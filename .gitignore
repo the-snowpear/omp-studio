@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build / release output
+dist/
+build/
+out/
+release/
+*.exe
+*.dmg
+*.AppImage
+*.zip
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor & OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# WorkBuddy local project data (not meant for public repo)
+.workbuddy/
