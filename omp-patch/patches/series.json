@@ -1,0 +1,18 @@
+{
+  "upstreamCommit": "45e12e5bb758198a920c6070e7e64cb33b21beac",
+  "patches": [
+    "0001-studio-host-cli-mode.patch",
+    "0002-studio-session-origin.patch",
+    "0003-studio-bridge-transport-auth-hello.patch",
+    "0004-studio-runtime-snapshot-recovery.patch",
+    "0005-studio-bridge-lifecycle-race.patch",
+    "0006-studio-runtime-arbiter-pause-resume.patch",
+    "0007-studio-session-control-core-rpc.patch",
+    "0008-studio-loop-service.patch",
+    "0009-studio-modes-tree-fork.patch",
+    "0010-studio-remote-ops-agent-jobs-shutdown.patch",
+    "0011-studio-live-control-plane.patch",
+    "0012-studio-command-manifest-conformance.patch",
+    "0013-studio-tree-ask-plan-model-parity.patch"
+  ]
+}

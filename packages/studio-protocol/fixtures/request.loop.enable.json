@@ -1,0 +1,1 @@
+{"idempotencyKey":"loop-enable-1","operation":{"kind":"loop.enable","limit":{"turns":3},"prompt":"repeat this"},"requestId":"req-loop-enable-1","runtimeEpoch":1,"type":"studio.request"}

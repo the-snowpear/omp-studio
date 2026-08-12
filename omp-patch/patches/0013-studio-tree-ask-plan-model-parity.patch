@@ -1,0 +1,650 @@
+diff --git a/packages/coding-agent/src/studio/bridge-dispatcher.ts b/packages/coding-agent/src/studio/bridge-dispatcher.ts
+index 9bde129..41203c4 100644
+--- a/packages/coding-agent/src/studio/bridge-dispatcher.ts
++++ b/packages/coding-agent/src/studio/bridge-dispatcher.ts
+@@ -317,7 +317,7 @@ export class StudioBridgeDispatcher {
+ 								: isModeOperation
+ 									? await this.#executeModeOperation(operation)
+ 									: isTreeOperation
+-										? await this.#executeTreeOperation(operation)
++										? await this.#executeTreeOperation(operation, commandId)
+ 										: operation.kind === "session.fork"
+ 											? await this.runtime.services.fork.fork()
+ 											: isOperatorOperation
+@@ -533,6 +533,9 @@ export class StudioBridgeDispatcher {
+ 			case "mode.plan.enter":
+ 				return await this.runtime.services.modes.enterPlan(operation.initialPrompt);
+ 			case "mode.plan.exit":
++				if (this.runtime.session.isStreaming) {
++					throw new StudioRuntimeCommandError("BUSY_STREAMING", "Runtime is streaming");
++				}
+ 				return await this.runtime.services.modes.exitPlan(operation.discardDraft === true);
+ 			case "mode.plan.review.open":
+ 				return await this.runtime.services.modes.openPlanReview();
+@@ -563,12 +566,12 @@ export class StudioBridgeDispatcher {
+ 		}
+ 	}
+ 
+-	async #executeTreeOperation(operation: StudioRequest["operation"]): Promise<unknown> {
++	async #executeTreeOperation(operation: StudioRequest["operation"], commandId: string): Promise<unknown> {
+ 		switch (operation.kind) {
+ 			case "session.tree.get":
+ 				return this.runtime.services.tree.getTree();
+ 			case "session.tree.navigate":
+-				return await this.runtime.services.tree.navigate(operation);
++				return await this.runtime.services.tree.navigate(commandId, operation);
+ 			default:
+ 				throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Tree operation is not registered");
+ 		}
+diff --git a/packages/coding-agent/src/studio/bridge-protocol.ts b/packages/coding-agent/src/studio/bridge-protocol.ts
+index c84418a..91cef59 100644
+--- a/packages/coding-agent/src/studio/bridge-protocol.ts
++++ b/packages/coding-agent/src/studio/bridge-protocol.ts
+@@ -763,18 +763,20 @@ export const STUDIO_LIMITED_CAPABILITIES: Readonly<Record<string, { limitations:
+ 	"loop.enable": {
+ 		limitations: ["Token limits are unsupported; use turns or minutes"],
+ 	},
+-	"session.tree.navigate": {
+-		limitations: ["Ask-tool re-answer requires the Remote InteractionPort"],
+-	},
+-	"mode.plan.enter": {
+-		limitations: ["Plan-role model switching is not yet owned by the Runtime service"],
+-	},
+ };
+ 
+ export function stableImplementedManifestHash(kind: "capabilities" | "commands"): string {
++	const content =
++		kind === "capabilities"
++			? STUDIO_IMPLEMENTED_CAPABILITIES.map(id => ({
++					id,
++					grade: STUDIO_LIMITED_CAPABILITIES[id] === undefined ? "stable" : "limited",
++					limitations: STUDIO_LIMITED_CAPABILITIES[id]?.limitations ?? [],
++				}))
++			: STUDIO_IMPLEMENTED_CAPABILITIES;
+ 	return `sha256:${crypto
+ 		.createHash("sha256")
+-		.update(`${kind}:${JSON.stringify(STUDIO_IMPLEMENTED_CAPABILITIES)}`)
++		.update(`${kind}:${JSON.stringify(content)}`)
+ 		.digest("hex")}`;
+ }
+ 
+diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
+index ff4112b..2f8f272 100644
+--- a/packages/coding-agent/src/studio/bridge-server.ts
++++ b/packages/coding-agent/src/studio/bridge-server.ts
+@@ -197,7 +197,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					type: "studio.hello.result",
+ 					requestId: hello.requestId,
+ 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
+-					runtimeVersion: `${VERSION}-studio.12`,
++					runtimeVersion: `${VERSION}-studio.13`,
+ 					upstreamVersion: VERSION,
+ 					upstreamCommit: UPSTREAM_COMMIT,
+ 					runtimeInstanceId: runtime.runtimeId,
+diff --git a/packages/coding-agent/src/studio/services/mode-control-service.ts b/packages/coding-agent/src/studio/services/mode-control-service.ts
+index 9a8dc32..bff06e4 100644
+--- a/packages/coding-agent/src/studio/services/mode-control-service.ts
++++ b/packages/coding-agent/src/studio/services/mode-control-service.ts
+@@ -1,7 +1,12 @@
+-import { prompt } from "@oh-my-pi/pi-utils";
++import type { Model } from "@oh-my-pi/pi-ai";
++import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
++import { logger, prompt } from "@oh-my-pi/pi-utils";
++import { onModelRolesChanged } from "../../config/settings";
++import { resolvePlanModelTransition } from "../../plan-mode/model-transition";
+ import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview.md" with { type: "text" };
+ import planModeApprovedPrompt from "../../prompts/system/plan-mode-approved.md" with { type: "text" };
+ import type { AgentSession } from "../../session/agent-session";
++import type { ConfiguredThinkingLevel } from "../../thinking";
+ import { type VibeOwnerScope, type VibeParentSession, VibeSessionRegistry } from "../../vibe/runtime";
+ 
+ export class StudioModeError extends Error {
+@@ -35,11 +40,20 @@ export class StudioModeControlService {
+ 	#vibePreviousTools: string[] | undefined;
+ 	#vibeOwnerScope: VibeOwnerScope | undefined;
+ 	#pendingPlan: { planFilePath: string; title: string } | undefined;
++	#planPreviousModelState: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
++	#pendingModelSwitch: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
+ 	readonly #unsubscribeSession: () => void;
++	readonly #unsubscribeModelRoles: () => void;
+ 
+ 	constructor(readonly session: AgentSession) {
+ 		this.#unsubscribeSession = session.subscribe(event => {
+ 			if (event.type === "goal_updated") this.#notify();
++			if (event.type === "agent_end") {
++				queueMicrotask(() => void this.flushPendingModelSwitch());
++			}
++		});
++		this.#unsubscribeModelRoles = onModelRolesChanged(() => {
++			if (this.session.getPlanModeState()?.enabled) void this.#applyPlanModel();
+ 		});
+ 	}
+ 
+@@ -96,6 +110,10 @@ export class StudioModeControlService {
+ 			throw new StudioModeError("COMMAND_BLOCKED", "Plan mode is already active");
+ 		}
+ 		const previousTools = this.session.getEnabledToolNames();
++		const previousModel = this.session.model;
++		this.#planPreviousModelState = previousModel
++			? { model: previousModel, thinkingLevel: this.session.configuredThinkingLevel() }
++			: undefined;
+ 		const tools = [...previousTools];
+ 		if (this.session.hasBuiltInTool("write") && !tools.includes("write")) tools.push("write");
+ 		const planFilePath = this.session.getPlanReferencePath() || "local://PLAN.md";
+@@ -103,6 +121,7 @@ export class StudioModeControlService {
+ 		this.#planPreviousTools = previousTools;
+ 		this.session.setPlanModeState({ enabled: true, planFilePath, workflow: "parallel" });
+ 		this.session.setPlanProposalHandler(title => this.session.preparePlanForReview(title));
++		await this.#applyPlanModel();
+ 		this.session.sessionManager.appendModeChange("plan", { planFilePath });
+ 		if (this.session.isStreaming) await this.session.sendPlanModeContext({ deliverAs: "steer" });
+ 		this.#notify();
+@@ -116,10 +135,33 @@ export class StudioModeControlService {
+ 		if (!discardDraft && current.enabled) {
+ 			throw new StudioModeError("INTERACTION_REQUIRED", "Confirm discarding the active plan draft");
+ 		}
++		const previousModel = this.#planPreviousModelState;
++		const planTools = this.session.getEnabledToolNames();
++		const planModel = this.session.model
++			? { model: this.session.model, thinkingLevel: this.session.configuredThinkingLevel() }
++			: undefined;
++		this.#clearPendingModelSwitch();
+ 		this.session.setPlanModeState(undefined);
++		try {
++			if (this.#planPreviousTools !== undefined) await this.session.setActiveToolsByName(this.#planPreviousTools);
++			if (previousModel !== undefined) await this.#restorePreviousModel(previousModel);
++		} catch (error) {
++			this.#clearPendingModelSwitch();
++			this.session.setPlanModeState(current);
++			try {
++				await this.session.setActiveToolsByName(planTools);
++				if (planModel !== undefined) await this.#restorePreviousModel(planModel);
++			} catch (rollbackError) {
++				logger.warn("Failed to roll back Plan mode exit", { error: String(rollbackError) });
++			}
++			throw new StudioModeError(
++				"COMMAND_BLOCKED",
++				`Failed to exit Plan mode: ${error instanceof Error ? error.message : String(error)}`,
++			);
++		}
+ 		this.session.setPlanProposalHandler(null);
+-		if (this.#planPreviousTools !== undefined) await this.session.setActiveToolsByName(this.#planPreviousTools);
+ 		this.#planPreviousTools = undefined;
++		this.#planPreviousModelState = undefined;
+ 		this.#pendingPlan = undefined;
+ 		this.session.sessionManager.appendModeChange("none");
+ 		this.#notify();
+@@ -148,6 +190,9 @@ export class StudioModeControlService {
+ 			await this.#submit(normalized);
+ 			return { decision };
+ 		}
++		if (this.session.isStreaming) {
++			throw new StudioModeError("COMMAND_BLOCKED", "Cannot approve a plan while the Runtime is streaming");
++		}
+ 		this.session.setPlanReferencePath(pending.planFilePath);
+ 		this.session.markPlanReferenceSent();
+ 		await this.exitPlan(true);
+@@ -249,10 +294,65 @@ export class StudioModeControlService {
+ 	}
+ 
+ 	dispose(): void {
++		this.#clearPendingModelSwitch();
+ 		this.#unsubscribeSession();
++		this.#unsubscribeModelRoles();
+ 		this.#listeners.clear();
+ 	}
+ 
++	async #applyPlanModel(): Promise<void> {
++		const resolved = this.session.resolveRoleModelWithThinking("plan");
++		if (!resolved.model) {
++			this.#clearPendingModelSwitch();
++			return;
++		}
++		const transition = resolvePlanModelTransition(this.session.model, resolved, this.session.isStreaming);
++		switch (transition.kind) {
++			case "none":
++				return;
++			case "thinking":
++				this.session.setThinkingLevel(transition.thinkingLevel);
++				return;
++			case "apply":
++				if (transition.deferred) {
++					this.#pendingModelSwitch = { model: transition.model, thinkingLevel: transition.thinkingLevel };
++					return;
++				}
++				try {
++					await this.session.setModelTemporary(transition.model, transition.thinkingLevel, { ephemeral: true });
++				} catch (error) {
++					logger.warn("Failed to switch to the Plan role model", { error: String(error) });
++				}
++		}
++	}
++
++	async #restorePreviousModel(previous: { model: Model; thinkingLevel?: ConfiguredThinkingLevel }): Promise<void> {
++		if (modelsAreEqual(this.session.model, previous.model)) {
++			this.session.setThinkingLevel(previous.thinkingLevel);
++			return;
++		}
++		if (this.session.isStreaming) {
++			this.#pendingModelSwitch = { model: previous.model, thinkingLevel: previous.thinkingLevel };
++			return;
++		}
++		await this.session.setModelTemporary(previous.model, previous.thinkingLevel, { ephemeral: true });
++	}
++
++	#clearPendingModelSwitch(): void {
++		this.#pendingModelSwitch = undefined;
++	}
++
++	async flushPendingModelSwitch(): Promise<void> {
++		const pending = this.#pendingModelSwitch;
++		if (pending === undefined || this.session.isStreaming) return;
++		this.#pendingModelSwitch = undefined;
++		try {
++			await this.session.setModelTemporary(pending.model, pending.thinkingLevel, { ephemeral: true });
++		} catch (error) {
++			logger.warn("Failed to apply a deferred Plan model transition", { error: String(error) });
++		}
++	}
++
+ 	async #restoreGoalTools(): Promise<void> {
+ 		if (this.#goalPreviousTools !== undefined) await this.session.setActiveToolsByName(this.#goalPreviousTools);
+ 		this.#goalPreviousTools = undefined;
+diff --git a/packages/coding-agent/src/studio/services/tree-service.ts b/packages/coding-agent/src/studio/services/tree-service.ts
+index ff6c5b4..c4c2b4a 100644
+--- a/packages/coding-agent/src/studio/services/tree-service.ts
++++ b/packages/coding-agent/src/studio/services/tree-service.ts
+@@ -1,5 +1,8 @@
++import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+ import type { AgentSession } from "../../session/agent-session";
+ import type { SessionTreeNode } from "../../session/session-entries";
++import type { AskToolDetails, AskToolInput, QuestionResult } from "../../tools/ask";
++import type { StudioInteractionPort } from "./interaction-port";
+ 
+ export interface StudioTreeNode {
+ 	id: string;
+@@ -39,7 +42,10 @@ function projectNode(node: SessionTreeNode): StudioTreeNode {
+ }
+ 
+ export class StudioTreeService {
+-	constructor(private readonly session: AgentSession) {}
++	constructor(
++		private readonly session: AgentSession,
++		private readonly interaction?: StudioInteractionPort,
++	) {}
+ 
+ 	getTree(): { leafId: string | null; roots: StudioTreeNode[] } {
+ 		return {
+@@ -48,18 +54,39 @@ export class StudioTreeService {
+ 		};
+ 	}
+ 
+-	async navigate(input: { targetId: string; summarize?: boolean; customInstructions?: string }): Promise<unknown> {
+-		const result = await this.session.navigateTree(input.targetId, {
++	async navigate(
++		commandId: string,
++		input: { targetId: string; summarize?: boolean; customInstructions?: string },
++	): Promise<unknown> {
++		let result = await this.session.navigateTree(input.targetId, {
+ 			summarize: input.summarize,
+ 			customInstructions: input.customInstructions,
+ 			allowAskReopen: true,
+ 		});
+ 		if (result.reopenAsk !== undefined) {
+-			throw new StudioTreeError("INTERACTION_REQUIRED", "Tree navigation requires an Ask response", {
+-				toolCallId: result.reopenAsk.toolCallId,
+-				questions: structuredClone(result.reopenAsk.questions),
++			if (this.interaction === undefined) {
++				throw new StudioTreeError("INTERACTION_REQUIRED", "Tree navigation requires an Ask response", {
++					toolCallId: result.reopenAsk.toolCallId,
++					questions: structuredClone(result.reopenAsk.questions),
++				});
++			}
++			const reanswer = await this.#reanswerAsk(commandId, result.reopenAsk.questions);
++			if (reanswer === undefined) {
++				return {
++					cancelled: true,
++					aborted: false,
++					askReanswerCommitted: false,
++					leafId: this.session.sessionManager.getLeafId(),
++				};
++			}
++			result = await this.session.navigateTree(input.targetId, {
++				summarize: input.summarize,
++				customInstructions: input.customInstructions,
++				allowAskReopen: true,
++				reanswerAskResult: reanswer,
+ 			});
+ 		}
++		if (result.askReanswerCommitted) this.session.resumeAfterAskReanswer();
+ 		return {
+ 			cancelled: result.cancelled,
+ 			aborted: result.aborted === true,
+@@ -68,4 +95,101 @@ export class StudioTreeService {
+ 			...(result.editorText === undefined ? {} : { editorText: result.editorText }),
+ 		};
+ 	}
++
++	async #reanswerAsk(
++		commandId: string,
++		questions: AskToolInput["questions"],
++	): Promise<AgentToolResult<AskToolDetails> | undefined> {
++		const results: QuestionResult[] = [];
++		for (const question of questions) {
++			const answer = await this.#answerQuestion(commandId, question, questions.length > 1);
++			if (answer === undefined) return undefined;
++			results.push(answer);
++		}
++		if (results.length === 1) {
++			const answer = results[0]!;
++			const details: AskToolDetails = {
++				question: answer.question,
++				options: answer.options,
++				multi: answer.multi,
++				selectedOptions: answer.selectedOptions,
++				...(answer.customInput === undefined ? {} : { customInput: answer.customInput }),
++			};
++			return { content: [{ type: "text", text: formatSingleAnswer(answer) }], details };
++		}
++		return {
++			content: [{ type: "text", text: `User answers:\n${results.map(formatQuestionAnswer).join("\n")}` }],
++			details: { results },
++		};
++	}
++
++	async #answerQuestion(
++		commandId: string,
++		question: AskToolInput["questions"][number],
++		allowEmpty: boolean,
++	): Promise<QuestionResult | undefined> {
++		const options = question.options.map((option, index) => ({
++			id: `option:${index}`,
++			label: option.label,
++			...(option.description === undefined ? {} : { description: option.description }),
++		}));
++		const customId = "custom-input";
++		let selectedIds: string[] = [];
++		if (options.length > 0) {
++			const selected = await this.interaction!.select({
++				commandId,
++				title: question.question,
++				options: [...options, { id: customId, label: "Other (type your own)" }],
++				multiple: question.multi === true,
++			});
++			if (selected === undefined) return undefined;
++			selectedIds = typeof selected === "string" ? [selected] : selected;
++			if (!question.multi && selectedIds.length !== 1) {
++				throw new StudioTreeError("INVALID_ARGUMENT", "Ask interaction returned multiple single-choice answers");
++			}
++			if (selectedIds.some(id => id !== customId && !options.some(option => option.id === id))) {
++				throw new StudioTreeError("INVALID_ARGUMENT", "Ask interaction returned an unknown option");
++			}
++		}
++		let customInput: string | undefined;
++		if (options.length === 0 || selectedIds.includes(customId)) {
++			customInput = await this.interaction!.input({
++				commandId,
++				title: question.question,
++				placeholder: "Type your answer",
++			});
++			if (customInput === undefined) return undefined;
++		}
++		const selectedOptions = selectedIds
++			.filter(id => id !== customId)
++			.map(id => options.find(option => option.id === id)!.label);
++		if (!allowEmpty && selectedOptions.length === 0 && customInput === undefined) return undefined;
++		return {
++			id: question.id,
++			question: question.question,
++			options: options.map(option => option.label),
++			multi: question.multi ?? false,
++			selectedOptions,
++			...(customInput === undefined ? {} : { customInput }),
++		};
++	}
++}
++
++function formatQuestionAnswer(result: QuestionResult): string {
++	if (result.customInput !== undefined) return `${result.id}: "${result.customInput}"`;
++	if (result.multi) return `${result.id}: [${result.selectedOptions.join(", ")}]`;
++	return `${result.id}: ${result.selectedOptions[0] ?? "(cancelled)"}`;
++}
++
++function formatSingleAnswer(result: QuestionResult): string {
++	const parts: string[] = [];
++	if (result.selectedOptions.length > 0) {
++		parts.push(
++			result.multi
++				? `User selected: ${result.selectedOptions.join(", ")}`
++				: `User selected: ${result.selectedOptions[0]}`,
++		);
++	}
++	if (result.customInput !== undefined) parts.push(`User provided custom input: ${result.customInput}`);
++	return parts.join("\n");
+ }
+diff --git a/packages/coding-agent/src/studio/studio-host-mode.ts b/packages/coding-agent/src/studio/studio-host-mode.ts
+index 9aafcf7..203a59e 100644
+--- a/packages/coding-agent/src/studio/studio-host-mode.ts
++++ b/packages/coding-agent/src/studio/studio-host-mode.ts
+@@ -177,11 +177,11 @@ export function createStudioHostRuntime(
+ 	});
+ 	const live = new StudioLiveService(liveSessionFactory);
+ 	const modes = new StudioModeControlService(session);
+-	const tree = new StudioTreeService(session);
++	const interaction = new StudioInteractionGateway();
++	const tree = new StudioTreeService(session, interaction);
+ 	const fork = new StudioForkService(session);
+ 	const commands = new StudioCommandManifestService(session);
+ 	const btw = new StudioBtwService(session);
+-	const interaction = new StudioInteractionGateway();
+ 	let pendingRuleWrite: { filePath: string; previous: Uint8Array | undefined; existed: boolean } | undefined;
+ 	const clearPendingRuleWrite = () => {
+ 		pendingRuleWrite = undefined;
+diff --git a/packages/coding-agent/test/studio-mode-control-service.test.ts b/packages/coding-agent/test/studio-mode-control-service.test.ts
+index ced2fe0..d86f96e 100644
+--- a/packages/coding-agent/test/studio-mode-control-service.test.ts
++++ b/packages/coding-agent/test/studio-mode-control-service.test.ts
+@@ -25,6 +25,7 @@ describe("WP-030/031/032 StudioModeControlService", () => {
+ 		await Settings.init({ inMemory: true, cwd: tempDir.path() });
+ 		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
+ 		const modelRegistry = new ModelRegistry(authStorage);
++		authStorage.setRuntimeApiKey("anthropic", "test-key");
+ 		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
+ 		if (!model) throw new Error("Expected claude-sonnet-4-5 test model");
+ 		session = new AgentSession({
+@@ -57,6 +58,39 @@ describe("WP-030/031/032 StudioModeControlService", () => {
+ 		expect(states.length).toBeGreaterThanOrEqual(2);
+ 	});
+ 
++	test("Plan switches to the configured role model and restores the pre-Plan model", async () => {
++		const previous = session.model;
++		const planModel = new ModelRegistry(authStorage).find("anthropic", "claude-opus-4-6");
++		if (!previous || !planModel) throw new Error("Expected bundled Plan test models");
++		session.settings.setModelRole("plan", `${planModel.provider}/${planModel.id}`);
++		await service.enterPlan();
++		expect(session.model?.id).toBe(planModel.id);
++		await service.exitPlan(true);
++		expect(session.model?.id).toBe(previous.id);
++	});
++
++	test("Plan applies an explicit thinking level without resetting the same model", async () => {
++		const current = session.model;
++		if (!current) throw new Error("Expected current test model");
++		session.settings.setModelRole("plan", `${current.provider}/${current.id}:off`);
++		await service.enterPlan();
++		expect(session.configuredThinkingLevel()).toBe("off");
++		await service.exitPlan(true);
++		expect(session.configuredThinkingLevel()).not.toBe("off");
++	});
++
++	test("Plan defers a streaming role-model switch until the Runtime is idle", async () => {
++		const planModel = new ModelRegistry(authStorage).find("anthropic", "claude-opus-4-6");
++		if (!planModel) throw new Error("Expected bundled Plan test model");
++		session.settings.setModelRole("plan", `${planModel.provider}/${planModel.id}`);
++		session.agent.state.isStreaming = true;
++		await service.enterPlan();
++		expect(session.model?.id).not.toBe(planModel.id);
++		session.agent.state.isStreaming = false;
++		await service.flushPendingModelSwitch();
++		expect(session.model?.id).toBe(planModel.id);
++	});
++
+ 	test("Goal create, budget, pause, resume, and drop preserve one state source", async () => {
+ 		await service.createGoal("ship the backend", 1_000);
+ 		expect(service.state().goal).toMatchObject({
+diff --git a/packages/coding-agent/test/studio-session-control-dispatcher.test.ts b/packages/coding-agent/test/studio-session-control-dispatcher.test.ts
+index 9064603..6a33ceb 100644
+--- a/packages/coding-agent/test/studio-session-control-dispatcher.test.ts
++++ b/packages/coding-agent/test/studio-session-control-dispatcher.test.ts
+@@ -139,7 +139,10 @@ function fixture() {
+ 					serviceCalls.push("session.tree.get");
+ 					return { leafId: null, roots: [] };
+ 				},
+-				navigate: async () => ({}),
++				navigate: async (commandId: string) => {
++					serviceCalls.push(`session.tree.navigate:${commandId}`);
++					return {};
++				},
+ 			},
+ 			fork: {
+ 				fork: async () => {
+@@ -305,6 +308,15 @@ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
+ 		expect((frames.at(-1)!.body as StudioReceipt).error).toMatchObject({ code: "BUSY_STREAMING" });
+ 	});
+ 
++	test("mode.plan.exit while streaming fails before changing Plan tools", async () => {
++		const { session, projector, frames, dispatcher, request } = fixture();
++		session.isStreaming = true;
++		await dispatcher.dispatch(request("plan-exit-busy", { kind: "mode.plan.exit", discardDraft: true }));
++		expect(projector.stateVersion).toBe(0);
++		expect(frames.map(frame => (frame.body as StudioReceipt).status)).toEqual(["accepted", "failed"]);
++		expect((frames.at(-1)!.body as StudioReceipt).error).toMatchObject({ code: "BUSY_STREAMING" });
++	});
++
+ 	test("turn.retry with nothing to retry completes with an explicit result and no state bump", async () => {
+ 		const { session, projector, frames, events, dispatcher, request } = fixture();
+ 		session.retryResult = false;
+@@ -455,6 +467,14 @@ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
+ 		});
+ 	});
+ 
++	test("tree navigation receives the arbiter command id used by remote interactions", async () => {
++		const { dispatcher, frames, request, serviceCalls } = fixture();
++		await dispatcher.dispatch(request("tree-navigate", { kind: "session.tree.navigate", targetId: "entry-1" }));
++		const accepted = frames.find(frame => (frame.body as StudioReceipt).status === "accepted")?.body as StudioReceipt;
++		expect(serviceCalls).toContain(`session.tree.navigate:${accepted.commandId}`);
++		expect((frames.at(-1)!.body as StudioReceipt).status).toBe("completed");
++	});
++
+ 	test("operator manifest and invocation route through the Runtime command service", async () => {
+ 		const { dispatcher, frames, request, serviceCalls } = fixture();
+ 		await dispatcher.dispatch(request("manifest-get", { kind: "operator.manifest.get" }));
+diff --git a/packages/coding-agent/test/studio-tree-service.test.ts b/packages/coding-agent/test/studio-tree-service.test.ts
+index 53cdac5..a83891d 100644
+--- a/packages/coding-agent/test/studio-tree-service.test.ts
++++ b/packages/coding-agent/test/studio-tree-service.test.ts
+@@ -1,5 +1,6 @@
+ import { describe, expect, test } from "bun:test";
+ import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
++import { StudioScriptedInteractionPort } from "@oh-my-pi/pi-coding-agent/studio/services/interaction-port";
+ import { StudioTreeService } from "@oh-my-pi/pi-coding-agent/studio/services/tree-service";
+ 
+ describe("WP-034 StudioTreeService", () => {
+@@ -22,7 +23,7 @@ describe("WP-034 StudioTreeService", () => {
+ 				],
+ 			},
+ 		} as unknown as AgentSession;
+-		const result = new StudioTreeService(session).getTree();
++		const result = new StudioTreeService(session, new StudioScriptedInteractionPort([])).getTree();
+ 		expect(result).toEqual({
+ 			leafId: "entry-1",
+ 			roots: [
+@@ -39,4 +40,88 @@ describe("WP-034 StudioTreeService", () => {
+ 		});
+ 		expect(JSON.stringify(result)).not.toContain("C:/private");
+ 	});
++
++	test("reopens Ask through the remote InteractionPort and resumes the committed branch", async () => {
++		const navigateTree = async (_target: string, options: Record<string, unknown>) => {
++			if (options.reanswerAskResult === undefined) {
++				return {
++					cancelled: false,
++					reopenAsk: {
++						toolCallId: "ask-call",
++						questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }, { label: "B" }] }],
++					},
++				};
++			}
++			return { cancelled: false, askReanswerCommitted: true };
++		};
++		let resumed = 0;
++		const session = {
++			navigateTree,
++			resumeAfterAskReanswer: () => resumed++,
++			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
++		} as unknown as AgentSession;
++		const result = await new StudioTreeService(session, new StudioScriptedInteractionPort(["option:1"])).navigate(
++			"cmd-1",
++			{ targetId: "ask-result" },
++		);
++		expect(result).toMatchObject({ askReanswerCommitted: true, leafId: "leaf" });
++		expect(resumed).toBe(1);
++	});
++
++	test("cancelling the remote Ask leaves the tree untouched", async () => {
++		const session = {
++			navigateTree: async () => ({
++				cancelled: false,
++				reopenAsk: {
++					toolCallId: "ask-call",
++					questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }] }],
++				},
++			}),
++			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
++		} as unknown as AgentSession;
++		const result = await new StudioTreeService(session, new StudioScriptedInteractionPort([undefined])).navigate(
++			"cmd-1",
++			{ targetId: "ask-result" },
++		);
++		expect(result).toMatchObject({ cancelled: true, askReanswerCommitted: false });
++	});
++
++	test("an empty single-question multi-select is treated as cancellation", async () => {
++		let navigateCalls = 0;
++		const session = {
++			navigateTree: async () => {
++				navigateCalls += 1;
++				return {
++					cancelled: false,
++					reopenAsk: {
++						toolCallId: "ask-call",
++						questions: [{ id: "q1", question: "Pick any", multi: true, options: [{ label: "A" }] }],
++					},
++				};
++			},
++			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
++		} as unknown as AgentSession;
++		const result = await new StudioTreeService(session, new StudioScriptedInteractionPort([[]])).navigate("cmd-1", {
++			targetId: "ask-result",
++		});
++		expect(result).toMatchObject({ cancelled: true, askReanswerCommitted: false });
++		expect(navigateCalls).toBe(1);
++	});
++
++	test("fails closed with recoverable Ask details when no remote interaction port is attached", async () => {
++		const session = {
++			navigateTree: async () => ({
++				cancelled: false,
++				reopenAsk: {
++					toolCallId: "ask-call",
++					questions: [{ id: "q1", question: "Pick", options: [{ label: "A" }] }],
++				},
++			}),
++			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
++		} as unknown as AgentSession;
++		await expect(new StudioTreeService(session).navigate("cmd-1", { targetId: "ask-result" })).rejects.toMatchObject({
++			code: "INTERACTION_REQUIRED",
++			details: { toolCallId: "ask-call" },
++		});
++	});
+ });

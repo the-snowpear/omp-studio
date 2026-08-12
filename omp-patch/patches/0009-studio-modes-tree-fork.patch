@@ -1,0 +1,1543 @@
+diff --git a/packages/coding-agent/CHANGELOG.md b/packages/coding-agent/CHANGELOG.md
+index e21e842f937eea0c9807c1f32d53c016cb563e22..6cd72797368dd9aee969f602c57efcc4de374b54 100644
+--- a/packages/coding-agent/CHANGELOG.md
++++ b/packages/coding-agent/CHANGELOG.md
+@@ -4,6 +4,7 @@
+ 
+ ### Added
+ 
++- Added Runtime-owned Studio Plan, Goal, Vibe, session-tree, and session-fork services, with shared `studio-host` TUI adapters and fail-closed mode/interaction gates.
+ - Added a Runtime-owned Studio loop service shared by the Bridge and `studio-host` TUI, with pause, prompt capture, turn/time limits, state projection, and shutdown cleanup.
+ - Added presentation-neutral Studio session controls for queue, context reset, retry, prompt, steer, follow-up, and abort, with truthful limited handling for destructive session drop.
+ - Added Runtime-authoritative Studio command arbitration and shared pause/resume services with fenced pause epochs, receipts, and state events.
+diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
+index ddfb9699169dbc0ba33cb634b10d3bd32e7543d4..0d209dae86d10fedfd2a23be32fb9fba3cc22f71 100644
+--- a/packages/coding-agent/src/main.ts
++++ b/packages/coding-agent/src/main.ts
+@@ -89,6 +89,7 @@ import { SessionManager } from "./session/session-manager";
+ import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
+ import { shouldShowStartupSplash } from "./startup-splash";
+ import type { StudioLoopService } from "./studio/services/loop-service";
++import type { StudioModeControlService } from "./studio/services/mode-control-service";
+ import type { StudioHostRuntime } from "./studio/studio-host-mode";
+ import { runStudioHostMode as defaultRunStudioHostMode, type RunStudioHostMode } from "./studio/studio-host-mode";
+ import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
+@@ -462,6 +463,7 @@ async function runInteractiveMode(
+ 	initialImages?: ImageContent[],
+ 	joinLink?: string,
+ 	studioLoopService?: StudioLoopService,
++	studioModeService?: StudioModeControlService,
+ ): Promise<void> {
+ 	const mode = new InteractiveMode(
+ 		session,
+@@ -472,6 +474,7 @@ async function runInteractiveMode(
+ 		mcpManager,
+ 		eventBus,
+ 		studioLoopService,
++		studioModeService,
+ 	);
+ 
+ 	// Cold-launch gate: the full setup wizard (every scene + the overlay and
+@@ -1790,6 +1793,7 @@ export async function runRootCommand(
+ 					initialImages,
+ 					parsedArgs.join,
+ 					runtime?.services.loop,
++					runtime?.services.modes,
+ 				);
+ 			if (isStudioHost) {
+ 				await (deps.runStudioHostMode ?? defaultRunStudioHostMode)(
+diff --git a/packages/coding-agent/src/modes/interactive-mode.ts b/packages/coding-agent/src/modes/interactive-mode.ts
+index 06f6f4dda96efec5610746b8c7157fd0b1944a5f..80a7f573ec3338e938cf1ff9b00a9257bdb8a0ad 100644
+--- a/packages/coding-agent/src/modes/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive-mode.ts
+@@ -114,6 +114,7 @@ import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } fr
+ import { formatDuration } from "../slash-commands/helpers/format";
+ import { STTController, type SttState } from "../stt";
+ import type { StudioLoopService, StudioLoopState } from "../studio/services/loop-service";
++import type { StudioModeControlService, StudioModeState } from "../studio/services/mode-control-service";
+ import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
+ import { formatTaskId } from "../task/render";
+ import type { ConfiguredThinkingLevel } from "../thinking";
+@@ -476,6 +477,8 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	#loopAutoSubmitTimer: NodeJS.Timeout | undefined;
+ 	readonly #studioLoopService: StudioLoopService | undefined;
+ 	#studioLoopUnsubscribe: (() => void) | undefined;
++	readonly #studioModeService: StudioModeControlService | undefined;
++	#studioModeUnsubscribe: (() => void) | undefined;
+ 	#todoAutoClearTimer: NodeJS.Timeout | undefined;
+ 	#modelCycleClearTimer: NodeJS.Timeout | undefined;
+ 	#nextAppearanceRequestToken = 1;
+@@ -682,6 +685,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		mcpManager?: MCPManager,
+ 		eventBus?: EventBus,
+ 		studioLoopService?: StudioLoopService,
++		studioModeService?: StudioModeControlService,
+ 	) {
+ 		this.session = session;
+ 		this.sessionManager = session.sessionManager;
+@@ -698,6 +702,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		);
+ 		this.#eventBus = eventBus;
+ 		this.#studioLoopService = studioLoopService;
++		this.#studioModeService = studioModeService;
+ 		if (eventBus) {
+ 			this.#eventBusUnsubscribers.push(
+ 				eventBus.on(LSP_STARTUP_EVENT_CHANNEL, data => {
+@@ -825,6 +830,22 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			this.#studioLoopUnsubscribe = this.#studioLoopService.onChange(state => this.#syncSharedLoopState(state));
+ 			this.#syncSharedLoopState(this.#studioLoopService.state());
+ 		}
++		if (this.#studioModeService !== undefined) {
++			this.#studioModeUnsubscribe = this.#studioModeService.onChange(state => this.#syncSharedModeState(state));
++			this.#syncSharedModeState(this.#studioModeService.state());
++		}
++	}
++
++	#syncSharedModeState(state: StudioModeState): void {
++		this.planModeEnabled = state.plan?.status === "active";
++		this.planModePaused = state.plan?.status === "paused";
++		this.planModePlanFilePath = state.plan?.planFilePath;
++		this.goalModeEnabled = state.goal?.status === "active";
++		this.goalModePaused = state.goal?.status === "paused";
++		this.vibeModeEnabled = state.vibe?.enabled === true;
++		this.#updatePlanModeStatus();
++		this.#updateGoalModeStatus();
++		this.#updateVibeModeStatus();
+ 	}
+ 
+ 	#handleMcpConnectionStatusEvent(event: McpConnectionStatusEvent): void {
+@@ -3333,6 +3354,30 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	async handlePlanModeCommand(initialPrompt?: string): Promise<void> {
++		if (this.#studioModeService !== undefined) {
++			try {
++				if (this.planModeEnabled || this.planModePaused) {
++					if (this.planModeEnabled) {
++						const confirmed = await this.showHookConfirm(
++							"Exit plan mode?",
++							"This exits plan mode without approving a plan.",
++						);
++						if (!confirmed) return;
++					}
++					await this.#studioModeService.exitPlan(true);
++					this.showStatus("Plan mode disabled.");
++					return;
++				}
++				await this.#studioModeService.enterPlan();
++				this.showStatus(`Plan mode enabled. Plan file: ${this.planModePlanFilePath ?? "local://PLAN.md"}`);
++				if (initialPrompt && this.onInputCallback) {
++					this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
++				}
++			} catch (error) {
++				this.showError(error instanceof Error ? error.message : String(error));
++			}
++			return;
++		}
+ 		if (this.goalModeEnabled || this.goalModePaused) {
+ 			this.showWarning("Exit goal mode first.");
+ 			return;
+@@ -3384,6 +3429,29 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	 * outlive the mode that directs them.
+ 	 */
+ 	async handleVibeModeCommand(initialPrompt?: string): Promise<void> {
++		if (this.#studioModeService !== undefined) {
++			try {
++				if (this.vibeModeEnabled) {
++					const result = await this.#studioModeService.exitVibe();
++					this.showStatus(
++						result.killed > 0
++							? `Vibe mode disabled. Killed ${result.killed} worker session${result.killed === 1 ? "" : "s"}.`
++							: "Vibe mode disabled.",
++					);
++					return;
++				}
++				await this.#studioModeService.enterVibe();
++				this.showStatus(
++					"Vibe mode enabled. You direct fast/good worker sessions; toolset is read + optional parent Todo + vibe tools.",
++				);
++				if (initialPrompt && this.onInputCallback) {
++					this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
++				}
++			} catch (error) {
++				this.showError(error instanceof Error ? error.message : String(error));
++			}
++			return;
++		}
+ 		if (this.vibeModeEnabled) {
+ 			await this.#exitVibeMode();
+ 			return;
+@@ -3479,7 +3547,11 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			}
+ 			nextBudget = parsed;
+ 		}
+-		await this.session.goalRuntime.onBudgetMutated(nextBudget);
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.setGoalBudget(nextBudget);
++		} else {
++			await this.session.goalRuntime.onBudgetMutated(nextBudget);
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		this.#scheduleGoalContinuation();
+ 		this.showStatus(nextBudget === undefined ? "Goal budget cleared." : `Goal budget set to ${nextBudget}.`);
+@@ -3536,6 +3608,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 	async handleGuidedGoalCommand(rest?: string): Promise<void> {
+ 		try {
++			if (this.#studioModeService !== undefined) {
++				await this.#studioModeService.startGuidedGoal(rest);
++				return;
++			}
+ 			if (this.planModeEnabled || this.planModePaused) {
+ 				this.showWarning("Exit plan mode first.");
+ 				return;
+@@ -3688,8 +3764,13 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			this.showWarning("No active goal to pause.");
+ 			return;
+ 		}
+-		await this.session.goalRuntime.pauseGoal();
+-		await this.#exitGoalMode({ paused: true, reason: "paused" });
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.pauseGoal();
++			this.showStatus("Goal mode paused.");
++		} else {
++			await this.session.goalRuntime.pauseGoal();
++			await this.#exitGoalMode({ paused: true, reason: "paused" });
++		}
+ 	}
+ 
+ 	async #resumeGoalAction(): Promise<void> {
+@@ -3697,7 +3778,11 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			this.showWarning("No paused goal to resume.");
+ 			return;
+ 		}
+-		await this.#enterGoalMode({ resume: true, silent: true });
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.resumeGoal();
++		} else {
++			await this.#enterGoalMode({ resume: true, silent: true });
++		}
+ 		this.showStatus("Goal mode resumed.");
+ 		this.#scheduleGoalContinuation();
+ 	}
+@@ -3712,12 +3797,21 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			"This removes the goal record. Accumulated usage stays in the session log.",
+ 		);
+ 		if (!confirmed) return;
+-		await this.session.goalRuntime.dropGoal();
+-		await this.#exitGoalMode({ reason: "dropped" });
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.dropGoal();
++			this.showStatus("Goal dropped.");
++		} else {
++			await this.session.goalRuntime.dropGoal();
++			await this.#exitGoalMode({ reason: "dropped" });
++		}
+ 	}
+ 
+ 	async #startGoalFromObjective(objective: string): Promise<void> {
+-		await this.#enterGoalMode({ objective, silent: true });
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.createGoal(objective);
++		} else {
++			await this.#enterGoalMode({ objective, silent: true });
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		if (!this.session.isStreaming && this.onInputCallback) {
+ 			this.onInputCallback(this.startPendingSubmission({ text: objective }));
+@@ -3725,10 +3819,14 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	async #replaceGoalFromObjective(objective: string): Promise<void> {
+-		const state = await this.session.goalRuntime.replaceGoal({ objective });
+-		this.session.setGoalModeState(state);
+-		this.goalModeEnabled = true;
+-		this.goalModePaused = false;
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.replaceGoal(objective);
++		} else {
++			const state = await this.session.goalRuntime.replaceGoal({ objective });
++			this.session.setGoalModeState(state);
++			this.goalModeEnabled = true;
++			this.goalModePaused = false;
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		this.#updateGoalModeStatus();
+ 		if (this.session.isStreaming) {
+@@ -4031,6 +4129,8 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		this.#cancelGoalContinuation();
+ 		this.#studioLoopUnsubscribe?.();
+ 		this.#studioLoopUnsubscribe = undefined;
++		this.#studioModeUnsubscribe?.();
++		this.#studioModeUnsubscribe = undefined;
+ 		if (this.#sttController) {
+ 			this.#sttController.dispose();
+ 			this.#sttController = undefined;
+diff --git a/packages/coding-agent/src/studio/bridge-dispatcher.ts b/packages/coding-agent/src/studio/bridge-dispatcher.ts
+index 172b04d4e93758ba542f88369279f002fb67dd2a..d2240f6751135bbaf8da8e67a01e5911e37f284a 100644
+--- a/packages/coding-agent/src/studio/bridge-dispatcher.ts
++++ b/packages/coding-agent/src/studio/bridge-dispatcher.ts
+@@ -1,9 +1,12 @@
+ import * as crypto from "node:crypto";
+ import type { StudioProtocolError, StudioReceipt, StudioRequest } from "./bridge-protocol";
+ import { StudioRuntimeCommandArbiter, StudioRuntimeCommandError } from "./command-arbiter";
++import { StudioForkError } from "./services/fork-service";
+ import { StudioLoopError } from "./services/loop-service";
++import { StudioModeError } from "./services/mode-control-service";
+ import { StudioPauseError } from "./services/pause-service";
+ import { SessionControlError, SessionControlService } from "./services/session-control-service";
++import { StudioTreeError } from "./services/tree-service";
+ import type { StudioStateProjector } from "./state-projector";
+ import type { StudioHostRuntime } from "./studio-host-mode";
+ 
+@@ -28,6 +31,23 @@ const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
+ 	"loop.enable",
+ 	"loop.pause",
+ 	"loop.disable",
++	"mode.plan.enter",
++	"mode.plan.exit",
++	"mode.plan.review.open",
++	"mode.plan.review.respond",
++	"mode.vibe.enter",
++	"mode.vibe.exit",
++	"goal.create",
++	"goal.replace",
++	"goal.show",
++	"goal.setBudget",
++	"goal.pause",
++	"goal.resume",
++	"goal.drop",
++	"goal.guided.start",
++	"session.tree.get",
++	"session.tree.navigate",
++	"session.fork",
+ ]);
+ 
+ function operationSignature(request: StudioRequest): string {
+@@ -52,6 +72,12 @@ function protocolError(error: unknown): StudioProtocolError {
+ 	if (error instanceof StudioLoopError) {
+ 		return { code: error.code, message: error.message, retryable: false };
+ 	}
++	if (error instanceof StudioModeError || error instanceof StudioForkError) {
++		return { code: error.code, message: error.message, retryable: false };
++	}
++	if (error instanceof StudioTreeError) {
++		return { code: error.code, message: error.message, retryable: false, details: error.details };
++	}
+ 	return { code: "INTERNAL_ERROR", message: "Runtime command failed", retryable: false };
+ }
+ 
+@@ -138,6 +164,8 @@ export class StudioBridgeDispatcher {
+ 			await this.#arbiter.run(request, commandId, "gui", async () => {
+ 				const isPauseOperation = operation.kind === "runtime.pause" || operation.kind === "runtime.resume";
+ 				const isLoopOperation = operation.kind.startsWith("loop.");
++				const isModeOperation = operation.kind.startsWith("mode.") || operation.kind.startsWith("goal.");
++				const isTreeOperation = operation.kind.startsWith("session.tree.");
+ 				if (isPauseOperation) this.#assertPausePreconditions(operation);
+ 				accepted = true;
+ 				send(`receipt-accepted:${commandId}`, {
+@@ -152,7 +180,13 @@ export class StudioBridgeDispatcher {
+ 					? await this.#executePauseOperation(operation)
+ 					: isLoopOperation
+ 						? await this.#executeLoopOperation(operation)
+-						: await this.#executeSessionOperation(operation);
++						: isModeOperation
++							? await this.#executeModeOperation(operation)
++							: isTreeOperation
++								? await this.#executeTreeOperation(operation)
++								: operation.kind === "session.fork"
++									? await this.runtime.services.fork.fork()
++									: await this.#executeSessionOperation(operation);
+ 				if (!isPauseOperation) this.projector.commitStateChange();
+ 				const completed: StudioReceipt = {
+ 					type: "studio.receipt",
+@@ -260,6 +294,52 @@ export class StudioBridgeDispatcher {
+ 		}
+ 	}
+ 
++	async #executeModeOperation(operation: StudioRequest["operation"]): Promise<unknown> {
++		switch (operation.kind) {
++			case "mode.plan.enter":
++				return await this.runtime.services.modes.enterPlan(operation.initialPrompt);
++			case "mode.plan.exit":
++				return await this.runtime.services.modes.exitPlan(operation.discardDraft === true);
++			case "mode.plan.review.open":
++				return await this.runtime.services.modes.openPlanReview();
++			case "mode.plan.review.respond":
++				return await this.runtime.services.modes.respondPlanReview(operation.decision, operation.feedback);
++			case "mode.vibe.enter":
++				return await this.runtime.services.modes.enterVibe(operation.initialPrompt);
++			case "mode.vibe.exit":
++				return await this.runtime.services.modes.exitVibe();
++			case "goal.create":
++				return await this.runtime.services.modes.createGoal(operation.objective, operation.tokenBudget);
++			case "goal.replace":
++				return await this.runtime.services.modes.replaceGoal(operation.objective, operation.tokenBudget);
++			case "goal.show":
++				return this.runtime.services.modes.state().goal ?? { status: "off" };
++			case "goal.setBudget":
++				return await this.runtime.services.modes.setGoalBudget(operation.tokenBudget);
++			case "goal.pause":
++				return await this.runtime.services.modes.pauseGoal();
++			case "goal.resume":
++				return await this.runtime.services.modes.resumeGoal();
++			case "goal.drop":
++				return await this.runtime.services.modes.dropGoal();
++			case "goal.guided.start":
++				return await this.runtime.services.modes.startGuidedGoal(operation.initial);
++			default:
++				throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Mode operation is not registered");
++		}
++	}
++
++	async #executeTreeOperation(operation: StudioRequest["operation"]): Promise<unknown> {
++		switch (operation.kind) {
++			case "session.tree.get":
++				return this.runtime.services.tree.getTree();
++			case "session.tree.navigate":
++				return await this.runtime.services.tree.navigate(operation);
++			default:
++				throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Tree operation is not registered");
++		}
++	}
++
+ 	#lookupReplay(request: StudioRequest, send: StudioBridgeSend): StudioReceipt | null | undefined {
+ 		const signature = operationSignature(request);
+ 		const byRequest = this.#byRequestId.get(request.requestId);
+diff --git a/packages/coding-agent/src/studio/bridge-protocol.ts b/packages/coding-agent/src/studio/bridge-protocol.ts
+index 5105b536b2351185ab73ac46bf543f00e80e8ad2..67cbace804b33ae321f0c76f9f1eabf648a86ae2 100644
+--- a/packages/coding-agent/src/studio/bridge-protocol.ts
++++ b/packages/coding-agent/src/studio/bridge-protocol.ts
+@@ -47,6 +47,15 @@ export type StudioOperation =
+ 	| { kind: "queue.enqueue"; text: string }
+ 	| { kind: "session.clearContext" }
+ 	| { kind: "session.drop" }
++	| { kind: "session.fork" }
++	| { kind: "session.tree.get" }
++	| {
++			kind: "session.tree.navigate";
++			targetId: string;
++			summarize?: boolean;
++			customInstructions?: string;
++			reanswer?: unknown;
++	  }
+ 	| { kind: "turn.retry" }
+ 	| { kind: "core.prompt"; text: string; images?: unknown[] }
+ 	| { kind: "core.steer"; text: string; images?: unknown[] }
+@@ -58,7 +67,21 @@ export type StudioOperation =
+ 			limit?: { turns?: number; minutes?: number; tokens?: number };
+ 	  }
+ 	| { kind: "loop.pause" }
+-	| { kind: "loop.disable" };
++	| { kind: "loop.disable" }
++	| { kind: "mode.plan.enter"; initialPrompt?: string }
++	| { kind: "mode.plan.exit"; discardDraft?: boolean }
++	| { kind: "mode.plan.review.open" }
++	| { kind: "mode.plan.review.respond"; decision: "approve" | "refine" | "dismiss"; feedback?: string }
++	| { kind: "mode.vibe.enter"; initialPrompt?: string }
++	| { kind: "mode.vibe.exit" }
++	| { kind: "goal.create"; objective: string; tokenBudget?: number }
++	| { kind: "goal.replace"; objective: string; tokenBudget?: number }
++	| { kind: "goal.show" }
++	| { kind: "goal.setBudget"; tokenBudget?: number }
++	| { kind: "goal.pause" }
++	| { kind: "goal.resume" }
++	| { kind: "goal.drop" }
++	| { kind: "goal.guided.start"; initial?: string };
+ 
+ export interface StudioRequest {
+ 	type: "studio.request";
+@@ -81,6 +104,7 @@ export interface StudioProtocolError {
+ 		| "INVALID_ARGUMENT"
+ 		| "BUSY_STREAMING"
+ 		| "BUSY_COMPACTING"
++		| "MODE_CONFLICT"
+ 		| "INTERNAL_ERROR";
+ 	message: string;
+ 	retryable: boolean;
+@@ -231,12 +255,78 @@ export function parseStudioRequest(value: unknown): StudioRequest {
+ 			break;
+ 		case "session.clearContext":
+ 		case "session.drop":
++		case "session.fork":
++		case "session.tree.get":
+ 		case "turn.retry":
+ 		case "core.abort":
+ 		case "loop.pause":
+ 		case "loop.disable":
++		case "mode.plan.review.open":
++		case "mode.vibe.exit":
++		case "goal.show":
++		case "goal.pause":
++		case "goal.resume":
++		case "goal.drop":
+ 			exactKeys(operation, ["kind"]);
+ 			break;
++		case "mode.plan.enter":
++		case "mode.vibe.enter":
++			exactKeys(operation, ["kind", "initialPrompt"]);
++			if (operation.initialPrompt !== undefined && !nonEmptyString(operation.initialPrompt)) {
++				throw new StudioFrameError("Invalid mode prompt");
++			}
++			break;
++		case "mode.plan.exit":
++			exactKeys(operation, ["kind", "discardDraft"]);
++			if (operation.discardDraft !== undefined && typeof operation.discardDraft !== "boolean") {
++				throw new StudioFrameError("Invalid plan exit option");
++			}
++			break;
++		case "mode.plan.review.respond":
++			exactKeys(operation, ["kind", "decision", "feedback"]);
++			if (!new Set(["approve", "refine", "dismiss"]).has(operation.decision as string)) {
++				throw new StudioFrameError("Invalid plan review decision");
++			}
++			if (operation.feedback !== undefined && !nonEmptyString(operation.feedback)) {
++				throw new StudioFrameError("Invalid plan review feedback");
++			}
++			break;
++		case "goal.create":
++		case "goal.replace":
++			exactKeys(operation, ["kind", "objective", "tokenBudget"]);
++			if (!nonEmptyString(operation.objective)) throw new StudioFrameError("Invalid goal objective");
++			if (
++				operation.tokenBudget !== undefined &&
++				(!Number.isSafeInteger(operation.tokenBudget) || (operation.tokenBudget as number) <= 0)
++			) {
++				throw new StudioFrameError("Invalid goal token budget");
++			}
++			break;
++		case "goal.setBudget":
++			exactKeys(operation, ["kind", "tokenBudget"]);
++			if (
++				operation.tokenBudget !== undefined &&
++				(!Number.isSafeInteger(operation.tokenBudget) || (operation.tokenBudget as number) <= 0)
++			) {
++				throw new StudioFrameError("Invalid goal token budget");
++			}
++			break;
++		case "goal.guided.start":
++			exactKeys(operation, ["kind", "initial"]);
++			if (operation.initial !== undefined && !nonEmptyString(operation.initial)) {
++				throw new StudioFrameError("Invalid guided goal input");
++			}
++			break;
++		case "session.tree.navigate":
++			exactKeys(operation, ["kind", "targetId", "summarize", "customInstructions", "reanswer"]);
++			if (!nonEmptyString(operation.targetId)) throw new StudioFrameError("Invalid tree target");
++			if (operation.summarize !== undefined && typeof operation.summarize !== "boolean") {
++				throw new StudioFrameError("Invalid tree summarize option");
++			}
++			if (operation.customInstructions !== undefined && !nonEmptyString(operation.customInstructions)) {
++				throw new StudioFrameError("Invalid tree instructions");
++			}
++			break;
+ 		case "loop.enable": {
+ 			exactKeys(operation, ["kind", "prompt", "limit"]);
+ 			if (operation.prompt !== undefined && !nonEmptyString(operation.prompt)) {
+@@ -303,6 +393,23 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+ 	"loop.enable",
+ 	"loop.pause",
+ 	"loop.disable",
++	"mode.plan.enter",
++	"mode.plan.exit",
++	"mode.plan.review.open",
++	"mode.plan.review.respond",
++	"mode.vibe.enter",
++	"mode.vibe.exit",
++	"goal.create",
++	"goal.replace",
++	"goal.show",
++	"goal.setBudget",
++	"goal.pause",
++	"goal.resume",
++	"goal.drop",
++	"goal.guided.start",
++	"session.tree.get",
++	"session.tree.navigate",
++	"session.fork",
+ ] as const;
+ 
+ /** Capabilities that exist but are graded `limited` in the hello manifest. */
+@@ -313,6 +420,12 @@ export const STUDIO_LIMITED_CAPABILITIES: Readonly<Record<string, { limitations:
+ 	"loop.enable": {
+ 		limitations: ["Token limits are unsupported; use turns or minutes"],
+ 	},
++	"session.tree.navigate": {
++		limitations: ["Ask-tool re-answer requires the Remote InteractionPort"],
++	},
++	"mode.plan.enter": {
++		limitations: ["Plan-role model switching is not yet owned by the Runtime service"],
++	},
+ };
+ 
+ export function stableImplementedManifestHash(kind: "capabilities" | "commands"): string {
+diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
+index c9ebc8524865e6d2d3b33ad232bfcf5b7e017b05..8432703a68ff468e0889334dda01c84d6f939d7a 100644
+--- a/packages/coding-agent/src/studio/bridge-server.ts
++++ b/packages/coding-agent/src/studio/bridge-server.ts
+@@ -192,7 +192,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					type: "studio.hello.result",
+ 					requestId: hello.requestId,
+ 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
+-					runtimeVersion: `${VERSION}-studio.8`,
++					runtimeVersion: `${VERSION}-studio.9`,
+ 					upstreamVersion: VERSION,
+ 					upstreamCommit: UPSTREAM_COMMIT,
+ 					runtimeInstanceId: runtime.runtimeId,
+diff --git a/packages/coding-agent/src/studio/services/fork-service.ts b/packages/coding-agent/src/studio/services/fork-service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f006c25b25cb7e5515ced88972aad3efe065583e
+--- /dev/null
++++ b/packages/coding-agent/src/studio/services/fork-service.ts
+@@ -0,0 +1,27 @@
++import type { AgentSession } from "../../session/agent-session";
++
++export class StudioForkError extends Error {
++	constructor(
++		readonly code: "BUSY_STREAMING" | "BUSY_COMPACTING" | "MODE_CONFLICT" | "COMMAND_BLOCKED",
++		message: string,
++	) {
++		super(message);
++		this.name = "StudioForkError";
++	}
++}
++
++export class StudioForkService {
++	constructor(private readonly session: AgentSession) {}
++
++	async fork(): Promise<{ forked: boolean; sessionId: string }> {
++		if (this.session.isStreaming) throw new StudioForkError("BUSY_STREAMING", "Runtime is streaming");
++		if (this.session.isCompacting) throw new StudioForkError("BUSY_COMPACTING", "Runtime is compacting");
++		if (this.session.getVibeModeState()?.enabled) {
++			throw new StudioForkError("MODE_CONFLICT", "Exit vibe mode before forking the session");
++		}
++		const forked = await this.session.fork();
++		if (!forked)
++			throw new StudioForkError("COMMAND_BLOCKED", "Session fork was cancelled or persistence is disabled");
++		return { forked: true, sessionId: this.session.sessionManager.getSessionId() };
++	}
++}
+diff --git a/packages/coding-agent/src/studio/services/mode-control-service.ts b/packages/coding-agent/src/studio/services/mode-control-service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9a8dc32e9f1db40576e24b780c5f47ca13943082
+--- /dev/null
++++ b/packages/coding-agent/src/studio/services/mode-control-service.ts
+@@ -0,0 +1,301 @@
++import { prompt } from "@oh-my-pi/pi-utils";
++import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview.md" with { type: "text" };
++import planModeApprovedPrompt from "../../prompts/system/plan-mode-approved.md" with { type: "text" };
++import type { AgentSession } from "../../session/agent-session";
++import { type VibeOwnerScope, type VibeParentSession, VibeSessionRegistry } from "../../vibe/runtime";
++
++export class StudioModeError extends Error {
++	constructor(
++		readonly code: "INVALID_ARGUMENT" | "COMMAND_BLOCKED" | "MODE_CONFLICT" | "INTERACTION_REQUIRED",
++		message: string,
++	) {
++		super(message);
++		this.name = "StudioModeError";
++	}
++}
++
++export interface StudioModeState {
++	plan?: { status: "active" | "paused" | "off"; planFilePath?: string };
++	goal?: {
++		status: "active" | "paused" | "complete" | "off";
++		objective?: string;
++		tokenBudget?: number;
++		tokensUsed?: number;
++	};
++	vibe?: { enabled: boolean; workerAgentIds: string[] };
++}
++
++export type StudioModeChangeListener = (state: StudioModeState) => void;
++
++/** Runtime-owned Plan/Goal/Vibe transitions shared by Bridge and presentation adapters. */
++export class StudioModeControlService {
++	readonly #listeners = new Set<StudioModeChangeListener>();
++	#planPreviousTools: string[] | undefined;
++	#goalPreviousTools: string[] | undefined;
++	#vibePreviousTools: string[] | undefined;
++	#vibeOwnerScope: VibeOwnerScope | undefined;
++	#pendingPlan: { planFilePath: string; title: string } | undefined;
++	readonly #unsubscribeSession: () => void;
++
++	constructor(readonly session: AgentSession) {
++		this.#unsubscribeSession = session.subscribe(event => {
++			if (event.type === "goal_updated") this.#notify();
++		});
++	}
++
++	state(): StudioModeState {
++		const plan = this.session.getPlanModeState();
++		const goal = this.session.getGoalModeState();
++		const vibe = this.session.getVibeModeState();
++		return {
++			...(plan === undefined
++				? {}
++				: {
++						plan: {
++							status: plan.enabled ? ("active" as const) : ("paused" as const),
++							planFilePath: plan.planFilePath,
++						},
++					}),
++			...(goal === undefined
++				? {}
++				: {
++						goal: {
++							status:
++								goal.goal.status === "complete"
++									? ("complete" as const)
++									: goal.enabled
++										? ("active" as const)
++										: ("paused" as const),
++							objective: goal.goal.objective,
++							tokenBudget: goal.goal.tokenBudget,
++							tokensUsed: goal.goal.tokensUsed,
++						},
++					}),
++			...(vibe === undefined
++				? {}
++				: {
++						vibe: {
++							enabled: vibe.enabled,
++							workerAgentIds: [],
++						},
++					}),
++		};
++	}
++
++	onChange(listener: StudioModeChangeListener): () => void {
++		this.#listeners.add(listener);
++		return () => this.#listeners.delete(listener);
++	}
++
++	async enterPlan(initialPrompt?: string): Promise<StudioModeState> {
++		this.#assertNoOtherMode("plan");
++		if (!this.session.settings.get("plan.enabled")) {
++			throw new StudioModeError("COMMAND_BLOCKED", "Plan mode is disabled in settings");
++		}
++		if (this.session.getPlanModeState()?.enabled) {
++			throw new StudioModeError("COMMAND_BLOCKED", "Plan mode is already active");
++		}
++		const previousTools = this.session.getEnabledToolNames();
++		const tools = [...previousTools];
++		if (this.session.hasBuiltInTool("write") && !tools.includes("write")) tools.push("write");
++		const planFilePath = this.session.getPlanReferencePath() || "local://PLAN.md";
++		await this.session.setActiveToolsByName(tools);
++		this.#planPreviousTools = previousTools;
++		this.session.setPlanModeState({ enabled: true, planFilePath, workflow: "parallel" });
++		this.session.setPlanProposalHandler(title => this.session.preparePlanForReview(title));
++		this.session.sessionManager.appendModeChange("plan", { planFilePath });
++		if (this.session.isStreaming) await this.session.sendPlanModeContext({ deliverAs: "steer" });
++		this.#notify();
++		if (initialPrompt !== undefined) await this.#submit(initialPrompt);
++		return this.state();
++	}
++
++	async exitPlan(discardDraft = false): Promise<StudioModeState> {
++		const current = this.session.getPlanModeState();
++		if (!current) return this.state();
++		if (!discardDraft && current.enabled) {
++			throw new StudioModeError("INTERACTION_REQUIRED", "Confirm discarding the active plan draft");
++		}
++		this.session.setPlanModeState(undefined);
++		this.session.setPlanProposalHandler(null);
++		if (this.#planPreviousTools !== undefined) await this.session.setActiveToolsByName(this.#planPreviousTools);
++		this.#planPreviousTools = undefined;
++		this.#pendingPlan = undefined;
++		this.session.sessionManager.appendModeChange("none");
++		this.#notify();
++		return this.state();
++	}
++
++	async openPlanReview(): Promise<{ planFilePath: string; title: string; planExists: boolean }> {
++		const result = await this.session.preparePlanForReview("");
++		const details = result.details;
++		if (details === undefined) throw new StudioModeError("COMMAND_BLOCKED", "Plan review details are unavailable");
++		this.#pendingPlan = { planFilePath: details.planFilePath, title: details.title };
++		return { planFilePath: details.planFilePath, title: details.title, planExists: details.planExists };
++	}
++
++	async respondPlanReview(decision: "approve" | "refine" | "dismiss", feedback?: string): Promise<unknown> {
++		const pending = this.#pendingPlan;
++		if (!pending) throw new StudioModeError("COMMAND_BLOCKED", "No plan review is open");
++		if (decision === "dismiss") {
++			this.#pendingPlan = undefined;
++			return { decision };
++		}
++		if (decision === "refine") {
++			const normalized = feedback?.trim();
++			if (!normalized) throw new StudioModeError("INVALID_ARGUMENT", "Plan refinement feedback is required");
++			this.#pendingPlan = undefined;
++			await this.#submit(normalized);
++			return { decision };
++		}
++		this.session.setPlanReferencePath(pending.planFilePath);
++		this.session.markPlanReferenceSent();
++		await this.exitPlan(true);
++		const executionPrompt = prompt.render(planModeApprovedPrompt, {
++			planFilePath: pending.planFilePath,
++			contextPreserved: true,
++		});
++		await this.#submit(executionPrompt, true);
++		return { decision, planFilePath: pending.planFilePath, title: pending.title };
++	}
++
++	async createGoal(objective: string, tokenBudget?: number): Promise<StudioModeState> {
++		this.#assertNoOtherMode("goal");
++		this.#goalPreviousTools = this.session.getEnabledToolNames().filter(name => name !== "goal");
++		await this.session.setActiveToolsByName([...new Set([...this.#goalPreviousTools, "goal"])]);
++		await this.session.goalRuntime.createGoal({ objective, tokenBudget });
++		this.#notify();
++		return this.state();
++	}
++
++	async replaceGoal(objective: string, tokenBudget?: number): Promise<StudioModeState> {
++		await this.session.goalRuntime.replaceGoal({ objective, tokenBudget });
++		this.#notify();
++		return this.state();
++	}
++
++	async setGoalBudget(tokenBudget?: number): Promise<StudioModeState> {
++		await this.session.goalRuntime.onBudgetMutated(tokenBudget);
++		this.#notify();
++		return this.state();
++	}
++
++	async pauseGoal(): Promise<StudioModeState> {
++		await this.session.goalRuntime.pauseGoal();
++		await this.#restoreGoalTools();
++		this.#notify();
++		return this.state();
++	}
++
++	async resumeGoal(): Promise<StudioModeState> {
++		this.#assertNoOtherMode("goal");
++		this.#goalPreviousTools = this.session.getEnabledToolNames().filter(name => name !== "goal");
++		await this.session.setActiveToolsByName([...new Set([...this.#goalPreviousTools, "goal"])]);
++		await this.session.goalRuntime.resumeGoal();
++		this.#notify();
++		return this.state();
++	}
++
++	async dropGoal(): Promise<StudioModeState> {
++		await this.session.goalRuntime.dropGoal();
++		await this.#restoreGoalTools();
++		this.#notify();
++		return this.state();
++	}
++
++	async startGuidedGoal(initial?: string): Promise<{ started: true }> {
++		this.#assertNoOtherMode("goal");
++		const enabled = this.session.getEnabledToolNames();
++		this.#goalPreviousTools = enabled.filter(name => name !== "goal");
++		if (!enabled.includes("goal")) await this.session.setActiveToolsByName([...enabled, "goal"]);
++		await this.#submit(prompt.render(guidedGoalInterviewPrompt, { initial: initial?.trim() || undefined }), true);
++		return { started: true };
++	}
++
++	async enterVibe(initialPrompt?: string): Promise<StudioModeState> {
++		this.#assertNoOtherMode("vibe");
++		if (this.session.getVibeModeState()?.enabled) {
++			throw new StudioModeError("COMMAND_BLOCKED", "Vibe mode is already active");
++		}
++		const parent = this.#vibeParent();
++		const registry = VibeSessionRegistry.global();
++		const scope = registry.ownerScope(parent);
++		registry.activateScope(scope);
++		const previousTools = this.session.getEnabledToolNames();
++		const baseTools = ["read"];
++		if (this.session.hasBuiltInTool("todo")) baseTools.push("todo");
++		await this.session.activateVibeTools(baseTools);
++		this.#vibePreviousTools = previousTools;
++		this.#vibeOwnerScope = scope;
++		this.session.setVibeModeState({ enabled: true });
++		this.session.sessionManager.appendModeChange("vibe");
++		if (this.session.isStreaming) await this.session.sendVibeModeContext({ deliverAs: "steer" });
++		this.#notify();
++		if (initialPrompt !== undefined) await this.#submit(initialPrompt);
++		return this.state();
++	}
++
++	async exitVibe(): Promise<{ killed: number; state: StudioModeState }> {
++		if (!this.session.getVibeModeState()?.enabled) return { killed: 0, state: this.state() };
++		const parent = this.#vibeParent();
++		const killed = await VibeSessionRegistry.global().killAll(parent, this.#vibeOwnerScope);
++		await this.session.deactivateVibeTools(this.#vibePreviousTools ?? []);
++		this.session.setVibeModeState(undefined);
++		this.session.sessionManager.appendModeChange("none");
++		this.#vibePreviousTools = undefined;
++		this.#vibeOwnerScope = undefined;
++		this.#notify();
++		return { killed, state: this.state() };
++	}
++
++	dispose(): void {
++		this.#unsubscribeSession();
++		this.#listeners.clear();
++	}
++
++	async #restoreGoalTools(): Promise<void> {
++		if (this.#goalPreviousTools !== undefined) await this.session.setActiveToolsByName(this.#goalPreviousTools);
++		this.#goalPreviousTools = undefined;
++	}
++
++	#assertNoOtherMode(target: "plan" | "goal" | "vibe"): void {
++		if (target === "goal" && !this.session.settings.get("goal.enabled")) {
++			throw new StudioModeError("COMMAND_BLOCKED", "Goal mode is disabled in settings");
++		}
++		if (target !== "plan" && this.session.getPlanModeState() !== undefined) {
++			throw new StudioModeError("MODE_CONFLICT", "Exit plan mode first");
++		}
++		if (target !== "goal" && this.session.getGoalModeState() !== undefined) {
++			throw new StudioModeError("MODE_CONFLICT", "Exit goal mode first");
++		}
++		if (target !== "vibe" && this.session.getVibeModeState()?.enabled) {
++			throw new StudioModeError("MODE_CONFLICT", "Exit vibe mode first");
++		}
++	}
++
++	async #submit(text: string, synthetic = false): Promise<void> {
++		const normalized = text.trim();
++		if (!normalized) throw new StudioModeError("INVALID_ARGUMENT", "Prompt must not be empty");
++		if (this.session.isStreaming) {
++			await this.session.followUp(normalized, undefined, { synthetic });
++		} else {
++			await this.session.prompt(normalized, { synthetic });
++		}
++	}
++
++	#vibeParent(): VibeParentSession {
++		return {
++			getAgentId: () => this.session.getAgentId() ?? null,
++			getSessionId: () => this.session.sessionManager.getSessionId(),
++			getSessionFile: () => this.session.sessionManager.getSessionFile() ?? null,
++			sessionManager: this.session.sessionManager,
++			asyncJobManager: this.session.asyncJobManager,
++			settings: this.session.settings,
++		};
++	}
++
++	#notify(): void {
++		const state = this.state();
++		for (const listener of this.#listeners) listener(structuredClone(state));
++	}
++}
+diff --git a/packages/coding-agent/src/studio/services/tree-service.ts b/packages/coding-agent/src/studio/services/tree-service.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ff6c5b441a514323cd83c4567d5b10710d49ac2c
+--- /dev/null
++++ b/packages/coding-agent/src/studio/services/tree-service.ts
+@@ -0,0 +1,71 @@
++import type { AgentSession } from "../../session/agent-session";
++import type { SessionTreeNode } from "../../session/session-entries";
++
++export interface StudioTreeNode {
++	id: string;
++	parentId: string | null;
++	type: string;
++	timestamp: string;
++	label?: string;
++	role?: string;
++	toolName?: string;
++	children: StudioTreeNode[];
++}
++
++export class StudioTreeError extends Error {
++	constructor(
++		readonly code: "INTERACTION_REQUIRED" | "INVALID_ARGUMENT",
++		message: string,
++		readonly details?: Record<string, unknown>,
++	) {
++		super(message);
++		this.name = "StudioTreeError";
++	}
++}
++
++function projectNode(node: SessionTreeNode): StudioTreeNode {
++	const entry = node.entry;
++	const message = entry.type === "message" ? entry.message : undefined;
++	return {
++		id: entry.id,
++		parentId: entry.parentId,
++		type: entry.type,
++		timestamp: entry.timestamp,
++		...(node.label === undefined ? {} : { label: node.label }),
++		...(message === undefined ? {} : { role: message.role }),
++		...(message?.role === "toolResult" ? { toolName: message.toolName } : {}),
++		children: node.children.map(projectNode),
++	};
++}
++
++export class StudioTreeService {
++	constructor(private readonly session: AgentSession) {}
++
++	getTree(): { leafId: string | null; roots: StudioTreeNode[] } {
++		return {
++			leafId: this.session.sessionManager.getLeafId(),
++			roots: this.session.sessionManager.getTree().map(projectNode),
++		};
++	}
++
++	async navigate(input: { targetId: string; summarize?: boolean; customInstructions?: string }): Promise<unknown> {
++		const result = await this.session.navigateTree(input.targetId, {
++			summarize: input.summarize,
++			customInstructions: input.customInstructions,
++			allowAskReopen: true,
++		});
++		if (result.reopenAsk !== undefined) {
++			throw new StudioTreeError("INTERACTION_REQUIRED", "Tree navigation requires an Ask response", {
++				toolCallId: result.reopenAsk.toolCallId,
++				questions: structuredClone(result.reopenAsk.questions),
++			});
++		}
++		return {
++			cancelled: result.cancelled,
++			aborted: result.aborted === true,
++			askReanswerCommitted: result.askReanswerCommitted === true,
++			leafId: this.session.sessionManager.getLeafId(),
++			...(result.editorText === undefined ? {} : { editorText: result.editorText }),
++		};
++	}
++}
+diff --git a/packages/coding-agent/src/studio/state-projector.ts b/packages/coding-agent/src/studio/state-projector.ts
+index c2b214d2573709f21991f0b69dcab7dc645dc964..16ea8eacc95ece99b08a6b7a6a0a139d2eb8e561 100644
+--- a/packages/coding-agent/src/studio/state-projector.ts
++++ b/packages/coding-agent/src/studio/state-projector.ts
+@@ -6,6 +6,7 @@ import {
+ 	stableImplementedManifestHash,
+ } from "./bridge-protocol";
+ import type { StudioLoopService } from "./services/loop-service";
++import type { StudioModeControlService } from "./services/mode-control-service";
+ import type { StudioPauseService } from "./services/pause-service";
+ import type { StudioHostRuntime } from "./studio-host-mode";
+ 
+@@ -31,10 +32,12 @@ export class StudioStateProjector {
+ 	readonly #runtime: StudioHostRuntime;
+ 	readonly #pauseService: StudioPauseService;
+ 	readonly #loopService: StudioLoopService;
++	readonly #modeService: StudioModeControlService;
+ 	readonly #listeners = new Set<(event: StudioEventEnvelope) => void>();
+ 	readonly #terminalReceipts: StudioReceipt[] = [];
+ 	readonly #unsubscribePause: () => void;
+ 	readonly #unsubscribeLoop: () => void;
++	readonly #unsubscribeModes: () => void;
+ 	#committedSnapshot: StudioOperatorStateSnapshot | undefined;
+ 	#stateVersion = 0;
+ 	#eventSeq = 0;
+@@ -43,9 +46,11 @@ export class StudioStateProjector {
+ 		this.#runtime = runtime;
+ 		this.#pauseService = runtime.services.pause;
+ 		this.#loopService = runtime.services.loop;
++		this.#modeService = runtime.services.modes;
+ 		this.#committedSnapshot = this.snapshot();
+ 		this.#unsubscribePause = this.#pauseService.onChange(() => this.commitStateChange());
+ 		this.#unsubscribeLoop = this.#loopService.onChange(() => this.commitStateChange());
++		this.#unsubscribeModes = this.#modeService.onChange(() => this.commitStateChange());
+ 	}
+ 
+ 	get stateVersion(): number {
+@@ -57,11 +62,13 @@ export class StudioStateProjector {
+ 	}
+ 
+ 	snapshot(): StudioOperatorStateSnapshot {
+-		const plan = this.#runtime.session.getPlanModeState();
+-		const goal = this.#runtime.session.getGoalModeState();
+-		const vibe = this.#runtime.session.getVibeModeState();
++		const modes = this.#modeService.state();
++		const plan = modes.plan;
++		const goal = modes.goal;
++		const vibe = modes.vibe;
+ 		const loop = this.#loopService.state();
+-		const activeMode = goal?.enabled ? "goal" : plan?.enabled ? "plan" : vibe?.enabled ? "vibe" : "normal";
++		const activeMode =
++			goal?.status === "active" ? "goal" : plan?.status === "active" ? "plan" : vibe?.enabled ? "vibe" : "normal";
+ 		const snapshot: StudioOperatorStateSnapshot = {
+ 			runtimeId: this.#runtime.runtimeId,
+ 			runtimeEpoch: this.#runtime.runtimeEpoch,
+@@ -79,16 +86,16 @@ export class StudioStateProjector {
+ 			agents: [],
+ 			jobs: [],
+ 		};
+-		if (plan !== undefined) snapshot.plan = { status: plan.enabled ? "active" : "off" };
++		if (plan !== undefined) snapshot.plan = { status: plan.status };
+ 		if (goal !== undefined) {
+ 			snapshot.goal = {
+-				status: goalStatus(goal.goal.status),
+-				objective: goal.goal.objective,
+-				tokenBudget: goal.goal.tokenBudget,
+-				tokensUsed: goal.goal.tokensUsed,
++				status: goalStatus(goal.status),
++				objective: goal.objective ?? "",
++				tokenBudget: goal.tokenBudget,
++				tokensUsed: goal.tokensUsed ?? 0,
+ 			};
+ 		}
+-		if (vibe !== undefined) snapshot.vibe = { enabled: vibe.enabled, workerAgentIds: [] };
++		if (vibe !== undefined) snapshot.vibe = { enabled: vibe.enabled, workerAgentIds: vibe.workerAgentIds };
+ 		return cloneSnapshot(snapshot);
+ 	}
+ 
+@@ -118,6 +125,7 @@ export class StudioStateProjector {
+ 	dispose(): void {
+ 		this.#unsubscribePause();
+ 		this.#unsubscribeLoop();
++		this.#unsubscribeModes();
+ 		this.#listeners.clear();
+ 	}
+ 
+diff --git a/packages/coding-agent/src/studio/studio-host-mode.ts b/packages/coding-agent/src/studio/studio-host-mode.ts
+index d98c997d2878928cea37871482fbdbdac1aa5ed8..41036923f6657138e2b0dc894bc65b7057274615 100644
+--- a/packages/coding-agent/src/studio/studio-host-mode.ts
++++ b/packages/coding-agent/src/studio/studio-host-mode.ts
+@@ -3,8 +3,11 @@ import { postmortem } from "@oh-my-pi/pi-utils";
+ import type { AgentSession } from "../session/agent-session";
+ import type { SessionManager } from "../session/session-manager";
+ import { StudioBridgeServer } from "./bridge-server";
++import { StudioForkService } from "./services/fork-service";
+ import { StudioLoopService } from "./services/loop-service";
++import { StudioModeControlService } from "./services/mode-control-service";
+ import { type StudioPauseService, studioPauseService } from "./services/pause-service";
++import { StudioTreeService } from "./services/tree-service";
+ 
+ export interface StudioBridgeConfiguration {
+ 	endpoint?: string;
+@@ -18,7 +21,13 @@ export interface StudioHostRuntime {
+ 	readonly sessionId: string;
+ 	readonly session: AgentSession;
+ 	readonly sessionManager: SessionManager;
+-	readonly services: Readonly<{ pause: StudioPauseService; loop: StudioLoopService }>;
++	readonly services: Readonly<{
++		pause: StudioPauseService;
++		loop: StudioLoopService;
++		modes: StudioModeControlService;
++		tree: StudioTreeService;
++		fork: StudioForkService;
++	}>;
+ 	readonly bridgeConfig: Readonly<StudioBridgeConfiguration>;
+ 	dispose(): void;
+ }
+@@ -78,6 +87,9 @@ export function createStudioHostRuntime(
+ 		setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+ 		clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+ 	});
++	const modes = new StudioModeControlService(session);
++	const tree = new StudioTreeService(session);
++	const fork = new StudioForkService(session);
+ 	const unsubscribe = session.subscribe(event => {
+ 		if (event.type === "agent_end") loop.scheduleNext();
+ 	});
+@@ -85,16 +97,19 @@ export function createStudioHostRuntime(
+ 	return Object.freeze({
+ 		runtimeId: createRuntimeId(),
+ 		runtimeEpoch: bridgeConfig.runtimeEpoch as number,
+-		sessionId: session.sessionManager.getSessionId(),
++		get sessionId() {
++			return session.sessionManager.getSessionId();
++		},
+ 		session,
+ 		sessionManager: session.sessionManager,
+-		services: Object.freeze({ pause: studioPauseService, loop }),
++		services: Object.freeze({ pause: studioPauseService, loop, modes, tree, fork }),
+ 		bridgeConfig: Object.freeze({ ...bridgeConfig }),
+ 		dispose: () => {
+ 			if (disposed) return;
+ 			disposed = true;
+ 			unsubscribe();
+ 			loop.dispose();
++			modes.dispose();
+ 		},
+ 	});
+ }
+diff --git a/packages/coding-agent/test/studio-bridge-server.test.ts b/packages/coding-agent/test/studio-bridge-server.test.ts
+index 1678a43d6b6531445e700edb8b766b8f9b1c99ab..acae3b0d92c6974b63c1e396bb3c9daca337007a 100644
+--- a/packages/coding-agent/test/studio-bridge-server.test.ts
++++ b/packages/coding-agent/test/studio-bridge-server.test.ts
+@@ -35,6 +35,22 @@ function fakeLoopService(): StudioLoopService {
+ 	});
+ }
+ 
++function fakeExtendedServices(session: Record<string, unknown>) {
++	return {
++		modes: {
++			state: () => ({
++				...((session.getPlanModeState as () => unknown)() === undefined
++					? {}
++					: { plan: { status: "active", planFilePath: "local://PLAN.md" } }),
++			}),
++			onChange: () => () => {},
++			dispose: () => {},
++		},
++		tree: { getTree: () => ({ leafId: null, roots: [] }), navigate: async () => ({}) },
++		fork: { fork: async () => ({ forked: true, sessionId: "session-test" }) },
++	};
++}
++
+ afterEach(async () => {
+ 	for (const socket of sockets.splice(0)) socket.destroy();
+ 	for (const server of servers.splice(0)) {
+@@ -48,19 +64,24 @@ afterEach(async () => {
+ });
+ 
+ function fakeRuntime(runtimeId = "runtime-instance-test", runtimeEpoch = 7): StudioHostRuntime {
++	const session = {
++		isStreaming: false,
++		isCompacting: false,
++		queuedMessageCount: 0,
++		getPlanModeState: () => undefined,
++		getGoalModeState: () => undefined,
++		getVibeModeState: () => undefined,
++	};
+ 	return {
+ 		runtimeId,
+ 		runtimeEpoch,
+ 		sessionId: "session-test",
+-		session: {
+-			isStreaming: false,
+-			isCompacting: false,
+-			queuedMessageCount: 0,
+-			getPlanModeState: () => undefined,
+-			getGoalModeState: () => undefined,
+-			getVibeModeState: () => undefined,
++		session,
++		services: {
++			pause: new StudioPauseService(new AgentPauseGate()),
++			loop: fakeLoopService(),
++			...fakeExtendedServices(session),
+ 		},
+-		services: { pause: new StudioPauseService(new AgentPauseGate()), loop: fakeLoopService() },
+ 	} as unknown as StudioHostRuntime;
+ }
+ 
+@@ -91,7 +112,11 @@ function sessionControlRuntime(): { runtime: StudioHostRuntime; session: Record<
+ 		runtimeEpoch: 7,
+ 		sessionId: "session-test",
+ 		session,
+-		services: { pause: new StudioPauseService(new AgentPauseGate()), loop: fakeLoopService() },
++		services: {
++			pause: new StudioPauseService(new AgentPauseGate()),
++			loop: fakeLoopService(),
++			...fakeExtendedServices(session),
++		},
+ 	} as unknown as StudioHostRuntime;
+ 	return { runtime, session };
+ }
+@@ -262,6 +287,23 @@ describe("WP-011 Studio Bridge runtime server", () => {
+ 			"loop.enable",
+ 			"loop.pause",
+ 			"loop.disable",
++			"mode.plan.enter",
++			"mode.plan.exit",
++			"mode.plan.review.open",
++			"mode.plan.review.respond",
++			"mode.vibe.enter",
++			"mode.vibe.exit",
++			"goal.create",
++			"goal.replace",
++			"goal.show",
++			"goal.setBudget",
++			"goal.pause",
++			"goal.resume",
++			"goal.drop",
++			"goal.guided.start",
++			"session.tree.get",
++			"session.tree.navigate",
++			"session.fork",
+ 		]);
+ 		expect(response.capabilityManifest.capabilities.find(entry => entry.id === "session.drop")).toMatchObject({
+ 			grade: "limited",
+diff --git a/packages/coding-agent/test/studio-fork-service.test.ts b/packages/coding-agent/test/studio-fork-service.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..be888b79bcd636f1760c8ed2ae0a20334dccb95c
+--- /dev/null
++++ b/packages/coding-agent/test/studio-fork-service.test.ts
+@@ -0,0 +1,41 @@
++import { describe, expect, test } from "bun:test";
++import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
++import { StudioForkError, StudioForkService } from "@oh-my-pi/pi-coding-agent/studio/services/fork-service";
++
++function fixture(overrides: Record<string, unknown> = {}) {
++	let sessionId = "session-old";
++	let forkCalls = 0;
++	const session = {
++		isStreaming: false,
++		isCompacting: false,
++		getVibeModeState: () => undefined,
++		async fork() {
++			forkCalls += 1;
++			sessionId = "session-new";
++			return true;
++		},
++		sessionManager: { getSessionId: () => sessionId },
++		...overrides,
++	} as unknown as AgentSession;
++	return { service: new StudioForkService(session), forkCalls: () => forkCalls };
++}
++
++describe("WP-035 StudioForkService", () => {
++	test("forks once and returns the rebound session identity", async () => {
++		const { service, forkCalls } = fixture();
++		expect(await service.fork()).toEqual({ forked: true, sessionId: "session-new" });
++		expect(forkCalls()).toBe(1);
++	});
++
++	test("fails closed while streaming, compacting, or vibe is active", async () => {
++		await expect(fixture({ isStreaming: true }).service.fork()).rejects.toMatchObject({
++			code: "BUSY_STREAMING",
++		});
++		await expect(fixture({ isCompacting: true }).service.fork()).rejects.toMatchObject({
++			code: "BUSY_COMPACTING",
++		});
++		await expect(fixture({ getVibeModeState: () => ({ enabled: true }) }).service.fork()).rejects.toBeInstanceOf(
++			StudioForkError,
++		);
++	});
++});
+diff --git a/packages/coding-agent/test/studio-mode-control-service.test.ts b/packages/coding-agent/test/studio-mode-control-service.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..ced2fe07914a063e8d8e05a25dbc2e6a47cc8e0f
+--- /dev/null
++++ b/packages/coding-agent/test/studio-mode-control-service.test.ts
+@@ -0,0 +1,89 @@
++import { afterEach, beforeEach, describe, expect, test } from "bun:test";
++import * as path from "node:path";
++import { Agent } from "@oh-my-pi/pi-agent-core";
++import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
++import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
++import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
++import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
++import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
++import { parseStudioRequest } from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
++import {
++	StudioModeControlService,
++	StudioModeError,
++} from "@oh-my-pi/pi-coding-agent/studio/services/mode-control-service";
++import { TempDir } from "@oh-my-pi/pi-utils";
++
++describe("WP-030/031/032 StudioModeControlService", () => {
++	let authStorage: AuthStorage;
++	let service: StudioModeControlService;
++	let session: AgentSession;
++	let tempDir: TempDir;
++
++	beforeEach(async () => {
++		resetSettingsForTest();
++		tempDir = TempDir.createSync("@pi-studio-modes-");
++		await Settings.init({ inMemory: true, cwd: tempDir.path() });
++		authStorage = await AuthStorage.create(path.join(tempDir.path(), "testauth.db"));
++		const modelRegistry = new ModelRegistry(authStorage);
++		const model = modelRegistry.find("anthropic", "claude-sonnet-4-5");
++		if (!model) throw new Error("Expected claude-sonnet-4-5 test model");
++		session = new AgentSession({
++			agent: new Agent({ initialState: { model, systemPrompt: ["Test"], tools: [], messages: [] } }),
++			sessionManager: SessionManager.create(tempDir.path(), tempDir.path()),
++			settings: Settings.isolated(),
++			modelRegistry,
++		});
++		service = new StudioModeControlService(session);
++	});
++
++	afterEach(async () => {
++		service.dispose();
++		await session.dispose();
++		authStorage.close();
++		tempDir.removeSync();
++		resetSettingsForTest();
++	});
++
++	test("Plan is Runtime-owned, conflict-fenced, and requires explicit draft discard", async () => {
++		const states: unknown[] = [];
++		service.onChange(state => states.push(state));
++		await service.enterPlan();
++		expect(service.state().plan).toMatchObject({ status: "active", planFilePath: "local://PLAN.md" });
++		expect(session.getPlanModeState()).toMatchObject({ enabled: true, planFilePath: "local://PLAN.md" });
++		await expect(service.createGoal("conflicting goal")).rejects.toBeInstanceOf(StudioModeError);
++		await expect(service.exitPlan()).rejects.toMatchObject({ code: "INTERACTION_REQUIRED" });
++		await service.exitPlan(true);
++		expect(service.state().plan).toBeUndefined();
++		expect(states.length).toBeGreaterThanOrEqual(2);
++	});
++
++	test("Goal create, budget, pause, resume, and drop preserve one state source", async () => {
++		await service.createGoal("ship the backend", 1_000);
++		expect(service.state().goal).toMatchObject({
++			status: "active",
++			objective: "ship the backend",
++			tokenBudget: 1_000,
++		});
++		await service.setGoalBudget(2_000);
++		expect(service.state().goal?.tokenBudget).toBe(2_000);
++		await service.pauseGoal();
++		expect(service.state().goal?.status).toBe("paused");
++		await service.resumeGoal();
++		expect(service.state().goal?.status).toBe("active");
++		await service.dropGoal();
++		expect(service.state().goal).toBeUndefined();
++	});
++
++	test("the Runtime mirror parser accepts M3 operations and rejects unknown fields", () => {
++		const base = { type: "studio.request", requestId: "m3-op", runtimeEpoch: 1 };
++		expect(
++			parseStudioRequest({
++				...base,
++				operation: { kind: "session.tree.navigate", targetId: "entry-1", summarize: true },
++			}).operation.kind,
++		).toBe("session.tree.navigate");
++		expect(() =>
++			parseStudioRequest({ ...base, operation: { kind: "goal.create", objective: "ship", surprise: true } }),
++		).toThrow();
++	});
++});
+diff --git a/packages/coding-agent/test/studio-session-control-dispatcher.test.ts b/packages/coding-agent/test/studio-session-control-dispatcher.test.ts
+index 93cfc0b17585c7cf7e7eb363eb3c5a0053c327d3..232df9a6d54a0a44d4f66b2732e4dd7b37c8d1fb 100644
+--- a/packages/coding-agent/test/studio-session-control-dispatcher.test.ts
++++ b/packages/coding-agent/test/studio-session-control-dispatcher.test.ts
+@@ -74,12 +74,51 @@ function fakeLoopService(): StudioLoopService {
+ 
+ function fixture() {
+ 	const session = new FakeSession();
++	const serviceCalls: string[] = [];
++	const modes = {
++		state: () => ({}),
++		onChange: () => () => {},
++		dispose: () => {},
++		enterPlan: async () => {
++			serviceCalls.push("mode.plan.enter");
++			return { plan: { status: "active" } };
++		},
++		exitPlan: async () => ({}),
++		openPlanReview: async () => ({}),
++		respondPlanReview: async () => ({}),
++		enterVibe: async () => ({}),
++		exitVibe: async () => ({ killed: 0, state: {} }),
++		createGoal: async () => ({}),
++		replaceGoal: async () => ({}),
++		setGoalBudget: async () => ({}),
++		pauseGoal: async () => ({}),
++		resumeGoal: async () => ({}),
++		dropGoal: async () => ({}),
++		startGuidedGoal: async () => ({ started: true }),
++	};
+ 	const runtime = {
+ 		runtimeId: "runtime-control-test",
+ 		runtimeEpoch: 7,
+ 		sessionId: "session-control-test",
+ 		session,
+-		services: { pause: new StudioPauseService(), loop: fakeLoopService() },
++		services: {
++			pause: new StudioPauseService(),
++			loop: fakeLoopService(),
++			modes,
++			tree: {
++				getTree: () => {
++					serviceCalls.push("session.tree.get");
++					return { leafId: null, roots: [] };
++				},
++				navigate: async () => ({}),
++			},
++			fork: {
++				fork: async () => {
++					serviceCalls.push("session.fork");
++					return { forked: true, sessionId: "session-control-test" };
++				},
++			},
++		},
+ 	} as unknown as StudioHostRuntime;
+ 	const projector = new StudioStateProjector(runtime);
+ 	const frames: Array<{ frameId: string; body: StudioReceipt | ReturnType<StudioStateProjector["response"]> }> = [];
+@@ -105,7 +144,7 @@ function fixture() {
+ 		operation,
+ 		...extra,
+ 	});
+-	return { session, projector, frames, events, dispatcher, request };
++	return { session, projector, frames, events, dispatcher, request, serviceCalls };
+ }
+ 
+ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
+@@ -186,8 +225,7 @@ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
+ 			request(
+ 				"unknown-one",
+ 				{
+-					kind: "mode.plan.enter",
+-					initialPrompt: "x",
++					kind: "operator.manifest.get",
+ 				} as unknown as StudioRequest["operation"],
+ 				{ idempotencyKey: "unknown-key" },
+ 			),
+@@ -207,8 +245,7 @@ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
+ 			request(
+ 				"unknown-replay",
+ 				{
+-					kind: "mode.plan.enter",
+-					initialPrompt: "x",
++					kind: "operator.manifest.get",
+ 				} as unknown as StudioRequest["operation"],
+ 				{ idempotencyKey: "unknown-key" },
+ 			),
+@@ -273,4 +310,17 @@ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
+ 		expect(projector.stateVersion).toBe(0);
+ 		expect((frames.at(-1)!.body as StudioReceipt).error).toMatchObject({ code: "INVALID_ARGUMENT" });
+ 	});
++
++	test("M3 mode, tree, and fork operations route through Runtime-owned services", async () => {
++		const { dispatcher, frames, request, serviceCalls } = fixture();
++		await dispatcher.dispatch(request("plan-enter", { kind: "mode.plan.enter" }));
++		await dispatcher.dispatch(request("tree-get", { kind: "session.tree.get" }));
++		await dispatcher.dispatch(request("session-fork", { kind: "session.fork" }));
++		expect(serviceCalls).toEqual(["mode.plan.enter", "session.tree.get", "session.fork"]);
++		expect(frames.filter(frame => (frame.body as StudioReceipt).status === "completed")).toHaveLength(3);
++		expect((frames.at(-1)!.body as StudioReceipt).result).toEqual({
++			forked: true,
++			sessionId: "session-control-test",
++		});
++	});
+ });
+diff --git a/packages/coding-agent/test/studio-tree-service.test.ts b/packages/coding-agent/test/studio-tree-service.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..53cdac5a5de7d475fd84221ffaadec61a9982559
+--- /dev/null
++++ b/packages/coding-agent/test/studio-tree-service.test.ts
+@@ -0,0 +1,42 @@
++import { describe, expect, test } from "bun:test";
++import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
++import { StudioTreeService } from "@oh-my-pi/pi-coding-agent/studio/services/tree-service";
++
++describe("WP-034 StudioTreeService", () => {
++	test("projects a path-free tree and preserves the active leaf", () => {
++		const session = {
++			sessionManager: {
++				getLeafId: () => "entry-1",
++				getTree: () => [
++					{
++						entry: {
++							type: "message",
++							id: "entry-1",
++							parentId: null,
++							timestamp: "2026-08-12T00:00:00.000Z",
++							message: { role: "user", content: "secret path C:/private" },
++						},
++						label: "Start",
++						children: [],
++					},
++				],
++			},
++		} as unknown as AgentSession;
++		const result = new StudioTreeService(session).getTree();
++		expect(result).toEqual({
++			leafId: "entry-1",
++			roots: [
++				{
++					id: "entry-1",
++					parentId: null,
++					type: "message",
++					timestamp: "2026-08-12T00:00:00.000Z",
++					label: "Start",
++					role: "user",
++					children: [],
++				},
++			],
++		});
++		expect(JSON.stringify(result)).not.toContain("C:/private");
++	});
++});

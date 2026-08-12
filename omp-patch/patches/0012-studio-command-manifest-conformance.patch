@@ -1,0 +1,98 @@
+diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
+index 862e964..ff4112b 100644
+--- a/packages/coding-agent/src/studio/bridge-server.ts
++++ b/packages/coding-agent/src/studio/bridge-server.ts
+@@ -197,7 +197,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					type: "studio.hello.result",
+ 					requestId: hello.requestId,
+ 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
+-					runtimeVersion: `${VERSION}-studio.11`,
++					runtimeVersion: `${VERSION}-studio.12`,
+ 					upstreamVersion: VERSION,
+ 					upstreamCommit: UPSTREAM_COMMIT,
+ 					runtimeInstanceId: runtime.runtimeId,
+diff --git a/packages/coding-agent/src/studio/services/command-manifest-service.ts b/packages/coding-agent/src/studio/services/command-manifest-service.ts
+index 1b3c2ba..c6f0d1e 100644
+--- a/packages/coding-agent/src/studio/services/command-manifest-service.ts
++++ b/packages/coding-agent/src/studio/services/command-manifest-service.ts
+@@ -11,9 +11,9 @@ export interface StudioOperatorCommand {
+ 	name: string;
+ 	aliases: string[];
+ 	description: string;
+-	source: "builtin" | "skill" | "extension" | "custom" | "mcp_prompt" | "file";
+-	implementation: "headless-handle" | "tui-compatibility" | "extension-command" | "prompt-expansion";
+-	interactionKinds: string[];
++	source: "builtin" | "skill" | "extension" | "prompt-template" | "file-command";
++	implementation: "shared-service" | "headless-handle" | "tui-compatibility" | "extension-command";
++	interactionKinds: Array<"confirm" | "select" | "input" | "editor" | "approval">;
+ 	presentation: "generic-form" | "terminal" | "native";
+ 	availability: "available";
+ 	argumentSchema?: { type: "string"; hint?: string };
+@@ -76,12 +76,17 @@ export class StudioCommandManifestService {
+ 		for (const command of await buildAvailableSlashCommands(availableSession)) {
+ 			if (command.source === "builtin") continue;
+ 			commands.push({
+-				id: `${command.source}.${command.name}`,
++				id: `${manifestSource(command.source)}.${command.name}`,
+ 				name: command.name,
+ 				aliases: [...(command.aliases ?? [])],
+ 				description: command.description ?? `/${command.name}`,
+-				source: command.source,
+-				implementation: command.source === "extension" ? "extension-command" : "prompt-expansion",
++				source: manifestSource(command.source),
++				implementation:
++					command.source === "extension"
++						? "extension-command"
++						: command.source === "skill"
++							? "shared-service"
++							: "headless-handle",
+ 				interactionKinds: [],
+ 				presentation: command.source === "extension" ? "generic-form" : "native",
+ 				availability: "available",
+@@ -177,6 +182,20 @@ export class StudioCommandManifestService {
+ 	}
+ }
+ 
++function manifestSource(
++	source: "builtin" | "skill" | "extension" | "custom" | "mcp_prompt" | "file",
++): StudioOperatorCommand["source"] {
++	switch (source) {
++		case "custom":
++		case "mcp_prompt":
++			return "prompt-template";
++		case "file":
++			return "file-command";
++		default:
++			return source;
++	}
++}
++
+ function builtinDescriptor(command: (typeof BUILTIN_SLASH_COMMANDS_INTERNAL)[number]): StudioOperatorCommand {
+ 	return {
+ 		id: `builtin.${command.name}`,
+diff --git a/packages/coding-agent/test/studio-command-manifest-service.test.ts b/packages/coding-agent/test/studio-command-manifest-service.test.ts
+index 45c8268..776ec7b 100644
+--- a/packages/coding-agent/test/studio-command-manifest-service.test.ts
++++ b/packages/coding-agent/test/studio-command-manifest-service.test.ts
+@@ -82,15 +82,18 @@ describe("WP-044 Studio command manifest", () => {
+ 		expect(manifest.commands.find(command => command.id === "extension.ext:hello")).toMatchObject({
+ 			implementation: "extension-command",
+ 		});
+-		expect(manifest.commands.find(command => command.id === "custom.custom:hello")).toMatchObject({
+-			implementation: "prompt-expansion",
++		expect(manifest.commands.find(command => command.id === "prompt-template.custom:hello")).toMatchObject({
++			source: "prompt-template",
++			implementation: "headless-handle",
+ 		});
+ 		expect(await service.invoke("extension.ext:hello", "world")).toEqual({
+ 			started: true,
+ 			consumed: false,
+ 			source: "extension",
+ 		});
+-		expect(await service.invoke("custom.custom:hello", { args: "team" })).toMatchObject({ source: "custom" });
++		expect(await service.invoke("prompt-template.custom:hello", { args: "team" })).toMatchObject({
++			source: "prompt-template",
++		});
+ 		expect(prompts).toEqual(["/ext:hello world", "/custom:hello team"]);
+ 	});
+ });

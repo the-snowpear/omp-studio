@@ -1,0 +1,197 @@
+/*
+ * OMP Studio renderer P0 surface.
+ *
+ * Minimal stylesheet built on the ver1 token language (light theme, from
+ * ui_reference/ver1/assets/css/tokens.css). This is a dense status readout,
+ * not a redesign: neutral surfaces, purple accent, darkened status colors.
+ */
+
+:root {
+  color-scheme: light;
+
+  --bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-2: #f2f2f5;
+  --border: #e2e2e7;
+  --border-strong: #cfcfd6;
+  --text: #1d2129;
+  --text-2: #4e5560;
+  --text-3: #5c636e;
+  --text-faint: #6d7480;
+  --accent: #6e56cf;
+  --accent-soft: rgba(110, 86, 207, 0.1);
+  --accent-border: rgba(110, 86, 207, 0.35);
+  --green: #137a52;
+  --green-soft: rgba(19, 122, 82, 0.12);
+  --amber: #8f5a05;
+  --amber-soft: rgba(143, 90, 5, 0.12);
+  --red: #c0272c;
+  --red-soft: rgba(192, 39, 44, 0.1);
+  --blue: #1f6ba3;
+  --blue-soft: rgba(31, 107, 163, 0.12);
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas,
+    "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.bar {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 600;
+}
+
+.badge {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  padding: 1px 8px;
+}
+
+.panel {
+  margin: 24px 16px;
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-width: 760px;
+}
+
+.panel h1 {
+  font-size: 16px;
+  margin: 0 0 4px;
+}
+
+.muted {
+  color: var(--text-3);
+  margin: 4px 0 0;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.panel-head h1 {
+  margin: 0;
+}
+
+.status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+.status-connecting {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.status-connected {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.status-disconnected {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 4px;
+}
+
+.chip-ok {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.chip-warn {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.chip-bad {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  row-gap: 6px;
+  margin: 0;
+}
+
+.fact {
+  display: contents;
+}
+
+.fact dt {
+  color: var(--text-faint);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 2px;
+}
+
+.fact dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.fact dd .chip {
+  margin-left: 8px;
+}
+
+.fact-note {
+  margin-left: 8px;
+  color: var(--text-3);
+  font-size: 12px;
+}

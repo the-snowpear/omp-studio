@@ -1,0 +1,446 @@
+diff --git a/packages/coding-agent/CHANGELOG.md b/packages/coding-agent/CHANGELOG.md
+index a4d66e8..025704e 100644
+--- a/packages/coding-agent/CHANGELOG.md
++++ b/packages/coding-agent/CHANGELOG.md
+@@ -2,6 +2,10 @@
+ 
+ ## [Unreleased]
+ 
++### Added
++
++- Added the `studio-host` launch mode and Bridge lifecycle seam for a shared TUI and Studio runtime session.
++
+ ## [17.2.12] - 2026-08-08
+ 
+ ### Fixed
+diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
+index 7e73dea..214413c 100644
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -506,6 +506,10 @@
+       "types": "./src/session/*.ts",
+       "import": "./src/session/*.ts"
+     },
++    "./studio/*": {
++      "types": "./src/studio/*.ts",
++      "import": "./src/studio/*.ts"
++    },
+     "./slash-commands/*": {
+       "types": "./src/slash-commands/*.ts",
+       "import": "./src/slash-commands/*.ts"
+diff --git a/packages/coding-agent/src/cli/args.ts b/packages/coding-agent/src/cli/args.ts
+index f8785e8..daa24ca 100644
+--- a/packages/coding-agent/src/cli/args.ts
++++ b/packages/coding-agent/src/cli/args.ts
+@@ -20,7 +20,7 @@ import { CliUsageError } from "./usage-error";
+ 
+ export { getExtraHelpText };
+ 
+-export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui";
++export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui" | "studio-host";
+ 
+ export interface Args {
+ 	cwd?: string;
+@@ -55,6 +55,8 @@ export interface Args {
+ 	help?: boolean;
+ 	version?: boolean;
+ 	mode?: Mode;
++	bridgeEndpoint?: string;
++	bridgeTokenFile?: string;
+ 	noSession?: boolean;
+ 	sessionDir?: string;
+ 	providerSessionId?: string;
+diff --git a/packages/coding-agent/src/cli/flag-tables.ts b/packages/coding-agent/src/cli/flag-tables.ts
+index e0af25d..f9c2a59 100644
+--- a/packages/coding-agent/src/cli/flag-tables.ts
++++ b/packages/coding-agent/src/cli/flag-tables.ts
+@@ -122,10 +122,23 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+ 		result.addDir = [...(result.addDir ?? []), value];
+ 	},
+ 	"--mode": (result, value) => {
+-		if (value === "text" || value === "json" || value === "rpc" || value === "acp" || value === "rpc-ui") {
++		if (
++			value === "text" ||
++			value === "json" ||
++			value === "rpc" ||
++			value === "acp" ||
++			value === "rpc-ui" ||
++			value === "studio-host"
++		) {
+ 			result.mode = value;
+ 		}
+ 	},
++	"--bridge-endpoint": (result, value) => {
++		result.bridgeEndpoint = value;
++	},
++	"--bridge-token-file": (result, value) => {
++		result.bridgeTokenFile = value;
++	},
+ 	"--fork": (result, value) => {
+ 		result.fork = value;
+ 	},
+diff --git a/packages/coding-agent/src/commands/launch-help.ts b/packages/coding-agent/src/commands/launch-help.ts
+index 98a9ea4..9449cfd 100644
+--- a/packages/coding-agent/src/commands/launch-help.ts
++++ b/packages/coding-agent/src/commands/launch-help.ts
+@@ -40,8 +40,14 @@ export const launchHelp = {
+ 		alias: Flags.string({ description: "Create a shell shortcut for the selected profile and exit" }),
+ 		cwd: Flags.string({ description: "Directory to start in (overrides the launch cwd)" }),
+ 		mode: Flags.string({
+-			description: "Output mode: text (default), json, rpc, or rpc-ui",
+-			options: ["text", "json", "rpc", "acp", "rpc-ui"],
++			description: "Output mode: text (default), json, rpc, acp, rpc-ui, or studio-host",
++			options: ["text", "json", "rpc", "acp", "rpc-ui", "studio-host"],
++		}),
++		"bridge-endpoint": Flags.string({
++			description: "Studio Bridge endpoint (transport is enabled by the Studio host protocol patch)",
++		}),
++		"bridge-token-file": Flags.string({
++			description: "Studio Bridge authentication token file",
+ 		}),
+ 		config: Flags.string({
+ 			description: "Load an extra config.yml-style overlay for this run (repeatable)",
+diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
+index c9de644..bc9b6d2 100644
+--- a/packages/coding-agent/src/main.ts
++++ b/packages/coding-agent/src/main.ts
+@@ -87,6 +87,7 @@ import { resolveResumableSession, type SessionInfo } from "./session/session-lis
+ import { SessionManager } from "./session/session-manager";
+ import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
+ import { shouldShowStartupSplash } from "./startup-splash";
++import { runStudioHostMode as defaultRunStudioHostMode, type RunStudioHostMode } from "./studio/studio-host-mode";
+ import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
+ import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
+ import { createTelemetryExportConfig, initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
+@@ -1186,6 +1187,7 @@ interface RunRootCommandDependencies {
+ 	discoverAuthStorage?: typeof discoverAuthStorage;
+ 	selectSession?: typeof selectSession;
+ 	runAcpMode?: RunAcpMode;
++	runStudioHostMode?: RunStudioHostMode;
+ 	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
+ 	settings?: Settings;
+ 	forceSetupWizard?: boolean;
+@@ -1234,6 +1236,10 @@ export async function runRootCommand(
+ 		process.exit(1);
+ 	}
+ 	const mode = parsedArgs.mode || "text";
++	if (mode === "studio-host" && parsedArgs.print) {
++		process.stderr.write(`${chalk.red("Error: --print is not supported in studio-host mode")}\n`);
++		process.exit(1);
++	}
+ 	// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
+ 	const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
+ 
+@@ -1268,10 +1274,11 @@ export async function runRootCommand(
+ 	// session-critical database connection picks the right busy timeout.
+ 	// See getDbBusyTimeoutMs().
+ 	const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
++	const isStudioHost = mode === "studio-host";
+ 	// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
+-	const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
++	const pipedInput = isProtocolMode || isStudioHost ? undefined : await logger.time("readPipedInput", readPipedInput);
+ 	const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
+-	const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
++	const isInteractive = !parsedArgs.print && !autoPrint && (parsedArgs.mode === undefined || isStudioHost);
+ 	// Only the interactive host renders a focusable Agent Hub / subagent session
+ 	// tree; declare it so headless subagent optimizations (e.g. skipping replan
+ 	// title refresh) can tell a focusable process from a print/RPC/eval one.
+@@ -1755,25 +1762,35 @@ export async function runRootCommand(
+ 
+ 			stopStartupWatchdog();
+ 			logger.endTiming();
+-			await runInteractiveMode(
+-				session,
+-				VERSION,
+-				startupChangelog,
+-				notifs,
+-				versionCheckPromise,
+-				initialArgs.messages,
+-				setToolUIContext,
+-				lspServers,
+-				mcpManager,
+-				Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
+-				deps.forceSetupWizard === true,
+-				showStartupSplash,
+-				eventBus,
+-				initialMessage,
+-				initialImages,
+-				parsedArgs.join,
+-			);
+-		} else {
++			const runTui = () =>
++				runInteractiveMode(
++					session,
++					VERSION,
++					startupChangelog,
++					notifs,
++					versionCheckPromise,
++					initialArgs.messages,
++					setToolUIContext,
++					lspServers,
++					mcpManager,
++					Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
++					deps.forceSetupWizard === true,
++					showStartupSplash,
++					eventBus,
++					initialMessage,
++					initialImages,
++					parsedArgs.join,
++				);
++			if (isStudioHost) {
++				await (deps.runStudioHostMode ?? defaultRunStudioHostMode)(
++					session,
++					{ endpoint: parsedArgs.bridgeEndpoint, tokenFile: parsedArgs.bridgeTokenFile },
++					runTui,
++				);
++			} else {
++				await runTui();
++			}
++		} else if (mode === "text" || mode === "json") {
+ 			// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
+ 			stopStartupWatchdog();
+ 			const runPrintMode: RunPrintMode = (await import("./modes/print-mode")).runPrintMode;
+@@ -1790,6 +1807,8 @@ export async function runRootCommand(
+ 			await session.dispose();
+ 			stopThemeWatcher();
+ 			await postmortem.quit(0);
++		} else {
++			throw new Error(`Unsupported non-interactive mode: ${mode}`);
+ 		}
+ 	}
+ }
+diff --git a/packages/coding-agent/src/studio/studio-host-mode.ts b/packages/coding-agent/src/studio/studio-host-mode.ts
+new file mode 100644
+index 0000000..2fd4e6d
+--- /dev/null
++++ b/packages/coding-agent/src/studio/studio-host-mode.ts
+@@ -0,0 +1,75 @@
++import * as crypto from "node:crypto";
++import { postmortem } from "@oh-my-pi/pi-utils";
++import type { AgentSession } from "../session/agent-session";
++import type { SessionManager } from "../session/session-manager";
++
++export interface StudioBridgeConfiguration {
++	endpoint?: string;
++	tokenFile?: string;
++}
++
++export interface StudioHostRuntime {
++	readonly runtimeId: string;
++	readonly sessionId: string;
++	readonly session: AgentSession;
++	readonly sessionManager: SessionManager;
++	readonly bridgeConfig: Readonly<StudioBridgeConfiguration>;
++}
++
++export interface StudioBridgeLifecycle {
++	start(runtime: StudioHostRuntime): Promise<void>;
++	stop(): Promise<void>;
++}
++
++export type StudioHostTuiRunner = (runtime: StudioHostRuntime) => Promise<void>;
++
++export type RunStudioHostMode = (
++	session: AgentSession,
++	bridgeConfig: StudioBridgeConfiguration,
++	runTui: StudioHostTuiRunner,
++) => Promise<void>;
++
++export interface StudioHostModeDependencies {
++	createBridge?: () => StudioBridgeLifecycle;
++	createRuntimeId?: () => string;
++}
++
++function createDeferredBridge(): StudioBridgeLifecycle {
++	return {
++		async start() {},
++		async stop() {},
++	};
++}
++
++export function createStudioHostRuntime(
++	session: AgentSession,
++	bridgeConfig: StudioBridgeConfiguration,
++	createRuntimeId: () => string = crypto.randomUUID,
++): StudioHostRuntime {
++	return Object.freeze({
++		runtimeId: createRuntimeId(),
++		sessionId: session.sessionManager.getSessionId(),
++		session,
++		sessionManager: session.sessionManager,
++		bridgeConfig: Object.freeze({ ...bridgeConfig }),
++	});
++}
++
++export async function runStudioHostMode(
++	session: AgentSession,
++	bridgeConfig: StudioBridgeConfiguration,
++	runTui: StudioHostTuiRunner,
++	dependencies: StudioHostModeDependencies = {},
++): Promise<void> {
++	const bridge = dependencies.createBridge?.() ?? createDeferredBridge();
++	const runtime = createStudioHostRuntime(session, bridgeConfig, dependencies.createRuntimeId);
++	const unregisterCleanup = postmortem.register(`studio-host-bridge:${runtime.runtimeId}`, () => bridge.stop());
++
++	try {
++		await bridge.start(runtime);
++		await runTui(runtime);
++	} finally {
++		unregisterCleanup();
++		await bridge.stop();
++	}
++}
+diff --git a/packages/coding-agent/test/main-host-classification.test.ts b/packages/coding-agent/test/main-host-classification.test.ts
+index d982d85..9124673 100644
+--- a/packages/coding-agent/test/main-host-classification.test.ts
++++ b/packages/coding-agent/test/main-host-classification.test.ts
+@@ -25,3 +25,26 @@ it("classifies an interactive host before opening auth storage", async () => {
+ 
+ 	expect(observedTimeout).toBe(5000);
+ });
++
++it("classifies studio-host as an interactive host before opening auth storage", async () => {
++	const previous = setInteractiveHost(false);
++	const stop = new Error("stop after studio-host classification");
++	let observedTimeout: number | undefined;
++	const parsed = parseArgs(["--mode", "studio-host"]);
++	parsed.noExtensions = true;
++
++	try {
++		await expect(
++			runRootCommand(parsed, ["--mode", "studio-host"], {
++				discoverAuthStorage: async () => {
++					observedTimeout = getDbBusyTimeoutMs();
++					throw stop;
++				},
++			}),
++		).rejects.toBe(stop);
++	} finally {
++		setInteractiveHost(previous);
++	}
++
++	expect(observedTimeout).toBe(5000);
++});
+diff --git a/packages/coding-agent/test/studio-host-args.test.ts b/packages/coding-agent/test/studio-host-args.test.ts
+new file mode 100644
+index 0000000..f7c0cf0
+--- /dev/null
++++ b/packages/coding-agent/test/studio-host-args.test.ts
+@@ -0,0 +1,24 @@
++import { describe, expect, test } from "bun:test";
++import { parseArgs } from "@oh-my-pi/pi-coding-agent/cli/args";
++
++describe("studio-host launch arguments", () => {
++	test("parses the studio-host mode and Bridge configuration", () => {
++		const parsed = parseArgs([
++			"--mode",
++			"studio-host",
++			"--bridge-endpoint",
++			"omp-studio-test",
++			"--bridge-token-file",
++			"C:\\temp\\omp-studio.token",
++		]);
++
++		expect(parsed.mode).toBe("studio-host");
++		expect(parsed.bridgeEndpoint).toBe("omp-studio-test");
++		expect(parsed.bridgeTokenFile).toBe("C:\\temp\\omp-studio.token");
++		expect(parsed.unrecognizedFlags).toEqual([]);
++	});
++
++	test("supports the equals form for studio-host mode", () => {
++		expect(parseArgs(["--mode=studio-host"]).mode).toBe("studio-host");
++	});
++});
+diff --git a/packages/coding-agent/test/studio-host-mode.test.ts b/packages/coding-agent/test/studio-host-mode.test.ts
+new file mode 100644
+index 0000000..d795f18
+--- /dev/null
++++ b/packages/coding-agent/test/studio-host-mode.test.ts
+@@ -0,0 +1,87 @@
++import { describe, expect, test } from "bun:test";
++import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
++import {
++	createStudioHostRuntime,
++	runStudioHostMode,
++	type StudioBridgeLifecycle,
++	type StudioHostRuntime,
++} from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
++
++function fakeSession(sessionId = "session-test"): AgentSession {
++	return {
++		sessionManager: { getSessionId: () => sessionId },
++	} as unknown as AgentSession;
++}
++
++describe("studio-host runtime", () => {
++	test("binds the TUI and Bridge lifecycle to one session identity", async () => {
++		const session = fakeSession();
++		let bridgeRuntime: StudioHostRuntime | undefined;
++		let tuiRuntime: StudioHostRuntime | undefined;
++		let stopCalls = 0;
++		const bridge: StudioBridgeLifecycle = {
++			async start(runtime) {
++				bridgeRuntime = runtime;
++			},
++			async stop() {
++				stopCalls++;
++			},
++		};
++
++		await runStudioHostMode(
++			session,
++			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token" },
++			async runtime => {
++				tuiRuntime = runtime;
++			},
++			{ createBridge: () => bridge, createRuntimeId: () => "runtime-test" },
++		);
++
++		expect(bridgeRuntime).toBe(tuiRuntime);
++		expect(tuiRuntime?.runtimeId).toBe("runtime-test");
++		expect(tuiRuntime?.sessionId).toBe("session-test");
++		expect(tuiRuntime?.session).toBe(session);
++		expect(tuiRuntime?.sessionManager).toBe(session.sessionManager);
++		expect(tuiRuntime?.bridgeConfig).toEqual({
++			endpoint: "omp-studio-test",
++			tokenFile: "C:\\temp\\omp-studio.token",
++		});
++		expect(stopCalls).toBe(1);
++	});
++
++	test("stops the Bridge lifecycle when TUI startup fails", async () => {
++		let stopCalls = 0;
++		const bridge: StudioBridgeLifecycle = {
++			async start() {},
++			async stop() {
++				stopCalls++;
++			},
++		};
++
++		await expect(
++			runStudioHostMode(
++				fakeSession(),
++				{},
++				async () => {
++					throw new Error("TUI failed");
++				},
++				{ createBridge: () => bridge },
++			),
++		).rejects.toThrow("TUI failed");
++		expect(stopCalls).toBe(1);
++	});
++
++	test("creates one immutable runtime identity from the supplied session", () => {
++		const session = fakeSession("session-one");
++		const runtime = createStudioHostRuntime(session, {}, () => "runtime-one");
++
++		expect(runtime).toEqual(
++			expect.objectContaining({
++				runtimeId: "runtime-one",
++				sessionId: "session-one",
++				session,
++				sessionManager: session.sessionManager,
++			}),
++		);
++	});
++});

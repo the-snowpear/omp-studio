@@ -1,0 +1,698 @@
+diff --git a/packages/coding-agent/CHANGELOG.md b/packages/coding-agent/CHANGELOG.md
+index 3498a31..573aff5 100644
+--- a/packages/coding-agent/CHANGELOG.md
++++ b/packages/coding-agent/CHANGELOG.md
+@@ -4,6 +4,7 @@
+ 
+ ### Added
+ 
++- Added Runtime-owned Studio state snapshots with epoch fencing and reconnect recovery.
+ - Added the authenticated local Studio Bridge transport and versioned hello negotiation for `studio-host` mode.
+ - Added the `studio-host` launch mode and Bridge lifecycle seam for a shared TUI and Studio runtime session.
+ - Added an optional, backward-readable creation marker for Studio-owned sessions while preserving legacy CLI sessions.
+diff --git a/packages/coding-agent/src/cli/args.ts b/packages/coding-agent/src/cli/args.ts
+index daa24ca..4da9607 100644
+--- a/packages/coding-agent/src/cli/args.ts
++++ b/packages/coding-agent/src/cli/args.ts
+@@ -57,6 +57,7 @@ export interface Args {
+ 	mode?: Mode;
+ 	bridgeEndpoint?: string;
+ 	bridgeTokenFile?: string;
++	bridgeRuntimeEpoch?: number;
+ 	noSession?: boolean;
+ 	sessionDir?: string;
+ 	providerSessionId?: string;
+diff --git a/packages/coding-agent/src/cli/flag-tables.ts b/packages/coding-agent/src/cli/flag-tables.ts
+index f9c2a59..a3546a5 100644
+--- a/packages/coding-agent/src/cli/flag-tables.ts
++++ b/packages/coding-agent/src/cli/flag-tables.ts
+@@ -105,6 +105,14 @@ function parseMaxTimeSeconds(value: string): number {
+ 	);
+ }
+ 
++function parseBridgeRuntimeEpoch(value: string): number {
++	const epoch = Number(value);
++	if (Number.isSafeInteger(epoch) && epoch > 0) return epoch;
++	throw new CliUsageError(
++		`Invalid --bridge-runtime-epoch value: ${JSON.stringify(value)}. Expected a positive safe integer.`,
++	);
++}
++
+ /**
+  * Setters for flags with string values. Most built-ins consume the next argv
+  * token even when it starts with `-`; flags listed in
+@@ -139,6 +147,9 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+ 	"--bridge-token-file": (result, value) => {
+ 		result.bridgeTokenFile = value;
+ 	},
++	"--bridge-runtime-epoch": (result, value) => {
++		result.bridgeRuntimeEpoch = parseBridgeRuntimeEpoch(value);
++	},
+ 	"--fork": (result, value) => {
+ 		result.fork = value;
+ 	},
+diff --git a/packages/coding-agent/src/commands/launch-help.ts b/packages/coding-agent/src/commands/launch-help.ts
+index 9449cfd..83a140e 100644
+--- a/packages/coding-agent/src/commands/launch-help.ts
++++ b/packages/coding-agent/src/commands/launch-help.ts
+@@ -49,6 +49,9 @@ export const launchHelp = {
+ 		"bridge-token-file": Flags.string({
+ 			description: "Studio Bridge authentication token file",
+ 		}),
++		"bridge-runtime-epoch": Flags.string({
++			description: "Positive Thread epoch assigned to this Studio Runtime process",
++		}),
+ 		config: Flags.string({
+ 			description: "Load an extra config.yml-style overlay for this run (repeatable)",
+ 			multiple: true,
+diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
+index 7c3b0b2..511105a 100644
+--- a/packages/coding-agent/src/main.ts
++++ b/packages/coding-agent/src/main.ts
+@@ -1789,7 +1789,11 @@ export async function runRootCommand(
+ 			if (isStudioHost) {
+ 				await (deps.runStudioHostMode ?? defaultRunStudioHostMode)(
+ 					session,
+-					{ endpoint: parsedArgs.bridgeEndpoint, tokenFile: parsedArgs.bridgeTokenFile },
++					{
++						endpoint: parsedArgs.bridgeEndpoint,
++						tokenFile: parsedArgs.bridgeTokenFile,
++						runtimeEpoch: parsedArgs.bridgeRuntimeEpoch,
++					},
+ 					runTui,
+ 				);
+ 			} else {
+diff --git a/packages/coding-agent/src/studio/bridge-protocol.ts b/packages/coding-agent/src/studio/bridge-protocol.ts
+index 1d85665..388fee5 100644
+--- a/packages/coding-agent/src/studio/bridge-protocol.ts
++++ b/packages/coding-agent/src/studio/bridge-protocol.ts
+@@ -39,6 +39,47 @@ export interface StudioHelloResponse {
+ 	challengeProof: string;
+ }
+ 
++export interface StudioSnapshotRequest {
++	type: "studio.request";
++	requestId: string;
++	runtimeEpoch: number;
++	operation: { kind: "runtime.snapshot" };
++}
++
++export interface StudioOperatorStateSnapshot {
++	runtimeId: string;
++	runtimeEpoch: number;
++	stateVersion: number;
++	sessionId: string;
++	isStreaming: boolean;
++	isCompacting: boolean;
++	activeMode: "normal" | "plan" | "goal" | "vibe";
++	plan?: { status: "off" | "active" | "paused" | "review"; planReference?: string };
++	goal?: {
++		status: "off" | "active" | "paused" | "complete";
++		objective?: string;
++		tokenBudget?: number;
++		tokensUsed?: number;
++	};
++	vibe?: { enabled: boolean; workerAgentIds: string[] };
++	pendingMessages: number;
++	activeCommandIds: string[];
++	agentsRevision: number;
++	jobsRevision: number;
++	agents: unknown[];
++	jobs: unknown[];
++}
++
++export interface StudioSnapshotResponse {
++	type: "studio.snapshot";
++	requestId: string;
++	snapshot: StudioOperatorStateSnapshot;
++	commandManifestHash: string;
++	capabilityHash: string;
++	lastEventSeq: number;
++	terminalReceipts: unknown[];
++}
++
+ export interface DecodedStudioFrame {
+ 	header: {
+ 		protocol: typeof STUDIO_PROTOCOL_NAME;
+@@ -90,6 +131,23 @@ export function parseStudioHelloRequest(value: unknown): StudioHelloRequest {
+ 	return input as unknown as StudioHelloRequest;
+ }
+ 
++export function parseStudioSnapshotRequest(value: unknown): StudioSnapshotRequest {
++	const input = record(value);
++	exactKeys(input, ["type", "requestId", "runtimeEpoch", "operation"]);
++	const operation = record(input.operation);
++	exactKeys(operation, ["kind"]);
++	if (
++		input.type !== "studio.request" ||
++		!nonEmptyString(input.requestId) ||
++		!Number.isSafeInteger(input.runtimeEpoch) ||
++		(input.runtimeEpoch as number) <= 0 ||
++		operation.kind !== "runtime.snapshot"
++	) {
++		throw new StudioFrameError("Invalid Studio snapshot request");
++	}
++	return input as unknown as StudioSnapshotRequest;
++}
++
+ export function createChallengeProof(token: string, challenge: string, runtimeInstanceId: string): string {
+ 	return crypto
+ 		.createHmac("sha256", token)
+diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
+index e2c98dd..b4b512f 100644
+--- a/packages/coding-agent/src/studio/bridge-server.ts
++++ b/packages/coding-agent/src/studio/bridge-server.ts
+@@ -6,11 +6,13 @@ import {
+ 	createChallengeProof,
+ 	encodeStudioFrame,
+ 	parseStudioHelloRequest,
++	parseStudioSnapshotRequest,
+ 	STUDIO_PROTOCOL_VERSION,
+ 	StudioFrameDecoder,
+ 	type StudioHelloResponse,
+ 	stableEmptyManifestHash,
+ } from "./bridge-protocol";
++import { StudioStateProjector } from "./state-projector";
+ import type { StudioBridgeLifecycle, StudioHostRuntime } from "./studio-host-mode";
+ 
+ const UPSTREAM_COMMIT = "45e12e5bb758198a920c6070e7e64cb33b21beac";
+@@ -42,7 +44,8 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 	#authenticatedSocket: net.Socket | undefined;
+ 	#token: string | undefined;
+ 	#runtime: StudioHostRuntime | undefined;
+-	#firstAuthentication: PromiseWithResolvers<void> | undefined;
++	#projector: StudioStateProjector | undefined;
++	#firstSnapshot: PromiseWithResolvers<void> | undefined;
+ 	#stopped = false;
+ 
+ 	constructor(endpoint: string, tokenFile: string, options: StudioBridgeServerOptions = {}) {
+@@ -57,8 +60,9 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 	async start(runtime: StudioHostRuntime): Promise<void> {
+ 		if (this.#server !== undefined) throw new Error("Studio Bridge is already started");
+ 		this.#runtime = runtime;
++		this.#projector = new StudioStateProjector(runtime);
+ 		this.#token = await consumeBridgeToken(this.#tokenFile);
+-		this.#firstAuthentication = Promise.withResolvers<void>();
++		this.#firstSnapshot = Promise.withResolvers<void>();
+ 		const server = net.createServer(socket => this.#accept(socket));
+ 		this.#server = server;
+ 		const listening = Promise.withResolvers<void>();
+@@ -72,14 +76,14 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 		try {
+ 			await listening.promise;
+ 			if (process.platform !== "win32") await fs.chmod(this.#endpoint, 0o600);
+-			const authenticationTimeout = setTimeout(
+-				() => this.#firstAuthentication?.reject(new Error("Studio Bridge authentication timed out")),
++			const snapshotTimeout = setTimeout(
++				() => this.#firstSnapshot?.reject(new Error("Studio Bridge initial snapshot timed out")),
+ 				this.#handshakeTimeoutMs,
+ 			);
+ 			try {
+-				await this.#firstAuthentication.promise;
++				await this.#firstSnapshot.promise;
+ 			} finally {
+-				clearTimeout(authenticationTimeout);
++				clearTimeout(snapshotTimeout);
+ 			}
+ 		} catch (error) {
+ 			await this.stop();
+@@ -90,7 +94,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 	async stop(): Promise<void> {
+ 		if (this.#stopped) return;
+ 		this.#stopped = true;
+-		this.#firstAuthentication?.reject(new Error("Studio Bridge stopped before authentication"));
++		this.#firstSnapshot?.reject(new Error("Studio Bridge stopped before initial snapshot"));
+ 		for (const socket of this.#sockets) socket.destroy();
+ 		this.#sockets.clear();
+ 		this.#authenticatedSocket = undefined;
+@@ -102,6 +106,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 		if (process.platform !== "win32") await fs.rm(this.#endpoint, { force: true });
+ 		this.#token = undefined;
+ 		this.#runtime = undefined;
++		this.#projector = undefined;
+ 	}
+ 
+ 	#accept(socket: net.Socket): void {
+@@ -121,7 +126,31 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 		socket.once("error", () => socket.destroy());
+ 		socket.on("data", chunk => {
+ 			if (authenticated) {
+-				socket.destroy();
++				try {
++					const frames = decoder.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
++					for (const frame of frames) {
++						const runtime = this.#runtime;
++						const projector = this.#projector;
++						if (
++							runtime === undefined ||
++							projector === undefined ||
++							frame.header.runtimeEpoch !== runtime.runtimeEpoch
++						)
++							throw new Error("Stale Runtime epoch");
++						const request = parseStudioSnapshotRequest(frame.body);
++						if (request.runtimeEpoch !== runtime.runtimeEpoch) throw new Error("Stale Runtime epoch");
++						socket.write(
++							encodeStudioFrame(
++								`snapshot-result:${request.requestId}`,
++								runtime.runtimeEpoch,
++								projector.response(request.requestId),
++							),
++							() => this.#firstSnapshot?.resolve(),
++						);
++					}
++				} catch {
++					socket.destroy();
++				}
+ 				return;
+ 			}
+ 			try {
+@@ -140,11 +169,11 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					type: "studio.hello.result",
+ 					requestId: hello.requestId,
+ 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
+-					runtimeVersion: `${VERSION}-studio.3`,
++					runtimeVersion: `${VERSION}-studio.4`,
+ 					upstreamVersion: VERSION,
+ 					upstreamCommit: UPSTREAM_COMMIT,
+ 					runtimeInstanceId: runtime.runtimeId,
+-					runtimeEpoch: 0,
++					runtimeEpoch: runtime.runtimeEpoch,
+ 					capabilityManifest: {
+ 						profile: "limited",
+ 						generatedAt: this.#now().toISOString(),
+@@ -155,11 +184,10 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					stateVersion: 0,
+ 					challengeProof: createChallengeProof(token, hello.challenge, runtime.runtimeId),
+ 				};
+-				socket.write(encodeStudioFrame(`hello-result:${hello.requestId}`, 0, response));
++				socket.write(encodeStudioFrame(`hello-result:${hello.requestId}`, runtime.runtimeEpoch, response));
+ 				authenticated = true;
+ 				clearTimeout(timeout);
+ 				this.#authenticatedSocket = socket;
+-				this.#firstAuthentication?.resolve();
+ 			} catch {
+ 				socket.destroy();
+ 			}
+diff --git a/packages/coding-agent/src/studio/state-projector.ts b/packages/coding-agent/src/studio/state-projector.ts
+new file mode 100644
+index 0000000..1e01005
+--- /dev/null
++++ b/packages/coding-agent/src/studio/state-projector.ts
+@@ -0,0 +1,85 @@
++import {
++	type StudioOperatorStateSnapshot,
++	type StudioSnapshotResponse,
++	stableEmptyManifestHash,
++} from "./bridge-protocol";
++import type { StudioHostRuntime } from "./studio-host-mode";
++
++function goalStatus(status: string): "off" | "active" | "paused" | "complete" {
++	switch (status) {
++		case "active":
++			return "active";
++		case "paused":
++		case "budget-limited":
++			return "paused";
++		case "complete":
++			return "complete";
++		default:
++			return "off";
++	}
++}
++
++function cloneSnapshot(snapshot: StudioOperatorStateSnapshot): StudioOperatorStateSnapshot {
++	return structuredClone(snapshot);
++}
++
++export class StudioStateProjector {
++	readonly #runtime: StudioHostRuntime;
++
++	constructor(runtime: StudioHostRuntime) {
++		this.#runtime = runtime;
++	}
++
++	get stateVersion(): number {
++		return 0;
++	}
++
++	get lastEventSeq(): number {
++		return 0;
++	}
++
++	snapshot(): StudioOperatorStateSnapshot {
++		const plan = this.#runtime.session.getPlanModeState();
++		const goal = this.#runtime.session.getGoalModeState();
++		const vibe = this.#runtime.session.getVibeModeState();
++		const activeMode = goal?.enabled ? "goal" : plan?.enabled ? "plan" : vibe?.enabled ? "vibe" : "normal";
++		const snapshot: StudioOperatorStateSnapshot = {
++			runtimeId: this.#runtime.runtimeId,
++			runtimeEpoch: this.#runtime.runtimeEpoch,
++			stateVersion: this.stateVersion,
++			sessionId: this.#runtime.sessionId,
++			isStreaming: this.#runtime.session.isStreaming,
++			isCompacting: this.#runtime.session.isCompacting,
++			activeMode,
++			pendingMessages: 0,
++			activeCommandIds: [],
++			agentsRevision: 0,
++			jobsRevision: 0,
++			agents: [],
++			jobs: [],
++		};
++		if (plan !== undefined) snapshot.plan = { status: plan.enabled ? "active" : "off" };
++		if (goal !== undefined) {
++			snapshot.goal = {
++				status: goalStatus(goal.goal.status),
++				objective: goal.goal.objective,
++				tokenBudget: goal.goal.tokenBudget,
++				tokensUsed: goal.goal.tokensUsed,
++			};
++		}
++		if (vibe !== undefined) snapshot.vibe = { enabled: vibe.enabled, workerAgentIds: [] };
++		return cloneSnapshot(snapshot);
++	}
++
++	response(requestId: string): StudioSnapshotResponse {
++		return {
++			type: "studio.snapshot",
++			requestId,
++			snapshot: this.snapshot(),
++			commandManifestHash: stableEmptyManifestHash("commands"),
++			capabilityHash: stableEmptyManifestHash("capabilities"),
++			lastEventSeq: this.lastEventSeq,
++			terminalReceipts: [],
++		};
++	}
++}
+diff --git a/packages/coding-agent/src/studio/studio-host-mode.ts b/packages/coding-agent/src/studio/studio-host-mode.ts
+index c9e5646..0738b07 100644
+--- a/packages/coding-agent/src/studio/studio-host-mode.ts
++++ b/packages/coding-agent/src/studio/studio-host-mode.ts
+@@ -7,10 +7,12 @@ import { StudioBridgeServer } from "./bridge-server";
+ export interface StudioBridgeConfiguration {
+ 	endpoint?: string;
+ 	tokenFile?: string;
++	runtimeEpoch?: number;
+ }
+ 
+ export interface StudioHostRuntime {
+ 	readonly runtimeId: string;
++	readonly runtimeEpoch: number;
+ 	readonly sessionId: string;
+ 	readonly session: AgentSession;
+ 	readonly sessionManager: SessionManager;
+@@ -36,8 +38,13 @@ export interface StudioHostModeDependencies {
+ }
+ 
+ function createConfiguredBridge(bridgeConfig: StudioBridgeConfiguration): StudioBridgeLifecycle {
+-	if (bridgeConfig.endpoint === undefined || bridgeConfig.tokenFile === undefined) {
+-		throw new Error("studio-host mode requires --bridge-endpoint and --bridge-token-file");
++	if (
++		bridgeConfig.endpoint === undefined ||
++		bridgeConfig.tokenFile === undefined ||
++		!Number.isSafeInteger(bridgeConfig.runtimeEpoch) ||
++		(bridgeConfig.runtimeEpoch as number) <= 0
++	) {
++		throw new Error("studio-host mode requires --bridge-endpoint, --bridge-token-file, and --bridge-runtime-epoch");
+ 	}
+ 	return new StudioBridgeServer(bridgeConfig.endpoint, bridgeConfig.tokenFile);
+ }
+@@ -47,8 +54,12 @@ export function createStudioHostRuntime(
+ 	bridgeConfig: StudioBridgeConfiguration,
+ 	createRuntimeId: () => string = crypto.randomUUID,
+ ): StudioHostRuntime {
++	if (!Number.isSafeInteger(bridgeConfig.runtimeEpoch) || (bridgeConfig.runtimeEpoch as number) <= 0) {
++		throw new Error("Studio Host Runtime epoch must be a positive safe integer");
++	}
+ 	return Object.freeze({
+ 		runtimeId: createRuntimeId(),
++		runtimeEpoch: bridgeConfig.runtimeEpoch as number,
+ 		sessionId: session.sessionManager.getSessionId(),
+ 		session,
+ 		sessionManager: session.sessionManager,
+diff --git a/packages/coding-agent/test/studio-bridge-server.test.ts b/packages/coding-agent/test/studio-bridge-server.test.ts
+index 11054cb..5b083d1 100644
+--- a/packages/coding-agent/test/studio-bridge-server.test.ts
++++ b/packages/coding-agent/test/studio-bridge-server.test.ts
+@@ -6,9 +6,11 @@ import * as os from "node:os";
+ import * as path from "node:path";
+ import {
+ 	createChallengeProof,
++	type DecodedStudioFrame,
+ 	encodeStudioFrame,
+ 	StudioFrameDecoder,
+ 	type StudioHelloResponse,
++	type StudioSnapshotResponse,
+ } from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
+ import { StudioBridgeServer } from "@oh-my-pi/pi-coding-agent/studio/bridge-server";
+ import type { StudioHostRuntime } from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
+@@ -21,8 +23,19 @@ afterEach(async () => {
+ 	for (const server of servers.splice(0)) await server.stop();
+ });
+ 
+-function fakeRuntime(runtimeId = "runtime-instance-test"): StudioHostRuntime {
+-	return { runtimeId } as unknown as StudioHostRuntime;
++function fakeRuntime(runtimeId = "runtime-instance-test", runtimeEpoch = 7): StudioHostRuntime {
++	return {
++		runtimeId,
++		runtimeEpoch,
++		sessionId: "session-test",
++		session: {
++			isStreaming: false,
++			isCompacting: false,
++			getPlanModeState: () => undefined,
++			getGoalModeState: () => undefined,
++			getVibeModeState: () => undefined,
++		},
++	} as unknown as StudioHostRuntime;
+ }
+ 
+ async function bridgeFixture(): Promise<{ endpoint: string; tokenFile: string; token: string }> {
+@@ -79,13 +92,13 @@ async function connect(endpoint: string): Promise<net.Socket> {
+ 	throw new Error("Studio Bridge endpoint did not start listening");
+ }
+ 
+-async function receiveHelloResponse(socket: net.Socket): Promise<StudioHelloResponse> {
++async function receiveFrame(socket: net.Socket): Promise<DecodedStudioFrame> {
+ 	const decoder = new StudioFrameDecoder();
+-	return new Promise<StudioHelloResponse>((resolve, reject) => {
++	return new Promise<DecodedStudioFrame>((resolve, reject) => {
+ 		socket.on("data", chunk => {
+ 			try {
+ 				const frame = decoder.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk)[0];
+-				if (frame !== undefined) resolve(frame.body as StudioHelloResponse);
++				if (frame !== undefined) resolve(frame);
+ 			} catch (error) {
+ 				reject(error);
+ 			}
+@@ -94,6 +107,23 @@ async function receiveHelloResponse(socket: net.Socket): Promise<StudioHelloResp
+ 	});
+ }
+ 
++async function exchangeSnapshot(
++	socket: net.Socket,
++	requestId: string,
++	runtimeEpoch = 7,
++): Promise<StudioSnapshotResponse> {
++	const response = receiveFrame(socket);
++	socket.write(
++		encodeStudioFrame(`snapshot-request:${requestId}`, runtimeEpoch, {
++			type: "studio.request",
++			requestId,
++			runtimeEpoch,
++			operation: { kind: "runtime.snapshot" },
++		}),
++	);
++	return (await response).body as StudioSnapshotResponse;
++}
++
+ function sendHello(socket: net.Socket, challenge: string, versions = [1]): void {
+ 	socket.write(
+ 		encodeStudioFrame("hello-request", 0, {
+@@ -116,16 +146,43 @@ describe("WP-011 Studio Bridge runtime server", () => {
+ 		const started = server.start(fakeRuntime());
+ 		await waitForTokenConsumption(fixture.tokenFile);
+ 		const socket = await connect(fixture.endpoint);
+-		const responsePromise = receiveHelloResponse(socket);
++		const responsePromise = receiveFrame(socket);
+ 		sendHello(socket, "challenge-one");
+-		const response = await responsePromise;
++		const responseFrame = await responsePromise;
++		const response = responseFrame.body as StudioHelloResponse;
++		const snapshot = await exchangeSnapshot(socket, "snapshot-one");
+ 		await started;
+ 		expect(response.runtimeInstanceId).toBe("runtime-instance-test");
++		expect(response.runtimeEpoch).toBe(7);
++		expect(responseFrame.header.runtimeEpoch).toBe(response.runtimeEpoch);
+ 		expect(response.capabilityManifest.profile).toBe("limited");
+ 		expect(response.capabilityManifest.capabilities).toEqual([]);
+ 		expect(response.challengeProof).toBe(
+ 			createChallengeProof(fixture.token, "challenge-one", "runtime-instance-test"),
+ 		);
++		expect(snapshot).toEqual({
++			type: "studio.snapshot",
++			requestId: "snapshot-one",
++			snapshot: {
++				runtimeId: "runtime-instance-test",
++				runtimeEpoch: 7,
++				stateVersion: 0,
++				sessionId: "session-test",
++				isStreaming: false,
++				isCompacting: false,
++				activeMode: "normal",
++				pendingMessages: 0,
++				activeCommandIds: [],
++				agentsRevision: 0,
++				jobsRevision: 0,
++				agents: [],
++				jobs: [],
++			},
++			commandManifestHash: expect.stringMatching(/^sha256:/),
++			capabilityHash: expect.stringMatching(/^sha256:/),
++			lastEventSeq: 0,
++			terminalReceipts: [],
++		});
+ 		expect(await fileExists(fixture.tokenFile)).toBe(false);
+ 	});
+ 
+@@ -166,23 +223,51 @@ describe("WP-011 Studio Bridge runtime server", () => {
+ 		const started = server.start(fakeRuntime());
+ 		await waitForTokenConsumption(fixture.tokenFile);
+ 		const first = await connect(fixture.endpoint);
+-		const firstResponse = receiveHelloResponse(first);
++		const firstResponse = receiveFrame(first);
+ 		sendHello(first, "challenge-first");
+-		expect((await firstResponse).challengeProof).toBe(
++		expect(((await firstResponse).body as StudioHelloResponse).challengeProof).toBe(
+ 			createChallengeProof(fixture.token, "challenge-first", "runtime-instance-test"),
+ 		);
++		const firstSnapshot = await exchangeSnapshot(first, "snapshot-first");
+ 		await started;
+ 		const firstClosed = new Promise<void>(resolve => first.once("close", () => resolve()));
+ 		first.destroy();
+ 		await firstClosed;
+ 
+ 		const second = await connect(fixture.endpoint);
+-		const secondResponse = receiveHelloResponse(second);
++		const secondResponse = receiveFrame(second);
+ 		sendHello(second, "challenge-second");
+-		const response = await secondResponse;
++		const response = (await secondResponse).body as StudioHelloResponse;
++		const secondSnapshot = await exchangeSnapshot(second, "snapshot-second");
+ 		expect(response.runtimeInstanceId).toBe("runtime-instance-test");
++		expect(response.runtimeEpoch).toBe(7);
+ 		expect(response.challengeProof).toBe(
+ 			createChallengeProof(fixture.token, "challenge-second", "runtime-instance-test"),
+ 		);
++		expect(secondSnapshot.snapshot).toEqual(firstSnapshot.snapshot);
++	});
++
++	test("rejects a snapshot request fenced to a stale Runtime epoch", async () => {
++		const fixture = await bridgeFixture();
++		const server = new StudioBridgeServer(fixture.endpoint, fixture.tokenFile);
++		servers.push(server);
++		const started = server.start(fakeRuntime()).catch(error => error as Error);
++		await waitForTokenConsumption(fixture.tokenFile);
++		const socket = await connect(fixture.endpoint);
++		const hello = receiveFrame(socket);
++		sendHello(socket, "challenge-stale");
++		await hello;
++		const closed = new Promise<void>(resolve => socket.once("close", () => resolve()));
++		socket.write(
++			encodeStudioFrame("snapshot-request:stale", 6, {
++				type: "studio.request",
++				requestId: "snapshot-stale",
++				runtimeEpoch: 6,
++				operation: { kind: "runtime.snapshot" },
++			}),
++		);
++		await closed;
++		await server.stop();
++		expect(await started).toBeInstanceOf(Error);
+ 	});
+ });
+diff --git a/packages/coding-agent/test/studio-host-args.test.ts b/packages/coding-agent/test/studio-host-args.test.ts
+index f7c0cf0..44ff87f 100644
+--- a/packages/coding-agent/test/studio-host-args.test.ts
++++ b/packages/coding-agent/test/studio-host-args.test.ts
+@@ -10,15 +10,22 @@ describe("studio-host launch arguments", () => {
+ 			"omp-studio-test",
+ 			"--bridge-token-file",
+ 			"C:\\temp\\omp-studio.token",
++			"--bridge-runtime-epoch",
++			"7",
+ 		]);
+ 
+ 		expect(parsed.mode).toBe("studio-host");
+ 		expect(parsed.bridgeEndpoint).toBe("omp-studio-test");
+ 		expect(parsed.bridgeTokenFile).toBe("C:\\temp\\omp-studio.token");
++		expect(parsed.bridgeRuntimeEpoch).toBe(7);
+ 		expect(parsed.unrecognizedFlags).toEqual([]);
+ 	});
+ 
+ 	test("supports the equals form for studio-host mode", () => {
+ 		expect(parseArgs(["--mode=studio-host"]).mode).toBe("studio-host");
+ 	});
++
++	test("rejects an invalid Runtime epoch", () => {
++		expect(() => parseArgs(["--bridge-runtime-epoch", "0"])).toThrow("positive safe integer");
++	});
+ });
+diff --git a/packages/coding-agent/test/studio-host-mode.test.ts b/packages/coding-agent/test/studio-host-mode.test.ts
+index 61a73da..e84aa74 100644
+--- a/packages/coding-agent/test/studio-host-mode.test.ts
++++ b/packages/coding-agent/test/studio-host-mode.test.ts
+@@ -30,7 +30,7 @@ describe("studio-host runtime", () => {
+ 
+ 		await runStudioHostMode(
+ 			session,
+-			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token" },
++			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 7 },
+ 			async runtime => {
+ 				tuiRuntime = runtime;
+ 			},
+@@ -39,12 +39,14 @@ describe("studio-host runtime", () => {
+ 
+ 		expect(bridgeRuntime).toBe(tuiRuntime);
+ 		expect(tuiRuntime?.runtimeId).toBe("runtime-test");
++		expect(tuiRuntime?.runtimeEpoch).toBe(7);
+ 		expect(tuiRuntime?.sessionId).toBe("session-test");
+ 		expect(tuiRuntime?.session).toBe(session);
+ 		expect(tuiRuntime?.sessionManager).toBe(session.sessionManager);
+ 		expect(tuiRuntime?.bridgeConfig).toEqual({
+ 			endpoint: "omp-studio-test",
+ 			tokenFile: "C:\\temp\\omp-studio.token",
++			runtimeEpoch: 7,
+ 		});
+ 		expect(stopCalls).toBe(1);
+ 	});
+@@ -61,7 +63,7 @@ describe("studio-host runtime", () => {
+ 		await expect(
+ 			runStudioHostMode(
+ 				fakeSession(),
+-				{},
++				{ runtimeEpoch: 1 },
+ 				async () => {
+ 					throw new Error("TUI failed");
+ 				},
+@@ -73,17 +75,18 @@ describe("studio-host runtime", () => {
+ 
+ 	test("fails closed when the default Bridge configuration is incomplete", async () => {
+ 		await expect(runStudioHostMode(fakeSession(), {}, async () => {})).rejects.toThrow(
+-			"requires --bridge-endpoint and --bridge-token-file",
++			"requires --bridge-endpoint, --bridge-token-file, and --bridge-runtime-epoch",
+ 		);
+ 	});
+ 
+ 	test("creates one immutable runtime identity from the supplied session", () => {
+ 		const session = fakeSession("session-one");
+-		const runtime = createStudioHostRuntime(session, {}, () => "runtime-one");
++		const runtime = createStudioHostRuntime(session, { runtimeEpoch: 11 }, () => "runtime-one");
+ 
+ 		expect(runtime).toEqual(
+ 			expect.objectContaining({
+ 				runtimeId: "runtime-one",
++				runtimeEpoch: 11,
+ 				sessionId: "session-one",
+ 				session,
+ 				sessionManager: session.sessionManager,

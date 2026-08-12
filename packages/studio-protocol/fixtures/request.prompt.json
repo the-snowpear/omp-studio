@@ -1,0 +1,1 @@
+{"idempotencyKey":"prompt-1","operation":{"kind":"core.prompt","text":"Summarize the changes","images":[{"type":"image","uri":"file:///tmp/example.png"}]},"requestId":"req-prompt-1","runtimeEpoch":1,"type":"studio.request"}

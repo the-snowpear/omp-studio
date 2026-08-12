@@ -1,0 +1,24 @@
+{
+  "name": "@omp-studio/renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared OMP Studio renderer: pure-browser React surface over the semantic StudioClient contract",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@omp-studio/client-contract": "0.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.6.0",
+    "typescript": "^5.9.0",
+    "vite": "^6.3.5"
+  }
+}

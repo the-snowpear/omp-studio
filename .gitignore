@@ -3,18 +3,22 @@ node_modules/
 .pnp/
 .pnp.js
 
-# Build / release output
-dist/
-build/
-out/
-release/
+# Build / release output (scoped to our own packages; vendored upstream source
+# under omp-patch/vendor/ must NOT match these — it contains .zip fixtures, an
+# `out/` dir, etc.)
+packages/*/dist/
+packages/*/build/
+packages/*/out/
+packages/*/release/
+apps/*/dist/
+apps/*/build/
+apps/*/out/
 *.exe
 *.dmg
 *.AppImage
-*.zip
 
 # Logs
-*.log
+packages/*/*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -27,3 +31,7 @@ Thumbs.db
 
 # WorkBuddy local project data (not meant for public repo)
 .workbuddy/
+
+# Local Codex setup backups and downloaded installers
+.codex-backups/
+.codex-tools/

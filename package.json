@@ -1,0 +1,32 @@
+{
+  "name": "omp-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend foundation for the OMP Studio v5 architecture",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @omp-studio/studio-protocol && npm run build -w @omp-studio/client-contract && npm run build -w @omp-studio/platform && npm run build -w @omp-studio/runtime-installer && npm run build -w @omp-studio/transport-desktop && npm run build -w @omp-studio/transport-web && npm run build -w @omp-studio/client && npm run build -w @omp-studio/platform-win32 && npm run build -w @omp-studio/studio-host && npm run build -w @omp-studio/testkit && npm run build -w @omp-studio/renderer",
+    "typecheck": "npm run build -w @omp-studio/studio-protocol && npm run build -w @omp-studio/client-contract && npm run build -w @omp-studio/platform && npm run build -w @omp-studio/runtime-installer && npm run build -w @omp-studio/transport-desktop && npm run build -w @omp-studio/transport-web && npm run typecheck -w @omp-studio/studio-protocol && npm run typecheck -w @omp-studio/runtime-installer && npm run typecheck -w @omp-studio/studio-host && npm run typecheck -w @omp-studio/client-contract && npm run typecheck -w @omp-studio/platform && npm run typecheck -w @omp-studio/client && npm run typecheck -w @omp-studio/platform-win32 && npm run typecheck -w @omp-studio/transport-desktop && npm run typecheck -w @omp-studio/transport-web && npm run typecheck -w @omp-studio/testkit && npm run typecheck -w @omp-studio/renderer",
+    "test": "npm run test -w @omp-studio/studio-protocol && npm run test -w @omp-studio/runtime-installer && npm run test -w @omp-studio/studio-host && npm run build -w @omp-studio/client-contract && npm run test -w @omp-studio/client && npm run build -w @omp-studio/platform && npm run test -w @omp-studio/platform-win32 && npm run build -w @omp-studio/transport-desktop && npm run build -w @omp-studio/transport-web && npm run test -w @omp-studio/testkit",
+    "check": "npm run typecheck && npm test",
+    "runtime:verify-source": "node scripts/verify-omp-source.mjs",
+    "omp:install-deps": "node scripts/install-omp-deps.mjs",
+    "omp:build:host": "node scripts/build-omp-host.mjs",
+    "omp:artifact": "npm run build && node scripts/runtime-artifact.mjs",
+    "omp:test:metadata": "node --test scripts/runtime-artifact.test.mjs",
+    "omp:e2e:install": "node scripts/runtime-install-e2e.mjs",
+    "omp:verify:prepatch": "node scripts/verify-omp-prepatch.mjs",
+    "omp:verify:patches": "node scripts/verify-omp-patches.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
