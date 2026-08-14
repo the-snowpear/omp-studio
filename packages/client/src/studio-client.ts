@@ -6,8 +6,8 @@
  * stream so it can enforce §8.3 rules without asking the Renderer:
  * resync gating of sensitive mutations, terminal/no-regression bookkeeping,
  * and transport failures recorded as failed command states. Renderer
- * listeners receive the raw event stream, filtered exactly by their
- * subscription scope.
+ * listeners receive only events accepted by the reducer, filtered exactly by
+ * their subscription scope.
  *
  * Renderer injection is `StudioClient` only; this class adds two
  * client-side conveniences (`getState` / `onState`) that are not part of
@@ -46,6 +46,9 @@ export class StudioClientImpl implements StudioClient {
   private state: ClientState;
   private closed = false;
   private transportUnsubscribe: Unsubscribe | null = null;
+  private bootstrapPromise: Promise<ClientBootstrap> | null = null;
+  private bootstrapping = false;
+  private readonly bufferedEvents: ClientEvent[] = [];
   private readonly listeners: RendererSubscription[] = [];
   private readonly stateListeners: Array<(state: ClientState) => void> = [];
 
@@ -62,10 +65,40 @@ export class StudioClientImpl implements StudioClient {
 
   async bootstrap(): Promise<ClientBootstrap> {
     this.assertOpen();
-    const bootstrap = await this.transport.bootstrap();
-    this.applyAction({ type: "bootstrap.set", bootstrap, occurredAt: this.ids.now() });
+    if (this.bootstrapPromise !== null) {
+      return this.bootstrapPromise;
+    }
+    this.bootstrapping = true;
     this.ensureSubscribed();
-    return bootstrap;
+    const run = (async (): Promise<ClientBootstrap> => {
+      try {
+        const bootstrap = await this.transport.bootstrap();
+        this.applyAction({ type: "bootstrap.set", bootstrap, occurredAt: this.ids.now() });
+        const pending = this.bufferedEvents.splice(0);
+        for (const event of pending) {
+          this.applyAction({ type: "event", event });
+        }
+        return bootstrap;
+      } catch (error) {
+        // Events buffered without a successful snapshot cannot be trusted;
+        // discard them so a later retry starts from a clean baseline.
+        this.bufferedEvents.length = 0;
+        throw error;
+      } finally {
+        this.bootstrapping = false;
+      }
+    })();
+    this.bootstrapPromise = run;
+    try {
+      return await run;
+    } finally {
+      this.bootstrapPromise = null;
+    }
+  }
+
+  /** Re-acquire a fresh snapshot and resume the event stream after a gap. */
+  async resync(): Promise<ClientBootstrap> {
+    return this.bootstrap();
   }
 
   async query<TName extends QueryName>(name: TName, input: QueryInput<TName>): Promise<QueryResult<TName>> {
@@ -176,12 +209,17 @@ export class StudioClientImpl implements StudioClient {
   private ensureSubscribed(): void {
     if (this.transportUnsubscribe === null) {
       this.transportUnsubscribe = this.transport.subscribe({ scope: "all" }, (event) => {
+        if (this.bootstrapping) {
+          this.bufferedEvents.push(event);
+          return;
+        }
         this.applyAction({ type: "event", event });
       });
     }
   }
 
   private applyAction(action: ClientAction): void {
+    const previous = this.state;
     const next = reduceClientState(this.state, action);
     if (next !== this.state) {
       this.state = next;
@@ -189,12 +227,36 @@ export class StudioClientImpl implements StudioClient {
         listener(this.state);
       }
     }
-    if (action.type === "event") {
+    if (action.type === "event" && this.shouldDeliverEvent(previous, next, action.event)) {
       for (const { scope, listener } of this.listeners) {
         if (eventMatchesScope(action.event, scope)) {
           listener(action.event);
         }
       }
     }
+    if (
+      action.type === "event" &&
+      !previous.connection.resyncRequired &&
+      next.connection.resyncRequired &&
+      !this.bootstrapping &&
+      !this.closed
+    ) {
+      queueMicrotask(() => {
+        if (!this.closed && this.state.connection.resyncRequired) {
+          void this.bootstrap().catch(() => {
+            // Keep the reducer in resync_required; a later manual resync can retry.
+          });
+        }
+      });
+    }
+  }
+
+  private shouldDeliverEvent(previous: ClientState, next: ClientState, event: ClientEvent): boolean {
+    // A stale/duplicate event leaves state unchanged. A gap changes only the
+    // resync flag while deliberately dropping the event payload.
+    if (next === previous || next.connection.cursor !== event.cursor) {
+      return false;
+    }
+    return true;
   }
 }

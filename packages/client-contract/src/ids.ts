@@ -28,6 +28,9 @@ export type StateVersion = Brand<number, "StateVersion">;
 /** Environment identity (opaque). */
 export type EnvironmentId = Brand<string, "EnvironmentId">;
 
+/** Opaque workspace identity. Never a filesystem path. */
+export type WorkspaceId = Brand<string, "WorkspaceId">;
+
 /** Thread identity (opaque). */
 export type ThreadId = Brand<string, "ThreadId">;
 

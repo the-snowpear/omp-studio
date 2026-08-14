@@ -19,6 +19,7 @@ import type {
   ClientError,
   ClientEvent,
   ClientEventBase,
+  ClientTransport,
   CommandName,
   CommandRequestId,
   EventCursor,
@@ -167,6 +168,21 @@ function runtimeChanged(cursor: number, connection: RuntimeConnection, overrides
   return { ...base(String(cursor), overrides), kind: "runtime.changed", connection };
 }
 
+function unavailableBootstrap(): ClientBootstrap {
+  return {
+    contractVersion: 1,
+    authority: { authorityId: "auth-1" as AuthorityId, authorityEpoch: 1 as AuthorityEpoch },
+    runtime: {
+      status: "unavailable",
+      classification: "unavailable",
+    },
+    surface: { terminalAttach: false, fileReveal: false, previewInput: false, openExternal: false },
+    capabilityManifest: { profile: "limited", generatedAt: TS, hash: "cap-empty", capabilities: [] },
+    commandManifestHash: "cmd-hash",
+    selected: {},
+  };
+}
+
 function bootedState(b: ClientBootstrap = bootstrap()): ClientState {
   return reduceClientState(createInitialClientState(), { type: "bootstrap.set", bootstrap: b, occurredAt: TS });
 }
@@ -207,6 +223,44 @@ test("bootstrap establishes authority/runtime epoch, stateVersion, cursor and sn
   assert.equal(state.connection.resyncRequired, false);
   assert.equal(state.entities.snapshot?.stateVersion, 1);
   assert.equal(state.connection.surface?.openExternal, false);
+});
+
+test("an unavailable bootstrap establishes authority, surface and manifests without a snapshot", () => {
+  const state = bootedState(unavailableBootstrap());
+  assert.equal(state.connection.phase, "bootstrapped");
+  assert.equal(state.connection.authorityId, "auth-1");
+  assert.equal(state.connection.authorityEpoch, 1);
+  assert.equal(state.connection.runtime?.status, "unavailable");
+  assert.equal(state.connection.runtime?.classification, "unavailable");
+  assert.equal(state.connection.runtime?.runtimeId, undefined);
+  assert.equal(state.connection.runtimeEpoch, null);
+  assert.equal(state.connection.stateVersion, null);
+  assert.equal(state.connection.cursor, null);
+  assert.equal(state.connection.resyncRequired, false);
+  assert.equal(state.connection.surface?.openExternal, false);
+  assert.equal(state.connection.capabilityManifest?.profile, "limited");
+  assert.equal(state.connection.commandManifestHash, "cmd-hash");
+  assert.equal(state.entities.snapshot, null);
+});
+
+test("a later snapshot event establishes runtime state after an unavailable bootstrap", () => {
+  let state = bootedState(unavailableBootstrap());
+  // Runtime comes up before the first snapshot: stream events are accepted
+  // but no snapshot state exists yet.
+  state = reduceClientState(state, {
+    type: "event",
+    event: runtimeChanged(11, { status: "connected", classification: "managed", runtimeId: "rt-1" as RuntimeId, runtimeEpoch: 1 as RuntimeEpoch }),
+  });
+  assert.equal(state.connection.runtimeEpoch, 1);
+  assert.equal(state.connection.cursor, "11");
+  assert.equal(state.entities.snapshot, null);
+  // The snapshot event is the mechanism that establishes Runtime state.
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(1, 1)) });
+  assert.equal(state.entities.snapshot?.stateVersion, 1);
+  assert.equal(state.connection.stateVersion, 1);
+  assert.equal(state.connection.cursor, "12");
+  assert.equal(state.connection.runtimeEpoch, 1);
+  assert.equal(state.connection.resyncRequired, false);
 });
 
 test("duplicate cursor events are idempotent", () => {
@@ -373,6 +427,9 @@ test("sensitive mutations are blocked with RESYNC_REQUIRED while resync is requi
   }
   assert.equal(isSensitiveCommand("session.resume"), true);
   assert.equal(isSensitiveCommand("interaction.respond"), true);
+  // workspace mutations change Host-side selection, so they are sensitive too
+  assert.equal(isSensitiveCommand("workspace.open"), true);
+  assert.equal(isSensitiveCommand("workspace.pick"), true);
 });
 
 test("re-bootstrap marks in-flight commands outcome_unknown", () => {
@@ -392,6 +449,53 @@ test("opaque cursors only support equality; a different cursor forces resync", (
   assert.equal(state, before); // duplicate opaque cursor is idempotent
   state = reduceClientState(state, { type: "event", event: { ...changed(11), cursor: "opaque-2" as EventCursor } });
   assert.equal(state.connection.resyncRequired, true);
+});
+
+test("large decimal cursors advance without Number precision loss", () => {
+  const last = "9007199254740992" as EventCursor;
+  const next = "9007199254740993" as EventCursor;
+  let state = bootedState({ ...bootstrap(), cursor: last });
+  state = reduceClientState(state, { type: "event", event: { ...changed(0), cursor: next } });
+  assert.equal(state.connection.cursor, next);
+  assert.equal(state.connection.resyncRequired, false);
+});
+
+test("StudioClientImpl buffers bootstrap races and does not deliver ignored events", async () => {
+  let emitDuringBootstrap: ((event: ClientEvent) => void) | undefined;
+  const listeners: Array<(event: ClientEvent) => void> = [];
+  const transport: ClientTransport = {
+    async bootstrap() {
+      emitDuringBootstrap?.(changed(11));
+      return bootstrap();
+    },
+    async query() {
+      return { ok: true, queryName: "session.state", result: snapshot(1, 1) } as never;
+    },
+    async command(request) {
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: TS };
+    },
+    subscribe(_scope, listener) {
+      emitDuringBootstrap = (event) => listeners.forEach((entry) => entry(event));
+      listeners.push(listener);
+      return () => {
+        const index = listeners.indexOf(listener);
+        if (index >= 0) listeners.splice(index, 1);
+      };
+    },
+    async close() {
+      listeners.length = 0;
+    },
+  };
+  const client = new StudioClientImpl(transport, fixedIds());
+  const received: ClientEvent[] = [];
+  client.subscribe({ scope: "all" }, (event) => received.push(event));
+  await client.bootstrap();
+  assert.deepEqual(received.map((event) => event.kind), ["state.changed"]);
+
+  const before = received.length;
+  emitDuringBootstrap?.({ ...changed(10), authorityEpoch: 0 as AuthorityEpoch });
+  assert.equal(received.length, before);
+  await client.close();
 });
 
 test("StudioClientImpl blocks sensitive commands before the transport sees them", async () => {

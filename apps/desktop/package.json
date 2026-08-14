@@ -1,0 +1,31 @@
+{
+  "name": "@omp-studio/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/src/main.js",
+  "description": "OMP Studio Windows Desktop shell (Electron Main)",
+  "scripts": {
+    "dev": "electron .",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@omp-studio/client": "0.1.0",
+    "@omp-studio/client-contract": "0.1.0",
+    "@omp-studio/host-client-api": "0.1.0",
+    "@omp-studio/platform": "0.1.0",
+    "@omp-studio/platform-darwin": "0.1.0",
+    "@omp-studio/platform-win32": "0.1.0",
+    "@omp-studio/studio-host": "0.1.0",
+    "@omp-studio/transport-desktop": "0.1.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@types/node": "^24.0.0",
+    "electron": "^43.4.0",
+    "typescript": "^5.9.0"
+  }
+}

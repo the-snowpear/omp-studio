@@ -24,9 +24,10 @@ interface CryptoLike {
 
 function randomUuid(): string {
   const cryptoLike = (globalThis as { crypto?: CryptoLike }).crypto;
-  const randomUUID = cryptoLike?.randomUUID;
-  if (typeof randomUUID === "function") {
-    return randomUUID();
+  // Member call keeps `this` bound: extracting `crypto.randomUUID` and
+  // calling it detached throws "Illegal invocation" in Chromium.
+  if (cryptoLike !== undefined && typeof cryptoLike.randomUUID === "function") {
+    return cryptoLike.randomUUID();
   }
   // Fallback only for exotic environments without Web Crypto. Never
   // Node-specific; the same path runs in any browser.

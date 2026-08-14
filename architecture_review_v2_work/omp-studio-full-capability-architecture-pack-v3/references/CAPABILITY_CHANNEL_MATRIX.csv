@@ -1,0 +1,94 @@
+capability_id,surface,preferred_channel,fallback_channel,grade,notes
+session.prompt,execute,rpc-ui,,native,Prompt accepted asynchronously; completion via events/prompt_result
+session.steer,control,rpc-ui,,native,Native RPC
+session.followUp,control,rpc-ui,,native,Native RPC
+session.abort,control,rpc-ui,,native,Native RPC
+session.abortAndPrompt,control,rpc-ui,,native,Native RPC
+session.state,observe,rpc-ui,,native,get_state
+session.history,observe,rpc-ui,native-file,native,RPC paging preferred; session files read-only offline
+session.branch,control,rpc-ui,,native,Native RPC
+session.handoff,control,rpc-ui,,native,Native RPC
+session.export,control,rpc-ui,,native,Native RPC
+session.stats,observe,rpc-ui,,native,Native RPC
+model.list,observe,rpc-ui,cli,native,get_available_models; omp models --json for admin views
+model.setSession,control,rpc-ui,,native,Session model switch
+model.thinkingSession,control,rpc-ui,,native,Session thinking switch
+model.fastMode,control,rpc-ui,,native,set_fast_mode
+provider.configure,configure,native-file,,supported-fallback,models.yml is OMP-native source
+provider.validate,diagnose,cli,rpc-ui,supported-fallback,Refresh/list effective models after save
+provider.login,control,rpc-ui,cli,native,RPC login; auth-broker CLI for admin/headless
+provider.logout,control,cli,slash-rpc,supported-fallback,No dedicated native RPC logout assumed
+provider.authStatus,observe,rpc-ui,cli,native,get_login_providers plus broker/admin status
+role.configureGlobal,configure,config-cli,native-file,native,Use OMP config schema
+role.configureProject,configure,native-file,,supported-fallback,config CLI does not write project config
+fallback.configureGlobal,configure,config-cli,native-file,native,retry.fallbackChains
+fallback.configureProject,configure,native-file,,supported-fallback,Project .omp/config.yml
+advisor.configure,configure,config-cli,native-file,native,advisor.* and modelRoles.advisor
+advisor.runtimeControl,control,slash-rpc,companion-extension,supported-fallback,Dedicated RPC desirable
+advisor.stats,observe,slash-rpc,companion-extension,supported-fallback,Dedicated RPC desirable
+compaction.control,control,rpc-ui,,native,compact/set_auto_compaction
+retry.control,control,rpc-ui,,native,set_auto_retry/abort_retry
+queue.steeringMode,control,rpc-ui,,native,Native RPC
+queue.followUpMode,control,rpc-ui,,native,Native RPC
+queue.interruptMode,control,rpc-ui,,native,Native RPC
+bash.execute,execute,rpc-ui,,native,Native RPC bash command
+bash.abort,control,rpc-ui,,native,Native RPC abort_bash
+tool.observe,observe,rpc-ui,,native,tool execution events
+tool.approval,control,rpc-ui,,native,Extension UI / approval events as applicable
+hostTool.register,configure,rpc-ui,,native,set_host_tools
+hostTool.execute,execute,rpc-ui,,native,host_tool_call/update/result
+hostUri.register,configure,rpc-ui,,native,set_host_uri_schemes
+hostUri.execute,execute,rpc-ui,,native,host_uri_request/result
+extensionUi.standard,control,rpc-ui,,native,rpc-ui standard select/confirm/input/editor/etc
+extensionUi.customTui,control,,,unavailable,Arbitrary TUI component is not automatically portable to React
+command.list,observe,rpc-ui,,native,get_available_commands
+command.invokeLocal,control,slash-rpc,,supported-fallback,Only deterministic discovered slash commands
+skill.configure,configure,native-file,config-cli,supported-fallback,OMP-native skills + filters
+skill.listEffective,observe,companion-extension,rpc-ui,experimental,No public complete effective inventory; private companion imports require exact build
+skill.invoke,execute,slash-rpc,,supported-fallback,/skill command when enabled; normal prompt context otherwise OMP-owned
+agentDefinition.configure,configure,native-file,,supported-fallback,OMP-native agent definition files
+agentDefinition.listEffective,observe,companion-extension,rpc-ui,experimental,Future native RPC preferred; task tool schema provides partial hints only
+subagent.spawnByHarness,execute,rpc-ui,,supported-fallback,OMP task tool/model decides spawn; no deterministic manual-spawn RPC
+subagent.observe,observe,rpc-ui,,native,Subscription/snapshots/events
+subagent.transcript,observe,rpc-ui,native-file,native,get_subagent_messages preferred
+subagent.message,control,companion-extension,collab-experimental,experimental,No public active rpc-ui command; upstream RPC required for stable product
+subagent.kill,control,companion-extension,collab-experimental,experimental,No public active rpc-ui command; upstream RPC required for stable product
+subagent.revive,control,companion-extension,collab-experimental,experimental,No public active rpc-ui command; upstream RPC required for stable product
+subagent.release,control,companion-extension,,experimental,Depends on exact internal/public API
+subagent.spawnManual,control,companion-extension,,experimental,Prefer future native RPC; do not use natural language
+asyncJob.observe,observe,slash-rpc,rpc-ui,supported-fallback,/jobs is textual and task events provide partial state
+asyncJob.cancel,control,companion-extension,collab-experimental,experimental,hub control exists internally but no public rpc-ui command
+mcp.configure,configure,native-file,,native,OMP-native mcp.json
+mcp.runtimeControl,control,slash-rpc,companion-extension,supported-fallback,/mcp flows and runtime OMP ownership
+mcp.status,observe,slash-rpc,companion-extension,supported-fallback,Structured RPC desirable
+plugin.configure,configure,native-file,config-cli,supported-fallback,OMP config/discovery sources
+plugin.reload,control,slash-rpc,,supported-fallback,/reload-plugins when available
+plugin.listEffective,observe,companion-extension,rpc-ui,experimental,Commands/tool state are partial; private companion discovery is exact-build only
+hook.configure,configure,native-file,config-cli,supported-fallback,File/settings driven
+hook.listEffective,observe,companion-extension,,experimental,No public effective inventory; do not import third-party code in Studio Host
+customTool.configure,configure,native-file,config-cli,supported-fallback,File/settings driven
+customTool.listEffective,observe,rpc-ui,companion-extension,native,get_state dumpTools can expose active tool metadata; companion for richer source info
+browser.toolExecution,execute,rpc-ui,,supported-fallback,OMP Agent owns tool invocation; Studio observes but cannot directly invoke
+browser.internalState,observe,rpc-ui,companion-extension,experimental,Tool events are partial; dedicated private state bridge is exact-build only
+computer.toolExecution,execute,rpc-ui,,supported-fallback,OMP Agent owns invocation; approval policies remain OMP
+lsp.toolExecution,execute,rpc-ui,,supported-fallback,OMP Agent owns invocation; no generic GUI invoke-tool RPC
+lsp.internalState,observe,companion-extension,,experimental,Only needed for dedicated GUI state
+DAP.toolExecution,execute,rpc-ui,,supported-fallback,OMP Agent owns invocation; no generic GUI invoke-tool RPC
+DAP.internalState,observe,companion-extension,,experimental,Only needed for dedicated GUI state
+memory.configure,configure,config-cli,native-file,native,OMP settings
+memory.observe,observe,slash-rpc,companion-extension,supported-fallback,Depends on available commands/status
+memory.autolearn,configure,config-cli,native-file,native,OMP settings
+TTSR.configure,configure,config-cli,native-file,native,OMP settings
+TTSR.observe,observe,rpc-ui,companion-extension,supported-fallback,Stream effects/events where exposed
+collab.startStop,control,,,unavailable,Current built-in collab control is TUI-only for an active rpc-ui process
+collab.participants,observe,,,unavailable,No native rpc-ui participant inventory
+collab.agentCommand,control,collab-experimental,companion-extension,experimental,Existing internal path; not stable Studio API
+profile.configure,configure,cli,native-file,supported-fallback,Resolve active profile paths explicitly
+config.catalog,observe,cli,,native,omp config list --json is a machine-readable settings catalog and validator surface
+config.global,configure,config-cli,,native,OMP schema validated
+config.project,configure,native-file,,supported-fallback,Atomic schema-aware project edit
+preview.runtime,execute,studio-host,,native,Studio-owned dev-server process not OMP capability
+preview.hostTools,execute,rpc-ui,studio-host,native,Registered Host Tools with Studio SecurityGate
+preview.browser,observe,studio-host,rpc-ui,native,Studio-owned browser data returned through Host Tools when model needs it
+diagnostics.omp,diagnose,cli,rpc-ui,native,Version/config/state/log probes
+update.omp,control,cli,,supported-fallback,Use OMP-supported update path when available

@@ -1,0 +1,787 @@
+/* ============================================================
+   OMP Studio — 二级页面（主页/环境检查/历史/能力中心/设置/诊断）
+   ============================================================ */
+
+.page {
+  /* dvh, matching .app — 100vh overflows under mobile/tablet browser chrome. */
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 二级页面统一页头 */
+.page-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  height: var(--topbar-h);
+  padding: 0 var(--sp-16) 0 var(--sp-8);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.page-head .ph-title {
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  /* 固定宽度槽位：消除切换页面时标题宽度变化导致的 nav 跳动。
+     宽度取最长标题（会话历史与 Time Travel ≈ 170px）+ nav 间距（16px）。
+     标题左对齐，长标题完整显示不截断。 */
+  width: 186px;
+  flex: none;
+}
+
+.page-nav {
+  display: flex;
+  gap: 5px;
+  margin-left: var(--sp-16);
+  /* 气泡 .nav-window 的包含块。 */
+  position: relative;
+}
+.page-nav a {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+}
+.page-nav a:hover { background: var(--surface-hover); color: var(--text); text-decoration: none; }
+/* 激活态不再靠加重字体区分：font-weight 变化会让拉丁字形（"Time Travel" /
+   "OMP"）变宽，镜像克隆在激活项上错位。选中感由气泡底色 + 镜像紫色承担，
+   所有入口保持同一字重，镜像才能逐像素对齐。 */
+.page-nav a.active { background: var(--accent-soft); color: var(--accent); }
+
+/* ---- 滑动激活气泡 + 紫色镜像 ----
+   .nav-window 是绝对定位的淡紫卡片，宽 = 激活入口宽；JS 直接写 left/width
+   （px），transition 在 left/width 上跑 —— 不要用 `translateX(var(--x))`：
+   Chromium 不对手写 var() 引用的 transform 做 transition，实测改了 --x
+   transform 纹丝不动。直接 px 必然可动。
+   pointer-events:none 不拦截基础链接的点击/悬停。
+   .nav-mirror 是气泡内一份紫色导航克隆，left 与气泡反向（-left）而始终钉
+   在基础层上；被气泡 overflow 裁剪，气泡盖住哪个入口就实时透紫。 */
+.nav-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0;
+  border-radius: var(--r-6);
+  background: var(--accent-soft);
+  overflow: hidden;
+  pointer-events: none;
+  transition: left var(--dur-slow) var(--ease-nav),
+              width var(--dur-slow) var(--ease-nav);
+}
+.nav-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;   /* 必须与 .page-nav 的 gap 一致，否则克隆逐项偏移 */
+  width: max-content;
+  /* 与 .nav-window 相同的时长/缓动：left 同步变化时镜像全程钉在气泡上
+     （反向），滑动途中气泡盖住的入口实时透出紫色。 */
+  transition: left var(--dur-slow) var(--ease-nav);
+}
+.nav-mirror a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  height: 30px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* env-check 等不在导航里的页面：气泡无处安放，隐藏。 */
+.page-nav.no-bubble .nav-window { display: none; }
+
+/* 场景切换器 FAB 是工作台专属（演示入口），二级页视图隐藏；
+   display:flex 与 [hidden] 冲突，需要 !important。 */
+.scenario-fab[hidden] { display: none !important; }
+
+.page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-24) var(--sp-32);
+  /* 进出场动画见 base.css（.page-body.page-in / .page-out）。
+     页头恒定不参与，只动内容区。 */
+}
+.page-narrow { max-width: 880px; margin: 0 auto; }
+.page-wide { max-width: 1080px; margin: 0 auto; }
+
+/* ---------- 项目主页 ---------- */
+.home-hero { margin-bottom: var(--sp-24); }
+.home-hero h1 { font-size: var(--fs-22); font-weight: var(--fw-semibold); margin-bottom: var(--sp-4); }
+.home-quick { display: flex; gap: var(--sp-8); margin-top: var(--sp-16); flex-wrap: wrap; }
+
+.proj-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-12);
+  margin-bottom: var(--sp-24);
+}
+/* Both of these are <a> now — they navigate, and as click-handled divs they
+   were mouse-only and could not be opened in a new tab. Their children moved
+   from <div> to <span> (a div inside an <a> that also holds inline content is
+   fine, but spans keep the whole card safely phrasing-level), so each row's
+   block layout is declared here rather than inherited. */
+.proj-card {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  padding: var(--sp-14);
+  cursor: pointer;
+  color: var(--text);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.proj-card:hover {
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-menu);
+  /* Links underline on hover globally; a whole card underlining itself is not
+     the affordance we want here — the border and shadow carry it. */
+  text-decoration: none;
+}
+.proj-card .pc-name { font-weight: var(--fw-semibold); font-size: var(--fs-14); display: flex; align-items: center; gap: var(--sp-8); }
+.proj-card .pc-icon { width: 20px; height: 20px; border-radius: 5px; flex: none; object-fit: contain; }
+.proj-card .pc-path { display: block; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); margin: 2px 0 var(--sp-10); }
+.proj-card .pc-flags { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+.proj-card .pc-foot {
+  display: flex; align-items: center; gap: var(--sp-8);
+  margin-top: var(--sp-10); padding-top: var(--sp-10);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-11); color: var(--text-3);
+}
+
+.activity-row {
+  display: flex; align-items: center; gap: var(--sp-10);
+  padding: 7px var(--sp-10);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+.activity-row:hover { background: var(--surface-hover); text-decoration: none; }
+.a-ic {
+  width: 24px; height: 24px; border-radius: var(--r-6);
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+.a-ic.blue { background: var(--blue-soft); color: var(--blue); }
+.a-ic.green { background: var(--green-soft); color: var(--green); }
+.a-ic.amber { background: var(--amber-soft); color: var(--amber); }
+.a-ic.purple { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------- Token 使用统计卡（项目主页） ---------- */
+.tk-card {
+  position: relative;
+  padding: var(--sp-12) var(--sp-14) var(--sp-10);
+  margin-bottom: var(--sp-24);
+}
+.tk-head { display: flex; align-items: center; gap: var(--sp-10); }
+.tk-title {
+  display: inline-flex; align-items: center; gap: var(--sp-6);
+  font-size: var(--fs-14); font-weight: var(--fw-semibold);
+}
+.tk-range { font-size: var(--fs-11); color: var(--text-3); }
+
+.tk-kpis { display: flex; flex-wrap: wrap; gap: var(--sp-12) var(--sp-24); margin-top: var(--sp-10); }
+.tk-kpi { display: flex; flex-direction: column; gap: 1px; }
+.tk-kpi-v { font-size: var(--fs-16); font-weight: var(--fw-semibold); }
+.tk-kpi-l {
+  display: inline-flex; align-items: center; gap: var(--sp-6);
+  font-size: var(--fs-11); color: var(--text-3);
+}
+.tk-dot { width: 8px; height: 8px; border-radius: var(--r-full); flex: none; display: inline-block; }
+.tk-dot.claude { background: var(--accent); }
+.tk-dot.codex { background: var(--blue); }
+.tk-dot.total { background: var(--accent); }
+
+.tk-chart-wrap { margin-top: var(--sp-12); }
+.tk-chart { display: block; width: 100%; height: 210px; margin-top: var(--sp-24); }
+.tk-chart .tk-grid { stroke: var(--border); stroke-dasharray: 3 4; stroke-width: 1; }
+.tk-chart .tk-grid.base { stroke-dasharray: none; }
+.tk-chart .tk-yt { font-family: var(--font-mono); font-size: 9px; fill: var(--text-faint); }
+.tk-chart .tk-xt { font-size: 9.5px; fill: var(--text-faint); }
+/* 曲线：基线 1.6px，曲线段需要 round join+cap 才不会出现尖角断开感。 */
+.tk-chart .tk-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.tk-chart .tk-line.claude { stroke: var(--accent); }
+.tk-chart .tk-line.codex { stroke: var(--blue); }
+.tk-chart .tk-line.total { stroke: var(--accent); }
+/* 面积：折线下方铺一缕淡色，让"smooth curve"在视觉上更明显。 */
+.tk-chart .tk-area { stroke: none; opacity: 0.14; }
+.tk-chart .tk-area.claude { fill: var(--accent); }
+.tk-chart .tk-area.codex { fill: var(--blue); }
+.tk-chart .tk-area.total { fill: var(--accent); }
+.tk-chart .tk-hit { fill: transparent; cursor: crosshair; }
+.tk-chart .tk-cursor { stroke: var(--accent); stroke-opacity: 0.45; stroke-width: 1; }
+.tk-chart .tk-hl { stroke: var(--surface); stroke-width: 1.5; fill: var(--accent); }
+.tk-chart .tk-pt.total { fill: var(--accent); }
+
+/* 日历：7 行 × 53 列（一年 GitHub 风格）。
+   紧凑模式：单元格方形 13×13px，gap 2px → 行列步进均 15px（横向 = 纵向）。
+   容器 width: max-content + 父容器中 margin auto，整体水平居中。
+   容器宽度 = 13 × 53 + 2 × 52 = 793px。 */
+.tk-cal-wrap { width: max-content; max-width: 100%; margin: var(--sp-8) auto 0; }
+.tk-cal { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 13px); grid-template-columns: repeat(var(--weeks, 53), 13px); gap: 5px; }
+/* 月份标签层：放在日历下方，与日历同一列公式对齐。grid-column 由 inline 决定
+   到具体的周列；min-width 0 允许月份字截断/溢出而不撑开整列。 */
+.tk-cal-months {
+  display: grid;
+  grid-template-columns: repeat(var(--weeks), 13px);
+  gap: 5px;
+  margin-top: 4px;
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+.tk-cal-months span {
+  white-space: nowrap;
+  overflow: visible;
+}
+.tk-cell {
+  display: block; min-width: 13px; min-height: 13px; aspect-ratio: 1 / 1;
+  border-radius: 2.5px;
+  background: var(--surface-2);
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.tk-cell.tk-empty { background: transparent; }
+/* 一年前未启用日期：淡灰底，区别于"启用但 0 token"。 */
+.tk-cell.tk-no-data { background: var(--surface-2); }
+/* 启用但当日 0 token：最浅紫底（提示"工作日但未触发"）。 */
+.tk-cell.tk-zero { background: var(--accent-softer); }
+/* 未来日期：边框 + 更淡的内色，提示"未到"；不参与色阶。 */
+.tk-cell.tk-future {
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  box-sizing: border-box;
+}
+/* 今日：紫色实心描边，醒目。 */
+.tk-cell.tk-today {
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
+.tk-cell.tk-hi {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 1px var(--accent);
+  position: relative; z-index: 1;
+}
+.tk-rls {
+  display: flex; justify-content: space-between;
+  margin-top: 4px; font-size: var(--fs-11); color: var(--text-faint);
+  /* 每行高 10px + gap 3px = 13px；最后一行不满 7 格也等高对齐。 */
+  min-height: 10px;
+}
+.tk-cal-foot { display: flex; align-items: center; margin-top: var(--sp-6); }
+.tk-scale {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: var(--fs-11); color: var(--text-faint);
+}
+.tk-scale i { width: 10px; height: 10px; border-radius: 2.5px; }
+.tk-scale i.tk-scale-max { width: auto; height: auto; }
+
+/* 浮层：折线 / 日历 / 键盘聚焦共用。位置由 JS 在 setCursor 里实时计算；
+   top/left 留 0 即可，避免误用静态 top 让浮层出现在错位置。 */
+.tk-tip {
+  position: absolute; top: 0; left: 0; z-index: 5;
+  min-width: 150px; padding: var(--sp-8) var(--sp-10);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-8); box-shadow: var(--shadow-menu);
+  font-size: var(--fs-11); line-height: 1.5;
+  display: none; pointer-events: none;
+}
+.tk-tip.show { display: block; }
+.tk-tip .tk-tip-row { display: flex; align-items: center; gap: var(--sp-6); color: var(--text-3); }
+.tk-tip .tk-tip-row b { margin-left: auto; color: var(--text-2); }
+
+/* 热力格小弹窗：该天在曲线上显示不出来时，弹在对应格上方。 */
+.tk-cell-tip {
+  position: absolute; z-index: 6;
+  min-width: 96px; padding: var(--sp-6) var(--sp-8);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-6); box-shadow: var(--shadow-menu);
+  font-size: var(--fs-11); line-height: 1.5; text-align: center;
+  display: none; pointer-events: none;
+}
+.tk-cell-tip b { display: block; }
+.tk-cell-tip .mono { color: var(--text-2); }
+
+/* ---------- 环境检查 ---------- */
+.env-summary {
+  display: flex; align-items: center; gap: var(--sp-12);
+  padding: var(--sp-16) var(--sp-20);
+  border-radius: var(--r-10);
+  margin-bottom: var(--sp-20);
+}
+.env-summary.ok { background: var(--green-soft); border: 1px solid var(--green); }
+.env-summary.fail { background: var(--red-soft); border: 1px solid var(--red); }
+.env-summary .es-icon {
+  width: 36px; height: 36px; border-radius: var(--r-full);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.env-summary.ok .es-icon { background: var(--green); color: #fff; }
+.env-summary.fail .es-icon { background: var(--red); color: #fff; }
+
+.check-row {
+  display: flex; align-items: center; gap: var(--sp-12);
+  padding: var(--sp-10) var(--sp-14);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-14);
+}
+.check-row:last-child { border-bottom: none; }
+.check-row .ck-name { font-weight: var(--fw-medium); width: 180px; flex: none; }
+.check-row .ck-detail { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); flex: 1; min-width: 0; }
+.check-row .ck-actions { display: flex; gap: var(--sp-6); flex: none; }
+
+/* ---------- 会话历史 ---------- */
+/* Two-column split, previously an inline grid on .page-wide. As an inline style
+   it could not respond to width, so the 380px rail and the session list fought
+   for space on a narrow window. */
+.hist-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: var(--sp-32);
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .hist-layout { grid-template-columns: 1fr; gap: var(--sp-24); }
+}
+.hist-toolbar { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-14); }
+.hist-search { flex: 1; }
+.tt-heading { font-size: var(--fs-14); font-weight: var(--fw-semibold); margin-bottom: var(--sp-4); }
+.tt-desc { margin-bottom: var(--sp-14); }
+
+/* The row is a container now — it used to be a clickable div wrapping three
+   icon buttons (nested interactive content). The title block is the link that
+   opens the session, so hover/focus highlight moves to :focus-within. */
+.hist-row {
+  display: flex; align-items: center; gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-14);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  margin-bottom: var(--sp-8);
+}
+.hist-row:hover,
+.hist-row:focus-within { border-color: var(--accent-border); }
+.hist-row .h-main {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+}
+.hist-row .h-main:hover { text-decoration: none; }
+.hist-row .h-title { display: block; font-weight: var(--fw-medium); font-size: var(--fs-14); }
+.hist-row .h-sub { font-size: var(--fs-11); color: var(--text-3); font-family: var(--font-mono); display: flex; gap: var(--sp-10); margin-top: 2px; flex-wrap: wrap; }
+.hist-row .h-fork { color: var(--accent); }
+.hist-row > .chip { flex: none; }
+.hist-row .h-acts { display: flex; gap: var(--sp-4); flex: none; }
+
+/* Time Travel */
+.tt-rail { position: relative; padding-left: 28px; }
+.tt-rail::before {
+  content: ""; position: absolute; left: 9px; top: 6px; bottom: 6px;
+  width: 2px; background: var(--border-strong); border-radius: 2px;
+}
+.tt-node { position: relative; margin-bottom: var(--sp-12); }
+.tt-node::before {
+  content: ""; position: absolute; left: -24px; top: 14px;
+  width: 10px; height: 10px; border-radius: var(--r-full);
+  background: var(--surface); border: 2px solid var(--text-faint);
+}
+.tt-node.user::before { border-color: var(--text-2); }
+.tt-node.plan::before { border-color: var(--blue); }
+.tt-node.tool::before { border-color: var(--text-faint); }
+.tt-node.file::before { border-color: var(--green); background: var(--green-soft); }
+.tt-node.test::before { border-color: var(--blue); background: var(--blue-soft); }
+.tt-node.checkpoint::before { border-color: var(--accent); background: var(--accent-soft); width: 12px; height: 12px; left: -25px; }
+.tt-node .tt-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-8); padding: var(--sp-10) var(--sp-14);
+  font-size: var(--fs-12);
+}
+.tt-node.checkpoint .tt-card { border-color: var(--accent-border); }
+.tt-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+.tt-card-body { margin-top: 2px; }
+
+/* ---------- 能力中心 ---------- */
+.cap-layout { display: flex; gap: var(--sp-24); align-items: flex-start; }
+.cap-side { width: 200px; flex: none; position: sticky; top: 0; }
+.cap-side button {
+  display: flex; align-items: center; gap: var(--sp-8);
+  width: 100%; text-align: left;
+  padding: 7px var(--sp-10); border-radius: var(--r-6);
+  font-size: var(--fs-12); color: var(--text-2);
+}
+.cap-side button:hover { background: var(--surface-hover); }
+.cap-side button.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--fw-medium); }
+.cap-side button .cnt { margin-left: auto; font-size: 10px; color: var(--text-faint); }
+.cap-main { flex: 1; min-width: 0; }
+
+/* Tab-level summary row — sits between tabs and the card list.
+   Reads as one line of telemetry, not a dashboard. */
+.cap-summary {
+  display: flex; align-items: center; flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-14);
+  padding: var(--sp-10) var(--sp-14);
+  margin-bottom: var(--sp-12);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.cap-sum-stat { display: inline-flex; align-items: center; gap: var(--sp-6); white-space: nowrap; }
+.cap-sum-stat strong {
+  font-family: var(--font-mono); font-weight: var(--fw-semibold);
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.cap-sum-stat .dot { width: 6px; height: 6px; }
+.cap-sum-stat svg { width: 11px; height: 11px; color: var(--text-3); }
+
+/* Card shell ---------------------------------------------------- */
+.cap-item {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  margin-bottom: var(--sp-10);
+  overflow: hidden;
+  /* Hover lift: glow is global (not a side bar) so the row reads as one
+     object, not "a normal card with a stripe glued to the left". The
+     shadow is two-layer (tight accent ring + soft halo) so the card lifts
+     off the page without a hard edge. Background is NOT in the transition
+     list — hover keeps the surface white so the card reads as "lifted",
+     not "selected". */
+  transition: border-color var(--dur-fast) var(--ease),
+              box-shadow var(--dur-fast) var(--ease);
+}
+.cap-item:hover,
+.cap-item:focus-within {
+  border-color: var(--accent-border);
+  /* Keep the surface white on hover — only the glow changes. A card
+     that also tints its background reads as "selected", which is a
+     different signal than "hover" and would collide with the future
+     `.cap-item.sel` state. */
+  background: var(--surface);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 0 18px -2px color-mix(in srgb, var(--accent) 32%, transparent),
+    0 4px 14px -8px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.cap-item.has-error { border-color: rgba(192, 39, 44, 0.28); }
+.cap-item.has-error:hover,
+.cap-item.has-error:focus-within {
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--red) 22%, transparent),
+    0 0 18px -2px color-mix(in srgb, var(--red) 32%, transparent),
+    0 4px 14px -8px color-mix(in srgb, var(--red) 40%, transparent);
+}
+
+.cap-item-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-14);
+}
+.cap-item-main { min-width: 0; display: flex; flex-direction: column; gap: var(--sp-8); }
+.cap-item-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); min-width: 0; }
+.cap-item-name {
+  font-weight: var(--fw-semibold); font-size: var(--fs-14);
+  color: var(--text);
+  font-family: var(--font-mono);
+  line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cap-item-actions { display: flex; align-items: center; gap: var(--sp-6); flex-shrink: 0; }
+
+/* Body row (description / meta) -------------------------------- */
+.cap-item-body {
+  padding: var(--sp-10) var(--sp-14) var(--sp-12);
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: var(--sp-8);
+}
+.cap-item-desc { font-size: var(--fs-12); color: var(--text-2); line-height: 1.45; }
+.cap-item-meta {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--sp-4) var(--sp-12);
+  font-size: var(--fs-11); color: var(--text-3); font-family: var(--font-mono);
+}
+
+/* Scope capsule + source path used on Skill cards.
+   Two-tone mirrors ver2: "全局" purple (account-wide), "具体项目"
+   blue (per-project override). "内置" is a neutral gray so it does
+   not impersonate a user-installable scope. Source path is one
+   mono line, ellipsis when long. */
+.cap-scope {
+  display: inline-flex; align-items: center; gap: var(--sp-4);
+  padding: 0 var(--sp-8); height: 18px;
+  font-size: 10.5px; font-weight: var(--fw-medium);
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+.cap-scope.global   { background: var(--accent-soft); color: var(--accent); }
+.cap-scope.project  { background: var(--blue-soft);    color: var(--blue); }
+.cap-scope.builtin  { background: var(--surface-2);    color: var(--text-3); }
+.cap-source {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Three-segment stepper (配 / 载 / 用) ---------------------------
+   Reads left-to-right as a pipeline. Connector between segments
+   lights up only when both sides are on, so a failure at "loaded"
+   reads as "configured, not loaded" — distinct from a transport
+   problem where nothing is loaded yet. */
+.cap-stepper { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.cap-step {
+  display: inline-flex; align-items: center; gap: var(--sp-4);
+  padding: 0 var(--sp-8); height: 18px;
+  font-size: 10.5px; font-weight: var(--fw-medium);
+  border-radius: var(--r-full);
+  background: var(--surface-2); color: var(--text-faint);
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.cap-step svg { width: 9px; height: 9px; }
+.cap-step.on { background: var(--green-soft); color: var(--green); }
+/* Connectors are dropped: with full labels (已配置 / 已加载 / 当前会话可用)
+   the three pills read top-to-bottom as a row, and a 1px line between them
+   just adds noise. The on/off colour of the pills themselves carries the
+   "pipeline" meaning. */
+
+/* Skills 卡：图标放大（卡片内 .a-ic 从 24px 提到 36px，图标 18→20px） */
+.cap-skills .a-ic { width: 36px; height: 36px; border-radius: var(--r-8); }
+.cap-skills .a-ic .icon { width: 20px; height: 20px; }
+
+/* Provides（工具 / 指令 / Hook / UI 能力）-----------------
+   ver2 风格：竖向堆叠，每行标题与内容同一行（可换行），
+   不做行级大胶囊；区带浅底与上边框分隔。 */
+.cap-item-provides {
+  border-top: 1px solid var(--border);
+  padding: var(--sp-10) var(--sp-14);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.cap-provide {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-6) var(--sp-8);
+  min-width: 0;
+}
+.cap-provide-head {
+  display: inline-flex; align-items: center; gap: var(--sp-6);
+  flex: none;
+  font-size: var(--fs-11); font-weight: var(--fw-medium); color: var(--text-2);
+}
+.cap-provide-head svg { width: 12px; height: 12px; color: var(--text-3); flex-shrink: 0; }
+.cap-provide-count {
+  margin-left: var(--sp-2);
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.cap-provide-items { display: inline-flex; flex-wrap: wrap; gap: var(--sp-4); }
+.cap-provide-item {
+  display: inline-flex; align-items: center;
+  padding: 0 var(--sp-8); height: 18px;
+  font-size: 10.5px; font-family: var(--font-mono);
+  /* 容器是 surface-2（浅灰），chips 用 surface（白/更深）突出边界 */
+  background: var(--surface); color: var(--text-2);
+  border: 1px solid var(--border); border-radius: var(--r-4);
+}
+/* Show "无" instead of an empty section so the stacked rows still read balanced. */
+.cap-provide-empty {
+  font-size: var(--fs-11); color: var(--text-faint);
+  font-style: italic;
+}
+
+/* Error region -------------------------------------------------- */
+.cap-error {
+  display: flex; align-items: flex-start; gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-14);
+  background: var(--red-soft);
+  border-top: 1px solid rgba(192, 39, 44, 0.28);
+  font-size: var(--fs-12); color: var(--red); line-height: 1.45;
+}
+.cap-error svg { flex-shrink: 0; width: 13px; height: 13px; margin-top: 1px; }
+
+/* Action feedback banner (plugins.setEnabled writes) ------------ */
+.cap-flash {
+  display: flex; align-items: center; gap: var(--sp-8);
+  margin-bottom: var(--sp-14);
+  padding: var(--sp-8) var(--sp-12);
+  background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--r-6);
+  font-size: var(--fs-12); color: var(--text-2);
+}
+.cap-flash svg { flex-shrink: 0; width: 13px; height: 13px; color: var(--text-3); }
+
+/* Slash commands list (denser, no card shell) ------------------ */
+.cap-slash-list {
+  display: flex; flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-8);
+  overflow: hidden;
+}
+.cap-slash-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(0, 3fr) auto auto;
+  align-items: center;
+  gap: var(--sp-14);
+  padding: var(--sp-10) var(--sp-14);
+  border-top: 1px solid var(--border);
+  transition: background var(--dur-fast) var(--ease);
+}
+.cap-slash-row:first-child { border-top: none; }
+.cap-slash-row:hover:not([data-ok="false"]) { background: var(--surface-hover); }
+.cap-slash-row[data-ok="false"] { opacity: 0.6; }
+.cap-slash-name {
+  display: flex; align-items: center; gap: var(--sp-10);
+  font-size: var(--fs-12); font-family: var(--font-mono);
+  color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.cap-slash-name .a-ic { width: 20px; height: 20px; flex-shrink: 0; }
+.cap-slash-desc { font-size: var(--fs-12); color: var(--text-2); line-height: 1.45; min-width: 0; }
+
+/* Responsive ---------------------------------------------------- */
+@media (max-width: 880px) {
+  .cap-layout { flex-direction: column; gap: var(--sp-12); }
+  .cap-side { width: auto; position: static; }
+
+  .cap-item-summary {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "icon main" ".    actions";
+    row-gap: var(--sp-10);
+  }
+  .cap-item-summary > .a-ic { grid-area: icon; }
+  .cap-item-summary > .cap-item-main { grid-area: main; }
+  .cap-item-summary > .cap-item-actions { grid-area: actions; justify-content: flex-end; }
+
+  .cap-slash-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "name   actions"
+      "desc   desc"
+      "status status";
+    row-gap: var(--sp-6);
+  }
+  .cap-slash-row > .cap-slash-name { grid-area: name; }
+  .cap-slash-row > .cap-slash-desc { grid-area: desc; }
+  .cap-slash-row > .chip { grid-area: status; justify-self: start; }
+  .cap-slash-row > button { grid-area: actions; }
+}
+
+/* ---------- 设置 ---------- */
+.set-layout { display: flex; gap: var(--sp-24); align-items: flex-start; }
+.set-group { margin-bottom: var(--sp-24); }
+.set-group > h3 {
+  font-size: var(--fs-14); font-weight: var(--fw-semibold);
+  margin-bottom: var(--sp-4);
+}
+.set-group > .desc { font-size: var(--fs-12); color: var(--text-3); margin-bottom: var(--sp-12); }
+.set-row {
+  display: flex; align-items: center; gap: var(--sp-16);
+  padding: var(--sp-10) var(--sp-14);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  font-size: var(--fs-12);
+}
+.set-row:first-of-type { border-radius: var(--r-8) var(--r-8) 0 0; }
+.set-row:last-of-type { border-bottom: 1px solid var(--border); border-radius: 0 0 var(--r-8) var(--r-8); }
+.set-row:only-of-type { border-radius: var(--r-8); border-bottom: 1px solid var(--border); }
+.set-row .sr-label { font-weight: var(--fw-medium); }
+.set-row .sr-desc { font-size: var(--fs-11); color: var(--text-3); margin-top: 1px; }
+.set-row .sr-control { margin-left: auto; flex: none; display: flex; align-items: center; gap: var(--sp-8); }
+.set-row .select, .set-row .input { width: 200px; }
+
+/* 设置页里的跳转卡（Models and Providers 分组下的两张）。
+   版式原本是每张卡上一串内联 style（display:flex / flex:1;min-width:0 /
+   display:block），用来覆盖 .proj-card 的 display:block —— 结构性版式写在
+   HTML 属性里，样式表就管不到，也没法随主题或断点调整。 */
+.set-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  margin-bottom: var(--sp-10);
+}
+.set-entry .se-main { flex: 1; min-width: 0; }
+/* .sr-desc 之前只有 .set-row 作用域下的规则，卡片里那份靠内联 display:block
+   撑着；这里给它自己的规则，两处才有一致的次要文字样式。 */
+.set-entry .sr-desc {
+  display: block;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  margin-top: 1px;
+}
+
+.perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-10); }
+.perm-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-8); padding: var(--sp-12) var(--sp-14);
+  font-size: var(--fs-12);
+}
+.perm-card .pm-head { display: flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-semibold); margin-bottom: var(--sp-6); }
+
+/* ---------- 诊断中心 ---------- */
+.diag-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  overflow: hidden;
+  margin-bottom: var(--sp-20);
+}
+.diag-kv .dk { background: var(--surface); padding: var(--sp-10) var(--sp-14); }
+.diag-kv .dk .k { font-size: var(--fs-11); color: var(--text-3); }
+.diag-kv .dk .v { font-family: var(--font-mono); font-size: var(--fs-12); margin-top: 2px; word-break: break-all; }
+/* Capability chip cloud. Each chip previously carried its own
+   `style="margin:0 4px 4px 0"`; a wrapping flex container replaces ~14 inline
+   declarations with one rule. */
+.diag-caps { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.diag-err-row { cursor: default; }
+.diag-section { margin-bottom: var(--sp-20); }
+.diag-section > h3 { font-size: var(--fs-14); font-weight: var(--fw-semibold); margin-bottom: var(--sp-8); display: flex; align-items: center; gap: var(--sp-8); }
+.diag-table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
+.diag-table th {
+  text-align: left; font-weight: var(--fw-medium); color: var(--text-3);
+  font-size: var(--fs-11); padding: 6px var(--sp-10);
+  border-bottom: 1px solid var(--border);
+}
+.diag-table td { padding: 7px var(--sp-10); border-bottom: 1px solid var(--border); font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-2); }
+.diag-table tr:last-child td { border-bottom: none; }
+details.diag-advanced { border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface); }
+details.diag-advanced > summary {
+  list-style: none; cursor: pointer; padding: var(--sp-10) var(--sp-14);
+  font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--text-2);
+}
+details.diag-advanced > summary::-webkit-details-marker { display: none; }
+details.diag-advanced .da-body { padding: 0 var(--sp-14) var(--sp-12); }

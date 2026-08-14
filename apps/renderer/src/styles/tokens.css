@@ -1,0 +1,253 @@
+/* ============================================================
+   OMP Studio — Design Tokens
+   Light / Dark 双主题，通过 html[data-theme] 切换
+   ============================================================ */
+
+:root {
+  /* Typography */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas,
+    "Courier New", monospace;
+
+  /* Typography scale: clear hierarchy with meaningful steps.
+     Removed --fs-13 (too close to 12px to be distinguishable).
+     The ladder now follows ~1.17x ratio for legible hierarchy. */
+  --fs-11: 11px;   /* Smallest UI text: timestamps, metadata, helper text */
+  --fs-12: 12px;   /* Standard UI text: buttons, labels, tree items */
+  --fs-14: 14px;   /* Secondary headings, emphasized text, section labels */
+  --fs-16: 16px;   /* Body text, input fields, conversation content */
+  --fs-18: 18px;   /* Page titles, panel headings */
+  --fs-22: 22px;   /* Large headings, welcome messages */
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Radius — soft, not sharp. Every tier moved up so the UI reads as
+     rounded rather than boxy; the ladder keeps its relative steps so
+     nested corners still nest correctly (outer must exceed inner). */
+  --r-4: 6px;    /* inline chips, tree rows, small controls */
+  --r-6: 9px;    /* buttons, menu items, tool cards */
+  --r-8: 12px;   /* cards, panels, popovers */
+  --r-10: 16px;  /* modals, composer, command palette */
+  --r-full: 999px;
+
+  /* Spacing scale — --sp-14 was referenced ~30 times as var(--sp-14, 14px)
+     without ever being declared. Declared here so the fallback stops being
+     load-bearing and the step can be retuned in one place. */
+  --sp-2: 2px;
+  --sp-4: 4px;
+  --sp-6: 6px;
+  --sp-8: 8px;
+  --sp-10: 10px;
+  --sp-12: 12px;
+  --sp-14: 14px;
+  --sp-16: 16px;
+  --sp-20: 20px;
+  --sp-24: 24px;
+  --sp-32: 32px;
+
+  /* Minimum pointer target (WCAG 2.2 SC 2.5.8 Target Size Minimum = 24px).
+     Dense IDE chrome draws smaller icons than this; the hit area is padded
+     out to --tap-min so the visual size and the target size can differ. */
+  --tap-min: 24px;
+
+  /* Layout metrics */
+  --topbar-h: 44px;
+  --sidebar-w: 272px;
+  --sidebar-min: 200px;
+  --sidebar-max: 400px;
+  --minimap-w: 36px;
+  --panel-w: 480px;
+  --doc-max-w: 768px;
+  --bottom-panel-h: 240px;
+
+  /* Motion — one curve for everything reads as mechanical. Entrances decelerate
+     into place (ease-out), exits accelerate away (ease-in), and exits run at
+     ~65% of entrance duration so dismissing never feels like waiting.
+     Tactile feedback uses a snappier duration to feel immediate. */
+  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out: cubic-bezier(0.16, 0.84, 0.44, 1);
+  --ease-in: cubic-bezier(0.5, 0, 0.75, 0);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);  /* Slight overshoot for playful interactions */
+  /* iOS 风格滑动手感：起步轻快、全程均匀缓出、末尾柔和停下（easeOutCubic 类），
+     给滑动指示器（模型配置标签栏气泡 / 二级页导航气泡）用的丝滑曲线。 */
+  --ease-ios: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  /* 切换页面标签栏（顶部导航气泡）专用：Apple iOS 弹簧曲线 —— 起步更猛、
+     长尾缓降，曲线感强、无过冲、结尾不戛然而止。 */
+  --ease-nav: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 250ms;
+  --dur-slide: 230ms;  /* 标签栏切换气泡的滑动时长，独立于页面切换的 --dur-slow */
+  --dur-exit: 120ms;
+  --dur-tactile: 80ms;  /* Quick feedback for button presses */
+
+  /* Z-index — the scale is the contract; raw values in component files are not.
+     Every layer below is referenced by name from the component CSS. */
+  --z-base: 1;
+  --z-resizer: 5;
+  --z-scroll-aid: 9;
+  --z-rail: 10;
+  --z-rail-tools: 11;
+  --z-topbar: 20;
+  --z-panel: 30;
+  --z-fab: 40;
+  --z-menu: 60;
+  --z-modal: 80;
+  --z-toast: 100;
+}
+
+/* ---------------- Light (default) ---------------- */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* 背景组合来自 redesigning-skill-card-components.zip：
+     侧栏/抽屉 = --bg-inset（sb-bg），对话区 = --bg（sb-panel） */
+  --bg: #fbfbfc;
+  --bg-inset: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f2f2f5;
+  --surface-3: #e8e8ec;
+  --surface-hover: rgba(20, 20, 30, 0.045);
+  --surface-active: rgba(20, 20, 30, 0.08);
+
+  --border: rgba(15, 18, 25, 0.09);
+  --border-strong: rgba(15, 18, 25, 0.16);
+
+  /* Text ramp. --text-faint was #8f96a1 — only 2.95:1 on white, and it carries
+     real text (thread timestamps, line numbers, diff durations, palette kind
+     labels), not just decoration. Both lower tiers were pulled down until they
+     clear 4.5:1 while keeping a visible step between them:
+       text-2  7.34:1   text-3  5.95:1   text-faint  4.72:1  */
+  --text: #1d2129;
+  --text-2: #4e5560;
+  --text-3: #5c636e;
+  --text-faint: #6d7480;
+  --text-on-accent: #ffffff;
+  /* Non-text greys (icon hairlines, rail dots, disabled glyphs) keep the old
+     lighter tone — they only owe 3:1, and using the text ramp there would make
+     the chrome heavier than the content. */
+  --glyph-faint: #8b929d;
+
+  --accent: #6e56cf;
+  --accent-hover: #5f48c0;
+  --accent-soft: rgba(110, 86, 207, 0.1);
+  --accent-softer: rgba(110, 86, 207, 0.06);
+  --accent-border: rgba(110, 86, 207, 0.35);
+
+  /* Status colors darkened to clear 4.5:1 on white — the originals sat at
+     3.2-3.9:1, which fails for the small mono text they carry. */
+  --green: #137a52;
+  --green-soft: rgba(19, 122, 82, 0.12);
+  --amber: #8f5a05;
+  --amber-soft: rgba(143, 90, 5, 0.12);
+  --red: #c0272c;
+  --red-soft: rgba(192, 39, 44, 0.1);
+  --blue: #1f6ba3;
+  --blue-soft: rgba(31, 107, 163, 0.12);
+  --purple: var(--accent);
+  --purple-soft: var(--accent-soft);
+
+  /* Git file status — deliberately separate from the semantic scale above,
+     so a tree full of modified files doesn't read as a tree full of
+     warnings. Mirrors ver2's split. */
+  --git-modified: #96570a;
+  --git-added: #177e33;
+  --git-deleted: #c7283a;
+  --git-renamed: #0a66c2;
+  --git-untracked: #666d78;
+  --git-conflict: #c7283a;
+
+  --diff-add-bg: rgba(19, 122, 82, 0.11);
+  --diff-add-gutter: rgba(19, 122, 82, 0.2);
+  --diff-del-bg: rgba(192, 39, 44, 0.09);
+  --diff-del-gutter: rgba(192, 39, 44, 0.18);
+
+  --code-bg: #f4f4f7;
+  --code-chip-bg: rgba(110, 86, 207, 0.09);
+  --code-chip-text: #5a45b8;
+
+  /* Flat: depth comes from borders + surface steps, never shadow stacks.
+     Detached surfaces use --border-float instead, which is strong enough
+     to separate them from the page without faking elevation. */
+  --shadow-menu: none;
+  --shadow-modal: none;
+  --border-float: #9b958c;
+
+  --scrollbar: rgba(20, 20, 30, 0.18);
+  --scrollbar-hover: rgba(20, 20, 30, 0.32);
+  --minimap-viewport: rgba(20, 20, 30, 0.08);
+  --selection: rgba(110, 86, 207, 0.2);
+}
+
+/* ---------------- Dark ---------------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #121519;
+  --bg-inset: #0e1013;
+  --surface: #1a1b1f;
+  --surface-2: #222329;
+  --surface-3: #2b2c33;
+  --surface-hover: rgba(235, 235, 245, 0.05);
+  --surface-active: rgba(235, 235, 245, 0.09);
+
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.12);
+
+  /* Same treatment in dark, measured against --surface (#1a1b1f) rather than
+     --bg, since --surface is the lighter of the two backgrounds text sits on:
+       text-2  8.1:1   text-3  5.37:1   text-faint  4.55:1  */
+  --text: #e7e8eb;
+  --text-2: #a7abb4;
+  --text-3: #8b909a;
+  --text-faint: #7c828c;
+  --glyph-faint: #676b74;
+  /* Dark accent is a light lilac — white on it is only 2.76:1. The
+     foreground has to invert to the app background instead (6.73:1). */
+  --text-on-accent: #121316;
+
+  --accent: #9e8cfc;
+  --accent-hover: #b0a2ff;
+  --accent-soft: rgba(158, 140, 252, 0.14);
+  --accent-softer: rgba(158, 140, 252, 0.08);
+  --accent-border: rgba(158, 140, 252, 0.4);
+
+  --green: #46b983;
+  --green-soft: rgba(70, 185, 131, 0.15);
+  --amber: #e0a23c;
+  --amber-soft: rgba(224, 162, 60, 0.15);
+  --red: #f06568;
+  --red-soft: rgba(240, 101, 104, 0.14);
+  --blue: #5da9e0;
+  --blue-soft: rgba(93, 169, 224, 0.15);
+
+  --git-modified: #e3a008;
+  --git-added: #3fb950;
+  --git-deleted: #f0616d;
+  --git-renamed: #4a9eff;
+  --git-untracked: #939aa5;
+  --git-conflict: #f0616d;
+
+  --diff-add-bg: rgba(70, 185, 131, 0.16);
+  --diff-add-gutter: rgba(70, 185, 131, 0.28);
+  --diff-del-bg: rgba(240, 101, 104, 0.14);
+  --diff-del-gutter: rgba(240, 101, 104, 0.26);
+
+  --code-bg: #141519;
+  --code-chip-bg: rgba(158, 140, 252, 0.14);
+  --code-chip-text: #b3a5fd;
+
+  --shadow-menu: none;
+  --shadow-modal: none;
+  --border-float: #46505f;
+
+  --scrollbar: rgba(235, 235, 245, 0.16);
+  --scrollbar-hover: rgba(235, 235, 245, 0.3);
+  --minimap-viewport: rgba(235, 235, 245, 0.07);
+  --selection: rgba(158, 140, 252, 0.3);
+}

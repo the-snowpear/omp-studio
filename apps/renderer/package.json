@@ -10,7 +10,11 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "@omp-studio/client": "0.1.0",
     "@omp-studio/client-contract": "0.1.0",
+    "@omp-studio/transport-desktop": "0.1.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

@@ -35,3 +35,14 @@ Thumbs.db
 # Local Codex setup backups and downloaded installers
 .codex-backups/
 .codex-tools/
+
+# Task backups, scratch work, and generated audit outputs
+backup/
+tmp/
+outputs/
+
+# Local agent/IDE config (project skills live under repo .claude only on dev machines)
+.claude/
+
+# Alternate lockfile (repo uses npm / package-lock.json)
+pnpm-lock.yaml

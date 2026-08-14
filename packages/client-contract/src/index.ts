@@ -23,6 +23,7 @@ import type {
   SessionId,
   StateVersion,
   ThreadId,
+  WorkspaceId,
 } from "./ids.js";
 import type {
   PublicAuthorityIdentity,
@@ -55,6 +56,7 @@ export interface ClientSelection {
   readonly environmentId?: EnvironmentId;
   readonly threadId?: ThreadId;
   readonly sessionId?: SessionId;
+  readonly workspaceId?: WorkspaceId;
 }
 
 /**
@@ -71,12 +73,16 @@ export interface ClientBootstrap {
   /** Hash of the operator command manifest; the full manifest comes by query. */
   readonly commandManifestHash: string;
   readonly selected: ClientSelection;
-  readonly snapshot: OperatorStateSnapshot;
+  /** Present when a Runtime snapshot is available; omitted in read-only bootstrap. */
+  readonly snapshot?: OperatorStateSnapshot;
   /** Snapshot version; equals `snapshot.stateVersion`. */
-  readonly stateVersion: StateVersion;
+  readonly stateVersion?: StateVersion;
   /** Subscription resume point; events after this cursor are in order. */
-  readonly cursor: EventCursor;
+  readonly cursor?: EventCursor;
 }
+
+/** Shared bootstrap fields before an optional Runtime snapshot is attached. */
+export type ClientBootstrapBase = Omit<ClientBootstrap, "snapshot" | "stateVersion" | "cursor">;
 
 export interface CommandOptions {
   /** Same key + same command must map to the same semantic input. */

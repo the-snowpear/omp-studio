@@ -12,7 +12,10 @@
  *
  * §8.3 invariants implemented here:
  *   1. bootstrap establishes authority/runtime epoch, stateVersion, cursor
- *      and the initial snapshot;
+ *      and the initial snapshot; an unavailable bootstrap (Runtime without
+ *      a snapshot) still establishes authority, surface and manifests but
+ *      keeps stateVersion/cursor null and entities.snapshot null until a
+ *      snapshot event arrives;
  *   2. duplicate cursors are idempotent (the reducer returns the same state
  *      reference when nothing changed);
  *   3. stale authority/runtime epochs are ignored;
@@ -132,10 +135,49 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
 
 /** Mutations with external side effects; blocked while resync is required. */
 const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
+  "core.prompt": true,
+  "core.steer": true,
+  "core.followUp": true,
+  "core.abort": true,
+  "queue.enqueue": true,
+  "runtime.pause": true,
+  "runtime.resume": true,
+  "turn.retry": true,
   "runtime.install": true,
   "session.resume": true,
   "session.drop": true,
   "interaction.respond": true,
+  "models.provider.upsert": true,
+  "models.provider.delete": true,
+  "models.roles.set": true,
+  "models.login.start": true,
+  "models.provider.test": true,
+  "models.cycleOrder.set": true,
+  "plugins.setEnabled": true,
+  "skills.setEnabled": true,
+  "workspace.open": true,
+  "workspace.pick": true,
+  "mode.plan.enter": true,
+  "mode.plan.exit": true,
+  "mode.plan.review.open": true,
+  "mode.plan.review.respond": true,
+  "mode.vibe.enter": true,
+  "mode.vibe.exit": true,
+  "goal.create": true,
+  "goal.replace": true,
+  "goal.show": true,
+  "goal.setBudget": true,
+  "goal.pause": true,
+  "goal.resume": true,
+  "goal.drop": true,
+  "goal.guided.start": true,
+  "loop.enable": true,
+  "loop.pause": true,
+  "loop.disable": true,
+  "session.fork": true,
+  "session.tree.get": true,
+  "session.tree.navigate": true,
+  "operator.invoke": true,
 };
 
 export function isSensitiveCommand(name: CommandName): boolean {
@@ -167,8 +209,8 @@ function isTerminal(status: CommandState["status"]): boolean {
  */
 const CANONICAL_DECIMAL_RE = /^(0|[1-9][0-9]*)$/;
 
-function parseNumericCursor(cursor: EventCursor): number | null {
-  return CANONICAL_DECIMAL_RE.test(cursor) ? Number(cursor) : null;
+function parseNumericCursor(cursor: EventCursor): bigint | null {
+  return CANONICAL_DECIMAL_RE.test(cursor) ? BigInt(cursor) : null;
 }
 
 type CursorRelation = "duplicate" | "next" | "gap" | "behind";
@@ -182,10 +224,10 @@ function cursorRelation(last: EventCursor, current: EventCursor): CursorRelation
   if (lastNum === null || currentNum === null) {
     return "gap";
   }
-  if (currentNum === lastNum + 1) {
+  if (currentNum === lastNum + 1n) {
     return "next";
   }
-  if (currentNum > lastNum + 1) {
+  if (currentNum > lastNum + 1n) {
     return "gap";
   }
   return "behind";
@@ -263,8 +305,11 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
     authorityEpoch: bootstrap.authority.authorityEpoch,
     runtime: bootstrap.runtime,
     runtimeEpoch: bootstrap.runtime.runtimeEpoch ?? null,
-    stateVersion: bootstrap.stateVersion,
-    cursor: bootstrap.cursor,
+    // Snapshot, stateVersion and cursor are all-or-none: an unavailable
+    // bootstrap (Runtime without a snapshot) leaves both null until a
+    // snapshot event establishes Runtime state.
+    stateVersion: bootstrap.stateVersion ?? null,
+    cursor: bootstrap.cursor ?? null,
     resyncRequired: false,
     resyncReason: null,
     surface: bootstrap.surface,
@@ -276,7 +321,7 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
   // In-flight commands from a previous bootstrap cannot be reconciled
   // against the fresh snapshot; they become outcome_unknown, never retried.
   const commands = markPendingOutcomeUnknown(state.commands, "client re-bootstrapped; outcome unknown", occurredAt);
-  return { ...state, connection, entities: { snapshot: bootstrap.snapshot }, commands };
+  return { ...state, connection, entities: { snapshot: bootstrap.snapshot ?? null }, commands };
 }
 
 function reduceEvent(state: ClientState, event: ClientEvent): ClientState {

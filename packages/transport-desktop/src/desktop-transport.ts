@@ -64,6 +64,9 @@ class TransportProtocolError extends Error {
  */
 function deepClone<T>(value: T): T {
   if (value === null || typeof value !== "object") {
+    if (typeof value === "function" || typeof value === "symbol") {
+      throw new TransportProtocolError("desktop transport: envelope contains a non-JSON value");
+    }
     return value;
   }
   if (Array.isArray(value)) {
@@ -71,6 +74,10 @@ function deepClone<T>(value: T): T {
   }
   if (value instanceof Date) {
     return new Date(value.getTime()) as T;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TransportProtocolError("desktop transport: envelope contains a non-plain object");
   }
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(value)) {

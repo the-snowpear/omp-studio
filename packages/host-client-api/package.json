@@ -1,0 +1,41 @@
+{
+  "name": "@omp-studio/host-client-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Presentation-neutral Host semantic facade for the OMP Studio product client (P1)",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./models": {
+      "types": "./dist/src/omp-models-adapter.d.ts",
+      "default": "./dist/src/omp-models-adapter.js"
+    },
+    "./extensibility": {
+      "types": "./dist/src/omp-extensibility-adapter.d.ts",
+      "default": "./dist/src/omp-extensibility-adapter.js"
+    },
+    "./workspaces": {
+      "types": "./dist/src/omp-workspace-adapter.d.ts",
+      "default": "./dist/src/omp-workspace-adapter.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"dist/test/*.test.js\""
+  },
+  "dependencies": {
+    "@omp-studio/client-contract": "0.1.0",
+    "@omp-studio/studio-host": "0.1.0",
+    "@omp-studio/studio-protocol": "0.1.0",
+    "yaml": "^2.9.0"
+  }
+}

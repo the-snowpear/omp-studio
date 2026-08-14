@@ -19,3 +19,4 @@ export * from "./session-catalog.js";
 export * from "./state-projector.js";
 export * from "./thread-binding-store.js";
 export * from "./windows-job-object.js";
+export * from "./workspace-registry.js";

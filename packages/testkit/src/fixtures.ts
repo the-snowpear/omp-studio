@@ -242,6 +242,9 @@ const QUERY_INPUTS = {
   "history.list": { limit: 5 },
   "session.state": {},
   "home.get": {},
+  "models.get": {},
+  "skills.get": {},
+  "projects.list": {},
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
@@ -256,6 +259,38 @@ const QUERY_RESPONSES = {
   "history.list": { ok: true, queryName: "history.list", result: HISTORY },
   "session.state": { ok: true, queryName: "session.state", result: SNAPSHOT },
   "home.get": { ok: true, queryName: "home.get", result: HOME },
+  "models.get": {
+    ok: true,
+    queryName: "models.get",
+    result: {
+      providers: [],
+      presets: [],
+      roles: [],
+      cycleOrder: [],
+      availableModels: [],
+      loginProviders: [],
+      generatedModelsYml: "providers: {}\n",
+      generatedConfigYml: "modelRoles: {}\n",
+      runtimeEffectHint: "test",
+      loginAvailable: false,
+      ompAvailable: false,
+    },
+  },
+  "skills.get": {
+    ok: true,
+    queryName: "skills.get",
+    result: {
+      skills: [],
+      plugins: [],
+      warnings: [],
+      generatedAt: T0,
+    },
+  },
+  "projects.list": {
+    ok: true,
+    queryName: "projects.list",
+    result: { workspaces: [] },
+  },
 } satisfies { readonly [K in QueryName]: ClientQueryResponse<K> };
 
 const COMMAND_RUNTIME_INSTALL: ClientCommandRequest<"runtime.install"> = {

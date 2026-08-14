@@ -114,6 +114,9 @@ export function runTransportContract(name: string, factory: TransportFactory): v
       const { api, transport } = createHarness(factory);
       const bootstrap = await transport.bootstrap();
       assert.deepEqual(bootstrap, contractFixtures.bootstrap);
+      // The fixture bootstraps with an established runtime snapshot; the
+      // contract's without-snapshot variant must not apply here.
+      assert.ok(bootstrap.snapshot);
       assert.equal(bootstrap.stateVersion, bootstrap.snapshot.stateVersion);
       assert.equal(bootstrap.snapshot.runtimeId, bootstrap.runtime.runtimeId);
       assert.equal(bootstrap.cursor, contractFixtures.bootstrap.cursor);

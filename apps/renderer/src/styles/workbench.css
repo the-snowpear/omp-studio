@@ -1,0 +1,1511 @@
+/* ============================================================
+   OMP Studio — 核心工作台
+   ============================================================ */
+
+/* ---------- 顶部工作区栏 ---------- */
+.topbar {
+  height: var(--topbar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 0 var(--sp-12) 0 var(--sp-8);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  position: relative;
+  z-index: var(--z-topbar);
+}
+/* 左组：面包屑 + Fork/Handoff。
+   面包屑按内容宽度排布（不 flex:1 撑开），Fork/Handoff 因此紧贴对话标题；
+   组本身 flex:1 吃掉剩余空间，把 Agent Hub / 历史 / 遥测推到最右。 */
+.tb-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: 1;
+  min-width: 0;
+}
+.tb-crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 0 1 auto;
+  font-size: var(--fs-12);
+}
+/* ver2 面包屑段：项目 › 分支 › 标题，各段都是可点按钮，hover 高亮 */
+.crumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 26px;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-6);
+  color: var(--text-2);
+  white-space: nowrap;
+  max-width: 220px;
+  min-width: 0;
+}
+.crumb-menu { display: inline-flex; min-width: 0; }
+.crumb-item:hover,
+.crumb-item.open { background: var(--surface-hover); color: var(--text); }
+.crumb-item .icon { flex: none; color: var(--text-3); }
+.crumb-item .ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.crumb-chevron { width: 12px; height: 12px; color: var(--text-faint); }
+.crumb-current { color: var(--text); font-weight: var(--fw-semibold); }
+.crumb-sep { color: var(--text-faint); flex: none; user-select: none; }
+.crumb-item .dot { width: 6px; height: 6px; margin-left: 1px; }
+.tb-right { margin-left: auto; display: flex; align-items: center; gap: var(--sp-4); }
+
+/* ---------- Session Telemetry（紧凑 · 扁平化：无边框无背景，纯文字） ---------- */
+.telemetry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: 2px var(--sp-4);
+  /* No cursor:pointer and no hover fill here any more. The wrapper has no click
+     handler — only the two .t-group children do — so both were advertising an
+     interaction that did nothing, and the wrapper's hover fill made the whole
+     strip look like one button covering three separate targets. */
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  border-radius: var(--r-4);
+}
+/* Telemetry 内部分区（Token / Context 独立点击）— real buttons now, so the
+   inherited button defaults (font, padding, border) have to be neutralised. */
+.telemetry .t-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  border-radius: var(--r-4);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.telemetry .anchored-pop { display: inline-flex; }
+.telemetry .t-group:hover,
+.telemetry .t-group.open { background: var(--accent-soft); }
+.telemetry .t-group:hover b,
+.telemetry .t-group.open b { color: var(--accent); }
+.telemetry .t-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.telemetry .t-item b { color: var(--text-2); font-weight: var(--fw-medium); }
+.telemetry .t-sep { width: 1px; height: 12px; background: var(--border-strong); opacity: 0.6; }
+.telemetry .ctx-ring {
+  width: 16px; height: 16px; border-radius: var(--r-full); flex: none;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--surface-3) 0);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.telemetry .ctx-ring::after {
+  content: ""; width: 10px; height: 10px; border-radius: var(--r-full); background: var(--bg);
+}
+/* Compact 按钮：独立按钮样式（与扁平 Telemetry 数字区分） */
+.tb-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--r-6);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  white-space: nowrap;
+  margin-left: 2px;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.tb-compact:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-softer); }
+.tb-compact .icon { width: 12px; height: 12px; }
+
+/* Telemetry 详情浮层 */
+.telemetry-pop { width: 340px; padding: 0; }
+.telemetry-pop .tp-head {
+  padding: var(--sp-12) var(--sp-14) var(--sp-8);
+  display: flex; align-items: center; gap: var(--sp-8);
+  font-weight: var(--fw-semibold);
+}
+
+/* ---------- Token 用量弹窗 ----------
+   Redesigned from a flat 2x5 grid of equal cells: cost and cache hit rate
+   were competing with retry count for attention. Now three tiers —
+   headline figures, an input/output split bar, then a detail list. */
+.tok-pop { width: 372px; }
+
+/* Tier 1 — the two numbers you actually opened this for. */
+.tok-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.tok-hero .th-cell {
+  background: var(--surface);
+  padding: var(--sp-10) var(--sp-14) var(--sp-12);
+}
+.tok-hero .th-k {
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  display: flex; align-items: center; gap: 4px;
+}
+.tok-hero .th-v {
+  font-family: var(--font-mono);
+  font-size: 21px;
+  line-height: 1.15;
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.tok-hero .th-sub { font-size: 10.5px; color: var(--text-3); margin-top: 3px; }
+.tok-hero .th-sub b { color: var(--green); font-weight: var(--fw-semibold); }
+
+/* Tier 2 — input vs output as proportion, not two unrelated numbers. */
+.tok-split { padding: var(--sp-12) var(--sp-14) var(--sp-10); }
+.tok-split .ts-top {
+  display: flex; align-items: baseline; justify-content: space-between;
+  font-size: var(--fs-11); color: var(--text-2);
+}
+.tok-split .ts-top b {
+  font-family: var(--font-mono); color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tok-bar {
+  display: flex; height: 6px; gap: 2px;
+  margin: var(--sp-8) 0 var(--sp-6);
+}
+.tok-bar i { display: block; height: 100%; border-radius: var(--r-full); }
+.tok-bar .tb-in { background: var(--blue); }
+.tok-bar .tb-out { background: var(--accent); }
+.tok-bar .tb-cache { background: var(--green); }
+.tok-bar .tb-none,
+.ctxbar .cb-none {
+  flex: 1 0 100%;
+  width: 100%;
+  min-width: 100%;
+  background: var(--surface-3);
+}
+.tok-keys { display: flex; gap: var(--sp-12); font-size: 10.5px; color: var(--text-3); }
+.tok-keys span { display: flex; align-items: center; gap: 4px; }
+.tok-keys i { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+
+/* Tier 3 — the rest, as rows. Cheap to scan, cheap to ignore. */
+.tok-rows {
+  padding: var(--sp-4) var(--sp-14) var(--sp-10);
+  border-top: 1px solid var(--border);
+}
+.tok-rows .tr-row {
+  display: flex; align-items: center;
+  height: 24px;
+  font-size: var(--fs-11);
+  color: var(--text-2);
+}
+.tok-rows .tr-row .tr-v {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tok-rows .tr-row .tr-v.ok { color: var(--green); }
+.tok-rows .tr-row .tr-v.dim { color: var(--text-3); }
+
+.tp-grid { padding: 0 var(--sp-14) var(--sp-10); display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.tp-cell { background: var(--surface); padding: var(--sp-8) var(--sp-10); }
+.tp-cell .k { font-size: 10.5px; color: var(--text-3); }
+.tp-cell .v { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--text); margin-top: 1px; }
+.tp-ctx { padding: var(--sp-10) var(--sp-14); font-size: var(--fs-11); color: var(--text-2); display: flex; flex-direction: column; gap: var(--sp-6); }
+
+/* Context 构成彩色堆叠条（ctx-pop） */
+.ctx-pop { width: 360px; }
+.ctxbar {
+  display: flex;
+  width: 100%;
+  height: 12px;
+  border-radius: var(--r-full);
+  overflow: hidden;
+  margin: 4px 0 2px;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.ctxbar i { display: block; height: 100%; transition: opacity var(--dur-fast) var(--ease); }
+.ctxbar i:hover { opacity: 0.75; }
+.ctx-legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 18px;
+  margin-top: 4px;
+}
+.ctx-legend .cl-row { display: flex; align-items: center; gap: 7px; font-size: var(--fs-11); color: var(--text-2); }
+.ctx-legend .cl-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.ctx-legend .cl-v { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--text); }
+
+/* ---------- 主工作区布局 ---------- */
+.workbench {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.convo-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.convo-scroll {
+  flex: 1;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  /* minimap 替代原生滚动条（参照 omp-web ChatWindow） */
+  scrollbar-width: none;
+}
+/* Skip-link target: tabindex="-1" makes this focusable so focus actually lands
+   in the conversation, but it is a scroll container, not a control — a ring
+   around the whole region would read as an error. Focus is still moved (screen
+   readers continue reading from here), just not outlined. */
+.convo-scroll:focus,
+.convo-scroll:focus-visible { outline: none; }
+.convo-scroll::-webkit-scrollbar { display: none; }
+.convo-doc {
+  max-width: var(--doc-max-w);
+  margin: 0 auto;
+  padding: var(--sp-24) var(--sp-32) var(--sp-32);
+  padding-right: calc(var(--sp-32) + var(--minimap-w) + 8px);
+}
+
+/* 主区模式：分栏时 */
+.workbench.split-right .side-panel { display: flex; }
+
+/* ---------- 文档式对话流 ---------- */
+.ev { margin-bottom: var(--sp-20); }
+.ev-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-bottom: var(--sp-6);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.ev-head .who {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-12);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+.ev-head .who .role-badge {
+  width: 18px; height: 18px; border-radius: var(--r-4);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: var(--fw-bold);
+}
+.role-badge.u { background: var(--surface-3); color: var(--text-2); }
+.role-badge.a { background: var(--accent-soft); color: var(--accent); }
+
+/* 用户消息：左边框引用块样式（非气泡） */
+.ev-user .ev-body {
+  border-left: 2px solid var(--accent);
+  padding: var(--sp-4) var(--sp-14);
+  background: var(--accent-softer);
+  border-radius: 0 var(--r-6) var(--r-6) 0;
+  font-size: var(--fs-14);
+  line-height: 1.7;
+}
+.ev-refs { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-8); }
+
+/* Assistant 正文 */
+.ev-assistant .ev-body { font-size: var(--fs-14); line-height: 1.75; color: var(--text); }
+.ev-body h3 { font-size: var(--fs-14); font-weight: var(--fw-semibold); margin: var(--sp-12) 0 var(--sp-6); }
+.ev-body p { margin: var(--sp-6) 0; }
+.ev-body ul { margin: var(--sp-6) 0 var(--sp-6) var(--sp-20); }
+.ev-body li { margin: 3px 0; }
+.ev-body strong { font-weight: var(--fw-semibold); }
+
+/* Thinking（折叠） */
+.ev-thinking {
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  overflow: hidden;
+}
+.ev-thinking > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 6px var(--sp-10);
+  cursor: pointer;
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  user-select: none;
+}
+.ev-thinking > summary::-webkit-details-marker { display: none; }
+.ev-thinking > summary:hover { color: var(--text); }
+.ev-thinking .think-body {
+  padding: var(--sp-4) var(--sp-12) var(--sp-10);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  border-top: 1px dashed var(--border);
+  font-style: italic;
+}
+
+/* Plan 卡 */
+.plan-card {
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--blue);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  padding: var(--sp-10) var(--sp-14);
+}
+.plan-card .plan-title {
+  display: flex; align-items: center; gap: var(--sp-6);
+  font-weight: var(--fw-semibold); font-size: var(--fs-12); color: var(--blue);
+  margin-bottom: var(--sp-6);
+}
+.plan-card ol { margin-left: var(--sp-20); font-size: var(--fs-14); color: var(--text-2); }
+.plan-card li { margin: 3px 0; }
+.plan-card li.done { color: var(--text-3); text-decoration: line-through; }
+
+/* ---------- 工具调用卡片 ---------- */
+.tool-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  overflow: hidden;
+  margin-bottom: var(--sp-8);
+}
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 6px var(--sp-10);
+  cursor: pointer;
+  user-select: none;
+}
+.tool-head:hover { background: var(--surface-hover); }
+.tool-head .tool-icon {
+  width: 20px; height: 20px; border-radius: var(--r-4);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-2); color: var(--text-3); flex: none;
+}
+.tool-head .tool-name { font-weight: var(--fw-semibold); font-size: var(--fs-12); }
+.tool-head .tool-target {
+  font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-2);
+  min-width: 0;
+}
+.tool-head .tool-meta { margin-left: auto; display: flex; align-items: center; gap: var(--sp-8); flex: none; }
+.tool-head .dur { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); }
+.tool-body { border-top: 1px solid var(--border); padding: var(--sp-10) var(--sp-12); display: none; }
+.tool-card.open .tool-body { display: block; }
+.tool-body .tb-row { display: flex; gap: var(--sp-10); font-size: var(--fs-12); margin-bottom: var(--sp-6); }
+.tool-body .tb-k { width: 72px; flex: none; color: var(--text-3); }
+.tool-body pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  padding: var(--sp-8) var(--sp-10);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-2);
+  margin-top: var(--sp-4);
+}
+
+/* 工具状态点 */
+.tst { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-11); font-weight: var(--fw-medium); }
+.tst.done { color: var(--green); }
+.tst.running { color: var(--blue); }
+.tst.pending { color: var(--text-3); }
+.tst.approval { color: var(--amber); }
+.tst.failed { color: var(--red); }
+.tst.aborted { color: var(--text-3); }
+
+/* 连续工具聚合卡 */
+.tool-group {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-6);
+  overflow: hidden;
+  margin-bottom: var(--sp-8);
+}
+.tool-group > .tg-head {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: 6px var(--sp-10); cursor: pointer;
+  font-size: var(--fs-12); color: var(--text-2);
+  background: var(--surface);
+}
+.tool-group > .tg-head:hover { background: var(--surface-hover); }
+.tool-group .tg-body { display: none; padding: var(--sp-8); background: var(--bg-inset); }
+.tool-group.open .tg-body { display: block; }
+.tool-group.open { border-style: solid; }
+
+/* ---------- 审批卡片 ---------- */
+.approval-card {
+  border: 2px solid var(--amber);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  overflow: hidden;
+}
+.approval-head {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-14);
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-weight: var(--fw-semibold); font-size: var(--fs-12);
+}
+.approval-head .chip { margin-left: auto; }
+.approval-body { padding: var(--sp-12) var(--sp-14); font-size: var(--fs-12); color: var(--text-2); }
+.approval-body .cmd {
+  font-family: var(--font-mono);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  padding: var(--sp-8) var(--sp-10);
+  margin: var(--sp-8) 0;
+  font-size: var(--fs-12);
+  color: var(--text);
+  display: flex; align-items: center; gap: var(--sp-8);
+}
+.approval-foot {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-14);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+/* Resolved approval: the amber \"needs your attention\" treatment stands down once
+   a decision is recorded. This was previously four inline style writes in JS
+   that baked light-theme token values into the element, so a resolved card kept
+   light-mode colours after a theme switch. Declared here instead, so both themes
+   resolve correctly. */
+.approval-card.resolved { border-color: var(--border); border-width: 1px; }
+.approval-card.resolved .approval-head {
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+/* Ask-User options are a radiogroup, so the selected one needs a non-colour cue
+   as well — `.sel` was accent border + accent tint only. */
+.ask-opt[aria-checked="true"]::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: currentColor;
+  flex: none;
+}
+
+/* Ask User 卡 */
+.ask-card {
+  border: 2px solid var(--accent-border);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  overflow: hidden;
+}
+.ask-head {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-14);
+  background: var(--accent-soft); color: var(--accent);
+  font-weight: var(--fw-semibold); font-size: var(--fs-12);
+}
+.ask-body { padding: var(--sp-12) var(--sp-14); display: flex; flex-direction: column; gap: var(--sp-8); }
+.ask-opt {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: 7px var(--sp-10);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  color: var(--text-2);
+  text-align: left;
+}
+.ask-opt:hover { border-color: var(--accent); color: var(--text); }
+.ask-opt.sel { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+/* 错误卡 */
+.error-card {
+  border: 1px solid var(--red);
+  border-left-width: 3px;
+  border-radius: var(--r-6);
+  background: var(--red-soft);
+  padding: var(--sp-10) var(--sp-14);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+.error-card .err-title { display: flex; align-items: center; gap: var(--sp-6); color: var(--red); font-weight: var(--fw-semibold); margin-bottom: var(--sp-4); }
+.error-card .err-actions { display: flex; gap: var(--sp-6); margin-top: var(--sp-8); }
+
+/* Checkpoint 卡 */
+.checkpoint-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  padding: var(--sp-12) var(--sp-14);
+}
+.checkpoint-card .cp-head { display: flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-semibold); font-size: var(--fs-12); }
+.checkpoint-card .cp-stats { display: flex; flex-wrap: wrap; gap: var(--sp-10); margin: var(--sp-8) 0; font-size: var(--fs-11); color: var(--text-3); font-family: var(--font-mono); }
+.checkpoint-card .cp-stats b { color: var(--text-2); font-weight: var(--fw-medium); }
+.checkpoint-card .cp-actions { display: flex; flex-wrap: wrap; gap: var(--sp-6); }
+
+/* Compact 条 */
+.compact-bar {
+  display: flex; align-items: center; gap: var(--sp-8);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-6);
+  padding: 6px var(--sp-12);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  background: var(--surface);
+}
+
+/* ---------- Conversation Minimap（参照 omp-web ChatMinimap：36px 圆点轨道 + 预览浮层） ---------- */
+.minimap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--minimap-w);
+  height: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  z-index: var(--z-rail);
+  user-select: none;
+  /* 不设 cursor:pointer：空白区（含视口指示条）不提示可点击，
+     只有节点（.mm-mark）是点击手 */
+}
+.minimap-track { position: relative; width: 100%; height: 100%; }
+/* 连接节点的轨道参考线 */
+.mm-rail {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  bottom: 14px;
+  width: 1px;
+  background: var(--border-strong);
+  transform: translateX(-50%);
+  z-index: 0;
+}
+/* 视口位置指示：覆盖整个 minimap 宽度的长方形，上下位置与高度
+   标示当前视口在整段对话中的位置（.convo-scroll 隐藏了原生滚动条）；
+   可按住拖动（滑块语义：保持抓取偏移，滚动跟随），光标沿用 minimap 的 pointer */
+.mm-viewport {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  border-radius: 2px;
+  background: var(--minimap-viewport);
+  z-index: 1; /* 在圆点之下、工具按钮之下 */
+}
+/* 回合节点：灰色圆点（同 omp-web 语义，每轮 user/assistant 一个点） */
+.mm-mark {
+  position: absolute;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  background: rgba(128, 128, 128, 0.16);
+  border: 1.5px solid rgba(128, 128, 128, 0.58);
+  z-index: 2;
+  cursor: pointer; /* 唯一提示可点击的区域：节点可跳转 */
+  transition: transform var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+.mm-mark:hover { transform: translate(-50%, -50%) scale(1.25); border-color: rgba(128, 128, 128, 0.9); }
+/* 活跃回合（滚动时最接近视口中部） */
+.mm-mark.active {
+  background: rgba(128, 128, 128, 0.42);
+  border-color: rgba(128, 128, 128, 0.95);
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--border-strong);
+  transform: translate(-50%, -50%) scale(1.12);
+}
+/* 特殊事件（需求：错误 / 审批突出显示），保留彩色点缀 */
+.mm-mark.user { background: rgba(128, 128, 128, 0.5); border-color: rgba(128, 128, 128, 0.85); }
+.mm-mark.error { background: var(--red); border-color: var(--red); }
+.mm-mark.approval { background: var(--amber); border-color: var(--amber); }
+.mm-mark.checkpoint { background: var(--accent); border-color: var(--accent); }
+.mm-mark.ask { background: var(--accent); border-color: var(--accent); }
+.mm-mark.compact { background: var(--text-3); border-color: var(--text-3); width: 12px; height: 3px; border-radius: 1px; }
+.mm-mark.file { border-color: var(--green); background: var(--green-soft); }
+.mm-mark.bash, .mm-mark.thinking, .mm-mark.plan { border-color: var(--blue); background: var(--blue-soft); }
+
+/* Minimap hover 预览浮层（左侧弹出，含回合序号 + 用户消息 + assistant 标题大纲） */
+.mm-preview {
+  position: absolute;
+  right: calc(var(--minimap-w) + 8px);
+  top: 8px;
+  width: 264px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-8);
+  box-shadow: var(--shadow-menu);
+  z-index: var(--z-menu);
+  padding: var(--sp-10);
+  font-size: var(--fs-11);
+  color: var(--text-2);
+  /* Was pointer-events: none, which silently killed three handlers bound to
+     this element in workbench.js: the mouseenter/mouseleave pair that keeps the
+     panel open while the cursor travels into it, and the click handler on
+     .mp-heading that jumps to an outline entry. The panel could never be
+     entered, so heading navigation was unreachable. */
+  pointer-events: auto;
+}
+.mm-preview .mp-no {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.mm-preview .mp-user {
+  font-weight: var(--fw-medium);
+  color: var(--text);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  margin-bottom: 6px;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.mm-preview .mp-heading {
+  padding: 3px 8px;
+  border-radius: var(--r-4);
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mm-preview .mp-heading:hover { background: var(--accent-soft); }
+.mm-preview .mp-empty { color: var(--text-faint); font-style: italic; }
+
+/* 底部工具按钮 */
+.minimap-tools {
+  position: absolute;
+  right: 4px;
+  bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: var(--z-rail-tools);
+}
+.minimap-tools .icon-btn {
+  width: 20px;
+  height: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.minimap-tools .icon-btn .icon { width: 11px; height: 11px; }
+
+/* 新内容提示 — a real <button> now (it was a click-handled div), so the button
+   defaults have to be reset back to the original appearance. */
+.new-content-pill {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: var(--sp-6);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-family: inherit;
+  font-size: var(--fs-11);
+  padding: 4px var(--sp-12);
+  border: none;
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-menu);
+  cursor: pointer;
+  z-index: var(--z-scroll-aid);
+  animation: omp-toast-in var(--dur) var(--ease-out);
+}
+/* The pill sits on the accent fill, so an accent ring would be invisible. */
+.new-content-pill:focus-visible { outline-color: var(--text); }
+
+/* ---------- 输入区 ---------- */
+.composer-region {
+  flex: none;
+  background: var(--bg);
+  padding: var(--sp-10) var(--sp-16) var(--sp-8);
+  /* 右侧让出 minimap 宽度，避免被遮挡（参照 omp-web CHAT_INPUT_RIGHT_PADDING） */
+  padding-right: calc(var(--sp-16) + var(--minimap-w) + 8px);
+  position: relative;
+}
+.composer {
+  max-width: var(--doc-max-w);
+  margin: 0 auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-10);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+/* 聚焦特效 = 外发光（比小输入框稍强）：柔光环 + 弥散光晕，边框不变色 */
+.composer:focus-within {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-softer),
+              0 0 18px 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.composer.running { border-color: var(--blue); }
+.composer-ctx {
+  display: flex; flex-wrap: wrap; gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-12) 0;
+}
+.ctx-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 var(--sp-8);
+  border-radius: var(--r-4);
+  background: var(--accent-soft); color: var(--accent);
+  font-size: var(--fs-11); font-weight: var(--fw-medium);
+  font-family: var(--font-mono);
+}
+/* Now a real button (it was a span with a click handler, so a reference could be
+   added by keyboard but never removed by one). It sits on the accent-soft chip
+   fill, so the focus ring switches to the accent's own colour for contrast. */
+.ctx-chip .x {
+  cursor: pointer;
+  opacity: 0.6;
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  border-radius: var(--r-4);
+  position: relative;
+}
+.ctx-chip .x:hover { opacity: 1; }
+/* 22px chip leaves the close target under the 24px minimum on its own. */
+.ctx-chip .x::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  transform: translate(-50%, -50%);
+}
+.ctx-chip .x:focus-visible { opacity: 1; outline-offset: 1px; }
+
+/* Completion popup options. `.ci-label` replaces a bare <span>, which the old
+   accept path selected with querySelector('span') — that matched whichever span
+   came first and silently picked up the type label on some rows. */
+.complete-item .ci-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer textarea {
+  width: 100%;
+  border: none;
+  background: transparent;
+  resize: none;
+  padding: 5px var(--sp-14) var(--sp-4);
+  font-size: var(--fs-14);
+  line-height: 1.6;
+  min-height: 44px;
+  max-height: 200px;
+  outline: none;
+  font-family: var(--font-ui);
+}
+/* The textarea suppresses its own ring because .composer draws the focus state
+   for it — the wrapper now takes the real glow (see .composer:focus-within
+   above), so the state is still announced visually while the text area itself
+   stays clean. */
+.composer textarea:focus,
+.composer textarea:focus-visible {
+  outline: none;
+}
+.composer-bar {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-8) var(--sp-8);
+}
+.composer-bar .cb-group { display: flex; align-items: center; gap: var(--sp-2); }
+.composer-bar .pill-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 24px; padding: 0 var(--sp-8);
+  border-radius: var(--r-full);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.composer-bar .pill-btn .icon { width: 13px; height: 13px; }
+.composer-bar .pill-btn.meta-model { color: var(--text-2); font-weight: var(--fw-medium); }
+.composer-bar .pill-btn.meta-model:hover { color: var(--accent); }
+.pill-btn:hover { background: var(--surface-hover); color: var(--text); }
+.composer-bar .pill-btn.warn {
+  color: var(--amber);
+  background: var(--amber-soft);
+  font-weight: var(--fw-medium);
+}
+.send-btn {
+  width: 30px; height: 30px;
+  border-radius: var(--r-8);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: none;
+}
+.send-btn:hover { background: var(--accent-hover); }
+.send-btn.abort { background: var(--red); }
+.send-btn:disabled { background: var(--surface-3); color: var(--text-faint); }
+
+/* 项目上下文条（Codex 风格）：初始/空闲对话显示项目、分支与文件上下文。
+   只保留上半圆角，下半紧贴 composer 形成视觉一体。宽度比 composer 窄。
+   外阴影让这条在对话区背景上略微浮起。 */
+.ctx-strip {
+  max-width: calc(var(--doc-max-w) - 80px);
+  margin: 0 auto 0;
+  display: flex; align-items: center; gap: var(--sp-12);
+  background: var(--surface);
+  padding: 7px var(--sp-16);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  border-radius: var(--r-8) var(--r-8) 0 0;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 3px 12px -3px rgba(0, 0, 0, 0.15);
+}
+.ctx-item { display: inline-flex; align-items: center; gap: var(--sp-4); min-width: 0; }
+.ctx-item .icon { color: var(--text-3); flex: none; }
+.ctx-item.muted { color: var(--text-3); }
+.ctx-item .dot { width: 6px; height: 6px; margin-left: var(--sp-4); }
+
+/* Steering / Follow-up 状态条 */
+.run-strip {
+  max-width: var(--doc-max-w);
+  margin: 0 auto var(--sp-8);
+  display: flex; align-items: center; gap: var(--sp-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  padding: 6px var(--sp-12);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+.run-strip .rs-label { display: inline-flex; align-items: center; gap: var(--sp-6); font-weight: var(--fw-medium); }
+.fq-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 var(--sp-8);
+  background: var(--blue-soft); color: var(--blue);
+  border-radius: var(--r-full); font-size: var(--fs-11); font-weight: var(--fw-medium);
+}
+
+/* 输入状态下拉（@ / 补全） */
+.complete-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: var(--sp-16);
+  width: 320px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-8);
+  box-shadow: var(--shadow-menu);
+  padding: var(--sp-6);
+  z-index: var(--z-menu);
+}
+.complete-item {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: 5px var(--sp-8);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.complete-item:hover, .complete-item.sel { background: var(--accent-soft); color: var(--accent); }
+.complete-item .ci-type { margin-left: auto; font-size: 10px; color: var(--text-faint); }
+
+/* ---------- 底部运行面板 ---------- */
+.bottom-panel {
+  flex: none;
+  height: var(--bottom-panel-h);
+  min-height: 36px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  transition: height var(--dur-slow) var(--ease-out);
+}
+.bottom-panel.collapsed { height: 36px !important; }
+.bp-head {
+  flex: none;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-10);
+  gap: var(--sp-10);
+  border-bottom: 1px solid var(--border);
+}
+.bp-resizer {
+  height: 4px; margin-top: -2px; cursor: row-resize; flex: none; z-index: var(--z-resizer);
+}
+.bp-resizer:hover, .bp-resizer.dragging { background: var(--accent-border); }
+/* Keyboard-operable now (role="separator" + arrows), and a 4px transparent strip
+   has no shape to outline, so it shows focus as a fill. */
+.bp-resizer:focus-visible { background: var(--accent); outline: none; }
+.bp-body { flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.bp-page { position: absolute; inset: 0; overflow-y: auto; padding: var(--sp-10) var(--sp-14); display: none; }
+.bp-page.active { display: block; }
+#bpTerminal { padding: 0; overflow: hidden; }
+#bpTerminal.active { display: flex; }
+
+.term { font-family: var(--font-mono); font-size: var(--fs-11); line-height: 1.7; }
+.term .cmd { color: var(--text); font-weight: var(--fw-medium); }
+.term .err { color: var(--red); }
+.term .ok { color: var(--green); }
+.term .warn { color: var(--amber); }
+.term div { white-space: pre-wrap; word-break: break-all; color: var(--text-2); }
+
+/* Terminal 多终端布局（左列表 + 右输出） */
+.term-layout { display: flex; flex: 1; width: 100%; height: 100%; min-height: 0; }
+.term-list {
+  width: 200px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-8);
+  overflow-y: auto;
+}
+.term-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 6px var(--sp-8);
+  border-radius: var(--r-6);
+  cursor: pointer;
+}
+.term-item:hover { background: var(--surface-hover); }
+.term-item.active { background: var(--accent-soft); }
+.term-item.active .ti-name { color: var(--accent); }
+.term-item.ended { opacity: 0.55; }
+.term-item .ti-icon {
+  width: 22px; height: 22px;
+  border-radius: var(--r-4);
+  background: var(--surface-2);
+  color: var(--text-3);
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: none;
+}
+.term-item.active .ti-icon { background: var(--accent-soft); color: var(--accent); }
+.term-item .ti-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.term-item .ti-name { font-family: var(--font-mono); font-size: var(--fs-11); font-weight: var(--fw-medium); color: var(--text); }
+.term-item .ti-sub { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint); }
+.term-item .ti-badge {
+  flex: none;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: var(--r-4);
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  display: inline-flex; align-items: center;
+}
+.ti-badge.purple { background: var(--accent-soft); color: var(--accent); }
+.ti-badge.gray { background: var(--surface-3); color: var(--text-3); }
+.term-new {
+  margin-top: auto;
+  display: flex; align-items: center; justify-content: center; gap: var(--sp-6);
+  padding: 7px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-6);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.term-new:hover { border-color: var(--accent); color: var(--accent); }
+.term-view { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.term-cwd {
+  flex: none;
+  display: flex; align-items: center; gap: var(--sp-6);
+  padding: 5px var(--sp-12);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+.term-out { flex: 1; overflow-y: auto; padding: var(--sp-8) var(--sp-12); }
+.term-screens {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.term-xterm {
+  height: 100%;
+  width: 100%;
+  padding: var(--sp-6) var(--sp-8);
+  box-sizing: border-box;
+}
+.term-xterm .xterm,
+.term-xterm .xterm-viewport,
+.term-xterm .xterm-screen {
+  height: 100%;
+}
+.term-xterm .xterm-viewport {
+  overflow-y: auto;
+}
+
+/* Problems.
+   The row was one clickable div holding the "add to context" button — nested
+   interactive content. Split into two siblings: the row body opens the problem,
+   the trailing button adds it to context. */
+.prob-row {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: 0 var(--sp-8) 0 0;
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+}
+.prob-row:hover,
+.prob-row:focus-within { background: var(--surface-hover); }
+.prob-open {
+  display: flex; align-items: center; gap: var(--sp-8);
+  flex: 1;
+  min-width: 0;
+  padding: 5px var(--sp-8);
+  border: none;
+  background: none;
+  border-radius: var(--r-6);
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.prob-row .pfile { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); margin-left: auto; }
+.prob-at { height: 20px; flex: none; }
+
+/* Severity tint. Was an inline style="color:var(--red)" on the icon wrapper,
+   which put a token reference in the render string; as a class the stylesheet
+   keeps ownership and both themes resolve through the same variables. */
+.prob-sev { display: inline-flex; flex: none; }
+.sev-red { color: var(--red); }
+.sev-amber { color: var(--amber); }
+.sev-blue { color: var(--blue); }
+.sev-green { color: var(--green); }
+
+.test-row {
+  display: flex; align-items: center; gap: var(--sp-10);
+  padding: var(--sp-8) var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  margin-bottom: var(--sp-6);
+  background: var(--surface);
+  font-size: var(--fs-12);
+}
+.test-suite { font-size: var(--fs-11); }
+/* Failure detail block, previously a 6-property inline style. */
+.test-fail {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  padding: var(--sp-8) var(--sp-10);
+  font-size: 10.5px;
+  margin: -2px 0 var(--sp-8);
+  color: var(--text-2);
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+/* ---------- 右侧功能面板 ---------- */
+.side-panel {
+  width: var(--panel-w);
+  flex: none;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  display: none;
+  flex-direction: column;
+  min-width: 360px;
+  max-width: 640px;
+  position: relative;
+}
+.side-panel.open { display: flex; }
+/* 宽度调节条：贴在面板左缘，悬停/拖拽/聚焦时显示竖线指示 */
+.sp-resizer {
+  position: absolute;
+  left: -4px; top: 0; bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.sp-resizer::after {
+  content: "";
+  position: absolute;
+  left: 3px; top: 0; bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease);
+}
+.sp-resizer:hover::after,
+.sp-resizer:focus-visible::after,
+.sp-resizer.dragging::after { background: var(--accent-border); }
+.sp-resizer:focus-visible { outline: none; }
+.sp-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: 0 var(--sp-10);
+  height: var(--topbar-h);
+  border-bottom: 1px solid var(--border);
+}
+.sp-body { flex: 1; min-height: 0; overflow-y: auto; }
+.sp-page { display: none; height: 100%; flex-direction: column; }
+.sp-page.active { display: flex; }
+
+/* Changes
+   The three wrapper divs here carried their layout as inline style attributes
+   (flex:none / flex:1;overflow-y:auto / flex:none), which put structural layout
+   in the render string where it could not be themed or overridden. */
+.ch-toolbar {
+  flex: none;
+  display: flex; align-items: center; gap: var(--sp-6);
+  padding: var(--sp-8) var(--sp-12);
+  border-bottom: 1px solid var(--border);
+}
+.ch-list { flex: 1; min-height: 0; overflow-y: auto; }
+/* Diff 区域高度调节条：位于文件列表与 Diff 之间，拖拽/方向键调整高度 */
+.ch-diff-resizer {
+  flex: none;
+  width: 100%;
+  height: 8px;
+  margin: -2px 0;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 0; padding: 0;
+  cursor: ns-resize;
+}
+.ch-diff-resizer[hidden] { display: none; }
+.ch-diff-resizer::before {
+  content: "";
+  width: 40px; height: 3px;
+  border-radius: var(--r-full);
+  background: var(--border);
+  transition: background var(--dur-fast) var(--ease);
+}
+.ch-diff-resizer:hover::before,
+.ch-diff-resizer:focus-visible::before,
+.ch-diff-resizer.dragging::before { background: var(--accent); }
+.ch-diff-resizer:focus-visible { outline: none; }
+.ch-diff-slot {
+  flex: none;
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+
+.ch-group { padding: var(--sp-10) var(--sp-12) 0; }
+.ch-group-title {
+  display: flex; align-items: center; gap: var(--sp-6);
+  font-size: var(--fs-11); font-weight: var(--fw-semibold);
+  color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: var(--sp-4);
+}
+/* 分组文件数：标题右侧计数胶囊，替代括号数字；配色沿用技能徽章语言 */
+.ch-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: var(--fw-semibold);
+  letter-spacing: 0;
+}
+/* Now a real <button> (it opens the diff and was mouse-only as a div), so the
+   button defaults — auto width, centred text, inherited font — are reset. */
+.ch-row {
+  display: flex; align-items: center; gap: var(--sp-8);
+  width: 100%;
+  padding: 5px var(--sp-8);
+  border: none;
+  background: none;
+  border-radius: var(--r-6);
+  font-family: inherit;
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.ch-row:hover { background: var(--surface-hover); }
+.ch-row.sel { background: var(--accent-soft); }
+.ch-row .ch-file { font-family: var(--font-mono); font-size: var(--fs-11); flex: 1; min-width: 0; text-align: left; }
+/* +/− 计数成组右对齐，tabular 数字不跳动 */
+.ch-delta { display: inline-flex; align-items: baseline; gap: var(--sp-4); flex: none; }
+.ch-row .ch-add { color: var(--green); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.ch-row .ch-del { color: var(--red); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+/* 归属信息（主 Agent / deps 子 Agent / 开始前已存在 / 未跟踪）：低调胶囊 */
+.ch-note {
+  flex: none;
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--surface-2);
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+
+/* Diff */
+.diff-toolbar {
+  flex: none;
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-12);
+}
+.diff-scroll { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-11); line-height: 1.65; }
+.diff-head-row {
+  padding: var(--sp-6) var(--sp-12);
+  background: var(--surface-2);
+  color: var(--text-2);
+  border-bottom: 1px solid var(--border);
+}
+.dl { display: flex; white-space: pre; }
+.dl .ln {
+  width: 38px; flex: none; text-align: right; padding-right: var(--sp-8);
+  color: var(--text-faint); user-select: none;
+}
+.dl .lc { flex: 1; padding-right: var(--sp-12); }
+/* +/- marker column. Added and removed lines were separated by background tint
+   alone — the one thing in this UI where colour was carrying the entire meaning
+   on the densest, most consequential screen. The glyph is the conventional
+   redundant cue and costs one character of width. */
+.dl .dm {
+  width: 10px;
+  flex: none;
+  text-align: center;
+  font-weight: var(--fw-semibold);
+  user-select: none;
+}
+.dl.add { background: var(--diff-add-bg); }
+.dl.add .ln { background: var(--diff-add-gutter); }
+.dl.add .dm { color: var(--git-added); }
+.dl.del { background: var(--diff-del-bg); }
+.dl.del .ln { background: var(--diff-del-gutter); }
+.dl.del .dm { color: var(--git-deleted); }
+/* 行内词级高亮：整行增删底色之上，仅变化片段再加深一层（GitHub 风格）。
+   浏览器默认 mark 是黄底黑字，这里继承行色、只加深背景。 */
+.dl .lc mark {
+  border-radius: 2px;
+  padding: 0 1px;
+  color: inherit;
+}
+.dl.add .lc mark.wd-add { background: var(--diff-add-gutter); }
+.dl.del .lc mark.wd-del { background: var(--diff-del-gutter); }
+/* Now a button element (it was a clickable div, and expanding context is the
+   only way to read the skipped region), so the button defaults — auto width,
+   centred text, own font — are reset back to a diff row. */
+.dl.collapse {
+  width: 100%;
+  color: var(--text-3); background: var(--surface-2); cursor: pointer;
+  justify-content: center; padding: 2px 0;
+  border: none;
+  font-family: inherit;
+  font-size: 10.5px;
+}
+.dl.collapse:hover { color: var(--accent); }
+/* Split 模式。
+   每半栏 min-width:0 + overflow:hidden：长代码行不再把 flex 项撑过 50%
+   （flex 默认 min-width:auto 会让 .lc 拒绝收缩，两栏互相重叠）。 */
+.diff-split .dl .half { width: 50%; min-width: 0; display: flex; overflow: hidden; }
+.diff-split .dl .half .lc { min-width: 0; }
+.diff-split .dl .half + .half { border-left: 1px solid var(--border); }
+
+/* Preview */
+.pv-toolbar {
+  flex: none;
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-10);
+  border-bottom: 1px solid var(--border);
+}
+.pv-url {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: var(--sp-6);
+  height: 26px;
+  padding: 0 var(--sp-10);
+  background: var(--surface-2);
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-2);
+}
+.pv-statusbar {
+  flex: none;
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: 4px var(--sp-12);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-11);
+  color: var(--text-2);
+}
+.pv-view { flex: 1; overflow: auto; background: var(--bg-inset); display: flex; justify-content: center; padding: var(--sp-12); }
+.pv-frame {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  overflow: hidden;
+  align-self: flex-start;
+  min-height: 320px;
+}
+.pv-frame.tablet { max-width: 480px; }
+.pv-frame.phone { max-width: 300px; }
+.pv-console {
+  flex: none; height: 120px; border-top: 1px solid var(--border);
+  overflow-y: auto; padding: var(--sp-8) var(--sp-12);
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6; color: var(--text-2);
+  background: var(--code-bg);
+}
+/* 模拟页面内容 */
+.mock-page { padding: var(--sp-20); font-size: var(--fs-14); }
+.mock-page .mp-nav { display: flex; gap: var(--sp-12); padding-bottom: var(--sp-12); border-bottom: 1px solid var(--border); margin-bottom: var(--sp-16); font-weight: var(--fw-medium); }
+.mock-page .mp-hero { padding: var(--sp-24); background: var(--accent-soft); border-radius: var(--r-8); margin-bottom: var(--sp-16); }
+.mock-page .mp-btn {
+  display: inline-block; padding: 6px var(--sp-16); border-radius: var(--r-6);
+  background: var(--accent); color: var(--text-on-accent); font-size: var(--fs-12);
+}
+/* 元素选择 */
+.pv-selecting .pv-view { cursor: crosshair; }
+.pv-el-hover { outline: 2px solid var(--accent) !important; outline-offset: 1px; }
+.pv-el-tag {
+  position: absolute; background: var(--accent); color: var(--text-on-accent);
+  font-size: 10px; padding: 1px 6px; border-radius: var(--r-4); z-index: var(--z-topbar);
+  font-family: var(--font-mono); pointer-events: none;
+}
+/* Preview 错误 */
+.pv-error {
+  margin: var(--sp-16);
+  border: 1px solid var(--red);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  overflow: hidden;
+}
+.pv-error .pe-head {
+  background: var(--red-soft); color: var(--red);
+  padding: var(--sp-10) var(--sp-14);
+  font-weight: var(--fw-semibold); font-size: var(--fs-12);
+  display: flex; align-items: center; gap: var(--sp-8);
+}
+.pv-error .pe-body { padding: var(--sp-12) var(--sp-14); font-size: var(--fs-12); color: var(--text-2); }
+.pv-error pre { margin-top: var(--sp-8); background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--r-6); padding: var(--sp-8); font-size: 10.5px; overflow-x: auto; }
+
+/* Agent Hub
+   The row is a plain container now — it used to be a clickable div wrapping two
+   icon buttons, which is nested interactive content. The name block is the
+   button that opens details, so the three controls are siblings. Hover moves to
+   the row via :focus-within so the whole row still highlights. */
+.agent-row {
+  display: flex; gap: var(--sp-10);
+  padding: var(--sp-10) var(--sp-12);
+  border-bottom: 1px solid var(--border);
+}
+.agent-row:hover,
+.agent-row:focus-within { background: var(--surface-hover); }
+.agent-row .ag-ic {
+  width: 28px; height: 28px; border-radius: var(--r-6);
+  background: var(--accent-soft); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.agent-row .ag-main { flex: 1; min-width: 0; }
+/* The details trigger. Full-width and left-aligned so the click target matches
+   the text block it used to be, minus the invalid nesting. */
+.ag-open {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.agent-row .ag-name { font-weight: var(--fw-semibold); font-size: var(--fs-12); display: flex; align-items: center; gap: var(--sp-6); flex-wrap: wrap; }
+.agent-row .ag-task { font-size: var(--fs-11); color: var(--text-2); }
+.agent-row .ag-meta {
+  font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono);
+  display: flex; gap: var(--sp-10);
+  /* Token counts and costs sit in a column of rows; proportional digits make
+     them jitter as values change. */
+  font-variant-numeric: tabular-nums;
+}
+.agent-row .ag-last { display: block; min-width: 0; }
+.agent-row .ag-tree { width: 14px; flex: none; color: var(--glyph-faint); font-family: var(--font-mono); align-self: center; }
+.agent-row .ag-acts { display: flex; flex-direction: column; gap: 2px; flex: none; }
+
+/* The failure card, previously inline styles. */
+.ag-fail { margin: var(--sp-12); padding: var(--sp-10) var(--sp-12); font-size: var(--fs-12); }
+.ag-fail-head {
+  display: flex; align-items: center; gap: var(--sp-6);
+  color: var(--amber); font-weight: var(--fw-semibold);
+}
+.ag-fail-detail { margin: var(--sp-4) 0 var(--sp-8); }
+.ag-fail-acts { display: flex; gap: var(--sp-6); flex-wrap: wrap; }
+
+/* ---------- Command Palette ---------- */
+.cmdk {
+  width: 560px;
+  max-width: calc(100vw - 64px);
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-10);
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+  animation: omp-menu-in var(--dur) var(--ease-out);
+}
+.cmdk-input {
+  display: flex; align-items: center; gap: var(--sp-10);
+  padding: var(--sp-12) var(--sp-16);
+  border-bottom: 1px solid var(--border);
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+/* 聚焦特效 = 外发光；输入框本身无边框，光晕画在整条搜索行上 */
+.cmdk-input:focus-within {
+  box-shadow: 0 0 0 3px var(--accent-softer),
+              0 0 14px 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cmdk-input input {
+  flex: 1; border: none; outline: none; background: transparent;
+  font-size: var(--fs-14);
+}
+.cmdk-input input:focus-visible { outline: none; }
+.cmdk-list { max-height: 340px; overflow-y: auto; padding: var(--sp-6); }
+.cmdk-item {
+  display: flex; align-items: center; gap: var(--sp-10);
+  padding: 7px var(--sp-10);
+  border-radius: var(--r-6);
+  font-size: var(--fs-14);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.cmdk-item.sel, .cmdk-item:hover { background: var(--accent-soft); color: var(--accent); }
+.cmdk-item .ci-kind { margin-left: auto; font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); }
+
+/* ---------- 场景切换器（演示用） ---------- */
+.scenario-fab {
+  position: absolute;
+  left: var(--sp-12);
+  bottom: var(--sp-12);
+  z-index: var(--z-fab);
+  display: flex; align-items: center; gap: var(--sp-6);
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-full);
+  padding: 4px var(--sp-10);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.scenario-fab:hover { border-color: var(--accent); color: var(--accent); }
+.scenario-menu { width: 300px; max-height: 420px; overflow-y: auto; }
+.scenario-menu .menu-item .sc-no {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+  width: 20px; flex: none;
+}

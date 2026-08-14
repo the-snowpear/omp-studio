@@ -690,3 +690,55 @@ Windows 前端接入只有同时满足以下条件才算完成：
 10. `FE-010`：建立 Desktop/Web transport parity E2E。
 
 第一轮完成后再拆 Workbench 和 Agent Hub 工单，避免在 Client/Host 边界尚未稳定时并行改造大量页面。
+
+## 19. 实施记录：ver1 Workbench 迁移（2026-08-12）
+
+本节是已落地实现的状态记录，不修改上文架构与计划章节。
+
+### 19.1 已实现的共享 Renderer 表面
+
+- React/Electron 共享 Renderer 已提供 ver1 Workbench chrome：`app-shell`、`sidebar`（品牌、项目与会话导航、新建对话、Runtime 状态）、`topbar`（面包屑、Runtime 状态、client contract 版本）、`workbench-shell` 主列（`convo-wrap`/`convo-scroll`/`convo-doc` 对话区、`minimap-rail`、`composer-region`、`ctx-strip`/`run-strip`）、`side-panel`、`bottom-panel`。
+- 路由仍为 `home | history | workbench`，无 router 依赖；bootstrap/query/subscription/reducer/Home/History 既有流程保持不变。
+- Renderer 仍由 StudioClient 驱动，无 Electron/Node 直接依赖。
+- 视觉基线：ver1 浅色中性表面、`#6e56cf` 强调色、272px 侧栏、44–48px topbar、文档最大宽度 768px、扁平边框与焦点微光；`<=900px` 时侧栏收窄、隐藏次要 explorer、side panel 隐藏，无横向溢出，composer 保持可用。
+- 侧栏折叠开关（sidebar 顶部与 topbar 菜单按钮，含 `aria-expanded`）与跳转对话区的 skip link（`#convoScroll`）可用。
+
+### 19.2 Composer 语义命令
+
+已接线且唯一允许的 composer mutation：
+
+```text
+core.prompt({ text })
+core.steer({ text })
+core.followUp({ text })
+queue.enqueue({ text })
+core.abort({})
+runtime.pause({})
+runtime.resume({ expectedPauseEpoch })
+turn.retry({})
+```
+
+`interaction.respond` 保持可用，用于 confirm/select/input 类交互。命令均为异步接受，绝不乐观声称完成。
+
+Enter 发送带 IME 组合防护：组合输入中的 Enter 不触发发送；仅在可发送时拦截 Enter（被门控时 Enter 正常换行），Shift+Enter 始终换行。命令仅在被接受后清空输入框，被拒绝或发送失败时保留输入文本。
+
+### 19.3 生命周期与门控
+
+- 生命周期：`local_pending -> accepted -> (interaction_required) -> completed | failed | rejected | outcome_unknown`；`accepted` 只表示已接受，terminal receipt 才是完成证据。
+- busy、`resyncRequired` 或 Runtime 不可用时，敏感 mutation 一律禁用；resync 横幅展示期间同样禁止。
+- Plan/Goal/Loop/Session tree 等高级控制按 capability manifest 门控，Runtime Limited 时明确禁用并说明原因。
+- composer 与命令条的每条 mutation 按 capability manifest 逐命令门控：manifest 缺失 entry 或 grade `unavailable` 一律禁用，Runtime `limited-system` 分类下禁用；`interaction.respond` 的响应控件（含 Cancel）在 busy / resync / runtime 不可用 / 无 capability 时同样禁用。
+
+### 19.4 Transcript 边界与无 mock 内容
+
+- 虚拟化语义 ClientEvent 渲染在底部 Activity 面板；对话 transcript 区只显示不可用空态或 interaction 提示，绝不虚构消息内容。当前 Host contract 未暴露 message transcript，因此不做任何回填或模拟对话。
+- ver1 的 `OMP_DATA`/`mock-data.js` 未迁入 Renderer；缺少对应 read model 的 surface（文件树、Git 状态、Preview、telemetry、绝对路径）一律不展示。
+
+### 19.5 暂缓与诚实禁用壳
+
+- 未接入的 capability surface 以禁用态壳呈现并附原因说明。视觉存在永远不等于 Host 能力存在，也不构成对 ver1 或任何 Host 能力的 Full Parity 声明。
+
+### 19.6 验证与验收
+
+- 命令：`npm run typecheck -w @omp-studio/renderer`、`npm run build -w @omp-studio/renderer`（完整门为根目录 `npm run check`）。
+- 验收：workbench 路由可见完整 ver1 chrome 且 composer 可输入；unsupported surface 为诚实禁用壳；本文档记录迁移与暂缓范围。

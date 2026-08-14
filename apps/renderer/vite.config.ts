@@ -7,4 +7,19 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   base: "./",
+  build: {
+    rollupOptions: {
+      output: {
+        // Keep the entry under the 500 kB warning: React, xterm, and the
+        // Studio client stay on their own cacheable vendor chunks.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("@xterm")) return "xterm";
+          if (id.includes("@omp-studio")) return "studio-client";
+          if (/node_modules[/\\](?:react-dom|react|scheduler)[/\\]/.test(id)) return "react";
+          return "vendor";
+        },
+      },
+    },
+  },
 });

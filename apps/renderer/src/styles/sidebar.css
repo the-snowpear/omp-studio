@@ -1,0 +1,825 @@
+/* ============================================================
+   OMP Studio — 复合侧栏
+   左上操作区 / 项目+对话 / 可拖分隔 / 文件树 / 左下 OMP 状态
+   ============================================================ */
+
+.sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-min);
+  max-width: var(--sidebar-max);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg-inset);
+  border-top: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-top-right-radius: 15px;
+  position: relative;
+  z-index: var(--z-panel);
+  transition: margin-left var(--dur-slow) var(--ease-out);
+  overflow: visible;
+}
+.sidebar.collapsed { margin-left: calc(-1 * var(--sidebar-w)); }
+/* Shadow layer sits behind content, same rounded box as the rail, so the
+   glow follows the 15px corner. z-index:-1 keeps it in this stacking
+   context, so the workbench cannot punch a hole in the mid-panel. */
+.sidebar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-top-right-radius: 15px;
+  background: var(--bg-inset);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--text) 16%, transparent);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* 拖拽手柄（右侧缘） */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  /* 技能&插件抽屉（--z-rail:10）打开时全宽覆盖 .sb-section 区，若 resizer 低于它
+     手柄会被抽屉吃掉命中，侧栏宽度就无法拖拽了。resizer 必须始终可拖，抬到抽屉之上。 */
+  z-index: var(--z-rail-tools);
+}
+.sidebar-resizer:hover, .sidebar-resizer.dragging { background: var(--accent-border); }
+/* Now keyboard-operable (role="separator" + arrow keys), so it needs a visible
+   focus state — a 6px transparent strip has no shape of its own to outline. */
+.sidebar-resizer:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
+
+/* ---------- 左上操作区 ---------- */
+.sb-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  /* 底距 0：下方 .sb-actions 紧贴，工具栏与 action 行之间无间距 */
+  padding: var(--sp-10) var(--sp-10) 0;
+  flex: none;
+  overflow: hidden;
+  border-top-right-radius: 15px;
+}
+.sb-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: 1;
+  min-width: 0;
+  padding: 4px var(--sp-6);
+  border-radius: var(--r-6);
+  cursor: pointer;
+}
+/* Now a real <button> instead of a click-handled <div>. Buttons center their
+   text and shrink to content, so both are reset to match the old div layout. */
+.sb-brand { text-align: left; }
+.sb-brand:hover { background: var(--surface-hover); }
+.sb-brand .logo {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-6);
+  display: block;
+  flex: none;
+  object-fit: contain;
+}
+.sb-brand .name { font-weight: var(--fw-semibold); font-size: var(--fs-14); }
+.sb-top .icon-btn { width: 28px; height: 28px; }
+
+/* ---------- 区域通用头 ---------- */
+.sb-section { display: flex; flex-direction: column; min-height: 0; }
+.sb-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-12) var(--sp-4);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex: none;
+  user-select: none;
+}
+/* Section titles are real headings now (they were <span>, so the sidebar had no
+   heading structure to navigate by). h2 brings its own 1.5em default, which
+   would render these section labels at ~17px inside an 11px head — reset to
+   inherit so the visual result is identical to the old span. */
+.sb-section-head h2 {
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  margin: 0;
+}
+.sb-section-head .icon-btn { width: 20px; height: 20px; margin-left: auto; }
+.sb-section-head .icon-btn + .icon-btn { margin-left: 0; }
+/* Explorer 操作组：默认隐藏，悬停标题栏显示（对齐 ver2 交互）
+   margin-left:auto 把整组顶到右侧，收起 chevron 作为最后一个子元素
+   紧跟其后、位于最右端。组内按钮因不在 `+ .icon-btn` 相邻选择器范围，
+   需显式清零 margin-left。 */
+.sb-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.sb-section-head:hover .sb-head-actions,
+.sb-section-head:focus-within .sb-head-actions { opacity: 1; }
+.sb-head-actions .icon-btn { width: 20px; height: 20px; margin-left: 0; }
+/* 收起 chevron 紧贴操作组右侧：.icon-btn 的通用 auto 会与操作组的 auto
+   平分剩余空间，造成操作组与收起按钮之间的大空隙，这里清零让两者紧贴。 */
+.sb-head-actions + .icon-btn { margin-left: 0; }
+
+/* Overflow-hidden panels clip upward CSS tooltips into a dark sliver.
+   Keep hover tips below the header, and never paint them while pressed. */
+.sb-section-head [data-tip]:hover::after,
+.sb-section-head [data-tip]:focus-visible::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+.sb-section-head [data-tip]:active::after,
+#sbFiles.collapse [data-tip]:hover::after,
+#sbFiles.collapse [data-tip]:focus-visible::after {
+  content: none;
+}
+
+.sb-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: var(--sp-8);
+  overscroll-behavior: contain;
+}
+
+/* ---------- 项目块 ---------- */
+.project { margin: 0 var(--sp-6) var(--sp-2); border-radius: var(--r-8); }
+.project-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: 3px var(--sp-8);
+  border-radius: var(--r-8);
+  cursor: pointer;
+}
+.project-head:hover { background: var(--surface-hover); }
+/* Disclosure chevron. The colour and the rotate transition were inline on the
+   element in app.js, which put presentation in the render string and meant the
+   transition token could not be changed centrally. */
+.project-head .tw {
+  display: inline-flex;
+  color: var(--glyph-faint);
+  flex: none;
+}
+.project-head .tw .icon { transition: transform var(--dur-fast) var(--ease-out); }
+.project-head .p-name {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-12);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+  flex: 1;
+}
+.project-head .p-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex: none;
+  object-fit: contain;
+}
+.project-flags { display: flex; align-items: center; gap: var(--sp-6); margin-left: auto; flex: none; }
+
+.thread {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: 6px var(--sp-8) 6px 26px;
+  border-radius: var(--r-6);
+  cursor: pointer;
+  position: relative;
+}
+.thread:hover { background: var(--surface-hover); }
+.thread.active { background: var(--accent-soft); }
+.thread.active .t-title { color: var(--accent); font-weight: var(--fw-medium); }
+.thread .t-title { flex: 1; min-width: 0; font-size: var(--fs-12); }
+.thread .t-meta { font-size: 10.5px; color: var(--text-faint); flex: none; }
+/* Pinned marker. Was a 📌 emoji inline in the title string: font-dependent,
+   uncontrollable by token, and it rendered full-colour against a monochrome
+   sidebar. Now the same vector set as every other icon. */
+.thread .t-pin,
+.hist-row .t-pin {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-right: 3px;
+  color: var(--text-3);
+}
+.thread .t-badges { display: flex; gap: 3px; align-items: center; flex: none; }
+.thread .t-approval { flex: none; }
+/* Codex 风格：运行中的会话在标题左侧显示转圈指示 */
+.thread .t-spin {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border: 1.4px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: var(--r-full);
+  animation: omp-spin 0.8s linear infinite;
+}
+.thread .unread {
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 9.5px;
+  font-weight: var(--fw-semibold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------- 上下区分隔 ---------- */
+.sb-divider {
+  flex: none;
+  height: 9px;
+  margin: 0 calc(-1 * var(--sp-2));
+  cursor: row-resize;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  overflow: hidden;
+}
+.sb-divider::before {
+  content: "";
+  width: 100%;
+  height: 1px;
+  background: var(--border);
+}
+.sb-divider.dragging::before,
+.sb-divider:focus-visible::before { background: var(--accent-border); }
+.sb-divider:focus-visible { outline: none; }
+
+/* 区域收起态 */
+.sb-section.collapse:not(#sbFiles) .sb-scroll { display: none; }
+.sb-section.collapse:not(#sbFiles) { flex: none !important; }
+#sbProjects {
+  flex: 1 1 var(--sb-proj-basis, 46%);
+  min-height: 0;
+  overflow: hidden;
+  transition: flex-grow var(--dur-slow) var(--ease-out),
+              flex-basis var(--dur-slow) var(--ease-out);
+}
+#sbFiles {
+  flex: 1 1 var(--sb-files-basis, 54%);
+  min-height: 34px;
+  overflow: hidden;
+  transition: flex-grow var(--dur-slow) var(--ease-out),
+              flex-basis var(--dur-slow) var(--ease-out);
+}
+#sbFiles.collapse {
+  flex-grow: 0;
+  flex-basis: 0%;
+}
+.sidebar.explorer-collapsed #sbProjects {
+  flex-grow: 1;
+  flex-basis: 100%;
+}
+.sidebar.explorer-collapsed .sb-divider {
+  display: none;
+}
+.sidebar.sb-splitting #sbProjects,
+.sidebar.sb-splitting #sbFiles,
+.sidebar.sb-splitting .sb-divider {
+  transition: none;
+}
+#sbFiles .sb-scroll {
+  transition: opacity var(--dur) var(--ease);
+}
+#sbFiles.collapse .sb-scroll {
+  opacity: 0;
+  pointer-events: none;
+}
+.sb-collapse-btn .icon {
+  transition: transform var(--dur) var(--ease-out);
+}
+.sb-collapse-btn.is-collapsed .icon {
+  transform: rotate(180deg);
+}
+
+/* ---------- 文件树 ---------- */
+.tree { padding: 0 var(--sp-6); font-size: var(--fs-12); }
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  /* Depth indent arrives as --depth-pad from the renderer (it is data, not
+     style). Keeping it in a custom property means this rule still owns the box,
+     so padding-right and the fallback cannot be clobbered by the inline value. */
+  padding-left: var(--depth-pad, var(--sp-6));
+  padding-right: var(--sp-6);
+  /* Explorer rows stay tight — the softened global radius reads as bubbly
+     on a 24px row in a dense tree. */
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-2);
+  position: relative;
+}
+.tree-row:hover { background: var(--surface-hover); color: var(--text); }
+.tree-row .tw { width: 14px; height: 14px; flex: none; color: var(--glyph-faint); display: inline-flex; }
+.tree-row .tw .icon { width: 12px; height: 12px; transition: transform var(--dur-fast) var(--ease-out); }
+.tree-row.open > .tw .icon { transform: rotate(90deg); }
+.tree-row .fi { color: var(--text-3); display: inline-flex; flex: none; }
+/* Folders carry the accent so the eye can find structure without reading
+   names; files stay neutral. Mirrors ver2's Explorer. */
+.tree-row[data-dir] .fi { color: var(--accent); }
+.tree-row .fi .icon { width: 14px; height: 14px; }
+.tree-row .fname { flex: 1; min-width: 0; }
+/* Git 状态指示：SVG 图标块（修改/新增/删除/未跟踪）。
+   图标 + 色底双通道，不单靠颜色（WCAG color-not-only）；
+   文件树与 Changes 面板共用。 */
+.fstat {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: var(--r-4);
+  flex: none;
+}
+.fstat .icon { width: 11px; height: 11px; }
+.fstat.m { color: var(--git-modified); background: color-mix(in srgb, var(--git-modified) 10%, transparent); }
+.fstat.a { color: var(--git-added);    background: color-mix(in srgb, var(--git-added) 10%, transparent); }
+.fstat.d { color: var(--git-deleted);  background: color-mix(in srgb, var(--git-deleted) 10%, transparent); }
+.fstat.u { color: var(--git-untracked); background: color-mix(in srgb, var(--git-untracked) 10%, transparent); }
+/* Row actions were revealed on :hover only, which makes them unreachable
+   without a pointer — display:none also removes them from the tab order, so
+   keyboard users had no path to "加入上下文" at all. :focus-within brings them
+   back as soon as anything inside the row takes focus. */
+.tree-row .fop { display: none; gap: 2px; flex: none; }
+.tree-row:hover .fop,
+.tree-row:focus-visible .fop,
+.tree-row:focus-within .fop { display: inline-flex; }
+.tree-row .fop .icon-btn { width: 18px; height: 18px; }
+.tree-children { display: none; }
+.tree-row.open + .tree-children { display: block; }
+
+/* 过程状态标记 */
+.tree-row .live { display: inline-flex; flex: none; }
+.tree-row.turn-file .fname { font-weight: var(--fw-medium); color: var(--text); }
+.tree-row .diag {
+  width: 5px; height: 5px; border-radius: var(--r-full); flex: none;
+}
+.diag.err { background: var(--red); }
+.diag.warn { background: var(--amber); }
+
+/* ---------- 左下用户与 OMP 状态 ---------- */
+.sb-footer {
+  flex: none;
+  /* margin-top:auto 把用户区钉在左下角：上方区域即使全部折叠、只剩头部高度，
+     空余空间也被这条 auto margin 吸收，用户区不会跟着上移。 */
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: var(--sp-8) var(--sp-10);
+}
+.sb-user {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 4px var(--sp-6);
+  border-radius: var(--r-6);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+.sb-user:hover { background: var(--surface-hover); }
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: 11px;
+  font-weight: var(--fw-semibold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+/* The name/status pair moved from \<div\> to \<span\> (a \<div\> inside a \<button\> is
+   invalid HTML, and the button is what makes this focusable). Spans are inline,
+   so the two-line stack is now declared here rather than inherited from the
+   old block-level default. */
+.sb-user > span:not(.avatar) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.sb-user .u-name { font-size: var(--fs-12); font-weight: var(--fw-medium); }
+.sb-user .u-status {
+  font-size: var(--fs-11);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.sb-user .u-status.ok { color: var(--green); }
+.sb-user .u-status.warn { color: var(--amber); }
+.sb-user .u-status.err { color: var(--red); }
+.sb-user .icon { margin-left: auto; color: var(--glyph-faint); }
+
+/* OMP 环境菜单：portal 到 body，按 ver1 overlay `up-left` 用 fixed 贴按钮上方 */
+.omp-menu {
+  position: fixed;
+  min-width: 260px;
+}
+.omp-menu-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-8) var(--sp-10);
+}
+.omp-menu-head .logo {
+  width: 26px; height: 26px; border-radius: var(--r-6);
+  background: var(--accent);
+  color: var(--text-on-accent); display: flex; align-items: center; justify-content: center;
+  font-weight: var(--fw-bold);
+}
+.omp-menu-head .v { font-size: var(--fs-11); color: var(--text-3); font-family: var(--font-mono); }
+.omp-menu-err {
+  margin: 0 var(--sp-6) var(--sp-6);
+  padding: var(--sp-8);
+  border-radius: var(--r-6);
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: var(--fs-11);
+  display: flex;
+  gap: var(--sp-6);
+  align-items: flex-start;
+}
+
+/* ============================================================
+   任务级常驻 action 区：两行 ghost row（对齐 Codex 截图）
+   行 1：[+] 新建对话
+   行 2：[⊞] 技能 & 插件 (3) →
+   不是 chip，而是整行宽的菜单项风格：圆角轻、左侧图标 + 文字、右侧徽章/箭头。
+   视觉重量低于 h2 标题（项目与对话），但仍可单独点击。
+   ============================================================ */
+.sb-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 顶距 5px：两行 action 与 .sb-top（OMP Studio 工具栏）之间留 5px（按需求微调） */
+  padding: 5px var(--sp-10) var(--sp-4);
+  flex: none;
+}
+
+/* 通用 ghost row：.action-row 整行可点 */
+.sb-actions .action-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  height: 30px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-regular);
+  text-align: left;
+  cursor: pointer;
+  border: 0;
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+.sb-actions .action-row:hover { background: var(--surface-hover); }
+.sb-actions .action-row .icon {
+  color: var(--text-3);
+  flex: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+.sb-actions .action-row:hover .icon { color: var(--text); }
+.sb-actions .action-row .lbl {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 右侧元数据（徽章 / 箭头） */
+.sb-actions .action-row .meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  flex: none;
+}
+.sb-actions .action-row .meta .count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: var(--r-full);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px; font-weight: var(--fw-semibold);
+  font-family: var(--font-mono);
+}
+.sb-actions .action-row .meta .chev {
+  color: var(--glyph-faint);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.sb-actions .action-row:hover .meta .chev { color: var(--text-3); }
+
+/* 新建对话：第一行，主操作。加号在文字左边，右侧仅文案提示。 */
+.sb-actions .new-convo-btn .icon { color: var(--accent); }
+.sb-actions .new-convo-btn:hover .icon { color: var(--accent-hover); }
+.sb-actions .new-convo-btn .lbl { font-weight: var(--fw-medium); }
+.sb-actions .new-convo-btn .meta .hint {
+  font-family: var(--font-ui);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
+/* 技能 & 插件：第二行，toggle chip。选中态 = 行底色变 accent-soft，徽章实心。 */
+.sb-actions .skills-btn[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sb-actions .skills-btn[aria-expanded="true"] .icon { color: var(--accent); }
+.sb-actions .skills-btn[aria-expanded="true"] .meta .count {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.sb-actions .skills-btn[aria-expanded="true"] .meta .chev { color: var(--accent); }
+
+/* ============================================================
+   侧栏内嵌技能抽屉面板
+   关键约束：覆盖 .sb-section 列表（项目与对话 + Explorer），
+   不覆盖 .sb-top 与 .sb-footer。
+   ============================================================ */
+.sb-drawer-mask {
+  position: absolute;
+  left: 0; right: 0;
+  top: var(--drawer-top, 56px);
+  bottom: var(--drawer-bottom, 56px);
+  background: var(--bg-inset);
+  display: flex; flex-direction: column;
+  z-index: var(--z-rail);
+  transform: translateX(-12px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform var(--dur-slow) var(--ease-out),
+              opacity var(--dur-slow) var(--ease);
+}
+.sb-drawer-mask.open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 抽屉顶部 */
+.sd-head {
+  flex: none;
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-12) var(--sp-8);
+}
+.sd-title {
+  display: flex; align-items: center; gap: var(--sp-8);
+  font-size: var(--fs-12); font-weight: var(--fw-semibold);
+  color: var(--text); letter-spacing: 0.02em;
+  min-width: 0;
+}
+.sd-title .icon { color: var(--accent); flex: none; }
+.sd-title .count {
+  margin-left: 2px; font-size: var(--fs-11); color: var(--text-3);
+  font-weight: var(--fw-regular); font-family: var(--font-mono);
+}
+.sd-head .spacer { flex: 1; }
+.sd-head .icon-btn { width: 24px; height: 24px; }
+/* 抽屉贴着 .sb-top，向上的 tip 会被裁掉，改到按钮下方 */
+.sd-head [data-tip]:hover::after,
+.sd-head [data-tip]:focus-visible::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+/* 搜索框 */
+.sd-search {
+  flex: none;
+  margin: 0 var(--sp-12) var(--sp-8);
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: 0 var(--sp-10);
+  height: 30px;
+  border-radius: var(--r-8);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  transition: border-color var(--dur-fast) var(--ease),
+              box-shadow var(--dur-fast) var(--ease);
+}
+/* 聚焦特效 = 外发光，边框不变色 */
+.sd-search:focus-within {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-softer),
+              0 0 14px 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.sd-search input {
+  flex: 1; min-width: 0; border: 0; outline: none;
+  background: transparent; color: var(--text); font: inherit;
+}
+.sd-search input::placeholder { color: var(--text-faint); }
+.sd-search .kbd {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-faint); padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px; background: var(--bg-inset);
+}
+
+/* 分类 tab */
+.sd-tabs {
+  flex: none;
+  display: flex; gap: 4px;
+  padding: 0 var(--sp-12) var(--sp-8);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.sd-tab {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px; padding: 0 var(--sp-10);
+  border-radius: var(--r-full);
+  color: var(--text-3);
+  font-size: var(--fs-11);
+  white-space: nowrap; flex: none;
+  cursor: pointer; background: transparent;
+  border: 0;
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+.sd-tab:hover { background: var(--surface-hover); color: var(--text); }
+.sd-tab.active { background: var(--accent-soft); color: var(--accent); }
+.sd-tab .count { font-family: var(--font-mono); font-size: 10px; opacity: .7; }
+
+/* 抽屉正文 */
+.sd-body {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 var(--sp-6) var(--sp-12);
+}
+
+/* 1:1 row treatment from redesigning-skill-card-components.zip */
+.sk-group { margin-bottom: 2px; }
+.sk-group-head { display:flex; align-items:center; gap:5px; width:100%; height:26px; padding:0 8px; color:var(--text-3); cursor:pointer; text-align:left; background:var(--bg-inset); border:0; }
+.sk-group-chevron { display:inline-flex; color:var(--text-faint); transition:transform 120ms ease-out; }
+.sk-group:not(.is-collapsed) .sk-group-chevron { transform:rotate(90deg); }
+.sk-group-head:hover { color:var(--text); }
+.sk-group-label { font-size:10.5px; font-weight:600; letter-spacing:.06em; }
+.sk-group-count,.sk-meta { color:var(--text-faint); font-family:var(--font-mono); font-size:10px; }
+.sk-group-rule { flex:1; height:1px; background:var(--border); }
+.sk-group-items { display:flex; flex-direction:column; gap:6px; }
+
+.sk-card { position:relative; display:flex; align-items:center; width:100%; height:54px; padding:0 8px; gap:10px; border-radius:8px; overflow:hidden; background:transparent; border:0; color:var(--text); cursor:pointer; outline:0; transition:background 120ms ease,opacity 120ms ease; }
+.sk-card:hover,.sk-card:focus-visible { background:var(--surface-hover); }
+.sk-card.is-added { background:var(--accent-softer); }
+.sk-card.has-error { background:transparent; }
+.sk-card.is-added::before,.sk-card.has-error::before { content:''; position:absolute; left:0; top:50%; width:2px; height:18px; transform:translateY(-50%); border-radius:0 999px 999px 0; background:var(--accent); }
+.sk-card.has-error::before { background:var(--red); }
+.sk-card.is-disabled { opacity:.5; cursor:not-allowed; }
+
+.sk-icon { position:relative; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; flex:none; border-radius:7px; background:var(--accent-soft); color:var(--accent); }
+.sk-icon .icon { width:15px; height:15px; }
+.sk-icon.green { background:transparent; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--green) 38%,transparent); color:var(--green); }
+.sk-icon.blue,.sk-icon.purple { background:color-mix(in srgb,var(--accent) 15%,transparent); color:var(--accent); }
+.sk-icon.amber { background:transparent; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--amber) 38%,transparent); color:var(--amber); }
+.sk-icon.gray { background:transparent; box-shadow:inset 0 0 0 1px var(--border-strong); color:var(--text-3); }
+.sk-icon.red { background:color-mix(in srgb,var(--red) 15%,transparent); color:var(--red); }
+.sk-icon-plugin { background:transparent; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--amber) 38%,transparent); }
+.sk-added-mark { position:absolute; right:-3px; bottom:-3px; display:inline-flex; align-items:center; justify-content:center; width:11px; height:11px; border-radius:999px; background:var(--accent); color:#fff; box-shadow:0 0 0 2px var(--bg-inset); }
+.sk-added-mark .icon { width:7px; height:7px; stroke-width:3.4; }
+.sk-error-mark { position:absolute; right:-3px; bottom:-3px; width:9px; height:9px; border-radius:999px; background:var(--red); box-shadow:0 0 0 2px var(--bg-inset); }
+
+.sk-content { flex:1; min-width:0; }
+.sk-row1 { display:flex; align-items:center; gap:6px; min-width:0; }
+.sk-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--font-mono); font-size:13px; line-height:18px; font-weight:600; color:var(--text); }
+.sk-scope { flex:none; font-size:10px; line-height:14px; letter-spacing:.04em; font-weight:500; opacity:.85; }
+.sk-scope-workspace { color:var(--accent); }.sk-scope-global { color:var(--green); }.sk-scope-builtin { color:var(--text-3); }.sk-scope-plugin { color:var(--amber); }
+.sk-external { display:inline-flex; flex:none; color:var(--text-faint); }.sk-external .icon { width:12px; height:12px; }
+.sk-desc { min-width:0; margin-top:1px; overflow:hidden; font-size:12px; line-height:16px; color:var(--text-2); text-overflow:ellipsis; white-space:nowrap; }
+.sk-card.has-error .sk-desc { color:var(--red); }.sk-desc .icon { width:11px; height:11px; margin-right:5px; vertical-align:-2px; }
+
+.sk-action-zone {
+  position:absolute; z-index:2; right:0; top:0;
+  display:flex; align-items:center; height:100%;
+  max-width:0; padding:0;
+  overflow:hidden; background:transparent;
+  transition: max-width 200ms var(--ease-out),
+              padding 200ms var(--ease-out),
+              background 160ms ease;
+}
+.sk-card:hover .sk-action-zone,
+.sk-card:focus-visible .sk-action-zone,
+.sk-card:has(:focus-visible) .sk-action-zone,
+.sk-card.is-retrying .sk-action-zone {
+  max-width:160px;
+  padding:0 6px 0 28px;
+  background:linear-gradient(to right,transparent 0%,color-mix(in srgb,var(--bg-inset) 70%,var(--surface) 30%) 26px);
+}
+.sk-actions { display:flex; align-items:center; gap:2px; transform:translateX(12px); opacity:0; transition:transform 200ms var(--ease-out),opacity 160ms ease; }
+.sk-card:hover .sk-actions,
+.sk-card:focus-visible .sk-actions,
+.sk-card:has(:focus-visible) .sk-actions,
+.sk-card.is-retrying .sk-actions { transform:translateX(0); opacity:1; }
+.sk-actions .hover-action,
+.sk-actions .open-hub { display:inline-flex; }
+.sk-card:hover .sk-persistent,
+.sk-card:focus-visible .sk-persistent,
+.sk-card:has(:focus-visible) .sk-persistent,
+.sk-card:hover .persistent-retry,
+.sk-card:focus-visible .persistent-retry,
+.sk-card:has(:focus-visible) .persistent-retry { display:none; }
+.sk-actions .add-btn { display:inline-flex; align-items:center; gap:3px; height:22px; padding:0 7px; border-radius:6px; font-size:11px; font-weight:500; color:var(--accent); background:var(--accent-soft); white-space:nowrap; }
+.sk-actions .add-btn:hover { filter:brightness(1.12); }.sk-actions .add-btn .icon { width:11px; height:11px; }
+.sk-actions .add-btn.retry-hover { color:var(--red); background:var(--red-soft); }
+.sk-actions .icon-btn { width:22px; height:22px; color:var(--text-3); }.sk-actions .icon-btn:hover { background:var(--surface-hover); color:var(--text); }
+.sk-persistent { display:inline-flex; max-width:42px; overflow:hidden; text-overflow:ellipsis; padding-right:3px; color:var(--accent); font-size:10px; letter-spacing:.04em; white-space:nowrap; }
+.persistent-retry { opacity:1!important; pointer-events:auto!important; color:var(--red)!important; background:var(--red-soft)!important; }
+.sk-card.is-retrying .sk-icon .icon { animation:sk-row-spin .9s linear infinite; }
+@keyframes sk-row-spin { to { transform:rotate(360deg); } }
+
+/* 卡片内 tip 改到按钮左侧，避免被 overflow:hidden 和列表滚动裁切 */
+.sk-card [data-tip]:hover::after,
+.sk-card [data-tip]:focus-visible::after {
+  top: 50%;
+  bottom: auto;
+  left: auto;
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+  max-width: 140px;
+  white-space: nowrap;
+}
+
+/* 空态 */
+.sd-empty {
+  margin: var(--sp-24) var(--sp-12);
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+}
+.sd-empty .icon {
+  display: block; margin: 0 auto var(--sp-8);
+  color: var(--glyph-faint);
+}
+
+/* 抽屉底部固定：进入能力中心入口 */
+.sd-foot {
+  flex: none;
+  padding: var(--sp-8) var(--sp-12);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-inset);
+}
+.sd-foot-link {
+  display: flex; align-items: center; gap: var(--sp-8);
+  padding: var(--sp-10) var(--sp-12);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  transition: border-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease);
+}
+.sd-foot-link:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-softer);
+  text-decoration: none;
+}
+.sd-foot-link .icon { color: var(--accent); flex: none; }
+.sd-foot-link .label { flex: 1; }
+.sd-foot-link .kbd {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* 减少动效 */
+@media (prefers-reduced-motion: reduce) {
+  .sb-drawer-mask { transition: opacity var(--dur-fast) linear; transform: none; }
+  .sb-drawer-mask.open { transform: none; }
+  .new-convo-btn:active, .skills-btn:active, .add-btn:active { transform: none; }
+}
