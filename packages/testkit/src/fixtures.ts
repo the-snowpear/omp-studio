@@ -244,7 +244,10 @@ const QUERY_INPUTS = {
   "home.get": {},
   "models.get": {},
   "skills.get": {},
+  "mcp.get": {},
+  "agents.definitions.get": {},
   "projects.list": {},
+  "usage.get": {},
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
@@ -274,6 +277,11 @@ const QUERY_RESPONSES = {
       runtimeEffectHint: "test",
       loginAvailable: false,
       ompAvailable: false,
+      modelRoleStorage: "global",
+      projectScopeAvailable: false,
+      modelProviderOrder: [],
+      fallbackChains: {},
+      fallbackRevertPolicy: "cooldown-expiry",
     },
   },
   "skills.get": {
@@ -286,10 +294,42 @@ const QUERY_RESPONSES = {
       generatedAt: T0,
     },
   },
+  "mcp.get": {
+    ok: true,
+    queryName: "mcp.get",
+    result: {
+      servers: [],
+      warnings: [],
+      generatedAt: T0,
+    },
+  },
+  "agents.definitions.get": {
+    ok: true,
+    queryName: "agents.definitions.get",
+    result: {
+      agents: [],
+      warnings: [],
+      builtinToolNames: [],
+      roleAliases: [],
+      projectScopeAvailable: false,
+      generatedAt: T0,
+    },
+  },
   "projects.list": {
     ok: true,
     queryName: "projects.list",
     result: { workspaces: [] },
+  },
+  "usage.get": {
+    ok: true,
+    queryName: "usage.get",
+    result: {
+      generatedAt: T0,
+      days: [],
+      models: [],
+      byModel: [],
+      hours: [],
+    },
   },
 } satisfies { readonly [K in QueryName]: ClientQueryResponse<K> };
 

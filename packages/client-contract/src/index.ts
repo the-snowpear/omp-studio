@@ -127,3 +127,4 @@ export * from "./ids.js";
 export * from "./read-models.js";
 export * from "./operations.js";
 export * from "./lifecycle.js";
+export * from "./model-thinking.js";

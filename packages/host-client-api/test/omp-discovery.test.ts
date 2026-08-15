@@ -62,11 +62,26 @@ describe("omp-discovery scope alignment", () => {
       const oc = result.skills.find((skill) => skill.name === "oc");
       assert.ok(oc);
       assert.equal(oc?.scope, "global");
-      assert.equal(oc?.sourceLabel, "用户");
+      assert.equal(oc?.sourceLabel, "OpenCode");
       const ocp = result.skills.find((skill) => skill.name === "ocp");
       assert.ok(ocp);
       assert.equal(ocp?.scope, "workspace");
-      assert.equal(ocp?.sourceLabel, "项目");
+      assert.equal(ocp?.sourceLabel, "OpenCode");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("labels Codex skills with the Codex source chip", async () => {
+    const { home, cwd } = await makeEnv();
+    try {
+      await writeSkill(join(home, ".codex", "skills"), "cx", "---\nname: cx\ndescription: user codex\n---\n");
+      const service = createOmpExtensibilityService({ home, cwd, now: () => NOW });
+      const result = await service.get();
+      const cx = result.skills.find((skill) => skill.name === "cx");
+      assert.ok(cx);
+      assert.equal(cx?.sourceLabel, "Codex");
+      assert.equal(cx?.scope, "global");
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -102,7 +117,7 @@ describe("omp-discovery scope alignment", () => {
       const mkt = result.skills.find((skill) => skill.name === "mkt");
       assert.ok(mkt);
       assert.equal(mkt?.sourceKind, "plugin");
-      assert.equal(mkt?.sourceLabel, "插件");
+      assert.equal(mkt?.sourceLabel, "Claude 插件");
       const mkt2 = result.skills.find((skill) => skill.name === "mkt2");
       assert.ok(mkt2, "skills from plugin.json-declared dirs must be scanned");
       assert.equal(mkt2?.sourceKind, "plugin");
@@ -144,7 +159,7 @@ describe("omp-discovery scope alignment", () => {
       const view = await service.get();
       const record = view.skills.find((entry) => entry.name === "agp");
       assert.equal(record?.sourceKind, "plugin");
-      assert.equal(record?.sourceLabel, "插件");
+      assert.equal(record?.sourceLabel, "Agent Plugin");
     } finally {
       await rm(home, { recursive: true, force: true });
     }
@@ -251,10 +266,10 @@ describe("omp-discovery scope alignment", () => {
 
       const service = createOmpExtensibilityService({ home, cwd, now: () => NOW });
       const result = await service.get();
-      assert.equal(result.skills.find((skill) => skill.name === "a")?.sourceLabel, "项目");
+      assert.equal(result.skills.find((skill) => skill.name === "a")?.sourceLabel, "OMP");
       assert.equal(result.skills.find((skill) => skill.name === "b")?.sourceLabel, "插件");
       const c = result.skills.find((skill) => skill.name === "c");
-      assert.equal(c?.sourceLabel, "用户");
+      assert.equal(c?.sourceLabel, "OMP");
       assert.equal(c?.scope, "global");
     } finally {
       await rm(home, { recursive: true, force: true });
@@ -328,7 +343,7 @@ describe("omp-discovery scope alignment", () => {
       const matches = result.skills.filter((entry) => entry.name === "clash");
       assert.equal(matches.length, 1);
       assert.equal(matches[0]?.enabled, true);
-      assert.equal(matches[0]?.sourceLabel, "项目");
+      assert.equal(matches[0]?.sourceLabel, "OMP");
     } finally {
       await rm(home, { recursive: true, force: true });
     }

@@ -21,6 +21,21 @@ export interface ProviderResult {
   readonly warnings: DiscoveryWarning[];
 }
 
+/** Provider chip text on the Skills inventory (same role as MCP `sourceLabel`). */
+function providerLabel(providerId: string): string {
+  if (providerId === "native") return "OMP";
+  if (providerId === "omp-plugins") return "插件";
+  if (providerId === "claude") return "Claude";
+  if (providerId === "agent-plugins") return "Agent Plugin";
+  if (providerId === "claude-plugins") return "Claude 插件";
+  if (providerId === "codex") return "Codex";
+  if (providerId === "opencode") return "OpenCode";
+  if (providerId === "github") return "GitHub";
+  if (providerId === "agents") return "Agents";
+  if (providerId === "omp-managed") return "托管";
+  return "OMP";
+}
+
 /**
  * Native provider (priority 100):
  * - Project: walk up from cwd to repoRoot, scan <dir>/.omp/skills at each ancestor
@@ -43,7 +58,7 @@ export async function loadNativeSkills(ctx: LoadContext): Promise<ProviderResult
       priority: 100,
       scope: "workspace",
       sourceKind: "native",
-      sourceLabel: "项目",
+      sourceLabel: providerLabel("native"),
       requireDescription: true,
     });
     allSkills.push(...skills);
@@ -58,7 +73,7 @@ export async function loadNativeSkills(ctx: LoadContext): Promise<ProviderResult
     priority: 100,
     scope: "global",
     sourceKind: "native",
-    sourceLabel: "用户",
+    sourceLabel: providerLabel("native"),
     requireDescription: true,
   });
   allSkills.push(...userSkills);
@@ -79,7 +94,7 @@ export async function loadManagedSkills(ctx: LoadContext): Promise<ProviderResul
     priority: 5,
     scope: "builtin",
     sourceKind: "managed",
-    sourceLabel: "托管",
+    sourceLabel: providerLabel("omp-managed"),
     requireDescription: true,
   });
   return { skills, warnings };
@@ -116,7 +131,7 @@ export async function loadOmpPluginsSkills(ctx: LoadContext): Promise<ProviderRe
       priority: 90,
       scope: scan.scope,
       sourceKind: "plugin",
-      sourceLabel: "插件",
+      sourceLabel: providerLabel("omp-plugins"),
       requireDescription: true,
     });
     allSkills.push(...skills);
@@ -147,7 +162,7 @@ export async function loadClaudeSkills(ctx: LoadContext): Promise<ProviderResult
       priority: 80,
       scope: "workspace",
       sourceKind: "native",
-      sourceLabel: "项目",
+      sourceLabel: providerLabel("claude"),
       requireDescription: false,
     });
     allSkills.push(...skills);
@@ -162,7 +177,7 @@ export async function loadClaudeSkills(ctx: LoadContext): Promise<ProviderResult
     priority: 80,
     scope: "global",
     sourceKind: "native",
-    sourceLabel: "用户",
+    sourceLabel: providerLabel("claude"),
     requireDescription: false,
   });
   allSkills.push(...userSkills);
@@ -224,7 +239,7 @@ export async function loadAgentPluginsSkills(ctx: LoadContext): Promise<Provider
       priority: 75,
       scope: candidate.scope,
       sourceKind: "plugin",
-      sourceLabel: "插件",
+      sourceLabel: providerLabel("agent-plugins"),
       requireDescription: false,
     });
     allSkills.push(...skills);
@@ -257,7 +272,7 @@ export async function loadClaudePluginsSkills(ctx: LoadContext): Promise<Provide
         priority: 70,
         scope: root.scope === "project" ? "workspace" : "builtin",
         sourceKind: "plugin",
-        sourceLabel: "插件",
+        sourceLabel: providerLabel("claude-plugins"),
         includeSelf: true,
         requireDescription: false,
       });
@@ -286,7 +301,7 @@ export async function loadCodexSkills(ctx: LoadContext): Promise<ProviderResult>
     priority: 70,
     scope: "workspace",
     sourceKind: "native",
-    sourceLabel: "项目",
+    sourceLabel: providerLabel("codex"),
     requireDescription: false,
   });
   allSkills.push(...projectSkills);
@@ -300,7 +315,7 @@ export async function loadCodexSkills(ctx: LoadContext): Promise<ProviderResult>
     priority: 70,
     scope: "global",
     sourceKind: "native",
-    sourceLabel: "用户",
+    sourceLabel: providerLabel("codex"),
     requireDescription: false,
   });
   allSkills.push(...userSkills);
@@ -326,7 +341,7 @@ export async function loadOpencodeSkills(ctx: LoadContext): Promise<ProviderResu
     priority: 55,
     scope: "workspace",
     sourceKind: "native",
-    sourceLabel: "项目",
+    sourceLabel: providerLabel("opencode"),
     requireDescription: false,
   });
   allSkills.push(...projectSkills);
@@ -340,7 +355,7 @@ export async function loadOpencodeSkills(ctx: LoadContext): Promise<ProviderResu
     priority: 55,
     scope: "global",
     sourceKind: "native",
-    sourceLabel: "用户",
+    sourceLabel: providerLabel("opencode"),
     requireDescription: false,
   });
   allSkills.push(...userSkills);
@@ -361,7 +376,7 @@ export async function loadGithubSkills(ctx: LoadContext): Promise<ProviderResult
     priority: 30,
     scope: "workspace",
     sourceKind: "native",
-    sourceLabel: "项目",
+    sourceLabel: providerLabel("github"),
     requireDescription: true, // GitHub skills require description
   });
   return { skills, warnings };
@@ -389,7 +404,7 @@ export async function loadAgentsSkills(ctx: LoadContext): Promise<ProviderResult
         priority: 70,
         scope: "workspace",
         sourceKind: "native",
-        sourceLabel: "项目",
+        sourceLabel: providerLabel("agents"),
         requireDescription: false,
       });
       allSkills.push(...skills);
@@ -406,7 +421,7 @@ export async function loadAgentsSkills(ctx: LoadContext): Promise<ProviderResult
       priority: 70,
       scope: "global",
       sourceKind: "native",
-      sourceLabel: "用户",
+      sourceLabel: providerLabel("agents"),
       requireDescription: false,
     });
     allSkills.push(...skills);

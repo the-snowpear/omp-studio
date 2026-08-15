@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import type { ConfigWriteResult, StudioClient } from "@omp-studio/client-contract";
+import type { ReactNode } from "react";
+import type { ConfigWriteResult, McpServerRecord, StudioClient } from "@omp-studio/client-contract";
 import { Icon } from "./icons";
+import { ToastHost } from "./ToastHost";
+import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
+import { SlidingTabs } from "./SlidingTabs";
 import {
-  createPreviewHostTools,
   createPreviewMcp,
   createPreviewSlashCommands,
   type PreviewMcp,
@@ -11,6 +13,7 @@ import {
 import { pluginToPreview, skillToPreview } from "./extensibilityMap";
 import {
   createPreviewDrawerItems,
+  withUniqueDrawerKeys,
   type PluginPreview,
   type SkillPreview,
 } from "./skillsPreview";
@@ -18,7 +21,7 @@ import { usePreviewMode } from "./preview/PreviewContext";
 
 export const CAP_INTENT_KEY = "omp.capIntent";
 
-export type CapTab = "skills" | "plugins" | "mcp" | "host" | "slash";
+export type CapTab = "skills" | "plugins" | "mcp" | "slash";
 
 type CapIntent = { tab?: CapTab; name?: string };
 
@@ -26,7 +29,6 @@ const TABS: ReadonlyArray<readonly [CapTab, string, string]> = [
   ["skills", "book", "Skills"],
   ["plugins", "package", "Plugins"],
   ["mcp", "plug", "MCP"],
-  ["host", "monitor", "Host Tools"],
   ["slash", "slash", "Slash Commands"],
 ];
 
@@ -37,7 +39,7 @@ const CONTRACT = {
   reveal: "打开 Skill 目录不在公共 contract 中",
   remove: "删除 Skill 不在公共 contract 中",
   plugin: "Plugin 详情 / 卸载不在公共 contract 中",
-  mcp: "MCP 连接控制不在公共 contract 中",
+  mcp: "MCP 连接控制尚未接入",
   slash: "演示 slash 不能当作 operator.invoke id 执行",
 } as const;
 
@@ -174,16 +176,18 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
   const [tab, setTab] = useState<CapTab>("skills");
   const [skills, setSkills] = useState<SkillPreview[]>(() => preview ? previewSkills() : []);
   const [plugins, setPlugins] = useState<PluginPreview[]>(() => preview ? previewPlugins() : []);
-  const [mcp, setMcp] = useState(() => preview ? createPreviewMcp() : []);
+  const [mcp, setMcp] = useState<PreviewMcp[]>(() => preview ? createPreviewMcp() : []);
+  const [mcpServers, setMcpServers] = useState<McpServerRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [pluginBusy, setPluginBusy] = useState<ReadonlySet<string>>(new Set());
   const [skillBusy, setSkillBusy] = useState<ReadonlySet<string>>(new Set());
-  const sideRef = useRef<HTMLDivElement>(null);
+  const [mcpBusy, setMcpBusy] = useState<ReadonlySet<string>>(new Set());
   const itemRefs = useRef(new Map<string, HTMLElement>());
+  const tabIndex = TABS.findIndex(([id]) => id === tab);
+  const { incoming, outgoing, dir, live, stageRef } = useOverlappingTabs(tab, tabIndex);
 
-  const hostTools = useMemo(() => preview ? createPreviewHostTools() : [], [preview]);
   const slash = useMemo(() => preview ? createPreviewSlashCommands() : [], [preview]);
 
   const refresh = useCallback(async () => {
@@ -191,18 +195,26 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
       setSkills(previewSkills());
       setPlugins(previewPlugins());
       setMcp(createPreviewMcp());
+      setMcpServers([]);
       setLoadError(null);
       return;
     }
     try {
-      const next = await client.query("skills.get", {});
-      setSkills(next.skills.map(skillToPreview));
-      setPlugins(next.plugins.map(pluginToPreview));
-      setLoadError(next.unavailableReason ?? null);
+      const [skillsNext, mcpNext] = await Promise.all([
+        client.query("skills.get", {}),
+        client.query("mcp.get", {}),
+      ]);
+      setSkills(skillsNext.skills.map(skillToPreview));
+      setPlugins(skillsNext.plugins.map(pluginToPreview));
+      setMcp([]);
+      setMcpServers([...mcpNext.servers]);
+      setLoadError(skillsNext.unavailableReason ?? mcpNext.unavailableReason ?? null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "skills.get failed";
+      const message = error instanceof Error ? error.message : "skills.get / mcp.get failed";
       setSkills([]);
       setPlugins([]);
+      setMcp([]);
+      setMcpServers([]);
       setLoadError(message);
     }
   }, [client, preview]);
@@ -214,8 +226,7 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
   const counts: Record<CapTab, number> = {
     skills: skills.length,
     plugins: plugins.length,
-    mcp: mcp.length,
-    host: hostTools.length,
+    mcp: preview ? mcp.length : mcpServers.length,
     slash: slash.length,
   };
 
@@ -227,25 +238,20 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
   }, []);
 
   useEffect(() => {
-    if (!highlight) return;
+    if (!highlight || incoming !== tab) return;
     const el = itemRefs.current.get(highlight);
     if (!el) return;
     el.focus();
     el.scrollIntoView({ block: "nearest" });
-  }, [tab, highlight]);
+  }, [tab, incoming, highlight]);
 
   const bindItem = (name: string) => (node: HTMLElement | null) => {
     if (node) itemRefs.current.set(name, node);
     else itemRefs.current.delete(name);
   };
 
-  const selectTab = (next: CapTab) => {
-    setTab(next);
-  };
-
   const toast = (text: string) => {
     setFlash(text);
-    window.setTimeout(() => setFlash(null), 3200);
   };
 
   /**
@@ -305,20 +311,28 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
     }
   };
 
-  const onSideKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const all = [...(sideRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])];
-    const index = all.indexOf(document.activeElement as HTMLButtonElement);
-    if (index < 0) return;
-    let next: HTMLButtonElement | undefined;
-    if (event.key === "ArrowDown") next = all[(index + 1) % all.length];
-    else if (event.key === "ArrowUp") next = all[(index - 1 + all.length) % all.length];
-    else if (event.key === "Home") next = all[0];
-    else if (event.key === "End") next = all[all.length - 1];
-    if (!next) return;
-    event.preventDefault();
-    const id = next.dataset.cap;
-    if (id && TABS.some(([tabId]) => tabId === id)) selectTab(id as CapTab);
-    next.focus();
+  const toggleMcpServer = async (server: McpServerRecord) => {
+    if (preview) return;
+    const next = !server.enabled;
+    setMcpBusy((current) => new Set(current).add(server.name));
+    try {
+      const handle = await client.command("mcp.setEnabled", {
+        name: server.name,
+        enabled: next,
+        scope: server.scope,
+      });
+      const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
+      toast(receipt.message ?? (next ? "已启用" : "已禁用"));
+      await refresh();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "MCP 开关失败");
+    } finally {
+      setMcpBusy((current) => {
+        const nextSet = new Set(current);
+        nextSet.delete(server.name);
+        return nextSet;
+      });
+    }
   };
 
   const renderSkills = () => {
@@ -335,13 +349,13 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
             { cls: "red", n: fail, label: "失败" },
           ]}
         />
-        {skills.map((skill) => {
+        {withUniqueDrawerKeys(skills).map(({ item: skill, key }) => {
           const scope = scopeOf(skill);
           const tone = skill.error ? "amber" : preview ? (skill.session ? "purple" : "gray") : "purple";
-          const source = skill.path || skill.src || "";
+          const sourcePath = skill.path && skill.path !== skill.src ? skill.path : "";
           return (
             <div
-              key={skill.name}
+              key={key}
               className={`cap-item cap-skills${skill.error ? " has-error" : ""}`}
               data-name={skill.name}
               tabIndex={highlight === skill.name ? 0 : -1}
@@ -353,6 +367,7 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
                   <div className="cap-item-name-row">
                     <span className="cap-item-name">{skill.name}</span>
                     <span className={`cap-scope ${scope.cls}`}>{scope.label}</span>
+                    {skill.src ? <span className="chip outline xs">{skill.src}</span> : null}
                   </div>
                   <Stepper loaded={skill.loaded} session={skill.session} configuredOnly={!preview} />
                 </div>
@@ -382,7 +397,7 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
               </div>
               <div className="cap-item-body">
                 <p className="cap-item-desc">{skill.desc}</p>
-                {source ? <span className="cap-source" title={source}>{source}</span> : null}
+                {sourcePath ? <span className="cap-source" title={sourcePath}>{sourcePath}</span> : null}
               </div>
               {skill.error ? (
                 <div className="cap-error">
@@ -411,7 +426,7 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
             { cls: "red", n: fail, label: "失败" },
           ]}
         />
-        {plugins.map((plugin) => {
+        {withUniqueDrawerKeys(plugins).map(({ item: plugin, key }) => {
           const err = Boolean(plugin.err);
           const enabled = plugin.enabled ?? plugin.status === "loaded";
           const chip = err
@@ -421,7 +436,7 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
               : { text: "已禁用", cls: "gray" };
           return (
             <div
-              key={plugin.name}
+              key={key}
               className={`cap-item${err ? " has-error" : ""}`}
               data-name={plugin.name}
               tabIndex={highlight === plugin.name ? 0 : -1}
@@ -472,27 +487,90 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
   };
 
   const renderMcp = () => {
-    const ok = mcp.filter((item) => item.status === "connected").length;
-    const fail = mcp.filter((item) => item.status === "error").length;
-    const off = mcp.length - ok - fail;
+    if (preview) {
+      const ok = mcp.filter((item) => item.status === "connected").length;
+      const fail = mcp.filter((item) => item.status === "error").length;
+      const off = mcp.length - ok - fail;
+      return (
+        <>
+          <Summary
+            total={mcp.length}
+            stats={[
+              { cls: "green", n: ok, label: "已连接" },
+              { cls: "red", n: fail, label: "失败" },
+              { cls: "gray", n: off, label: "未连接" },
+            ]}
+          />
+          {mcp.map((item) => {
+            const tone = item.status === "connected" ? "green" : item.status === "reconnecting" ? "amber" : "gray";
+            const isOn = item.status !== "disabled";
+            return (
+              <div
+                key={item.name}
+                className={`cap-item${item.status === "error" ? " has-error" : ""}`}
+                data-tone={tone}
+                data-name={item.name}
+                tabIndex={highlight === item.name ? 0 : -1}
+                ref={bindItem(item.name)}
+              >
+                <div className="cap-item-summary">
+                  <span className={`a-ic ${tone}`}><Icon name="plug" extra="sm" /></span>
+                  <div className="cap-item-main">
+                    <div className="cap-item-name-row">
+                      <span className="cap-item-name">{item.name}</span>
+                      <span className={`chip ${tone} xs`}>{item.status}</span>
+                      <span className="chip outline xs">{item.transport}</span>
+                    </div>
+                  </div>
+                  <div className="cap-item-actions">
+                    <Disabled className="btn small outline" tip={CONTRACT.mcp}>测试连接<span className="sr-only">：{item.name}</span></Disabled>
+                    <Disabled className="btn small outline" tip={CONTRACT.mcp}>日志<span className="sr-only">：{item.name}</span></Disabled>
+                    <Disabled className="icon-btn small" tip={CONTRACT.mcp}><Icon name="refresh" extra="sm" /></Disabled>
+                    <Switch
+                      on={isOn}
+                      label={`启用 MCP 服务器 ${item.name}`}
+                      onToggle={() => setMcp((current) => current.map((entry) => entry.name === item.name ? togglePreviewMcp(entry) : entry))}
+                    />
+                  </div>
+                </div>
+                <div className="cap-item-body">
+                  <div className="cap-item-meta">
+                    <span>Tools {item.tools}</span>
+                    <span>Resources {item.resources}</span>
+                    <span>Prompts {item.prompts}</span>
+                    <span className="mono">最近调用 {item.last}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      );
+    }
+
+    const on = mcpServers.filter((item) => item.status === "enabled").length;
+    const off = mcpServers.filter((item) => item.status === "disabled").length;
+    const shadowed = mcpServers.filter((item) => item.status === "shadowed").length;
     return (
       <>
         <Summary
-          total={mcp.length}
+          total={mcpServers.length}
           stats={[
-            { cls: "green", n: ok, label: "已连接" },
-            { cls: "red", n: fail, label: "失败" },
-            { cls: "gray", n: off, label: "未连接" },
+            { cls: "green", n: on, label: "已启用" },
+            { cls: "gray", n: off, label: "已禁用" },
+            { cls: "amber", n: shadowed, label: "被覆盖" },
           ]}
         />
-        {mcp.map((item) => {
-          const tone = item.status === "connected" ? "green" : item.status === "reconnecting" ? "amber" : "gray";
-          const chip = tone;
-          const isOn = item.status !== "disabled";
+        {mcpServers.length === 0 ? (
+          <p className="muted small">未发现 MCP 配置。OMP 会扫描本机 mcp.json，以及 Codex / Cursor / Claude / Gemini 等来源。</p>
+        ) : null}
+        {mcpServers.map((item) => {
+          const tone = item.status === "enabled" ? "green" : item.status === "shadowed" ? "amber" : "gray";
+          const chipLabel = item.status === "enabled" ? "enabled" : item.status === "shadowed" ? "shadowed" : "disabled";
           return (
             <div
-              key={item.name}
-              className={`cap-item${item.status === "error" ? " has-error" : ""}`}
+              key={`${item.scope}:${item.name}`}
+              className="cap-item"
               data-tone={tone}
               data-name={item.name}
               tabIndex={highlight === item.name ? 0 : -1}
@@ -503,8 +581,9 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
                 <div className="cap-item-main">
                   <div className="cap-item-name-row">
                     <span className="cap-item-name">{item.name}</span>
-                    <span className={`chip ${chip} xs`}>{item.status}</span>
+                    <span className={`chip ${tone} xs`}>{chipLabel}</span>
                     <span className="chip outline xs">{item.transport}</span>
+                    <span className="chip outline xs">{item.sourceLabel}</span>
                   </div>
                 </div>
                 <div className="cap-item-actions">
@@ -512,55 +591,19 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
                   <Disabled className="btn small outline" tip={CONTRACT.mcp}>日志<span className="sr-only">：{item.name}</span></Disabled>
                   <Disabled className="icon-btn small" tip={CONTRACT.mcp}><Icon name="refresh" extra="sm" /></Disabled>
                   <Switch
-                    on={isOn}
+                    on={item.enabled}
                     label={`启用 MCP 服务器 ${item.name}`}
-                    onToggle={() => setMcp((current) => current.map((entry) => entry.name === item.name ? toggleMcp(entry) : entry))}
+                    disabled={mcpBusy.has(item.name) || item.status === "shadowed"}
+                    onToggle={() => void toggleMcpServer(item)}
                   />
                 </div>
               </div>
               <div className="cap-item-body">
                 <div className="cap-item-meta">
-                  <span>Tools {item.tools}</span>
-                  <span>Resources {item.resources}</span>
-                  <span>Prompts {item.prompts}</span>
-                  <span className="mono">最近调用 {item.last}</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </>
-    );
-  };
-
-  const renderHost = () => {
-    const ok = hostTools.filter((tool) => tool.registered).length;
-    return (
-      <>
-        <Summary
-          total={hostTools.length}
-          stats={[
-            { cls: "green", n: ok, label: "已注册" },
-            { cls: "gray", n: hostTools.length - ok, label: "未注册" },
-          ]}
-        />
-        {hostTools.map((tool) => {
-          const tone = tool.registered ? "green" : "amber";
-          return (
-            <div key={tool.name} className="cap-item" data-name={tool.name} tabIndex={highlight === tool.name ? 0 : -1} ref={bindItem(tool.name)}>
-              <div className="cap-item-summary">
-                <span className={`a-ic ${tone}`}><Icon name="monitor" extra="sm" /></span>
-                <div className="cap-item-main">
-                  <div className="cap-item-name-row">
-                    <span className="cap-item-name mono">{tool.name}</span>
-                    <span className={`chip ${tone} xs`}>{tool.registered ? "已注册" : "未注册"}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="cap-item-body">
-                <p className="cap-item-desc">{tool.desc}</p>
-                <div className="cap-item-meta">
-                  <span>累计调用 {tool.calls} 次</span>
+                  <span>Tools —</span>
+                  <span>Resources —</span>
+                  <span>Prompts —</span>
+                  <span className="mono">配置库存（非连接态）</span>
                 </div>
               </div>
             </div>
@@ -606,74 +649,80 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
     );
   };
 
+  const tabBody = (id: CapTab) => {
+    if (id === "skills") return renderSkills();
+    if (id === "plugins") return renderPlugins();
+    if (id === "mcp") return renderMcp();
+    return renderSlash();
+  };
+
   return (
     <div className="page-wide">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <div>
           <h1 style={{ fontSize: 18 }}>能力中心</h1>
-          <p className="muted small">Skills / Plugins 扫描 OMP / Claude / Agents / Codex / OpenCode / GitHub / 插件与市场（configured 库存，非 Runtime loaded）。MCP / Host Tools / Slash 仍无对应 read model。</p>
-          <p className="tiny muted">
-            {preview
-              ? "演示目录 · 预览开时覆盖真实库存"
-              : loadError
-                ? loadError
-                : "已配置库存 · 当前会话是否加载需 Runtime introspection"}
-          </p>
+          <p className="muted small">这里汇总了你的全部能力，包括来自多个应用和插件市场的 Skills 与 Plugins。</p>
+          {preview || loadError ? (
+            <p className="tiny muted">{preview ? "演示模式：展示示例能力，不代表你的真实配置。" : loadError}</p>
+          ) : null}
         </div>
         <span className="spacer" />
         <Disabled className="btn outline" tip={CONTRACT.folder}><Icon name="folder" extra="sm" />打开来源目录</Disabled>
         <Disabled className="btn primary" tip={CONTRACT.create}><Icon name="plus" extra="sm" />创建 Skill</Disabled>
       </div>
-      {flash ? (
-        <div className="cap-flash" role="status">
-          <Icon name="info" extra="xs" />
-          <span>{flash}</span>
-        </div>
-      ) : null}
+      <ToastHost message={flash} onDismiss={() => setFlash(null)} />
       <div className="cap-layout">
-        <div
-          className="cap-side"
+        <SlidingTabs
           id="capSide"
-          ref={sideRef}
-          role="tablist"
-          aria-label="能力分类"
-          aria-orientation="vertical"
-          onKeyDown={onSideKey}
-        >
-          {TABS.map(([id, icon, label]) => {
-            const active = tab === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                data-cap={id}
-                className={active ? "active" : undefined}
-                role="tab"
-                aria-selected={active}
-                aria-controls="capMain"
-                tabIndex={active ? 0 : -1}
-                onClick={() => selectTab(id)}
+          ariaLabel="能力分类"
+          value={tab}
+          onChange={setTab}
+          syncKey={TABS.map(([id]) => String(counts[id])).join(",")}
+          items={TABS.map(([id, icon, label]) => ({
+            id,
+            icon,
+            label,
+            buttonId: `capTab-${id}`,
+            panelId: `cap-${id}`,
+            badge: <span className="cnt">{counts[id]}<span className="sr-only"> 项</span></span>,
+          }))}
+        />
+        <div className="cap-main" id="capMain">
+          <div className="cap-pane-stage" ref={stageRef}>
+            {outgoing != null && outgoing !== incoming ? (
+              <div
+                key={outgoing}
+                className={tabPaneClass(tabPaneRole(outgoing, incoming, outgoing, live), dir)}
+                data-tab-pane={outgoing}
+                role="tabpanel"
+                id={`cap-${outgoing}`}
+                tabIndex={-1}
+                aria-labelledby={`capTab-${outgoing}`}
+                aria-hidden
+                inert
               >
-                <Icon name={icon} extra="sm" />
-                {label}
-                <span className="cnt">{counts[id]}<span className="sr-only"> 项</span></span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="cap-main" id="capMain" role="tabpanel" tabIndex={0} aria-label="能力列表">
-          {tab === "skills" ? renderSkills() : null}
-          {tab === "plugins" ? renderPlugins() : null}
-          {tab === "mcp" ? renderMcp() : null}
-          {tab === "host" ? renderHost() : null}
-          {tab === "slash" ? renderSlash() : null}
+                {tabBody(outgoing)}
+              </div>
+            ) : null}
+            <div
+              key={incoming}
+              className={tabPaneClass(tabPaneRole(incoming, incoming, outgoing, live), dir)}
+              data-tab-pane={incoming}
+              role="tabpanel"
+              id={`cap-${incoming}`}
+              tabIndex={0}
+              aria-labelledby={`capTab-${incoming}`}
+            >
+              {tabBody(incoming)}
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function toggleMcp(item: PreviewMcp): PreviewMcp {
+function togglePreviewMcp(item: PreviewMcp): PreviewMcp {
   if (item.status === "disabled") return { ...item, status: "connected" };
   return { ...item, status: "disabled" };
 }

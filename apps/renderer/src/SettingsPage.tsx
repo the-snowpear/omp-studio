@@ -1,10 +1,38 @@
-import { useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import { useState } from "react";
+import type { ReactNode } from "react";
 import { Icon } from "./icons";
 import type { PageRoute } from "./HomePage";
 import { setModelConfigIntent, type McTab } from "./ModelConfigPage";
+import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
+import { SlidingTabs } from "./SlidingTabs";
 
-type GroupId = "general" | "models" | "permissions" | "sessions" | "preview" | "advanced";
+export const SETTINGS_INTENT_KEY = "omp.settingsIntent";
+
+export type SettingsGroupId = "general" | "models" | "permissions" | "sessions" | "preview" | "advanced";
+
+type GroupId = SettingsGroupId;
+
+const GROUP_IDS: ReadonlyArray<SettingsGroupId> = ["general", "models", "permissions", "sessions", "preview", "advanced"];
+
+export function setSettingsIntent(group: SettingsGroupId): void {
+  try {
+    sessionStorage.setItem(SETTINGS_INTENT_KEY, JSON.stringify({ group }));
+  } catch {
+    /* sessionStorage may be blocked; navigation still opens the page. */
+  }
+}
+
+function takeSettingsIntent(): SettingsGroupId | null {
+  try {
+    const raw = sessionStorage.getItem(SETTINGS_INTENT_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(SETTINGS_INTENT_KEY);
+    const value = JSON.parse(raw) as { group?: unknown };
+    return GROUP_IDS.some((id) => id === value.group) ? value.group as SettingsGroupId : null;
+  } catch {
+    return null;
+  }
+}
 
 const GROUPS: ReadonlyArray<readonly [GroupId, string, string]> = [
   ["general", "settings", "General"],
@@ -68,70 +96,41 @@ export function SettingsPage({
   onSetTheme: (theme: "light" | "dark") => void;
   onRoute: (route: PageRoute) => void;
 }) {
-  const [group, setGroup] = useState<GroupId>("general");
-  const sideRef = useRef<HTMLDivElement>(null);
+  const [group, setGroup] = useState<GroupId>(() => takeSettingsIntent() ?? "general");
+  const groupIndex = GROUPS.findIndex(([id]) => id === group);
+  const { incoming, outgoing, dir, live, stageRef } = useOverlappingTabs(group, groupIndex);
+  const pane = (id: GroupId) => ({
+    className: `set-group ${tabPaneClass(tabPaneRole(id, incoming, outgoing, live), dir)}`,
+    hidden: id !== incoming && id !== outgoing,
+    "data-tab-pane": id,
+    inert: id === outgoing ? true : undefined,
+  });
 
   const openModelConfig = (tab: McTab) => {
     setModelConfigIntent({ tab });
     onRoute("model-config");
   };
 
-  const onSideKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const all = [...(sideRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])];
-    const index = all.indexOf(document.activeElement as HTMLButtonElement);
-    if (index < 0) return;
-    let next: HTMLButtonElement | undefined;
-    if (event.key === "ArrowDown") next = all[(index + 1) % all.length];
-    else if (event.key === "ArrowUp") next = all[(index - 1 + all.length) % all.length];
-    else if (event.key === "Home") next = all[0];
-    else if (event.key === "End") next = all[all.length - 1];
-    if (!next) return;
-    event.preventDefault();
-    const id = next.dataset.set as GroupId | undefined;
-    if (id) setGroup(id);
-    next.focus();
-  };
-
   return (
     <div className="page-wide set-layout">
-      <div
-        className="cap-side"
+      <SlidingTabs
         id="setSide"
-        ref={sideRef}
-        role="tablist"
-        aria-label="设置分组"
-        aria-orientation="vertical"
-        onKeyDown={onSideKey}
-      >
-        {GROUPS.map(([id, icon, label]) => {
-          const active = group === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              data-set={id}
-              id={`setTab-${id}`}
-              role="tab"
-              aria-controls={`set-${id}`}
-              aria-selected={active}
-              tabIndex={active ? 0 : -1}
-              className={active ? "active" : undefined}
-              onClick={() => setGroup(id)}
-            >
-              <Icon name={icon} extra="sm" />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+        ariaLabel="设置分组"
+        value={group}
+        onChange={setGroup}
+        items={GROUPS.map(([id, icon, label]) => ({
+          id,
+          icon,
+          label,
+          buttonId: `setTab-${id}`,
+          panelId: `set-${id}`,
+        }))}
+      />
 
       <div className="cap-main" id="setMain">
-        <p className="tiny muted" style={{ marginBottom: 14 }}>
-          除「主题」外，本页设置项当前为本地预览：公共 contract 尚未提供设置读写模型，刷新后不保留。
-        </p>
-
+        <div className="cap-pane-stage" ref={stageRef}>
         {/* General */}
-        <div className="set-group" id="set-general" role="tabpanel" aria-labelledby="setTab-general" tabIndex={0} hidden={group !== "general"}>
+        <div {...pane("general")} id="set-general" role="tabpanel" aria-labelledby="setTab-general" tabIndex={0}>
           <h3>General</h3>
           <p className="desc">界面语言、主题与布局记忆。</p>
           <Row label="界面语言" desc="界面文案语言（概念术语保留英文）">
@@ -152,7 +151,7 @@ export function SettingsPage({
         </div>
 
         {/* Models and Providers */}
-        <div className="set-group" id="set-models" role="tabpanel" aria-labelledby="setTab-models" tabIndex={0} hidden={group !== "models"}>
+        <div {...pane("models")} id="set-models" role="tabpanel" aria-labelledby="setTab-models" tabIndex={0}>
           <h3>Models and Providers</h3>
           <p className="desc">Provider 认证、Endpoint、模型与角色路由都在「模型配置」页——这里只保留入口。</p>
           <button type="button" className="proj-card set-entry" onClick={() => openModelConfig("providers")}>
@@ -171,13 +170,21 @@ export function SettingsPage({
             </span>
             <Icon name="chevron-r" extra="sm" />
           </button>
+          <button type="button" className="proj-card set-entry" onClick={() => openModelConfig("subagents")}>
+            <span className="a-ic green" aria-hidden="true"><Icon name="bot" extra="sm" /></span>
+            <span className="se-main">
+              <span className="pc-name">模型配置 · 子代理</span>
+              <span className="sr-desc">task agent 定义 · 项目 / 用户 / 内置 · 工具与模型 · 系统提示 · config.yml 会话覆盖</span>
+            </span>
+            <Icon name="chevron-r" extra="sm" />
+          </button>
           <Row label="默认模型" desc="新对话使用的模型（即 @default 角色的当前生效值）" style={{ marginTop: 14 }}>
             <button type="button" className="btn small outline" onClick={() => openModelConfig("roles")}>在「模型配置 · 角色」中管理</button>
           </Row>
         </div>
 
         {/* Permissions */}
-        <div className="set-group" id="set-permissions" role="tabpanel" aria-labelledby="setTab-permissions" tabIndex={0} hidden={group !== "permissions"}>
+        <div {...pane("permissions")} id="set-permissions" role="tabpanel" aria-labelledby="setTab-permissions" tabIndex={0}>
           <h3>Permissions</h3>
           <p className="desc">三种模式：<b>Review</b>（所有写操作需审批）· <b>Workspace</b>（工作区内自动允许）· <b>Full Access</b>（完全信任）。各能力对应 OMP capability 协商结果。</p>
           <Row label="权限模式" desc="OMP 授权粒度的整体默认">
@@ -200,7 +207,7 @@ export function SettingsPage({
         </div>
 
         {/* Sessions */}
-        <div className="set-group" id="set-sessions" role="tabpanel" aria-labelledby="setTab-sessions" tabIndex={0} hidden={group !== "sessions"}>
+        <div {...pane("sessions")} id="set-sessions" role="tabpanel" aria-labelledby="setTab-sessions" tabIndex={0}>
           <h3>Sessions</h3>
           <p className="desc">会话保存、自动命名、Checkpoint 与 Compact 策略。</p>
           <Row label="自动保存会话" desc="每个 Turn 结束后持久化到本地"><Toggle defaultOn label="自动保存会话" /></Row>
@@ -218,7 +225,7 @@ export function SettingsPage({
         </div>
 
         {/* Preview */}
-        <div className="set-group" id="set-preview" role="tabpanel" aria-labelledby="setTab-preview" tabIndex={0} hidden={group !== "preview"}>
+        <div {...pane("preview")} id="set-preview" role="tabpanel" aria-labelledby="setTab-preview" tabIndex={0}>
           <h3>Preview</h3>
           <p className="desc">本地开发服务器与受控浏览器行为。</p>
           <Row label="启动命令" desc="留空则自动检测（package.json scripts）"><input className="input mono" defaultValue="npm run dev" /></Row>
@@ -235,7 +242,7 @@ export function SettingsPage({
         </div>
 
         {/* Advanced */}
-        <div className="set-group" id="set-advanced" role="tabpanel" aria-labelledby="setTab-advanced" tabIndex={0} hidden={group !== "advanced"}>
+        <div {...pane("advanced")} id="set-advanced" role="tabpanel" aria-labelledby="setTab-advanced" tabIndex={0}>
           <h3>Advanced</h3>
           <p className="desc">OMP 路径、RPC / Bridge 与实验性能力。修改前请确认你了解其影响。</p>
           <Row label="OMP 路径" desc="留空则自动检测"><input className="input mono" defaultValue="自动检测（omp）" /></Row>
@@ -249,6 +256,7 @@ export function SettingsPage({
           <Row label="RPC 超时" desc="单次调用超时时间（毫秒）"><input className="input mono" defaultValue="30000" /></Row>
           <Row label="Bridge 自动重启" desc="连接中断后自动重启 Bridge 进程"><Toggle defaultOn label="Bridge 自动重启" /></Row>
           <Row label="实验性能力" desc="启用 preview.dom v3、多 Preview 实例"><Toggle label="实验性能力" /></Row>
+        </div>
         </div>
       </div>
     </div>

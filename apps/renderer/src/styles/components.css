@@ -56,6 +56,8 @@
 }
 
 .btn.small { height: 24px; padding: 0 var(--sp-8); font-size: var(--fs-11); }
+/* 大号按钮：Deck 审批卡等需要突出决策的场合 */
+.btn.lg { height: 32px; padding: 0 var(--sp-12); font-size: var(--fs-14); }
 /* Disabled: opacity alone can still read as "just quiet text" on a tinted
    button, so pointer-events are dropped too — the control cannot be hovered
    into looking live. 0.45 sits inside the 0.38-0.5 disabled range. */
@@ -282,6 +284,12 @@
   color: var(--text);
   border: 1px solid var(--border);
 }
+.seg button:disabled,
+.seg.is-disabled button {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.seg.is-disabled button:hover { color: var(--text-3); }
 :root[data-theme="dark"] .seg button.active { background: var(--surface-3); }
 
 .tabs {
@@ -391,11 +399,18 @@
   padding: 8px var(--sp-14);
   font-size: var(--fs-12);
   color: var(--text);
-  animation: omp-toast-in var(--dur) var(--ease-out);
+  animation: omp-toast-in var(--dur-toast) var(--ease-out);
+}
+.toast.leaving {
+  animation: omp-toast-out var(--dur-toast) var(--ease-in) forwards;
 }
 @keyframes omp-toast-in {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: none; }
+}
+@keyframes omp-toast-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(14px); }
 }
 
 /* ---------- Tooltip ----------
@@ -460,6 +475,28 @@
   width: 100%;
   transition: border-color var(--dur-fast) var(--ease),
               box-shadow var(--dur-fast) var(--ease);
+}
+/* Chrome's UA placeholder is opacity 0.54 of the input color, and native
+   ::placeholder is painted off the control's compositor layer. An ancestor
+   page-in/out `transform` then shows that text at the wrong size for a frame
+   (especially on Windows ClearType when the layer is created or dropped).
+   Lock metrics to the field, use a faint color at opacity 1, and keep the
+   control on its own layer while any ancestor carries the animation class.
+   `.page-in` stays attached after the animation; dropping the layer is what
+   snaps the glyphs. */
+.input::placeholder,
+.select::placeholder {
+  color: var(--text-faint);
+  opacity: 1;
+  font-size: inherit;
+  line-height: inherit;
+  font-family: inherit;
+  font-weight: inherit;
+}
+.page-in input.input, .page-out input.input,
+.page-in .select, .page-out .select {
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 /* 聚焦特效 = 外发光：3px 柔光环 + 弥散光晕，边框颜色保持不变；
    关闭全局 2px 实线 outline（即用户不想要的"紫色边线"）。 */

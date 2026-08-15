@@ -312,15 +312,33 @@
 .role-badge.u { background: var(--surface-3); color: var(--text-2); }
 .role-badge.a { background: var(--accent-soft); color: var(--accent); }
 
-/* 用户消息：左边框引用块样式（非气泡） */
+/* 用户消息：聊天气泡（右对齐 + accent 实底 + 右下小角指向发送者）
+   参照 Claude / Cursor 等 agent 客户端的惯例：用户消息用气泡，
+   assistant 保持文档式正文。 */
+.ev-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.ev-user .ev-head { justify-content: flex-end; }
 .ev-user .ev-body {
-  border-left: 2px solid var(--accent);
-  padding: var(--sp-4) var(--sp-14);
-  background: var(--accent-softer);
-  border-radius: 0 var(--r-6) var(--r-6) 0;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-radius: var(--r-10) var(--r-10) var(--r-4) var(--r-10);
+  padding: var(--sp-10) var(--sp-14);
+  max-width: 78%;
   font-size: var(--fs-14);
   line-height: 1.7;
+  word-break: break-word;
 }
+.ev-user .ev-body p:first-child { margin-top: 0; }
+.ev-user .ev-body p:last-child { margin-bottom: 0; }
+/* 气泡内的代码 chip：accent 色调在实底上会糊，改半透明跟随气泡文字色 */
+.ev-user .ev-body .chip-code {
+  background: color-mix(in srgb, var(--text-on-accent) 16%, transparent);
+  color: var(--text-on-accent);
+}
+.ev-user .ev-refs { justify-content: flex-end; }
 .ev-refs { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-8); }
 
 /* Assistant 正文 */
@@ -744,13 +762,83 @@
   padding-right: calc(var(--sp-16) + var(--minimap-w) + 8px);
   position: relative;
 }
+
+/* ---------- Deck：底部操作许可浮层（Agent 提问 / 审批请求） ----------
+   参照 ver1：浮在输入框上方（最靠近输入，优先处理），不挤占布局；
+   激活时 composer 变暗让位。切换动画：
+   · 同一张卡片内切换内容 —— 卡片外壳（.deck-card）常驻，内部轨道（.deck-track）
+     横向平移：旧内容向左推出、新内容从右滑入，不换卡、不闪烁；
+   · 高度变化以底部为锚向上展开 —— JS 锁像素高度后交给 height transition，
+     新内容更高时向上生长、更矮时向下收起，而不是瞬间跳变。 */
+.deck {
+  position: absolute;
+  left: var(--sp-16);
+  bottom: var(--sp-8);
+  /* 与 .composer-region 的右 padding 一致（含 minimap 让位），与 composer 同宽同中线 */
+  right: calc(var(--sp-16) + var(--minimap-w) + 8px);
+  margin: 0 auto;
+  max-width: var(--doc-max-w);
+  z-index: var(--z-rail);
+  overflow: hidden;
+  box-shadow: 0 8px 28px rgba(15, 17, 26, 0.10), 0 2px 8px rgba(15, 17, 26, 0.06);
+}
+:root[data-theme="dark"] .deck {
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.30);
+}
+.deck.smooth { transition: height var(--dur-slow) var(--ease-out); }
+/* 卡片外壳：常驻的同一张卡片，填满 Deck（top/bottom 都锚定），内容在内部切换 */
+.deck-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+.deck-card.in { animation: deck-in var(--dur-slow) var(--ease-out); }
+.deck-card.out {
+  animation: deck-out 220ms var(--ease-in) both;
+  pointer-events: none;
+}
+@keyframes deck-in {
+  from { opacity: 0; transform: translateX(28px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes deck-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(-24px); }
+}
+/* 内容轨道：旧 / 新内容并排，transform 决定显示哪一屏；不重叠所以不闪烁 */
+.deck-track {
+  display: flex;
+  align-items: flex-start;
+  height: 100%;
+  transition: transform var(--dur-slow) var(--ease-out);
+  will-change: transform;
+}
+.deck-track.no-anim { transition: none; }
+.deck-cell {
+  flex: 0 0 100%;
+  min-width: 0;
+  max-height: min(420px, 72vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Deck 激活时被覆盖的 composer：变暗并禁止交互（参照 ver1） */
+.composer-region:has(.deck.active) .composer {
+  opacity: 0.35;
+  pointer-events: none;
+  box-shadow: none;
+}
 .composer {
   max-width: var(--doc-max-w);
   margin: 0 auto;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-10);
   background: var(--surface);
-  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+  /* opacity：Deck 激活时变暗让位，平滑过渡 */
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), opacity var(--dur) var(--ease);
 }
 /* 聚焦特效 = 外发光（比小输入框稍强）：柔光环 + 弥散光晕，边框不变色 */
 .composer:focus-within {
@@ -1450,20 +1538,69 @@
 .ag-fail-acts { display: flex; gap: var(--sp-6); flex-wrap: wrap; }
 
 /* ---------- Command Palette ---------- */
-.cmdk {
-  width: 560px;
-  max-width: calc(100vw - 64px);
-  background: var(--surface);
-  border: 1px solid var(--border-float);
-  border-radius: var(--r-10);
-  box-shadow: var(--shadow-modal);
-  overflow: hidden;
+.cmdk-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  background: rgba(15, 15, 25, 0.28);
+  animation: omp-fade-in var(--dur-fast) var(--ease-out);
+}
+:root[data-theme="dark"] .cmdk-backdrop { background: rgba(0, 0, 0, 0.45); }
+.cmdk-shell {
+  --cmdk-radius: 28px;
+  --cmdk-ring: conic-gradient(
+    from 125deg,
+    var(--blue),
+    var(--accent),
+    color-mix(in srgb, var(--accent) 55%, var(--red)),
+    var(--blue),
+    var(--accent),
+    color-mix(in srgb, var(--accent) 55%, var(--red)),
+    var(--blue),
+    var(--accent),
+    color-mix(in srgb, var(--accent) 55%, var(--red)),
+    var(--blue)
+  );
+  position: relative;
+  width: min(680px, calc(100vw - 40px));
+  height: min(680px, calc(100vh - 48px));
+  flex: none;
   animation: omp-menu-in var(--dur) var(--ease-out);
+}
+.cmdk-glow {
+  position: absolute;
+  inset: -12px;
+  border-radius: calc(var(--cmdk-radius) + 12px);
+  background: var(--cmdk-ring);
+  filter: blur(22px);
+  opacity: 0.38;
+  z-index: 0;
+  pointer-events: none;
+}
+.cmdk {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1.5px solid transparent;
+  border-radius: var(--cmdk-radius);
+  overflow: hidden;
+  background:
+    linear-gradient(var(--surface), var(--surface)) padding-box,
+    var(--cmdk-ring) border-box;
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--text) 16%, transparent);
 }
 .cmdk-input {
   display: flex; align-items: center; gap: var(--sp-10);
-  padding: var(--sp-12) var(--sp-16);
+  padding: 14px 18px;
   border-bottom: 1px solid var(--border);
+  flex: none;
   transition: box-shadow var(--dur-fast) var(--ease);
 }
 /* 聚焦特效 = 外发光；输入框本身无边框，光晕画在整条搜索行上 */
@@ -1473,20 +1610,75 @@
 }
 .cmdk-input input {
   flex: 1; border: none; outline: none; background: transparent;
-  font-size: var(--fs-14);
+  font-size: var(--fs-16);
+  min-width: 0;
+  color: var(--text);
 }
 .cmdk-input input:focus-visible { outline: none; }
-.cmdk-list { max-height: 340px; overflow-y: auto; padding: var(--sp-6); }
+.cmdk-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-8) var(--sp-8) var(--sp-12);
+}
+.cmdk-group + .cmdk-group { margin-top: var(--sp-6); }
+.cmdk-group-label {
+  padding: 4px var(--sp-10) 6px;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  color: var(--text-faint);
+}
 .cmdk-item {
-  display: flex; align-items: center; gap: var(--sp-10);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  width: 100%;
   padding: 7px var(--sp-10);
   border-radius: var(--r-6);
   font-size: var(--fs-14);
-  color: var(--text-2);
+  color: var(--text);
   cursor: pointer;
+  text-align: left;
 }
-.cmdk-item.sel, .cmdk-item:hover { background: var(--accent-soft); color: var(--accent); }
+.cmdk-item.sel, .cmdk-item:hover { background: var(--surface-hover); color: var(--text); }
+.cmdk-item .icon { color: var(--text-3); flex: none; }
+.cmdk-item-label {
+  flex: 0 1 auto;
+  max-width: 68%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmdk-item-meta {
+  flex: 1 1 0;
+  margin-left: 4px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  color: var(--text-faint);
+}
+.cmdk-item .kbd {
+  margin-left: auto;
+  flex: none;
+}
 .cmdk-item .ci-kind { margin-left: auto; font-size: 10.5px; color: var(--text-faint); font-family: var(--font-mono); }
+.cmdk-list:has(.cmdk-empty) {
+  display: flex;
+}
+.cmdk-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-8);
+  padding: 48px var(--sp-16);
+  color: var(--text-3);
+  font-size: var(--fs-13);
+}
 
 /* ---------- 场景切换器（演示用） ---------- */
 .scenario-fab {

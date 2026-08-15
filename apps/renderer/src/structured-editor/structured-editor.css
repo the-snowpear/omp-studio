@@ -1,0 +1,105 @@
+/* Shared JSON / YAML editor chrome. Token colors live in theme.ts (CodeMirror). */
+
+.st-card.yml-card {
+  margin-top: var(--sp-20);
+}
+
+.st-card.st-card-embed {
+  margin-top: var(--sp-8);
+  margin-bottom: 0;
+}
+
+.st-lang.seg {
+  flex: none;
+}
+
+.st-lang.seg button {
+  font-size: var(--fs-11);
+  padding: var(--sp-4) var(--sp-8);
+  min-height: var(--tap-min);
+}
+
+.st-editor {
+  position: relative;
+  background: var(--code-bg);
+  overflow: hidden;
+}
+
+.st-editor .cm-content:focus,
+.st-editor .cm-content:focus-visible {
+  outline: none;
+}
+
+.st-editor .cm-scroller {
+  overflow: auto;
+}
+
+.st-editor.is-focused {
+  box-shadow: inset 0 0 0 2px var(--accent-border);
+}
+
+.st-editor.is-disabled {
+  opacity: 0.72;
+}
+
+.st-editor .cm-gutters {
+  min-height: 100%;
+}
+
+.st-expand-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgba(15, 15, 25, 0.5);
+  animation: omp-fade-in var(--dur-fast) var(--ease-out);
+}
+
+:root[data-theme="dark"] .st-expand-scrim {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.st-card.is-expanded {
+  position: fixed;
+  z-index: calc(var(--z-modal) + 1);
+  top: calc(var(--topbar-h) + 12px);
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border-color: var(--border-float);
+  box-shadow: var(--shadow-modal);
+  animation: omp-menu-in var(--dur) var(--ease-out);
+}
+
+.st-card.is-expanded .yml-head {
+  flex: none;
+}
+
+.st-card.is-expanded .st-editor {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.st-card.is-expanded .yml-error {
+  flex: none;
+}
+
+.st-expand-slot {
+  visibility: hidden;
+  pointer-events: none;
+  margin-top: var(--sp-20);
+  margin-bottom: var(--sp-12);
+}
+
+.st-expand-slot.st-card-embed {
+  margin-top: var(--sp-8);
+  margin-bottom: 0;
+}
+
+.st-holder {
+  display: contents;
+}

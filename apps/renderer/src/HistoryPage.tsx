@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type { SessionHistoryEntry, SessionHistoryReadModel, SessionHistoryStatus } from "@omp-studio/client-contract";
 import { Icon } from "./icons";
+import { ToastHost } from "./ToastHost";
 import type { PageRoute } from "./HomePage";
 import { usePreviewMode } from "./preview/PreviewContext";
 import {
@@ -49,14 +50,9 @@ function formatHostTime(value: string): string {
   return new Date(then).toLocaleDateString();
 }
 
-function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void] {
+function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void, dismiss: () => void] {
   const [notice, setNotice] = useState<{ text: string; icon: string } | null>(null);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(null), 2400);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
-  return [notice, (text, icon = "info") => setNotice({ text, icon })];
+  return [notice, (text, icon = "info") => setNotice({ text, icon }), () => setNotice(null)];
 }
 
 function HistEmpty({ text }: { text: string }) {
@@ -173,7 +169,7 @@ export function HistoryPage({
 }) {
   const { preview } = usePreviewMode();
   const [query, setQuery] = useState("");
-  const [notice, show] = useNotice();
+  const [notice, show, dismissNotice] = useNotice();
   const q = query.trim().toLowerCase();
 
   const previewRows = useMemo(
@@ -268,11 +264,7 @@ export function HistoryPage({
           </>
         )}
       </section>
-      {notice ? (
-        <div className="toast-wrap" role="status" aria-live="polite">
-          <div className="toast"><Icon name={notice.icon} extra="sm" />{notice.text}</div>
-        </div>
-      ) : null}
+      <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />
     </div>
   );
 }

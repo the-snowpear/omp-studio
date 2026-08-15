@@ -430,6 +430,7 @@ test("sensitive mutations are blocked with RESYNC_REQUIRED while resync is requi
   // workspace mutations change Host-side selection, so they are sensitive too
   assert.equal(isSensitiveCommand("workspace.open"), true);
   assert.equal(isSensitiveCommand("workspace.pick"), true);
+  assert.equal(isSensitiveCommand("usage.openDashboard"), true);
 });
 
 test("re-bootstrap marks in-flight commands outcome_unknown", () => {

@@ -81,6 +81,7 @@
   --dur-fast: 120ms;
   --dur: 180ms;
   --dur-slow: 250ms;
+  --dur-toast: 320ms;  /* 浮窗提示的浮入/浮出动画时长，放慢一些更醒目 */
   --dur-slide: 230ms;  /* 标签栏切换气泡的滑动时长，独立于页面切换的 --dur-slow */
   --dur-exit: 120ms;
   --dur-tactile: 80ms;  /* Quick feedback for button presses */
@@ -151,6 +152,40 @@
   --blue-soft: rgba(31, 107, 163, 0.12);
   --purple: var(--accent);
   --purple-soft: var(--accent-soft);
+
+  /* 角色主题色调板 — 给「模型配置 → 角色」列表卡片分配不同颜色。
+     主色取高饱和纯色（图标色），-soft 用于 hover 光环，
+     图标底色由 CSS color-mix 与 --bg-inset 混合生成，保证通透不灰。 */
+  --tint-green: #16a34a;
+  --tint-green-soft: rgba(22, 163, 74, 0.13);
+  --tint-green-border: rgba(22, 163, 74, 0.35);
+  --tint-blue: #0284c7;
+  --tint-blue-soft: rgba(2, 132, 199, 0.13);
+  --tint-blue-border: rgba(2, 132, 199, 0.35);
+  --tint-teal: #0d9488;
+  --tint-teal-soft: rgba(13, 148, 136, 0.13);
+  --tint-teal-border: rgba(13, 148, 136, 0.35);
+  --tint-violet: #7c3aed;
+  --tint-violet-soft: rgba(124, 58, 237, 0.13);
+  --tint-violet-border: rgba(124, 58, 237, 0.35);
+  --tint-pink: #db2777;
+  --tint-pink-soft: rgba(219, 39, 119, 0.13);
+  --tint-pink-border: rgba(219, 39, 119, 0.35);
+  --tint-orange: #ea580c;
+  --tint-orange-soft: rgba(234, 88, 12, 0.13);
+  --tint-orange-border: rgba(234, 88, 12, 0.35);
+  --tint-cyan: #0891b2;
+  --tint-cyan-soft: rgba(8, 145, 178, 0.13);
+  --tint-cyan-border: rgba(8, 145, 178, 0.35);
+  --tint-lime: #65a30d;
+  --tint-lime-soft: rgba(101, 163, 13, 0.13);
+  --tint-lime-border: rgba(101, 163, 13, 0.35);
+  --tint-indigo: #4f46e5;
+  --tint-indigo-soft: rgba(79, 70, 229, 0.13);
+  --tint-indigo-border: rgba(79, 70, 229, 0.35);
+  --tint-rose: #e11d48;
+  --tint-rose-soft: rgba(225, 29, 72, 0.13);
+  --tint-rose-border: rgba(225, 29, 72, 0.35);
 
   /* Git file status — deliberately separate from the semantic scale above,
      so a tree full of modified files doesn't read as a tree full of
@@ -225,6 +260,38 @@
   --red-soft: rgba(240, 101, 104, 0.14);
   --blue: #5da9e0;
   --blue-soft: rgba(93, 169, 224, 0.15);
+
+  /* 角色主题色调板 — 深色主题亮色档（400 级高饱和） */
+  --tint-green: #4ade80;
+  --tint-green-soft: rgba(74, 222, 128, 0.16);
+  --tint-green-border: rgba(74, 222, 128, 0.4);
+  --tint-blue: #38bdf8;
+  --tint-blue-soft: rgba(56, 189, 248, 0.16);
+  --tint-blue-border: rgba(56, 189, 248, 0.4);
+  --tint-teal: #2dd4bf;
+  --tint-teal-soft: rgba(45, 212, 191, 0.16);
+  --tint-teal-border: rgba(45, 212, 191, 0.4);
+  --tint-violet: #a78bfa;
+  --tint-violet-soft: rgba(167, 139, 250, 0.16);
+  --tint-violet-border: rgba(167, 139, 250, 0.4);
+  --tint-pink: #f472b6;
+  --tint-pink-soft: rgba(244, 114, 182, 0.16);
+  --tint-pink-border: rgba(244, 114, 182, 0.4);
+  --tint-orange: #fb923c;
+  --tint-orange-soft: rgba(251, 146, 60, 0.16);
+  --tint-orange-border: rgba(251, 146, 60, 0.4);
+  --tint-cyan: #22d3ee;
+  --tint-cyan-soft: rgba(34, 211, 238, 0.16);
+  --tint-cyan-border: rgba(34, 211, 238, 0.4);
+  --tint-lime: #a3e635;
+  --tint-lime-soft: rgba(163, 230, 53, 0.16);
+  --tint-lime-border: rgba(163, 230, 53, 0.4);
+  --tint-indigo: #818cf8;
+  --tint-indigo-soft: rgba(129, 140, 248, 0.16);
+  --tint-indigo-border: rgba(129, 140, 248, 0.4);
+  --tint-rose: #fb7185;
+  --tint-rose-soft: rgba(251, 113, 133, 0.16);
+  --tint-rose-border: rgba(251, 113, 133, 0.4);
 
   --git-modified: #e3a008;
   --git-added: #3fb950;

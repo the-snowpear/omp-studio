@@ -1,7 +1,7 @@
 /**
- * Preview-only MCP / Host Tools / Slash catalog, ported from
+ * Preview-only MCP / Slash catalog, ported from
  * ui_reference/ver1/assets/js/mock-data.js. Used by the capabilities page
- * until Host exposes matching read models.
+ * until Host exposes matching read models (Slash) or for MCP demo stories.
  */
 
 export type McpStatus = "connected" | "reconnecting" | "disabled" | "error";
@@ -14,13 +14,6 @@ export type PreviewMcp = {
   resources: number;
   prompts: number;
   last: string;
-};
-
-export type PreviewHostTool = {
-  name: string;
-  desc: string;
-  registered: boolean;
-  calls: number;
 };
 
 export type PreviewSlash = {
@@ -37,17 +30,6 @@ export function createPreviewMcp(): PreviewMcp[] {
     { name: "github", transport: "http · :38412", status: "connected", tools: 26, resources: 4, prompts: 2, last: "38s ago" },
     { name: "playwright", transport: "stdio", status: "reconnecting", tools: 18, resources: 0, prompts: 0, last: "失败 3 次" },
     { name: "sqlite-sessions", transport: "stdio", status: "disabled", tools: 7, resources: 2, prompts: 0, last: "—" },
-  ];
-}
-
-export function createPreviewHostTools(): PreviewHostTool[] {
-  return [
-    { name: "preview.open", desc: "打开 / 刷新 Preview 页面", registered: true, calls: 142 },
-    { name: "preview.screenshot", desc: "Preview 页面截图", registered: true, calls: 56 },
-    { name: "preview.dom", desc: "读取 Preview DOM 摘要", registered: true, calls: 23 },
-    { name: "editor.openExternal", desc: "在外部编辑器打开文件", registered: true, calls: 31 },
-    { name: "system.reveal", desc: "在系统文件管理器中显示", registered: true, calls: 18 },
-    { name: "browser.controlled", desc: "受控浏览器页面操作", registered: false, calls: 0 },
   ];
 }
 

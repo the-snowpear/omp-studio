@@ -19,9 +19,21 @@
       "types": "./dist/src/omp-extensibility-adapter.d.ts",
       "default": "./dist/src/omp-extensibility-adapter.js"
     },
+    "./mcp": {
+      "types": "./dist/src/omp-mcp-adapter.d.ts",
+      "default": "./dist/src/omp-mcp-adapter.js"
+    },
+    "./agent-definitions": {
+      "types": "./dist/src/omp-agent-definitions-adapter.d.ts",
+      "default": "./dist/src/omp-agent-definitions-adapter.js"
+    },
     "./workspaces": {
       "types": "./dist/src/omp-workspace-adapter.d.ts",
       "default": "./dist/src/omp-workspace-adapter.js"
+    },
+    "./usage": {
+      "types": "./dist/src/omp-usage-adapter.d.ts",
+      "default": "./dist/src/omp-usage-adapter.js"
     }
   },
   "files": [

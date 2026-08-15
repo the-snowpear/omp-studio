@@ -30,12 +30,15 @@ import { HomePage, SecondaryPage } from "./HomePage";
 import { HistoryPage } from "./HistoryPage";
 import { AgentHubPage, setHubIntent } from "./AgentHub";
 import { CapabilitiesPage, setCapIntent, type CapTab } from "./CapabilitiesPage";
-import { ModelConfigPage } from "./ModelConfigPage";
-import { SettingsPage } from "./SettingsPage";
+import { ModelConfigPage, modelConfigHasUnsavedChanges, setModelConfigIntent } from "./ModelConfigPage";
+import { SettingsPage, setSettingsIntent } from "./SettingsPage";
 import { DiagnosticsPage } from "./DiagnosticsPage";
 import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
 import { SkillsDrawer } from "./SkillsDrawer";
-import { countEnabledDrawerItems, createPreviewDrawerItems } from "./skillsPreview";
+import { CommandPalette, type CommandPaletteHandle } from "./CommandPalette";
+import { buildPaletteGroups, type BottomTab, type PaletteAction, type SideTab } from "./commandPaletteCatalog";
+import { toDrawerItems } from "./extensibilityMap";
+import { countEnabledDrawerItems, createPreviewDrawerItems, type DrawerItem } from "./skillsPreview";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
 import { PreviewModeProvider, usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_MODE_SWITCH_ENABLED, readStoredPreviewMode } from "./preview/mode";
@@ -435,7 +438,10 @@ function Titlebar({
         <PreviewSwitch
           enabled={previewMode.enabled}
           preview={previewMode.preview}
-          onToggle={() => previewMode.setPreview(!previewMode.preview)}
+          onToggle={() => {
+            if (modelConfigHasUnsavedChanges() && !window.confirm("有未保存的模型配置更改，切换预览会丢弃草稿。确定继续？")) return;
+            previewMode.setPreview(!previewMode.preview);
+          }}
         />
       </div>
     </header>
@@ -530,6 +536,158 @@ function InteractionPrompt({ interaction, onRespond, disabled }: { interaction: 
   );
 }
 
+/* —— 底部操作许可 Deck（Agent 提问 / 审批请求）——
+   参照 ver1：浮在输入框上方（最靠近输入，优先处理），不挤占布局；
+   激活时 composer 变暗让位。切换动画：
+   · 同一张卡片内切换内容 —— 卡片外壳常驻，内部横向轨道平移：
+     旧内容向左推出、新内容从右滑入，不换卡、不闪烁；
+   · 高度变化以底部为锚向上展开 —— JS 锁像素高度后交给 CSS transition，
+     新内容更高时向上生长、更矮时向下收起，而不是瞬间跳变。 */
+type DeckEntry = { id: string; interaction: ClientInteraction; leaving: boolean };
+
+const DECK_PUSH_MS = 260; /* 内容平移时长（略大于 CSS transform transition 250ms） */
+const DECK_EXIT_MS = 220; /* 整卡退出动画时长（与 CSS deck-out 一致） */
+const DECK_GROW_MS = 320; /* 高度展开过渡时长（不小于 CSS height transition） */
+
+function InteractionDeck({ interaction, onRespond, disabled }: {
+  interaction: ClientInteraction | null;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void;
+  disabled: boolean;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [entries, setEntries] = useState<DeckEntry[]>([]);
+  /* 锁定容器像素高度；null = 无内容（自动高度 0）。锁定值的变化由
+     .deck.smooth 的 height transition 驱动，实现「向上展开 / 向下收起」。 */
+  const [lockH, setLockH] = useState<number | null>(null);
+  /* 剪枝提交：轨道 transform 复位不过渡（否则唯一内容会从左滑回） */
+  const [noAnim, setNoAnim] = useState(false);
+  /* 卡片外壳动画：in = 空 → 首次出现滑入；out = 整卡退出；"" = 稳态 */
+  const [shellMode, setShellMode] = useState<"in" | "out" | "">("");
+  const lastId = useRef<string | null>(null);
+  const gen = useRef(0);    /* 世代计数：被新交互取代后，过期的定时器作废 */
+  const lastW = useRef(-1); /* ResizeObserver 只响应宽度变化，不打断高度过渡 */
+  const timers = useRef<number[]>([]);
+
+  const later = useCallback((fn: () => void, ms: number) => {
+    const t = window.setTimeout(() => {
+      timers.current = timers.current.filter((x) => x !== t);
+      fn();
+    }, ms);
+    timers.current.push(t);
+  }, []);
+
+  useEffect(() => () => {
+    timers.current.forEach((t) => window.clearTimeout(t));
+  }, []);
+
+  /* interaction 变化：先锁定当前渲染高度（换内容瞬间不跳变），再在同一张卡片内平移 */
+  useEffect(() => {
+    const id = interaction?.interactionId ?? null;
+    if (id === lastId.current) return;
+    lastId.current = id;
+    gen.current += 1;
+    const g = gen.current;
+
+    const wrap = wrapRef.current;
+    if (wrap) {
+      wrap.classList.add("smooth");
+      setLockH(wrap.offsetHeight); /* 无卡片时 offsetHeight 为 0 */
+    }
+    const wasEmpty = !wrap || !wrap.querySelector(".deck-cell");
+
+    if (interaction === null) {
+      /* 全部退出：整卡滑出 → 收起高度 → 解锁（被新交互取代则作废） */
+      setShellMode("out");
+      setEntries((prev) => prev.map((e) => ({ ...e, leaving: true })));
+      later(() => {
+        if (gen.current !== g) return;
+        setEntries([]);
+        setLockH(0);
+      }, DECK_EXIT_MS);
+      later(() => {
+        if (gen.current === g) setLockH(null);
+      }, DECK_EXIT_MS + DECK_GROW_MS);
+      return;
+    }
+
+    setNoAnim(false);
+    setShellMode(wasEmpty ? "in" : "");
+    setEntries((prev) => {
+      if (prev.some((e) => e.interaction.interactionId === interaction.interactionId)) return prev;
+      return [...prev.map((e) => ({ ...e, leaving: true })), { id: interaction.interactionId, interaction, leaving: false }];
+    });
+    /* 内容平移结束后：移出旧内容，同一次提交里把轨道复位到 0（禁止过渡） */
+    later(() => {
+      if (gen.current !== g) return;
+      setEntries((prev) => prev.filter((e) => !e.leaving));
+      setNoAnim(true);
+    }, DECK_PUSH_MS);
+  }, [interaction, later]);
+
+  /* 提交后：量出最新内容的高度，平滑展开到新高度（以底部为锚向上生长） */
+  useEffect(() => {
+    if (!entries.length) return;
+    const wrap = wrapRef.current;
+    const track = trackRef.current;
+    if (!wrap || !track || lockH === null) return;
+    /* 在下一帧重测，避免锁到旧宽度下的过时高度 */
+    const raf = requestAnimationFrame(() => {
+      const cell = track.querySelector<HTMLElement>(".deck-cell:last-child");
+      if (!cell) return;
+      setLockH(cell.offsetHeight);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [entries]);
+
+  /* 容器宽度变化（窗口 / 侧栏 / 底栏）时跟随卡片自然高度，不做过渡 */
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const ro = new ResizeObserver((items) => {
+      for (const item of items) {
+        const width = item.contentBoxSize?.[0]?.inlineSize ?? item.contentRect.width;
+        if (Math.abs(width - lastW.current) < 0.5) continue;
+        lastW.current = width;
+        const track = trackRef.current;
+        const cell = track?.querySelector<HTMLElement>(".deck-cell:last-child");
+        if (!cell) return;
+        wrap.classList.remove("smooth");
+        setLockH(cell.offsetHeight);
+      }
+    });
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={wrapRef}
+      className={`deck${entries.length ? " active" : ""}`}
+      style={lockH === null ? undefined : { height: lockH }}
+      role="region"
+      aria-label="待处理的审批与提问"
+      aria-live="polite"
+    >
+      {entries.length > 0 && (
+        <div className={`deck-card${shellMode ? ` ${shellMode}` : ""}`}>
+          <div
+            ref={trackRef}
+            className={`deck-track${noAnim ? " no-anim" : ""}`}
+            style={{ transform: `translateX(${-100 * Math.max(0, entries.length - 1)}%)` }}
+          >
+            {entries.map((entry) => (
+              <div key={entry.id} className="deck-cell">
+                <InteractionPrompt interaction={entry.interaction} onRespond={onRespond} disabled={disabled} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GenericCommandForm({ manifest, busy, enabled, onInvoke }: { manifest: OperatorCommandManifest; busy: boolean; enabled: boolean; onInvoke: (commandId: string, args?: unknown) => void }) {
   const [selected, setSelected] = useState("");
   const [args, setArgs] = useState("{}");
@@ -596,6 +754,8 @@ type ShellChrome = {
   onSelectPreviewThread: (id: string) => void;
   onPickProject: () => void;
   onOpenCapabilities: (tab?: CapTab, name?: string) => void;
+  onOpenPalette: () => void;
+  paletteOpen: boolean;
   onToggleOmpMenu: () => void;
   ompMenuOpen: boolean;
 };
@@ -779,7 +939,18 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
           <AppIcon className="logo" size={22} />
           <span className="name">OMP Studio</span>
         </button>
-        <button className="icon-btn" data-tip="统一搜索 (Ctrl K)" aria-label="搜索会话" onClick={() => onRoute("history")}><Icon name="search" /></button>
+        <button
+          className="icon-btn"
+          data-tip="命令面板 (Ctrl K)"
+          data-cmdk-anchor=""
+          aria-label="命令面板"
+          aria-haspopup="dialog"
+          aria-expanded={chrome.paletteOpen}
+          {...(chrome.paletteOpen ? { "aria-controls": "cmdkList" } : {})}
+          onClick={chrome.onOpenPalette}
+        >
+          <Icon name="search" />
+        </button>
       </div>
       <div className="sb-actions">
         <button className="action-row new-convo-btn" aria-label="新建对话" onClick={() => {
@@ -1265,19 +1436,21 @@ function AppTopbar({ state, chrome, onRoute, threadTitle, sideOpen, onToggleSide
   );
 }
 
-function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, bottomOpen, onBottomOpenChange, onRoute }: {
+function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSideTabChange, bottomOpen, onBottomOpenChange, bottomTab, onBottomTabChange, onRoute }: {
   state: ViewState;
   client: ClientStateSource;
   sideOpen: boolean;
   onCloseSide: () => void;
+  sideTab: SideTab;
+  onSideTabChange: (tab: SideTab) => void;
   bottomOpen: boolean;
   onBottomOpenChange: (open: boolean) => void;
+  bottomTab: BottomTab;
+  onBottomTabChange: (tab: BottomTab) => void;
   onRoute: (route: Route) => void;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [sideTab, setSideTab] = useState<"changes" | "preview" | "agents">("changes");
-  const [bottomTab, setBottomTab] = useState<"terminal" | "problems" | "tests" | "output" | "logs" | "pvlogs">("logs");
   const terminalRef = useRef<TerminalPaneHandle>(null);
   const terminalAvailable = typeof globalThis.ompStudioTerminal !== "undefined";
   const { preview } = usePreviewMode();
@@ -1332,8 +1505,6 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, bottomOpen, onB
             <div className="convo-doc" id="convoDoc" role="log" aria-live="polite" aria-relevant="additions">
               {preview ? (
                 <PreviewTranscript />
-              ) : pendingInteraction?.status === "interaction_required" ? (
-                <InteractionPrompt interaction={pendingInteraction.interaction} onRespond={respond} disabled={interactionDisabled} />
               ) : (
                 <div className="empty" style={{ paddingTop: 72 }}>
                   <Icon name="message" extra="lg" />
@@ -1357,6 +1528,11 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, bottomOpen, onB
             </div>
           </div>
           <div className="composer-region">
+            <InteractionDeck
+              interaction={pendingInteraction?.status === "interaction_required" ? pendingInteraction.interaction : null}
+              onRespond={respond}
+              disabled={interactionDisabled}
+            />
             <div className={`ctx-strip${running ? " hidden" : ""}`} role="status" aria-live="polite">
               <span className="ctx-item"><Icon name="folder-open" extra="sm" /><span>{preview ? "omp-web" : (state.model.workspaces?.workspaces.find((workspace) => workspace.active)?.name ?? "未选择项目")}</span></span>
               <span className="ctx-item"><Icon name="cpu" extra="sm" /><span>{preview ? "gemini-3.6-flash" : (runtime?.classification ?? "runtime unavailable")}</span></span>
@@ -1417,13 +1593,13 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, bottomOpen, onB
           <div className="sp-resizer" id="spResizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-label="调整右侧面板宽度" />
           <div className="sp-head">
             <div className="tabs" role="tablist" aria-label="面板视图">
-              <button className={sideTab === "changes" ? "active" : ""} role="tab" aria-selected={sideTab === "changes"} aria-controls="spChanges" onClick={() => setSideTab("changes")}>
+              <button className={sideTab === "changes" ? "active" : ""} role="tab" aria-selected={sideTab === "changes"} aria-controls="spChanges" onClick={() => onSideTabChange("changes")}>
                 <Icon name="diff" extra="sm" />Changes
               </button>
-              <button className={sideTab === "preview" ? "active" : ""} role="tab" aria-selected={sideTab === "preview"} aria-controls="spPreview" onClick={() => setSideTab("preview")}>
+              <button className={sideTab === "preview" ? "active" : ""} role="tab" aria-selected={sideTab === "preview"} aria-controls="spPreview" onClick={() => onSideTabChange("preview")}>
                 <Icon name="globe" extra="sm" />Preview
               </button>
-              <button className={sideTab === "agents" ? "active" : ""} role="tab" aria-selected={sideTab === "agents"} aria-controls="spAgents" onClick={() => setSideTab("agents")}>
+              <button className={sideTab === "agents" ? "active" : ""} role="tab" aria-selected={sideTab === "agents"} aria-controls="spAgents" onClick={() => onSideTabChange("agents")}>
                 <Icon name="bot" extra="sm" />Agents
                 {preview ? <span className="chip gray xs">4<span className="sr-only"> 个 Agent</span></span> : snapshot ? <span className="chip gray xs">{snapshot.agents.length}<span className="sr-only"> 个 Agent</span></span> : null}
               </button>
@@ -1483,23 +1659,23 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, bottomOpen, onB
         <div className="bp-resizer" id="bpResizer" />
         <div className="bp-head">
           <div className="tabs" role="tablist" aria-label="运行面板视图">
-            <button className={bottomTab === "terminal" ? "active" : ""} role="tab" aria-selected={bottomTab === "terminal"} onClick={() => { setBottomTab("terminal"); onBottomOpenChange(true); }}>
+            <button className={bottomTab === "terminal" ? "active" : ""} role="tab" aria-selected={bottomTab === "terminal"} onClick={() => { onBottomTabChange("terminal"); onBottomOpenChange(true); }}>
               <Icon name="terminal" extra="sm" />Terminal
             </button>
-            <button className={bottomTab === "problems" ? "active" : ""} role="tab" aria-selected={bottomTab === "problems"} onClick={() => { setBottomTab("problems"); onBottomOpenChange(true); }}>
+            <button className={bottomTab === "problems" ? "active" : ""} role="tab" aria-selected={bottomTab === "problems"} onClick={() => { onBottomTabChange("problems"); onBottomOpenChange(true); }}>
               <Icon name="alert-c" extra="sm" />Problems
             </button>
-            <button className={bottomTab === "tests" ? "active" : ""} role="tab" aria-selected={bottomTab === "tests"} onClick={() => { setBottomTab("tests"); onBottomOpenChange(true); }}>
+            <button className={bottomTab === "tests" ? "active" : ""} role="tab" aria-selected={bottomTab === "tests"} onClick={() => { onBottomTabChange("tests"); onBottomOpenChange(true); }}>
               <Icon name="test" extra="sm" />Tests
             </button>
-            <button className={bottomTab === "output" ? "active" : ""} role="tab" aria-selected={bottomTab === "output"} onClick={() => { setBottomTab("output"); onBottomOpenChange(true); }}>
+            <button className={bottomTab === "output" ? "active" : ""} role="tab" aria-selected={bottomTab === "output"} onClick={() => { onBottomTabChange("output"); onBottomOpenChange(true); }}>
               <Icon name="console" extra="sm" />Output
             </button>
-            <button className={bottomTab === "logs" ? "active" : ""} role="tab" aria-selected={bottomTab === "logs"} onClick={() => { setBottomTab("logs"); onBottomOpenChange(true); }}>
+            <button className={bottomTab === "logs" ? "active" : ""} role="tab" aria-selected={bottomTab === "logs"} onClick={() => { onBottomTabChange("logs"); onBottomOpenChange(true); }}>
               <Icon name="book" extra="sm" />OMP Logs
               {state.events.length > 0 && <span className="chip gray xs">{state.events.length}<span className="sr-only"> 条事件</span></span>}
             </button>
-            <button className={bottomTab === "pvlogs" ? "active" : ""} role="tab" aria-selected={bottomTab === "pvlogs"} onClick={() => { setBottomTab("pvlogs"); onBottomOpenChange(true); }}>
+            <button className={bottomTab === "pvlogs" ? "active" : ""} role="tab" aria-selected={bottomTab === "pvlogs"} onClick={() => { onBottomTabChange("pvlogs"); onBottomOpenChange(true); }}>
               <Icon name="globe" extra="sm" />Preview Logs
             </button>
           </div>
@@ -1602,6 +1778,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [splitRatio, setSplitRatio] = useState(0.46);
   const [sideOpen, setSideOpen] = useState(() => previewOn());
   const [bottomOpen, setBottomOpen] = useState(() => previewOn());
+  const [sideTab, setSideTab] = useState<SideTab>("changes");
+  const [bottomTab, setBottomTab] = useState<BottomTab>("logs");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const [paletteInventory, setPaletteInventory] = useState<DrawerItem[]>([]);
+  const paletteRef = useRef<CommandPaletteHandle>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [ompMenuOpen, setOmpMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<ShellDialog | null>(null);
@@ -1615,6 +1797,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const shellClass = pagePhaseClass(shellPhase);
   const [trailAt, setTrailAt] = useState(0);
   const [capNonce, setCapNonce] = useState(0);
+  const [settingsNonce, setSettingsNonce] = useState(0);
+  const [mcNonce, setMcNonce] = useState(0);
   const snapshot = snapshotFrom(state);
   const runtime = state.clientState?.connection.runtime ?? state.bootstrap?.runtime;
   const capabilities = state.model.capabilities ?? state.bootstrap?.capabilityManifest;
@@ -1743,9 +1927,183 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     setDialog(next);
   };
 
+  const paletteGate = useRef(false);
+
+  const closePalette = useCallback((restoreFocus = true) => {
+    paletteGate.current = true;
+    setPaletteOpen(false);
+    setPaletteQuery("");
+    window.setTimeout(() => {
+      paletteGate.current = false;
+      if (!restoreFocus) return;
+      const anchor = document.querySelector<HTMLElement>("[data-cmdk-anchor]");
+      if (anchor && document.body.contains(anchor)) anchor.focus();
+    }, 0);
+  }, []);
+
+  const openPalette = useCallback(() => {
+    if (paletteGate.current) return;
+    setOpenMenu(null);
+    setOmpMenuOpen(false);
+    if (paletteOpen) {
+      paletteRef.current?.focusInput();
+      return;
+    }
+    setPaletteQuery("");
+    setPaletteOpen(true);
+  }, [paletteOpen]);
+
+  const startNewChat = () => {
+    if (previewMode.preview) {
+      go("workbench");
+      return;
+    }
+    const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
+    if (active) {
+      selectProject({ id: active.workspaceId, name: active.name });
+      go("workbench");
+    } else {
+      void pickProject();
+    }
+  };
+
+  const openHistoryEntry = (entry: SessionHistoryEntry) => {
+    if (previewMode.preview) {
+      onSelectThread(entry);
+      return;
+    }
+    const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
+    if (active) {
+      selectProject({ id: active.workspaceId, name: active.name });
+    } else {
+      setExplorerOpen(true);
+    }
+    onSelectThread(entry);
+  };
+
+  const runPaletteAction = (action: PaletteAction) => {
+    closePalette(false);
+    switch (action.kind) {
+      case "route":
+        go(action.route);
+        return;
+      case "newChat":
+        startNewChat();
+        return;
+      case "pickProject":
+        void pickProject();
+        return;
+      case "selectThread":
+        openHistoryEntry(action.entry);
+        return;
+      case "previewThread":
+        setPreviewThreadId(action.threadId);
+        {
+          const hit = findPreviewThread(action.threadId);
+          if (hit) {
+            setPreviewProjectId(hit.project.id);
+            setSelectedProject({ id: hit.project.id, name: hit.project.name });
+            setExplorerOpen(true);
+          }
+        }
+        go("workbench");
+        return;
+      case "selectProject":
+        selectProject({ id: action.id, name: action.name });
+        go("workbench");
+        return;
+      case "previewProject":
+        setPreviewProjectId(action.id);
+        {
+          const project = findPreviewProject(action.id);
+          if (project) {
+            setSelectedProject({ id: project.id, name: project.name });
+            setExplorerOpen(true);
+            const first = project.threads[0];
+            if (first) setPreviewThreadId(first.id);
+          }
+        }
+        go("workbench");
+        return;
+      case "toggleSidebar":
+        setCollapsed((value) => !value);
+        return;
+      case "toggleBottom":
+        go("workbench");
+        setBottomOpen((value) => !value);
+        return;
+      case "toggleSide":
+        go("workbench");
+        setSideOpen((value) => !value);
+        return;
+      case "openSkills":
+        go("workbench");
+        setSkillsOpen(true);
+        return;
+      case "toggleTheme":
+        setTheme((value) => (value === "light" ? "dark" : "light"));
+        return;
+      case "openBottom":
+        go("workbench");
+        setBottomTab(action.tab);
+        setBottomOpen(true);
+        return;
+      case "openSide":
+        go("workbench");
+        setSideTab(action.tab);
+        setSideOpen(true);
+        return;
+      case "openSettings":
+        setSettingsIntent(action.group);
+        setSettingsNonce((value) => value + 1);
+        go("settings");
+        return;
+      case "openModelConfig":
+        if (modelConfigHasUnsavedChanges() && !window.confirm("有未保存的模型配置更改，重新打开会丢弃草稿。确定继续？")) return;
+        setModelConfigIntent({ tab: action.tab });
+        setMcNonce((value) => value + 1);
+        go("model-config");
+        return;
+      case "openCapabilities":
+        setCapIntent(action.tab, action.name);
+        setCapNonce((value) => value + 1);
+        setSkillsOpen(false);
+        go("capabilities");
+        return;
+    }
+  };
+
+  useEffect(() => {
+    if (!paletteOpen) return;
+    if (previewMode.preview) {
+      setPaletteInventory(createPreviewDrawerItems());
+      return;
+    }
+    let cancelled = false;
+    void client.query("skills.get", {}).then((model) => {
+      if (!cancelled) setPaletteInventory(toDrawerItems(model));
+    }).catch(() => {
+      if (!cancelled) setPaletteInventory([]);
+    });
+    return () => { cancelled = true; };
+  }, [paletteOpen, previewMode.preview, client]);
+
+  const paletteGroups = useMemo(() => buildPaletteGroups({
+    preview: previewMode.preview,
+    historyEntries: state.model.history?.entries ?? [],
+    workspaces: state.model.workspaces?.workspaces ?? [],
+    ...(selectedProject ? { activeProjectName: selectedProject.name } : {}),
+    inventory: paletteInventory,
+    query: paletteQuery,
+  }), [previewMode.preview, state.model.history, state.model.workspaces, selectedProject, paletteInventory, paletteQuery]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (paletteOpen) {
+          closePalette();
+          return;
+        }
         if (dialog) {
           setDialog(null);
           return;
@@ -1765,7 +2123,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         setSkillsOpen((value) => !value);
       } else if (key === "k") {
         event.preventDefault();
-        go("history");
+        openPalette();
       } else if (key === "o" && event.shiftKey) {
         event.preventDefault();
         go("workbench");
@@ -1776,7 +2134,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dialog, go, skillsOpen]);
+  }, [dialog, go, skillsOpen, paletteOpen, closePalette, openPalette]);
 
   const chrome: ShellChrome = {
     collapsed,
@@ -1842,6 +2200,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       setSkillsOpen(false);
       go("capabilities");
     },
+    onOpenPalette: openPalette,
+    paletteOpen,
     onToggleOmpMenu: () => setOmpMenuOpen((value) => !value),
     ompMenuOpen,
   };
@@ -1854,6 +2214,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         canForward={trailAt < trail.length - 1}
         onBack={() => {
           if (trailAt <= 0) return;
+          if (modelConfigHasUnsavedChanges() && !window.confirm("有未保存的模型配置更改，确定离开吗？")) return;
           const next = trailAt - 1;
           const route = trail[next] ?? "workbench";
           setTrailAt(next);
@@ -1891,7 +2252,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               <button className="menu-item" role="menuitem" onClick={() => go("settings")}>设置</button>
               <button className="menu-item" role="menuitem" onClick={() => go("diagnostics")}>诊断中心</button>
               <div className="menu-sep" />
-              <button className="menu-item" role="menuitem" onClick={() => go("history")}>搜索会话<span className="kbd">Ctrl K</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => { setOpenMenu(null); openPalette(); }}>命令面板<span className="kbd">Ctrl K</span></button>
               <button className="menu-item" role="menuitem" onClick={() => go("home")}>项目主页</button>
             </TitleMenu>
             <TitleMenu id="edit" label="编辑" openId={openMenu} onToggle={setOpenMenu}>
@@ -1949,6 +2310,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               {...(state.model.home ? { home: state.model.home } : {})}
               {...(state.model.history ? { history: state.model.history } : {})}
               {...(state.model.workspaces ? { workspaces: state.model.workspaces } : {})}
+              client={client}
               onPickFolder={() => {
                 if (previewMode.preview) return;
                 void pickProject();
@@ -1971,9 +2333,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               onOpenMain={() => go("workbench")}
             />
           ) : pageRoute === "model-config" ? (
-            <ModelConfigPage client={client} />
+            <ModelConfigPage key={mcNonce} client={client} />
           ) : pageRoute === "settings" ? (
-            <SettingsPage theme={theme} onSetTheme={(next) => setTheme(next)} onRoute={go} />
+            <SettingsPage key={settingsNonce} theme={theme} onSetTheme={(next) => setTheme(next)} onRoute={go} />
           ) : pageRoute === "diagnostics" ? (
             <DiagnosticsPage
               client={client}
@@ -2003,7 +2365,19 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               <span><b>resync required</b> · <span className="banner-detail">正在恢复最新 Runtime 状态，敏感操作已暂停。</span></span>
             </div>
           )}
-          <WorkbenchCanvas state={state} client={client} sideOpen={sideOpen} onCloseSide={() => setSideOpen(false)} bottomOpen={bottomOpen} onBottomOpenChange={setBottomOpen} onRoute={go} />
+          <WorkbenchCanvas
+            state={state}
+            client={client}
+            sideOpen={sideOpen}
+            onCloseSide={() => setSideOpen(false)}
+            sideTab={sideTab}
+            onSideTabChange={setSideTab}
+            bottomOpen={bottomOpen}
+            onBottomOpenChange={setBottomOpen}
+            bottomTab={bottomTab}
+            onBottomTabChange={setBottomTab}
+            onRoute={go}
+          />
           <span className="sr-only">client contract v{CLIENT_CONTRACT_VERSION}{snapshot ? ` · session ${snapshot.sessionId}` : ""}</span>
         </div>
       </div>
@@ -2031,7 +2405,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
                 <div className="modal-body">
                   <dl className="about-list">
                     <div className="about-row"><dt>新建对话</dt><dd><span className="kbd">Ctrl ⇧ O</span></dd></div>
-                    <div className="about-row"><dt>搜索会话</dt><dd><span className="kbd">Ctrl K</span></dd></div>
+                    <div className="about-row"><dt>命令面板</dt><dd><span className="kbd">Ctrl K</span></dd></div>
                     <div className="about-row"><dt>展开 / 收起侧栏</dt><dd><span className="kbd">Ctrl B</span></dd></div>
                     <div className="about-row"><dt>技能与插件</dt><dd><span className="kbd">Ctrl ⇧ K</span></dd></div>
                     <div className="about-row"><dt>底部面板</dt><dd><span className="kbd">Ctrl J</span></dd></div>
@@ -2046,6 +2420,15 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           </div>
         </div>
       ) : null}
+      <CommandPalette
+        ref={paletteRef}
+        open={paletteOpen}
+        query={paletteQuery}
+        groups={paletteGroups}
+        onQueryChange={setPaletteQuery}
+        onClose={closePalette}
+        onRun={runPaletteAction}
+      />
     </div>
   );
 }

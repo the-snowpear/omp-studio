@@ -198,6 +198,44 @@ export interface HomeReadModel {
   readonly recentWorkspaces?: ReadonlyArray<WorkspaceRecord>;
 }
 
+/** One local calendar day of aggregated token usage. Date is `YYYY-MM-DD`. */
+export interface TokenUsageDayPoint {
+  readonly date: string;
+  readonly totalTokens: number;
+}
+
+/** Safe model id for the homepage usage chart legend. Never a path. */
+export interface TokenUsageModelRef {
+  readonly id: string;
+}
+
+/** Per-model tokens for one local calendar day. */
+export interface TokenUsageModelDayPoint {
+  readonly date: string;
+  readonly model: string;
+  readonly tokens: number;
+}
+
+/** Per-model tokens for one local hour of today (`0`–`23`). */
+export interface TokenUsageHourPoint {
+  readonly hour: number;
+  readonly model: string;
+  readonly tokens: number;
+}
+
+/**
+ * Homepage Token heatmap / curve read model. Aggregates only: no session
+ * files, folders, or other filesystem facts.
+ */
+export interface TokenUsageReadModel {
+  readonly generatedAt: string;
+  readonly days: ReadonlyArray<TokenUsageDayPoint>;
+  readonly models: ReadonlyArray<TokenUsageModelRef>;
+  readonly byModel: ReadonlyArray<TokenUsageModelDayPoint>;
+  readonly hours: ReadonlyArray<TokenUsageHourPoint>;
+  readonly unavailableReason?: string;
+}
+
 /** Wire API used by a provider or custom model in `models.yml`. */
 export type ModelApiKind =
   | "openai-completions"
@@ -227,11 +265,17 @@ export type ModelEntryStatus = "available" | "disabled" | "unavailable";
 
 export type ModelEntrySource = "catalog" | "discovery" | "custom" | "extension";
 
-/** Masked credential metadata. Never carries a secret or env value. */
+/**
+ * Credential metadata for a provider.
+ * `apiKey` echoes the credential value stored in models.yml (plain key for
+ * `api-key`, `!command` string for `command`) so the editor can pre-fill it.
+ * Deliberate choice: the desktop console is a local trusted surface.
+ */
 export interface ModelAuthMeta {
   readonly type: ModelAuthType;
   readonly hasSecret: boolean;
   readonly account?: string;
+  readonly apiKey?: string;
 }
 
 export interface ModelDiscoveryMeta {
@@ -242,6 +286,34 @@ export interface ModelDiscoveryMeta {
 export interface ModelCostMeta {
   readonly input?: number;
   readonly output?: number;
+  readonly cacheRead?: number;
+  readonly cacheWrite?: number;
+}
+
+/** Safe subset of OMP `remoteCompaction` exposed for display/edit. */
+export interface ModelProviderRemoteCompaction {
+  readonly enabled?: boolean;
+  readonly endpoint?: string;
+  readonly model?: string;
+}
+
+/** Partial `models.yml` modelOverrides / extra custom-model fields. */
+export interface ModelOverridePatch {
+  readonly name?: string;
+  readonly contextWindow?: number;
+  readonly maxTokens?: number;
+  readonly reasoning?: boolean;
+  readonly image?: boolean;
+  readonly tools?: boolean;
+  readonly cost?: ModelCostMeta;
+  readonly omitMaxOutputTokens?: boolean;
+  readonly premiumMultiplier?: number;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly contextPromotionTarget?: string;
+  readonly compactionModel?: string;
+  readonly remoteCompaction?: ModelProviderRemoteCompaction;
+  /** Allowed thinking strengths written as `thinking.efforts` in models.yml. */
+  readonly thinking?: ReadonlyArray<string>;
 }
 
 /** One model row under a provider. Safe display facts only. */
@@ -257,13 +329,16 @@ export interface ModelCatalogEntry {
   readonly cost?: ModelCostMeta;
   readonly status: ModelEntryStatus;
   readonly source: ModelEntrySource;
-}
-
-/** Safe subset of OMP `remoteCompaction` exposed for display/edit. */
-export interface ModelProviderRemoteCompaction {
-  readonly enabled?: boolean;
-  readonly endpoint?: string;
-  readonly model?: string;
+  readonly api?: string;
+  readonly baseUrl?: string;
+  readonly omitMaxOutputTokens?: boolean;
+  readonly premiumMultiplier?: number;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly contextPromotionTarget?: string;
+  readonly compactionModel?: string;
+  readonly remoteCompaction?: ModelProviderRemoteCompaction;
+  /** Allowed thinking strengths (`off` / `low` / `medium` / `high` / `xhigh` / `max`). */
+  readonly thinking?: ReadonlyArray<string>;
 }
 
 /** One configured or discovered provider on the model-config page. */
@@ -286,6 +361,8 @@ export interface ModelProviderRecord {
   readonly transport?: "pi-native";
   readonly remoteCompaction?: ModelProviderRemoteCompaction;
   readonly models: ReadonlyArray<ModelCatalogEntry>;
+  /** Safe subset of `models.yml` modelOverrides (no secrets). */
+  readonly modelOverrides?: Readonly<Record<string, ModelOverridePatch>>;
 }
 
 export type ModelPresetAuth = ModelAuthType;
@@ -321,7 +398,10 @@ export interface ModelRoleIssue {
   readonly detail: string;
 }
 
-/** Built-in (or listed) model role. This slice is global-only. */
+export type ModelRoleStorage = "global" | "project";
+export type ModelFallbackRevertPolicy = "cooldown-expiry" | "never";
+
+/** Built-in or custom model role. `scope` is which config file currently owns the assignment. */
 export interface ModelRoleRecord {
   readonly id: string;
   readonly alias: string;
@@ -330,7 +410,7 @@ export interface ModelRoleRecord {
   readonly builtin: boolean;
   readonly primary: string;
   readonly thinking?: string;
-  readonly scope: "global";
+  readonly scope: ModelRoleStorage;
   readonly issue?: ModelRoleIssue;
 }
 
@@ -340,7 +420,12 @@ export interface AvailableModelRecord {
   readonly selector: string;
   readonly name: string;
   readonly reasoning: boolean;
+  readonly image?: boolean;
+  readonly tools?: boolean;
+  readonly contextWindow?: number;
+  readonly maxTokens?: number;
   readonly thinking?: ReadonlyArray<string>;
+  readonly cost?: ModelCostMeta;
 }
 
 export interface ModelLoginProviderRecord {
@@ -368,6 +453,11 @@ export interface ModelConfigReadModel {
   readonly loginAvailable: boolean;
   readonly ompAvailable: boolean;
   readonly unavailableReason?: string;
+  readonly modelRoleStorage: ModelRoleStorage;
+  readonly projectScopeAvailable: boolean;
+  readonly modelProviderOrder: ReadonlyArray<string>;
+  readonly fallbackChains: Readonly<Record<string, ReadonlyArray<string>>>;
+  readonly fallbackRevertPolicy: ModelFallbackRevertPolicy;
 }
 
 /** Skill origin as OMP discovery would classify it. Never a filesystem path. */
@@ -386,7 +476,7 @@ export interface SkillRecord {
   readonly desc: string;
   readonly scope: SkillScope;
   readonly sourceKind: SkillSourceKind;
-  /** Safe display label: 用户 / 项目 / 插件 / 托管. */
+  /** Safe display label: OMP / Codex / Claude / OpenCode / GitHub / Agents / 插件 / 托管. */
   readonly sourceLabel: string;
   /** Frontmatter `enabled` is not `false`. */
   readonly enabled: boolean;
@@ -436,6 +526,106 @@ export interface ExtensibilityReadModel {
   readonly unavailableReason?: string;
 }
 
+/** MCP transport kinds surfaced in the public inventory (no connection details). */
+export type McpTransport = "stdio" | "http" | "sse";
+
+/**
+ * Configured-only MCP status. Not Runtime connection state
+ * (`connected` / reconnecting / error).
+ */
+export type McpConfigStatus = "enabled" | "disabled" | "shadowed";
+
+/**
+ * One configured MCP server from OMP-native mcp.json discovery.
+ * Never includes command, args, env, url, headers, or OAuth secrets.
+ */
+export interface McpServerRecord {
+  readonly name: string;
+  readonly transport: McpTransport;
+  /** Effective enabled after denylist / allowlist / per-entry flags. */
+  readonly enabled: boolean;
+  readonly status: McpConfigStatus;
+  /** Safe display label: 用户 / 项目. */
+  readonly sourceLabel: string;
+  readonly scope: "user" | "project";
+}
+
+/**
+ * Configured MCP server inventory. Disk scan of OMP-native mcp.json paths,
+ * not live MCPManager connection state.
+ */
+export interface McpReadModel {
+  readonly servers: ReadonlyArray<McpServerRecord>;
+  /** Pre-redacted parse / collision notes. Never paths. */
+  readonly warnings: ReadonlyArray<string>;
+  readonly generatedAt: string;
+  readonly unavailableReason?: string;
+}
+
+/**
+ * Configured OMP task-agent definition (Markdown + YAML frontmatter).
+ * Disk inventory, not a live Agent Hub instance. Paths never appear.
+ */
+export type AgentDefinitionSource = "project" | "user" | "bundled" | "plugin";
+
+/** Thinking selectors OMP accepts on agent frontmatter (`thinking-level` / `thinking`). */
+export type AgentThinkingLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "auto";
+
+export interface AgentDefinitionRecord {
+  readonly name: string;
+  readonly description: string;
+  /** Prompt body below the frontmatter. Empty when the bundled prompt is packed in the runtime. */
+  readonly systemPrompt: string;
+  readonly tools?: ReadonlyArray<string>;
+  readonly spawns?: ReadonlyArray<string> | "*";
+  readonly model?: ReadonlyArray<string>;
+  readonly thinkingLevel?: AgentThinkingLevel;
+  readonly output?: unknown;
+  readonly blocking?: boolean;
+  readonly autoloadSkills?: ReadonlyArray<string>;
+  readonly readSummarize?: boolean;
+  /** `true` = default prewalk target; string = custom model pattern. */
+  readonly prewalk?: boolean | string;
+  readonly source: AgentDefinitionSource;
+  /** Safe display label: 项目 / 用户 / 内置 / 插件. */
+  readonly sourceLabel: string;
+  readonly editable: boolean;
+  readonly canDelete: boolean;
+  readonly canFork: boolean;
+  /** `task.disabledAgents` overlay. */
+  readonly disabled: boolean;
+  readonly overrideModel?: string;
+  /** `task.agentPrewalk` overlay: `on` / `off` / pattern. */
+  readonly prewalkOverride?: string;
+  readonly contentHash?: string;
+  readonly error?: string;
+  /** Bundled agents whose system prompt lives in the runtime binary. */
+  readonly promptPacked?: boolean;
+}
+
+/**
+ * Effective task-agent roster (first-wins by name) plus picker catalogs.
+ * Not the Runtime loaded set.
+ */
+export interface AgentDefinitionsReadModel {
+  readonly agents: ReadonlyArray<AgentDefinitionRecord>;
+  /** Pre-redacted collision / parse notes. Never paths. */
+  readonly warnings: ReadonlyArray<string>;
+  readonly builtinToolNames: ReadonlyArray<string>;
+  readonly roleAliases: ReadonlyArray<string>;
+  readonly projectScopeAvailable: boolean;
+  readonly generatedAt: string;
+  readonly unavailableReason?: string;
+}
+
 export type ConfigRuntimeEffect = "immediate" | "new-session" | "restart-process";
 
 /** Terminal result of a provider connection smoke test. Never a Runtime snapshot. */
@@ -443,6 +633,27 @@ export interface ModelProviderTestResult {
   readonly ok: boolean;
   readonly latencyMs: number;
   readonly detail: string;
+  /** HTTP status observed on a successful reachability probe (any response counts). */
+  readonly httpStatus?: number;
+  /** Number of retries performed (only timeout-class failures are retried). */
+  readonly retryCount?: number;
+}
+
+/** One model id returned by a discovery probe. Never a secret. */
+export interface ModelDiscoveryModel {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** Terminal result of a non-persisting discovery probe. */
+export interface ModelDiscoveryResult {
+  readonly ok: boolean;
+  readonly found: number;
+  readonly usable: number;
+  readonly models: ReadonlyArray<ModelDiscoveryModel>;
+  readonly latencyMs: number;
+  readonly detail: string;
+  readonly httpStatus?: number;
 }
 
 /** Terminal result of a model-config mutation. Never a Runtime snapshot. */

@@ -66,7 +66,7 @@ describe("createOmpExtensibilityService", () => {
         ["commit-msg", "oss-audit", "shared"],
       );
       const shared = result.skills.find((skill) => skill.name === "shared");
-      assert.equal(shared?.sourceLabel, "项目");
+      assert.equal(shared?.sourceLabel, "OMP");
       assert.equal(shared?.scope, "workspace");
       assert.equal(shared?.desc, "project copy");
       // enabled: false skills stay listed as disabled inventory

@@ -564,10 +564,12 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
   const pickDirectory = createProductionPickDirectory();
   const runtimeSession = createDesktopRuntimeSessionPort();
   let activeComposition: DesktopHostComposition | undefined;
+  const workspaceCwd: { current: string | undefined } = { current: undefined };
   const workspaces = createOmpWorkspaceService({
     registry,
     pickDirectory,
     onActivated: async (stored) => {
+      workspaceCwd.current = stored.canonicalPath;
       await activeComposition?.rebindWorkspace({
         workspaceId: stored.workspaceId,
         cwd: stored.canonicalPath,
@@ -577,6 +579,7 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
   const facade: DesktopFacadeSeams = {
     ...(options?.openUrl === undefined ? {} : { openUrl: options.openUrl }),
     workspaces,
+    getWorkspaceCwd: () => workspaceCwd.current,
   };
   const baseOptions = {
     authorityLockServices: createProductionAuthorityLockServices(),
@@ -603,6 +606,11 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
       // The registry file is loaded once, before the first composition can
       // serve any renderer query.
       await registry.load();
+      const activeId = registry.activeWorkspaceId;
+      if (activeId !== undefined) {
+        const stored = registry.list().find((entry) => entry.workspaceId === activeId);
+        if (stored !== undefined) workspaceCwd.current = stored.canonicalPath;
+      }
       const composition = await factory.create();
       activeComposition = composition;
       return composition;

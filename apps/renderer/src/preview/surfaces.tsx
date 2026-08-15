@@ -227,9 +227,9 @@ function PreviewEventView({ event }: { event: PreviewEvent }) {
               <div className="tiny muted" style={{ marginTop: 4 }}>影响范围：{event.scope}</div>
             </div>
             <div className="approval-foot">
-              <button type="button" className="btn primary small" disabled title="演示审批，不会发给 Host">允许一次</button>
-              <button type="button" className="btn outline small" disabled title="演示审批，不会发给 Host">始终允许此类操作</button>
-              <button type="button" className="btn small danger" disabled title="演示审批，不会发给 Host">拒绝</button>
+              <button type="button" className="btn primary lg" disabled title="演示审批，不会发给 Host">允许一次</button>
+              <button type="button" className="btn outline lg" disabled title="演示审批，不会发给 Host">始终允许此类操作</button>
+              <button type="button" className="btn lg danger" disabled title="演示审批，不会发给 Host">拒绝</button>
             </div>
           </div>
         </div>

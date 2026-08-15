@@ -207,5 +207,32 @@ export function serializeModelsYml(root: { [key: string]: YamlValue }): string {
 }
 
 export function redactModelsYmlText(source: string): string {
-  return source.replace(/^(\s*apiKey:\s+)(?!"?\*)(?!!).+$/gm, "$1********");
+  return source.replace(/^(\s*apiKey:\s+)(?!"?\*)(?!!).+$/gm, '$1"********"');
+}
+
+export function isRedactedApiKey(value: unknown): boolean {
+  return typeof value === "string" && /^\*{6,}$/.test(value);
+}
+
+/** Copy previous apiKey when the new document still has the redaction placeholder. */
+export function restoreRedactedApiKeys(
+  next: { [key: string]: YamlValue },
+  previous: { [key: string]: YamlValue },
+): void {
+  const nextProviders = yamlMap(next.providers);
+  const prevProviders = yamlMap(previous.providers);
+  if (!nextProviders || !prevProviders) return;
+  for (const [id, node] of Object.entries(nextProviders)) {
+    const current = yamlMap(node);
+    const prior = yamlMap(prevProviders[id]);
+    if (!current || !prior) continue;
+    if (isRedactedApiKey(current.apiKey) && typeof prior.apiKey === "string") {
+      current.apiKey = prior.apiKey;
+    }
+  }
+}
+
+function yamlMap(value: YamlValue | undefined): { [key: string]: YamlValue } | undefined {
+  if (value === null || value === undefined || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value;
 }

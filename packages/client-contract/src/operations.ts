@@ -20,13 +20,19 @@ import type {
   EnvironmentReadModel,
   ConfigWriteResult,
   ExtensibilityReadModel,
+  McpReadModel,
+  AgentDefinitionsReadModel,
+  AgentThinkingLevel,
   HomeReadModel,
   ModelApiKind,
   ModelAuthType,
   ModelConfigReadModel,
+  ModelDiscoveryResult,
+  ModelOverridePatch,
   ModelProviderTestResult,
   RuntimeInstallState,
   SessionHistoryReadModel,
+  TokenUsageReadModel,
   WorkspaceListReadModel,
 } from "./read-models.js";
 
@@ -43,7 +49,10 @@ export interface QueryInputMap {
   "home.get": EmptyInput;
   "models.get": EmptyInput;
   "skills.get": EmptyInput;
+  "mcp.get": EmptyInput;
+  "agents.definitions.get": EmptyInput;
   "projects.list": EmptyInput;
+  "usage.get": EmptyInput;
 }
 
 export interface QueryResultMap {
@@ -60,8 +69,14 @@ export interface QueryResultMap {
   "models.get": ModelConfigReadModel;
   /** Configured OMP skills + plugins. Not Runtime CapabilityManifest. */
   "skills.get": ExtensibilityReadModel;
+  /** Configured OMP MCP servers. Disk scan, not MCPManager connection state. */
+  "mcp.get": McpReadModel;
+  /** Configured OMP task-agent definitions. Disk scan, not Agent Hub. */
+  "agents.definitions.get": AgentDefinitionsReadModel;
   /** Host workspace inventory. Paths never leave the Host registry. */
   "projects.list": WorkspaceListReadModel;
+  /** Homepage token heatmap / curve. Aggregates from omp stats.db only. */
+  "usage.get": TokenUsageReadModel;
 }
 
 export type QueryName = keyof QueryInputMap & keyof QueryResultMap;
@@ -79,14 +94,13 @@ export interface ModelProviderAuthInput {
   readonly clearSecret?: boolean;
 }
 
-export interface ModelProviderModelInput {
+export interface ModelProviderModelInput extends ModelOverridePatch {
   readonly id: string;
-  readonly name?: string;
-  readonly contextWindow?: number;
-  readonly maxTokens?: number;
-  readonly reasoning?: boolean;
-  readonly image?: boolean;
+  readonly api?: string;
+  readonly baseUrl?: string;
 }
+
+export type ModelProviderOverrideInput = ModelOverridePatch;
 
 export interface ModelProviderUpsertInput {
   readonly id: string;
@@ -108,6 +122,8 @@ export interface ModelProviderUpsertInput {
     readonly model?: string;
   } | null;
   readonly models?: ReadonlyArray<ModelProviderModelInput>;
+  /** null clears overrides; omit leaves previous YAML untouched. */
+  readonly modelOverrides?: Readonly<Record<string, ModelProviderOverrideInput>> | null;
   readonly expectedHash?: string;
 }
 
@@ -117,6 +133,74 @@ export interface ModelProviderTestInput {
   readonly api?: ModelApiKind | string;
   readonly endpointUrl?: string;
   readonly apiKey?: string;
+}
+
+/** Toggle a provider via `config.yml` `disabledProviders` only. */
+export interface ModelProviderSetEnabledInput {
+  readonly id: string;
+  readonly enabled: boolean;
+}
+
+/** One-shot runtime discovery probe. Never persists `models.db`. */
+export interface ModelProviderProbeInput {
+  readonly providerId: string;
+  readonly endpointUrl?: string;
+  readonly apiKey?: string;
+  readonly discoveryType?: string;
+  readonly timeoutMs?: number;
+}
+
+/** Replace the whole `modelRoles` map so deleted keys leave disk. */
+export interface ModelRolesWriteInput {
+  readonly roles: Readonly<Record<string, string>>;
+}
+
+/** Create a custom role (`modelTags` + optional `modelRoles` assignment). */
+export interface ModelRoleCreateInput {
+  readonly id: string;
+  readonly name: string;
+  readonly desc?: string;
+  readonly color?: string;
+  readonly selector?: string;
+}
+
+export interface ModelFallbackSetInput {
+  readonly chains: Readonly<Record<string, ReadonlyArray<string>>>;
+  readonly revertPolicy?: "cooldown-expiry" | "never";
+}
+
+/** Create or replace a user/project task-agent Markdown definition. */
+export interface AgentDefinitionUpsertInput {
+  readonly name: string;
+  readonly description: string;
+  readonly systemPrompt: string;
+  readonly scope: "user" | "project";
+  /** Omit or null = inherit parent tools. Non-empty lists get `yield` added by Host. */
+  readonly tools?: ReadonlyArray<string> | null;
+  /** Omit or null = inherit; `[]` = none; `"*"` = any. */
+  readonly spawns?: ReadonlyArray<string> | "*" | null;
+  readonly model?: ReadonlyArray<string> | null;
+  readonly thinkingLevel?: AgentThinkingLevel | null;
+  readonly output?: unknown;
+  readonly blocking?: boolean | null;
+  readonly autoloadSkills?: ReadonlyArray<string> | null;
+  readonly readSummarize?: boolean | null;
+  readonly prewalk?: boolean | string | null;
+  readonly expectedHash?: string;
+}
+
+export interface AgentDefinitionDeleteInput {
+  readonly name: string;
+  readonly scope: "user" | "project";
+  readonly expectedHash?: string;
+}
+
+/** Persist `task.disabledAgents` / `task.agentModelOverrides` / `task.agentPrewalk`. */
+export interface AgentDefinitionConfigureInput {
+  readonly name: string;
+  readonly disabled?: boolean;
+  readonly overrideModel?: string | null;
+  readonly prewalkOverride?: string | null;
 }
 
 /** Public semantic command inputs exposed by the Runtime control surface. */
@@ -179,12 +263,39 @@ interface CoreCommandInputMap {
   "models.provider.upsert": ModelProviderUpsertInput;
   /** Remove a custom provider from models.yml. */
   "models.provider.delete": { readonly id: string; readonly expectedHash?: string };
-  /** Persist a global modelRoles assignment via `omp config set`. */
+  /** Persist a modelRoles assignment. Empty `selector` clears the role. */
   "models.roles.set": { readonly roleId: string; readonly selector: string };
+  /** Replace the whole `modelRoles` map (YAML editor deletes included). */
+  "models.roles.write": ModelRolesWriteInput;
+  /** Create a custom role via `modelTags`. */
+  "models.roles.create": ModelRoleCreateInput;
+  /** Delete a custom role (`modelTags` + `modelRoles`). Built-in roles are rejected. */
+  "models.roles.delete": { readonly roleId: string };
+  /** Switch `modelRoleStorage` between global config and `<cwd>/.omp/config.yml`. */
+  "models.roleStorage.set": { readonly storage: "global" | "project" };
+  /** Persist `retry.fallbackChains` and optional `retry.fallbackRevertPolicy`. */
+  "models.fallback.set": ModelFallbackSetInput;
+  /** Persist `modelProviderOrder` (ambiguous model-id provider precedence). */
+  "models.providerOrder.set": { readonly order: ReadonlyArray<string> };
+  /** Enable/disable a provider via `disabledProviders` only. */
+  "models.provider.setEnabled": ModelProviderSetEnabledInput;
+  /** Replace models.yml from the source editor. Redacted apiKey values keep the previous secret. */
+  "models.yml.write": {
+    readonly text: string;
+    readonly expectedHash?: string;
+    /** When the form above is dirty, overlay this provider onto the parsed YAML before write. */
+    readonly overlay?: ModelProviderUpsertInput;
+  };
   /** Start an OAuth login through a short-lived OMP RPC sidecar. */
   "models.login.start": { readonly providerId: string };
+  /** Soft-delete stored credentials for a provider in local `agent.db`. */
+  "models.login.logout": { readonly providerId: string };
   /** Non-persisting connectivity smoke test against a provider endpoint. */
   "models.provider.test": ModelProviderTestInput;
+  /** One-shot discovery HTTP probe. Does not write `models.db`. */
+  "models.provider.probe": ModelProviderProbeInput;
+  /** Force `omp models refresh` so runtime discovery rewrites `models.db`. */
+  "models.discovery.refresh": EmptyInput;
   /** Persist the quick model-switch rotation order into config.yml. */
   "models.cycleOrder.set": { readonly order: ReadonlyArray<string> };
   /** Activate a known workspace (Host-owned registry; never a path). */
@@ -214,6 +325,24 @@ interface CoreCommandInputMap {
     /** Which inventory scope to edit; resolved by the Host when omitted. */
     readonly scope?: "user" | "project";
   };
+  /**
+   * Enable/disable a configured MCP server in OMP-native mcp.json
+   * (and user-level disabledServers / enabledServers). Reflects in `mcp.get`
+   * immediately; Runtime reconnect is `new-session`.
+   */
+  "mcp.setEnabled": {
+    readonly name: string;
+    readonly enabled: boolean;
+    readonly scope?: "user" | "project";
+  };
+  /** Create or replace a user/project `.omp/agents/*.md` definition. */
+  "agents.definition.upsert": AgentDefinitionUpsertInput;
+  /** Remove a user/project task-agent file. Bundled/plugin agents cannot be deleted. */
+  "agents.definition.delete": AgentDefinitionDeleteInput;
+  /** Persist per-agent overlays in config.yml (disable / model / prewalk). */
+  "agents.definition.configure": AgentDefinitionConfigureInput;
+  /** Open the native `omp stats` dashboard in the default browser. */
+  "usage.openDashboard": EmptyInput;
   // Runtime control commands share the same accepted/receipt lifecycle. Their
   // terminal state is observed through events, so the result is the current
   // public Runtime snapshot.
@@ -228,14 +357,30 @@ interface CoreCommandResultMap {
   "interaction.respond": OperatorStateSnapshot;
   "models.provider.upsert": ConfigWriteResult;
   "models.provider.delete": ConfigWriteResult;
+  "models.provider.setEnabled": ConfigWriteResult;
   "models.roles.set": ConfigWriteResult;
+  "models.roles.write": ConfigWriteResult;
+  "models.roles.create": ConfigWriteResult;
+  "models.roles.delete": ConfigWriteResult;
+  "models.roleStorage.set": ConfigWriteResult;
+  "models.fallback.set": ConfigWriteResult;
+  "models.providerOrder.set": ConfigWriteResult;
+  "models.yml.write": ConfigWriteResult;
   "models.login.start": ConfigWriteResult;
+  "models.login.logout": ConfigWriteResult;
   "models.provider.test": ModelProviderTestResult;
+  "models.provider.probe": ModelDiscoveryResult;
+  "models.discovery.refresh": ConfigWriteResult;
   "models.cycleOrder.set": ConfigWriteResult;
   "workspace.open": WorkspaceListReadModel;
   "workspace.pick": WorkspaceListReadModel;
   "plugins.setEnabled": ConfigWriteResult;
   "skills.setEnabled": ConfigWriteResult;
+  "mcp.setEnabled": ConfigWriteResult;
+  "agents.definition.upsert": ConfigWriteResult;
+  "agents.definition.delete": ConfigWriteResult;
+  "agents.definition.configure": ConfigWriteResult;
+  "usage.openDashboard": ConfigWriteResult;
 }
 
 export type CommandResultMap = CoreCommandResultMap & {

@@ -175,6 +175,11 @@ export function getPluginsDir(home: string): string {
   return getResolver(home).rootSubdir("plugins", "data");
 }
 
+/** Get the omp stats database path (~/.omp/stats.db or its XDG data equivalent). */
+export function getStatsDbPath(home: string): string {
+  return getResolver(home).rootSubdir("stats.db", "data");
+}
+
 /**
  * Get the project-local config directory (.omp).
  */

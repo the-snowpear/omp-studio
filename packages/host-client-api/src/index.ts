@@ -20,6 +20,8 @@ export type {
   HostCatalogEntry,
   HostDiagnosticsFactory,
   HostExtensibilityService,
+  HostMcpService,
+  HostAgentDefinitionsService,
   HostInteractionRespondInput,
   HostManifestProvider,
   HostModelsService,
@@ -28,6 +30,7 @@ export type {
   HostRuntimeInstallService,
   HostSemanticCommandService,
   HostSessionCatalogProvider,
+  HostUsageService,
   HostWorkspaceService,
 } from "./services.js";
 

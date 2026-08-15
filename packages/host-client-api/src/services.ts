@@ -18,18 +18,30 @@ import type {
   ConfigWriteResult,
   DiagnosticEntryId,
   ExtensibilityReadModel,
+  McpReadModel,
+  AgentDefinitionConfigureInput,
+  AgentDefinitionDeleteInput,
+  AgentDefinitionsReadModel,
+  AgentDefinitionUpsertInput,
   IdempotencyKey,
   InteractionId,
   InteractionResponseValue,
   ModelConfigReadModel,
+  ModelDiscoveryResult,
+  ModelFallbackSetInput,
+  ModelProviderProbeInput,
+  ModelProviderSetEnabledInput,
   ModelProviderTestResult,
   ModelProviderUpsertInput,
+  ModelRoleCreateInput,
+  ModelRolesWriteInput,
   RuntimeChannel,
   RuntimeInstallState,
   SessionHistoryStatus,
   ThreadId,
   WorkspaceId,
   WorkspaceListReadModel,
+  TokenUsageReadModel,
 } from "@omp-studio/client-contract";
 import type {
   CapabilityManifest,
@@ -142,9 +154,24 @@ export interface HostModelsService {
   get(): ModelConfigReadModel | Promise<ModelConfigReadModel>;
   upsertProvider(input: ModelProviderUpsertInput): ConfigWriteResult | Promise<ConfigWriteResult>;
   deleteProvider(input: { readonly id: string; readonly expectedHash?: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  setProviderEnabled(input: ModelProviderSetEnabledInput): ConfigWriteResult | Promise<ConfigWriteResult>;
   setRole(input: { readonly roleId: string; readonly selector: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  writeRoles(input: ModelRolesWriteInput): ConfigWriteResult | Promise<ConfigWriteResult>;
+  createRole(input: ModelRoleCreateInput): ConfigWriteResult | Promise<ConfigWriteResult>;
+  deleteRole(input: { readonly roleId: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  setRoleStorage(input: { readonly storage: "global" | "project" }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  setFallback(input: ModelFallbackSetInput): ConfigWriteResult | Promise<ConfigWriteResult>;
+  setProviderOrder(input: { readonly order: ReadonlyArray<string> }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  writeModelsYml(input: {
+    readonly text: string;
+    readonly expectedHash?: string;
+    readonly overlay?: ModelProviderUpsertInput;
+  }): ConfigWriteResult | Promise<ConfigWriteResult>;
   startLogin(input: { readonly providerId: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  logout(input: { readonly providerId: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
   testProvider(input: { readonly providerId?: string; readonly api?: string; readonly endpointUrl?: string; readonly apiKey?: string }): ModelProviderTestResult | Promise<ModelProviderTestResult>;
+  probeProvider(input: ModelProviderProbeInput): ModelDiscoveryResult | Promise<ModelDiscoveryResult>;
+  refreshDiscovery(): ConfigWriteResult | Promise<ConfigWriteResult>;
   setCycleOrder(input: { readonly order: ReadonlyArray<string> }): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
@@ -177,6 +204,30 @@ export interface HostExtensibilityService {
 }
 
 /**
+ * Host-owned configured MCP server inventory. Paths stay in the adapter;
+ * the facade only publishes the public read model.
+ */
+export interface HostMcpService {
+  get(): McpReadModel | Promise<McpReadModel>;
+  setEnabled(input: {
+    readonly name: string;
+    readonly enabled: boolean;
+    readonly scope?: "user" | "project";
+  }): ConfigWriteResult | Promise<ConfigWriteResult>;
+}
+
+/**
+ * Host-owned task-agent definition inventory. Paths stay in the adapter;
+ * the facade only publishes the public read model and write receipts.
+ */
+export interface HostAgentDefinitionsService {
+  get(): AgentDefinitionsReadModel | Promise<AgentDefinitionsReadModel>;
+  upsert(input: AgentDefinitionUpsertInput): ConfigWriteResult | Promise<ConfigWriteResult>;
+  delete(input: AgentDefinitionDeleteInput): ConfigWriteResult | Promise<ConfigWriteResult>;
+  configure(input: AgentDefinitionConfigureInput): ConfigWriteResult | Promise<ConfigWriteResult>;
+}
+
+/**
  * Host-owned workspace registry service. Paths live only in the Host
  * registry; the facade publishes the path-free workspace list.
  */
@@ -184,6 +235,15 @@ export interface HostWorkspaceService {
   list(): WorkspaceListReadModel | Promise<WorkspaceListReadModel>;
   open(input: { readonly workspaceId: WorkspaceId }): Promise<WorkspaceListReadModel>;
   pick(): Promise<WorkspaceListReadModel>;
+}
+
+/**
+ * Host-owned token-usage adapter. Syncs via `omp stats --summary` and reads
+ * aggregates from stats.db. Paths never appear on the public read model.
+ */
+export interface HostUsageService {
+  get(): TokenUsageReadModel | Promise<TokenUsageReadModel>;
+  openDashboard(): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /** Input accepted by the semantic interaction responder. */

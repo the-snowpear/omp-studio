@@ -15,6 +15,9 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
           if (id.includes("@xterm")) return "xterm";
+          if (id.includes("@codemirror") || id.includes("@lezer") || /node_modules[/\\]codemirror[/\\]/.test(id)) {
+            return "codemirror";
+          }
           if (id.includes("@omp-studio")) return "studio-client";
           if (/node_modules[/\\](?:react-dom|react|scheduler)[/\\]/.test(id)) return "react";
           return "vendor";

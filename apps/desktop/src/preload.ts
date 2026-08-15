@@ -36,17 +36,29 @@ import {
 } from "./terminal-shared.js";
 
 /**
- * Electron-backed adapter. `on`/`removeListener` pass the exact same
- * listener reference through, so the unsubscribe removes the registered
- * listener by identity (no wrapping closures).
+ * Electron `ipcRenderer.on` calls `(IpcRendererEvent, payload)`. The Host
+ * bridge must see only the payload — cloning the IPC event throws
+ * "envelope contains a non-JSON value". Wrap like the terminal channels
+ * and keep a WeakMap so `removeListener` still matches by identity.
  */
+const hostEventWrappers = new WeakMap<
+  (event: unknown, ...args: readonly unknown[]) => void,
+  (event: unknown, ...args: readonly unknown[]) => void
+>();
+
 const sender: DesktopIpcBridge = {
   invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
   on: (channel, listener) => {
-    ipcRenderer.on(channel, listener);
+    const wrapped = (_event: unknown, payload: unknown): void => {
+      listener(payload);
+    };
+    hostEventWrappers.set(listener, wrapped);
+    ipcRenderer.on(channel, wrapped);
   },
   removeListener: (channel, listener) => {
-    ipcRenderer.removeListener(channel, listener);
+    const wrapped = hostEventWrappers.get(listener) ?? listener;
+    hostEventWrappers.delete(listener);
+    ipcRenderer.removeListener(channel, wrapped);
   },
 };
 

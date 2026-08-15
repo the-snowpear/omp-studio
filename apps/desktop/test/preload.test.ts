@@ -66,6 +66,14 @@ class FakeBridge implements DesktopIpcBridge {
       listener(payload);
     }
   }
+
+  /** Electron-shaped dispatch: first arg is a non-JSON IpcRendererEvent. */
+  emitElectronEvent(payload: unknown): void {
+    const ipcEvent = { sender: { send() {} } };
+    for (const listener of [...(this.listeners.get(DESKTOP_IPC_CHANNELS.event) ?? [])]) {
+      listener(ipcEvent, payload);
+    }
+  }
 }
 
 const EVENT_BASE = {
@@ -267,5 +275,19 @@ describe("createDesktopIpcBridge: per-listener scope filtering", () => {
       bridge.emitEvent(payload);
     }
     assert.equal(received.length, 0);
+  });
+
+  test("Electron (ipcEvent, payload) dispatch delivers the envelope, not the IPC event", () => {
+    const bridge = new FakeBridge();
+    const api = createDesktopIpcBridge(bridge);
+    const received: ClientEvent[] = [];
+    api.subscribe({ scope: "all" }, (event) => {
+      received.push(event);
+    });
+    const event = makeEvent({ cursor: "e1" });
+    bridge.emitElectronEvent(event);
+    assert.equal(received.length, 1);
+    assert.equal(received[0]?.cursor, "e1");
+    assert.equal("sender" in (received[0] as object), false);
   });
 });

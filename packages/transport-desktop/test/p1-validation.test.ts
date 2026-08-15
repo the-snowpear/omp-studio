@@ -48,7 +48,10 @@ const QUERY_ENVELOPES: ReadonlyArray<{
   { name: "home.get", payload: { queryName: "home.get", input: {} } },
   { name: "models.get", payload: { queryName: "models.get", input: {} } },
   { name: "skills.get", payload: { queryName: "skills.get", input: {} } },
+  { name: "mcp.get", payload: { queryName: "mcp.get", input: {} } },
+  { name: "agents.definitions.get", payload: { queryName: "agents.definitions.get", input: {} } },
   { name: "projects.list", payload: { queryName: "projects.list", input: {} } },
+  { name: "usage.get", payload: { queryName: "usage.get", input: {} } },
 ];
 
 const COMMAND_ENVELOPES: ReadonlyArray<{
@@ -127,6 +130,105 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
     },
   },
   {
+    name: "models.provider.setEnabled",
+    payload: {
+      commandName: "models.provider.setEnabled",
+      input: { id: "acme", enabled: false },
+      idempotencyKey: "idem-models-enabled-1",
+      requestId: "req-models-enabled-1",
+    },
+  },
+  {
+    name: "models.roles.write",
+    payload: {
+      commandName: "models.roles.write",
+      input: { roles: { default: "acme/fast" } },
+      idempotencyKey: "idem-models-write-1",
+      requestId: "req-models-write-1",
+    },
+  },
+  {
+    name: "models.roles.create",
+    payload: {
+      commandName: "models.roles.create",
+      input: { id: "review", name: "Review" },
+      idempotencyKey: "idem-models-create-1",
+      requestId: "req-models-create-1",
+    },
+  },
+  {
+    name: "models.roles.delete",
+    payload: {
+      commandName: "models.roles.delete",
+      input: { roleId: "review" },
+      idempotencyKey: "idem-models-delete-role-1",
+      requestId: "req-models-delete-role-1",
+    },
+  },
+  {
+    name: "models.roleStorage.set",
+    payload: {
+      commandName: "models.roleStorage.set",
+      input: { storage: "global" },
+      idempotencyKey: "idem-models-storage-1",
+      requestId: "req-models-storage-1",
+    },
+  },
+  {
+    name: "models.fallback.set",
+    payload: {
+      commandName: "models.fallback.set",
+      input: { chains: { "acme/fast": ["acme/slow"] }, revertPolicy: "never" },
+      idempotencyKey: "idem-models-fallback-1",
+      requestId: "req-models-fallback-1",
+    },
+  },
+  {
+    name: "models.providerOrder.set",
+    payload: {
+      commandName: "models.providerOrder.set",
+      input: { order: ["acme", "openai"] },
+      idempotencyKey: "idem-models-order-1",
+      requestId: "req-models-order-1",
+    },
+  },
+  {
+    name: "models.login.logout",
+    payload: {
+      commandName: "models.login.logout",
+      input: { providerId: "anthropic" },
+      idempotencyKey: "idem-models-logout-1",
+      requestId: "req-models-logout-1",
+    },
+  },
+  {
+    name: "models.provider.probe",
+    payload: {
+      commandName: "models.provider.probe",
+      input: { providerId: "ollama" },
+      idempotencyKey: "idem-models-probe-1",
+      requestId: "req-models-probe-1",
+    },
+  },
+  {
+    name: "models.discovery.refresh",
+    payload: {
+      commandName: "models.discovery.refresh",
+      input: {},
+      idempotencyKey: "idem-models-refresh-1",
+      requestId: "req-models-refresh-1",
+    },
+  },
+  {
+    name: "models.yml.write",
+    payload: {
+      commandName: "models.yml.write",
+      input: { text: "providers: {}\n" },
+      idempotencyKey: "idem-models-yml-1",
+      requestId: "req-models-yml-1",
+    },
+  },
+  {
     name: "models.login.start",
     payload: {
       commandName: "models.login.start",
@@ -154,6 +256,15 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
     },
   },
   {
+    name: "usage.openDashboard",
+    payload: {
+      commandName: "usage.openDashboard",
+      input: {},
+      idempotencyKey: "idem-usage-1",
+      requestId: "req-usage-1",
+    },
+  },
+  {
     name: "plugins.setEnabled",
     payload: {
       commandName: "plugins.setEnabled",
@@ -169,6 +280,47 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
       input: { name: "upstream-sync", enabled: true },
       idempotencyKey: "idem-skills-1",
       requestId: "req-skills-1",
+    },
+  },
+  {
+    name: "mcp.setEnabled",
+    payload: {
+      commandName: "mcp.setEnabled",
+      input: { name: "filesystem", enabled: false, scope: "user" },
+      idempotencyKey: "idem-mcp-1",
+      requestId: "req-mcp-1",
+    },
+  },
+  {
+    name: "agents.definition.upsert",
+    payload: {
+      commandName: "agents.definition.upsert",
+      input: {
+        name: "reviewer",
+        description: "Use this agent when reviewing code",
+        systemPrompt: "Review the diff.",
+        scope: "user",
+      },
+      idempotencyKey: "idem-agents-1",
+      requestId: "req-agents-1",
+    },
+  },
+  {
+    name: "agents.definition.delete",
+    payload: {
+      commandName: "agents.definition.delete",
+      input: { name: "reviewer", scope: "user" },
+      idempotencyKey: "idem-agents-2",
+      requestId: "req-agents-2",
+    },
+  },
+  {
+    name: "agents.definition.configure",
+    payload: {
+      commandName: "agents.definition.configure",
+      input: { name: "scout", disabled: true },
+      idempotencyKey: "idem-agents-3",
+      requestId: "req-agents-3",
     },
   },
 ];
@@ -242,7 +394,10 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       "home.get",
       "models.get",
       "skills.get",
+      "mcp.get",
+      "agents.definitions.get",
       "projects.list",
+      "usage.get",
     ]);
     for (const { name, payload } of QUERY_ENVELOPES) {
       const parsed = parseClientQueryRequest(payload);
@@ -373,14 +528,30 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       "interaction.respond",
       "models.provider.upsert",
       "models.provider.delete",
+      "models.provider.setEnabled",
       "models.roles.set",
+      "models.roles.write",
+      "models.roles.create",
+      "models.roles.delete",
+      "models.roleStorage.set",
+      "models.fallback.set",
+      "models.providerOrder.set",
+      "models.yml.write",
       "models.login.start",
+      "models.login.logout",
       "models.provider.test",
+      "models.provider.probe",
+      "models.discovery.refresh",
       "models.cycleOrder.set",
       "plugins.setEnabled",
       "skills.setEnabled",
+      "mcp.setEnabled",
+      "agents.definition.upsert",
+      "agents.definition.delete",
+      "agents.definition.configure",
       "workspace.open",
       "workspace.pick",
+      "usage.openDashboard",
     ]);
     for (const { name, payload } of COMMAND_ENVELOPES) {
       const parsed = parseClientCommandRequest(payload);
@@ -389,6 +560,54 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       assert.ok(parsed.idempotencyKey.length > 0);
       assert.ok("input" in parsed);
     }
+  });
+
+  test("accepts empty models.roles.set selector and empty probe endpointUrl", () => {
+    const cleared = parseClientCommandRequest({
+      commandName: "models.roles.set",
+      input: { roleId: "default", selector: "" },
+      idempotencyKey: "idem-models-clear-1",
+      requestId: "req-models-clear-1",
+    });
+    assert.equal(cleared.commandName, "models.roles.set");
+    const probe = parseClientCommandRequest({
+      commandName: "models.provider.probe",
+      input: { providerId: "ollama", endpointUrl: "" },
+      idempotencyKey: "idem-models-probe-empty-1",
+      requestId: "req-models-probe-empty-1",
+    });
+    assert.equal(probe.commandName, "models.provider.probe");
+  });
+
+  test("accepts models.provider.upsert thinking efforts and rejects unknown ids", () => {
+    const parsed = parseClientCommandRequest({
+      commandName: "models.provider.upsert",
+      input: {
+        id: "acme",
+        name: "Acme",
+        api: "openai-completions",
+        auth: { type: "api-key" },
+        models: [{ id: "custom-1", reasoning: true, thinking: ["off", "low", "max"] }],
+        modelOverrides: { "catalog-1": { reasoning: true, thinking: ["high", "xhigh"] } },
+      },
+      idempotencyKey: "idem-models-thinking-1",
+      requestId: "req-models-thinking-1",
+    });
+    assert.equal(parsed.commandName, "models.provider.upsert");
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "models.provider.upsert",
+        input: {
+          id: "acme",
+          name: "Acme",
+          api: "openai-completions",
+          auth: { type: "api-key" },
+          models: [{ id: "custom-1", thinking: ["minimal"] }],
+        },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
   });
 
   test("rejects an unknown commandName and identity-smuggling fields", () => {
@@ -542,6 +761,46 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       parseClientCommandRequest({
         commandName: "skills.setEnabled",
         input: { name: "skill", enabled: true, scope: "machine" },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "mcp.setEnabled",
+        input: { name: "", enabled: true },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "mcp.setEnabled",
+        input: { name: "filesystem", enabled: 1 },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "agents.definition.upsert",
+        input: { name: "x", description: "d", systemPrompt: "", scope: "machine" },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "agents.definition.delete",
+        input: { name: "x", scope: "bundled" },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "agents.definition.configure",
+        input: { name: "", disabled: true },
         idempotencyKey: "k",
         requestId: "r",
       }),

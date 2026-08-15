@@ -6,6 +6,7 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import { Icon } from "./icons";
+import { ToastHost } from "./ToastHost";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_DIAGNOSTICS } from "./preview/fixtures";
 
@@ -28,14 +29,9 @@ const GRADE_TONE: Record<string, string> = {
   unavailable: "gray",
 };
 
-function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void] {
+function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void, dismiss: () => void] {
   const [notice, setNotice] = useState<{ text: string; icon: string } | null>(null);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(null), 2600);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
-  return [notice, (text, icon = "info") => setNotice({ text, icon })];
+  return [notice, (text, icon = "info") => setNotice({ text, icon }), () => setNotice(null)];
 }
 
 function fmtTime(iso: string): string {
@@ -77,7 +73,7 @@ export function DiagnosticsPage({
   const [diag, setDiag] = useState<DiagnosticReadModel | undefined>(diagnostics);
   const [caps, setCaps] = useState<CapManifest | undefined>(capabilities);
   const [busy, setBusy] = useState(false);
-  const [notice, show] = useNotice();
+  const [notice, show, dismissNotice] = useNotice();
 
   useEffect(() => setDiag(diagnostics), [diagnostics]);
   useEffect(() => setCaps(capabilities), [capabilities]);
@@ -279,11 +275,7 @@ export function DiagnosticsPage({
         </div>
       </details>
 
-      {notice ? (
-        <div className="toast-wrap" role="status" aria-live="polite">
-          <div className="toast"><Icon name={notice.icon} extra="sm" />{notice.text}</div>
-        </div>
-      ) : null}
+      <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />
     </div>
   );
 }

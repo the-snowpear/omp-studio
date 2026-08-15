@@ -49,10 +49,13 @@ import type {
   EnvironmentReadModel,
   ConfigWriteResult,
   ExtensibilityReadModel,
+  McpReadModel,
+  AgentDefinitionsReadModel,
   HomeReadModel,
   IdempotencyKey,
   InteractionId,
   ModelConfigReadModel,
+  ModelDiscoveryResult,
   ModelProviderTestResult,
   PlatformId,
   PublicAuthorityIdentity,
@@ -67,6 +70,7 @@ import type {
   SubscriptionScope,
   SurfaceCapabilities,
   ThreadId,
+  TokenUsageReadModel,
   Unsubscribe,
   WorkspaceId,
   WorkspaceListReadModel,
@@ -104,6 +108,8 @@ import {
   type HostCatalogEntry,
   type HostDiagnosticsFactory,
   type HostExtensibilityService,
+  type HostMcpService,
+  type HostAgentDefinitionsService,
   type HostManifestProvider,
   type HostModelsService,
   type HostRuntimeAccess,
@@ -111,6 +117,7 @@ import {
   type HostRuntimeInstallService,
   type HostSemanticCommandService,
   type HostSessionCatalogProvider,
+  type HostUsageService,
   type HostWorkspaceService,
 } from "./services.js";
 
@@ -132,10 +139,26 @@ const DEFAULT_REGISTRY_CAPACITY = 512;
 type ModelsCommandName =
   | "models.provider.upsert"
   | "models.provider.delete"
+  | "models.provider.setEnabled"
   | "models.roles.set"
+  | "models.roles.write"
+  | "models.roles.create"
+  | "models.roles.delete"
+  | "models.roleStorage.set"
+  | "models.fallback.set"
+  | "models.providerOrder.set"
+  | "models.yml.write"
   | "models.login.start"
+  | "models.login.logout"
   | "models.provider.test"
+  | "models.provider.probe"
+  | "models.discovery.refresh"
   | "models.cycleOrder.set";
+
+type AgentDefinitionsCommandName =
+  | "agents.definition.upsert"
+  | "agents.definition.delete"
+  | "agents.definition.configure";
 
 /** Facade constructor inputs; every seam is explicit and injectable. */
 export interface StudioHostClientFacadeOptions {
@@ -156,8 +179,14 @@ export interface StudioHostClientFacadeOptions {
   readonly models?: HostModelsService;
   /** Optional configured skills/plugins inventory adapter. */
   readonly extensibility?: HostExtensibilityService;
+  /** Optional configured MCP server inventory adapter. */
+  readonly mcp?: HostMcpService;
+  /** Optional configured task-agent definition adapter. */
+  readonly agentDefinitions?: HostAgentDefinitionsService;
   /** Optional Host workspace registry adapter (paths never leave it). */
   readonly workspaces?: HostWorkspaceService;
+  /** Optional omp stats usage adapter (heatmap / native dashboard). */
+  readonly usage?: HostUsageService;
   /** Bounded idempotency registry capacity (default 512). */
   readonly registryCapacity?: number;
 }
@@ -451,8 +480,20 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#querySkills();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "mcp.get": {
+        const result = await this.#queryMcp();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "agents.definitions.get": {
+        const result = await this.#queryAgentDefinitions();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "projects.list": {
         const result = await this.#queryProjects();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "usage.get": {
+        const result = await this.#queryUsage();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
     }
@@ -487,9 +528,20 @@ export class StudioHostClientFacade implements ClientTransport {
       }
       case "models.provider.upsert":
       case "models.provider.delete":
+      case "models.provider.setEnabled":
       case "models.roles.set":
+      case "models.roles.write":
+      case "models.roles.create":
+      case "models.roles.delete":
+      case "models.roleStorage.set":
+      case "models.fallback.set":
+      case "models.providerOrder.set":
+      case "models.yml.write":
       case "models.login.start":
+      case "models.login.logout":
       case "models.provider.test":
+      case "models.provider.probe":
+      case "models.discovery.refresh":
       case "models.cycleOrder.set": {
         return this.#commandModels(request as ClientCommandRequest<ModelsCommandName>);
       }
@@ -497,9 +549,20 @@ export class StudioHostClientFacade implements ClientTransport {
       case "workspace.pick": {
         return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick">);
       }
+      case "usage.openDashboard": {
+        return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
+      }
       case "plugins.setEnabled":
       case "skills.setEnabled": {
         return this.#commandExtensibility(request as ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled">);
+      }
+      case "mcp.setEnabled": {
+        return this.#commandMcp(request as ClientCommandRequest<"mcp.setEnabled">);
+      }
+      case "agents.definition.upsert":
+      case "agents.definition.delete":
+      case "agents.definition.configure": {
+        return this.#commandAgentDefinitions(request as ClientCommandRequest<AgentDefinitionsCommandName>);
       }
       default: {
         const p4 = request as ClientCommandRequest;
@@ -893,6 +956,21 @@ export class StudioHostClientFacade implements ClientTransport {
     return model;
   }
 
+  async #queryUsage(): Promise<TokenUsageReadModel> {
+    const service = this.#options.usage;
+    if (service === undefined) {
+      return {
+        generatedAt: this.#options.diagnostics.now(),
+        days: [],
+        models: [],
+        byModel: [],
+        hours: [],
+        unavailableReason: "Host 未接入用量适配器。",
+      };
+    }
+    return service.get();
+  }
+
   async #querySkills(): Promise<ExtensibilityReadModel> {
     const service = this.#options.extensibility;
     if (service === undefined) {
@@ -902,6 +980,35 @@ export class StudioHostClientFacade implements ClientTransport {
         warnings: [],
         generatedAt: this.#options.diagnostics.now(),
         unavailableReason: "Host 未接入技能 / 插件适配器。",
+      };
+    }
+    return service.get();
+  }
+
+  async #queryMcp(): Promise<McpReadModel> {
+    const service = this.#options.mcp;
+    if (service === undefined) {
+      return {
+        servers: [],
+        warnings: [],
+        generatedAt: this.#options.diagnostics.now(),
+        unavailableReason: "Host 未接入 MCP 适配器。",
+      };
+    }
+    return service.get();
+  }
+
+  async #queryAgentDefinitions(): Promise<AgentDefinitionsReadModel> {
+    const service = this.#options.agentDefinitions;
+    if (service === undefined) {
+      return {
+        agents: [],
+        warnings: [],
+        builtinToolNames: [],
+        roleAliases: [],
+        projectScopeAvailable: false,
+        generatedAt: this.#options.diagnostics.now(),
+        unavailableReason: "Host 未接入子代理定义适配器。",
       };
     }
     return service.get();
@@ -923,6 +1030,11 @@ export class StudioHostClientFacade implements ClientTransport {
         loginAvailable: false,
         ompAvailable: false,
         unavailableReason: "Host 未接入模型配置适配器。",
+        modelRoleStorage: "global",
+        projectScopeAvailable: false,
+        modelProviderOrder: [],
+        fallbackChains: {},
+        fallbackRevertPolicy: "cooldown-expiry",
       };
     }
     return service.get();
@@ -1020,7 +1132,7 @@ export class StudioHostClientFacade implements ClientTransport {
     service: HostModelsService,
   ): Promise<void> {
     try {
-      let result: ConfigWriteResult | ModelProviderTestResult;
+      let result: ConfigWriteResult | ModelProviderTestResult | ModelDiscoveryResult;
       switch (request.commandName) {
         case "models.provider.upsert":
           result = await service.upsertProvider(request.input as never);
@@ -1028,14 +1140,47 @@ export class StudioHostClientFacade implements ClientTransport {
         case "models.provider.delete":
           result = await service.deleteProvider(request.input as { readonly id: string; readonly expectedHash?: string });
           break;
+        case "models.provider.setEnabled":
+          result = await service.setProviderEnabled(request.input as never);
+          break;
         case "models.roles.set":
           result = await service.setRole(request.input as { readonly roleId: string; readonly selector: string });
+          break;
+        case "models.roles.write":
+          result = await service.writeRoles(request.input as never);
+          break;
+        case "models.roles.create":
+          result = await service.createRole(request.input as never);
+          break;
+        case "models.roles.delete":
+          result = await service.deleteRole(request.input as { readonly roleId: string });
+          break;
+        case "models.roleStorage.set":
+          result = await service.setRoleStorage(request.input as { readonly storage: "global" | "project" });
+          break;
+        case "models.fallback.set":
+          result = await service.setFallback(request.input as never);
+          break;
+        case "models.providerOrder.set":
+          result = await service.setProviderOrder(request.input as { readonly order: ReadonlyArray<string> });
+          break;
+        case "models.yml.write":
+          result = await service.writeModelsYml(request.input as never);
           break;
         case "models.login.start":
           result = await service.startLogin(request.input as { readonly providerId: string });
           break;
+        case "models.login.logout":
+          result = await service.logout(request.input as { readonly providerId: string });
+          break;
         case "models.provider.test":
           result = await service.testProvider(request.input as { readonly providerId?: string; readonly api?: string; readonly endpointUrl?: string; readonly apiKey?: string });
+          break;
+        case "models.provider.probe":
+          result = await service.probeProvider(request.input as never);
+          break;
+        case "models.discovery.refresh":
+          result = await service.refreshDiscovery();
           break;
         case "models.cycleOrder.set":
           result = await service.setCycleOrder(request.input as { readonly order: ReadonlyArray<string> });
@@ -1119,6 +1264,122 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   /**
+   * MCP enable/disable: Host-owned mcp.json mutation; no Runtime required.
+   */
+  async #commandMcp(request: ClientCommandRequest<"mcp.setEnabled">): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.mcp;
+    if (service === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", "mcp.setEnabled is not available: no MCP adapter is wired");
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted;
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runMcpCommand(request, service);
+    return accepted;
+  }
+
+  async #runMcpCommand(request: ClientCommandRequest<"mcp.setEnabled">, service: HostMcpService): Promise<void> {
+    try {
+      const result = await service.setEnabled(request.input);
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  /**
+   * Shared gate for task-agent definition mutations: an explicit injected
+   * service is required before anything is accepted; a missing seam fails
+   * closed with CAPABILITY_UNAVAILABLE. These are Host-owned disk writes
+   * and never require a Runtime snapshot.
+   */
+  async #commandAgentDefinitions(
+    request: ClientCommandRequest<AgentDefinitionsCommandName>,
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.agentDefinitions;
+    if (service === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        `${request.commandName} is not available: no agent-definitions adapter is wired`,
+      );
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted;
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runAgentDefinitionsCommand(request, service);
+    return accepted;
+  }
+
+  async #runAgentDefinitionsCommand(
+    request: ClientCommandRequest<AgentDefinitionsCommandName>,
+    service: HostAgentDefinitionsService,
+  ): Promise<void> {
+    try {
+      let result: ConfigWriteResult;
+      switch (request.commandName) {
+        case "agents.definition.upsert":
+          result = await service.upsert(request.input as never);
+          break;
+        case "agents.definition.delete":
+          result = await service.delete(request.input as never);
+          break;
+        case "agents.definition.configure":
+          result = await service.configure(request.input as never);
+          break;
+      }
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  /**
    * Shared gate for the two workspace commands: an explicit injected
    * service is required before anything is accepted; a missing seam fails
    * closed with CAPABILITY_UNAVAILABLE and no fake completion is published.
@@ -1163,6 +1424,56 @@ export class StudioHostClientFacade implements ClientTransport {
           ? await service.open(request.input as { readonly workspaceId: WorkspaceId })
           : await service.pick();
       this.#lastWorkspaceModel = result;
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
+  async #commandUsage(request: ClientCommandRequest<"usage.openDashboard">): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.usage;
+    if (service === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        `${request.commandName} is not available: no usage adapter is wired`,
+      );
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runUsageCommand(request, service);
+    return accepted;
+  }
+
+  async #runUsageCommand(
+    request: ClientCommandRequest<"usage.openDashboard">,
+    service: HostUsageService,
+  ): Promise<void> {
+    try {
+      const result = await service.openDashboard();
       this.#emitTerminal(request.requestId, {
         requestId: request.requestId,
         commandName: request.commandName,

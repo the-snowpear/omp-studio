@@ -14,7 +14,7 @@ export function skillToPreview(skill: SkillRecord): SkillPreview {
     desc: skill.desc,
     src: skill.sourceLabel,
     scope: skill.scope,
-    path: skill.sourceLabel,
+    path: "",
     enabled: skill.enabled,
     loaded: false,
     session: false,

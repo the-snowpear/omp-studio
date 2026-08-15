@@ -87,7 +87,10 @@ export function createDesktopIpcBridge(bridge: DesktopIpcBridge): OmpStudioDeskt
     },
 
     subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe {
-      const onEvent = (payload: unknown): void => {
+      const onEvent = (first: unknown, ...rest: readonly unknown[]): void => {
+        // Electron `ipcRenderer.on` delivers `(IpcRendererEvent, payload)`.
+        // Tests and a wrapped preload may deliver the payload as the first arg.
+        const payload = rest.length > 0 ? rest[0] : first;
         if (payload === null || typeof payload !== "object") {
           return;
         }

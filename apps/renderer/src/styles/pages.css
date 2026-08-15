@@ -188,6 +188,7 @@
   margin-bottom: var(--sp-24);
 }
 .tk-head { display: flex; align-items: center; gap: var(--sp-10); }
+.tk-head .btn { flex: none; }
 .tk-title {
   display: inline-flex; align-items: center; gap: var(--sp-6);
   font-size: var(--fs-14); font-weight: var(--fw-semibold);
@@ -202,29 +203,71 @@
   font-size: var(--fs-11); color: var(--text-3);
 }
 .tk-dot { width: 8px; height: 8px; border-radius: var(--r-full); flex: none; display: inline-block; }
-.tk-dot.claude { background: var(--accent); }
-.tk-dot.codex { background: var(--blue); }
+.tk-dot.m0 { background: var(--accent); }
+.tk-dot.m1 { background: var(--blue); }
+.tk-dot.m2 { background: var(--green); }
+.tk-dot.m3 { background: var(--amber); }
+.tk-dot.m4 { background: var(--red); }
+.tk-dot.other { background: var(--text-faint); }
 .tk-dot.total { background: var(--accent); }
 
+.tk-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-8) var(--sp-12);
+  margin-top: var(--sp-8);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.tk-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tk-chart-wrap { margin-top: var(--sp-12); }
-.tk-chart { display: block; width: 100%; height: 210px; margin-top: var(--sp-24); }
+.tk-chart { display: block; width: 100%; height: 210px; margin-top: var(--sp-24); overflow: visible; }
 .tk-chart .tk-grid { stroke: var(--border); stroke-dasharray: 3 4; stroke-width: 1; }
 .tk-chart .tk-grid.base { stroke-dasharray: none; }
 .tk-chart .tk-yt { font-family: var(--font-mono); font-size: 9px; fill: var(--text-faint); }
 .tk-chart .tk-xt { font-size: 9.5px; fill: var(--text-faint); }
 /* 曲线：基线 1.6px，曲线段需要 round join+cap 才不会出现尖角断开感。 */
 .tk-chart .tk-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
-.tk-chart .tk-line.claude { stroke: var(--accent); }
-.tk-chart .tk-line.codex { stroke: var(--blue); }
+.tk-chart .tk-line.m0 { stroke: var(--accent); }
+.tk-chart .tk-line.m1 { stroke: var(--blue); }
+.tk-chart .tk-line.m2 { stroke: var(--green); }
+.tk-chart .tk-line.m3 { stroke: var(--amber); }
+.tk-chart .tk-line.m4 { stroke: var(--red); }
+.tk-chart .tk-line.other { stroke: var(--text-faint); }
 .tk-chart .tk-line.total { stroke: var(--accent); }
 /* 面积：折线下方铺一缕淡色，让"smooth curve"在视觉上更明显。 */
 .tk-chart .tk-area { stroke: none; opacity: 0.14; }
-.tk-chart .tk-area.claude { fill: var(--accent); }
-.tk-chart .tk-area.codex { fill: var(--blue); }
+.tk-chart .tk-area.m0 { fill: var(--accent); }
+.tk-chart .tk-area.m1 { fill: var(--blue); }
+.tk-chart .tk-area.m2 { fill: var(--green); }
+.tk-chart .tk-area.m3 { fill: var(--amber); }
+.tk-chart .tk-area.m4 { fill: var(--red); }
+.tk-chart .tk-area.other { fill: var(--text-faint); }
 .tk-chart .tk-area.total { fill: var(--accent); }
 .tk-chart .tk-hit { fill: transparent; cursor: crosshair; }
 .tk-chart .tk-cursor { stroke: var(--accent); stroke-opacity: 0.45; stroke-width: 1; }
 .tk-chart .tk-hl { stroke: var(--surface); stroke-width: 1.5; fill: var(--accent); }
+.tk-chart .tk-hl.m0 { fill: var(--accent); }
+.tk-chart .tk-hl.m1 { fill: var(--blue); }
+.tk-chart .tk-hl.m2 { fill: var(--green); }
+.tk-chart .tk-hl.m3 { fill: var(--amber); }
+.tk-chart .tk-hl.m4 { fill: var(--red); }
+.tk-chart .tk-hl.other { fill: var(--text-faint); }
+.tk-chart .tk-pt.m0 { fill: var(--accent); }
+.tk-chart .tk-pt.m1 { fill: var(--blue); }
+.tk-chart .tk-pt.m2 { fill: var(--green); }
+.tk-chart .tk-pt.m3 { fill: var(--amber); }
+.tk-chart .tk-pt.m4 { fill: var(--red); }
+.tk-chart .tk-pt.other { fill: var(--text-faint); }
 .tk-chart .tk-pt.total { fill: var(--accent); }
 
 /* 日历：7 行 × 53 列（一年 GitHub 风格）。
@@ -417,19 +460,172 @@
 }
 .tt-card-body { margin-top: 2px; }
 
-/* ---------- 能力中心 ---------- */
-.cap-layout { display: flex; gap: var(--sp-24); align-items: flex-start; }
-.cap-side { width: 200px; flex: none; position: sticky; top: 0; }
+/* ---------- 能力中心 / 设置：左侧分类 + 滑动气泡 ----------
+   版式仍是原来的左栏右内容。激活态不再写按钮背景/字重（字重变化会让
+   行宽微移，气泡对不齐），改由绝对定位的淡紫窗口盖住当前行，窗口内
+   紫色镜像反向位移，盖住哪一行哪一行就透出 accent —— 和页头导航、
+   模型配置标签栏同一套「遮盖变色」，只是沿竖轴平移。 */
+.cap-layout {
+  display: flex;
+  gap: var(--sp-24);
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+/* 能力中心 / 设置：.page-body 不再滚动。标题与侧栏钉在视口里，
+   每个标签面板自己滚 —— 切页时两层叠在同一视口里交叉淡入，
+   高度塌缩不会把整页弹回顶部。 */
+.page-body:has(.cap-layout),
+.page-body:has(.set-layout) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.page-body:has(.cap-layout) > .page-wide {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.page-body:has(.cap-layout) > .page-wide > :not(.cap-layout) {
+  flex-shrink: 0;
+}
+.page-body:has(.set-layout) > .page-wide {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.cap-side {
+  width: 200px;
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .cap-side button {
-  display: flex; align-items: center; gap: var(--sp-8);
-  width: 100%; text-align: left;
-  padding: 7px var(--sp-10); border-radius: var(--r-6);
-  font-size: var(--fs-12); color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  flex-shrink: 0;
+  text-align: left;
+  padding: 7px var(--sp-10);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  transition: background var(--dur-fast) var(--ease);
 }
 .cap-side button:hover { background: var(--surface-hover); }
-.cap-side button.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--fw-medium); }
-.cap-side button .cnt { margin-left: auto; font-size: 10px; color: var(--text-faint); }
-.cap-main { flex: 1; min-width: 0; }
+.cap-side button .cnt {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.cap-tab-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 0;
+  border-radius: var(--r-6);
+  background: var(--accent-soft);
+  overflow: hidden;
+  pointer-events: none;
+  transition: top var(--dur-slide) var(--ease-ios),
+              height var(--dur-slide) var(--ease-ios);
+}
+.cap-tab-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  transition: top var(--dur-slide) var(--ease-ios);
+}
+.cap-tab-mirror button {
+  color: var(--accent);
+  cursor: default;
+  background: transparent;
+}
+.cap-side .cap-tab-mirror button:hover { background: transparent; }
+.cap-tab-mirror .cnt { color: var(--text-faint); }
+
+.cap-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cap-pane-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  /* .cap-item hover 外发光约 18px；舞台加宽、面板用同等内边距把内容推回原位，
+     阴影落在 overflow 裁切盒内侧，左右不会被切平。 */
+  margin-inline: -20px;
+}
+
+/* 叠层交叉淡入：新旧面板同时在场，透明度做溶解，短距 translateX 只提示方向。
+   进入用 --ease-nav 长尾缓降；离开更短，后半段由新面板主导。
+   时长须与 TAB_PANE_MS 对齐。 */
+.tab-pane {
+  position: absolute;
+  inset: 0;
+  padding-inline: 20px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.tab-pane-enter-fwd,
+.tab-pane-enter-back {
+  z-index: 1;
+  backface-visibility: hidden;
+}
+.tab-pane-enter-fwd {
+  animation: tab-pane-enter-fwd 320ms var(--ease-nav) both;
+}
+.tab-pane-enter-back {
+  animation: tab-pane-enter-back 320ms var(--ease-nav) both;
+}
+.tab-pane-leave-fwd,
+.tab-pane-leave-back {
+  z-index: 0;
+  pointer-events: none;
+  backface-visibility: hidden;
+}
+.tab-pane-leave-fwd {
+  animation: tab-pane-leave-fwd 240ms var(--ease-nav) both;
+}
+.tab-pane-leave-back {
+  animation: tab-pane-leave-back 240ms var(--ease-nav) both;
+}
+@keyframes tab-pane-enter-fwd {
+  from { opacity: 0; transform: translate3d(16px, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes tab-pane-leave-fwd {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(-8px, 0, 0); }
+}
+@keyframes tab-pane-enter-back {
+  from { opacity: 0; transform: translate3d(-16px, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes tab-pane-leave-back {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(8px, 0, 0); }
+}
 
 /* Tab-level summary row — sits between tabs and the card list.
    Reads as one line of telemetry, not a dashboard. */
@@ -629,17 +825,6 @@
 }
 .cap-error svg { flex-shrink: 0; width: 13px; height: 13px; margin-top: 1px; }
 
-/* Action feedback banner (plugins.setEnabled writes) ------------ */
-.cap-flash {
-  display: flex; align-items: center; gap: var(--sp-8);
-  margin-bottom: var(--sp-14);
-  padding: var(--sp-8) var(--sp-12);
-  background: var(--surface-2);
-  border: 1px solid var(--border); border-radius: var(--r-6);
-  font-size: var(--fs-12); color: var(--text-2);
-}
-.cap-flash svg { flex-shrink: 0; width: 13px; height: 13px; color: var(--text-3); }
-
 /* Slash commands list (denser, no card shell) ------------------ */
 .cap-slash-list {
   display: flex; flex-direction: column;
@@ -672,7 +857,7 @@
 /* Responsive ---------------------------------------------------- */
 @media (max-width: 880px) {
   .cap-layout { flex-direction: column; gap: var(--sp-12); }
-  .cap-side { width: auto; position: static; }
+  .cap-side { width: auto; flex: none; max-height: none; }
 
   .cap-item-summary {
     grid-template-columns: auto minmax(0, 1fr);
@@ -698,8 +883,9 @@
 }
 
 /* ---------- 设置 ---------- */
-.set-layout { display: flex; gap: var(--sp-24); align-items: flex-start; }
-.set-group { margin-bottom: var(--sp-24); }
+.set-layout { display: flex; gap: var(--sp-24); align-items: stretch; }
+.set-group { margin-bottom: 0; }
+.set-group[hidden] { display: none; }
 .set-group > h3 {
   font-size: var(--fs-14); font-weight: var(--fw-semibold);
   margin-bottom: var(--sp-4);

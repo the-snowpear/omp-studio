@@ -24,6 +24,7 @@ import type {
   SubscriptionScope,
   ThreadId,
 } from "@omp-studio/client-contract";
+import { MODEL_CONFIG_THINKING_EFFORTS } from "@omp-studio/client-contract";
 
 /** Thrown when an IPC payload fails strict P1 boundary validation. */
 export class ValidationError extends Error {
@@ -383,22 +384,71 @@ function validateModelsProviderAuth(input: unknown, what: string): void {
   }
 }
 
+function validateThinkingEfforts(value: unknown, what: string): void {
+  if (!Array.isArray(value)) throw new ValidationError(`${what} must be an array`);
+  if (value.length > MODEL_CONFIG_THINKING_EFFORTS.length) {
+    throw new ValidationError(`${what} exceeds max length`);
+  }
+  for (const item of value) {
+    if (typeof item !== "string" || !(MODEL_CONFIG_THINKING_EFFORTS as readonly string[]).includes(item)) {
+      throw new ValidationError(`${what}: invalid effort`);
+    }
+  }
+}
+
+const MODEL_OVERRIDE_KEYS = [
+  "name",
+  "contextWindow",
+  "maxTokens",
+  "reasoning",
+  "image",
+  "tools",
+  "cost",
+  "omitMaxOutputTokens",
+  "premiumMultiplier",
+  "headers",
+  "contextPromotionTarget",
+  "compactionModel",
+  "remoteCompaction",
+  "thinking",
+] as const;
+
+const MODEL_PROVIDER_MODEL_KEYS = ["id", "api", "baseUrl", ...MODEL_OVERRIDE_KEYS] as const;
+
+function validateModelPatchFields(item: Record<string, unknown>, what: string): void {
+  if (item.name !== undefined) assertNonEmptyText(item.name, `${what}.name`);
+  if (item.contextWindow !== undefined && (typeof item.contextWindow !== "number" || !Number.isSafeInteger(item.contextWindow) || item.contextWindow <= 0)) {
+    throw new ValidationError(`${what}.contextWindow must be a positive integer`);
+  }
+  if (item.maxTokens !== undefined && (typeof item.maxTokens !== "number" || !Number.isSafeInteger(item.maxTokens) || item.maxTokens <= 0)) {
+    throw new ValidationError(`${what}.maxTokens must be a positive integer`);
+  }
+  if (item.reasoning !== undefined && typeof item.reasoning !== "boolean") throw new ValidationError(`${what}.reasoning must be boolean`);
+  if (item.image !== undefined && typeof item.image !== "boolean") throw new ValidationError(`${what}.image must be boolean`);
+  if (item.tools !== undefined && typeof item.tools !== "boolean") throw new ValidationError(`${what}.tools must be boolean`);
+  if (item.thinking !== undefined) validateThinkingEfforts(item.thinking, `${what}.thinking`);
+}
+
 function validateModelsProviderModels(input: unknown, what: string): void {
   if (!Array.isArray(input)) throw new ValidationError(`${what}: models must be an array`);
   if (input.length > MAX_LIST_ITEMS) throw new ValidationError(`${what}: models exceeds max length`);
   for (const item of input) {
     assertPlainObject(item, `${what}: model`);
-    assertNoUnknownKeys(item, ["id", "name", "contextWindow", "maxTokens", "reasoning", "image"], `${what}: model`);
+    assertNoUnknownKeys(item, MODEL_PROVIDER_MODEL_KEYS, `${what}: model`);
     assertNonEmptyText(item.id, `${what}: model.id`);
-    if (item.name !== undefined) assertNonEmptyText(item.name, `${what}: model.name`);
-    if (item.contextWindow !== undefined && (typeof item.contextWindow !== "number" || !Number.isSafeInteger(item.contextWindow) || item.contextWindow <= 0)) {
-      throw new ValidationError(`${what}: model.contextWindow must be a positive integer`);
-    }
-    if (item.maxTokens !== undefined && (typeof item.maxTokens !== "number" || !Number.isSafeInteger(item.maxTokens) || item.maxTokens <= 0)) {
-      throw new ValidationError(`${what}: model.maxTokens must be a positive integer`);
-    }
-    if (item.reasoning !== undefined && typeof item.reasoning !== "boolean") throw new ValidationError(`${what}: model.reasoning must be boolean`);
-    if (item.image !== undefined && typeof item.image !== "boolean") throw new ValidationError(`${what}: model.image must be boolean`);
+    if (item.api !== undefined) assertNonEmptyText(item.api, `${what}: model.api`);
+    if (item.baseUrl !== undefined) assertNonEmptyText(item.baseUrl, `${what}: model.baseUrl`);
+    validateModelPatchFields(item, `${what}: model`);
+  }
+}
+
+function validateModelsProviderOverrides(input: unknown, what: string): void {
+  assertPlainObject(input, what);
+  for (const [modelId, patch] of Object.entries(input)) {
+    assertNonEmptyText(modelId, `${what}: model id`);
+    assertPlainObject(patch, `${what}: ${modelId}`);
+    assertNoUnknownKeys(patch, MODEL_OVERRIDE_KEYS, `${what}: ${modelId}`);
+    validateModelPatchFields(patch, `${what}: ${modelId}`);
   }
 }
 
@@ -406,7 +456,7 @@ function validateModelsProviderUpsertInput(input: unknown): void {
   assertPlainObject(input, "models.provider.upsert input");
   assertNoUnknownKeys(
     input,
-    ["id", "name", "website", "note", "api", "endpointUrl", "local", "enabled", "auth", "discovery", "models", "expectedHash"],
+    ["id", "name", "website", "note", "api", "endpointUrl", "local", "enabled", "auth", "discovery", "models", "modelOverrides", "expectedHash", "headers", "disableStrictTools", "transport", "remoteCompaction"],
     "models.provider.upsert input",
   );
   assertNonEmptyText(input.id, "models.provider.upsert input: id");
@@ -414,7 +464,10 @@ function validateModelsProviderUpsertInput(input: unknown): void {
   assertNonEmptyText(input.api, "models.provider.upsert input: api");
   if (input.website !== undefined) assertNonEmptyText(input.website, "models.provider.upsert input: website");
   if (input.note !== undefined && typeof input.note !== "string") throw new ValidationError("models.provider.upsert input: note must be a string");
-  if (input.endpointUrl !== undefined) assertNonEmptyText(input.endpointUrl, "models.provider.upsert input: endpointUrl");
+  if (input.endpointUrl !== undefined) {
+    if (typeof input.endpointUrl !== "string") throw new ValidationError("models.provider.upsert input: endpointUrl must be a string");
+    if (input.endpointUrl.length > MAX_TEXT_LENGTH) throw new ValidationError("models.provider.upsert input: endpointUrl exceeds max length");
+  }
   if (input.local !== undefined && typeof input.local !== "boolean") throw new ValidationError("models.provider.upsert input: local must be boolean");
   if (input.enabled !== undefined && typeof input.enabled !== "boolean") throw new ValidationError("models.provider.upsert input: enabled must be boolean");
   if (input.expectedHash !== undefined) assertNonEmptyText(input.expectedHash, "models.provider.upsert input: expectedHash");
@@ -428,6 +481,9 @@ function validateModelsProviderUpsertInput(input: unknown): void {
     }
   }
   if (input.models !== undefined) validateModelsProviderModels(input.models, "models.provider.upsert input");
+  if (input.modelOverrides !== undefined && input.modelOverrides !== null) {
+    validateModelsProviderOverrides(input.modelOverrides, "models.provider.upsert input: modelOverrides");
+  }
 }
 
 function validateModelsProviderDeleteInput(input: unknown): void {
@@ -441,7 +497,95 @@ function validateModelsRolesSetInput(input: unknown): void {
   assertPlainObject(input, "models.roles.set input");
   assertNoUnknownKeys(input, ["roleId", "selector"], "models.roles.set input");
   assertNonEmptyText(input.roleId, "models.roles.set input: roleId");
-  assertNonEmptyText(input.selector, "models.roles.set input: selector");
+  if (typeof input.selector !== "string") throw new ValidationError("models.roles.set input: selector must be a string");
+  if (input.selector.length > MAX_TEXT_LENGTH) throw new ValidationError("models.roles.set input: selector exceeds max length");
+}
+
+function validateModelsProviderSetEnabledInput(input: unknown): void {
+  assertPlainObject(input, "models.provider.setEnabled input");
+  assertNoUnknownKeys(input, ["id", "enabled"], "models.provider.setEnabled input");
+  assertNonEmptyText(input.id, "models.provider.setEnabled input: id");
+  if (typeof input.enabled !== "boolean") throw new ValidationError("models.provider.setEnabled input: enabled must be boolean");
+}
+
+function validateModelsProviderProbeInput(input: unknown): void {
+  assertPlainObject(input, "models.provider.probe input");
+  assertNoUnknownKeys(input, ["providerId", "endpointUrl", "apiKey", "discoveryType", "timeoutMs"], "models.provider.probe input");
+  assertNonEmptyText(input.providerId, "models.provider.probe input: providerId");
+  if (input.endpointUrl !== undefined) {
+    if (typeof input.endpointUrl !== "string") throw new ValidationError("models.provider.probe input: endpointUrl must be a string");
+    if (input.endpointUrl.length > MAX_TEXT_LENGTH) throw new ValidationError("models.provider.probe input: endpointUrl exceeds max length");
+  }
+  if (input.apiKey !== undefined) assertNonEmptyText(input.apiKey, "models.provider.probe input: apiKey");
+  if (input.discoveryType !== undefined) assertNonEmptyText(input.discoveryType, "models.provider.probe input: discoveryType");
+  if (input.timeoutMs !== undefined && (typeof input.timeoutMs !== "number" || !Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0)) {
+    throw new ValidationError("models.provider.probe input: timeoutMs must be a positive integer");
+  }
+}
+
+function validateModelsRolesWriteInput(input: unknown): void {
+  assertPlainObject(input, "models.roles.write input");
+  assertNoUnknownKeys(input, ["roles"], "models.roles.write input");
+  assertPlainObject(input.roles, "models.roles.write input: roles");
+  for (const [roleId, selector] of Object.entries(input.roles)) {
+    assertNonEmptyText(roleId, "models.roles.write input: role id");
+    if (typeof selector !== "string") throw new ValidationError("models.roles.write input: selector must be a string");
+    if (selector.length > MAX_TEXT_LENGTH) throw new ValidationError("models.roles.write input: selector exceeds max length");
+  }
+}
+
+function validateModelsRolesCreateInput(input: unknown): void {
+  assertPlainObject(input, "models.roles.create input");
+  assertNoUnknownKeys(input, ["id", "name", "desc", "color", "selector"], "models.roles.create input");
+  assertNonEmptyText(input.id, "models.roles.create input: id");
+  assertNonEmptyText(input.name, "models.roles.create input: name");
+  if (input.desc !== undefined && typeof input.desc !== "string") throw new ValidationError("models.roles.create input: desc must be a string");
+  if (input.color !== undefined) assertNonEmptyText(input.color, "models.roles.create input: color");
+  if (input.selector !== undefined) {
+    if (typeof input.selector !== "string") throw new ValidationError("models.roles.create input: selector must be a string");
+    if (input.selector.length > MAX_TEXT_LENGTH) throw new ValidationError("models.roles.create input: selector exceeds max length");
+  }
+}
+
+function validateModelsRolesDeleteInput(input: unknown): void {
+  assertPlainObject(input, "models.roles.delete input");
+  assertNoUnknownKeys(input, ["roleId"], "models.roles.delete input");
+  assertNonEmptyText(input.roleId, "models.roles.delete input: roleId");
+}
+
+function validateModelsRoleStorageSetInput(input: unknown): void {
+  assertPlainObject(input, "models.roleStorage.set input");
+  assertNoUnknownKeys(input, ["storage"], "models.roleStorage.set input");
+  if (input.storage !== "global" && input.storage !== "project") {
+    throw new ValidationError("models.roleStorage.set input: storage must be \"global\" or \"project\"");
+  }
+}
+
+function validateModelsFallbackSetInput(input: unknown): void {
+  assertPlainObject(input, "models.fallback.set input");
+  assertNoUnknownKeys(input, ["chains", "revertPolicy"], "models.fallback.set input");
+  assertPlainObject(input.chains, "models.fallback.set input: chains");
+  for (const [key, chain] of Object.entries(input.chains)) {
+    assertNonEmptyText(key, "models.fallback.set input: chain key");
+    validateStringList(chain, `models.fallback.set input: chains.${key}`, true);
+  }
+  if (input.revertPolicy !== undefined && input.revertPolicy !== "cooldown-expiry" && input.revertPolicy !== "never") {
+    throw new ValidationError("models.fallback.set input: revertPolicy must be \"cooldown-expiry\" or \"never\"");
+  }
+}
+
+function validateModelsProviderOrderSetInput(input: unknown): void {
+  assertPlainObject(input, "models.providerOrder.set input");
+  assertNoUnknownKeys(input, ["order"], "models.providerOrder.set input");
+  if (!Array.isArray(input.order) || input.order.some((item) => typeof item !== "string" || item.length === 0)) {
+    throw new ValidationError("models.providerOrder.set input: order must be an array of non-empty strings");
+  }
+}
+
+function validateModelsLoginLogoutInput(input: unknown): void {
+  assertPlainObject(input, "models.login.logout input");
+  assertNoUnknownKeys(input, ["providerId"], "models.login.logout input");
+  assertNonEmptyText(input.providerId, "models.login.logout input: providerId");
 }
 
 function validateModelsProviderTestInput(input: unknown): void {
@@ -451,6 +595,14 @@ function validateModelsProviderTestInput(input: unknown): void {
   if (input.api !== undefined) assertNonEmptyText(input.api, "models.provider.test input: api");
   if (input.endpointUrl !== undefined) assertNonEmptyText(input.endpointUrl, "models.provider.test input: endpointUrl");
   if (input.apiKey !== undefined) assertNonEmptyText(input.apiKey, "models.provider.test input: apiKey");
+}
+
+function validateModelsYmlWriteInput(input: unknown): void {
+  assertPlainObject(input, "models.yml.write input");
+  assertNoUnknownKeys(input, ["text", "expectedHash", "overlay"], "models.yml.write input");
+  assertNonEmptyText(input.text, "models.yml.write input: text");
+  if (input.expectedHash !== undefined) assertNonEmptyText(input.expectedHash, "models.yml.write input: expectedHash");
+  if (input.overlay !== undefined) validateModelsProviderUpsertInput(input.overlay);
 }
 
 function validateModelsCycleOrderSetInput(input: unknown): void {
@@ -487,6 +639,147 @@ function validateSkillsSetEnabledInput(input: unknown): void {
   validateEnabledToggleInput(input, "skills.setEnabled input");
 }
 
+function validateMcpSetEnabledInput(input: unknown): void {
+  validateEnabledToggleInput(input, "mcp.setEnabled input");
+}
+
+const AGENT_THINKING_LEVELS = new Set([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "auto",
+]);
+
+function validateStringList(value: unknown, what: string, allowEmpty: boolean): asserts value is string[] {
+  if (!Array.isArray(value)) throw new ValidationError(`${what} must be an array of strings`);
+  if (value.length > MAX_LIST_ITEMS) throw new ValidationError(`${what} exceeds max length`);
+  if (!allowEmpty && value.length === 0) throw new ValidationError(`${what} must not be empty`);
+  for (const item of value) {
+    if (typeof item !== "string" || item.trim().length === 0) {
+      throw new ValidationError(`${what} must be an array of non-empty strings`);
+    }
+    if (item.length > MAX_TEXT_LENGTH) throw new ValidationError(`${what} item exceeds max length`);
+  }
+}
+
+function validateOptionalJsonValue(value: unknown, what: string): void {
+  if (value === undefined || value === null) return;
+  try {
+    validateJsonNode(value, 0, { remaining: MAX_SERIALIZED_SIZE });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      throw new ValidationError(`${what}: invalid JSON value`);
+    }
+    throw error;
+  }
+}
+
+function validateNullableBoolean(value: unknown, what: string): void {
+  if (value !== null && typeof value !== "boolean") {
+    throw new ValidationError(`${what} must be boolean or null`);
+  }
+}
+
+function validateAgentDefinitionUpsertInput(input: unknown): void {
+  assertPlainObject(input, "agents.definition.upsert input");
+  assertNoUnknownKeys(
+    input,
+    [
+      "name",
+      "description",
+      "systemPrompt",
+      "scope",
+      "tools",
+      "spawns",
+      "model",
+      "thinkingLevel",
+      "output",
+      "blocking",
+      "autoloadSkills",
+      "readSummarize",
+      "prewalk",
+      "expectedHash",
+    ],
+    "agents.definition.upsert input",
+  );
+  assertNonEmptyText(input.name, "agents.definition.upsert input: name");
+  assertNonEmptyText(input.description, "agents.definition.upsert input: description");
+  if (typeof input.systemPrompt !== "string") {
+    throw new ValidationError("agents.definition.upsert input: systemPrompt must be a string");
+  }
+  if (input.systemPrompt.length > MAX_TEXT_LENGTH) {
+    throw new ValidationError("agents.definition.upsert input: systemPrompt exceeds max length");
+  }
+  if (input.scope !== "user" && input.scope !== "project") {
+    throw new ValidationError("agents.definition.upsert input: scope must be \"user\" or \"project\"");
+  }
+  if (input.tools !== undefined && input.tools !== null) {
+    validateStringList(input.tools, "agents.definition.upsert input: tools", true);
+  }
+  if (input.spawns !== undefined && input.spawns !== null && input.spawns !== "*") {
+    validateStringList(input.spawns, "agents.definition.upsert input: spawns", true);
+  }
+  if (input.model !== undefined && input.model !== null) {
+    validateStringList(input.model, "agents.definition.upsert input: model", true);
+  }
+  if (input.thinkingLevel !== undefined && input.thinkingLevel !== null) {
+    if (typeof input.thinkingLevel !== "string" || !AGENT_THINKING_LEVELS.has(input.thinkingLevel)) {
+      throw new ValidationError("agents.definition.upsert input: thinkingLevel is invalid");
+    }
+  }
+  if (input.output !== undefined) validateOptionalJsonValue(input.output, "agents.definition.upsert input: output");
+  if (input.blocking !== undefined) validateNullableBoolean(input.blocking, "agents.definition.upsert input: blocking");
+  if (input.autoloadSkills !== undefined && input.autoloadSkills !== null) {
+    validateStringList(input.autoloadSkills, "agents.definition.upsert input: autoloadSkills", true);
+  }
+  if (input.readSummarize !== undefined) {
+    validateNullableBoolean(input.readSummarize, "agents.definition.upsert input: readSummarize");
+  }
+  if (input.prewalk !== undefined && input.prewalk !== null && typeof input.prewalk !== "boolean") {
+    if (typeof input.prewalk !== "string" || input.prewalk.trim().length === 0) {
+      throw new ValidationError("agents.definition.upsert input: prewalk must be boolean, string, or null");
+    }
+  }
+  if (input.expectedHash !== undefined) assertNonEmptyText(input.expectedHash, "agents.definition.upsert input: expectedHash");
+}
+
+function validateAgentDefinitionDeleteInput(input: unknown): void {
+  assertPlainObject(input, "agents.definition.delete input");
+  assertNoUnknownKeys(input, ["name", "scope", "expectedHash"], "agents.definition.delete input");
+  assertNonEmptyText(input.name, "agents.definition.delete input: name");
+  if (input.scope !== "user" && input.scope !== "project") {
+    throw new ValidationError("agents.definition.delete input: scope must be \"user\" or \"project\"");
+  }
+  if (input.expectedHash !== undefined) assertNonEmptyText(input.expectedHash, "agents.definition.delete input: expectedHash");
+}
+
+function validateAgentDefinitionConfigureInput(input: unknown): void {
+  assertPlainObject(input, "agents.definition.configure input");
+  assertNoUnknownKeys(
+    input,
+    ["name", "disabled", "overrideModel", "prewalkOverride"],
+    "agents.definition.configure input",
+  );
+  assertNonEmptyText(input.name, "agents.definition.configure input: name");
+  if (input.disabled !== undefined && typeof input.disabled !== "boolean") {
+    throw new ValidationError("agents.definition.configure input: disabled must be boolean");
+  }
+  if (input.overrideModel !== undefined && input.overrideModel !== null) {
+    if (typeof input.overrideModel !== "string" || input.overrideModel.trim().length === 0) {
+      throw new ValidationError("agents.definition.configure input: overrideModel must be a non-empty string or null");
+    }
+  }
+  if (input.prewalkOverride !== undefined && input.prewalkOverride !== null) {
+    if (typeof input.prewalkOverride !== "string" || input.prewalkOverride.trim().length === 0) {
+      throw new ValidationError("agents.definition.configure input: prewalkOverride must be a non-empty string or null");
+    }
+  }
+}
+
 /**
  * Per-name query input validators keyed by the full contract QueryName map:
  * a mapped type over `QueryName`, so a name added to client-contract fails
@@ -505,7 +798,10 @@ const QUERY_INPUT_VALIDATORS: {
   "home.get": (input) => validateEmptyInput(input, "home.get input"),
   "models.get": (input) => validateEmptyInput(input, "models.get input"),
   "skills.get": (input) => validateEmptyInput(input, "skills.get input"),
+  "mcp.get": (input) => validateEmptyInput(input, "mcp.get input"),
+  "agents.definitions.get": (input) => validateEmptyInput(input, "agents.definitions.get input"),
   "projects.list": (input) => validateEmptyInput(input, "projects.list input"),
+  "usage.get": (input) => validateEmptyInput(input, "usage.get input"),
 };
 
 /** Per-name command input validators, keyed by the full CommandName map. */
@@ -547,18 +843,34 @@ const COMMAND_INPUT_VALIDATORS: {
   "interaction.respond": validateInteractionRespondInput,
   "models.provider.upsert": validateModelsProviderUpsertInput,
   "models.provider.delete": validateModelsProviderDeleteInput,
+  "models.provider.setEnabled": validateModelsProviderSetEnabledInput,
   "models.roles.set": validateModelsRolesSetInput,
+  "models.roles.write": validateModelsRolesWriteInput,
+  "models.roles.create": validateModelsRolesCreateInput,
+  "models.roles.delete": validateModelsRolesDeleteInput,
+  "models.roleStorage.set": validateModelsRoleStorageSetInput,
+  "models.fallback.set": validateModelsFallbackSetInput,
+  "models.providerOrder.set": validateModelsProviderOrderSetInput,
+  "models.yml.write": validateModelsYmlWriteInput,
   "models.login.start": validateModelsLoginStartInput,
+  "models.login.logout": validateModelsLoginLogoutInput,
   "models.provider.test": validateModelsProviderTestInput,
+  "models.provider.probe": validateModelsProviderProbeInput,
+  "models.discovery.refresh": (input) => validateEmptyCommandInput(input, "models.discovery.refresh input"),
   "models.cycleOrder.set": validateModelsCycleOrderSetInput,
   "plugins.setEnabled": validatePluginsSetEnabledInput,
   "skills.setEnabled": validateSkillsSetEnabledInput,
+  "mcp.setEnabled": validateMcpSetEnabledInput,
+  "agents.definition.upsert": validateAgentDefinitionUpsertInput,
+  "agents.definition.delete": validateAgentDefinitionDeleteInput,
+  "agents.definition.configure": validateAgentDefinitionConfigureInput,
   "workspace.open": (input) => {
     assertPlainObject(input, "workspace.open input");
     assertNoUnknownKeys(input, ["workspaceId"], "workspace.open input");
     assertOpaqueToken(input.workspaceId, "workspace.open input: workspaceId");
   },
   "workspace.pick": (input) => validateEmptyCommandInput(input, "workspace.pick input"),
+  "usage.openDashboard": (input) => validateEmptyCommandInput(input, "usage.openDashboard input"),
 };
 
 /** Every valid query name, derived from the client-contract map. */

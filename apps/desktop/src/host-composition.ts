@@ -41,8 +41,10 @@ import type { ClientTransport, PublicAuthorityIdentity, ArchId, PlatformId, Auth
 import {
   createDefaultHostDiagnosticsFactory,
   StudioHostClientFacade,
+  type HostAgentDefinitionsService,
   type HostDiagnosticsFactory,
   type HostExtensibilityService,
+  type HostMcpService,
   type HostManifestProvider,
   type HostModelsService,
   type HostRuntimeAccess,
@@ -50,11 +52,15 @@ import {
   type HostRuntimeInstallService,
   type HostSemanticCommandService,
   type HostSessionCatalogProvider,
+  type HostUsageService,
   type HostWorkspaceService,
   type StudioHostClientFacadeOptions,
 } from "@omp-studio/host-client-api";
+import { createOmpAgentDefinitionsService } from "@omp-studio/host-client-api/agent-definitions";
 import { createOmpExtensibilityService } from "@omp-studio/host-client-api/extensibility";
+import { createOmpMcpService } from "@omp-studio/host-client-api/mcp";
 import { createOmpModelsService } from "@omp-studio/host-client-api/models";
+import { createOmpUsageService } from "@omp-studio/host-client-api/usage";
 import type { PlatformPort, PrivateEndpoint } from "@omp-studio/platform";
 import {
   HostBackend,
@@ -144,7 +150,11 @@ export interface DesktopFacadeSeams {
   readonly commands?: HostSemanticCommandService;
   readonly models?: HostModelsService;
   readonly extensibility?: HostExtensibilityService;
+  readonly mcp?: HostMcpService;
+  readonly agentDefinitions?: HostAgentDefinitionsService;
+  readonly getWorkspaceCwd?: () => string | undefined;
   readonly workspaces?: HostWorkspaceService;
+  readonly usage?: HostUsageService;
   readonly openUrl?: (url: string) => Promise<void>;
 }
 
@@ -200,6 +210,8 @@ interface FacadeContext {
   readonly sessionRef: { current: DesktopRuntimeSession | undefined };
   /** Forwarder for the current bundle's publications (facade onPublication). */
   readonly publications: SessionPublicationForwarder;
+  /** Active workspace cwd for project-scoped disk adapters. */
+  readonly workspaceCwd: { current: string | undefined };
 }
 
 /** Fan-out for the current Runtime bundle's publication stream. */
@@ -249,9 +261,25 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
         throw new Error("no runtime install service is wired; runtime.install is not available");
       }),
     ...(seams.commands !== undefined ? { commands: seams.commands } : { commands: runtimeCommandService }),
-    models: seams.models ?? createOmpModelsService(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
+    models:
+      seams.models ??
+      createOmpModelsService({
+        ...(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
+        getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
+      }),
     extensibility: seams.extensibility ?? createOmpExtensibilityService(),
+    mcp:
+      seams.mcp ??
+      createOmpMcpService({
+        getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
+      }),
+    agentDefinitions:
+      seams.agentDefinitions ??
+      createOmpAgentDefinitionsService({
+        getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
+      }),
     ...(seams.workspaces === undefined ? {} : { workspaces: seams.workspaces }),
+    usage: seams.usage ?? createOmpUsageService(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
     // The runtime access reads the live holder, so a workspace rebind
     // re-points hello / snapshot / onPublication without replacing the
     // facade object the renderer transport is bound to.
@@ -394,6 +422,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     if (this.#closed || this.#shutdownStarted) {
       throw new Error("desktop host composition is closed");
     }
+    this.#facadeContext.workspaceCwd.current = workspace.cwd;
     const port = this.#runtimeSession;
     if (port?.rebind === undefined) {
       return;
@@ -495,6 +524,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         seams,
         sessionRef,
         publications,
+        workspaceCwd: { current: seams.getWorkspaceCwd?.() },
       };
       return new DesktopHostCompositionImpl({
         facade: buildFacade(facadeContext),

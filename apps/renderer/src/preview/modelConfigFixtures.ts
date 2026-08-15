@@ -47,8 +47,11 @@ export const MODEL_PRESETS: ReadonlyArray<ModelPresetGroup> = [
       { id: "openai", name: "OpenAI", desc: "GPT 系列模型官方 API", api: "openai-responses", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.openai.com/v1" },
       { id: "openai-codex", name: "OpenAI Codex", desc: "Codex 订阅额度（ChatGPT 账号）", api: "openai-codex-responses", auth: ["oauth"], oauth: true, endpoint: "https://api.openai.com/v1" },
       { id: "google-gemini", name: "Google Gemini", desc: "Gemini 系列模型官方 API", api: "google-generative-ai", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://generativelanguage.googleapis.com/v1beta" },
+      { id: "gemini-cli", name: "Google Gemini CLI", desc: "Gemini Code Assist 订阅", api: "google-gemini-cli", auth: ["oauth"], oauth: true },
       { id: "xai", name: "xAI", desc: "Grok 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.x.ai/v1" },
+      { id: "groq", name: "Groq", desc: "高速推理（Llama / Mixtral）", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.groq.com/openai/v1" },
       { id: "deepseek", name: "DeepSeek", desc: "DeepSeek V / R 系列", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.deepseek.com/v1" },
+      { id: "moonshot", name: "Moonshot / Kimi", desc: "Kimi K 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.moonshot.cn/v1" },
     ],
   },
   {
@@ -64,6 +67,16 @@ export const MODEL_PRESETS: ReadonlyArray<ModelPresetGroup> = [
     items: [
       { id: "ollama", name: "Ollama", desc: "本地模型服务，自动发现已拉取模型", api: "openai-completions", auth: ["none"], local: true, popular: true, endpoint: "http://localhost:11434/v1", discovery: "ollama" },
       { id: "lm-studio", name: "LM Studio", desc: "本地 OpenAI 兼容服务", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:1234/v1", discovery: "lm-studio" },
+      { id: "llama.cpp", name: "llama.cpp", desc: "llama-server OpenAI 兼容接口", api: "openai-completions", auth: ["none"], local: true, endpoint: "http://localhost:8080/v1", discovery: "llama.cpp" },
+    ],
+  },
+  {
+    group: "更多 Provider",
+    items: [
+      { id: "qwen", name: "Qwen", desc: "通义千问官方 API", api: "openai-completions", auth: ["api-key"], endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+      { id: "zhipu", name: "Zhipu / 智谱", desc: "GLM 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://open.bigmodel.cn/api/paas/v4" },
+      { id: "fireworks", name: "Fireworks", desc: "Fireworks AI 托管推理", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.fireworks.ai/inference/v1" },
+      { id: "siliconflow", name: "SiliconFlow", desc: "硅基流动模型云", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.siliconflow.cn/v1" },
     ],
   },
 ];
@@ -121,7 +134,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
       id: "openai", name: "OpenAI", source: "builtin", status: "available",
       statusDetail: "API Key 已保存", api: "openai-responses",
       endpointUrl: "https://api.openai.com/v1", local: false, enabled: true,
-      website: "https://platform.openai.com", auth: { type: "api-key", hasSecret: true },
+      website: "https://platform.openai.com", auth: { type: "api-key", hasSecret: true, apiKey: "sk-demo-openai-9f2c7e1a" },
       models: [
         m("gpt-5.2", "GPT-5.2", 400000, 128000, { img: true, reason: true, cIn: 1.75, cOut: 14 }),
         m("gpt-5.2-codex", "GPT-5.2 Codex", 400000, 128000, { img: true, reason: true, cIn: 1.75, cOut: 14 }),
@@ -147,7 +160,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
       id: "zhipu", name: "Zhipu / 智谱", source: "builtin", status: "disabled",
       statusDetail: "已禁用", api: "openai-completions",
       endpointUrl: "https://open.bigmodel.cn/api/paas/v4", local: false, enabled: false,
-      auth: { type: "api-key", hasSecret: true },
+      auth: { type: "api-key", hasSecret: true, apiKey: "sk-demo-zhipu-3b8d5f2c" },
       models: [m("glm-4.6", "GLM 4.6", 200000, 8192, { reason: true, status: "disabled" })],
     }),
   ];
@@ -159,20 +172,36 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     { id: "vision", alias: "@vision", name: "Vision", desc: "视觉与图片任务", builtin: true, primary: "anthropic/claude-sonnet-4.5", scope: "global" },
     { id: "plan", alias: "@plan", name: "Architect", desc: "规划和架构任务", builtin: true, primary: "anthropic/claude-opus-4.8", thinking: "high", scope: "global" },
     { id: "designer", alias: "@designer", name: "Designer", desc: "设计相关任务", builtin: true, primary: "openrouter/auto", thinking: "medium", scope: "global", issue: { kind: "model-unavailable", detail: "模型不可用" } },
-    { id: "commit", alias: "@commit", name: "Commit", desc: "Commit 相关任务", builtin: true, primary: "anthropic/claude-haiku-4.5", thinking: "low", scope: "global" },
+    { id: "commit", alias: "@commit", name: "Commit", desc: "Commit 相关任务", builtin: true, primary: "anthropic/claude-haiku-4.5", scope: "global" },
     { id: "tiny", alias: "@tiny", name: "Tiny", desc: "标题、记忆等极轻量后台任务", builtin: true, primary: "lm-studio/qwen", thinking: "off", scope: "global", issue: { kind: "provider-down", detail: "本地服务未运行" } },
     { id: "task", alias: "@task", name: "Subtask", desc: "通用子任务", builtin: true, primary: "openai/gpt-5-mini", scope: "global" },
     { id: "advisor", alias: "@advisor", name: "Advisor", desc: "第二模型审查", builtin: true, primary: "openai/gpt-5.2", thinking: "medium", scope: "global" },
+    { id: "review", alias: "@review", name: "Review", desc: "自定义审查角色", builtin: false, primary: "anthropic/claude-sonnet-4.5", scope: "project" },
   ];
 
   const availableModels = providers.flatMap((item) =>
-    item.models.filter((model) => model.status === "available").map((model) => ({
-      provider: item.id,
-      id: model.id,
-      selector: model.selector,
-      name: model.name,
-      reasoning: model.reasoning,
-    })),
+    item.models.filter((model) => model.status === "available").map((model) => {
+      const thinking = !model.reasoning
+        ? undefined
+        : model.id.startsWith("gpt-5.2")
+          ? ["low", "medium", "high", "xhigh"]
+          : model.id.includes("opus") || model.id.includes("sonnet")
+            ? ["low", "medium", "high", "max"]
+            : ["minimal", "low", "medium", "high"];
+      return {
+        provider: item.id,
+        id: model.id,
+        selector: model.selector,
+        name: model.name,
+        reasoning: model.reasoning,
+        image: model.image,
+        tools: model.tools,
+        ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+        ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
+        ...(model.cost ? { cost: model.cost } : {}),
+        ...(thinking ? { thinking } : {}),
+      };
+    }),
   );
 
   return {
@@ -184,11 +213,19 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     loginProviders: [
       { id: "anthropic", name: "Anthropic", available: true, authenticated: true },
       { id: "openai", name: "OpenAI", available: true, authenticated: false },
+      { id: "google-gemini", name: "Google Gemini", available: true, authenticated: true },
     ],
     generatedModelsYml: "providers:\n  anthropic:\n    api: anthropic-messages\n",
     generatedConfigYml: "modelRoles:\n  default: anthropic/claude-sonnet-4.5\n",
     runtimeEffectHint: "演示数据不会写入本机 OMP 配置。",
-    loginAvailable: false,
+    loginAvailable: true,
     ompAvailable: true,
+    modelRoleStorage: "project",
+    projectScopeAvailable: true,
+    modelProviderOrder: ["anthropic", "openai", "openrouter"],
+    fallbackChains: {
+      "anthropic/claude-sonnet-4.5": ["openai/gpt-5.2", "openai/gpt-5-mini"],
+    },
+    fallbackRevertPolicy: "cooldown-expiry",
   };
 }

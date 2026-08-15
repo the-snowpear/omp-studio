@@ -130,8 +130,9 @@ export async function main(): Promise<void> {
     window.webContents?.on?.("did-fail-load", (_event: unknown, errorCode: number, errorDescription: string, validatedURL: string) => {
       console.error(`[omp-studio] renderer failed to load (${errorCode}): ${errorDescription} ${validatedURL}`);
     });
-    window.webContents?.on?.("console-message", (_event: unknown, level: number, message: string, line: number, sourceId: string) => {
-      if (level >= 2) console.error(`[omp-studio] renderer console ${sourceId}:${line}: ${message}`);
+    window.webContents?.on?.("console-message", (event) => {
+      if (event.level !== "warning" && event.level !== "error") return;
+      console.error(`[omp-studio] renderer console ${event.sourceId}:${event.lineNumber}: ${event.message}`);
     });
     loadRendererTarget(window, target);
     return {

@@ -52,13 +52,49 @@ export const ICON_BY_NAME: Record<string, string> = {
   "browser-lab": "globe",
 };
 
+export type SkillTone = "purple" | "blue" | "green" | "amber" | "teal" | "cyan" | "rose" | "gray" | "red";
+
+const SKILL_TONES: readonly Exclude<SkillTone, "red" | "gray">[] = [
+  "purple",
+  "blue",
+  "green",
+  "amber",
+  "teal",
+  "cyan",
+  "rose",
+];
+
+/** Named preview fixtures keep a stable hue; unknown names hash into the palette. */
+export const COLOR_BY_NAME: Partial<Record<string, Exclude<SkillTone, "red">>> = {
+  "upstream-sync": "green",
+  "code-review-graph": "purple",
+  "mermaid-verify": "blue",
+  "commit-msg": "amber",
+  "oss-audit": "rose",
+  "omp-preview-tools": "teal",
+  "git-worktree-plus": "cyan",
+  "browser-lab": "amber",
+};
+
+function hashTone(name: string): (typeof SKILL_TONES)[number] {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 33 + name.charCodeAt(i)) | 0;
+  return SKILL_TONES[Math.abs(hash) % SKILL_TONES.length] ?? "purple";
+}
+
+/** Card accent. Errors stay red; everything else is per-name, not per-scope. */
+export function itemTone(item: DrawerItem): SkillTone {
+  if (isDrawerItemError(item)) return "red";
+  return COLOR_BY_NAME[item.name] ?? hashTone(item.name);
+}
+
 export function createPreviewDrawerItems(): DrawerItem[] {
   return [
     {
       kind: "skill",
       name: "upstream-sync",
       desc: "跟踪上游仓库同步的标准流程（graft、合并、验证）",
-      src: "项目",
+      src: "OMP",
       scope: "workspace",
       path: ".omp/skills/upstream-sync/SKILL.md",
       enabled: true,
@@ -69,7 +105,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       kind: "skill",
       name: "code-review-graph",
       desc: "生成代码审查依赖图",
-      src: "用户",
+      src: "OMP",
       scope: "global",
       path: "~/.omp/skills/code-review-graph/SKILL.md",
       enabled: true,
@@ -80,7 +116,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       kind: "skill",
       name: "mermaid-verify",
       desc: "Mermaid 图表渲染回归验证",
-      src: "项目",
+      src: "OMP",
       scope: "workspace",
       path: ".omp/skills/mermaid-verify/SKILL.md",
       enabled: true,
@@ -91,7 +127,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       kind: "skill",
       name: "commit-msg",
       desc: "生成符合 Conventional Commits 的提交信息",
-      src: "用户",
+      src: "OMP",
       scope: "global",
       path: "~/.omp/skills/commit-msg/SKILL.md",
       enabled: false,
@@ -102,7 +138,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       kind: "skill",
       name: "oss-audit",
       desc: "开源仓库发布前合规检查",
-      src: "内置",
+      src: "托管",
       scope: "builtin",
       path: "omp:builtin/oss-audit",
       enabled: true,
@@ -183,4 +219,24 @@ export function matchesDrawerQuery(item: DrawerItem, query: string): boolean {
   if (!q) return true;
   const desc = item.kind === "skill" ? item.desc : item.err ?? "";
   return `${item.name} ${desc} ${item.src}`.toLowerCase().includes(q);
+}
+
+/**
+ * List identity for React keys and filter animation.
+ * `name` alone is not unique: a skill and a plugin (or two plugins) can share one.
+ */
+export function drawerItemKey(item: DrawerItem): string {
+  if (item.kind === "plugin") return `plugin:${item.src}:${item.name}`;
+  return `skill:${item.scope}:${item.src}:${item.name}`;
+}
+
+/** Disambiguate duplicate `drawerItemKey` values among siblings (`base`, `base#1`, …). */
+export function withUniqueDrawerKeys<T extends DrawerItem>(items: readonly T[]): Array<{ item: T; key: string }> {
+  const seen = new Map<string, number>();
+  return items.map((item) => {
+    const base = drawerItemKey(item);
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return { item, key: n === 0 ? base : `${base}#${n}` };
+  });
 }
