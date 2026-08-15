@@ -1,5 +1,9 @@
 import type { StudioOperation } from "./commands";
-import type { RemoteInteractionRequiredEvent } from "./interactions";
+import type { ConversationRuntimeEvent } from "./conversation";
+import type {
+  RemoteInteractionRequiredEvent,
+  StudioInteractionResolvedEvent,
+} from "./interactions";
 import type {
   CommandId,
   EventSeq,
@@ -60,6 +64,7 @@ export type StudioErrorCode =
   | "PROTOCOL_UNSUPPORTED"
   | "RUNTIME_EPOCH_STALE"
   | "STATE_VERSION_CONFLICT"
+  | "CURSOR_STALE"
   | "CAPABILITY_UNAVAILABLE"
   | "COMMAND_UNKNOWN"
   | "COMMAND_BLOCKED"
@@ -94,6 +99,11 @@ export interface StudioReceipt<TResult = unknown> {
   error?: StudioProtocolError;
 }
 
+/**
+ * Envelope time source freeze: `occurredAt` is the only event-emission
+ * timestamp. Inner conversation events must not repeat `occurredAt`,
+ * `runtimeEpoch`, `eventSeq`, or `stateVersion`.
+ */
 export interface StudioEventEnvelope<TEvent = unknown> {
   type: "studio.event";
   runtimeEpoch: RuntimeEpoch;
@@ -110,9 +120,23 @@ export interface StudioSnapshotResponse {
   commandManifestHash: string;
   capabilityHash: string;
   lastEventSeq: EventSeq;
+  /**
+   * Head-cursor hint for the active-branch transcript at snapshot time.
+   * It does not carry message bodies and is not a page cursor. Host may use
+   * it only to decide whether `session.transcript.read` is needed. After
+   * branch switch, session resume, or reset the Runtime must mint a cursor
+   * bound to the new session/branch/epoch. Tamper → `INVALID_ARGUMENT`;
+   * wrong session/branch/epoch → `CURSOR_STALE`.
+   */
   messagesCursor?: OpaqueCursor;
   terminalReceipts: StudioReceipt[];
 }
+
+export type StudioBridgeEvent =
+  | RuntimeLifecycleEvent
+  | ConversationRuntimeEvent
+  | { kind: "state.changed"; snapshot: OperatorStateSnapshot }
+  | { kind: "btw.changed"; snapshot: unknown };
 
 export type RuntimeLifecycleEvent =
   | { kind: "runtime.ready" }
@@ -125,7 +149,8 @@ export type RuntimeLifecycleEvent =
   | { kind: "command.failed"; commandId: CommandId; error: StudioProtocolError }
   | { kind: "progress"; commandId: CommandId; stage: string; percent?: number }
   | { kind: "notify"; severity: "info" | "warning" | "error"; title: string; message?: string }
-  | RemoteInteractionRequiredEvent;
+  | RemoteInteractionRequiredEvent
+  | StudioInteractionResolvedEvent;
 
 export interface FrameHeader {
   protocol: typeof STUDIO_PROTOCOL_NAME;

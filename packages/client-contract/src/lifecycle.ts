@@ -12,7 +12,7 @@
  * resync (FRONTEND_INTEGRATION.md §8.3).
  */
 
-import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+import type { ConversationRuntimeEvent, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 import type {
   AuthorityEpoch,
@@ -21,6 +21,7 @@ import type {
   IdempotencyKey,
   InteractionId,
   RuntimeEpoch,
+  SessionId,
   StateVersion,
   ThreadId,
 } from "./ids.js";
@@ -61,22 +62,32 @@ export interface CommandHandle<TName extends CommandName = CommandName>
   readonly issuedAt: string;
 }
 
-export interface InteractionBase {
+/**
+ * Shared identity fields of every interaction prompt. `requestId` is
+ * optional: only commands such as `core.prompt` / `session.drop` correlate
+ * an interaction with a client command; Ask / tool-approval interactions
+ * are session-level and stand on their own.
+ */
+export interface ClientInteractionBase {
   readonly interactionId: InteractionId;
-  readonly requestId: CommandRequestId;
+  readonly sessionId: SessionId;
+  readonly leaseGeneration: number;
+  readonly title: string;
+  readonly requestId?: CommandRequestId;
 }
 
 /**
- * Interaction prompt issued by the Host for `interaction_required`
- * commands; answered via the `interaction.respond` command.
+ * Interaction prompt issued by the Host. `interaction.required` always
+ * enters `state.interaction.pending`; with a `requestId` the reducer also
+ * correlates the original command when it is still accepted.
  */
 export type ClientInteraction =
-  | (InteractionBase & {
+  | (ClientInteractionBase & {
       readonly kind: "confirm";
       readonly message: string;
       readonly destructive: boolean;
     })
-  | (InteractionBase & {
+  | (ClientInteractionBase & {
       readonly kind: "select";
       readonly options: ReadonlyArray<{
         readonly id: string;
@@ -85,17 +96,17 @@ export type ClientInteraction =
       }>;
       readonly multiple: boolean;
     })
-  | (InteractionBase & {
+  | (ClientInteractionBase & {
       readonly kind: "input";
       readonly placeholder?: string;
       readonly secret: boolean;
     })
-  | (InteractionBase & {
+  | (ClientInteractionBase & {
       readonly kind: "editor";
       readonly content?: string;
       readonly language?: string;
     })
-  | (InteractionBase & {
+  | (ClientInteractionBase & {
       readonly kind: "approval";
       readonly approvalType: string;
       /** Heterogeneous, pre-redacted approval details. */
@@ -161,14 +172,34 @@ export type ClientEvent =
   | (ClientEventBase & { readonly kind: "snapshot"; readonly snapshot: OperatorStateSnapshot })
   | (ClientEventBase & { readonly kind: "state.changed" })
   | (ClientEventBase & { readonly kind: "command.accepted"; readonly accepted: ClientCommandAccepted })
+  | (ClientEventBase & { readonly kind: "interaction.required"; readonly interaction: ClientInteraction })
   | (ClientEventBase & {
-      readonly kind: "command.interactionRequired";
-      readonly interaction: ClientInteraction;
+      readonly kind: "interaction.resolved";
+      readonly interactionId: InteractionId;
+      readonly leaseGeneration: number;
+      readonly outcome: "submitted" | "cancelled" | "aborted" | "expired";
     })
   | (ClientEventBase & { readonly kind: "command.receipt"; readonly receipt: CommandReceipt })
   | (ClientEventBase & { readonly kind: "runtime.changed"; readonly connection: RuntimeConnection })
   | (ClientEventBase & { readonly kind: "resync.required"; readonly reason: string })
-  | (ClientEventBase & { readonly kind: "diagnostics.changed" });
+  | (ClientEventBase & { readonly kind: "diagnostics.changed" })
+  /**
+   * Live conversation projector output. `ClientEventBase.cursor` is the
+   * Host facade delivery cursor (decimal, monotonic per authority epoch).
+   * `eventSeq` is `StudioEventEnvelope.eventSeq` from the Bridge — a
+   * different namespace used by the conversation reducer for Runtime
+   * continuity. Do not treat the two as interchangeable.
+   *
+   * Time source is `ClientEventBase.occurredAt`, copied from
+   * `StudioEventEnvelope.occurredAt`. Inner `update` payloads must not
+   * repeat occurredAt / runtimeEpoch / eventSeq / stateVersion.
+   */
+  | (ClientEventBase & {
+      readonly kind: "conversation.changed";
+      readonly sessionId: SessionId;
+      readonly eventSeq: number;
+      readonly update: ConversationRuntimeEvent;
+    });
 
 /** What subset of the event stream a subscription requests. */
 export type SubscriptionScope =

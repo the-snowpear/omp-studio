@@ -33,6 +33,7 @@ import type {
   IdempotencyKey,
   QueryInput,
   QueryName,
+  ConversationTranscriptReadPage,
   RuntimeEpoch,
   RuntimeId,
   SessionId,
@@ -57,6 +58,7 @@ import type {
   OperatorStateSnapshot,
 } from "@omp-studio/studio-protocol";
 
+import { conversationChangedEvent, conversationLiveSequence, conversationPages } from "./conversation-fixtures.js";
 import type { ContractFixtureApi, FixtureCalls, FixtureSubscription } from "./types.js";
 
 /** Public opaque authority/runtime identities (never secrets). */
@@ -248,6 +250,8 @@ const QUERY_INPUTS = {
   "agents.definitions.get": {},
   "projects.list": {},
   "usage.get": {},
+  "session.transcript.read": { limit: 50 },
+  "session.transcript.readPage": { sessionId: SESSION_ID, limit: 50 },
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
@@ -330,6 +334,23 @@ const QUERY_RESPONSES = {
       byModel: [],
       hours: [],
     },
+  },
+  "session.transcript.read": {
+    ok: true,
+    queryName: "session.transcript.read",
+    result: conversationPages.userAssistant,
+  },
+  "session.transcript.readPage": {
+    ok: true,
+    queryName: "session.transcript.readPage",
+    result: {
+      sessionId: SESSION_ID,
+      transcriptRevision: "fixture-revision-1",
+      branchLeafId: conversationPages.userAssistant.branchLeafId,
+      items: conversationPages.userAssistant.items,
+      headCursor: conversationPages.userAssistant.headCursor,
+      hasMoreBefore: false,
+    } satisfies ConversationTranscriptReadPage,
   },
 } satisfies { readonly [K in QueryName]: ClientQueryResponse<K> };
 
@@ -423,11 +444,14 @@ const DIAGNOSTICS_EVENT: ClientEvent = {
   kind: "diagnostics.changed",
 };
 
+const CONVERSATION_EVENT: ClientEvent = conversationChangedEvent(conversationLiveSequence[0]!, 12);
+
 const EVENTS: ReadonlyArray<ClientEvent> = [
   SNAPSHOT_EVENT,
   ACCEPTED_EVENT,
   RECEIPT_EVENT,
   DIAGNOSTICS_EVENT,
+  CONVERSATION_EVENT,
 ];
 
 /**
@@ -441,7 +465,7 @@ function commandRequestIdOf(event: ClientEvent): CommandRequestId | undefined {
   switch (event.kind) {
     case "command.accepted":
       return event.accepted.requestId;
-    case "command.interactionRequired":
+    case "interaction.required":
       return event.interaction.requestId;
     case "command.receipt":
       return event.receipt.requestId;

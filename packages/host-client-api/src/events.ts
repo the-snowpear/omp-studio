@@ -20,11 +20,12 @@ import type {
   EventCursor,
   RuntimeConnection,
   RuntimeEpoch,
+  SessionId,
   StateVersion,
   SubscriptionScope,
   Unsubscribe,
 } from "@omp-studio/client-contract";
-import type { CommandLedgerEntry } from "@omp-studio/studio-protocol";
+import type { CommandLedgerEntry, ConversationRuntimeEvent } from "@omp-studio/studio-protocol";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 /** Runtime state the bus consults when an event seed omits epoch/version. */
@@ -37,6 +38,8 @@ export interface HostEventSeedBase {
   /** Overrides the bus context for this event (e.g. the lost Runtime epoch of a receipt). */
   readonly runtimeEpoch?: RuntimeEpoch;
   readonly stateVersion?: StateVersion;
+  /** Bridge `StudioEventEnvelope.occurredAt` for conversation events; otherwise the facade clock. */
+  readonly occurredAt?: string;
 }
 
 /** Every ClientEvent kind the facade can emit, minus the shared envelope. */
@@ -44,11 +47,23 @@ export type HostEventSeed =
   | (HostEventSeedBase & { readonly kind: "snapshot"; readonly snapshot: OperatorStateSnapshot })
   | (HostEventSeedBase & { readonly kind: "state.changed" })
   | (HostEventSeedBase & { readonly kind: "command.accepted"; readonly accepted: ClientCommandAccepted })
-  | (HostEventSeedBase & { readonly kind: "command.interactionRequired"; readonly interaction: ClientInteraction })
+  | (HostEventSeedBase & { readonly kind: "interaction.required"; readonly interaction: ClientInteraction })
+  | (HostEventSeedBase & {
+      readonly kind: "interaction.resolved";
+      readonly interactionId: string;
+      readonly leaseGeneration: number;
+      readonly outcome: "submitted" | "cancelled" | "aborted" | "expired";
+    })
   | (HostEventSeedBase & { readonly kind: "command.receipt"; readonly receipt: CommandReceipt })
   | (HostEventSeedBase & { readonly kind: "runtime.changed"; readonly connection: RuntimeConnection })
   | (HostEventSeedBase & { readonly kind: "resync.required"; readonly reason: string })
-  | (HostEventSeedBase & { readonly kind: "diagnostics.changed" });
+  | (HostEventSeedBase & { readonly kind: "diagnostics.changed" })
+  | (HostEventSeedBase & {
+      readonly kind: "conversation.changed";
+      readonly sessionId: SessionId;
+      readonly eventSeq: number;
+      readonly update: ConversationRuntimeEvent;
+    });
 
 interface Subscriber {
   readonly scope: SubscriptionScope;
@@ -74,7 +89,7 @@ export function eventMatchesScope(event: ClientEvent, scope: SubscriptionScope):
       switch (event.kind) {
         case "command.accepted":
           return event.accepted.requestId === scope.requestId;
-        case "command.interactionRequired":
+        case "interaction.required":
           return event.interaction.requestId === scope.requestId;
         case "command.receipt":
           return event.receipt.requestId === scope.requestId;
@@ -203,11 +218,15 @@ export class HostEventBus {
       ...(runtimeEpoch === undefined ? {} : { runtimeEpoch }),
       stateVersion,
       cursor: this.#cursor.next(),
-      occurredAt: this.#clock(),
+      occurredAt: seed.occurredAt ?? this.#clock(),
     } as ClientEvent;
-    for (const subscriber of this.#subscribers) {
+    for (const subscriber of [...this.#subscribers]) {
       if (eventMatchesScope(event, subscriber.scope)) {
-        subscriber.listener(event);
+        try {
+          subscriber.listener(event);
+        } catch {
+          // Isolate sibling listeners so one throw cannot starve the rest.
+        }
       }
     }
     return event;

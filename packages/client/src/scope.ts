@@ -26,7 +26,9 @@ export function eventMatchesScope(event: ClientEvent, scope: SubscriptionScope):
       switch (event.kind) {
         case "command.accepted":
           return event.accepted.requestId === scope.requestId;
-        case "command.interactionRequired":
+        case "interaction.required":
+          // Command-correlated interactions match; standalone interactions
+          // (no requestId) are invisible to command-scoped subscriptions.
           return event.interaction.requestId === scope.requestId;
         case "command.receipt":
           return event.receipt.requestId === scope.requestId;

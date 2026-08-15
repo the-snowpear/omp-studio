@@ -16,12 +16,15 @@
 
 import type {
   ClientBootstrap,
+  ClientError,
   ClientEvent,
   ClientTransport,
   CommandHandle,
   CommandInput,
   CommandName,
   CommandOptions,
+  ConversationTranscriptPage,
+  ConversationTranscriptReadPage,
   QueryInput,
   QueryName,
   QueryResult,
@@ -40,7 +43,22 @@ interface RendererSubscription {
   readonly listener: (event: ClientEvent) => void;
 }
 
-export class StudioClientImpl implements StudioClient {
+/**
+ * Official client-local transcript hydrate surface. These methods update
+ * reducer state and are not transport envelopes — they live here rather
+ * than on the shared `StudioClient` contract so Desktop/Web adapters stay
+ * thin. Renderer should import this type instead of duck-typing.
+ */
+export interface ConversationHydrateClient {
+  beginTranscriptHydrate(): number;
+  hydrateTranscript(page: ConversationTranscriptPage, generation: number): void;
+  prependTranscript(page: ConversationTranscriptPage, generation: number): void;
+  hydrateArchiveTranscript?(page: ConversationTranscriptReadPage, generation: number): void;
+  prependArchiveTranscript?(page: ConversationTranscriptReadPage, generation: number): void;
+  failTranscriptHydrate(error: ClientError, generation: number): void;
+}
+
+export class StudioClientImpl implements StudioClient, ConversationHydrateClient {
   private readonly transport: ClientTransport;
   private readonly ids: ClientClockAndIds;
   private state: ClientState;
@@ -108,6 +126,32 @@ export class StudioClientImpl implements StudioClient {
       throw response.error;
     }
     return response.result;
+  }
+
+  /** Start a transcript hydrate generation so a stale page cannot land after session switch. */
+  beginTranscriptHydrate(): number {
+    this.applyAction({ type: "conversation.beginHydrate" });
+    return this.state.conversation.hydrateGeneration;
+  }
+
+  hydrateTranscript(page: ConversationTranscriptPage, generation: number): void {
+    this.applyAction({ type: "conversation.hydrate", page, generation });
+  }
+
+  prependTranscript(page: ConversationTranscriptPage, generation: number): void {
+    this.applyAction({ type: "conversation.prepend", page, generation });
+  }
+
+  hydrateArchiveTranscript(page: ConversationTranscriptReadPage, generation: number): void {
+    this.applyAction({ type: "conversation.hydrateArchive", page, generation });
+  }
+
+  prependArchiveTranscript(page: ConversationTranscriptReadPage, generation: number): void {
+    this.applyAction({ type: "conversation.prependArchive", page, generation });
+  }
+
+  failTranscriptHydrate(error: ClientError, generation: number): void {
+    this.applyAction({ type: "conversation.error", error, generation });
   }
 
   async command<TName extends CommandName>(

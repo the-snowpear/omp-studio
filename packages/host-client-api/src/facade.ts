@@ -36,6 +36,8 @@ import type {
   ClientCommandRequest,
   ClientError,
   ClientErrorCode,
+  ClientInteraction,
+  ConversationTranscriptReadPage,
   ClientEvent,
   ClientQueryRequest,
   ClientQueryResponse,
@@ -62,6 +64,8 @@ import type {
   QueryName,
   RuntimeChannel,
   RuntimeConnection,
+  RuntimeEpoch,
+  RuntimeId,
   RuntimeInstallState,
   SessionHistoryEntry,
   SessionHistoryReadModel,
@@ -74,20 +78,20 @@ import type {
   Unsubscribe,
   WorkspaceId,
   WorkspaceListReadModel,
+  OpaqueCursor,
 } from "@omp-studio/client-contract";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 import type {
   CapabilityManifest,
   CommandLedgerEntry,
+  ConversationTranscriptPage,
   OperatorCommandManifest,
   OperatorStateSnapshot,
-  RuntimeEpoch,
-  RuntimeId,
   RuntimeInstallationManifest,
 } from "@omp-studio/studio-protocol";
 import type { StudioOperation } from "@omp-studio/studio-protocol";
-import { canonicalJson } from "@omp-studio/studio-protocol";
-import type { HostBackend, RuntimePublication } from "@omp-studio/studio-host";
+import { canonicalJson, parseConversationRuntimeEvent, parseConversationTranscriptPage } from "@omp-studio/studio-protocol";
+import type { HostBackend, RuntimePublication, StudioConversationForward, StudioInteractionForward } from "@omp-studio/studio-host";
 
 import {
   HostEventBus,
@@ -103,6 +107,7 @@ import {
   sanitizeDisplayText,
   threadIdFor,
 } from "./read-models.js";
+import { mapRemoteInteractionToClient } from "./interaction-map.js";
 import {
   toClientError,
   type HostCatalogEntry,
@@ -117,6 +122,7 @@ import {
   type HostRuntimeInstallService,
   type HostSemanticCommandService,
   type HostSessionCatalogProvider,
+  type HostSessionArchiveProvider,
   type HostUsageService,
   type HostWorkspaceService,
 } from "./services.js";
@@ -171,6 +177,8 @@ export interface StudioHostClientFacadeOptions {
   /** Optional ready Runtime session controller plus safe hello/snapshot access. */
   readonly runtime?: HostRuntimeAccess;
   readonly catalog: HostSessionCatalogProvider;
+  /** Optional Runtime-independent persistent transcript reader. */
+  readonly archive?: HostSessionArchiveProvider;
   readonly diagnostics: HostDiagnosticsFactory;
   readonly install: HostRuntimeInstallService;
   /** Optional semantic service for session.resume/drop and interaction.respond. */
@@ -359,6 +367,9 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (options.catalog === null || typeof options.catalog.list !== "function") {
     throw new TypeError("facade session catalog provider is required");
   }
+  if (options.archive !== undefined && typeof options.archive.readPage !== "function") {
+    throw new TypeError("facade session archive provider must expose readPage");
+  }
   if (options.diagnostics === null || typeof options.diagnostics.now !== "function" || typeof options.diagnostics.newEntryId !== "function") {
     throw new TypeError("facade diagnostics factory is required");
   }
@@ -372,6 +383,21 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (runtime?.onPublication !== undefined && typeof runtime.onPublication !== "function") {
     throw new TypeError("facade runtime publication hook must be a function");
   }
+  if (runtime?.onConversationEvent !== undefined && typeof runtime.onConversationEvent !== "function") {
+    throw new TypeError("facade runtime conversation hook must be a function");
+  }
+  if (runtime?.onConversationResync !== undefined && typeof runtime.onConversationResync !== "function") {
+    throw new TypeError("facade runtime conversation resync hook must be a function");
+  }
+  if (runtime?.currentSession !== undefined && typeof runtime.currentSession !== "function") {
+    throw new TypeError("facade runtime currentSession must be a function");
+  }
+  if (runtime?.readTranscript !== undefined && typeof runtime.readTranscript !== "function") {
+    throw new TypeError("facade runtime readTranscript must be a function");
+  }
+  if (runtime?.onInteractionEvent !== undefined && typeof runtime.onInteractionEvent !== "function") {
+    throw new TypeError("facade runtime interaction hook must be a function");
+  }
 }
 
 /**
@@ -384,14 +410,19 @@ export class StudioHostClientFacade implements ClientTransport {
   readonly #bus: HostEventBus;
   readonly #terminalEmitted = new Set<CommandRequestId>();
   #unsubscribePublication: Unsubscribe | undefined;
+  #unsubscribeConversation: Unsubscribe | undefined;
+  #unsubscribeConversationResync: Unsubscribe | undefined;
+  #unsubscribeInteraction: Unsubscribe | undefined;
   #closed = false;
   #lastHello: HostRuntimeHelloView | undefined;
   #lastEmittedConnection: RuntimeConnection | undefined;
   #lastPublishedVersion: StateVersion | undefined;
+  #lastPublishedEpoch: RuntimeEpoch | undefined;
   #installInFlight = false;
   #lastInstallResult: RuntimeInstallState | undefined;
   /** Last workspace list seen; feeds the bootstrap selection (`projects.list` wins in the Renderer). */
   #lastWorkspaceModel: WorkspaceListReadModel | undefined;
+  readonly #conversationDiagnostics: DiagnosticEntry[] = [];
 
   constructor(options: StudioHostClientFacadeOptions) {
     validateOptions(options);
@@ -403,6 +434,8 @@ export class StudioHostClientFacade implements ClientTransport {
     if (onPublication !== undefined) {
       this.#unsubscribePublication = onPublication((publication) => this.#onPublication(publication));
     }
+    this.#bindConversation();
+    this.#bindInteraction();
   }
 
   async bootstrap(): Promise<ClientBootstrap> {
@@ -427,7 +460,29 @@ export class StudioHostClientFacade implements ClientTransport {
       // absent (exactOptionalPropertyTypes) until a Runtime snapshot exists.
       return base;
     }
-    return { ...base, snapshot, stateVersion: snapshot.stateVersion, cursor: this.#bus.currentCursor() };
+    const messagesCursor = this.#options.runtime?.messagesCursor?.();
+    const pendingInteraction = this.#bootstrapPendingInteraction(snapshot);
+    return {
+      ...base,
+      snapshot,
+      stateVersion: snapshot.stateVersion,
+      cursor: this.#bus.currentCursor(),
+      ...(messagesCursor === undefined ? {} : { messagesCursor }),
+      ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
+    };
+  }
+
+  /**
+   * Recoverable pending interaction for bootstrap (plan §1.4): read the
+   * full pending from the Runtime snapshot, map through the same redacting
+   * mapper. TUI-owned interactions are never exposed as submittable cards.
+   */
+  #bootstrapPendingInteraction(snapshot: OperatorStateSnapshot): ClientInteraction | undefined {
+    const pending = snapshot.pendingInteraction;
+    if (pending === undefined || pending.owner !== "gui") {
+      return undefined;
+    }
+    return mapRemoteInteractionToClient(pending.request, snapshot.sessionId as SessionId, pending.leaseGeneration);
   }
 
   async query<TName extends QueryName>(request: ClientQueryRequest<TName>): Promise<ClientQueryResponse<TName>> {
@@ -494,6 +549,15 @@ export class StudioHostClientFacade implements ClientTransport {
       }
       case "usage.get": {
         const result = await this.#queryUsage();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.transcript.read": {
+        const result = await this.#queryTranscript(request.input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.transcript.readPage": {
+        const archiveRequest = request as ClientQueryRequest<"session.transcript.readPage">;
+        const result = await this.#queryArchiveTranscript(archiveRequest.input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
     }
@@ -582,7 +646,7 @@ export class StudioHostClientFacade implements ClientTransport {
     if (replay !== undefined) { this.#replayTerminal(replay, request.requestId); return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted; }
     const accepted = { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt } as ClientCommandAccepted;
     this.#bus.emit({ kind: "command.accepted", accepted });
-    void this.#runP4Command(() => service.invoke!(operation), request.requestId, request.commandName);
+    void this.#runP4Command(() => service.invoke!(operation, request.requestId), request.requestId, request.commandName);
     return accepted;
   }
 
@@ -610,6 +674,12 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#closed = true;
     this.#unsubscribePublication?.();
     this.#unsubscribePublication = undefined;
+    this.#unsubscribeConversation?.();
+    this.#unsubscribeConversation = undefined;
+    this.#unsubscribeConversationResync?.();
+    this.#unsubscribeConversationResync = undefined;
+    this.#unsubscribeInteraction?.();
+    this.#unsubscribeInteraction = undefined;
     this.#bus.close();
   }
 
@@ -745,15 +815,161 @@ export class StudioHostClientFacade implements ClientTransport {
 
   #onPublication(publication: RuntimePublication): void {
     const snapshot = publication.snapshot;
+    // A resident Worker may be re-selected with an older per-Worker epoch.
+    // Publish the connection change first so the Client resets its active
+    // Runtime fence before receiving that Worker's snapshot.
+    this.#syncRuntimeEvents();
     const version = snapshot.stateVersion;
+    const epochChanged = this.#lastPublishedEpoch !== snapshot.runtimeEpoch;
+    if (epochChanged) {
+      this.#lastPublishedEpoch = snapshot.runtimeEpoch;
+      this.#lastPublishedVersion = undefined;
+    }
     if (this.#lastPublishedVersion === undefined || Number(version) > Number(this.#lastPublishedVersion)) {
       this.#lastPublishedVersion = version;
-      this.#bus.emit({ kind: "state.changed", runtimeEpoch: snapshot.runtimeEpoch, stateVersion: version });
+      this.#bus.emit({
+        kind: "snapshot",
+        snapshot,
+        runtimeEpoch: snapshot.runtimeEpoch,
+        stateVersion: version,
+      });
     }
     for (const entry of publication.terminalOutcomes) {
       this.#emitLedgerReceipt(entry);
     }
+  }
+
+  #bindConversation(): void {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) {
+      return;
+    }
+    if (runtime.onConversationEvent !== undefined) {
+      this.#unsubscribeConversation = runtime.onConversationEvent((event) => this.#onConversationForward(event));
+      if (runtime.onConversationResync !== undefined) {
+        this.#unsubscribeConversationResync = runtime.onConversationResync((reason) => this.#onConversationResync(reason));
+      }
+      return;
+    }
+    const session = this.#runtimeSession();
+    if (session === undefined) {
+      return;
+    }
+    this.#unsubscribeConversation = session.onConversationEvent((event) => this.#onConversationForward(event));
+    this.#unsubscribeConversationResync = session.onConversationResync((reason) => this.#onConversationResync(reason));
+  }
+
+  #bindInteraction(): void {
+    const runtime = this.#options.runtime;
+    if (runtime?.onInteractionEvent === undefined) {
+      return;
+    }
+    this.#unsubscribeInteraction = runtime.onInteractionEvent((event) => this.#onInteractionForward(event));
+  }
+
+  #onInteractionForward(forward: StudioInteractionForward): void {
     this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshot();
+    if (snapshot === undefined) {
+      return;
+    }
+    const envelope = forward.envelope;
+    if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) {
+      return;
+    }
+    const event = envelope.event;
+    if (event.kind === "interaction.resolved") {
+      this.#bus.emit({
+        kind: "interaction.resolved",
+        runtimeEpoch: envelope.runtimeEpoch,
+        stateVersion: envelope.stateVersion,
+        occurredAt: envelope.occurredAt,
+        interactionId: event.interactionId,
+        leaseGeneration: event.leaseGeneration,
+        outcome: event.outcome,
+      });
+      return;
+    }
+    if (event.owner === "tui") {
+      this.#recordConversationDiagnostic("A terminal-owned interaction is pending; handle it in the TUI");
+      return;
+    }
+    const requestId = forward.clientRequestId as CommandRequestId | undefined;
+    const mapped = mapRemoteInteractionToClient(
+      event.request,
+      snapshot.sessionId as SessionId,
+      event.leaseGeneration,
+      requestId,
+    );
+    if (mapped === undefined) {
+      this.#recordConversationDiagnostic("Dropped an interaction with an unsupported kind");
+      return;
+    }
+    this.#bus.emit({
+      kind: "interaction.required",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      interaction: mapped,
+    });
+  }
+
+  #runtimeSession() {
+    return this.#options.runtime?.currentSession?.() ?? this.#options.runtime?.session;
+  }
+
+  #onConversationResync(reason: string): void {
+    this.#syncRuntimeEvents();
+    this.#bus.emit({ kind: "resync.required", reason });
+  }
+
+  #onConversationForward(forward: StudioConversationForward): void {
+    this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshot();
+    if (snapshot === undefined) {
+      return;
+    }
+    const envelope = forward.envelope;
+    if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) {
+      return;
+    }
+    let update;
+    try {
+      update = parseConversationRuntimeEvent(envelope.event);
+    } catch {
+      this.#recordConversationDiagnostic("Dropped a malformed conversation event; transcript resync is required");
+      this.#bus.emit({
+        kind: "resync.required",
+        reason: "conversation mapping failed; re-query session.transcript.read",
+      });
+      return;
+    }
+    if (update.sessionId !== snapshot.sessionId) {
+      return;
+    }
+    this.#bus.emit({
+      kind: "conversation.changed",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      sessionId: update.sessionId as SessionId,
+      eventSeq: Number(envelope.eventSeq),
+      update,
+    });
+  }
+
+  #recordConversationDiagnostic(message: string): void {
+    this.#conversationDiagnostics.push({
+      entryId: this.#options.diagnostics.newEntryId(),
+      scope: "runtime",
+      level: "warning",
+      message,
+      occurredAt: this.#options.diagnostics.now(),
+    });
+    if (this.#conversationDiagnostics.length > 8) {
+      this.#conversationDiagnostics.shift();
+    }
+    this.#bus.emit({ kind: "diagnostics.changed" });
   }
 
   /**
@@ -873,6 +1089,7 @@ export class StudioHostClientFacade implements ClientTransport {
         });
         break;
     }
+    entries.push(...this.#conversationDiagnostics);
     return buildDiagnosticsReadModel(now, { ...this.#options.authority }, entries);
   }
 
@@ -969,6 +1186,58 @@ export class StudioHostClientFacade implements ClientTransport {
       };
     }
     return service.get();
+  }
+
+  async #queryTranscript(input: {
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptPage> {
+    const snapshot = this.#currentSnapshot();
+    if (snapshot === undefined) {
+      throw unavailableError("session.transcript.read requires a connected Runtime");
+    }
+    const reader = this.#options.runtime?.readTranscript;
+    const session = this.#runtimeSession();
+    if (reader === undefined && session === undefined) {
+      throw unavailableError("session.transcript.read requires a connected Runtime");
+    }
+    const raw = reader === undefined ? await session!.readTranscript(input) : await reader(input);
+    let page: ConversationTranscriptPage;
+    try {
+      page = parseConversationTranscriptPage(raw);
+    } catch (error) {
+      throw clientError(
+        "INTERNAL_ERROR",
+        error instanceof Error ? error.message : "malformed transcript page",
+      );
+    }
+    const current = this.#currentSnapshot();
+    if (current === undefined) {
+      throw unavailableError("session.transcript.read requires a connected Runtime");
+    }
+    if (page.runtimeEpoch !== current.runtimeEpoch) {
+      throw clientError("STALE_EPOCH", "transcript page runtime epoch does not match the current session");
+    }
+    if (page.sessionId !== current.sessionId) {
+      throw clientError("CURSOR_STALE", "transcript page session does not match the current session");
+    }
+    return page;
+  }
+
+  async #queryArchiveTranscript(input: {
+    readonly sessionId: SessionId;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptReadPage> {
+    const archive = this.#options.archive;
+    if (archive === undefined) {
+      throw unavailableError("session.transcript.readPage is not available");
+    }
+    try {
+      return await archive.readPage(input);
+    } catch (error) {
+      throw toClientError(error);
+    }
   }
 
   async #querySkills(): Promise<ExtensibilityReadModel> {
@@ -1494,9 +1763,12 @@ export class StudioHostClientFacade implements ClientTransport {
 
   /**
    * Shared gate for the three semantic commands: an explicit injected
-   * service and a live Runtime snapshot are required before anything is
-   * accepted; missing pieces fail closed with CAPABILITY_UNAVAILABLE /
-   * UNAVAILABLE and no fake completion is ever published.
+   * service is required before anything is accepted. `session.drop` and
+   * `interaction.respond` also need a live Runtime snapshot.
+   * `session.resume` must not: it is the command that starts or rebinds
+   * Runtime onto a catalog session, including when no snapshot exists yet.
+   * Missing pieces fail closed with CAPABILITY_UNAVAILABLE / UNAVAILABLE
+   * and no fake completion is ever published.
    */
   async #commandSemantic<TName extends "session.resume" | "session.drop" | "interaction.respond">(
     request: ClientCommandRequest<TName>,
@@ -1507,7 +1779,7 @@ export class StudioHostClientFacade implements ClientTransport {
     if (service === undefined) {
       throw clientError("CAPABILITY_UNAVAILABLE", `${commandName} is not available: no semantic command service is wired`);
     }
-    if (this.#currentSnapshot() === undefined) {
+    if (commandName !== "session.resume" && this.#currentSnapshot() === undefined) {
       throw unavailableError(`${commandName} requires a Runtime snapshot`);
     }
     this.#validateSemanticInput(commandName, request.input);
@@ -1537,7 +1809,11 @@ export class StudioHostClientFacade implements ClientTransport {
         if (commandName === "session.resume") {
           void this.#runSemanticCommand(() => service.resume({ threadId }), request.requestId, commandName);
         } else {
-          void this.#runSemanticCommand(() => service.drop({ threadId }), request.requestId, commandName);
+          void this.#runSemanticCommand(
+            () => service.drop({ threadId, requestId: request.requestId }),
+            request.requestId,
+            commandName,
+          );
         }
         break;
       }

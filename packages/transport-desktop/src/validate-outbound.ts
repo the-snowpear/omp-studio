@@ -24,6 +24,7 @@ import type {
   RuntimeClassification,
   RuntimeConnectionStatus,
 } from "@omp-studio/client-contract";
+import { parseConversationRuntimeEvent, parseConversationTranscriptPage } from "@omp-studio/client-contract";
 
 import {
   ValidationError,
@@ -32,6 +33,7 @@ import {
   assertOpaqueToken,
   assertPlainObject,
   isOpaqueToken,
+  isPlainObject,
 } from "./validate-inbound.js";
 import { COMMAND_NAMES, QUERY_NAMES } from "./validate-inbound.js";
 
@@ -52,6 +54,7 @@ const CLIENT_ERROR_CODES = [
   "RESYNC_REQUIRED",
   "TRANSPORT_ERROR",
   "INTERNAL_ERROR",
+  "CURSOR_STALE",
 ] as const satisfies readonly ClientErrorCode[];
 
 /**
@@ -68,6 +71,45 @@ function assertClientError(value: unknown): void {
   }
   if (typeof value.message !== "string") {
     throw new ValidationError("client error: message must be a string");
+  }
+}
+
+function assertConversationTranscriptReadPage(value: unknown): void {
+  assertPlainObject(value, "session.transcript.readPage result");
+  assertNoUnknownKeys(
+    value,
+    [
+      "sessionId",
+      "transcriptRevision",
+      "branchLeafId",
+      "items",
+      "olderCursor",
+      "headCursor",
+      "hasMoreBefore",
+    ],
+    "session.transcript.readPage result",
+  );
+  assertOpaqueToken(value.sessionId, "session.transcript.readPage result: sessionId");
+  assertOpaqueToken(
+    value.transcriptRevision,
+    "session.transcript.readPage result: transcriptRevision",
+  );
+  try {
+    // Reuse the protocol's exact, bounded item/cursor/page parser. The
+    // synthetic epoch is validation-only and never enters the public result.
+    parseConversationTranscriptPage({
+      runtimeEpoch: 1,
+      sessionId: value.sessionId,
+      branchLeafId: value.branchLeafId,
+      items: value.items,
+      ...(value.olderCursor === undefined ? {} : { olderCursor: value.olderCursor }),
+      headCursor: value.headCursor,
+      hasMoreBefore: value.hasMoreBefore,
+    });
+  } catch (error) {
+    throw new ValidationError(
+      `session.transcript.readPage result: invalid transcript page (${error instanceof Error ? error.message : "invalid"})`,
+    );
   }
 }
 
@@ -90,6 +132,18 @@ export function assertClientQueryResponse(value: unknown): asserts value is Clie
   if (ok) {
     if (!("result" in value)) {
       throw new ValidationError("query response: ok response is missing the result");
+    }
+    if (queryName === "session.transcript.read") {
+      try {
+        parseConversationTranscriptPage(value.result);
+      } catch (error) {
+        throw new ValidationError(
+          `query response: invalid transcript page (${error instanceof Error ? error.message : "invalid"})`,
+        );
+      }
+    }
+    if (queryName === "session.transcript.readPage") {
+      assertConversationTranscriptReadPage(value.result);
     }
     return;
   }
@@ -125,11 +179,13 @@ const EVENT_KINDS = [
   "snapshot",
   "state.changed",
   "command.accepted",
-  "command.interactionRequired",
+  "interaction.required",
+  "interaction.resolved",
   "command.receipt",
   "runtime.changed",
   "resync.required",
   "diagnostics.changed",
+  "conversation.changed",
 ] as const satisfies readonly ClientEvent["kind"][];
 
 const EVENT_BASE_KEYS = [
@@ -197,7 +253,12 @@ function assertOptionList(value: unknown): void {
 function assertClientInteraction(value: unknown): void {
   assertPlainObject(value, "event: interaction");
   assertOpaqueToken(value.interactionId, "event: interactionId");
-  assertOpaqueToken(value.requestId, "event: interaction requestId");
+  assertOpaqueToken(value.sessionId, "event: interaction sessionId");
+  assertCounter(value.leaseGeneration, "event: interaction leaseGeneration");
+  assertNonEmptyText(value.title, "event: interaction title");
+  if (value.requestId !== undefined) {
+    assertOpaqueToken(value.requestId, "event: interaction requestId");
+  }
   const kind = value.kind;
   if (typeof kind !== "string" || !(INTERACTION_KINDS as readonly string[]).includes(kind)) {
     throw new ValidationError(`event: interaction has unknown kind ${describe(kind)}`);
@@ -206,7 +267,16 @@ function assertClientInteraction(value: unknown): void {
     case "confirm":
       assertNoUnknownKeys(
         value,
-        ["kind", "interactionId", "requestId", "message", "destructive"],
+        [
+          "kind",
+          "interactionId",
+          "sessionId",
+          "leaseGeneration",
+          "title",
+          "requestId",
+          "message",
+          "destructive",
+        ],
         "event: interaction",
       );
       assertNonEmptyText(value.message, "event: interaction message");
@@ -217,7 +287,7 @@ function assertClientInteraction(value: unknown): void {
     case "select":
       assertNoUnknownKeys(
         value,
-        ["kind", "interactionId", "requestId", "options", "multiple"],
+        ["kind", "interactionId", "sessionId", "leaseGeneration", "title", "requestId", "options", "multiple"],
         "event: interaction",
       );
       assertOptionList(value.options);
@@ -228,7 +298,7 @@ function assertClientInteraction(value: unknown): void {
     case "input":
       assertNoUnknownKeys(
         value,
-        ["kind", "interactionId", "requestId", "placeholder", "secret"],
+        ["kind", "interactionId", "sessionId", "leaseGeneration", "title", "requestId", "placeholder", "secret"],
         "event: interaction",
       );
       if (value.placeholder !== undefined && typeof value.placeholder !== "string") {
@@ -241,7 +311,7 @@ function assertClientInteraction(value: unknown): void {
     case "editor":
       assertNoUnknownKeys(
         value,
-        ["kind", "interactionId", "requestId", "content", "language"],
+        ["kind", "interactionId", "sessionId", "leaseGeneration", "title", "requestId", "content", "language"],
         "event: interaction",
       );
       if (value.content !== undefined && typeof value.content !== "string") {
@@ -254,7 +324,7 @@ function assertClientInteraction(value: unknown): void {
     case "approval":
       assertNoUnknownKeys(
         value,
-        ["kind", "interactionId", "requestId", "approvalType", "detail"],
+        ["kind", "interactionId", "sessionId", "leaseGeneration", "title", "requestId", "approvalType", "detail"],
         "event: interaction",
       );
       assertNonEmptyText(value.approvalType, "event: interaction approvalType");
@@ -417,10 +487,24 @@ export function assertClientEvent(value: unknown): asserts value is ClientEvent 
       assertEventBase(value);
       assertClientCommandAccepted(value.accepted);
       return;
-    case "command.interactionRequired":
+    case "interaction.required":
       assertEventKeys(value, "event", ["interaction"]);
       assertEventBase(value);
       assertClientInteraction(value.interaction);
+      return;
+    case "interaction.resolved":
+      assertEventKeys(value, "event", ["interactionId", "leaseGeneration", "outcome"]);
+      assertEventBase(value);
+      assertOpaqueToken(value.interactionId, "event: interactionId");
+      assertCounter(value.leaseGeneration, "event: leaseGeneration");
+      if (
+        value.outcome !== "submitted" &&
+        value.outcome !== "cancelled" &&
+        value.outcome !== "aborted" &&
+        value.outcome !== "expired"
+      ) {
+        throw new ValidationError(`event: unsupported interaction outcome ${describe(value.outcome)}`);
+      }
       return;
     case "command.receipt":
       assertEventKeys(value, "event", ["receipt"]);
@@ -436,6 +520,26 @@ export function assertClientEvent(value: unknown): asserts value is ClientEvent 
       assertEventKeys(value, "event", ["reason"]);
       assertEventBase(value);
       assertNonEmptyText(value.reason, "event: reason");
+      return;
+    case "conversation.changed":
+      assertEventKeys(value, "event", ["sessionId", "eventSeq", "update"]);
+      assertEventBase(value);
+      assertOpaqueToken(value.sessionId, "event: sessionId");
+      assertCounter(value.eventSeq, "event: eventSeq");
+      if (!isPlainObject(value.update)) {
+        throw new ValidationError("event: conversation update must be a plain object");
+      }
+      try {
+        const parsed = parseConversationRuntimeEvent(value.update);
+        if (parsed.sessionId !== value.sessionId) {
+          throw new ValidationError("event: conversation sessionId does not match update.sessionId");
+        }
+      } catch (error) {
+        if (error instanceof ValidationError) throw error;
+        throw new ValidationError(
+          `event: invalid conversation update (${error instanceof Error ? error.message : "invalid"})`,
+        );
+      }
       return;
     default:
       throw new ValidationError(`event: unhandled kind ${describe(kind)}`);

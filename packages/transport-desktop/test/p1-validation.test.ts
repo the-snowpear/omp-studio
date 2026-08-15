@@ -33,6 +33,7 @@ import {
   type DesktopIpcChannel,
   type OmpStudioDesktopApi,
 } from "../src/index.js";
+import { CONVERSATION_LIMITS } from "@omp-studio/client-contract";
 
 /** Envelope fixtures that must always validate (P1 contract shapes). */
 const QUERY_ENVELOPES: ReadonlyArray<{
@@ -52,6 +53,14 @@ const QUERY_ENVELOPES: ReadonlyArray<{
   { name: "agents.definitions.get", payload: { queryName: "agents.definitions.get", input: {} } },
   { name: "projects.list", payload: { queryName: "projects.list", input: {} } },
   { name: "usage.get", payload: { queryName: "usage.get", input: {} } },
+  { name: "session.transcript.read", payload: { queryName: "session.transcript.read", input: { limit: 50 } } },
+  {
+    name: "session.transcript.readPage",
+    payload: {
+      queryName: "session.transcript.readPage",
+      input: { sessionId: "session-1", limit: 50 },
+    },
+  },
 ];
 
 const COMMAND_ENVELOPES: ReadonlyArray<{
@@ -398,6 +407,8 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       "agents.definitions.get",
       "projects.list",
       "usage.get",
+      "session.transcript.read",
+      "session.transcript.readPage",
     ]);
     for (const { name, payload } of QUERY_ENVELOPES) {
       const parsed = parseClientQueryRequest(payload);
@@ -461,6 +472,55 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       input: { limit: MAX_HISTORY_LIMIT },
     });
     assert.equal(ok.queryName, "history.list");
+  });
+
+  test("session.transcript.read rejects extra keys, bad limits, and oversized cursors", () => {
+    expectValidationError(() =>
+      parseClientQueryRequest({ queryName: "session.transcript.read", input: { extra: true } }),
+    );
+    expectValidationError(() =>
+      parseClientQueryRequest({ queryName: "session.transcript.read", input: { limit: 0 } }),
+    );
+    expectValidationError(() =>
+      parseClientQueryRequest({ queryName: "session.transcript.read", input: { limit: 101 } }),
+    );
+    expectValidationError(() =>
+      parseClientQueryRequest({
+        queryName: "session.transcript.read",
+        input: { cursor: "x".repeat(CONVERSATION_LIMITS.CURSOR_MAX_CHARS + 1) },
+      }),
+    );
+    const ok = parseClientQueryRequest({
+      queryName: "session.transcript.read",
+      input: { cursor: "opaque-older", limit: 50 },
+    });
+    assert.equal(ok.queryName, "session.transcript.read");
+  });
+
+  test("session.transcript.readPage requires an explicit session and validates pagination", () => {
+    for (const input of [
+      {},
+      { sessionId: "" },
+      { sessionId: " " },
+      { sessionId: "x".repeat(MAX_ID_LENGTH + 1) },
+      { sessionId: "session-1", extra: true },
+      { sessionId: "session-1", cursor: "" },
+      {
+        sessionId: "session-1",
+        cursor: "x".repeat(CONVERSATION_LIMITS.CURSOR_MAX_CHARS + 1),
+      },
+      { sessionId: "session-1", limit: 0 },
+      { sessionId: "session-1", limit: CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX + 1 },
+    ]) {
+      expectValidationError(() =>
+        parseClientQueryRequest({ queryName: "session.transcript.readPage", input }),
+      );
+    }
+    const ok = parseClientQueryRequest({
+      queryName: "session.transcript.readPage",
+      input: { sessionId: "session-1", cursor: "opaque-older", limit: 50 },
+    });
+    assert.equal(ok.queryName, "session.transcript.readPage");
   });
 });
 
@@ -955,6 +1015,93 @@ describe("assertClientQueryResponse: outbound strictness", () => {
     expectValidationError(() =>
       assertClientQueryResponse({ ok: false, queryName: "home.get", error: "UNAVAILABLE" }),
     );
+    assertClientQueryResponse({
+      ok: false,
+      queryName: "session.transcript.read",
+      error: { code: "CURSOR_STALE", message: "cursor belongs to another branch" },
+    });
+  });
+
+  test("session.transcript.read outbound page rejects extra keys and non-plain payloads", () => {
+    const result = {
+      runtimeEpoch: 1,
+      sessionId: "session-1",
+      branchLeafId: null,
+      items: [],
+      headCursor: "opaque-head",
+      hasMoreBefore: false,
+    };
+    assertClientQueryResponse({ ok: true, queryName: "session.transcript.read", result });
+    expectValidationError(() =>
+      assertClientQueryResponse({ ok: true, queryName: "session.transcript.read", result: { ...result, extra: true } }),
+    );
+    expectValidationError(() =>
+      assertClientQueryResponse({ ok: true, queryName: "session.transcript.read", result: "nope" }),
+    );
+    const oversized = {
+      ...result,
+      items: [
+        {
+          kind: "message",
+          itemId: "msg-1",
+          parentId: null,
+          createdAt: "2026-08-15T12:00:00.000Z",
+          role: "user",
+          content: [{ type: "text", text: "x".repeat(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES + 1) }],
+        },
+      ],
+    };
+    expectValidationError(() =>
+      assertClientQueryResponse({ ok: true, queryName: "session.transcript.read", result: oversized }),
+    );
+  });
+
+  test("session.transcript.readPage accepts only runtime-independent persisted pages", () => {
+    const result = {
+      sessionId: "session-1",
+      transcriptRevision: "transcript-revision-1",
+      branchLeafId: "leaf-1",
+      items: [],
+      olderCursor: "opaque-older",
+      headCursor: "opaque-head",
+      hasMoreBefore: true,
+    };
+    assertClientQueryResponse({ ok: true, queryName: "session.transcript.readPage", result });
+
+    for (const invalid of [
+      { ...result, runtimeEpoch: 1 },
+      { ...result, transcriptRevision: "" },
+      { ...result, transcriptRevision: "x".repeat(MAX_ID_LENGTH + 1) },
+      { ...result, sessionId: "" },
+      { ...result, branchLeafId: 42 },
+      { ...result, headCursor: "" },
+      {
+        ...result,
+        olderCursor: "x".repeat(CONVERSATION_LIMITS.CURSOR_MAX_CHARS + 1),
+      },
+      { ...result, hasMoreBefore: "yes" },
+      { ...result, items: "not-an-array" },
+      {
+        ...result,
+        items: Array.from(
+          { length: CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX + 1 },
+          (_, index) => ({
+            kind: "resetBoundary",
+            itemId: `reset-${index}`,
+            parentId: null,
+            createdAt: "2026-08-15T12:00:00.000Z",
+          }),
+        ),
+      },
+    ]) {
+      expectValidationError(() =>
+        assertClientQueryResponse({
+          ok: true,
+          queryName: "session.transcript.readPage",
+          result: invalid,
+        }),
+      );
+    }
   });
 });
 
@@ -995,9 +1142,25 @@ describe("assertClientEvent: outbound strictness", () => {
       accepted: { commandName: "session.drop", requestId: "req-1", status: "accepted", acceptedAt: "2026-08-12T00:00:00.000Z" },
     });
     assertClientEvent({
-      kind: "command.interactionRequired",
+      kind: "interaction.required",
       ...base,
-      interaction: { kind: "confirm", interactionId: "i-1", requestId: "req-1", message: "Drop?", destructive: true },
+      interaction: {
+        kind: "confirm",
+        interactionId: "i-1",
+        sessionId: "session-1",
+        leaseGeneration: 1,
+        title: "Drop?",
+        requestId: "req-1",
+        message: "Drop?",
+        destructive: true,
+      },
+    });
+    assertClientEvent({
+      kind: "interaction.resolved",
+      ...base,
+      interactionId: "i-1",
+      leaseGeneration: 1,
+      outcome: "submitted",
     });
     assertClientEvent({
       kind: "command.receipt",
@@ -1012,6 +1175,21 @@ describe("assertClientEvent: outbound strictness", () => {
     });
     assertClientEvent({ kind: "resync.required", ...base, reason: "cursor gap" });
     assertClientEvent({ kind: "diagnostics.changed", ...base });
+    assertClientEvent({
+      kind: "conversation.changed",
+      ...base,
+      runtimeEpoch: 1,
+      sessionId: "session-1",
+      eventSeq: 3,
+      update: {
+        kind: "conversation.message.started",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        messageId: "msg-1",
+        role: "assistant",
+        createdAt: "2026-08-15T12:00:00.000Z",
+      },
+    });
   });
 
   test("rejects unknown kinds and unknown envelope fields", () => {
@@ -1036,16 +1214,84 @@ describe("assertClientEvent: outbound strictness", () => {
     );
     expectValidationError(() =>
       assertClientEvent({
-        kind: "command.interactionRequired",
+        kind: "interaction.required",
         ...base,
-        interaction: { kind: "select", interactionId: "i-1", requestId: "req-1", options: "nope", multiple: false },
+        interaction: {
+          kind: "select",
+          interactionId: "i-1",
+          sessionId: "session-1",
+          leaseGeneration: 1,
+          title: "Pick",
+          requestId: "req-1",
+          options: "nope",
+          multiple: false,
+        },
       }),
+    );
+    expectValidationError(() =>
+      assertClientEvent({ kind: "interaction.resolved", ...base, interactionId: "i-1", leaseGeneration: 1, outcome: "forged" }),
     );
     expectValidationError(() =>
       assertClientEvent({
         kind: "runtime.changed",
         ...base,
         connection: { status: "connected", classification: "root", runtimeId: "r-1" },
+      }),
+    );
+    expectValidationError(() =>
+      assertClientEvent({
+        kind: "conversation.changed",
+        ...base,
+        runtimeEpoch: 1,
+        sessionId: "session-1",
+        eventSeq: 1,
+        update: { kind: "conversation.forged", sessionId: "session-1" },
+      }),
+    );
+    expectValidationError(() =>
+      assertClientEvent({
+        kind: "conversation.changed",
+        ...base,
+        runtimeEpoch: 1,
+        sessionId: "session-1",
+        eventSeq: 1,
+        update: {
+          kind: "conversation.message.started",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          messageId: "msg-1",
+          role: "assistant",
+          createdAt: "2026-08-15T12:00:00.000Z",
+          extra: true,
+        },
+      }),
+    );
+    expectValidationError(() =>
+      assertClientEvent({
+        kind: "conversation.changed",
+        ...base,
+        runtimeEpoch: 1,
+        sessionId: "session-1",
+        eventSeq: 1,
+        update: {
+          kind: "conversation.message.delta",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          messageId: "msg-1",
+          blockId: "b1",
+          blockType: "text",
+          delta: "x".repeat(CONVERSATION_LIMITS.DELTA_MAX_BYTES + 1),
+        },
+      }),
+    );
+    expectValidationError(() =>
+      assertClientEvent({
+        kind: "conversation.changed",
+        ...base,
+        runtimeEpoch: 1,
+        sessionId: "session-1",
+        eventSeq: 1,
+        update: "nope",
       }),
     );
   });

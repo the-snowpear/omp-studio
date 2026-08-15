@@ -10,7 +10,7 @@ import type {
   SessionId,
   StateVersion,
 } from "./ids";
-import type { InteractionSummary } from "./interactions";
+import type { StudioPendingInteraction } from "./interactions";
 
 export interface PlanState {
   status: "off" | "active" | "paused" | "review";
@@ -61,7 +61,7 @@ export interface OperatorStateSnapshot {
   pause?: PauseState;
   live?: LiveState;
   pendingMessages: number;
-  pendingInteraction?: InteractionSummary;
+  pendingInteraction?: StudioPendingInteraction;
   activeCommandIds: CommandId[];
   agentsRevision: number;
   jobsRevision: number;

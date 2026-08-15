@@ -1,3 +1,8 @@
+import { ContractValidationError } from "./contract-error.js";
+import {
+  CONVERSATION_LIMITS,
+  SESSION_TRANSCRIPT_READ_KIND,
+} from "./contracts/conversation.js";
 import {
   STUDIO_PROTOCOL_NAME,
   STUDIO_PROTOCOL_VERSION,
@@ -10,17 +15,23 @@ import {
   type StudioSnapshotResponse,
 } from "./contracts/protocol.js";
 import type { OperatorStateSnapshot } from "./contracts/state.js";
-import type { OperatorCommandManifest, OperatorCommandManifestEntry } from "./contracts/manifests.js";
+import type { OperatorCommandManifest } from "./contracts/manifests.js";
+import {
+  isConversationRuntimeEventKind,
+  parseConversationRuntimeEvent,
+  parseOpaqueConversationCursor,
+  parseSessionTranscriptReadLimit,
+} from "./conversation-validation.js";
 
-export class ContractValidationError extends Error {
-  constructor(
-    message: string,
-    readonly path = "$",
-  ) {
-    super(`${path}: ${message}`);
-    this.name = "ContractValidationError";
-  }
-}
+export { ContractValidationError } from "./contract-error.js";
+export {
+  parseConversationContentBlock,
+  parseConversationItem,
+  parseConversationRuntimeEvent,
+  parseConversationTranscriptPage,
+  parseOpaqueConversationCursor,
+  parseSessionTranscriptReadLimit,
+} from "./conversation-validation.js";
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -337,18 +348,17 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
     const interaction = record(input.pendingInteraction, "$snapshot.snapshot.pendingInteraction");
     exactKeys(
       interaction,
-      ["interactionId", "commandId", "kind", "owner", "leaseGeneration"],
+      ["request", "owner", "leaseGeneration"],
       "$snapshot.snapshot.pendingInteraction",
     );
-    nonEmptyString(interaction.interactionId, "$snapshot.snapshot.pendingInteraction.interactionId");
-    nonEmptyString(interaction.commandId, "$snapshot.snapshot.pendingInteraction.commandId");
-    if (!["confirm", "select", "input", "editor", "approval"].includes(interaction.kind as string)) {
-      throw new ContractValidationError("unsupported interaction kind", "$snapshot.snapshot.pendingInteraction.kind");
-    }
     if (interaction.owner !== "gui" && interaction.owner !== "tui") {
       throw new ContractValidationError("unsupported interaction owner", "$snapshot.snapshot.pendingInteraction.owner");
     }
     nonNegativeInteger(interaction.leaseGeneration, "$snapshot.snapshot.pendingInteraction.leaseGeneration");
+    validateRemoteInteractionRequest(
+      record(interaction.request, "$snapshot.snapshot.pendingInteraction.request"),
+      "$snapshot.snapshot.pendingInteraction.request",
+    );
   }
   return input as unknown as OperatorStateSnapshot;
 }
@@ -411,6 +421,14 @@ export function parseStudioEventEnvelope(value: unknown): StudioEventEnvelope {
     }
     positiveInteger(event.leaseGeneration, "$event.event.leaseGeneration");
     validateRemoteInteractionRequest(record(event.request, "$event.event.request"), "$event.event.request");
+  } else if (event.kind === "interaction.resolved") {
+    exactKeys(event, ["kind", "interactionId", "commandId", "leaseGeneration", "outcome"], "$event.event");
+    nonEmptyString(event.interactionId, "$event.event.interactionId");
+    nonEmptyString(event.commandId, "$event.event.commandId");
+    nonNegativeInteger(event.leaseGeneration, "$event.event.leaseGeneration");
+    if (!["submitted", "cancelled", "aborted", "expired"].includes(event.outcome as string)) {
+      throw new ContractValidationError("unsupported interaction outcome", "$event.event.outcome");
+    }
   } else if (event.kind === "progress") {
     exactKeys(event, ["kind", "commandId", "stage", "percent"], "$event.event");
     nonEmptyString(event.commandId, "$event.event.commandId");
@@ -458,6 +476,8 @@ export function parseStudioEventEnvelope(value: unknown): StudioEventEnvelope {
 	} else if (event.kind === "btw.changed") {
 		exactKeys(event, ["kind", "snapshot"], "$event.event");
 		jsonValue(event.snapshot, "$event.event.snapshot");
+	} else if (isConversationRuntimeEventKind(event.kind)) {
+		parseConversationRuntimeEvent(event, "$event.event");
 	} else {
 		throw new ContractValidationError("unsupported event kind", "$event.event.kind");
   }
@@ -542,7 +562,7 @@ const MAX_COMMAND_ID_LENGTH = 1024;
 const MAX_AGENT_ID_LENGTH = 512;
 const MAX_AGENT_DEFINITION_LENGTH = 256;
 const MAX_AGENT_TEXT_LENGTH = 64 * 1024;
-const MAX_TRANSCRIPT_PAGE = 100;
+const MAX_TRANSCRIPT_PAGE = CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX;
 
 function jsonValue(value: unknown, path: string, seen: Set<object> = new Set()): void {
   if (value === null) return;
@@ -680,6 +700,17 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   "loop.disable": { keys: ["kind"] },
   "session.fork": { keys: ["kind"] },
   "session.tree.get": { keys: ["kind"] },
+  [SESSION_TRANSCRIPT_READ_KIND]: {
+    keys: ["kind", "cursor", "limit"],
+    validate: (operation) => {
+      if (operation.cursor !== undefined) {
+        parseOpaqueConversationCursor(operation.cursor, "$request.operation.cursor");
+      }
+      if (operation.limit !== undefined) {
+        parseSessionTranscriptReadLimit(operation.limit, "$request.operation.limit");
+      }
+    },
+  },
   "session.tree.navigate": {
     keys: ["kind", "targetId", "summarize", "customInstructions", "reanswer"],
     validate: (operation) => {
@@ -994,6 +1025,7 @@ const ERROR_CODES = new Set([
   "PROTOCOL_UNSUPPORTED",
   "RUNTIME_EPOCH_STALE",
   "STATE_VERSION_CONFLICT",
+  "CURSOR_STALE",
   "CAPABILITY_UNAVAILABLE",
   "COMMAND_UNKNOWN",
   "COMMAND_BLOCKED",

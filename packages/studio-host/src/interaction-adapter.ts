@@ -4,6 +4,7 @@ import type {
   RemoteInteractionRequest,
   RemoteInteractionRequiredEvent,
   RemoteInteractionResponse,
+  StudioInteractionResolvedEvent,
   StudioOperation,
 } from "@omp-studio/studio-protocol";
 import { CommandArbiter, StudioHostError, type InteractionSurface } from "./command-arbiter.js";
@@ -78,6 +79,33 @@ export class RemoteInteractionAdapter {
     };
     this.#pending = pending;
     return this.#clonePending(pending);
+  }
+
+  /** Drop the pending interaction locally. Does not dispatch a Runtime respond. */
+  clear(): void {
+    this.#pending = undefined;
+    this.#inFlight = false;
+    this.arbiter.abandonAllInteractions();
+  }
+
+  /**
+   * Runtime-side resolution (`interaction.resolved`): when the event matches
+   * the adopted interaction id + generation, complete the arbiter ownership
+   * and drop the local pending. Stale generations and unknown ids are
+   * ignored (idempotent). Returns true when the local pending was cleared.
+   */
+  resolve(event: StudioInteractionResolvedEvent): boolean {
+    const pending = this.#pending;
+    if (
+      pending === undefined ||
+      pending.interactionId !== event.interactionId ||
+      pending.generation !== event.leaseGeneration
+    ) {
+      return false;
+    }
+    this.arbiter.completeInteraction(event.interactionId, event.commandId, pending.owner, pending.generation);
+    this.#pending = undefined;
+    return true;
   }
 
   /** Defensive clone of the pending interaction, or undefined while idle. */

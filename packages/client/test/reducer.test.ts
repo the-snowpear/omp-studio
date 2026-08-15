@@ -19,6 +19,7 @@ import type {
   ClientError,
   ClientEvent,
   ClientEventBase,
+  ClientInteraction,
   ClientTransport,
   CommandName,
   CommandRequestId,
@@ -43,7 +44,8 @@ import {
   type ClientState,
 } from "../src/reducer.js";
 import type { ClientClockAndIds } from "../src/clock.js";
-import { StudioClientImpl } from "../src/studio-client.js";
+import { StudioClientImpl, type ConversationHydrateClient } from "../src/studio-client.js";
+import { selectConversationHydrate } from "../src/conversation-state.js";
 
 const TS = "2026-08-12T00:00:00.000Z";
 const REQ_1 = "req-1" as CommandRequestId;
@@ -122,17 +124,43 @@ function accepted(requestId: CommandRequestId, cursor: number, overrides: EventO
   };
 }
 
-function interactionRequired(requestId: CommandRequestId, cursor: number, overrides: EventOverrides = {}): ClientEvent {
+function interactionRequired(
+  requestId: CommandRequestId | undefined,
+  cursor: number,
+  overrides: EventOverrides = {},
+  interactionOverrides: Partial<ClientInteraction> = {},
+): ClientEvent {
+  const interaction = {
+    interactionId: "ia-1" as InteractionId,
+    sessionId: "session-1" as SessionId,
+    leaseGeneration: 1,
+    title: "Confirm drop",
+    ...(requestId === undefined ? {} : { requestId }),
+    kind: "confirm" as const,
+    message: "Drop thread?",
+    destructive: true,
+    ...interactionOverrides,
+  };
   return {
     ...base(String(cursor), overrides),
-    kind: "command.interactionRequired",
-    interaction: {
-      interactionId: "ia-1" as InteractionId,
-      requestId,
-      kind: "confirm",
-      message: "Drop thread?",
-      destructive: true,
-    },
+    kind: "interaction.required",
+    interaction: interaction as ClientInteraction,
+  };
+}
+
+function interactionResolved(
+  interactionId: InteractionId,
+  leaseGeneration: number,
+  cursor: number,
+  outcome: "submitted" | "cancelled" | "aborted" | "expired" = "submitted",
+  overrides: EventOverrides = {},
+): ClientEvent {
+  return {
+    ...base(String(cursor), overrides),
+    kind: "interaction.resolved",
+    interactionId,
+    leaseGeneration,
+    outcome,
   };
 }
 
@@ -336,9 +364,31 @@ test("runtime loss marks accepted commands outcome_unknown", () => {
     assert.fail("expected outcome_unknown entry");
   }
   assert.equal(state.connection.runtimeEpoch, null);
+  assert.equal(state.entities.snapshot, null);
+  assert.equal(state.connection.stateVersion, null);
   // a completed receipt after outcome_unknown is ignored: terminal is final
   state = reduceClientState(state, { type: "event", event: completedReceipt(REQ_1, 13) });
   assert.equal(state.commands[REQ_1]?.status, "outcome_unknown");
+});
+
+test("a new runtime epoch accepts a smaller stateVersion and replaces the snapshot", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(11, snapshot(9, 1)) });
+  assert.equal(state.entities.snapshot?.stateVersion, 9);
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(1, 2)) });
+  assert.equal(state.connection.runtimeEpoch, 2);
+  assert.equal(state.connection.stateVersion, 1);
+  assert.equal(state.entities.snapshot?.stateVersion, 1);
+  assert.equal(state.entities.snapshot?.runtimeEpoch, 2);
+});
+
+test("the same runtime epoch still rejects a regressing snapshot", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(11, snapshot(4, 1)) });
+  const before = state.entities.snapshot;
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(2, 1)) });
+  assert.equal(state.entities.snapshot, before);
+  assert.equal(state.connection.stateVersion, 4);
 });
 
 test("a runtime epoch change via snapshot marks in-flight commands outcome_unknown", () => {
@@ -371,9 +421,12 @@ test("interaction_required transitions from pending states and never regresses",
   state = reduceClientState(state, { type: "event", event: accepted(REQ_1, 11) });
   const interactionEvent: ClientEvent = {
     ...base("12"),
-    kind: "command.interactionRequired",
+    kind: "interaction.required",
     interaction: {
       interactionId: "ia-1" as InteractionId,
+      sessionId: "session-1" as SessionId,
+      leaseGeneration: 1,
+      title: "Confirm drop",
       requestId: REQ_1,
       kind: "confirm",
       message: "Drop thread?",
@@ -382,12 +435,72 @@ test("interaction_required transitions from pending states and never regresses",
   };
   state = reduceClientState(state, { type: "event", event: interactionEvent });
   assert.equal(state.commands[REQ_1]?.status, "interaction_required");
+  assert.equal(state.interaction.pending?.interactionId, "ia-1");
   state = reduceClientState(state, { type: "event", event: completedReceipt(REQ_1, 13) });
   assert.equal(state.commands[REQ_1]?.status, "completed");
   // a late interaction cannot regress a terminal command
   const late: ClientEvent = { ...interactionEvent, cursor: "14" as EventCursor };
   state = reduceClientState(state, { type: "event", event: late });
   assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
+test("interaction without a requestId still enters state.interaction.pending", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  assert.equal(state.interaction.pending?.kind, "confirm");
+  assert.equal(state.interaction.pending?.title, "Confirm drop");
+  assert.equal("requestId" in state.interaction.pending!, false);
+});
+
+test("interaction.resolved clears pending only for matching id and generation", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  // wrong generation: no-op
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 2, 12) });
+  assert.ok(state.interaction.pending);
+  // correct generation: cleared
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 1, 13) });
+  assert.equal(state.interaction.pending, null);
+  // duplicate resolved is idempotent
+  const before = state;
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 1, 14) });
+  assert.equal(state, before);
+  // different id: no-op
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 15) });
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-other" as InteractionId, 1, 16) });
+  assert.ok(state.interaction.pending);
+});
+
+test("bootstrap restores pending interaction and clears it when absent", () => {
+  const pending = {
+    interactionId: "ia-1" as InteractionId,
+    sessionId: "session-1" as SessionId,
+    leaseGeneration: 3,
+    title: "Pick a branch",
+    kind: "select" as const,
+    options: [{ id: "option:0", label: "main" }],
+    multiple: false,
+  };
+  const withPending = reduceClientState(createInitialClientState(), {
+    type: "bootstrap.set",
+    bootstrap: { ...bootstrap(), pendingInteraction: pending },
+    occurredAt: TS,
+  });
+  assert.deepEqual(withPending.interaction.pending, pending);
+  const withoutPending = reduceClientState(withPending, {
+    type: "bootstrap.set",
+    bootstrap: bootstrap(),
+    occurredAt: TS,
+  });
+  assert.equal(withoutPending.interaction.pending, null);
+});
+
+test("runtime epoch change clears the pending interaction", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  assert.ok(state.interaction.pending);
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(2, 2)) });
+  assert.equal(state.interaction.pending, null);
 });
 
 test("sensitive mutations are blocked with RESYNC_REQUIRED while resync is required", () => {
@@ -690,4 +803,32 @@ test("MemoryClientTransport enforces closed behavior", async () => {
   transport.subscribe({ scope: "all" }, (e) => delivered.push(e));
   transport.emit(changed(11));
   assert.equal(delivered.length, 0);
+});
+
+test("StudioClientImpl records transcript hydrate failure on conversation state", () => {
+  const transport: ClientTransport = {
+    async bootstrap() {
+      return bootstrap();
+    },
+    async query() {
+      return { ok: true, queryName: "session.state", result: snapshot(1, 1) } as never;
+    },
+    async command(request) {
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: TS };
+    },
+    subscribe() {
+      return () => undefined;
+    },
+    async close() {
+      return;
+    },
+  };
+  const client = new StudioClientImpl(transport, fixedIds());
+  const hydrate: ConversationHydrateClient = client;
+  const gen = hydrate.beginTranscriptHydrate();
+  hydrate.failTranscriptHydrate({ code: "UNAVAILABLE", message: "runtime down" }, gen);
+  const view = selectConversationHydrate(client.getState().conversation);
+  assert.equal(view.status, "error");
+  assert.equal(view.error?.code, "UNAVAILABLE");
+  assert.equal(view.error?.message, "runtime down");
 });

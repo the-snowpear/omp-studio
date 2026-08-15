@@ -44,12 +44,16 @@ export interface RemoteInteractionResponse {
   value?: unknown;
 }
 
-export interface InteractionSummary {
-  interactionId: InteractionId;
-  commandId: CommandId;
-  kind: InteractionKind;
-  owner: "gui" | "tui";
-  leaseGeneration: number;
+/**
+ * Full recoverable pending interaction carried by the snapshot. The request
+ * is the same shape the Bridge carries; the Host redacts and length-limits
+ * before mapping to the Client contract. At most one pending Interaction
+ * exists in a snapshot; a second request must fail closed.
+ */
+export interface StudioPendingInteraction {
+  readonly request: RemoteInteractionRequest;
+  readonly owner: "gui" | "tui";
+  readonly leaseGeneration: number;
 }
 
 export interface RemoteInteractionRequiredEvent {
@@ -57,4 +61,12 @@ export interface RemoteInteractionRequiredEvent {
   request: RemoteInteractionRequest;
   owner: "gui" | "tui";
   leaseGeneration: number;
+}
+
+export interface StudioInteractionResolvedEvent {
+  kind: "interaction.resolved";
+  interactionId: InteractionId;
+  commandId: CommandId;
+  leaseGeneration: number;
+  outcome: "submitted" | "cancelled" | "aborted" | "expired";
 }
