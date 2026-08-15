@@ -109,7 +109,7 @@ index 2f8f272..63e2d06 100644
  							request.operation.kind === "tui.transfer"
  						) {
 diff --git a/packages/coding-agent/src/studio/conversation-protocol.ts b/packages/coding-agent/src/studio/conversation-protocol.ts
-index a332092..154a5ff 100644
+index a332092..8d4a0e2 100644
 --- a/packages/coding-agent/src/studio/conversation-protocol.ts
 +++ b/packages/coding-agent/src/studio/conversation-protocol.ts
 @@ -86,7 +86,7 @@ export const CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION = false as cons
@@ -121,9 +121,36 @@ index a332092..154a5ff 100644
  export const STUDIO_CONVERSATION_DISPATCH_ALLOW_LIST = [SESSION_TRANSCRIPT_READ_KIND] as const;
  
  export const CONVERSATION_LIMITS = {
+@@ -224,7 +224,8 @@ function jsonValueLimited(value: unknown, depth: number, seen: Set<object>): voi
+ 			return;
+ 		}
+ 		const prototype = Object.getPrototypeOf(value);
+-		if (prototype !== Object.prototype && prototype !== null) throw new StudioConversationError("Invalid JSON object");
++		if (prototype !== Object.prototype && prototype !== null)
++			throw new StudioConversationError("Invalid JSON object");
+ 		for (const item of Object.values(value as Record<string, unknown>)) jsonValueLimited(item, depth + 1, seen);
+ 	} finally {
+ 		seen.delete(value);
+@@ -335,7 +336,15 @@ export function parseConversationItem(value: unknown): ConversationItem {
+ 
+ export function parseConversationTranscriptPage(value: unknown): ConversationTranscriptPage {
+ 	const input = record(value);
+-	exactKeys(input, ["runtimeEpoch", "sessionId", "branchLeafId", "items", "olderCursor", "headCursor", "hasMoreBefore"]);
++	exactKeys(input, [
++		"runtimeEpoch",
++		"sessionId",
++		"branchLeafId",
++		"items",
++		"olderCursor",
++		"headCursor",
++		"hasMoreBefore",
++	]);
+ 	if (!Number.isSafeInteger(input.runtimeEpoch) || (input.runtimeEpoch as number) <= 0) {
+ 		throw new StudioConversationError("Invalid runtime epoch");
+ 	}
 diff --git a/packages/coding-agent/src/studio/services/session-transcript-service.ts b/packages/coding-agent/src/studio/services/session-transcript-service.ts
 new file mode 100644
-index 0000000..1111111
+index 0000000..3ae22a6
 --- /dev/null
 +++ b/packages/coding-agent/src/studio/services/session-transcript-service.ts
 @@ -0,0 +1,468 @@

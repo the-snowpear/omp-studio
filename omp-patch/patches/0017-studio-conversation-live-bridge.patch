@@ -1,4 +1,5 @@
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
+index 28cbe0f..83b67db 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
 @@ -442,6 +442,9 @@ export class SessionManager {
@@ -101,16 +102,14 @@ diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/cod
  	#setLeaf(id: string | null): void {
  		this.#index.setLeaf(id);
  		const batch = this.#atomicEntryBatch;
-@@ -2059,7 +2127,18 @@ export class SessionManager {
+@@ -2059,7 +2127,16 @@ export class SessionManager {
  			| PythonExecutionMessage
  			| FileMentionMessage,
  	): string {
 -		const entry: SessionMessageEntry = { type: "message", ...this.#freshEntryFields(), message };
 +		const role = message.role;
 +		const reserved =
-+			role === "user" || role === "assistant" || role === "system"
-+				? this.#takeReservedMessageId(role)
-+				: undefined;
++			role === "user" || role === "assistant" || role === "system" ? this.#takeReservedMessageId(role) : undefined;
 +		const entry: SessionMessageEntry = {
 +			type: "message",
 +			...(reserved === undefined
@@ -121,7 +120,7 @@ diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/cod
  		this.#recordEntry(entry);
  		return entry.id;
  	}
-@@ -2162,9 +2241,12 @@ export class SessionManager {
+@@ -2162,9 +2239,12 @@ export class SessionManager {
  		fromExtension?: boolean,
  		preserveData?: Record<string, unknown>,
  	): string {
@@ -135,7 +134,38 @@ diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/cod
  			summary,
  			shortSummary,
  			firstKeptEntryId,
+diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
+index 63e2d06..3326cf3 100644
+--- a/packages/coding-agent/src/studio/bridge-server.ts
++++ b/packages/coding-agent/src/studio/bridge-server.ts
+@@ -69,9 +69,13 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 		this.#projector = new StudioStateProjector(runtime);
+ 		this.#dispatcher = new StudioBridgeDispatcher(runtime, this.#projector, () => {});
+ 		this.#unsubscribeProjector = this.#projector.onEvent(event => {
+-			const socket = this.#authenticatedSocket;
+-			if (socket !== undefined && !socket.destroyed) {
+-				socket.write(encodeStudioFrame(`event:${event.eventSeq}`, runtime.runtimeEpoch, event));
++			try {
++				const socket = this.#authenticatedSocket;
++				if (socket !== undefined && !socket.destroyed) {
++					socket.write(encodeStudioFrame(`event:${event.eventSeq}`, runtime.runtimeEpoch, event));
++				}
++			} catch {
++				// Isolate mapper/write failures so a bad conversation frame cannot destroy the socket.
+ 			}
+ 		});
+ 		this.#token = await consumeBridgeToken(this.#tokenFile);
+@@ -198,7 +202,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					type: "studio.hello.result",
+ 					requestId: hello.requestId,
+ 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
+-					runtimeVersion: `${VERSION}-studio.13`,
++					runtimeVersion: `${VERSION}-studio.17`,
+ 					upstreamVersion: VERSION,
+ 					upstreamCommit: UPSTREAM_COMMIT,
+ 					runtimeInstanceId: runtime.runtimeId,
 diff --git a/packages/coding-agent/src/studio/state-projector.ts b/packages/coding-agent/src/studio/state-projector.ts
+index e448169..16bb4aa 100644
 --- a/packages/coding-agent/src/studio/state-projector.ts
 +++ b/packages/coding-agent/src/studio/state-projector.ts
 @@ -1,3 +1,4 @@
@@ -245,6 +275,7 @@ diff --git a/packages/coding-agent/src/studio/state-projector.ts b/packages/codi
  	}
  }
 diff --git a/packages/coding-agent/src/studio/studio-host-mode.ts b/packages/coding-agent/src/studio/studio-host-mode.ts
+index b64af1e..6b1aece 100644
 --- a/packages/coding-agent/src/studio/studio-host-mode.ts
 +++ b/packages/coding-agent/src/studio/studio-host-mode.ts
 @@ -31,6 +31,7 @@ import { StudioLoopService } from "./services/loop-service";
@@ -331,38 +362,12 @@ diff --git a/packages/coding-agent/src/studio/studio-host-mode.ts b/packages/cod
  			loop.dispose();
  			live.dispose();
  			modes.dispose();
-diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
---- a/packages/coding-agent/src/studio/bridge-server.ts
-+++ b/packages/coding-agent/src/studio/bridge-server.ts
-@@ -69,9 +69,13 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
- 		this.#projector = new StudioStateProjector(runtime);
- 		this.#dispatcher = new StudioBridgeDispatcher(runtime, this.#projector, () => {});
- 		this.#unsubscribeProjector = this.#projector.onEvent(event => {
--			const socket = this.#authenticatedSocket;
--			if (socket !== undefined && !socket.destroyed) {
--				socket.write(encodeStudioFrame(`event:${event.eventSeq}`, runtime.runtimeEpoch, event));
-+			try {
-+				const socket = this.#authenticatedSocket;
-+				if (socket !== undefined && !socket.destroyed) {
-+					socket.write(encodeStudioFrame(`event:${event.eventSeq}`, runtime.runtimeEpoch, event));
-+				}
-+			} catch {
-+				// Isolate mapper/write failures so a bad conversation frame cannot destroy the socket.
- 			}
- 		});
- 		this.#token = await consumeBridgeToken(this.#tokenFile);
-@@ -200,5 +204,5 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
- 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
--					runtimeVersion: `${VERSION}-studio.13`,
-+					runtimeVersion: `${VERSION}-studio.17`,
- 					upstreamVersion: VERSION,
- 					upstreamCommit: UPSTREAM_COMMIT,
- 					runtimeInstanceId: runtime.runtimeId,
 diff --git a/packages/coding-agent/test/studio-conversation-live-bridge.test.ts b/packages/coding-agent/test/studio-conversation-live-bridge.test.ts
 new file mode 100644
+index 0000000..2f39425
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-conversation-live-bridge.test.ts
-@@ -0,0 +1,668 @@
+@@ -0,0 +1,654 @@
 +import { afterEach, describe, expect, test } from "bun:test";
 +import * as crypto from "node:crypto";
 +import * as fs from "node:fs/promises";
@@ -381,18 +386,15 @@ new file mode 100644
 +} from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
 +import { StudioBridgeServer } from "@oh-my-pi/pi-coding-agent/studio/bridge-server";
 +import { CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION } from "@oh-my-pi/pi-coding-agent/studio/conversation-protocol";
-+import { ConversationLiveProjector } from "@oh-my-pi/pi-coding-agent/studio/services/conversation-live-projector";
 +import { StudioCommandManifestService } from "@oh-my-pi/pi-coding-agent/studio/services/command-manifest-service";
++import { ConversationLiveProjector } from "@oh-my-pi/pi-coding-agent/studio/services/conversation-live-projector";
 +import { StudioInteractionGateway } from "@oh-my-pi/pi-coding-agent/studio/services/interaction-port";
 +import { StudioLiveService } from "@oh-my-pi/pi-coding-agent/studio/services/live-service";
 +import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loop-service";
 +import { StudioPauseService } from "@oh-my-pi/pi-coding-agent/studio/services/pause-service";
 +import { StudioSessionTranscriptService } from "@oh-my-pi/pi-coding-agent/studio/services/session-transcript-service";
 +import { StudioStateProjector } from "@oh-my-pi/pi-coding-agent/studio/state-projector";
-+import {
-+	createStudioHostRuntime,
-+	type StudioHostRuntime,
-+} from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
++import { createStudioHostRuntime, type StudioHostRuntime } from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
 +import { TempDir } from "@oh-my-pi/pi-utils";
 +
 +const usage = {
@@ -522,8 +524,7 @@ new file mode 100644
 +		bus.emit({ type: "message_start", message: user });
 +		const started = envelopes.find(event => event.event.kind === "conversation.message.started");
 +		expect(started?.event.kind).toBe("conversation.message.started");
-+		const messageId =
-+			started?.event.kind === "conversation.message.started" ? started.event.messageId : undefined;
++		const messageId = started?.event.kind === "conversation.message.started" ? started.event.messageId : undefined;
 +		expect(messageId).toBeDefined();
 +		expect(messageId).not.toMatch(/^msg-\d+$/);
 +
@@ -532,12 +533,8 @@ new file mode 100644
 +		const completed = envelopes.find(event => event.event.kind === "conversation.message.completed");
 +		expect(completed?.event.kind).toBe("conversation.message.completed");
 +		expect(persistedId).toBe(messageId);
-+		expect(
-+			completed?.event.kind === "conversation.message.completed" && completed.event.messageId,
-+		).toBe(messageId);
-+		expect(
-+			completed?.event.kind === "conversation.message.completed" && completed.event.item.itemId,
-+		).toBe(messageId);
++		expect(completed?.event.kind === "conversation.message.completed" && completed.event.messageId).toBe(messageId);
++		expect(completed?.event.kind === "conversation.message.completed" && completed.event.item.itemId).toBe(messageId);
 +
 +		const page = new StudioSessionTranscriptService(() => ({
 +			runtimeEpoch: 3,
@@ -587,9 +584,9 @@ new file mode 100644
 +
 +		const completed = envelopes.find(event => event.event.kind === "conversation.compaction.completed");
 +		expect(completed?.event.kind).toBe("conversation.compaction.completed");
-+		expect(
-+			completed?.event.kind === "conversation.compaction.completed" && completed.event.item?.itemId,
-+		).toBe(persistedId);
++		expect(completed?.event.kind === "conversation.compaction.completed" && completed.event.item?.itemId).toBe(
++			persistedId,
++		);
 +		const page = new StudioSessionTranscriptService(() => ({
 +			runtimeEpoch: 3,
 +			sessionId: manager.getSessionId(),
@@ -676,9 +673,9 @@ new file mode 100644
 +		const laterCompactId = manager.appendCompaction("later compact", "later", userId, 4);
 +		expect(laterCompactId).toBe(nextCompactReserved);
 +		expect(laterCompactId).not.toBe(assistantReserved);
-+		expect(manager.getBranch().some(entry => entry.type === "compaction" && entry.summary === "should not persist")).toBe(
-+			false,
-+		);
++		expect(
++			manager.getBranch().some(entry => entry.type === "compaction" && entry.summary === "should not persist"),
++		).toBe(false);
 +
 +		live.dispose();
 +		state.dispose();
@@ -922,11 +919,7 @@ new file mode 100644
 +	return frame;
 +}
 +
-+async function exchangeSnapshot(
-+	socket: net.Socket,
-+	requestId: string,
-+	runtimeEpoch = 7,
-+): Promise<void> {
++async function exchangeSnapshot(socket: net.Socket, requestId: string, runtimeEpoch = 7): Promise<void> {
 +	const response = receiveFrame(socket);
 +	socket.write(
 +		encodeStudioFrame(`snapshot-request:${requestId}`, runtimeEpoch, {
@@ -1024,9 +1017,7 @@ new file mode 100644
 +			.map(frame => frame.body as StudioEventEnvelope)
 +			.find(event => event.event.kind === "conversation.message.completed");
 +		expect(startedEvent?.event.kind === "conversation.message.started" && startedEvent.event.messageId).toBe(
-+			completedEvent?.event.kind === "conversation.message.completed"
-+				? completedEvent.event.item.itemId
-+				: undefined,
++			completedEvent?.event.kind === "conversation.message.completed" ? completedEvent.event.item.itemId : undefined,
 +		);
 +		conversation.dispose();
 +	});

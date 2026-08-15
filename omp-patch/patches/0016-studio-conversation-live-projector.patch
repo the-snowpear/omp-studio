@@ -1,8 +1,9 @@
 diff --git a/packages/coding-agent/src/studio/services/conversation-live-projector.ts b/packages/coding-agent/src/studio/services/conversation-live-projector.ts
 new file mode 100644
+index 0000000..5f93784
 --- /dev/null
 +++ b/packages/coding-agent/src/studio/services/conversation-live-projector.ts
-@@ -0,0 +1,881 @@
+@@ -0,0 +1,877 @@
 +import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 +import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";
 +import { logger } from "@oh-my-pi/pi-utils";
@@ -203,10 +204,7 @@ new file mode 100644
 +		this.#unsubscribe = target.subscribe(event => this.project(event));
 +	}
 +
-+	rebind(
-+		target: ConversationLiveBindTarget | undefined,
-+		identity: { sessionId: string; runtimeEpoch: number },
-+	): void {
++	rebind(target: ConversationLiveBindTarget | undefined, identity: { sessionId: string; runtimeEpoch: number }): void {
 +		this.#unsubscribe?.();
 +		this.#unsubscribe = undefined;
 +		this.#clearLiveState();
@@ -274,11 +272,7 @@ new file mode 100644
 +				this.#onCompactionEnd(event);
 +				return;
 +			case "auto_retry_start":
-+				this.#emitNotice(
-+					"warning",
-+					`Retry ${event.attempt}/${event.maxAttempts}`,
-+					"retry",
-+				);
++				this.#emitNotice("warning", `Retry ${event.attempt}/${event.maxAttempts}`, "retry");
 +				return;
 +			case "notice":
 +				this.#emitNotice(event.level, event.message, event.source);
@@ -396,10 +390,13 @@ new file mode 100644
 +		if (this.#turnAborted) return;
 +		this.#flushPendingDeltas();
 +		const turnId = this.#ensureTurnId();
-+		const messageId = this.#openAssistantId ?? this.#lastItemId ?? this.#options.reserveMessageId({
-+			role: "assistant",
-+			createdAt: this.#clock.nowIso(),
-+		});
++		const messageId =
++			this.#openAssistantId ??
++			this.#lastItemId ??
++			this.#options.reserveMessageId({
++				role: "assistant",
++				createdAt: this.#clock.nowIso(),
++			});
 +		const args = sanitizeToolArguments(event.args);
 +		const toolName = sanitizePublicText(event.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
 +		if (toolName.length === 0) {
@@ -886,9 +883,10 @@ new file mode 100644
 +}
 diff --git a/packages/coding-agent/src/studio/services/conversation-sanitizer.ts b/packages/coding-agent/src/studio/services/conversation-sanitizer.ts
 new file mode 100644
+index 0000000..6e3056a
 --- /dev/null
 +++ b/packages/coding-agent/src/studio/services/conversation-sanitizer.ts
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,191 @@
 +/**
 + * Shared conversation sanitizer for live events and (plan 02) transcript mapping.
 + *
@@ -898,11 +896,7 @@ new file mode 100644
 + */
 +import * as os from "node:os";
 +import * as path from "node:path";
-+import {
-+	CONVERSATION_LIMITS,
-+	CONVERSATION_REDACT_KEY_PATTERN,
-+	type JsonValue,
-+} from "../conversation-protocol";
++import { CONVERSATION_LIMITS, CONVERSATION_REDACT_KEY_PATTERN, type JsonValue } from "../conversation-protocol";
 +
 +const encoder = new TextEncoder();
 +const decoder = new TextDecoder();
@@ -1014,7 +1008,10 @@ new file mode 100644
 +	}
 +}
 +
-+function collectStrings(value: JsonValue, bucket: { text: string; parent: Record<string, JsonValue> | JsonValue[]; key: string | number }[]): void {
++function collectStrings(
++	value: JsonValue,
++	bucket: { text: string; parent: Record<string, JsonValue> | JsonValue[]; key: string | number }[],
++): void {
 +	if (typeof value === "string") return;
 +	if (Array.isArray(value)) {
 +		for (let index = 0; index < value.length; index++) {
@@ -1048,14 +1045,12 @@ new file mode 100644
 +	const strings: { text: string; parent: Record<string, JsonValue> | JsonValue[]; key: string | number }[] = [];
 +	collectStrings(clone, strings);
 +	strings.sort((a, b) => utf8ByteLength(b.text) - utf8ByteLength(a.text));
-+	let truncated = false;
 +	for (const entry of strings) {
 +		if (utf8ByteLength(JSON.stringify(clone)) <= maxBytes) break;
 +		const keep = Math.max(0, Math.floor(utf8ByteLength(entry.text) / 2));
 +		const next = truncateUtf8(entry.text, keep);
 +		if (Array.isArray(entry.parent)) entry.parent[entry.key as number] = next.text;
 +		else entry.parent[entry.key as string] = next.text;
-+		truncated = true;
 +	}
 +	if (utf8ByteLength(JSON.stringify(clone)) <= maxBytes) return { value: clone, truncated: true };
 +	return { value: undefined, truncated: true };
@@ -1085,24 +1080,28 @@ new file mode 100644
 +}
 diff --git a/packages/coding-agent/test/studio-conversation-live-projector.test.ts b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
 new file mode 100644
+index 0000000..8ba8e85
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
-@@ -0,0 +1,610 @@
+@@ -0,0 +1,609 @@
 +import { describe, expect, test } from "bun:test";
 +import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 +import type { AssistantMessage, AssistantMessageEvent, UserMessage } from "@oh-my-pi/pi-ai";
 +import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session-events";
 +import {
 +	CONVERSATION_LIMITS,
-+	parseConversationRuntimeEvent,
 +	type ConversationRuntimeEvent,
++	parseConversationRuntimeEvent,
 +} from "@oh-my-pi/pi-coding-agent/studio/conversation-protocol";
 +import {
 +	CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD,
-+	ConversationLiveProjector,
 +	type ConversationLiveBindTarget,
++	ConversationLiveProjector,
 +} from "@oh-my-pi/pi-coding-agent/studio/services/conversation-live-projector";
-+import { sanitizeJsonValue, sanitizeToolArguments } from "@oh-my-pi/pi-coding-agent/studio/services/conversation-sanitizer";
++import {
++	sanitizeJsonValue,
++	sanitizeToolArguments,
++} from "@oh-my-pi/pi-coding-agent/studio/services/conversation-sanitizer";
 +
 +const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
 +const TS = Date.UTC(2026, 7, 15, 0, 0, 0);
@@ -1213,9 +1212,7 @@ new file mode 100644
 +		const message = assistant([{ type: "text", text: "Hello world" }]);
 +		projector.project({ type: "agent_start" });
 +		projector.project({ type: "message_start", message });
-+		projector.project(
-+			update(message, { type: "text_start", contentIndex: 0, partial: message }),
-+		);
++		projector.project(update(message, { type: "text_start", contentIndex: 0, partial: message }));
 +		for (const piece of ["Hel", "lo", " ", "wo", "rld"]) {
 +			projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: piece, partial: message }));
 +		}
@@ -1256,9 +1253,7 @@ new file mode 100644
 +		const thinkingDelta = events.find(
 +			event => event.kind === "conversation.message.delta" && event.blockType === "thinking",
 +		);
-+		const textDelta = events.find(
-+			event => event.kind === "conversation.message.delta" && event.blockType === "text",
-+		);
++		const textDelta = events.find(event => event.kind === "conversation.message.delta" && event.blockType === "text");
 +		expect(thinkingDelta?.kind === "conversation.message.delta" && thinkingDelta.blockId).not.toBe(
 +			textDelta?.kind === "conversation.message.delta" ? textDelta.blockId : "",
 +		);
@@ -1553,12 +1548,10 @@ new file mode 100644
 +		const fresh = assistant([{ type: "text", text: "new" }]);
 +		second.emit({ type: "agent_start" });
 +		second.emit({ type: "message_start", message: fresh });
-+		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "STALE")).toBe(
-+			false,
-+		);
-+		expect(events.filter(event => event.kind === "conversation.message.started").map(event => event.sessionId)).toEqual(
-+			["session-1", "session-2"],
-+		);
++		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "STALE")).toBe(false);
++		expect(
++			events.filter(event => event.kind === "conversation.message.started").map(event => event.sessionId),
++		).toEqual(["session-1", "session-2"]);
 +		expect(first.listenerCount).toBe(0);
 +		expect(second.listenerCount).toBe(1);
 +	});
@@ -1694,7 +1687,9 @@ new file mode 100644
 +		]);
 +		expect(wireAll(events).map(event => event.kind)).toEqual(kinds(events));
 +		projector.dispose();
-+		session.emit(update(assistantMessage, { type: "text_delta", contentIndex: 0, delta: "nope", partial: assistantMessage }));
++		session.emit(
++			update(assistantMessage, { type: "text_delta", contentIndex: 0, delta: "nope", partial: assistantMessage }),
++		);
 +		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "nope")).toBe(false);
 +	});
 +});

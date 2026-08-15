@@ -4727,7 +4727,7 @@ index 4103692..2fef927 100644
  	} finally {
 diff --git a/packages/coding-agent/test/studio-agent-hub-service.test.ts b/packages/coding-agent/test/studio-agent-hub-service.test.ts
 new file mode 100644
-index 0000000..4455587
+index 0000000..6382c46
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-agent-hub-service.test.ts
 @@ -0,0 +1,727 @@
@@ -4834,7 +4834,7 @@ index 0000000..4455587
 +			calls.push(`ensureLive:${id}`);
 +			if (options.failEnsureLive) throw new Error(`${SECRET_SESSION}: revival failed`);
 +			const ref = registry.refs.get(id);
-+			if (!ref || ref.status !== "parked") throw new Error(`${SECRET_SESSION}: unknown agent`);
++			if (ref?.status !== "parked") throw new Error(`${SECRET_SESSION}: unknown agent`);
 +			const live = makeLiveAgent();
 +			ref.session = live as unknown as AgentSession;
 +			ref.status = "idle";
@@ -5855,10 +5855,10 @@ index 0000000..69af107
 +});
 diff --git a/packages/coding-agent/test/studio-job-service.test.ts b/packages/coding-agent/test/studio-job-service.test.ts
 new file mode 100644
-index 0000000..73e7f2f
+index 0000000..17d1537
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-job-service.test.ts
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,139 @@
 +import { describe, expect, test } from "bun:test";
 +import type { AsyncJob } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 +import {
@@ -5899,11 +5899,7 @@ index 0000000..73e7f2f
 +		getAllJobs: () => [...jobs.values()],
 +		cancel: (id, filter) => {
 +			const candidate = jobs.get(id);
-+			if (
-+				!candidate ||
-+				candidate.status !== "running" ||
-+				(filter?.ownerId && candidate.ownerId !== filter.ownerId)
-+			) {
++			if (candidate?.status !== "running" || (filter?.ownerId && candidate.ownerId !== filter.ownerId)) {
 +				return false;
 +			}
 +			candidate.status = "cancelled";
