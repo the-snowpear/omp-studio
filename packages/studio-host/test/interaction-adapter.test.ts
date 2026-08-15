@@ -252,6 +252,54 @@ test("M4 approval submits require a confirmation token", async () => {
   assert.equal(calls.length, 1);
 });
 
+test("M4 approval token binding mismatch fails closed (stale generation / epoch)", async () => {
+  const calls: StudioOperation[] = [];
+  const registry = new HostConfirmationRegistry();
+  const adapter = new RemoteInteractionAdapter(
+    makeArbiter(),
+    registry,
+    async (operation) => {
+      calls.push(operation);
+      return { status: "accepted" };
+    },
+  );
+  adapter.adopt(eventFor(approvalRequest()));
+  const token = registry.issue(
+    { kind: "interaction.respond", interactionId, commandId, decision: "submit" },
+    "gui",
+    { leaseGeneration: 1, runtimeEpoch: 7 },
+  );
+  await assert.rejects(
+    () =>
+      adapter.respond({
+        interactionId,
+        commandId,
+        decision: "submit",
+        owner: "gui",
+        confirmationToken: token,
+        binding: { leaseGeneration: 2, runtimeEpoch: 7 },
+      }),
+    (error: unknown) => isHostError(error, "INTERACTION_STALE"),
+  );
+  assert.ok(adapter.pending()); // interaction stays pending (fail closed)
+  assert.equal(calls.length, 0);
+  // correct binding succeeds
+  const fresh = registry.issue(
+    { kind: "interaction.respond", interactionId, commandId, decision: "submit" },
+    "gui",
+    { leaseGeneration: 1, runtimeEpoch: 7 },
+  );
+  await adapter.respond({
+    interactionId,
+    commandId,
+    decision: "submit",
+    owner: "gui",
+    confirmationToken: fresh,
+    binding: { leaseGeneration: 1, runtimeEpoch: 7 },
+  });
+  assert.equal(calls.length, 1);
+});
+
 test("M4 respond rejects wrong owner, stale ids, and duplicates", async () => {
   const adapter = new RemoteInteractionAdapter(
     makeArbiter(),
@@ -445,10 +493,9 @@ test("M4 adoption rejects replayed, conflicting, and invalid events", () => {
   assert.equal(adopted.interactionId, interactionId);
   assert.equal(adopted.generation, 3);
 
-  assert.throws(
-    () => adapter.adopt(eventFor(confirmRequest(), "tui", 4)),
-    (error: unknown) => isHostError(error, "INTERACTION_STALE"),
-  );
+  const transferred = adapter.adopt(eventFor(confirmRequest(), "tui", 4));
+  assert.equal(transferred.owner, "tui");
+  assert.equal(transferred.generation, 4);
   const conflicting: RemoteInteractionRequest = {
     kind: "confirm",
     interactionId: "interaction-2" as InteractionId,
@@ -459,6 +506,10 @@ test("M4 adoption rejects replayed, conflicting, and invalid events", () => {
   assert.throws(
     () => adapter.adopt(eventFor(conflicting)),
     (error: unknown) => isHostError(error, "COMMAND_BLOCKED"),
+  );
+  assert.throws(
+    () => adapter.adopt(eventFor(confirmRequest(), "gui", 3)),
+    (error: unknown) => isHostError(error, "INTERACTION_STALE"),
   );
 
   const fresh = new RemoteInteractionAdapter(
@@ -530,4 +581,51 @@ test("M4 error messages never echo secret interaction content", async () => {
   assert.ok(caught instanceof StudioHostError);
   assert.equal(caught.code, "NOT_OWNER");
   assert.ok(!caught.message.includes("super-secret-placeholder"));
+});
+
+test("M4 same interactionId with a higher generation updates the pending lease", async () => {
+  const adapter = new RemoteInteractionAdapter(
+    makeArbiter(),
+    new HostConfirmationRegistry(),
+    async () => ({ status: "accepted" }),
+  );
+  adapter.adopt(eventFor(confirmRequest(), "tui", 1));
+  const updated = adapter.adopt(eventFor(confirmRequest(), "gui", 2));
+  assert.equal(updated.owner, "gui");
+  assert.equal(updated.generation, 2);
+  assert.equal(adapter.pending()?.generation, 2);
+  await adapter.respond({ interactionId, commandId, decision: "cancel", owner: "gui" });
+  assert.equal(adapter.pending(), undefined);
+});
+
+test("M4 duplicate same-generation adopt is idempotent and does not throw", () => {
+  const adapter = new RemoteInteractionAdapter(
+    makeArbiter(),
+    new HostConfirmationRegistry(),
+    async () => ({ status: "accepted" }),
+  );
+  adapter.adopt(eventFor(confirmRequest(), "gui", 4));
+  const again = adapter.adopt(eventFor(confirmRequest(), "gui", 4));
+  assert.equal(again.generation, 4);
+  assert.equal(adapter.pending()?.generation, 4);
+});
+
+test("M4 clear drops pending without dispatching a Runtime respond", async () => {
+  const calls: StudioOperation[] = [];
+  const adapter = new RemoteInteractionAdapter(
+    makeArbiter(),
+    new HostConfirmationRegistry(),
+    async (operation) => {
+      calls.push(operation);
+      return { status: "accepted" };
+    },
+  );
+  adapter.adopt(eventFor(confirmRequest()));
+  adapter.clear();
+  assert.equal(adapter.pending(), undefined);
+  await assert.rejects(
+    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
+    (error: unknown) => isHostError(error, "INTERACTION_STALE"),
+  );
+  assert.equal(calls.length, 0);
 });

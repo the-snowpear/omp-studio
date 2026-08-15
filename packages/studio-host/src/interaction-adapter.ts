@@ -31,6 +31,8 @@ export interface RemoteInteractionRespondInput {
   owner: InteractionSurface;
   /** One-shot token; required for destructive confirm and approval submits. */
   confirmationToken?: string;
+  /** Token binding (plan §3.4): lease generation and Runtime epoch. */
+  binding?: { leaseGeneration?: number; runtimeEpoch?: number };
 }
 
 export interface PendingRemoteInteraction {
@@ -147,7 +149,7 @@ export class RemoteInteractionAdapter {
         if (input.confirmationToken === undefined) {
           throw new StudioHostError("INVALID_ARGUMENT", "Confirmation token is required for this interaction response");
         }
-        this.confirmations.consume(input.confirmationToken, operation, input.owner);
+        this.confirmations.consume(input.confirmationToken, operation, input.owner, input.binding);
       }
       await this.#acknowledged(operation);
       this.arbiter.completeInteraction(input.interactionId, input.commandId, input.owner, ownership.generation);

@@ -127,6 +127,10 @@ export class DesktopInteractionHost {
       owner: "gui",
       ...(input.value === undefined ? {} : { value: input.value }),
       ...(confirmationToken === undefined ? {} : { confirmationToken }),
+      // Bind the one-shot token to this interaction's lease generation and
+      // the current Runtime epoch (plan §3.4): a stale generation or a token
+      // minted for an older epoch fails closed at consumption.
+      binding: { leaseGeneration: pending.generation, runtimeEpoch: this.#runtimeEpoch() },
     });
     this.#tokens.delete(tokenKey);
   }
@@ -178,11 +182,24 @@ export class DesktopInteractionHost {
     if (!isHighRisk(kind, destructive)) {
       return;
     }
-    const operation: StudioOperation =
-      kind === "confirm"
-        ? { kind: "interaction.respond", interactionId, commandId, decision: "submit", value: true }
-        : { kind: "interaction.respond", interactionId, commandId, decision: "submit" };
-    this.#tokens.set(`${interactionId}:${generation}`, this.#confirmations.issue(operation, "gui"));
+    // The one-shot token is signed over the exact respond operation: submit
+    // with value true (plan §3.3/§3.4) — decision, value, interactionId and
+    // commandId are all bound by the operation hash.
+    const operation: StudioOperation = {
+      kind: "interaction.respond",
+      interactionId,
+      commandId,
+      decision: "submit",
+      value: true,
+    };
+    this.#tokens.set(
+      `${interactionId}:${generation}`,
+      this.#confirmations.issue(operation, "gui", { leaseGeneration: generation, runtimeEpoch: this.#runtimeEpoch() }),
+    );
+  }
+
+  #runtimeEpoch(): number {
+    return this.#sessionRef.current?.controller.publication()?.snapshot.runtimeEpoch ?? 0;
   }
 }
 

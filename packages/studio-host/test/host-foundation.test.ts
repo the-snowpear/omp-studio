@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
-import { createServer, type Server, type Socket } from "node:net";
+import { createConnection, createServer, Socket, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -436,6 +436,36 @@ test("PR-009 disconnect after accepted publishes outcome_unknown without fake co
     assert.equal(controller.publication()?.terminalOutcomes[0]?.status, "outcome_unknown");
   } finally {
     controller.dispose();
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("connectUntilReady retries CONNECTION_FAILED until the pipe accepts", async () => {
+  const token = "bridge-token-retry";
+  const bridge = await listenForHello((hello) => helloResponse(hello, token));
+  let attempts = 0;
+  const client = new StudioBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    connectSocket: (endpoint) => {
+      attempts += 1;
+      if (attempts < 3) {
+        const socket = new Socket();
+        queueMicrotask(() => {
+          socket.emit("error", Object.assign(new Error("connect ENOENT"), { code: "ENOENT" }));
+        });
+        return socket;
+      }
+      return createConnection(endpoint);
+    },
+  });
+  try {
+    const response = await client.connectUntilReady({ deadline: Date.now() + 2_000 });
+    assert.equal(attempts >= 3, true);
+    assert.equal(client.state, "negotiated");
+    assert.equal(response.runtimeVersion, "17.2.12-studio.3");
+  } finally {
     client.close();
     await bridge.close();
   }
@@ -1271,6 +1301,28 @@ test("WP-014 confirmation token expires after its TTL", () => {
     () => registry.consume(token, { kind: "session.drop" }, "gui"),
     (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
   );
+});
+
+test("WP-014 confirmation token binds lease generation and runtime epoch", () => {
+  const registry = new HostConfirmationRegistry();
+  const operation = { kind: "session.drop" } as const;
+  const token = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  // same binding: ok
+  registry.consume(token, operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  // re-issue and try a stale generation / epoch: fail closed
+  const gen = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(gen, operation, "gui", { leaseGeneration: 4, runtimeEpoch: 7 }),
+    (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
+  );
+  const epoch = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(epoch, operation, "gui", { leaseGeneration: 3, runtimeEpoch: 8 }),
+    (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
+  );
+  // binding-less consumption of a bound token is still accepted (compat callers)
+  const loose = registry.issue(operation, "gui", { leaseGeneration: 1 });
+  registry.consume(loose, operation, "gui");
 });
 
 test("WP-014 confirmation registry evicts the oldest token at capacity", () => {
