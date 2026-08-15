@@ -556,11 +556,19 @@ index 0000000..a332092
 +}
 diff --git a/packages/coding-agent/test/studio-conversation-protocol.test.ts b/packages/coding-agent/test/studio-conversation-protocol.test.ts
 new file mode 100644
-index 0000000..2ce2329
+index 0000000..9d28006
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-conversation-protocol.test.ts
-@@ -0,0 +1,248 @@
+@@ -0,0 +1,250 @@
 +import { describe, expect, test } from "bun:test";
++import {
++	parseStudioRequest,
++	STUDIO_IMPLEMENTED_CAPABILITIES,
++	StudioFrameError,
++	type StudioSnapshotResponse,
++	stableEmptyManifestHash,
++	stableImplementedManifestHash,
++} from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
 +import {
 +	CONVERSATION_BRANCH_SUMMARY_MAPPING,
 +	CONVERSATION_LIMITS,
@@ -573,12 +581,6 @@ index 0000000..2ce2329
 +	STUDIO_CONVERSATION_DISPATCH_ALLOW_LIST,
 +	StudioConversationError,
 +} from "@oh-my-pi/pi-coding-agent/studio/conversation-protocol";
-+import {
-+	parseStudioRequest,
-+	STUDIO_IMPLEMENTED_CAPABILITIES,
-+	StudioFrameError,
-+	type StudioSnapshotResponse,
-+} from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
 +
 +const base = { type: "studio.request" as const, requestId: "request-transcript", runtimeEpoch: 1 };
 +
@@ -623,19 +625,20 @@ index 0000000..2ce2329
 +};
 +
 +describe("session transcript contract mirror", () => {
-+	test("freezes capability, concurrency, and first-version mapping without advertising implementation", () => {
++	test("advertises session.history only after the Runtime reader exists", () => {
 +		expect(SESSION_TRANSCRIPT_READ_KIND).toBe("session.transcript.read");
 +		expect(SESSION_TRANSCRIPT_READ_CAPABILITY).toBe("session.history");
 +		expect(SESSION_TRANSCRIPT_READ_CONCURRENCY).toBe("read-concurrent");
 +		expect(CONVERSATION_BRANCH_SUMMARY_MAPPING).toBe("ignore");
 +		expect(CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION).toBe(false);
 +		expect(STUDIO_CONVERSATION_DISPATCH_ALLOW_LIST).toEqual(["session.transcript.read"]);
-+		expect(STUDIO_IMPLEMENTED_CAPABILITIES.includes("session.history")).toBe(false);
-+		expect(
-+			(STUDIO_IMPLEMENTED_CAPABILITIES as readonly string[]).includes("session.transcript.read"),
-+		).toBe(false);
++		expect(STUDIO_IMPLEMENTED_CAPABILITIES.includes("session.history")).toBe(true);
++		expect((STUDIO_IMPLEMENTED_CAPABILITIES as readonly string[]).includes("session.transcript.read")).toBe(true);
 +		expect(CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX).toBe(100);
 +		expect(CONVERSATION_LIMITS.PAGE_MAX_BYTES).toBeLessThan(1024 * 1024);
++		const capabilityHash = stableImplementedManifestHash("capabilities");
++		expect(capabilityHash.startsWith("sha256:")).toBe(true);
++		expect(capabilityHash).not.toBe(stableEmptyManifestHash("capabilities"));
 +	});
 +
 +	test("parses session.transcript.read and rejects illegal cursor, limit, and extra keys", () => {
@@ -665,9 +668,7 @@ index 0000000..2ce2329
 +
 +	test("rejects extra keys, missing fields, branch_summary, and over-limit pages", () => {
 +		expect(() => parseConversationTranscriptPage({ ...page, extra: true })).toThrow(StudioConversationError);
-+		expect(() => parseConversationTranscriptPage({ ...page, hasMoreBefore: "yes" })).toThrow(
-+			StudioConversationError,
-+		);
++		expect(() => parseConversationTranscriptPage({ ...page, hasMoreBefore: "yes" })).toThrow(StudioConversationError);
 +		expect(() =>
 +			parseConversationTranscriptPage({
 +				...page,
@@ -695,6 +696,7 @@ index 0000000..2ce2329
 +				isStreaming: false,
 +				isCompacting: false,
 +				activeMode: "normal",
++				approvalMode: "yolo",
 +				pendingMessages: 0,
 +				activeCommandIds: [],
 +				agentsRevision: 0,
@@ -777,7 +779,7 @@ index 0000000..2ce2329
 +			{ kind: "conversation.notice", sessionId: "session-1", level: "info", message: "ok" },
 +		];
 +		for (const event of events) {
-+			expect(parseConversationRuntimeEvent(event).kind).toBe(event.kind);
++			expect(parseConversationRuntimeEvent(event).kind as string).toBe(event.kind as string);
 +		}
 +		expect(() =>
 +			parseConversationRuntimeEvent({

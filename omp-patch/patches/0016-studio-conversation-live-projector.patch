@@ -1086,10 +1086,10 @@ index 0000000..6e3056a
 +}
 diff --git a/packages/coding-agent/test/studio-conversation-live-projector.test.ts b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
 new file mode 100644
-index 0000000..055621e
+index 0000000..a5ef31d
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
-@@ -0,0 +1,609 @@
+@@ -0,0 +1,616 @@
 +import { describe, expect, test } from "bun:test";
 +import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 +import type { AssistantMessage, AssistantMessageEvent, UserMessage } from "@oh-my-pi/pi-ai";
@@ -1109,7 +1109,14 @@ index 0000000..055621e
 +	sanitizeToolArguments,
 +} from "@oh-my-pi/pi-coding-agent/studio/services/conversation-sanitizer";
 +
-+const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 };
++const ZERO_USAGE = {
++	input: 0,
++	output: 0,
++	cacheRead: 0,
++	cacheWrite: 0,
++	totalTokens: 0,
++	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++};
 +const TS = Date.UTC(2026, 7, 15, 0, 0, 0);
 +
 +class AgentSessionEventDouble implements ConversationLiveBindTarget {
@@ -1581,7 +1588,7 @@ index 0000000..055621e
 +	test("omits providerPayload and secret keys from serialized live frames", () => {
 +		const { projector, events } = createProjector();
 +		const message = assistant([{ type: "text", text: "ok" }], {
-+			providerPayload: { type: "openaiResponsesHistory", encrypted: "SECRET_TOKEN_VALUE" },
++			providerPayload: { type: "openaiResponsesHistory", items: [{ encrypted: "SECRET_TOKEN_VALUE" }] },
 +		});
 +		projector.project({ type: "agent_start" });
 +		projector.project({ type: "message_start", message });

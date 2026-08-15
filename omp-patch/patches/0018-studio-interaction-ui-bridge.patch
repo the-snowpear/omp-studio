@@ -30,7 +30,7 @@ index 6d46fed..cba87f4 100644
  	askDialog?(
  		questions: ExtensionAskDialogQuestion[],
 diff --git a/packages/coding-agent/src/extensibility/extensions/wrapper.ts b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
-index 7618e30..f642d16 100644
+index 7618e30..24e80e4 100644
 --- a/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 @@ -7,6 +7,7 @@ import type {
@@ -60,7 +60,7 @@ index 7618e30..f642d16 100644
  /**
   * Adapts a RegisteredTool into an AgentTool.
   */
-@@ -289,9 +302,78 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+@@ -289,9 +302,80 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  				});
  			};
  
@@ -78,8 +78,10 @@ index 7618e30..f642d16 100644
 +			// approval; otherwise fail closed. Provider safety checks always
 +			// need an explicit user approval — no setting or yolo mode may
 +			// bypass this gate.
-+			const remoteApproval = context?.ui?.approveTool;
-+			if (remoteApproval !== undefined) {
++			// Invoke through the ui object so `this` stays bound to the
++			// remote context instance (private-method access).
++			const remoteUi = context?.ui;
++			if (remoteUi?.approveTool !== undefined) {
 +				const summary = truncateForPrompt(
 +					`${formatApprovalPrompt(this.tool, resolvedArgs, approvalCheck.reason)}${
 +						pendingSafetyChecks.length > 0
@@ -89,7 +91,7 @@ index 7618e30..f642d16 100644
 +				);
 +				let approved: boolean;
 +				try {
-+					approved = await remoteApproval(
++					approved = await remoteUi.approveTool(
 +						{
 +							toolName: this.tool.name,
 +							toolCallId,
@@ -142,7 +144,7 @@ index 7618e30..f642d16 100644
  				const reason = "no interactive UI available";
  				await emitApprovalResolved(false, reason);
  				if (pendingSafetyChecks.length > 0) {
-@@ -307,29 +389,6 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+@@ -307,29 +391,6 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  						`  3. Use an interactive UI to approve the tool call`,
  				);
  			}
@@ -560,10 +562,10 @@ index 67ceaee..18cf567 100644
  	"remoteUi.standard",
 diff --git a/packages/coding-agent/src/studio/remote-extension-ui.ts b/packages/coding-agent/src/studio/remote-extension-ui.ts
 new file mode 100644
-index 0000000..1ee4715
+index 0000000..21bdc8e
 --- /dev/null
 +++ b/packages/coding-agent/src/studio/remote-extension-ui.ts
-@@ -0,0 +1,280 @@
+@@ -0,0 +1,293 @@
 +import * as crypto from "node:crypto";
 +import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
 +import type {
@@ -577,7 +579,10 @@ index 0000000..1ee4715
 +	TerminalInputHandler,
 +} from "../extensibility/extensions/types";
 +import { getExtensionUISelectOptionLabel } from "../extensibility/extensions/types";
-+import { type Theme, theme } from "../modes/theme/theme";
++import { defaultThemes } from "../modes/theme/defaults";
++import { createTheme } from "../modes/theme/loader";
++import type { ThemeJson } from "../modes/theme/schema";
++import type { Theme } from "../modes/theme/theme";
 +import type { ToolUiFactory } from "../tools/context";
 +import { StudioInteractionError, type StudioInteractionGateway } from "./services/interaction-port";
 +
@@ -629,6 +634,8 @@ index 0000000..1ee4715
 + * "not supported" failures — they never touch the Bridge.
 + */
 +export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
++	#fallbackTheme: Theme | undefined;
++
 +	constructor(
 +		private readonly gateway: StudioInteractionGateway,
 +		private readonly commandId: string,
@@ -777,7 +784,15 @@ index 0000000..1ee4715
 +	}
 +
 +	get theme(): Theme {
-+		return theme;
++		// The module-level `theme` singleton is only assigned after TUI theme
++		// initialization; headless Studio contexts fall back to a static
++		// default so Ask helpers (e.g. the "Done selecting" label) never
++		// dereference an uninitialized global.
++		if (this.#fallbackTheme === undefined) {
++			const firstDefault = Object.values(defaultThemes)[0];
++			this.#fallbackTheme = createTheme(firstDefault as ThemeJson);
++		}
++		return this.#fallbackTheme;
 +	}
 +
 +	getAllThemes(): Promise<{ name: string; path: string | undefined }[]> {
@@ -1339,6 +1354,215 @@ index 8e9cc33..62a3b56 100644
  		it("emits resolved false when approval is denied", async () => {
  			const events: Array<{ type: string; approved?: boolean; reason?: string }> = [];
  			const extCode = `
+diff --git a/packages/coding-agent/test/studio-approval-ask-e2e.test.ts b/packages/coding-agent/test/studio-approval-ask-e2e.test.ts
+new file mode 100644
+index 0000000..6d6e988
+--- /dev/null
++++ b/packages/coding-agent/test/studio-approval-ask-e2e.test.ts
+@@ -0,0 +1,203 @@
++import { afterAll, beforeAll, describe, expect, test } from "bun:test";
++import * as fs from "node:fs";
++import * as os from "node:os";
++import * as path from "node:path";
++import type { AgentToolContext } from "@oh-my-pi/pi-agent-core";
++import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
++import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
++import { defaultThemes } from "@oh-my-pi/pi-coding-agent/modes/theme/defaults";
++import { createTheme } from "@oh-my-pi/pi-coding-agent/modes/theme/loader";
++import type { ThemeJson } from "@oh-my-pi/pi-coding-agent/modes/theme/schema";
++import { setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
++import { createAgentSession } from "@oh-my-pi/pi-coding-agent/sdk";
++import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
++import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
++import { StudioRuntimeCommandArbiter } from "@oh-my-pi/pi-coding-agent/studio/command-arbiter";
++import { createStudioRemoteUiFactory } from "@oh-my-pi/pi-coding-agent/studio/remote-extension-ui";
++import {
++	StudioInteractionGateway,
++	StudioRemoteInteractionPort,
++} from "@oh-my-pi/pi-coding-agent/studio/services/interaction-port";
++import { AskTool } from "@oh-my-pi/pi-coding-agent/tools/ask";
++import { removeSyncWithRetries, Snowflake } from "@oh-my-pi/pi-utils";
++
++const BASE_SETTINGS = {
++	"async.enabled": false,
++	"bash.autoBackground.enabled": false,
++	"bashInterceptor.enabled": false,
++} as const;
++
++function textOf(result: { content?: ReadonlyArray<{ type: string; text?: string }> }): string {
++	const blocks = result.content ?? [];
++	for (const block of blocks) {
++		if (block.type === "text" && typeof block.text === "string") return block.text;
++	}
++	return "";
++}
++
++/**
++ * Real Runtime E2E (plan §验收): a genuine AgentSession + the production
++ * ExtensionToolWrapper approval gate + the Studio remote interaction port.
++ * No mocks on the tool/approval/port path; only the model call is absent
++ * because tools execute directly.
++ */
++describe("studio real tool approval and ask E2E", () => {
++	let tempDir: string;
++	let session: AgentSession;
++
++	beforeAll(async () => {
++		// AskTool's "Done selecting" label reads the module theme singleton;
++		// the TUI initializes it at startup, so do the same here.
++		setThemeInstance(createTheme(Object.values(defaultThemes)[0] as ThemeJson));
++		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), `pi-approval-e2e-${Snowflake.next()}-`));
++		const cwd = path.join(tempDir, "cwd");
++		fs.mkdirSync(cwd, { recursive: true });
++		const sessionManager = SessionManager.create(cwd, path.join(tempDir, "sessions"));
++		const created = await createAgentSession({
++			cwd,
++			agentDir: tempDir,
++			sessionManager,
++			settings: Settings.isolated(BASE_SETTINGS),
++			model: getBundledModel("openai", "gpt-4o-mini"),
++			disableExtensionDiscovery: true,
++			skills: [],
++			contextFiles: [],
++			workspaceTree: { rootPath: cwd, rendered: ".", truncated: false, totalLines: 1, agentsMdFiles: [] },
++			promptTemplates: [],
++			slashCommands: [],
++			enableMCP: false,
++			enableLsp: false,
++			toolNames: ["bash"],
++			hasUI: true,
++		});
++		session = created.session;
++	});
++
++	afterAll(async () => {
++		await session.dispose();
++		// Windows can briefly hold tempdir handles after dispose; best-effort cleanup.
++		for (let attempt = 0; attempt < 5; attempt++) {
++			try {
++				removeSyncWithRetries(tempDir);
++				break;
++			} catch {
++				await Bun.sleep(50 * (attempt + 1));
++			}
++		}
++	});
++
++	function remoteUi() {
++		const arbiter = new StudioRuntimeCommandArbiter(
++			() => ({ runtimeEpoch: 1, stateVersion: 0, isStreaming: false, isCompacting: false }),
++			[],
++		);
++		const port = new StudioRemoteInteractionPort(
++			arbiter,
++			() => {},
++			() => {},
++		);
++		const gateway = new StudioInteractionGateway();
++		gateway.bind(port);
++		const factory = createStudioRemoteUiFactory(gateway);
++		const toolCall = { batchId: "b", index: 0, total: 1, toolCalls: [{ id: "e2e-call-1", name: "bash" }] };
++		return { port, ui: factory(toolCall), toolCall };
++	}
++
++	async function respond(
++		port: StudioRemoteInteractionPort,
++		decision: "submit" | "cancel",
++		value?: unknown,
++	): Promise<void> {
++		const request = port.pending()?.request;
++		if (!request) throw new Error("no pending interaction");
++		port.respond({
++			kind: "interaction.respond",
++			interactionId: request.interactionId,
++			commandId: request.commandId,
++			decision,
++			...(value === undefined ? {} : { value }),
++		});
++	}
++
++	test("Review mode: bash approval card allows once and the tool continues", async () => {
++		const bash = session.getToolByName("bash");
++		if (!bash) throw new Error("Expected bash tool");
++		const { port, ui, toolCall } = remoteUi();
++		const settings = Settings.isolated({ ...BASE_SETTINGS, "tools.approvalMode": "always-ask" });
++		const result = bash.execute("e2e-approval-allow", { command: "echo approved-e2e" }, undefined, undefined, {
++			settings,
++			ui,
++			toolCall,
++		} as AgentToolContext);
++		const pending = port.pending();
++		expect(pending).toBeDefined();
++		expect(pending?.request).toMatchObject({
++			kind: "approval",
++			approvalType: "bash",
++			commandId: "studio-tool:e2e-call-1",
++		});
++		await respond(port, "submit", true);
++		const outcome = await result;
++		expect(textOf(outcome)).toContain("approved-e2e");
++		expect(port.pending()).toBeUndefined();
++	});
++
++	test("Review mode: cancelling the bash approval denies the tool", async () => {
++		const bash = session.getToolByName("bash");
++		if (!bash) throw new Error("Expected bash tool");
++		const { port, ui, toolCall } = remoteUi();
++		const settings = Settings.isolated({ ...BASE_SETTINGS, "tools.approvalMode": "always-ask" });
++		const result = bash.execute("e2e-approval-deny", { command: "echo must-not-run" }, undefined, undefined, {
++			settings,
++			ui,
++			toolCall,
++		} as AgentToolContext);
++		expect(port.pending()).toBeDefined();
++		await respond(port, "cancel");
++		await expect(result).rejects.toThrow("Tool call denied by user: bash");
++	});
++
++	test("yolo mode creates no approval card and runs directly", async () => {
++		const bash = session.getToolByName("bash");
++		if (!bash) throw new Error("Expected bash tool");
++		const { port, ui, toolCall } = remoteUi();
++		const settings = Settings.isolated({ ...BASE_SETTINGS, "tools.approvalMode": "yolo" });
++		const result = await bash.execute("e2e-yolo", { command: "echo yolo-e2e" }, undefined, undefined, {
++			settings,
++			ui,
++			toolCall,
++		} as AgentToolContext);
++		expect(textOf(result)).toContain("yolo-e2e");
++		expect(port.pending()).toBeUndefined();
++	});
++
++	test("Live Ask select asks one question at a time and returns the chosen label", async () => {
++		const askTool = new AskTool(session as never);
++		const { port, ui, toolCall } = remoteUi();
++		const result = askTool.execute(
++			"e2e-ask-1",
++			{
++				questions: [
++					{
++						id: "backend",
++						question: "Which backend?",
++						options: [{ label: "SQLite" }, { label: "PostgreSQL" }],
++					},
++				],
++			},
++			undefined,
++			undefined,
++			{ hasUI: true, ui, toolCall } as AgentToolContext,
++		);
++		const pending = port.pending();
++		expect(pending?.request).toMatchObject({
++			kind: "select",
++			commandId: "studio-tool:e2e-call-1",
++			title: "Which backend?",
++		});
++		await respond(port, "submit", "option:1");
++		const outcome = await result;
++		expect(textOf(outcome)).toContain("PostgreSQL");
++		expect(port.pending()).toBeUndefined();
++	});
++});
 diff --git a/packages/coding-agent/test/studio-bridge-server.test.ts b/packages/coding-agent/test/studio-bridge-server.test.ts
 index 5512e6a..c511ea9 100644
 --- a/packages/coding-agent/test/studio-bridge-server.test.ts
