@@ -68,27 +68,58 @@ function riskLabel(risk: string | undefined): string | undefined {
 
 export function InteractionPrompt({ interaction, onRespond, disabled, caption, demo, queue }: {
   interaction: ClientInteraction;
-  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled?: boolean;
   caption?: InteractionCaption;
   demo?: boolean;
   queue?: DeckQueue;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(interaction.kind === "editor" ? (interaction.content ?? "") : "");
   const [selected, setSelected] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
+  /* Editor prefill sync: a same-id higher-generation card keeps the card
+     shell; refresh the draft when the content changes (plan §6.3). */
+  useEffect(() => {
+    if (interaction.kind === "editor") setText(interaction.content ?? "");
+  }, [interaction]);
   const toggleOption = (optionId: string) => {
     if (disabled || interaction.kind !== "select") return;
     setSelected((previous) => interaction.multiple
       ? (previous.includes(optionId) ? previous.filter((id) => id !== optionId) : [...previous, optionId])
       : (previous.length === 1 && previous[0] === optionId ? [] : [optionId]));
   };
-  const cancel = <button className="btn outline" disabled={disabled} onClick={() => onRespond("cancel")}>Cancel</button>;
+  const busy = disabled || submitting;
+  const submit = (value?: InteractionResponseValue) => {
+    if (busy) return;
+    setSubmitting(true);
+    setSubmitError(false);
+    // Respond failure keeps the card (plan §6.4): the pending interaction
+    // stays until the Runtime resolves it, and the deck surfaces Retry.
+    Promise.resolve(onRespond("submit", value)).then(
+      (ok) => {
+        if (ok === false) setSubmitError(true);
+      },
+      () => setSubmitError(true),
+    ).finally(() => setSubmitting(false));
+  };
+  const cancel = () => {
+    if (busy) return;
+    setSubmitting(true);
+    Promise.resolve(onRespond("cancel")).finally(() => setSubmitting(false));
+  };
+  const retryNote = submitError ? (
+    <p className="ask-error" role="alert">
+      提交失败，卡片已保留。请重试。
+    </p>
+  ) : null;
   if (interaction.kind === "confirm") {
     return (
       <div className="approval-card">
-        <PromptHead icon="alert" title="确认" {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
+        <PromptHead icon="alert" title={interaction.title || "确认"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="approval-body">{interaction.message}</div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled} onClick={() => onRespond("submit", true)}>Confirm</button>{cancel}</div>
+        {retryNote}
+        <div className="approval-foot"><button className="btn primary" disabled={busy} onClick={() => submit(true)}>Confirm</button>{cancelButton(cancel, busy)}</div>
       </div>
     );
   }
@@ -96,51 +127,60 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
     const canSubmit = interaction.multiple ? selected.length > 0 : selected.length === 1;
     return (
       <div className="ask-card">
-        <PromptHead icon="message" title={caption ? "Agent 提问" : "选择"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
+        <PromptHead icon="message" title={interaction.title || "选择"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="ask-body">
           {caption ? (
             <>
               <p>{caption.title}</p>
               {caption.description ? <p className="muted small">{caption.description}</p> : null}
             </>
-          ) : (
-            <p className="muted small">Runtime requests select{interaction.multiple ? " (multiple)" : ""}.</p>
-          )}
+          ) : null}
           {interaction.options.map((option) => (
-            <button key={option.id} type="button" className={`ask-opt${selected.includes(option.id) ? " sel" : ""}`} aria-checked={selected.includes(option.id)} disabled={disabled} onClick={() => toggleOption(option.id)}>
+            <button key={option.id} type="button" className={`ask-opt${selected.includes(option.id) ? " sel" : ""}`} aria-checked={selected.includes(option.id)} disabled={busy} onClick={() => toggleOption(option.id)}>
               <span>{option.label}</span>
               {option.description ? (option.description === "推荐" ? <span className="chip purple xs">{option.description}</span> : <span className="muted small">{option.description}</span>) : null}
             </button>
           ))}
         </div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled || !canSubmit} onClick={() => onRespond("submit", interaction.multiple ? selected : selected[0])}>Submit</button>{cancel}</div>
+        {retryNote}
+        <div className="approval-foot"><button className="btn primary" disabled={busy || !canSubmit} onClick={() => submit(interaction.multiple ? selected : selected[0])}>Submit</button>{cancelButton(cancel, busy)}</div>
       </div>
     );
   }
   if (interaction.kind === "input") {
     return (
       <div className="ask-card">
-        <PromptHead icon="pencil" title="输入" {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
+        <PromptHead icon="pencil" title={interaction.title || "输入"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="ask-body">
-          <input className="input" value={text} onChange={(event) => setText(event.target.value)} disabled={disabled} placeholder={interaction.placeholder ?? "Response"} type={interaction.secret ? "password" : "text"} />
+          <input className="input" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} placeholder={interaction.placeholder ?? "Response"} type={interaction.secret ? "password" : "text"} />
         </div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled || !text.trim()} onClick={() => onRespond("submit", text)}>Submit</button>{cancel}</div>
+        {retryNote}
+        <div className="approval-foot"><button className="btn primary" disabled={busy || !text.trim()} onClick={() => submit(text)}>Submit</button>{cancelButton(cancel, busy)}</div>
       </div>
     );
   }
   if (interaction.kind === "editor") {
     return (
-      <div className="approval-card">
-        <PromptHead icon="alert" title="编辑" {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
-        <div className="approval-body">
-          <p>{`Runtime requests editor${interaction.language ? ` (${interaction.language})` : ""}.`}</p>
-          <p className="muted small">没有安全提交 schema，只能取消。</p>
+      <div className="ask-card">
+        <PromptHead icon="pencil" title={interaction.title || "编辑"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
+        <div className="ask-body">
+          {interaction.language ? <p className="muted small">{interaction.language}</p> : null}
+          <textarea
+            className="editor-input"
+            rows={6}
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            disabled={busy}
+            aria-label={interaction.title || "编辑内容"}
+          />
         </div>
-        <div className="approval-foot"><button className="btn" disabled title="此交互类型未实现安全提交">Submit</button>{cancel}</div>
+        {retryNote}
+        <div className="approval-foot"><button className="btn primary" disabled={busy} onClick={() => submit(text)}>Submit</button>{cancelButton(cancel, busy)}</div>
       </div>
     );
   }
   const command = typeof interaction.detail.command === "string" ? interaction.detail.command : undefined;
+  const summary = typeof interaction.detail.summary === "string" ? interaction.detail.summary : undefined;
   const reason = typeof interaction.detail.reason === "string" ? interaction.detail.reason : undefined;
   const risk = riskLabel(typeof interaction.detail.risk === "string" ? interaction.detail.risk : undefined);
   const scope = typeof interaction.detail.scope === "string" ? interaction.detail.scope : undefined;
@@ -148,17 +188,23 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
     <div className="approval-card">
       <PromptHead icon="alert" title={`审批${risk ? ` · ${risk}` : ""}`} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
       <div className="approval-body">
-        <p>{caption?.title ?? interaction.approvalType}</p>
+        <p>{caption?.title ?? interaction.title ?? interaction.approvalType}</p>
         {command ? <p className="cmd">{command}</p> : null}
+        {summary ? <p className="muted small">{summary}</p> : null}
         {reason ? <p>{reason}</p> : null}
         {scope ? <p className="muted small">{scope}</p> : null}
       </div>
+      {retryNote}
       <div className="approval-foot">
-        <button className="btn primary" disabled={disabled} onClick={() => onRespond("submit", true)}>允许一次</button>
-        {cancel}
+        <button className="btn primary" disabled={busy} onClick={() => submit(true)}>允许一次</button>
+        {cancelButton(cancel, busy)}
       </div>
     </div>
   );
+}
+
+function cancelButton(cancel: () => void, busy: boolean) {
+  return <button className="btn outline" disabled={busy} onClick={cancel}>Cancel</button>;
 }
 
 /* —— 底部操作许可 Deck（Agent 提问 / 审批请求）——
@@ -176,7 +222,7 @@ const DECK_GROW_MS = 320; /* 高度展开过渡时长（不小于 CSS height tra
 
 export function InteractionDeck({ interaction, onRespond, disabled }: {
   interaction: ClientInteraction | null;
-  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -206,9 +252,11 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
     timers.current.forEach((t) => window.clearTimeout(t));
   }, []);
 
-  /* interaction 变化：先锁定当前渲染高度（换内容瞬间不跳变），再在同一张卡片内平移 */
+  /* interaction 变化：先锁定当前渲染高度（换内容瞬间不跳变），再在同一张卡片内平移。
+     卡片身份 = interactionId + leaseGeneration（plan §6.4）：同 id 高 generation
+     视为新卡，替换旧内容；同 id 同 generation 幂等忽略。 */
   useEffect(() => {
-    const id = interaction?.interactionId ?? null;
+    const id = interaction === null ? null : `${interaction.interactionId}:${interaction.leaseGeneration}`;
     if (id === lastId.current) return;
     lastId.current = id;
     gen.current += 1;
@@ -236,11 +284,12 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
       return;
     }
 
+    const entryId = `${interaction.interactionId}:${interaction.leaseGeneration}`;
     setNoAnim(false);
     setShellMode(wasEmpty ? "in" : "");
     setEntries((prev) => {
-      if (prev.some((e) => e.interaction.interactionId === interaction.interactionId)) return prev;
-      return [...prev.map((e) => ({ ...e, leaving: true })), { id: interaction.interactionId, interaction, leaving: false }];
+      if (prev.some((e) => e.id === entryId)) return prev;
+      return [...prev.map((e) => ({ ...e, leaving: true })), { id: entryId, interaction, leaving: false }];
     });
     /* 内容平移结束后：移出旧内容，同一次提交里把轨道复位到 0（禁止过渡） */
     later(() => {

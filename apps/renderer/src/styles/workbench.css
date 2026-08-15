@@ -1423,6 +1423,26 @@
 .approval-menu-item.selected { color: var(--accent); }
 .approval-menu-item .am-label { font-size: var(--fs-12); font-weight: var(--fw-medium); }
 .approval-menu-item .am-desc { font-size: var(--fs-11); color: var(--text-3); }
+/* 交互卡编辑器与失败重试（plan §6.3/§6.4） */
+.editor-input {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  padding: var(--sp-8);
+  border-radius: var(--r-8);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+.editor-input:focus { outline: none; border-color: var(--accent); }
+.ask-error {
+  color: var(--red, #e5484d);
+  font-size: var(--fs-11);
+  margin: var(--sp-4) var(--sp-8) 0;
+}
 .send-btn {
   width: 30px; height: 30px;
   border-radius: var(--r-8);

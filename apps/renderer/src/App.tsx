@@ -22,6 +22,8 @@ import type {
   Unsubscribe,
   WorkspaceId,
   WorkspaceListReadModel,
+  WorkspaceFileNode,
+  WorkspaceFileTreeReadModel,
 } from "@omp-studio/client-contract";
 import { selectComposerReceipt, type ClientState, type ConversationHydrateClient } from "@omp-studio/client";
 import type { ApprovalMode, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
@@ -1322,9 +1324,15 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, s
       return false;
     } finally { setBusy(false); }
   }, [busy, client]);
-  const respond = useCallback((decision: "submit" | "cancel", value?: InteractionResponseValue) => {
-    if (!pendingInteraction) return;
-    void run("interaction.respond", { interactionId: pendingInteraction.interactionId, decision, ...(value === undefined ? {} : { value }) });
+  const respond = useCallback((decision: "submit" | "cancel", value?: InteractionResponseValue): Promise<boolean> => {
+    if (!pendingInteraction) return Promise.resolve(false);
+    // run() waits for the receipt and reports failure through the return
+    // value; the pending card stays until the Runtime resolves it.
+    return run("interaction.respond", {
+      interactionId: pendingInteraction.interactionId,
+      decision,
+      ...(value === undefined ? {} : { value }),
+    });
   }, [pendingInteraction, run]);
   const commandRows = useMemo(() => Object.values(commands).slice(-20).reverse(), [commands]);
   const snapshotReady = snapshot !== undefined;
@@ -1441,15 +1449,16 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, s
             </div>
           </div>
           <div className="composer-region">
-            {preview ? (
-              <PreviewDeck />
-            ) : (
+            {/* 真实 pending Interaction 永远优先于 Preview（plan §6.1） */}
+            {pendingInteraction ? (
               <InteractionDeck
                 interaction={pendingInteraction}
                 onRespond={respond}
                 disabled={interactionDisabled}
               />
-            )}
+            ) : preview ? (
+              <PreviewDeck />
+            ) : null}
             <div className={`ctx-strip${running ? " hidden" : ""}`} role="status" aria-live="polite">
               <span className="ctx-item"><Icon name="folder-open" extra="sm" /><span>{preview ? "omp-web" : (state.model.workspaces?.workspaces.find((workspace) => workspace.active)?.name ?? "未选择项目")}</span></span>
               <span className="ctx-item"><Icon name="cpu" extra="sm" /><span>{preview ? "gemini-3.6-flash" : (runtime?.classification ?? "runtime unavailable")}</span></span>
