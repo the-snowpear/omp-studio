@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
-index 28cbe0f..83b67db 100644
+index 28cbe0f..c32a9f3 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
 @@ -442,6 +442,9 @@ export class SessionManager {
@@ -102,14 +102,13 @@ index 28cbe0f..83b67db 100644
  	#setLeaf(id: string | null): void {
  		this.#index.setLeaf(id);
  		const batch = this.#atomicEntryBatch;
-@@ -2059,7 +2127,16 @@ export class SessionManager {
+@@ -2059,7 +2127,15 @@ export class SessionManager {
  			| PythonExecutionMessage
  			| FileMentionMessage,
  	): string {
 -		const entry: SessionMessageEntry = { type: "message", ...this.#freshEntryFields(), message };
 +		const role = message.role;
-+		const reserved =
-+			role === "user" || role === "assistant" || role === "system" ? this.#takeReservedMessageId(role) : undefined;
++		const reserved = role === "user" || role === "assistant" ? this.#takeReservedMessageId(role) : undefined;
 +		const entry: SessionMessageEntry = {
 +			type: "message",
 +			...(reserved === undefined
@@ -120,7 +119,7 @@ index 28cbe0f..83b67db 100644
  		this.#recordEntry(entry);
  		return entry.id;
  	}
-@@ -2162,9 +2239,12 @@ export class SessionManager {
+@@ -2162,9 +2238,12 @@ export class SessionManager {
  		fromExtension?: boolean,
  		preserveData?: Record<string, unknown>,
  	): string {
@@ -364,10 +363,10 @@ index b64af1e..6b1aece 100644
  			modes.dispose();
 diff --git a/packages/coding-agent/test/studio-conversation-live-bridge.test.ts b/packages/coding-agent/test/studio-conversation-live-bridge.test.ts
 new file mode 100644
-index 0000000..2f39425
+index 0000000..bd148de
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-conversation-live-bridge.test.ts
-@@ -0,0 +1,654 @@
+@@ -0,0 +1,664 @@
 +import { afterEach, describe, expect, test } from "bun:test";
 +import * as crypto from "node:crypto";
 +import * as fs from "node:fs/promises";
@@ -526,6 +525,7 @@ index 0000000..2f39425
 +		expect(started?.event.kind).toBe("conversation.message.started");
 +		const messageId = started?.event.kind === "conversation.message.started" ? started.event.messageId : undefined;
 +		expect(messageId).toBeDefined();
++		if (messageId === undefined) throw new Error("expected a projector message id");
 +		expect(messageId).not.toMatch(/^msg-\d+$/);
 +
 +		bus.emit({ type: "message_end", message: user });
@@ -627,6 +627,7 @@ index 0000000..2f39425
 +		const liveId =
 +			completed?.event.kind === "conversation.compaction.completed" ? completed.event.item?.itemId : undefined;
 +		expect(liveId).toBeDefined();
++		if (liveId === undefined) throw new Error("expected a live compaction id");
 +		const persistedId = manager.appendCompaction("kept recent turns", "recent", userId, 9);
 +		expect(persistedId).toBe(liveId);
 +		const page = new StudioSessionTranscriptService(() => ({
@@ -1016,9 +1017,17 @@ index 0000000..2f39425
 +		const completedEvent = frames
 +			.map(frame => frame.body as StudioEventEnvelope)
 +			.find(event => event.event.kind === "conversation.message.completed");
-+		expect(startedEvent?.event.kind === "conversation.message.started" && startedEvent.event.messageId).toBe(
-+			completedEvent?.event.kind === "conversation.message.completed" ? completedEvent.event.item.itemId : undefined,
-+		);
++		const startedMessageId =
++			startedEvent?.event.kind === "conversation.message.started" ? startedEvent.event.messageId : undefined;
++		const completedItemId =
++			completedEvent?.event.kind === "conversation.message.completed"
++				? completedEvent.event.item?.itemId
++				: undefined;
++		expect(startedMessageId).toBeDefined();
++		if (startedMessageId === undefined) throw new Error("expected a started message id");
++		expect(completedItemId).toBeDefined();
++		if (completedItemId === undefined) throw new Error("expected a completed item id");
++		expect(startedMessageId).toBe(completedItemId);
 +		conversation.dispose();
 +	});
 +});

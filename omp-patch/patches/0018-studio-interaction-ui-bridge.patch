@@ -244,7 +244,7 @@ index 63e058a..4e26eda 100644
  			} else {
  				await runTui();
 diff --git a/packages/coding-agent/src/modes/interactive-mode.ts b/packages/coding-agent/src/modes/interactive-mode.ts
-index 80a7f57..c09a0cf 100644
+index 80a7f57..731a36f 100644
 --- a/packages/coding-agent/src/modes/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive-mode.ts
 @@ -120,6 +120,7 @@ import { formatTaskId } from "../task/render";
@@ -255,6 +255,15 @@ index 80a7f57..c09a0cf 100644
  import { normalizeLocalScheme } from "../tools/path-utils";
  import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../tools/render-utils";
  import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
+@@ -594,7 +595,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	#planReviewAnnotationStateBySubmission = new WeakMap<SubmittedUserInput, string>();
+ 	readonly lspServers: LspStartupServerInfo[] | undefined = undefined;
+ 	mcpManager?: MCPManager;
+-	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
++	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
+ 
+ 	readonly #codexResetFireworksController: CodexResetFireworksController;
+ 	readonly #btwController: BtwController;
 @@ -680,7 +681,7 @@ export class InteractiveMode implements InteractiveModeContext {
  		session: AgentSession,
  		version: string,
@@ -1250,7 +1259,7 @@ index 69b25bb..6340b70 100644
  	}
  
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
-index 8e9cc33..93a5605 100644
+index 8e9cc33..62a3b56 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
 +++ b/packages/coding-agent/test/extensions-runner.test.ts
 @@ -1789,6 +1789,76 @@ describe("ExtensionRunner", () => {
@@ -1279,7 +1288,7 @@ index 8e9cc33..93a5605 100644
 +				hasQueuedMessages: () => false,
 +				abort: () => {},
 +				settings: { get: (key: string) => (key === "tools.approvalMode" ? "always-ask" : {}) } as never,
-+				ui: { approveTool },
++				ui: { approveTool } as unknown as ExtensionUIContext as unknown as ExtensionUIContext,
 +			});
 +			expect(approveTool).toHaveBeenCalledWith(
 +				expect.objectContaining({
@@ -1320,7 +1329,7 @@ index 8e9cc33..93a5605 100644
 +					hasQueuedMessages: () => false,
 +					abort: () => {},
 +					settings: { get: (key: string) => (key === "tools.approvalMode" ? "always-ask" : {}) } as never,
-+					ui: { approveTool },
++					ui: { approveTool } as unknown as ExtensionUIContext as unknown as ExtensionUIContext,
 +				}),
 +			).rejects.toThrow("Tool call denied by user: dangerous_tool");
 +			expect(approveTool).toHaveBeenCalledTimes(1);
@@ -1667,11 +1676,12 @@ index 69af107..e2acfd5 100644
  });
 diff --git a/packages/coding-agent/test/studio-remote-extension-ui.test.ts b/packages/coding-agent/test/studio-remote-extension-ui.test.ts
 new file mode 100644
-index 0000000..02bcb83
+index 0000000..448a950
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-remote-extension-ui.test.ts
-@@ -0,0 +1,197 @@
+@@ -0,0 +1,198 @@
 +import { describe, expect, test } from "bun:test";
++import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 +import type {
 +	StudioInteractionRequiredEvent,
 +	StudioInteractionResolvedEvent,
@@ -1802,9 +1812,9 @@ index 0000000..02bcb83
 +		expect(() => ui.pasteToEditor("x")).not.toThrow();
 +		expect(ui.getEditorText()).toBe("");
 +		expect(ui.onTerminalInput(() => undefined)()).toBeUndefined();
-+		expect(() => ui.addAutocompleteProvider(() => undefined)).not.toThrow();
++		expect(() => ui.addAutocompleteProvider((() => undefined) as never)).not.toThrow();
 +		expect(ui.getToolsExpanded()).toBe(false);
-+		expect(ui.askDialog).toBeUndefined();
++		expect((ui as ExtensionUIContext).askDialog).toBeUndefined();
 +		expect(() => ui.custom()).toThrow("not supported");
 +	});
 +

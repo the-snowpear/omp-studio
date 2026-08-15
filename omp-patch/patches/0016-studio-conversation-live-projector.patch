@@ -1,9 +1,9 @@
 diff --git a/packages/coding-agent/src/studio/services/conversation-live-projector.ts b/packages/coding-agent/src/studio/services/conversation-live-projector.ts
 new file mode 100644
-index 0000000..5f93784
+index 0000000..82e7167
 --- /dev/null
 +++ b/packages/coding-agent/src/studio/services/conversation-live-projector.ts
-@@ -0,0 +1,877 @@
+@@ -0,0 +1,883 @@
 +import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 +import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";
 +import { logger } from "@oh-my-pi/pi-utils";
@@ -502,10 +502,16 @@ index 0000000..5f93784
 +			});
 +			return;
 +		}
-+		const summary = sanitizePublicText(event.result.summary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES);
++		const result = event.result;
++		if (result === undefined) {
++			// Not persisted (safety net); the compiler cannot narrow through
++			// the compound hasPersistedAuthority expression above.
++			return;
++		}
++		const summary = sanitizePublicText(result.summary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES);
 +		const itemId =
 +			this.#openCompactionId ??
-+			this.#options.lookupPersistedCompactionId?.({ summary: event.result.summary }) ??
++			this.#options.lookupPersistedCompactionId?.({ summary: result.summary }) ??
 +			this.#reserveCompactionId();
 +		this.#openCompactionId = undefined;
 +		const completed: Extract<ConversationRuntimeEvent, { kind: "conversation.compaction.completed" }> = {
@@ -520,9 +526,9 @@ index 0000000..5f93784
 +				summary: summary.text.length > 0 ? summary.text : "compacted",
 +			},
 +		};
-+		if (event.result.shortSummary !== undefined) {
++		if (result.shortSummary !== undefined && completed.item !== undefined) {
 +			completed.item.shortSummary = sanitizePublicText(
-+				event.result.shortSummary,
++				result.shortSummary,
 +				CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES,
 +			).text;
 +		}
@@ -1080,7 +1086,7 @@ index 0000000..6e3056a
 +}
 diff --git a/packages/coding-agent/test/studio-conversation-live-projector.test.ts b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
 new file mode 100644
-index 0000000..8ba8e85
+index 0000000..055621e
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
 @@ -0,0 +1,609 @@
@@ -1103,7 +1109,7 @@ index 0000000..8ba8e85
 +	sanitizeToolArguments,
 +} from "@oh-my-pi/pi-coding-agent/studio/services/conversation-sanitizer";
 +
-+const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
++const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 };
 +const TS = Date.UTC(2026, 7, 15, 0, 0, 0);
 +
 +class AgentSessionEventDouble implements ConversationLiveBindTarget {
@@ -1229,7 +1235,7 @@ index 0000000..8ba8e85
 +		expect(completed?.kind === "conversation.message.completed" && completed.item.content).toEqual([
 +			{ type: "text", text: "Hello world" },
 +		]);
-+		expect(wireAll(events).map(event => event.kind)).toEqual(kinds(events));
++		expect(wireAll(events).map(event => event.kind as string)).toEqual(kinds(events));
 +	});
 +
 +	test("keeps thinking and text on separate blocks", () => {
@@ -1575,7 +1581,7 @@ index 0000000..8ba8e85
 +	test("omits providerPayload and secret keys from serialized live frames", () => {
 +		const { projector, events } = createProjector();
 +		const message = assistant([{ type: "text", text: "ok" }], {
-+			providerPayload: { type: "openai", encrypted: "SECRET_TOKEN_VALUE" },
++			providerPayload: { type: "openaiResponsesHistory", encrypted: "SECRET_TOKEN_VALUE" },
 +		});
 +		projector.project({ type: "agent_start" });
 +		projector.project({ type: "message_start", message });
@@ -1685,7 +1691,7 @@ index 0000000..8ba8e85
 +		expect(assistantCompleted?.kind === "conversation.message.completed" && assistantCompleted.item.content).toEqual([
 +			{ type: "text", text: "It is a workspace." },
 +		]);
-+		expect(wireAll(events).map(event => event.kind)).toEqual(kinds(events));
++		expect(wireAll(events).map(event => event.kind as string)).toEqual(kinds(events));
 +		projector.dispose();
 +		session.emit(
 +			update(assistantMessage, { type: "text_delta", contentIndex: 0, delta: "nope", partial: assistantMessage }),
