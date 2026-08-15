@@ -1,4 +1,5 @@
 import type { AgentOperation, JobOperation } from "./agents-jobs";
+import type { SessionTranscriptRead } from "./conversation";
 import type { CommandId, InteractionId } from "./ids";
 import type { RemoteInteractionResponse } from "./interactions";
 
@@ -31,7 +32,8 @@ export type SessionOperation =
       customInstructions?: string;
       reanswer?: unknown;
     }
-  | { kind: "turn.retry" };
+  | { kind: "turn.retry" }
+  | SessionTranscriptRead;
 
 export type ModeOperation =
   | { kind: "mode.plan.enter"; initialPrompt?: string }
@@ -76,6 +78,15 @@ export type OperatorOperation =
   | { kind: "operator.manifest.get" }
   | { kind: "operator.invoke"; commandId: string; arguments?: unknown };
 
+export type ApprovalMode = "always-ask" | "write" | "yolo";
+
+export type PermissionOperation = {
+  kind: "permissions.mode.set";
+  mode: ApprovalMode;
+  /** Persist to the OMP global configuration; false = runtime-local override. */
+  persist: boolean;
+};
+
 export type TransferOperation = {
   kind: "tui.transfer";
   commandId: CommandId;
@@ -88,6 +99,7 @@ export type StudioOperation =
   | ModeOperation
   | CompositeOperation
   | OperatorOperation
+  | PermissionOperation
   | TransferOperation
   | AgentOperation
   | JobOperation

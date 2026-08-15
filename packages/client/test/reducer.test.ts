@@ -59,7 +59,7 @@ function snapshot(stateVersion: number, runtimeEpoch: number): OperatorStateSnap
     sessionId: "sess-1" as SessionId,
     isStreaming: false,
     isCompacting: false,
-    activeMode: "normal",
+    activeMode: "normal", approvalMode: "yolo",
     pendingMessages: 0,
     activeCommandIds: [],
     agentsRevision: 0,
@@ -215,7 +215,7 @@ function bootedState(b: ClientBootstrap = bootstrap()): ClientState {
   return reduceClientState(createInitialClientState(), { type: "bootstrap.set", bootstrap: b, occurredAt: TS });
 }
 
-function issue(state: ClientState, name: "session.resume" | "runtime.install", requestId: CommandRequestId): ClientState {
+function issue(state: ClientState, name: "session.create" | "session.resume" | "runtime.install", requestId: CommandRequestId): ClientState {
   return reduceClientState(state, {
     type: "command.issue",
     requestId,
@@ -371,6 +371,60 @@ test("runtime loss marks accepted commands outcome_unknown", () => {
   assert.equal(state.commands[REQ_1]?.status, "outcome_unknown");
 });
 
+test("session.resume survives its expected connected epoch change until the completed receipt", () => {
+  let state = bootedState();
+  state = issue(state, "session.resume", REQ_1);
+  state = reduceClientState(state, { type: "event", event: accepted(REQ_1, 11) });
+  state = reduceClientState(state, {
+    type: "event",
+    event: runtimeChanged(12, {
+      status: "connected",
+      classification: "managed",
+      runtimeId: "rt-2" as RuntimeId,
+      runtimeEpoch: 2 as RuntimeEpoch,
+    }),
+  });
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+  state = reduceClientState(state, {
+    type: "event",
+    event: completedReceipt(REQ_1, 13, { runtimeEpoch: 2 as RuntimeEpoch }),
+  });
+  assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
+test("session.create survives the fresh Runtime epoch change until completion", () => {
+  let state = bootedState();
+  state = issue(state, "session.create", REQ_1);
+  const createAccepted = accepted(REQ_1, 11);
+  assert.equal(createAccepted.kind, "command.accepted");
+  if (createAccepted.kind !== "command.accepted") return;
+  state = reduceClientState(state, {
+    type: "event",
+    event: { ...createAccepted, accepted: { ...createAccepted.accepted, commandName: "session.create" } },
+  });
+  state = reduceClientState(state, {
+    type: "event",
+    event: runtimeChanged(12, {
+      status: "connected",
+      classification: "managed",
+      runtimeId: "rt-fresh" as RuntimeId,
+      runtimeEpoch: 2 as RuntimeEpoch,
+    }),
+  });
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+  const createCompleted = completedReceipt(REQ_1, 13, { runtimeEpoch: 2 as RuntimeEpoch });
+  assert.equal(createCompleted.kind, "command.receipt");
+  if (createCompleted.kind !== "command.receipt" || createCompleted.receipt.status !== "completed") return;
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...createCompleted,
+      receipt: { ...createCompleted.receipt, commandName: "session.create" },
+    },
+  });
+  assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
 test("a new runtime epoch accepts a smaller stateVersion and replaces the snapshot", () => {
   let state = bootedState();
   state = reduceClientState(state, { type: "event", event: snapshotEvent(11, snapshot(9, 1)) });
@@ -395,11 +449,15 @@ test("a runtime epoch change via snapshot marks in-flight commands outcome_unkno
   let state = bootedState();
   state = issue(state, "session.resume", REQ_1);
   state = reduceClientState(state, { type: "event", event: accepted(REQ_1, 11) });
+  state = issue(state, "runtime.install", REQ_2);
   state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(2, 2)) });
   assert.equal(state.connection.runtimeEpoch, 2);
-  assert.equal(state.commands[REQ_1]?.status, "outcome_unknown");
-  if (state.commands[REQ_1]?.status === "outcome_unknown") {
-    assert.equal(state.commands[REQ_1]?.reason, "runtime epoch changed; outcome unknown");
+  // The resume command itself survives the epoch change it caused; every
+  // other in-flight command is outcome_unknown.
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+  assert.equal(state.commands[REQ_2]?.status, "outcome_unknown");
+  if (state.commands[REQ_2]?.status === "outcome_unknown") {
+    assert.equal(state.commands[REQ_2]?.reason, "runtime epoch changed; outcome unknown");
   }
 });
 
@@ -461,13 +519,13 @@ test("interaction.resolved clears pending only for matching id and generation", 
   // correct generation: cleared
   state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 1, 13) });
   assert.equal(state.interaction.pending, null);
-  // duplicate resolved is idempotent
+  // duplicate resolved (same cursor) is idempotent
   const before = state;
-  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 1, 14) });
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 1, 13) });
   assert.equal(state, before);
   // different id: no-op
-  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 15) });
-  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-other" as InteractionId, 1, 16) });
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 14) });
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-other" as InteractionId, 1, 15) });
   assert.ok(state.interaction.pending);
 });
 

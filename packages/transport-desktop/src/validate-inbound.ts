@@ -24,7 +24,7 @@ import type {
   SubscriptionScope,
   ThreadId,
 } from "@omp-studio/client-contract";
-import { MODEL_CONFIG_THINKING_EFFORTS } from "@omp-studio/client-contract";
+import { CONVERSATION_LIMITS, MODEL_CONFIG_THINKING_EFFORTS } from "@omp-studio/client-contract";
 
 /** Thrown when an IPC payload fails strict P1 boundary validation. */
 export class ValidationError extends Error {
@@ -131,6 +131,48 @@ export function assertNonEmptyText(value: unknown, field: string): asserts value
 function validateEmptyInput(input: unknown, what: string): void {
   assertPlainObject(input, what);
   assertNoUnknownKeys(input, [], what);
+}
+
+function validateTranscriptPaginationFields(
+  input: Record<string, unknown>,
+  what: string,
+): void {
+  if ("cursor" in input) {
+    const cursor = input.cursor;
+    if (typeof cursor !== "string" || cursor.length === 0 || cursor.length > CONVERSATION_LIMITS.CURSOR_MAX_CHARS) {
+      throw new ValidationError(
+        `${what}: cursor must be a non-empty string of at most ${CONVERSATION_LIMITS.CURSOR_MAX_CHARS} characters`,
+      );
+    }
+  }
+  if ("limit" in input) {
+    const limit = input.limit;
+    if (
+      typeof limit !== "number" ||
+      !Number.isSafeInteger(limit) ||
+      limit < CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MIN ||
+      limit > CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX
+    ) {
+      throw new ValidationError(
+        `${what}: limit must be an integer between ${CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MIN} and ${CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX}`,
+      );
+    }
+  }
+}
+
+function validateTranscriptReadInput(input: unknown): void {
+  const what = "session.transcript.read input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["cursor", "limit"], what);
+  validateTranscriptPaginationFields(input, what);
+}
+
+function validateTranscriptReadPageInput(input: unknown): void {
+  const what = "session.transcript.readPage input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["sessionId", "cursor", "limit"], what);
+  assertOpaqueToken(input.sessionId, `${what}: sessionId`);
+  validateTranscriptPaginationFields(input, what);
 }
 
 function validateHistoryListInput(input: unknown): void {
@@ -802,6 +844,8 @@ const QUERY_INPUT_VALIDATORS: {
   "agents.definitions.get": (input) => validateEmptyInput(input, "agents.definitions.get input"),
   "projects.list": (input) => validateEmptyInput(input, "projects.list input"),
   "usage.get": (input) => validateEmptyInput(input, "usage.get input"),
+  "session.transcript.read": validateTranscriptReadInput,
+  "session.transcript.readPage": validateTranscriptReadPageInput,
 };
 
 /** Per-name command input validators, keyed by the full CommandName map. */
@@ -838,9 +882,17 @@ const COMMAND_INPUT_VALIDATORS: {
   "session.tree.navigate": validateTreeNavigateInput,
   "operator.invoke": validateOperatorInvokeInput,
   "runtime.install": validateRuntimeInstallInput,
+  "session.create": (input) => validateEmptyCommandInput(input, "session.create input"),
   "session.resume": (input) => validateThreadInput(input, "session.resume input"),
   "session.drop": (input) => validateThreadInput(input, "session.drop input"),
   "interaction.respond": validateInteractionRespondInput,
+  "permissions.mode.set": (input) => {
+    assertPlainObject(input, "permissions.mode.set input");
+    assertNoUnknownKeys(input, ["mode"], "permissions.mode.set input");
+    if (input.mode !== "always-ask" && input.mode !== "write" && input.mode !== "yolo") {
+      throw new ValidationError("permissions.mode.set input: mode must be always-ask, write or yolo");
+    }
+  },
   "models.provider.upsert": validateModelsProviderUpsertInput,
   "models.provider.delete": validateModelsProviderDeleteInput,
   "models.provider.setEnabled": validateModelsProviderSetEnabledInput,

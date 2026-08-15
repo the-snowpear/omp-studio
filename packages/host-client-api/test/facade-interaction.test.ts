@@ -31,7 +31,7 @@ function snapshot() {
     sessionId: SESSION,
     isStreaming: false,
     isCompacting: false,
-    activeMode: "normal" as const,
+    activeMode: "normal" as const, approvalMode: "yolo" as const,
     pendingMessages: 0,
     activeCommandIds: [],
     agentsRevision: 0,

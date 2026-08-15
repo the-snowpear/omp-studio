@@ -255,6 +255,7 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
       "isStreaming",
       "isCompacting",
       "activeMode",
+      "approvalMode",
       "plan",
       "goal",
       "vibe",
@@ -279,6 +280,9 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
   booleanValue(input.isCompacting, "$snapshot.snapshot.isCompacting");
   if (!["normal", "plan", "goal", "vibe"].includes(input.activeMode as string)) {
     throw new ContractValidationError("unsupported active mode", "$snapshot.snapshot.activeMode");
+  }
+  if (!["always-ask", "write", "yolo"].includes(input.approvalMode as string)) {
+    throw new ContractValidationError("unsupported approval mode", "$snapshot.snapshot.approvalMode");
   }
   nonNegativeInteger(input.pendingMessages, "$snapshot.snapshot.pendingMessages");
   nonNegativeInteger(input.agentsRevision, "$snapshot.snapshot.agentsRevision");
@@ -955,6 +959,17 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
       }
       if ("arguments" in operation) {
         jsonValue(operation.arguments, "$request.operation.arguments");
+      }
+    },
+  },
+  "permissions.mode.set": {
+    keys: ["kind", "mode", "persist"],
+    validate: (operation) => {
+      if (operation.mode !== "always-ask" && operation.mode !== "write" && operation.mode !== "yolo") {
+        throw new ContractValidationError("unsupported approval mode", "$request.operation.mode");
+      }
+      if (typeof operation.persist !== "boolean") {
+        throw new ContractValidationError("expected a boolean", "$request.operation.persist");
       }
     },
   },

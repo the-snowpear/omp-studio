@@ -88,7 +88,7 @@ const SNAPSHOT: OperatorStateSnapshot = {
   sessionId: SESSION_ID,
   isStreaming: false,
   isCompacting: false,
-  activeMode: "normal",
+  activeMode: "normal", approvalMode: "yolo",
   plan: { status: "off" },
   goal: { status: "off" },
   pause: { paused: false },

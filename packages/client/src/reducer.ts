@@ -196,9 +196,11 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "runtime.resume": true,
   "turn.retry": true,
   "runtime.install": true,
+  "session.create": true,
   "session.resume": true,
   "session.drop": true,
   "interaction.respond": true,
+  "permissions.mode.set": true,
   "models.provider.upsert": true,
   "models.provider.delete": true,
   "models.provider.setEnabled": true,
@@ -320,6 +322,7 @@ function markPendingOutcomeUnknown(
   commands: Readonly<Record<CommandRequestId, CommandState>>,
   reason: string,
   observedAt: string,
+  preserve?: (command: CommandState) => boolean,
 ): Readonly<Record<CommandRequestId, CommandState>> {
   let changed = false;
   const next: Record<CommandRequestId, CommandState> = {};
@@ -329,7 +332,7 @@ function markPendingOutcomeUnknown(
     if (command === undefined) {
       continue;
     }
-    if (isTerminal(command.status)) {
+    if (isTerminal(command.status) || preserve?.(command) === true) {
       next[requestId] = command;
     } else {
       next[requestId] = {
@@ -489,7 +492,12 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
           connection: { ...state.connection, runtimeEpoch: eventRuntimeEpoch, stateVersion: null },
           entities: { snapshot: null },
           interaction: { pending: null },
-          commands: markPendingOutcomeUnknown(state.commands, "runtime epoch changed; outcome unknown", event.occurredAt),
+          commands: markPendingOutcomeUnknown(
+            state.commands,
+            "runtime epoch changed; outcome unknown",
+            event.occurredAt,
+            (command) => command.commandName === "session.resume" || command.commandName === "session.create",
+          ),
           conversation: reduceConversationState(state.conversation, { type: "clear" }),
         };
       }
@@ -778,7 +786,14 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
   const epochChanged = nextRuntimeEpoch !== prevRuntimeEpoch;
   let commands = state.commands;
   if (epochChanged || lost) {
-    commands = markPendingOutcomeUnknown(commands, "runtime changed; outcome unknown", event.occurredAt);
+    commands = markPendingOutcomeUnknown(
+      commands,
+      "runtime changed; outcome unknown",
+      event.occurredAt,
+      epochChanged && !lost && connection.status === "connected"
+        ? (command) => command.commandName === "session.resume" || command.commandName === "session.create"
+        : undefined,
+    );
   }
   const conversation =
     epochChanged || lost ? reduceConversationState(state.conversation, { type: "clear" }) : state.conversation;

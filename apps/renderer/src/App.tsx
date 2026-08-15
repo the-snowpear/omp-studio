@@ -8,7 +8,6 @@ import type {
   ClientBootstrap,
   ClientError,
   ClientEvent,
-  ClientInteraction,
   CommandName,
   CommandInput,
   DiagnosticReadModel,
@@ -17,13 +16,15 @@ import type {
   InteractionResponseValue,
   SessionHistoryEntry,
   SessionHistoryReadModel,
+  SessionId,
+  ThreadId,
   StudioClient,
   Unsubscribe,
   WorkspaceId,
   WorkspaceListReadModel,
 } from "@omp-studio/client-contract";
-import type { ClientState } from "@omp-studio/client";
-import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+import { selectComposerReceipt, type ClientState, type ConversationHydrateClient } from "@omp-studio/client";
+import type { ApprovalMode, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import type { OperatorCommandManifest } from "@omp-studio/studio-protocol";
 import { AppIcon, Icon } from "./icons";
 import { HomePage, SecondaryPage } from "./HomePage";
@@ -40,6 +41,10 @@ import { buildPaletteGroups, type BottomTab, type PaletteAction, type SideTab } 
 import { toDrawerItems } from "./extensibilityMap";
 import { countEnabledDrawerItems, createPreviewDrawerItems, type DrawerItem } from "./skillsPreview";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
+import { hostErrorMessage, waitReceipt } from "./hostError";
+import { asConversationClient } from "./conversation/conversationHost";
+import { ConversationPane } from "./conversation/ConversationPane";
+import { useConversation } from "./conversation/useConversation";
 import { PreviewModeProvider, usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_MODE_SWITCH_ENABLED, readStoredPreviewMode } from "./preview/mode";
 import {
@@ -62,8 +67,26 @@ import {
   PreviewTests,
   PreviewTokenPanel,
   PreviewTokenTrigger,
-  PreviewTranscript,
 } from "./preview/surfaces";
+import { PreviewDeck } from "./preview/PreviewDeck";
+import { InteractionDeck } from "./InteractionDeck";
+
+/** Permission pill options (plan §5.1): Review → always-ask, Workspace → write, Full Access → yolo. */
+const APPROVAL_MODE_OPTIONS: ReadonlyArray<{
+  readonly mode: ApprovalMode;
+  readonly label: string;
+  readonly description: string;
+}> = [
+  { mode: "always-ask", label: "Review", description: "所有写操作需审批" },
+  { mode: "write", label: "Workspace", description: "工作区内自动允许" },
+  { mode: "yolo", label: "Full Access", description: "完全信任" },
+];
+
+const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
+  "always-ask": "Review",
+  write: "Workspace",
+  yolo: "Full Access",
+};
 
 type Model = {
   environment?: EnvironmentReadModel;
@@ -75,7 +98,7 @@ type Model = {
   workspaces?: WorkspaceListReadModel;
 };
 
-type ClientStateSource = StudioClient & {
+type ClientStateSource = StudioClient & ConversationHydrateClient & {
   getState?: () => ClientState;
   onState?: (listener: (state: ClientState) => void) => Unsubscribe;
 };
@@ -156,7 +179,26 @@ function asError(cause: unknown): ClientError {
 }
 
 function snapshotFrom(state: ViewState): OperatorStateSnapshot | undefined {
-  return state.clientState?.entities.snapshot ?? (state.bootstrap && "snapshot" in state.bootstrap ? state.bootstrap.snapshot : state.model.home?.snapshot);
+  if (state.clientState !== undefined) {
+    return state.clientState.entities.snapshot ?? undefined;
+  }
+  return state.bootstrap && "snapshot" in state.bootstrap ? state.bootstrap.snapshot : state.model.home?.snapshot;
+}
+
+async function resyncRuntimeModel(client: ClientStateSource): Promise<Model> {
+  const results = await Promise.allSettled([
+    client.query("capabilities.get", {}),
+    client.query("commands.getManifest", {}),
+    client.query("projects.list", {}),
+    client.query("history.list", { limit: 20 }),
+  ]);
+  const [capabilities, commandManifest, workspaces, history] = results;
+  return {
+    ...(capabilities.status === "fulfilled" ? { capabilities: capabilities.value } : {}),
+    ...(commandManifest.status === "fulfilled" ? { commandManifest: commandManifest.value } : {}),
+    ...(workspaces.status === "fulfilled" ? { workspaces: workspaces.value } : {}),
+    ...(history.status === "fulfilled" ? { history: history.value } : {}),
+  };
 }
 
 function chipTone(value: string): "green" | "amber" | "red" {
@@ -475,219 +517,6 @@ function Deferred({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function InteractionPrompt({ interaction, onRespond, disabled }: { interaction: ClientInteraction; onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void; disabled?: boolean }) {
-  const [text, setText] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
-  const toggleOption = (optionId: string) => {
-    if (disabled || interaction.kind !== "select") return;
-    setSelected((previous) => interaction.multiple
-      ? (previous.includes(optionId) ? previous.filter((id) => id !== optionId) : [...previous, optionId])
-      : (previous.length === 1 && previous[0] === optionId ? [] : [optionId]));
-  };
-  const cancel = <button className="btn outline" disabled={disabled} onClick={() => onRespond("cancel")}>Cancel</button>;
-  if (interaction.kind === "confirm") {
-    return (
-      <div className="approval-card">
-        <div className="approval-head"><Icon name="alert" extra="sm" />Input required</div>
-        <div className="approval-body">{interaction.message}</div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled} onClick={() => onRespond("submit", true)}>Confirm</button>{cancel}</div>
-      </div>
-    );
-  }
-  if (interaction.kind === "select") {
-    const canSubmit = interaction.multiple ? selected.length > 0 : selected.length === 1;
-    return (
-      <div className="ask-card">
-        <div className="ask-head"><Icon name="message" extra="sm" />Input required</div>
-        <div className="ask-body">
-          <p className="muted small">Runtime requests select{interaction.multiple ? " (multiple)" : ""}.</p>
-          {interaction.options.map((option) => (
-            <button key={option.id} type="button" className={`ask-opt${selected.includes(option.id) ? " sel" : ""}`} aria-checked={selected.includes(option.id)} disabled={disabled} onClick={() => toggleOption(option.id)}>
-              <span>{option.label}</span>
-              {option.description ? <span className="muted small">{option.description}</span> : null}
-            </button>
-          ))}
-        </div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled || !canSubmit} onClick={() => onRespond("submit", interaction.multiple ? selected : selected[0])}>Submit</button>{cancel}</div>
-      </div>
-    );
-  }
-  if (interaction.kind === "input") {
-    return (
-      <div className="ask-card">
-        <div className="ask-head"><Icon name="pencil" extra="sm" />Input required</div>
-        <div className="ask-body">
-          <input className="input" value={text} onChange={(event) => setText(event.target.value)} disabled={disabled} placeholder={interaction.placeholder ?? "Response"} type={interaction.secret ? "password" : "text"} />
-        </div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled || !text.trim()} onClick={() => onRespond("submit", text)}>Submit</button>{cancel}</div>
-      </div>
-    );
-  }
-  const note = interaction.kind === "editor" ? `Runtime requests editor${interaction.language ? ` (${interaction.language})` : ""}.` : `Runtime requests approval (${interaction.approvalType}).`;
-  return (
-    <div className="approval-card">
-      <div className="approval-head"><Icon name="alert" extra="sm" />Input required</div>
-      <div className="approval-body">
-        <p>{note}</p>
-        <p className="muted small">此交互类型未实现安全提交；请使用 Cancel 拒绝。</p>
-      </div>
-      <div className="approval-foot"><button className="btn" disabled title="此交互类型未实现安全提交">Submit</button>{cancel}</div>
-    </div>
-  );
-}
-
-/* —— 底部操作许可 Deck（Agent 提问 / 审批请求）——
-   参照 ver1：浮在输入框上方（最靠近输入，优先处理），不挤占布局；
-   激活时 composer 变暗让位。切换动画：
-   · 同一张卡片内切换内容 —— 卡片外壳常驻，内部横向轨道平移：
-     旧内容向左推出、新内容从右滑入，不换卡、不闪烁；
-   · 高度变化以底部为锚向上展开 —— JS 锁像素高度后交给 CSS transition，
-     新内容更高时向上生长、更矮时向下收起，而不是瞬间跳变。 */
-type DeckEntry = { id: string; interaction: ClientInteraction; leaving: boolean };
-
-const DECK_PUSH_MS = 260; /* 内容平移时长（略大于 CSS transform transition 250ms） */
-const DECK_EXIT_MS = 220; /* 整卡退出动画时长（与 CSS deck-out 一致） */
-const DECK_GROW_MS = 320; /* 高度展开过渡时长（不小于 CSS height transition） */
-
-function InteractionDeck({ interaction, onRespond, disabled }: {
-  interaction: ClientInteraction | null;
-  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void;
-  disabled: boolean;
-}) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [entries, setEntries] = useState<DeckEntry[]>([]);
-  /* 锁定容器像素高度；null = 无内容（自动高度 0）。锁定值的变化由
-     .deck.smooth 的 height transition 驱动，实现「向上展开 / 向下收起」。 */
-  const [lockH, setLockH] = useState<number | null>(null);
-  /* 剪枝提交：轨道 transform 复位不过渡（否则唯一内容会从左滑回） */
-  const [noAnim, setNoAnim] = useState(false);
-  /* 卡片外壳动画：in = 空 → 首次出现滑入；out = 整卡退出；"" = 稳态 */
-  const [shellMode, setShellMode] = useState<"in" | "out" | "">("");
-  const lastId = useRef<string | null>(null);
-  const gen = useRef(0);    /* 世代计数：被新交互取代后，过期的定时器作废 */
-  const lastW = useRef(-1); /* ResizeObserver 只响应宽度变化，不打断高度过渡 */
-  const timers = useRef<number[]>([]);
-
-  const later = useCallback((fn: () => void, ms: number) => {
-    const t = window.setTimeout(() => {
-      timers.current = timers.current.filter((x) => x !== t);
-      fn();
-    }, ms);
-    timers.current.push(t);
-  }, []);
-
-  useEffect(() => () => {
-    timers.current.forEach((t) => window.clearTimeout(t));
-  }, []);
-
-  /* interaction 变化：先锁定当前渲染高度（换内容瞬间不跳变），再在同一张卡片内平移 */
-  useEffect(() => {
-    const id = interaction?.interactionId ?? null;
-    if (id === lastId.current) return;
-    lastId.current = id;
-    gen.current += 1;
-    const g = gen.current;
-
-    const wrap = wrapRef.current;
-    if (wrap) {
-      wrap.classList.add("smooth");
-      setLockH(wrap.offsetHeight); /* 无卡片时 offsetHeight 为 0 */
-    }
-    const wasEmpty = !wrap || !wrap.querySelector(".deck-cell");
-
-    if (interaction === null) {
-      /* 全部退出：整卡滑出 → 收起高度 → 解锁（被新交互取代则作废） */
-      setShellMode("out");
-      setEntries((prev) => prev.map((e) => ({ ...e, leaving: true })));
-      later(() => {
-        if (gen.current !== g) return;
-        setEntries([]);
-        setLockH(0);
-      }, DECK_EXIT_MS);
-      later(() => {
-        if (gen.current === g) setLockH(null);
-      }, DECK_EXIT_MS + DECK_GROW_MS);
-      return;
-    }
-
-    setNoAnim(false);
-    setShellMode(wasEmpty ? "in" : "");
-    setEntries((prev) => {
-      if (prev.some((e) => e.interaction.interactionId === interaction.interactionId)) return prev;
-      return [...prev.map((e) => ({ ...e, leaving: true })), { id: interaction.interactionId, interaction, leaving: false }];
-    });
-    /* 内容平移结束后：移出旧内容，同一次提交里把轨道复位到 0（禁止过渡） */
-    later(() => {
-      if (gen.current !== g) return;
-      setEntries((prev) => prev.filter((e) => !e.leaving));
-      setNoAnim(true);
-    }, DECK_PUSH_MS);
-  }, [interaction, later]);
-
-  /* 提交后：量出最新内容的高度，平滑展开到新高度（以底部为锚向上生长） */
-  useEffect(() => {
-    if (!entries.length) return;
-    const wrap = wrapRef.current;
-    const track = trackRef.current;
-    if (!wrap || !track || lockH === null) return;
-    /* 在下一帧重测，避免锁到旧宽度下的过时高度 */
-    const raf = requestAnimationFrame(() => {
-      const cell = track.querySelector<HTMLElement>(".deck-cell:last-child");
-      if (!cell) return;
-      setLockH(cell.offsetHeight);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [entries]);
-
-  /* 容器宽度变化（窗口 / 侧栏 / 底栏）时跟随卡片自然高度，不做过渡 */
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const ro = new ResizeObserver((items) => {
-      for (const item of items) {
-        const width = item.contentBoxSize?.[0]?.inlineSize ?? item.contentRect.width;
-        if (Math.abs(width - lastW.current) < 0.5) continue;
-        lastW.current = width;
-        const track = trackRef.current;
-        const cell = track?.querySelector<HTMLElement>(".deck-cell:last-child");
-        if (!cell) return;
-        wrap.classList.remove("smooth");
-        setLockH(cell.offsetHeight);
-      }
-    });
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={wrapRef}
-      className={`deck${entries.length ? " active" : ""}`}
-      style={lockH === null ? undefined : { height: lockH }}
-      role="region"
-      aria-label="待处理的审批与提问"
-      aria-live="polite"
-    >
-      {entries.length > 0 && (
-        <div className={`deck-card${shellMode ? ` ${shellMode}` : ""}`}>
-          <div
-            ref={trackRef}
-            className={`deck-track${noAnim ? " no-anim" : ""}`}
-            style={{ transform: `translateX(${-100 * Math.max(0, entries.length - 1)}%)` }}
-          >
-            {entries.map((entry) => (
-              <div key={entry.id} className="deck-cell">
-                <InteractionPrompt interaction={entry.interaction} onRespond={onRespond} disabled={disabled} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function GenericCommandForm({ manifest, busy, enabled, onInvoke }: { manifest: OperatorCommandManifest; busy: boolean; enabled: boolean; onInvoke: (commandId: string, args?: unknown) => void }) {
   const [selected, setSelected] = useState("");
   const [args, setArgs] = useState("{}");
@@ -753,6 +582,7 @@ type ShellChrome = {
   onSelectPreviewProject: (id: string) => void;
   onSelectPreviewThread: (id: string) => void;
   onPickProject: () => void;
+  onStartNewChat: () => void;
   onOpenCapabilities: (tab?: CapTab, name?: string) => void;
   onOpenPalette: () => void;
   paletteOpen: boolean;
@@ -953,20 +783,7 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
         </button>
       </div>
       <div className="sb-actions">
-        <button className="action-row new-convo-btn" aria-label="新建对话" onClick={() => {
-          if (preview) {
-            chrome.onSelectPreviewProject(chrome.previewProjectId);
-            onRoute("workbench");
-            return;
-          }
-          const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
-          if (active) {
-            chrome.onSelectProject({ id: active.workspaceId, name: active.name });
-            onRoute("workbench");
-          } else {
-            chrome.onPickProject();
-          }
-        }}>
+        <button className="action-row new-convo-btn" aria-label="新建对话" onClick={() => chrome.onStartNewChat()}>
           <Icon name="plus" />
           <span className="lbl">新建对话</span>
           <span className="meta"><span className="hint">Ctrl ⇧ O</span></span>
@@ -1436,9 +1253,11 @@ function AppTopbar({ state, chrome, onRoute, threadTitle, sideOpen, onToggleSide
   );
 }
 
-function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSideTabChange, bottomOpen, onBottomOpenChange, bottomTab, onBottomTabChange, onRoute }: {
+function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, sideOpen, onCloseSide, sideTab, onSideTabChange, bottomOpen, onBottomOpenChange, bottomTab, onBottomTabChange, onRoute }: {
   state: ViewState;
   client: ClientStateSource;
+  selectedSessionId?: string;
+  selectedThreadId?: ThreadId;
   sideOpen: boolean;
   onCloseSide: () => void;
   sideTab: SideTab;
@@ -1451,6 +1270,11 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [composerError, setComposerError] = useState<string | undefined>(undefined);
+  const [approvalMenuOpen, setApprovalMenuOpen] = useState(false);
+  const promptUnsub = useRef<Unsubscribe | undefined>(undefined);
+  useEffect(() => () => promptUnsub.current?.(), []);
   const terminalRef = useRef<TerminalPaneHandle>(null);
   const terminalAvailable = typeof globalThis.ompStudioTerminal !== "undefined";
   const { preview } = usePreviewMode();
@@ -1458,7 +1282,7 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
   const connection = state.clientState?.connection;
   const runtime = connection?.runtime ?? state.bootstrap?.runtime;
   const commands = state.clientState?.commands ?? {};
-  const pendingInteraction = Object.values(commands).find((command) => command.status === "interaction_required");
+  const pendingInteraction = state.clientState?.interaction.pending ?? null;
   const capabilities = state.model.capabilities ?? state.bootstrap?.capabilityManifest;
   const commandManifest = state.model.commandManifest;
   const capabilityById = useMemo(() => new Map((capabilities?.capabilities ?? []).map((capability) => [capability.id, capability])), [capabilities]);
@@ -1469,31 +1293,132 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
     if (runtime?.classification === "limited-system") return false;
     return true;
   };
+  const conversationClient = useMemo(() => asConversationClient(client), [client]);
+  const runtimeConnected = runtime?.status === "connected";
+  const conversationIdentity = selectedSessionId === undefined
+    ? snapshot ? { runtimeEpoch: snapshot.runtimeEpoch, sessionId: snapshot.sessionId } : null
+    : {
+        sessionId: selectedSessionId as SessionId,
+        ...(snapshot?.sessionId === selectedSessionId ? { runtimeEpoch: snapshot.runtimeEpoch } : {}),
+      };
+  const convo = useConversation({
+    preview,
+    client: conversationClient,
+    identity: conversationIdentity,
+    // Persistent archive reads are Broker/Host-owned and do not require a
+    // currently connected Runtime capability manifest.
+    canRead: true,
+    runtimeConnected,
+  });
   const run = useCallback(async <T extends CommandName>(name: T, input: CommandInput<T>): Promise<boolean> => {
     if (busy) return false;
     setBusy(true);
     try {
-      await client.command(name, input);
+      const handle = await client.command(name, input);
+      await waitReceipt(client, handle.requestId);
       return true;
-    } catch { return false; } finally { setBusy(false); }
+    } catch (error) {
+      setComposerError(hostErrorMessage(error, "操作失败"));
+      return false;
+    } finally { setBusy(false); }
   }, [busy, client]);
   const respond = useCallback((decision: "submit" | "cancel", value?: InteractionResponseValue) => {
-    if (!pendingInteraction || pendingInteraction.status !== "interaction_required") return;
-    void run("interaction.respond", { interactionId: pendingInteraction.interaction.interactionId, decision, ...(value === undefined ? {} : { value }) });
+    if (!pendingInteraction) return;
+    void run("interaction.respond", { interactionId: pendingInteraction.interactionId, decision, ...(value === undefined ? {} : { value }) });
   }, [pendingInteraction, run]);
   const commandRows = useMemo(() => Object.values(commands).slice(-20).reverse(), [commands]);
-  const runtimeConnected = runtime?.status === "connected";
   const snapshotReady = snapshot !== undefined;
-  const gated = busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady;
+  const executionMatches = selectedSessionId === undefined || snapshot?.sessionId === selectedSessionId;
+  const gated = busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady || !executionMatches;
   const interactionDisabled = gated || !can("interaction.respond");
   const textReady = text.trim().length > 0;
-  const canSend = textReady && !gated;
   const abortEligible = Boolean(snapshot?.isStreaming) || (snapshot?.pendingMessages ?? 0) > 0;
   const running = Boolean(snapshot?.isStreaming);
-  const dispatchText = async (name: "core.prompt" | "core.steer" | "core.followUp" | "queue.enqueue") => {
-    if (!canSend || !can(name)) return;
-    const accepted = await run(name, { text: text.trim() });
-    if (accepted) setText("");
+  // Approval mode pill (plan §5.5): read-only view of the Runtime snapshot;
+  // disabled while busy/streaming/resync/pending interaction. Never
+  // optimistic — the label only changes after the receipt/snapshot updates.
+  const approvalMode: ApprovalMode = snapshot?.approvalMode ?? "yolo";
+  const approvalLabel = APPROVAL_MODE_LABELS[approvalMode];
+  const approvalDisabled =
+    gated || running || pendingInteraction !== null || !can("permissions.mode.set");
+  const promptEnabled = textReady && !gated && !sending && !running && can("core.prompt");
+  const steerEnabled = textReady && !sending && runtimeConnected && snapshotReady && !connection?.resyncRequired && can("core.steer");
+  const restorePending = (requestId: string) => {
+    const pending = convo.state.pendingUsers.find((entry) => entry.requestId === requestId);
+    if (!pending) return;
+    setText(pending.draft);
+    setComposerError(undefined);
+    convo.dropPending(requestId);
+  };
+  const activateSelectedSession = async () => {
+    if (selectedThreadId === undefined || executionMatches) return;
+    setComposerError(undefined);
+    await run("session.resume", { threadId: selectedThreadId });
+  };
+  const sendPrompt = async () => {
+    if (!promptEnabled) return;
+    const draft = text;
+    const trimmed = draft.trim();
+    setComposerError(undefined);
+    setSending(true);
+    setText("");
+    try {
+      const handle = await client.command("core.prompt", { text: trimmed });
+      convo.trackPending({
+        requestId: handle.requestId,
+        text: trimmed,
+        draft,
+        status: "pending",
+        knownItemIds: convo.state.items.map((item) => item.itemId),
+      });
+      promptUnsub.current?.();
+      const watchReceipt = () => {
+        const commands = client.getState?.()?.commands;
+        if (commands === undefined) return;
+        const receipt = selectComposerReceipt(commands, handle.requestId);
+        if (
+          receipt.phase === "pending" ||
+          receipt.phase === "accepted" ||
+          receipt.phase === "unknown" ||
+          receipt.phase === "interaction_required"
+        ) {
+          return;
+        }
+        promptUnsub.current?.();
+        promptUnsub.current = undefined;
+        if (receipt.phase === "completed") return;
+        if (receipt.phase === "failed") {
+          convo.failPending(handle.requestId, receipt.error.message);
+          return;
+        }
+        convo.failPending(handle.requestId, receipt.reason);
+      };
+      promptUnsub.current = client.onState
+        ? client.onState(() => watchReceipt())
+        : client.subscribe({ scope: "command", requestId: handle.requestId }, () => watchReceipt());
+      watchReceipt();
+    } catch (error) {
+      setText(draft);
+      setComposerError(hostErrorMessage(error, "发送失败"));
+    } finally {
+      setSending(false);
+    }
+  };
+  const dispatchSteer = async () => {
+    if (!steerEnabled) return;
+    const draft = text;
+    setComposerError(undefined);
+    setSending(true);
+    try {
+      const handle = await client.command("core.steer", { text: text.trim() });
+      await waitReceipt(client, handle.requestId);
+      setText("");
+    } catch (error) {
+      setText(draft);
+      setComposerError(hostErrorMessage(error, "Steer 失败"));
+    } finally {
+      setSending(false);
+    }
   };
   const marks = state.events.slice(-24);
 
@@ -1501,19 +1426,7 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
     <>
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
         <div className="convo-wrap">
-          <main className="convo-scroll" id="convoScroll" tabIndex={-1} aria-label="对话内容">
-            <div className="convo-doc" id="convoDoc" role="log" aria-live="polite" aria-relevant="additions">
-              {preview ? (
-                <PreviewTranscript />
-              ) : (
-                <div className="empty" style={{ paddingTop: 72 }}>
-                  <Icon name="message" extra="lg" />
-                  <p>开始一段对话</p>
-                  <p className="muted small">公共 contract 不暴露消息 transcript。语义事件显示在底部 OMP Logs。</p>
-                </div>
-              )}
-            </div>
-          </main>
+          <ConversationPane snapshot={convo} onLoadOlder={convo.loadOlder} onRestore={restorePending} />
           <div className="minimap" id="minimap">
             <div className="minimap-track" id="mmTrack" aria-hidden="true">
               <span className="mm-rail" />
@@ -1528,11 +1441,15 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
             </div>
           </div>
           <div className="composer-region">
-            <InteractionDeck
-              interaction={pendingInteraction?.status === "interaction_required" ? pendingInteraction.interaction : null}
-              onRespond={respond}
-              disabled={interactionDisabled}
-            />
+            {preview ? (
+              <PreviewDeck />
+            ) : (
+              <InteractionDeck
+                interaction={pendingInteraction}
+                onRespond={respond}
+                disabled={interactionDisabled}
+              />
+            )}
             <div className={`ctx-strip${running ? " hidden" : ""}`} role="status" aria-live="polite">
               <span className="ctx-item"><Icon name="folder-open" extra="sm" /><span>{preview ? "omp-web" : (state.model.workspaces?.workspaces.find((workspace) => workspace.active)?.name ?? "未选择项目")}</span></span>
               <span className="ctx-item"><Icon name="cpu" extra="sm" /><span>{preview ? "gemini-3.6-flash" : (runtime?.classification ?? "runtime unavailable")}</span></span>
@@ -1545,9 +1462,23 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
               <span className="muted small">{snapshot ? `${snapshot.activeMode} · ${snapshot.pendingMessages} pending` : "No Runtime snapshot."}</span>
               <span className="spacer" />
               {snapshot && snapshot.pendingMessages > 0 && <span className="fq-chip"><Icon name="queue" extra="sm" />Follow-up ×{snapshot.pendingMessages}</span>}
-              <button className="btn small outline" disabled={!canSend || !can("core.steer")} onClick={() => void dispatchText("core.steer")}><Icon name="steering" extra="sm" />Steering</button>
+              <button className="btn small outline" disabled={!steerEnabled} onClick={() => void dispatchSteer()}><Icon name="steering" extra="sm" />Steering</button>
               <button className="btn small danger" disabled={gated || !abortEligible || !can("core.abort")} onClick={() => void run("core.abort", {})}><Icon name="stop" extra="sm" />Abort</button>
             </div>
+            {!preview && !executionMatches ? (
+              <div className="run-strip" role="status" aria-live="polite">
+                <span className="rs-label"><Icon name="history" extra="sm" />当前正在查看持久化历史</span>
+                <span className="muted small">激活后可继续对话；其他会话的 Runtime Worker 会保持运行。</span>
+                <span className="spacer" />
+                <button
+                  className="btn small primary"
+                  disabled={busy || selectedThreadId === undefined}
+                  onClick={() => void activateSelectedSession()}
+                >
+                  <Icon name="play" extra="sm" />激活此会话
+                </button>
+              </div>
+            ) : null}
             <div className={`composer${running ? " running" : ""}`} id="composer">
               <div className="composer-ctx" aria-label="已引用的上下文" role="group" />
               <label className="sr-only" htmlFor="composerInput">消息输入框。发送给 Runtime 的文本。</label>
@@ -1559,22 +1490,69 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
                 placeholder="输入消息… 输入 / 触发命令，@ 引用文件、Agent、Diff、Preview 元素"
                 aria-describedby="composerHint"
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && canSend && can("core.prompt")) {
+                  if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                  if (running) {
                     event.preventDefault();
-                    void dispatchText("core.prompt");
+                    return;
+                  }
+                  if (promptEnabled) {
+                    event.preventDefault();
+                    void sendPrompt();
                   }
                 }}
               />
-              <p className="sr-only" id="composerHint">按 Enter 发送，Shift+Enter 换行</p>
+              <p className="sr-only" id="composerHint">{running ? "流式输出中：Enter 发送已禁用，请使用 Steer 或 Abort" : "按 Enter 发送，Shift+Enter 换行"}</p>
+              {composerError ? (
+                <div className="composer-error" role="alert">
+                  <Icon name="alert" extra="sm" />
+                  <span>{composerError}</span>
+                </div>
+              ) : null}
+              {running ? <p className="composer-hint muted small">流式输出中：Enter 发送已禁用，请使用 Steer 或 Abort。</p> : null}
               <div className="composer-bar">
                 <div className="cb-group">
                   <button className="icon-btn small" data-tip="附件 / 图片" disabled title="附件不在公共 contract 中"><Icon name="attach" extra="sm" /></button>
                   <button className="icon-btn small" data-tip="@ 引用" disabled title="@ 引用不在公共 contract 中"><Icon name="at" extra="sm" /></button>
                   <button className="icon-btn small" data-tip="Slash Commands" disabled title="Slash Commands 不在公共 contract 中"><Icon name="slash" extra="sm" /></button>
                 </div>
-                <button className="pill-btn" disabled title="权限模式不在公共 contract 中" aria-label="权限模式：default">
-                  <Icon name="shield" extra="sm" /><span>default</span>
-                </button>
+                <div className="approval-pill-wrap">
+                  <button
+                    className={`pill-btn${approvalMode === "yolo" ? "" : ""}`}
+                    disabled={approvalDisabled}
+                    onClick={() => setApprovalMenuOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={approvalMenuOpen}
+                    aria-label={`权限模式：${approvalLabel}`}
+                    title={approvalDisabled ? "Runtime 忙碌或存在待处理交互时不可切换权限模式" : `权限模式：${approvalLabel}（点击切换）`}
+                  >
+                    <Icon name="shield" extra="sm" /><span>{approvalLabel}</span>
+                  </button>
+                  {approvalMenuOpen ? (
+                    <>
+                      <div className="approval-menu-backdrop" onClick={() => setApprovalMenuOpen(false)} />
+                      <div className="approval-menu" role="menu" aria-label="权限模式">
+                        {APPROVAL_MODE_OPTIONS.map((option) => (
+                          <button
+                            key={option.mode}
+                            role="menuitemradio"
+                            aria-checked={approvalMode === option.mode}
+                            className={`approval-menu-item${approvalMode === option.mode ? " selected" : ""}`}
+                            onClick={() => {
+                              setApprovalMenuOpen(false);
+                              if (option.mode === approvalMode) return;
+                              // No optimistic switch: the pill updates only
+                              // after the receipt / snapshot reflects the mode.
+                              void run("permissions.mode.set", { mode: option.mode });
+                            }}
+                          >
+                            <span className="am-label">{option.label}</span>
+                            <span className="am-desc">{option.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
                 <span className="spacer" />
                 <button className="pill-btn meta-model" disabled title="模型切换不在公共 contract 中" aria-label="当前模型不可用">
                   <Icon name="cpu" extra="sm" /><span>—</span>
@@ -1582,7 +1560,7 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
                 <button className="pill-btn" disabled title="思考强度不在公共 contract 中" aria-label="思考强度不可用">
                   <Icon name="brain" extra="sm" /><span>—</span>
                 </button>
-                <button className="send-btn" disabled={!canSend || !can("core.prompt")} onClick={() => void dispatchText("core.prompt")} data-tip="发送 (Enter)" title="发送 (Enter)">
+                <button className="send-btn" disabled={!promptEnabled} onClick={() => void sendPrompt()} data-tip={running ? "流式输出中，普通发送已禁用" : "发送 (Enter)"} title={running ? "流式输出中：请使用 Steer 或 Abort" : "发送 (Enter)"}>
                   <Icon name="send" extra="sm" />
                 </button>
               </div>
@@ -1755,12 +1733,13 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
   );
 }
 
-function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, onWorkspacesChange }: {
+function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, onNewThread, onWorkspacesChange }: {
   state: ViewState;
   client: ClientStateSource;
   onRoute: (route: Route) => void;
   selectedHistoryId: string | null;
   onSelectThread: (entry: SessionHistoryEntry) => void;
+  onNewThread: () => void;
   onWorkspacesChange: (workspaces: WorkspaceListReadModel) => void;
 }) {
   const previewMode = usePreviewMode();
@@ -1782,6 +1761,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [bottomTab, setBottomTab] = useState<BottomTab>("logs");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
+  const [sessionActionError, setSessionActionError] = useState<string | undefined>(undefined);
   const [paletteInventory, setPaletteInventory] = useState<DrawerItem[]>([]);
   const paletteRef = useRef<CommandPaletteHandle>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -1803,6 +1783,23 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const runtime = state.clientState?.connection.runtime ?? state.bootstrap?.runtime;
   const capabilities = state.model.capabilities ?? state.bootstrap?.capabilityManifest;
   const environment = state.model.environment;
+  /** Approval mode for Settings → Permissions (plan §5.6); never optimistic. */
+  const approvalMode: ApprovalMode = snapshot?.approvalMode ?? "yolo";
+  const setApprovalMode = useCallback(
+    (mode: ApprovalMode) => {
+      if (snapshot === undefined) return;
+      void (async () => {
+        try {
+          const handle = await client.command("permissions.mode.set", { mode });
+          await waitReceipt(client, handle.requestId);
+          setSessionActionError(undefined);
+        } catch (error) {
+          setSessionActionError(hostErrorMessage(error, "切换权限模式失败"));
+        }
+      })();
+    },
+    [client, snapshot],
+  );
   const selected = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId);
   const previewThread = findPreviewThread(previewThreadId);
   const threadTitle = previewMode.preview
@@ -1953,19 +1950,23 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     setPaletteOpen(true);
   }, [paletteOpen]);
 
-  const startNewChat = () => {
+  const startNewChat = useCallback(() => {
     if (previewMode.preview) {
       go("workbench");
       return;
     }
-    const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
-    if (active) {
-      selectProject({ id: active.workspaceId, name: active.name });
-      go("workbench");
-    } else {
-      void pickProject();
-    }
-  };
+    setSessionActionError(undefined);
+    void (async () => {
+      try {
+        const handle = await client.command("session.create", {});
+        await waitReceipt(client, handle.requestId);
+        onNewThread();
+        go("workbench");
+      } catch (error) {
+        setSessionActionError(hostErrorMessage(error, "新建对话失败"));
+      }
+    })();
+  }, [client, previewMode.preview, go, onNewThread]);
 
   const openHistoryEntry = (entry: SessionHistoryEntry) => {
     if (previewMode.preview) {
@@ -1978,6 +1979,10 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     } else {
       setExplorerOpen(true);
     }
+    // Selecting a historical conversation is a View-plane operation. Do not
+    // stop/restart the current Runtime just to render persisted transcript.
+    // Execution stays gated until a Worker can be ensured for this session.
+    setSessionActionError(undefined);
     onSelectThread(entry);
   };
 
@@ -2126,7 +2131,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         openPalette();
       } else if (key === "o" && event.shiftKey) {
         event.preventDefault();
-        go("workbench");
+        startNewChat();
       } else if (key === "j" && !event.shiftKey) {
         event.preventDefault();
         setBottomOpen((value) => !value);
@@ -2134,7 +2139,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dialog, go, skillsOpen, paletteOpen, closePalette, openPalette]);
+  }, [dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
 
   const chrome: ShellChrome = {
     collapsed,
@@ -2157,21 +2162,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     onResizeSplit: setSplitRatio,
     onSelectProject: selectProject,
     onSelectThread: (entry) => {
-      if (previewMode.preview) {
-        onSelectThread(entry);
-        return;
-      }
-      const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
-      if (active) {
-        selectProject({ id: active.workspaceId, name: active.name });
-      } else {
-        setExplorerOpen(true);
-      }
-      onSelectThread(entry);
+      openHistoryEntry(entry);
     },
     onPickProject: () => {
       void pickProject();
     },
+    onStartNewChat: startNewChat,
     onSelectPreviewProject: (id) => {
       setPreviewProjectId(id);
       const project = findPreviewProject(id);
@@ -2244,7 +2240,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         menus={
           <>
             <TitleMenu id="file" label="文件" openId={openMenu} onToggle={setOpenMenu}>
-              <button className="menu-item" role="menuitem" onClick={() => go("workbench")}>新建对话<span className="kbd">Ctrl ⇧ O</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => startNewChat()}>新建对话<span className="kbd">Ctrl ⇧ O</span></button>
               <button className="menu-item" role="menuitem" onClick={() => go("history")}>会话历史</button>
               <button className="menu-item" role="menuitem" onClick={() => go("agent-hub")}>Agent Hub</button>
               <button className="menu-item" role="menuitem" onClick={() => go("capabilities")}>能力中心</button>
@@ -2281,6 +2277,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           </>
         }
       />
+      {sessionActionError ? (
+        <div className="empty" role="alert" style={{ padding: "8px 16px" }}>
+          <p className="muted small">{sessionActionError}</p>
+        </div>
+      ) : null}
       {showPage ? (
         <SecondaryPage
           route={pageRoute}
@@ -2335,7 +2336,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           ) : pageRoute === "model-config" ? (
             <ModelConfigPage key={mcNonce} client={client} />
           ) : pageRoute === "settings" ? (
-            <SettingsPage key={settingsNonce} theme={theme} onSetTheme={(next) => setTheme(next)} onRoute={go} />
+            <SettingsPage
+              key={settingsNonce}
+              theme={theme}
+              onSetTheme={(next) => setTheme(next)}
+              onRoute={go}
+              {...(snapshot ? { approvalMode } : {})}
+              onSetApprovalMode={setApprovalMode}
+            />
           ) : pageRoute === "diagnostics" ? (
             <DiagnosticsPage
               client={client}
@@ -2368,6 +2376,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           <WorkbenchCanvas
             state={state}
             client={client}
+            {...(selected?.sessionId === undefined ? {} : { selectedSessionId: selected.sessionId })}
+            {...(selected?.threadId === undefined ? {} : { selectedThreadId: selected.threadId })}
             sideOpen={sideOpen}
             onCloseSide={() => setSideOpen(false)}
             sideTab={sideTab}
@@ -2483,6 +2493,19 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
     };
   }, [client]);
 
+  const runtimeEpoch = state.clientState?.connection.runtimeEpoch;
+  const runtimeStatus = state.clientState?.connection.runtime?.status;
+  useEffect(() => {
+    if (state.loading || runtimeStatus !== "connected") return;
+    let cancelled = false;
+    void resyncRuntimeModel(client).then((model) => {
+      if (!cancelled) dispatch({ type: "model", model });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, state.loading, runtimeEpoch, runtimeStatus]);
+
   const routedState = { ...state, route };
   const body = state.loading ? (
     <div className="app">
@@ -2513,6 +2536,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
       onRoute={setRoute}
       selectedHistoryId={selectedHistoryId}
       onSelectThread={(entry) => { setSelectedHistoryId(entry.historyId); setRoute("workbench"); }}
+      onNewThread={() => setSelectedHistoryId(null)}
       onWorkspacesChange={(workspaces) => dispatch({ type: "model", model: { workspaces } })}
     />
   );

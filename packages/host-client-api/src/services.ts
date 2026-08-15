@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import type {
   ClientError,
   ClientErrorCode,
+  ConversationTranscriptReadPage,
   ConfigWriteResult,
   DiagnosticEntryId,
   ExtensibilityReadModel,
@@ -23,6 +24,7 @@ import type {
   AgentDefinitionDeleteInput,
   AgentDefinitionsReadModel,
   AgentDefinitionUpsertInput,
+  CommandRequestId,
   IdempotencyKey,
   InteractionId,
   InteractionResponseValue,
@@ -35,6 +37,7 @@ import type {
   ModelProviderUpsertInput,
   ModelRoleCreateInput,
   ModelRolesWriteInput,
+  OpaqueCursor,
   RuntimeChannel,
   RuntimeInstallState,
   SessionHistoryStatus,
@@ -44,7 +47,9 @@ import type {
   TokenUsageReadModel,
 } from "@omp-studio/client-contract";
 import type {
+  ApprovalMode,
   CapabilityManifest,
+  ConversationTranscriptPage,
   OperatorCommandManifest,
   OperatorStateSnapshot,
   RuntimeBackend,
@@ -52,10 +57,13 @@ import type {
   RuntimeEpoch,
   RuntimeId,
 } from "@omp-studio/studio-protocol";
-import type {
-  HostBackend,
-  RuntimePublication,
-  StudioRuntimeSessionController,
+import {
+  StudioHostError,
+  type HostBackend,
+  type RuntimePublication,
+  type StudioConversationForward,
+  type StudioInteractionForward,
+  type StudioRuntimeSessionController,
 } from "@omp-studio/studio-host";
 import type { StudioOperation } from "@omp-studio/studio-protocol";
 import { redactText } from "./read-models.js";
@@ -100,9 +108,24 @@ export interface HostRuntimeHelloView {
  */
 export interface HostRuntimeAccess {
   readonly session?: StudioRuntimeSessionController;
+  /** Live session holder so transcript reads follow workspace/runtime rebind. */
+  readonly currentSession?: () => StudioRuntimeSessionController | undefined;
+  /**
+   * Optional test/composition seam. When omitted, the facade calls
+   * `currentSession()?.readTranscript` / `session.readTranscript`.
+   */
+  readonly readTranscript?: (input: {
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }) => Promise<ConversationTranscriptPage>;
   readonly hello: () => HostRuntimeHelloView | undefined;
   readonly snapshot?: () => OperatorStateSnapshot | undefined;
+  /** Opaque transcript head hint for bootstrap; never message bodies. */
+  readonly messagesCursor?: () => OpaqueCursor | undefined;
   readonly onPublication?: (listener: (publication: RuntimePublication) => void) => () => void;
+  readonly onConversationEvent?: (listener: (event: StudioConversationForward) => void) => () => void;
+  readonly onConversationResync?: (listener: (reason: string) => void) => () => void;
+  readonly onInteractionEvent?: (listener: (event: StudioInteractionForward) => void) => () => void;
 }
 
 /** One session-history row as supplied by the Host-side catalog provider. */
@@ -126,6 +149,15 @@ export interface HostCatalogEntry {
  */
 export interface HostSessionCatalogProvider {
   list(): HostCatalogEntry[] | Promise<HostCatalogEntry[]>;
+}
+
+/** Runtime-independent persistent transcript reader owned by the Host/Broker. */
+export interface HostSessionArchiveProvider {
+  readPage(input: {
+    readonly sessionId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): ConversationTranscriptReadPage | Promise<ConversationTranscriptReadPage>;
 }
 
 /**
@@ -254,17 +286,51 @@ export interface HostInteractionRespondInput {
 }
 
 /**
- * Explicit semantic command service for `session.resume`, `session.drop`
- * and `interaction.respond`. Absent (or a missing Runtime snapshot) means
- * the facade returns CAPABILITY_UNAVAILABLE / UNAVAILABLE — it never
+ * Explicit semantic command service for `session.create`, `session.resume`, `session.drop`
+ * and `interaction.respond`. Absent service means the facade returns
+ * CAPABILITY_UNAVAILABLE. `session.drop` / `interaction.respond` still
+ * need a live Runtime snapshot. `session.create` / `session.resume` may run
+ * without one so they can start a fresh or catalog-bound Runtime. Never
  * fabricates a completion.
  */
 export interface HostSemanticCommandService {
+  create?(): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
   resume(input: { readonly threadId: ThreadId }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
-  drop(input: { readonly threadId: ThreadId }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
+  drop(input: {
+    readonly threadId: ThreadId;
+    readonly requestId: CommandRequestId;
+  }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
   respond(input: HostInteractionRespondInput): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
-  /** P4 Runtime primitive bridge. The Host remains the sole operation owner. */
-  invoke?(operation: StudioOperation): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
+  /**
+   * Apply the tool approval mode across resident Runtimes (plan §5.3): the
+   * active Runtime persists the mode, siblings receive non-persistent
+   * overrides. Rejected while the Runtime is streaming or an interaction is
+   * pending. Failures surface as `syncStatus: "partial"`, never faked.
+   */
+  setApprovalMode?(input: {
+    readonly mode: ApprovalMode;
+  }):
+    | {
+        readonly mode: ApprovalMode;
+        readonly syncStatus: "complete" | "partial";
+        readonly appliedSessions: number;
+        readonly failedSessions: number;
+      }
+    | Promise<{
+        readonly mode: ApprovalMode;
+        readonly syncStatus: "complete" | "partial";
+        readonly appliedSessions: number;
+        readonly failedSessions: number;
+      }>;
+  /**
+   * P4 Runtime primitive bridge. Pass the client `requestId` so ledger
+   * rejected / outcome_unknown rows stay aligned with the same command.
+   * The Host remains the sole operation owner.
+   */
+  invoke?(
+    operation: StudioOperation,
+    requestId?: CommandRequestId,
+  ): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
 }
 
 /** Default diagnostics factory: real timestamps and random opaque entry ids. */
@@ -284,6 +350,7 @@ const CLIENT_ERROR_CODES: Record<ClientErrorCode, true> = {
   RESYNC_REQUIRED: true,
   TRANSPORT_ERROR: true,
   INTERNAL_ERROR: true,
+  CURSOR_STALE: true,
 };
 
 /** Narrow check for an already-shaped ClientError (e.g. thrown by a service). */
@@ -309,8 +376,33 @@ export function toClientError(error: unknown, fallbackCode: ClientErrorCode = "I
   if (isClientError(error)) {
     return { code: error.code, message: error.message };
   }
+  if (error instanceof StudioHostError) {
+    return mapStudioHostError(error);
+  }
   if (error instanceof Error && error.message.length > 0) {
     return { code: fallbackCode, message: redactText(error.message) };
   }
   return { code: fallbackCode, message: "Host rejected the request" };
+}
+
+function mapStudioHostError(error: StudioHostError): ClientError {
+  switch (error.code) {
+    case "INVALID_ARGUMENT":
+      return { code: "INVALID_ARGUMENT", message: error.message };
+    case "CURSOR_STALE":
+      return { code: "CURSOR_STALE", message: error.message };
+    case "RUNTIME_EPOCH_STALE":
+      return { code: "STALE_EPOCH", message: error.message };
+    case "STATE_VERSION_CONFLICT":
+      return { code: "STATE_VERSION_CONFLICT", message: error.message };
+    case "CAPABILITY_UNAVAILABLE":
+      return { code: "CAPABILITY_UNAVAILABLE", message: error.message };
+    case "BUSY_STREAMING":
+    case "COMMAND_BLOCKED":
+    case "INTERACTION_STALE":
+    case "NOT_OWNER":
+      return { code: "INVALID_ARGUMENT", message: error.message };
+    default:
+      return { code: "INTERNAL_ERROR", message: redactText(error.message) };
+  }
 }

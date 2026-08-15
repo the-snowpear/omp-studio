@@ -1,4 +1,5 @@
 import type { StudioAgentSnapshot, StudioJobSnapshot } from "./agents-jobs";
+import type { ApprovalMode } from "./commands";
 import type {
   AgentId,
   CommandId,
@@ -54,6 +55,8 @@ export interface OperatorStateSnapshot {
   isStreaming: boolean;
   isCompacting: boolean;
   activeMode: "normal" | "plan" | "goal" | "vibe";
+  /** Effective tool approval mode of the Runtime (override layer first). */
+  approvalMode: ApprovalMode;
   plan?: PlanState;
   goal?: GoalState;
   vibe?: VibeState;

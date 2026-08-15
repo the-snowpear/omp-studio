@@ -85,6 +85,15 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
     },
   },
   {
+    name: "session.create",
+    payload: {
+      commandName: "session.create",
+      input: {},
+      idempotencyKey: "idem-create",
+      requestId: "req-create",
+    },
+  },
+  {
     name: "session.resume",
     payload: {
       commandName: "session.resume",
@@ -100,6 +109,15 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
       input: { threadId: "thread-1" },
       idempotencyKey: "idem-3",
       requestId: "req-3",
+    },
+  },
+  {
+    name: "permissions.mode.set",
+    payload: {
+      commandName: "permissions.mode.set",
+      input: { mode: "always-ask" },
+      idempotencyKey: "idem-mode-1",
+      requestId: "req-mode-1",
     },
   },
   {
@@ -583,9 +601,11 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       "session.tree.navigate",
       "operator.invoke",
       "runtime.install",
+      "session.create",
       "session.resume",
       "session.drop",
       "interaction.respond",
+      "permissions.mode.set",
       "models.provider.upsert",
       "models.provider.delete",
       "models.provider.setEnabled",

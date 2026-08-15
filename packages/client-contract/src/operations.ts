@@ -9,12 +9,16 @@
  */
 
 import type {
+  ApprovalMode,
   CapabilityManifest,
+  ConversationTranscriptPage,
+  OpaqueCursor,
   OperatorCommandManifest,
   OperatorStateSnapshot,
 } from "@omp-studio/studio-protocol";
 
-import type { CommandRequestId, IdempotencyKey, InteractionId, ThreadId, WorkspaceId } from "./ids.js";
+import type { ConversationTranscriptReadPage } from "./conversation.js";
+import type { CommandRequestId, IdempotencyKey, InteractionId, SessionId, ThreadId, WorkspaceId } from "./ids.js";
 import type {
   DiagnosticReadModel,
   EnvironmentReadModel,
@@ -53,6 +57,13 @@ export interface QueryInputMap {
   "agents.definitions.get": EmptyInput;
   "projects.list": EmptyInput;
   "usage.get": EmptyInput;
+  "session.transcript.read": { readonly cursor?: OpaqueCursor; readonly limit?: number };
+  /** Runtime-independent persisted transcript page for an explicit session. */
+  "session.transcript.readPage": {
+    readonly sessionId: SessionId;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  };
 }
 
 export interface QueryResultMap {
@@ -77,6 +88,10 @@ export interface QueryResultMap {
   "projects.list": WorkspaceListReadModel;
   /** Homepage token heatmap / curve. Aggregates from omp stats.db only. */
   "usage.get": TokenUsageReadModel;
+  /** Active-branch transcript page. Protocol public shape; never `unknown[]`. */
+  "session.transcript.read": ConversationTranscriptPage;
+  /** Persisted transcript page. Available independently of Runtime residency. */
+  "session.transcript.readPage": ConversationTranscriptReadPage;
 }
 
 export type QueryName = keyof QueryInputMap & keyof QueryResultMap;
@@ -249,6 +264,8 @@ export type InteractionResponseValue =
 interface CoreCommandInputMap {
   /** Install or update the trusted runtime (environment page action). */
   "runtime.install": { readonly channel?: RuntimeChannel };
+  /** Start a fresh Runtime session in the active workspace. */
+  "session.create": EmptyInput;
   /** Resume a thread from history or the home page. */
   "session.resume": { readonly threadId: ThreadId };
   /** Drop a thread. Destructive: the Host issues a one-time confirmation. */
@@ -258,6 +275,14 @@ interface CoreCommandInputMap {
     readonly interactionId: InteractionId;
     readonly decision: "submit" | "cancel";
     readonly value?: InteractionResponseValue;
+  };
+  /**
+   * Set the tool approval mode for every resident Runtime. The active
+   * Runtime persists the mode to the OMP global configuration; sibling
+   * resident Runtimes receive a non-persistent override.
+   */
+  "permissions.mode.set": {
+    readonly mode: ApprovalMode;
   };
   /** Create or update a custom provider in models.yml. */
   "models.provider.upsert": ModelProviderUpsertInput;
@@ -352,9 +377,16 @@ export type CommandInputMap = CoreCommandInputMap & RuntimeCommandInputMap;
 
 interface CoreCommandResultMap {
   "runtime.install": RuntimeInstallState;
+  "session.create": OperatorStateSnapshot;
   "session.resume": OperatorStateSnapshot;
   "session.drop": OperatorStateSnapshot;
   "interaction.respond": OperatorStateSnapshot;
+  "permissions.mode.set": {
+    readonly mode: ApprovalMode;
+    readonly syncStatus: "complete" | "partial";
+    readonly appliedSessions: number;
+    readonly failedSessions: number;
+  };
   "models.provider.upsert": ConfigWriteResult;
   "models.provider.delete": ConfigWriteResult;
   "models.provider.setEnabled": ConfigWriteResult;
@@ -399,7 +431,8 @@ export type ClientErrorCode =
   | "CAPABILITY_UNAVAILABLE"
   | "RESYNC_REQUIRED"
   | "TRANSPORT_ERROR"
-  | "INTERNAL_ERROR";
+  | "INTERNAL_ERROR"
+  | "CURSOR_STALE";
 
 export interface ClientError {
   readonly code: ClientErrorCode;

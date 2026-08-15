@@ -51,9 +51,8 @@ function history(id: string): SessionHistoryEntry {
 
 describe("sessionLifecycle", () => {
   it("treats new conversation as available under the current shell contract", () => {
-    // The production contract currently reports new-conversation as available
-    // (host session.create is out of scope for this milestone); the reason
-    // text is retained for future gating.
+    // The production shell exposes session.create end to end. The reason text
+    // remains available for adapters that intentionally omit that command.
     expect(isNewConversationAvailable()).toBe(true);
     expect(NEW_CONVERSATION_UNAVAILABLE_REASON).toMatch(/session.create/);
   });
@@ -105,7 +104,7 @@ describe("sessionLifecycle", () => {
         sessionId: "sess-1" as SessionId,
         isStreaming: false,
         isCompacting: false,
-        activeMode: "normal",
+        activeMode: "normal", approvalMode: "yolo",
         pendingMessages: 0,
         activeCommandIds: [],
         agentsRevision: 0,

@@ -91,10 +91,15 @@ export function SettingsPage({
   theme,
   onSetTheme,
   onRoute,
+  approvalMode,
+  onSetApprovalMode,
 }: {
   theme: "light" | "dark";
   onSetTheme: (theme: "light" | "dark") => void;
   onRoute: (route: PageRoute) => void;
+  /** Current Runtime approval mode; undefined = no Runtime snapshot yet. */
+  approvalMode?: "always-ask" | "write" | "yolo";
+  onSetApprovalMode: (mode: "always-ask" | "write" | "yolo") => void;
 }) {
   const [group, setGroup] = useState<GroupId>(() => takeSettingsIntent() ?? "general");
   const groupIndex = GROUPS.findIndex(([id]) => id === group);
@@ -187,8 +192,23 @@ export function SettingsPage({
         <div {...pane("permissions")} id="set-permissions" role="tabpanel" aria-labelledby="setTab-permissions" tabIndex={0}>
           <h3>Permissions</h3>
           <p className="desc">三种模式：<b>Review</b>（所有写操作需审批）· <b>Workspace</b>（工作区内自动允许）· <b>Full Access</b>（完全信任）。各能力对应 OMP capability 协商结果。</p>
-          <Row label="权限模式" desc="OMP 授权粒度的整体默认">
-            <select className="select" defaultValue="Workspace"><option>Review</option><option>Workspace</option><option>Full Access</option></select>
+          <Row label="权限模式" desc="OMP 授权粒度的整体默认；写入后同步所有驻留 Runtime">
+            <select
+              className="select"
+              value={approvalMode === undefined ? "" : approvalMode}
+              disabled={approvalMode === undefined}
+              onChange={(event) => {
+                const mode = event.target.value as "always-ask" | "write" | "yolo";
+                if (mode === approvalMode) return;
+                onSetApprovalMode(mode);
+              }}
+              aria-label="权限模式"
+            >
+              {approvalMode === undefined ? <option value="" disabled>无 Runtime</option> : null}
+              <option value="always-ask">Review</option>
+              <option value="write">Workspace</option>
+              <option value="yolo">Full Access</option>
+            </select>
           </Row>
           <div className="perm-grid" style={{ marginTop: 12 }}>
             <PermCard icon="file" name="文件读取" desc="工作区内文件自动允许" defaultOn note="工作区内 · 自动" />

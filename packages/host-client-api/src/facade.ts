@@ -578,6 +578,10 @@ export class StudioHostClientFacade implements ClientTransport {
         const installRequest = request as ClientCommandRequest<"runtime.install">;
         return this.#commandInstall(installRequest);
       }
+      case "session.create": {
+        const createRequest = request as ClientCommandRequest<"session.create">;
+        return this.#commandCreate(createRequest);
+      }
       case "session.resume": {
         const resumeRequest = request as ClientCommandRequest<"session.resume">;
         return this.#commandResume(resumeRequest);
@@ -589,6 +593,10 @@ export class StudioHostClientFacade implements ClientTransport {
       case "interaction.respond": {
         const respondRequest = request as ClientCommandRequest<"interaction.respond">;
         return this.#commandRespond(respondRequest);
+      }
+      case "permissions.mode.set": {
+        const modeRequest = request as ClientCommandRequest<"permissions.mode.set">;
+        return this.#commandSetApprovalMode(modeRequest);
       }
       case "models.provider.upsert":
       case "models.provider.delete":
@@ -1363,12 +1371,94 @@ export class StudioHostClientFacade implements ClientTransport {
     return this.#commandSemantic(request, "session.resume");
   }
 
+  async #commandCreate(request: ClientCommandRequest<"session.create">): Promise<ClientCommandAccepted<"session.create">> {
+    return this.#commandSemantic(request, "session.create");
+  }
+
   async #commandDrop(request: ClientCommandRequest<"session.drop">): Promise<ClientCommandAccepted<"session.drop">> {
     return this.#commandSemantic(request, "session.drop");
   }
 
   async #commandRespond(request: ClientCommandRequest<"interaction.respond">): Promise<ClientCommandAccepted<"interaction.respond">> {
     return this.#commandSemantic(request, "interaction.respond");
+  }
+
+  /**
+   * `permissions.mode.set`: session-exclusive approval mode sync (plan §5.4).
+   * Requires a live Runtime snapshot and the injected semantic service;
+   * streaming / pending-interaction rejection happens in the desktop
+   * service. The receipt carries the sync statistics — never a fabricated
+   * "complete".
+   */
+  async #commandSetApprovalMode(
+    request: ClientCommandRequest<"permissions.mode.set">,
+  ): Promise<ClientCommandAccepted<"permissions.mode.set">> {
+    validateEnvelope(request);
+    const service = this.#options.commands;
+    if (service?.setApprovalMode === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        "permissions.mode.set is not available: no semantic command service is wired",
+      );
+    }
+    if (this.#currentSnapshot() === undefined) {
+      throw unavailableError("permissions.mode.set requires a Runtime snapshot");
+    }
+    const mode = request.input.mode;
+    if (mode !== "always-ask" && mode !== "write" && mode !== "yolo") {
+      throw clientError("INVALID_ARGUMENT", "permissions.mode.set mode must be always-ask, write or yolo");
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: "permissions.mode.set", requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted: ClientCommandAccepted<"permissions.mode.set"> = {
+      commandName: "permissions.mode.set",
+      requestId: request.requestId,
+      status: "accepted",
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runSetApprovalMode(() => service.setApprovalMode!({ mode }), request.requestId);
+    return accepted;
+  }
+
+  async #runSetApprovalMode(
+    run: () =>
+      | {
+          readonly mode: "always-ask" | "write" | "yolo";
+          readonly syncStatus: "complete" | "partial";
+          readonly appliedSessions: number;
+          readonly failedSessions: number;
+        }
+      | Promise<{
+          readonly mode: "always-ask" | "write" | "yolo";
+          readonly syncStatus: "complete" | "partial";
+          readonly appliedSessions: number;
+          readonly failedSessions: number;
+        }>,
+    requestId: CommandRequestId,
+  ): Promise<void> {
+    try {
+      const result = await run();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "permissions.mode.set",
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "permissions.mode.set",
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
   }
 
   async #commandModels(
@@ -1762,15 +1852,15 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   /**
-   * Shared gate for the three semantic commands: an explicit injected
+   * Shared gate for the semantic session/interaction commands: an explicit injected
    * service is required before anything is accepted. `session.drop` and
    * `interaction.respond` also need a live Runtime snapshot.
-   * `session.resume` must not: it is the command that starts or rebinds
-   * Runtime onto a catalog session, including when no snapshot exists yet.
+   * `session.create` / `session.resume` must not: they start or rebind a
+   * Runtime even when no snapshot exists yet.
    * Missing pieces fail closed with CAPABILITY_UNAVAILABLE / UNAVAILABLE
    * and no fake completion is ever published.
    */
-  async #commandSemantic<TName extends "session.resume" | "session.drop" | "interaction.respond">(
+  async #commandSemantic<TName extends "session.create" | "session.resume" | "session.drop" | "interaction.respond">(
     request: ClientCommandRequest<TName>,
     commandName: TName,
   ): Promise<ClientCommandAccepted<TName>> {
@@ -1779,7 +1869,10 @@ export class StudioHostClientFacade implements ClientTransport {
     if (service === undefined) {
       throw clientError("CAPABILITY_UNAVAILABLE", `${commandName} is not available: no semantic command service is wired`);
     }
-    if (commandName !== "session.resume" && this.#currentSnapshot() === undefined) {
+    if (commandName === "session.create" && service.create === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", "session.create is not available");
+    }
+    if (commandName !== "session.create" && commandName !== "session.resume" && this.#currentSnapshot() === undefined) {
       throw unavailableError(`${commandName} requires a Runtime snapshot`);
     }
     this.#validateSemanticInput(commandName, request.input);
@@ -1798,6 +1891,9 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#bus.emit({ kind: "command.accepted", accepted });
     const input = request.input;
     switch (commandName) {
+      case "session.create":
+        void this.#runSemanticCommand(() => service.create!(), request.requestId, commandName);
+        break;
       case "session.resume":
       case "session.drop": {
         // Re-narrow with the same guard used for validation so the typed
@@ -1840,9 +1936,15 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   #validateSemanticInput(
-    commandName: "session.resume" | "session.drop" | "interaction.respond",
+    commandName: "session.create" | "session.resume" | "session.drop" | "interaction.respond",
     input: unknown,
   ): void {
+    if (commandName === "session.create") {
+      if (input === null || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 0) {
+        throw clientError("INVALID_ARGUMENT", "session.create input must be empty");
+      }
+      return;
+    }
     if (commandName === "session.resume" || commandName === "session.drop") {
       if (!isThreadCommandInput(input)) {
         throw clientError("INVALID_ARGUMENT", `${commandName} threadId must not be empty`);
@@ -1886,7 +1988,7 @@ export class StudioHostClientFacade implements ClientTransport {
   async #runSemanticCommand(
     run: () => OperatorStateSnapshot | Promise<OperatorStateSnapshot>,
     requestId: CommandRequestId,
-    commandName: "session.resume" | "session.drop" | "interaction.respond",
+    commandName: "session.create" | "session.resume" | "session.drop" | "interaction.respond",
   ): Promise<void> {
     try {
       const result = await run();
