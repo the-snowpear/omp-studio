@@ -54,6 +54,7 @@ import {
 const UPSTREAM_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const T0 = "2026-08-15T12:00:00.000Z";
 const EPOCH = CONVERSATION_FIXTURE_IDS.runtimeEpoch;
+const SESSION = CONVERSATION_FIXTURE_IDS.sessionId as SessionId;
 
 const SNAPSHOT: OperatorStateSnapshot = {
   runtimeId: "rt-0001" as RuntimeId,
@@ -287,7 +288,7 @@ test("MVP-A desktop: persisted workspace hello → empty transcript → prompt a
     assert.ok(bootstrap.capabilityManifest.capabilities.some((entry) => entry.id === "core.prompt"));
     assert.equal(bootstrap.snapshot?.sessionId, CONVERSATION_FIXTURE_IDS.sessionId as SessionId);
 
-    const genEmpty = client.beginTranscriptHydrate();
+    const genEmpty = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
     const empty = await client.query("session.transcript.read", { limit: 50 });
     assert.equal(empty.items.length, 0);
     client.hydrateTranscript(empty, genEmpty);
@@ -314,7 +315,7 @@ test("MVP-A desktop: persisted workspace hello → empty transcript → prompt a
     await waitUntil(() => live.page.items.length === 2);
     const page = await client.query("session.transcript.read", { limit: 50 });
     assert.equal(page.items.length, 2);
-    const gen = client.beginTranscriptHydrate();
+    const gen = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
     client.hydrateTranscript(page, gen);
     const views = selectConversationViews(client.getState().conversation).filter(
       (view) => view.kind === "item" && view.item.kind === "message",
@@ -325,7 +326,7 @@ test("MVP-A desktop: persisted workspace hello → empty transcript → prompt a
     await composition.reload();
     const reloaded = new StudioClientImpl(composition.facade, clock());
     await reloaded.bootstrap();
-    const genReload = reloaded.beginTranscriptHydrate();
+    const genReload = reloaded.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
     const again = await reloaded.query("session.transcript.read", { limit: 50 });
     reloaded.hydrateTranscript(again, genReload);
     const reloadViews = selectConversationViews(reloaded.getState().conversation).filter(
@@ -340,7 +341,7 @@ test("MVP-B desktop: live sequence through composition is a single assistant + c
   await withReady(async ({ composition, live }) => {
     const client = new StudioClientImpl(composition.facade, clock());
     await client.bootstrap();
-    const gen = client.beginTranscriptHydrate();
+    const gen = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
     client.hydrateTranscript(conversationPages.empty, gen);
     const seqs: number[] = [];
     client.subscribe({ scope: "runtime" }, (event) => {
@@ -366,7 +367,7 @@ test("MVP-B desktop: live sequence through composition is a single assistant + c
       assert.ok(seqs[i]! > seqs[i - 1]!);
     }
     live.page = conversationPages.thinkingTool;
-    const genReload = client.beginTranscriptHydrate();
+    const genReload = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
     const history = await client.query("session.transcript.read", { limit: 50 });
     client.hydrateTranscript(history, genReload);
     const reloadAssistants = selectConversationViews(client.getState().conversation).filter(

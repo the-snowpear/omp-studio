@@ -152,7 +152,7 @@ test("MVP-A: empty transcript → core.prompt accepted non-terminal → persist 
       assert.ok(bootstrap.capabilityManifest.capabilities.some((entry) => entry.id === "core.prompt"));
       assert.equal(bootstrap.snapshot?.sessionId, CONVERSATION_FIXTURE_IDS.sessionId as SessionId);
 
-      const genEmpty = client.beginTranscriptHydrate();
+      const genEmpty = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
       const empty = await client.query("session.transcript.read", { limit: 50 });
       assert.equal(empty.items.length, 0);
       client.hydrateTranscript(empty, genEmpty);
@@ -168,14 +168,14 @@ test("MVP-A: empty transcript → core.prompt accepted non-terminal → persist 
       assert.deepEqual(messageRoles(afterPrompt), ["user", "assistant"]);
       assert.equal(afterPrompt.items.length, 2);
 
-      const genHydrate = client.beginTranscriptHydrate();
+      const genHydrate = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
       client.hydrateTranscript(afterPrompt, genHydrate);
       const clientViews = selectConversationViews(client.getState().conversation);
       const persisted = clientViews.filter((view) => view.kind === "item" && view.item.kind === "message");
       assert.equal(persisted.length, 2);
       assert.equal(new Set(persisted.map((view) => (view.kind === "item" ? view.item.itemId : ""))).size, 2);
 
-      const genReload = client.beginTranscriptHydrate();
+      const genReload = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
       const reloaded = await client.query("session.transcript.read", { limit: 50 });
       client.hydrateTranscript(reloaded, genReload);
       const reloadViews = selectConversationViews(client.getState().conversation).filter(
@@ -228,7 +228,7 @@ test("MVP-B: live start/delta/tool/completed converges on one assistant and one 
     const client = new StudioClientImpl(facade, clock());
     try {
       await client.bootstrap();
-      const gen = client.beginTranscriptHydrate();
+      const gen = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
       client.hydrateTranscript(conversationPages.empty, gen);
       const seqs: number[] = [];
       client.subscribe({ scope: "runtime" }, (event) => {
@@ -260,7 +260,7 @@ test("MVP-B: live start/delta/tool/completed converges on one assistant and one 
         assert.ok(seqs[i]! > seqs[i - 1]!, "eventSeq must be monotonic");
       }
       page = conversationPages.thinkingTool;
-      const genReload = client.beginTranscriptHydrate();
+      const genReload = client.beginTranscriptHydrate({ sessionId: CONVERSATION_FIXTURE_IDS.sessionId });
       const history = await client.query("session.transcript.read", { limit: 50 });
       client.hydrateTranscript(history, genReload);
       const reloadViews = selectConversationViews(client.getState().conversation);

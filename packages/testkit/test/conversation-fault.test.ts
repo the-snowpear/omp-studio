@@ -85,7 +85,7 @@ test("epoch/session switch events are dropped and do not merge timelines", () =>
 });
 
 test("stale hydrate generation after clear is ignored (late query)", () => {
-  let state = reduceConversationState(createInitialConversationState(), { type: "beginHydrate" });
+  let state = reduceConversationState(createInitialConversationState(), { type: "beginHydrate", identity: { sessionId: CONVERSATION_FIXTURE_IDS.sessionId } });
   const generation = state.hydrateGeneration;
   state = reduceConversationState(state, { type: "clear" });
   state = reduceConversationState(state, {
