@@ -51,6 +51,8 @@ export class DesktopInteractionHost {
   readonly #events = new IsolatedForwarder<StudioInteractionForward>();
   readonly #adapter: RemoteInteractionAdapter;
   #unsubscribe: (() => void) | undefined;
+  #unsubscribeLoss: (() => void) | undefined;
+  #lost = false;
 
   constructor(sessionRef: { current: DesktopRuntimeSession | undefined }) {
     this.#sessionRef = sessionRef;
@@ -94,11 +96,29 @@ export class DesktopInteractionHost {
   attach(controller: StudioRuntimeSessionController | undefined): void {
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
+    this.#unsubscribeLoss?.();
+    this.#unsubscribeLoss = undefined;
+    this.#lost = false;
     this.clear();
     if (controller === undefined || typeof controller.onInteractionEvent !== "function") {
       return;
     }
     this.#unsubscribe = controller.onInteractionEvent((event) => this.#onEvent(event, controller));
+    // Runtime loss: the bridge disconnect clears the hello; revoke every
+    // pre-signed token and drop the adapter pending so stale cards and
+    // confirmations cannot outlive the Runtime (plan §4.3). The client is
+    // resynced through the facade's runtime.changed event.
+    if (typeof controller.onPublication !== "function") {
+      return;
+    }
+    this.#unsubscribeLoss = controller.onPublication(() => {
+      const session = this.#sessionRef.current;
+      if (session === undefined || session.hello() !== undefined || this.#lost) {
+        return;
+      }
+      this.#lost = true;
+      this.clear();
+    });
   }
 
   clear(): void {
@@ -120,19 +140,43 @@ export class DesktopInteractionHost {
     if (highRisk && input.decision === "submit" && confirmationToken === undefined) {
       throw new StudioHostError("INVALID_ARGUMENT", "High-risk confirmation token is not available");
     }
-    await this.#adapter.respond({
-      interactionId: pending.interactionId,
-      commandId: pending.commandId,
-      decision: input.decision,
-      owner: "gui",
-      ...(input.value === undefined ? {} : { value: input.value }),
-      ...(confirmationToken === undefined ? {} : { confirmationToken }),
-      // Bind the one-shot token to this interaction's lease generation and
-      // the current Runtime epoch (plan §3.4): a stale generation or a token
-      // minted for an older epoch fails closed at consumption.
-      binding: { leaseGeneration: pending.generation, runtimeEpoch: this.#runtimeEpoch() },
-    });
-    this.#tokens.delete(tokenKey);
+    try {
+      await this.#adapter.respond({
+        interactionId: pending.interactionId,
+        commandId: pending.commandId,
+        decision: input.decision,
+        owner: "gui",
+        ...(input.value === undefined ? {} : { value: input.value }),
+        ...(confirmationToken === undefined ? {} : { confirmationToken }),
+        // Bind the one-shot token to this interaction's lease generation and
+        // the current Runtime epoch (plan §3.4): a stale generation or a token
+        // minted for an older epoch fails closed at consumption.
+        binding: { leaseGeneration: pending.generation, runtimeEpoch: this.#runtimeEpoch() },
+      });
+      this.#tokens.delete(tokenKey);
+    } catch (error) {
+      // The one-shot token was consumed or is stale; the interaction is
+      // still pending. Re-enter the safe confirmation flow by re-signing a
+      // fresh token so the next attempt can proceed (plan §3.4). If the
+      // pending disappeared (resolved concurrently), just drop the token.
+      const current = this.#adapter.pending();
+      if (
+        current !== undefined &&
+        current.interactionId === pending.interactionId &&
+        isHighRisk(current.request.kind, current.request.kind === "confirm" ? current.request.destructive : undefined)
+      ) {
+        this.#resign(
+          current.interactionId,
+          current.generation,
+          current.commandId,
+          current.request.kind,
+          current.request.kind === "confirm" ? current.request.destructive : undefined,
+        );
+      } else {
+        this.#tokens.delete(tokenKey);
+      }
+      throw error;
+    }
   }
 
   #onEvent(forward: StudioInteractionForward, controller: StudioRuntimeSessionController): void {
