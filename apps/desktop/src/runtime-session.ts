@@ -296,7 +296,7 @@ export function createDesktopRuntimeSessionPort(
       // disk; a non-persistent override keeps it aligned when persistence
       // failed or the sibling was out of sync.
       if (pendingApprovalMode !== undefined) {
-        void serialized(() => invokePermissionMode(session, pendingApprovalMode!, false)).catch(() => undefined);
+        await synchronizeApprovalMode(pendingApprovalMode);
       }
       return session;
     } catch (error) {
@@ -319,6 +319,9 @@ export function createDesktopRuntimeSessionPort(
     if (existing !== undefined) {
       if (existing.session.hello() !== undefined && existing.session.controller.publication()?.snapshot?.sessionId === sessionId) {
         setActiveSession(sessionId);
+        if (pendingApprovalMode !== undefined) {
+          await synchronizeApprovalMode(pendingApprovalMode);
+        }
         options.log?.write("info", "runtime.worker.select", `session=${sessionId} resident=true`);
         return existing.session;
       }
@@ -410,6 +413,54 @@ export function createDesktopRuntimeSessionPort(
     }
   }
 
+  async function synchronizeApprovalMode(mode: ApprovalMode): Promise<{
+    mode: ApprovalMode;
+    syncStatus: "complete" | "partial";
+    appliedSessions: number;
+    failedSessions: number;
+  }> {
+    const current = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
+    if (current === undefined && residents.size === 0) {
+      throw new Error("No Runtime session is available for an approval mode change");
+    }
+    let appliedSessions = 0;
+    let failedSessions = 0;
+    const apply = async (session: DesktopRuntimeSession, persist: boolean): Promise<void> => {
+      try {
+        await invokePermissionMode(session, mode, persist);
+        appliedSessions += 1;
+      } catch {
+        failedSessions += 1;
+      }
+    };
+    // Re-run the complete resident set on every retry. Clearing a single
+    // global pending value after only one Worker succeeded could otherwise
+    // leave another resident on a stale, more permissive mode indefinitely.
+    if (current !== undefined) {
+      await apply(current.session, true);
+      if (failedSessions > 0) {
+        pendingApprovalMode = mode;
+        return { mode, syncStatus: "partial", appliedSessions, failedSessions };
+      }
+    }
+    for (const resident of residents.values()) {
+      if (resident === current) continue;
+      await apply(resident.session, false);
+    }
+    pendingApprovalMode = failedSessions > 0 ? mode : undefined;
+    options.log?.write(
+      "info",
+      "runtime.approval-mode",
+      `mode=${mode} applied=${appliedSessions} failed=${failedSessions}`,
+    );
+    return {
+      mode,
+      syncStatus: failedSessions === 0 ? "complete" : "partial",
+      appliedSessions,
+      failedSessions,
+    };
+  }
+
   return {
     supportsConcurrentSessions: true,
     start(launchContext): Promise<DesktopRuntimeSession | undefined> {
@@ -446,41 +497,7 @@ export function createDesktopRuntimeSessionPort(
       appliedSessions: number;
       failedSessions: number;
     }> {
-      return await serialized(async () => {
-        const current = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
-        if (current === undefined && residents.size === 0) {
-          throw new Error("No Runtime session is available for an approval mode change");
-        }
-        let appliedSessions = 0;
-        let failedSessions = 0;
-        const apply = async (session: DesktopRuntimeSession, persist: boolean): Promise<void> => {
-          try {
-            await invokePermissionMode(session, mode, persist);
-            appliedSessions += 1;
-          } catch {
-            failedSessions += 1;
-          }
-        };
-        // The active Runtime persists to the OMP global configuration; every
-        // sibling resident Runtime gets a non-persistent override.
-        if (current !== undefined) await apply(current.session, true);
-        for (const resident of residents.values()) {
-          if (resident === current) continue;
-          await apply(resident.session, false);
-        }
-        pendingApprovalMode = failedSessions > 0 ? mode : undefined;
-        options.log?.write(
-          "info",
-          "runtime.approval-mode",
-          `mode=${mode} applied=${appliedSessions} failed=${failedSessions}`,
-        );
-        return {
-          mode,
-          syncStatus: failedSessions === 0 ? "complete" : "partial",
-          appliedSessions,
-          failedSessions,
-        };
-      });
+      return await serialized(() => synchronizeApprovalMode(mode));
     },
   };
 }

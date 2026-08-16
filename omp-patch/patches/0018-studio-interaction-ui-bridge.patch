@@ -416,7 +416,7 @@ index f69bd57..9c82f92 100644
  				if (!isPauseOperation) this.projector.commitStateChange();
  				const completed: StudioReceipt = {
  					type: "studio.receipt",
-@@ -541,6 +548,22 @@ export class StudioBridgeDispatcher {
+@@ -541,6 +548,24 @@ export class StudioBridgeDispatcher {
  		}
  	}
  
@@ -426,6 +426,8 @@ index f69bd57..9c82f92 100644
 +		}
 +		const settings = this.runtime.session.settings;
 +		if (operation.persist) {
++			// A durable write must supersede any prior resident-only override.
++			settings.clearOverride("tools.approvalMode");
 +			settings.set("tools.approvalMode", operation.mode);
 +			await settings.flush();
 +		} else {
@@ -565,7 +567,7 @@ new file mode 100644
 index 0000000..21bdc8e
 --- /dev/null
 +++ b/packages/coding-agent/src/studio/remote-extension-ui.ts
-@@ -0,0 +1,293 @@
+@@ -0,0 +1,299 @@
 +import * as crypto from "node:crypto";
 +import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
 +import type {
@@ -822,14 +824,20 @@ index 0000000..21bdc8e
 +	async #runWithCancel<T>(run: () => Promise<T>, dialogOptions?: ExtensionUIDialogOptions): Promise<T> {
 +		const signal = dialogOptions?.signal;
 +		if (signal === undefined) return await run();
++		const abortOutcome = (): "aborted" | "expired" => {
++			const reason = signal.reason;
++			return reason instanceof DOMException && reason.name === "TimeoutError" ? "expired" : "aborted";
++		};
 +		if (signal.aborted) {
-+			this.#cancel("Interaction aborted");
++			const outcome = abortOutcome();
++			this.#cancel(outcome === "expired" ? "Interaction expired" : "Interaction aborted", outcome);
 +			throw new DOMException("Aborted", "AbortError");
 +		}
 +		let cancelled = false;
 +		const onAbort = () => {
 +			cancelled = true;
-+			this.#cancel("Interaction aborted");
++			const outcome = abortOutcome();
++			this.#cancel(outcome === "expired" ? "Interaction expired" : "Interaction aborted", outcome);
 +		};
 +		signal.addEventListener("abort", onAbort, { once: true });
 +		try {
@@ -842,9 +850,9 @@ index 0000000..21bdc8e
 +		}
 +	}
 +
-+	#cancel(reason: string): void {
++	#cancel(reason: string, outcome: "aborted" | "expired" = "aborted"): void {
 +		try {
-+			this.gateway.cancel(reason);
++			this.gateway.cancel(reason, outcome);
 +		} catch {
 +			// Interaction already resolved or closed; nothing to cancel.
 +		}

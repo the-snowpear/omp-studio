@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type {
-  CommandConcurrency,
-  CommandId,
-  Generation,
-  InteractionId,
-  RuntimeControlLease,
-  RuntimeEpoch,
-  StateVersion,
-  StudioErrorCode,
-  StudioOperation,
-  StudioRequest,
+import {
+  SESSION_TRANSCRIPT_READ_KIND,
+  type CommandConcurrency,
+  type CommandId,
+  type Generation,
+  type InteractionId,
+  type RuntimeControlLease,
+  type RuntimeEpoch,
+  type StateVersion,
+  type StudioErrorCode,
+  type StudioOperation,
+  type StudioRequest,
 } from "@omp-studio/studio-protocol";
 
 export interface ArbiterState {
@@ -56,6 +57,7 @@ export function classifyOperation(operation: StudioOperation): CommandConcurrenc
     operation.kind === "agent.list" ||
     operation.kind === "agent.get" ||
     operation.kind === "agent.transcript.read" ||
+    operation.kind === SESSION_TRANSCRIPT_READ_KIND ||
     operation.kind === "job.list" ||
     operation.kind === "job.get"
   ) {
@@ -160,8 +162,23 @@ export class CommandArbiter {
     if (!Number.isSafeInteger(generation) || generation < 1) {
       throw new StudioHostError("INVALID_ARGUMENT", "Interaction generation must be a positive integer");
     }
-    if (this.#interactions.has(interactionId)) {
-      throw new StudioHostError("INTERACTION_STALE", "Interaction is already active (replayed adoption)");
+    const existing = this.#interactions.get(interactionId);
+    if (existing !== undefined) {
+      if (existing.commandId !== commandId) {
+        throw new StudioHostError("INTERACTION_STALE", "Interaction is already active (replayed adoption)");
+      }
+      if (generation === existing.generation && existing.owner === owner) {
+        return { ...existing };
+      }
+      if (generation > existing.generation) {
+        const updated: InteractionOwnership = { interactionId, commandId, owner, generation };
+        this.#interactions.set(interactionId, updated);
+        if (this.#lease !== undefined) {
+          this.#lease = { ...this.#lease, interactionId };
+        }
+        return { ...updated };
+      }
+      throw new StudioHostError("INTERACTION_STALE", "Interaction generation is stale");
     }
     if (this.#interactions.size > 0) {
       throw new StudioHostError("COMMAND_BLOCKED", "Another interaction is already active");
@@ -172,6 +189,11 @@ export class CommandArbiter {
       this.#lease = { ...this.#lease, interactionId };
     }
     return { ...ownership };
+  }
+
+  /** Drop every interaction lease without dispatching a Runtime respond. Used on rebind. */
+  abandonAllInteractions(): void {
+    this.#interactions.clear();
   }
 
   claimInteraction(commandId: CommandId, owner: InteractionSurface): InteractionOwnership {

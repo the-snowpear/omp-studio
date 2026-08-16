@@ -1,0 +1,39 @@
+diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
+index ebe752e..9195495 100644
+--- a/packages/coding-agent/src/studio/bridge-server.ts
++++ b/packages/coding-agent/src/studio/bridge-server.ts
+@@ -202,7 +202,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					type: "studio.hello.result",
+ 					requestId: hello.requestId,
+ 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
+-					runtimeVersion: `${VERSION}-studio.20`,
++					runtimeVersion: `${VERSION}-studio.21`,
+ 					upstreamVersion: VERSION,
+ 					upstreamCommit: UPSTREAM_COMMIT,
+ 					runtimeInstanceId: runtime.runtimeId,
+diff --git a/packages/coding-agent/test/studio-remote-extension-ui.test.ts b/packages/coding-agent/test/studio-remote-extension-ui.test.ts
+index 448a950..3286ae4 100644
+--- a/packages/coding-agent/test/studio-remote-extension-ui.test.ts
++++ b/packages/coding-agent/test/studio-remote-extension-ui.test.ts
+@@ -116,6 +116,21 @@ describe("WP-041 Studio Remote Extension UI", () => {
+ 		expect(resolved[0]).toMatchObject({ outcome: "aborted", commandId: "studio-tool:call-4" });
+ 	});
+ 
++	test("a TimeoutError abort resolves the Remote interaction as expired", async () => {
++		const { port, gateway, resolved } = fixture();
++		const ui = new StudioRemoteExtensionUiContext(gateway, "studio-tool:call-timeout");
++		const controller = new AbortController();
++		const promise = ui.editor("Wait", "", { signal: controller.signal });
++		expect(port.pending()).toBeDefined();
++		controller.abort(new DOMException("Timed out", "TimeoutError"));
++		await expect(promise).rejects.toThrow("Aborted");
++		expect(port.pending()).toBeUndefined();
++		expect(resolved[0]).toMatchObject({
++			outcome: "expired",
++			commandId: "studio-tool:call-timeout",
++		});
++	});
++
+ 	test("non-blocking UI capabilities are safe no-ops; custom is explicitly unsupported", async () => {
+ 		const { gateway } = fixture();
+ 		const ui = new StudioRemoteExtensionUiContext(gateway, "studio-tool:call-5");

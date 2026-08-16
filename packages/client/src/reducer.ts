@@ -60,6 +60,7 @@ import type { CapabilityManifest, OperatorStateSnapshot } from "@omp-studio/stud
 import {
   conversationHintFromCursor,
   createInitialConversationState,
+  type ConversationIdentity,
   type ConversationState,
 } from "./conversation-state.js";
 import { reduceConversationState } from "./conversation-reducer.js";
@@ -87,6 +88,7 @@ export interface ClientConnectionState {
 
 export interface ClientEntitiesState {
   readonly snapshot: OperatorStateSnapshot | null;
+  readonly telemetry: OperatorStateSnapshot["telemetry"] | null;
 }
 
 /**
@@ -130,7 +132,10 @@ export type ClientAction =
       readonly occurredAt: string;
     }
   | { readonly type: "close" }
-  | { readonly type: "conversation.beginHydrate" }
+  | {
+      readonly type: "conversation.beginHydrate";
+      readonly identity: ConversationIdentity;
+    }
   | {
       readonly type: "conversation.hydrate";
       readonly page: ConversationTranscriptPage;
@@ -177,7 +182,7 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
       selected: null,
       contractVersion: null,
     },
-    entities: { snapshot: null },
+    entities: { snapshot: null, telemetry: null },
     interaction: { pending: null },
     conversation: createInitialConversationState(),
     commands: {},
@@ -226,7 +231,11 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "agents.definition.configure": true,
   "workspace.open": true,
   "workspace.pick": true,
+  "workspace.file.create": true,
+  "workspace.directory.create": true,
   "usage.openDashboard": true,
+  "git.execute": true,
+  "github.execute": true,
   "mode.plan.enter": true,
   "mode.plan.exit": true,
   "mode.plan.review.open": true,
@@ -363,7 +372,13 @@ export function reduceClientState(state: ClientState, action: ClientAction): Cli
         ? state
         : { ...state, connection: { ...state.connection, phase: "closed" } };
     case "conversation.beginHydrate":
-      return { ...state, conversation: reduceConversationState(state.conversation, { type: "beginHydrate" }) };
+      return {
+        ...state,
+        conversation: reduceConversationState(state.conversation, {
+          type: "beginHydrate",
+          identity: action.identity,
+        }),
+      };
     case "conversation.hydrate":
       return {
         ...state,
@@ -458,7 +473,14 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
         : state.conversation.identity === undefined
           ? conversationHintFromCursor(bootstrap.messagesCursor)
           : state.conversation;
-  return { ...state, connection, entities: { snapshot: bootstrap.snapshot ?? null }, interaction, conversation, commands };
+  return {
+    ...state,
+    connection,
+    entities: { snapshot: bootstrap.snapshot ?? null, telemetry: bootstrap.snapshot?.telemetry ?? null },
+    interaction,
+    conversation,
+    commands,
+  };
 }
 
 function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
@@ -490,7 +512,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
         state = {
           ...state,
           connection: { ...state.connection, runtimeEpoch: eventRuntimeEpoch, stateVersion: null },
-          entities: { snapshot: null },
+          entities: { snapshot: null, telemetry: null },
           interaction: { pending: null },
           commands: markPendingOutcomeUnknown(
             state.commands,
@@ -538,7 +560,26 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
       return reduceSnapshot(state, event);
     case "state.changed":
     case "diagnostics.changed":
+    case "operation.progress":
+    case "git.repository.changed":
       return { ...state, connection: advanceConnection(state.connection, event) };
+    case "telemetry.changed": {
+      if (state.entities.snapshot?.sessionId !== event.sessionId) {
+        // The Host cursor is global to the event stream. Ignore a delayed
+        // telemetry payload for another session, but still consume its
+        // cursor so the next valid event does not look like a gap.
+        return { ...state, connection: advanceConnection(state.connection, event) };
+      }
+      const snapshot = state.entities.snapshot;
+      return {
+        ...state,
+        connection: advanceConnection(state.connection, event),
+        entities: {
+          snapshot: snapshot === null ? null : { ...snapshot, telemetry: event.telemetry },
+          telemetry: event.telemetry,
+        },
+      };
+    }
     case "command.accepted":
       return reduceCommandAccepted(state, event);
     case "interaction.required":
@@ -557,6 +598,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
           resyncRequired: true,
           resyncReason: event.reason,
         },
+        entities: { ...state.entities, telemetry: null },
         conversation: reduceConversationState(state.conversation, { type: "resync" }),
       };
     case "conversation.changed":
@@ -623,7 +665,8 @@ function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readon
       resyncRequired: false,
       resyncReason: null,
     },
-    entities: { snapshot },
+    entities: { snapshot, telemetry: snapshot.telemetry ?? null },
+    interaction: { pending: null },
     conversation:
       state.entities.snapshot !== null && state.entities.snapshot.sessionId !== snapshot.sessionId
         ? reduceConversationState(state.conversation, { type: "clear" })
@@ -807,11 +850,15 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
       runtimeEpoch: nextRuntimeEpoch,
       ...(epochChanged || lost ? { stateVersion: null } : {}),
     },
-    ...(epochChanged || lost ? { entities: { snapshot: null } } : {}),
+    ...(epochChanged || lost ? { entities: { snapshot: null, telemetry: null } } : {}),
     interaction,
     commands,
     conversation,
   };
+}
+
+export function selectSessionTelemetry(state: ClientState): OperatorStateSnapshot["telemetry"] | null {
+  return state.entities.telemetry;
 }
 
 interface CommandIssueAction {

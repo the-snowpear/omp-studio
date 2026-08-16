@@ -9,6 +9,7 @@ import { Icon } from "./icons";
 import { ToastHost } from "./ToastHost";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_DIAGNOSTICS } from "./preview/fixtures";
+import { waitForCommandReceipt } from "./sessionLifecycle";
 
 type CapManifest = ClientBootstrap["capabilityManifest"];
 type RuntimeConn = ClientBootstrap["runtime"];
@@ -72,11 +73,13 @@ export function DiagnosticsPage({
   const mock = PREVIEW_DIAGNOSTICS;
   const [diag, setDiag] = useState<DiagnosticReadModel | undefined>(diagnostics);
   const [caps, setCaps] = useState<CapManifest | undefined>(capabilities);
+  const [env, setEnv] = useState<EnvironmentReadModel | undefined>(environment);
   const [busy, setBusy] = useState(false);
   const [notice, show, dismissNotice] = useNotice();
 
   useEffect(() => setDiag(diagnostics), [diagnostics]);
   useEffect(() => setCaps(capabilities), [capabilities]);
+  useEffect(() => setEnv(environment), [environment]);
 
   const authority = diag?.authority ?? environment?.authority;
   const capList = caps?.capabilities ?? [];
@@ -90,15 +93,42 @@ export function DiagnosticsPage({
     }
     setBusy(true);
     try {
-      const [d, c] = await Promise.allSettled([
+      const [d, c, e] = await Promise.allSettled([
         client.query("diagnostics.get", {}),
         client.query("capabilities.get", {}),
+        client.query("environment.get", {}),
       ]);
       if (d.status === "fulfilled") setDiag(d.value);
       if (c.status === "fulfilled") setCaps(c.value);
+      if (e.status === "fulfilled") setEnv(e.value);
       show(d.status === "fulfilled" ? "已重新检测 OMP" : "重新检测失败", d.status === "fulfilled" ? "check" : "alert-c");
     } catch {
       show("重新检测失败", "alert-c");
+    } finally {
+      setBusy(false);
+    }
+  }, [client, preview, show]);
+
+  const installRuntime = useCallback(async () => {
+    if (preview) return;
+    setBusy(true);
+    try {
+      const handle = await client.command("runtime.install", {});
+      const receipt = await waitForCommandReceipt(client, handle.requestId);
+      const [d, e] = await Promise.allSettled([
+        client.query("diagnostics.get", {}),
+        client.query("environment.get", {}),
+      ]);
+      if (d.status === "fulfilled") setDiag(d.value);
+      if (e.status === "fulfilled") setEnv(e.value);
+      if (receipt.status === "completed") {
+        show("托管 Runtime 已安装", "check");
+      } else {
+        const message = receipt.status === "failed" ? receipt.error.message : "安装未完成";
+        show(message, "alert-c");
+      }
+    } catch (error) {
+      show(error instanceof Error ? error.message : "安装失败", "alert-c");
     } finally {
       setBusy(false);
     }
@@ -174,6 +204,16 @@ export function DiagnosticsPage({
               <button className="btn outline" disabled title={CONTRACT.restart}><Icon name="refresh" extra="sm" />重启 OMP Bridge</button>
             </>
           )}
+          {!preview && env?.installer?.status !== "installed" ? (
+            <button
+              className="btn primary"
+              disabled={busy}
+              onClick={() => void installRuntime()}
+              title="从本地签名制品安装托管 Runtime，不会使用系统 PATH 上的 omp"
+            >
+              <Icon name="package" extra="sm" />安装 Runtime
+            </button>
+          ) : null}
           <button className="btn primary" disabled={busy} onClick={() => void refresh()}><Icon name="pulse" extra="sm" />重新检测 OMP</button>
         </div>
       </div>
@@ -193,6 +233,7 @@ export function DiagnosticsPage({
             <Kv k="OMP 版本" v={runtime?.runtimeVersion ?? "—"} />
             <Kv k="上游版本" v={runtime?.upstreamVersion ? `${runtime.upstreamVersion}${runtime.upstreamCommit ? ` (${runtime.upstreamCommit.slice(0, 7)})` : ""}` : "—"} />
             <Kv k="运行时状态" v={`${runtime?.status ?? "unavailable"} · ${runtime?.classification ?? "—"}`} />
+            <Kv k="托管安装" v={env?.installer ? `${env.installer.status}${env.installer.version ? ` · ${env.installer.version}` : ""}${env.installer.message ? ` · ${env.installer.message}` : ""}` : "—"} />
             <Kv k="后端 Backend" v={runtime?.backend ?? "—"} />
             <Kv k="平台" v={environment ? `${environment.platform} · ${environment.arch}` : "—"} />
             <Kv k="授权 Authority" v={authority ? `${authority.authorityId} · epoch ${authority.authorityEpoch}` : "—"} />

@@ -12,10 +12,12 @@ import type {
   SessionHistoryEntry,
   SessionId,
   StateVersion,
+  StudioClient,
   ThreadId,
 } from "@omp-studio/client-contract";
 import {
   createResumeGenerationGate,
+  ensureSelectedSessionActive,
   isNewConversationAvailable,
   NEW_CONVERSATION_UNAVAILABLE_REASON,
   resumeHistoryEntry,
@@ -149,5 +151,115 @@ describe("sessionLifecycle", () => {
       },
     };
     await expect(waitForCommandReceipt(client, requestId)).resolves.toEqual(receipt);
+  });
+
+  it("automatically resumes the selected history session before prompt dispatch", async () => {
+    const calls: string[] = [];
+    const targetSessionId = "session-b" as SessionId;
+    const requestId = "req-resume-b" as CommandRequestId;
+    const receipt: CommandReceipt = {
+      requestId,
+      commandName: "session.resume",
+      status: "completed",
+      result: {
+        runtimeId: "rt-1" as RuntimeId,
+        runtimeEpoch: 2 as RuntimeEpoch,
+        stateVersion: 2 as StateVersion,
+        sessionId: targetSessionId,
+        isStreaming: false,
+        isCompacting: false,
+        activeMode: "normal",
+        approvalMode: "yolo",
+        pendingMessages: 0,
+        activeCommandIds: [],
+        agentsRevision: 0,
+        jobsRevision: 0,
+        agents: [],
+        jobs: [],
+      },
+      observedAt: "2026-08-15T00:00:04.000Z",
+    };
+    const client = {
+      async command(name: string) {
+        calls.push(name);
+        return { requestId: name === "session.resume" ? requestId : "req-prompt" as CommandRequestId };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      getState() {
+        return { commands: { [requestId]: receipt } };
+      },
+    } as unknown as StudioClient;
+
+    await ensureSelectedSessionActive(client, {
+      activeSessionId: "session-a" as SessionId,
+      selectedSessionId: targetSessionId,
+      selectedThreadId: "thread-b" as ThreadId,
+    });
+    await client.command("core.prompt", { text: "continue" });
+    expect(calls).toEqual(["session.resume", "core.prompt"]);
+  });
+
+  it("does not resume an already active session", async () => {
+    const calls: string[] = [];
+    const client = {
+      async command(name: string) {
+        calls.push(name);
+        return { requestId: "unused" as CommandRequestId };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+    } as unknown as StudioClient;
+    const sessionId = "session-a" as SessionId;
+    await ensureSelectedSessionActive(client, {
+      activeSessionId: sessionId,
+      selectedSessionId: sessionId,
+      selectedThreadId: "thread-a" as ThreadId,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("fails before prompt dispatch when the resumed session identity is wrong", async () => {
+    const requestId = "req-resume-wrong" as CommandRequestId;
+    const receipt: CommandReceipt = {
+      requestId,
+      commandName: "session.resume",
+      status: "completed",
+      result: {
+        runtimeId: "rt-1" as RuntimeId,
+        runtimeEpoch: 2 as RuntimeEpoch,
+        stateVersion: 2 as StateVersion,
+        sessionId: "session-c" as SessionId,
+        isStreaming: false,
+        isCompacting: false,
+        activeMode: "normal",
+        approvalMode: "yolo",
+        pendingMessages: 0,
+        activeCommandIds: [],
+        agentsRevision: 0,
+        jobsRevision: 0,
+        agents: [],
+        jobs: [],
+      },
+      observedAt: "2026-08-15T00:00:05.000Z",
+    };
+    const client = {
+      async command() {
+        return { requestId };
+      },
+      subscribe() {
+        return () => undefined;
+      },
+      getState() {
+        return { commands: { [requestId]: receipt } };
+      },
+    } as unknown as StudioClient;
+    await expect(ensureSelectedSessionActive(client, {
+      activeSessionId: "session-a" as SessionId,
+      selectedSessionId: "session-b" as SessionId,
+      selectedThreadId: "thread-b" as ThreadId,
+    })).rejects.toMatchObject({ code: "STATE_VERSION_CONFLICT" });
   });
 });

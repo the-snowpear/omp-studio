@@ -32,6 +32,8 @@ export function eventMatchesScope(event: ClientEvent, scope: SubscriptionScope):
           return event.interaction.requestId === scope.requestId;
         case "command.receipt":
           return event.receipt.requestId === scope.requestId;
+        case "operation.progress":
+          return event.progress.requestId === scope.requestId;
         default:
           return false;
       }

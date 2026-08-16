@@ -51,7 +51,7 @@ import type {
 } from "./lifecycle.js";
 
 /** Version of this client contract; bumped on incompatible contract changes. */
-export const CLIENT_CONTRACT_VERSION = 1 as const;
+export const CLIENT_CONTRACT_VERSION = 2 as const;
 
 /** Opaque selections carried by the bootstrap; never resolved to paths. */
 export interface ClientSelection {
@@ -142,3 +142,4 @@ export * from "./operations.js";
 export * from "./lifecycle.js";
 export * from "./model-thinking.js";
 export * from "./conversation.js";
+export * from "./git.js";

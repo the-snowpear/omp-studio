@@ -12,6 +12,7 @@ import type {
   StateVersion,
 } from "./ids";
 import type { StudioPendingInteraction } from "./interactions";
+import type { SessionTelemetrySnapshot } from "./telemetry";
 
 export interface PlanState {
   status: "off" | "active" | "paused" | "review";
@@ -70,6 +71,7 @@ export interface OperatorStateSnapshot {
   jobsRevision: number;
   agents: StudioAgentSnapshot[];
   jobs: StudioJobSnapshot[];
+  telemetry?: SessionTelemetrySnapshot;
 }
 
 export interface RuntimeControlLease {
@@ -106,4 +108,3 @@ export interface CommandLedgerEntry {
 export interface JobSelection {
   jobId: JobId;
 }
-

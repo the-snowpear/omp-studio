@@ -106,7 +106,13 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   const cancel = () => {
     if (busy) return;
     setSubmitting(true);
-    Promise.resolve(onRespond("cancel")).finally(() => setSubmitting(false));
+    setSubmitError(false);
+    Promise.resolve(onRespond("cancel")).then(
+      (ok) => {
+        if (ok === false) setSubmitError(true);
+      },
+      () => setSubmitError(true),
+    ).finally(() => setSubmitting(false));
   };
   const retryNote = submitError ? (
     <p className="ask-error" role="alert">

@@ -1,7 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { findBun, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
+import { findBun, npmInvocation, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
+import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 import {
   MANAGED_ENTRYPOINT,
   PATCHES_DIRECTORY,
@@ -37,8 +38,8 @@ run(executable, ["--version"], { cwd: ompSourceDirectory, env });
 run(executable, ["--smoke-test"], { cwd: ompSourceDirectory, env });
 console.log(`Built and verified ${executable}`);
 
-const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-run(npm, ["run", "build"]);
+const npm = npmInvocation();
+run(npm.command, [...npm.prefix, "run", "build"]);
 const runtimeIdentity = await probeRuntimeIdentity({ binaryPath: executable });
 console.log(`Probed Runtime identity ${runtimeIdentity.runtimeVersion}`);
 
@@ -49,10 +50,24 @@ const upstreamVersion = await readUpstreamVersion();
 const runtimeVersion = deriveRuntimeVersion(upstreamVersion, series);
 const artifactDirectory =
   process.env.OMP_ARTIFACT_DIR ?? defaultArtifactDirectory(artifactPlatform, runtimeVersion);
-if (!process.env.OMP_RUNTIME_SIGNING_KEY || !process.env.OMP_RUNTIME_SIGNING_KEY_ID) {
-  throw new Error("OMP_RUNTIME_SIGNING_KEY and OMP_RUNTIME_SIGNING_KEY_ID are required to package a Runtime artifact");
+const envKeyPath = process.env.OMP_RUNTIME_SIGNING_KEY?.trim();
+const envKeyId = process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
+let signingKey;
+let keyId;
+if (envKeyPath && envKeyId) {
+  signingKey = await readFile(envKeyPath);
+  keyId = envKeyId;
+} else {
+  try {
+    const local = await readRuntimeSigningKeys();
+    signingKey = local.privateKey;
+    keyId = local.keyId;
+  } catch {
+    throw new Error(
+      "OMP_RUNTIME_SIGNING_KEY and OMP_RUNTIME_SIGNING_KEY_ID are required to package a Runtime artifact. Run npm run omp:keys to create a local signing key.",
+    );
+  }
 }
-const signingKey = await readFile(process.env.OMP_RUNTIME_SIGNING_KEY);
 
 const { manifestPath, checksumsPath, signaturePath, manifest } = await generateRuntimeArtifact({
   upstream,
@@ -64,7 +79,7 @@ const { manifestPath, checksumsPath, signaturePath, manifest } = await generateR
   entrypoint: MANAGED_ENTRYPOINT,
   channel: process.env.OMP_RUNTIME_CHANNEL ?? "stable",
   signingKey,
-  keyId: process.env.OMP_RUNTIME_SIGNING_KEY_ID,
+  keyId,
   outDirectory: artifactDirectory,
   runtimeIdentity,
 });

@@ -80,6 +80,23 @@ interface WindowSubscriptions {
 }
 
 /**
+ * Electron `ipcMain.handle` stringifies a thrown plain object as
+ * `[object Object]`. ClientError is `{ code, message }` — wrap it in Error
+ * so the renderer sees the actual Host message.
+ */
+function throwIpcError(error: unknown): never {
+  if (error instanceof Error) {
+    throw error;
+  }
+  if (isPlainObject(error) && typeof error.code === "string" && typeof error.message === "string") {
+    const wrapped = new Error(error.message);
+    wrapped.name = error.code;
+    throw wrapped;
+  }
+  throw new Error("desktop ipc: host rejected the request");
+}
+
+/**
  * Register the fixed Desktop IPC surface for one facade. Calling twice with
  * the same `ipcMain` throws (Electron rejects duplicate handlers); dispose
  * first when swapping facades (e.g. after a composition reload).
@@ -138,27 +155,39 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
 
   ipc.handle(DESKTOP_IPC_CHANNELS.bootstrap, async (event: IpcMainInvokeEvent) => {
     assertTrustedSender(event.sender);
-    const bootstrap = await requireFacade().bootstrap();
-    if (!isPlainObject(bootstrap)) {
-      throw new Error("desktop ipc: invalid bootstrap response");
+    try {
+      const bootstrap = await requireFacade().bootstrap();
+      if (!isPlainObject(bootstrap)) {
+        throw new Error("desktop ipc: invalid bootstrap response");
+      }
+      return bootstrap;
+    } catch (error) {
+      throwIpcError(error);
     }
-    return bootstrap;
   });
 
   ipc.handle(DESKTOP_IPC_CHANNELS.query, async (event: IpcMainInvokeEvent, payload: unknown) => {
     assertTrustedSender(event.sender);
-    const request = parseClientQueryRequest(payload);
-    const response = await requireFacade().query(request);
-    assertClientQueryResponse(response);
-    return response;
+    try {
+      const request = parseClientQueryRequest(payload);
+      const response = await requireFacade().query(request);
+      assertClientQueryResponse(response);
+      return response;
+    } catch (error) {
+      throwIpcError(error);
+    }
   });
 
   ipc.handle(DESKTOP_IPC_CHANNELS.command, async (event: IpcMainInvokeEvent, payload: unknown) => {
     assertTrustedSender(event.sender);
-    const request = parseClientCommandRequest(payload);
-    const accepted = await requireFacade().command(request);
-    assertClientCommandAccepted(accepted);
-    return accepted;
+    try {
+      const request = parseClientCommandRequest(payload);
+      const accepted = await requireFacade().command(request);
+      assertClientCommandAccepted(accepted);
+      return accepted;
+    } catch (error) {
+      throwIpcError(error);
+    }
   });
 
   ipc.handle(DESKTOP_IPC_CHANNELS.subscribe, (event: IpcMainInvokeEvent, payload: unknown) => {

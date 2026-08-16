@@ -71,7 +71,7 @@ function snapshot(stateVersion: number, runtimeEpoch: number): OperatorStateSnap
 
 function bootstrap(stateVersion = 1, cursor = "10", runtimeEpoch = 1): ClientBootstrap {
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     authority: { authorityId: "auth-1" as AuthorityId, authorityEpoch: 1 as AuthorityEpoch },
     runtime: {
       status: "connected",
@@ -198,7 +198,7 @@ function runtimeChanged(cursor: number, connection: RuntimeConnection, overrides
 
 function unavailableBootstrap(): ClientBootstrap {
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     authority: { authorityId: "auth-1" as AuthorityId, authorityEpoch: 1 as AuthorityEpoch },
     runtime: {
       status: "unavailable",
@@ -369,6 +369,60 @@ test("runtime loss marks accepted commands outcome_unknown", () => {
   // a completed receipt after outcome_unknown is ignored: terminal is final
   state = reduceClientState(state, { type: "event", event: completedReceipt(REQ_1, 13) });
   assert.equal(state.commands[REQ_1]?.status, "outcome_unknown");
+});
+
+test("telemetry.changed updates session telemetry without changing snapshot stateVersion", () => {
+  let state = bootedState();
+  const telemetry = {
+    sessionId: "sess-1" as SessionId,
+    capturedAt: TS,
+    tokens: { input: 100, output: 20, reasoning: 4, cacheRead: 10, cacheWrite: 2, total: 120, cost: 0.4 },
+    context: {
+      contextWindow: 128000,
+      usedTokens: 4000,
+      percent: 3.125,
+      anchored: true,
+      systemPromptTokens: 100,
+      systemContextTokens: 200,
+      systemToolsTokens: 300,
+      skillsTokens: 400,
+      messagesTokens: 3000,
+    },
+  };
+  state = reduceClientState(state, {
+    type: "event",
+    event: { ...base("11", { runtimeEpoch: 1 as RuntimeEpoch }), kind: "telemetry.changed", sessionId: "sess-1" as SessionId, telemetry },
+  });
+  assert.equal(state.entities.snapshot?.stateVersion, 1);
+  assert.equal(state.entities.telemetry?.tokens.total, 120);
+  assert.equal(state.entities.snapshot?.telemetry?.context?.messagesTokens, 3000);
+});
+
+test("stale-session telemetry consumes its cursor without replacing current telemetry", () => {
+  let state = bootedState();
+  const staleSessionId = "sess-old" as SessionId;
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...base("11", { runtimeEpoch: 1 as RuntimeEpoch }),
+      kind: "telemetry.changed",
+      sessionId: staleSessionId,
+      telemetry: {
+        sessionId: staleSessionId,
+        capturedAt: TS,
+        tokens: { input: 1, output: 2, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 3, cost: 0 },
+        context: null,
+        unavailableReason: "model_context_unknown",
+      },
+    },
+  });
+  assert.equal(state.connection.cursor, "11");
+  assert.equal(state.entities.telemetry, null);
+  assert.equal(state.connection.resyncRequired, false);
+
+  state = reduceClientState(state, { type: "event", event: changed(12) });
+  assert.equal(state.connection.cursor, "12");
+  assert.equal(state.connection.resyncRequired, false);
 });
 
 test("session.resume survives its expected connected epoch change until the completed receipt", () => {
@@ -670,6 +724,18 @@ test("StudioClientImpl buffers bootstrap races and does not deliver ignored even
   await client.close();
 });
 
+test("StudioClientImpl rejects an incompatible bootstrap contract before applying state", async () => {
+  const client = new StudioClientImpl(new MemoryClientTransport({
+    bootstrap: () => ({ ...bootstrap(), contractVersion: 1 } as unknown as ClientBootstrap),
+  }), fixedIds());
+  await assert.rejects(
+    client.bootstrap(),
+    (error: unknown) => (error as ClientError).code === "UNAVAILABLE" && /contract mismatch/iu.test((error as ClientError).message),
+  );
+  assert.equal(client.getState().connection.phase, "initial");
+  await client.close();
+});
+
 test("StudioClientImpl blocks sensitive commands before the transport sees them", async () => {
   let commandCalls = 0;
   const transport = new MemoryClientTransport({
@@ -883,7 +949,7 @@ test("StudioClientImpl records transcript hydrate failure on conversation state"
   };
   const client = new StudioClientImpl(transport, fixedIds());
   const hydrate: ConversationHydrateClient = client;
-  const gen = hydrate.beginTranscriptHydrate();
+  const gen = hydrate.beginTranscriptHydrate({ runtimeEpoch: 1 as RuntimeEpoch, sessionId: "s-1" as SessionId });
   hydrate.failTranscriptHydrate({ code: "UNAVAILABLE", message: "runtime down" }, gen);
   const view = selectConversationHydrate(client.getState().conversation);
   assert.equal(view.status, "error");

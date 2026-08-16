@@ -78,7 +78,13 @@ import type {
   Unsubscribe,
   WorkspaceId,
   WorkspaceListReadModel,
+  WorkspaceFileTreeReadModel,
+  WorkspaceFileMutationResult,
   OpaqueCursor,
+  GitExecuteInput,
+  GitHubExecuteInput,
+  GitOperationResult,
+  GitHubOperationResult,
 } from "@omp-studio/client-contract";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 import type {
@@ -91,7 +97,7 @@ import type {
 } from "@omp-studio/studio-protocol";
 import type { StudioOperation } from "@omp-studio/studio-protocol";
 import { canonicalJson, parseConversationRuntimeEvent, parseConversationTranscriptPage } from "@omp-studio/studio-protocol";
-import type { HostBackend, RuntimePublication, StudioConversationForward, StudioInteractionForward } from "@omp-studio/studio-host";
+import type { HostBackend, RuntimePublication, StudioConversationForward, StudioInteractionForward, StudioTelemetryForward } from "@omp-studio/studio-host";
 
 import {
   HostEventBus,
@@ -125,6 +131,9 @@ import {
   type HostSessionArchiveProvider,
   type HostUsageService,
   type HostWorkspaceService,
+  type HostWorkspaceFileService,
+  type HostGitService,
+  type HostGitHubService,
 } from "./services.js";
 
 /** Conservative surface grants: every optional surface is off by default. */
@@ -193,6 +202,12 @@ export interface StudioHostClientFacadeOptions {
   readonly agentDefinitions?: HostAgentDefinitionsService;
   /** Optional Host workspace registry adapter (paths never leave it). */
   readonly workspaces?: HostWorkspaceService;
+  /** Optional Host-owned workspace-relative file tree adapter. */
+  readonly workspaceFiles?: HostWorkspaceFileService;
+  /** Optional Host-owned system Git adapter. Independent of Runtime availability. */
+  readonly git?: HostGitService;
+  /** Optional Host-owned GitHub CLI adapter. Independent of Runtime availability. */
+  readonly github?: HostGitHubService;
   /** Optional omp stats usage adapter (heatmap / native dashboard). */
   readonly usage?: HostUsageService;
   /** Bounded idempotency registry capacity (default 512). */
@@ -309,12 +324,25 @@ function validateEnvelope(request: {
 }
 
 function validateInteractionValue(value: unknown): void {
-  if (value === undefined || typeof value === "string" || typeof value === "boolean") return;
+  const MAX_TEXT = 128 * 1024;
+  const MAX_ITEMS = 256;
+  if (value === undefined || typeof value === "boolean") return;
+  if (typeof value === "string") {
+    if (value.length > MAX_TEXT) throw clientError("INVALID_ARGUMENT", "interaction.respond text value is too large");
+    return;
+  }
   if (Array.isArray(value)) {
-    if (value.every((item) => typeof item === "string")) return;
+    if (value.length > MAX_ITEMS) throw clientError("INVALID_ARGUMENT", "interaction.respond has too many selected values");
+    if (value.every((item) => typeof item === "string" && item.length <= MAX_TEXT)) return;
     throw clientError("INVALID_ARGUMENT", "interaction.respond array value must contain only strings");
   }
-  if (value !== null && typeof value === "object") return;
+  if (value !== null && typeof value === "object") {
+    try {
+      if (JSON.stringify(value).length <= MAX_TEXT) return;
+    } catch {
+      // Fall through to the same fail-closed error as non-JSON values.
+    }
+  }
   throw clientError("INVALID_ARGUMENT", "interaction.respond value has an unsupported shape");
 }
 
@@ -325,11 +353,17 @@ function isThreadCommandInput(value: unknown): value is { readonly threadId: Thr
 
 function isInteractionCommandInput(
   value: unknown,
-): value is { readonly interactionId: InteractionId; readonly decision: "submit" | "cancel"; readonly value?: unknown } {
+): value is {
+  readonly interactionId: InteractionId;
+  readonly leaseGeneration: number;
+  readonly decision: "submit" | "cancel";
+  readonly value?: unknown;
+} {
   if (value === null || typeof value !== "object") return false;
-  if (!("interactionId" in value) || !("decision" in value)) return false;
-  const { interactionId, decision } = value;
+  if (!("interactionId" in value) || !("leaseGeneration" in value) || !("decision" in value)) return false;
+  const { interactionId, leaseGeneration, decision } = value;
   if (typeof interactionId !== "string" || interactionId.length === 0) return false;
+  if (typeof leaseGeneration !== "number" || !Number.isSafeInteger(leaseGeneration) || leaseGeneration < 1) return false;
   return decision === "submit" || decision === "cancel";
 }
 
@@ -389,6 +423,9 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (runtime?.onConversationResync !== undefined && typeof runtime.onConversationResync !== "function") {
     throw new TypeError("facade runtime conversation resync hook must be a function");
   }
+  if (runtime?.onTelemetryEvent !== undefined && typeof runtime.onTelemetryEvent !== "function") {
+    throw new TypeError("facade runtime telemetry hook must be a function");
+  }
   if (runtime?.currentSession !== undefined && typeof runtime.currentSession !== "function") {
     throw new TypeError("facade runtime currentSession must be a function");
   }
@@ -412,7 +449,10 @@ export class StudioHostClientFacade implements ClientTransport {
   #unsubscribePublication: Unsubscribe | undefined;
   #unsubscribeConversation: Unsubscribe | undefined;
   #unsubscribeConversationResync: Unsubscribe | undefined;
+  #unsubscribeTelemetry: Unsubscribe | undefined;
   #unsubscribeInteraction: Unsubscribe | undefined;
+  #unsubscribeGitProgress: Unsubscribe | undefined;
+  #unsubscribeGithubProgress: Unsubscribe | undefined;
   #closed = false;
   #lastHello: HostRuntimeHelloView | undefined;
   #lastEmittedConnection: RuntimeConnection | undefined;
@@ -435,11 +475,23 @@ export class StudioHostClientFacade implements ClientTransport {
       this.#unsubscribePublication = onPublication((publication) => this.#onPublication(publication));
     }
     this.#bindConversation();
+    this.#bindTelemetry();
     this.#bindInteraction();
+    this.#unsubscribeGitProgress = options.git?.onProgress?.((progress) => {
+      this.#bus.emit({ kind: "operation.progress", progress });
+    });
+    this.#unsubscribeGithubProgress = options.github?.onProgress?.((progress) => {
+      this.#bus.emit({ kind: "operation.progress", progress });
+    });
   }
 
   async bootstrap(): Promise<ClientBootstrap> {
     this.#assertOpen();
+    // Capture the resume cursor before reading the snapshot. Events emitted
+    // after this point remain strictly newer than the baseline and can be
+    // replayed from StudioClient's bootstrap buffer instead of being
+    // mistaken for duplicates of the snapshot.
+    const bootstrapCursor = this.#bus.currentCursor();
     const now = this.#options.diagnostics.now();
     const capabilityManifest = await this.#resolveManifest(this.#options.capabilityManifest, () => neutralCapabilityManifest(now));
     const commandManifest = await this.#resolveManifest(this.#options.commandManifest, () => neutralCommandManifest(now));
@@ -466,7 +518,7 @@ export class StudioHostClientFacade implements ClientTransport {
       ...base,
       snapshot,
       stateVersion: snapshot.stateVersion,
-      cursor: this.#bus.currentCursor(),
+      cursor: bootstrapCursor,
       ...(messagesCursor === undefined ? {} : { messagesCursor }),
       ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
     };
@@ -516,7 +568,7 @@ export class StudioHostClientFacade implements ClientTransport {
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "history.list": {
-        const result = await this.#queryHistory(request.input);
+        const result = await this.#queryHistory(request.input as { readonly limit?: number });
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "session.state": {
@@ -547,18 +599,64 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryProjects();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "workspace.fileTree": {
+        const service = this.#options.workspaceFiles;
+        if (service === undefined) throw clientError("CAPABILITY_UNAVAILABLE", "workspace.fileTree is not available on this Host");
+        const result = await service.get(request.input as { readonly workspaceId: WorkspaceId; readonly path?: string });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "usage.get": {
         const result = await this.#queryUsage();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "session.transcript.read": {
-        const result = await this.#queryTranscript(request.input);
+        const result = await this.#queryTranscript(request.input as { readonly cursor?: OpaqueCursor; readonly limit?: number });
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "session.transcript.readPage": {
         const archiveRequest = request as ClientQueryRequest<"session.transcript.readPage">;
         const result = await this.#queryArchiveTranscript(archiveRequest.input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "git.toolchain.get": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.toolchain() } as ClientQueryResponse;
+      }
+      case "git.repository.get": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.repository(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.diff.get": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.diff(request.input as never) } as ClientQueryResponse;
+      }
+      case "git.branches.list": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.branches(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.worktrees.list": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.worktrees(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.remotes.list": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.remotes(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "github.auth.get": {
+        const service = this.#requireGithub(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.auth(request.input as { readonly workspaceId?: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "github.pr.list": {
+        const service = this.#requireGithub(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.pullRequests(request.input as never) } as ClientQueryResponse;
+      }
+      case "github.pr.get": {
+        const service = this.#requireGithub(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.pullRequest(request.input as never) } as ClientQueryResponse;
+      }
+      case "github.pr.checks": {
+        const service = this.#requireGithub(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.checks(request.input as never) } as ClientQueryResponse;
       }
     }
   }
@@ -621,6 +719,10 @@ export class StudioHostClientFacade implements ClientTransport {
       case "workspace.pick": {
         return this.#commandWorkspace(request as ClientCommandRequest<"workspace.open" | "workspace.pick">);
       }
+      case "workspace.file.create":
+      case "workspace.directory.create": {
+        return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create">);
+      }
       case "usage.openDashboard": {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
       }
@@ -636,11 +738,75 @@ export class StudioHostClientFacade implements ClientTransport {
       case "agents.definition.configure": {
         return this.#commandAgentDefinitions(request as ClientCommandRequest<AgentDefinitionsCommandName>);
       }
+      case "git.execute":
+        return this.#commandGit(request as ClientCommandRequest<"git.execute">);
+      case "github.execute":
+        return this.#commandGithub(request as ClientCommandRequest<"github.execute">);
       default: {
         const p4 = request as ClientCommandRequest;
         return this.#commandP4(p4);
       }
     }
+  }
+
+  #requireGit(name: string): HostGitService {
+    const service = this.#options.git;
+    if (service === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${name} is not available: no Git adapter is wired`);
+    return service;
+  }
+
+  #requireGithub(name: string): HostGitHubService {
+    const service = this.#options.github;
+    if (service === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${name} is not available: no GitHub adapter is wired`);
+    return service;
+  }
+
+  async #commandGit(request: ClientCommandRequest<"git.execute">): Promise<ClientCommandAccepted> {
+    return this.#commandHostOperation(request, this.#requireGit(request.commandName), "git");
+  }
+
+  async #commandGithub(request: ClientCommandRequest<"github.execute">): Promise<ClientCommandAccepted> {
+    return this.#commandHostOperation(request, this.#requireGithub(request.commandName), "github");
+  }
+
+  async #commandHostOperation(
+    request: ClientCommandRequest<"git.execute"> | ClientCommandRequest<"github.execute">,
+    service: HostGitService | HostGitHubService,
+    domain: "git" | "github",
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request as ClientCommandRequest);
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request as ClientCommandRequest, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted;
+    }
+    const accepted = { commandName: request.commandName, requestId: request.requestId, status: "accepted" as const, acceptedAt };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void (async () => {
+      try {
+        const result: GitOperationResult | GitHubOperationResult = domain === "git"
+          ? await (service as HostGitService).execute(request.input as GitExecuteInput, request.requestId)
+          : await (service as HostGitHubService).execute(request.input as GitHubExecuteInput, request.requestId);
+        this.#emitTerminal(request.requestId, { requestId: request.requestId, commandName: request.commandName, status: "completed", result, observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+        const changesLocalRepository = domain === "git" || (domain === "github" && request.input.operation.kind === "pr.checkout");
+        if (changesLocalRepository && request.input.workspaceId !== undefined) {
+          const repository = domain === "git" ? (result as GitOperationResult).repository : undefined;
+          this.#bus.emit({
+            kind: "git.repository.changed",
+            repository: {
+              workspaceId: request.input.workspaceId,
+              ...(repository?.repositoryId === undefined ? {} : { repositoryId: repository.repositoryId }),
+              ...(repository?.revision === undefined ? {} : { revision: repository.revision }),
+              reason: "command",
+            },
+          });
+        }
+      } catch (error) {
+        this.#emitTerminal(request.requestId, { requestId: request.requestId, commandName: request.commandName, status: "failed", error: toClientError(error), observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+      }
+    })();
+    return accepted as ClientCommandAccepted;
   }
 
   async #commandP4(request: ClientCommandRequest): Promise<ClientCommandAccepted> {
@@ -686,8 +852,14 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#unsubscribeConversation = undefined;
     this.#unsubscribeConversationResync?.();
     this.#unsubscribeConversationResync = undefined;
+    this.#unsubscribeTelemetry?.();
+    this.#unsubscribeTelemetry = undefined;
     this.#unsubscribeInteraction?.();
     this.#unsubscribeInteraction = undefined;
+    this.#unsubscribeGitProgress?.();
+    this.#unsubscribeGitProgress = undefined;
+    this.#unsubscribeGithubProgress?.();
+    this.#unsubscribeGithubProgress = undefined;
     this.#bus.close();
   }
 
@@ -833,14 +1005,36 @@ export class StudioHostClientFacade implements ClientTransport {
       this.#lastPublishedEpoch = snapshot.runtimeEpoch;
       this.#lastPublishedVersion = undefined;
     }
+    let publishedSnapshot = false;
     if (this.#lastPublishedVersion === undefined || Number(version) > Number(this.#lastPublishedVersion)) {
       this.#lastPublishedVersion = version;
+      publishedSnapshot = true;
       this.#bus.emit({
         kind: "snapshot",
         snapshot,
         runtimeEpoch: snapshot.runtimeEpoch,
         stateVersion: version,
       });
+    }
+    if (publishedSnapshot) {
+      const pending = snapshot.pendingInteraction;
+      if (pending?.owner === "gui") {
+        const requestId = this.#runtimeSession()?.requestIdForCommandId?.(pending.request.commandId) as CommandRequestId | undefined;
+        const mapped = mapRemoteInteractionToClient(
+          pending.request,
+          snapshot.sessionId as SessionId,
+          pending.leaseGeneration,
+          requestId,
+        );
+        if (mapped !== undefined) {
+          this.#bus.emit({
+            kind: "interaction.required",
+            runtimeEpoch: snapshot.runtimeEpoch,
+            stateVersion: version,
+            interaction: mapped,
+          });
+        }
+      }
     }
     for (const entry of publication.terminalOutcomes) {
       this.#emitLedgerReceipt(entry);
@@ -865,6 +1059,37 @@ export class StudioHostClientFacade implements ClientTransport {
     }
     this.#unsubscribeConversation = session.onConversationEvent((event) => this.#onConversationForward(event));
     this.#unsubscribeConversationResync = session.onConversationResync((reason) => this.#onConversationResync(reason));
+  }
+
+  #bindTelemetry(): void {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) return;
+    if (runtime.onTelemetryEvent !== undefined) {
+      this.#unsubscribeTelemetry = runtime.onTelemetryEvent((event) => this.#onTelemetryForward(event));
+      return;
+    }
+    const session = this.#runtimeSession();
+    if (session?.onTelemetryEvent !== undefined) {
+      this.#unsubscribeTelemetry = session.onTelemetryEvent((event) => this.#onTelemetryForward(event));
+    }
+  }
+
+  #onTelemetryForward(forward: StudioTelemetryForward): void {
+    this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshot();
+    if (snapshot === undefined) return;
+    const envelope = forward.envelope;
+    if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) return;
+    const event = envelope.event;
+    if (event.sessionId !== snapshot.sessionId || event.telemetry.sessionId !== snapshot.sessionId) return;
+    this.#bus.emit({
+      kind: "telemetry.changed",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      sessionId: event.sessionId as SessionId,
+      telemetry: event.telemetry,
+    });
   }
 
   #bindInteraction(): void {
@@ -1773,6 +1998,53 @@ export class StudioHostClientFacade implements ClientTransport {
     return accepted;
   }
 
+  async #commandWorkspaceFile(
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create">,
+  ): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const service = this.#options.workspaceFiles;
+    if (service === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no workspace file adapter is wired`);
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = { commandName: request.commandName, requestId: request.requestId, status: "accepted" as const, acceptedAt };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runWorkspaceFileCommand(request, service);
+    return accepted;
+  }
+
+  async #runWorkspaceFileCommand(
+    request: ClientCommandRequest<"workspace.file.create" | "workspace.directory.create">,
+    service: HostWorkspaceFileService,
+  ): Promise<void> {
+    try {
+      const input = request.input as { readonly workspaceId: WorkspaceId; readonly path: string };
+      const result: WorkspaceFileMutationResult = request.commandName === "workspace.file.create"
+        ? await service.createFile(input)
+        : await service.createDirectory(input);
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(request.requestId, {
+        requestId: request.requestId,
+        commandName: request.commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
+  }
+
   async #runWorkspaceCommand(
     request: ClientCommandRequest<"workspace.open" | "workspace.pick">,
     service: HostWorkspaceService,
@@ -1781,7 +2053,7 @@ export class StudioHostClientFacade implements ClientTransport {
       const result =
         request.commandName === "workspace.open"
           ? await service.open(request.input as { readonly workspaceId: WorkspaceId })
-          : await service.pick();
+          : await service.pick(request.input as { readonly name?: string });
       this.#lastWorkspaceModel = result;
       this.#emitTerminal(request.requestId, {
         requestId: request.requestId,
@@ -1918,11 +2190,13 @@ export class StudioHostClientFacade implements ClientTransport {
           throw clientError("INVALID_ARGUMENT", "interaction.respond interactionId/decision are invalid");
         }
         const interactionId = input.interactionId;
+        const leaseGeneration = input.leaseGeneration;
         const decision = input.decision;
         void this.#runSemanticCommand(
           () =>
             service.respond({
               interactionId,
+              leaseGeneration,
               decision,
               ...(input.value === undefined ? {} : { value: input.value }),
             }),

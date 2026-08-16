@@ -265,7 +265,10 @@
 .convo-scroll {
   flex: 1;
   overflow-y: auto;
-  scroll-behavior: smooth;
+  /* Hydrate/session switches position at the latest item before paint. Keep
+     the container itself instant; explicit "回到最新" actions opt into
+     smooth scrolling at the call site. */
+  scroll-behavior: auto;
   position: relative;
   /* minimap 替代原生滚动条（参照 omp-web ChatWindow） */
   scrollbar-width: none;
@@ -478,8 +481,27 @@
 }
 .batch-diff .add { color: var(--green); }
 .batch-diff .del { color: var(--red); }
-.batch-chain { display: none; margin-top: var(--sp-4); }
-.ev-batch.open .batch-chain { display: block; }
+.batch-chain {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition:
+    grid-template-rows var(--dur-slow) var(--ease-out),
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out),
+    visibility 0s linear var(--dur-slow);
+}
+.batch-chain-inner { min-height: 0; overflow: hidden; }
+.ev-batch.open .batch-chain {
+  grid-template-rows: 1fr;
+  margin-top: var(--sp-4);
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
 .tl-item {
   margin: 1px 0;
   --tl-pad-x: 4px;
@@ -525,6 +547,19 @@
   text-underline-offset: 2px;
   text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
 }
+.tl-diff {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+.tl-diff .add { color: var(--green); }
+.tl-diff .del { color: var(--red); }
+.tl-diff + .tl-chev { margin-left: 0; }
 .tl-chev {
   width: var(--tl-chev-w);
   height: var(--tl-chev-w);
@@ -539,23 +574,55 @@
 .tl-item.open .tl-chev,
 .tl-item:focus-within .tl-chev { opacity: 1; }
 .tl-item.open .tl-chev { transform: rotate(180deg); }
-.tl-card { display: none; }
+.tl-card {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition:
+    grid-template-rows var(--dur-slow) var(--ease-out),
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out),
+    visibility 0s linear var(--dur-slow);
+}
 .tl-item.open .tl-card {
-  display: block;
-  max-height: var(--tc-max-h);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
+  grid-template-rows: 1fr;
+  min-width: 0;
+  max-width: 100%;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition-delay: 0s;
+  overflow: visible;
   margin-left: calc(var(--tl-pad-x) + var(--tl-icon-w) + var(--sp-6));
   margin-right: calc(var(--tl-pad-x) + var(--tl-chev-w) + var(--sp-6));
 }
-.tl-card .tc-body { padding: 0 0 var(--sp-8); }
+.tl-card .tc-body {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 0 var(--sp-8);
+}
+.tl-card > .tc-body,
+.tl-card > .think-scroll { min-height: 0; }
 .tl-card .codeblock,
 .tl-card .tc-diff,
 .tl-card .tc-json,
 .tl-card .tc-code,
 .tl-card .tc-tree,
-.tl-card .think-scroll { max-height: none; overflow: visible; }
+.tl-card .think-scroll {
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.tl-card .codeblock,
+.tl-card .tc-code,
+.tl-card .tc-tree { max-height: 220px; }
+.tl-card .tc-diff { max-height: 240px; }
+.tl-card .tc-json { max-height: 180px; }
+.tl-card .think-scroll { max-height: var(--tc-max-h); }
 .think-card {
   margin: 2px 0 var(--sp-8);
   border-left: 1px solid var(--border-strong);
@@ -581,6 +648,12 @@
 .tc-body > * { margin-bottom: var(--sp-8); }
 .tc-body > :last-child { margin-bottom: var(--sp-6); }
 .tc-summary { font-size: var(--fs-11); color: var(--text-3); }
+.tc-edit-summary {
+  padding: 2px 0;
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  color: var(--text-2);
+}
 .tc-foot { display: flex; align-items: center; gap: var(--sp-8); }
 .tc-label { font-size: var(--fs-11); color: var(--text-faint); margin-bottom: 4px; }
 .tc-note { font-size: var(--fs-11); color: var(--text-faint); }
@@ -606,7 +679,7 @@
   font-family: var(--font-mono); font-size: var(--fs-11); line-height: 1.65;
   color: var(--text-2);
   overflow: auto; max-height: 220px;
-  white-space: pre-wrap; word-break: break-all;
+  white-space: pre; word-break: normal;
 }
 .tc-body .codeblock .c-cmd { color: var(--text); font-weight: var(--fw-medium); }
 .tc-body .codeblock .c-err { color: var(--red); }
@@ -629,7 +702,13 @@
   font-size: var(--fs-11);
   line-height: 1.65;
 }
-.tc-code .cl { display: flex; gap: var(--sp-8); padding: 0 var(--sp-8); }
+.tc-code .cl {
+  display: flex;
+  gap: var(--sp-8);
+  width: max-content;
+  min-width: 100%;
+  padding: 0 var(--sp-8);
+}
 .tc-code .ln {
   flex: none;
   min-width: 28px;
@@ -638,7 +717,17 @@
   user-select: none;
   font-variant-numeric: tabular-nums;
 }
-.tc-code .lx { min-width: 0; white-space: pre-wrap; word-break: break-all; color: var(--text-2); }
+.tc-code .lx { min-width: max-content; white-space: pre; word-break: normal; color: var(--text-2); }
+.tc-diff .dl { width: max-content; min-width: 100%; }
+.tc-diff .dl .lc { flex: none; min-width: max-content; }
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-chain,
+  .tl-card {
+    transition: none;
+    transform: none;
+  }
+}
 .tc-tree {
   border: 1px solid var(--border);
   border-radius: var(--r-6);
@@ -1366,7 +1455,16 @@
   max-height: 200px;
   outline: none;
   font-family: var(--font-ui);
+  transition: min-height var(--dur) var(--ease-out), max-height var(--dur) var(--ease-out), padding var(--dur) var(--ease-out);
 }
+.composer.running.compact textarea {
+  min-height: 30px;
+  max-height: 30px;
+  padding-top: 3px;
+  padding-bottom: 2px;
+  overflow: hidden;
+}
+.composer.running.expanded textarea { min-height: 44px; max-height: 200px; }
 /* The textarea suppresses its own ring because .composer draws the focus state
    for it — the wrapper now takes the real glow (see .composer:focus-within
    above), so the state is still announced visually while the text area itself
@@ -1471,6 +1569,199 @@
   box-shadow: 0 3px 12px -3px rgba(0, 0, 0, 0.15);
 }
 .ctx-item { display: inline-flex; align-items: center; gap: var(--sp-4); min-width: 0; }
+.ctx-project-wrap { position: relative; display: inline-flex; min-width: 0; }
+.ctx-project-switch {
+  color: var(--text-2);
+  font: inherit;
+  border-radius: var(--r-4);
+  padding: 2px var(--sp-4);
+  margin: -2px calc(var(--sp-4) * -1);
+  transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.ctx-project-switch:hover,
+.ctx-project-switch[aria-expanded="true"] { color: var(--text); background: var(--surface-hover); }
+.ctx-project-switch .icon:last-child { width: 11px; height: 11px; color: var(--text-faint); }
+.ctx-project-backdrop { position: fixed; inset: 0; z-index: 40; cursor: default; }
+.ctx-project-menu {
+  left: 0;
+  bottom: calc(100% + 7px);
+  z-index: 41;
+  width: min(320px, calc(100vw - 48px));
+  padding: var(--sp-8);
+  overflow: hidden;
+  border-radius: var(--r-10);
+  font-size: var(--fs-12);
+}
+.ctx-project-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  height: 38px;
+  padding: 0 var(--sp-8);
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+}
+.ctx-project-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+.ctx-project-search input::placeholder { color: var(--text-faint); }
+.ctx-project-list {
+  max-height: min(246px, 38vh);
+  overflow-y: auto;
+  padding: var(--sp-6) 0;
+  scrollbar-width: thin;
+}
+.ctx-project-menu .menu-item { min-height: 34px; font-size: var(--fs-12); }
+.ctx-project-list .menu-item { font-size: var(--fs-14); }
+.ctx-project-menu .menu-item > span:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-project-empty {
+  padding: var(--sp-16) var(--sp-8);
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+}
+
+/* Codex-style project creation, restated in OMP's quieter surface system. */
+.create-project-backdrop {
+  align-items: center;
+  padding: var(--sp-24);
+  background: color-mix(in srgb, var(--bg) 34%, rgba(15, 17, 26, 0.72));
+}
+.create-project-modal {
+  width: min(620px, calc(100vw - 48px));
+  border-radius: 20px;
+  overflow: hidden;
+}
+.create-project-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  padding: var(--sp-24) var(--sp-24) var(--sp-16);
+}
+.create-project-head h2 {
+  margin: 3px 0 0;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+.create-project-kicker {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.12em;
+}
+.create-project-body { padding: 0 var(--sp-24) var(--sp-8); }
+.create-project-name {
+  display: flex;
+  align-items: stretch;
+  height: 54px;
+  margin-bottom: var(--sp-20);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-10);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.create-project-name:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-softer);
+}
+.create-project-name > .icon {
+  width: 52px;
+  height: 100%;
+  padding: 17px;
+  border-right: 1px solid var(--border);
+  color: var(--text-3);
+}
+.create-project-name input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 0 var(--sp-14);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-16);
+}
+.create-project-name input::placeholder { color: var(--text-faint); }
+.create-project-label {
+  margin: 0 0 var(--sp-8);
+  color: var(--text);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.create-project-folder {
+  width: 100%;
+  min-height: 126px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-14);
+  padding: var(--sp-20);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-10);
+  background: var(--surface-2);
+  color: var(--text-2);
+  text-align: left;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.create-project-folder:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-softer);
+}
+.create-project-folder:active { transform: scale(0.995); }
+.create-project-folder.selected { border-style: solid; border-color: var(--accent-border); }
+.create-folder-icon {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: var(--r-8);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent);
+}
+.create-folder-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
+.create-folder-copy b { color: var(--text); font-size: var(--fs-14); }
+.create-folder-copy span { color: var(--text-3); font-size: var(--fs-12); }
+.create-project-error {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-top: var(--sp-10);
+  color: var(--red);
+  font-size: var(--fs-12);
+}
+.create-project-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-8);
+  padding: var(--sp-16) var(--sp-24) var(--sp-24);
+}
+.create-project-foot .btn { min-width: 92px; height: 38px; }
+.create-project-foot .spinner { margin-right: var(--sp-6); }
+@media (max-width: 640px) {
+  .create-project-backdrop { align-items: flex-end; padding: var(--sp-8); }
+  .create-project-modal { width: 100%; border-radius: 18px; }
+  .create-project-head,
+  .create-project-body,
+  .create-project-foot { padding-left: var(--sp-16); padding-right: var(--sp-16); }
+}
 .ctx-item .icon { color: var(--text-3); flex: none; }
 .ctx-item.muted { color: var(--text-3); }
 .ctx-item .dot { width: 6px; height: 6px; margin-left: var(--sp-4); }
@@ -1756,6 +2047,25 @@
 .sp-body { flex: 1; min-height: 0; overflow-y: auto; }
 .sp-page { display: none; height: 100%; flex-direction: column; }
 .sp-page.active { display: flex; }
+
+/* Host-backed Git surface. Paths are repository-relative public values. */
+.git-toolbar { flex-wrap: wrap; }
+.git-branch-label { display: inline-flex; align-items: center; gap: var(--sp-6); min-width: 70px; max-width: 150px; font-size: var(--fs-11); font-weight: var(--fw-semibold); }
+.git-notice { flex: none; padding: 6px 12px; border-bottom: 1px solid var(--border); color: var(--text-2); font-size: var(--fs-11); overflow-wrap: anywhere; }
+.git-operation { flex: none; display: flex; align-items: center; gap: var(--sp-6); padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--warning-soft); font-size: var(--fs-11); }
+.git-actions { flex: none; display: flex; align-items: center; gap: var(--sp-8); padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.git-actions select { min-width: 150px; max-width: 190px; height: 28px; border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-1); color: var(--text); font: inherit; font-size: var(--fs-11); }
+.git-change-line { display: flex; align-items: center; gap: 2px; border-radius: var(--r-6); }
+.git-change-line.selected { background: var(--accent-soft); }
+.git-change-line .ch-row { min-width: 0; flex: 1; }
+.git-change-line .icon-btn { flex: none; }
+.git-commit-box { flex: none; display: flex; align-items: stretch; gap: var(--sp-6); padding: var(--sp-8) var(--sp-12); border-top: 1px solid var(--border); }
+.git-commit-box textarea { flex: 1; min-width: 0; resize: vertical; border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-1); color: var(--text); padding: 6px 8px; font: inherit; font-size: var(--fs-11); }
+.git-diff-slot { height: min(280px, 38%); border-top: 1px solid var(--border); }
+.git-diff-slot .dl .lc { min-width: max-content; padding-left: 4px; }
+.git-pr-list { margin: 10px 12px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-8); }
+.git-pr-row { display: flex; align-items: center; gap: var(--sp-6); padding: 5px 0; font-size: var(--fs-11); }
+.git-pr-row > span { flex: 1; min-width: 0; }
 
 /* Changes
    The three wrapper divs here carried their layout as inline style attributes

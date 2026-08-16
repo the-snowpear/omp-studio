@@ -16,6 +16,7 @@ import type {
 } from "./ids";
 import type { CapabilityManifest } from "./manifests";
 import type { OperatorStateSnapshot } from "./state";
+import type { SessionTelemetryEvent } from "./telemetry";
 
 export const STUDIO_PROTOCOL_NAME = "omp-studio" as const;
 export const STUDIO_PROTOCOL_VERSION = 1 as const;
@@ -135,6 +136,7 @@ export interface StudioSnapshotResponse {
 export type StudioBridgeEvent =
   | RuntimeLifecycleEvent
   | ConversationRuntimeEvent
+  | SessionTelemetryEvent
   | { kind: "state.changed"; snapshot: OperatorStateSnapshot }
   | { kind: "btw.changed"; snapshot: unknown };
 

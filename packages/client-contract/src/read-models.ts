@@ -188,6 +188,28 @@ export interface WorkspaceListReadModel {
   readonly activeWorkspaceId?: WorkspaceId;
 }
 
+/** A workspace-relative Explorer node. Absolute paths never cross the Host boundary. */
+export interface WorkspaceFileNode {
+  readonly type: "file" | "dir";
+  readonly name: string;
+  /** Normalized workspace-relative path (forward slashes). */
+  readonly path: string;
+  readonly children?: ReadonlyArray<WorkspaceFileNode>;
+}
+
+/** Current file tree for a registered workspace. */
+export interface WorkspaceFileTreeReadModel {
+  readonly workspaceId: WorkspaceId;
+  readonly nodes: ReadonlyArray<WorkspaceFileNode>;
+}
+
+/** Terminal result for a workspace file mutation. */
+export interface WorkspaceFileMutationResult {
+  readonly applied: boolean;
+  readonly kind: "file" | "directory";
+  readonly path: string;
+}
+
 /** Home page read model: runtime status plus the current read snapshot. */
 export interface HomeReadModel {
   readonly authority: PublicAuthorityIdentity;

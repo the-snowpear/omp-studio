@@ -104,6 +104,13 @@ export class DesktopInteractionHost {
       return;
     }
     this.#unsubscribe = controller.onInteractionEvent((event) => this.#onEvent(event, controller));
+    // A resident/reconnected Runtime may already have an interaction in its
+    // snapshot. Adopt it locally so the GUI can respond even though the
+    // original required event happened before this Host attached.
+    const pending = controller.pendingInteraction?.();
+    if (pending !== undefined && pending.owner === "gui") {
+      this.#adoptPending(pending);
+    }
     // Runtime loss: the bridge disconnect clears the hello; revoke every
     // pre-signed token and drop the adapter pending so stale cards and
     // confirmations cannot outlive the Runtime (plan §4.3). The client is
@@ -128,7 +135,11 @@ export class DesktopInteractionHost {
 
   async respond(input: HostInteractionRespondInput): Promise<void> {
     const pending = this.#adapter.pending();
-    if (pending === undefined || pending.interactionId !== input.interactionId) {
+    if (
+      pending === undefined ||
+      pending.interactionId !== input.interactionId ||
+      pending.generation !== input.leaseGeneration
+    ) {
       throw new StudioHostError("INTERACTION_STALE", "No matching interaction is pending");
     }
     if (pending.owner !== "gui") {
@@ -144,6 +155,7 @@ export class DesktopInteractionHost {
       await this.#adapter.respond({
         interactionId: pending.interactionId,
         commandId: pending.commandId,
+        generation: pending.generation,
         decision: input.decision,
         owner: "gui",
         ...(input.value === undefined ? {} : { value: input.value }),
@@ -187,7 +199,10 @@ export class DesktopInteractionHost {
         // forward so the client clears its pending card. Idempotent for
         // stale generations.
         this.#adapter.resolve(forward.envelope.event);
-        this.#revokeTokens(forward.envelope.event.interactionId);
+        this.#revokeToken(
+          forward.envelope.event.interactionId,
+          forward.envelope.event.leaseGeneration,
+        );
         this.#events.publish({ envelope: forward.envelope });
         return;
       }
@@ -207,10 +222,26 @@ export class DesktopInteractionHost {
     }
   }
 
-  #revokeTokens(interactionId: string): void {
-    for (const key of [...this.#tokens.keys()]) {
-      if (key.startsWith(`${interactionId}:`)) this.#tokens.delete(key);
-    }
+  #adoptPending(
+    pending: NonNullable<ReturnType<StudioRuntimeSessionController["pendingInteraction"]>>,
+  ): void {
+    const adopted = this.#adapter.adopt({
+      kind: "interaction.required",
+      request: pending.request,
+      owner: pending.owner,
+      leaseGeneration: pending.leaseGeneration,
+    });
+    this.#resign(
+      adopted.interactionId,
+      adopted.generation,
+      adopted.commandId,
+      adopted.request.kind,
+      adopted.request.kind === "confirm" ? adopted.request.destructive : undefined,
+    );
+  }
+
+  #revokeToken(interactionId: string, generation: number): void {
+    this.#tokens.delete(`${interactionId}:${generation}`);
   }
 
   #resign(

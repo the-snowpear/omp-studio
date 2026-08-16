@@ -4,11 +4,14 @@ import {
   FrameDecoder,
   STUDIO_PROTOCOL_VERSION,
   encodeFrame,
+  parseConversationTranscriptPage,
   parseStudioEventEnvelope,
   parseStudioHelloResponse,
   parseOperatorCommandManifest,
   parseStudioReceipt,
   parseStudioSnapshotResponse,
+  type ConversationTranscriptPage,
+  type OpaqueCursor,
   type RequestId,
   type DecodedFrame,
   type RuntimeEpoch,
@@ -20,8 +23,10 @@ import {
   type StudioReceipt,
   type StudioSnapshotResponse,
   type OperatorCommandManifest,
+  type SessionTranscriptRead,
 } from "@omp-studio/studio-protocol";
 import { verifyChallengeProof } from "./bridge-auth.js";
+import { StudioHostError } from "./command-arbiter.js";
 import { RuntimeProjection } from "./runtime-projection.js";
 
 export type StudioBridgeClientState =
@@ -109,6 +114,7 @@ export class StudioBridgeClient {
   readonly #pendingRequests = new Map<string, PendingRequest>();
   readonly #projectionListeners = new Set<(snapshot: StudioSnapshotResponse["snapshot"]) => void>();
   readonly #eventListeners = new Set<(event: StudioEventEnvelope) => void>();
+  readonly #resyncListeners = new Set<() => void>();
   readonly #projection = new RuntimeProjection();
 
   constructor(private readonly options: StudioBridgeClientOptions) {
@@ -125,6 +131,38 @@ export class StudioBridgeClient {
   async connect(): Promise<StudioHelloResponse> {
     if (this.#state !== "idle") throw new Error(`Cannot connect Studio Bridge from ${this.#state}`);
     return this.#handshake(false);
+  }
+
+  /**
+   * Retry `CONNECTION_FAILED` until `deadline`. Windows named pipes are not
+   * bound at spawn; a single connect hits ENOENT and must not fail the Host.
+   * Other handshake failures (timeout, auth, protocol) are not retried.
+   */
+  async connectUntilReady(options: {
+    readonly deadline: number;
+    readonly retryDelayMs?: number;
+    readonly hasExited?: () => boolean;
+  }): Promise<StudioHelloResponse> {
+    const retryDelayMs = options.retryDelayMs ?? 50;
+    while (true) {
+      try {
+        return await this.connect();
+      } catch (error) {
+        if (
+          !(error instanceof StudioBridgeHandshakeError) ||
+          error.code !== "CONNECTION_FAILED" ||
+          Date.now() >= options.deadline ||
+          options.hasExited?.() === true
+        ) {
+          throw error;
+        }
+        const remaining = options.deadline - Date.now();
+        if (remaining <= 0) throw error;
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, Math.min(retryDelayMs, remaining));
+        });
+      }
+    }
   }
 
   disconnect(): void {
@@ -278,6 +316,10 @@ export class StudioBridgeClient {
     return this.#projection.snapshot();
   }
 
+  messagesCursor(): OpaqueCursor | undefined {
+    return this.#projection.messagesCursor();
+  }
+
   async requestCommandManifest(): Promise<OperatorCommandManifest> {
     const runtimeEpoch = this.#runtimeEpoch;
     if (runtimeEpoch === undefined) throw new Error("Studio Bridge negotiation is incomplete");
@@ -294,6 +336,45 @@ export class StudioBridgeClient {
     return parseOperatorCommandManifest(receipt.result);
   }
 
+  async readTranscript(
+    input: { readonly cursor?: OpaqueCursor; readonly limit?: number } = {},
+  ): Promise<ConversationTranscriptPage> {
+    if (this.#state !== "ready") {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Studio Bridge is not ready for transcript read");
+    }
+    const runtimeEpoch = this.#runtimeEpoch;
+    if (runtimeEpoch === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Studio Bridge negotiation is incomplete");
+    }
+    const requestId = (this.options.createRequestId ?? randomUUID)();
+    const operation: SessionTranscriptRead = { kind: "session.transcript.read" };
+    if (input.cursor !== undefined) operation.cursor = input.cursor;
+    if (input.limit !== undefined) operation.limit = input.limit;
+    const receipt = await this.invoke({
+      type: "studio.request",
+      requestId: requestId as RequestId,
+      runtimeEpoch,
+      operation,
+    });
+    if (receipt.status === "rejected" || receipt.status === "failed") {
+      throw new StudioHostError(
+        receipt.error?.code ?? "INTERNAL_ERROR",
+        receipt.error?.message ?? "session.transcript.read failed",
+      );
+    }
+    if (receipt.status !== "completed" || receipt.result === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "session.transcript.read did not complete");
+    }
+    try {
+      return parseConversationTranscriptPage(receipt.result);
+    } catch (error) {
+      throw new StudioHostError(
+        "INTERNAL_ERROR",
+        error instanceof Error ? error.message : "malformed transcript page",
+      );
+    }
+  }
+
   onProjectionChanged(listener: (snapshot: StudioSnapshotResponse["snapshot"]) => void): () => void {
     this.#projectionListeners.add(listener);
     return () => this.#projectionListeners.delete(listener);
@@ -302,6 +383,11 @@ export class StudioBridgeClient {
   onEvent(listener: (event: StudioEventEnvelope) => void): () => void {
     this.#eventListeners.add(listener);
     return () => this.#eventListeners.delete(listener);
+  }
+
+  onResyncRequired(listener: () => void): () => void {
+    this.#resyncListeners.add(listener);
+    return () => this.#resyncListeners.delete(listener);
   }
 
   async shutdown(): Promise<StudioReceipt> {
@@ -479,11 +565,28 @@ export class StudioBridgeClient {
       this.#state = "snapshot-required";
       this.#detachReadyListener();
       this.options.onResyncRequired?.();
+      for (const listener of [...this.#resyncListeners]) {
+        try {
+          listener();
+        } catch {
+          // Isolate resync subscribers from the socket handler.
+        }
+      }
       return;
     }
     if (result === "applied") {
-      this.options.onEvent?.(event);
-      for (const listener of this.#eventListeners) listener(structuredClone(event));
+      try {
+        this.options.onEvent?.(event);
+      } catch {
+        // Isolate the constructor event hook from the socket handler.
+      }
+      for (const listener of [...this.#eventListeners]) {
+        try {
+          listener(structuredClone(event));
+        } catch {
+          // Isolate sibling event listeners from the socket handler.
+        }
+      }
       const snapshot = this.#projection.snapshot();
       if (snapshot !== undefined) this.#publishProjection(snapshot);
     }

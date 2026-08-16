@@ -233,7 +233,8 @@ test("applyApprovalMode reports partial when a sibling fails and re-syncs the ne
   state.failInvoke.add("fresh-1");
   const result = await port.applyApprovalMode?.("always-ask");
   assert.deepEqual(result, { mode: "always-ask", syncStatus: "partial", appliedSessions: 1, failedSessions: 1 });
-  // A fresh launch re-applies the pending mode as a non-persistent override.
+  // A fresh active Worker retries the durable write, then re-applies the
+  // mode to every resident before the pending marker can clear.
   state.failInvoke.delete("fresh-1");
   await port.switchSession?.({ kind: "fresh" });
   await waitFor(() =>
@@ -244,7 +245,61 @@ test("applyApprovalMode reports partial when a sibling fails and re-syncs the ne
   const reapply = state.invokes.find(
     (entry) => entry.sessionId === "fresh-2" && entry.operation.kind === "permissions.mode.set",
   );
-  assert.deepEqual(reapply?.operation, { kind: "permissions.mode.set", mode: "always-ask", persist: false });
+  assert.deepEqual(reapply?.operation, { kind: "permissions.mode.set", mode: "always-ask", persist: true });
+  assert.equal(
+    state.invokes.some(
+      (entry) =>
+        entry.sessionId === "fresh-1" &&
+        entry.operation.kind === "permissions.mode.set" &&
+        entry.operation.persist === false,
+    ),
+    true,
+  );
+  await port.stop();
+});
+
+test("approval mode retry does not clear while any resident remains unsynchronized", async () => {
+  const { port, state } = createHarness();
+  await port.start(context); // fresh-1
+  await port.switchSession?.({ kind: "resume", sessionId: "session-b" });
+  await port.switchSession?.({ kind: "resume", sessionId: "session-c" }); // active
+  state.failInvoke.add("fresh-1");
+  state.failInvoke.add("session-b");
+  const first = await port.applyApprovalMode?.("always-ask");
+  assert.deepEqual(first, {
+    mode: "always-ask",
+    syncStatus: "partial",
+    appliedSessions: 1,
+    failedSessions: 2,
+  });
+
+  // session-b can now persist, but fresh-1 is still failing. The pending
+  // mode must remain after this otherwise-successful activation.
+  state.failInvoke.delete("session-b");
+  await port.switchSession?.({ kind: "resume", sessionId: "session-b" });
+  assert.equal(
+    state.invokes.some(
+      (entry) =>
+        entry.sessionId === "session-b" &&
+        entry.operation.kind === "permissions.mode.set" &&
+        entry.operation.persist === true,
+    ),
+    true,
+  );
+
+  // Once the final failed resident recovers, selecting another resident
+  // retries the complete set and reaches fresh-1 before clearing pending.
+  state.failInvoke.delete("fresh-1");
+  await port.switchSession?.({ kind: "resume", sessionId: "session-c" });
+  assert.equal(
+    state.invokes.some(
+      (entry) =>
+        entry.sessionId === "fresh-1" &&
+        entry.operation.kind === "permissions.mode.set" &&
+        entry.operation.persist === false,
+    ),
+    true,
+  );
   await port.stop();
 });
 

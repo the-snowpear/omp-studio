@@ -1,0 +1,10 @@
+{
+  "name": "omp-studio-installer-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron host shell for the OMP Studio installer UI",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "node ../../node_modules/electron/cli.js ."
+  }
+}

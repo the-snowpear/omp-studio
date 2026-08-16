@@ -83,12 +83,13 @@ export function createOmpWorkspaceService(options: OmpWorkspaceAdapterOptions): 
       return toModel(options.registry);
     },
 
-    async pick(): Promise<WorkspaceListReadModel> {
+    async pick(input?: { readonly name?: string }): Promise<WorkspaceListReadModel> {
       const dir = await options.pickDirectory();
       if (dir === undefined) {
         throw new WorkspacePickCancelledError();
       }
-      const stored = await options.registry.upsertByPath(dir, now());
+      const displayName = input?.name === undefined ? undefined : sanitizeDisplayText(input.name, NAME_MAX);
+      const stored = await options.registry.upsertByPath(dir, now(), displayName);
       await activate(stored);
       return toModel(options.registry);
     },

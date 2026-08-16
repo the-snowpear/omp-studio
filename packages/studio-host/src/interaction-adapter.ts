@@ -26,6 +26,8 @@ export type RemoteInteractionDecision = "submit" | "cancel";
 export interface RemoteInteractionRespondInput {
   interactionId: InteractionId;
   commandId: CommandId;
+  /** Generation captured by the GUI caller; omitted only for trusted TUI calls. */
+  generation?: number;
   decision: RemoteInteractionDecision;
   value?: unknown;
   owner: InteractionSurface;
@@ -130,6 +132,12 @@ export class RemoteInteractionAdapter {
     if (this.#inFlight) {
       throw new StudioHostError("COMMAND_BLOCKED", "An interaction operation is already in flight");
     }
+    if (input.owner === "gui" && input.generation === undefined) {
+      throw new StudioHostError("INTERACTION_STALE", "GUI interaction generation is required");
+    }
+    if (input.generation !== undefined && input.generation !== pending.generation) {
+      throw new StudioHostError("INTERACTION_STALE", "Interaction generation is stale");
+    }
     const operation: RemoteInteractionResponse = {
       kind: "interaction.respond",
       interactionId: input.interactionId,
@@ -152,8 +160,13 @@ export class RemoteInteractionAdapter {
         this.confirmations.consume(input.confirmationToken, operation, input.owner, input.binding);
       }
       await this.#acknowledged(operation);
-      this.arbiter.completeInteraction(input.interactionId, input.commandId, input.owner, ownership.generation);
-      this.#pending = undefined;
+      // Runtime interaction.resolved may have already completed the arbiter
+      // between the acknowledgement and this continuation. Completion is
+      // therefore deliberately idempotent from the adapter's perspective.
+      if (this.#pending?.interactionId === input.interactionId && this.#pending.generation === ownership.generation) {
+        this.arbiter.completeInteraction(input.interactionId, input.commandId, input.owner, ownership.generation);
+        this.#pending = undefined;
+      }
     } finally {
       this.#inFlight = false;
     }

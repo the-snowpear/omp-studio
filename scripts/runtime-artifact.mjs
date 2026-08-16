@@ -35,6 +35,7 @@ import { createHash, sign as signPayload } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 
 export const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 
@@ -99,8 +100,11 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "session.tree.get",
   "session.tree.navigate",
   "session.fork",
+  "session.history",
+  "session.transcript.read",
   "operator.manifest.get",
   "operator.invoke",
+  "permissions.mode.set",
   "interaction.respond",
   "tui.transfer",
   "remoteUi.standard",
@@ -486,13 +490,22 @@ async function main(argv) {
   const platform = args.platform ?? `${process.platform}-${process.arch}`;
   const entrypoint = args.entrypoint ?? MANAGED_ENTRYPOINT;
   const channel = args.channel ?? "stable";
-  const signingKeyPath = args.signingKey ?? process.env.OMP_RUNTIME_SIGNING_KEY;
-  const keyId = args.keyId ?? process.env.OMP_RUNTIME_SIGNING_KEY_ID;
-  if (signingKeyPath === undefined) {
-    throw new Error("--signing-key or OMP_RUNTIME_SIGNING_KEY is required");
+  const envSigningKeyPath = args.signingKey ?? process.env.OMP_RUNTIME_SIGNING_KEY;
+  const envKeyId = args.keyId ?? process.env.OMP_RUNTIME_SIGNING_KEY_ID;
+  let signingKey;
+  let keyId;
+  if (envSigningKeyPath !== undefined && envKeyId !== undefined) {
+    signingKey = await readFile(resolve(envSigningKeyPath));
+    keyId = envKeyId;
+  } else {
+    try {
+      const local = await readRuntimeSigningKeys();
+      signingKey = local.privateKey;
+      keyId = local.keyId;
+    } catch {
+      throw new Error("--signing-key or OMP_RUNTIME_SIGNING_KEY is required. Run npm run omp:keys to create a local signing key.");
+    }
   }
-  if (keyId === undefined) throw new Error("--key-id or OMP_RUNTIME_SIGNING_KEY_ID is required");
-  const signingKey = await readFile(resolve(signingKeyPath));
   const binaryPath = resolve(args.binary ?? defaultBinaryPath());
   const upstream = await readUpstreamPin();
   const series = await readPatchSeries();

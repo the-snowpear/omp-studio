@@ -44,7 +44,24 @@ import type {
   ThreadId,
   WorkspaceId,
   WorkspaceListReadModel,
+  WorkspaceFileTreeReadModel,
+  WorkspaceFileMutationResult,
   TokenUsageReadModel,
+  GitToolchainReadModel,
+  GitRepositoryReadModel,
+  GitDiffReadModel,
+  GitBranchListReadModel,
+  GitWorktreeListReadModel,
+  GitRemoteListReadModel,
+  GitExecuteInput,
+  GitOperationResult,
+  GitHubAuthReadModel,
+  GitHubPullRequestListReadModel,
+  GitHubPullRequestDetailReadModel,
+  GitHubChecksReadModel,
+  GitHubExecuteInput,
+  GitHubOperationResult,
+  OperationProgress,
 } from "@omp-studio/client-contract";
 import type {
   ApprovalMode,
@@ -63,6 +80,7 @@ import {
   type RuntimePublication,
   type StudioConversationForward,
   type StudioInteractionForward,
+  type StudioTelemetryForward,
   type StudioRuntimeSessionController,
 } from "@omp-studio/studio-host";
 import type { StudioOperation } from "@omp-studio/studio-protocol";
@@ -125,6 +143,7 @@ export interface HostRuntimeAccess {
   readonly onPublication?: (listener: (publication: RuntimePublication) => void) => () => void;
   readonly onConversationEvent?: (listener: (event: StudioConversationForward) => void) => () => void;
   readonly onConversationResync?: (listener: (reason: string) => void) => () => void;
+  readonly onTelemetryEvent?: (listener: (event: StudioTelemetryForward) => void) => () => void;
   readonly onInteractionEvent?: (listener: (event: StudioInteractionForward) => void) => () => void;
 }
 
@@ -266,7 +285,38 @@ export interface HostAgentDefinitionsService {
 export interface HostWorkspaceService {
   list(): WorkspaceListReadModel | Promise<WorkspaceListReadModel>;
   open(input: { readonly workspaceId: WorkspaceId }): Promise<WorkspaceListReadModel>;
-  pick(): Promise<WorkspaceListReadModel>;
+  pick(input?: { readonly name?: string }): Promise<WorkspaceListReadModel>;
+}
+
+/** Host-owned workspace-relative file tree and mutation adapter. */
+export interface HostWorkspaceFileService {
+  get(input: { readonly workspaceId: WorkspaceId; readonly path?: string }): WorkspaceFileTreeReadModel | Promise<WorkspaceFileTreeReadModel>;
+  createFile(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
+  createDirectory(input: { readonly workspaceId: WorkspaceId; readonly path: string }): WorkspaceFileMutationResult | Promise<WorkspaceFileMutationResult>;
+}
+
+/** Host-owned system Git adapter. Repository paths and process details never cross this port. */
+export interface HostGitService {
+  toolchain(): GitToolchainReadModel | Promise<GitToolchainReadModel>;
+  repository(input: { readonly workspaceId: WorkspaceId }): GitRepositoryReadModel | Promise<GitRepositoryReadModel>;
+  diff(input: { readonly workspaceId: WorkspaceId; readonly path: string; readonly target: "working" | "staged" }): GitDiffReadModel | Promise<GitDiffReadModel>;
+  branches(input: { readonly workspaceId: WorkspaceId }): GitBranchListReadModel | Promise<GitBranchListReadModel>;
+  worktrees(input: { readonly workspaceId: WorkspaceId }): GitWorktreeListReadModel | Promise<GitWorktreeListReadModel>;
+  remotes(input: { readonly workspaceId: WorkspaceId }): GitRemoteListReadModel | Promise<GitRemoteListReadModel>;
+  execute(input: GitExecuteInput, requestId: CommandRequestId): GitOperationResult | Promise<GitOperationResult>;
+  cancelAll?(): void | Promise<void>;
+  onProgress?(listener: (progress: OperationProgress) => void): () => void;
+}
+
+/** Host-owned GitHub CLI adapter. Tokens and gh configuration never cross this port. */
+export interface HostGitHubService {
+  auth(input: { readonly workspaceId?: WorkspaceId }): GitHubAuthReadModel | Promise<GitHubAuthReadModel>;
+  pullRequests(input: { readonly workspaceId: WorkspaceId; readonly state?: "open" | "closed" | "merged" | "all" }): GitHubPullRequestListReadModel | Promise<GitHubPullRequestListReadModel>;
+  pullRequest(input: { readonly workspaceId: WorkspaceId; readonly number: number }): GitHubPullRequestDetailReadModel | Promise<GitHubPullRequestDetailReadModel>;
+  checks(input: { readonly workspaceId: WorkspaceId; readonly number: number }): GitHubChecksReadModel | Promise<GitHubChecksReadModel>;
+  execute(input: GitHubExecuteInput, requestId: CommandRequestId): GitHubOperationResult | Promise<GitHubOperationResult>;
+  cancelAll?(): void | Promise<void>;
+  onProgress?(listener: (progress: OperationProgress) => void): () => void;
 }
 
 /**
@@ -281,6 +331,8 @@ export interface HostUsageService {
 /** Input accepted by the semantic interaction responder. */
 export interface HostInteractionRespondInput {
   readonly interactionId: InteractionId;
+  /** Lease generation captured by the client-visible interaction card. */
+  readonly leaseGeneration: number;
   readonly decision: "submit" | "cancel";
   readonly value?: InteractionResponseValue;
 }

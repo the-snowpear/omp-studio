@@ -536,7 +536,11 @@ const PROBE_RUNTIME_EPOCH = 1;
 export function buildProcessProbeArgs(
   additionalArgs: readonly string[],
   bootstrap: { endpoint: string; tokenFile: string },
+  runtimeEpoch: number = PROBE_RUNTIME_EPOCH,
 ): string[] {
+  if (!Number.isSafeInteger(runtimeEpoch) || runtimeEpoch < 1) {
+    throw new TypeError("runtimeEpoch must be a positive integer");
+  }
   return [
     "--mode",
     "studio-host",
@@ -546,7 +550,7 @@ export function buildProcessProbeArgs(
     "--bridge-token-file",
     bootstrap.tokenFile,
     "--bridge-runtime-epoch",
-    String(PROBE_RUNTIME_EPOCH),
+    String(runtimeEpoch),
   ];
 }
 

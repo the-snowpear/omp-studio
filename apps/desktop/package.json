@@ -18,6 +18,7 @@
     "@omp-studio/platform": "0.1.0",
     "@omp-studio/platform-darwin": "0.1.0",
     "@omp-studio/platform-win32": "0.1.0",
+    "@omp-studio/runtime-installer": "0.1.0",
     "@omp-studio/studio-host": "0.1.0",
     "@omp-studio/transport-desktop": "0.1.0",
     "node-pty": "^1.1.0"
@@ -26,6 +27,7 @@
     "@electron/rebuild": "^4.2.0",
     "@types/node": "^24.0.0",
     "electron": "^43.4.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "@omp-studio/testkit": "0.1.0"
   }
 }

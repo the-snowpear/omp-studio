@@ -12,7 +12,7 @@
  * resync (FRONTEND_INTEGRATION.md §8.3).
  */
 
-import type { ConversationRuntimeEvent, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+import type { ConversationRuntimeEvent, OperatorStateSnapshot, SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
 
 import type {
   AuthorityEpoch,
@@ -25,6 +25,7 @@ import type {
   StateVersion,
   ThreadId,
 } from "./ids.js";
+import type { GitRepositoryChanged, OperationProgress } from "./git.js";
 import type { RuntimeConnection } from "./read-models.js";
 import type {
   ClientCommandAccepted,
@@ -183,6 +184,13 @@ export type ClientEvent =
   | (ClientEventBase & { readonly kind: "runtime.changed"; readonly connection: RuntimeConnection })
   | (ClientEventBase & { readonly kind: "resync.required"; readonly reason: string })
   | (ClientEventBase & { readonly kind: "diagnostics.changed" })
+  | (ClientEventBase & { readonly kind: "operation.progress"; readonly progress: OperationProgress })
+  | (ClientEventBase & { readonly kind: "git.repository.changed"; readonly repository: GitRepositoryChanged })
+  | (ClientEventBase & {
+      readonly kind: "telemetry.changed";
+      readonly sessionId: SessionId;
+      readonly telemetry: SessionTelemetrySnapshot;
+    })
   /**
    * Live conversation projector output. `ClientEventBase.cursor` is the
    * Host facade delivery cursor (decimal, monotonic per authority epoch).

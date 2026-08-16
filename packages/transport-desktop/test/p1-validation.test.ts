@@ -18,8 +18,8 @@ import {
   DESKTOP_IPC_CHANNELS,
   MAX_HISTORY_LIMIT,
   MAX_ID_LENGTH,
-  MAX_LIST_ITEMS,
-  MAX_TEXT_LENGTH,
+  MAX_INTERACTION_LIST_ITEMS,
+  MAX_INTERACTION_TEXT_LENGTH,
   MAX_VALUE_DEPTH,
   QUERY_NAMES,
   ValidationError,
@@ -52,6 +52,7 @@ const QUERY_ENVELOPES: ReadonlyArray<{
   { name: "mcp.get", payload: { queryName: "mcp.get", input: {} } },
   { name: "agents.definitions.get", payload: { queryName: "agents.definitions.get", input: {} } },
   { name: "projects.list", payload: { queryName: "projects.list", input: {} } },
+  { name: "workspace.fileTree", payload: { queryName: "workspace.fileTree", input: { workspaceId: "ws-0001" } } },
   { name: "usage.get", payload: { queryName: "usage.get", input: {} } },
   { name: "session.transcript.read", payload: { queryName: "session.transcript.read", input: { limit: 50 } } },
   {
@@ -61,6 +62,16 @@ const QUERY_ENVELOPES: ReadonlyArray<{
       input: { sessionId: "session-1", limit: 50 },
     },
   },
+  { name: "git.toolchain.get", payload: { queryName: "git.toolchain.get", input: {} } },
+  { name: "git.repository.get", payload: { queryName: "git.repository.get", input: { workspaceId: "ws-0001" } } },
+  { name: "git.diff.get", payload: { queryName: "git.diff.get", input: { workspaceId: "ws-0001", path: "src/index.ts", target: "working" } } },
+  { name: "git.branches.list", payload: { queryName: "git.branches.list", input: { workspaceId: "ws-0001" } } },
+  { name: "git.worktrees.list", payload: { queryName: "git.worktrees.list", input: { workspaceId: "ws-0001" } } },
+  { name: "git.remotes.list", payload: { queryName: "git.remotes.list", input: { workspaceId: "ws-0001" } } },
+  { name: "github.auth.get", payload: { queryName: "github.auth.get", input: { workspaceId: "ws-0001" } } },
+  { name: "github.pr.list", payload: { queryName: "github.pr.list", input: { workspaceId: "ws-0001", state: "open" } } },
+  { name: "github.pr.get", payload: { queryName: "github.pr.get", input: { workspaceId: "ws-0001", number: 1 } } },
+  { name: "github.pr.checks", payload: { queryName: "github.pr.checks", input: { workspaceId: "ws-0001", number: 1 } } },
 ];
 
 const COMMAND_ENVELOPES: ReadonlyArray<{
@@ -124,7 +135,7 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
     name: "interaction.respond",
     payload: {
       commandName: "interaction.respond",
-      input: { interactionId: "interaction-1", decision: "submit", value: "ok" },
+      input: { interactionId: "interaction-1", leaseGeneration: 1, decision: "submit", value: "ok" },
       idempotencyKey: "idem-4",
       requestId: "req-4",
     },
@@ -283,6 +294,24 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
     },
   },
   {
+    name: "workspace.file.create",
+    payload: {
+      commandName: "workspace.file.create",
+      input: { workspaceId: "ws-0001", path: "docs/README.md" },
+      idempotencyKey: "idem-ws-file-1",
+      requestId: "req-ws-file-1",
+    },
+  },
+  {
+    name: "workspace.directory.create",
+    payload: {
+      commandName: "workspace.directory.create",
+      input: { workspaceId: "ws-0001", path: "docs/new" },
+      idempotencyKey: "idem-ws-dir-1",
+      requestId: "req-ws-dir-1",
+    },
+  },
+  {
     name: "usage.openDashboard",
     payload: {
       commandName: "usage.openDashboard",
@@ -349,6 +378,14 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
       idempotencyKey: "idem-agents-3",
       requestId: "req-agents-3",
     },
+  },
+  {
+    name: "git.execute",
+    payload: { commandName: "git.execute", input: { workspaceId: "ws-0001", operation: { kind: "stage", paths: ["src/index.ts"] } }, idempotencyKey: "idem-git-1", requestId: "req-git-1" },
+  },
+  {
+    name: "github.execute",
+    payload: { commandName: "github.execute", input: { workspaceId: "ws-0001", operation: { kind: "pr.comment", number: 1, body: "Looks good" } }, idempotencyKey: "idem-github-1", requestId: "req-github-1" },
   },
 ];
 
@@ -424,9 +461,20 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       "mcp.get",
       "agents.definitions.get",
       "projects.list",
+      "workspace.fileTree",
       "usage.get",
       "session.transcript.read",
       "session.transcript.readPage",
+      "git.toolchain.get",
+      "git.repository.get",
+      "git.diff.get",
+      "git.branches.list",
+      "git.worktrees.list",
+      "git.remotes.list",
+      "github.auth.get",
+      "github.pr.list",
+      "github.pr.get",
+      "github.pr.checks",
     ]);
     for (const { name, payload } of QUERY_ENVELOPES) {
       const parsed = parseClientQueryRequest(payload);
@@ -490,6 +538,14 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       input: { limit: MAX_HISTORY_LIMIT },
     });
     assert.equal(ok.queryName, "history.list");
+  });
+
+  test("workspace.fileTree accepts a safe relative directory and rejects escapes", () => {
+    const ok = parseClientQueryRequest({ queryName: "workspace.fileTree", input: { workspaceId: "ws-1", path: "apps/renderer" } });
+    assert.equal(ok.queryName, "workspace.fileTree");
+    for (const path of ["../outside", "/absolute", "C:\\absolute", "apps//renderer", "."]) {
+      expectValidationError(() => parseClientQueryRequest({ queryName: "workspace.fileTree", input: { workspaceId: "ws-1", path } }));
+    }
   });
 
   test("session.transcript.read rejects extra keys, bad limits, and oversized cursors", () => {
@@ -631,7 +687,11 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       "agents.definition.configure",
       "workspace.open",
       "workspace.pick",
+      "workspace.file.create",
+      "workspace.directory.create",
       "usage.openDashboard",
+      "git.execute",
+      "github.execute",
     ]);
     for (const { name, payload } of COMMAND_ENVELOPES) {
       const parsed = parseClientCommandRequest(payload);
@@ -657,6 +717,41 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       requestId: "req-models-probe-empty-1",
     });
     assert.equal(probe.commandName, "models.provider.probe");
+  });
+
+  test("Git remote inputs accept network transports and reject local/helper schemes", () => {
+    for (const url of ["https://github.com/acme/repo.git", "ssh://git@github.com/acme/repo.git", "git@github.com:acme/repo.git"]) {
+      const parsed = parseClientCommandRequest({
+        commandName: "git.execute",
+        input: { operation: { kind: "clone", url } },
+        idempotencyKey: `clone-${url}`,
+        requestId: `clone-${url}`,
+      });
+      assert.equal(parsed.commandName, "git.execute");
+    }
+    for (const url of ["file:///C:/secret", "ext::helper command", "../repo", "C:\\repo", "https://user:secret@github.com/acme/repo.git", "https://github.com/acme/repo.git\n--upload-pack=evil"]) {
+      expectValidationError(() => parseClientCommandRequest({
+        commandName: "git.execute",
+        input: { operation: { kind: "clone", url } },
+        idempotencyKey: "clone-invalid",
+        requestId: "clone-invalid",
+      }));
+    }
+  });
+
+  test("GitHub PR text fields are bounded", () => {
+    for (const operation of [
+      { kind: "pr.create", title: "x".repeat(257), body: "", base: "main" },
+      { kind: "pr.comment", number: 1, body: "x".repeat(100_001) },
+      { kind: "pr.close", number: 1, comment: "x".repeat(100_001) },
+    ]) {
+      expectValidationError(() => parseClientCommandRequest({
+        commandName: "github.execute",
+        input: { workspaceId: "ws-1", operation },
+        idempotencyKey: "github-text",
+        requestId: "github-text",
+      }));
+    }
   });
 
   test("accepts models.provider.upsert thinking efforts and rejects unknown ids", () => {
@@ -770,11 +865,11 @@ describe("parseClientCommandRequest: envelope strictness", () => {
         }),
       );
     }
-    // interaction.respond: decision must be submit|cancel, interactionId required
+    // interaction.respond: decision, interactionId and a positive generation are required
     expectValidationError(() =>
       parseClientCommandRequest({
         commandName: "interaction.respond",
-        input: { interactionId: "i", decision: "maybe" },
+        input: { interactionId: "i", leaseGeneration: 1, decision: "maybe" },
         idempotencyKey: "k",
         requestId: "r",
       }),
@@ -782,11 +877,21 @@ describe("parseClientCommandRequest: envelope strictness", () => {
     expectValidationError(() =>
       parseClientCommandRequest({
         commandName: "interaction.respond",
-        input: { decision: "submit" },
+        input: { leaseGeneration: 1, decision: "submit" },
         idempotencyKey: "k",
         requestId: "r",
       }),
     );
+    for (const leaseGeneration of [undefined, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expectValidationError(() =>
+        parseClientCommandRequest({
+          commandName: "interaction.respond",
+          input: { interactionId: "i", leaseGeneration, decision: "submit" },
+          idempotencyKey: "k",
+          requestId: "r",
+        }),
+      );
+    }
     // plugins.setEnabled: name required, enabled boolean, scope user|project
     expectValidationError(() =>
       parseClientCommandRequest({
@@ -899,13 +1004,13 @@ describe("parseClientCommandRequest: interaction.respond value safety", () => {
     for (const value of ["yes", true, ["a", "b"], { note: "x" }, { nested: { deep: [1] } }]) {
       const parsed = parseClientCommandRequest({
         ...base,
-        input: { interactionId: "i", decision: "submit", value },
+        input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value },
       });
       assert.equal(parsed.commandName, "interaction.respond");
     }
     const cancel = parseClientCommandRequest({
       ...base,
-      input: { interactionId: "i", decision: "cancel" },
+      input: { interactionId: "i", leaseGeneration: 1, decision: "cancel" },
     });
     assert.equal(cancel.commandName, "interaction.respond");
   });
@@ -913,7 +1018,7 @@ describe("parseClientCommandRequest: interaction.respond value safety", () => {
   test("rejects non-JSON-safe values (numbers, null, undefined, functions)", () => {
     for (const value of [42, 0, null, undefined, () => "x", Symbol("s"), 1n]) {
       expectValidationError(() =>
-        parseClientCommandRequest({ ...base, input: { interactionId: "i", decision: "submit", value } }),
+        parseClientCommandRequest({ ...base, input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value } }),
       );
     }
   });
@@ -921,7 +1026,7 @@ describe("parseClientCommandRequest: interaction.respond value safety", () => {
   test("rejects NaN/Infinity and non-plain exotic objects", () => {
     for (const value of [Number.NaN, Number.POSITIVE_INFINITY, new Date(0), new Map()]) {
       expectValidationError(() =>
-        parseClientCommandRequest({ ...base, input: { interactionId: "i", decision: "submit", value } }),
+        parseClientCommandRequest({ ...base, input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value } }),
       );
     }
   });
@@ -929,7 +1034,7 @@ describe("parseClientCommandRequest: interaction.respond value safety", () => {
   test("rejects reserved keys (__proto__, constructor, prototype) inside the value", () => {
     for (const key of ["__proto__", "constructor", "prototype"]) {
       const payload = JSON.parse(
-        `{"commandName":"interaction.respond","input":{"interactionId":"i","decision":"submit","value":{"${key}":{"x":1}}},"idempotencyKey":"k","requestId":"r"}`,
+        `{"commandName":"interaction.respond","input":{"interactionId":"i","leaseGeneration":1,"decision":"submit","value":{"${key}":{"x":1}}},"idempotencyKey":"k","requestId":"r"}`,
       );
       const message = expectValidationError(() => parseClientCommandRequest(payload));
       assert.match(message, /reserved key/);
@@ -938,17 +1043,22 @@ describe("parseClientCommandRequest: interaction.respond value safety", () => {
   });
 
   test("rejects strings and arrays beyond the size bounds", () => {
-    const tooLong = "a".repeat(MAX_TEXT_LENGTH + 1);
-    expectValidationError(() =>
-      parseClientCommandRequest({ ...base, input: { interactionId: "i", decision: "submit", value: tooLong } }),
+    const boundary = "a".repeat(MAX_INTERACTION_TEXT_LENGTH);
+    assert.equal(
+      parseClientCommandRequest({ ...base, input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value: boundary } }).commandName,
+      "interaction.respond",
     );
-    const tooMany = Array.from({ length: MAX_LIST_ITEMS + 1 }, () => "x");
+    const tooLong = "a".repeat(MAX_INTERACTION_TEXT_LENGTH + 1);
     expectValidationError(() =>
-      parseClientCommandRequest({ ...base, input: { interactionId: "i", decision: "submit", value: tooMany } }),
+      parseClientCommandRequest({ ...base, input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value: tooLong } }),
+    );
+    const tooMany = Array.from({ length: MAX_INTERACTION_LIST_ITEMS + 1 }, () => "x");
+    expectValidationError(() =>
+      parseClientCommandRequest({ ...base, input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value: tooMany } }),
     );
     const nonStringItems = ["x", 1];
     expectValidationError(() =>
-      parseClientCommandRequest({ ...base, input: { interactionId: "i", decision: "submit", value: nonStringItems } }),
+      parseClientCommandRequest({ ...base, input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value: nonStringItems } }),
     );
   });
 
@@ -958,14 +1068,14 @@ describe("parseClientCommandRequest: interaction.respond value safety", () => {
       nested = { child: nested };
     }
     expectValidationError(() =>
-      parseClientCommandRequest({ ...base, input: { interactionId: "i", decision: "submit", value: nested } }),
+      parseClientCommandRequest({ ...base, input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value: nested } }),
     );
   });
 
   test("rejects a value whose serialized-size proxy exceeds the budget", () => {
-    const bulky = Array.from({ length: MAX_LIST_ITEMS }, () => "x".repeat(MAX_TEXT_LENGTH / 100));
+    const bulky = Array.from({ length: MAX_INTERACTION_LIST_ITEMS }, () => "x".repeat(1024));
     expectValidationError(() =>
-      parseClientCommandRequest({ ...base, input: { interactionId: "i", decision: "submit", value: bulky } }),
+      parseClientCommandRequest({ ...base, input: { interactionId: "i", leaseGeneration: 1, decision: "submit", value: bulky } }),
     );
   });
 });
@@ -1314,5 +1424,20 @@ describe("assertClientEvent: outbound strictness", () => {
         update: "nope",
       }),
     );
+  });
+
+  test("validates workspace mutation receipt results and optional Git list fields", () => {
+    assertClientEvent({
+      kind: "command.receipt",
+      ...base,
+      receipt: { requestId: "req-file", commandName: "workspace.file.create", status: "completed", result: { applied: true, kind: "file", path: "src/new.ts" }, observedAt: base.occurredAt },
+    });
+    expectValidationError(() => assertClientEvent({
+      kind: "command.receipt",
+      ...base,
+      receipt: { requestId: "req-file", commandName: "workspace.file.create", status: "completed", result: { applied: "yes", kind: "file", path: "../outside" }, observedAt: base.occurredAt },
+    }));
+    expectValidationError(() => assertClientQueryResponse({ ok: true, queryName: "git.branches.list", result: { workspaceId: "ws-1", branches: [{ name: "main", remote: false, current: true, headOid: "abc", upstream: 42, ahead: 0, behind: 0 }] } }));
+    expectValidationError(() => assertClientQueryResponse({ ok: true, queryName: "git.worktrees.list", result: { workspaceId: "ws-1", rootConfigured: true, worktrees: [{ worktreeId: "wt-1", name: "main", current: true, detached: false, bare: false, locked: false, prunable: false, workspaceId: {} }] } }));
   });
 });

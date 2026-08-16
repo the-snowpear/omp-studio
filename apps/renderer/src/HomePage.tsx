@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import type { ClientBootstrap, ConfigWriteResult, HomeReadModel, SessionHistoryReadModel, StudioClient, TokenUsageReadModel, WorkspaceListReadModel } from "@omp-studio/client-contract";
+import type { ClientBootstrap, ConfigWriteResult, GitOperationResult, HomeReadModel, SessionHistoryReadModel, StudioClient, TokenUsageReadModel, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "./icons";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_ACTIVITY, PREVIEW_PROJECTS } from "./preview/fixtures";
+import { waitForCommandReceipt } from "./sessionLifecycle";
 
 export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics";
 
@@ -880,12 +881,17 @@ export function HomePage({
 
   const { preview } = usePreviewMode();
   const activities = (history?.entries ?? []).slice(0, 5);
+  const [installing, setInstalling] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [installMessage, setInstallMessage] = useState<string | undefined>(undefined);
+  const runtimeMissing = !preview && runtime?.status !== "connected";
 
   return (
     <div className="page-wide">
       <div className="home-hero">
         <h1>{greeting()}，Studio</h1>
         <p className="muted">{preview ? "预览模式 · 演示数据" : statusBits.join(" · ")}</p>
+        {installMessage ? <p className="muted small">{installMessage}</p> : null}
         <div className="home-quick">
           <button
             className="btn primary"
@@ -900,7 +906,70 @@ export function HomePage({
           >
             <Icon name="folder-open" extra="sm" />打开本地文件夹
           </button>
-          <button className="btn outline" disabled title="克隆仓库不在公共 contract 中"><Icon name="branch" extra="sm" />克隆 Git 仓库</button>
+          {runtimeMissing && client ? (
+            <button
+              className="btn outline"
+              disabled={installing}
+              title="从本地签名制品安装托管 Runtime"
+              onClick={() => {
+                void (async () => {
+                  setInstalling(true);
+                  setInstallMessage(undefined);
+                  try {
+                    const handle = await client.command("runtime.install", {});
+                    const receipt = await waitForCommandReceipt(client, handle.requestId);
+                    if (receipt.status === "completed") {
+                      setInstallMessage("托管 Runtime 已安装。打开项目后即可启动。");
+                    } else if (receipt.status === "failed") {
+                      setInstallMessage(receipt.error.message);
+                    } else {
+                      setInstallMessage("安装未完成");
+                    }
+                  } catch (error) {
+                    setInstallMessage(error instanceof Error ? error.message : "安装失败");
+                  } finally {
+                    setInstalling(false);
+                  }
+                })();
+              }}
+            >
+              <Icon name="package" extra="sm" />{installing ? "正在安装…" : "安装 Runtime"}
+            </button>
+          ) : null}
+          <button
+            className="btn outline"
+            disabled={preview || !client || cloning}
+            title={preview ? "预览模式不执行 Git 操作" : "使用系统 Git 克隆，并通过系统选择器选择父目录"}
+            onClick={() => {
+              const url = window.prompt("Git 仓库 URL")?.trim();
+              if (!url || !client) return;
+              const directoryName = window.prompt("目录名（可留空使用仓库名）")?.trim();
+              void (async () => {
+                setCloning(true);
+                setInstallMessage(undefined);
+                try {
+                  const handle = await client.command("git.execute", { operation: { kind: "clone", url, ...(directoryName ? { directoryName } : {}) } });
+                  const receipt = await waitForCommandReceipt(client, handle.requestId);
+                  if (receipt.status === "completed") {
+                    const result = receipt.result as GitOperationResult;
+                    setInstallMessage(result.message);
+                    if (result.createdWorkspaceId !== undefined) {
+                      onOpenWorkspace?.(result.createdWorkspaceId);
+                      onRoute("workbench");
+                    }
+                  } else if (receipt.status === "failed") {
+                    setInstallMessage(receipt.error.message);
+                  } else {
+                    setInstallMessage(receipt.reason);
+                  }
+                } catch (error) {
+                  setInstallMessage(error instanceof Error ? error.message : "克隆失败");
+                } finally {
+                  setCloning(false);
+                }
+              })();
+            }}
+          ><Icon name="branch" extra="sm" />{cloning ? "正在克隆…" : "克隆 Git 仓库"}</button>
           <button className="btn outline" onClick={() => onRoute("history")}><Icon name="history" extra="sm" />恢复最近对话</button>
           <button className="btn outline" disabled title="临时工作区不在公共 contract 中"><Icon name="flask" extra="sm" />创建临时工作区</button>
         </div>

@@ -38,6 +38,11 @@ export interface SessionCatalogResult {
 export interface SessionCatalogOptions {
   /** OMP's sessions root or one project-specific session directory. */
   sessionsRoot?: string;
+  /**
+   * When set, only sessions whose header `cwd` resolves to this workspace are
+   * returned. The comparison is internal — `cwd` is never copied onto entries.
+   */
+  allowedCwd?: string;
   /** Includes ordinary/unmarked OMP CLI sessions and unknown future origins. */
   includeCliSessions?: boolean;
   maxSessionBytes?: number;
@@ -49,6 +54,7 @@ interface ParsedHeader {
   timestamp?: string;
   title?: string;
   studioOrigin?: string;
+  cwd?: string;
 }
 
 export function defaultOmpSessionsRoot(environment: NodeJS.ProcessEnv = process.env): string {
@@ -63,6 +69,7 @@ export function defaultOmpSessionsRoot(environment: NodeJS.ProcessEnv = process.
 export async function scanSessionCatalog(options: SessionCatalogOptions = {}): Promise<SessionCatalogResult> {
   const root = resolve(options.sessionsRoot ?? defaultOmpSessionsRoot());
   const includeCliSessions = options.includeCliSessions ?? false;
+  const allowedCwd = options.allowedCwd;
   const maxSessionBytes = options.maxSessionBytes ?? DEFAULT_MAX_SESSION_BYTES;
   const prefixBytes = options.prefixBytes ?? DEFAULT_PREFIX_BYTES;
   if (!Number.isSafeInteger(maxSessionBytes) || maxSessionBytes <= 0) throw new TypeError("maxSessionBytes must be positive");
@@ -97,6 +104,9 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
       note("CORRUPT_SKIPPED");
       continue;
     }
+    if (allowedCwd !== undefined && (header.cwd === undefined || !sameWorkspaceCwd(header.cwd, allowedCwd))) {
+      continue;
+    }
     const origin = classifyOrigin(header.studioOrigin);
     if (origin !== "studio" && !includeCliSessions) continue;
     const title = sanitizeTitle(header.title);
@@ -125,6 +135,12 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([code, count]) => ({ code, count })),
   };
+}
+
+function sameWorkspaceCwd(left: string, right: string): boolean {
+  const a = resolve(left);
+  const b = resolve(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 function classifyOrigin(value: string | undefined): CatalogSessionOrigin {
@@ -200,6 +216,7 @@ async function readSessionHeader(file: string, byteLimit: number): Promise<Parse
         ...(typeof value.timestamp === "string" ? { timestamp: value.timestamp } : {}),
         ...(typeof value.title === "string" ? { title: value.title } : titleSlot === undefined ? {} : { title: titleSlot }),
         ...(typeof value.studioOrigin === "string" ? { studioOrigin: value.studioOrigin } : {}),
+        ...(typeof value.cwd === "string" && value.cwd.length > 0 ? { cwd: value.cwd } : {}),
       };
     }
     return undefined;

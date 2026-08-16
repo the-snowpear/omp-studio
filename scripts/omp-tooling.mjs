@@ -48,12 +48,25 @@ export function toolingEnvironment(extra = {}) {
   };
 }
 
+export function npmInvocation() {
+  if (process.platform !== "win32") {
+    return { command: "npm", prefix: [] };
+  }
+  const npmCli =
+    process.env.OMP_NPM_CLI ?? join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  if (!existsSync(npmCli)) {
+    throw new Error(`npm CLI was not found at ${npmCli}`);
+  }
+  return { command: process.execPath, prefix: [npmCli] };
+}
+
 export function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repositoryRoot,
     env: options.env ?? toolingEnvironment(),
     encoding: options.capture ? "utf8" : undefined,
     stdio: options.capture ? "pipe" : "inherit",
+    windowsHide: true,
   });
 
   if (result.error) throw result.error;

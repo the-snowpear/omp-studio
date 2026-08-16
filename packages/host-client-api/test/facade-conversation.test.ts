@@ -18,7 +18,7 @@ import type {
 } from "@omp-studio/client-contract";
 import type { ConversationTranscriptPage, StudioOperation } from "@omp-studio/studio-protocol";
 import type { ConversationTranscriptReadPage } from "@omp-studio/client-contract";
-import { HostBackend, type RuntimePublication, type StudioConversationForward } from "@omp-studio/studio-host";
+import { HostBackend, type RuntimePublication, type StudioConversationForward, type StudioTelemetryForward } from "@omp-studio/studio-host";
 
 import {
   HostEventBus,
@@ -517,6 +517,65 @@ test("re-selecting an older resident Runtime publishes runtime.changed before it
       publish({ commitSeq: 2, publishedAt: T0, snapshot: liveSnapshot, terminalOutcomes: [] });
       assert.deepEqual(events.map((event) => event.kind), ["runtime.changed", "snapshot"]);
       assert.equal(events[0]?.runtimeEpoch, 1);
+    },
+  );
+});
+
+test("session telemetry forwards through the facade and preserves the current session identity", async () => {
+  let publishTelemetry: (event: StudioTelemetryForward) => void = () => {};
+  await withFacade(
+    {
+      hello,
+      snapshot: () => snapshot(),
+      onTelemetryEvent: (listener) => {
+        publishTelemetry = listener;
+        return () => { publishTelemetry = () => {}; };
+      },
+    },
+    undefined,
+    async (facade) => {
+      const events: ClientEvent[] = [];
+      facade.subscribe({ scope: "all" }, (event) => events.push(event));
+      const telemetry = {
+        sessionId: SESSION,
+        capturedAt: T0,
+        tokens: { input: 10, output: 2, reasoning: 0, cacheRead: 1, cacheWrite: 0, total: 12, cost: 0.1 },
+        context: {
+          contextWindow: 128000,
+          usedTokens: 100,
+          percent: 0.078125,
+          anchored: true,
+          systemPromptTokens: 10,
+          systemContextTokens: 20,
+          systemToolsTokens: 30,
+          skillsTokens: 10,
+          messagesTokens: 30,
+        },
+      };
+      publishTelemetry({
+        envelope: {
+          type: "studio.event",
+          runtimeEpoch: 1 as RuntimeEpoch,
+          eventSeq: 8 as never,
+          stateVersion: 4 as StateVersion,
+          occurredAt: T0,
+          event: { kind: "session.telemetry.changed", sessionId: SESSION, telemetry },
+        },
+      });
+      const last = events.at(-1);
+      assert.equal(last?.kind, "telemetry.changed");
+      if (last?.kind === "telemetry.changed") assert.equal(last.telemetry.context?.messagesTokens, 30);
+      publishTelemetry({
+        envelope: {
+          type: "studio.event",
+          runtimeEpoch: 1 as RuntimeEpoch,
+          eventSeq: 9 as never,
+          stateVersion: 4 as StateVersion,
+          occurredAt: T0,
+          event: { kind: "session.telemetry.changed", sessionId: "other-session" as SessionId, telemetry: { ...telemetry, sessionId: "other-session" as SessionId } },
+        },
+      });
+      assert.equal(events.filter((event) => event.kind === "telemetry.changed").length, 1);
     },
   );
 });

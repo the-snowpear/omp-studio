@@ -97,7 +97,14 @@ test("M4 adapter adopts the exact Runtime lease and respond completes the intera
   assert.equal(adopted.request.kind, "confirm");
   assert.deepEqual(adapter.pending(), adopted);
 
-  await adapter.respond({ interactionId, commandId, decision: "submit", value: true, owner: "gui" });
+  await adapter.respond({
+    interactionId,
+    commandId,
+    generation: adapter.pending()!.generation,
+    decision: "submit",
+    value: true,
+    owner: "gui",
+  });
   assert.deepEqual(calls, [
     { kind: "interaction.respond", interactionId, commandId, decision: "submit", value: true },
   ]);
@@ -119,7 +126,7 @@ test("M4 cancel decision dispatches and completes the interaction", async () => 
     },
   );
   adapter.adopt(eventFor(confirmRequest()));
-  await adapter.respond({ interactionId, commandId, decision: "cancel", owner: "gui" });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "cancel", owner: "gui" });
   assert.deepEqual(calls, [{ kind: "interaction.respond", interactionId, commandId, decision: "cancel" }]);
   assert.equal(adapter.pending(), undefined);
 });
@@ -138,7 +145,7 @@ test("M4 destructive confirm requires a one-shot confirmation token", async () =
 
   adapter.adopt(eventFor(confirmRequest(true)));
   await assert.rejects(
-    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
+    () => adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" }),
     (error: unknown) => isHostError(error, "INVALID_ARGUMENT"),
   );
   assert.equal(calls.length, 0);
@@ -146,7 +153,7 @@ test("M4 destructive confirm requires a one-shot confirmation token", async () =
 
   const submitOperation = { kind: "interaction.respond", interactionId, commandId, decision: "submit" } as const;
   const token = registry.issue(submitOperation, "gui");
-  await adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui", confirmationToken: token });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui", confirmationToken: token });
   assert.equal(adapter.pending(), undefined);
   assert.equal(calls.length, 1);
 
@@ -161,6 +168,7 @@ test("M4 destructive confirm requires a one-shot confirmation token", async () =
         interactionId: interactionId2,
         commandId: commandId2,
         decision: "submit",
+        generation: adapter.pending()!.generation,
         owner: "gui",
         confirmationToken: token,
       }),
@@ -177,6 +185,7 @@ test("M4 destructive confirm requires a one-shot confirmation token", async () =
         interactionId: interactionId2,
         commandId: commandId2,
         decision: "submit",
+        generation: adapter.pending()!.generation,
         owner: "gui",
         confirmationToken: tuiToken,
       }),
@@ -195,6 +204,7 @@ test("M4 destructive confirm requires a one-shot confirmation token", async () =
         interactionId: interactionId2,
         commandId: commandId2,
         decision: "submit",
+        generation: adapter.pending()!.generation,
         owner: "gui",
         confirmationToken: valueToken,
       }),
@@ -211,6 +221,7 @@ test("M4 destructive confirm requires a one-shot confirmation token", async () =
     interactionId: interactionId2,
     commandId: commandId2,
     decision: "submit",
+    generation: adapter.pending()!.generation,
     owner: "gui",
     confirmationToken: freshToken,
   });
@@ -218,7 +229,7 @@ test("M4 destructive confirm requires a one-shot confirmation token", async () =
 
   // Cancelling a destructive confirm needs no authorization.
   adapter.adopt(eventFor(confirmRequest(true)));
-  await adapter.respond({ interactionId, commandId, decision: "cancel", owner: "gui" });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "cancel", owner: "gui" });
   assert.equal(adapter.pending(), undefined);
   assert.deepEqual(calls, [
     { kind: "interaction.respond", interactionId, commandId, decision: "submit" },
@@ -240,14 +251,14 @@ test("M4 approval submits require a confirmation token", async () => {
   );
   adapter.adopt(eventFor(approvalRequest()));
   await assert.rejects(
-    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
+    () => adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" }),
     (error: unknown) => isHostError(error, "INVALID_ARGUMENT"),
   );
   const token = registry.issue(
     { kind: "interaction.respond", interactionId, commandId, decision: "submit" },
     "gui",
   );
-  await adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui", confirmationToken: token });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui", confirmationToken: token });
   assert.equal(adapter.pending(), undefined);
   assert.equal(calls.length, 1);
 });
@@ -275,6 +286,7 @@ test("M4 approval token binding mismatch fails closed (stale generation / epoch)
         interactionId,
         commandId,
         decision: "submit",
+        generation: adapter.pending()!.generation,
         owner: "gui",
         confirmationToken: token,
         binding: { leaseGeneration: 2, runtimeEpoch: 7 },
@@ -293,6 +305,7 @@ test("M4 approval token binding mismatch fails closed (stale generation / epoch)
     interactionId,
     commandId,
     decision: "submit",
+    generation: adapter.pending()!.generation,
     owner: "gui",
     confirmationToken: fresh,
     binding: { leaseGeneration: 1, runtimeEpoch: 7 },
@@ -313,18 +326,18 @@ test("M4 respond rejects wrong owner, stale ids, and duplicates", async () => {
     (error: unknown) => isHostError(error, "NOT_OWNER"),
   );
   await assert.rejects(
-    () => adapter.respond({ interactionId: "interaction-other" as InteractionId, commandId, decision: "submit", owner: "gui" }),
+    () => adapter.respond({ interactionId: "interaction-other" as InteractionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" }),
     (error: unknown) => isHostError(error, "INTERACTION_STALE"),
   );
 
-  await adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" });
   await assert.rejects(
     () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
     (error: unknown) => isHostError(error, "INTERACTION_STALE"),
   );
 
   adapter.adopt(eventFor(confirmRequest()));
-  await adapter.respond({ interactionId, commandId, decision: "cancel", owner: "gui" });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "cancel", owner: "gui" });
   await assert.rejects(
     () => adapter.respond({ interactionId, commandId, decision: "cancel", owner: "gui" }),
     (error: unknown) => isHostError(error, "INTERACTION_STALE"),
@@ -346,9 +359,9 @@ test("M4 concurrent respond attempts fail closed while one is in flight", async 
     },
   );
   adapter.adopt(eventFor(confirmRequest()));
-  const first = adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" });
+  const first = adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" });
   await assert.rejects(
-    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
+    () => adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" }),
     (error: unknown) => isHostError(error, "COMMAND_BLOCKED"),
   );
   assert.equal(calls.length, 1);
@@ -378,7 +391,7 @@ test("M4 transferToTui is explicit, dispatches tui.transfer, and advances owners
   assert.equal(pending?.generation, 2);
 
   await assert.rejects(
-    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
+    () => adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" }),
     (error: unknown) => isHostError(error, "NOT_OWNER"),
   );
   await assert.rejects(
@@ -404,7 +417,7 @@ test("M4 transfer invoke failure leaves gui ownership unchanged", async () => {
   const pending = adapter.pending();
   assert.equal(pending?.owner, "gui");
   assert.equal(pending?.generation, 1);
-  await adapter.respond({ interactionId, commandId, decision: "cancel", owner: "gui" });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "cancel", owner: "gui" });
   assert.equal(adapter.pending(), undefined);
 });
 
@@ -422,14 +435,14 @@ test("M4 invoke failure keeps the interaction pending and retryable", async () =
   );
   adapter.adopt(eventFor(confirmRequest()));
   await assert.rejects(
-    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
+    () => adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" }),
     /transport failed/,
   );
   assert.equal(calls.length, 1);
   assert.ok(adapter.pending() !== undefined);
 
   fail = false;
-  await adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" });
   assert.equal(adapter.pending(), undefined);
   assert.equal(calls.length, 2);
 });
@@ -453,19 +466,19 @@ test("M4 destructive confirmation is consumed even when invoke fails", async () 
     "gui",
   );
   await assert.rejects(
-    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui", confirmationToken: token }),
+    () => adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui", confirmationToken: token }),
     /transport failed/,
   );
   assert.equal(calls.length, 1);
   assert.ok(adapter.pending() !== undefined);
   await assert.rejects(
-    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui", confirmationToken: token }),
+    () => adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui", confirmationToken: token }),
     (error: unknown) => isHostError(error, "INTERACTION_STALE"),
   );
 
   fail = false;
   const fresh = registry.issue({ kind: "interaction.respond", interactionId, commandId, decision: "submit" }, "gui");
-  await adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui", confirmationToken: fresh });
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui", confirmationToken: fresh });
   assert.equal(adapter.pending(), undefined);
 });
 
@@ -477,7 +490,7 @@ test("M4 a non-acknowledged invoke result fails closed", async () => {
   );
   adapter.adopt(eventFor(confirmRequest()));
   await assert.rejects(
-    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
+    () => adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "submit", owner: "gui" }),
     (error: unknown) => isHostError(error, "INTERNAL_ERROR"),
   );
   assert.ok(adapter.pending() !== undefined);
@@ -593,8 +606,8 @@ test("M4 same interactionId with a higher generation updates the pending lease",
   const updated = adapter.adopt(eventFor(confirmRequest(), "gui", 2));
   assert.equal(updated.owner, "gui");
   assert.equal(updated.generation, 2);
-  assert.equal(adapter.pending()?.generation, 2);
-  await adapter.respond({ interactionId, commandId, decision: "cancel", owner: "gui" });
+  assert.equal(adapter.pending()!.generation, 2);
+  await adapter.respond({ interactionId, commandId, generation: adapter.pending()!.generation, decision: "cancel", owner: "gui" });
   assert.equal(adapter.pending(), undefined);
 });
 
@@ -607,7 +620,7 @@ test("M4 duplicate same-generation adopt is idempotent and does not throw", () =
   adapter.adopt(eventFor(confirmRequest(), "gui", 4));
   const again = adapter.adopt(eventFor(confirmRequest(), "gui", 4));
   assert.equal(again.generation, 4);
-  assert.equal(adapter.pending()?.generation, 4);
+  assert.equal(adapter.pending()!.generation, 4);
 });
 
 test("M4 clear drops pending without dispatching a Runtime respond", async () => {
@@ -628,4 +641,49 @@ test("M4 clear drops pending without dispatching a Runtime respond", async () =>
     (error: unknown) => isHostError(error, "INTERACTION_STALE"),
   );
   assert.equal(calls.length, 0);
+});
+
+test("M4 GUI response rejects a stale lease generation", async () => {
+  const adapter = new RemoteInteractionAdapter(
+    makeArbiter(),
+    new HostConfirmationRegistry(),
+    async () => ({ status: "accepted" }),
+  );
+  adapter.adopt(eventFor(confirmRequest(), "gui", 4));
+  await assert.rejects(
+    () => adapter.respond({ interactionId, commandId, decision: "submit", owner: "gui" }),
+    (error: unknown) => isHostError(error, "INTERACTION_STALE"),
+  );
+  await assert.rejects(
+    () => adapter.respond({ interactionId, commandId, generation: 3, decision: "submit", owner: "gui" }),
+    (error: unknown) => isHostError(error, "INTERACTION_STALE"),
+  );
+  assert.equal(adapter.pending()!.generation, 4);
+});
+
+test("M4 resolved event racing the response receipt is idempotent", async () => {
+  let release!: (result: RemoteInteractionInvokeResult) => void;
+  const gate = new Promise<RemoteInteractionInvokeResult>((resolve) => {
+    release = resolve;
+  });
+  const adapter = new RemoteInteractionAdapter(
+    makeArbiter(),
+    new HostConfirmationRegistry(),
+    async () => gate,
+  );
+  adapter.adopt(eventFor(confirmRequest(), "gui", 2));
+  const response = adapter.respond({ interactionId, commandId, generation: 2, decision: "submit", owner: "gui" });
+  assert.equal(
+    adapter.resolve({
+      kind: "interaction.resolved",
+      interactionId,
+      commandId,
+      leaseGeneration: 2,
+      outcome: "submitted",
+    }),
+    true,
+  );
+  release({ status: "accepted" });
+  await response;
+  assert.equal(adapter.pending(), undefined);
 });

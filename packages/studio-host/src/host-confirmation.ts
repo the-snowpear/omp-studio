@@ -80,13 +80,15 @@ export class HostConfirmationRegistry {
       throw new StudioHostError("NOT_OWNER", "Confirmation token is bound to a different operation");
     }
     if (
-      binding.leaseGeneration !== undefined &&
-      entry.leaseGeneration !== undefined &&
+      (entry.leaseGeneration !== undefined || binding.leaseGeneration !== undefined) &&
       entry.leaseGeneration !== binding.leaseGeneration
     ) {
       throw new StudioHostError("INTERACTION_STALE", "Confirmation token is bound to a different interaction generation");
     }
-    if (binding.runtimeEpoch !== undefined && entry.runtimeEpoch !== undefined && entry.runtimeEpoch !== binding.runtimeEpoch) {
+    if (
+      (entry.runtimeEpoch !== undefined || binding.runtimeEpoch !== undefined) &&
+      entry.runtimeEpoch !== binding.runtimeEpoch
+    ) {
       throw new StudioHostError("INTERACTION_STALE", "Confirmation token is bound to a different runtime epoch");
     }
     this.#entries.delete(token);

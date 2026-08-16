@@ -18,6 +18,11 @@
     "0015-studio-session-transcript.patch",
     "0016-studio-conversation-live-projector.patch",
     "0017-studio-conversation-live-bridge.patch",
-    "0018-studio-interaction-ui-bridge.patch"
+    "0018-studio-interaction-ui-bridge.patch",
+    "0019-studio-session-telemetry.patch",
+    "0020-conversation-transcript-normalization.patch",
+    "0021-studio-interaction-hardening.patch",
+    "0022-studio-transcript-type-hardening.patch",
+    "0023-studio-runtime-test-hardening.patch"
   ]
 }

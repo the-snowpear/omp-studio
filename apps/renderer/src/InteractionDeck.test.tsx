@@ -121,6 +121,15 @@ describe("InteractionDeck real cards", () => {
     await waitFor(() => expect(ok).toHaveBeenCalledWith("submit", "option:0"));
   });
 
+  it("failed cancel keeps the card and exposes Retry", async () => {
+    const failing = vi.fn(() => Promise.resolve(false));
+    render(<InteractionPrompt interaction={select("Pick", ["A"])} onRespond={failing} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(failing).toHaveBeenCalledWith("cancel"));
+    expect(screen.getByText(/提交失败/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  });
+
   it("deck identity includes leaseGeneration: same id with a higher generation replaces the card", () => {
     const onRespond = vi.fn();
     const first = select("Q1", ["A"]);

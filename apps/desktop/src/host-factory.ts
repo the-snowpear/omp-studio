@@ -41,7 +41,7 @@ import { promisify } from "node:util";
 
 import { dialog } from "electron";
 
-import type { ArchId } from "@omp-studio/client-contract";
+import type { ArchId, WorkspaceId } from "@omp-studio/client-contract";
 import { createOmpWorkspaceService } from "@omp-studio/host-client-api/workspaces";
 import type { Win32PlatformServices, Win32AuthorityLockServices, Win32EndpointProviders } from "@omp-studio/platform-win32";
 import { Win32PlatformPort, Win32AuthorityLock, Win32PrivateEndpoint } from "@omp-studio/platform-win32";
@@ -56,7 +56,13 @@ import {
   type DesktopFacadeSeams,
   type DesktopRuntimeSessionPort,
 } from "./host-composition.js";
+import { createHostFileLog } from "./host-log.js";
+import { createDesktopGitService } from "./git-service.js";
+import { createDesktopGithubService } from "./github-service.js";
+import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
 import { createDesktopRuntimeSessionPort } from "./runtime-session.js";
+import { createWorkspaceFileService } from "./workspace-files.js";
+import type { DesktopManagedInstallOptions } from "./runtime-install.js";
 import type { DesktopHostComposition, DesktopHostFactory } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -89,6 +95,8 @@ export interface DesktopHostFactoryOptionsWin32 {
   readonly arch?: ArchId;
   /** Runtime start/stop port; absent means the composition stays read-only. */
   readonly runtimeSession?: DesktopRuntimeSessionPort;
+  /** When set, wires a real `runtime.install` against local signed artifacts. */
+  readonly managedInstall?: DesktopManagedInstallOptions;
   /** Facade seam providers; absent slots fail closed. */
   readonly facade?: DesktopFacadeSeams;
 }
@@ -112,6 +120,8 @@ export interface DesktopHostFactoryOptionsDarwin {
   readonly arch?: ArchId;
   /** Runtime start/stop port; absent means the composition stays read-only. */
   readonly runtimeSession?: DesktopRuntimeSessionPort;
+  /** When set, wires a real `runtime.install` against local signed artifacts. */
+  readonly managedInstall?: DesktopManagedInstallOptions;
   /** Facade seam providers; absent slots fail closed. */
   readonly facade?: DesktopFacadeSeams;
 }
@@ -162,6 +172,7 @@ export function createDesktopHostFactory(options: DesktopHostFactoryOptions): De
         ...(options.resolver === undefined ? {} : { resolver: options.resolver }),
         ...(options.preference === undefined ? {} : { preference: options.preference }),
         ...(options.arch === undefined ? {} : { arch: options.arch }),
+        ...(options.managedInstall === undefined ? {} : { managedInstall: options.managedInstall }),
         ...(options.facade === undefined ? {} : { facade: options.facade }),
       });
     },
@@ -455,7 +466,8 @@ function createProductionWin32EndpointProviders(): Win32EndpointProviders {
   const reservationPath = (authority: string): string => join(registryRoot(), authority);
   return {
     async currentUserSid(): Promise<string> {
-      const { stdout } = await execFileAsync("whoami.exe", ["/user", "/fo", "csv", "/nh"]);
+      const whoami = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe");
+      const { stdout } = await execFileAsync(whoami, ["/user", "/fo", "csv", "/nh"]);
       return parseWindowsUserSid(stdout);
     },
     generateEndpointAuthority: () => randomBytes(24).toString("base64url"),
@@ -487,7 +499,8 @@ function createProductionWin32EndpointProviders(): Win32EndpointProviders {
     async applyOwnerOnlyAcl(authority: string, sid: string): Promise<void> {
       // The reservation registry entry is the owned resource; the runtime
       // pipe itself inherits current-user protection from the spawning user.
-      await execFileAsync("icacls.exe", [reservationPath(authority), "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`]);
+      const icacls = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "icacls.exe");
+      await execFileAsync(icacls, [reservationPath(authority), "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`]);
     },
     async releaseEndpoint(authority: string): Promise<void> {
       try {
@@ -562,10 +575,23 @@ function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
 export function createProductionHostFactory(options?: { readonly openUrl?: (url: string) => Promise<void> }): DesktopHostFactory {
   const registry = new WorkspaceRegistry(productionWorkspaceRegistryPath());
   const pickDirectory = createProductionPickDirectory();
-  const runtimeSession = createDesktopRuntimeSessionPort();
+  const hostLog = createHostFileLog({
+    directory: join(userAppDataRoot(), STATE_DIRECTORY_NAME, "logs"),
+  });
+  const runtimeSession = createDesktopRuntimeSessionPort({ log: hostLog });
+  const gitProcessRunner = new HostProcessRunner();
+  const gitWriteQueue = new GitWriteQueue();
+  const git = createDesktopGitService({
+    registry,
+    pickDirectory,
+    preferencesPath: join(userAppDataRoot(), STATE_DIRECTORY_NAME, "git-preferences.json"),
+    runner: gitProcessRunner,
+    queue: gitWriteQueue,
+  });
+  const github = createDesktopGithubService({ registry, runner: gitProcessRunner, queue: gitWriteQueue });
   let activeComposition: DesktopHostComposition | undefined;
   const workspaceCwd: { current: string | undefined } = { current: undefined };
-  const workspaces = createOmpWorkspaceService({
+  const innerWorkspaces = createOmpWorkspaceService({
     registry,
     pickDirectory,
     onActivated: async (stored) => {
@@ -576,15 +602,51 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
       });
     },
   });
+  const workspaces = {
+    list: () => innerWorkspaces.list(),
+    pick: (input?: { readonly name?: string }) => innerWorkspaces.pick(input),
+    async open(input: { readonly workspaceId: WorkspaceId }) {
+      const alreadyActive = registry.activeWorkspaceId === input.workspaceId;
+      const runtimeBound = activeComposition?.status === "ready";
+      const model = await innerWorkspaces.open(input);
+      if (alreadyActive && !runtimeBound) {
+        const stored = registry.get(input.workspaceId);
+        if (stored !== undefined) {
+          workspaceCwd.current = stored.canonicalPath;
+          await activeComposition?.rebindWorkspace({
+            workspaceId: stored.workspaceId,
+            cwd: stored.canonicalPath,
+          });
+        }
+      }
+      return model;
+    },
+  };
   const facade: DesktopFacadeSeams = {
     ...(options?.openUrl === undefined ? {} : { openUrl: options.openUrl }),
     workspaces,
+    workspaceFiles: createWorkspaceFileService({ registry }),
+    git,
+    github,
+    disposeHostOperations: () => gitProcessRunner.cancelAll(),
     getWorkspaceCwd: () => workspaceCwd.current,
+    getActiveWorkspace: () => {
+      const activeId = registry.activeWorkspaceId;
+      if (activeId === undefined) {
+        return undefined;
+      }
+      const stored = registry.get(activeId);
+      if (stored === undefined) {
+        return undefined;
+      }
+      return { workspaceId: stored.workspaceId, cwd: stored.canonicalPath };
+    },
   };
   const baseOptions = {
     authorityLockServices: createProductionAuthorityLockServices(),
     resolver: { probe: createProcessProbe() },
     runtimeSession,
+    managedInstall: {},
     facade,
   };
   const factory = createDesktopHostFactory({

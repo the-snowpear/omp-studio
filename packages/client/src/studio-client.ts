@@ -32,8 +32,10 @@ import type {
   SubscriptionScope,
   Unsubscribe,
 } from "@omp-studio/client-contract";
+import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 
 import { createBrowserClockAndIds, type ClientClockAndIds } from "./clock.js";
+import type { ConversationIdentity } from "./conversation-state.js";
 import { CLIENT_CLOSED_ERROR, toClientError } from "./errors.js";
 import { createInitialClientState, reduceClientState, type ClientAction, type ClientState } from "./reducer.js";
 import { eventMatchesScope } from "./scope.js";
@@ -50,7 +52,7 @@ interface RendererSubscription {
  * thin. Renderer should import this type instead of duck-typing.
  */
 export interface ConversationHydrateClient {
-  beginTranscriptHydrate(): number;
+  beginTranscriptHydrate(identity: ConversationIdentity): number;
   hydrateTranscript(page: ConversationTranscriptPage, generation: number): void;
   prependTranscript(page: ConversationTranscriptPage, generation: number): void;
   hydrateArchiveTranscript?(page: ConversationTranscriptReadPage, generation: number): void;
@@ -91,6 +93,12 @@ export class StudioClientImpl implements StudioClient, ConversationHydrateClient
     const run = (async (): Promise<ClientBootstrap> => {
       try {
         const bootstrap = await this.transport.bootstrap();
+        if (bootstrap.contractVersion !== CLIENT_CONTRACT_VERSION) {
+          throw {
+            code: "UNAVAILABLE",
+            message: `Client contract mismatch: expected ${CLIENT_CONTRACT_VERSION}, received ${String(bootstrap.contractVersion)}`,
+          } satisfies ClientError;
+        }
         this.applyAction({ type: "bootstrap.set", bootstrap, occurredAt: this.ids.now() });
         const pending = this.bufferedEvents.splice(0);
         for (const event of pending) {
@@ -129,8 +137,8 @@ export class StudioClientImpl implements StudioClient, ConversationHydrateClient
   }
 
   /** Start a transcript hydrate generation so a stale page cannot land after session switch. */
-  beginTranscriptHydrate(): number {
-    this.applyAction({ type: "conversation.beginHydrate" });
+  beginTranscriptHydrate(identity: ConversationIdentity): number {
+    this.applyAction({ type: "conversation.beginHydrate", identity });
     return this.state.conversation.hydrateGeneration;
   }
 

@@ -44,6 +44,8 @@ import {
   type HostAgentDefinitionsService,
   type HostDiagnosticsFactory,
   type HostExtensibilityService,
+  type HostGitHubService,
+  type HostGitService,
   type HostMcpService,
   type HostManifestProvider,
   type HostModelsService,
@@ -55,6 +57,7 @@ import {
   type HostSessionArchiveProvider,
   type HostUsageService,
   type HostWorkspaceService,
+  type HostWorkspaceFileService,
   type StudioHostClientFacadeOptions,
 } from "@omp-studio/host-client-api";
 import { createOmpAgentDefinitionsService } from "@omp-studio/host-client-api/agent-definitions";
@@ -70,6 +73,7 @@ import {
   type RuntimeResolution,
   type RuntimeResolverEnvironment,
   type StudioConversationForward,
+  type StudioTelemetryForward,
   type StudioRuntimeSessionController,
   StudioSessionArchiveReader,
   type SessionArchiveReadInput,
@@ -194,10 +198,15 @@ export interface DesktopFacadeSeams {
   readonly agentDefinitions?: HostAgentDefinitionsService;
   readonly getWorkspaceCwd?: () => string | undefined;
   readonly workspaces?: HostWorkspaceService;
+  readonly workspaceFiles?: HostWorkspaceFileService;
+  readonly git?: HostGitService;
+  readonly github?: HostGitHubService;
   readonly usage?: HostUsageService;
   readonly openUrl?: (url: string) => Promise<void>;
   /** Active workspace for Runtime start; never falls back to process.cwd(). */
   readonly getActiveWorkspace?: () => { workspaceId: string; cwd: string } | undefined;
+  /** Stops Host-owned Git/gh child processes during final app shutdown. */
+  readonly disposeHostOperations?: () => void;
 }
 
 /** Inputs for {@link createDesktopHostComposition}; every port is explicit. */
@@ -261,6 +270,7 @@ interface FacadeContext {
   /** Single publication channel; Facade subscribe and session attach share it. */
   readonly publications: DesktopPublicationForwarder;
   readonly conversationEvents: IsolatedForwarder<StudioConversationForward>;
+  readonly telemetryEvents: IsolatedForwarder<StudioTelemetryForward>;
   readonly conversationResync: IsolatedForwarder<string>;
   readonly interaction: DesktopInteractionHost;
   readonly bindSession: { current: (session: DesktopRuntimeSession | undefined) => void };
@@ -417,6 +427,9 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
         getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
       }),
     ...(seams.workspaces === undefined ? {} : { workspaces: seams.workspaces }),
+    ...(seams.workspaceFiles === undefined ? {} : { workspaceFiles: seams.workspaceFiles }),
+    ...(seams.git === undefined ? {} : { git: seams.git }),
+    ...(seams.github === undefined ? {} : { github: seams.github }),
     usage: seams.usage ?? createOmpUsageService(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
     // Live accessors follow workspace/runtime rebind. Conversation and
     // interaction events are not buffered; reload never replays old deltas.
@@ -428,6 +441,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       onPublication: (listener) => context.publications.subscribe(listener),
       onConversationEvent: (listener) => context.conversationEvents.subscribe(listener),
       onConversationResync: (listener) => context.conversationResync.subscribe(listener),
+      onTelemetryEvent: (listener) => context.telemetryEvents.subscribe(listener),
       onInteractionEvent: (listener) => context.interaction.subscribe(listener),
     } satisfies HostRuntimeAccess,
   };
@@ -477,6 +491,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
   #unsubscribeCurrentPublication: (() => void) | undefined;
   #unsubscribeConversation: (() => void) | undefined;
   #unsubscribeConversationResync: (() => void) | undefined;
+  #unsubscribeTelemetry: (() => void) | undefined;
   #closed = false;
   #shutdownStarted = false;
 
@@ -530,6 +545,8 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#unsubscribeConversation = undefined;
     this.#unsubscribeConversationResync?.();
     this.#unsubscribeConversationResync = undefined;
+    this.#unsubscribeTelemetry?.();
+    this.#unsubscribeTelemetry = undefined;
     this.#facadeContext.interaction.attach(session?.controller);
     if (session === undefined) {
       return;
@@ -546,6 +563,11 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     if (typeof controller.onConversationResync === "function") {
       this.#unsubscribeConversationResync = controller.onConversationResync((reason) => {
         this.#facadeContext.conversationResync.publish(reason);
+      });
+    }
+    if (typeof controller.onTelemetryEvent === "function") {
+      this.#unsubscribeTelemetry = controller.onTelemetryEvent((event) => {
+        this.#facadeContext.telemetryEvents.publish(event);
       });
     }
     this.#replayCurrentPublication();
@@ -613,6 +635,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     }
     this.#shutdownStarted = true;
     await this.#facade.close();
+    this.#facadeContext.seams.disposeHostOperations?.();
     if (this.#sessionStarted && this.#runtimeSession !== undefined) {
       await this.#runtimeSession.stop();
     }
@@ -699,6 +722,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         sessionRef,
         publications,
         conversationEvents: new IsolatedForwarder<StudioConversationForward>(),
+        telemetryEvents: new IsolatedForwarder<StudioTelemetryForward>(),
         conversationResync: new IsolatedForwarder<string>(),
         interaction,
         bindSession: { current: (next) => {

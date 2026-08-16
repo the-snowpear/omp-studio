@@ -24,8 +24,10 @@ import type {
   StateVersion,
   SubscriptionScope,
   Unsubscribe,
+  OperationProgress,
+  GitRepositoryChanged,
 } from "@omp-studio/client-contract";
-import type { CommandLedgerEntry, ConversationRuntimeEvent } from "@omp-studio/studio-protocol";
+import type { CommandLedgerEntry, ConversationRuntimeEvent, SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 /** Runtime state the bus consults when an event seed omits epoch/version. */
@@ -58,6 +60,13 @@ export type HostEventSeed =
   | (HostEventSeedBase & { readonly kind: "runtime.changed"; readonly connection: RuntimeConnection })
   | (HostEventSeedBase & { readonly kind: "resync.required"; readonly reason: string })
   | (HostEventSeedBase & { readonly kind: "diagnostics.changed" })
+  | (HostEventSeedBase & { readonly kind: "operation.progress"; readonly progress: OperationProgress })
+  | (HostEventSeedBase & { readonly kind: "git.repository.changed"; readonly repository: GitRepositoryChanged })
+  | (HostEventSeedBase & {
+      readonly kind: "telemetry.changed";
+      readonly sessionId: SessionId;
+      readonly telemetry: SessionTelemetrySnapshot;
+    })
   | (HostEventSeedBase & {
       readonly kind: "conversation.changed";
       readonly sessionId: SessionId;
@@ -93,6 +102,8 @@ export function eventMatchesScope(event: ClientEvent, scope: SubscriptionScope):
           return event.interaction.requestId === scope.requestId;
         case "command.receipt":
           return event.receipt.requestId === scope.requestId;
+        case "operation.progress":
+          return event.progress.requestId === scope.requestId;
         default:
           return false;
       }

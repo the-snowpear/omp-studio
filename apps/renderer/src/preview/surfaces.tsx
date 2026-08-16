@@ -5,7 +5,6 @@ import {
   PREVIEW_CHANGES,
   PREVIEW_CTX_PARTS,
   PREVIEW_DIFF,
-  PREVIEW_EVENTS,
   PREVIEW_FILE_TREE,
   PREVIEW_MINIMAP,
   PREVIEW_PREVIEW,
@@ -15,11 +14,11 @@ import {
   PREVIEW_TELEMETRY,
   PREVIEW_TESTS,
   type PreviewChangeRow,
-  type PreviewEvent,
   type PreviewFileNode,
   type PreviewSideAgent,
-  type PreviewTool,
 } from "./fixtures";
+import { ConvoTranscript } from "../conversation/ConvoTranscript";
+import { previewConversationRows } from "./conversationFixtures";
 
 const GIT_ICON = { M: "pencil", A: "plus", D: "trash", "?": "file-plus" } as const;
 const GIT_CLASS = { M: "m", A: "a", D: "d", "?": "u" } as const;
@@ -44,12 +43,14 @@ function FileStat({ status }: { status?: PreviewFileNode["status"] }) {
   );
 }
 
-function TreeNodes({ nodes, depth, prefix, expanded, onToggle }: {
+function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction }: {
   nodes: PreviewFileNode[];
   depth: number;
   prefix: string;
   expanded: Set<string>;
   onToggle: (path: string) => void;
+  onFile: (path: string) => void;
+  onAction: (path: string, action: "context" | "more") => void;
 }) {
   return (
     <>
@@ -81,14 +82,14 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle }: {
                 <span className="fname ellipsis">{node.name}</span>
               </div>
               <div className="tree-children" role="group">
-                {node.children ? <TreeNodes nodes={node.children} depth={depth + 1} prefix={path} expanded={expanded} onToggle={onToggle} /> : null}
+                {node.children ? <TreeNodes nodes={node.children} depth={depth + 1} prefix={path} expanded={expanded} onToggle={onToggle} onFile={onFile} onAction={onAction} /> : null}
               </div>
             </div>
           );
         }
         const code = node.name.endsWith(".tsx") || node.name.endsWith(".ts");
         return (
-          <div key={path} className={`tree-row${node.turn ? " turn-file" : ""}`} data-file={path} role="treeitem" tabIndex={0} style={pad}>
+          <div key={path} className={`tree-row${node.turn ? " turn-file" : ""}`} data-file={path} role="treeitem" tabIndex={0} style={pad} onClick={() => onFile(path)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onFile(path); } }}>
             <span className="tw" />
             <span className="fi"><Icon name={code ? "file-code" : "file"} /></span>
             <span className="fname ellipsis">{node.name}</span>
@@ -96,6 +97,10 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle }: {
             {node.reading ? <span className="live" role="img" aria-label="OMP 正在读取"><span className="dot purple pulse" /></span> : null}
             {node.diagnostic ? <span className={`diag ${node.diagnostic === "error" ? "err" : "warn"}`} role="img" aria-label={node.diagnostic === "error" ? "存在诊断错误" : "存在诊断警告"} /> : null}
             <FileStat status={node.status} />
+            <span className="fop">
+              <button type="button" className="icon-btn" data-tip="加入上下文" aria-label={`加入上下文 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context"); }}><Icon name="at" /></button>
+              <button type="button" className="icon-btn" data-tip="更多" aria-label={`更多操作 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
+            </span>
           </div>
         );
       })}
@@ -103,12 +108,13 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle }: {
   );
 }
 
-export function PreviewFileTree({ label }: { label: string }) {
+export function PreviewFileTree({ label, search }: { label: string; search?: string }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const next = new Set<string>();
     collectOpen(PREVIEW_FILE_TREE, "", next);
     return next;
   });
+  const [message, setMessage] = useState<string | undefined>(undefined);
   const onToggle = (path: string) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -117,188 +123,31 @@ export function PreviewFileTree({ label }: { label: string }) {
       return next;
     });
   };
+  const visible = search?.trim()
+    ? filterPreviewNodes(PREVIEW_FILE_TREE, search)
+    : PREVIEW_FILE_TREE;
   return (
-    <div className="tree" role="tree" aria-label={`${label} 文件树`}>
-      <TreeNodes nodes={PREVIEW_FILE_TREE} depth={0} prefix="" expanded={expanded} onToggle={onToggle} />
-    </div>
+    <>
+      {message ? <div className="muted tiny" role="status" style={{ padding: "2px 12px 6px" }}>{message}</div> : null}
+      <div className="tree" role="tree" aria-label={`${label} 文件树`}>
+        <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={(path) => setMessage(`打开 ${path}`)} onAction={(path, action) => setMessage(action === "context" ? `已加入上下文：${path}` : `更多操作：${path}`)} />
+      </div>
+    </>
   );
 }
 
-function FixtureHtml({ html, className }: { html: string; className?: string }) {
-  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
-}
-
-function ToolCard({ tool, running }: { tool: PreviewTool; running?: boolean }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className={`tool-card${open ? " open" : ""}${running || tool.status === "running" ? " running" : ""}`}>
-      <button type="button" className="tool-head" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <Icon name="wrench" extra="sm" />
-        <span><b>{tool.name}</b> · {tool.target}</span>
-        <span className="spacer" />
-        <span className="tiny muted">{tool.dur}</span>
-        <Icon name="chevron-d" extra="sm" />
-      </button>
-      {open && (tool.summary || tool.output) ? (
-        <div className="tool-body">
-          {tool.summary ? <p className="muted small">{tool.summary}</p> : null}
-          {tool.output ? <pre>{tool.output}</pre> : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PreviewEventView({ event }: { event: PreviewEvent }) {
-  switch (event.type) {
-    case "user":
-      return (
-        <div className="ev ev-user" id={`ev-${event.id}`}>
-          <div className="ev-head"><span className="who"><span className="role-badge u">S</span>snowpear</span><span>{event.time}</span></div>
-          <FixtureHtml className="ev-body" html={event.html} />
-          {event.refs?.length ? (
-            <div className="ev-refs">
-              {event.refs.map((ref) => (
-                <span key={ref} className="chip-file"><Icon name="file" extra="sm" /> {ref}</span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      );
-    case "assistant":
-      return (
-        <div className="ev ev-assistant" id={`ev-${event.id}`}>
-          <div className="ev-head">
-            <span className="who"><span className="role-badge a">π</span>OMP</span>
-            <span className="muted">gemini-3.6-flash · {event.time}</span>
-            {event.streaming ? <span className="chip blue xs">流式输出中</span> : null}
-          </div>
-          <FixtureHtml className="ev-body" html={`${event.html}${event.streaming ? "<span class=\"stream-caret\"></span>" : ""}`} />
-        </div>
-      );
-    case "thinking":
-      return (
-        <details className="ev ev-thinking" id={`ev-${event.id}`}>
-          <summary>
-            <Icon name="sparkles" extra="sm" /><span>Thinking</span>
-            <span className="muted">· {event.dur}</span>
-            <span className="ellipsis muted" style={{ flex: 1 }}>{event.preview.slice(0, 42)}…</span>
-            <Icon name="chevron-d" extra="sm" />
-          </summary>
-          <div className="think-body">{event.preview}</div>
-        </details>
-      );
-    case "plan":
-      return (
-        <div className="ev" id={`ev-${event.id}`}>
-          <div className="plan-card">
-            <div className="plan-title"><Icon name="layers" extra="sm" />{event.title}</div>
-            <ol>{event.items.map((item, index) => <li key={item} className={index < 3 ? "done" : undefined}>{item}</li>)}</ol>
-          </div>
-        </div>
-      );
-    case "tool":
-      return <div className="ev" id={`ev-${event.id}`}><ToolCard tool={event.tool} running={event.tool.status === "running"} /></div>;
-    case "toolgroup":
-      return (
-        <details className="ev" id={`ev-${event.id}`}>
-          <div className="tool-group">
-            <div className="tg-head">
-              <Icon name="wrench" extra="sm" />
-              <span><b>{event.count} 个工具调用</b> · {event.summary}</span>
-              <span className="spacer" />
-              <span className="chip green sm">全部完成</span>
-            </div>
-            <div className="tg-body">{event.tools.map((tool, index) => <ToolCard key={`${tool.name}-${index}`} tool={tool} />)}</div>
-          </div>
-        </details>
-      );
-    case "approval":
-      return (
-        <div className="ev" id={`ev-${event.id}`}>
-          <div className="approval-card">
-            <div className="approval-head">
-              <Icon name="shield" extra="sm" /><span>{event.title}</span>
-              <span className={`chip ${event.risk === "medium" ? "amber" : "red"}`}>风险：{event.risk === "medium" ? "中" : "高"}</span>
-            </div>
-            <div className="approval-body">
-              <div className="cmd"><Icon name="terminal" extra="sm" /><span>{event.cmd}</span></div>
-              <div>{event.reason}</div>
-              <div className="tiny muted" style={{ marginTop: 4 }}>影响范围：{event.scope}</div>
-            </div>
-            <div className="approval-foot">
-              <button type="button" className="btn primary lg" disabled title="演示审批，不会发给 Host">允许一次</button>
-              <button type="button" className="btn outline lg" disabled title="演示审批，不会发给 Host">始终允许此类操作</button>
-              <button type="button" className="btn lg danger" disabled title="演示审批，不会发给 Host">拒绝</button>
-            </div>
-          </div>
-        </div>
-      );
-    case "askuser":
-      return (
-        <div className="ev" id={`ev-${event.id}`}>
-          <div className="ask-card">
-            <div className="ask-head"><Icon name="message" extra="sm" /><span>{event.title}</span></div>
-            <div className="ask-body">
-              <div className="small muted">{event.desc}</div>
-              {event.options.map((option, index) => (
-                <button key={option} type="button" className={`ask-opt${index === 0 ? " sel" : ""}`} disabled title="演示选项，不会发给 Host">{option}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-      );
-    case "error":
-      return (
-        <div className="ev" id={`ev-${event.id}`}>
-          <div className="error-card">
-            <div className="err-title"><Icon name="alert" extra="sm" />{event.title}</div>
-            <FixtureHtml html={event.html} />
-          </div>
-        </div>
-      );
-    case "checkpoint":
-      return (
-        <div className="ev" id={`ev-${event.id}`}>
-          <div className="checkpoint-card">
-            <div className="cp-head">
-              <Icon name="commit" extra="sm" />
-              <span>Checkpoint #{event.no}</span>
-              <span className="muted small" style={{ fontWeight: 400 }}>{event.desc}</span>
-              <span className="spacer" />
-              <span className="tiny muted mono">{event.time}</span>
-            </div>
-            <div className="cp-stats">
-              <span><b>{event.files}</b> 个文件</span>
-              <span style={{ color: "var(--green)" }}>+{event.add}</span>
-              <span style={{ color: "var(--red)" }}>-{event.del}</span>
-              <span>构建 <b>{event.build}</b></span>
-              <span>测试 <b>{event.tests}</b></span>
-              <span>Preview <b>{event.preview}</b></span>
-            </div>
-          </div>
-        </div>
-      );
-    case "compact":
-      return (
-        <div className="ev" id={`ev-${event.id}`}>
-          <div className="compact-bar">
-            <Icon name="minimize" extra="sm" />
-            <span><b>Compact</b> · {event.summary}</span>
-            <span className="spacer" />
-            <div className="meter" style={{ width: 80 }}><i style={{ width: `${event.pct}%` }} /></div>
-          </div>
-        </div>
-      );
-  }
+function filterPreviewNodes(nodes: PreviewFileNode[], query: string): PreviewFileNode[] {
+  const needle = query.trim().toLowerCase();
+  return nodes.flatMap((node) => {
+    const children = node.children ? filterPreviewNodes(node.children, query) : [];
+    return node.name.toLowerCase().includes(needle) || children.length > 0
+      ? [{ ...node, ...(node.type === "dir" ? { children } : {}) }]
+      : [];
+  });
 }
 
 export function PreviewTranscript() {
-  return (
-    <>
-      {PREVIEW_EVENTS.map((event) => <PreviewEventView key={event.id} event={event} />)}
-    </>
-  );
+  return <ConvoTranscript rows={previewConversationRows()} demo />;
 }
 
 export function PreviewMinimap() {

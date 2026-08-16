@@ -31,6 +31,12 @@ export type EnvironmentId = Brand<string, "EnvironmentId">;
 /** Opaque workspace identity. Never a filesystem path. */
 export type WorkspaceId = Brand<string, "WorkspaceId">;
 
+/** Opaque identity shared by linked worktrees of one Git repository. */
+export type GitRepositoryId = Brand<string, "GitRepositoryId">;
+
+/** Opaque identity of one Git worktree. Never a filesystem path. */
+export type GitWorktreeId = Brand<string, "GitWorktreeId">;
+
 /** Thread identity (opaque). */
 export type ThreadId = Brand<string, "ThreadId">;
 
