@@ -1,0 +1,1395 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  createInitialConversationState,
+  reduceConversationState,
+  selectConversationHydrate,
+  selectConversationViews,
+} from "@omp-studio/client";
+import type {
+  AuthorityEpoch,
+  ClientError,
+  ClientEvent,
+  ConversationItem,
+  ConversationRuntimeEvent,
+  ConversationTranscriptReadPage,
+  ConversationTranscriptPage,
+  EventCursor,
+  OpaqueCursor,
+  QueryInput,
+  QueryName,
+  QueryResult,
+  RuntimeEpoch,
+  SessionId,
+  StateVersion,
+  SubscriptionScope,
+  Unsubscribe,
+} from "@omp-studio/client-contract";
+import { createConversationEngine } from "./conversationEngine";
+import {
+  ARCHIVE_TRANSCRIPT_QUERY_NAME,
+  TRANSCRIPT_QUERY_NAME,
+  type ConversationClient,
+  type ConversationIdentity,
+} from "./conversationHost";
+import { ConversationItemView } from "./ConversationItemView";
+import { ConvoTranscript } from "./ConvoTranscript";
+import { ToolBody } from "./ToolBody";
+import { batchSummary, toolDiffStats, toolKind } from "./toolMeta";
+import { distanceFromBottom, shouldFollow } from "./useConversationScroll";
+import {
+  applyLiveEvent,
+  buildTimeline,
+  emptyConversationState,
+  failPending,
+  hydratePage,
+  resetConversation,
+  rowsFromConversationViews,
+  segmentsFromContent,
+  trackPending,
+} from "./conversationViewModel";
+import { PREVIEW_CONVO_IDENTITY, PREVIEW_CONVO_ITEMS } from "../preview/conversationFixtures";
+
+afterEach(cleanup);
+
+const epoch = 1 as RuntimeEpoch;
+const session = "session-a" as SessionId;
+const identity: ConversationIdentity = { runtimeEpoch: epoch, sessionId: session };
+const other: ConversationIdentity = { runtimeEpoch: 2 as RuntimeEpoch, sessionId: "session-b" as SessionId };
+
+function page(partial: Partial<ConversationTranscriptPage> & { items: readonly ConversationItem[] }): ConversationTranscriptPage {
+  return {
+    runtimeEpoch: partial.runtimeEpoch ?? epoch,
+    sessionId: session,
+    branchLeafId: "leaf-1",
+    headCursor: "head-1" as OpaqueCursor,
+    hasMoreBefore: false,
+    ...partial,
+  };
+}
+
+function archivePage(
+  sessionId: SessionId,
+  items: readonly ConversationItem[],
+): ConversationTranscriptReadPage {
+  return {
+    sessionId,
+    transcriptRevision: `revision-${sessionId}`,
+    branchLeafId: "leaf-archive",
+    headCursor: "head-archive" as OpaqueCursor,
+    hasMoreBefore: false,
+    items,
+  };
+}
+
+function userItem(id: string, text: string): ConversationItem {
+  return {
+    kind: "message",
+    itemId: id,
+    parentId: null,
+    createdAt: "2026-08-15T00:00:00.000Z",
+    role: "user",
+    content: [{ type: "text", text }],
+  };
+}
+
+function assistantItem(id: string, text: string): Extract<ConversationItem, { kind: "message" }> {
+  return {
+    kind: "message",
+    itemId: id,
+    parentId: null,
+    createdAt: "2026-08-15T00:00:01.000Z",
+    role: "assistant",
+    content: [{ type: "text", text }],
+  };
+}
+
+function envelope(): Pick<ClientEvent, "authorityEpoch" | "runtimeEpoch" | "stateVersion" | "cursor" | "occurredAt"> {
+  return {
+    authorityEpoch: 1 as AuthorityEpoch,
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    cursor: "10" as EventCursor,
+    occurredAt: "2026-08-15T00:00:00.000Z",
+  };
+}
+
+class FakeClient implements ConversationClient {
+  conversation = createInitialConversationState();
+  commands: ReturnType<ConversationClient["getState"]>["commands"] = {};
+  reads: Array<{ name: string; input: { cursor?: OpaqueCursor; limit?: number } }> = [];
+  hydrateCalls: Array<{ mode: "hydrate" | "prepend"; generation: number }> = [];
+  begins = 0;
+  beginIdentities: ConversationIdentity[] = [];
+  runtimeListeners = new Set<(event: ClientEvent) => void>();
+  stateListeners = new Set<(state: ReturnType<ConversationClient["getState"]>) => void>();
+  queue: Array<{
+    resolve: (page: ConversationTranscriptPage | ConversationTranscriptReadPage) => void;
+    reject: (error: unknown) => void;
+  }> = [];
+  auto?: ConversationTranscriptPage | ConversationTranscriptReadPage | { error: { code: string; message: string } };
+
+  getState() {
+    return { conversation: this.conversation, commands: this.commands };
+  }
+
+  onState(listener: (state: ReturnType<ConversationClient["getState"]>) => void): Unsubscribe {
+    this.stateListeners.add(listener);
+    return () => {
+      this.stateListeners.delete(listener);
+    };
+  }
+
+  beginTranscriptHydrate(targetIdentity: ConversationIdentity): number {
+    this.begins += 1;
+    this.beginIdentities.push(targetIdentity);
+    this.conversation = reduceConversationState(this.conversation, {
+      type: "beginHydrate",
+      identity: targetIdentity,
+    });
+    this.emitState();
+    return this.conversation.hydrateGeneration;
+  }
+
+  hydrateTranscript(next: ConversationTranscriptPage, generation: number): void {
+    this.hydrateCalls.push({ mode: "hydrate", generation });
+    this.conversation = reduceConversationState(this.conversation, { type: "hydrate", page: next, generation });
+    this.emitState();
+  }
+
+  prependTranscript(next: ConversationTranscriptPage, generation: number): void {
+    this.hydrateCalls.push({ mode: "prepend", generation });
+    this.conversation = reduceConversationState(this.conversation, { type: "prepend", page: next, generation });
+    this.emitState();
+  }
+
+  hydrateArchiveTranscript(next: ConversationTranscriptReadPage, generation: number): void {
+    this.hydrateCalls.push({ mode: "hydrate", generation });
+    this.conversation = reduceConversationState(this.conversation, { type: "hydrateArchive", page: next, generation });
+    this.emitState();
+  }
+
+  prependArchiveTranscript(next: ConversationTranscriptReadPage, generation: number): void {
+    this.hydrateCalls.push({ mode: "prepend", generation });
+    this.conversation = reduceConversationState(this.conversation, { type: "prependArchive", page: next, generation });
+    this.emitState();
+  }
+
+  failTranscriptHydrate(error: ClientError, generation: number): void {
+    this.conversation = reduceConversationState(this.conversation, { type: "error", error, generation });
+    this.emitState();
+  }
+
+  async query<TName extends QueryName>(name: TName, input: QueryInput<TName>): Promise<QueryResult<TName>> {
+    this.reads.push({ name, input: input as { cursor?: OpaqueCursor; limit?: number } });
+    if (name !== TRANSCRIPT_QUERY_NAME && name !== ARCHIVE_TRANSCRIPT_QUERY_NAME) {
+      throw { code: "UNAVAILABLE", message: `unexpected query ${name}` };
+    }
+    if (this.auto && "error" in this.auto) throw this.auto.error;
+    if (this.auto && !("error" in this.auto)) return this.auto as QueryResult<TName>;
+    const next = await new Promise<ConversationTranscriptPage | ConversationTranscriptReadPage>((resolve, reject) => {
+      this.queue.push({ resolve, reject });
+    });
+    return next as QueryResult<TName>;
+  }
+
+  subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe {
+    if (scope.scope !== "runtime") return () => {};
+    this.runtimeListeners.add(listener);
+    return () => {
+      this.runtimeListeners.delete(listener);
+    };
+  }
+
+  emit(event: ClientEvent) {
+    for (const listener of this.runtimeListeners) listener(event);
+  }
+
+  pushLive(update: ConversationRuntimeEvent, eventSeq: number) {
+    const event: Extract<ClientEvent, { kind: "conversation.changed" }> = {
+      ...envelope(),
+      kind: "conversation.changed",
+      sessionId: update.sessionId,
+      eventSeq,
+      update,
+    };
+    this.conversation = reduceConversationState(this.conversation, { type: "live", event });
+    this.emitState();
+  }
+
+  emitState() {
+    const snapshot = this.getState();
+    for (const listener of this.stateListeners) listener(snapshot);
+  }
+
+  resolveNext(value: ConversationTranscriptPage | ConversationTranscriptReadPage) {
+    const pending = this.queue.shift();
+    if (!pending) throw new Error("no pending transcript read");
+    pending.resolve(value);
+  }
+
+  rejectNext(error: unknown) {
+    const pending = this.queue.shift();
+    if (!pending) throw new Error("no pending transcript read");
+    pending.reject(error);
+  }
+}
+
+async function tick(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function engineOf(client: ConversationClient | null, overrides: Partial<Parameters<typeof createConversationEngine>[0]> = {}) {
+  return createConversationEngine({
+    preview: false,
+    client,
+    identity,
+    canRead: true,
+    runtimeConnected: true,
+    previewItems: PREVIEW_CONVO_ITEMS,
+    ...overrides,
+  });
+}
+
+describe("preview vs real isolation", () => {
+  it("preview hydrates typed fixtures and never queries transcript", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client, { preview: true, identity: PREVIEW_CONVO_IDENTITY });
+    engine.start();
+    await tick();
+    expect(client.reads).toEqual([]);
+    expect(client.begins).toBe(0);
+    expect(client.runtimeListeners.size).toBe(0);
+    const snap = engine.getSnapshot();
+    expect(snap.demo).toBe(true);
+    expect(snap.rows.some((row) => row.type === "user")).toBe(true);
+    expect(snap.state.items.map((item) => item.itemId)).toEqual(PREVIEW_CONVO_ITEMS.map((item) => item.itemId));
+  });
+
+  it("real unavailable states do not fall back to preview fixtures", () => {
+    const client = new FakeClient();
+    const disconnected = engineOf(client, { runtimeConnected: false, identity: null });
+    disconnected.start();
+    expect(disconnected.getSnapshot().state.hydrateStatus).toBe("unavailable");
+    expect(disconnected.getSnapshot().rows).toEqual([]);
+    expect(disconnected.getSnapshot().state.items).toEqual([]);
+
+    const noCap = engineOf(client, { canRead: false });
+    noCap.start();
+    expect(noCap.getSnapshot().state.unavailableReason).toMatch(/session\.history/);
+    expect(noCap.getSnapshot().state.items).toEqual([]);
+    expect(client.reads).toEqual([]);
+    expect(client.begins).toBe(0);
+  });
+
+  it("missing ConversationClient stays an honest empty shell", () => {
+    const engine = engineOf(null);
+    engine.start();
+    expect(engine.getSnapshot().state.hydrateStatus).toBe("unavailable");
+    expect(engine.getSnapshot().state.unavailableReason).toMatch(/hydrate/);
+    expect(engine.getSnapshot().rows).toEqual([]);
+  });
+
+  it("missing or throwing getState stays an honest empty shell", () => {
+    const missing = new FakeClient();
+    missing.getState = () => undefined as never;
+    const missingEngine = engineOf(missing);
+    expect(missingEngine.getSnapshot().state.hydrateStatus).toBe("unavailable");
+    expect(missingEngine.getSnapshot().state.unavailableReason).toMatch(/hydrate/);
+    expect(missingEngine.getSnapshot().rows).toEqual([]);
+
+    const throwing = new FakeClient();
+    throwing.getState = () => {
+      throw new TypeError("Cannot read properties of undefined (reading 'state')");
+    };
+    const throwingEngine = engineOf(throwing);
+    expect(throwingEngine.getSnapshot().state.hydrateStatus).toBe("unavailable");
+    expect(throwingEngine.getSnapshot().rows).toEqual([]);
+    expect(throwingEngine.getSnapshot().state.items).toEqual([]);
+  });
+});
+
+describe("hydrate", () => {
+  it("loads the latest page via beginHydrate + session.transcript.read + hydrateTranscript", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    expect(engine.getSnapshot().state.hydrateStatus).toBe("loading");
+    client.resolveNext(page({ items: [] }));
+    await tick();
+    const snap = engine.getSnapshot();
+    expect(snap.state.hydrateStatus).toBe("ready");
+    expect(snap.rows).toEqual([]);
+    expect(snap.state.items).toEqual([]);
+    expect(client.begins).toBe(1);
+    expect(client.reads[0]?.name).toBe("session.transcript.read");
+    expect(client.reads[0]?.input).toEqual({ limit: 50 });
+    expect(client.hydrateCalls).toEqual([{ mode: "hydrate", generation: 1 }]);
+    expect(selectConversationViews(client.conversation)).toEqual([]);
+  });
+
+  it("binds hydrate to an inactive archive identity before the page returns", async () => {
+    const client = new FakeClient();
+    client.conversation = reduceConversationState(client.conversation, {
+      type: "hydrate",
+      generation: 0,
+      page: page({ items: [userItem("a1", "active session")] }),
+    });
+    const archiveIdentity: ConversationIdentity = { sessionId: other.sessionId };
+    const engine = engineOf(client, { identity: archiveIdentity });
+    engine.start();
+
+    expect(client.beginIdentities).toEqual([archiveIdentity]);
+    expect(client.conversation.identity).toEqual(archiveIdentity);
+    expect(client.conversation.hydrateStatus).toBe("loading");
+    client.resolveNext(archivePage(other.sessionId, [userItem("b1", "historical session")]));
+    await tick();
+
+    expect(engine.getSnapshot().state.hydrateStatus).toBe("ready");
+    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["b1"]);
+    expect(client.reads[0]?.name).toBe(ARCHIVE_TRANSCRIPT_QUERY_NAME);
+  });
+
+  it("hydrate UNAVAILABLE goes through failTranscriptHydrate and selectConversationHydrate", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.rejectNext({ code: "UNAVAILABLE", message: "bridge down" });
+    await tick();
+    const hydrate = selectConversationHydrate(client.conversation);
+    expect(hydrate.status).toBe("error");
+    expect(hydrate.error).toEqual({ code: "UNAVAILABLE", message: "bridge down" });
+    const snap = engine.getSnapshot();
+    expect(snap.state.hydrateStatus).toBe("error");
+    expect(snap.state.error).toEqual(hydrate.error);
+    expect(snap.state.items).toEqual([]);
+    expect(snap.rows).toEqual([]);
+    expect(snap.demo).toBe(false);
+    expect(snap.state.items.map((item) => item.itemId)).not.toEqual(PREVIEW_CONVO_ITEMS.map((item) => item.itemId));
+  });
+
+  it("discards a late query from a previous hydrate generation", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    engine.start();
+    client.resolveNext(page({ items: [userItem("old", "stale")], sessionId: session }));
+    await tick();
+    expect(engine.getSnapshot().state.items).toEqual([]);
+    client.resolveNext(
+      page({
+        runtimeEpoch: epoch,
+        sessionId: session,
+        items: [userItem("new", "fresh")],
+        hasMoreBefore: false,
+      }),
+    );
+    await tick();
+    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["new"]);
+    expect(client.hydrateCalls.map((entry) => entry.generation)).toEqual([1, 2]);
+  });
+
+  it("prepends older pages with the current generation and does not beginHydrate again", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.resolveNext(page({ items: [userItem("u2", "later")], olderCursor: "older-2" as OpaqueCursor, hasMoreBefore: true }));
+    await tick();
+    const generation = client.conversation.hydrateGeneration;
+    expect(generation).toBe(1);
+    const older = engine.loadOlder();
+    client.resolveNext(page({ items: [userItem("u1", "earlier"), userItem("u2", "later")], hasMoreBefore: false }));
+    await older;
+    expect(client.begins).toBe(1);
+    expect(client.reads[1]?.input.cursor).toBe("older-2");
+    expect(client.hydrateCalls[1]).toEqual({ mode: "prepend", generation });
+    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["u1", "u2"]);
+  });
+});
+
+describe("live merge", () => {
+  it("start then delta then completed stays one assistant node", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, identity, 1);
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.delta",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      blockId: "b1",
+      blockType: "text",
+      delta: "Hel",
+    }, identity, 2);
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.delta",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      blockId: "b1",
+      blockType: "text",
+      delta: "lo",
+    }, identity, 3);
+    const liveRows = buildTimeline(state).filter((row) => row.type === "assistant");
+    expect(liveRows).toHaveLength(1);
+    expect(liveRows[0]).toMatchObject({ itemId: "m1", status: "streaming" });
+    const completed: ConversationRuntimeEvent = {
+      kind: "conversation.message.completed",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      item: assistantItem("m1", "Hello"),
+    };
+    state = applyLiveEvent(state, completed, identity, 4);
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.delta",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      blockId: "b1",
+      blockType: "text",
+      delta: " ignored",
+    }, identity, 5);
+    const rows = buildTimeline(state).filter((row) => row.type === "assistant");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ itemId: "m1", status: "completed" });
+    if (rows[0]?.type === "assistant") {
+      expect(rows[0].segments.some((segment) => segment.type === "text" && segment.text === "Hello")).toBe(true);
+      expect(rows[0].segments.some((segment) => segment.type === "text" && segment.text.includes("ignored"))).toBe(false);
+    }
+  });
+
+  it("tool start/update/end stay one tool row and completed result wins", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, identity, 1);
+    state = applyLiveEvent(state, {
+      kind: "conversation.tool.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      toolCallId: "c1",
+      toolName: "Read",
+      arguments: { path: "package.json" },
+      startedAt: "2026-08-15T00:00:01.000Z",
+    }, identity, 2);
+    state = applyLiveEvent(state, {
+      kind: "conversation.tool.updated",
+      sessionId: session,
+      turnId: "t1",
+      toolCallId: "c1",
+      updateMode: "append",
+      output: "par",
+    }, identity, 3);
+    state = applyLiveEvent(state, {
+      kind: "conversation.tool.updated",
+      sessionId: session,
+      turnId: "t1",
+      toolCallId: "c1",
+      updateMode: "append",
+      output: "tial",
+    }, identity, 4);
+    const before = buildTimeline(state);
+    const liveBatch = before.flatMap((row) => (row.type === "assistant" ? row.segments : [])).find((segment) => segment.type === "batch");
+    expect(liveBatch?.type === "batch" ? liveBatch.tools : []).toHaveLength(1);
+    expect(liveBatch?.type === "batch" ? liveBatch.tools[0]?.output : undefined).toBe("partial");
+    state = applyLiveEvent(state, {
+      kind: "conversation.tool.completed",
+      sessionId: session,
+      turnId: "t1",
+      toolCallId: "c1",
+      result: { type: "toolResult", toolCallId: "c1", toolName: "Read", output: "AUTHORITATIVE", isError: false },
+      completedAt: "2026-08-15T00:00:02.000Z",
+    }, identity, 5);
+    const after = buildTimeline(state).flatMap((row) => (row.type === "assistant" ? row.segments : [])).find((segment) => segment.type === "batch");
+    expect(after?.type === "batch" ? after.tools : []).toHaveLength(1);
+    expect(after?.type === "batch" ? after.tools[0]?.output : undefined).toBe("AUTHORITATIVE");
+    expect(after?.type === "batch" ? after.tools[0]?.status : undefined).toBe("succeeded");
+  });
+
+  it("ignores a completed item whose itemId does not equal messageId", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, identity);
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.completed",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      item: assistantItem("other", "nope"),
+    }, identity);
+    expect(state.items).toEqual([]);
+    expect(state.liveMessages.m1).toBeDefined();
+  });
+
+  it("real engine projects client live state without a second local merge", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.resolveNext(page({ items: [] }));
+    await tick();
+    client.pushLive({
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, 1);
+    client.pushLive({
+      kind: "conversation.tool.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      toolCallId: "c1",
+      toolName: "Read",
+      arguments: { path: "a.ts" },
+      startedAt: "2026-08-15T00:00:00.100Z",
+    }, 2);
+    client.pushLive({
+      kind: "conversation.tool.completed",
+      sessionId: session,
+      turnId: "t1",
+      toolCallId: "c1",
+      completedAt: "2026-08-15T00:00:00.200Z",
+      result: {
+        type: "toolResult",
+        toolCallId: "c1",
+        toolName: "Read",
+        isError: false,
+        data: { totalLines: 7 },
+      },
+    }, 3);
+    const rows = engine.getSnapshot().rows.filter((row) => row.type === "assistant");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ itemId: "m1", status: "streaming", presentation: "process" });
+    const batch = rows[0]?.type === "assistant"
+      ? rows[0].segments.find((segment) => segment.type === "batch")
+      : undefined;
+    expect(batch?.type === "batch" ? batch.tools[0]?.result?.data : undefined).toEqual({ totalLines: 7 });
+    expect(client.reads).toHaveLength(1);
+  });
+
+  it("real path abort keeps the same message text and marks it aborted", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.resolveNext(page({ items: [] }));
+    await tick();
+    client.pushLive({
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, 1);
+    client.pushLive({
+      kind: "conversation.message.delta",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      blockId: "b1",
+      blockType: "text",
+      delta: "partial",
+    }, 2);
+    client.pushLive({
+      kind: "conversation.turn.aborted",
+      sessionId: session,
+      turnId: "t1",
+    }, 3);
+    const rows = engine.getSnapshot().rows.filter((row) => row.type === "assistant");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ itemId: "m1", status: "aborted" });
+    if (rows[0]?.type === "assistant") {
+      expect(rows[0].segments.some((segment) => segment.type === "text" && segment.text === "partial")).toBe(true);
+    }
+    expect(client.conversation.liveMessages.m1?.aborted).toBe(true);
+    expect(client.conversation.liveMessages.m1?.blocks.b1?.text).toBe("partial");
+    expect(client.reads).toHaveLength(1);
+    render(<ConversationItemView row={rows[0]!} />);
+    expect(screen.getByText("已中止")).toBeTruthy();
+    expect(screen.getByText("partial")).toBeTruthy();
+  });
+
+  it("client live message aborted:true projects to an aborted view and DOM chip", () => {
+    const views = selectConversationViews({
+      ...createInitialConversationState(),
+      order: ["m1"],
+      liveMessages: {
+        m1: {
+          messageId: "m1",
+          turnId: "t1",
+          role: "assistant",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          blocks: { b1: { blockId: "b1", blockType: "text", text: "partial" } },
+          completed: false,
+          aborted: true,
+        },
+      },
+    });
+    const rows = rowsFromConversationViews(views);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ itemId: "m1", status: "aborted" });
+    if (rows[0]?.type === "assistant") {
+      expect(rows[0].segments.some((segment) => segment.type === "text" && segment.text === "partial")).toBe(true);
+    }
+    render(<ConversationItemView row={rows[0]!} />);
+    expect(screen.getByText("已中止")).toBeTruthy();
+    expect(screen.getByText("partial")).toBeTruthy();
+  });
+});
+
+describe("pagination and grouping", () => {
+  it("prepends an older page without duplicating item ids", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = hydratePage(state, page({ items: [userItem("u2", "later")], olderCursor: "older-2" as OpaqueCursor, hasMoreBefore: true }), 1, "replace");
+    state = hydratePage(
+      state,
+      page({
+        items: [userItem("u1", "earlier"), userItem("u2", "later")],
+        olderCursor: "older-3" as OpaqueCursor,
+        hasMoreBefore: false,
+      }),
+      1,
+      "prepend",
+    );
+    expect(state.items.map((item) => item.itemId)).toEqual(["u1", "u2"]);
+    expect(state.hasMoreBefore).toBe(false);
+  });
+
+  it("groups consecutive tool calls in one assistant message into a batch", () => {
+    const segments = segmentsFromContent(
+      [
+        { type: "thinking", text: "plan" },
+        { type: "toolCall", toolCallId: "c1", toolName: "Read", arguments: { path: "a.ts" } },
+        { type: "toolResult", toolCallId: "c1", toolName: "Read", output: "a", isError: false },
+        { type: "toolCall", toolCallId: "c2", toolName: "Read", arguments: { path: "b.ts" } },
+        { type: "toolResult", toolCallId: "c2", toolName: "Read", output: "b", isError: false },
+        { type: "text", text: "done" },
+      ],
+      {},
+    );
+    expect(segments.map((segment) => segment.type)).toEqual(["thinking", "batch", "text"]);
+    expect(segments[1]?.type === "batch" ? segments[1].tools.map((tool) => tool.toolCallId) : []).toEqual(["c1", "c2"]);
+  });
+
+  it("merges consecutive process messages and shows one OMP header only on the final reply", () => {
+    const processOne: ConversationItem = {
+      ...assistantItem("process-1", ""),
+      content: [
+        { type: "toolCall", toolCallId: "read-1", toolName: "Read", arguments: { path: "a.ts" } },
+        { type: "toolResult", toolCallId: "read-1", toolName: "Read", output: "a", isError: false },
+      ],
+    };
+    const processTwo: ConversationItem = {
+      ...assistantItem("process-2", ""),
+      content: [
+        { type: "toolCall", toolCallId: "read-2", toolName: "Read", arguments: { path: "b.ts" } },
+        { type: "toolResult", toolCallId: "read-2", toolName: "Read", output: "b", isError: false },
+      ],
+    };
+    const progress = assistantItem("progress", "我先检查一下。");
+    const finalReply = assistantItem("final", "检查完成，这是最终结论。");
+    const items = [userItem("u1", "检查"), progress, processOne, processTwo, finalReply];
+    const itemsById = Object.fromEntries(items.map((item) => [item.itemId, item]));
+    const rows = rowsFromConversationViews(selectConversationViews({
+      ...createInitialConversationState(),
+      order: items.map((item) => item.itemId),
+      itemsById,
+    }));
+
+    const assistants = rows.filter((row) => row.type === "assistant");
+    expect(assistants).toHaveLength(3);
+    expect(assistants.map((row) => row.type === "assistant" ? row.presentation : undefined)).toEqual([
+      "process",
+      "process",
+      "reply",
+    ]);
+    const process = assistants[1];
+    const batches = process?.type === "assistant"
+      ? process.segments.filter((segment) => segment.type === "batch")
+      : [];
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.type === "batch" ? batches[0].tools.map((tool) => tool.toolCallId) : []).toEqual([
+      "read-1",
+      "read-2",
+    ]);
+
+    const { container } = render(<ConvoTranscript rows={rows} />);
+    expect(container.querySelectorAll(".ev-head .role-badge.a")).toHaveLength(1);
+    expect(container.querySelectorAll(".ev-process .ev-batch")).toHaveLength(1);
+    expect(screen.getByText("检查完成，这是最终结论。")).toBeTruthy();
+  });
+
+  it("does not render empty persisted assistants or spin for a missing historical result", () => {
+    const items: ConversationItem[] = [
+      {
+        ...assistantItem("tool-owner", ""),
+        content: [{ type: "toolCall", toolCallId: "missing-result", toolName: "Read", arguments: { path: "a.ts" } }],
+      },
+      {
+        ...assistantItem("empty-assistant", ""),
+        content: [],
+      },
+    ];
+    const rows = buildTimeline({
+      ...emptyConversationState(1),
+      identity,
+      items,
+      hydrateStatus: "ready",
+    });
+    const assistants = rows.filter((row) => row.type === "assistant");
+    expect(assistants).toHaveLength(1);
+    if (assistants[0]?.type === "assistant") {
+      const batch = assistants[0].segments.find((segment) => segment.type === "batch");
+      expect(batch?.type === "batch" ? batch.tools[0]?.status : undefined).toBe("missing");
+    }
+  });
+});
+
+describe("scroll follow", () => {
+  it("follows near the bottom and stops after scrolling up", () => {
+    expect(shouldFollow(distanceFromBottom({ scrollHeight: 1000, scrollTop: 940, clientHeight: 80 }))).toBe(true);
+    expect(shouldFollow(distanceFromBottom({ scrollHeight: 1000, scrollTop: 100, clientHeight: 80 }))).toBe(false);
+  });
+});
+
+describe("composer pending semantics", () => {
+  it("keeps pending as pending after local accept and restores draft on terminal failure", () => {
+    let state = emptyConversationState(1);
+    state = trackPending(state, {
+      requestId: "req-1",
+      text: "hello",
+      draft: "hello",
+      status: "pending",
+      knownItemIds: [],
+    });
+    const pendingRow = buildTimeline(state).find((row) => row.type === "user");
+    expect(pendingRow).toMatchObject({ pending: "pending", text: "hello" });
+    state = failPending(state, "req-1", "rejected by runtime");
+    const failed = buildTimeline(state).find((row) => row.type === "user");
+    expect(failed).toMatchObject({ pending: "failed", error: "rejected by runtime" });
+    expect(state.pendingUsers[0]?.draft).toBe("hello");
+  });
+
+  it("reconciles pending when a new matching user item arrives", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = trackPending(state, {
+      requestId: "req-1",
+      text: "hello",
+      draft: "hello",
+      status: "pending",
+      knownItemIds: [],
+    });
+    state = hydratePage(state, page({ items: [userItem("u1", "hello")], hasMoreBefore: false }), 1, "replace");
+    expect(state.pendingUsers).toEqual([]);
+    expect(buildTimeline(state).filter((row) => row.type === "user")).toHaveLength(1);
+  });
+});
+
+describe("runtime identity and XSS", () => {
+  it("does not merge a page from another session", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = hydratePage(
+      state,
+      page({ runtimeEpoch: other.runtimeEpoch ?? epoch, sessionId: other.sessionId, items: [userItem("x", "nope")] }),
+      1,
+      "replace",
+    );
+    expect(state.items).toEqual([]);
+  });
+
+  it("renders host text as text, not HTML", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "evil",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: '<script>alert(1)</script><img src=x onerror="alert(1)">',
+        }}
+      />,
+    );
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.textContent).toContain("<script>alert(1)</script>");
+  });
+
+  it("renders markdown emphasis and lists in assistant text", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{ type: "text", key: "t1", text: "先看 **browser** 协议，再写 `xd://browser`。\n\n- 步骤一\n- 步骤二" }],
+        }}
+      />,
+    );
+    expect(container.querySelector("strong")?.textContent).toBe("browser");
+    expect(container.querySelector(".chip-code")?.textContent).toBe("xd://browser");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelector("ul")).toBeTruthy();
+  });
+
+  it("renders indented, numbered, and CRLF markdown lists", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md-list",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{
+            type: "text",
+            key: "t1",
+            text: "步骤：\r\n  - 读协议\r\n  - 写实现\r\n\r\n1. 允许一次\r\n2. 取消",
+          }],
+        }}
+      />,
+    );
+    const items = [...container.querySelectorAll("li")].map((node) => node.textContent);
+    expect(items).toEqual(["读协议", "写实现", "允许一次", "取消"]);
+    expect(container.querySelector("ul")).toBeTruthy();
+    expect(container.querySelector("ol")).toBeTruthy();
+  });
+
+  it("pretty-prints JSON write content instead of one raw line", () => {
+    const { container } = render(
+      <ToolBody
+        tool={{
+          toolCallId: "w1",
+          toolName: "Write",
+          status: "succeeded",
+          arguments: { path: "xd://browser", content: '{"action":"run","name":"main"}' },
+        }}
+      />,
+    );
+    const lines = [...container.querySelectorAll(".tc-code .lx")].map((node) => node.textContent);
+    expect(lines.some((line) => line?.includes('"action": "run"'))).toBe(true);
+    expect(lines.length).toBeGreaterThan(1);
+  });
+
+  it("renders structured transcript details for Read and Edit results", () => {
+    const { container } = render(
+      <>
+        <ToolBody
+          tool={{
+            toolCallId: "read-details",
+            toolName: "Read",
+            status: "succeeded",
+            arguments: { path: "a.ts" },
+            result: {
+              type: "toolResult",
+              toolCallId: "read-details",
+              toolName: "Read",
+              output: "fallback",
+              data: { totalLines: 2, displayContent: { text: "one\ntwo" } },
+              isError: false,
+            },
+          }}
+        />
+        <ToolBody
+          tool={{
+            toolCallId: "edit-details",
+            toolName: "Edit",
+            status: "succeeded",
+            result: {
+              type: "toolResult",
+              toolCallId: "edit-details",
+              toolName: "Edit",
+              data: { diff: "-old\n+new" },
+              isError: false,
+            },
+          }}
+        />
+      </>,
+    );
+    expect(container.textContent).toContain("one");
+    expect(container.textContent).toContain("-old");
+    expect(container.textContent).toContain("+new");
+  });
+
+  it("preview transcript shows the demo marker", () => {
+    render(<ConvoTranscript rows={buildTimeline({ ...emptyConversationState(1), items: PREVIEW_CONVO_ITEMS, hydrateStatus: "ready", identity: PREVIEW_CONVO_IDENTITY })} demo />);
+    expect(screen.getByText("演示")).toBeTruthy();
+  });
+
+  it("preview gallery expands every native tool-card body", () => {
+    render(
+      <ConvoTranscript
+        rows={buildTimeline({
+          ...emptyConversationState(1),
+          items: PREVIEW_CONVO_ITEMS,
+          hydrateStatus: "ready",
+          identity: PREVIEW_CONVO_IDENTITY,
+        })}
+        demo
+      />,
+    );
+    const kinds = [...document.querySelectorAll(".tl-item[data-kind]")].map((node) => node.getAttribute("data-kind"));
+    expect(kinds).toEqual(expect.arrayContaining([
+      "think", "read", "write", "edit", "bash", "grep", "glob", "ast_grep", "ast_edit", "ask",
+      "debug", "eval", "github", "lsp", "inspect_image", "browser", "computer", "checkpoint",
+      "rewind", "security_scan", "task", "hub", "todo", "web_search", "retain", "recall",
+      "reflect", "memory_edit", "learn", "manage_skill", "yield", "goal", "generate_image",
+      "tts", "vibe", "mcp", "resolve",
+    ]));
+    expect(document.querySelectorAll(".tl-item.open")).toHaveLength(kinds.length);
+    expect(document.querySelector(".ev-batch.open")).not.toBeNull();
+    expect(document.querySelector(".tc-diff")).not.toBeNull();
+    expect(document.querySelector(".tc-ask")).not.toBeNull();
+    expect(document.querySelector(".tc-todo")).not.toBeNull();
+    expect(document.querySelector(".tc-lsp")).not.toBeNull();
+    expect(document.querySelector(".tc-vibe")).not.toBeNull();
+    expect(document.querySelector(".tc-resolve")).not.toBeNull();
+    expect(document.querySelector(".subagent-strip .sa-card.running")).not.toBeNull();
+  });
+});
+
+describe("gap resync signal", () => {
+  it("keeps later conversation events when eventSeq skips non-conversation traffic", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, identity, 1);
+    state = applyLiveEvent(state, {
+      kind: "conversation.message.delta",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      blockId: "b1",
+      blockType: "text",
+      delta: "x",
+    }, identity, 4);
+    expect(state.resyncRequired).toBe(false);
+    expect(state.liveMessages.m1?.blocks.find((block) => block.blockId === "b1")?.text).toBe("x");
+  });
+
+  it("resync.required re-hydrates the latest page and does not guess deltas", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.resolveNext(page({ items: [userItem("u1", "hello")] }));
+    await tick();
+    expect(client.begins).toBe(1);
+    client.emit({
+      ...envelope(),
+      kind: "resync.required",
+      reason: "gap",
+    });
+    client.emit({
+      ...envelope(),
+      kind: "resync.required",
+      reason: "duplicate-gap-signal",
+    });
+    await tick();
+    expect(client.begins).toBe(2);
+    expect(client.reads).toHaveLength(2);
+    client.resolveNext(page({ items: [userItem("u1", "hello"), userItem("u2", "next")] }));
+    await tick();
+    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["u1", "u2"]);
+    expect(client.hydrateCalls.every((entry) => entry.mode === "hydrate")).toBe(true);
+  });
+});
+
+describe("truncated display", () => {
+  it("shows a visible 已截断 mark for a truncated tool result", () => {
+    render(
+      <ToolBody
+        tool={{
+          toolCallId: "c-trunc",
+          toolName: "Bash",
+          status: "succeeded",
+          output: "stdout truncated for display",
+          truncated: true,
+          result: {
+            type: "toolResult",
+            toolCallId: "c-trunc",
+            toolName: "Bash",
+            output: "stdout truncated for display",
+            isError: false,
+            truncated: true,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByRole("note", { name: "已截断" })).toBeTruthy();
+    expect(screen.getByText("stdout truncated for display")).toBeTruthy();
+  });
+
+  it("does not show 已截断 when the tool result is complete", () => {
+    render(
+      <ToolBody
+        tool={{
+          toolCallId: "c-full",
+          toolName: "Bash",
+          status: "succeeded",
+          output: "ok",
+        }}
+      />,
+    );
+    expect(screen.queryByText("已截断")).toBeNull();
+  });
+
+  it("renders the truncated mark from a hydrated tool-result fixture", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = hydratePage(
+      state,
+      page({
+        items: [{
+          kind: "message",
+          itemId: "m-trunc",
+          parentId: null,
+          createdAt: "2026-08-15T00:00:02.000Z",
+          role: "assistant",
+          content: [
+            { type: "toolCall", toolCallId: "c-trunc", toolName: "Bash", arguments: { command: "ls" } },
+            {
+              type: "toolResult",
+              toolCallId: "c-trunc",
+              toolName: "Bash",
+              output: "stdout truncated for display",
+              isError: false,
+              truncated: true,
+            },
+          ],
+        }],
+      }),
+      1,
+      "replace",
+    );
+    const row = buildTimeline(state).find((entry) => entry.type === "assistant");
+    expect(row?.type).toBe("assistant");
+    render(<ConversationItemView row={row!} />);
+    fireEvent.click(screen.getByRole("button", { name: /运行 1 条命令/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Bash/ }));
+    expect(screen.getByRole("note", { name: "已截断" })).toBeTruthy();
+  });
+
+  it("shows 已截断 on truncated text and thinking blocks", () => {
+    const { rerender } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "m-text",
+          createdAt: "2026-08-15T00:00:02.000Z",
+          status: "completed",
+          segments: [{ type: "text", key: "t1", text: "hello", truncated: true }],
+        }}
+      />,
+    );
+    expect(screen.getByRole("note", { name: "已截断" })).toBeTruthy();
+    rerender(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "m-think",
+          createdAt: "2026-08-15T00:00:02.000Z",
+          status: "completed",
+          segments: [{ type: "thinking", key: "th1", text: "plan", truncated: true }],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /思考/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Think/ }));
+    expect(screen.getByRole("note", { name: "已截断" })).toBeTruthy();
+  });
+});
+
+describe("ver1 batch chain", () => {
+  it("renders a collapsed batch summary instead of a grouped tool card", () => {
+    render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "m-batch",
+          createdAt: "2026-08-15T00:00:02.000Z",
+          status: "completed",
+          segments: [{
+            type: "batch",
+            key: "b1",
+            tools: [
+              { toolCallId: "c1", toolName: "Read", status: "succeeded", arguments: { path: "a.ts" } },
+              { toolCallId: "c2", toolName: "Read", status: "succeeded", arguments: { path: "b.ts" } },
+            ],
+          }],
+        }}
+      />,
+    );
+    expect(document.querySelector(".tool-group")).toBeNull();
+    expect(document.querySelector(".ev-batch")).not.toBeNull();
+    expect(screen.getByText("阅读 2 个文件")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /阅读 2 个文件/ }));
+    expect(screen.getByRole("button", { name: /Read · a\.ts/ })).toBeTruthy();
+  });
+
+  it("keeps tool then thinking segments inside one visual chain", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "m-reverse-chain",
+          createdAt: "2026-08-15T00:00:02.000Z",
+          status: "completed",
+          presentation: "process",
+          segments: [
+            {
+              type: "batch",
+              key: "tools-first",
+              tools: [
+                { toolCallId: "edit-1", toolName: "Edit", status: "succeeded", arguments: { path: "mcp_node_repl.js" } },
+                { toolCallId: "read-1", toolName: "Read", status: "succeeded", arguments: { path: "mcp_node_repl.js" } },
+              ],
+            },
+            { type: "thinking", key: "thinking-after", text: "Still empty. The tool returns empty output." },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelectorAll(".ev-batch")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: /编辑 mcp_node_repl\.js/ }));
+    expect(screen.getByRole("button", { name: /Still empty/ })).toBeTruthy();
+  });
+});
+
+describe("real OMP tool-card bindings", () => {
+  it("routes xd write envelopes to Browser and MCP instead of file Write", () => {
+    const browser = {
+      toolCallId: "xd-browser",
+      toolName: "write",
+      status: "succeeded" as const,
+      arguments: { path: "xd://browser", content: "{\"action\":\"open\"}" },
+      output: "Opened tab main",
+      result: {
+        type: "toolResult" as const,
+        toolCallId: "xd-browser",
+        toolName: "write",
+        isError: false,
+        data: {
+          xdev: {
+            tool: "browser",
+            mode: "execute",
+            args: { action: "open", url: "http://127.0.0.1:4173" },
+            inner: { name: "main", result: "Opened tab main" },
+          },
+        },
+      },
+    };
+    const mcp = {
+      toolCallId: "xd-mcp",
+      toolName: "write",
+      status: "succeeded" as const,
+      arguments: { path: "xd://mcp__node_repl_js", content: "{\"code\":\"6 * 7\"}" },
+      result: {
+        type: "toolResult" as const,
+        toolCallId: "xd-mcp",
+        toolName: "write",
+        isError: false,
+        data: {
+          xdev: {
+            tool: "mcp__node_repl_js",
+            mode: "execute",
+            args: { code: "6 * 7" },
+            inner: { serverName: "node_repl", mcpToolName: "js", rawContent: [{ type: "text", text: "42" }] },
+          },
+        },
+      },
+    };
+    expect(toolKind(browser)).toBe("browser");
+    expect(toolKind(mcp)).toBe("mcp");
+    const wrappedKind = (tool: string) => toolKind({
+      toolCallId: `xd-${tool}`,
+      toolName: "write",
+      status: "succeeded",
+      result: {
+        type: "toolResult",
+        toolCallId: `xd-${tool}`,
+        toolName: "write",
+        isError: false,
+        data: { xdev: { tool, args: {} } },
+      },
+    });
+    expect(wrappedKind("inspect_image")).toBe("inspect_image");
+    expect(wrappedKind("lsp")).toBe("lsp");
+    expect(wrappedKind("powershell")).toBe("bash");
+    expect(wrappedKind("report_issue")).toBe("report_issue");
+    expect(batchSummary([], [mcp]).text).toBe("请求 1 次");
+    const { container } = render(<><ToolBody tool={browser} /><ToolBody tool={mcp} /></>);
+    expect(container.textContent).toContain("http://127.0.0.1:4173");
+    expect(container.textContent).toContain("Opened tab main");
+    expect(container.textContent).toContain("6 * 7");
+    expect(container.textContent).toContain("42");
+  });
+
+  it("renders real file Write and string Edit diff fields", () => {
+    const write = {
+      toolCallId: "write-file",
+      toolName: "write",
+      status: "succeeded" as const,
+      arguments: { path: "src/a.ts", content: "one\ntwo" },
+      result: { type: "toolResult" as const, toolCallId: "write-file", toolName: "write", isError: false, data: { resolvedPath: "D:/src/a.ts" } },
+    };
+    const edit = {
+      toolCallId: "edit-file",
+      toolName: "edit",
+      status: "succeeded" as const,
+      arguments: { path: "src/a.ts", old_string: "old", new_string: "new" },
+      result: {
+        type: "toolResult" as const,
+        toolCallId: "edit-file",
+        toolName: "edit",
+        isError: false,
+        data: { diff: " 11|before\n-12|old\n+12|new", firstChangedLine: 12, path: "src/a.ts" },
+      },
+    };
+    const { container } = render(<><ToolBody tool={write} /><ToolBody tool={edit} /></>);
+    expect(container.textContent).toContain("写入");
+    expect(container.textContent).toContain("2 行");
+    expect(container.textContent).toContain("one");
+    expect(container.querySelectorAll('[data-tool-scroll="both"]')).toHaveLength(2);
+    expect(container.querySelectorAll(".tc-diff .dl")).toHaveLength(3);
+    expect(container.querySelector(".tc-diff .add")?.textContent).toContain("new");
+    expect(container.querySelector(".tc-diff .del")?.textContent).toContain("old");
+    expect(batchSummary([], [edit])).toMatchObject({ add: 1, del: 1 });
+  });
+
+  it("shows Write/Edit line stats on tool rows and an optional Edit summary", () => {
+    const write = {
+      toolCallId: "write-title",
+      toolName: "write",
+      status: "succeeded" as const,
+      arguments: { path: "src/a.ts", content: "one\ntwo" },
+    };
+    const edit = {
+      toolCallId: "edit-title",
+      toolName: "edit",
+      status: "succeeded" as const,
+      arguments: { path: "src/a.ts", i: "更新配置项" },
+      result: {
+        type: "toolResult" as const,
+        toolCallId: "edit-title",
+        toolName: "edit",
+        isError: false,
+        data: { diff: "-12|old\n+12|new" },
+      },
+    };
+    expect(toolDiffStats(write)).toEqual({ add: 2, del: 0 });
+    expect(toolDiffStats(edit)).toEqual({ add: 1, del: 1 });
+
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "tool-title-stats",
+          createdAt: "2026-08-15T00:00:02.000Z",
+          status: "completed",
+          presentation: "process",
+          segments: [{ type: "batch", key: "stats", tools: [write, edit] }],
+        }}
+      />,
+    );
+    fireEvent.click(container.querySelector(".batch-sum") as HTMLButtonElement);
+    expect(container.querySelector(".batch-chain-inner")).not.toBeNull();
+    expect(container.querySelector('[data-kind="write"] .tl-diff .add')?.textContent).toBe("+2");
+    expect(container.querySelector('[data-kind="edit"] .tl-diff .add')?.textContent).toBe("+1");
+    expect(container.querySelector('[data-kind="edit"] .tl-diff .del')?.textContent).toBe("−1");
+
+    const editButton = screen.getByRole("button", { name: /Edit/ });
+    fireEvent.click(editButton);
+    expect(container.querySelector(".tc-edit-summary")?.textContent).toBe("更新配置项");
+    fireEvent.click(editButton);
+    expect(container.querySelector('[data-kind="edit"]')?.classList.contains("open")).toBe(false);
+    expect(container.querySelector('[data-kind="edit"] .tl-card')).not.toBeNull();
+  });
+
+  it("renders real Read, Bash, Grep, and Glob result shapes", () => {
+    const read = {
+      toolCallId: "read-real", toolName: "read", status: "succeeded" as const,
+      arguments: { path: "src/a.ts" },
+      result: { type: "toolResult" as const, toolCallId: "read-real", toolName: "read", isError: false, data: { totalLines: 2, fileSize: 8, displayContent: { text: "one\ntwo", startLine: 4, lineNumbers: [4, 5] } } },
+    };
+    const bash = {
+      toolCallId: "bash-real", toolName: "bash", status: "succeeded" as const,
+      arguments: { command: "npm test", cwd: "D:/repo" }, output: "ok",
+      result: { type: "toolResult" as const, toolCallId: "bash-real", toolName: "bash", isError: false, data: { exitCode: 0, wallTimeMs: 1250, timeoutSeconds: 30 } },
+    };
+    const grep = {
+      toolCallId: "grep-real", toolName: "grep", status: "succeeded" as const,
+      arguments: { pattern: "needle", path: "src" },
+      result: { type: "toolResult" as const, toolCallId: "grep-real", toolName: "grep", isError: false, data: { matchCount: 2, fileCount: 1, fileMatches: [{ path: "src/a.ts", count: 2 }], displayContent: "# src\n## a.ts\n  4│needle" } },
+    };
+    const glob = {
+      toolCallId: "glob-real", toolName: "glob", status: "succeeded" as const,
+      arguments: { path: "src", pattern: "*.ts" },
+      result: { type: "toolResult" as const, toolCallId: "glob-real", toolName: "glob", isError: false, data: { fileCount: 1, files: ["src/a.ts"], truncated: false } },
+    };
+    const { container } = render(<><ToolBody tool={read} /><ToolBody tool={bash} /><ToolBody tool={grep} /><ToolBody tool={glob} /></>);
+    expect(container.textContent).toContain("one");
+    expect(container.querySelector('.tc-code[data-tool-scroll="both"]')).not.toBeNull();
+    expect(container.textContent).toContain("1.25s");
+    expect(container.textContent).toContain("src/a.ts");
+    expect(container.textContent).toContain("4│needle");
+  });
+
+  it("renders real Eval, Ask, Task, Hub, and Web Search result shapes", () => {
+    const evalTool = {
+      toolCallId: "eval-real", toolName: "eval", status: "succeeded" as const,
+      arguments: { language: "py", title: "probe", code: "print(42)" },
+      result: { type: "toolResult" as const, toolCallId: "eval-real", toolName: "eval", isError: false, data: { language: "python", cells: [{ index: 0, title: "probe", code: "print(42)", language: "python", output: "42", status: "complete", exitCode: 0, durationMs: 25 }] } },
+    };
+    const ask = {
+      toolCallId: "ask-real", toolName: "ask", status: "succeeded" as const,
+      arguments: { questions: [{ question: "怎么处理？" }] }, output: "User selected: 修复它",
+      result: { type: "toolResult" as const, toolCallId: "ask-real", toolName: "ask", isError: false, data: { question: "怎么处理？", options: ["修复它", "保持现状"], multi: false, selectedOptions: ["修复它"] } },
+    };
+    const task = {
+      toolCallId: "task-real", toolName: "task", status: "succeeded" as const,
+      arguments: { context: "# Goal\n检查代码", tasks: [{ name: "audit", task: "审查" }] },
+      result: { type: "toolResult" as const, toolCallId: "task-real", toolName: "task", isError: false, data: { totalDurationMs: 1200, progress: [{ id: "audit", status: "completed", toolCount: 3, requests: 2, tokens: 500, durationMs: 1200 }] } },
+    };
+    const hub = {
+      toolCallId: "hub-real", toolName: "hub", status: "succeeded" as const,
+      arguments: { op: "jobs" },
+      result: { type: "toolResult" as const, toolCallId: "hub-real", toolName: "hub", isError: false, data: { op: "jobs", jobs: [{ id: "audit", type: "task", status: "running", label: "audit", durationMs: 1300, resolvedModel: "deepseek" }] } },
+    };
+    const web = {
+      toolCallId: "web-real", toolName: "web_search", status: "succeeded" as const,
+      arguments: { query: "OMP Studio" }, output: "[1] Official result",
+      result: { type: "toolResult" as const, toolCallId: "web-real", toolName: "web_search", isError: false, data: { response: { provider: "google", sources: [{ title: "Official result", url: "https://example.com", snippet: "summary" }] } } },
+    };
+    const { container } = render(<><ToolBody tool={evalTool} /><ToolBody tool={ask} /><ToolBody tool={task} /><ToolBody tool={hub} /><ToolBody tool={web} /></>);
+    expect(container.textContent).toContain("42");
+    expect(container.querySelector(".ask-opt.is-on")?.textContent).toContain("修复它");
+    expect(container.textContent).toContain("audit");
+    expect(container.textContent).toContain("running");
+    expect(container.textContent).toContain("Official result");
+    expect(container.textContent).toContain("https://example.com");
+  });
+});

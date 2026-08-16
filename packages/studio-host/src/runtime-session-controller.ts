@@ -1,19 +1,38 @@
 import type {
   CommandId,
   CommandLedgerEntry,
+  ConversationTranscriptPage,
+  OpaqueCursor,
   RuntimeEpoch,
   RuntimeId,
+  StudioPendingInteraction,
   StudioReceipt,
   StudioRequest,
 } from "@omp-studio/studio-protocol";
 import { StudioBridgeClient } from "./bridge-client.js";
 import { CommandLedger } from "./command-ledger.js";
+import { StudioHostError } from "./command-arbiter.js";
+import {
+  ConversationEventFanout,
+  type StudioConversationForward,
+} from "./conversation-events.js";
+import {
+  InteractionEventFanout,
+  type StudioInteractionForward,
+} from "./interaction-events.js";
+import { TelemetryEventFanout, type StudioTelemetryForward } from "./telemetry-events.js";
 import { RuntimePublicationStore, type RuntimePublication } from "./runtime-publication.js";
 
 const TERMINAL = new Set<CommandLedgerEntry["status"]>(["completed", "failed", "rejected", "outcome_unknown"]);
 
 export class StudioRuntimeSessionController {
   readonly #unsubscribeProjection: () => void;
+  readonly #unsubscribeEvent: () => void;
+  readonly #unsubscribeResync: () => void;
+  readonly #conversation = new ConversationEventFanout();
+  readonly #interaction = new InteractionEventFanout();
+  readonly #telemetry = new TelemetryEventFanout();
+  readonly #publicationListeners = new Set<(publication: RuntimePublication) => void>();
 
   constructor(
     private readonly bridge: StudioBridgeClient,
@@ -21,8 +40,28 @@ export class StudioRuntimeSessionController {
     private readonly publications = new RuntimePublicationStore(),
   ) {
     this.#unsubscribeProjection = bridge.onProjectionChanged((snapshot) => {
-      this.publications.publish(snapshot, this.ledger.snapshot());
+      this.#publish(snapshot);
     });
+    this.#unsubscribeEvent = bridge.onEvent((envelope) => {
+      this.#conversation.forward(envelope);
+      this.#telemetry.forward(envelope);
+      this.#interaction.forward(envelope, (commandId) => this.requestIdForCommandId(commandId));
+    });
+    this.#unsubscribeResync = bridge.onResyncRequired(() => {
+      this.#conversation.emitResync("conversation gap; re-query session.transcript.read");
+    });
+  }
+
+  #publish(snapshot: Parameters<RuntimePublicationStore["publish"]>[0]): RuntimePublication {
+    const publication = this.publications.publish(snapshot, this.ledger.snapshot());
+    for (const listener of [...this.#publicationListeners]) {
+      try {
+        listener(publication);
+      } catch {
+        // Isolate publication consumers from the Bridge/ledger path.
+      }
+    }
+    return publication;
   }
 
   async refresh(): Promise<RuntimePublication> {
@@ -30,7 +69,7 @@ export class StudioRuntimeSessionController {
     for (const receipt of response.terminalReceipts) {
       if (this.ledger.getByRequestId(receipt.requestId) !== undefined) this.ledger.reconcileReceipt(receipt);
     }
-    return this.publications.publish(response.snapshot, this.ledger.snapshot());
+    return this.#publish(response.snapshot);
   }
 
   async invoke(request: StudioRequest): Promise<StudioReceipt> {
@@ -38,28 +77,81 @@ export class StudioRuntimeSessionController {
     if (snapshot === undefined) throw new Error("Runtime snapshot is required before command invocation");
     const provisionalCommandId = request.requestId as unknown as CommandId;
     this.ledger.request(provisionalCommandId, request, snapshot.runtimeId, snapshot.stateVersion);
-    this.publications.publish(snapshot, this.ledger.snapshot());
+    this.#publish(snapshot);
     try {
       return await this.bridge.invoke(request, (receipt) => {
         this.ledger.reconcileReceipt(receipt);
         const current = this.bridge.projectionSnapshot();
-        if (current !== undefined) this.publications.publish(current, this.ledger.snapshot());
+        if (current !== undefined) this.#publish(current);
       });
     } catch (error) {
       const entry = this.ledger.getByRequestId(request.requestId);
       if (entry !== undefined && !TERMINAL.has(entry.status)) {
         this.ledger.transition(entry.commandId, "outcome_unknown", { errorCode: "OUTCOME_UNKNOWN" });
         const current = this.bridge.projectionSnapshot();
-        if (current !== undefined) this.publications.publish(current, this.ledger.snapshot());
+        if (current !== undefined) this.#publish(current);
       }
       throw error;
     }
   }
 
+  /**
+   * Read the active-branch transcript. This is a query, not a Composer
+   * command: it is not recorded on the command ledger.
+   */
+  async readTranscript(
+    input: { readonly cursor?: OpaqueCursor; readonly limit?: number } = {},
+  ): Promise<ConversationTranscriptPage> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime snapshot is required before transcript read");
+    }
+    const page = await this.bridge.readTranscript(input);
+    const current = this.bridge.projectionSnapshot();
+    if (current === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime snapshot disappeared during transcript read");
+    }
+    if (page.runtimeEpoch !== current.runtimeEpoch) {
+      throw new StudioHostError(
+        "RUNTIME_EPOCH_STALE",
+        "Transcript page runtime epoch does not match the current session",
+      );
+    }
+    if (page.sessionId !== current.sessionId) {
+      throw new StudioHostError("CURSOR_STALE", "Transcript page session does not match the current session");
+    }
+    return page;
+  }
+
+  onConversationEvent(listener: (event: StudioConversationForward) => void): () => void {
+    return this.#conversation.onEvent(listener);
+  }
+
+  onConversationResync(listener: (reason: string) => void): () => void {
+    return this.#conversation.onResync(listener);
+  }
+
+  onInteractionEvent(listener: (event: StudioInteractionForward) => void): () => void {
+    return this.#interaction.onEvent(listener);
+  }
+
+  onTelemetryEvent(listener: (event: StudioTelemetryForward) => void): () => void {
+    return this.#telemetry.onEvent(listener);
+  }
+
+  requestIdForCommandId(commandId: CommandId): string | undefined {
+    return this.ledger.get(commandId)?.requestId ?? this.ledger.getByRequestId(String(commandId))?.requestId;
+  }
+
+  messagesCursor(): OpaqueCursor | undefined {
+    return this.bridge.messagesCursor();
+  }
+
   runtimeLost(runtimeId: RuntimeId, runtimeEpoch: RuntimeEpoch): CommandLedgerEntry[] {
     const changed = this.ledger.markRuntimeLost(runtimeId, runtimeEpoch);
     const snapshot = this.bridge.projectionSnapshot();
-    if (snapshot !== undefined) this.publications.publish(snapshot, this.ledger.snapshot());
+    if (snapshot !== undefined) this.#publish(snapshot);
+    this.#conversation.emitResync("runtime lost; re-query session.transcript.read");
     return changed;
   }
 
@@ -67,7 +159,25 @@ export class StudioRuntimeSessionController {
     return this.publications.current();
   }
 
+  /** Recover the Runtime-owned pending interaction when a resident session is reattached. */
+  pendingInteraction(): StudioPendingInteraction | undefined {
+    return this.publications.current()?.snapshot.pendingInteraction;
+  }
+
+  onPublication(listener: (publication: RuntimePublication) => void): () => void {
+    this.#publicationListeners.add(listener);
+    return () => {
+      this.#publicationListeners.delete(listener);
+    };
+  }
+
   dispose(): void {
     this.#unsubscribeProjection();
+    this.#unsubscribeEvent();
+    this.#unsubscribeResync();
+    this.#publicationListeners.clear();
+    this.#conversation.dispose();
+    this.#interaction.dispose();
+    this.#telemetry.dispose();
   }
 }

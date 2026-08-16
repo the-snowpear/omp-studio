@@ -18,7 +18,30 @@ export {
   type ClientEntitiesState,
   type ClientState,
   type ClientUiState,
+  selectSessionTelemetry,
 } from "./reducer.js";
-export { StudioClientImpl } from "./studio-client.js";
+export { StudioClientImpl, type ConversationHydrateClient } from "./studio-client.js";
 export { MemoryClientTransport, type MemoryTransportHandlers } from "./memory-transport.js";
 export { eventMatchesScope } from "./scope.js";
+export {
+  CONVERSATION_STATE_ITEM_CAP,
+  clearConversationState,
+  conversationHintFromCursor,
+  createInitialConversationState,
+  selectConversationHydrate,
+  selectConversationViews,
+  type ConversationHydrateStatus,
+  type ConversationIdentity,
+  type ConversationLiveMessage,
+  type ConversationLiveTool,
+  type ConversationNotice,
+  type ConversationState,
+  type ConversationView,
+} from "./conversation-state.js";
+export { reduceConversationState, type ConversationAction } from "./conversation-reducer.js";
+export {
+  isComposerTerminal,
+  selectComposerReceipt,
+  selectComposerTerminal,
+  type ComposerReceiptView,
+} from "./receipt-selectors.js";

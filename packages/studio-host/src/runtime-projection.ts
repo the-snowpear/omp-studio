@@ -1,14 +1,17 @@
 import type {
   EventSeq,
+  OpaqueCursor,
   OperatorStateSnapshot,
   StudioEventEnvelope,
   StudioHelloResponse,
   StudioSnapshotResponse,
+  SessionTelemetryEvent,
 } from "@omp-studio/studio-protocol";
 
 export type RuntimeEventApplyResult = "applied" | "stale" | "gap" | "snapshot-required";
 
 type StateChangedEvent = { kind: "state.changed"; snapshot: OperatorStateSnapshot };
+type TelemetryChangedEvent = SessionTelemetryEvent;
 
 function isStateChangedEvent(value: unknown): value is StateChangedEvent {
   return (
@@ -20,14 +23,20 @@ function isStateChangedEvent(value: unknown): value is StateChangedEvent {
   );
 }
 
+function isTelemetryChangedEvent(value: unknown): value is TelemetryChangedEvent {
+  return value !== null && typeof value === "object" && "kind" in value && value.kind === "session.telemetry.changed";
+}
+
 export class RuntimeProjection {
   #hello: StudioHelloResponse | undefined;
   #snapshot: OperatorStateSnapshot | undefined;
+  #messagesCursor: OpaqueCursor | undefined;
   #lastEventSeq = 0 as EventSeq;
   #snapshotRequired = true;
 
   beginConnection(hello: StudioHelloResponse): void {
     this.#hello = structuredClone(hello);
+    this.#messagesCursor = undefined;
     this.#snapshotRequired = true;
   }
 
@@ -44,6 +53,7 @@ export class RuntimeProjection {
       throw new Error("Runtime snapshot identity does not match hello");
     }
     this.#snapshot = structuredClone(response.snapshot);
+    this.#messagesCursor = response.messagesCursor;
     this.#lastEventSeq = response.lastEventSeq;
     this.#snapshotRequired = false;
     return structuredClone(response.snapshot);
@@ -69,6 +79,15 @@ export class RuntimeProjection {
         return "gap";
       }
       this.#snapshot = structuredClone(envelope.event.snapshot);
+    } else if (isTelemetryChangedEvent(envelope.event)) {
+      if (envelope.event.sessionId !== snapshot.sessionId || envelope.event.telemetry.sessionId !== snapshot.sessionId) {
+        // Event sequence is runtime-wide. A late telemetry event from the
+        // prior session must be ignored without turning the next event into a
+        // false gap.
+        this.#lastEventSeq = envelope.eventSeq;
+        return "stale";
+      }
+      this.#snapshot = { ...snapshot, telemetry: structuredClone(envelope.event.telemetry) };
     }
     this.#lastEventSeq = envelope.eventSeq;
     return "applied";
@@ -76,6 +95,10 @@ export class RuntimeProjection {
 
   snapshot(): OperatorStateSnapshot | undefined {
     return this.#snapshot === undefined ? undefined : structuredClone(this.#snapshot);
+  }
+
+  messagesCursor(): OpaqueCursor | undefined {
+    return this.#messagesCursor;
   }
 
   lastEventSeq(): EventSeq {

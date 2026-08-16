@@ -36,6 +36,8 @@ export type PaletteItem = {
   hint?: string;
   keywords?: string;
   recentIndex?: number;
+  disabled?: boolean;
+  disabledReason?: string;
   action: PaletteAction;
 };
 
@@ -102,13 +104,20 @@ function recents(input: PaletteCatalogInput): PaletteItem[] {
   });
 }
 
-function staticGroups(): PaletteGroup[] {
+function staticGroups(preview: boolean): PaletteGroup[] {
   return [
     {
       id: "recommended",
       label: "推荐",
       items: [
-        { id: "new-chat", icon: "plus", label: "新建对话", hint: "Ctrl+Shift+O", keywords: "new chat thread", action: { kind: "newChat" } },
+        {
+          id: "new-chat",
+          icon: "plus",
+          label: "新建对话",
+          hint: "Ctrl+Shift+O",
+          keywords: "new chat thread",
+          action: { kind: "newChat" },
+        },
         { id: "pick-folder", icon: "folder-open", label: "打开本地文件夹", keywords: "open project workspace folder", action: { kind: "pickProject" } },
         { id: "history", icon: "history", label: "会话历史", keywords: "time travel", action: { kind: "route", route: "history" } },
       ],
@@ -207,7 +216,7 @@ export function buildPaletteGroups(input: PaletteCatalogInput): PaletteGroup[] {
   const groups: PaletteGroup[] = [];
   const chat = recents(input).filter((item) => matches(item, query));
   if (chat.length) groups.push({ id: "chat", label: "聊天", items: chat });
-  for (const group of staticGroups()) {
+  for (const group of staticGroups(input.preview)) {
     const items = group.items.filter((item) => matches(item, query));
     if (items.length) groups.push({ ...group, items });
   }

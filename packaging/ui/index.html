@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none';" />
+<link rel="icon" href="app-icon.png" />
+<title>OMP Studio 安装向导 · 视觉原型</title>
+<script>
+  if (new URLSearchParams(window.location.search).get("host") === "installer") {
+    document.documentElement.setAttribute("data-host", "installer");
+  }
+</script>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<!-- lucide 图标以 inline SVG 内联（stroke 风格，24 viewBox） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-arrow-r" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></g>
+    <g id="i-arrow-l" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></g>
+    <g id="i-info" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></g>
+    <g id="i-box" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></g>
+    <g id="i-term" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2 2-2 2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/></g>
+    <g id="i-blocks" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="14" y="3" rx="1"/><path d="M10 21V8a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H3"/></g>
+    <g id="i-list" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></g>
+    <g id="i-ext" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></g>
+    <g id="i-folder" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></g>
+    <g id="i-drive" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/></g>
+    <g id="i-monitor" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></g>
+    <g id="i-sun" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></g>
+    <g id="i-moon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></g>
+    <g id="i-minus" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></g>
+    <g id="i-x" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>
+    <g id="i-warn" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></g>
+    <g id="logo-glyph"><rect x="18" y="19" width="60" height="13" rx="4.5"/><rect x="36.5" y="19" width="12.5" height="43" rx="4.5"/><rect x="57" y="19" width="12.5" height="58" rx="4.5"/></g>
+  </defs>
+</svg>
+
+<div class="omp-stage" id="stage" data-theme="system">
+  <div class="stage-caption"><strong>OMP Studio</strong> 安装向导 · 视觉原型 <span class="dot-sep"></span> 720 × 480</div>
+  <div class="stage-tools">
+    <div class="theme-switch" role="group" aria-label="主题">
+      <button data-t="system"><svg viewBox="0 0 24 24"><use href="#i-monitor"/></svg> 跟随系统</button>
+      <button data-t="light"><svg viewBox="0 0 24 24"><use href="#i-sun"/></svg> 亮色</button>
+      <button data-t="dark"><svg viewBox="0 0 24 24"><use href="#i-moon"/></svg> 暗色</button>
+    </div>
+  </div>
+
+  <div class="scale-wrap" id="scaleWrap">
+    <div class="omp-window">
+      <!-- 标题栏 -->
+      <div class="titlebar">
+        <span class="tb-icon"><img src="app-icon.png" alt="" /></span>
+        <span class="tb-title">OMP Studio 安装 <span>v1.4.2</span></span>
+        <div class="tb-buttons">
+          <button class="tb-btn" aria-label="最小化" tabindex="-1"><svg viewBox="0 0 24 24"><use href="#i-minus"/></svg></button>
+          <button class="tb-btn tb-close" id="tbClose" aria-label="关闭"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
+      <div class="body">
+        <!-- 第 1 步 · 欢迎 -->
+        <div class="step" data-step="0">
+          <aside class="banner">
+            <div class="banner-dots"><i></i><i></i><i></i></div>
+            <div class="logo-64">
+              <svg width="56" height="56" viewBox="0 0 96 96" role="img" aria-label="OMP Studio">
+                <defs><linearGradient id="lg1" x1="16" y1="14" x2="80" y2="84" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F95BD4"/><stop offset=".52" stop-color="#8B5CF6"/><stop offset="1" stop-color="#4C8DFF"/></linearGradient></defs>
+                <rect x="2.5" y="2.5" width="91" height="91" rx="24" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.22)"/>
+                <g fill="url(#lg1)"><use href="#logo-glyph"/></g>
+              </svg>
+            </div>
+            <h2>OMP Studio</h2>
+            <p class="tagline">面向 OMP 开发者的桌面工作台</p>
+            <span class="chip">v1.4.2 · x64</span>
+            <p class="runtime-note">&gt;_ 内置 <b>OMP Runtime 1.4.2</b></p>
+            <svg class="watermark" viewBox="0 0 96 96" aria-hidden="true">
+              <defs><linearGradient id="lg1w" x1="0" y1="0" x2="96" y2="96" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#9db8ff"/></linearGradient></defs>
+              <g fill="url(#lg1w)"><use href="#logo-glyph"/></g>
+            </svg>
+          </aside>
+          <section class="pane">
+            <h1>欢迎使用 OMP Studio 安装向导</h1>
+            <p class="lede">本向导将在你的计算机上安装 OMP Studio 1.4.2，随附内置 OMP 运行时、原生 PTY 终端与 Agent / MCP 扩展支持，安装完成即可使用。</p>
+            <div class="features">
+              <div class="feature"><span class="f-icon"><svg viewBox="0 0 24 24"><use href="#i-box"/></svg></span>
+                <div><div class="f-title">内置 OMP 运行时</div><div class="f-desc">随应用一并安装与升级，无需手动配置开发环境。</div></div>
+              </div>
+              <div class="feature"><span class="f-icon"><svg viewBox="0 0 24 24"><use href="#i-term"/></svg></span>
+                <div><div class="f-title">原生 PTY 终端</div><div class="f-desc">低延迟渲染，完整支持转义序列与真彩色输出。</div></div>
+              </div>
+              <div class="feature"><span class="f-icon"><svg viewBox="0 0 24 24"><use href="#i-blocks"/></svg></span>
+                <div><div class="f-title">Agent 与 MCP 扩展</div><div class="f-desc">连接模型与工具链，按需扩展工作台能力。</div></div>
+              </div>
+            </div>
+            <p class="foot-hint"><svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg> 单击「下一步」继续。</p>
+          </section>
+        </div>
+
+        <!-- 第 2 步 · 安装位置 -->
+        <div class="step" data-step="1">
+          <div class="form-page">
+            <header class="headband"><h1>选择安装位置</h1><p>选择要安装 OMP Studio 的文件夹。</p></header>
+            <div class="form">
+              <div class="group">
+                <span class="g-label">目标文件夹</span>
+                <div class="path-row">
+                  <input class="input" id="pathInput" value="C:\Users\Ada\AppData\Local\Programs\OMP Studio" spellcheck="false" aria-label="安装路径"/>
+                  <button class="btn small" id="browseBtn"><svg viewBox="0 0 24 24"><use href="#i-folder"/></svg> 浏览(R)…</button>
+                </div>
+              </div>
+              <div class="group">
+                <span class="g-label">所需磁盘空间</span>
+                <div class="space-block">
+                  <div class="meter" role="img" aria-label="磁盘空间指示">
+                    <div class="used" id="meterUsed"></div>
+                    <div class="req" id="meterReq"></div>
+                  </div>
+                  <div class="space-legend">
+                    <span class="k req"><i></i>所需空间 <span class="val">328 MB</span></span>
+                    <span class="k free"><i></i>已使用 <span class="val">181 GB</span></span>
+                    <span class="spacer"></span>
+                    <span class="drive">磁盘 C:\ · 可用 55.7 GB / 共 237 GB</span>
+                  </div>
+                </div>
+              </div>
+              <div class="group" style="margin-top:2px">
+                <span class="g-label">附加任务</span>
+                <label class="check"><input type="checkbox" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">将 OMP Studio 添加到 PATH 环境变量(推荐)</span></label>
+                <label class="check"><input type="checkbox" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">创建桌面快捷方式</span></label>
+              </div>
+              <p class="foot-hint" style="margin-top:auto"><svg viewBox="0 0 24 24"><use href="#i-info"/></svg> 安装完成后，可通过「设置 → 应用」卸载 OMP Studio。</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第 3 步 · 安装进度 -->
+        <div class="step" data-step="2">
+          <div class="form-page">
+            <header class="headband"><h1>正在安装 OMP Studio</h1><p>请稍候，正在将 OMP Studio 安装到你的计算机。</p></header>
+            <div class="form" style="gap:12px">
+              <div class="progress-block">
+                <div class="phase-row"><span class="phase" id="phase">正在准备…</span><span class="pct" id="pct">0 %</span></div>
+                <div class="progress" role="progressbar"><div class="bar" id="bar"></div></div>
+                <div class="file-row" id="fileRow">&nbsp;</div>
+              </div>
+              <span class="log-label"><svg viewBox="0 0 24 24"><use href="#i-list"/></svg> 详细信息</span>
+              <div class="logview" id="logview"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第 4 步 · 完成 -->
+        <div class="step" data-step="3">
+          <aside class="banner">
+            <div class="banner-dots"><i></i><i></i><i></i></div>
+            <div class="logo-64">
+              <svg width="56" height="56" viewBox="0 0 96 96" role="img" aria-label="OMP Studio">
+                <defs><linearGradient id="lg2" x1="16" y1="14" x2="80" y2="84" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F95BD4"/><stop offset=".52" stop-color="#8B5CF6"/><stop offset="1" stop-color="#4C8DFF"/></linearGradient></defs>
+                <rect x="2.5" y="2.5" width="91" height="91" rx="24" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.22)"/>
+                <g fill="url(#lg2)"><use href="#logo-glyph"/></g>
+              </svg>
+            </div>
+            <h2>OMP Studio</h2>
+            <p class="tagline">面向 OMP 开发者的桌面工作台</p>
+            <span class="chip">v1.4.2 · x64</span>
+            <p class="runtime-note">&gt;_ 运行时已就绪 · <b>omp://</b> 已注册</p>
+            <svg class="watermark" viewBox="0 0 96 96" aria-hidden="true">
+              <defs><linearGradient id="lg2w" x1="0" y1="0" x2="96" y2="96" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#9db8ff"/></linearGradient></defs>
+              <g fill="url(#lg2w)"><use href="#logo-glyph"/></g>
+            </svg>
+          </aside>
+          <section class="pane finish-pane">
+            <div class="success-mark" aria-hidden="true" id="successMark">
+              <span class="halo"></span>
+              <svg viewBox="0 0 62 62" fill="none"><circle class="ring" cx="31" cy="31" r="27.5"/><path class="tick" d="M20 32.5l7.5 7L42 24.5"/></svg>
+            </div>
+            <h1 class="finish-item" style="animation-delay:240ms">安装完成</h1>
+            <p class="lede finish-item" style="animation-delay:320ms">OMP Studio 已成功安装，运行时与扩展组件均已就绪。</p>
+            <div class="summary finish-item" style="animation-delay:420ms">
+              <div class="row"><span class="k">安装位置</span><span class="v" id="sumPath">C:\Users\Ada\AppData\Local\Programs\OMP Studio</span></div>
+              <div class="row"><span class="k">产品版本</span><span class="v ui-font">OMP Studio 1.4.2 (x64)</span></div>
+              <div class="row"><span class="k">内置运行时</span><span class="v ui-font">OMP Runtime 1.4.2 · PTY · MCP</span></div>
+            </div>
+            <div class="finish-actions finish-item" style="animation-delay:520ms">
+              <label class="check"><input type="checkbox" id="runCheck" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">运行 OMP Studio(R)<small>勾选后，关闭向导将自动启动</small></span></label>
+              <a class="link" href="#" onclick="return false">查看发行说明 <svg viewBox="0 0 24 24"><use href="#i-ext"/></svg></a>
+            </div>
+          </section>
+        </div>
+
+        <!-- 取消确认 -->
+        <div class="overlay" id="confirmOv" hidden>
+          <div class="dialog">
+            <div class="d-head">
+              <span class="d-icon"><svg viewBox="0 0 24 24"><use href="#i-warn"/></svg></span>
+              <div><h3>取消安装</h3><p class="d-msg" id="confirmMsg">确定要退出 OMP Studio 安装向导吗？安装尚未完成。</p></div>
+            </div>
+            <div class="d-actions">
+              <button class="btn" id="confirmQuit">退出安装(Q)</button>
+              <button class="btn primary" id="confirmStay">继续安装</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 浏览文件夹 -->
+        <div class="overlay" id="browseOv" hidden>
+          <div class="dialog browser">
+            <h3>浏览文件夹</h3>
+            <div class="tree" id="tree"></div>
+            <div class="sel-path" id="selPath"></div>
+            <div class="d-actions">
+              <button class="btn" id="browseCancel">取消</button>
+              <button class="btn primary" id="browseOk">确定</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部操作条 -->
+      <div class="footer">
+        <span class="hint" id="footHint"></span>
+        <span class="spacer"></span>
+        <div class="f-group" data-for="0">
+          <button class="btn js-cancel">取消</button>
+          <button class="btn primary js-next">下一步(N) <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg></button>
+        </div>
+        <div class="f-group" data-for="1">
+          <button class="btn js-back"><svg viewBox="0 0 24 24"><use href="#i-arrow-l"/></svg> 上一步(B)</button>
+          <button class="btn primary js-next">安装(I)</button>
+          <button class="btn js-cancel">取消</button>
+        </div>
+        <div class="f-group" data-for="2">
+          <button class="btn" disabled><svg viewBox="0 0 24 24"><use href="#i-arrow-l"/></svg> 上一步(B)</button>
+          <button class="btn" disabled>下一步(N) <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg></button>
+          <button class="btn js-cancel">取消</button>
+        </div>
+        <div class="f-group" data-for="3">
+          <button class="btn primary" id="finishBtn">完成(F)</button>
+        </div>
+      </div>
+
+      <div class="toast" id="toast" hidden><span class="spin"></span> <span id="toastMsg"></span></div>
+    </div>
+  </div>
+
+  <div class="stage-note">
+    <span><b>Enter</b> 下一步 · <b>Esc</b> 取消 · 主题默认跟随系统，可在右上覆盖</span>
+    <span class="motion-badge"><i></i> 动效 <span id="motionText">标准</span> · <span class="mono">prefers-reduced-motion</span> 已适配</span>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var stage = document.getElementById("stage");
+  var hostMode = document.documentElement.getAttribute("data-host") === "installer";
+  var installerShell = window.installerShell;
+  var DURATION = 8600, step = -1, prevStep = null, simTimers = [], raf = 0;
+  var DEFAULT_PATH = "C:\\Users\\Ada\\AppData\\Local\\Programs\\OMP Studio";
+
+  /* ---------- 主题 ---------- */
+  var saved = localStorage.getItem("omp-setup-theme") || "system";
+  setTheme(saved);
+  function setTheme(t) {
+    stage.setAttribute("data-theme", t);
+    localStorage.setItem("omp-setup-theme", t);
+    Array.prototype.forEach.call(document.querySelectorAll(".theme-switch button"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-t") === t);
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".theme-switch button"), function (b) {
+    b.addEventListener("click", function () { setTheme(b.getAttribute("data-t")); });
+  });
+
+  var mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  function motionText() { document.getElementById("motionText").textContent = mq.matches ? "已按系统设置减弱" : "标准"; }
+  mq.addEventListener ? mq.addEventListener("change", motionText) : mq.addListener(motionText);
+  motionText();
+
+  /* ---------- 缩放适配 ---------- */
+  function fit() {
+    if (hostMode) {
+      document.getElementById("scaleWrap").style.transform = "none";
+      return;
+    }
+    var s = Math.min(1, (innerWidth - 36) / 760, (innerHeight - 130) / 520);
+    document.getElementById("scaleWrap").style.transform = "scale(" + s + ")";
+  }
+  addEventListener("resize", fit); fit();
+
+  /* ---------- 步骤机 ---------- */
+  var steps = Array.prototype.slice.call(document.querySelectorAll(".step"));
+  var HINTS = [
+    "第 1 步，共 4 步 · 许可与组件已内置于运行时",
+    "第 2 步，共 4 步 · 预计占用 328 MB",
+    "第 3 步，共 4 步 · 正在写入文件，请勿关闭窗口",
+    "安装已完成 · 感谢使用 OMP Studio"
+  ];
+  function renderHints() {
+    document.getElementById("footHint").innerHTML =
+      '<svg viewBox="0 0 24 24"><use href="#i-info"/></svg> ' + HINTS[step];
+    Array.prototype.forEach.call(document.querySelectorAll(".f-group"), function (g) {
+      g.classList.toggle("on", +g.getAttribute("data-for") === step);
+    });
+  }
+  function go(target, dirOverride) {
+    if (target === step) return;
+    var dir = dirOverride !== undefined ? dirOverride : (target > step ? 1 : -1);
+    var cur = step; step = target; prevStep = cur;
+    steps.forEach(function (el) {
+      var i = +el.getAttribute("data-step");
+      el.className = "step" +
+        (i === step ? " enter" + (dir < 0 ? " back" : "") : i === prevStep ? " exit" + (dir < 0 ? " back" : "") : "");
+      el.setAttribute("aria-hidden", i === step ? "false" : "true");
+    });
+    renderHints();
+    setTimeout(function () { prevStep = null; steps.forEach(function (el) {
+      var i = +el.getAttribute("data-step");
+      if (i !== step) el.className = "step";
+    }); }, 420);
+    if (step === 1) requestAnimationFrame(function () { setTimeout(armMeter, 90); });
+    if (step === 2) startSim();
+    if (step === 3) document.getElementById("sumPath").textContent = document.getElementById("pathInput").value;
+  }
+
+  /* ---------- 磁盘指示 ---------- */
+  function armMeter() {
+    var used = 76.4, req = Math.max(1.7, 328 / (237 * 1024) * 100);
+    var u = document.getElementById("meterUsed"), r = document.getElementById("meterReq");
+    u.style.width = "0%"; r.style.width = "0%"; r.style.left = "0%";
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      u.style.width = used + "%"; r.style.left = used + "%"; r.style.width = req + "%";
+    }); });
+  }
+
+  /* ---------- 安装模拟 ---------- */
+  var PCT_KEYS = [[0,0],[0.07,7],[0.13,12],[0.28,34],[0.52,68],[0.66,80],[0.74,86],[0.8,91],[0.87,95],[0.95,98],[1,100]];
+  var PLAN = [
+    { t: .01, time: "10:24:01", msg: "初始化安装环境", kind: "ok", phase: "正在准备安装环境…", file: "" },
+    { t: .07, time: "10:24:02", msg: "校验安装包完整性  (SHA-256) … 通过", kind: "ok", phase: "正在校验安装包…", file: "omp-studio-1.4.2-x64.msix" },
+    { t: .13, time: "10:24:02", msg: "释放文件: omp-studio.exe  (24.6 MB)", kind: "ok", phase: "正在释放文件…", file: "omp-studio.exe" },
+    { t: .2,  time: "10:24:03", msg: "释放文件: resources\\app.asar  (41.8 MB)", kind: "ok", file: "resources\\app.asar" },
+    { t: .29, time: "10:24:03", msg: "释放文件: runtime\\omp-runtime-1.4.2-win-x64.7z  (96.2 MB)", kind: "ok", file: "runtime\\omp-runtime-1.4.2-win-x64.7z" },
+    { t: .42, time: "10:24:04", msg: "释放文件: runtime\\node\\node.exe  (38.1 MB)", kind: "ok", file: "runtime\\node\\node.exe" },
+    { t: .52, time: "10:24:05", msg: "部署 OMP 运行时 v1.4.2 → runtime\\", kind: "hl", phase: "正在部署 OMP 运行时…", file: "runtime\\bin\\ompd.exe" },
+    { t: .6,  time: "10:24:05", msg: "部署内置扩展: agent-core, mcp-bridge", kind: "ok", file: "extensions\\mcp-bridge\\index.js" },
+    { t: .66, time: "10:24:06", msg: "注册 PTY 组件: winpty-agent.exe", kind: "ok", phase: "正在配置系统组件…", file: "pty\\winpty-agent.exe" },
+    { t: .74, time: "10:24:06", msg: "创建快捷方式: 开始菜单\\OMP Studio.lnk", kind: "ok", file: "" },
+    { t: .8,  time: "10:24:07", msg: "写入卸载信息: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OMPStudio", kind: "ok", file: "" },
+    { t: .87, time: "10:24:07", msg: "注册 URI 协议处理器: omp://", kind: "ok", phase: "正在完成安装…", file: "" },
+    { t: .95, time: "10:24:08", msg: "共写入 1,284 个文件 · 328 MB", kind: "ok", file: "" },
+    { t: 1,   time: "10:24:08", msg: "安装完成", kind: "done", file: "" }
+  ];
+  function easeInOut(u) { return u < .5 ? 4*u*u*u : 1 - Math.pow(-2*u+2, 3)/2; }
+  function smoothPct(t) {
+    for (var i = 1; i < PCT_KEYS.length; i++) if (t <= PCT_KEYS[i][0]) {
+      var a = PCT_KEYS[i-1], b = PCT_KEYS[i];
+      return a[1] + (b[1]-a[1]) * easeInOut((t-a[0])/(b[0]-a[0]));
+    }
+    return 100;
+  }
+  function quantPct(t) { var p = 0; PCT_KEYS.forEach(function (k) { if (t >= k[0]) p = k[1]; }); return p; }
+
+  function startSim() {
+    stopSim();
+    var logview = document.getElementById("logview"); logview.innerHTML = "";
+    document.getElementById("phase").textContent = "正在准备…";
+    document.getElementById("fileRow").innerHTML = "&nbsp;";
+    setBar(0);
+    var t0 = performance.now();
+    PLAN.forEach(function (item) {
+      simTimers.push(setTimeout(function () {
+        var div = document.createElement("div");
+        div.className = "line " + item.kind;
+        div.innerHTML = '<span class="t">[' + item.time + ']</span><span class="m"></span>';
+        div.querySelector(".m").textContent = item.msg;
+        logview.appendChild(div);
+        logview.scrollTop = logview.scrollHeight;
+        if (item.phase) document.getElementById("phase").textContent = item.phase;
+        if (item.file !== undefined) document.getElementById("fileRow").textContent = item.file ? "正在处理: " + item.file : " ";
+      }, item.t * DURATION));
+    });
+    var tick = function (now) {
+      var t = Math.min(1, (now - t0) / DURATION);
+      setBar(mq.matches ? quantPct(t) : smoothPct(t));
+      if (t < 1) raf = requestAnimationFrame(tick);
+      else {
+        document.getElementById("phase").textContent = "安装完成";
+        simTimers.push(setTimeout(function () { go(3); }, 1000));
+      }
+    };
+    raf = requestAnimationFrame(tick);
+  }
+  function setBar(p) {
+    document.getElementById("bar").style.width = p + "%";
+    document.getElementById("pct").textContent = Math.round(p) + " %";
+  }
+  function stopSim() {
+    cancelAnimationFrame(raf);
+    simTimers.forEach(clearTimeout); simTimers = [];
+  }
+
+  /* ---------- 取消 / 浏览 / 完成 ---------- */
+  var confirmOv = document.getElementById("confirmOv");
+  var browseOv = document.getElementById("browseOv");
+  function openConfirm() {
+    document.getElementById("confirmMsg").textContent =
+      "确定要退出 OMP Studio 安装向导吗？安装尚未完成。" + (step === 2 ? " 取消将回滚已释放的文件。" : "");
+    confirmOv.hidden = false;
+  }
+  function closeDialogs() { confirmOv.hidden = true; browseOv.hidden = true; }
+  function closeInstallerShell() {
+    if (installerShell && typeof installerShell.close === "function") {
+      installerShell.close();
+      return;
+    }
+    go(0);
+  }
+  document.querySelectorAll(".js-cancel").forEach(function (b) { b.addEventListener("click", openConfirm); });
+  document.getElementById("tbClose").addEventListener("click", function () {
+    if (step < 3) openConfirm();
+    else closeInstallerShell();
+  });
+  var minimizeBtn = document.querySelector(".tb-btn:not(.tb-close)");
+  if (minimizeBtn) minimizeBtn.addEventListener("click", function () {
+    if (installerShell && typeof installerShell.minimize === "function") installerShell.minimize();
+  });
+  document.getElementById("confirmStay").addEventListener("click", closeDialogs);
+  confirmOv.addEventListener("mousedown", function (e) { if (e.target === confirmOv) closeDialogs(); });
+  document.getElementById("confirmQuit").addEventListener("click", function () {
+    closeDialogs(); stopSim(); closeInstallerShell();
+  });
+
+  var NODES = [
+    { id: "desktop", label: "桌面", depth: 0, icon: "#i-monitor", path: "C:\\Users\\Ada\\Desktop\\OMP Studio" },
+    { id: "pc", label: "此电脑", depth: 0, icon: "#i-drive" },
+    { id: "c", label: "本地磁盘 (C:)", depth: 1, icon: "#i-drive", path: "C:\\OMP Studio" },
+    { id: "users", label: "Users", depth: 2, icon: "#i-folder" },
+    { id: "ada", label: "Ada", depth: 3, icon: "#i-folder" },
+    { id: "appdata", label: "AppData", depth: 4, icon: "#i-folder" },
+    { id: "local", label: "Local", depth: 5, icon: "#i-folder" },
+    { id: "programs", label: "Programs", depth: 6, icon: "#i-folder" },
+    { id: "omp", label: "OMP Studio", depth: 7, icon: "#i-folder", path: DEFAULT_PATH },
+    { id: "docs", label: "文档", depth: 0, icon: "#i-folder", path: "C:\\Users\\Ada\\Documents\\OMP Studio" }
+  ];
+  var browseSel = "omp";
+  function renderTree() {
+    var tree = document.getElementById("tree"); tree.innerHTML = "";
+    NODES.forEach(function (n) {
+      var d = document.createElement("div");
+      d.className = "node" + (browseSel === n.id ? " sel" : "");
+      d.style.paddingLeft = (8 + n.depth * 14) + "px";
+      if (!n.path) d.style.opacity = ".75";
+      d.innerHTML = '<svg viewBox="0 0 24 24"><use href="' + n.icon + '"/></svg> ' + n.label;
+      if (n.path) d.addEventListener("click", function () { browseSel = n.id; renderTree(); });
+      tree.appendChild(d);
+    });
+    var sel = NODES.filter(function (n) { return n.id === browseSel; })[0];
+    document.getElementById("selPath").textContent = (sel && sel.path) || DEFAULT_PATH;
+  }
+  document.getElementById("browseBtn").addEventListener("click", function () { browseOv.hidden = false; renderTree(); });
+  document.getElementById("browseCancel").addEventListener("click", closeDialogs);
+  browseOv.addEventListener("mousedown", function (e) { if (e.target === browseOv) closeDialogs(); });
+  document.getElementById("browseOk").addEventListener("click", function () {
+    var sel = NODES.filter(function (n) { return n.id === browseSel; })[0];
+    if (sel && sel.path) document.getElementById("pathInput").value = sel.path;
+    closeDialogs();
+  });
+
+  document.getElementById("finishBtn").addEventListener("click", function () {
+    var run = document.getElementById("runCheck").checked;
+    var toast = document.getElementById("toast");
+    document.getElementById("toastMsg").textContent = run ? "正在启动 OMP Studio…" : "安装向导已退出";
+    toast.hidden = false;
+    setTimeout(function () { toast.hidden = true; stopSim(); closeInstallerShell(); }, 2000);
+  });
+
+  document.querySelectorAll(".js-next").forEach(function (b) { b.addEventListener("click", function () { go(step + 1); }); });
+  document.querySelectorAll(".js-back").forEach(function (b) { b.addEventListener("click", function () { go(step - 1); }); });
+
+  addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+      if (!browseOv.hidden || !confirmOv.hidden) closeDialogs();
+      else if (step < 3) openConfirm();
+    }
+    if (e.key === "Enter" && browseOv.hidden && confirmOv.hidden && step !== 2) {
+      if (step === 3) document.getElementById("finishBtn").click();
+      else go(step + 1);
+    }
+  });
+
+  go(0, 1);
+})();
+</script>
+</body>
+</html>

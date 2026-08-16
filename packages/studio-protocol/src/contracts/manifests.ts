@@ -72,6 +72,7 @@ export const FULL_PARITY_REQUIRED_CAPABILITIES = [
   "turn.retry",
   "operator.manifest",
   "operator.invoke",
+  "permissions.mode.set",
   "interaction.respond",
   "agent.list",
   "agent.send",

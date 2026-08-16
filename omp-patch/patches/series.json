@@ -13,6 +13,16 @@
     "0010-studio-remote-ops-agent-jobs-shutdown.patch",
     "0011-studio-live-control-plane.patch",
     "0012-studio-command-manifest-conformance.patch",
-    "0013-studio-tree-ask-plan-model-parity.patch"
+    "0013-studio-tree-ask-plan-model-parity.patch",
+    "0014-studio-conversation-contract.patch",
+    "0015-studio-session-transcript.patch",
+    "0016-studio-conversation-live-projector.patch",
+    "0017-studio-conversation-live-bridge.patch",
+    "0018-studio-interaction-ui-bridge.patch",
+    "0019-studio-session-telemetry.patch",
+    "0020-conversation-transcript-normalization.patch",
+    "0021-studio-interaction-hardening.patch",
+    "0022-studio-transcript-type-hardening.patch",
+    "0023-studio-runtime-test-hardening.patch"
   ]
 }

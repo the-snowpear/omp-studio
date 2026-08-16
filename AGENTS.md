@@ -13,6 +13,8 @@ OMP Studio 是 OMP Runtime / AgentSession 的 Windows 桌面控制台与配套 W
 - `ui_reference/`：界面参考，不是运行时产品代码。
 - `backup/`：历史备份；不应作为实现或测试输入。
 
+Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`
+
 ## 工作方式
 
 1. 先阅读相关 package 的 `package.json`、类型和测试；只改与任务直接相关的文件。

@@ -1,0 +1,812 @@
+diff --git a/packages/coding-agent/src/studio/bridge-protocol.ts b/packages/coding-agent/src/studio/bridge-protocol.ts
+index 91cef59..b42a3d9 100644
+--- a/packages/coding-agent/src/studio/bridge-protocol.ts
++++ b/packages/coding-agent/src/studio/bridge-protocol.ts
+@@ -1,5 +1,12 @@
+ import * as crypto from "node:crypto";
+ import type { StudioBtwSnapshot } from "./services/btw-service";
++import {
++	CONVERSATION_LIMITS,
++	type ConversationRuntimeEvent,
++	SESSION_TRANSCRIPT_READ_KIND,
++} from "./conversation-protocol";
++
++export * from "./conversation-protocol";
+ 
+ export const STUDIO_PROTOCOL_NAME = "omp-studio" as const;
+ export const STUDIO_PROTOCOL_VERSION = 1 as const;
+@@ -52,6 +59,11 @@ export type StudioOperation =
+ 	| { kind: "session.drop" }
+ 	| { kind: "session.fork" }
+ 	| { kind: "session.tree.get" }
++	| {
++			kind: "session.transcript.read";
++			cursor?: string;
++			limit?: number;
++	  }
+ 	| {
+ 			kind: "session.tree.navigate";
+ 			targetId: string;
+@@ -194,6 +206,7 @@ export interface StudioProtocolError {
+ 		| "CAPABILITY_UNAVAILABLE"
+ 		| "RUNTIME_EPOCH_STALE"
+ 		| "STATE_VERSION_CONFLICT"
++		| "CURSOR_STALE"
+ 		| "COMMAND_UNKNOWN"
+ 		| "COMMAND_BLOCKED"
+ 		| "INTERACTION_REQUIRED"
+@@ -234,7 +247,8 @@ export interface StudioEventEnvelope {
+ 		| { kind: "runtime.quiescing" }
+ 		| { kind: "runtime.shutdownComplete" }
+ 		| StudioInteractionRequiredEvent
+-		| { kind: "btw.changed"; snapshot: StudioBtwSnapshot };
++		| { kind: "btw.changed"; snapshot: StudioBtwSnapshot }
++		| ConversationRuntimeEvent;
+ }
+ 
+ export interface StudioInteractionSummary {
+@@ -280,6 +294,12 @@ export interface StudioSnapshotResponse {
+ 	commandManifestHash: string;
+ 	capabilityHash: string;
+ 	lastEventSeq: number;
++	/**
++	 * Head-cursor hint for the active-branch transcript at snapshot time.
++	 * It does not carry message bodies. Tamper → INVALID_ARGUMENT;
++	 * wrong session/branch/epoch → CURSOR_STALE.
++	 */
++	messagesCursor?: string;
+ 	terminalReceipts: StudioReceipt[];
+ }
+ 
+@@ -574,6 +594,24 @@ export function parseStudioRequest(value: unknown): StudioRequest {
+ 				throw new StudioFrameError("Invalid transcript limit");
+ 			}
+ 			break;
++		case SESSION_TRANSCRIPT_READ_KIND:
++			exactKeys(operation, ["kind", "cursor", "limit"]);
++			if (
++				operation.cursor !== undefined &&
++				(!nonEmptyString(operation.cursor) ||
++					(operation.cursor as string).length > CONVERSATION_LIMITS.CURSOR_MAX_CHARS)
++			) {
++				throw new StudioFrameError("Invalid transcript cursor");
++			}
++			if (
++				operation.limit !== undefined &&
++				(!Number.isSafeInteger(operation.limit) ||
++					(operation.limit as number) < CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MIN ||
++					(operation.limit as number) > CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX)
++			) {
++				throw new StudioFrameError("Invalid transcript limit");
++			}
++			break;
+ 		case "agent.subscribe":
+ 			exactKeys(operation, ["kind", "level"]);
+ 			if (operation.level !== "progress" && operation.level !== "events") {
+diff --git a/packages/coding-agent/src/studio/conversation-protocol.ts b/packages/coding-agent/src/studio/conversation-protocol.ts
+new file mode 100644
+index 0000000..a332092
+--- /dev/null
++++ b/packages/coding-agent/src/studio/conversation-protocol.ts
+@@ -0,0 +1,465 @@
++export class StudioConversationError extends Error {
++	constructor(message: string) {
++		super(message);
++		this.name = "StudioConversationError";
++	}
++}
++
++export type JsonPrimitive = string | number | boolean | null;
++export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
++export type ConversationRole = "user" | "assistant" | "system";
++
++export type ConversationContentBlock =
++	| { type: "text"; text: string; truncated?: boolean }
++	| { type: "thinking"; text: string; truncated?: boolean }
++	| {
++			type: "toolCall";
++			toolCallId: string;
++			toolName: string;
++			arguments?: JsonValue;
++			truncated?: boolean;
++	  }
++	| {
++			type: "toolResult";
++			toolCallId: string;
++			toolName?: string;
++			output?: string;
++			data?: JsonValue;
++			isError: boolean;
++			truncated?: boolean;
++	  };
++
++export type ConversationMessageItem = {
++	kind: "message";
++	itemId: string;
++	parentId: string | null;
++	createdAt: string;
++	role: ConversationRole;
++	content: readonly ConversationContentBlock[];
++};
++
++export type ConversationCompactionItem = {
++	kind: "compaction";
++	itemId: string;
++	parentId: string | null;
++	createdAt: string;
++	summary: string;
++	shortSummary?: string;
++	warning?: string;
++};
++
++export type ConversationResetBoundaryItem = {
++	kind: "resetBoundary";
++	itemId: string;
++	parentId: string | null;
++	createdAt: string;
++};
++
++export type ConversationItem = ConversationMessageItem | ConversationCompactionItem | ConversationResetBoundaryItem;
++
++export interface ConversationTranscriptPage {
++	runtimeEpoch: number;
++	sessionId: string;
++	branchLeafId: string | null;
++	items: readonly ConversationItem[];
++	olderCursor?: string;
++	headCursor: string;
++	hasMoreBefore: boolean;
++}
++
++export const SESSION_TRANSCRIPT_READ_KIND = "session.transcript.read" as const;
++export const SESSION_TRANSCRIPT_READ_CAPABILITY = "session.history" as const;
++export const SESSION_TRANSCRIPT_READ_CONCURRENCY = "read-concurrent" as const;
++export const CONVERSATION_CURSOR_SCHEMA_VERSION = 1 as const;
++export const CONVERSATION_CURSOR_DIRECTION = "older" as const;
++export const CONVERSATION_CURSOR_NAMESPACE = "session.transcript.v1" as const;
++export const CONVERSATION_BRANCH_SUMMARY_MAPPING = "ignore" as const;
++export const CONVERSATION_PUBLIC_ITEM_KINDS = ["message", "compaction", "resetBoundary"] as const;
++export const CONVERSATION_IGNORED_SESSION_ENTRY_TYPES = [
++	"branch_summary",
++	"custom",
++	"label",
++	"model_change",
++	"service_tier_change",
++] as const;
++export const CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION = false as const;
++export const CONVERSATION_REDACT_KEY_PATTERN =
++	/token|secret|password|api[_-]?key|authorization|cookie|providerpayload/iu;
++
++/** Type-layer dispatcher allow-list. Commit B wires execution; do not advertise capability yet. */
++export const STUDIO_CONVERSATION_DISPATCH_ALLOW_LIST = [SESSION_TRANSCRIPT_READ_KIND] as const;
++
++export const CONVERSATION_LIMITS = {
++	TRANSCRIPT_LIMIT_MIN: 1,
++	TRANSCRIPT_LIMIT_MAX: 100,
++	TRANSCRIPT_LIMIT_DEFAULT: 50,
++	TEXT_BLOCK_MAX_BYTES: 256 * 1024,
++	JSON_VALUE_MAX_BYTES: 256 * 1024,
++	JSON_VALUE_MAX_DEPTH: 12,
++	PAGE_MAX_BYTES: 768 * 1024,
++	CURSOR_MAX_CHARS: 1024,
++	ITEM_ID_MAX_CHARS: 256,
++	TOOL_NAME_MAX_CHARS: 256,
++	NOTICE_MESSAGE_MAX_CHARS: 16 * 1024,
++	DELTA_MAX_BYTES: 32 * 1024,
++	COMPACTION_SUMMARY_MAX_BYTES: 256 * 1024,
++} as const;
++
++export type ConversationRuntimeEvent =
++	| {
++			kind: "conversation.message.started";
++			sessionId: string;
++			turnId: string;
++			messageId: string;
++			role: ConversationRole;
++			createdAt: string;
++	  }
++	| {
++			kind: "conversation.message.delta";
++			sessionId: string;
++			turnId: string;
++			messageId: string;
++			blockId: string;
++			blockType: "text" | "thinking";
++			delta: string;
++	  }
++	| {
++			kind: "conversation.message.completed";
++			sessionId: string;
++			turnId: string;
++			messageId: string;
++			item: ConversationMessageItem;
++	  }
++	| {
++			kind: "conversation.tool.started";
++			sessionId: string;
++			turnId: string;
++			messageId: string;
++			toolCallId: string;
++			toolName: string;
++			arguments?: JsonValue;
++			startedAt: string;
++	  }
++	| {
++			kind: "conversation.tool.updated";
++			sessionId: string;
++			turnId: string;
++			toolCallId: string;
++			updateMode: "append" | "replace";
++			output?: string;
++			truncated?: boolean;
++	  }
++	| {
++			kind: "conversation.tool.completed";
++			sessionId: string;
++			turnId: string;
++			toolCallId: string;
++			result: Extract<ConversationContentBlock, { type: "toolResult" }>;
++			completedAt: string;
++	  }
++	| { kind: "conversation.turn.completed"; sessionId: string; turnId: string }
++	| { kind: "conversation.turn.aborted"; sessionId: string; turnId: string }
++	| { kind: "conversation.compaction.started"; sessionId: string; action: string }
++	| {
++			kind: "conversation.compaction.completed";
++			sessionId: string;
++			item?: ConversationCompactionItem;
++			aborted: boolean;
++	  }
++	| {
++			kind: "conversation.notice";
++			sessionId: string;
++			level: "info" | "warning" | "error";
++			message: string;
++			source?: string;
++	  };
++
++const utf8Bytes = (text: string): number => new TextEncoder().encode(text).byteLength;
++
++function record(value: unknown): Record<string, unknown> {
++	if (value === null || typeof value !== "object" || Array.isArray(value)) {
++		throw new StudioConversationError("Invalid conversation object");
++	}
++	return value as Record<string, unknown>;
++}
++
++function exactKeys(value: Record<string, unknown>, allowed: readonly string[]): void {
++	const allowedSet = new Set(allowed);
++	if (Object.keys(value).some(key => !allowedSet.has(key))) {
++		throw new StudioConversationError("Unknown conversation field");
++	}
++}
++
++function nonEmptyString(value: unknown): value is string {
++	return typeof value === "string" && value.length > 0;
++}
++
++function boundedId(value: unknown): string {
++	if (!nonEmptyString(value) || value.length > CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS) {
++		throw new StudioConversationError("Invalid conversation id");
++	}
++	return value;
++}
++
++function boundedUtf8(value: unknown, maxBytes: number): string {
++	if (typeof value !== "string" || utf8Bytes(value) > maxBytes) {
++		throw new StudioConversationError("Invalid conversation text");
++	}
++	return value;
++}
++
++function jsonValueLimited(value: unknown, depth: number, seen: Set<object>): void {
++	if (depth > CONVERSATION_LIMITS.JSON_VALUE_MAX_DEPTH) throw new StudioConversationError("JSON too deep");
++	if (value === null || typeof value === "string" || typeof value === "boolean") return;
++	if (typeof value === "number") {
++		if (!Number.isFinite(value)) throw new StudioConversationError("Invalid JSON number");
++		return;
++	}
++	if (typeof value !== "object") throw new StudioConversationError("Invalid JSON value");
++	if (seen.has(value)) throw new StudioConversationError("Cyclic JSON value");
++	seen.add(value);
++	try {
++		if (Array.isArray(value)) {
++			for (const item of value) jsonValueLimited(item, depth + 1, seen);
++			return;
++		}
++		const prototype = Object.getPrototypeOf(value);
++		if (prototype !== Object.prototype && prototype !== null) throw new StudioConversationError("Invalid JSON object");
++		for (const item of Object.values(value as Record<string, unknown>)) jsonValueLimited(item, depth + 1, seen);
++	} finally {
++		seen.delete(value);
++	}
++}
++
++function parseJsonValue(value: unknown): JsonValue {
++	jsonValueLimited(value, 1, new Set());
++	const encoded = JSON.stringify(value);
++	if (utf8Bytes(encoded) > CONVERSATION_LIMITS.JSON_VALUE_MAX_BYTES) {
++		throw new StudioConversationError("JSON value too large");
++	}
++	return value as JsonValue;
++}
++
++export function parseOpaqueConversationCursor(value: unknown): string {
++	if (!nonEmptyString(value) || value.length > CONVERSATION_LIMITS.CURSOR_MAX_CHARS) {
++		throw new StudioConversationError("Invalid conversation cursor");
++	}
++	return value;
++}
++
++export function parseSessionTranscriptReadLimit(value: unknown): number {
++	if (
++		!Number.isSafeInteger(value) ||
++		(value as number) < CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MIN ||
++		(value as number) > CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX
++	) {
++		throw new StudioConversationError("Invalid transcript limit");
++	}
++	return value as number;
++}
++
++function parseRole(value: unknown): ConversationRole {
++	if (value !== "user" && value !== "assistant" && value !== "system") {
++		throw new StudioConversationError("Invalid conversation role");
++	}
++	return value;
++}
++
++function parseBlock(value: unknown): ConversationContentBlock {
++	const input = record(value);
++	if (input.type === "text" || input.type === "thinking") {
++		exactKeys(input, ["type", "text", "truncated"]);
++		boundedUtf8(input.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++		if (input.truncated !== undefined && typeof input.truncated !== "boolean") {
++			throw new StudioConversationError("Invalid truncated flag");
++		}
++		return input as unknown as ConversationContentBlock;
++	}
++	if (input.type === "toolCall") {
++		exactKeys(input, ["type", "toolCallId", "toolName", "arguments", "truncated"]);
++		boundedId(input.toolCallId);
++		boundedUtf8(input.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
++		if (!nonEmptyString(input.toolName)) throw new StudioConversationError("Invalid tool name");
++		if ("arguments" in input) parseJsonValue(input.arguments);
++		if (input.truncated !== undefined && typeof input.truncated !== "boolean") {
++			throw new StudioConversationError("Invalid truncated flag");
++		}
++		return input as unknown as ConversationContentBlock;
++	}
++	if (input.type === "toolResult") {
++		exactKeys(input, ["type", "toolCallId", "toolName", "output", "data", "isError", "truncated"]);
++		boundedId(input.toolCallId);
++		if (typeof input.isError !== "boolean") throw new StudioConversationError("Invalid tool result");
++		if (input.toolName !== undefined) {
++			boundedUtf8(input.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
++			if (!nonEmptyString(input.toolName)) throw new StudioConversationError("Invalid tool name");
++		}
++		if (input.output !== undefined) boundedUtf8(input.output, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++		if ("data" in input) parseJsonValue(input.data);
++		if (input.truncated !== undefined && typeof input.truncated !== "boolean") {
++			throw new StudioConversationError("Invalid truncated flag");
++		}
++		return input as unknown as ConversationContentBlock;
++	}
++	throw new StudioConversationError("Invalid content block");
++}
++
++export function parseConversationItem(value: unknown): ConversationItem {
++	const input = record(value);
++	boundedId(input.itemId);
++	if (input.parentId !== null) boundedId(input.parentId);
++	if (!nonEmptyString(input.createdAt)) throw new StudioConversationError("Invalid item timestamp");
++	if (input.kind === "message") {
++		exactKeys(input, ["kind", "itemId", "parentId", "createdAt", "role", "content"]);
++		parseRole(input.role);
++		if (!Array.isArray(input.content)) throw new StudioConversationError("Invalid message content");
++		for (const block of input.content) parseBlock(block);
++		return input as unknown as ConversationItem;
++	}
++	if (input.kind === "compaction") {
++		exactKeys(input, ["kind", "itemId", "parentId", "createdAt", "summary", "shortSummary", "warning"]);
++		boundedUtf8(input.summary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES);
++		if (!nonEmptyString(input.summary)) throw new StudioConversationError("Invalid compaction summary");
++		if (input.shortSummary !== undefined) {
++			boundedUtf8(input.shortSummary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES);
++		}
++		if (input.warning !== undefined) boundedUtf8(input.warning, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES);
++		return input as unknown as ConversationItem;
++	}
++	if (input.kind === "resetBoundary") {
++		exactKeys(input, ["kind", "itemId", "parentId", "createdAt"]);
++		return input as unknown as ConversationItem;
++	}
++	throw new StudioConversationError("Invalid conversation item");
++}
++
++export function parseConversationTranscriptPage(value: unknown): ConversationTranscriptPage {
++	const input = record(value);
++	exactKeys(input, ["runtimeEpoch", "sessionId", "branchLeafId", "items", "olderCursor", "headCursor", "hasMoreBefore"]);
++	if (!Number.isSafeInteger(input.runtimeEpoch) || (input.runtimeEpoch as number) <= 0) {
++		throw new StudioConversationError("Invalid runtime epoch");
++	}
++	if (!nonEmptyString(input.sessionId)) throw new StudioConversationError("Invalid session id");
++	if (input.branchLeafId !== null) boundedId(input.branchLeafId);
++	if (!Array.isArray(input.items) || input.items.length > CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX) {
++		throw new StudioConversationError("Invalid transcript items");
++	}
++	for (const item of input.items) parseConversationItem(item);
++	parseOpaqueConversationCursor(input.headCursor);
++	if (typeof input.hasMoreBefore !== "boolean") throw new StudioConversationError("Invalid hasMoreBefore");
++	if (input.olderCursor !== undefined) parseOpaqueConversationCursor(input.olderCursor);
++	if (utf8Bytes(JSON.stringify(input)) > CONVERSATION_LIMITS.PAGE_MAX_BYTES) {
++		throw new StudioConversationError("Transcript page too large");
++	}
++	return input as unknown as ConversationTranscriptPage;
++}
++
++export function parseConversationRuntimeEvent(value: unknown): ConversationRuntimeEvent {
++	const input = record(value);
++	if (!nonEmptyString(input.kind) || !nonEmptyString(input.sessionId)) {
++		throw new StudioConversationError("Invalid conversation event");
++	}
++	switch (input.kind) {
++		case "conversation.message.started":
++			exactKeys(input, ["kind", "sessionId", "turnId", "messageId", "role", "createdAt"]);
++			boundedId(input.turnId);
++			boundedId(input.messageId);
++			parseRole(input.role);
++			if (!nonEmptyString(input.createdAt)) throw new StudioConversationError("Invalid message timestamp");
++			return input as unknown as ConversationRuntimeEvent;
++		case "conversation.message.delta":
++			exactKeys(input, ["kind", "sessionId", "turnId", "messageId", "blockId", "blockType", "delta"]);
++			boundedId(input.turnId);
++			boundedId(input.messageId);
++			boundedId(input.blockId);
++			if (input.blockType !== "text" && input.blockType !== "thinking") {
++				throw new StudioConversationError("Invalid delta block type");
++			}
++			boundedUtf8(input.delta, CONVERSATION_LIMITS.DELTA_MAX_BYTES);
++			if (!nonEmptyString(input.delta)) throw new StudioConversationError("Invalid delta");
++			return input as unknown as ConversationRuntimeEvent;
++		case "conversation.message.completed": {
++			exactKeys(input, ["kind", "sessionId", "turnId", "messageId", "item"]);
++			const messageId = boundedId(input.messageId);
++			boundedId(input.turnId);
++			const item = parseConversationItem(input.item);
++			if (item.kind !== "message" || item.itemId !== messageId) {
++				throw new StudioConversationError("Completed message id mismatch");
++			}
++			return input as unknown as ConversationRuntimeEvent;
++		}
++		case "conversation.tool.started":
++			exactKeys(input, [
++				"kind",
++				"sessionId",
++				"turnId",
++				"messageId",
++				"toolCallId",
++				"toolName",
++				"arguments",
++				"startedAt",
++			]);
++			boundedId(input.turnId);
++			boundedId(input.messageId);
++			boundedId(input.toolCallId);
++			boundedUtf8(input.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
++			if (!nonEmptyString(input.toolName) || !nonEmptyString(input.startedAt)) {
++				throw new StudioConversationError("Invalid tool start");
++			}
++			if ("arguments" in input) parseJsonValue(input.arguments);
++			return input as unknown as ConversationRuntimeEvent;
++		case "conversation.tool.updated":
++			exactKeys(input, ["kind", "sessionId", "turnId", "toolCallId", "updateMode", "output", "truncated"]);
++			boundedId(input.turnId);
++			boundedId(input.toolCallId);
++			if (input.updateMode !== "append" && input.updateMode !== "replace") {
++				throw new StudioConversationError("Invalid tool update mode");
++			}
++			if (input.output !== undefined) boundedUtf8(input.output, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++			if (input.truncated !== undefined && typeof input.truncated !== "boolean") {
++				throw new StudioConversationError("Invalid truncated flag");
++			}
++			return input as unknown as ConversationRuntimeEvent;
++		case "conversation.tool.completed": {
++			exactKeys(input, ["kind", "sessionId", "turnId", "toolCallId", "result", "completedAt"]);
++			const toolCallId = boundedId(input.toolCallId);
++			boundedId(input.turnId);
++			if (!nonEmptyString(input.completedAt)) throw new StudioConversationError("Invalid tool completion time");
++			const result = parseBlock(input.result);
++			if (result.type !== "toolResult" || result.toolCallId !== toolCallId) {
++				throw new StudioConversationError("Tool result id mismatch");
++			}
++			return input as unknown as ConversationRuntimeEvent;
++		}
++		case "conversation.turn.completed":
++		case "conversation.turn.aborted":
++			exactKeys(input, ["kind", "sessionId", "turnId"]);
++			boundedId(input.turnId);
++			return input as unknown as ConversationRuntimeEvent;
++		case "conversation.compaction.started":
++			exactKeys(input, ["kind", "sessionId", "action"]);
++			if (!nonEmptyString(input.action)) throw new StudioConversationError("Invalid compaction action");
++			return input as unknown as ConversationRuntimeEvent;
++		case "conversation.compaction.completed":
++			exactKeys(input, ["kind", "sessionId", "item", "aborted"]);
++			if (typeof input.aborted !== "boolean") throw new StudioConversationError("Invalid compaction aborted flag");
++			if (input.item !== undefined) {
++				const item = parseConversationItem(input.item);
++				if (item.kind !== "compaction") throw new StudioConversationError("Invalid compaction item");
++			}
++			return input as unknown as ConversationRuntimeEvent;
++		case "conversation.notice":
++			exactKeys(input, ["kind", "sessionId", "level", "message", "source"]);
++			if (input.level !== "info" && input.level !== "warning" && input.level !== "error") {
++				throw new StudioConversationError("Invalid notice level");
++			}
++			boundedUtf8(input.message, CONVERSATION_LIMITS.NOTICE_MESSAGE_MAX_CHARS);
++			if (!nonEmptyString(input.message)) throw new StudioConversationError("Invalid notice");
++			if (input.source !== undefined && !nonEmptyString(input.source)) {
++				throw new StudioConversationError("Invalid notice source");
++			}
++			return input as unknown as ConversationRuntimeEvent;
++		default:
++			throw new StudioConversationError("Unsupported conversation event");
++	}
++}
+diff --git a/packages/coding-agent/test/studio-conversation-protocol.test.ts b/packages/coding-agent/test/studio-conversation-protocol.test.ts
+new file mode 100644
+index 0000000..9d28006
+--- /dev/null
++++ b/packages/coding-agent/test/studio-conversation-protocol.test.ts
+@@ -0,0 +1,250 @@
++import { describe, expect, test } from "bun:test";
++import {
++	parseStudioRequest,
++	STUDIO_IMPLEMENTED_CAPABILITIES,
++	StudioFrameError,
++	type StudioSnapshotResponse,
++	stableEmptyManifestHash,
++	stableImplementedManifestHash,
++} from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
++import {
++	CONVERSATION_BRANCH_SUMMARY_MAPPING,
++	CONVERSATION_LIMITS,
++	CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION,
++	parseConversationRuntimeEvent,
++	parseConversationTranscriptPage,
++	SESSION_TRANSCRIPT_READ_CAPABILITY,
++	SESSION_TRANSCRIPT_READ_CONCURRENCY,
++	SESSION_TRANSCRIPT_READ_KIND,
++	STUDIO_CONVERSATION_DISPATCH_ALLOW_LIST,
++	StudioConversationError,
++} from "@oh-my-pi/pi-coding-agent/studio/conversation-protocol";
++
++const base = { type: "studio.request" as const, requestId: "request-transcript", runtimeEpoch: 1 };
++
++const page = {
++	runtimeEpoch: 1,
++	sessionId: "session-1",
++	branchLeafId: "leaf-1",
++	items: [
++		{ kind: "resetBoundary", itemId: "reset-1", parentId: null, createdAt: "2026-08-15T00:00:00.000Z" },
++		{
++			kind: "message",
++			itemId: "msg-1",
++			parentId: "reset-1",
++			createdAt: "2026-08-15T00:00:01.000Z",
++			role: "user",
++			content: [{ type: "text", text: "hello" }],
++		},
++		{
++			kind: "message",
++			itemId: "msg-2",
++			parentId: "msg-1",
++			createdAt: "2026-08-15T00:00:02.000Z",
++			role: "assistant",
++			content: [
++				{ type: "thinking", text: "plan" },
++				{ type: "toolCall", toolCallId: "call-1", toolName: "Read", arguments: { path: "package.json" } },
++				{ type: "toolResult", toolCallId: "call-1", output: "{}", isError: false },
++				{ type: "text", text: "done" },
++			],
++		},
++		{
++			kind: "compaction",
++			itemId: "compact-1",
++			parentId: "msg-2",
++			createdAt: "2026-08-15T00:00:03.000Z",
++			summary: "summarized",
++		},
++	],
++	headCursor: "opaque-head",
++	olderCursor: "opaque-older",
++	hasMoreBefore: true,
++};
++
++describe("session transcript contract mirror", () => {
++	test("advertises session.history only after the Runtime reader exists", () => {
++		expect(SESSION_TRANSCRIPT_READ_KIND).toBe("session.transcript.read");
++		expect(SESSION_TRANSCRIPT_READ_CAPABILITY).toBe("session.history");
++		expect(SESSION_TRANSCRIPT_READ_CONCURRENCY).toBe("read-concurrent");
++		expect(CONVERSATION_BRANCH_SUMMARY_MAPPING).toBe("ignore");
++		expect(CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION).toBe(false);
++		expect(STUDIO_CONVERSATION_DISPATCH_ALLOW_LIST).toEqual(["session.transcript.read"]);
++		expect(STUDIO_IMPLEMENTED_CAPABILITIES.includes("session.history")).toBe(true);
++		expect((STUDIO_IMPLEMENTED_CAPABILITIES as readonly string[]).includes("session.transcript.read")).toBe(true);
++		expect(CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX).toBe(100);
++		expect(CONVERSATION_LIMITS.PAGE_MAX_BYTES).toBeLessThan(1024 * 1024);
++		const capabilityHash = stableImplementedManifestHash("capabilities");
++		expect(capabilityHash.startsWith("sha256:")).toBe(true);
++		expect(capabilityHash).not.toBe(stableEmptyManifestHash("capabilities"));
++	});
++
++	test("parses session.transcript.read and rejects illegal cursor, limit, and extra keys", () => {
++		expect(parseStudioRequest({ ...base, operation: { kind: "session.transcript.read" } }).operation.kind).toBe(
++			"session.transcript.read",
++		);
++		expect(
++			parseStudioRequest({
++				...base,
++				operation: { kind: "session.transcript.read", cursor: "opaque", limit: 50 },
++			}).operation.kind,
++		).toBe("session.transcript.read");
++		for (const operation of [
++			{ kind: "session.transcript.read", cursor: "" },
++			{ kind: "session.transcript.read", limit: 0 },
++			{ kind: "session.transcript.read", limit: 101 },
++			{ kind: "session.transcript.read", extra: true },
++		]) {
++			expect(() => parseStudioRequest({ ...base, operation })).toThrow(StudioFrameError);
++		}
++	});
++
++	test("parses every public item and block kind", () => {
++		const parsed = parseConversationTranscriptPage(page);
++		expect(parsed.items.map(item => item.kind)).toEqual(["resetBoundary", "message", "message", "compaction"]);
++	});
++
++	test("rejects extra keys, missing fields, branch_summary, and over-limit pages", () => {
++		expect(() => parseConversationTranscriptPage({ ...page, extra: true })).toThrow(StudioConversationError);
++		expect(() => parseConversationTranscriptPage({ ...page, hasMoreBefore: "yes" })).toThrow(StudioConversationError);
++		expect(() =>
++			parseConversationTranscriptPage({
++				...page,
++				items: [{ kind: "branch_summary", itemId: "x", parentId: null, createdAt: "2026-08-15T00:00:00.000Z" }],
++			}),
++		).toThrow(StudioConversationError);
++		const tooMany = Array.from({ length: CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX + 1 }, (_, index) => ({
++			kind: "resetBoundary" as const,
++			itemId: `reset-${index}`,
++			parentId: null,
++			createdAt: "2026-08-15T00:00:00.000Z",
++		}));
++		expect(() => parseConversationTranscriptPage({ ...page, items: tooMany })).toThrow(StudioConversationError);
++	});
++
++	test("snapshot messagesCursor is an optional opaque head hint", () => {
++		const snapshot: StudioSnapshotResponse = {
++			type: "studio.snapshot",
++			requestId: "req-snapshot",
++			snapshot: {
++				runtimeId: "runtime-1",
++				runtimeEpoch: 1,
++				stateVersion: 0,
++				sessionId: "session-1",
++				isStreaming: false,
++				isCompacting: false,
++				activeMode: "normal",
++				approvalMode: "yolo",
++				pendingMessages: 0,
++				activeCommandIds: [],
++				agentsRevision: 0,
++				jobsRevision: 0,
++				agents: [],
++				jobs: [],
++			},
++			commandManifestHash: "sha256:commands",
++			capabilityHash: "sha256:capabilities",
++			lastEventSeq: 0,
++			messagesCursor: "opaque-head",
++			terminalReceipts: [],
++		};
++		expect(snapshot.messagesCursor).toBe("opaque-head");
++		expect("items" in snapshot).toBe(false);
++	});
++
++	test("parses every live conversation event kind and rejects inner occurredAt and id mismatch", () => {
++		const events = [
++			{
++				kind: "conversation.message.started",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				messageId: "msg-1",
++				role: "assistant",
++				createdAt: "2026-08-15T00:00:00.000Z",
++			},
++			{
++				kind: "conversation.message.delta",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				messageId: "msg-1",
++				blockId: "block-1",
++				blockType: "text",
++				delta: "Hi",
++			},
++			{
++				kind: "conversation.message.completed",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				messageId: "msg-1",
++				item: {
++					kind: "message",
++					itemId: "msg-1",
++					parentId: null,
++					createdAt: "2026-08-15T00:00:00.000Z",
++					role: "assistant",
++					content: [{ type: "text", text: "Hi" }],
++				},
++			},
++			{
++				kind: "conversation.tool.started",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				messageId: "msg-1",
++				toolCallId: "call-1",
++				toolName: "Read",
++				startedAt: "2026-08-15T00:00:01.000Z",
++			},
++			{
++				kind: "conversation.tool.updated",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				toolCallId: "call-1",
++				updateMode: "replace",
++				output: "out",
++			},
++			{
++				kind: "conversation.tool.completed",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				toolCallId: "call-1",
++				result: { type: "toolResult", toolCallId: "call-1", isError: false },
++				completedAt: "2026-08-15T00:00:02.000Z",
++			},
++			{ kind: "conversation.turn.completed", sessionId: "session-1", turnId: "turn-1" },
++			{ kind: "conversation.turn.aborted", sessionId: "session-1", turnId: "turn-1" },
++			{ kind: "conversation.compaction.started", sessionId: "session-1", action: "auto" },
++			{ kind: "conversation.compaction.completed", sessionId: "session-1", aborted: true },
++			{ kind: "conversation.notice", sessionId: "session-1", level: "info", message: "ok" },
++		];
++		for (const event of events) {
++			expect(parseConversationRuntimeEvent(event).kind as string).toBe(event.kind as string);
++		}
++		expect(() =>
++			parseConversationRuntimeEvent({
++				kind: "conversation.message.started",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				messageId: "msg-1",
++				role: "assistant",
++				createdAt: "2026-08-15T00:00:00.000Z",
++				occurredAt: "2026-08-15T00:00:00.000Z",
++			}),
++		).toThrow(StudioConversationError);
++		expect(() =>
++			parseConversationRuntimeEvent({
++				kind: "conversation.message.completed",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				messageId: "live-1",
++				item: {
++					kind: "message",
++					itemId: "persisted-2",
++					parentId: null,
++					createdAt: "2026-08-15T00:00:00.000Z",
++					role: "assistant",
++					content: [{ type: "text", text: "Hi" }],
++				},
++			}),
++		).toThrow(StudioConversationError);
++	});
++});

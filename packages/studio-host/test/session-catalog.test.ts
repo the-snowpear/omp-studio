@@ -73,6 +73,34 @@ test("session catalog handles title slots, unknown origins, duplicates, corrupti
   assert.ok(result.diagnostics.some((item) => item.code === "OVERSIZE_SKIPPED"));
 });
 
+test("session catalog filters by allowedCwd without exposing the path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-cwd-"));
+  const project = join(root, "project");
+  await mkdir(project);
+  const allowed = join(root, "workspace-a");
+  const other = join(root, "workspace-b");
+  await sessionFile(project, "local", {
+    type: "session",
+    id: "local-id",
+    timestamp: "2026-08-11T00:00:00.000Z",
+    cwd: allowed,
+    title: "Local chat",
+    studioOrigin: "studio-host",
+  });
+  await sessionFile(project, "foreign", {
+    type: "session",
+    id: "foreign-id",
+    timestamp: "2026-08-11T00:00:00.000Z",
+    cwd: other,
+    title: "Other workspace",
+    studioOrigin: "studio-host",
+  });
+  const filtered = await scanSessionCatalog({ sessionsRoot: root, allowedCwd: allowed });
+  assert.deepEqual(filtered.sessions.map((entry) => entry.sessionId), ["local-id"]);
+  assert.ok(!JSON.stringify(filtered).includes(other));
+  assert.ok(!JSON.stringify(filtered).includes("workspace-b"));
+});
+
 test("session catalog reports an unavailable root without exposing it", async () => {
   const result = await scanSessionCatalog({ sessionsRoot: join(tmpdir(), "missing-omp-session-root") });
   assert.deepEqual(result.sessions, []);

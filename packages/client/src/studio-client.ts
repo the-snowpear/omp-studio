@@ -16,12 +16,15 @@
 
 import type {
   ClientBootstrap,
+  ClientError,
   ClientEvent,
   ClientTransport,
   CommandHandle,
   CommandInput,
   CommandName,
   CommandOptions,
+  ConversationTranscriptPage,
+  ConversationTranscriptReadPage,
   QueryInput,
   QueryName,
   QueryResult,
@@ -29,8 +32,10 @@ import type {
   SubscriptionScope,
   Unsubscribe,
 } from "@omp-studio/client-contract";
+import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 
 import { createBrowserClockAndIds, type ClientClockAndIds } from "./clock.js";
+import type { ConversationIdentity } from "./conversation-state.js";
 import { CLIENT_CLOSED_ERROR, toClientError } from "./errors.js";
 import { createInitialClientState, reduceClientState, type ClientAction, type ClientState } from "./reducer.js";
 import { eventMatchesScope } from "./scope.js";
@@ -40,7 +45,22 @@ interface RendererSubscription {
   readonly listener: (event: ClientEvent) => void;
 }
 
-export class StudioClientImpl implements StudioClient {
+/**
+ * Official client-local transcript hydrate surface. These methods update
+ * reducer state and are not transport envelopes — they live here rather
+ * than on the shared `StudioClient` contract so Desktop/Web adapters stay
+ * thin. Renderer should import this type instead of duck-typing.
+ */
+export interface ConversationHydrateClient {
+  beginTranscriptHydrate(identity: ConversationIdentity): number;
+  hydrateTranscript(page: ConversationTranscriptPage, generation: number): void;
+  prependTranscript(page: ConversationTranscriptPage, generation: number): void;
+  hydrateArchiveTranscript?(page: ConversationTranscriptReadPage, generation: number): void;
+  prependArchiveTranscript?(page: ConversationTranscriptReadPage, generation: number): void;
+  failTranscriptHydrate(error: ClientError, generation: number): void;
+}
+
+export class StudioClientImpl implements StudioClient, ConversationHydrateClient {
   private readonly transport: ClientTransport;
   private readonly ids: ClientClockAndIds;
   private state: ClientState;
@@ -73,6 +93,12 @@ export class StudioClientImpl implements StudioClient {
     const run = (async (): Promise<ClientBootstrap> => {
       try {
         const bootstrap = await this.transport.bootstrap();
+        if (bootstrap.contractVersion !== CLIENT_CONTRACT_VERSION) {
+          throw {
+            code: "UNAVAILABLE",
+            message: `Client contract mismatch: expected ${CLIENT_CONTRACT_VERSION}, received ${String(bootstrap.contractVersion)}`,
+          } satisfies ClientError;
+        }
         this.applyAction({ type: "bootstrap.set", bootstrap, occurredAt: this.ids.now() });
         const pending = this.bufferedEvents.splice(0);
         for (const event of pending) {
@@ -108,6 +134,32 @@ export class StudioClientImpl implements StudioClient {
       throw response.error;
     }
     return response.result;
+  }
+
+  /** Start a transcript hydrate generation so a stale page cannot land after session switch. */
+  beginTranscriptHydrate(identity: ConversationIdentity): number {
+    this.applyAction({ type: "conversation.beginHydrate", identity });
+    return this.state.conversation.hydrateGeneration;
+  }
+
+  hydrateTranscript(page: ConversationTranscriptPage, generation: number): void {
+    this.applyAction({ type: "conversation.hydrate", page, generation });
+  }
+
+  prependTranscript(page: ConversationTranscriptPage, generation: number): void {
+    this.applyAction({ type: "conversation.prepend", page, generation });
+  }
+
+  hydrateArchiveTranscript(page: ConversationTranscriptReadPage, generation: number): void {
+    this.applyAction({ type: "conversation.hydrateArchive", page, generation });
+  }
+
+  prependArchiveTranscript(page: ConversationTranscriptReadPage, generation: number): void {
+    this.applyAction({ type: "conversation.prependArchive", page, generation });
+  }
+
+  failTranscriptHydrate(error: ClientError, generation: number): void {
+    this.applyAction({ type: "conversation.error", error, generation });
   }
 
   async command<TName extends CommandName>(

@@ -1,0 +1,297 @@
+diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
+index 3326cf3aaa721b1c9f16138f6f29270fb1e0cb45..ebe752ea21bd015582bc2934c5b0d767a934aa87 100644
+--- a/packages/coding-agent/src/studio/bridge-server.ts
++++ b/packages/coding-agent/src/studio/bridge-server.ts
+@@ -202,7 +202,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					type: "studio.hello.result",
+ 					requestId: hello.requestId,
+ 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
+-					runtimeVersion: `${VERSION}-studio.17`,
++					runtimeVersion: `${VERSION}-studio.20`,
+ 					upstreamVersion: VERSION,
+ 					upstreamCommit: UPSTREAM_COMMIT,
+ 					runtimeInstanceId: runtime.runtimeId,
+diff --git a/packages/coding-agent/src/studio/services/conversation-live-projector.ts b/packages/coding-agent/src/studio/services/conversation-live-projector.ts
+index 82e71675721c4426c6dcb3e4bd387cd1b95a8909..84d7584a847d3b538f58e943949e9d3184d0021d 100644
+--- a/packages/coding-agent/src/studio/services/conversation-live-projector.ts
++++ b/packages/coding-agent/src/studio/services/conversation-live-projector.ts
+@@ -10,7 +10,7 @@ import {
+ 	type ConversationRuntimeEvent,
+ 	parseConversationRuntimeEvent,
+ } from "../conversation-protocol";
+-import { sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
++import { sanitizeJsonValue, sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
+ 
+ export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
+ export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
+@@ -106,13 +106,21 @@ function isControlEvent(kind: ConversationRuntimeEvent["kind"]): boolean {
+ 	return kind !== "conversation.message.delta" && kind !== "conversation.tool.updated";
+ }
+ 
+-function toolText(result: unknown): { text: string; isError: boolean } {
++function toolText(result: unknown): {
++	text: string;
++	isError: boolean;
++	data?: import("../conversation-protocol").JsonValue;
++	truncated?: boolean;
++} {
+ 	if (result instanceof Error) return { text: result.message, isError: true };
+ 	if (result === null || result === undefined) return { text: "", isError: false };
+ 	if (typeof result === "string") return { text: result, isError: false };
+ 	if (typeof result !== "object") return { text: String(result), isError: false };
+ 	const record = result as Record<string, unknown>;
+ 	const isError = record.isError === true;
++	const details = record.details === undefined ? undefined : sanitizeJsonValue(record.details);
++	const extra = details?.value === undefined ? {} : { data: details.value };
++	const truncated = details?.truncated === true ? { truncated: true } : {};
+ 	if (Array.isArray(record.content)) {
+ 		const text = record.content
+ 			.filter((block): block is { type: "text"; text: string } => {
+@@ -125,11 +133,11 @@ function toolText(result: unknown): { text: string; isError: boolean } {
+ 			})
+ 			.map(block => block.text)
+ 			.join("");
+-		return { text, isError };
++		return { text, isError, ...extra, ...truncated };
+ 	}
+-	if (typeof record.output === "string") return { text: record.output, isError };
+-	if (typeof record.message === "string") return { text: record.message, isError };
+-	return { text: "", isError };
++	if (typeof record.output === "string") return { text: record.output, isError, ...extra, ...truncated };
++	if (typeof record.message === "string") return { text: record.message, isError, ...extra, ...truncated };
++	return { text: "", isError, ...extra, ...truncated };
+ }
+ 
+ function sameDeltaIdentity(
+@@ -462,6 +470,8 @@ export class ConversationLiveProjector {
+ 		if (toolName.length > 0) result.toolName = toolName;
+ 		if (sanitized.text.length > 0) result.output = sanitized.text;
+ 		if (sanitized.truncated) result.truncated = true;
++		if (extracted.data !== undefined) result.data = extracted.data;
++		if (extracted.truncated === true) result.truncated = true;
+ 		this.#emitParsed({
+ 			kind: "conversation.tool.completed",
+ 			sessionId: this.#sessionId,
+diff --git a/packages/coding-agent/src/studio/services/session-transcript-service.ts b/packages/coding-agent/src/studio/services/session-transcript-service.ts
+index d768afffdbb1979ac4c07e8e175193fc9fd3e82f..7c3d7463c42ef463bba053e60bf17b0d691dbe81 100644
+--- a/packages/coding-agent/src/studio/services/session-transcript-service.ts
++++ b/packages/coding-agent/src/studio/services/session-transcript-service.ts
+@@ -14,7 +14,13 @@ import {
+ 	parseConversationTranscriptPage,
+ 	parseSessionTranscriptReadLimit,
+ } from "../conversation-protocol";
+-import { sanitizePublicText, sanitizeToolArguments, truncateUtf8, utf8ByteLength } from "./conversation-sanitizer";
++import {
++	sanitizeJsonValue,
++	sanitizePublicText,
++	sanitizeToolArguments,
++	truncateUtf8,
++	utf8ByteLength,
++} from "./conversation-sanitizer";
+ 
+ export type StudioSessionTranscriptSessionManager = {
+ 	getSessionId(): string;
+@@ -130,23 +136,21 @@ function mapToolResultMessage(message: Record<string, unknown>, fallbackName?: s
+ 		mapped.data = { omitted: "image" };
+ 		truncated = true;
+ 	}
++	if ("details" in message && message.details !== undefined) {
++		const details = sanitizeJsonValue(message.details);
++		if (details.value !== undefined) mapped.data = details.value;
++		truncated ||= details.truncated;
++	}
+ 	if (truncated) mapped.truncated = true;
+ 	return mapped;
+ }
+ 
+-function mapMessageEntry(entry: SessionEntry & { type: "message" }): ConversationItem {
++function mapMessageEntry(entry: SessionEntry & { type: "message" }): ConversationItem | undefined {
+ 	const message = asRecord(entry.message) ?? {};
+ 	const createdAt =
+ 		typeof entry.timestamp === "string" && entry.timestamp.length > 0 ? entry.timestamp : new Date(0).toISOString();
+ 	if (message.role === "toolResult") {
+-		return {
+-			kind: "message",
+-			itemId: entry.id,
+-			parentId: entry.parentId,
+-			createdAt,
+-			role: "assistant",
+-			content: [mapToolResultMessage(message)],
+-		};
++		return undefined;
+ 	}
+ 	const content: ConversationContentBlock[] = [];
+ 	if (typeof message.content === "string") {
+@@ -162,6 +166,7 @@ function mapMessageEntry(entry: SessionEntry & { type: "message" }): Conversatio
+ 			}
+ 		}
+ 	}
++	if (content.length === 0) return undefined;
+ 	return {
+ 		kind: "message",
+ 		itemId: entry.id,
+@@ -210,21 +215,56 @@ function projectEntry(entry: SessionEntry): ConversationItem | undefined {
+ 
+ function projectBranch(entries: readonly SessionEntry[]): ConversationItem[] {
+ 	const items: ConversationItem[] = [];
++	const toolOwners = new Map<string, number>();
++	const toolResults: Array<{
++		readonly entry: SessionEntry;
++		readonly result: Extract<ConversationContentBlock, { type: "toolResult" }>;
++	}> = [];
+ 	for (const entry of entries) {
++		if (entry.type === "message") {
++			const message = asRecord(entry.message) ?? {};
++			if (message.role === "toolResult") {
++				toolResults.push({ entry, result: mapToolResultMessage(message) });
++				continue;
++			}
++		}
+ 		try {
+ 			const item = projectEntry(entry);
+-			if (item !== undefined) items.push(item);
++			if (item === undefined || (item.kind === "message" && item.content.length === 0)) continue;
++			const index = items.length;
++			items.push(item);
++			if (item.kind === "message") {
++				for (const block of item.content) {
++					if (block.type === "toolCall") toolOwners.set(block.toolCallId, index);
++				}
++			}
+ 		} catch {
+-			items.push({
+-				kind: "message",
+-				itemId: entry.id,
+-				parentId: entry.parentId,
+-				createdAt: typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString(),
+-				role: "assistant",
+-				content: [{ type: "text", text: "", truncated: true }],
+-			});
++			// A malformed entry is not allowed to create an empty public row.
+ 		}
+ 	}
++	const orphans: typeof toolResults = [];
++	for (const { entry, result } of toolResults) {
++		const ownerIndex = toolOwners.get(result.toolCallId);
++		const owner = ownerIndex === undefined ? undefined : items[ownerIndex];
++		if (owner === undefined || owner.kind !== "message") {
++			orphans.push({ entry, result });
++			continue;
++		}
++		const content = owner.content.some(block => block.type === "toolResult" && block.toolCallId === result.toolCallId)
++			? owner.content
++			: [...owner.content, result];
++		items[ownerIndex] = { ...owner, content };
++	}
++	for (const { entry, result } of orphans) {
++		items.push({
++			kind: "message",
++			itemId: entry.id,
++			parentId: entry.parentId,
++			createdAt: typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString(),
++			role: "assistant",
++			content: [{ type: "toolCall", toolCallId: result.toolCallId, toolName: result.toolName ?? "tool" }, result],
++		});
++	}
+ 	return items;
+ }
+ 
+diff --git a/packages/coding-agent/test/studio-conversation-live-projector.test.ts b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
+index a5ef31d63a473552ebdce4292bb2ca814a630f3c..ea15a8570691c58f58075c478061371436f76cdf 100644
+--- a/packages/coding-agent/test/studio-conversation-live-projector.test.ts
++++ b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
+@@ -341,6 +341,31 @@ describe("ConversationLiveProjector", () => {
+ 		expect(diagnostics.length).toBeGreaterThanOrEqual(0);
+ 	});
+ 
++	test("keeps sanitized tool details on the completed result", () => {
++		const { projector, events } = createProjector();
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message: assistant([]) });
++		projector.project({ type: "tool_execution_start", toolCallId: "call-details", toolName: "Read", args: {} });
++		projector.project({
++			type: "tool_execution_end",
++			toolCallId: "call-details",
++			toolName: "Read",
++			result: {
++				content: [{ type: "text", text: "body" }],
++				isError: false,
++				details: { lines: 2, preview: ["a", "b"], token: "redact-me" },
++			},
++			isError: false,
++		});
++		const completed = events.find(event => event.kind === "conversation.tool.completed");
++		expect(completed?.kind === "conversation.tool.completed" && completed.result.data).toEqual({
++			lines: 2,
++			preview: ["a", "b"],
++			token: "[redacted]",
++		});
++		expect(JSON.stringify(completed)).not.toContain("redact-me");
++	});
++
+ 	test("flushes remaining deltas before message.completed", () => {
+ 		const { projector, events } = createProjector();
+ 		const message = assistant([{ type: "text", text: "ab" }]);
+diff --git a/packages/coding-agent/test/studio-session-transcript-service.test.ts b/packages/coding-agent/test/studio-session-transcript-service.test.ts
+index 164ee46f903a267426235c1dee5ed2b63d5ca506..3cfd185d4103ce474f931b350160a9ce7a07c3d1 100644
+--- a/packages/coding-agent/test/studio-session-transcript-service.test.ts
++++ b/packages/coding-agent/test/studio-session-transcript-service.test.ts
+@@ -118,11 +118,11 @@ describe("StudioSessionTranscriptService", () => {
+ 		manager.appendMessage(
+ 			assistantMessage([{ type: "toolCall", id: "call-ok", name: "Read", arguments: { path: "a.ts" } }]),
+ 		);
+-		const okId = manager.appendMessage(toolResult("call-ok", "Read", '{"ok":true}', false));
++		manager.appendMessage(toolResult("call-ok", "Read", '{"ok":true}', false));
+ 		manager.appendMessage(
+ 			assistantMessage([{ type: "toolCall", id: "call-bad", name: "Bash", arguments: { command: "nope" } }]),
+ 		);
+-		const errId = manager.appendMessage(toolResult("call-bad", "Bash", "exit 1", true));
++		manager.appendMessage(toolResult("call-bad", "Bash", "exit 1", true));
+ 		manager.appendMessage({
+ 			role: "user",
+ 			content: "secret turn",
+@@ -130,17 +130,29 @@ describe("StudioSessionTranscriptService", () => {
+ 			providerPayload: { type: "openaiResponsesHistory", items: [{ token: "sk-leak" }] },
+ 		});
+ 		const page = serviceFor(manager).read();
+-		const ok = page.items.find(item => item.itemId === okId);
+-		const err = page.items.find(item => item.itemId === errId);
++		const ok = page.items.find(
++			item =>
++				item.kind === "message" &&
++				item.content.some(block => block.type === "toolResult" && block.toolCallId === "call-ok"),
++		);
++		const err = page.items.find(
++			item =>
++				item.kind === "message" &&
++				item.content.some(block => block.type === "toolResult" && block.toolCallId === "call-bad"),
++		);
+ 		expect(ok).toMatchObject({
+ 			kind: "message",
+ 			content: [
++				{ type: "toolCall", toolCallId: "call-ok", toolName: "Read" },
+ 				{ type: "toolResult", toolCallId: "call-ok", toolName: "Read", output: '{"ok":true}', isError: false },
+ 			],
+ 		});
+ 		expect(err).toMatchObject({
+ 			kind: "message",
+-			content: [{ type: "toolResult", toolCallId: "call-bad", toolName: "Bash", output: "exit 1", isError: true }],
++			content: [
++				{ type: "toolCall", toolCallId: "call-bad", toolName: "Bash" },
++				{ type: "toolResult", toolCallId: "call-bad", toolName: "Bash", output: "exit 1", isError: true },
++			],
+ 		});
+ 		expect(JSON.stringify(page)).not.toContain("providerPayload");
+ 		expect(JSON.stringify(page)).not.toContain("sk-leak");
+@@ -267,7 +279,10 @@ describe("StudioSessionTranscriptService", () => {
+ 		const huge = "x".repeat(CONVERSATION_LIMITS.JSON_VALUE_MAX_BYTES + 4096);
+ 		manager.appendMessage(toolResult("call-huge", "Bash", huge, false));
+ 		const page = serviceFor(manager).read();
+-		const block = page.items[0] && page.items[0].kind === "message" ? page.items[0].content[0] : undefined;
++		const block =
++			page.items[0] && page.items[0].kind === "message"
++				? page.items[0].content.find(item => item.type === "toolResult")
++				: undefined;
+ 		expect(block).toMatchObject({ type: "toolResult", truncated: true });
+ 		expect(new TextEncoder().encode(JSON.stringify(page)).byteLength).toBeLessThanOrEqual(
+ 			CONVERSATION_LIMITS.PAGE_MAX_BYTES,

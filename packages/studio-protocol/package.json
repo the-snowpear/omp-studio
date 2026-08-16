@@ -15,6 +15,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test dist/test/protocol.test.js"
+    "test": "npm run build && node --test \"dist/test/*.test.js\""
   }
 }

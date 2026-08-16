@@ -19,6 +19,7 @@ import type {
   ClientError,
   ClientEvent,
   ClientEventBase,
+  ClientInteraction,
   ClientTransport,
   CommandName,
   CommandRequestId,
@@ -43,7 +44,8 @@ import {
   type ClientState,
 } from "../src/reducer.js";
 import type { ClientClockAndIds } from "../src/clock.js";
-import { StudioClientImpl } from "../src/studio-client.js";
+import { StudioClientImpl, type ConversationHydrateClient } from "../src/studio-client.js";
+import { selectConversationHydrate } from "../src/conversation-state.js";
 
 const TS = "2026-08-12T00:00:00.000Z";
 const REQ_1 = "req-1" as CommandRequestId;
@@ -57,7 +59,7 @@ function snapshot(stateVersion: number, runtimeEpoch: number): OperatorStateSnap
     sessionId: "sess-1" as SessionId,
     isStreaming: false,
     isCompacting: false,
-    activeMode: "normal",
+    activeMode: "normal", approvalMode: "yolo",
     pendingMessages: 0,
     activeCommandIds: [],
     agentsRevision: 0,
@@ -69,7 +71,7 @@ function snapshot(stateVersion: number, runtimeEpoch: number): OperatorStateSnap
 
 function bootstrap(stateVersion = 1, cursor = "10", runtimeEpoch = 1): ClientBootstrap {
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     authority: { authorityId: "auth-1" as AuthorityId, authorityEpoch: 1 as AuthorityEpoch },
     runtime: {
       status: "connected",
@@ -122,17 +124,43 @@ function accepted(requestId: CommandRequestId, cursor: number, overrides: EventO
   };
 }
 
-function interactionRequired(requestId: CommandRequestId, cursor: number, overrides: EventOverrides = {}): ClientEvent {
+function interactionRequired(
+  requestId: CommandRequestId | undefined,
+  cursor: number,
+  overrides: EventOverrides = {},
+  interactionOverrides: Partial<ClientInteraction> = {},
+): ClientEvent {
+  const interaction = {
+    interactionId: "ia-1" as InteractionId,
+    sessionId: "session-1" as SessionId,
+    leaseGeneration: 1,
+    title: "Confirm drop",
+    ...(requestId === undefined ? {} : { requestId }),
+    kind: "confirm" as const,
+    message: "Drop thread?",
+    destructive: true,
+    ...interactionOverrides,
+  };
   return {
     ...base(String(cursor), overrides),
-    kind: "command.interactionRequired",
-    interaction: {
-      interactionId: "ia-1" as InteractionId,
-      requestId,
-      kind: "confirm",
-      message: "Drop thread?",
-      destructive: true,
-    },
+    kind: "interaction.required",
+    interaction: interaction as ClientInteraction,
+  };
+}
+
+function interactionResolved(
+  interactionId: InteractionId,
+  leaseGeneration: number,
+  cursor: number,
+  outcome: "submitted" | "cancelled" | "aborted" | "expired" = "submitted",
+  overrides: EventOverrides = {},
+): ClientEvent {
+  return {
+    ...base(String(cursor), overrides),
+    kind: "interaction.resolved",
+    interactionId,
+    leaseGeneration,
+    outcome,
   };
 }
 
@@ -170,7 +198,7 @@ function runtimeChanged(cursor: number, connection: RuntimeConnection, overrides
 
 function unavailableBootstrap(): ClientBootstrap {
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     authority: { authorityId: "auth-1" as AuthorityId, authorityEpoch: 1 as AuthorityEpoch },
     runtime: {
       status: "unavailable",
@@ -187,7 +215,7 @@ function bootedState(b: ClientBootstrap = bootstrap()): ClientState {
   return reduceClientState(createInitialClientState(), { type: "bootstrap.set", bootstrap: b, occurredAt: TS });
 }
 
-function issue(state: ClientState, name: "session.resume" | "runtime.install", requestId: CommandRequestId): ClientState {
+function issue(state: ClientState, name: "session.create" | "session.resume" | "runtime.install", requestId: CommandRequestId): ClientState {
   return reduceClientState(state, {
     type: "command.issue",
     requestId,
@@ -336,20 +364,154 @@ test("runtime loss marks accepted commands outcome_unknown", () => {
     assert.fail("expected outcome_unknown entry");
   }
   assert.equal(state.connection.runtimeEpoch, null);
+  assert.equal(state.entities.snapshot, null);
+  assert.equal(state.connection.stateVersion, null);
   // a completed receipt after outcome_unknown is ignored: terminal is final
   state = reduceClientState(state, { type: "event", event: completedReceipt(REQ_1, 13) });
   assert.equal(state.commands[REQ_1]?.status, "outcome_unknown");
+});
+
+test("telemetry.changed updates session telemetry without changing snapshot stateVersion", () => {
+  let state = bootedState();
+  const telemetry = {
+    sessionId: "sess-1" as SessionId,
+    capturedAt: TS,
+    tokens: { input: 100, output: 20, reasoning: 4, cacheRead: 10, cacheWrite: 2, total: 120, cost: 0.4 },
+    context: {
+      contextWindow: 128000,
+      usedTokens: 4000,
+      percent: 3.125,
+      anchored: true,
+      systemPromptTokens: 100,
+      systemContextTokens: 200,
+      systemToolsTokens: 300,
+      skillsTokens: 400,
+      messagesTokens: 3000,
+    },
+  };
+  state = reduceClientState(state, {
+    type: "event",
+    event: { ...base("11", { runtimeEpoch: 1 as RuntimeEpoch }), kind: "telemetry.changed", sessionId: "sess-1" as SessionId, telemetry },
+  });
+  assert.equal(state.entities.snapshot?.stateVersion, 1);
+  assert.equal(state.entities.telemetry?.tokens.total, 120);
+  assert.equal(state.entities.snapshot?.telemetry?.context?.messagesTokens, 3000);
+});
+
+test("stale-session telemetry consumes its cursor without replacing current telemetry", () => {
+  let state = bootedState();
+  const staleSessionId = "sess-old" as SessionId;
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...base("11", { runtimeEpoch: 1 as RuntimeEpoch }),
+      kind: "telemetry.changed",
+      sessionId: staleSessionId,
+      telemetry: {
+        sessionId: staleSessionId,
+        capturedAt: TS,
+        tokens: { input: 1, output: 2, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 3, cost: 0 },
+        context: null,
+        unavailableReason: "model_context_unknown",
+      },
+    },
+  });
+  assert.equal(state.connection.cursor, "11");
+  assert.equal(state.entities.telemetry, null);
+  assert.equal(state.connection.resyncRequired, false);
+
+  state = reduceClientState(state, { type: "event", event: changed(12) });
+  assert.equal(state.connection.cursor, "12");
+  assert.equal(state.connection.resyncRequired, false);
+});
+
+test("session.resume survives its expected connected epoch change until the completed receipt", () => {
+  let state = bootedState();
+  state = issue(state, "session.resume", REQ_1);
+  state = reduceClientState(state, { type: "event", event: accepted(REQ_1, 11) });
+  state = reduceClientState(state, {
+    type: "event",
+    event: runtimeChanged(12, {
+      status: "connected",
+      classification: "managed",
+      runtimeId: "rt-2" as RuntimeId,
+      runtimeEpoch: 2 as RuntimeEpoch,
+    }),
+  });
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+  state = reduceClientState(state, {
+    type: "event",
+    event: completedReceipt(REQ_1, 13, { runtimeEpoch: 2 as RuntimeEpoch }),
+  });
+  assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
+test("session.create survives the fresh Runtime epoch change until completion", () => {
+  let state = bootedState();
+  state = issue(state, "session.create", REQ_1);
+  const createAccepted = accepted(REQ_1, 11);
+  assert.equal(createAccepted.kind, "command.accepted");
+  if (createAccepted.kind !== "command.accepted") return;
+  state = reduceClientState(state, {
+    type: "event",
+    event: { ...createAccepted, accepted: { ...createAccepted.accepted, commandName: "session.create" } },
+  });
+  state = reduceClientState(state, {
+    type: "event",
+    event: runtimeChanged(12, {
+      status: "connected",
+      classification: "managed",
+      runtimeId: "rt-fresh" as RuntimeId,
+      runtimeEpoch: 2 as RuntimeEpoch,
+    }),
+  });
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+  const createCompleted = completedReceipt(REQ_1, 13, { runtimeEpoch: 2 as RuntimeEpoch });
+  assert.equal(createCompleted.kind, "command.receipt");
+  if (createCompleted.kind !== "command.receipt" || createCompleted.receipt.status !== "completed") return;
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...createCompleted,
+      receipt: { ...createCompleted.receipt, commandName: "session.create" },
+    },
+  });
+  assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
+test("a new runtime epoch accepts a smaller stateVersion and replaces the snapshot", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(11, snapshot(9, 1)) });
+  assert.equal(state.entities.snapshot?.stateVersion, 9);
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(1, 2)) });
+  assert.equal(state.connection.runtimeEpoch, 2);
+  assert.equal(state.connection.stateVersion, 1);
+  assert.equal(state.entities.snapshot?.stateVersion, 1);
+  assert.equal(state.entities.snapshot?.runtimeEpoch, 2);
+});
+
+test("the same runtime epoch still rejects a regressing snapshot", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(11, snapshot(4, 1)) });
+  const before = state.entities.snapshot;
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(2, 1)) });
+  assert.equal(state.entities.snapshot, before);
+  assert.equal(state.connection.stateVersion, 4);
 });
 
 test("a runtime epoch change via snapshot marks in-flight commands outcome_unknown", () => {
   let state = bootedState();
   state = issue(state, "session.resume", REQ_1);
   state = reduceClientState(state, { type: "event", event: accepted(REQ_1, 11) });
+  state = issue(state, "runtime.install", REQ_2);
   state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(2, 2)) });
   assert.equal(state.connection.runtimeEpoch, 2);
-  assert.equal(state.commands[REQ_1]?.status, "outcome_unknown");
-  if (state.commands[REQ_1]?.status === "outcome_unknown") {
-    assert.equal(state.commands[REQ_1]?.reason, "runtime epoch changed; outcome unknown");
+  // The resume command itself survives the epoch change it caused; every
+  // other in-flight command is outcome_unknown.
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+  assert.equal(state.commands[REQ_2]?.status, "outcome_unknown");
+  if (state.commands[REQ_2]?.status === "outcome_unknown") {
+    assert.equal(state.commands[REQ_2]?.reason, "runtime epoch changed; outcome unknown");
   }
 });
 
@@ -371,9 +533,12 @@ test("interaction_required transitions from pending states and never regresses",
   state = reduceClientState(state, { type: "event", event: accepted(REQ_1, 11) });
   const interactionEvent: ClientEvent = {
     ...base("12"),
-    kind: "command.interactionRequired",
+    kind: "interaction.required",
     interaction: {
       interactionId: "ia-1" as InteractionId,
+      sessionId: "session-1" as SessionId,
+      leaseGeneration: 1,
+      title: "Confirm drop",
       requestId: REQ_1,
       kind: "confirm",
       message: "Drop thread?",
@@ -382,12 +547,72 @@ test("interaction_required transitions from pending states and never regresses",
   };
   state = reduceClientState(state, { type: "event", event: interactionEvent });
   assert.equal(state.commands[REQ_1]?.status, "interaction_required");
+  assert.equal(state.interaction.pending?.interactionId, "ia-1");
   state = reduceClientState(state, { type: "event", event: completedReceipt(REQ_1, 13) });
   assert.equal(state.commands[REQ_1]?.status, "completed");
   // a late interaction cannot regress a terminal command
   const late: ClientEvent = { ...interactionEvent, cursor: "14" as EventCursor };
   state = reduceClientState(state, { type: "event", event: late });
   assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
+test("interaction without a requestId still enters state.interaction.pending", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  assert.equal(state.interaction.pending?.kind, "confirm");
+  assert.equal(state.interaction.pending?.title, "Confirm drop");
+  assert.equal("requestId" in state.interaction.pending!, false);
+});
+
+test("interaction.resolved clears pending only for matching id and generation", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  // wrong generation: no-op
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 2, 12) });
+  assert.ok(state.interaction.pending);
+  // correct generation: cleared
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 1, 13) });
+  assert.equal(state.interaction.pending, null);
+  // duplicate resolved (same cursor) is idempotent
+  const before = state;
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-1" as InteractionId, 1, 13) });
+  assert.equal(state, before);
+  // different id: no-op
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 14) });
+  state = reduceClientState(state, { type: "event", event: interactionResolved("ia-other" as InteractionId, 1, 15) });
+  assert.ok(state.interaction.pending);
+});
+
+test("bootstrap restores pending interaction and clears it when absent", () => {
+  const pending = {
+    interactionId: "ia-1" as InteractionId,
+    sessionId: "session-1" as SessionId,
+    leaseGeneration: 3,
+    title: "Pick a branch",
+    kind: "select" as const,
+    options: [{ id: "option:0", label: "main" }],
+    multiple: false,
+  };
+  const withPending = reduceClientState(createInitialClientState(), {
+    type: "bootstrap.set",
+    bootstrap: { ...bootstrap(), pendingInteraction: pending },
+    occurredAt: TS,
+  });
+  assert.deepEqual(withPending.interaction.pending, pending);
+  const withoutPending = reduceClientState(withPending, {
+    type: "bootstrap.set",
+    bootstrap: bootstrap(),
+    occurredAt: TS,
+  });
+  assert.equal(withoutPending.interaction.pending, null);
+});
+
+test("runtime epoch change clears the pending interaction", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  assert.ok(state.interaction.pending);
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(2, 2)) });
+  assert.equal(state.interaction.pending, null);
 });
 
 test("sensitive mutations are blocked with RESYNC_REQUIRED while resync is required", () => {
@@ -496,6 +721,18 @@ test("StudioClientImpl buffers bootstrap races and does not deliver ignored even
   const before = received.length;
   emitDuringBootstrap?.({ ...changed(10), authorityEpoch: 0 as AuthorityEpoch });
   assert.equal(received.length, before);
+  await client.close();
+});
+
+test("StudioClientImpl rejects an incompatible bootstrap contract before applying state", async () => {
+  const client = new StudioClientImpl(new MemoryClientTransport({
+    bootstrap: () => ({ ...bootstrap(), contractVersion: 1 } as unknown as ClientBootstrap),
+  }), fixedIds());
+  await assert.rejects(
+    client.bootstrap(),
+    (error: unknown) => (error as ClientError).code === "UNAVAILABLE" && /contract mismatch/iu.test((error as ClientError).message),
+  );
+  assert.equal(client.getState().connection.phase, "initial");
   await client.close();
 });
 
@@ -690,4 +927,32 @@ test("MemoryClientTransport enforces closed behavior", async () => {
   transport.subscribe({ scope: "all" }, (e) => delivered.push(e));
   transport.emit(changed(11));
   assert.equal(delivered.length, 0);
+});
+
+test("StudioClientImpl records transcript hydrate failure on conversation state", () => {
+  const transport: ClientTransport = {
+    async bootstrap() {
+      return bootstrap();
+    },
+    async query() {
+      return { ok: true, queryName: "session.state", result: snapshot(1, 1) } as never;
+    },
+    async command(request) {
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: TS };
+    },
+    subscribe() {
+      return () => undefined;
+    },
+    async close() {
+      return;
+    },
+  };
+  const client = new StudioClientImpl(transport, fixedIds());
+  const hydrate: ConversationHydrateClient = client;
+  const gen = hydrate.beginTranscriptHydrate({ runtimeEpoch: 1 as RuntimeEpoch, sessionId: "s-1" as SessionId });
+  hydrate.failTranscriptHydrate({ code: "UNAVAILABLE", message: "runtime down" }, gen);
+  const view = selectConversationHydrate(client.getState().conversation);
+  assert.equal(view.status, "error");
+  assert.equal(view.error?.code, "UNAVAILABLE");
+  assert.equal(view.error?.message, "runtime down");
 });

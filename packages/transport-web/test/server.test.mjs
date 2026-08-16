@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { LoopbackWebAdapter, createLoopbackHttpServer } from '../dist/src/index.js';
 
 function host() { return {
-  bootstrap: async () => ({ contractVersion: 1 }),
+  bootstrap: async () => ({ contractVersion: 2 }),
   query: async (r) => ({ ok: true, queryName: r.queryName, result: {} }),
   command: async (r) => ({ commandName: r.commandName, status: 'accepted', requestId: 'r', acceptedAt: 't' }),
   subscribe: () => () => {},

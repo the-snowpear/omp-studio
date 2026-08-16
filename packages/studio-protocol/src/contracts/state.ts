@@ -1,4 +1,5 @@
 import type { StudioAgentSnapshot, StudioJobSnapshot } from "./agents-jobs";
+import type { ApprovalMode } from "./commands";
 import type {
   AgentId,
   CommandId,
@@ -10,7 +11,8 @@ import type {
   SessionId,
   StateVersion,
 } from "./ids";
-import type { InteractionSummary } from "./interactions";
+import type { StudioPendingInteraction } from "./interactions";
+import type { SessionTelemetrySnapshot } from "./telemetry";
 
 export interface PlanState {
   status: "off" | "active" | "paused" | "review";
@@ -54,6 +56,8 @@ export interface OperatorStateSnapshot {
   isStreaming: boolean;
   isCompacting: boolean;
   activeMode: "normal" | "plan" | "goal" | "vibe";
+  /** Effective tool approval mode of the Runtime (override layer first). */
+  approvalMode: ApprovalMode;
   plan?: PlanState;
   goal?: GoalState;
   vibe?: VibeState;
@@ -61,12 +65,13 @@ export interface OperatorStateSnapshot {
   pause?: PauseState;
   live?: LiveState;
   pendingMessages: number;
-  pendingInteraction?: InteractionSummary;
+  pendingInteraction?: StudioPendingInteraction;
   activeCommandIds: CommandId[];
   agentsRevision: number;
   jobsRevision: number;
   agents: StudioAgentSnapshot[];
   jobs: StudioJobSnapshot[];
+  telemetry?: SessionTelemetrySnapshot;
 }
 
 export interface RuntimeControlLease {
@@ -103,4 +108,3 @@ export interface CommandLedgerEntry {
 export interface JobSelection {
   jobId: JobId;
 }
-

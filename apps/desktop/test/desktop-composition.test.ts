@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { ClientBootstrap, ClientError, EventCursor } from "@omp-studio/client-contract";
+import type { ClientBootstrap, ClientError, CommandRequestId, EventCursor, IdempotencyKey } from "@omp-studio/client-contract";
 import { privateEndpoint, type PlatformPort } from "@omp-studio/platform";
 import { AuthorityAlreadyOwnedError } from "@omp-studio/platform-win32";
 import {
@@ -56,7 +56,7 @@ const SNAPSHOT: OperatorStateSnapshot = {
   sessionId: "sess-0001" as SessionId,
   isStreaming: false,
   isCompacting: false,
-  activeMode: "normal",
+  activeMode: "normal", approvalMode: "yolo",
   pendingMessages: 0,
   activeCommandIds: [],
   agentsRevision: 0,
@@ -234,6 +234,8 @@ function fakeSessionPort(options: { ready?: boolean; startError?: Error; stopErr
             dispose: () => {},
           } as unknown as StudioRuntimeSessionController,
           hello: () => HELLO_VIEW,
+          capabilityManifest: () => undefined,
+          commandManifest: () => undefined,
           onPublication: () => () => {},
         };
         return session;
@@ -412,6 +414,35 @@ test("without a runtime session port the composition stays read-only even with a
   });
 });
 
+test("managedInstall without trusted keys fails closed instead of reporting installed", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      managedInstall: {},
+      installer: {},
+    });
+    const events: Array<{ kind: string; receipt?: { status: string; error?: { message: string } } }> = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    const accepted = await composition.facade.command({
+      commandName: "runtime.install",
+      input: {},
+      idempotencyKey: "idem-install-keys" as IdempotencyKey,
+      requestId: "req-install-keys" as CommandRequestId,
+    });
+    assert.equal(accepted.status, "accepted");
+    const started = Date.now();
+    while (!events.some((event) => event.kind === "command.receipt") && Date.now() - started < 2000) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    const receipt = events.find((event) => event.kind === "command.receipt");
+    assert.equal(receipt?.receipt?.status, "failed");
+    assert.match(receipt?.receipt?.error?.message ?? "", /OMP_RUNTIME_TRUSTED_PUBLIC_KEY/u);
+    await composition.shutdown();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Second owner fails closed
 // ---------------------------------------------------------------------------
@@ -578,27 +609,27 @@ test("creation failure releases every acquired resource without masking the orig
   });
 });
 
-test("a session start failure stops the started runtime and releases the endpoint and lease", async () => {
+test("a session start failure keeps a read-only Host facade", async () => {
   await withTempProfile(async (profileDirectory) => {
     await withTempExecutable(async (executablePath) => {
       const lock = fakeAuthorityLock();
       const endpoint = fakePrivateEndpoint();
       const session = fakeSessionPort({ startError: new Error("runtime failed to start") });
-      await assert.rejects(
-        createDesktopHostComposition({
-          platform: fakePlatform(profileDirectory).port,
-          authorityLock: lock.port,
-          privateEndpoint: endpoint.port,
-          runtimeSession: session.port,
-          resolver: { probe: fullParityProbe() },
-          preference: { kind: "system", executable: executablePath, allowLimited: false },
-        }),
-        /runtime failed to start/u,
-      );
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: lock.port,
+        privateEndpoint: endpoint.port,
+        runtimeSession: session.port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system", executable: executablePath, allowLimited: false },
+      });
+      assert.equal(composition.status, "read-only");
+      assertWithoutSnapshot(await composition.facade.bootstrap());
       assert.deepEqual(session.calls, ["session.start", "session.stop"]);
-      assert.deepEqual(endpoint.calls, ["endpoint.create", "endpoint.release"]);
-      assert.deepEqual(lock.calls, ["acquire", "lease.release"]);
-      assert.equal(lock.released, true);
+      assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+      assert.deepEqual(lock.calls, ["acquire"]);
+      assert.equal(lock.released, false);
+      await composition.shutdown();
     });
   });
 });

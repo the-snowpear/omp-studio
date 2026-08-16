@@ -153,6 +153,7 @@ interface FakeFacade extends ClientTransport {
   bootstrapResult: ClientBootstrap;
   queryResult: ClientQueryResponse;
   commandResult: ClientCommandAccepted;
+  commandError: unknown;
 }
 
 function makeFacade(): FakeFacade {
@@ -168,6 +169,7 @@ function makeFacade(): FakeFacade {
       status: "accepted",
       acceptedAt: "2026-08-12T00:00:00.000Z",
     } as unknown as ClientCommandAccepted,
+    commandError: undefined,
     async bootstrap() {
       this.calls.push("bootstrap");
       return this.bootstrapResult;
@@ -178,6 +180,7 @@ function makeFacade(): FakeFacade {
     },
     async command<TName extends CommandName>(request: ClientCommandRequest<TName>) {
       this.calls.push(`command:${request.commandName}`);
+      if (this.commandError !== undefined) throw this.commandError;
       return this.commandResult as ClientCommandAccepted<TName>;
     },
     subscribe(scope: SubscriptionScope, listener: (event: ClientEvent) => void) {
@@ -361,6 +364,24 @@ describe("registerDesktopIpc: valid named-method routes", () => {
     });
     assert.deepEqual(facade.calls, ["command:session.drop"]);
     assert.equal((result as { status: string }).status, "accepted");
+    handle.dispose();
+  });
+
+  test("plain ClientError from command is rethrown as Error with the Host message", async () => {
+    const { invoke, facade, handle } = registerIpc();
+    const sender = makeSender(1);
+    facade.commandError = { code: "UNAVAILABLE", message: "session.resume requires a Runtime snapshot" };
+    await assert.rejects(
+      () =>
+        invoke(DESKTOP_IPC_CHANNELS.command, sender, {
+          commandName: "session.resume",
+          input: { threadId: "t-1" },
+          idempotencyKey: "idem-1",
+          requestId: "req-1",
+        }),
+      (error: unknown) =>
+        error instanceof Error && error.message === "session.resume requires a Runtime snapshot" && error.name === "UNAVAILABLE",
+    );
     handle.dispose();
   });
 

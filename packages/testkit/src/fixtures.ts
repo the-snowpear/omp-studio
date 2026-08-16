@@ -31,8 +31,11 @@ import type {
   EventCursor,
   HistoryEntryId,
   IdempotencyKey,
+  GitRepositoryId,
+  GitWorktreeId,
   QueryInput,
   QueryName,
+  ConversationTranscriptReadPage,
   RuntimeEpoch,
   RuntimeId,
   SessionId,
@@ -40,6 +43,7 @@ import type {
   SubscriptionScope,
   ThreadId,
   Unsubscribe,
+  WorkspaceId,
 } from "@omp-studio/client-contract";
 import type {
   DiagnosticReadModel,
@@ -57,6 +61,7 @@ import type {
   OperatorStateSnapshot,
 } from "@omp-studio/studio-protocol";
 
+import { conversationChangedEvent, conversationLiveSequence, conversationPages } from "./conversation-fixtures.js";
 import type { ContractFixtureApi, FixtureCalls, FixtureSubscription } from "./types.js";
 
 /** Public opaque authority/runtime identities (never secrets). */
@@ -68,6 +73,9 @@ const STATE_VERSION = 41 as StateVersion;
 const ENVIRONMENT_ID = "env-0001" as EnvironmentId;
 const THREAD_ID = "thr-0001" as ThreadId;
 const SESSION_ID = "sess-0001" as SessionId;
+const WORKSPACE_ID = "ws-0001" as WorkspaceId;
+const GIT_REPOSITORY_ID = "repo-0001" as GitRepositoryId;
+const GIT_WORKTREE_ID = "worktree-0001" as GitWorktreeId;
 const HISTORY_ID = "hist-0001" as HistoryEntryId;
 const DIAGNOSTIC_ID = "diag-0001" as DiagnosticEntryId;
 const COMMAND_REQUEST_ID = "cmd-req-0001" as CommandRequestId;
@@ -86,7 +94,7 @@ const SNAPSHOT: OperatorStateSnapshot = {
   sessionId: SESSION_ID,
   isStreaming: false,
   isCompacting: false,
-  activeMode: "normal",
+  activeMode: "normal", approvalMode: "yolo",
   plan: { status: "off" },
   goal: { status: "off" },
   pause: { paused: false },
@@ -247,7 +255,20 @@ const QUERY_INPUTS = {
   "mcp.get": {},
   "agents.definitions.get": {},
   "projects.list": {},
+  "workspace.fileTree": { workspaceId: WORKSPACE_ID },
   "usage.get": {},
+  "session.transcript.read": { limit: 50 },
+  "session.transcript.readPage": { sessionId: SESSION_ID, limit: 50 },
+  "git.toolchain.get": {},
+  "git.repository.get": { workspaceId: WORKSPACE_ID },
+  "git.diff.get": { workspaceId: WORKSPACE_ID, path: "src/index.ts", target: "working" },
+  "git.branches.list": { workspaceId: WORKSPACE_ID },
+  "git.worktrees.list": { workspaceId: WORKSPACE_ID },
+  "git.remotes.list": { workspaceId: WORKSPACE_ID },
+  "github.auth.get": { workspaceId: WORKSPACE_ID },
+  "github.pr.list": { workspaceId: WORKSPACE_ID, state: "open" },
+  "github.pr.get": { workspaceId: WORKSPACE_ID, number: 1 },
+  "github.pr.checks": { workspaceId: WORKSPACE_ID, number: 1 },
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
@@ -320,6 +341,11 @@ const QUERY_RESPONSES = {
     queryName: "projects.list",
     result: { workspaces: [] },
   },
+  "workspace.fileTree": {
+    ok: true,
+    queryName: "workspace.fileTree",
+    result: { workspaceId: WORKSPACE_ID, nodes: [] },
+  },
   "usage.get": {
     ok: true,
     queryName: "usage.get",
@@ -330,6 +356,88 @@ const QUERY_RESPONSES = {
       byModel: [],
       hours: [],
     },
+  },
+  "session.transcript.read": {
+    ok: true,
+    queryName: "session.transcript.read",
+    result: conversationPages.userAssistant,
+  },
+  "session.transcript.readPage": {
+    ok: true,
+    queryName: "session.transcript.readPage",
+    result: {
+      sessionId: SESSION_ID,
+      transcriptRevision: "fixture-revision-1",
+      branchLeafId: conversationPages.userAssistant.branchLeafId,
+      items: conversationPages.userAssistant.items,
+      headCursor: conversationPages.userAssistant.headCursor,
+      hasMoreBefore: false,
+    } satisfies ConversationTranscriptReadPage,
+  },
+  "git.toolchain.get": {
+    ok: true,
+    queryName: "git.toolchain.get",
+    result: { git: { available: true, version: "git version fixture" }, githubCli: { available: true, version: "gh version fixture" } },
+  },
+  "git.repository.get": {
+    ok: true,
+    queryName: "git.repository.get",
+    result: {
+      workspaceId: WORKSPACE_ID,
+      isRepository: true,
+      repositoryId: GIT_REPOSITORY_ID,
+      worktreeId: GIT_WORKTREE_ID,
+      branch: "main",
+      headOid: UPSTREAM_COMMIT,
+      detached: false,
+      unborn: false,
+      upstream: "origin/main",
+      ahead: 0,
+      behind: 0,
+      stashCount: 0,
+      changes: [],
+      revision: "git-revision-1",
+    },
+  },
+  "git.diff.get": {
+    ok: true,
+    queryName: "git.diff.get",
+    result: { workspaceId: WORKSPACE_ID, path: "src/index.ts", target: "working", patch: "", binary: false, truncated: false, revision: "diff-revision-1" },
+  },
+  "git.branches.list": {
+    ok: true,
+    queryName: "git.branches.list",
+    result: { workspaceId: WORKSPACE_ID, branches: [{ name: "main", remote: false, current: true, headOid: UPSTREAM_COMMIT, upstream: "origin/main", ahead: 0, behind: 0, checkedOutWorktreeId: GIT_WORKTREE_ID }] },
+  },
+  "git.worktrees.list": {
+    ok: true,
+    queryName: "git.worktrees.list",
+    result: { workspaceId: WORKSPACE_ID, rootConfigured: false, worktrees: [{ worktreeId: GIT_WORKTREE_ID, name: "fixture", branch: "main", headOid: UPSTREAM_COMMIT, current: true, detached: false, bare: false, locked: false, prunable: false, workspaceId: WORKSPACE_ID }] },
+  },
+  "git.remotes.list": {
+    ok: true,
+    queryName: "git.remotes.list",
+    result: { workspaceId: WORKSPACE_ID, remotes: [{ name: "origin", fetchUrl: "https://github.com/example/fixture.git", pushUrl: "https://github.com/example/fixture.git", host: "github.com", repository: "example/fixture" }] },
+  },
+  "github.auth.get": {
+    ok: true,
+    queryName: "github.auth.get",
+    result: { available: true, authenticated: true, host: "github.com", account: "fixture", gitProtocol: "https" },
+  },
+  "github.pr.list": {
+    ok: true,
+    queryName: "github.pr.list",
+    result: { workspaceId: WORKSPACE_ID, pullRequests: [] },
+  },
+  "github.pr.get": {
+    ok: true,
+    queryName: "github.pr.get",
+    result: { workspaceId: WORKSPACE_ID, pullRequest: { number: 1, title: "Fixture PR", state: "open", draft: false, headBranch: "feature", baseBranch: "main", headOid: UPSTREAM_COMMIT, url: "https://github.com/example/fixture/pull/1" }, checks: [] },
+  },
+  "github.pr.checks": {
+    ok: true,
+    queryName: "github.pr.checks",
+    result: { workspaceId: WORKSPACE_ID, pullRequestNumber: 1, checks: [], overall: "neutral" },
   },
 } satisfies { readonly [K in QueryName]: ClientQueryResponse<K> };
 
@@ -423,11 +531,14 @@ const DIAGNOSTICS_EVENT: ClientEvent = {
   kind: "diagnostics.changed",
 };
 
+const CONVERSATION_EVENT: ClientEvent = conversationChangedEvent(conversationLiveSequence[0]!, 12);
+
 const EVENTS: ReadonlyArray<ClientEvent> = [
   SNAPSHOT_EVENT,
   ACCEPTED_EVENT,
   RECEIPT_EVENT,
   DIAGNOSTICS_EVENT,
+  CONVERSATION_EVENT,
 ];
 
 /**
@@ -441,7 +552,7 @@ function commandRequestIdOf(event: ClientEvent): CommandRequestId | undefined {
   switch (event.kind) {
     case "command.accepted":
       return event.accepted.requestId;
-    case "command.interactionRequired":
+    case "interaction.required":
       return event.interaction.requestId;
     case "command.receipt":
       return event.receipt.requestId;

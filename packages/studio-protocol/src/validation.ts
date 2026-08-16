@@ -1,3 +1,8 @@
+import { ContractValidationError } from "./contract-error.js";
+import {
+  CONVERSATION_LIMITS,
+  SESSION_TRANSCRIPT_READ_KIND,
+} from "./contracts/conversation.js";
 import {
   STUDIO_PROTOCOL_NAME,
   STUDIO_PROTOCOL_VERSION,
@@ -10,17 +15,25 @@ import {
   type StudioSnapshotResponse,
 } from "./contracts/protocol.js";
 import type { OperatorStateSnapshot } from "./contracts/state.js";
-import type { OperatorCommandManifest, OperatorCommandManifestEntry } from "./contracts/manifests.js";
+import type { OperatorCommandManifest } from "./contracts/manifests.js";
+import {
+  isConversationRuntimeEventKind,
+  parseConversationRuntimeEvent,
+  parseOpaqueConversationCursor,
+  parseSessionTranscriptReadLimit,
+} from "./conversation-validation.js";
+import { isSessionTelemetryEventKind, parseSessionTelemetryEvent, parseSessionTelemetrySnapshot } from "./telemetry-validation.js";
 
-export class ContractValidationError extends Error {
-  constructor(
-    message: string,
-    readonly path = "$",
-  ) {
-    super(`${path}: ${message}`);
-    this.name = "ContractValidationError";
-  }
-}
+export { ContractValidationError } from "./contract-error.js";
+export {
+  parseConversationContentBlock,
+  parseConversationItem,
+  parseConversationRuntimeEvent,
+  parseConversationTranscriptPage,
+  parseOpaqueConversationCursor,
+  parseSessionTranscriptReadLimit,
+} from "./conversation-validation.js";
+export { isSessionTelemetryEventKind, parseSessionTelemetryEvent, parseSessionTelemetrySnapshot } from "./telemetry-validation.js";
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -42,6 +55,42 @@ function nonEmptyString(value: unknown, path: string): string {
     throw new ContractValidationError("expected a non-empty string", path);
   }
   return value;
+}
+
+const INTERACTION_LIMITS = {
+  ID_MAX_CHARS: 256,
+  TITLE_MAX_CHARS: 4_096,
+  MESSAGE_MAX_CHARS: 16 * 1024,
+  OPTION_COUNT_MAX: 256,
+  OPTION_TEXT_MAX_CHARS: 4_096,
+  EDITOR_CONTENT_MAX_CHARS: 128 * 1024,
+  DETAILS_MAX_BYTES: 64 * 1024,
+} as const;
+
+function boundedInteractionString(value: unknown, path: string, maxChars: number): string {
+  const text = nonEmptyString(value, path);
+  if (text.length > maxChars) {
+    throw new ContractValidationError(`string exceeds ${maxChars} characters`, path);
+  }
+  return text;
+}
+
+function boundedOptionalInteractionString(value: unknown, path: string, maxChars: number): string {
+  if (typeof value !== "string") {
+    throw new ContractValidationError("expected a string", path);
+  }
+  if (value.length > maxChars) {
+    throw new ContractValidationError(`string exceeds ${maxChars} characters`, path);
+  }
+  return value;
+}
+
+function boundedInteractionJson(value: unknown, path: string, maxBytes: number): void {
+  jsonValue(value, path);
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined || new TextEncoder().encode(encoded).length > maxBytes) {
+    throw new ContractValidationError(`JSON value exceeds ${maxBytes} bytes`, path);
+  }
 }
 
 function booleanValue(value: unknown, path: string): boolean {
@@ -244,6 +293,7 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
       "isStreaming",
       "isCompacting",
       "activeMode",
+      "approvalMode",
       "plan",
       "goal",
       "vibe",
@@ -257,6 +307,7 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
       "jobsRevision",
       "agents",
       "jobs",
+      "telemetry",
     ],
     "$snapshot.snapshot",
   );
@@ -268,6 +319,9 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
   booleanValue(input.isCompacting, "$snapshot.snapshot.isCompacting");
   if (!["normal", "plan", "goal", "vibe"].includes(input.activeMode as string)) {
     throw new ContractValidationError("unsupported active mode", "$snapshot.snapshot.activeMode");
+  }
+  if (!["always-ask", "write", "yolo"].includes(input.approvalMode as string)) {
+    throw new ContractValidationError("unsupported approval mode", "$snapshot.snapshot.approvalMode");
   }
   nonNegativeInteger(input.pendingMessages, "$snapshot.snapshot.pendingMessages");
   nonNegativeInteger(input.agentsRevision, "$snapshot.snapshot.agentsRevision");
@@ -337,19 +391,19 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
     const interaction = record(input.pendingInteraction, "$snapshot.snapshot.pendingInteraction");
     exactKeys(
       interaction,
-      ["interactionId", "commandId", "kind", "owner", "leaseGeneration"],
+      ["request", "owner", "leaseGeneration"],
       "$snapshot.snapshot.pendingInteraction",
     );
-    nonEmptyString(interaction.interactionId, "$snapshot.snapshot.pendingInteraction.interactionId");
-    nonEmptyString(interaction.commandId, "$snapshot.snapshot.pendingInteraction.commandId");
-    if (!["confirm", "select", "input", "editor", "approval"].includes(interaction.kind as string)) {
-      throw new ContractValidationError("unsupported interaction kind", "$snapshot.snapshot.pendingInteraction.kind");
-    }
     if (interaction.owner !== "gui" && interaction.owner !== "tui") {
       throw new ContractValidationError("unsupported interaction owner", "$snapshot.snapshot.pendingInteraction.owner");
     }
-    nonNegativeInteger(interaction.leaseGeneration, "$snapshot.snapshot.pendingInteraction.leaseGeneration");
+    positiveInteger(interaction.leaseGeneration, "$snapshot.snapshot.pendingInteraction.leaseGeneration");
+    validateRemoteInteractionRequest(
+      record(interaction.request, "$snapshot.snapshot.pendingInteraction.request"),
+      "$snapshot.snapshot.pendingInteraction.request",
+    );
   }
+  if (input.telemetry !== undefined) parseSessionTelemetrySnapshot(input.telemetry, "$snapshot.snapshot.telemetry");
   return input as unknown as OperatorStateSnapshot;
 }
 
@@ -411,6 +465,14 @@ export function parseStudioEventEnvelope(value: unknown): StudioEventEnvelope {
     }
     positiveInteger(event.leaseGeneration, "$event.event.leaseGeneration");
     validateRemoteInteractionRequest(record(event.request, "$event.event.request"), "$event.event.request");
+  } else if (event.kind === "interaction.resolved") {
+    exactKeys(event, ["kind", "interactionId", "commandId", "leaseGeneration", "outcome"], "$event.event");
+    nonEmptyString(event.interactionId, "$event.event.interactionId");
+    nonEmptyString(event.commandId, "$event.event.commandId");
+    positiveInteger(event.leaseGeneration, "$event.event.leaseGeneration");
+    if (!["submitted", "cancelled", "aborted", "expired"].includes(event.outcome as string)) {
+      throw new ContractValidationError("unsupported interaction outcome", "$event.event.outcome");
+    }
   } else if (event.kind === "progress") {
     exactKeys(event, ["kind", "commandId", "stage", "percent"], "$event.event");
     nonEmptyString(event.commandId, "$event.event.commandId");
@@ -428,38 +490,42 @@ export function parseStudioEventEnvelope(value: unknown): StudioEventEnvelope {
     }
     nonEmptyString(event.title, "$event.event.title");
     if (event.message !== undefined) nonEmptyString(event.message, "$event.event.message");
-	} else if (
-		event.kind === "runtime.ready" ||
-		event.kind === "runtime.quiescing" ||
-		event.kind === "runtime.shutdownComplete"
-	) {
-		exactKeys(event, ["kind"], "$event.event");
-	} else if (event.kind === "runtime.resyncRequired") {
-		exactKeys(event, ["kind", "reason"], "$event.event");
-		nonEmptyString(event.reason, "$event.event.reason");
-	} else if (event.kind === "command.started") {
-		exactKeys(event, ["kind", "commandId", "operationKind"], "$event.event");
-		nonEmptyString(event.commandId, "$event.event.commandId");
-		nonEmptyString(event.operationKind, "$event.event.operationKind");
-	} else if (event.kind === "command.interactionRequired" || event.kind === "command.completed") {
-		exactKeys(event, ["kind", "commandId"], "$event.event");
-		nonEmptyString(event.commandId, "$event.event.commandId");
-	} else if (event.kind === "command.failed") {
-		exactKeys(event, ["kind", "commandId", "error"], "$event.event");
-		nonEmptyString(event.commandId, "$event.event.commandId");
-		const error = record(event.error, "$event.event.error");
-		exactKeys(error, ["code", "message", "retryable", "details"], "$event.event.error");
-		nonEmptyString(error.code, "$event.event.error.code");
-		if (typeof error.message !== "string") {
-			throw new ContractValidationError("expected a string", "$event.event.error.message");
-		}
-		booleanValue(error.retryable, "$event.event.error.retryable");
-		if (error.details !== undefined) record(error.details, "$event.event.error.details");
-	} else if (event.kind === "btw.changed") {
-		exactKeys(event, ["kind", "snapshot"], "$event.event");
-		jsonValue(event.snapshot, "$event.event.snapshot");
-	} else {
-		throw new ContractValidationError("unsupported event kind", "$event.event.kind");
+  } else if (
+    event.kind === "runtime.ready" ||
+    event.kind === "runtime.quiescing" ||
+    event.kind === "runtime.shutdownComplete"
+  ) {
+    exactKeys(event, ["kind"], "$event.event");
+  } else if (event.kind === "runtime.resyncRequired") {
+    exactKeys(event, ["kind", "reason"], "$event.event");
+    nonEmptyString(event.reason, "$event.event.reason");
+  } else if (event.kind === "command.started") {
+    exactKeys(event, ["kind", "commandId", "operationKind"], "$event.event");
+    nonEmptyString(event.commandId, "$event.event.commandId");
+    nonEmptyString(event.operationKind, "$event.event.operationKind");
+  } else if (event.kind === "command.interactionRequired" || event.kind === "command.completed") {
+    exactKeys(event, ["kind", "commandId"], "$event.event");
+    nonEmptyString(event.commandId, "$event.event.commandId");
+  } else if (event.kind === "command.failed") {
+    exactKeys(event, ["kind", "commandId", "error"], "$event.event");
+    nonEmptyString(event.commandId, "$event.event.commandId");
+    const error = record(event.error, "$event.event.error");
+    exactKeys(error, ["code", "message", "retryable", "details"], "$event.event.error");
+    nonEmptyString(error.code, "$event.event.error.code");
+    if (typeof error.message !== "string") {
+      throw new ContractValidationError("expected a string", "$event.event.error.message");
+    }
+    booleanValue(error.retryable, "$event.event.error.retryable");
+    if (error.details !== undefined) record(error.details, "$event.event.error.details");
+  } else if (event.kind === "btw.changed") {
+    exactKeys(event, ["kind", "snapshot"], "$event.event");
+    jsonValue(event.snapshot, "$event.event.snapshot");
+  } else if (isSessionTelemetryEventKind(event.kind)) {
+    parseSessionTelemetryEvent(event, "$event.event");
+  } else if (isConversationRuntimeEventKind(event.kind)) {
+    parseConversationRuntimeEvent(event, "$event.event");
+  } else {
+    throw new ContractValidationError("unsupported event kind", "$event.event.kind");
   }
   return input as unknown as StudioEventEnvelope;
 }
@@ -467,28 +533,30 @@ export function parseStudioEventEnvelope(value: unknown): StudioEventEnvelope {
 function validateRemoteInteractionRequest(request: Record<string, unknown>, path: string): void {
   const kind = nonEmptyString(request.kind, `${path}.kind`);
   const baseKeys = ["kind", "interactionId", "commandId", "title"];
-  nonEmptyString(request.interactionId, `${path}.interactionId`);
-  nonEmptyString(request.commandId, `${path}.commandId`);
-  nonEmptyString(request.title, `${path}.title`);
+  boundedInteractionString(request.interactionId, `${path}.interactionId`, INTERACTION_LIMITS.ID_MAX_CHARS);
+  boundedInteractionString(request.commandId, `${path}.commandId`, INTERACTION_LIMITS.ID_MAX_CHARS);
+  boundedInteractionString(request.title, `${path}.title`, INTERACTION_LIMITS.TITLE_MAX_CHARS);
   switch (kind) {
     case "confirm":
       exactKeys(request, [...baseKeys, "message", "destructive"], path);
-      nonEmptyString(request.message, `${path}.message`);
+      boundedInteractionString(request.message, `${path}.message`, INTERACTION_LIMITS.MESSAGE_MAX_CHARS);
       if (request.destructive !== undefined && typeof request.destructive !== "boolean") {
         throw new ContractValidationError("expected a boolean", `${path}.destructive`);
       }
       return;
     case "select": {
       exactKeys(request, [...baseKeys, "options", "multiple"], path);
-      if (!Array.isArray(request.options) || request.options.length === 0) {
+      if (!Array.isArray(request.options) || request.options.length === 0 || request.options.length > INTERACTION_LIMITS.OPTION_COUNT_MAX) {
         throw new ContractValidationError("expected non-empty options", `${path}.options`);
       }
       for (const [index, value] of request.options.entries()) {
         const option = record(value, `${path}.options[${index}]`);
         exactKeys(option, ["id", "label", "description"], `${path}.options[${index}]`);
-        nonEmptyString(option.id, `${path}.options[${index}].id`);
-        nonEmptyString(option.label, `${path}.options[${index}].label`);
-        if (option.description !== undefined) nonEmptyString(option.description, `${path}.options[${index}].description`);
+        boundedInteractionString(option.id, `${path}.options[${index}].id`, INTERACTION_LIMITS.ID_MAX_CHARS);
+        boundedInteractionString(option.label, `${path}.options[${index}].label`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+        if (option.description !== undefined) {
+          boundedOptionalInteractionString(option.description, `${path}.options[${index}].description`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+        }
       }
       if (request.multiple !== undefined && typeof request.multiple !== "boolean") {
         throw new ContractValidationError("expected a boolean", `${path}.multiple`);
@@ -497,25 +565,23 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
     }
     case "input":
       exactKeys(request, [...baseKeys, "placeholder", "secret"], path);
-      if (request.placeholder !== undefined) nonEmptyString(request.placeholder, `${path}.placeholder`);
+      if (request.placeholder !== undefined) boundedOptionalInteractionString(request.placeholder, `${path}.placeholder`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
       if (request.secret !== undefined && typeof request.secret !== "boolean") {
         throw new ContractValidationError("expected a boolean", `${path}.secret`);
       }
       return;
     case "editor":
       exactKeys(request, [...baseKeys, "content", "language", "promptStyle"], path);
-      if (request.content !== undefined && typeof request.content !== "string") {
-        throw new ContractValidationError("expected a string", `${path}.content`);
-      }
-      if (request.language !== undefined) nonEmptyString(request.language, `${path}.language`);
+      if (request.content !== undefined) boundedOptionalInteractionString(request.content, `${path}.content`, INTERACTION_LIMITS.EDITOR_CONTENT_MAX_CHARS);
+      if (request.language !== undefined) boundedOptionalInteractionString(request.language, `${path}.language`, 128);
       if (request.promptStyle !== undefined && typeof request.promptStyle !== "boolean") {
         throw new ContractValidationError("expected a boolean", `${path}.promptStyle`);
       }
       return;
     case "approval":
       exactKeys(request, [...baseKeys, "approvalType", "details"], path);
-      nonEmptyString(request.approvalType, `${path}.approvalType`);
-      jsonValue(request.details, `${path}.details`);
+      boundedInteractionString(request.approvalType, `${path}.approvalType`, INTERACTION_LIMITS.ID_MAX_CHARS);
+      boundedInteractionJson(request.details, `${path}.details`, INTERACTION_LIMITS.DETAILS_MAX_BYTES);
       return;
     default:
       throw new ContractValidationError("unsupported interaction kind", `${path}.kind`);
@@ -542,7 +608,7 @@ const MAX_COMMAND_ID_LENGTH = 1024;
 const MAX_AGENT_ID_LENGTH = 512;
 const MAX_AGENT_DEFINITION_LENGTH = 256;
 const MAX_AGENT_TEXT_LENGTH = 64 * 1024;
-const MAX_TRANSCRIPT_PAGE = 100;
+const MAX_TRANSCRIPT_PAGE = CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX;
 
 function jsonValue(value: unknown, path: string, seen: Set<object> = new Set()): void {
   if (value === null) return;
@@ -680,6 +746,17 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   "loop.disable": { keys: ["kind"] },
   "session.fork": { keys: ["kind"] },
   "session.tree.get": { keys: ["kind"] },
+  [SESSION_TRANSCRIPT_READ_KIND]: {
+    keys: ["kind", "cursor", "limit"],
+    validate: (operation) => {
+      if (operation.cursor !== undefined) {
+        parseOpaqueConversationCursor(operation.cursor, "$request.operation.cursor");
+      }
+      if (operation.limit !== undefined) {
+        parseSessionTranscriptReadLimit(operation.limit, "$request.operation.limit");
+      }
+    },
+  },
   "session.tree.navigate": {
     keys: ["kind", "targetId", "summarize", "customInstructions", "reanswer"],
     validate: (operation) => {
@@ -927,6 +1004,17 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
       }
     },
   },
+  "permissions.mode.set": {
+    keys: ["kind", "mode", "persist"],
+    validate: (operation) => {
+      if (operation.mode !== "always-ask" && operation.mode !== "write" && operation.mode !== "yolo") {
+        throw new ContractValidationError("unsupported approval mode", "$request.operation.mode");
+      }
+      if (typeof operation.persist !== "boolean") {
+        throw new ContractValidationError("expected a boolean", "$request.operation.persist");
+      }
+    },
+  },
   "interaction.respond": {
     keys: ["kind", "interactionId", "commandId", "decision", "value"],
     validate: (operation) => {
@@ -994,6 +1082,7 @@ const ERROR_CODES = new Set([
   "PROTOCOL_UNSUPPORTED",
   "RUNTIME_EPOCH_STALE",
   "STATE_VERSION_CONFLICT",
+  "CURSOR_STALE",
   "CAPABILITY_UNAVAILABLE",
   "COMMAND_UNKNOWN",
   "COMMAND_BLOCKED",

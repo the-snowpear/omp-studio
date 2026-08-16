@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 import type {
   AuthorityEpoch,
@@ -8,7 +8,6 @@ import type {
   ClientBootstrap,
   ClientError,
   ClientEvent,
-  ClientInteraction,
   CommandName,
   CommandInput,
   DiagnosticReadModel,
@@ -17,13 +16,17 @@ import type {
   InteractionResponseValue,
   SessionHistoryEntry,
   SessionHistoryReadModel,
+  SessionId,
+  ThreadId,
   StudioClient,
   Unsubscribe,
   WorkspaceId,
   WorkspaceListReadModel,
+  WorkspaceFileNode,
+  WorkspaceFileTreeReadModel,
 } from "@omp-studio/client-contract";
-import type { ClientState } from "@omp-studio/client";
-import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+import { selectComposerReceipt, type ClientState, type ConversationHydrateClient } from "@omp-studio/client";
+import type { ApprovalMode, OperatorStateSnapshot, SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
 import type { OperatorCommandManifest } from "@omp-studio/studio-protocol";
 import { AppIcon, Icon } from "./icons";
 import { HomePage, SecondaryPage } from "./HomePage";
@@ -40,10 +43,15 @@ import { buildPaletteGroups, type BottomTab, type PaletteAction, type SideTab } 
 import { toDrawerItems } from "./extensibilityMap";
 import { countEnabledDrawerItems, createPreviewDrawerItems, type DrawerItem } from "./skillsPreview";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
+import { hostErrorMessage, waitReceipt } from "./hostError";
+import { asConversationClient } from "./conversation/conversationHost";
+import { ConversationPane } from "./conversation/ConversationPane";
+import { useConversation } from "./conversation/useConversation";
 import { PreviewModeProvider, usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_MODE_SWITCH_ENABLED, readStoredPreviewMode } from "./preview/mode";
 import {
   PREVIEW_PROJECTS,
+  PREVIEW_FILE_TREE,
   defaultPreviewSelection,
   findPreviewProject,
   findPreviewThread,
@@ -62,8 +70,28 @@ import {
   PreviewTests,
   PreviewTokenPanel,
   PreviewTokenTrigger,
-  PreviewTranscript,
 } from "./preview/surfaces";
+import { PreviewDeck } from "./preview/PreviewDeck";
+import { InteractionDeck } from "./InteractionDeck";
+import { ensureSelectedSessionActive } from "./sessionLifecycle";
+import { GitStatusPanel, useGitRepository } from "./git/GitStatusPanel";
+
+/** Permission pill options (plan §5.1): Review → always-ask, Workspace → write, Full Access → yolo. */
+const APPROVAL_MODE_OPTIONS: ReadonlyArray<{
+  readonly mode: ApprovalMode;
+  readonly label: string;
+  readonly description: string;
+}> = [
+  { mode: "always-ask", label: "Review", description: "所有写操作需审批" },
+  { mode: "write", label: "Workspace", description: "工作区内自动允许" },
+  { mode: "yolo", label: "Full Access", description: "完全信任" },
+];
+
+const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
+  "always-ask": "Review",
+  write: "Workspace",
+  yolo: "Full Access",
+};
 
 type Model = {
   environment?: EnvironmentReadModel;
@@ -75,7 +103,7 @@ type Model = {
   workspaces?: WorkspaceListReadModel;
 };
 
-type ClientStateSource = StudioClient & {
+type ClientStateSource = StudioClient & ConversationHydrateClient & {
   getState?: () => ClientState;
   onState?: (listener: (state: ClientState) => void) => Unsubscribe;
 };
@@ -156,7 +184,26 @@ function asError(cause: unknown): ClientError {
 }
 
 function snapshotFrom(state: ViewState): OperatorStateSnapshot | undefined {
-  return state.clientState?.entities.snapshot ?? (state.bootstrap && "snapshot" in state.bootstrap ? state.bootstrap.snapshot : state.model.home?.snapshot);
+  if (state.clientState !== undefined) {
+    return state.clientState.entities.snapshot ?? undefined;
+  }
+  return state.bootstrap && "snapshot" in state.bootstrap ? state.bootstrap.snapshot : state.model.home?.snapshot;
+}
+
+async function resyncRuntimeModel(client: ClientStateSource): Promise<Model> {
+  const results = await Promise.allSettled([
+    client.query("capabilities.get", {}),
+    client.query("commands.getManifest", {}),
+    client.query("projects.list", {}),
+    client.query("history.list", { limit: 20 }),
+  ]);
+  const [capabilities, commandManifest, workspaces, history] = results;
+  return {
+    ...(capabilities.status === "fulfilled" ? { capabilities: capabilities.value } : {}),
+    ...(commandManifest.status === "fulfilled" ? { commandManifest: commandManifest.value } : {}),
+    ...(workspaces.status === "fulfilled" ? { workspaces: workspaces.value } : {}),
+    ...(history.status === "fulfilled" ? { history: history.value } : {}),
+  };
 }
 
 function chipTone(value: string): "green" | "amber" | "red" {
@@ -189,6 +236,7 @@ function runtimeStatusLabel(runtime?: ClientBootstrap["runtime"]): { text: strin
 
 type EditCommand = "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll";
 type ShellDialog = "about" | "shortcuts";
+type WorkspaceCreationKind = "file" | "directory";
 
 function execEditCommand(command: EditCommand): void {
   try {
@@ -324,15 +372,6 @@ function CrumbMenu({ id, openId, onToggle, tip, current, children, menu }: {
     </div>
   );
 }
-
-const CTX_PARTS: ReadonlyArray<{ name: string; color: string }> = [
-  { name: "系统提示词", color: "#8a919c" },
-  { name: "Skills", color: "#6e56cf" },
-  { name: "对话历史", color: "#3b9bd4" },
-  { name: "文件内容", color: "#d9930d" },
-  { name: "工具定义", color: "#64748b" },
-  { name: "子 Agent 汇总", color: "#2f9e6e" },
-];
 
 function AnchoredPop({ id, openId, onToggle, tip, label, align = "start", triggerClassName, popoverClassName, children, panel }: {
   id: string;
@@ -475,219 +514,6 @@ function Deferred({ title, detail }: { title: string; detail: string }) {
   );
 }
 
-function InteractionPrompt({ interaction, onRespond, disabled }: { interaction: ClientInteraction; onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void; disabled?: boolean }) {
-  const [text, setText] = useState("");
-  const [selected, setSelected] = useState<string[]>([]);
-  const toggleOption = (optionId: string) => {
-    if (disabled || interaction.kind !== "select") return;
-    setSelected((previous) => interaction.multiple
-      ? (previous.includes(optionId) ? previous.filter((id) => id !== optionId) : [...previous, optionId])
-      : (previous.length === 1 && previous[0] === optionId ? [] : [optionId]));
-  };
-  const cancel = <button className="btn outline" disabled={disabled} onClick={() => onRespond("cancel")}>Cancel</button>;
-  if (interaction.kind === "confirm") {
-    return (
-      <div className="approval-card">
-        <div className="approval-head"><Icon name="alert" extra="sm" />Input required</div>
-        <div className="approval-body">{interaction.message}</div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled} onClick={() => onRespond("submit", true)}>Confirm</button>{cancel}</div>
-      </div>
-    );
-  }
-  if (interaction.kind === "select") {
-    const canSubmit = interaction.multiple ? selected.length > 0 : selected.length === 1;
-    return (
-      <div className="ask-card">
-        <div className="ask-head"><Icon name="message" extra="sm" />Input required</div>
-        <div className="ask-body">
-          <p className="muted small">Runtime requests select{interaction.multiple ? " (multiple)" : ""}.</p>
-          {interaction.options.map((option) => (
-            <button key={option.id} type="button" className={`ask-opt${selected.includes(option.id) ? " sel" : ""}`} aria-checked={selected.includes(option.id)} disabled={disabled} onClick={() => toggleOption(option.id)}>
-              <span>{option.label}</span>
-              {option.description ? <span className="muted small">{option.description}</span> : null}
-            </button>
-          ))}
-        </div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled || !canSubmit} onClick={() => onRespond("submit", interaction.multiple ? selected : selected[0])}>Submit</button>{cancel}</div>
-      </div>
-    );
-  }
-  if (interaction.kind === "input") {
-    return (
-      <div className="ask-card">
-        <div className="ask-head"><Icon name="pencil" extra="sm" />Input required</div>
-        <div className="ask-body">
-          <input className="input" value={text} onChange={(event) => setText(event.target.value)} disabled={disabled} placeholder={interaction.placeholder ?? "Response"} type={interaction.secret ? "password" : "text"} />
-        </div>
-        <div className="approval-foot"><button className="btn primary" disabled={disabled || !text.trim()} onClick={() => onRespond("submit", text)}>Submit</button>{cancel}</div>
-      </div>
-    );
-  }
-  const note = interaction.kind === "editor" ? `Runtime requests editor${interaction.language ? ` (${interaction.language})` : ""}.` : `Runtime requests approval (${interaction.approvalType}).`;
-  return (
-    <div className="approval-card">
-      <div className="approval-head"><Icon name="alert" extra="sm" />Input required</div>
-      <div className="approval-body">
-        <p>{note}</p>
-        <p className="muted small">此交互类型未实现安全提交；请使用 Cancel 拒绝。</p>
-      </div>
-      <div className="approval-foot"><button className="btn" disabled title="此交互类型未实现安全提交">Submit</button>{cancel}</div>
-    </div>
-  );
-}
-
-/* —— 底部操作许可 Deck（Agent 提问 / 审批请求）——
-   参照 ver1：浮在输入框上方（最靠近输入，优先处理），不挤占布局；
-   激活时 composer 变暗让位。切换动画：
-   · 同一张卡片内切换内容 —— 卡片外壳常驻，内部横向轨道平移：
-     旧内容向左推出、新内容从右滑入，不换卡、不闪烁；
-   · 高度变化以底部为锚向上展开 —— JS 锁像素高度后交给 CSS transition，
-     新内容更高时向上生长、更矮时向下收起，而不是瞬间跳变。 */
-type DeckEntry = { id: string; interaction: ClientInteraction; leaving: boolean };
-
-const DECK_PUSH_MS = 260; /* 内容平移时长（略大于 CSS transform transition 250ms） */
-const DECK_EXIT_MS = 220; /* 整卡退出动画时长（与 CSS deck-out 一致） */
-const DECK_GROW_MS = 320; /* 高度展开过渡时长（不小于 CSS height transition） */
-
-function InteractionDeck({ interaction, onRespond, disabled }: {
-  interaction: ClientInteraction | null;
-  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void;
-  disabled: boolean;
-}) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [entries, setEntries] = useState<DeckEntry[]>([]);
-  /* 锁定容器像素高度；null = 无内容（自动高度 0）。锁定值的变化由
-     .deck.smooth 的 height transition 驱动，实现「向上展开 / 向下收起」。 */
-  const [lockH, setLockH] = useState<number | null>(null);
-  /* 剪枝提交：轨道 transform 复位不过渡（否则唯一内容会从左滑回） */
-  const [noAnim, setNoAnim] = useState(false);
-  /* 卡片外壳动画：in = 空 → 首次出现滑入；out = 整卡退出；"" = 稳态 */
-  const [shellMode, setShellMode] = useState<"in" | "out" | "">("");
-  const lastId = useRef<string | null>(null);
-  const gen = useRef(0);    /* 世代计数：被新交互取代后，过期的定时器作废 */
-  const lastW = useRef(-1); /* ResizeObserver 只响应宽度变化，不打断高度过渡 */
-  const timers = useRef<number[]>([]);
-
-  const later = useCallback((fn: () => void, ms: number) => {
-    const t = window.setTimeout(() => {
-      timers.current = timers.current.filter((x) => x !== t);
-      fn();
-    }, ms);
-    timers.current.push(t);
-  }, []);
-
-  useEffect(() => () => {
-    timers.current.forEach((t) => window.clearTimeout(t));
-  }, []);
-
-  /* interaction 变化：先锁定当前渲染高度（换内容瞬间不跳变），再在同一张卡片内平移 */
-  useEffect(() => {
-    const id = interaction?.interactionId ?? null;
-    if (id === lastId.current) return;
-    lastId.current = id;
-    gen.current += 1;
-    const g = gen.current;
-
-    const wrap = wrapRef.current;
-    if (wrap) {
-      wrap.classList.add("smooth");
-      setLockH(wrap.offsetHeight); /* 无卡片时 offsetHeight 为 0 */
-    }
-    const wasEmpty = !wrap || !wrap.querySelector(".deck-cell");
-
-    if (interaction === null) {
-      /* 全部退出：整卡滑出 → 收起高度 → 解锁（被新交互取代则作废） */
-      setShellMode("out");
-      setEntries((prev) => prev.map((e) => ({ ...e, leaving: true })));
-      later(() => {
-        if (gen.current !== g) return;
-        setEntries([]);
-        setLockH(0);
-      }, DECK_EXIT_MS);
-      later(() => {
-        if (gen.current === g) setLockH(null);
-      }, DECK_EXIT_MS + DECK_GROW_MS);
-      return;
-    }
-
-    setNoAnim(false);
-    setShellMode(wasEmpty ? "in" : "");
-    setEntries((prev) => {
-      if (prev.some((e) => e.interaction.interactionId === interaction.interactionId)) return prev;
-      return [...prev.map((e) => ({ ...e, leaving: true })), { id: interaction.interactionId, interaction, leaving: false }];
-    });
-    /* 内容平移结束后：移出旧内容，同一次提交里把轨道复位到 0（禁止过渡） */
-    later(() => {
-      if (gen.current !== g) return;
-      setEntries((prev) => prev.filter((e) => !e.leaving));
-      setNoAnim(true);
-    }, DECK_PUSH_MS);
-  }, [interaction, later]);
-
-  /* 提交后：量出最新内容的高度，平滑展开到新高度（以底部为锚向上生长） */
-  useEffect(() => {
-    if (!entries.length) return;
-    const wrap = wrapRef.current;
-    const track = trackRef.current;
-    if (!wrap || !track || lockH === null) return;
-    /* 在下一帧重测，避免锁到旧宽度下的过时高度 */
-    const raf = requestAnimationFrame(() => {
-      const cell = track.querySelector<HTMLElement>(".deck-cell:last-child");
-      if (!cell) return;
-      setLockH(cell.offsetHeight);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [entries]);
-
-  /* 容器宽度变化（窗口 / 侧栏 / 底栏）时跟随卡片自然高度，不做过渡 */
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const ro = new ResizeObserver((items) => {
-      for (const item of items) {
-        const width = item.contentBoxSize?.[0]?.inlineSize ?? item.contentRect.width;
-        if (Math.abs(width - lastW.current) < 0.5) continue;
-        lastW.current = width;
-        const track = trackRef.current;
-        const cell = track?.querySelector<HTMLElement>(".deck-cell:last-child");
-        if (!cell) return;
-        wrap.classList.remove("smooth");
-        setLockH(cell.offsetHeight);
-      }
-    });
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={wrapRef}
-      className={`deck${entries.length ? " active" : ""}`}
-      style={lockH === null ? undefined : { height: lockH }}
-      role="region"
-      aria-label="待处理的审批与提问"
-      aria-live="polite"
-    >
-      {entries.length > 0 && (
-        <div className={`deck-card${shellMode ? ` ${shellMode}` : ""}`}>
-          <div
-            ref={trackRef}
-            className={`deck-track${noAnim ? " no-anim" : ""}`}
-            style={{ transform: `translateX(${-100 * Math.max(0, entries.length - 1)}%)` }}
-          >
-            {entries.map((entry) => (
-              <div key={entry.id} className="deck-cell">
-                <InteractionPrompt interaction={entry.interaction} onRespond={onRespond} disabled={disabled} />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function GenericCommandForm({ manifest, busy, enabled, onInvoke }: { manifest: OperatorCommandManifest; busy: boolean; enabled: boolean; onInvoke: (commandId: string, args?: unknown) => void }) {
   const [selected, setSelected] = useState("");
   const [args, setArgs] = useState("{}");
@@ -733,6 +559,8 @@ type ShellChrome = {
   collapsed: boolean;
   skillsOpen: boolean;
   explorerOpen: boolean;
+  /** 当前选中项目的会话列表是否展开（项目头 chevron 可收起，ver1/ver2 语义）。 */
+  projectListExpanded: boolean;
   theme: "light" | "dark";
   sidebarWidth: number;
   splitRatio: number;
@@ -749,10 +577,13 @@ type ShellChrome = {
   onResizeSidebar: (width: number) => void;
   onResizeSplit: (ratio: number) => void;
   onSelectProject: (project: SelectedProject) => void;
+  /** 项目头点击：已展开的项目收起会话列表（保持选中），否则选中并展开。 */
+  onToggleProject: (project: SelectedProject) => void;
   onSelectThread: (entry: SessionHistoryEntry) => void;
   onSelectPreviewProject: (id: string) => void;
   onSelectPreviewThread: (id: string) => void;
   onPickProject: () => void;
+  onStartNewChat: () => void;
   onOpenCapabilities: (tab?: CapTab, name?: string) => void;
   onOpenPalette: () => void;
   paletteOpen: boolean;
@@ -760,11 +591,528 @@ type ShellChrome = {
   ompMenuOpen: boolean;
 };
 
+function filterWorkspaceNodes(nodes: ReadonlyArray<WorkspaceFileNode>, query: string): ReadonlyArray<WorkspaceFileNode> {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return nodes;
+  return nodes.flatMap((node) => {
+    const children = node.children ? filterWorkspaceNodes(node.children, query) : [];
+    return node.name.toLowerCase().includes(needle) || children.length > 0
+      ? [{ ...node, ...(node.type === "dir" ? { children } : {}) }]
+      : [];
+  });
+}
+
+function countWorkspaceFiles(nodes: ReadonlyArray<{ readonly type: string; readonly children?: ReadonlyArray<unknown> }>): number {
+  return nodes.reduce((total, node) => total + (node.type === "file" ? 1 : countWorkspaceFiles((node.children ?? []) as ReadonlyArray<{ readonly type: string; readonly children?: ReadonlyArray<unknown> }>)), 0);
+}
+
+function findWorkspaceNode(nodes: ReadonlyArray<WorkspaceFileNode>, path: string): WorkspaceFileNode | undefined {
+  for (const node of nodes) {
+    if (node.path === path) return node;
+    const found = node.children ? findWorkspaceNode(node.children, path) : undefined;
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function replaceWorkspaceChildren(nodes: ReadonlyArray<WorkspaceFileNode>, path: string, children: ReadonlyArray<WorkspaceFileNode>): ReadonlyArray<WorkspaceFileNode> {
+  return nodes.map((node) => {
+    if (node.path === path) return { ...node, children };
+    return node.children ? { ...node, children: replaceWorkspaceChildren(node.children, path, children) } : node;
+  });
+}
+
+type VisibleWorkspaceNode = {
+  readonly node: WorkspaceFileNode;
+  readonly parentPath?: string;
+};
+
+function flattenVisibleWorkspaceNodes(
+  nodes: ReadonlyArray<WorkspaceFileNode>,
+  expanded: ReadonlySet<string>,
+  parentPath?: string,
+): ReadonlyArray<VisibleWorkspaceNode> {
+  const visible: VisibleWorkspaceNode[] = [];
+  for (const node of nodes) {
+    visible.push({ node, ...(parentPath ? { parentPath } : {}) });
+    if (node.type === "dir" && expanded.has(node.path) && node.children) {
+      visible.push(...flattenVisibleWorkspaceNodes(node.children, expanded, node.path));
+    }
+  }
+  return visible;
+}
+
+function expandedWorkspacePathsForSearch(nodes: ReadonlyArray<WorkspaceFileNode>, expanded: ReadonlySet<string>, search: string): Set<string> {
+  const next = new Set(expanded);
+  if (!search.trim()) return next;
+  const visit = (items: ReadonlyArray<WorkspaceFileNode>): void => {
+    for (const item of items) {
+      if (item.type === "dir" && item.children && item.children.length > 0) {
+        next.add(item.path);
+        visit(item.children);
+      }
+    }
+  };
+  visit(nodes);
+  return next;
+}
+
+function WorkspaceTreeNodes({
+  nodes,
+  depth,
+  parentPath,
+  expanded,
+  loadingPaths,
+  activePath,
+  registerNode,
+  createKind,
+  createParentPath,
+  createName,
+  createBusy,
+  createError,
+  createInputRef,
+  onCreateNameChange,
+  onCreateSubmit,
+  onCreateCancel,
+  onSelect,
+  onKeyDown,
+  onToggle,
+  onFile,
+  onContext,
+  onMore,
+}: {
+  nodes: ReadonlyArray<WorkspaceFileNode>;
+  depth: number;
+  parentPath?: string;
+  expanded: Set<string>;
+  loadingPaths: Set<string>;
+  activePath: string | null;
+  registerNode: (path: string, element: HTMLDivElement | null) => void;
+  createKind: WorkspaceCreationKind | null;
+  createParentPath: string | undefined;
+  createName: string;
+  createBusy: boolean;
+  createError: string | undefined;
+  createInputRef: { current: HTMLInputElement | null };
+  onCreateNameChange: (value: string) => void;
+  onCreateSubmit: (event: ReactFormEvent<HTMLFormElement>) => void;
+  onCreateCancel: () => void;
+  onSelect: (path: string) => void;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>, node: WorkspaceFileNode, parentPath?: string) => void;
+  onToggle: (path: string) => void;
+  onFile: (path: string) => void;
+  onContext: (path: string) => void;
+  onMore: (path: string) => void;
+}) {
+  const showCreate = createKind !== null && createParentPath === parentPath;
+  const createPad = { ["--depth-pad" as string]: `${depth * 14 + 6}px` } as CSSProperties;
+  useEffect(() => {
+    if (!showCreate) return;
+    const input = createInputRef.current;
+    input?.focus();
+    input?.scrollIntoView?.({ block: "nearest" });
+  }, [createInputRef, createParentPath, showCreate]);
+  return <>
+    {nodes.map((node, index) => {
+      const pad = { ["--depth-pad" as string]: `${depth * 14 + 6}px` } as CSSProperties;
+      if (node.type === "dir") {
+        const open = expanded.has(node.path);
+        return <div key={node.path}>
+          <div
+            ref={(element) => registerNode(node.path, element)}
+            className={`tree-row${open ? " open" : ""}`}
+            data-dir={node.path}
+            role="treeitem"
+            aria-expanded={open}
+            aria-selected={activePath === node.path}
+            aria-busy={loadingPaths.has(node.path) || undefined}
+            aria-level={depth + 1}
+            aria-posinset={index + 1}
+            aria-setsize={nodes.length}
+            aria-label={`${node.name} 文件夹`}
+            tabIndex={activePath === node.path ? 0 : -1}
+            style={pad}
+            onFocus={() => onSelect(node.path)}
+            onClick={() => { onSelect(node.path); onToggle(node.path); }}
+            onKeyDown={(event) => onKeyDown(event, node, parentPath)}
+          >
+            <span className="tw"><Icon name="chevron-r" extra="sm" /></span>
+            <span className="fi"><Icon name={open ? "folder-open" : "folder"} /></span>
+            <span className="fname ellipsis">{node.name}</span>
+          </div>
+          <div className="tree-children" role="group">
+            {loadingPaths.has(node.path) ? (
+              <div className="tree-row muted" style={{ ["--depth-pad" as string]: `${(depth + 1) * 14 + 6}px` } as CSSProperties} role="status">
+                <span className="tw" />
+                <span className="fi"><span className="spinner" aria-hidden="true" /></span>
+                <span className="fname ellipsis">正在读取…</span>
+              </div>
+            ) : node.children ? <WorkspaceTreeNodes nodes={node.children} depth={depth + 1} parentPath={node.path} expanded={expanded} loadingPaths={loadingPaths} activePath={activePath} registerNode={registerNode} createKind={createKind} createParentPath={createParentPath} createName={createName} createBusy={createBusy} createError={createError} createInputRef={createInputRef} onCreateNameChange={onCreateNameChange} onCreateSubmit={onCreateSubmit} onCreateCancel={onCreateCancel} onSelect={onSelect} onKeyDown={onKeyDown} onToggle={onToggle} onFile={onFile} onContext={onContext} onMore={onMore} /> : null}
+          </div>
+        </div>;
+      }
+      const code = node.name.endsWith(".tsx") || node.name.endsWith(".ts");
+      return <div
+        ref={(element) => registerNode(node.path, element)}
+        key={node.path}
+        className="tree-row"
+        data-file={node.path}
+        role="treeitem"
+        aria-selected={activePath === node.path}
+        aria-level={depth + 1}
+        aria-posinset={index + 1}
+        aria-setsize={nodes.length}
+        tabIndex={activePath === node.path ? 0 : -1}
+        style={pad}
+        onFocus={() => onSelect(node.path)}
+        onClick={() => { onSelect(node.path); onFile(node.path); }}
+        onKeyDown={(event) => onKeyDown(event, node, parentPath)}
+      >
+        <span className="tw" />
+        <span className="fi"><Icon name={code ? "file-code" : "file"} /></span>
+        <span className="fname ellipsis">{node.name}</span>
+        <span className="fop">
+          <button type="button" className="icon-btn" data-tip="加入上下文" aria-label={`加入上下文 ${node.path}`} onClick={(event) => { event.stopPropagation(); onContext(node.path); }}><Icon name="at" /></button>
+          <button type="button" className="icon-btn" data-tip="更多" aria-label={`更多操作 ${node.path}`} onClick={(event) => { event.stopPropagation(); onMore(node.path); }}><Icon name="more" /></button>
+        </span>
+      </div>;
+    })}
+    {showCreate ? (
+      <>
+        <form className="tree-new-row" style={createPad} onSubmit={onCreateSubmit}>
+          <span className="tw" />
+          <span className="fi"><Icon name={createKind === "file" ? "file" : "folder"} /></span>
+          <input
+            ref={(element) => { createInputRef.current = element; }}
+            className="input"
+            value={createName}
+            onChange={(event) => onCreateNameChange(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); onCreateCancel(); } }}
+            placeholder={createKind === "file" ? "文件名（含后缀）" : "文件夹名"}
+            aria-label={createKind === "file" ? "新建文件名" : "新建文件夹名"}
+            disabled={createBusy}
+            autoFocus
+          />
+          <button type="submit" className="icon-btn" data-tip="创建" aria-label="创建" disabled={createBusy}><Icon name="check" extra="sm" /></button>
+          <button type="button" className="icon-btn" data-tip="取消" aria-label="取消" disabled={createBusy} onClick={onCreateCancel}><Icon name="x" extra="sm" /></button>
+        </form>
+        {createBusy ? <div className="tree-new-status muted tiny" style={createPad} role="status">正在创建…</div> : null}
+        {createError ? <div className="tree-new-status error tiny" style={createPad} role="alert">{createError}</div> : null}
+      </>
+    ) : null}
+  </>;
+}
+
+export function RealFileTree({ client, workspaceId, label, refreshToken, search, createKind, createParentPath, createName, createBusy, createError, createInputRef, onCreateNameChange, onCreateSubmit, onCreateCancel, onSelectionChange }: {
+  client: StudioClient;
+  workspaceId: WorkspaceId;
+  label: string;
+  refreshToken: number;
+  search: string;
+  createKind: WorkspaceCreationKind | null;
+  createParentPath: string | undefined;
+  createName: string;
+  createBusy: boolean;
+  createError: string | undefined;
+  createInputRef: { current: HTMLInputElement | null };
+  onCreateNameChange: (value: string) => void;
+  onCreateSubmit: (event: ReactFormEvent<HTMLFormElement>) => void;
+  onCreateCancel: () => void;
+  onSelectionChange?: (node: WorkspaceFileNode | undefined) => void;
+}) {
+  const [model, setModel] = useState<WorkspaceFileTreeReadModel | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [loadingPaths, setLoadingPaths] = useState<Set<string>>(() => new Set());
+  const [message, setMessage] = useState<string | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
+  const [activePath, setActivePath] = useState<string | null>(null);
+  const expandedRef = useRef(new Set<string>());
+  const loadingPathsRef = useRef(new Set<string>());
+  const nodeRefs = useRef(new Map<string, HTMLDivElement>());
+  const typeaheadRef = useRef<{ value: string; timeout?: ReturnType<typeof setTimeout> }>({ value: "" });
+  const generationRef = useRef(0);
+  const refresh = useCallback(async () => {
+    const generation = ++generationRef.current;
+    setLoading(true);
+    try {
+      const next = await client.query("workspace.fileTree", { workspaceId });
+      if (generation !== generationRef.current) return;
+      setModel(next);
+      expandedRef.current = new Set();
+      setExpanded(expandedRef.current);
+      setActivePath(next.nodes[0]?.path ?? null);
+      onSelectionChange?.(undefined);
+      loadingPathsRef.current.clear();
+      setLoadingPaths(new Set());
+      setMessage(undefined);
+    } catch (error) {
+      if (generation !== generationRef.current) return;
+      setModel(null);
+      setMessage(hostErrorMessage(error, "文件树加载失败"));
+    } finally {
+      if (generation === generationRef.current) setLoading(false);
+    }
+  }, [client, onSelectionChange, workspaceId]);
+  useEffect(() => { void refresh(); }, [refresh, refreshToken]);
+  const visible = useMemo(() => filterWorkspaceNodes(model?.nodes ?? [], search), [model?.nodes, search]);
+  const displayExpanded = useMemo(() => expandedWorkspacePathsForSearch(visible, expanded, search), [expanded, search, visible]);
+  const visibleItems = useMemo(() => flattenVisibleWorkspaceNodes(visible, displayExpanded), [displayExpanded, visible]);
+  useEffect(() => {
+    if (activePath === null || visibleItems.some(({ node }) => node.path === activePath)) return;
+    setActivePath(visibleItems[0]?.node.path ?? null);
+  }, [activePath, visibleItems]);
+  useEffect(() => () => {
+    if (typeaheadRef.current.timeout !== undefined) clearTimeout(typeaheadRef.current.timeout);
+  }, []);
+  const loadDirectory = useCallback(async (path: string) => {
+    if (loadingPathsRef.current.has(path)) return;
+    const generation = generationRef.current;
+    loadingPathsRef.current.add(path);
+    setLoadingPaths(new Set(loadingPathsRef.current));
+    try {
+      const next = await client.query("workspace.fileTree", { workspaceId, path });
+      if (generation !== generationRef.current) return;
+      setModel((current) => current === null ? current : { ...current, nodes: replaceWorkspaceChildren(current.nodes, path, next.nodes) });
+      setMessage(undefined);
+    } catch (error) {
+      if (generation === generationRef.current) {
+        const next = new Set(expandedRef.current);
+        next.delete(path);
+        expandedRef.current = next;
+        setExpanded(next);
+        setMessage(hostErrorMessage(error, `无法展开 ${path}`));
+      }
+    } finally {
+      loadingPathsRef.current.delete(path);
+      if (generation === generationRef.current) setLoadingPaths(new Set(loadingPathsRef.current));
+    }
+  }, [client, workspaceId]);
+  useEffect(() => {
+    if (createKind === null || createParentPath === undefined || model === null) return;
+    const target = findWorkspaceNode(model.nodes, createParentPath);
+    if (target?.type !== "dir") return;
+    if (!expandedRef.current.has(createParentPath)) {
+      const next = new Set(expandedRef.current);
+      next.add(createParentPath);
+      expandedRef.current = next;
+      setExpanded(next);
+    }
+    if (target.children === undefined) void loadDirectory(createParentPath);
+  }, [createKind, createParentPath, loadDirectory, model]);
+  const toggle = useCallback((path: string) => {
+    const open = expandedRef.current.has(path);
+    const next = new Set(expandedRef.current);
+    if (open) next.delete(path); else next.add(path);
+    expandedRef.current = next;
+    setExpanded(next);
+    if (!open && model && findWorkspaceNode(model.nodes, path)?.children === undefined) void loadDirectory(path);
+  }, [loadDirectory, model]);
+  const registerNode = useCallback((path: string, element: HTMLDivElement | null) => {
+    if (element) nodeRefs.current.set(path, element);
+    else nodeRefs.current.delete(path);
+  }, []);
+  const focusNode = useCallback((path: string) => {
+    setActivePath(path);
+    nodeRefs.current.get(path)?.focus();
+  }, []);
+  const openFile = useCallback((path: string) => {
+    setActivePath(path);
+    setMessage(`打开 ${path}`);
+  }, []);
+  const selectPath = useCallback((path: string) => {
+    setActivePath(path);
+    const node = model === null ? undefined : findWorkspaceNode(model.nodes, path);
+    onSelectionChange?.(node);
+  }, [model, onSelectionChange]);
+  const clearBlankSelection = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest("[role=\"treeitem\"], form, input, button")) return;
+    setActivePath(null);
+    onSelectionChange?.(undefined);
+  }, [onSelectionChange]);
+  const handleTreeKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>, node: WorkspaceFileNode, parentPath?: string) => {
+    if (event.target !== event.currentTarget) return;
+    const index = visibleItems.findIndex((item) => item.node.path === node.path);
+    if (index < 0) return;
+    const focusAt = (nextIndex: number): void => {
+      const item = visibleItems[nextIndex];
+      if (item) focusNode(item.node.path);
+    };
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusAt(Math.min(visibleItems.length - 1, index + 1));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusAt(Math.max(0, index - 1));
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      focusAt(0);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      focusAt(visibleItems.length - 1);
+      return;
+    }
+    if (event.key === "ArrowRight" && node.type === "dir") {
+      event.preventDefault();
+      if (!displayExpanded.has(node.path)) toggle(node.path);
+      else focusAt(index + 1);
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (node.type === "dir" && displayExpanded.has(node.path) && !search.trim()) toggle(node.path);
+      else if (parentPath) focusNode(parentPath);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (node.type === "dir") toggle(node.path);
+      else openFile(node.path);
+      return;
+    }
+    if (event.key.length !== 1 || event.ctrlKey || event.altKey || event.metaKey) return;
+    const typed = event.key.toLocaleLowerCase();
+    const previous = typeaheadRef.current.value;
+    const findMatch = (needle: string): VisibleWorkspaceNode | undefined => {
+      for (let offset = 1; offset <= visibleItems.length; offset += 1) {
+        const candidate = visibleItems[(index + offset) % visibleItems.length];
+        if (candidate?.node.name.toLocaleLowerCase().startsWith(needle)) return candidate;
+      }
+      return undefined;
+    };
+    let value = `${previous}${typed}`;
+    let match = findMatch(value);
+    if (!match && previous) {
+      value = typed;
+      match = findMatch(value);
+    }
+    if (!match) return;
+    event.preventDefault();
+    if (typeaheadRef.current.timeout !== undefined) clearTimeout(typeaheadRef.current.timeout);
+    typeaheadRef.current.value = value;
+    typeaheadRef.current.timeout = setTimeout(() => { typeaheadRef.current.value = ""; }, 700);
+    focusNode(match.node.path);
+  }, [displayExpanded, focusNode, openFile, search, toggle, visibleItems]);
+  if (loading && model === null) return <div className="empty"><p className="muted small">正在读取文件树…</p></div>;
+  if (model === null) return <div className="empty"><p className="muted small">{message ?? "文件树不可用"}</p></div>;
+  return <>
+    {message ? <div className="muted tiny" role="status" style={{ padding: "2px 12px 6px" }}>{message}</div> : null}
+    <div className="tree" role="tree" aria-label={`${label} 文件树`} onClick={clearBlankSelection}>
+      <WorkspaceTreeNodes
+        nodes={visible}
+        depth={0}
+        expanded={displayExpanded}
+        loadingPaths={loadingPaths}
+        activePath={activePath}
+        registerNode={registerNode}
+        createKind={createKind}
+        createParentPath={createParentPath}
+        createName={createName}
+        createBusy={createBusy}
+        createError={createError}
+        createInputRef={createInputRef}
+        onCreateNameChange={onCreateNameChange}
+        onCreateSubmit={onCreateSubmit}
+        onCreateCancel={onCreateCancel}
+        onSelect={selectPath}
+        onKeyDown={handleTreeKeyDown}
+        onToggle={toggle}
+        onFile={openFile}
+        onContext={(path) => setMessage(`已加入上下文：${path}`)}
+        onMore={(path) => setMessage(`更多操作：${path}`)}
+      />
+    </div>
+    <div className="sr-only" aria-live="polite">{loading ? "正在刷新文件树" : ""}</div>
+    <span className="sr-only">{model.nodes.length} 个顶层条目</span>
+    <span className="sr-only">{`新建文件和目录可通过 Explorer 工具栏完成`}</span>
+  </>;
+}
+
 function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chrome: ShellChrome; client: StudioClient; onRoute: (route: Route) => void }) {
   const sidebarRef = useRef<HTMLElement>(null);
   const ompBtnRef = useRef<HTMLButtonElement>(null);
   const ompMenuRef = useRef<HTMLDivElement>(null);
   const [ompMenuPos, setOmpMenuPos] = useState<{ left: number; bottom?: number; top?: number }>({ left: 0, bottom: 0 });
+  const [fileSearch, setFileSearch] = useState("");
+  const [fileRefreshToken, setFileRefreshToken] = useState(0);
+  const [previewFileMessage, setPreviewFileMessage] = useState<string | undefined>(undefined);
+  const [newEntryKind, setNewEntryKind] = useState<WorkspaceCreationKind | null>(null);
+  const [newEntryPath, setNewEntryPath] = useState("");
+  const [selectedDirectoryPath, setSelectedDirectoryPath] = useState<string | undefined>(undefined);
+  const [newEntryParentPath, setNewEntryParentPath] = useState<string | undefined>(undefined);
+  const [newEntryBusy, setNewEntryBusy] = useState(false);
+  const [newEntryError, setNewEntryError] = useState<string | undefined>(undefined);
+  const newEntryInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setSelectedDirectoryPath(undefined);
+    setNewEntryParentPath(undefined);
+    setNewEntryKind(null);
+    setNewEntryPath("");
+    setNewEntryError(undefined);
+  }, [chrome.selectedProject?.id]);
+  const beginWorkspaceEntry = (kind: WorkspaceCreationKind) => {
+    if (!chrome.selectedProject || newEntryBusy) return;
+    setNewEntryKind(kind);
+    setNewEntryPath("");
+    setNewEntryParentPath(selectedDirectoryPath);
+    setFileSearch("");
+    setNewEntryError(undefined);
+  };
+  const cancelWorkspaceEntry = () => {
+    if (newEntryBusy) return;
+    setNewEntryKind(null);
+    setNewEntryPath("");
+    setNewEntryParentPath(undefined);
+    setNewEntryError(undefined);
+  };
+  const handleFileTreeSelection = useCallback((node: WorkspaceFileNode | undefined) => {
+    setSelectedDirectoryPath(node?.type === "dir" ? node.path : undefined);
+  }, []);
+  const createWorkspaceEntry = async (event: ReactFormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!chrome.selectedProject || newEntryKind === null || newEntryBusy) return;
+    const name = newEntryPath.trim();
+    if (!name) {
+      setNewEntryError("请输入名称");
+      newEntryInputRef.current?.focus();
+      return;
+    }
+    if (name === "." || name === ".." || /[\\/]/.test(name)) {
+      setNewEntryError("这里只能输入单个文件名或文件夹名");
+      newEntryInputRef.current?.focus();
+      return;
+    }
+    const kind = newEntryKind;
+    const commandName = kind === "file" ? "workspace.file.create" : "workspace.directory.create";
+    const path = newEntryParentPath ? `${newEntryParentPath}/${name}` : name;
+    setNewEntryBusy(true);
+    setNewEntryError(undefined);
+    if (preview) {
+      setPreviewFileMessage(`演示：已创建${kind === "file" ? "文件" : "文件夹"} ${path}`);
+      setNewEntryBusy(false);
+      setNewEntryKind(null);
+      setNewEntryPath("");
+      setNewEntryParentPath(undefined);
+      return;
+    }
+    try {
+      const handle = await client.command(commandName, { workspaceId: chrome.selectedProject.id as WorkspaceId, path });
+      await waitReceipt(client, handle.requestId);
+      setFileRefreshToken((value) => value + 1);
+      setNewEntryKind(null);
+      setNewEntryPath("");
+      setNewEntryParentPath(undefined);
+    } catch (error) {
+      setNewEntryError(hostErrorMessage(error, `新建${kind === "file" ? "文件" : "文件夹"}失败`));
+    } finally {
+      setNewEntryBusy(false);
+    }
+  };
   const runtime = state.clientState?.connection.runtime ?? state.bootstrap?.runtime;
   const history = state.model.history;
   const omp = runtimeStatusLabel(runtime);
@@ -953,20 +1301,7 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
         </button>
       </div>
       <div className="sb-actions">
-        <button className="action-row new-convo-btn" aria-label="新建对话" onClick={() => {
-          if (preview) {
-            chrome.onSelectPreviewProject(chrome.previewProjectId);
-            onRoute("workbench");
-            return;
-          }
-          const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
-          if (active) {
-            chrome.onSelectProject({ id: active.workspaceId, name: active.name });
-            onRoute("workbench");
-          } else {
-            chrome.onPickProject();
-          }
-        }}>
+        <button className="action-row new-convo-btn" aria-label="新建对话" onClick={() => chrome.onStartNewChat()}>
           <Icon name="plus" />
           <span className="lbl">新建对话</span>
           <span className="meta"><span className="hint">Ctrl ⇧ O</span></span>
@@ -986,17 +1321,34 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
         </div>
         <div className="sb-scroll" id="projectList">
           {preview ? PREVIEW_PROJECTS.map((project) => {
-            const open = chrome.previewProjectId === project.id;
+            const open = chrome.previewProjectId === project.id && chrome.projectListExpanded;
             return (
               <div className="project" key={project.id}>
-                <button className="project-head" type="button" onClick={() => chrome.onSelectPreviewProject(project.id)}>
-                  <span className="tw"><Icon name={open ? "chevron-d" : "chevron-r"} extra="sm" /></span>
-                  <span className="p-name">{project.name}</span>
-                  <span className="project-flags">
-                    {project.running ? <span className="dot green pulse" aria-hidden="true" /> : null}
-                    {project.dirty > 0 ? <span className="muted tiny">{project.dirty}</span> : null}
+                <div className="project-head-row">
+                  <button
+                    className="project-head"
+                    type="button"
+                    aria-expanded={open}
+                    onClick={() => chrome.onToggleProject({ id: project.id, name: project.name })}
+                  >
+                    {/* 左侧图标位：默认文件夹（展开 folder-open / 收起 folder），
+                        悬停整行时换为折叠箭头（chevron-d / chevron-r） */}
+                    <span className="tw">
+                      <span className="tw-folder"><Icon name={open ? "folder-open" : "folder"} extra="sm" /></span>
+                      <span className="tw-chev"><Icon name={open ? "chevron-d" : "chevron-r"} extra="sm" /></span>
+                    </span>
+                    <span className="p-name">{project.name}</span>
+                    <span className="project-flags">
+                      {project.running ? <span className="dot green pulse" aria-hidden="true" /> : null}
+                      {project.dirty > 0 ? <span className="muted tiny">{project.dirty}</span> : null}
+                    </span>
+                  </button>
+                  {/* 悬停浮现的操作区：最右 + 在此项目下新建文件，其左 ⋯ 更多（功能未接入） */}
+                  <span className="p-actions">
+                    <button type="button" className="icon-btn" data-tip="更多操作" aria-label="更多操作" disabled title="更多操作（功能未接入）"><Icon name="more" extra="sm" /></button>
+                    <button type="button" className="icon-btn" data-tip="在此项目下新建文件" aria-label="在此项目下新建文件" disabled title="在此项目下新建文件（功能未接入）"><Icon name="plus" extra="sm" /></button>
                   </span>
-                </button>
+                </div>
                 {open ? project.threads.map((thread) => (
                   <button
                     key={thread.id}
@@ -1011,17 +1363,33 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
             );
           }) : state.model.workspaces && state.model.workspaces.workspaces.length ? (
             state.model.workspaces.workspaces.map((workspace) => {
-              const open = chrome.selectedProject?.id === workspace.workspaceId;
+              const open = chrome.selectedProject?.id === workspace.workspaceId && chrome.projectListExpanded;
               return (
                 <div className="project" key={workspace.workspaceId}>
-                  <button className="project-head" type="button" onClick={() => chrome.onSelectProject({ id: workspace.workspaceId, name: workspace.name })}>
-                    <span className="tw"><Icon name={open ? "chevron-d" : "chevron-r"} extra="sm" /></span>
-                    <span className="p-name ellipsis">{workspace.name}</span>
-                    <span className="project-flags">
-                      {workspace.active ? <span className="chip gray xs">当前</span> : null}
-                      {open ? <span className="muted tiny">{history?.total ?? 0}</span> : null}
+                  <div className="project-head-row">
+                    <button
+                      className="project-head"
+                      type="button"
+                      aria-expanded={open}
+                      onClick={() => chrome.onToggleProject({ id: workspace.workspaceId, name: workspace.name })}
+                    >
+                      {/* 左侧图标位：默认文件夹（展开 folder-open / 收起 folder），
+                          悬停整行时换为折叠箭头（chevron-d / chevron-r） */}
+                      <span className="tw">
+                        <span className="tw-folder"><Icon name={open ? "folder-open" : "folder"} extra="sm" /></span>
+                        <span className="tw-chev"><Icon name={open ? "chevron-d" : "chevron-r"} extra="sm" /></span>
+                      </span>
+                      <span className="p-name ellipsis">{workspace.name}</span>
+                      <span className="project-flags">
+                        {open ? <span className="muted tiny">{history?.total ?? 0}</span> : null}
+                      </span>
+                    </button>
+                    {/* 悬停浮现的操作区：最右 + 在此项目下新建文件，其左 ⋯ 更多（功能未接入） */}
+                    <span className="p-actions">
+                      <button type="button" className="icon-btn" data-tip="更多操作" aria-label="更多操作" disabled title="更多操作（功能未接入）"><Icon name="more" extra="sm" /></button>
+                      <button type="button" className="icon-btn" data-tip="在此项目下新建文件" aria-label="在此项目下新建文件" disabled title="在此项目下新建文件（功能未接入）"><Icon name="plus" extra="sm" /></button>
                     </span>
-                  </button>
+                  </div>
                   {open ? (history?.entries ?? []).slice(0, 12).map((entry) => (
                     <button
                       key={entry.historyId}
@@ -1073,26 +1441,39 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
         <div className="sb-section-head">
           <h2 id="sbFilesTitle">Explorer</h2>
           <div className="sb-head-actions">
-            <button className="icon-btn" data-tip="新建文件" disabled title="文件树不在公共 contract 中"><Icon name="plus" extra="sm" /></button>
-            <button className="icon-btn" data-tip="新建目录" disabled title="文件树不在公共 contract 中"><Icon name="folder" extra="sm" /></button>
-            <button className="icon-btn" data-tip="搜索文件" disabled title="文件树不在公共 contract 中"><Icon name="search" extra="sm" /></button>
-            <button className="icon-btn" data-tip="刷新" disabled title="文件树不在公共 contract 中"><Icon name="refresh" extra="sm" /></button>
+            <button className={`icon-btn${newEntryKind === "file" ? " active" : ""}`} data-tip="新建文件" aria-label="新建文件" aria-pressed={newEntryKind === "file"} disabled={!chrome.selectedProject || newEntryBusy} onClick={() => beginWorkspaceEntry("file")}><Icon name="plus" extra="sm" /></button>
+            <button className={`icon-btn${newEntryKind === "directory" ? " active" : ""}`} data-tip="新建文件夹" aria-label="新建文件夹" aria-pressed={newEntryKind === "directory"} disabled={!chrome.selectedProject || newEntryBusy} onClick={() => beginWorkspaceEntry("directory")}><Icon name="folder" extra="sm" /></button>
+            <button className={`icon-btn${fileSearch ? " active" : ""}`} data-tip="筛选已加载文件" aria-label="筛选已加载文件" onClick={() => setFileSearch((value) => value ? "" : " ")}><Icon name="search" extra="sm" /></button>
+            <button className="icon-btn" data-tip="刷新" aria-label="刷新文件树" disabled={!chrome.selectedProject} onClick={() => preview ? setPreviewFileMessage("演示：文件树已刷新") : setFileRefreshToken((value) => value + 1)}><Icon name="refresh" extra="sm" /></button>
           </div>
           <button className={`icon-btn sb-collapse-btn${chrome.explorerOpen ? "" : " is-collapsed"}`} aria-label={chrome.explorerOpen ? "收起 Explorer" : "展开 Explorer"} aria-expanded={chrome.explorerOpen} onClick={chrome.onToggleExplorer}>
-            <Icon name="chevron-d" extra="sm" />
+            <Icon name={chrome.explorerOpen ? "chevron-d" : "chevron-u"} extra="sm" />
           </button>
         </div>
+        {fileSearch ? <div style={{ padding: "4px 10px" }}><input autoFocus className="input" value={fileSearch.trim()} onChange={(event) => setFileSearch(event.target.value || " ")} placeholder="筛选已加载文件…" aria-label="筛选已加载文件" /></div> : null}
+        {preview && previewFileMessage ? <div className="muted tiny" role="status" style={{ padding: "2px 12px 6px" }}>{previewFileMessage}</div> : null}
         <div className="sb-scroll">
           {preview ? (
-            <PreviewFileTree label={findPreviewProject(chrome.previewProjectId)?.name ?? "项目"} />
+            <PreviewFileTree label={findPreviewProject(chrome.previewProjectId)?.name ?? "项目"} search={fileSearch.trim()} />
           ) : chrome.selectedProject ? (
-            <div className="tree" role="tree" aria-label={`${chrome.selectedProject.name} 文件树`}>
-              <div className="tree-row open" data-dir role="treeitem" aria-expanded="true" tabIndex={0}>
-                <span className="tw"><Icon name="chevron-d" extra="sm" /></span>
-                <span className="fi"><Icon name="folder-open" /></span>
-                <span className="fname ellipsis">{chrome.selectedProject.name}</span>
-              </div>
-            </div>
+            <RealFileTree
+              key={chrome.selectedProject.id}
+              client={client}
+              workspaceId={chrome.selectedProject.id as WorkspaceId}
+              label={chrome.selectedProject.name}
+              refreshToken={fileRefreshToken}
+              search={fileSearch.trim()}
+              createKind={newEntryKind}
+              createParentPath={newEntryParentPath}
+              createName={newEntryPath}
+              createBusy={newEntryBusy}
+              createError={newEntryError}
+              createInputRef={newEntryInputRef}
+              onCreateNameChange={(value) => { setNewEntryPath(value); setNewEntryError(undefined); }}
+              onCreateSubmit={(event) => void createWorkspaceEntry(event)}
+              onCreateCancel={cancelWorkspaceEntry}
+              onSelectionChange={handleFileTreeSelection}
+            />
           ) : (
             <div className="empty">暂无选择项目</div>
           )}
@@ -1175,13 +1556,77 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
   );
 }
 
-function AppTopbar({ state, chrome, onRoute, threadTitle, sideOpen, onToggleSide }: {
+function formatTelemetryTokens(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}k`;
+  return Math.round(value).toLocaleString("en-US");
+}
+
+function formatTelemetryCost(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(4) : "—";
+}
+
+function formatTelemetryTime(value: string): string {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleTimeString() : "—";
+}
+
+const TELEMETRY_CONTEXT_PARTS: ReadonlyArray<{ key: keyof NonNullable<SessionTelemetrySnapshot["context"]>; label: string; color: string }> = [
+  { key: "systemPromptTokens", label: "系统提示词", color: "#8a919c" },
+  { key: "systemContextTokens", label: "系统上下文", color: "#64748b" },
+  { key: "systemToolsTokens", label: "工具定义", color: "#d9930d" },
+  { key: "skillsTokens", label: "Skills", color: "#6e56cf" },
+  { key: "messagesTokens", label: "对话消息", color: "#3b9bd4" },
+];
+
+function RealTokenTrigger({ telemetry }: { telemetry: SessionTelemetrySnapshot | null }) {
+  if (telemetry === null) {
+    return <><span className="t-item"><Icon name="arrow-u" extra="sm" /><b>—</b></span><span className="t-item"><Icon name="arrow-d" extra="sm" /><b>—</b></span><span className="t-sep" aria-hidden="true" /><span className="t-item"><b>—</b>&nbsp;cache</span></>;
+  }
+  return <><span className="t-item"><Icon name="arrow-u" extra="sm" /><b>{formatTelemetryTokens(telemetry.tokens.input)}</b></span><span className="t-item"><Icon name="arrow-d" extra="sm" /><b>{formatTelemetryTokens(telemetry.tokens.output)}</b></span><span className="t-sep" aria-hidden="true" /><span className="t-item"><b>{formatTelemetryTokens(telemetry.tokens.cacheRead + telemetry.tokens.cacheWrite)}</b>&nbsp;cache</span></>;
+}
+
+function RealTokenPanel({ telemetry }: { telemetry: SessionTelemetrySnapshot | null }) {
+  if (telemetry === null) {
+    return <><div className="tp-head"><Icon name="zap" extra="sm" />Token 用量<span className="spacer" /><span className="chip gray xs">不可用</span></div><div className="tp-ctx"><div className="tiny muted">Runtime telemetry 尚未就绪。</div></div></>;
+  }
+  const t = telemetry.tokens;
+  const turn = telemetry.lastCompletedTurn;
+  return <>
+    <div className="tp-head"><Icon name="zap" extra="sm" />Token 用量<span className="spacer" /><span className="chip green xs">实时</span></div>
+    <div className="tok-hero"><div className="th-cell"><div className="th-k">会话总量</div><div className="th-v">{formatTelemetryTokens(t.total)}</div><div className="th-sub">输入 {formatTelemetryTokens(t.input)} · 输出 {formatTelemetryTokens(t.output)}</div></div><div className="th-cell"><div className="th-k">Cost</div><div className="th-v">{formatTelemetryCost(t.cost)}</div><div className="th-sub">Runtime 原生值</div></div></div>
+    <div className="tok-rows">
+      <div className="tr-row">Reasoning<span className="tr-v">{formatTelemetryTokens(t.reasoning)}</span></div>
+      <div className="tr-row">Cache read<span className="tr-v">{formatTelemetryTokens(t.cacheRead)}</span></div>
+      <div className="tr-row">Cache write<span className="tr-v">{formatTelemetryTokens(t.cacheWrite)}</span></div>
+      <div className="tr-row">最近完成输入 / 输出<span className="tr-v">{turn ? `${formatTelemetryTokens(turn.input)} / ${formatTelemetryTokens(turn.output)}` : "—"}</span></div>
+      <div className="tr-row">最近完成时间<span className="tr-v">{turn ? formatTelemetryTime(turn.completedAt) : "—"}</span></div>
+    </div>
+  </>;
+}
+
+function RealContextTrigger({ telemetry }: { telemetry: SessionTelemetrySnapshot | null }) {
+  const percent = telemetry?.context?.percent;
+  return <><span className="ctx-ring" style={{ ["--p" as string]: percent ?? 0 }} aria-hidden="true" /><span className="t-item"><b>{percent === undefined ? "—" : `${Math.round(percent)}%`}</b></span></>;
+}
+
+function RealContextPanel({ telemetry }: { telemetry: SessionTelemetrySnapshot | null }) {
+  const context = telemetry?.context;
+  if (context === null || context === undefined) return <><div className="tp-head"><Icon name="layers" extra="sm" />CONTEXT 构成<span className="spacer" /><span className="chip gray xs">不可用</span></div><div className="tp-ctx"><div className="tiny muted">当前模型未提供有效 Context Window。</div></div></>;
+  const total = Math.max(1, context.usedTokens);
+  return <><div className="tp-head"><Icon name="layers" extra="sm" />CONTEXT 构成<span className="spacer" /><span className="chip green xs">{Math.round(context.percent)}%</span></div><div className="tp-ctx" style={{ paddingTop: 12 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}><span>已使用</span><b className="mono" style={{ fontSize: 13 }}>{formatTelemetryTokens(context.usedTokens)} / {formatTelemetryTokens(context.contextWindow)}</b></div><div className="ctxbar">{TELEMETRY_CONTEXT_PARTS.map((part) => <i key={part.key} style={{ width: `${Math.min(100, ((context[part.key] as number) / total) * 100)}%`, background: part.color }} title={`${part.label} ${formatTelemetryTokens(context[part.key] as number)}`} />)}</div><div className="ctx-legend">{TELEMETRY_CONTEXT_PARTS.map((part) => <div key={part.key} className="cl-row"><span className="cl-dot" style={{ background: part.color }} /><span>{part.label}</span><span className="cl-v">{formatTelemetryTokens(context[part.key] as number)}</span></div>)}</div><div className="tiny muted" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>{context.anchored ? "Provider anchor" : "Estimated"}</div></div></>;
+}
+
+function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onToggleSide, onOpenChanges }: {
   state: ViewState;
+  client: StudioClient;
   chrome: ShellChrome;
   onRoute: (route: Route) => void;
   threadTitle: string;
   sideOpen: boolean;
   onToggleSide: () => void;
+  onOpenChanges: () => void;
 }) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const unavailable = "不在公共 contract 中";
@@ -1189,11 +1634,13 @@ function AppTopbar({ state, chrome, onRoute, threadTitle, sideOpen, onToggleSide
   const previewProject = findPreviewProject(chrome.previewProjectId);
   const previewHit = findPreviewThread(chrome.previewThreadId);
   const realActiveWorkspace = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
+  const realGit = useGitRepository(client, preview ? undefined : realActiveWorkspace?.workspaceId);
   const crumbProject = preview
     ? (previewProject?.name ?? "omp-web")
     : (realActiveWorkspace?.name ?? "未选择项目");
-  const crumbBranch = preview ? (previewProject?.branch ?? "main") : "—";
+  const crumbBranch = preview ? (previewProject?.branch ?? "main") : (realGit.repository?.branch ?? (realGit.repository?.detached ? "detached HEAD" : "—"));
   const crumbThread = preview ? (previewHit?.thread.title ?? threadTitle) : threadTitle;
+  const telemetry = preview ? null : (state.clientState?.entities.telemetry ?? null);
 
   useEffect(() => {
     if (openMenu === null) return;
@@ -1277,14 +1724,14 @@ function AppTopbar({ state, chrome, onRoute, threadTitle, sideOpen, onToggleSide
               <>
                 <div className="branch-menu-head">
                   <div className="bmh-title"><Icon name="branch" extra="sm" /><b>{crumbBranch}</b></div>
-                  <div className="bmh-meta">{preview ? `${previewProject?.dirty ?? 0} 个未提交 · 演示` : "Git 分支不在公共 contract 中"}</div>
+                  <div className="bmh-meta">{preview ? `${previewProject?.dirty ?? 0} 个未提交 · 演示` : realGit.repository?.isRepository ? `${realGit.repository.changes.length} 个未提交 · ↑${realGit.repository.ahead} ↓${realGit.repository.behind}` : (realGit.error ?? "当前项目不是 Git 仓库")}</div>
                 </div>
-                <MenuItem icon="commit" disabled title={`未提交修改：${unavailable}`}>未提交修改</MenuItem>
+                <MenuItem icon="commit" {...(preview ? { disabled: true, title: "预览数据不执行 Git 操作" } : { onClick: () => run(onOpenChanges) })}>未提交修改</MenuItem>
                 <div className="menu-sep" />
-                <MenuItem icon="columns" disabled title={`Changes：${unavailable}`}>查看 Changes</MenuItem>
-                <MenuItem icon="commit" disabled title={`创建 Commit：${unavailable}`}>创建 Commit</MenuItem>
-                <MenuItem icon="branch" disabled title={`切换分支：${unavailable}`}>切换分支</MenuItem>
-                <MenuItem icon="worktree" disabled title={`新建 Worktree：${unavailable}`}>新建 Worktree</MenuItem>
+                <MenuItem icon="columns" onClick={() => run(onOpenChanges)}>查看 Changes</MenuItem>
+                <MenuItem icon="commit" {...(preview ? { disabled: true, title: "预览数据不执行 Commit" } : { onClick: () => run(onOpenChanges) })}>创建 Commit</MenuItem>
+                <MenuItem icon="branch" {...(preview ? { disabled: true, title: "预览数据不切换分支" } : { onClick: () => run(onOpenChanges) })}>切换分支</MenuItem>
+                <MenuItem icon="worktree" {...(preview ? { disabled: true, title: "预览数据不创建 Worktree" } : { onClick: () => run(onOpenChanges) })}>新建 Worktree</MenuItem>
               </>
             }
           >
@@ -1332,51 +1779,9 @@ function AppTopbar({ state, chrome, onRoute, threadTitle, sideOpen, onToggleSide
             align="end"
             triggerClassName="t-group"
             popoverClassName="telemetry-pop tok-pop"
-            panel={preview ? <PreviewTokenPanel /> : (
-              <>
-                <div className="tp-head"><Icon name="zap" extra="sm" />Token 用量<span className="spacer" /><span className="chip gray xs">不可用</span></div>
-                <div className="tok-hero">
-                  <div className="th-cell">
-                    <div className="th-k">总消耗</div>
-                    <div className="th-v">—</div>
-                    <div className="th-sub">本轮 —</div>
-                  </div>
-                  <div className="th-cell">
-                    <div className="th-k">Cost</div>
-                    <div className="th-v">—</div>
-                    <div className="th-sub">缓存已省 <b>—</b></div>
-                  </div>
-                </div>
-                <div className="tok-split">
-                  <div className="ts-top"><span>构成</span><b>— 入 / — 出</b></div>
-                  <div className="tok-bar"><i className="tb-none" /></div>
-                  <div className="tok-keys">
-                    <span><i className="tb-in" />输入</span>
-                    <span><i className="tb-out" />输出</span>
-                    <span><i className="tb-cache" />缓存 —</span>
-                  </div>
-                </div>
-                <div className="tok-rows">
-                  <div className="tr-row">本轮输入 / 输出<span className="tr-v dim">—</span></div>
-                  <div className="tr-row">本轮耗时<span className="tr-v dim">—</span></div>
-                  <div className="tr-row">会话总耗时<span className="tr-v dim">—</span></div>
-                  <div className="tr-row">子 Agent 消耗<span className="tr-v dim">—</span></div>
-                  <div className="tr-row">重试 / Fallback<span className="tr-v dim">—</span></div>
-                </div>
-                <div className="tp-ctx">
-                  <div className="tiny muted">公共 contract 不暴露 token 用量、成本与缓存命中。</div>
-                </div>
-              </>
-            )}
+            panel={preview ? <PreviewTokenPanel /> : <RealTokenPanel telemetry={telemetry} />}
           >
-            {preview ? <PreviewTokenTrigger /> : (
-              <>
-                <span className="t-item"><Icon name="arrow-u" extra="sm" /><b>—</b></span>
-                <span className="t-item"><Icon name="arrow-d" extra="sm" /><b>—</b></span>
-                <span className="t-sep" aria-hidden="true" />
-                <span className="t-item"><b>—</b>&nbsp;cache</span>
-              </>
-            )}
+            {preview ? <PreviewTokenTrigger /> : <RealTokenTrigger telemetry={telemetry} />}
           </AnchoredPop>
           <span className="t-sep" aria-hidden="true" />
           <AnchoredPop
@@ -1388,37 +1793,9 @@ function AppTopbar({ state, chrome, onRoute, threadTitle, sideOpen, onToggleSide
             align="end"
             triggerClassName="t-group"
             popoverClassName="telemetry-pop ctx-pop"
-            panel={preview ? <PreviewContextPanel /> : (
-              <>
-                <div className="tp-head"><Icon name="layers" extra="sm" />CONTEXT 构成<span className="spacer" /><span className="chip gray xs">—</span></div>
-                <div className="tp-ctx" style={{ paddingTop: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <span>已使用</span>
-                    <b className="mono" style={{ fontSize: 13 }}>— / —</b>
-                  </div>
-                  <div className="ctxbar"><i className="cb-none" /></div>
-                  <div className="ctx-legend">
-                    {CTX_PARTS.map((part) => (
-                      <div key={part.name} className="cl-row">
-                        <span className="cl-dot" style={{ background: part.color }} />
-                        <span>{part.name}</span>
-                        <span className="cl-v">—</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="tiny muted" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-                    Compact：— · 公共 contract 无 context 构成 read model
-                  </div>
-                </div>
-              </>
-            )}
+            panel={preview ? <PreviewContextPanel /> : <RealContextPanel telemetry={telemetry} />}
           >
-            {preview ? <PreviewContextTrigger /> : (
-              <>
-                <span className="ctx-ring" style={{ ["--p" as string]: 0 }} aria-hidden="true" />
-                <span className="t-item"><b>—</b></span>
-              </>
-            )}
+            {preview ? <PreviewContextTrigger /> : <RealContextTrigger telemetry={telemetry} />}
           </AnchoredPop>
           <span className="t-sep" aria-hidden="true" />
           <span className="t-item"><b>auto</b>&nbsp;compact</span>
@@ -1436,9 +1813,15 @@ function AppTopbar({ state, chrome, onRoute, threadTitle, sideOpen, onToggleSide
   );
 }
 
-function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSideTabChange, bottomOpen, onBottomOpenChange, bottomTab, onBottomTabChange, onRoute }: {
+function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, previewProjectId, previewThreadId, onSelectProject, onSelectPreviewProject, sideOpen, onCloseSide, sideTab, onSideTabChange, bottomOpen, onBottomOpenChange, bottomTab, onBottomTabChange, onRoute }: {
   state: ViewState;
   client: ClientStateSource;
+  selectedSessionId?: string;
+  selectedThreadId?: ThreadId;
+  previewProjectId?: string;
+  previewThreadId?: string;
+  onSelectProject: (project: SelectedProject) => void;
+  onSelectPreviewProject: (id: string) => void;
   sideOpen: boolean;
   onCloseSide: () => void;
   sideTab: SideTab;
@@ -1451,6 +1834,21 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [composerError, setComposerError] = useState<string | undefined>(undefined);
+  const [composerSubmitted, setComposerSubmitted] = useState(false);
+  const [composerExpanded, setComposerExpanded] = useState(true);
+  const [contextProjectMenuOpen, setContextProjectMenuOpen] = useState(false);
+  const [contextProjectQuery, setContextProjectQuery] = useState("");
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [createProjectName, setCreateProjectName] = useState("");
+  const [createProjectFolderReady, setCreateProjectFolderReady] = useState(false);
+  const [createProjectBusy, setCreateProjectBusy] = useState(false);
+  const [createProjectError, setCreateProjectError] = useState<string | undefined>(undefined);
+  const [previewCreatedProject, setPreviewCreatedProject] = useState<{ id: string; name: string } | null>(null);
+  const [approvalMenuOpen, setApprovalMenuOpen] = useState(false);
+  const promptUnsub = useRef<Unsubscribe | undefined>(undefined);
+  useEffect(() => () => promptUnsub.current?.(), []);
   const terminalRef = useRef<TerminalPaneHandle>(null);
   const terminalAvailable = typeof globalThis.ompStudioTerminal !== "undefined";
   const { preview } = usePreviewMode();
@@ -1458,7 +1856,7 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
   const connection = state.clientState?.connection;
   const runtime = connection?.runtime ?? state.bootstrap?.runtime;
   const commands = state.clientState?.commands ?? {};
-  const pendingInteraction = Object.values(commands).find((command) => command.status === "interaction_required");
+  const pendingInteraction = state.clientState?.interaction.pending ?? null;
   const capabilities = state.model.capabilities ?? state.bootstrap?.capabilityManifest;
   const commandManifest = state.model.commandManifest;
   const capabilityById = useMemo(() => new Map((capabilities?.capabilities ?? []).map((capability) => [capability.id, capability])), [capabilities]);
@@ -1469,31 +1867,225 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
     if (runtime?.classification === "limited-system") return false;
     return true;
   };
+  const conversationClient = useMemo(() => asConversationClient(client), [client]);
+  const runtimeConnected = runtime?.status === "connected";
+  const conversationIdentity = selectedSessionId === undefined
+    ? snapshot ? { runtimeEpoch: snapshot.runtimeEpoch, sessionId: snapshot.sessionId } : null
+    : {
+        sessionId: selectedSessionId as SessionId,
+        ...(snapshot?.sessionId === selectedSessionId ? { runtimeEpoch: snapshot.runtimeEpoch } : {}),
+      };
+  const convo = useConversation({
+    preview,
+    client: conversationClient,
+    identity: conversationIdentity,
+    // Persistent archive reads are Broker/Host-owned and do not require a
+    // currently connected Runtime capability manifest.
+    canRead: true,
+    runtimeConnected,
+    ...(previewThreadId === undefined ? {} : { previewThreadId }),
+  });
+  const isNewConversation = preview
+    ? previewThreadId === "t0"
+    : selectedSessionId === undefined && convo.rows.length === 0;
+  const showContextStrip = isNewConversation && !composerSubmitted;
+  const activeWorkspace = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
+  const activePreviewProject = preview ? findPreviewProject(previewProjectId ?? "") : undefined;
+  const contextProjectName = preview
+    ? (previewCreatedProject?.name ?? activePreviewProject?.name ?? "未选择项目")
+    : (activeWorkspace?.name ?? "未选择项目");
+  const normalizedProjectQuery = contextProjectQuery.trim().toLocaleLowerCase();
+  const previewProjectOptions = PREVIEW_PROJECTS.filter((project) => project.name.toLocaleLowerCase().includes(normalizedProjectQuery));
+  const workspaceOptions = (state.model.workspaces?.workspaces ?? []).filter((workspace) => workspace.name.toLocaleLowerCase().includes(normalizedProjectQuery));
+  const openCreateProject = () => {
+    setContextProjectMenuOpen(false);
+    setCreateProjectName("");
+    setCreateProjectFolderReady(false);
+    setCreateProjectError(undefined);
+    setCreateProjectOpen(true);
+  };
+  const createProject = async () => {
+    const name = createProjectName.trim();
+    if (!name || !createProjectFolderReady || createProjectBusy) return;
+    setCreateProjectError(undefined);
+    if (preview) {
+      setPreviewCreatedProject({ id: `preview-created-${Date.now()}`, name });
+      setCreateProjectOpen(false);
+      return;
+    }
+    setCreateProjectBusy(true);
+    try {
+      const handle = await client.command("workspace.pick", { name });
+      const model = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
+      const active = model.workspaces.find((workspace) => workspace.active);
+      if (!active) throw new Error("选择的文件夹未注册为项目");
+      onSelectProject({ id: active.workspaceId, name: active.name });
+      setCreateProjectOpen(false);
+    } catch (error) {
+      setCreateProjectError(hostErrorMessage(error, "创建项目失败"));
+    } finally {
+      setCreateProjectBusy(false);
+    }
+  };
+  useEffect(() => {
+    setComposerSubmitted(false);
+    setComposerExpanded(true);
+  }, [previewThreadId, selectedSessionId, selectedThreadId]);
+  const convoRef = useRef(convo);
+  convoRef.current = convo;
+  const selectedTargetRef = useRef({ selectedSessionId, selectedThreadId });
+  selectedTargetRef.current = { selectedSessionId, selectedThreadId };
   const run = useCallback(async <T extends CommandName>(name: T, input: CommandInput<T>): Promise<boolean> => {
     if (busy) return false;
     setBusy(true);
     try {
-      await client.command(name, input);
+      const handle = await client.command(name, input);
+      const result = await waitReceipt<{ readonly syncStatus?: "complete" | "partial"; readonly failedSessions?: number }>(client, handle.requestId);
+      if (name === "permissions.mode.set" && result.syncStatus === "partial") {
+        setComposerError(`权限模式仅同步到部分 Runtime（${result.failedSessions ?? 0} 个失败），请稍后重试。`);
+        return false;
+      }
+      setComposerError(undefined);
       return true;
-    } catch { return false; } finally { setBusy(false); }
+    } catch (error) {
+      setComposerError(hostErrorMessage(error, "操作失败"));
+      return false;
+    } finally { setBusy(false); }
   }, [busy, client]);
-  const respond = useCallback((decision: "submit" | "cancel", value?: InteractionResponseValue) => {
-    if (!pendingInteraction || pendingInteraction.status !== "interaction_required") return;
-    void run("interaction.respond", { interactionId: pendingInteraction.interaction.interactionId, decision, ...(value === undefined ? {} : { value }) });
+  const respond = useCallback((decision: "submit" | "cancel", value?: InteractionResponseValue): Promise<boolean> => {
+    if (!pendingInteraction) return Promise.resolve(false);
+    // run() waits for the receipt and reports failure through the return
+    // value; the pending card stays until the Runtime resolves it.
+    return run("interaction.respond", {
+      interactionId: pendingInteraction.interactionId,
+      leaseGeneration: pendingInteraction.leaseGeneration,
+      decision,
+      ...(value === undefined ? {} : { value }),
+    });
   }, [pendingInteraction, run]);
   const commandRows = useMemo(() => Object.values(commands).slice(-20).reverse(), [commands]);
-  const runtimeConnected = runtime?.status === "connected";
   const snapshotReady = snapshot !== undefined;
-  const gated = busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady;
+  const executionMatches = selectedSessionId === undefined || snapshot?.sessionId === selectedSessionId;
+  const gated = busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady || !executionMatches;
   const interactionDisabled = gated || !can("interaction.respond");
   const textReady = text.trim().length > 0;
-  const canSend = textReady && !gated;
-  const abortEligible = Boolean(snapshot?.isStreaming) || (snapshot?.pendingMessages ?? 0) > 0;
-  const running = Boolean(snapshot?.isStreaming);
-  const dispatchText = async (name: "core.prompt" | "core.steer" | "core.followUp" | "queue.enqueue") => {
-    if (!canSend || !can(name)) return;
-    const accepted = await run(name, { text: text.trim() });
-    if (accepted) setText("");
+  const abortEligible = executionMatches && (Boolean(snapshot?.isStreaming) || (snapshot?.pendingMessages ?? 0) > 0);
+  const running = preview
+    ? previewThreadId === "t1"
+    : executionMatches && Boolean(snapshot?.isStreaming);
+  useEffect(() => {
+    if (running) setComposerExpanded(false);
+  }, [running]);
+  // Approval mode pill (plan §5.5): read-only view of the Runtime snapshot;
+  // disabled while busy/streaming/resync/pending interaction. Never
+  // optimistic — the label only changes after the receipt/snapshot updates.
+  const approvalMode: ApprovalMode = snapshot?.approvalMode ?? "yolo";
+  const approvalLabel = APPROVAL_MODE_LABELS[approvalMode];
+  const approvalDisabled =
+    gated || running || pendingInteraction !== null || !can("permissions.mode.set");
+  const promptTargetReady = executionMatches
+    ? runtimeConnected && snapshotReady
+    : !preview && selectedSessionId !== undefined && selectedThreadId !== undefined;
+  const promptEnabled =
+    textReady &&
+    !busy &&
+    !connection?.resyncRequired &&
+    !sending &&
+    !running &&
+    promptTargetReady &&
+    can("core.prompt");
+  const steerEnabled = textReady && !sending && executionMatches && runtimeConnected && snapshotReady && !connection?.resyncRequired && can("core.steer");
+  const restorePending = (requestId: string) => {
+    const pending = convo.state.pendingUsers.find((entry) => entry.requestId === requestId);
+    if (!pending) return;
+    setText(pending.draft);
+    setComposerError(undefined);
+    convo.dropPending(requestId);
+  };
+  const sendPrompt = async () => {
+    if (!promptEnabled) return;
+    const draft = text;
+    const trimmed = draft.trim();
+    const targetSessionId = selectedSessionId as SessionId | undefined;
+    const targetThreadId = selectedThreadId;
+    setComposerError(undefined);
+    setComposerSubmitted(true);
+    setSending(true);
+    setText("");
+    try {
+      const resumed = targetSessionId !== undefined && snapshot?.sessionId !== targetSessionId;
+      await ensureSelectedSessionActive(client, {
+        ...(snapshot?.sessionId === undefined ? {} : { activeSessionId: snapshot.sessionId }),
+        ...(targetSessionId === undefined ? {} : { selectedSessionId: targetSessionId }),
+        ...(targetThreadId === undefined ? {} : { selectedThreadId: targetThreadId }),
+      });
+      const currentTarget = selectedTargetRef.current;
+      if (
+        currentTarget.selectedSessionId !== targetSessionId ||
+        currentTarget.selectedThreadId !== targetThreadId
+      ) {
+        throw { code: "STATE_VERSION_CONFLICT", message: "发送期间已切换会话，本次发送已取消，草稿已恢复。" };
+      }
+      if (resumed) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      const handle = await client.command("core.prompt", { text: trimmed });
+      const pendingConvo = convoRef.current;
+      pendingConvo.trackPending({
+        requestId: handle.requestId,
+        text: trimmed,
+        draft,
+        status: "pending",
+        knownItemIds: pendingConvo.state.items.map((item) => item.itemId),
+      });
+      promptUnsub.current?.();
+      const watchReceipt = () => {
+        const commands = client.getState?.()?.commands;
+        if (commands === undefined) return;
+        const receipt = selectComposerReceipt(commands, handle.requestId);
+        if (
+          receipt.phase === "pending" ||
+          receipt.phase === "accepted" ||
+          receipt.phase === "unknown" ||
+          receipt.phase === "interaction_required"
+        ) {
+          return;
+        }
+        promptUnsub.current?.();
+        promptUnsub.current = undefined;
+        if (receipt.phase === "completed") return;
+        if (receipt.phase === "failed") {
+          pendingConvo.failPending(handle.requestId, receipt.error.message);
+          return;
+        }
+        pendingConvo.failPending(handle.requestId, receipt.reason);
+      };
+      promptUnsub.current = client.onState
+        ? client.onState(() => watchReceipt())
+        : client.subscribe({ scope: "command", requestId: handle.requestId }, () => watchReceipt());
+      watchReceipt();
+    } catch (error) {
+      setText(draft);
+      setComposerError(hostErrorMessage(error, "发送失败"));
+    } finally {
+      setSending(false);
+    }
+  };
+  const dispatchSteer = async () => {
+    if (!steerEnabled) return;
+    const draft = text;
+    setComposerError(undefined);
+    setSending(true);
+    try {
+      const handle = await client.command("core.steer", { text: text.trim() });
+      await waitReceipt(client, handle.requestId);
+      setText("");
+    } catch (error) {
+      setText(draft);
+      setComposerError(hostErrorMessage(error, "Steer 失败"));
+    } finally {
+      setSending(false);
+    }
   };
   const marks = state.events.slice(-24);
 
@@ -1501,19 +2093,7 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
     <>
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
         <div className="convo-wrap">
-          <main className="convo-scroll" id="convoScroll" tabIndex={-1} aria-label="对话内容">
-            <div className="convo-doc" id="convoDoc" role="log" aria-live="polite" aria-relevant="additions">
-              {preview ? (
-                <PreviewTranscript />
-              ) : (
-                <div className="empty" style={{ paddingTop: 72 }}>
-                  <Icon name="message" extra="lg" />
-                  <p>开始一段对话</p>
-                  <p className="muted small">公共 contract 不暴露消息 transcript。语义事件显示在底部 OMP Logs。</p>
-                </div>
-              )}
-            </div>
-          </main>
+          <ConversationPane snapshot={convo} onLoadOlder={convo.loadOlder} onRestore={restorePending} />
           <div className="minimap" id="minimap">
             <div className="minimap-track" id="mmTrack" aria-hidden="true">
               <span className="mm-rail" />
@@ -1528,53 +2108,216 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
             </div>
           </div>
           <div className="composer-region">
-            <InteractionDeck
-              interaction={pendingInteraction?.status === "interaction_required" ? pendingInteraction.interaction : null}
-              onRespond={respond}
-              disabled={interactionDisabled}
-            />
-            <div className={`ctx-strip${running ? " hidden" : ""}`} role="status" aria-live="polite">
-              <span className="ctx-item"><Icon name="folder-open" extra="sm" /><span>{preview ? "omp-web" : (state.model.workspaces?.workspaces.find((workspace) => workspace.active)?.name ?? "未选择项目")}</span></span>
-              <span className="ctx-item"><Icon name="cpu" extra="sm" /><span>{preview ? "gemini-3.6-flash" : (runtime?.classification ?? "runtime unavailable")}</span></span>
-              <span className="ctx-item muted"><Icon name="branch" extra="sm" /><span>{preview ? "main" : "—"}</span></span>
+            {/* 真实 pending Interaction 永远优先于 Preview（plan §6.1） */}
+            {pendingInteraction ? (
+              <InteractionDeck
+                interaction={pendingInteraction}
+                onRespond={respond}
+                disabled={interactionDisabled}
+              />
+            ) : preview ? (
+              <PreviewDeck />
+            ) : null}
+            {showContextStrip ? <div className="ctx-strip" role="status" aria-live="polite">
+              <span className="ctx-project-wrap">
+                <button
+                  type="button"
+                  className="ctx-item ctx-project-switch"
+                  aria-haspopup="menu"
+                  aria-expanded={contextProjectMenuOpen}
+                  onClick={() => setContextProjectMenuOpen((open) => !open)}
+                  title="切换项目"
+                >
+                  <Icon name="folder-open" extra="sm" />
+                  <span>{contextProjectName}</span>
+                  <Icon name="chevron-d" extra="sm" />
+                </button>
+                {contextProjectMenuOpen ? (
+                  <>
+                    <button className="ctx-project-backdrop" aria-label="关闭项目菜单" onClick={() => setContextProjectMenuOpen(false)} />
+                    <div className="menu ctx-project-menu" role="menu" aria-label="切换项目">
+                      <label className="ctx-project-search">
+                        <Icon name="search" extra="sm" />
+                        <span className="sr-only">搜索项目</span>
+                        <input
+                          autoFocus
+                          value={contextProjectQuery}
+                          placeholder="搜索项目"
+                          onChange={(event) => setContextProjectQuery(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") setContextProjectMenuOpen(false);
+                          }}
+                        />
+                      </label>
+                      <div className="ctx-project-list">
+                      {previewCreatedProject && previewCreatedProject.name.toLocaleLowerCase().includes(normalizedProjectQuery) ? (
+                        <MenuItem icon="folder-open" current hint="演示">{previewCreatedProject.name}</MenuItem>
+                      ) : null}
+                      {preview ? previewProjectOptions.map((project) => (
+                        <MenuItem
+                          key={project.id}
+                          icon="folder-open"
+                          current={!previewCreatedProject && project.id === previewProjectId}
+                          hint={!previewCreatedProject && project.id === previewProjectId ? "当前" : project.branch}
+                          onClick={() => {
+                            setContextProjectMenuOpen(false);
+                            setPreviewCreatedProject(null);
+                            onSelectPreviewProject(project.id);
+                          }}
+                        >{project.name}</MenuItem>
+                      )) : workspaceOptions.map((workspace) => (
+                        <MenuItem
+                          key={workspace.workspaceId}
+                          icon="folder-open"
+                          current={workspace.active}
+                          {...(workspace.active ? { hint: "当前" } : {})}
+                          onClick={() => {
+                            setContextProjectMenuOpen(false);
+                            onSelectProject({ id: workspace.workspaceId, name: workspace.name });
+                          }}
+                        >{workspace.name}</MenuItem>
+                      ))}
+                      {!preview && !state.model.workspaces?.workspaces.length ? (
+                        <MenuItem icon="folder-open" disabled>暂无项目</MenuItem>
+                      ) : null}
+                      {normalizedProjectQuery && (preview ? previewProjectOptions.length === 0 && !previewCreatedProject : workspaceOptions.length === 0) ? (
+                        <div className="ctx-project-empty">没有匹配的项目</div>
+                      ) : null}
+                      </div>
+                      <div className="menu-sep" />
+                      <MenuItem icon="plus" onClick={openCreateProject}>新建项目</MenuItem>
+                      <MenuItem icon="x" disabled title="当前 Runtime contract 需要活动工作区">不在项目中工作</MenuItem>
+                    </div>
+                  </>
+                ) : null}
+              </span>
+              <span className="ctx-item muted"><Icon name="branch" extra="sm" /><span>{preview ? (previewCreatedProject ? "main" : activePreviewProject?.branch ?? "—") : "—"}</span></span>
               <span className="spacer" />
-              <span className="ctx-item muted"><Icon name="file" extra="sm" />{preview ? "18 个文件" : "文件树不可用"}</span>
-            </div>
+              <span className="ctx-item muted"><Icon name="file" extra="sm" />{preview ? `${countWorkspaceFiles(PREVIEW_FILE_TREE)} 个文件` : "文件树不可用"}</span>
+            </div> : null}
+            {createProjectOpen ? (
+              <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (!createProjectBusy) setCreateProjectOpen(false); }}>
+                <section className="modal create-project-modal" role="dialog" aria-modal="true" aria-labelledby="createProjectTitle" onMouseDown={(event) => event.stopPropagation()}>
+                  <div className="create-project-head">
+                    <div>
+                      <span className="create-project-kicker">WORKSPACE</span>
+                      <h2 id="createProjectTitle">创建项目</h2>
+                    </div>
+                    <button type="button" className="icon-btn" aria-label="关闭" disabled={createProjectBusy} onClick={() => setCreateProjectOpen(false)}><Icon name="x" /></button>
+                  </div>
+                  <div className="create-project-body">
+                    <label className="create-project-name">
+                      <span className="sr-only">项目名称</span>
+                      <Icon name="folder-open" />
+                      <input autoFocus value={createProjectName} placeholder="项目名称" maxLength={80} onChange={(event) => setCreateProjectName(event.target.value)} />
+                    </label>
+                    <div className="create-project-label">源文件夹</div>
+                    <button
+                      type="button"
+                      className={`create-project-folder${createProjectFolderReady ? " selected" : ""}`}
+                      onClick={() => setCreateProjectFolderReady(true)}
+                    >
+                      <span className="create-folder-icon"><Icon name={createProjectFolderReady ? "check" : "folder-open"} /></span>
+                      <span className="create-folder-copy">
+                        <b>{createProjectFolderReady ? "已准备选择源文件夹" : "选择项目文件夹"}</b>
+                        <span>{preview ? "演示模式不会访问本机文件" : "创建时将打开系统文件夹选择器"}</span>
+                      </span>
+                      {preview ? <span className="chip purple xs">演示</span> : <Icon name="chevron-r" extra="sm" />}
+                    </button>
+                    {createProjectError ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{createProjectError}</div> : null}
+                  </div>
+                  <div className="create-project-foot">
+                    <button type="button" className="btn outline" disabled={createProjectBusy} onClick={() => setCreateProjectOpen(false)}>取消</button>
+                    <button type="button" className="btn primary" disabled={!createProjectName.trim() || !createProjectFolderReady || createProjectBusy} onClick={() => void createProject()}>
+                      {createProjectBusy ? <><span className="spinner" aria-hidden="true" />正在创建</> : "创建项目"}
+                    </button>
+                  </div>
+                </section>
+              </div>
+            ) : null}
             <div className={`run-strip${running ? "" : " hidden"}`} role="status" aria-live="polite">
               <span className="rs-label st-running"><span className="spinner" aria-hidden="true" />{snapshot?.isStreaming ? "Run 进行中" : "Queued"}</span>
               <span className="muted small">{snapshot ? `${snapshot.activeMode} · ${snapshot.pendingMessages} pending` : "No Runtime snapshot."}</span>
               <span className="spacer" />
               {snapshot && snapshot.pendingMessages > 0 && <span className="fq-chip"><Icon name="queue" extra="sm" />Follow-up ×{snapshot.pendingMessages}</span>}
-              <button className="btn small outline" disabled={!canSend || !can("core.steer")} onClick={() => void dispatchText("core.steer")}><Icon name="steering" extra="sm" />Steering</button>
+              <button className="btn small outline" disabled={!steerEnabled} onClick={() => void dispatchSteer()}><Icon name="steering" extra="sm" />Steering</button>
               <button className="btn small danger" disabled={gated || !abortEligible || !can("core.abort")} onClick={() => void run("core.abort", {})}><Icon name="stop" extra="sm" />Abort</button>
             </div>
-            <div className={`composer${running ? " running" : ""}`} id="composer">
+            <div className={`composer${running ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
               <div className="composer-ctx" aria-label="已引用的上下文" role="group" />
               <label className="sr-only" htmlFor="composerInput">消息输入框。发送给 Runtime 的文本。</label>
               <textarea
                 id="composerInput"
                 rows={2}
                 value={text}
+                onFocus={() => setComposerExpanded(true)}
                 onChange={(event) => setText(event.target.value)}
                 placeholder="输入消息… 输入 / 触发命令，@ 引用文件、Agent、Diff、Preview 元素"
                 aria-describedby="composerHint"
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && canSend && can("core.prompt")) {
+                  if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                  if (running) {
                     event.preventDefault();
-                    void dispatchText("core.prompt");
+                    return;
+                  }
+                  if (promptEnabled) {
+                    event.preventDefault();
+                    void sendPrompt();
                   }
                 }}
               />
-              <p className="sr-only" id="composerHint">按 Enter 发送，Shift+Enter 换行</p>
+              <p className="sr-only" id="composerHint">{running ? "流式输出中：Enter 发送已禁用，请使用 Steer 或 Abort" : "按 Enter 发送，Shift+Enter 换行"}</p>
+              {composerError ? (
+                <div className="composer-error" role="alert">
+                  <Icon name="alert" extra="sm" />
+                  <span>{composerError}</span>
+                </div>
+              ) : null}
+              {running ? <p className="composer-hint muted small">流式输出中：Enter 发送已禁用，请使用 Steer 或 Abort。</p> : null}
               <div className="composer-bar">
                 <div className="cb-group">
                   <button className="icon-btn small" data-tip="附件 / 图片" disabled title="附件不在公共 contract 中"><Icon name="attach" extra="sm" /></button>
                   <button className="icon-btn small" data-tip="@ 引用" disabled title="@ 引用不在公共 contract 中"><Icon name="at" extra="sm" /></button>
                   <button className="icon-btn small" data-tip="Slash Commands" disabled title="Slash Commands 不在公共 contract 中"><Icon name="slash" extra="sm" /></button>
                 </div>
-                <button className="pill-btn" disabled title="权限模式不在公共 contract 中" aria-label="权限模式：default">
-                  <Icon name="shield" extra="sm" /><span>default</span>
-                </button>
+                <div className="approval-pill-wrap">
+                  <button
+                    className={`pill-btn${approvalMode === "yolo" ? "" : ""}`}
+                    disabled={approvalDisabled}
+                    onClick={() => setApprovalMenuOpen((open) => !open)}
+                    aria-haspopup="menu"
+                    aria-expanded={approvalMenuOpen}
+                    aria-label={`权限模式：${approvalLabel}`}
+                    title={approvalDisabled ? "Runtime 忙碌或存在待处理交互时不可切换权限模式" : `权限模式：${approvalLabel}（点击切换）`}
+                  >
+                    <Icon name="shield" extra="sm" /><span>{approvalLabel}</span>
+                  </button>
+                  {approvalMenuOpen ? (
+                    <>
+                      <div className="approval-menu-backdrop" onClick={() => setApprovalMenuOpen(false)} />
+                      <div className="approval-menu" role="menu" aria-label="权限模式">
+                        {APPROVAL_MODE_OPTIONS.map((option) => (
+                          <button
+                            key={option.mode}
+                            role="menuitemradio"
+                            aria-checked={approvalMode === option.mode}
+                            className={`approval-menu-item${approvalMode === option.mode ? " selected" : ""}`}
+                            onClick={() => {
+                              setApprovalMenuOpen(false);
+                              if (option.mode === approvalMode) return;
+                              // No optimistic switch: the pill updates only
+                              // after the receipt / snapshot reflects the mode.
+                              void run("permissions.mode.set", { mode: option.mode });
+                            }}
+                          >
+                            <span className="am-label">{option.label}</span>
+                            <span className="am-desc">{option.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
                 <span className="spacer" />
                 <button className="pill-btn meta-model" disabled title="模型切换不在公共 contract 中" aria-label="当前模型不可用">
                   <Icon name="cpu" extra="sm" /><span>—</span>
@@ -1582,7 +2325,7 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
                 <button className="pill-btn" disabled title="思考强度不在公共 contract 中" aria-label="思考强度不可用">
                   <Icon name="brain" extra="sm" /><span>—</span>
                 </button>
-                <button className="send-btn" disabled={!canSend || !can("core.prompt")} onClick={() => void dispatchText("core.prompt")} data-tip="发送 (Enter)" title="发送 (Enter)">
+                <button className="send-btn" disabled={!promptEnabled} onClick={() => void sendPrompt()} data-tip={running ? "流式输出中，普通发送已禁用" : "发送 (Enter)"} title={running ? "流式输出中：请使用 Steer 或 Abort" : "发送 (Enter)"}>
                   <Icon name="send" extra="sm" />
                 </button>
               </div>
@@ -1609,7 +2352,7 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
           </div>
           <div className="sp-body">
             <div className={`sp-page${sideTab === "changes" ? " active" : ""}`} id="spChanges" role="tabpanel">
-              {preview ? <PreviewChanges /> : <Deferred title="Changes 不可用" detail="公共 contract 没有文件树 / diff read model。" />}
+              {sideOpen && sideTab === "changes" ? (preview ? <PreviewChanges /> : <GitStatusPanel client={client} {...(activeWorkspace === undefined ? {} : { workspaceId: activeWorkspace.workspaceId })} />) : null}
             </div>
             <div className={`sp-page${sideTab === "preview" ? " active" : ""}`} id="spPreview" role="tabpanel">
               {preview ? <PreviewSidePreview /> : <Deferred title="Preview 不可用" detail="没有 Preview URL 可供嵌入。" />}
@@ -1755,12 +2498,13 @@ function WorkbenchCanvas({ state, client, sideOpen, onCloseSide, sideTab, onSide
   );
 }
 
-function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, onWorkspacesChange }: {
+function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, onNewThread, onWorkspacesChange }: {
   state: ViewState;
   client: ClientStateSource;
   onRoute: (route: Route) => void;
   selectedHistoryId: string | null;
   onSelectThread: (entry: SessionHistoryEntry) => void;
+  onNewThread: () => void;
   onWorkspacesChange: (workspaces: WorkspaceListReadModel) => void;
 }) {
   const previewMode = usePreviewMode();
@@ -1769,6 +2513,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [skillsEnabledCount, setSkillsEnabledCount] = useState(() => previewOn() ? countEnabledDrawerItems(createPreviewDrawerItems()) : 0);
   const [explorerOpen, setExplorerOpen] = useState(() => previewOn());
+  const [projectListExpanded, setProjectListExpanded] = useState(true);
   const [selectedProject, setSelectedProject] = useState<SelectedProject | null>(() => previewOn() ? CURRENT_PROJECT : null);
   const initialPreview = defaultPreviewSelection();
   const [previewProjectId, setPreviewProjectId] = useState(initialPreview.projectId);
@@ -1782,6 +2527,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [bottomTab, setBottomTab] = useState<BottomTab>("logs");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
+  const [sessionActionError, setSessionActionError] = useState<string | undefined>(undefined);
   const [paletteInventory, setPaletteInventory] = useState<DrawerItem[]>([]);
   const paletteRef = useRef<CommandPaletteHandle>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -1803,6 +2549,23 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const runtime = state.clientState?.connection.runtime ?? state.bootstrap?.runtime;
   const capabilities = state.model.capabilities ?? state.bootstrap?.capabilityManifest;
   const environment = state.model.environment;
+  /** Approval mode for Settings → Permissions (plan §5.6); never optimistic. */
+  const approvalMode: ApprovalMode = snapshot?.approvalMode ?? "yolo";
+  const setApprovalMode = useCallback(
+    (mode: ApprovalMode) => {
+      if (snapshot === undefined) return;
+      void (async () => {
+        try {
+          const handle = await client.command("permissions.mode.set", { mode });
+          await waitReceipt(client, handle.requestId);
+          setSessionActionError(undefined);
+        } catch (error) {
+          setSessionActionError(hostErrorMessage(error, "切换权限模式失败"));
+        }
+      })();
+    },
+    [client, snapshot],
+  );
   const selected = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId);
   const previewThread = findPreviewThread(previewThreadId);
   const threadTitle = previewMode.preview
@@ -1812,10 +2575,20 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   useEffect(() => {
     if (previewMode.preview) {
       setExplorerOpen(true);
+      setProjectListExpanded(true);
       const project = findPreviewProject(previewProjectId);
       if (project) setSelectedProject({ id: project.id, name: project.name });
+      return;
     }
-  }, [previewMode.preview, previewProjectId]);
+    const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
+    if (active) {
+      setSelectedProject({ id: active.workspaceId, name: active.name });
+      setExplorerOpen(true);
+      setProjectListExpanded(true);
+    } else {
+      setSelectedProject(null);
+    }
+  }, [previewMode.preview, previewProjectId, state.model.workspaces]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -1842,6 +2615,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const selectProject = (project: SelectedProject) => {
     setSelectedProject(project);
     setExplorerOpen(true);
+    setProjectListExpanded(true);
     if (!previewMode.preview) {
       // Host remembers the selection; the registry is the only path holder.
       void client.command("workspace.open", { workspaceId: project.id as WorkspaceId }).then(() => {
@@ -1867,6 +2641,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       if (active) {
         setSelectedProject({ id: active.workspaceId, name: active.name });
         setExplorerOpen(true);
+        setProjectListExpanded(true);
         go("workbench");
       }
     });
@@ -1895,6 +2670,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (next === "home") {
       setSelectedProject(null);
       setExplorerOpen(false);
+      setProjectListExpanded(false);
     } else if (next === "workbench") {
       const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
       if (active) {
@@ -1953,19 +2729,23 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     setPaletteOpen(true);
   }, [paletteOpen]);
 
-  const startNewChat = () => {
+  const startNewChat = useCallback(() => {
     if (previewMode.preview) {
       go("workbench");
       return;
     }
-    const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
-    if (active) {
-      selectProject({ id: active.workspaceId, name: active.name });
-      go("workbench");
-    } else {
-      void pickProject();
-    }
-  };
+    setSessionActionError(undefined);
+    void (async () => {
+      try {
+        const handle = await client.command("session.create", {});
+        await waitReceipt(client, handle.requestId);
+        onNewThread();
+        go("workbench");
+      } catch (error) {
+        setSessionActionError(hostErrorMessage(error, "新建对话失败"));
+      }
+    })();
+  }, [client, previewMode.preview, go, onNewThread]);
 
   const openHistoryEntry = (entry: SessionHistoryEntry) => {
     if (previewMode.preview) {
@@ -1974,10 +2754,19 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     }
     const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
     if (active) {
-      selectProject({ id: active.workspaceId, name: active.name });
+      setSelectedProject((current) => current?.id === active.workspaceId
+        ? current
+        : { id: active.workspaceId, name: active.name });
+      setExplorerOpen(true);
+      setProjectListExpanded(true);
     } else {
       setExplorerOpen(true);
+      setProjectListExpanded(true);
     }
+    // Selecting a historical conversation is a View-plane operation. Do not
+    // stop/restart the current Runtime just to render persisted transcript.
+    // Execution stays gated until a Worker can be ensured for this session.
+    setSessionActionError(undefined);
     onSelectThread(entry);
   };
 
@@ -2004,6 +2793,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             setPreviewProjectId(hit.project.id);
             setSelectedProject({ id: hit.project.id, name: hit.project.name });
             setExplorerOpen(true);
+            setProjectListExpanded(true);
           }
         }
         go("workbench");
@@ -2019,6 +2809,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           if (project) {
             setSelectedProject({ id: project.id, name: project.name });
             setExplorerOpen(true);
+            setProjectListExpanded(true);
             const first = project.threads[0];
             if (first) setPreviewThreadId(first.id);
           }
@@ -2126,7 +2917,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         openPalette();
       } else if (key === "o" && event.shiftKey) {
         event.preventDefault();
-        go("workbench");
+        startNewChat();
       } else if (key === "j" && !event.shiftKey) {
         event.preventDefault();
         setBottomOpen((value) => !value);
@@ -2134,12 +2925,13 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [dialog, go, skillsOpen, paletteOpen, closePalette, openPalette]);
+  }, [dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
 
   const chrome: ShellChrome = {
     collapsed,
     skillsOpen,
     explorerOpen,
+    projectListExpanded,
     theme,
     sidebarWidth,
     splitRatio,
@@ -2156,30 +2948,49 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     onResizeSidebar: setSidebarWidth,
     onResizeSplit: setSplitRatio,
     onSelectProject: selectProject,
-    onSelectThread: (entry) => {
-      if (previewMode.preview) {
-        onSelectThread(entry);
+    onToggleProject: (project) => {
+      const open = previewMode.preview
+        ? previewProjectId === project.id && projectListExpanded
+        : selectedProject?.id === project.id && projectListExpanded;
+      // 再点已展开的项目：收起会话列表，保持当前选中（不发 workspace.open）。
+      if (open) {
+        setProjectListExpanded(false);
         return;
       }
-      const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
-      if (active) {
-        selectProject({ id: active.workspaceId, name: active.name });
-      } else {
-        setExplorerOpen(true);
+      setProjectListExpanded(true);
+      if (previewMode.preview) {
+        setPreviewProjectId(project.id);
+        const hit = findPreviewProject(project.id);
+        if (hit) {
+          setSelectedProject({ id: hit.id, name: hit.name });
+          setExplorerOpen(true);
+          if (previewThreadId !== "t0") {
+            const first = hit.threads[0];
+            if (first) setPreviewThreadId(first.id);
+          }
+        }
+        return;
       }
-      onSelectThread(entry);
+      selectProject(project);
+    },
+    onSelectThread: (entry) => {
+      openHistoryEntry(entry);
     },
     onPickProject: () => {
       void pickProject();
     },
+    onStartNewChat: startNewChat,
     onSelectPreviewProject: (id) => {
       setPreviewProjectId(id);
       const project = findPreviewProject(id);
       if (project) {
         setSelectedProject({ id: project.id, name: project.name });
         setExplorerOpen(true);
-        const first = project.threads[0];
-        if (first) setPreviewThreadId(first.id);
+        setProjectListExpanded(true);
+        if (previewThreadId !== "t0") {
+          const first = project.threads[0];
+          if (first) setPreviewThreadId(first.id);
+        }
       }
     },
     onSelectPreviewThread: (id) => {
@@ -2189,6 +3000,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         setPreviewProjectId(hit.project.id);
         setSelectedProject({ id: hit.project.id, name: hit.project.name });
         setExplorerOpen(true);
+        setProjectListExpanded(true);
       }
       go("workbench");
     },
@@ -2244,7 +3056,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         menus={
           <>
             <TitleMenu id="file" label="文件" openId={openMenu} onToggle={setOpenMenu}>
-              <button className="menu-item" role="menuitem" onClick={() => go("workbench")}>新建对话<span className="kbd">Ctrl ⇧ O</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => startNewChat()}>新建对话<span className="kbd">Ctrl ⇧ O</span></button>
               <button className="menu-item" role="menuitem" onClick={() => go("history")}>会话历史</button>
               <button className="menu-item" role="menuitem" onClick={() => go("agent-hub")}>Agent Hub</button>
               <button className="menu-item" role="menuitem" onClick={() => go("capabilities")}>能力中心</button>
@@ -2281,6 +3093,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           </>
         }
       />
+      {sessionActionError ? (
+        <div className="empty" role="alert" style={{ padding: "8px 16px" }}>
+          <p className="muted small">{sessionActionError}</p>
+        </div>
+      ) : null}
       {showPage ? (
         <SecondaryPage
           route={pageRoute}
@@ -2335,7 +3152,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           ) : pageRoute === "model-config" ? (
             <ModelConfigPage key={mcNonce} client={client} />
           ) : pageRoute === "settings" ? (
-            <SettingsPage key={settingsNonce} theme={theme} onSetTheme={(next) => setTheme(next)} onRoute={go} />
+            <SettingsPage
+              key={settingsNonce}
+              theme={theme}
+              onSetTheme={(next) => setTheme(next)}
+              onRoute={go}
+              {...(snapshot ? { approvalMode } : {})}
+              onSetApprovalMode={setApprovalMode}
+            />
           ) : pageRoute === "diagnostics" ? (
             <DiagnosticsPage
               client={client}
@@ -2352,7 +3176,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       <div className={`app-body ${shellClass}`}>
         <AppSidebar state={state} chrome={chrome} client={client} onRoute={go} />
         <div className="main-col">
-          <AppTopbar state={state} chrome={chrome} onRoute={go} threadTitle={threadTitle} sideOpen={sideOpen} onToggleSide={() => setSideOpen((value) => !value)} />
+          <AppTopbar state={state} client={client} chrome={chrome} onRoute={go} threadTitle={threadTitle} sideOpen={sideOpen} onToggleSide={() => setSideOpen((value) => !value)} onOpenChanges={() => { setSideTab("changes"); setSideOpen(true); }} />
           {state.hostError && (
             <div className="banner amber" role="alert">
               <Icon name="alert" />
@@ -2368,6 +3192,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           <WorkbenchCanvas
             state={state}
             client={client}
+            {...(selected?.sessionId === undefined ? {} : { selectedSessionId: selected.sessionId })}
+            {...(selected?.threadId === undefined ? {} : { selectedThreadId: selected.threadId })}
+            {...(previewMode.preview ? { previewProjectId: chrome.previewProjectId, previewThreadId: chrome.previewThreadId } : {})}
+            onSelectProject={chrome.onSelectProject}
+            onSelectPreviewProject={chrome.onSelectPreviewProject}
             sideOpen={sideOpen}
             onCloseSide={() => setSideOpen(false)}
             sideTab={sideTab}
@@ -2483,6 +3312,19 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
     };
   }, [client]);
 
+  const runtimeEpoch = state.clientState?.connection.runtimeEpoch;
+  const runtimeStatus = state.clientState?.connection.runtime?.status;
+  useEffect(() => {
+    if (state.loading || runtimeStatus !== "connected") return;
+    let cancelled = false;
+    void resyncRuntimeModel(client).then((model) => {
+      if (!cancelled) dispatch({ type: "model", model });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, state.loading, runtimeEpoch, runtimeStatus]);
+
   const routedState = { ...state, route };
   const body = state.loading ? (
     <div className="app">
@@ -2513,6 +3355,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
       onRoute={setRoute}
       selectedHistoryId={selectedHistoryId}
       onSelectThread={(entry) => { setSelectedHistoryId(entry.historyId); setRoute("workbench"); }}
+      onNewThread={() => setSelectedHistoryId(null)}
       onWorkspacesChange={(workspaces) => dispatch({ type: "model", model: { workspaces } })}
     />
   );

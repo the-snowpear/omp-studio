@@ -4727,7 +4727,7 @@ index 4103692..2fef927 100644
  	} finally {
 diff --git a/packages/coding-agent/test/studio-agent-hub-service.test.ts b/packages/coding-agent/test/studio-agent-hub-service.test.ts
 new file mode 100644
-index 0000000..4455587
+index 0000000..6382c46
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-agent-hub-service.test.ts
 @@ -0,0 +1,727 @@
@@ -4834,7 +4834,7 @@ index 0000000..4455587
 +			calls.push(`ensureLive:${id}`);
 +			if (options.failEnsureLive) throw new Error(`${SECRET_SESSION}: revival failed`);
 +			const ref = registry.refs.get(id);
-+			if (!ref || ref.status !== "parked") throw new Error(`${SECRET_SESSION}: unknown agent`);
++			if (ref?.status !== "parked") throw new Error(`${SECRET_SESSION}: unknown agent`);
 +			const live = makeLiveAgent();
 +			ref.session = live as unknown as AgentSession;
 +			ref.status = "idle";
@@ -5855,10 +5855,10 @@ index 0000000..69af107
 +});
 diff --git a/packages/coding-agent/test/studio-job-service.test.ts b/packages/coding-agent/test/studio-job-service.test.ts
 new file mode 100644
-index 0000000..73e7f2f
+index 0000000..17d1537
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-job-service.test.ts
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,139 @@
 +import { describe, expect, test } from "bun:test";
 +import type { AsyncJob } from "@oh-my-pi/pi-coding-agent/async/job-manager";
 +import {
@@ -5899,11 +5899,7 @@ index 0000000..73e7f2f
 +		getAllJobs: () => [...jobs.values()],
 +		cancel: (id, filter) => {
 +			const candidate = jobs.get(id);
-+			if (
-+				!candidate ||
-+				candidate.status !== "running" ||
-+				(filter?.ownerId && candidate.ownerId !== filter.ownerId)
-+			) {
++			if (candidate?.status !== "running" || (filter?.ownerId && candidate.ownerId !== filter.ownerId)) {
 +				return false;
 +			}
 +			candidate.status = "cancelled";
@@ -6094,10 +6090,10 @@ index 0000000..33ffb43
 +});
 diff --git a/packages/coding-agent/test/studio-omfg-service.test.ts b/packages/coding-agent/test/studio-omfg-service.test.ts
 new file mode 100644
-index 0000000..7809a28
+index 0000000..6a36f0a
 --- /dev/null
 +++ b/packages/coding-agent/test/studio-omfg-service.test.ts
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,124 @@
 +import { describe, expect, test } from "bun:test";
 +import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 +import {
@@ -6183,7 +6179,7 @@ index 0000000..7809a28
 +		await expect(h.service.amend(generated.candidateId, "change it")).rejects.toMatchObject({
 +			code: "COMMAND_BLOCKED",
 +		});
-+		await expect(h.service.commit("stale", "project", false)).rejects.toMatchObject({
++		await expect(h.service.commit("stale", "project", false, "cmd-test")).rejects.toMatchObject({
 +			code: "INTERACTION_STALE",
 +		});
 +	});
@@ -6191,19 +6187,21 @@ index 0000000..7809a28
 +	test("confirms overwrite, uses atomic write, registers live, and consumes candidate", async () => {
 +		const h = harness([rule()], { exists: true, confirm: true });
 +		const generated = await h.service.generate("complaint");
-+		const result = await h.service.commit(generated.candidateId, "project", false);
++		const result = await h.service.commit(generated.candidateId, "project", false, "cmd-test");
 +		expect(result).toEqual({ committed: true, scope: "project", ruleName: "no-bad" });
 +		expect(h.confirmations).toHaveLength(1);
 +		expect(h.writes).toHaveLength(1);
 +		expect(h.writes[0]?.atomic).toBeTrue();
 +		expect(h.registered).toHaveLength(1);
-+		await expect(h.service.commit(generated.candidateId, "project", true)).rejects.toBeInstanceOf(StudioOmfgError);
++		await expect(h.service.commit(generated.candidateId, "project", true, "cmd-test")).rejects.toBeInstanceOf(
++			StudioOmfgError,
++		);
 +	});
 +
 +	test("cancellation writes nothing and registration failure rolls back without leaking the path", async () => {
 +		const cancelled = harness([rule()], { exists: true, confirm: false });
 +		const first = await cancelled.service.generate("complaint");
-+		expect(await cancelled.service.commit(first.candidateId, "project", false)).toMatchObject({
++		expect(await cancelled.service.commit(first.candidateId, "project", false, "cmd-test")).toMatchObject({
 +			committed: false,
 +		});
 +		expect(cancelled.writes).toHaveLength(0);
@@ -6211,7 +6209,7 @@ index 0000000..7809a28
 +		const failed = harness([rule()], { register: false });
 +		const second = await failed.service.generate("complaint");
 +		try {
-+			await failed.service.commit(second.candidateId, "project", true);
++			await failed.service.commit(second.candidateId, "project", true, "cmd-test");
 +			throw new Error("expected failure");
 +		} catch (error) {
 +			expect(error).toMatchObject({ code: "INTERNAL_ERROR", partial: true });

@@ -73,6 +73,28 @@ test("WP-012 parses the canonical initial snapshot and fences nested epochs", as
       }),
     ContractValidationError,
   );
+  const snapshotValue = value as { snapshot: Record<string, unknown> };
+  assert.throws(
+    () =>
+      parseStudioSnapshotResponse({
+        ...snapshotValue,
+        snapshot: {
+          ...snapshotValue.snapshot,
+          pendingInteraction: {
+            owner: "gui",
+            leaseGeneration: 0,
+            request: {
+              kind: "editor",
+              interactionId: "interaction-1",
+              commandId: "command-1",
+              title: "Edit",
+              content: "",
+            },
+          },
+        },
+      }),
+    ContractValidationError,
+  );
 });
 
 test("WP-012 validates state events against their envelope", async () => {
@@ -92,6 +114,46 @@ test("WP-012 validates state events against their envelope", async () => {
     () => parseStudioEventEnvelope({ ...event, event: { ...event.event, snapshot } }),
     ContractValidationError,
   );
+});
+
+test("session telemetry events validate numeric usage and reject unsafe fields", () => {
+  const telemetry = {
+    sessionId: "session-1",
+    capturedAt: "2026-08-15T12:00:00.000Z",
+    tokens: { input: 10, output: 4, reasoning: 1, cacheRead: 2, cacheWrite: 0, total: 14, cost: 0.12 },
+    lastCompletedTurn: {
+      input: 10,
+      output: 4,
+      reasoning: 1,
+      cacheRead: 2,
+      cacheWrite: 0,
+      total: 14,
+      cost: 0.12,
+      completedAt: "2026-08-15T11:59:00.000Z",
+    },
+    context: {
+      contextWindow: 128000,
+      usedTokens: 2400,
+      percent: 1.875,
+      anchored: true,
+      systemPromptTokens: 100,
+      systemContextTokens: 200,
+      systemToolsTokens: 300,
+      skillsTokens: 400,
+      messagesTokens: 1400,
+    },
+  };
+  const event = {
+    type: "studio.event",
+    runtimeEpoch: 1,
+    eventSeq: 2,
+    stateVersion: 0,
+    occurredAt: "2026-08-15T12:00:00.000Z",
+    event: { kind: "session.telemetry.changed", sessionId: "session-1", telemetry },
+  };
+  assert.equal((parseStudioEventEnvelope(event).event as { kind: string }).kind, "session.telemetry.changed");
+  assert.throws(() => parseStudioEventEnvelope({ ...event, event: { ...event.event, telemetry: { ...telemetry, tokens: { ...telemetry.tokens, input: -1 } } } }), ContractValidationError);
+  assert.throws(() => parseStudioEventEnvelope({ ...event, event: { ...event.event, telemetry: { ...telemetry, context: { ...telemetry.context, surprise: 1 } } } }), ContractValidationError);
 });
 
 test("WP-001 parses canonical request and receipt fixtures bidirectionally", async () => {
@@ -396,6 +458,19 @@ test("M4 validates interaction, progress, and notification events", () => {
     () => parseStudioEventEnvelope(envelope({ kind: "progress", commandId: "c", stage: "working", percent: 101 })),
     ContractValidationError,
   );
+	assert.throws(
+		() =>
+			parseStudioEventEnvelope(
+				envelope({
+					kind: "interaction.resolved",
+					interactionId: "interaction-1",
+					commandId: "command-1",
+					leaseGeneration: 0,
+					outcome: "submitted",
+				}),
+			),
+		ContractValidationError,
+	);
   assert.throws(
     () =>
       parseStudioEventEnvelope(
@@ -404,6 +479,84 @@ test("M4 validates interaction, progress, and notification events", () => {
     ContractValidationError,
   );
 	assert.throws(() => parseStudioEventEnvelope(envelope({ kind: "runtime.futureEvent" })), ContractValidationError);
+});
+
+test("interaction payloads are bounded at the Studio protocol boundary", () => {
+  const envelope = (event: unknown) => ({
+    type: "studio.event",
+    runtimeEpoch: 1,
+    eventSeq: 1,
+    stateVersion: 0,
+    occurredAt: "2026-08-12T00:00:00.000Z",
+    event,
+  });
+  assert.throws(
+    () =>
+      parseStudioEventEnvelope(
+        envelope({
+          kind: "interaction.required",
+          owner: "gui",
+          leaseGeneration: 1,
+          request: {
+            kind: "confirm",
+            interactionId: "interaction-1",
+            commandId: "command-1",
+            title: "x".repeat(4_097),
+            message: "Proceed?",
+          },
+        }),
+      ),
+    ContractValidationError,
+  );
+  assert.throws(
+    () =>
+      parseStudioEventEnvelope(
+        envelope({
+          kind: "interaction.required",
+          owner: "gui",
+          leaseGeneration: 1,
+          request: {
+            kind: "select",
+            interactionId: "interaction-1",
+            commandId: "command-1",
+            title: "Pick",
+            options: Array.from({ length: 257 }, (_, index) => ({ id: `id-${index}`, label: "x" })),
+          },
+        }),
+      ),
+    ContractValidationError,
+  );
+  const emptyEditor = parseStudioEventEnvelope(
+    envelope({
+      kind: "interaction.required",
+      owner: "gui",
+      leaseGeneration: 1,
+      request: {
+        kind: "editor",
+        interactionId: "interaction-1",
+        commandId: "command-1",
+        title: "Edit",
+        content: "",
+        language: "",
+      },
+    }),
+  );
+  assert.ok(emptyEditor !== undefined);
+  const emptyOptionalText = parseStudioEventEnvelope(
+    envelope({
+      kind: "interaction.required",
+      owner: "gui",
+      leaseGeneration: 1,
+      request: {
+        kind: "select",
+        interactionId: "interaction-1",
+        commandId: "command-1",
+        title: "Pick",
+        options: [{ id: "one", label: "One", description: "" }],
+      },
+    }),
+  );
+  assert.ok(emptyOptionalText !== undefined);
 });
 
 test("M4 validates BTW, TAN, and OMFG composite operations", () => {

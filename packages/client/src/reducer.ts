@@ -24,8 +24,10 @@
  *   5. while resync is required, sensitive mutations
  *      (runtime.install / session.drop / interaction.respond) reduce to a
  *      failed entry with RESYNC_REQUIRED;
- *   6. snapshot events clear resync only on matching authority and
- *      non-regressing version;
+ *   6. snapshot events clear resync only on matching authority; version
+ *      monotonicity is scoped to one runtimeEpoch (a new epoch may restart
+ *      from a smaller version);
+
  *   7. command accepted/interaction/terminal transitions never regress or
  *      duplicate; terminal states are final;
  *   8. runtime epoch changes (or runtime loss) mark in-flight commands
@@ -39,10 +41,13 @@ import type {
   ClientCommandAccepted,
   ClientError,
   ClientEvent,
+  ClientInteraction,
   ClientSelection,
   CommandName,
   CommandRequestId,
   CommandState,
+  ConversationTranscriptPage,
+  ConversationTranscriptReadPage,
   EventCursor,
   IdempotencyKey,
   RuntimeConnection,
@@ -51,6 +56,14 @@ import type {
   SurfaceCapabilities,
 } from "@omp-studio/client-contract";
 import type { CapabilityManifest, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+
+import {
+  conversationHintFromCursor,
+  createInitialConversationState,
+  type ConversationIdentity,
+  type ConversationState,
+} from "./conversation-state.js";
+import { reduceConversationState } from "./conversation-reducer.js";
 
 /** Renderer-owned area; the client reducer never reads or writes it. */
 export type ClientUiState = Readonly<Record<string, unknown>>;
@@ -75,11 +88,24 @@ export interface ClientConnectionState {
 
 export interface ClientEntitiesState {
   readonly snapshot: OperatorStateSnapshot | null;
+  readonly telemetry: OperatorStateSnapshot["telemetry"] | null;
+}
+
+/**
+ * Session-level interaction area. At most one pending interaction exists
+ * (`interaction.required` always writes it; `interaction.resolved` clears
+ * only the matching interactionId + leaseGeneration). Renderer reads the
+ * pending card from here — never by scanning commands.
+ */
+export interface ClientInteractionState {
+  readonly pending: ClientInteraction | null;
 }
 
 export interface ClientState {
   readonly connection: ClientConnectionState;
   readonly entities: ClientEntitiesState;
+  readonly interaction: ClientInteractionState;
+  readonly conversation: ConversationState;
   readonly commands: Readonly<Record<CommandRequestId, CommandState>>;
   readonly ui: ClientUiState;
 }
@@ -105,7 +131,36 @@ export type ClientAction =
       readonly error: ClientError;
       readonly occurredAt: string;
     }
-  | { readonly type: "close" };
+  | { readonly type: "close" }
+  | {
+      readonly type: "conversation.beginHydrate";
+      readonly identity: ConversationIdentity;
+    }
+  | {
+      readonly type: "conversation.hydrate";
+      readonly page: ConversationTranscriptPage;
+      readonly generation: number;
+    }
+  | {
+      readonly type: "conversation.prepend";
+      readonly page: ConversationTranscriptPage;
+      readonly generation: number;
+    }
+  | {
+      readonly type: "conversation.hydrateArchive";
+      readonly page: ConversationTranscriptReadPage;
+      readonly generation: number;
+    }
+  | {
+      readonly type: "conversation.prependArchive";
+      readonly page: ConversationTranscriptReadPage;
+      readonly generation: number;
+    }
+  | {
+      readonly type: "conversation.error";
+      readonly error: ClientError;
+      readonly generation: number;
+    };
 
 const EMPTY_UI: ClientUiState = Object.freeze({});
 
@@ -127,7 +182,9 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
       selected: null,
       contractVersion: null,
     },
-    entities: { snapshot: null },
+    entities: { snapshot: null, telemetry: null },
+    interaction: { pending: null },
+    conversation: createInitialConversationState(),
     commands: {},
     ui,
   };
@@ -144,9 +201,11 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "runtime.resume": true,
   "turn.retry": true,
   "runtime.install": true,
+  "session.create": true,
   "session.resume": true,
   "session.drop": true,
   "interaction.respond": true,
+  "permissions.mode.set": true,
   "models.provider.upsert": true,
   "models.provider.delete": true,
   "models.provider.setEnabled": true,
@@ -172,7 +231,11 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "agents.definition.configure": true,
   "workspace.open": true,
   "workspace.pick": true,
+  "workspace.file.create": true,
+  "workspace.directory.create": true,
   "usage.openDashboard": true,
+  "git.execute": true,
+  "github.execute": true,
   "mode.plan.enter": true,
   "mode.plan.exit": true,
   "mode.plan.review.open": true,
@@ -268,6 +331,7 @@ function markPendingOutcomeUnknown(
   commands: Readonly<Record<CommandRequestId, CommandState>>,
   reason: string,
   observedAt: string,
+  preserve?: (command: CommandState) => boolean,
 ): Readonly<Record<CommandRequestId, CommandState>> {
   let changed = false;
   const next: Record<CommandRequestId, CommandState> = {};
@@ -277,7 +341,7 @@ function markPendingOutcomeUnknown(
     if (command === undefined) {
       continue;
     }
-    if (isTerminal(command.status)) {
+    if (isTerminal(command.status) || preserve?.(command) === true) {
       next[requestId] = command;
     } else {
       next[requestId] = {
@@ -307,6 +371,59 @@ export function reduceClientState(state: ClientState, action: ClientAction): Cli
       return state.connection.phase === "closed"
         ? state
         : { ...state, connection: { ...state.connection, phase: "closed" } };
+    case "conversation.beginHydrate":
+      return {
+        ...state,
+        conversation: reduceConversationState(state.conversation, {
+          type: "beginHydrate",
+          identity: action.identity,
+        }),
+      };
+    case "conversation.hydrate":
+      return {
+        ...state,
+        conversation: reduceConversationState(state.conversation, {
+          type: "hydrate",
+          page: action.page,
+          generation: action.generation,
+        }),
+      };
+    case "conversation.prepend":
+      return {
+        ...state,
+        conversation: reduceConversationState(state.conversation, {
+          type: "prepend",
+          page: action.page,
+          generation: action.generation,
+        }),
+      };
+    case "conversation.hydrateArchive":
+      return {
+        ...state,
+        conversation: reduceConversationState(state.conversation, {
+          type: "hydrateArchive",
+          page: action.page,
+          generation: action.generation,
+        }),
+      };
+    case "conversation.prependArchive":
+      return {
+        ...state,
+        conversation: reduceConversationState(state.conversation, {
+          type: "prependArchive",
+          page: action.page,
+          generation: action.generation,
+        }),
+      };
+    case "conversation.error":
+      return {
+        ...state,
+        conversation: reduceConversationState(state.conversation, {
+          type: "error",
+          error: action.error,
+          generation: action.generation,
+        }),
+      };
     default: {
       const _exhaustive: never = action;
       return state;
@@ -337,7 +454,33 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
   // In-flight commands from a previous bootstrap cannot be reconciled
   // against the fresh snapshot; they become outcome_unknown, never retried.
   const commands = markPendingOutcomeUnknown(state.commands, "client re-bootstrapped; outcome unknown", occurredAt);
-  return { ...state, connection, entities: { snapshot: bootstrap.snapshot ?? null }, commands };
+  // Bootstrap restores the pending interaction from the Runtime snapshot
+  // (rule 1.4.5); when the Runtime has no pending, the old Client pending is
+  // cleared (rule 1.4.6).
+  const interaction = { pending: bootstrap.pendingInteraction ?? null };
+  const previousSession = state.entities.snapshot?.sessionId;
+  const nextSession = bootstrap.snapshot?.sessionId;
+  const sessionChanged = previousSession !== undefined && nextSession !== undefined && previousSession !== nextSession;
+  const epochChanged =
+    state.connection.runtimeEpoch !== null &&
+    bootstrap.runtime.runtimeEpoch !== undefined &&
+    state.connection.runtimeEpoch !== bootstrap.runtime.runtimeEpoch;
+  const conversation =
+    sessionChanged || epochChanged
+      ? conversationHintFromCursor(bootstrap.messagesCursor)
+      : state.conversation.headCursor === undefined && bootstrap.messagesCursor !== undefined
+        ? { ...state.conversation, headCursor: bootstrap.messagesCursor }
+        : state.conversation.identity === undefined
+          ? conversationHintFromCursor(bootstrap.messagesCursor)
+          : state.conversation;
+  return {
+    ...state,
+    connection,
+    entities: { snapshot: bootstrap.snapshot ?? null, telemetry: bootstrap.snapshot?.telemetry ?? null },
+    interaction,
+    conversation,
+    commands,
+  };
 }
 
 function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
@@ -368,8 +511,16 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
       if (eventRuntimeEpoch > runtimeEpoch) {
         state = {
           ...state,
-          connection: { ...state.connection, runtimeEpoch: eventRuntimeEpoch },
-          commands: markPendingOutcomeUnknown(state.commands, "runtime epoch changed; outcome unknown", event.occurredAt),
+          connection: { ...state.connection, runtimeEpoch: eventRuntimeEpoch, stateVersion: null },
+          entities: { snapshot: null, telemetry: null },
+          interaction: { pending: null },
+          commands: markPendingOutcomeUnknown(
+            state.commands,
+            "runtime epoch changed; outcome unknown",
+            event.occurredAt,
+            (command) => command.commandName === "session.resume" || command.commandName === "session.create",
+          ),
+          conversation: reduceConversationState(state.conversation, { type: "clear" }),
         };
       }
     } else {
@@ -399,6 +550,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
           resyncRequired: true,
           resyncReason: `cursor gap at ${event.cursor}`,
         },
+        conversation: reduceConversationState(state.conversation, { type: "resync" }),
       };
     }
   }
@@ -408,11 +560,32 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
       return reduceSnapshot(state, event);
     case "state.changed":
     case "diagnostics.changed":
+    case "operation.progress":
+    case "git.repository.changed":
       return { ...state, connection: advanceConnection(state.connection, event) };
+    case "telemetry.changed": {
+      if (state.entities.snapshot?.sessionId !== event.sessionId) {
+        // The Host cursor is global to the event stream. Ignore a delayed
+        // telemetry payload for another session, but still consume its
+        // cursor so the next valid event does not look like a gap.
+        return { ...state, connection: advanceConnection(state.connection, event) };
+      }
+      const snapshot = state.entities.snapshot;
+      return {
+        ...state,
+        connection: advanceConnection(state.connection, event),
+        entities: {
+          snapshot: snapshot === null ? null : { ...snapshot, telemetry: event.telemetry },
+          telemetry: event.telemetry,
+        },
+      };
+    }
     case "command.accepted":
       return reduceCommandAccepted(state, event);
-    case "command.interactionRequired":
+    case "interaction.required":
       return reduceInteractionRequired(state, event);
+    case "interaction.resolved":
+      return reduceInteractionResolved(state, event);
     case "command.receipt":
       return reduceCommandReceipt(state, event);
     case "runtime.changed":
@@ -425,6 +598,14 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
           resyncRequired: true,
           resyncReason: event.reason,
         },
+        entities: { ...state.entities, telemetry: null },
+        conversation: reduceConversationState(state.conversation, { type: "resync" }),
+      };
+    case "conversation.changed":
+      return {
+        ...state,
+        connection: advanceConnection(state.connection, event),
+        conversation: reduceConversationState(state.conversation, { type: "live", event }),
       };
     default: {
       const _exhaustive: never = event;
@@ -456,9 +637,14 @@ function runtimeEpochOf(event: ClientEvent): RuntimeEpoch | undefined {
 
 function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readonly kind: "snapshot" }>): ClientState {
   const snapshot = event.snapshot;
-  // Non-regressing version only; an older snapshot is never applied.
+  // Version is monotonic only inside one runtimeEpoch. A new epoch may
+  // restart from a smaller version; that snapshot is the new baseline.
   const currentVersion = state.connection.stateVersion;
-  if (currentVersion !== null && snapshot.stateVersion < currentVersion) {
+  if (
+    currentVersion !== null &&
+    snapshot.stateVersion < currentVersion &&
+    snapshot.runtimeEpoch === state.connection.runtimeEpoch
+  ) {
     return state;
   }
   // Duplicate or behind-cursor snapshots are idempotent.
@@ -479,7 +665,12 @@ function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readon
       resyncRequired: false,
       resyncReason: null,
     },
-    entities: { snapshot },
+    entities: { snapshot, telemetry: snapshot.telemetry ?? null },
+    interaction: { pending: null },
+    conversation:
+      state.entities.snapshot !== null && state.entities.snapshot.sessionId !== snapshot.sessionId
+        ? reduceConversationState(state.conversation, { type: "clear" })
+        : state.conversation,
   };
 }
 
@@ -526,52 +717,70 @@ function reduceCommandAccepted(state: ClientState, event: Extract<ClientEvent, {
   return { ...state, connection };
 }
 
-function reduceInteractionRequired(state: ClientState, event: Extract<ClientEvent, { readonly kind: "command.interactionRequired" }>): ClientState {
+function reduceInteractionRequired(
+  state: ClientState,
+  event: Extract<ClientEvent, { readonly kind: "interaction.required" }>,
+): ClientState {
   const interaction = event.interaction;
-  const requestId = interaction.requestId;
   const connection = advanceConnection(state.connection, event);
-  const existing = state.commands[requestId];
-  if (existing === undefined) {
-    // Without a tracked command there is no commandName to attach; the
-    // interaction is dropped (deterministic).
+  // Always write state.interaction.pending (rule 1.3): a same-id +
+  // same-generation prompt is idempotent; anything else replaces the card.
+  const pending = state.interaction.pending;
+  const interactionState =
+    pending !== null && pending.interactionId === interaction.interactionId
+      ? pending.leaseGeneration === interaction.leaseGeneration
+        ? state.interaction
+        : { pending: interaction }
+      : { pending: interaction };
+  // Optional command correlation: with a requestId and a still-accepted
+  // command, attach the interaction to the original command state.
+  let commands = state.commands;
+  if (interaction.requestId !== undefined) {
+    const existing = commands[interaction.requestId];
+    if (existing !== undefined && (existing.status === "local_pending" || existing.status === "accepted")) {
+      commands = {
+        ...commands,
+        [interaction.requestId]: {
+          requestId: existing.requestId,
+          commandName: existing.commandName,
+          status: "interaction_required",
+          interaction,
+        },
+      };
+    } else if (existing !== undefined && existing.status === "interaction_required") {
+      if (existing.interaction.interactionId !== interaction.interactionId) {
+        commands = {
+          ...commands,
+          [interaction.requestId]: {
+            requestId: existing.requestId,
+            commandName: existing.commandName,
+            status: "interaction_required",
+            interaction,
+          },
+        };
+      }
+    }
+  }
+  return { ...state, connection, interaction: interactionState, commands };
+}
+
+function reduceInteractionResolved(
+  state: ClientState,
+  event: Extract<ClientEvent, { readonly kind: "interaction.resolved" }>,
+): ClientState {
+  const connection = advanceConnection(state.connection, event);
+  // Only the matching interactionId + leaseGeneration clears the pending
+  // card; late generations and duplicates are idempotent no-ops. The
+  // original command's terminal receipt stays the only completion evidence.
+  const pending = state.interaction.pending;
+  if (
+    pending === null ||
+    pending.interactionId !== event.interactionId ||
+    pending.leaseGeneration !== event.leaseGeneration
+  ) {
     return { ...state, connection };
   }
-  if (existing.status === "local_pending" || existing.status === "accepted") {
-    return {
-      ...state,
-      connection,
-      commands: {
-        ...state.commands,
-        [requestId]: {
-          requestId: existing.requestId,
-          commandName: existing.commandName,
-          status: "interaction_required",
-          interaction,
-        },
-      },
-    };
-  }
-  if (existing.status === "interaction_required") {
-    if (existing.interaction.interactionId === interaction.interactionId) {
-      return { ...state, connection };
-    }
-    // Host re-issued the prompt with a fresh interaction id.
-    return {
-      ...state,
-      connection,
-      commands: {
-        ...state.commands,
-        [requestId]: {
-          requestId: existing.requestId,
-          commandName: existing.commandName,
-          status: "interaction_required",
-          interaction,
-        },
-      },
-    };
-  }
-  // Terminal: no regression.
-  return { ...state, connection };
+  return { ...state, connection, interaction: { pending: null } };
 }
 
 function reduceCommandReceipt(state: ClientState, event: Extract<ClientEvent, { readonly kind: "command.receipt" }>): ClientState {
@@ -620,17 +829,36 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
   const epochChanged = nextRuntimeEpoch !== prevRuntimeEpoch;
   let commands = state.commands;
   if (epochChanged || lost) {
-    commands = markPendingOutcomeUnknown(commands, "runtime changed; outcome unknown", event.occurredAt);
+    commands = markPendingOutcomeUnknown(
+      commands,
+      "runtime changed; outcome unknown",
+      event.occurredAt,
+      epochChanged && !lost && connection.status === "connected"
+        ? (command) => command.commandName === "session.resume" || command.commandName === "session.create"
+        : undefined,
+    );
   }
+  const conversation =
+    epochChanged || lost ? reduceConversationState(state.conversation, { type: "clear" }) : state.conversation;
+  const interaction = epochChanged || lost ? { pending: null } : state.interaction;
+  const advanced = advanceConnection(state.connection, event);
   return {
     ...state,
     connection: {
-      ...advanceConnection(state.connection, event),
+      ...advanced,
       runtime: connection,
       runtimeEpoch: nextRuntimeEpoch,
+      ...(epochChanged || lost ? { stateVersion: null } : {}),
     },
+    ...(epochChanged || lost ? { entities: { snapshot: null, telemetry: null } } : {}),
+    interaction,
     commands,
+    conversation,
   };
+}
+
+export function selectSessionTelemetry(state: ClientState): OperatorStateSnapshot["telemetry"] | null {
+  return state.entities.telemetry;
 }
 
 interface CommandIssueAction {

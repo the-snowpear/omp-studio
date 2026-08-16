@@ -17,9 +17,17 @@ export interface WindowsBridgeAclPort {
 
 export type WindowsAclCommandRunner = (executable: string, args: readonly string[]) => Promise<string>;
 
+function windowsSystem32Executable(name: "whoami.exe" | "icacls.exe"): string {
+  return join(process.env.SystemRoot ?? "C:\\Windows", "System32", name);
+}
+
 function runWindowsAclCommand(executable: string, args: readonly string[]): Promise<string> {
+  const resolved =
+    process.platform === "win32" && (executable === "whoami.exe" || executable === "icacls.exe")
+      ? windowsSystem32Executable(executable)
+      : executable;
   return new Promise((resolve, reject) => {
-    execFile(executable, [...args], { encoding: "utf8", windowsHide: true }, (error, stdout) => {
+    execFile(resolved, [...args], { encoding: "utf8", windowsHide: true }, (error, stdout) => {
       if (error !== null) reject(error);
       else resolve(stdout);
     });

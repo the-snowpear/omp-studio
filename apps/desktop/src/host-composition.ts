@@ -37,13 +37,15 @@
  * renderer contract.
  */
 
-import type { ClientTransport, PublicAuthorityIdentity, ArchId, PlatformId, AuthorityId, AuthorityEpoch } from "@omp-studio/client-contract";
+import type { ClientTransport, PublicAuthorityIdentity, ArchId, PlatformId, AuthorityId, AuthorityEpoch, ConversationTranscriptReadPage } from "@omp-studio/client-contract";
 import {
   createDefaultHostDiagnosticsFactory,
   StudioHostClientFacade,
   type HostAgentDefinitionsService,
   type HostDiagnosticsFactory,
   type HostExtensibilityService,
+  type HostGitHubService,
+  type HostGitService,
   type HostMcpService,
   type HostManifestProvider,
   type HostModelsService,
@@ -52,8 +54,10 @@ import {
   type HostRuntimeInstallService,
   type HostSemanticCommandService,
   type HostSessionCatalogProvider,
+  type HostSessionArchiveProvider,
   type HostUsageService,
   type HostWorkspaceService,
+  type HostWorkspaceFileService,
   type StudioHostClientFacadeOptions,
 } from "@omp-studio/host-client-api";
 import { createOmpAgentDefinitionsService } from "@omp-studio/host-client-api/agent-definitions";
@@ -64,13 +68,25 @@ import { createOmpUsageService } from "@omp-studio/host-client-api/usage";
 import type { PlatformPort, PrivateEndpoint } from "@omp-studio/platform";
 import {
   HostBackend,
-  StudioRuntimeSessionController,
+  type HostBackendOptions,
   type RuntimePublication,
   type RuntimeResolution,
   type RuntimeResolverEnvironment,
+  type StudioConversationForward,
+  type StudioTelemetryForward,
+  type StudioRuntimeSessionController,
+  StudioSessionArchiveReader,
+  type SessionArchiveReadInput,
 } from "@omp-studio/studio-host";
-import type { CapabilityManifest, OperatorCommandManifest, RuntimePreference } from "@omp-studio/studio-protocol";
+import type { ApprovalMode, CapabilityManifest, OperatorCommandManifest, RuntimePreference } from "@omp-studio/studio-protocol";
 
+import { DesktopInteractionHost, IsolatedForwarder } from "./interaction-host.js";
+import {
+  createDesktopRuntimeInstallService,
+  loadInstallerTrustedKeys,
+  type DesktopManagedInstallOptions,
+} from "./runtime-install.js";
+import { createDesktopSemanticCommands, createWorkspaceSessionCatalog } from "./session-commands.js";
 import type { DesktopHostComposition, DesktopRuntimeStatus } from "./types.js";
 
 /** Default Runtime resolution preference for the P1 managed slice. */
@@ -106,6 +122,10 @@ export interface DesktopRuntimeSession {
   hello(): HostRuntimeHelloView | undefined;
   /** Subscribe to publication advances (Bridge projection changes). */
   onPublication(listener: (publication: RuntimePublication) => void): () => void;
+  /** Authenticated hello capability manifest; `undefined` when disconnected or fail-closed. */
+  capabilityManifest(): CapabilityManifest | undefined;
+  /** Hash-verified operator command manifest; `undefined` when disconnected or fail-closed. */
+  commandManifest(): OperatorCommandManifest | undefined;
 }
 
 /** Context handed to the runtime session port after a trusted resolution. */
@@ -113,6 +133,8 @@ export interface DesktopRuntimeSessionContext {
   readonly resolution: RuntimeResolution;
   readonly endpoint: PrivateEndpoint;
   readonly profileDirectory: string;
+  /** Persisted or newly selected workspace; absent means honest read-only. */
+  readonly workspace?: { workspaceId: string; cwd: string };
 }
 
 /**
@@ -122,6 +144,8 @@ export interface DesktopRuntimeSessionContext {
  * substitute fakes so no untrusted file is ever executed.
  */
 export interface DesktopRuntimeSessionPort {
+  /** True when switching the active view keeps sibling Runtime Workers resident. */
+  readonly supportsConcurrentSessions?: boolean;
   /**
    * Starts (or connects to) the trusted Runtime and returns a ready
    * session bundle, or `undefined` when the Runtime is not ready. Called
@@ -138,6 +162,25 @@ export interface DesktopRuntimeSessionPort {
    * changes the `start` contract: startup still happens at most once.
    */
   rebind?(workspace: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined>;
+  /**
+   * Stop the current Runtime and launch it against another session file
+   * (`resume`) or a fresh process (`fresh`). Increments the Runtime epoch.
+   * On launch failure the port restores the previous session when possible.
+   */
+  switchSession?(intent: { kind: "resume"; sessionId: string } | { kind: "fresh" }): Promise<DesktopRuntimeSession | undefined>;
+  /**
+   * Apply the tool approval mode across resident Runtimes (plan §5.3): the
+   * active Runtime persists the mode to the OMP global configuration, every
+   * sibling resident Runtime receives a non-persistent override. Returns
+   * per-session statistics; failures surface as `syncStatus: "partial"`
+   * and are re-applied on the next activate/rebind.
+   */
+  applyApprovalMode?(mode: ApprovalMode): Promise<{
+    mode: ApprovalMode;
+    syncStatus: "complete" | "partial";
+    appliedSessions: number;
+    failedSessions: number;
+  }>;
 }
 
 /** Facade seam providers; every optional slot fails closed when absent. */
@@ -145,6 +188,7 @@ export interface DesktopFacadeSeams {
   readonly capabilityManifest?: HostManifestProvider<CapabilityManifest>;
   readonly commandManifest?: HostManifestProvider<OperatorCommandManifest>;
   readonly catalog?: HostSessionCatalogProvider;
+  readonly archive?: HostSessionArchiveProvider;
   readonly diagnostics?: HostDiagnosticsFactory;
   readonly install?: HostRuntimeInstallService;
   readonly commands?: HostSemanticCommandService;
@@ -154,8 +198,15 @@ export interface DesktopFacadeSeams {
   readonly agentDefinitions?: HostAgentDefinitionsService;
   readonly getWorkspaceCwd?: () => string | undefined;
   readonly workspaces?: HostWorkspaceService;
+  readonly workspaceFiles?: HostWorkspaceFileService;
+  readonly git?: HostGitService;
+  readonly github?: HostGitHubService;
   readonly usage?: HostUsageService;
   readonly openUrl?: (url: string) => Promise<void>;
+  /** Active workspace for Runtime start; never falls back to process.cwd(). */
+  readonly getActiveWorkspace?: () => { workspaceId: string; cwd: string } | undefined;
+  /** Stops Host-owned Git/gh child processes during final app shutdown. */
+  readonly disposeHostOperations?: () => void;
 }
 
 /** Inputs for {@link createDesktopHostComposition}; every port is explicit. */
@@ -174,6 +225,14 @@ export interface DesktopCompositionOptions {
   readonly preference?: RuntimePreference;
   /** Client-visible arch; defaults from the running process. */
   readonly arch?: ArchId;
+  /** Installer trusted keys; required for `runtime.install` signature verification. */
+  readonly installer?: HostBackendOptions["installer"];
+  /**
+   * When set, composition wires a real `runtime.install` service that
+   * copies a local signed artifact into the profile `runtimes/` tree.
+   * Absent means the command stays fail-closed (`not wired`).
+   */
+  readonly managedInstall?: DesktopManagedInstallOptions;
   /** Facade seam providers; absent slots fail closed. */
   readonly facade?: DesktopFacadeSeams;
 }
@@ -208,10 +267,20 @@ interface FacadeContext {
   readonly seams: DesktopFacadeSeams;
   /** Live session-bundle holder; the facade's runtime access reads it. */
   readonly sessionRef: { current: DesktopRuntimeSession | undefined };
-  /** Forwarder for the current bundle's publications (facade onPublication). */
-  readonly publications: SessionPublicationForwarder;
+  /** Single publication channel; Facade subscribe and session attach share it. */
+  readonly publications: DesktopPublicationForwarder;
+  readonly conversationEvents: IsolatedForwarder<StudioConversationForward>;
+  readonly telemetryEvents: IsolatedForwarder<StudioTelemetryForward>;
+  readonly conversationResync: IsolatedForwarder<string>;
+  readonly interaction: DesktopInteractionHost;
+  readonly bindSession: { current: (session: DesktopRuntimeSession | undefined) => void };
+  readonly runtimeSession: DesktopRuntimeSessionPort | undefined;
   /** Active workspace cwd for project-scoped disk adapters. */
   readonly workspaceCwd: { current: string | undefined };
+  readonly profileDirectory: string;
+  readonly endpoint: PrivateEndpoint;
+  readonly managedInstall?: DesktopManagedInstallOptions;
+  readonly hasTrustedKey: boolean;
 }
 
 /** Fan-out for the current Runtime bundle's publication stream. */
@@ -219,48 +288,127 @@ export interface SessionPublicationForwarder {
   subscribe(listener: (publication: RuntimePublication) => void): () => void;
 }
 
+/**
+ * One publication channel for the composition lifetime. Facade subscribe,
+ * session attach replay, reload replay and rebind all use this object.
+ * Listener exceptions are isolated so a UI consumer cannot break Bridge
+ * socket handling or sibling subscribers.
+ */
+class DesktopPublicationForwarder implements SessionPublicationForwarder {
+  readonly #listeners = new Set<(publication: RuntimePublication) => void>();
+
+  subscribe(listener: (publication: RuntimePublication) => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  }
+
+  publish(publication: RuntimePublication): void {
+    for (const listener of [...this.#listeners]) {
+      try {
+        listener(publication);
+      } catch {
+        // Isolate consumer failures from the Runtime publication path.
+      }
+    }
+  }
+}
+
+async function startInstalledRuntime(context: FacadeContext): Promise<void> {
+  const resolution: RuntimeResolution = await context.backend.resolve({ kind: "managed" });
+  if (resolution.classification !== "managed") {
+    throw new Error(resolution.rejectionReason ?? "Installed Runtime was not accepted as managed");
+  }
+  const port = context.runtimeSession;
+  if (port === undefined) {
+    return;
+  }
+  const workspace = context.seams.getActiveWorkspace?.();
+  if (context.sessionRef.current !== undefined && port.rebind !== undefined && workspace !== undefined) {
+    const next = await port.rebind(workspace);
+    if (next !== undefined) {
+      context.bindSession.current(next);
+    }
+    return;
+  }
+  const next = await port.start({
+    resolution,
+    endpoint: context.endpoint,
+    profileDirectory: context.profileDirectory,
+    ...(workspace === undefined ? {} : { workspace }),
+  });
+  if (next !== undefined) {
+    context.bindSession.current(next);
+  }
+}
+
 function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const seams = context.seams;
   const sessionRef = context.sessionRef;
-  const runtimeCommandService = {
-    resume: async () => { throw new Error("session.resume requires a session catalog command service"); },
-    drop: async () => { throw new Error("session.drop requires a session catalog command service"); },
-    respond: async () => { throw new Error("interaction.respond requires an interaction command service"); },
-    invoke: async (operation: import("@omp-studio/studio-protocol").StudioOperation) => {
-      const session = sessionRef.current;
-      if (session === undefined) throw new Error("Runtime is not available");
-      const snapshot = session.controller.publication()?.snapshot;
-      const hello = session.hello();
-      if (snapshot === undefined || hello === undefined) throw new Error("Runtime snapshot is unavailable");
-      const receipt = await session.controller.invoke({
-        type: "studio.request",
-        requestId: `gui-${Date.now()}-${Math.random().toString(36).slice(2)}` as import("@omp-studio/studio-protocol").RequestId,
-        runtimeEpoch: snapshot.runtimeEpoch,
-        expectedStateVersion: snapshot.stateVersion,
-        operation,
-      });
-      if (receipt.status !== "completed") throw new Error(receipt.error?.message ?? `Runtime command ${receipt.status}`);
-      return session.controller.publication()?.snapshot ?? snapshot;
+  const catalog = seams.catalog ?? createWorkspaceSessionCatalog(() => context.workspaceCwd.current);
+  let archiveCwd: string | undefined;
+  let archiveReader: StudioSessionArchiveReader | undefined;
+  const archive = seams.archive ?? {
+    readPage: async (input: { readonly sessionId: string; readonly cursor?: string; readonly limit?: number }) => {
+      const cwd = context.workspaceCwd.current;
+      if (cwd === undefined) throw new Error("Persistent transcript requires an active workspace");
+      if (archiveReader === undefined || archiveCwd !== cwd) {
+        archiveCwd = cwd;
+        archiveReader = new StudioSessionArchiveReader({ allowedCwd: cwd });
+      }
+      const page = await archiveReader.readPage(input as unknown as SessionArchiveReadInput);
+      return page as unknown as ConversationTranscriptReadPage;
     },
-  } satisfies import("@omp-studio/host-client-api").HostSemanticCommandService;
-  const session = sessionRef.current;
+  } satisfies HostSessionArchiveProvider;
+  const runtimeCommandService =
+    seams.commands ??
+    createDesktopSemanticCommands({
+      sessionRef,
+      catalog,
+      ...(context.runtimeSession?.switchSession === undefined
+        ? {}
+        : { switchSession: (intent) => context.runtimeSession!.switchSession!(intent) }),
+      ...(context.runtimeSession?.applyApprovalMode === undefined
+        ? {}
+        : { applyApprovalMode: (mode) => context.runtimeSession!.applyApprovalMode!(mode) }),
+      supportsConcurrentSessions: context.runtimeSession?.supportsConcurrentSessions === true,
+      bindSession: (session) => context.bindSession.current(session),
+      interaction: context.interaction,
+    });
   const options: StudioHostClientFacadeOptions = {
     authority: context.authority,
     platform: context.platform,
     arch: context.arch,
     backend: context.backend,
-    capabilityManifest: seams.capabilityManifest ?? (() => undefined),
-    commandManifest: seams.commandManifest ?? (() => undefined),
-    catalog: seams.catalog ?? { list: () => [] },
+    capabilityManifest: seams.capabilityManifest ?? (() => sessionRef.current?.capabilityManifest()),
+    commandManifest: seams.commandManifest ?? (() => sessionRef.current?.commandManifest()),
+    catalog,
+    archive,
     diagnostics: seams.diagnostics ?? createDefaultHostDiagnosticsFactory(),
-    // Refuse to fake an install: without an injected service the command
-    // fails closed instead of completing with a state nothing changed.
     install:
       seams.install ??
-      (async () => {
-        throw new Error("no runtime install service is wired; runtime.install is not available");
-      }),
-    ...(seams.commands !== undefined ? { commands: seams.commands } : { commands: runtimeCommandService }),
+      (context.managedInstall === undefined
+        ? async () => {
+            throw new Error("no runtime install service is wired; runtime.install is not available");
+          }
+        : createDesktopRuntimeInstallService({
+            backend: context.backend,
+            platform: `${context.platform}-${context.arch}`,
+            hasTrustedKey: context.hasTrustedKey,
+            ...(context.managedInstall.locateArtifact === undefined
+              ? {}
+              : { locateArtifact: context.managedInstall.locateArtifact }),
+            ...(context.managedInstall.activateOptions === undefined
+              ? {}
+              : { activateOptions: context.managedInstall.activateOptions }),
+            afterActivate:
+              context.managedInstall.afterActivate ??
+              (async () => {
+                await startInstalledRuntime(context);
+              }),
+          })),
+    commands: runtimeCommandService,
     models:
       seams.models ??
       createOmpModelsService({
@@ -279,15 +427,22 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
         getCwd: () => seams.getWorkspaceCwd?.() ?? context.workspaceCwd.current,
       }),
     ...(seams.workspaces === undefined ? {} : { workspaces: seams.workspaces }),
+    ...(seams.workspaceFiles === undefined ? {} : { workspaceFiles: seams.workspaceFiles }),
+    ...(seams.git === undefined ? {} : { git: seams.git }),
+    ...(seams.github === undefined ? {} : { github: seams.github }),
     usage: seams.usage ?? createOmpUsageService(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
-    // The runtime access reads the live holder, so a workspace rebind
-    // re-points hello / snapshot / onPublication without replacing the
-    // facade object the renderer transport is bound to.
+    // Live accessors follow workspace/runtime rebind. Conversation and
+    // interaction events are not buffered; reload never replays old deltas.
     runtime: {
-      ...(session === undefined ? {} : { session: session.controller }),
+      currentSession: () => sessionRef.current?.controller,
       hello: () => sessionRef.current?.hello(),
       snapshot: () => sessionRef.current?.controller.publication()?.snapshot,
+      messagesCursor: () => sessionRef.current?.controller.messagesCursor?.(),
       onPublication: (listener) => context.publications.subscribe(listener),
+      onConversationEvent: (listener) => context.conversationEvents.subscribe(listener),
+      onConversationResync: (listener) => context.conversationResync.subscribe(listener),
+      onTelemetryEvent: (listener) => context.telemetryEvents.subscribe(listener),
+      onInteractionEvent: (listener) => context.interaction.subscribe(listener),
     } satisfies HostRuntimeAccess,
   };
   return new StudioHostClientFacade(options);
@@ -326,15 +481,17 @@ function assertCompositionOptions(options: DesktopCompositionOptions): void {
 
 class DesktopHostCompositionImpl implements DesktopHostComposition {
   #facade: StudioHostClientFacade;
-  readonly #status: DesktopRuntimeStatus;
+  #status: DesktopRuntimeStatus;
   #facadeContext: FacadeContext;
   readonly #lease: DesktopAuthorityLease;
   readonly #endpointLease: DesktopEndpointLease;
   readonly #runtimeSession: DesktopRuntimeSessionPort | undefined;
   #sessionStarted: boolean;
   readonly #sessionRef: { current: DesktopRuntimeSession | undefined };
-  readonly #publicationListeners = new Set<(publication: RuntimePublication) => void>();
   #unsubscribeCurrentPublication: (() => void) | undefined;
+  #unsubscribeConversation: (() => void) | undefined;
+  #unsubscribeConversationResync: (() => void) | undefined;
+  #unsubscribeTelemetry: (() => void) | undefined;
   #closed = false;
   #shutdownStarted = false;
 
@@ -355,6 +512,12 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#runtimeSession = options.runtimeSession;
     this.#sessionStarted = options.sessionStarted;
     this.#sessionRef = options.facadeContext.sessionRef;
+    this.#facadeContext.bindSession.current = (session) => {
+      this.#sessionRef.current = session;
+      this.#sessionStarted = this.#sessionStarted || session !== undefined;
+      this.#status = session === undefined ? "read-only" : "ready";
+      this.#attachSession(session);
+    };
     this.#attachSession(this.#sessionRef.current);
   }
 
@@ -371,25 +534,49 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
   }
 
   /**
-   * Point the publication forwarder at the current bundle and replay its
-   * latest publication so the facade's runtime-changed sync fires promptly.
+   * Point the single publication channel at the current bundle and replay
+   * its latest publication so the facade's runtime-changed sync fires
+   * promptly. Old session listeners are cancelled first.
    */
   #attachSession(session: DesktopRuntimeSession | undefined): void {
     this.#unsubscribeCurrentPublication?.();
     this.#unsubscribeCurrentPublication = undefined;
+    this.#unsubscribeConversation?.();
+    this.#unsubscribeConversation = undefined;
+    this.#unsubscribeConversationResync?.();
+    this.#unsubscribeConversationResync = undefined;
+    this.#unsubscribeTelemetry?.();
+    this.#unsubscribeTelemetry = undefined;
+    this.#facadeContext.interaction.attach(session?.controller);
     if (session === undefined) {
       return;
     }
     this.#unsubscribeCurrentPublication = session.onPublication((publication) => {
-      for (const listener of this.#publicationListeners) {
-        listener(publication);
-      }
+      this.#facadeContext.publications.publish(publication);
     });
-    const current = session.controller.publication();
+    const controller = session.controller;
+    if (typeof controller.onConversationEvent === "function") {
+      this.#unsubscribeConversation = controller.onConversationEvent((event) => {
+        this.#facadeContext.conversationEvents.publish(event);
+      });
+    }
+    if (typeof controller.onConversationResync === "function") {
+      this.#unsubscribeConversationResync = controller.onConversationResync((reason) => {
+        this.#facadeContext.conversationResync.publish(reason);
+      });
+    }
+    if (typeof controller.onTelemetryEvent === "function") {
+      this.#unsubscribeTelemetry = controller.onTelemetryEvent((event) => {
+        this.#facadeContext.telemetryEvents.publish(event);
+      });
+    }
+    this.#replayCurrentPublication();
+  }
+
+  #replayCurrentPublication(): void {
+    const current = this.#sessionRef.current?.controller.publication();
     if (current !== undefined) {
-      for (const listener of this.#publicationListeners) {
-        listener(current);
-      }
+      this.#facadeContext.publications.publish(current);
     }
   }
 
@@ -405,6 +592,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     }
     await this.#facade.close();
     this.#facade = buildFacade(this.#facadeContext);
+    this.#replayCurrentPublication();
     return this;
   }
 
@@ -430,6 +618,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     const next = await port.rebind(workspace);
     this.#sessionStarted = this.#sessionStarted || next !== undefined;
     this.#sessionRef.current = next;
+    this.#status = next === undefined ? "read-only" : "ready";
     this.#attachSession(next);
   }
 
@@ -446,6 +635,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     }
     this.#shutdownStarted = true;
     await this.#facade.close();
+    this.#facadeContext.seams.disposeHostOperations?.();
     if (this.#sessionStarted && this.#runtimeSession !== undefined) {
       await this.#runtimeSession.stop();
     }
@@ -479,10 +669,14 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
     // 3. Current-user-only private endpoint.
     endpointLease = await options.privateEndpoint.createCurrentUserOnly(profileDirectory);
     try {
+      const installerOptions =
+        options.installer ??
+        (options.managedInstall === undefined ? undefined : await loadInstallerTrustedKeys());
       // 4. HostBackend initialization.
       const backend = new HostBackend({
         stateDirectory: profileDirectory,
         ...(options.resolver === undefined ? {} : { resolver: options.resolver }),
+        ...(installerOptions === undefined ? {} : { installer: installerOptions }),
       });
       await backend.initialize();
 
@@ -497,25 +691,28 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       let session: DesktopRuntimeSession | undefined;
       const runtimeSession = options.runtimeSession;
       const classification = resolution.classification;
+      const activeWorkspace = seams.getActiveWorkspace?.();
       if ((classification === "managed" || classification === "compatible-system") && runtimeSession !== undefined) {
         sessionStarted = true;
-        session = await runtimeSession.start({
-          resolution,
-          endpoint: endpointLease.endpoint,
-          profileDirectory,
-        });
+        try {
+          session = await runtimeSession.start({
+            resolution,
+            endpoint: endpointLease.endpoint,
+            profileDirectory,
+            ...(activeWorkspace === undefined ? {} : { workspace: activeWorkspace }),
+          });
+        } catch {
+          // Runtime start is not Host identity. Keep a read-only facade so
+          // bootstrap/install/workspace still work; never null the IPC host.
+          await bestEffort(() => runtimeSession.stop());
+          sessionStarted = false;
+          session = undefined;
+        }
       }
       const status: DesktopRuntimeStatus = session === undefined ? "read-only" : "ready";
       const sessionRef = { current: session };
-      const publicationListeners = new Set<(publication: RuntimePublication) => void>();
-      const publications: SessionPublicationForwarder = {
-        subscribe(listener) {
-          publicationListeners.add(listener);
-          return () => {
-            publicationListeners.delete(listener);
-          };
-        },
-      };
+      const publications = new DesktopPublicationForwarder();
+      const interaction = new DesktopInteractionHost(sessionRef);
       const facadeContext: FacadeContext = {
         authority: authorityIdentityFromLease(lease),
         platform: platform.platform,
@@ -524,7 +721,19 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         seams,
         sessionRef,
         publications,
-        workspaceCwd: { current: seams.getWorkspaceCwd?.() },
+        conversationEvents: new IsolatedForwarder<StudioConversationForward>(),
+        telemetryEvents: new IsolatedForwarder<StudioTelemetryForward>(),
+        conversationResync: new IsolatedForwarder<string>(),
+        interaction,
+        bindSession: { current: (next) => {
+          sessionRef.current = next;
+        } },
+        runtimeSession,
+        workspaceCwd: { current: activeWorkspace?.cwd ?? seams.getWorkspaceCwd?.() },
+        profileDirectory,
+        endpoint: endpointLease.endpoint,
+        hasTrustedKey: installerOptions?.trustedKeys !== undefined && Object.keys(installerOptions.trustedKeys).length > 0,
+        ...(options.managedInstall === undefined ? {} : { managedInstall: options.managedInstall }),
       };
       return new DesktopHostCompositionImpl({
         facade: buildFacade(facadeContext),

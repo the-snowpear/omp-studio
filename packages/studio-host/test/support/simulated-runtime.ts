@@ -119,7 +119,7 @@ export function initialSnapshot(runtimeId: RuntimeId, runtimeEpoch: RuntimeEpoch
     sessionId: "session-fixture" as OperatorStateSnapshot["sessionId"],
     isStreaming: false,
     isCompacting: false,
-    activeMode: "normal",
+    activeMode: "normal", approvalMode: "yolo",
     pendingMessages: 0,
     activeCommandIds: [],
     agentsRevision: 0,

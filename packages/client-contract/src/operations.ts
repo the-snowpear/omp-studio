@@ -9,12 +9,33 @@
  */
 
 import type {
+  ApprovalMode,
   CapabilityManifest,
+  ConversationTranscriptPage,
+  OpaqueCursor,
   OperatorCommandManifest,
   OperatorStateSnapshot,
 } from "@omp-studio/studio-protocol";
 
-import type { CommandRequestId, IdempotencyKey, InteractionId, ThreadId, WorkspaceId } from "./ids.js";
+import type { ConversationTranscriptReadPage } from "./conversation.js";
+import type {
+  GitBranchListReadModel,
+  GitDiffReadModel,
+  GitDiffTarget,
+  GitExecuteInput,
+  GitHubAuthReadModel,
+  GitHubChecksReadModel,
+  GitHubExecuteInput,
+  GitHubOperationResult,
+  GitHubPullRequestDetailReadModel,
+  GitHubPullRequestListReadModel,
+  GitOperationResult,
+  GitRemoteListReadModel,
+  GitRepositoryReadModel,
+  GitToolchainReadModel,
+  GitWorktreeListReadModel,
+} from "./git.js";
+import type { CommandRequestId, IdempotencyKey, InteractionId, SessionId, ThreadId, WorkspaceId } from "./ids.js";
 import type {
   DiagnosticReadModel,
   EnvironmentReadModel,
@@ -34,6 +55,8 @@ import type {
   SessionHistoryReadModel,
   TokenUsageReadModel,
   WorkspaceListReadModel,
+  WorkspaceFileTreeReadModel,
+  WorkspaceFileMutationResult,
 } from "./read-models.js";
 
 /** Empty input shape for queries that take no arguments. */
@@ -52,7 +75,26 @@ export interface QueryInputMap {
   "mcp.get": EmptyInput;
   "agents.definitions.get": EmptyInput;
   "projects.list": EmptyInput;
+  /** Lists one directory level. Omit path for the workspace root. */
+  "workspace.fileTree": { readonly workspaceId: WorkspaceId; readonly path?: string };
   "usage.get": EmptyInput;
+  "session.transcript.read": { readonly cursor?: OpaqueCursor; readonly limit?: number };
+  /** Runtime-independent persisted transcript page for an explicit session. */
+  "session.transcript.readPage": {
+    readonly sessionId: SessionId;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  };
+  "git.toolchain.get": EmptyInput;
+  "git.repository.get": { readonly workspaceId: WorkspaceId };
+  "git.diff.get": { readonly workspaceId: WorkspaceId; readonly path: string; readonly target: GitDiffTarget };
+  "git.branches.list": { readonly workspaceId: WorkspaceId };
+  "git.worktrees.list": { readonly workspaceId: WorkspaceId };
+  "git.remotes.list": { readonly workspaceId: WorkspaceId };
+  "github.auth.get": { readonly workspaceId?: WorkspaceId };
+  "github.pr.list": { readonly workspaceId: WorkspaceId; readonly state?: "open" | "closed" | "merged" | "all" };
+  "github.pr.get": { readonly workspaceId: WorkspaceId; readonly number: number };
+  "github.pr.checks": { readonly workspaceId: WorkspaceId; readonly number: number };
 }
 
 export interface QueryResultMap {
@@ -75,8 +117,23 @@ export interface QueryResultMap {
   "agents.definitions.get": AgentDefinitionsReadModel;
   /** Host workspace inventory. Paths never leave the Host registry. */
   "projects.list": WorkspaceListReadModel;
+  "workspace.fileTree": WorkspaceFileTreeReadModel;
   /** Homepage token heatmap / curve. Aggregates from omp stats.db only. */
   "usage.get": TokenUsageReadModel;
+  /** Active-branch transcript page. Protocol public shape; never `unknown[]`. */
+  "session.transcript.read": ConversationTranscriptPage;
+  /** Persisted transcript page. Available independently of Runtime residency. */
+  "session.transcript.readPage": ConversationTranscriptReadPage;
+  "git.toolchain.get": GitToolchainReadModel;
+  "git.repository.get": GitRepositoryReadModel;
+  "git.diff.get": GitDiffReadModel;
+  "git.branches.list": GitBranchListReadModel;
+  "git.worktrees.list": GitWorktreeListReadModel;
+  "git.remotes.list": GitRemoteListReadModel;
+  "github.auth.get": GitHubAuthReadModel;
+  "github.pr.list": GitHubPullRequestListReadModel;
+  "github.pr.get": GitHubPullRequestDetailReadModel;
+  "github.pr.checks": GitHubChecksReadModel;
 }
 
 export type QueryName = keyof QueryInputMap & keyof QueryResultMap;
@@ -249,6 +306,8 @@ export type InteractionResponseValue =
 interface CoreCommandInputMap {
   /** Install or update the trusted runtime (environment page action). */
   "runtime.install": { readonly channel?: RuntimeChannel };
+  /** Start a fresh Runtime session in the active workspace. */
+  "session.create": EmptyInput;
   /** Resume a thread from history or the home page. */
   "session.resume": { readonly threadId: ThreadId };
   /** Drop a thread. Destructive: the Host issues a one-time confirmation. */
@@ -256,8 +315,18 @@ interface CoreCommandInputMap {
   /** Answer an `interaction_required` prompt issued by the Host. */
   "interaction.respond": {
     readonly interactionId: InteractionId;
+    /** Lease generation captured by the visible interaction card. */
+    readonly leaseGeneration: number;
     readonly decision: "submit" | "cancel";
     readonly value?: InteractionResponseValue;
+  };
+  /**
+   * Set the tool approval mode for every resident Runtime. The active
+   * Runtime persists the mode to the OMP global configuration; sibling
+   * resident Runtimes receive a non-persistent override.
+   */
+  "permissions.mode.set": {
+    readonly mode: ApprovalMode;
   };
   /** Create or update a custom provider in models.yml. */
   "models.provider.upsert": ModelProviderUpsertInput;
@@ -301,7 +370,11 @@ interface CoreCommandInputMap {
   /** Activate a known workspace (Host-owned registry; never a path). */
   "workspace.open": { readonly workspaceId: WorkspaceId };
   /** Open the system directory picker and register the chosen folder. */
-  "workspace.pick": EmptyInput;
+  "workspace.pick": { readonly name?: string };
+  /** Create an empty file inside the selected workspace. */
+  "workspace.file.create": { readonly workspaceId: WorkspaceId; readonly path: string };
+  /** Create a directory inside the selected workspace. */
+  "workspace.directory.create": { readonly workspaceId: WorkspaceId; readonly path: string };
   /**
    * Whole-package plugin enable/disable: whether the plugin enters the
    * Runtime session. Never uninstalls or touches node_modules. Writes the
@@ -343,6 +416,10 @@ interface CoreCommandInputMap {
   "agents.definition.configure": AgentDefinitionConfigureInput;
   /** Open the native `omp stats` dashboard in the default browser. */
   "usage.openDashboard": EmptyInput;
+  /** Execute one strictly typed Host-owned Git operation. */
+  "git.execute": GitExecuteInput;
+  /** Execute one strictly typed GitHub CLI operation. */
+  "github.execute": GitHubExecuteInput;
   // Runtime control commands share the same accepted/receipt lifecycle. Their
   // terminal state is observed through events, so the result is the current
   // public Runtime snapshot.
@@ -352,9 +429,16 @@ export type CommandInputMap = CoreCommandInputMap & RuntimeCommandInputMap;
 
 interface CoreCommandResultMap {
   "runtime.install": RuntimeInstallState;
+  "session.create": OperatorStateSnapshot;
   "session.resume": OperatorStateSnapshot;
   "session.drop": OperatorStateSnapshot;
   "interaction.respond": OperatorStateSnapshot;
+  "permissions.mode.set": {
+    readonly mode: ApprovalMode;
+    readonly syncStatus: "complete" | "partial";
+    readonly appliedSessions: number;
+    readonly failedSessions: number;
+  };
   "models.provider.upsert": ConfigWriteResult;
   "models.provider.delete": ConfigWriteResult;
   "models.provider.setEnabled": ConfigWriteResult;
@@ -374,6 +458,8 @@ interface CoreCommandResultMap {
   "models.cycleOrder.set": ConfigWriteResult;
   "workspace.open": WorkspaceListReadModel;
   "workspace.pick": WorkspaceListReadModel;
+  "workspace.file.create": WorkspaceFileMutationResult;
+  "workspace.directory.create": WorkspaceFileMutationResult;
   "plugins.setEnabled": ConfigWriteResult;
   "skills.setEnabled": ConfigWriteResult;
   "mcp.setEnabled": ConfigWriteResult;
@@ -381,6 +467,8 @@ interface CoreCommandResultMap {
   "agents.definition.delete": ConfigWriteResult;
   "agents.definition.configure": ConfigWriteResult;
   "usage.openDashboard": ConfigWriteResult;
+  "git.execute": GitOperationResult;
+  "github.execute": GitHubOperationResult;
 }
 
 export type CommandResultMap = CoreCommandResultMap & {
@@ -399,7 +487,8 @@ export type ClientErrorCode =
   | "CAPABILITY_UNAVAILABLE"
   | "RESYNC_REQUIRED"
   | "TRANSPORT_ERROR"
-  | "INTERNAL_ERROR";
+  | "INTERNAL_ERROR"
+  | "CURSOR_STALE";
 
 export interface ClientError {
   readonly code: ClientErrorCode;

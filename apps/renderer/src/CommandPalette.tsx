@@ -88,7 +88,7 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
       } else if (event.key === "Enter") {
         event.preventDefault();
         const item = flat[selected];
-        if (item) onRun(item.action);
+        if (item && !item.disabled) onRun(item.action);
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -186,8 +186,13 @@ function PaletteRow({
       data-cmdk-id={item.id}
       role="option"
       aria-selected={selected}
+      aria-disabled={item.disabled === true}
+      disabled={item.disabled === true}
+      title={item.disabledReason}
       onPointerEnter={onHover}
-      onClick={onRun}
+      onClick={() => {
+        if (!item.disabled) onRun();
+      }}
     >
       <Icon name={item.icon} extra="sm" />
       <span className="cmdk-item-label">{item.label}</span>

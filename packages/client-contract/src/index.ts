@@ -16,6 +16,7 @@ import type {
   OperatorStateSnapshot,
 } from "@omp-studio/studio-protocol";
 
+import type { OpaqueCursor } from "./conversation.js";
 import type {
   EnvironmentId,
   EventCursor,
@@ -43,13 +44,14 @@ import type {
 } from "./operations.js";
 import type {
   ClientEvent,
+  ClientInteraction,
   CommandHandle,
   SubscriptionScope,
   Unsubscribe,
 } from "./lifecycle.js";
 
 /** Version of this client contract; bumped on incompatible contract changes. */
-export const CLIENT_CONTRACT_VERSION = 1 as const;
+export const CLIENT_CONTRACT_VERSION = 2 as const;
 
 /** Opaque selections carried by the bootstrap; never resolved to paths. */
 export interface ClientSelection {
@@ -79,6 +81,17 @@ export interface ClientBootstrap {
   readonly stateVersion?: StateVersion;
   /** Subscription resume point; events after this cursor are in order. */
   readonly cursor?: EventCursor;
+  /**
+   * Opaque transcript head hint only. Never a page of messages. Renderer
+   * and Client must still query `session.transcript.read` for bodies.
+   */
+  readonly messagesCursor?: OpaqueCursor;
+  /**
+   * Recoverable pending interaction from the current Runtime snapshot.
+   * Present only when the Runtime is waiting on a GUI-owned interaction;
+   * TUI-owned interactions are never exposed as submittable cards.
+   */
+  readonly pendingInteraction?: ClientInteraction;
 }
 
 /** Shared bootstrap fields before an optional Runtime snapshot is attached. */
@@ -128,3 +141,5 @@ export * from "./read-models.js";
 export * from "./operations.js";
 export * from "./lifecycle.js";
 export * from "./model-thinking.js";
+export * from "./conversation.js";
+export * from "./git.js";

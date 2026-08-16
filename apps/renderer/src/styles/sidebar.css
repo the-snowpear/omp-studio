@@ -163,24 +163,66 @@
 
 /* ---------- 项目块 ---------- */
 .project { margin: 0 var(--sp-6) var(--sp-2); border-radius: var(--r-8); }
+/* 行容器：悬停高亮与操作区挂在整行上。项目头是 <button>，操作按钮不能嵌进
+   button（无效 HTML），所以做成行内兄弟节点。 */
+.project-head-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-8);
+}
+.project-head-row:hover,
+.project-head-row:focus-within { background: var(--surface-hover); }
 .project-head {
   display: flex;
   align-items: center;
   gap: var(--sp-6);
+  flex: 1;
+  min-width: 0;
   padding: 3px var(--sp-8);
   border-radius: var(--r-8);
   cursor: pointer;
 }
-.project-head:hover { background: var(--surface-hover); }
-/* Disclosure chevron. The colour and the rotate transition were inline on the
-   element in app.js, which put presentation in the render string and meant the
-   transition token could not be changed centrally. */
+/* 悬停操作区：最右 +（在此项目下新建文件），其左 ⋯（更多）。功能未接入，仅占位。
+   display:none 时不在 tab 序里；:focus-within 让键盘聚焦操作按钮后保持可见
+   （与 .tree-row .fop 同一规则）。 */
+.p-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding-right: var(--sp-4);
+}
+.project-head-row:hover .p-actions,
+.project-head-row:focus-within .p-actions { display: inline-flex; }
+.p-actions .icon-btn { width: 20px; height: 20px; }
+/* 行内按钮的 tip 改到按钮下方并右对齐：项目列表区 overflow 隐藏，向上的 tip
+   会被裁掉，居中 tip 会从右侧溢出滚动容器。 */
+.project-head-row [data-tip]:hover::after,
+.project-head-row [data-tip]:focus-visible::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: auto;
+  right: 0;
+  transform: none;
+}
+/* 左侧图标位：默认显示文件夹图标（展开 folder-open / 收起 folder），悬停整行时
+   换为折叠箭头（chevron-d / chevron-r）。固定 14px 槽位 + 居中，图标切换时
+   项目名不位移。 */
 .project-head .tw {
+  width: 14px;
+  height: 14px;
   display: inline-flex;
-  color: var(--glyph-faint);
+  align-items: center;
+  justify-content: center;
   flex: none;
 }
-.project-head .tw .icon { transition: transform var(--dur-fast) var(--ease-out); }
+.project-head .tw .tw-chev { display: none; }
+.project-head .tw .tw-folder { color: var(--text-3); }
+.project-head .tw .tw-chev { color: var(--glyph-faint); }
+.project-head-row:hover .tw .tw-folder,
+.project-head-row:focus-within .tw .tw-folder { display: none; }
+.project-head-row:hover .tw .tw-chev,
+.project-head-row:focus-within .tw .tw-chev { display: inline-flex; }
 .project-head .p-name {
   font-weight: var(--fw-semibold);
   font-size: var(--fs-12);
@@ -315,12 +357,9 @@
 .sb-collapse-btn .icon {
   transition: transform var(--dur) var(--ease-out);
 }
-.sb-collapse-btn.is-collapsed .icon {
-  transform: rotate(180deg);
-}
 
 /* ---------- 文件树 ---------- */
-.tree { padding: 0 var(--sp-6); font-size: var(--fs-12); }
+.tree { min-height: 100%; padding: 0 var(--sp-6); font-size: var(--fs-12); }
 .tree-row {
   display: flex;
   align-items: center;
@@ -339,8 +378,16 @@
   position: relative;
 }
 .tree-row:hover { background: var(--surface-hover); color: var(--text); }
+.tree-row[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-hover));
+  color: var(--text);
+}
+.tree-row:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--accent) 68%, transparent);
+  outline-offset: -1px;
+}
 .tree-row .tw { width: 14px; height: 14px; flex: none; color: var(--glyph-faint); display: inline-flex; }
-.tree-row .tw .icon { width: 12px; height: 12px; transition: transform var(--dur-fast) var(--ease-out); }
+.tree-row .tw .icon { width: 12px; height: 12px; transform: rotate(0deg); transform-origin: center; transition: transform var(--dur-fast) var(--ease-out); }
 .tree-row.open > .tw .icon { transform: rotate(90deg); }
 .tree-row .fi { color: var(--text-3); display: inline-flex; flex: none; }
 /* Folders carry the accent so the eye can find structure without reading
@@ -373,6 +420,46 @@
 .tree-row .fop .icon-btn { width: 18px; height: 18px; }
 .tree-children { display: none; }
 .tree-row.open + .tree-children { display: block; }
+.tree-new-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  margin: 4px var(--sp-6) 5px 0;
+  padding: 2px 4px 2px var(--depth-pad, var(--sp-6));
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border-strong));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  box-shadow: inset 2px 0 var(--accent);
+}
+.tree-new-row .tw { width: 14px; height: 14px; flex: none; }
+.tree-new-row .fi { color: var(--accent); display: inline-flex; flex: none; }
+.tree-new-row .fi .icon { width: 14px; height: 14px; }
+.tree-new-row .input {
+  min-width: 0;
+  height: 24px;
+  flex: 1;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--fs-12);
+}
+.tree-new-row .input:focus,
+.tree-new-row .input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 58%, transparent);
+  background: var(--surface);
+}
+.tree-new-row .icon-btn { width: 22px; height: 22px; flex: none; }
+.tree-new-status {
+  padding-left: var(--depth-pad, var(--sp-6));
+  padding-right: var(--sp-6);
+  margin: -1px var(--sp-6) 4px 0;
+  line-height: 1.35;
+}
+.tree-new-status.error { color: var(--red); }
 
 /* 过程状态标记 */
 .tree-row .live { display: inline-flex; flex: none; }

@@ -24,7 +24,7 @@ import type {
   SubscriptionScope,
   ThreadId,
 } from "@omp-studio/client-contract";
-import { MODEL_CONFIG_THINKING_EFFORTS } from "@omp-studio/client-contract";
+import { CONVERSATION_LIMITS, MODEL_CONFIG_THINKING_EFFORTS } from "@omp-studio/client-contract";
 
 /** Thrown when an IPC payload fails strict P1 boundary validation. */
 export class ValidationError extends Error {
@@ -41,9 +41,15 @@ export class ValidationError extends Error {
  */
 
 /** Max characters of any single string inside an `interaction.respond` value. */
-export const MAX_TEXT_LENGTH = 100_000;
+export const MAX_INTERACTION_TEXT_LENGTH = 128 * 1024;
 
 /** Max elements of the top-level string-array `interaction.respond` value. */
+export const MAX_INTERACTION_LIST_ITEMS = 256;
+
+/** Max characters used by other text-bearing command inputs. */
+export const MAX_TEXT_LENGTH = 100_000;
+
+/** Max elements used by non-interaction command lists. */
 export const MAX_LIST_ITEMS = 1_000;
 
 /** Max object/array nesting depth inside an `interaction.respond` value. */
@@ -54,7 +60,7 @@ export const MAX_VALUE_DEPTH = 32;
  * for an `interaction.respond` value. Approximate, not byte-exact; it fails
  * closed with margin.
  */
-export const MAX_SERIALIZED_SIZE = 1_000_000;
+export const MAX_SERIALIZED_SIZE = MAX_INTERACTION_TEXT_LENGTH + 2;
 
 /** Upper bound for the optional `history.list` limit. */
 export const MAX_HISTORY_LIMIT = 1_000;
@@ -133,6 +139,48 @@ function validateEmptyInput(input: unknown, what: string): void {
   assertNoUnknownKeys(input, [], what);
 }
 
+function validateTranscriptPaginationFields(
+  input: Record<string, unknown>,
+  what: string,
+): void {
+  if ("cursor" in input) {
+    const cursor = input.cursor;
+    if (typeof cursor !== "string" || cursor.length === 0 || cursor.length > CONVERSATION_LIMITS.CURSOR_MAX_CHARS) {
+      throw new ValidationError(
+        `${what}: cursor must be a non-empty string of at most ${CONVERSATION_LIMITS.CURSOR_MAX_CHARS} characters`,
+      );
+    }
+  }
+  if ("limit" in input) {
+    const limit = input.limit;
+    if (
+      typeof limit !== "number" ||
+      !Number.isSafeInteger(limit) ||
+      limit < CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MIN ||
+      limit > CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX
+    ) {
+      throw new ValidationError(
+        `${what}: limit must be an integer between ${CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MIN} and ${CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX}`,
+      );
+    }
+  }
+}
+
+function validateTranscriptReadInput(input: unknown): void {
+  const what = "session.transcript.read input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["cursor", "limit"], what);
+  validateTranscriptPaginationFields(input, what);
+}
+
+function validateTranscriptReadPageInput(input: unknown): void {
+  const what = "session.transcript.readPage input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["sessionId", "cursor", "limit"], what);
+  assertOpaqueToken(input.sessionId, `${what}: sessionId`);
+  validateTranscriptPaginationFields(input, what);
+}
+
 function validateHistoryListInput(input: unknown): void {
   assertPlainObject(input, "history.list input");
   assertNoUnknownKeys(input, ["limit"], "history.list input");
@@ -147,6 +195,285 @@ function validateHistoryListInput(input: unknown): void {
       );
     }
   }
+}
+
+function validateWorkspaceFilePath(value: unknown, what: string): void {
+  assertNonEmptyText(value, what);
+  if (value.length > 1_000 || value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)) {
+    throw new ValidationError(`${what}: path must be a relative workspace path`);
+  }
+  const parts = value.replaceAll("\\", "/").split("/");
+  if (parts.some((part) => part.length === 0 || part === "." || part === "..")) {
+    throw new ValidationError(`${what}: path must stay inside the workspace`);
+  }
+}
+
+function validateWorkspaceFileTreeInput(input: unknown): void {
+  assertPlainObject(input, "workspace.fileTree input");
+  assertNoUnknownKeys(input, ["workspaceId", "path"], "workspace.fileTree input");
+  assertOpaqueToken(input.workspaceId, "workspace.fileTree input: workspaceId");
+  if (input.path !== undefined) validateWorkspaceFilePath(input.path, "workspace.fileTree input: path");
+}
+
+function validateWorkspaceFileMutationInput(input: unknown, what: string): void {
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "path"], what);
+  assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  validateWorkspaceFilePath(input.path, `${what}: path`);
+}
+
+function validateWorkspaceSelector(input: unknown, what: string): void {
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId"], what);
+  assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+}
+
+function validateOptionalWorkspaceSelector(input: unknown, what: string): void {
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId"], what);
+  if (input.workspaceId !== undefined) assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+}
+
+function validateGitRef(value: unknown, what: string): void {
+  assertNonEmptyText(value, what);
+  if (value.length > MAX_ID_LENGTH || value.startsWith("-") || /[\0\r\n]/u.test(value)) {
+    throw new ValidationError(`${what}: invalid Git ref`);
+  }
+}
+
+function validateGitRemoteUrl(value: unknown, what: string): void {
+  assertNonEmptyText(value, what);
+  if (value.length > 4_096 || value.startsWith("-") || /[\0\r\n\t ]/u.test(value)) {
+    throw new ValidationError(`${what}: invalid remote URL`);
+  }
+  if (!value.includes("://") && !value.includes("::") && /^(?:[^@/:\s]+@)?[^/:\s]+:[^:\s][^\s]*$/u.test(value) && !/^[A-Za-z]:/u.test(value)) return;
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw new ValidationError(`${what}: remote URL must use https, http, ssh, git, or SCP syntax`); }
+  if (!(["https:", "http:", "ssh:", "git:"] as const).includes(parsed.protocol as "https:" | "http:" | "ssh:" | "git:") || parsed.hostname.length === 0 || parsed.password.length > 0) {
+    throw new ValidationError(`${what}: remote URL must use https, http, ssh, git, or SCP syntax without a password`);
+  }
+}
+
+function validateBoundedText(value: unknown, what: string, maximum = MAX_TEXT_LENGTH): void {
+  if (typeof value !== "string" || value.length > maximum) throw new ValidationError(`${what}: text exceeds the max length of ${maximum}`);
+}
+
+function validateGitPaths(value: unknown, what: string): void {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_LIST_ITEMS) {
+    throw new ValidationError(`${what}: paths must be a non-empty bounded array`);
+  }
+  for (const path of value) validateWorkspaceFilePath(path, `${what}: path`);
+}
+
+function validateOptionalBoolean(value: unknown, what: string): void {
+  if (value !== undefined && typeof value !== "boolean") throw new ValidationError(`${what}: must be boolean`);
+}
+
+function validatePositiveInteger(value: unknown, what: string): void {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new ValidationError(`${what}: must be a positive integer`);
+  }
+}
+
+function validateGitDiffInput(input: unknown): void {
+  const what = "git.diff.get input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "path", "target"], what);
+  assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  validateWorkspaceFilePath(input.path, `${what}: path`);
+  if (input.target !== "working" && input.target !== "staged") throw new ValidationError(`${what}: invalid target`);
+}
+
+function validateGithubPrListInput(input: unknown): void {
+  const what = "github.pr.list input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "state"], what);
+  assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  if (input.state !== undefined && input.state !== "open" && input.state !== "closed" && input.state !== "merged" && input.state !== "all") {
+    throw new ValidationError(`${what}: invalid state`);
+  }
+}
+
+function validateGithubPrNumberInput(input: unknown, what: string): void {
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "number"], what);
+  assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  validatePositiveInteger(input.number, `${what}: number`);
+}
+
+function validateGitExecuteInput(input: unknown): void {
+  const what = "git.execute input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "operation"], what);
+  if (input.workspaceId !== undefined) assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  assertPlainObject(input.operation, `${what}: operation`);
+  const operation = input.operation;
+  assertNonEmptyText(operation.kind, `${what}: operation.kind`);
+  const bool = (key: string) => validateOptionalBoolean(operation[key], `${what}: ${key}`);
+  const ref = (key: string, required = false) => {
+    if (required || operation[key] !== undefined) validateGitRef(operation[key], `${what}: ${key}`);
+  };
+  switch (operation.kind) {
+    case "init":
+    case "worktree.pickRoot":
+      assertNoUnknownKeys(operation, ["kind"], `${what}: operation`);
+      break;
+    case "clone":
+      assertNoUnknownKeys(operation, ["kind", "url", "directoryName"], `${what}: operation`);
+      validateGitRemoteUrl(operation.url, `${what}: url`);
+      if (operation.directoryName !== undefined) validateWorkspaceFilePath(operation.directoryName, `${what}: directoryName`);
+      return;
+    case "stage":
+    case "unstage":
+      assertNoUnknownKeys(operation, ["kind", "paths"], `${what}: operation`);
+      validateGitPaths(operation.paths, what);
+      break;
+    case "discard":
+      assertNoUnknownKeys(operation, ["kind", "paths", "expectedRevision"], `${what}: operation`);
+      validateGitPaths(operation.paths, what);
+      assertOpaqueToken(operation.expectedRevision, `${what}: expectedRevision`);
+      break;
+    case "commit":
+      assertNoUnknownKeys(operation, ["kind", "message", "amend", "sign"], `${what}: operation`);
+      assertNonEmptyText(operation.message, `${what}: message`);
+      if (operation.message.length > MAX_TEXT_LENGTH) throw new ValidationError(`${what}: message is too long`);
+      bool("amend"); bool("sign");
+      break;
+    case "branch.create":
+      assertNoUnknownKeys(operation, ["kind", "name", "startPoint", "checkout"], `${what}: operation`);
+      ref("name", true); ref("startPoint"); bool("checkout");
+      break;
+    case "branch.switch":
+      assertNoUnknownKeys(operation, ["kind", "name"], `${what}: operation`); ref("name", true);
+      break;
+    case "branch.rename":
+      assertNoUnknownKeys(operation, ["kind", "oldName", "newName"], `${what}: operation`); ref("oldName"); ref("newName", true);
+      break;
+    case "branch.delete":
+      assertNoUnknownKeys(operation, ["kind", "name", "force", "expectedRevision"], `${what}: operation`); ref("name", true); bool("force"); if (operation.expectedRevision !== undefined) assertOpaqueToken(operation.expectedRevision, `${what}: expectedRevision`);
+      break;
+    case "worktree.create":
+      assertNoUnknownKeys(operation, ["kind", "branch", "startPoint", "createBranch", "directoryName"], `${what}: operation`); ref("branch", true); ref("startPoint"); bool("createBranch"); if (operation.directoryName !== undefined) validateWorkspaceFilePath(operation.directoryName, `${what}: directoryName`);
+      break;
+    case "worktree.lock":
+      assertNoUnknownKeys(operation, ["kind", "worktreeId", "reason"], `${what}: operation`); assertOpaqueToken(operation.worktreeId, `${what}: worktreeId`); if (operation.reason !== undefined) assertNonEmptyText(operation.reason, `${what}: reason`);
+      break;
+    case "worktree.unlock":
+      assertNoUnknownKeys(operation, ["kind", "worktreeId"], `${what}: operation`); assertOpaqueToken(operation.worktreeId, `${what}: worktreeId`);
+      break;
+    case "worktree.remove":
+      assertNoUnknownKeys(operation, ["kind", "worktreeId", "force", "expectedRevision"], `${what}: operation`); assertOpaqueToken(operation.worktreeId, `${what}: worktreeId`); bool("force"); if (operation.expectedRevision !== undefined) assertOpaqueToken(operation.expectedRevision, `${what}: expectedRevision`);
+      break;
+    case "worktree.prune":
+      assertNoUnknownKeys(operation, ["kind", "dryRun"], `${what}: operation`); bool("dryRun");
+      break;
+    case "remote.add":
+    case "remote.setUrl":
+      assertNoUnknownKeys(operation, operation.kind === "remote.add" ? ["kind", "name", "url"] : ["kind", "name", "url", "push"], `${what}: operation`); ref("name", true); validateGitRemoteUrl(operation.url, `${what}: url`); if (operation.kind === "remote.setUrl") bool("push");
+      break;
+    case "remote.remove":
+      assertNoUnknownKeys(operation, ["kind", "name"], `${what}: operation`); ref("name", true);
+      break;
+    case "fetch":
+      assertNoUnknownKeys(operation, ["kind", "remote", "prune"], `${what}: operation`); ref("remote"); bool("prune");
+      break;
+    case "pull":
+      assertNoUnknownKeys(operation, ["kind", "strategy", "remote", "branch"], `${what}: operation`); if (operation.strategy !== "ff-only" && operation.strategy !== "rebase" && operation.strategy !== "merge") throw new ValidationError(`${what}: invalid pull strategy`); ref("remote"); ref("branch");
+      break;
+    case "push":
+      assertNoUnknownKeys(operation, ["kind", "remote", "branch", "setUpstream", "forceWithLease", "expectedRemoteOid"], `${what}: operation`); ref("remote"); ref("branch"); bool("setUpstream"); bool("forceWithLease"); if (operation.expectedRemoteOid !== undefined) assertOpaqueToken(operation.expectedRemoteOid, `${what}: expectedRemoteOid`); if (operation.forceWithLease === true && operation.expectedRemoteOid === undefined) throw new ValidationError(`${what}: forceWithLease requires expectedRemoteOid`);
+      break;
+    case "stash.push":
+      assertNoUnknownKeys(operation, ["kind", "message", "includeUntracked"], `${what}: operation`); if (operation.message !== undefined) assertNonEmptyText(operation.message, `${what}: message`); bool("includeUntracked");
+      break;
+    case "stash.apply":
+      assertNoUnknownKeys(operation, ["kind", "stash", "pop"], `${what}: operation`); ref("stash"); bool("pop");
+      break;
+    case "stash.drop":
+      assertNoUnknownKeys(operation, ["kind", "stash", "expectedRevision"], `${what}: operation`); ref("stash", true); assertOpaqueToken(operation.expectedRevision, `${what}: expectedRevision`);
+      break;
+    case "tag.create":
+      assertNoUnknownKeys(operation, ["kind", "name", "target", "message"], `${what}: operation`); ref("name", true); ref("target"); if (operation.message !== undefined) assertNonEmptyText(operation.message, `${what}: message`);
+      break;
+    case "tag.delete":
+      assertNoUnknownKeys(operation, ["kind", "name"], `${what}: operation`); ref("name", true);
+      break;
+    case "merge":
+      assertNoUnknownKeys(operation, ["kind", "ref", "noFastForward"], `${what}: operation`); ref("ref", true); bool("noFastForward");
+      break;
+    case "rebase":
+    case "cherry-pick":
+    case "revert":
+      assertNoUnknownKeys(operation, ["kind", "ref"], `${what}: operation`); ref("ref", true);
+      break;
+    case "reset":
+      assertNoUnknownKeys(operation, ["kind", "mode", "ref", "expectedRevision"], `${what}: operation`); if (operation.mode !== "soft" && operation.mode !== "mixed" && operation.mode !== "hard") throw new ValidationError(`${what}: invalid reset mode`); ref("ref", true); assertOpaqueToken(operation.expectedRevision, `${what}: expectedRevision`);
+      break;
+    case "continue":
+    case "abort":
+      assertNoUnknownKeys(operation, ["kind", "operation"], `${what}: operation`); if (operation.operation !== "merge" && operation.operation !== "rebase" && operation.operation !== "cherry-pick" && operation.operation !== "revert") throw new ValidationError(`${what}: invalid in-progress operation`);
+      break;
+    case "cancel":
+      assertNoUnknownKeys(operation, ["kind", "requestId"], `${what}: operation`); assertOpaqueToken(operation.requestId, `${what}: requestId`);
+      return;
+    default:
+      throw new ValidationError(`${what}: unknown operation kind`);
+  }
+  if (input.workspaceId === undefined) throw new ValidationError(`${what}: workspaceId is required for this operation`);
+}
+
+function validateGithubExecuteInput(input: unknown): void {
+  const what = "github.execute input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "operation"], what);
+  if (input.workspaceId !== undefined) assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  assertPlainObject(input.operation, `${what}: operation`);
+  const operation = input.operation;
+  switch (operation.kind) {
+    case "auth.login":
+      assertNoUnknownKeys(operation, ["kind", "host", "gitProtocol"], `${what}: operation`);
+      if (operation.host !== undefined) validateGitRef(operation.host, `${what}: host`);
+      if (operation.gitProtocol !== undefined && operation.gitProtocol !== "https" && operation.gitProtocol !== "ssh") throw new ValidationError(`${what}: invalid gitProtocol`);
+      return;
+    case "auth.logout":
+      assertNoUnknownKeys(operation, ["kind", "host"], `${what}: operation`);
+      if (operation.host !== undefined) validateGitRef(operation.host, `${what}: host`);
+      return;
+    case "pr.create":
+      assertNoUnknownKeys(operation, ["kind", "title", "body", "base", "head", "draft"], `${what}: operation`); assertNonEmptyText(operation.title, `${what}: title`); validateBoundedText(operation.title, `${what}: title`, 256); validateBoundedText(operation.body, `${what}: body`); validateGitRef(operation.base, `${what}: base`); if (operation.head !== undefined) validateGitRef(operation.head, `${what}: head`); validateOptionalBoolean(operation.draft, `${what}: draft`);
+      break;
+    case "pr.edit":
+      assertNoUnknownKeys(operation, ["kind", "number", "title", "body", "base"], `${what}: operation`); validatePositiveInteger(operation.number, `${what}: number`); if (operation.title !== undefined) { assertNonEmptyText(operation.title, `${what}: title`); validateBoundedText(operation.title, `${what}: title`, 256); } if (operation.body !== undefined) validateBoundedText(operation.body, `${what}: body`); if (operation.base !== undefined) validateGitRef(operation.base, `${what}: base`);
+      break;
+    case "pr.ready":
+      assertNoUnknownKeys(operation, ["kind", "number", "undo"], `${what}: operation`); validatePositiveInteger(operation.number, `${what}: number`); validateOptionalBoolean(operation.undo, `${what}: undo`);
+      break;
+    case "pr.comment":
+      assertNoUnknownKeys(operation, ["kind", "number", "body"], `${what}: operation`); validatePositiveInteger(operation.number, `${what}: number`); assertNonEmptyText(operation.body, `${what}: body`); validateBoundedText(operation.body, `${what}: body`);
+      break;
+    case "pr.review":
+      assertNoUnknownKeys(operation, ["kind", "number", "decision", "body"], `${what}: operation`); validatePositiveInteger(operation.number, `${what}: number`); if (operation.decision !== "approve" && operation.decision !== "comment" && operation.decision !== "request-changes") throw new ValidationError(`${what}: invalid review decision`); if (operation.body !== undefined) validateBoundedText(operation.body, `${what}: body`);
+      break;
+    case "pr.updateBranch":
+      assertNoUnknownKeys(operation, ["kind", "number", "rebase"], `${what}: operation`); validatePositiveInteger(operation.number, `${what}: number`); validateOptionalBoolean(operation.rebase, `${what}: rebase`);
+      break;
+    case "pr.merge":
+      assertNoUnknownKeys(operation, ["kind", "number", "method", "expectedHeadOid", "auto", "deleteBranch"], `${what}: operation`); validatePositiveInteger(operation.number, `${what}: number`); if (operation.method !== "merge" && operation.method !== "squash" && operation.method !== "rebase") throw new ValidationError(`${what}: invalid merge method`); assertOpaqueToken(operation.expectedHeadOid, `${what}: expectedHeadOid`); validateOptionalBoolean(operation.auto, `${what}: auto`); validateOptionalBoolean(operation.deleteBranch, `${what}: deleteBranch`);
+      break;
+    case "pr.close":
+      assertNoUnknownKeys(operation, ["kind", "number", "comment", "deleteBranch"], `${what}: operation`); validatePositiveInteger(operation.number, `${what}: number`); if (operation.comment !== undefined) { assertNonEmptyText(operation.comment, `${what}: comment`); validateBoundedText(operation.comment, `${what}: comment`); } validateOptionalBoolean(operation.deleteBranch, `${what}: deleteBranch`);
+      break;
+    case "pr.reopen":
+    case "pr.checkout":
+      assertNoUnknownKeys(operation, ["kind", "number"], `${what}: operation`); validatePositiveInteger(operation.number, `${what}: number`);
+      break;
+    case "cancel":
+      assertNoUnknownKeys(operation, ["kind", "requestId"], `${what}: operation`); assertOpaqueToken(operation.requestId, `${what}: requestId`);
+      return;
+    default:
+      throw new ValidationError(`${what}: unknown operation kind`);
+  }
+  if (input.workspaceId === undefined) throw new ValidationError(`${what}: workspaceId is required for PR operations`);
 }
 
 const RUNTIME_CHANNELS: readonly RuntimeChannel[] = ["stable", "canary"];
@@ -271,9 +598,9 @@ function validateJsonNode(value: unknown, depth: number, budget: SizeBudget): vo
   }
   switch (typeof value) {
     case "string":
-      if (value.length > MAX_TEXT_LENGTH) {
+      if (value.length > MAX_INTERACTION_TEXT_LENGTH) {
         throw new ValidationError(
-          `interaction.respond value: string exceeds the max length of ${MAX_TEXT_LENGTH}`,
+          `interaction.respond value: string exceeds the max length of ${MAX_INTERACTION_TEXT_LENGTH}`,
         );
       }
       spend(budget, value.length + 2);
@@ -334,9 +661,9 @@ function validateInteractionValue(value: unknown): void {
     );
   }
   if (Array.isArray(value)) {
-    if (value.length > MAX_LIST_ITEMS) {
+    if (value.length > MAX_INTERACTION_LIST_ITEMS) {
       throw new ValidationError(
-        `interaction.respond value: array exceeds the max length of ${MAX_LIST_ITEMS}`,
+        `interaction.respond value: array exceeds the max length of ${MAX_INTERACTION_LIST_ITEMS}`,
       );
     }
     spend(budget, 1 + value.length);
@@ -353,8 +680,15 @@ function validateInteractionValue(value: unknown): void {
 
 function validateInteractionRespondInput(input: unknown): void {
   assertPlainObject(input, "interaction.respond input");
-  assertNoUnknownKeys(input, ["interactionId", "decision", "value"], "interaction.respond input");
+  assertNoUnknownKeys(input, ["interactionId", "leaseGeneration", "decision", "value"], "interaction.respond input");
   assertOpaqueToken(input.interactionId, "interaction.respond input: interactionId");
+  if (
+    typeof input.leaseGeneration !== "number" ||
+    !Number.isSafeInteger(input.leaseGeneration) ||
+    input.leaseGeneration <= 0
+  ) {
+    throw new ValidationError("interaction.respond input: leaseGeneration must be a positive safe integer");
+  }
   const decision = input.decision;
   if (decision !== "submit" && decision !== "cancel") {
     throw new ValidationError('interaction.respond input: decision must be "submit" or "cancel"');
@@ -801,7 +1135,20 @@ const QUERY_INPUT_VALIDATORS: {
   "mcp.get": (input) => validateEmptyInput(input, "mcp.get input"),
   "agents.definitions.get": (input) => validateEmptyInput(input, "agents.definitions.get input"),
   "projects.list": (input) => validateEmptyInput(input, "projects.list input"),
+  "workspace.fileTree": validateWorkspaceFileTreeInput,
   "usage.get": (input) => validateEmptyInput(input, "usage.get input"),
+  "session.transcript.read": validateTranscriptReadInput,
+  "session.transcript.readPage": validateTranscriptReadPageInput,
+  "git.toolchain.get": (input) => validateEmptyInput(input, "git.toolchain.get input"),
+  "git.repository.get": (input) => validateWorkspaceSelector(input, "git.repository.get input"),
+  "git.diff.get": validateGitDiffInput,
+  "git.branches.list": (input) => validateWorkspaceSelector(input, "git.branches.list input"),
+  "git.worktrees.list": (input) => validateWorkspaceSelector(input, "git.worktrees.list input"),
+  "git.remotes.list": (input) => validateWorkspaceSelector(input, "git.remotes.list input"),
+  "github.auth.get": (input) => validateOptionalWorkspaceSelector(input, "github.auth.get input"),
+  "github.pr.list": validateGithubPrListInput,
+  "github.pr.get": (input) => validateGithubPrNumberInput(input, "github.pr.get input"),
+  "github.pr.checks": (input) => validateGithubPrNumberInput(input, "github.pr.checks input"),
 };
 
 /** Per-name command input validators, keyed by the full CommandName map. */
@@ -838,9 +1185,17 @@ const COMMAND_INPUT_VALIDATORS: {
   "session.tree.navigate": validateTreeNavigateInput,
   "operator.invoke": validateOperatorInvokeInput,
   "runtime.install": validateRuntimeInstallInput,
+  "session.create": (input) => validateEmptyCommandInput(input, "session.create input"),
   "session.resume": (input) => validateThreadInput(input, "session.resume input"),
   "session.drop": (input) => validateThreadInput(input, "session.drop input"),
   "interaction.respond": validateInteractionRespondInput,
+  "permissions.mode.set": (input) => {
+    assertPlainObject(input, "permissions.mode.set input");
+    assertNoUnknownKeys(input, ["mode"], "permissions.mode.set input");
+    if (input.mode !== "always-ask" && input.mode !== "write" && input.mode !== "yolo") {
+      throw new ValidationError("permissions.mode.set input: mode must be always-ask, write or yolo");
+    }
+  },
   "models.provider.upsert": validateModelsProviderUpsertInput,
   "models.provider.delete": validateModelsProviderDeleteInput,
   "models.provider.setEnabled": validateModelsProviderSetEnabledInput,
@@ -869,8 +1224,19 @@ const COMMAND_INPUT_VALIDATORS: {
     assertNoUnknownKeys(input, ["workspaceId"], "workspace.open input");
     assertOpaqueToken(input.workspaceId, "workspace.open input: workspaceId");
   },
-  "workspace.pick": (input) => validateEmptyCommandInput(input, "workspace.pick input"),
+  "workspace.pick": (input) => {
+    assertPlainObject(input, "workspace.pick input");
+    assertNoUnknownKeys(input, ["name"], "workspace.pick input");
+    if (input.name !== undefined) {
+      assertNonEmptyText(input.name, "workspace.pick input: name");
+      if (input.name.trim().length > 80) throw new ValidationError("workspace.pick input: name must be at most 80 characters");
+    }
+  },
+  "workspace.file.create": (input) => validateWorkspaceFileMutationInput(input, "workspace.file.create input"),
+  "workspace.directory.create": (input) => validateWorkspaceFileMutationInput(input, "workspace.directory.create input"),
   "usage.openDashboard": (input) => validateEmptyCommandInput(input, "usage.openDashboard input"),
+  "git.execute": validateGitExecuteInput,
+  "github.execute": validateGithubExecuteInput,
 };
 
 /** Every valid query name, derived from the client-contract map. */

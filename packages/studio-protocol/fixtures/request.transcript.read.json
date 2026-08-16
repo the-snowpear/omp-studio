@@ -1,0 +1,9 @@
+{
+  "type": "studio.request",
+  "requestId": "req-transcript-1",
+  "runtimeEpoch": 1,
+  "operation": {
+    "kind": "session.transcript.read",
+    "limit": 50
+  }
+}

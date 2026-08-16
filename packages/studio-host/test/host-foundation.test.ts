@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
-import { createServer, type Server, type Socket } from "node:net";
+import { createConnection, createServer, Socket, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -108,7 +108,7 @@ function snapshotResponse(
       sessionId: sessionId as StudioSnapshotResponse["snapshot"]["sessionId"],
       isStreaming: false,
       isCompacting: false,
-      activeMode: "normal",
+      activeMode: "normal", approvalMode: "yolo",
       pendingMessages: 0,
       activeCommandIds: [],
       agentsRevision: 0,
@@ -441,6 +441,36 @@ test("PR-009 disconnect after accepted publishes outcome_unknown without fake co
   }
 });
 
+test("connectUntilReady retries CONNECTION_FAILED until the pipe accepts", async () => {
+  const token = "bridge-token-retry";
+  const bridge = await listenForHello((hello) => helloResponse(hello, token));
+  let attempts = 0;
+  const client = new StudioBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    connectSocket: (endpoint) => {
+      attempts += 1;
+      if (attempts < 3) {
+        const socket = new Socket();
+        queueMicrotask(() => {
+          socket.emit("error", Object.assign(new Error("connect ENOENT"), { code: "ENOENT" }));
+        });
+        return socket;
+      }
+      return createConnection(endpoint);
+    },
+  });
+  try {
+    const response = await client.connectUntilReady({ deadline: Date.now() + 2_000 });
+    assert.equal(attempts >= 3, true);
+    assert.equal(client.state, "negotiated");
+    assert.equal(response.runtimeVersion, "17.2.12-studio.3");
+  } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
 test("WP-011 authenticates a real local Bridge connection without sending the token", async () => {
   const token = "bridge-token-1";
   let observedHello = "";
@@ -575,6 +605,72 @@ test("WP-012 projection fences stale epochs and requests a snapshot on event gap
     }),
     "snapshot-required",
   );
+});
+
+test("projection consumes a stale-session telemetry sequence without mutating the snapshot", () => {
+  const token = "projection-telemetry-token";
+  const hello = helloResponse(
+    {
+      type: "studio.hello",
+      requestId: "hello-projection-telemetry" as RequestId,
+      supportedProtocolVersions: [1],
+      requiredProfile: "full-parity-v1",
+      challenge: "projection-telemetry-challenge",
+    },
+    token,
+  );
+  const projection = new RuntimeProjection();
+  projection.beginConnection(hello);
+  projection.applySnapshot(snapshotResponse("snapshot-projection-telemetry", hello));
+  const base = projection.snapshot()!;
+  const staleSessionId = "session-old" as typeof base.sessionId;
+
+  assert.equal(
+    projection.applyEvent({
+      type: "studio.event",
+      runtimeEpoch: hello.runtimeEpoch,
+      eventSeq: 1 as StudioSnapshotResponse["lastEventSeq"],
+      stateVersion: base.stateVersion,
+      occurredAt: "2026-08-15T00:00:01.000Z",
+      event: {
+        kind: "session.telemetry.changed",
+        sessionId: staleSessionId,
+        telemetry: {
+          sessionId: staleSessionId,
+          capturedAt: "2026-08-15T00:00:01.000Z",
+          tokens: {
+            input: 1,
+            output: 2,
+            reasoning: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            total: 3,
+            cost: 0,
+          },
+          context: null,
+          unavailableReason: "model_context_unknown",
+        },
+      },
+    }),
+    "stale",
+  );
+  assert.equal(projection.lastEventSeq(), 1);
+  assert.equal(projection.snapshot()?.telemetry, undefined);
+  assert.equal(projection.needsSnapshot(), false);
+
+  assert.equal(
+    projection.applyEvent({
+      type: "studio.event",
+      runtimeEpoch: hello.runtimeEpoch,
+      eventSeq: 2 as StudioSnapshotResponse["lastEventSeq"],
+      stateVersion: 1 as StateVersion,
+      occurredAt: "2026-08-15T00:00:02.000Z",
+      event: { kind: "state.changed", snapshot: { ...base, stateVersion: 1 as StateVersion } },
+    }),
+    "applied",
+  );
+  assert.equal(projection.lastEventSeq(), 2);
+  assert.equal(projection.needsSnapshot(), false);
 });
 
 test("PR-008 closes a local Bridge connection on an oversized response", async () => {
@@ -1269,6 +1365,42 @@ test("WP-014 confirmation token expires after its TTL", () => {
   now += 251;
   assert.throws(
     () => registry.consume(token, { kind: "session.drop" }, "gui"),
+    (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
+  );
+});
+
+test("WP-014 confirmation token binds lease generation and runtime epoch", () => {
+  const registry = new HostConfirmationRegistry();
+  const operation = { kind: "session.drop" } as const;
+  const token = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  // same binding: ok
+  registry.consume(token, operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  // re-issue and try a stale generation / epoch: fail closed
+  const gen = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(gen, operation, "gui", { leaseGeneration: 4, runtimeEpoch: 7 }),
+    (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
+  );
+  const epoch = registry.issue(operation, "gui", { leaseGeneration: 3, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(epoch, operation, "gui", { leaseGeneration: 3, runtimeEpoch: 8 }),
+    (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
+  );
+  // A caller cannot bypass either binding by omitting it, and cannot attach
+  // a binding to a token that was issued without one.
+  const missingGeneration = registry.issue(operation, "gui", { leaseGeneration: 1, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(missingGeneration, operation, "gui", { runtimeEpoch: 7 }),
+    (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
+  );
+  const missingEpoch = registry.issue(operation, "gui", { leaseGeneration: 1, runtimeEpoch: 7 });
+  assert.throws(
+    () => registry.consume(missingEpoch, operation, "gui", { leaseGeneration: 1 }),
+    (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
+  );
+  const unexpectedBinding = registry.issue(operation, "gui");
+  assert.throws(
+    () => registry.consume(unexpectedBinding, operation, "gui", { leaseGeneration: 1 }),
     (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
   );
 });

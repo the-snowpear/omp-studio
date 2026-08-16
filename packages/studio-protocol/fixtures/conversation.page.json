@@ -1,0 +1,57 @@
+{
+  "runtimeEpoch": 1,
+  "sessionId": "session-1",
+  "branchLeafId": "leaf-1",
+  "items": [
+    {
+      "kind": "resetBoundary",
+      "itemId": "reset-1",
+      "parentId": null,
+      "createdAt": "2026-08-15T00:00:00.000Z"
+    },
+    {
+      "kind": "message",
+      "itemId": "msg-user-1",
+      "parentId": "reset-1",
+      "createdAt": "2026-08-15T00:00:01.000Z",
+      "role": "user",
+      "content": [{ "type": "text", "text": "Read package.json" }]
+    },
+    {
+      "kind": "message",
+      "itemId": "msg-assistant-1",
+      "parentId": "msg-user-1",
+      "createdAt": "2026-08-15T00:00:02.000Z",
+      "role": "assistant",
+      "content": [
+        { "type": "thinking", "text": "I will inspect the manifest." },
+        {
+          "type": "toolCall",
+          "toolCallId": "call-1",
+          "toolName": "Read",
+          "arguments": { "path": "package.json" }
+        },
+        {
+          "type": "toolResult",
+          "toolCallId": "call-1",
+          "toolName": "Read",
+          "output": "{ \"name\": \"omp-studio\" }",
+          "isError": false
+        },
+        { "type": "text", "text": "This is a Studio workspace." }
+      ]
+    },
+    {
+      "kind": "compaction",
+      "itemId": "compact-1",
+      "parentId": "msg-assistant-1",
+      "createdAt": "2026-08-15T00:00:03.000Z",
+      "summary": "User asked about package.json; assistant summarized the workspace.",
+      "shortSummary": "Workspace summary",
+      "warning": "little context freed"
+    }
+  ],
+  "olderCursor": "opaque-older-cursor",
+  "headCursor": "opaque-head-cursor",
+  "hasMoreBefore": true
+}

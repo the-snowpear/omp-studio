@@ -4,6 +4,7 @@ import type {
   RemoteInteractionRequest,
   RemoteInteractionRequiredEvent,
   RemoteInteractionResponse,
+  StudioInteractionResolvedEvent,
   StudioOperation,
 } from "@omp-studio/studio-protocol";
 import { CommandArbiter, StudioHostError, type InteractionSurface } from "./command-arbiter.js";
@@ -25,11 +26,15 @@ export type RemoteInteractionDecision = "submit" | "cancel";
 export interface RemoteInteractionRespondInput {
   interactionId: InteractionId;
   commandId: CommandId;
+  /** Generation captured by the GUI caller; omitted only for trusted TUI calls. */
+  generation?: number;
   decision: RemoteInteractionDecision;
   value?: unknown;
   owner: InteractionSurface;
   /** One-shot token; required for destructive confirm and approval submits. */
   confirmationToken?: string;
+  /** Token binding (plan §3.4): lease generation and Runtime epoch. */
+  binding?: { leaseGeneration?: number; runtimeEpoch?: number };
 }
 
 export interface PendingRemoteInteraction {
@@ -80,6 +85,33 @@ export class RemoteInteractionAdapter {
     return this.#clonePending(pending);
   }
 
+  /** Drop the pending interaction locally. Does not dispatch a Runtime respond. */
+  clear(): void {
+    this.#pending = undefined;
+    this.#inFlight = false;
+    this.arbiter.abandonAllInteractions();
+  }
+
+  /**
+   * Runtime-side resolution (`interaction.resolved`): when the event matches
+   * the adopted interaction id + generation, complete the arbiter ownership
+   * and drop the local pending. Stale generations and unknown ids are
+   * ignored (idempotent). Returns true when the local pending was cleared.
+   */
+  resolve(event: StudioInteractionResolvedEvent): boolean {
+    const pending = this.#pending;
+    if (
+      pending === undefined ||
+      pending.interactionId !== event.interactionId ||
+      pending.generation !== event.leaseGeneration
+    ) {
+      return false;
+    }
+    this.arbiter.completeInteraction(event.interactionId, event.commandId, pending.owner, pending.generation);
+    this.#pending = undefined;
+    return true;
+  }
+
   /** Defensive clone of the pending interaction, or undefined while idle. */
   pending(): PendingRemoteInteraction | undefined {
     return this.#pending === undefined ? undefined : this.#clonePending(this.#pending);
@@ -100,6 +132,12 @@ export class RemoteInteractionAdapter {
     if (this.#inFlight) {
       throw new StudioHostError("COMMAND_BLOCKED", "An interaction operation is already in flight");
     }
+    if (input.owner === "gui" && input.generation === undefined) {
+      throw new StudioHostError("INTERACTION_STALE", "GUI interaction generation is required");
+    }
+    if (input.generation !== undefined && input.generation !== pending.generation) {
+      throw new StudioHostError("INTERACTION_STALE", "Interaction generation is stale");
+    }
     const operation: RemoteInteractionResponse = {
       kind: "interaction.respond",
       interactionId: input.interactionId,
@@ -119,11 +157,16 @@ export class RemoteInteractionAdapter {
         if (input.confirmationToken === undefined) {
           throw new StudioHostError("INVALID_ARGUMENT", "Confirmation token is required for this interaction response");
         }
-        this.confirmations.consume(input.confirmationToken, operation, input.owner);
+        this.confirmations.consume(input.confirmationToken, operation, input.owner, input.binding);
       }
       await this.#acknowledged(operation);
-      this.arbiter.completeInteraction(input.interactionId, input.commandId, input.owner, ownership.generation);
-      this.#pending = undefined;
+      // Runtime interaction.resolved may have already completed the arbiter
+      // between the acknowledgement and this continuation. Completion is
+      // therefore deliberately idempotent from the adapter's perspective.
+      if (this.#pending?.interactionId === input.interactionId && this.#pending.generation === ownership.generation) {
+        this.arbiter.completeInteraction(input.interactionId, input.commandId, input.owner, ownership.generation);
+        this.#pending = undefined;
+      }
     } finally {
       this.#inFlight = false;
     }

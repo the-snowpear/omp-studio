@@ -73,31 +73,6 @@ export type PreviewTelemetry = {
 
 export type PreviewCtxPart = { name: string; v: string; pct: number; color: string };
 
-export type PreviewEvent =
-  | { id: string; type: "user"; time: string; html: string; refs?: string[] }
-  | { id: string; type: "thinking"; dur: string; preview: string }
-  | { id: string; type: "plan"; title: string; items: string[] }
-  | { id: string; type: "toolgroup"; count: number; summary: string; tools: PreviewTool[] }
-  | { id: string; type: "assistant"; time: string; html: string; streaming?: boolean }
-  | { id: string; type: "tool"; tool: PreviewTool }
-  | { id: string; type: "approval"; kind: string; risk: "medium" | "high"; title: string; cmd: string; reason: string; scope: string }
-  | { id: string; type: "error"; title: string; html: string }
-  | { id: string; type: "askuser"; title: string; desc: string; options: string[] }
-  | { id: string; type: "checkpoint"; no: number; time: string; files: number; add: number; del: number; tests: string; build: string; preview: string; desc: string }
-  | { id: string; type: "compact"; pct: number; summary: string };
-
-export type PreviewTool = {
-  name: string;
-  target: string;
-  status: "done" | "running";
-  dur: string;
-  startTime?: string;
-  summary?: string;
-  input?: string;
-  output?: string;
-  affectsWorkspace?: boolean;
-};
-
 export type PreviewMinimap = { type: string; evId: string; at: number };
 
 export type PreviewChangeRow = {
@@ -182,6 +157,7 @@ export const PREVIEW_PROJECTS: PreviewProject[] = [
     branch: "main", worktree: null, dirty: 3, running: true,
     attention: true, preview: "running", pinned: true,
     threads: [
+      { id: "t0", title: "新建对话（空白）", time: "now", msgs: 0, status: "idle" },
       { id: "t1", title: "跟踪上游 pi-web 更新到 omp-web", time: "32m ago", msgs: 45, status: "running", pinned: true, hasSub: true, unread: 3 },
       { id: "t2", title: "Audit and fix OSS repository issues", time: "2h ago", msgs: 12, status: "idle", unread: 0 },
       { id: "t3", title: "选择 gemini3.6flash 随意发送消息后报错…", time: "4d ago", msgs: 1337, status: "approval", hasSub: true, unread: 1 },
@@ -281,128 +257,10 @@ export const PREVIEW_TELEMETRY: PreviewTelemetry = {
 
 export const PREVIEW_CTX_PARTS: PreviewCtxPart[] = [
   { name: "系统提示词", v: "13k", pct: 5.9, color: "#8a919c" },
-  { name: "Skills", v: "24k", pct: 10.9, color: "#6e56cf" },
-  { name: "对话历史", v: "119k", pct: 54.0, color: "#3b9bd4" },
-  { name: "文件内容", v: "42k", pct: 19.1, color: "#d9930d" },
+  { name: "系统上下文", v: "42k", pct: 19.1, color: "#64748b" },
   { name: "工具定义", v: "18k", pct: 8.2, color: "#64748b" },
-  { name: "子 Agent 汇总", v: "4.3k", pct: 2.0, color: "#2f9e6e" },
-];
-
-export const PREVIEW_EVENTS: PreviewEvent[] = [
-  {
-    id: "e1", type: "user", time: "14:02",
-    html: "已成功完成从上游 <span class=\"chip-code\">pi-web</span>（<span class=\"chip-code\">v0.8.1</span>）到 <span class=\"chip-code\">omp-web</span> 的同步更新，并确保 omp-web 的所有特有逻辑（<span class=\"chip-code\">~/.omp/agent/</span> 路径适配、OMP 逻辑、代码主题选择器等）完整保留。帮我把这次同步的过程整理成文档，并验证类型检查通过。",
-    refs: ["docs/UPSTREAM-SYNC.md", "package.json"],
-  },
-  { id: "e2", type: "thinking", dur: "12s", preview: "用户想要把上游同步过程整理成文档，并运行类型检查。先看一下 docs/ 目录现有结构和 package.json 里的 scripts…" },
-  {
-    id: "e3", type: "plan", title: "Plan",
-    items: [
-      "阅读 docs/ 现有文档与 package.json，确认 scripts 与文档结构",
-      "整理本次上游同步的三个阶段（graft 关联、合并冲突、质量验证）",
-      "新建 docs/UPSTREAM-SYNC.md 并更新 README 链接",
-      "运行 tsc --noEmit 与 lint 验证",
-    ],
-  },
-  {
-    id: "e4", type: "toolgroup", count: 4,
-    summary: "读取 4 个文件（docs/README.md、package.json、README.md、.omp/agent/config.yml）",
-    tools: [
-      { name: "Read", target: "docs/README.md", status: "done", dur: "0.2s" },
-      { name: "Read", target: "package.json", status: "done", dur: "0.1s" },
-      { name: "Grep", target: "\"UPSTREAM\" in *.md", status: "done", dur: "0.4s" },
-      { name: "Read", target: "README.md", status: "done", dur: "0.2s" },
-    ],
-  },
-  {
-    id: "e5", type: "assistant", time: "14:04",
-    html:
-      "<h3>一、本次同步完成的工作</h3>" +
-      "<p><strong>1. 配置 Upstream 远程仓库与历史关联：</strong></p><ul>" +
-      "<li>添加上游仓库地址 <span class=\"chip-code\">https://github.com/agegr/pi-web.git</span> 并拉取最新的 Release Tags。</li>" +
-      "<li>使用 <span class=\"chip-code\">git replace --graft</span> 将 omp-web 初始提交与 pi-web 的 <span class=\"chip-code\">v0.8.0</span> Commit 建立了清晰的 Parent 演进链，为后续标准 3-way 自动合并打下基础。</li></ul>" +
-      "<p><strong>2. 合并 v0.8.1 并解决冲突：</strong></p><ul>" +
-      "<li>保留 OMP 特有定制：包名（<span class=\"chip-code\">omp-web</span>）及 CLI 命令名称（<span class=\"chip-code\">omp-web</span>）。</li>" +
-      "<li>配置文件与会话读取路径（<span class=\"chip-file\">~/.omp/agent/sessions/</span>、<span class=\"chip-file\">models.json</span>、<span class=\"chip-file\">config.yml</span>、<span class=\"chip-file\">agent.db</span> 等）。</li>" +
-      "<li>代码块主题选择器（<span class=\"chip-code\">useCodeTheme</span> 钩子集成到新抽离的 <span class=\"chip-file\">MermaidBlock.tsx</span> 中）。</li>" +
-      "<li>README 文档中的 OMP 专属说明与致谢。</li></ul>" +
-      "<p><strong>吸纳上游 v0.8.1 更新与安全增强：</strong></p><ul>" +
-      "<li>引入全新的 IDE 风格 Directory Picker 目录选择器（<span class=\"chip-file\">components/DirectoryPicker.tsx</span>）。</li>" +
-      "<li>升级 <span class=\"chip-code\">@earendil-works/pi-*</span> 衍生核心依赖至 <span class=\"chip-code\">0.82.1</span>。</li>" +
-      "<li>限制默认监听地址为 Loopback（<span class=\"chip-code\">127.0.0.1</span>）及路径/请求安全校验增强。</li>" +
-      "<li>Mermaid 渲染优化与全屏缩放拖拽功能。</li></ul>",
-  },
-  {
-    id: "e6", type: "tool",
-    tool: {
-      name: "Write", target: "docs/UPSTREAM-SYNC.md", status: "done", dur: "1.8s", startTime: "14:04:31",
-      summary: "新建文档，记录 graft 关联、合并策略与验证步骤，共 214 行。",
-      input: "path: docs/UPSTREAM-SYNC.md\ncontent: (214 lines)",
-      output: "File created successfully.", affectsWorkspace: true,
-    },
-  },
-  {
-    id: "e7", type: "tool",
-    tool: {
-      name: "Edit", target: "README.md", status: "done", dur: "0.6s", startTime: "14:04:33",
-      summary: "在文档索引中加入 UPSTREAM-SYNC.md 链接（+3 -1）。",
-      input: "replace: \"- [更新日志](docs/CHANGELOG.md)\"\nwith:    \"- [更新日志](docs/CHANGELOG.md)\\n- [上游同步](docs/UPSTREAM-SYNC.md)\"",
-      output: "1 hunk applied.", affectsWorkspace: true,
-    },
-  },
-  {
-    id: "e8", type: "approval", kind: "Bash", risk: "medium",
-    title: "OMP 想要执行 Bash 命令",
-    cmd: "npm run typecheck && npm run lint",
-    reason: "该命令会在工作区内执行 TypeScript 类型检查与 ESLint，不会修改文件，但会读写 node_modules/.cache。",
-    scope: "工作区内 · 只读（除缓存目录）",
-  },
-  {
-    id: "e9", type: "tool",
-    tool: {
-      name: "Bash", target: "npm run typecheck", status: "running", dur: "8.4s…", startTime: "14:05:02",
-      summary: "TypeScript 类型检查进行中…",
-      input: "npm run typecheck",
-      output: "> omp-web@0.8.1 typecheck\n> tsc --noEmit\n\ncomponents/MermaidBlock.tsx(147,11): error TS2322: Type 'string' is not assignable to type 'MermaidTheme'.",
-      affectsWorkspace: false,
-    },
-  },
-  {
-    id: "e10", type: "error", title: "类型检查发现 1 个错误",
-    html: "<span class=\"chip-file\">components/MermaidBlock.tsx:147</span> — <span class=\"chip-code\">TS2322</span> Type 'string' is not assignable to type 'MermaidTheme'。看起来是上游合并时主题字面量类型被 widen 了，我可以顺手修掉。",
-  },
-  {
-    id: "e11", type: "askuser", title: "是否一并修复这个类型错误？",
-    desc: "该错误来自本次上游合并，不在你最初要求的范围内。",
-    options: ["修复它（推荐）", "只记录到文档，暂不修复", "跳过类型检查"],
-  },
-  {
-    id: "e12", type: "checkpoint", no: 12, time: "14:06",
-    files: 3, add: 218, del: 4, tests: "未运行", build: "通过", preview: "已刷新",
-    desc: "文档整理完成，等待类型错误处理决策",
-  },
-  {
-    id: "e13", type: "user", time: "14:07",
-    html: "修复它。另外把 Mermaid 缩放也顺手验证一下 Preview。",
-    refs: ["components/MermaidBlock.tsx"],
-  },
-  {
-    id: "e14", type: "toolgroup", count: 3,
-    summary: "编辑 MermaidBlock.tsx · 重新运行类型检查 · 刷新 Preview",
-    tools: [
-      { name: "Edit", target: "components/MermaidBlock.tsx", status: "done", dur: "0.9s" },
-      { name: "Bash", target: "npm run typecheck", status: "done", dur: "11.2s" },
-      { name: "Preview", target: "http://127.0.0.1:30141", status: "done", dur: "2.1s" },
-    ],
-  },
-  {
-    id: "e15", type: "assistant", time: "14:09", streaming: true,
-    html:
-      "<h3>3. 类型检查与质量验证：</h3>" +
-      "<p>已修复 <span class=\"chip-file\">components/MermaidBlock.tsx:147</span> 的字面量类型问题（改为 <span class=\"chip-code\">as const</span> 断言），<span class=\"chip-code\">tsc --noEmit</span> 现在 0 错误通过。Preview 已在 <span class=\"chip-code\">127.0.0.1:30141</span> 热更新，Mermaid 全屏缩放拖拽验证正常。</p>" +
-      "<p>本轮共修改 <strong>4 个文件</strong>（+221 / -5），建议创建一个 Checkpoint。</p>",
-  },
-  { id: "e16", type: "compact", pct: 22, summary: "Context 使用 22%（225k / 1.0M），距离自动 Compact 阈值（80%）较远。" },
+  { name: "Skills", v: "24k", pct: 10.9, color: "#6e56cf" },
+  { name: "对话消息", v: "123.4k", pct: 56.0, color: "#3b9bd4" },
 ];
 
 export const PREVIEW_MINIMAP: PreviewMinimap[] = [

@@ -1,0 +1,51 @@
+# OMP Studio — electron-builder 配置（NSIS target，骨架阶段）
+# 用法：npx electron-builder --config packaging/electron-builder.yml --win nsis
+
+appId: com.ompstudio.app
+productName: OMP Studio
+copyright: Copyright © 2026 OMP Studio
+
+# 打包的应用根：apps/desktop（从仓库根执行的相对路径）
+appDirectory: apps/desktop
+
+directories:
+  output: outputs/installer
+  buildResources: packaging/resources
+
+files:
+  - dist/**          # apps/desktop/dist — 编译后的 Electron Main
+  - package.json
+  - node_modules/**  # 依赖（含 @omp-studio/* workspace 包与 node-pty）
+
+# 原生模块：按 Electron ABI 重编译 node-pty（与 apps/desktop 的 @electron/rebuild 对应）
+npmRebuild: true
+buildDependenciesFromSource: false
+
+# asar 内保留原生模块（否则 node-pty 运行时找不到 .node 文件）
+asarUnpack:
+  - "**/*.node"
+
+win:
+  # 骨架阶段：x64 即可；正式发布再加 arm64
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # 复用 desktop 现有图标资源（ico 用于安装器/快捷方式）
+  icon: apps/desktop/resources/icon.ico
+
+nsis:
+  # 向导式安装（非 oneClick）：允许选择安装目录，符合原型 UI 的交互
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # 每用户安装（免管理员）；企业场景可改 perMachine
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: OMP Studio
+  # 卸载时保留用户数据目录（运行时、会话等）
+  deleteAppDataOnUninstall: false
+  # 骨架阶段未完成签名；正式发布需替换为真实证书
+  # signingHashAlgorithms: [sha256]
+  # 自定义 NSIS 脚本钩子（后续翻译 UI 原型时用）：
+  # include: packaging/nsis/custom.nsh

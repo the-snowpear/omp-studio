@@ -2,7 +2,7 @@
  * Durable Host-owned workspace registry.
  *
  * The registry is the ONLY place workspace paths live. It maps an opaque
- * random `workspaceId` to a canonical absolute directory path, a basename
+ * random `workspaceId` to a canonical absolute directory path, a user-facing
  * display name and the last-opened timestamp, persisted under the profile
  * directory (`workspaces.json`) with the same atomic tmp+rename flush as
  * {@link ThreadBindingStore}. Nothing in the client contract, transport or
@@ -20,7 +20,7 @@ export interface StoredWorkspace {
   workspaceId: string;
   /** Canonical absolute directory path. Host-only. */
   canonicalPath: string;
-  /** Display basename of {@link canonicalPath}. */
+  /** User-facing display name; defaults to the basename of {@link canonicalPath}. */
   name: string;
   /** ISO last-opened timestamp. */
   lastOpenedAt: string;
@@ -101,7 +101,7 @@ export class WorkspaceRegistry {
    * same canonical path (case-insensitive on win32) reuses its id, updates
    * `lastOpenedAt` and makes it active; a new path gets a fresh opaque id.
    */
-  async upsertByPath(dir: string, nowIso: string = new Date().toISOString()): Promise<StoredWorkspace> {
+  async upsertByPath(dir: string, nowIso: string = new Date().toISOString(), displayName?: string): Promise<StoredWorkspace> {
     let metadata;
     try {
       metadata = await lstat(dir);
@@ -123,6 +123,7 @@ export class WorkspaceRegistry {
       const refreshed: StoredWorkspace = {
         ...existing,
         canonicalPath,
+        ...(displayName === undefined ? {} : { name: displayName }),
         lastOpenedAt: nowIso,
       };
       this.#workspaces.set(refreshed.workspaceId, refreshed);
@@ -133,7 +134,7 @@ export class WorkspaceRegistry {
     const created: StoredWorkspace = {
       workspaceId: randomBytes(16).toString("base64url"),
       canonicalPath,
-      name: basename(canonicalPath),
+      name: displayName ?? basename(canonicalPath),
       lastOpenedAt: nowIso,
     };
     this.#workspaces.set(created.workspaceId, created);

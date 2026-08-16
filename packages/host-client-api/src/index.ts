@@ -30,8 +30,12 @@ export type {
   HostRuntimeInstallService,
   HostSemanticCommandService,
   HostSessionCatalogProvider,
+  HostSessionArchiveProvider,
   HostUsageService,
   HostWorkspaceService,
+  HostWorkspaceFileService,
+  HostGitService,
+  HostGitHubService,
 } from "./services.js";
 
 export {
@@ -45,6 +49,8 @@ export {
   sanitizeDisplayText,
   threadIdFor,
 } from "./read-models.js";
+
+export { mapRemoteInteractionToClient, sanitizeApprovalDetail } from "./interaction-map.js";
 
 export { HostEventBus, HostEventCursor, eventMatchesScope } from "./events.js";
 export type { HostEventContext, HostEventSeed, HostEventSeedBase } from "./events.js";

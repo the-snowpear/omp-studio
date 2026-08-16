@@ -471,6 +471,18 @@ test("process probe uses the real studio-host CLI contract", () => {
     "--bridge-runtime-epoch",
     "1",
   ]);
+  assert.deepEqual(buildProcessProbeArgs(["--cwd", "D:\\\\ws"], { endpoint: "pipe", tokenFile: "token" }, 3), [
+    "--mode",
+    "studio-host",
+    "--cwd",
+    "D:\\\\ws",
+    "--bridge-endpoint",
+    "pipe",
+    "--bridge-token-file",
+    "token",
+    "--bridge-runtime-epoch",
+    "3",
+  ]);
 });
 
 test("profile limited with all required capabilities is still limited-system", async () => {

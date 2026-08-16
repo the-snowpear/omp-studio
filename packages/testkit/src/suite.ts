@@ -153,6 +153,35 @@ export function runTransportContract(name: string, factory: TransportFactory): v
       assert.equal(manifest.result.hash, contractFixtures.bootstrap.commandManifestHash);
     });
 
+    await t.test("transcript query and conversation events are in the suite", async () => {
+      const { api, transport } = createHarness(factory);
+      const request = {
+        queryName: "session.transcript.read" as const,
+        input: contractFixtures.queryInputs["session.transcript.read"],
+      };
+      const response = await transport.query(request);
+      assert.equal(response.ok, true);
+      if (!response.ok) {
+        assert.fail("session.transcript.read must resolve ok");
+      }
+      assert.equal(response.queryName, "session.transcript.read");
+      assert.ok(Array.isArray(response.result.items));
+      assert.equal(typeof response.result.headCursor, "string");
+      assert.notEqual(response.result.headCursor.length, 0);
+
+      const received: ClientEvent[] = [];
+      transport.subscribe({ scope: "runtime" }, (event) => received.push(event));
+      const conversation = contractFixtures.events.find((event) => event.kind === "conversation.changed");
+      assert.ok(conversation, "fixture events must include conversation.changed");
+      api.emit(conversation);
+      assert.equal(received.length, 1);
+      assert.equal(received[0]?.kind, "conversation.changed");
+      if (received[0]?.kind === "conversation.changed") {
+        assert.equal(received[0].eventSeq, conversation.kind === "conversation.changed" ? conversation.eventSeq : -1);
+        assert.equal(received[0].occurredAt, conversation.occurredAt);
+      }
+    });
+
     await t.test("query input is defensively cloned before forwarding", async () => {
       const { api, transport } = createHarness(factory);
       const input = { limit: 5 };

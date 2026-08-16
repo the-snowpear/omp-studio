@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import type {
@@ -173,13 +173,13 @@ test("workspace.pick through the real adapter completes and never serializes the
           workspaces: service,
         });
         try {
-          const event = await runWorkspaceCommand(realFacade, "workspace.pick", {}, "pick-1");
+          const event = await runWorkspaceCommand(realFacade, "workspace.pick", { name: "Studio Sandbox" }, "pick-1");
           assert.equal(event.kind, "command.receipt");
           if (event.kind !== "command.receipt") return;
           assert.equal(event.receipt.status, "completed");
           const result = event.receipt.result as WorkspaceListReadModel;
           assert.equal(result.workspaces.length, 1);
-          assert.equal(result.workspaces[0]!.name, basename(picked));
+          assert.equal(result.workspaces[0]!.name, "Studio Sandbox");
           assert.equal(result.workspaces[0]!.active, true);
           const json = JSON.stringify(event);
           assert.ok(!json.includes("C:\\"), "completed pick receipt must not leak a drive path");

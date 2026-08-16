@@ -1,0 +1,1708 @@
+diff --git a/packages/coding-agent/src/studio/services/conversation-live-projector.ts b/packages/coding-agent/src/studio/services/conversation-live-projector.ts
+new file mode 100644
+index 0000000..82e7167
+--- /dev/null
++++ b/packages/coding-agent/src/studio/services/conversation-live-projector.ts
+@@ -0,0 +1,883 @@
++import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
++import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";
++import { logger } from "@oh-my-pi/pi-utils";
++import type { AgentSessionEvent } from "../../session/agent-session-events";
++import {
++	CONVERSATION_LIMITS,
++	type ConversationContentBlock,
++	type ConversationMessageItem,
++	type ConversationRole,
++	type ConversationRuntimeEvent,
++	parseConversationRuntimeEvent,
++} from "../conversation-protocol";
++import { sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
++
++export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
++export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
++export const CONVERSATION_LIVE_QUEUE_LIMIT = 128;
++
++export interface ConversationLiveClock {
++	nowMs(): number;
++	nowIso(): string;
++	setTimer(callback: () => void, delayMs: number): unknown;
++	clearTimer(timer: unknown): void;
++}
++
++export interface ConversationLiveBindTarget {
++	subscribe(listener: (event: AgentSessionEvent) => void): () => void;
++}
++
++export interface ConversationLiveProjectorOptions {
++	sessionId: string;
++	runtimeEpoch: number;
++	reserveMessageId: (input: { role: ConversationRole; createdAt: string }) => string;
++	/** Non-message entries (compaction). Must not consume the message-id FIFO. */
++	allocateEntryId?: () => string;
++	reserveCompactionId?: () => string;
++	releaseCompactionId?: (id: string) => void;
++	lookupPersistedCompactionId?: (input: { summary: string }) => string | undefined;
++	clock?: ConversationLiveClock;
++	coalesceIntervalMs?: number;
++	coalesceCharThreshold?: number;
++	queueLimit?: number;
++	onDiagnostic?: (message: string) => void;
++}
++
++type LiveListener = (event: ConversationRuntimeEvent) => void;
++
++type PendingDelta = {
++	sessionId: string;
++	turnId: string;
++	messageId: string;
++	blockId: string;
++	blockType: "text" | "thinking";
++	delta: string;
++};
++
++type OpenMessage = {
++	messageId: string;
++	turnId: string;
++	role: ConversationRole;
++	createdAt: string;
++	parentId: string | null;
++	blocks: Map<string, { blockType: "text" | "thinking"; text: string }>;
++	toolCalls: Map<string, Extract<ConversationContentBlock, { type: "toolCall" }>>;
++	completed: boolean;
++};
++
++function defaultClock(): ConversationLiveClock {
++	return {
++		nowMs: () => Date.now(),
++		nowIso: () => new Date().toISOString(),
++		setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
++		clearTimer: timer => {
++			clearTimeout(timer as never);
++		},
++	};
++}
++
++function isAssistant(message: AgentMessage): message is AssistantMessage {
++	return message.role === "assistant";
++}
++
++function publicRole(role: string): ConversationRole | undefined {
++	if (role === "user" || role === "assistant" || role === "system") return role;
++	return undefined;
++}
++
++function createdAtOf(message: AgentMessage, fallbackIso: string): string {
++	if ("timestamp" in message && typeof message.timestamp === "number" && Number.isFinite(message.timestamp)) {
++		return new Date(message.timestamp).toISOString();
++	}
++	return fallbackIso;
++}
++
++function userText(message: AgentMessage): string {
++	if (message.role !== "user") return "";
++	if (typeof message.content === "string") return message.content;
++	if (!Array.isArray(message.content)) return "";
++	return message.content
++		.filter(block => block.type === "text")
++		.map(block => block.text)
++		.join("");
++}
++
++function isControlEvent(kind: ConversationRuntimeEvent["kind"]): boolean {
++	return kind !== "conversation.message.delta" && kind !== "conversation.tool.updated";
++}
++
++function toolText(result: unknown): { text: string; isError: boolean } {
++	if (result instanceof Error) return { text: result.message, isError: true };
++	if (result === null || result === undefined) return { text: "", isError: false };
++	if (typeof result === "string") return { text: result, isError: false };
++	if (typeof result !== "object") return { text: String(result), isError: false };
++	const record = result as Record<string, unknown>;
++	const isError = record.isError === true;
++	if (Array.isArray(record.content)) {
++		const text = record.content
++			.filter((block): block is { type: "text"; text: string } => {
++				return (
++					block !== null &&
++					typeof block === "object" &&
++					(block as { type?: unknown }).type === "text" &&
++					typeof (block as { text?: unknown }).text === "string"
++				);
++			})
++			.map(block => block.text)
++			.join("");
++		return { text, isError };
++	}
++	if (typeof record.output === "string") return { text: record.output, isError };
++	if (typeof record.message === "string") return { text: record.message, isError };
++	return { text: "", isError };
++}
++
++function sameDeltaIdentity(
++	left: Extract<ConversationRuntimeEvent, { kind: "conversation.message.delta" }>,
++	right: Extract<ConversationRuntimeEvent, { kind: "conversation.message.delta" }>,
++): boolean {
++	return (
++		left.sessionId === right.sessionId &&
++		left.turnId === right.turnId &&
++		left.messageId === right.messageId &&
++		left.blockId === right.blockId &&
++		left.blockType === right.blockType
++	);
++}
++
++/**
++ * Projects `AgentSession.subscribe()` events into contract live events.
++ * Does not wrap StudioEventEnvelope; StateProjector owns eventSeq/stateVersion.
++ */
++export class ConversationLiveProjector {
++	readonly #options: ConversationLiveProjectorOptions;
++	readonly #clock: ConversationLiveClock;
++	readonly #listeners = new Set<LiveListener>();
++	readonly #queue: ConversationRuntimeEvent[] = [];
++	readonly #pending = new Map<string, PendingDelta>();
++	readonly #openMessages = new Map<string, OpenMessage>();
++	readonly #completedMessageIds = new Set<string>();
++	readonly #completedToolIds = new Set<string>();
++	readonly #toolOutput = new Map<string, string>();
++	#sessionId: string;
++	#runtimeEpoch: number;
++	#generation = 0;
++	#turnSeq = 0;
++	#turnId: string | undefined;
++	#turnAborted = false;
++	#turnCompleted = false;
++	#lastItemId: string | null = null;
++	#openAssistantId: string | undefined;
++	#openCompactionId: string | undefined;
++	#unsubscribe: (() => void) | undefined;
++	#coalesceTimer: unknown;
++	#disposed = false;
++
++	constructor(options: ConversationLiveProjectorOptions) {
++		this.#options = options;
++		this.#clock = options.clock ?? defaultClock();
++		this.#sessionId = options.sessionId;
++		this.#runtimeEpoch = options.runtimeEpoch;
++	}
++
++	get sessionId(): string {
++		return this.#sessionId;
++	}
++
++	get runtimeEpoch(): number {
++		return this.#runtimeEpoch;
++	}
++
++	onEvent(listener: LiveListener): () => void {
++		this.#listeners.add(listener);
++		return () => this.#listeners.delete(listener);
++	}
++
++	bind(target: ConversationLiveBindTarget): void {
++		this.#unsubscribe?.();
++		this.#unsubscribe = target.subscribe(event => this.project(event));
++	}
++
++	rebind(target: ConversationLiveBindTarget | undefined, identity: { sessionId: string; runtimeEpoch: number }): void {
++		this.#unsubscribe?.();
++		this.#unsubscribe = undefined;
++		this.#clearLiveState();
++		this.#sessionId = identity.sessionId;
++		this.#runtimeEpoch = identity.runtimeEpoch;
++		this.#generation += 1;
++		if (target !== undefined) this.bind(target);
++	}
++
++	flush(): void {
++		this.#flushPendingDeltas();
++		this.#drain();
++	}
++
++	dispose(): void {
++		this.#unsubscribe?.();
++		this.#unsubscribe = undefined;
++		this.#clearCoalesceTimer();
++		this.#pending.clear();
++		this.#queue.length = 0;
++		this.#clearLiveState();
++		this.#listeners.clear();
++		this.#disposed = true;
++	}
++
++	project(event: AgentSessionEvent): void {
++		if (this.#disposed) return;
++		try {
++			this.#project(event);
++		} catch (error) {
++			this.#diagnostic(error instanceof Error ? error.message : "conversation live projector failed");
++		}
++	}
++
++	#project(event: AgentSessionEvent): void {
++		switch (event.type) {
++			case "agent_start":
++				this.#onAgentStart();
++				return;
++			case "agent_end":
++				this.#onAgentEnd();
++				return;
++			case "message_start":
++				this.#onMessageStart(event.message);
++				return;
++			case "message_update":
++				this.#onMessageUpdate(event.message, event.assistantMessageEvent);
++				return;
++			case "message_end":
++				this.#onMessageEnd(event.message);
++				return;
++			case "tool_execution_start":
++				this.#onToolStart(event);
++				return;
++			case "tool_execution_update":
++				this.#onToolUpdate(event);
++				return;
++			case "tool_execution_end":
++				this.#onToolEnd(event);
++				return;
++			case "auto_compaction_start":
++				this.#onCompactionStart(event.action);
++				return;
++			case "auto_compaction_end":
++				this.#onCompactionEnd(event);
++				return;
++			case "auto_retry_start":
++				this.#emitNotice("warning", `Retry ${event.attempt}/${event.maxAttempts}`, "retry");
++				return;
++			case "notice":
++				this.#emitNotice(event.level, event.message, event.source);
++				return;
++			default:
++				return;
++		}
++	}
++
++	#onAgentStart(): void {
++		this.#turnSeq += 1;
++		this.#turnId = `turn-${this.#turnSeq}`;
++		this.#turnAborted = false;
++		this.#turnCompleted = false;
++		this.#openAssistantId = undefined;
++	}
++
++	#onAgentEnd(): void {
++		this.#flushPendingDeltas();
++		const turnId = this.#ensureTurnId();
++		if (this.#turnAborted) {
++			this.#emitParsed({ kind: "conversation.turn.aborted", sessionId: this.#sessionId, turnId });
++		} else if (!this.#turnCompleted) {
++			this.#emitParsed({ kind: "conversation.turn.completed", sessionId: this.#sessionId, turnId });
++		}
++		this.#turnCompleted = true;
++		this.#openAssistantId = undefined;
++	}
++
++	#onMessageStart(message: AgentMessage): void {
++		if (message.role === "user" && "synthetic" in message && message.synthetic) return;
++		if (message.role === "user" && "steering" in message && message.steering) return;
++		const role = publicRole(message.role);
++		if (role === undefined) {
++			this.#diagnostic(`ignored session message role ${message.role}`);
++			return;
++		}
++		if (this.#turnAborted) return;
++		const turnId = this.#ensureTurnId();
++		const createdAt = createdAtOf(message, this.#clock.nowIso());
++		const messageId = this.#options.reserveMessageId({ role, createdAt });
++		const open: OpenMessage = {
++			messageId,
++			turnId,
++			role,
++			createdAt,
++			parentId: this.#lastItemId,
++			blocks: new Map(),
++			toolCalls: new Map(),
++			completed: false,
++		};
++		this.#openMessages.set(messageId, open);
++		if (role === "assistant") this.#openAssistantId = messageId;
++		this.#emitParsed({
++			kind: "conversation.message.started",
++			sessionId: this.#sessionId,
++			turnId,
++			messageId,
++			role,
++			createdAt,
++		});
++	}
++
++	#onMessageUpdate(message: AgentMessage, stream: AssistantMessageEvent): void {
++		if (!isAssistant(message)) return;
++		if (this.#turnAborted) return;
++		const open = this.#openAssistant();
++		if (open === undefined || open.completed || this.#completedMessageIds.has(open.messageId)) return;
++		if (stream.type === "text_delta" || stream.type === "thinking_delta") {
++			const blockType = stream.type === "text_delta" ? "text" : "thinking";
++			this.#appendDelta(open, stream.contentIndex, blockType, stream.delta);
++			return;
++		}
++		if (stream.type === "text_start" || stream.type === "thinking_start") {
++			const blockType = stream.type === "text_start" ? "text" : "thinking";
++			this.#blockId(open.messageId, stream.contentIndex, blockType);
++			return;
++		}
++		if (stream.type === "toolcall_end") {
++			this.#recordToolCall(open, stream.toolCall);
++		}
++	}
++
++	#onMessageEnd(message: AgentMessage): void {
++		if (message.role === "user" && "synthetic" in message && message.synthetic) return;
++		if (message.role === "user" && "steering" in message && message.steering) return;
++		const role = publicRole(message.role);
++		if (role === undefined) {
++			this.#diagnostic(`ignored session message role ${message.role}`);
++			return;
++		}
++		let open =
++			role === "assistant"
++				? this.#openAssistant()
++				: [...this.#openMessages.values()].find(item => item.role === role && !item.completed);
++		if (open === undefined) {
++			const alreadyCompleted = [...this.#openMessages.values()].some(
++				item => item.role === role && item.completed && item.turnId === this.#turnId,
++			);
++			if (alreadyCompleted || this.#turnAborted) return;
++			this.#onMessageStart(message);
++			open =
++				role === "assistant"
++					? this.#openAssistant()
++					: [...this.#openMessages.values()].find(item => item.role === role && !item.completed);
++		}
++		if (open === undefined) return;
++		this.#hydrateFromMessage(open, message);
++		this.#completeMessage(open, message);
++		if (isAssistant(message) && message.stopReason === "aborted") this.#turnAborted = true;
++		if (role === "assistant") this.#openAssistantId = undefined;
++	}
++
++	#onToolStart(event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>): void {
++		if (this.#turnAborted) return;
++		this.#flushPendingDeltas();
++		const turnId = this.#ensureTurnId();
++		const messageId =
++			this.#openAssistantId ??
++			this.#lastItemId ??
++			this.#options.reserveMessageId({
++				role: "assistant",
++				createdAt: this.#clock.nowIso(),
++			});
++		const args = sanitizeToolArguments(event.args);
++		const toolName = sanitizePublicText(event.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
++		if (toolName.length === 0) {
++			this.#diagnostic("dropped tool start with empty tool name");
++			return;
++		}
++		const started: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }> = {
++			kind: "conversation.tool.started",
++			sessionId: this.#sessionId,
++			turnId,
++			messageId,
++			toolCallId: event.toolCallId,
++			toolName,
++			startedAt: this.#clock.nowIso(),
++		};
++		if (args.arguments !== undefined) started.arguments = args.arguments;
++		this.#emitParsed(started);
++		const open = this.#openMessages.get(messageId);
++		if (open !== undefined) {
++			this.#recordToolCall(open, {
++				type: "toolCall",
++				id: event.toolCallId,
++				name: event.toolName,
++				arguments: (event.args ?? {}) as Record<string, unknown>,
++			});
++		}
++	}
++
++	#onToolUpdate(event: Extract<AgentSessionEvent, { type: "tool_execution_update" }>): void {
++		if (this.#turnAborted) return;
++		if (this.#completedToolIds.has(event.toolCallId)) return;
++		this.#flushPendingDeltas();
++		const extracted = toolText(event.partialResult);
++		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++		const previous = this.#toolOutput.get(event.toolCallId);
++		let updateMode: "append" | "replace" = "replace";
++		let output = sanitized.text;
++		if (previous !== undefined && sanitized.text.startsWith(previous) && sanitized.text.length > previous.length) {
++			updateMode = "append";
++			output = sanitized.text.slice(previous.length);
++		}
++		this.#toolOutput.set(event.toolCallId, sanitized.text);
++		if (output.length === 0 && !sanitized.truncated) return;
++		const updated: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> = {
++			kind: "conversation.tool.updated",
++			sessionId: this.#sessionId,
++			turnId: this.#ensureTurnId(),
++			toolCallId: event.toolCallId,
++			updateMode,
++		};
++		if (output.length > 0) updated.output = output;
++		if (sanitized.truncated) updated.truncated = true;
++		this.#emitParsed(updated);
++	}
++
++	#onToolEnd(event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>): void {
++		this.#flushPendingDeltas();
++		if (this.#completedToolIds.has(event.toolCallId)) return;
++		this.#completedToolIds.add(event.toolCallId);
++		const extracted = toolText(event.result);
++		const isError = event.isError === true || extracted.isError || event.result instanceof Error;
++		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++		const toolName = sanitizePublicText(event.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
++		const result: Extract<ConversationContentBlock, { type: "toolResult" }> = {
++			type: "toolResult",
++			toolCallId: event.toolCallId,
++			isError,
++		};
++		if (toolName.length > 0) result.toolName = toolName;
++		if (sanitized.text.length > 0) result.output = sanitized.text;
++		if (sanitized.truncated) result.truncated = true;
++		this.#emitParsed({
++			kind: "conversation.tool.completed",
++			sessionId: this.#sessionId,
++			turnId: this.#ensureTurnId(),
++			toolCallId: event.toolCallId,
++			result,
++			completedAt: this.#clock.nowIso(),
++		});
++	}
++
++	#onCompactionStart(action: string): void {
++		this.#releaseOpenCompaction();
++		this.#openCompactionId = this.#reserveCompactionId();
++		this.#emitParsed({
++			kind: "conversation.compaction.started",
++			sessionId: this.#sessionId,
++			action,
++		});
++	}
++
++	#onCompactionEnd(event: Extract<AgentSessionEvent, { type: "auto_compaction_end" }>): void {
++		this.#flushPendingDeltas();
++		const aborted = event.aborted === true;
++		const hasPersistedAuthority =
++			!aborted && !event.skipped && event.result !== undefined && event.result.summary.length > 0;
++		if (!hasPersistedAuthority) {
++			this.#releaseOpenCompaction();
++			this.#emitParsed({
++				kind: "conversation.compaction.completed",
++				sessionId: this.#sessionId,
++				aborted,
++			});
++			return;
++		}
++		const result = event.result;
++		if (result === undefined) {
++			// Not persisted (safety net); the compiler cannot narrow through
++			// the compound hasPersistedAuthority expression above.
++			return;
++		}
++		const summary = sanitizePublicText(result.summary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES);
++		const itemId =
++			this.#openCompactionId ??
++			this.#options.lookupPersistedCompactionId?.({ summary: result.summary }) ??
++			this.#reserveCompactionId();
++		this.#openCompactionId = undefined;
++		const completed: Extract<ConversationRuntimeEvent, { kind: "conversation.compaction.completed" }> = {
++			kind: "conversation.compaction.completed",
++			sessionId: this.#sessionId,
++			aborted: false,
++			item: {
++				kind: "compaction",
++				itemId,
++				parentId: this.#lastItemId,
++				createdAt: this.#clock.nowIso(),
++				summary: summary.text.length > 0 ? summary.text : "compacted",
++			},
++		};
++		if (result.shortSummary !== undefined && completed.item !== undefined) {
++			completed.item.shortSummary = sanitizePublicText(
++				result.shortSummary,
++				CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES,
++			).text;
++		}
++		this.#lastItemId = itemId;
++		this.#emitParsed(completed);
++	}
++
++	#reserveCompactionId(): string {
++		return (
++			this.#options.reserveCompactionId?.() ??
++			this.#options.allocateEntryId?.() ??
++			this.#options.reserveMessageId({
++				role: "system",
++				createdAt: this.#clock.nowIso(),
++			})
++		);
++	}
++
++	#releaseOpenCompaction(): void {
++		if (this.#openCompactionId === undefined) return;
++		this.#options.releaseCompactionId?.(this.#openCompactionId);
++		this.#openCompactionId = undefined;
++	}
++
++	#emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void {
++		const sanitized = sanitizePublicText(message, CONVERSATION_LIMITS.NOTICE_MESSAGE_MAX_CHARS);
++		if (sanitized.text.length === 0) return;
++		const notice: Extract<ConversationRuntimeEvent, { kind: "conversation.notice" }> = {
++			kind: "conversation.notice",
++			sessionId: this.#sessionId,
++			level,
++			message: sanitized.text,
++		};
++		if (source !== undefined && source.length > 0) {
++			const cleanSource = sanitizePublicText(source, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS).text;
++			if (cleanSource.length > 0) notice.source = cleanSource;
++		}
++		this.#emitParsed(notice);
++	}
++
++	#appendDelta(open: OpenMessage, contentIndex: number, blockType: "text" | "thinking", delta: string): void {
++		if (delta.length === 0) return;
++		const blockId = this.#blockId(open.messageId, contentIndex, blockType);
++		const existing = open.blocks.get(blockId) ?? { blockType, text: "" };
++		existing.text += delta;
++		open.blocks.set(blockId, existing);
++		const pendingKey = `${open.messageId}:${blockId}`;
++		const pending = this.#pending.get(pendingKey);
++		if (pending !== undefined) pending.delta += delta;
++		else {
++			this.#pending.set(pendingKey, {
++				sessionId: this.#sessionId,
++				turnId: open.turnId,
++				messageId: open.messageId,
++				blockId,
++				blockType,
++				delta,
++			});
++		}
++		const threshold = this.#options.coalesceCharThreshold ?? CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD;
++		const buffered = this.#pending.get(pendingKey);
++		if (buffered !== undefined && buffered.delta.length >= threshold) this.#flushPendingKey(pendingKey);
++		else this.#scheduleCoalesce();
++	}
++
++	#hydrateFromMessage(open: OpenMessage, message: AgentMessage): void {
++		if (message.role === "user") {
++			const text = userText(message);
++			if (text.length > 0) {
++				const blockId = this.#blockId(open.messageId, 0, "text");
++				const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++				open.blocks.set(blockId, { blockType: "text", text: sanitized.text });
++			}
++			return;
++		}
++		if (!isAssistant(message) || !Array.isArray(message.content)) return;
++		message.content.forEach((block, index) => {
++			if (block.type === "text") {
++				const blockId = this.#blockId(open.messageId, index, "text");
++				const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++				open.blocks.set(blockId, { blockType: "text", text: sanitized.text });
++				return;
++			}
++			if (block.type === "thinking") {
++				const blockId = this.#blockId(open.messageId, index, "thinking");
++				const sanitized = sanitizePublicText(block.thinking, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++				open.blocks.set(blockId, { blockType: "thinking", text: sanitized.text });
++				return;
++			}
++			if (block.type === "toolCall") this.#recordToolCall(open, block);
++		});
++	}
++
++	#contentFromLiveBuffers(open: OpenMessage): ConversationContentBlock[] {
++		const content: ConversationContentBlock[] = [];
++		for (const block of open.blocks.values()) {
++			const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++			if (sanitized.text.length === 0 && !sanitized.truncated) continue;
++			const item: ConversationContentBlock = { type: block.blockType, text: sanitized.text };
++			if (sanitized.truncated) item.truncated = true;
++			content.push(item);
++		}
++		for (const toolCall of open.toolCalls.values()) content.push(toolCall);
++		return content;
++	}
++
++	#contentFromMessage(open: OpenMessage, message: AgentMessage): ConversationContentBlock[] {
++		if (message.role === "user") {
++			const text = userText(message);
++			const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++			if (sanitized.text.length === 0 && !sanitized.truncated) return [];
++			const block: ConversationContentBlock = { type: "text", text: sanitized.text };
++			if (sanitized.truncated) block.truncated = true;
++			return [block];
++		}
++		if (!isAssistant(message) || !Array.isArray(message.content)) return this.#contentFromLiveBuffers(open);
++		const content: ConversationContentBlock[] = [];
++		for (const block of message.content) {
++			if (block.type === "text") {
++				const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++				const item: ConversationContentBlock = { type: "text", text: sanitized.text };
++				if (sanitized.truncated) item.truncated = true;
++				if (item.text.length > 0 || item.truncated) content.push(item);
++				continue;
++			}
++			if (block.type === "thinking") {
++				const sanitized = sanitizePublicText(block.thinking, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
++				const item: ConversationContentBlock = { type: "thinking", text: sanitized.text };
++				if (sanitized.truncated) item.truncated = true;
++				if (item.text.length > 0 || item.truncated) content.push(item);
++				continue;
++			}
++			if (block.type === "toolCall") {
++				this.#recordToolCall(open, block);
++				const recorded = open.toolCalls.get(block.id);
++				if (recorded !== undefined) content.push(recorded);
++			}
++		}
++		return content;
++	}
++
++	#recordToolCall(open: OpenMessage, toolCall: ToolCall): void {
++		const args = sanitizeToolArguments(toolCall.arguments);
++		const toolName = sanitizePublicText(toolCall.name, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
++		if (toolName.length === 0) return;
++		const block: Extract<ConversationContentBlock, { type: "toolCall" }> = {
++			type: "toolCall",
++			toolCallId: toolCall.id,
++			toolName,
++		};
++		if (args.arguments !== undefined) block.arguments = args.arguments;
++		if (args.truncated) block.truncated = true;
++		open.toolCalls.set(toolCall.id, block);
++	}
++
++	#completeMessage(open: OpenMessage, message?: AgentMessage): void {
++		this.#flushPendingDeltas();
++		if (open.completed || this.#completedMessageIds.has(open.messageId)) return;
++		open.completed = true;
++		this.#completedMessageIds.add(open.messageId);
++		const content =
++			message !== undefined ? this.#contentFromMessage(open, message) : this.#contentFromLiveBuffers(open);
++		const item: ConversationMessageItem = {
++			kind: "message",
++			itemId: open.messageId,
++			parentId: open.parentId,
++			createdAt: open.createdAt,
++			role: open.role,
++			content,
++		};
++		this.#lastItemId = open.messageId;
++		this.#emitParsed({
++			kind: "conversation.message.completed",
++			sessionId: this.#sessionId,
++			turnId: open.turnId,
++			messageId: open.messageId,
++			item,
++		});
++	}
++
++	#blockId(messageId: string, contentIndex: number, blockType: "text" | "thinking"): string {
++		return `${messageId}:${blockType}:${contentIndex}`;
++	}
++
++	#openAssistant(): OpenMessage | undefined {
++		if (this.#openAssistantId === undefined) return undefined;
++		return this.#openMessages.get(this.#openAssistantId);
++	}
++
++	#ensureTurnId(): string {
++		if (this.#turnId !== undefined) return this.#turnId;
++		this.#onAgentStart();
++		return this.#turnId ?? "turn-1";
++	}
++
++	#scheduleCoalesce(): void {
++		if (this.#coalesceTimer !== undefined) return;
++		const delay = this.#options.coalesceIntervalMs ?? CONVERSATION_LIVE_COALESCE_INTERVAL_MS;
++		const generation = this.#generation;
++		this.#coalesceTimer = this.#clock.setTimer(() => {
++			this.#coalesceTimer = undefined;
++			if (this.#disposed || generation !== this.#generation) return;
++			this.#flushPendingDeltas();
++			this.#drain();
++		}, delay);
++	}
++
++	#clearCoalesceTimer(): void {
++		if (this.#coalesceTimer === undefined) return;
++		this.#clock.clearTimer(this.#coalesceTimer);
++		this.#coalesceTimer = undefined;
++	}
++
++	#flushPendingDeltas(): void {
++		this.#clearCoalesceTimer();
++		for (const key of [...this.#pending.keys()]) this.#flushPendingKey(key);
++	}
++
++	#flushPendingKey(key: string): void {
++		const pending = this.#pending.get(key);
++		if (pending === undefined) return;
++		this.#pending.delete(key);
++		if (this.#completedMessageIds.has(pending.messageId) || this.#turnAborted) return;
++		let remaining = pending.delta;
++		const max = CONVERSATION_LIMITS.DELTA_MAX_BYTES;
++		while (remaining.length > 0) {
++			const chunk = utf8ByteLength(remaining) <= max ? remaining : sanitizePublicText(remaining, max).text;
++			if (chunk.length === 0) break;
++			this.#emitParsed({
++				kind: "conversation.message.delta",
++				sessionId: pending.sessionId,
++				turnId: pending.turnId,
++				messageId: pending.messageId,
++				blockId: pending.blockId,
++				blockType: pending.blockType,
++				delta: chunk,
++			});
++			if (chunk === remaining) break;
++			remaining = remaining.slice(chunk.length);
++		}
++	}
++
++	#emitParsed(event: ConversationRuntimeEvent): void {
++		if (this.#disposed) return;
++		if ("runtimeEpoch" in event || "eventSeq" in event || "stateVersion" in event || "occurredAt" in event) {
++			this.#diagnostic("refusing inner live event that repeats envelope fields");
++			return;
++		}
++		let parsed: ConversationRuntimeEvent;
++		try {
++			parsed = parseConversationRuntimeEvent(event);
++		} catch (error) {
++			this.#diagnostic(error instanceof Error ? error.message : "invalid conversation live event");
++			return;
++		}
++		this.#enqueue(parsed);
++		this.#drain();
++	}
++
++	#enqueue(event: ConversationRuntimeEvent): void {
++		const limit = this.#options.queueLimit ?? CONVERSATION_LIVE_QUEUE_LIMIT;
++		if (!isControlEvent(event.kind) && this.#queue.length > 0) {
++			const last = this.#queue[this.#queue.length - 1];
++			if (
++				event.kind === "conversation.message.delta" &&
++				last?.kind === "conversation.message.delta" &&
++				sameDeltaIdentity(last, event) &&
++				utf8ByteLength(last.delta) + utf8ByteLength(event.delta) <= CONVERSATION_LIMITS.DELTA_MAX_BYTES
++			) {
++				this.#queue[this.#queue.length - 1] = { ...last, delta: last.delta + event.delta };
++				return;
++			}
++			if (
++				event.kind === "conversation.tool.updated" &&
++				last?.kind === "conversation.tool.updated" &&
++				last.toolCallId === event.toolCallId &&
++				last.turnId === event.turnId
++			) {
++				if (event.updateMode === "replace") {
++					this.#queue[this.#queue.length - 1] = event;
++					return;
++				}
++				if (last.updateMode === "append" && event.updateMode === "append") {
++					this.#queue[this.#queue.length - 1] = {
++						...last,
++						output: `${last.output ?? ""}${event.output ?? ""}`,
++						truncated: last.truncated === true || event.truncated === true ? true : undefined,
++					};
++					return;
++				}
++			}
++		}
++		if (this.#queue.length >= limit) this.#compactQueue();
++		if (this.#queue.length >= limit && !isControlEvent(event.kind)) return;
++		if (this.#queue.length >= limit && isControlEvent(event.kind)) {
++			const dropAt = this.#queue.findIndex(item => !isControlEvent(item.kind));
++			if (dropAt >= 0) this.#queue.splice(dropAt, 1);
++			else return;
++		}
++		this.#queue.push(event);
++	}
++
++	#compactQueue(): void {
++		if (this.#queue.length < 2) return;
++		const compacted: ConversationRuntimeEvent[] = [];
++		for (const event of this.#queue) {
++			const last = compacted[compacted.length - 1];
++			if (
++				event.kind === "conversation.message.delta" &&
++				last?.kind === "conversation.message.delta" &&
++				sameDeltaIdentity(last, event) &&
++				utf8ByteLength(last.delta) + utf8ByteLength(event.delta) <= CONVERSATION_LIMITS.DELTA_MAX_BYTES
++			) {
++				compacted[compacted.length - 1] = { ...last, delta: last.delta + event.delta };
++			} else compacted.push(event);
++		}
++		this.#queue.length = 0;
++		this.#queue.push(...compacted);
++	}
++
++	#drain(): void {
++		while (this.#queue.length > 0 && !this.#disposed) {
++			const event = this.#queue.shift();
++			if (event === undefined) break;
++			for (const listener of [...this.#listeners]) {
++				try {
++					listener(event);
++				} catch (error) {
++					this.#diagnostic(error instanceof Error ? error.message : "conversation live listener failed");
++					logger.warn("Conversation live projector listener threw", {
++						error: error instanceof Error ? error.message : String(error),
++					});
++				}
++			}
++		}
++	}
++
++	#clearLiveState(): void {
++		this.#clearCoalesceTimer();
++		this.#pending.clear();
++		this.#queue.length = 0;
++		this.#openMessages.clear();
++		this.#completedMessageIds.clear();
++		this.#completedToolIds.clear();
++		this.#toolOutput.clear();
++		this.#turnId = undefined;
++		this.#turnAborted = false;
++		this.#turnCompleted = false;
++		this.#lastItemId = null;
++		this.#openAssistantId = undefined;
++		this.#releaseOpenCompaction();
++	}
++
++	#diagnostic(message: string): void {
++		this.#options.onDiagnostic?.(message);
++		logger.warn("Conversation live projector", { message });
++	}
++}
+diff --git a/packages/coding-agent/src/studio/services/conversation-sanitizer.ts b/packages/coding-agent/src/studio/services/conversation-sanitizer.ts
+new file mode 100644
+index 0000000..6e3056a
+--- /dev/null
++++ b/packages/coding-agent/src/studio/services/conversation-sanitizer.ts
+@@ -0,0 +1,191 @@
++/**
++ * Shared conversation sanitizer for live events and (plan 02) transcript mapping.
++ *
++ * Truncates, redacts secret-shaped keys, drops providerPayload, and rejects
++ * cyclic / non-JSON values. Import this module instead of copying
++ * CONVERSATION_REDACT_KEY_PATTERN or a second redaction regex.
++ */
++import * as os from "node:os";
++import * as path from "node:path";
++import { CONVERSATION_LIMITS, CONVERSATION_REDACT_KEY_PATTERN, type JsonValue } from "../conversation-protocol";
++
++const encoder = new TextEncoder();
++const decoder = new TextDecoder();
++const REDACTED = "[redacted]";
++
++export function utf8ByteLength(text: string): number {
++	return encoder.encode(text).byteLength;
++}
++
++export function truncateUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
++	if (maxBytes <= 0) return { text: "", truncated: text.length > 0 };
++	const bytes = encoder.encode(text);
++	if (bytes.byteLength <= maxBytes) return { text, truncated: false };
++	let end = maxBytes;
++	while (end > 0 && (bytes[end] & 0b1100_0000) === 0b1000_0000) end -= 1;
++	return { text: decoder.decode(bytes.subarray(0, end)), truncated: true };
++}
++
++/**
++ * Mirrors `tools/render-utils.shortenPath` (home → `~`) without importing the
++ * TUI renderer graph. Transcript and live projectors must share this helper.
++ */
++export function shortenHomePath(filePath: string, homeDir = os.homedir()): string {
++	if (!homeDir) return filePath;
++	if (!filePath.startsWith(homeDir)) return filePath;
++	const suffix = filePath.slice(homeDir.length);
++	if (suffix === "" || suffix.startsWith(path.posix.sep) || suffix.startsWith(path.win32.sep)) {
++		return `~${suffix.replaceAll(path.win32.sep, path.posix.sep)}`;
++	}
++	return filePath;
++}
++
++export function sanitizePublicText(
++	text: string,
++	maxBytes: number,
++	homeDir = os.homedir(),
++): { text: string; truncated: boolean } {
++	return truncateUtf8(shortenHomePath(text, homeDir), maxBytes);
++}
++
++function isPlainObject(value: object): boolean {
++	const prototype = Object.getPrototypeOf(value);
++	return prototype === Object.prototype || prototype === null;
++}
++
++function redactKey(key: string): boolean {
++	return CONVERSATION_REDACT_KEY_PATTERN.test(key);
++}
++
++export type SanitizeJsonResult = {
++	value: JsonValue | undefined;
++	truncated: boolean;
++};
++
++function sanitizeJsonWalk(
++	value: unknown,
++	depth: number,
++	maxDepth: number,
++	seen: Set<object>,
++	homeDir: string,
++): SanitizeJsonResult {
++	if (depth > maxDepth) return { value: null, truncated: true };
++	if (value === null || typeof value === "boolean") return { value, truncated: false };
++	if (typeof value === "string") {
++		const shortened = shortenHomePath(value, homeDir);
++		return { value: shortened, truncated: shortened !== value };
++	}
++	if (typeof value === "number") {
++		if (!Number.isFinite(value)) return { value: null, truncated: true };
++		return { value, truncated: false };
++	}
++	if (typeof value !== "object") return { value: undefined, truncated: true };
++	if (seen.has(value)) return { value: null, truncated: true };
++	if (Array.isArray(value)) {
++		seen.add(value);
++		try {
++			let truncated = false;
++			const items: JsonValue[] = [];
++			for (const item of value) {
++				const next = sanitizeJsonWalk(item, depth + 1, maxDepth, seen, homeDir);
++				truncated = truncated || next.truncated;
++				if (next.value !== undefined) items.push(next.value);
++				else truncated = true;
++			}
++			return { value: items, truncated };
++		} finally {
++			seen.delete(value);
++		}
++	}
++	if (!isPlainObject(value)) return { value: undefined, truncated: true };
++	seen.add(value);
++	try {
++		let truncated = false;
++		const record: Record<string, JsonValue> = {};
++		for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
++			if (redactKey(key)) {
++				record[key] = REDACTED;
++				truncated = true;
++				continue;
++			}
++			const next = sanitizeJsonWalk(item, depth + 1, maxDepth, seen, homeDir);
++			truncated = truncated || next.truncated;
++			if (next.value !== undefined) record[key] = next.value;
++			else truncated = true;
++		}
++		return { value: record, truncated };
++	} finally {
++		seen.delete(value);
++	}
++}
++
++function collectStrings(
++	value: JsonValue,
++	bucket: { text: string; parent: Record<string, JsonValue> | JsonValue[]; key: string | number }[],
++): void {
++	if (typeof value === "string") return;
++	if (Array.isArray(value)) {
++		for (let index = 0; index < value.length; index++) {
++			const item = value[index];
++			if (typeof item === "string") bucket.push({ text: item, parent: value as JsonValue[], key: index });
++			else if (item !== null && typeof item === "object") collectStrings(item, bucket);
++		}
++		return;
++	}
++	if (value !== null && typeof value === "object") {
++		const record = value as Record<string, JsonValue>;
++		for (const [key, item] of Object.entries(record)) {
++			if (typeof item === "string") bucket.push({ text: item, parent: record, key });
++			else if (item !== null && typeof item === "object") collectStrings(item, bucket);
++		}
++	}
++}
++
++function shrinkToBudget(value: JsonValue, maxBytes: number): SanitizeJsonResult {
++	if (utf8ByteLength(JSON.stringify(value)) <= maxBytes) return { value, truncated: false };
++	if (typeof value === "string") {
++		let keep = Math.max(0, maxBytes - 2);
++		let next = truncateUtf8(value, keep);
++		while (keep > 0 && utf8ByteLength(JSON.stringify(next.text)) > maxBytes) {
++			keep = Math.floor(keep / 2);
++			next = truncateUtf8(value, keep);
++		}
++		return { value: next.text, truncated: true };
++	}
++	const clone = JSON.parse(JSON.stringify(value)) as JsonValue;
++	const strings: { text: string; parent: Record<string, JsonValue> | JsonValue[]; key: string | number }[] = [];
++	collectStrings(clone, strings);
++	strings.sort((a, b) => utf8ByteLength(b.text) - utf8ByteLength(a.text));
++	for (const entry of strings) {
++		if (utf8ByteLength(JSON.stringify(clone)) <= maxBytes) break;
++		const keep = Math.max(0, Math.floor(utf8ByteLength(entry.text) / 2));
++		const next = truncateUtf8(entry.text, keep);
++		if (Array.isArray(entry.parent)) entry.parent[entry.key as number] = next.text;
++		else entry.parent[entry.key as string] = next.text;
++	}
++	if (utf8ByteLength(JSON.stringify(clone)) <= maxBytes) return { value: clone, truncated: true };
++	return { value: undefined, truncated: true };
++}
++
++export function sanitizeJsonValue(
++	value: unknown,
++	options: { maxBytes?: number; maxDepth?: number; homeDir?: string } = {},
++): SanitizeJsonResult {
++	const maxBytes = options.maxBytes ?? CONVERSATION_LIMITS.JSON_VALUE_MAX_BYTES;
++	const maxDepth = options.maxDepth ?? CONVERSATION_LIMITS.JSON_VALUE_MAX_DEPTH;
++	const homeDir = options.homeDir ?? os.homedir();
++	const walked = sanitizeJsonWalk(value, 1, maxDepth, new Set(), homeDir);
++	if (walked.value === undefined) return walked;
++	const shrunk = shrinkToBudget(walked.value, maxBytes);
++	return { value: shrunk.value, truncated: walked.truncated || shrunk.truncated };
++}
++
++export function sanitizeToolArguments(
++	value: unknown,
++	options: { maxBytes?: number; maxDepth?: number; homeDir?: string } = {},
++): { arguments?: JsonValue; truncated: boolean } {
++	if (value === undefined) return { truncated: false };
++	const sanitized = sanitizeJsonValue(value, options);
++	if (sanitized.value === undefined) return { truncated: true };
++	return { arguments: sanitized.value, truncated: sanitized.truncated };
++}
+diff --git a/packages/coding-agent/test/studio-conversation-live-projector.test.ts b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
+new file mode 100644
+index 0000000..a5ef31d
+--- /dev/null
++++ b/packages/coding-agent/test/studio-conversation-live-projector.test.ts
+@@ -0,0 +1,616 @@
++import { describe, expect, test } from "bun:test";
++import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
++import type { AssistantMessage, AssistantMessageEvent, UserMessage } from "@oh-my-pi/pi-ai";
++import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session-events";
++import {
++	CONVERSATION_LIMITS,
++	type ConversationRuntimeEvent,
++	parseConversationRuntimeEvent,
++} from "@oh-my-pi/pi-coding-agent/studio/conversation-protocol";
++import {
++	CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD,
++	type ConversationLiveBindTarget,
++	ConversationLiveProjector,
++} from "@oh-my-pi/pi-coding-agent/studio/services/conversation-live-projector";
++import {
++	sanitizeJsonValue,
++	sanitizeToolArguments,
++} from "@oh-my-pi/pi-coding-agent/studio/services/conversation-sanitizer";
++
++const ZERO_USAGE = {
++	input: 0,
++	output: 0,
++	cacheRead: 0,
++	cacheWrite: 0,
++	totalTokens: 0,
++	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++};
++const TS = Date.UTC(2026, 7, 15, 0, 0, 0);
++
++class AgentSessionEventDouble implements ConversationLiveBindTarget {
++	readonly #listeners: Array<(event: AgentSessionEvent) => void> = [];
++
++	subscribe(listener: (event: AgentSessionEvent) => void): () => void {
++		this.#listeners.push(listener);
++		return () => {
++			const index = this.#listeners.indexOf(listener);
++			if (index >= 0) this.#listeners.splice(index, 1);
++		};
++	}
++
++	emit(event: AgentSessionEvent): void {
++		for (const listener of [...this.#listeners]) listener(event);
++	}
++
++	get listenerCount(): number {
++		return this.#listeners.length;
++	}
++}
++
++function assistant(content: AssistantMessage["content"], extra: Partial<AssistantMessage> = {}): AssistantMessage {
++	return {
++		role: "assistant",
++		content,
++		api: "openai-completions",
++		provider: "openai",
++		model: "test-model",
++		usage: ZERO_USAGE,
++		stopReason: "stop",
++		timestamp: TS,
++		...extra,
++	};
++}
++
++function user(text: string, extra: Partial<UserMessage> = {}): UserMessage {
++	return { role: "user", content: text, timestamp: TS, ...extra };
++}
++
++function update(
++	message: AssistantMessage,
++	stream: AssistantMessageEvent,
++): Extract<AgentSessionEvent, { type: "message_update" }> {
++	return { type: "message_update", message, assistantMessageEvent: stream };
++}
++
++function createProjector(sessionId = "session-1", runtimeEpoch = 1) {
++	let nextId = 1;
++	const events: ConversationRuntimeEvent[] = [];
++	const diagnostics: string[] = [];
++	const projector = new ConversationLiveProjector({
++		sessionId,
++		runtimeEpoch,
++		reserveMessageId: () => `msg-${nextId++}`,
++		coalesceIntervalMs: 60_000,
++		coalesceCharThreshold: CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD,
++		onDiagnostic: message => diagnostics.push(message),
++	});
++	projector.onEvent(event => events.push(event));
++	return { projector, events, diagnostics, ids: () => nextId };
++}
++
++function kinds(events: ConversationRuntimeEvent[]): string[] {
++	return events.map(event => event.kind);
++}
++
++function deltas(events: ConversationRuntimeEvent[], blockType?: "text" | "thinking"): string {
++	return events
++		.filter(
++			(event): event is Extract<ConversationRuntimeEvent, { kind: "conversation.message.delta" }> =>
++				event.kind === "conversation.message.delta" && (blockType === undefined || event.blockType === blockType),
++		)
++		.map(event => event.delta)
++		.join("");
++}
++
++function wireAll(events: ConversationRuntimeEvent[]): ConversationRuntimeEvent[] {
++	return events.map(event => parseConversationRuntimeEvent(JSON.parse(JSON.stringify(event))));
++}
++
++describe("conversation sanitizer", () => {
++	test("redacts secret keys, drops cycles, and truncates oversized JSON", () => {
++		expect(sanitizeToolArguments({ apiKey: "sk-secret", path: "ok" }).arguments).toEqual({
++			apiKey: "[redacted]",
++			path: "ok",
++		});
++		expect(sanitizeToolArguments({ providerPayload: { token: "abc" } }).truncated).toBe(true);
++		const cyclic: Record<string, unknown> = { keep: true };
++		cyclic.self = cyclic;
++		const cyclicResult = sanitizeJsonValue(cyclic);
++		expect(cyclicResult.truncated).toBe(true);
++		expect(() => JSON.stringify(cyclicResult.value)).not.toThrow();
++		const huge = "a".repeat(CONVERSATION_LIMITS.JSON_VALUE_MAX_BYTES + 8);
++		const oversized = sanitizeJsonValue(huge);
++		expect(oversized.truncated).toBe(true);
++		expect(JSON.stringify(oversized.value ?? "").length).toBeLessThanOrEqual(
++			CONVERSATION_LIMITS.JSON_VALUE_MAX_BYTES,
++		);
++	});
++});
++
++describe("ConversationLiveProjector", () => {
++	test("projects assistant start, coalesced deltas, then a completed item with matching messageId", () => {
++		const { projector, events } = createProjector();
++		const message = assistant([{ type: "text", text: "Hello world" }]);
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message });
++		projector.project(update(message, { type: "text_start", contentIndex: 0, partial: message }));
++		for (const piece of ["Hel", "lo", " ", "wo", "rld"]) {
++			projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: piece, partial: message }));
++		}
++		projector.project({ type: "message_end", message });
++		expect(kinds(events)).toContain("conversation.message.started");
++		expect(kinds(events)).toContain("conversation.message.delta");
++		expect(kinds(events)[kinds(events).length - 1]).toBe("conversation.message.completed");
++		expect(deltas(events, "text")).toBe("Hello world");
++		const started = events.find(event => event.kind === "conversation.message.started");
++		const completed = events.find(event => event.kind === "conversation.message.completed");
++		expect(started?.kind === "conversation.message.started" && started.messageId).toBe("msg-1");
++		expect(completed?.kind === "conversation.message.completed" && completed.messageId).toBe("msg-1");
++		expect(completed?.kind === "conversation.message.completed" && completed.item.itemId).toBe("msg-1");
++		expect(completed?.kind === "conversation.message.completed" && completed.item.content).toEqual([
++			{ type: "text", text: "Hello world" },
++		]);
++		expect(wireAll(events).map(event => event.kind as string)).toEqual(kinds(events));
++	});
++
++	test("keeps thinking and text on separate blocks", () => {
++		const { projector, events } = createProjector();
++		const message = assistant([
++			{ type: "thinking", thinking: "plan" },
++			{ type: "text", text: "done" },
++		]);
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message });
++		projector.project(update(message, { type: "thinking_delta", contentIndex: 0, delta: "plan", partial: message }));
++		projector.project(update(message, { type: "text_delta", contentIndex: 1, delta: "done", partial: message }));
++		projector.project({ type: "message_end", message });
++		expect(deltas(events, "thinking")).toBe("plan");
++		expect(deltas(events, "text")).toBe("done");
++		const completed = events.find(event => event.kind === "conversation.message.completed");
++		expect(completed?.kind === "conversation.message.completed" && completed.item.content).toEqual([
++			{ type: "thinking", text: "plan" },
++			{ type: "text", text: "done" },
++		]);
++		const thinkingDelta = events.find(
++			event => event.kind === "conversation.message.delta" && event.blockType === "thinking",
++		);
++		const textDelta = events.find(event => event.kind === "conversation.message.delta" && event.blockType === "text");
++		expect(thinkingDelta?.kind === "conversation.message.delta" && thinkingDelta.blockId).not.toBe(
++			textDelta?.kind === "conversation.message.delta" ? textDelta.blockId : "",
++		);
++	});
++
++	test("associates two tool calls independently", () => {
++		const { projector, events } = createProjector();
++		const message = assistant([
++			{ type: "toolCall", id: "call-1", name: "Read", arguments: { path: "a.json" } },
++			{ type: "toolCall", id: "call-2", name: "Bash", arguments: { command: "ls" } },
++		]);
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message });
++		projector.project({
++			type: "tool_execution_start",
++			toolCallId: "call-1",
++			toolName: "Read",
++			args: { path: "a.json" },
++		});
++		projector.project({
++			type: "tool_execution_end",
++			toolCallId: "call-1",
++			toolName: "Read",
++			result: { content: [{ type: "text", text: "{}" }], isError: false },
++			isError: false,
++		});
++		projector.project({
++			type: "tool_execution_start",
++			toolCallId: "call-2",
++			toolName: "Bash",
++			args: { command: "ls" },
++		});
++		projector.project({
++			type: "tool_execution_end",
++			toolCallId: "call-2",
++			toolName: "Bash",
++			result: { content: [{ type: "text", text: "ok" }], isError: false },
++			isError: false,
++		});
++		const started = events.filter(event => event.kind === "conversation.tool.started");
++		const completed = events.filter(event => event.kind === "conversation.tool.completed");
++		expect(started.map(event => event.kind === "conversation.tool.started" && event.toolCallId)).toEqual([
++			"call-1",
++			"call-2",
++		]);
++		expect(completed.map(event => event.kind === "conversation.tool.completed" && event.toolCallId)).toEqual([
++			"call-1",
++			"call-2",
++		]);
++		expect(started[0]?.kind === "conversation.tool.started" && started[0].messageId).toBe("msg-1");
++		expect(started[1]?.kind === "conversation.tool.started" && started[1].messageId).toBe("msg-1");
++	});
++
++	test("uses append when partial output extends the previous snapshot and replace otherwise", () => {
++		const { projector, events } = createProjector();
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message: assistant([]) });
++		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
++		projector.project({
++			type: "tool_execution_update",
++			toolCallId: "call-1",
++			toolName: "Bash",
++			args: {},
++			partialResult: { content: [{ type: "text", text: "abc" }] },
++		});
++		projector.project({
++			type: "tool_execution_update",
++			toolCallId: "call-1",
++			toolName: "Bash",
++			args: {},
++			partialResult: { content: [{ type: "text", text: "abcdef" }] },
++		});
++		projector.project({
++			type: "tool_execution_update",
++			toolCallId: "call-1",
++			toolName: "Bash",
++			args: {},
++			partialResult: { content: [{ type: "text", text: "xyz" }] },
++		});
++		const updates = events.filter(event => event.kind === "conversation.tool.updated");
++		expect(updates).toEqual([
++			{
++				kind: "conversation.tool.updated",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				toolCallId: "call-1",
++				updateMode: "replace",
++				output: "abc",
++			},
++			{
++				kind: "conversation.tool.updated",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				toolCallId: "call-1",
++				updateMode: "append",
++				output: "def",
++			},
++			{
++				kind: "conversation.tool.updated",
++				sessionId: "session-1",
++				turnId: "turn-1",
++				toolCallId: "call-1",
++				updateMode: "replace",
++				output: "xyz",
++			},
++		]);
++	});
++
++	test("marks tool errors, truncates huge stdout, and survives cyclic or binary arguments", () => {
++		const { projector, events, diagnostics } = createProjector();
++		const cyclic: Record<string, unknown> = { path: "pkg.json" };
++		cyclic.self = cyclic;
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message: assistant([]) });
++		projector.project({
++			type: "tool_execution_start",
++			toolCallId: "call-err",
++			toolName: "Bash",
++			args: cyclic,
++		});
++		projector.project({
++			type: "tool_execution_end",
++			toolCallId: "call-err",
++			toolName: "Bash",
++			result: new Error("boom"),
++			isError: true,
++		});
++		projector.project({
++			type: "tool_execution_start",
++			toolCallId: "call-huge",
++			toolName: "Bash",
++			args: { data: new Uint8Array([1, 2, 3]) },
++		});
++		const huge = "x".repeat(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES + 32);
++		projector.project({
++			type: "tool_execution_update",
++			toolCallId: "call-huge",
++			toolName: "Bash",
++			args: {},
++			partialResult: { content: [{ type: "text", text: huge }] },
++		});
++		projector.project({
++			type: "tool_execution_end",
++			toolCallId: "call-huge",
++			toolName: "Bash",
++			result: { content: [{ type: "text", text: huge }], isError: false },
++			isError: false,
++		});
++		const errorDone = events.find(
++			event => event.kind === "conversation.tool.completed" && event.toolCallId === "call-err",
++		);
++		expect(errorDone?.kind === "conversation.tool.completed" && errorDone.result.isError).toBe(true);
++		expect(errorDone?.kind === "conversation.tool.completed" && errorDone.result.output).toBe("boom");
++		expect(JSON.stringify(errorDone)).not.toMatch(/\s+at\s+/);
++		const hugeUpdate = events.find(
++			event => event.kind === "conversation.tool.updated" && event.toolCallId === "call-huge",
++		);
++		expect(hugeUpdate?.kind === "conversation.tool.updated" && hugeUpdate.truncated).toBe(true);
++		const hugeDone = events.find(
++			event => event.kind === "conversation.tool.completed" && event.toolCallId === "call-huge",
++		);
++		expect(hugeDone?.kind === "conversation.tool.completed" && hugeDone.result.truncated).toBe(true);
++		expect(wireAll(events).length).toBe(events.length);
++		expect(diagnostics.length).toBeGreaterThanOrEqual(0);
++	});
++
++	test("flushes remaining deltas before message.completed", () => {
++		const { projector, events } = createProjector();
++		const message = assistant([{ type: "text", text: "ab" }]);
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message });
++		projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: "a", partial: message }));
++		projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: "b", partial: message }));
++		projector.project({ type: "message_end", message });
++		const completedAt = kinds(events).lastIndexOf("conversation.message.completed");
++		const lastDeltaAt = kinds(events).lastIndexOf("conversation.message.delta");
++		expect(lastDeltaAt).toBeGreaterThanOrEqual(0);
++		expect(lastDeltaAt).toBeLessThan(completedAt);
++		expect(deltas(events)).toBe("ab");
++	});
++
++	test("duplicate completed is idempotent and late deltas after completed are dropped", () => {
++		const { projector, events } = createProjector();
++		const message = assistant([{ type: "text", text: "Hi" }]);
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message });
++		projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: "Hi", partial: message }));
++		projector.project({ type: "message_end", message });
++		projector.project({ type: "message_end", message });
++		projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: "LATE", partial: message }));
++		expect(events.filter(event => event.kind === "conversation.message.completed")).toHaveLength(1);
++		expect(deltas(events)).toBe("Hi");
++	});
++
++	test("abort keeps received content and drops later deltas for that turn", () => {
++		const { projector, events } = createProjector();
++		const streaming = assistant([{ type: "text", text: "Hel" }], { stopReason: "aborted" });
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message: streaming });
++		projector.project(update(streaming, { type: "text_delta", contentIndex: 0, delta: "Hel", partial: streaming }));
++		projector.project({ type: "message_end", message: streaming });
++		projector.project(update(streaming, { type: "text_delta", contentIndex: 0, delta: "lo", partial: streaming }));
++		projector.project({ type: "agent_end", messages: [streaming] });
++		expect(deltas(events)).toBe("Hel");
++		expect(kinds(events)).toContain("conversation.turn.aborted");
++		expect(kinds(events)).not.toContain("conversation.turn.completed");
++		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "lo")).toBe(false);
++	});
++
++	test("projects compaction start and completed without preserveData", () => {
++		const { projector, events } = createProjector();
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "auto_compaction_start", reason: "threshold", action: "context-full" });
++		projector.project({
++			type: "auto_compaction_end",
++			action: "context-full",
++			result: {
++				summary: "kept recent turns",
++				shortSummary: "recent",
++				firstKeptEntryId: "leaf-1",
++				tokensBefore: 9,
++				preserveData: { secret: "nope" },
++				details: { providerPayload: { token: "abc" } },
++			},
++			aborted: false,
++			willRetry: false,
++		});
++		const started = events.find(event => event.kind === "conversation.compaction.started");
++		const completed = events.find(event => event.kind === "conversation.compaction.completed");
++		expect(started).toEqual({
++			kind: "conversation.compaction.started",
++			sessionId: "session-1",
++			action: "context-full",
++		});
++		expect(completed?.kind === "conversation.compaction.completed" && completed.aborted).toBe(false);
++		expect(completed?.kind === "conversation.compaction.completed" && completed.item?.summary).toBe(
++			"kept recent turns",
++		);
++		expect(JSON.stringify(completed)).not.toContain("preserveData");
++		expect(JSON.stringify(completed)).not.toContain("providerPayload");
++	});
++
++	test("aborted or skipped compaction does not emit an authoritative item", () => {
++		const { projector, events } = createProjector();
++		projector.project({ type: "auto_compaction_start", reason: "threshold", action: "context-full" });
++		projector.project({
++			type: "auto_compaction_end",
++			action: "context-full",
++			result: {
++				summary: "should not become public",
++				firstKeptEntryId: "leaf-1",
++				tokensBefore: 3,
++			},
++			aborted: true,
++			willRetry: false,
++		});
++		const aborted = events.find(event => event.kind === "conversation.compaction.completed");
++		expect(aborted).toEqual({
++			kind: "conversation.compaction.completed",
++			sessionId: "session-1",
++			aborted: true,
++		});
++
++		events.length = 0;
++		projector.project({ type: "auto_compaction_start", reason: "idle", action: "shake" });
++		projector.project({
++			type: "auto_compaction_end",
++			action: "shake",
++			result: undefined,
++			aborted: false,
++			willRetry: false,
++			skipped: true,
++		});
++		const skipped = events.find(event => event.kind === "conversation.compaction.completed");
++		expect(skipped).toEqual({
++			kind: "conversation.compaction.completed",
++			sessionId: "session-1",
++			aborted: false,
++		});
++	});
++
++	test("rebind drops the previous session subscription and late native events", () => {
++		const { projector, events } = createProjector();
++		const first = new AgentSessionEventDouble();
++		const second = new AgentSessionEventDouble();
++		const message = assistant([{ type: "text", text: "old" }]);
++		projector.bind(first);
++		first.emit({ type: "agent_start" });
++		first.emit({ type: "message_start", message });
++		projector.rebind(second, { sessionId: "session-2", runtimeEpoch: 2 });
++		first.emit(update(message, { type: "text_delta", contentIndex: 0, delta: "STALE", partial: message }));
++		const fresh = assistant([{ type: "text", text: "new" }]);
++		second.emit({ type: "agent_start" });
++		second.emit({ type: "message_start", message: fresh });
++		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "STALE")).toBe(false);
++		expect(
++			events.filter(event => event.kind === "conversation.message.started").map(event => event.sessionId),
++		).toEqual(["session-1", "session-2"]);
++		expect(first.listenerCount).toBe(0);
++		expect(second.listenerCount).toBe(1);
++	});
++
++	test("coalesces 10k tiny deltas into a bounded event count without losing text", () => {
++		const { projector, events } = createProjector();
++		const message = assistant([{ type: "text", text: "x".repeat(10_000) }]);
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message });
++		for (let index = 0; index < 10_000; index++) {
++			projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: "x", partial: message }));
++		}
++		projector.project({ type: "message_end", message });
++		const deltaEvents = events.filter(event => event.kind === "conversation.message.delta");
++		expect(deltaEvents.length).toBeLessThan(10_000 / 8);
++		expect(deltaEvents.length).toBeGreaterThan(0);
++		expect(deltas(events, "text")).toBe("x".repeat(10_000));
++		expect(events.length).toBeLessThan(deltaEvents.length + 8);
++	});
++
++	test("omits providerPayload and secret keys from serialized live frames", () => {
++		const { projector, events } = createProjector();
++		const message = assistant([{ type: "text", text: "ok" }], {
++			providerPayload: { type: "openaiResponsesHistory", items: [{ encrypted: "SECRET_TOKEN_VALUE" }] },
++		});
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message });
++		projector.project({
++			type: "tool_execution_start",
++			toolCallId: "call-1",
++			toolName: "Read",
++			args: { authorization: "Bearer secret", path: "package.json" },
++		});
++		projector.project({ type: "message_end", message });
++		const serialized = JSON.stringify(events);
++		expect(serialized).not.toContain("providerPayload");
++		expect(serialized).not.toContain("SECRET_TOKEN_VALUE");
++		expect(serialized).not.toContain("Bearer secret");
++		expect(serialized).toContain("[redacted]");
++		for (const event of events) {
++			expect("occurredAt" in event).toBe(false);
++			expect("runtimeEpoch" in event).toBe(false);
++			expect("eventSeq" in event).toBe(false);
++			expect("stateVersion" in event).toBe(false);
++		}
++	});
++
++	test("a throwing consumer does not stop later live events", () => {
++		const { projector, events } = createProjector();
++		let sawCompleted = false;
++		projector.onEvent(event => {
++			if (event.kind === "conversation.message.started") throw new Error("consumer failed");
++			if (event.kind === "conversation.message.completed") sawCompleted = true;
++		});
++		const message = assistant([{ type: "text", text: "ok" }]);
++		projector.project({ type: "agent_start" });
++		projector.project({ type: "message_start", message });
++		projector.project({ type: "message_end", message });
++		expect(events.some(event => event.kind === "conversation.message.completed")).toBe(true);
++		expect(sawCompleted).toBe(true);
++	});
++
++	test("retry becomes a safe notice and unknown custom messages are ignored", () => {
++		const { projector, events, diagnostics } = createProjector();
++		projector.project({ type: "agent_start" });
++		projector.project({
++			type: "auto_retry_start",
++			attempt: 2,
++			maxAttempts: 5,
++			delayMs: 10,
++			errorMessage: "provider exploded with apiKey=sk-live",
++		});
++		projector.project({
++			type: "message_start",
++			message: { role: "custom", customType: "hook", content: "nope", timestamp: TS } as AgentMessage,
++		});
++		const notice = events.find(event => event.kind === "conversation.notice");
++		expect(notice).toEqual({
++			kind: "conversation.notice",
++			sessionId: "session-1",
++			level: "warning",
++			message: "Retry 2/5",
++			source: "retry",
++		});
++		expect(JSON.stringify(events)).not.toContain("sk-live");
++		expect(events.some(event => event.kind === "conversation.message.started")).toBe(false);
++		expect(diagnostics.some(item => item.includes("custom"))).toBe(true);
++	});
++
++	test("AgentSession subscribe double replays a native event fixture into contract events", () => {
++		const session = new AgentSessionEventDouble();
++		const { projector, events } = createProjector();
++		projector.bind(session);
++		const userMessage = user("read package.json");
++		const assistantMessage = assistant([{ type: "text", text: "It is a workspace." }]);
++		const fixture: AgentSessionEvent[] = [
++			{ type: "agent_start" },
++			{ type: "message_start", message: userMessage },
++			{ type: "message_end", message: userMessage },
++			{ type: "message_start", message: assistantMessage },
++			update(assistantMessage, { type: "text_start", contentIndex: 0, partial: assistantMessage }),
++			update(assistantMessage, { type: "text_delta", contentIndex: 0, delta: "It is ", partial: assistantMessage }),
++			update(assistantMessage, {
++				type: "text_delta",
++				contentIndex: 0,
++				delta: "a workspace.",
++				partial: assistantMessage,
++			}),
++			{ type: "message_end", message: assistantMessage },
++			{ type: "agent_end", messages: [userMessage, assistantMessage] },
++		];
++		for (const event of fixture) session.emit(event);
++		expect(kinds(events)).toEqual([
++			"conversation.message.started",
++			"conversation.message.completed",
++			"conversation.message.started",
++			"conversation.message.delta",
++			"conversation.message.completed",
++			"conversation.turn.completed",
++		]);
++		expect(deltas(events)).toBe("It is a workspace.");
++		const userCompleted = events.find(
++			event => event.kind === "conversation.message.completed" && event.item.role === "user",
++		);
++		const assistantCompleted = events.find(
++			event => event.kind === "conversation.message.completed" && event.item.role === "assistant",
++		);
++		expect(userCompleted?.kind === "conversation.message.completed" && userCompleted.messageId).toBe(
++			userCompleted?.kind === "conversation.message.completed" ? userCompleted.item.itemId : "",
++		);
++		expect(assistantCompleted?.kind === "conversation.message.completed" && assistantCompleted.item.content).toEqual([
++			{ type: "text", text: "It is a workspace." },
++		]);
++		expect(wireAll(events).map(event => event.kind as string)).toEqual(kinds(events));
++		projector.dispose();
++		session.emit(
++			update(assistantMessage, { type: "text_delta", contentIndex: 0, delta: "nope", partial: assistantMessage }),
++		);
++		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "nope")).toBe(false);
++	});
++});
