@@ -35,6 +35,7 @@ import { createHash, sign as signPayload } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { overlayHash } from "./omp-overlay.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 
 export const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
@@ -95,6 +96,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "agent.revive",
   "agent.release",
   "agent.transcript.read",
+  "agent.conversation.read",
   "agent.subscribe",
   "job.list",
   "job.get",
@@ -228,8 +230,29 @@ export function canonicalJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+// The patchset version is recorded explicitly rather than derived from the
+// patch count. Counting made the version move backwards the moment patches
+// were consolidated, which collides with an already-installed runtime
+// directory of the same name. `npm run omp:patches:regen` advances it only
+// when the captured overlay+seam digest actually changed.
 export function derivePatchsetVersion(series) {
+  if (typeof series.patchsetVersion === "string" && series.patchsetVersion.length > 0) {
+    return series.patchsetVersion;
+  }
   return `studio.${series.patches.length}`;
+}
+
+export function nextPatchsetVersion(current) {
+  const match = /^studio\.(\d+)$/u.exec(current ?? "");
+  if (match === null) throw new Error(`patchsetVersion must look like studio.<n>, found ${current ?? "missing"}`);
+  return `studio.${Number(match[1]) + 1}`;
+}
+
+/** Content digest over both layers; the regen script compares it to decide whether to bump the version. */
+export function seriesDigest({ overlayHash, patchHashes }) {
+  const lines = [`overlay:${overlayHash}`];
+  for (const name of Object.keys(patchHashes).sort()) lines.push(`patch:${name}:${patchHashes[name]}`);
+  return `sha256:${sha256Hex(lines.join("\n"))}`;
 }
 
 export function deriveRuntimeVersion(upstreamVersion, series) {
@@ -299,7 +322,23 @@ export async function readPatchSeries(path = SERIES_JSON_PATH) {
   if (!Array.isArray(series.patches) || series.patches.some((name) => typeof name !== "string")) {
     throw new TypeError("patch series patches must be an array of file names");
   }
-  return { upstreamCommit, patches: [...series.patches] };
+  if (series.patchsetVersion !== undefined && !/^studio\.\d+$/u.test(series.patchsetVersion)) {
+    throw new TypeError(`patch series patchsetVersion must look like studio.<n>, found ${series.patchsetVersion}`);
+  }
+  if (series.patchsetDigest !== undefined && !/^sha256:[a-f0-9]{64}$/u.test(series.patchsetDigest)) {
+    throw new TypeError("patch series patchsetDigest must be a sha256 digest");
+  }
+  return {
+    upstreamCommit,
+    patches: [...series.patches],
+    ...(series.patchsetVersion === undefined ? {} : { patchsetVersion: series.patchsetVersion }),
+    ...(series.patchsetDigest === undefined ? {} : { patchsetDigest: series.patchsetDigest }),
+  };
+}
+
+export async function writePatchSeries(series, path = SERIES_JSON_PATH) {
+  await writeFile(path, canonicalJson(series), "utf8");
+  return path;
 }
 
 export async function readUpstreamVersion(packageJsonPath = VENDOR_CODING_AGENT_PACKAGE_JSON) {
@@ -339,6 +378,7 @@ export async function buildManifest({
   entrypoint = MANAGED_ENTRYPOINT,
   channel = "stable",
   runtimeIdentity,
+  overlay,
 }) {
   if (entrypoint !== MANAGED_ENTRYPOINT) {
     throw new Error(
@@ -362,6 +402,9 @@ export async function buildManifest({
   });
   const entrypointSha256 = sha256Hex(await readFile(binaryPath));
   const patchHashes = await computePatchHashes(patchesDirectory, series.patches);
+  // The overlay carries the bulk of the Studio source, so provenance has to
+  // cover it too; patchHashes alone would attest to only the seam layer.
+  const overlayDigest = overlay ?? (await overlayHash());
 
   const provenanceBase = {
     upstreamVersion,
@@ -369,6 +412,7 @@ export async function buildManifest({
     patchsetVersion,
     patches: [...series.patches],
     patchHashes,
+    overlayHash: overlayDigest,
     entrypoint,
     entrypointSha256,
   };
@@ -406,6 +450,7 @@ export async function generateRuntimeArtifact({
   keyId,
   outDirectory,
   runtimeIdentity,
+  overlay,
 }) {
   if (signingKey === undefined) throw new Error("A Runtime Ed25519 signing key is required");
   if (typeof keyId !== "string" || keyId.length === 0) throw new Error("A Runtime signing key id is required");
@@ -419,6 +464,7 @@ export async function generateRuntimeArtifact({
     entrypoint,
     channel,
     runtimeIdentity,
+    overlay,
   });
   const manifestText = canonicalJson(manifest);
   const checksums = {

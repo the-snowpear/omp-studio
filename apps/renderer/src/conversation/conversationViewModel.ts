@@ -127,6 +127,12 @@ export type TimelineRow =
       readonly status: "streaming" | "completed" | "aborted" | "error";
       /** Process rows omit the repeated OMP identity header; only the final reply in a turn uses reply. */
       readonly presentation?: "process" | "reply";
+      /**
+       * The owning Runtime turn is still running (`openTurnItems`). File-edit
+       * tools can finish and mark this row completed while more steps remain;
+       * the transcript diff card waits until this flag clears.
+       */
+      readonly turnOpen?: boolean;
       /** Live-only provider failure carried on `conversation.message.completed`. */
       readonly error?: ConversationMessageError;
     }
@@ -702,22 +708,40 @@ function mergedProcessStatus(rows: readonly AssistantRow[]): AssistantRow["statu
   return "completed";
 }
 
-function mergeProcessRows(rows: readonly AssistantRow[]): AssistantRow {
-  const first = rows[0]!;
-  const thinking: Extract<AssistantSegment, { type: "thinking" }>[] = [];
-  const tools: ToolView[] = [];
-  for (const row of rows) {
-    for (const segment of row.segments) {
-      if (segment.type === "thinking") {
-        thinking.push({ ...segment, key: `${row.itemId}:${segment.key}` });
-      } else if (segment.type === "batch") {
-        tools.push(...segment.tools);
+/**
+ * Appends process segments while keeping the order the model produced them in.
+ * Only *adjacent* batches fuse: a thinking block emitted after a tool result has
+ * to stay after that tool, otherwise the transcript reads as if the model
+ * concluded before running anything.
+ */
+function appendProcessSegments(target: AssistantSegment[], incoming: readonly AssistantSegment[]): void {
+  for (const segment of incoming) {
+    if (segment.type === "batch") {
+      if (segment.tools.length === 0) continue;
+      const last = target[target.length - 1];
+      if (last?.type === "batch") {
+        target[target.length - 1] = { ...last, tools: [...last.tools, ...segment.tools] };
+        continue;
       }
     }
+    target.push(segment);
   }
-  const segments: AssistantSegment[] = [...thinking];
-  if (tools.length > 0) {
-    segments.push({ type: "batch", key: `turn-process:${first.itemId}`, tools });
+}
+
+function anyTurnOpen(rows: readonly AssistantRow[]): boolean {
+  return rows.some((row) => row.turnOpen === true);
+}
+
+function mergeProcessRows(rows: readonly AssistantRow[]): AssistantRow {
+  const first = rows[0]!;
+  const segments: AssistantSegment[] = [];
+  for (const row of rows) {
+    appendProcessSegments(
+      segments,
+      row.segments
+        .filter((segment) => segment.type !== "text")
+        .map((segment) => ({ ...segment, key: `${row.itemId}:${segment.key}` })),
+    );
   }
   const error = rows.find((row) => row.error !== undefined)?.error;
   return {
@@ -726,6 +750,7 @@ function mergeProcessRows(rows: readonly AssistantRow[]): AssistantRow {
     status: mergedProcessStatus(rows),
     presentation: "process",
     ...(error === undefined ? {} : { error }),
+    ...(anyTurnOpen(rows) ? { turnOpen: true } : {}),
   };
 }
 
@@ -748,10 +773,13 @@ function presentAssistantTurns(rows: readonly TimelineRow[]): TimelineRow[] {
       const previousIndex = merged.length - 1;
       const previous = merged[previousIndex];
       if (previous !== undefined && hasAssistantProcess(previous)) {
+        const segments = previous.segments.slice();
+        appendProcessSegments(segments, process.segments);
         merged[previousIndex] = {
           ...previous,
-          segments: [...previous.segments, ...process.segments],
+          segments,
           status: mergedProcessStatus([previous, process]),
+          ...(anyTurnOpen([previous, process]) ? { turnOpen: true } : {}),
         };
       } else {
         merged.push(process);
@@ -835,6 +863,7 @@ export function buildTimeline(state: ConversationState): TimelineRow[] {
       createdAt: live.createdAt,
       segments: segmentsFromLive(live, tools),
       status: live.aborted ? "aborted" : "streaming",
+      ...(!live.aborted ? { turnOpen: true } : {}),
     });
   }
   for (const pending of state.pendingUsers) {
@@ -1010,6 +1039,7 @@ function rowFromItem(
     createdAt: item.createdAt,
     segments,
     status: error !== undefined ? "error" : running ? "streaming" : "completed",
+    ...(turnOpen ? { turnOpen: true } : {}),
     ...(error === undefined ? {} : { error }),
   };
 }
@@ -1055,6 +1085,7 @@ export function rowsFromConversationViews(
       createdAt: live.createdAt,
       segments: segmentsFromLive(live, tools),
       status: view.message.aborted ? "aborted" : view.message.completed ? "completed" : "streaming",
+      ...(!view.message.aborted ? { turnOpen: true } : {}),
     });
   }
   for (const pending of pendingUsers) rows.push(pendingRow(pending));

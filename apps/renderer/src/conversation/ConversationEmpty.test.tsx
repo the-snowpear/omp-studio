@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EnvironmentId, HistoryEntryId, SessionHistoryEntry, StudioClient, ThreadId, TokenUsageReadModel } from "@omp-studio/client-contract";
 import { PreviewModeProvider } from "../preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
+import { __resetOperatorProfileForTests } from "../settings/operatorProfile";
 import { ConversationEmpty } from "./ConversationEmpty";
 import { ConversationPane } from "./ConversationPane";
 import { resetConversation } from "./conversationViewModel";
@@ -10,6 +11,7 @@ import { resetConversation } from "./conversationViewModel";
 afterEach(() => {
   cleanup();
   window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
+  __resetOperatorProfileForTests(null);
 });
 
 function renderEmpty(options: {

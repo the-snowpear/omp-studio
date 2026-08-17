@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { assertForkApplied } from "./omp-overlay.mjs";
 import { findBun, npmInvocation, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 import {
@@ -19,6 +20,11 @@ const bun = findBun();
 const env = toolingEnvironment({
   CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
 });
+
+// Building a vendor tree without the fork applied yields an omp.exe with no
+// studio-host mode. That only surfaces much later, as an opaque identity probe
+// failure after a full Rust build, so check the cheap precondition first.
+await assertForkApplied();
 
 run(bun, ["--cwd=packages/natives", "run", "build"], { cwd: ompSourceDirectory, env });
 run(bun, ["--cwd=packages/coding-agent", "run", "build"], { cwd: ompSourceDirectory, env });

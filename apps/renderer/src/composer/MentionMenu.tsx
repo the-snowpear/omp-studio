@@ -17,7 +17,7 @@ export function MentionMenu({
   onSelect: (item: MentionCandidate) => void;
   onHover: (index: number) => void;
 }) {
-  const title = trigger === "@" ? "引用文件 / 文件夹 / Agent" : "插入技能";
+  const title = trigger === "@" ? "引用文件 / 文件夹 / Agent" : "指令已改到输入开头的 /";
   return (
     <div className="cm-mention" role="listbox" aria-label={title}>
       <div className="cm-mention-head">

@@ -757,6 +757,55 @@ test("interaction payloads are bounded at the Studio protocol boundary", () => {
     }),
   );
   assert.ok(emptyOptionalText !== undefined);
+  const askCard = parseStudioEventEnvelope(
+    envelope({
+      kind: "interaction.required",
+      owner: "gui",
+      leaseGeneration: 1,
+      request: {
+        kind: "ask",
+        interactionId: "interaction-1",
+        commandId: "command-1",
+        title: "Agent 提问",
+        questions: [
+          {
+            id: "inertia",
+            question: "Need inertia?",
+            header: "惯性",
+            options: [
+              { id: "option:0", label: "Yes", description: "coast", preview: "v *= 0.92" },
+              { id: "option:1", label: "No" },
+            ],
+            recommended: 0,
+          },
+          {
+            id: "default",
+            question: "Default?",
+            options: [{ id: "option:0", label: "On" }],
+          },
+        ],
+      },
+    }),
+  );
+  assert.ok(askCard !== undefined);
+  assert.throws(
+    () =>
+      parseStudioEventEnvelope(
+        envelope({
+          kind: "interaction.required",
+          owner: "gui",
+          leaseGeneration: 1,
+          request: {
+            kind: "ask",
+            interactionId: "interaction-1",
+            commandId: "command-1",
+            title: "Agent 提问",
+            questions: [],
+          },
+        }),
+      ),
+    ContractValidationError,
+  );
 });
 
 test("M4 validates BTW, TAN, and OMFG composite operations", () => {

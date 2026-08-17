@@ -19,14 +19,18 @@ describe("filterMentions", () => {
 });
 
 describe("previewMentions", () => {
-  it("lists preview skills for / and agents plus workspace paths for @", () => {
-    expect(previewMentions("/", "commit").some((item) => item.name === "commit-msg")).toBe(true);
-    expect(previewMentions("/", "commit").every((item) => item.kind === "skill")).toBe(true);
+  it("does not treat / as a skill mention; @ lists agents plus workspace paths", () => {
+    expect(previewMentions("/", "commit")).toEqual([]);
     expect(previewMentions("@", "review").some((item) => item.name === "code-reviewer")).toBe(true);
     const kinds = new Set(previewMentions("@", "").map((item) => item.kind));
     expect(kinds.has("agent")).toBe(true);
     expect(kinds.has("file")).toBe(true);
     expect(kinds.has("dir")).toBe(true);
+    expect(kinds.has("skill")).toBe(false);
+  });
+
+  it("includes matching skills only after the user types a query", () => {
+    expect(previewMentions("@", "commit").some((item) => item.name === "commit-msg")).toBe(true);
   });
 });
 

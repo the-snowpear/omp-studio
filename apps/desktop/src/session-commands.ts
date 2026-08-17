@@ -3,6 +3,8 @@
  * and P4 invoke that forwards the client requestId.
  */
 
+import { randomUUID } from "node:crypto";
+
 import type {
   HostCatalogEntry,
   HostSemanticCommandService,
@@ -29,6 +31,19 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   "queue.enqueue",
   "runtime.pause",
   "runtime.resume",
+  "session.model.set",
+  "session.thinking.set",
+  "mode.plan.enter",
+  "mode.plan.exit",
+  "mode.vibe.enter",
+  "mode.vibe.exit",
+  "goal.create",
+  "goal.drop",
+  "loop.enable",
+  "loop.disable",
+  "session.fast.set",
+  "session.prewalk.arm",
+  "session.prewalk.disarm",
 ]);
 
 export function fencesOnStateVersion(kind: StudioOperation["kind"]): boolean {
@@ -71,7 +86,8 @@ export function createDesktopSemanticCommands(options: {
       : {
           archive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
             const sessionId = await resolveCatalogSessionId(options.catalog, threadId);
-            await archiveFactory().archive(sessionId);
+            const skipWriteGrace = await releaseResidentSession(options, sessionId);
+            await archiveFactory().archive(sessionId, skipWriteGrace ? { skipWriteGrace: true } : {});
             return { applied: true, runtimeEffect: "immediate", message: "Session archived to the OMP cold archive" };
           },
           unarchive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
@@ -217,6 +233,43 @@ export function createDesktopSemanticCommands(options: {
   };
 }
 
+/**
+ * A live Runtime holds the session file open. Abort a streaming turn, then
+ * switch to a fresh session so the cold-archive move can take the file.
+ * Returns true when the writer was just stopped (skip the crash-tail grace).
+ */
+async function releaseResidentSession(
+  options: {
+    readonly sessionRef: { current: DesktopRuntimeSession | undefined };
+    readonly switchSession?: DesktopRuntimeSessionPort["switchSession"];
+    readonly bindSession: (session: DesktopRuntimeSession | undefined) => void;
+  },
+  sessionId: string,
+): Promise<boolean> {
+  const session = options.sessionRef.current;
+  const snapshot = session?.controller.publication()?.snapshot;
+  if (session === undefined || snapshot === undefined || snapshot.sessionId !== sessionId) return false;
+  if (snapshot.isStreaming) {
+    const receipt = await session.controller.invoke({
+      type: "studio.request",
+      requestId: randomUUID() as RequestId,
+      runtimeEpoch: snapshot.runtimeEpoch,
+      operation: { kind: "core.abort" },
+    });
+    throwIfNotCompleted(receipt);
+  }
+  if (options.switchSession === undefined) {
+    throw new StudioHostError("COMMAND_BLOCKED", "Session is resident in a Runtime and cannot be moved");
+  }
+  const next = await options.switchSession({ kind: "fresh" });
+  options.bindSession(next);
+  const nextId = next?.controller.publication()?.snapshot?.sessionId;
+  if (nextId === sessionId) {
+    throw new StudioHostError("COMMAND_BLOCKED", "无法离开当前会话，归档已取消");
+  }
+  return true;
+}
+
 async function resolveCatalogSessionId(catalog: HostSessionCatalogProvider, threadId: ThreadId): Promise<string> {
   const entries = await catalog.list();
   const match = entries.find((entry) => threadIdFor(entry.sessionId) === threadId);
@@ -240,6 +293,9 @@ function throwIfNotCompleted(receipt: { readonly status: string; readonly error?
   }
   if (code === "CAPABILITY_UNAVAILABLE") {
     throw new StudioHostError("CAPABILITY_UNAVAILABLE", receipt.error?.message ?? "runtime capability is unavailable");
+  }
+  if (code === "COMMAND_BLOCKED") {
+    throw new StudioHostError("COMMAND_BLOCKED", receipt.error?.message ?? "a conflicting command is active");
   }
   if (code === "INVALID_ARGUMENT" || receipt.status === "rejected") {
     throw new StudioHostError("INVALID_ARGUMENT", receipt.error?.message ?? "Runtime rejected the request");

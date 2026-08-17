@@ -75,6 +75,24 @@ export function mapRemoteInteractionToClient(
         approvalType: request.approvalType,
         detail: sanitizeApprovalDetail(request.details),
       };
+    case "ask":
+      return {
+        ...base,
+        kind: "ask",
+        questions: request.questions.map((question) => ({
+          id: question.id,
+          question: question.question,
+          ...(question.header === undefined ? {} : { header: question.header }),
+          options: question.options.map((option) => ({
+            id: option.id,
+            label: option.label,
+            ...(option.description === undefined ? {} : { description: option.description }),
+            ...(option.preview === undefined ? {} : { preview: option.preview }),
+          })),
+          multiple: question.multiple ?? false,
+          ...(question.recommended === undefined ? {} : { recommended: question.recommended }),
+        })),
+      };
     default:
       return undefined;
   }

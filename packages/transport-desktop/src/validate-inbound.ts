@@ -660,7 +660,8 @@ function validateTextInput(input: unknown, what: string): void {
 
 const PROMPT_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const MAX_PROMPT_IMAGES = 16;
-const MAX_PROMPT_IMAGE_DATA = 12_000_000;
+/** Base64 length cap (~64 MiB binary). IPC safety, not a composer ingest limit. */
+const MAX_PROMPT_IMAGE_DATA = 96_000_000;
 
 function validatePromptImages(value: unknown, what: string): void {
   if (!Array.isArray(value)) throw new ValidationError(`${what}: images must be an array`);

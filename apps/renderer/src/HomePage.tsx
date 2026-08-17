@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { ChangeEvent as ReactChangeEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { ClientBootstrap, ConfigWriteResult, HomeReadModel, SessionHistoryReadModel, StudioClient, TokenUsageReadModel, WorkspaceListReadModel } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "./icons";
@@ -7,6 +7,16 @@ import { pagePhaseClass, useDeferredKey } from "./pageTransition";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_ACTIVITY, PREVIEW_PROJECTS } from "./preview/fixtures";
 import { waitForCommandReceipt } from "./sessionLifecycle";
+import {
+  DISPLAY_NAME_MAX,
+  avatarInitial,
+  avatarSrcFromBytes,
+  loadAvatarImageFile,
+  useOperatorProfile,
+  type LoadedAvatarImage,
+  type ProcessedAvatar,
+} from "./settings/operatorProfile";
+import { AvatarCropDialog } from "./settings/AvatarCropDialog";
 import {
   DAY_MS,
   EMPTY_USAGE,
@@ -17,6 +27,7 @@ import {
   parseDateKey,
   startOfDay,
 } from "./usage/tokenUsage";
+import { useAxisCrossfade, useTokenChartMorph, type TokenChartModelPts } from "./usage/useTokenChartMorph";
 
 export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics";
 
@@ -143,6 +154,210 @@ function greeting(): string {
   return "晚上好";
 }
 
+function ProfileAvatar({ name, src, className }: { name: string; src: string; className: string }) {
+  if (src) return <img className={className} src={src} alt="" draggable={false} />;
+  return <span className={className} aria-hidden="true">{avatarInitial(name)}</span>;
+}
+
+function ompStatusText(
+  runtime: ClientBootstrap["runtime"] | undefined,
+  preview: boolean,
+  extras: readonly string[],
+): string {
+  const head = preview || runtime?.status === "connected"
+    ? "omp is ready"
+    : runtime?.status
+      ? `omp ${runtime.status}`
+      : "omp unavailable";
+  return extras.length > 0 ? `${head} · ${extras.join(" · ")}` : head;
+}
+
+function ProfileEditDialog({
+  name,
+  avatar,
+  onClose,
+  onSave,
+}: {
+  name: string;
+  avatar: string;
+  onClose: () => void;
+  onSave: (next: { displayName: string; avatar: ProcessedAvatar | null | undefined }) => Promise<void>;
+}) {
+  const [draftName, setDraftName] = useState(name);
+  const [draftSrc, setDraftSrc] = useState(avatar);
+  const [draftAvatar, setDraftAvatar] = useState<ProcessedAvatar | null | undefined>(undefined);
+  const [crop, setCrop] = useState<LoadedAvatarImage | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const cropRef = useRef<LoadedAvatarImage | undefined>(undefined);
+  cropRef.current = crop;
+
+  useEffect(() => {
+    return () => cropRef.current?.close();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || busy) return;
+      if (crop !== undefined) {
+        setCrop((prev) => {
+          prev?.close();
+          return undefined;
+        });
+        return;
+      }
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, crop, onClose]);
+
+  const dismissCrop = () => {
+    if (busy) return;
+    setCrop((prev) => {
+      prev?.close();
+      return undefined;
+    });
+  };
+
+  const onPick = (event: ReactChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError(undefined);
+    void loadAvatarImageFile(file).then(
+      (loaded) => {
+        setCrop((prev) => {
+          prev?.close();
+          return loaded;
+        });
+        setBusy(false);
+      },
+      (cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "头像读取失败。");
+        setBusy(false);
+      },
+    );
+  };
+
+  return (
+    <>
+    <div className="modal-backdrop" role="presentation" onMouseDown={() => { if (!busy && crop === undefined) onClose(); }}>
+      <section
+        className="modal profile-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profileEditTitle"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head profile-edit-head">
+          <div>
+            <span className="profile-edit-kicker">PROFILE</span>
+            <h2 id="profileEditTitle">编辑个人资料</h2>
+          </div>
+          <button type="button" className="icon-btn" aria-label="关闭" disabled={busy} onClick={onClose}>
+            <Icon name="x" />
+          </button>
+        </div>
+        <div className="modal-body profile-edit-body">
+          <div className="profile-edit-avatar">
+            <button
+              type="button"
+              className="profile-edit-avatar-btn"
+              disabled={busy}
+              aria-label="上传头像"
+              onClick={() => fileRef.current?.click()}
+            >
+              <ProfileAvatar name={draftName} src={draftSrc} className="profile-edit-avatar-img" />
+              <span className="profile-edit-avatar-overlay" aria-hidden="true">
+                <Icon name="camera" extra="sm" />
+              </span>
+            </button>
+            <div className="profile-edit-avatar-copy">
+              <b>头像</b>
+              <span>点击头像上传本地图片</span>
+              {draftSrc ? (
+                <button
+                  type="button"
+                  className="btn outline small"
+                  disabled={busy}
+                  onClick={() => { setDraftAvatar(null); setDraftSrc(""); setError(undefined); }}
+                >
+                  移除头像
+                </button>
+              ) : null}
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+              hidden
+              onChange={onPick}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="profileDisplayName">用户名</label>
+            <input
+              id="profileDisplayName"
+              className="input"
+              autoFocus
+              value={draftName}
+              maxLength={DISPLAY_NAME_MAX}
+              placeholder="Studio"
+              onChange={(event) => setDraftName(event.target.value)}
+            />
+          </div>
+          {error ? <p className="profile-edit-error" role="alert"><Icon name="alert" extra="sm" />{error}</p> : null}
+        </div>
+        <div className="modal-foot">
+          <button type="button" className="btn outline" disabled={busy} onClick={onClose}>取消</button>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={busy || !draftName.trim()}
+            onClick={() => {
+              setBusy(true);
+              setError(undefined);
+              void onSave({ displayName: draftName, avatar: draftAvatar }).then(
+                () => undefined,
+                (cause: unknown) => {
+                  setError(cause instanceof Error ? cause.message : "保存失败。");
+                  setBusy(false);
+                },
+              );
+            }}
+          >
+            {busy ? "处理中…" : "保存"}
+          </button>
+        </div>
+      </section>
+    </div>
+    {crop ? (
+      <AvatarCropDialog
+        image={crop}
+        locked={busy}
+        notice={error}
+        onConfirm={(avatar) => {
+          setDraftAvatar(avatar);
+          setDraftSrc(avatarSrcFromBytes(avatar));
+          setCrop((prev) => {
+            prev?.close();
+            return undefined;
+          });
+          setError(undefined);
+        }}
+        onRetake={() => {
+          fileRef.current?.click();
+        }}
+        onClose={dismissCrop}
+      />
+    ) : null}
+    </>
+  );
+}
+
 function relativeTime(iso: string): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return "";
@@ -199,56 +414,8 @@ function dayLabel(ts: number): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
-function smoothPath(pts: Array<readonly [number, number]>): string {
-  if (pts.length < 2) return "";
-  const xs = pts.map((point) => point[0]);
-  const ys = pts.map((point) => point[1]);
-  const count = pts.length;
-  const dxs = Array.from({ length: count - 1 }, (_, index) => xs[index + 1]! - xs[index]!);
-  const slopes = dxs.map((dx, index) => (Math.abs(dx) < 1e-6 ? 0 : (ys[index + 1]! - ys[index]!) / dx));
-  const tangents = new Array<number>(count);
-  tangents[0] = slopes[0]!;
-  tangents[count - 1] = slopes[count - 2]!;
-  for (let index = 1; index < count - 1; index++) {
-    tangents[index] = slopes[index - 1]! * slopes[index]! <= 0 ? 0 : (slopes[index - 1]! + slopes[index]!) / 2;
-  }
-  // Fritsch–Carlson: keep each cubic inside its two endpoints so a steep
-  // neighbor cannot pull a near-zero span below the axis.
-  const scale = new Array<number>(count).fill(1);
-  for (let index = 0; index < count - 1; index++) {
-    const slope = slopes[index]!;
-    if (Math.abs(slope) < 1e-8) {
-      scale[index] = 0;
-      scale[index + 1] = 0;
-      continue;
-    }
-    const alpha = tangents[index]! / slope;
-    const beta = tangents[index + 1]! / slope;
-    const sum = alpha * alpha + beta * beta;
-    if (sum > 9) {
-      const tau = 3 / Math.sqrt(sum);
-      scale[index] = Math.min(scale[index]!, tau);
-      scale[index + 1] = Math.min(scale[index + 1]!, tau);
-    }
-  }
-  for (let index = 0; index < count; index++) tangents[index]! *= scale[index]!;
-  let path = `M${xs[0]!.toFixed(1)} ${ys[0]!.toFixed(1)}`;
-  for (let index = 0; index < count - 1; index++) {
-    const dx = dxs[index]!;
-    if (Math.abs(dx) < 1e-6) {
-      path += `L${xs[index + 1]!.toFixed(1)} ${ys[index + 1]!.toFixed(1)}`;
-      continue;
-    }
-    const y0 = ys[index]!;
-    const y1 = ys[index + 1]!;
-    const lo = Math.min(y0, y1);
-    const hi = Math.max(y0, y1);
-    const c1y = Math.min(hi, Math.max(lo, y0 + tangents[index]! * dx / 3));
-    const c2y = Math.min(hi, Math.max(lo, y1 - tangents[index + 1]! * dx / 3));
-    path += `C${(xs[index]! + dx / 3).toFixed(1)} ${c1y.toFixed(1)} ${(xs[index + 1]! - dx / 3).toFixed(1)} ${c2y.toFixed(1)} ${xs[index + 1]!.toFixed(1)} ${y1.toFixed(1)}`;
-  }
-  return path;
-}
+const CHART_Y_RATIOS = [0, 0.25, 0.5, 0.75, 1] as const;
+const EMPTY_CHART_MODELS: readonly TokenChartModelPts[] = [];
 
 function waitReceipt<T>(client: StudioClient, requestId: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -411,9 +578,10 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
       return points;
     }
     if (view === "month" || view === "week") {
+      const date = new Date(today);
       const rangeStart = view === "month"
-        ? startOfDay(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1).getTime())
-        : today - ((todayDate.getDay() + 6) % 7) * DAY_MS;
+        ? startOfDay(new Date(date.getFullYear(), date.getMonth(), 1).getTime())
+        : today - ((date.getDay() + 6) % 7) * DAY_MS;
       const points: ChartPoint[] = [];
       let index = 0;
       for (let ts = rangeStart; ts <= today; ts += DAY_MS) {
@@ -429,13 +597,15 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
       for (const id of modelIds) byModel[id] = tokensByModelHour.get(id)?.get(hour) ?? 0;
       return { x: hour, byModel, hour };
     });
-  }, [cells, modelIds, today, todayDate, tokensByModelDay, tokensByModelHour, view, weeks]);
+  }, [cells, modelIds, today, tokensByModelDay, tokensByModelHour, view, weeks]);
 
   const chartMax = Math.max(1, ...series.map((point) => pointMax(point)));
   const vbH = 210;
   const padTop = 10;
   const padBottom = 22;
-  const yOf = (value: number) => padTop + (1 - Math.min(1, value / chartMax)) * (vbH - padTop - padBottom);
+  const peakPad = 4;
+  const plotH = vbH - padTop - padBottom;
+  const yOf = (value: number) => padTop + peakPad + (1 - Math.min(1, value / chartMax)) * (plotH - peakPad);
   const xOf = (index: number, count: number) => (index + 0.5) * (chartWidth / Math.max(1, count));
 
   useLayoutEffect(() => {
@@ -452,13 +622,25 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
     return () => observer.disconnect();
   }, [loading, preview, usage.generatedAt]);
 
-  const modelPaths = chartWidth >= 8
-    ? modelIds.map((id) => {
-      const pts = series.map((point) => [xOf(point.x, series.length), yOf(point.byModel[id] ?? 0)] as const);
-      return { id, pts, path: pts.length >= 2 ? smoothPath(pts) : "" };
-    })
-    : [];
-  const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(chartMax * ratio)))];
+  const yOfRatio = (ratio: number) => padTop + (1 - ratio) * plotH;
+  const targetModels = useMemo(() => {
+    if (chartWidth < 8) return EMPTY_CHART_MODELS;
+    const count = Math.max(1, series.length);
+    return modelIds.map((id) => ({
+      id,
+      pts: series.map((point) => [
+        (point.x + 0.5) * (chartWidth / count),
+        padTop + peakPad + (1 - Math.min(1, (point.byModel[id] ?? 0) / chartMax)) * (plotH - peakPad),
+      ] as const),
+    }));
+  }, [chartMax, chartWidth, modelIds, plotH, series]);
+  const { paths: modelPaths, morphing } = useTokenChartMorph(targetModels, {
+    view,
+    width: chartWidth,
+    padTop,
+    plotH,
+  });
+  const yTicks = CHART_Y_RATIOS.map((ratio) => ({ ratio, value: Math.round(chartMax * ratio) }));
   const xLabels = (() => {
     if (view === "year") return monthLabels.map((month) => ({ x: xOf((month.column - 1), Math.max(1, series.length)), lbl: month.label }));
     if (view === "month") {
@@ -474,6 +656,8 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
     }
     return [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22].map((hour) => ({ x: xOf(hour, series.length), lbl: `${hour}:00` }));
   })();
+  const xFade = useAxisCrossfade(xLabels, view);
+  const yFade = useAxisCrossfade(yTicks, view);
 
   const seriesIndexForDay = (ts: number) => {
     if (view === "day") return ts === today ? Math.max(0, series.length - 1) : -1;
@@ -500,7 +684,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
   };
 
   const onChartMove = (event: ReactPointerEvent<SVGSVGElement>) => {
-    if (!series.length || !chartWidth) return;
+    if (morphing || !series.length || !chartWidth) return;
     setCellTip(null);
     const rect = event.currentTarget.getBoundingClientRect();
     const vx = (event.clientX - rect.left) * (chartWidth / rect.width);
@@ -520,6 +704,10 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
 
   const onCellEnter = (ts: number) => {
     setCellTip({ ts });
+    if (morphing) {
+      setHover(null);
+      return;
+    }
     const index = seriesIndexForDay(ts);
     const point = index >= 0 ? series[index] : undefined;
     if (!point) {
@@ -651,28 +839,39 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
         onPointerMove={onChartMove}
         onPointerLeave={() => { setHover((prev) => (prev?.source === "chart" ? null : prev)); }}
       >
-        {ticks.map((tick, index) => {
-          const y = yOf(tick);
-          return (
-            <g key={`y-${index}`}>
-              <line className={`tk-grid${tick === 0 ? " base" : ""}`} x1={0} y1={y} x2={chartWidth} y2={y} />
-              <text className="tk-yt" x={0} y={y - 3.5}>{tick === 0 ? "0" : fmtTokens(tick)}</text>
-            </g>
-          );
+        {CHART_Y_RATIOS.map((ratio) => {
+          const y = yOfRatio(ratio);
+          return <line key={`g-${ratio}`} className={`tk-grid${ratio === 0 ? " base" : ""}`} x1={0} y1={y} x2={chartWidth} y2={y} />;
         })}
-        {xLabels.map((label, index) => (
-          <text key={`x-${index}`} className="tk-xt" x={label.x} y={vbH - 7}>{label.lbl}</text>
+        {yFade.outgoing?.map((tick) => (
+          <text key={`y-out-${tick.ratio}`} className="tk-yt out" x={0} y={yOfRatio(tick.ratio) - 3.5}>{tick.value === 0 ? "0" : fmtTokens(tick.value)}</text>
         ))}
-        {modelPaths.map((entry) => {
-          const tone = modelTone(modelIds, entry.id);
-          return (
-            <g key={entry.id}>
-              {entry.path ? <path className={`tk-line ${tone}`} d={entry.path} /> : null}
-              {entry.pts.length === 1 ? <circle className={`tk-pt ${tone}`} cx={entry.pts[0]![0]} cy={entry.pts[0]![1]} r={3} /> : null}
-            </g>
-          );
-        })}
-        {hover && hoverPoint ? (
+        {yFade.incoming.map((tick) => (
+          <text key={`y-in-${tick.ratio}`} className={yFade.live ? "tk-yt in" : "tk-yt"} x={0} y={yOfRatio(tick.ratio) - 3.5}>{tick.value === 0 ? "0" : fmtTokens(tick.value)}</text>
+        ))}
+        {xFade.outgoing?.map((label, index) => (
+          <text key={`x-out-${index}`} className="tk-xt out" x={label.x} y={vbH - 7}>{label.lbl}</text>
+        ))}
+        {xFade.incoming.map((label, index) => (
+          <text key={`x-in-${index}`} className={xFade.live ? "tk-xt in" : "tk-xt"} x={label.x} y={vbH - 7}>{label.lbl}</text>
+        ))}
+        <defs>
+          <clipPath id="tk-plot-clip">
+            <rect x={0} y={0} width={Math.max(chartWidth, 1)} height={padTop + plotH + 3} />
+          </clipPath>
+        </defs>
+        <g clipPath="url(#tk-plot-clip)">
+          {modelPaths.map((entry) => {
+            const tone = modelTone(modelIds, entry.id);
+            return (
+              <g key={entry.id}>
+                {entry.path ? <path className={`tk-line ${tone}`} d={entry.path} /> : null}
+                {!morphing && entry.pts.length === 1 ? <circle className={`tk-pt ${tone}`} cx={entry.pts[0]![0]} cy={entry.pts[0]![1]} r={3} /> : null}
+              </g>
+            );
+          })}
+        </g>
+        {!morphing && hover && hoverPoint ? (
           <>
             <line className="tk-cursor" x1={hover.x} x2={hover.x} y1={padTop} y2={vbH - padBottom} />
             {modelIds.map((id) => (
@@ -688,7 +887,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
         ) : null}
         <rect className="tk-hit" x={0} y={0} width={Math.max(chartWidth, 1)} height={vbH} />
       </svg>
-      {hover?.source === "chart" && hoverPoint ? (
+      {!morphing && hover?.source === "chart" && hoverPoint ? (
         <div className="tk-tip show" style={{ left: Math.max(8, Math.min((cardRef.current?.clientWidth ?? 320) - 168, (hover?.x ?? 0) - 60)), top: 180 }}>
           <b>{hoverLabel}</b>
           {modelIds.map((id) => (
@@ -780,23 +979,41 @@ export function HomePage({
   onRoute: (route: PageRoute) => void;
 }) {
   const waiting = snapshot?.agents.filter((agent) => agent.status === "idle" || agent.status === "parked").length ?? 0;
-  const statusBits: string[] = [];
-  if (snapshot?.isStreaming) statusBits.push("任务正在运行");
-  if (waiting > 0) statusBits.push(`${waiting} 个 Agent 空闲`);
-  if (runtime?.status === "connected") statusBits.push(`Runtime ${runtime.classification ?? "connected"}`);
-  else statusBits.push(runtime?.status ? `Runtime ${runtime.status}` : "Runtime 不可用");
+  const extraBits: string[] = [];
+  if (snapshot?.isStreaming) extraBits.push("任务正在运行");
+  if (waiting > 0) extraBits.push(`${waiting} 个 Agent 空闲`);
 
   const { preview } = usePreviewMode();
+  const { profile, update, persistAvatar } = useOperatorProfile();
+  const [editingProfile, setEditingProfile] = useState(false);
   const activities = (history?.entries ?? []).slice(0, 5);
   const [installing, setInstalling] = useState(false);
   const [installMessage, setInstallMessage] = useState<string | undefined>(undefined);
   const runtimeMissing = !preview && runtime?.status !== "connected";
+  const statusText = ompStatusText(runtime, preview, extraBits);
 
   return (
     <div className="page-wide">
       <div className="home-hero">
-        <h1>{greeting()}，Studio</h1>
-        <p className="muted">{preview ? "预览模式 · 演示数据" : statusBits.join(" · ")}</p>
+        <div className="home-identity">
+          <span className="home-avatar-slot">
+            <ProfileAvatar name={profile.displayName} src={profile.avatarSrc} className="home-avatar" />
+          </span>
+          <div className="home-identity-copy">
+            <h1>{greeting()}，{profile.displayName}</h1>
+            <p className="muted">{statusText}</p>
+          </div>
+          <button
+            type="button"
+            className="icon-btn home-id-edit"
+            data-tip="编辑用户名和头像"
+            title="编辑用户名和头像"
+            aria-label="编辑用户名和头像"
+            onClick={() => setEditingProfile(true)}
+          >
+            <Icon name="pencil" />
+          </button>
+        </div>
         {installMessage ? <p className="muted small">{installMessage}</p> : null}
         <div className="home-quick">
           <button
@@ -918,10 +1135,22 @@ export function HomePage({
             <span className="spacer" />
             <span className="tiny muted">{relativeTime(entry.lastActiveAt)}</span>
           </button>
-        )) : (
+        )        ) : (
           <div className="empty" style={{ padding: 16 }}>暂无最近活动</div>
         )}
       </div>
+      {editingProfile ? (
+        <ProfileEditDialog
+          name={profile.displayName}
+          avatar={profile.avatarSrc}
+          onClose={() => setEditingProfile(false)}
+          onSave={async (next) => {
+            update({ displayName: next.displayName });
+            if (next.avatar !== undefined) await persistAvatar(next.avatar);
+            setEditingProfile(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

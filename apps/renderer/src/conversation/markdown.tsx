@@ -259,7 +259,6 @@ export function MarkdownText({
       >
         {text}
       </ReactMarkdown>
-      {streaming ? <span className="stream-caret" aria-hidden="true" /> : null}
       {truncated === true ? mark : null}
     </div>
   );

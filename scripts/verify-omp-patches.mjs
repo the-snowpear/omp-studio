@@ -1,5 +1,16 @@
+// Verify the two-layer fork model against the pinned upstream tree.
+//
+//   overlay  omp-patch/overlay/**  copied in (Studio-owned files, absent upstream)
+//   seam     omp-patch/patches/*   applied in series order (edits to upstream files)
+//
+// The vendor tree must be clean going in and clean coming out. Two invariants
+// are enforced beyond "it builds": the overlay may not modify any
+// upstream-tracked file (that would smuggle a seam change past review), and
+// every seam patch must apply with `--check` before it is applied for real.
+
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { applyOverlay, assertOverlayPresent, removeOverlay } from "./omp-overlay.mjs";
 import {
   findBun,
   ompSourceDirectory,
@@ -19,18 +30,30 @@ const head = run("git", ["-C", ompSourceDirectory, "rev-parse", "HEAD"], { captu
 if (head !== upstream.commit || series.upstreamCommit !== upstream.commit) {
   throw new Error(`OMP pin mismatch: source=${head}, upstream=${upstream.commit}, series=${series.upstreamCommit}`);
 }
-if (!Array.isArray(series.patches) || series.patches.length === 0) {
-  throw new Error("Patch verification requires at least one patch in series.json");
+if (!Array.isArray(series.patches)) {
+  throw new Error("Patch verification requires a patches array in series.json");
 }
+await assertOverlayPresent();
 
 const initialStatus = run("git", ["-C", ompSourceDirectory, "status", "--porcelain"], { capture: true });
 if (initialStatus !== "") throw new Error(`OMP source must be clean before patch verification:\n${initialStatus}`);
 
 const patchFiles = series.patches.map(name => join(repositoryRoot, "omp-patch", "patches", name));
 const applied = [];
+let overlayApplied = false;
 let verificationError;
 
 try {
+  const overlayFiles = await applyOverlay();
+  overlayApplied = true;
+  const overlayTouchedTracked = run("git", ["-C", ompSourceDirectory, "diff", "--name-only"], { capture: true });
+  if (overlayTouchedTracked !== "") {
+    throw new Error(
+      `Overlay overwrote upstream-tracked files; those edits belong in a seam patch:\n${overlayTouchedTracked}`,
+    );
+  }
+  console.log(`Applied ${overlayFiles.length} overlay file(s)`);
+
   for (const patchFile of patchFiles) {
     run("git", ["-C", ompSourceDirectory, "apply", "--check", patchFile]);
     run("git", ["-C", ompSourceDirectory, "apply", patchFile]);
@@ -71,6 +94,7 @@ try {
       "packages/coding-agent/test/studio-model-control-service.test.ts",
       "packages/coding-agent/test/studio-session-control-dispatcher.test.ts",
       "packages/coding-agent/test/studio-session-control-service.test.ts",
+      "packages/coding-agent/test/studio-skill-prompt-expansion.test.ts",
       "packages/coding-agent/test/studio-command-manifest-service.test.ts",
       "packages/coding-agent/test/studio-interaction-port.test.ts",
       "packages/coding-agent/test/studio-remote-extension-ui.test.ts",
@@ -108,6 +132,16 @@ try {
       break;
     }
   }
+  if (overlayApplied) {
+    try {
+      await removeOverlay();
+    } catch (error) {
+      verificationError = new AggregateError(
+        [verificationError, error].filter(Boolean),
+        "Patch verification failed and the overlay could not be fully removed",
+      );
+    }
+  }
 }
 
 const finalStatus = run("git", ["-C", ompSourceDirectory, "status", "--porcelain"], { capture: true });
@@ -118,4 +152,6 @@ if (finalStatus !== "") {
 }
 if (verificationError) throw verificationError;
 
-console.log(`Verified ${series.patches.length} OMP patch(es) at ${upstream.commit}; vendor restored clean`);
+console.log(
+  `Verified overlay + ${series.patches.length} seam patch(es) at ${upstream.commit}; vendor restored clean`,
+);

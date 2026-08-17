@@ -30,9 +30,18 @@ channel metadata, and reference-safe retention.
 All values come from the real pin (`omp-patch/upstream.json`), the real patch
 series (`omp-patch/patches/series.json`), the pinned vendor package version,
 and the real built binary. `runtimeVersion` is
-`<upstreamVersion>-studio.<patchCount>`.
+`<upstreamVersion>-<patchsetVersion>`, where `patchsetVersion` is the
+`studio.<n>` value recorded in the series file. It is recorded rather than
+derived from the patch count so that consolidating patches cannot move the
+version backwards onto an already-installed directory name; `omp:patches:regen`
+advances it whenever the fork's content digest changes.
 Emitted JSON is deterministic: no timestamps, no absolute paths, fixed key
 order — two builds over identical inputs produce byte-identical files.
+
+Artifact provenance (returned by the generator, not written into the manifest)
+covers both layers of the fork: `patchHashes` for the seam patches and
+`overlayHash` for `omp-patch/overlay/`, which holds the bulk of the Studio
+Runtime source. See `omp-patch/README.md` for the layer split.
 
 ### Limited capability/command hashes
 

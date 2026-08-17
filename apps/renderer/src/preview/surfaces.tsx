@@ -3,6 +3,7 @@ import type { GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadM
 import { Icon } from "../icons";
 import { setHubIntent } from "../AgentHub";
 import { GitCommitGraph } from "../git/GitCommitGraph";
+import { GitDiffResizer, useGitDiffHeight } from "../git/GitDiffResizer";
 import { GitMoreActionsMenu } from "../git/GitMoreActionsMenu";
 import { GitPanelSplit } from "../git/GitPanelSplit";
 import { GitTip } from "../git/GitTip";
@@ -20,24 +21,13 @@ import {
   PREVIEW_SIDE_AGENTS,
   PREVIEW_TELEMETRY,
   PREVIEW_TESTS,
-  type PreviewChangeRow,
   type PreviewFileNode,
   type PreviewSideAgent,
 } from "./fixtures";
+import { ChangesPanel, FileStat, type ChangesDiffFile } from "../conversation/ChangesPanel";
 import { ConvoTranscript } from "../conversation/ConvoTranscript";
-import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
+import { GIT_STATUS_META } from "../git/treeStatus";
 import { previewConversationRows } from "./conversationFixtures";
-
-function FileStat({ status }: { status: TreeGitStatus | undefined }) {
-  if (!status) return null;
-  const meta = GIT_STATUS_META[status];
-  return (
-    <span className={`fstat ${meta.className}`}>
-      <span aria-hidden="true">{meta.letter}</span>
-      <span className="sr-only"> {meta.label}</span>
-    </span>
-  );
-}
 
 function collectOpen(nodes: PreviewFileNode[], prefix: string, into: Set<string>): void {
   for (const node of nodes) {
@@ -266,103 +256,81 @@ export function PreviewContextPanel() {
   );
 }
 
-function ChangeGroup({ title, id, rows, selected, onSelect }: {
-  title: string;
-  id: string;
-  rows: PreviewChangeRow[];
-  selected: string | null;
-  onSelect: (file: string) => void;
-}) {
-  return (
-    <div className="ch-group" role="group" aria-labelledby={id}>
-      <div className="ch-group-title" id={id}>
-        <span>{title}</span><span className="ch-count" aria-label={`${rows.length} 个文件`}>{rows.length}</span>
-      </div>
-      {rows.map((row) => (
-        <button
-          key={row.file}
-          type="button"
-          className={`ch-row${selected === row.file ? " sel" : ""}`}
-          aria-current={selected === row.file}
-          onClick={() => onSelect(row.file)}
-        >
-          <FileStat status={row.status} />
-          <span className="ch-file ellipsis">{row.file}</span>
-          <span className="ch-note">{row.agent ?? row.note ?? ""}</span>
-          <span className="ch-delta">
-            <span className="ch-add">+{row.add}<span className="sr-only"> 行新增</span></span>
-            <span className="ch-del">-{row.del}<span className="sr-only"> 行删除</span></span>
-          </span>
-        </button>
-      ))}
-    </div>
-  );
+function previewDelta(rows: readonly { add: number; del: number }[]): { add: number; del: number } {
+  return rows.reduce((sum, row) => ({ add: sum.add + row.add, del: sum.del + row.del }), { add: 0, del: 0 });
 }
 
+function previewDiffFiles(rows: readonly { file: string; add: number; del: number }[]): ChangesDiffFile[] {
+  const d = PREVIEW_DIFF;
+  return rows.map((row) => ({
+    file: row.file,
+    add: row.add,
+    del: row.del,
+    hunks: row.file === d.file ? [{
+      hunkLabel: "hunk 1/2",
+      lines: d.lines.map((line) => (
+        line[0] === "collapse"
+          ? { kind: "collapse" as const, label: line[1] }
+          : {
+            kind: "row" as const,
+            mark: line[0] === "+" || line[0] === "-" ? line[0] : " ",
+            oldLn: line[1],
+            newLn: line[2],
+            text: line[3],
+          }
+      )),
+    }] : [],
+  }));
+}
+
+const PREVIEW_TURN_LAST = "last";
+const PREVIEW_TURN_SESSION = "session";
+
 export function PreviewChanges({ focusPath }: { focusPath?: string }) {
-  const [selected, setSelected] = useState<string | null>(PREVIEW_DIFF.file);
+  const last = previewDelta(PREVIEW_CHANGES.turn);
+  const session = previewDelta(PREVIEW_CHANGES.thread);
+  const [turnId, setTurnId] = useState(PREVIEW_TURN_LAST);
   const [split, setSplit] = useState(false);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const files = previewDiffFiles(turnId === PREVIEW_TURN_SESSION ? PREVIEW_CHANGES.thread : PREVIEW_CHANGES.turn);
   useEffect(() => {
     if (focusPath === undefined) return;
-    const known = [...PREVIEW_CHANGES.turn, ...PREVIEW_CHANGES.thread]
-      .some((row) => row.file === focusPath);
-    if (known) setSelected(focusPath);
+    const inLast = PREVIEW_CHANGES.turn.some((row) => row.file === focusPath);
+    const inSession = PREVIEW_CHANGES.thread.some((row) => row.file === focusPath);
+    if (!inLast && !inSession) return;
+    setTurnId(inLast ? PREVIEW_TURN_LAST : PREVIEW_TURN_SESSION);
+    setExpanded(new Set([focusPath]));
   }, [focusPath]);
-  const d = PREVIEW_DIFF;
   return (
-    <>
-      <div className="ch-toolbar">
-        <span className="chip gray xs">演示</span>
-        <span className="spacer" />
-        <button type="button" className="btn small outline" disabled title="演示 Diff，不会发给 Host">查看全部 Diff</button>
-      </div>
-      <div className="ch-list">
-        <ChangeGroup title="当前 Turn" id="chgTurn" rows={PREVIEW_CHANGES.turn} selected={selected} onSelect={setSelected} />
-        <ChangeGroup title="本会话累积" id="chgThread" rows={PREVIEW_CHANGES.thread} selected={selected} onSelect={setSelected} />
-      </div>
-      {selected ? (
-        <div className="ch-diff-slot" style={{ height: 220 }}>
-          <div className="diff-toolbar">
-            <Icon name="file-code" extra="sm" />
-            <span className="mono small ellipsis">{selected}</span>
-            <span className="ch-add">+{d.add}</span>
-            <span className="ch-del">-{d.del}</span>
-            <span className="spacer" />
-            <span className="seg" role="radiogroup" aria-label="Diff 显示模式">
-              <button type="button" role="radio" aria-checked={!split} className={split ? "" : "active"} onClick={() => setSplit(false)}>Inline</button>
-              <button type="button" role="radio" aria-checked={split} className={split ? "active" : ""} onClick={() => setSplit(true)}>Split</button>
-            </span>
-          </div>
-          <div className={`diff-scroll${split ? " diff-split" : ""}`}>
-            <div className="diff-head-row">@@ {d.file} · hunk 1/2 @@</div>
-            {d.lines.map((line, index) => {
-              if (line[0] === "collapse") {
-                return <div key={`c-${index}`} className="dl collapse"><Icon name="chevron-ud" extra="sm" /> {line[1]}</div>;
-              }
-              const cls = line[0] === "+" ? "add" : line[0] === "-" ? "del" : "";
-              const mark = line[0] === "+" ? "+" : line[0] === "-" ? "−" : " ";
-              if (split) {
-                const left = line[0] !== "+"
-                  ? <div className="half"><span className="ln">{line[1]}</span><span className="lc">{line[3]}</span></div>
-                  : <div className="half"><span className="ln" /><span className="lc" /></div>;
-                const right = line[0] !== "-"
-                  ? <div className="half"><span className="ln">{line[2]}</span><span className="lc">{line[3]}</span></div>
-                  : <div className="half"><span className="ln" /><span className="lc" /></div>;
-                return <div key={`${index}-${line[3]}`} className={`dl ${cls}`}>{left}{right}</div>;
-              }
-              return (
-                <div key={`${index}-${line[3]}`} className={`dl ${cls}`}>
-                  <span className="ln">{line[1]}</span>
-                  <span className="ln">{line[2]}</span>
-                  <span className="dm" aria-hidden="true">{mark}</span>
-                  <span className="lc">{line[3]}</span>
-                </div>
-              );
-            })}
-          </div>
+    <ChangesPanel
+      demo
+      turns={[
+        { id: PREVIEW_TURN_LAST, label: "最近一轮", add: last.add, del: last.del },
+        { id: PREVIEW_TURN_SESSION, label: "本会话", add: session.add, del: session.del },
+      ]}
+      turnId={turnId}
+      onTurnChange={(id) => {
+        setTurnId(id);
+        setExpanded(new Set());
+      }}
+      files={files}
+      expanded={expanded}
+      onToggle={(file) => {
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          if (next.has(file)) next.delete(file);
+          else next.add(file);
+          return next;
+        });
+      }}
+      split={split}
+      onSplit={setSplit}
+      empty={(
+        <div className="empty" style={{ padding: 18 }}>
+          <p>演示会话还没有文件改动。</p>
         </div>
-      ) : null}
-    </>
+      )}
+    />
   );
 }
 
@@ -370,6 +338,7 @@ export function PreviewChanges({ focusPath }: { focusPath?: string }) {
 export function PreviewGitPanel() {
   const [selected, setSelected] = useState<string | null>(PREVIEW_DIFF.file);
   const [graphLayout, setGraphLayout] = useState(readGitGraphLayout);
+  const [diffHeight, setDiffHeight] = useGitDiffHeight();
   const [selectedCommit, setSelectedCommit] = useState<string>();
   const [selectedCommitPath, setSelectedCommitPath] = useState<string>();
   const known = [...PREVIEW_GIT.staged, ...PREVIEW_GIT.working].some((row) => row.path === selected);
@@ -454,11 +423,13 @@ export function PreviewGitPanel() {
         ))}
       </div>
       <div className="git-commit-box">
-        <textarea disabled placeholder="Commit message（演示）" rows={2} readOnly value="" onChange={() => undefined} />
+        <textarea disabled placeholder="Commit message（演示）" rows={1} readOnly value="" onChange={() => undefined} />
         <GitTip text="演示仓库，不会创建 Commit"><button type="button" className="btn small primary" disabled>Commit</button></GitTip>
       </div>
       {active !== null ? (
-        <div className="ch-diff-slot">
+        <>
+        <GitDiffResizer height={diffHeight} onHeight={setDiffHeight} />
+        <div className="ch-diff-slot git-diff-slot" style={{ height: diffHeight }}>
           <div className="diff-toolbar">
             <Icon name="file-code" extra="sm" />
             <span className="mono small ellipsis">{active}</span>
@@ -484,6 +455,7 @@ export function PreviewGitPanel() {
             })}
           </div>
         </div>
+        </>
       ) : null}
         </>
       )}

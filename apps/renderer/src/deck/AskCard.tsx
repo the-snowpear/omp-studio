@@ -30,7 +30,7 @@ export function AskHead({
           <span className="dk-head-chips" role="tablist" aria-label="问题">
             {headers.map((entry) => (
               <button
-                key={entry.header}
+                key={`${entry.index}:${entry.header}`}
                 type="button"
                 role="tab"
                 aria-selected={entry.active}

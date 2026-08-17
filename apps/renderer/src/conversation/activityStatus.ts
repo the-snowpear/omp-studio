@@ -5,12 +5,20 @@ export type ActivityPhase = "waiting" | "thinking" | "responding" | "tool" | "qu
 
 export const WORKING_LABEL = "working";
 
+/** Live auto-retry counter from Runtime `conversation.notice` (`Retry 5/10`). */
+export interface ActivityRetry {
+  readonly attempt: number;
+  readonly maxAttempts: number;
+}
+
 export interface ActivityStatus {
   readonly phase: ActivityPhase;
   /** Verb phrase shown after elapsed time once the model has started responding. */
   readonly label: string;
   /** Concrete target of the operation (file, command, query); already shortened. */
   readonly detail?: string;
+  /** Outstanding auto-retry; shown immediately to the right of `working`. */
+  readonly retry?: ActivityRetry;
 }
 
 export function isLiveActivityPhase(phase: ActivityPhase): boolean {
@@ -126,8 +134,118 @@ export function isAbortEligible(input: {
   readonly streaming: boolean;
   readonly pendingMessages: number;
   readonly awaiting: boolean;
+  readonly retrying?: boolean;
 }): boolean {
-  return input.executionMatches && (input.streaming || input.pendingMessages > 0 || input.awaiting);
+  return input.executionMatches && (
+    input.streaming || input.pendingMessages > 0 || input.awaiting || input.retrying === true
+  );
+}
+
+const RETRY_NOTICE = /^Retry (\d+)\/(\d+)$/;
+
+export function parseRetryNotice(message: string, source?: string): ActivityRetry | undefined {
+  if (source !== undefined && source !== "retry") return undefined;
+  const match = RETRY_NOTICE.exec(message.trim());
+  if (match === null) return undefined;
+  const attempt = Number(match[1]);
+  const maxAttempts = Number(match[2]);
+  if (!Number.isInteger(attempt) || !Number.isInteger(maxAttempts) || attempt < 1 || maxAttempts < 1) {
+    return undefined;
+  }
+  return { attempt, maxAttempts };
+}
+
+export function isRetryActivityNotice(message: string, source?: string): boolean {
+  return parseRetryNotice(message, source) !== undefined;
+}
+
+export function formatRetry(retry: ActivityRetry): string {
+  return `Retry ${retry.attempt}/${retry.maxAttempts}`;
+}
+
+export function latestActivityRetry(
+  notices: readonly { readonly message: string; readonly source?: string }[],
+): ActivityRetry | undefined {
+  for (let index = notices.length - 1; index >= 0; index -= 1) {
+    const notice = notices[index];
+    if (notice === undefined) continue;
+    const parsed = parseRetryNotice(notice.message, notice.source);
+    if (parsed !== undefined) return parsed;
+  }
+  return undefined;
+}
+
+function retryNoticeCount(notices: readonly { readonly message: string; readonly source?: string }[]): number {
+  let count = 0;
+  for (const notice of notices) {
+    if (parseRetryNotice(notice.message, notice.source) !== undefined) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Hold the latest `Retry N/M` notice until that retry attempt's stream ends
+ * without a further retry. A new notice during backoff refreshes the counter;
+ * a streaming falling edge after the retried request has started clears it.
+ */
+export function reduceActivityRetry(
+  prev: {
+    readonly identityKey: string;
+    readonly retry?: ActivityRetry;
+    readonly noticeCount: number;
+    readonly seenStream: boolean;
+    readonly wasStreaming: boolean;
+  },
+  input: {
+    readonly identityKey: string;
+    readonly notices: readonly { readonly message: string; readonly source?: string }[];
+    readonly streaming: boolean;
+    readonly failed: boolean;
+  },
+): {
+  readonly identityKey: string;
+  readonly retry?: ActivityRetry;
+  readonly noticeCount: number;
+  readonly seenStream: boolean;
+  readonly wasStreaming: boolean;
+} {
+  const noticeCount = retryNoticeCount(input.notices);
+  const latest = latestActivityRetry(input.notices);
+  const hold = prev.identityKey === input.identityKey
+    ? prev
+    : { identityKey: input.identityKey, noticeCount: 0, seenStream: false, wasStreaming: false };
+  if (input.failed && !input.streaming) {
+    return { identityKey: input.identityKey, noticeCount, seenStream: false, wasStreaming: false };
+  }
+  if (latest !== undefined && noticeCount > hold.noticeCount) {
+    return {
+      identityKey: input.identityKey,
+      retry: latest,
+      noticeCount,
+      seenStream: false,
+      wasStreaming: input.streaming,
+    };
+  }
+  if (hold.retry === undefined) {
+    return {
+      identityKey: input.identityKey,
+      noticeCount,
+      seenStream: false,
+      wasStreaming: input.streaming,
+    };
+  }
+  const rising = !hold.wasStreaming && input.streaming;
+  const seenStream = hold.seenStream || rising;
+  if (hold.wasStreaming && !input.streaming && seenStream && noticeCount === hold.noticeCount) {
+    return { identityKey: input.identityKey, noticeCount, seenStream: false, wasStreaming: false };
+  }
+  return {
+    identityKey: input.identityKey,
+    retry: hold.retry,
+    noticeCount,
+    seenStream,
+    wasStreaming: input.streaming,
+  };
 }
 
 /**
@@ -136,16 +254,21 @@ export function isAbortEligible(input: {
  * shows no line at all rather than a placeholder.
  *
  * Before the first assistant event, the phase is `waiting` (Claude: only
- * "working"). Time and the live operation appear once thinking, text, or a
- * tool has started.
+ * "working", plus `Retry N/M` while auto-retry is outstanding). Time and the
+ * live operation appear once thinking, text, or a tool has started — retry
+ * is omitted from that live line.
  */
 export function deriveActivityStatus(input: {
   readonly state: ConversationState;
   readonly streaming: boolean;
   readonly pendingMessages: number;
   readonly awaiting?: boolean;
+  readonly retry?: ActivityRetry;
 }): ActivityStatus | null {
-  const { state, streaming, pendingMessages, awaiting = false } = input;
+  const { state, streaming, pendingMessages, awaiting = false, retry } = input;
+  const withRetry = (status: ActivityStatus): ActivityStatus => (
+    retry === undefined ? status : { ...status, retry }
+  );
   if (streaming && hasLiveActivityProgress(state)) {
     const tool = activeTool(state);
     if (tool !== undefined) {
@@ -158,7 +281,7 @@ export function deriveActivityStatus(input: {
     if (blockType === "thinking") return { phase: "thinking", label: "正在思考" };
     if (blockType === "text") return { phase: "responding", label: "正在回复" };
   }
-  if (streaming || awaiting) return { phase: "waiting", label: WORKING_LABEL };
+  if (streaming || awaiting || retry !== undefined) return withRetry({ phase: "waiting", label: WORKING_LABEL });
   if (pendingMessages > 0) return { phase: "queued", label: `已排队 ${pendingMessages} 条消息` };
   return null;
 }

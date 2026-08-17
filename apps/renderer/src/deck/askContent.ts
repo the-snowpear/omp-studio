@@ -77,4 +77,77 @@ export function submitSelectValue(
   return multiple ? ids : ids[0];
 }
 
+export type AskDeckView = {
+  readonly items: ReadonlyArray<{
+    readonly kind: "ask";
+    readonly id: string;
+    readonly question: DeckAskQuestion;
+  }>;
+};
+
+function optionToDeck(option: { readonly id: string; readonly label: string; readonly description?: string; readonly preview?: string }): DeckAskOption | undefined {
+  if (isReservedOption(option.id, option.label)) return undefined;
+  const stripped = stripRecommended(option.label);
+  return {
+    label: stripped.label,
+    ...(option.description && option.description !== "推荐" ? { description: option.description } : {}),
+    ...(option.preview ? { preview: option.preview } : {}),
+  };
+}
+
+/** Map a Host `ask` interaction (one tool call, many questions) onto preview Ask cards. */
+export function askToDeckView(interaction: Extract<ClientInteraction, { kind: "ask" }>): AskDeckView {
+  return {
+    items: interaction.questions.map((question) => {
+      const options: DeckAskOption[] = [];
+      let recommended = question.recommended;
+      for (const option of question.options) {
+        const mapped = optionToDeck(option);
+        if (!mapped) continue;
+        const rec = mapped.label !== option.label || option.description === "推荐";
+        if (rec && recommended === undefined) recommended = options.length;
+        options.push(mapped);
+      }
+      const header = question.header?.trim() || question.id;
+      return {
+        kind: "ask" as const,
+        id: question.id,
+        question: {
+          id: question.id,
+          question: question.question,
+          header,
+          options,
+          ...(question.multiple ? { multi: true } : {}),
+          ...(recommended === undefined ? {} : { recommended }),
+        },
+      };
+    }),
+  };
+}
+
+export type AskSubmitPayload = {
+  readonly results: ReadonlyArray<{
+    readonly id: string;
+    readonly selectedOptions: readonly string[];
+    readonly customInput?: string;
+  }>;
+};
+
+export function submitAskValue(
+  questions: Extract<ClientInteraction, { kind: "ask" }>["questions"],
+  answers: Readonly<Record<string, DeckAskAnswer>>,
+): AskSubmitPayload {
+  return {
+    results: questions.map((question) => {
+      const answer = answers[question.id] ?? NO_ASK_ANSWER;
+      const custom = answer.custom.trim();
+      return {
+        id: question.id,
+        selectedOptions: custom ? [] : [...answer.picked],
+        ...(custom ? { customInput: custom } : {}),
+      };
+    }),
+  };
+}
+
 export { NO_ASK_ANSWER };

@@ -3,12 +3,15 @@ import { Icon } from "./icons";
 import type { ComposerDoc } from "./composer/types";
 import type { PromptImage } from "./composer/types";
 
-/** 流式期间按 Enter 入队的本地消息；run 结束后按序经 core.prompt 发送。 */
+/** 流式期间按 Enter 入队的本地消息；run 结束后按序经 core.prompt 发送。
+ *  条目上「插入纠偏」由调用方走 core.steer，打断当前回合。 */
 export interface QueuedMessage {
   id: number;
   text: string;
   images?: ReadonlyArray<PromptImage>;
   doc?: ComposerDoc;
+  /** Session that owned the draft. Flush must not send this into another thread. */
+  sessionId?: string;
 }
 
 export function MessageQueueBar({ messages, running, sendEnabled, demo, onEdit, onSendNow, onRemove }: {
@@ -61,11 +64,17 @@ export function MessageQueueBar({ messages, running, sendEnabled, demo, onEdit, 
                     type="button"
                     className="icon-btn small"
                     disabled={!sendEnabled}
-                    data-tip={demo === true ? "立刻发送（演示，不调用 Host）" : running ? "立刻发送：作为 follow-up 交给 Runtime 排队" : "立刻发送"}
-                    aria-label={`立刻发送第 ${index + 1} 条排队消息`}
+                    data-tip={
+                      demo === true
+                        ? (running ? "插入纠偏（演示，不调用 Host）" : "立刻发送（演示，不调用 Host）")
+                        : running
+                          ? "插入纠偏：打断当前回合，跳过尚未开始的工具后立刻处理"
+                          : "立刻发送"
+                    }
+                    aria-label={running ? `插入纠偏第 ${index + 1} 条排队消息` : `立刻发送第 ${index + 1} 条排队消息`}
                     onClick={() => onSendNow(entry)}
                   >
-                    <Icon name="send" extra="sm" />
+                    <Icon name={running ? "steering" : "send"} extra="sm" />
                   </button>
                   <button
                     type="button"

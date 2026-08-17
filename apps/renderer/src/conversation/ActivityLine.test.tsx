@@ -14,6 +14,29 @@ describe("ActivityLine", () => {
     expect(screen.queryByRole("button", { name: "停止当前运行" })).toBeNull();
   });
 
+  it("places Retry N/M immediately to the right of working", () => {
+    render(
+      <ActivityLine
+        status={{ phase: "waiting", label: WORKING_LABEL, retry: { attempt: 5, maxAttempts: 10 } }}
+      />,
+    );
+    expect(screen.getByRole("status").textContent?.replace(/\s+/g, " ").trim()).toBe("working·Retry 5/10");
+  });
+
+  it("drops Retry N/M once the live operation appears", () => {
+    render(
+      <ActivityLine
+        status={{ phase: "tool", label: "正在读取", detail: "App.tsx", retry: { attempt: 5, maxAttempts: 10 } }}
+        startedAt={Date.now()}
+      />,
+    );
+    const spoken = screen.getByRole("status").textContent?.replace(/\s+/g, " ").trim() ?? "";
+    expect(spoken).not.toContain("Retry");
+    expect(spoken).toContain(WORKING_LABEL);
+    expect(spoken).toContain("正在读取");
+    expect(spoken).toContain("App.tsx");
+  });
+
   it("reveals elapsed time and the live operation after the model starts responding", () => {
     render(
       <ActivityLine

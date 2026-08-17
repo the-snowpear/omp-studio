@@ -8,7 +8,8 @@
  *
  * 数据：预览开 = modelConfigFixtures 演示数据 + 纯本地选择；预览关 = models.get
  * 提供目录，pill 显示的当前值只来自 snapshot.model（Runtime 真值），切换走
- * session.model.set / session.thinking.set，不做乐观填值。
+ * session.model.set / session.thinking.set，不做乐观填值。流式期间也可以换模型，
+ * Runtime 把选择记到下一轮用户对话，当前请求和自动重试仍用原模型。
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -83,8 +84,8 @@ export function ComposerModelPicker({
   refreshKey = "",
   snapshot,
   can,
-  busy,
   onRun,
+  openNonce = 0,
 }: {
   preview: boolean;
   client: StudioClient;
@@ -95,6 +96,8 @@ export function ComposerModelPicker({
   can: (id: string) => boolean;
   busy: boolean;
   onRun: <T extends CommandName>(name: T, input: CommandInput<T>) => Promise<boolean>;
+  /** Increment to open the model menu from `/model`. */
+  openNonce?: number;
 }) {
   const [menu, setMenu] = useState<MenuKind>("none");
   const [moreOpen, setMoreOpen] = useState(false);
@@ -107,6 +110,9 @@ export function ComposerModelPicker({
   const modelMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => () => window.clearTimeout(flyoutTimer.current), []);
+  useEffect(() => {
+    if (openNonce > 0) setMenu("model");
+  }, [openNonce]);
 
   // 取数：挂载、切预览、切对话（refreshKey）、打开菜单时都刷新，
   // 保证菜单关闭状态下 pill 标签也跟随当前数据源。
@@ -185,8 +191,7 @@ export function ComposerModelPicker({
   );
   const modelReady = preview || can("session.model.set");
   const thinkingReady = preview || can("session.thinking.set");
-  // Runtime 在 streaming / compacting 时会直接拒绝切换，所以流式期间先禁用。
-  const locked = !preview && (busy || snapshot?.isStreaming === true);
+  const nextTurnOnly = !preview && (snapshot?.isStreaming === true || snapshot?.isCompacting === true);
 
   const selectedModel = pick ? bySelector.get(pick.selector) : undefined;
   const thinking = useMemo(() => {
@@ -228,7 +233,7 @@ export function ComposerModelPicker({
 
   const chooseRole = (role: ModelRoleRecord) => {
     closeAll();
-    if (!modelReady || locked) return;
+    if (!modelReady) return;
     if (preview) {
       setPreviewPick(pickWith(role.id, role.primary, role.thinking));
       return;
@@ -241,7 +246,7 @@ export function ComposerModelPicker({
 
   const chooseModel = (selector: string) => {
     closeAll();
-    if (!modelReady || locked) return;
+    if (!modelReady) return;
     if (preview) {
       const model = bySelector.get(selector);
       setPreviewPick((prev) => pickWith(null, selector, clampRoleThinking(prev?.thinking, model) || undefined));
@@ -253,7 +258,7 @@ export function ComposerModelPicker({
 
   const chooseThinking = (id: string) => {
     closeAll();
-    if (!thinkingReady || locked) return;
+    if (!thinkingReady) return;
     if (preview) {
       setPreviewPick((prev) => (prev ? pickWith(prev.roleId, prev.selector, id === "off" ? undefined : id) : prev));
       return;
@@ -284,7 +289,7 @@ export function ComposerModelPicker({
   const modelPillTitle = !modelReady
     ? "Runtime 未暴露 session.model.set"
     : pick
-      ? `${pick.selector}${roleName ? `（${roleName}）` : ""}${preview ? " · 演示" : ""}`
+      ? `${pick.selector}${roleName ? `（${roleName}）` : ""}${preview ? " · 演示" : ""}${nextTurnOnly ? " · 下一轮对话生效" : ""}`
       : "选择模型";
 
   return (
@@ -336,7 +341,7 @@ export function ComposerModelPicker({
                       role="menuitemradio"
                       aria-checked={on}
                       className={`cmp-role${on ? " selected" : ""}`}
-                      disabled={!modelReady || locked}
+                      disabled={!modelReady}
                       title={role.primary}
                       onClick={() => chooseRole(role)}
                     >
@@ -407,7 +412,7 @@ export function ComposerModelPicker({
                               role="option"
                               aria-selected={on}
                               className={`menu-item rms-option${on ? " is-on" : ""}`}
-                              disabled={!modelReady || locked}
+                              disabled={!modelReady}
                               title={model.selector}
                               onClick={() => chooseModel(model.selector)}
                             >
@@ -432,8 +437,8 @@ export function ComposerModelPicker({
                 </div>
               ) : !modelReady ? (
                 <div className="cmp-menu-note">Runtime 未暴露 session.model.set</div>
-              ) : locked ? (
-                <div className="cmp-menu-note">Runtime 忙，本轮结束后才能切换模型</div>
+              ) : nextTurnOnly ? (
+                <div className="cmp-menu-note">当前轮次仍用原模型，下一轮对话才生效</div>
               ) : (
                 <div className="cmp-menu-note">只改当前会话，不写 models.yml</div>
               )}
@@ -445,7 +450,7 @@ export function ComposerModelPicker({
         <button
           type="button"
           className="pill-btn"
-          disabled={!pick || thinking.disabled || !thinkingReady || locked}
+          disabled={!pick || thinking.disabled || !thinkingReady}
           aria-haspopup="menu"
           aria-expanded={menu === "thinking"}
           aria-label="思考强度"
@@ -454,8 +459,8 @@ export function ComposerModelPicker({
               ? "Runtime 未暴露 session.thinking.set"
               : thinking.disabled
                 ? "当前模型不支持思考强度"
-                : locked
-                  ? "Runtime 忙，本轮结束后才能改思考强度"
+                : nextTurnOnly
+                  ? `思考强度：${thinkingLabel}（下一轮对话生效）`
                   : `思考强度：${thinkingLabel}`
           }
           onClick={() => setMenu((current) => (current === "thinking" ? "none" : "thinking"))}

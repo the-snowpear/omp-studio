@@ -75,6 +75,7 @@ const INTERACTION_LIMITS = {
   TITLE_MAX_CHARS: 4_096,
   MESSAGE_MAX_CHARS: 16 * 1024,
   OPTION_COUNT_MAX: 256,
+  QUESTION_COUNT_MAX: 32,
   OPTION_TEXT_MAX_CHARS: 4_096,
   EDITOR_CONTENT_MAX_CHARS: 128 * 1024,
   DETAILS_MAX_BYTES: 64 * 1024,
@@ -252,7 +253,7 @@ const COMMAND_PRESENTATIONS = new Set(["native", "generic-form", "terminal"]);
 const COMMAND_AVAILABILITY = new Set(["available", "disabled", "blocked"]);
 const COMMAND_RISKS = new Set(["normal", "sensitive", "destructive"]);
 const COMMAND_EFFECTS = new Set(["read", "session", "workspace", "process", "external"]);
-const INTERACTION_KINDS = new Set(["confirm", "select", "input", "editor", "approval"]);
+const INTERACTION_KINDS = new Set(["confirm", "select", "input", "editor", "approval", "ask"]);
 
 export function parseOperatorCommandManifest(value: unknown): OperatorCommandManifest {
   const manifest = record(value, "$commandManifest");
@@ -575,6 +576,48 @@ export function parseStudioEventEnvelope(value: unknown): StudioEventEnvelope {
   return input as unknown as StudioEventEnvelope;
 }
 
+function validateAskOption(value: unknown, path: string): void {
+  const option = record(value, path);
+  exactKeys(option, ["id", "label", "description", "preview"], path);
+  boundedInteractionString(option.id, `${path}.id`, INTERACTION_LIMITS.ID_MAX_CHARS);
+  boundedInteractionString(option.label, `${path}.label`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+  if (option.description !== undefined) {
+    boundedOptionalInteractionString(option.description, `${path}.description`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+  }
+  if (option.preview !== undefined) {
+    boundedOptionalInteractionString(option.preview, `${path}.preview`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+  }
+}
+
+function validateAskQuestions(value: unknown, path: string): void {
+  if (!Array.isArray(value) || value.length === 0 || value.length > INTERACTION_LIMITS.QUESTION_COUNT_MAX) {
+    throw new ContractValidationError("expected a non-empty question list", path);
+  }
+  for (const [index, entry] of value.entries()) {
+    const question = record(entry, `${path}[${index}]`);
+    exactKeys(question, ["id", "question", "header", "options", "multiple", "recommended"], `${path}[${index}]`);
+    boundedInteractionString(question.id, `${path}[${index}].id`, INTERACTION_LIMITS.ID_MAX_CHARS);
+    boundedInteractionString(question.question, `${path}[${index}].question`, INTERACTION_LIMITS.TITLE_MAX_CHARS);
+    if (question.header !== undefined) {
+      boundedOptionalInteractionString(question.header, `${path}[${index}].header`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+    }
+    if (!Array.isArray(question.options) || question.options.length > INTERACTION_LIMITS.OPTION_COUNT_MAX) {
+      throw new ContractValidationError("expected options", `${path}[${index}].options`);
+    }
+    for (const [optionIndex, option] of question.options.entries()) {
+      validateAskOption(option, `${path}[${index}].options[${optionIndex}]`);
+    }
+    if (question.multiple !== undefined && typeof question.multiple !== "boolean") {
+      throw new ContractValidationError("expected a boolean", `${path}[${index}].multiple`);
+    }
+    if (question.recommended !== undefined) {
+      if (typeof question.recommended !== "number" || !Number.isSafeInteger(question.recommended) || question.recommended < 0) {
+        throw new ContractValidationError("expected a non-negative integer", `${path}[${index}].recommended`);
+      }
+    }
+  }
+}
+
 function validateRemoteInteractionRequest(request: Record<string, unknown>, path: string): void {
   const kind = nonEmptyString(request.kind, `${path}.kind`);
   const baseKeys = ["kind", "interactionId", "commandId", "title"];
@@ -628,6 +671,11 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
       boundedInteractionString(request.approvalType, `${path}.approvalType`, INTERACTION_LIMITS.ID_MAX_CHARS);
       boundedInteractionJson(request.details, `${path}.details`, INTERACTION_LIMITS.DETAILS_MAX_BYTES);
       return;
+    case "ask": {
+      exactKeys(request, [...baseKeys, "questions"], path);
+      validateAskQuestions(request.questions, `${path}.questions`);
+      return;
+    }
     default:
       throw new ContractValidationError("unsupported interaction kind", `${path}.kind`);
   }

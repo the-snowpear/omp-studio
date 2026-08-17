@@ -121,6 +121,8 @@ test("archive respects the crash-writer grace window", async () => {
     await utimes(seed.sessionFile, fresh, fresh);
     const svc = new StudioSessionArchiveService({ allowedCwd: seed.workspace, sessionsRoot: seed.sessionsRoot, archiveRoot: seed.archiveRoot, writeGraceMs: 60_000 });
     assert.equal(errorCode(await svc.archive("session-a").catch((error) => error)), "SESSION_RECENTLY_WRITTEN");
+    const forced = await svc.archive("session-a", { skipWriteGrace: true });
+    assert.equal(forced.archived, true);
   } finally {
     await rm(seed.root, { recursive: true, force: true });
   }

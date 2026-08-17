@@ -25,9 +25,14 @@ export function serializeChip(chip: ComposerChip, imageIndex?: number): string {
       return `/skill:${chip.name ?? chip.label}`;
     case "agent":
       return `@${chip.name ?? chip.label}`;
+    case "mode":
+      return "";
     case "image":
+      // Disk-backed images travel as @path so OMP `extractFileMentions` auto-reads
+      // them. Clipboard captures have no path and become [图N] plus wire bytes.
+      if (chip.path) return `@${quoteMentionPath(chip.path)}`;
       if (chip.image) return `[图${imageIndex ?? 1}]`;
-      return `@${quoteMentionPath(chip.path ?? chip.label)}`;
+      return `@${quoteMentionPath(chip.label)}`;
   }
 }
 
@@ -39,7 +44,7 @@ export function serializeDoc(doc: ComposerDoc): { text: string; images: PromptIm
       text += node.value;
       continue;
     }
-    if (node.chip.kind === "image" && node.chip.image) {
+    if (node.chip.kind === "image" && node.chip.image && !node.chip.path) {
       images.push(node.chip.image);
       text += serializeChip(node.chip, images.length);
       continue;
@@ -65,6 +70,7 @@ export function docIsEmpty(doc: ComposerDoc): boolean {
 }
 
 export function snapshotIsEmpty(snapshot: ComposerSnapshot): boolean {
+  if (snapshot.doc.nodes.some((node) => node.type === "chip" && node.chip.kind === "mode")) return false;
   return snapshot.text.trim().length === 0 && snapshot.images.length === 0;
 }
 

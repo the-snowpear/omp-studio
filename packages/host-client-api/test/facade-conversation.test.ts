@@ -570,13 +570,13 @@ test("re-selecting an older resident Runtime publishes runtime.changed before it
   let publish: (publication: RuntimePublication) => void = () => {};
   let liveHello: HostRuntimeHelloView = {
     runtimeId: "rt-b",
-    runtimeEpoch: 2,
+    runtimeEpoch: 1,
     classification: "managed",
   };
   let liveSnapshot = {
     ...snapshot("session-b" as SessionId),
     runtimeId: "rt-b" as RuntimeId,
-    runtimeEpoch: 2 as RuntimeEpoch,
+    runtimeEpoch: 1 as RuntimeEpoch,
     stateVersion: 8 as StateVersion,
   };
   await withFacade(
@@ -594,6 +594,9 @@ test("re-selecting an older resident Runtime publishes runtime.changed before it
     async (facade) => {
       const events: ClientEvent[] = [];
       facade.subscribe({ scope: "all" }, (event) => events.push(event));
+      publish({ commitSeq: 1, publishedAt: T0, snapshot: liveSnapshot, terminalOutcomes: [] });
+      assert.deepEqual(events.map((event) => event.kind), ["snapshot"]);
+      events.length = 0;
       liveHello = { runtimeId: "rt-a", runtimeEpoch: 1, classification: "managed" };
       liveSnapshot = {
         ...snapshot(SESSION),
@@ -604,6 +607,12 @@ test("re-selecting an older resident Runtime publishes runtime.changed before it
       publish({ commitSeq: 2, publishedAt: T0, snapshot: liveSnapshot, terminalOutcomes: [] });
       assert.deepEqual(events.map((event) => event.kind), ["runtime.changed", "snapshot"]);
       assert.equal(events[0]?.runtimeEpoch, 1);
+      const selected = events[1];
+      assert.equal(selected?.kind, "snapshot");
+      if (selected?.kind === "snapshot") {
+        assert.equal(selected.snapshot.runtimeId, "rt-a");
+        assert.equal(selected.snapshot.stateVersion, 2);
+      }
     },
   );
 });

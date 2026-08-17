@@ -5,6 +5,7 @@ import { ConvoTranscript } from "./ConvoTranscript";
 import { useConversationScroll } from "./useConversationScroll";
 import type { ConversationSnapshot } from "./conversationEngine";
 import { resetConversation, type ConversationState } from "./conversationViewModel";
+import { isRetryActivityNotice } from "./activityStatus";
 import { isTransientStatusNotice } from "./transientStatusNotice";
 import type { SubagentHubTarget } from "./toolMeta";
 
@@ -47,11 +48,13 @@ export function ConversationPane({
         loadingOlder: false,
         identityKey: "",
       };
+  const showWelcome = Boolean(welcome && (forceWelcome || rows.length === 0));
   const scroll = useConversationScroll({
     scrollerRef,
     identityKey,
     itemCount: rows.length + (activity === undefined ? 0 : 1),
     loadingOlder,
+    pin: showWelcome ? "top" : "bottom",
   });
   const prevLoading = useRef(loadingOlder);
 
@@ -76,7 +79,7 @@ export function ConversationPane({
             <p>{standby.title}</p>
             <p className="muted small">{standby.detail}</p>
           </div>
-        ) : welcome && (forceWelcome || rows.length === 0) ? (
+        ) : showWelcome ? (
           <>
             {welcome}
             {activity === undefined ? null : <ActivityLine {...activity} />}
@@ -98,6 +101,7 @@ export function ConversationPane({
             ) : null}
             {state.notices.map((notice) => {
               if (isTransientStatusNotice(notice.message, notice.source)) return null;
+              if (isRetryActivityNotice(notice.message, notice.source)) return null;
               const xdevGroups = parseXdevMountNotice(notice.message);
               if (xdevGroups !== null) {
                 return <XdevMountNotice key={notice.id} level={notice.level} groups={xdevGroups} />;

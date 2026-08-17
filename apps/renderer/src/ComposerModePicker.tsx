@@ -84,11 +84,13 @@ export function ComposerModePicker({
   preview,
   snapshot,
   can,
-  busy,
+  busy: _busy,
   disabled: _disabled,
   keyword,
   onKeywordChange,
   onRun,
+  openNonce = 0,
+  openToggles = false,
 }: {
   preview: boolean;
   snapshot?: OperatorStateSnapshot;
@@ -98,6 +100,9 @@ export function ComposerModePicker({
   keyword: MagicKeyword | null;
   onKeywordChange: (keyword: MagicKeyword | null) => void;
   onRun: <T extends CommandName>(name: T, input: CommandInput<T>) => Promise<boolean>;
+  /** Increment to open the mode menu from `/plan` and friends. */
+  openNonce?: number;
+  openToggles?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [togglesOpen, setTogglesOpen] = useState(false);
@@ -107,6 +112,11 @@ export function ComposerModePicker({
   const flyoutTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => () => window.clearTimeout(flyoutTimer.current), []);
+  useEffect(() => {
+    if (openNonce <= 0) return;
+    setOpen(true);
+    setTogglesOpen(openToggles);
+  }, [openNonce, openToggles]);
   useEffect(() => {
     if (!preview) setLocal(PREVIEW_OFF);
   }, [preview]);
@@ -141,7 +151,7 @@ export function ComposerModePicker({
   const loopReady = preview || can("loop.enable");
   const fastReady = preview || can("session.fast.set");
   const prewalkReady = preview || can("session.prewalk.arm");
-  const commandLocked = !preview && busy;
+  const nextTurnOnly = !preview && (snapshot?.isStreaming === true || snapshot?.isCompacting === true);
 
   const close = () => {
     window.clearTimeout(flyoutTimer.current);
@@ -172,7 +182,7 @@ export function ComposerModePicker({
   };
 
   const selectSession = (next: SessionMode, ready: boolean) => {
-    if (!ready || commandLocked) return;
+    if (!ready) return;
     if (preview) {
       setLocal((current) => ({ ...current, session: current.session === next ? null : next }));
       return;
@@ -192,7 +202,7 @@ export function ComposerModePicker({
   };
 
   const toggleLoop = () => {
-    if (!loopReady || commandLocked) return;
+    if (!loopReady) return;
     if (preview) {
       setLocal((current) => ({ ...current, loop: !current.loop }));
       return;
@@ -206,7 +216,7 @@ export function ComposerModePicker({
   };
 
   const toggleFast = () => {
-    if (!fastReady || commandLocked) return;
+    if (!fastReady) return;
     if (preview) {
       setLocal((current) => ({ ...current, fast: !current.fast }));
       return;
@@ -215,7 +225,7 @@ export function ComposerModePicker({
   };
 
   const togglePrewalk = () => {
-    if (!prewalkReady || commandLocked) return;
+    if (!prewalkReady) return;
     if (preview) {
       setLocal((current) => ({ ...current, prewalk: !current.prewalk }));
       return;
@@ -230,7 +240,7 @@ export function ComposerModePicker({
 
   const applyLoopParams = (kind: LoopLimitKind, value: string) => {
     setLocal((current) => ({ ...current, loopKind: kind, loopValue: value }));
-    if (preview || !loopOn || commandLocked || !loopReady) return;
+    if (preview || !loopOn || !loopReady) return;
     const limit = loopLimitOf(kind, value);
     if (kind !== "none" && limit === undefined) return;
     void onRun("loop.enable", limit === undefined ? {} : { limit });
@@ -238,7 +248,7 @@ export function ComposerModePicker({
 
   const applyPrewalkTarget = (value: string) => {
     setLocal((current) => ({ ...current, prewalkTarget: value }));
-    if (preview || !prewalkOn || commandLocked || !prewalkReady) return;
+    if (preview || !prewalkOn || !prewalkReady) return;
     const target = value.trim();
     void onRun("session.prewalk.arm", target.length === 0 ? {} : { target });
   };
@@ -305,6 +315,7 @@ export function ComposerModePicker({
               onMouseDown={retainComposerFocus}
             >
               {preview ? <p className="cmp-menu-note"><span className="chip gray xs">演示</span>预览下不调用 Host</p> : null}
+              {nextTurnOnly ? <p className="cmp-menu-note">当前轮次仍用原模式，下一轮对话（含插入信息）才生效</p> : null}
               <p className="menu-label">会话模式</p>
               <button
                 type="button"

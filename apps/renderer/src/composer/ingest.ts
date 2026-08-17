@@ -1,8 +1,6 @@
 import type { ComposerChip, ComposerChipKind, PromptImage } from "./types";
 import { isImageMimeType } from "./types";
 
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-
 export function chipIconName(kind: ComposerChipKind): string {
   switch (kind) {
     case "dir":
@@ -13,6 +11,8 @@ export function chipIconName(kind: ComposerChipKind): string {
       return "sparkles";
     case "agent":
       return "bot";
+    case "mode":
+      return "zap";
     default:
       return "file";
   }
@@ -36,7 +36,6 @@ function mimeFromFile(file: File): PromptImage["mimeType"] | null {
 export async function fileToPromptImage(file: File): Promise<PromptImage | null> {
   const mimeType = mimeFromFile(file);
   if (mimeType === null) return null;
-  if (file.size > MAX_IMAGE_BYTES) return null;
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   let binary = "";
@@ -67,7 +66,7 @@ export function parseChipPayload(value: string): Omit<ComposerChip, "image"> | n
     if (typeof parsed.id !== "string" || typeof parsed.kind !== "string" || typeof parsed.label !== "string") {
       return null;
     }
-    if (parsed.kind !== "file" && parsed.kind !== "dir" && parsed.kind !== "image" && parsed.kind !== "skill" && parsed.kind !== "agent") {
+    if (parsed.kind !== "file" && parsed.kind !== "dir" && parsed.kind !== "image" && parsed.kind !== "skill" && parsed.kind !== "agent" && parsed.kind !== "mode") {
       return null;
     }
     return {

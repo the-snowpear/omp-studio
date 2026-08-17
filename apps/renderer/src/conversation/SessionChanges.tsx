@@ -1,108 +1,111 @@
 import { useEffect, useMemo, useState } from "react";
-import { Icon } from "../icons";
+import { ChangesPanel, type ChangesDiffFile, type ChangesTurnOption } from "./ChangesPanel";
 import type { TimelineRow } from "./conversationViewModel";
-import { sessionFileChanges, sessionFilePatches, type SessionPatchBlock, type TurnFileChange } from "./toolMeta";
+import {
+  listSessionChangeTurns,
+  sessionChangeScope,
+  sessionChangeTurnIdForPath,
+  sessionFilePatches,
+  SESSION_CHANGE_LAST_ID,
+  SESSION_CHANGE_SESSION_ID,
+  type FileEditKind,
+  type SessionPatchBlock,
+} from "./toolMeta";
 
-const BLOCK_LABEL: Record<SessionPatchBlock["kind"], string> = {
+const BLOCK_LABEL: Record<FileEditKind, string> = {
   edit: "Edit",
   write: "Write",
   ast_edit: "AST Edit",
 };
 
+function deltaOf(files: readonly { add: number; del: number }[]): { add: number; del: number } {
+  return files.reduce((sum, file) => ({ add: sum.add + file.add, del: sum.del + file.del }), { add: 0, del: 0 });
+}
+
+function toTurnOption(turn: { id: string; label: string; files: readonly { add: number; del: number }[] }): ChangesTurnOption {
+  const delta = deltaOf(turn.files);
+  return { id: turn.id, label: turn.label, add: delta.add, del: delta.del };
+}
+
+function fileDiff(path: string, blocks: readonly SessionPatchBlock[], add: number, del: number): ChangesDiffFile {
+  return {
+    file: path,
+    add,
+    del,
+    ...(blocks.some((block) => block.truncated) ? { truncated: true } : {}),
+    hunks: blocks.map((block, index) => ({
+      hunkLabel: blocks.length > 1 ? `${BLOCK_LABEL[block.kind]} · ${index + 1}/${blocks.length}` : BLOCK_LABEL[block.kind],
+      lines: block.lines.map((line) => ({ kind: "row" as const, mark: line.mark, oldLn: line.oldLn, newLn: line.newLn, text: line.text })),
+    })),
+  };
+}
+
+function pathMatches(path: string, focus: string): boolean {
+  const value = path.replaceAll("\\", "/");
+  const normalized = focus.replaceAll("\\", "/");
+  return value === normalized || value.endsWith(`/${normalized}`) || normalized.endsWith(`/${value}`);
+}
+
 /** 右侧 Changes 页签：本轮对话（transcript 工具调用）产生的文件改动。
     不是 Git 工作区状态——那是「Git 管理」页的职责。 */
 export function SessionChanges({ rows, focusPath }: { rows: readonly TimelineRow[]; focusPath?: string }) {
-  const changes = useMemo(() => sessionFileChanges(rows), [rows]);
-  const patches = useMemo(
-    () => sessionFilePatches(rows.flatMap((row) => (row.type === "assistant" ? row.segments : []))),
-    [rows],
-  );
-  const [selected, setSelected] = useState<string | null>(null);
+  const turns = useMemo(() => listSessionChangeTurns(rows).map(toTurnOption), [rows]);
+  const [turnId, setTurnId] = useState(SESSION_CHANGE_LAST_ID);
+  const [split, setSplit] = useState(false);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const known = turns.some((turn) => turn.id === turnId);
+  const activeId = known ? turnId : SESSION_CHANGE_LAST_ID;
+  const scope = useMemo(() => sessionChangeScope(rows, activeId), [rows, activeId]);
+  const patches = useMemo(() => sessionFilePatches(scope.segments), [scope]);
 
-  // TaskProgressDock / 顶栏带路径打开时，按归一化后缀匹配选中对应文件。
+  useEffect(() => {
+    if (known) return;
+    setTurnId(SESSION_CHANGE_LAST_ID);
+  }, [known]);
+
   useEffect(() => {
     if (focusPath === undefined) return;
-    const normalized = focusPath.replaceAll("\\", "/");
-    const matches = (path: string) => {
-      const value = path.replaceAll("\\", "/");
-      return value === normalized || value.endsWith(`/${normalized}`) || normalized.endsWith(`/${value}`);
-    };
-    const hit = changes.session.find((file) => matches(file.path));
-    if (hit !== undefined) setSelected(hit.path);
-  }, [focusPath, changes.session]);
+    const nextTurn = sessionChangeTurnIdForPath(rows, focusPath) ?? SESSION_CHANGE_LAST_ID;
+    const hit = sessionChangeScope(rows, nextTurn).files.find((file) => pathMatches(file.path, focusPath));
+    setTurnId(nextTurn);
+    setExpanded(hit === undefined ? new Set() : new Set([hit.path]));
+  }, [focusPath, rows]);
 
-  // 选中文件被后续回合移除、或尚未点选时，回退到第一个文件，面板不空转。
-  const activePath = useMemo(() => {
-    if (selected !== null && changes.session.some((file) => file.path === selected)) return selected;
-    return changes.session[0]?.path ?? null;
-  }, [selected, changes.session]);
-  const activeBlocks = activePath === null ? [] : patches.get(activePath) ?? [];
-
-  const sessionAdd = changes.session.reduce((sum, file) => sum + file.add, 0);
-  const sessionDel = changes.session.reduce((sum, file) => sum + file.del, 0);
-
-  const group = (title: string, files: readonly TurnFileChange[]) => (
-    <div className="ch-group">
-      <div className="ch-group-title">{title}<span className="ch-count">{files.length}</span></div>
-      {files.map((file) => (
-        <div className={`git-change-line${activePath === file.path ? " selected" : ""}`} key={file.path}>
-          <button type="button" className="ch-row" aria-label={`查看 ${file.path} 的会话改动`} onClick={() => setSelected(file.path)}>
-            <span className="ch-file ellipsis" title={file.path}>{file.path}</span>
-            <span className="ch-delta">
-              {file.add ? <span className="ch-add">+{file.add}</span> : null}
-              {file.del ? <span className="ch-del">−{file.del}</span> : null}
-            </span>
-          </button>
-        </div>
-      ))}
-    </div>
-  );
+  const files = scope.files.map((file) => fileDiff(file.path, patches.get(file.path) ?? [], file.add, file.del));
+  const sessionHasFiles = turns.some((turn) => turn.id === SESSION_CHANGE_SESSION_ID && (turn.add > 0 || turn.del > 0));
 
   return (
-    <>
-      <div className="git-notice" role="status">
-        来自本轮对话的工具调用（Edit / Write / AST Edit），非 Git 工作区状态。
-        {changes.session.length ? ` 会话累计 +${sessionAdd} / −${sessionDel}。` : ""}
-      </div>
-      <div className="ch-list">
-        {changes.session.length === 0 ? (
-          <div className="empty" style={{ padding: 18 }}>
-            <p>本会话还没有文件改动。</p>
-            <p>Agent 修改文件后，这里按对话记录汇总每个文件的增删。</p>
-          </div>
-        ) : (
-          <>
-            {changes.turn.length > 0 ? group("当前 Turn", changes.turn) : null}
-            {group("本会话累积", changes.session)}
-          </>
-        )}
-      </div>
-      {activePath !== null ? (
-        <div className="ch-diff-slot">
-          <div className="diff-toolbar">
-            <Icon name="file-code" extra="sm" />
-            <span className="mono small ellipsis">{activePath}</span>
-            {activeBlocks.some((block) => block.truncated) ? <span className="chip gray xs">部分截断</span> : null}
-          </div>
-          <div className="diff-scroll">
-            {activeBlocks.map((block, index) => (
-              <div key={`${block.kind}-${index}`}>
-                <div className="diff-head-row">@@ {BLOCK_LABEL[block.kind]} · 第 {index + 1}/{activeBlocks.length} 段 @@</div>
-                {block.lines.map((line, lineIndex) => {
-                  const tone = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "";
-                  const mark = tone === "add" ? "+" : tone === "del" ? "−" : " ";
-                  return (
-                    <div key={lineIndex} className={`dl ${tone}`}>
-                      <span className="dm" aria-hidden="true">{mark}</span>
-                      <span className="lc">{line.slice(1)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+    <ChangesPanel
+      turns={turns}
+      turnId={activeId}
+      onTurnChange={(id) => {
+        setTurnId(id);
+        setExpanded(new Set());
+      }}
+      files={files}
+      expanded={expanded}
+      onToggle={(file) => {
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          if (next.has(file)) next.delete(file);
+          else next.add(file);
+          return next;
+        });
+      }}
+      split={split}
+      onSplit={setSplit}
+      empty={(
+        <div className="empty" style={{ padding: 18 }}>
+          {sessionHasFiles ? (
+            <p>这一轮还没有文件改动。</p>
+          ) : (
+            <>
+              <p>本会话还没有文件改动。</p>
+              <p>Agent 修改文件后，这里按对话记录汇总每个文件的增删。</p>
+            </>
+          )}
         </div>
-      ) : null}
-    </>
+      )}
+    />
   );
 }

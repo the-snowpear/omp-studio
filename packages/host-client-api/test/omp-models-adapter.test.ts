@@ -928,6 +928,91 @@ describe("P1/P2 model-config adapter surfaces", () => {
     }
   });
 
+  test("does not surface cache-only catalog providers that are absent from models.yml", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-cache-only-"));
+    try {
+      await writeFile(
+        join(dir, "models.yml"),
+        [
+          "providers:",
+          "  gateway:",
+          "    api: openai-completions",
+          "    models:",
+          "    - id: flash",
+          "      name: Flash",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(join(dir, "models.db"));
+      db.exec("CREATE TABLE model_cache (provider_id TEXT, models TEXT, authoritative INTEGER)");
+      db.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "gateway",
+        JSON.stringify([
+          { id: "flash", provider: "gateway", name: "Flash", reasoning: true, thinking: { efforts: ["high"] } },
+          { id: "pro", provider: "gateway", name: "Pro" },
+        ]),
+      );
+      db.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "zenmux",
+        JSON.stringify([{ id: "claude-sonnet-4", provider: "zenmux", name: "Claude Sonnet 4" }]),
+      );
+      db.close();
+      const snapshot = await createOmpModelsService({ agentDir: dir }).get();
+      assert.deepEqual(
+        snapshot.providers.map((item) => item.id),
+        ["gateway"],
+      );
+      assert.equal(
+        snapshot.availableModels.some((item) => item.provider === "zenmux" || item.selector.startsWith("zenmux/")),
+        false,
+      );
+      assert.equal(snapshot.availableModels.some((item) => item.selector === "gateway/flash"), true);
+      assert.equal(snapshot.availableModels.some((item) => item.selector === "gateway/pro"), true);
+      assert.deepEqual(snapshot.availableModels.find((item) => item.selector === "gateway/flash")?.thinking, ["high"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps OAuth-authenticated cache providers that are absent from models.yml", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-authed-cache-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers:\n  gateway:\n    api: openai-completions\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const { DatabaseSync } = await import("node:sqlite");
+      const modelsDb = new DatabaseSync(join(dir, "models.db"));
+      modelsDb.exec("CREATE TABLE model_cache (provider_id TEXT, models TEXT, authoritative INTEGER)");
+      modelsDb.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "zenmux",
+        JSON.stringify([{ id: "claude-sonnet-4", provider: "zenmux", name: "Claude Sonnet 4" }]),
+      );
+      modelsDb.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "opencode-go:models-v1:testfp",
+        JSON.stringify([{ id: "glm-5", provider: "opencode-go", name: "GLM 5" }]),
+      );
+      modelsDb.close();
+      const authDb = new DatabaseSync(join(dir, "agent.db"));
+      authDb.exec("CREATE TABLE auth_credentials (provider TEXT, disabled_cause TEXT, updated_at INTEGER)");
+      authDb.prepare("INSERT INTO auth_credentials (provider, disabled_cause) VALUES (?, NULL)").run("opencode-go");
+      authDb.close();
+      const snapshot = await createOmpModelsService({ agentDir: dir }).get();
+      assert.deepEqual(
+        snapshot.providers.map((item) => item.id).sort(),
+        ["gateway", "opencode-go"],
+      );
+      assert.equal(snapshot.availableModels.some((item) => item.selector === "opencode-go/glm-5"), true);
+      assert.equal(
+        snapshot.availableModels.some((item) => item.provider === "zenmux" || item.selector.startsWith("zenmux/")),
+        false,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("probe parses Ollama tags and does not write models.db", async () => {
     const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-"));
     try {

@@ -98,7 +98,7 @@ export class StudioSessionArchiveService {
     }
   }
 
-  async archive(sessionId: string): Promise<SessionArchiveMoveResult> {
+  async archive(sessionId: string, options?: { readonly skipWriteGrace?: boolean }): Promise<SessionArchiveMoveResult> {
     if (sessionId.length === 0) throw new SessionArchiveServiceError("SESSION_NOT_FOUND", "Session id is required");
     await this.#assertGcLockIdle();
     await this.#assertNotResident(sessionId);
@@ -120,7 +120,7 @@ export class StudioSessionArchiveService {
     if (metadata.size > this.#maxSessionBytes) {
       throw new SessionArchiveServiceError("SESSION_TOO_LARGE", "Session exceeds the configured archive limit");
     }
-    if (this.#now().getTime() - metadata.mtimeMs < this.#writeGraceMs) {
+    if (options?.skipWriteGrace !== true && this.#now().getTime() - metadata.mtimeMs < this.#writeGraceMs) {
       throw new SessionArchiveServiceError(
         "SESSION_RECENTLY_WRITTEN",
         "Session was written recently; retry shortly so a crash tail cannot be archived",

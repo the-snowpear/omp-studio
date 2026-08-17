@@ -1,9 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ClientInteraction, InteractionResponseValue } from "@omp-studio/client-contract";
 import { ApprovalCard } from "./deck/ApprovalCard";
 import { AskActions, AskBody, AskHead } from "./deck/AskCard";
 import { approvalFromInteraction } from "./deck/approvalContent";
-import { askAnswered, NO_ASK_ANSWER, nextPicked, selectToAskView, submitSelectValue } from "./deck/askContent";
+import {
+  askAnswered,
+  askToDeckView,
+  NO_ASK_ANSWER,
+  nextPicked,
+  selectToAskView,
+  submitAskValue,
+  submitSelectValue,
+} from "./deck/askContent";
+import { QueuedDeck, type QueuedAskItem, type QueuedDeckItem } from "./deck/QueuedDeck";
 import { PromptHead, type DeckQueue } from "./deck/PromptHead";
 import type { DeckAskAnswer } from "./deck/types";
 
@@ -144,6 +153,16 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
       </div>
     );
   }
+  if (interaction.kind === "ask") {
+    return (
+      <LiveAskQueue
+        interaction={interaction}
+        onRespond={onRespond}
+        disabled={busy}
+      />
+    );
+  }
+  if (interaction.kind !== "approval") return null;
   const view = approvalFromInteraction(interaction);
   return (
     <ApprovalCard
@@ -159,138 +178,99 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   );
 }
 
-type DeckEntry = { id: string; interaction: ClientInteraction; leaving: boolean };
+function askItemsFrom(interaction: Extract<ClientInteraction, { kind: "ask" | "select" }>): readonly QueuedDeckItem[] {
+  if (interaction.kind === "ask") return askToDeckView(interaction).items;
+  const view = selectToAskView(interaction);
+  return [{ kind: "ask", id: view.question.id, question: view.question }];
+}
 
-const DECK_PUSH_MS = 260;
-const DECK_EXIT_MS = 220;
-const DECK_GROW_MS = 320;
+function LiveAskQueue({
+  interaction,
+  onRespond,
+  disabled,
+}: {
+  interaction: Extract<ClientInteraction, { kind: "ask" | "select" }>;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  disabled: boolean;
+}) {
+  const items = askItemsFrom(interaction);
+  const answersRef = useRef<Record<string, DeckAskAnswer>>({});
+  const outcomesRef = useRef<Record<string, "submit" | "cancel">>({});
+  const [submitError, setSubmitError] = useState(false);
+
+  const finishIfComplete = async (): Promise<boolean> => {
+    if (items.some((item) => outcomesRef.current[item.id] === undefined)) return true;
+    const allCancel = items.every((item) => outcomesRef.current[item.id] === "cancel");
+    if (allCancel) {
+      const result = await Promise.resolve(onRespond("cancel"));
+      return result !== false;
+    }
+    const value = liveAskValue(interaction, answersRef.current);
+    if (value === undefined) return false;
+    const result = await Promise.resolve(onRespond("submit", value));
+    return result !== false;
+  };
+
+  const settle = async (item: QueuedAskItem, reason: "submit" | "cancel", answer?: DeckAskAnswer): Promise<boolean> => {
+    if (reason === "submit") answersRef.current[item.id] = answer ?? NO_ASK_ANSWER;
+    else answersRef.current[item.id] = NO_ASK_ANSWER;
+    outcomesRef.current[item.id] = reason;
+    const ok = await finishIfComplete();
+    if (!ok) {
+      delete outcomesRef.current[item.id];
+      setSubmitError(true);
+      return false;
+    }
+    setSubmitError(false);
+    return true;
+  };
+
+  return (
+    <QueuedDeck
+      items={items}
+      regionLabel="待处理的审批与提问"
+      {...(disabled ? { disabled: true } : {})}
+      {...(submitError ? { submitError: true } : {})}
+      onAskSubmit={(item, answer) => settle(item, "submit", answer)}
+      onAskCancel={(item) => settle(item, "cancel")}
+    />
+  );
+}
+
+function liveAskValue(
+  interaction: Extract<ClientInteraction, { kind: "ask" | "select" }>,
+  answers: Readonly<Record<string, DeckAskAnswer>>,
+): InteractionResponseValue | undefined {
+  if (interaction.kind === "ask") return submitAskValue(interaction.questions, answers);
+  const view = selectToAskView(interaction);
+  return submitSelectValue(view, answers[view.question.id] ?? NO_ASK_ANSWER, interaction.multiple);
+}
 
 export function InteractionDeck({ interaction, onRespond, disabled }: {
   interaction: ClientInteraction | null;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled: boolean;
 }) {
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const trackRef = useRef<HTMLDivElement>(null);
-  const [entries, setEntries] = useState<DeckEntry[]>([]);
-  const [lockH, setLockH] = useState<number | null>(null);
-  const [noAnim, setNoAnim] = useState(false);
-  const [shellMode, setShellMode] = useState<"in" | "out" | "">("");
-  const lastId = useRef<string | null>(null);
-  const gen = useRef(0);
-  const lastW = useRef(-1);
-  const timers = useRef<number[]>([]);
-
-  const later = useCallback((fn: () => void, ms: number) => {
-    const t = window.setTimeout(() => {
-      timers.current = timers.current.filter((x) => x !== t);
-      fn();
-    }, ms);
-    timers.current.push(t);
-  }, []);
-
-  useEffect(() => () => {
-    timers.current.forEach((t) => window.clearTimeout(t));
-  }, []);
-
-  useEffect(() => {
-    const id = interaction === null ? null : `${interaction.interactionId}:${interaction.leaseGeneration}`;
-    if (id === lastId.current) return;
-    lastId.current = id;
-    gen.current += 1;
-    const g = gen.current;
-
-    const wrap = wrapRef.current;
-    if (wrap) {
-      wrap.classList.add("smooth");
-      setLockH(wrap.offsetHeight);
-    }
-    const wasEmpty = !wrap || !wrap.querySelector(".deck-cell");
-
-    if (interaction === null) {
-      setShellMode("out");
-      setEntries((prev) => prev.map((e) => ({ ...e, leaving: true })));
-      later(() => {
-        if (gen.current !== g) return;
-        setEntries([]);
-        setLockH(0);
-      }, DECK_EXIT_MS);
-      later(() => {
-        if (gen.current === g) setLockH(null);
-      }, DECK_EXIT_MS + DECK_GROW_MS);
-      return;
-    }
-
-    const entryId = `${interaction.interactionId}:${interaction.leaseGeneration}`;
-    setNoAnim(false);
-    setShellMode(wasEmpty ? "in" : "");
-    setEntries((prev) => {
-      if (prev.some((e) => e.id === entryId)) return prev;
-      return [...prev.map((e) => ({ ...e, leaving: true })), { id: entryId, interaction, leaving: false }];
-    });
-    later(() => {
-      if (gen.current !== g) return;
-      setEntries((prev) => prev.filter((e) => !e.leaving));
-      setNoAnim(true);
-    }, DECK_PUSH_MS);
-  }, [interaction, later]);
-
-  useEffect(() => {
-    if (!entries.length) return;
-    const wrap = wrapRef.current;
-    const track = trackRef.current;
-    if (!wrap || !track || lockH === null) return;
-    const raf = requestAnimationFrame(() => {
-      const cell = track.querySelector<HTMLElement>(".deck-cell:last-child");
-      if (!cell) return;
-      setLockH(cell.offsetHeight);
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [entries]);
-
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const ro = new ResizeObserver((items) => {
-      for (const item of items) {
-        const width = item.contentBoxSize?.[0]?.inlineSize ?? item.contentRect.width;
-        if (Math.abs(width - lastW.current) < 0.5) continue;
-        lastW.current = width;
-        const track = trackRef.current;
-        const cell = track?.querySelector<HTMLElement>(".deck-cell:last-child");
-        if (!cell) return;
-        wrap.classList.remove("smooth");
-        setLockH(cell.offsetHeight);
-      }
-    });
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, []);
-
+  if (interaction === null) {
+    return <div className="deck" role="region" aria-label="待处理的审批与提问" />;
+  }
+  if (interaction.kind === "ask" || interaction.kind === "select") {
+    return (
+      <LiveAskQueue
+        key={`${interaction.interactionId}:${interaction.leaseGeneration}`}
+        interaction={interaction}
+        onRespond={onRespond}
+        disabled={disabled}
+      />
+    );
+  }
   return (
-    <div
-      ref={wrapRef}
-      className={`deck${entries.length ? " active" : ""}`}
-      style={lockH === null ? undefined : { height: lockH }}
-      role="region"
-      aria-label="待处理的审批与提问"
-      aria-live="polite"
-    >
-      {entries.length > 0 && (
-        <div className={`deck-card${shellMode ? ` ${shellMode}` : ""}`}>
-          <div
-            ref={trackRef}
-            className={`deck-track${noAnim ? " no-anim" : ""}`}
-            style={{ transform: `translateX(${-100 * Math.max(0, entries.length - 1)}%)` }}
-          >
-            {entries.map((entry) => (
-              <div key={entry.id} className="deck-cell">
-                <InteractionPrompt interaction={entry.interaction} onRespond={onRespond} disabled={disabled} />
-              </div>
-            ))}
-          </div>
+    <div className="deck active preview-queue" role="region" aria-label="待处理的审批与提问" aria-live="polite">
+      <div className="deck-card">
+        <div className="dk-stage">
+          <InteractionPrompt interaction={interaction} onRespond={onRespond} disabled={disabled} />
         </div>
-      )}
+      </div>
     </div>
   );
 }

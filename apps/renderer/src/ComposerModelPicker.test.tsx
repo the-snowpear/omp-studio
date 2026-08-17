@@ -171,6 +171,28 @@ describe("ComposerModelPicker", () => {
     expect(onRun).toHaveBeenCalledWith("session.thinking.set", { level: "high" });
   });
 
+  it("真实模式：流式期间仍可切换模型，走 session.model.set", async () => {
+    const query = vi.fn(async () => createPreviewModelConfig());
+    const onRun = vi.fn(async () => true);
+    renderPicker({
+      preview: false,
+      client: stubClient(query),
+      snapshot: { ...liveSnapshot(), isStreaming: true },
+      onRun,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "选择模型" }));
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /Fast/ })).toBeTruthy());
+    expect((screen.getByRole("menuitemradio", { name: /Fast/ }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText("当前轮次仍用原模型，下一轮对话才生效")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Fast/ }));
+    expect(onRun).toHaveBeenCalledWith("session.model.set", {
+      selector: "openai/gpt-5-mini",
+      thinking: "low",
+    });
+  });
+
   it("真实模式：Runtime 未暴露 session.model.set 时角色不可选", async () => {
     const query = vi.fn(async () => createPreviewModelConfig());
     const onRun = vi.fn(async () => true);

@@ -65,6 +65,7 @@ export interface RuntimeInstallationManifest {
   runtimeVersion: string;
   upstreamVersion: string;
   upstreamCommit: string;
+  /** `studio.<n>`, recorded in the patch series rather than counted, so it never moves backwards. */
   patchsetVersion: string;
   studioProtocol: { min: number; max: number };
   /** Limited is required while a managed build truthfully exposes only a verified subset. */

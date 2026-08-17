@@ -28,6 +28,16 @@ import {
   type DesktopIpcBridge,
 } from "./ipc-validation.js";
 import { CHROME_NOTIFY_CHANNEL } from "./chrome-notify-shared.js";
+import {
+  CHROME_IMAGE_CHANNELS,
+  type ChromeImageInput,
+  type ChromeImageResult,
+} from "./chrome-image-shared.js";
+import {
+  CHROME_PROFILE_CHANNELS,
+  type ChromeAvatarBytes,
+  type ChromeAvatarSaveResult,
+} from "./chrome-profile-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
 import {
   WORKSPACE_SHELL_IPC_CHANNELS,
@@ -81,6 +91,17 @@ contextBridge.exposeInMainWorld(
     notify(payload: { title: string; body?: string }): Promise<void> {
       return ipcRenderer.invoke(CHROME_NOTIFY_CHANNEL, payload) as Promise<void>;
     },
+    saveAvatar(input: ChromeAvatarBytes): Promise<ChromeAvatarSaveResult | { ok: false; message: string }> {
+      return ipcRenderer.invoke(CHROME_PROFILE_CHANNELS.saveAvatar, input) as Promise<
+        ChromeAvatarSaveResult | { ok: false; message: string }
+      >;
+    },
+    loadAvatar(): Promise<ChromeAvatarBytes | null> {
+      return ipcRenderer.invoke(CHROME_PROFILE_CHANNELS.loadAvatar) as Promise<ChromeAvatarBytes | null>;
+    },
+    clearAvatar(): Promise<void> {
+      return ipcRenderer.invoke(CHROME_PROFILE_CHANNELS.clearAvatar) as Promise<void>;
+    },
     openProjectInEditor(workspaceId: string): Promise<WorkspaceShellEditorResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor, { workspaceId }) as Promise<WorkspaceShellEditorResult>;
     },
@@ -100,6 +121,12 @@ contextBridge.exposeInMainWorld(
         workspaceId,
         paths,
       }) as Promise<ReadonlyArray<ResolvedDroppedPath>>;
+    },
+    copyImage(input: Pick<ChromeImageInput, "mime" | "bytes">): Promise<ChromeImageResult> {
+      return ipcRenderer.invoke(CHROME_IMAGE_CHANNELS.copyImage, input) as Promise<ChromeImageResult>;
+    },
+    saveImage(input: ChromeImageInput): Promise<ChromeImageResult> {
+      return ipcRenderer.invoke(CHROME_IMAGE_CHANNELS.saveImage, input) as Promise<ChromeImageResult>;
     },
   }),
 );

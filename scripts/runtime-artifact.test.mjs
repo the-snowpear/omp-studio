@@ -15,11 +15,14 @@ import {
   generateRuntimeArtifact,
   implementedManifestHash,
   LIMITED_CAPABILITIES,
+  nextPatchsetVersion,
   readPatchSeries,
   readUpstreamPin,
   readUpstreamVersion,
+  seriesDigest,
   sha256Hex,
 } from "./runtime-artifact.mjs";
+import { assertOverlayPresent, overlayHash } from "./omp-overlay.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
 const REAL_UPSTREAM_COMMIT = "45e12e5bb758198a920c6070e7e64cb33b21beac";
@@ -66,6 +69,9 @@ async function fixtureInputs() {
     publicKey,
     keyId: "fixture-key",
     runtimeIdentity,
+    // Pinned so the unit fixtures stay hermetic; the real overlay digest is
+    // exercised by the repository-level tests further down.
+    overlay: `sha256:${"a".repeat(64)}`,
   };
 }
 
@@ -180,6 +186,7 @@ test("artifact manifest carries the contract fields derived from real pin/series
     "agent.revive",
     "agent.release",
     "agent.transcript.read",
+    "agent.conversation.read",
     "agent.subscribe",
     "job.list",
     "job.get",
@@ -300,11 +307,59 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstreamVersion, "17.2.12");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
-  assert.equal(patchsetVersion, `studio.${series.patches.length}`);
+  assert.equal(patchsetVersion, series.patchsetVersion);
   assert.equal(deriveRuntimeVersion(upstreamVersion, series), `17.2.12-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }
+});
+
+test("patchset version is recorded, not counted, so consolidating patches cannot reuse an installed version", () => {
+  const consolidated = { patchsetVersion: "studio.35", patches: ["0001-a.patch", "0002-b.patch"] };
+  assert.equal(derivePatchsetVersion(consolidated), "studio.35");
+  assert.equal(nextPatchsetVersion("studio.35"), "studio.36");
+  assert.throws(() => nextPatchsetVersion("35"), /studio\.<n>/u);
+  assert.throws(() => nextPatchsetVersion(undefined), /studio\.<n>/u);
+});
+
+test("series digest changes with overlay content and with seam patch content", () => {
+  const patchHashes = { "0001-a.patch": "a".repeat(64) };
+  const baseline = seriesDigest({ overlayHash: `sha256:${"1".repeat(64)}`, patchHashes });
+  assert.match(baseline, /^sha256:[a-f0-9]{64}$/u);
+  assert.equal(baseline, seriesDigest({ overlayHash: `sha256:${"1".repeat(64)}`, patchHashes }));
+  assert.notEqual(baseline, seriesDigest({ overlayHash: `sha256:${"2".repeat(64)}`, patchHashes }));
+  assert.notEqual(
+    baseline,
+    seriesDigest({ overlayHash: `sha256:${"1".repeat(64)}`, patchHashes: { "0001-a.patch": "b".repeat(64) } }),
+  );
+});
+
+test("real overlay is non-empty and its digest lands in artifact provenance", async () => {
+  const upstream = await readUpstreamPin();
+  const series = await readPatchSeries();
+  const files = await assertOverlayPresent();
+  assert.ok(files.length > 0);
+  const digest = await overlayHash();
+  assert.match(digest, /^sha256:[a-f0-9]{64}$/u);
+
+  const inputs = await fixtureInputs();
+  const { provenance } = await generateRuntimeArtifact({
+    upstream,
+    series,
+    upstreamVersion: "17.2.12",
+    binaryPath: inputs.binaryPath,
+    patchesDirectory: PATCHES_DIRECTORY,
+    platform: "win32-x64",
+    entrypoint: MANAGED_ENTRYPOINT,
+    outDirectory: join(inputs.root, "out-overlay"),
+    signingKey: inputs.signingKey,
+    keyId: inputs.keyId,
+    runtimeIdentity: {
+      ...inputs.runtimeIdentity,
+      runtimeVersion: deriveRuntimeVersion("17.2.12", series),
+    },
+  });
+  assert.equal(provenance.overlayHash, digest);
 });
 
 test("real patch series contributes real patch content hashes", async () => {

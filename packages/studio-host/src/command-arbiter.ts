@@ -69,7 +69,20 @@ export function classifyOperation(operation: StudioOperation): CommandConcurrenc
     operation.kind === "core.steer" ||
     operation.kind === "core.followUp" ||
     operation.kind === "core.abort" ||
-    operation.kind === "queue.enqueue"
+    operation.kind === "queue.enqueue" ||
+    operation.kind === "session.model.set" ||
+    operation.kind === "session.thinking.set" ||
+    operation.kind === "mode.plan.enter" ||
+    operation.kind === "mode.plan.exit" ||
+    operation.kind === "mode.vibe.enter" ||
+    operation.kind === "mode.vibe.exit" ||
+    operation.kind === "goal.create" ||
+    operation.kind === "goal.drop" ||
+    operation.kind === "loop.enable" ||
+    operation.kind === "loop.disable" ||
+    operation.kind === "session.fast.set" ||
+    operation.kind === "session.prewalk.arm" ||
+    operation.kind === "session.prewalk.disarm"
   ) {
     return "queue-compatible";
   }
@@ -114,7 +127,13 @@ export class CommandArbiter {
     }
 
     const concurrency = classifyOperation(request.operation);
-    if (state.isCompacting && concurrency !== "read-concurrent") {
+    const deferredSessionPreference = concurrency === "queue-compatible"
+      && request.operation.kind !== "core.prompt"
+      && request.operation.kind !== "core.steer"
+      && request.operation.kind !== "core.followUp"
+      && request.operation.kind !== "core.abort"
+      && request.operation.kind !== "queue.enqueue";
+    if (state.isCompacting && concurrency !== "read-concurrent" && !deferredSessionPreference) {
       throw new StudioHostError("BUSY_COMPACTING", "Runtime is compacting");
     }
     if (

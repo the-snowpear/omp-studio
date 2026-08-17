@@ -141,3 +141,42 @@ test("approval summary is kept up to 4000 characters", () => {
   if (mapped?.kind !== "approval") return;
   assert.equal(mapped.detail.summary, summary);
 });
+
+test("ask preserves questions including header, preview, and recommended", () => {
+  const mapped = mapRemoteInteractionToClient(
+    {
+      ...base("ask"),
+      kind: "ask",
+      questions: [
+        {
+          id: "inertia",
+          question: "Need inertia?",
+          header: "惯性",
+          options: [
+            { id: "option:0", label: "Yes", description: "coast", preview: "v *= 0.92" },
+            { id: "option:1", label: "No" },
+          ],
+          recommended: 0,
+        },
+        {
+          id: "default",
+          question: "Default?",
+          options: [{ id: "option:0", label: "On" }],
+        },
+      ],
+    },
+    SESSION_ID,
+    4,
+  );
+  assert.equal(mapped?.kind, "ask");
+  if (mapped?.kind !== "ask") return;
+  assert.equal(mapped.title, "Runtime prompt title");
+  assert.equal("requestId" in mapped, false);
+  assert.equal(mapped.questions.length, 2);
+  assert.equal(mapped.questions[0]?.header, "惯性");
+  assert.equal(mapped.questions[0]?.multiple, false);
+  assert.equal(mapped.questions[0]?.recommended, 0);
+  assert.equal(mapped.questions[0]?.options[0]?.preview, "v *= 0.92");
+  assert.equal(mapped.questions[1]?.question, "Default?");
+  assert.equal(mapped.questions[1]?.multiple, false);
+});

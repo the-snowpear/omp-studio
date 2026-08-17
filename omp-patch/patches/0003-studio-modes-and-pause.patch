@@ -1,0 +1,646 @@
+diff --git a/packages/coding-agent/src/async/job-manager.ts b/packages/coding-agent/src/async/job-manager.ts
+index 1fc9e65..34d1088 100644
+--- a/packages/coding-agent/src/async/job-manager.ts
++++ b/packages/coding-agent/src/async/job-manager.ts
+@@ -146,6 +146,7 @@ export class AsyncJobManager {
+ 	readonly #evictionTimers = new Map<string, NodeJS.Timeout>();
+ 	readonly #pollEscalation = new Map<string | undefined, PollEscalationState>();
+ 	readonly #deliverySinks = new Map<string, AsyncJobDeliverySink>();
++	readonly #changeListeners = new Set<() => void>();
+ 	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
+ 	readonly #maxRunningJobs: number;
+ 	readonly #retentionMs: number;
+@@ -168,6 +169,11 @@ export class AsyncJobManager {
+ 		this.#retentionMs = Math.max(0, Math.floor(options.retentionMs ?? DEFAULT_RETENTION_MS));
+ 	}
+ 
++	onChange(listener: () => void): () => void {
++		this.#changeListeners.add(listener);
++		return () => this.#changeListeners.delete(listener);
++	}
++
+ 	/** True when the running-job count has reached the configured cap. */
+ 	get atCapacity(): boolean {
+ 		if (this.#disposed) return true;
+@@ -226,6 +232,7 @@ export class AsyncJobManager {
+ 
+ 		const reportProgress = async (text: string, details?: Record<string, unknown>): Promise<void> => {
+ 			if (details) job.latestDetails = details;
++			this.#emitChange();
+ 			if (!options?.onProgress) return;
+ 			try {
+ 				await options.onProgress(text, details);
+@@ -244,6 +251,7 @@ export class AsyncJobManager {
+ 					reportProgress,
+ 					markRunning: () => {
+ 						job.queued = false;
++						this.#emitChange();
+ 					},
+ 				});
+ 				if (job.status === "cancelled") {
+@@ -253,6 +261,7 @@ export class AsyncJobManager {
+ 				}
+ 				job.status = "completed";
+ 				job.resultText = text;
++				this.#emitChange();
+ 				this.#enqueueDelivery(id, text);
+ 				this.#scheduleEviction(id);
+ 			} catch (error) {
+@@ -264,12 +273,14 @@ export class AsyncJobManager {
+ 				const errorText = error instanceof Error ? error.message : String(error);
+ 				job.status = "failed";
+ 				job.errorText = errorText;
++				this.#emitChange();
+ 				this.#enqueueDelivery(id, errorText);
+ 				this.#scheduleEviction(id);
+ 			}
+ 		})();
+ 
+ 		this.#jobs.set(id, job);
++		this.#emitChange();
+ 		return id;
+ 	}
+ 
+@@ -285,6 +296,7 @@ export class AsyncJobManager {
+ 		if (job.status !== "running") return false;
+ 		job.status = "cancelled";
+ 		job.abortController.abort();
++		this.#emitChange();
+ 		this.#scheduleEviction(id);
+ 		return true;
+ 	}
+@@ -419,6 +431,7 @@ export class AsyncJobManager {
+ 		for (const job of this.getRunningJobs(filter)) {
+ 			job.status = "cancelled";
+ 			job.abortController.abort();
++			this.#emitChange();
+ 			this.#scheduleEviction(job.id);
+ 		}
+ 	}
+@@ -630,7 +643,17 @@ export class AsyncJobManager {
+ 		this.#evictionTimers.delete(jobId);
+ 		this.#suppressedDeliveries.delete(jobId);
+ 		this.#watchedJobs.delete(jobId);
+-		return this.#jobs.delete(jobId);
++		const deleted = this.#jobs.delete(jobId);
++		if (deleted) this.#emitChange();
++		return deleted;
++	}
++
++	#emitChange(): void {
++		for (const listener of this.#changeListeners) {
++			try {
++				listener();
++			} catch {}
++		}
+ 	}
+ 
+ 	#scheduleEviction(jobId: string): void {
+diff --git a/packages/coding-agent/src/modes/components/pause-screen.ts b/packages/coding-agent/src/modes/components/pause-screen.ts
+index e090930..efb5418 100644
+--- a/packages/coding-agent/src/modes/components/pause-screen.ts
++++ b/packages/coding-agent/src/modes/components/pause-screen.ts
+@@ -11,7 +11,7 @@
+  * Use case: freeze a busy session, hand-edit the repo, resume, then explain
+  * the change via a normal steering message.
+  */
+-import { agentPauseGate } from "@oh-my-pi/pi-agent-core";
++
+ import {
+ 	type Component,
+ 	matchesKey,
+@@ -21,6 +21,7 @@ import {
+ 	visibleWidth,
+ } from "@oh-my-pi/pi-tui";
+ import { formatDuration } from "../../slash-commands/helpers/format";
++import { studioPauseService } from "../../studio/services/pause-service";
+ import { theme } from "../theme/theme";
+ import { matchesAppInterrupt } from "../utils/keybinding-matchers";
+ 
+@@ -131,7 +132,8 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
+ 
+ 	/** Start the clock; resolves once the user asks to resume. */
+ 	run(): Promise<void> {
+-		this.#startedAt = agentPauseGate.pausedAt ?? Date.now();
++		const pausedAt = studioPauseService.state().pausedAt;
++		this.#startedAt = pausedAt === undefined ? Date.now() : Date.parse(pausedAt);
+ 		this.#timer ??= setInterval(() => {
+ 			if (!this.#disposed) this.host.ui.requestRender();
+ 		}, TICK_MS);
+@@ -179,12 +181,19 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
+ 
+ /**
+  * Engage the global pause gate and hold the fullscreen pause screen until the
+- * user resumes. No-op when the gate is already engaged. Always releases the
+- * gate on the way out (including teardown throws) — a leaked pause would
+- * freeze every agent in the process with no UI left to release it.
++ * user resumes. If another authorized surface already paused this Runtime, the
++ * TUI attaches to that pause epoch instead of silently doing nothing. Always
++ * releases the observed epoch on the way out (including teardown throws).
+  */
+ export async function runPauseScreen(host: PauseScreenHost): Promise<void> {
+-	if (!agentPauseGate.pause()) return;
++	const existing = studioPauseService.state();
++	let pauseEpoch: number;
++	if (existing.paused) {
++		if (existing.pauseEpoch === undefined) throw new Error("Paused Runtime has no pause epoch");
++		pauseEpoch = existing.pauseEpoch;
++	} else {
++		pauseEpoch = studioPauseService.pause().pauseEpoch;
++	}
+ 	const component = new PauseScreenComponent(host);
+ 	const overlay = host.ui.showOverlay(component, {
+ 		width: "100%",
+@@ -200,9 +209,11 @@ export async function runPauseScreen(host: PauseScreenHost): Promise<void> {
+ 		component.dispose();
+ 		host.ui.setFocus(component);
+ 		overlay.hide();
+-		const heldMs = agentPauseGate.resume();
+-		if (heldMs !== undefined) {
++		try {
++			const { heldMs } = studioPauseService.resume(pauseEpoch);
+ 			host.showStatus(`Resumed after ${formatDuration(heldMs)} — agents are running again.`);
++		} catch {
++			// Another authorized surface may already have resumed this pause epoch.
+ 		}
+ 	}
+ }
+diff --git a/packages/coding-agent/src/modes/interactive-mode.ts b/packages/coding-agent/src/modes/interactive-mode.ts
+index 72fd2d5..731a36f 100644
+--- a/packages/coding-agent/src/modes/interactive-mode.ts
++++ b/packages/coding-agent/src/modes/interactive-mode.ts
+@@ -113,11 +113,14 @@ import type { ShakeMode } from "../session/shake-types";
+ import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } from "../slash-commands/builtin-registry";
+ import { formatDuration } from "../slash-commands/helpers/format";
+ import { STTController, type SttState } from "../stt";
++import type { StudioLoopService, StudioLoopState } from "../studio/services/loop-service";
++import type { StudioModeControlService, StudioModeState } from "../studio/services/mode-control-service";
+ import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
+ import { formatTaskId } from "../task/render";
+ import type { ConfiguredThinkingLevel } from "../thinking";
+ import { tinyTitleClient } from "../tiny/title-client";
+ import type { LspStartupServerInfo } from "../tools";
++import type { ToolUiFactory } from "../tools/context";
+ import { normalizeLocalScheme } from "../tools/path-utils";
+ import { replaceTabs, TRUNCATE_LENGTHS, truncateToWidth } from "../tools/render-utils";
+ import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
+@@ -473,6 +476,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	loopPrompt: string | undefined = undefined;
+ 	loopLimit: LoopLimitRuntime | undefined = undefined;
+ 	#loopAutoSubmitTimer: NodeJS.Timeout | undefined;
++	readonly #studioLoopService: StudioLoopService | undefined;
++	#studioLoopUnsubscribe: (() => void) | undefined;
++	readonly #studioModeService: StudioModeControlService | undefined;
++	#studioModeUnsubscribe: (() => void) | undefined;
+ 	#todoAutoClearTimer: NodeJS.Timeout | undefined;
+ 	#modelCycleClearTimer: NodeJS.Timeout | undefined;
+ 	#nextAppearanceRequestToken = 1;
+@@ -588,7 +595,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	#planReviewAnnotationStateBySubmission = new WeakMap<SubmittedUserInput, string>();
+ 	readonly lspServers: LspStartupServerInfo[] | undefined = undefined;
+ 	mcpManager?: MCPManager;
+-	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
++	readonly #toolUiContextSetter: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
+ 
+ 	readonly #codexResetFireworksController: CodexResetFireworksController;
+ 	readonly #btwController: BtwController;
+@@ -674,10 +681,12 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		session: AgentSession,
+ 		version: string,
+ 		startupChangelog: StartupChangelogSelection | undefined = undefined,
+-		setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void = () => {},
++		setToolUIContext: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void = () => {},
+ 		lspServers: LspStartupServerInfo[] | undefined = undefined,
+ 		mcpManager?: MCPManager,
+ 		eventBus?: EventBus,
++		studioLoopService?: StudioLoopService,
++		studioModeService?: StudioModeControlService,
+ 	) {
+ 		this.session = session;
+ 		this.sessionManager = session.sessionManager;
+@@ -693,6 +702,8 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			new MCPCommandController(this).handleMCPAuthChallenge(serverName, challenge),
+ 		);
+ 		this.#eventBus = eventBus;
++		this.#studioLoopService = studioLoopService;
++		this.#studioModeService = studioModeService;
+ 		if (eventBus) {
+ 			this.#eventBusUnsubscribers.push(
+ 				eventBus.on(LSP_STARTUP_EVENT_CHANNEL, data => {
+@@ -816,6 +827,26 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		this.#focusController = new SessionFocusController(this);
+ 		this.#inputController = new InputController(this);
+ 		this.#observerRegistry = new SessionObserverRegistry();
++		if (this.#studioLoopService !== undefined) {
++			this.#studioLoopUnsubscribe = this.#studioLoopService.onChange(state => this.#syncSharedLoopState(state));
++			this.#syncSharedLoopState(this.#studioLoopService.state());
++		}
++		if (this.#studioModeService !== undefined) {
++			this.#studioModeUnsubscribe = this.#studioModeService.onChange(state => this.#syncSharedModeState(state));
++			this.#syncSharedModeState(this.#studioModeService.state());
++		}
++	}
++
++	#syncSharedModeState(state: StudioModeState): void {
++		this.planModeEnabled = state.plan?.status === "active";
++		this.planModePaused = state.plan?.status === "paused";
++		this.planModePlanFilePath = state.plan?.planFilePath;
++		this.goalModeEnabled = state.goal?.status === "active";
++		this.goalModePaused = state.goal?.status === "paused";
++		this.vibeModeEnabled = state.vibe?.enabled === true;
++		this.#updatePlanModeStatus();
++		this.#updateGoalModeStatus();
++		this.#updateVibeModeStatus();
+ 	}
+ 
+ 	#handleMcpConnectionStatusEvent(event: McpConnectionStatusEvent): void {
+@@ -1344,6 +1375,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	#scheduleLoopAutoSubmit(): void {
++		if (this.#studioLoopService !== undefined) return;
+ 		this.#cancelLoopAutoSubmit();
+ 		if (!this.loopModeEnabled || !this.loopPrompt) return;
+ 		const prompt = this.loopPrompt;
+@@ -1474,7 +1506,20 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		this.ui.requestRender();
+ 	}
+ 
++	#syncSharedLoopState(state: StudioLoopState | undefined): void {
++		this.loopModeEnabled = state !== undefined;
++		this.loopModePaused = state?.status === "paused";
++		this.loopPrompt = state?.prompt;
++		this.loopLimit = this.#studioLoopService?.limitState();
++		this.#syncLoopModeStatus();
++	}
++
+ 	disableLoopMode(message = "Loop mode disabled."): void {
++		if (this.#studioLoopService !== undefined) {
++			const wasEnabled = this.#studioLoopService.disable().disabled;
++			if (wasEnabled) this.showStatus(message);
++			return;
++		}
+ 		const wasEnabled = this.loopModeEnabled;
+ 		this.loopModeEnabled = false;
+ 		this.loopModePaused = false;
+@@ -1488,6 +1533,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	setLoopPrompt(prompt: string): void {
++		if (this.#studioLoopService !== undefined) {
++			if (this.#studioLoopService.state() !== undefined) this.#studioLoopService.capturePrompt(prompt);
++			return;
++		}
+ 		if (!this.loopModeEnabled) return;
+ 		this.loopPrompt = prompt;
+ 		this.loopModePaused = false;
+@@ -1500,6 +1549,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	 * user submits becomes the new loop prompt and resumes iteration.
+ 	 */
+ 	pauseLoop(): void {
++		if (this.#studioLoopService !== undefined) {
++			if (this.#studioLoopService.state() !== undefined) this.#studioLoopService.pause();
++			return;
++		}
+ 		this.loopPrompt = undefined;
+ 		this.loopModePaused = true;
+ 		this.#cancelLoopAutoSubmit();
+@@ -1507,6 +1560,26 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	async handleLoopCommand(args = ""): Promise<string | undefined> {
++		if (this.#studioLoopService !== undefined) {
++			if (this.#studioLoopService.state() !== undefined) {
++				this.disableLoopMode();
++				return undefined;
++			}
++			const parsed = parseLoopLimitArgs(args);
++			if (typeof parsed === "string") {
++				this.showError(parsed);
++				return undefined;
++			}
++			this.#studioLoopService.enableFromConfig(undefined, parsed.limit);
++			const limitSuffix = parsed.limit ? ` Limited to ${describeLoopLimit(parsed.limit)}.` : "";
++			const remaining = this.#studioLoopService.limitState();
++			const remainingSuffix = remaining ? ` ${describeLoopLimitRuntime(remaining)}.` : "";
++			const tail = parsed.prompt ? "Repeating it after each turn." : "Your next prompt will repeat after each turn.";
++			this.showStatus(
++				`Loop mode enabled.${limitSuffix}${remainingSuffix} ${tail} Esc cancels the current iteration; /loop again to disable.`,
++			);
++			return parsed.prompt;
++		}
+ 		if (this.loopModeEnabled) {
+ 			this.disableLoopMode();
+ 			return undefined;
+@@ -3282,6 +3355,30 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	async handlePlanModeCommand(initialPrompt?: string): Promise<void> {
++		if (this.#studioModeService !== undefined) {
++			try {
++				if (this.planModeEnabled || this.planModePaused) {
++					if (this.planModeEnabled) {
++						const confirmed = await this.showHookConfirm(
++							"Exit plan mode?",
++							"This exits plan mode without approving a plan.",
++						);
++						if (!confirmed) return;
++					}
++					await this.#studioModeService.exitPlan(true);
++					this.showStatus("Plan mode disabled.");
++					return;
++				}
++				await this.#studioModeService.enterPlan();
++				this.showStatus(`Plan mode enabled. Plan file: ${this.planModePlanFilePath ?? "local://PLAN.md"}`);
++				if (initialPrompt && this.onInputCallback) {
++					this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
++				}
++			} catch (error) {
++				this.showError(error instanceof Error ? error.message : String(error));
++			}
++			return;
++		}
+ 		if (this.goalModeEnabled || this.goalModePaused) {
+ 			this.showWarning("Exit goal mode first.");
+ 			return;
+@@ -3333,6 +3430,29 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	 * outlive the mode that directs them.
+ 	 */
+ 	async handleVibeModeCommand(initialPrompt?: string): Promise<void> {
++		if (this.#studioModeService !== undefined) {
++			try {
++				if (this.vibeModeEnabled) {
++					const result = await this.#studioModeService.exitVibe();
++					this.showStatus(
++						result.killed > 0
++							? `Vibe mode disabled. Killed ${result.killed} worker session${result.killed === 1 ? "" : "s"}.`
++							: "Vibe mode disabled.",
++					);
++					return;
++				}
++				await this.#studioModeService.enterVibe();
++				this.showStatus(
++					"Vibe mode enabled. You direct fast/good worker sessions; toolset is read + optional parent Todo + vibe tools.",
++				);
++				if (initialPrompt && this.onInputCallback) {
++					this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
++				}
++			} catch (error) {
++				this.showError(error instanceof Error ? error.message : String(error));
++			}
++			return;
++		}
+ 		if (this.vibeModeEnabled) {
+ 			await this.#exitVibeMode();
+ 			return;
+@@ -3428,7 +3548,11 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			}
+ 			nextBudget = parsed;
+ 		}
+-		await this.session.goalRuntime.onBudgetMutated(nextBudget);
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.setGoalBudget(nextBudget);
++		} else {
++			await this.session.goalRuntime.onBudgetMutated(nextBudget);
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		this.#scheduleGoalContinuation();
+ 		this.showStatus(nextBudget === undefined ? "Goal budget cleared." : `Goal budget set to ${nextBudget}.`);
+@@ -3485,6 +3609,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 	async handleGuidedGoalCommand(rest?: string): Promise<void> {
+ 		try {
++			if (this.#studioModeService !== undefined) {
++				await this.#studioModeService.startGuidedGoal(rest);
++				return;
++			}
+ 			if (this.planModeEnabled || this.planModePaused) {
+ 				this.showWarning("Exit plan mode first.");
+ 				return;
+@@ -3637,8 +3765,13 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			this.showWarning("No active goal to pause.");
+ 			return;
+ 		}
+-		await this.session.goalRuntime.pauseGoal();
+-		await this.#exitGoalMode({ paused: true, reason: "paused" });
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.pauseGoal();
++			this.showStatus("Goal mode paused.");
++		} else {
++			await this.session.goalRuntime.pauseGoal();
++			await this.#exitGoalMode({ paused: true, reason: "paused" });
++		}
+ 	}
+ 
+ 	async #resumeGoalAction(): Promise<void> {
+@@ -3646,7 +3779,11 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			this.showWarning("No paused goal to resume.");
+ 			return;
+ 		}
+-		await this.#enterGoalMode({ resume: true, silent: true });
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.resumeGoal();
++		} else {
++			await this.#enterGoalMode({ resume: true, silent: true });
++		}
+ 		this.showStatus("Goal mode resumed.");
+ 		this.#scheduleGoalContinuation();
+ 	}
+@@ -3661,12 +3798,21 @@ export class InteractiveMode implements InteractiveModeContext {
+ 			"This removes the goal record. Accumulated usage stays in the session log.",
+ 		);
+ 		if (!confirmed) return;
+-		await this.session.goalRuntime.dropGoal();
+-		await this.#exitGoalMode({ reason: "dropped" });
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.dropGoal();
++			this.showStatus("Goal dropped.");
++		} else {
++			await this.session.goalRuntime.dropGoal();
++			await this.#exitGoalMode({ reason: "dropped" });
++		}
+ 	}
+ 
+ 	async #startGoalFromObjective(objective: string): Promise<void> {
+-		await this.#enterGoalMode({ objective, silent: true });
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.createGoal(objective);
++		} else {
++			await this.#enterGoalMode({ objective, silent: true });
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		if (!this.session.isStreaming && this.onInputCallback) {
+ 			this.onInputCallback(this.startPendingSubmission({ text: objective }));
+@@ -3674,10 +3820,14 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	async #replaceGoalFromObjective(objective: string): Promise<void> {
+-		const state = await this.session.goalRuntime.replaceGoal({ objective });
+-		this.session.setGoalModeState(state);
+-		this.goalModeEnabled = true;
+-		this.goalModePaused = false;
++		if (this.#studioModeService !== undefined) {
++			await this.#studioModeService.replaceGoal(objective);
++		} else {
++			const state = await this.session.goalRuntime.replaceGoal({ objective });
++			this.session.setGoalModeState(state);
++			this.goalModeEnabled = true;
++			this.goalModePaused = false;
++		}
+ 		this.#resetGoalContinuationSuppression();
+ 		this.#updateGoalModeStatus();
+ 		if (this.session.isStreaming) {
+@@ -3978,6 +4128,10 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		this.#cancelTodoAutoClearTimer();
+ 		this.#cancelObserverUiSyncTimer();
+ 		this.#cancelGoalContinuation();
++		this.#studioLoopUnsubscribe?.();
++		this.#studioLoopUnsubscribe = undefined;
++		this.#studioModeUnsubscribe?.();
++		this.#studioModeUnsubscribe = undefined;
+ 		if (this.#sttController) {
+ 			this.#sttController.dispose();
+ 			this.#sttController = undefined;
+@@ -4080,7 +4234,7 @@ export class InteractiveMode implements InteractiveModeContext {
+ 	}
+ 
+ 	// Extension UI integration
+-	setToolUIContext(uiContext: ExtensionUIContext, hasUI: boolean): void {
++	setToolUIContext(uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean): void {
+ 		this.#toolUiContextSetter(uiContext, hasUI);
+ 	}
+ 
+diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+index 67d7c12..2faa2b2 100644
+--- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
++++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+@@ -30,6 +30,7 @@ import type { AgentSession } from "../../session/agent-session";
+ import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
+ import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
+ import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
++import type { ToolUiFactory } from "../../tools/context";
+ import { defaultLoadModeForToolName } from "../../tools/essential-tools";
+ import type { EventBus } from "../../utils/event-bus";
+ import { calculateTokensPerSecond } from "../../utils/token-rate";
+@@ -661,7 +662,7 @@ export function requestRpcDialog<T>(
+  */
+ export async function runRpcMode(
+ 	session: AgentSession,
+-	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
++	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void,
+ 	eventBus?: EventBus,
+ 	input: ReadableStream<Uint8Array> = claimRpcInput(),
+ ): Promise<never> {
+diff --git a/packages/coding-agent/src/modes/types.ts b/packages/coding-agent/src/modes/types.ts
+index b659512..59ff568 100644
+--- a/packages/coding-agent/src/modes/types.ts
++++ b/packages/coding-agent/src/modes/types.ts
+@@ -26,6 +26,7 @@ import type { SessionContext } from "../session/session-context";
+ import type { SessionManager } from "../session/session-manager";
+ import type { ShakeMode } from "../session/shake-types";
+ import type { LspStartupServerInfo } from "../tools";
++import type { ToolUiFactory } from "../tools/context";
+ import type { EventBus } from "../utils/event-bus";
+ import type { AssistantMessageComponent } from "./components/assistant-message";
+ import type { BashExecutionComponent } from "./components/bash-execution";
+@@ -233,7 +234,7 @@ export interface InteractiveModeContext {
+ 	checkShutdownRequested(): Promise<void>;
+ 
+ 	// Extension UI integration
+-	setToolUIContext(uiContext: ExtensionUIContext, hasUI: boolean): void;
++	setToolUIContext(uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean): void;
+ 	initializeHookRunner(uiContext: ExtensionUIContext, hasUI: boolean): void;
+ 	/** Stack extension autocomplete behavior on top of the built-in editor provider. */
+ 	addAutocompleteProvider(factory: AutocompleteProviderFactory): void;
+diff --git a/packages/coding-agent/src/slash-commands/builtin-modes.ts b/packages/coding-agent/src/slash-commands/builtin-modes.ts
+index 5fa9b62..133777c 100644
+--- a/packages/coding-agent/src/slash-commands/builtin-modes.ts
++++ b/packages/coding-agent/src/slash-commands/builtin-modes.ts
+@@ -284,6 +284,10 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
+ 		aliases: ["models"],
+ 		description: "Switch model for this session",
+ 		acpDescription: "Show current model selection",
++		inlineHint: "[provider/model]",
++		// `handle` implements the argument form, so headless callers (Studio
++		// operator manifest) must be allowed to pass a selector.
++		allowArgs: true,
+ 		getTuiAutocompleteDescription: runtime => {
+ 			const model = runtime.ctx.session.model;
+ 			return model ? `Model: ${model.provider}/${model.id}` : "Model: none selected";
+diff --git a/packages/coding-agent/test/interactive-mode-loop.test.ts b/packages/coding-agent/test/interactive-mode-loop.test.ts
+index bdd9d31..1888148 100644
+--- a/packages/coding-agent/test/interactive-mode-loop.test.ts
++++ b/packages/coding-agent/test/interactive-mode-loop.test.ts
+@@ -9,6 +9,7 @@ import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
+ import { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
+ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
+ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
++import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loop-service";
+ import { TempDir } from "@oh-my-pi/pi-utils";
+ 
+ async function flushMicrotasks(): Promise<void> {
+@@ -187,4 +188,39 @@ describe("InteractiveMode loop auto-submit", () => {
+ 		mode.disableLoopMode();
+ 		expect(setLoopModeStatus).toHaveBeenLastCalledWith(undefined);
+ 	});
++
++	it("delegates Studio Host TUI loop commands to the shared Runtime service", async () => {
++		mode.stop();
++		const service = new StudioLoopService({
++			action: () => "prompt",
++			isBlocked: () => false,
++			isVibeActive: () => false,
++			submitPrompt: () => {},
++			compact: () => {},
++			reset: () => {},
++			nowMs: Date.now,
++			setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
++			clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
++		});
++		mode = new InteractiveMode(session, "test", undefined, undefined, undefined, undefined, undefined, service);
++		mode.ui.requestRender = vi.fn();
++		const setLoopModeStatus = vi.spyOn(mode.statusLine, "setLoopModeStatus");
++
++		await mode.handleLoopCommand("3");
++		expect(service.state()).toEqual({ status: "waiting" });
++		expect(mode.loopModeEnabled).toBe(true);
++		expect(mode.loopLimit).toEqual({ kind: "iterations", initial: 3, remaining: 3 });
++
++		mode.setLoopPrompt("shared prompt");
++		expect(service.state()).toEqual({ status: "running", prompt: "shared prompt" });
++		mode.pauseLoop();
++		expect(service.state()).toEqual({ status: "paused" });
++		service.capturePrompt("bridge prompt");
++		expect(mode.loopPrompt).toBe("bridge prompt");
++
++		mode.disableLoopMode();
++		expect(service.state()).toBeUndefined();
++		expect(mode.loopModeEnabled).toBe(false);
++		expect(setLoopModeStatus).toHaveBeenLastCalledWith(undefined);
++	});
+ });
+diff --git a/packages/coding-agent/test/modes/components/pause-screen.test.ts b/packages/coding-agent/test/modes/components/pause-screen.test.ts
+index 36adc5c..cb62332 100644
+--- a/packages/coding-agent/test/modes/components/pause-screen.test.ts
++++ b/packages/coding-agent/test/modes/components/pause-screen.test.ts
+@@ -137,12 +137,16 @@ describe("pause screen", () => {
+ 			expect(agentPauseGate.paused).toBe(false);
+ 		});
+ 
+-		it("is a no-op when the gate is already engaged elsewhere", async () => {
++		it("attaches to an existing Bridge pause epoch and lets the TUI resume it", async () => {
+ 			agentPauseGate.pause();
+ 			const { host, shown } = makeHost();
+-			await runPauseScreen(host); // must resolve immediately, not park
+-			expect(shown.length).toBe(0);
+-			expect(agentPauseGate.paused).toBe(true); // foreign pause not stolen
++			const run = runPauseScreen(host);
++			await Bun.sleep(1);
++			expect(shown.length).toBe(1);
++			const component = shown[0];
++			if (component instanceof PauseScreenComponent) component.handleInput("\x1b");
++			await run;
++			expect(agentPauseGate.paused).toBe(false);
+ 		});
+ 	});
+ });

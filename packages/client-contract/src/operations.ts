@@ -396,7 +396,9 @@ interface CoreCommandInputMap {
   /**
    * Archive a thread: the Host moves the session JSONL (gzip) and its
    * artifacts into the OMP cold-archive tree. Reversible via
-   * `session.unarchive`; rejected while the session is resident in a Runtime.
+   * `session.unarchive`. If the session is the live Runtime session, the
+   * Host aborts a streaming turn, switches the Runtime off that file, then
+   * moves it.
    */
   "session.archive": { readonly threadId: ThreadId };
   /** Restore an archived thread back into the active sessions tree. */

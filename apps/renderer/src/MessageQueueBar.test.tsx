@@ -54,7 +54,7 @@ describe("MessageQueueBar", () => {
     expect(screen.getByText("空闲后自动发送")).toBeTruthy();
   });
 
-  it("编辑 / 立刻发送 / 删除 回调携带对应条目", () => {
+  it("编辑 / 插入纠偏 / 删除 回调携带对应条目", () => {
     const onEdit = vi.fn();
     const onSendNow = vi.fn();
     const onRemove = vi.fn();
@@ -70,13 +70,13 @@ describe("MessageQueueBar", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "编辑第 2 条排队消息" }));
     expect(onEdit).toHaveBeenCalledWith(entry(2, "第二条"));
-    fireEvent.click(screen.getByRole("button", { name: "立刻发送第 1 条排队消息" }));
+    fireEvent.click(screen.getByRole("button", { name: "插入纠偏第 1 条排队消息" }));
     expect(onSendNow).toHaveBeenCalledWith(entry(1, "第一条"));
     fireEvent.click(screen.getByRole("button", { name: "删除第 2 条排队消息" }));
     expect(onRemove).toHaveBeenCalledWith(entry(2, "第二条"));
   });
 
-  it("sendEnabled 为 false 时立刻发送禁用，编辑与删除仍可用", () => {
+  it("sendEnabled 为 false 时插入纠偏禁用，编辑与删除仍可用", () => {
     render(
       <MessageQueueBar
         messages={[entry(1, "hi")]}
@@ -87,9 +87,35 @@ describe("MessageQueueBar", () => {
         onRemove={() => {}}
       />,
     );
-    expect((screen.getByRole("button", { name: "立刻发送第 1 条排队消息" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "插入纠偏第 1 条排队消息" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "编辑第 1 条排队消息" }) as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByRole("button", { name: "删除第 1 条排队消息" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("空闲时发送按钮是立刻发送，运行中是插入纠偏", () => {
+    const { rerender } = render(
+      <MessageQueueBar
+        messages={[entry(1, "hi")]}
+        running={false}
+        sendEnabled
+        onEdit={() => {}}
+        onSendNow={() => {}}
+        onRemove={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "立刻发送第 1 条排队消息" })).toBeTruthy();
+    rerender(
+      <MessageQueueBar
+        messages={[entry(1, "hi")]}
+        running
+        sendEnabled
+        onEdit={() => {}}
+        onSendNow={() => {}}
+        onRemove={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "插入纠偏第 1 条排队消息" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "立刻发送第 1 条排队消息" })).toBeNull();
   });
 
   it("demo 模式显示「演示」标记", () => {

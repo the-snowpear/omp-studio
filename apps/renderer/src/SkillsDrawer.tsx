@@ -4,13 +4,13 @@ import type { StudioClient } from "@omp-studio/client-contract";
 import { Icon } from "./icons";
 import { toDrawerItems } from "./extensibilityMap";
 import {
-  ICON_BY_NAME,
-  countEnabledDrawerItems,
   createPreviewDrawerItems,
+  drawerItemIcon,
   drawerItemKey,
   isDrawerItemAdded,
   isDrawerItemEnabled,
   isDrawerItemError,
+  isDrawerItemUsed,
   itemTone,
   matchesDrawerQuery,
   withUniqueDrawerKeys,
@@ -172,7 +172,7 @@ function itemScope(item: DrawerItem): SkillScope | "plugin" {
 }
 
 function itemIcon(item: DrawerItem): string {
-  return ICON_BY_NAME[item.name] ?? (item.kind === "plugin" ? "plug" : "puzzle");
+  return drawerItemIcon(item);
 }
 
 function itemDesc(item: DrawerItem): string {
@@ -192,12 +192,20 @@ export function SkillsDrawer({
   onClose,
   onEnabledCountChange,
   onOpenHub,
+  draftSkills,
+  usedSkills,
+  onInsertSkill,
+  onRemoveSkill,
 }: {
   open: boolean;
   client: StudioClient;
   onClose: () => void;
   onEnabledCountChange?: (count: number) => void;
   onOpenHub?: (intent?: { tab: "skills" | "plugins"; name?: string }) => void;
+  draftSkills?: ReadonlySet<string>;
+  usedSkills?: ReadonlySet<string>;
+  onInsertSkill?: (skill: { name: string; desc?: string }) => void;
+  onRemoveSkill?: (name: string) => void;
 }) {
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -238,9 +246,25 @@ export function SkillsDrawer({
     if (open && !preview) void refresh();
   }, [open, preview, refresh]);
 
+  const skillAdded = (item: DrawerItem): boolean => {
+    if (item.kind !== "skill") return isDrawerItemAdded(item);
+    if (preview) return item.session;
+    return draftSkills?.has(item.name) === true;
+  };
+
+  const skillUsed = (item: DrawerItem): boolean => {
+    if (item.kind !== "skill") return false;
+    if (preview) return isDrawerItemUsed(item);
+    return usedSkills?.has(item.name) === true;
+  };
+
   useEffect(() => {
-    onEnabledCountChange?.(countEnabledDrawerItems(items));
-  }, [items, onEnabledCountChange]);
+    const count = items.filter((item) => {
+      if (item.kind === "plugin") return isDrawerItemEnabled(item);
+      return skillAdded(item) || skillUsed(item);
+    }).length;
+    onEnabledCountChange?.(count);
+  }, [items, onEnabledCountChange, preview, draftSkills, usedSkills]);
 
   useEffect(() => {
     if (open) searchRef.current?.focus();
@@ -332,7 +356,15 @@ export function SkillsDrawer({
 
   const toggleItem = (item: DrawerItem) => {
     if (item.kind === "skill") {
-      patchItem(item, { session: !item.session });
+      if (preview) {
+        patchItem(item, { session: !item.session });
+        return;
+      }
+      if (skillAdded(item)) {
+        onRemoveSkill?.(item.name);
+        return;
+      }
+      onInsertSkill?.({ name: item.name, ...(item.desc ? { desc: item.desc } : {}) });
       return;
     }
     if (!preview) return;
@@ -472,6 +504,9 @@ export function SkillsDrawer({
                       >
                         <SkillCard
                           item={slot.item}
+                          added={skillAdded(slot.item)}
+                          used={skillUsed(slot.item)}
+                          insertDisabled={!preview && slot.item.kind === "skill" && onInsertSkill === undefined}
                           drawerOpen={open}
                           filterEpoch={filterEpoch}
                           phase={slot.phase}
@@ -579,6 +614,9 @@ function SkillSlot({
 
 function SkillCard({
   item,
+  added,
+  used,
+  insertDisabled,
   drawerOpen,
   filterEpoch,
   phase,
@@ -587,6 +625,9 @@ function SkillCard({
   onOpenHub,
 }: {
   item: DrawerItem;
+  added: boolean;
+  used: boolean;
+  insertDisabled?: boolean;
   drawerOpen: boolean;
   filterEpoch: number;
   phase: SlotPhase;
@@ -595,12 +636,12 @@ function SkillCard({
   onOpenHub?: () => void;
 }) {
   const err = isDrawerItemError(item);
-  const added = isDrawerItemAdded(item);
   const retrying = Boolean(item.retrying);
   const scope = itemScope(item);
   const tone = itemTone(item);
   const desc = itemDesc(item);
   const meta = itemMeta(item);
+  const glyph = retrying ? "refresh" : itemIcon(item);
   const epochRef = useRef(filterEpoch);
   const [addedPaint, setAddedPaint] = useState(() => {
     if (filterEpoch === 0 || phase === "leave" || !added) return added;
@@ -609,6 +650,7 @@ function SkillCard({
   });
   const cls = ["sk-card"];
   if (addedPaint) cls.push("is-added");
+  if (used) cls.push("is-used");
   if (err) cls.push("has-error");
   if (retrying) cls.push("is-retrying");
   const flyId = `sk-fly-${drawerItemKey(item).replaceAll(":", "-")}`;
@@ -775,8 +817,16 @@ function SkillCard({
         onPointerEnter={onHitEnter}
         onPointerLeave={onHitLeave}
       >
-        <span className={`sk-icon${item.kind === "plugin" ? " sk-icon-plugin" : ""}`}>
-          <Icon name={retrying ? "refresh" : itemIcon(item)} extra="sm" />
+        <span
+          className={`sk-icon${item.kind === "plugin" ? " sk-icon-plugin" : ""}`}
+          data-icon={glyph}
+        >
+          <Icon name={glyph} />
+          {used && !err ? (
+            <span className="sk-used-mark" aria-hidden="true" title="本轮对话用过">
+              <Icon name="history" extra="sm" />
+            </span>
+          ) : null}
           {err && !retrying ? <span className="sk-error-mark" /> : (
             <span className="sk-added-mark" aria-hidden="true">
               <Icon name="check" extra="sm" />
@@ -823,7 +873,7 @@ function SkillCard({
             <button
               className="add-btn hover-action"
               type="button"
-              aria-label={`从当前对话移除 ${item.name}`}
+              aria-label={`从当前草稿移除 ${item.name}`}
               onClick={(event) => {
                 event.stopPropagation();
                 onToggle();
@@ -837,7 +887,8 @@ function SkillCard({
             <button
               className="add-btn hover-action"
               type="button"
-              aria-label={`把 ${item.name} 加入当前对话`}
+              aria-label={`把 ${item.name} 加入当前草稿`}
+              disabled={insertDisabled}
               onClick={(event) => {
                 event.stopPropagation();
                 onToggle();
@@ -907,6 +958,7 @@ function SkillFlyout({
   onPointerEnter: () => void;
   onPointerLeave: () => void;
 }) {
+  const glyph = itemIcon(item);
   const ref = useRef<HTMLDivElement>(null);
   const [entered, setEntered] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; side: "right" | "left" }>({
@@ -962,8 +1014,11 @@ function SkillFlyout({
       <span className="sk-fly-bridge" aria-hidden="true" />
       <span className="sk-fly-arrow" aria-hidden="true" />
       <div className="sk-fly-kicker">
-        <span className={`sk-icon${item.kind === "plugin" ? " sk-icon-plugin" : ""}`}>
-          <Icon name={itemIcon(item)} extra="sm" />
+        <span
+          className={`sk-icon${item.kind === "plugin" ? " sk-icon-plugin" : ""}`}
+          data-icon={glyph}
+        >
+          <Icon name={glyph} />
         </span>
         {SCOPE_LABEL[scope] ?? "技能"}
         {item.kind === "skill" && item.src ? <span className="chip outline xs">{item.src}</span> : null}

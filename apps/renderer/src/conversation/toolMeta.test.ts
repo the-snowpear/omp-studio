@@ -8,9 +8,14 @@ import {
   isRealSubagentId,
   resolveSubagentHubTarget,
   subagentCardKey,
+  listSessionChangeTurns,
+  sessionChangeScope,
+  sessionChangeTurnIdForPath,
   sessionFileChanges,
   sessionFilePatches,
   sessionTaskProgress,
+  SESSION_CHANGE_LAST_ID,
+  SESSION_CHANGE_SESSION_ID,
   toolKind,
   toolLabel,
 } from "./toolMeta";
@@ -127,14 +132,25 @@ describe("upstream tool schemas", () => {
       ].join("\n"),
     });
     expect(sessionFileChanges([assistantRow("a1", [astEdit])]).session).toEqual([
-      { path: "src/one.ts", name: "one.ts", dir: "src/", add: 1, del: 1 },
-      { path: "src/nested/two.ts", name: "two.ts", dir: "src/nested/", add: 1, del: 1 },
+      { path: "src/one.ts", name: "one.ts", dir: "src/", add: 1, del: 1, status: "modified", note: "AST Edit" },
+      { path: "src/nested/two.ts", name: "two.ts", dir: "src/nested/", add: 1, del: 1, status: "modified", note: "AST Edit" },
     ]);
     const patches = sessionFilePatches(batchSegments("a1", [astEdit]));
-    expect(patches.get("src/one.ts")).toEqual([{ kind: "ast_edit", lines: ["-  foo(a);", "+  bar(a);"] }]);
-    expect(patches.get("src/nested/two.ts")).toEqual([
-      { kind: "ast_edit", lines: ["   const x = 1;", "-  foo(x);", "+  bar(x);"] },
-    ]);
+    expect(patches.get("src/one.ts")).toEqual([{
+      kind: "ast_edit",
+      lines: [
+        { mark: "-", oldLn: "12", newLn: "", text: "  foo(a);" },
+        { mark: "+", oldLn: "", newLn: "12", text: "  bar(a);" },
+      ],
+    }]);
+    expect(patches.get("src/nested/two.ts")).toEqual([{
+      kind: "ast_edit",
+      lines: [
+        { mark: " ", oldLn: "40", newLn: "40", text: "  const x = 1;" },
+        { mark: "-", oldLn: "41", newLn: "", text: "  foo(x);" },
+        { mark: "+", oldLn: "", newLn: "41", text: "  bar(x);" },
+      ],
+    }]);
   });
 });
 
@@ -153,7 +169,22 @@ describe("sessionFileChanges", () => {
     expect(changes.turn.map((file) => file.path).sort()).toEqual(["src/a.ts", "src/b.ts"]);
     expect(changes.session.map((file) => file.path).sort()).toEqual(["src/a.ts", "src/b.ts"]);
     const a = changes.session.find((file) => file.path === "src/a.ts");
-    expect(a).toMatchObject({ add: 2, del: 1 });
+    expect(a).toMatchObject({ add: 2, del: 1, status: "modified", note: "Edit" });
+  });
+
+  it("infers FileStat status and tool-kind notes from the last successful edit kind", () => {
+    const rows: readonly TimelineRow[] = [
+      assistantRow("a1", [
+        tool("w1", "write", { path: "docs/new.md", content: "hello" }),
+        tool("e1", "edit", { path: "src/gone.ts" }, { diff: "-1|old" }),
+        tool("w2", "write", { path: "src/mixed.ts", content: "first" }),
+        tool("e2", "edit", { path: "src/mixed.ts" }, { diff: "-1|first\n+1|second" }),
+      ]),
+    ];
+    const byPath = Object.fromEntries(sessionFileChanges(rows).session.map((file) => [file.path, file]));
+    expect(byPath["docs/new.md"]).toMatchObject({ status: "added", note: "Write", add: 1, del: 0 });
+    expect(byPath["src/gone.ts"]).toMatchObject({ status: "deleted", note: "Edit", add: 0, del: 1 });
+    expect(byPath["src/mixed.ts"]).toMatchObject({ status: "modified", note: "Edit" });
   });
 
   it("turn aggregates a streaming tail across consecutive assistant rows, session keeps history", () => {
@@ -187,6 +218,81 @@ describe("sessionFileChanges", () => {
   });
 });
 
+describe("listSessionChangeTurns", () => {
+  it("lists last turn, earlier turns with files, and the session total", () => {
+    const rows: readonly TimelineRow[] = [
+      userRow("u1"),
+      assistantRow("a1", [tool("e1", "edit", { path: "src/a.ts" }, { diff: "-1|old\n+1|new" })]),
+      userRow("u2"),
+      assistantRow("a2", [
+        tool("e2", "edit", { path: "src/b.ts" }, { diff: "+2|added" }),
+        tool("e3", "edit", { path: "src/a.ts" }, { diff: "+1|more" }),
+      ]),
+    ];
+    const turns = listSessionChangeTurns(rows);
+    expect(turns.map((turn) => turn.id)).toEqual([SESSION_CHANGE_LAST_ID, "a1", SESSION_CHANGE_SESSION_ID]);
+    expect(turns.map((turn) => turn.label)).toEqual(["最近一轮", "第 1 轮", "本会话"]);
+    expect(turns[0]?.files.map((file) => file.path).sort()).toEqual(["src/a.ts", "src/b.ts"]);
+    expect(turns[1]?.files.map((file) => file.path)).toEqual(["src/a.ts"]);
+    expect(turns[2]?.files.find((file) => file.path === "src/a.ts")).toMatchObject({ add: 2, del: 1 });
+  });
+
+  it("keeps last turn following a streaming tail and skips empty earlier runs", () => {
+    const rows: readonly TimelineRow[] = [
+      assistantRow("a0", []),
+      userRow("u1"),
+      assistantRow("a1", [tool("e1", "write", { path: "docs/old.md", content: "x" })]),
+      userRow("u2"),
+      assistantRow("a2", [tool("e2", "write", { path: "docs/new.md", content: "y" })]),
+      assistantRow("a3", [tool("e3", "write", { path: "docs/tail.md", content: "z" })], "streaming"),
+    ];
+    const turns = listSessionChangeTurns(rows);
+    expect(turns.map((turn) => [turn.id, turn.files.map((file) => file.path)])).toEqual([
+      [SESSION_CHANGE_LAST_ID, ["docs/new.md", "docs/tail.md"]],
+      ["a1", ["docs/old.md"]],
+      [SESSION_CHANGE_SESSION_ID, ["docs/old.md", "docs/new.md", "docs/tail.md"]],
+    ]);
+  });
+
+  it("scopes patches to the selected turn instead of the whole session", () => {
+    const rows: readonly TimelineRow[] = [
+      assistantRow("a1", [tool("e1", "edit", { path: "src/a.ts" }, { diff: "-1|old\n+1|new" })]),
+      userRow("u2"),
+      assistantRow("a2", [tool("e2", "edit", { path: "src/a.ts" }, { diff: "+1|more" })]),
+    ];
+    const first = sessionChangeScope(rows, "a1");
+    expect(first.label).toBe("第 1 轮");
+    expect(first.files).toEqual([expect.objectContaining({ path: "src/a.ts", add: 1, del: 1 })]);
+    expect(sessionFilePatches(first.segments).get("src/a.ts")).toEqual([
+      {
+        kind: "edit",
+        lines: [
+          { mark: "-", oldLn: "1", newLn: "", text: "old" },
+          { mark: "+", oldLn: "", newLn: "1", text: "new" },
+        ],
+      },
+    ]);
+    const last = sessionChangeScope(rows, SESSION_CHANGE_LAST_ID);
+    expect(last.label).toBe("最近一轮");
+    expect(sessionFilePatches(last.segments).get("src/a.ts")).toEqual([
+      { kind: "edit", lines: [{ mark: "+", oldLn: "", newLn: "1", text: "more" }] },
+    ]);
+    const session = sessionChangeScope(rows, "gone");
+    expect(session.id).toBe(SESSION_CHANGE_LAST_ID);
+  });
+
+  it("resolves focus path to the latest turn that touched the file", () => {
+    const rows: readonly TimelineRow[] = [
+      assistantRow("a1", [tool("e1", "edit", { path: "src/a.ts" }, { diff: "+1|one" })]),
+      userRow("u2"),
+      assistantRow("a2", [tool("e2", "edit", { path: "src/b.ts" }, { diff: "+1|two" })]),
+    ];
+    expect(sessionChangeTurnIdForPath(rows, "src/a.ts")).toBe("a1");
+    expect(sessionChangeTurnIdForPath(rows, "src/b.ts")).toBe(SESSION_CHANGE_LAST_ID);
+    expect(sessionChangeTurnIdForPath(rows, "missing.ts")).toBeUndefined();
+  });
+});
+
 describe("sessionFilePatches", () => {
   it("parses tuple-array diffs with the EditBody mark/line/text shape", () => {
     const segments = batchSegments("a1", [
@@ -203,9 +309,9 @@ describe("sessionFilePatches", () => {
       {
         kind: "edit",
         lines: [
-          " - [更新日志](docs/CHANGELOG.md)",
-          "+- [上游同步](docs/UPSTREAM-SYNC.md)",
-          "-- [旧条目](docs/OLD.md)",
+          { mark: " ", oldLn: "46", newLn: "46", text: "- [更新日志](docs/CHANGELOG.md)" },
+          { mark: "+", oldLn: "", newLn: "47", text: "- [上游同步](docs/UPSTREAM-SYNC.md)" },
+          { mark: "-", oldLn: "47", newLn: "", text: "- [旧条目](docs/OLD.md)" },
         ],
       },
     ]);
@@ -216,20 +322,34 @@ describe("sessionFilePatches", () => {
       tool("e1", "edit", { path: "src/a.ts" }, { diff: " 11|before\n-12|old\n+12|new\nplain" }),
     ]);
     expect(sessionFilePatches(segments).get("src/a.ts")).toEqual([
-      { kind: "edit", lines: [" before", "-old", "+new", " plain"] },
+      {
+        kind: "edit",
+        lines: [
+          { mark: " ", oldLn: "11", newLn: "11", text: "before" },
+          { mark: "-", oldLn: "12", newLn: "", text: "old" },
+          { mark: "+", oldLn: "", newLn: "12", text: "new" },
+          { mark: " ", oldLn: "", newLn: "", text: "plain" },
+        ],
+      },
     ]);
   });
 
   it("renders write content as add lines and caps oversized files", () => {
     const small = batchSegments("a1", [tool("w1", "write", { path: "docs/x.md", content: "one\ntwo" })]);
-    expect(sessionFilePatches(small).get("docs/x.md")).toEqual([{ kind: "write", lines: ["+one", "+two"] }]);
+    expect(sessionFilePatches(small).get("docs/x.md")).toEqual([{
+      kind: "write",
+      lines: [
+        { mark: "+", oldLn: "", newLn: "1", text: "one" },
+        { mark: "+", oldLn: "", newLn: "2", text: "two" },
+      ],
+    }]);
 
     const huge = batchSegments("a2", [tool("w2", "write", { path: "big.ts", content: Array.from({ length: 600 }, (_, i) => `l${i}`).join("\n") })]);
     const block = sessionFilePatches(huge).get("big.ts")?.[0];
     expect(block).toBeDefined();
     expect(block?.lines).toHaveLength(500);
-    expect(block?.lines[0]).toBe("+l0");
-    expect(block?.lines.at(-1)).toBe("+l499");
+    expect(block?.lines[0]).toEqual({ mark: "+", oldLn: "", newLn: "1", text: "l0" });
+    expect(block?.lines.at(-1)).toEqual({ mark: "+", oldLn: "", newLn: "500", text: "l499" });
     expect(block?.truncated).toBe(true);
   });
 
@@ -244,8 +364,17 @@ describe("sessionFilePatches", () => {
       }),
     ]);
     const patches = sessionFilePatches(segments);
-    expect(patches.get("src/one.ts")).toEqual([{ kind: "ast_edit", lines: ["-const a = 1;", "+const a = 2;"] }]);
-    expect(patches.get("src/two.ts")).toEqual([{ kind: "ast_edit", lines: ["+export const two = 2;"] }]);
+    expect(patches.get("src/one.ts")).toEqual([{
+      kind: "ast_edit",
+      lines: [
+        { mark: "-", oldLn: "", newLn: "", text: "const a = 1;" },
+        { mark: "+", oldLn: "", newLn: "", text: "const a = 2;" },
+      ],
+    }]);
+    expect(patches.get("src/two.ts")).toEqual([{
+      kind: "ast_edit",
+      lines: [{ mark: "+", oldLn: "", newLn: "", text: "export const two = 2;" }],
+    }]);
     expect(patches.has("renamed → path.ts")).toBe(false);
   });
 
@@ -257,8 +386,8 @@ describe("sessionFilePatches", () => {
     ]);
     const blocks = sessionFilePatches(segments).get("src/a.ts");
     expect(blocks).toEqual([
-      { kind: "edit", lines: ["+first"] },
-      { kind: "write", lines: ["+rewritten"] },
+      { kind: "edit", lines: [{ mark: "+", oldLn: "", newLn: "1", text: "first" }] },
+      { kind: "write", lines: [{ mark: "+", oldLn: "", newLn: "1", text: "rewritten" }] },
     ]);
   });
 });

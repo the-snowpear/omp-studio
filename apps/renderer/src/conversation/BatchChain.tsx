@@ -185,9 +185,13 @@ function ToolItem({ tool, open, onToggle, showDetail = true }: { tool: ToolView;
   );
 }
 
+/** 一条工具链里的单个条目，顺序即模型产出顺序。 */
+export type ChainItem =
+  | { readonly kind: "think"; readonly think: ThinkView }
+  | { readonly kind: "tool"; readonly tool: ToolView };
+
 export function BatchChain({
-  tools,
-  thinking = [],
+  items,
   batchKey,
   expandAll = false,
   standalone = false,
@@ -195,8 +199,8 @@ export function BatchChain({
   showDetail = true,
   onInspectSubagent,
 }: {
-  tools: readonly ToolView[];
-  thinking?: readonly ThinkView[];
+  /** 已按模型产出顺序排好的链条目；相邻思考应在上游合并后再传进来。 */
+  items: readonly ChainItem[];
   batchKey: string;
   expandAll?: boolean;
   standalone?: boolean;
@@ -206,12 +210,21 @@ export function BatchChain({
   showDetail?: boolean;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
 }) {
-  const visible = tools.filter((tool) => !isAskPending(tool));
-  const mergedThinking: ThinkView | undefined = thinking.length === 0 ? undefined : {
-    key: thinking[0]!.key,
-    text: thinking.map((think) => think.text.trim()).filter(Boolean).join("\n\n"),
-    ...(thinking.some((think) => think.truncated === true) ? { truncated: true } : {}),
-  };
+  // 展开状态按「槽位」寻址而不是按 segment key：同一条链在 live → 落盘之间会换 key
+  // （`m1:thinking:0` → `thinking-0`），按槽位寻址才不会在落盘那一刻丢掉展开状态。
+  const chain: { readonly slot: string; readonly item: ChainItem }[] = [];
+  const visible: ToolView[] = [];
+  const thinking: ThinkView[] = [];
+  for (const item of items) {
+    if (item.kind === "think") {
+      chain.push({ slot: `think-${thinking.length}`, item });
+      thinking.push(item.think);
+      continue;
+    }
+    if (isAskPending(item.tool)) continue;
+    chain.push({ slot: item.tool.toolCallId, item });
+    visible.push(item.tool);
+  }
   const running = visible.some((tool) => tool.status === "running" || tool.status === "queued");
   const askOnly = visible.length > 0 && visible.every((tool) => {
     const kind = toolKind(tool);
@@ -230,44 +243,43 @@ export function BatchChain({
     }
     if (tool.status === "queued") nextQueuedId = tool.toolCallId;
   }
-  // 流式跟随：最后一个运行中的工具 → 下一个待跑的工具 → 仍在输出的思考。
-  const activeKey = lastRunId ?? nextQueuedId ?? (liveTail && mergedThinking !== undefined ? mergedThinking.key : undefined);
+  // 流式跟随：最后一个运行中的工具 → 下一个待跑的工具 → 链尾仍在输出的思考。
+  // 链尾之前的思考已经被后面的工具接管，不该再跟着它。
+  const tail = chain[chain.length - 1];
+  const tailThinkSlot = tail !== undefined && tail.item.kind === "think" ? tail.slot : undefined;
+  const activeKey = lastRunId ?? nextQueuedId ?? (liveTail ? tailThinkSlot : undefined);
   // 用户手动切换过的项/链记入 override，之后不再被自动展开/折叠覆盖。
   const [manualOpen, setManualOpen] = useState<boolean | undefined>(undefined);
   const [overrides, setOverrides] = useState<Readonly<Record<string, boolean>>>({});
   const open = manualOpen ?? (running || liveTail || askOnly || expandAll);
-  const itemOpen = (key: string) => overrides[key] ?? (key === activeKey || expandAll || askOnly);
+  const itemOpen = (slot: string) => overrides[slot] ?? (slot === activeKey || expandAll || askOnly);
   const bodyId = useId();
-  const toggleItem = (key: string) => {
-    setOverrides((previous) => ({ ...previous, [key]: !(previous[key] ?? (key === activeKey || expandAll || askOnly)) }));
+  const toggleItem = (slot: string) => {
+    setOverrides((previous) => ({ ...previous, [slot]: !(previous[slot] ?? (slot === activeKey || expandAll || askOnly)) }));
   };
   const toggleOpen = () => setManualOpen(!open);
-  if (thinking.length === 0 && visible.length === 0) return null;
-  const cards: ReactNode[] = [];
-  if (mergedThinking !== undefined) {
-    cards.push(
+  if (chain.length === 0) return null;
+  const cards: ReactNode[] = chain.map(({ slot, item }) =>
+    item.kind === "think" ? (
       <ThinkCard
-        key={mergedThinking.key}
-        itemKey={mergedThinking.key}
-        preview={mergedThinking.text.trim().replace(/\s+/g, " ")}
-        full={mergedThinking.text}
-        {...(mergedThinking.truncated === true ? { truncated: true } : {})}
-        open={itemOpen(mergedThinking.key)}
-        onToggle={() => toggleItem(mergedThinking.key)}
-      />,
-    );
-  }
-  for (const tool of visible) {
-    cards.push(
+        key={slot}
+        itemKey={item.think.key}
+        preview={item.think.text.trim().replace(/\s+/g, " ")}
+        full={item.think.text}
+        {...(item.think.truncated === true ? { truncated: true } : {})}
+        open={itemOpen(slot)}
+        onToggle={() => toggleItem(slot)}
+      />
+    ) : (
       <ToolItem
-        key={tool.toolCallId}
-        tool={tool}
-        open={itemOpen(tool.toolCallId)}
-        onToggle={() => toggleItem(tool.toolCallId)}
+        key={slot}
+        tool={item.tool}
+        open={itemOpen(slot)}
+        onToggle={() => toggleItem(slot)}
         showDetail={showDetail}
-      />,
-    );
-  }
+      />
+    ),
+  );
   // 单卡（只有一段思考，或只用了一个工具）没有可归纳的批次：摘要行只会把「Read ·
   // a.ts」重述成「阅读 1 个文件」，还多要一次点击才看得到内容。直接把那张卡摆出来。
   if (cards.length === 1) {
@@ -281,7 +293,7 @@ export function BatchChain({
       </div>
     );
   }
-  const summary = batchSummary(mergedThinking === undefined ? [] : [mergedThinking], visible);
+  const summary = batchSummary(thinking, visible);
   return (
     <div
       className={`${standalone ? "ev " : ""}ev-batch${open ? " open" : ""}${running ? " is-running" : ""}${expandAll || askOnly ? " is-pinned-open" : ""}`}

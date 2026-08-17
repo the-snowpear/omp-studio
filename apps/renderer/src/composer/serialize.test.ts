@@ -36,6 +36,10 @@ describe("serializeChip", () => {
     expect(serializeChip(chip({ kind: "skill", label: "commit-msg", name: "commit-msg" }))).toBe("/skill:commit-msg");
   });
 
+  it("does not put mode capsules into the prompt text", () => {
+    expect(serializeChip(chip({ kind: "mode", label: "fast", name: "fast" }))).toBe("");
+  });
+
   it("serializes agents as @name", () => {
     expect(serializeChip(chip({ kind: "agent", label: "code-reviewer", name: "code-reviewer" }))).toBe("@code-reviewer");
   });
@@ -55,6 +59,19 @@ describe("serializeChip", () => {
 
   it("falls back to @path when an image chip has no bytes", () => {
     expect(serializeChip(chip({ kind: "image", label: "logo.png", path: "assets/logo.png" }))).toBe("@assets/logo.png");
+  });
+
+  it("keeps a disk image as @path even when preview bytes are attached", () => {
+    expect(
+      serializeChip(
+        chip({
+          kind: "image",
+          label: "logo.png",
+          path: "assets/logo.png",
+          image: { type: "image", mimeType: "image/png", data: "abc" },
+        }),
+      ),
+    ).toBe("@assets/logo.png");
   });
 });
 
@@ -91,6 +108,27 @@ describe("serializeDoc", () => {
         { type: "image", mimeType: "image/png", data: "aaa" },
         { type: "image", mimeType: "image/jpeg", data: "bbb" },
       ],
+    });
+  });
+
+  it("does not duplicate a workspace image as both @path and wire bytes", () => {
+    const doc: ComposerDoc = {
+      nodes: [
+        { type: "text", value: "看 " },
+        {
+          type: "chip",
+          chip: chip({
+            kind: "image",
+            label: "logo.png",
+            path: "assets/logo.png",
+            image: { type: "image", mimeType: "image/png", data: "aaa" },
+          }),
+        },
+      ],
+    };
+    expect(serializeDoc(doc)).toEqual({
+      text: "看 @assets/logo.png",
+      images: [],
     });
   });
 

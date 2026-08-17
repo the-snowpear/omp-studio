@@ -17,6 +17,8 @@ export type SkillPreview = {
   enabled: boolean;
   loaded: boolean;
   session: boolean;
+  /** Preview-only: this skill was used earlier in the demo conversation. */
+  used?: boolean;
   error?: string;
   retrying?: boolean;
 };
@@ -48,9 +50,114 @@ export const ICON_BY_NAME: Record<string, string> = {
   "commit-msg": "pencil",
   "oss-audit": "shield",
   "omp-preview-tools": "eye",
-  "git-worktree-plus": "branch",
+  "git-worktree-plus": "worktree",
   "browser-lab": "globe",
+  "banner-design": "banner",
+  brand: "diamond",
+  "design-system": "swatch",
+  "design-taste-frontend": "sparkles",
+  design: "palette",
+  slides: "slides",
+  "ui-styling": "brush",
+  "ui-ux-pro-max": "wand",
 };
+
+/** Distinctive glyphs for unmatched names. Never puzzle / command / box (those read as the same square). */
+const FALLBACK_ICONS = [
+  "sparkles",
+  "diamond",
+  "wand",
+  "hexagon",
+  "layers",
+  "zap",
+  "brain",
+  "flask",
+  "swatch",
+  "cpu",
+  "book",
+  "pen-nib",
+  "type",
+  "palette",
+  "asterisk",
+  "steering",
+] as const;
+
+type IconRule = { readonly icon: string; readonly keys: readonly string[] };
+
+/** First match wins. Short keys (≤3) must be whole tokens so `type` does not steal `typescript`. */
+const ICON_RULES: readonly IconRule[] = [
+  { icon: "banner", keys: ["banner", "hero", "poster", "billboard", "横幅", "海报"] },
+  { icon: "slides", keys: ["slide", "slides", "deck", "ppt", "pptx", "present", "presentation", "幻灯", "演示"] },
+  { icon: "diamond", keys: ["brand", "logo", "identity", "trademark", "品牌", "商标", "标志"] },
+  { icon: "palette", keys: ["palette", "color", "colour", "colors", "swatch", "tokens", "配色", "色彩"] },
+  { icon: "type", keys: ["typography", "font", "fonts", "typeface", "字体", "排版"] },
+  { icon: "brush", keys: ["brush", "paint", "styling", "css", "tailwind", "shadcn", "样式"] },
+  { icon: "wand", keys: ["ux", "ui", "interface", "frontend", "taste", "界面", "体验"] },
+  { icon: "sparkles", keys: ["design", "icon", "icons", "visual", "aesthetic", "设计", "图标"] },
+  { icon: "image", keys: ["image", "photo", "screenshot", "mermaid", "picture", "图片", "截图"] },
+  { icon: "network", keys: ["graph", "diagram", "chart", "network", "mindmap"] },
+  { icon: "worktree", keys: ["worktree"] },
+  { icon: "branch", keys: ["git", "commit", "branch", "vcs"] },
+  { icon: "shield", keys: ["audit", "security", "review", "lint", "oss", "合规", "审查", "安全"] },
+  { icon: "test", keys: ["test", "tests", "verify", "qa", "spec", "测试", "验证"] },
+  { icon: "globe", keys: ["browser", "web", "http", "preview", "url", "浏览器"] },
+  { icon: "book", keys: ["doc", "docs", "document", "readme", "wiki", "copy", "文档"] },
+  { icon: "pencil", keys: ["write", "writing", "msg", "message", "写作", "提交"] },
+  { icon: "terminal", keys: ["terminal", "shell", "cli", "bash", "powershell"] },
+  { icon: "plug", keys: ["mcp", "plugin", "plugins"] },
+  { icon: "brain", keys: ["llm", "agent", "prompt"] },
+  { icon: "database", keys: ["db", "sql", "sqlite", "postgres", "database"] },
+  { icon: "search", keys: ["search", "find", "grep"] },
+  { icon: "file-code", keys: ["code", "refactor", "patch"] },
+  { icon: "server", keys: ["deploy", "server", "infra", "docker"] },
+  { icon: "key", keys: ["auth", "oauth", "secret"] },
+  { icon: "bug", keys: ["debug", "bug", "trace"] },
+  { icon: "zap", keys: ["perf", "performance", "optimize"] },
+  { icon: "flask", keys: ["lab", "experiment", "research"] },
+  { icon: "cpu", keys: ["firmware", "embed", "esp32", "hardware"] },
+  { icon: "hexagon", keys: ["cad", "solidworks", "零件"] },
+  { icon: "layers", keys: ["system", "stack", "layout"] },
+];
+
+function hashName(name: string): number {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 33 + name.charCodeAt(i)) | 0;
+  return Math.abs(hash);
+}
+
+function iconTokens(text: string): Set<string> {
+  return new Set(text.toLowerCase().split(/[^a-z0-9\u4e00-\u9fff]+/).filter((part) => part.length > 0));
+}
+
+function ruleMatches(hay: string, parts: Set<string>, key: string): boolean {
+  if (/[\u4e00-\u9fff]/.test(key)) return hay.includes(key);
+  if (key.length <= 3) return parts.has(key);
+  if (parts.has(key)) return true;
+  for (const part of parts) {
+    if (part.includes(key)) return true;
+  }
+  return false;
+}
+
+function inferSkillIcon(name: string, desc: string): string | undefined {
+  const hay = `${name} ${desc}`.toLowerCase();
+  const parts = iconTokens(hay);
+  for (const rule of ICON_RULES) {
+    if (rule.keys.some((key) => ruleMatches(hay, parts, key))) return rule.icon;
+  }
+  return undefined;
+}
+
+/** Per-skill glyph for the drawer tile. Unknown names hash into a varied pool instead of sharing puzzle. */
+export function drawerItemIcon(item: DrawerItem): string {
+  const nameKey = item.name.trim().toLowerCase();
+  const named = ICON_BY_NAME[nameKey];
+  if (named) return named;
+  const inferred = inferSkillIcon(nameKey, item.kind === "skill" ? item.desc : "");
+  if (inferred) return inferred;
+  if (item.kind === "plugin") return "plug";
+  return FALLBACK_ICONS[hashName(nameKey) % FALLBACK_ICONS.length] ?? "sparkles";
+}
 
 export type SkillTone = "purple" | "blue" | "green" | "amber" | "teal" | "cyan" | "rose" | "gray" | "red";
 
@@ -74,18 +181,24 @@ export const COLOR_BY_NAME: Partial<Record<string, Exclude<SkillTone, "red">>> =
   "omp-preview-tools": "teal",
   "git-worktree-plus": "cyan",
   "browser-lab": "amber",
+  "banner-design": "rose",
+  brand: "amber",
+  "design-system": "teal",
+  "design-taste-frontend": "purple",
+  design: "cyan",
+  slides: "blue",
+  "ui-styling": "green",
+  "ui-ux-pro-max": "rose",
 };
 
 function hashTone(name: string): (typeof SKILL_TONES)[number] {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 33 + name.charCodeAt(i)) | 0;
-  return SKILL_TONES[Math.abs(hash) % SKILL_TONES.length] ?? "purple";
+  return SKILL_TONES[hashName(name) % SKILL_TONES.length] ?? "purple";
 }
 
 /** Card accent. Errors stay red; everything else is per-name, not per-scope. */
 export function itemTone(item: DrawerItem): SkillTone {
   if (isDrawerItemError(item)) return "red";
-  return COLOR_BY_NAME[item.name] ?? hashTone(item.name);
+  return COLOR_BY_NAME[item.name] ?? COLOR_BY_NAME[item.name.trim().toLowerCase()] ?? hashTone(item.name);
 }
 
 export function createPreviewDrawerItems(): DrawerItem[] {
@@ -100,6 +213,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       enabled: true,
       loaded: true,
       session: true,
+      used: true,
     },
     {
       kind: "skill",
@@ -111,6 +225,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       enabled: true,
       loaded: true,
       session: true,
+      used: true,
     },
     {
       kind: "skill",
@@ -144,6 +259,7 @@ export function createPreviewDrawerItems(): DrawerItem[] {
       enabled: true,
       loaded: true,
       session: true,
+      used: true,
       error: "SKILL.md 第 42 行 frontmatter 缺 summary",
     },
     {
@@ -197,12 +313,16 @@ export function isDrawerItemEnabled(item: DrawerItem): boolean {
 }
 
 /**
- * Drawer「加入态」: the skill was used in the current conversation (`session`),
- * not merely present in configured inventory. Plugins stay session-loaded.
+ * Drawer「加入态」: the skill is in the current composer draft (`session` in
+ * preview fixtures). Plugins stay session-loaded.
  */
 export function isDrawerItemAdded(item: DrawerItem): boolean {
   if (item.kind === "skill") return item.session;
   return isDrawerItemEnabled(item);
+}
+
+export function isDrawerItemUsed(item: DrawerItem): boolean {
+  return item.kind === "skill" && item.used === true;
 }
 
 export function isDrawerItemError(item: DrawerItem): boolean {

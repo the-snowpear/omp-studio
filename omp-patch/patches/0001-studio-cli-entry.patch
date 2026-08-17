@@ -1,0 +1,432 @@
+diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
+index 7e73dea..214413c 100644
+--- a/packages/coding-agent/package.json
++++ b/packages/coding-agent/package.json
+@@ -506,6 +506,10 @@
+       "types": "./src/session/*.ts",
+       "import": "./src/session/*.ts"
+     },
++    "./studio/*": {
++      "types": "./src/studio/*.ts",
++      "import": "./src/studio/*.ts"
++    },
+     "./slash-commands/*": {
+       "types": "./src/slash-commands/*.ts",
+       "import": "./src/slash-commands/*.ts"
+diff --git a/packages/coding-agent/src/cli.ts b/packages/coding-agent/src/cli.ts
+index 237fe99..382dd6b 100755
+--- a/packages/coding-agent/src/cli.ts
++++ b/packages/coding-agent/src/cli.ts
+@@ -397,6 +397,14 @@ export async function runCli(argv: string[]): Promise<void> {
+ 		await runSmokeTest();
+ 		return;
+ 	}
++	// Hidden Studio archived-session telemetry probe: must stay ahead of
++	// command/launch dispatch so the request JSON on stdin is never treated as
++	// a prompt, and must never appear in public help output.
++	if (resolvedArgv[0] === "--studio-session-telemetry-probe") {
++		const { runStudioSessionTelemetryProbe } = await import("./studio/session-telemetry-probe");
++		process.exitCode = await runStudioSessionTelemetryProbe();
++		return;
++	}
+ 	const [{ run }, { commands, resolveCliArgv }] = await Promise.all([
+ 		import("@oh-my-pi/pi-utils/cli"),
+ 		import("./cli-commands"),
+diff --git a/packages/coding-agent/src/cli/args.ts b/packages/coding-agent/src/cli/args.ts
+index f8785e8..4da9607 100644
+--- a/packages/coding-agent/src/cli/args.ts
++++ b/packages/coding-agent/src/cli/args.ts
+@@ -20,7 +20,7 @@ import { CliUsageError } from "./usage-error";
+ 
+ export { getExtraHelpText };
+ 
+-export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui";
++export type Mode = "text" | "json" | "rpc" | "acp" | "rpc-ui" | "studio-host";
+ 
+ export interface Args {
+ 	cwd?: string;
+@@ -55,6 +55,9 @@ export interface Args {
+ 	help?: boolean;
+ 	version?: boolean;
+ 	mode?: Mode;
++	bridgeEndpoint?: string;
++	bridgeTokenFile?: string;
++	bridgeRuntimeEpoch?: number;
+ 	noSession?: boolean;
+ 	sessionDir?: string;
+ 	providerSessionId?: string;
+diff --git a/packages/coding-agent/src/cli/flag-tables.ts b/packages/coding-agent/src/cli/flag-tables.ts
+index e0af25d..a3546a5 100644
+--- a/packages/coding-agent/src/cli/flag-tables.ts
++++ b/packages/coding-agent/src/cli/flag-tables.ts
+@@ -105,6 +105,14 @@ function parseMaxTimeSeconds(value: string): number {
+ 	);
+ }
+ 
++function parseBridgeRuntimeEpoch(value: string): number {
++	const epoch = Number(value);
++	if (Number.isSafeInteger(epoch) && epoch > 0) return epoch;
++	throw new CliUsageError(
++		`Invalid --bridge-runtime-epoch value: ${JSON.stringify(value)}. Expected a positive safe integer.`,
++	);
++}
++
+ /**
+  * Setters for flags with string values. Most built-ins consume the next argv
+  * token even when it starts with `-`; flags listed in
+@@ -122,10 +130,26 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+ 		result.addDir = [...(result.addDir ?? []), value];
+ 	},
+ 	"--mode": (result, value) => {
+-		if (value === "text" || value === "json" || value === "rpc" || value === "acp" || value === "rpc-ui") {
++		if (
++			value === "text" ||
++			value === "json" ||
++			value === "rpc" ||
++			value === "acp" ||
++			value === "rpc-ui" ||
++			value === "studio-host"
++		) {
+ 			result.mode = value;
+ 		}
+ 	},
++	"--bridge-endpoint": (result, value) => {
++		result.bridgeEndpoint = value;
++	},
++	"--bridge-token-file": (result, value) => {
++		result.bridgeTokenFile = value;
++	},
++	"--bridge-runtime-epoch": (result, value) => {
++		result.bridgeRuntimeEpoch = parseBridgeRuntimeEpoch(value);
++	},
+ 	"--fork": (result, value) => {
+ 		result.fork = value;
+ 	},
+diff --git a/packages/coding-agent/src/commands/launch-help.ts b/packages/coding-agent/src/commands/launch-help.ts
+index 98a9ea4..83a140e 100644
+--- a/packages/coding-agent/src/commands/launch-help.ts
++++ b/packages/coding-agent/src/commands/launch-help.ts
+@@ -40,8 +40,17 @@ export const launchHelp = {
+ 		alias: Flags.string({ description: "Create a shell shortcut for the selected profile and exit" }),
+ 		cwd: Flags.string({ description: "Directory to start in (overrides the launch cwd)" }),
+ 		mode: Flags.string({
+-			description: "Output mode: text (default), json, rpc, or rpc-ui",
+-			options: ["text", "json", "rpc", "acp", "rpc-ui"],
++			description: "Output mode: text (default), json, rpc, acp, rpc-ui, or studio-host",
++			options: ["text", "json", "rpc", "acp", "rpc-ui", "studio-host"],
++		}),
++		"bridge-endpoint": Flags.string({
++			description: "Studio Bridge endpoint (transport is enabled by the Studio host protocol patch)",
++		}),
++		"bridge-token-file": Flags.string({
++			description: "Studio Bridge authentication token file",
++		}),
++		"bridge-runtime-epoch": Flags.string({
++			description: "Positive Thread epoch assigned to this Studio Runtime process",
+ 		}),
+ 		config: Flags.string({
+ 			description: "Load an extra config.yml-style overlay for this run (repeatable)",
+diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
+index c9de644..4e26eda 100644
+--- a/packages/coding-agent/src/main.ts
++++ b/packages/coding-agent/src/main.ts
+@@ -83,15 +83,22 @@ import {
+ 	persistForeignSession,
+ } from "./session/foreign-session-import";
+ import type { ForeignSessionInfo, ForeignSessionSource, ForeignSessionStore } from "./session/foreign-session-store";
++import { STUDIO_HOST_SESSION_ORIGIN } from "./session/session-entries";
+ import { resolveResumableSession, type SessionInfo } from "./session/session-listing";
+ import { SessionManager } from "./session/session-manager";
+ import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
+ import { shouldShowStartupSplash } from "./startup-splash";
++import type { StudioLoopService } from "./studio/services/loop-service";
++import type { StudioModeControlService } from "./studio/services/mode-control-service";
++import type { StudioHostRuntime } from "./studio/studio-host-mode";
++import { runStudioHostMode as defaultRunStudioHostMode, type RunStudioHostMode } from "./studio/studio-host-mode";
+ import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
++import { createMCPProxyTools } from "./task/executor";
+ import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
+ import { createTelemetryExportConfig, initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
+ import { concreteThinkingLevel, parseConfiguredThinkingLevel } from "./thinking";
+ import type { LspStartupServerInfo } from "./tools";
++import type { ToolUiFactory } from "./tools/context";
+ import { getChangelogPath, resolveStartupChangelogForDisplay, type StartupChangelogSelection } from "./utils/changelog";
+ import { EventBus } from "./utils/event-bus";
+ import { withTimeoutSignal } from "./utils/fetch-timeout";
+@@ -100,7 +107,7 @@ type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
+ type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<void>;
+ type RunRpcMode = (
+ 	session: AgentSession,
+-	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
++	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void,
+ 	eventBus?: EventBus,
+ 	input?: ReadableStream<Uint8Array>,
+ ) => Promise<never>;
+@@ -447,7 +454,7 @@ async function runInteractiveMode(
+ 	notifs: (InteractiveModeNotify | null)[],
+ 	versionCheckPromise: Promise<string | undefined>,
+ 	initialMessages: string[],
+-	setExtensionUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
++	setExtensionUIContext: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void,
+ 	lspServers: LspStartupServerInfo[] | undefined,
+ 	mcpManager: MCPManager | undefined,
+ 	resuming: boolean,
+@@ -457,6 +464,9 @@ async function runInteractiveMode(
+ 	initialMessage?: string,
+ 	initialImages?: ImageContent[],
+ 	joinLink?: string,
++	studioLoopService?: StudioLoopService,
++	studioModeService?: StudioModeControlService,
++	studioShutdownRequested?: Promise<void>,
+ ): Promise<void> {
+ 	const mode = new InteractiveMode(
+ 		session,
+@@ -466,6 +476,8 @@ async function runInteractiveMode(
+ 		lspServers,
+ 		mcpManager,
+ 		eventBus,
++		studioLoopService,
++		studioModeService,
+ 	);
+ 
+ 	// Cold-launch gate: the full setup wizard (every scene + the overlay and
+@@ -561,8 +573,20 @@ async function runInteractiveMode(
+ 	}
+ 
+ 	while (true) {
+-		const input = await mode.getUserInput();
+-		await submitInteractiveInput(mode, session, input);
++		if (studioShutdownRequested === undefined) {
++			const input = await mode.getUserInput();
++			await submitInteractiveInput(mode, session, input);
++			continue;
++		}
++		const next = await Promise.race([
++			mode.getUserInput().then(input => ({ kind: "input" as const, input })),
++			studioShutdownRequested.then(() => ({ kind: "shutdown" as const })),
++		]);
++		if (next.kind === "shutdown") {
++			await mode.shutdown();
++			return;
++		}
++		await submitInteractiveInput(mode, session, next.input);
+ 	}
+ }
+ 
+@@ -752,13 +776,14 @@ export async function createSessionManager(
+ 	activeSettings: Settings = settings,
+ 	askToMoveSession: SessionPrompt = promptMoveSession,
+ ): Promise<SessionManager | undefined> {
++	const studioOrigin = parsed.mode === "studio-host" ? STUDIO_HOST_SESSION_ORIGIN : undefined;
+ 	if (parsed.fork) {
+ 		if (parsed.noSession) {
+ 			throw new SessionResolutionError("--fork requires session persistence");
+ 		}
+ 		const forkSource = parsed.fork;
+ 		if (forkSource.includes("/") || forkSource.includes("\\") || forkSource.endsWith(".jsonl")) {
+-			return await SessionManager.forkFrom(forkSource, cwd, parsed.sessionDir);
++			return await SessionManager.forkFrom(forkSource, cwd, parsed.sessionDir, undefined, { studioOrigin });
+ 		}
+ 		const match = await resolveResumableSession(forkSource, cwd, parsed.sessionDir);
+ 		if (!match) {
+@@ -767,7 +792,7 @@ export async function createSessionManager(
+ 				"Run `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.",
+ 			);
+ 		}
+-		return await SessionManager.forkFrom(match.session.path, cwd, parsed.sessionDir);
++		return await SessionManager.forkFrom(match.session.path, cwd, parsed.sessionDir, undefined, { studioOrigin });
+ 	}
+ 
+ 	if (parsed.noSession) {
+@@ -820,26 +845,26 @@ export async function createSessionManager(
+ 		return await SessionManager.open(match.session.path, parsed.sessionDir);
+ 	}
+ 	if (parsed.continue) {
+-		return await SessionManager.continueRecent(cwd, parsed.sessionDir);
++		return await SessionManager.continueRecent(cwd, parsed.sessionDir, undefined, { studioOrigin });
+ 	}
+ 	// --resume without value is handled separately (needs picker UI)
+ 	// If --session-dir provided without --continue/--resume, create new session there
+ 	if (parsed.sessionDir) {
+-		return SessionManager.create(cwd, parsed.sessionDir);
++		return SessionManager.create(cwd, parsed.sessionDir, undefined, { studioOrigin });
+ 	}
+ 	// Auto-resume: behave like --continue if the setting is enabled and a prior
+ 	// session exists. When a prior session is resumed, mark parsed.continue so
+ 	// buildSessionOptions restores the session's model/thinking instead of
+ 	// overriding them with CLI defaults.
+ 	if (activeSettings.get("autoResume")) {
+-		const manager = await SessionManager.continueRecent(cwd, parsed.sessionDir);
++		const manager = await SessionManager.continueRecent(cwd, parsed.sessionDir, undefined, { studioOrigin });
+ 		if (manager.getEntries().length > 0) {
+ 			parsed.continue = true;
+ 		}
+ 		return manager;
+ 	}
+-	// Default case (new session) returns undefined, SDK will create one
+-	return undefined;
++	// Default Studio startup creates the manager here so its first header carries the origin marker.
++	return studioOrigin ? SessionManager.create(cwd, parsed.sessionDir, undefined, { studioOrigin }) : undefined;
+ }
+ 
+ /** Discover SYSTEM.md file if no CLI system prompt was provided */
+@@ -1186,6 +1211,7 @@ interface RunRootCommandDependencies {
+ 	discoverAuthStorage?: typeof discoverAuthStorage;
+ 	selectSession?: typeof selectSession;
+ 	runAcpMode?: RunAcpMode;
++	runStudioHostMode?: RunStudioHostMode;
+ 	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
+ 	settings?: Settings;
+ 	forceSetupWizard?: boolean;
+@@ -1234,6 +1260,10 @@ export async function runRootCommand(
+ 		process.exit(1);
+ 	}
+ 	const mode = parsedArgs.mode || "text";
++	if (mode === "studio-host" && parsedArgs.print) {
++		process.stderr.write(`${chalk.red("Error: --print is not supported in studio-host mode")}\n`);
++		process.exit(1);
++	}
+ 	// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
+ 	const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
+ 
+@@ -1268,10 +1298,11 @@ export async function runRootCommand(
+ 	// session-critical database connection picks the right busy timeout.
+ 	// See getDbBusyTimeoutMs().
+ 	const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
++	const isStudioHost = mode === "studio-host";
+ 	// Protocol modes own stdin; treating it as prompt text would consume JSON-RPC frames before their transports start.
+-	const pipedInput = isProtocolMode ? undefined : await logger.time("readPipedInput", readPipedInput);
++	const pipedInput = isProtocolMode || isStudioHost ? undefined : await logger.time("readPipedInput", readPipedInput);
+ 	const autoPrint = pipedInput !== undefined && !parsedArgs.print && parsedArgs.mode === undefined;
+-	const isInteractive = !parsedArgs.print && !autoPrint && parsedArgs.mode === undefined;
++	const isInteractive = !parsedArgs.print && !autoPrint && (parsedArgs.mode === undefined || isStudioHost);
+ 	// Only the interactive host renders a focusable Agent Hub / subagent session
+ 	// tree; declare it so headless subagent optimizations (e.g. skipping replan
+ 	// title refresh) can tell a focusable process from a print/RPC/eval one.
+@@ -1438,6 +1469,9 @@ export async function runRootCommand(
+ 		}
+ 		throw error;
+ 	}
++	if (isStudioHost && sessionManager) {
++		sessionManager.setNewSessionStudioOrigin(STUDIO_HOST_SESSION_ORIGIN);
++	}
+ 
+ 	if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager) {
+ 		const previousCwd = cwd;
+@@ -1755,25 +1789,57 @@ export async function runRootCommand(
+ 
+ 			stopStartupWatchdog();
+ 			logger.endTiming();
+-			await runInteractiveMode(
+-				session,
+-				VERSION,
+-				startupChangelog,
+-				notifs,
+-				versionCheckPromise,
+-				initialArgs.messages,
+-				setToolUIContext,
+-				lspServers,
+-				mcpManager,
+-				Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
+-				deps.forceSetupWizard === true,
+-				showStartupSplash,
+-				eventBus,
+-				initialMessage,
+-				initialImages,
+-				parsedArgs.join,
+-			);
+-		} else {
++			const runTui = (runtime?: StudioHostRuntime) => {
++				// The desktop Host owns the UI. In a non-TTY launch, starting the
++				// interactive editor makes the Runtime treat stdin as an interrupt
++				// source and exit with code 129 immediately after the Bridge handshake.
++				// Keep the Bridge process alive until the desktop sends shutdown.
++				if (isStudioHost && runtime !== undefined && !(process.stdin.isTTY && process.stdout.isTTY)) {
++					return runtime.waitForShutdown().then(async () => {
++						await session.dispose();
++						await postmortem.quit(0);
++					});
++				}
++				return runInteractiveMode(
++					session,
++					VERSION,
++					startupChangelog,
++					notifs,
++					versionCheckPromise,
++					initialArgs.messages,
++					setToolUIContext,
++					lspServers,
++					mcpManager,
++					Boolean(parsedArgs.continue || parsedArgs.resume || parsedArgs.fork || foreignSource),
++					deps.forceSetupWizard === true,
++					showStartupSplash,
++					eventBus,
++					initialMessage,
++					initialImages,
++					parsedArgs.join,
++					runtime?.services.loop,
++					runtime?.services.modes,
++					runtime?.waitForShutdown(),
++				);
++			};
++			if (isStudioHost) {
++				await (deps.runStudioHostMode ?? defaultRunStudioHostMode)(
++					session,
++					{
++						endpoint: parsedArgs.bridgeEndpoint,
++						tokenFile: parsedArgs.bridgeTokenFile,
++						runtimeEpoch: parsedArgs.bridgeRuntimeEpoch,
++					},
++					runTui,
++					{
++						tanCustomTools: mcpManager ? createMCPProxyTools(mcpManager) : undefined,
++						setToolUIContext,
++					},
++				);
++			} else {
++				await runTui();
++			}
++		} else if (mode === "text" || mode === "json") {
+ 			// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
+ 			stopStartupWatchdog();
+ 			const runPrintMode: RunPrintMode = (await import("./modes/print-mode")).runPrintMode;
+@@ -1790,6 +1856,8 @@ export async function runRootCommand(
+ 			await session.dispose();
+ 			stopThemeWatcher();
+ 			await postmortem.quit(0);
++		} else {
++			throw new Error(`Unsupported non-interactive mode: ${mode}`);
+ 		}
+ 	}
+ }
+diff --git a/packages/coding-agent/test/main-host-classification.test.ts b/packages/coding-agent/test/main-host-classification.test.ts
+index d982d85..9124673 100644
+--- a/packages/coding-agent/test/main-host-classification.test.ts
++++ b/packages/coding-agent/test/main-host-classification.test.ts
+@@ -25,3 +25,26 @@ it("classifies an interactive host before opening auth storage", async () => {
+ 
+ 	expect(observedTimeout).toBe(5000);
+ });
++
++it("classifies studio-host as an interactive host before opening auth storage", async () => {
++	const previous = setInteractiveHost(false);
++	const stop = new Error("stop after studio-host classification");
++	let observedTimeout: number | undefined;
++	const parsed = parseArgs(["--mode", "studio-host"]);
++	parsed.noExtensions = true;
++
++	try {
++		await expect(
++			runRootCommand(parsed, ["--mode", "studio-host"], {
++				discoverAuthStorage: async () => {
++					observedTimeout = getDbBusyTimeoutMs();
++					throw stop;
++				},
++			}),
++		).rejects.toBe(stop);
++	} finally {
++		setInteractiveHost(previous);
++	}
++
++	expect(observedTimeout).toBe(5000);
++});

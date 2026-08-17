@@ -1,0 +1,698 @@
+diff --git a/packages/coding-agent/src/plan-mode/approved-plan.ts b/packages/coding-agent/src/plan-mode/approved-plan.ts
+index f4f36c2..5d2b05f 100644
+--- a/packages/coding-agent/src/plan-mode/approved-plan.ts
++++ b/packages/coding-agent/src/plan-mode/approved-plan.ts
+@@ -10,6 +10,7 @@ export interface PlanApprovalDetails {
+ 	planFilePath: string;
+ 	title: string;
+ 	planExists: boolean;
++	planContent?: string;
+ }
+ 
+ /** Validate and normalize the agent-supplied plan title into a safe filename stem.
+diff --git a/packages/coding-agent/src/registry/agent-registry.ts b/packages/coding-agent/src/registry/agent-registry.ts
+index 500aef6..71e238d 100644
+--- a/packages/coding-agent/src/registry/agent-registry.ts
++++ b/packages/coding-agent/src/registry/agent-registry.ts
+@@ -91,6 +91,7 @@ export type RegistryEvent =
+ 	| { type: "registered"; ref: AgentRef }
+ 	| { type: "status_changed"; ref: AgentRef }
+ 	| { type: "metadata_changed"; ref: AgentRef }
++	| { type: "session_changed"; ref: AgentRef; previousSession: AgentSession | null }
+ 	| { type: "removed"; ref: AgentRef };
+ 
+ type RegistryListener = (event: RegistryEvent) => void;
+@@ -198,8 +199,7 @@ export class AgentRegistry {
+ 	/**
+ 	 * Record a short activity gist for the work-aware roster. Display-only and
+ 	 * read on demand (`irc list`, peer roster), so it emits no event — keeping
+-	 * the per-tool-call update rate off the registry listener path (same as
+-	 * `attachSession`, which also bumps `lastActivity` without emitting). Only a
++	 * the per-tool-call update rate off the registry listener path. Only a
+ 	 * `running` agent has current work: a heartbeat for any other status is
+ 	 * dropped, so a late progress flush can't resurrect activity on a ref that
+ 	 * `setStatus` just cleared. Every running heartbeat refreshes `lastActivity`
+@@ -230,16 +230,20 @@ export class AgentRegistry {
+ 		// closes the race between a parked reviver claiming the ref and finishing
+ 		// createAgentSession after an explicit kill.
+ 		if (!ref || ref.status === "aborted" || !this.#matchesExpected(ref, expected)) return false;
++		const previousSession = ref.session;
+ 		ref.session = session;
+ 		if (sessionFile !== undefined) ref.sessionFile = sessionFile;
+ 		ref.lastActivity = Date.now();
++		this.#emit({ type: "session_changed", ref, previousSession });
+ 		return true;
+ 	}
+ 
+ 	detachSession(id: string, expected?: AgentRefExpectation): boolean {
+ 		const ref = this.#refs.get(id);
+ 		if (!ref || !this.#matchesExpected(ref, expected)) return false;
++		const previousSession = ref.session;
+ 		ref.session = null;
++		this.#emit({ type: "session_changed", ref, previousSession });
+ 		return true;
+ 	}
+ 
+diff --git a/packages/coding-agent/src/session/agent-session-types.ts b/packages/coding-agent/src/session/agent-session-types.ts
+index b424eb2..332cc3c 100644
+--- a/packages/coding-agent/src/session/agent-session-types.ts
++++ b/packages/coding-agent/src/session/agent-session-types.ts
+@@ -36,6 +36,7 @@ import type { SecretObfuscator } from "../secrets/obfuscator";
+ import type { ConfiguredThinkingLevel } from "../thinking";
+ import type { XdevState } from "../tools/xdev";
+ import type { CodexAutoRedeemCoordinator } from "./codex-auto-reset";
++import type { CustomMessage } from "./messages";
+ import type { SessionManager } from "./session-manager";
+ 
+ /** Maximum time the interactive shutdown path waits for Mnemopi consolidation. */
+@@ -302,6 +303,8 @@ export interface PromptOptions {
+ 	attribution?: MessageAttribution;
+ 	/** Skip pre-send compaction checks for this prompt. */
+ 	skipCompactionCheck?: boolean;
++	/** Messages injected ahead of the user message in the same turn. */
++	prependMessages?: CustomMessage[];
+ }
+ 
+ /** Options for AgentSession.followUp(). */
+diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
+index 6ccceb0..1673861 100644
+--- a/packages/coding-agent/src/session/agent-session.ts
++++ b/packages/coding-agent/src/session/agent-session.ts
+@@ -408,6 +408,8 @@ type ScheduledAgentContinueOptions = {
+ 	shouldContinue?: () => boolean;
+ 	onSkip?: (reason: AgentContinueSkipReason) => void;
+ 	onError?: (error: unknown) => void;
++	/** Studio deferred model/thinking: apply before draining queued user follow-ups. */
++	applyBeforeNextUserTurn?: boolean;
+ };
+ 
+ type SessionTitleSource = "auto" | "user";
+@@ -597,6 +599,7 @@ export class AgentSession {
+ 	readonly #loopGuards: LoopGuards;
+ 	#promptInFlightCount = 0;
+ 	#abortInProgress = false;
++	#beforeNextUserTurn: (() => Promise<void>) | undefined;
+ 	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
+ 	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
+ 	// checks in #handleAgentEvent) still fire on the original schedule — only the
+@@ -885,13 +888,22 @@ export class AgentSession {
+ 		return this.#prewalk.arm(target, thinkingLevel);
+ 	}
+ 
++	/** Clear an armed prewalk without switching models. */
++	disarmPrewalk(): boolean {
++		return this.#prewalk.disarm();
++	}
++
+ 	/** Validate the active plan artifact and shape an `xd://propose` result for review-mode hosts. */
+ 	async preparePlanForReview(title: string): Promise<AgentToolResult<PlanApprovalDetails>> {
+ 		const state = this.getPlanModeState();
+ 		if (!state?.enabled) {
+ 			throw new ToolError("Plan mode is not active.");
+ 		}
+-		const { planFilePath, title: resolvedTitle } = await resolveApprovedPlan({
++		const {
++			planFilePath,
++			title: resolvedTitle,
++			planContent,
++		} = await resolveApprovedPlan({
+ 			suppliedTitle: title,
+ 			statePlanFilePath: state.planFilePath,
+ 			readPlan: url => this.#readPlanFile(url),
+@@ -899,7 +911,7 @@ export class AgentSession {
+ 		});
+ 		return {
+ 			content: [{ type: "text", text: "Plan ready for review." }],
+-			details: { planFilePath, title: resolvedTitle, planExists: true },
++			details: { planFilePath, title: resolvedTitle, planExists: true, planContent },
+ 		};
+ 	}
+ 
+@@ -3019,7 +3031,7 @@ export class AgentSession {
+ 					return;
+ 				}
+ 			}
+-			if (signal.aborted) {
++			if (signal.aborted || this.#abortInProgress || this.#isDisposed) {
+ 				options?.onSkip?.("aborted");
+ 				return;
+ 			}
+@@ -3045,7 +3057,13 @@ export class AgentSession {
+ 				// streaming turn — agent.continue() here would race the handoff's session
+ 				// reset. The first-class fix is in #checkCompaction/the agent_end handler,
+ 				// but this guard catches anything that bypasses that path.
+-				if (signal.aborted || this.#isDisposed || this.isCompacting || this.isGeneratingHandoff) {
++				if (
++					signal.aborted ||
++					this.#isDisposed ||
++					this.#abortInProgress ||
++					this.isCompacting ||
++					this.isGeneratingHandoff
++				) {
+ 					this.#skipAgentContinue("session-unavailable", options);
+ 					return;
+ 				}
+@@ -3053,6 +3071,14 @@ export class AgentSession {
+ 					this.#skipAgentContinue("should-continue-false", options);
+ 					return;
+ 				}
++				if (options?.applyBeforeNextUserTurn) {
++					try {
++						await this.#runBeforeNextUserTurn();
++					} catch (error) {
++						options?.onError?.(error);
++						return;
++					}
++				}
+ 				this.#beginInFlight();
+ 				try {
+ 					const reverted = await this.#recovery.maybeRestoreRetryFallbackPrimary();
+@@ -3110,6 +3136,7 @@ export class AgentSession {
+ 				delayMs: 100,
+ 				generation: options.generation,
+ 				shouldContinue: () => this.agent.hasQueuedMessages(),
++				applyBeforeNextUserTurn: true,
+ 			});
+ 			return true;
+ 		}
+@@ -3148,6 +3175,7 @@ export class AgentSession {
+ 					this.#scheduleAgentContinue({
+ 						generation,
+ 						shouldContinue: () => this.agent.hasQueuedMessages(),
++						applyBeforeNextUserTurn: true,
+ 					});
+ 					return;
+ 				}
+@@ -3510,6 +3538,19 @@ export class AgentSession {
+ 		}
+ 	}
+ 
++	/**
++	 * Hosts such as Studio apply deferred session model/thinking changes here.
++	 * Invoked at the start of the next user prompt, queued follow-up drain, or
++	 * manual retry — not on 503 auto-retry `agent.continue()`.
++	 */
++	setBeforeNextUserTurn(hook: (() => Promise<void>) | undefined): void {
++		this.#beforeNextUserTurn = hook;
++	}
++
++	async #runBeforeNextUserTurn(): Promise<void> {
++		await this.#beforeNextUserTurn?.();
++	}
++
+ 	/**
+ 	 * Subscribe to agent events.
+ 	 * Session persistence is handled internally (saves messages on message_end).
+@@ -5109,6 +5150,9 @@ export class AgentSession {
+ 			const streamingBehavior = options?.streamingBehavior;
+ 			if (!streamingBehavior) throw new AgentBusyError();
+ 
++			for (const prelude of options?.prependMessages ?? []) {
++				await this.#queueCustomMessage(prelude, streamingBehavior);
++			}
+ 			// Steer/follow-up the keyword notices BEFORE the queued user message so the
+ 			// model reads the steering notice ahead of the prompt it modifies.
+ 			for (const notice of keywordNotices) {
+@@ -5159,13 +5203,16 @@ export class AgentSession {
+ 		}
+ 
+ 		try {
++			const injected = [
++				...(options?.prependMessages ?? []),
++				...preludeMessages,
++				...keywordNotices,
++				...(imageDescriptionNotice ? [imageDescriptionNotice] : []),
++			];
+ 			await this.#promptWithMessage(message, expandedText, {
+ 				...options,
+ 				images: normalizedImages,
+-				prependMessages:
+-					preludeMessages.length > 0 || keywordNotices.length > 0 || imageDescriptionNotice
+-						? [...preludeMessages, ...keywordNotices, ...(imageDescriptionNotice ? [imageDescriptionNotice] : [])]
+-						: undefined,
++				prependMessages: injected.length > 0 ? injected : undefined,
+ 			});
+ 		} finally {
+ 			// Clean up residual eager-todo directive if the prompt never consumed it
+@@ -5246,6 +5293,9 @@ export class AgentSession {
+ 			acceptTerminalEmptyStop?: boolean;
+ 		},
+ 	): Promise<void> {
++		if (message.role === "user") {
++			await this.#runBeforeNextUserTurn();
++		}
+ 		this.#beginInFlight();
+ 		const generation = this.#promptGeneration;
+ 		try {
+@@ -5731,6 +5781,7 @@ export class AgentSession {
+ 		}
+ 		this.#queuedMessageDrainScheduled = true;
+ 		this.#scheduleAgentContinue({
++			applyBeforeNextUserTurn: true,
+ 			shouldContinue: () => {
+ 				this.#queuedMessageDrainScheduled = false;
+ 				return this.#canAutoContinueForFollowUp() && this.agent.hasQueuedMessages();
+@@ -7126,7 +7177,10 @@ export class AgentSession {
+ 	}
+ 
+ 	/** Retry the last failed assistant turn when the session is idle. */
+-	retry(): Promise<boolean> {
++	async retry(): Promise<boolean> {
++		if (!this.isStreaming && !this.isCompacting) {
++			await this.#runBeforeNextUserTurn();
++		}
+ 		return this.#recovery.retry();
+ 	}
+ 
+diff --git a/packages/coding-agent/src/session/prewalk.ts b/packages/coding-agent/src/session/prewalk.ts
+index bd361ba..0c9176c 100644
+--- a/packages/coding-agent/src/session/prewalk.ts
++++ b/packages/coding-agent/src/session/prewalk.ts
+@@ -203,6 +203,13 @@ export class PrewalkCoordinator {
+ 		});
+ 	}
+ 
++	/** Clears an armed prewalk without switching models. */
++	disarm(): boolean {
++		if (!this.#prewalk) return false;
++		this.#clearPrewalkState();
++		return true;
++	}
++
+ 	/** Arms a prewalk immediately for an explicit slash-command request. */
+ 	arm(target: Model, thinkingLevel?: ConfiguredThinkingLevel): boolean {
+ 		const active = this.#prewalk;
+diff --git a/packages/coding-agent/src/session/session-entries.ts b/packages/coding-agent/src/session/session-entries.ts
+index 36c6277..bec8fcb 100644
+--- a/packages/coding-agent/src/session/session-entries.ts
++++ b/packages/coding-agent/src/session/session-entries.ts
+@@ -10,6 +10,10 @@ export const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";
+ 
+ export const TITLE_CHANGE_ENTRY_TYPE = "title_change";
+ 
++export const STUDIO_HOST_SESSION_ORIGIN = "studio-host";
++
++export type StudioSessionOrigin = typeof STUDIO_HOST_SESSION_ORIGIN;
++
+ export type SessionTitleSource = "auto" | "user";
+ 
+ /** Fixed-width first-line slot carrying the mutable current session title. */
+@@ -43,6 +47,8 @@ export interface SessionHeader {
+ 	previousSessionFiles?: string[];
+ 	/** Provider prompt-cache identity inherited by exact-route full forks. */
+ 	providerPromptCacheKey?: string;
++	/** Optional creation marker ignored by unpatched OMP readers. */
++	studioOrigin?: StudioSessionOrigin;
+ }
+ 
+ export interface NewSessionOptions {
+@@ -53,6 +59,8 @@ export interface NewSessionOptions {
+ 	drop?: boolean;
+ 	/** Additional workspace directories to seed on the new session. */
+ 	additionalDirectories?: string[];
++	/** Creation marker for a fresh session; never applied while opening an existing session. */
++	studioOrigin?: StudioSessionOrigin;
+ }
+ 
+ export interface SessionEntryBase {
+diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
+index dfe6955..c32a9f3 100644
+--- a/packages/coding-agent/src/session/session-manager.ts
++++ b/packages/coding-agent/src/session/session-manager.ts
+@@ -52,6 +52,7 @@ import {
+ 	type SessionMessageEntry,
+ 	type SessionTitleSource,
+ 	type SessionTreeNode,
++	type StudioSessionOrigin,
+ 	type ThinkingLevelChangeEntry,
+ 	TITLE_CHANGE_ENTRY_TYPE,
+ 	type TitleChangeEntry,
+@@ -441,6 +442,9 @@ export class SessionManager {
+ 	#hasTitleSlot = true;
+ 	#entries: SessionEntry[] = [];
+ 	#index = new SessionEntryIndex();
++	#reservedMessageIds: Array<{ role: "user" | "assistant" | "system"; id: string }> = [];
++	#reservedCompactionIds: string[] = [];
++	#reservedMessageIdSet = new Set<string>();
+ 
+ 	/** File reflects all current entries; appends can go incrementally. */
+ 	#fileIsCurrent = false;
+@@ -515,6 +519,8 @@ export class SessionManager {
+ 	 * back to the most-recent session instead of being treated as a fresh crumb.
+ 	 */
+ 	#breadcrumbFresh = false;
++	/** Creation marker inherited by future `/new` sessions without mutating the currently opened header. */
++	#newSessionStudioOrigin: StudioSessionOrigin | undefined;
+ 	#sessionNameChangedCallbacks = new Set<() => void>();
+ 
+ 	private constructor(cwd: string, sessionDir: string, persist: boolean, storage: SessionStorage) {
+@@ -1043,6 +1049,8 @@ export class SessionManager {
+ 			parentSession: options?.parentSession,
+ 			providerPromptCacheKey: options?.providerPromptCacheKey,
+ 		};
++		const studioOrigin = options?.studioOrigin ?? this.#newSessionStudioOrigin;
++		if (studioOrigin) this.#header.studioOrigin = studioOrigin;
+ 		const workspace = normalizeSessionWorkspace({
+ 			cwd: this.#cwd,
+ 			directories: options?.additionalDirectories ?? [],
+@@ -1055,6 +1063,7 @@ export class SessionManager {
+ 
+ 		this.#entries = [];
+ 		this.#index.clear();
++		this.clearReservedMessageIds();
+ 		this.#fileIsCurrent = false;
+ 		this.#rewriteRequired = false;
+ 		this.#forceFileCreation = false;
+@@ -1089,16 +1098,80 @@ export class SessionManager {
+ 		this.#titleSource = header.titleSource;
+ 		this.#titleUpdatedAt = header.timestamp;
+ 		this.#index.rebuild(entries);
++		this.clearReservedMessageIds();
++	}
++
++	#occupiedIds(): { has(id: string): boolean } {
++		return { has: id => this.#index.has(id) || this.#reservedMessageIdSet.has(id) };
++	}
++
++	#nextId(): string {
++		return generateId(this.#occupiedIds());
++	}
++
++	#takeReservedMessageId(role: "user" | "assistant" | "system"): string | undefined {
++		const index = this.#reservedMessageIds.findIndex(item => item.role === role);
++		if (index < 0) return undefined;
++		const [reserved] = this.#reservedMessageIds.splice(index, 1);
++		this.#reservedMessageIdSet.delete(reserved.id);
++		return reserved.id;
+ 	}
+ 
+ 	#freshEntryFields(): { id: string; parentId: string | null; timestamp: string } {
+ 		return {
+-			id: generateId(this.#index),
++			id: this.#nextId(),
+ 			parentId: this.#index.leafId(),
+ 			timestamp: nowIso(),
+ 		};
+ 	}
+ 
++	/**
++	 * Reserve a SessionEntry id from the same `generateId` pool used by persist.
++	 * `appendMessage` for that role reuses the oldest matching reservation.
++	 */
++	reserveMessageId(role: "user" | "assistant" | "system"): string {
++		const id = this.#nextId();
++		this.#reservedMessageIdSet.add(id);
++		this.#reservedMessageIds.push({ role, id });
++		return id;
++	}
++
++	/** Allocate an entry id without enqueueing it for `appendMessage`. */
++	allocateEntryId(): string {
++		return this.#nextId();
++	}
++
++	/**
++	 * Reserve a SessionEntry id for a forthcoming `appendCompaction`.
++	 * Does not consume the message-id FIFO.
++	 */
++	reserveCompactionId(): string {
++		const id = this.#nextId();
++		this.#reservedMessageIdSet.add(id);
++		this.#reservedCompactionIds.push(id);
++		return id;
++	}
++
++	releaseCompactionId(id: string): void {
++		const index = this.#reservedCompactionIds.indexOf(id);
++		if (index < 0) return;
++		this.#reservedCompactionIds.splice(index, 1);
++		this.#reservedMessageIdSet.delete(id);
++	}
++
++	#takeReservedCompactionId(): string | undefined {
++		const id = this.#reservedCompactionIds.shift();
++		if (id === undefined) return undefined;
++		this.#reservedMessageIdSet.delete(id);
++		return id;
++	}
++
++	clearReservedMessageIds(): void {
++		this.#reservedMessageIds.length = 0;
++		this.#reservedCompactionIds.length = 0;
++		this.#reservedMessageIdSet.clear();
++	}
++
+ 	#setLeaf(id: string | null): void {
+ 		this.#index.setLeaf(id);
+ 		const batch = this.#atomicEntryBatch;
+@@ -1879,6 +1952,10 @@ export class SessionManager {
+ 		return this.#sessionId;
+ 	}
+ 
++	setNewSessionStudioOrigin(origin: StudioSessionOrigin | undefined): void {
++		this.#newSessionStudioOrigin = origin;
++	}
++
+ 	getSessionFile(): string | undefined {
+ 		return this.#sessionFile;
+ 	}
+@@ -2050,7 +2127,15 @@ export class SessionManager {
+ 			| PythonExecutionMessage
+ 			| FileMentionMessage,
+ 	): string {
+-		const entry: SessionMessageEntry = { type: "message", ...this.#freshEntryFields(), message };
++		const role = message.role;
++		const reserved = role === "user" || role === "assistant" ? this.#takeReservedMessageId(role) : undefined;
++		const entry: SessionMessageEntry = {
++			type: "message",
++			...(reserved === undefined
++				? this.#freshEntryFields()
++				: { id: reserved, parentId: this.#index.leafId(), timestamp: nowIso() }),
++			message,
++		};
+ 		this.#recordEntry(entry);
+ 		return entry.id;
+ 	}
+@@ -2153,9 +2238,12 @@ export class SessionManager {
+ 		fromExtension?: boolean,
+ 		preserveData?: Record<string, unknown>,
+ 	): string {
++		const reserved = this.#takeReservedCompactionId();
+ 		const entry: CompactionEntry<T> = {
+ 			type: "compaction",
+-			...this.#freshEntryFields(),
++			...(reserved === undefined
++				? this.#freshEntryFields()
++				: { id: reserved, parentId: this.#index.leafId(), timestamp: nowIso() }),
+ 			summary,
+ 			shortSummary,
+ 			firstKeptEntryId,
+@@ -2494,10 +2582,16 @@ export class SessionManager {
+ 	 * @param cwd Working directory (stored in the session header)
+ 	 * @param sessionDir Optional session directory; defaults to the cwd-derived dir.
+ 	 */
+-	static create(cwd: string, sessionDir?: string, storage: SessionStorage = new FileSessionStorage()): SessionManager {
++	static create(
++		cwd: string,
++		sessionDir?: string,
++		storage: SessionStorage = new FileSessionStorage(),
++		options?: NewSessionOptions,
++	): SessionManager {
+ 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
+ 		const manager = new SessionManager(cwd, dir, true, storage);
+-		manager.#resetToNewSession();
++		manager.#newSessionStudioOrigin = options?.studioOrigin;
++		manager.#resetToNewSession(options);
+ 		return manager;
+ 	}
+ 
+@@ -2537,11 +2631,12 @@ export class SessionManager {
+ 		cwd: string,
+ 		sessionDir?: string,
+ 		storage: SessionStorage = new FileSessionStorage(),
+-		options?: { suppressBreadcrumb?: boolean; sessionFile?: string },
++		options?: { suppressBreadcrumb?: boolean; sessionFile?: string; studioOrigin?: StudioSessionOrigin },
+ 	): Promise<SessionManager> {
+ 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
+ 		const manager = new SessionManager(cwd, dir, true, storage);
+ 		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
++		manager.#newSessionStudioOrigin = options?.studioOrigin;
+ 
+ 		const sourceEntries = structuredClone(await loadEntriesFromFile(sourcePath, storage)) as FileEntry[];
+ 		migrateToCurrentVersion(sourceEntries);
+@@ -2553,6 +2648,7 @@ export class SessionManager {
+ 			{
+ 				parentSession: sourceHeader?.id,
+ 				providerPromptCacheKey: sourceHeader?.providerPromptCacheKey ?? sourceHeader?.id,
++				studioOrigin: options?.studioOrigin,
+ 			},
+ 			options?.sessionFile,
+ 		);
+@@ -2681,6 +2777,7 @@ export class SessionManager {
+ 		cwd: string,
+ 		sessionDir?: string,
+ 		storage: SessionStorage = new FileSessionStorage(),
++		options?: { studioOrigin?: StudioSessionOrigin },
+ 	): Promise<SessionManager> {
+ 		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
+ 		const resolvedCwd = path.resolve(cwd);
+@@ -2696,7 +2793,8 @@ export class SessionManager {
+ 			// exists=false only when fresh, so this never masks a real stale crumb.
+ 			if (breadcrumb.fresh && !breadcrumb.exists) {
+ 				const manager = new SessionManager(cwd, dir, true, storage);
+-				manager.#resetToNewSession();
++				manager.#newSessionStudioOrigin = options?.studioOrigin;
++				manager.#resetToNewSession({ studioOrigin: options?.studioOrigin });
+ 				return manager;
+ 			}
+ 
+@@ -2753,8 +2851,9 @@ export class SessionManager {
+ 		if (chosenSession === undefined) chosenSession = await findMostRecentSession(dir, storage);
+ 
+ 		const manager = new SessionManager(cwd, dir, true, storage);
++		manager.#newSessionStudioOrigin = options?.studioOrigin;
+ 		if (chosenSession) await manager.setSessionFile(chosenSession);
+-		else manager.#resetToNewSession();
++		else manager.#resetToNewSession({ studioOrigin: options?.studioOrigin });
+ 		return manager;
+ 	}
+ 
+diff --git a/packages/coding-agent/src/session/turn-recovery.ts b/packages/coding-agent/src/session/turn-recovery.ts
+index 3a05bcb..912d309 100644
+--- a/packages/coding-agent/src/session/turn-recovery.ts
++++ b/packages/coding-agent/src/session/turn-recovery.ts
+@@ -179,6 +179,8 @@ type UsageLimitOutcome = {
+ export class TurnRecovery {
+ 	readonly #host: TurnRecoveryHost;
+ 	#retryAbortController: AbortController | undefined;
++	/** Sticky cancel so abort wins even if the backoff controller is created after `abortRetry()`. */
++	#retryCancelled = false;
+ 	#retryAttempt = 0;
+ 	#retryPromise: Promise<void> | undefined;
+ 	#retryResolve: (() => void) | undefined;
+@@ -225,6 +227,7 @@ export class TurnRecovery {
+ 		this.#emptyStopRetryCount = 0;
+ 		this.#unexpectedStopRetryCount = 0;
+ 		this.#acceptTerminalEmptyStopForPrompt = false;
++		this.#retryCancelled = false;
+ 	}
+ 
+ 	/** Sets whether one terminal empty stop is accepted for the current prompt. */
+@@ -1574,6 +1577,7 @@ export class TurnRecovery {
+ 		// not a retry loop, so it runs even when the user disabled retries: it switches
+ 		// the model once and lets the base turn proceed.
+ 		if (!retrySettings.enabled && !options?.fireworksFastFallback) return false;
++		if (this.#retryCancelled || this.#host.abortInProgress() || this.#host.isDisposed()) return false;
+ 		const classifierRefusal = this.isClassifierRefusal(message);
+ 
+ 		const generation = this.#host.promptGeneration();
+@@ -1799,6 +1803,10 @@ export class TurnRecovery {
+ 
+ 		await this.#recordPendingRetryError(message, id, { switchedCredential, switchedModel, delayMs });
+ 
++		if (this.#retryWasCancelled(generation)) {
++			return await this.#abandonRetry({ announced: this.#retryAttempt > 1 });
++		}
++
+ 		await this.#host.emitSessionEvent({
+ 			type: "auto_retry_start",
+ 			attempt: this.#retryAttempt,
+@@ -1819,6 +1827,10 @@ export class TurnRecovery {
+ 		// pattern instead of re-sampling the same stalled reasoning.
+ 		this.#maybeInjectThinkingLoopRedirect(id);
+ 
++		if (this.#retryWasCancelled(generation)) {
++			return await this.#abandonRetry({ announced: true });
++		}
++
+ 		// Wait with exponential backoff (abortable).
+ 		const retryAbortController = new AbortController();
+ 		this.#retryAbortController?.abort();
+@@ -1829,24 +1841,16 @@ export class TurnRecovery {
+ 			if (this.#retryAbortController !== retryAbortController) {
+ 				return false;
+ 			}
+-			// Aborted during sleep - emit end event so UI can clean up
+-			const attempt = this.#retryAttempt;
+-			this.#retryAttempt = 0;
+-			this.#retryAbortController = undefined;
+-			await this.#host.emitSessionEvent({
+-				type: "auto_retry_end",
+-				success: false,
+-				attempt,
+-				finalError: "Retry cancelled",
+-			});
+-			this.#clearPendingRetryErrors();
+-			this.resolveRetry();
+-			return false;
++			return await this.#abandonRetry({ announced: true });
+ 		}
+ 		if (this.#retryAbortController === retryAbortController) {
+ 			this.#retryAbortController = undefined;
+ 		}
+ 
++		if (this.#retryWasCancelled(generation)) {
++			return await this.#abandonRetry({ announced: true });
++		}
++
+ 		// The identity-keyed removal above can miss when a context rebuild
+ 		// recreated the failed turn's message object between settle and retry
+ 		// (fresh identity, same failed tail — issue #5382). Agent.continue()
+@@ -1861,6 +1865,10 @@ export class TurnRecovery {
+ 			this.#stripFailedAssistantTail();
+ 		}
+ 
++		if (this.#retryWasCancelled(generation)) {
++			return await this.#abandonRetry({ announced: true });
++		}
++
+ 		// Retry via continue() outside the agent_end event callback chain. A
+ 		// continuation that still fails locally must close the retry saga —
+ 		// otherwise auto_retry_end never fires, retryPromise stays pending, and
+@@ -1949,11 +1957,37 @@ export class TurnRecovery {
+ 	 * Cancel in-progress retry.
+ 	 */
+ 	abortRetry(): void {
++		this.#retryCancelled = true;
+ 		this.#retryAbortController?.abort();
+-		// Note: _retryAttempt is reset in the catch block of _autoRetry
+ 		this.resolveRetry();
+ 	}
+ 
++	#retryWasCancelled(generation: number): boolean {
++		return (
++			this.#retryCancelled ||
++			this.#host.abortInProgress() ||
++			this.#host.isDisposed() ||
++			this.#host.promptGeneration() !== generation
++		);
++	}
++
++	async #abandonRetry(options: { announced: boolean }): Promise<false> {
++		const attempt = this.#retryAttempt;
++		this.#retryAttempt = 0;
++		this.#retryAbortController = undefined;
++		if (options.announced) {
++			await this.#host.emitSessionEvent({
++				type: "auto_retry_end",
++				success: false,
++				attempt,
++				finalError: "Retry cancelled",
++			});
++		}
++		this.#clearPendingRetryErrors();
++		this.resolveRetry();
++		return false;
++	}
++
+ 	async #promptAgentWithIdleRetry(messages: AgentMessage[], options?: { toolChoice?: ToolChoice }): Promise<void> {
+ 		const deadline = Date.now() + 30_000;
+ 		for (;;) {
+@@ -2026,6 +2060,7 @@ export class TurnRecovery {
+ 		}
+ 
+ 		// Reset retry budget for a fresh attempt
++		this.#retryCancelled = false;
+ 		this.#retryAttempt = 0;
+ 
+ 		// Re-attempt the turn

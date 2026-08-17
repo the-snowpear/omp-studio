@@ -462,8 +462,8 @@ export interface HostSemanticCommandService {
     | Promise<OperatorStateSnapshot | OperatorInvokeOutcome>;
   /**
    * Archive a thread: the Host moves the session JSONL (gzip) and artifacts
-   * into the OMP cold-archive tree, mirroring `omp gc`. Rejected while the
-   * session is resident in a Runtime. No Runtime snapshot is required.
+   * into the OMP cold-archive tree, mirroring `omp gc`. A live resident
+   * session is aborted (if streaming) and switched off the file first.
    */
   archive?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
   /** Restore an archived thread back into the active sessions tree. */

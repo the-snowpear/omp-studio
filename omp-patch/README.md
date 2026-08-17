@@ -2,14 +2,56 @@
 
 The v5 architecture pins `can1357/oh-my-pi` at commit `45e12e5bb758198a920c6070e7e64cb33b21beac` for the initial audited baseline.
 
-The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so patches can be generated and reviewed without mixing upstream files into the Studio repository.
+The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
 Executable names have separate responsibilities:
 
 - `omp.exe` is the patched OMP CLI/runtime and is launched as `omp --mode studio-host`;
 - `omp-studio.exe` is reserved for the future desktop Studio application and is not built by this backend-only phase.
 
-Before writing the first OMP source patch, run:
+## Two layers: overlay and seam
+
+Studio's changes to the pinned tree split by file ownership, not by feature or date.
+
+| Layer | Location | Contents | Size |
+|---|---|---|---|
+| Overlay | `overlay/` | Files upstream does not have at all: `packages/coding-agent/src/studio/**` and the `studio-*` tests | ~22,400 lines |
+| Seam | `patches/*.patch` | The only edits that touch upstream-owned files | ~960 lines |
+
+The overlay is ordinary tracked source in this repository. Editing it is an ordinary edit with an ordinary diff — no patch number, no apply/reverse cycle, and no rebase conflict when the pin moves, because upstream has nothing at those paths to conflict with. Only the seam is expressed as patches, and each patch is grouped by the upstream subsystem it touches, so an upstream bump maps to a small predictable set of refreshes:
+
+| Patch | Upstream subsystem |
+|---|---|
+| `0001-studio-cli-entry.patch` | `main.ts`, `cli.ts`, CLI arg/flag tables, launch help, package manifest |
+| `0002-studio-session-runtime.patch` | `session/**`, `registry/agent-registry.ts`, `plan-mode/approved-plan.ts` |
+| `0003-studio-modes-and-pause.patch` | `modes/**`, `slash-commands/builtin-modes.ts`, `async/job-manager.ts` |
+| `0004-studio-extensibility.patch` | `extensibility/extensions/**`, `sdk.ts`, `tools/context.ts` |
+
+`scripts/omp-seam.mjs` holds the authoritative path list for each group. Adding a seam file means adding it to a group there and rerunning the regen script — an upstream file that no group claims makes regeneration fail rather than silently dropping the edit.
+
+`packages/coding-agent/CHANGELOG.md` is deliberately excluded (`SEAM_EXCLUDED`). Fork-local changelog prose conflicts on every upstream release and carries no runtime behaviour; Studio's history lives in this repository.
+
+## Working loop
+
+Put the vendor tree into its working state, edit inside it, then capture the result back:
+
+```powershell
+npm run omp:overlay:apply    # overlay copied in + seam patches applied (idempotent)
+# ... edit under omp-patch/vendor/oh-my-pi ...
+npm run omp:patches:regen    # overlay captured back, seam patches rewritten, series.json updated
+```
+
+Never hand-write or hand-edit a `.patch`. Regeneration is the only supported producer; hand edits drift from the group definition and reintroduce the ordering problems this model removes.
+
+Verify the whole fork from a clean vendor tree:
+
+```powershell
+npm run omp:verify:patches
+```
+
+The verifier copies the overlay in, applies the seam patches in series order, runs the root and OMP source gates, then reverses the patches and removes the overlay in a `finally` cleanup. Beyond "it builds" it enforces two invariants: the overlay may not modify any upstream-tracked file (that would smuggle a seam change past review), and every seam patch must pass `git apply --check` before being applied. It intentionally does not rebuild the compiled host binary; milestone binary validation runs with the fork applied via `npm run omp:build:host`.
+
+Before the first source change against a fresh pin, both layers must be empty:
 
 ```powershell
 npm run omp:install-deps
@@ -17,59 +59,50 @@ npm run omp:build:host
 npm run omp:verify:prepatch
 ```
 
-After a patch is registered in `patches/series.json`, verify the complete series from a clean vendor tree:
+Never run `git submodule update` while the fork is applied, and never use root-wide `git add -A` while unrelated Studio/frontend work is present.
 
-```powershell
-npm run omp:verify:patches
-```
+## Versioning
 
-The verifier applies patches in series order, runs the root and OMP source gates, and reverses the patches in a `finally` cleanup. It intentionally does not rebuild the compiled host binary; milestone binary validation is performed with the series applied using `npm run omp:build:host`.
+`patches/series.json` records `patchsetVersion` explicitly and pairs it with `patchsetDigest`, a content hash over the overlay bytes and the seam patch bytes. The regen script advances the version only when that digest changes.
 
-Author patches from the vendor root with standard `git diff` paths. New files must first be made visible to the diff with intent-to-add:
+The version is recorded rather than counted for a reason: it used to be derived from the number of patch files, so consolidating the series made the runtime version move *backwards* onto a directory name a user might already have installed. `derivePatchsetVersion` prefers the recorded field; the count remains only as a fallback for series files that predate it.
 
-```powershell
-git -C omp-patch/vendor/oh-my-pi add -N packages/coding-agent/src/studio packages/coding-agent/test/studio-host-args.test.ts packages/coding-agent/test/studio-host-mode.test.ts
-git -C omp-patch/vendor/oh-my-pi diff --check
-git -C omp-patch/vendor/oh-my-pi diff > omp-patch/patches/0001-studio-host-cli-mode.patch
-git -C omp-patch/vendor/oh-my-pi reset -q
-```
+Artifact provenance covers both layers — `patchHashes` for the seam, `overlayHash` for the overlay. A digest over paths *and* contents means a rename changes provenance even when no byte of code did.
 
-Never run `git submodule update` while patches are applied, and never use root-wide `git add -A` while unrelated Studio/frontend work is present.
+## Upgrading the pin
+
+1. Move the submodule to the new upstream commit and update `upstream.json` plus `series.json`'s `upstreamCommit`.
+2. `npm run omp:overlay:apply`. The overlay always lands cleanly; only the four seam patches can reject.
+3. Fix rejects in the vendor tree, then `npm run omp:patches:regen`.
+4. `npm run omp:verify:patches`.
+
+Overlay breakage from an upstream bump shows up as type errors, not merge conflicts — `bun check:ts` inside the vendor tree is the fast signal.
+
+## Design constraints
+
+The root `@omp-studio/studio-protocol` package is the canonical contract. Because the pinned vendor is an independently installable Bun workspace and cannot import the root private package, the overlay mirrors only the minimal frame/hello wire subset; root fixtures and bidirectional tests are the compatibility authority.
+
+The fork must not introduce a second `AgentSession`, RPC/TUI hot switching, Slash-command automation, or PTY semantic parsing.
 
 The Windows host native build uses the repository-pinned Rust toolchain. Bazel is not used for the Windows `host` target; `scripts/bazel-natives.ts` delegates to the local N-API/MSVC build. The root build wrapper defaults Cargo to four parallel jobs to avoid resource exhaustion during the first optimized build.
 
-Patches must be small and ordered in `patches/series.json`, with the first vertical slice limited to:
+## Capability history
 
-1. the `studio-host` CLI mode;
-2. local Bridge authentication and hello;
-3. state projection and snapshot;
-4. the command arbiter;
-5. shared pause/resume service wiring.
+The fork was originally carried as 34 sequential patches, `0001-studio-host-cli-mode` through `0034-studio-next-turn-model`. That numbering is retired; the files and their per-patch narrative remain in this repository's Git history and in `backup/2026-08-17/omp-overlay-split-190333/`. The capabilities they introduced, in the order they were built:
 
-WP-010 stops at the `studio-host` CLI mode, one shared `AgentSession`/`SessionManager`, one shared runtime identity, and an unbound Bridge lifecycle seam. Named Pipe/UDS transport, authentication, and protocol hello belong to WP-011; the WP-010 seam must not report fake readiness.
+- **Host entry and session identity** — the `studio-host` CLI mode with one shared `AgentSession`/`SessionManager` and one shared runtime identity; the optional backward-readable `studioOrigin: "studio-host"` creation marker, which leaves session schema version 3 unchanged and classifies missing or unknown markers as CLI/legacy. Resuming a CLI session in Studio does not rewrite its origin.
+- **Transport, authentication, hello** — a local Named Pipe/UDS server. The Runtime atomically claims and deletes the one-time token file, accepts a length-prefixed hello only at pre-epoch `0`, returns a challenge proof bound to the process-stable runtime identity, and supports reconnect with a fresh Host nonce.
+- **Snapshot and recovery** — the Host assigns a positive `runtimeEpoch` with `--bridge-runtime-epoch`; hello negotiates that epoch, then `runtime.snapshot` serves shared session identity with truthful streaming, compacting, plan, goal, and vibe state. TUI startup is held until the authenticated initial snapshot is written. Reconnect requires the same identity and epoch and always takes a fresh snapshot. The Host projection preserves Runtime `stateVersion`/`eventSeq`, detects event gaps, and returns to snapshot-required state without renumbering Runtime events.
+- **Command lifecycle** — Host-side correlation of accepted and terminal receipts, persisted terminal outcomes, snapshot receipt-tail reconciliation, a separate Host `commitSeq`, and `outcome_unknown` fencing when the Bridge or owned process is lost.
+- **Arbiter, pause, resume** — Runtime-side arbitration serializes GUI/TUI process-exclusive commands, interaction ownership is generation-fenced, and both the TUI pause screen and the Bridge call the same process-global pause service, with monotonic `pauseEpoch` and bounded same-process idempotency replay.
+- **Session and core RPC** — the presentation-neutral surface shared by Bridge and TUI: queue enqueue, clear context, retry, prompt, steer, follow-up, abort. Rejected commands are idempotently replayable, receipts stay bound to the submitting socket, and reconnect snapshots bypass the mutation queue so an abandoned in-flight command cannot deadlock recovery.
+- **Loop** — Runtime-owned and presentation-neutral: one scheduler and state source for enable, prompt capture, pause, disable, turn/time limits, reconnect projection, and shutdown cleanup. Token limits stay explicitly graded as limited because neither the v5 contract nor upstream OMP defines an accounting semantic.
+- **Modes, tree, fork** — Runtime-owned Plan, Goal, Vibe, session-tree, and session-fork services sharing mode state and tool transitions with the TUI. Tree snapshots omit message content and filesystem paths, and fork rebinding uses the same live `AgentSession`. Ask-result tree navigation performs the native two-phase sibling-branch protocol through the generation-fenced Remote InteractionPort and resumes the agent only after the answer commits. Plan mode applies the configured `plan` role model, defers streaming transitions to the idle boundary, restores the pre-Plan model/thinking level, rolls back failed exits, and rejects mid-turn exits.
+- **Remote ops** — the dynamic operator manifest, Remote InteractionPort and explicit GUI-to-TUI transfer, BTW/TAN/OMFG composite services, Runtime-owned Agent Hub and Job services with ownership/generation/confirmation fencing, and graceful `runtime.shutdown` quiesce/drain/completion signaling.
+- **Command manifest conformance** — custom/MCP prompts exposed as `prompt-template`, file commands as `file-command`, every implementation value one of the canonical shared/headless/extension/TUI routes, so the Host process probe can validate `operator.manifest.get` and bind its hash and upstream commit to the authenticated Hello.
+- **Live control plane** — presentation-neutral operations, snapshot state, and an injectable media-session boundary. Until a frontend-owned authenticated audio device/sideband exists, `live.start` fails closed with `CAPABILITY_UNAVAILABLE`; `live.stop` stays idempotent and Runtime shutdown always stops Live.
+- **Conversation and transcript** — the conversation contract, session transcript service, live projector and bridge, transcript normalization and type hardening, provider-error surfacing, and subagent conversation reconstruction.
+- **Telemetry** — session telemetry, archived-session telemetry, Agent Hub usage, and turn-rate accounting.
+- **Later refinements** — session handoff, fast prewalk, session model control, multi-skill prompt expansion, abort during retry, and next-turn model selection.
 
-Session transcripts remain authoritative in the normal OMP session store. Patch `0002-studio-session-origin.patch` adds the optional, backward-readable `studioOrigin: "studio-host"` creation marker without changing session schema version 3. Missing or unknown markers classify as CLI/legacy. Resuming a CLI session in Studio does not rewrite its origin; subsequent sessions created by the Studio process receive the marker. This provides the classification basis for a later read-only `session.list` service without moving JSONL files or creating a second session writer.
-
-Patch `0003-studio-bridge-transport-auth-hello.patch` binds the lifecycle seam to a local Named Pipe/UDS server. The Runtime atomically claims and deletes the one-time token file, accepts a length-prefixed hello only at pre-epoch `0`, returns a challenge proof bound to the process-stable runtime identity, and supports reconnect with a fresh Host nonce. Until WP-012 supplies the authoritative projector/snapshot, the hello truthfully advertises an empty `limited` manifest and does not emit a fake `runtime.ready` event or accept mutations.
-
-Patch `0004-studio-runtime-snapshot-recovery.patch` adds the first authoritative Runtime projection and read-only snapshot flow. The Host assigns a positive `runtimeEpoch` with `--bridge-runtime-epoch`; hello negotiates that epoch, then the Runtime serves `runtime.snapshot` with the shared session identity and truthful streaming, compacting, plan, goal, and vibe state. TUI startup is held until the authenticated initial snapshot is written. Reconnect requires the same runtime identity and epoch and always takes a fresh snapshot; stale-epoch snapshot requests are closed. The Host projection preserves Runtime `stateVersion`/`eventSeq`, detects event gaps, and returns to snapshot-required state without renumbering Runtime events.
-
-WP-013 command lifecycle composition is Host-side. The Host now correlates accepted and terminal receipts, persists terminal outcomes, reconciles snapshot receipt tails, publishes a separate Host `commitSeq`, and fences unresolved commands as `outcome_unknown` when the Bridge or owned process is lost. Patch `0005-studio-bridge-lifecycle-race.patch` is a narrow Runtime reliability repair discovered by the WP-013 clean-series gate: stopping before the first snapshot now resolves a typed startup outcome instead of racing an unhandled Promise rejection. It adds no mutation capability; OMP continues to reject non-snapshot requests until a later shared-service command patch can execute them truthfully.
-
-Patch `0006-studio-runtime-arbiter-pause-resume.patch` closes the first real mutation vertical slice. Runtime-side arbitration serializes GUI/TUI process-exclusive commands, interaction ownership is generation-fenced, and both the TUI pause screen and Bridge call the same process-global pause service. Authenticated `runtime.pause` and `runtime.resume` requests now produce accepted/terminal receipts, monotonic `pauseEpoch`, Runtime-owned state events, snapshot recovery, and bounded same-process idempotency replay. The hello remains `limited` and advertises only the three implemented Runtime capabilities: snapshot, pause, and resume.
-
-Patch `0008-studio-loop-service.patch` makes Loop Runtime-owned and presentation-neutral. Bridge and the `studio-host` TUI share one scheduler and state source for enable, prompt capture, pause, disable, turn/time limits, reconnect projection, and shutdown cleanup; token limits remain explicitly graded as limited.
-
-Patch `0009-studio-modes-tree-fork.patch` adds Runtime-owned Plan, Goal, Vibe, session-tree, and session-fork services. The Bridge and `studio-host` TUI share mode state and tool transitions, tree snapshots omit message content and filesystem paths, and fork rebinding uses the same live `AgentSession`. Patch 0013 completes Tree Ask re-answer through the Remote InteractionPort and Plan-role model transitions.
-
-Patch `0010-studio-remote-ops-agent-jobs-shutdown.patch` completes the backend surface needed before renderer integration. It adds the dynamic operator manifest, Remote InteractionPort and explicit GUI-to-TUI transfer, BTW/TAN/OMFG composite services, Runtime-owned Agent Hub and Job services with ownership/generation/confirmation fencing, real roster/job projection, and graceful `runtime.shutdown` quiesce/drain/completion signaling. The patch deliberately does not add renderer UI or rename the Runtime executable: the patched CLI remains `omp.exe`, while the future desktop shell remains `omp-studio.exe`.
-
-Patch `0011-studio-live-control-plane.patch` adds the presentation-neutral Live control plane, Bridge operations, snapshot state, and an injectable media-session boundary. Before WP-061 supplies a frontend-owned authenticated audio device/sideband, `live.start` fails closed with `CAPABILITY_UNAVAILABLE`; `live.stop` remains idempotent and Runtime shutdown always stops Live. The capability is therefore advertised as limited rather than pretending that headless voice media is available.
-
-Patch `0012-studio-command-manifest-conformance.patch` aligns dynamic command descriptors with the canonical v5 manifest vocabulary. Custom/MCP prompts are exposed as `prompt-template`, file commands as `file-command`, and every implementation value is one of the canonical shared/headless/extension/TUI routes. This allows the Host process probe to validate `operator.manifest.get` and bind its hash and upstream commit to the authenticated Hello before claiming compatibility.
-
-Patch `0013-studio-tree-ask-plan-model-parity.patch` closes the remaining backend-only Tree and Plan gaps. Ask-result tree navigation now performs the native two-phase sibling-branch protocol through the generation-fenced Remote InteractionPort and resumes the agent only after the answer commits; an empty single-question selection cancels without mutating the tree. Plan mode applies the configured `plan` role model, defers streaming transitions to the idle boundary, tracks role changes, restores the pre-Plan model/thinking level, rolls back failed exits, and rejects mid-turn exits before changing the active tool set. Capability hashes now include stable/limited grades and limitation text, so a parity-grade change cannot reuse stale packaged evidence. Loop token limits remain fail-closed because neither the v5 contract nor upstream OMP defines an accounting semantic.
-
-Patch `0007-studio-session-control-core-rpc.patch` adds the presentation-neutral session/core command surface shared by Bridge and TUI: queue enqueue, clear context, retry, prompt, steer, follow-up, and abort. Rejected commands are idempotently replayable, command receipts stay bound to the socket that submitted them, and reconnect snapshots bypass the mutation queue so an abandoned in-flight command cannot deadlock recovery. `session.drop` is advertised as limited and fails closed with `INTERACTION_REQUIRED` until WP-040 supplies the approval port. The managed Runtime remains `limited` and now truthfully advertises eleven implemented operations.
-
-The root `@omp-studio/studio-protocol` package is the canonical contract. Because the pinned vendor is an independently installable Bun workspace and cannot import the root private package, patch 0003 mirrors only the minimal frame/hello wire subset; root fixtures and bidirectional tests are the compatibility authority. Patches must not introduce a second `AgentSession`, RPC/TUI hot switching, Slash-command automation, or PTY semantic parsing.
+Capability hashes include stable/limited grades and limitation text, so a parity-grade change cannot reuse stale packaged evidence.

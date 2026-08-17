@@ -490,6 +490,32 @@ test("a new runtime epoch accepts a smaller stateVersion and replaces the snapsh
   assert.equal(state.entities.snapshot?.runtimeEpoch, 2);
 });
 
+test("a new runtime identity accepts a smaller stateVersion within the same epoch", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(11, snapshot(9, 1)) });
+  state = reduceClientState(state, {
+    type: "event",
+    event: runtimeChanged(12, {
+      status: "connected",
+      classification: "managed",
+      runtimeId: "rt-2" as RuntimeId,
+      runtimeEpoch: 1 as RuntimeEpoch,
+    }),
+  });
+  assert.equal(state.connection.stateVersion, null);
+  assert.equal(state.entities.snapshot, null);
+
+  const next = {
+    ...snapshot(1, 1),
+    runtimeId: "rt-2" as RuntimeId,
+    sessionId: "sess-2" as SessionId,
+  };
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(13, next) });
+  assert.equal(state.connection.stateVersion, 1);
+  assert.equal(state.entities.snapshot?.runtimeId, "rt-2");
+  assert.equal(state.entities.snapshot?.sessionId, "sess-2");
+});
+
 test("the same runtime epoch still rejects a regressing snapshot", () => {
   let state = bootedState();
   state = reduceClientState(state, { type: "event", event: snapshotEvent(11, snapshot(4, 1)) });

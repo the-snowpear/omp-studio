@@ -1,12 +1,12 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ConversationMessageError } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { useAppSettings, type ToolActivityDetail } from "../settings/appSettings";
-import { BatchChain } from "./BatchChain";
+import { BatchChain, type ChainItem } from "./BatchChain";
 import { TruncationMark } from "./ToolBody";
 import { MarkdownText } from "./markdown";
 import { TurnDiffCard } from "./TurnDiffCard";
-import type { AssistantSegment, TimelineRow, ToolView } from "./conversationViewModel";
+import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
 import type { SubagentHubTarget, ThinkView, TurnFileChange } from "./toolMeta";
 
 function formatTime(iso: string): string {
@@ -21,19 +21,28 @@ function MessageBody({
   streaming,
   truncated,
   magicKeywords,
+  copyText,
 }: {
   text: string;
   streaming?: boolean;
   truncated?: boolean;
   magicKeywords?: boolean;
+  copyText?: string;
 }) {
-  return (
+  const body = (
     <MarkdownText
       text={text}
       {...(streaming === true ? { streaming: true } : {})}
       {...(truncated === true ? { truncated: true, mark: <TruncationMark /> } : {})}
       {...(magicKeywords === true ? { magicKeywords: true } : {})}
     />
+  );
+  if (copyText === undefined || copyText.length === 0) return body;
+  return (
+    <div className="ev-copy-host">
+      {body}
+      <MessageCopyActions text={copyText} />
+    </div>
   );
 }
 
@@ -59,6 +68,51 @@ function hasAssistantText(segments: readonly AssistantSegment[]): boolean {
   return segments.some((segment) => segment.type === "text" && segment.text.length > 0);
 }
 
+function concludingReplyText(segments: readonly AssistantSegment[]): { key: string; text: string } | undefined {
+  let last: { key: string; text: string } | undefined;
+  for (const segment of segments) {
+    if (segment.type === "batch") {
+      last = undefined;
+      continue;
+    }
+    if (segment.type === "text" && segment.text.length > 0) last = { key: segment.key, text: segment.text };
+  }
+  return last;
+}
+
+function MessageCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="ev-msg-copy"
+      aria-label={copied ? "已复制" : "复制消息"}
+      onClick={() => {
+        const clipboard = typeof navigator === "object" ? navigator.clipboard : undefined;
+        if (!clipboard) return;
+        clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => {});
+      }}
+    >
+      <Icon name={copied ? "check" : "copy"} extra="sm" />
+    </button>
+  );
+}
+
+function MessageCopyActions({ text }: { text: string }) {
+  if (text.length === 0) return null;
+  return (
+    <div className="ev-msg-actions">
+      <MessageCopyButton text={text} />
+    </div>
+  );
+}
+
 function renderAssistantSegments(
   segments: readonly AssistantSegment[],
   options: {
@@ -74,46 +128,69 @@ function renderAssistantSegments(
     /** 设置 → 常规：流式输出（关闭后不带流式光标渲染）。 */
     showStreaming?: boolean;
     onInspectSubagent?: (target: SubagentHubTarget) => void;
+    allowCopy?: boolean;
   } = {},
 ): ReactNode[] {
   const showThinking = options.showThinking !== false;
   const showStreaming = options.showStreaming !== false;
   const toolActivity = options.toolActivity ?? "concise";
+  const lastText = options.allowCopy === true ? concludingReplyText(segments) : undefined;
   const nodes: ReactNode[] = [];
   let index = 0;
+  // React key 用节点在该行里的序号，而不是 segment key：同一段内容在 live → 落盘之间
+  // 会换 key（`m1:text:1` → `text-1`、`m1:thinking:0` → `thinking-0`），跟着 segment
+  // key 会让正文和整条工具链在落盘那一刻卸载重挂载。
+  let bodyCount = 0;
+  let chainCount = 0;
   while (index < segments.length) {
     const segment = segments[index]!;
     if (segment.type === "text") {
       nodes.push(
         <MessageBody
-          key={segment.key}
+          key={`body-${bodyCount}`}
           text={segment.text}
           {...(showStreaming && segment.streaming === true ? { streaming: true } : {})}
           {...(segment.truncated === true ? { truncated: true } : {})}
+          {...(lastText?.key === segment.key ? { copyText: lastText.text } : {})}
         />,
       );
+      bodyCount += 1;
       index += 1;
       continue;
     }
-    const thinking: ThinkView[] = [];
-    const tools: ToolView[] = [];
-    const batchKey = segment.key;
+    // 一条链里的思考与工具保持模型产出顺序：只有中间没被工具打断的连续思考才合成
+    // 一张卡，否则工具跑完之后的思考会被并进工具之前的思考里。
+    const items: ChainItem[] = [];
+    let pendingThink: ThinkView | undefined;
+    const flushThink = () => {
+      if (pendingThink === undefined) return;
+      items.push({ kind: "think", think: pendingThink });
+      pendingThink = undefined;
+    };
     while (index < segments.length && segments[index]?.type !== "text") {
       const process = segments[index]!;
-      if (process.type === "thinking" && process.text.length > 0) {
-        if (showThinking) {
-          thinking.push({
-            key: process.key,
-            text: process.text,
-            ...(process.truncated === true ? { truncated: true } : {}),
-          });
+      if (process.type === "thinking") {
+        const text = process.text.trim();
+        if (showThinking && text.length > 0) {
+          pendingThink =
+            pendingThink === undefined
+              ? { key: process.key, text, ...(process.truncated === true ? { truncated: true } : {}) }
+              : {
+                  key: pendingThink.key,
+                  text: `${pendingThink.text}\n\n${text}`,
+                  ...(pendingThink.truncated === true || process.truncated === true ? { truncated: true } : {}),
+                };
         }
-      } else if (process.type === "batch") {
-        if (toolActivity !== "hidden") tools.push(...process.tools);
+      } else if (process.type === "batch" && toolActivity !== "hidden" && process.tools.length > 0) {
+        flushThink();
+        for (const tool of process.tools) items.push({ kind: "tool", tool });
       }
       index += 1;
     }
-    if (thinking.length === 0 && tools.length === 0) continue;
+    flushThink();
+    if (items.length === 0) continue;
+    const batchKey = `chain-${chainCount}`;
+    chainCount += 1;
     // 该组之后没有别的段落（即 AI 尚未开始输出其后的文本段）时视为流式尾部链。
     const liveTail = options.streaming === true && index >= segments.length;
     const chainExpandAll = options.expandAll === true || toolActivity === "full";
@@ -121,8 +198,7 @@ function renderAssistantSegments(
       <BatchChain
         key={batchKey}
         batchKey={batchKey}
-        tools={tools}
-        thinking={thinking}
+        items={items}
         {...(chainExpandAll ? { expandAll: true } : {})}
         {...(options.standalone === true ? { standalone: true } : {})}
         {...(liveTail ? { liveTail: true } : {})}
@@ -185,7 +261,11 @@ export function ConversationItemView({
           {row.pending === "pending" ? <span className="chip gray xs">发送中</span> : null}
           {row.pending === "failed" ? <span className="chip red xs">发送失败</span> : null}
         </div>
-        <MessageBody text={row.text} magicKeywords />
+        <MessageBody
+          text={row.text}
+          magicKeywords
+          {...(row.text.length > 0 ? { copyText: row.text } : {})}
+        />
         {row.pending === "failed" && row.requestId && onRestore ? (
           <div className="err-actions">
             {row.error ? <span className="muted small">{row.error}</span> : null}
@@ -223,27 +303,27 @@ export function ConversationItemView({
         </div>
       );
     }
-    if (row.presentation === "process") {
-      if (row.segments.length === 0 && row.error === undefined && (fileChanges === undefined || fileChanges.length === 0)) return null;
-      return (
-        <div className="ev ev-assistant ev-process" data-item-id={row.itemId}>
-          {renderAssistantSegments(row.segments, row.status === "streaming" ? { streaming: true, ...displayOptions } : displayOptions)}
-          {row.error ? <ProviderErrorDetail error={row.error} /> : null}
-          {changes}
-        </div>
-      );
+    const process = row.presentation === "process";
+    if (process && row.segments.length === 0 && row.error === undefined && (fileChanges === undefined || fileChanges.length === 0)) {
+      return null;
     }
+    // 每来一个 assistant item，同一轮里上一行就从 reply 降级成 process，身份头随之
+    // 出现/消失。头部必须占住一个固定的子节点位置（process 时为 null），否则段落数组
+    // 会整体前移一格，React 按位置比对时会把整组工具链卸载重挂载——展开状态和动画都丢。
     return (
-      <div className="ev ev-assistant" data-item-id={row.itemId}>
-        <div className="ev-head">
-          <span className="who"><span className="role-badge a">π</span>OMP</span>
-          <span className="muted">{formatTime(row.createdAt)}</span>
-          <AssistantStatus status={row.status} />
-        </div>
+      <div className={`ev ev-assistant${process ? " ev-process" : ""}`} data-item-id={row.itemId}>
+        {process ? null : (
+          <div className="ev-head">
+            <span className="who"><span className="role-badge a">π</span>OMP</span>
+            <span className="muted">{formatTime(row.createdAt)}</span>
+            <AssistantStatus status={row.status} />
+          </div>
+        )}
         {renderAssistantSegments(row.segments, {
-          ...(expandAll === true ? { expandAll: true } : {}),
+          ...(expandAll === true && !process ? { expandAll: true } : {}),
           ...(row.status === "streaming" ? { streaming: true } : {}),
           ...displayOptions,
+          ...(!process && row.status !== "streaming" ? { allowCopy: true } : {}),
         })}
         {row.error ? <ProviderErrorDetail error={row.error} /> : null}
         {changes}

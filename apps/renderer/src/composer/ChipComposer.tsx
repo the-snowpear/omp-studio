@@ -20,18 +20,30 @@ import {
   chipRemoveTarget,
   createChipElement,
   editorIsEmpty,
+  findMentionToken,
   insertNodesAtCaret,
   insertPlainText,
   mentionAtCaret,
   placeCaretAtEnd,
   readDoc,
   removeChipById,
+  removeConflictingModeChips,
+  removeSkillChipsByName,
   renumberImageChips,
   syncChipTruncation,
   replaceMention,
   writeDoc,
 } from "./editorDom";
+import { CommandMenu } from "./CommandMenu";
+import { ImagePreview, type ImagePreviewSubject } from "./ImagePreview";
 import { MentionMenu } from "./MentionMenu";
+import {
+  filterSlashCommands,
+  lookupSlashCommand,
+  parseSlashDraft,
+  slashNeedsArgs,
+  type StudioSlashCommand,
+} from "./commands";
 
 export type ChipComposerHandle = {
   focus(): void;
@@ -39,8 +51,10 @@ export type ChipComposerHandle = {
   getSnapshot(): ComposerSnapshot;
   setSnapshot(snapshot: ComposerSnapshot): void;
   insertChip(chip: Omit<ComposerChip, "id"> & { id?: string }): void;
+  removeSkillChip(name: string): void;
   openFilePicker(): void;
-  openMention(trigger: "@" | "/"): void;
+  openMention(trigger: "@"): void;
+  openCommandMenu(): void;
   isEmpty(): boolean;
 };
 
@@ -52,9 +66,12 @@ type Props = {
   workspaceId?: string;
   describedBy?: string;
   loadMentions?: (trigger: "@" | "/", query: string) => Promise<readonly MentionCandidate[]>;
+  onRunCommand?: (command: StudioSlashCommand, args: string) => void;
   onChange?: (snapshot: ComposerSnapshot) => void;
   onSubmit?: () => void;
   onQueue?: () => void;
+  /** Ctrl+Enter / Cmd+Enter: Runtime follow-up (text + images). */
+  onFollowUp?: () => void;
   running?: boolean;
   onFocus?: (event: FocusEvent<HTMLDivElement>) => void;
   onBlur?: (event: FocusEvent<HTMLDivElement>) => void;
@@ -102,9 +119,11 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     workspaceId,
     describedBy,
     loadMentions,
+    onRunCommand,
     onChange,
     onSubmit,
     onQueue,
+    onFollowUp,
     running,
     onFocus,
     onBlur,
@@ -118,10 +137,20 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const imagesRef = useRef(new Map<string, PromptImage>());
   const composingRef = useRef(false);
   const [empty, setEmpty] = useState(true);
-  const [thumbs, setThumbs] = useState<Array<{ id: string; url: string; label: string }>>([]);
-  const [mention, setMention] = useState<{ trigger: "@" | "/"; query: string } | null>(null);
+  const [thumbs, setThumbs] = useState<Array<ImagePreviewSubject & { id: string }>>([]);
+  const [preview, setPreview] = useState<(ImagePreviewSubject & { id: string }) | null>(null);
+  const [mention, setMention] = useState<{ trigger: "@"; query: string } | null>(null);
   const [candidates, setCandidates] = useState<MentionCandidate[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [draftText, setDraftText] = useState("");
+  const [detachedCommand, setDetachedCommand] = useState(false);
+  const [commandDismissed, setCommandDismissed] = useState(false);
+  const [commandIndex, setCommandIndex] = useState(0);
+
+  const closeCommandMenu = (): void => {
+    setDetachedCommand(false);
+    setCommandDismissed(true);
+  };
 
   const emit = (): ComposerSnapshot => {
     const editor = editorRef.current;
@@ -132,10 +161,21 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (editorRef.current === editor) syncChipTruncation(editor);
     });
     const snapshot = snapshotOf(editor, imagesRef.current);
+    setDraftText(snapshot.text);
+    if (snapshot.text.startsWith("/")) {
+      setDetachedCommand(false);
+      setCommandDismissed(false);
+    }
     setEmpty(snapshotIsEmpty(snapshot));
     const nextThumbs = snapshot.doc.nodes.flatMap((node) => {
       if (node.type !== "chip" || node.chip.kind !== "image" || node.chip.image === undefined) return [];
-      return [{ id: node.chip.id, url: imagePreviewUrl(node.chip.image), label: node.chip.label }];
+      return [{
+        id: node.chip.id,
+        url: imagePreviewUrl(node.chip.image),
+        label: node.chip.label,
+        mimeType: node.chip.image.mimeType,
+        data: node.chip.image.data,
+      }];
     });
     setThumbs(nextThumbs);
     // Drop bytes for capsules the user deleted; base64 payloads are large.
@@ -150,6 +190,20 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const insertChip = (draft: Omit<ComposerChip, "id"> & { id?: string }): void => {
     const editor = editorRef.current;
     if (!editor) return;
+    if (draft.kind === "mode") {
+      const name = draft.name ?? draft.label.replace(/^\//u, "");
+      removeConflictingModeChips(editor, name);
+      const chip: ComposerChip = {
+        ...draft,
+        id: draft.id ?? newChipId(),
+        name,
+        label: draft.label.replace(/^\//u, "") || name,
+      };
+      editor.insertBefore(createChipElement(chip), editor.firstChild);
+      placeCaretAtEnd(editor);
+      emit();
+      return;
+    }
     const chip: ComposerChip = { ...draft, id: draft.id ?? newChipId() };
     if (chip.image) imagesRef.current.set(chip.id, chip.image);
     insertNodesAtCaret(editor, [createChipElement(chip), document.createTextNode(" ")]);
@@ -173,17 +227,26 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       // reaches the image branch; extension sniffing is only the fallback.
       if (meta ? meta.kind === "image" : isImageFile(file)) {
         const image = await fileToPromptImage(file).catch(() => null);
-        if (!image) {
-          skipped += 1;
+        // Disk-backed images travel as @path. Preview bytes are optional: a
+        // read failure must not drop the capsule.
+        if (image) {
+          insertChip({
+            kind: "image",
+            label: "图",
+            ...(meta ? { path: meta.path } : {}),
+            image,
+          });
           continue;
         }
-        // `emit()` renumbers 图N in document order, so no counter is needed here.
-        insertChip({
-          kind: "image",
-          label: "图",
-          ...(meta ? { path: meta.path } : {}),
-          image,
-        });
+        if (meta) {
+          insertChip({
+            kind: "image",
+            label: "图",
+            path: meta.path,
+          });
+          continue;
+        }
+        skipped += 1;
         continue;
       }
       if (meta) {
@@ -198,10 +261,18 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     }
     if (skipped > 0) {
       onError?.(workspaceId
-        ? "有些文件读不到，未添加为胶囊：可能已被移动、是快捷方式，或图片超过 8MB。"
+        ? "有些文件读不到，未添加为胶囊：可能已被移动或是快捷方式。"
         : "当前环境无法解析磁盘路径，只有图片可以附件。");
     }
   };
+
+  useEffect(() => {
+    setPreview((current) => {
+      if (current === null) return null;
+      const live = thumbs.find((thumb) => thumb.id === current.id);
+      return live ?? null;
+    });
+  }, [thumbs]);
 
   useImperativeHandle(ref, () => ({
     focus() {
@@ -228,10 +299,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       placeCaretAtEnd(editor);
     },
     insertChip,
+    removeSkillChip(name) {
+      const editor = editorRef.current;
+      if (!editor || !removeSkillChipsByName(editor, name)) return;
+      emit();
+    },
     openFilePicker() {
       fileRef.current?.click();
     },
-    openMention(trigger: "@" | "/") {
+    openMention(trigger: "@") {
       const editor = editorRef.current;
       if (!editor) return;
       editor.focus();
@@ -239,13 +315,32 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       emit();
       setMention({ trigger, query: "" });
     },
+    openCommandMenu() {
+      const editor = editorRef.current;
+      if (!editor) return;
+      editor.focus();
+      setCommandDismissed(false);
+      const current = snapshotOf(editor, imagesRef.current).text;
+      if (current.length === 0) {
+        insertNodesAtCaret(editor, [document.createTextNode("/")]);
+        emit();
+        setDetachedCommand(false);
+        return;
+      }
+      if (current.startsWith("/")) {
+        setDetachedCommand(false);
+        return;
+      }
+      setDetachedCommand(true);
+      setCommandIndex(0);
+    },
     isEmpty() {
       return editorRef.current ? editorIsEmpty(editorRef.current) : true;
     },
   }));
 
   useEffect(() => {
-    if (!mention || loadMentions === undefined) {
+    if (!mention || mention.trigger !== "@" || loadMentions === undefined) {
       setCandidates([]);
       return;
     }
@@ -263,7 +358,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const acceptMention = (item: MentionCandidate): void => {
     const editor = editorRef.current;
     if (!editor) return;
-    const at = mentionAtCaret(editor);
+    // Toolbar `@` often leaves the caret outside the token; still fold `@` into the capsule.
+    const at = mentionAtCaret(editor) ?? (mention ? findMentionToken(editor, mention.query) : null);
     const chip: ComposerChip = {
       id: newChipId(),
       kind: item.kind,
@@ -278,11 +374,72 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     emit();
   };
 
+  const insertModeChip = (name: string): void => {
+    insertChip({ kind: "mode", label: name, name });
+  };
+
+  const writeCommandText = (text: string): void => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    imagesRef.current.clear();
+    writeDoc(editor, { nodes: [{ type: "text", value: text }] }, imagesRef.current);
+    emit();
+    placeCaretAtEnd(editor);
+  };
+
+  const slashDraft = parseSlashDraft(draftText);
+  const commandItems = detachedCommand
+    ? filterSlashCommands("")
+    : slashDraft
+      ? filterSlashCommands(slashDraft.name)
+      : [];
+  const commandOpen = (detachedCommand || slashDraft !== null) && mention === null && !commandDismissed;
+
+  useEffect(() => {
+    setCommandIndex(0);
+  }, [slashDraft?.name, detachedCommand]);
+
+  useEffect(() => {
+    if (!commandOpen) return;
+    const onPointerDown = (event: globalThis.PointerEvent): void => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (editorRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(".cm-mention") !== null) return;
+      closeCommandMenu();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [commandOpen]);
+
+  const acceptCommand = (item: StudioSlashCommand): void => {
+    const args = slashDraft !== null && (slashDraft.name === item.name || item.aliases.includes(slashDraft.name))
+      ? slashDraft.args
+      : "";
+    if (item.availability === "disabled") return;
+    const overlay = detachedCommand;
+    if (item.select === "chip") {
+      setDetachedCommand(false);
+      if (!overlay) writeCommandText(args);
+      insertModeChip(item.name);
+      return;
+    }
+    if (slashNeedsArgs(item, args) || (item.select === "complete-args" && args.length === 0)) {
+      setDetachedCommand(false);
+      writeCommandText(`/${item.name} `);
+      setCommandIndex(0);
+      return;
+    }
+    onRunCommand?.(item, args);
+    setDetachedCommand(false);
+    if (!overlay) writeCommandText("");
+  };
+
   const refreshMention = (): void => {
     const editor = editorRef.current;
     if (!editor || composingRef.current) return;
     const at = mentionAtCaret(editor);
-    setMention(at ? { trigger: at.trigger, query: at.query } : null);
+    setMention(at ? { trigger: "@", query: at.query } : null);
   };
 
   const onInput = (_event: FormEvent<HTMLDivElement>): void => {
@@ -318,6 +475,50 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (commandOpen && commandItems.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setCommandIndex((index) => (index + 1) % commandItems.length);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setCommandIndex((index) => (index - 1 + commandItems.length) % commandItems.length);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        if (slashDraft && slashDraft.name.length === 0 && !detachedCommand) {
+          event.preventDefault();
+          return;
+        }
+        const exact = slashDraft ? lookupSlashCommand(slashDraft.name) : undefined;
+        if (detachedCommand || exact === undefined) {
+          const item = commandItems[commandIndex];
+          if (item) {
+            event.preventDefault();
+            acceptCommand(item);
+          }
+          return;
+        }
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeCommandMenu();
+        if (slashDraft && slashDraft.name.length === 0) writeCommandText("");
+        return;
+      }
+      if (event.key === "Tab" && commandItems[commandIndex]) {
+        event.preventDefault();
+        const item = commandItems[commandIndex];
+        if (!item) return;
+        if (detachedCommand) {
+          acceptCommand(item);
+          return;
+        }
+        writeCommandText(item.allowArgs ? `/${item.name} ` : `/${item.name}`);
+        return;
+      }
+    }
     if (mention && candidates.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -329,7 +530,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         setActiveIndex((index) => (index - 1 + candidates.length) % candidates.length);
         return;
       }
-      if (event.key === "Enter" && !event.shiftKey) {
+      if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
         const item = candidates[activeIndex];
         if (item) {
           event.preventDefault();
@@ -345,6 +546,10 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
+    if (event.ctrlKey || event.metaKey) {
+      onFollowUp?.();
+      return;
+    }
     if (running) onQueue?.();
     else onSubmit?.();
   };
@@ -355,18 +560,27 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         <div className="cm-thumbs" aria-label="已附加的图片">
           {thumbs.map((thumb) => (
             <figure key={thumb.id} className="cm-thumb">
-              <img src={thumb.url} alt={thumb.label} />
+              <button
+                type="button"
+                className="cm-thumb-open"
+                aria-label={`预览${thumb.label}`}
+                onClick={() => setPreview(thumb)}
+              >
+                <img src={thumb.url} alt="" />
+              </button>
               <button
                 type="button"
                 className="cm-thumb-remove"
                 aria-label={`移除${thumb.label}`}
                 title={`移除${thumb.label}`}
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => removeChip(thumb.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  removeChip(thumb.id);
+                }}
               >
                 <span aria-hidden="true">×</span>
               </button>
-              <figcaption>{thumb.label}</figcaption>
             </figure>
           ))}
         </div>
@@ -398,9 +612,20 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           event.preventDefault();
           removeChip(chipId);
         }}
-        onFocus={onFocus}
+        onFocus={(event) => {
+          if (editorRef.current && snapshotOf(editorRef.current, imagesRef.current).text.startsWith("/")) {
+            setCommandDismissed(false);
+          }
+          onFocus?.(event);
+        }}
         onBlur={(event) => {
           setMention(null);
+          const next = event.relatedTarget;
+          if (next instanceof Node && (editorRef.current?.contains(next) || (next instanceof Element && next.closest(".cm-mention") !== null))) {
+            onBlur?.(event);
+            return;
+          }
+          closeCommandMenu();
           onBlur?.(event);
         }}
         onPointerDown={onPointerDown}
@@ -412,7 +637,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           refreshMention();
         }}
       />
-      {mention ? (
+      {commandOpen ? (
+        <CommandMenu
+          query={detachedCommand ? "" : (slashDraft?.name ?? "")}
+          items={commandItems}
+          activeIndex={commandIndex}
+          onSelect={acceptCommand}
+          onHover={setCommandIndex}
+        />
+      ) : mention ? (
         <MentionMenu
           trigger={mention.trigger}
           query={mention.query}
@@ -432,6 +665,13 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           event.target.value = "";
         }}
       />
+      {preview !== null ? (
+        <ImagePreview
+          image={preview}
+          onClose={() => setPreview(null)}
+          {...(onError === undefined ? {} : { onError })}
+        />
+      ) : null}
     </div>
   );
 });

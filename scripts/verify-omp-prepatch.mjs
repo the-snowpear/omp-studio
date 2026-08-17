@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { overlayFiles } from "./omp-overlay.mjs";
 import {
   findBun,
   ompSourceDirectory,
@@ -21,6 +22,11 @@ if (head !== upstream.commit || series.upstreamCommit !== upstream.commit) {
 }
 if (series.patches.length !== 0) {
   throw new Error("Pre-patch verification requires an empty patch series");
+}
+// The overlay carries most of the fork, so an unpatched baseline means both
+// layers are absent — a populated overlay would silently invalidate the run.
+if ((await overlayFiles().catch(() => [])).length !== 0) {
+  throw new Error("Pre-patch verification requires an empty overlay");
 }
 
 const sourceStatus = run("git", ["-C", ompSourceDirectory, "status", "--porcelain"], { capture: true });

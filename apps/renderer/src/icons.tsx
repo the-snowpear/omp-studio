@@ -112,6 +112,16 @@ const PATHS: Record<string, string> = {
   keyboard: '<rect x="1.5" y="4" width="13" height="8.5" rx="1.2"/><path d="M4 6.5h.2M7 6.5h.2M10 6.5h.2M12 6.5h.2M4 9.5h.2M12 9.5h.2M6 9.5h4"/>',
   logo: '<circle cx="8" cy="8" r="6.5"/><path d="M5.5 11.5c1.5-1 3.5-1 5 0M5.5 6.5c1.5 1 3.5 1 5 0" stroke-width="1.4"/>',
   asterisk: '<path d="M8 1.8v12.4M2.6 4.9l10.8 6.2M13.4 4.9 2.6 11.1"/>',
+  palette: '<circle cx="6.3" cy="9" r="2.7"/><circle cx="9.7" cy="9" r="2.7"/><circle cx="8" cy="6.1" r="2.7"/>',
+  brush: '<path d="M9.6 2.4 13.6 6.4 7.2 12.8c-.9.9-2.2 1-3.8.7.2-1.5.5-2.8 1.4-3.7z"/><path d="M8.4 3.6 12.4 7.6"/>',
+  type: '<path d="M3.4 12.6 7.4 3.3h1.7l4 9.3"/><path d="M5.1 9.1h6.8"/>',
+  diamond: '<path d="M8 2 14 8 8 14 2 8z"/><path d="M2 8h12"/>',
+  wand: '<path d="M2.8 13.2 10.6 5.4"/><path d="M9.3 3.9 12.1 6.7"/><path d="M12.5 2.1v2.3M11.35 3.25h2.3"/><path d="M4.6 6.1l.7 1.5 1.5.7-1.5.7-.7 1.5-.7-1.5-1.5-.7 1.5-.7z"/>',
+  swatch: '<rect x="2.1" y="2.2" width="7.3" height="7.3" rx="1.6"/><rect x="6.6" y="6.5" width="7.3" height="7.3" rx="1.6"/>',
+  slides: '<rect x="2.4" y="3.1" width="11.2" height="7.6" rx="1.2"/><path d="M5.2 13h5.6M8 10.7v2.3"/><path d="M5.2 5.7h5.6M5.2 8h3.5"/>',
+  banner: '<path d="M3.2 2.3v11.4"/><path d="M3.2 2.5h9.5l-2.1 2.9 2.1 2.9H3.2"/>',
+  hexagon: '<path d="M8 1.6 13.7 4.9v6.2L8 14.4 2.3 11.1V4.9z"/>',
+  "pen-nib": '<path d="M8 14.1 3.7 9.4 10.8 2.3a2 2 0 0 1 2.8 2.8L6.5 12.2z"/><path d="M9.2 4.6 11.4 6.8"/><path d="M8 14.1 6.7 10.8h2.6z"/>',
 };
 
 /** App / project mark served from `apps/renderer/public/icon.png`. */
@@ -128,6 +138,10 @@ export function AppIcon({ className, size }: { className?: string; size?: number
       draggable={false}
     />
   );
+}
+
+export function hasIcon(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PATHS, name);
 }
 
 export function iconSvg(name: string, extra?: string): string {

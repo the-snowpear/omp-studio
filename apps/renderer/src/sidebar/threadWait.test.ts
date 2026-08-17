@@ -16,6 +16,7 @@ describe("waitKindFromInteraction", () => {
 
   it("maps ask-style prompts to 待回答", () => {
     expect(waitKindFromInteraction("select")).toBe("ask");
+    expect(waitKindFromInteraction("ask")).toBe("ask");
     expect(waitKindFromInteraction("input")).toBe("ask");
     expect(waitKindFromInteraction("editor")).toBe("ask");
     expect(THREAD_WAIT_LABEL.ask).toBe("待回答");

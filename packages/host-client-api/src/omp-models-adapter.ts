@@ -737,6 +737,10 @@ function providerFromYaml(
   };
 }
 
+function providerIsOperatorConfigured(id: string, authenticated: Set<string>): boolean {
+  return authenticated.has(id) || envHasSecret(id);
+}
+
 function providersFromAvailable(
   available: AvailableModelRecord[],
   existing: Set<string>,
@@ -746,13 +750,17 @@ function providersFromAvailable(
   const byProvider = new Map<string, AvailableModelRecord[]>();
   for (const model of available) {
     if (existing.has(model.provider)) continue;
+    // Bundled static catalogs (zenmux) land in models.db without models.yml.
+    // Builtin OAuth providers (opencode-go) also live in cache, but only after
+    // the operator logs in — those must still appear.
+    if (!providerIsOperatorConfigured(model.provider, authenticated)) continue;
     const list = byProvider.get(model.provider) ?? [];
     list.push(model);
     byProvider.set(model.provider, list);
   }
   return [...byProvider.entries()].map(([id, models]) => {
     const preset = PRESET_GROUPS.flatMap((group) => group.items).find((item) => item.id === id);
-    const authType = preset?.auth[0] ?? "api-key";
+    const authType = preset?.auth[0] ?? (authenticated.has(id) ? "oauth" : "api-key");
     const oauthOk = authType === "oauth" && authenticated.has(id);
     return {
       id,
@@ -1449,6 +1457,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const providersMap = asRecord(file.root.providers) ?? {};
       const fromFile = Object.keys(providersMap).map((id) => providerFromYaml(id, asRecord(providersMap[id]) ?? {}, available, disabled, authenticated));
       const existing = new Set(fromFile.map((provider) => provider.id));
+      // models.db also holds bundled static catalogs the operator never opted into
+      // (zenmux). Keep yaml providers, plus cache providers with auth/env.
       const providers = [...fromFile, ...providersFromAvailable(available, existing, disabled, authenticated)];
       const cacheBySelector = new Map<string, AvailableModelRecord>();
       for (const model of available) {
@@ -1462,8 +1472,11 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           return cached?.thinking?.length ? { ...record, thinking: cached.thinking } : record;
         }),
       );
+      const allowedProviders = new Set(providers.map((provider) => provider.id));
       const availableBySelector = new Map<string, AvailableModelRecord>();
-      for (const model of [...yamlAvailable, ...available]) availableBySelector.set(model.selector, model);
+      for (const model of [...yamlAvailable, ...available.filter((model) => allowedProviders.has(model.provider))]) {
+        availableBySelector.set(model.selector, model);
+      }
       const mergedAvailable = [...availableBySelector.values()];
       const availableSet = new Set(mergedAvailable.map((model) => model.selector));
       const roleDefs = [

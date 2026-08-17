@@ -45,6 +45,8 @@ export function useConversationScroll(args: {
   identityKey: string;
   itemCount: number;
   loadingOlder: boolean;
+  /** Welcome / new-chat surface stays at the top; transcripts stick to the bottom. */
+  pin?: "top" | "bottom";
 }): {
   follow: boolean;
   hasNewContent: boolean;
@@ -52,10 +54,10 @@ export function useConversationScroll(args: {
   jumpToLatest: () => void;
   preparePrepend: () => void;
 } {
-  const { scrollerRef, identityKey, itemCount, loadingOlder } = args;
-  const [follow, setFollow] = useState(true);
+  const { scrollerRef, identityKey, itemCount, loadingOlder, pin = "bottom" } = args;
+  const [follow, setFollow] = useState(pin === "bottom");
   const [hasNewContent, setHasNewContent] = useState(false);
-  const followRef = useRef(true);
+  const followRef = useRef(pin === "bottom");
   const itemCountRef = useRef(itemCount);
   const anchorRef = useRef<ScrollAnchor | null>(null);
   const skipStickRef = useRef(false);
@@ -63,8 +65,8 @@ export function useConversationScroll(args: {
   const stick = useCallback(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [scrollerRef]);
+    el.scrollTop = pin === "top" ? 0 : el.scrollHeight;
+  }, [pin, scrollerRef]);
 
   const stickAfterLayout = useCallback(() => {
     stick();
@@ -78,8 +80,13 @@ export function useConversationScroll(args: {
     followRef.current = true;
     setFollow(true);
     setHasNewContent(false);
-    stickAfterLayout();
-  }, [stickAfterLayout]);
+    const el = scrollerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    requestAnimationFrame(() => {
+      const next = scrollerRef.current;
+      if (next) next.scrollTop = next.scrollHeight;
+    });
+  }, [scrollerRef]);
 
   const onScroll = useCallback(
     (event: UIEvent<HTMLElement>) => {
@@ -100,14 +107,15 @@ export function useConversationScroll(args: {
   }, [scrollerRef]);
 
   useLayoutEffect(() => {
-    followRef.current = true;
+    const followBottom = pin === "bottom";
+    followRef.current = followBottom;
     anchorRef.current = null;
     skipStickRef.current = false;
     itemCountRef.current = -1;
-    setFollow(true);
+    setFollow(followBottom);
     setHasNewContent(false);
     stickAfterLayout();
-  }, [identityKey, stickAfterLayout]);
+  }, [identityKey, pin, stickAfterLayout]);
 
   useLayoutEffect(() => {
     const el = scrollerRef.current;
@@ -121,14 +129,14 @@ export function useConversationScroll(args: {
     if (itemCount === itemCountRef.current) return;
     const grew = itemCount > itemCountRef.current;
     itemCountRef.current = itemCount;
-    if (!grew) return;
+    if (!grew || pin === "top") return;
     if (followRef.current) {
       stickAfterLayout();
       setHasNewContent(false);
     } else {
       setHasNewContent(true);
     }
-  }, [itemCount, loadingOlder, scrollerRef, stickAfterLayout]);
+  }, [itemCount, loadingOlder, pin, scrollerRef, stickAfterLayout]);
 
   return { follow, hasNewContent, onScroll, jumpToLatest, preparePrepend };
 }

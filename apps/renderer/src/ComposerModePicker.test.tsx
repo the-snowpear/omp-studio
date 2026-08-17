@@ -142,6 +142,26 @@ describe("ComposerModePicker", () => {
     expect((screen.getByRole("menuitemradio", { name: /^Vibe/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("真实模式：busy 或流式时仍可切 Plan，并提示下一轮生效", () => {
+    const onRun = vi.fn(async (_name: CommandName, _input: CommandInput<CommandName>) => true);
+    render(
+      <ComposerModePicker
+        preview={false}
+        snapshot={{ isStreaming: true } as OperatorStateSnapshot}
+        can={(id) => id === "mode.plan.enter"}
+        busy={true}
+        disabled={true}
+        keyword={null}
+        onKeywordChange={vi.fn()}
+        onRun={onRun}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "会话模式" }));
+    expect(screen.getByText("当前轮次仍用原模式，下一轮对话（含插入信息）才生效")).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Plan/ }));
+    expect(onRun).toHaveBeenCalledWith("mode.plan.enter", {});
+  });
+
   it("真实模式：Plan 走 mode.plan.enter，capability 缺失时 Fast 禁用", () => {
     const onRun = vi.fn(async (_name: CommandName, _input: CommandInput<CommandName>) => true);
     render(

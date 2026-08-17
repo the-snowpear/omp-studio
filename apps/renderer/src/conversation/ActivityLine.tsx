@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "../icons";
 import {
   formatElapsed,
+  formatRetry,
   isLiveActivityPhase,
+  reduceActivityRetry,
   reduceAwaitingTurn,
   WORKING_LABEL,
+  type ActivityRetry,
   type ActivityStatus,
 } from "./activityStatus";
 
@@ -55,6 +58,44 @@ export function useAwaitingTurn(input: {
   return next.latched;
 }
 
+/**
+ * Outstanding auto-retry for the current run. Survives the backoff gap after
+ * `isStreaming` falls and before the next attempt starts.
+ */
+export function useActivityRetry(input: {
+  notices: readonly { message: string; source?: string }[];
+  streaming: boolean;
+  failed: boolean;
+  identityKey: string;
+}): ActivityRetry | undefined {
+  const ref = useRef<{
+    identityKey: string;
+    retry?: ActivityRetry;
+    noticeCount: number;
+    seenStream: boolean;
+    wasStreaming: boolean;
+  }>({
+    identityKey: input.identityKey,
+    noticeCount: 0,
+    seenStream: false,
+    wasStreaming: false,
+  });
+  const next = reduceActivityRetry(ref.current, {
+    identityKey: input.identityKey,
+    notices: input.notices,
+    streaming: input.streaming,
+    failed: input.failed,
+  });
+  ref.current = {
+    identityKey: next.identityKey,
+    noticeCount: next.noticeCount,
+    seenStream: next.seenStream,
+    wasStreaming: next.wasStreaming,
+    ...(next.retry === undefined ? {} : { retry: next.retry }),
+  };
+  return next.retry;
+}
+
 /** Wall-clock ms since `startedAt`, re-rendered once per second. */
 function useElapsed(startedAt: number | undefined): number {
   const [now, setNow] = useState(() => Date.now());
@@ -70,8 +111,10 @@ function useElapsed(startedAt: number | undefined): number {
 
 /**
  * Bottom-of-transcript run status. Waiting for the first assistant event shows
- * only "working"; once a response starts, elapsed time and the live operation
- * join the line. No chrome, no stop control — abort stays on the composer.
+ * only "working"; an outstanding auto-retry joins immediately to its right as
+ * `Retry N/M`. Once a response starts, the retry drops and the line is
+ * `working · elapsed · operation`. No chrome, no stop control — abort stays
+ * on the composer.
  */
 export function ActivityLine({
   status,
@@ -94,6 +137,12 @@ export function ActivityLine({
       </span>
       <span className="al-text" role="status" aria-live="polite">
         <span className="al-label">{WORKING_LABEL}</span>
+        {status.retry === undefined || live ? null : (
+          <>
+            <span className="al-sep">·</span>
+            <span className="al-retry">{formatRetry(status.retry)}</span>
+          </>
+        )}
         {live && startedAt !== undefined ? (
           <>
             <span className="al-sep">·</span>

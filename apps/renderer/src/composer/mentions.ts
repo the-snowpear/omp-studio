@@ -1,16 +1,14 @@
 import type {
   AgentDefinitionRecord,
-  ExtensibilityReadModel,
   SkillRecord,
   StudioClient,
   WorkspaceFileTreeReadModel,
   WorkspaceId,
 } from "@omp-studio/client-contract";
 
-import { createPreviewDrawerItems } from "../skillsPreview";
 import type { MentionCandidate } from "./types";
 
-/** `@` shows agents plus workspace paths; `/` shows skills. */
+/** `@` shows agents, skills (when the query is non-empty), and workspace paths. `/` is the command menu, not a mention. */
 const MENTION_LIMIT = 12;
 
 function matchQuery(item: MentionCandidate, query: string): boolean {
@@ -28,16 +26,6 @@ export function filterMentions(items: readonly MentionCandidate[], query: string
   return items.filter((item) => matchQuery(item, query)).slice(0, MENTION_LIMIT);
 }
 
-function skillCandidate(skill: Pick<SkillRecord, "name" | "desc">): MentionCandidate {
-  return {
-    kind: "skill",
-    id: `skill:${skill.name}`,
-    label: skill.name,
-    name: skill.name,
-    ...(skill.desc ? { detail: skill.desc } : {}),
-  };
-}
-
 function agentCandidate(agent: Pick<AgentDefinitionRecord, "name" | "description">): MentionCandidate {
   return {
     kind: "agent",
@@ -45,6 +33,16 @@ function agentCandidate(agent: Pick<AgentDefinitionRecord, "name" | "description
     label: agent.name,
     name: agent.name,
     ...(agent.description ? { detail: agent.description } : {}),
+  };
+}
+
+function skillCandidate(skill: Pick<SkillRecord, "name" | "desc">): MentionCandidate {
+  return {
+    kind: "skill",
+    id: `skill:${skill.name}`,
+    label: skill.name,
+    name: skill.name,
+    ...(skill.desc ? { detail: skill.desc } : {}),
   };
 }
 
@@ -233,6 +231,10 @@ const PREVIEW_AGENTS: ReadonlyArray<MentionCandidate> = [
   { kind: "agent", id: "agent:generalPurpose", label: "generalPurpose", name: "generalPurpose", detail: "通用子代理" },
 ];
 
+const PREVIEW_SKILLS: ReadonlyArray<MentionCandidate> = [
+  { kind: "skill", id: "skill:commit-msg", label: "commit-msg", name: "commit-msg", detail: "Conventional Commits" },
+];
+
 const PREVIEW_ENTRIES: ReadonlyArray<WorkspaceEntry> = [
   { type: "dir", name: "src", path: "apps/renderer/src" },
   { type: "dir", name: "composer", path: "apps/renderer/src/composer" },
@@ -244,15 +246,11 @@ const PREVIEW_ENTRIES: ReadonlyArray<WorkspaceEntry> = [
 ];
 
 export function previewMentions(trigger: "@" | "/", query: string): MentionCandidate[] {
-  if (trigger === "/") {
-    const skills = createPreviewDrawerItems()
-      .filter((item) => item.kind === "skill")
-      .map((item) => skillCandidate({ name: item.name, desc: item.desc }));
-    return filterMentions(skills, query);
-  }
+  if (trigger === "/") return [];
   const agents = filterMentions(PREVIEW_AGENTS, query);
+  const skills = query.trim().length === 0 ? [] : filterMentions(PREVIEW_SKILLS, query);
   const entries = rankEntries(PREVIEW_ENTRIES, query.trim().replaceAll("\\", "/").toLowerCase());
-  return dedupeById([...agents, ...entries]).slice(0, MENTION_LIMIT);
+  return dedupeById([...agents, ...skills, ...entries]).slice(0, MENTION_LIMIT);
 }
 
 export async function loadMentions(
@@ -261,17 +259,27 @@ export async function loadMentions(
   query: string,
   files?: WorkspaceFileIndex,
 ): Promise<MentionCandidate[]> {
-  if (trigger === "/") {
-    const model: ExtensibilityReadModel = await client.query("skills.get", {});
-    const skills = model.skills.filter((skill) => skill.enabled && !skill.hide).map(skillCandidate);
-    return filterMentions(skills, query);
-  }
-  const [agents, entries] = await Promise.all([
+  if (trigger === "/") return [];
+  const needle = query.trim();
+  const [agents, skills, entries] = await Promise.all([
     client
       .query("agents.definitions.get", {})
       .then((model) => filterMentions(model.agents.filter((agent) => !agent.disabled).map(agentCandidate), query))
       .catch(() => [] as MentionCandidate[]),
+    needle.length === 0
+      ? Promise.resolve([] as MentionCandidate[])
+      : client
+          .query("skills.get", {})
+          .then((model) =>
+            filterMentions(
+              model.skills
+                .filter((skill) => skill.enabled && !skill.hide && skill.error === undefined)
+                .map(skillCandidate),
+              query,
+            ),
+          )
+          .catch(() => [] as MentionCandidate[]),
     files?.search(query).catch(() => [] as MentionCandidate[]) ?? Promise.resolve([] as MentionCandidate[]),
   ]);
-  return dedupeById([...agents, ...entries]).slice(0, MENTION_LIMIT);
+  return dedupeById([...agents, ...skills, ...entries]).slice(0, MENTION_LIMIT);
 }

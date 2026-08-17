@@ -42,6 +42,20 @@ import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerModePicker } from "./ComposerModePicker";
 import { ChipComposer, type ChipComposerHandle } from "./composer/ChipComposer";
 import {
+  isDestructiveMemoryClear,
+  planComposerSend,
+  resolveSlashExecute,
+  type SlashNativeUi,
+  type StudioSlashCommand,
+} from "./composer/commands";
+import {
+  canFlushQueuedMessage,
+  composerFollowUpEnabled,
+  composerPromptEnabled,
+  composerQueueEnabled,
+  visibleQueuedMessages,
+} from "./composer/dispatch";
+import {
   createWorkspaceFileIndex,
   loadMentions,
   previewMentions,
@@ -49,6 +63,7 @@ import {
 } from "./composer/mentions";
 import { snapshotFromDoc, snapshotFromText, snapshotIsEmpty } from "./composer/serialize";
 import { emptySnapshot, fileLabel, type ComposerSnapshot } from "./composer/types";
+import { mergeUsedSkills, skillNamesInDoc, skillNamesInText } from "./skills/skillUsage";
 import { MessageQueueBar, type QueuedMessage } from "./MessageQueueBar";
 import { injectMagicKeyword, type MagicKeyword } from "./composerMode";
 import { SettingsPage, setSettingsIntent } from "./SettingsPage";
@@ -64,7 +79,7 @@ import { pagePhaseClass, useDeferredKey } from "./pageTransition";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "./telemetry/useViewedSessionTelemetry";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { asConversationClient } from "./conversation/conversationHost";
-import { useAwaitingTurn, useRunWindow } from "./conversation/ActivityLine";
+import { useActivityRetry, useAwaitingTurn, useRunWindow } from "./conversation/ActivityLine";
 import { deriveActivityStatus, isAbortEligible } from "./conversation/activityStatus";
 import { ConversationEmpty } from "./conversation/ConversationEmpty";
 import { ConversationPane } from "./conversation/ConversationPane";
@@ -90,6 +105,7 @@ import {
   writeLayoutMemory,
 } from "./settings/appSettings";
 import { desktopNotice } from "./settings/desktopNotice";
+import { avatarInitial, useOperatorProfile } from "./settings/operatorProfile";
 import {
   PREVIEW_PROJECTS,
   PREVIEW_QUEUED_MESSAGES,
@@ -119,7 +135,9 @@ import { PreviewDeck } from "./preview/PreviewDeck";
 import { InteractionDeck } from "./InteractionDeck";
 import { PlanReviewDeck } from "./deck/PlanCard";
 import { PLAN_REFINE_FEEDBACK, type PlanActionId } from "./deck/types";
+import { ThreadSpin } from "./sidebar/ThreadSpin";
 import { ThreadWaitChip } from "./sidebar/ThreadWaitChip";
+import { threadRunningFromLive } from "./sidebar/threadRunning";
 import { waitKindFromLive, type ThreadWaitKind } from "./sidebar/threadWait";
 import { ensureSelectedSessionActive } from "./sessionLifecycle";
 import { GitStatusPanel, useGitRepository } from "./git/GitStatusPanel";
@@ -262,6 +280,27 @@ function asError(cause: unknown): ClientError {
   };
 }
 
+/** Session preferences apply on the next user turn; they must not wait for abort/prompt receipts. */
+const LIVE_SESSION_PREFERENCE_COMMANDS = new Set<CommandName>([
+  "session.model.set",
+  "session.thinking.set",
+  "mode.plan.enter",
+  "mode.plan.exit",
+  "mode.vibe.enter",
+  "mode.vibe.exit",
+  "goal.create",
+  "goal.drop",
+  "loop.enable",
+  "loop.disable",
+  "session.fast.set",
+  "session.prewalk.arm",
+  "session.prewalk.disarm",
+]);
+
+function isLiveSessionPreferenceCommand(name: CommandName): boolean {
+  return LIVE_SESSION_PREFERENCE_COMMANDS.has(name);
+}
+
 function snapshotFrom(state: ViewState): OperatorStateSnapshot | undefined {
   if (state.clientState !== undefined) {
     return state.clientState.entities.snapshot ?? undefined;
@@ -342,8 +381,19 @@ type EditCommand = "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll";
 type ShellDialog = "about" | "shortcuts";
 type WorkspaceCreationKind = "file" | "directory";
 type ArchivePending =
-  | { kind: "preview"; threadId: string; title: string }
-  | { kind: "real"; entry: SessionHistoryEntry };
+  | { kind: "preview"; threadId: string; title: string; streaming: boolean }
+  | { kind: "real"; entry: SessionHistoryEntry; streaming: boolean };
+
+function archiveConfirmIsStreaming(
+  pending: ArchivePending,
+  live: { readonly sessionId?: string; readonly isStreaming?: boolean } | undefined,
+): boolean {
+  if (pending.streaming) return true;
+  if (pending.kind !== "real") return false;
+  return pending.entry.sessionId !== undefined
+    && pending.entry.sessionId === live?.sessionId
+    && live.isStreaming === true;
+}
 
 function execEditCommand(command: EditCommand): void {
   try {
@@ -861,7 +911,7 @@ type ShellChrome = {
   /** 顶栏「归档」的目标会话；undefined = 不可用（原因见 archiveTargetReason）。 */
   archiveTarget: SessionHistoryEntry | undefined;
   archiveTargetReason: string | undefined;
-  /** 驻留 Runtime 正在使用的 sessionId；该会话不可归档（Host 会拒绝移动文件）。 */
+  /** 驻留 Runtime 正在使用的 sessionId；归档该会话时 Host 会先停止再移走文件。 */
   residentSessionId: string | undefined;
   /** 「展开更多」：该项目已展开的会话数 +10，必要时重查 history.list。 */
   onLoadMoreThreads: (projectId: string) => void;
@@ -886,6 +936,10 @@ type ShellChrome = {
   /** 进行中的 shell 动作类型；null = 空闲。 */
   projectShellAction: "editor" | "directory" | null;
   onAddComposerContext: (chip: { kind: "file" | "dir"; path: string; label: string }) => void;
+  onInsertSkill: (skill: { name: string; desc?: string }) => void;
+  onRemoveComposerSkill: (name: string) => void;
+  draftSkills: ReadonlySet<string>;
+  usedSkills: ReadonlySet<string>;
 };
 
 type ProjectShellActionResult =
@@ -1487,6 +1541,7 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
   const ompConnected = runtime?.status === "connected";
   const ompVersion = runtime?.runtimeVersion ?? (preview ? "v0.82.1" : "—");
   const ompMeta = preview ? "rpc/2.1 · 演示" : (runtime?.classification ?? "unavailable");
+  const { profile } = useOperatorProfile();
   useLayoutEffect(() => {
     if (!chrome.ompMenuOpen || !ompBtnRef.current) return;
     const place = () => {
@@ -1727,14 +1782,16 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
                   return (<>
                     {visible.map((thread) => {
                       const wait = thread.id === "t3" ? chrome.previewDeckWait : thread.wait;
+                      const running = thread.status === "running";
                       return (
                       <div className={`thread-row${wait ? " has-wait" : ""}`} key={thread.id}>
                         <button
                           className={`thread${chrome.previewThreadId === thread.id ? " active" : ""}`}
                           onClick={() => chrome.onSelectPreviewThread(thread.id)}
                         >
+                          <ThreadSpin running={running} />
                           <span className="t-title"><span className="t-scroll">{thread.title}</span></span>
-                          {wait ? null : <span className="t-meta">{thread.time}</span>}
+                          {wait || running ? null : <span className="t-meta">{thread.time}</span>}
                         </button>
                         {/* 悬停操作区：最右「归档」（演示：本地隐藏），其左 ⋯ 更多（功能未接入） */}
                         <span className="t-actions">
@@ -1793,14 +1850,21 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
                     return (<>
                       {entries.map((entry) => {
                         const wait = threadWaitForSession(entry.sessionId);
+                        const running = threadRunningFromLive({
+                          ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
+                          ...(liveSnapshot?.sessionId === undefined ? {} : { snapshotSessionId: liveSnapshot.sessionId }),
+                          ...(liveSnapshot?.isStreaming === undefined ? {} : { streaming: liveSnapshot.isStreaming }),
+                          ...(liveSnapshot?.isCompacting === undefined ? {} : { compacting: liveSnapshot.isCompacting }),
+                        });
                         return (
                         <div className={`thread-row${wait ? " has-wait" : ""}`} key={entry.historyId}>
                           <button
                             className={`thread${chrome.selectedHistoryId === entry.historyId ? " active" : ""}`}
                             onClick={() => chrome.onSelectThread(entry)}
                           >
+                            <ThreadSpin running={running} />
                             <span className="t-title"><span className="t-scroll">{entry.title}</span></span>
-                            {wait ? null : <span className="t-meta">{relativeTime(entry.lastActiveAt)}</span>}
+                            {wait || running ? null : <span className="t-meta">{relativeTime(entry.lastActiveAt)}</span>}
                           </button>
                           {/* 悬停操作区：最右「归档」（session.archive），其左 ⋯ 更多（功能未接入） */}
                           <span className="t-actions">
@@ -1808,9 +1872,8 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
                             <button
                               type="button"
                               className="icon-btn"
-                              data-tip={chrome.residentSessionId !== undefined && chrome.residentSessionId === entry.sessionId ? "归档：会话正在运行" : "归档会话"}
+                              data-tip={running ? "归档会话（进行中的输出会先停止）" : "归档会话"}
                               aria-label="归档会话"
-                              disabled={chrome.residentSessionId !== undefined && chrome.residentSessionId === entry.sessionId}
                               onClick={() => chrome.onArchiveThread(entry)}
                             ><Icon name="archive" extra="sm" /></button>
                           </span>
@@ -1918,20 +1981,26 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
         onClose={chrome.onToggleSkills}
         onEnabledCountChange={chrome.onSkillsEnabledCount}
         onOpenHub={(intent) => chrome.onOpenCapabilities(intent?.tab, intent?.name)}
+        onInsertSkill={chrome.onInsertSkill}
+        onRemoveSkill={chrome.onRemoveComposerSkill}
+        draftSkills={chrome.draftSkills}
+        usedSkills={chrome.usedSkills}
       />
       <footer className="sb-footer">
         <button
           ref={ompBtnRef}
           type="button"
           className="sb-user"
-          aria-label="Studio · OMP 状态与环境菜单"
+          aria-label={`${profile.displayName} · OMP 状态与环境菜单`}
           aria-haspopup="menu"
           aria-expanded={chrome.ompMenuOpen}
           onClick={chrome.onToggleOmpMenu}
         >
-          <span className="avatar" aria-hidden="true">S</span>
+          {profile.avatarSrc
+            ? <img className="avatar" src={profile.avatarSrc} alt="" draggable={false} />
+            : <span className="avatar" aria-hidden="true">{avatarInitial(profile.displayName)}</span>}
           <span>
-            <span className="u-name">Studio</span>
+            <span className="u-name">{profile.displayName}</span>
             <span className={`u-status ${omp.tone}`} role="status" aria-live="polite">
               <span className={`dot ${omp.tone === "ok" ? "green" : omp.tone === "err" ? "red" : "amber"}${omp.tone === "ok" ? " pulse" : ""}`} aria-hidden="true" />
               <span>{omp.text}</span>
@@ -2319,11 +2388,21 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
                 <MenuItem icon="history" onClick={() => run(() => onRoute("history"))}>会话历史</MenuItem>
                 <MenuItem
                   icon="archive"
-                  disabled={chrome.archiveTarget === undefined}
-                  {...(chrome.archiveTarget === undefined
-                    ? { title: chrome.archiveTargetReason ?? "归档：当前没有可归档的会话" }
-                    : { title: "归档当前对话（移入冷归档，可在会话历史页查看/恢复）" })}
+                  disabled={preview ? chrome.hiddenPreviewThreads.has(chrome.previewThreadId) : chrome.archiveTarget === undefined}
+                  {...(preview
+                    ? chrome.hiddenPreviewThreads.has(chrome.previewThreadId)
+                      ? { title: "归档：该演示会话已隐藏" }
+                      : { title: "归档当前对话（演示）" }
+                    : chrome.archiveTarget === undefined
+                      ? { title: chrome.archiveTargetReason ?? "归档：当前没有可归档的会话" }
+                      : { title: sessionBusy
+                        ? "归档当前对话（将先停止进行中的输出，再移入冷归档）"
+                        : "归档当前对话（移入冷归档，可在会话历史页查看/恢复）" })}
                   onClick={() => {
+                    if (preview) {
+                      run(() => chrome.onArchivePreviewThread(chrome.previewThreadId));
+                      return;
+                    }
                     const target = chrome.archiveTarget;
                     if (target !== undefined) run(() => chrome.onArchiveThread(target));
                   }}
@@ -2453,7 +2532,7 @@ function useComposerCollisionCollapse() {
   return barRef;
 }
 
-function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId }: {
+function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged }: {
   state: ViewState;
   client: ClientStateSource;
   selectedSessionId?: string;
@@ -2489,6 +2568,10 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   onOpenGit: () => void;
   composerRef: { current: ChipComposerHandle | null };
   workspaceId?: string;
+  onSlashUi: (ui: SlashNativeUi) => void;
+  onDraftSkillsChange?: (names: ReadonlySet<string>) => void;
+  onUsedSkillsChange?: (identityKey: string, names: ReadonlySet<string>) => void;
+  onSessionTitleMaybeChanged?: () => void;
 }) {
   const [draft, setDraft] = useState<ComposerSnapshot>(emptySnapshot);
   const [bottomResizing, setBottomResizing] = useState(false);
@@ -2643,6 +2726,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   const [previewCreatedProject, setPreviewCreatedProject] = useState<{ id: string; name: string } | null>(null);
   const [approvalMenuOpen, setApprovalMenuOpen] = useState(false);
   const [magicKeyword, setMagicKeyword] = useState<MagicKeyword | null>(null);
+  const [modelMenuNonce, setModelMenuNonce] = useState(0);
+  const [modeMenuNonce, setModeMenuNonce] = useState(0);
+  const [modeOpenToggles, setModeOpenToggles] = useState(false);
   const [changesFocusPath, setChangesFocusPath] = useState<string | undefined>();
   const promptUnsub = useRef<Unsubscribe | undefined>(undefined);
   useEffect(() => () => promptUnsub.current?.(), []);
@@ -2697,6 +2783,17 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     runtimeConnected,
     ...(previewThreadId === undefined ? {} : { previewThreadId }),
   });
+  useEffect(() => {
+    onDraftSkillsChange?.(skillNamesInDoc(draft.doc));
+  }, [draft.doc, onDraftSkillsChange]);
+  useEffect(() => {
+    const names = new Set<string>();
+    for (const row of convo.rows) {
+      if (row.type !== "user") continue;
+      for (const name of skillNamesInText(row.text)) names.add(name);
+    }
+    onUsedSkillsChange?.(convo.identityKey, names);
+  }, [convo.rows, convo.identityKey, onUsedSkillsChange]);
   useEffect(() => {
     toastedStatusIds.current = new Set();
   }, [convo.identityKey]);
@@ -2806,8 +2903,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   const selectedTargetRef = useRef({ selectedSessionId, selectedThreadId });
   selectedTargetRef.current = { selectedSessionId, selectedThreadId };
   const run = useCallback(async <T extends CommandName>(name: T, input: CommandInput<T>): Promise<boolean> => {
-    if (busy) return false;
-    setBusy(true);
+    const concurrent = isLiveSessionPreferenceCommand(name);
+    if (busy && !concurrent) return false;
+    if (!concurrent) setBusy(true);
     try {
       const handle = await client.command(name, input);
       const result = await waitReceipt<{ readonly syncStatus?: "complete" | "partial"; readonly failedSessions?: number }>(client, handle.requestId);
@@ -2827,7 +2925,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
       }
       setComposerError(message);
       return false;
-    } finally { setBusy(false); }
+    } finally {
+      if (!concurrent) setBusy(false);
+    }
   }, [busy, client]);
   const respond = useCallback((decision: "submit" | "cancel", value?: InteractionResponseValue): Promise<boolean> => {
     if (!pendingInteraction) return Promise.resolve(false);
@@ -2864,15 +2964,23 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     failed: promptFailed,
     identityKey: convo.identityKey,
   });
+  const activityRetry = useActivityRetry({
+    notices: convo.state.notices,
+    streaming: sessionStreaming,
+    failed: promptFailed,
+    identityKey: convo.identityKey,
+  });
   // Composer / abort / queue flush are write surfaces: follow the live Runtime,
   // including the send → isStreaming snapshot gap. Preview must not replace this
   // with the t1 demo story or the stop button appears while core.abort stays gated.
-  const running = sessionStreaming || (executionMatches && awaitingTurn);
+  const retrying = executionMatches && activityRetry !== undefined;
+  const running = sessionStreaming || (executionMatches && awaitingTurn) || retrying;
   const abortEligible = isAbortEligible({
     executionMatches,
     streaming: sessionStreaming,
     pendingMessages: snapshot?.pendingMessages ?? 0,
     awaiting: awaitingTurn,
+    retrying,
   });
   const abortAllowed = !gated && abortEligible && can("core.abort");
   const activityStatus = useMemo(
@@ -2883,8 +2991,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
           streaming: sessionStreaming,
           pendingMessages: snapshot?.pendingMessages ?? 0,
           awaiting: executionMatches && awaitingTurn,
+          ...(activityRetry === undefined ? {} : { retry: activityRetry }),
         })),
-    [awaitingTurn, convo.state, executionMatches, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages],
+    [activityRetry, awaitingTurn, convo.state, executionMatches, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages],
   );
   const runWindow = useRunWindow(activityStatus !== null);
   const activity = activityStatus === null || sessionCreating === true
@@ -3048,16 +3157,39 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     sessionCreating !== true &&
     promptTargetReady &&
     can("core.prompt");
-  const promptEnabled = textReady && !running && (promptChannelReady || sessionCreating === true);
-  const testRerunDisabled = !promptChannelReady || running;
+  const promptEnabled = composerPromptEnabled({
+    textReady,
+    running,
+    pendingInteraction: pendingInteraction !== null,
+    promptChannelReady,
+    sessionCreating,
+  });
+  const testRerunDisabled = !promptChannelReady || running || pendingInteraction !== null;
   const testRerunTitle = running
     ? "当前回合进行中，等结束后再请 Agent 重跑"
-    : promptChannelReady
-      ? "请 Agent 用同一条命令再跑一次"
-      : "没有活动会话或 Runtime 未就绪";
+    : pendingInteraction !== null
+      ? "请先处理上方的询问或审批"
+      : promptChannelReady
+        ? "请 Agent 用同一条命令再跑一次"
+        : "没有活动会话或 Runtime 未就绪";
   // 流式期间 Enter 不再禁用：消息进本地排队栏，本轮结束后自动发送。
-  // 想插话就在排队栏里「立刻发送」，走 core.followUp 交给 Runtime 排队。
-  const queueEnabled = textReady && running && promptChannelReady;
+  // 想纠偏就在排队栏里点「插入纠偏」，走 core.steer 打断当前回合。
+  const queueEnabled = composerQueueEnabled({ textReady, running, promptChannelReady });
+  const followUpChannelReady =
+    !busy &&
+    !connection?.resyncRequired &&
+    !sending &&
+    sessionCreating !== true &&
+    promptTargetReady &&
+    can("core.followUp");
+  const followUpEnabled = composerFollowUpEnabled({
+    textReady,
+    running,
+    pendingInteraction: pendingInteraction !== null,
+    followUpChannelReady,
+  });
+  const steerNowEnabled =
+    !sending && sessionCreating !== true && promptTargetReady && !connection?.resyncRequired && can("core.steer");
   const restorePending = (requestId: string) => {
     const pending = convo.state.pendingUsers.find((entry) => entry.requestId === requestId);
     if (!pending) return;
@@ -3073,14 +3205,34 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   };
   // sendPrompt 与排队 flush 共用的发送路径。失败时置 composerError 并返回 false，
   // 草稿恢复方式由调用方决定（输入框草稿回填 vs 排队条目回队）。
-  const dispatchPrompt = async (payload: ComposerSnapshot): Promise<boolean> => {
-    const trimmed = payload.text.trim();
-    if (!trimmed && payload.images.length === 0) return false;
+  const dispatchPrompt = async (payload: ComposerSnapshot, options?: { readonly asFollowUp?: boolean }): Promise<boolean> => {
+    const plan = planComposerSend(payload);
+    let outboundPayload = payload;
     const targetSessionId = selectedSessionId as SessionId | undefined;
     const targetThreadId = selectedThreadId;
     setComposerSubmitted(true);
     setSending(true);
     try {
+      if (plan.kind === "execute") {
+        if (options?.asFollowUp === true && running) {
+          setComposerError("当前回合进行中，斜杠指令请等结束后再发。");
+          return false;
+        }
+        return await runSlashCommand(plan.command, plan.args);
+      }
+      if (plan.kind === "apply-then-prompt") {
+        for (const step of plan.apply) {
+          const ok = await runSlashCommand(step.command, step.args);
+          if (!ok) return false;
+        }
+        if (snapshotIsEmpty(plan.snapshot) && plan.snapshot.images.length === 0) return true;
+        outboundPayload = plan.snapshot;
+      }
+      if (plan.kind === "follow-up") {
+        outboundPayload = plan.snapshot;
+      }
+      const trimmed = outboundPayload.text.trim();
+      if (!trimmed && outboundPayload.images.length === 0) return false;
       const resumed = targetSessionId !== undefined && snapshot?.sessionId !== targetSessionId;
       await ensureSelectedSessionActive(client, {
         ...(snapshot?.sessionId === undefined ? {} : { activeSessionId: snapshot.sessionId }),
@@ -3097,8 +3249,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
       if (resumed) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
-      const outbound = promptInputOf(payload);
-      const handle = await client.command("core.prompt", outbound);
+      const outbound = promptInputOf(outboundPayload);
+      const commandName = options?.asFollowUp === true || plan.kind === "follow-up" ? "core.followUp" : "core.prompt";
+      const handle = await client.command(commandName, outbound);
       const pendingConvo = convoRef.current;
       pendingConvo.trackPending({
         requestId: handle.requestId,
@@ -3133,6 +3286,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
         ? client.onState(() => watchReceipt())
         : client.subscribe({ scope: "command", requestId: handle.requestId }, () => watchReceipt());
       watchReceipt();
+      if (!preview) onSessionTitleMaybeChanged?.();
       return true;
     } catch (error) {
       setComposerError(hostErrorMessage(error, "发送失败"));
@@ -3163,12 +3317,24 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
       composerInputRef.current?.setSnapshot(payload);
     }
   };
+  const sendFollowUp = async () => {
+    if (!followUpEnabled) return;
+    setComposerError(undefined);
+    const payload = composerInputRef.current?.getSnapshot() ?? draft;
+    composerInputRef.current?.clear();
+    setDraft(emptySnapshot());
+    if (!(await dispatchPrompt(payload, { asFollowUp: true }))) {
+      setDraft(payload);
+      composerInputRef.current?.setSnapshot(payload);
+    }
+  };
   const takeComposerSnapshot = (): ComposerSnapshot => composerInputRef.current?.getSnapshot() ?? draft;
   const queueEntryOf = (payload: ComposerSnapshot, id: number): QueuedMessage => ({
     id,
     text: payload.text,
     ...(payload.images.length > 0 ? { images: payload.images } : {}),
     doc: payload.doc,
+    ...(selectedSessionId === undefined ? {} : { sessionId: selectedSessionId }),
   });
   const snapshotOfEntry = (entry: QueuedMessage): ComposerSnapshot => (
     entry.doc ? { text: entry.text, images: entry.images ?? [], doc: entry.doc } : snapshotFromText(entry.text)
@@ -3211,32 +3377,56 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     if (preview) setPreviewQueue((queue) => queue.filter((item) => item.id !== entry.id));
     else setQueuedMessages((queue) => queue.filter((item) => item.id !== entry.id));
   };
-  // 「立刻发送」：流式走 core.followUp 直接交给 Runtime 排队（本轮结束后处理，快照
-  // pendingMessages 会显示 Follow-up ×N）；空闲时等价于直接 prompt。
-  // 预览模式下仅从本地演示列表移除，不调 Host。
+  // 「插入纠偏」：流式走 core.steer，打断当前回合（当前工具跑完后跳过尚未开始的
+  // 调用，立刻处理这条）。空闲时等价于直接 prompt。预览模式只从本地列表移除。
   const sendQueuedNow = async (entry: QueuedMessage) => {
     if (preview) {
       setPreviewQueue((queue) => queue.filter((item) => item.id !== entry.id));
       return;
     }
-    if (sending || busy) return;
+    if (sending) return;
     setComposerError(undefined);
     if (!running) {
+      if (busy) return;
       setQueuedMessages((queue) => queue.filter((item) => item.id !== entry.id));
       if (!(await dispatchPrompt(snapshotOfEntry(entry)))) {
         setQueuedMessages((queue) => [{ ...entry }, ...queue]);
       }
       return;
     }
-    if (!promptTargetReady || !can("core.followUp")) return;
+    if (!steerNowEnabled) return;
     setSending(true);
     try {
-      const outbound = promptInputOf(snapshotOfEntry(entry));
-      const handle = await client.command("core.followUp", outbound);
+      const planned = planComposerSend(snapshotOfEntry(entry));
+      if (planned.kind === "execute") {
+        setComposerError("当前回合进行中，斜杠指令请等结束后再发。");
+        return;
+      }
+      let outboundPayload = snapshotOfEntry(entry);
+      if (planned.kind === "apply-then-prompt") {
+        for (const step of planned.apply) {
+          const ok = await runSlashCommand(step.command, step.args);
+          if (!ok) return;
+        }
+        outboundPayload = planned.snapshot;
+      } else {
+        outboundPayload = planned.snapshot;
+      }
+      const outbound = promptInputOf(outboundPayload);
+      const handle = await client.command("core.steer", outbound);
+      const pendingConvo = convoRef.current;
+      pendingConvo.trackPending({
+        requestId: handle.requestId,
+        text: outbound.text,
+        draft: entry.text,
+        status: "pending",
+        knownItemIds: pendingConvo.state.items.map((item) => item.itemId),
+      });
       await waitReceipt(client, handle.requestId);
       setQueuedMessages((queue) => queue.filter((item) => item.id !== entry.id));
+      if (!preview) onSessionTitleMaybeChanged?.();
     } catch (error) {
-      setComposerError(hostErrorMessage(error, "排队发送失败"));
+      setComposerError(hostErrorMessage(error, "纠偏失败"));
     } finally {
       setSending(false);
     }
@@ -3246,16 +3436,28 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   //（running 仍为 false）时靠 tick 继续排水；失败回队后设冷却窗口，防止快速持续失败
   // （如会话切换冲突）被重新入队的依赖变化立刻重触发而形成热重试循环。
   useEffect(() => {
-    if (running || pendingInteraction !== null || !promptChannelReady || queuedMessages.length === 0) return;
-    const head = queuedMessages[0];
-    if (head === undefined || queueFlushBusyRef.current) return;
+    const head = queuedMessages.find((entry) => entry.sessionId === selectedSessionId);
+    if (
+      head === undefined ||
+      queueFlushBusyRef.current ||
+      !canFlushQueuedMessage({
+        running,
+        pendingInteraction: pendingInteraction !== null,
+        promptChannelReady,
+        ...(selectedSessionId === undefined ? {} : { selectedSessionId }),
+        ...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId }),
+        ...(head.sessionId === undefined ? {} : { entrySessionId: head.sessionId }),
+      })
+    ) {
+      return;
+    }
     const retryDelay = queueRetryAtRef.current - Date.now();
     if (retryDelay > 0) {
       const timer = window.setTimeout(() => setQueueFlushTick((tick) => tick + 1), retryDelay);
       return () => window.clearTimeout(timer);
     }
     queueFlushBusyRef.current = true;
-    setQueuedMessages((queue) => queue.slice(1));
+    setQueuedMessages((queue) => queue.filter((item) => item.id !== head.id));
     void (async () => {
       let sent = false;
       try {
@@ -3271,7 +3473,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     })();
     // dispatchPrompt 每渲染重建（与 sendPrompt 同风格），effect 触发时同步快照队列头，
     // 不进依赖以免每次渲染都重启 flush。
-  }, [running, pendingInteraction, promptChannelReady, queuedMessages, queueFlushTick]);
+  }, [running, pendingInteraction, promptChannelReady, queuedMessages, queueFlushTick, selectedSessionId, snapshot?.sessionId]);
   // 一次有界遍历后本地过滤，`@` 的每次击键不再回打 Host；换项目才重建索引。
   const fileIndex = useMemo(
     () => (preview || workspaceId === undefined
@@ -3280,6 +3482,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     [preview, client, workspaceId],
   );
   const fetchMentions = useCallback(async (trigger: "@" | "/", query: string) => {
+    if (trigger === "/") return [];
     if (preview) return previewMentions(trigger, query);
     try {
       return await loadMentions(client, trigger, query, fileIndex);
@@ -3287,6 +3490,71 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
       return [];
     }
   }, [preview, client, fileIndex]);
+  function openSlashUi(ui: SlashNativeUi): void {
+    if (ui === "model-picker") {
+      setModelMenuNonce((value) => value + 1);
+      return;
+    }
+    if (ui === "mode-picker") {
+      setModeOpenToggles(false);
+      setModeMenuNonce((value) => value + 1);
+      return;
+    }
+    if (ui === "mode-toggles") {
+      setModeOpenToggles(true);
+      setModeMenuNonce((value) => value + 1);
+      return;
+    }
+    if (ui === "plan-review") {
+      if (!preview) void run("mode.plan.review.open", {});
+      return;
+    }
+    if (ui === "session-tree") {
+      onOpenChanges();
+      return;
+    }
+    onSlashUi(ui);
+  }
+  async function runSlashCommand(command: StudioSlashCommand, args: string): Promise<boolean> {
+    if (command.availability === "disabled") {
+      setComposerError(command.disabledReason ?? `/${command.name} 暂不可用`);
+      return false;
+    }
+    const destructive = command.risk === "destructive" || isDestructiveMemoryClear(command, args);
+    if (destructive && !preview && !window.confirm(`确定执行 /${command.name}${args ? ` ${args}` : ""}？此操作会改会话状态。`)) {
+      return false;
+    }
+    const execute = resolveSlashExecute(command, args);
+    if (execute.kind === "none") return false;
+    if (execute.kind === "native-ui") {
+      openSlashUi(execute.ui);
+      return true;
+    }
+    if (preview) {
+      setStatusToast(`演示：/${command.name}${args ? ` ${args}` : ""}`);
+      return true;
+    }
+    if (execute.kind === "typed") {
+      return run(execute.name as CommandName, execute.input as CommandInput<CommandName>);
+    }
+    if (execute.kind === "invoke") {
+      try {
+        const handle = await client.command("operator.invoke", {
+          commandId: execute.commandId,
+          ...(execute.arguments ? { arguments: execute.arguments } : {}),
+        });
+        const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
+        const line = outcome.output.find((item) => item.trim().length > 0);
+        setStatusToast(line ?? `已执行 /${command.name}`);
+        setComposerError(undefined);
+        return true;
+      } catch (error) {
+        setComposerError(hostErrorMessage(error, `/${command.name} 失败`));
+        return false;
+      }
+    }
+    return false;
+  }
   return (
     <>
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
@@ -3692,9 +3960,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
               </div>
             ) : null}
             <MessageQueueBar
-              messages={preview ? previewQueue : queuedMessages}
+              messages={preview ? previewQueue : visibleQueuedMessages(queuedMessages, selectedSessionId)}
               running={preview ? previewThreadId === "t1" : running}
-              sendEnabled={preview || (promptChannelReady && (!running || can("core.followUp")))}
+              sendEnabled={preview || (running ? steerNowEnabled : promptChannelReady)}
               {...(preview ? { demo: true } : {})}
               onEdit={editQueuedMessage}
               onSendNow={(entry) => void sendQueuedNow(entry)}
@@ -3707,13 +3975,15 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                 ref={composerInputRef}
                 id="composerInput"
                 compact={running && !composerExpanded}
-                placeholder="输入消息… / 插入技能，@ 引用文件或 Agent；拖入或粘贴文件变成胶囊"
+                placeholder="输入消息… / 指令，@ 引用文件、Agent 或 Skill；拖入或粘贴文件变成胶囊"
                 describedBy="composerHint"
                 {...(workspaceId === undefined ? {} : { workspaceId })}
                 loadMentions={fetchMentions}
+                onRunCommand={runSlashCommand}
                 onChange={setDraft}
                 onSubmit={() => { if (promptEnabled) void sendPrompt(); }}
                 onQueue={enqueueDraft}
+                onFollowUp={() => { if (followUpEnabled) void sendFollowUp(); }}
                 running={running}
                 onFocus={() => setComposerExpanded(true)}
                 onPointerDown={(event) => {
@@ -3729,7 +3999,13 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                 }}
                 onError={setComposerError}
               />
-              <p className="sr-only" id="composerHint">{running ? "按 Enter 将消息加入排队栏，本轮结束后自动发送" : "按 Enter 发送，Shift+Enter 换行"}</p>
+              <p className="sr-only" id="composerHint">{
+                running
+                  ? "按 Enter 将消息加入排队栏，本轮结束后自动发送。Ctrl+Enter 立刻交给 Runtime，本轮结束后处理，可带图片。"
+                  : pendingInteraction
+                    ? "请先处理上方的询问或审批，再发送新消息"
+                    : "按 Enter 发送，Ctrl+Enter 作为后续消息发送（可带图），Shift+Enter 换行"
+              }</p>
               {composerError ? (
                 <div className="composer-error" role="alert">
                   <Icon name="alert" extra="sm" />
@@ -3739,8 +4015,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
               <div className="composer-bar" data-collapse="full" ref={composerBarRef}>
                 <div className="cb-group">
                   <button className="icon-btn small" data-tip="附件 / 图片" aria-label="附件 / 图片" onClick={() => composerInputRef.current?.openFilePicker()}><Icon name="attach" extra="sm" /></button>
-                  <button className="icon-btn small" data-tip="@ 引用文件 / 文件夹 / Agent" aria-label="@ 引用文件、文件夹或 Agent" onClick={() => composerInputRef.current?.openMention("@")}><Icon name="at" extra="sm" /></button>
-                  <button className="icon-btn small" data-tip="插入技能" aria-label="插入技能" onClick={() => composerInputRef.current?.openMention("/")}><Icon name="slash" extra="sm" /></button>
+                  <button className="icon-btn small" data-tip="@ 引用文件 / 文件夹 / Agent / Skill" aria-label="@ 引用文件、文件夹、Agent 或 Skill" onClick={() => composerInputRef.current?.openMention("@")}><Icon name="at" extra="sm" /></button>
+                  <button className="icon-btn small" data-tip="指令" aria-label="指令" onClick={() => composerInputRef.current?.openCommandMenu()}><Icon name="slash" extra="sm" /></button>
                 </div>
                 <div className="approval-pill-wrap">
                   <button
@@ -3789,6 +4065,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                   keyword={magicKeyword}
                   onKeywordChange={setMagicKeyword}
                   onRun={run}
+                  openNonce={modeMenuNonce}
+                  openToggles={modeOpenToggles}
                 />
                 <span className="spacer" />
                 <ComposerModelPicker
@@ -3799,6 +4077,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                   can={can}
                   busy={busy}
                   onRun={run}
+                  openNonce={modelMenuNonce}
                 />
                 {/* 运行中且没有草稿时，发送位变停止；有草稿时保持"加入排队栏"，
                     否则会吃掉流式期间唯一的点击排队入口。 */}
@@ -3821,8 +4100,20 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                     className="send-btn"
                     disabled={!(promptEnabled || queueEnabled || (preview && running))}
                     onClick={() => (running ? enqueueDraft() : void sendPrompt())}
-                    data-tip={running ? "运行中：加入排队栏，本轮结束后发送 (Enter)" : "发送 (Enter)"}
-                    title={running ? "运行中：按 Enter 或点击这里把消息加入排队栏" : "发送 (Enter)"}
+                    data-tip={
+                      running
+                        ? "运行中：Enter 加入排队栏；Ctrl+Enter 立刻 follow-up（可带图）"
+                        : pendingInteraction
+                          ? "请先处理上方的询问或审批"
+                          : "发送 (Enter)；Ctrl+Enter 作为后续消息"
+                    }
+                    title={
+                      running
+                        ? "Enter 加入本地排队栏。Ctrl+Enter 立刻交给 Runtime，本轮结束后处理。"
+                        : pendingInteraction
+                          ? "请先处理上方的询问或审批"
+                          : "Enter 发送。Ctrl+Enter 作为后续消息发送，可带图片。"
+                    }
                   >
                     <Icon name="send" extra="sm" />
                   </button>
@@ -4061,6 +4352,20 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [projectListExpanded, setProjectListExpanded] = useState(true);
   const [selectedProject, setSelectedProject] = useState<SelectedProject | null>(() => previewOn() ? CURRENT_PROJECT : null);
   const composerRef = useRef<ChipComposerHandle | null>(null);
+  const [draftSkills, setDraftSkills] = useState<ReadonlySet<string>>(() => new Set());
+  const [usedSkills, setUsedSkills] = useState<ReadonlySet<string>>(() => new Set());
+  const usedSkillsIdentityRef = useRef("");
+  const onDraftSkillsChange = useCallback((names: ReadonlySet<string>) => {
+    setDraftSkills(names);
+  }, []);
+  const onUsedSkillsChange = useCallback((identityKey: string, names: ReadonlySet<string>) => {
+    if (usedSkillsIdentityRef.current !== identityKey) {
+      usedSkillsIdentityRef.current = identityKey;
+      setUsedSkills(names);
+      return;
+    }
+    setUsedSkills((prev) => mergeUsedSkills(prev, names));
+  }, []);
   /** 各项目当前展开的会话条数；折叠会话列表时清掉对应键回到默认 6 条。 */
   const [projectThreadLimits, setProjectThreadLimits] = useState<Record<string, number>>({});
   /** 预览模式「归档」演示隐藏的会话 id（仅本地，不碰 Host）。 */
@@ -4150,8 +4455,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     };
   }, [wantHistoryAll, client]);
   const previewThread = findPreviewThread(previewThreadId);
-  /** 顶栏「归档」目标：当前选中的历史会话（休眠视图可直接归档）；
-      驻留 Runtime 上的会话无法归档（Host 会拒绝移动正在写的文件）。 */
+  /** 顶栏「归档」目标：当前选中的历史会话，或驻留 Runtime 上的会话。
+      进行中的会话也可以归档：Host 会先停止再移走文件。 */
   const residentSessionId = snapshot?.sessionId;
   const archiveTargetBase = selected
     ?? state.model.history?.entries.find((entry) => entry.sessionId !== undefined && entry.sessionId === residentSessionId);
@@ -4159,9 +4464,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     ? "归档：当前没有可归档的会话"
     : archiveTargetBase.status === "archived"
       ? "归档：该会话已在归档中"
-      : archiveTargetBase.sessionId !== undefined && archiveTargetBase.sessionId === residentSessionId
-        ? "归档：会话正在运行，请先切换或结束会话"
-        : undefined;
+      : undefined;
   const archiveTarget = archiveTargetReason === undefined ? archiveTargetBase : undefined;
   const threadTitle = previewMode.preview
     ? (previewThread?.thread.title ?? "跟踪上游 pi-web 更新到 omp-web")
@@ -4428,13 +4731,22 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (archiveBusy) return;
     const hit = findPreviewThread(threadId);
     setArchiveError(undefined);
-    setArchivePending({ kind: "preview", threadId, title: hit?.thread.title ?? "该会话" });
+    setArchivePending({
+      kind: "preview",
+      threadId,
+      title: hit?.thread.title ?? "该会话",
+      streaming: hit?.thread.status === "running",
+    });
   };
 
   const requestArchiveThread = (entry: SessionHistoryEntry) => {
     if (archiveBusy) return;
     setArchiveError(undefined);
-    setArchivePending({ kind: "real", entry });
+    setArchivePending({
+      kind: "real",
+      entry,
+      streaming: entry.sessionId !== undefined && entry.sessionId === snapshot?.sessionId && snapshot.isStreaming === true,
+    });
   };
 
   /** 归档/取消归档成功后刷新两个 history 模型：侧栏（active）与历史页（全量）。 */
@@ -4452,7 +4764,22 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     }
   }, [client, onHistoryChange, state.model.history?.entries.length]);
 
-  /** 真实模式「归档」：session.archive 把会话移入 OMP 冷归档（gzip）；
+  const sessionTitleRefreshTimers = useRef<number[]>([]);
+  const refreshSessionTitles = useCallback(() => {
+    if (previewMode.preview) return;
+    for (const id of sessionTitleRefreshTimers.current) window.clearTimeout(id);
+    sessionTitleRefreshTimers.current = [0, 2_000, 8_000].map((delay) =>
+      window.setTimeout(() => {
+        void refreshHistoryModels();
+      }, delay),
+    );
+  }, [previewMode.preview, refreshHistoryModels]);
+  useEffect(() => () => {
+    for (const id of sessionTitleRefreshTimers.current) window.clearTimeout(id);
+  }, []);
+
+  /** 真实模式「归档」：session.archive 把会话移入 OMP 冷归档（gzip）。
+      进行中的会话由 Host 先 abort / 切走 Runtime，再移文件。
       归档的是当前选中会话时回到新对话视图。仅由确认弹窗调用。 */
   const archiveThread = async (entry: SessionHistoryEntry): Promise<boolean> => {
     try {
@@ -4593,8 +4920,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     runSessionCreate(async () => {
       const handle = await client.command("session.create", {});
       await waitReceipt(client, handle.requestId);
+      refreshSessionTitles();
     });
-  }, [client, go, onNewThread, previewMode.preview, runSessionCreate]);
+  }, [client, go, onNewThread, previewMode.preview, runSessionCreate, refreshSessionTitles]);
 
   /** 项目行「＋」：在指定项目下新建会话。非激活项目先 workspace.open
    * 并等待回执（Host 在回执前完成 Runtime 重绑），再 session.create，
@@ -4626,8 +4954,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       }
       const handle = await client.command("session.create", {});
       await waitReceipt(client, handle.requestId);
+      refreshSessionTitles();
     });
-  }, [client, previewMode.preview, go, onNewThread, onWorkspacesChange, runSessionCreate, state.model.workspaces]);
+  }, [client, previewMode.preview, go, onNewThread, onWorkspacesChange, runSessionCreate, state.model.workspaces, refreshSessionTitles]);
 
   const openHistoryEntry = (entry: SessionHistoryEntry) => {
     if (previewMode.preview) {
@@ -5024,6 +5353,20 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       });
       composerRef.current?.focus();
     },
+    onInsertSkill: (skill) => {
+      composerRef.current?.insertChip({
+        kind: "skill",
+        label: skill.name,
+        name: skill.name,
+      });
+      composerRef.current?.focus();
+    },
+    onRemoveComposerSkill: (name) => {
+      composerRef.current?.removeSkillChip(name);
+      composerRef.current?.focus();
+    },
+    draftSkills,
+    usedSkills,
   };
 
   return (
@@ -5242,6 +5585,21 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             onOpenChanges={() => { setSideTab("changes"); setSideOpen(true); }}
             onOpenGit={() => { setSideTab("git"); setSideOpen(true); }}
             composerRef={composerRef}
+            onDraftSkillsChange={onDraftSkillsChange}
+            onUsedSkillsChange={onUsedSkillsChange}
+            onSessionTitleMaybeChanged={refreshSessionTitles}
+            onSlashUi={(ui) => {
+              if (ui === "settings") { go("settings"); return; }
+              if (ui === "model-config") { go("model-config"); return; }
+              if (ui === "capabilities-mcp") { setCapIntent("mcp"); go("capabilities"); return; }
+              if (ui === "capabilities-plugins") { setCapIntent("plugins"); go("capabilities"); return; }
+              if (ui === "capabilities-slash") { setCapIntent("slash"); go("capabilities"); return; }
+              if (ui === "agent-hub") { go("agent-hub"); return; }
+              if (ui === "history") { go("history"); return; }
+              if (ui === "new-chat") { startNewChat(); return; }
+              if (ui === "command-palette") { openPalette(); return; }
+              if (ui === "skills-drawer") { setSkillsOpen(true); return; }
+            }}
             {...(selectedProject?.id === undefined ? {} : { workspaceId: selectedProject.id })}
           />
           <span className="sr-only">client contract v{CLIENT_CONTRACT_VERSION}{snapshot ? ` · session ${snapshot.sessionId}` : ""}</span>
@@ -5305,6 +5663,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
                 <p className="create-branch-sub">
                   确定要归档「{archivePending.kind === "preview" ? archivePending.title : archivePending.entry.title}」吗？
                 </p>
+                {archiveConfirmIsStreaming(archivePending, snapshot) ? (
+                  <p className="create-branch-sub">当前对话正在进行。确认后将强制停止输出，再归档。</p>
+                ) : null}
               </div>
               <button type="button" className="icon-btn" aria-label="关闭" disabled={archiveBusy} onClick={closeArchiveConfirm}><Icon name="x" /></button>
             </div>
@@ -5319,7 +5680,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             <div className="create-project-foot">
               <button type="button" className="btn outline" disabled={archiveBusy} onClick={closeArchiveConfirm}>取消</button>
               <button type="button" className="btn primary" autoFocus disabled={archiveBusy} onClick={confirmArchive}>
-                {archiveBusy ? <><span className="spinner" aria-hidden="true" />正在归档</> : "归档"}
+                {archiveBusy
+                  ? <><span className="spinner" aria-hidden="true" />{archiveConfirmIsStreaming(archivePending, snapshot) ? "正在停止并归档" : "正在归档"}</>
+                  : "归档"}
               </button>
             </div>
           </section>

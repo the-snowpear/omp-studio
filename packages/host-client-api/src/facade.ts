@@ -498,6 +498,7 @@ export class StudioHostClientFacade implements ClientTransport {
   #lastHello: HostRuntimeHelloView | undefined;
   #lastEmittedConnection: RuntimeConnection | undefined;
   #lastPublishedVersion: StateVersion | undefined;
+  #lastPublishedRuntimeId: RuntimeId | undefined;
   #lastPublishedEpoch: RuntimeEpoch | undefined;
   #installInFlight = false;
   #lastInstallResult: RuntimeInstallState | undefined;
@@ -1082,8 +1083,11 @@ export class StudioHostClientFacade implements ClientTransport {
     // Runtime fence before receiving that Worker's snapshot.
     this.#syncRuntimeEvents();
     const version = snapshot.stateVersion;
-    const epochChanged = this.#lastPublishedEpoch !== snapshot.runtimeEpoch;
-    if (epochChanged) {
+    const identityChanged =
+      this.#lastPublishedRuntimeId !== snapshot.runtimeId ||
+      this.#lastPublishedEpoch !== snapshot.runtimeEpoch;
+    if (identityChanged) {
+      this.#lastPublishedRuntimeId = snapshot.runtimeId;
       this.#lastPublishedEpoch = snapshot.runtimeEpoch;
       this.#lastPublishedVersion = undefined;
     }
@@ -1849,10 +1853,11 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   /**
-   * `session.archive` / `session.unarchive`: Host-owned cold-archive moves
-   * that never touch the Runtime. Like the other semantic commands they need
-   * an explicit injected service and fail closed without one, but no Runtime
-   * snapshot is required — the catalog and archive trees are disk state.
+   * `session.archive` / `session.unarchive`: Host-owned cold-archive moves.
+   * Unarchive never touches the Runtime. Archive of a live resident session
+   * first aborts a streaming turn and switches the Runtime off that file.
+   * Like the other semantic commands they need an explicit injected service
+   * and fail closed without one.
    */
   async #commandArchiveToggle(
     request: ClientCommandRequest<"session.archive" | "session.unarchive">,

@@ -9,15 +9,34 @@ OMP Studio 是 OMP Runtime / AgentSession 的 Windows 桌面控制台与配套 W
 - `apps/desktop/`：Electron 主进程与 Windows 桌面壳。
 - `apps/renderer/`：Vite + React 渲染进程 UI。
 - `packages/`：协议、host、客户端、transport、平台和测试工具包。
-- `omp-patch/vendor/oh-my-pi/`：上游 OMP 的 studio-host 补丁来源。
+- `omp-patch/overlay/`：Studio 自有的 Runtime 源码（`packages/coding-agent/src/studio/**` 与 `studio-*` 测试），上游没有这些路径，按普通源码维护。
+- `omp-patch/patches/`：接缝补丁，只包含对上游已有文件的改动，按上游子系统分组。
+- `omp-patch/vendor/oh-my-pi/`：上游 OMP submodule，overlay 与接缝补丁施加于其工作区。
 - `ui_reference/`：界面参考，不是运行时产品代码。
 - `backup/`：历史备份；不应作为实现或测试输入。
 
 Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`
 
+## 功能代码索引
+
+改某块产品功能前，打开 [`doc/feature-index.md`](doc/feature-index.md) 按表跳到文件，不要全库盲搜。那是功能 → 文件的地图，不是架构愿景；路径变更只改索引，不要把表格复制进本文件。
+
+| 任务 | 索引章节 |
+|---|---|
+| 工作台壳 / 预览 / 首页 | 工作台壳 |
+| 对话、Composer、审批、Plan | 对话与 Composer |
+| 会话创建 / 归档 / telemetry | 会话、归档、Telemetry |
+| Agent Hub、Skills、MCP、模型 | Agent Hub、Skills、MCP、模型 |
+| Git / 文件树 / 工作区 | Git / GitHub / 工作区文件 |
+| 终端、设置、诊断 | 终端、窗口铬、设置、诊断 |
+| Host 协议 / Runtime 进程 | Host 内核 |
+| overlay / 接缝补丁 | Runtime overlay |
+| 某条 query/command 落哪 | 命令落点速查 |
+
+
 ## 工作方式
 
-1. 先阅读相关 package 的 `package.json`、类型和测试；只改与任务直接相关的文件。
+1. 先按上面的表打开 `doc/feature-index.md` 对应节，再读相关 package 的 `package.json`、类型和测试；只改与任务直接相关的文件。
 2. 修改既有文件前，先在 `backup/YYYY-MM-DD/<task>-HHmmss/` 中保存原文件，并保留其项目相对路径。
 3. 不编辑 `backup/` 中的历史版本；需要恢复时复制回工作区，而不是原地修改。
 4. 不覆盖已有备份。每项备份包含简短 `README.md`，写明原因、来源提交（如有）和恢复方式。
@@ -90,3 +109,20 @@ npm run check
 - `npm run preview`（Windows：构建后启动 Electron 预览）
 
 运行时/补丁专项命令见根目录 `package.json`，包括 `runtime:verify-source`、`omp:test:metadata` 和 `omp:verify:patches`。
+
+## 改 OMP Runtime 源码
+
+Runtime 侧分两层，详见 `omp-patch/README.md`：
+
+- **overlay**（`omp-patch/overlay/`）：Studio 自有文件，上游不存在。普通编辑、普通 diff，升级上游时不会冲突。
+- **接缝补丁**（`omp-patch/patches/*.patch`）：仅对上游已有文件的改动，按上游子系统分成 4 组。
+
+工作流固定为：
+
+```powershell
+npm run omp:overlay:apply    # 把 overlay 铺进 vendor 并套用接缝补丁（幂等）
+# 在 omp-patch/vendor/oh-my-pi 里改代码
+npm run omp:patches:regen    # 回收 overlay、重写接缝补丁、更新 series.json
+```
+
+不要手写或手改 `.patch`，一律用 regen 生成。新接触一个上游文件时，先把它加进 `scripts/omp-seam.mjs` 的分组，否则 regen 会报错而不是悄悄丢掉改动。

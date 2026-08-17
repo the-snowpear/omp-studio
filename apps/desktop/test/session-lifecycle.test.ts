@@ -337,6 +337,38 @@ test("core.abort omits expectedStateVersion so a live turn can be interrupted", 
   });
 });
 
+test("session.model.set omits expectedStateVersion so a live turn can queue the next model", async () => {
+  await withReady(async ({ composition, live }) => {
+    live.setSnapshot({ ...live.snapshot, isStreaming: true, stateVersion: 4 as StateVersion });
+    await composition.facade.command({
+      commandName: "session.model.set",
+      input: { selector: "anthropic/claude-opus-4-6" },
+      idempotencyKey: "idem-model-1" as IdempotencyKey,
+      requestId: "client-req-model-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    const modelSet = live.invokes[0];
+    assert.equal(modelSet?.operation.kind, "session.model.set");
+    assert.equal("expectedStateVersion" in (modelSet ?? {}), false);
+  });
+});
+
+test("mode.plan.enter omits expectedStateVersion so a live turn can queue the next mode", async () => {
+  await withReady(async ({ composition, live }) => {
+    live.setSnapshot({ ...live.snapshot, isStreaming: true, stateVersion: 4 as StateVersion });
+    await composition.facade.command({
+      commandName: "mode.plan.enter",
+      input: {},
+      idempotencyKey: "idem-plan-1" as IdempotencyKey,
+      requestId: "client-req-plan-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    const planEnter = live.invokes[0];
+    assert.equal(planEnter?.operation.kind, "mode.plan.enter");
+    assert.equal("expectedStateVersion" in (planEnter ?? {}), false);
+  });
+});
+
 test("operator.invoke completion carries the command output envelope", async () => {
   await withReady(async ({ composition, live }) => {
     const events: ClientEvent[] = [];

@@ -43,9 +43,9 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: OMP Studio
-  # 卸载时保留用户数据目录（运行时、会话等）
+  # 卸载时保留 Electron userData（运行时、会话等）
   deleteAppDataOnUninstall: false
+  # 升级时保留安装目录旁的 userdata/（头像等），不要整目录 RMDir
+  include: packaging/nsis/custom.nsh
   # 骨架阶段未完成签名；正式发布需替换为真实证书
   # signingHashAlgorithms: [sha256]
-  # 自定义 NSIS 脚本钩子（后续翻译 UI 原型时用）：
-  # include: packaging/nsis/custom.nsh

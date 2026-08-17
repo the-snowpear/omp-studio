@@ -256,7 +256,7 @@ export function PlanReviewDeck({
   onAction: (id: PlanActionId) => void;
 }) {
   return (
-    <div className="deck active" role="region" aria-label="待审核的计划" aria-live="polite">
+    <div className="deck active preview-queue" role="region" aria-label="待审核的计划" aria-live="polite">
       <div className="deck-card">
         <PlanCard
           title={title}

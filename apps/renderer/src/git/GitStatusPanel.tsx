@@ -23,6 +23,7 @@ import { hostErrorMessage, waitReceipt } from "../hostError";
 import { Icon } from "../icons";
 
 import { GitCommitGraph } from "./GitCommitGraph";
+import { GitDiffResizer, useGitDiffHeight } from "./GitDiffResizer";
 import { GitMoreActionsMenu } from "./GitMoreActionsMenu";
 import { GitPanelSplit } from "./GitPanelSplit";
 import { GitTip } from "./GitTip";
@@ -146,6 +147,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
   const [notice, setNotice] = useState<string>();
   const [activeRequest, setActiveRequest] = useState<{ domain: "git" | "github"; requestId: CommandRequestId }>();
   const [graphLayout, setGraphLayout] = useState(readGitGraphLayout);
+  const [diffHeight, setDiffHeight] = useGitDiffHeight();
   const [log, setLog] = useState<GitLogListReadModel>();
   const [logLoading, setLogLoading] = useState(false);
   const [logError, setLogError] = useState<string>();
@@ -501,9 +503,17 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       {githubAuth?.authenticated && pullRequests?.pullRequests.length ? <div className="git-pr-list"><div className="ch-group-title">Open pull requests<span className="ch-count">{pullRequests.pullRequests.length}</span></div>{pullRequests.pullRequests.map((pr) => <div className="git-pr-row" key={pr.number}><span className="ellipsis">#{pr.number} {pr.title}</span><button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.checkout", number: pr.number })}>Checkout</button>{pr.draft ? <button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.ready", number: pr.number })}>Ready</button> : null}<GitTip text={pr.headOid ? "Squash merge" : "缺少远端 head OID"}><button className="btn small primary" disabled={busy || !pr.headOid} onClick={() => { if (pr.headOid && window.confirm(`确认 squash merge #${pr.number}？`)) void executeGithub({ kind: "pr.merge", number: pr.number, method: "squash", expectedHeadOid: pr.headOid, deleteBranch: true }); }}>Merge</button></GitTip></div>)}</div> : null}
     </div>
     <div className="git-commit-box">
-      <textarea value={commitMessage} placeholder="Commit message" rows={2} onChange={(event) => setCommitMessage(event.target.value)} />
+      <textarea value={commitMessage} placeholder="Commit message" rows={1} onChange={(event) => setCommitMessage(event.target.value)} />
       <button className="btn small primary" disabled={busy || staged.length === 0 || !commitMessage.trim()} onClick={() => { const message = commitMessage.trim(); if (!message) return; void execute({ kind: "commit", message }).then((completed) => { if (completed) setCommitMessage(""); }); }}>Commit</button>
     </div>
-    {selected ? <div className="ch-diff-slot git-diff-slot"><div className="diff-toolbar"><Icon name="file-code" extra="sm" /><span className="mono small ellipsis">{selected.path}</span><span className="chip gray xs">{selected.target === "staged" ? "staged" : "working"}</span>{diff?.truncated ? <span className="chip gray xs">已截断</span> : null}</div><div className="diff-scroll">{diff ? (diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 && repository.changes.some((change) => change.path === selected.path && change.worktree === "untracked") ? <div className="empty">未跟踪文件暂时没有 Git diff；暂存后可查看。</div> : patchLines(diff.patch)) : <div className="empty">读取 Diff…</div>}</div></div> : null}
+    {selected ? (
+      <>
+        <GitDiffResizer height={diffHeight} onHeight={setDiffHeight} />
+        <div className="ch-diff-slot git-diff-slot" style={{ height: diffHeight }}>
+          <div className="diff-toolbar"><Icon name="file-code" extra="sm" /><span className="mono small ellipsis">{selected.path}</span><span className="chip gray xs">{selected.target === "staged" ? "staged" : "working"}</span>{diff?.truncated ? <span className="chip gray xs">已截断</span> : null}</div>
+          <div className="diff-scroll">{diff ? (diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 && repository.changes.some((change) => change.path === selected.path && change.worktree === "untracked") ? <div className="empty">未跟踪文件暂时没有 Git diff；暂存后可查看。</div> : patchLines(diff.patch)) : <div className="empty">读取 Diff…</div>}</div>
+        </div>
+      </>
+    ) : null}
   </>);
 }

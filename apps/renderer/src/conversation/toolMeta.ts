@@ -1,4 +1,5 @@
 import type { JsonValue } from "@omp-studio/client-contract";
+import type { TreeGitStatus } from "../git/treeStatus";
 import { jsonRecord, jsonString, type AssistantSegment, type TimelineRow, type ToolStatus, type ToolView } from "./conversationViewModel";
 
 export type ToolKind = string;
@@ -452,38 +453,67 @@ export function toolDiffStats(tool: ToolView): { readonly add: number; readonly 
   return { add, del };
 }
 
+export type FileEditKind = "write" | "edit" | "ast_edit";
+
 export type TurnFileChange = {
   readonly path: string;
   readonly name: string;
   readonly dir: string;
   readonly add: number;
   readonly del: number;
+  readonly status?: TreeGitStatus;
+  readonly note?: string;
 };
 
-const FILE_EDIT_KINDS = new Set(["write", "edit", "ast_edit"]);
+const CHANGE_NOTE: Readonly<Record<FileEditKind, string>> = {
+  write: "Write",
+  edit: "Edit",
+  ast_edit: "AST Edit",
+};
+
+function asFileEditKind(kind: string): FileEditKind | undefined {
+  return kind === "write" || kind === "edit" || kind === "ast_edit" ? kind : undefined;
+}
+
+function changeStatus(add: number, del: number, kinds: readonly FileEditKind[]): TreeGitStatus {
+  const writeOnly = kinds.length > 0 && kinds.every((kind) => kind === "write");
+  if (writeOnly && del === 0) return "added";
+  if (add === 0 && del > 0) return "deleted";
+  return "modified";
+}
+
+function changeNote(kinds: readonly FileEditKind[]): string | undefined {
+  const last = kinds.at(-1);
+  return last === undefined ? undefined : CHANGE_NOTE[last];
+}
 
 function toolFilePath(tool: ToolView): string | undefined {
   const fields = toolFields(tool);
   return jsonString(fields.path) ?? jsonString(fields.resolvedPath) ?? jsonString(fields.target);
 }
 
+type FileChangeAcc = { add: number; del: number; kinds: FileEditKind[] };
+
 function addTurnFile(
-  files: Map<string, { add: number; del: number }>,
+  files: Map<string, FileChangeAcc>,
   path: string | undefined,
   add: number,
   del: number,
+  kind: FileEditKind,
 ): void {
   if (path === undefined) return;
   const normalized = path.replaceAll("\\", "/").trim();
   if (!normalized || normalized.includes(" → ")) return;
   const previous = files.get(normalized);
-  files.set(normalized, previous === undefined ? { add, del } : { add: previous.add + add, del: previous.del + del });
+  files.set(normalized, previous === undefined
+    ? { add, del, kinds: [kind] }
+    : { add: previous.add + add, del: previous.del + del, kinds: [...previous.kinds, kind] });
 }
 
-function collectToolFileChanges(tool: ToolView, files: Map<string, { add: number; del: number }>): void {
+function collectToolFileChanges(tool: ToolView, files: Map<string, FileChangeAcc>): void {
   if (tool.status !== "succeeded") return;
-  const kind = toolKind(tool);
-  if (!FILE_EDIT_KINDS.has(kind)) return;
+  const kind = asFileEditKind(toolKind(tool));
+  if (kind === undefined) return;
   const fields = toolFields(tool);
   if (kind === "ast_edit") {
     if (Array.isArray(fields.changes)) {
@@ -493,7 +523,7 @@ function collectToolFileChanges(tool: ToolView, files: Map<string, { add: number
         if (file === undefined) continue;
         const before = jsonString(record?.before);
         const after = jsonString(record?.after);
-        addTurnFile(files, file, after ? 1 : 0, before ? 1 : 0);
+        addTurnFile(files, file, after ? 1 : 0, before ? 1 : 0, kind);
       }
       return;
     }
@@ -505,17 +535,17 @@ function collectToolFileChanges(tool: ToolView, files: Map<string, { add: number
         const file = jsonString(record?.path);
         const count = jsonNumber(record?.count);
         if (file === undefined || count === undefined || count <= 0) continue;
-        addTurnFile(files, file, count, count);
+        addTurnFile(files, file, count, count, kind);
       }
     }
     return;
   }
   const diff = toolDiffStats(tool);
-  addTurnFile(files, toolFilePath(tool), diff.add, diff.del);
+  addTurnFile(files, toolFilePath(tool), diff.add, diff.del, kind);
 }
 
 export function collectTurnFileChanges(segments: readonly AssistantSegment[]): TurnFileChange[] {
-  const files = new Map<string, { add: number; del: number }>();
+  const files = new Map<string, FileChangeAcc>();
   for (const segment of segments) {
     if (segment.type !== "batch") continue;
     for (const tool of segment.tools) collectToolFileChanges(tool, files);
@@ -523,17 +553,35 @@ export function collectTurnFileChanges(segments: readonly AssistantSegment[]): T
   const changes: TurnFileChange[] = [];
   for (const [path, stats] of files) {
     const display = splitDisplayPath(path);
-    changes.push({ path, name: display.name, dir: display.dir, add: stats.add, del: stats.del });
+    const note = changeNote(stats.kinds);
+    changes.push({
+      path,
+      name: display.name,
+      dir: display.dir,
+      add: stats.add,
+      del: stats.del,
+      status: changeStatus(stats.add, stats.del, stats.kinds),
+      ...(note === undefined ? {} : { note }),
+    });
   }
   return changes;
 }
 
 /* ---------- 会话级变更（右侧 Changes 页签） ---------- */
 
-/** 单文件的一段 patch：行首 "+"（新增）、"-"（删除）或空格（上下文），其余为行文本。 */
+export type SessionPatchMark = "+" | "-" | " ";
+
+/** 单文件的一段 patch：保留旧/新行号，供 Changes Diff 双栏 gutter 使用。 */
+export type SessionPatchLine = {
+  readonly mark: SessionPatchMark;
+  readonly oldLn: string;
+  readonly newLn: string;
+  readonly text: string;
+};
+
 export type SessionPatchBlock = {
-  readonly kind: "edit" | "write" | "ast_edit";
-  readonly lines: readonly string[];
+  readonly kind: FileEditKind;
+  readonly lines: readonly SessionPatchLine[];
   readonly truncated?: boolean;
 };
 
@@ -546,20 +594,41 @@ function normalizedPatchPath(path: string | undefined): string | undefined {
   return normalized !== "" && !normalized.includes(" → ") ? normalized : undefined;
 }
 
+function patchMark(value: unknown): SessionPatchMark {
+  return value === "+" || value === "-" ? value : " ";
+}
+
+function numberedPatchLine(mark: SessionPatchMark, ln: string, text: string): SessionPatchLine {
+  return {
+    mark,
+    oldLn: mark === "+" ? "" : ln,
+    newLn: mark === "-" ? "" : ln,
+    text,
+  };
+}
+
 /** edit 工具 diff 字段 → 统一 patch 行。解析口径与 ToolBody 的 EditBody 完全一致：
     数组行 [mark, 旧行号, 新行号, 文本]、字符串行 `mark 行号|文本`（不匹配视为上下文行）。 */
-function editPatchLines(diff: JsonValue | undefined): string[] {
-  const lines: string[] = [];
+function editPatchLines(diff: JsonValue | undefined): SessionPatchLine[] {
+  const lines: SessionPatchLine[] = [];
   if (Array.isArray(diff)) {
     for (const row of diff) {
       if (!Array.isArray(row)) continue;
-      const mark = row[0] === "+" || row[0] === "-" ? row[0] : " ";
-      lines.push(`${mark}${String(row[3] ?? "")}`);
+      lines.push({
+        mark: patchMark(row[0]),
+        oldLn: String(row[1] ?? ""),
+        newLn: String(row[2] ?? ""),
+        text: String(row[3] ?? ""),
+      });
     }
   } else if (typeof diff === "string" && diff.length > 0) {
     for (const line of diff.split("\n")) {
       const match = /^([ +\-])(\d*)\|(.*)$/.exec(line);
-      lines.push(match === null ? ` ${line}` : `${match[1]}${match[3]}`);
+      if (match === null) {
+        lines.push({ mark: " ", oldLn: "", newLn: "", text: line });
+        continue;
+      }
+      lines.push(numberedPatchLine(patchMark(match[1]), match[2] ?? "", match[3] ?? ""));
     }
   }
   return lines;
@@ -568,7 +637,7 @@ function editPatchLines(diff: JsonValue | undefined): string[] {
 const GROUPED_HEADER_RE = /^(#+)\s+(.*)$/;
 const GROUPED_HEADER_SUFFIX_RE = /\s+\([^)]*\)\s*$/;
 const GROUPED_HEADER_HASH_TAG_RE = /#[0-9a-f]+$/i;
-const GROUPED_BODY_RE = /^([ +\-])\d*│(.*)$/;
+const GROUPED_BODY_RE = /^([ +\-])(\d*)│(.*)$/;
 
 /**
  * ast_edit only reports per-file replacement counts as data; the changed line
@@ -577,15 +646,17 @@ const GROUPED_BODY_RE = /^([ +\-])\d*│(.*)$/;
  * lines. Rebuild cwd-relative paths from the header stack the same way upstream
  * `classifyGroupedLines` does, so the Changes tab can show a real patch body.
  */
-function astEditDisplayPatches(display: string): Map<string, string[]> {
-  const byFile = new Map<string, string[]>();
+function astEditDisplayPatches(display: string): Map<string, SessionPatchLine[]> {
+  const byFile = new Map<string, SessionPatchLine[]>();
   const dirAtDepth = new Map<number, string>();
-  let current: string[] | undefined;
+  let current: SessionPatchLine[] | undefined;
   for (const line of display.split("\n")) {
     const header = GROUPED_HEADER_RE.exec(line);
     if (header === null) {
       const body = GROUPED_BODY_RE.exec(line);
-      if (body !== null && current !== undefined) current.push(`${body[1]}${body[2]}`);
+      if (body !== null && current !== undefined) {
+        current.push(numberedPatchLine(patchMark(body[1]), body[2] ?? "", body[3] ?? ""));
+      }
       continue;
     }
     const depth = header[1]!.length;
@@ -624,13 +695,13 @@ export function sessionFilePatches(segments: readonly AssistantSegment[]): Map<s
     if (segment.type !== "batch") continue;
     for (const tool of segment.tools) {
       if (tool.status !== "succeeded") continue;
-      const kind = toolKind(tool);
-      if (!FILE_EDIT_KINDS.has(kind)) continue;
+      const kind = asFileEditKind(toolKind(tool));
+      if (kind === undefined) continue;
       const fields = toolFields(tool);
       if (kind === "ast_edit") {
         if (Array.isArray(fields.changes)) {
           // 一个 ast_edit 可改多文件：按 file 归组，before → - 行、after → + 行。
-          const byFile = new Map<string, string[]>();
+          const byFile = new Map<string, SessionPatchLine[]>();
           for (const entry of fields.changes) {
             const record = jsonRecord(entry);
             const file = normalizedPatchPath(jsonString(record?.file));
@@ -638,8 +709,8 @@ export function sessionFilePatches(segments: readonly AssistantSegment[]): Map<s
             const before = jsonString(record?.before);
             const after = jsonString(record?.after);
             const lines = byFile.get(file) ?? [];
-            if (before !== undefined) lines.push(`-${before}`);
-            if (after !== undefined) lines.push(`+${after}`);
+            if (before !== undefined) lines.push({ mark: "-", oldLn: "", newLn: "", text: before });
+            if (after !== undefined) lines.push({ mark: "+", oldLn: "", newLn: "", text: after });
             byFile.set(file, lines);
           }
           for (const [file, lines] of byFile) push(file, { kind: "ast_edit", lines });
@@ -664,7 +735,12 @@ export function sessionFilePatches(segments: readonly AssistantSegment[]): Map<s
         const truncated = raw.length > PATCH_LINE_CAP;
         push(path, {
           kind: "write",
-          lines: raw.slice(0, PATCH_LINE_CAP).map((line) => `+${line}`),
+          lines: raw.slice(0, PATCH_LINE_CAP).map((line, index) => ({
+            mark: "+",
+            oldLn: "",
+            newLn: String(index + 1),
+            text: line,
+          })),
           ...(truncated ? { truncated: true } : {}),
         });
         continue;
@@ -683,26 +759,170 @@ export type SessionFileChanges = {
   readonly session: readonly TurnFileChange[];
 };
 
-/** 最后一段连续 assistant 行的闭区间；没有 assistant 行时为 undefined。 */
-function lastAssistantRunRange(rows: readonly TimelineRow[]): { start: number; end: number } | undefined {
-  let end = -1;
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
+/** 连续 assistant 行的闭区间；非 assistant 行切开一轮。 */
+export type AssistantRunRange = {
+  readonly start: number;
+  readonly end: number;
+};
+
+export const SESSION_CHANGE_LAST_ID = "last";
+export const SESSION_CHANGE_SESSION_ID = "session";
+
+export type SessionChangeTurnKind = "last" | "turn" | "session";
+
+export type SessionChangeTurn = {
+  readonly id: string;
+  readonly kind: SessionChangeTurnKind;
+  readonly label: string;
+  readonly files: readonly TurnFileChange[];
+};
+
+export type SessionChangeScope = {
+  readonly id: string;
+  readonly kind: SessionChangeTurnKind;
+  readonly label: string;
+  readonly files: readonly TurnFileChange[];
+  readonly segments: readonly AssistantSegment[];
+};
+
+function assistantSegmentsOf(rows: readonly TimelineRow[]): AssistantSegment[] {
+  const segments: AssistantSegment[] = [];
+  for (const row of rows) {
+    if (row.type === "assistant") segments.push(...row.segments);
+  }
+  return segments;
+}
+
+/** 非 assistant 行切开的连续 assistant 段。与对话 TurnDiffCard 的 turn 口径一致。 */
+export function assistantRunRanges(rows: readonly TimelineRow[]): readonly AssistantRunRange[] {
+  const ranges: AssistantRunRange[] = [];
+  let start = -1;
+  const flush = (endExclusive: number) => {
+    if (start >= 0 && endExclusive > start) ranges.push({ start, end: endExclusive - 1 });
+    start = -1;
+  };
+  for (let index = 0; index < rows.length; index += 1) {
     if (rows[index]?.type === "assistant") {
-      end = index;
-      break;
+      if (start < 0) start = index;
+      continue;
+    }
+    flush(index);
+  }
+  flush(rows.length);
+  return ranges;
+}
+
+function lastAssistantRunRange(rows: readonly TimelineRow[]): AssistantRunRange | undefined {
+  const ranges = assistantRunRanges(rows);
+  return ranges[ranges.length - 1];
+}
+
+function rangeTurnId(rows: readonly TimelineRow[], range: AssistantRunRange): string {
+  const row = rows[range.end];
+  return row?.type === "assistant" ? row.itemId : `turn:${range.start}-${range.end}`;
+}
+
+function filesInRange(rows: readonly TimelineRow[], range: AssistantRunRange): TurnFileChange[] {
+  return collectTurnFileChanges(assistantSegmentsOf(rows.slice(range.start, range.end + 1)));
+}
+
+function segmentsInRange(rows: readonly TimelineRow[], range: AssistantRunRange): AssistantSegment[] {
+  return assistantSegmentsOf(rows.slice(range.start, range.end + 1));
+}
+
+function changePathMatches(path: string, focus: string): boolean {
+  const value = path.replaceAll("\\", "/");
+  const normalized = focus.replaceAll("\\", "/");
+  return value === normalized || value.endsWith(`/${normalized}`) || normalized.endsWith(`/${value}`);
+}
+
+/** 轮次菜单：最近一轮（跟随最新段）+ 有改动的历史轮 + 本会话。 */
+export function listSessionChangeTurns(rows: readonly TimelineRow[]): SessionChangeTurn[] {
+  const ranges = assistantRunRanges(rows);
+  const last = ranges[ranges.length - 1];
+  const items: SessionChangeTurn[] = [{
+    id: SESSION_CHANGE_LAST_ID,
+    kind: "last",
+    label: "最近一轮",
+    files: last === undefined ? [] : filesInRange(rows, last),
+  }];
+  let historyIndex = 0;
+  for (let index = 0; index < ranges.length - 1; index += 1) {
+    const range = ranges[index]!;
+    const files = filesInRange(rows, range);
+    if (files.length === 0) continue;
+    historyIndex += 1;
+    items.push({
+      id: rangeTurnId(rows, range),
+      kind: "turn",
+      label: `第 ${historyIndex} 轮`,
+      files,
+    });
+  }
+  items.push({
+    id: SESSION_CHANGE_SESSION_ID,
+    kind: "session",
+    label: "本会话",
+    files: collectTurnFileChanges(assistantSegmentsOf(rows)),
+  });
+  return items;
+}
+
+/** 选中轮次的文件清单与 patch 段。未知 id 回退到最近一轮。 */
+export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string): SessionChangeScope {
+  if (turnId === SESSION_CHANGE_SESSION_ID) {
+    return {
+      id: SESSION_CHANGE_SESSION_ID,
+      kind: "session",
+      label: "本会话",
+      files: collectTurnFileChanges(assistantSegmentsOf(rows)),
+      segments: assistantSegmentsOf(rows),
+    };
+  }
+  const ranges = assistantRunRanges(rows);
+  if (turnId !== SESSION_CHANGE_LAST_ID) {
+    let historyIndex = 0;
+    for (let index = 0; index < ranges.length - 1; index += 1) {
+      const range = ranges[index]!;
+      const files = filesInRange(rows, range);
+      if (files.length === 0) continue;
+      historyIndex += 1;
+      if (rangeTurnId(rows, range) !== turnId) continue;
+      return {
+        id: turnId,
+        kind: "turn",
+        label: `第 ${historyIndex} 轮`,
+        files,
+        segments: segmentsInRange(rows, range),
+      };
     }
   }
-  if (end < 0) return undefined;
-  let start = end;
-  while (start > 0 && rows[start - 1]?.type === "assistant") start -= 1;
-  return { start, end };
+  const last = ranges[ranges.length - 1];
+  return {
+    id: SESSION_CHANGE_LAST_ID,
+    kind: "last",
+    label: "最近一轮",
+    files: last === undefined ? [] : filesInRange(rows, last),
+    segments: last === undefined ? [] : segmentsInRange(rows, last),
+  };
+}
+
+/** 从后往前找改过该路径的一轮；最后一段用 last id，便于跟随新 turn。 */
+export function sessionChangeTurnIdForPath(rows: readonly TimelineRow[], path: string): string | undefined {
+  const ranges = assistantRunRanges(rows);
+  for (let index = ranges.length - 1; index >= 0; index -= 1) {
+    const range = ranges[index]!;
+    if (!filesInRange(rows, range).some((file) => changePathMatches(file.path, path))) continue;
+    return index === ranges.length - 1 ? SESSION_CHANGE_LAST_ID : rangeTurnId(rows, range);
+  }
+  return undefined;
 }
 
 /** 会话变更视图：当前 Turn 与本会话累积两组文件清单。 */
 export function sessionFileChanges(rows: readonly TimelineRow[]): SessionFileChanges {
   const run = lastAssistantRunRange(rows);
   return {
-    turn: run === undefined ? [] : collectTurnFileChanges(assistantSegmentsOf(rows.slice(run.start, run.end + 1))),
+    turn: run === undefined ? [] : filesInRange(rows, run),
     session: collectTurnFileChanges(assistantSegmentsOf(rows)),
   };
 }
@@ -841,14 +1061,6 @@ export function todoStepProgress(todos: readonly TodoTask[]): { current: number;
   if (inProgress >= 0) return { current: inProgress + 1, total, completed };
   if (completed >= total) return { current: total, total, completed };
   return { current: Math.min(total, completed + 1), total, completed };
-}
-
-function assistantSegmentsOf(rows: readonly TimelineRow[]): AssistantSegment[] {
-  const segments: AssistantSegment[] = [];
-  for (const row of rows) {
-    if (row.type === "assistant") segments.push(...row.segments);
-  }
-  return segments;
 }
 
 /** Session HUD: latest todo snapshot plus files from the current (possibly streaming) turn. */

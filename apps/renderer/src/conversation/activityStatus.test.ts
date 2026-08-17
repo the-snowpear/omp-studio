@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   deriveActivityStatus,
   formatElapsed,
+  formatRetry,
   formatTokens,
   isAbortEligible,
+  isRetryActivityNotice,
+  parseRetryNotice,
+  reduceActivityRetry,
   reduceAwaitingTurn,
   shortenDetail,
   WORKING_LABEL,
@@ -114,6 +118,24 @@ describe("deriveActivityStatus", () => {
     const replying = stateWith({ messages: [message("m1", "text", "我先改 App.tsx")] });
     expect(deriveActivityStatus({ state: replying, streaming: true, pendingMessages: 0 })?.phase).toBe("responding");
   });
+
+  it("shows Retry N/M only while waiting, not after a live operation starts", () => {
+    const retry = { attempt: 5, maxAttempts: 10 };
+    expect(deriveActivityStatus({
+      state: emptyConversationState(),
+      streaming: false,
+      pendingMessages: 0,
+      retry,
+    })).toEqual({ phase: "waiting", label: WORKING_LABEL, retry });
+    const state = stateWith({
+      tools: [tool({ toolCallId: "c1", toolName: "read", status: "running", arguments: { path: "App.tsx" } })],
+    });
+    expect(deriveActivityStatus({ state, streaming: true, pendingMessages: 0, retry })).toEqual({
+      phase: "tool",
+      label: "正在读取",
+      detail: "App.tsx",
+    });
+  });
 });
 
 describe("reduceAwaitingTurn", () => {
@@ -152,10 +174,81 @@ describe("isAbortEligible", () => {
   it("allows abort while streaming or while Runtime follow-ups are queued", () => {
     expect(isAbortEligible({ ...idle, streaming: true })).toBe(true);
     expect(isAbortEligible({ ...idle, pendingMessages: 1 })).toBe(true);
+    expect(isAbortEligible({ ...idle, retrying: true })).toBe(true);
   });
 
   it("refuses abort when the viewed session is not the live Runtime session", () => {
     expect(isAbortEligible({ executionMatches: false, streaming: true, pendingMessages: 1, awaiting: true })).toBe(false);
+  });
+});
+
+describe("activity retry notices", () => {
+  const idle = {
+    identityKey: "s1",
+    noticeCount: 0,
+    seenStream: false,
+    wasStreaming: false,
+  };
+  const retryNotice = { message: "Retry 5/10", source: "retry" as const };
+
+  it("parses Runtime Retry N/M notices and ignores other sources", () => {
+    expect(parseRetryNotice("Retry 5/10", "retry")).toEqual({ attempt: 5, maxAttempts: 10 });
+    expect(formatRetry({ attempt: 5, maxAttempts: 10 })).toBe("Retry 5/10");
+    expect(isRetryActivityNotice("Retry 5/10", "retry")).toBe(true);
+    expect(parseRetryNotice("Retry 5/10", "priority")).toBeUndefined();
+    expect(parseRetryNotice("正在同步压缩摘要", "retry")).toBeUndefined();
+  });
+
+  it("holds Retry N/M through backoff and clears after the retried stream ends", () => {
+    const started = reduceActivityRetry(idle, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: false,
+      failed: false,
+    });
+    expect(started.retry).toEqual({ attempt: 5, maxAttempts: 10 });
+    const backoff = reduceActivityRetry(started, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: false,
+      failed: false,
+    });
+    expect(backoff.retry).toEqual({ attempt: 5, maxAttempts: 10 });
+    const streaming = reduceActivityRetry(backoff, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: true,
+      failed: false,
+    });
+    expect(streaming.retry).toEqual({ attempt: 5, maxAttempts: 10 });
+    expect(reduceActivityRetry(streaming, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: false,
+      failed: false,
+    }).retry).toBeUndefined();
+  });
+
+  it("refreshes the counter when another retry notice arrives on the falling edge", () => {
+    const first = reduceActivityRetry(idle, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: false,
+      failed: false,
+    });
+    const streaming = reduceActivityRetry(first, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: true,
+      failed: false,
+    });
+    const next = reduceActivityRetry(streaming, {
+      identityKey: "s1",
+      notices: [retryNotice, { message: "Retry 6/10", source: "retry" }],
+      streaming: false,
+      failed: false,
+    });
+    expect(next.retry).toEqual({ attempt: 6, maxAttempts: 10 });
   });
 });
 

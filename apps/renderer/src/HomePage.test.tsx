@@ -1,0 +1,77 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { RuntimeConnection } from "@omp-studio/client-contract";
+import { HomePage } from "./HomePage";
+import { PreviewModeProvider } from "./preview/PreviewContext";
+import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
+import { __resetOperatorProfileForTests } from "./settings/operatorProfile";
+
+beforeAll(() => {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  (globalThis as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
+});
+
+afterEach(() => {
+  cleanup();
+  window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
+  __resetOperatorProfileForTests(null);
+});
+
+function renderHome(options: {
+  preview?: boolean;
+  runtime?: RuntimeConnection;
+} = {}) {
+  window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === true ? "1" : "0");
+  render(
+    <PreviewModeProvider>
+      <HomePage
+        {...(options.runtime === undefined ? {} : { runtime: options.runtime })}
+        onRoute={() => undefined}
+      />
+    </PreviewModeProvider>,
+  );
+}
+
+describe("HomePage identity", () => {
+  it("shows the greeting with the local name, omp is ready, and a single user avatar", () => {
+    renderHome({ runtime: { status: "connected", classification: "managed" } });
+    expect(screen.getByRole("heading", { level: 1, name: /，Studio$/ })).toBeTruthy();
+    expect(screen.getByText("omp is ready")).toBeTruthy();
+    expect(screen.queryByText(/Runtime managed/)).toBeNull();
+    expect(document.querySelectorAll(".home-avatar").length).toBe(1);
+    expect(screen.getByRole("button", { name: "编辑用户名和头像" })).toBeTruthy();
+  });
+
+  it("keeps an honest omp status when Runtime is down", () => {
+    renderHome({ runtime: { status: "unavailable", classification: "unavailable" } });
+    expect(screen.getByText("omp unavailable")).toBeTruthy();
+    expect(screen.queryByText("omp is ready")).toBeNull();
+  });
+
+  it("saves a new display name from the edit dialog", () => {
+    renderHome({ runtime: { status: "connected", classification: "managed" } });
+    fireEvent.click(screen.getByRole("button", { name: "编辑用户名和头像" }));
+    const dialog = screen.getByRole("dialog", { name: "编辑个人资料" });
+    expect(dialog).toBeTruthy();
+    const file = dialog.querySelector("input[type='file']");
+    expect(file?.getAttribute("accept") ?? "").toContain("image/");
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "Ada" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: /，Ada$/ })).toBeTruthy();
+  });
+
+  it("renders an uploaded avatar on the greeting row", () => {
+    __resetOperatorProfileForTests(JSON.stringify({ displayName: "Ada" }), "data:image/png;base64,QQ==");
+    renderHome({ runtime: { status: "connected", classification: "managed" } });
+    const photo = document.querySelector(".home-identity img.home-avatar");
+    expect(photo).toBeInstanceOf(HTMLImageElement);
+    expect((photo as HTMLImageElement).getAttribute("src")).toBe("data:image/png;base64,QQ==");
+    expect(screen.getByRole("heading", { level: 1, name: /，Ada$/ })).toBeTruthy();
+    expect(document.querySelectorAll(".home-avatar").length).toBe(1);
+  });
+});

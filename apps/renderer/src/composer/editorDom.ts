@@ -2,6 +2,7 @@ import { iconSvg } from "../icons";
 import { chipPayload, chipIconName, parseChipPayload } from "./ingest";
 import { normalizeDoc } from "./serialize";
 import { splitChipLabel, type ComposerChip, type ComposerDoc, type ComposerNode, type PromptImage } from "./types";
+import { modeChipConflictsWith } from "./commands";
 
 function escapeHtml(value: string): string {
   return value
@@ -84,7 +85,8 @@ export function createChipElement(chip: ComposerChip): HTMLSpanElement {
   span.contentEditable = "false";
   span.dataset.chip = chipPayload(chip);
   span.title = chip.path ?? chip.name ?? chip.label;
-  span.innerHTML = `${iconSvg(chipIconName(chip.kind), "sm")}<span class="cm-chip-label">${chipLabelHtml(chip.label)}</span>${removeButtonHtml(chip.label)}`;
+  const icon = chip.kind === "mode" ? "" : iconSvg(chipIconName(chip.kind), "sm");
+  span.innerHTML = `${icon}<span class="cm-chip-label">${chipLabelHtml(chip.label)}</span>${removeButtonHtml(chip.label)}`;
   return span;
 }
 
@@ -143,7 +145,8 @@ export function writeDoc(editor: HTMLElement, doc: ComposerDoc, images: Map<stri
       continue;
     }
     if (node.chip.image) images.set(node.chip.id, node.chip.image);
-    editor.append(createChipElement(node.chip), document.createTextNode(" "));
+    editor.append(createChipElement(node.chip));
+    if (node.chip.kind !== "mode") editor.append(document.createTextNode(" "));
   }
 }
 
@@ -181,6 +184,24 @@ function placeCaretBefore(parent: Node, node: ChildNode | null): void {
   selection.addRange(range);
 }
 
+/** Caret after `node`. Text nodes keep the caret inside so `@` stays a mention. */
+function placeCaretAfter(node: Node): void {
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  if (node.nodeType === Node.TEXT_NODE) {
+    range.setStart(node, (node as Text).data.length);
+  } else {
+    const parent = node.parentNode;
+    if (!parent) return;
+    const index = [...parent.childNodes].indexOf(node as ChildNode);
+    range.setStart(parent, index < 0 ? parent.childNodes.length : index + 1);
+  }
+  range.collapse(true);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 /**
  * Removes a capsule by id, plus the single spacer inserted after it. When the
  * removal came from inside the editor the caret lands where the capsule was,
@@ -201,7 +222,44 @@ export function removeChipById(editor: HTMLElement, id: string): boolean {
   return false;
 }
 
+/** Remove every skill capsule with this definition name. */
+export function removeSkillChipsByName(editor: HTMLElement, name: string): boolean {
+  const ids: string[] = [];
+  for (const chip of editor.querySelectorAll<HTMLElement>(".cm-chip")) {
+    const payload = parseChipPayload(chip.dataset.chip ?? "");
+    if (payload?.kind !== "skill") continue;
+    if ((payload.name ?? payload.label) !== name) continue;
+    ids.push(payload.id);
+  }
+  let removed = false;
+  for (const id of ids) {
+    if (removeChipById(editor, id)) removed = true;
+  }
+  return removed;
+}
+
+/** Drop mode capsules that collide with `name` (same switch, or plan/vibe/goal mutex). */
+export function removeConflictingModeChips(editor: HTMLElement, name: string): boolean {
+  const ids: string[] = [];
+  for (const chip of editor.querySelectorAll<HTMLElement>(".cm-chip")) {
+    const payload = parseChipPayload(chip.dataset.chip ?? "");
+    if (payload?.kind !== "mode") continue;
+    const existing = payload.name ?? payload.label.replace(/^\//u, "");
+    if (modeChipConflictsWith(name, existing)) ids.push(payload.id);
+  }
+  let removed = false;
+  for (const id of ids) {
+    if (removeChipById(editor, id)) removed = true;
+  }
+  return removed;
+}
+
 export function placeCaretAtEnd(editor: HTMLElement): void {
+  const last = editor.lastChild;
+  if (last) {
+    placeCaretAfter(last);
+    return;
+  }
   const selection = window.getSelection();
   if (!selection) return;
   const range = document.createRange();
@@ -215,15 +273,16 @@ export function insertNodesAtCaret(editor: HTMLElement, nodes: Node[]): void {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || !editor.contains(selection.anchorNode)) {
     for (const node of nodes) editor.append(node);
-    placeCaretAtEnd(editor);
+    const last = nodes[nodes.length - 1];
+    if (last) placeCaretAfter(last);
+    else placeCaretAtEnd(editor);
     return;
   }
   const range = selection.getRangeAt(0);
   range.deleteContents();
   for (const node of [...nodes].reverse()) range.insertNode(node);
-  range.collapse(false);
-  selection.removeAllRanges();
-  selection.addRange(range);
+  const last = nodes[nodes.length - 1];
+  if (last) placeCaretAfter(last);
 }
 
 /**
@@ -243,33 +302,85 @@ export function insertPlainText(editor: HTMLElement, text: string): void {
 }
 
 export type MentionQuery = {
-  trigger: "@" | "/";
+  trigger: "@";
   query: string;
   textNode: Text;
   start: number;
   end: number;
 };
 
+const MENTION_TOKEN = /(?:^|[\s([{<"'])(@)([^\s]*)$/u;
+
+function inChip(node: Node): boolean {
+  const el = node instanceof Element ? node : node.parentElement;
+  return el?.closest(".cm-chip") !== null;
+}
+
+function mentionInText(textNode: Text, end: number): MentionQuery | null {
+  if (end < 0 || end > textNode.data.length) return null;
+  const before = textNode.data.slice(0, end);
+  const match = MENTION_TOKEN.exec(before);
+  if (!match || match.index === undefined) return null;
+  const start = match[0].startsWith("@") ? match.index : match.index + 1;
+  return {
+    trigger: "@",
+    query: match[2] ?? "",
+    textNode,
+    start,
+    end,
+  };
+}
+
+/** Mention in the text that ends at `node` (inclusive). */
+function mentionEndingAt(node: Node | null): MentionQuery | null {
+  if (!node || inChip(node)) return null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return mentionInText(node as Text, (node as Text).data.length);
+  }
+  if (node instanceof HTMLElement && !node.classList.contains("cm-chip")) {
+    return mentionEndingAt(node.lastChild);
+  }
+  return null;
+}
+
 export function mentionAtCaret(editor: HTMLElement): MentionQuery | null {
   const selection = window.getSelection();
   if (!selection?.isCollapsed || selection.rangeCount === 0) return null;
   const node = selection.anchorNode;
-  if (!node || node.nodeType !== Node.TEXT_NODE || !editor.contains(node)) return null;
-  const textNode = node as Text;
-  const text = textNode.data;
-  const offset = selection.anchorOffset;
-  const before = text.slice(0, offset);
-  const match = /(?:^|[\s([{<"'])([@/])([^\s]*)$/u.exec(before);
-  if (!match || match.index === undefined || match[1] === undefined) return null;
-  const trigger = match[1] as "@" | "/";
-  const tokenStart = match[0].startsWith("@") || match[0].startsWith("/") ? match.index : match.index + 1;
-  return {
-    trigger,
-    query: match[2] ?? "",
-    textNode,
-    start: tokenStart,
-    end: offset,
-  };
+  if (!node || !editor.contains(node) || inChip(node)) return null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    const textNode = node as Text;
+    const hit = mentionInText(textNode, selection.anchorOffset);
+    if (hit) return hit;
+    // Toolbar `@` / insertNode often leaves the caret at offset 0 of the next text node.
+    if (selection.anchorOffset === 0) return mentionEndingAt(textNode.previousSibling);
+    return null;
+  }
+  return mentionEndingAt(node.childNodes[selection.anchorOffset - 1] ?? null);
+}
+
+/**
+ * Last `@query` mention in the editor. Used when the caret is not inside the
+ * token (toolbar `@` button, then pick from the menu).
+ */
+export function findMentionToken(editor: HTMLElement, query: string): MentionQuery | null {
+  const needle = `@${query}`;
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  let found: MentionQuery | null = null;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const textNode = node as Text;
+    if (inChip(textNode)) continue;
+    const text = textNode.data;
+    let from = 0;
+    while (from <= text.length) {
+      const at = text.indexOf(needle, from);
+      if (at === -1) break;
+      const hit = mentionInText(textNode, at + needle.length);
+      if (hit && hit.start === at && hit.query === query) found = hit;
+      from = at + 1;
+    }
+  }
+  return found;
 }
 
 export function replaceMention(mention: MentionQuery, chipEl: HTMLSpanElement): void {

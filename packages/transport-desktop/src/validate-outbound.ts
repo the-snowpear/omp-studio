@@ -588,6 +588,7 @@ const INTERACTION_KINDS = [
   "input",
   "editor",
   "approval",
+  "ask",
 ] as const satisfies readonly ClientInteraction["kind"][];
 
 function assertOptionList(value: unknown): void {
@@ -601,6 +602,53 @@ function assertOptionList(value: unknown): void {
     assertNonEmptyText(option.label, "event: interaction option label");
     if (option.description !== undefined && typeof option.description !== "string") {
       throw new ValidationError("event: interaction option description must be a string");
+    }
+  }
+}
+
+function assertAskOptionList(value: unknown): void {
+  if (!Array.isArray(value)) {
+    throw new ValidationError("event: ask options must be an array");
+  }
+  for (const option of value) {
+    assertPlainObject(option, "event: ask option");
+    assertNoUnknownKeys(option, ["id", "label", "description", "preview"], "event: ask option");
+    assertNonEmptyText(option.id, "event: ask option id");
+    assertNonEmptyText(option.label, "event: ask option label");
+    if (option.description !== undefined && typeof option.description !== "string") {
+      throw new ValidationError("event: ask option description must be a string");
+    }
+    if (option.preview !== undefined && typeof option.preview !== "string") {
+      throw new ValidationError("event: ask option preview must be a string");
+    }
+  }
+}
+
+function assertAskQuestions(value: unknown): void {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ValidationError("event: ask questions must be a non-empty array");
+  }
+  for (const question of value) {
+    assertPlainObject(question, "event: ask question");
+    assertNoUnknownKeys(
+      question,
+      ["id", "question", "header", "options", "multiple", "recommended"],
+      "event: ask question",
+    );
+    assertNonEmptyText(question.id, "event: ask question id");
+    assertNonEmptyText(question.question, "event: ask question text");
+    if (question.header !== undefined && typeof question.header !== "string") {
+      throw new ValidationError("event: ask question header must be a string");
+    }
+    assertAskOptionList(question.options);
+    if (typeof question.multiple !== "boolean") {
+      throw new ValidationError("event: ask question multiple must be a boolean");
+    }
+    if (
+      question.recommended !== undefined &&
+      (typeof question.recommended !== "number" || !Number.isSafeInteger(question.recommended) || question.recommended < 0)
+    ) {
+      throw new ValidationError("event: ask question recommended must be a non-negative integer");
     }
   }
 }
@@ -685,6 +733,14 @@ function assertClientInteraction(value: unknown): void {
       );
       assertNonEmptyText(value.approvalType, "event: interaction approvalType");
       assertPlainObject(value.detail, "event: interaction detail");
+      return;
+    case "ask":
+      assertNoUnknownKeys(
+        value,
+        ["kind", "interactionId", "sessionId", "leaseGeneration", "title", "requestId", "questions"],
+        "event: interaction",
+      );
+      assertAskQuestions(value.questions);
       return;
     default:
       throw new ValidationError(`event: unhandled interaction kind ${describe(kind)}`);

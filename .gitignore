@@ -39,6 +39,9 @@ Thumbs.db
 .zcode/
 .omp/
 
+# Unpackaged desktop sidecar (avatars etc.); packaged builds use {installDir}/userdata/
+apps/desktop/userdata/
+
 # Local Playwright CLI captures and scratch UI dumps
 .playwright-cli/
 **/__scratch__/

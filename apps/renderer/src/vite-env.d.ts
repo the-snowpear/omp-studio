@@ -35,6 +35,12 @@ declare global {
         setTheme(theme: "light" | "dark"): Promise<void>;
         /** App 级系统通知（固定文案；非 Host / Studio Bridge 面）。 */
         notify(payload: { title: string; body?: string }): Promise<void>;
+        /** 把处理后的头像写入安装目录 `userdata/profile/`，不回传路径。 */
+        saveAvatar(input: { mime: "image/jpeg" | "image/webp" | "image/png"; bytes: Uint8Array }): Promise<
+          { readonly ok: true } | { readonly ok: false; readonly message: string }
+        >;
+        loadAvatar(): Promise<{ readonly mime: "image/jpeg" | "image/webp" | "image/png"; readonly bytes: Uint8Array } | null>;
+        clearAvatar(): Promise<void>;
         openProjectInEditor(workspaceId: string): Promise<WorkspaceShellEditorResult>;
         openProjectDirectory(workspaceId: string): Promise<void>;
         /** Electron `webUtils.getPathForFile` for dropped / pasted File objects. */
@@ -57,6 +63,19 @@ declare global {
               }
             | { readonly ok: false; readonly reason: "missing" | "invalid" }
           >
+        >;
+        copyImage(input: {
+          mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+          bytes: Uint8Array;
+        }): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
+        saveImage(input: {
+          mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+          bytes: Uint8Array;
+          suggestedName: string;
+        }): Promise<
+          | { readonly ok: true }
+          | { readonly ok: false; readonly cancelled: true }
+          | { readonly ok: false; readonly message: string }
         >;
       }
     | undefined;

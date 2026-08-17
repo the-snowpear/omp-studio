@@ -1,0 +1,344 @@
+diff --git a/packages/coding-agent/src/extensibility/extensions/types.ts b/packages/coding-agent/src/extensibility/extensions/types.ts
+index 6d46fed..cba87f4 100644
+--- a/packages/coding-agent/src/extensibility/extensions/types.ts
++++ b/packages/coding-agent/src/extensibility/extensions/types.ts
+@@ -242,6 +242,26 @@ export interface ExtensionUIContext {
+ 	/** Show a text input dialog. */
+ 	input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
+ 
++	/**
++	 * Optional structured approval surface. When present, the extension tool
++	 * wrapper uses it for tier approvals instead of the generic
++	 * `select("Approve", "Deny")` prompt. `details` must stay within the
++	 * safe structure `{ toolName, toolCallId, reason?, summary, risk, scope? }`
++	 * — never full environment variables, auth headers, tokens or passwords.
++	 * Resolves `true` only for an explicit approval submit (`value: true`).
++	 */
++	approveTool?(
++		input: {
++			toolName: string;
++			toolCallId: string;
++			title: string;
++			reason?: string;
++			details: unknown;
++			approvalMode: "always-ask" | "write" | "yolo";
++		},
++		options?: ExtensionUIDialogOptions,
++	): Promise<boolean>;
++
+ 	/** Show the rich ask dialog when the interactive TUI surface is available. */
+ 	askDialog?(
+ 		questions: ExtensionAskDialogQuestion[],
+diff --git a/packages/coding-agent/src/extensibility/extensions/wrapper.ts b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
+index 7618e30..24e80e4 100644
+--- a/packages/coding-agent/src/extensibility/extensions/wrapper.ts
++++ b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
+@@ -7,6 +7,7 @@ import type {
+ 	AgentToolResult,
+ 	AgentToolUpdateCallback,
+ 	ToolLoadMode,
++	ToolTier,
+ } from "@oh-my-pi/pi-agent-core";
+ import type { ComputerSafetyCheck, ImageContent, Static, TextContent, TSchema } from "@oh-my-pi/pi-ai";
+ import { sanitizeText } from "@oh-my-pi/pi-utils";
+@@ -19,6 +20,18 @@ import { applyToolProxy } from "../tool-proxy";
+ import type { ExtensionRunner } from "./runner";
+ import type { RegisteredTool, ToolCallEventResult } from "./types";
+ 
++/** Approval tier → risk label for the remote approval card. */
++function tierRisk(tier: ToolTier): "low" | "medium" | "high" {
++	switch (tier) {
++		case "read":
++			return "low";
++		case "write":
++			return "medium";
++		case "exec":
++			return "high";
++	}
++}
++
+ /**
+  * Adapts a RegisteredTool into an AgentTool.
+  */
+@@ -289,9 +302,80 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+ 				});
+ 			};
+ 
+-			// Provider safety checks fail closed without an interactive prompt. Unlike
+-			// ordinary tier approval, no setting or yolo mode may bypass this gate.
+-			if (!this.runner.hasUI()) {
++			const markProviderSafetyApproved = () => {
++				if (pendingSafetyChecks.length === 0) return;
++				if (!context) throw new Error("Provider safety approval context is unavailable");
++				context.providerSafetyApproved = true;
++			};
++
++			// Approval priority (plan §3.2): Studio Remote approval when the
++			// tool call's UI context provides one; otherwise the legacy TUI
++			// approval; otherwise fail closed. Provider safety checks always
++			// need an explicit user approval — no setting or yolo mode may
++			// bypass this gate.
++			// Invoke through the ui object so `this` stays bound to the
++			// remote context instance (private-method access).
++			const remoteUi = context?.ui;
++			if (remoteUi?.approveTool !== undefined) {
++				const summary = truncateForPrompt(
++					`${formatApprovalPrompt(this.tool, resolvedArgs, approvalCheck.reason)}${
++						pendingSafetyChecks.length > 0
++							? `\nProvider safety checks:\n${safetyCheckLines(pendingSafetyChecks).join("\n")}`
++							: ""
++					}`,
++				);
++				let approved: boolean;
++				try {
++					approved = await remoteUi.approveTool(
++						{
++							toolName: this.tool.name,
++							toolCallId,
++							title: `Allow ${this.tool.name}?`,
++							...(approvalCheck.reason === undefined ? {} : { reason: approvalCheck.reason }),
++							details: {
++								toolName: this.tool.name,
++								toolCallId,
++								...(approvalCheck.reason === undefined ? {} : { reason: approvalCheck.reason }),
++								summary,
++								risk: tierRisk(resolved.tier),
++								...(this.tool.name.startsWith("mcp__") ? { scope: "mcp" } : {}),
++							},
++							approvalMode,
++						},
++						{ signal },
++					);
++				} catch (err) {
++					await emitApprovalResolved(false, err instanceof Error ? err.message : "approval aborted");
++					throw err;
++				}
++				await emitApprovalResolved(approved, approved ? undefined : "denied by user");
++				if (!approved) {
++					throw new Error(`Tool call denied by user: ${this.tool.name}`);
++				}
++				markProviderSafetyApproved();
++			} else if (this.runner.hasUI()) {
++				const uiContext = this.runner.getUIContext();
++				const basePrompt = formatApprovalPrompt(this.tool, resolvedArgs, approvalCheck.reason);
++				const safetyPrompt =
++					pendingSafetyChecks.length > 0
++						? `${basePrompt}\nProvider safety checks:\n${safetyCheckLines(pendingSafetyChecks).join("\n")}`
++						: basePrompt;
++				let choice: string | undefined;
++				try {
++					choice = await uiContext.select(safetyPrompt, ["Approve", "Deny"]);
++				} catch (err) {
++					await emitApprovalResolved(false, err instanceof Error ? err.message : "approval aborted");
++					throw err;
++				}
++				const approved = choice === "Approve";
++				await emitApprovalResolved(approved, approved ? undefined : "denied by user");
++				if (!approved) {
++					throw new Error(`Tool call denied by user: ${this.tool.name}`);
++				}
++				markProviderSafetyApproved();
++			} else {
++				// Provider safety checks fail closed without an interactive
++				// prompt, and tier approvals cannot auto-approve headlessly.
+ 				const reason = "no interactive UI available";
+ 				await emitApprovalResolved(false, reason);
+ 				if (pendingSafetyChecks.length > 0) {
+@@ -307,29 +391,6 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+ 						`  3. Use an interactive UI to approve the tool call`,
+ 				);
+ 			}
+-
+-			const uiContext = this.runner.getUIContext();
+-			const basePrompt = formatApprovalPrompt(this.tool, resolvedArgs, approvalCheck.reason);
+-			const safetyPrompt =
+-				pendingSafetyChecks.length > 0
+-					? `${basePrompt}\nProvider safety checks:\n${safetyCheckLines(pendingSafetyChecks).join("\n")}`
+-					: basePrompt;
+-			let choice: string | undefined;
+-			try {
+-				choice = await uiContext.select(safetyPrompt, ["Approve", "Deny"]);
+-			} catch (err) {
+-				await emitApprovalResolved(false, err instanceof Error ? err.message : "approval aborted");
+-				throw err;
+-			}
+-			const approved = choice === "Approve";
+-			await emitApprovalResolved(approved, approved ? undefined : "denied by user");
+-			if (!approved) {
+-				throw new Error(`Tool call denied by user: ${this.tool.name}`);
+-			}
+-			if (pendingSafetyChecks.length > 0) {
+-				if (!context) throw new Error("Provider safety approval context is unavailable");
+-				context.providerSafetyApproved = true;
+-			}
+ 		}
+ 
+ 		// Execute the actual tool
+diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
+index f770442..c34c530 100644
+--- a/packages/coding-agent/src/sdk.ts
++++ b/packages/coding-agent/src/sdk.ts
+@@ -207,7 +207,7 @@ import {
+ 	xdevEntries,
+ } from "./tools";
+ import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
+-import { ToolContextStore } from "./tools/context";
++import { ToolContextStore, type ToolUiFactory } from "./tools/context";
+ import { isIrcEnabled } from "./tools/hub";
+ import { getImageGenTools } from "./tools/image-gen";
+ import { wrapToolWithMetaNotice } from "./tools/output-meta";
+@@ -590,8 +590,8 @@ export interface CreateAgentSessionResult {
+ 	session: AgentSession;
+ 	/** Extensions result (loaded extensions + runtime) */
+ 	extensionsResult: LoadExtensionsResult;
+-	/** Update tool UI context (interactive mode) */
+-	setToolUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
++	/** Update tool UI context (interactive mode) or install a per-tool-call UI factory (Studio headless). */
++	setToolUIContext: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
+ 	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
+ 	mcpManager?: MCPManager;
+ 	/** Warning if session was restored with a different model than saved */
+@@ -3113,7 +3113,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			await extensionRunner.emitAfterProviderResponse(response, model);
+ 		};
+ 
+-		const setToolUIContext = (uiContext: ExtensionUIContext, hasUI: boolean) => {
++		const setToolUIContext = (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => {
+ 			toolContextStore.setUIContext(uiContext, hasUI);
+ 		};
+ 
+diff --git a/packages/coding-agent/src/tools/context.ts b/packages/coding-agent/src/tools/context.ts
+index 69b25bb..6340b70 100644
+--- a/packages/coding-agent/src/tools/context.ts
++++ b/packages/coding-agent/src/tools/context.ts
+@@ -21,25 +21,45 @@ declare module "@oh-my-pi/pi-agent-core" {
+ 	}
+ }
+ 
++/**
++ * Per-tool-call UI context factory. Interactive TUI modes keep the single
++ * static UIContext; the Studio headless Runtime installs a factory so each
++ * tool call receives a Remote UI context bound to its own internal
++ * commandId (`studio-tool:<toolCallId>`), keeping multi-question Ask flows
++ * on one identity.
++ */
++export type ToolUiFactory = (toolCall?: ToolCallContext) => ExtensionUIContext;
++
++/** Setter shape shared by session creation and the interactive mode. */
++export type ToolUiContextSetter = (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
++
+ export class ToolContextStore {
+ 	#uiContext: ExtensionUIContext | undefined;
++	#uiFactory: ToolUiFactory | undefined;
+ 	#hasUI = false;
+ 	#toolNames: string[] = [];
+ 
+ 	constructor(private readonly getBaseContext: () => CustomToolContext) {}
+ 
+ 	getContext(toolCall?: ToolCallContext): AgentToolContext {
++		const ui = this.#uiFactory === undefined ? this.#uiContext : this.#uiFactory(toolCall);
+ 		return {
+ 			...this.getBaseContext(),
+-			ui: this.#uiContext,
+-			hasUI: this.#hasUI,
++			ui,
++			hasUI: this.#hasUI && ui !== undefined,
+ 			toolNames: this.#toolNames,
+ 			toolCall,
+ 		};
+ 	}
+ 
+-	setUIContext(uiContext: ExtensionUIContext, hasUI: boolean): void {
+-		this.#uiContext = uiContext;
++	setUIContext(uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean): void {
++		if (typeof uiContext === "function") {
++			this.#uiFactory = uiContext;
++			this.#uiContext = undefined;
++		} else {
++			this.#uiContext = uiContext;
++			this.#uiFactory = undefined;
++		}
+ 		this.#hasUI = hasUI;
+ 	}
+ 
+diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
+index 8e9cc33..62a3b56 100644
+--- a/packages/coding-agent/test/extensions-runner.test.ts
++++ b/packages/coding-agent/test/extensions-runner.test.ts
+@@ -1789,6 +1789,76 @@ describe("ExtensionRunner", () => {
+ 			delete globalState.__approvalEvents;
+ 		});
+ 
++		it("prefers the Studio Remote approveTool over the runner TUI select", async () => {
++			const result = await loadTestExtensions();
++			const runner = new ExtensionRunner(
++				result.extensions,
++				result.runtime,
++				tempDir.path(),
++				sessionManager,
++				modelRegistry,
++			);
++			const select = vi.fn(async () => "Approve");
++			initializeRunner(runner, select);
++			const approveTool = vi.fn(async () => true);
++			const execute = vi.fn(async () => ({ content: [{ type: "text" as const, text: "ran" }] }));
++			const wrapper = new ExtensionToolWrapper({ ...approvalTool, execute }, runner);
++			await (wrapper as ExtensionToolWrapper<any>).execute("call-remote-approval", {}, undefined, undefined, {
++				sessionManager,
++				modelRegistry,
++				model: undefined,
++				isIdle: () => true,
++				hasQueuedMessages: () => false,
++				abort: () => {},
++				settings: { get: (key: string) => (key === "tools.approvalMode" ? "always-ask" : {}) } as never,
++				ui: { approveTool } as unknown as ExtensionUIContext as unknown as ExtensionUIContext,
++			});
++			expect(approveTool).toHaveBeenCalledWith(
++				expect.objectContaining({
++					toolName: "dangerous_tool",
++					toolCallId: "call-remote-approval",
++					title: "Allow dangerous_tool?",
++					approvalMode: "always-ask",
++					details: expect.objectContaining({ toolName: "dangerous_tool", risk: "high" }),
++				}),
++				expect.anything(),
++			);
++			expect(select).not.toHaveBeenCalled();
++			expect(execute).toHaveBeenCalledTimes(1);
++		});
++
++		it("remote approval resolve false denies the tool and never executes it", async () => {
++			const result = await loadTestExtensions();
++			const runner = new ExtensionRunner(
++				result.extensions,
++				result.runtime,
++				tempDir.path(),
++				sessionManager,
++				modelRegistry,
++			);
++			initializeRunner(
++				runner,
++				vi.fn(async () => "Approve"),
++			);
++			const approveTool = vi.fn(async () => false);
++			const execute = vi.fn(async () => ({ content: [{ type: "text" as const, text: "ran" }] }));
++			const wrapper = new ExtensionToolWrapper({ ...approvalTool, execute }, runner);
++			await expect(
++				(wrapper as ExtensionToolWrapper<any>).execute("call-remote-denied", {}, undefined, undefined, {
++					sessionManager,
++					modelRegistry,
++					model: undefined,
++					isIdle: () => true,
++					hasQueuedMessages: () => false,
++					abort: () => {},
++					settings: { get: (key: string) => (key === "tools.approvalMode" ? "always-ask" : {}) } as never,
++					ui: { approveTool } as unknown as ExtensionUIContext as unknown as ExtensionUIContext,
++				}),
++			).rejects.toThrow("Tool call denied by user: dangerous_tool");
++			expect(approveTool).toHaveBeenCalledTimes(1);
++			expect(execute).not.toHaveBeenCalled();
++		});
++
+ 		it("emits resolved false when approval is denied", async () => {
+ 			const events: Array<{ type: string; approved?: boolean; reason?: string }> = [];
+ 			const extCode = `

@@ -24,7 +24,9 @@
     "p5:gate": "node scripts/p5-gate.mjs",
     "omp:e2e:install": "node scripts/runtime-install-e2e.mjs",
     "omp:verify:prepatch": "node scripts/verify-omp-prepatch.mjs",
-    "omp:verify:patches": "node scripts/verify-omp-patches.mjs"
+    "omp:verify:patches": "node scripts/verify-omp-patches.mjs",
+    "omp:overlay:apply": "node scripts/apply-omp-overlay.mjs",
+    "omp:patches:regen": "node scripts/regen-omp-patches.mjs"
   },
   "engines": {
     "node": ">=22"

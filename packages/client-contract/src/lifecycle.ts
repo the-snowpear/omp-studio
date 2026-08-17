@@ -112,7 +112,27 @@ export type ClientInteraction =
       readonly approvalType: string;
       /** Heterogeneous, pre-redacted approval details. */
       readonly detail: Readonly<Record<string, unknown>>;
+    })
+  | (ClientInteractionBase & {
+      readonly kind: "ask";
+      readonly questions: ReadonlyArray<ClientAskQuestion>;
     });
+
+export type ClientAskOption = {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly preview?: string;
+};
+
+export type ClientAskQuestion = {
+  readonly id: string;
+  readonly question: string;
+  readonly header?: string;
+  readonly options: ReadonlyArray<ClientAskOption>;
+  readonly multiple: boolean;
+  readonly recommended?: number;
+};
 
 /**
  * Terminal receipt: the only source of final command outcomes. A receipt is

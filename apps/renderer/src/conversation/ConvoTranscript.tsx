@@ -22,6 +22,12 @@ function collectAssistantSegments(rows: readonly TimelineRow[]): AssistantSegmen
   return segments;
 }
 
+function turnSliceClosed(slice: readonly TimelineRow[]): boolean {
+  const last = slice[slice.length - 1];
+  if (last?.type !== "assistant" || last.status === "streaming") return false;
+  return !slice.some((row) => row.type === "assistant" && row.turnOpen === true);
+}
+
 /** Attach one change card to the last assistant row of each completed turn. */
 export function turnChangeBinds(rows: readonly TimelineRow[]): ReadonlyArray<TurnChangeBind | undefined> {
   const binds: Array<TurnChangeBind | undefined> = rows.map(() => undefined);
@@ -34,8 +40,7 @@ export function turnChangeBinds(rows: readonly TimelineRow[]): ReadonlyArray<Tur
       return;
     }
     const slice = rows.slice(start, end);
-    const last = slice[slice.length - 1];
-    if (last?.type !== "assistant" || last.status === "streaming") {
+    if (!turnSliceClosed(slice)) {
       start = -1;
       return;
     }

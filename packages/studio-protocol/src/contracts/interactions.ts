@@ -1,6 +1,6 @@
 import type { CommandId, InteractionId } from "./ids";
 
-export type InteractionKind = "confirm" | "select" | "input" | "editor" | "approval";
+export type InteractionKind = "confirm" | "select" | "input" | "editor" | "approval" | "ask";
 
 interface InteractionBase {
   interactionId: InteractionId;
@@ -34,7 +34,27 @@ export type RemoteInteractionRequest =
       kind: "approval";
       approvalType: string;
       details: unknown;
+    })
+  | (InteractionBase & {
+      kind: "ask";
+      questions: RemoteAskQuestion[];
     });
+
+export type RemoteAskOption = {
+  id: string;
+  label: string;
+  description?: string;
+  preview?: string;
+};
+
+export type RemoteAskQuestion = {
+  id: string;
+  question: string;
+  header?: string;
+  options: RemoteAskOption[];
+  multiple?: boolean;
+  recommended?: number;
+};
 
 export interface RemoteInteractionResponse {
   kind: "interaction.respond";

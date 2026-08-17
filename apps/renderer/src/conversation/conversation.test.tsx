@@ -1401,6 +1401,141 @@ describe("runtime identity and XSS", () => {
   });
 });
 
+describe("message copy", () => {
+  function mockClipboard() {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    return writeText;
+  }
+
+  it("copies the user message source text and shows 已复制", async () => {
+    const writeText = mockClipboard();
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-copy",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "打开 @src/app.ts",
+        }}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "复制消息" });
+    expect(button.textContent).toBe("");
+    expect(container.querySelector(".ev-copy-host .ev-body")).toBeTruthy();
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("打开 @src/app.ts");
+    });
+    expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy();
+  });
+
+  it("copies only the last assistant text body", async () => {
+    const writeText = mockClipboard();
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "a-copy",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [
+            { type: "thinking", key: "th1", text: "先想一步" },
+            {
+              type: "batch",
+              key: "b1",
+              tools: [{ toolCallId: "c1", toolName: "Read", status: "succeeded", arguments: { path: "a.ts" } }],
+            },
+            { type: "text", key: "t1", text: "第一段" },
+            { type: "text", key: "t2", text: "第二段" },
+          ],
+        }}
+      />,
+    );
+    const hosts = container.querySelectorAll(".ev-copy-host");
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0]?.querySelector(".ev-body")?.textContent).toContain("第二段");
+    expect(hosts[0]?.querySelector(".ev-body")?.textContent).not.toContain("第一段");
+    fireEvent.click(screen.getByRole("button", { name: "复制消息" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("第二段");
+    });
+  });
+
+  it("hides copy on process rows without text", () => {
+    render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "a-tools",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          presentation: "process",
+          segments: [{
+            type: "batch",
+            key: "b1",
+            tools: [{ toolCallId: "c1", toolName: "Read", status: "succeeded", arguments: { path: "a.ts" } }],
+          }],
+        }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "复制消息" })).toBeNull();
+  });
+
+  it("hides copy on interstitial text between tool chains", () => {
+    render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "a-mid",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          presentation: "process",
+          segments: [
+            {
+              type: "batch",
+              key: "b1",
+              tools: [{ toolCallId: "c1", toolName: "Read", status: "succeeded", arguments: { path: "a.ts" } }],
+            },
+            { type: "text", key: "t-mid", text: "再试一次别的路径。" },
+            {
+              type: "batch",
+              key: "b2",
+              tools: [{ toolCallId: "c2", toolName: "Edit", status: "succeeded", arguments: { path: "a.ts" } }],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "复制消息" })).toBeNull();
+  });
+
+  it("hides copy when the last text is still followed by tools", () => {
+    render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "a-then-tools",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [
+            { type: "text", key: "t1", text: "我先去改文件。" },
+            {
+              type: "batch",
+              key: "b1",
+              tools: [{ toolCallId: "c1", toolName: "Edit", status: "succeeded", arguments: { path: "a.ts" } }],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "复制消息" })).toBeNull();
+  });
+});
+
 describe("gap resync signal", () => {
   it("keeps later conversation events when eventSeq skips non-conversation traffic", () => {
     let state = resetConversation(1, identity, "ready");
@@ -1638,6 +1773,130 @@ describe("ver1 batch chain", () => {
     expect(container.querySelector(".think-scroll")?.textContent).toContain("First diagnostic step.");
     expect(container.querySelector(".think-scroll")?.textContent).toContain("Second diagnostic step.");
     expect(container.querySelector('[data-kind="think"]')?.getAttribute("data-item-key")).toBe("thinking-1");
+  });
+});
+
+describe("tool chain keeps the produced order", () => {
+  it("keeps reasoning emitted after a tool result behind that tool when process items merge", () => {
+    const step: Extract<ConversationItem, { kind: "message" }> = {
+      ...assistantItem("step", ""),
+      content: [
+        { type: "thinking", text: "先读一下这个文件。" },
+        { type: "toolCall", toolCallId: "read-1", toolName: "Read", arguments: { path: "a.ts" } },
+        { type: "toolResult", toolCallId: "read-1", toolName: "Read", output: "", isError: false },
+      ],
+    };
+    const after: Extract<ConversationItem, { kind: "message" }> = {
+      ...assistantItem("after", ""),
+      content: [
+        { type: "thinking", text: "文件是空的，改用 Grep。" },
+        { type: "toolCall", toolCallId: "grep-1", toolName: "Grep", arguments: { pattern: "needle" } },
+        { type: "toolResult", toolCallId: "grep-1", toolName: "Grep", output: "hit", isError: false },
+      ],
+    };
+    const items = [userItem("u-order", "查一下"), step, after, assistantItem("final-order", "查到了。")];
+    const rows = rowsFromConversationViews(selectConversationViews({
+      ...createInitialConversationState(),
+      order: items.map((item) => item.itemId),
+      itemsById: Object.fromEntries(items.map((item) => [item.itemId, item])),
+    }));
+
+    const process = rows.find((row) => row.type === "assistant" && row.presentation === "process");
+    const shape = process?.type === "assistant"
+      ? process.segments.map((segment) =>
+          segment.type === "batch"
+            ? `batch:${segment.tools.map((tool) => tool.toolCallId).join(",")}`
+            : `${segment.type}:${segment.text}`,
+        )
+      : [];
+    expect(shape).toEqual([
+      "thinking:先读一下这个文件。",
+      "batch:read-1",
+      "thinking:文件是空的，改用 Grep。",
+      "batch:grep-1",
+    ]);
+  });
+
+  it("renders post-tool reasoning as its own card after the tool row", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "m-chain-order",
+          createdAt: "2026-08-15T00:00:02.000Z",
+          status: "completed",
+          presentation: "process",
+          segments: [
+            { type: "thinking", key: "think-before", text: "Plan: read the file." },
+            {
+              type: "batch",
+              key: "batch-1",
+              tools: [{ toolCallId: "read-1", toolName: "Read", status: "succeeded", arguments: { path: "a.ts" } }],
+            },
+            { type: "thinking", key: "think-after", text: "The file was empty." },
+          ],
+        }}
+      />,
+    );
+
+    expect([...container.querySelectorAll(".tl-item")].map((node) => node.getAttribute("data-kind"))).toEqual([
+      "think",
+      "read",
+      "think",
+    ]);
+    const cards = [...container.querySelectorAll('[data-kind="think"] .think-scroll')].map((node) => node.textContent ?? "");
+    expect(cards[0]).toContain("Plan: read the file.");
+    expect(cards[0]).not.toContain("The file was empty.");
+    expect(cards[1]).toContain("The file was empty.");
+  });
+
+  it("keeps a manually collapsed chain collapsed across the live-to-persisted swap", () => {
+    const liveRow = {
+      type: "assistant" as const,
+      itemId: "m-live-swap",
+      createdAt: "2026-08-15T00:00:02.000Z",
+      status: "streaming" as const,
+      presentation: "reply" as const,
+      segments: [
+        { type: "thinking" as const, key: "m1:thinking:0", text: "Planning." },
+        { type: "text" as const, key: "m1:text:1", text: "先看两个文件。", streaming: true },
+        {
+          type: "batch" as const,
+          key: "live-tools-m1",
+          tools: [
+            { toolCallId: "read-1", toolName: "Read", status: "running" as const, arguments: { path: "a.ts" } },
+            { toolCallId: "read-2", toolName: "Read", status: "queued" as const, arguments: { path: "b.ts" } },
+          ],
+        },
+      ],
+    };
+    const { container, rerender } = render(<ConversationItemView row={liveRow} />);
+    fireEvent.click(container.querySelector(".batch-sum") as HTMLButtonElement);
+    expect(container.querySelector(".ev-batch.open")).toBeNull();
+
+    // message.completed 落盘：segment key 从 blockId 换成序号 key，同一时刻这一行也从
+    // reply 降级成 process（身份头交给新的 assistant item）。两者都不该重挂载工具链。
+    rerender(
+      <ConversationItemView
+        row={{
+          ...liveRow,
+          presentation: "process",
+          segments: [
+            { type: "thinking", key: "thinking-0", text: "Planning." },
+            { type: "text", key: "text-1", text: "先看两个文件。" },
+            {
+              type: "batch",
+              key: "batch-2",
+              tools: [
+                { toolCallId: "read-1", toolName: "Read", status: "succeeded", arguments: { path: "a.ts" } },
+                { toolCallId: "read-2", toolName: "Read", status: "running", arguments: { path: "b.ts" } },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelector(".ev-batch.open")).toBeNull();
   });
 });
 
@@ -2163,6 +2422,7 @@ describe("turn file-change card", () => {
     };
     const streaming = { ...completed, itemId: "live-turn", status: "streaming" as const };
     expect(turnChangeBinds([streaming])[0]).toBeUndefined();
+    expect(turnChangeBinds([{ ...completed, turnOpen: true }])[0]).toBeUndefined();
 
     const reviewed: string[] = [];
     const { container } = render(
@@ -2217,6 +2477,63 @@ describe("turn file-change card", () => {
     expect(toggles).toHaveLength(2);
     expect(toggles[0]?.getAttribute("aria-expanded")).toBe("false");
     expect(toggles[1]?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("holds the latest card until the Runtime turn closes, even after file tools succeed", () => {
+    const writeItem: Extract<ConversationItem, { kind: "message" }> = {
+      ...assistantItem("m-write", ""),
+      createdAt: "2026-08-15T00:00:02.000Z",
+      content: [
+        { type: "toolCall", toolCallId: "w1", toolName: "write", arguments: { path: "src/a.ts", content: "a\nb\nc" } },
+        { type: "toolResult", toolCallId: "w1", toolName: "write", isError: false },
+      ],
+    };
+    const replyItem = assistantItem("m-reply", "改好了。");
+    const baseState = {
+      ...createInitialConversationState(),
+      order: ["m-write", "m-reply"],
+      itemsById: { "m-write": writeItem, "m-reply": replyItem },
+    };
+    const openRows = rowsFromConversationViews(selectConversationViews({
+      ...baseState,
+      openTurnItems: { "m-write": "t1", "m-reply": "t1" },
+    }));
+    expect(openRows.every((row) => row.type !== "assistant" || row.turnOpen === true)).toBe(true);
+    expect(turnChangeBinds(openRows).every((bind) => bind === undefined)).toBe(true);
+
+    const earlierClosed = {
+      type: "assistant" as const,
+      itemId: "old-turn",
+      createdAt: "2026-08-15T00:00:00.000Z",
+      status: "completed" as const,
+      segments: [{ type: "batch" as const, key: "b-old", tools: [write] }],
+    };
+    const laterOpen = {
+      type: "assistant" as const,
+      itemId: "new-turn",
+      createdAt: "2026-08-15T00:00:04.000Z",
+      status: "completed" as const,
+      turnOpen: true,
+      segments: [{ type: "batch" as const, key: "b-new", tools: [edit] }],
+    };
+    const mixed = turnChangeBinds([
+      { type: "user", itemId: "u-old", createdAt: "2026-08-15T00:00:00.000Z", text: "上一轮" },
+      earlierClosed,
+      { type: "user", itemId: "u-new", createdAt: "2026-08-15T00:00:03.000Z", text: "这一轮" },
+      laterOpen,
+    ]);
+    expect(mixed[1]).toBeDefined();
+    expect(mixed[3]).toBeUndefined();
+
+    const closedRows = rowsFromConversationViews(selectConversationViews(baseState));
+    const closedBinds = turnChangeBinds(closedRows);
+    expect(closedRows.some((row) => row.type === "assistant" && row.turnOpen === true)).toBe(false);
+    expect(closedBinds.some((bind) => bind !== undefined)).toBe(true);
+
+    const { container: openContainer } = render(<ConvoTranscript rows={openRows} />);
+    expect(openContainer.querySelector(".turn-diff")).toBeNull();
+    const { container: closedContainer } = render(<ConvoTranscript rows={closedRows} />);
+    expect(closedContainer.querySelector(".turn-diff")).not.toBeNull();
   });
 });
 
@@ -2325,8 +2642,8 @@ describe("session task progress", () => {
       },
     ]);
     expect(progress.todos).toEqual([{ id: "文档-0", content: "写文档", status: "in_progress", phase: "文档" }]);
-    expect(progress.files).toEqual([
-      { path: "docs/UPSTREAM-SYNC.md", name: "UPSTREAM-SYNC.md", dir: "docs/", add: 2, del: 0 },
+    expect(progress.files).toMatchObject([
+      { path: "docs/UPSTREAM-SYNC.md", name: "UPSTREAM-SYNC.md", dir: "docs/", add: 2, del: 0, status: "added", note: "Write" },
     ]);
   });
 });
@@ -2382,6 +2699,22 @@ describe("xd:// mount notice", () => {
     expect(screen.queryByText(/no service-tier control/)).toBeNull();
     expect(screen.queryByText(/already matches the active model/)).toBeNull();
     expect(screen.getByText("正在同步压缩摘要")).toBeTruthy();
+  });
+
+  it("does not render Retry N/M notices in the transcript; they belong on the activity line", () => {
+    const state = {
+      ...resetConversation(1, identity, "ready"),
+      notices: [{ id: "n0", level: "warning" as const, message: "Retry 5/10", source: "retry" }],
+    };
+    const { container } = render(
+      <ConversationPane
+        snapshot={{ state, rows: buildTimeline(state), demo: false, loadingOlder: false, identityKey: "retry-notice" }}
+        onLoadOlder={() => {}}
+        activity={{ status: { phase: "waiting", label: "working", retry: { attempt: 5, maxAttempts: 10 } } }}
+      />,
+    );
+    expect(container.querySelector(".convo-notice")).toBeNull();
+    expect(container.querySelector(".al-retry")?.textContent).toBe("Retry 5/10");
   });
 });
 

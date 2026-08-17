@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SessionHistoryEntry, SessionHistoryReadModel, StudioClient, TokenUsageReadModel } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { usePreviewMode } from "../preview/PreviewContext";
+import { useOperatorProfile } from "../settings/operatorProfile";
 import {
   EMPTY_USAGE,
   USAGE_POLL_MS,
@@ -43,6 +44,7 @@ export function ConversationEmpty({
   onOpenHistory: () => void;
 }) {
   const { preview } = usePreviewMode();
+  const { profile } = useOperatorProfile();
   const previewUsage = useMemo(() => buildPreviewUsage(), []);
   const [liveUsage, setLiveUsage] = useState<TokenUsageReadModel | null>(null);
   const [fetchedHistory, setFetchedHistory] = useState<SessionHistoryReadModel | undefined>(undefined);
@@ -104,7 +106,7 @@ export function ConversationEmpty({
     });
   }, [fetchedHistory, hiddenPreviewThreadIds, history, preview, projectName, runningSessionId, waitingSessionId]);
 
-  const greet = `${greetingPart()}，Studio`;
+  const greet = `${greetingPart()}，${profile.displayName}`;
   const usageReason = !preview && liveUsage?.unavailableReason ? liveUsage.unavailableReason : undefined;
 
   return (

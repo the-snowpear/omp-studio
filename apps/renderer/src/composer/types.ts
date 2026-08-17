@@ -1,6 +1,6 @@
 /**
- * Composer inline chips: files, folders, images, skills, and agents.
- * Serialized form is what Runtime consumes (`@path`, `/skill:name`, `[图N]`).
+ * Composer inline chips: files, folders, images, skills, agents, and session modes.
+ * File/skill/agent serialize to Runtime tokens; mode capsules are omitted from prompt text.
  */
 
 export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
@@ -14,7 +14,7 @@ export type PromptImage = {
   readonly data: string;
 };
 
-export type ComposerChipKind = "file" | "dir" | "image" | "skill" | "agent";
+export type ComposerChipKind = "file" | "dir" | "image" | "skill" | "agent" | "mode";
 
 export type ComposerChip = {
   readonly id: string;

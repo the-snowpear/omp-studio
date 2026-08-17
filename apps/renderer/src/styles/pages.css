@@ -123,7 +123,179 @@
 /* ---------- 项目主页 ---------- */
 .home-hero { margin-bottom: var(--sp-24); }
 .home-hero h1 { font-size: var(--fs-22); font-weight: var(--fw-semibold); margin-bottom: var(--sp-4); }
+.home-identity {
+  --home-avatar-d: calc(var(--fs-22) * 1.55 + var(--sp-4) + var(--fs-14) * 1.55);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-12);
+}
+.home-avatar-slot {
+  flex: none;
+  width: var(--home-avatar-d);
+  height: var(--home-avatar-d);
+}
+.home-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--r-full);
+  object-fit: cover;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--home-avatar-d) * 0.42);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  overflow: hidden;
+}
+.home-identity-copy {
+  flex: 1;
+  min-width: 0;
+}
+.home-identity-copy h1 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-22);
+  line-height: 1.55;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-identity-copy p {
+  margin: 0;
+  font-size: var(--fs-14);
+  line-height: 1.55;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-id-edit { flex: none; align-self: start; }
+img.home-avatar,
+img.profile-edit-avatar-img { display: block; }
 .home-quick { display: flex; gap: var(--sp-8); margin-top: var(--sp-16); flex-wrap: wrap; }
+
+.profile-edit-modal { width: 420px; }
+.profile-edit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  padding-bottom: var(--sp-4);
+}
+.profile-edit-head h2 {
+  margin: 2px 0 0;
+  font-size: var(--fs-16);
+  font-weight: var(--fw-semibold);
+}
+.profile-edit-kicker {
+  display: block;
+  font: var(--fw-semibold) 10px var(--font-mono);
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+.profile-edit-body { display: flex; flex-direction: column; gap: var(--sp-16); }
+.profile-edit-avatar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-14);
+}
+.profile-edit-avatar-btn {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  cursor: pointer;
+  flex: none;
+}
+.profile-edit-avatar-img {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--r-full);
+  object-fit: cover;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: var(--fw-semibold);
+  overflow: hidden;
+}
+.profile-edit-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-full);
+  background: rgba(15, 15, 25, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.profile-edit-avatar-btn:hover .profile-edit-avatar-overlay,
+.profile-edit-avatar-btn:focus-visible .profile-edit-avatar-overlay { opacity: 1; }
+.profile-edit-avatar-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.profile-edit-avatar-copy b { font-size: var(--fs-13); }
+.profile-edit-avatar-copy span { font-size: var(--fs-12); color: var(--text-3); }
+.profile-edit-avatar-copy .btn { margin-top: 4px; }
+.profile-edit-error {
+  margin: 0;
+  color: var(--red);
+  font-size: var(--fs-12);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.avatar-crop-backdrop { z-index: calc(var(--z-modal) + 1); }
+.avatar-crop-modal { width: 360px; }
+.avatar-crop-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-12);
+}
+.avatar-crop-stage {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--r-10);
+  background: #0b0b0f;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.avatar-crop-stage.is-dragging { cursor: grabbing; }
+.avatar-crop-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.avatar-crop-circle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--avatar-crop-circle);
+  height: var(--avatar-crop-circle);
+  transform: translate(-50%, -50%);
+  border-radius: var(--r-full);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4), 0 0 0 9999px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+}
+.avatar-crop-foot { justify-content: space-between; }
 
 .proj-grid {
   display: grid;
@@ -233,10 +405,22 @@
 .tk-chart { display: block; width: 100%; height: 210px; margin-top: var(--sp-24); overflow: visible; }
 .tk-chart .tk-grid { stroke: var(--border); stroke-dasharray: 3 4; stroke-width: 1; }
 .tk-chart .tk-grid.base { stroke-dasharray: none; }
-.tk-chart .tk-yt { font-family: var(--font-mono); font-size: 9px; fill: var(--text-faint); }
-.tk-chart .tk-xt { font-size: 9.5px; fill: var(--text-faint); }
+.tk-chart .tk-yt { font-family: var(--font-mono); font-size: 9px; fill: var(--text-faint); pointer-events: none; }
+.tk-chart .tk-xt { font-size: 9.5px; fill: var(--text-faint); pointer-events: none; }
+.tk-chart .tk-xt.in,
+.tk-chart .tk-yt.in { animation: tk-axis-in var(--dur-chart-axis) var(--ease) both; }
+.tk-chart .tk-xt.out,
+.tk-chart .tk-yt.out { animation: tk-axis-out var(--dur-chart-axis) var(--ease) both; }
+@keyframes tk-axis-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tk-axis-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tk-chart .tk-xt.in,
+  .tk-chart .tk-yt.in,
+  .tk-chart .tk-xt.out,
+  .tk-chart .tk-yt.out { animation: none; }
+}
 /* 曲线：基线 1.6px，曲线段需要 round join+cap 才不会出现尖角断开感。 */
-.tk-chart .tk-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.tk-chart .tk-line { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
 .tk-chart .tk-line.m0 { stroke: var(--accent); }
 .tk-chart .tk-line.m1 { stroke: var(--blue); }
 .tk-chart .tk-line.m2 { stroke: var(--green); }

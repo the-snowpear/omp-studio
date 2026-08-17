@@ -25,8 +25,8 @@
  *      (runtime.install / session.drop / interaction.respond) reduce to a
  *      failed entry with RESYNC_REQUIRED;
  *   6. snapshot events clear resync only on matching authority; version
- *      monotonicity is scoped to one runtimeEpoch (a new epoch may restart
- *      from a smaller version);
+ *      monotonicity is scoped to one Runtime identity and epoch (either may
+ *      restart from a smaller version);
 
  *   7. command accepted/interaction/terminal transitions never regress or
  *      duplicate; terminal states are final;
@@ -656,13 +656,15 @@ function runtimeEpochOf(event: ClientEvent): RuntimeEpoch | undefined {
 
 function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readonly kind: "snapshot" }>): ClientState {
   const snapshot = event.snapshot;
-  // Version is monotonic only inside one runtimeEpoch. A new epoch may
-  // restart from a smaller version; that snapshot is the new baseline.
+  // Version is monotonic only inside one Runtime identity and epoch. A
+  // different resident Worker may use the same epoch with a smaller version.
   const currentVersion = state.connection.stateVersion;
+  const currentSnapshot = state.entities.snapshot;
   if (
     currentVersion !== null &&
     snapshot.stateVersion < currentVersion &&
-    snapshot.runtimeEpoch === state.connection.runtimeEpoch
+    snapshot.runtimeId === currentSnapshot?.runtimeId &&
+    snapshot.runtimeEpoch === currentSnapshot.runtimeEpoch
   ) {
     return state;
   }
@@ -843,23 +845,25 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
   const connection = event.connection;
   const nextRuntimeEpoch = connection.runtimeEpoch ?? null;
   const prevRuntimeEpoch = state.connection.runtimeEpoch;
+  const runtimeIdChanged = connection.runtimeId !== state.connection.runtime?.runtimeId;
   const wasDisconnected = state.connection.runtime?.status === "disconnected";
   const lost = connection.status === "disconnected" && !wasDisconnected;
   const epochChanged = nextRuntimeEpoch !== prevRuntimeEpoch;
+  const identityChanged = runtimeIdChanged || epochChanged;
   let commands = state.commands;
-  if (epochChanged || lost) {
+  if (identityChanged || lost) {
     commands = markPendingOutcomeUnknown(
       commands,
       "runtime changed; outcome unknown",
       event.occurredAt,
-      epochChanged && !lost && connection.status === "connected"
+      identityChanged && !lost && connection.status === "connected"
         ? (command) => command.commandName === "session.resume" || command.commandName === "session.create"
         : undefined,
     );
   }
   const conversation =
-    epochChanged || lost ? reduceConversationState(state.conversation, { type: "clear" }) : state.conversation;
-  const interaction = epochChanged || lost ? { pending: null } : state.interaction;
+    identityChanged || lost ? reduceConversationState(state.conversation, { type: "clear" }) : state.conversation;
+  const interaction = identityChanged || lost ? { pending: null } : state.interaction;
   const advanced = advanceConnection(state.connection, event);
   return {
     ...state,
@@ -867,9 +871,9 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
       ...advanced,
       runtime: connection,
       runtimeEpoch: nextRuntimeEpoch,
-      ...(epochChanged || lost ? { stateVersion: null } : {}),
+      ...(identityChanged || lost ? { stateVersion: null } : {}),
     },
-    ...(epochChanged || lost ? { entities: { snapshot: null, telemetry: null } } : {}),
+    ...(identityChanged || lost ? { entities: { snapshot: null, telemetry: null } } : {}),
     interaction,
     commands,
     conversation,

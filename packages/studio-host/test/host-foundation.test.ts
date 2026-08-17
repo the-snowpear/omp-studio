@@ -857,6 +857,39 @@ test("M4 operator.manifest.get is read-concurrent and operator.invoke is session
   );
 });
 
+test("session.model.set is queue-compatible during streaming and compacting", async () => {
+  assert.equal(classifyOperation({ kind: "session.model.set", selector: "anthropic/claude-opus-4-6" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "session.thinking.set", level: "high" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "mode.plan.enter" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "mode.vibe.exit" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "goal.create", objective: "ship" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "loop.enable" }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "session.fast.set", enabled: true }), "queue-compatible");
+  assert.equal(classifyOperation({ kind: "session.prewalk.disarm" }), "queue-compatible");
+
+  const streaming = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: true,
+    isCompacting: false,
+  }));
+  await streaming.run(request({ kind: "session.model.set", selector: "anthropic/claude-opus-4-6" }), () => undefined);
+  await streaming.run(request({ kind: "mode.plan.enter" }), () => undefined);
+
+  const compacting = new CommandArbiter(() => ({
+    runtimeEpoch: epoch,
+    stateVersion: 1 as StateVersion,
+    isStreaming: false,
+    isCompacting: true,
+  }));
+  await compacting.run(request({ kind: "session.thinking.set", level: "high" }), () => undefined);
+  await compacting.run(request({ kind: "mode.vibe.enter" }), () => undefined);
+  await assert.rejects(
+    () => compacting.run(request({ kind: "session.drop" }), () => undefined),
+    (error: unknown) => error instanceof StudioHostError && error.code === "BUSY_COMPACTING",
+  );
+});
+
 test("M4 concurrent operator.manifest.get reads both execute", async () => {
   const arbiter = new CommandArbiter(() => ({
     runtimeEpoch: epoch,

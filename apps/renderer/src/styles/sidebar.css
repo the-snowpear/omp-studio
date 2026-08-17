@@ -255,7 +255,8 @@
   gap: var(--sp-6);
   width: 100%;
   min-width: 0;
-  padding: 6px var(--sp-8) 6px 26px;
+  /* 左内边距与项目头相同：8px + 14px 文件夹槽 + 6px gap，标题与项目名对齐。 */
+  padding: 6px var(--sp-8);
   border-radius: var(--r-6);
   cursor: pointer;
   position: relative;
@@ -296,6 +297,12 @@
   visibility: visible;
   pointer-events: auto;
 }
+/* 等待胶囊占着最右槽：悬停也不露出归档 / 更多，避免和胶囊抢位。 */
+.thread-row.has-wait:hover .t-actions {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
 /* 悬停行抬升一层：.t-actions 的 transform 让它自成层叠上下文，气泡的
    z-index(--z-menu) 只在该上下文内有效；后续 .thread-row 同为 positioned、
    按 DOM 顺序后绘，会把向下弹出的 tip 盖住，看起来像 tip 半透明透出下一行。
@@ -315,13 +322,13 @@
   --title-clear: 40px;
 }
 /* 等待胶囊（待确认 / 待审核 / 待回答）：钉在行最右，盖住归档键。
-   宽约 46px（chip.xs 三字）+ 右缘 4px → 左缘距行右 50px。
-   标题盒右缘距行右 8px → clear=42、fade=60。悬停仍以胶囊为准，
+   宽约 52px（三字 10.5px + 左右 10px）+ 右缘 4px → 左缘距行右 56px。
+   标题盒右缘距行右 8px → clear=48、fade=66。悬停仍以胶囊为准，
    不改走操作按钮那套 58/40。 */
 .thread-row.has-wait .t-title,
 .thread-row.has-wait:hover .t-title {
-  --title-fade: 60px;
-  --title-clear: 42px;
+  --title-fade: 66px;
+  --title-clear: 48px;
 }
 @property --title-fade {
   syntax: "<length>";
@@ -354,7 +361,7 @@
   transition: transform 3s linear 800ms;
 }
 .thread-row.has-wait:hover .t-scroll {
-  transform: translateX(min(100cqw - 100% - 60px, 0px));
+  transform: translateX(min(100cqw - 100% - 66px, 0px));
 }
 /* 会话行的行内 tip 与项目行同规则：列表区 overflow 隐藏，向下弹、右对齐。 */
 .thread-row [data-tip]:hover::after,
@@ -365,13 +372,13 @@
   right: 0;
   transform: none;
 }
-/* 「展开更多」：第 7 位起的出现口，与 .thread 同左缩进。 */
+/* 「展开更多」：第 7 位起的出现口，与会话标题同左缘（文件夹槽 + gap）。 */
 .load-more {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin: 2px 0 2px 26px;
-  padding: 4px var(--sp-8);
+  margin: 2px 0 2px var(--sp-8);
+  padding: 4px var(--sp-8) 4px calc(14px + var(--sp-6));
   border-radius: var(--r-6);
   font-size: var(--fs-11);
   color: var(--text-3);
@@ -427,8 +434,8 @@
 }
 .thread .t-badges { display: flex; gap: 3px; align-items: center; flex: none; }
 /* 会话行最右等待胶囊：绝对定位盖住归档键，图层高于 .t-actions。
-   自身不接点击，点到胶囊仍落到下面的会话按钮 / 归档键。
-   不透明底用来挡住底下的图标；底色跟行背景走，避免透出归档。 */
+   自身不接点击，点到胶囊仍落到下面的会话按钮。
+   底色只用 chip 自身的状态色，悬停 / 选中行都不改，避免看起来褪色。 */
 .t-wait {
   position: absolute;
   right: var(--sp-4);
@@ -436,14 +443,23 @@
   transform: translateY(-50%);
   z-index: 2;
   pointer-events: none;
-  padding: 2px 0;
-  background: var(--surface);
   border-radius: var(--r-full);
 }
-.thread-row:hover .t-wait { background: var(--surface-hover); }
-.thread-row:has(.thread.active) .t-wait { background: var(--accent-soft); }
-.thread-row:has(.thread.active):hover .t-wait { background: var(--accent-soft); }
-/* Codex 风格：运行中的会话在标题左侧显示转圈指示 */
+/* 比 chip.xs 更高更宽，字号仍是 10.5px。 */
+.t-wait.chip.xs {
+  height: 20px;
+  padding: 0 10px;
+  font-size: 10.5px;
+}
+/* 与项目头 .tw 同宽的文件夹列：运行中在此转圈，空闲留空，标题左缘对齐。 */
+.thread .t-gutter {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
 .thread .t-spin {
   width: 11px;
   height: 11px;
@@ -749,6 +765,8 @@
   align-items: center;
   justify-content: center;
   flex: none;
+  object-fit: cover;
+  overflow: hidden;
 }
 /* The name/status pair moved from \<div\> to \<span\> (a \<div\> inside a \<button\> is
    invalid HTML, and the button is what makes this focusable). Spans are inline,
@@ -1160,15 +1178,54 @@
 
 .sk-icon {
   position:relative; display:inline-flex; align-items:center; justify-content:center;
-  width:26px; height:26px; flex:none; border-radius:7px;
-  background:color-mix(in srgb, var(--sk-tone) 15%, transparent); color:var(--sk-tone);
-  transition: transform 280ms var(--ease-spring), background 180ms ease, color 180ms ease;
+  width:28px; height:28px; flex:none; border-radius:8px;
+  color:var(--sk-tone);
+  /* 亮色：右上受光、左下沉色。 */
+  background:
+    radial-gradient(130% 100% at 14% 88%,
+      color-mix(in srgb, var(--sk-tone) 30%, transparent),
+      color-mix(in srgb, var(--sk-tone) 7%, transparent) 64%);
+  box-shadow:
+    inset -1px 1px 0 color-mix(in srgb, #fff 42%, transparent),
+    inset 1px -1px 0 color-mix(in srgb, var(--sk-tone) 16%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--sk-tone) 18%, transparent);
+  transition: transform 280ms var(--ease-spring), background 180ms ease, color 180ms ease, box-shadow 180ms ease;
 }
-.sk-icon .icon { width:15px; height:15px; }
+.sk-icon::after {
+  content:""; position:absolute; inset:1px; border-radius:7px; pointer-events:none; z-index:0;
+  background:linear-gradient(225deg, color-mix(in srgb, #fff 38%, transparent) 0%, transparent 58%);
+}
+.sk-icon .icon {
+  position:relative; z-index:1;
+  width:15px; height:15px; stroke-width:1.45;
+}
 .sk-card.is-added .sk-icon { transform:scale(1.06); }
-.sk-icon-plugin { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--sk-tone) 32%, transparent); }
+.sk-icon-plugin {
+  border-radius:9px;
+  box-shadow:
+    inset -1px 1px 0 color-mix(in srgb, #fff 36%, transparent),
+    inset 1px -1px 0 color-mix(in srgb, var(--sk-tone) 22%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--sk-tone) 36%, transparent);
+}
+:root[data-theme="dark"] .sk-icon {
+  background:
+    radial-gradient(120% 90% at 28% 18%,
+      color-mix(in srgb, var(--sk-tone) 34%, transparent),
+      color-mix(in srgb, var(--sk-tone) 10%, transparent) 64%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 20%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--sk-tone) 22%, transparent);
+}
+:root[data-theme="dark"] .sk-icon::after {
+  background:linear-gradient(180deg, color-mix(in srgb, #fff 14%, transparent), transparent 46%);
+}
+:root[data-theme="dark"] .sk-icon-plugin {
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--sk-tone) 40%, transparent);
+}
 .sk-added-mark {
-  position:absolute; right:-3px; bottom:-3px; display:inline-flex;
+  position:absolute; z-index:2; right:-3px; bottom:-3px; display:inline-flex;
   align-items:center; justify-content:center; width:11px; height:11px; border-radius:999px;
   background:var(--sk-tone); color:#fff; box-shadow:0 0 0 2px var(--bg-inset);
   opacity:0; transform:scale(0.25); pointer-events:none;
@@ -1176,7 +1233,16 @@
 }
 .sk-card.is-added .sk-added-mark { opacity:1; transform:scale(1); }
 .sk-added-mark .icon { width:7px; height:7px; stroke-width:3.4; }
-.sk-error-mark { position:absolute; right:-3px; bottom:-3px; width:9px; height:9px; border-radius:999px; background:var(--red); box-shadow:0 0 0 2px var(--bg-inset); }
+.sk-used-mark {
+  position:absolute; z-index:2; left:-3px; bottom:-3px; display:inline-flex;
+  align-items:center; justify-content:center; width:11px; height:11px; border-radius:999px;
+  background:var(--text-3); color:#fff; box-shadow:0 0 0 2px var(--bg-inset);
+  opacity:0; transform:scale(0.25); pointer-events:none;
+  transition: transform 280ms var(--ease-spring), opacity 160ms var(--ease-out), background 180ms ease;
+}
+.sk-card.is-used .sk-used-mark { opacity:1; transform:scale(1); }
+.sk-used-mark .icon { width:7px; height:7px; stroke-width:3.4; }
+.sk-error-mark { position:absolute; z-index:2; right:-3px; bottom:-3px; width:9px; height:9px; border-radius:999px; background:var(--red); box-shadow:0 0 0 2px var(--bg-inset); }
 
 .sk-content { flex:1; min-width:0; }
 .sk-row1 { display:flex; align-items:center; gap:6px; min-width:0; }
@@ -1311,6 +1377,7 @@
 .sk-fly-kicker .sk-icon {
   width: 18px; height: 18px; border-radius: 5px;
 }
+.sk-fly-kicker .sk-icon::after { border-radius: 4px; }
 .sk-fly-kicker .sk-icon .icon { width: 11px; height: 11px; }
 .sk-fly-name {
   font-family: var(--font-mono);
@@ -1390,10 +1457,11 @@
 
 /* 减少动效 */
 @media (prefers-reduced-motion: reduce) {
+  .thread .t-spin { animation: none; }
   .sb-drawer-mask { transition: opacity var(--dur-fast) linear; transform: none; }
   .sb-drawer-mask.open { transform: none; }
   .new-convo-btn:active, .skills-btn:active, .add-btn:active { transform: none; }
-  .sk-card, .sk-card::before, .sk-icon, .sk-added-mark { transition: none; }
+  .sk-card, .sk-card::before, .sk-icon, .sk-added-mark, .sk-used-mark { transition: none; }
   .sk-card.is-added .sk-icon { transform: none; }
   .sk-slot, .sk-slot.is-leave, .sk-slot.is-enter, .sk-slot.is-enter.is-in,
   .sk-slot.is-leave .sk-card, .sk-slot.is-enter .sk-card, .sk-slot.is-enter.is-in .sk-card,

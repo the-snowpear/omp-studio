@@ -381,6 +381,48 @@
 .ev-user .ev-refs { justify-content: flex-end; }
 .ev-refs { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-8); }
 
+/* 消息复制：只在最后一段正文（含其下方图标）悬停 / 聚焦时显现 */
+.ev-copy-host {
+  display: flex;
+  flex-direction: column;
+}
+.ev-user .ev-copy-host {
+  align-self: flex-end;
+  align-items: flex-end;
+  width: max-content;
+  max-width: 78%;
+}
+.ev-user .ev-copy-host .ev-body { max-width: 100%; }
+.ev-msg-actions {
+  display: flex;
+  align-items: center;
+  margin-top: var(--sp-6);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.ev-copy-host:hover .ev-msg-actions,
+.ev-copy-host:focus-within .ev-msg-actions {
+  opacity: 1;
+}
+.ev-msg-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.ev-msg-copy:hover,
+.ev-msg-copy:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text-2);
+}
+
 /* 每轮结束后的文件更改摘要：低对比卡片，对齐对话密度，不引入第二套语言色标 */
 .turn-diff {
   margin-top: var(--sp-12);
@@ -503,6 +545,21 @@
 
 /* Assistant 正文 */
 .ev-assistant .ev-body { font-size: var(--fs-14); line-height: 1.75; color: var(--text); }
+
+/* Assistant 行内节奏：思考/工具链、正文、变更卡共用一个 gap。
+   在此之前 .ev-body 与 .ev-batch 之间没有任何外边距（正文紧贴工具摘要行），
+   而 .ev-batch 自带的 12px 又会和 .ev 的 20px 叠成 32px，同一轮里的间距忽紧忽松。 */
+.ev-assistant {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+}
+.ev-assistant > .ev-head { margin-bottom: 0; }
+.ev-assistant > .ev-batch { margin-bottom: 0; }
+.ev-assistant > .ev-provider-error { margin-top: 0; }
+.ev-assistant > .turn-diff { margin-top: 0; }
+/* OMP 把一轮拆成多个 item 落盘，过程行之间比轮次之间更紧。 */
+.ev-assistant.ev-process { margin-bottom: var(--sp-10); }
 .ev-provider-error {
   margin-top: var(--sp-8);
   padding: var(--sp-10) var(--sp-12);
@@ -825,7 +882,6 @@
 .batch-text { min-width: 0; }
 .batch-diff {
   flex: none;
-  margin-left: auto;
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   font-variant-numeric: tabular-nums;
@@ -905,14 +961,12 @@
   align-items: center;
   gap: var(--sp-6);
   flex: none;
-  margin-left: auto;
   font-family: var(--font-mono);
   font-size: var(--fs-11);
   font-variant-numeric: tabular-nums;
 }
 .tl-diff .add { color: var(--green); }
 .tl-diff .del { color: var(--red); }
-.tl-diff + .tl-chev { margin-left: 0; }
 .tl-chev {
   width: var(--tl-chev-w);
   height: var(--tl-chev-w);
@@ -1573,7 +1627,8 @@
 /* ---------- 运行活动行 ----------
    对话文档的最后一块，随内容一起滚动（同 Cursor / Claude）。无边框无底色：
    它读起来是对话流的下一段，不是控件。min-height 固定，出现与消失不挤动上文。
-   等待首个助手事件时只有 working；有响应后才跟时长和当前操作。 */
+   等待首个助手事件时只有 working；自动重试等待时 working 右侧跟 Retry N/M；
+   有响应后去掉 retry，只跟时长和当前操作。 */
 .activity-line {
   display: flex;
   align-items: center;
@@ -1627,6 +1682,11 @@
 }
 .al-elapsed {
   flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.al-retry {
+  flex: none;
+  color: var(--amber);
   font-variant-numeric: tabular-nums;
 }
 .al-sep { opacity: 0.55; }
@@ -2106,7 +2166,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-/* 预览：ver1 队列 1/N，同一窗口切换审批 / 提问，不并排两张卡 */
+/* 预览与真实共用 .preview-queue：ver1 队列 1/N，同一窗口切换审批 / 提问，不并排两张卡 */
 .deck.preview-queue {
   height: auto;
   max-height: min(420px, 72vh);
@@ -2127,7 +2187,7 @@
    是同一批 DOM 节点，换页时不重建、不平移、不淡出——只有中间的问题正文段
    （.dk-swap 里的两格）做方向性交叉溶解。整卡一起横推 + 同时改高度会读成
    「斜向平移」，把不该动的两行钉住之后只剩正文在动。
-   正文段的像素高度由 JS 先锁旧值、下一帧过渡到新值（见 PreviewDeck 的 lockH）：
+   正文段的像素高度由 JS 先锁旧值、下一帧过渡到新值（见 QueuedDeck 的 lockH）：
    Deck 贴着输入框底部，所以底部操作行原地不动、卡片朝上生长 / 收起。
    卡片被处理掉（提交 / 取消 / 批准）时外壳可能整张换掉（计划卡 ⇄ ask 卡），
    那一次把高度锁挪到 .dk-stage 上，不留旧卡、只过渡整卡高度。 */
@@ -2615,7 +2675,7 @@
 .cm-thumbs {
   display: flex;
   gap: var(--sp-6);
-  padding: var(--sp-8) var(--sp-14) 0;
+  padding: var(--sp-8) var(--sp-14) var(--sp-6);
   overflow-x: auto;
 }
 .cm-thumb {
@@ -2632,6 +2692,18 @@
   border-radius: var(--r-8);
   border: 1px solid var(--border);
   background: var(--surface-2);
+}
+.cm-thumb-open {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+  border-radius: var(--r-8);
+}
+.cm-thumb-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .cm-thumb-remove {
   position: absolute;
@@ -2660,11 +2732,52 @@
   color: var(--red);
   border-color: var(--red);
 }
-.cm-thumb figcaption {
-  margin-top: 4px;
-  font-size: var(--fs-11);
-  color: var(--text-2);
-  text-align: center;
+.img-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-24);
+  background: rgba(0, 0, 0, 0.72);
+}
+.img-preview-dialog {
+  position: relative;
+  display: grid;
+  place-items: center;
+  max-width: 90vw;
+  max-height: 90vh;
+}
+.img-preview-close {
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  z-index: calc(var(--z-modal) + 1);
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-float);
+  box-shadow: var(--shadow-menu);
+}
+.img-preview-close:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.img-preview-image {
+  display: block;
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: var(--r-8);
+  box-shadow: var(--shadow-modal);
+  background: var(--surface-2);
+}
+.img-preview-menu {
+  position: fixed;
+  z-index: calc(var(--z-modal) + 2);
+  min-width: 140px;
 }
 .chip-composer-editor {
   position: relative;
@@ -2674,10 +2787,10 @@
   overflow: auto;
   padding: 5px var(--sp-14) var(--sp-4);
   font-size: var(--fs-14);
-  /* Shared with `.cm-chip` height so pills sit in the line box, not on a
-     different baseline than the 14px text around them. */
-  --composer-line: calc(var(--fs-14) * 1.6);
-  line-height: var(--composer-line);
+  /* Same integer as `.cm-chip` height so inserting a pill cannot grow
+     the first line. `1.6` (22.4px) plus a 20px `middle`/`bottom` chip
+     hangs extra pixels above the glyphs and the row drops. */
+  line-height: 20px;
   font-family: var(--font-ui);
   color: var(--text);
   caret-color: var(--text);
@@ -2721,7 +2834,11 @@
   align-items: center;
   gap: 4px;
   max-width: 120px;
-  height: var(--composer-line, calc(var(--fs-14) * 1.6));
+  /* Same 20px as the editor line box. `top` (not `middle`/`bottom`) keeps
+     any subpixel remainder below the pill so the first line cannot drop. */
+  height: 20px;
+  max-height: 20px;
+  overflow: hidden;
   box-sizing: border-box;
   margin: 0 1px;
   padding: 0 8px 0 6px;
@@ -2730,10 +2847,7 @@
   font-weight: var(--fw-medium);
   line-height: 1;
   user-select: none;
-  /* Height matches the editor line box, so bottom (= top) flush-centers
-     the pill with the surrounding 14px text. `middle` would key off
-     x-height and sit a few pixels high. */
-  vertical-align: bottom;
+  vertical-align: top;
   --cm-scroll-x: 0px;
   --cm-scroll-duration: 0s;
 }
@@ -2754,6 +2868,7 @@
   border: 0;
   border-radius: var(--r-full);
   background: transparent;
+  appearance: none;
   color: inherit;
   cursor: pointer;
   opacity: 0;
@@ -2767,16 +2882,25 @@
 .cm-chip-x:hover { background: color-mix(in srgb, currentColor 20%, transparent); }
 /* Centered in the pill rather than joining the baseline row, which would hang
    the icon's bottom edge on the text baseline. */
-.cm-chip .icon { width: 12px; height: 12px; flex: none; align-self: center; }
+.cm-chip .icon {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  overflow: hidden;
+  vertical-align: 0;
+}
 .cm-chip-x .icon { width: 10px; height: 10px; }
 /* Same sizer + clip recipe as `.git-ref`: the hidden sizer gives the pill its
    intrinsic width (capped by max-width); the clip is a size container so the
    hover marquee can use 100cqw without collapsing the chip. */
 .cm-chip-label {
   position: relative;
-  display: inline-grid;
+  display: grid;
   grid-template-columns: minmax(0, max-content);
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   max-width: 100%;
   overflow: hidden;
   align-items: center;
@@ -2785,6 +2909,8 @@
   display: flex;
   min-width: 0;
   max-width: 100%;
+  height: 100%;
+  align-items: center;
   visibility: hidden;
   pointer-events: none;
   white-space: nowrap;
@@ -2798,6 +2924,7 @@
   position: absolute;
   inset: 0;
   display: flex;
+  align-items: center;
   overflow: hidden;
   container-type: inline-size;
 }
@@ -2805,6 +2932,7 @@
   display: flex;
   min-width: 0;
   width: 100%;
+  height: 100%;
   align-items: center;
   white-space: nowrap;
 }
@@ -2812,6 +2940,7 @@
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
+  line-height: 16px;
 }
 .cm-chip-ext { flex: none; white-space: nowrap; }
 /* Idle fade is only on a stem that actually overflows — otherwise a short
@@ -2843,13 +2972,21 @@
 .cm-chip-image { color: var(--purple); background: var(--purple-soft); }
 .cm-chip-skill { color: var(--amber); background: var(--amber-soft); }
 .cm-chip-agent { color: var(--green); background: var(--green-soft); }
+.cm-chip-mode {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
+  padding-left: 8px;
+  margin-inline-end: 4px;
+  max-width: 7.5rem;
+}
 .cm-mention {
   position: absolute;
   left: var(--sp-12);
   right: var(--sp-12);
   bottom: calc(100% - 4px);
   z-index: var(--z-menu);
-  max-height: 240px;
+  max-height: 360px;
   overflow: auto;
   padding: var(--sp-4);
   border: 1px solid var(--border);
@@ -2883,6 +3020,29 @@
 }
 .cm-mention-item.active,
 .cm-mention-item:hover { background: var(--accent-softer); }
+.cm-mention-item.is-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.cm-mention-group {
+  padding: 8px 8px 2px;
+  font-size: var(--fs-10);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.cm-command-hint {
+  flex: 0 0 auto;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  letter-spacing: -0.02em;
+  font-family: var(--font-mono);
+  color: color-mix(in srgb, var(--accent) 58%, #d8d0ef);
+}
+:root[data-theme="dark"] .cm-command-hint {
+  color: var(--accent);
+}
 .cm-mention-label {
   font-size: var(--fs-12);
   font-weight: var(--fw-medium);
@@ -2896,6 +3056,43 @@
   white-space: nowrap;
   font-size: var(--fs-11);
   color: var(--text-3);
+}
+.cm-command .cm-mention-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+}
+.cm-command .cm-mention-group {
+  position: sticky;
+  top: 26px;
+  z-index: 1;
+  background: var(--surface);
+}
+.cm-command-item {
+  gap: var(--sp-8);
+}
+.cm-command-id {
+  flex: 0 1 auto;
+  display: block;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+.cm-command .cm-command-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cm-command .cm-mention-detail {
+  max-width: none;
+  flex: 1 1 auto;
 }
 
 /* The textarea suppresses its own ring because .composer draws the focus state
@@ -3554,7 +3751,7 @@
 
 /* 流式期间 Enter 的本地排队栏：与 composer 同宽同风格，位于 composer 正上方。
    头行右侧为展开/收起按钮；条目折叠走 grid-rows 0fr/1fr 动画（同 .task-dock-collapse）。
-   条目右侧为 编辑 / 立刻发送 / 删除 三个 icon-btn（复用 .icon-btn.small）。 */
+   条目右侧为 编辑 / 插入纠偏（运行中）或立刻发送（空闲）/ 删除 三个 icon-btn。 */
 .queue-strip {
   max-width: var(--doc-max-w);
   margin: 0 auto var(--sp-8);
@@ -4008,9 +4205,13 @@
   transform: none;
 }
 .git-panel [data-tip]:active::after { content: none; }
-.git-commit-box { flex: none; display: flex; align-items: stretch; gap: var(--sp-6); padding: var(--sp-8) var(--sp-12); border-top: 1px solid var(--border); }
-.git-commit-box textarea { flex: 1; min-width: 0; resize: vertical; border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-1); color: var(--text); padding: 6px 8px; font: inherit; font-size: var(--fs-11); }
-.git-diff-slot { height: min(280px, 38%); border-top: 1px solid var(--border); }
+.git-commit-box { flex: none; display: flex; align-items: center; gap: var(--sp-6); padding: 6px 12px; border-top: 1px solid var(--border); }
+.git-commit-box textarea {
+  flex: 1; min-width: 0; height: 28px; min-height: 28px; max-height: 28px; resize: none;
+  border: 1px solid var(--border); border-radius: var(--r-6); background: var(--surface-1); color: var(--text);
+  padding: 3px 8px; font: inherit; font-size: var(--fs-11); line-height: 20px;
+}
+.git-diff-slot { min-height: 96px; border-top: 1px solid var(--border); }
 .git-diff-slot .dl .lc { min-width: max-content; padding-left: 4px; }
 .git-pr-list { margin: 10px 12px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-8); }
 .git-pr-row { display: flex; align-items: center; gap: var(--sp-6); padding: 5px 0; font-size: var(--fs-11); }
@@ -4326,7 +4527,156 @@
   padding: var(--sp-8) var(--sp-12);
   border-bottom: 1px solid var(--border);
 }
+.ch-toolbar .seg button { padding: 0 6px; }
 .ch-list { flex: 1; min-height: 0; overflow-y: auto; }
+.ch-turn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+.ch-turn-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 var(--sp-4);
+  border: none;
+  border-radius: var(--r-6);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+.ch-turn-btn:hover { background: var(--surface-hover); }
+.ch-turn-btn:disabled { opacity: 0.55; cursor: default; }
+.ch-turn-label { min-width: 0; }
+.ch-turn-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+.ch-turn-menu {
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+}
+.ch-turn-menu .menu-item .ch-delta { margin-left: auto; }
+.ch-item { border-bottom: 1px solid var(--border); }
+.ch-item:last-child { border-bottom: none; }
+.ch-item .ch-row {
+  min-height: 36px;
+  gap: var(--sp-6);
+  padding: 6px var(--sp-12) 6px var(--sp-8);
+  border-radius: 0;
+  color: var(--text);
+}
+.ch-item .ch-row:hover { background: var(--surface-hover); }
+.ch-item .ch-row:focus-visible { outline: 1.5px solid var(--accent-border); outline-offset: -1px; }
+.ch-item.open .ch-row { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.ch-row-chev {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.ch-item.open .ch-row-chev { transform: rotate(90deg); }
+.ch-row-icon {
+  flex: none;
+  width: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--glyph-faint);
+}
+.ch-file-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+}
+.ch-file-name {
+  flex: none;
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+.ch-file-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+.ch-item .ch-delta {
+  min-width: 4.75em;
+  justify-content: flex-end;
+  font-weight: var(--fw-semibold);
+}
+.ch-file-diff-wrap {
+  margin: 0 var(--sp-10) var(--sp-10) var(--sp-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ch-file-diff {
+  overflow: auto;
+  max-height: min(360px, 50vh);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.65;
+}
+.ch-file-diff-empty {
+  padding: var(--sp-10) var(--sp-12);
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: var(--fs-12);
+}
+.ch-file-diff .chip { margin: var(--sp-6) var(--sp-12) 0; }
+.ch-file-diff .diff-head-row {
+  padding: 4px var(--sp-10);
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
+}
+/* 内层按最长代码定宽（至少铺满卡片）。每行 stretch 到内层，短行铺满、
+   横向滚到长行尽头时红绿底色还在。左右对照不走这套，避免撑破 50% 分栏。 */
+.ch-file-diff:not(.diff-split) .ch-file-diff-inner {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+}
+.ch-file-diff:not(.diff-split) .ch-file-hunk,
+.ch-file-diff:not(.diff-split) .diff-head-row,
+.ch-file-diff:not(.diff-split) .dl {
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+}
+.ch-file-diff:not(.diff-split) .dl .lc {
+  flex: 1 0 auto;
+  min-width: max-content;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ch-row-chev { transition: none; }
+}
 /* Diff 区域高度调节条：位于文件列表与 Diff 之间，拖拽/方向键调整高度 */
 .ch-diff-resizer {
   flex: none;
@@ -4337,6 +4687,7 @@
   background: transparent;
   border: 0; padding: 0;
   cursor: ns-resize;
+  touch-action: none;
 }
 .ch-diff-resizer[hidden] { display: none; }
 .ch-diff-resizer::before {
@@ -4354,6 +4705,7 @@
   flex: none;
   display: flex; flex-direction: column;
   min-height: 0;
+  height: 220px;
 }
 
 .ch-group { padding: var(--sp-10) var(--sp-12) 0; }
@@ -4396,8 +4748,8 @@
 .ch-row .ch-file { font-family: var(--font-mono); font-size: var(--fs-11); flex: 1; min-width: 0; text-align: left; }
 /* +/− 计数成组右对齐，tabular 数字不跳动 */
 .ch-delta { display: inline-flex; align-items: baseline; gap: var(--sp-4); flex: none; }
-.ch-row .ch-add { color: var(--green); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
-.ch-row .ch-del { color: var(--red); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.ch-add { color: var(--green); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.ch-del { color: var(--red); font-family: var(--font-mono); font-size: 10.5px; font-variant-numeric: tabular-nums; }
 /* 归属信息（主 Agent / deps 子 Agent / 开始前已存在 / 未跟踪）：低调胶囊 */
 .ch-note {
   flex: none;
@@ -4890,7 +5242,6 @@
   font-size: var(--fs-12);
 }
 .composer-hint { margin: 0 var(--sp-14) var(--sp-6); }
-.convo-copy { flex: none; }
 .ev-user .err-actions {
   display: flex;
   align-items: center;
@@ -4911,7 +5262,7 @@
   background: radial-gradient(620px 340px at 50% 16%, rgba(124, 92, 240, 0.06), transparent 72%);
 }
 .convo-wrap.is-empty .convo-doc {
-  margin: auto;
+  margin: 0 auto;
   width: 100%;
   max-width: 960px;
   padding-right: var(--sp-32);

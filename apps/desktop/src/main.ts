@@ -14,15 +14,18 @@
  * context is just a transport plus a coarse availability status.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session, shell, type WebContents } from "electron";
 import {
   TITLEBAR_OVERLAY,
   TITLEBAR_OVERLAY_HEIGHT,
   applyTitleBarOverlay,
   registerTitleBarOverlayIpc,
 } from "./titlebar-overlay.js";
+import { registerChromeImageIpc } from "./chrome-image.js";
 import { registerChromeNotifyIpc } from "./chrome-notify.js";
+import { registerChromeProfileIpc } from "./chrome-profile.js";
 import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 
 import { createDesktopApplication } from "./composition.js";
@@ -165,6 +168,47 @@ export async function main(): Promise<void> {
     });
     const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
     const disposeNotify = registerChromeNotifyIpc({ isTrustedSender });
+    const disposeProfile = registerChromeProfileIpc({ isTrustedSender });
+    const disposeImage = registerChromeImageIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      actions: {
+        copyImageToClipboard(bytes) {
+          const image = nativeImage.createFromBuffer(Buffer.from(bytes));
+          if (image.isEmpty()) return false;
+          clipboard.writeImage(image);
+          return true;
+        },
+        async showSaveDialog(sender, options) {
+          const owner = BrowserWindow.fromWebContents(sender as WebContents);
+          const dialogOptions = {
+            title: "保存图片",
+            defaultPath: options.defaultPath,
+            filters: options.filters.map((filter) => ({
+              name: filter.name,
+              extensions: [...filter.extensions],
+            })),
+          };
+          const result = owner
+            ? await dialog.showSaveDialog(owner, dialogOptions)
+            : await dialog.showSaveDialog(dialogOptions);
+          return {
+            canceled: result.canceled === true,
+            ...(typeof result.filePath === "string" ? { filePath: result.filePath } : {}),
+          };
+        },
+        writeFile(filePath, bytes) {
+          return writeFile(filePath, bytes);
+        },
+      },
+    });
     const disposeTerminal = registerTerminalIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -217,6 +261,8 @@ export async function main(): Promise<void> {
       dispose: () => {
         disposeWorkspaceShell.dispose();
         disposeTerminal.dispose();
+        disposeImage.dispose();
+        disposeProfile();
         disposeNotify();
         disposeChrome();
         ipc.dispose();
