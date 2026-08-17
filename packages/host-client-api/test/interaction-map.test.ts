@@ -121,3 +121,23 @@ test("approval details are reduced to a redacted scalar record", () => {
   assert.equal(typeof mapped.detail.path, "string");
   assert.match(String(mapped.detail.path), /redacted/i);
 });
+
+test("approval summary is kept up to 4000 characters", () => {
+  const summary = `Command: ${"npx tsc ".repeat(200).trim()}`;
+  assert.ok(summary.length > 240);
+  assert.ok(summary.length < 4000);
+  const mapped = mapRemoteInteractionToClient(
+    {
+      ...base("approval"),
+      kind: "approval",
+      approvalType: "bash",
+      details: { toolName: "bash", summary, risk: "low" },
+    },
+    SESSION_ID,
+    1,
+    REQUEST_ID,
+  );
+  assert.equal(mapped?.kind, "approval");
+  if (mapped?.kind !== "approval") return;
+  assert.equal(mapped.detail.summary, summary);
+});

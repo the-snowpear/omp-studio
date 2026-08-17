@@ -1,70 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientInteraction, InteractionResponseValue } from "@omp-studio/client-contract";
-import { Icon } from "./icons";
+import { ApprovalCard } from "./deck/ApprovalCard";
+import { AskActions, AskBody, AskHead } from "./deck/AskCard";
+import { approvalFromInteraction } from "./deck/approvalContent";
+import { askAnswered, NO_ASK_ANSWER, nextPicked, selectToAskView, submitSelectValue } from "./deck/askContent";
+import { PromptHead, type DeckQueue } from "./deck/PromptHead";
+import type { DeckAskAnswer } from "./deck/types";
+
+export type { DeckQueue } from "./deck/PromptHead";
+export { PromptHead, QueueNav } from "./deck/PromptHead";
 
 export type InteractionCaption = {
   readonly title: string;
   readonly description?: string;
   readonly meta?: string;
 };
-
-export type DeckQueue = {
-  readonly index: number;
-  readonly total: number;
-  readonly onPrev: () => void;
-  readonly onNext: () => void;
-};
-
-export function QueueNav({ queue }: { queue?: DeckQueue }) {
-  if (!queue || queue.total <= 1) return null;
-  return (
-    <span className="dk-queue">
-      <button type="button" className="icon-btn small" aria-label="上一个请求" disabled={queue.index === 0} onClick={queue.onPrev}>
-        <Icon name="chevron-l" extra="sm" />
-      </button>
-      <span className="q-pos">{queue.index + 1}/{queue.total}</span>
-      <button type="button" className="icon-btn small" aria-label="下一个请求" disabled={queue.index === queue.total - 1} onClick={queue.onNext}>
-        <Icon name="chevron-r" extra="sm" />
-      </button>
-    </span>
-  );
-}
-
-export function PromptHead({
-  icon,
-  title,
-  demo,
-  meta,
-  queue,
-}: {
-  icon: "alert" | "message" | "pencil";
-  title: string;
-  demo?: boolean;
-  meta?: string;
-  queue?: DeckQueue;
-}) {
-  return (
-    <div className={icon === "message" || icon === "pencil" ? "ask-head" : "approval-head"}>
-      <Icon name={icon} extra="sm" />
-      {title}
-      <span className="dk-head-end">
-        {demoMark(demo)}
-        {meta ? <span className="dk-agent">{meta}</span> : null}
-        <QueueNav {...(queue ? { queue } : {})} />
-      </span>
-    </div>
-  );
-}
-
-function demoMark(demo?: boolean) {
-  return demo ? <span className="chip gray xs">演示</span> : null;
-}
-
-function riskLabel(risk: string | undefined): string | undefined {
-  if (risk === "high") return "高风险";
-  if (risk === "medium" || risk === "med") return "中风险";
-  return risk;
-}
 
 export function InteractionPrompt({ interaction, onRespond, disabled, caption, demo, queue }: {
   interaction: ClientInteraction;
@@ -75,27 +25,19 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
   queue?: DeckQueue;
 }) {
   const [text, setText] = useState(interaction.kind === "editor" ? (interaction.content ?? "") : "");
-  const [selected, setSelected] = useState<string[]>([]);
+  const [answer, setAnswer] = useState<DeckAskAnswer>(NO_ASK_ANSWER);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(false);
-  /* Editor prefill sync: a same-id higher-generation card keeps the card
-     shell; refresh the draft when the content changes (plan §6.3). */
   useEffect(() => {
     if (interaction.kind === "editor") setText(interaction.content ?? "");
-  }, [interaction]);
-  const toggleOption = (optionId: string) => {
-    if (disabled || interaction.kind !== "select") return;
-    setSelected((previous) => interaction.multiple
-      ? (previous.includes(optionId) ? previous.filter((id) => id !== optionId) : [...previous, optionId])
-      : (previous.length === 1 && previous[0] === optionId ? [] : [optionId]));
-  };
+    else setText("");
+    setAnswer(NO_ASK_ANSWER);
+  }, [interaction.interactionId, interaction.leaseGeneration]);
   const busy = disabled || submitting;
   const submit = (value?: InteractionResponseValue) => {
     if (busy) return;
     setSubmitting(true);
     setSubmitError(false);
-    // Respond failure keeps the card (plan §6.4): the pending interaction
-    // stays until the Runtime resolves it, and the deck surfaces Retry.
     Promise.resolve(onRespond("submit", value)).then(
       (ok) => {
         if (ok === false) setSubmitError(true);
@@ -125,31 +67,48 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
         <PromptHead icon="alert" title={interaction.title || "确认"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="approval-body">{interaction.message}</div>
         {retryNote}
-        <div className="approval-foot"><button className="btn primary" disabled={busy} onClick={() => submit(true)}>Confirm</button>{cancelButton(cancel, busy)}</div>
+        <div className="dk-actions">
+          <button className="btn lg outline" disabled={busy} onClick={cancel}>取消</button>
+          <button className="btn lg primary" disabled={busy} onClick={() => submit(true)}>确认</button>
+        </div>
       </div>
     );
   }
   if (interaction.kind === "select") {
-    const canSubmit = interaction.multiple ? selected.length > 0 : selected.length === 1;
+    const view = selectToAskView(interaction);
+    const pick = (label: string) => {
+      if (busy) return;
+      setAnswer((previous) => ({ ...previous, picked: nextPicked(view.question, previous.picked, label) }));
+    };
+    const send = () => {
+      const value = submitSelectValue(view, answer, interaction.multiple);
+      if (value === undefined) return;
+      submit(value);
+    };
     return (
       <div className="ask-card">
-        <PromptHead icon="message" title={interaction.title || "选择"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
-        <div className="ask-body">
-          {caption ? (
-            <>
-              <p>{caption.title}</p>
-              {caption.description ? <p className="muted small">{caption.description}</p> : null}
-            </>
-          ) : null}
-          {interaction.options.map((option) => (
-            <button key={option.id} type="button" className={`ask-opt${selected.includes(option.id) ? " sel" : ""}`} aria-checked={selected.includes(option.id)} disabled={busy} onClick={() => toggleOption(option.id)}>
-              <span>{option.label}</span>
-              {option.description ? (option.description === "推荐" ? <span className="chip purple xs">{option.description}</span> : <span className="muted small">{option.description}</span>) : null}
-            </button>
-          ))}
-        </div>
+        <AskHead
+          {...(demo === true ? { demo: true } : {})}
+          {...(caption?.meta ? { meta: caption.meta } : {})}
+          {...(queue ? { queue } : {})}
+          headers={[]}
+          onJump={() => undefined}
+        />
+        <AskBody
+          question={view.question}
+          answer={answer}
+          {...(busy ? { disabled: true } : {})}
+          onPick={pick}
+          onCustom={(value) => setAnswer((previous) => ({ ...previous, custom: value }))}
+          onSubmit={send}
+        />
         {retryNote}
-        <div className="approval-foot"><button className="btn primary" disabled={busy || !canSubmit} onClick={() => submit(interaction.multiple ? selected : selected[0])}>Submit</button>{cancelButton(cancel, busy)}</div>
+        <AskActions
+          {...(busy ? { disabled: true } : {})}
+          canSubmit={askAnswered(answer)}
+          onCancel={cancel}
+          onSubmit={send}
+        />
       </div>
     );
   }
@@ -158,10 +117,10 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
       <div className="ask-card">
         <PromptHead icon="pencil" title={interaction.title || "输入"} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
         <div className="ask-body">
-          <input className="input" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} placeholder={interaction.placeholder ?? "Response"} type={interaction.secret ? "password" : "text"} />
+          <input className="input dk-input" value={text} onChange={(event) => setText(event.target.value)} disabled={busy} placeholder={interaction.placeholder ?? "Response"} type={interaction.secret ? "password" : "text"} />
         </div>
         {retryNote}
-        <div className="approval-foot"><button className="btn primary" disabled={busy || !text.trim()} onClick={() => submit(text)}>Submit</button>{cancelButton(cancel, busy)}</div>
+        <AskActions {...(busy ? { disabled: true } : {})} canSubmit={text.trim().length > 0} onCancel={cancel} onSubmit={() => submit(text)} />
       </div>
     );
   }
@@ -181,50 +140,30 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
           />
         </div>
         {retryNote}
-        <div className="approval-foot"><button className="btn primary" disabled={busy} onClick={() => submit(text)}>Submit</button>{cancelButton(cancel, busy)}</div>
+        <AskActions {...(busy ? { disabled: true } : {})} canSubmit={true} onCancel={cancel} onSubmit={() => submit(text)} />
       </div>
     );
   }
-  const command = typeof interaction.detail.command === "string" ? interaction.detail.command : undefined;
-  const summary = typeof interaction.detail.summary === "string" ? interaction.detail.summary : undefined;
-  const reason = typeof interaction.detail.reason === "string" ? interaction.detail.reason : undefined;
-  const risk = riskLabel(typeof interaction.detail.risk === "string" ? interaction.detail.risk : undefined);
-  const scope = typeof interaction.detail.scope === "string" ? interaction.detail.scope : undefined;
+  const view = approvalFromInteraction(interaction);
   return (
-    <div className="approval-card">
-      <PromptHead icon="alert" title={`审批${risk ? ` · ${risk}` : ""}`} {...(demo === true ? { demo: true } : {})} {...(caption?.meta ? { meta: caption.meta } : {})} {...(queue ? { queue } : {})} />
-      <div className="approval-body">
-        <p>{caption?.title ?? interaction.title ?? interaction.approvalType}</p>
-        {command ? <p className="cmd">{command}</p> : null}
-        {summary ? <p className="muted small">{summary}</p> : null}
-        {reason ? <p>{reason}</p> : null}
-        {scope ? <p className="muted small">{scope}</p> : null}
-      </div>
-      {retryNote}
-      <div className="approval-foot">
-        <button className="btn primary" disabled={busy} onClick={() => submit(true)}>允许一次</button>
-        {cancelButton(cancel, busy)}
-      </div>
-    </div>
+    <ApprovalCard
+      view={view}
+      {...(demo === true ? { demo: true } : {})}
+      {...(caption?.meta ? { meta: caption.meta } : {})}
+      {...(busy ? { disabled: true } : {})}
+      {...(submitError ? { submitError: true } : {})}
+      onAllow={() => submit(true)}
+      onAlways={() => submit(true)}
+      onDeny={cancel}
+    />
   );
 }
 
-function cancelButton(cancel: () => void, busy: boolean) {
-  return <button className="btn outline" disabled={busy} onClick={cancel}>Cancel</button>;
-}
-
-/* —— 底部操作许可 Deck（Agent 提问 / 审批请求）——
-   参照 ver1：浮在输入框上方（最靠近输入，优先处理），不挤占布局；
-   激活时 composer 变暗让位。切换动画：
-   · 同一张卡片内切换内容 —— 卡片外壳常驻，内部横向轨道平移：
-     旧内容向左推出、新内容从右滑入，不换卡、不闪烁；
-   · 高度变化以底部为锚向上展开 —— JS 锁像素高度后交给 CSS transition，
-     新内容更高时向上生长、更矮时向下收起，而不是瞬间跳变。 */
 type DeckEntry = { id: string; interaction: ClientInteraction; leaving: boolean };
 
-const DECK_PUSH_MS = 260; /* 内容平移时长（略大于 CSS transform transition 250ms） */
-const DECK_EXIT_MS = 220; /* 整卡退出动画时长（与 CSS deck-out 一致） */
-const DECK_GROW_MS = 320; /* 高度展开过渡时长（不小于 CSS height transition） */
+const DECK_PUSH_MS = 260;
+const DECK_EXIT_MS = 220;
+const DECK_GROW_MS = 320;
 
 export function InteractionDeck({ interaction, onRespond, disabled }: {
   interaction: ClientInteraction | null;
@@ -234,16 +173,12 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
   const wrapRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const [entries, setEntries] = useState<DeckEntry[]>([]);
-  /* 锁定容器像素高度；null = 无内容（自动高度 0）。锁定值的变化由
-     .deck.smooth 的 height transition 驱动，实现「向上展开 / 向下收起」。 */
   const [lockH, setLockH] = useState<number | null>(null);
-  /* 剪枝提交：轨道 transform 复位不过渡（否则唯一内容会从左滑回） */
   const [noAnim, setNoAnim] = useState(false);
-  /* 卡片外壳动画：in = 空 → 首次出现滑入；out = 整卡退出；"" = 稳态 */
   const [shellMode, setShellMode] = useState<"in" | "out" | "">("");
   const lastId = useRef<string | null>(null);
-  const gen = useRef(0);    /* 世代计数：被新交互取代后，过期的定时器作废 */
-  const lastW = useRef(-1); /* ResizeObserver 只响应宽度变化，不打断高度过渡 */
+  const gen = useRef(0);
+  const lastW = useRef(-1);
   const timers = useRef<number[]>([]);
 
   const later = useCallback((fn: () => void, ms: number) => {
@@ -258,9 +193,6 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
     timers.current.forEach((t) => window.clearTimeout(t));
   }, []);
 
-  /* interaction 变化：先锁定当前渲染高度（换内容瞬间不跳变），再在同一张卡片内平移。
-     卡片身份 = interactionId + leaseGeneration（plan §6.4）：同 id 高 generation
-     视为新卡，替换旧内容；同 id 同 generation 幂等忽略。 */
   useEffect(() => {
     const id = interaction === null ? null : `${interaction.interactionId}:${interaction.leaseGeneration}`;
     if (id === lastId.current) return;
@@ -271,12 +203,11 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
     const wrap = wrapRef.current;
     if (wrap) {
       wrap.classList.add("smooth");
-      setLockH(wrap.offsetHeight); /* 无卡片时 offsetHeight 为 0 */
+      setLockH(wrap.offsetHeight);
     }
     const wasEmpty = !wrap || !wrap.querySelector(".deck-cell");
 
     if (interaction === null) {
-      /* 全部退出：整卡滑出 → 收起高度 → 解锁（被新交互取代则作废） */
       setShellMode("out");
       setEntries((prev) => prev.map((e) => ({ ...e, leaving: true })));
       later(() => {
@@ -297,7 +228,6 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
       if (prev.some((e) => e.id === entryId)) return prev;
       return [...prev.map((e) => ({ ...e, leaving: true })), { id: entryId, interaction, leaving: false }];
     });
-    /* 内容平移结束后：移出旧内容，同一次提交里把轨道复位到 0（禁止过渡） */
     later(() => {
       if (gen.current !== g) return;
       setEntries((prev) => prev.filter((e) => !e.leaving));
@@ -305,13 +235,11 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
     }, DECK_PUSH_MS);
   }, [interaction, later]);
 
-  /* 提交后：量出最新内容的高度，平滑展开到新高度（以底部为锚向上生长） */
   useEffect(() => {
     if (!entries.length) return;
     const wrap = wrapRef.current;
     const track = trackRef.current;
     if (!wrap || !track || lockH === null) return;
-    /* 在下一帧重测，避免锁到旧宽度下的过时高度 */
     const raf = requestAnimationFrame(() => {
       const cell = track.querySelector<HTMLElement>(".deck-cell:last-child");
       if (!cell) return;
@@ -320,7 +248,6 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
     return () => cancelAnimationFrame(raf);
   }, [entries]);
 
-  /* 容器宽度变化（窗口 / 侧栏 / 底栏）时跟随卡片自然高度，不做过渡 */
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;

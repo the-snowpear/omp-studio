@@ -55,6 +55,8 @@ import {
   type HostSemanticCommandService,
   type HostSessionCatalogProvider,
   type HostSessionArchiveProvider,
+  type HostSessionTelemetryProbePort,
+  type HostSessionTelemetryStorePort,
   type HostUsageService,
   type HostWorkspaceService,
   type HostWorkspaceFileService,
@@ -69,15 +71,22 @@ import type { PlatformPort, PrivateEndpoint } from "@omp-studio/platform";
 import {
   HostBackend,
   type HostBackendOptions,
+  createNodeSessionTelemetryProbe,
+  createPathLocator,
   type RuntimePublication,
   type RuntimeResolution,
   type RuntimeResolverEnvironment,
+  SessionTelemetryStore,
   type StudioConversationForward,
   type StudioTelemetryForward,
   type StudioRuntimeSessionController,
   StudioSessionArchiveReader,
+  StudioSessionArchiveService,
   type SessionArchiveReadInput,
 } from "@omp-studio/studio-host";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ApprovalMode, CapabilityManifest, OperatorCommandManifest, RuntimePreference } from "@omp-studio/studio-protocol";
 
 import { DesktopInteractionHost, IsolatedForwarder } from "./interaction-host.js";
@@ -189,6 +198,12 @@ export interface DesktopFacadeSeams {
   readonly commandManifest?: HostManifestProvider<OperatorCommandManifest>;
   readonly catalog?: HostSessionCatalogProvider;
   readonly archive?: HostSessionArchiveProvider;
+  /** Overrides the persisted "last observed" telemetry store (tests). */
+  readonly telemetryStore?: HostSessionTelemetryStorePort;
+  /** Overrides the one-shot archived-session telemetry probe (tests). */
+  readonly telemetryProbe?: HostSessionTelemetryProbePort;
+  /** Optional Host log for coarse probe diagnostics (no paths or session ids). */
+  readonly hostLog?: { write(level: "info" | "warn" | "error", event: string, detail?: string): void };
   readonly diagnostics?: HostDiagnosticsFactory;
   readonly install?: HostRuntimeInstallService;
   readonly commands?: HostSemanticCommandService;
@@ -349,23 +364,89 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const catalog = seams.catalog ?? createWorkspaceSessionCatalog(() => context.workspaceCwd.current);
   let archiveCwd: string | undefined;
   let archiveReader: StudioSessionArchiveReader | undefined;
+  const currentArchiveReader = (): StudioSessionArchiveReader => {
+    const cwd = context.workspaceCwd.current;
+    if (cwd === undefined) throw new Error("Persistent transcript requires an active workspace");
+    if (archiveReader === undefined || archiveCwd !== cwd) {
+      archiveCwd = cwd;
+      archiveReader = new StudioSessionArchiveReader({ allowedCwd: cwd });
+    }
+    return archiveReader;
+  };
+  let archiveServiceCwd: string | undefined;
+  let archiveService: StudioSessionArchiveService | undefined;
+  const currentArchiveService = (): StudioSessionArchiveService => {
+    const cwd = context.workspaceCwd.current;
+    if (cwd === undefined) throw new Error("Session archive requires an active workspace");
+    if (archiveService === undefined || archiveServiceCwd !== cwd) {
+      archiveServiceCwd = cwd;
+      archiveService = new StudioSessionArchiveService({
+        allowedCwd: cwd,
+        isResident: (sessionId) => sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
+      });
+    }
+    return archiveService;
+  };
   const archive = seams.archive ?? {
     readPage: async (input: { readonly sessionId: string; readonly cursor?: string; readonly limit?: number }) => {
-      const cwd = context.workspaceCwd.current;
-      if (cwd === undefined) throw new Error("Persistent transcript requires an active workspace");
-      if (archiveReader === undefined || archiveCwd !== cwd) {
-        archiveCwd = cwd;
-        archiveReader = new StudioSessionArchiveReader({ allowedCwd: cwd });
-      }
-      const page = await archiveReader.readPage(input as unknown as SessionArchiveReadInput);
+      const page = await currentArchiveReader().readPage(input as unknown as SessionArchiveReadInput);
       return page as unknown as ConversationTranscriptReadPage;
     },
+    readRevision: async (sessionId: string) => await currentArchiveReader().readRevision(sessionId),
+    createProbeCopy: async (sessionId: string, destinationDirectory: string) =>
+      await currentArchiveReader().createProbeCopy(sessionId, destinationDirectory),
   } satisfies HostSessionArchiveProvider;
+  // Archived-session telemetry: persisted "last observed" records plus the
+  // one-shot OMP probe. The probe scratch dir lives under the Host profile.
+  const telemetryStore =
+    seams.telemetryStore ??
+    new SessionTelemetryStore({
+      rootDirectory: join(context.profileDirectory, "session-telemetry", "v1"),
+      resolveRevision: async (sessionId) => {
+        if (context.workspaceCwd.current === undefined) return undefined;
+        try {
+          return (await currentArchiveReader().readRevision(sessionId)).transcriptRevision;
+        } catch {
+          return undefined;
+        }
+      },
+    });
+  const probeExecutable = async (): Promise<string | undefined> => {
+    const installed = await context.backend.installer.currentManifest().catch(() => undefined);
+    if (installed !== undefined && installed.entrypointPath.length > 0) return installed.entrypointPath;
+    return await createPathLocator().locate(context.platform, context.arch);
+  };
+  const telemetryProbe =
+    seams.telemetryProbe ??
+    createNodeSessionTelemetryProbe({
+      executablePath: probeExecutable,
+      ...(seams.hostLog === undefined
+        ? {}
+        : {
+            onDiagnostic: (info) => {
+              seams.hostLog?.write(
+                info.result === "ok" ? "info" : "warn",
+                "telemetry.probe",
+                JSON.stringify(info),
+              );
+            },
+          }),
+    });
+  const telemetryProbeWorkspace = {
+    create: async (): Promise<string> => {
+      await mkdir(join(context.profileDirectory, "tmp"), { recursive: true });
+      return await mkdtemp(join(context.profileDirectory, "tmp", "telemetry-probe-"));
+    },
+    remove: async (path: string): Promise<void> => {
+      await rm(path, { recursive: true, force: true }).catch(() => {});
+    },
+  };
   const runtimeCommandService =
     seams.commands ??
     createDesktopSemanticCommands({
       sessionRef,
       catalog,
+      archive: currentArchiveService,
       ...(context.runtimeSession?.switchSession === undefined
         ? {}
         : { switchSession: (intent) => context.runtimeSession!.switchSession!(intent) }),
@@ -385,6 +466,10 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     commandManifest: seams.commandManifest ?? (() => sessionRef.current?.commandManifest()),
     catalog,
     archive,
+    telemetryStore,
+    telemetryProbe,
+    telemetryProbeWorkspace,
+    workspaceCwd: () => context.workspaceCwd.current,
     diagnostics: seams.diagnostics ?? createDefaultHostDiagnosticsFactory(),
     install:
       seams.install ??

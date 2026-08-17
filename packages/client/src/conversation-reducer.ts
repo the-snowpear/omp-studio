@@ -1,13 +1,14 @@
-import type {
-  ClientError,
-  ClientEvent,
-  ConversationItem,
-  ConversationMessageItem,
-  ConversationRuntimeEvent,
-  ConversationTranscriptPage,
-  ConversationTranscriptReadPage,
-  RuntimeEpoch,
-  SessionId,
+import {
+  CONVERSATION_LIMITS,
+  type ClientError,
+  type ClientEvent,
+  type ConversationItem,
+  type ConversationMessageItem,
+  type ConversationRuntimeEvent,
+  type ConversationTranscriptPage,
+  type ConversationTranscriptReadPage,
+  type RuntimeEpoch,
+  type SessionId,
 } from "@omp-studio/client-contract";
 
 import {
@@ -20,6 +21,9 @@ import {
   type ConversationIdentity,
   type ConversationState,
 } from "./conversation-state.js";
+
+/** UTF-16 unit cap for one accumulated live block; see appendBoundedText. */
+const LIVE_BLOCK_TEXT_CAP = CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES;
 
 export type ConversationAction =
   | { readonly type: "beginHydrate"; readonly identity: ConversationIdentity }
@@ -145,6 +149,8 @@ function reduceHydrate(
     ...(page.olderCursor === undefined ? {} : { olderCursor: page.olderCursor }),
     headCursor: page.headCursor,
     abortedTurns: prepend ? state.abortedTurns : {},
+    itemErrors: prepend ? state.itemErrors : {},
+    openTurnItems: dropLive ? {} : state.openTurnItems,
     ...(prepend && state.lastEventSeq !== undefined ? { lastEventSeq: state.lastEventSeq } : {}),
   };
   return next;
@@ -221,7 +227,7 @@ function applyRuntimeEvent(state: ConversationState, update: ConversationRuntime
     case "conversation.tool.completed":
       return completeTool(state, update);
     case "conversation.turn.completed":
-      return state;
+      return closeTurn(state, update.turnId);
     case "conversation.turn.aborted":
       return abortTurn(state, update);
     case "conversation.compaction.started":
@@ -275,10 +281,13 @@ function deltaMessage(
   const current = state.liveMessages[update.messageId];
   if (current === undefined || current.completed || current.aborted) return state;
   const existing = current.blocks[update.blockId];
-  const block = {
+  if (existing?.truncated === true) return state;
+  const appended = appendBoundedText(existing?.text ?? "", update.delta);
+  const block: ConversationLiveBlock = {
     blockId: update.blockId,
     blockType: update.blockType,
-    text: (existing?.text ?? "") + update.delta,
+    text: appended.text,
+    ...(appended.truncated ? { truncated: true } : {}),
   };
   return {
     ...state,
@@ -287,6 +296,24 @@ function deltaMessage(
       [update.messageId]: { ...current, blocks: { ...current.blocks, [update.blockId]: block } },
     },
   };
+}
+
+/**
+ * Memory guard for the live streaming buffer: each delta is byte-bounded by
+ * validation, but the accumulated block was not. The cap is measured in UTF-16
+ * units (an upper display bound, cheaper than re-encoding on every delta); the
+ * persisted item that replaces this buffer on completion carries the exact
+ * byte-bounded text.
+ */
+function appendBoundedText(existing: string, delta: string): { readonly text: string; readonly truncated: boolean } {
+  const max = LIVE_BLOCK_TEXT_CAP;
+  const room = max - existing.length;
+  if (room <= 0) return { text: existing, truncated: true };
+  if (delta.length <= room) return { text: existing + delta, truncated: false };
+  let end = room;
+  const lead = delta.charCodeAt(end - 1);
+  if (lead >= 0xd800 && lead <= 0xdbff) end -= 1;
+  return { text: existing + delta.slice(0, end), truncated: true };
 }
 
 function completeMessage(
@@ -318,7 +345,16 @@ function completeMessage(
   const liveMessages = { ...state.liveMessages };
   delete liveMessages[update.messageId];
   const order = state.order.includes(update.item.itemId) ? state.order : [...state.order, update.item.itemId];
-  return { ...state, itemsById, liveMessages, order };
+  const itemErrors = { ...state.itemErrors };
+  if (update.error !== undefined) itemErrors[update.messageId] = update.error;
+  return {
+    ...state,
+    itemsById,
+    liveMessages,
+    order,
+    openTurnItems: { ...state.openTurnItems, [update.item.itemId]: update.turnId },
+    itemErrors,
+  };
 }
 
 function blocksFromMessageItem(item: ConversationMessageItem): Record<string, ConversationLiveBlock> {
@@ -338,7 +374,7 @@ function startTool(
   update: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }>,
 ): ConversationState {
   const existing = state.liveTools[update.toolCallId];
-  if (existing?.status === "completed") return state;
+  if (existing?.status === "completed" || existing?.status === "aborted") return state;
   const tool: ConversationLiveTool = {
     toolCallId: update.toolCallId,
     turnId: update.turnId,
@@ -351,19 +387,37 @@ function startTool(
   return { ...state, liveTools: { ...state.liveTools, [update.toolCallId]: tool } };
 }
 
+/**
+ * Only `conversation.tool.started` carries the owning messageId, so a live tool
+ * whose start we never saw (dropped after a resync) has to recover its owner
+ * from the persisted item that declares the call, or its result would orphan and
+ * the call would keep rendering as resultless.
+ */
+function ownerMessageId(state: ConversationState, toolCallId: string): string | undefined {
+  for (const itemId of state.order) {
+    const item = state.itemsById[itemId];
+    if (item?.kind !== "message") continue;
+    for (const block of item.content) {
+      if (block.type === "toolCall" && block.toolCallId === toolCallId) return item.itemId;
+    }
+  }
+  return undefined;
+}
+
 function updateTool(
   state: ConversationState,
   update: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }>,
 ): ConversationState {
   const existing = state.liveTools[update.toolCallId];
-  if (existing?.status === "completed") return state;
+  if (existing?.status === "completed" || existing?.status === "aborted") return state;
   const previous = existing?.output ?? "";
   const output = update.updateMode === "replace" ? (update.output ?? "") : previous + (update.output ?? "");
+  const messageId = existing?.messageId ?? ownerMessageId(state, update.toolCallId);
   const tool: ConversationLiveTool = {
     toolCallId: update.toolCallId,
     turnId: update.turnId,
     status: "updated",
-    ...(existing?.messageId === undefined ? {} : { messageId: existing.messageId }),
+    ...(messageId === undefined ? {} : { messageId }),
     ...(existing?.toolName === undefined ? {} : { toolName: existing.toolName }),
     ...(existing?.arguments === undefined ? {} : { arguments: existing.arguments }),
     ...(existing?.startedAt === undefined ? {} : { startedAt: existing.startedAt }),
@@ -379,13 +433,14 @@ function completeTool(
 ): ConversationState {
   const existing = state.liveTools[update.toolCallId];
   const toolName = update.result.toolName ?? existing?.toolName;
+  const messageId = existing?.messageId ?? ownerMessageId(state, update.toolCallId);
   const tool: ConversationLiveTool = {
     toolCallId: update.toolCallId,
     turnId: update.turnId,
     status: "completed",
     completedAt: update.completedAt,
     isError: update.result.isError,
-    ...(existing?.messageId === undefined ? {} : { messageId: existing.messageId }),
+    ...(messageId === undefined ? {} : { messageId }),
     ...(toolName === undefined ? {} : { toolName }),
     ...(existing?.arguments === undefined ? {} : { arguments: existing.arguments }),
     ...(existing?.startedAt === undefined ? {} : { startedAt: existing.startedAt }),
@@ -406,11 +461,31 @@ function abortTurn(
     if (message === undefined || message.turnId !== update.turnId || message.aborted) continue;
     liveMessages[id] = { ...message, aborted: true };
   }
+  // A hard-killed tool may never emit tool.completed; without this it would
+  // keep rendering as running forever. A late tool.completed still overrides
+  // the aborted marker with the authoritative result.
+  const liveTools: Record<string, ConversationLiveTool> = { ...state.liveTools };
+  for (const [id, tool] of Object.entries(liveTools)) {
+    if (tool === undefined || tool.turnId !== update.turnId) continue;
+    if (tool.status === "completed" || tool.status === "aborted") continue;
+    liveTools[id] = { ...tool, status: "aborted" };
+  }
   return {
-    ...state,
+    ...closeTurn(state, update.turnId),
     liveMessages,
+    liveTools,
     abortedTurns: { ...state.abortedTurns, [update.turnId]: true },
   };
+}
+
+/** Drops the turn's items from `openTurnItems`; their tools can no longer start. */
+function closeTurn(state: ConversationState, turnId: string): ConversationState {
+  const openTurnItems: Record<string, string> = {};
+  for (const [itemId, owner] of Object.entries(state.openTurnItems)) {
+    if (owner !== turnId) openTurnItems[itemId] = owner;
+  }
+  if (Object.keys(openTurnItems).length === Object.keys(state.openTurnItems).length) return state;
+  return { ...state, openTurnItems };
 }
 
 function completeCompaction(

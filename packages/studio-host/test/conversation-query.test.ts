@@ -21,6 +21,7 @@ import {
   type RuntimeInstanceId,
   type StateVersion,
   type StudioRequest,
+  type AgentId,
 } from "@omp-studio/studio-protocol";
 import {
   CommandArbiter,
@@ -218,6 +219,7 @@ function completedReceipt(request: StudioRequest, hello: StudioHelloResponse, re
 
 test("session.transcript.read is read-concurrent and can run while streaming", async () => {
   assert.equal(classifyOperation({ kind: SESSION_TRANSCRIPT_READ_KIND }), "read-concurrent");
+  assert.equal(classifyOperation({ kind: "agent.conversation.read", agentId: "agent-1" as AgentId }), "read-concurrent");
   const streaming = new CommandArbiter(() => ({
     runtimeEpoch: epoch,
     stateVersion: 1 as StateVersion,

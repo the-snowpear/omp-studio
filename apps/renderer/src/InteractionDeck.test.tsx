@@ -61,19 +61,33 @@ function approval(title: string): ClientInteraction {
     leaseGeneration: 1,
     title,
     approvalType: "bash",
-    detail: { toolName: "bash", summary: "rm -rf /tmp/x", risk: "high" },
+    detail: {
+      toolName: "bash",
+      summary: "Command: git status\nReason: inspect workspace",
+      risk: "high",
+    },
   };
 }
 
 describe("InteractionDeck real cards", () => {
-  it("select shows the real question title and submits the picked option id", () => {
+  it("select uses the preview Ask layout and submits the picked option id", () => {
     const onRespond = vi.fn();
     render(<InteractionPrompt interaction={select("Which backend?", ["SQLite", "PostgreSQL"])} onRespond={onRespond} />);
+    expect(screen.getByText("Agent 提问")).toBeTruthy();
     expect(screen.getByText("Which backend?")).toBeTruthy();
     expect(screen.queryByText(/Runtime requests select/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "SQLite" }));
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(document.querySelector(".dk-opt")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /SQLite/ }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     expect(onRespond).toHaveBeenCalledWith("submit", "option:0");
+  });
+
+  it("select custom answer submits the typed text", () => {
+    const onRespond = vi.fn();
+    render(<InteractionPrompt interaction={select("Which backend?", ["SQLite"])} onRespond={onRespond} />);
+    fireEvent.change(screen.getByLabelText("自定义回答"), { target: { value: "neither" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
+    expect(onRespond).toHaveBeenCalledWith("submit", "neither");
   });
 
   it("input shows the real title and placeholder and submits the typed text", () => {
@@ -82,7 +96,7 @@ describe("InteractionDeck real cards", () => {
     expect(screen.getByText("你的名字？")).toBeTruthy();
     const field = screen.getByPlaceholderText("Jane");
     fireEvent.change(field, { target: { value: "Ada" } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     expect(onRespond).toHaveBeenCalledWith("submit", "Ada");
   });
 
@@ -93,41 +107,56 @@ describe("InteractionDeck real cards", () => {
     const area = screen.getByLabelText("编辑计划") as HTMLTextAreaElement;
     expect(area.value).toBe("draft");
     fireEvent.change(area, { target: { value: "revised" } });
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() => expect(onRespond).toHaveBeenCalledWith("submit", "revised"));
   });
 
-  it("approval submit sends value true", () => {
+  it("approval uses the ver1 layout and submit sends value true", () => {
     const onRespond = vi.fn();
     render(<InteractionPrompt interaction={approval("允许执行 bash?")} onRespond={onRespond} />);
-    expect(screen.getByText("允许执行 bash?")).toBeTruthy();
+    expect(screen.getByText("审批请求")).toBeTruthy();
+    expect(screen.getByText("OMP 想要执行 Bash 命令")).toBeTruthy();
+    expect(screen.getByText("高风险")).toBeTruthy();
+    expect(screen.getByText(/git status/)).toBeTruthy();
+    expect(screen.getByText("inspect workspace")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "允许一次" }));
+    expect(onRespond).toHaveBeenCalledWith("submit", true);
+  });
+
+  it("approval 拒绝 cancels the interaction", () => {
+    const onRespond = vi.fn();
+    render(<InteractionPrompt interaction={approval("Allow?")} onRespond={onRespond} />);
+    fireEvent.click(screen.getByRole("button", { name: "拒绝" }));
+    expect(onRespond).toHaveBeenCalledWith("cancel");
+  });
+
+  it("approval 始终允许 still submits true for this call", () => {
+    const onRespond = vi.fn();
+    render(<InteractionPrompt interaction={approval("Allow?")} onRespond={onRespond} />);
+    fireEvent.click(screen.getByRole("button", { name: "始终允许" }));
     expect(onRespond).toHaveBeenCalledWith("submit", true);
   });
 
   it("failed respond keeps the card and shows Retry; resolved clears it", async () => {
     const failing = vi.fn(() => Promise.resolve(false));
     const { rerender } = render(<InteractionPrompt interaction={select("Pick", ["A"])} onRespond={failing} />);
-    fireEvent.click(screen.getByRole("button", { name: "A" }));
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("radio", { name: /^A$/ }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() => expect(screen.getByText(/提交失败/)).toBeTruthy());
-    // Card stays: same interaction still rendered with Retry affordance.
-    expect(screen.getByRole("button", { name: "Submit" })).toBeTruthy();
-    // A retry with a succeeding responder completes the flow; the option
-    // selection survives the rerender.
+    expect(screen.getByRole("button", { name: "提交" })).toBeTruthy();
     const ok = vi.fn(() => Promise.resolve(true));
     rerender(<InteractionPrompt interaction={select("Pick", ["A"])} onRespond={ok} />);
-    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() => expect(ok).toHaveBeenCalledWith("submit", "option:0"));
   });
 
   it("failed cancel keeps the card and exposes Retry", async () => {
     const failing = vi.fn(() => Promise.resolve(false));
     render(<InteractionPrompt interaction={select("Pick", ["A"])} onRespond={failing} />);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     await waitFor(() => expect(failing).toHaveBeenCalledWith("cancel"));
     expect(screen.getByText(/提交失败/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
   });
 
   it("deck identity includes leaseGeneration: same id with a higher generation replaces the card", () => {

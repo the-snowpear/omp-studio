@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { open, readdir, lstat } from "node:fs/promises";
+import { open, readdir, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import {
   CONVERSATION_LIMITS,
@@ -12,6 +12,9 @@ import {
   type OpaqueCursor,
   type SessionId,
 } from "@omp-studio/studio-protocol";
+
+import { GzipFileError, readGunzipCapped, readGunzipPrefix } from "./gzip-file.js";
+import { defaultOmpArchiveRoot } from "./session-catalog.js";
 
 const CURSOR_NAMESPACE = "session.archive.v1";
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
@@ -35,6 +38,21 @@ export interface SessionArchiveTranscriptPage {
   readonly hasMoreBefore: boolean;
 }
 
+/** Identity + revision of an archived session, without transcript content. */
+export interface SessionArchiveRevision {
+  readonly sessionId: string;
+  readonly transcriptRevision: string;
+}
+
+/**
+ * A validated, crash-tail-trimmed copy of an archived session transcript.
+ * `temporarySessionFile` is Host-internal: it must never reach the Client
+ * Contract, events, the Renderer, or logs.
+ */
+export interface SessionArchiveProbeCopy extends SessionArchiveRevision {
+  readonly temporarySessionFile: string;
+}
+
 export type SessionArchiveErrorCode =
   | "SESSION_NOT_FOUND"
   | "SESSION_DUPLICATE"
@@ -53,6 +71,8 @@ export class SessionArchiveError extends Error {
 
 export interface SessionArchiveReaderOptions {
   readonly sessionsRoot?: string;
+  /** Cold-archive root (`<agentDir>/archive/sessions`); `.jsonl.gz` members are readable too. */
+  readonly archiveRoot?: string;
   readonly allowedCwd: string;
   readonly maxSessionBytes?: number;
   readonly maxScanFiles?: number;
@@ -101,6 +121,7 @@ type CursorPayload = {
  */
 export class StudioSessionArchiveReader {
   readonly #sessionsRoot: string;
+  readonly #archiveRoot: string;
   readonly #allowedCwd: string;
   readonly #maxSessionBytes: number;
   readonly #maxScanFiles: number;
@@ -112,11 +133,12 @@ export class StudioSessionArchiveReader {
   #indexBuildInFlight: Promise<void> | undefined;
   /** Parsed snapshots are shared by paging and repeated session switches. */
   #snapshotCache = new Map<string, CachedSnapshot>();
-  #snapshotInFlight = new Map<string, { version: FileVersion; promise: Promise<ArchiveSnapshot> }>();
+  #snapshotInFlight = new Map<string, { version: FileVersion | undefined; promise: Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> }>();
 
   constructor(options: SessionArchiveReaderOptions) {
     if (options.allowedCwd.length === 0) throw new TypeError("allowedCwd is required");
     this.#sessionsRoot = resolve(options.sessionsRoot ?? defaultOmpSessionsRoot());
+    this.#archiveRoot = resolve(options.archiveRoot ?? defaultOmpArchiveRoot(this.#sessionsRoot));
     this.#allowedCwd = resolve(options.allowedCwd);
     this.#maxSessionBytes = options.maxSessionBytes ?? DEFAULT_MAX_SESSION_BYTES;
     this.#maxScanFiles = options.maxScanFiles ?? DEFAULT_MAX_SCAN_FILES;
@@ -153,12 +175,19 @@ export class StudioSessionArchiveReader {
       ) {
         throw new SessionArchiveError("CURSOR_STALE", "Transcript cursor belongs to another revision or branch");
       }
-      const boundaryIndex = items.findIndex((item) => item.itemId === cursor.boundary);
-      if (boundaryIndex < 0) throw new SessionArchiveError("CURSOR_STALE", "Transcript cursor boundary is stale");
-      endExclusive = boundaryIndex;
+      if (cursor.boundary.length === 0) {
+        // The head cursor of an empty projection carries an empty boundary;
+        // paging before it yields an empty page, matching the online service.
+        endExclusive = 0;
+      } else {
+        const boundaryIndex = items.findIndex((item) => item.itemId === cursor.boundary);
+        if (boundaryIndex < 0) throw new SessionArchiveError("CURSOR_STALE", "Transcript cursor boundary is stale");
+        endExclusive = boundaryIndex;
+      }
     }
     const start = Math.max(0, endExclusive - limit);
-    const pageItems = items.slice(start, endExclusive);
+    let pageItems = items.slice(start, endExclusive);
+    let hasMoreBefore = start > 0;
     const cursorBase = {
       sessionId: snapshot.sessionId,
       transcriptRevision: snapshot.transcriptRevision,
@@ -168,21 +197,71 @@ export class StudioSessionArchiveReader {
       ...cursorBase,
       boundary: items.at(-1)?.itemId ?? "",
     });
-    return {
+    const pageOf = (): SessionArchiveTranscriptPage => ({
       sessionId: snapshot.sessionId as SessionId,
       transcriptRevision: snapshot.transcriptRevision,
       branchLeafId: snapshot.branchLeafId,
       items: pageItems,
-      ...(start > 0 && pageItems[0] !== undefined
+      ...(hasMoreBefore && pageItems[0] !== undefined
         ? { olderCursor: this.#encodeCursor({ ...cursorBase, boundary: pageItems[0].itemId }) }
         : {}),
       headCursor,
-      hasMoreBefore: start > 0,
+      hasMoreBefore,
+    });
+    // The transport rejects pages above PAGE_MAX_BYTES, so an over-budget page
+    // must be shrunk here or large archived sessions become unreadable. Mirrors
+    // the online StudioSessionTranscriptService shrink behaviour.
+    let page = pageOf();
+    while (Buffer.byteLength(JSON.stringify(page), "utf8") > CONVERSATION_LIMITS.PAGE_MAX_BYTES && pageItems.length > 1) {
+      pageItems = pageItems.slice(1);
+      hasMoreBefore = true;
+      page = pageOf();
+    }
+    if (Buffer.byteLength(JSON.stringify(page), "utf8") > CONVERSATION_LIMITS.PAGE_MAX_BYTES && pageItems.length === 1) {
+      pageItems = [shrinkItem(pageItems[0]!)];
+      page = pageOf();
+    }
+    return page;
+  }
+
+  /** Returns the current archive revision of a session without reading its content. */
+  async readRevision(sessionId: string): Promise<SessionArchiveRevision> {
+    if (sessionId.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session id is required");
+    const file = await this.#locate(sessionId);
+    const snapshot = await this.#readSnapshot(file, sessionId);
+    return { sessionId: snapshot.sessionId, transcriptRevision: snapshot.transcriptRevision };
+  }
+
+  /**
+   * Writes the validated complete JSONL prefix of a session into a
+   * Host-controlled directory and returns the copy path. The original file is
+   * only ever opened read-only; an incomplete crash tail is dropped, but a
+   * malformed interior record still fails closed via the snapshot validation.
+   */
+  async createProbeCopy(sessionId: string, destinationDirectory: string): Promise<SessionArchiveProbeCopy> {
+    if (sessionId.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session id is required");
+    if (typeof destinationDirectory !== "string" || !isAbsolute(destinationDirectory)) {
+      throw new SessionArchiveError("SESSION_CORRUPT", "Probe copy destination must be an absolute directory");
+    }
+    const destination = await lstat(destinationDirectory).catch(() => undefined);
+    if (destination === undefined || !destination.isDirectory() || destination.isSymbolicLink()) {
+      throw new SessionArchiveError("SESSION_CORRUPT", "Probe copy destination is not a usable directory");
+    }
+    const file = await this.#locate(sessionId);
+    const { snapshot, version } = await this.#readSnapshotVersioned(file, sessionId);
+    const prefix = await this.#readCompletePrefix(file, version);
+    const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/gu, "").slice(0, 64) || "session";
+    const temporarySessionFile = join(destinationDirectory, `probe-${randomBytes(8).toString("hex")}-${safeId}.jsonl`);
+    await writeFile(temporarySessionFile, prefix, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    return {
+      sessionId: snapshot.sessionId,
+      transcriptRevision: snapshot.transcriptRevision,
+      temporarySessionFile,
     };
   }
 
-  async #locate(sessionId: string): Promise<string> {
-    const candidates = await listSessionFiles(this.#sessionsRoot, this.#maxScanFiles);
+	async #locate(sessionId: string): Promise<string> {
+    const candidates = await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
     await this.#ensureIndex(candidates);
     let matches = this.#sessionIndex.get(sessionId) ?? [];
     if (matches.length === 1) {
@@ -206,9 +285,14 @@ export class StudioSessionArchiveReader {
   }
 
   async #readSnapshot(path: string, expectedSessionId: string): Promise<ArchiveSnapshot> {
+    const { snapshot } = await this.#readSnapshotVersioned(path, expectedSessionId);
+    return snapshot;
+  }
+
+  async #readSnapshotVersioned(path: string, expectedSessionId: string): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
     const cached = this.#snapshotCache.get(path);
     const indexedVersion = this.#indexedVersions.get(path);
-    if (cached !== undefined && indexedVersion === cached.version) return cached.snapshot;
+    if (cached !== undefined && indexedVersion === cached.version) return { snapshot: cached.snapshot, version: cached.version };
     const pending = this.#snapshotInFlight.get(path);
     if (pending !== undefined && pending.version === indexedVersion) return pending.promise;
     const read = this.#readSnapshotUncached(path, expectedSessionId)
@@ -221,16 +305,68 @@ export class StudioSessionArchiveReader {
           this.#snapshotCache.delete(oldest);
         }
         this.#indexedVersions.set(path, version);
-        return snapshot;
+        return { snapshot, version };
       })
       .finally(() => {
         if (this.#snapshotInFlight.get(path)?.promise === read) this.#snapshotInFlight.delete(path);
       });
-    this.#snapshotInFlight.set(path, { version: indexedVersion ?? "", promise: read });
+    this.#snapshotInFlight.set(path, { version: indexedVersion, promise: read });
     return read;
   }
 
-  async #readSnapshotUncached(path: string, expectedSessionId: string): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
+  /** Second, identity-checked read used only by the probe-copy path. */
+  async #readCompletePrefix(path: string, expectedVersion: FileVersion): Promise<Buffer> {
+    const { bytes, version } = await this.#readWholeFile(path);
+    if (version !== expectedVersion) {
+      throw new SessionArchiveError("SESSION_CORRUPT", "Session changed identity while it was being read");
+    }
+    return completeJsonlPrefix(bytes).bytes;
+  }
+
+  /**
+   * Whole-file read with identity checks. Plain sessions stream through one
+   * already-open handle; cold-archive `.jsonl.gz` members are decompressed
+   * under the same byte cap and identified by the compressed file's stat.
+   */
+  async #readWholeFile(path: string): Promise<{
+    bytes: Buffer;
+    identity: { dev: number | bigint; ino: number | bigint };
+    version: FileVersion;
+  }> {
+    if (isCompressedSessionPath(path)) {
+      let before;
+      try {
+        before = await lstat(path);
+      } catch {
+        throw new SessionArchiveError("SESSION_NOT_FOUND", "Session is not available");
+      }
+      if (!before.isFile() || before.isSymbolicLink()) {
+        throw new SessionArchiveError("SESSION_CORRUPT", "Session is not a regular file");
+      }
+      if (before.size > this.#maxSessionBytes) {
+        throw new SessionArchiveError("SESSION_TOO_LARGE", "Session exceeds the configured read limit");
+      }
+      let bytes: Buffer;
+      try {
+        bytes = await readGunzipCapped(path, this.#maxSessionBytes);
+      } catch (error) {
+        if (error instanceof GzipFileError) {
+          throw new SessionArchiveError(
+            error.code === "TOO_LARGE" ? "SESSION_TOO_LARGE" : "SESSION_CORRUPT",
+            error.message,
+          );
+        }
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          throw new SessionArchiveError("SESSION_NOT_FOUND", "Session is not available");
+        }
+        throw new SessionArchiveError("SESSION_CORRUPT", "Archived session could not be read");
+      }
+      const after = await lstat(path).catch(() => undefined);
+      if (after === undefined || fileVersion(after) !== fileVersion(before)) {
+        throw new SessionArchiveError("SESSION_CORRUPT", "Session changed identity while it was being read");
+      }
+      return { bytes, identity: { dev: before.dev, ino: before.ino }, version: fileVersion(after) };
+    }
     const handle = await open(path, "r");
     try {
       const before = await handle.stat({ bigint: true });
@@ -250,48 +386,53 @@ export class StudioSessionArchiveReader {
       if (after.dev !== before.dev || after.ino !== before.ino || after.size < before.size) {
         throw new SessionArchiveError("SESSION_CORRUPT", "Session changed identity while it was being read");
       }
-      const complete = completeJsonlPrefix(buffer.subarray(0, offset));
-      const values = parseCompleteJsonl(complete.text);
-      const header = values.find((value) => isRecord(value) && value.type === "session");
-      if (!isRecord(header) || typeof header.id !== "string" || typeof header.cwd !== "string") {
-        throw new SessionArchiveError("SESSION_CORRUPT", "Session header is missing or invalid");
-      }
-      if (header.id !== expectedSessionId) {
-        throw new SessionArchiveError("SESSION_CORRUPT", "Session identity changed while it was being read");
-      }
-      if (!sameWorkspace(header.cwd, this.#allowedCwd)) {
-        throw new SessionArchiveError("WORKSPACE_MISMATCH", "Session does not belong to the selected workspace");
-      }
-      const entries = values.flatMap((value) => {
-        const entry = parseEntry(value);
-        return entry === undefined ? [] : [entry];
-      });
-      const branchLeafId = resolveBranchLeaf(entries);
-      const revision = createHash("sha256")
-        .update(CURSOR_NAMESPACE)
-        .update("\0")
-        .update(header.id)
-        .update("\0")
-        .update(String(before.dev))
-        .update(":")
-        .update(String(before.ino))
-        .update(":")
-        .update(String(complete.byteLength))
-        .update("\0")
-        .update(complete.bytes)
-        .digest("base64url");
-      return {
-        snapshot: {
-          sessionId: header.id,
-          transcriptRevision: `sha256:${revision}`,
-          branchLeafId,
-          entries,
-        },
-        version: fileVersion(after),
-      };
+      return { bytes: buffer.subarray(0, offset), identity: { dev: before.dev, ino: before.ino }, version: fileVersion(after) };
     } finally {
       await handle.close();
     }
+  }
+
+  async #readSnapshotUncached(path: string, expectedSessionId: string): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
+    const { bytes, identity, version } = await this.#readWholeFile(path);
+    const complete = completeJsonlPrefix(bytes);
+    const values = parseCompleteJsonl(complete.text);
+    const header = values.find((value) => isRecord(value) && value.type === "session");
+    if (!isRecord(header) || typeof header.id !== "string" || typeof header.cwd !== "string") {
+      throw new SessionArchiveError("SESSION_CORRUPT", "Session header is missing or invalid");
+    }
+    if (header.id !== expectedSessionId) {
+      throw new SessionArchiveError("SESSION_CORRUPT", "Session identity changed while it was being read");
+    }
+    if (!sameWorkspace(header.cwd, this.#allowedCwd)) {
+      throw new SessionArchiveError("WORKSPACE_MISMATCH", "Session does not belong to the selected workspace");
+    }
+    const entries = values.flatMap((value) => {
+      const entry = parseEntry(value);
+      return entry === undefined ? [] : [entry];
+    });
+    const branchLeafId = resolveBranchLeaf(entries);
+    const revision = createHash("sha256")
+      .update(CURSOR_NAMESPACE)
+      .update("\0")
+      .update(header.id)
+      .update("\0")
+      .update(String(identity.dev))
+      .update(":")
+      .update(String(identity.ino))
+      .update(":")
+      .update(String(complete.byteLength))
+      .update("\0")
+      .update(complete.bytes)
+      .digest("base64url");
+    return {
+      snapshot: {
+        sessionId: header.id,
+        transcriptRevision: `sha256:${revision}`,
+        branchLeafId,
+        entries,
+      },
+      version,
+    };
   }
 
   #encodeCursor(payload: Omit<CursorPayload, "namespace">): OpaqueCursor {
@@ -367,22 +508,28 @@ function defaultOmpSessionsRoot(environment: NodeJS.ProcessEnv = process.env): s
   return resolve(agentDirectory === undefined || agentDirectory.length === 0 ? join(homedir(), ".omp", "agent") : agentDirectory, "sessions");
 }
 
-async function listSessionFiles(root: string, limit: number): Promise<string[]> {
-  let roots;
-  try {
-    roots = await readdir(root, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+async function listSessionFiles(roots: { sessions: string; archive: string }, limit: number): Promise<string[]> {
   const files: string[] = [];
   const add = (path: string): void => {
     if (files.length >= limit) throw new SessionArchiveError("SESSION_CORRUPT", "Session catalog exceeds the scan limit");
     files.push(path);
   };
-  for (const entry of roots) {
+  await collectTree(roots.sessions, ".jsonl", add);
+  await collectTree(roots.archive, ".jsonl.gz", add);
+  return files.sort();
+}
+
+async function collectTree(root: string, suffix: string, add: (path: string) => void): Promise<void> {
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
     if (entry.isSymbolicLink()) continue;
     const candidate = join(root, entry.name);
-    if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+    if (entry.isFile() && entry.name.endsWith(suffix)) {
       add(candidate);
       continue;
     }
@@ -394,10 +541,13 @@ async function listSessionFiles(root: string, limit: number): Promise<string[]> 
       continue;
     }
     for (const child of children) {
-      if (child.isFile() && !child.isSymbolicLink() && child.name.endsWith(".jsonl")) add(join(candidate, child.name));
+      if (child.isFile() && !child.isSymbolicLink() && child.name.endsWith(suffix)) add(join(candidate, child.name));
     }
   }
-  return files.sort();
+}
+
+function isCompressedSessionPath(path: string): boolean {
+  return path.endsWith(".jsonl.gz");
 }
 
 async function readHeader(path: string, byteLimit: number, maxSessionBytes: number): Promise<IndexedHeader | undefined> {
@@ -408,24 +558,35 @@ async function readHeader(path: string, byteLimit: number, maxSessionBytes: numb
     return undefined;
   }
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > maxSessionBytes) return undefined;
-  const handle = await open(path, "r");
-  try {
-    const buffer = Buffer.alloc(Math.min(byteLimit, metadata.size));
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    for (const line of buffer.subarray(0, bytesRead).toString("utf8").split(/\r?\n/u).slice(0, 8)) {
-      try {
-        const value = JSON.parse(line) as unknown;
-        if (isRecord(value) && value.type === "session" && typeof value.id === "string" && value.id.length > 0) {
-          return { id: value.id, version: fileVersion(metadata) };
-        }
-      } catch {
-        // A partial prefix line is not a usable header.
-      }
+  let text: string;
+  if (isCompressedSessionPath(path)) {
+    try {
+      const prefix = await readGunzipPrefix(path, byteLimit, maxSessionBytes);
+      text = prefix.toString("utf8");
+    } catch {
+      return undefined;
     }
-    return undefined;
-  } finally {
-    await handle.close();
+  } else {
+    const handle = await open(path, "r");
+    try {
+      const buffer = Buffer.alloc(Math.min(byteLimit, metadata.size));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      text = buffer.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await handle.close();
+    }
   }
+  for (const line of text.split(/\r?\n/u).slice(0, 8)) {
+    try {
+      const value = JSON.parse(line) as unknown;
+      if (isRecord(value) && value.type === "session" && typeof value.id === "string" && value.id.length > 0) {
+        return { id: value.id, version: fileVersion(metadata) };
+      }
+    } catch {
+      // A partial prefix line is not a usable header.
+    }
+  }
+  return undefined;
 }
 
 async function readFileVersion(path: string, maxSessionBytes: number): Promise<FileVersion | undefined> {
@@ -590,9 +751,9 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
       itemId: entry.id,
       parentId: entry.parentId,
       createdAt,
-      summary: truncateText(entry.summary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES).text || " ",
-      ...(typeof entry.shortSummary === "string" ? { shortSummary: truncateText(entry.shortSummary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES).text } : {}),
-      ...(typeof entry.warning === "string" ? { warning: truncateText(entry.warning, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES).text } : {}),
+      summary: sanitizeText(entry.summary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES).text || " ",
+      ...(typeof entry.shortSummary === "string" ? { shortSummary: sanitizeText(entry.shortSummary, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES).text } : {}),
+      ...(typeof entry.warning === "string" ? { warning: sanitizeText(entry.warning, CONVERSATION_LIMITS.COMPACTION_SUMMARY_MAX_BYTES).text } : {}),
     };
   }
   if (entry.type === "reset_boundary") {
@@ -603,7 +764,7 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
 
 function projectContent(value: unknown): ConversationContentBlock[] {
   if (typeof value === "string") {
-    const text = truncateText(value, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+    const text = sanitizeText(value, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
     return [{ type: "text", text: text.text, ...(text.truncated ? { truncated: true } : {}) }];
   }
   if (!Array.isArray(value)) return [];
@@ -611,19 +772,27 @@ function projectContent(value: unknown): ConversationContentBlock[] {
   for (const item of value) {
     if (!isRecord(item)) continue;
     if (item.type === "text" && typeof item.text === "string") {
-      const text = truncateText(item.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+      const text = sanitizeText(item.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
       blocks.push({ type: "text", text: text.text, ...(text.truncated ? { truncated: true } : {}) });
     } else if (item.type === "thinking" && typeof item.thinking === "string") {
-      const text = truncateText(item.thinking, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+      const text = sanitizeText(item.thinking, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
       blocks.push({ type: "thinking", text: text.text, ...(text.truncated ? { truncated: true } : {}) });
     } else if (item.type === "toolCall" && typeof item.id === "string" && typeof item.name === "string") {
-      const args = sanitizeJson(item.arguments, 0);
+      const toolCallId = item.id.slice(0, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS) || "tool-call";
+      const toolName = item.name.slice(0, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS) || "tool";
+      const args = projectBoundedJson(item.arguments);
+      const truncated = toolCallId !== item.id || toolName !== item.name || args.truncated;
       blocks.push({
         type: "toolCall",
-        toolCallId: item.id.slice(0, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS) || "tool-call",
-        toolName: item.name.slice(0, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS) || "tool",
-        ...(args === undefined ? {} : { arguments: args }),
+        toolCallId,
+        toolName,
+        ...(args.value === undefined ? {} : { arguments: args.value }),
+        ...(truncated ? { truncated: true } : {}),
       });
+    } else if (item.type === "image") {
+      // Binary content never crosses the read plane; the online transcript
+      // service emits the same empty truncated marker for image blocks.
+      blocks.push({ type: "text", text: "", truncated: true });
     }
   }
   return blocks;
@@ -637,20 +806,23 @@ function projectToolResult(message: Record<string, unknown>): Extract<Conversati
       if (isRecord(item) && item.type === "text" && typeof item.text === "string") outputs.push(item.text);
     }
   }
-  const output = truncateText(outputs.join("\n"), CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-  const details = projectToolDetails(message.details);
+  const output = sanitizeText(outputs.join("\n"), CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+  const details = projectBoundedJson(message.details);
+  const toolName = typeof message.toolName === "string" ? message.toolName.slice(0, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS) : undefined;
+  const nameTruncated = toolName !== undefined && toolName !== message.toolName;
   return {
     type: "toolResult",
     toolCallId: typeof message.toolCallId === "string" ? message.toolCallId.slice(0, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS) : "tool-call",
-    ...(typeof message.toolName === "string" ? { toolName: message.toolName.slice(0, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS) } : {}),
+    ...(toolName === undefined ? {} : { toolName }),
     ...(output.text.length === 0 ? {} : { output: output.text }),
     ...(details.value === undefined ? {} : { data: details.value }),
     isError: message.isError === true,
-    ...(output.truncated || details.truncated ? { truncated: true } : {}),
+    ...(output.truncated || details.truncated || nameTruncated ? { truncated: true } : {}),
   };
 }
 
-function projectToolDetails(value: unknown): { readonly value?: JsonValue; readonly truncated: boolean } {
+/** Byte-bounded JSON projection shared by toolCall arguments and toolResult details. */
+function projectBoundedJson(value: unknown): { readonly value?: JsonValue; readonly truncated: boolean } {
   if (value === undefined) return { truncated: false };
   const sanitized = sanitizeJson(value, 0);
   if (sanitized === undefined) return { truncated: true };
@@ -666,7 +838,8 @@ function projectToolDetails(value: unknown): { readonly value?: JsonValue; reado
 
 function sanitizeJson(value: unknown, depth: number): JsonValue | undefined {
   if (depth > CONVERSATION_LIMITS.JSON_VALUE_MAX_DEPTH) return { truncated: true };
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "string") return shortenHomePath(value);
+  if (value === null || typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
   if (Array.isArray(value)) return value.map((item) => sanitizeJson(item, depth + 1) ?? null);
   if (!isRecord(value)) return undefined;
@@ -687,6 +860,54 @@ function truncateText(value: string, maxBytes: number): { text: string; truncate
   let end = maxBytes;
   while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end -= 1;
   return { text: bytes.subarray(0, end).toString("utf8"), truncated: true };
+}
+
+/**
+ * Mirrors the Runtime conversation-sanitizer `shortenHomePath`: only a leading
+ * home prefix is rewritten, keeping archived transcripts free of absolute home
+ * paths just like the online read plane.
+ */
+function shortenHomePath(filePath: string, homeDir = homedir()): string {
+  if (!homeDir) return filePath;
+  if (!filePath.startsWith(homeDir)) return filePath;
+  const suffix = filePath.slice(homeDir.length);
+  if (suffix === "" || suffix.startsWith("/") || suffix.startsWith("\\")) {
+    return `~${suffix.replaceAll("\\", "/")}`;
+  }
+  return filePath;
+}
+
+function sanitizeText(value: string, maxBytes: number): { text: string; truncated: boolean } {
+  return truncateText(shortenHomePath(value), maxBytes);
+}
+
+/** Last-resort reduction when a single item alone exceeds the page budget. */
+function shrinkItem(item: ConversationItem): ConversationItem {
+  if (item.kind === "message") {
+    return {
+      ...item,
+      content: item.content.map((block) => {
+        if (block.type === "text" || block.type === "thinking") {
+          const text = truncateText(block.text, Math.min(256, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES));
+          return { ...block, text: text.text, truncated: true };
+        }
+        if (block.type === "toolCall") return { ...block, arguments: { truncated: true }, truncated: true };
+        const { output: _output, ...rest } = block;
+        return { ...rest, data: { truncated: true }, truncated: true };
+      }),
+    };
+  }
+  if (item.kind === "compaction") {
+    const summary = truncateText(item.summary, 256);
+    return {
+      kind: "compaction",
+      itemId: item.itemId,
+      parentId: item.parentId,
+      createdAt: item.createdAt,
+      summary: summary.text.length > 0 ? summary.text : " ",
+    };
+  }
+  return item;
 }
 
 function sameWorkspace(left: string, right: string): boolean {

@@ -136,6 +136,15 @@ export interface StudioClient {
   close(): Promise<void>;
 }
 
+// Session thinking selectors are protocol facts; re-exported so transport
+// adapters can validate them without depending on studio-protocol directly.
+export { SESSION_THINKING_LEVELS, SESSION_THINKING_SELECTORS } from "@omp-studio/studio-protocol";
+export type {
+  SessionModelState,
+  SessionThinkingLevel,
+  SessionThinkingSelector,
+} from "@omp-studio/studio-protocol";
+
 export * from "./ids.js";
 export * from "./read-models.js";
 export * from "./operations.js";

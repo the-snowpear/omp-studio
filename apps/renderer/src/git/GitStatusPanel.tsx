@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   CommandRequestId,
   GitBranchListReadModel,
+  GitCommitChangesReadModel,
+  GitCommitDiffReadModel,
   GitDiffReadModel,
   GitDiffTarget,
   GitHubAuthReadModel,
   GitHubOperation,
   GitHubPullRequestListReadModel,
+  GitLogListReadModel,
   GitOperation,
   GitOperationResult,
   GitRemoteListReadModel,
@@ -18,6 +21,12 @@ import type {
 
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { Icon } from "../icons";
+
+import { GitCommitGraph } from "./GitCommitGraph";
+import { GitMoreActionsMenu } from "./GitMoreActionsMenu";
+import { GitPanelSplit } from "./GitPanelSplit";
+import { GitTip } from "./GitTip";
+import { readGitGraphLayout, writeGitGraphLayout } from "./gitGraphMemory";
 
 type RepositoryHook = {
   readonly repository?: GitRepositoryReadModel;
@@ -74,6 +83,40 @@ function ask(label: string, initial = ""): string | undefined {
   return value ? value : undefined;
 }
 
+/** Electron 渲染进程不支持 window.prompt（electron/electron#472，官方明确不实现）：
+    这些靠 prompt 收集文本输入的操作在桌面端拿不到任何输入，点击后只会静默无反应。
+    Host 侧操作本身都已实现，等应用内输入对话框接入后从此清单移除即可恢复。
+    选中时先给出明确提示，而不是假装可用。 */
+const PENDING_INPUT_LABELS: Record<string, string> = {
+  "branch.create": "新建并切换分支",
+  "branch.switch": "切换分支",
+  "branch.rename": "重命名当前分支",
+  "branch.delete": "删除分支",
+  "worktree.create": "新建 Worktree",
+  "worktree.lock": "锁定 Worktree",
+  "worktree.unlock": "解锁 Worktree",
+  "worktree.remove": "移除 Worktree",
+  merge: "Merge",
+  rebase: "Rebase",
+  "cherry-pick": "Cherry-pick",
+  revert: "Revert",
+  reset: "Hard reset",
+  "tag.create": "创建 Tag",
+  "tag.delete": "删除 Tag",
+  "push.force": "Force-with-lease Push",
+  "remote.add": "添加 Remote",
+  "remote.set": "修改 Remote URL",
+  "remote.remove": "移除 Remote",
+  "pr.create": "创建 PR",
+  "pr.edit": "编辑 PR",
+  "pr.comment": "评论 PR",
+  "pr.review": "Review PR",
+  "pr.merge": "合并 PR",
+  "pr.update": "更新 PR 分支",
+  "pr.close": "关闭 PR",
+  "pr.reopen": "重新打开 PR",
+};
+
 function statusLabel(index: string, worktree: string): string {
   if (index === "conflicted" || worktree === "conflicted") return "冲突";
   if (index !== "unmodified" && worktree !== "unmodified") return "已暂存 + 工作区";
@@ -88,7 +131,7 @@ function patchLines(patch: string) {
   });
 }
 
-export function GitStatusPanel({ client, workspaceId }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId }) {
+export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId; readonly focusPath?: string }) {
   const repositoryHook = useGitRepository(client, workspaceId);
   const repository = repositoryHook.repository;
   const [branches, setBranches] = useState<GitBranchListReadModel>();
@@ -102,7 +145,18 @@ export function GitStatusPanel({ client, workspaceId }: { readonly client: Studi
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [activeRequest, setActiveRequest] = useState<{ domain: "git" | "github"; requestId: CommandRequestId }>();
+  const [graphLayout, setGraphLayout] = useState(readGitGraphLayout);
+  const [log, setLog] = useState<GitLogListReadModel>();
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState<string>();
+  const [logLimit, setLogLimit] = useState(80);
+  const [selectedCommit, setSelectedCommit] = useState<string>();
+  const [commitChanges, setCommitChanges] = useState<GitCommitChangesReadModel>();
+  const [changesLoading, setChangesLoading] = useState(false);
+  const [selectedCommitPath, setSelectedCommitPath] = useState<string>();
+  const [commitDiff, setCommitDiff] = useState<GitCommitDiffReadModel>();
   const detailsGeneration = useRef(0);
+  const logGeneration = useRef(0);
 
   const refreshDetails = useCallback(async () => {
     const requestGeneration = ++detailsGeneration.current;
@@ -134,14 +188,82 @@ export function GitStatusPanel({ client, workspaceId }: { readonly client: Studi
     else setPullRequests(undefined);
   }, [client, workspaceId]);
 
+  const persistGraphLayout = useCallback((next: typeof graphLayout) => {
+    setGraphLayout(next);
+    writeGitGraphLayout(next);
+  }, []);
+
+  const refreshLog = useCallback(async () => {
+    const requestGeneration = ++logGeneration.current;
+    if (!graphLayout.open || workspaceId === undefined) {
+      setLog(undefined);
+      setLogError(undefined);
+      setLogLoading(false);
+      return;
+    }
+    setLogLoading(true);
+    try {
+      const value = await client.query("git.log.list", { workspaceId, limit: logLimit });
+      if (requestGeneration !== logGeneration.current) return;
+      setLog(value);
+      setLogError(undefined);
+    } catch (cause) {
+      if (requestGeneration !== logGeneration.current) return;
+      setLog(undefined);
+      setLogError(hostErrorMessage(cause, "无法读取提交历史"));
+    } finally {
+      if (requestGeneration === logGeneration.current) setLogLoading(false);
+    }
+  }, [client, graphLayout.open, logLimit, workspaceId]);
+
   const refreshAll = useCallback(async () => {
-    await Promise.all([repositoryHook.refresh(), refreshDetails()]);
-  }, [refreshDetails, repositoryHook.refresh]);
+    await Promise.all([repositoryHook.refresh(), refreshDetails(), refreshLog()]);
+  }, [refreshDetails, refreshLog, repositoryHook.refresh]);
 
   useEffect(() => {
     void refreshDetails();
     return () => { detailsGeneration.current += 1; };
   }, [refreshDetails]);
+
+  useEffect(() => {
+    void refreshLog();
+    if (!graphLayout.open || workspaceId === undefined) return;
+    const unsubscribe = client.subscribe({ scope: "all" }, (event) => {
+      if (event.kind === "git.repository.changed" && event.repository.workspaceId === workspaceId) void refreshLog();
+    });
+    return () => {
+      logGeneration.current += 1;
+      unsubscribe();
+    };
+  }, [client, graphLayout.open, refreshLog, workspaceId]);
+
+  useEffect(() => {
+    if (workspaceId === undefined || selectedCommit === undefined) {
+      setCommitChanges(undefined);
+      return;
+    }
+    let cancelled = false;
+    setChangesLoading(true);
+    void client.query("git.commit.changes", { workspaceId, oid: selectedCommit }).then(
+      (value) => { if (!cancelled) { setCommitChanges(value); setChangesLoading(false); } },
+      (cause) => { if (!cancelled) { setCommitChanges(undefined); setChangesLoading(false); setNotice(hostErrorMessage(cause, "无法读取提交文件")); } },
+    );
+    return () => { cancelled = true; };
+  }, [client, selectedCommit, workspaceId]);
+
+  useEffect(() => {
+    if (workspaceId === undefined || selectedCommit === undefined || selectedCommitPath === undefined) {
+      setCommitDiff(undefined);
+      return;
+    }
+    let cancelled = false;
+    setCommitDiff(undefined);
+    void client.query("git.commit.diff", { workspaceId, oid: selectedCommit, path: selectedCommitPath }).then(
+      (value) => { if (!cancelled) setCommitDiff(value); },
+      (cause) => { if (!cancelled) { setCommitDiff(undefined); setNotice(hostErrorMessage(cause, "无法读取提交 Diff")); } },
+    );
+    return () => { cancelled = true; };
+  }, [client, selectedCommit, selectedCommitPath, workspaceId]);
 
   useEffect(() => {
     if (workspaceId === undefined || selected === undefined) {
@@ -215,6 +337,11 @@ export function GitStatusPanel({ client, workspaceId }: { readonly client: Studi
 
   const runAdvanced = (value: string) => {
     if (!repository) return;
+    const pending = PENDING_INPUT_LABELS[value];
+    if (pending !== undefined) {
+      setNotice(`${pending}：该功能待后续实现`);
+      return;
+    }
     switch (value) {
       case "branch.create": { const name = ask("新分支名称"); if (name) void execute({ kind: "branch.create", name, checkout: true }); break; }
       case "branch.switch": { const name = ask("切换到分支", branches?.branches.find((item) => !item.remote && !item.current)?.name); if (name) void execute({ kind: "branch.switch", name }); break; }
@@ -257,29 +384,102 @@ export function GitStatusPanel({ client, workspaceId }: { readonly client: Studi
   const staged = useMemo(() => repository?.changes.filter((change) => change.index !== "unmodified") ?? [], [repository]);
   const working = useMemo(() => repository?.changes.filter((change) => change.worktree !== "unmodified") ?? [], [repository]);
 
-  if (workspaceId === undefined) return <div className="empty" style={{ padding: 18 }}>请先选择项目</div>;
-  if (repositoryHook.loading && repository === undefined) return <div className="empty" style={{ padding: 18 }}>正在读取 Git 状态…</div>;
-  if (repositoryHook.error) return <div className="empty" style={{ padding: 18 }}><p>{repositoryHook.error}</p><button className="btn small outline" onClick={() => void repositoryHook.refresh()}>重试</button></div>;
-  if (!repository?.isRepository) return <div className="empty" style={{ padding: 18 }}><p>{repository?.unavailableReason ?? "当前项目还不是 Git 仓库"}</p><button className="btn small primary" disabled={busy} onClick={() => void execute({ kind: "init" })}>初始化仓库</button></div>;
+  useEffect(() => {
+    if (focusPath === undefined || repository === undefined) return;
+    const normalized = focusPath.replaceAll("\\", "/");
+    const matches = (path: string) => {
+      const value = path.replaceAll("\\", "/");
+      return value === normalized || value.endsWith(`/${normalized}`) || normalized.endsWith(`/${value}`);
+    };
+    const workingHit = repository.changes.find((change) => change.worktree !== "unmodified" && matches(change.path));
+    const stagedHit = repository.changes.find((change) => change.index !== "unmodified" && matches(change.path));
+    const hit = workingHit ?? stagedHit;
+    if (hit === undefined) return;
+    setSelected({ path: hit.path, target: workingHit !== undefined ? "working" : "staged" });
+  }, [focusPath, repository]);
+
+  const graphPanel = (
+    <GitCommitGraph
+      {...(log === undefined ? {} : { model: log })}
+      loading={logLoading}
+      {...(logError === undefined ? {} : { error: logError })}
+      busy={busy}
+      {...(selectedCommit === undefined ? {} : { selectedOid: selectedCommit })}
+      {...(commitChanges === undefined ? {} : { changes: commitChanges })}
+      changesLoading={changesLoading}
+      {...(selectedCommitPath === undefined ? {} : { selectedPath: selectedCommitPath })}
+      {...(commitDiff === undefined ? {} : { diff: commitDiff })}
+      onRefresh={() => void refreshLog()}
+      onSelectCommit={setSelectedCommit}
+      onSelectFile={setSelectedCommitPath}
+      onLoadMore={() => setLogLimit((value) => Math.min(200, value + 80))}
+      onCherryPick={(oid) => void execute({ kind: "cherry-pick", ref: oid })}
+      onRevert={(oid) => void execute({ kind: "revert", ref: oid })}
+      onCheckout={(oid) => void execute({ kind: "checkout", ref: oid })}
+      onCreateBranch={(oid, name) => void execute({ kind: "branch.create", name, startPoint: oid, checkout: true })}
+    />
+  );
+  const wrap = (top: ReactNode) => (
+    <GitPanelSplit
+      top={top}
+      graphOpen={graphLayout.open}
+      splitRatio={graphLayout.splitRatio}
+      onToggle={() => persistGraphLayout({ ...graphLayout, open: !graphLayout.open })}
+      onResizeSplit={(ratio) => persistGraphLayout({ ...graphLayout, splitRatio: ratio })}
+      {...(repository && (repository.ahead || repository.behind) ? { meta: <span className="chip gray xs">↑{repository.ahead} ↓{repository.behind}</span> } : {})}
+    >
+      {graphPanel}
+    </GitPanelSplit>
+  );
+
+  if (workspaceId === undefined) return wrap(<div className="empty" style={{ padding: 18 }}>请先选择项目</div>);
+  if (repositoryHook.loading && repository === undefined) return wrap(<div className="empty" style={{ padding: 18 }}>正在读取 Git 状态…</div>);
+  if (repositoryHook.error) return wrap(<div className="empty" style={{ padding: 18 }}><p>{repositoryHook.error}</p><button className="btn small outline" onClick={() => void repositoryHook.refresh()}>重试</button></div>);
+  if (!repository?.isRepository) return wrap(<div className="empty" style={{ padding: 18 }}><p>{repository?.unavailableReason ?? "当前项目还不是 Git 仓库"}</p><button className="btn small primary" disabled={busy} onClick={() => void execute({ kind: "init" })}>初始化仓库</button></div>);
 
   const rows = (title: string, changes: typeof staged, target: GitDiffTarget) => (
     <div className="ch-group">
-      <div className="ch-group-title">{title}<span className="ch-count">{changes.length}</span></div>
+      <div className="ch-group-title">
+        {title}
+        <span className="ch-count">{changes.length}</span>
+        <span className="spacer" />
+        {target === "working" ? (
+          <GitTip text={working.length === 0 ? "没有可暂存的更改" : `暂存全部（${working.length}）`}>
+            <button type="button" className="icon-btn small" aria-label="暂存全部" disabled={busy || working.length === 0} onClick={() => void execute({ kind: "stage", paths: working.map((change) => change.path) })}>
+              <Icon name="plus" extra="sm" />
+            </button>
+          </GitTip>
+        ) : (
+          <GitTip text={staged.length === 0 ? "没有已暂存的更改" : `取消暂存全部（${staged.length}）`}>
+            <button type="button" className="icon-btn small" aria-label="取消暂存全部" disabled={busy || staged.length === 0} onClick={() => void execute({ kind: "unstage", paths: staged.map((change) => change.path) })}>
+              <Icon name="minus" extra="sm" />
+            </button>
+          </GitTip>
+        )}
+      </div>
       {changes.map((change) => (
         <div className={`git-change-line${selected?.path === change.path && selected.target === target ? " selected" : ""}`} key={`${target}-${change.path}`}>
           <button className="ch-row" aria-label={`查看 ${change.path} 的 ${target === "staged" ? "暂存" : "工作区"} Diff`} onClick={() => setSelected({ path: change.path, target })}>
             <span className="ch-file ellipsis">{change.path}</span><span className="ch-note">{statusLabel(change.index, change.worktree)}</span>
           </button>
-          <button className="icon-btn small" title={target === "staged" ? "取消暂存" : "暂存"} disabled={busy} onClick={() => void execute({ kind: target === "staged" ? "unstage" : "stage", paths: [change.path] })}><Icon name={target === "staged" ? "minus" : "plus"} extra="sm" /></button>
-          {target === "working" ? <button className="icon-btn small danger" title="丢弃更改" disabled={busy || !repository.revision} onClick={() => { if (repository.revision && window.confirm(`确认丢弃 ${change.path} 的工作区更改？`)) void execute({ kind: "discard", paths: [change.path], expectedRevision: repository.revision }); }}><Icon name="trash" extra="sm" /></button> : null}
+          <GitTip text={target === "staged" ? "取消暂存" : "暂存"}>
+            <button type="button" className="icon-btn small" aria-label={target === "staged" ? "取消暂存" : "暂存"} disabled={busy} onClick={() => void execute({ kind: target === "staged" ? "unstage" : "stage", paths: [change.path] })}><Icon name={target === "staged" ? "minus" : "plus"} extra="sm" /></button>
+          </GitTip>
+          {target === "working" ? (
+            <GitTip text="丢弃更改">
+              <button type="button" className="icon-btn small danger" aria-label="丢弃更改" disabled={busy || !repository.revision} onClick={() => { if (repository.revision && window.confirm(`确认丢弃 ${change.path} 的工作区更改？`)) void execute({ kind: "discard", paths: [change.path], expectedRevision: repository.revision }); }}><Icon name="trash" extra="sm" /></button>
+            </GitTip>
+          ) : null}
         </div>
       ))}
     </div>
   );
 
-  return <>
+  return wrap(<>
     <div className="ch-toolbar git-toolbar">
-      <button className="icon-btn small" title="刷新" disabled={busy} onClick={() => void refreshAll()}><Icon name="refresh" extra="sm" /></button>
+      <GitTip text="刷新">
+        <button type="button" className="icon-btn small" aria-label="刷新" disabled={busy} onClick={() => void refreshAll()}><Icon name="refresh" extra="sm" /></button>
+      </GitTip>
       <span className="git-branch-label ellipsis"><Icon name="branch" extra="sm" />{repository.branch ?? "detached HEAD"}</span>
       {repository.ahead || repository.behind ? <span className="chip gray xs">↑{repository.ahead} ↓{repository.behind}</span> : null}
       <span className="spacer" />
@@ -291,26 +491,19 @@ export function GitStatusPanel({ client, workspaceId }: { readonly client: Studi
     {notice ? <div className="git-notice" role="status">{notice}</div> : null}
     {repository.operation ? <div className="git-operation"><b>{repository.operation}</b> 正在进行 <span className="spacer" /><button className="btn small outline" disabled={busy} onClick={() => void execute({ kind: "continue", operation: repository.operation! })}>继续</button><button className="btn small danger" disabled={busy} onClick={() => void execute({ kind: "abort", operation: repository.operation! })}>中止</button></div> : null}
     <div className="git-actions">
-      <select aria-label="更多 Git 操作" disabled={busy} defaultValue="" onChange={(event) => { runAdvanced(event.target.value); event.currentTarget.value = ""; }}>
-        <option value="" disabled>更多操作…</option>
-        <optgroup label="分支"><option value="branch.create">新建并切换分支</option><option value="branch.switch">切换分支</option><option value="branch.rename">重命名当前分支</option><option value="branch.delete">删除分支</option></optgroup>
-        <optgroup label="Worktree"><option value="worktree.root">选择 Worktree 根目录</option><option value="worktree.create">新建 Worktree</option><option value="worktree.lock">锁定 Worktree</option><option value="worktree.unlock">解锁 Worktree</option><option value="worktree.remove">移除 Worktree</option><option value="worktree.prune">Prune Worktree</option></optgroup>
-        <optgroup label="历史"><option value="stash">Stash 全部</option><option value="stash.pop">Pop Stash</option><option value="merge">Merge</option><option value="rebase">Rebase</option><option value="cherry-pick">Cherry-pick</option><option value="revert">Revert</option><option value="reset">Hard reset…</option><option value="tag.create">创建 Tag</option><option value="tag.delete">删除 Tag</option></optgroup>
-        <optgroup label="远端"><option value="pull.rebase">Pull --rebase</option><option value="pull.merge">Pull --merge</option><option value="push.force">Force-with-lease Push</option><option value="remote.add">添加 Remote</option><option value="remote.set">修改 Remote URL</option><option value="remote.remove">移除 Remote</option></optgroup>
-        <optgroup label="GitHub" disabled={githubAuth?.available === false}><option value="auth">登录 GitHub</option><option value="auth.logout">退出 GitHub</option><option value="pr.create">创建 PR</option><option value="pr.edit">编辑 PR</option><option value="pr.comment">评论 PR</option><option value="pr.review">Review PR</option><option value="pr.update">更新 PR 分支</option><option value="pr.merge">合并 PR</option><option value="pr.close">关闭 PR</option><option value="pr.reopen">重新打开 PR</option></optgroup>
-      </select>
+      <GitMoreActionsMenu disabled={busy} githubDisabled={githubAuth?.available === false} onPick={runAdvanced} />
       <span className="tiny muted">{branches ? branches.branches.length : "—"} branches · {worktrees ? worktrees.worktrees.length : "—"} worktrees · {repository.stashCount} stash{githubAuth?.available === false ? ` · ${githubAuth.unavailableReason ?? "GitHub CLI 不可用"}` : ""}</span>
     </div>
     <div className="ch-list">
       {rows("已暂存", staged, "staged")}
       {rows("工作区", working, "working")}
       {repository.changes.length === 0 ? <div className="empty" style={{ padding: 18 }}>工作区干净</div> : null}
-      {githubAuth?.authenticated && pullRequests?.pullRequests.length ? <div className="git-pr-list"><div className="ch-group-title">Open pull requests<span className="ch-count">{pullRequests.pullRequests.length}</span></div>{pullRequests.pullRequests.map((pr) => <div className="git-pr-row" key={pr.number}><span className="ellipsis">#{pr.number} {pr.title}</span><button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.checkout", number: pr.number })}>Checkout</button>{pr.draft ? <button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.ready", number: pr.number })}>Ready</button> : null}<button className="btn small primary" disabled={busy || !pr.headOid} title={pr.headOid ? "Squash merge" : "缺少远端 head OID"} onClick={() => { if (pr.headOid && window.confirm(`确认 squash merge #${pr.number}？`)) void executeGithub({ kind: "pr.merge", number: pr.number, method: "squash", expectedHeadOid: pr.headOid, deleteBranch: true }); }}>Merge</button></div>)}</div> : null}
+      {githubAuth?.authenticated && pullRequests?.pullRequests.length ? <div className="git-pr-list"><div className="ch-group-title">Open pull requests<span className="ch-count">{pullRequests.pullRequests.length}</span></div>{pullRequests.pullRequests.map((pr) => <div className="git-pr-row" key={pr.number}><span className="ellipsis">#{pr.number} {pr.title}</span><button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.checkout", number: pr.number })}>Checkout</button>{pr.draft ? <button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.ready", number: pr.number })}>Ready</button> : null}<GitTip text={pr.headOid ? "Squash merge" : "缺少远端 head OID"}><button className="btn small primary" disabled={busy || !pr.headOid} onClick={() => { if (pr.headOid && window.confirm(`确认 squash merge #${pr.number}？`)) void executeGithub({ kind: "pr.merge", number: pr.number, method: "squash", expectedHeadOid: pr.headOid, deleteBranch: true }); }}>Merge</button></GitTip></div>)}</div> : null}
     </div>
     <div className="git-commit-box">
       <textarea value={commitMessage} placeholder="Commit message" rows={2} onChange={(event) => setCommitMessage(event.target.value)} />
       <button className="btn small primary" disabled={busy || staged.length === 0 || !commitMessage.trim()} onClick={() => { const message = commitMessage.trim(); if (!message) return; void execute({ kind: "commit", message }).then((completed) => { if (completed) setCommitMessage(""); }); }}>Commit</button>
     </div>
     {selected ? <div className="ch-diff-slot git-diff-slot"><div className="diff-toolbar"><Icon name="file-code" extra="sm" /><span className="mono small ellipsis">{selected.path}</span><span className="chip gray xs">{selected.target === "staged" ? "staged" : "working"}</span>{diff?.truncated ? <span className="chip gray xs">已截断</span> : null}</div><div className="diff-scroll">{diff ? (diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 && repository.changes.some((change) => change.path === selected.path && change.worktree === "untracked") ? <div className="empty">未跟踪文件暂时没有 Git diff；暂存后可查看。</div> : patchLines(diff.patch)) : <div className="empty">读取 Diff…</div>}</div></div> : null}
-  </>;
+  </>);
 }

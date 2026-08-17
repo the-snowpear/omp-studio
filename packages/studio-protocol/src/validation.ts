@@ -1,4 +1,6 @@
 import { ContractValidationError } from "./contract-error.js";
+import type { AgentTranscriptMessage, AgentTranscriptPage } from "./contracts/agents-jobs.js";
+import type { AgentId, Generation, OpaqueCursor } from "./contracts/ids.js";
 import {
   CONVERSATION_LIMITS,
   SESSION_TRANSCRIPT_READ_KIND,
@@ -14,6 +16,7 @@ import {
   type StudioRequest,
   type StudioSnapshotResponse,
 } from "./contracts/protocol.js";
+import { SESSION_THINKING_LEVELS, SESSION_THINKING_SELECTORS } from "./contracts/state.js";
 import type { OperatorStateSnapshot } from "./contracts/state.js";
 import type { OperatorCommandManifest } from "./contracts/manifests.js";
 import {
@@ -22,7 +25,12 @@ import {
   parseOpaqueConversationCursor,
   parseSessionTranscriptReadLimit,
 } from "./conversation-validation.js";
-import { isSessionTelemetryEventKind, parseSessionTelemetryEvent, parseSessionTelemetrySnapshot } from "./telemetry-validation.js";
+import {
+  isSessionTelemetryEventKind,
+  parseSessionTelemetryEvent,
+  parseSessionTelemetryReadResult,
+  parseSessionTelemetrySnapshot,
+} from "./telemetry-validation.js";
 
 export { ContractValidationError } from "./contract-error.js";
 export {
@@ -33,7 +41,12 @@ export {
   parseOpaqueConversationCursor,
   parseSessionTranscriptReadLimit,
 } from "./conversation-validation.js";
-export { isSessionTelemetryEventKind, parseSessionTelemetryEvent, parseSessionTelemetrySnapshot } from "./telemetry-validation.js";
+export {
+  isSessionTelemetryEventKind,
+  parseSessionTelemetryEvent,
+  parseSessionTelemetryReadResult,
+  parseSessionTelemetrySnapshot,
+} from "./telemetry-validation.js";
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -298,6 +311,9 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
       "goal",
       "vibe",
       "loop",
+      "model",
+      "fast",
+      "prewalk",
       "pause",
       "live",
       "pendingMessages",
@@ -339,11 +355,13 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
 
   if (input.plan !== undefined) {
     const plan = record(input.plan, "$snapshot.snapshot.plan");
-    exactKeys(plan, ["status", "planReference"], "$snapshot.snapshot.plan");
+    exactKeys(plan, ["status", "planReference", "title", "body"], "$snapshot.snapshot.plan");
     if (!["off", "active", "paused", "review"].includes(plan.status as string)) {
       throw new ContractValidationError("unsupported plan status", "$snapshot.snapshot.plan.status");
     }
     optionalString(plan.planReference, "$snapshot.snapshot.plan.planReference");
+    if (plan.title !== undefined) boundedInteractionString(plan.title, "$snapshot.snapshot.plan.title", INTERACTION_LIMITS.TITLE_MAX_CHARS);
+    if (plan.body !== undefined) boundedInteractionString(plan.body, "$snapshot.snapshot.plan.body", 32 * 1024);
   }
   if (input.goal !== undefined) {
     const goal = record(input.goal, "$snapshot.snapshot.goal");
@@ -371,6 +389,33 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
     }
     optionalString(loop.prompt, "$snapshot.snapshot.loop.prompt");
     if (loop.iterations !== undefined) nonNegativeInteger(loop.iterations, "$snapshot.snapshot.loop.iterations");
+  }
+  if (input.model !== undefined) {
+    const model = record(input.model, "$snapshot.snapshot.model");
+    exactKeys(model, ["selector", "provider", "id", "thinking", "configuredThinking"], "$snapshot.snapshot.model");
+    nonEmptyString(model.selector, "$snapshot.snapshot.model.selector");
+    nonEmptyString(model.provider, "$snapshot.snapshot.model.provider");
+    nonEmptyString(model.id, "$snapshot.snapshot.model.id");
+    if (model.thinking !== undefined && !THINKING_LEVEL_SET.has(model.thinking as string)) {
+      throw new ContractValidationError("unsupported thinking level", "$snapshot.snapshot.model.thinking");
+    }
+    if (model.configuredThinking !== undefined) {
+      assertThinkingSelector(model.configuredThinking, "$snapshot.snapshot.model.configuredThinking");
+    }
+  }
+  if (input.fast !== undefined) {
+    const fast = record(input.fast, "$snapshot.snapshot.fast");
+    exactKeys(fast, ["enabled", "active"], "$snapshot.snapshot.fast");
+    booleanValue(fast.enabled, "$snapshot.snapshot.fast.enabled");
+    if (fast.active !== undefined) booleanValue(fast.active, "$snapshot.snapshot.fast.active");
+  }
+  if (input.prewalk !== undefined) {
+    const prewalk = record(input.prewalk, "$snapshot.snapshot.prewalk");
+    exactKeys(prewalk, ["status", "target"], "$snapshot.snapshot.prewalk");
+    if (!["off", "armed", "active"].includes(prewalk.status as string)) {
+      throw new ContractValidationError("unsupported prewalk status", "$snapshot.snapshot.prewalk.status");
+    }
+    optionalString(prewalk.target, "$snapshot.snapshot.prewalk.target");
   }
   if (input.pause !== undefined) {
     const pause = record(input.pause, "$snapshot.snapshot.pause");
@@ -608,7 +653,16 @@ const MAX_COMMAND_ID_LENGTH = 1024;
 const MAX_AGENT_ID_LENGTH = 512;
 const MAX_AGENT_DEFINITION_LENGTH = 256;
 const MAX_AGENT_TEXT_LENGTH = 64 * 1024;
+const MAX_MODEL_SELECTOR_LENGTH = 256;
 const MAX_TRANSCRIPT_PAGE = CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_MAX;
+const THINKING_LEVEL_SET = new Set<string>(SESSION_THINKING_LEVELS);
+const THINKING_SELECTOR_SET = new Set<string>(SESSION_THINKING_SELECTORS);
+
+function assertThinkingSelector(value: unknown, path: string): void {
+  if (typeof value !== "string" || !THINKING_SELECTOR_SET.has(value)) {
+    throw new ContractValidationError("unsupported thinking selector", path);
+  }
+}
 
 function jsonValue(value: unknown, path: string, seen: Set<object> = new Set()): void {
   if (value === null) return;
@@ -744,7 +798,47 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   },
   "loop.pause": { keys: ["kind"] },
   "loop.disable": { keys: ["kind"] },
+  "session.fast.set": {
+    keys: ["kind", "enabled"],
+    validate: (operation) => {
+      booleanValue(operation.enabled, "$request.operation.enabled");
+    },
+  },
+  "session.prewalk.arm": {
+    keys: ["kind", "target"],
+    validate: (operation) => {
+      if (operation.target !== undefined) nonEmptyString(operation.target, "$request.operation.target");
+    },
+  },
+  "session.prewalk.disarm": { keys: ["kind"] },
   "session.fork": { keys: ["kind"] },
+  "session.handoff": {
+    keys: ["kind", "customInstructions"],
+    validate: (operation) => {
+      if (operation.customInstructions !== undefined) {
+        nonEmptyString(operation.customInstructions, "$request.operation.customInstructions");
+      }
+    },
+  },
+  "session.model.set": {
+    keys: ["kind", "selector", "thinking"],
+    validate: (operation) => {
+      const selector = nonEmptyString(operation.selector, "$request.operation.selector");
+      if (selector.length > MAX_MODEL_SELECTOR_LENGTH) {
+        throw new ContractValidationError(
+          `selector must be at most ${MAX_MODEL_SELECTOR_LENGTH} characters`,
+          "$request.operation.selector",
+        );
+      }
+      if (operation.thinking !== undefined) {
+        assertThinkingSelector(operation.thinking, "$request.operation.thinking");
+      }
+    },
+  },
+  "session.thinking.set": {
+    keys: ["kind", "level"],
+    validate: (operation) => assertThinkingSelector(operation.level, "$request.operation.level"),
+  },
   "session.tree.get": { keys: ["kind"] },
   [SESSION_TRANSCRIPT_READ_KIND]: {
     keys: ["kind", "cursor", "limit"],
@@ -954,6 +1048,24 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
       }
     },
   },
+  "agent.conversation.read": {
+    keys: ["kind", "agentId", "cursor", "limit"],
+    validate: (operation) => {
+      const agentId = nonEmptyString(operation.agentId, "$request.operation.agentId");
+      if (agentId.length > MAX_AGENT_ID_LENGTH) {
+        throw new ContractValidationError("agentId is too long", "$request.operation.agentId");
+      }
+      if (operation.cursor !== undefined) {
+        const cursor = nonEmptyString(operation.cursor, "$request.operation.cursor");
+        if (cursor.length > CONVERSATION_LIMITS.CURSOR_MAX_CHARS) {
+          throw new ContractValidationError("cursor exceeds the protocol limit", "$request.operation.cursor");
+        }
+      }
+      if (operation.limit !== undefined) {
+        parseSessionTranscriptReadLimit(operation.limit, "$request.operation.limit");
+      }
+    },
+  },
   "agent.subscribe": {
     keys: ["kind", "level"],
     validate: (operation) => {
@@ -1132,4 +1244,44 @@ export function parseStudioReceipt(value: unknown): StudioReceipt {
     if (error.details !== undefined) record(error.details, "$receipt.error.details");
   }
   return input as unknown as StudioReceipt;
+}
+
+const AGENT_TRANSCRIPT_ROLES = new Set(["user", "assistant", "custom", "system"]);
+
+/** Structural parser for the Runtime Agent Hub transcript page result. */
+export function parseAgentTranscriptPage(value: unknown): AgentTranscriptPage {
+  const input = record(value, "$agentPage");
+  exactKeys(input, ["agentId", "generation", "cursor", "nextCursor", "messages", "eof"], "$agentPage");
+  nonEmptyString(input.agentId, "$agentPage.agentId");
+  positiveInteger(input.generation, "$agentPage.generation");
+  nonEmptyString(input.cursor, "$agentPage.cursor");
+  if (input.nextCursor !== undefined) nonEmptyString(input.nextCursor, "$agentPage.nextCursor");
+  if (typeof input.eof !== "boolean") {
+    throw new ContractValidationError("expected a boolean", "$agentPage.eof");
+  }
+  if (!Array.isArray(input.messages)) {
+    throw new ContractValidationError("expected an array", "$agentPage.messages");
+  }
+  const messages = input.messages.map((message, index) => {
+    const path = `$agentPage.messages[${index}]`;
+    const record_ = record(message, path);
+    exactKeys(record_, ["id", "role", "ts", "text"], path);
+    nonEmptyString(record_.id, `${path}.id`);
+    if (!AGENT_TRANSCRIPT_ROLES.has(record_.role as string)) {
+      throw new ContractValidationError("unsupported transcript role", `${path}.role`);
+    }
+    nonNegativeInteger(record_.ts, `${path}.ts`);
+    if (typeof record_.text !== "string") {
+      throw new ContractValidationError("expected a string", `${path}.text`);
+    }
+    return { id: record_.id, role: record_.role, ts: record_.ts, text: record_.text } as AgentTranscriptMessage;
+  });
+  return {
+    agentId: input.agentId as AgentId,
+    generation: input.generation as Generation,
+    cursor: input.cursor as OpaqueCursor,
+    ...(input.nextCursor !== undefined ? { nextCursor: input.nextCursor as OpaqueCursor } : {}),
+    messages,
+    eof: input.eof as boolean,
+  };
 }

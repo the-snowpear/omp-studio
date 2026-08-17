@@ -53,6 +53,9 @@ export interface GitRepositoryReadModel {
   readonly stashCount: number;
   readonly operation?: "merge" | "rebase" | "cherry-pick" | "revert";
   readonly changes: ReadonlyArray<GitFileChange>;
+  /** Uncommitted line totals vs HEAD (tracked diff plus untracked files as insertions). Omitted when not computable. */
+  readonly insertions?: number;
+  readonly deletions?: number;
   /** Opaque state fingerprint used to reject stale destructive actions. */
   readonly revision?: string;
   readonly unavailableReason?: string;
@@ -119,6 +122,64 @@ export interface GitRemoteListReadModel {
   readonly remotes: ReadonlyArray<GitRemoteRecord>;
 }
 
+export type GitLogRefKind = "head" | "local" | "remote" | "tag";
+
+export interface GitLogRef {
+  readonly name: string;
+  readonly kind: GitLogRefKind;
+  readonly current: boolean;
+}
+
+export type GitLogRelation = "head" | "outgoing" | "incoming" | "common";
+
+export interface GitLogCommitRecord {
+  readonly oid: string;
+  readonly parents: ReadonlyArray<string>;
+  readonly subject: string;
+  readonly authorName: string;
+  readonly authorDate: string;
+  readonly refs: ReadonlyArray<GitLogRef>;
+  readonly relation: GitLogRelation;
+  readonly insertions?: number;
+  readonly deletions?: number;
+}
+
+export interface GitLogListReadModel {
+  readonly workspaceId: WorkspaceId;
+  readonly commits: ReadonlyArray<GitLogCommitRecord>;
+  readonly truncated: boolean;
+  readonly cursor?: string;
+  readonly headOid?: string;
+  readonly upstream?: string;
+  readonly mergeBaseOid?: string;
+  readonly ahead: number;
+  readonly behind: number;
+}
+
+export type GitCommitChangeStatus = "added" | "modified" | "deleted" | "renamed" | "copied";
+
+export interface GitCommitChangeRecord {
+  readonly path: string;
+  readonly status: GitCommitChangeStatus;
+  readonly originalPath?: string;
+}
+
+export interface GitCommitChangesReadModel {
+  readonly workspaceId: WorkspaceId;
+  readonly oid: string;
+  readonly subject: string;
+  readonly files: ReadonlyArray<GitCommitChangeRecord>;
+}
+
+export interface GitCommitDiffReadModel {
+  readonly workspaceId: WorkspaceId;
+  readonly oid: string;
+  readonly path: string;
+  readonly patch: string;
+  readonly binary: boolean;
+  readonly truncated: boolean;
+}
+
 export interface GitOperationResult {
   readonly operation: GitOperation["kind"];
   readonly message: string;
@@ -134,7 +195,7 @@ export type GitOperation =
   | { readonly kind: "stage"; readonly paths: ReadonlyArray<string> }
   | { readonly kind: "unstage"; readonly paths: ReadonlyArray<string> }
   | { readonly kind: "discard"; readonly paths: ReadonlyArray<string>; readonly expectedRevision: string }
-  | { readonly kind: "commit"; readonly message: string; readonly amend?: boolean; readonly sign?: boolean }
+  | { readonly kind: "commit"; readonly message: string; readonly amend?: boolean; readonly sign?: boolean; readonly paths?: ReadonlyArray<string> }
   | { readonly kind: "branch.create"; readonly name: string; readonly startPoint?: string; readonly checkout?: boolean }
   | { readonly kind: "branch.switch"; readonly name: string }
   | { readonly kind: "branch.rename"; readonly oldName?: string; readonly newName: string }
@@ -160,6 +221,7 @@ export type GitOperation =
   | { readonly kind: "rebase"; readonly ref: string }
   | { readonly kind: "cherry-pick"; readonly ref: string }
   | { readonly kind: "revert"; readonly ref: string }
+  | { readonly kind: "checkout"; readonly ref: string }
   | { readonly kind: "reset"; readonly mode: "soft" | "mixed" | "hard"; readonly ref: string; readonly expectedRevision: string }
   | { readonly kind: "continue"; readonly operation: "merge" | "rebase" | "cherry-pick" | "revert" }
   | { readonly kind: "abort"; readonly operation: "merge" | "rebase" | "cherry-pick" | "revert" }

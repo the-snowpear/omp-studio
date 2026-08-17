@@ -56,7 +56,11 @@ import type {
   SurfaceCapabilities,
 } from "@omp-studio/client-contract";
 import type {
+  AgentId,
+  AgentTranscriptPage,
   CapabilityManifest,
+  Generation,
+  OpaqueCursor,
   OperatorCommandManifest,
   OperatorStateSnapshot,
 } from "@omp-studio/studio-protocol";
@@ -74,6 +78,7 @@ const ENVIRONMENT_ID = "env-0001" as EnvironmentId;
 const THREAD_ID = "thr-0001" as ThreadId;
 const SESSION_ID = "sess-0001" as SessionId;
 const WORKSPACE_ID = "ws-0001" as WorkspaceId;
+const AGENT_ID = "agent-0001" as AgentId;
 const GIT_REPOSITORY_ID = "repo-0001" as GitRepositoryId;
 const GIT_WORKTREE_ID = "worktree-0001" as GitWorktreeId;
 const HISTORY_ID = "hist-0001" as HistoryEntryId;
@@ -258,13 +263,19 @@ const QUERY_INPUTS = {
   "workspace.fileTree": { workspaceId: WORKSPACE_ID },
   "usage.get": {},
   "session.transcript.read": { limit: 50 },
+  "agent.transcript.read": { agentId: AGENT_ID, limit: 50 },
+  "agent.conversation.read": { agentId: AGENT_ID, limit: 50 },
   "session.transcript.readPage": { sessionId: SESSION_ID, limit: 50 },
+  "session.telemetry.read": { sessionId: SESSION_ID },
   "git.toolchain.get": {},
   "git.repository.get": { workspaceId: WORKSPACE_ID },
   "git.diff.get": { workspaceId: WORKSPACE_ID, path: "src/index.ts", target: "working" },
   "git.branches.list": { workspaceId: WORKSPACE_ID },
   "git.worktrees.list": { workspaceId: WORKSPACE_ID },
   "git.remotes.list": { workspaceId: WORKSPACE_ID },
+  "git.log.list": { workspaceId: WORKSPACE_ID, limit: 80 },
+  "git.commit.changes": { workspaceId: WORKSPACE_ID, oid: UPSTREAM_COMMIT },
+  "git.commit.diff": { workspaceId: WORKSPACE_ID, oid: UPSTREAM_COMMIT, path: "src/index.ts" },
   "github.auth.get": { workspaceId: WORKSPACE_ID },
   "github.pr.list": { workspaceId: WORKSPACE_ID, state: "open" },
   "github.pr.get": { workspaceId: WORKSPACE_ID, number: 1 },
@@ -362,6 +373,30 @@ const QUERY_RESPONSES = {
     queryName: "session.transcript.read",
     result: conversationPages.userAssistant,
   },
+  "agent.transcript.read": {
+    ok: true,
+    queryName: "agent.transcript.read",
+    result: {
+      agentId: AGENT_ID,
+      generation: 1 as Generation,
+      cursor: "agent-cursor-0" as OpaqueCursor,
+      messages: [
+        { id: "agent-m-1", role: "user", ts: 1_754_000_000_000, text: "audit the lockfile" },
+        { id: "agent-m-2", role: "assistant", ts: 1_754_000_060_000, text: "scanned 312 dependencies" },
+      ],
+      eof: true,
+    } satisfies AgentTranscriptPage,
+  },
+  "agent.conversation.read": {
+    ok: true,
+    queryName: "agent.conversation.read",
+    result: conversationPages.userAssistant,
+  },
+  "session.telemetry.read": {
+    ok: true,
+    queryName: "session.telemetry.read",
+    result: { sessionId: SESSION_ID, source: "live", semantics: "current-live", telemetry: { sessionId: SESSION_ID, capturedAt: "2026-08-16T00:00:00.000Z", tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 }, context: null } },
+  },
   "session.transcript.readPage": {
     ok: true,
     queryName: "session.transcript.readPage",
@@ -396,6 +431,8 @@ const QUERY_RESPONSES = {
       behind: 0,
       stashCount: 0,
       changes: [],
+      insertions: 0,
+      deletions: 0,
       revision: "git-revision-1",
     },
   },
@@ -418,6 +455,38 @@ const QUERY_RESPONSES = {
     ok: true,
     queryName: "git.remotes.list",
     result: { workspaceId: WORKSPACE_ID, remotes: [{ name: "origin", fetchUrl: "https://github.com/example/fixture.git", pushUrl: "https://github.com/example/fixture.git", host: "github.com", repository: "example/fixture" }] },
+  },
+  "git.log.list": {
+    ok: true,
+    queryName: "git.log.list",
+    result: {
+      workspaceId: WORKSPACE_ID,
+      commits: [{
+        oid: UPSTREAM_COMMIT,
+        parents: [],
+        subject: "Fixture commit",
+        authorName: "fixture",
+        authorDate: "2026-01-01T00:00:00Z",
+        refs: [{ name: "main", kind: "local", current: true }],
+        relation: "head",
+      }],
+      truncated: false,
+      headOid: UPSTREAM_COMMIT,
+      upstream: "origin/main",
+      mergeBaseOid: UPSTREAM_COMMIT,
+      ahead: 0,
+      behind: 0,
+    },
+  },
+  "git.commit.changes": {
+    ok: true,
+    queryName: "git.commit.changes",
+    result: { workspaceId: WORKSPACE_ID, oid: UPSTREAM_COMMIT, subject: "Fixture commit", files: [{ path: "src/index.ts", status: "modified" }] },
+  },
+  "git.commit.diff": {
+    ok: true,
+    queryName: "git.commit.diff",
+    result: { workspaceId: WORKSPACE_ID, oid: UPSTREAM_COMMIT, path: "src/index.ts", patch: "", binary: false, truncated: false },
   },
   "github.auth.get": {
     ok: true,

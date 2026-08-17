@@ -36,18 +36,21 @@
 
   /* Spacing scale — --sp-14 was referenced ~30 times as var(--sp-14, 14px)
      without ever being declared. Declared here so the fallback stops being
-     load-bearing and the step can be retuned in one place. */
-  --sp-2: 2px;
-  --sp-4: 4px;
-  --sp-6: 6px;
-  --sp-8: 8px;
-  --sp-10: 10px;
-  --sp-12: 12px;
-  --sp-14: 14px;
-  --sp-16: 16px;
-  --sp-20: 20px;
-  --sp-24: 24px;
-  --sp-32: 32px;
+     load-bearing and the step can be retuned in one place.
+     信息密度（设置 → 常规）经 --density-scale 等比缩放整条间距阶梯，
+     不动字号与布局度量（--sidebar-w / --panel-w 等由 JS 按像素写入）。 */
+  --density-scale: 1;
+  --sp-2: calc(2px * var(--density-scale));
+  --sp-4: calc(4px * var(--density-scale));
+  --sp-6: calc(6px * var(--density-scale));
+  --sp-8: calc(8px * var(--density-scale));
+  --sp-10: calc(10px * var(--density-scale));
+  --sp-12: calc(12px * var(--density-scale));
+  --sp-14: calc(14px * var(--density-scale));
+  --sp-16: calc(16px * var(--density-scale));
+  --sp-20: calc(20px * var(--density-scale));
+  --sp-24: calc(24px * var(--density-scale));
+  --sp-32: calc(32px * var(--density-scale));
 
   /* Minimum pointer target (WCAG 2.2 SC 2.5.8 Target Size Minimum = 24px).
      Dense IDE chrome draws smaller icons than this; the hit area is padded
@@ -78,10 +81,18 @@
   /* 切换页面标签栏（顶部导航气泡）专用：Apple iOS 弹簧曲线 —— 起步更猛、
      长尾缓降，曲线感强、无过冲、结尾不戛然而止。 */
   --ease-nav: cubic-bezier(0.32, 0.72, 0, 1);
+  /* 上面两条曲线的镜像（cubic-bezier(x1,y1,x2,y2) 的反向 =
+     cubic-bezier(1-x2,1-y2,1-x1,1-y1)）。收起动画要「就是展开倒着播」时用它，
+     而不是换成通用的 --ease-in —— 换了曲线就不是同一段动作倒放了。 */
+  --ease-out-rev: cubic-bezier(0.56, 0, 0.84, 0.16);
+  --ease-nav-rev: cubic-bezier(1, 0, 0.68, 0.28);
   --dur-fast: 120ms;
   --dur: 180ms;
   --dur-slow: 250ms;
   --dur-toast: 320ms;  /* 浮窗提示的浮入/浮出动画时长，放慢一些更醒目 */
+  /* 悬停提示（data-tip）的出现延迟：指针静止停留后才弹标签，扫过按钮
+     时不闪现。与动效时长分开命名，因为它是等待时间而不是动画时间。 */
+  --tip-delay: 500ms;
   --dur-slide: 230ms;  /* 标签栏切换气泡的滑动时长，独立于页面切换的 --dur-slow */
   --dur-exit: 120ms;
   --dur-tactile: 80ms;  /* Quick feedback for button presses */
@@ -100,6 +111,11 @@
   --z-modal: 80;
   --z-toast: 100;
 }
+
+/* ---------------- 信息密度（设置 → 常规） ----------------
+   只缩放间距阶梯：紧凑 ~0.85x，宽松 ~1.15x。字号与布局度量不动。 */
+:root[data-density="compact"] { --density-scale: 0.85; }
+:root[data-density="cozy"] { --density-scale: 1.15; }
 
 /* ---------------- Light (default) ---------------- */
 :root,
@@ -148,6 +164,11 @@
   --amber-soft: rgba(143, 90, 5, 0.12);
   --red: #c0272c;
   --red-soft: rgba(192, 39, 44, 0.1);
+  /* 警告橙红（Full Access 权限模式专用）：深胡萝卜橙（orange-700 档），
+     比上一版红橙混合更偏橙；亮色主题下对白底约 5.2:1。
+     -soft 直接用主色的低透明度版本，色相干净不发脏。 */
+  --danger-orange: #c2410c;
+  --danger-orange-soft: color-mix(in srgb, var(--danger-orange) 14%, transparent);
   --blue: #1f6ba3;
   --blue-soft: rgba(31, 107, 163, 0.12);
   --purple: var(--accent);
@@ -189,12 +210,13 @@
 
   /* Git file status — deliberately separate from the semantic scale above,
      so a tree full of modified files doesn't read as a tree full of
-     warnings. Mirrors ver2's split. */
+     warnings. Mirrors ver2's split. Untracked reads as green (VS Code
+     convention); the U/A letters carry the added-vs-untracked distinction. */
   --git-modified: #96570a;
   --git-added: #177e33;
   --git-deleted: #c7283a;
   --git-renamed: #0a66c2;
-  --git-untracked: #666d78;
+  --git-untracked: #1a7f37;
   --git-conflict: #c7283a;
 
   --diff-add-bg: rgba(19, 122, 82, 0.11);
@@ -258,6 +280,10 @@
   --amber-soft: rgba(224, 162, 60, 0.15);
   --red: #f06568;
   --red-soft: rgba(240, 101, 104, 0.14);
+  /* 警告橙红（Full Access 权限模式专用）：暖橙，暗色主题下对比约 6.7:1。
+     -soft 直接用主色的低透明度版本，色相干净不发脏。 */
+  --danger-orange: #ff7a45;
+  --danger-orange-soft: color-mix(in srgb, var(--danger-orange) 14%, transparent);
   --blue: #5da9e0;
   --blue-soft: rgba(93, 169, 224, 0.15);
 
@@ -297,7 +323,7 @@
   --git-added: #3fb950;
   --git-deleted: #f0616d;
   --git-renamed: #4a9eff;
-  --git-untracked: #939aa5;
+  --git-untracked: #7ee787;
   --git-conflict: #f0616d;
 
   --diff-add-bg: rgba(70, 185, 131, 0.16);

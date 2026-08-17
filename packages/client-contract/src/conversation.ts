@@ -8,6 +8,7 @@ export type {
   ConversationCompactionItem,
   ConversationContentBlock,
   ConversationItem,
+  ConversationMessageError,
   ConversationMessageItem,
   ConversationResetBoundaryItem,
   ConversationRole,

@@ -399,6 +399,7 @@
 }
 .hist-toolbar { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-14); }
 .hist-search { flex: 1; }
+.hist-tabs { display: flex; gap: var(--sp-6); flex-shrink: 0; }
 .tt-heading { font-size: var(--fs-14); font-weight: var(--fw-semibold); margin-bottom: var(--sp-4); }
 .tt-desc { margin-bottom: var(--sp-14); }
 
@@ -906,6 +907,60 @@
 .set-row .sr-desc { font-size: var(--fs-11); color: var(--text-3); margin-top: 1px; }
 .set-row .sr-control { margin-left: auto; flex: none; display: flex; align-items: center; gap: var(--sp-8); }
 .set-row .select, .set-row .input { width: 200px; }
+
+/* Phase 1 IA 重构：分节 / 来源徽标 / 尚未接入态 / 演示提示。 */
+.set-section { margin-top: var(--sp-16); }
+.set-section > h4 {
+  font-size: var(--fs-12); font-weight: var(--fw-semibold);
+  color: var(--text-2); margin-bottom: var(--sp-6);
+}
+.set-section > .set-section-desc { font-size: var(--fs-11); color: var(--text-3); margin-bottom: var(--sp-8); }
+/* 分节内的行组各自成卡（首尾圆角随分组而不是整个面板）。 */
+.set-section .set-row:first-of-type { border-radius: var(--r-8) var(--r-8) 0 0; }
+.set-section .set-row:last-of-type { border-bottom: 1px solid var(--border); border-radius: 0 0 var(--r-8) var(--r-8); }
+.set-section .set-row:only-of-type { border-radius: var(--r-8); border-bottom: 1px solid var(--border); }
+
+.src-badge {
+  display: inline-block; margin-left: var(--sp-6);
+  padding: 0 var(--sp-6); border-radius: var(--r-full);
+  font-size: var(--fs-11); font-weight: var(--fw-regular);
+  line-height: 16px; vertical-align: 1px;
+  border: 1px solid var(--border); color: var(--text-3);
+  cursor: default; user-select: none;
+}
+.src-badge[data-source="default"] { color: var(--text-3); }
+.src-badge[data-source="user"] { color: var(--accent, var(--text-2)); border-color: color-mix(in srgb, var(--accent, var(--text-2)) 35%, var(--border)); }
+.src-badge[data-source="project"] { color: var(--purple, var(--text-2)); border-color: color-mix(in srgb, var(--purple, var(--text-2)) 35%, var(--border)); }
+.src-badge[data-source="runtime"] { color: var(--amber, var(--text-2)); border-color: color-mix(in srgb, var(--amber, var(--text-2)) 35%, var(--border)); }
+.src-badge.is-unavailable, .src-badge[data-source="unavailable"] {
+  border-style: dashed; color: var(--text-3); background: color-mix(in srgb, var(--text-3) 6%, transparent);
+}
+.set-row.is-unavailable .sr-control { opacity: 0.55; }
+.set-row.is-unavailable { cursor: help; }
+
+.set-toolbar { display: flex; justify-content: flex-end; margin-bottom: var(--sp-8); }
+.demo-chip { margin-left: var(--sp-8); vertical-align: 1px; }
+
+.set-flash {
+  margin-bottom: var(--sp-10);
+  padding: var(--sp-6) var(--sp-12);
+  border: 1px dashed var(--border); border-radius: var(--r-8);
+  font-size: var(--fs-11); color: var(--text-3);
+}
+
+.set-note { margin-top: var(--sp-8); }
+
+.config-layer-list {
+  border: 1px solid var(--border); border-radius: var(--r-8);
+  background: var(--surface); overflow: hidden;
+}
+.config-layer-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-8) var(--sp-14);
+  font-size: var(--fs-12);
+  border-bottom: 1px solid var(--border);
+}
+.config-layer-row:last-child { border-bottom: none; }
 
 /* 设置页里的跳转卡（Models and Providers 分组下的两张）。
    版式原本是每张卡上一串内联 style（display:flex / flex:1;min-width:0 /

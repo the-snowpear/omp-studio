@@ -57,6 +57,20 @@ export type ConversationResetBoundaryItem = {
 };
 
 /**
+ * Why an assistant turn produced nothing, carried on the live completion event
+ * only. `provider`/`model` matter as much as the text: a gateway that advertises
+ * a model through discovery but refuses to serve it is only diagnosable from the
+ * pair that was actually requested.
+ */
+export type ConversationMessageError = {
+  message: string;
+  /** Provider HTTP status when the failure came from a request. */
+  status?: number;
+  provider?: string;
+  model?: string;
+};
+
+/**
  * Persistent public transcript items. These are the only kinds Host/Renderer
  * may render from `session.transcript.read`.
  *
@@ -232,6 +246,12 @@ export type ConversationRuntimeEvent =
       turnId: string;
       messageId: string;
       item: ConversationMessageItem;
+      /**
+       * Present when the assistant message ended with a provider error. Live-only:
+       * the persisted item carries no error field, so a reloaded transcript shows
+       * the turn without it.
+       */
+      error?: ConversationMessageError;
     }
   | {
       kind: "conversation.tool.started";

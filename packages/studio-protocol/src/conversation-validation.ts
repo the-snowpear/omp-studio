@@ -4,6 +4,7 @@ import {
   type ConversationCompactionItem,
   type ConversationContentBlock,
   type ConversationItem,
+  type ConversationMessageError,
   type ConversationMessageItem,
   type ConversationResetBoundaryItem,
   type ConversationRole,
@@ -64,6 +65,23 @@ function boundedUtf8(value: unknown, path: string, maxBytes: number): string {
     throw new ContractValidationError(`exceeds ${maxBytes} UTF-8 bytes`, path);
   }
   return value;
+}
+
+function parseMessageError(value: unknown, path: string): ConversationMessageError {
+  const input = record(value, path);
+  exactKeys(input, ["message", "status", "provider", "model"], path);
+  const message = boundedUtf8(input.message, `${path}.message`, CONVERSATION_LIMITS.NOTICE_MESSAGE_MAX_CHARS);
+  if (message.length === 0) throw new ContractValidationError("expected a non-empty string", `${path}.message`);
+  const error: ConversationMessageError = { message };
+  if (input.status !== undefined) {
+    if (!Number.isSafeInteger(input.status)) {
+      throw new ContractValidationError("expected a safe integer", `${path}.status`);
+    }
+    error.status = input.status as number;
+  }
+  if (input.provider !== undefined) error.provider = boundedId(input.provider, `${path}.provider`);
+  if (input.model !== undefined) error.model = boundedId(input.model, `${path}.model`);
+  return error;
 }
 
 function positiveInteger(value: unknown, path: string): number {
@@ -377,18 +395,20 @@ export function parseConversationRuntimeEvent(value: unknown, path = "$event.eve
       };
     }
     case "conversation.message.completed": {
-      exactKeys(input, ["kind", "sessionId", "turnId", "messageId", "item"], path);
+      exactKeys(input, ["kind", "sessionId", "turnId", "messageId", "item", "error"], path);
       const messageId = boundedId(input.messageId, `${path}.messageId`);
       const item = parseMessageItem(input.item, `${path}.item`);
       if (item.itemId !== messageId) {
         throw new ContractValidationError("item.itemId must equal messageId", `${path}.item.itemId`);
       }
+      const error = input.error === undefined ? undefined : parseMessageError(input.error, `${path}.error`);
       return {
         kind,
         sessionId: sessionId as ConversationRuntimeEvent["sessionId"],
         turnId: boundedId(input.turnId, `${path}.turnId`),
         messageId,
         item,
+        ...(error === undefined ? {} : { error }),
       };
     }
     case "conversation.tool.started": {

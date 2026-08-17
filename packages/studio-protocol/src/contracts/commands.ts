@@ -2,6 +2,7 @@ import type { AgentOperation, JobOperation } from "./agents-jobs";
 import type { SessionTranscriptRead } from "./conversation";
 import type { CommandId, InteractionId } from "./ids";
 import type { RemoteInteractionResponse } from "./interactions";
+import type { SessionThinkingSelector } from "./state";
 
 export interface LoopLimit {
   turns?: number;
@@ -24,6 +25,14 @@ export type SessionOperation =
   | { kind: "session.clearContext" }
   | { kind: "session.drop" }
   | { kind: "session.fork" }
+  | { kind: "session.handoff"; customInstructions?: string }
+  /**
+   * Switch the live session model — same semantics as `/model`, so it never
+   * rewrites `modelRoles` on disk. `thinking` pins a level alongside the
+   * switch; omitted, the target model's own default applies.
+   */
+  | { kind: "session.model.set"; selector: string; thinking?: SessionThinkingSelector }
+  | { kind: "session.thinking.set"; level: SessionThinkingSelector }
   | { kind: "session.tree.get" }
   | {
       kind: "session.tree.navigate";
@@ -33,6 +42,9 @@ export type SessionOperation =
       reanswer?: unknown;
     }
   | { kind: "turn.retry" }
+  | { kind: "session.fast.set"; enabled: boolean }
+  | { kind: "session.prewalk.arm"; target?: string }
+  | { kind: "session.prewalk.disarm" }
   | SessionTranscriptRead;
 
 export type ModeOperation =

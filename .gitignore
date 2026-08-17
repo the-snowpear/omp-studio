@@ -18,7 +18,7 @@ apps/*/out/
 *.AppImage
 
 # Logs
-packages/*/*.log
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -28,21 +28,33 @@ yarn-error.log*
 Thumbs.db
 .idea/
 .vscode/
+.cursor/
 
 # WorkBuddy local project data (not meant for public repo)
 .workbuddy/
 
-# Local Codex setup backups and downloaded installers
+# Local Codex / ZCode / agent session data
 .codex-backups/
 .codex-tools/
+.zcode/
+.omp/
+
+# Local Playwright CLI captures and scratch UI dumps
+.playwright-cli/
+**/__scratch__/
 
 # Task backups, scratch work, and generated audit outputs
 backup/
 tmp/
+output/
 outputs/
+
+# Architecture review packs / extracted archives (local working notes, not product code)
+architecture_review_v2_work/
 
 # Local agent/IDE config (project skills live under repo .claude only on dev machines)
 .claude/
+skills-lock.json
 
 # Alternate lockfile (repo uses npm / package-lock.json)
 pnpm-lock.yaml

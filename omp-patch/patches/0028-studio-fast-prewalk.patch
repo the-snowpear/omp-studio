@@ -1,0 +1,528 @@
+diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
+index 6ccceb0..695f52e 100644
+--- a/packages/coding-agent/src/session/agent-session.ts
++++ b/packages/coding-agent/src/session/agent-session.ts
+@@ -885,6 +885,11 @@ export class AgentSession {
+ 		return this.#prewalk.arm(target, thinkingLevel);
+ 	}
+ 
++	/** Clear an armed prewalk without switching models. */
++	disarmPrewalk(): boolean {
++		return this.#prewalk.disarm();
++	}
++
+ 	/** Validate the active plan artifact and shape an `xd://propose` result for review-mode hosts. */
+ 	async preparePlanForReview(title: string): Promise<AgentToolResult<PlanApprovalDetails>> {
+ 		const state = this.getPlanModeState();
+diff --git a/packages/coding-agent/src/session/prewalk.ts b/packages/coding-agent/src/session/prewalk.ts
+index bd361ba..0c9176c 100644
+--- a/packages/coding-agent/src/session/prewalk.ts
++++ b/packages/coding-agent/src/session/prewalk.ts
+@@ -203,6 +203,13 @@ export class PrewalkCoordinator {
+ 		});
+ 	}
+ 
++	/** Clears an armed prewalk without switching models. */
++	disarm(): boolean {
++		if (!this.#prewalk) return false;
++		this.#clearPrewalkState();
++		return true;
++	}
++
+ 	/** Arms a prewalk immediately for an explicit slash-command request. */
+ 	arm(target: Model, thinkingLevel?: ConfiguredThinkingLevel): boolean {
+ 		const active = this.#prewalk;
+diff --git a/packages/coding-agent/src/studio/bridge-dispatcher.ts b/packages/coding-agent/src/studio/bridge-dispatcher.ts
+index a77601a..5c3c4b0 100644
+--- a/packages/coding-agent/src/studio/bridge-dispatcher.ts
++++ b/packages/coding-agent/src/studio/bridge-dispatcher.ts
+@@ -4,6 +4,7 @@ import { StudioRuntimeCommandArbiter, StudioRuntimeCommandError } from "./comman
+ import { StudioAgentHubError } from "./services/agent-hub-service";
+ import { StudioBtwError } from "./services/btw-service";
+ import { StudioCommandManifestError } from "./services/command-manifest-service";
++import { StudioFastPrewalkError } from "./services/fast-prewalk-service";
+ import { StudioForkError } from "./services/fork-service";
+ import { StudioHandoffError } from "./services/handoff-service";
+ import { StudioInteractionError, StudioRemoteInteractionPort } from "./services/interaction-port";
+@@ -83,6 +84,9 @@ const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
+ 	"session.tree.navigate",
+ 	"session.fork",
+ 	"session.handoff",
++	"session.fast.set",
++	"session.prewalk.arm",
++	"session.prewalk.disarm",
+ 	"operator.manifest.get",
+ 	"operator.invoke",
+ 	"permissions.mode.set",
+@@ -118,7 +122,12 @@ function protocolError(error: unknown): StudioProtocolError {
+ 			...(error.code === "CAPABILITY_UNAVAILABLE" ? { details: { reason: "MEDIA_SIDEBAND_UNAVAILABLE" } } : {}),
+ 		};
+ 	}
+-	if (error instanceof StudioModeError || error instanceof StudioForkError || error instanceof StudioHandoffError) {
++	if (
++		error instanceof StudioModeError ||
++		error instanceof StudioForkError ||
++		error instanceof StudioHandoffError ||
++		error instanceof StudioFastPrewalkError
++	) {
+ 		return { code: error.code, message: error.message, retryable: false };
+ 	}
+ 	if (error instanceof StudioTreeError) {
+@@ -531,6 +540,12 @@ export class StudioBridgeDispatcher {
+ 			}
+ 			case "turn.retry":
+ 				return await this.#sessionControl.retry();
++			case "session.fast.set":
++				return this.runtime.services.fastPrewalk.setFast(operation.enabled);
++			case "session.prewalk.arm":
++				return this.runtime.services.fastPrewalk.arm(operation.target);
++			case "session.prewalk.disarm":
++				return this.runtime.services.fastPrewalk.disarm();
+ 			case "core.prompt":
+ 				return await this.#sessionControl.prompt(operation.text, operation.images).then(result => {
+ 					if (this.runtime.services.loop.state()?.status === "waiting") {
+@@ -576,6 +591,9 @@ export class StudioBridgeDispatcher {
+ 				if (operation.prompt !== undefined && this.runtime.session.isStreaming) {
+ 					throw new StudioRuntimeCommandError("BUSY_STREAMING", "Runtime is streaming");
+ 				}
++				if (this.runtime.services.loop.state()) {
++					return this.runtime.services.loop.setLimit(operation.limit);
++				}
+ 				const result = this.runtime.services.loop.enable(operation.prompt, operation.limit);
+ 				if (result.initialPrompt !== undefined) {
+ 					try {
+diff --git a/packages/coding-agent/src/studio/bridge-protocol.ts b/packages/coding-agent/src/studio/bridge-protocol.ts
+index a671813..623e056 100644
+--- a/packages/coding-agent/src/studio/bridge-protocol.ts
++++ b/packages/coding-agent/src/studio/bridge-protocol.ts
+@@ -59,6 +59,9 @@ export type StudioOperation =
+ 	| { kind: "session.drop" }
+ 	| { kind: "session.fork" }
+ 	| { kind: "session.handoff"; customInstructions?: string }
++	| { kind: "session.fast.set"; enabled: boolean }
++	| { kind: "session.prewalk.arm"; target?: string }
++	| { kind: "session.prewalk.disarm" }
+ 	| { kind: "session.tree.get" }
+ 	| {
+ 			kind: "session.transcript.read";
+@@ -328,6 +331,8 @@ export interface StudioOperatorStateSnapshot {
+ 	};
+ 	vibe?: { enabled: boolean; workerAgentIds: string[] };
+ 	loop?: { status: "waiting" | "running" | "paused"; prompt?: string; iterations?: number };
++	fast?: { enabled: boolean; active?: boolean };
++	prewalk?: { status: "off" | "armed" | "active"; target?: string };
+ 	pause?: { paused: boolean; pauseEpoch?: number; pausedAt?: string };
+ 	live?: { status: "off" | "connecting" | "active" | "stopping" | "failed"; deviceId?: string };
+ 	pendingInteraction?: StudioPendingInteraction;
+@@ -496,6 +501,19 @@ export function parseStudioRequest(value: unknown): StudioRequest {
+ 				throw new StudioFrameError("Invalid handoff instructions");
+ 			}
+ 			break;
++		case "session.fast.set":
++			exactKeys(operation, ["kind", "enabled"]);
++			if (typeof operation.enabled !== "boolean") throw new StudioFrameError("Invalid fast mode flag");
++			break;
++		case "session.prewalk.arm":
++			exactKeys(operation, ["kind", "target"]);
++			if (operation.target !== undefined && !nonEmptyString(operation.target)) {
++				throw new StudioFrameError("Invalid prewalk target");
++			}
++			break;
++		case "session.prewalk.disarm":
++			exactKeys(operation, ["kind"]);
++			break;
+ 		case "mode.plan.enter":
+ 		case "mode.vibe.enter":
+ 			exactKeys(operation, ["kind", "initialPrompt"]);
+@@ -813,6 +831,9 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+ 	"loop.enable",
+ 	"loop.pause",
+ 	"loop.disable",
++	"session.fast.set",
++	"session.prewalk.arm",
++	"session.prewalk.disarm",
+ 	"mode.plan.enter",
+ 	"mode.plan.exit",
+ 	"mode.plan.review.open",
+diff --git a/packages/coding-agent/src/studio/bridge-server.ts b/packages/coding-agent/src/studio/bridge-server.ts
+index bb148c1..3c2b018 100644
+--- a/packages/coding-agent/src/studio/bridge-server.ts
++++ b/packages/coding-agent/src/studio/bridge-server.ts
+@@ -202,7 +202,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
+ 					type: "studio.hello.result",
+ 					requestId: hello.requestId,
+ 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
+-					runtimeVersion: `${VERSION}-studio.27`,
++					runtimeVersion: `${VERSION}-studio.28`,
+ 					upstreamVersion: VERSION,
+ 					upstreamCommit: UPSTREAM_COMMIT,
+ 					runtimeInstanceId: runtime.runtimeId,
+diff --git a/packages/coding-agent/src/studio/services/fast-prewalk-service.ts b/packages/coding-agent/src/studio/services/fast-prewalk-service.ts
+new file mode 100644
+index 0000000..a980761
+--- /dev/null
++++ b/packages/coding-agent/src/studio/services/fast-prewalk-service.ts
+@@ -0,0 +1,109 @@
++import type { Model } from "@oh-my-pi/pi-ai";
++import {
++	DEFAULT_PREWALK_TARGET,
++	expandRoleAlias,
++	getModelMatchPreferences,
++	resolveCliModel,
++} from "../../config/model-resolver";
++import type { AgentSession } from "../../session/agent-session";
++import type { ConfiguredThinkingLevel } from "../../thinking";
++
++export class StudioFastPrewalkError extends Error {
++	constructor(
++		readonly code: "INVALID_ARGUMENT" | "COMMAND_BLOCKED",
++		message: string,
++	) {
++		super(message);
++		this.name = "StudioFastPrewalkError";
++	}
++}
++
++export interface StudioFastState {
++	enabled: boolean;
++	active: boolean;
++}
++
++export interface StudioPrewalkState {
++	status: "armed";
++	target: string;
++}
++
++export interface ResolvedPrewalkTarget {
++	model: Model;
++	thinkingLevel?: ConfiguredThinkingLevel;
++	selector: string;
++}
++
++export type ResolvePrewalkTarget = (selector: string) => ResolvedPrewalkTarget;
++
++/** Presentation-neutral `/fast` and `/prewalk` adapters for the Studio Bridge. */
++export class StudioFastPrewalkService {
++	constructor(
++		private readonly session: AgentSession,
++		private readonly resolveTarget: ResolvePrewalkTarget = selector => resolvePrewalkTarget(session, selector),
++	) {}
++
++	setFast(enabled: boolean): StudioFastState {
++		if (!this.session.setFastMode(enabled)) {
++			throw new StudioFastPrewalkError(
++				"COMMAND_BLOCKED",
++				"The current model has no service-tier control for fast mode",
++			);
++		}
++		return {
++			enabled: this.session.isFastModeEnabled(),
++			active: this.session.isFastModeActive(),
++		};
++	}
++
++	arm(target?: string): StudioPrewalkState {
++		const resolved = this.resolveTarget(normalizeSelector(target));
++		const current = this.session.getPrewalkState();
++		if (current) {
++			const sameTarget =
++				current.target.provider === resolved.model.provider &&
++				current.target.id === resolved.model.id &&
++				current.thinkingLevel === resolved.thinkingLevel;
++			if (sameTarget) {
++				return { status: "armed", target: resolved.selector };
++			}
++			this.session.disarmPrewalk();
++		}
++		const armed = this.session.armPrewalk(resolved.model, resolved.thinkingLevel);
++		if (!armed) {
++			throw new StudioFastPrewalkError(
++				"COMMAND_BLOCKED",
++				"Prewalk target already matches the active model and thinking level",
++			);
++		}
++		return { status: "armed", target: resolved.selector };
++	}
++
++	disarm(): { disarmed: boolean } {
++		return { disarmed: this.session.disarmPrewalk() };
++	}
++}
++
++export function resolvePrewalkTarget(session: AgentSession, selector: string): ResolvedPrewalkTarget {
++	const rolePattern = expandRoleAlias(selector, session.settings);
++	const resolved = resolveCliModel({
++		cliModel: rolePattern,
++		modelRegistry: session.modelRegistry,
++		preferences: getModelMatchPreferences(session.settings),
++	});
++	if (resolved.error || !resolved.model) {
++		throw new StudioFastPrewalkError("INVALID_ARGUMENT", resolved.error ?? `Model "${selector}" not found`);
++	}
++	if (!session.modelRegistry.hasConfiguredAuth(resolved.model)) {
++		throw new StudioFastPrewalkError(
++			"COMMAND_BLOCKED",
++			`No API key for ${resolved.model.provider}/${resolved.model.id}`,
++		);
++	}
++	return { model: resolved.model, thinkingLevel: resolved.thinkingLevel, selector };
++}
++
++function normalizeSelector(target: string | undefined): string {
++	const trimmed = target?.trim();
++	return trimmed ? trimmed : DEFAULT_PREWALK_TARGET;
++}
+diff --git a/packages/coding-agent/src/studio/services/loop-service.ts b/packages/coding-agent/src/studio/services/loop-service.ts
+index 21b924a..93a3b44 100644
+--- a/packages/coding-agent/src/studio/services/loop-service.ts
++++ b/packages/coding-agent/src/studio/services/loop-service.ts
+@@ -74,6 +74,18 @@ export class StudioLoopService {
+ 		return this.#enable(prompt, normalizeLimit(limit));
+ 	}
+ 
++	/**
++	 * Replace the active limit without dropping the captured prompt or iteration
++	 * count. Duration/turn budgets restart from `nowMs()`.
++	 */
++	setLimit(limit?: StudioLoopLimit): StudioLoopState {
++		this.#assertUsable();
++		if (!this.#enabled) throw new StudioLoopError("COMMAND_BLOCKED", "Loop mode is not enabled");
++		this.#limit = createLoopLimitRuntime(normalizeLimit(limit), this.port.nowMs());
++		this.#notify();
++		return this.state()!;
++	}
++
+ 	/** TUI adapter entry point that preserves the CLI parser's sub-minute duration support. */
+ 	enableFromConfig(prompt: string | undefined, config: LoopLimitConfig | undefined): StudioLoopEnableResult {
+ 		return this.#enable(prompt, config);
+diff --git a/packages/coding-agent/src/studio/state-projector.ts b/packages/coding-agent/src/studio/state-projector.ts
+index 26633a3..131e692 100644
+--- a/packages/coding-agent/src/studio/state-projector.ts
++++ b/packages/coding-agent/src/studio/state-projector.ts
+@@ -155,6 +155,19 @@ export class StudioStateProjector {
+ 			};
+ 		}
+ 		if (vibe !== undefined) snapshot.vibe = { enabled: vibe.enabled, workerAgentIds: vibe.workerAgentIds };
++		if (this.#runtime.session.isFastModeEnabled?.() === true) {
++			snapshot.fast = {
++				enabled: true,
++				active: this.#runtime.session.isFastModeActive?.() === true,
++			};
++		}
++		const prewalk = this.#runtime.session.getPrewalkState?.();
++		if (prewalk?.target) {
++			snapshot.prewalk = {
++				status: "armed",
++				target: `${prewalk.target.provider}/${prewalk.target.id}`,
++			};
++		}
+ 		return cloneSnapshot(snapshot);
+ 	}
+ 
+diff --git a/packages/coding-agent/src/studio/studio-host-mode.ts b/packages/coding-agent/src/studio/studio-host-mode.ts
+index 7b489ee..db1f5e3 100644
+--- a/packages/coding-agent/src/studio/studio-host-mode.ts
++++ b/packages/coding-agent/src/studio/studio-host-mode.ts
+@@ -30,6 +30,7 @@ import {
+ import { StudioBtwService } from "./services/btw-service";
+ import { StudioCommandManifestService } from "./services/command-manifest-service";
+ import { ConversationLiveProjector } from "./services/conversation-live-projector";
++import { StudioFastPrewalkService } from "./services/fast-prewalk-service";
+ import { StudioForkService } from "./services/fork-service";
+ import { StudioHandoffService } from "./services/handoff-service";
+ import { StudioInteractionGateway } from "./services/interaction-port";
+@@ -63,6 +64,7 @@ export interface StudioHostRuntime {
+ 		tree: StudioTreeService;
+ 		fork: StudioForkService;
+ 		handoff: StudioHandoffService;
++		fastPrewalk: StudioFastPrewalkService;
+ 		commands: StudioCommandManifestService;
+ 		btw: StudioBtwService;
+ 		interaction: StudioInteractionGateway;
+@@ -308,6 +310,7 @@ export function createStudioHostRuntime(
+ 	const tree = new StudioTreeService(session, interaction);
+ 	const fork = new StudioForkService(session);
+ 	const handoff = new StudioHandoffService(session);
++	const fastPrewalk = new StudioFastPrewalkService(session);
+ 	const commands = new StudioCommandManifestService(session);
+ 	const btw = new StudioBtwService(session);
+ 	let pendingRuleWrite: { filePath: string; previous: Uint8Array | undefined; existed: boolean } | undefined;
+@@ -647,6 +650,7 @@ export function createStudioHostRuntime(
+ 			tree,
+ 			fork,
+ 			handoff,
++			fastPrewalk,
+ 			commands,
+ 			btw,
+ 			interaction,
+diff --git a/packages/coding-agent/test/studio-fast-prewalk-service.test.ts b/packages/coding-agent/test/studio-fast-prewalk-service.test.ts
+new file mode 100644
+index 0000000..a18851d
+--- /dev/null
++++ b/packages/coding-agent/test/studio-fast-prewalk-service.test.ts
+@@ -0,0 +1,104 @@
++import { describe, expect, test } from "bun:test";
++import type { Model } from "@oh-my-pi/pi-ai";
++import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
++import type { Prewalk } from "@oh-my-pi/pi-coding-agent/session/agent-session-types";
++import {
++	StudioFastPrewalkError,
++	StudioFastPrewalkService,
++} from "@oh-my-pi/pi-coding-agent/studio/services/fast-prewalk-service";
++
++function model(id: string): Model {
++	return { id, provider: "anthropic" } as Model;
++}
++
++function fixture(overrides: {
++	fastSupported?: boolean;
++	armResult?: boolean;
++	resolve?: (selector: string) => { model: Model; selector: string };
++} = {}) {
++	let fastEnabled = false;
++	let prewalk: Prewalk | undefined;
++	const armCalls: Model[] = [];
++	const disarmCalls: number[] = [];
++	const session = {
++		setFastMode(enabled: boolean) {
++			if (overrides.fastSupported === false) return false;
++			fastEnabled = enabled;
++			return true;
++		},
++		isFastModeEnabled: () => fastEnabled,
++		isFastModeActive: () => fastEnabled,
++		getPrewalkState: () => prewalk,
++		armPrewalk(target: Model) {
++			armCalls.push(target);
++			if (overrides.armResult === false) return false;
++			prewalk = { target };
++			return true;
++		},
++		disarmPrewalk() {
++			disarmCalls.push(1);
++			const had = prewalk !== undefined;
++			prewalk = undefined;
++			return had;
++		},
++	} as unknown as AgentSession;
++	const resolve =
++		overrides.resolve ??
++		((selector: string) => ({
++			model: model(selector === "@smol" ? "smol" : selector),
++			selector,
++		}));
++	return {
++		service: new StudioFastPrewalkService(session, resolve),
++		armCalls,
++		disarmCalls,
++	};
++}
++
++describe("StudioFastPrewalkService", () => {
++	test("sets fast mode and reports whether priority is active", () => {
++		const { service } = fixture();
++		expect(service.setFast(true)).toEqual({ enabled: true, active: true });
++		expect(service.setFast(false)).toEqual({ enabled: false, active: false });
++	});
++
++	test("fails closed when the active model has no service-tier family", () => {
++		const { service } = fixture({ fastSupported: false });
++		expect(() => service.setFast(true)).toThrow(StudioFastPrewalkError);
++		try {
++			service.setFast(true);
++		} catch (error) {
++			expect(error).toMatchObject({ code: "COMMAND_BLOCKED" });
++		}
++	});
++
++	test("arms @smol by default and replaces an already-armed different target", () => {
++		const { service, armCalls, disarmCalls } = fixture();
++		expect(service.arm()).toEqual({ status: "armed", target: "@smol" });
++		expect(armCalls.map(item => item.id)).toEqual(["smol"]);
++		expect(service.arm("opus")).toEqual({ status: "armed", target: "opus" });
++		expect(disarmCalls).toHaveLength(1);
++		expect(armCalls.map(item => item.id)).toEqual(["smol", "opus"]);
++	});
++
++	test("re-arming the same target is a no-op", () => {
++		const { service, armCalls, disarmCalls } = fixture();
++		service.arm("opus");
++		expect(service.arm("opus")).toEqual({ status: "armed", target: "opus" });
++		expect(armCalls).toHaveLength(1);
++		expect(disarmCalls).toHaveLength(0);
++	});
++
++	test("maps a no-op arm to COMMAND_BLOCKED", () => {
++		const { service } = fixture({ armResult: false });
++		expect(() => service.arm("opus")).toThrow("already matches the active model");
++	});
++
++	test("disarm reports whether a prewalk was armed", () => {
++		const { service } = fixture();
++		expect(service.disarm()).toEqual({ disarmed: false });
++		service.arm("opus");
++		expect(service.disarm()).toEqual({ disarmed: true });
++		expect(service.disarm()).toEqual({ disarmed: false });
++	});
++});
+diff --git a/packages/coding-agent/test/studio-loop-service.test.ts b/packages/coding-agent/test/studio-loop-service.test.ts
+index 0501886..977bd7a 100644
+--- a/packages/coding-agent/test/studio-loop-service.test.ts
++++ b/packages/coding-agent/test/studio-loop-service.test.ts
+@@ -103,6 +103,27 @@ describe("WP-033 StudioLoopService", () => {
+ 		expect(f.service.state()).toBeUndefined();
+ 	});
+ 
++	test("replaces the limit on an already-enabled loop without dropping the prompt", async () => {
++		const f = fixture();
++		f.service.enable("repeat", { turns: 1 });
++		expect(f.service.setLimit({ turns: 2 })).toEqual({ status: "running", prompt: "repeat" });
++		f.service.scheduleNext();
++		await f.runNext();
++		expect(f.submitted).toEqual(["repeat"]);
++		expect(f.service.state()).toMatchObject({ iterations: 1, prompt: "repeat" });
++		f.service.scheduleNext();
++		await f.runNext();
++		expect(f.submitted).toEqual(["repeat", "repeat"]);
++		f.service.scheduleNext();
++		await f.runNext();
++		expect(f.service.state()).toBeUndefined();
++	});
++
++	test("setLimit fails closed when loop is not enabled", () => {
++		const { service } = fixture();
++		expect(() => service.setLimit({ turns: 2 })).toThrow("Loop mode is not enabled");
++	});
++
+ 	test("rejects token limits and conflicting or invalid limits without mutation", () => {
+ 		const { service } = fixture();
+ 		expect(() => service.enable("x", { tokens: 100 })).toThrow(StudioLoopError);
+diff --git a/packages/coding-agent/test/studio-m4-protocol.test.ts b/packages/coding-agent/test/studio-m4-protocol.test.ts
+index 33ffb43..fa6e1ff 100644
+--- a/packages/coding-agent/test/studio-m4-protocol.test.ts
++++ b/packages/coding-agent/test/studio-m4-protocol.test.ts
+@@ -25,6 +25,24 @@ describe("M4 Runtime protocol mirror", () => {
+ 		).toBe("tui.transfer");
+ 	});
+ 
++	test("parses fast and prewalk session operations", () => {
++		for (const operation of [
++			{ kind: "session.fast.set", enabled: true },
++			{ kind: "session.prewalk.arm" },
++			{ kind: "session.prewalk.arm", target: "@smol" },
++			{ kind: "session.prewalk.disarm" },
++		]) {
++			expect(parseStudioRequest({ ...base, operation }).operation.kind as string).toBe(operation.kind);
++		}
++		for (const operation of [
++			{ kind: "session.fast.set", enabled: "yes" },
++			{ kind: "session.prewalk.arm", target: "" },
++			{ kind: "session.prewalk.disarm", extra: true },
++		]) {
++			expect(() => parseStudioRequest({ ...base, operation })).toThrow(StudioFrameError);
++		}
++	});
++
+ 	test("rejects unknown fields and non-JSON argument values", () => {
+ 		for (const operation of [
+ 			{ kind: "interaction.respond", interactionId: "i", commandId: "c", decision: "maybe" },

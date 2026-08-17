@@ -14,15 +14,16 @@
  * context is just a transport plus a coarse availability status.
  */
 
-import { app, BrowserWindow, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from "electron";
 import {
   TITLEBAR_OVERLAY,
   TITLEBAR_OVERLAY_HEIGHT,
   applyTitleBarOverlay,
   registerTitleBarOverlayIpc,
 } from "./titlebar-overlay.js";
+import { registerChromeNotifyIpc } from "./chrome-notify.js";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 
 import { createDesktopApplication } from "./composition.js";
 import { registerDesktopIpc } from "./ipc.js";
@@ -38,6 +39,14 @@ import {
 } from "./security.js";
 import type { DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
 import { createProductionHostFactory } from "./host-factory.js";
+import {
+  externalEditorCommandForPath,
+  launchExternalEditor,
+  resolveExternalEditorCommand,
+} from "./external-editor.js";
+import { registerWorkspaceShellIpc } from "./workspace-shell-ipc.js";
+import type { WorkspaceShellEditorResult } from "./workspace-shell-shared.js";
+import { resolveDroppedPaths } from "./dropped-paths.js";
 import { registerTerminalIpc } from "./terminal-ipc.js";
 import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js";
 
@@ -81,7 +90,48 @@ export async function main(): Promise<void> {
       await shell.openExternal(url);
     },
   });
-  const terminalManager = new TerminalSessionManager({ spawner: createNodePtySpawner() });
+  const terminalManager = new TerminalSessionManager({
+    spawner: createNodePtySpawner(),
+    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? process.cwd(),
+  });
+
+  const editorDialogFilters = (platform: NodeJS.Platform): Array<{ name: string; extensions: string[] }> => {
+    if (platform === "darwin") {
+      return [
+        { name: "应用程序 (*.app)", extensions: ["app"] },
+        { name: "所有文件", extensions: ["*"] },
+      ];
+    }
+    if (platform === "win32") {
+      return [
+        { name: "应用程序 (*.exe)", extensions: ["exe"] },
+        { name: "所有文件", extensions: ["*"] },
+      ];
+    }
+    return [{ name: "所有文件", extensions: ["*"] }];
+  };
+
+  const openInExternalEditor = async (cwd: string): Promise<WorkspaceShellEditorResult> => {
+    const detected = resolveExternalEditorCommand();
+    const defaultPath = detected !== undefined && isAbsolute(detected.file) ? detected.file : undefined;
+    const pickerOptions: Electron.OpenDialogOptions = {
+      title: "选择用于打开项目的编辑器",
+      buttonLabel: "用所选程序打开",
+      properties: ["openFile"],
+      ...(defaultPath === undefined ? {} : { defaultPath }),
+      filters: editorDialogFilters(process.platform),
+    };
+    const owner = BrowserWindow.getFocusedWindow();
+    const picked = owner === null
+      ? await dialog.showOpenDialog(pickerOptions)
+      : await dialog.showOpenDialog(owner, pickerOptions);
+    const file = picked.filePaths[0];
+    if (picked.canceled || file === undefined) {
+      return { status: "cancelled" };
+    }
+    await launchExternalEditor(externalEditorCommandForPath(file), cwd);
+    return { status: "opened", editorName: basename(file) };
+  };
 
   const createWindow: DesktopWindowFactory = async (context) => {
     const window = createSecureWindow({
@@ -114,6 +164,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
     });
     const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
+    const disposeNotify = registerChromeNotifyIpc({ isTrustedSender });
     const disposeTerminal = registerTerminalIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -125,6 +176,26 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       manager: terminalManager,
+    });
+    const disposeWorkspaceShell = registerWorkspaceShellIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      actions: {
+        resolveWorkspaceCwd: (workspaceId) => hostFactory.resolveWorkspaceCwd(workspaceId),
+        openInExternalEditor,
+        revealInFileManager: async (cwd) => {
+          const error = await shell.openPath(cwd);
+          if (error.length > 0) throw new Error(error);
+        },
+        resolveDroppedPaths: (cwd, paths) => resolveDroppedPaths(cwd, paths),
+      },
     });
     applyTitleBarOverlay(window, "light");
     window.webContents?.on?.("did-fail-load", (_event: unknown, errorCode: number, errorDescription: string, validatedURL: string) => {
@@ -144,7 +215,9 @@ export async function main(): Promise<void> {
         windowSurface.close();
       },
       dispose: () => {
+        disposeWorkspaceShell.dispose();
         disposeTerminal.dispose();
+        disposeNotify();
         disposeChrome();
         ipc.dispose();
       },

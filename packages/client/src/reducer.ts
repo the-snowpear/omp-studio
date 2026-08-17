@@ -204,6 +204,8 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "session.create": true,
   "session.resume": true,
   "session.drop": true,
+  "session.archive": true,
+  "session.unarchive": true,
   "interaction.respond": true,
   "permissions.mode.set": true,
   "models.provider.upsert": true,
@@ -253,10 +255,22 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "loop.enable": true,
   "loop.pause": true,
   "loop.disable": true,
+  "session.fast.set": true,
+  "session.prewalk.arm": true,
+  "session.prewalk.disarm": true,
   "session.fork": true,
+  "session.handoff": true,
+  "session.model.set": true,
+  "session.thinking.set": true,
   "session.tree.get": true,
   "session.tree.navigate": true,
   "operator.invoke": true,
+  "agent.spawn": true,
+  "agent.send": true,
+  "agent.kill": true,
+  "agent.revive": true,
+  "agent.release": true,
+  "job.cancel": true,
 };
 
 export function isSensitiveCommand(name: CommandName): boolean {
@@ -601,12 +615,17 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
         entities: { ...state.entities, telemetry: null },
         conversation: reduceConversationState(state.conversation, { type: "resync" }),
       };
-    case "conversation.changed":
+    case "conversation.changed": {
+      const snapshot = state.entities.snapshot;
+      const applyToMain = snapshot !== null && event.sessionId === snapshot.sessionId;
       return {
         ...state,
         connection: advanceConnection(state.connection, event),
-        conversation: reduceConversationState(state.conversation, { type: "live", event }),
+        conversation: applyToMain
+          ? reduceConversationState(state.conversation, { type: "live", event })
+          : state.conversation,
       };
+    }
     default: {
       const _exhaustive: never = event;
       return state;

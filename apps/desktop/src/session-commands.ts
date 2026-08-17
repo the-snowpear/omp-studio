@@ -9,11 +9,31 @@ import type {
   HostSessionCatalogProvider,
 } from "@omp-studio/host-client-api";
 import { threadIdFor } from "@omp-studio/host-client-api";
-import { scanSessionCatalog, StudioHostError } from "@omp-studio/studio-host";
+import { scanSessionCatalog, StudioHostError, type StudioSessionArchiveService } from "@omp-studio/studio-host";
 import type { ApprovalMode, RequestId, StudioOperation, ThreadId } from "@omp-studio/studio-protocol";
+import type { ConfigWriteResult } from "@omp-studio/client-contract";
 
 import type { DesktopRuntimeSession, DesktopRuntimeSessionPort } from "./host-composition.js";
 import type { DesktopInteractionHost } from "./interaction-host.js";
+
+/**
+ * Commands issued against a live turn. Conversation events bump `stateVersion`
+ * on every completed message/tool, so fencing abort/steer/pause on the Host's
+ * last snapshot races the stream and the Runtime rejects with
+ * STATE_VERSION_CONFLICT.
+ */
+const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
+  "core.abort",
+  "core.steer",
+  "core.followUp",
+  "queue.enqueue",
+  "runtime.pause",
+  "runtime.resume",
+]);
+
+export function fencesOnStateVersion(kind: StudioOperation["kind"]): boolean {
+  return !LIVE_TURN_OPERATION_KINDS.has(kind);
+}
 
 export function createWorkspaceSessionCatalog(getCwd: () => string | undefined): HostSessionCatalogProvider {
   return {
@@ -25,7 +45,7 @@ export function createWorkspaceSessionCatalog(getCwd: () => string | undefined):
         sessionId: entry.sessionId,
         modifiedAt: entry.modifiedAt,
         messageCount: 0,
-        status: "active" as const,
+        status: (entry.archived ? "archived" : "active") as HostCatalogEntry["status"],
         ...(entry.title === undefined ? {} : { title: entry.title }),
         ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
       }));
@@ -36,13 +56,30 @@ export function createWorkspaceSessionCatalog(getCwd: () => string | undefined):
 export function createDesktopSemanticCommands(options: {
   readonly sessionRef: { current: DesktopRuntimeSession | undefined };
   readonly catalog: HostSessionCatalogProvider;
+  /** Lazy factory: the archive service is rebuilt when the workspace changes. */
+  readonly archive?: () => StudioSessionArchiveService;
   readonly switchSession?: DesktopRuntimeSessionPort["switchSession"];
   readonly applyApprovalMode?: DesktopRuntimeSessionPort["applyApprovalMode"];
   readonly supportsConcurrentSessions?: boolean;
   readonly bindSession: (session: DesktopRuntimeSession | undefined) => void;
   readonly interaction: DesktopInteractionHost;
 }): HostSemanticCommandService {
+  const archiveFactory = options.archive;
   return {
+    ...(archiveFactory === undefined
+      ? {}
+      : {
+          archive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
+            const sessionId = await resolveCatalogSessionId(options.catalog, threadId);
+            await archiveFactory().archive(sessionId);
+            return { applied: true, runtimeEffect: "immediate", message: "Session archived to the OMP cold archive" };
+          },
+          unarchive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
+            const sessionId = await resolveCatalogSessionId(options.catalog, threadId);
+            await archiveFactory().unarchive(sessionId);
+            return { applied: true, runtimeEffect: "immediate", message: "Session restored from the archive" };
+          },
+        }),
     create: async () => {
       if (options.switchSession === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Fresh Runtime sessions are not available");
@@ -159,11 +196,23 @@ export function createDesktopSemanticCommands(options: {
         type: "studio.request",
         requestId: requestId as unknown as RequestId,
         runtimeEpoch: snapshot.runtimeEpoch,
-        expectedStateVersion: snapshot.stateVersion,
+        ...(fencesOnStateVersion(operation.kind) ? { expectedStateVersion: snapshot.stateVersion } : {}),
         operation,
       });
       throwIfNotCompleted(receipt);
-      return session.controller.publication()?.snapshot ?? snapshot;
+      const latest = session.controller.publication()?.snapshot ?? snapshot;
+      if (operation.kind === "operator.invoke") {
+        // The Runtime returns { output, result } for operator commands; carry
+        // it beside the post-command snapshot so the Renderer can surface
+        // real command feedback (e.g. the /export target path).
+        const carried = (receipt.result ?? {}) as { output?: unknown; result?: unknown };
+        return {
+          snapshot: latest,
+          output: Array.isArray(carried.output) ? carried.output.filter((line): line is string => typeof line === "string") : [],
+          result: carried.result ?? { consumed: true },
+        };
+      }
+      return latest;
     },
   };
 }

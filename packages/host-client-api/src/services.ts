@@ -37,6 +37,7 @@ import type {
   ModelProviderUpsertInput,
   ModelRoleCreateInput,
   ModelRolesWriteInput,
+  OperatorInvokeOutcome,
   OpaqueCursor,
   RuntimeChannel,
   RuntimeInstallState,
@@ -53,6 +54,9 @@ import type {
   GitBranchListReadModel,
   GitWorktreeListReadModel,
   GitRemoteListReadModel,
+  GitLogListReadModel,
+  GitCommitChangesReadModel,
+  GitCommitDiffReadModel,
   GitExecuteInput,
   GitOperationResult,
   GitHubAuthReadModel,
@@ -67,12 +71,14 @@ import type {
   ApprovalMode,
   CapabilityManifest,
   ConversationTranscriptPage,
+  AgentTranscriptPage,
   OperatorCommandManifest,
   OperatorStateSnapshot,
   RuntimeBackend,
   RuntimeClassification,
   RuntimeEpoch,
   RuntimeId,
+  SessionTelemetrySnapshot,
 } from "@omp-studio/studio-protocol";
 import {
   StudioHostError,
@@ -136,6 +142,24 @@ export interface HostRuntimeAccess {
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
   }) => Promise<ConversationTranscriptPage>;
+  /**
+   * Per-agent transcript read from the Runtime Agent Hub. When omitted, the
+   * facade calls `currentSession()?.readAgentTranscript` / `session.readAgentTranscript`.
+   */
+  readonly readAgentTranscript?: (input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }) => Promise<AgentTranscriptPage>;
+  /**
+   * Per-agent ConversationItem page from the Runtime. When omitted, the
+   * facade calls `currentSession()?.readAgentConversation`.
+   */
+  readonly readAgentConversation?: (input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }) => Promise<ConversationTranscriptPage>;
   readonly hello: () => HostRuntimeHelloView | undefined;
   readonly snapshot?: () => OperatorStateSnapshot | undefined;
   /** Opaque transcript head hint for bootstrap; never message bodies. */
@@ -177,6 +201,43 @@ export interface HostSessionArchiveProvider {
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
   }): ConversationTranscriptReadPage | Promise<ConversationTranscriptReadPage>;
+  /** Optional current-revision lookup for archived-session telemetry. */
+  readRevision?(sessionId: string): Promise<{ sessionId: string; transcriptRevision: string }> | { sessionId: string; transcriptRevision: string };
+  /**
+   * Optional validated transcript copy for the one-shot telemetry probe.
+   * The returned `temporarySessionFile` is Host-internal and must never
+   * reach the Client Contract, events, the Renderer, or logs.
+   */
+  createProbeCopy?(sessionId: string, destinationDirectory: string): Promise<{
+    sessionId: string;
+    transcriptRevision: string;
+    temporarySessionFile: string;
+  }>;
+}
+
+/** Minimal "last observed" telemetry persistence surface consumed by the facade. */
+export interface HostSessionTelemetryStorePort {
+  record(sessionId: string, telemetry: SessionTelemetrySnapshot): void;
+  /** Returns the persisted telemetry only when the archive revision matches exactly. */
+  read(sessionId: string, revision: string): Promise<{ telemetry: SessionTelemetrySnapshot } | undefined>;
+  flush(): Promise<void>;
+  dispose(): void;
+}
+
+/** One-shot archived-session telemetry probe owned by the Host. */
+export interface HostSessionTelemetryProbePort {
+  run(input: {
+    readonly sessionId: string;
+    readonly sessionFile: string;
+    readonly allowedCwd: string;
+    readonly transcriptRevision: string;
+  }): Promise<{ readonly ok: true; readonly telemetry: SessionTelemetrySnapshot } | { readonly ok: false; readonly reason: "UNAVAILABLE" }>;
+}
+
+/** Creates and cleans up Host-owned scratch directories for probe copies. */
+export interface HostTelemetryProbeWorkspacePort {
+  create(): Promise<string>;
+  remove(path: string): Promise<void>;
 }
 
 /**
@@ -303,9 +364,20 @@ export interface HostGitService {
   branches(input: { readonly workspaceId: WorkspaceId }): GitBranchListReadModel | Promise<GitBranchListReadModel>;
   worktrees(input: { readonly workspaceId: WorkspaceId }): GitWorktreeListReadModel | Promise<GitWorktreeListReadModel>;
   remotes(input: { readonly workspaceId: WorkspaceId }): GitRemoteListReadModel | Promise<GitRemoteListReadModel>;
+  log(input: { readonly workspaceId: WorkspaceId; readonly limit?: number; readonly skip?: number }): GitLogListReadModel | Promise<GitLogListReadModel>;
+  commitChanges(input: { readonly workspaceId: WorkspaceId; readonly oid: string }): GitCommitChangesReadModel | Promise<GitCommitChangesReadModel>;
+  commitDiff(input: { readonly workspaceId: WorkspaceId; readonly oid: string; readonly path: string }): GitCommitDiffReadModel | Promise<GitCommitDiffReadModel>;
   execute(input: GitExecuteInput, requestId: CommandRequestId): GitOperationResult | Promise<GitOperationResult>;
   cancelAll?(): void | Promise<void>;
   onProgress?(listener: (progress: OperationProgress) => void): () => void;
+  /**
+   * Optional: repository mutations the Host detected outside `execute`
+   * (the agent or an external tool ran git). The facade forwards these as
+   * `git.repository.changed` with reason "external".
+   */
+  onExternalRepositoryChange?(listener: (change: { readonly workspaceId: WorkspaceId }) => void): () => void;
+  /** Optional: release Host-side resources (watchers, timers). */
+  dispose?(): void;
 }
 
 /** Host-owned GitHub CLI adapter. Tokens and gh configuration never cross this port. */
@@ -377,12 +449,25 @@ export interface HostSemanticCommandService {
   /**
    * P4 Runtime primitive bridge. Pass the client `requestId` so ledger
    * rejected / outcome_unknown rows stay aligned with the same command.
-   * The Host remains the sole operation owner.
+   * The Host remains the sole operation owner. `operator.invoke` returns
+   * an `OperatorInvokeOutcome` (command output beside the snapshot); every
+   * other operation returns the post-command state snapshot.
    */
   invoke?(
     operation: StudioOperation,
     requestId?: CommandRequestId,
-  ): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
+  ):
+    | OperatorStateSnapshot
+    | OperatorInvokeOutcome
+    | Promise<OperatorStateSnapshot | OperatorInvokeOutcome>;
+  /**
+   * Archive a thread: the Host moves the session JSONL (gzip) and artifacts
+   * into the OMP cold-archive tree, mirroring `omp gc`. Rejected while the
+   * session is resident in a Runtime. No Runtime snapshot is required.
+   */
+  archive?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  /** Restore an archived thread back into the active sessions tree. */
+  unarchive?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /** Default diagnostics factory: real timestamps and random opaque entry ids. */

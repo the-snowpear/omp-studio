@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Icon } from "../icons";
 import { ToolBody, TruncationMark } from "./ToolBody";
 import { jsonString, type ToolView } from "./conversationViewModel";
@@ -6,6 +6,8 @@ import {
   batchSummary,
   chainItemDetail,
   collectAgents,
+  resolveSubagentHubTarget,
+  subagentCardKey,
   isAskPending,
   isPathKind,
   saPill,
@@ -15,21 +17,30 @@ import {
   toolIcon,
   toolKind,
   toolLabel,
+  type SubagentHubTarget,
   type ThinkView,
 } from "./toolMeta";
 
-function SubagentStrip({ tools }: { tools: readonly ToolView[] }) {
+function SubagentStrip({
+  tools,
+  onInspectSubagent,
+}: {
+  tools: readonly ToolView[];
+  onInspectSubagent?: (target: SubagentHubTarget) => void;
+}) {
   const agents = collectAgents(tools);
   if (agents.length === 0) return null;
   return (
     <div className="subagent-strip">
       {agents.map((agent) => {
         const pill = saPill(agent);
+        const target = resolveSubagentHubTarget(agent);
+        const inspectable = onInspectSubagent !== undefined && target !== undefined;
         const aria = [agent.name, pill.label, agent.dur, agent.tokens ? `${agent.tokens} tok` : ""]
           .filter(Boolean)
           .join("，");
-        return (
-          <div key={agent.name} className={`sa-card ${agent.status}`} role="group" aria-label={aria}>
+        const body = (
+          <>
             <div className="sa-top">
               <span className={`hub-act ${pill.cls}`}>{pill.label}</span>
               <span className="sa-name">{agent.name}</span>
@@ -42,6 +53,32 @@ function SubagentStrip({ tools }: { tools: readonly ToolView[] }) {
               {agent.files !== undefined ? <span className="hub-num"><i>files</i><b>{agent.files}</b></span> : null}
               {agent.cost ? <span className="sa-cost">{agent.cost}</span> : null}
             </div>
+          </>
+        );
+        if (inspectable) {
+          return (
+            <button
+              key={subagentCardKey(agent)}
+              type="button"
+              className={`sa-card is-inspectable ${agent.status}`}
+              aria-label={`${aria}，打开对话`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onInspectSubagent(target);
+              }}
+            >
+              {body}
+            </button>
+          );
+        }
+        return (
+          <div
+            key={subagentCardKey(agent)}
+            className={`sa-card ${agent.status}`}
+            role="group"
+            aria-label={target === undefined ? `${aria}，无法打开对话：缺少 Agent 身份` : aria}
+          >
+            {body}
           </div>
         );
       })}
@@ -72,18 +109,20 @@ function ThinkCard({ preview, full, truncated, open, onToggle, itemKey }: {
         <Icon name="chevron-d" extra="sm tl-chev" />
       </button>
       <div className="tl-card think-card">
-        <div className="think-scroll convo-plain">
-          {truncated === true ? <TruncationMark /> : null}
-          {full.split("\n").map((line, index) => (
-            <span key={index}>{index > 0 ? <br /> : null}{line}</span>
-          ))}
+        <div className="tl-card-motion-inner">
+          <div className="think-scroll convo-plain">
+            {truncated === true ? <TruncationMark /> : null}
+            {full.split("\n").map((line, index) => (
+              <span key={index}>{index > 0 ? <br /> : null}{line}</span>
+            ))}
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function ToolItem({ tool, open, onToggle }: { tool: ToolView; open: boolean; onToggle: () => void }) {
+function ToolItem({ tool, open, onToggle, showDetail = true }: { tool: ToolView; open: boolean; onToggle: () => void; showDetail?: boolean }) {
   const kind = toolKind(tool);
   if (kind === "think") {
     const fields = toolFields(tool);
@@ -101,14 +140,15 @@ function ToolItem({ tool, open, onToggle }: { tool: ToolView; open: boolean; onT
     );
   }
   const label = toolLabel(tool);
-  const detail = chainItemDetail(tool);
-  const running = tool.status === "running" || tool.status === "queued";
+  const detail = showDetail ? chainItemDetail(tool) : undefined;
+  const running = tool.status === "running";
+  const queued = tool.status === "queued";
   const failed = tool.status === "failed";
   const diff = toolDiffStats(tool);
   const diffLabel = [diff.add ? `新增 ${diff.add} 行` : "", diff.del ? `删除 ${diff.del} 行` : ""].filter(Boolean).join("，");
   const aria = `${label}${detail ? ` · ${detail}` : ""}${diffLabel ? `，${diffLabel}` : ""}，${statusLabel(tool.status)}，${open ? "收起" : "展开"}详情`;
   return (
-    <div className={`tl-item${open ? " open" : ""}${running ? " is-running" : ""}`} data-kind={kind} data-status={tool.status}>
+    <div className={`tl-item${open ? " open" : ""}${running ? " is-running" : ""}`} data-kind={kind} data-status={tool.status} data-tool-call-id={tool.toolCallId}>
       <button
         type="button"
         className={`tl-row${failed ? " is-error" : ""}${running ? " is-running" : ""}`}
@@ -117,7 +157,7 @@ function ToolItem({ tool, open, onToggle }: { tool: ToolView; open: boolean; onT
         onClick={onToggle}
       >
         <span className="tl-icon">
-          {running ? <span className="spinner" /> : <Icon name={toolIcon(kind)} extra="sm" />}
+          {running ? <span className="spinner" /> : <Icon name={queued ? "clock" : toolIcon(kind)} extra="sm" />}
         </span>
         <span className="tl-name">{label}</span>
         {detail ? (
@@ -135,8 +175,10 @@ function ToolItem({ tool, open, onToggle }: { tool: ToolView; open: boolean; onT
         <Icon name="chevron-d" extra="sm tl-chev" />
       </button>
       <div className="tl-card">
-        <div className="tc-body">
-          <ToolBody tool={tool} />
+        <div className="tl-card-motion-inner">
+          <div className="tc-body">
+            <ToolBody tool={tool} />
+          </div>
         </div>
       </div>
     </div>
@@ -149,57 +191,109 @@ export function BatchChain({
   batchKey,
   expandAll = false,
   standalone = false,
+  liveTail = false,
+  showDetail = true,
+  onInspectSubagent,
 }: {
   tools: readonly ToolView[];
   thinking?: readonly ThinkView[];
   batchKey: string;
   expandAll?: boolean;
   standalone?: boolean;
+  /** 该链是流式 assistant 输出的尾部（其后还没有新的文本段）时为 true。 */
+  liveTail?: boolean;
+  /** 工具行上的意图摘要行（设置 → 对话与交互 → 显示工具调用意图）。 */
+  showDetail?: boolean;
+  onInspectSubagent?: (target: SubagentHubTarget) => void;
 }) {
   const visible = tools.filter((tool) => !isAskPending(tool));
+  const mergedThinking: ThinkView | undefined = thinking.length === 0 ? undefined : {
+    key: thinking[0]!.key,
+    text: thinking.map((think) => think.text.trim()).filter(Boolean).join("\n\n"),
+    ...(thinking.some((think) => think.truncated === true) ? { truncated: true } : {}),
+  };
   const running = visible.some((tool) => tool.status === "running" || tool.status === "queued");
   const askOnly = visible.length > 0 && visible.every((tool) => {
     const kind = toolKind(tool);
     return kind === "ask" || kind === "askuser";
   });
-  const [open, setOpen] = useState(running || expandAll || askOnly);
-  const lastRun = visible.reduce((index, tool, current) => (
-    tool.status === "running" || tool.status === "queued" ? current : index
-  ), -1);
-  const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(() => {
-    const keys = new Set<string>();
-    if (expandAll) {
-      for (const think of thinking) keys.add(think.key);
-      for (const tool of visible) keys.add(tool.toolCallId);
-      return keys;
+  // 真实事件顺序里 message.completed 先于第一个 tool.started，整条链会先全部落成
+  // queued，所以只有 running 才算「正在跑」；否则倒序扫描会跟到链尾那个还没启动的调用。
+  let lastRunId: string | undefined;
+  let nextQueuedId: string | undefined;
+  for (let index = visible.length - 1; index >= 0; index -= 1) {
+    const tool = visible[index];
+    if (tool === undefined) continue;
+    if (tool.status === "running") {
+      lastRunId = tool.toolCallId;
+      break;
     }
-    if (lastRun >= 0) keys.add(visible[lastRun]!.toolCallId);
-    if (askOnly) for (const tool of visible) keys.add(tool.toolCallId);
-    return keys;
-  });
-  const summary = batchSummary(thinking, visible);
+    if (tool.status === "queued") nextQueuedId = tool.toolCallId;
+  }
+  // 流式跟随：最后一个运行中的工具 → 下一个待跑的工具 → 仍在输出的思考。
+  const activeKey = lastRunId ?? nextQueuedId ?? (liveTail && mergedThinking !== undefined ? mergedThinking.key : undefined);
+  // 用户手动切换过的项/链记入 override，之后不再被自动展开/折叠覆盖。
+  const [manualOpen, setManualOpen] = useState<boolean | undefined>(undefined);
+  const [overrides, setOverrides] = useState<Readonly<Record<string, boolean>>>({});
+  const open = manualOpen ?? (running || liveTail || askOnly || expandAll);
+  const itemOpen = (key: string) => overrides[key] ?? (key === activeKey || expandAll || askOnly);
   const bodyId = useId();
   const toggleItem = (key: string) => {
-    setOpenKeys((previous) => {
-      const next = new Set(previous);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setOverrides((previous) => ({ ...previous, [key]: !(previous[key] ?? (key === activeKey || expandAll || askOnly)) }));
   };
+  const toggleOpen = () => setManualOpen(!open);
   if (thinking.length === 0 && visible.length === 0) return null;
+  const cards: ReactNode[] = [];
+  if (mergedThinking !== undefined) {
+    cards.push(
+      <ThinkCard
+        key={mergedThinking.key}
+        itemKey={mergedThinking.key}
+        preview={mergedThinking.text.trim().replace(/\s+/g, " ")}
+        full={mergedThinking.text}
+        {...(mergedThinking.truncated === true ? { truncated: true } : {})}
+        open={itemOpen(mergedThinking.key)}
+        onToggle={() => toggleItem(mergedThinking.key)}
+      />,
+    );
+  }
+  for (const tool of visible) {
+    cards.push(
+      <ToolItem
+        key={tool.toolCallId}
+        tool={tool}
+        open={itemOpen(tool.toolCallId)}
+        onToggle={() => toggleItem(tool.toolCallId)}
+        showDetail={showDetail}
+      />,
+    );
+  }
+  // 单卡（只有一段思考，或只用了一个工具）没有可归纳的批次：摘要行只会把「Read ·
+  // a.ts」重述成「阅读 1 个文件」，还多要一次点击才看得到内容。直接把那张卡摆出来。
+  if (cards.length === 1) {
+    return (
+      <div
+        className={`${standalone ? "ev " : ""}ev-batch is-single${running ? " is-running" : ""}`}
+        data-batch-key={batchKey}
+      >
+        <SubagentStrip tools={visible} {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })} />
+        {cards}
+      </div>
+    );
+  }
+  const summary = batchSummary(mergedThinking === undefined ? [] : [mergedThinking], visible);
   return (
     <div
       className={`${standalone ? "ev " : ""}ev-batch${open ? " open" : ""}${running ? " is-running" : ""}${expandAll || askOnly ? " is-pinned-open" : ""}`}
       data-batch-key={batchKey}
     >
-      <SubagentStrip tools={visible} />
+      <SubagentStrip tools={visible} {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })} />
       <button
         type="button"
         className="batch-sum"
         aria-expanded={open}
         aria-controls={bodyId}
-        onClick={() => setOpen((value) => !value)}
+        onClick={toggleOpen}
       >
         <span className="batch-text">{summary.text}</span>
         {summary.add || summary.del ? (
@@ -210,27 +304,7 @@ export function BatchChain({
         ) : null}
       </button>
       <div className="batch-chain" id={bodyId}>
-        <div className="batch-chain-inner">
-          {thinking.map((think) => (
-            <ThinkCard
-              key={think.key}
-              itemKey={think.key}
-              preview={think.text.trim().replace(/\s+/g, " ")}
-              full={think.text}
-              {...(think.truncated === true ? { truncated: true } : {})}
-              open={openKeys.has(think.key)}
-              onToggle={() => toggleItem(think.key)}
-            />
-          ))}
-          {visible.map((tool) => (
-            <ToolItem
-              key={tool.toolCallId}
-              tool={tool}
-              open={openKeys.has(tool.toolCallId)}
-              onToggle={() => toggleItem(tool.toolCallId)}
-            />
-          ))}
-        </div>
+        <div className="batch-chain-inner">{cards}</div>
       </div>
     </div>
   );

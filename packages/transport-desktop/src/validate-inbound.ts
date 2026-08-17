@@ -24,7 +24,11 @@ import type {
   SubscriptionScope,
   ThreadId,
 } from "@omp-studio/client-contract";
-import { CONVERSATION_LIMITS, MODEL_CONFIG_THINKING_EFFORTS } from "@omp-studio/client-contract";
+import {
+  CONVERSATION_LIMITS,
+  MODEL_CONFIG_THINKING_EFFORTS,
+  SESSION_THINKING_SELECTORS,
+} from "@omp-studio/client-contract";
 
 /** Thrown when an IPC payload fails strict P1 boundary validation. */
 export class ValidationError extends Error {
@@ -133,6 +137,15 @@ export function assertNonEmptyText(value: unknown, field: string): asserts value
   }
 }
 
+const THINKING_SELECTOR_SET = new Set<string>(SESSION_THINKING_SELECTORS);
+const MAX_MODEL_SELECTOR_CHARS = 256;
+
+function assertThinkingSelector(value: unknown, field: string): void {
+  if (typeof value !== "string" || !THINKING_SELECTOR_SET.has(value)) {
+    throw new ValidationError(`${field}: unsupported thinking selector`);
+  }
+}
+
 /** Reject objects with no allowed keys (the EmptyInput query shape). */
 function validateEmptyInput(input: unknown, what: string): void {
   assertPlainObject(input, what);
@@ -181,9 +194,108 @@ function validateTranscriptReadPageInput(input: unknown): void {
   validateTranscriptPaginationFields(input, what);
 }
 
+function validateSessionTelemetryReadInput(input: unknown): void {
+  const what = "session.telemetry.read input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["sessionId"], what);
+  assertOpaqueToken(input.sessionId, `${what}: sessionId`);
+}
+
+function validateAgentTranscriptReadInput(input: unknown): void {
+  const what = "agent.transcript.read input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["agentId", "cursor", "limit"], what);
+  assertOpaqueToken(input.agentId, `${what}: agentId`);
+  validateTranscriptPaginationFields(input, what);
+}
+
+function validateAgentConversationReadInput(input: unknown): void {
+  const what = "agent.conversation.read input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["agentId", "cursor", "limit"], what);
+  assertOpaqueToken(input.agentId, `${what}: agentId`);
+  validateTranscriptPaginationFields(input, what);
+}
+
+function validateAgentIdGenerationFields(input: Record<string, unknown>, what: string): void {
+  assertOpaqueToken(input.agentId, `${what}: agentId`);
+  if (
+    typeof input.expectedGeneration !== "number" ||
+    !Number.isSafeInteger(input.expectedGeneration) ||
+    input.expectedGeneration < 1
+  ) {
+    throw new ValidationError(`${what}: expectedGeneration must be a positive safe integer`);
+  }
+}
+
+function validateAgentSpawnInput(input: unknown): void {
+  const what = "agent.spawn input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["definition", "assignment", "context", "async", "isolation", "effort"], what);
+  assertNonEmptyText(input.definition, `${what}: definition`);
+  assertNonEmptyText(input.assignment, `${what}: assignment`);
+  if ("context" in input && input.context !== undefined) {
+    if (typeof input.context !== "string" || input.context.trim().length === 0) {
+      throw new ValidationError(`${what}: context must be a non-empty string when present`);
+    }
+  }
+  if ("async" in input && input.async !== undefined && typeof input.async !== "boolean") {
+    throw new ValidationError(`${what}: async must be boolean when present`);
+  }
+  if (
+    "isolation" in input &&
+    input.isolation !== undefined &&
+    input.isolation !== "patch" &&
+    input.isolation !== "branch"
+  ) {
+    throw new ValidationError(`${what}: isolation must be patch or branch when present`);
+  }
+  if (
+    "effort" in input &&
+    input.effort !== undefined &&
+    input.effort !== "lo" &&
+    input.effort !== "med" &&
+    input.effort !== "hi"
+  ) {
+    throw new ValidationError(`${what}: effort must be lo, med, or hi when present`);
+  }
+}
+
+function validateAgentSendInput(input: unknown): void {
+  const what = "agent.send input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["agentId", "expectedGeneration", "text", "mode"], what);
+  validateAgentIdGenerationFields(input, what);
+  assertNonEmptyText(input.text, `${what}: text`);
+  if (input.mode !== "prompt" && input.mode !== "steer" && input.mode !== "followUp") {
+    throw new ValidationError(`${what}: mode must be prompt, steer, or followUp`);
+  }
+}
+
+function validateAgentLifecycleInput(input: unknown): void {
+  const what = "agent lifecycle input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["agentId", "expectedGeneration"], what);
+  validateAgentIdGenerationFields(input, what);
+}
+
+function validateJobCancelInput(input: unknown): void {
+  const what = "job.cancel input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["jobId", "expectedGeneration"], what);
+  assertOpaqueToken(input.jobId, `${what}: jobId`);
+  if (
+    typeof input.expectedGeneration !== "number" ||
+    !Number.isSafeInteger(input.expectedGeneration) ||
+    input.expectedGeneration < 1
+  ) {
+    throw new ValidationError(`${what}: expectedGeneration must be a positive safe integer`);
+  }
+}
+
 function validateHistoryListInput(input: unknown): void {
   assertPlainObject(input, "history.list input");
-  assertNoUnknownKeys(input, ["limit"], "history.list input");
+  assertNoUnknownKeys(input, ["limit", "status"], "history.list input");
   if ("limit" in input) {
     const limit = input.limit;
     if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit <= 0) {
@@ -193,6 +305,12 @@ function validateHistoryListInput(input: unknown): void {
       throw new ValidationError(
         `history.list input: limit exceeds the max of ${MAX_HISTORY_LIMIT}`,
       );
+    }
+  }
+  if ("status" in input) {
+    const status = input.status;
+    if (status !== "active" && status !== "archived" && status !== "closed") {
+      throw new ValidationError("history.list input: status must be active, archived or closed");
     }
   }
 }
@@ -284,6 +402,40 @@ function validateGitDiffInput(input: unknown): void {
   if (input.target !== "working" && input.target !== "staged") throw new ValidationError(`${what}: invalid target`);
 }
 
+function validateGitLogInput(input: unknown): void {
+  const what = "git.log.list input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "limit", "skip"], what);
+  assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  if (input.limit !== undefined) {
+    if (typeof input.limit !== "number" || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 200) {
+      throw new ValidationError(`${what}: limit must be an integer from 1 to 200`);
+    }
+  }
+  if (input.skip !== undefined) {
+    if (typeof input.skip !== "number" || !Number.isSafeInteger(input.skip) || input.skip < 0) {
+      throw new ValidationError(`${what}: skip must be a non-negative integer`);
+    }
+  }
+}
+
+function validateGitCommitChangesInput(input: unknown): void {
+  const what = "git.commit.changes input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "oid"], what);
+  assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  validateGitRef(input.oid, `${what}: oid`);
+}
+
+function validateGitCommitDiffInput(input: unknown): void {
+  const what = "git.commit.diff input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["workspaceId", "oid", "path"], what);
+  assertOpaqueToken(input.workspaceId, `${what}: workspaceId`);
+  validateGitRef(input.oid, `${what}: oid`);
+  validateWorkspaceFilePath(input.path, `${what}: path`);
+}
+
 function validateGithubPrListInput(input: unknown): void {
   const what = "github.pr.list input";
   assertPlainObject(input, what);
@@ -334,10 +486,11 @@ function validateGitExecuteInput(input: unknown): void {
       assertOpaqueToken(operation.expectedRevision, `${what}: expectedRevision`);
       break;
     case "commit":
-      assertNoUnknownKeys(operation, ["kind", "message", "amend", "sign"], `${what}: operation`);
+      assertNoUnknownKeys(operation, ["kind", "message", "amend", "sign", "paths"], `${what}: operation`);
       assertNonEmptyText(operation.message, `${what}: message`);
       if (operation.message.length > MAX_TEXT_LENGTH) throw new ValidationError(`${what}: message is too long`);
       bool("amend"); bool("sign");
+      if (operation.paths !== undefined) validateGitPaths(operation.paths, what);
       break;
     case "branch.create":
       assertNoUnknownKeys(operation, ["kind", "name", "startPoint", "checkout"], `${what}: operation`);
@@ -404,6 +557,7 @@ function validateGitExecuteInput(input: unknown): void {
     case "rebase":
     case "cherry-pick":
     case "revert":
+    case "checkout":
       assertNoUnknownKeys(operation, ["kind", "ref"], `${what}: operation`); ref("ref", true);
       break;
     case "reset":
@@ -502,6 +656,42 @@ function validateTextInput(input: unknown, what: string): void {
   if (input.text.length > MAX_TEXT_LENGTH) {
     throw new ValidationError(`${what}: text exceeds the max length of ${MAX_TEXT_LENGTH}`);
   }
+}
+
+const PROMPT_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const MAX_PROMPT_IMAGES = 16;
+const MAX_PROMPT_IMAGE_DATA = 12_000_000;
+
+function validatePromptImages(value: unknown, what: string): void {
+  if (!Array.isArray(value)) throw new ValidationError(`${what}: images must be an array`);
+  if (value.length > MAX_PROMPT_IMAGES) {
+    throw new ValidationError(`${what}: images exceeds the max count of ${MAX_PROMPT_IMAGES}`);
+  }
+  for (const [index, image] of value.entries()) {
+    const field = `${what}: images[${index}]`;
+    assertPlainObject(image, field);
+    assertNoUnknownKeys(image, ["type", "mimeType", "data"], field);
+    if (image.type !== "image") throw new ValidationError(`${field}: type must be "image"`);
+    if (typeof image.mimeType !== "string" || !PROMPT_IMAGE_MIME.has(image.mimeType)) {
+      throw new ValidationError(`${field}: unsupported mimeType`);
+    }
+    if (typeof image.data !== "string" || image.data.length === 0) {
+      throw new ValidationError(`${field}: data must be a non-empty string`);
+    }
+    if (image.data.length > MAX_PROMPT_IMAGE_DATA) {
+      throw new ValidationError(`${field}: data exceeds the max length of ${MAX_PROMPT_IMAGE_DATA}`);
+    }
+  }
+}
+
+function validatePromptInput(input: unknown, what: string): void {
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["text", "images"], what);
+  assertNonEmptyText(input.text, `${what}: text`);
+  if (input.text.length > MAX_TEXT_LENGTH) {
+    throw new ValidationError(`${what}: text exceeds the max length of ${MAX_TEXT_LENGTH}`);
+  }
+  if (input.images !== undefined) validatePromptImages(input.images, what);
 }
 
 function validateEmptyCommandInput(input: unknown, what: string): void {
@@ -1138,13 +1328,19 @@ const QUERY_INPUT_VALIDATORS: {
   "workspace.fileTree": validateWorkspaceFileTreeInput,
   "usage.get": (input) => validateEmptyInput(input, "usage.get input"),
   "session.transcript.read": validateTranscriptReadInput,
+  "agent.transcript.read": validateAgentTranscriptReadInput,
+  "agent.conversation.read": validateAgentConversationReadInput,
   "session.transcript.readPage": validateTranscriptReadPageInput,
+  "session.telemetry.read": validateSessionTelemetryReadInput,
   "git.toolchain.get": (input) => validateEmptyInput(input, "git.toolchain.get input"),
   "git.repository.get": (input) => validateWorkspaceSelector(input, "git.repository.get input"),
   "git.diff.get": validateGitDiffInput,
   "git.branches.list": (input) => validateWorkspaceSelector(input, "git.branches.list input"),
   "git.worktrees.list": (input) => validateWorkspaceSelector(input, "git.worktrees.list input"),
   "git.remotes.list": (input) => validateWorkspaceSelector(input, "git.remotes.list input"),
+  "git.log.list": validateGitLogInput,
+  "git.commit.changes": validateGitCommitChangesInput,
+  "git.commit.diff": validateGitCommitDiffInput,
   "github.auth.get": (input) => validateOptionalWorkspaceSelector(input, "github.auth.get input"),
   "github.pr.list": validateGithubPrListInput,
   "github.pr.get": (input) => validateGithubPrNumberInput(input, "github.pr.get input"),
@@ -1155,9 +1351,9 @@ const QUERY_INPUT_VALIDATORS: {
 const COMMAND_INPUT_VALIDATORS: {
   readonly [K in CommandName]: (input: unknown) => void;
 } = {
-  "core.prompt": (input) => validateTextInput(input, "core.prompt input"),
-  "core.steer": (input) => validateTextInput(input, "core.steer input"),
-  "core.followUp": (input) => validateTextInput(input, "core.followUp input"),
+  "core.prompt": (input) => validatePromptInput(input, "core.prompt input"),
+  "core.steer": (input) => validatePromptInput(input, "core.steer input"),
+  "core.followUp": (input) => validatePromptInput(input, "core.followUp input"),
   "core.abort": (input) => validateEmptyCommandInput(input, "core.abort input"),
   "queue.enqueue": (input) => validateTextInput(input, "queue.enqueue input"),
   "runtime.pause": (input) => validateEmptyCommandInput(input, "runtime.pause input"),
@@ -1180,14 +1376,44 @@ const COMMAND_INPUT_VALIDATORS: {
   "loop.enable": validateLoopEnableInput,
   "loop.pause": (input) => validateEmptyCommandInput(input, "loop.pause input"),
   "loop.disable": (input) => validateEmptyCommandInput(input, "loop.disable input"),
+  "session.fast.set": (input) => {
+    assertPlainObject(input, "session.fast.set input");
+    assertNoUnknownKeys(input, ["enabled"], "session.fast.set input");
+    if (typeof input.enabled !== "boolean") throw new ValidationError("session.fast.set input: enabled must be boolean");
+  },
+  "session.prewalk.arm": (input) => validateOptionalTextFields(input, "session.prewalk.arm input", ["target"]),
+  "session.prewalk.disarm": (input) => validateEmptyCommandInput(input, "session.prewalk.disarm input"),
   "session.fork": (input) => validateEmptyCommandInput(input, "session.fork input"),
+  "session.handoff": (input) => validateOptionalTextFields(input, "session.handoff input", ["customInstructions"]),
+  "session.model.set": (input) => {
+    assertPlainObject(input, "session.model.set input");
+    assertNoUnknownKeys(input, ["selector", "thinking"], "session.model.set input");
+    assertNonEmptyText(input.selector, "session.model.set input: selector");
+    if (input.selector.length > MAX_MODEL_SELECTOR_CHARS) {
+      throw new ValidationError(`session.model.set input: selector exceeds ${MAX_MODEL_SELECTOR_CHARS} characters`);
+    }
+    if (input.thinking !== undefined) assertThinkingSelector(input.thinking, "session.model.set input: thinking");
+  },
+  "session.thinking.set": (input) => {
+    assertPlainObject(input, "session.thinking.set input");
+    assertNoUnknownKeys(input, ["level"], "session.thinking.set input");
+    assertThinkingSelector(input.level, "session.thinking.set input: level");
+  },
   "session.tree.get": (input) => validateEmptyCommandInput(input, "session.tree.get input"),
   "session.tree.navigate": validateTreeNavigateInput,
   "operator.invoke": validateOperatorInvokeInput,
+  "agent.spawn": validateAgentSpawnInput,
+  "agent.send": validateAgentSendInput,
+  "agent.kill": validateAgentLifecycleInput,
+  "agent.revive": validateAgentLifecycleInput,
+  "agent.release": validateAgentLifecycleInput,
+  "job.cancel": validateJobCancelInput,
   "runtime.install": validateRuntimeInstallInput,
   "session.create": (input) => validateEmptyCommandInput(input, "session.create input"),
   "session.resume": (input) => validateThreadInput(input, "session.resume input"),
   "session.drop": (input) => validateThreadInput(input, "session.drop input"),
+  "session.archive": (input) => validateThreadInput(input, "session.archive input"),
+  "session.unarchive": (input) => validateThreadInput(input, "session.unarchive input"),
   "interaction.respond": validateInteractionRespondInput,
   "permissions.mode.set": (input) => {
     assertPlainObject(input, "permissions.mode.set input");

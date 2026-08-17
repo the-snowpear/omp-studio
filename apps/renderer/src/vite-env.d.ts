@@ -22,10 +22,44 @@ declare global {
   var ompStudio: OmpStudioDesktopApi | undefined;
 
   /**
-   * Window-chrome helper (not the Host transport). Updates native
-   * caption-button overlay colors to match the renderer titlebar theme.
+   * Window-chrome helpers (not the Host transport). Theme sync talks to the
+   * native caption buttons; workspace actions resolve paths in Main and never
+   * send a filesystem path back to the Renderer.
    */
-  var ompStudioChrome: { setTheme(theme: "light" | "dark"): Promise<void> } | undefined;
+  type WorkspaceShellEditorResult =
+    | { readonly status: "opened"; readonly editorName?: string }
+    | { readonly status: "cancelled" };
+
+  var ompStudioChrome:
+    | {
+        setTheme(theme: "light" | "dark"): Promise<void>;
+        /** App 级系统通知（固定文案；非 Host / Studio Bridge 面）。 */
+        notify(payload: { title: string; body?: string }): Promise<void>;
+        openProjectInEditor(workspaceId: string): Promise<WorkspaceShellEditorResult>;
+        openProjectDirectory(workspaceId: string): Promise<void>;
+        /** Electron `webUtils.getPathForFile` for dropped / pasted File objects. */
+        getPathForFile(file: File): string | null;
+        /**
+         * `scope: "workspace"` → `path` is workspace-relative;
+         * `scope: "absolute"` → the drop came from elsewhere on the machine.
+         */
+        resolveDroppedPaths(
+          workspaceId: string,
+          paths: readonly string[],
+        ): Promise<
+          ReadonlyArray<
+            | {
+                readonly ok: true;
+                readonly kind: "file" | "dir" | "image";
+                readonly scope: "workspace" | "absolute";
+                readonly path: string;
+                readonly name: string;
+              }
+            | { readonly ok: false; readonly reason: "missing" | "invalid" }
+          >
+        >;
+      }
+    | undefined;
 
   /**
    * Desktop-chrome local shell (not Host / Studio Bridge). Present only

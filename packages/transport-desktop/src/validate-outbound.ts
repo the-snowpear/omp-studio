@@ -25,6 +25,7 @@ import type {
   RuntimeConnectionStatus,
 } from "@omp-studio/client-contract";
 import { parseConversationRuntimeEvent, parseConversationTranscriptPage } from "@omp-studio/client-contract";
+import { parseSessionTelemetryReadResult } from "@omp-studio/studio-protocol";
 
 import {
   ValidationError,
@@ -71,6 +72,56 @@ function assertClientError(value: unknown): void {
   }
   if (typeof value.message !== "string") {
     throw new ValidationError("client error: message must be a string");
+  }
+}
+
+function assertSessionTelemetryReadResult(value: unknown): void {
+  try {
+    parseSessionTelemetryReadResult(value);
+  } catch (error) {
+    throw new ValidationError(
+      `session.telemetry.read result: invalid telemetry read result (${error instanceof Error ? error.message : "invalid"})`,
+    );
+  }
+}
+
+const AGENT_TRANSCRIPT_ROLES = ["user", "assistant", "custom", "system"] as const;
+
+function assertAgentTranscriptPage(value: unknown): void {
+  const what = "agent.transcript.read result";
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["agentId", "generation", "cursor", "nextCursor", "messages", "eof"], what);
+  assertOpaqueToken(value.agentId, `${what}: agentId`);
+  if (
+    typeof value.generation !== "number" ||
+    !Number.isSafeInteger(value.generation) ||
+    value.generation < 1
+  ) {
+    throw new ValidationError(`${what}: generation must be a positive safe integer`);
+  }
+  assertOpaqueToken(value.cursor, `${what}: cursor`);
+  if ("nextCursor" in value && value.nextCursor !== undefined) {
+    assertOpaqueToken(value.nextCursor, `${what}: nextCursor`);
+  }
+  if (typeof value.eof !== "boolean") {
+    throw new ValidationError(`${what}: eof must be a boolean`);
+  }
+  if (!Array.isArray(value.messages)) {
+    throw new ValidationError(`${what}: messages must be an array`);
+  }
+  for (const message of value.messages) {
+    assertPlainObject(message, `${what}: message`);
+    assertNoUnknownKeys(message, ["id", "role", "ts", "text"], `${what}: message`);
+    assertNonEmptyText(message.id, `${what}: message.id`);
+    if (!(AGENT_TRANSCRIPT_ROLES as readonly string[]).includes(message.role as string)) {
+      throw new ValidationError(`${what}: message.role is not a known transcript role`);
+    }
+    if (typeof message.ts !== "number" || !Number.isSafeInteger(message.ts) || message.ts < 0) {
+      throw new ValidationError(`${what}: message.ts must be a non-negative safe integer`);
+    }
+    if (typeof message.text !== "string") {
+      throw new ValidationError(`${what}: message.text must be a string`);
+    }
   }
 }
 
@@ -171,10 +222,11 @@ const GIT_FILE_STATES = ["unmodified", "modified", "added", "deleted", "renamed"
 function assertGitRepository(value: unknown): void {
   const what = "git.repository.get result";
   assertPlainObject(value, what);
-  assertNoUnknownKeys(value, ["workspaceId", "isRepository", "repositoryId", "worktreeId", "branch", "headOid", "detached", "unborn", "upstream", "ahead", "behind", "stashCount", "operation", "changes", "revision", "unavailableReason"], what);
+  assertNoUnknownKeys(value, ["workspaceId", "isRepository", "repositoryId", "worktreeId", "branch", "headOid", "detached", "unborn", "upstream", "ahead", "behind", "stashCount", "operation", "changes", "insertions", "deletions", "revision", "unavailableReason"], what);
   assertOpaqueToken(value.workspaceId, `${what}: workspaceId`);
   if (typeof value.isRepository !== "boolean" || typeof value.detached !== "boolean" || typeof value.unborn !== "boolean") throw new ValidationError(`${what}: invalid repository flags`);
   for (const key of ["ahead", "behind", "stashCount"] as const) assertCounter(value[key], `${what}: ${key}`);
+  for (const key of ["insertions", "deletions"] as const) if (value[key] !== undefined) assertCounter(value[key], `${what}: ${key}`);
   for (const key of ["repositoryId", "worktreeId", "revision"] as const) if (value[key] !== undefined) assertOpaqueToken(value[key], `${what}: ${key}`);
   for (const key of ["branch", "headOid", "upstream", "unavailableReason"] as const) if (value[key] !== undefined && typeof value[key] !== "string") throw new ValidationError(`${what}: ${key} must be string`);
   if (value.operation !== undefined && value.operation !== "merge" && value.operation !== "rebase" && value.operation !== "cherry-pick" && value.operation !== "revert") throw new ValidationError(`${what}: invalid operation`);
@@ -199,6 +251,72 @@ function assertGitDiff(value: unknown): void {
   if (typeof value.patch !== "string" || value.patch.length > 4 * 1024 * 1024) throw new ValidationError(`${what}: patch exceeds limit`);
   if (typeof value.binary !== "boolean" || typeof value.truncated !== "boolean") throw new ValidationError(`${what}: invalid flags`);
   assertOpaqueToken(value.revision, `${what}: revision`);
+}
+
+const GIT_LOG_REF_KINDS = ["head", "local", "remote", "tag"] as const;
+const GIT_LOG_RELATIONS = ["head", "outgoing", "incoming", "common"] as const;
+const GIT_COMMIT_CHANGE_STATUSES = ["added", "modified", "deleted", "renamed", "copied"] as const;
+
+function assertGitLogList(value: unknown): void {
+  const what = "git.log.list result";
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["workspaceId", "commits", "truncated", "cursor", "headOid", "upstream", "mergeBaseOid", "ahead", "behind"], what);
+  assertOpaqueToken(value.workspaceId, `${what}: workspaceId`);
+  if (typeof value.truncated !== "boolean") throw new ValidationError(`${what}: truncated must be boolean`);
+  assertCounter(value.ahead, `${what}: ahead`);
+  assertCounter(value.behind, `${what}: behind`);
+  for (const key of ["cursor", "headOid", "upstream", "mergeBaseOid"] as const) {
+    if (value[key] !== undefined && typeof value[key] !== "string") throw new ValidationError(`${what}: ${key} must be string`);
+  }
+  if (!Array.isArray(value.commits) || value.commits.length > 200) throw new ValidationError(`${what}: commits must be bounded`);
+  for (const commit of value.commits) {
+    assertPlainObject(commit, `${what}: commit`);
+    assertNoUnknownKeys(commit, ["oid", "parents", "subject", "authorName", "authorDate", "refs", "relation", "insertions", "deletions"], `${what}: commit`);
+    assertNonEmptyText(commit.oid, `${what}: oid`);
+    assertNonEmptyText(commit.subject, `${what}: subject`);
+    assertNonEmptyText(commit.authorName, `${what}: authorName`);
+    assertNonEmptyText(commit.authorDate, `${what}: authorDate`);
+    if (typeof commit.relation !== "string" || !(GIT_LOG_RELATIONS as readonly string[]).includes(commit.relation)) throw new ValidationError(`${what}: invalid relation`);
+    if (!Array.isArray(commit.parents) || commit.parents.length > 32) throw new ValidationError(`${what}: parents must be bounded`);
+    for (const parent of commit.parents) assertNonEmptyText(parent, `${what}: parent`);
+    if (!Array.isArray(commit.refs) || commit.refs.length > 64) throw new ValidationError(`${what}: refs must be bounded`);
+    for (const ref of commit.refs) {
+      assertPlainObject(ref, `${what}: ref`);
+      assertNoUnknownKeys(ref, ["name", "kind", "current"], `${what}: ref`);
+      assertNonEmptyText(ref.name, `${what}: ref.name`);
+      if (typeof ref.kind !== "string" || !(GIT_LOG_REF_KINDS as readonly string[]).includes(ref.kind)) throw new ValidationError(`${what}: invalid ref kind`);
+      if (typeof ref.current !== "boolean") throw new ValidationError(`${what}: ref.current must be boolean`);
+    }
+    for (const key of ["insertions", "deletions"] as const) if (commit[key] !== undefined) assertCounter(commit[key], `${what}: ${key}`);
+  }
+}
+
+function assertGitCommitChanges(value: unknown): void {
+  const what = "git.commit.changes result";
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["workspaceId", "oid", "subject", "files"], what);
+  assertOpaqueToken(value.workspaceId, `${what}: workspaceId`);
+  assertNonEmptyText(value.oid, `${what}: oid`);
+  assertNonEmptyText(value.subject, `${what}: subject`);
+  if (!Array.isArray(value.files) || value.files.length > 10_000) throw new ValidationError(`${what}: files must be bounded`);
+  for (const file of value.files) {
+    assertPlainObject(file, `${what}: file`);
+    assertNoUnknownKeys(file, ["path", "status", "originalPath"], `${what}: file`);
+    assertRelativePath(file.path, `${what}: file.path`);
+    if (typeof file.status !== "string" || !(GIT_COMMIT_CHANGE_STATUSES as readonly string[]).includes(file.status)) throw new ValidationError(`${what}: invalid file status`);
+    if (file.originalPath !== undefined) assertRelativePath(file.originalPath, `${what}: file.originalPath`);
+  }
+}
+
+function assertGitCommitDiff(value: unknown): void {
+  const what = "git.commit.diff result";
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["workspaceId", "oid", "path", "patch", "binary", "truncated"], what);
+  assertOpaqueToken(value.workspaceId, `${what}: workspaceId`);
+  assertNonEmptyText(value.oid, `${what}: oid`);
+  assertRelativePath(value.path, `${what}: path`);
+  if (typeof value.patch !== "string" || value.patch.length > 4 * 1024 * 1024) throw new ValidationError(`${what}: patch exceeds limit`);
+  if (typeof value.binary !== "boolean" || typeof value.truncated !== "boolean") throw new ValidationError(`${what}: invalid flags`);
 }
 
 function assertGitList(value: unknown, kind: "branches" | "worktrees" | "remotes"): void {
@@ -284,7 +402,7 @@ function assertGithubPrPayload(value: unknown, mode: "list" | "detail" | "checks
   assertNoUnknownKeys(value, ["workspaceId", "pullRequest", "checks"], what); assertOpaqueToken(value.workspaceId, `${what}: workspaceId`); assertGithubPullRequest(value.pullRequest, `${what}: pullRequest`); assertGithubChecks(value.checks, what);
 }
 
-const GIT_OPERATION_KINDS = ["init", "clone", "stage", "unstage", "discard", "commit", "branch.create", "branch.switch", "branch.rename", "branch.delete", "worktree.pickRoot", "worktree.create", "worktree.lock", "worktree.unlock", "worktree.remove", "worktree.prune", "remote.add", "remote.setUrl", "remote.remove", "fetch", "pull", "push", "stash.push", "stash.apply", "stash.drop", "tag.create", "tag.delete", "merge", "rebase", "cherry-pick", "revert", "reset", "continue", "abort", "cancel"] as const;
+const GIT_OPERATION_KINDS = ["init", "clone", "stage", "unstage", "discard", "commit", "branch.create", "branch.switch", "branch.rename", "branch.delete", "worktree.pickRoot", "worktree.create", "worktree.lock", "worktree.unlock", "worktree.remove", "worktree.prune", "remote.add", "remote.setUrl", "remote.remove", "fetch", "pull", "push", "stash.push", "stash.apply", "stash.drop", "tag.create", "tag.delete", "merge", "rebase", "cherry-pick", "revert", "checkout", "reset", "continue", "abort", "cancel"] as const;
 const GITHUB_OPERATION_KINDS = ["auth.login", "auth.logout", "pr.create", "pr.edit", "pr.ready", "pr.comment", "pr.review", "pr.updateBranch", "pr.merge", "pr.close", "pr.reopen", "pr.checkout", "cancel"] as const;
 
 function assertGitOperationResult(value: unknown): void {
@@ -349,6 +467,21 @@ export function assertClientQueryResponse(value: unknown): asserts value is Clie
     if (queryName === "session.transcript.readPage") {
       assertConversationTranscriptReadPage(value.result);
     }
+    if (queryName === "agent.transcript.read") {
+      assertAgentTranscriptPage(value.result);
+    }
+    if (queryName === "agent.conversation.read") {
+      try {
+        parseConversationTranscriptPage(value.result);
+      } catch (error) {
+        throw new ValidationError(
+          `query response: invalid agent conversation page (${error instanceof Error ? error.message : "invalid"})`,
+        );
+      }
+    }
+    if (queryName === "session.telemetry.read") {
+      assertSessionTelemetryReadResult(value.result);
+    }
     if (queryName === "workspace.fileTree") {
       assertWorkspaceFileTree(value.result);
     }
@@ -358,6 +491,9 @@ export function assertClientQueryResponse(value: unknown): asserts value is Clie
     if (queryName === "git.branches.list") assertGitList(value.result, "branches");
     if (queryName === "git.worktrees.list") assertGitList(value.result, "worktrees");
     if (queryName === "git.remotes.list") assertGitList(value.result, "remotes");
+    if (queryName === "git.log.list") assertGitLogList(value.result);
+    if (queryName === "git.commit.changes") assertGitCommitChanges(value.result);
+    if (queryName === "git.commit.diff") assertGitCommitDiff(value.result);
     if (queryName === "github.auth.get") assertGithubAuth(value.result);
     if (queryName === "github.pr.list") assertGithubPrPayload(value.result, "list");
     if (queryName === "github.pr.get") assertGithubPrPayload(value.result, "detail");
@@ -588,6 +724,7 @@ function assertCommandReceipt(value: unknown): void {
       if (commandName === "git.execute") assertGitOperationResult(value.result);
       if (commandName === "github.execute") assertGithubOperationResult(value.result);
       if (commandName === "workspace.file.create" || commandName === "workspace.directory.create") assertWorkspaceFileMutationResult(value.result);
+      if (commandName === "operator.invoke") assertOperatorInvokeOutcome(value.result);
       return;
     case "failed":
       assertNoUnknownKeys(
@@ -608,6 +745,24 @@ function assertCommandReceipt(value: unknown): void {
       return;
     default:
       throw new ValidationError(`event: unhandled receipt status ${describe(status)}`);
+  }
+}
+
+/** Assert the enriched operator.invoke completion: snapshot + output + raw result. */
+function assertOperatorInvokeOutcome(value: unknown): void {
+  assertPlainObject(value, "event: operator.invoke result");
+  assertNoUnknownKeys(value, ["snapshot", "output", "result"], "event: operator.invoke result");
+  assertPlainObject(value.snapshot, "event: operator.invoke result snapshot");
+  if (!Array.isArray(value.output)) {
+    throw new ValidationError("event: operator.invoke result output must be an array");
+  }
+  for (const line of value.output) {
+    if (typeof line !== "string") {
+      throw new ValidationError("event: operator.invoke result output must contain only strings");
+    }
+  }
+  if (!("result" in value)) {
+    throw new ValidationError("event: operator.invoke result is missing the command result");
   }
 }
 

@@ -1,12 +1,19 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import type { GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadModel, WorkspaceId } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { setHubIntent } from "../AgentHub";
+import { GitCommitGraph } from "../git/GitCommitGraph";
+import { GitMoreActionsMenu } from "../git/GitMoreActionsMenu";
+import { GitPanelSplit } from "../git/GitPanelSplit";
+import { GitTip } from "../git/GitTip";
+import { readGitGraphLayout, writeGitGraphLayout } from "../git/gitGraphMemory";
 import {
   PREVIEW_CHANGES,
   PREVIEW_CTX_PARTS,
   PREVIEW_DIFF,
   PREVIEW_FILE_TREE,
-  PREVIEW_MINIMAP,
+  PREVIEW_GIT,
+  PREVIEW_GIT_LOG,
   PREVIEW_PREVIEW,
   PREVIEW_PROBLEMS,
   PREVIEW_PV_LOGS,
@@ -18,11 +25,19 @@ import {
   type PreviewSideAgent,
 } from "./fixtures";
 import { ConvoTranscript } from "../conversation/ConvoTranscript";
+import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
 import { previewConversationRows } from "./conversationFixtures";
 
-const GIT_ICON = { M: "pencil", A: "plus", D: "trash", "?": "file-plus" } as const;
-const GIT_CLASS = { M: "m", A: "a", D: "d", "?": "u" } as const;
-const GIT_LABEL = { M: "已修改", A: "新增", D: "已删除", "?": "未跟踪" } as const;
+function FileStat({ status }: { status: TreeGitStatus | undefined }) {
+  if (!status) return null;
+  const meta = GIT_STATUS_META[status];
+  return (
+    <span className={`fstat ${meta.className}`}>
+      <span aria-hidden="true">{meta.letter}</span>
+      <span className="sr-only"> {meta.label}</span>
+    </span>
+  );
+}
 
 function collectOpen(nodes: PreviewFileNode[], prefix: string, into: Set<string>): void {
   for (const node of nodes) {
@@ -33,16 +48,6 @@ function collectOpen(nodes: PreviewFileNode[], prefix: string, into: Set<string>
   }
 }
 
-function FileStat({ status }: { status?: PreviewFileNode["status"] }) {
-  if (!status) return null;
-  return (
-    <span className={`fstat ${GIT_CLASS[status]}`}>
-      <Icon name={GIT_ICON[status]} />
-      <span className="sr-only"> {GIT_LABEL[status]}</span>
-    </span>
-  );
-}
-
 function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction }: {
   nodes: PreviewFileNode[];
   depth: number;
@@ -50,7 +55,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
   expanded: Set<string>;
   onToggle: (path: string) => void;
   onFile: (path: string) => void;
-  onAction: (path: string, action: "context" | "more") => void;
+  onAction: (path: string, action: "context" | "context-dir" | "more") => void;
 }) {
   return (
     <>
@@ -64,6 +69,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
               <div
                 className={`tree-row${open ? " open" : ""}`}
                 data-dir={path}
+                data-git={node.status ? GIT_STATUS_META[node.status].className : undefined}
                 role="treeitem"
                 tabIndex={0}
                 aria-expanded={open}
@@ -80,6 +86,11 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
                 <span className="tw"><Icon name="chevron-r" extra="sm" /></span>
                 <span className="fi"><Icon name={open ? "folder-open" : "folder"} /></span>
                 <span className="fname ellipsis">{node.name}</span>
+                <FileStat status={node.status} />
+                <span className="fop">
+                  <button type="button" className="icon-btn" data-tip="加入上下文" aria-label={`加入上下文 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context-dir"); }}><Icon name="at" /></button>
+                  <button type="button" className="icon-btn" data-tip="更多" aria-label={`更多操作 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
+                </span>
               </div>
               <div className="tree-children" role="group">
                 {node.children ? <TreeNodes nodes={node.children} depth={depth + 1} prefix={path} expanded={expanded} onToggle={onToggle} onFile={onFile} onAction={onAction} /> : null}
@@ -89,7 +100,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
         }
         const code = node.name.endsWith(".tsx") || node.name.endsWith(".ts");
         return (
-          <div key={path} className={`tree-row${node.turn ? " turn-file" : ""}`} data-file={path} role="treeitem" tabIndex={0} style={pad} onClick={() => onFile(path)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onFile(path); } }}>
+          <div key={path} className={`tree-row${node.turn ? " turn-file" : ""}`} data-file={path} data-git={node.status ? GIT_STATUS_META[node.status].className : undefined} role="treeitem" tabIndex={0} style={pad} onClick={() => onFile(path)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onFile(path); } }}>
             <span className="tw" />
             <span className="fi"><Icon name={code ? "file-code" : "file"} /></span>
             <span className="fname ellipsis">{node.name}</span>
@@ -108,7 +119,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
   );
 }
 
-export function PreviewFileTree({ label, search }: { label: string; search?: string }) {
+export function PreviewFileTree({ label, search, onContext }: { label: string; search?: string; onContext?: (path: string, kind: "file" | "dir") => void }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const next = new Set<string>();
     collectOpen(PREVIEW_FILE_TREE, "", next);
@@ -130,7 +141,12 @@ export function PreviewFileTree({ label, search }: { label: string; search?: str
     <>
       {message ? <div className="muted tiny" role="status" style={{ padding: "2px 12px 6px" }}>{message}</div> : null}
       <div className="tree" role="tree" aria-label={`${label} 文件树`}>
-        <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={(path) => setMessage(`打开 ${path}`)} onAction={(path, action) => setMessage(action === "context" ? `已加入上下文：${path}` : `更多操作：${path}`)} />
+        <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={(path) => setMessage(`打开 ${path}`)} onAction={(path, action) => {
+          if (action === "context" || action === "context-dir") {
+            onContext?.(path, action === "context-dir" ? "dir" : "file");
+            setMessage(`已加入上下文：${path}`);
+          }
+        }} />
       </div>
     </>
   );
@@ -148,23 +164,6 @@ function filterPreviewNodes(nodes: PreviewFileNode[], query: string): PreviewFil
 
 export function PreviewTranscript() {
   return <ConvoTranscript rows={previewConversationRows()} demo />;
-}
-
-export function PreviewMinimap() {
-  return (
-    <>
-      {PREVIEW_MINIMAP.map((mark) => (
-        <button
-          key={mark.evId}
-          type="button"
-          className={`mm-mark ${mark.type}`}
-          style={{ top: `${14 + mark.at * 0.72}%` }}
-          aria-label={`跳到 ${mark.type}`}
-          onClick={() => document.getElementById(`ev-${mark.evId}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
-        />
-      ))}
-    </>
-  );
 }
 
 export function PreviewTokenTrigger() {
@@ -206,12 +205,13 @@ export function PreviewTokenPanel() {
         <div className="tok-keys">
           <span><i className="tb-in" />输入</span>
           <span><i className="tb-out" />输出</span>
-          <span><i className="tb-cache" />缓存 {t.cacheTokens}</span>
+          <span><i className="tb-cache" />缓存 {t.cacheTokens} · 命中 <b>{t.cacheHitRate}</b></span>
         </div>
       </div>
       <div className="tok-rows">
         <div className="tr-row">本轮输入 / 输出<span className="tr-v">{t.turnIn} / {t.turnOut}</span></div>
         <div className="tr-row">本轮耗时<span className="tr-v">{t.turnTime}</span></div>
+        <div className="tr-row">TPS<span className="tr-v">{t.tps}</span></div>
         <div className="tr-row">会话总耗时<span className="tr-v">{t.sessionTime}</span></div>
         <div className="tr-row">子 Agent 消耗<span className="tr-v">{t.subagentCost}</span></div>
         <div className="tr-row">重试 / Fallback<span className={`tr-v${t.retries ? "" : " ok"}`}>{t.retries} 次 / 无</span></div>
@@ -299,9 +299,15 @@ function ChangeGroup({ title, id, rows, selected, onSelect }: {
   );
 }
 
-export function PreviewChanges() {
+export function PreviewChanges({ focusPath }: { focusPath?: string }) {
   const [selected, setSelected] = useState<string | null>(PREVIEW_DIFF.file);
   const [split, setSplit] = useState(false);
+  useEffect(() => {
+    if (focusPath === undefined) return;
+    const known = [...PREVIEW_CHANGES.turn, ...PREVIEW_CHANGES.thread]
+      .some((row) => row.file === focusPath);
+    if (known) setSelected(focusPath);
+  }, [focusPath]);
   const d = PREVIEW_DIFF;
   return (
     <>
@@ -309,12 +315,10 @@ export function PreviewChanges() {
         <span className="chip gray xs">演示</span>
         <span className="spacer" />
         <button type="button" className="btn small outline" disabled title="演示 Diff，不会发给 Host">查看全部 Diff</button>
-        <button type="button" className="btn small primary" disabled title="创建 Commit 不在公共 contract 中">创建 Commit</button>
       </div>
       <div className="ch-list">
         <ChangeGroup title="当前 Turn" id="chgTurn" rows={PREVIEW_CHANGES.turn} selected={selected} onSelect={setSelected} />
-        <ChangeGroup title="本 Thread 累积" id="chgThread" rows={PREVIEW_CHANGES.thread} selected={selected} onSelect={setSelected} />
-        <ChangeGroup title="Agent 开始前已存在" id="chgPre" rows={PREVIEW_CHANGES.preexisting} selected={selected} onSelect={setSelected} />
+        <ChangeGroup title="本会话累积" id="chgThread" rows={PREVIEW_CHANGES.thread} selected={selected} onSelect={setSelected} />
       </div>
       {selected ? (
         <div className="ch-diff-slot" style={{ height: 220 }}>
@@ -359,6 +363,148 @@ export function PreviewChanges() {
         </div>
       ) : null}
     </>
+  );
+}
+
+/** Git 管理页演示面：与 GitStatusPanel 同一视觉，但所有操作 disabled、不调 Host。 */
+export function PreviewGitPanel() {
+  const [selected, setSelected] = useState<string | null>(PREVIEW_DIFF.file);
+  const [graphLayout, setGraphLayout] = useState(readGitGraphLayout);
+  const [selectedCommit, setSelectedCommit] = useState<string>();
+  const [selectedCommitPath, setSelectedCommitPath] = useState<string>();
+  const known = [...PREVIEW_GIT.staged, ...PREVIEW_GIT.working].some((row) => row.path === selected);
+  const active = known ? selected : null;
+  const d = PREVIEW_DIFF;
+  const previewLog = useMemo<GitLogListReadModel>(() => ({
+    workspaceId: "preview-git" as WorkspaceId,
+    commits: PREVIEW_GIT_LOG.commits.map(({ files: _files, patch: _patch, ...commit }) => commit),
+    truncated: false,
+    headOid: PREVIEW_GIT_LOG.headOid,
+    upstream: PREVIEW_GIT_LOG.upstream,
+    mergeBaseOid: PREVIEW_GIT_LOG.mergeBaseOid,
+    ahead: PREVIEW_GIT_LOG.ahead,
+    behind: PREVIEW_GIT_LOG.behind,
+  }), []);
+  const previewChanges = useMemo<GitCommitChangesReadModel | undefined>(() => {
+    const hit = PREVIEW_GIT_LOG.commits.find((commit) => commit.oid === selectedCommit);
+    if (!hit) return undefined;
+    return { workspaceId: "preview-git" as WorkspaceId, oid: hit.oid, subject: hit.subject, files: hit.files };
+  }, [selectedCommit]);
+  const previewDiff = useMemo<GitCommitDiffReadModel | undefined>(() => {
+    const hit = PREVIEW_GIT_LOG.commits.find((commit) => commit.oid === selectedCommit);
+    if (!hit || selectedCommitPath === undefined) return undefined;
+    const file = hit.files.find((item) => item.path === selectedCommitPath);
+    if (!file) return undefined;
+    return { workspaceId: "preview-git" as WorkspaceId, oid: hit.oid, path: file.path, patch: hit.patch, binary: false, truncated: false };
+  }, [selectedCommit, selectedCommitPath]);
+  const persistGraphLayout = (next: typeof graphLayout) => {
+    setGraphLayout(next);
+    writeGitGraphLayout(next);
+  };
+  const group = (title: string, rows: readonly { readonly path: string; readonly status: string }[], extra?: ReactNode) => (
+    <div className="ch-group">
+      <div className="ch-group-title">
+        {title}
+        <span className="ch-count">{rows.length}</span>
+        {extra ? <span className="spacer" /> : null}
+        {extra}
+      </div>
+      {rows.map((row) => (
+        <div className={`git-change-line${active === row.path ? " selected" : ""}`} key={row.path}>
+          <button type="button" className="ch-row" aria-label={`演示：查看 ${row.path}`} onClick={() => setSelected(row.path)}>
+            <span className="ch-file ellipsis">{row.path}</span>
+            <span className="ch-note">{row.status}</span>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <GitPanelSplit
+      top={(
+        <>
+      <div className="ch-toolbar git-toolbar">
+        <span className="chip gray xs">演示</span>
+        <span className="git-branch-label ellipsis"><Icon name="branch" extra="sm" />{PREVIEW_GIT.branch}</span>
+        <span className="chip gray xs">↑{PREVIEW_GIT.ahead} ↓{PREVIEW_GIT.behind}</span>
+        <span className="spacer" />
+        <GitTip text="演示仓库，不会发给 Host"><button type="button" className="btn small outline" disabled>Fetch</button></GitTip>
+        <GitTip text="演示仓库，不会发给 Host"><button type="button" className="btn small outline" disabled>Pull</button></GitTip>
+        <GitTip text="演示仓库，不会发给 Host"><button type="button" className="btn small outline" disabled>Push</button></GitTip>
+      </div>
+      <div className="git-notice" role="status">演示仓库状态（omp-web / main）。预览模式下不执行任何 Git 操作。</div>
+      <div className="git-actions">
+        <GitMoreActionsMenu />
+        <span className="tiny muted">演示</span>
+      </div>
+      <div className="ch-list">
+        {group("已暂存", PREVIEW_GIT.staged, (
+          <GitTip text="演示：取消暂存全部，不会发给 Host">
+            <button type="button" className="icon-btn small" aria-label="取消暂存全部" disabled>
+              <Icon name="minus" extra="sm" />
+            </button>
+          </GitTip>
+        ))}
+        {group("工作区", PREVIEW_GIT.working, (
+          <GitTip text="演示：暂存全部，不会发给 Host">
+            <button type="button" className="icon-btn small" aria-label="暂存全部" disabled>
+              <Icon name="plus" extra="sm" />
+            </button>
+          </GitTip>
+        ))}
+      </div>
+      <div className="git-commit-box">
+        <textarea disabled placeholder="Commit message（演示）" rows={2} readOnly value="" onChange={() => undefined} />
+        <GitTip text="演示仓库，不会创建 Commit"><button type="button" className="btn small primary" disabled>Commit</button></GitTip>
+      </div>
+      {active !== null ? (
+        <div className="ch-diff-slot">
+          <div className="diff-toolbar">
+            <Icon name="file-code" extra="sm" />
+            <span className="mono small ellipsis">{active}</span>
+            <span className="chip gray xs">演示 diff</span>
+            <span className="ch-add">+{d.add}</span>
+            <span className="ch-del">-{d.del}</span>
+          </div>
+          <div className="diff-scroll">
+            {d.lines.map((line, index) => {
+              if (line[0] === "collapse") {
+                return <div key={`c-${index}`} className="dl collapse"><Icon name="chevron-ud" extra="sm" /> {line[1]}</div>;
+              }
+              const cls = line[0] === "+" ? "add" : line[0] === "-" ? "del" : "";
+              const mark = line[0] === "+" ? "+" : line[0] === "-" ? "−" : " ";
+              return (
+                <div key={`${index}-${line[3]}`} className={`dl ${cls}`}>
+                  <span className="ln">{line[1]}</span>
+                  <span className="ln">{line[2]}</span>
+                  <span className="dm" aria-hidden="true">{mark}</span>
+                  <span className="lc">{line[3]}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+        </>
+      )}
+      graphOpen={graphLayout.open}
+      splitRatio={graphLayout.splitRatio}
+      onToggle={() => persistGraphLayout({ ...graphLayout, open: !graphLayout.open })}
+      onResizeSplit={(ratio) => persistGraphLayout({ ...graphLayout, splitRatio: ratio })}
+      preview
+      meta={<span className="chip gray xs">↑{PREVIEW_GIT_LOG.ahead} ↓{PREVIEW_GIT_LOG.behind}</span>}
+    >
+      <GitCommitGraph
+        model={previewLog}
+        preview
+        {...(selectedCommit === undefined ? {} : { selectedOid: selectedCommit })}
+        {...(previewChanges === undefined ? {} : { changes: previewChanges })}
+        {...(selectedCommitPath === undefined ? {} : { selectedPath: selectedCommitPath })}
+        {...(previewDiff === undefined ? {} : { diff: previewDiff })}
+        onSelectCommit={setSelectedCommit}
+        onSelectFile={setSelectedCommitPath}
+      />
+    </GitPanelSplit>
   );
 }
 

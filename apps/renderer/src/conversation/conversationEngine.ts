@@ -166,7 +166,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     });
     return {
       state,
-      rows: rowsFromConversationViews(selectConversationViews(convo), pending),
+      rows: rowsFromConversationViews(selectConversationViews(convo), pending, convo.itemErrors),
       demo: false,
       loadingOlder,
       identityKey: identityKey(state.identity),

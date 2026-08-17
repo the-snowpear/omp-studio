@@ -108,3 +108,35 @@ test("session catalog reports an unavailable root without exposing it", async ()
   assert.ok(!JSON.stringify(result).includes("missing-omp-session-root"));
   assert.match(defaultOmpSessionsRoot({ OMP_AGENT_DIR: "C:\\omp-profile\\agent" }), /sessions$/u);
 });
+
+test("session catalog scans the cold-archive tree and marks gz members archived", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-catalog-arch-"));
+  const project = join(root, "--project--");
+  const archiveProject = join(root, "archive", "sessions", "--project--");
+  await mkdir(project, { recursive: true });
+  await mkdir(archiveProject, { recursive: true });
+  await sessionFile(project, "live", {
+    type: "session",
+    id: "live-id",
+    cwd: "C:\secret\live",
+    title: "Live chat",
+    studioOrigin: "studio-host",
+  });
+  const { gzipSync } = await import("node:zlib");
+  await writeFile(
+    join(archiveProject, "2026-08-15T00-00-00-000Z_old.jsonl.gz"),
+    gzipSync(Buffer.from(
+      [
+        JSON.stringify({ type: "title", v: 1, title: "Archived chat", updatedAt: "2026-08-15T00:00:00.000Z", pad: "" }),
+        JSON.stringify({ type: "session", id: "archived-id", timestamp: "2026-08-15T00:00:00.000Z", cwd: "C:\secret\live", studioOrigin: "studio-host" }),
+      ].join("\n") + "\n",
+      "utf8",
+    )),
+  );
+  const result = await scanSessionCatalog({ sessionsRoot: root, archiveRoot: join(root, "archive", "sessions"), includeCliSessions: true, allowedCwd: "C:\secret\live" });
+  const byId = new Map(result.sessions.map((entry) => [entry.sessionId, entry]));
+  assert.equal(byId.get("live-id")?.archived, false);
+  assert.equal(byId.get("archived-id")?.archived, true);
+  assert.equal(byId.get("archived-id")?.title, "Archived chat");
+  assert.ok(!JSON.stringify(result).includes("C:\secret"));
+});

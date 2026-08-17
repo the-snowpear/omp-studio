@@ -20,14 +20,20 @@
  * - No Node API or Host secret (token/endpoint/Runtime PID) leaks.
  */
 
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 import {
   createDesktopIpcBridge,
   DESKTOP_BRIDGE_GLOBAL,
   type DesktopIpcBridge,
 } from "./ipc-validation.js";
+import { CHROME_NOTIFY_CHANNEL } from "./chrome-notify-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
+import {
+  WORKSPACE_SHELL_IPC_CHANNELS,
+  type ResolvedDroppedPath,
+  type WorkspaceShellEditorResult,
+} from "./workspace-shell-shared.js";
 import {
   TERMINAL_IPC_CHANNELS,
   type OmpStudioTerminalApi,
@@ -71,6 +77,29 @@ contextBridge.exposeInMainWorld(
     setTheme(theme: "light" | "dark"): Promise<void> {
       if (theme !== "light" && theme !== "dark") return Promise.resolve();
       return ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, { theme }) as Promise<void>;
+    },
+    notify(payload: { title: string; body?: string }): Promise<void> {
+      return ipcRenderer.invoke(CHROME_NOTIFY_CHANNEL, payload) as Promise<void>;
+    },
+    openProjectInEditor(workspaceId: string): Promise<WorkspaceShellEditorResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor, { workspaceId }) as Promise<WorkspaceShellEditorResult>;
+    },
+    openProjectDirectory(workspaceId: string): Promise<void> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.revealInFileManager, { workspaceId }) as Promise<void>;
+    },
+    getPathForFile(file: File): string | null {
+      try {
+        const path = webUtils.getPathForFile(file);
+        return typeof path === "string" && path.length > 0 ? path : null;
+      } catch {
+        return null;
+      }
+    },
+    resolveDroppedPaths(workspaceId: string, paths: readonly string[]): Promise<ReadonlyArray<ResolvedDroppedPath>> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.resolveDroppedPaths, {
+        workspaceId,
+        paths,
+      }) as Promise<ReadonlyArray<ResolvedDroppedPath>>;
     },
   }),
 );

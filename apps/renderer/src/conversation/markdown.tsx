@@ -1,70 +1,234 @@
+import { useEffect, useState } from "react";
+import { isValidElement } from "react";
+import { useMemo } from "react";
 import type { ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
+
+import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
 
 function isSafeHref(href: string): boolean {
   return /^(https?:|mailto:)/i.test(href.trim());
 }
 
-function renderInline(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const pattern = /(`[^`]+`)|(\*\*[^*]+?\*\*)|(\*[^*\s][^*]*?\*)|(\[[^\]]+\]\([^)]+\))/g;
-  let last = 0;
-  let match: RegExpExecArray | null;
-  let index = 0;
-  while ((match = pattern.exec(text))) {
-    if (match.index > last) {
-      nodes.push(<span key={`${keyPrefix}-t${index}`}>{text.slice(last, match.index)}</span>);
-      index += 1;
-    }
-    const token = match[0];
-    if (token.startsWith("`")) {
-      nodes.push(<span key={`${keyPrefix}-c${index}`} className="chip-code">{token.slice(1, -1)}</span>);
-    } else if (token.startsWith("**")) {
-      nodes.push(<strong key={`${keyPrefix}-b${index}`}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith("*")) {
-      nodes.push(<em key={`${keyPrefix}-i${index}`}>{token.slice(1, -1)}</em>);
-    } else {
-      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-      const label = link?.[1] ?? "";
-      const href = link?.[2]?.trim() ?? "";
-      if (isSafeHref(href)) {
-        nodes.push(
-          <a key={`${keyPrefix}-a${index}`} href={href} target="_blank" rel="noreferrer noopener">
-            {label}
-          </a>,
-        );
-      } else {
-        nodes.push(<span key={`${keyPrefix}-l${index}`}>{token}</span>);
-      }
-    }
-    index += 1;
-    last = match.index + token.length;
+function reactNodeText(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map((child) => reactNodeText(child)).join("");
+  if (isValidElement(node)) {
+    const props = node.props as { children?: ReactNode };
+    return reactNodeText(props.children);
   }
-  if (last < text.length) nodes.push(<span key={`${keyPrefix}-t${index}`}>{text.slice(last)}</span>);
-  return nodes;
+  return "";
 }
 
-export function MarkdownInline({ text, k = "m" }: { text: string; k?: string }) {
-  return <>{renderInline(text, k)}</>;
+type Mermaid = typeof import("mermaid")["default"];
+
+let mermaidModule: Promise<Mermaid> | undefined;
+
+function loadMermaid(): Promise<Mermaid> {
+  mermaidModule ??= import("mermaid").then((mod) => mod.default);
+  return mermaidModule;
 }
 
-function listItem(line: string): { ordered: boolean; text: string } | undefined {
-  const unordered = line.match(/^[ \t]*[-*+]\s+(.+)$/);
-  if (unordered) return { ordered: false, text: unordered[1]! };
-  const ordered = line.match(/^[ \t]*\d+[.)]\s+(.+)$/);
-  if (ordered) return { ordered: true, text: ordered[1]! };
+function currentThemeIsDark(): boolean {
+  return typeof document === "object" && document.documentElement.getAttribute("data-theme") === "dark";
+}
+
+function MermaidBlock({ code }: { code: string }) {
+  const [svg, setSvg] = useState<string | undefined>(undefined);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setFailed(false);
+    setSvg(undefined);
+    loadMermaid()
+      .then((mermaid) => {
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: currentThemeIsDark() ? "dark" : "default",
+        });
+        const id = `mmd-${Math.random().toString(36).slice(2, 10)}`;
+        return mermaid.render(id, code);
+      })
+      .then((result) => {
+        if (alive) setSvg(result.svg);
+      })
+      .catch(() => {
+        if (alive) setFailed(true);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [code]);
+  if (failed) {
+    return (
+      <div className="md-code">
+        <div className="md-code-head">
+          <span className="md-code-lang">mermaid</span>
+          <span className="md-code-err">图渲染失败</span>
+        </div>
+        <pre className="codeblock md-code-pre">
+          <code>{code}</code>
+        </pre>
+      </div>
+    );
+  }
+  return (
+    <div className="mermaid-box" {...(svg === undefined ? {} : { dangerouslySetInnerHTML: { __html: svg } })}>
+      {svg === undefined ? <span className="mermaid-pending">图表生成中…</span> : null}
+    </div>
+  );
+}
+
+function CodeCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="md-code-copy"
+      onClick={() => {
+        const clipboard = typeof navigator === "object" ? navigator.clipboard : undefined;
+        if (!clipboard) return;
+        clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => {});
+      }}
+    >
+      {copied ? "已复制" : "复制"}
+    </button>
+  );
+}
+
+type PreChildProps = { className?: unknown; children?: ReactNode };
+
+function firstElementChild(children: ReactNode): PreChildProps | undefined {
+  const list = Array.isArray(children) ? children : [children];
+  for (const child of list) {
+    if (isValidElement(child)) return child.props as PreChildProps;
+  }
   return undefined;
 }
 
-function paragraphLines(lines: readonly string[], key: string): ReactNode {
+function createComponents(streaming: boolean, magicKeywords: boolean): Components {
+  const prose = (children: ReactNode): ReactNode =>
+    magicKeywords ? withMagicKeywordChildren(children) : children;
+
+  return {
+    p({ children }) {
+      return <p>{prose(children)}</p>;
+    },
+    li({ children }) {
+      return <li>{prose(children)}</li>;
+    },
+    h1({ children }) {
+      return <h1>{prose(children)}</h1>;
+    },
+    h2({ children }) {
+      return <h2>{prose(children)}</h2>;
+    },
+    h3({ children }) {
+      return <h3>{prose(children)}</h3>;
+    },
+    h4({ children }) {
+      return <h4>{prose(children)}</h4>;
+    },
+    h5({ children }) {
+      return <h5>{prose(children)}</h5>;
+    },
+    h6({ children }) {
+      return <h6>{prose(children)}</h6>;
+    },
+    blockquote({ children }) {
+      return <blockquote>{prose(children)}</blockquote>;
+    },
+    td({ children }) {
+      return <td>{prose(children)}</td>;
+    },
+    th({ children }) {
+      return <th>{prose(children)}</th>;
+    },
+    strong({ children }) {
+      return <strong>{prose(children)}</strong>;
+    },
+    em({ children }) {
+      return <em>{prose(children)}</em>;
+    },
+    del({ children }) {
+      return <del>{prose(children)}</del>;
+    },
+    a({ href, children }) {
+      const url = typeof href === "string" ? href.trim() : "";
+      if (!isSafeHref(url)) return <span>{prose(children)}</span>;
+      return (
+        <a href={url} target="_blank" rel="noreferrer noopener">
+          {prose(children)}
+        </a>
+      );
+    },
+    img({ src, alt }) {
+      const url = typeof src === "string" ? src.trim() : "";
+      if (!/^https?:\/\//i.test(url)) return null;
+      return <img src={url} alt={alt ?? ""} loading="lazy" referrerPolicy="no-referrer" />;
+    },
+    table({ children }) {
+      return (
+        <div className="md-table-wrap">
+          <table>{children}</table>
+        </div>
+      );
+    },
+    code({ className, children }) {
+      const cls = typeof className === "string" ? className : "";
+      if (cls.length > 0) return <code className={cls}>{children}</code>;
+      return <code className="chip-code">{children}</code>;
+    },
+    pre({ children }) {
+      const child = firstElementChild(children);
+      const cls = typeof child?.className === "string" ? child.className : "";
+      const lang = /language-([\w+#.-]+)/.exec(cls)?.[1] ?? "";
+      const text = reactNodeText(child?.children).replace(/\n$/, "");
+      if (lang === "mermaid") {
+        if (streaming) {
+          return (
+            <div className="md-code">
+              <div className="md-code-head">
+                <span className="md-code-lang">mermaid</span>
+                <span className="md-code-hint">流式输出中</span>
+              </div>
+              <pre className="codeblock md-code-pre">
+                <code>{text}</code>
+              </pre>
+            </div>
+          );
+        }
+        return <MermaidBlock code={text} />;
+      }
+      return (
+        <div className="md-code">
+          <div className="md-code-head">
+            <span className="md-code-lang">{lang || "text"}</span>
+            <CodeCopyButton text={text} />
+          </div>
+          <pre className="codeblock md-code-pre">{children}</pre>
+        </div>
+      );
+    },
+  };
+}
+
+export function MarkdownInline({ text }: { text: string; k?: string }) {
   return (
-    <p key={key}>
-      {lines.map((line, index) => (
-        <span key={`${key}-${index}`}>
-          {index > 0 ? <br /> : null}
-          {renderInline(line, `${key}-${index}`)}
-        </span>
-      ))}
-    </p>
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <>{children}</> }}>
+      {text}
+    </ReactMarkdown>
   );
 }
 
@@ -73,90 +237,28 @@ export function MarkdownText({
   streaming,
   truncated,
   mark,
+  magicKeywords,
 }: {
   text: string;
   streaming?: boolean;
   truncated?: boolean;
   mark?: ReactNode;
+  /** Paint OMP magic keywords (static gradient) in prose text nodes. */
+  magicKeywords?: boolean;
 }) {
-  const blocks: ReactNode[] = [];
-  const lines = text.split(/\r\n|\n|\r/);
-  let index = 0;
-  let para: string[] = [];
-  let list: { ordered: boolean; items: string[] } | undefined;
-  const flushPara = () => {
-    if (para.length === 0) return;
-    blocks.push(paragraphLines(para, `p-${blocks.length}`));
-    para = [];
-  };
-  const flushList = () => {
-    if (!list || list.items.length === 0) return;
-    const Tag = list.ordered ? "ol" : "ul";
-    blocks.push(
-      <Tag key={`l-${blocks.length}`}>
-        {list.items.map((item, itemIndex) => (
-          <li key={itemIndex}>{renderInline(item, `l-${blocks.length}-${itemIndex}`)}</li>
-        ))}
-      </Tag>,
-    );
-    list = undefined;
-  };
-  while (index < lines.length) {
-    const line = lines[index]!;
-    const fence = line.match(/^```(\w+)?\s*$/);
-    if (fence) {
-      flushPara();
-      flushList();
-      const code: string[] = [];
-      index += 1;
-      while (index < lines.length && !/^```\s*$/.test(lines[index]!)) {
-        code.push(lines[index]!);
-        index += 1;
-      }
-      if (index < lines.length) index += 1;
-      blocks.push(
-        <div key={`c-${blocks.length}`} className="codeblock">
-          {code.join("\n") || "\u00a0"}
-        </div>,
-      );
-      continue;
-    }
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
-      flushPara();
-      flushList();
-      const level = Math.min(heading[1]!.length, 3);
-      const Tag = (`h${level}` as "h1" | "h2" | "h3");
-      blocks.push(<Tag key={`h-${blocks.length}`}>{renderInline(heading[2]!, `h-${blocks.length}`)}</Tag>);
-      index += 1;
-      continue;
-    }
-    const item = listItem(line);
-    if (item) {
-      flushPara();
-      if (!list || list.ordered !== item.ordered) {
-        flushList();
-        list = { ordered: item.ordered, items: [] };
-      }
-      list.items.push(item.text);
-      index += 1;
-      continue;
-    }
-    if (!line.trim()) {
-      flushPara();
-      flushList();
-      index += 1;
-      continue;
-    }
-    flushList();
-    para.push(line);
-    index += 1;
-  }
-  flushPara();
-  flushList();
+  const components = useMemo(
+    () => createComponents(streaming === true, magicKeywords === true),
+    [streaming, magicKeywords],
+  );
   return (
     <div className="ev-body">
-      {blocks}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]]}
+        components={components}
+      >
+        {text}
+      </ReactMarkdown>
       {streaming ? <span className="stream-caret" aria-hidden="true" /> : null}
       {truncated === true ? mark : null}
     </div>

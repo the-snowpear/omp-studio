@@ -2,6 +2,7 @@ import type {
   ClientError,
   ConversationContentBlock,
   ConversationItem,
+  ConversationMessageError,
   ConversationRole,
   ConversationRuntimeEvent,
   ConversationTranscriptPage,
@@ -27,6 +28,8 @@ export interface ConversationLiveBlock {
   readonly blockId: string;
   readonly blockType: "text" | "thinking";
   readonly text: string;
+  /** Set once the live buffer hit its cap; later deltas for the block are dropped. */
+  readonly truncated?: boolean;
 }
 
 export interface ConversationLiveMessage {
@@ -49,7 +52,7 @@ export interface ConversationLiveTool {
   readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>;
   readonly truncated?: boolean;
   readonly isError?: boolean;
-  readonly status: "started" | "updated" | "completed";
+  readonly status: "started" | "updated" | "completed" | "aborted";
   readonly startedAt?: string;
   readonly completedAt?: string;
 }
@@ -76,6 +79,19 @@ export interface ConversationState {
   readonly lastEventSeq?: number;
   readonly resyncRequired: boolean;
   readonly abortedTurns: Readonly<Record<string, true>>;
+  /**
+   * Persisted itemId → provider failure for assistant messages that ended with
+   * `stopReason: "error"`. Live-only: the transcript carries no error field, so
+   * these are dropped on a full re-hydrate just like `abortedTurns`.
+   */
+  readonly itemErrors: Readonly<Record<string, ConversationMessageError>>;
+  /**
+   * Persisted itemId → owning turnId, kept only while that turn is still open.
+   * The runtime persists an assistant item before the first tool of that item
+   * starts, so a resultless toolCall is only provably lost once the turn closes.
+   * Entries are dropped on `turn.completed` / `turn.aborted`.
+   */
+  readonly openTurnItems: Readonly<Record<string, string>>;
   readonly error?: ClientError;
 }
 
@@ -91,6 +107,8 @@ export function createInitialConversationState(): ConversationState {
     hydrateGeneration: 0,
     resyncRequired: false,
     abortedTurns: {},
+    itemErrors: {},
+    openTurnItems: {},
   };
 }
 
@@ -102,7 +120,13 @@ export function clearConversationState(state: ConversationState): ConversationSt
 }
 
 export type ConversationView =
-  | { readonly kind: "item"; readonly item: ConversationItem; readonly tools: readonly ConversationLiveTool[] }
+  | {
+      readonly kind: "item";
+      readonly item: ConversationItem;
+      readonly tools: readonly ConversationLiveTool[];
+      /** The turn that produced this item is still running, so its tools may not have started yet. */
+      readonly turnOpen: boolean;
+    }
   | {
       readonly kind: "live";
       readonly message: ConversationLiveMessage;
@@ -125,7 +149,12 @@ export function selectConversationViews(state: ConversationState): readonly Conv
     }
     const item = state.itemsById[id];
     if (item !== undefined) {
-      views.push({ kind: "item", item, tools: toolsForMessage(state, id) });
+      views.push({
+        kind: "item",
+        item,
+        tools: toolsForMessage(state, id),
+        turnOpen: state.openTurnItems[id] !== undefined,
+      });
       continue;
     }
     if (live !== undefined) {

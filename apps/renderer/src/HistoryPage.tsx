@@ -13,12 +13,24 @@ import {
 } from "./preview/fixtures";
 
 const CONTRACT = {
-  filter: "筛选会话不在公共 contract 中",
   export: "导出会话不在公共 contract 中",
   fork: "Fork 会话不在公共 contract 中",
   more: "更多会话操作不在公共 contract 中",
-  rewind: "Time Travel / checkpoint 不在公共 contract 中",
 } as const;
+
+/** 工具栏状态筛选：纯客户端过滤已加载的会话模型，不涉及 Host 契约。 */
+type StatusTab = "all" | "active" | "archived";
+
+const STATUS_TABS: ReadonlyArray<{ readonly id: StatusTab; readonly label: string }> = [
+  { id: "all", label: "全部" },
+  { id: "active", label: "进行中" },
+  { id: "archived", label: "已归档" },
+];
+
+function matchesStatusTab(status: string, tab: StatusTab): boolean {
+  if (tab === "all") return true;
+  return tab === "archived" ? status === "archived" : status !== "archived";
+}
 
 const PREVIEW_STATUS: Record<PreviewHistoryStatus, { chip: string; label: string }> = {
   running: { chip: "blue", label: "运行中" },
@@ -71,7 +83,7 @@ function PreviewHistRow({
 }: {
   row: PreviewHistoryRow;
   onOpen: () => void;
-  onAct: (kind: "resume" | "fork" | "more") => void;
+  onAct: (kind: "resume" | "fork" | "more" | "unarchive") => void;
 }) {
   const status = PREVIEW_STATUS[row.status];
   return (
@@ -94,8 +106,18 @@ function PreviewHistRow({
       </a>
       <span className={`chip ${status.chip}`}>{status.label}</span>
       <div className="h-acts">
-        <button type="button" className="icon-btn small" data-tip={`恢复：${row.title}`} aria-label={`恢复：${row.title}`} onClick={() => onAct("resume")}><Icon name="refresh" extra="sm" /></button>
+        <button
+          type="button"
+          className="icon-btn small"
+          data-tip={row.status === "archived" ? "恢复：已归档会话需先取消归档" : `恢复：${row.title}`}
+          aria-label={`恢复：${row.title}`}
+          disabled={row.status === "archived"}
+          onClick={() => onAct("resume")}
+        ><Icon name="refresh" extra="sm" /></button>
         <button type="button" className="icon-btn small" data-tip={`Fork：${row.title}`} aria-label={`Fork：${row.title}`} onClick={() => onAct("fork")}><Icon name="fork" extra="sm" /></button>
+        {row.status === "archived" ? (
+          <button type="button" className="icon-btn small" data-tip={`取消归档：${row.title}`} aria-label={`取消归档：${row.title}`} onClick={() => onAct("unarchive")}><Icon name="external" extra="sm" /></button>
+        ) : null}
         <button type="button" className="icon-btn small" data-tip={`更多操作：${row.title}`} aria-label={`更多操作：${row.title}`} onClick={() => onAct("more")}><Icon name="more" extra="sm" /></button>
       </div>
     </div>
@@ -105,11 +127,14 @@ function PreviewHistRow({
 function HostHistRow({
   entry,
   onOpen,
+  onUnarchive,
 }: {
   entry: SessionHistoryEntry;
   onOpen: () => void;
+  onUnarchive: (() => void) | undefined;
 }) {
   const status = HOST_STATUS[entry.status];
+  const archived = entry.status === "archived";
   return (
     <div className="hist-row">
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
@@ -123,8 +148,18 @@ function HostHistRow({
       </a>
       <span className={`chip ${status.chip}`}>{status.label}</span>
       <div className="h-acts">
-        <button type="button" className="icon-btn small" data-tip={`恢复：${entry.title}`} aria-label={`恢复：${entry.title}`} onClick={onOpen}><Icon name="refresh" extra="sm" /></button>
+        <button
+          type="button"
+          className="icon-btn small"
+          data-tip={archived ? "恢复：已归档会话需先取消归档" : `恢复：${entry.title}`}
+          aria-label={`恢复：${entry.title}`}
+          disabled={archived}
+          onClick={onOpen}
+        ><Icon name="refresh" extra="sm" /></button>
         <button type="button" className="icon-btn small" disabled title={CONTRACT.fork} data-tip={CONTRACT.fork} aria-label={`Fork：${entry.title}`}><Icon name="fork" extra="sm" /></button>
+        {archived && onUnarchive !== undefined ? (
+          <button type="button" className="icon-btn small" data-tip={`取消归档：${entry.title}`} aria-label={`取消归档：${entry.title}`} onClick={onUnarchive}><Icon name="external" extra="sm" /></button>
+        ) : null}
         <button type="button" className="icon-btn small" disabled title={CONTRACT.more} data-tip={CONTRACT.more} aria-label={`更多操作：${entry.title}`}><Icon name="more" extra="sm" /></button>
       </div>
     </div>
@@ -162,23 +197,31 @@ export function HistoryPage({
   history,
   onRoute,
   onSelectThread,
+  onUnarchive,
 }: {
   history?: SessionHistoryReadModel;
   onRoute: (route: PageRoute) => void;
   onSelectThread: (entry: SessionHistoryEntry) => void;
+  /** 真实模式「取消归档」（session.unarchive）；预览模式下为 undefined（走演示 toast）。 */
+  onUnarchive?: (entry: SessionHistoryEntry) => void;
 }) {
   const { preview } = usePreviewMode();
   const [query, setQuery] = useState("");
+  const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [notice, show, dismissNotice] = useNotice();
   const q = query.trim().toLowerCase();
 
   const previewRows = useMemo(
-    () => PREVIEW_HISTORY.filter((row) => `${row.title} ${row.project} ${row.branch}`.toLowerCase().includes(q)),
-    [q],
+    () => PREVIEW_HISTORY
+      .filter((row) => `${row.title} ${row.project} ${row.branch}`.toLowerCase().includes(q))
+      .filter((row) => matchesStatusTab(row.status, statusTab)),
+    [q, statusTab],
   );
   const hostRows = useMemo(
-    () => (history?.entries ?? []).filter((entry) => `${entry.title} ${entry.summary ?? ""}`.toLowerCase().includes(q)),
-    [history, q],
+    () => (history?.entries ?? [])
+      .filter((entry) => `${entry.title} ${entry.summary ?? ""}`.toLowerCase().includes(q))
+      .filter((entry) => matchesStatusTab(entry.status, statusTab)),
+    [history, q, statusTab],
   );
 
   const rows = preview ? previewRows : hostRows;
@@ -198,12 +241,21 @@ export function HistoryPage({
             placeholder="搜索对话标题 / 项目 / 分支…"
             onChange={(event) => setQuery(event.target.value)}
           />
+          {/* 状态筛选是纯客户端过滤（已加载会话模型），两种模式行为一致 */}
+          <div className="hist-tabs" role="group" aria-label="按状态筛选会话">
+            {STATUS_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`btn small ${statusTab === tab.id ? "primary" : "outline"}`}
+                aria-pressed={statusTab === tab.id}
+                onClick={() => setStatusTab(tab.id)}
+              >{tab.label}</button>
+            ))}
+          </div>
           {preview
             ? (
               <>
-                <button type="button" className="btn outline" onClick={() => show("演示：筛选只改本页列表，不写 Host", "filter")}>
-                  <Icon name="filter" extra="sm" />筛选
-                </button>
                 <button type="button" className="btn outline" onClick={() => show("演示：导出不会写文件", "export")}>
                   <Icon name="export" extra="sm" />导出
                 </button>
@@ -211,14 +263,9 @@ export function HistoryPage({
               </>
             )
             : (
-              <>
-                <button type="button" className="btn outline" disabled title={CONTRACT.filter}>
-                  <Icon name="filter" extra="sm" />筛选
-                </button>
-                <button type="button" className="btn outline" disabled title={CONTRACT.export}>
-                  <Icon name="export" extra="sm" />导出
-                </button>
-              </>
+              <button type="button" className="btn outline" disabled title={CONTRACT.export}>
+                <Icon name="export" extra="sm" />导出
+              </button>
             )}
         </div>
         {preview
@@ -234,6 +281,10 @@ export function HistoryPage({
                     onRoute("workbench");
                     return;
                   }
+                  if (kind === "unarchive") {
+                    show(`演示：取消归档「${row.title}」不会改 Host`, "archive");
+                    return;
+                  }
                   show(kind === "fork" ? `演示：Fork「${row.title}」不会创建 Thread` : `演示：更多操作不会改 Host`, kind === "fork" ? "fork" : "more");
                 }}
               />
@@ -241,27 +292,26 @@ export function HistoryPage({
             : <HistEmpty text="没有匹配的对话" />)
           : (hostRows.length
             ? hostRows.map((entry) => (
-              <HostHistRow key={entry.historyId} entry={entry} onOpen={() => onSelectThread(entry)} />
+              <HostHistRow
+                key={entry.historyId}
+                entry={entry}
+                onOpen={() => onSelectThread(entry)}
+                onUnarchive={entry.status === "archived" && onUnarchive !== undefined ? () => onUnarchive(entry) : undefined}
+              />
             ))
             : <HistEmpty text={history ? "没有匹配的对话" : "无法读取 session catalog"} />)}
         <div className="sr-only" role="status" aria-live="polite">{live}</div>
       </section>
       <section aria-labelledby="ttHeading">
         <h2 className="tt-heading" id="ttHeading">Time Travel</h2>
+        <p className="muted small tt-desc">「跟踪上游 pi-web 更新到 omp-web」的执行历史。恢复操作会明确区分代码与对话的影响范围。</p>
         {preview ? (
-          <>
-            <p className="muted small tt-desc">「跟踪上游 pi-web 更新到 omp-web」的执行历史。恢复操作会明确区分代码与对话的影响范围。</p>
-            <TimeTravelRail onRestore={(kind) => show(`演示：${TT_RESTORE[kind]}`, "history")} />
-          </>
+          <TimeTravelRail onRestore={(kind) => show(`演示：${TT_RESTORE[kind]}`, "history")} />
         ) : (
-          <>
-            <p className="muted small tt-desc">当前 contract 只提供会话目录；checkpoint / Time Travel 等待 Host read model。</p>
-            <div className="empty">
-              <Icon name="history" />
-              Time Travel 不可用
-              <span className="muted small">{CONTRACT.rewind}</span>
-            </div>
-          </>
+          <div className="empty">
+            <Icon name="history" />
+            当前功能等待后续接入
+          </div>
         )}
       </section>
       <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />

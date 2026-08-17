@@ -96,13 +96,13 @@ function ProviderTestRow({ result }: { result: TestResultView }) {
   );
 }
 
-const ROLE_ICONS: Record<string, string> = {
+export const ROLE_ICONS: Record<string, string> = {
   default: "cpu", smol: "zap", slow: "brain", vision: "eye", plan: "layers",
   designer: "sparkles", commit: "commit", tiny: "box", task: "bot", advisor: "user",
 };
 
 /** 角色列表卡片的主题色（与 models-roles.css 的 .role-row[data-tint] 对应）。 */
-const ROLE_TINTS: Record<string, string> = {
+export const ROLE_TINTS: Record<string, string> = {
   default: "purple", smol: "green", slow: "blue", vision: "violet", plan: "teal",
   designer: "pink", commit: "cyan", tiny: "lime", task: "orange", advisor: "indigo",
 };
@@ -197,7 +197,7 @@ function sortProviders(
     .map((item) => item.provider);
 }
 
-type ModelPickItem = {
+export type ModelPickItem = {
   readonly provider: string;
   readonly id: string;
   readonly selector: string;
@@ -229,7 +229,7 @@ function toPickItem(model: AvailableModelRecord, entry?: ModelCatalogEntry): Mod
   };
 }
 
-function groupModelsByProvider(
+export function groupModelsByProvider(
   models: ReadonlyArray<AvailableModelRecord>,
   providers: ReadonlyArray<ModelProviderRecord>,
 ): ModelPickGroup[] {
@@ -273,7 +273,7 @@ function flattenModelGroups(
   return items;
 }
 
-function ModelPickCaps({ model }: { model: ModelPickItem }) {
+export function ModelPickCaps({ model }: { model: ModelPickItem }) {
   return (
     <span className="rms-option-caps">
       {model.reasoning ? <span className="chip purple xs chip-icon" title="思考"><Icon name="brain" extra="sm" /></span> : null}
@@ -347,7 +347,7 @@ function BrandMark({ id, local, status }: { id: string; local?: boolean; status?
   return <span className={`pv-fallback a-ic ${tone}`} aria-hidden="true"><Icon name={local ? "monitor" : "server"} extra="lg" /></span>;
 }
 
-function ProviderGlyph({ id, local = false }: { id: string; local?: boolean }) {
+export function ProviderGlyph({ id, local = false }: { id: string; local?: boolean }) {
   if (id && hasBrand(id)) return <Brand id={id} extra="sm" />;
   return <Icon name={local ? "monitor" : "server"} extra="sm" />;
 }

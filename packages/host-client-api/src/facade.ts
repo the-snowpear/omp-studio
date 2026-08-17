@@ -59,6 +59,7 @@ import type {
   ModelConfigReadModel,
   ModelDiscoveryResult,
   ModelProviderTestResult,
+  OperatorInvokeOutcome,
   PlatformId,
   PublicAuthorityIdentity,
   QueryName,
@@ -69,6 +70,7 @@ import type {
   RuntimeInstallState,
   SessionHistoryEntry,
   SessionHistoryReadModel,
+  SessionHistoryStatus,
   SessionId,
   StateVersion,
   SubscriptionScope,
@@ -88,15 +90,24 @@ import type {
 } from "@omp-studio/client-contract";
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 import type {
+  AgentTranscriptPage,
   CapabilityManifest,
   CommandLedgerEntry,
   ConversationTranscriptPage,
   OperatorCommandManifest,
   OperatorStateSnapshot,
   RuntimeInstallationManifest,
+  SessionTelemetryReadResult,
+  SessionTelemetrySnapshot,
 } from "@omp-studio/studio-protocol";
 import type { StudioOperation } from "@omp-studio/studio-protocol";
-import { canonicalJson, parseConversationRuntimeEvent, parseConversationTranscriptPage } from "@omp-studio/studio-protocol";
+import {
+  canonicalJson,
+  parseConversationRuntimeEvent,
+  parseConversationTranscriptPage,
+  parseSessionTelemetryReadResult,
+  parseSessionTelemetrySnapshot,
+} from "@omp-studio/studio-protocol";
 import type { HostBackend, RuntimePublication, StudioConversationForward, StudioInteractionForward, StudioTelemetryForward } from "@omp-studio/studio-host";
 
 import {
@@ -129,6 +140,9 @@ import {
   type HostSemanticCommandService,
   type HostSessionCatalogProvider,
   type HostSessionArchiveProvider,
+  type HostSessionTelemetryProbePort,
+  type HostSessionTelemetryStorePort,
+  type HostTelemetryProbeWorkspacePort,
   type HostUsageService,
   type HostWorkspaceService,
   type HostWorkspaceFileService,
@@ -188,6 +202,14 @@ export interface StudioHostClientFacadeOptions {
   readonly catalog: HostSessionCatalogProvider;
   /** Optional Runtime-independent persistent transcript reader. */
   readonly archive?: HostSessionArchiveProvider;
+  /** Optional "last observed" telemetry persistence for archived sessions. */
+  readonly telemetryStore?: HostSessionTelemetryStorePort;
+  /** Optional one-shot OMP probe for archived-session telemetry. */
+  readonly telemetryProbe?: HostSessionTelemetryProbePort;
+  /** Optional scratch-directory factory for probe transcript copies. */
+  readonly telemetryProbeWorkspace?: HostTelemetryProbeWorkspacePort;
+  /** Resolves the active workspace cwd used to scope probe requests. */
+  readonly workspaceCwd?: () => string | undefined;
   readonly diagnostics: HostDiagnosticsFactory;
   readonly install: HostRuntimeInstallService;
   /** Optional semantic service for session.resume/drop and interaction.respond. */
@@ -404,6 +426,21 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (options.archive !== undefined && typeof options.archive.readPage !== "function") {
     throw new TypeError("facade session archive provider must expose readPage");
   }
+  if (options.telemetryStore !== undefined && typeof options.telemetryStore.record !== "function") {
+    throw new TypeError("facade telemetry store must expose record");
+  }
+  if (options.telemetryProbe !== undefined && typeof options.telemetryProbe.run !== "function") {
+    throw new TypeError("facade telemetry probe must expose run");
+  }
+  if (
+    options.telemetryProbeWorkspace !== undefined &&
+    (typeof options.telemetryProbeWorkspace.create !== "function" || typeof options.telemetryProbeWorkspace.remove !== "function")
+  ) {
+    throw new TypeError("facade telemetry probe workspace must expose create and remove");
+  }
+  if (options.workspaceCwd !== undefined && typeof options.workspaceCwd !== "function") {
+    throw new TypeError("facade workspace cwd resolver must be a function");
+  }
   if (options.diagnostics === null || typeof options.diagnostics.now !== "function" || typeof options.diagnostics.newEntryId !== "function") {
     throw new TypeError("facade diagnostics factory is required");
   }
@@ -432,6 +469,9 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (runtime?.readTranscript !== undefined && typeof runtime.readTranscript !== "function") {
     throw new TypeError("facade runtime readTranscript must be a function");
   }
+  if (runtime?.readAgentConversation !== undefined && typeof runtime.readAgentConversation !== "function") {
+    throw new TypeError("facade runtime readAgentConversation must be a function");
+  }
   if (runtime?.onInteractionEvent !== undefined && typeof runtime.onInteractionEvent !== "function") {
     throw new TypeError("facade runtime interaction hook must be a function");
   }
@@ -452,6 +492,7 @@ export class StudioHostClientFacade implements ClientTransport {
   #unsubscribeTelemetry: Unsubscribe | undefined;
   #unsubscribeInteraction: Unsubscribe | undefined;
   #unsubscribeGitProgress: Unsubscribe | undefined;
+  #unsubscribeGitExternal: Unsubscribe | undefined;
   #unsubscribeGithubProgress: Unsubscribe | undefined;
   #closed = false;
   #lastHello: HostRuntimeHelloView | undefined;
@@ -479,6 +520,12 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#bindInteraction();
     this.#unsubscribeGitProgress = options.git?.onProgress?.((progress) => {
       this.#bus.emit({ kind: "operation.progress", progress });
+    });
+    this.#unsubscribeGitExternal = options.git?.onExternalRepositoryChange?.((change) => {
+      this.#bus.emit({
+        kind: "git.repository.changed",
+        repository: { workspaceId: change.workspaceId, reason: "external" },
+      });
     });
     this.#unsubscribeGithubProgress = options.github?.onProgress?.((progress) => {
       this.#bus.emit({ kind: "operation.progress", progress });
@@ -568,7 +615,7 @@ export class StudioHostClientFacade implements ClientTransport {
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "history.list": {
-        const result = await this.#queryHistory(request.input as { readonly limit?: number });
+        const result = await this.#queryHistory(request.input as { readonly limit?: number; readonly status?: SessionHistoryStatus });
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "session.state": {
@@ -613,9 +660,22 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryTranscript(request.input as { readonly cursor?: OpaqueCursor; readonly limit?: number });
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "agent.transcript.read": {
+        const result = await this.#queryAgentTranscript(request.input as { readonly agentId: string; readonly cursor?: OpaqueCursor; readonly limit?: number });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "agent.conversation.read": {
+        const result = await this.#queryAgentConversation(request.input as { readonly agentId: string; readonly cursor?: OpaqueCursor; readonly limit?: number });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "session.transcript.readPage": {
         const archiveRequest = request as ClientQueryRequest<"session.transcript.readPage">;
         const result = await this.#queryArchiveTranscript(archiveRequest.input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.telemetry.read": {
+        const telemetryRequest = request as ClientQueryRequest<"session.telemetry.read">;
+        const result = await this.#querySessionTelemetry(telemetryRequest.input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "git.toolchain.get": {
@@ -641,6 +701,18 @@ export class StudioHostClientFacade implements ClientTransport {
       case "git.remotes.list": {
         const service = this.#requireGit(request.queryName);
         return { ok: true, queryName: request.queryName, result: await service.remotes(request.input as { readonly workspaceId: WorkspaceId }) } as ClientQueryResponse;
+      }
+      case "git.log.list": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.log(request.input as { readonly workspaceId: WorkspaceId; readonly limit?: number; readonly skip?: number }) } as ClientQueryResponse;
+      }
+      case "git.commit.changes": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.commitChanges(request.input as { readonly workspaceId: WorkspaceId; readonly oid: string }) } as ClientQueryResponse;
+      }
+      case "git.commit.diff": {
+        const service = this.#requireGit(request.queryName);
+        return { ok: true, queryName: request.queryName, result: await service.commitDiff(request.input as { readonly workspaceId: WorkspaceId; readonly oid: string; readonly path: string }) } as ClientQueryResponse;
       }
       case "github.auth.get": {
         const service = this.#requireGithub(request.queryName);
@@ -687,6 +759,10 @@ export class StudioHostClientFacade implements ClientTransport {
       case "session.drop": {
         const dropRequest = request as ClientCommandRequest<"session.drop">;
         return this.#commandDrop(dropRequest);
+      }
+      case "session.archive":
+      case "session.unarchive": {
+        return this.#commandArchiveToggle(request as ClientCommandRequest<"session.archive" | "session.unarchive">);
       }
       case "interaction.respond": {
         const respondRequest = request as ClientCommandRequest<"interaction.respond">;
@@ -824,7 +900,7 @@ export class StudioHostClientFacade implements ClientTransport {
     return accepted;
   }
 
-  async #runP4Command(run: () => OperatorStateSnapshot | Promise<OperatorStateSnapshot>, requestId: CommandRequestId, commandName: CommandName): Promise<void> {
+  async #runP4Command(run: () => OperatorStateSnapshot | OperatorInvokeOutcome | Promise<OperatorStateSnapshot | OperatorInvokeOutcome>, requestId: CommandRequestId, commandName: CommandName): Promise<void> {
     try {
       const result = await run();
       this.#emitTerminal(requestId, { requestId, commandName, status: "completed", result, observedAt: this.#options.diagnostics.now() } as CommandReceipt);
@@ -858,9 +934,15 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#unsubscribeInteraction = undefined;
     this.#unsubscribeGitProgress?.();
     this.#unsubscribeGitProgress = undefined;
+    this.#unsubscribeGitExternal?.();
+    this.#unsubscribeGitExternal = undefined;
     this.#unsubscribeGithubProgress?.();
     this.#unsubscribeGithubProgress = undefined;
     this.#bus.close();
+    const store = this.#options.telemetryStore;
+    if (store !== undefined) {
+      void store.flush().catch(() => {});
+    }
   }
 
   #assertOpen(): void {
@@ -1090,6 +1172,7 @@ export class StudioHostClientFacade implements ClientTransport {
       sessionId: event.sessionId as SessionId,
       telemetry: event.telemetry,
     });
+    this.#options.telemetryStore?.record(event.sessionId, event.telemetry);
   }
 
   #bindInteraction(): void {
@@ -1173,11 +1256,8 @@ export class StudioHostClientFacade implements ClientTransport {
       this.#recordConversationDiagnostic("Dropped a malformed conversation event; transcript resync is required");
       this.#bus.emit({
         kind: "resync.required",
-        reason: "conversation mapping failed; re-query session.transcript.read",
+        reason: "conversation mapping failed; re-read open transcripts",
       });
-      return;
-    }
-    if (update.sessionId !== snapshot.sessionId) {
       return;
     }
     this.#bus.emit({
@@ -1326,14 +1406,18 @@ export class StudioHostClientFacade implements ClientTransport {
     return buildDiagnosticsReadModel(now, { ...this.#options.authority }, entries);
   }
 
-  async #queryHistory(input: { readonly limit?: number }): Promise<SessionHistoryReadModel> {
+  async #queryHistory(input: { readonly limit?: number; readonly status?: SessionHistoryStatus }): Promise<SessionHistoryReadModel> {
     const requested = input.limit ?? HISTORY_DEFAULT_LIMIT;
     if (!Number.isSafeInteger(requested) || requested < 1) {
       throw clientError("INVALID_ARGUMENT", "history limit must be a positive integer");
     }
+    if (input.status !== undefined && input.status !== "active" && input.status !== "archived" && input.status !== "closed") {
+      throw clientError("INVALID_ARGUMENT", "history status must be active, archived or closed");
+    }
     const limit = Math.min(requested, HISTORY_MAX_LIMIT);
     const catalog = await this.#options.catalog.list();
-    const sorted = [...catalog].sort(
+    const filtered = input.status === undefined ? catalog : catalog.filter((entry) => entry.status === input.status);
+    const sorted = [...filtered].sort(
       (left, right) => right.modifiedAt.localeCompare(left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
     );
     const entries = sorted.map((entry) => this.#mapHistoryEntry(entry));
@@ -1374,7 +1458,9 @@ export class StudioHostClientFacade implements ClientTransport {
       throw unavailableError("home.get requires a Runtime snapshot");
     }
     const catalog = await this.#options.catalog.list();
+    // Archived sessions are not resumable; the home page only offers live threads.
     const recentThreads = [...catalog]
+      .filter((entry) => entry.status !== "archived")
       .sort(
         (left, right) => right.modifiedAt.localeCompare(left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
       )
@@ -1471,6 +1557,164 @@ export class StudioHostClientFacade implements ClientTransport {
     } catch (error) {
       throw toClientError(error);
     }
+  }
+
+  async #queryAgentTranscript(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<AgentTranscriptPage> {
+    const snapshot = this.#currentSnapshot();
+    if (snapshot === undefined) {
+      throw unavailableError("agent.transcript.read requires a connected Runtime");
+    }
+    const reader = this.#options.runtime?.readAgentTranscript;
+    const session = this.#runtimeSession();
+    if (reader === undefined && (session === undefined || session.readAgentTranscript === undefined)) {
+      throw unavailableError("agent.transcript.read requires a connected Runtime");
+    }
+    const run =
+      reader === undefined
+        ? session!.readAgentTranscript!.bind(session!)
+        : () => reader(input);
+    try {
+      return await run(input);
+    } catch (error) {
+      throw toClientError(error);
+    }
+  }
+
+  async #queryAgentConversation(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptPage> {
+    const snapshot = this.#currentSnapshot();
+    if (snapshot === undefined) {
+      throw unavailableError("agent.conversation.read requires a connected Runtime");
+    }
+    const reader = this.#options.runtime?.readAgentConversation;
+    const session = this.#runtimeSession();
+    if (reader === undefined && (session === undefined || session.readAgentConversation === undefined)) {
+      throw unavailableError("agent.conversation.read requires a connected Runtime");
+    }
+    const run =
+      reader === undefined
+        ? session!.readAgentConversation!.bind(session!)
+        : () => reader(input);
+    try {
+      return await run(input);
+    } catch (error) {
+      throw toClientError(error);
+    }
+  }
+
+  /**
+   * Read-only session telemetry with provenance. Priority: live Runtime
+   * snapshot → persisted "last observed" record (exact archive revision) →
+   * one-shot OMP probe over a temporary transcript copy. The probe copy and
+   * any absolute path stay Host-internal.
+   */
+  async #querySessionTelemetry(input: { readonly sessionId: SessionId }): Promise<SessionTelemetryReadResult> {
+    const archive = this.#options.archive;
+    if (archive === undefined || archive.readRevision === undefined || archive.createProbeCopy === undefined) {
+      throw unavailableError("session.telemetry.read requires the session archive");
+    }
+    const liveSnapshot = this.#currentSnapshot();
+    if (liveSnapshot !== undefined && liveSnapshot.sessionId === input.sessionId && liveSnapshot.telemetry !== undefined) {
+      return this.#telemetryReadResult(input.sessionId, "live", "current-live", liveSnapshot.telemetry);
+    }
+    let revision: { sessionId: string; transcriptRevision: string };
+    try {
+      revision = await archive.readRevision(input.sessionId);
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === "SESSION_NOT_FOUND") {
+        throw unavailableError("session is not available");
+      }
+      throw toClientError(error);
+    }
+    if (revision.sessionId !== input.sessionId) {
+      throw unavailableError("session is not available");
+    }
+    const store = this.#options.telemetryStore;
+    if (store !== undefined) {
+      const persisted = await this.#readPersistedTelemetry(store, input.sessionId, revision.transcriptRevision);
+      if (persisted !== undefined) {
+        return this.#telemetryReadResult(input.sessionId, "persisted", "last-observed", persisted);
+      }
+    }
+    const probed = await this.#probeSessionTelemetry(input.sessionId, revision.transcriptRevision);
+    if (probed !== undefined) return probed;
+    throw unavailableError("session telemetry is not available for this session");
+  }
+
+  async #readPersistedTelemetry(
+    store: { read(sessionId: string, revision: string): Promise<unknown> },
+    sessionId: SessionId,
+    revision: string,
+  ): Promise<SessionTelemetrySnapshot | undefined> {
+    try {
+      const record = (await store.read(sessionId, revision)) as { telemetry?: unknown } | undefined;
+      if (record === undefined || record.telemetry === undefined) return undefined;
+      const telemetry = parseSessionTelemetrySnapshot(record.telemetry);
+      return telemetry.sessionId === sessionId ? telemetry : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #probeSessionTelemetry(sessionId: SessionId, transcriptRevision: string): Promise<SessionTelemetryReadResult | undefined> {
+    const probe = this.#options.telemetryProbe;
+    const workspace = this.#options.telemetryProbeWorkspace;
+    const archive = this.#options.archive;
+    const allowedCwd = this.#options.workspaceCwd?.();
+    if (
+      probe === undefined ||
+      workspace === undefined ||
+      archive?.createProbeCopy === undefined ||
+      allowedCwd === undefined ||
+      allowedCwd.length === 0
+    ) {
+      return undefined;
+    }
+    let directory: string | undefined;
+    try {
+      directory = await workspace.create();
+      const copy = await archive.createProbeCopy(sessionId, directory);
+      const outcome = await probe.run({
+        sessionId,
+        sessionFile: copy.temporarySessionFile,
+        allowedCwd,
+        transcriptRevision,
+      });
+      if (!outcome.ok) return undefined;
+      const telemetry = parseSessionTelemetrySnapshot(outcome.telemetry);
+      if (telemetry.sessionId !== sessionId) return undefined;
+      // The Runtime may have resumed this exact session while the probe ran;
+      // live data wins over a recomputed archive estimate.
+      const liveSnapshot = this.#currentSnapshot();
+      if (liveSnapshot !== undefined && liveSnapshot.sessionId === sessionId && liveSnapshot.telemetry !== undefined) {
+        return this.#telemetryReadResult(sessionId, "live", "current-live", liveSnapshot.telemetry);
+      }
+      return this.#telemetryReadResult(sessionId, "archive-recomputed", "current-environment-recomputed", telemetry);
+    } catch {
+      return undefined;
+    } finally {
+      if (directory !== undefined) await workspace.remove(directory).catch(() => {});
+    }
+  }
+
+  #telemetryReadResult(
+    sessionId: SessionId,
+    source: "live" | "persisted" | "archive-recomputed",
+    semantics: "current-live" | "last-observed" | "current-environment-recomputed",
+    telemetry: unknown,
+  ): SessionTelemetryReadResult {
+    const snapshot = parseSessionTelemetrySnapshot(telemetry);
+    if (snapshot.sessionId !== sessionId) {
+      throw unavailableError("session telemetry identity mismatch");
+    }
+    return parseSessionTelemetryReadResult({ sessionId, source, semantics, telemetry: snapshot });
   }
 
   async #querySkills(): Promise<ExtensibilityReadModel> {
@@ -1602,6 +1846,73 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #commandDrop(request: ClientCommandRequest<"session.drop">): Promise<ClientCommandAccepted<"session.drop">> {
     return this.#commandSemantic(request, "session.drop");
+  }
+
+  /**
+   * `session.archive` / `session.unarchive`: Host-owned cold-archive moves
+   * that never touch the Runtime. Like the other semantic commands they need
+   * an explicit injected service and fail closed without one, but no Runtime
+   * snapshot is required — the catalog and archive trees are disk state.
+   */
+  async #commandArchiveToggle(
+    request: ClientCommandRequest<"session.archive" | "session.unarchive">,
+  ): Promise<ClientCommandAccepted<"session.archive" | "session.unarchive">> {
+    validateEnvelope(request);
+    const service = this.#options.commands;
+    if (service === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        `${request.commandName} is not available: no semantic command service is wired`,
+      );
+    }
+    const run = request.commandName === "session.archive" ? service.archive : service.unarchive;
+    if (run === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available`);
+    }
+    if (!isThreadCommandInput(request.input)) {
+      throw clientError("INVALID_ARGUMENT", `${request.commandName} threadId must not be empty`);
+    }
+    const threadId = request.input.threadId;
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = {
+      commandName: request.commandName,
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runArchiveToggle(() => run({ threadId }), request.requestId, request.commandName);
+    return accepted;
+  }
+
+  async #runArchiveToggle(
+    run: () => ConfigWriteResult | Promise<ConfigWriteResult>,
+    requestId: CommandRequestId,
+    commandName: "session.archive" | "session.unarchive",
+  ): Promise<void> {
+    try {
+      const result = await run();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName,
+        status: "completed",
+        result,
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    } catch (error) {
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName,
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      } as CommandReceipt);
+    }
   }
 
   async #commandRespond(request: ClientCommandRequest<"interaction.respond">): Promise<ClientCommandAccepted<"interaction.respond">> {

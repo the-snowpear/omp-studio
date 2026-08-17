@@ -17,6 +17,8 @@ import type { SessionTelemetrySnapshot } from "./telemetry";
 export interface PlanState {
   status: "off" | "active" | "paused" | "review";
   planReference?: string;
+  title?: string;
+  body?: string;
 }
 
 export interface GoalState {
@@ -35,6 +37,52 @@ export interface LoopState {
   status: "waiting" | "running" | "paused";
   prompt?: string;
   iterations?: number;
+}
+
+export interface FastState {
+  /** User-facing toggle (`/fast on`). */
+  enabled: boolean;
+  /** Whether the active model currently realizes priority/fast. */
+  active?: boolean;
+}
+
+export interface PrewalkState {
+  status: "off" | "armed" | "active";
+  target?: string;
+}
+
+/**
+ * Session thinking selectors the Runtime accepts and reports. `auto` is a
+ * session-only mode (per-turn classification) and is never a `provider/model`
+ * suffix; `inherit` is excluded because it resolves back to the provider
+ * default instead of expressing an operator selection.
+ */
+export const SESSION_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type SessionThinkingLevel = (typeof SESSION_THINKING_LEVELS)[number];
+
+export const SESSION_THINKING_SELECTORS = [...SESSION_THINKING_LEVELS, "auto"] as const;
+
+export type SessionThinkingSelector = (typeof SESSION_THINKING_SELECTORS)[number];
+
+/** Active model of the shared session. Never carries provider credentials. */
+export interface SessionModelState {
+  /** Canonical `provider/id` selector. */
+  selector: string;
+  provider: string;
+  id: string;
+  /** Effective level for the next request; absent when reasoning is disabled. */
+  thinking?: SessionThinkingLevel;
+  /** What the operator selected: a concrete level or `auto`. */
+  configuredThinking?: SessionThinkingSelector;
 }
 
 export interface PauseState {
@@ -62,6 +110,10 @@ export interface OperatorStateSnapshot {
   goal?: GoalState;
   vibe?: VibeState;
   loop?: LoopState;
+  /** Active session model; absent before the first model resolves. */
+  model?: SessionModelState;
+  fast?: FastState;
+  prewalk?: PrewalkState;
   pause?: PauseState;
   live?: LiveState;
   pendingMessages: number;

@@ -388,25 +388,47 @@
   gap: var(--sp-8);
   align-items: center;
 }
+.toast-wrap.is-top {
+  top: 52px;
+  bottom: auto;
+}
 .toast {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-8);
+  max-width: min(560px, calc(100vw - 48px));
   background: var(--surface);
   border: 1px solid var(--border-float);
   border-radius: var(--r-8);
   box-shadow: var(--shadow-menu);
   padding: 8px var(--sp-14);
   font-size: var(--fs-12);
+  line-height: 1.45;
   color: var(--text);
   animation: omp-toast-in var(--dur-toast) var(--ease-out);
 }
+.toast > .icon { flex: none; margin-top: 1px; }
+.toast > span { min-width: 0; }
 .toast.leaving {
   animation: omp-toast-out var(--dur-toast) var(--ease-in) forwards;
 }
 @keyframes omp-toast-in {
   from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: none; }
+}
+.toast-wrap.is-top .toast {
+  animation-name: omp-toast-in-top;
+}
+.toast-wrap.is-top .toast.leaving {
+  animation-name: omp-toast-out-top;
+}
+@keyframes omp-toast-in-top {
+  from { opacity: 0; transform: translateY(-14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes omp-toast-out-top {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-14px); }
 }
 @keyframes omp-toast-out {
   from { opacity: 1; transform: none; }
@@ -423,7 +445,8 @@
      content but below modal and toast. */
 [data-tip] { position: relative; }
 [data-tip]:hover::after,
-[data-tip]:focus-visible::after {
+[data-tip]:focus-visible::after,
+.git-tip:focus-within::after {
   content: attr(data-tip);
   position: absolute;
   bottom: calc(100% + 6px);
@@ -442,6 +465,9 @@
   text-align: center;
   z-index: var(--z-menu);
   pointer-events: none;
+  /* 悬停意图延迟：backwards 让延迟期间保持不可见，指针快速扫过时
+     标签不会闪现；离开即消失，无退场动画。 */
+  animation: omp-fade-in var(--dur-fast) var(--ease-out) var(--tip-delay) backwards;
 }
 
 /* 靠近视口顶部的区域：tooltip 显示在元素下方，避免被屏幕顶边裁切 */
@@ -519,6 +545,16 @@
   cursor: default;
 }
 .input[aria-invalid="true"], .select[aria-invalid="true"] { border-color: var(--red); }
+/* Full Access 权限模式选中时：警告橙红描边/文字，聚焦光晕同色系 */
+.select.danger {
+  color: var(--danger-orange);
+  border-color: color-mix(in srgb, var(--danger-orange) 45%, transparent);
+}
+.select.danger:focus,
+.select.danger:focus-visible {
+  box-shadow: 0 0 0 3px var(--danger-orange-soft),
+              0 0 14px 1px color-mix(in srgb, var(--danger-orange) 20%, transparent);
+}
 textarea.input { height: auto; min-height: 72px; padding: var(--sp-8) var(--sp-10); resize: vertical; }
 
 /* Switch.

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { CommandRequestId, IdempotencyKey, ThreadId } from "@omp-studio/client-contract";
+import type { ClientEvent, CommandRequestId, IdempotencyKey, ThreadId } from "@omp-studio/client-contract";
 import { threadIdFor } from "@omp-studio/host-client-api";
 import type { HostRuntimeHelloView } from "@omp-studio/host-client-api";
 import { privateEndpoint, type PlatformPort } from "@omp-studio/platform";
@@ -168,13 +168,18 @@ function liveSession(initial: OperatorStateSnapshot = SNAPSHOT): LiveHandle {
       refresh: async () => ({ commitSeq: 1, publishedAt: T0, snapshot: handle.snapshot, terminalOutcomes: [] }),
       invoke: async (request: StudioRequest): Promise<StudioReceipt> => {
         handle.invokes.push(request);
-        return {
+        const operation = "operation" in request ? request.operation : undefined;
+        const receipt: StudioReceipt = {
           type: "studio.receipt",
           requestId: request.requestId,
           runtimeEpoch: handle.snapshot.runtimeEpoch,
           stateVersion: handle.snapshot.stateVersion,
           status: "completed",
         };
+        if (operation !== undefined && operation.kind === "operator.invoke") {
+          receipt.result = { output: ["Session exported to: omp-session-x.html"], result: { consumed: true } };
+        }
+        return receipt;
       },
       runtimeLost: () => [],
       publication: () => ({ commitSeq: 1, publishedAt: T0, snapshot: handle.snapshot, terminalOutcomes: [] }),
@@ -303,6 +308,56 @@ test("P4 invoke forwards the client requestId instead of minting gui-* ids", asy
     await waitUntil(() => live.invokes.length === 1);
     assert.equal(live.invokes[0]?.requestId, requestId);
     assert.equal(String(live.invokes[0]?.requestId).startsWith("gui-"), false);
+  });
+});
+
+test("core.abort omits expectedStateVersion so a live turn can be interrupted", async () => {
+  await withReady(async ({ composition, live }) => {
+    live.setSnapshot({ ...live.snapshot, isStreaming: true, stateVersion: 4 as StateVersion });
+    await composition.facade.command({
+      commandName: "core.abort",
+      input: {},
+      idempotencyKey: "idem-abort-1" as IdempotencyKey,
+      requestId: "client-req-abort-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    const abort = live.invokes[0];
+    assert.equal(abort?.operation.kind, "core.abort");
+    assert.equal("expectedStateVersion" in (abort ?? {}), false);
+
+    await composition.facade.command({
+      commandName: "core.prompt",
+      input: { text: "after" },
+      idempotencyKey: "idem-prompt-fenced" as IdempotencyKey,
+      requestId: "client-req-prompt-fenced" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 2);
+    assert.equal(live.invokes[1]?.operation.kind, "core.prompt");
+    assert.equal(live.invokes[1]?.expectedStateVersion, live.snapshot.stateVersion);
+  });
+});
+
+test("operator.invoke completion carries the command output envelope", async () => {
+  await withReady(async ({ composition, live }) => {
+    const events: ClientEvent[] = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    await composition.facade.command({
+      commandName: "operator.invoke",
+      input: { commandId: "builtin.export" },
+      idempotencyKey: "idem-invoke-export" as IdempotencyKey,
+      requestId: "client-req-export-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    await waitUntil(() => events.some((event) => event.kind === "command.receipt"));
+    const receiptEvent = events.find((event) => event.kind === "command.receipt");
+    assert.equal(receiptEvent?.kind, "command.receipt");
+    if (receiptEvent?.kind !== "command.receipt") return;
+    assert.equal(receiptEvent.receipt.status, "completed");
+    assert.deepEqual(receiptEvent.receipt.result, {
+      snapshot: live.snapshot,
+      output: ["Session exported to: omp-session-x.html"],
+      result: { consumed: true },
+    });
   });
 });
 

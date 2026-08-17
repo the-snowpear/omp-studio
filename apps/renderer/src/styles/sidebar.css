@@ -92,6 +92,14 @@
 .sb-brand .name { font-weight: var(--fw-semibold); font-size: var(--fs-14); }
 .sb-top .icon-btn { width: 28px; height: 28px; }
 
+/* 左上应用菜单弹层：portal 到 body，JS 按锚点定位并做视口钳制，
+   覆盖 .menu 的 absolute 定位（min-width 240px 对齐 ver1）。 */
+.app-menu-popover {
+  position: fixed;
+  min-width: 240px;
+  z-index: var(--z-menu);
+}
+
 /* ---------- 区域通用头 ---------- */
 .sb-section { display: flex; flex-direction: column; min-height: 0; }
 .sb-section-head {
@@ -245,16 +253,168 @@
   display: flex;
   align-items: center;
   gap: var(--sp-6);
+  width: 100%;
+  min-width: 0;
   padding: 6px var(--sp-8) 6px 26px;
   border-radius: var(--r-6);
   cursor: pointer;
   position: relative;
+  overflow: hidden;
+  text-align: left;
 }
 .thread:hover { background: var(--surface-hover); }
+/* 悬停高亮挂整行（与 .project-head-row 同规则）：指针移到右侧操作按钮上时
+   行背景不熄灭。active 行悬停仍保持 accent-soft。 */
+.thread-row:hover .thread { background: var(--surface-hover); }
+.thread-row:hover .thread.active { background: var(--accent-soft); }
 .thread.active { background: var(--accent-soft); }
 .thread.active .t-title { color: var(--accent); font-weight: var(--fw-medium); }
-.thread .t-title { flex: 1; min-width: 0; font-size: var(--fs-12); }
-.thread .t-meta { font-size: 10.5px; color: var(--text-faint); flex: none; }
+/* 会话行外壳：thread 是 button，归档/更多操作按钮不能嵌在里面（嵌套交互
+   元素非法），平铺为兄弟节点后用绝对定位浮在行右侧。 */
+.thread-row { position: relative; display: flex; align-items: center; }
+.thread-row .thread { flex: 1 1 0; width: auto; }
+/* 悬停操作区：最右「归档」，其左「⋯ 更多」。仅 :hover 显现——点击选中
+   会话后行按钮持有焦点，若用 :focus-within 会让选中行一直挂着操作按钮。
+   常驻布局 + opacity/visibility 过渡：隐藏时不可聚焦也不挡点击；
+   显隐与标题/时间戳的淡出用同一时长和曲线，交叉渐变不打架。 */
+.t-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  position: absolute;
+  right: var(--sp-4);
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-out), visibility var(--dur-fast) var(--ease-out);
+}
+.thread-row:hover .t-actions {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+/* 悬停行抬升一层：.t-actions 的 transform 让它自成层叠上下文，气泡的
+   z-index(--z-menu) 只在该上下文内有效；后续 .thread-row 同为 positioned、
+   按 DOM 顺序后绘，会把向下弹出的 tip 盖住，看起来像 tip 半透明透出下一行。
+   悬停/聚焦时把整行提到 z-index:1，气泡恢复盖在相邻行之上。 */
+.thread-row:hover,
+.thread-row:focus-within { z-index: 1; }
+.t-actions .icon-btn { width: 20px; height: 20px; }
+/* 悬停态坐标推导（相对【行】右缘，再换算到【标题盒】右缘）：
+   .t-actions 距行右缘 4px（--sp-4），宽 42px（20 + 2 + 20），
+   ⋯ 左缘 = 4 + 42 = 46px；加 2px 余量 → 完全透明点在行右缘 48px 处。
+   时间戳收 0 后，标题右缘距行右缘 = .thread 右内边距 8px（--sp-8），
+   换算标题坐标：clear = 48 - 8 = 40px，带宽 18px → fade = 58px。
+   即：文字恰好在 ⋯ 按钮左缘前完全消失，之前保持可见。 */
+.thread-row:hover .t-meta { opacity: 0; max-width: 0; }
+.thread-row:hover .t-title {
+  --title-fade: 58px;
+  --title-clear: 40px;
+}
+/* 等待胶囊（待确认 / 待审核 / 待回答）：钉在行最右，盖住归档键。
+   宽约 46px（chip.xs 三字）+ 右缘 4px → 左缘距行右 50px。
+   标题盒右缘距行右 8px → clear=42、fade=60。悬停仍以胶囊为准，
+   不改走操作按钮那套 58/40。 */
+.thread-row.has-wait .t-title,
+.thread-row.has-wait:hover .t-title {
+  --title-fade: 60px;
+  --title-clear: 42px;
+}
+@property --title-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 18px;
+}
+@property --title-clear {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+/* 悬停自动滚读：长标题被右侧操作按钮遮挡时，文本滑到「尾端抵达渐隐带
+   起点」为止（完全可读的右边界），到头即停、不循环。终点位移在【悬停态
+   声明】里计算：100cqw = 标题盒宽 C（.t-title 的 container-type 提供），
+   transform 的 100% = 文本自身宽 W，终点 = C − W − 58px（58 = 悬停态
+   渐隐带宽，用字面量：--title-fade 注册为 inherits:false，子元素取不到）；
+   未溢出时被 min() 钳到 0，短标题纹丝不动（长标题位移为负 = 向左滚，
+   短标题为正 = 恒为 0）。
+   用 transition 而不是 @keyframes：cqw 写进 keyframes 时 Chromium 可能
+   回退按视口解析，终点恒为正、被钳 0，表现为完全不动；普通声明里的
+   cqw 在 computed-value 阶段稳定按容器解析。transition 只挂在悬停态，
+   移开悬停基态无过渡，瞬时复位；延时 800ms 比 tooltip 的意图确认
+   （--tip-delay 500ms）再晚一拍，确认是真的在阅读这行才开始滚。 */
+.thread .t-scroll {
+  display: inline-block;
+  white-space: nowrap;
+}
+.thread-row:hover .t-scroll {
+  transform: translateX(min(100cqw - 100% - 58px, 0px));
+  transition: transform 3s linear 800ms;
+}
+.thread-row.has-wait:hover .t-scroll {
+  transform: translateX(min(100cqw - 100% - 60px, 0px));
+}
+/* 会话行的行内 tip 与项目行同规则：列表区 overflow 隐藏，向下弹、右对齐。 */
+.thread-row [data-tip]:hover::after,
+.thread-row [data-tip]:focus-visible::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: auto;
+  right: 0;
+  transform: none;
+}
+/* 「展开更多」：第 7 位起的出现口，与 .thread 同左缩进。 */
+.load-more {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 2px 26px;
+  padding: 4px var(--sp-8);
+  border-radius: var(--r-6);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  cursor: pointer;
+  text-align: left;
+}
+.load-more:hover { background: var(--surface-hover); color: var(--text-2); }
+.load-more .lm-count { margin-left: auto; color: var(--text-faint); font-size: 10.5px; }
+.thread .t-title {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--fs-12);
+  /* 容器上下文：给 .t-scroll 的 100cqw 提供标题盒宽。宽度本就来自
+     flex 分配（flex:1 1 0 + min-width:0），不依赖内容，inline-size
+     包含在此无副作用。 */
+  container-type: inline-size;
+  /* 右缘渐隐遮罩的两端做成变量，坐标相对【标题盒】右缘：--title-fade 是
+     渐隐带起点（不透明边界），--title-clear 是完全透明点，带宽 18px。
+     常态 clear=0：渐隐到标题右缘，只负责截断软化。悬停态换算见下方
+     .thread-row:hover 覆盖处的坐标推导。@property 注册后两个长度随
+     transition 平滑滑动；不支持的环境退化为瞬切，遮罩仍生效。 */
+  --title-fade: 18px;
+  --title-clear: 0px;
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--title-fade)), transparent calc(100% - var(--title-clear)));
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--title-fade)), transparent calc(100% - var(--title-clear)));
+  transition: --title-fade var(--dur-fast) var(--ease-out), --title-clear var(--dur-fast) var(--ease-out);
+}
+.thread .t-meta {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  /* 悬停时宽度收到 0（与图标淡入同步），让标题右缘到行右缘的距离恒为
+     .thread 的 8px 右内边距——标题遮罩坐标才有精确解。max-width 用 80px
+     上限（shrink-to-fit，常态不影响实际宽度），overflow 防收窄时换行。 */
+  overflow: hidden;
+  max-width: 80px;
+  transition: opacity var(--dur-fast) var(--ease-out), max-width var(--dur-fast) var(--ease-out);
+}
 /* Pinned marker. Was a 📌 emoji inline in the title string: font-dependent,
    uncontrollable by token, and it rendered full-colour against a monochrome
    sidebar. Now the same vector set as every other icon. */
@@ -266,7 +426,23 @@
   color: var(--text-3);
 }
 .thread .t-badges { display: flex; gap: 3px; align-items: center; flex: none; }
-.thread .t-approval { flex: none; }
+/* 会话行最右等待胶囊：绝对定位盖住归档键，图层高于 .t-actions。
+   自身不接点击，点到胶囊仍落到下面的会话按钮 / 归档键。
+   不透明底用来挡住底下的图标；底色跟行背景走，避免透出归档。 */
+.t-wait {
+  position: absolute;
+  right: var(--sp-4);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  pointer-events: none;
+  padding: 2px 0;
+  background: var(--surface);
+  border-radius: var(--r-full);
+}
+.thread-row:hover .t-wait { background: var(--surface-hover); }
+.thread-row:has(.thread.active) .t-wait { background: var(--accent-soft); }
+.thread-row:has(.thread.active):hover .t-wait { background: var(--accent-soft); }
 /* Codex 风格：运行中的会话在标题左侧显示转圈指示 */
 .thread .t-spin {
   width: 11px;
@@ -395,29 +571,92 @@
 .tree-row[data-dir] .fi { color: var(--accent); }
 .tree-row .fi .icon { width: 14px; height: 14px; }
 .tree-row .fname { flex: 1; min-width: 0; }
-/* Git 状态指示：SVG 图标块（修改/新增/删除/未跟踪）。
-   图标 + 色底双通道，不单靠颜色（WCAG color-not-only）；
-   文件树与 Changes 面板共用。 */
+/* Git 状态指示：行尾彩色字母（M/A/D/R/U/! = 修改/新增/删除/重命名/未跟踪/冲突）。
+   字母 + 文件名着色双通道，不单靠颜色（WCAG color-not-only）；
+   文件树与 Changes 面板共用；目录显示聚合后的后代状态。 */
 .fstat {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px;
-  border-radius: var(--r-4);
+  min-width: 12px; height: 16px;
   flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  /* 文件行悬停时徽章淡出并收宽，给浮层按钮让位（同 .thread .t-meta）。
+     max-width 上限取字母实际宽度之上，常态不影响；min/max 同时过渡，
+     收窄过程字母被 overflow 裁住。 */
+  overflow: hidden;
+  max-width: 14px;
+  transition: opacity var(--dur-fast) var(--ease-out), min-width var(--dur-fast) var(--ease-out), max-width var(--dur-fast) var(--ease-out);
 }
-.fstat .icon { width: 11px; height: 11px; }
-.fstat.m { color: var(--git-modified); background: color-mix(in srgb, var(--git-modified) 10%, transparent); }
-.fstat.a { color: var(--git-added);    background: color-mix(in srgb, var(--git-added) 10%, transparent); }
-.fstat.d { color: var(--git-deleted);  background: color-mix(in srgb, var(--git-deleted) 10%, transparent); }
-.fstat.u { color: var(--git-untracked); background: color-mix(in srgb, var(--git-untracked) 10%, transparent); }
-/* Row actions were revealed on :hover only, which makes them unreachable
-   without a pointer — display:none also removes them from the tab order, so
-   keyboard users had no path to "加入上下文" at all. :focus-within brings them
-   back as soon as anything inside the row takes focus. */
-.tree-row .fop { display: none; gap: 2px; flex: none; }
+.fstat.m { color: var(--git-modified); }
+.fstat.a { color: var(--git-added); }
+.fstat.d { color: var(--git-deleted); }
+.fstat.r { color: var(--git-renamed); }
+.fstat.u { color: var(--git-untracked); }
+.fstat.x { color: var(--git-conflict); }
+/* Row actions were revealed on :hover only via display, which makes them
+   unreachable without a pointer AND pops them in/out abruptly. Same recipe
+   as .thread-row .t-actions: absolutely positioned over the row's right
+   edge, always laid out, opacity/visibility cross-fade; the hidden state
+   cannot be tabbed into and does not catch clicks. Row focus (:focus-within)
+   keeps the keyboard path. */
+.tree-row .fop {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+  position: absolute;
+  right: var(--sp-4);
+  top: 50%;
+  transform: translateY(-50%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-out), visibility var(--dur-fast) var(--ease-out);
+}
 .tree-row:hover .fop,
 .tree-row:focus-visible .fop,
-.tree-row:focus-within .fop { display: inline-flex; }
+.tree-row:focus-within .fop {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 .tree-row .fop .icon-btn { width: 18px; height: 18px; }
+/* 文件名右缘渐隐遮罩（同 .thread .t-title）：常态 18px 软化截断，
+   悬停时把被浮层按钮遮住的段落渐隐。悬停坐标推导（相对【行】右缘，
+   再换算【文件名盒】右缘）：.fop 距行右缘 4px（--sp-4），宽 38px
+   （18 + 2 + 18），左按钮左缘 = 4 + 38 = 42px；+2px 余量 → 完全透明点
+   在行右缘 44px。徽章收 0 后文件名右缘距行右缘 = 6px 右内边距
+   （--sp-6）+ 5px 行内 gap = 11px，换算文件名坐标：clear = 44 - 11
+   = 33px，带宽 18px → fade = 51px。文件行与文件夹行都是「加入上下文 +
+   更多」两枚按钮，悬停渐隐同一套坐标。 */
+.tree-row .fname {
+  --fname-fade: 18px;
+  --fname-clear: 0px;
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--fname-fade)), transparent calc(100% - var(--fname-clear)));
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--fname-fade)), transparent calc(100% - var(--fname-clear)));
+  transition: --fname-fade var(--dur-fast) var(--ease-out), --fname-clear var(--dur-fast) var(--ease-out);
+}
+.tree-row:where([data-file], [data-dir]):where(:hover, :focus-visible, :focus-within) .fname {
+  --fname-fade: 51px;
+  --fname-clear: 33px;
+}
+/* 徽章与按钮显隐同步淡出（状态集与 .fop 显隐完全一致）。 */
+.tree-row:where([data-file], [data-dir]):where(:hover, :focus-visible, :focus-within) .fstat {
+  opacity: 0;
+  min-width: 0;
+  max-width: 0;
+}
+@property --fname-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 18px;
+}
+@property --fname-clear {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
 .tree-children { display: none; }
 .tree-row.open + .tree-children { display: block; }
 .tree-new-row {
@@ -469,6 +708,14 @@
 }
 .diag.err { background: var(--red); }
 .diag.warn { background: var(--amber); }
+/* Git 状态文件名着色：字母徽标之外的第二通道。放在 .turn-file 之后，
+   「本轮已触碰」的加粗与 git 颜色叠加（同特异性，源顺序决定颜色取 git）。 */
+.tree-row[data-git="m"] .fname { color: var(--git-modified); }
+.tree-row[data-git="a"] .fname { color: var(--git-added); }
+.tree-row[data-git="d"] .fname { color: var(--git-deleted); }
+.tree-row[data-git="r"] .fname { color: var(--git-renamed); }
+.tree-row[data-git="u"] .fname { color: var(--git-untracked); }
+.tree-row[data-git="x"] .fname { color: var(--git-conflict); }
 
 /* ---------- 左下用户与 OMP 状态 ---------- */
 .sb-footer {

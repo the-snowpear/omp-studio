@@ -81,6 +81,7 @@ const PATHS: Record<string, string> = {
   layers: '<path d="M8 2 14 5.5 8 9 2 5.5z"/><path d="M2.5 8.5 8 11.8l5.5-3.3M2.5 11.5 8 14.8l5.5-3.3"/>',
   minimize: '<path d="M3 8h10"/>',
   maximize: '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/>',
+  expand: '<path d="M9.2 2.5h4.3V6.8M13.5 2.5 9 7M6.8 13.5H2.5V9.2M2.5 13.5 7 9"/>',
   restore: '<path d="M6 2.5v3.5H2.5M13.5 6V2.5H10M10 13.5v-3.5h3.5M2.5 10v3.5H6"/>',
   database: '<ellipse cx="8" cy="3.5" rx="6" ry="2"/><path d="M2 3.5v9c0 1.1 2.7 2 6 2s6-.9 6-2v-9M2 8c0 1.1 2.7 2 6 2s6-.9 6-2"/>',
   key: '<circle cx="5" cy="10.5" r="3"/><path d="M7.2 8.3 13 2.5M11 4.5l2 2M9 6.5l1.5 1.5"/>',
@@ -110,6 +111,7 @@ const PATHS: Record<string, string> = {
   steering: '<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="1.6"/><path d="M8 2.5v3.9M8 9.6v3.9M2.5 8h3.9M9.6 8h3.9"/>',
   keyboard: '<rect x="1.5" y="4" width="13" height="8.5" rx="1.2"/><path d="M4 6.5h.2M7 6.5h.2M10 6.5h.2M12 6.5h.2M4 9.5h.2M12 9.5h.2M6 9.5h4"/>',
   logo: '<circle cx="8" cy="8" r="6.5"/><path d="M5.5 11.5c1.5-1 3.5-1 5 0M5.5 6.5c1.5 1 3.5 1 5 0" stroke-width="1.4"/>',
+  asterisk: '<path d="M8 1.8v12.4M2.6 4.9l10.8 6.2M13.4 4.9 2.6 11.1"/>',
 };
 
 /** App / project mark served from `apps/renderer/public/icon.png`. */
@@ -126,6 +128,11 @@ export function AppIcon({ className, size }: { className?: string; size?: number
       draggable={false}
     />
   );
+}
+
+export function iconSvg(name: string, extra?: string): string {
+  const className = extra ? `icon ${extra}` : "icon";
+  return `<svg class="${className}" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name] ?? PATHS.box ?? ""}</svg>`;
 }
 
 export function Icon({ name, extra }: { name: string; extra?: string }) {

@@ -15,6 +15,8 @@ import {
   parseStudioHelloResponse,
   parseStudioReceipt,
   parseStudioSnapshotResponse,
+  parseSessionTelemetryReadResult,
+  parseSessionTelemetrySnapshot,
 } from "../src/index.js";
 import type { RuntimeEpoch } from "../src/contracts/ids.js";
 
@@ -97,6 +99,70 @@ test("WP-012 parses the canonical initial snapshot and fences nested epochs", as
   );
 });
 
+test("snapshot accepts optional fast and prewalk projections", async () => {
+  const value = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8")) as {
+    snapshot: Record<string, unknown>;
+  };
+  const parsed = parseStudioSnapshotResponse({
+    ...value,
+    snapshot: {
+      ...value.snapshot,
+      fast: { enabled: true, active: false },
+      prewalk: { status: "armed", target: "@smol" },
+    },
+  });
+  assert.equal(parsed.snapshot.fast?.enabled, true);
+  assert.equal(parsed.snapshot.fast?.active, false);
+  assert.equal(parsed.snapshot.prewalk?.status, "armed");
+  assert.equal(parsed.snapshot.prewalk?.target, "@smol");
+  assert.throws(
+    () =>
+      parseStudioSnapshotResponse({
+        ...value,
+        snapshot: { ...value.snapshot, fast: { enabled: "yes" } },
+      }),
+    ContractValidationError,
+  );
+});
+
+test("snapshot accepts optional session model projection", async () => {
+  const value = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8")) as {
+    snapshot: Record<string, unknown>;
+  };
+  const parsed = parseStudioSnapshotResponse({
+    ...value,
+    snapshot: {
+      ...value.snapshot,
+      model: {
+        selector: "anthropic/claude-sonnet-4-5",
+        provider: "anthropic",
+        id: "claude-sonnet-4-5",
+        thinking: "high",
+        configuredThinking: "auto",
+      },
+    },
+  });
+  assert.equal(parsed.snapshot.model?.selector, "anthropic/claude-sonnet-4-5");
+  assert.equal(parsed.snapshot.model?.thinking, "high");
+  assert.equal(parsed.snapshot.model?.configuredThinking, "auto");
+  assert.throws(
+    () =>
+      parseStudioSnapshotResponse({
+        ...value,
+        snapshot: {
+          ...value.snapshot,
+          model: {
+            selector: "anthropic/claude-sonnet-4-5",
+            provider: "anthropic",
+            id: "claude-sonnet-4-5",
+            thinking: "auto",
+          },
+        },
+      }),
+    ContractValidationError,
+  );
+});
+
 test("WP-012 validates state events against their envelope", async () => {
   const snapshot = parseStudioSnapshotResponse(
     JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8")) as unknown,
@@ -116,6 +182,28 @@ test("WP-012 validates state events against their envelope", async () => {
   );
 });
 
+test("plan review snapshot may carry title and body", async () => {
+  const value = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8")) as {
+    snapshot: Record<string, unknown>;
+  };
+  const parsed = parseStudioSnapshotResponse({
+    ...value,
+    snapshot: {
+      ...value.snapshot,
+      activeMode: "plan",
+      plan: {
+        status: "review",
+        planReference: "local://preview-plan.md",
+        title: "Preview zoom inertia",
+        body: "## Goal\n\nFreeze the protocol.",
+      },
+    },
+  });
+  assert.equal(parsed.snapshot.plan?.status, "review");
+  assert.equal(parsed.snapshot.plan?.title, "Preview zoom inertia");
+  assert.equal(parsed.snapshot.plan?.body, "## Goal\n\nFreeze the protocol.");
+});
+
 test("session telemetry events validate numeric usage and reject unsafe fields", () => {
   const telemetry = {
     sessionId: "session-1",
@@ -130,6 +218,8 @@ test("session telemetry events validate numeric usage and reject unsafe fields",
       total: 14,
       cost: 0.12,
       completedAt: "2026-08-15T11:59:00.000Z",
+      durationMs: 9_500,
+      tps: 35.4,
     },
     context: {
       contextWindow: 128000,
@@ -154,6 +244,98 @@ test("session telemetry events validate numeric usage and reject unsafe fields",
   assert.equal((parseStudioEventEnvelope(event).event as { kind: string }).kind, "session.telemetry.changed");
   assert.throws(() => parseStudioEventEnvelope({ ...event, event: { ...event.event, telemetry: { ...telemetry, tokens: { ...telemetry.tokens, input: -1 } } } }), ContractValidationError);
   assert.throws(() => parseStudioEventEnvelope({ ...event, event: { ...event.event, telemetry: { ...telemetry, context: { ...telemetry.context, surprise: 1 } } } }), ContractValidationError);
+});
+
+test("telemetry turns validate optional rate fields and reject deviations", () => {
+  const telemetry = {
+    sessionId: "session-1",
+    capturedAt: "2026-08-15T12:00:00.000Z",
+    tokens: { input: 10, output: 4, reasoning: 1, cacheRead: 2, cacheWrite: 0, total: 14, cost: 0.12 },
+    context: null,
+  };
+  const withRates = {
+    ...telemetry,
+    lastCompletedTurn: {
+      input: 10,
+      output: 450,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 460,
+      cost: 0.02,
+      completedAt: "2026-08-15T11:59:00.000Z",
+      durationMs: 10_000,
+      tps: 45,
+    },
+  };
+  assert.equal(parseSessionTelemetrySnapshot(withRates).lastCompletedTurn?.tps, 45);
+  assert.equal(parseSessionTelemetrySnapshot({ ...telemetry, lastCompletedTurn: undefined }).lastCompletedTurn, undefined);
+  const turn = withRates.lastCompletedTurn;
+  assert.throws(
+    () => parseSessionTelemetrySnapshot({ ...withRates, lastCompletedTurn: { ...turn, tps: -1 } }),
+    ContractValidationError,
+  );
+  assert.throws(
+    () => parseSessionTelemetrySnapshot({ ...withRates, lastCompletedTurn: { ...turn, tps: Number.POSITIVE_INFINITY } }),
+    ContractValidationError,
+  );
+  assert.throws(
+    () => parseSessionTelemetrySnapshot({ ...withRates, lastCompletedTurn: { ...turn, durationMs: 10.5 } }),
+    ContractValidationError,
+  );
+  assert.throws(
+    () => parseSessionTelemetrySnapshot({ ...withRates, lastCompletedTurn: { ...turn, ttft: 120 } }),
+    ContractValidationError,
+  );
+});
+
+test("session telemetry snapshots accept the probe unavailable reason", () => {
+  const telemetry = {
+    sessionId: "session-1",
+    capturedAt: "2026-08-15T12:00:00.000Z",
+    tokens: { input: 10, output: 4, reasoning: 1, cacheRead: 2, cacheWrite: 0, total: 14, cost: 0.12 },
+    context: null,
+    unavailableReason: "probe_dynamic_context_disabled",
+  };
+  assert.equal(parseSessionTelemetrySnapshot(telemetry).unavailableReason, "probe_dynamic_context_disabled");
+  assert.throws(
+    () => parseSessionTelemetrySnapshot({ ...telemetry, unavailableReason: "made-up-reason" }),
+    ContractValidationError,
+  );
+});
+
+test("session telemetry read results validate source, semantics, and identity", () => {
+  const telemetry = {
+    sessionId: "session-1",
+    capturedAt: "2026-08-15T12:00:00.000Z",
+    tokens: { input: 10, output: 4, reasoning: 1, cacheRead: 2, cacheWrite: 0, total: 14, cost: 0.12 },
+    context: {
+      contextWindow: 128000,
+      usedTokens: 2400,
+      percent: 1.875,
+      anchored: false,
+      systemPromptTokens: 100,
+      systemContextTokens: 200,
+      systemToolsTokens: 300,
+      skillsTokens: 400,
+      messagesTokens: 1400,
+    },
+  };
+  const result = { sessionId: "session-1", source: "archive-recomputed", semantics: "current-environment-recomputed", telemetry };
+  assert.equal(parseSessionTelemetryReadResult(result).source, "archive-recomputed");
+  assert.equal(parseSessionTelemetryReadResult({ ...result, source: "persisted", semantics: "last-observed" }).semantics, "last-observed");
+  assert.equal(parseSessionTelemetryReadResult({ ...result, source: "live", semantics: "current-live" }).source, "live");
+  assert.throws(() => parseSessionTelemetryReadResult({ ...result, source: "cached" }), ContractValidationError);
+  assert.throws(() => parseSessionTelemetryReadResult({ ...result, semantics: "stale" }), ContractValidationError);
+  assert.throws(() => parseSessionTelemetryReadResult({ ...result, extra: true }), ContractValidationError);
+  assert.throws(
+    () => parseSessionTelemetryReadResult({ ...result, sessionId: "session-2" }),
+    ContractValidationError,
+  );
+  assert.throws(
+    () => parseSessionTelemetryReadResult({ ...result, telemetry: { ...telemetry, tokens: { ...telemetry.tokens, input: Number.NaN } } }),
+    ContractValidationError,
+  );
 });
 
 test("WP-001 parses canonical request and receipt fixtures bidirectionally", async () => {
@@ -263,6 +445,15 @@ test("WP-030..035 validate Plan, Goal, Vibe, Tree, and Fork operations", () => {
     { kind: "session.tree.get" },
     { kind: "session.tree.navigate", targetId: "entry-1", summarize: true },
     { kind: "session.fork" },
+    { kind: "session.handoff" },
+    { kind: "session.handoff", customInstructions: "focus on the parser bug" },
+    { kind: "session.fast.set", enabled: true },
+    { kind: "session.prewalk.arm", target: "@smol" },
+    { kind: "session.prewalk.disarm" },
+    { kind: "session.model.set", selector: "anthropic/claude-sonnet-4-5" },
+    { kind: "session.model.set", selector: "anthropic/claude-sonnet-4-5", thinking: "high" },
+    { kind: "session.thinking.set", level: "auto" },
+    { kind: "session.thinking.set", level: "off" },
   ];
   for (const operation of valid) {
     assert.equal(parseFoundationStudioRequest({ ...base, operation }).operation.kind, operation.kind);
@@ -280,6 +471,15 @@ test("WP-030..035 validate Plan, Goal, Vibe, Tree, and Fork operations", () => {
     { kind: "session.tree.navigate", targetId: "" },
     { kind: "session.tree.navigate", targetId: "entry-1", summarize: "yes" },
     { kind: "session.fork", extra: true },
+    { kind: "session.handoff", customInstructions: "" },
+    { kind: "session.handoff", extra: true },
+    { kind: "session.fast.set", enabled: "yes" },
+    { kind: "session.prewalk.arm", target: "" },
+    { kind: "session.prewalk.disarm", extra: true },
+    { kind: "session.model.set", selector: "" },
+    { kind: "session.model.set", selector: "anthropic/claude-sonnet-4-5", thinking: "inherit" },
+    { kind: "session.thinking.set", level: "inherit" },
+    { kind: "session.thinking.set", extra: true },
   ];
   for (const operation of invalid) {
     assert.throws(() => parseFoundationStudioRequest({ ...base, operation }), ContractValidationError);
@@ -603,6 +803,7 @@ test("M5 validates Agent Hub and Job operations at the trust boundary", () => {
     { kind: "agent.revive", agentId: "Child-1", expectedGeneration: 2 },
     { kind: "agent.release", agentId: "Child-1", expectedGeneration: 3 },
     { kind: "agent.transcript.read", agentId: "Child-1", cursor: "opaque", limit: 100 },
+    { kind: "agent.conversation.read", agentId: "Child-1", cursor: "opaque", limit: 100 },
     { kind: "agent.subscribe", level: "events" },
     { kind: "job.list", ownerAgentId: "Main", includeRecent: true },
     { kind: "job.get", jobId: "job-1" },
@@ -621,6 +822,7 @@ test("M5 validates Agent Hub and Job operations at the trust boundary", () => {
     { kind: "agent.send", agentId: "Child-1", expectedGeneration: 1, text: "continue", mode: "broadcast" },
     { kind: "agent.kill", agentId: "Child-1", expectedGeneration: 1, force: true },
     { kind: "agent.transcript.read", agentId: "Child-1", limit: 101 },
+    { kind: "agent.conversation.read", agentId: "Child-1", limit: 101 },
     { kind: "agent.subscribe", level: "all" },
     { kind: "job.list", includeRecent: "yes" },
     { kind: "job.cancel", jobId: "job-1", expectedGeneration: 0 },

@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type {
-  AuthorityEpoch,
-  ClientError,
-  ClientEvent,
-  ConversationTranscriptReadPage,
-  ConversationTranscriptPage,
-  EventCursor,
-  OpaqueCursor,
-  RuntimeEpoch,
-  SessionId,
-  StateVersion,
+import {
+  CONVERSATION_LIMITS,
+  type AuthorityEpoch,
+  type ClientError,
+  type ClientEvent,
+  type ConversationTranscriptReadPage,
+  type ConversationTranscriptPage,
+  type EventCursor,
+  type OpaqueCursor,
+  type RuntimeEpoch,
+  type SessionId,
+  type StateVersion,
 } from "@omp-studio/client-contract";
 
 import {
@@ -441,6 +442,160 @@ test("tool events after message.completed stay attached to the persisted assista
   assert.equal(assistant.tools[0]?.toolCallId, "call-1");
 });
 
+test("a tool result whose start event was lost still attaches to its persisted item", () => {
+  // A resync drops liveTools, so the completion arrives without the messageId
+  // that only conversation.tool.started carries.
+  let state = apply(undefined, {
+    type: "hydrate",
+    generation: 0,
+    page: page([
+      {
+        kind: "message",
+        itemId: "msg-1",
+        parentId: null,
+        createdAt: "2026-08-15T12:00:00.000Z",
+        role: "assistant",
+        content: [{ type: "toolCall", toolCallId: "call-1", toolName: "bash" }],
+      },
+    ]),
+  });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.completed",
+        sessionId: SESSION,
+        turnId: "t1",
+        toolCallId: "call-1",
+        completedAt: "2026-08-15T12:00:01.000Z",
+        result: { type: "toolResult", toolCallId: "call-1", toolName: "bash", isError: false, data: { exitCode: 0 } },
+      },
+      1,
+    ),
+  });
+  assert.equal(state.liveTools["call-1"]?.messageId, "msg-1");
+  const view = selectConversationViews(state).find((entry) => entry.kind === "item");
+  assert.ok(view && view.kind === "item");
+  assert.equal(view.tools[0]?.result?.data !== undefined, true);
+});
+
+test("an item stays turnOpen until its turn reports completed", () => {
+  const item = {
+    kind: "message" as const,
+    itemId: "msg-1",
+    parentId: null,
+    createdAt: "2026-08-15T12:00:00.000Z",
+    role: "assistant" as const,
+    content: [
+      { type: "toolCall" as const, toolCallId: "call-1", toolName: "read" },
+      { type: "toolCall" as const, toolCallId: "call-2", toolName: "read" },
+    ],
+  };
+  // The runtime persists the assistant item before any tool starts.
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      { kind: "conversation.message.completed", sessionId: SESSION, turnId: "t1", messageId: "msg-1", item },
+      1,
+    ),
+  });
+  const open = selectConversationViews(state).find((view) => view.kind === "item");
+  assert.ok(open && open.kind === "item");
+  assert.equal(open.turnOpen, true);
+
+  state = apply(state, {
+    type: "live",
+    event: liveEvent({ kind: "conversation.turn.completed", sessionId: SESSION, turnId: "t1" }, 2),
+  });
+  const closed = selectConversationViews(state).find((view) => view.kind === "item");
+  assert.ok(closed && closed.kind === "item");
+  assert.equal(closed.turnOpen, false);
+});
+
+test("turn abort closes the turn so its unstarted tools stop reading as pending", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.completed",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        item: {
+          kind: "message",
+          itemId: "msg-1",
+          parentId: null,
+          createdAt: "2026-08-15T12:00:00.000Z",
+          role: "assistant",
+          content: [{ type: "toolCall", toolCallId: "call-1", toolName: "bash" }],
+        },
+      },
+      1,
+    ),
+  });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent({ kind: "conversation.turn.aborted", sessionId: SESSION, turnId: "t1" }, 2),
+  });
+  const view = selectConversationViews(state).find((entry) => entry.kind === "item");
+  assert.ok(view && view.kind === "item");
+  assert.equal(view.turnOpen, false);
+});
+
+test("provider error on message.completed is kept live-only and dropped on hydrate", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.completed",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        item: {
+          kind: "message",
+          itemId: "msg-1",
+          parentId: null,
+          createdAt: "2026-08-15T12:00:00.000Z",
+          role: "assistant",
+          content: [],
+        },
+        error: {
+          message: "Model is not supported by composite groups",
+          status: 400,
+          provider: "sub2api-go",
+          model: "mimo-v2.5",
+        },
+      },
+      1,
+    ),
+  });
+  assert.deepEqual(state.itemErrors["msg-1"], {
+    message: "Model is not supported by composite groups",
+    status: 400,
+    provider: "sub2api-go",
+    model: "mimo-v2.5",
+  });
+  const item = state.itemsById["msg-1"];
+  assert.ok(item && item.kind === "message");
+  assert.equal("error" in item, false);
+
+  state = apply(state, {
+    type: "hydrate",
+    generation: 0,
+    page: page([
+      {
+        kind: "message",
+        itemId: "msg-1",
+        parentId: null,
+        createdAt: "2026-08-15T12:00:00.000Z",
+        role: "assistant",
+        content: [],
+      },
+    ]),
+  });
+  assert.deepEqual(state.itemErrors, {});
+});
+
 test("session/epoch live events for a different identity are dropped", () => {
   let state = apply(undefined, {
     type: "hydrate",
@@ -741,4 +896,107 @@ test("message.completed after abort converges text but keeps the aborted view", 
     .join("");
   assert.equal(late.liveMessages["msg-1"]?.aborted, true);
   assert.equal(lateText, "partial answer");
+});
+
+test("turn.aborted marks running tools aborted; a late completion still overrides", () => {
+  let state = createInitialConversationState();
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        startedAt: "2026-08-15T12:00:00.000Z",
+      },
+      1,
+    ),
+  });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent({ kind: "conversation.turn.aborted", sessionId: SESSION, turnId: "t1" }, 2),
+  });
+  assert.equal(state.liveTools["call-1"]?.status, "aborted");
+
+  // A start replay cannot resurrect an aborted tool into a running spinner.
+  const replayed = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        startedAt: "2026-08-15T12:00:02.000Z",
+      },
+      3,
+    ),
+  });
+  assert.equal(replayed.liveTools["call-1"]?.status, "aborted");
+
+  // The authoritative result, when the runtime did emit one, still lands.
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.completed",
+        sessionId: SESSION,
+        turnId: "t1",
+        toolCallId: "call-1",
+        result: { type: "toolResult", toolCallId: "call-1", isError: true, output: "aborted by user" },
+        completedAt: "2026-08-15T12:00:03.000Z",
+      },
+      3,
+    ),
+  });
+  assert.equal(state.liveTools["call-1"]?.status, "completed");
+  assert.equal(state.liveTools["call-1"]?.isError, true);
+});
+
+test("live block accumulation is capped and later deltas for the block are dropped", () => {
+  const cap = CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES;
+  const chunk = "x".repeat(200_000);
+  let state = createInitialConversationState();
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        role: "assistant",
+        createdAt: "2026-08-15T12:00:00.000Z",
+      },
+      1,
+    ),
+  });
+  const delta = (seq: number): ConversationAction => ({
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.delta",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        blockId: "b1",
+        blockType: "text",
+        delta: chunk,
+      },
+      seq,
+    ),
+  });
+  state = apply(state, delta(2));
+  assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.text.length, 200_000);
+  assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.truncated, undefined);
+  state = apply(state, delta(3));
+  assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.text.length, cap);
+  assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.truncated, true);
+  state = apply(state, delta(4));
+  assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.text.length, cap);
 });

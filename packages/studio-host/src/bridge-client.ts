@@ -4,12 +4,15 @@ import {
   FrameDecoder,
   STUDIO_PROTOCOL_VERSION,
   encodeFrame,
+  parseAgentTranscriptPage,
   parseConversationTranscriptPage,
   parseStudioEventEnvelope,
   parseStudioHelloResponse,
   parseOperatorCommandManifest,
   parseStudioReceipt,
   parseStudioSnapshotResponse,
+  type AgentId,
+  type AgentTranscriptPage,
   type ConversationTranscriptPage,
   type OpaqueCursor,
   type RequestId,
@@ -371,6 +374,96 @@ export class StudioBridgeClient {
       throw new StudioHostError(
         "INTERNAL_ERROR",
         error instanceof Error ? error.message : "malformed transcript page",
+      );
+    }
+  }
+
+  /**
+   * Read one page of a per-agent transcript through the Runtime Agent Hub.
+   * Query, not a ledger command; the page carries its own signed cursor.
+   */
+  async readAgentTranscript(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<AgentTranscriptPage> {
+    if (this.#state !== "ready") {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Studio Bridge is not ready for agent transcript read");
+    }
+    const runtimeEpoch = this.#runtimeEpoch;
+    if (runtimeEpoch === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Studio Bridge negotiation is incomplete");
+    }
+    const requestId = (this.options.createRequestId ?? randomUUID)();
+    const operation: { kind: "agent.transcript.read"; agentId: AgentId; cursor?: OpaqueCursor; limit?: number } = {
+      kind: "agent.transcript.read",
+      agentId: input.agentId as AgentId,
+    };
+    if (input.cursor !== undefined) operation.cursor = input.cursor;
+    if (input.limit !== undefined) operation.limit = input.limit;
+    const receipt = await this.invoke({
+      type: "studio.request",
+      requestId: requestId as RequestId,
+      runtimeEpoch,
+      operation,
+    });
+    if (receipt.status === "rejected" || receipt.status === "failed") {
+      throw new StudioHostError(
+        receipt.error?.code ?? "INTERNAL_ERROR",
+        receipt.error?.message ?? "agent.transcript.read failed",
+      );
+    }
+    if (receipt.status !== "completed" || receipt.result === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "agent.transcript.read did not complete");
+    }
+    const page = parseAgentTranscriptPage(receipt.result);
+    return page;
+  }
+
+  /**
+   * Read one ConversationItem page for a child agent. Query, not a ledger
+   * command. The page uses conversation cursors, not agent.transcript offsets.
+   */
+  async readAgentConversation(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptPage> {
+    if (this.#state !== "ready") {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Studio Bridge is not ready for agent conversation read");
+    }
+    const runtimeEpoch = this.#runtimeEpoch;
+    if (runtimeEpoch === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Studio Bridge negotiation is incomplete");
+    }
+    const requestId = (this.options.createRequestId ?? randomUUID)();
+    const operation: { kind: "agent.conversation.read"; agentId: AgentId; cursor?: OpaqueCursor; limit?: number } = {
+      kind: "agent.conversation.read",
+      agentId: input.agentId as AgentId,
+    };
+    if (input.cursor !== undefined) operation.cursor = input.cursor;
+    if (input.limit !== undefined) operation.limit = input.limit;
+    const receipt = await this.invoke({
+      type: "studio.request",
+      requestId: requestId as RequestId,
+      runtimeEpoch,
+      operation,
+    });
+    if (receipt.status === "rejected" || receipt.status === "failed") {
+      throw new StudioHostError(
+        receipt.error?.code ?? "INTERNAL_ERROR",
+        receipt.error?.message ?? "agent.conversation.read failed",
+      );
+    }
+    if (receipt.status !== "completed" || receipt.result === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "agent.conversation.read did not complete");
+    }
+    try {
+      return parseConversationTranscriptPage(receipt.result);
+    } catch (error) {
+      throw new StudioHostError(
+        "INTERNAL_ERROR",
+        error instanceof Error ? error.message : "malformed agent conversation page",
       );
     }
   }

@@ -572,8 +572,25 @@ function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
  * Runtime through the composition. Until a folder is picked the desktop
  * stays read-only — `%APPDATA%\omp-studio` is never used as a project cwd.
  */
-export function createProductionHostFactory(options?: { readonly openUrl?: (url: string) => Promise<void> }): DesktopHostFactory {
+/**
+ * Production factory plus the narrow Main-only workspace lookup used by
+ * Desktop chrome (external editor / file manager / local terminal cwd).
+ * These methods stay in the Main process and never cross the Host facade.
+ */
+export interface ProductionDesktopHostFactory extends DesktopHostFactory {
+  /** Resolve an opaque workspaceId to its Host-owned canonical cwd. */
+  resolveWorkspaceCwd(workspaceId: string): Promise<string>;
+  /** Current active workspace cwd, used by the local PTY manager. */
+  activeWorkspaceCwd(): string | undefined;
+}
+
+export function createProductionHostFactory(options?: { readonly openUrl?: (url: string) => Promise<void> }): ProductionDesktopHostFactory {
   const registry = new WorkspaceRegistry(productionWorkspaceRegistryPath());
+  let registryReady: Promise<void> | undefined;
+  const ensureRegistry = (): Promise<void> => {
+    registryReady ??= registry.load();
+    return registryReady;
+  };
   const pickDirectory = createProductionPickDirectory();
   const hostLog = createHostFileLog({
     directory: join(userAppDataRoot(), STATE_DIRECTORY_NAME, "logs"),
@@ -623,12 +640,16 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
     },
   };
   const facade: DesktopFacadeSeams = {
+    hostLog,
     ...(options?.openUrl === undefined ? {} : { openUrl: options.openUrl }),
     workspaces,
     workspaceFiles: createWorkspaceFileService({ registry }),
     git,
     github,
-    disposeHostOperations: () => gitProcessRunner.cancelAll(),
+    disposeHostOperations: () => {
+      gitProcessRunner.cancelAll();
+      git.dispose();
+    },
     getWorkspaceCwd: () => workspaceCwd.current,
     getActiveWorkspace: () => {
       const activeId = registry.activeWorkspaceId;
@@ -667,7 +688,7 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
     async create(): Promise<DesktopHostComposition> {
       // The registry file is loaded once, before the first composition can
       // serve any renderer query.
-      await registry.load();
+      await ensureRegistry();
       const activeId = registry.activeWorkspaceId;
       if (activeId !== undefined) {
         const stored = registry.list().find((entry) => entry.workspaceId === activeId);
@@ -676,6 +697,17 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
       const composition = await factory.create();
       activeComposition = composition;
       return composition;
+    },
+    async resolveWorkspaceCwd(workspaceId: string): Promise<string> {
+      await ensureRegistry();
+      const stored = registry.get(workspaceId);
+      if (stored === undefined) {
+        throw new Error(`desktop workspace shell: unknown workspace id ${workspaceId}`);
+      }
+      return stored.canonicalPath;
+    },
+    activeWorkspaceCwd(): string | undefined {
+      return workspaceCwd.current;
     },
   };
 }

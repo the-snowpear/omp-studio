@@ -23,6 +23,14 @@
     "0020-conversation-transcript-normalization.patch",
     "0021-studio-interaction-hardening.patch",
     "0022-studio-transcript-type-hardening.patch",
-    "0023-studio-runtime-test-hardening.patch"
+    "0023-studio-runtime-test-hardening.patch",
+    "0024-studio-archived-session-telemetry.patch",
+    "0025-studio-agent-hub-usage-telemetry.patch",
+    "0026-studio-telemetry-turn-rate.patch",
+    "0027-studio-session-handoff.patch",
+    "0028-studio-fast-prewalk.patch",
+    "0029-studio-session-model-control.patch",
+    "0030-studio-conversation-provider-error.patch",
+    "0031-studio-subagent-conversation.patch"
   ]
 }

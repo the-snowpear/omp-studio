@@ -377,6 +377,32 @@ test("live conversation events parse every kind and reject inner occurredAt", ()
     assert.equal((parseStudioEventEnvelope(envelope(event)).event as { kind: string }).kind, event.kind);
   }
 
+  const withError = {
+    kind: "conversation.message.completed",
+    sessionId: "session-1",
+    turnId: "turn-1",
+    messageId: "msg-err",
+    item: {
+      kind: "message",
+      itemId: "msg-err",
+      parentId: null,
+      createdAt: "2026-08-15T12:00:00.000Z",
+      role: "assistant",
+      content: [],
+    },
+    error: {
+      message: "Model is not supported by composite groups",
+      status: 400,
+      provider: "sub2api-go",
+      model: "mimo-v2.5",
+    },
+  };
+  assert.deepEqual(parseConversationRuntimeEvent(withError), withError);
+  assert.throws(
+    () => parseConversationRuntimeEvent({ ...withError, error: { message: "" } }),
+    ContractValidationError,
+  );
+
   assert.throws(
     () => parseConversationRuntimeEvent({ ...started, occurredAt: "2026-08-15T12:00:00.000Z" }),
     ContractValidationError,

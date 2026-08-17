@@ -57,6 +57,7 @@ export function classifyOperation(operation: StudioOperation): CommandConcurrenc
     operation.kind === "agent.list" ||
     operation.kind === "agent.get" ||
     operation.kind === "agent.transcript.read" ||
+    operation.kind === "agent.conversation.read" ||
     operation.kind === SESSION_TRANSCRIPT_READ_KIND ||
     operation.kind === "job.list" ||
     operation.kind === "job.get"

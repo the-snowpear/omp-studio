@@ -6,7 +6,7 @@ import { PREVIEW_HISTORY, PREVIEW_PROJECTS } from "./preview/fixtures";
 import type { SettingsGroupId } from "./SettingsPage";
 import type { DrawerItem } from "./skillsPreview";
 
-export type SideTab = "changes" | "preview" | "agents";
+export type SideTab = "changes" | "git" | "preview" | "agents";
 export type BottomTab = "terminal" | "problems" | "tests" | "output" | "logs" | "pvlogs";
 
 export type PaletteAction =
@@ -149,6 +149,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "open-logs", icon: "pulse", label: "打开 OMP Logs", action: { kind: "openBottom", tab: "logs" } },
         { id: "open-pvlogs", icon: "globe", label: "打开 Preview Logs", action: { kind: "openBottom", tab: "pvlogs" } },
         { id: "open-changes", icon: "diff", label: "打开 Changes", action: { kind: "openSide", tab: "changes" } },
+        { id: "open-git", icon: "branch", label: "打开 Git", keywords: "git branch commit push pull stage", action: { kind: "openSide", tab: "git" } },
         { id: "open-preview", icon: "eye", label: "打开 Preview", action: { kind: "openSide", tab: "preview" } },
         { id: "open-agents", icon: "bot", label: "打开 Agents", action: { kind: "openSide", tab: "agents" } },
         { id: "open-skills", icon: "layers", label: "打开技能与插件", hint: "Ctrl+Shift+K", keywords: "skills plugins drawer", action: { kind: "openSkills" } },
@@ -158,12 +159,13 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       id: "config",
       label: "配置",
       items: [
-        { id: "set-general", icon: "settings", label: "设置 · General", keywords: "常规 主题 语言", action: { kind: "openSettings", group: "general" } },
-        { id: "set-models", icon: "cpu", label: "设置 · Models and Providers", keywords: "模型 供应商", action: { kind: "openSettings", group: "models" } },
-        { id: "set-permissions", icon: "shield", label: "设置 · Permissions", keywords: "权限", action: { kind: "openSettings", group: "permissions" } },
-        { id: "set-sessions", icon: "history", label: "设置 · Sessions", keywords: "会话", action: { kind: "openSettings", group: "sessions" } },
-        { id: "set-preview", icon: "globe", label: "设置 · Preview", action: { kind: "openSettings", group: "preview" } },
-        { id: "set-advanced", icon: "wrench", label: "设置 · Advanced", keywords: "高级", action: { kind: "openSettings", group: "advanced" } },
+        { id: "set-general", icon: "settings", label: "设置 · 常规", keywords: "general 主题 密度 通知 启动 布局", action: { kind: "openSettings", group: "general" } },
+        { id: "set-interaction", icon: "message", label: "设置 · 对话与交互", keywords: "interaction steering 中断 粘贴 thinking 工具意图", action: { kind: "openSettings", group: "interaction" } },
+        { id: "set-permissions", icon: "shield", label: "设置 · 权限与安全", keywords: "permissions 审批 always ask write yolo 工具级", action: { kind: "openSettings", group: "permissions" } },
+        { id: "set-context", icon: "layers", label: "设置 · 上下文与记忆", keywords: "context compact 压缩 记忆 memory hindsight mnemopi", action: { kind: "openSettings", group: "context" } },
+        { id: "set-files", icon: "terminal", label: "设置 · 文件与终端", keywords: "files edit mode hashline lsp shell 终端", action: { kind: "openSettings", group: "files" } },
+        { id: "set-tasks", icon: "play", label: "设置 · 任务与执行", keywords: "tasks plan goal loop 子任务 并发", action: { kind: "openSettings", group: "tasks" } },
+        { id: "set-advanced", icon: "wrench", label: "设置 · 高级", keywords: "advanced 配置层级 重试 循环保护", action: { kind: "openSettings", group: "advanced" } },
         { id: "mc-providers", icon: "server", label: "模型配置 · 供应商", action: { kind: "openModelConfig", tab: "providers" } },
         { id: "mc-roles", icon: "steering", label: "模型配置 · 角色", action: { kind: "openModelConfig", tab: "roles" } },
         { id: "mc-subagents", icon: "bot", label: "模型配置 · 子代理", action: { kind: "openModelConfig", tab: "subagents" } },

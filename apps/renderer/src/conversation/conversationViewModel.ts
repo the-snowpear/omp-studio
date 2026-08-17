@@ -4,16 +4,18 @@ import type {
   ConversationLiveTool,
   ConversationView,
 } from "@omp-studio/client";
-import type {
-  ConversationCompactionItem,
-  ConversationContentBlock,
-  ConversationItem,
-  ConversationMessageItem,
-  ConversationResetBoundaryItem,
-  ConversationRuntimeEvent,
-  ConversationTranscriptPage,
-  JsonValue,
-  OpaqueCursor,
+import {
+  CONVERSATION_LIMITS,
+  type ConversationCompactionItem,
+  type ConversationContentBlock,
+  type ConversationItem,
+  type ConversationMessageError,
+  type ConversationMessageItem,
+  type ConversationResetBoundaryItem,
+  type ConversationRuntimeEvent,
+  type ConversationTranscriptPage,
+  type JsonValue,
+  type OpaqueCursor,
 } from "@omp-studio/client-contract";
 import type { ConversationIdentity } from "./conversationHost";
 import { sameIdentity } from "./conversationHost";
@@ -24,6 +26,8 @@ export type LiveBlock = {
   readonly blockId: string;
   readonly blockType: "text" | "thinking";
   readonly text: string;
+  /** Set once the live buffer hit its cap; later deltas for the block are dropped. */
+  readonly truncated?: boolean;
 };
 
 export type LiveMessage = {
@@ -60,6 +64,7 @@ export type ConversationNotice = {
   readonly id: string;
   readonly level: "info" | "warning" | "error";
   readonly message: string;
+  readonly source?: string;
 };
 
 export type HydrateStatus = "idle" | "loading" | "ready" | "error" | "resyncing" | "unavailable";
@@ -81,6 +86,12 @@ export type ConversationState = {
   readonly pendingUsers: readonly PendingUser[];
   readonly lastEventSeq?: number;
   readonly resyncRequired: boolean;
+  /**
+   * Persisted itemId → owning turnId while that turn is still running. OMP
+   * persists the assistant item before its first tool starts, so only a closed
+   * turn proves a resultless toolCall lost its result.
+   */
+  readonly openTurnItems: { readonly [itemId: string]: string };
 };
 
 export type ToolView = {
@@ -116,6 +127,8 @@ export type TimelineRow =
       readonly status: "streaming" | "completed" | "aborted" | "error";
       /** Process rows omit the repeated OMP identity header; only the final reply in a turn uses reply. */
       readonly presentation?: "process" | "reply";
+      /** Live-only provider failure carried on `conversation.message.completed`. */
+      readonly error?: ConversationMessageError;
     }
   | { readonly type: "compaction"; readonly item: ConversationCompactionItem }
   | { readonly type: "resetBoundary"; readonly item: ConversationResetBoundaryItem };
@@ -133,6 +146,7 @@ export function emptyConversationState(generation = 0): ConversationState {
     notices: [],
     pendingUsers: [],
     resyncRequired: false,
+    openTurnItems: {},
   };
 }
 
@@ -297,7 +311,7 @@ export function applyLiveEvent(
     case "conversation.turn.aborted":
       return abortTurn(withSeq, event.turnId);
     case "conversation.turn.completed":
-      return withSeq;
+      return closeTurn(withSeq, event.turnId);
     case "conversation.compaction.started":
       return appendNotice(withSeq, {
         id: `compaction-start-${withSeq.notices.length}`,
@@ -322,6 +336,7 @@ export function applyLiveEvent(
         id: `notice-${withSeq.notices.length}-${event.level}`,
         level: event.level,
         message: event.message,
+        ...(event.source === undefined ? {} : { source: event.source }),
       });
   }
 }
@@ -360,15 +375,43 @@ function deltaMessage(
   const index = live.blocks.findIndex((block) => block.blockId === event.blockId);
   const blocks = live.blocks.slice();
   if (index === -1) {
-    blocks.push({ blockId: event.blockId, blockType: event.blockType, text: event.delta });
+    const appended = appendBoundedText("", event.delta);
+    blocks.push({
+      blockId: event.blockId,
+      blockType: event.blockType,
+      text: appended.text,
+      ...(appended.truncated ? { truncated: true } : {}),
+    });
   } else {
     const current = blocks[index]!;
-    blocks[index] = { ...current, text: `${current.text}${event.delta}` };
+    if (current.truncated === true) return state;
+    const appended = appendBoundedText(current.text, event.delta);
+    blocks[index] = {
+      ...current,
+      text: appended.text,
+      ...(appended.truncated ? { truncated: true } : {}),
+    };
   }
   return {
     ...state,
     liveMessages: { ...state.liveMessages, [event.messageId]: { ...live, blocks } },
   };
+}
+
+/**
+ * Memory guard for the live streaming buffer, mirroring the client reducer:
+ * UTF-16 unit cap as a cheap upper bound; the persisted item that replaces the
+ * buffer on completion carries the exact byte-bounded text.
+ */
+function appendBoundedText(existing: string, delta: string): { readonly text: string; readonly truncated: boolean } {
+  const max = CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES;
+  const room = max - existing.length;
+  if (room <= 0) return { text: existing, truncated: true };
+  if (delta.length <= room) return { text: existing + delta, truncated: false };
+  let end = room;
+  const lead = delta.charCodeAt(end - 1);
+  if (lead >= 0xd800 && lead <= 0xdbff) end -= 1;
+  return { text: existing + delta.slice(0, end), truncated: true };
 }
 
 function completeMessage(
@@ -384,7 +427,18 @@ function completeMessage(
     liveMessages: dropped.liveMessages,
     liveOrder: dropped.liveOrder,
     pendingUsers: reconcilePendingUsers(state.pendingUsers, items),
+    openTurnItems: { ...state.openTurnItems, [event.item.itemId]: event.turnId },
   };
+}
+
+/** Drops the turn's items from `openTurnItems`; their tools can no longer start. */
+function closeTurn(state: ConversationState, turnId: string): ConversationState {
+  const openTurnItems: { [itemId: string]: string } = {};
+  for (const [itemId, owner] of Object.entries(state.openTurnItems)) {
+    if (owner !== turnId) openTurnItems[itemId] = owner;
+  }
+  if (Object.keys(openTurnItems).length === Object.keys(state.openTurnItems).length) return state;
+  return { ...state, openTurnItems };
 }
 
 function startTool(
@@ -463,7 +517,7 @@ function abortTurn(state: ConversationState, turnId: string): ConversationState 
         ? { ...tool, status: "aborted" }
         : tool;
   }
-  return { ...state, liveMessages, liveTools };
+  return { ...closeTurn(state, turnId), liveMessages, liveTools };
 }
 
 export function jsonRecord(value: JsonValue | undefined): { readonly [key: string]: JsonValue } | undefined {
@@ -483,6 +537,7 @@ function toolViewFromBlocks(
   call: Extract<ConversationContentBlock, { type: "toolCall" }>,
   result: Extract<ConversationContentBlock, { type: "toolResult" }> | undefined,
   live: LiveTool | undefined,
+  turnOpen: boolean,
 ): ToolView {
   if (result) {
     return {
@@ -509,9 +564,10 @@ function toolViewFromBlocks(
   return {
     toolCallId: call.toolCallId,
     toolName: call.toolName,
-    // Persisted transcript items are already complete history. A call with
-    // no result is not a live queued operation and must never show a spinner.
-    status: "missing",
+    // The runtime persists the assistant item before the first tool of that
+    // item starts, so inside an open turn a resultless call is still waiting
+    // its slot. Only a closed turn proves the result is gone.
+    status: turnOpen ? "queued" : "missing",
     ...(call.arguments === undefined ? {} : { arguments: call.arguments }),
     ...(call.truncated === undefined ? {} : { truncated: call.truncated }),
   };
@@ -527,6 +583,7 @@ export function segmentsFromContent(
   content: readonly ConversationContentBlock[],
   liveTools: ConversationState["liveTools"],
   streaming = false,
+  turnOpen = false,
 ): AssistantSegment[] {
   const segments: AssistantSegment[] = [];
   const batch: ToolView[] = [];
@@ -538,7 +595,7 @@ export function segmentsFromContent(
   for (const block of content) {
     if (block.type === "toolResult") continue;
     if (block.type === "toolCall") {
-      batch.push(toolViewFromBlocks(block, results.get(block.toolCallId), liveTools[block.toolCallId]));
+      batch.push(toolViewFromBlocks(block, results.get(block.toolCallId), liveTools[block.toolCallId], turnOpen));
       continue;
     }
     flushBatch(segments, batch, `batch-${index}`);
@@ -569,12 +626,18 @@ function segmentsFromLive(live: LiveMessage, tools: readonly LiveTool[]): Assist
   for (const block of live.blocks) {
     if (block.blockType === "thinking") {
       if (block.text.length === 0) continue;
-      segments.push({ type: "thinking", key: block.blockId, text: block.text });
+      segments.push({
+        type: "thinking",
+        key: block.blockId,
+        text: block.text,
+        ...(block.truncated === undefined ? {} : { truncated: block.truncated }),
+      });
     } else {
       segments.push({
         type: "text",
         key: block.blockId,
         text: block.text,
+        ...(block.truncated === undefined ? {} : { truncated: block.truncated }),
         streaming: !live.aborted,
       });
     }
@@ -611,7 +674,24 @@ function pendingRow(entry: PendingUser): TimelineRow {
 
 type AssistantRow = Extract<TimelineRow, { type: "assistant" }>;
 
+const TOOL_PROCESS_FILLER_PATTERN = /^[.·•…。]+$/u;
+
+function hasAssistantProcess(row: AssistantRow): boolean {
+  return row.segments.some((segment) => segment.type === "thinking" || segment.type === "batch");
+}
+
+function withoutToolProcessFillers(row: AssistantRow): AssistantRow {
+  if (!hasAssistantProcess(row)) return row;
+  const segments = row.segments.filter((segment) => {
+    if (segment.type !== "text") return true;
+    const text = segment.text.trim();
+    return text.length > 0 && !TOOL_PROCESS_FILLER_PATTERN.test(text);
+  });
+  return segments.length === row.segments.length ? row : { ...row, segments };
+}
+
 function hasVisibleAssistantText(row: AssistantRow): boolean {
+  if (row.error !== undefined) return true;
   return row.segments.some((segment) => segment.type === "text" && segment.text.trim().length > 0);
 }
 
@@ -639,11 +719,13 @@ function mergeProcessRows(rows: readonly AssistantRow[]): AssistantRow {
   if (tools.length > 0) {
     segments.push({ type: "batch", key: `turn-process:${first.itemId}`, tools });
   }
+  const error = rows.find((row) => row.error !== undefined)?.error;
   return {
     ...first,
     segments,
     status: mergedProcessStatus(rows),
     presentation: "process",
+    ...(error === undefined ? {} : { error }),
   };
 }
 
@@ -662,7 +744,18 @@ function presentAssistantTurns(rows: readonly TimelineRow[]): TimelineRow[] {
     let processRun: AssistantRow[] = [];
     const flushProcess = () => {
       if (processRun.length === 0) return;
-      merged.push(mergeProcessRows(processRun));
+      const process = mergeProcessRows(processRun);
+      const previousIndex = merged.length - 1;
+      const previous = merged[previousIndex];
+      if (previous !== undefined && hasAssistantProcess(previous)) {
+        merged[previousIndex] = {
+          ...previous,
+          segments: [...previous.segments, ...process.segments],
+          status: mergedProcessStatus([previous, process]),
+        };
+      } else {
+        merged.push(process);
+      }
       processRun = [];
     };
     for (const row of assistantRun) {
@@ -687,7 +780,7 @@ function presentAssistantTurns(rows: readonly TimelineRow[]): TimelineRow[] {
 
   for (const row of rows) {
     if (row.type === "assistant") {
-      assistantRun.push(row);
+      assistantRun.push(withoutToolProcessFillers(row));
       continue;
     }
     flushRun();
@@ -718,8 +811,8 @@ export function buildTimeline(state: ConversationState): TimelineRow[] {
       });
       continue;
     }
-    const row = rowFromItem(item, state.liveTools);
-    if (row.type === "assistant" && row.segments.length === 0) continue;
+    const row = rowFromItem(item, state.liveTools, state.openTurnItems[item.itemId] !== undefined);
+    if (row.type === "assistant" && row.segments.length === 0 && row.error === undefined) continue;
     rows.push(row);
   }
   for (const messageId of state.liveOrder) {
@@ -779,6 +872,7 @@ export function persistedItemsOf(convo: ClientConversationState): ConversationIt
 
 function toolStatusFromClient(tool: ConversationLiveTool): ToolStatus {
   if (tool.status === "completed") return tool.isError === true ? "failed" : "succeeded";
+  if (tool.status === "aborted") return "aborted";
   if (tool.status === "started" || tool.status === "updated") return "running";
   return "queued";
 }
@@ -852,9 +946,11 @@ export function projectClientConversation(
       id: `notice-${index}`,
       level: notice.level,
       message: notice.message,
+      ...(notice.source === undefined ? {} : { source: notice.source }),
     })),
     pendingUsers,
     resyncRequired: convo.resyncRequired,
+    openTurnItems: convo.openTurnItems,
     ...(convo.olderCursor === undefined ? {} : { olderCursor: convo.olderCursor }),
     ...(convo.headCursor === undefined ? {} : { headCursor: convo.headCursor }),
     ...(convo.lastEventSeq === undefined ? {} : { lastEventSeq: convo.lastEventSeq }),
@@ -868,7 +964,16 @@ function mapClientHydrateStatus(convo: ClientConversationState): HydrateStatus {
   return convo.hydrateStatus;
 }
 
-function rowFromItem(item: ConversationItem, liveTools: ConversationState["liveTools"]): TimelineRow {
+function isToolActive(tool: ToolView | LiveTool): boolean {
+  return tool.status === "running" || tool.status === "queued";
+}
+
+function rowFromItem(
+  item: ConversationItem,
+  liveTools: ConversationState["liveTools"],
+  turnOpen = false,
+  error?: ConversationMessageError,
+): TimelineRow {
   if (item.kind === "compaction") return { type: "compaction", item };
   if (item.kind === "resetBoundary") return { type: "resetBoundary", item };
   if (item.role === "user") {
@@ -886,7 +991,7 @@ function rowFromItem(item: ConversationItem, liveTools: ConversationState["liveT
   const extra = Object.values(liveTools).filter(
     (tool) => tool.messageId === item.itemId && !used.has(tool.toolCallId),
   );
-  const segments = segmentsFromContent(item.content, liveTools);
+  const segments = segmentsFromContent(item.content, liveTools, false, turnOpen);
   if (extra.length > 0) {
     segments.push({
       type: "batch",
@@ -894,13 +999,18 @@ function rowFromItem(item: ConversationItem, liveTools: ConversationState["liveT
       tools: extra,
     });
   }
-  const running = extra.some((tool) => tool.status === "running" || tool.status === "queued");
+  // Tools normally live inside the persisted content, so the row is still
+  // streaming whenever any of its tool views is active — not only the extras.
+  const running = segments.some(
+    (segment) => segment.type === "batch" && segment.tools.some(isToolActive),
+  );
   return {
     type: "assistant",
     itemId: item.itemId,
     createdAt: item.createdAt,
     segments,
-    status: running ? "streaming" : "completed",
+    status: error !== undefined ? "error" : running ? "streaming" : "completed",
+    ...(error === undefined ? {} : { error }),
   };
 }
 
@@ -913,12 +1023,18 @@ function liveToolMap(tools: readonly LiveTool[]): ConversationState["liveTools"]
 export function rowsFromConversationViews(
   views: readonly ConversationView[],
   pendingUsers: readonly PendingUser[] = [],
+  itemErrors: Readonly<Record<string, ConversationMessageError>> = {},
 ): TimelineRow[] {
   const rows: TimelineRow[] = [];
   for (const view of views) {
     if (view.kind === "item") {
-      const row = rowFromItem(view.item, liveToolMap(view.tools.map(liveToolFromClient)));
-      if (row.type === "assistant" && row.segments.length === 0) continue;
+      const row = rowFromItem(
+        view.item,
+        liveToolMap(view.tools.map(liveToolFromClient)),
+        view.turnOpen,
+        itemErrors[view.item.itemId],
+      );
+      if (row.type === "assistant" && row.segments.length === 0 && row.error === undefined) continue;
       rows.push(row);
       continue;
     }

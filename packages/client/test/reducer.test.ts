@@ -956,3 +956,45 @@ test("StudioClientImpl records transcript hydrate failure on conversation state"
   assert.equal(view.error?.code, "UNAVAILABLE");
   assert.equal(view.error?.message, "runtime down");
 });
+
+test("child conversation.changed advances the cursor without stealing or polluting main conversation", () => {
+  let state = bootedState();
+  const conversationBefore = state.conversation;
+  const child: ClientEvent = {
+    ...base("11", { runtimeEpoch: 1 as RuntimeEpoch, stateVersion: 1 as StateVersion }),
+    kind: "conversation.changed",
+    sessionId: "child-sess" as SessionId,
+    eventSeq: 7,
+    update: {
+      kind: "conversation.message.started",
+      sessionId: "child-sess" as SessionId,
+      turnId: "turn-1",
+      messageId: "child-m1",
+      role: "assistant",
+      createdAt: TS,
+    },
+  };
+  state = reduceClientState(state, { type: "event", event: child });
+  assert.equal(state.connection.cursor, "11");
+  assert.equal(state.conversation, conversationBefore);
+  assert.equal(state.conversation.identity, undefined);
+
+  const main: ClientEvent = {
+    ...base("12", { runtimeEpoch: 1 as RuntimeEpoch, stateVersion: 1 as StateVersion }),
+    kind: "conversation.changed",
+    sessionId: "sess-1" as SessionId,
+    eventSeq: 9,
+    update: {
+      kind: "conversation.message.started",
+      sessionId: "sess-1" as SessionId,
+      turnId: "turn-1",
+      messageId: "main-m1",
+      role: "assistant",
+      createdAt: TS,
+    },
+  };
+  state = reduceClientState(state, { type: "event", event: main });
+  assert.equal(state.connection.cursor, "12");
+  assert.equal(state.conversation.identity?.sessionId, "sess-1");
+  assert.equal(state.conversation.lastEventSeq, 9);
+});

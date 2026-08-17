@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StudioClient, WorkspaceFileTreeReadModel, WorkspaceId } from "@omp-studio/client-contract";
 
+import { buildGitStatusLookup } from "./git/treeStatus";
+
 vi.mock("@xterm/xterm", () => ({ Terminal: class Terminal {} }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class FitAddon {} }));
 
@@ -177,5 +179,56 @@ describe("RealFileTree", () => {
 
     await screen.findByRole("textbox", { name: "新建文件夹名" });
     expect(query).toHaveBeenCalledWith("workspace.fileTree", { workspaceId, path: "src" });
+  });
+
+  it("decorates changed files and their ancestor folders with git status badges", async () => {
+    const query = vi.fn(async () => tree([
+      {
+        type: "dir",
+        name: "src",
+        path: "src",
+        children: [
+          { type: "file", name: "main.ts", path: "src/main.ts" },
+          { type: "file", name: "notes.md", path: "src/notes.md" },
+        ],
+      },
+      { type: "file", name: "README.md", path: "README.md" },
+    ]));
+    const client = { query } as unknown as StudioClient;
+    const gitStatus = buildGitStatusLookup([
+      { path: "src/main.ts", index: "unmodified", worktree: "modified", conflicted: false },
+      { path: "src/notes.md", index: "unmodified", worktree: "untracked", conflicted: false },
+    ]);
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" gitStatus={gitStatus} {...noCreation} />);
+
+    const fileRow = await waitFor(() => {
+      const row = screen.getByText("main.ts").closest<HTMLDivElement>("[role=treeitem]");
+      expect(row).not.toBeNull();
+      return row!;
+    });
+    expect(fileRow.querySelector(".fstat.m")).not.toBeNull();
+    expect(screen.getAllByText("已修改").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("未跟踪").closest(".fstat.u")).not.toBeNull();
+    const dirRow = screen.getByRole("treeitem", { name: "src 文件夹" });
+    expect(dirRow.querySelector(".fstat.m")).not.toBeNull();
+    const untouched = screen.getByText("README.md").closest("[role=treeitem]");
+    expect(untouched!.querySelector(".fstat")).toBeNull();
+  });
+
+  it("renders no git badges when status lookup is empty or absent", async () => {
+    const query = vi.fn(async () => tree([
+      { type: "dir", name: "src", path: "src", children: [{ type: "file", name: "main.ts", path: "src/main.ts" }] },
+    ]));
+    const client = { query } as unknown as StudioClient;
+
+    const { unmount } = render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" gitStatus={new Map()} {...noCreation} />);
+    await screen.findByRole("treeitem", { name: "src 文件夹" });
+    expect(document.querySelector(".fstat")).toBeNull();
+    unmount();
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+    await screen.findByRole("treeitem", { name: "src 文件夹" });
+    expect(document.querySelector(".fstat")).toBeNull();
   });
 });

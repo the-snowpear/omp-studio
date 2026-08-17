@@ -56,11 +56,19 @@ const QUERY_ENVELOPES: ReadonlyArray<{
   { name: "usage.get", payload: { queryName: "usage.get", input: {} } },
   { name: "session.transcript.read", payload: { queryName: "session.transcript.read", input: { limit: 50 } } },
   {
+    name: "agent.transcript.read",
+    payload: { queryName: "agent.transcript.read", input: { agentId: "agent-0001", limit: 50 } },
+  },
+  {
     name: "session.transcript.readPage",
     payload: {
       queryName: "session.transcript.readPage",
       input: { sessionId: "session-1", limit: 50 },
     },
+  },
+  {
+    name: "session.telemetry.read",
+    payload: { queryName: "session.telemetry.read", input: { sessionId: "session-1" } },
   },
   { name: "git.toolchain.get", payload: { queryName: "git.toolchain.get", input: {} } },
   { name: "git.repository.get", payload: { queryName: "git.repository.get", input: { workspaceId: "ws-0001" } } },
@@ -68,6 +76,9 @@ const QUERY_ENVELOPES: ReadonlyArray<{
   { name: "git.branches.list", payload: { queryName: "git.branches.list", input: { workspaceId: "ws-0001" } } },
   { name: "git.worktrees.list", payload: { queryName: "git.worktrees.list", input: { workspaceId: "ws-0001" } } },
   { name: "git.remotes.list", payload: { queryName: "git.remotes.list", input: { workspaceId: "ws-0001" } } },
+  { name: "git.log.list", payload: { queryName: "git.log.list", input: { workspaceId: "ws-0001", limit: 80 } } },
+  { name: "git.commit.changes", payload: { queryName: "git.commit.changes", input: { workspaceId: "ws-0001", oid: "0123456789abcdef0123456789abcdef01234567" } } },
+  { name: "git.commit.diff", payload: { queryName: "git.commit.diff", input: { workspaceId: "ws-0001", oid: "0123456789abcdef0123456789abcdef01234567", path: "src/index.ts" } } },
   { name: "github.auth.get", payload: { queryName: "github.auth.get", input: { workspaceId: "ws-0001" } } },
   { name: "github.pr.list", payload: { queryName: "github.pr.list", input: { workspaceId: "ws-0001", state: "open" } } },
   { name: "github.pr.get", payload: { queryName: "github.pr.get", input: { workspaceId: "ws-0001", number: 1 } } },
@@ -86,6 +97,78 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
   { name: "runtime.pause", payload: { commandName: "runtime.pause", input: {}, idempotencyKey: "idem-core-6", requestId: "req-core-6" } },
   { name: "runtime.resume", payload: { commandName: "runtime.resume", input: { expectedPauseEpoch: 0 }, idempotencyKey: "idem-core-7", requestId: "req-core-7" } },
   { name: "turn.retry", payload: { commandName: "turn.retry", input: {}, idempotencyKey: "idem-core-8", requestId: "req-core-8" } },
+  {
+    name: "session.model.set",
+    payload: {
+      commandName: "session.model.set",
+      input: { selector: "anthropic/claude-sonnet-4-5", thinking: "high" },
+      idempotencyKey: "idem-model-1",
+      requestId: "req-model-1",
+    },
+  },
+  {
+    name: "session.thinking.set",
+    payload: {
+      commandName: "session.thinking.set",
+      input: { level: "auto" },
+      idempotencyKey: "idem-think-1",
+      requestId: "req-think-1",
+    },
+  },
+  {
+    name: "agent.spawn",
+    payload: {
+      commandName: "agent.spawn",
+      input: { definition: "general-purpose", assignment: "audit the lockfile", async: true },
+      idempotencyKey: "idem-agent-1",
+      requestId: "req-agent-1",
+    },
+  },
+  {
+    name: "agent.send",
+    payload: {
+      commandName: "agent.send",
+      input: { agentId: "agent-0001", expectedGeneration: 1, text: "status?", mode: "prompt" },
+      idempotencyKey: "idem-agent-2",
+      requestId: "req-agent-2",
+    },
+  },
+  {
+    name: "agent.kill",
+    payload: {
+      commandName: "agent.kill",
+      input: { agentId: "agent-0001", expectedGeneration: 1 },
+      idempotencyKey: "idem-agent-3",
+      requestId: "req-agent-3",
+    },
+  },
+  {
+    name: "agent.revive",
+    payload: {
+      commandName: "agent.revive",
+      input: { agentId: "agent-0001", expectedGeneration: 1 },
+      idempotencyKey: "idem-agent-4",
+      requestId: "req-agent-4",
+    },
+  },
+  {
+    name: "agent.release",
+    payload: {
+      commandName: "agent.release",
+      input: { agentId: "agent-0001", expectedGeneration: 1 },
+      idempotencyKey: "idem-agent-5",
+      requestId: "req-agent-5",
+    },
+  },
+  {
+    name: "job.cancel",
+    payload: {
+      commandName: "job.cancel",
+      input: { jobId: "job-0001", expectedGeneration: 1 },
+      idempotencyKey: "idem-agent-6",
+      requestId: "req-agent-6",
+    },
+  },
   {
     name: "runtime.install",
     payload: {
@@ -120,6 +203,24 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
       input: { threadId: "thread-1" },
       idempotencyKey: "idem-3",
       requestId: "req-3",
+    },
+  },
+  {
+    name: "session.archive",
+    payload: {
+      commandName: "session.archive",
+      input: { threadId: "thread-1" },
+      idempotencyKey: "idem-archive",
+      requestId: "req-archive",
+    },
+  },
+  {
+    name: "session.unarchive",
+    payload: {
+      commandName: "session.unarchive",
+      input: { threadId: "thread-1" },
+      idempotencyKey: "idem-unarchive",
+      requestId: "req-unarchive",
     },
   },
   {
@@ -464,13 +565,19 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       "workspace.fileTree",
       "usage.get",
       "session.transcript.read",
+      "agent.transcript.read",
+      "agent.conversation.read",
       "session.transcript.readPage",
+      "session.telemetry.read",
       "git.toolchain.get",
       "git.repository.get",
       "git.diff.get",
       "git.branches.list",
       "git.worktrees.list",
       "git.remotes.list",
+      "git.log.list",
+      "git.commit.changes",
+      "git.commit.diff",
       "github.auth.get",
       "github.pr.list",
       "github.pr.get",
@@ -540,6 +647,42 @@ describe("parseClientQueryRequest: envelope strictness", () => {
     assert.equal(ok.queryName, "history.list");
   });
 
+  test("history.list accepts a known status and rejects anything else", () => {
+    for (const status of ["active", "archived", "closed"]) {
+      const ok = parseClientQueryRequest({ queryName: "history.list", input: { status } });
+      assert.equal(ok.queryName, "history.list");
+    }
+    for (const status of ["bogus", "ACTIVE", 1, null, [], {}]) {
+      const message = expectValidationError(() =>
+        parseClientQueryRequest({ queryName: "history.list", input: { status } }),
+      );
+      assert.match(message, /status/);
+    }
+  });
+
+  test("session.archive and session.unarchive require a non-empty threadId", () => {
+    for (const commandName of ["session.archive", "session.unarchive"]) {
+      const ok = parseClientCommandRequest({
+        commandName,
+        input: { threadId: "thread-1" },
+        idempotencyKey: "idem-archive-shape",
+        requestId: "req-archive-shape",
+      });
+      assert.equal(ok.commandName, commandName);
+      for (const input of [{}, { threadId: "" }, { threadId: 42 }, { threadId: "thread-1", extra: 1 }]) {
+        const message = expectValidationError(() =>
+          parseClientCommandRequest({
+            commandName,
+            input,
+            idempotencyKey: "idem-archive-shape",
+            requestId: "req-archive-shape",
+          }),
+        );
+        assert.match(message, /threadId|unknown field/u);
+      }
+    }
+  });
+
   test("workspace.fileTree accepts a safe relative directory and rejects escapes", () => {
     const ok = parseClientQueryRequest({ queryName: "workspace.fileTree", input: { workspaceId: "ws-1", path: "apps/renderer" } });
     assert.equal(ok.queryName, "workspace.fileTree");
@@ -595,6 +738,26 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       input: { sessionId: "session-1", cursor: "opaque-older", limit: 50 },
     });
     assert.equal(ok.queryName, "session.transcript.readPage");
+  });
+
+  test("session.telemetry.read requires exactly one session id and no runtime fields", () => {
+    for (const input of [
+      {},
+      { sessionId: "" },
+      { sessionId: " " },
+      { sessionId: "x".repeat(MAX_ID_LENGTH + 1) },
+      { sessionId: "session-1", extra: true },
+      { sessionId: "session-1", cwd: "D:\workspace" },
+      { sessionId: "session-1", runtimeExecutable: "omp.exe" },
+      { sessionId: "session-1", sessionFile: "C:\tmp\copy.jsonl" },
+    ]) {
+      expectValidationError(() => parseClientQueryRequest({ queryName: "session.telemetry.read", input }));
+    }
+    const ok = parseClientQueryRequest({
+      queryName: "session.telemetry.read",
+      input: { sessionId: "session-1" },
+    });
+    assert.equal(ok.queryName, "session.telemetry.read");
   });
 });
 
@@ -652,14 +815,28 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       "loop.enable",
       "loop.pause",
       "loop.disable",
+      "session.fast.set",
+      "session.prewalk.arm",
+      "session.prewalk.disarm",
       "session.fork",
+      "session.handoff",
+      "session.model.set",
+      "session.thinking.set",
       "session.tree.get",
       "session.tree.navigate",
       "operator.invoke",
+      "agent.spawn",
+      "agent.send",
+      "agent.kill",
+      "agent.revive",
+      "agent.release",
+      "job.cancel",
       "runtime.install",
       "session.create",
       "session.resume",
       "session.drop",
+      "session.archive",
+      "session.unarchive",
       "interaction.respond",
       "permissions.mode.set",
       "models.provider.upsert",
@@ -700,6 +877,62 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       assert.ok(parsed.idempotencyKey.length > 0);
       assert.ok("input" in parsed);
     }
+  });
+
+  test("core.prompt accepts optional images and rejects malformed ones", () => {
+    const parsed = parseClientCommandRequest({
+      commandName: "core.prompt",
+      input: {
+        text: "see [图1]",
+        images: [{ type: "image", mimeType: "image/png", data: "abc" }],
+      },
+      idempotencyKey: "idem-img-1",
+      requestId: "req-img-1",
+    });
+    assert.equal(parsed.commandName, "core.prompt");
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "core.prompt",
+        input: { text: "x", images: [{ type: "file", mimeType: "image/png", data: "abc" }] },
+        idempotencyKey: "idem-img-bad",
+        requestId: "req-img-bad",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "queue.enqueue",
+        input: { text: "x", images: [{ type: "image", mimeType: "image/png", data: "abc" }] },
+        idempotencyKey: "idem-q-img",
+        requestId: "req-q-img",
+      }),
+    );
+  });
+
+  test("session model and thinking commands reject inherit and empty selectors", () => {
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "session.model.set",
+        input: { selector: "" },
+        idempotencyKey: "idem-model-empty",
+        requestId: "req-model-empty",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "session.model.set",
+        input: { selector: "anthropic/claude-sonnet-4-5", thinking: "inherit" },
+        idempotencyKey: "idem-model-inherit",
+        requestId: "req-model-inherit",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "session.thinking.set",
+        input: { level: "inherit" },
+        idempotencyKey: "idem-think-inherit",
+        requestId: "req-think-inherit",
+      }),
+    );
   });
 
   test("accepts empty models.roles.set selector and empty probe endpointUrl", () => {
@@ -1228,6 +1461,45 @@ describe("assertClientQueryResponse: outbound strictness", () => {
         assertClientQueryResponse({
           ok: true,
           queryName: "session.transcript.readPage",
+          result: invalid,
+        }),
+      );
+    }
+  });
+
+  test("session.telemetry.read results validate provenance and fail closed on deviations", () => {
+    const telemetry = {
+      sessionId: "session-1",
+      capturedAt: "2026-08-15T12:00:00.000Z",
+      tokens: { input: 10, output: 4, reasoning: 1, cacheRead: 2, cacheWrite: 0, total: 14, cost: 0.12 },
+      context: null,
+      unavailableReason: "probe_dynamic_context_disabled",
+    };
+    const result = {
+      sessionId: "session-1",
+      source: "archive-recomputed",
+      semantics: "current-environment-recomputed",
+      telemetry,
+    };
+    assertClientQueryResponse({ ok: true, queryName: "session.telemetry.read", result });
+    assertClientQueryResponse({
+      ok: true,
+      queryName: "session.telemetry.read",
+      result: { ...result, source: "persisted", semantics: "last-observed" },
+    });
+    for (const invalid of [
+      { ...result, source: "cached" },
+      { ...result, semantics: "stale" },
+      { ...result, extra: true },
+      { ...result, sessionId: "session-2" },
+      { ...result, telemetry: { ...telemetry, tokens: { ...telemetry.tokens, input: -1 } } },
+      { ...result, telemetry: { ...telemetry, tokens: { ...telemetry.tokens, input: Number.NaN } } },
+      { ...result, telemetry: { ...telemetry, unavailableReason: "made-up" } },
+    ]) {
+      expectValidationError(() =>
+        assertClientQueryResponse({
+          ok: true,
+          queryName: "session.telemetry.read",
           result: invalid,
         }),
       );

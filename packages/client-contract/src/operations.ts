@@ -9,20 +9,27 @@
  */
 
 import type {
+  AgentId,
+  AgentTranscriptPage,
   ApprovalMode,
   CapabilityManifest,
   ConversationTranscriptPage,
   OpaqueCursor,
   OperatorCommandManifest,
   OperatorStateSnapshot,
+  SessionTelemetryReadResult,
+  SessionThinkingSelector,
 } from "@omp-studio/studio-protocol";
 
 import type { ConversationTranscriptReadPage } from "./conversation.js";
 import type {
   GitBranchListReadModel,
+  GitCommitChangesReadModel,
+  GitCommitDiffReadModel,
   GitDiffReadModel,
   GitDiffTarget,
   GitExecuteInput,
+  GitLogListReadModel,
   GitHubAuthReadModel,
   GitHubChecksReadModel,
   GitHubExecuteInput,
@@ -53,6 +60,7 @@ import type {
   ModelProviderTestResult,
   RuntimeInstallState,
   SessionHistoryReadModel,
+  SessionHistoryStatus,
   TokenUsageReadModel,
   WorkspaceListReadModel,
   WorkspaceFileTreeReadModel,
@@ -67,7 +75,7 @@ export interface QueryInputMap {
   "capabilities.get": EmptyInput;
   "commands.getManifest": EmptyInput;
   "diagnostics.get": EmptyInput;
-  "history.list": { readonly limit?: number };
+  "history.list": { readonly limit?: number; readonly status?: SessionHistoryStatus };
   "session.state": EmptyInput;
   "home.get": EmptyInput;
   "models.get": EmptyInput;
@@ -79,11 +87,17 @@ export interface QueryInputMap {
   "workspace.fileTree": { readonly workspaceId: WorkspaceId; readonly path?: string };
   "usage.get": EmptyInput;
   "session.transcript.read": { readonly cursor?: OpaqueCursor; readonly limit?: number };
+  "agent.transcript.read": { readonly agentId: AgentId; readonly cursor?: OpaqueCursor; readonly limit?: number };
+  "agent.conversation.read": { readonly agentId: AgentId; readonly cursor?: OpaqueCursor; readonly limit?: number };
   /** Runtime-independent persisted transcript page for an explicit session. */
   "session.transcript.readPage": {
     readonly sessionId: SessionId;
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
+  };
+  /** Read-only telemetry for a session: live snapshot, persisted record, or recomputed archive probe. */
+  "session.telemetry.read": {
+    readonly sessionId: SessionId;
   };
   "git.toolchain.get": EmptyInput;
   "git.repository.get": { readonly workspaceId: WorkspaceId };
@@ -91,6 +105,9 @@ export interface QueryInputMap {
   "git.branches.list": { readonly workspaceId: WorkspaceId };
   "git.worktrees.list": { readonly workspaceId: WorkspaceId };
   "git.remotes.list": { readonly workspaceId: WorkspaceId };
+  "git.log.list": { readonly workspaceId: WorkspaceId; readonly limit?: number; readonly skip?: number };
+  "git.commit.changes": { readonly workspaceId: WorkspaceId; readonly oid: string };
+  "git.commit.diff": { readonly workspaceId: WorkspaceId; readonly oid: string; readonly path: string };
   "github.auth.get": { readonly workspaceId?: WorkspaceId };
   "github.pr.list": { readonly workspaceId: WorkspaceId; readonly state?: "open" | "closed" | "merged" | "all" };
   "github.pr.get": { readonly workspaceId: WorkspaceId; readonly number: number };
@@ -122,14 +139,22 @@ export interface QueryResultMap {
   "usage.get": TokenUsageReadModel;
   /** Active-branch transcript page. Protocol public shape; never `unknown[]`. */
   "session.transcript.read": ConversationTranscriptPage;
+  /** Per-agent transcript page from the Runtime Agent Hub. */
+  "agent.transcript.read": AgentTranscriptPage;
+  "agent.conversation.read": ConversationTranscriptPage;
   /** Persisted transcript page. Available independently of Runtime residency. */
   "session.transcript.readPage": ConversationTranscriptReadPage;
+  /** Session telemetry with provenance. Available independently of Runtime residency. */
+  "session.telemetry.read": SessionTelemetryReadResult;
   "git.toolchain.get": GitToolchainReadModel;
   "git.repository.get": GitRepositoryReadModel;
   "git.diff.get": GitDiffReadModel;
   "git.branches.list": GitBranchListReadModel;
   "git.worktrees.list": GitWorktreeListReadModel;
   "git.remotes.list": GitRemoteListReadModel;
+  "git.log.list": GitLogListReadModel;
+  "git.commit.changes": GitCommitChangesReadModel;
+  "git.commit.diff": GitCommitDiffReadModel;
   "github.auth.get": GitHubAuthReadModel;
   "github.pr.list": GitHubPullRequestListReadModel;
   "github.pr.get": GitHubPullRequestDetailReadModel;
@@ -260,11 +285,26 @@ export interface AgentDefinitionConfigureInput {
   readonly prewalkOverride?: string | null;
 }
 
+/**
+ * Image attachment on prompt / steer / follow-up. Matches the Runtime
+ * `ImageContent` wire shape (`type` + base64 `data` + `mimeType`).
+ */
+export type PromptImageInput = {
+  readonly type: "image";
+  readonly mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  readonly data: string;
+};
+
+export type PromptTextInput = {
+  readonly text: string;
+  readonly images?: ReadonlyArray<PromptImageInput>;
+};
+
 /** Public semantic command inputs exposed by the Runtime control surface. */
 export interface RuntimeCommandInputMap {
-  "core.prompt": { readonly text: string };
-  "core.steer": { readonly text: string };
-  "core.followUp": { readonly text: string };
+  "core.prompt": PromptTextInput;
+  "core.steer": PromptTextInput;
+  "core.followUp": PromptTextInput;
   "core.abort": EmptyInput;
   "queue.enqueue": { readonly text: string };
   "runtime.pause": EmptyInput;
@@ -287,10 +327,51 @@ export interface RuntimeCommandInputMap {
   "loop.enable": { readonly prompt?: string; readonly limit?: { readonly turns?: number; readonly minutes?: number; readonly tokens?: number } };
   "loop.pause": EmptyInput;
   "loop.disable": EmptyInput;
+  "session.fast.set": { readonly enabled: boolean };
+  "session.prewalk.arm": { readonly target?: string };
+  "session.prewalk.disarm": EmptyInput;
+  /**
+   * Switch the model of the live Runtime session. Same semantics as `/model`:
+   * the session changes, `modelRoles` on disk does not. Rejected while the
+   * Runtime is streaming or compacting.
+   */
+  "session.model.set": { readonly selector: string; readonly thinking?: SessionThinkingSelector };
+  /** Set the session thinking level without changing the active model. */
+  "session.thinking.set": { readonly level: SessionThinkingSelector };
   "session.fork": EmptyInput;
+  /**
+   * Generate a handoff document from the current session and start a fresh
+   * session seeded with it. The Runtime switches to the new session, so the
+   * post-command snapshot carries the new sessionId.
+   */
+  "session.handoff": { readonly customInstructions?: string };
   "session.tree.get": EmptyInput;
   "session.tree.navigate": { readonly targetId: string; readonly summarize?: boolean; readonly customInstructions?: string; readonly reanswer?: unknown };
   "operator.invoke": { readonly commandId: string; readonly arguments?: unknown };
+  /** Spawn a subagent via the native structured-subagent path. */
+  "agent.spawn": {
+    readonly definition: string;
+    readonly assignment: string;
+    readonly context?: string;
+    readonly async?: boolean;
+    readonly isolation?: string;
+    readonly effort?: string;
+  };
+  /** Deliver a message to a live/parked subagent (generation-fenced). */
+  "agent.send": {
+    readonly agentId: string;
+    readonly expectedGeneration: number;
+    readonly text: string;
+    readonly mode: "prompt" | "steer" | "followUp";
+  };
+  /** Abort + tombstone a subagent. Destructive: the Runtime issues a confirmation gate. */
+  "agent.kill": { readonly agentId: string; readonly expectedGeneration: number };
+  /** Reattach a live session to a parked subagent. */
+  "agent.revive": { readonly agentId: string; readonly expectedGeneration: number };
+  /** Erase a terminal subagent record. Destructive: the Runtime issues a confirmation gate. */
+  "agent.release": { readonly agentId: string; readonly expectedGeneration: number };
+  /** Cancel a background job owned by the caller's subtree. */
+  "job.cancel": { readonly jobId: string; readonly expectedGeneration: number };
 }
 
 /**
@@ -312,6 +393,14 @@ interface CoreCommandInputMap {
   "session.resume": { readonly threadId: ThreadId };
   /** Drop a thread. Destructive: the Host issues a one-time confirmation. */
   "session.drop": { readonly threadId: ThreadId };
+  /**
+   * Archive a thread: the Host moves the session JSONL (gzip) and its
+   * artifacts into the OMP cold-archive tree. Reversible via
+   * `session.unarchive`; rejected while the session is resident in a Runtime.
+   */
+  "session.archive": { readonly threadId: ThreadId };
+  /** Restore an archived thread back into the active sessions tree. */
+  "session.unarchive": { readonly threadId: ThreadId };
   /** Answer an `interaction_required` prompt issued by the Host. */
   "interaction.respond": {
     readonly interactionId: InteractionId;
@@ -432,6 +521,8 @@ interface CoreCommandResultMap {
   "session.create": OperatorStateSnapshot;
   "session.resume": OperatorStateSnapshot;
   "session.drop": OperatorStateSnapshot;
+  "session.archive": ConfigWriteResult;
+  "session.unarchive": ConfigWriteResult;
   "interaction.respond": OperatorStateSnapshot;
   "permissions.mode.set": {
     readonly mode: ApprovalMode;
@@ -471,8 +562,22 @@ interface CoreCommandResultMap {
   "github.execute": GitHubOperationResult;
 }
 
+/**
+ * Enriched `operator.invoke` completion: the Runtime's command output lines
+ * and raw command result travel beside the post-command state snapshot so
+ * surfaces (e.g. conversation export) can surface real operator feedback
+ * instead of a bare snapshot.
+ */
+export interface OperatorInvokeOutcome {
+  readonly snapshot: OperatorStateSnapshot;
+  readonly output: ReadonlyArray<string>;
+  readonly result: unknown;
+}
+
 export type CommandResultMap = CoreCommandResultMap & {
-  [K in keyof RuntimeCommandInputMap]: OperatorStateSnapshot;
+  [K in Exclude<keyof RuntimeCommandInputMap, "operator.invoke">]: OperatorStateSnapshot;
+} & {
+  "operator.invoke": OperatorInvokeOutcome;
 };
 
 export type CommandName = keyof CommandInputMap & keyof CommandResultMap;

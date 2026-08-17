@@ -64,7 +64,7 @@ export class ConversationEventFanout {
     try {
       parsed = parseConversationRuntimeEvent(envelope.event);
     } catch {
-      this.emitResync("conversation mapping failed; re-query session.transcript.read");
+      this.emitResync("conversation mapping failed; re-read open transcripts");
       return false;
     }
     const event: StudioConversationForward = {

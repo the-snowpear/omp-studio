@@ -1,4 +1,5 @@
 import type {
+  AgentTranscriptPage,
   CommandId,
   CommandLedgerEntry,
   ConversationTranscriptPage,
@@ -48,7 +49,7 @@ export class StudioRuntimeSessionController {
       this.#interaction.forward(envelope, (commandId) => this.requestIdForCommandId(commandId));
     });
     this.#unsubscribeResync = bridge.onResyncRequired(() => {
-      this.#conversation.emitResync("conversation gap; re-query session.transcript.read");
+      this.#conversation.emitResync("conversation gap; re-read open transcripts");
     });
   }
 
@@ -123,6 +124,59 @@ export class StudioRuntimeSessionController {
     return page;
   }
 
+  /**
+   * Read one page of a per-agent transcript from the Runtime Agent Hub.
+   * Query, not a Composer command: it is not recorded on the command ledger.
+   * The page carries its own generation-bound signed cursor.
+   */
+  async readAgentTranscript(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<AgentTranscriptPage> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime snapshot is required before agent transcript read");
+    }
+    const page = await this.bridge.readAgentTranscript(input);
+    const current = this.bridge.projectionSnapshot();
+    if (current === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime snapshot disappeared during agent transcript read");
+    }
+    if (page.agentId !== input.agentId) {
+      throw new StudioHostError("CURSOR_STALE", "Agent transcript page does not match the requested agent");
+    }
+    return page;
+  }
+
+  /**
+   * Read one ConversationItem page for a child agent. Query, not a Composer
+   * command. The child's sessionId is expected and must not match the main
+   * snapshot session.
+   */
+  async readAgentConversation(input: {
+    readonly agentId: string;
+    readonly cursor?: OpaqueCursor;
+    readonly limit?: number;
+  }): Promise<ConversationTranscriptPage> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime snapshot is required before agent conversation read");
+    }
+    const page = await this.bridge.readAgentConversation(input);
+    const current = this.bridge.projectionSnapshot();
+    if (current === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime snapshot disappeared during agent conversation read");
+    }
+    if (page.runtimeEpoch !== current.runtimeEpoch) {
+      throw new StudioHostError(
+        "RUNTIME_EPOCH_STALE",
+        "Agent conversation page runtime epoch does not match the current session",
+      );
+    }
+    return page;
+  }
+
   onConversationEvent(listener: (event: StudioConversationForward) => void): () => void {
     return this.#conversation.onEvent(listener);
   }
@@ -151,7 +205,7 @@ export class StudioRuntimeSessionController {
     const changed = this.ledger.markRuntimeLost(runtimeId, runtimeEpoch);
     const snapshot = this.bridge.projectionSnapshot();
     if (snapshot !== undefined) this.#publish(snapshot);
-    this.#conversation.emitResync("runtime lost; re-query session.transcript.read");
+    this.#conversation.emitResync("runtime lost; re-read open transcripts");
     return changed;
   }
 

@@ -1,5 +1,12 @@
 import { ContractValidationError } from "./contract-error.js";
-import type { SessionTelemetryEvent, SessionTelemetrySnapshot } from "./contracts/telemetry.js";
+import type {
+  SessionTelemetryEvent,
+  SessionTelemetryReadResult,
+  SessionTelemetrySemantics,
+  SessionTelemetrySnapshot,
+  SessionTelemetrySource,
+  SessionTelemetryUnavailableReason,
+} from "./contracts/telemetry.js";
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -40,6 +47,20 @@ function booleanValue(value: unknown, path: string): boolean {
 
 const TOKEN_FIELDS = ["input", "output", "reasoning", "cacheRead", "cacheWrite", "total", "cost"] as const;
 
+const UNAVAILABLE_REASONS: readonly SessionTelemetryUnavailableReason[] = [
+  "runtime_not_ready",
+  "model_context_unknown",
+  "probe_dynamic_context_disabled",
+];
+
+const TELEMETRY_SOURCES: readonly SessionTelemetrySource[] = ["live", "persisted", "archive-recomputed"];
+
+const TELEMETRY_SEMANTICS: readonly SessionTelemetrySemantics[] = [
+  "current-live",
+  "last-observed",
+  "current-environment-recomputed",
+];
+
 function parseTokenSet(value: unknown, path: string): SessionTelemetrySnapshot["tokens"] {
   const input = record(value, path);
   exactKeys(input, TOKEN_FIELDS, path);
@@ -49,9 +70,11 @@ function parseTokenSet(value: unknown, path: string): SessionTelemetrySnapshot["
 
 function parseTurn(value: unknown, path: string): NonNullable<SessionTelemetrySnapshot["lastCompletedTurn"]> {
   const input = record(value, path);
-  exactKeys(input, [...TOKEN_FIELDS, "completedAt"], path);
+  exactKeys(input, [...TOKEN_FIELDS, "completedAt", "durationMs", "tps"], path);
   for (const field of TOKEN_FIELDS) finiteNonNegative(input[field], `${path}.${field}`);
   nonEmptyString(input.completedAt, `${path}.completedAt`);
+  if (input.durationMs !== undefined) nonNegativeInteger(input.durationMs, `${path}.durationMs`);
+  if (input.tps !== undefined) finiteNonNegative(input.tps, `${path}.tps`);
   return input as NonNullable<SessionTelemetrySnapshot["lastCompletedTurn"]>;
 }
 
@@ -87,10 +110,27 @@ export function parseSessionTelemetrySnapshot(value: unknown, path = "$telemetry
   parseTokenSet(input.tokens, `${path}.tokens`);
   if (input.lastCompletedTurn !== undefined) parseTurn(input.lastCompletedTurn, `${path}.lastCompletedTurn`);
   if (input.context !== null) parseContext(input.context, `${path}.context`);
-  if (input.unavailableReason !== undefined && input.unavailableReason !== "runtime_not_ready" && input.unavailableReason !== "model_context_unknown") {
+  if (input.unavailableReason !== undefined && !UNAVAILABLE_REASONS.includes(input.unavailableReason as SessionTelemetryUnavailableReason)) {
     throw new ContractValidationError("unsupported telemetry unavailable reason", `${path}.unavailableReason`);
   }
   return input as unknown as SessionTelemetrySnapshot;
+}
+
+export function parseSessionTelemetryReadResult(value: unknown, path = "$result"): SessionTelemetryReadResult {
+  const input = record(value, path);
+  exactKeys(input, ["sessionId", "source", "semantics", "telemetry"], path);
+  nonEmptyString(input.sessionId, `${path}.sessionId`);
+  if (!TELEMETRY_SOURCES.includes(input.source as SessionTelemetrySource)) {
+    throw new ContractValidationError("unsupported telemetry source", `${path}.source`);
+  }
+  if (!TELEMETRY_SEMANTICS.includes(input.semantics as SessionTelemetrySemantics)) {
+    throw new ContractValidationError("unsupported telemetry semantics", `${path}.semantics`);
+  }
+  const telemetry = parseSessionTelemetrySnapshot(input.telemetry, `${path}.telemetry`);
+  if (telemetry.sessionId !== input.sessionId) {
+    throw new ContractValidationError("telemetry session mismatch", `${path}.sessionId`);
+  }
+  return input as unknown as SessionTelemetryReadResult;
 }
 
 export function parseSessionTelemetryEvent(value: unknown, path = "$event.event"): SessionTelemetryEvent {

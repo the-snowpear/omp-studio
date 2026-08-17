@@ -144,18 +144,21 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
     },
     agents: [
       {
+        id: "agent-019fcb01",
         name: "deps", status: "done", activity: "done", dur: "38s",
         resolvedModel: "gemini-3.6-flash", thinking: "max",
         tokens: "12.6k", tools: 8, requests: 4, cost: "¥ 0.51", files: 6,
         lastTool: "Grep · \"pi-core\" in lockfile",
       },
       {
+        id: "agent-019fc9d2",
         name: "docs", status: "done", activity: "done", dur: "41s",
         resolvedModel: "claude-sonnet-4.5", thinking: "high",
         tokens: "9.8k", tools: 5, requests: 3, cost: "¥ 0.36", files: 2,
         lastTool: "Web Search · v0.8.1 notes",
       },
       {
+        id: "agent-019fcb17",
         name: "preview", status: "running", activity: "tool", dur: "9s",
         resolvedModel: "gemini-3.6-flash", thinking: "max",
         tokens: "5.1k", tools: 3, requests: 2, cost: "¥ 0.18",

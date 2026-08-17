@@ -18,7 +18,7 @@ import type { RemoteInteractionRequest } from "@omp-studio/studio-protocol";
 import { redactDetail } from "./read-models.js";
 
 const APPROVAL_DETAIL_MAX_KEYS = 16;
-const APPROVAL_DETAIL_MAX_CHARS = 240;
+const APPROVAL_DETAIL_MAX_CHARS = 4000;
 const APPROVAL_KEY = /^[A-Za-z][A-Za-z0-9_]{0,31}$/u;
 const APPROVAL_SENSITIVE = /token|secret|password|pid|process|endpoint|pipe|auth|bearer|credential/iu;
 

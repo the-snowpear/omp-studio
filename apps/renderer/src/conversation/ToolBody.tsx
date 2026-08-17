@@ -110,11 +110,20 @@ function durationText(value: JsonValue | undefined): string | undefined {
   return `${(milliseconds / 1000).toFixed(milliseconds % 1000 === 0 ? 1 : 2)}s`;
 }
 
+/**
+ * Preview gallery cards pass their whole `{ kind, name, … }` display record as
+ * arguments, so dumping it as Args is noise. A real tool that merely happens to
+ * take a `kind` argument must still show its args.
+ */
+function isPreviewCard(fields: { readonly [key: string]: JsonValue }): boolean {
+  return jsonString(fields.kind) !== undefined && jsonString(fields.name) !== undefined;
+}
+
 function DefaultBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
   const args = fields.args !== undefined
     ? fields.args
-    : jsonString(fields.kind)
+    : isPreviewCard(fields)
       ? undefined
       : tool.arguments;
   const output = fields.output;

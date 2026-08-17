@@ -16,7 +16,7 @@ import type {
   SessionId,
   StateVersion,
 } from "@omp-studio/client-contract";
-import type { ConversationTranscriptPage, StudioOperation } from "@omp-studio/studio-protocol";
+import type { AgentId, ConversationTranscriptPage, StudioOperation } from "@omp-studio/studio-protocol";
 import type { ConversationTranscriptReadPage } from "@omp-studio/client-contract";
 import { HostBackend, type RuntimePublication, type StudioConversationForward, type StudioTelemetryForward } from "@omp-studio/studio-host";
 
@@ -152,6 +152,32 @@ async function withFacade(
   }
 }
 
+test("agent.conversation.read returns a child session page without requiring the main sessionId", async () => {
+  const childPage = { ...PAGE, sessionId: "child-session" as SessionId };
+  await withFacade(
+    {
+      hello,
+      snapshot,
+      readAgentConversation: async (input) => {
+        assert.equal(input.agentId, "agent-019fcb01");
+        return childPage;
+      },
+    },
+    undefined,
+    undefined,
+    async (facade) => {
+      const response = await facade.query({
+        queryName: "agent.conversation.read",
+        input: { agentId: "agent-019fcb01" as AgentId, limit: 50 },
+      });
+      assert.equal(response.ok, true);
+      if (!response.ok) return;
+      assert.equal(response.result.sessionId, "child-session");
+      assert.equal(response.result.items[0]?.itemId, "msg-user-1");
+    },
+  );
+});
+
 test("session.transcript.read returns the current session page and not a fake empty page", async () => {
   await withFacade(
     {
@@ -256,6 +282,32 @@ test("live conversation events map through the allow-list and keep Bridge occurr
   );
 });
 
+test("forwards a child-session conversation event to runtime subscribers", async () => {
+  const listeners: Array<(event: StudioConversationForward) => void> = [];
+  await withFacade(
+    {
+      hello,
+      snapshot,
+      onConversationEvent: (listener) => {
+        listeners.push(listener);
+        return () => undefined;
+      },
+    },
+    undefined,
+    undefined,
+    async (facade) => {
+      const received: ClientEvent[] = [];
+      facade.subscribe({ scope: "runtime" }, (event) => received.push(event));
+      listeners[0]!(startedEnvelope("child-session"));
+      const changed = received.find((event) => event.kind === "conversation.changed");
+      assert.ok(changed);
+      if (changed?.kind !== "conversation.changed") return;
+      assert.equal(changed.sessionId, "child-session");
+      assert.equal(changed.update.sessionId, "child-session");
+    },
+  );
+});
+
 test("forged conversation.* kinds are not blind-cast; mapping failure emits resync", async () => {
   const listeners: Array<(event: StudioConversationForward) => void> = [];
   await withFacade(
@@ -288,7 +340,7 @@ test("forged conversation.* kinds are not blind-cast; mapping failure emits resy
       const resync = received.find((event) => event.kind === "resync.required");
       assert.ok(resync);
       if (resync?.kind === "resync.required") {
-        assert.match(resync.reason, /mapping failed|transcript/);
+        assert.equal(resync.reason, "conversation mapping failed; re-read open transcripts");
       }
     },
   );
@@ -397,6 +449,41 @@ test("invoke forwards the client requestId so ledger rows can align", async () =
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.requestId, requestId);
     assert.equal(calls[0]?.operation.kind, "core.prompt");
+  });
+});
+
+test("operator.invoke outcome envelope reaches the completed receipt verbatim", async () => {
+  const outcome = {
+    snapshot: snapshot(),
+    output: ["Session exported to: omp-session-x.html"],
+    result: { consumed: true },
+  };
+  const commands: HostSemanticCommandService = {
+    resume: async () => snapshot(),
+    drop: async () => snapshot(),
+    respond: async () => snapshot(),
+    invoke: async (operation) => {
+      assert.equal(operation.kind, "operator.invoke");
+      return operation.kind === "operator.invoke" ? outcome : snapshot();
+    },
+  };
+  await withFacade({ hello, snapshot }, commands, async (facade) => {
+    const events: ClientEvent[] = [];
+    facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    await facade.command({
+      commandName: "operator.invoke",
+      input: { commandId: "builtin.export", arguments: undefined },
+      idempotencyKey: "idem-invoke-outcome" as IdempotencyKey,
+      requestId: "gui-invoke-outcome" as CommandRequestId,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const receipt = events.find((event) => event.kind === "command.receipt");
+    assert.equal(receipt?.kind, "command.receipt");
+    if (receipt?.kind === "command.receipt" && receipt.receipt.status === "completed") {
+      assert.deepEqual(receipt.receipt.result, outcome);
+    } else {
+      assert.fail("operator.invoke receipt did not complete with the outcome envelope");
+    }
   });
 });
 
@@ -578,4 +665,118 @@ test("session telemetry forwards through the facade and preserves the current se
       assert.equal(events.filter((event) => event.kind === "telemetry.changed").length, 1);
     },
   );
+});
+
+test("session.archive and session.unarchive dispatch to the semantic service without a Runtime snapshot", async () => {
+  const calls: string[] = [];
+  const commands: HostSemanticCommandService = {
+    resume: async () => snapshot(),
+    drop: async () => snapshot(),
+    respond: async () => snapshot(),
+    archive: async ({ threadId }) => {
+      calls.push(`archive:${threadId}`);
+      return { applied: true, runtimeEffect: "immediate", message: "archived" };
+    },
+    unarchive: async ({ threadId }) => {
+      calls.push(`unarchive:${threadId}`);
+      return { applied: true, runtimeEffect: "immediate", message: "restored" };
+    },
+  };
+  await withFacade(undefined, commands, async (facade) => {
+    const acceptedArchive = await facade.command({
+      commandName: "session.archive",
+      requestId: "gui-archive-1" as CommandRequestId,
+      idempotencyKey: "idem-archive-1" as IdempotencyKey,
+      input: { threadId: "thread-1" as never },
+    });
+    assert.equal(acceptedArchive.status, "accepted");
+    const acceptedUnarchive = await facade.command({
+      commandName: "session.unarchive",
+      requestId: "gui-unarchive-1" as CommandRequestId,
+      idempotencyKey: "idem-unarchive-1" as IdempotencyKey,
+      input: { threadId: "thread-1" as never },
+    });
+    assert.equal(acceptedUnarchive.status, "accepted");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(calls, ["archive:thread-1", "unarchive:thread-1"]);
+  });
+});
+
+test("session.archive fails closed when the semantic service has no archive support", async () => {
+  const commands: HostSemanticCommandService = {
+    resume: async () => snapshot(),
+    drop: async () => snapshot(),
+    respond: async () => snapshot(),
+  };
+  await withFacade(undefined, commands, async (facade) => {
+    await assert.rejects(
+      () =>
+        facade.command({
+          commandName: "session.archive",
+          requestId: "gui-archive-2" as CommandRequestId,
+          idempotencyKey: "idem-archive-2" as IdempotencyKey,
+          input: { threadId: "thread-1" as never },
+        }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, "CAPABILITY_UNAVAILABLE");
+        assert.match(String((error as { message?: unknown }).message), /session\.archive is not available/u);
+        return true;
+      },
+    );
+  });
+});
+
+test("history.list filters by status host-side before pagination", async () => {
+  const profile = await mkdtemp(join(tmpdir(), "omp-facade-history-"));
+  try {
+    const backend = new HostBackend({ stateDirectory: profile });
+    await backend.initialize();
+    const facade = new StudioHostClientFacade({
+      authority: { authorityId: "auth-history" as AuthorityId, authorityEpoch: 1 as AuthorityEpoch },
+      platform: "win32",
+      arch: "x64",
+      backend,
+      capabilityManifest: () => undefined,
+      commandManifest: () => undefined,
+      catalog: {
+        list: async () => [
+          { sessionId: "s-active", modifiedAt: "2026-08-15T10:00:00.000Z", messageCount: 0, status: "active" as const },
+          { sessionId: "s-archived", modifiedAt: "2026-08-15T11:00:00.000Z", messageCount: 0, status: "archived" as const },
+          { sessionId: "s-closed", modifiedAt: "2026-08-15T09:00:00.000Z", messageCount: 0, status: "closed" as const },
+        ],
+      },
+      diagnostics: { now: () => T0, newEntryId: () => "diag-history" as never },
+      install: async () => {
+        throw new Error("runtime.install is not wired in history tests");
+      },
+    });
+    try {
+      const all = await facade.query({ queryName: "history.list", input: {} });
+      assert.equal(all.ok, true);
+      if (all.ok) {
+        assert.deepEqual(
+          all.result.entries.map((entry) => entry.status).sort(),
+          ["active", "archived", "closed"],
+        );
+      }
+      const archivedOnly = await facade.query({ queryName: "history.list", input: { status: "archived" } });
+      assert.equal(archivedOnly.ok, true);
+      if (archivedOnly.ok) {
+        assert.deepEqual(archivedOnly.result.entries.map((entry) => entry.sessionId), ["s-archived"]);
+        assert.equal(archivedOnly.result.total, 1);
+      }
+      const activeOnly = await facade.query({ queryName: "history.list", input: { status: "active" } });
+      assert.equal(activeOnly.ok, true);
+      if (activeOnly.ok) {
+        assert.deepEqual(activeOnly.result.entries.map((entry) => entry.sessionId), ["s-active"]);
+      }
+      const bogus = await facade.query({ queryName: "history.list", input: { status: "bogus" as never } });
+      assert.equal(bogus.ok, false);
+      if (!bogus.ok) assert.equal(bogus.error.code, "INVALID_ARGUMENT");
+    } finally {
+      await facade.close();
+    }
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+  }
 });

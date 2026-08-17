@@ -1,5 +1,13 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { mermaidRenderMock } = vi.hoisted(() => ({ mermaidRenderMock: vi.fn() }));
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: mermaidRenderMock,
+  },
+}));
 import {
   createInitialConversationState,
   reduceConversationState,
@@ -15,6 +23,7 @@ import type {
   ConversationTranscriptReadPage,
   ConversationTranscriptPage,
   EventCursor,
+  JsonValue,
   OpaqueCursor,
   QueryInput,
   QueryName,
@@ -33,9 +42,10 @@ import {
   type ConversationIdentity,
 } from "./conversationHost";
 import { ConversationItemView } from "./ConversationItemView";
-import { ConvoTranscript } from "./ConvoTranscript";
+import { ConversationPane, parseXdevMountNotice } from "./ConversationPane";
+import { ConvoTranscript, turnChangeBinds } from "./ConvoTranscript";
 import { ToolBody } from "./ToolBody";
-import { batchSummary, toolDiffStats, toolKind } from "./toolMeta";
+import { batchSummary, collectLatestTodos, collectTurnFileChanges, groupTodosByPhase, isTodoPhaseComplete, sessionTaskProgress, todoPhaseHeadersVisible, todoPhaseOpenByDefault, todoStepProgress, toolDiffStats, toolKind } from "./toolMeta";
 import { distanceFromBottom, shouldFollow } from "./useConversationScroll";
 import {
   applyLiveEvent,
@@ -47,6 +57,7 @@ import {
   rowsFromConversationViews,
   segmentsFromContent,
   trackPending,
+  type ToolView,
 } from "./conversationViewModel";
 import { PREVIEW_CONVO_IDENTITY, PREVIEW_CONVO_ITEMS } from "../preview/conversationFixtures";
 
@@ -589,6 +600,107 @@ describe("live merge", () => {
     expect(client.reads).toHaveLength(1);
   });
 
+  it("keeps persisted-then-started tools pending in the real event order", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.resolveNext(page({ items: [] }));
+    await tick();
+    const toolsOf = () => {
+      const row = engine.getSnapshot().rows.find((entry) => entry.type === "assistant");
+      const batch = row?.type === "assistant" ? row.segments.find((segment) => segment.type === "batch") : undefined;
+      return batch?.type === "batch" ? batch.tools : [];
+    };
+    const rowStatus = () => {
+      const row = engine.getSnapshot().rows.find((entry) => entry.type === "assistant");
+      return row?.type === "assistant" ? row.status : undefined;
+    };
+    client.pushLive({
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, 1);
+    // The agent loop ends the message before it starts the first tool, so the
+    // item is persisted with tool calls that have neither start nor result yet.
+    client.pushLive({
+      kind: "conversation.message.completed",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      item: {
+        kind: "message",
+        itemId: "m1",
+        parentId: null,
+        createdAt: "2026-08-15T00:00:00.000Z",
+        role: "assistant",
+        content: [
+          { type: "text", text: "read both files" },
+          { type: "toolCall", toolCallId: "c1", toolName: "read", arguments: { path: "a.ts" } },
+          { type: "toolCall", toolCallId: "c2", toolName: "read", arguments: { path: "b.ts" } },
+        ],
+      },
+    }, 2);
+    expect(toolsOf().map((tool) => tool.status)).toEqual(["queued", "queued"]);
+    expect(rowStatus()).toBe("streaming");
+
+    client.pushLive({
+      kind: "conversation.tool.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      toolCallId: "c1",
+      toolName: "read",
+      arguments: { path: "a.ts" },
+      startedAt: "2026-08-15T00:00:00.100Z",
+    }, 3);
+    expect(toolsOf().map((tool) => tool.status)).toEqual(["running", "queued"]);
+    expect(rowStatus()).toBe("streaming");
+
+    for (const [seq, toolCallId] of [[4, "c1"], [5, "c2"]] as const) {
+      client.pushLive({
+        kind: "conversation.tool.completed",
+        sessionId: session,
+        turnId: "t1",
+        toolCallId,
+        completedAt: "2026-08-15T00:00:00.300Z",
+        result: { type: "toolResult", toolCallId, toolName: "read", isError: false, data: { totalLines: 3 } },
+      }, seq);
+    }
+    client.pushLive({ kind: "conversation.turn.completed", sessionId: session, turnId: "t1" }, 6);
+    expect(toolsOf().map((tool) => tool.status)).toEqual(["succeeded", "succeeded"]);
+    expect(rowStatus()).toBe("completed");
+  });
+
+  it("marks a resultless tool missing once its turn is closed", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.resolveNext(page({ items: [] }));
+    await tick();
+    client.pushLive({
+      kind: "conversation.message.completed",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      item: {
+        kind: "message",
+        itemId: "m1",
+        parentId: null,
+        createdAt: "2026-08-15T00:00:00.000Z",
+        role: "assistant",
+        content: [{ type: "toolCall", toolCallId: "c1", toolName: "bash", arguments: { cmd: "ls" } }],
+      },
+    }, 1);
+    client.pushLive({ kind: "conversation.turn.completed", sessionId: session, turnId: "t1" }, 2);
+    const row = engine.getSnapshot().rows.find((entry) => entry.type === "assistant");
+    const batch = row?.type === "assistant" ? row.segments.find((segment) => segment.type === "batch") : undefined;
+    expect(batch?.type === "batch" ? batch.tools[0]?.status : undefined).toBe("missing");
+    expect(row?.type === "assistant" ? row.status : undefined).toBe("completed");
+  });
+
   it("real path abort keeps the same message text and marks it aborted", async () => {
     const client = new FakeClient();
     const engine = engineOf(client);
@@ -631,6 +743,44 @@ describe("live merge", () => {
     expect(screen.getByText("partial")).toBeTruthy();
   });
 
+  it("real path abort marks a hard-killed running tool as aborted instead of running forever", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.resolveNext(page({ items: [] }));
+    await tick();
+    client.pushLive({
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, 1);
+    client.pushLive({
+      kind: "conversation.tool.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      toolCallId: "call-1",
+      toolName: "bash",
+      startedAt: "2026-08-15T00:00:01.000Z",
+    }, 2);
+    // No tool.completed ever arrives: the runtime was hard-killed mid-tool.
+    client.pushLive({
+      kind: "conversation.turn.aborted",
+      sessionId: session,
+      turnId: "t1",
+    }, 3);
+    const rows = engine.getSnapshot().rows.filter((row) => row.type === "assistant");
+    expect(rows).toHaveLength(1);
+    const batch = rows[0]?.type === "assistant"
+      ? rows[0].segments.find((segment) => segment.type === "batch")
+      : undefined;
+    expect(batch?.type === "batch" ? batch.tools[0]?.status : undefined).toBe("aborted");
+    expect(rows[0]?.type === "assistant" ? rows[0].status : undefined).toBe("aborted");
+  });
+
   it("client live message aborted:true projects to an aborted view and DOM chip", () => {
     const views = selectConversationViews({
       ...createInitialConversationState(),
@@ -656,6 +806,61 @@ describe("live merge", () => {
     render(<ConversationItemView row={rows[0]!} />);
     expect(screen.getByText("已中止")).toBeTruthy();
     expect(screen.getByText("partial")).toBeTruthy();
+  });
+
+  it("provider error on an empty assistant item stays visible with status, provider, model, and message", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client);
+    engine.start();
+    client.resolveNext(page({ items: [] }));
+    await tick();
+    client.pushLive({
+      kind: "conversation.message.started",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      role: "assistant",
+      createdAt: "2026-08-15T00:00:00.000Z",
+    }, 1);
+    client.pushLive({
+      kind: "conversation.message.completed",
+      sessionId: session,
+      turnId: "t1",
+      messageId: "m1",
+      item: {
+        kind: "message",
+        itemId: "m1",
+        parentId: null,
+        createdAt: "2026-08-15T00:00:00.000Z",
+        role: "assistant",
+        content: [],
+      },
+      error: {
+        message: "Model is not supported by composite groups",
+        status: 400,
+        provider: "sub2api-go",
+        model: "mimo-v2.5",
+      },
+    }, 2);
+    client.pushLive({ kind: "conversation.turn.completed", sessionId: session, turnId: "t1" }, 3);
+    const rows = engine.getSnapshot().rows.filter((row) => row.type === "assistant");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      itemId: "m1",
+      status: "error",
+      presentation: "reply",
+      error: {
+        message: "Model is not supported by composite groups",
+        status: 400,
+        provider: "sub2api-go",
+        model: "mimo-v2.5",
+      },
+    });
+    expect(client.conversation.itemErrors.m1?.status).toBe(400);
+    render(<ConversationItemView row={rows[0]!} />);
+    expect(screen.getByText("出错")).toBeTruthy();
+    expect(screen.getByText("400 · sub2api-go · mimo-v2.5")).toBeTruthy();
+    expect(screen.getByText("Model is not supported by composite groups")).toBeTruthy();
   });
 });
 
@@ -739,6 +944,55 @@ describe("pagination and grouping", () => {
     expect(container.querySelectorAll(".ev-head .role-badge.a")).toHaveLength(1);
     expect(container.querySelectorAll(".ev-process .ev-batch")).toHaveLength(1);
     expect(screen.getByText("检查完成，这是最终结论。")).toBeTruthy();
+  });
+
+  it("ignores dot fillers and keeps following tools in the preceding mixed process chain", () => {
+    const command: ConversationItem = {
+      ...assistantItem("command", ""),
+      content: [
+        { type: "text", text: "明白了，我先修改并检查。" },
+        { type: "toolCall", toolCallId: "bash-1", toolName: "Bash", arguments: { command: "npm test" } },
+        { type: "toolResult", toolCallId: "bash-1", toolName: "Bash", output: "ok", isError: false },
+      ],
+    };
+    const edit: ConversationItem = {
+      ...assistantItem("edit", ""),
+      content: [
+        { type: "text", text: "." },
+        { type: "toolCall", toolCallId: "edit-1", toolName: "Edit", arguments: { path: "tokens.css" } },
+        { type: "toolResult", toolCallId: "edit-1", toolName: "Edit", output: "done", isError: false },
+      ],
+    };
+    const read: ConversationItem = {
+      ...assistantItem("read", ""),
+      content: [
+        { type: "text", text: "\n\n" },
+        { type: "toolCall", toolCallId: "read-1", toolName: "Read", arguments: { path: "index.html" } },
+        { type: "toolResult", toolCallId: "read-1", toolName: "Read", output: "body", isError: false },
+      ],
+    };
+    const finalReply = assistantItem("final-after-tools", "修改完成。");
+    const items = [userItem("u-tool-chain", "调整颜色"), command, edit, read, finalReply];
+    const rows = rowsFromConversationViews(selectConversationViews({
+      ...createInitialConversationState(),
+      order: items.map((item) => item.itemId),
+      itemsById: Object.fromEntries(items.map((item) => [item.itemId, item])),
+    }));
+
+    const assistants = rows.filter((row) => row.type === "assistant");
+    expect(assistants).toHaveLength(2);
+    const process = assistants[0];
+    expect(process?.type === "assistant"
+      ? process.segments.filter((segment) => segment.type === "text").map((segment) => segment.text)
+      : []).toEqual(["明白了，我先修改并检查。"]);
+    expect(process?.type === "assistant"
+      ? process.segments.flatMap((segment) => segment.type === "batch" ? segment.tools.map((tool) => tool.toolCallId) : [])
+      : []).toEqual(["bash-1", "edit-1", "read-1"]);
+
+    const { container } = render(<ConvoTranscript rows={rows} />);
+    expect(container.querySelectorAll(".ev-process .ev-batch")).toHaveLength(1);
+    expect(container.textContent).not.toContain("\n.\n");
+    expect(screen.getByText("修改完成。")).toBeTruthy();
   });
 
   it("does not render empty persisted assistants or spin for a missing historical result", () => {
@@ -835,6 +1089,22 @@ describe("runtime identity and XSS", () => {
     expect(container.textContent).toContain("<script>alert(1)</script>");
   });
 
+  it("does not put a streaming chip on the assistant header", () => {
+    render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "live",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "streaming",
+          segments: [{ type: "text", key: "t1", text: "正在写", streaming: true }],
+        }}
+      />,
+    );
+    expect(screen.queryByText("流式输出中")).toBeNull();
+    expect(screen.getByText("正在写")).toBeTruthy();
+  });
+
   it("renders markdown emphasis and lists in assistant text", () => {
     const { container } = render(
       <ConversationItemView
@@ -873,6 +1143,169 @@ describe("runtime identity and XSS", () => {
     expect(items).toEqual(["读协议", "写实现", "允许一次", "取消"]);
     expect(container.querySelector("ul")).toBeTruthy();
     expect(container.querySelector("ol")).toBeTruthy();
+  });
+
+  it("renders GFM tables with header and body cells", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md-table",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{
+            type: "text",
+            key: "t1",
+            text: "| 阶段 | 说明 |\n| --- | --- |\n| 构建 | vite build |\n| 测试 | vitest |",
+          }],
+        }}
+      />,
+    );
+    const heads = [...container.querySelectorAll("thead th")].map((node) => node.textContent);
+    expect(heads).toEqual(["阶段", "说明"]);
+    const cells = [...container.querySelectorAll("tbody td")].map((node) => node.textContent);
+    expect(cells).toEqual(["构建", "vite build", "测试", "vitest"]);
+    expect(container.querySelector(".md-table-wrap table")).toBeTruthy();
+  });
+
+  it("renders blockquotes, horizontal rules, and strikethrough", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md-quote",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{
+            type: "text",
+            key: "t1",
+            text: "> 引用一段\n\n---\n\n旧方案 ~~已废弃~~。",
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector("blockquote")?.textContent).toContain("引用一段");
+    expect(container.querySelector("hr")).toBeTruthy();
+    expect(container.querySelector("del")?.textContent).toBe("已废弃");
+  });
+
+  it("renders task lists and nested lists", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md-task",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{
+            type: "text",
+            key: "t1",
+            text: "- [x] 完成\n- [ ] 待办\n- 外层\n  - 内层",
+          }],
+        }}
+      />,
+    );
+    const boxes = [...container.querySelectorAll('input[type="checkbox"]')];
+    expect(boxes).toHaveLength(2);
+    expect((boxes[0] as HTMLInputElement).checked).toBe(true);
+    expect((boxes[1] as HTMLInputElement).checked).toBe(false);
+    const outer = [...container.querySelectorAll("ul.contains-task-list > li")];
+    expect(outer).toHaveLength(3);
+    const nested = container.querySelectorAll("li ul li");
+    expect(nested).toHaveLength(1);
+    expect(nested[0]?.textContent).toBe("内层");
+  });
+
+  it("renders fenced code with language chip, highlighting, and copy button", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md-code",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{
+            type: "text",
+            key: "t1",
+            text: "```js\nconst answer = 42;\n```",
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".md-code-lang")?.textContent).toBe("js");
+    const code = container.querySelector(".md-code-pre code");
+    expect(code?.className).toContain("language-js");
+    expect(code?.textContent).toContain("const answer = 42;");
+    expect(container.querySelector(".hljs-keyword")).toBeTruthy();
+    expect(container.querySelector("button.md-code-copy")).toBeTruthy();
+  });
+
+  it("renders unlanguaged fenced code as a plain block, not an inline chip", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md-plain-code",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{
+            type: "text",
+            key: "t1",
+            text: "```\nplain block\n```",
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".md-code-lang")?.textContent).toBe("text");
+    const pre = container.querySelector("pre.md-code-pre");
+    expect(pre?.textContent).toContain("plain block");
+    expect(pre?.querySelector("code.chip-code")).toBeTruthy();
+  });
+
+  it("renders mermaid fences as diagrams once streaming settles", async () => {
+    mermaidRenderMock.mockReset();
+    mermaidRenderMock.mockResolvedValue({ svg: "<svg>graph</svg>" });
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md-mermaid",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{
+            type: "text",
+            key: "t1",
+            text: "```mermaid\ngraph TD\n  A --> B\n```",
+          }],
+        }}
+      />,
+    );
+    await waitFor(() => {
+      expect(container.querySelector(".mermaid-box svg")).toBeTruthy();
+    });
+    expect(mermaidRenderMock).toHaveBeenCalledTimes(1);
+    expect(mermaidRenderMock.mock.calls[0]?.[1]).toContain("graph TD");
+  });
+
+  it("keeps mermaid fences as source text while streaming", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "md-mermaid-stream",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          status: "completed",
+          segments: [{
+            type: "text",
+            key: "t1",
+            streaming: true,
+            text: "```mermaid\ngraph TD\n  A --> B\n```",
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".mermaid-box")).toBeNull();
+    expect(container.querySelector(".md-code-pre")?.textContent).toContain("graph TD");
   });
 
   it("pretty-prints JSON write content instead of one raw line", () => {
@@ -933,7 +1366,7 @@ describe("runtime identity and XSS", () => {
 
   it("preview transcript shows the demo marker", () => {
     render(<ConvoTranscript rows={buildTimeline({ ...emptyConversationState(1), items: PREVIEW_CONVO_ITEMS, hydrateStatus: "ready", identity: PREVIEW_CONVO_IDENTITY })} demo />);
-    expect(screen.getByText("演示")).toBeTruthy();
+    expect(screen.getAllByText("演示").length).toBeGreaterThan(0);
   });
 
   it("preview gallery expands every native tool-card body", () => {
@@ -1088,7 +1521,6 @@ describe("truncated display", () => {
     const row = buildTimeline(state).find((entry) => entry.type === "assistant");
     expect(row?.type).toBe("assistant");
     render(<ConversationItemView row={row!} />);
-    fireEvent.click(screen.getByRole("button", { name: /运行 1 条命令/ }));
     fireEvent.click(screen.getByRole("button", { name: /Bash/ }));
     expect(screen.getByRole("note", { name: "已截断" })).toBeTruthy();
   });
@@ -1117,7 +1549,6 @@ describe("truncated display", () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /思考/ }));
     fireEvent.click(screen.getByRole("button", { name: /^Think/ }));
     expect(screen.getByRole("note", { name: "已截断" })).toBeTruthy();
   });
@@ -1176,6 +1607,281 @@ describe("ver1 batch chain", () => {
     expect(container.querySelectorAll(".ev-batch")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: /编辑 mcp_node_repl\.js/ }));
     expect(screen.getByRole("button", { name: /Still empty/ })).toBeTruthy();
+  });
+
+  it("merges repeated thinking segments into one thinking tool", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "assistant",
+          itemId: "m-merged-thinking",
+          createdAt: "2026-08-15T00:00:02.000Z",
+          status: "completed",
+          presentation: "process",
+          segments: [
+            { type: "thinking", key: "thinking-1", text: "First diagnostic step." },
+            { type: "thinking", key: "thinking-2", text: "Second diagnostic step.", truncated: true },
+            {
+              type: "batch",
+              key: "tools-after-thinking",
+              tools: [{ toolCallId: "bash-after-thinking", toolName: "Bash", status: "succeeded" }],
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(container.querySelector(".batch-sum") as HTMLButtonElement);
+    expect(container.querySelectorAll('[data-kind="think"]')).toHaveLength(1);
+    const thinkButton = screen.getByRole("button", { name: /First diagnostic step/ });
+    fireEvent.click(thinkButton);
+    expect(container.querySelector(".think-scroll")?.textContent).toContain("First diagnostic step.");
+    expect(container.querySelector(".think-scroll")?.textContent).toContain("Second diagnostic step.");
+    expect(container.querySelector('[data-kind="think"]')?.getAttribute("data-item-key")).toBe("thinking-1");
+  });
+});
+
+describe("streaming chain auto expand and fold", () => {
+  const baseRow = {
+    type: "assistant" as const,
+    itemId: "m-live-chain",
+    createdAt: "2026-08-15T00:00:02.000Z",
+    status: "streaming" as const,
+  };
+
+  it("expands the last running tool and follows newly started tools", () => {
+    const { container, rerender } = render(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          presentation: "process",
+          segments: [{
+            type: "batch",
+            key: "live-tools",
+            tools: [
+              { toolCallId: "read-1", toolName: "Read", status: "succeeded", arguments: { path: "src/a.ts" } },
+              { toolCallId: "bash-1", toolName: "Bash", status: "running", arguments: { command: "npm test" } },
+            ],
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".ev-batch")?.classList.contains("open")).toBe(true);
+    const openItems = container.querySelectorAll(".tl-item.open");
+    expect(openItems).toHaveLength(1);
+    expect(openItems[0]?.getAttribute("data-status")).toBe("running");
+
+    rerender(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          presentation: "process",
+          segments: [{
+            type: "batch",
+            key: "live-tools",
+            tools: [
+              { toolCallId: "read-1", toolName: "Read", status: "succeeded", arguments: { path: "src/a.ts" } },
+              { toolCallId: "bash-1", toolName: "Bash", status: "succeeded", arguments: { command: "npm test" } },
+              { toolCallId: "grep-2", toolName: "Grep", status: "running", arguments: { pattern: "needle" } },
+            ],
+          }],
+        }}
+      />,
+    );
+    const followed = container.querySelectorAll(".tl-item.open");
+    expect(followed).toHaveLength(1);
+    expect(followed[0]?.getAttribute("data-kind")).toBe("grep");
+  });
+
+  it("follows the running tool while the calls after it are still queued", () => {
+    // message.completed 落盘整条链后，尾部工具还没收到 tool.started，只能是 queued。
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          presentation: "process",
+          segments: [{
+            type: "batch",
+            key: "live-tools",
+            tools: [
+              { toolCallId: "read-1", toolName: "Read", status: "running", arguments: { path: "src/a.ts" } },
+              { toolCallId: "read-2", toolName: "Read", status: "queued", arguments: { path: "src/b.ts" } },
+              { toolCallId: "read-3", toolName: "Read", status: "queued", arguments: { path: "src/c.ts" } },
+            ],
+          }],
+        }}
+      />,
+    );
+    const openItems = container.querySelectorAll(".tl-item.open");
+    expect(openItems).toHaveLength(1);
+    expect(openItems[0]?.getAttribute("data-status")).toBe("running");
+    expect(container.querySelectorAll(".tl-row .spinner")).toHaveLength(1);
+  });
+
+  it("expands the next queued call before any start event arrives", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          presentation: "process",
+          segments: [{
+            type: "batch",
+            key: "live-tools",
+            tools: [
+              { toolCallId: "read-1", toolName: "Read", status: "succeeded", arguments: { path: "src/a.ts" } },
+              { toolCallId: "read-2", toolName: "Read", status: "queued", arguments: { path: "src/b.ts" } },
+              { toolCallId: "read-3", toolName: "Read", status: "queued", arguments: { path: "src/c.ts" } },
+            ],
+          }],
+        }}
+      />,
+    );
+    const openItems = container.querySelectorAll(".tl-item.open");
+    expect(openItems).toHaveLength(1);
+    expect(openItems[0]?.querySelector(".tl-detail")?.textContent).toBe("src/b.ts");
+  });
+
+  it("expands streaming thinking and folds it once the next text starts", () => {
+    const { container, rerender } = render(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          segments: [{ type: "thinking", key: "th-1", text: "还在推演下一步。" }],
+        }}
+      />,
+    );
+    expect(container.querySelector('.tl-item.open[data-kind="think"]')).not.toBeNull();
+
+    rerender(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          segments: [
+            { type: "thinking", key: "th-1", text: "推演完成。" },
+            { type: "text", key: "tx-1", text: "结论如下", streaming: true },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelector(".tl-item.open")).toBeNull();
+  });
+
+  it("keeps the chain open while a tool runs and folds it when the turn completes", () => {
+    const runningPair = [
+      { toolCallId: "bash-1", toolName: "Bash", status: "running" as const, arguments: { command: "npm test" } },
+      { toolCallId: "bash-2", toolName: "Bash", status: "queued" as const, arguments: { command: "npm run lint" } },
+    ];
+    const { container, rerender } = render(
+      <ConversationItemView
+        row={{ ...baseRow, presentation: "process", segments: [{ type: "batch", key: "live-tools", tools: runningPair }] }}
+      />,
+    );
+    expect(container.querySelector(".ev-batch.open")).not.toBeNull();
+
+    rerender(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          status: "completed",
+          presentation: "process",
+          segments: [{
+            type: "batch",
+            key: "live-tools",
+            tools: runningPair.map((tool) => ({ ...tool, status: "succeeded" as const })),
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".ev-batch.open")).toBeNull();
+    expect(container.querySelector(".tl-item.open")).toBeNull();
+  });
+
+  it("manual collapse during streaming wins over auto expand", () => {
+    const tools = [
+      { toolCallId: "bash-1", toolName: "Bash", status: "running" as const, arguments: { command: "npm test" } },
+      { toolCallId: "read-1", toolName: "Read", status: "succeeded" as const, arguments: { path: "src/a.ts" } },
+    ];
+    const { container, rerender } = render(
+      <ConversationItemView
+        row={{ ...baseRow, presentation: "process", segments: [{ type: "batch", key: "live-tools", tools }] }}
+      />,
+    );
+    fireEvent.click(container.querySelector(".batch-sum") as HTMLButtonElement);
+    expect(container.querySelector(".ev-batch.open")).toBeNull();
+
+    rerender(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          presentation: "process",
+          segments: [{
+            type: "batch",
+            key: "live-tools",
+            tools: [{ ...tools[0]!, output: "still running" }, tools[1]!],
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".ev-batch.open")).toBeNull();
+  });
+});
+
+describe("single-card chains skip the batch shell", () => {
+  const baseRow = {
+    type: "assistant" as const,
+    itemId: "m-single",
+    createdAt: "2026-08-15T00:00:02.000Z",
+    status: "completed" as const,
+    presentation: "process" as const,
+  };
+
+  it("renders a lone tool as its own row without a batch summary", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          segments: [{
+            type: "batch",
+            key: "one-tool",
+            tools: [{ toolCallId: "read-1", toolName: "Read", status: "succeeded", arguments: { path: "src/a.ts" } }],
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".batch-sum")).toBeNull();
+    expect(container.querySelector(".batch-chain")).toBeNull();
+    const row = screen.getByRole("button", { name: /Read · src\/a\.ts/ });
+    expect(row).toBeTruthy();
+    fireEvent.click(row);
+    expect(container.querySelector('.tl-item.open[data-kind="read"]')).not.toBeNull();
+  });
+
+  it("renders a lone thinking segment as its own card without a batch summary", () => {
+    const { container } = render(
+      <ConversationItemView row={{ ...baseRow, segments: [{ type: "thinking", key: "th-1", text: "先看清依赖方向。" }] }} />,
+    );
+    expect(container.querySelector(".batch-sum")).toBeNull();
+    expect(container.querySelectorAll('.tl-item[data-kind="think"]')).toHaveLength(1);
+  });
+
+  it("keeps the batch summary as soon as a chain holds two cards", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          segments: [
+            { type: "thinking", key: "th-1", text: "读一下再说。" },
+            {
+              type: "batch",
+              key: "one-tool",
+              tools: [{ toolCallId: "read-1", toolName: "Read", status: "succeeded", arguments: { path: "src/a.ts" } }],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelector(".batch-sum")).not.toBeNull();
+    expect(container.querySelector(".batch-chain")).not.toBeNull();
   });
 });
 
@@ -1327,6 +2033,7 @@ describe("real OMP tool-card bindings", () => {
     fireEvent.click(editButton);
     expect(container.querySelector('[data-kind="edit"]')?.classList.contains("open")).toBe(false);
     expect(container.querySelector('[data-kind="edit"] .tl-card')).not.toBeNull();
+    expect(container.querySelector('[data-kind="edit"] .tl-card > .tl-card-motion-inner > .tc-body')).not.toBeNull();
   });
 
   it("renders real Read, Bash, Grep, and Glob result shapes", () => {
@@ -1391,5 +2098,321 @@ describe("real OMP tool-card bindings", () => {
     expect(container.textContent).toContain("running");
     expect(container.textContent).toContain("Official result");
     expect(container.textContent).toContain("https://example.com");
+  });
+});
+
+describe("turn file-change card", () => {
+  const write = {
+    toolCallId: "write-card",
+    toolName: "write",
+    status: "succeeded" as const,
+    arguments: { path: "apps/renderer/src/conversation/ConversationPane.tsx", content: "a\nb\nc" },
+  };
+  const edit = {
+    toolCallId: "edit-card",
+    toolName: "edit",
+    status: "succeeded" as const,
+    arguments: { path: "apps/renderer/src/styles/workbench.css" },
+    result: {
+      type: "toolResult" as const,
+      toolCallId: "edit-card",
+      toolName: "edit",
+      isError: false,
+      data: { diff: "-1|old\n+1|new\n+2|also" },
+    },
+  };
+
+  it("merges Write/Edit/AST Edit files and skips failed tools", () => {
+    const failed = { ...write, toolCallId: "write-fail", status: "failed" as const, arguments: { path: "secret.env", content: "x" } };
+    const ast = {
+      toolCallId: "ast-card",
+      toolName: "ast_edit",
+      status: "succeeded" as const,
+      arguments: {
+        target: "console.log($MSG) → void",
+        changes: [
+          { file: "apps/renderer/src/conversation/ConversationPane.tsx", before: "log", after: "" },
+          { file: "apps/renderer/src/xdev-notice-replay.html", before: "a", after: "b" },
+        ],
+      },
+    };
+    const changes = collectTurnFileChanges([
+      { type: "batch", key: "b", tools: [write, edit, failed, ast] },
+    ]);
+    expect(changes.map((file) => file.path)).toEqual([
+      "apps/renderer/src/conversation/ConversationPane.tsx",
+      "apps/renderer/src/styles/workbench.css",
+      "apps/renderer/src/xdev-notice-replay.html",
+    ]);
+    expect(changes[0]).toMatchObject({ name: "ConversationPane.tsx", dir: "apps/renderer/src/conversation/", add: 3, del: 1 });
+    expect(changes[1]).toMatchObject({ name: "workbench.css", add: 2, del: 1 });
+    expect(changes[2]).toMatchObject({ name: "xdev-notice-replay.html", add: 1, del: 1 });
+  });
+
+  it("shows a completed-turn card with 审核 and right-aligned diffstats, not while streaming", () => {
+    const completed = {
+      type: "assistant" as const,
+      itemId: "done-turn",
+      createdAt: "2026-08-15T00:00:02.000Z",
+      status: "completed" as const,
+      presentation: "reply" as const,
+      segments: [
+        { type: "text" as const, key: "t", text: "改好了。" },
+        { type: "batch" as const, key: "b", tools: [write, edit] },
+      ],
+    };
+    const streaming = { ...completed, itemId: "live-turn", status: "streaming" as const };
+    expect(turnChangeBinds([streaming])[0]).toBeUndefined();
+
+    const reviewed: string[] = [];
+    const { container } = render(
+      <ConvoTranscript
+        rows={[completed]}
+        onReviewChanges={() => { reviewed.push("review"); }}
+      />,
+    );
+    expect(container.querySelector(".turn-diff.open")).not.toBeNull();
+    expect(screen.getByRole("button", { name: /2 个文件已更改/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector(".turn-diff-stats .add")?.textContent).toBe("+5");
+    expect(container.querySelector(".turn-diff-stats .del")?.textContent).toBe("−1");
+    expect(container.querySelector(".turn-diff-row .turn-diff-file-stats")?.textContent).toContain("+3");
+    expect(screen.getByText("ConversationPane.tsx")).toBeTruthy();
+    expect(screen.getByText("apps/renderer/src/conversation/")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "撤销" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "审查" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "审核" }));
+    expect(reviewed).toEqual(["review"]);
+  });
+
+  it("collapses earlier turns and keeps the latest completed turn expanded", () => {
+    const first = {
+      type: "assistant" as const,
+      itemId: "turn-1",
+      createdAt: "2026-08-15T00:00:02.000Z",
+      status: "completed" as const,
+      presentation: "reply" as const,
+      segments: [{ type: "batch" as const, key: "b1", tools: [write] }],
+    };
+    const second = {
+      type: "assistant" as const,
+      itemId: "turn-2",
+      createdAt: "2026-08-15T00:00:04.000Z",
+      status: "completed" as const,
+      presentation: "reply" as const,
+      segments: [{ type: "batch" as const, key: "b2", tools: [edit] }],
+    };
+    render(
+      <ConvoTranscript
+        rows={[
+          { type: "user", itemId: "u1", createdAt: "2026-08-15T00:00:01.000Z", text: "第一轮" },
+          first,
+          { type: "user", itemId: "u2", createdAt: "2026-08-15T00:00:03.000Z", text: "第二轮" },
+          second,
+        ]}
+      />,
+    );
+    const toggles = screen.getAllByRole("button", { name: /个文件已更改/ });
+    expect(toggles).toHaveLength(2);
+    expect(toggles[0]?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggles[1]?.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+describe("session task progress", () => {
+  const todoTool = (id: string, phases: JsonValue, op = "update"): ToolView => ({
+    toolCallId: id,
+    toolName: "todo",
+    status: "succeeded",
+    arguments: { kind: "todo", op, phases },
+  });
+
+  it("keeps the latest todo snapshot and maps done/doing labels", () => {
+    const first = todoTool("todo-1", [
+      { name: "计划", tasks: [{ content: "阅读文档", status: "done" }, { text: "写文档", status: "doing" }] },
+    ]);
+    const second = todoTool("todo-2", [
+      {
+        name: "验证",
+        tasks: [
+          { id: "a", content: "typecheck", status: "completed" },
+          { id: "b", content: "lint", status: "in_progress" },
+          { id: "c", content: "checkpoint", status: "pending" },
+        ],
+      },
+    ]);
+    const todos = collectLatestTodos([
+      { type: "batch", key: "b1", tools: [first] },
+      { type: "batch", key: "b2", tools: [second] },
+    ]);
+    expect(todos.map((task) => ({ id: task.id, content: task.content, status: task.status, phase: task.phase }))).toEqual([
+      { id: "a", content: "typecheck", status: "completed", phase: "验证" },
+      { id: "b", content: "lint", status: "in_progress", phase: "验证" },
+      { id: "c", content: "checkpoint", status: "pending", phase: "验证" },
+    ]);
+    expect(todoStepProgress(todos)).toEqual({ current: 2, total: 3, completed: 1 });
+  });
+
+  it("groups tasks by first-seen phase and hides headers for a lone Tasks list", () => {
+    const grouped = groupTodosByPhase([
+      { id: "1", content: "读文档", status: "completed", phase: "文档" },
+      { id: "2", content: "写文档", status: "completed", phase: "文档" },
+      { id: "3", content: "lint", status: "in_progress", phase: "验证" },
+    ]);
+    expect(grouped.map((group) => ({ phase: group.phase, contents: group.tasks.map((task) => task.content) }))).toEqual([
+      { phase: "文档", contents: ["读文档", "写文档"] },
+      { phase: "验证", contents: ["lint"] },
+    ]);
+    expect(todoPhaseHeadersVisible(grouped)).toBe(true);
+    expect(todoPhaseHeadersVisible(groupTodosByPhase([
+      { id: "1", content: "写文档", status: "pending", phase: "Tasks" },
+    ]))).toBe(false);
+    expect(todoPhaseHeadersVisible(groupTodosByPhase([
+      { id: "1", content: "写文档", status: "pending" },
+    ]))).toBe(false);
+    const mixed = grouped;
+    expect(isTodoPhaseComplete(mixed[0]!)).toBe(true);
+    expect(isTodoPhaseComplete(mixed[1]!)).toBe(false);
+    expect(todoPhaseOpenByDefault(mixed)).toEqual([false, true]);
+    expect(todoPhaseOpenByDefault([
+      { phase: "文档", tasks: [{ id: "1", content: "读文档", status: "completed", phase: "文档" }] },
+      { phase: "验证", tasks: [{ id: "2", content: "lint", status: "completed", phase: "验证" }] },
+    ])).toEqual([true, true]);
+  });
+
+  it("treats clear as an empty snapshot and ignores abandoned tasks in the step count", () => {
+    expect(collectLatestTodos([{
+      type: "batch",
+      key: "b",
+      tools: [
+        todoTool("todo-1", [{ name: "计划", tasks: [{ content: "x", status: "pending" }] }]),
+        todoTool("todo-clear", [], "clear"),
+      ],
+    }])).toEqual([]);
+    expect(todoStepProgress([
+      { id: "1", content: "done", status: "completed" },
+      { id: "2", content: "skip", status: "abandoned" },
+      { id: "3", content: "next", status: "pending" },
+    ])).toEqual({ current: 2, total: 2, completed: 1 });
+  });
+
+  it("reads latest-turn files even while streaming, and todos from the whole session", () => {
+    const write = {
+      toolCallId: "write-live",
+      toolName: "write",
+      status: "succeeded" as const,
+      arguments: { path: "docs/UPSTREAM-SYNC.md", content: "a\nb" },
+    };
+    const progress = sessionTaskProgress([
+      { type: "user", itemId: "u1", createdAt: "2026-08-15T00:00:01.000Z", text: "先列任务" },
+      {
+        type: "assistant",
+        itemId: "a1",
+        createdAt: "2026-08-15T00:00:02.000Z",
+        status: "completed",
+        presentation: "reply",
+        segments: [{ type: "batch", key: "b1", tools: [todoTool("todo-1", [{ name: "文档", tasks: [{ content: "写文档", status: "doing" }] }])] }],
+      },
+      { type: "user", itemId: "u2", createdAt: "2026-08-15T00:00:03.000Z", text: "继续改文件" },
+      {
+        type: "assistant",
+        itemId: "a2",
+        createdAt: "2026-08-15T00:00:04.000Z",
+        status: "streaming",
+        presentation: "process",
+        segments: [{ type: "batch", key: "b2", tools: [write] }],
+      },
+    ]);
+    expect(progress.todos).toEqual([{ id: "文档-0", content: "写文档", status: "in_progress", phase: "文档" }]);
+    expect(progress.files).toEqual([
+      { path: "docs/UPSTREAM-SYNC.md", name: "UPSTREAM-SYNC.md", dir: "docs/", add: 2, del: 0 },
+    ]);
+  });
+});
+
+describe("xd:// mount notice", () => {
+  const mountedNotice =
+    "xd://: mounted mcp__blender_get_scene_info, mcp__blender_execute_blender_code, mcp__sts_get_game_state";
+
+  function paneWithNotices(messages: string[]) {
+    const state = {
+      ...resetConversation(1, identity, "ready"),
+      notices: messages.map((message, index) => ({ id: `n${index}`, level: "info" as const, message })),
+    };
+    return render(
+      <ConversationPane
+        snapshot={{ state, rows: buildTimeline(state), demo: false, loadingOlder: false, identityKey: "notice-test" }}
+        onLoadOlder={() => {}}
+      />,
+    );
+  }
+
+  it("parses mounted/unmounted groups from the runtime notice text", () => {
+    expect(parseXdevMountNotice("xd://: mounted a, b")).toEqual({ mounted: ["a", "b"] });
+    expect(parseXdevMountNotice("xd://: unmounted c")).toEqual({ unmounted: ["c"] });
+    expect(parseXdevMountNotice("xd://: mounted a; unmounted b, c")).toEqual({ mounted: ["a"], unmounted: ["b", "c"] });
+    expect(parseXdevMountNotice("xd://: reboot required")).toBeNull();
+    expect(parseXdevMountNotice("正在同步压缩摘要")).toBeNull();
+  });
+
+  it("collapses the mounted tool list behind a titled toggle by default", () => {
+    const { container } = paneWithNotices([mountedNotice]);
+    const toggle = screen.getByRole("button", { name: /已挂载 · 3 个工具/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".convo-notice.xdev-mount.open")).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector(".convo-notice.xdev-mount.open")).not.toBeNull();
+    expect(screen.getByText("mcp__blender_get_scene_info")).toBeTruthy();
+    expect(screen.getByText("mcp__sts_get_game_state")).toBeTruthy();
+  });
+
+  it("keeps non-xdev notices as plain text", () => {
+    paneWithNotices(["正在同步压缩摘要"]);
+    expect(screen.getByText("正在同步压缩摘要")).toBeTruthy();
+  });
+
+  it("does not render Fast / Prewalk status notices in the transcript", () => {
+    paneWithNotices([
+      "The current model has no service-tier control for /fast to toggle.",
+      "Prewalk: target sub2api-go/mimo-v2.5 already matches the active model and thinking level; nothing to switch.",
+      "正在同步压缩摘要",
+    ]);
+    expect(screen.queryByText(/no service-tier control/)).toBeNull();
+    expect(screen.queryByText(/already matches the active model/)).toBeNull();
+    expect(screen.getByText("正在同步压缩摘要")).toBeTruthy();
+  });
+});
+
+describe("conversation activity line", () => {
+  it("renders working at the bottom of the scroll document", () => {
+    const state = resetConversation(1, identity, "ready");
+    const { container } = render(
+      <ConversationPane
+        snapshot={{ state, rows: buildTimeline(state), demo: false, loadingOlder: false, identityKey: "activity-test" }}
+        onLoadOlder={() => {}}
+        activity={{ status: { phase: "waiting", label: "working" }, startedAt: Date.now() }}
+      />,
+    );
+    const line = container.querySelector(".activity-line");
+    expect(line?.getAttribute("data-phase")).toBe("waiting");
+    expect(line?.textContent).toContain("working");
+    expect(container.querySelector(".al-op")).toBeNull();
+  });
+
+  it("keeps the activity line on the empty welcome surface so send is not silent", () => {
+    const state = resetConversation(1, identity, "ready");
+    const { container } = render(
+      <ConversationPane
+        snapshot={{ state, rows: [], demo: false, loadingOlder: false, identityKey: "activity-welcome" }}
+        onLoadOlder={() => {}}
+        forceWelcome
+        welcome={<div>开始一段对话</div>}
+        activity={{ status: { phase: "waiting", label: "working" } }}
+      />,
+    );
+    expect(screen.getByText("开始一段对话")).toBeTruthy();
+    expect(container.querySelector(".activity-line")?.textContent).toContain("working");
   });
 });

@@ -3,12 +3,18 @@
  * Renderer display only — never sent through Host / Studio Bridge.
  */
 
+import type { TreeGitStatus } from "../git/treeStatus";
+
+export type PreviewThreadWait = "approval" | "plan" | "ask";
+
 export type PreviewThread = {
   id: string;
   title: string;
   time: string;
   msgs: number;
-  status: "running" | "idle" | "approval" | "archived";
+  status: "running" | "idle" | "archived";
+  /** Sidebar capsule while a deck card is waiting (审批 / plan / ask). */
+  wait?: PreviewThreadWait;
   pinned?: boolean;
   hasSub?: boolean;
   unread?: number;
@@ -21,6 +27,8 @@ export type PreviewProject = {
   branch: string;
   worktree: string | null;
   dirty: number;
+  insertions: number;
+  deletions: number;
   running: boolean;
   attention: boolean;
   preview: "running" | "stopped" | "building";
@@ -32,7 +40,7 @@ export type PreviewFileNode = {
   type: "dir" | "file";
   name: string;
   open?: boolean;
-  status?: "M" | "A" | "D" | "?";
+  status?: TreeGitStatus;
   turn?: boolean;
   reading?: boolean;
   writing?: boolean;
@@ -64,6 +72,8 @@ export type PreviewTelemetry = {
   turnIn: string;
   turnOut: string;
   cacheSaved: string;
+  tps: string;
+  cacheHitRate: string;
   usedExact: string;
   totalExact: string;
   inPct: number;
@@ -73,11 +83,9 @@ export type PreviewTelemetry = {
 
 export type PreviewCtxPart = { name: string; v: string; pct: number; color: string };
 
-export type PreviewMinimap = { type: string; evId: string; at: number };
-
 export type PreviewChangeRow = {
   file: string;
-  status: "M" | "A" | "D" | "?";
+  status: TreeGitStatus;
   add: number;
   del: number;
   agent?: string | null;
@@ -154,20 +162,23 @@ export type PreviewSideAgent = {
 export const PREVIEW_PROJECTS: PreviewProject[] = [
   {
     id: "p1", name: "omp-web", path: "C:\\Aspace\\Tools\\omp-web",
-    branch: "main", worktree: null, dirty: 3, running: true,
+    branch: "main", worktree: null, dirty: 3, insertions: 214, deletions: 58, running: true,
     attention: true, preview: "running", pinned: true,
     threads: [
       { id: "t0", title: "新建对话（空白）", time: "now", msgs: 0, status: "idle" },
       { id: "t1", title: "跟踪上游 pi-web 更新到 omp-web", time: "32m ago", msgs: 45, status: "running", pinned: true, hasSub: true, unread: 3 },
-      { id: "t2", title: "Audit and fix OSS repository issues", time: "2h ago", msgs: 12, status: "idle", unread: 0 },
-      { id: "t3", title: "选择 gemini3.6flash 随意发送消息后报错…", time: "4d ago", msgs: 1337, status: "approval", hasSub: true, unread: 1 },
-      { id: "t4", title: "修复 Git Bash 路径未找到问题", time: "4d ago", msgs: 8, status: "idle" },
+      { id: "t2", title: "Audit and fix OSS repository issues", time: "2h ago", msgs: 12, status: "idle", wait: "ask", unread: 0 },
+      { id: "t3", title: "选择 gemini3.6flash 随意发送消息后报错…", time: "4d ago", msgs: 1337, status: "idle", wait: "plan", hasSub: true, unread: 1 },
+      { id: "t4", title: "修复 Git Bash 路径未找到问题", time: "4d ago", msgs: 8, status: "idle", wait: "approval" },
       { id: "t5", title: "重构 session 存储层 (session)", time: "6d ago", msgs: 156, status: "archived" },
+      { id: "t9", title: "补齐预览模式的会话分页演示", time: "7d ago", msgs: 5, status: "idle" },
+      { id: "t10", title: "清理历史遗留的 mock 分支", time: "9d ago", msgs: 21, status: "idle" },
+      { id: "t11", title: "侧栏会话行悬停操作样式走查", time: "11d ago", msgs: 3, status: "idle" },
     ],
   },
   {
     id: "p2", name: "pi-web (upstream)", path: "C:\\Aspace\\Tools\\pi-web",
-    branch: "v0.8.1", worktree: null, dirty: 0, running: false,
+    branch: "v0.8.1", worktree: null, dirty: 0, insertions: 0, deletions: 0, running: false,
     attention: false, preview: "stopped",
     threads: [
       { id: "t6", title: "对比 v0.8.0 → v0.8.1 变更清单", time: "1d ago", msgs: 22, status: "idle" },
@@ -175,7 +186,7 @@ export const PREVIEW_PROJECTS: PreviewProject[] = [
   },
   {
     id: "p3", name: "omp-web (feat/mermaid)", path: "C:\\Aspace\\Tools\\omp-web\\.worktrees\\mermaid",
-    branch: "feat/mermaid-zoom", worktree: "mermaid", dirty: 7, running: true,
+    branch: "feat/mermaid-zoom", worktree: "mermaid", dirty: 7, insertions: 1263, deletions: 341, running: true,
     attention: false, preview: "building",
     threads: [
       { id: "t7", title: "Mermaid 渲染优化与全屏缩放拖拽", time: "18m ago", msgs: 63, status: "running", hasSub: true, unread: 2 },
@@ -183,6 +194,23 @@ export const PREVIEW_PROJECTS: PreviewProject[] = [
     ],
   },
 ];
+
+/**
+ * 排队栏演示（p1 · t1「跟踪上游 pi-web 更新到 omp-web」流式期间）：
+ * 流式时按 Enter 入队的两条本地消息，预览模式下覆盖真实排队状态展示。
+ */
+export const PREVIEW_QUEUED_MESSAGES: readonly { id: number; text: string }[] = [
+  { id: 1, text: "对比完 v0.8.1 的变更后，把 package.json 里 pi-web 的依赖版本同步 bump 到 0.8.1" },
+  { id: 2, text: "同步完跑一遍 npm run check，报错按优先级整理成清单" },
+];
+
+/**
+ * 活动行演示（p1 · t1 流式期间）：对话滚动区底部的运行状态。
+ * 与排队栏同一条故事线——正在跑 `npm run check`。
+ */
+export const PREVIEW_RUN_ACTIVITY = {
+  status: { phase: "tool", label: "正在运行", detail: "npm run check" },
+} as const;
 
 export const PREVIEW_FILE_TREE: PreviewFileNode[] = [
   { type: "dir", name: ".claude", children: [{ type: "file", name: "settings.local.json" }] },
@@ -192,37 +220,37 @@ export const PREVIEW_FILE_TREE: PreviewFileNode[] = [
     { type: "dir", name: "workflows", children: [{ type: "file", name: "ci.yml" }] },
   ] },
   { type: "dir", name: "app", open: true, children: [
-    { type: "file", name: "App.tsx", status: "M", turn: true },
+    { type: "file", name: "App.tsx", status: "modified", turn: true },
     { type: "file", name: "main.tsx" },
-    { type: "dir", name: "routes", children: [
-      { type: "file", name: "session.tsx", status: "M", reading: true },
+    { type: "dir", name: "routes", status: "modified", children: [
+      { type: "file", name: "session.tsx", status: "modified", reading: true },
       { type: "file", name: "home.tsx" },
     ] },
   ] },
   { type: "dir", name: "bin", children: [{ type: "file", name: "omp-web.js" }] },
   { type: "dir", name: "components", open: true, children: [
-    { type: "file", name: "DirectoryPicker.tsx", status: "A", writing: true },
-    { type: "file", name: "MermaidBlock.tsx", status: "M", turn: true, diagnostic: "error" },
+    { type: "file", name: "DirectoryPicker.tsx", status: "added", writing: true },
+    { type: "file", name: "MermaidBlock.tsx", status: "modified", turn: true, diagnostic: "error" },
     { type: "file", name: "ChatTimeline.tsx" },
-    { type: "file", name: "CodeBlock.tsx", status: "M" },
+    { type: "file", name: "CodeBlock.tsx", status: "modified" },
     { type: "file", name: "TelemetryBar.tsx", dirty: true },
   ] },
   { type: "dir", name: "docs", children: [
-    { type: "file", name: "UPSTREAM-SYNC.md", status: "A" },
-    { type: "file", name: "README.md", status: "M", turn: true },
+    { type: "file", name: "UPSTREAM-SYNC.md", status: "added" },
+    { type: "file", name: "README.md", status: "modified", turn: true },
   ] },
   { type: "dir", name: "hooks", children: [
-    { type: "file", name: "useCodeTheme.ts", status: "M" },
+    { type: "file", name: "useCodeTheme.ts", status: "modified" },
     { type: "file", name: "useSession.ts" },
   ] },
   { type: "dir", name: "lib", children: [
     { type: "file", name: "rpc.ts", diagnostic: "warn" },
-    { type: "file", name: "graft.ts" },
+    { type: "file", name: "graft.ts", status: "renamed" },
   ] },
   { type: "file", name: ".gitignore" },
   { type: "file", name: "AGENTS.md" },
-  { type: "file", name: "package.json", status: "M", turn: true },
-  { type: "file", name: "config.yml", status: "?" },
+  { type: "file", name: "package.json", status: "modified", turn: true },
+  { type: "file", name: "config.yml", status: "untracked" },
 ];
 
 export const PREVIEW_TELEMETRY: PreviewTelemetry = {
@@ -248,6 +276,8 @@ export const PREVIEW_TELEMETRY: PreviewTelemetry = {
   turnIn: "42.1k",
   turnOut: "6.8k",
   cacheSaved: "78%",
+  tps: "6.8",
+  cacheHitRate: "78%",
   usedExact: "220,400",
   totalExact: "1,000,000",
   inPct: 72,
@@ -263,37 +293,117 @@ export const PREVIEW_CTX_PARTS: PreviewCtxPart[] = [
   { name: "对话消息", v: "123.4k", pct: 56.0, color: "#3b9bd4" },
 ];
 
-export const PREVIEW_MINIMAP: PreviewMinimap[] = [
-  { type: "user", evId: "e1", at: 2 },
-  { type: "plan", evId: "e3", at: 9 },
-  { type: "assistant", evId: "e5", at: 20 },
-  { type: "file", evId: "e6", at: 30 },
-  { type: "approval", evId: "e8", at: 40 },
-  { type: "bash", evId: "e9", at: 48 },
-  { type: "error", evId: "e10", at: 55 },
-  { type: "ask", evId: "e11", at: 61 },
-  { type: "checkpoint", evId: "e12", at: 67 },
-  { type: "user", evId: "e13", at: 73 },
-  { type: "assistant", evId: "e15", at: 83 },
-  { type: "compact", evId: "e16", at: 93 },
-];
-
 export const PREVIEW_CHANGES = {
   turn: [
-    { file: "components/MermaidBlock.tsx", status: "M" as const, add: 6, del: 3, agent: "主 Agent" },
-    { file: "docs/UPSTREAM-SYNC.md", status: "A" as const, add: 214, del: 0, agent: "主 Agent" },
+    { file: "components/MermaidBlock.tsx", status: "modified" as const, add: 6, del: 3, agent: "主 Agent" },
+    { file: "docs/UPSTREAM-SYNC.md", status: "added" as const, add: 214, del: 0, agent: "主 Agent" },
   ],
   thread: [
-    { file: "README.md", status: "M" as const, add: 3, del: 1, agent: "主 Agent" },
-    { file: "package.json", status: "M" as const, add: 4, del: 4, agent: "deps 子 Agent" },
-    { file: "app/App.tsx", status: "M" as const, add: 18, del: 9, agent: "主 Agent" },
-    { file: "hooks/useCodeTheme.ts", status: "M" as const, add: 11, del: 6, agent: "主 Agent" },
-  ],
-  preexisting: [
-    { file: "components/TelemetryBar.tsx", status: "M" as const, add: 42, del: 11, agent: null, note: "Agent 开始前已存在" },
-    { file: "config.yml", status: "?" as const, add: 0, del: 0, agent: null, note: "未跟踪" },
+    { file: "README.md", status: "modified" as const, add: 3, del: 1, agent: "主 Agent" },
+    { file: "package.json", status: "modified" as const, add: 4, del: 4, agent: "deps 子 Agent" },
+    { file: "app/App.tsx", status: "modified" as const, add: 18, del: 9, agent: "主 Agent" },
+    { file: "hooks/useCodeTheme.ts", status: "modified" as const, add: 11, del: 6, agent: "主 Agent" },
   ],
 };
+
+/** ver1 `D.todos` — composer-docked task list (display only). */
+export type PreviewTodoItem = {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  phase: string;
+};
+
+export const PREVIEW_TODOS: readonly PreviewTodoItem[] = [
+  { id: "t1", phase: "文档", content: "阅读 docs/ 现有文档与 package.json", status: "completed" },
+  { id: "t2", phase: "文档", content: "整理上游同步三阶段（graft / 合并 / 验证）", status: "completed" },
+  { id: "t3", phase: "文档", content: "新建 docs/UPSTREAM-SYNC.md 并更新 README 链接", status: "completed" },
+  { id: "t4", phase: "验证", content: "修复 MermaidBlock.tsx:147 字面量类型（TS2322）", status: "completed" },
+  { id: "t5", phase: "验证", content: "重新运行 typecheck 与 lint 确认通过", status: "in_progress" },
+  { id: "t6", phase: "验证", content: "验证 Mermaid 全屏缩放拖拽（Preview）", status: "in_progress" },
+  { id: "t7", phase: "验证", content: "创建 Checkpoint #13 并汇总本轮变更", status: "pending" },
+];
+
+/** Compact file set for the composer dock (turn + README from the ver1 story). */
+export const PREVIEW_TODO_FILES = [
+  { path: "docs/UPSTREAM-SYNC.md", name: "UPSTREAM-SYNC.md", dir: "docs/", add: 214, del: 0 },
+  { path: "README.md", name: "README.md", dir: "", add: 3, del: 1 },
+  { path: "components/MermaidBlock.tsx", name: "MermaidBlock.tsx", dir: "components/", add: 6, del: 3 },
+] as const;
+
+/** Git 管理页演示：沿用 ver1 D.projects 里 omp-web / main 的故事（dirty 3）。 */
+export const PREVIEW_GIT_LOG = {
+  branch: "main",
+  ahead: 2,
+  behind: 0,
+  headOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  mergeBaseOid: "cccccccccccccccccccccccccccccccccccccccc",
+  upstream: "origin/main",
+  commits: [
+    {
+      oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      parents: ["cccccccccccccccccccccccccccccccccccccccc", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      subject: "merge: integrate runtime interaction",
+      authorName: "Ada",
+      authorDate: "2026-08-16T12:00:00Z",
+      relation: "head" as const,
+      refs: [
+        { name: "HEAD", kind: "head" as const, current: true },
+        { name: "main", kind: "local" as const, current: true },
+      ],
+      files: [{ path: "apps/renderer/src/conversation/SessionChanges.tsx", status: "modified" as const }],
+      patch: "@@ -1,3 +1,6 @@\n export function SessionChanges() {\n+  return <div>interaction host</div>;\n }\n",
+    },
+    {
+      oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      parents: ["cccccccccccccccccccccccccccccccccccccccc"],
+      subject: "feat(studio): integrate runtime interaction",
+      authorName: "Ada",
+      authorDate: "2026-08-16T11:00:00Z",
+      relation: "outgoing" as const,
+      refs: [],
+      files: [{ path: "packages/host-client-api/src/facade.ts", status: "modified" as const }],
+      patch: "@@ -10,3 +10,4 @@\n+  // interaction host\n",
+    },
+    {
+      oid: "cccccccccccccccccccccccccccccccccccccccc",
+      parents: ["dddddddddddddddddddddddddddddddddddddddd"],
+      subject: "feat: expand models/MCP/agents host bridge",
+      authorName: "Ada",
+      authorDate: "2026-08-15T09:00:00Z",
+      relation: "common" as const,
+      refs: [{ name: "origin/main", kind: "remote" as const, current: false }],
+      files: [{ path: "README.md", status: "modified" as const }],
+      patch: "@@ -1,2 +1,3 @@\n # omp-web\n+Host bridge\n",
+    },
+    {
+      oid: "dddddddddddddddddddddddddddddddddddddddd",
+      parents: [],
+      subject: "Initial commit",
+      authorName: "thesnowpear",
+      authorDate: "2026-08-01T08:00:00Z",
+      relation: "common" as const,
+      refs: [],
+      files: [{ path: "README.md", status: "added" as const }],
+      patch: "@@ -0,0 +1,2 @@\n+# omp-web\n",
+    },
+  ],
+} as const;
+
+export const PREVIEW_GIT = {
+  branch: "main",
+  ahead: 2,
+  behind: 0,
+  staged: [
+    { path: "docs/UPSTREAM-SYNC.md", status: "新增" },
+    { path: "README.md", status: "修改" },
+  ],
+  working: [
+    { path: "components/MermaidBlock.tsx", status: "修改" },
+    { path: "hooks/useCodeTheme.ts", status: "修改" },
+    { path: "config.yml", status: "未跟踪" },
+  ],
+} as const;
 
 export const PREVIEW_DIFF = {
   file: "components/MermaidBlock.tsx",

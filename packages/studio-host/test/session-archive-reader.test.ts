@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+
+import { CONVERSATION_LIMITS } from "@omp-studio/studio-protocol";
 
 import { SessionArchiveError, StudioSessionArchiveReader } from "../src/index.js";
 
@@ -230,6 +232,296 @@ test("archive cursor becomes stale after a complete append changes the revision"
       () => reader.readPage({ sessionId: "session-a", cursor, limit: 1 }),
       (error: unknown) => error instanceof SessionArchiveError && error.code === "CURSOR_STALE",
     );
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader exposes revisions and validated probe copies without touching the original", async () => {
+  const seed = await fixture([]);
+  const complete = `${records(seed.workspace).map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+  // Simulate a crash-truncated tail: an incomplete final line must be dropped.
+  await writeFile(seed.file, `${complete}{"type":"message","id":"tail-partial"`, "utf8");
+  const probeDir = join(seed.root, "probe");
+  await mkdir(probeDir);
+  try {
+    const reader = new StudioSessionArchiveReader({
+      sessionsRoot: seed.sessions,
+      allowedCwd: seed.workspace,
+      cursorSecret: Buffer.alloc(32, 7),
+    });
+    const revision = await reader.readRevision("session-a");
+    assert.equal(revision.sessionId, "session-a");
+    assert.match(revision.transcriptRevision, /^sha256:/u);
+
+    const before = await (await import("node:fs/promises")).stat(seed.file);
+    const copy = await reader.createProbeCopy("session-a", probeDir);
+    assert.equal(copy.sessionId, "session-a");
+    assert.equal(copy.transcriptRevision, revision.transcriptRevision);
+    assert.ok(copy.temporarySessionFile.startsWith(probeDir));
+    const copyContent = await (await import("node:fs/promises")).readFile(copy.temporarySessionFile, "utf8");
+    assert.equal(copyContent, complete);
+    const after = await (await import("node:fs/promises")).stat(seed.file);
+    assert.equal(after.size, before.size);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+
+    await assert.rejects(() => reader.readRevision("session-missing"), (error: unknown) => {
+      assert.ok(error instanceof SessionArchiveError);
+      assert.equal(error.code, "SESSION_NOT_FOUND");
+      return true;
+    });
+    await assert.rejects(() => reader.createProbeCopy("session-missing", probeDir), /Session is not available/u);
+    await assert.rejects(() => reader.createProbeCopy("session-a", join(seed.root, "no-such-dir")), /usable directory/u);
+    await assert.rejects(() => reader.createProbeCopy("session-a", "relative/dir"), /absolute directory/u);
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader pages cold-archive .jsonl.gz sessions with the same workspace gate", async () => {
+  const seed = await fixture([]);
+  const complete = `${records(seed.workspace).map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+  // Simulate omp gc: gzip the session into <agentDir>/archive/sessions keeping the layout.
+  const archiveProject = join(seed.root, "archive", "sessions", "project");
+  await mkdir(archiveProject, { recursive: true });
+  const { gzipSync } = await import("node:zlib");
+  const gz = join(archiveProject, "2026-08-15T00-00-00-000Z_session-a.jsonl.gz");
+  await writeFile(gz, gzipSync(Buffer.from(complete, "utf8"), { level: 9 }));
+  await rm(seed.file, { force: true });
+  try {
+    const reader = new StudioSessionArchiveReader({
+      sessionsRoot: seed.sessions,
+      allowedCwd: seed.workspace,
+      cursorSecret: Buffer.alloc(32, 7),
+    });
+    const page = await reader.readPage({ sessionId: "session-a", limit: 10 });
+    assert.equal(page.sessionId, "session-a");
+    assert.equal(page.items.length, 3);
+    assert.equal(page.items[0]?.kind, "message");
+    assert.match(page.transcriptRevision, /^sha256:/u);
+
+    const revision = await reader.readRevision("session-a");
+    assert.equal(revision.sessionId, "session-a");
+
+    const probeDir = join(seed.root, "probe");
+    await mkdir(probeDir);
+    const copy = await reader.createProbeCopy("session-a", probeDir);
+    const copyContent = await (await import("node:fs/promises")).readFile(copy.temporarySessionFile, "utf8");
+    assert.equal(copyContent, complete);
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader shrinks over-budget pages below PAGE_MAX_BYTES and keeps paging consistent", async () => {
+  const seed = await fixture([]);
+  const bigText = "x".repeat(300 * 1024);
+  const entries: Entry[] = [{ type: "session", id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" }];
+  let parentId: string | null = null;
+  for (let index = 1; index <= 4; index += 1) {
+    const id = `big-${index}`;
+    entries.push({
+      type: "message",
+      id,
+      parentId,
+      timestamp: `2026-08-15T00:00:0${index}.000Z`,
+      message: { role: "user", content: `${id}:${bigText}` },
+    });
+    parentId = id;
+  }
+  await writeFile(seed.file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  try {
+    const reader = new StudioSessionArchiveReader({ sessionsRoot: seed.sessions, allowedCwd: seed.workspace });
+    const page = await reader.readPage({ sessionId: "session-a", limit: 10 });
+    assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") <= CONVERSATION_LIMITS.PAGE_MAX_BYTES);
+    assert.ok(page.items.length >= 1 && page.items.length < 4);
+    assert.equal(page.items.at(-1)?.itemId, "big-4");
+    assert.equal(page.hasMoreBefore, true);
+    assert.ok(page.olderCursor);
+    const older = await reader.readPage({ sessionId: "session-a", cursor: page.olderCursor, limit: 10 });
+    assert.ok(Buffer.byteLength(JSON.stringify(older), "utf8") <= CONVERSATION_LIMITS.PAGE_MAX_BYTES);
+    const firstOnPage = page.items[0]?.itemId;
+    assert.ok(firstOnPage !== undefined && !older.items.some((item) => item.itemId === firstOnPage));
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader shrinks a single item that alone exceeds the page budget", async () => {
+  const seed = await fixture([]);
+  const bigText = "y".repeat(300 * 1024);
+  const entries: Entry[] = [
+    { type: "session", id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" },
+    {
+      type: "message",
+      id: "huge-1",
+      parentId: null,
+      timestamp: "2026-08-15T00:00:01.000Z",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: bigText },
+          { type: "text", text: bigText },
+          { type: "text", text: bigText },
+        ],
+      },
+    },
+  ];
+  await writeFile(seed.file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  try {
+    const reader = new StudioSessionArchiveReader({ sessionsRoot: seed.sessions, allowedCwd: seed.workspace });
+    const page = await reader.readPage({ sessionId: "session-a", limit: 10 });
+    assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") <= CONVERSATION_LIMITS.PAGE_MAX_BYTES);
+    assert.equal(page.items.length, 1);
+    const item = page.items[0];
+    assert.equal(item?.kind, "message");
+    if (item?.kind === "message") {
+      for (const block of item.content) {
+        assert.equal(block.type, "text");
+        if (block.type === "text") {
+          assert.ok(Buffer.byteLength(block.text, "utf8") <= 256);
+          assert.equal(block.truncated, true);
+        }
+      }
+    }
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader accepts an empty-boundary head cursor from an empty projection", async () => {
+  const seed = await fixture([]);
+  await writeFile(
+    seed.file,
+    `${JSON.stringify({ type: "session", id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" })}\n`,
+    "utf8",
+  );
+  try {
+    const reader = new StudioSessionArchiveReader({ sessionsRoot: seed.sessions, allowedCwd: seed.workspace });
+    const head = await reader.readPage({ sessionId: "session-a" });
+    assert.deepEqual(head.items, []);
+    const paged = await reader.readPage({ sessionId: "session-a", cursor: head.headCursor });
+    assert.deepEqual(paged.items, []);
+    assert.equal(paged.hasMoreBefore, false);
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader emits image placeholders and shortens home paths like the online read plane", async () => {
+  const seed = await fixture([]);
+  const homePath = join(homedir(), "secret.txt");
+  const entries: Entry[] = [
+    { type: "session", id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" },
+    {
+      type: "message",
+      id: "mixed-1",
+      parentId: null,
+      timestamp: "2026-08-15T00:00:01.000Z",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "image", data: "base64-bytes", mimeType: "image/png" },
+          { type: "text", text: homePath },
+          { type: "toolCall", id: "call-home", name: "Read", arguments: { path: homePath } },
+        ],
+      },
+    },
+  ];
+  await writeFile(seed.file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  try {
+    const reader = new StudioSessionArchiveReader({ sessionsRoot: seed.sessions, allowedCwd: seed.workspace });
+    const page = await reader.readPage({ sessionId: "session-a", limit: 10 });
+    const item = page.items[0];
+    assert.equal(item?.kind, "message");
+    if (item?.kind === "message") {
+      assert.deepEqual(item.content[0], { type: "text", text: "", truncated: true });
+      assert.equal(item.content[1]?.type, "text");
+      if (item.content[1]?.type === "text") assert.equal(item.content[1].text, "~/secret.txt");
+      assert.equal(item.content[2]?.type, "toolCall");
+      if (item.content[2]?.type === "toolCall") {
+        assert.deepEqual(item.content[2].arguments, { path: "~/secret.txt" });
+      }
+    }
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader caps oversized toolCall arguments instead of emitting an over-budget block", async () => {
+  const seed = await fixture([]);
+  const entries: Entry[] = [
+    { type: "session", id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" },
+    {
+      type: "message",
+      id: "big-args-1",
+      parentId: null,
+      timestamp: "2026-08-15T00:00:01.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call-big", name: "Write", arguments: { blob: "z".repeat(300 * 1024) } }],
+      },
+    },
+  ];
+  await writeFile(seed.file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  try {
+    const reader = new StudioSessionArchiveReader({ sessionsRoot: seed.sessions, allowedCwd: seed.workspace });
+    const page = await reader.readPage({ sessionId: "session-a", limit: 10 });
+    const item = page.items[0];
+    assert.equal(item?.kind, "message");
+    if (item?.kind === "message") {
+      assert.deepEqual(item.content[0], {
+        type: "toolCall",
+        toolCallId: "call-big",
+        toolName: "Write",
+        arguments: { truncated: true },
+        truncated: true,
+      });
+    }
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader keeps the workspace boundary for gz members and caps their decompressed size", async () => {
+  const seed = await fixture([]);
+  const complete = `${records(seed.workspace).map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+  const archiveProject = join(seed.root, "archive", "sessions", "project");
+  await mkdir(archiveProject, { recursive: true });
+  const { gzipSync } = await import("node:zlib");
+  await writeFile(join(archiveProject, "2026-08-15T00-00-00-000Z_session-a.jsonl.gz"), gzipSync(Buffer.from(complete, "utf8")));
+  await rm(seed.file, { force: true });
+  try {
+    const foreign = new StudioSessionArchiveReader({
+      sessionsRoot: seed.sessions,
+      allowedCwd: join(seed.root, "another-workspace"),
+      cursorSecret: Buffer.alloc(32, 7),
+    });
+    await assert.rejects(() => foreign.readPage({ sessionId: "session-a", limit: 5 }), (error: unknown) => {
+      assert.ok(error instanceof SessionArchiveError);
+      assert.equal(error.code, "WORKSPACE_MISMATCH");
+      return true;
+    });
+
+    // Decompressed cap: a member larger than maxSessionBytes once inflated
+    // indexes fine (the header scan stops after its 64KB prefix) but must
+    // fail closed when the full page read inflates past the cap.
+    const big = [
+      JSON.stringify({ type: "session", version: 3, id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" }),
+      JSON.stringify({ type: "message", id: "m-1", parentId: null, timestamp: "2026-08-15T00:00:01.000Z", message: { role: "user", content: "x".repeat(120_000) } }),
+    ].join("\n") + "\n";
+    await writeFile(join(archiveProject, "2026-08-15T00-00-00-000Z_session-a.jsonl.gz"), gzipSync(Buffer.from(big, "utf8")));
+    const capped = new StudioSessionArchiveReader({
+      sessionsRoot: seed.sessions,
+      allowedCwd: seed.workspace,
+      maxSessionBytes: 65_600,
+      cursorSecret: Buffer.alloc(32, 7),
+    });
+    await assert.rejects(() => capped.readPage({ sessionId: "session-a", limit: 5 }), (error: unknown) => {
+      assert.ok(error instanceof SessionArchiveError);
+      assert.equal(error.code, "SESSION_TOO_LARGE");
+      return true;
+    });
   } finally {
     await rm(seed.root, { recursive: true, force: true });
   }

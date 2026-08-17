@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -106,12 +106,15 @@ test("DesktopGitService performs real repository, branch, worktree and safety fl
   const project = join(root, "project");
   const worktreeRoot = join(root, "worktrees");
   const registry = new WorkspaceRegistry(join(root, "registry.json"));
+  // The service's .git watchers hold Windows directory handles; dispose them
+  // before the recursive rm below or the cleanup fails and the run hangs.
+  let service: ReturnType<typeof createDesktopGitService> | undefined;
   try {
     await mkdir(project);
     await mkdir(worktreeRoot);
     const stored = await registry.upsertByPath(project);
     const workspaceId = stored.workspaceId as WorkspaceId;
-    const service = createDesktopGitService({
+    service = createDesktopGitService({
       registry,
       pickDirectory: async () => worktreeRoot,
       preferencesPath: join(root, "git-preferences.json"),
@@ -179,6 +182,195 @@ test("DesktopGitService performs real repository, branch, worktree and safety fl
       (error: unknown) => (error as ClientError).code === "INVALID_ARGUMENT",
     );
   } finally {
+    service?.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("DesktopGitService reports external repository changes and stays quiet for its own commands", async (context) => {
+  if (!(await hasGit())) { context.skip("system Git is unavailable"); return; }
+  const root = await mkdtemp(join(tmpdir(), "omp-git-external-"));
+  const project = join(root, "project");
+  const registry = new WorkspaceRegistry(join(root, "registry.json"));
+  const waitFor = async (predicate: () => boolean, timeoutMs: number): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) return true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return predicate();
+  };
+  try {
+    await mkdir(project);
+    const stored = await registry.upsertByPath(project);
+    const workspaceId = stored.workspaceId as WorkspaceId;
+    const service = createDesktopGitService({
+      registry,
+      pickDirectory: async () => undefined,
+      preferencesPath: join(root, "git-preferences.json"),
+    });
+    const request = (value: string) => value as CommandRequestId;
+    await service.execute({ workspaceId, operation: { kind: "init" } }, request("git-init"));
+    await execFileAsync("git", ["config", "user.name", "OMP Test"], { cwd: project });
+    await execFileAsync("git", ["config", "user.email", "omp@example.invalid"], { cwd: project });
+    await writeFile(join(project, "README.md"), "first\n", "utf8");
+    await service.execute({ workspaceId, operation: { kind: "stage", paths: ["README.md"] } }, request("git-stage"));
+    await service.execute({ workspaceId, operation: { kind: "commit", message: "initial commit" } }, request("git-commit"));
+    await service.repository({ workspaceId });
+    // Let the post-command suppression window from the commit above elapse so
+    // only the external switch below can produce a notification.
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+
+    const seen: WorkspaceId[] = [];
+    const unsubscribe = service.onExternalRepositoryChange((change) => seen.push(change.workspaceId));
+
+    await execFileAsync("git", ["switch", "-c", "feature-external"], { cwd: project });
+    assert.equal(await waitFor(() => seen.length > 0, 5_000), true, "external branch switch should notify");
+    assert.deepEqual(seen, [workspaceId]);
+
+    seen.length = 0;
+    await service.execute({ workspaceId, operation: { kind: "branch.create", name: "via-studio" } }, request("git-branch-create"));
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    assert.equal(seen.length, 0, "service-owned commands must not notify as external");
+
+    unsubscribe();
+    service.dispose();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("DesktopGitService surfaces blocked switch file lists and commits only listed paths", async (context) => {
+  if (!(await hasGit())) { context.skip("system Git is unavailable"); return; }
+  const root = await mkdtemp(join(tmpdir(), "omp-git-blocked-"));
+  const project = join(root, "project");
+  const registry = new WorkspaceRegistry(join(root, "registry.json"));
+  let service: ReturnType<typeof createDesktopGitService> | undefined;
+  try {
+    await mkdir(project);
+    const stored = await registry.upsertByPath(project);
+    const workspaceId = stored.workspaceId as WorkspaceId;
+    service = createDesktopGitService({
+      registry,
+      pickDirectory: async () => undefined,
+      preferencesPath: join(root, "git-preferences.json"),
+    });
+    const request = (value: string) => value as CommandRequestId;
+    await service.execute({ workspaceId, operation: { kind: "init" } }, request("git-init"));
+    await execFileAsync("git", ["config", "user.name", "OMP Test"], { cwd: project });
+    await execFileAsync("git", ["config", "user.email", "omp@example.invalid"], { cwd: project });
+    await writeFile(join(project, "README.md"), "first\n", "utf8");
+    await writeFile(join(project, "NOTES.md"), "note\n", "utf8");
+    await service.execute({ workspaceId, operation: { kind: "stage", paths: ["README.md", "NOTES.md"] } }, request("git-stage"));
+    await service.execute({ workspaceId, operation: { kind: "commit", message: "initial commit" } }, request("git-commit"));
+    const mainBranch = (await service.repository({ workspaceId })).branch!;
+
+    // Diverge README.md on a sibling branch and add EXTRA.md there; NOTES.md
+    // stays identical so only README.md (tracked) and EXTRA.md (untracked in
+    // the way) block a switch from a dirty working tree.
+    await execFileAsync("git", ["branch", "other"], { cwd: project });
+    await execFileAsync("git", ["switch", "other"], { cwd: project });
+    await writeFile(join(project, "README.md"), "other\n", "utf8");
+    await writeFile(join(project, "EXTRA.md"), "extra other\n", "utf8");
+    await execFileAsync("git", ["add", "README.md", "EXTRA.md"], { cwd: project });
+    await execFileAsync("git", ["commit", "-m", "other branch readme"], { cwd: project });
+    await execFileAsync("git", ["switch", mainBranch], { cwd: project });
+
+    await writeFile(join(project, "README.md"), "local edit\n", "utf8");
+    await writeFile(join(project, "NOTES.md"), "note local\n", "utf8");
+    await writeFile(join(project, "EXTRA.md"), "extra local\n", "utf8");
+
+    await assert.rejects(
+      service.execute({ workspaceId, operation: { kind: "branch.switch", name: "other" } }, request("git-switch-blocked")),
+      (error: unknown) => {
+        const shaped = error as ClientError;
+        assert.equal(shaped.code, "INVALID_ARGUMENT");
+        assert.ok(shaped.message.startsWith("Local changes would be overwritten by checkout"));
+        // Tracked conflict carries diff-vs-HEAD counts; untracked conflict counts file lines.
+        assert.deepEqual(shaped.message.split("\n").slice(1), ["README.md\t1\t1", "EXTRA.md\t1\t0"]);
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      service.execute({ workspaceId, operation: { kind: "commit", message: "no amend with paths", amend: true, paths: ["README.md"] } }, request("git-commit-amend-paths")),
+      (error: unknown) => (error as ClientError).code === "INVALID_ARGUMENT",
+    );
+
+    // The Renderer flow: stage the untracked blocker, then commit both listed paths.
+    await service.execute({ workspaceId, operation: { kind: "stage", paths: ["EXTRA.md"] } }, request("git-stage-blocker"));
+    await service.execute({ workspaceId, operation: { kind: "commit", message: "save blockers before switch", paths: ["README.md", "EXTRA.md"] } }, request("git-commit-paths"));
+    const after = await service.repository({ workspaceId });
+    assert.deepEqual(after.changes.map((change) => change.path), ["NOTES.md"]);
+
+    const switched = await service.execute({ workspaceId, operation: { kind: "branch.switch", name: "other" } }, request("git-switch-after"));
+    assert.equal(switched.repository?.branch, "other");
+    // core.autocrlf may check blobs out with CRLF; normalize before comparing.
+    assert.equal((await readFile(join(project, "README.md"), "utf8")).replaceAll("\r\n", "\n"), "other\n");
+    assert.equal((await readFile(join(project, "EXTRA.md"), "utf8")).replaceAll("\r\n", "\n"), "extra other\n");
+    // The unlisted local modification carries over to the new branch.
+    assert.ok(switched.repository?.changes.some((change) => change.path === "NOTES.md" && change.worktree === "modified"));
+  } finally {
+    service?.dispose();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("DesktopGitService lists a merge graph, commit files, and detaches checkout", async (context) => {
+  if (!(await hasGit())) { context.skip("system Git is unavailable"); return; }
+  const root = await mkdtemp(join(tmpdir(), "omp-git-log-"));
+  const project = join(root, "project");
+  const upstream = join(root, "upstream.git");
+  const registry = new WorkspaceRegistry(join(root, "registry.json"));
+  let service: ReturnType<typeof createDesktopGitService> | undefined;
+  try {
+    await mkdir(project);
+    const stored = await registry.upsertByPath(project);
+    const workspaceId = stored.workspaceId as WorkspaceId;
+    service = createDesktopGitService({
+      registry,
+      pickDirectory: async () => undefined,
+      preferencesPath: join(root, "git-preferences.json"),
+    });
+    const request = (value: string) => value as CommandRequestId;
+    await service.execute({ workspaceId, operation: { kind: "init" } }, request("git-init"));
+    await execFileAsync("git", ["config", "user.name", "OMP Test"], { cwd: project });
+    await execFileAsync("git", ["config", "user.email", "omp@example.invalid"], { cwd: project });
+    await writeFile(join(project, "README.md"), "base\n", "utf8");
+    await service.execute({ workspaceId, operation: { kind: "stage", paths: ["README.md"] } }, request("git-stage"));
+    await service.execute({ workspaceId, operation: { kind: "commit", message: "initial commit" } }, request("git-commit"));
+    await execFileAsync("git", ["init", "--bare", upstream]);
+    await execFileAsync("git", ["remote", "add", "origin", upstream], { cwd: project });
+    const branch = (await service.repository({ workspaceId })).branch!;
+    await execFileAsync("git", ["push", "-u", "origin", branch], { cwd: project });
+
+    await execFileAsync("git", ["switch", "-c", "feature"], { cwd: project });
+    await writeFile(join(project, "FEATURE.md"), "side\n", "utf8");
+    await service.execute({ workspaceId, operation: { kind: "stage", paths: ["FEATURE.md"] } }, request("git-stage-feature"));
+    await service.execute({ workspaceId, operation: { kind: "commit", message: "feat: side work" } }, request("git-commit-feature"));
+    await execFileAsync("git", ["switch", branch], { cwd: project });
+    await execFileAsync("git", ["merge", "--no-ff", "-m", "merge: integrate feature", "feature"], { cwd: project });
+
+    const log = await service.log({ workspaceId, limit: 20 });
+    assert.equal(log.ahead, 2);
+    assert.equal(log.behind, 0);
+    assert.ok(log.mergeBaseOid);
+    assert.equal(log.commits[0]?.relation, "head");
+    assert.ok(log.commits[0]?.parents.length === 2);
+    assert.ok(log.commits.some((commit) => commit.subject === "feat: side work" && commit.relation === "outgoing"));
+    assert.ok(log.commits.some((commit) => commit.refs.some((ref) => ref.name === `origin/${branch}`)));
+
+    const mergeOid = log.commits[0]!.oid;
+    const changes = await service.commitChanges({ workspaceId, oid: mergeOid });
+    assert.equal(changes.subject, "merge: integrate feature");
+    assert.ok(changes.files.some((file) => file.path === "FEATURE.md"));
+    const diff = await service.commitDiff({ workspaceId, oid: mergeOid, path: "FEATURE.md" });
+    assert.match(diff.patch, /side/);
+
+    const checked = await service.execute({ workspaceId, operation: { kind: "checkout", ref: log.commits.find((commit) => commit.subject === "initial commit")!.oid } }, request("git-checkout"));
+    assert.equal(checked.repository?.detached, true);
+  } finally {
+    service?.dispose();
     await rm(root, { recursive: true, force: true });
   }
 });
