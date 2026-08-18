@@ -1,6 +1,7 @@
 /**
  * Preview-only Agent Hub fixtures, ported from ui_reference/ver1/assets/js/mock-data.js.
- * Used when Host snapshot.agents is empty so the page matches the ver1 visual.
+ * Used when Studio preview mode is on; it replaces the Host snapshot on this
+ * page and must not be written through to Host commands.
  */
 
 export type PreviewTool = { name: string; args?: string };

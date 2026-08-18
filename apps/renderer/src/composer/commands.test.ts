@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { COMMAND_NAMES } from "@omp-studio/transport-desktop";
+import type { ThreadId } from "@omp-studio/client-contract";
+
 import {
   BUILTIN_SLASH_CATALOG,
+  bindSlashTypedCommand,
+  composerSlashExecute,
   filterSlashCommands,
   lookupSlashCommand,
   parseSlashDraft,
@@ -9,6 +14,7 @@ import {
   resolveSlashExecute,
   slashNeedsArgs,
   stripLeadingSlashCommand,
+  typedSlashSource,
   visibleSlashCatalog,
   type StudioSlashCommand,
 } from "./commands";
@@ -31,6 +37,25 @@ describe("parseSlashDraft", () => {
     expect(parseSlashDraft("a/model")).toBeNull();
     expect(parseSlashDraft("hello /plan")).toBeNull();
     expect(parseSlashDraft(" /fast")).toBeNull();
+  });
+});
+
+describe("typedSlashSource", () => {
+  it("reads typed text and ignores capsules that serialize with a slash", () => {
+    expect(typedSlashSource({ nodes: [] })).toBe("");
+    expect(typedSlashSource({ nodes: [{ type: "text", value: "/model" }] })).toBe("/model");
+    expect(typedSlashSource({
+      nodes: [
+        { type: "chip", chip: { id: "s1", kind: "skill", label: "commit-msg", name: "commit-msg" } },
+        { type: "text", value: " 写提交信息" },
+      ],
+    })).toBe("");
+    expect(typedSlashSource({
+      nodes: [
+        { type: "chip", chip: { id: "m1", kind: "mode", label: "fast", name: "fast" } },
+        { type: "text", value: "/model" },
+      ],
+    })).toBe("/model");
   });
 });
 
@@ -90,6 +115,17 @@ describe("resolveSlashExecute", () => {
     expect(resolveSlashExecute(model, "")).toEqual({ kind: "native-ui", ui: "model-picker" });
   });
 
+  it("points /branch at the user-message action and keeps /tree on the Changes panel", () => {
+    expect(resolveSlashExecute(lookupSlashCommand("branch")!, "")).toEqual({
+      kind: "native-ui",
+      ui: "user-message-branch",
+    });
+    expect(resolveSlashExecute(lookupSlashCommand("tree")!, "")).toEqual({
+      kind: "native-ui",
+      ui: "session-tree",
+    });
+  });
+
   it("uses typed session ops for TUI-only builtins", () => {
     expect(resolveSlashExecute(lookupSlashCommand("clear")!, "")).toEqual({
       kind: "typed",
@@ -100,6 +136,47 @@ describe("resolveSlashExecute", () => {
       kind: "typed",
       name: "queue.enqueue",
       input: { text: "later" },
+    });
+  });
+
+  it("maps btw / tan / omfg onto protocol composite commands", () => {
+    expect(resolveSlashExecute(lookupSlashCommand("btw")!, "why this file?")).toEqual({
+      kind: "typed",
+      name: "btw.ask",
+      input: { question: "why this file?" },
+    });
+    expect(resolveSlashExecute(lookupSlashCommand("tan")!, "review tests")).toEqual({
+      kind: "typed",
+      name: "tan.start",
+      input: { work: "review tests" },
+    });
+    expect(resolveSlashExecute(lookupSlashCommand("omfg")!, "avoid this")).toEqual({
+      kind: "typed",
+      name: "omfg.generate",
+      input: { complaint: "avoid this" },
+    });
+  });
+
+  it("keeps every typed slash name inside the desktop command allow-list", () => {
+    const typed = BUILTIN_SLASH_CATALOG.flatMap((command) => (command.typed === undefined ? [] : [command.typed.name]));
+    expect(typed.length).toBeGreaterThan(0);
+    for (const name of typed) {
+      expect(COMMAND_NAMES).toContain(name);
+    }
+  });
+
+  it("binds /drop to Host session.drop with the current threadId", () => {
+    const execute = resolveSlashExecute(lookupSlashCommand("drop")!, "");
+    expect(execute).toEqual({ kind: "typed", name: "session.drop", input: {} });
+    if (execute.kind !== "typed") return;
+    expect(bindSlashTypedCommand(execute, {})).toEqual({
+      ok: false,
+      error: "没有当前会话，无法执行 /drop",
+    });
+    expect(bindSlashTypedCommand(execute, { threadId: "thread-1" as ThreadId })).toEqual({
+      ok: true,
+      name: "session.drop",
+      input: { threadId: "thread-1" },
     });
   });
 
@@ -245,6 +322,15 @@ describe("planComposerSend", () => {
     expect(plan.snapshot.text).toContain("看这张");
     expect(plan.snapshot.text.startsWith("/queue")).toBe(false);
     expect(plan.snapshot.images).toEqual([{ type: "image", mimeType: "image/png", data: "aaa" }]);
+  });
+
+  it("treats /btw as a slash execute so preview and streaming can still run it", () => {
+    expect(composerSlashExecute(snapshotFromText("/btw why this file?"))).toEqual({
+      kind: "execute",
+      command: expect.objectContaining({ name: "btw" }),
+      args: "why this file?",
+    });
+    expect(composerSlashExecute(snapshotFromText("普通消息"))).toBeUndefined();
   });
 
   it("strips only the slash token from the first text node", () => {

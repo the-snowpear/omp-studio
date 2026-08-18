@@ -104,6 +104,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "job.subscribe",
   "session.tree.get",
   "session.tree.navigate",
+  "session.tree.branch",
   "session.fork",
   "session.handoff",
   "session.model.set",

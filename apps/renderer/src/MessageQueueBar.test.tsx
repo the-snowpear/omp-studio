@@ -103,7 +103,9 @@ describe("MessageQueueBar", () => {
         onRemove={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: "立刻发送第 1 条排队消息" })).toBeTruthy();
+    const sendNow = screen.getByRole("button", { name: "立刻发送第 1 条排队消息" });
+    expect(sendNow).toBeTruthy();
+    expect(sendNow.getAttribute("data-send-icon")).toBe("arrow-u");
     rerender(
       <MessageQueueBar
         messages={[entry(1, "hi")]}
@@ -114,8 +116,29 @@ describe("MessageQueueBar", () => {
         onRemove={() => {}}
       />,
     );
-    expect(screen.getByRole("button", { name: "插入纠偏第 1 条排队消息" })).toBeTruthy();
+    const steer = screen.getByRole("button", { name: "插入纠偏第 1 条排队消息" });
+    expect(steer).toBeTruthy();
+    expect(steer.getAttribute("data-send-icon")).toBe("arrow-u");
     expect(screen.queryByRole("button", { name: "立刻发送第 1 条排队消息" })).toBeNull();
+  });
+
+  it("editingId 对应条目显示「编辑中」且保留原文", () => {
+    render(
+      <MessageQueueBar
+        messages={[entry(1, "第一条"), entry(2, "第二条")]}
+        running
+        sendEnabled
+        editingId={2}
+        onEdit={() => {}}
+        onSendNow={() => {}}
+        onRemove={() => {}}
+      />,
+    );
+    expect(screen.getByText("编辑中")).toBeTruthy();
+    expect(screen.getByText("第二条")).toBeTruthy();
+    const editingRow = document.querySelector(".qs-item.editing");
+    expect(editingRow?.textContent).toContain("第二条");
+    expect(document.querySelectorAll(".qs-item.editing")).toHaveLength(1);
   });
 
   it("demo 模式显示「演示」标记", () => {
@@ -133,7 +156,7 @@ describe("MessageQueueBar", () => {
     expect(screen.getByText("演示")).toBeTruthy();
   });
 
-  it("头行最右侧按钮可展开/收起条目列表", () => {
+  it("点击整行标题可展开/收起条目列表", () => {
     render(
       <MessageQueueBar
         messages={[entry(1, "第一条"), entry(2, "第二条")]}
@@ -149,11 +172,10 @@ describe("MessageQueueBar", () => {
     const toggle = screen.getByRole("button", { name: "收起排队消息" });
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(collapse.hasAttribute("inert")).toBe(false);
-    fireEvent.click(toggle);
+    fireEvent.click(screen.getByText("排队消息 ×2"));
     expect(strip.classList.contains("collapsed")).toBe(true);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(collapse.hasAttribute("inert")).toBe(true);
-    // 收起后仍能再次展开
     fireEvent.click(screen.getByRole("button", { name: "展开排队消息" }));
     expect(strip.classList.contains("collapsed")).toBe(false);
     expect(collapse.hasAttribute("inert")).toBe(false);

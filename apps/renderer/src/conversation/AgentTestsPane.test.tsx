@@ -19,7 +19,7 @@ describe("AgentTestsPane", () => {
       <AgentTestsPane
         runs={[]}
         rerunDisabled
-        rerunTitle="没有活动会话或 Runtime 未就绪"
+        rerunTitle="未就绪"
         onRerun={() => undefined}
       />,
     );
@@ -46,7 +46,7 @@ describe("AgentTestsPane", () => {
       <AgentTestsPane
         runs={[failed]}
         rerunDisabled={false}
-        rerunTitle="请 Agent 用同一条命令再跑一次"
+        rerunTitle="重跑"
         onRerun={onRerun}
         onReveal={onReveal}
       />,
@@ -69,12 +69,12 @@ describe("AgentTestsPane", () => {
       <AgentTestsPane
         runs={[run({ toolCallId: "ok", command: "npm test", status: "pass", exitCode: 0 })]}
         rerunDisabled
-        rerunTitle="没有活动会话或 Runtime 未就绪"
+        rerunTitle="未就绪"
         onRerun={() => undefined}
       />,
     );
     const button = screen.getByRole("button", { name: "请 Agent 再跑" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect(button.getAttribute("title")).toBe("没有活动会话或 Runtime 未就绪");
+    expect(button.getAttribute("data-tip")).toBe("未就绪");
   });
 });

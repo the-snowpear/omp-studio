@@ -7,6 +7,8 @@
  *
  * 预览开：层 1/3 纯本地演示，不调 Host。预览关：跟 snapshot / capability；
  * keyword 始终是渲染进程粘性状态。
+ * 流式 / 压缩中：加号仍可点出 Plan / Goal / Vibe 胶囊（本地乐观态），
+ * Host 切模式等本轮结束后再生效。
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
@@ -80,6 +82,18 @@ function snapshotSession(snapshot: OperatorStateSnapshot | undefined): SessionMo
   return null;
 }
 
+function enterCapability(mode: SessionMode): string {
+  if (mode === "plan") return "mode.plan.enter";
+  if (mode === "vibe") return "mode.vibe.enter";
+  return "goal.create";
+}
+
+function exitCapability(mode: SessionMode): string {
+  if (mode === "plan") return "mode.plan.exit";
+  if (mode === "vibe") return "mode.vibe.exit";
+  return "goal.drop";
+}
+
 export function ComposerModePicker({
   preview,
   snapshot,
@@ -108,8 +122,12 @@ export function ComposerModePicker({
   const [togglesOpen, setTogglesOpen] = useState(false);
   const [flyoutSide, setFlyoutSide] = useState<"right" | "left">("right");
   const [local, setLocal] = useState<PreviewLayer3>(PREVIEW_OFF);
+  /** Overlay while streaming: snapshot.activeMode lags or Host is blocked by resync. */
+  const [optimistic, setOptimistic] = useState<SessionMode | null | undefined>(undefined);
   const menuRef = useRef<HTMLDivElement>(null);
   const flyoutTimer = useRef<number | undefined>(undefined);
+  const hostFailedRef = useRef(false);
+  const wasStreamingRef = useRef(false);
 
   useEffect(() => () => window.clearTimeout(flyoutTimer.current), []);
   useEffect(() => {
@@ -135,7 +153,8 @@ export function ComposerModePicker({
     setFlyoutSide(rect.right + 8 + TOGGLE_FLYOUT_WIDTH <= window.innerWidth - 8 ? "right" : "left");
   }, [togglesOpen]);
 
-  const session = preview ? local.session : snapshotSession(snapshot);
+  const committed = preview ? local.session : snapshotSession(snapshot);
+  const session = !preview && optimistic !== undefined ? optimistic : committed;
   const loopOn = preview ? local.loop : snapshot?.loop !== undefined;
   const fastOn = preview ? local.fast : snapshot?.fast?.enabled === true;
   const prewalkOn = preview
@@ -145,13 +164,46 @@ export function ComposerModePicker({
   const loopValue = local.loopValue;
   const prewalkTarget = local.prewalkTarget || (!preview ? (snapshot?.prewalk?.target ?? "") : "");
 
-  const planReady = preview || can("mode.plan.enter");
-  const goalReady = preview || can("goal.create");
-  const vibeReady = preview || can("mode.vibe.enter");
+  const nextTurnOnly = !preview && (snapshot?.isStreaming === true || snapshot?.isCompacting === true);
+  const planReady = preview || nextTurnOnly || can("mode.plan.enter");
+  const goalReady = preview || nextTurnOnly || can("goal.create");
+  const vibeReady = preview || nextTurnOnly || can("mode.vibe.enter");
   const loopReady = preview || can("loop.enable");
   const fastReady = preview || can("session.fast.set");
   const prewalkReady = preview || can("session.prewalk.arm");
-  const nextTurnOnly = !preview && (snapshot?.isStreaming === true || snapshot?.isCompacting === true);
+
+  useEffect(() => {
+    setOptimistic(undefined);
+    hostFailedRef.current = false;
+  }, [snapshot?.sessionId]);
+  useEffect(() => {
+    if (preview || optimistic === undefined) return;
+    if (optimistic === committed) {
+      setOptimistic(undefined);
+      hostFailedRef.current = false;
+    }
+  }, [preview, optimistic, committed]);
+  useEffect(() => {
+    const ended = wasStreamingRef.current && !nextTurnOnly;
+    wasStreamingRef.current = nextTurnOnly;
+    if (!ended || preview || optimistic === undefined || optimistic === committed || !hostFailedRef.current) return;
+    hostFailedRef.current = false;
+    void (async () => {
+      if (optimistic === null) {
+        if (committed === "plan") await onRun("mode.plan.exit", { discardDraft: true });
+        else if (committed === "goal") await onRun("goal.drop", {});
+        else if (committed === "vibe") await onRun("mode.vibe.exit", {});
+        return;
+      }
+      if (committed === optimistic) return;
+      if (committed === "plan" && !(await onRun("mode.plan.exit", { discardDraft: true }))) return;
+      if (committed === "goal" && !(await onRun("goal.drop", {}))) return;
+      if (committed === "vibe" && !(await onRun("mode.vibe.exit", {}))) return;
+      if (optimistic === "plan") await onRun("mode.plan.enter", {});
+      else if (optimistic === "vibe") await onRun("mode.vibe.enter", {});
+      else await onRun("goal.create", { objective: DEFAULT_GOAL_OBJECTIVE });
+    })();
+  }, [committed, nextTurnOnly, onRun, optimistic, preview]);
 
   const close = () => {
     window.clearTimeout(flyoutTimer.current);
@@ -187,13 +239,22 @@ export function ComposerModePicker({
       setLocal((current) => ({ ...current, session: current.session === next ? null : next }));
       return;
     }
+    const turningOff = session === next;
+    setOptimistic(turningOff ? null : next);
+    const needed = turningOff ? exitCapability(next) : enterCapability(next);
+    if (!can(needed)) {
+      hostFailedRef.current = true;
+      return;
+    }
     void (async () => {
-      if (session === next) {
-        await exitSession();
-        return;
+      let ok = true;
+      if (turningOff) {
+        ok = await exitSession();
+      } else {
+        if (session !== null) ok = await exitSession();
+        if (ok) ok = await enterSession(next);
       }
-      if (session !== null && !(await exitSession())) return;
-      await enterSession(next);
+      hostFailedRef.current = !ok;
     })();
   };
 
@@ -300,7 +361,7 @@ export function ComposerModePicker({
           aria-haspopup="menu"
           aria-expanded={open}
           aria-label="会话模式"
-          title="Plan / Ultrathink / Orchestrate / Loop / Fast / Prewalk"
+          data-tip="模式"
         >
           <Icon name="plus" extra="sm" />
         </button>
@@ -323,7 +384,7 @@ export function ComposerModePicker({
                 aria-checked={session === "plan"}
                 className={`approval-menu-item${session === "plan" ? " selected" : ""}`}
                 disabled={!planReady}
-                title={planReady ? "进入 Plan：只读规划后再执行" : "Runtime 未暴露 mode.plan.enter"}
+                data-tip={planReady ? undefined : "Plan（暂未实现）"}
                 onClick={() => selectSession("plan", planReady)}
               >
                 <span className="am-label">Plan</span>
@@ -335,7 +396,7 @@ export function ComposerModePicker({
                 aria-checked={session === "goal"}
                 className={`approval-menu-item${session === "goal" ? " selected" : ""}`}
                 disabled={!goalReady}
-                title={goalReady ? "进入 Goal：按目标与预算推进" : "Runtime 未暴露 goal.create"}
+                data-tip={goalReady ? undefined : "Goal（暂未实现）"}
                 onClick={() => selectSession("goal", goalReady)}
               >
                 <span className="am-label">Goal</span>
@@ -347,7 +408,7 @@ export function ComposerModePicker({
                 aria-checked={session === "vibe"}
                 className={`approval-menu-item${session === "vibe" ? " selected" : ""}`}
                 disabled={!vibeReady}
-                title={vibeReady ? "进入 Vibe：持久 director 委派" : "Runtime 未暴露 mode.vibe.enter"}
+                data-tip={vibeReady ? undefined : "Vibe（暂未实现）"}
                 onClick={() => selectSession("vibe", vibeReady)}
               >
                 <span className="am-label">Vibe</span>
@@ -449,14 +510,14 @@ export function ComposerModePicker({
                       />
                     ) : null}
                   </div>
-                  <label className={`cmp-mode-check${fastOn ? " selected" : ""}`} title={fastReady ? "Priority service tier" : "Runtime 未暴露 session.fast.set"}>
+                  <label className={`cmp-mode-check${fastOn ? " selected" : ""}`} data-tip={fastReady ? undefined : "Fast（暂未实现）"}>
                     <input type="checkbox" checked={fastOn} disabled={!fastReady} onChange={toggleFast} />
                     <span>
                       <span className="am-label">Fast</span>
                       <span className="am-desc">当前会话打开 priority / speed=fast</span>
                     </span>
                   </label>
-                  <label className={`cmp-mode-check${prewalkOn ? " selected" : ""}`} title={prewalkReady ? "规划后切到便宜模型" : "Runtime 未暴露 session.prewalk.arm"}>
+                  <label className={`cmp-mode-check${prewalkOn ? " selected" : ""}`} data-tip={prewalkReady ? undefined : "Prewalk（暂未实现）"}>
                     <input type="checkbox" checked={prewalkOn} disabled={!prewalkReady} onChange={togglePrewalk} />
                     <span>
                       <span className="am-label">Prewalk</span>
@@ -486,7 +547,7 @@ export function ComposerModePicker({
       {capsules.length > 0 ? (
         <span className="cmp-mode-cluster">
           {capsules.map((capsule) => (
-            <span key={capsule.id} className={`mode-chip tint-${capsule.tint}`} title={capsule.label}>
+            <span key={capsule.id} className={`mode-chip tint-${capsule.tint}`} data-tip={capsule.label}>
               <span className="mode-chip-label mode-chip-label-full">{capsule.label}</span>
               <span className="mode-chip-label mode-chip-label-initial" aria-hidden="true">{labelInitial(capsule.label)}</span>
               <button

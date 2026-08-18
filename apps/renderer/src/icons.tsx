@@ -107,6 +107,7 @@ const PATHS: Record<string, string> = {
   wrench: '<path d="M13.6 2.8a2.8 2.8 0 0 0-3.9 3.8L4 12.3a1.5 1.5 0 0 0 2.1 2.1l5.7-5.7a2.8 2.8 0 0 0 3.8-3.9L13 6.5 11.5 5z"/>',
   update: '<path d="M8 2v8M4.5 6.5 8 10l3.5-3.5M3 12.5h10"/>',
   rewind: '<path d="M13 3.5 7.5 8 13 12.5zM8.5 3.5 3 8l5.5 4.5z"/>',
+  undo: '<path d="M2.5 8a5.5 5.5 0 1 1 1.6 3.9M2.5 13v-3h3"/>',
   queue: '<path d="M2.5 4h11M2.5 8h11M2.5 12h7"/><circle cx="12.5" cy="12" r="1.5"/>',
   steering: '<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="1.6"/><path d="M8 2.5v3.9M8 9.6v3.9M2.5 8h3.9M9.6 8h3.9"/>',
   keyboard: '<rect x="1.5" y="4" width="13" height="8.5" rx="1.2"/><path d="M4 6.5h.2M7 6.5h.2M10 6.5h.2M12 6.5h.2M4 9.5h.2M12 9.5h.2M6 9.5h4"/>',

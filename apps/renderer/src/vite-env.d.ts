@@ -35,7 +35,9 @@ declare global {
         setTheme(theme: "light" | "dark"): Promise<void>;
         /** App 级系统通知（固定文案；非 Host / Studio Bridge 面）。 */
         notify(payload: { title: string; body?: string }): Promise<void>;
-        /** 把处理后的头像写入安装目录 `userdata/profile/`，不回传路径。 */
+        /** 用系统默认浏览器打开 https 链接（Main `shell.openExternal`，不是 Electron 窗）。 */
+        openUrl(payload: { url: string }): Promise<void>;
+        /** 把处理后的头像写入 `%APPDATA%\omp-studio\profile\`，不回传路径。 */
         saveAvatar(input: { mime: "image/jpeg" | "image/webp" | "image/png"; bytes: Uint8Array }): Promise<
           { readonly ok: true } | { readonly ok: false; readonly message: string }
         >;

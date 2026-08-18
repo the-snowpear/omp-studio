@@ -12,6 +12,7 @@ import type {
   AgentId,
   AgentTranscriptPage,
   ApprovalMode,
+  BtwSnapshot,
   CapabilityManifest,
   ConversationTranscriptPage,
   OpaqueCursor,
@@ -48,7 +49,9 @@ import type {
   EnvironmentReadModel,
   ConfigWriteResult,
   ExtensibilityReadModel,
+  McpLogsReadModel,
   McpReadModel,
+  McpTestResult,
   AgentDefinitionsReadModel,
   AgentThinkingLevel,
   HomeReadModel,
@@ -58,6 +61,7 @@ import type {
   ModelDiscoveryResult,
   ModelOverridePatch,
   ModelProviderTestResult,
+  RuntimeConnection,
   RuntimeInstallState,
   SessionHistoryReadModel,
   SessionHistoryStatus,
@@ -81,6 +85,8 @@ export interface QueryInputMap {
   "models.get": EmptyInput;
   "skills.get": EmptyInput;
   "mcp.get": EmptyInput;
+  /** Recent Host-owned probe log for one configured MCP server. */
+  "mcp.logs.get": { readonly name: string };
   "agents.definitions.get": EmptyInput;
   "projects.list": EmptyInput;
   /** Lists one directory level. Omit path for the workspace root. */
@@ -130,6 +136,8 @@ export interface QueryResultMap {
   "skills.get": ExtensibilityReadModel;
   /** Configured OMP MCP servers. Disk scan, not MCPManager connection state. */
   "mcp.get": McpReadModel;
+  /** Last Host probe lines for one MCP server. Never connection secrets. */
+  "mcp.logs.get": McpLogsReadModel;
   /** Configured OMP task-agent definitions. Disk scan, not Agent Hub. */
   "agents.definitions.get": AgentDefinitionsReadModel;
   /** Host workspace inventory. Paths never leave the Host registry. */
@@ -268,6 +276,7 @@ export interface AgentDefinitionUpsertInput {
   readonly autoloadSkills?: ReadonlyArray<string> | null;
   readonly readSummarize?: boolean | null;
   readonly prewalk?: boolean | string | null;
+  readonly advisor?: boolean | string | null;
   readonly expectedHash?: string;
 }
 
@@ -277,12 +286,13 @@ export interface AgentDefinitionDeleteInput {
   readonly expectedHash?: string;
 }
 
-/** Persist `task.disabledAgents` / `task.agentModelOverrides` / `task.agentPrewalk`. */
+/** Persist `task.disabledAgents` / `task.agentModelOverrides` / `task.agentPrewalk` / `task.agentAdvisor`. */
 export interface AgentDefinitionConfigureInput {
   readonly name: string;
   readonly disabled?: boolean;
   readonly overrideModel?: string | null;
   readonly prewalkOverride?: string | null;
+  readonly advisorOverride?: string | null;
 }
 
 /**
@@ -313,7 +323,10 @@ export interface RuntimeCommandInputMap {
   "mode.plan.enter": { readonly initialPrompt?: string };
   "mode.plan.exit": { readonly discardDraft?: boolean };
   "mode.plan.review.open": EmptyInput;
-  "mode.plan.review.respond": { readonly decision: "approve" | "refine" | "dismiss"; readonly feedback?: string };
+  "mode.plan.review.respond": {
+    readonly decision: "execute" | "compact" | "keep" | "approve" | "refine" | "dismiss";
+    readonly feedback?: string;
+  };
   "mode.vibe.enter": { readonly initialPrompt?: string };
   "mode.vibe.exit": EmptyInput;
   "goal.create": { readonly objective: string; readonly tokenBudget?: number };
@@ -338,6 +351,11 @@ export interface RuntimeCommandInputMap {
   "session.model.set": { readonly selector: string; readonly thinking?: SessionThinkingSelector };
   /** Set the session thinking level without changing the active model. */
   "session.thinking.set": { readonly level: SessionThinkingSelector };
+  /**
+   * In-place conversation reset. Keeps the same session identity and history
+   * tree; not a new session (`session.create` / `/new`).
+   */
+  "session.clearContext": EmptyInput;
   "session.fork": EmptyInput;
   /**
    * Generate a handoff document from the current session and start a fresh
@@ -347,7 +365,22 @@ export interface RuntimeCommandInputMap {
   "session.handoff": { readonly customInstructions?: string };
   "session.tree.get": EmptyInput;
   "session.tree.navigate": { readonly targetId: string; readonly summarize?: boolean; readonly customInstructions?: string; readonly reanswer?: unknown };
+  "session.tree.branch": { readonly targetId: string };
   "operator.invoke": { readonly commandId: string; readonly arguments?: unknown };
+  /** Side-channel question that does not enter the main transcript. */
+  "btw.ask": { readonly question: string };
+  /** Cancel the in-flight BTW answer. The id fences a stale abort against a newer ask. */
+  "btw.abort": { readonly ephemeralId: string };
+  /**
+   * Promote a completed BTW answer into a real session branch. The token is
+   * minted per ask and only travels on the `btw.ask` receipt, so a client that
+   * merely observed `btw.changed` cannot branch someone else's answer.
+   */
+  "btw.branch": { readonly branchToken: string };
+  /** Start a background side-agent. */
+  "tan.start": { readonly work: string };
+  /** Generate a TTSR rule candidate from a complaint. */
+  "omfg.generate": { readonly complaint: string };
   /** Spawn a subagent via the native structured-subagent path. */
   "agent.spawn": {
     readonly definition: string;
@@ -363,6 +396,7 @@ export interface RuntimeCommandInputMap {
     readonly expectedGeneration: number;
     readonly text: string;
     readonly mode: "prompt" | "steer" | "followUp";
+    readonly images?: ReadonlyArray<PromptImageInput>;
   };
   /** Abort + tombstone a subagent. Destructive: the Runtime issues a confirmation gate. */
   "agent.kill": { readonly agentId: string; readonly expectedGeneration: number };
@@ -387,6 +421,12 @@ export type InteractionResponseValue =
 interface CoreCommandInputMap {
   /** Install or update the trusted runtime (environment page action). */
   "runtime.install": { readonly channel?: RuntimeChannel };
+  /**
+   * Start or restart the managed Runtime under the active workspace.
+   * No-op when already connected. Completes with the public connection
+   * facts so diagnostics can refresh without a second round-trip.
+   */
+  "runtime.ensure": EmptyInput;
   /** Start a fresh Runtime session in the active workspace. */
   "session.create": EmptyInput;
   /** Resume a thread from history or the home page. */
@@ -499,11 +539,41 @@ interface CoreCommandInputMap {
     readonly enabled: boolean;
     readonly scope?: "user" | "project";
   };
+  /**
+   * Open the winning skill's directory in the system file manager.
+   * Paths stay in the Host; the Renderer only supplies the skill name.
+   */
+  "skills.reveal": {
+    readonly name: string;
+    readonly scope?: "user" | "project";
+  };
+  /**
+   * Open the native OMP skills root (user `~/.omp/agent/skills` or project
+   * `.omp/skills`) in the system file manager. Creates the directory if missing.
+   */
+  "skills.revealRoot": {
+    readonly scope?: "user" | "project";
+  };
+  /**
+   * Re-scan configured MCP inventory from disk. Does not reconnect a live
+   * Runtime MCPManager (`runtimeEffect: new-session`).
+   */
+  "mcp.refresh": {
+    readonly name?: string;
+  };
+  /**
+   * One-shot Host probe: JSON-RPC `initialize` + `tools/list`. Secrets stay
+   * in the adapter; the receipt never includes command, URL, or headers.
+   */
+  "mcp.test": {
+    readonly name: string;
+    readonly scope?: "user" | "project";
+  };
   /** Create or replace a user/project `.omp/agents/*.md` definition. */
   "agents.definition.upsert": AgentDefinitionUpsertInput;
   /** Remove a user/project task-agent file. Bundled/plugin agents cannot be deleted. */
   "agents.definition.delete": AgentDefinitionDeleteInput;
-  /** Persist per-agent overlays in config.yml (disable / model / prewalk). */
+  /** Persist per-agent overlays in config.yml (disable / model / prewalk / advisor). */
   "agents.definition.configure": AgentDefinitionConfigureInput;
   /** Open the native `omp stats` dashboard in the default browser. */
   "usage.openDashboard": EmptyInput;
@@ -520,6 +590,7 @@ export type CommandInputMap = CoreCommandInputMap & RuntimeCommandInputMap;
 
 interface CoreCommandResultMap {
   "runtime.install": RuntimeInstallState;
+  "runtime.ensure": RuntimeConnection;
   "session.create": OperatorStateSnapshot;
   "session.resume": OperatorStateSnapshot;
   "session.drop": OperatorStateSnapshot;
@@ -555,7 +626,11 @@ interface CoreCommandResultMap {
   "workspace.directory.create": WorkspaceFileMutationResult;
   "plugins.setEnabled": ConfigWriteResult;
   "skills.setEnabled": ConfigWriteResult;
+  "skills.reveal": ConfigWriteResult;
+  "skills.revealRoot": ConfigWriteResult;
   "mcp.setEnabled": ConfigWriteResult;
+  "mcp.refresh": ConfigWriteResult;
+  "mcp.test": McpTestResult;
   "agents.definition.upsert": ConfigWriteResult;
   "agents.definition.delete": ConfigWriteResult;
   "agents.definition.configure": ConfigWriteResult;
@@ -576,10 +651,58 @@ export interface OperatorInvokeOutcome {
   readonly result: unknown;
 }
 
+/**
+ * `session.tree.navigate` / `session.tree.branch` completion: post-command
+ * snapshot plus the editor fill-back (text and optional images). Images
+ * travel only on this receipt; the public transcript still strips them.
+ */
+export interface SessionTreeCommandOutcome {
+  readonly snapshot: OperatorStateSnapshot;
+  readonly cancelled?: boolean;
+  readonly sessionId?: string;
+  readonly editorText?: string;
+  readonly editorImages?: ReadonlyArray<PromptImageInput>;
+  readonly leafId?: string | null;
+  readonly aborted?: boolean;
+  readonly askReanswerCommitted?: boolean;
+}
+
+/**
+ * `btw.ask` completion. The snapshot is the usual post-command Runtime state;
+ * `branchToken` is the one-shot authorization for a later `btw.branch` and is
+ * deliberately absent from the `btw.changed` event stream.
+ */
+export interface BtwAskOutcome {
+  readonly snapshot: OperatorStateSnapshot;
+  readonly ephemeralId: string;
+  readonly branchToken: string;
+  readonly status: "running";
+}
+
+/**
+ * `btw.branch` completion. `branched: false` means the Runtime declined (stale
+ * token, answer no longer complete, session moved on); `reason` carries the
+ * Runtime's own wording so the surface does not have to guess.
+ */
+export interface BtwBranchOutcome {
+  readonly snapshot: OperatorStateSnapshot;
+  readonly branched: boolean;
+  readonly newSessionId?: string;
+  readonly newLeafId?: string;
+  readonly reason?: string;
+}
+
 export type CommandResultMap = CoreCommandResultMap & {
-  [K in Exclude<keyof RuntimeCommandInputMap, "operator.invoke">]: OperatorStateSnapshot;
+  [K in Exclude<
+    keyof RuntimeCommandInputMap,
+    "operator.invoke" | "session.tree.navigate" | "session.tree.branch" | "btw.ask" | "btw.branch"
+  >]: OperatorStateSnapshot;
 } & {
   "operator.invoke": OperatorInvokeOutcome;
+  "session.tree.navigate": SessionTreeCommandOutcome;
+  "session.tree.branch": SessionTreeCommandOutcome;
+  "btw.ask": BtwAskOutcome;
+  "btw.branch": BtwBranchOutcome;
 };
 
 export type CommandName = keyof CommandInputMap & keyof CommandResultMap;

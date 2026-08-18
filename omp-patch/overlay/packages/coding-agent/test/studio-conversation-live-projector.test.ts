@@ -626,6 +626,57 @@ describe("ConversationLiveProjector", () => {
 		expect(diagnostics.some(item => item.includes("custom"))).toBe(true);
 	});
 
+	test("developer, synthetic user, and steering user harness messages never become public rows", () => {
+		const { projector, events, diagnostics } = createProjector();
+		projector.project({ type: "agent_start" });
+		const developer = {
+			role: "developer",
+			content: [{ type: "text", text: "<system-reminder>todo still open</system-reminder>" }],
+			attribution: "agent",
+			timestamp: TS,
+		} as AgentMessage;
+		const synthetic = user("<instruction>MUST read local://plan.md</instruction>", { synthetic: true });
+		const steering = user("steer the turn", { steering: true });
+		const visible = user("hello");
+		for (const message of [developer, synthetic, steering, visible]) {
+			projector.project({ type: "message_start", message });
+			projector.project({ type: "message_end", message });
+		}
+		expect(events.filter(event => event.kind === "conversation.message.started")).toEqual([
+			{
+				kind: "conversation.message.started",
+				sessionId: "session-1",
+				turnId: "turn-1",
+				messageId: "msg-1",
+				role: "user",
+				createdAt: new Date(TS).toISOString(),
+			},
+		]);
+		expect(JSON.stringify(events)).not.toContain("system-reminder");
+		expect(JSON.stringify(events)).not.toContain("<instruction>");
+		expect(JSON.stringify(events)).not.toContain("steer the turn");
+		expect(diagnostics.some(item => item.includes("developer"))).toBe(true);
+	});
+
+	test("auto_retry_end becomes a retry-end notice so the UI can drop Retry N/M", () => {
+		const { projector, events } = createProjector();
+		projector.project({
+			type: "auto_retry_end",
+			success: false,
+			attempt: 2,
+			finalError: "Retry cancelled",
+		});
+		expect(events).toEqual([
+			{
+				kind: "conversation.notice",
+				sessionId: "session-1",
+				level: "warning",
+				message: "Retry cancelled",
+				source: "retry-end",
+			},
+		]);
+	});
+
 	test("AgentSession subscribe double replays a native event fixture into contract events", () => {
 		const session = new AgentSessionEventDouble();
 		const { projector, events } = createProjector();
@@ -676,5 +727,86 @@ describe("ConversationLiveProjector", () => {
 			update(assistantMessage, { type: "text_delta", contentIndex: 0, delta: "nope", partial: assistantMessage }),
 		);
 		expect(events.some(event => event.kind === "conversation.message.delta" && event.delta === "nope")).toBe(false);
+	});
+
+	test("does not reserve a message id when a tool starts with no assistant owner", () => {
+		const { projector, events, diagnostics, ids } = createProjector();
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
+		expect(events.some(event => event.kind === "conversation.tool.started")).toBe(false);
+		expect(ids()).toBe(1);
+		expect(diagnostics.some(message => message.includes("no owning assistant message"))).toBe(true);
+	});
+
+	test("tools after message_end attach to the completed assistant without stealing FIFO", () => {
+		const { projector, events, ids } = createProjector();
+		const message = assistant([{ type: "toolCall", id: "call-1", name: "Bash", arguments: {} }]);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message });
+		projector.project({ type: "message_end", message });
+		expect(ids()).toBe(2);
+		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
+		const started = events.filter(event => event.kind === "conversation.tool.started");
+		expect(started).toHaveLength(1);
+		expect(started[0]?.kind === "conversation.tool.started" && started[0].messageId).toBe("msg-1");
+		expect(ids()).toBe(2);
+	});
+
+	test("toolcall_end emits conversation.tool.started", () => {
+		const { projector, events } = createProjector();
+		const message = assistant([]);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message });
+		projector.project(
+			update(message, {
+				type: "toolcall_end",
+				contentIndex: 0,
+				toolCall: { type: "toolCall", id: "call-1", name: "Read", arguments: { path: "a.ts" } },
+				partial: message,
+			}),
+		);
+		const started = events.find(event => event.kind === "conversation.tool.started");
+		expect(started?.kind === "conversation.tool.started" && started.toolCallId).toBe("call-1");
+		expect(started?.kind === "conversation.tool.started" && started.messageId).toBe("msg-1");
+		expect(started?.kind === "conversation.tool.started" && started.toolName).toBe("Read");
+	});
+
+	test("joins multiple tool result text blocks with newlines", () => {
+		const { projector, events } = createProjector();
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: assistant([]) });
+		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
+		projector.project({
+			type: "tool_execution_end",
+			toolCallId: "call-1",
+			toolName: "Bash",
+			result: {
+				content: [
+					{ type: "text", text: "stdout" },
+					{ type: "text", text: "stderr" },
+				],
+				isError: false,
+			},
+			isError: false,
+		});
+		const completed = events.find(event => event.kind === "conversation.tool.completed");
+		expect(completed?.kind === "conversation.tool.completed" && completed.result.output).toBe("stdout\nstderr");
+	});
+
+	test("accepts the same toolCallId again after it completed", () => {
+		const { projector, events } = createProjector();
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: assistant([]) });
+		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
+		projector.project({
+			type: "tool_execution_end",
+			toolCallId: "call-1",
+			toolName: "Bash",
+			result: { content: [{ type: "text", text: "first" }], isError: false },
+			isError: false,
+		});
+		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
+		const started = events.filter(event => event.kind === "conversation.tool.started");
+		expect(started).toHaveLength(2);
 	});
 });

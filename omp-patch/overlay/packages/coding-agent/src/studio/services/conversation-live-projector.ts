@@ -11,7 +11,14 @@ import {
 	type ConversationRuntimeEvent,
 	parseConversationRuntimeEvent,
 } from "../conversation-protocol";
-import { sanitizeJsonValue, sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
+import {
+	publicToolCallId,
+	sanitizeJsonValue,
+	sanitizePublicText,
+	sanitizeToolArguments,
+	utf8ByteLength,
+} from "./conversation-sanitizer";
+import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
 
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
 export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
@@ -79,11 +86,6 @@ function defaultClock(): ConversationLiveClock {
 
 function isAssistant(message: AgentMessage): message is AssistantMessage {
 	return message.role === "assistant";
-}
-
-function publicRole(role: string): ConversationRole | undefined {
-	if (role === "user" || role === "assistant" || role === "system") return role;
-	return undefined;
 }
 
 /**
@@ -165,18 +167,22 @@ function toolText(result: unknown): {
 	const extra = details?.value === undefined ? {} : { data: details.value };
 	const truncated = details?.truncated === true ? { truncated: true } : {};
 	if (Array.isArray(record.content)) {
-		const text = record.content
-			.filter((block): block is { type: "text"; text: string } => {
-				return (
-					block !== null &&
-					typeof block === "object" &&
-					(block as { type?: unknown }).type === "text" &&
-					typeof (block as { text?: unknown }).text === "string"
-				);
-			})
-			.map(block => block.text)
-			.join("");
-		return { text, isError, ...extra, ...truncated };
+		const texts: string[] = [];
+		let omittedBinary = false;
+		for (const block of record.content) {
+			if (
+				block !== null &&
+				typeof block === "object" &&
+				(block as { type?: unknown }).type === "text" &&
+				typeof (block as { text?: unknown }).text === "string"
+			) {
+				texts.push((block as { text: string }).text);
+			} else if (block !== null && typeof block === "object" && (block as { type?: unknown }).type === "image") {
+				omittedBinary = true;
+			}
+		}
+		const binary = omittedBinary ? { truncated: true as const } : truncated;
+		return { text: texts.join("\n"), isError, ...extra, ...binary };
 	}
 	if (typeof record.output === "string") return { text: record.output, isError, ...extra, ...truncated };
 	if (typeof record.message === "string") return { text: record.message, isError, ...extra, ...truncated };
@@ -210,6 +216,7 @@ export class ConversationLiveProjector {
 	readonly #completedMessageIds = new Set<string>();
 	readonly #completedToolIds = new Set<string>();
 	readonly #toolOutput = new Map<string, string>();
+	readonly #toolOwners = new Map<string, string>();
 	#sessionId: string;
 	#runtimeEpoch: number;
 	#generation = 0;
@@ -218,6 +225,7 @@ export class ConversationLiveProjector {
 	#turnAborted = false;
 	#turnCompleted = false;
 	#lastItemId: string | null = null;
+	#lastAssistantId: string | undefined;
 	#openAssistantId: string | undefined;
 	#openCompactionId: string | undefined;
 	#unsubscribe: (() => void) | undefined;
@@ -319,6 +327,13 @@ export class ConversationLiveProjector {
 			case "auto_retry_start":
 				this.#emitNotice("warning", `Retry ${event.attempt}/${event.maxAttempts}`, "retry");
 				return;
+			case "auto_retry_end":
+				this.#emitNotice(
+					event.success ? "info" : "warning",
+					event.success ? "Retry recovered" : "Retry cancelled",
+					"retry-end",
+				);
+				return;
 			case "notice":
 				this.#emitNotice(event.level, event.message, event.source);
 				return;
@@ -348,9 +363,8 @@ export class ConversationLiveProjector {
 	}
 
 	#onMessageStart(message: AgentMessage): void {
-		if (message.role === "user" && "synthetic" in message && message.synthetic) return;
-		if (message.role === "user" && "steering" in message && message.steering) return;
-		const role = publicRole(message.role);
+		if (isHarnessInjectedUserMessage(message)) return;
+		const role = publicConversationRole(message.role);
 		if (role === undefined) {
 			this.#diagnostic(`ignored session message role ${message.role}`);
 			return;
@@ -398,13 +412,19 @@ export class ConversationLiveProjector {
 		}
 		if (stream.type === "toolcall_end") {
 			this.#recordToolCall(open, stream.toolCall);
+			this.#emitToolStarted({
+				messageId: open.messageId,
+				turnId: open.turnId,
+				toolCallId: stream.toolCall.id,
+				toolName: stream.toolCall.name,
+				args: stream.toolCall.arguments,
+			});
 		}
 	}
 
 	#onMessageEnd(message: AgentMessage): void {
-		if (message.role === "user" && "synthetic" in message && message.synthetic) return;
-		if (message.role === "user" && "steering" in message && message.steering) return;
-		const role = publicRole(message.role);
+		if (isHarnessInjectedUserMessage(message)) return;
+		const role = publicConversationRole(message.role);
 		if (role === undefined) {
 			this.#diagnostic(`ignored session message role ${message.role}`);
 			return;
@@ -433,32 +453,27 @@ export class ConversationLiveProjector {
 
 	#onToolStart(event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>): void {
 		if (this.#turnAborted) return;
-		this.#flushPendingDeltas();
 		const turnId = this.#ensureTurnId();
+		const publicId = publicToolCallId(event.toolCallId, "").id;
 		const messageId =
+			(publicId.length > 0 ? this.#toolOwners.get(publicId) : undefined) ??
 			this.#openAssistantId ??
-			this.#lastItemId ??
-			this.#options.reserveMessageId({
-				role: "assistant",
-				createdAt: this.#clock.nowIso(),
-			});
-		const args = sanitizeToolArguments(event.args);
-		const toolName = sanitizePublicText(event.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
-		if (toolName.length === 0) {
-			this.#diagnostic("dropped tool start with empty tool name");
+			this.#lastAssistantId;
+		if (messageId === undefined) {
+			this.#diagnostic("dropped tool start with no owning assistant message");
 			return;
 		}
-		const started: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }> = {
-			kind: "conversation.tool.started",
-			sessionId: this.#sessionId,
-			turnId,
-			messageId,
-			toolCallId: event.toolCallId,
-			toolName,
-			startedAt: this.#clock.nowIso(),
-		};
-		if (args.arguments !== undefined) started.arguments = args.arguments;
-		this.#emitParsed(started);
+		if (
+			!this.#emitToolStarted({
+				messageId,
+				turnId,
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				args: event.args,
+			})
+		) {
+			return;
+		}
 		const open = this.#openMessages.get(messageId);
 		if (open !== undefined) {
 			this.#recordToolCall(open, {
@@ -472,42 +487,49 @@ export class ConversationLiveProjector {
 
 	#onToolUpdate(event: Extract<AgentSessionEvent, { type: "tool_execution_update" }>): void {
 		if (this.#turnAborted) return;
-		if (this.#completedToolIds.has(event.toolCallId)) return;
+		const toolCallId = publicToolCallId(event.toolCallId, "").id;
+		if (toolCallId.length === 0 || this.#completedToolIds.has(toolCallId)) return;
 		this.#flushPendingDeltas();
 		const extracted = toolText(event.partialResult);
 		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-		const previous = this.#toolOutput.get(event.toolCallId);
+		const previous = this.#toolOutput.get(toolCallId);
 		let updateMode: "append" | "replace" = "replace";
 		let output = sanitized.text;
 		if (previous !== undefined && sanitized.text.startsWith(previous) && sanitized.text.length > previous.length) {
 			updateMode = "append";
 			output = sanitized.text.slice(previous.length);
 		}
-		this.#toolOutput.set(event.toolCallId, sanitized.text);
-		if (output.length === 0 && !sanitized.truncated) return;
+		this.#toolOutput.set(toolCallId, sanitized.text);
+		const truncated = sanitized.truncated || extracted.truncated === true;
+		if (output.length === 0 && !truncated) return;
 		const updated: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> = {
 			kind: "conversation.tool.updated",
 			sessionId: this.#sessionId,
 			turnId: this.#ensureTurnId(),
-			toolCallId: event.toolCallId,
+			toolCallId,
 			updateMode,
 		};
 		if (output.length > 0) updated.output = output;
-		if (sanitized.truncated) updated.truncated = true;
+		if (truncated) updated.truncated = true;
 		this.#emitParsed(updated);
 	}
 
 	#onToolEnd(event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>): void {
 		this.#flushPendingDeltas();
-		if (this.#completedToolIds.has(event.toolCallId)) return;
-		this.#completedToolIds.add(event.toolCallId);
+		const toolCallId = publicToolCallId(event.toolCallId, "").id;
+		if (toolCallId.length === 0) {
+			this.#diagnostic("dropped tool end with empty toolCallId");
+			return;
+		}
+		if (this.#completedToolIds.has(toolCallId)) return;
+		this.#completedToolIds.add(toolCallId);
 		const extracted = toolText(event.result);
 		const isError = event.isError === true || extracted.isError || event.result instanceof Error;
 		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 		const toolName = sanitizePublicText(event.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
 		const result: Extract<ConversationContentBlock, { type: "toolResult" }> = {
 			type: "toolResult",
-			toolCallId: event.toolCallId,
+			toolCallId,
 			isError,
 		};
 		if (toolName.length > 0) result.toolName = toolName;
@@ -519,7 +541,7 @@ export class ConversationLiveProjector {
 			kind: "conversation.tool.completed",
 			sessionId: this.#sessionId,
 			turnId: this.#ensureTurnId(),
-			toolCallId: event.toolCallId,
+			toolCallId,
 			result,
 			completedAt: this.#clock.nowIso(),
 		});
@@ -710,7 +732,7 @@ export class ConversationLiveProjector {
 			}
 			if (block.type === "toolCall") {
 				this.#recordToolCall(open, block);
-				const recorded = open.toolCalls.get(block.id);
+				const recorded = open.toolCalls.get(publicToolCallId(block.id, "").id);
 				if (recorded !== undefined) content.push(recorded);
 			}
 		}
@@ -718,17 +740,57 @@ export class ConversationLiveProjector {
 	}
 
 	#recordToolCall(open: OpenMessage, toolCall: ToolCall): void {
+		const publicId = publicToolCallId(toolCall.id, "");
+		if (publicId.id.length === 0) return;
 		const args = sanitizeToolArguments(toolCall.arguments);
 		const toolName = sanitizePublicText(toolCall.name, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
 		if (toolName.length === 0) return;
 		const block: Extract<ConversationContentBlock, { type: "toolCall" }> = {
 			type: "toolCall",
-			toolCallId: toolCall.id,
+			toolCallId: publicId.id,
 			toolName,
 		};
 		if (args.arguments !== undefined) block.arguments = args.arguments;
-		if (args.truncated) block.truncated = true;
-		open.toolCalls.set(toolCall.id, block);
+		if (args.truncated || publicId.truncated) block.truncated = true;
+		open.toolCalls.set(publicId.id, block);
+		this.#toolOwners.set(publicId.id, open.messageId);
+		if (open.role === "assistant") this.#lastAssistantId = open.messageId;
+	}
+
+	#emitToolStarted(input: {
+		messageId: string;
+		turnId: string;
+		toolCallId: string;
+		toolName: string;
+		args: unknown;
+	}): boolean {
+		this.#flushPendingDeltas();
+		const publicId = publicToolCallId(input.toolCallId, "");
+		if (publicId.id.length === 0) {
+			this.#diagnostic("dropped tool start with empty toolCallId");
+			return false;
+		}
+		this.#completedToolIds.delete(publicId.id);
+		const toolName = sanitizePublicText(input.toolName, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS).text;
+		if (toolName.length === 0) {
+			this.#diagnostic("dropped tool start with empty tool name");
+			return false;
+		}
+		const args = sanitizeToolArguments(input.args);
+		const started: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }> = {
+			kind: "conversation.tool.started",
+			sessionId: this.#sessionId,
+			turnId: input.turnId,
+			messageId: input.messageId,
+			toolCallId: publicId.id,
+			toolName,
+			startedAt: this.#clock.nowIso(),
+		};
+		if (args.arguments !== undefined) started.arguments = args.arguments;
+		this.#toolOwners.set(publicId.id, input.messageId);
+		this.#lastAssistantId = input.messageId;
+		this.#emitParsed(started);
+		return true;
 	}
 
 	#completeMessage(open: OpenMessage, message?: AgentMessage, error?: ConversationMessageError): void {
@@ -747,6 +809,7 @@ export class ConversationLiveProjector {
 			content,
 		};
 		this.#lastItemId = open.messageId;
+		if (open.role === "assistant") this.#lastAssistantId = open.messageId;
 		this.#emitParsed({
 			kind: "conversation.message.completed",
 			sessionId: this.#sessionId,
@@ -870,9 +933,14 @@ export class ConversationLiveProjector {
 			}
 		}
 		if (this.#queue.length >= limit) this.#compactQueue();
+		if (this.#queue.length >= limit && event.kind === "conversation.tool.updated") {
+			const dropDelta = this.#queue.findIndex(item => item.kind === "conversation.message.delta");
+			if (dropDelta >= 0) this.#queue.splice(dropDelta, 1);
+		}
 		if (this.#queue.length >= limit && !isControlEvent(event.kind)) return;
 		if (this.#queue.length >= limit && isControlEvent(event.kind)) {
-			const dropAt = this.#queue.findIndex(item => !isControlEvent(item.kind));
+			const dropDelta = this.#queue.findIndex(item => item.kind === "conversation.message.delta");
+			const dropAt = dropDelta >= 0 ? dropDelta : this.#queue.findIndex(item => !isControlEvent(item.kind));
 			if (dropAt >= 0) this.#queue.splice(dropAt, 1);
 			else return;
 		}
@@ -881,8 +949,26 @@ export class ConversationLiveProjector {
 
 	#compactQueue(): void {
 		if (this.#queue.length < 2) return;
+		const lastUpdateAt = new Map<string, number>();
+		this.#queue.forEach((event, index) => {
+			if (event.kind === "conversation.tool.updated") lastUpdateAt.set(event.toolCallId, index);
+		});
 		const compacted: ConversationRuntimeEvent[] = [];
-		for (const event of this.#queue) {
+		for (let index = 0; index < this.#queue.length; index++) {
+			const event = this.#queue[index];
+			if (event === undefined) continue;
+			if (event.kind === "conversation.tool.updated") {
+				if (lastUpdateAt.get(event.toolCallId) !== index) continue;
+				const full = this.#toolOutput.get(event.toolCallId);
+				const coalesced: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> = {
+					...event,
+					updateMode: "replace",
+				};
+				if (full !== undefined && full.length > 0) coalesced.output = full;
+				else if (event.output !== undefined) coalesced.output = event.output;
+				compacted.push(coalesced);
+				continue;
+			}
 			const last = compacted[compacted.length - 1];
 			if (
 				event.kind === "conversation.message.delta" &&
@@ -922,10 +1008,12 @@ export class ConversationLiveProjector {
 		this.#completedMessageIds.clear();
 		this.#completedToolIds.clear();
 		this.#toolOutput.clear();
+		this.#toolOwners.clear();
 		this.#turnId = undefined;
 		this.#turnAborted = false;
 		this.#turnCompleted = false;
 		this.#lastItemId = null;
+		this.#lastAssistantId = undefined;
 		this.#openAssistantId = undefined;
 		this.#releaseOpenCompaction();
 	}

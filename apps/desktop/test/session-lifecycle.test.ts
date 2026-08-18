@@ -179,6 +179,22 @@ function liveSession(initial: OperatorStateSnapshot = SNAPSHOT): LiveHandle {
         if (operation !== undefined && operation.kind === "operator.invoke") {
           receipt.result = { output: ["Session exported to: omp-session-x.html"], result: { consumed: true } };
         }
+        if (operation !== undefined && (operation.kind === "session.tree.navigate" || operation.kind === "session.tree.branch")) {
+          receipt.result = {
+            cancelled: false,
+            editorText: "from-runtime",
+            editorImages: [{ type: "image", mimeType: "image/png", data: "aaa" }],
+            ...(operation.kind === "session.tree.branch"
+              ? { sessionId: "branched-session" }
+              : { leafId: "leaf-1", aborted: false, askReanswerCommitted: false }),
+          };
+        }
+        if (operation !== undefined && operation.kind === "btw.ask") {
+          receipt.result = { ephemeralId: "ephemeral-btw-1", branchToken: "branch-token-1", status: "running" };
+        }
+        if (operation !== undefined && operation.kind === "btw.branch") {
+          receipt.result = { branched: true, newSessionId: "session-btw-branch", newLeafId: "leaf-btw" };
+        }
         return receipt;
       },
       runtimeLost: () => [],
@@ -369,6 +385,84 @@ test("mode.plan.enter omits expectedStateVersion so a live turn can queue the ne
   });
 });
 
+test("session.clearContext is forwarded to Runtime as the protocol kind", async () => {
+  await withReady(async ({ composition, live }) => {
+    await composition.facade.command({
+      commandName: "session.clearContext",
+      input: {},
+      idempotencyKey: "idem-clear-1" as IdempotencyKey,
+      requestId: "client-req-clear-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    assert.equal(live.invokes[0]?.operation.kind, "session.clearContext");
+    assert.equal(live.invokes[0]?.expectedStateVersion, live.snapshot.stateVersion);
+  });
+});
+
+test("btw.ask is forwarded to Runtime with the question payload", async () => {
+  await withReady(async ({ composition, live }) => {
+    await composition.facade.command({
+      commandName: "btw.ask",
+      input: { question: "why this file?" },
+      idempotencyKey: "idem-btw-1" as IdempotencyKey,
+      requestId: "client-req-btw-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    assert.deepEqual(live.invokes[0]?.operation, { kind: "btw.ask", question: "why this file?" });
+  });
+});
+
+test("btw.ask omits expectedStateVersion so it can run beside a live turn", async () => {
+  await withReady(async ({ composition, live }) => {
+    live.setSnapshot({ ...live.snapshot, isStreaming: true, stateVersion: 4 as StateVersion });
+    await composition.facade.command({
+      commandName: "btw.ask",
+      input: { question: "side channel" },
+      idempotencyKey: "idem-btw-live" as IdempotencyKey,
+      requestId: "client-req-btw-live" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    assert.equal(live.invokes[0]?.operation.kind, "btw.ask");
+    assert.equal("expectedStateVersion" in (live.invokes[0] ?? {}), false);
+  });
+});
+
+test("btw.abort and btw.branch forward their ids and keep the Runtime result beside the snapshot", async () => {
+  await withReady(async ({ composition, live }) => {
+    const events: ClientEvent[] = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    await composition.facade.command({
+      commandName: "btw.abort",
+      input: { ephemeralId: "ephemeral-btw-1" },
+      idempotencyKey: "idem-btw-abort" as IdempotencyKey,
+      requestId: "client-req-btw-abort" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    assert.deepEqual(live.invokes[0]?.operation, { kind: "btw.abort", ephemeralId: "ephemeral-btw-1" });
+    assert.equal("expectedStateVersion" in (live.invokes[0] ?? {}), false);
+
+    await composition.facade.command({
+      commandName: "btw.branch",
+      input: { branchToken: "branch-token-1" },
+      idempotencyKey: "idem-btw-branch" as IdempotencyKey,
+      requestId: "client-req-btw-branch" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 2);
+    assert.deepEqual(live.invokes[1]?.operation, { kind: "btw.branch", branchToken: "branch-token-1" });
+    await waitUntil(() => events.some((event) => event.kind === "command.receipt" && event.receipt.requestId === "client-req-btw-branch"));
+    const receiptEvent = events.find((event) => event.kind === "command.receipt" && event.receipt.requestId === "client-req-btw-branch");
+    assert.equal(receiptEvent?.kind, "command.receipt");
+    if (receiptEvent?.kind !== "command.receipt") return;
+    assert.equal(receiptEvent.receipt.status, "completed");
+    assert.deepEqual(receiptEvent.receipt.result, {
+      snapshot: live.snapshot,
+      branched: true,
+      newSessionId: "session-btw-branch",
+      newLeafId: "leaf-btw",
+    });
+  });
+});
+
 test("operator.invoke completion carries the command output envelope", async () => {
   await withReady(async ({ composition, live }) => {
     const events: ClientEvent[] = [];
@@ -390,6 +484,80 @@ test("operator.invoke completion carries the command output envelope", async () 
       output: ["Session exported to: omp-session-x.html"],
       result: { consumed: true },
     });
+  });
+});
+
+test("session.tree.navigate completion keeps editor fill-back beside the snapshot", async () => {
+  await withReady(async ({ composition, live }) => {
+    const events: ClientEvent[] = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    await composition.facade.command({
+      commandName: "session.tree.navigate",
+      input: { targetId: "entry-1" },
+      idempotencyKey: "idem-tree-navigate-1" as IdempotencyKey,
+      requestId: "client-req-tree-navigate-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    await waitUntil(() => events.some((event) => event.kind === "command.receipt"));
+    const receiptEvent = events.find((event) => event.kind === "command.receipt");
+    assert.equal(receiptEvent?.kind, "command.receipt");
+    if (receiptEvent?.kind !== "command.receipt") return;
+    assert.equal(receiptEvent.receipt.status, "completed");
+    assert.deepEqual(receiptEvent.receipt.result, {
+      cancelled: false,
+      editorText: "from-runtime",
+      editorImages: [{ type: "image", mimeType: "image/png", data: "aaa" }],
+      leafId: "leaf-1",
+      aborted: false,
+      askReanswerCommitted: false,
+      snapshot: live.snapshot,
+    });
+  });
+});
+
+test("session.tree.branch completion keeps sessionId and editor fill-back beside the snapshot", async () => {
+  await withReady(async ({ composition, live }) => {
+    const events: ClientEvent[] = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    await composition.facade.command({
+      commandName: "session.tree.branch",
+      input: { targetId: "entry-1" },
+      idempotencyKey: "idem-tree-branch-1" as IdempotencyKey,
+      requestId: "client-req-tree-branch-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    await waitUntil(() => events.some((event) => event.kind === "command.receipt"));
+    const receiptEvent = events.find((event) => event.kind === "command.receipt");
+    assert.equal(receiptEvent?.kind, "command.receipt");
+    if (receiptEvent?.kind !== "command.receipt") return;
+    assert.equal(receiptEvent.receipt.status, "completed");
+    assert.deepEqual(receiptEvent.receipt.result, {
+      cancelled: false,
+      editorText: "from-runtime",
+      editorImages: [{ type: "image", mimeType: "image/png", data: "aaa" }],
+      sessionId: "branched-session",
+      snapshot: live.snapshot,
+    });
+  });
+});
+
+test("other P4 completions stay snapshot-only", async () => {
+  await withReady(async ({ composition, live }) => {
+    const events: ClientEvent[] = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    await composition.facade.command({
+      commandName: "session.fork",
+      input: {},
+      idempotencyKey: "idem-fork-1" as IdempotencyKey,
+      requestId: "client-req-fork-1" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    await waitUntil(() => events.some((event) => event.kind === "command.receipt"));
+    const receiptEvent = events.find((event) => event.kind === "command.receipt");
+    assert.equal(receiptEvent?.kind, "command.receipt");
+    if (receiptEvent?.kind !== "command.receipt") return;
+    assert.equal(receiptEvent.receipt.status, "completed");
+    assert.deepEqual(receiptEvent.receipt.result, live.snapshot);
   });
 });
 

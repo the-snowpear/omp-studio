@@ -39,9 +39,11 @@ import { ImagePreview, type ImagePreviewSubject } from "./ImagePreview";
 import { MentionMenu } from "./MentionMenu";
 import {
   filterSlashCommands,
+  composerSlashExecute,
   lookupSlashCommand,
   parseSlashDraft,
   slashNeedsArgs,
+  typedSlashSource,
   type StudioSlashCommand,
 } from "./commands";
 
@@ -72,6 +74,8 @@ type Props = {
   onQueue?: () => void;
   /** Ctrl+Enter / Cmd+Enter: Runtime follow-up (text + images). */
   onFollowUp?: () => void;
+  /** Escape when mention / slash menus are closed (queued-message edit cancel). */
+  onEscape?: () => void;
   running?: boolean;
   onFocus?: (event: FocusEvent<HTMLDivElement>) => void;
   onBlur?: (event: FocusEvent<HTMLDivElement>) => void;
@@ -124,6 +128,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     onSubmit,
     onQueue,
     onFollowUp,
+    onEscape,
     running,
     onFocus,
     onBlur,
@@ -142,7 +147,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const [mention, setMention] = useState<{ trigger: "@"; query: string } | null>(null);
   const [candidates, setCandidates] = useState<MentionCandidate[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [draftText, setDraftText] = useState("");
+  const [slashSource, setSlashSource] = useState("");
   const [detachedCommand, setDetachedCommand] = useState(false);
   const [commandDismissed, setCommandDismissed] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
@@ -161,8 +166,9 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (editorRef.current === editor) syncChipTruncation(editor);
     });
     const snapshot = snapshotOf(editor, imagesRef.current);
-    setDraftText(snapshot.text);
-    if (snapshot.text.startsWith("/")) {
+    const typed = typedSlashSource(snapshot.doc);
+    setSlashSource(typed);
+    if (typed.startsWith("/")) {
       setDetachedCommand(false);
       setCommandDismissed(false);
     }
@@ -320,14 +326,20 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (!editor) return;
       editor.focus();
       setCommandDismissed(false);
-      const current = snapshotOf(editor, imagesRef.current).text;
-      if (current.length === 0) {
-        insertNodesAtCaret(editor, [document.createTextNode("/")]);
-        emit();
-        setDetachedCommand(false);
+      const snapshot = snapshotOf(editor, imagesRef.current);
+      const typed = typedSlashSource(snapshot.doc);
+      if (typed.length === 0) {
+        if (snapshot.text.length === 0) {
+          insertNodesAtCaret(editor, [document.createTextNode("/")]);
+          emit();
+          setDetachedCommand(false);
+          return;
+        }
+        setDetachedCommand(true);
+        setCommandIndex(0);
         return;
       }
-      if (current.startsWith("/")) {
+      if (typed.startsWith("/")) {
         setDetachedCommand(false);
         return;
       }
@@ -387,7 +399,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     placeCaretAtEnd(editor);
   };
 
-  const slashDraft = parseSlashDraft(draftText);
+  const slashDraft = parseSlashDraft(slashSource);
   const commandItems = detachedCommand
     ? filterSlashCommands("")
     : slashDraft
@@ -544,10 +556,33 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         return;
       }
     }
+    if (event.key === "Escape") {
+      if (commandOpen) {
+        event.preventDefault();
+        closeCommandMenu();
+        if (slashDraft && slashDraft.name.length === 0) writeCommandText("");
+        return;
+      }
+      if (mention) {
+        event.preventDefault();
+        setMention(null);
+        return;
+      }
+      if (onEscape === undefined) return;
+      event.preventDefault();
+      onEscape();
+      return;
+    }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     if (event.ctrlKey || event.metaKey) {
       onFollowUp?.();
+      return;
+    }
+    const editor = editorRef.current;
+    const slash = editor === null ? undefined : composerSlashExecute(snapshotOf(editor, imagesRef.current));
+    if (slash !== undefined) {
+      onSubmit?.();
       return;
     }
     if (running) onQueue?.();
@@ -572,7 +607,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
                 type="button"
                 className="cm-thumb-remove"
                 aria-label={`移除${thumb.label}`}
-                title={`移除${thumb.label}`}
+                data-tip="移除"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -613,7 +648,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           removeChip(chipId);
         }}
         onFocus={(event) => {
-          if (editorRef.current && snapshotOf(editorRef.current, imagesRef.current).text.startsWith("/")) {
+          if (editorRef.current && typedSlashSource(snapshotOf(editorRef.current, imagesRef.current).doc).startsWith("/")) {
             setCommandDismissed(false);
           }
           onFocus?.(event);

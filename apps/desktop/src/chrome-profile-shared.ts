@@ -3,7 +3,7 @@
  *
  * Shared by Main and the sandboxed preload（无 Electron Main API）。
  * 这不是 Host / Studio Bridge 面：Renderer 只提交处理后的图片字节，
- * Main 写入安装目录旁的 userdata/profile，永不把文件系统路径回传给 Renderer。
+ * Main 写入 `%APPDATA%\omp-studio\profile`，永不把文件系统路径回传给 Renderer。
  */
 
 export const CHROME_PROFILE_CHANNELS = {

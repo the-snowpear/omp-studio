@@ -6,6 +6,7 @@ import type {
 } from "@omp-studio/client";
 import {
   CONVERSATION_LIMITS,
+  truncateUtf8,
   type ConversationCompactionItem,
   type ConversationContentBlock,
   type ConversationItem,
@@ -17,8 +18,11 @@ import {
   type JsonValue,
   type OpaqueCursor,
 } from "@omp-studio/client-contract";
+import type { ComposerDoc } from "../composer/types";
 import type { ConversationIdentity } from "./conversationHost";
 import { sameIdentity } from "./conversationHost";
+import type { UserMessageThumb, UserThumbMap } from "./userMessageThumbs";
+import { mergeThumbMaps, thumbsFromDisplays } from "./userMessageThumbs";
 
 export type ToolStatus = "queued" | "running" | "succeeded" | "failed" | "aborted" | "missing";
 
@@ -58,6 +62,8 @@ export type PendingUser = {
   readonly status: "pending" | "failed";
   readonly knownItemIds: readonly string[];
   readonly error?: string;
+  /** Composer capsules at send time; used so the bubble does not fall back to @ / tokens. */
+  readonly doc?: ComposerDoc;
 };
 
 export type ConversationNotice = {
@@ -86,12 +92,21 @@ export type ConversationState = {
   readonly pendingUsers: readonly PendingUser[];
   readonly lastEventSeq?: number;
   readonly resyncRequired: boolean;
+  /** Capsule docs transferred from pending → persisted itemId for the current session. */
+  readonly userDisplays: { readonly [itemId: string]: ComposerDoc };
+  /** Preview bytes for user-bubble thumbnails (local store + in-session absorb). */
+  readonly userThumbs: UserThumbMap;
   /**
    * Persisted itemId → owning turnId while that turn is still running. OMP
    * persists the assistant item before its first tool starts, so only a closed
    * turn proves a resultless toolCall lost its result.
    */
   readonly openTurnItems: { readonly [itemId: string]: string };
+  /**
+   * Live compaction divider. Set by `conversation.compaction.started`;
+   * cleared when the persisted compaction item (or abort) arrives.
+   */
+  readonly compacting?: { readonly action: string };
 };
 
 export type ToolView = {
@@ -118,6 +133,8 @@ export type TimelineRow =
       readonly pending?: PendingUser["status"];
       readonly requestId?: string;
       readonly error?: string;
+      readonly doc?: ComposerDoc;
+      readonly thumbs?: readonly UserMessageThumb[];
     }
   | {
       readonly type: "assistant";
@@ -133,11 +150,31 @@ export type TimelineRow =
        * the transcript diff card waits until this flag clears.
        */
       readonly turnOpen?: boolean;
-      /** Live-only provider failure carried on `conversation.message.completed`. */
+      /** Provider failure from `conversation.message.completed`, latched until the next successful assistant return. */
       readonly error?: ConversationMessageError;
     }
   | { readonly type: "compaction"; readonly item: ConversationCompactionItem }
+  | { readonly type: "compacting"; readonly action?: string }
   | { readonly type: "resetBoundary"; readonly item: ConversationResetBoundaryItem };
+
+export const COMPACTING_ROW_ID = "compacting";
+
+export function timelineRowKey(row: TimelineRow): string {
+  if (row.type === "compacting") return COMPACTING_ROW_ID;
+  if (row.type === "compaction" || row.type === "resetBoundary") return row.item.itemId;
+  return row.itemId;
+}
+
+/** Append the in-progress compact divider once, at the end of the transcript. */
+export function withCompactingRow(
+  rows: readonly TimelineRow[],
+  compacting: boolean,
+  action?: string,
+): TimelineRow[] {
+  if (!compacting) return [...rows];
+  if (rows.some((row) => row.type === "compacting")) return [...rows];
+  return [...rows, { type: "compacting", ...(action === undefined || action.length === 0 ? {} : { action }) }];
+}
 
 export function emptyConversationState(generation = 0): ConversationState {
   return {
@@ -152,6 +189,8 @@ export function emptyConversationState(generation = 0): ConversationState {
     notices: [],
     pendingUsers: [],
     resyncRequired: false,
+    userDisplays: {},
+    userThumbs: {},
     openTurnItems: {},
   };
 }
@@ -207,13 +246,28 @@ function appendNotice(state: ConversationState, notice: ConversationNotice): Con
   return { ...state, notices: [...state.notices.slice(-19), notice] };
 }
 
-export function reconcilePendingUsers(
+function clearRendererCompacting(state: ConversationState): ConversationState {
+  if (state.compacting === undefined) return state;
+  const { compacting: _dropped, ...rest } = state;
+  return rest;
+}
+
+export function absorbPendingDisplays(
   pending: readonly PendingUser[],
   items: readonly ConversationItem[],
-): readonly PendingUser[] {
+  existing: { readonly [itemId: string]: ComposerDoc } = {},
+): {
+  readonly pending: readonly PendingUser[];
+  readonly displays: { readonly [itemId: string]: ComposerDoc };
+} {
   const used = new Set<string>();
-  return pending.filter((entry) => {
-    if (entry.status === "failed") return true;
+  const displays: { [itemId: string]: ComposerDoc } = { ...existing };
+  const next: PendingUser[] = [];
+  for (const entry of pending) {
+    if (entry.status === "failed") {
+      next.push(entry);
+      continue;
+    }
     const known = new Set(entry.knownItemIds);
     const match = items.find(
       (item) =>
@@ -223,10 +277,48 @@ export function reconcilePendingUsers(
         !used.has(item.itemId) &&
         messageText(item) === entry.text,
     );
-    if (match === undefined) return true;
+    if (match === undefined) {
+      next.push(entry);
+      continue;
+    }
     used.add(match.itemId);
-    return false;
-  });
+    if (entry.doc !== undefined) displays[match.itemId] = entry.doc;
+  }
+  return { pending: next, displays };
+}
+
+export function reconcilePendingUsers(
+  pending: readonly PendingUser[],
+  items: readonly ConversationItem[],
+): readonly PendingUser[] {
+  return absorbPendingDisplays(pending, items).pending;
+}
+
+function withReconciledPending(
+  state: ConversationState,
+  items: readonly ConversationItem[],
+): Pick<ConversationState, "pendingUsers" | "userDisplays" | "userThumbs"> {
+  const absorbed = absorbPendingDisplays(state.pendingUsers, items, state.userDisplays);
+  return {
+    pendingUsers: absorbed.pending,
+    userDisplays: absorbed.displays,
+    userThumbs: mergeThumbMaps(state.userThumbs, thumbsFromDisplays(absorbed.displays)),
+  };
+}
+
+function withUserDisplay(
+  row: Extract<TimelineRow, { type: "user" }>,
+  displays: { readonly [itemId: string]: ComposerDoc },
+  thumbs: UserThumbMap = {},
+): Extract<TimelineRow, { type: "user" }> {
+  const doc = row.doc ?? displays[row.itemId];
+  const rowThumbs = row.thumbs ?? thumbs[row.itemId];
+  if (doc === undefined && rowThumbs === undefined) return row;
+  return {
+    ...row,
+    ...(doc === undefined ? {} : { doc }),
+    ...(rowThumbs === undefined || rowThumbs.length === 0 ? {} : { thumbs: rowThumbs }),
+  };
 }
 
 export function hydratePage(
@@ -247,7 +339,7 @@ export function hydratePage(
       hasMoreBefore: page.hasMoreBefore,
       hydrateStatus: "ready",
       resyncRequired: false,
-      pendingUsers: reconcilePendingUsers(state.pendingUsers, items),
+      ...withReconciledPending(state, items),
       ...(page.olderCursor === undefined ? {} : { olderCursor: page.olderCursor }),
     };
   }
@@ -278,7 +370,7 @@ export function hydratePage(
     headCursor: page.headCursor,
     hydrateStatus: "ready",
     resyncRequired: false,
-    pendingUsers: reconcilePendingUsers(state.pendingUsers, page.items),
+    ...withReconciledPending(state, page.items),
     ...(page.olderCursor === undefined ? {} : { olderCursor: page.olderCursor }),
   };
 }
@@ -319,23 +411,20 @@ export function applyLiveEvent(
     case "conversation.turn.completed":
       return closeTurn(withSeq, event.turnId);
     case "conversation.compaction.started":
-      return appendNotice(withSeq, {
-        id: `compaction-start-${withSeq.notices.length}`,
-        level: "info",
-        message: "正在同步压缩摘要",
-      });
+      return { ...withSeq, compacting: { action: event.action } };
     case "conversation.compaction.completed": {
+      const cleared = clearRendererCompacting(withSeq);
       if (event.item) {
-        return { ...withSeq, items: upsertItem(withSeq.items, event.item) };
+        return { ...cleared, items: upsertItem(cleared.items, event.item) };
       }
       if (event.aborted) {
-        return appendNotice(withSeq, {
-          id: `compaction-abort-${withSeq.notices.length}`,
+        return appendNotice(cleared, {
+          id: `compaction-abort-${cleared.notices.length}`,
           level: "warning",
           message: "上下文压缩已中止",
         });
       }
-      return withSeq;
+      return cleared;
     }
     case "conversation.notice":
       return appendNotice(withSeq, {
@@ -406,18 +495,10 @@ function deltaMessage(
 
 /**
  * Memory guard for the live streaming buffer, mirroring the client reducer:
- * UTF-16 unit cap as a cheap upper bound; the persisted item that replaces the
- * buffer on completion carries the exact byte-bounded text.
+ * UTF-8 byte cap, never splitting a codepoint.
  */
 function appendBoundedText(existing: string, delta: string): { readonly text: string; readonly truncated: boolean } {
-  const max = CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES;
-  const room = max - existing.length;
-  if (room <= 0) return { text: existing, truncated: true };
-  if (delta.length <= room) return { text: existing + delta, truncated: false };
-  let end = room;
-  const lead = delta.charCodeAt(end - 1);
-  if (lead >= 0xd800 && lead <= 0xdbff) end -= 1;
-  return { text: existing + delta.slice(0, end), truncated: true };
+  return truncateUtf8(existing + delta, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 }
 
 function completeMessage(
@@ -432,7 +513,7 @@ function completeMessage(
     items,
     liveMessages: dropped.liveMessages,
     liveOrder: dropped.liveOrder,
-    pendingUsers: reconcilePendingUsers(state.pendingUsers, items),
+    ...withReconciledPending(state, items),
     openTurnItems: { ...state.openTurnItems, [event.item.itemId]: event.turnId },
   };
 }
@@ -447,12 +528,23 @@ function closeTurn(state: ConversationState, turnId: string): ConversationState 
   return { ...state, openTurnItems };
 }
 
+function ownerMessageId(state: ConversationState, toolCallId: string): string | undefined {
+  for (const item of state.items) {
+    if (item.kind !== "message") continue;
+    for (const block of item.content) {
+      if (block.type === "toolCall" && block.toolCallId === toolCallId) return item.itemId;
+    }
+  }
+  return undefined;
+}
+
 function startTool(
   state: ConversationState,
   event: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }>,
 ): ConversationState {
   const existing = state.liveTools[event.toolCallId];
-  if (existing?.result) return state;
+  if (existing?.status === "aborted") return state;
+  const keepStream = existing !== undefined && existing.result === undefined;
   return {
     ...state,
     liveTools: {
@@ -464,7 +556,8 @@ function startTool(
         toolName: event.toolName,
         status: "running",
         ...(event.arguments === undefined ? {} : { arguments: event.arguments }),
-        ...(existing?.output === undefined ? {} : { output: existing.output }),
+        ...(keepStream && existing.output !== undefined ? { output: existing.output } : {}),
+        ...(keepStream && existing.truncated === true ? { truncated: true } : {}),
       },
     },
   };
@@ -480,7 +573,7 @@ function updateTool(
   const output = `${previous}${event.output ?? ""}`;
   const next: LiveTool = {
     toolCallId: event.toolCallId,
-    messageId: existing?.messageId ?? "",
+    messageId: existing?.messageId || ownerMessageId(state, event.toolCallId) || "",
     turnId: event.turnId,
     toolName: existing?.toolName ?? "tool",
     status: "running",
@@ -499,7 +592,7 @@ function completeTool(
   const status: ToolStatus = event.result.isError ? "failed" : "succeeded";
   const next: LiveTool = {
     toolCallId: event.toolCallId,
-    messageId: existing?.messageId ?? "",
+    messageId: existing?.messageId || ownerMessageId(state, event.toolCallId) || "",
     turnId: event.turnId,
     toolName: event.result.toolName ?? existing?.toolName ?? "tool",
     status,
@@ -675,6 +768,7 @@ function pendingRow(entry: PendingUser): TimelineRow {
     pending: entry.status,
     requestId: entry.requestId,
     ...(entry.error === undefined ? {} : { error: entry.error }),
+    ...(entry.doc === undefined ? {} : { doc: entry.doc }),
   };
 }
 
@@ -796,11 +890,11 @@ function presentAssistantTurns(rows: readonly TimelineRow[]): TimelineRow[] {
     }
     flushProcess();
 
-    const last = merged[merged.length - 1];
+    const replyRow = [...merged].reverse().find((row) => hasVisibleAssistantText(row));
     for (const row of merged) {
       presented.push({
         ...row,
-        presentation: row === last && hasVisibleAssistantText(row) ? "reply" : "process",
+        presentation: row === replyRow ? "reply" : "process",
       });
     }
     assistantRun = [];
@@ -831,12 +925,12 @@ export function buildTimeline(state: ConversationState): TimelineRow[] {
       continue;
     }
     if (item.role === "user") {
-      rows.push({
+      rows.push(withUserDisplay({
         type: "user",
         itemId: item.itemId,
         createdAt: item.createdAt,
         text: messageText(item),
-      });
+      }, state.userDisplays, state.userThumbs));
       continue;
     }
     const row = rowFromItem(item, state.liveTools, state.openTurnItems[item.itemId] !== undefined);
@@ -849,12 +943,12 @@ export function buildTimeline(state: ConversationState): TimelineRow[] {
     if (live === undefined) continue;
     const tools = Object.values(state.liveTools).filter((tool) => tool.messageId === messageId);
     if (live.role === "user") {
-      rows.push({
+      rows.push(withUserDisplay({
         type: "user",
         itemId: live.messageId,
         createdAt: live.createdAt,
         text: live.blocks.map((block) => block.text).join("\n"),
-      });
+      }, state.userDisplays, state.userThumbs));
       continue;
     }
     rows.push({
@@ -869,7 +963,9 @@ export function buildTimeline(state: ConversationState): TimelineRow[] {
   for (const pending of state.pendingUsers) {
     rows.push(pendingRow(pending));
   }
-  return presentAssistantTurns(rows);
+  const presented = presentAssistantTurns(rows);
+  if (state.compacting === undefined) return presented;
+  return withCompactingRow(presented, true, state.compacting.action);
 }
 
 export function trackPending(state: ConversationState, pending: PendingUser): ConversationState {
@@ -920,13 +1016,21 @@ function liveToolFromClient(tool: ConversationLiveTool): LiveTool {
   };
 }
 
+function contentIndexOfBlockId(blockId: string): number {
+  const match = /(\d+)$/.exec(blockId);
+  if (match === null) return Number.MAX_SAFE_INTEGER;
+  return Number(match[1]);
+}
+
 function liveMessageFromClient(message: ConversationLiveMessage): LiveMessage {
   return {
     messageId: message.messageId,
     turnId: message.turnId,
     role: message.role,
     createdAt: message.createdAt,
-    blocks: Object.values(message.blocks),
+    blocks: Object.values(message.blocks).slice().sort(
+      (left, right) => contentIndexOfBlockId(left.blockId) - contentIndexOfBlockId(right.blockId),
+    ),
     aborted: message.aborted,
   };
 }
@@ -939,6 +1043,8 @@ export function projectClientConversation(
     hydrateStatus?: HydrateStatus;
     error?: { readonly code: string; readonly message: string };
     unavailableReason?: string;
+    userDisplays?: { readonly [itemId: string]: ComposerDoc };
+    userThumbs?: UserThumbMap;
   } = {},
 ): ConversationState {
   const items = persistedItemsOf(convo);
@@ -979,10 +1085,13 @@ export function projectClientConversation(
     })),
     pendingUsers,
     resyncRequired: convo.resyncRequired,
+    userDisplays: extras.userDisplays ?? {},
+    userThumbs: extras.userThumbs ?? {},
     openTurnItems: convo.openTurnItems,
     ...(convo.olderCursor === undefined ? {} : { olderCursor: convo.olderCursor }),
     ...(convo.headCursor === undefined ? {} : { headCursor: convo.headCursor }),
     ...(convo.lastEventSeq === undefined ? {} : { lastEventSeq: convo.lastEventSeq }),
+    ...(convo.compacting === undefined ? {} : { compacting: convo.compacting }),
     ...(extras.error === undefined ? convo.error === undefined ? {} : { error: convo.error } : { error: extras.error }),
     ...(extras.unavailableReason === undefined ? {} : { unavailableReason: extras.unavailableReason }),
   };
@@ -1050,13 +1159,52 @@ function liveToolMap(tools: readonly LiveTool[]): ConversationState["liveTools"]
   return next;
 }
 
+function appendOrphanProviderErrors(
+  rows: TimelineRow[],
+  itemErrors: Readonly<Record<string, ConversationMessageError>>,
+): void {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (row.type === "user" || row.type === "assistant") seen.add(row.itemId);
+    else if (row.type === "compacting") seen.add(COMPACTING_ROW_ID);
+    else seen.add(row.item.itemId);
+  }
+  for (const [itemId, error] of Object.entries(itemErrors)) {
+    if (error === undefined || seen.has(itemId)) continue;
+    const previous = rows.at(-1);
+    const createdAt =
+      previous === undefined
+        ? ""
+        : previous.type === "user" || previous.type === "assistant"
+          ? previous.createdAt
+          : previous.type === "compacting"
+            ? ""
+            : previous.item.createdAt;
+    rows.push({
+      type: "assistant",
+      itemId,
+      createdAt,
+      segments: [],
+      status: "error",
+      error,
+    });
+  }
+}
+
 export function rowsFromConversationViews(
   views: readonly ConversationView[],
   pendingUsers: readonly PendingUser[] = [],
   itemErrors: Readonly<Record<string, ConversationMessageError>> = {},
+  userDisplays: { readonly [itemId: string]: ComposerDoc } = {},
+  userThumbs: UserThumbMap = {},
 ): TimelineRow[] {
   const rows: TimelineRow[] = [];
+  let compactingAction: string | undefined;
   for (const view of views) {
+    if (view.kind === "compacting") {
+      compactingAction = view.action;
+      continue;
+    }
     if (view.kind === "item") {
       const row = rowFromItem(
         view.item,
@@ -1065,29 +1213,34 @@ export function rowsFromConversationViews(
         itemErrors[view.item.itemId],
       );
       if (row.type === "assistant" && row.segments.length === 0 && row.error === undefined) continue;
-      rows.push(row);
+      rows.push(row.type === "user" ? withUserDisplay(row, userDisplays, userThumbs) : row);
       continue;
     }
     const live = liveMessageFromClient(view.message);
     const tools = view.tools.map(liveToolFromClient);
     if (live.role === "user") {
-      rows.push({
+      rows.push(withUserDisplay({
         type: "user",
         itemId: live.messageId,
         createdAt: live.createdAt,
         text: live.blocks.map((block) => block.text).join("\n"),
-      });
+      }, userDisplays, userThumbs));
       continue;
     }
+    const error = itemErrors[live.messageId];
     rows.push({
       type: "assistant",
       itemId: live.messageId,
       createdAt: live.createdAt,
       segments: segmentsFromLive(live, tools),
-      status: view.message.aborted ? "aborted" : view.message.completed ? "completed" : "streaming",
-      ...(!view.message.aborted ? { turnOpen: true } : {}),
+      status: error !== undefined ? "error" : view.message.aborted ? "aborted" : view.message.completed ? "completed" : "streaming",
+      ...(!view.message.aborted && error === undefined ? { turnOpen: true } : {}),
+      ...(error === undefined ? {} : { error }),
     });
   }
   for (const pending of pendingUsers) rows.push(pendingRow(pending));
-  return presentAssistantTurns(rows);
+  appendOrphanProviderErrors(rows, itemErrors);
+  const presented = presentAssistantTurns(rows);
+  if (compactingAction === undefined) return presented;
+  return withCompactingRow(presented, true, compactingAction);
 }

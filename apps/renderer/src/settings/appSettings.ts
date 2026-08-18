@@ -182,6 +182,16 @@ export interface LayoutMemory {
   readonly explorerOpen: boolean;
   readonly panelWidth: number;
   readonly bottomHeight: number;
+  /** BTW 浮窗：placement、是否打开与几何。字段扁平，与本结构其他项一致。 */
+  readonly btwOpen: boolean;
+  readonly btwPlacement: string;
+  readonly btwMinimized: boolean;
+  readonly btwX: number;
+  readonly btwY: number;
+  readonly btwW: number;
+  readonly btwH: number;
+  readonly btwCapX: number;
+  readonly btwCapY: number;
 }
 
 const LAYOUT_MEMORY_PREFIX = "omp.layoutMemory.";
@@ -208,6 +218,15 @@ export function readLayoutMemory(scope: string): Partial<LayoutMemory> | undefin
       ...(typeof value.explorerOpen === "boolean" ? { explorerOpen: value.explorerOpen } : {}),
       ...(typeof value.panelWidth === "number" && Number.isFinite(value.panelWidth) ? { panelWidth: value.panelWidth } : {}),
       ...(typeof value.bottomHeight === "number" && Number.isFinite(value.bottomHeight) ? { bottomHeight: value.bottomHeight } : {}),
+      ...(typeof value.btwOpen === "boolean" ? { btwOpen: value.btwOpen } : {}),
+      ...(typeof value.btwPlacement === "string" ? { btwPlacement: value.btwPlacement } : {}),
+      ...(typeof value.btwMinimized === "boolean" ? { btwMinimized: value.btwMinimized } : {}),
+      ...(typeof value.btwX === "number" && Number.isFinite(value.btwX) ? { btwX: value.btwX } : {}),
+      ...(typeof value.btwY === "number" && Number.isFinite(value.btwY) ? { btwY: value.btwY } : {}),
+      ...(typeof value.btwW === "number" && Number.isFinite(value.btwW) ? { btwW: value.btwW } : {}),
+      ...(typeof value.btwH === "number" && Number.isFinite(value.btwH) ? { btwH: value.btwH } : {}),
+      ...(typeof value.btwCapX === "number" && Number.isFinite(value.btwCapX) ? { btwCapX: value.btwCapX } : {}),
+      ...(typeof value.btwCapY === "number" && Number.isFinite(value.btwCapY) ? { btwCapY: value.btwCapY } : {}),
     };
     return Object.keys(memory).length > 0 ? memory as Partial<LayoutMemory> : undefined;
   } catch {

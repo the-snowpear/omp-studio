@@ -21,8 +21,12 @@ import type {
   ModelRoleStorage,
   StudioClient,
 } from "@omp-studio/client-contract";
-import { MODEL_CONFIG_THINKING_EFFORTS } from "@omp-studio/client-contract";
-import { clampRoleThinking, roleThinkingControl } from "@omp-studio/client-contract";
+import {
+  clampRoleThinking,
+  isModelEnvConfigName,
+  MODEL_CONFIG_THINKING_EFFORTS,
+  roleThinkingControl,
+} from "@omp-studio/client-contract";
 import { Brand, hasBrand } from "./brands";
 import { Icon } from "./icons";
 import { ToastHost } from "./ToastHost";
@@ -276,10 +280,10 @@ function flattenModelGroups(
 export function ModelPickCaps({ model }: { model: ModelPickItem }) {
   return (
     <span className="rms-option-caps">
-      {model.reasoning ? <span className="chip purple xs chip-icon" title="思考"><Icon name="brain" extra="sm" /></span> : null}
-      {model.image ? <span className="chip blue xs chip-icon" title="多模态"><Icon name="image" extra="sm" /></span> : null}
-      {model.tools ? <span className="chip gray xs chip-icon" title="工具"><Icon name="wrench" extra="sm" /></span> : null}
-      <span className="chip gray xs" title="上下文窗口">{fmtK(model.contextWindow)}</span>
+      {model.reasoning ? <span className="chip purple xs chip-icon" data-tip="思考"><Icon name="brain" extra="sm" /></span> : null}
+      {model.image ? <span className="chip blue xs chip-icon" data-tip="多模态"><Icon name="image" extra="sm" /></span> : null}
+      {model.tools ? <span className="chip gray xs chip-icon" data-tip="工具"><Icon name="wrench" extra="sm" /></span> : null}
+      <span className="chip gray xs" data-tip="上下文">{fmtK(model.contextWindow)}</span>
     </span>
   );
 }
@@ -426,7 +430,7 @@ function ThinkingEffortSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label="thinking effort"
-        title={selected.length > 0 ? selected.join(", ") : "thinking effort"}
+        data-tip={selected.length > 0 ? selected.join(", ") : "思考"}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
@@ -465,6 +469,114 @@ function ThinkingEffortSelect({
                   >
                     <span className={`pick-check${on ? " on" : ""}`}>{on ? <Icon name="check" extra="sm" /> : null}</span>
                     <span className="pick-copy"><b className="mono">{id}</b></span>
+                  </button>
+                );
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
+function AuthTypeSelect({
+  value,
+  onChange,
+}: {
+  value: ModelAuthType;
+  onChange: (next: ModelAuthType) => void;
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState({ top: 0, left: 0, width: 280 });
+  const selected = MODEL_AUTH_TYPES.find((item) => item.id === value) ?? MODEL_AUTH_TYPES[1];
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const next = thinkingMenuAnchor(btnRef.current, menuRef.current);
+    setAnchor({ ...next, width: Math.max(next.width, 280) });
+  }, [open, value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    };
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (btnRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+    };
+  }, [open]);
+
+  const pick = (id: ModelAuthType) => {
+    onChange(id);
+    setOpen(false);
+  };
+
+  return (
+    <div className="mc-select" style={{ maxWidth: 280 }}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`select mc-select-btn${open ? " is-open" : ""}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="认证方式"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (open) {
+            setOpen(false);
+            return;
+          }
+          if (btnRef.current) {
+            const next = thinkingMenuAnchor(btnRef.current);
+            setAnchor({ ...next, width: Math.max(next.width, 280) });
+          }
+          setOpen(true);
+        }}
+      >
+        <span>{selected?.label ?? value}</span>
+        <Icon name={open ? "chevron-u" : "chevron-d"} extra="sm" />
+      </button>
+      {open
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className="menu mc-select-menu"
+              role="listbox"
+              aria-label="认证方式"
+              style={{ top: anchor.top, left: anchor.left, width: anchor.width }}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              {MODEL_AUTH_TYPES.map((item) => {
+                const on = item.id === value;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="option"
+                    aria-selected={on}
+                    className={`menu-item mc-select-option${on ? " is-on" : ""}`}
+                    onClick={() => pick(item.id)}
+                  >
+                    <span className="mc-select-copy">
+                      <b>{item.label}</b>
+                      <span>{item.hint}</span>
+                    </span>
+                    {on ? <Icon name="check" extra="sm" /> : null}
                   </button>
                 );
               })}
@@ -744,9 +856,9 @@ function ModelCaps({ model }: { model: ModelCatalogEntry }) {
     <span className="pm-meta">
       <span className="chip gray xs">{fmtK(model.contextWindow)} ctx</span>
       {model.maxTokens ? <span className="chip gray xs">{fmtK(model.maxTokens)} out</span> : null}
-      {model.image ? <span className="chip blue xs chip-icon" title="支持图片输入"><Icon name="image" extra="sm" /></span> : null}
-      {model.reasoning ? <span className="chip purple xs chip-icon" title="Reasoning"><Icon name="brain" extra="sm" /></span> : null}
-      {model.tools ? <span className="chip gray xs chip-icon" title="Tools"><Icon name="wrench" extra="sm" /></span> : null}
+      {model.image ? <span className="chip blue xs chip-icon" data-tip="图片"><Icon name="image" extra="sm" /></span> : null}
+      {model.reasoning ? <span className="chip purple xs chip-icon" data-tip="思考"><Icon name="brain" extra="sm" /></span> : null}
+      {model.tools ? <span className="chip gray xs chip-icon" data-tip="工具"><Icon name="wrench" extra="sm" /></span> : null}
       {model.cost?.input !== undefined || model.cost?.output !== undefined
         ? <span className="chip gray xs">${model.cost.input ?? "—"}/${model.cost.output ?? "—"}</span>
         : null}
@@ -778,7 +890,7 @@ function draftFromProvider(provider: ModelProviderRecord): Draft {
     apiKey: provider.auth.type === "api-key" && provider.auth.apiKey && !provider.auth.apiKey.startsWith("!")
       ? provider.auth.apiKey
       : "",
-    envName: `${provider.id.replace(/-/g, "_").toUpperCase()}_API_KEY`,
+    envName: provider.auth.envName ?? `${provider.id.replace(/-/g, "_").toUpperCase()}_API_KEY`,
     command: provider.auth.type === "command" && provider.auth.apiKey ? provider.auth.apiKey : "",
     discoveryType: provider.discovery?.type ?? "",
     ...(provider.discovery?.timeoutMs === undefined ? {} : { discoveryTimeoutMs: provider.discovery.timeoutMs }),
@@ -1031,6 +1143,30 @@ function providerUpsertFromDraft(editor: Draft, contentHash?: string): ModelProv
   };
 }
 
+function editorTestSecret(editor: Draft): string | undefined {
+  if (editor.authType === "api-key") return editor.apiKey.trim() || undefined;
+  if (editor.authType === "env") return editor.envName.trim() || undefined;
+  if (editor.authType === "command") return editor.command.trim() || undefined;
+  return undefined;
+}
+
+function withPreviewLogin(record: ModelProviderRecord, current: ModelConfigReadModel): ModelProviderRecord {
+  if (record.auth.type !== "oauth") return record;
+  const login = current.loginProviders.find((item) => item.id === record.id);
+  const existing = current.providers.find((item) => item.id === record.id);
+  if (!login?.authenticated && !existing?.auth.hasSecret) return record;
+  return {
+    ...record,
+    status: record.enabled ? "available" : record.status,
+    statusDetail: "已登录 · 演示账号",
+    auth: {
+      ...record.auth,
+      hasSecret: true,
+      account: existing?.auth.account ?? "demo@local",
+    },
+  };
+}
+
 function previewProviderFromDraft(editor: Draft): ModelProviderRecord {
   return {
     id: editor.id.trim(),
@@ -1046,8 +1182,16 @@ function previewProviderFromDraft(editor: Draft): ModelProviderRecord {
     ...(editor.note ? { note: editor.note } : {}),
     auth: {
       type: editor.authType,
-      hasSecret: Boolean(editor.apiKey || editor.command),
-      ...(editor.apiKey ? { apiKey: editor.apiKey } : {}),
+      hasSecret: editor.authType === "none"
+        ? false
+        : editor.authType === "env"
+          ? Boolean(editor.envName.trim())
+          : Boolean(editor.apiKey || editor.command),
+      ...(editor.authType === "api-key" && editor.apiKey ? { apiKey: editor.apiKey } : {}),
+      ...(editor.authType === "command" && editor.command
+        ? { apiKey: editor.command.startsWith("!") ? editor.command : `!${editor.command}` }
+        : {}),
+      ...(editor.authType === "env" && editor.envName.trim() ? { envName: editor.envName.trim() } : {}),
     },
     ...(editor.discoveryType ? { discovery: { type: editor.discoveryType } } : {}),
     ...(Object.keys(parseHeaders(editor.headersText)).length > 0 ? { headers: parseHeaders(editor.headersText) } : {}),
@@ -1285,7 +1429,7 @@ function RoleAssignControl({
         ref={btnRef}
         type="button"
         className={`icon-btn small role-assign-btn${open ? " is-open" : ""}`}
-        title="选择角色"
+        data-tip="角色"
         aria-label="选择角色"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -1503,7 +1647,7 @@ function RoleModelPicker({
         aria-expanded={open}
         aria-controls={listId}
         aria-label="主模型"
-        title={value || undefined}
+        data-tip={value || undefined}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
@@ -1575,7 +1719,6 @@ function RoleModelPicker({
                             aria-selected={on}
                             data-active={isActive ? "true" : undefined}
                             className={`menu-item rms-option${on ? " is-on" : ""}${isActive ? " is-active" : ""}`}
-                            title={model.selector}
                             onMouseDown={(event) => event.preventDefault()}
                             onClick={() => pick(model.selector)}
                           >
@@ -2158,6 +2301,14 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       toast("名称和 Provider ID 不能为空");
       return;
     }
+    if (editorState.authType === "env" && editorState.envName.trim() && !isModelEnvConfigName(editorState.envName.trim())) {
+      toast("环境变量名只能使用字母、数字和下划线，例如 OPENAI_API_KEY");
+      return;
+    }
+    if (editorState.authType === "command" && !editorState.command.trim() && !editExisting) {
+      toast("请填写获取 Secret 的命令");
+      return;
+    }
     const roleUpdates = rolePrimaryUpdates(roles, roleAssignDraft);
     if (modelsYmlDirty) {
       const saved = await persistModelsYml(modelsYmlValue, true, true);
@@ -2170,9 +2321,10 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     if (preview) {
       const record = previewProviderFromDraft(editorState);
       mutateLocal((current) => {
+        const saved = withPreviewLogin(record, current);
         let next: ModelConfigReadModel = {
           ...current,
-          providers: [...current.providers.filter((item) => item.id !== record.id), record],
+          providers: [...current.providers.filter((item) => item.id !== saved.id), saved],
         };
         if (roleUpdates.length > 0) next = withRolePrimaryUpdates(next, roleUpdates);
         return next;
@@ -2209,10 +2361,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     }
     if (preview) {
       const record = previewProviderFromDraft(draft);
-      mutateLocal((current) => ({
-        ...current,
-        providers: [...current.providers.filter((item) => item.id !== record.id), record],
-      }));
+      mutateLocal((current) => {
+        const saved = withPreviewLogin(record, current);
+        return {
+          ...current,
+          providers: [...current.providers.filter((item) => item.id !== saved.id), saved],
+        };
+      });
       toast(`演示：${okMessage}，未写入 models.yml`);
       return;
     }
@@ -2430,8 +2585,35 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   };
 
   const startLogin = async (providerId: string) => {
+    if (!providerId.trim()) {
+      toast("请先填写 Provider ID");
+      return;
+    }
     if (preview) {
-      toast("演示：不会发起 Host 登录");
+      mutateLocal((current) => {
+        const known = current.loginProviders.some((item) => item.id === providerId);
+        const loginProviders = known
+          ? current.loginProviders.map((item) => item.id === providerId ? { ...item, authenticated: true } : item)
+          : [...current.loginProviders, {
+              id: providerId,
+              name: current.providers.find((item) => item.id === providerId)?.name ?? providerId,
+              available: true,
+              authenticated: true,
+            }];
+        return {
+          ...current,
+          loginProviders,
+          providers: current.providers.map((item) => item.id === providerId
+            ? {
+                ...item,
+                status: item.enabled ? "available" : item.status,
+                statusDetail: "已登录 · 演示账号",
+                auth: { ...item.auth, type: "oauth", hasSecret: true, account: item.auth.account ?? "demo@local" },
+              }
+            : item),
+        };
+      });
+      toast("演示：已模拟登录，未写入 Host");
       return;
     }
     if (!data?.loginAvailable) {
@@ -2455,6 +2637,11 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       mutateLocal((current) => ({
         ...current,
         loginProviders: current.loginProviders.map((item) => item.id === providerId ? { ...item, authenticated: false } : item),
+        providers: current.providers.map((item) => {
+          if (item.id !== providerId) return item;
+          const { account: _dropped, ...auth } = item.auth;
+          return { ...item, statusDetail: "尚未登录", auth: { ...auth, hasSecret: false } };
+        }),
       }));
       toast("演示：已登出，未写入 Host");
       return;
@@ -2866,7 +3053,16 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                   <div className="field"><label htmlFor="f-name">供应商名称</label><input className="input" id="f-name" value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} /></div>
                   <div className="field">
                     <label htmlFor="f-id">Provider ID</label>
-                    <input className="input mono" id="f-id" value={editor.id} readOnly={editExisting} onChange={(event) => setEditor({ ...editor, id: event.target.value })} />
+                    <input className="input mono" id="f-id" value={editor.id} readOnly={editExisting} onChange={(event) => {
+                      const id = event.target.value;
+                      const prevConv = `${editor.id.replace(/-/g, "_").toUpperCase()}_API_KEY`;
+                      const nextConv = `${id.replace(/-/g, "_").toUpperCase()}_API_KEY`;
+                      setEditor({
+                        ...editor,
+                        id,
+                        envName: !editor.envName.trim() || editor.envName === prevConv ? nextConv : editor.envName,
+                      });
+                    }} />
                     <span className="desc">Model Selector 形如 <span className="chip-code">{editor.id || "provider-id"}/model-id</span></span>
                   </div>
                   <div className="field"><label htmlFor="f-site">官网链接</label><input className="input mono" id="f-site" value={editor.website} onChange={(event) => setEditor({ ...editor, website: event.target.value })} /></div>
@@ -2876,26 +3072,44 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 <div className="mp-sec-divider" aria-hidden="true" />
 
                 <h3>认证</h3>
-                <select className="select" style={{ maxWidth: 280 }} value={editor.authType} onChange={(event) => setEditor({ ...editor, authType: event.target.value as ModelAuthType })}>
-                  {MODEL_AUTH_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-                </select>
+                <AuthTypeSelect
+                  value={editor.authType}
+                  onChange={(authType) => {
+                    const envName = editor.envName.trim()
+                      || `${(editor.id || "provider").replace(/-/g, "_").toUpperCase()}_API_KEY`;
+                    setEditor({ ...editor, authType, envName });
+                  }}
+                />
                 <div className="auth-box">
-                  {editor.authType === "oauth" ? (
-                    <div className="auth-status">
-                      <Icon name="key" extra="sm" />
-                      <span>
-                        {data?.loginProviders.find((item) => item.id === editor.id)?.authenticated
-                          ? "已登录本机 OAuth 凭据。"
-                          : data?.loginAvailable ? "可尝试应用内登录。" : "请用终端 `omp login`。"}
-                      </span>
-                      <button type="button" className="btn small primary" disabled={busy} onClick={() => void startLogin(editor.id)}>
-                        {data?.loginProviders.find((item) => item.id === editor.id)?.authenticated ? "重新登录" : "登录"}
-                      </button>
-                      {data?.loginProviders.find((item) => item.id === editor.id)?.authenticated ? (
-                        <button type="button" className="btn small outline" disabled={busy} onClick={() => void logoutProvider(editor.id)}>登出</button>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  {editor.authType === "oauth" ? (() => {
+                    const login = data?.loginProviders.find((item) => item.id === editor.id);
+                    const authed = Boolean(login?.authenticated);
+                    const account = data?.providers.find((item) => item.id === editor.id)?.auth.account;
+                    return (
+                      <>
+                        <div className="auth-status">
+                          <Icon name={authed ? "check" : data?.loginAvailable ? "key" : "info"} extra="sm" />
+                          <span>
+                            {authed
+                              ? <>已登录{account ? <> <b>{account}</b></> : "本机 OAuth 凭据"}。</>
+                              : data?.loginAvailable
+                                ? "尚未登录 — 可在应用内完成 OAuth 授权。"
+                                : <>请用终端 <span className="chip-code">omp login {editor.id || "provider"}</span>。</>}
+                          </span>
+                          <span className={`chip ${authed ? "green" : "gray"} xs`}>{authed ? "凭据有效" : "未登录"}</span>
+                        </div>
+                        <div className="auth-actions">
+                          <button type="button" className={`btn small ${authed ? "outline" : "primary"}`} disabled={busy} onClick={() => void startLogin(editor.id)}>
+                            <Icon name="key" extra="sm" />
+                            {authed ? "重新登录" : "登录"}
+                          </button>
+                          {authed ? (
+                            <button type="button" className="btn small outline" disabled={busy} onClick={() => void logoutProvider(editor.id)}>登出</button>
+                          ) : null}
+                        </div>
+                      </>
+                    );
+                  })() : null}
                   {editor.authType === "api-key" ? (
                     <div className="field">
                       <label htmlFor="f-key">API Key</label>
@@ -2914,25 +3128,56 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           className="pwd-toggle"
                           aria-label={showKey ? "隐藏 API Key" : "显示 API Key"}
                           aria-pressed={showKey}
-                          title={showKey ? "隐藏 API Key" : "显示 API Key"}
+                          data-tip={showKey ? "隐藏" : "显示"}
                           onClick={() => setShowKey((value) => !value)}
                         >
                           <Icon name={showKey ? "eye-off" : "eye"} extra="sm" />
                         </button>
                       </div>
+                      <span className="desc">{editor.apiKey ? "将写入 models.yml 的 apiKey" : "尚未配置凭据 · 留空保存则保留已有密钥"}</span>
                     </div>
                   ) : null}
-                  {editor.authType === "env" ? (
-                    <div className="field">
-                      <label htmlFor="f-env">Environment Variable Name</label>
-                      <input className="input mono" id="f-env" value={editor.envName} onChange={(event) => setEditor({ ...editor, envName: event.target.value })} />
-                      <span className="desc">OMP 启动时从环境读取，不把密钥写入 models.yml</span>
-                    </div>
-                  ) : null}
+                  {editor.authType === "env" ? (() => {
+                    const name = editor.envName.trim();
+                    const valid = !name || isModelEnvConfigName(name);
+                    const saved = data?.providers.find((item) => item.id === editor.id);
+                    const detected = saved?.auth.type === "env" && saved.auth.envName === name && saved.auth.hasSecret;
+                    return (
+                      <div className="field">
+                        <label htmlFor="f-env">Environment Variable Name</label>
+                        <input
+                          className="input mono"
+                          id="f-env"
+                          value={editor.envName}
+                          placeholder="如 OPENAI_API_KEY / ANTHROPIC_API_KEY"
+                          aria-invalid={!valid}
+                          onChange={(event) => setEditor({ ...editor, envName: event.target.value })}
+                        />
+                        <span className="desc">
+                          {!valid
+                            ? "环境变量名只能使用字母、数字和下划线，例如 OPENAI_API_KEY"
+                            : name
+                              ? detected
+                                ? <span className="auth-env-ok">已在本机环境中检测到 {name}</span>
+                                : preview
+                                  ? `演示：保存后写入 apiKey: ${name}，不把密钥写入配置`
+                                  : `OMP 把 apiKey 当作环境变量名读取。保存后按本机环境检测 ${name}`
+                              : "OMP 启动时从环境变量读取，不把密钥写入 models.yml"}
+                        </span>
+                      </div>
+                    );
+                  })() : null}
                   {editor.authType === "command" ? (
                     <div className="field">
                       <label htmlFor="f-cmd">获取 Secret 的命令</label>
                       <input className="input mono" id="f-cmd" value={editor.command} placeholder="!op read op://dev/openai/api-key" onChange={(event) => setEditor({ ...editor, command: event.target.value })} />
+                      <span className="desc">写入 models.yml 的 <span className="chip-code">apiKey: !command</span>。OMP 执行该命令取凭据（1Password CLI、pass 等），Secret 不落盘</span>
+                    </div>
+                  ) : null}
+                  {editor.authType === "none" ? (
+                    <div className="auth-status" style={{ marginBottom: 0 }}>
+                      <Icon name="check" extra="sm" />
+                      <span>无需认证 — 适用于 Ollama、LM Studio、llama.cpp 等本地服务。保存为 <span className="chip-code">auth: none</span>。</span>
                     </div>
                   ) : null}
                 </div>
@@ -2977,7 +3222,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           <span className="mono">{model.id}</span>
                           <span className="muted small">{model.name}</span>
                           <span className="spacer" />
-                          <button type="button" className="icon-btn small" title="编辑 Override" onClick={() => setModelEdit({ kind: "override", modelId: model.id, draft: blankOverrideForm(editor.modelOverrides[model.id]) })}><Icon name="pencil" extra="sm" /></button>
+                          <button type="button" className="icon-btn small" data-tip="编辑" onClick={() => setModelEdit({ kind: "override", modelId: model.id, draft: blankOverrideForm(editor.modelOverrides[model.id]) })}><Icon name="pencil" extra="sm" /></button>
                           <RoleAssignControl
                             selector={sel}
                             open={assignPopSel === sel}
@@ -3010,7 +3255,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                     <div className="kv-row">
                       <span className="k">探测 / 扫描</span>
                       <span className="v" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button type="button" className="btn small outline" disabled={busy || probing} onClick={() => void onProbe(editor.id, editor.endpointUrl || undefined, editor.apiKey || undefined, editor.discoveryType || undefined, editor.discoveryTimeoutMs)}>
+                        <button type="button" className="btn small outline" disabled={busy || probing} onClick={() => void onProbe(editor.id, editor.endpointUrl || undefined, editorTestSecret(editor), editor.discoveryType || undefined, editor.discoveryTimeoutMs)}>
                           {probing ? "探测中…" : "探测"}
                         </button>
                         <button type="button" className="btn small outline" disabled={busy} onClick={() => void refreshDiscovery()}>重新扫描</button>
@@ -3032,7 +3277,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                             <span className="mono">{model.id || "新模型"}</span>
                             <span className="muted small">{model.name}</span>
                             <span className="spacer" />
-                            <button type="button" className="icon-btn small" title="编辑模型" onClick={() => setModelEdit({ kind: "custom", index, draft: blankCustomForm(model) })}><Icon name="pencil" extra="sm" /></button>
+                            <button type="button" className="icon-btn small" data-tip="编辑" onClick={() => setModelEdit({ kind: "custom", index, draft: blankCustomForm(model) })}><Icon name="pencil" extra="sm" /></button>
                             <RoleAssignControl
                               selector={sel}
                               open={assignPopSel === sel}
@@ -3045,7 +3290,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                               onDraftChange={onRoleAssignDraft}
                               onError={toast}
                             />
-                            <button type="button" className="icon-btn small" title="删除模型" onClick={() => {
+                            <button type="button" className="icon-btn small" data-tip="删除" onClick={() => {
                               const models = editor.models.filter((_, i) => i !== index);
                               setEditor({ ...editor, models });
                             }}><Icon name="trash" extra="sm" /></button>
@@ -3137,7 +3382,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       </div>
                     </span>
                   ) : null}
-                  <button type="button" className="btn outline" disabled={busy || testing} onClick={() => void onTest("editor", editExisting ? editor.id : undefined, editor.api, editor.endpointUrl, editor.apiKey || undefined)}>{testing ? "测试中…" : "测试连接"}</button>
+                  <button type="button" className="btn outline" disabled={busy || testing} onClick={() => void onTest("editor", editExisting ? editor.id : undefined, editor.api, editor.endpointUrl, editorTestSecret(editor))}>{testing ? "测试中…" : "测试连接"}</button>
                   <button type="submit" className="btn primary" disabled={busy}><Icon name="check" extra="sm" />{editExisting ? "保存修改" : "添加供应商"}</button>
                 </span>
               </div>
@@ -3155,7 +3400,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                   <button type="button" className={sourceFilter === "third" ? "active" : undefined} onClick={() => setSourceFilter("third")}>第三方</button>
                 </span>
                 <span className="spacer" />
-                <button type="button" className="btn outline" disabled={preview} title={preview ? "演示模式不刷新 Host" : undefined} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />刷新状态</button>
+                <button type="button" className="btn outline" disabled={preview} data-tip={preview ? "预览" : undefined} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />刷新状态</button>
                 <button type="button" className="btn primary" onClick={() => { setModelEdit(null); setEditor(blankDraft()); setEditExisting(false); setPresetOpen(false); setPresetSel(null); setConfirmDelete(false); setTestResult(null); }}><Icon name="plus" extra="sm" />添加供应商</button>
               </div>
               {!data && !loadError ? (
@@ -3182,7 +3427,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                         type="button"
                         className="pv-drag"
                         aria-label={`拖动调整 ${provider.name} 的显示顺序`}
-                        title="拖动调整顺序"
+                        data-tip="拖动"
                         onPointerDown={(event) => onProviderDragPointerDown(event, provider.id)}
                       />
                       <BrandMark id={provider.id} local={provider.local} status={provider.status} />
@@ -3196,10 +3441,10 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                         <div className="pv-sub"><span className="pv-url ellipsis">{provider.endpointUrl || provider.statusDetail}</span></div>
                       </div>
                       <div className="pv-acts">
-                        <button type="button" className={`pv-act is-action${testing ? " is-testing" : ""}`} disabled={busy || testing} data-tip="测试连接" aria-label="测试连接" onClick={() => void onTest("list", provider.id)}><Icon name="pulse" /></button>
-                        <button type="button" className="pv-act is-action" disabled={busy} data-tip="刷新模型（omp models refresh）" aria-label="刷新模型" onClick={() => void refreshDiscovery()}><Icon name="refresh" /></button>
-                        <button type="button" className="pv-act is-action is-edit" data-tip="编辑供应商" aria-label="编辑供应商" onClick={() => { setModelEdit(null); setEditor(draftFromProvider(provider)); setEditExisting(true); setConfirmDelete(false); setTestResult(null); }}><Icon name="pencil" /></button>
-                        <button type="button" className="pv-act is-action is-copy" data-tip="复制 Provider ID" aria-label="复制 Provider ID" onClick={() => { void navigator.clipboard.writeText(provider.id); toast(`已复制 ${provider.id}`); }}><Icon name="copy" /></button>
+                        <button type="button" className={`pv-act is-action${testing ? " is-testing" : ""}`} disabled={busy || testing} data-tip="测试" aria-label="测试连接" onClick={() => void onTest("list", provider.id)}><Icon name="pulse" /></button>
+                        <button type="button" className="pv-act is-action" disabled={busy} data-tip="刷新" aria-label="刷新模型" onClick={() => void refreshDiscovery()}><Icon name="refresh" /></button>
+                        <button type="button" className="pv-act is-action is-edit" data-tip="编辑" aria-label="编辑供应商" onClick={() => { setModelEdit(null); setEditor(draftFromProvider(provider)); setEditExisting(true); setConfirmDelete(false); setTestResult(null); }}><Icon name="pencil" /></button>
+                        <button type="button" className="pv-act is-action is-copy" data-tip="复制" aria-label="复制 Provider ID" onClick={() => { void navigator.clipboard.writeText(provider.id); toast(`已复制 ${provider.id}`); }}><Icon name="copy" /></button>
                         <span className="pv-act is-switch">
                           <button
                             type="button"
@@ -3234,17 +3479,17 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                             <span className="pm-sel ellipsis">{model.selector}</span>
                             <span className="pm-meta">
                               <span className="chip gray xs">{fmtK(model.contextWindow)} ctx</span>
-                              {model.image ? <span className="chip blue xs chip-icon" title="支持图片输入"><Icon name="image" extra="sm" /></span> : null}
-                              {model.reasoning ? <span className="chip purple xs chip-icon" title="Reasoning"><Icon name="brain" extra="sm" /></span> : null}
-                              {model.tools ? <span className="chip gray xs chip-icon" title="Tools"><Icon name="wrench" extra="sm" /></span> : null}
+                              {model.image ? <span className="chip blue xs chip-icon" data-tip="图片"><Icon name="image" extra="sm" /></span> : null}
+                              {model.reasoning ? <span className="chip purple xs chip-icon" data-tip="思考"><Icon name="brain" extra="sm" /></span> : null}
+                              {model.tools ? <span className="chip gray xs chip-icon" data-tip="工具"><Icon name="wrench" extra="sm" /></span> : null}
                             </span>
-                            <button type="button" className="icon-btn small" title="复制 Model Selector" onClick={() => { void navigator.clipboard.writeText(model.selector); toast(`已复制 ${model.selector}`); }}><Icon name="copy" extra="sm" /></button>
+                            <button type="button" className="icon-btn small" data-tip="复制" onClick={() => { void navigator.clipboard.writeText(model.selector); toast(`已复制 ${model.selector}`); }}><Icon name="copy" extra="sm" /></button>
                             {(model.source === "catalog" || model.source === "extension") ? (
-                              <button type="button" className="icon-btn small" title="编辑 Override" onClick={() => {
+                              <button type="button" className="icon-btn small" data-tip="编辑" onClick={() => {
                                 setModelEdit({ kind: "override", modelId: model.id, draft: blankOverrideForm(provider.modelOverrides?.[model.id]), providerId: provider.id });
                               }}><Icon name="pencil" extra="sm" /></button>
                             ) : model.source === "custom" ? (
-                              <button type="button" className="icon-btn small" title="编辑模型" onClick={() => {
+                              <button type="button" className="icon-btn small" data-tip="编辑" onClick={() => {
                                 const index = provider.models.findIndex((item) => item.id === model.id && item.source === "custom");
                                 if (index >= 0) setModelEdit({ kind: "custom", index, draft: blankCustomForm(model), providerId: provider.id });
                               }}><Icon name="pencil" extra="sm" /></button>
@@ -3736,7 +3981,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                     aria-selected={(data?.modelRoleStorage ?? "global") === "project"}
                     className={(data?.modelRoleStorage ?? "global") === "project" ? "active" : undefined}
                     disabled={busy || !data?.projectScopeAvailable}
-                    title={data?.projectScopeAvailable ? undefined : "未打开工作区"}
+                    data-tip={data?.projectScopeAvailable ? undefined : "无工作区"}
                     onClick={() => { if (data?.projectScopeAvailable && (data?.modelRoleStorage ?? "global") !== "project") void setRoleStorage("project"); }}
                   >项目</button>
                 </span>

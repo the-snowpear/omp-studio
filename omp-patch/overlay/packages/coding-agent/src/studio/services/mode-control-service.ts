@@ -1,3 +1,5 @@
+import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
+import { CompactionCancelledError } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
@@ -6,6 +8,7 @@ import type { PlanApprovalDetails } from "../../plan-mode/approved-plan";
 import { resolvePlanModelTransition } from "../../plan-mode/model-transition";
 import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planModeApprovedPrompt from "../../prompts/system/plan-mode-approved.md" with { type: "text" };
+import planModeCompactInstructionsPrompt from "../../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
 import type { AgentSession } from "../../session/agent-session";
 import type { ConfiguredThinkingLevel } from "../../thinking";
 import { PROPOSE_DEVICE_NAME, writeDeviceDispatch } from "../../tools/resolve";
@@ -33,6 +36,11 @@ export interface StudioModeState {
 }
 
 export type StudioModeChangeListener = (state: StudioModeState) => void;
+
+export type StudioPlanReviewDecision = "execute" | "compact" | "keep" | "approve" | "refine" | "dismiss";
+
+type PlanApprovalKind = "execute" | "compact" | "keep";
+type PlanCompactionOutcome = "ok" | "cancelled" | "failed";
 
 type PendingSessionMode =
 	| { kind: "normal" }
@@ -71,7 +79,17 @@ export class StudioModeControlService {
 				}
 			}
 			if (event.type === "agent_end") {
-				queueMicrotask(() => void this.flushPendingModelSwitch());
+				queueMicrotask(() => {
+					void (async () => {
+						await this.flushPendingModelSwitch();
+						if (this.session.isStreaming || this.session.isCompacting) return;
+						try {
+							await this.applyPending();
+						} catch (error) {
+							logger.warn("Failed to apply a deferred session mode", { error: String(error) });
+						}
+					})();
+				});
 			}
 		});
 		this.#unsubscribeModelRoles = onModelRolesChanged(() => {
@@ -129,7 +147,7 @@ export class StudioModeControlService {
 		return this.state();
 	}
 
-	async exitPlan(discardDraft = false): Promise<StudioModeState> {
+	async exitPlan(discardDraft = false, options?: { deferModelRestore?: boolean }): Promise<StudioModeState> {
 		if (this.#shouldDefer()) {
 			if (this.#pendingSession?.kind === "plan") return this.#queuePending(undefined);
 			if (this.#committedKind() === "plan") return this.#queuePending({ kind: "normal" });
@@ -150,7 +168,9 @@ export class StudioModeControlService {
 		this.session.setPlanModeState(undefined);
 		try {
 			if (this.#planPreviousTools !== undefined) await this.session.setActiveToolsByName(this.#planPreviousTools);
-			if (previousModel !== undefined) await this.#restorePreviousModel(previousModel);
+			if (previousModel !== undefined && options?.deferModelRestore !== true) {
+				await this.#restorePreviousModel(previousModel);
+			}
 		} catch (error) {
 			this.#clearPendingModelSwitch();
 			this.session.setPlanModeState(current);
@@ -167,7 +187,7 @@ export class StudioModeControlService {
 		}
 		this.session.setPlanProposalHandler(null);
 		this.#planPreviousTools = undefined;
-		this.#planPreviousModelState = undefined;
+		if (options?.deferModelRestore !== true) this.#planPreviousModelState = undefined;
 		this.#pendingPlan = undefined;
 		this.#planReviewAbortPending = false;
 		this.session.sessionManager.appendModeChange("none");
@@ -176,6 +196,9 @@ export class StudioModeControlService {
 	}
 
 	async openPlanReview(): Promise<{ planFilePath: string; title: string; planExists: boolean }> {
+		if (!this.session.getPlanModeState()?.enabled) {
+			throw new StudioModeError("COMMAND_BLOCKED", "Plan mode is not active");
+		}
 		const result = await this.session.preparePlanForReview("");
 		const details = result.details;
 		if (details === undefined) throw new StudioModeError("COMMAND_BLOCKED", "Plan review details are unavailable");
@@ -183,7 +206,7 @@ export class StudioModeControlService {
 		return { planFilePath: details.planFilePath, title: details.title, planExists: details.planExists };
 	}
 
-	async respondPlanReview(decision: "approve" | "refine" | "dismiss", feedback?: string): Promise<unknown> {
+	async respondPlanReview(decision: StudioPlanReviewDecision, feedback?: string): Promise<unknown> {
 		const pending = this.#pendingPlan;
 		if (!pending) throw new StudioModeError("COMMAND_BLOCKED", "No plan review is open");
 		if (decision === "dismiss") {
@@ -201,18 +224,45 @@ export class StudioModeControlService {
 			await this.#submit(normalized);
 			return { decision };
 		}
-		if (this.session.isStreaming) {
-			throw new StudioModeError("COMMAND_BLOCKED", "Cannot approve a plan while the Runtime is streaming");
+		if (this.session.isStreaming || this.session.isCompacting) {
+			throw new StudioModeError("COMMAND_BLOCKED", "Cannot approve a plan while the Runtime is busy");
 		}
-		this.session.setPlanReferencePath(pending.planFilePath);
+		const approval: PlanApprovalKind = decision === "execute" || decision === "compact" ? decision : "keep";
+		const compactBeforeExecute = approval === "compact";
+		const preserveContext = approval !== "execute";
+		let compactOutcome: PlanCompactionOutcome | undefined;
+		if (compactBeforeExecute) this.session.markPlanInternalAbortPending();
+		try {
+			this.session.setPlanReferencePath(pending.planFilePath);
+			await this.exitPlan(true, { deferModelRestore: compactBeforeExecute });
+			await this.#ensureReadTool();
+			if (!preserveContext) {
+				const reset = await this.session.resetSessionContext();
+				if (reset === undefined) {
+					throw new StudioModeError("COMMAND_BLOCKED", "Cannot clear context while the session is busy");
+				}
+			} else if (compactBeforeExecute) {
+				compactOutcome = await this.#compactForPlanApproval(pending.planFilePath);
+			}
+		} finally {
+			this.session.clearPlanInternalAbortPending();
+		}
+		if (compactBeforeExecute) await this.#restoreDeferredPlanModel();
+		if (compactOutcome === "cancelled") {
+			return { decision: approval, dispatched: false, reason: "compaction_cancelled" };
+		}
 		this.session.markPlanReferenceSent();
-		await this.exitPlan(true);
 		const executionPrompt = prompt.render(planModeApprovedPrompt, {
 			planFilePath: pending.planFilePath,
-			contextPreserved: true,
+			contextPreserved: preserveContext,
 		});
 		await this.#submit(executionPrompt, true);
-		return { decision, planFilePath: pending.planFilePath, title: pending.title };
+		return {
+			decision: approval,
+			planFilePath: pending.planFilePath,
+			title: pending.title,
+			dispatched: true,
+		};
 	}
 
 	async createGoal(objective: string, tokenBudget?: number): Promise<StudioModeState> {
@@ -555,8 +605,42 @@ export class StudioModeControlService {
 		if (!normalized) throw new StudioModeError("INVALID_ARGUMENT", "Prompt must not be empty");
 		if (this.session.isStreaming) {
 			await this.session.followUp(normalized, undefined, { synthetic });
-		} else {
+			return;
+		}
+		try {
 			await this.session.prompt(normalized, { synthetic });
+		} catch (error) {
+			if (!(error instanceof AgentBusyError)) throw error;
+			await this.session.followUp(normalized, undefined, { synthetic });
+		}
+	}
+
+	async #ensureReadTool(): Promise<void> {
+		const tools = this.session.getEnabledToolNames();
+		if (tools.includes("read") || !this.session.hasBuiltInTool("read")) return;
+		await this.session.setActiveToolsByName([...tools, "read"]);
+	}
+
+	async #compactForPlanApproval(planFilePath: string): Promise<PlanCompactionOutcome> {
+		const internalGuidance = prompt.render(planModeCompactInstructionsPrompt, { planFilePath });
+		try {
+			await this.session.compact(undefined, { internalGuidance });
+			return "ok";
+		} catch (error) {
+			if (error instanceof CompactionCancelledError) return "cancelled";
+			logger.warn("Plan approval compaction failed; executing best-effort", { error: String(error) });
+			return "failed";
+		}
+	}
+
+	async #restoreDeferredPlanModel(): Promise<void> {
+		const previous = this.#planPreviousModelState;
+		this.#planPreviousModelState = undefined;
+		if (previous === undefined) return;
+		try {
+			await this.#restorePreviousModel(previous);
+		} catch (error) {
+			logger.warn("Failed to restore the execution model after Plan compaction", { error: String(error) });
 		}
 	}
 

@@ -14,6 +14,8 @@
  */
 
 import type {
+  BtwErrorCode,
+  BtwStatus,
   ClientCommandAccepted,
   ClientEvent,
   ClientErrorCode,
@@ -23,6 +25,8 @@ import type {
   RuntimeBackend,
   RuntimeClassification,
   RuntimeConnectionStatus,
+  RuntimeDisconnectCode,
+  RuntimeUnavailableCode,
 } from "@omp-studio/client-contract";
 import { parseConversationRuntimeEvent, parseConversationTranscriptPage } from "@omp-studio/client-contract";
 import { parseSessionTelemetryReadResult } from "@omp-studio/studio-protocol";
@@ -542,6 +546,7 @@ const EVENT_KINDS = [
   "operation.progress",
   "git.repository.changed",
   "conversation.changed",
+  "btw.changed",
 ] as const satisfies readonly ClientEvent["kind"][];
 
 const EVENT_BASE_KEYS = [
@@ -781,6 +786,12 @@ function assertCommandReceipt(value: unknown): void {
       if (commandName === "github.execute") assertGithubOperationResult(value.result);
       if (commandName === "workspace.file.create" || commandName === "workspace.directory.create") assertWorkspaceFileMutationResult(value.result);
       if (commandName === "operator.invoke") assertOperatorInvokeOutcome(value.result);
+      if (commandName === "session.tree.navigate" || commandName === "session.tree.branch") {
+        assertSessionTreeCommandOutcome(value.result);
+      }
+      if (commandName === "btw.ask") assertBtwAskOutcome(value.result);
+      if (commandName === "btw.branch") assertBtwBranchOutcome(value.result);
+      if (commandName === "runtime.ensure") assertRuntimeConnection(value.result);
       return;
     case "failed":
       assertNoUnknownKeys(
@@ -822,18 +833,153 @@ function assertOperatorInvokeOutcome(value: unknown): void {
   }
 }
 
+const SESSION_TREE_RESULT_KEYS = [
+  "snapshot",
+  "cancelled",
+  "sessionId",
+  "editorText",
+  "editorImages",
+  "leafId",
+  "aborted",
+  "askReanswerCommitted",
+] as const;
+
+const EDITOR_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/** Assert tree navigate/branch completion: snapshot plus optional editor fill-back. */
+function assertSessionTreeCommandOutcome(value: unknown): void {
+  assertPlainObject(value, "event: session.tree result");
+  assertNoUnknownKeys(value, [...SESSION_TREE_RESULT_KEYS], "event: session.tree result");
+  assertPlainObject(value.snapshot, "event: session.tree result snapshot");
+  if (value.cancelled !== undefined && typeof value.cancelled !== "boolean") {
+    throw new ValidationError("event: session.tree result cancelled must be boolean");
+  }
+  if (value.aborted !== undefined && typeof value.aborted !== "boolean") {
+    throw new ValidationError("event: session.tree result aborted must be boolean");
+  }
+  if (value.askReanswerCommitted !== undefined && typeof value.askReanswerCommitted !== "boolean") {
+    throw new ValidationError("event: session.tree result askReanswerCommitted must be boolean");
+  }
+  if (value.sessionId !== undefined && (typeof value.sessionId !== "string" || value.sessionId.length === 0)) {
+    throw new ValidationError("event: session.tree result sessionId must be a non-empty string");
+  }
+  if (value.editorText !== undefined && typeof value.editorText !== "string") {
+    throw new ValidationError("event: session.tree result editorText must be a string");
+  }
+  if (value.leafId !== undefined && value.leafId !== null && (typeof value.leafId !== "string" || value.leafId.length === 0)) {
+    throw new ValidationError("event: session.tree result leafId must be a non-empty string or null");
+  }
+  if (value.editorImages !== undefined) {
+    if (!Array.isArray(value.editorImages)) {
+      throw new ValidationError("event: session.tree result editorImages must be an array");
+    }
+    for (const image of value.editorImages) {
+      assertPlainObject(image, "event: session.tree result editorImages item");
+      assertNoUnknownKeys(image, ["type", "mimeType", "data"], "event: session.tree result editorImages item");
+      if (image.type !== "image") {
+        throw new ValidationError("event: session.tree result editorImages item type must be image");
+      }
+      if (typeof image.mimeType !== "string" || !EDITOR_IMAGE_MIME_TYPES.has(image.mimeType)) {
+        throw new ValidationError("event: session.tree result editorImages item mimeType is unsupported");
+      }
+      if (typeof image.data !== "string" || image.data.length === 0) {
+        throw new ValidationError("event: session.tree result editorImages item data must be non-empty base64");
+      }
+    }
+  }
+}
+
+const BTW_STATUS_VALUES = ["running", "completed", "failed", "aborted"] as const satisfies readonly BtwStatus[];
+
+const BTW_ERROR_CODE_VALUES = ["INTERNAL_ERROR", "OUTPUT_LIMIT"] as const satisfies readonly BtwErrorCode[];
+
+/** Assert the BTW side-channel snapshot carried by `btw.changed` and receipts. */
+function assertBtwSnapshot(value: unknown, field: string): void {
+  assertPlainObject(value, field);
+  assertNoUnknownKeys(value, ["ephemeralId", "status", "text", "copy", "error"], field);
+  assertOpaqueToken(value.ephemeralId, `${field} ephemeralId`);
+  if (typeof value.status !== "string" || !(BTW_STATUS_VALUES as readonly string[]).includes(value.status)) {
+    throw new ValidationError(`${field} has unsupported status ${describe(value.status)}`);
+  }
+  if (typeof value.text !== "string") {
+    throw new ValidationError(`${field} text must be a string`);
+  }
+  if (value.copy !== undefined && typeof value.copy !== "string") {
+    throw new ValidationError(`${field} copy must be a string`);
+  }
+  if (value.error !== undefined) {
+    assertPlainObject(value.error, `${field} error`);
+    assertNoUnknownKeys(value.error, ["code", "message"], `${field} error`);
+    if (typeof value.error.code !== "string" || !(BTW_ERROR_CODE_VALUES as readonly string[]).includes(value.error.code)) {
+      throw new ValidationError(`${field} error has unsupported code ${describe(value.error.code)}`);
+    }
+    if (typeof value.error.message !== "string") {
+      throw new ValidationError(`${field} error message must be a string`);
+    }
+  }
+}
+
+/** Assert `btw.ask` completion: snapshot plus the one-shot branch authorization. */
+function assertBtwAskOutcome(value: unknown): void {
+  assertPlainObject(value, "event: btw.ask result");
+  assertNoUnknownKeys(value, ["snapshot", "ephemeralId", "branchToken", "status"], "event: btw.ask result");
+  assertPlainObject(value.snapshot, "event: btw.ask result snapshot");
+  assertOpaqueToken(value.ephemeralId, "event: btw.ask result ephemeralId");
+  assertOpaqueToken(value.branchToken, "event: btw.ask result branchToken");
+  if (value.status !== "running") {
+    throw new ValidationError('event: btw.ask result status must be exactly "running"');
+  }
+}
+
+/** Assert `btw.branch` completion: whether the branch happened and where it landed. */
+function assertBtwBranchOutcome(value: unknown): void {
+  assertPlainObject(value, "event: btw.branch result");
+  assertNoUnknownKeys(value, ["snapshot", "branched", "newSessionId", "newLeafId", "reason"], "event: btw.branch result");
+  assertPlainObject(value.snapshot, "event: btw.branch result snapshot");
+  if (typeof value.branched !== "boolean") {
+    throw new ValidationError("event: btw.branch result branched must be boolean");
+  }
+  if (value.newSessionId !== undefined) assertOpaqueToken(value.newSessionId, "event: btw.branch result newSessionId");
+  if (value.newLeafId !== undefined) assertOpaqueToken(value.newLeafId, "event: btw.branch result newLeafId");
+  if (value.reason !== undefined && typeof value.reason !== "string") {
+    throw new ValidationError("event: btw.branch result reason must be a string");
+  }
+}
+
 const CONNECTION_STATUSES = [
   "connecting",
   "connected",
   "disconnected",
+  "unavailable",
 ] as const satisfies readonly RuntimeConnectionStatus[];
 
 const CONNECTION_CLASSIFICATIONS = [
+  "unavailable",
   "managed",
   "compatible-system",
   "limited-system",
   "rejected",
 ] as const satisfies readonly RuntimeClassification[];
+
+const UNAVAILABLE_CODES = [
+  "no-workspace",
+  "workspace-unusable",
+  "not-installed",
+  "resolution-rejected",
+  "resolution-limited",
+  "launch-failed",
+  "handshake-timeout",
+  "spawn-failed",
+  "exited-before-ready",
+  "not-wired",
+] as const satisfies readonly RuntimeUnavailableCode[];
+
+const DISCONNECT_CODES = [
+  "pipe-closed",
+  "process-exit",
+  "lease-lost",
+  "host-stop",
+] as const satisfies readonly RuntimeDisconnectCode[];
 
 const RUNTIME_BACKENDS = ["studio-host", "rpc-ui", "acp"] as const satisfies readonly RuntimeBackend[];
 
@@ -852,6 +998,10 @@ function assertRuntimeConnection(value: unknown): void {
       "upstreamVersion",
       "upstreamCommit",
       "rejectionReason",
+      "unavailableCode",
+      "unavailableReason",
+      "disconnectCode",
+      "disconnectReason",
     ],
     "event: connection",
   );
@@ -887,9 +1037,21 @@ function assertRuntimeConnection(value: unknown): void {
     "upstreamVersion",
     "upstreamCommit",
     "rejectionReason",
+    "unavailableReason",
+    "disconnectReason",
   ] as const) {
     if (value[field] !== undefined && typeof value[field] !== "string") {
       throw new ValidationError(`event: connection ${field} must be a string`);
+    }
+  }
+  if (value.unavailableCode !== undefined) {
+    if (typeof value.unavailableCode !== "string" || !(UNAVAILABLE_CODES as readonly string[]).includes(value.unavailableCode)) {
+      throw new ValidationError(`event: connection has unknown unavailableCode ${describe(value.unavailableCode)}`);
+    }
+  }
+  if (value.disconnectCode !== undefined) {
+    if (typeof value.disconnectCode !== "string" || !(DISCONNECT_CODES as readonly string[]).includes(value.disconnectCode)) {
+      throw new ValidationError(`event: connection has unknown disconnectCode ${describe(value.disconnectCode)}`);
     }
   }
 }
@@ -1001,6 +1163,13 @@ export function assertClientEvent(value: unknown): asserts value is ClientEvent 
           `event: invalid conversation update (${error instanceof Error ? error.message : "invalid"})`,
         );
       }
+      return;
+    case "btw.changed":
+      assertEventKeys(value, "event", ["sessionId", "eventSeq", "snapshot"]);
+      assertEventBase(value);
+      assertOpaqueToken(value.sessionId, "event: btw sessionId");
+      assertCounter(value.eventSeq, "event: btw eventSeq");
+      assertBtwSnapshot(value.snapshot, "event: btw snapshot");
       return;
     default:
       throw new ValidationError(`event: unhandled kind ${describe(kind)}`);

@@ -6,6 +6,12 @@ import { ThreadBindingStore } from "./thread-binding-store.js";
 
 export interface HostBackendOptions {
   stateDirectory: string;
+  /**
+   * Managed Runtime tree (`versions/` + `current.json`). Defaults to
+   * `<stateDirectory>/runtimes`. Packaged desktop sets this to
+   * `$INSTDIR/runtime` so the live `omp.exe` sits next to the app.
+   */
+  runtimeInstallDirectory?: string;
   installer?: Omit<RuntimeInstallerOptions, "isRuntimeReferenced">;
   resolver?: Omit<RuntimeResolverEnvironment, "managedLookup">;
 }
@@ -18,8 +24,12 @@ export class HostBackend {
 
   constructor(options: HostBackendOptions) {
     if (options.stateDirectory.length === 0) throw new TypeError("Host backend state directory is required");
+    const runtimeInstallDirectory = options.runtimeInstallDirectory ?? join(options.stateDirectory, "runtimes");
+    if (runtimeInstallDirectory.length === 0) {
+      throw new TypeError("Host backend runtime install directory is required");
+    }
     this.bindings = new ThreadBindingStore(join(options.stateDirectory, "thread-bindings.json"));
-    this.installer = new RuntimeInstaller(join(options.stateDirectory, "runtimes"), {
+    this.installer = new RuntimeInstaller(runtimeInstallDirectory, {
       ...options.installer,
       isRuntimeReferenced: version => this.bindings.isRuntimeReferenced(version),
     });

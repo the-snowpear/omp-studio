@@ -2,9 +2,16 @@
  * Desktop managed Runtime install seam.
  *
  * `runtime.install` copies a locally signed artifact into the Host-owned
- * `%APPDATA%\omp-studio\runtimes` tree and activates it. There is no
- * downloader and no PATH / system-omp fallback. Artifact lookup is Host-only;
- * paths never enter ClientBootstrap.
+ * Runtime tree and activates it. There is no downloader and no PATH /
+ * system-omp fallback. Artifact lookup is Host-only; paths never enter
+ * ClientBootstrap.
+ *
+ * Unpackaged (`electron .`) keeps that tree under
+ * `%APPDATA%\omp-studio\runtimes`. Packaged builds put the live
+ * `omp.exe` at `$INSTDIR\runtime\versions\<ver>\` (`extraFiles` already
+ * uses the installer layout). First launch verifies and writes
+ * `$INSTDIR\runtime\current.json`; diagnostics updates write the same
+ * folder. Uninstall deletes that live Runtime with the app.
  */
 
 import { readFile, readdir } from "node:fs/promises";
@@ -12,7 +19,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { HostRuntimeInstallService } from "@omp-studio/host-client-api";
+import type { HostRuntimeInstallProbe, HostRuntimeInstallService } from "@omp-studio/host-client-api";
 import type { RuntimeChannel, RuntimeInstallState } from "@omp-studio/client-contract";
 import {
   parseRuntimeInstallationManifest,
@@ -32,6 +39,55 @@ export interface DesktopManagedInstallOptions {
   readonly activateOptions?: ActivateOptions;
   /** Tests replace the post-activate Runtime start; production leaves this unset. */
   readonly afterActivate?: () => Promise<void>;
+  /**
+   * Host `RuntimeInstaller` root. Packaged: `$INSTDIR\runtime`. Unpackaged:
+   * omitted so HostBackend uses `%APPDATA%\omp-studio\runtimes`.
+   */
+  readonly installDirectory?: string;
+  /**
+   * Signed artifact lookup root. Packaged: `$INSTDIR\runtime\versions`
+   * (the live version folders). Prepended when `locateArtifact` is not
+   * overridden.
+   */
+  readonly artifactRoot?: string;
+  /** Packaged public verification key dir (`$INSTDIR\runtime-keys`). Never the private key. */
+  readonly trustedKeysDirectory?: string;
+  /**
+   * When no current managed install exists, copy+activate the located
+   * artifact into the installer root before the first resolve. Packaged
+   * extraFiles already land under `versions/`, so this is verify +
+   * `current.json`. Failures stay read-only.
+   */
+  readonly seedOnStart?: boolean;
+}
+
+export const PACKAGED_RUNTIME_ARTIFACT_DIR = "runtime";
+export const PACKAGED_RUNTIME_VERSIONS_DIR = "versions";
+export const PACKAGED_RUNTIME_KEYS_DIR = "runtime-keys";
+
+/** Layout written next to the packaged `OMP Studio.exe`. Undefined when unpackaged. */
+export function packagedRuntimeInstallLayout(input: {
+  readonly isPackaged: boolean;
+  readonly execPath: string;
+}): { readonly installDirectory: string; readonly artifactRoot: string; readonly keysDirectory: string } | undefined {
+  if (!input.isPackaged) return undefined;
+  const installDir = dirname(input.execPath);
+  const installDirectory = join(installDir, PACKAGED_RUNTIME_ARTIFACT_DIR);
+  return {
+    installDirectory,
+    artifactRoot: join(installDirectory, PACKAGED_RUNTIME_VERSIONS_DIR),
+    keysDirectory: join(installDir, PACKAGED_RUNTIME_KEYS_DIR),
+  };
+}
+
+/** Host RuntimeInstaller root: packaged override, otherwise `<state>/runtimes`. */
+export function resolveManagedRuntimeInstallDirectory(input: {
+  readonly stateDirectory: string;
+  readonly installDirectory?: string;
+}): string {
+  const override = input.installDirectory?.trim();
+  if (override !== undefined && override.length > 0) return override;
+  return join(input.stateDirectory, "runtimes");
 }
 
 const KEY_ID_FILE = "key-id.txt";
@@ -45,14 +101,9 @@ export function defaultRuntimeKeysDirectory(): string {
   return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "omp-studio", "keys");
 }
 
-export async function loadInstallerTrustedKeys(
-  keysDirectory = defaultRuntimeKeysDirectory(),
+async function readTrustedKeysDirectory(
+  keysDirectory: string,
 ): Promise<{ trustedKeys: Record<string, Buffer> } | undefined> {
-  const envPath = process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY?.trim();
-  const envId = process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
-  if (envPath !== undefined && envPath.length > 0 && envId !== undefined && envId.length > 0) {
-    return { trustedKeys: { [envId]: await readFile(envPath) } };
-  }
   try {
     const keyId = (await readFile(join(keysDirectory, KEY_ID_FILE), "utf8")).trim();
     const publicKey = await readFile(join(keysDirectory, PUBLIC_KEY_FILE));
@@ -63,6 +114,22 @@ export async function loadInstallerTrustedKeys(
   } catch {
     return undefined;
   }
+}
+
+export async function loadInstallerTrustedKeys(
+  keysDirectory: string | readonly string[] = defaultRuntimeKeysDirectory(),
+): Promise<{ trustedKeys: Record<string, Buffer> } | undefined> {
+  const envPath = process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY?.trim();
+  const envId = process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
+  if (envPath !== undefined && envPath.length > 0 && envId !== undefined && envId.length > 0) {
+    return { trustedKeys: { [envId]: await readFile(envPath) } };
+  }
+  const directories = typeof keysDirectory === "string" ? [keysDirectory] : keysDirectory;
+  for (const directory of directories) {
+    const loaded = await readTrustedKeysDirectory(directory);
+    if (loaded !== undefined) return loaded;
+  }
+  return undefined;
 }
 
 const ARTIFACT_WALK_DEPTH = 8;
@@ -109,13 +176,27 @@ export function collectManagedRuntimeArtifactRoots(options: {
   return roots;
 }
 
-function defaultArtifactRoots(platform: string): string[] {
-  const extra = process.env.OMP_ARTIFACT_DIR;
+function defaultArtifactRoots(platform: string, extra?: string): string[] {
+  const fromEnv = process.env.OMP_ARTIFACT_DIR;
+  const resolvedExtra = extra ?? fromEnv;
   return collectManagedRuntimeArtifactRoots({
     platform,
     seeds: [process.cwd(), fileURLToPath(new URL(".", import.meta.url))],
-    ...(extra === undefined ? {} : { extra }),
+    ...(resolvedExtra === undefined ? {} : { extra: resolvedExtra }),
   });
+}
+
+export function createManagedArtifactLocator(options: {
+  readonly artifactRoot?: string;
+  readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
+}): (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined> {
+  if (options.locateArtifact !== undefined) return options.locateArtifact;
+  if (options.artifactRoot === undefined) return locateManagedRuntimeArtifact;
+  return (input) =>
+    locateManagedRuntimeArtifact({
+      ...input,
+      roots: defaultArtifactRoots(input.platform, options.artifactRoot),
+    });
 }
 
 async function readArtifactManifest(directory: string): Promise<RuntimeInstallationManifest | undefined> {
@@ -178,21 +259,144 @@ export async function locateManagedRuntimeArtifact(
   return matches[matches.length - 1]?.directory;
 }
 
+/**
+ * Compare an installed runtime version against a locally discovered
+ * artifact. Uses the same `localeCompare` order as artifact locate.
+ * Paths never enter the returned read model.
+ */
+export function resolveManagedRuntimeInstallState(input: {
+  readonly installedVersion?: string;
+  readonly availableVersion?: string;
+}): RuntimeInstallState {
+  const installed = input.installedVersion;
+  const available = input.availableVersion;
+  if (installed === undefined) {
+    return available === undefined
+      ? { status: "not-installed", signature: "unknown" }
+      : { status: "not-installed", signature: "unknown", availableVersion: available };
+  }
+  if (available !== undefined && available.localeCompare(installed) > 0) {
+    return {
+      status: "update-available",
+      version: installed,
+      availableVersion: available,
+      signature: "verified",
+    };
+  }
+  return { status: "installed", version: installed, signature: "verified" };
+}
+
+export type SeedManagedRuntimeResult = "seeded" | "already-installed" | "skipped";
+
+export interface SeedManagedRuntimeBackend {
+  readonly installer: {
+    currentManifest(): Promise<unknown>;
+  };
+  install(directory: string): Promise<RuntimeInstallationManifest>;
+  activate(version: string, options?: ActivateOptions): Promise<unknown>;
+}
+
+/**
+ * Copy the shipped/located signed artifact into the Host installer root
+ * when nothing is current. Does not start a Runtime session. When the
+ * artifact already is that versions folder, install is a no-op and this
+ * only activates.
+ */
+export async function seedManagedRuntimeFromArtifact(options: {
+  readonly backend: SeedManagedRuntimeBackend;
+  readonly platform: string;
+  readonly hasTrustedKey: boolean;
+  readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
+  readonly activateOptions?: ActivateOptions;
+}): Promise<SeedManagedRuntimeResult> {
+  if (!options.hasTrustedKey) return "skipped";
+  let current;
+  try {
+    current = await options.backend.installer.currentManifest();
+  } catch {
+    current = undefined;
+  }
+  if (current !== undefined) return "already-installed";
+  const locate = options.locateArtifact ?? locateManagedRuntimeArtifact;
+  const artifactDirectory = await locate({ platform: options.platform });
+  if (artifactDirectory === undefined) return "skipped";
+  let manifest: RuntimeInstallationManifest;
+  try {
+    manifest = await options.backend.install(artifactDirectory);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/already installed/u.test(message)) {
+      throw error;
+    }
+    const parsed = await readArtifactManifest(artifactDirectory);
+    if (parsed === undefined) {
+      throw error;
+    }
+    manifest = parsed;
+  }
+  await options.backend.activate(manifest.runtimeVersion, options.activateOptions);
+  return "seeded";
+}
+
+export async function probeManagedRuntimeInstall(options: {
+  readonly platform: string;
+  readonly currentVersion?: string;
+  readonly channel?: RuntimeChannel;
+  readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
+}): Promise<RuntimeInstallState> {
+  const locate = options.locateArtifact ?? locateManagedRuntimeArtifact;
+  const directory = await locate({
+    platform: options.platform,
+    ...(options.channel === undefined ? {} : { channel: options.channel }),
+  });
+  let availableVersion: string | undefined;
+  if (directory !== undefined) {
+    availableVersion = (await readArtifactManifest(directory))?.runtimeVersion;
+  }
+  return resolveManagedRuntimeInstallState({
+    ...(options.currentVersion === undefined ? {} : { installedVersion: options.currentVersion }),
+    ...(availableVersion === undefined ? {} : { availableVersion }),
+  });
+}
+
+export function createDesktopRuntimeInstallProbe(options: {
+  readonly backend: Pick<HostBackend, "installer">;
+  readonly platform: string;
+  readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
+  readonly artifactRoot?: string;
+}): HostRuntimeInstallProbe {
+  const locate = createManagedArtifactLocator(options);
+  return async (): Promise<RuntimeInstallState> => {
+    let currentVersion: string | undefined;
+    try {
+      currentVersion = (await options.backend.installer.currentManifest())?.manifest.runtimeVersion;
+    } catch {
+      currentVersion = undefined;
+    }
+    return probeManagedRuntimeInstall({
+      platform: options.platform,
+      ...(currentVersion === undefined ? {} : { currentVersion }),
+      locateArtifact: locate,
+    });
+  };
+}
+
 export function createDesktopRuntimeInstallService(options: {
   readonly backend: Pick<HostBackend, "install" | "activate">;
   readonly platform: string;
   readonly hasTrustedKey: boolean;
   readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
+  readonly artifactRoot?: string;
   readonly activateOptions?: ActivateOptions;
   readonly afterActivate?: (manifest: RuntimeInstallationManifest) => Promise<void>;
 }): HostRuntimeInstallService {
+  const locate = createManagedArtifactLocator(options);
   return async (channel?: RuntimeChannel): Promise<RuntimeInstallState> => {
     if (!options.hasTrustedKey) {
       throw new Error(
         "Managed Runtime install requires OMP_RUNTIME_TRUSTED_PUBLIC_KEY and OMP_RUNTIME_SIGNING_KEY_ID. Run npm run omp:keys to create a local signing key.",
       );
     }
-    const locate = options.locateArtifact ?? locateManagedRuntimeArtifact;
     const artifactDirectory = await locate({
       platform: options.platform,
       ...(channel === undefined ? {} : { channel }),

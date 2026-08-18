@@ -41,6 +41,7 @@ export type SessionOperation =
       customInstructions?: string;
       reanswer?: unknown;
     }
+  | { kind: "session.tree.branch"; targetId: string }
   | { kind: "turn.retry" }
   | { kind: "session.fast.set"; enabled: boolean }
   | { kind: "session.prewalk.arm"; target?: string }
@@ -53,7 +54,11 @@ export type ModeOperation =
   | { kind: "mode.plan.review.open" }
   | {
       kind: "mode.plan.review.respond";
-      decision: "approve" | "refine" | "dismiss";
+      /**
+       * `execute` clears conversation context, `compact` distills it, `keep`
+       * preserves it. `approve` is the keep-context alias.
+       */
+      decision: "execute" | "compact" | "keep" | "approve" | "refine" | "dismiss";
       feedback?: string;
     }
   | { kind: "mode.vibe.enter"; initialPrompt?: string }

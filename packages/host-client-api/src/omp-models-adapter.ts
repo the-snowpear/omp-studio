@@ -37,7 +37,7 @@ import type {
   ModelRoleStorage,
   ModelRolesWriteInput,
 } from "@omp-studio/client-contract";
-import { parseCacheThinkingEfforts, parseModelThinkingEfforts } from "@omp-studio/client-contract";
+import { isModelEnvConfigName, parseCacheThinkingEfforts, parseModelThinkingEfforts } from "@omp-studio/client-contract";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseModelsYml, redactModelsYmlText, restoreRedactedApiKeys, serializeModelsYml, type YamlValue } from "./models-yml.js";
@@ -69,7 +69,7 @@ const PRESET_GROUPS: ReadonlyArray<ModelPresetGroup> = [
       { id: "openai-codex", name: "OpenAI Codex", desc: "Codex 订阅额度（ChatGPT 账号）", api: "openai-codex-responses", auth: ["oauth"], oauth: true, endpoint: "https://api.openai.com/v1" },
       { id: "google-gemini", name: "Google Gemini", desc: "Gemini 系列模型官方 API", api: "google-generative-ai", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://generativelanguage.googleapis.com/v1beta" },
       { id: "gemini-cli", name: "Google Gemini CLI", desc: "Gemini Code Assist 订阅", api: "google-gemini-cli", auth: ["oauth"], oauth: true },
-      { id: "xai", name: "xAI", desc: "Grok 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.x.ai/v1" },
+      { id: "xai", name: "xAI", desc: "Grok 系列模型", api: "openai-responses", auth: ["api-key"], endpoint: "https://api.x.ai/v1" },
       { id: "groq", name: "Groq", desc: "高速推理（Llama / Mixtral）", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.groq.com/openai/v1" },
       { id: "deepseek", name: "DeepSeek", desc: "DeepSeek V / R 系列", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.deepseek.com/v1" },
       { id: "moonshot", name: "Moonshot / Kimi", desc: "Kimi K 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.moonshot.cn/v1" },
@@ -172,9 +172,43 @@ export function envNameForProvider(id: string): string {
   return `${id.replace(/-/g, "_").toUpperCase()}_API_KEY`;
 }
 
-export function envHasSecret(id: string): boolean {
-  const value = process.env[envNameForProvider(id)];
+export function envHasValue(name: string): boolean {
+  const value = process.env[name];
   return typeof value === "string" && value.length > 0;
+}
+
+export function envHasSecret(id: string): boolean {
+  return envHasValue(envNameForProvider(id));
+}
+
+/** True when a models.yml `apiKey` should be treated as an env var name. */
+export function isEnvConfigName(value: string): boolean {
+  return isModelEnvConfigName(value) || envHasValue(value);
+}
+
+/** Resolve a stored `apiKey` (literal, env name, or `!command`) to a secret. */
+export function materializeApiKey(key: string | undefined): string | undefined {
+  if (typeof key !== "string" || key.length === 0) return undefined;
+  if (key.startsWith("!")) return undefined;
+  if (isEnvConfigName(key)) return envHasValue(key) ? process.env[key] : undefined;
+  return key;
+}
+
+function resolveRequestApiKey(
+  key: string | undefined,
+  fallbackProviderId?: string,
+): { command: true } | { missingEnv: string } | { value?: string } {
+  if (typeof key === "string" && key.startsWith("!")) return { command: true };
+  if (typeof key === "string" && isEnvConfigName(key)) {
+    const value = materializeApiKey(key);
+    return value ? { value } : { missingEnv: key };
+  }
+  if (typeof key === "string" && key.length > 0) return { value: key };
+  if (fallbackProviderId) {
+    const value = materializeApiKey(envNameForProvider(fallbackProviderId));
+    if (value) return { value };
+  }
+  return {};
 }
 
 export function ollamaTagsUrl(base: string): string {
@@ -325,7 +359,10 @@ function mapApi(api: string | undefined): ModelApiKind | string {
   return aliases[api] ?? api;
 }
 
-function authFromYaml(provider: ProviderYaml, providerId: string): { type: ModelAuthType; hasSecret: boolean; apiKey?: string } {
+function authFromYaml(
+  provider: ProviderYaml,
+  providerId: string,
+): { type: ModelAuthType; hasSecret: boolean; apiKey?: string; envName?: string } {
   if (provider.auth === "none") return { type: "none", hasSecret: false };
   if (provider.auth === "oauth") {
     return {
@@ -336,8 +373,12 @@ function authFromYaml(provider: ProviderYaml, providerId: string): { type: Model
   }
   const key = provider.apiKey;
   if (typeof key === "string" && key.startsWith("!")) return { type: "command", hasSecret: true, apiKey: key };
+  if (typeof key === "string" && isEnvConfigName(key)) {
+    return { type: "env", hasSecret: envHasValue(key), envName: key };
+  }
   if (typeof key === "string" && key.length > 0) return { type: "api-key", hasSecret: true, apiKey: key };
-  if (envHasSecret(providerId)) return { type: "env", hasSecret: true };
+  const conventional = envNameForProvider(providerId);
+  if (envHasValue(conventional)) return { type: "env", hasSecret: true, envName: conventional };
   return { type: "api-key", hasSecret: false };
 }
 
@@ -722,6 +763,7 @@ function providerFromYaml(
       type: auth.type === "oauth" && hasOAuth ? "oauth" : auth.type,
       hasSecret: auth.type === "oauth" ? hasOAuth : auth.hasSecret,
       ...(auth.apiKey === undefined ? {} : { apiKey: auth.apiKey }),
+      ...(auth.envName === undefined ? {} : { envName: auth.envName }),
     },
     ...(yaml.discovery?.type
       ? { discovery: { type: yaml.discovery.type, ...(yaml.discovery.timeoutMs === undefined ? {} : { timeoutMs: yaml.discovery.timeoutMs }) } }
@@ -775,6 +817,7 @@ function providersFromAvailable(
       auth: {
         type: authType,
         hasSecret: authType === "none" || authType === "env" ? envHasSecret(id) || authType === "none" : oauthOk || authType !== "oauth",
+        ...(authType === "env" ? { envName: envNameForProvider(id) } : {}),
       },
       ...(preset?.discovery ? { discovery: { type: preset.discovery } } : {}),
       models: models.map((model) => catalogEntryFromAvailable(model)),
@@ -817,22 +860,29 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
   // credential under another auth mode.
   const prevApiKey = typeof next.apiKey === "string" ? next.apiKey : undefined;
   const prevWasCommand = prevApiKey !== undefined && prevApiKey.startsWith("!");
+  const prevWasEnv = prevApiKey !== undefined && !prevWasCommand && isEnvConfigName(prevApiKey);
   if (input.auth.type === "none") {
     next.auth = "none";
     delete next.apiKey;
   } else if (input.auth.type === "oauth") {
     next.auth = "oauth";
-    if (prevWasCommand) delete next.apiKey;
-  } else if (input.auth.type === "command" && input.auth.command) {
-    next.apiKey = input.auth.command.startsWith("!") ? input.auth.command : `!${input.auth.command}`;
+    // A leftover bearer/env-name would win over OAuth in OMP resolution.
+    delete next.apiKey;
+  } else if (input.auth.type === "command") {
+    if (input.auth.command) {
+      next.apiKey = input.auth.command.startsWith("!") ? input.auth.command : `!${input.auth.command}`;
+    } else if (!prevWasCommand) {
+      delete next.apiKey;
+    }
     delete next.auth;
   } else if (input.auth.type === "api-key") {
     if (input.auth.clearSecret) delete next.apiKey;
     else if (input.auth.apiKey) next.apiKey = input.auth.apiKey;
-    else if (prevWasCommand) delete next.apiKey;
+    else if (prevWasCommand || prevWasEnv) delete next.apiKey;
     delete next.auth;
   } else if (input.auth.type === "env") {
-    delete next.apiKey;
+    const name = input.auth.envName?.trim();
+    next.apiKey = name && isEnvConfigName(name) ? name : envNameForProvider(input.id);
     delete next.auth;
   }
   if (input.headers !== undefined) {
@@ -1517,14 +1567,26 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         roles,
         cycleOrder: cycleOrder.length > 0 ? cycleOrder : ["smol", "default", "slow"],
         availableModels: mergedAvailable,
-        loginProviders: PRESET_GROUPS.flatMap((group) => group.items)
-          .filter((item) => item.oauth)
-          .map((item) => ({
-            id: item.id,
-            name: item.name,
-            available: Boolean(openUrl),
-            authenticated: authenticated.has(item.id),
-          })),
+        loginProviders: (() => {
+          const fromPresets = PRESET_GROUPS.flatMap((group) => group.items)
+            .filter((item) => item.oauth)
+            .map((item) => ({
+              id: item.id,
+              name: item.name,
+              available: Boolean(openUrl),
+              authenticated: authenticated.has(item.id),
+            }));
+          const seen = new Set(fromPresets.map((item) => item.id));
+          const fromYaml = providers
+            .filter((item) => item.auth.type === "oauth" && !seen.has(item.id))
+            .map((item) => ({
+              id: item.id,
+              name: item.name,
+              available: Boolean(openUrl),
+              authenticated: authenticated.has(item.id) || item.auth.hasSecret,
+            }));
+          return [...fromPresets, ...fromYaml];
+        })(),
         generatedModelsYml: redactModelsYmlText(file.text || serializeModelsYml(file.root)),
         generatedConfigYml,
         contentHash: file.hash,
@@ -1689,6 +1751,17 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       let apiKey = input.apiKey;
       let api = input.api;
 
+      if (apiKey !== undefined) {
+        const resolved = resolveRequestApiKey(apiKey);
+        if ("command" in resolved) {
+          return { ok: false, latencyMs: Date.now() - started, detail: "该供应商使用外部命令取凭据，无法在此自动测试，请在终端验证。" };
+        }
+        if ("missingEnv" in resolved) {
+          return { ok: false, latencyMs: Date.now() - started, detail: `未在环境中检测到 ${resolved.missingEnv}` };
+        }
+        apiKey = resolved.value;
+      }
+
       // Resolve saved config as defaults when a provider id is supplied.
       if (input.providerId) {
         const paths = await resolvePaths();
@@ -1700,11 +1773,17 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
             if (endpointUrl === undefined) endpointUrl = stringOf(raw.baseUrl);
             if (api === undefined) api = stringOf(raw.api);
             if (apiKey === undefined) {
-              const key = stringOf(raw.apiKey);
-              if (key !== undefined && key.startsWith("!")) {
-                return { ok: false, latencyMs: Date.now() - started, detail: "该供应商使用外部命令取凭据，无法在此自动测试，请在终端验证。" };
+              const yamlAuth = stringOf(raw.auth);
+              if (yamlAuth !== "none" && yamlAuth !== "oauth") {
+                const resolved = resolveRequestApiKey(stringOf(raw.apiKey), input.providerId);
+                if ("command" in resolved) {
+                  return { ok: false, latencyMs: Date.now() - started, detail: "该供应商使用外部命令取凭据，无法在此自动测试，请在终端验证。" };
+                }
+                if ("missingEnv" in resolved) {
+                  return { ok: false, latencyMs: Date.now() - started, detail: `未在环境中检测到 ${resolved.missingEnv}` };
+                }
+                apiKey = resolved.value;
               }
-              apiKey = key;
             }
           } catch {
             // Fall through to whatever was provided in the request.
@@ -1833,6 +1912,10 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       let apiKey = input.apiKey;
       let discoveryType = input.discoveryType;
       let timeoutMs = input.timeoutMs ?? TEST_TIMEOUT_MS;
+      if (apiKey) {
+        const resolved = resolveRequestApiKey(apiKey);
+        apiKey = "value" in resolved ? resolved.value : undefined;
+      }
       const paths = await resolvePaths();
       if (paths) {
         try {
@@ -1840,8 +1923,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           const raw = asRecord((asRecord(file.root.providers) ?? {})[input.providerId]) ?? {};
           if (!endpointUrl) endpointUrl = stringOf(raw.baseUrl);
           if (!apiKey) {
-            const key = stringOf(raw.apiKey);
-            if (key && !key.startsWith("!")) apiKey = key;
+            const resolved = resolveRequestApiKey(stringOf(raw.apiKey), input.providerId);
+            if ("value" in resolved) apiKey = resolved.value;
           }
           const discovery = asRecord(raw.discovery);
           if (!discoveryType) discoveryType = stringOf(discovery?.type);

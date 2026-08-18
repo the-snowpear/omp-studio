@@ -48,7 +48,19 @@ function pathMatches(path: string, focus: string): boolean {
 
 /** 右侧 Changes 页签：本轮对话（transcript 工具调用）产生的文件改动。
     不是 Git 工作区状态——那是「Git 管理」页的职责。 */
-export function SessionChanges({ rows, focusPath }: { rows: readonly TimelineRow[]; focusPath?: string }) {
+export function SessionChanges({
+  rows,
+  focusPath,
+  focusTurnId,
+  focusKey,
+}: {
+  rows: readonly TimelineRow[];
+  focusPath?: string;
+  /** 对话 TurnDiffCard「审核」传入的轮次 id（与 `listSessionChangeTurns` 一致）。 */
+  focusTurnId?: string;
+  /** 同一轮再次审核时递增，避免被轮次菜单改过之后无法跳回。 */
+  focusKey?: number;
+}) {
   const turns = useMemo(() => listSessionChangeTurns(rows).map(toTurnOption), [rows]);
   const [turnId, setTurnId] = useState(SESSION_CHANGE_LAST_ID);
   const [split, setSplit] = useState(false);
@@ -64,12 +76,19 @@ export function SessionChanges({ rows, focusPath }: { rows: readonly TimelineRow
   }, [known]);
 
   useEffect(() => {
+    if (focusTurnId === undefined) return;
+    setTurnId(focusTurnId);
+    setExpanded(new Set());
+  }, [focusTurnId, focusKey]);
+
+  useEffect(() => {
+    if (focusTurnId !== undefined) return;
     if (focusPath === undefined) return;
     const nextTurn = sessionChangeTurnIdForPath(rows, focusPath) ?? SESSION_CHANGE_LAST_ID;
     const hit = sessionChangeScope(rows, nextTurn).files.find((file) => pathMatches(file.path, focusPath));
     setTurnId(nextTurn);
     setExpanded(hit === undefined ? new Set() : new Set([hit.path]));
-  }, [focusPath, rows]);
+  }, [focusPath, focusTurnId, rows]);
 
   const files = scope.files.map((file) => fileDiff(file.path, patches.get(file.path) ?? [], file.add, file.del));
   const sessionHasFiles = turns.some((turn) => turn.id === SESSION_CHANGE_SESSION_ID && (turn.add > 0 || turn.del > 0));

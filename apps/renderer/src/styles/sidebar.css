@@ -147,19 +147,6 @@
    平分剩余空间，造成操作组与收起按钮之间的大空隙，这里清零让两者紧贴。 */
 .sb-head-actions + .icon-btn { margin-left: 0; }
 
-/* Overflow-hidden panels clip upward CSS tooltips into a dark sliver.
-   Keep hover tips below the header, and never paint them while pressed. */
-.sb-section-head [data-tip]:hover::after,
-.sb-section-head [data-tip]:focus-visible::after {
-  top: calc(100% + 6px);
-  bottom: auto;
-}
-.sb-section-head [data-tip]:active::after,
-#sbFiles.collapse [data-tip]:hover::after,
-#sbFiles.collapse [data-tip]:focus-visible::after {
-  content: none;
-}
-
 .sb-scroll {
   flex: 1;
   min-height: 0;
@@ -203,16 +190,6 @@
 .project-head-row:hover .p-actions,
 .project-head-row:focus-within .p-actions { display: inline-flex; }
 .p-actions .icon-btn { width: 20px; height: 20px; }
-/* 行内按钮的 tip 改到按钮下方并右对齐：项目列表区 overflow 隐藏，向上的 tip
-   会被裁掉，居中 tip 会从右侧溢出滚动容器。 */
-.project-head-row [data-tip]:hover::after,
-.project-head-row [data-tip]:focus-visible::after {
-  top: calc(100% + 6px);
-  bottom: auto;
-  left: auto;
-  right: 0;
-  transform: none;
-}
 /* 左侧图标位：默认显示文件夹图标（展开 folder-open / 收起 folder），悬停整行时
    换为折叠箭头（chevron-d / chevron-r）。固定 14px 槽位 + 居中，图标切换时
    项目名不位移。 */
@@ -362,15 +339,6 @@
 }
 .thread-row.has-wait:hover .t-scroll {
   transform: translateX(min(100cqw - 100% - 66px, 0px));
-}
-/* 会话行的行内 tip 与项目行同规则：列表区 overflow 隐藏，向下弹、右对齐。 */
-.thread-row [data-tip]:hover::after,
-.thread-row [data-tip]:focus-visible::after {
-  top: calc(100% + 6px);
-  bottom: auto;
-  left: auto;
-  right: 0;
-  transform: none;
 }
 /* 「展开更多」：第 7 位起的出现口，与会话标题同左缘（文件夹槽 + gap）。 */
 .load-more {
@@ -658,7 +626,8 @@
   --fname-clear: 33px;
 }
 /* 徽章与按钮显隐同步淡出（状态集与 .fop 显隐完全一致）。 */
-.tree-row:where([data-file], [data-dir]):where(:hover, :focus-visible, :focus-within) .fstat {
+.tree-row:where([data-file], [data-dir]):where(:hover, :focus-visible, :focus-within) .fstat,
+.tree-row:where([data-file], [data-dir]):where(:hover, :focus-visible, :focus-within) .live {
   opacity: 0;
   min-width: 0;
   max-width: 0;
@@ -717,7 +686,15 @@
 .tree-new-status.error { color: var(--red); }
 
 /* 过程状态标记 */
-.tree-row .live { display: inline-flex; flex: none; }
+.tree-row .live {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  max-width: 24px;
+  transition: opacity var(--dur-fast) var(--ease-out), min-width var(--dur-fast) var(--ease-out), max-width var(--dur-fast) var(--ease-out);
+}
 .tree-row.turn-file .fname { font-weight: var(--fw-medium); color: var(--text); }
 .tree-row .diag {
   width: 5px; height: 5px; border-radius: var(--r-full); flex: none;
@@ -797,10 +774,43 @@
 }
 .omp-menu-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-8);
-  padding: var(--sp-8) var(--sp-8) var(--sp-10);
+  padding: var(--sp-4) var(--sp-8) var(--sp-8);
 }
+.omp-menu-profile {
+  width: calc(100% - 2 * var(--sp-6));
+  margin: var(--sp-2) var(--sp-6) 0;
+  padding: var(--sp-4) var(--sp-8) var(--sp-8);
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.omp-menu-profile .avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+}
+.omp-menu-profile:hover { background: var(--surface-hover); }
+.omp-menu-profile > span:not(.avatar) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.omp-menu-profile .u-name,
+.omp-menu-head .v {
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
+}
+.omp-menu-profile .u-name { font-weight: var(--fw-semibold); }
 .omp-menu-head .logo {
   width: 26px; height: 26px; border-radius: var(--r-6);
   background: var(--accent);
@@ -959,12 +969,6 @@
 }
 .sd-head .spacer { flex: 1; }
 .sd-head .icon-btn { width: 24px; height: 24px; }
-/* 抽屉贴着 .sb-top，向上的 tip 会被裁掉，改到按钮下方 */
-.sd-head [data-tip]:hover::after,
-.sd-head [data-tip]:focus-visible::after {
-  top: calc(100% + 6px);
-  bottom: auto;
-}
 
 /* 搜索框 */
 .sd-search {
@@ -1297,18 +1301,6 @@
 .persistent-retry { opacity:1!important; pointer-events:auto!important; color:var(--red)!important; background:var(--red-soft)!important; }
 .sk-card.is-retrying .sk-icon .icon { animation:sk-row-spin .9s linear infinite; }
 @keyframes sk-row-spin { to { transform:rotate(360deg); } }
-
-/* 卡片内 tip 改到按钮左侧，避免被 overflow:hidden 和列表滚动裁切 */
-.sk-card [data-tip]:hover::after,
-.sk-card [data-tip]:focus-visible::after {
-  top: 50%;
-  bottom: auto;
-  left: auto;
-  right: calc(100% + 6px);
-  transform: translateY(-50%);
-  max-width: 140px;
-  white-space: nowrap;
-}
 
 /* 悬停简介：从卡片右侧浮入工作台，不被抽屉 overflow 裁切 */
 .sk-fly {

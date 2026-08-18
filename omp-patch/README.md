@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The v5 architecture pins `can1357/oh-my-pi` at commit `45e12e5bb758198a920c6070e7e64cb33b21beac` for the initial audited baseline.
+The managed Runtime pin is `can1357/oh-my-pi` `v17.3.7` at commit `8500092296621a6826b7136e840f8a59ea338958`. The initial audited baseline was `45e12e5bb758198a920c6070e7e64cb33b21beac`.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 

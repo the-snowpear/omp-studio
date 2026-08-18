@@ -24,13 +24,21 @@ describe("task progress dock", () => {
     const dock = document.querySelector(".task-dock");
     const shell = document.querySelector(".task-dock-shell");
     const collapse = document.querySelector(".task-dock-collapse");
+    const bar = document.querySelector(".task-dock-bar");
     const pill = document.querySelector(".task-dock-pill");
     expect(dock?.classList.contains("open")).toBe(false);
     expect(dock?.classList.contains("both")).toBe(true);
     expect(collapse?.getAttribute("aria-hidden")).toBe("true");
     expect(collapse?.hasAttribute("hidden")).toBe(false);
     expect(shell?.firstElementChild).toBe(collapse);
-    expect(shell?.lastElementChild).toBe(pill);
+    expect(shell?.lastElementChild).toBe(bar);
+    expect(bar?.contains(pill)).toBe(true);
+    expect(bar?.classList.contains("has-review")).toBe(false);
+    expect(toggle.textContent).not.toContain("任务");
+    expect(toggle.textContent).not.toContain("文件修改");
+    expect(toggle.textContent).not.toContain("审核");
+    expect(document.querySelector(".task-dock-ring")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "审核" })).toBeNull();
   });
 
   it("expands into a todo list on the left and file changes on the right", () => {
@@ -60,9 +68,15 @@ describe("task progress dock", () => {
     expect(p1.getAttribute("aria-expanded")).toBe("false");
     expect(p2.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("group", { name: "P2 验证" }).textContent).toContain("重新运行 typecheck 与 lint 确认通过");
+    expect(document.querySelector(".task-dock-col-head")).toBeNull();
     expect(screen.getByLabelText("任务列表").textContent).toContain("创建 Checkpoint #13 并汇总本轮变更");
     expect(screen.getByLabelText("文件修改").textContent).toContain("UPSTREAM-SYNC.md");
     expect(screen.getByLabelText("文件修改").textContent).toContain("MermaidBlock.tsx");
+    const bar = document.querySelector(".task-dock-bar");
+    expect(bar?.classList.contains("has-review")).toBe(true);
+    expect(bar?.textContent).not.toMatch(/任务\s*\d/);
+    expect(bar?.querySelector(".task-dock-bar-tasks")).toBeNull();
+    expect(bar?.querySelector(".task-dock-bar-label")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "审核" }));
     expect(reviewed).toEqual(["review"]);
     fireEvent.click(screen.getByRole("button", { name: /打开 docs\/UPSTREAM-SYNC.md/ }));
@@ -76,14 +90,23 @@ describe("task progress dock", () => {
     expect(document.querySelector(".task-dock")?.classList.contains("open")).toBe(true);
     expect(screen.getByLabelText("任务列表")).toBeTruthy();
     expect(screen.queryByLabelText("文件修改")).toBeNull();
+    const tasksBar = document.querySelector(".task-dock-bar");
+    expect(tasksBar?.classList.contains("has-review")).toBe(false);
+    expect(document.querySelector(".task-dock-ring")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "审核" })).toBeNull();
     unmount();
 
     render(<TaskProgressDock todos={[]} files={PREVIEW_TODO_FILES} />);
+    expect(document.querySelector(".task-dock-ring")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /3 个文件已更改/ }));
     expect(document.querySelector(".task-dock")?.classList.contains("single")).toBe(true);
     expect(screen.getByLabelText("文件修改")).toBeTruthy();
     expect(screen.queryByLabelText("任务列表")).toBeNull();
     expect(screen.queryByText("本轮还没有待办")).toBeNull();
+    const filesBar = document.querySelector(".task-dock-bar");
+    expect(filesBar?.classList.contains("has-review")).toBe(true);
+    expect(document.querySelector(".task-dock-ring")).toBeNull();
+    expect(screen.getByRole("button", { name: "审核" })).toBeTruthy();
   });
 
   it("keeps a single unnamed or default Tasks list flat", () => {
@@ -181,5 +204,86 @@ describe("task progress dock", () => {
     expect(document.querySelector("[data-current=true]")?.textContent).toContain("提交");
     expect(scrollTo).toHaveBeenCalled();
     Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+    Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+  });
+
+  it("does not re-scroll when the todo array is replaced with the same snapshot", async () => {
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const list = this.classList.contains("task-dock-todos");
+      return {
+        top: list ? 0 : 80,
+        height: list ? 140 : 28,
+        bottom: list ? 140 : 108,
+        left: 0,
+        right: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      } as DOMRect;
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return 140; } });
+    const first = [
+      { id: "1", phase: "文档", content: "读文档", status: "completed" as const },
+      { id: "2", phase: "验证", content: "lint", status: "in_progress" as const },
+    ];
+    const { rerender } = render(<TaskProgressDock todos={first} files={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /第 2 \/ 2 步/ }));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(scrollTo).toHaveBeenCalled();
+    scrollTo.mockClear();
+    rerender(<TaskProgressDock todos={first.map((todo) => ({ ...todo }))} files={[]} />);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(scrollTo).not.toHaveBeenCalled();
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+    Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+  });
+
+  it("keeps a manual scroll until the next todo list update", async () => {
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const list = this.classList.contains("task-dock-todos");
+      return {
+        top: list ? 0 : 80,
+        height: list ? 140 : 28,
+        bottom: list ? 140 : 108,
+        left: 0,
+        right: 0,
+        width: 100,
+        x: 0,
+        y: 0,
+        toJSON() {},
+      } as DOMRect;
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return 140; } });
+    const first = [
+      { id: "1", phase: "文档", content: "读文档", status: "completed" as const },
+      { id: "2", phase: "验证", content: "lint", status: "in_progress" as const },
+      { id: "3", phase: "验证", content: "提交", status: "pending" as const },
+    ];
+    const { rerender } = render(<TaskProgressDock todos={first} files={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /第 2 \/ 3 步/ }));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    scrollTo.mockClear();
+    fireEvent.wheel(document.querySelector(".task-dock-todos")!);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(scrollTo).not.toHaveBeenCalled();
+    rerender(
+      <TaskProgressDock
+        todos={[
+          { id: "1", phase: "文档", content: "读文档", status: "completed" },
+          { id: "2", phase: "验证", content: "lint", status: "completed" },
+          { id: "3", phase: "验证", content: "提交", status: "in_progress" },
+        ]}
+        files={[]}
+      />,
+    );
+    expect(document.querySelector("[data-current=true]")?.textContent).toContain("提交");
+    expect(scrollTo).toHaveBeenCalled();
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+    Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
   });
 });

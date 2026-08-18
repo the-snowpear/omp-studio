@@ -25,7 +25,7 @@ import {
 import { assertOverlayPresent, overlayHash } from "./omp-overlay.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "45e12e5bb758198a920c6070e7e64cb33b21beac";
+const REAL_UPSTREAM_COMMIT = "8500092296621a6826b7136e840f8a59ea338958";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 async function fixtureInputs() {
@@ -194,6 +194,7 @@ test("artifact manifest carries the contract fields derived from real pin/series
     "job.subscribe",
     "session.tree.get",
     "session.tree.navigate",
+    "session.tree.branch",
     "session.fork",
     "session.handoff",
     "session.model.set",
@@ -304,11 +305,11 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.commit, REAL_UPSTREAM_COMMIT);
   assert.equal(series.upstreamCommit, upstream.commit);
   assert.equal(upstream.entrypoint, "omp.exe");
-  assert.equal(upstreamVersion, "17.2.12");
+  assert.equal(upstreamVersion, "17.3.7");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `17.2.12-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `17.3.7-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }

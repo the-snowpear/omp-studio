@@ -147,7 +147,7 @@ export class StudioStateProjector {
 			isStreaming: this.#runtime.session.isStreaming,
 			isCompacting: this.#runtime.session.isCompacting,
 			activeMode,
-			approvalMode: this.#approvalMode(),
+			approvalMode: this.#runtime.services.permissions?.state() ?? this.#approvalMode(),
 			pause: this.#pauseService.state(),
 			...(this.#pendingInteraction === undefined
 				? {}

@@ -114,4 +114,40 @@ describe("WP-041 StudioBtwService", () => {
 			error: { code: "OUTPUT_LIMIT" },
 		});
 	});
+
+	test("branch cancellation or failure restores the token so a retry is not stale", async () => {
+		const cancelled = fixture();
+		cancelled.session.branchFromBtw = async () => ({ cancelled: true });
+		const cancelledStarted = cancelled.service.ask("question");
+		cancelled.run.resolve({ replyText: "answer", assistantMessage: assistant("answer") });
+		await Bun.sleep(0);
+		await expect(cancelled.service.branch(cancelledStarted.ephemeralId, cancelledStarted.branchToken)).resolves.toEqual({
+			branched: false,
+			reason: "cancelled",
+		});
+		await expect(cancelled.service.branch(cancelledStarted.ephemeralId, cancelledStarted.branchToken)).resolves.toEqual({
+			branched: false,
+			reason: "cancelled",
+		});
+
+		const failing = fixture();
+		let attempts = 0;
+		failing.session.branchFromBtw = async () => {
+			attempts += 1;
+			if (attempts === 1) throw new Error("disk full");
+			return { cancelled: false };
+		};
+		const failingStarted = failing.service.ask("question");
+		failing.run.resolve({ replyText: "answer", assistantMessage: assistant("answer") });
+		await Bun.sleep(0);
+		await expect(failing.service.branch(failingStarted.ephemeralId, failingStarted.branchToken)).rejects.toMatchObject({
+			code: "COMMAND_BLOCKED",
+		});
+		await expect(failing.service.branch(failingStarted.ephemeralId, failingStarted.branchToken)).resolves.toEqual({
+			branched: true,
+			newSessionId: "session-1",
+			newLeafId: "leaf-1",
+		});
+		expect(attempts).toBe(2);
+	});
 });

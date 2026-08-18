@@ -81,6 +81,7 @@ export type AgentOperation =
       expectedGeneration: Generation;
       text: string;
       mode: "prompt" | "steer" | "followUp";
+      images?: unknown[];
     }
   | { kind: "agent.kill"; agentId: AgentId; expectedGeneration: Generation }
   | { kind: "agent.revive"; agentId: AgentId; expectedGeneration: Generation }

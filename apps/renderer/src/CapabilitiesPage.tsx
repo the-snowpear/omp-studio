@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { ConfigWriteResult, McpServerRecord, StudioClient } from "@omp-studio/client-contract";
+import { createPortal } from "react-dom";
+import type {
+  ConfigWriteResult,
+  McpServerRecord,
+  McpTestResult,
+  StudioClient,
+} from "@omp-studio/client-contract";
 import { Icon } from "./icons";
 import { ToastHost } from "./ToastHost";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
@@ -9,8 +15,16 @@ import {
   createPreviewMcp,
   createPreviewSlashCommands,
   type PreviewMcp,
+  type PreviewSlash,
 } from "./capabilitiesPreview";
+import {
+  lookupSlashCommand,
+  slashNeedsArgs,
+  visibleSlashCatalog,
+  type StudioSlashCommand,
+} from "./composer/commands";
 import { pluginToPreview, skillToPreview } from "./extensibilityMap";
+import { hostErrorMessage, waitReceipt } from "./hostError";
 import {
   createPreviewDrawerItems,
   withUniqueDrawerKeys,
@@ -33,15 +47,34 @@ const TABS: ReadonlyArray<readonly [CapTab, string, string]> = [
 ];
 
 const CONTRACT = {
-  folder: "打开来源目录不在公共 contract 中",
-  create: "创建 Skill 不在公共 contract 中",
-  view: "Skill 详情不在公共 contract 中",
-  reveal: "打开 Skill 目录不在公共 contract 中",
-  remove: "删除 Skill 不在公共 contract 中",
-  plugin: "Plugin 详情 / 卸载不在公共 contract 中",
-  mcp: "MCP 连接控制尚未接入",
-  slash: "演示 slash 不能当作 operator.invoke id 执行",
+  create: "创建（暂未实现）",
+  view: "查看（暂未实现）",
+  remove: "删除（暂未实现）",
+  plugin: "插件（暂未实现）",
+  builtinDir: "内置技能无本地目录",
+  shadowed: "被更高优先级配置覆盖",
+  slashComposer: "请在 Composer 输入",
 } as const;
+
+type McpLogView = {
+  readonly name: string;
+  readonly lines: readonly string[];
+  readonly emptyReason?: string;
+};
+
+function slashToPreview(command: StudioSlashCommand): PreviewSlash {
+  return {
+    name: `/${command.name}`,
+    desc: command.description,
+    src: "内置",
+    args: command.hint ?? "",
+    ok: command.availability === "available",
+  };
+}
+
+function slashBareName(name: string): string {
+  return name.startsWith("/") ? name.slice(1) : name;
+}
 
 export function setCapIntent(tab: CapTab, name?: string): void {
   try {
@@ -69,19 +102,6 @@ function previewSkills(): SkillPreview[] {
   return createPreviewDrawerItems().filter((item): item is SkillPreview => item.kind === "skill");
 }
 
-/** Resolve a command's terminal result; rejects with an Error on failure. */
-function waitReceipt<T>(client: StudioClient, requestId: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const unsub = client.subscribe({ scope: "command", requestId: requestId as never }, (event) => {
-      if (event.kind !== "command.receipt" || event.receipt.requestId !== requestId) return;
-      unsub();
-      if (event.receipt.status === "completed") resolve(event.receipt.result as T);
-      else if (event.receipt.status === "failed") reject(new Error(event.receipt.error?.message ?? "命令失败"));
-      else reject(new Error(`命令未完成：${event.receipt.status}`));
-    });
-  });
-}
-
 function previewPlugins(): PluginPreview[] {
   return createPreviewDrawerItems().filter((item): item is PluginPreview => item.kind === "plugin");
 }
@@ -101,7 +121,7 @@ function Switch({ on, label, onToggle, disabled }: { on: boolean; label: string;
       aria-checked={on}
       aria-label={label}
       disabled={disabled}
-      title={disabled ? "正在写入 OMP 配置…" : undefined}
+      data-tip={disabled ? "写入中" : undefined}
       onClick={onToggle}
     />
   );
@@ -109,7 +129,7 @@ function Switch({ on, label, onToggle, disabled }: { on: boolean; label: string;
 
 function Disabled({ className, tip, children }: { className: string; tip: string; children: ReactNode }) {
   return (
-    <button type="button" className={className} disabled title={tip}>
+    <button type="button" className={className} disabled data-tip={tip}>
       {children}
     </button>
   );
@@ -171,7 +191,13 @@ function Summary({
   );
 }
 
-export function CapabilitiesPage({ client }: { client: StudioClient }) {
+export function CapabilitiesPage({
+  client,
+  onRunSlash,
+}: {
+  client: StudioClient;
+  onRunSlash?: (command: StudioSlashCommand, args: string) => Promise<boolean>;
+}) {
   const { preview } = usePreviewMode();
   const [tab, setTab] = useState<CapTab>("skills");
   const [skills, setSkills] = useState<SkillPreview[]>(() => preview ? previewSkills() : []);
@@ -184,11 +210,16 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
   const [pluginBusy, setPluginBusy] = useState<ReadonlySet<string>>(new Set());
   const [skillBusy, setSkillBusy] = useState<ReadonlySet<string>>(new Set());
   const [mcpBusy, setMcpBusy] = useState<ReadonlySet<string>>(new Set());
+  const [mcpTesting, setMcpTesting] = useState<ReadonlySet<string>>(new Set());
+  const [mcpLogs, setMcpLogs] = useState<McpLogView | null>(null);
   const itemRefs = useRef(new Map<string, HTMLElement>());
   const tabIndex = TABS.findIndex(([id]) => id === tab);
   const { incoming, outgoing, dir, live, stageRef } = useOverlappingTabs(tab, tabIndex);
 
-  const slash = useMemo(() => preview ? createPreviewSlashCommands() : [], [preview]);
+  const slash = useMemo(
+    () => (preview ? createPreviewSlashCommands() : visibleSlashCatalog().map(slashToPreview)),
+    [preview],
+  );
 
   const refresh = useCallback(async () => {
     if (preview) {
@@ -252,6 +283,127 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
 
   const toast = (text: string) => {
     setFlash(text);
+  };
+
+  const withMcpBusy = async (name: string, run: () => Promise<void>, testing = false) => {
+    setMcpBusy((current) => new Set(current).add(name));
+    if (testing) setMcpTesting((current) => new Set(current).add(name));
+    try {
+      await run();
+    } finally {
+      setMcpBusy((current) => {
+        const nextSet = new Set(current);
+        nextSet.delete(name);
+        return nextSet;
+      });
+      if (testing) {
+        setMcpTesting((current) => {
+          const nextSet = new Set(current);
+          nextSet.delete(name);
+          return nextSet;
+        });
+      }
+    }
+  };
+
+  const revealSkill = async (skill: SkillPreview) => {
+    if (preview) {
+      toast("演示：已打开目录");
+      return;
+    }
+    try {
+      const handle = await client.command("skills.reveal", { name: skill.name });
+      const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
+      toast(receipt.message ?? `已打开 ${skill.name} 所在目录`);
+    } catch (error) {
+      toast(hostErrorMessage(error, "无法打开目录"));
+    }
+  };
+
+  const revealSkillRoot = async () => {
+    if (preview) {
+      toast("演示：已打开目录");
+      return;
+    }
+    try {
+      const handle = await client.command("skills.revealRoot", { scope: "user" });
+      const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
+      toast(receipt.message ?? "已打开用户技能目录");
+    } catch (error) {
+      toast(hostErrorMessage(error, "无法打开目录"));
+    }
+  };
+
+  const refreshMcp = async (item: McpServerRecord | PreviewMcp) => {
+    if (preview) {
+      toast("演示：已刷新配置");
+      return;
+    }
+    if ("status" in item && item.status === "shadowed") return;
+    await withMcpBusy(item.name, async () => {
+      try {
+        const handle = await client.command("mcp.refresh", { name: item.name });
+        const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
+        toast(receipt.message ?? "已刷新配置");
+        await refresh();
+      } catch (error) {
+        toast(hostErrorMessage(error, "刷新失败"));
+      }
+    });
+  };
+
+  const testMcp = async (item: McpServerRecord | PreviewMcp) => {
+    if (preview) {
+      const tools = "tools" in item && typeof item.tools === "number" ? item.tools : 0;
+      toast(`演示：已连接（${tools} 个工具）`);
+      return;
+    }
+    if ("status" in item && item.status === "shadowed") return;
+    await withMcpBusy(item.name, async () => {
+      try {
+        const handle = await client.command("mcp.test", {
+          name: item.name,
+          ...("scope" in item ? { scope: item.scope } : {}),
+        });
+        const result = await waitReceipt<McpTestResult>(client, handle.requestId);
+        toast(result.ok ? (result.detail || `已连接（${result.toolCount ?? 0} 个工具）`) : result.detail);
+        await refresh();
+      } catch (error) {
+        toast(hostErrorMessage(error, "测试连接失败"));
+      }
+    }, true);
+  };
+
+  const openMcpLogs = async (item: McpServerRecord | PreviewMcp) => {
+    if (preview) {
+      setMcpLogs({ name: item.name, lines: [], emptyReason: "尚无日志，请先测试连接" });
+      return;
+    }
+    try {
+      const result = await client.query("mcp.logs.get", { name: item.name });
+      setMcpLogs({
+        name: result.name,
+        lines: result.lines,
+        ...(result.emptyReason === undefined ? {} : { emptyReason: result.emptyReason }),
+      });
+    } catch (error) {
+      toast(hostErrorMessage(error, "无法读取日志"));
+    }
+  };
+
+  const runSlash = async (row: PreviewSlash) => {
+    if (preview) {
+      toast(`演示：已执行 ${row.name}`);
+      return;
+    }
+    const command = lookupSlashCommand(slashBareName(row.name));
+    if (command === undefined || onRunSlash === undefined) return;
+    if (slashNeedsArgs(command, "")) return;
+    try {
+      await onRunSlash(command, "");
+    } catch (error) {
+      toast(hostErrorMessage(error, `执行 ${row.name} 失败`));
+    }
   };
 
   /**
@@ -379,7 +531,7 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
                       onToggle={() => void toggleSkill(skill)}
                     />
                   ) : skill.scope === "builtin" ? (
-                    <Disabled className="switch" tip="内置技能不可切换">
+                    <Disabled className="switch" tip="内置">
                       <span className="sr-only">启用 Skill {skill.name}</span>
                     </Disabled>
                   ) : (
@@ -391,13 +543,25 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
                     />
                   )}
                   <Disabled className="btn small outline" tip={CONTRACT.view}>查看</Disabled>
-                  <Disabled className="icon-btn small" tip={CONTRACT.reveal}><Icon name="folder-open" extra="sm" /></Disabled>
+                  {skill.scope === "builtin" ? (
+                    <Disabled className="icon-btn small" tip={CONTRACT.builtinDir}><Icon name="folder-open" extra="sm" /></Disabled>
+                  ) : (
+                    <button
+                      type="button"
+                      className="icon-btn small"
+                      data-tip="打开来源目录"
+                      aria-label={`打开来源目录：${skill.name}`}
+                      onClick={() => void revealSkill(skill)}
+                    >
+                      <Icon name="folder-open" extra="sm" />
+                    </button>
+                  )}
                   <Disabled className="icon-btn small danger" tip={CONTRACT.remove}><Icon name="trash" extra="sm" /></Disabled>
                 </div>
               </div>
               <div className="cap-item-body">
                 <p className="cap-item-desc">{skill.desc}</p>
-                {sourcePath ? <span className="cap-source" title={sourcePath}>{sourcePath}</span> : null}
+                {sourcePath ? <span className="cap-source" data-tip={sourcePath}>{sourcePath}</span> : null}
               </div>
               {skill.error ? (
                 <div className="cap-error">
@@ -523,9 +687,21 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
                     </div>
                   </div>
                   <div className="cap-item-actions">
-                    <Disabled className="btn small outline" tip={CONTRACT.mcp}>测试连接<span className="sr-only">：{item.name}</span></Disabled>
-                    <Disabled className="btn small outline" tip={CONTRACT.mcp}>日志<span className="sr-only">：{item.name}</span></Disabled>
-                    <Disabled className="icon-btn small" tip={CONTRACT.mcp}><Icon name="refresh" extra="sm" /></Disabled>
+                    <button type="button" className="btn small outline" aria-label={`测试连接：${item.name}`} onClick={() => void testMcp(item)}>
+                      测试连接
+                    </button>
+                    <button type="button" className="btn small outline" aria-label={`日志：${item.name}`} onClick={() => void openMcpLogs(item)}>
+                      日志
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn small"
+                      data-tip="刷新"
+                      aria-label={`刷新：${item.name}`}
+                      onClick={() => void refreshMcp(item)}
+                    >
+                      <Icon name="refresh" extra="sm" />
+                    </button>
                     <Switch
                       on={isOn}
                       label={`启用 MCP 服务器 ${item.name}`}
@@ -587,9 +763,40 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
                   </div>
                 </div>
                 <div className="cap-item-actions">
-                  <Disabled className="btn small outline" tip={CONTRACT.mcp}>测试连接<span className="sr-only">：{item.name}</span></Disabled>
-                  <Disabled className="btn small outline" tip={CONTRACT.mcp}>日志<span className="sr-only">：{item.name}</span></Disabled>
-                  <Disabled className="icon-btn small" tip={CONTRACT.mcp}><Icon name="refresh" extra="sm" /></Disabled>
+                  {item.status === "shadowed" ? (
+                    <>
+                      <button type="button" className="btn small outline" disabled data-tip={CONTRACT.shadowed} aria-label={`测试连接：${item.name}`}>测试连接</button>
+                      <button type="button" className="btn small outline" aria-label={`日志：${item.name}`} onClick={() => void openMcpLogs(item)}>
+                        日志
+                      </button>
+                      <Disabled className="icon-btn small" tip={CONTRACT.shadowed}><Icon name="refresh" extra="sm" /></Disabled>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="btn small outline"
+                        aria-label={`测试连接：${item.name}`}
+                        disabled={mcpBusy.has(item.name)}
+                        onClick={() => void testMcp(item)}
+                      >
+                        测试连接
+                      </button>
+                      <button type="button" className="btn small outline" aria-label={`日志：${item.name}`} onClick={() => void openMcpLogs(item)}>
+                        日志
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn small"
+                        data-tip="刷新"
+                        aria-label={`刷新：${item.name}`}
+                        disabled={mcpBusy.has(item.name)}
+                        onClick={() => void refreshMcp(item)}
+                      >
+                        <Icon name="refresh" extra="sm" />
+                      </button>
+                    </>
+                  )}
                   <Switch
                     on={item.enabled}
                     label={`启用 MCP 服务器 ${item.name}`}
@@ -600,10 +807,14 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
               </div>
               <div className="cap-item-body">
                 <div className="cap-item-meta">
-                  <span>Tools —</span>
+                  <span>Tools {item.lastProbe?.toolCount ?? "—"}</span>
                   <span>Resources —</span>
                   <span>Prompts —</span>
-                  <span className="mono">配置库存（非连接态）</span>
+                  <span className="mono">
+                    {item.lastProbe
+                      ? (item.lastProbe.ok ? item.lastProbe.detail : `探测失败 · ${item.lastProbe.detail}`)
+                      : "配置库存（非连接态）"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -625,25 +836,45 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
           ]}
         />
         <div className="cap-slash-list">
-          {slash.map((command) => (
-            <div
-              key={command.name}
-              className="cap-slash-row"
-              data-ok={String(command.ok)}
-              data-name={command.name}
-              tabIndex={highlight === command.name ? 0 : -1}
-              ref={bindItem(command.name)}
-            >
-              <div className="cap-slash-name">
-                <span className="a-ic purple"><Icon name="slash" extra="sm" /></span>
-                <span className="mono">{command.name}</span>
-                <span className="muted">{command.args}</span>
+          {slash.map((command) => {
+            const catalog = preview ? undefined : lookupSlashCommand(slashBareName(command.name));
+            const needsArgs = catalog !== undefined && slashNeedsArgs(catalog, "");
+            const canRun = preview
+              ? command.ok
+              : command.ok && catalog !== undefined && onRunSlash !== undefined && !needsArgs;
+            const tip = preview
+              ? undefined
+              : !command.ok
+                ? (catalog?.disabledReason ?? "当前会话不可用")
+                : needsArgs
+                  ? `${CONTRACT.slashComposer} ${command.name} …`
+                  : undefined;
+            return (
+              <div
+                key={command.name}
+                className="cap-slash-row"
+                data-ok={String(command.ok)}
+                data-name={command.name}
+                tabIndex={highlight === command.name ? 0 : -1}
+                ref={bindItem(command.name)}
+              >
+                <div className="cap-slash-name">
+                  <span className="a-ic purple"><Icon name="slash" extra="sm" /></span>
+                  <span className="mono">{command.name}</span>
+                  <span className="muted">{command.args}</span>
+                </div>
+                <div className="cap-slash-desc">{command.desc}<span className="muted"> · {command.src}</span></div>
+                <span className={`chip ${command.ok ? "green" : "gray"} sm`}>{command.ok ? "当前会话可用" : "不可用"}</span>
+                {canRun ? (
+                  <button className="btn small primary" type="button" onClick={() => void runSlash(command)}>
+                    执行
+                  </button>
+                ) : (
+                  <Disabled className="btn small primary" tip={tip ?? "无法执行"}>执行</Disabled>
+                )}
               </div>
-              <div className="cap-slash-desc">{command.desc}<span className="muted"> · {command.src}</span></div>
-              <span className={`chip ${command.ok ? "green" : "gray"} sm`}>{command.ok ? "当前会话可用" : "不可用"}</span>
-              <button className="btn small primary" type="button" disabled title={CONTRACT.slash}>执行</button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </>
     );
@@ -667,10 +898,16 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
           ) : null}
         </div>
         <span className="spacer" />
-        <Disabled className="btn outline" tip={CONTRACT.folder}><Icon name="folder" extra="sm" />打开来源目录</Disabled>
+        <button type="button" className="btn outline" onClick={() => void revealSkillRoot()}>
+          <Icon name="folder" extra="sm" />打开来源目录
+        </button>
         <Disabled className="btn primary" tip={CONTRACT.create}><Icon name="plus" extra="sm" />创建 Skill</Disabled>
       </div>
-      <ToastHost message={flash} onDismiss={() => setFlash(null)} />
+      <ToastHost
+        message={mcpTesting.size === 0 ? flash : `正在测试 ${[...mcpTesting].join("、")}…`}
+        sticky={mcpTesting.size > 0}
+        onDismiss={() => setFlash(null)}
+      />
       <div className="cap-layout">
         <SlidingTabs
           id="capSide"
@@ -718,6 +955,38 @@ export function CapabilitiesPage({ client }: { client: StudioClient }) {
           </div>
         </div>
       </div>
+      {mcpLogs ? createPortal(
+        <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => setMcpLogs(null)}>
+          <section
+            className="modal create-project-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="capMcpLogTitle"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="create-project-head">
+              <div>
+                <span className="create-project-kicker">MCP</span>
+                <h2 id="capMcpLogTitle">{mcpLogs.name} 日志</h2>
+              </div>
+              <button type="button" className="icon-btn" aria-label="关闭" onClick={() => setMcpLogs(null)}>
+                <Icon name="x" />
+              </button>
+            </div>
+            <div className="create-project-body">
+              {mcpLogs.lines.length === 0 ? (
+                <p className="muted">{mcpLogs.emptyReason ?? "尚无日志，请先测试连接"}</p>
+              ) : (
+                <pre className="cap-log-body mono">{mcpLogs.lines.join("\n")}</pre>
+              )}
+            </div>
+            <div className="create-project-foot">
+              <button type="button" className="btn outline" onClick={() => setMcpLogs(null)}>关闭</button>
+            </div>
+          </section>
+        </div>,
+        document.body,
+      ) : null}
     </div>
   );
 }

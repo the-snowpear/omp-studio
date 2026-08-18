@@ -52,7 +52,7 @@ export function TurnDiffCard({
           type="button"
           className="btn small turn-diff-review"
           onClick={onReview}
-          title={demo === true ? "打开右侧 Changes 面板（演示）" : "打开右侧 Changes 面板"}
+          data-tip={demo === true ? "Changes（演示）" : "Changes"}
         >
           <Icon name="diff" extra="sm" />
           审核
@@ -72,8 +72,8 @@ export function TurnDiffCard({
                 <span className="turn-diff-icon" aria-hidden="true">
                   <Icon name={fileIcon(file.name)} extra="sm" />
                 </span>
-                <span className="turn-diff-name" title={file.path}>{file.name}</span>
-                {file.dir ? <span className="turn-diff-dir" title={file.dir}>{file.dir}</span> : null}
+                <span className="turn-diff-name" data-tip={file.path}>{file.name}</span>
+                {file.dir ? <span className="turn-diff-dir" data-tip={file.dir}>{file.dir}</span> : null}
                 {file.add || file.del ? (
                   <span className="turn-diff-file-stats">
                     {file.add ? <span className="add">+{file.add}<span className="sr-only"> 行新增</span></span> : null}

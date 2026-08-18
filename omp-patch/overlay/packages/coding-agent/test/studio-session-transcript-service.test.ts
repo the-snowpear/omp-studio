@@ -8,6 +8,7 @@ import {
 import {
 	StudioSessionTranscriptError,
 	StudioSessionTranscriptService,
+	projectConversationBranch,
 } from "@oh-my-pi/pi-coding-agent/studio/services/session-transcript-service";
 import { StudioStateProjector } from "@oh-my-pi/pi-coding-agent/studio/state-projector";
 import type { StudioHostRuntime } from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
@@ -109,6 +110,43 @@ describe("StudioSessionTranscriptService", () => {
 				{ type: "toolCall", toolCallId: "call-1", toolName: "Read", arguments: { path: "package.json" } },
 			],
 		});
+	});
+
+	test("omits developer and synthetic/steering user harness messages from the public page", () => {
+		using tempDir = TempDir.createSync("@omp-studio-transcript-harness-");
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		const userId = manager.appendMessage(userMessage("hello"));
+		manager.appendMessage({
+			role: "developer",
+			content: [
+				{
+					type: "text",
+					text: "<system-reminder>\nYou stopped with 2 incomplete todo item(s):\n</system-reminder>",
+				},
+			],
+			attribution: "agent",
+			timestamp: Date.now(),
+		});
+		manager.appendMessage({
+			role: "user",
+			content: "<instruction>MUST read local://annotation-channel-v2-plan.md</instruction>",
+			synthetic: true,
+			timestamp: Date.now(),
+		});
+		manager.appendMessage({
+			role: "user",
+			content: "steer the turn",
+			steering: true,
+			timestamp: Date.now(),
+		});
+		const assistantId = manager.appendMessage(assistantMessage([{ type: "text", text: "done" }]));
+		const page = serviceFor(manager).read();
+		expect(page.items.map(item => item.itemId)).toEqual([userId, assistantId]);
+		expect(page.items.map(item => (item.kind === "message" ? item.role : item.kind))).toEqual(["user", "assistant"]);
+		const serialized = JSON.stringify(page);
+		expect(serialized).not.toContain("system-reminder");
+		expect(serialized).not.toContain("<instruction>");
+		expect(serialized).not.toContain("steer the turn");
 	});
 
 	test("maps successful and failed tool results without leaking providerPayload", () => {
@@ -352,5 +390,122 @@ describe("StudioSessionTranscriptService", () => {
 		expect(afterPersist).not.toBe(emptyCursor);
 		expect(projector.response("snap-persisted").messagesCursor).toBe(afterPersist);
 		projector.dispose();
+	});
+});
+
+describe("projectConversationBranch", () => {
+	test("inserts an orphan toolResult in chronological order", () => {
+		const items = projectConversationBranch([
+			{
+				type: "message",
+				id: "u1",
+				parentId: null,
+				timestamp: "2026-08-15T00:00:01.000Z",
+				message: { role: "user", content: "hi", timestamp: 1 },
+			},
+			{
+				type: "message",
+				id: "orphan",
+				parentId: "u1",
+				timestamp: "2026-08-15T00:00:02.000Z",
+				message: {
+					role: "toolResult",
+					toolCallId: "missing",
+					toolName: "Bash",
+					content: [{ type: "text", text: "out" }],
+					isError: false,
+					timestamp: 2,
+				},
+			},
+			{
+				type: "message",
+				id: "u2",
+				parentId: "orphan",
+				timestamp: "2026-08-15T00:00:03.000Z",
+				message: { role: "user", content: "later", timestamp: 3 },
+			},
+		] as never);
+		expect(items.map(item => item.itemId)).toEqual(["u1", "orphan", "u2"]);
+	});
+
+	test("empty toolCallIds pair onto the parent call and stay unique across assistants", () => {
+		const items = projectConversationBranch([
+			{
+				type: "message",
+				id: "a1",
+				parentId: null,
+				timestamp: "2026-08-15T00:00:01.000Z",
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "", name: "Bash", arguments: {} }],
+					timestamp: 1,
+				},
+			},
+			{
+				type: "message",
+				id: "r1",
+				parentId: "a1",
+				timestamp: "2026-08-15T00:00:02.000Z",
+				message: {
+					role: "toolResult",
+					toolCallId: "",
+					toolName: "Bash",
+					content: [{ type: "text", text: "one" }],
+					isError: false,
+					timestamp: 2,
+				},
+			},
+			{
+				type: "message",
+				id: "a2",
+				parentId: "r1",
+				timestamp: "2026-08-15T00:00:03.000Z",
+				message: {
+					role: "assistant",
+					content: [{ type: "toolCall", id: "", name: "Read", arguments: {} }],
+					timestamp: 3,
+				},
+			},
+		] as never);
+		expect(items.map(item => item.itemId)).toEqual(["a1", "a2"]);
+		const first = items[0];
+		const second = items[1];
+		expect(first?.kind).toBe("message");
+		expect(second?.kind).toBe("message");
+		if (first?.kind !== "message" || second?.kind !== "message") return;
+		const firstCall = first.content.find(block => block.type === "toolCall");
+		const firstResult = first.content.find(block => block.type === "toolResult");
+		const secondCall = second.content.find(block => block.type === "toolCall");
+		expect(firstCall?.type === "toolCall" && firstCall.toolCallId !== "tool-call").toBe(true);
+		expect(firstResult?.type === "toolResult" && firstResult.output).toBe("one");
+		expect(firstCall?.type === "toolCall" && firstResult?.type === "toolResult" && firstCall.toolCallId === firstResult.toolCallId).toBe(true);
+		expect(secondCall?.type === "toolCall" && firstCall?.type === "toolCall" && secondCall.toolCallId !== firstCall.toolCallId).toBe(true);
+	});
+
+	test("over-long toolCallIds stay unique after bounding", () => {
+		const prefix = "x".repeat(CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS);
+		const items = projectConversationBranch([
+			{
+				type: "message",
+				id: "a1",
+				parentId: null,
+				timestamp: "2026-08-15T00:00:01.000Z",
+				message: {
+					role: "assistant",
+					content: [
+						{ type: "toolCall", id: `${prefix}a`, name: "Bash", arguments: {} },
+						{ type: "toolCall", id: `${prefix}b`, name: "Read", arguments: {} },
+					],
+					timestamp: 1,
+				},
+			},
+		] as never);
+		const message = items[0];
+		expect(message?.kind).toBe("message");
+		if (message?.kind !== "message") return;
+		const ids = message.content.filter(block => block.type === "toolCall").map(block => block.toolCallId);
+		expect(ids).toHaveLength(2);
+		expect(ids[0]).not.toBe(ids[1]);
+		expect(ids.every(id => id.length <= CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS)).toBe(true);
 	});
 });

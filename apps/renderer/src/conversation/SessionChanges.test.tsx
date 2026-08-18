@@ -120,4 +120,32 @@ describe("SessionChanges", () => {
       "10", "10", "11", "", "", "11",
     ]);
   });
+
+  it("selects the earlier turn when reviewing that conversation card", () => {
+    const rows: readonly TimelineRow[] = [
+      assistantRow("a1", [tool("e1", "edit", { path: "src/a.ts" }, { diff: "+1|one" })]),
+      userRow("u2"),
+      assistantRow("a2", [tool("e2", "edit", { path: "src/b.ts" }, { diff: "+1|two" })]),
+    ];
+    render(<SessionChanges rows={rows} focusTurnId="a1" focusKey={1} />);
+    expect(screen.getByRole("button", { name: "选择改动轮次" }).textContent).toContain("第 1 轮");
+    expect(screen.getByRole("button", { name: "展开 src/a.ts 的会话改动" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "展开 src/b.ts 的会话改动" })).toBeNull();
+  });
+
+  it("returns to the reviewed turn when the same card is audited again", () => {
+    const rows: readonly TimelineRow[] = [
+      assistantRow("a1", [tool("e1", "edit", { path: "src/a.ts" }, { diff: "+1|one" })]),
+      userRow("u2"),
+      assistantRow("a2", [tool("e2", "edit", { path: "src/b.ts" }, { diff: "+1|two" })]),
+    ];
+    const { rerender } = render(<SessionChanges rows={rows} focusTurnId="a1" focusKey={1} />);
+    fireEvent.click(screen.getByRole("button", { name: "选择改动轮次" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "改动轮次" })).getByRole("menuitem", { name: /最近一轮/ }));
+    expect(screen.getByRole("button", { name: "选择改动轮次" }).textContent).toContain("最近一轮");
+
+    rerender(<SessionChanges rows={rows} focusTurnId="a1" focusKey={2} />);
+    expect(screen.getByRole("button", { name: "选择改动轮次" }).textContent).toContain("第 1 轮");
+    expect(screen.getByRole("button", { name: "展开 src/a.ts 的会话改动" })).toBeTruthy();
+  });
 });

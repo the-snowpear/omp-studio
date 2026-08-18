@@ -14,8 +14,11 @@ import * as path from "node:path";
 import type {
   ConfigWriteResult,
   McpConfigStatus,
+  McpLastProbe,
+  McpLogsReadModel,
   McpReadModel,
   McpServerRecord,
+  McpTestResult,
   McpTransport,
 } from "@omp-studio/client-contract";
 
@@ -24,10 +27,12 @@ import { listClaudePluginRoots, type ClaudePluginRoot } from "./omp-discovery/he
 import { getAgentDir, getProjectConfigDir } from "./omp-discovery/paths.js";
 import { listOmpPluginRoots, listSettingsExtensionRoots } from "./omp-discovery/plugin-roots.js";
 import { sanitizeDisplayText } from "./read-models.js";
+import { probeMcpServer, type McpConnectSpec } from "./omp-mcp-probe.js";
 import type { HostMcpService } from "./services.js";
 
 const NAME_MAX = 80;
 const WARNING_MAX = 240;
+const LOG_CAP = 80;
 const MCP_NAME = /^[A-Za-z0-9][A-Za-z0-9._:.-]{0,99}$/;
 const AGENT_PLUGIN_MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
 
@@ -85,6 +90,9 @@ interface McpServerEntry {
   transport?: string;
   command?: unknown;
   url?: unknown;
+  args?: unknown;
+  env?: unknown;
+  headers?: unknown;
 }
 
 interface InternalServer {
@@ -97,6 +105,7 @@ interface InternalServer {
   readonly rank: number;
   readonly seq: number;
   readonly writableNative: boolean;
+  readonly connect: McpConnectSpec;
   shadowed: boolean;
 }
 
@@ -113,6 +122,38 @@ function safeName(value: string): string | undefined {
   const trimmed = value.trim();
   if (!MCP_NAME.test(trimmed)) return undefined;
   return sanitizeDisplayText(trimmed, NAME_MAX) ?? undefined;
+}
+
+function stringMap(value: unknown): Record<string, string> | undefined {
+  const record = asRecord(value);
+  if (record === undefined) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, item] of Object.entries(record)) {
+    if (typeof item === "string" && item.length > 0) out[key] = item;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = value.filter((item): item is string => typeof item === "string");
+  return out.length > 0 ? out : undefined;
+}
+
+function connectSpec(transport: McpTransport, entry: McpServerEntry): McpConnectSpec {
+  const command = typeof entry.command === "string" ? entry.command : undefined;
+  const url = typeof entry.url === "string" ? entry.url : undefined;
+  const args = stringList(entry.args);
+  const env = stringMap(entry.env);
+  const headers = stringMap(entry.headers);
+  return {
+    transport,
+    ...(command === undefined ? {} : { command }),
+    ...(args === undefined ? {} : { args }),
+    ...(env === undefined ? {} : { env }),
+    ...(url === undefined ? {} : { url }),
+    ...(headers === undefined ? {} : { headers }),
+  };
 }
 
 function inferTransport(entry: McpServerEntry): McpTransport {
@@ -208,10 +249,14 @@ function listFromMap(
     if (typeof entry.transport === "string") mapped.transport = entry.transport;
     if (entry.command !== undefined) mapped.command = entry.command;
     if (entry.url !== undefined) mapped.url = entry.url;
+    if (entry.args !== undefined) mapped.args = entry.args;
+    if (entry.env !== undefined) mapped.env = entry.env;
+    if (entry.headers !== undefined) mapped.headers = entry.headers;
+    const transport = inferTransport(mapped);
     seq.n += 1;
     servers.push({
       name,
-      transport: inferTransport(mapped),
+      transport,
       entryEnabled: mapped.enabled !== false,
       scope,
       sourceLabel,
@@ -219,6 +264,7 @@ function listFromMap(
       rank,
       seq: seq.n,
       writableNative,
+      connect: connectSpec(transport, mapped),
       shadowed: false,
     });
   }
@@ -554,6 +600,7 @@ function toRecord(
   server: InternalServer,
   disabled: ReadonlySet<string>,
   forced: ReadonlySet<string>,
+  lastProbe?: McpLastProbe,
 ): McpServerRecord {
   const sourceSaysDisabled = !server.entryEnabled && !forced.has(server.name);
   const denied = disabled.has(server.name);
@@ -568,6 +615,7 @@ function toRecord(
     status,
     sourceLabel: server.sourceLabel,
     scope: server.scope,
+    ...(lastProbe === undefined ? {} : { lastProbe }),
   };
 }
 
@@ -575,6 +623,35 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
   const home = options.home ?? homedir();
   const now = options.now ?? (() => new Date().toISOString());
   const getCwd = options.getCwd ?? (() => undefined);
+  const lastProbes = new Map<string, McpLastProbe>();
+  const logLines = new Map<string, string[]>();
+
+  const appendLog = (name: string, lines: readonly string[]): void => {
+    const prev = logLines.get(name) ?? [];
+    const next = [...prev, ...lines].slice(-LOG_CAP);
+    logLines.set(name, next);
+  };
+
+  const pickServer = (
+    servers: InternalServer[],
+    name: string,
+    scope?: "user" | "project",
+  ): InternalServer => {
+    const matches = servers.filter((server) => server.name === name);
+    if (matches.length === 0) {
+      throw { code: "INVALID_ARGUMENT", message: `未找到 MCP 服务器 ${name}` };
+    }
+    const preferred =
+      (scope === "user" || scope === "project"
+        ? matches.find((server) => server.scope === scope)
+        : undefined) ??
+      matches.find((server) => !server.shadowed) ??
+      matches[0];
+    if (preferred === undefined) {
+      throw { code: "INVALID_ARGUMENT", message: `未找到 MCP 服务器 ${name}` };
+    }
+    return preferred;
+  };
 
   const userNativePath = () => path.join(getAgentDir(home), "mcp.json");
 
@@ -807,7 +884,7 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
       try {
         const { servers, warnings, disabled, forced } = await collect();
         const records = servers
-          .map((server) => toRecord(server, disabled, forced))
+          .map((server) => toRecord(server, disabled, forced, lastProbes.get(server.name)))
           .sort((a, b) => a.name.localeCompare(b.name));
         return {
           servers: records,
@@ -887,6 +964,65 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
       await writeJsonFile(userFile, nextUser);
 
       return WRITE_OK(input.enabled ? `已启用 ${name}` : `已禁用 ${name}`);
+    },
+
+    async refresh(input) {
+      const { servers } = await collect();
+      if (input?.name !== undefined) {
+        const name = safeName(input.name);
+        if (name === undefined) {
+          throw { code: "INVALID_ARGUMENT", message: "无效的 MCP 服务器名称" };
+        }
+        pickServer(servers, name);
+        const line = sanitizeDisplayText(`已重新扫描 ${name}`, WARNING_MAX) ?? `已重新扫描 ${name}`;
+        appendLog(name, [line]);
+        return WRITE_OK(`已重新扫描 ${name}。当前会话需新开会话后才会重载连接。`);
+      }
+      return WRITE_OK(`已重新扫描 ${servers.length} 个 MCP 配置。当前会话需新开会话后才会重载连接。`);
+    },
+
+    async test(input): Promise<McpTestResult> {
+      const name = safeName(input.name);
+      if (name === undefined) {
+        throw { code: "INVALID_ARGUMENT", message: "无效的 MCP 服务器名称" };
+      }
+      const { servers } = await collect();
+      const server = pickServer(servers, name, input.scope);
+      if (server.shadowed) {
+        throw { code: "INVALID_ARGUMENT", message: `${name} 被更高优先级配置覆盖` };
+      }
+      const cwd = getCwd()?.trim();
+      const outcome = await probeMcpServer(server.connect, cwd ? { cwd } : {});
+      const probe: McpLastProbe = {
+        ok: outcome.ok,
+        at: now(),
+        detail: outcome.detail,
+        ...(outcome.toolCount === undefined ? {} : { toolCount: outcome.toolCount }),
+      };
+      lastProbes.set(name, probe);
+      appendLog(name, outcome.logLines);
+      return {
+        ok: outcome.ok,
+        latencyMs: outcome.latencyMs,
+        detail: outcome.detail,
+        ...(outcome.toolCount === undefined ? {} : { toolCount: outcome.toolCount }),
+      };
+    },
+
+    async logs(input): Promise<McpLogsReadModel> {
+      const name = safeName(input.name);
+      if (name === undefined) {
+        throw { code: "INVALID_ARGUMENT", message: "无效的 MCP 服务器名称" };
+      }
+      const { servers } = await collect();
+      pickServer(servers, name);
+      const lines = logLines.get(name) ?? [];
+      return {
+        name,
+        lines,
+        generatedAt: now(),
+        ...(lines.length === 0 ? { emptyReason: "尚无日志，请先测试连接" } : {}),
+      };
     },
   };
 }

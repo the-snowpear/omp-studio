@@ -362,13 +362,6 @@ body.is-pv-sorting * {
   position: relative;
 }
 .pv-dot { width: 8px; height: 8px; }
-.pv-count[data-tip]:hover::after {
-  content: attr(data-tip);
-  position: absolute; top: calc(100% + 6px); left: 0;
-  background: var(--text); color: var(--surface);
-  font-size: 10.5px; padding: 3px 7px; border-radius: var(--r-4);
-  white-space: nowrap; z-index: var(--z-menu); pointer-events: none;
-}
 .pv-sub {
   font-size: var(--fs-11); color: var(--text-3);
   margin-top: 7px; display: flex; gap: var(--sp-10); flex-wrap: wrap;
@@ -465,46 +458,6 @@ body.is-pv-sorting * {
 }
 .pv-act.is-testing svg { animation: pv-spin 0.9s linear infinite; }
 @keyframes pv-spin { to { transform: rotate(360deg); } }
-
-/* tooltip（hover / 键盘聚焦显示按钮含义）。与 components.css 的全局
-   [data-tip] 气泡同款外观，但放在按钮下方：.pv-card 是 overflow:hidden，
-   全局规则的「上方」气泡会被裁成一条无文字的黑色细条（见 sidebar.css
-   sb-section-head 的同样处理）。必须显式 bottom:auto——全局规则会带
-   bottom:calc(100% + 6px)，与这里的 top 同时生效会把气泡盒压成 0 高、
-   只剩 padding 的黑色细条。显示延迟 350ms（鼠标在按钮上停留片刻才出现），
-   移开后立即淡出。 */
-.pv-act[data-tip]::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 6px);
-  bottom: auto;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--text);
-  color: var(--bg);
-  font-size: var(--fs-11);
-  line-height: 1.45;
-  padding: 3px 8px;
-  border-radius: var(--r-4);
-  width: max-content;
-  max-width: 220px;
-  text-align: center;
-  z-index: var(--z-menu);
-  pointer-events: none;
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity var(--dur-fast) var(--ease) 0s,
-    visibility 0s linear 350ms;
-}
-.pv-act[data-tip]:hover::after,
-.pv-act[data-tip]:focus-visible::after {
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity var(--dur-fast) var(--ease) 350ms,
-    visibility 0s linear 350ms;
-}
 
 /* 开关：槽位必须让出 .switch 的 34×20 轨迹，否则 28×28 盒会把旋钮挤进
    展开箭头的命中区，看起来像开关点不动。 */
@@ -712,7 +665,7 @@ body.is-pv-sorting * {
   margin-top: var(--sp-10);
 }
 .auth-status {
-  display: flex; align-items: center; gap: var(--sp-8);
+  display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap;
   font-size: var(--fs-12); color: var(--text-2);
   padding: var(--sp-8) var(--sp-10);
   border-radius: var(--r-6);
@@ -720,6 +673,9 @@ body.is-pv-sorting * {
   border: 1px solid var(--border);
   margin-bottom: var(--sp-10);
 }
+.auth-status .chip { margin-left: auto; }
+.auth-actions { display: flex; gap: var(--sp-8); flex-wrap: wrap; }
+.auth-env-ok { color: var(--green); }
 
 /* API Key 输入框：右侧小眼睛，点击切换明文/密文 */
 .pwd-input { position: relative; }
@@ -1003,7 +959,9 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   display: flex; align-items: center; gap: var(--sp-8);
   padding: var(--sp-10) var(--sp-2);
   background: linear-gradient(to top, var(--bg) 70%, transparent);
-  z-index: var(--z-base);
+  /* Above .sa-model-add (z-index 2) so 保存 is not covered by the model picker
+     stacking context while the editor is scrolled. Open model menu uses 20. */
+  z-index: var(--z-resizer);
 }
 .mp-foot .right { margin-left: auto; display: flex; gap: var(--sp-8); }
 
@@ -1813,7 +1771,10 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   margin: 0 0 var(--sp-8) 2px;
   letter-spacing: 0.02em;
 }
-.sa-card {
+.sa-field-error { color: var(--red); }
+/* 只作用在模型配置 / 子代理定义列表（.pv-card.sa-card）。
+   对话工具链的紧凑卡也叫 .sa-card，不能吃到这里的横向居中。 */
+.pv-card.sa-card {
   display: flex;
   align-items: center;
   gap: var(--sp-12);
@@ -1839,6 +1800,74 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   align-items: center;
   align-self: center;
   gap: var(--sp-6);
+}
+/* 仅当前卡片 hover / 键盘焦点时显示。右 margin 把按钮从开关再拉开一点。 */
+.sa-card-delete {
+  width: 28px;
+  height: 28px;
+  margin: 0 var(--sp-8) 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-6);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  position: relative;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(6px);
+  transition:
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out),
+    visibility 0s linear var(--dur),
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.sa-card-delete svg { width: 14px; height: 14px; }
+.pv-card.sa-card:hover .sa-card-delete,
+.pv-card.sa-card:focus-within .sa-card-delete {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(0);
+  transition:
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out),
+    visibility 0s linear 0s,
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.sa-card-delete:hover,
+.sa-card-delete:focus-visible {
+  background: var(--red-soft);
+  color: var(--red);
+  outline: none;
+}
+.sa-card-delete:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-border);
+}
+.pv-card.sa-card:hover .sa-card-delete:disabled,
+.pv-card.sa-card:focus-within .sa-card-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.sa-delete-modal {
+  width: 400px;
+}
+.modal-backdrop.sa-delete-backdrop {
+  padding-top: 22vh;
+}
+.sa-delete-modal .modal-body p {
+  margin: 0;
+}
+.sa-delete-modal .modal-body p + p {
+  margin-top: var(--sp-8);
 }
 .sa-card-top {
   display: flex;
@@ -1882,6 +1911,80 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   flex-wrap: wrap;
   gap: var(--sp-6);
   min-height: 24px;
+}
+.sa-model-pick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-10);
+}
+.sa-model-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-6);
+}
+.sa-model-inherit {
+  font-size: var(--fs-12);
+  color: var(--text-faint);
+}
+.sa-model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  max-width: 100%;
+  padding: 0 6px 0 10px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: var(--fs-12);
+  font-family: var(--font-mono);
+}
+.sa-model-pill > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sa-model-pill .icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--text-3);
+}
+.sa-model-add {
+  z-index: 2;
+}
+.sa-model-add:has(.cmp-menu) {
+  z-index: 20;
+}
+.sa-model-add .pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-full);
+  border: 1px dashed var(--border-strong);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.sa-model-add .pill-btn span {
+  max-width: none;
+  overflow: visible;
+}
+.sa-model-add .pill-btn .icon {
+  width: 13px;
+  height: 13px;
+}
+.sa-model-add .pill-btn:hover,
+.sa-model-add .pill-btn[aria-expanded="true"] {
+  border-style: solid;
+  border-color: var(--accent-border);
+  color: var(--accent);
+  background: var(--accent-softer);
 }
 .sa-chip {
   display: inline-flex;
@@ -2018,3 +2121,57 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   background: var(--accent-soft);
 }
 .thinking-effort-menu .pick-check .icon { width: 11px; height: 11px; }
+
+.mc-select { position: relative; width: 100%; min-width: 0; }
+.mc-select-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-8);
+  padding-right: var(--sp-8);
+  text-align: left;
+  cursor: pointer;
+}
+.mc-select-btn > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mc-select-btn .icon { flex: none; color: var(--text-faint); }
+.mc-select-btn.is-open { border-color: var(--accent-border); }
+.menu.mc-select-menu {
+  position: fixed;
+  min-width: 0;
+  z-index: calc(var(--z-modal) + 1);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mc-select-option {
+  align-items: flex-start;
+  min-height: 40px;
+  padding: var(--sp-6) var(--sp-8);
+}
+.mc-select-option.is-on {
+  color: var(--text);
+  background: var(--accent-softer);
+}
+.mc-select-option .icon { flex: none; margin-top: 2px; color: var(--accent); }
+.mc-select-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.mc-select-copy b {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+.mc-select-copy span {
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}

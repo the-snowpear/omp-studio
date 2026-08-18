@@ -16,7 +16,7 @@ import type {
   StateVersion,
 } from "@omp-studio/client-contract";
 import type { CommandId, InteractionId } from "@omp-studio/studio-protocol";
-import { HostBackend, type StudioInteractionForward } from "@omp-studio/studio-host";
+import { HostBackend, type RuntimePublication, type StudioInteractionForward } from "@omp-studio/studio-host";
 
 import { StudioHostClientFacade, type HostRuntimeAccess } from "../src/index.js";
 
@@ -358,4 +358,76 @@ test("bootstrap hides a TUI-owned pending interaction", async () => {
     const bootstrap: ClientBootstrap = await facade.bootstrap();
     assert.equal(bootstrap.pendingInteraction, undefined);
   });
+});
+
+function guiPendingConfirm() {
+  return {
+    request: {
+      kind: "confirm" as const,
+      interactionId: "int-1" as InteractionId,
+      commandId: "cmd-1" as CommandId,
+      title: "Confirm drop",
+      message: "Drop the session?",
+    },
+    owner: "gui" as const,
+    leaseGeneration: 1,
+  };
+}
+
+test("later snapshots do not re-emit the same GUI interaction.required", async () => {
+  let publish: (publication: RuntimePublication) => void = () => undefined;
+  let current = { ...snapshot(), pendingInteraction: guiPendingConfirm() };
+  await withFacade(
+    {
+      hello,
+      snapshot: () => current,
+      onPublication: (listener) => {
+        publish = listener;
+        return () => {
+          publish = () => undefined;
+        };
+      },
+    },
+    async (facade) => {
+      const received: ClientEvent[] = [];
+      facade.subscribe({ scope: "all" }, (event) => received.push(event));
+      publish({ commitSeq: 1, publishedAt: T0, snapshot: current, terminalOutcomes: [] });
+      current = { ...current, stateVersion: 5 as StateVersion };
+      publish({ commitSeq: 2, publishedAt: T0, snapshot: current, terminalOutcomes: [] });
+      assert.equal(received.filter((event) => event.kind === "interaction.required").length, 1);
+    },
+  );
+});
+
+test("a live interaction.required is not repeated by a following snapshot of the same lease", async () => {
+  let publish: (publication: RuntimePublication) => void = () => undefined;
+  const listeners: Array<(event: StudioInteractionForward) => void> = [];
+  await withFacade(
+    {
+      hello,
+      snapshot,
+      onInteractionEvent: (listener) => {
+        listeners.push(listener);
+        return () => undefined;
+      },
+      onPublication: (listener) => {
+        publish = listener;
+        return () => {
+          publish = () => undefined;
+        };
+      },
+    },
+    async (facade) => {
+      const received: ClientEvent[] = [];
+      facade.subscribe({ scope: "all" }, (event) => received.push(event));
+      listeners[0]!(guiConfirm());
+      publish({
+        commitSeq: 1,
+        publishedAt: T0,
+        snapshot: { ...snapshot(), stateVersion: 5 as StateVersion, pendingInteraction: guiPendingConfirm() },
+        terminalOutcomes: [],
+      });
+      assert.equal(received.filter((event) => event.kind === "interaction.required").length, 1);
+    },
+  );
 });

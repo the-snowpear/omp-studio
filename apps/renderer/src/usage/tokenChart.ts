@@ -206,6 +206,14 @@ export function clampPtsToPlot(
   ]);
 }
 
+/** Keep native x, park every sample on the zero baseline for a rise-in morph. */
+export function flattenToBaseline(
+  pts: ReadonlyArray<ChartPx>,
+  baselineY: number,
+): Array<[number, number]> {
+  return pts.map((point) => [point[0], baselineY]);
+}
+
 /** CSS cubic-bezier(0.25, 0.46, 0.45, 0.94) — matches `--ease-ios`. */
 export function easeIos(t: number): number {
   if (t <= 0) return 0;

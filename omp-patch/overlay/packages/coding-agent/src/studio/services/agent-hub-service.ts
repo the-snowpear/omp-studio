@@ -130,9 +130,9 @@ export interface StudioAgentTranscriptPage {
  */
 export interface StudioLiveAgentPort {
 	readonly isStreaming: boolean;
-	prompt(text: string): Promise<boolean>;
-	steer(text: string): Promise<void>;
-	followUp(text: string): Promise<void>;
+	prompt(text: string, options?: { images?: readonly unknown[] }): Promise<boolean>;
+	steer(text: string, images?: readonly unknown[]): Promise<void>;
+	followUp(text: string, images?: readonly unknown[]): Promise<void>;
 	abort(options?: { reason?: string }): Promise<void>;
 }
 
@@ -388,6 +388,7 @@ export class StudioAgentHubService {
 		text: string;
 		mode: StudioAgentSendMode;
 		callerAgentId: string;
+		images?: readonly unknown[];
 	}): Promise<{
 		outcome: StudioAgentDeliveryOutcome;
 		generation: number;
@@ -436,16 +437,20 @@ export class StudioAgentHubService {
 			throw new StudioAgentHubError("LIFECYCLE_ERROR", `Agent "${args.agentId}" has no live session`);
 		}
 		const wasStreaming = live.isStreaming;
+		const images = args.images;
 		try {
 			if (args.mode === "prompt") {
-				const submitted = await live.prompt(text);
+				const submitted = images === undefined ? await live.prompt(text) : await live.prompt(text, { images });
 				if (submitted === false) {
 					throw new StudioAgentHubError("DELIVERY_FAILED", `Message to "${args.agentId}" was not accepted`);
 				}
 			} else if (args.mode === "steer") {
-				await live.steer(text);
-			} else {
+				if (images === undefined) await live.steer(text);
+				else await live.steer(text, images);
+			} else if (images === undefined) {
 				await live.followUp(text);
+			} else {
+				await live.followUp(text, images);
 			}
 		} catch (error) {
 			if (error instanceof StudioAgentHubError) throw error;

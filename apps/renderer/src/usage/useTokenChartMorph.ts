@@ -6,6 +6,7 @@ import {
   CHART_SAMPLE_COUNT,
   clampPtsToPlot,
   easeIos,
+  flattenToBaseline,
   lerpPoints,
   sampleForMorph,
   smoothPath,
@@ -38,6 +39,16 @@ function uniqueIds(left: readonly string[], right: readonly string[]): string[] 
     ids.push(id);
   }
   return ids;
+}
+
+function hasDrawableCurve(models: readonly TokenChartModelPts[]): boolean {
+  return models.some((model) => model.pts.length >= 2);
+}
+
+function flattenSamples(samples: SampleMap, baselineY: number): SampleMap {
+  const next: SampleMap = new Map();
+  for (const [id, pts] of samples) next.set(id, flattenToBaseline(pts, baselineY));
+  return next;
 }
 
 function nativePaths(models: readonly TokenChartModelPts[]): TokenChartModelPath[] {
@@ -84,6 +95,7 @@ export function useTokenChartMorph(
   const startRef = useRef(0);
   const morphingRef = useRef(false);
   const primedRef = useRef(false);
+  const introDoneRef = useRef(false);
   modelsRef.current = models;
 
   const stop = () => {
@@ -113,33 +125,7 @@ export function useTokenChartMorph(
     writePaths(width < 8 ? [] : nativePaths(next));
   };
 
-  useLayoutEffect(() => {
-    const next = modelsRef.current;
-    const viewChanged = viewRef.current !== view;
-    const widthChanged = widthRef.current !== width;
-    const firstPaint = !primedRef.current;
-    viewRef.current = view;
-    widthRef.current = width;
-    primedRef.current = true;
-
-    if (width < 8 || firstPaint || chartMotionReduced() || widthChanged || !viewChanged) {
-      if (morphingRef.current && width >= 8 && !widthChanged && !viewChanged) {
-        toRef.current = sampleAll(next);
-        return stop;
-      }
-      applyNative(next);
-      return stop;
-    }
-
-    const target = sampleAll(next);
-    const from: SampleMap = new Map();
-    const to: SampleMap = new Map();
-    const liveIds = uniqueIds([...displayRef.current.keys()], next.map((model) => model.id));
-    const flat = sampleModel([]);
-    for (const id of liveIds) {
-      from.set(id, displayRef.current.get(id) ?? flat);
-      to.set(id, target.get(id) ?? flat);
-    }
+  const startMorph = (from: SampleMap, to: SampleMap, liveIds: string[]) => {
     fromRef.current = from;
     toRef.current = to;
     idsRef.current = liveIds;
@@ -147,6 +133,14 @@ export function useTokenChartMorph(
     morphingRef.current = true;
     setMorphing(true);
     stop();
+    const initial: TokenChartModelPath[] = [];
+    for (const id of liveIds) {
+      const pts = from.get(id);
+      if (!pts) continue;
+      initial.push(pathOf(id, pts));
+    }
+    displayRef.current = from;
+    writePaths(initial);
 
     const tick = (now: number) => {
       const t = Math.min(1, (now - startRef.current) / CHART_MORPH_MS);
@@ -167,14 +161,77 @@ export function useTokenChartMorph(
         rafRef.current = window.requestAnimationFrame(tick);
         return;
       }
+      introDoneRef.current = true;
       applyNative(modelsRef.current);
     };
     rafRef.current = window.requestAnimationFrame(tick);
+  };
+
+  const revealIfNeeded = (next: readonly TokenChartModelPts[]): boolean => {
+    if (introDoneRef.current) return false;
+    if (width < 8) {
+      applyNative(next);
+      return true;
+    }
+    if (chartMotionReduced() || !hasDrawableCurve(next)) {
+      applyNative(next);
+      if (chartMotionReduced()) introDoneRef.current = true;
+      return true;
+    }
+    const target = sampleAll(next);
+    const ids = next.map((model) => model.id);
+    if (morphingRef.current && rafRef.current !== 0) {
+      toRef.current = target;
+      return true;
+    }
+    startMorph(flattenSamples(target, baselineY), target, ids);
+    return true;
+  };
+
+  useLayoutEffect(() => {
+    const next = modelsRef.current;
+    const viewChanged = viewRef.current !== view;
+    const widthChanged = widthRef.current !== width;
+    viewRef.current = view;
+    widthRef.current = width;
+    primedRef.current = true;
+
+    if (width < 8) {
+      if (morphingRef.current && !widthChanged && !viewChanged) {
+        toRef.current = sampleAll(next);
+        return stop;
+      }
+      applyNative(next);
+      return stop;
+    }
+
+    if (revealIfNeeded(next)) return stop;
+
+    if (chartMotionReduced() || widthChanged || !viewChanged) {
+      if (morphingRef.current && !widthChanged && !viewChanged) {
+        toRef.current = sampleAll(next);
+        return stop;
+      }
+      applyNative(next);
+      return stop;
+    }
+
+    const target = sampleAll(next);
+    const from: SampleMap = new Map();
+    const to: SampleMap = new Map();
+    const liveIds = uniqueIds([...displayRef.current.keys()], next.map((model) => model.id));
+    const flat = sampleModel([]);
+    for (const id of liveIds) {
+      from.set(id, displayRef.current.get(id) ?? flat);
+      to.set(id, target.get(id) ?? flat);
+    }
+    startMorph(from, to, liveIds);
     return stop;
   }, [padTop, plotH, view, width]);
 
   useLayoutEffect(() => {
     if (!primedRef.current) return;
+    if (revealIfNeeded(models)) return;
     if (morphingRef.current) {
       if (width >= 8) toRef.current = sampleAll(models);
       return;

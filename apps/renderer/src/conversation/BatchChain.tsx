@@ -1,7 +1,9 @@
 import { useId, useState, type ReactNode } from "react";
 import { Icon } from "../icons";
 import { ToolBody, TruncationMark } from "./ToolBody";
+import { ToolCardScroll } from "./useToolCardFollowScroll";
 import { jsonString, type ToolView } from "./conversationViewModel";
+import { SubagentMetrics } from "./SubagentMetrics";
 import {
   batchSummary,
   chainItemDetail,
@@ -30,6 +32,9 @@ function SubagentStrip({
 }) {
   const agents = collectAgents(tools);
   if (agents.length === 0) return null;
+  // #region agent log
+  fetch("http://127.0.0.1:7773/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"84cd67"},body:JSON.stringify({sessionId:"84cd67",runId:"pre-fix",hypothesisId:"A",location:"BatchChain.tsx:SubagentStrip",message:"subagent strip render",data:{hasCallback:onInspectSubagent!==undefined,agents:agents.map((agent)=>({name:agent.name,agentId:agent.agentId??null,toolCallId:agent.toolCallId,inspectable:onInspectSubagent!==undefined&&resolveSubagentHubTarget(agent)!==undefined}))},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   return (
     <div className="subagent-strip">
       {agents.map((agent) => {
@@ -44,14 +49,14 @@ function SubagentStrip({
             <div className="sa-top">
               <span className={`hub-act ${pill.cls}`}>{pill.label}</span>
               <span className="sa-name">{agent.name}</span>
+              <SubagentMetrics
+                tokens={agent.tokens}
+                tools={agent.tools}
+                requests={agent.requests}
+                files={agent.files}
+                cost={agent.cost}
+              />
               {agent.dur ? <span className="sa-dur">{agent.dur}</span> : null}
-            </div>
-            <div className="sa-metrics">
-              {agent.tokens !== undefined ? <span className="sa-tok"><b>{agent.tokens}</b><i>tok</i></span> : null}
-              {agent.tools !== undefined ? <span className="hub-num"><i>tools</i><b>{agent.tools}</b></span> : null}
-              {agent.requests !== undefined ? <span className="hub-num"><i>req</i><b>{agent.requests}</b></span> : null}
-              {agent.files !== undefined ? <span className="hub-num"><i>files</i><b>{agent.files}</b></span> : null}
-              {agent.cost ? <span className="sa-cost">{agent.cost}</span> : null}
             </div>
           </>
         );
@@ -64,6 +69,9 @@ function SubagentStrip({
               aria-label={`${aria}，打开对话`}
               onClick={(event) => {
                 event.stopPropagation();
+                // #region agent log
+                fetch("http://127.0.0.1:7773/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"84cd67"},body:JSON.stringify({sessionId:"84cd67",runId:"pre-fix",hypothesisId:"B",location:"BatchChain.tsx:sa-card-click",message:"inspectable card click",data:{agentId:target.agentId,toolCallId:target.toolCallId,task:target.task??null},timestamp:Date.now()})}).catch(()=>{});
+                // #endregion
                 onInspectSubagent(target);
               }}
             >
@@ -77,6 +85,11 @@ function SubagentStrip({
             className={`sa-card ${agent.status}`}
             role="group"
             aria-label={target === undefined ? `${aria}，无法打开对话：缺少 Agent 身份` : aria}
+            onClick={() => {
+              // #region agent log
+              fetch("http://127.0.0.1:7773/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"84cd67"},body:JSON.stringify({sessionId:"84cd67",runId:"pre-fix",hypothesisId:"A",location:"BatchChain.tsx:sa-card-dead-click",message:"non-inspectable card click",data:{name:agent.name,agentId:agent.agentId??null,hasCallback:onInspectSubagent!==undefined},timestamp:Date.now()})}).catch(()=>{});
+              // #endregion
+            }}
           >
             {body}
           </div>
@@ -86,11 +99,12 @@ function SubagentStrip({
   );
 }
 
-function ThinkCard({ preview, full, truncated, open, onToggle, itemKey }: {
+function ThinkCard({ preview, full, truncated, open, follow = false, onToggle, itemKey }: {
   preview: string;
   full: string;
   truncated?: boolean;
   open: boolean;
+  follow?: boolean;
   onToggle: () => void;
   itemKey: string;
 }) {
@@ -110,12 +124,12 @@ function ThinkCard({ preview, full, truncated, open, onToggle, itemKey }: {
       </button>
       <div className="tl-card think-card">
         <div className="tl-card-motion-inner">
-          <div className="think-scroll convo-plain">
+          <ToolCardScroll follow={follow} className="think-scroll convo-plain">
             {truncated === true ? <TruncationMark /> : null}
             {full.split("\n").map((line, index) => (
               <span key={index}>{index > 0 ? <br /> : null}{line}</span>
             ))}
-          </div>
+          </ToolCardScroll>
         </div>
       </div>
     </div>
@@ -135,6 +149,7 @@ function ToolItem({ tool, open, onToggle, showDetail = true }: { tool: ToolView;
         full={full}
         {...(tool.truncated === true ? { truncated: true } : {})}
         open={open}
+        follow={open && tool.status === "running"}
         onToggle={onToggle}
       />
     );
@@ -177,7 +192,7 @@ function ToolItem({ tool, open, onToggle, showDetail = true }: { tool: ToolView;
       <div className="tl-card">
         <div className="tl-card-motion-inner">
           <div className="tc-body">
-            <ToolBody tool={tool} />
+            <ToolBody tool={tool} follow={open && running} />
           </div>
         </div>
       </div>
@@ -268,6 +283,7 @@ export function BatchChain({
         full={item.think.text}
         {...(item.think.truncated === true ? { truncated: true } : {})}
         open={itemOpen(slot)}
+        follow={itemOpen(slot) && liveTail && slot === activeKey}
         onToggle={() => toggleItem(slot)}
       />
     ) : (

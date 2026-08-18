@@ -211,6 +211,38 @@ html, body { height: 100%; margin: 0; }
 
 .stage-tools { position: absolute; top: 16px; right: 20px; display: flex; gap: 10px; align-items: center; }
 
+.scenario-switch {
+  position: absolute;
+  top: 44px;
+  left: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--window-bg) 72%, transparent);
+  border: 1px solid var(--hairline);
+  backdrop-filter: blur(8px);
+  max-width: 460px;
+}
+.scenario-switch button {
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: 500 11px var(--font-ui);
+  cursor: pointer;
+  transition: background var(--d-micro), color var(--d-micro), box-shadow var(--d-micro);
+}
+.scenario-switch button:hover { color: var(--text-1); }
+.scenario-switch button.on {
+  background: var(--control-bg);
+  color: var(--text-1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), inset 0 0 0 1px var(--hairline);
+}
+
 .theme-switch {
   display: flex;
   padding: 2px;
@@ -463,8 +495,8 @@ html, body { height: 100%; margin: 0; }
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 18px 32px 14px;
-  gap: 16px;
+  padding: 14px 32px 12px;
+  gap: 12px;
 }
 
 .group { position: relative; border: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -487,6 +519,43 @@ html, body { height: 100%; margin: 0; }
 .input::selection { background: var(--accent-soft-2); }
 .input:hover { border-color: var(--control-border-hover); }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft-2); }
+.input[readonly], .input:disabled {
+  background: var(--header-bg);
+  color: var(--text-2);
+  border-color: var(--hairline);
+}
+.path-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.path-hint svg { width: 13px; height: 13px; flex: 0 0 auto; margin-top: 1px; color: var(--accent); }
+.path-hint .mono { font-family: var(--font-mono); font-size: 11px; color: var(--text-1); }
+.path-hint.append svg { color: var(--accent); }
+.path-hint.warn { color: var(--warning); }
+.path-hint.warn svg { color: var(--warning); }
+
+.notice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-1);
+}
+.notice[hidden] { display: none; }
+.notice svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 1px; }
+.notice.info { background: var(--accent-soft); color: var(--text-1); }
+.notice.info svg { color: var(--accent); }
+.notice.warn { background: var(--warning-soft); }
+.notice.warn svg { color: var(--warning); }
+.notice.ok { background: var(--success-soft); }
+.notice.ok svg { color: var(--success); }
 
 /* ---------- 7. 按钮 ---------- */
 .btn {
@@ -591,6 +660,7 @@ html, body { height: 100%; margin: 0; }
 .check input:focus-visible + .box { box-shadow: var(--focus-ring); }
 .check .c-text { font-size: 12px; color: var(--text-1); line-height: 1.5; }
 .check .c-text small { display: block; font-size: 11px; color: var(--text-3); }
+.check.is-locked { opacity: 0.72; }
 
 /* ---------- 9. 磁盘空间指示 ---------- */
 .space-block { display: flex; flex-direction: column; gap: 7px; }
@@ -909,6 +979,7 @@ html[data-host="installer"] .omp-stage {
 }
 html[data-host="installer"] .stage-caption,
 html[data-host="installer"] .stage-tools,
+html[data-host="installer"] .scenario-switch,
 html[data-host="installer"] .stage-note {
   display: none;
 }

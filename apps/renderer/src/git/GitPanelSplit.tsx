@@ -103,7 +103,7 @@ export function GitPanelSplit({
           <button
             type="button"
             className={`icon-btn sb-collapse-btn${graphOpen ? "" : " is-collapsed"}`}
-            data-tip={graphOpen ? "收起提交历史" : "展开提交历史"}
+            data-tip={graphOpen ? "收起" : "展开"}
             aria-label={graphOpen ? "收起提交历史" : "展开提交历史"}
             aria-expanded={graphOpen}
             onClick={onToggle}

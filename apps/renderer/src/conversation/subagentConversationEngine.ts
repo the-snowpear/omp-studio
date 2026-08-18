@@ -66,9 +66,8 @@ export function createSubagentConversationEngine(input: {
 
   const enqueueLive = (event: Extract<ClientEvent, { kind: "conversation.changed" }>) => {
     if (liveBuffer.length >= LIVE_BUFFER_LIMIT) {
-      liveBuffer = [];
+      liveBuffer = liveBuffer.slice(-(LIVE_BUFFER_LIMIT - 1));
       overflow = true;
-      return;
     }
     liveBuffer.push({ eventSeq: event.eventSeq, sessionId: event.sessionId, update: event.update });
   };

@@ -16,6 +16,7 @@ import {
   catalogEntryFromAvailable,
   createOmpModelsService,
   envNameForProvider,
+  isEnvConfigName,
   isRetryableTestFailure,
   networkErrorDetail,
   ollamaTagsUrl,
@@ -84,6 +85,52 @@ describe("toYamlProvider auth boundary", () => {
     const out = toYamlProvider(input, previous);
     assert.equal("apiKey" in out, false);
     assert.equal(out.auth, "oauth");
+  });
+
+  test("oauth save drops a leftover bearer so OAuth is not shadowed", () => {
+    const previous = { apiKey: "sk-123", api: "openai-completions" };
+    const out = toYamlProvider({ id: "p", name: "p", api: "openai-completions", auth: { type: "oauth" as const } }, previous);
+    assert.equal("apiKey" in out, false);
+    assert.equal(out.auth, "oauth");
+  });
+
+  test("writes env auth as an environment variable name, not a secret", () => {
+    const out = toYamlProvider(
+      { id: "openai", name: "OpenAI", api: "openai-completions", auth: { type: "env" as const, envName: "OPENAI_API_KEY" } },
+      { apiKey: "sk-123" },
+    );
+    assert.equal(out.apiKey, "OPENAI_API_KEY");
+    assert.equal("auth" in out, false);
+  });
+
+  test("env save falls back to the conventional name when envName is omitted", () => {
+    const out = toYamlProvider(
+      { id: "open-ai", name: "OpenAI", api: "openai-completions", auth: { type: "env" as const } },
+      undefined,
+    );
+    assert.equal(out.apiKey, "OPEN_AI_API_KEY");
+  });
+
+  test("drops a stale env name when switching env -> api-key with a blank key", () => {
+    const previous = { apiKey: "OPENAI_API_KEY", api: "openai-completions" };
+    const out = toYamlProvider({ id: "p", name: "p", api: "openai-completions", auth: { type: "api-key" as const } }, previous);
+    assert.equal("apiKey" in out, false);
+  });
+
+  test("keeps a custom env name when re-saving env with the same envName", () => {
+    const previous = { apiKey: "CUSTOM_PROVIDER_KEY", api: "openai-completions" };
+    const out = toYamlProvider(
+      { id: "openai", name: "OpenAI", api: "openai-completions", auth: { type: "env" as const, envName: "CUSTOM_PROVIDER_KEY" } },
+      previous,
+    );
+    assert.equal(out.apiKey, "CUSTOM_PROVIDER_KEY");
+  });
+
+  test("none auth writes auth: none and drops credentials", () => {
+    const previous = { apiKey: "sk-123", api: "openai-completions" };
+    const out = toYamlProvider({ id: "ollama", name: "Ollama", api: "openai-completions", auth: { type: "none" as const } }, previous);
+    assert.equal(out.auth, "none");
+    assert.equal("apiKey" in out, false);
   });
 
   test("keeps the command credential when re-saving command without re-entering it", () => {
@@ -808,6 +855,13 @@ describe("envNameForProvider", () => {
     assert.equal(envNameForProvider("open-ai"), "OPEN_AI_API_KEY");
     assert.equal(envNameForProvider("ollama"), "OLLAMA_API_KEY");
   });
+
+  test("classifies env names vs literal keys", () => {
+    assert.equal(isEnvConfigName("OPENAI_API_KEY"), true);
+    assert.equal(isEnvConfigName("ACME_TOKEN"), true);
+    assert.equal(isEnvConfigName("sk-proj-abc"), false);
+    assert.equal(isEnvConfigName("!op read op://vault/key"), false);
+  });
 });
 
 describe("P1/P2 model-config adapter surfaces", () => {
@@ -834,12 +888,32 @@ describe("P1/P2 model-config adapter surfaces", () => {
       const acme = snapshot.providers.find((item) => item.id === "acme");
       assert.equal(acme?.auth.type, "env");
       assert.equal(acme?.auth.hasSecret, true);
+      assert.equal(acme?.auth.envName, key);
       assert.notEqual(acme?.status, "not-authenticated");
     } finally {
       if (previous === undefined) delete process.env[key];
       else process.env[key] = previous;
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  test("explicit env name round-trips through upsert and get", async () => {
+    await withAgentDir(async (dir, service) => {
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme",
+        api: "openai-completions",
+        auth: { type: "env", envName: "ACME_TOKEN" },
+      });
+      const yaml = await readFile(join(dir, "models.yml"), "utf8");
+      assert.match(yaml, /apiKey: ACME_TOKEN/);
+      assert.doesNotMatch(yaml, /auth:/);
+      const snapshot = await service.get();
+      const acme = snapshot.providers.find((item) => item.id === "acme");
+      assert.equal(acme?.auth.type, "env");
+      assert.equal(acme?.auth.envName, "ACME_TOKEN");
+      assert.equal(acme?.auth.apiKey, undefined);
+    });
   });
 
   test("name round-trips and empty baseUrl is omitted from yaml", async () => {
@@ -1118,6 +1192,22 @@ describe("P1/P2 model-config adapter surfaces", () => {
       assert.equal(JSON.stringify(result).includes("sk-should-not-leak"), false);
       const after = await service.get();
       assert.equal(after.loginProviders.find((item) => item.id === "anthropic")?.authenticated, false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("provider presets", () => {
+  test("xAI paid API preset uses OpenAI Responses", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-xai-preset-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const service = createOmpModelsService({ agentDir: dir });
+      const model = await service.get();
+      const xai = model.presets.flatMap((group) => [...group.items]).find((item) => item.id === "xai");
+      assert.equal(xai?.api, "openai-responses");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

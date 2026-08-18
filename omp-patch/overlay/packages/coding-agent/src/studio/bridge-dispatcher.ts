@@ -14,6 +14,10 @@ import { StudioLiveError } from "./services/live-service";
 import { StudioLoopError } from "./services/loop-service";
 import { StudioModeError } from "./services/mode-control-service";
 import { StudioModelControlError } from "./services/model-control-service";
+import {
+	StudioPermissionControlError,
+	StudioPermissionControlService,
+} from "./services/permission-control-service";
 import { StudioOmfgError } from "./services/omfg-service";
 import { StudioPauseError } from "./services/pause-service";
 import { SessionControlError, SessionControlService } from "./services/session-control-service";
@@ -85,6 +89,7 @@ const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"job.subscribe",
 	"session.tree.get",
 	"session.tree.navigate",
+	"session.tree.branch",
 	"session.fork",
 	"session.handoff",
 	"session.fast.set",
@@ -132,6 +137,7 @@ function protocolError(error: unknown): StudioProtocolError {
 		error instanceof StudioForkError ||
 		error instanceof StudioHandoffError ||
 		error instanceof StudioModelControlError ||
+		error instanceof StudioPermissionControlError ||
 		error instanceof StudioFastPrewalkError
 	) {
 		return { code: error.code, message: error.message, retryable: false };
@@ -218,6 +224,7 @@ export class StudioBridgeDispatcher {
 	readonly #transcript: StudioSessionTranscriptService;
 	readonly #interactions: StudioRemoteInteractionPort;
 	readonly #unsubscribeBtw: () => void;
+	readonly #permissions: StudioPermissionControlService;
 	readonly #byRequestId = new Map<string, RememberedReceipt>();
 	readonly #byIdempotencyKey = new Map<string, RememberedReceipt>();
 	#quiescing = false;
@@ -236,10 +243,12 @@ export class StudioBridgeDispatcher {
 			}),
 			[...SESSION_CONTROL_OPERATION_KINDS, "runtime.pause", "runtime.resume"],
 		);
+		this.#permissions = runtime.services.permissions ?? new StudioPermissionControlService(runtime.session);
 		this.#sessionControl = new SessionControlService(runtime.session, {
 			beforeQueuedUserTurn: async () => {
 				await this.runtime.services.models.applyPending();
 				await this.runtime.services.modes.applyPending();
+				await this.#permissions.applyPending();
 			},
 		});
 		this.#transcript =
@@ -627,18 +636,7 @@ export class StudioBridgeDispatcher {
 		if (operation.kind !== "permissions.mode.set") {
 			throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Operation is not registered with the Runtime arbiter");
 		}
-		const settings = this.runtime.session.settings;
-		if (operation.persist) {
-			// A durable write must supersede any prior resident-only override.
-			settings.clearOverride("tools.approvalMode");
-			settings.set("tools.approvalMode", operation.mode);
-			await settings.flush();
-		} else {
-			// Non-persistent override: applies to this Runtime only and does
-			// not touch the on-disk configuration.
-			settings.override("tools.approvalMode", operation.mode);
-		}
-		return { mode: operation.mode, persisted: operation.persist };
+		return await this.#permissions.setMode(operation.mode, operation.persist);
 	}
 
 	async #executeLoopOperation(operation: StudioRequest["operation"]): Promise<unknown> {
@@ -711,6 +709,8 @@ export class StudioBridgeDispatcher {
 				return this.runtime.services.tree.getTree();
 			case "session.tree.navigate":
 				return await this.runtime.services.tree.navigate(commandId, operation);
+			case "session.tree.branch":
+				return await this.runtime.services.tree.branch(commandId, operation);
 			default:
 				throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Tree operation is not registered");
 		}

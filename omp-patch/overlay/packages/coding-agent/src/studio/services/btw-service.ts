@@ -160,13 +160,17 @@ export class StudioBtwService {
 				record.originalLeafId,
 				record.originalSessionId,
 			);
-			if (result.cancelled) return { branched: false, reason: "cancelled" };
+			if (result.cancelled) {
+				record.branchConsumed = false;
+				return { branched: false, reason: "cancelled" };
+			}
 			return {
 				branched: true,
 				newSessionId: this.session.sessionManager.getSessionId(),
 				newLeafId: this.session.sessionManager.getLeafId(),
 			};
 		} catch {
+			record.branchConsumed = false;
 			throw new StudioBtwError("COMMAND_BLOCKED", "BTW branch could not be completed");
 		}
 	}

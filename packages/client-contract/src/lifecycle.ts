@@ -12,7 +12,12 @@
  * resync (FRONTEND_INTEGRATION.md §8.3).
  */
 
-import type { ConversationRuntimeEvent, OperatorStateSnapshot, SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
+import type {
+  BtwSnapshot,
+  ConversationRuntimeEvent,
+  OperatorStateSnapshot,
+  SessionTelemetrySnapshot,
+} from "@omp-studio/studio-protocol";
 
 import type {
   AuthorityEpoch,
@@ -227,6 +232,18 @@ export type ClientEvent =
       readonly sessionId: SessionId;
       readonly eventSeq: number;
       readonly update: ConversationRuntimeEvent;
+    })
+  /**
+   * BTW side-channel progress. Latest-value only: the Runtime keeps one slot
+   * and re-emits the whole snapshot per delta, so a dropped intermediate frame
+   * is not a gap. `eventSeq` shares the Bridge namespace with
+   * `conversation.changed`, not the facade delivery `cursor`.
+   */
+  | (ClientEventBase & {
+      readonly kind: "btw.changed";
+      readonly sessionId: SessionId;
+      readonly eventSeq: number;
+      readonly snapshot: BtwSnapshot;
     });
 
 /** What subset of the event stream a subscription requests. */

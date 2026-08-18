@@ -144,8 +144,8 @@ export type ConversationRuntimeEvent =
 			item: ConversationMessageItem;
 			/**
 			 * Present when the assistant message ended with `stopReason: "error"`.
-			 * Live-only: the persisted item carries no error field, so a reloaded
-			 * transcript shows the turn without it.
+			 * The persisted item carries no error field. Studio latches the last
+			 * live payload until that session's next assistant return succeeds.
 			 */
 			error?: ConversationMessageError;
 	  }

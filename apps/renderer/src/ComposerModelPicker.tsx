@@ -12,7 +12,7 @@
  * Runtime 把选择记到下一轮用户对话，当前请求和自动重试仍用原模型。
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type {
   CommandInput,
@@ -78,6 +78,212 @@ function labelInitial(label: string): string {
   return Array.from(label.trim())[0]?.toLocaleUpperCase() ?? "—";
 }
 
+/** Composer / 子代理编辑共用的模型菜单（角色列表 + 「更多模型」飞出层）。 */
+export function ComposerModelMenu({
+  data,
+  loading,
+  loadError,
+  preview,
+  disabled,
+  placement = "up",
+  note,
+  isRoleSelected,
+  isModelSelected,
+  onChooseRole,
+  onChooseModel,
+  onClose,
+}: {
+  data: ModelConfigReadModel | null;
+  loading: boolean;
+  loadError: string | null;
+  preview: boolean;
+  disabled?: boolean;
+  placement?: "up" | "down";
+  note?: ReactNode;
+  isRoleSelected: (role: ModelRoleRecord) => boolean;
+  isModelSelected: (selector: string) => boolean;
+  onChooseRole: (role: ModelRoleRecord) => void;
+  onChooseModel: (selector: string) => void;
+  onClose: () => void;
+}) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [flyoutSide, setFlyoutSide] = useState<"right" | "left">("right");
+  const flyoutTimer = useRef<number | undefined>(undefined);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => () => window.clearTimeout(flyoutTimer.current), []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const bySelector = useMemo(
+    () => new Map((data?.availableModels ?? []).map((model) => [model.selector, model])),
+    [data],
+  );
+  const rolesWithModel = useMemo(
+    () => (data?.roles ?? []).filter(
+      (role) => Boolean(role.primary) && !role.issue && bySelector.has(role.primary),
+    ),
+    [data, bySelector],
+  );
+  const groups = useMemo(
+    () => (data ? groupModelsByProvider(data.availableModels, data.providers) : []),
+    [data],
+  );
+
+  const scheduleFlyoutClose = () => {
+    window.clearTimeout(flyoutTimer.current);
+    flyoutTimer.current = window.setTimeout(() => setMoreOpen(false), FLYOUT_CLOSE_GRACE_MS);
+  };
+  const keepFlyoutOpen = () => {
+    window.clearTimeout(flyoutTimer.current);
+    setMoreOpen(true);
+  };
+
+  useLayoutEffect(() => {
+    if (!moreOpen) return;
+    const rect = menuRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setFlyoutSide(rect.right + 8 + FLYOUT_WIDTH <= window.innerWidth - 8 ? "right" : "left");
+  }, [moreOpen]);
+
+  return (
+    <>
+      <div className="approval-menu-backdrop" onClick={onClose} />
+      <div
+        className={`cmp-menu${placement === "down" ? " cmp-menu-down" : ""}`}
+        role="menu"
+        aria-label="选择模型"
+        ref={menuRef}
+      >
+        <div className="cmp-roles">
+          {loading && !data ? (
+            <div className="cmp-empty">加载模型配置…</div>
+          ) : loadError && rolesWithModel.length === 0 ? (
+            <div className="cmp-empty cmp-error">{loadError}</div>
+          ) : rolesWithModel.length === 0 ? (
+            <div className="cmp-empty">没有已分配可用模型的角色</div>
+          ) : (
+            rolesWithModel.map((role) => {
+              const on = isRoleSelected(role);
+              const modelName = bySelector.get(role.primary)?.name ?? modelShortName(role.primary);
+              const think = role.thinking && role.thinking !== "off"
+                ? MODEL_THINKING.find((item) => item.id === role.thinking)?.label ?? role.thinking
+                : null;
+              return (
+                <button
+                  type="button"
+                  key={role.id}
+                  role="menuitemradio"
+                  aria-checked={on}
+                  className={`cmp-role${on ? " selected" : ""}`}
+                  disabled={disabled}
+                  onClick={() => onChooseRole(role)}
+                >
+                  <span className="cmp-role-ic" data-tint={ROLE_TINTS[role.id] ?? "purple"} aria-hidden="true">
+                    <Icon name={ROLE_ICONS[role.id] ?? "cpu"} extra="sm" />
+                  </span>
+                  <span className="cmp-role-copy">
+                    <b>
+                      {role.name}
+                      <span className="cmp-role-alias">{role.alias}</span>
+                    </b>
+                    <span>
+                      {modelName}
+                      {think ? ` · ${think}` : ""}
+                    </span>
+                  </span>
+                  {on ? <Icon name="check" extra="sm" /> : null}
+                </button>
+              );
+            })
+          )}
+        </div>
+        <div className="cmp-menu-sep" />
+        <span
+          className={`cmp-more-zone${moreOpen ? " is-open" : ""}`}
+          onMouseEnter={keepFlyoutOpen}
+          onMouseLeave={scheduleFlyoutClose}
+        >
+          <button
+            type="button"
+            className="cmp-more"
+            aria-haspopup="listbox"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((open) => !open)}
+          >
+            <Icon name="more" extra="sm" />
+            <span>更多模型</span>
+            <span className="spacer" />
+            <Icon name={flyoutSide === "right" ? "chevron-r" : "chevron-l"} extra="sm" />
+          </button>
+        </span>
+        {moreOpen ? (
+          <div
+            className={`menu rms-pop cmp-flyout side-${flyoutSide}`}
+            role="listbox"
+            aria-label="全部模型"
+            onMouseEnter={keepFlyoutOpen}
+            onMouseLeave={scheduleFlyoutClose}
+          >
+            {groups.length === 0 ? (
+              <div className="rms-empty">没有可用模型</div>
+            ) : (
+              groups.map((group) => (
+                <div className="rms-group" key={group.providerId} role="group" aria-label={group.providerName}>
+                  <div className="rms-group-label">
+                    <span className="rms-brand" aria-hidden="true">
+                      <ProviderGlyph id={group.providerId} local={group.local} />
+                    </span>
+                    <span className="rms-group-name">{group.providerName}</span>
+                    <span className="rms-group-count">{group.models.length}</span>
+                  </div>
+                  {group.models.map((model) => {
+                    const on = isModelSelected(model.selector);
+                    return (
+                      <button
+                        type="button"
+                        key={model.selector}
+                        role="option"
+                        aria-selected={on}
+                        className={`menu-item rms-option${on ? " is-on" : ""}`}
+                        disabled={disabled}
+                        onClick={() => onChooseModel(model.selector)}
+                      >
+                        <span className="rms-option-copy">
+                          <b>{model.name}</b>
+                          {model.id !== model.name ? <span>{model.id}</span> : null}
+                        </span>
+                        <ModelPickCaps model={model} />
+                        {on ? <Icon name="check" extra="sm" /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        ) : null}
+        {preview ? (
+          <div className="cmp-menu-note">
+            <span className="chip gray xs">演示</span>
+            <span>{note ?? "演示数据，不写入本机配置"}</span>
+          </div>
+        ) : note ? (
+          <div className="cmp-menu-note">{note}</div>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
 export function ComposerModelPicker({
   preview,
   client,
@@ -100,16 +306,11 @@ export function ComposerModelPicker({
   openNonce?: number;
 }) {
   const [menu, setMenu] = useState<MenuKind>("none");
-  const [moreOpen, setMoreOpen] = useState(false);
   const [data, setData] = useState<ModelConfigReadModel | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [previewPick, setPreviewPick] = useState<ComposerPick | null>(null);
-  const [flyoutSide, setFlyoutSide] = useState<"right" | "left">("right");
-  const flyoutTimer = useRef<number | undefined>(undefined);
-  const modelMenuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => () => window.clearTimeout(flyoutTimer.current), []);
   useEffect(() => {
     if (openNonce > 0) setMenu("model");
   }, [openNonce]);
@@ -172,17 +373,6 @@ export function ComposerModelPicker({
     () => new Map((data?.availableModels ?? []).map((model) => [model.selector, model])),
     [data],
   );
-  // 只列「当前能直接切过去」的角色：已分配模型、无 issue 且模型在可用列表。
-  const rolesWithModel = useMemo(
-    () => (data?.roles ?? []).filter(
-      (role) => Boolean(role.primary) && !role.issue && bySelector.has(role.primary),
-    ),
-    [data, bySelector],
-  );
-  const groups = useMemo(
-    () => (data ? groupModelsByProvider(data.availableModels, data.providers) : []),
-    [data],
-  );
 
   // 预览用本地选择，真实模式只认 Runtime 投影，避免 pill 和实际跑的模型不一致。
   const pick = useMemo(
@@ -209,8 +399,6 @@ export function ComposerModelPicker({
   const thinkingLabel = thinking.items.find((item) => item.id === thinking.value)?.label ?? "—";
 
   const closeAll = () => {
-    window.clearTimeout(flyoutTimer.current);
-    setMoreOpen(false);
     setMenu("none");
   };
 
@@ -268,30 +456,6 @@ export function ComposerModelPicker({
     apply("session.thinking.set", { level });
   };
 
-  const scheduleFlyoutClose = () => {
-    window.clearTimeout(flyoutTimer.current);
-    flyoutTimer.current = window.setTimeout(() => setMoreOpen(false), FLYOUT_CLOSE_GRACE_MS);
-  };
-  const keepFlyoutOpen = () => {
-    window.clearTimeout(flyoutTimer.current);
-    setMoreOpen(true);
-  };
-
-  // 二级弹窗默认在主菜单右侧展开，右侧视口空间不足才翻到左侧。
-  useLayoutEffect(() => {
-    if (!moreOpen) return;
-    const rect = modelMenuRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setFlyoutSide(rect.right + 8 + FLYOUT_WIDTH <= window.innerWidth - 8 ? "right" : "left");
-  }, [moreOpen]);
-
-  const roleName = pick?.roleId ? data?.roles.find((role) => role.id === pick.roleId)?.name ?? pick.roleId : null;
-  const modelPillTitle = !modelReady
-    ? "Runtime 未暴露 session.model.set"
-    : pick
-      ? `${pick.selector}${roleName ? `（${roleName}）` : ""}${preview ? " · 演示" : ""}${nextTurnOnly ? " · 下一轮对话生效" : ""}`
-      : "选择模型";
-
   return (
     <>
       <span className="cmp-pill-wrap">
@@ -301,14 +465,12 @@ export function ComposerModelPicker({
           aria-haspopup="menu"
           aria-expanded={menu === "model"}
           aria-label="选择模型"
-          title={modelPillTitle}
+          data-tip={!modelReady ? "模型（暂未实现）" : "模型"}
           onClick={() => {
             if (menu === "model") {
               closeAll();
               return;
             }
-            window.clearTimeout(flyoutTimer.current);
-            setMoreOpen(false);
             setMenu("model");
           }}
         >
@@ -317,133 +479,25 @@ export function ComposerModelPicker({
           <span className="cmp-model-label-initial" aria-hidden="true">{labelInitial(modelLabel)}</span>
         </button>
         {menu === "model" ? (
-          <>
-            <div className="approval-menu-backdrop" onClick={closeAll} />
-            <div className="cmp-menu" role="menu" aria-label="选择模型" ref={modelMenuRef}>
-              <div className="cmp-roles">
-              {loading && !data ? (
-                <div className="cmp-empty">加载模型配置…</div>
-              ) : loadError && rolesWithModel.length === 0 ? (
-                <div className="cmp-empty cmp-error">{loadError}</div>
-              ) : rolesWithModel.length === 0 ? (
-                <div className="cmp-empty">没有已分配可用模型的角色</div>
-              ) : (
-                rolesWithModel.map((role) => {
-                  const on = pick?.roleId === role.id;
-                  const modelName = bySelector.get(role.primary)?.name ?? modelShortName(role.primary);
-                  const think = role.thinking && role.thinking !== "off"
-                    ? MODEL_THINKING.find((item) => item.id === role.thinking)?.label ?? role.thinking
-                    : null;
-                  return (
-                    <button
-                      type="button"
-                      key={role.id}
-                      role="menuitemradio"
-                      aria-checked={on}
-                      className={`cmp-role${on ? " selected" : ""}`}
-                      disabled={!modelReady}
-                      title={role.primary}
-                      onClick={() => chooseRole(role)}
-                    >
-                      <span className="cmp-role-ic" data-tint={ROLE_TINTS[role.id] ?? "purple"} aria-hidden="true">
-                        <Icon name={ROLE_ICONS[role.id] ?? "cpu"} extra="sm" />
-                      </span>
-                      <span className="cmp-role-copy">
-                        <b>
-                          {role.name}
-                          <span className="cmp-role-alias">{role.alias}</span>
-                        </b>
-                        <span>
-                          {modelName}
-                          {think ? ` · ${think}` : ""}
-                        </span>
-                      </span>
-                      {on ? <Icon name="check" extra="sm" /> : null}
-                    </button>
-                  );
-                })
-              )}
-              </div>
-              <div className="cmp-menu-sep" />
-              <span
-                className={`cmp-more-zone${moreOpen ? " is-open" : ""}`}
-                onMouseEnter={keepFlyoutOpen}
-                onMouseLeave={scheduleFlyoutClose}
-              >
-                <button
-                  type="button"
-                  className="cmp-more"
-                  aria-haspopup="listbox"
-                  aria-expanded={moreOpen}
-                  onClick={() => setMoreOpen((open) => !open)}
-                >
-                  <Icon name="more" extra="sm" />
-                  <span>更多模型</span>
-                  <span className="spacer" />
-                  <Icon name={flyoutSide === "right" ? "chevron-r" : "chevron-l"} extra="sm" />
-                </button>
-              </span>
-              {moreOpen ? (
-                <div
-                  className={`menu rms-pop cmp-flyout side-${flyoutSide}`}
-                  role="listbox"
-                  aria-label="全部模型"
-                  onMouseEnter={keepFlyoutOpen}
-                  onMouseLeave={scheduleFlyoutClose}
-                >
-                    {groups.length === 0 ? (
-                    <div className="rms-empty">没有可用模型</div>
-                  ) : (
-                    groups.map((group) => (
-                      <div className="rms-group" key={group.providerId} role="group" aria-label={group.providerName}>
-                        <div className="rms-group-label">
-                          <span className="rms-brand" aria-hidden="true">
-                            <ProviderGlyph id={group.providerId} local={group.local} />
-                          </span>
-                          <span className="rms-group-name">{group.providerName}</span>
-                          <span className="rms-group-count">{group.models.length}</span>
-                        </div>
-                        {group.models.map((model) => {
-                          const on = pick?.selector === model.selector;
-                          return (
-                            <button
-                              type="button"
-                              key={model.selector}
-                              role="option"
-                              aria-selected={on}
-                              className={`menu-item rms-option${on ? " is-on" : ""}`}
-                              disabled={!modelReady}
-                              title={model.selector}
-                              onClick={() => chooseModel(model.selector)}
-                            >
-                              <span className="rms-option-copy">
-                                <b>{model.name}</b>
-                                {model.id !== model.name ? <span>{model.id}</span> : null}
-                              </span>
-                              <ModelPickCaps model={model} />
-                              {on ? <Icon name="check" extra="sm" /> : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ))
-                  )}
-                </div>
-              ) : null}
-              {preview ? (
-                <div className="cmp-menu-note">
-                  <span className="chip gray xs">演示</span>
-                  <span>演示数据，不写入本机配置</span>
-                </div>
-              ) : !modelReady ? (
-                <div className="cmp-menu-note">Runtime 未暴露 session.model.set</div>
-              ) : nextTurnOnly ? (
-                <div className="cmp-menu-note">当前轮次仍用原模型，下一轮对话才生效</div>
-              ) : (
-                <div className="cmp-menu-note">只改当前会话，不写 models.yml</div>
-              )}
-            </div>
-          </>
+          <ComposerModelMenu
+            data={data}
+            loading={loading}
+            loadError={loadError}
+            preview={preview}
+            disabled={!modelReady}
+            isRoleSelected={(role) => pick?.roleId === role.id}
+            isModelSelected={(selector) => pick?.selector === selector}
+            {...(preview || (modelReady && !nextTurnOnly)
+              ? {}
+              : {
+                  note: !modelReady
+                    ? "Runtime 未暴露 session.model.set"
+                    : "当前轮次仍用原模型，下一轮对话才生效",
+                })}
+            onChooseRole={chooseRole}
+            onChooseModel={chooseModel}
+            onClose={closeAll}
+          />
         ) : null}
       </span>
       <span className="cmp-pill-wrap">
@@ -454,14 +508,12 @@ export function ComposerModelPicker({
           aria-haspopup="menu"
           aria-expanded={menu === "thinking"}
           aria-label="思考强度"
-          title={
+          data-tip={
             !thinkingReady
-              ? "Runtime 未暴露 session.thinking.set"
+              ? "思考（暂未实现）"
               : thinking.disabled
-                ? "当前模型不支持思考强度"
-                : nextTurnOnly
-                  ? `思考强度：${thinkingLabel}（下一轮对话生效）`
-                  : `思考强度：${thinkingLabel}`
+                ? "不支持"
+                : "思考"
           }
           onClick={() => setMenu((current) => (current === "thinking" ? "none" : "thinking"))}
         >

@@ -22,7 +22,7 @@ export function truncateUtf8(text: string, maxBytes: number): { text: string; tr
 	const bytes = encoder.encode(text);
 	if (bytes.byteLength <= maxBytes) return { text, truncated: false };
 	let end = maxBytes;
-	while (end > 0 && (bytes[end] & 0b1100_0000) === 0b1000_0000) end -= 1;
+	while (end > 0 && ((bytes[end] ?? 0) & 0b1100_0000) === 0b1000_0000) end -= 1;
 	return { text: decoder.decode(bytes.subarray(0, end)), truncated: true };
 }
 
@@ -188,4 +188,27 @@ export function sanitizeToolArguments(
 	const sanitized = sanitizeJsonValue(value, options);
 	if (sanitized.value === undefined) return { truncated: true };
 	return { arguments: sanitized.value, truncated: sanitized.truncated };
+}
+
+/** FNV-1a 32-bit hex. Must match `@omp-studio/studio-protocol` `fnv1aHex`. */
+export function fnv1aHex(text: string): string {
+	let hash = 0x811c9dc5;
+	for (let index = 0; index < text.length; index++) {
+		hash ^= text.charCodeAt(index);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * Bound a vendor toolCallId to the public contract without collapsing
+ * distinct long ids onto one key. Empty raw values use `fallback`.
+ */
+export function publicToolCallId(raw: string, fallback: string): { id: string; truncated: boolean } {
+	if (raw.length === 0) return { id: fallback, truncated: true };
+	const max = CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS;
+	if (raw.length <= max) return { id: raw, truncated: false };
+	const digest = fnv1aHex(raw);
+	const keep = Math.max(1, max - digest.length - 1);
+	return { id: `${raw.slice(0, keep)}-${digest}`, truncated: true };
 }

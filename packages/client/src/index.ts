@@ -12,12 +12,14 @@ export {
   createInitialClientState,
   isSensitiveCommand,
   reduceClientState,
+  COMMAND_STATE_TERMINAL_CAP,
   RESYNC_REQUIRED_ERROR,
   type ClientAction,
   type ClientConnectionState,
   type ClientEntitiesState,
   type ClientState,
   type ClientUiState,
+  selectBtwSnapshot,
   selectSessionTelemetry,
 } from "./reducer.js";
 export { StudioClientImpl, type ConversationHydrateClient } from "./studio-client.js";
@@ -25,6 +27,7 @@ export { MemoryClientTransport, type MemoryTransportHandlers } from "./memory-tr
 export { eventMatchesScope } from "./scope.js";
 export {
   CONVERSATION_STATE_ITEM_CAP,
+  CONVERSATION_STATE_LIVE_TOOLS_CAP,
   clearConversationState,
   conversationHintFromCursor,
   createInitialConversationState,
@@ -37,6 +40,7 @@ export {
   type ConversationNotice,
   type ConversationState,
   type ConversationView,
+  type StickyProviderError,
 } from "./conversation-state.js";
 export { reduceConversationState, type ConversationAction } from "./conversation-reducer.js";
 export {

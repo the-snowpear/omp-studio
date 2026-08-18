@@ -24,7 +24,7 @@ export function SourceBadge({ source, reason }: { source: SettingSource; reason?
     <span
       className={`src-badge${source === "unavailable" ? " is-unavailable" : ""}`}
       data-source={source}
-      title={source === "unavailable" ? (reason ?? "该设置尚未接入 Host / Studio Bridge") : `当前值来源：${SOURCE_LABELS[source]}`}
+      data-tip={source === "unavailable" ? "（暂未实现）" : undefined}
     >
       {SOURCE_LABELS[source]}
     </span>
@@ -55,7 +55,7 @@ export function SettingRow({
   children: ReactNode;
 }) {
   return (
-    <div className={`set-row${source === "unavailable" ? " is-unavailable" : ""}`} title={source === "unavailable" ? (reason ?? "该设置尚未接入 Host / Studio Bridge") : undefined}>
+    <div className={`set-row${source === "unavailable" ? " is-unavailable" : ""}`} data-tip={source === "unavailable" ? "（暂未实现）" : undefined}>
       <div>
         <div className="sr-label">
           {label} <SourceBadge source={source} reason={reason} />
@@ -108,7 +108,7 @@ export function StaticSelect({
   title?: string;
 }) {
   return (
-    <select className="select" value={value} disabled aria-label={label} title={title ?? "尚未接入"}>
+    <select className="select" value={value} disabled aria-label={label} data-tip={title ?? "（暂未实现）"}>
       {options.map((option) => (
         <option key={option} value={option}>{option}</option>
       ))}

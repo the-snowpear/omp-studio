@@ -59,5 +59,8 @@ architecture_review_v2_work/
 .claude/
 skills-lock.json
 
+# Local generated installer public key (never the private signing key)
+packaging/runtime-keys/
+
 # Alternate lockfile (repo uses npm / package-lock.json)
 pnpm-lock.yaml

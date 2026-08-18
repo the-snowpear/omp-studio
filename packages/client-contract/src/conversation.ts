@@ -27,6 +27,9 @@ export {
   SESSION_TRANSCRIPT_READ_KIND,
   parseConversationRuntimeEvent,
   parseConversationTranscriptPage,
+  publicConversationToolCallId,
+  truncateUtf8,
+  utf8ByteLength,
 } from "@omp-studio/studio-protocol";
 
 import type {

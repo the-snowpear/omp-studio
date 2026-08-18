@@ -50,6 +50,34 @@ export type RuntimeClassification =
 export type RuntimeBackend = "studio-host" | "rpc-ui" | "acp";
 
 /**
+ * Why a Runtime never connected (`status === "unavailable"`). Closed union
+ * so the Renderer can map to copy without parsing Host English sentences.
+ * Present only with `unavailableReason`; never a path, PID or endpoint.
+ */
+export type RuntimeUnavailableCode =
+  | "no-workspace"
+  | "workspace-unusable"
+  | "not-installed"
+  | "resolution-rejected"
+  | "resolution-limited"
+  | "launch-failed"
+  | "handshake-timeout"
+  | "spawn-failed"
+  | "exited-before-ready"
+  | "not-wired";
+
+/**
+ * Why a previously connected Runtime dropped (`status === "disconnected"`).
+ * Closed union so the Renderer can map copy without parsing Host sentences.
+ * Present only with `disconnectReason`; never a path, PID or endpoint.
+ */
+export type RuntimeDisconnectCode =
+  | "pipe-closed"
+  | "process-exit"
+  | "lease-lost"
+  | "host-stop";
+
+/**
  * Runtime connection facts exposed to the Renderer. Carries only public
  * display facts: opaque identity, epochs, backend and versions. Never
  * carries the runtime PID, process handle, private endpoint or session
@@ -68,6 +96,20 @@ export interface RuntimeConnection {
   readonly upstreamCommit?: string;
   /** Present only when classification is "rejected". Safe, pre-redacted text. */
   readonly rejectionReason?: string;
+  /**
+   * Present when `status` is `"unavailable"` and the Host knows why.
+   * Closed code for UI mapping; optional next to a pre-redacted sentence.
+   */
+  readonly unavailableCode?: RuntimeUnavailableCode;
+  /** Safe, pre-redacted sentence explaining why the Runtime never connected. */
+  readonly unavailableReason?: string;
+  /**
+   * Present when `status` is `"disconnected"` and the Host knows why.
+   * Closed code for UI mapping; optional next to a pre-redacted sentence.
+   */
+  readonly disconnectCode?: RuntimeDisconnectCode;
+  /** Safe, pre-redacted sentence explaining why the Runtime dropped. */
+  readonly disconnectReason?: string;
 }
 
 /**
@@ -97,7 +139,14 @@ export type SignatureStatus = "verified" | "unverified" | "unknown";
  */
 export interface RuntimeInstallState {
   readonly status: RuntimeInstallStatus;
+  /** Currently installed runtime version, when one exists. */
   readonly version?: string;
+  /**
+   * Newest locally discovered signed artifact version. Present when a
+   * probe found an artifact (installable or newer than `version`).
+   * Never a path.
+   */
+  readonly availableVersion?: string;
   readonly signature: SignatureStatus;
   /** Safe, pre-redacted message (e.g. a failure reason). */
   readonly message?: string;
@@ -272,6 +321,17 @@ export type ModelApiKind =
 
 export type ModelAuthType = "oauth" | "api-key" | "env" | "command" | "none";
 
+/**
+ * OMP treats a models.yml `apiKey` as an environment variable name when it
+ * looks like one (`FOO_BAR`, all-caps identifiers). Literal keys (`sk-…`)
+ * and `!command` values are not env names.
+ */
+export function isModelEnvConfigName(value: string): boolean {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) return false;
+  if (/^sk/i.test(value)) return false;
+  return value.includes("_") || (value === value.toUpperCase() && value.length >= 4);
+}
+
 export type ModelProviderSource = "builtin" | "custom" | "runtime" | "extension";
 
 export type ModelProviderStatus =
@@ -291,6 +351,7 @@ export type ModelEntrySource = "catalog" | "discovery" | "custom" | "extension";
  * Credential metadata for a provider.
  * `apiKey` echoes the credential value stored in models.yml (plain key for
  * `api-key`, `!command` string for `command`) so the editor can pre-fill it.
+ * `envName` is the environment variable name for `env` auth (not a secret).
  * Deliberate choice: the desktop console is a local trusted surface.
  */
 export interface ModelAuthMeta {
@@ -298,6 +359,7 @@ export interface ModelAuthMeta {
   readonly hasSecret: boolean;
   readonly account?: string;
   readonly apiKey?: string;
+  readonly envName?: string;
 }
 
 export interface ModelDiscoveryMeta {
@@ -558,6 +620,17 @@ export type McpTransport = "stdio" | "http" | "sse";
 export type McpConfigStatus = "enabled" | "disabled" | "shadowed";
 
 /**
+ * Last Host-owned one-shot probe for an MCP server. Never includes command,
+ * URL, headers, or secrets.
+ */
+export interface McpLastProbe {
+  readonly ok: boolean;
+  readonly at: string;
+  readonly detail: string;
+  readonly toolCount?: number;
+}
+
+/**
  * One configured MCP server from OMP-native mcp.json discovery.
  * Never includes command, args, env, url, headers, or OAuth secrets.
  */
@@ -570,6 +643,8 @@ export interface McpServerRecord {
   /** Safe display label: 用户 / 项目. */
   readonly sourceLabel: string;
   readonly scope: "user" | "project";
+  /** Host-process memory from the last `mcp.test`; omitted until probed. */
+  readonly lastProbe?: McpLastProbe;
 }
 
 /**
@@ -582,6 +657,25 @@ export interface McpReadModel {
   readonly warnings: ReadonlyArray<string>;
   readonly generatedAt: string;
   readonly unavailableReason?: string;
+}
+
+/** Terminal result of a Host-owned MCP one-shot connect (`initialize` + `tools/list`). */
+export interface McpTestResult {
+  readonly ok: boolean;
+  readonly latencyMs: number;
+  readonly detail: string;
+  readonly toolCount?: number;
+}
+
+/**
+ * Recent Host-owned MCP probe log lines for one server. Pre-redacted;
+ * never paths, URLs, or secrets.
+ */
+export interface McpLogsReadModel {
+  readonly name: string;
+  readonly lines: ReadonlyArray<string>;
+  readonly generatedAt: string;
+  readonly emptyReason?: string;
 }
 
 /**
@@ -616,6 +710,8 @@ export interface AgentDefinitionRecord {
   readonly readSummarize?: boolean;
   /** `true` = default prewalk target; string = custom model pattern. */
   readonly prewalk?: boolean | string;
+  /** `true` = default advisor-role model; string = custom advisor model pattern. */
+  readonly advisor?: boolean | string;
   readonly source: AgentDefinitionSource;
   /** Safe display label: 项目 / 用户 / 内置 / 插件. */
   readonly sourceLabel: string;
@@ -627,6 +723,8 @@ export interface AgentDefinitionRecord {
   readonly overrideModel?: string;
   /** `task.agentPrewalk` overlay: `on` / `off` / pattern. */
   readonly prewalkOverride?: string;
+  /** `task.agentAdvisor` overlay: `on` / `off` / pattern. */
+  readonly advisorOverride?: string;
   readonly contentHash?: string;
   readonly error?: string;
   /** Bundled agents whose system prompt lives in the runtime binary. */

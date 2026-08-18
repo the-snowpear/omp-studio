@@ -39,6 +39,14 @@
 
 <div class="omp-stage" id="stage" data-theme="system">
   <div class="stage-caption"><strong>OMP Studio</strong> 安装向导 · 视觉原型 <span class="dot-sep"></span> 720 × 480</div>
+  <div class="scenario-switch" role="group" aria-label="安装情景">
+    <button type="button" data-sc="fresh">全新</button>
+    <button type="button" data-sc="upgrade">升级 1.3.0</button>
+    <button type="button" data-sc="same">相同版本</button>
+    <button type="button" data-sc="downgrade">已装更高</button>
+    <button type="button" data-sc="running">进程占用</button>
+    <button type="button" data-sc="uninstall">卸载</button>
+  </div>
   <div class="stage-tools">
     <div class="theme-switch" role="group" aria-label="主题">
       <button data-t="system"><svg viewBox="0 0 24 24"><use href="#i-monitor"/></svg> 跟随系统</button>
@@ -52,7 +60,7 @@
       <!-- 标题栏 -->
       <div class="titlebar">
         <span class="tb-icon"><img src="app-icon.png" alt="" /></span>
-        <span class="tb-title">OMP Studio 安装 <span>v1.4.2</span></span>
+        <span class="tb-title"><span id="tbAction">OMP Studio 安装</span> <span id="tbVersion">v1.4.2</span></span>
         <div class="tb-buttons">
           <button class="tb-btn" aria-label="最小化" tabindex="-1"><svg viewBox="0 0 24 24"><use href="#i-minus"/></svg></button>
           <button class="tb-btn tb-close" id="tbClose" aria-label="关闭"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
@@ -74,41 +82,46 @@
             <h2>OMP Studio</h2>
             <p class="tagline">面向 OMP 开发者的桌面工作台</p>
             <span class="chip">v1.4.2 · x64</span>
-            <p class="runtime-note">&gt;_ 内置 <b>OMP Runtime 1.4.2</b></p>
+            <p class="runtime-note" id="welcomeRuntime">&gt;_ 内置 <b>OMP Runtime 1.4.2</b></p>
             <svg class="watermark" viewBox="0 0 96 96" aria-hidden="true">
               <defs><linearGradient id="lg1w" x1="0" y1="0" x2="96" y2="96" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#9db8ff"/></linearGradient></defs>
               <g fill="url(#lg1w)"><use href="#logo-glyph"/></g>
             </svg>
           </aside>
           <section class="pane">
-            <h1>欢迎使用 OMP Studio 安装向导</h1>
-            <p class="lede">本向导将在你的计算机上安装 OMP Studio 1.4.2，随附内置 OMP 运行时、原生 PTY 终端与 Agent / MCP 扩展支持，安装完成即可使用。</p>
+            <h1 id="welcomeTitle">欢迎使用 OMP Studio 安装向导</h1>
+            <p class="lede" id="welcomeLede">本向导将在你的计算机上安装 OMP Studio 1.4.2，随附内置 OMP 运行时、原生 PTY 终端与 Agent / MCP 扩展支持，安装完成即可使用。</p>
             <div class="features">
               <div class="feature"><span class="f-icon"><svg viewBox="0 0 24 24"><use href="#i-box"/></svg></span>
-                <div><div class="f-title">内置 OMP 运行时</div><div class="f-desc">随应用一并安装与升级，无需手动配置开发环境。</div></div>
+                <div><div class="f-title" id="f1Title">内置 OMP 运行时</div><div class="f-desc" id="f1Desc">随应用一并安装与升级，无需手动配置开发环境。</div></div>
               </div>
               <div class="feature"><span class="f-icon"><svg viewBox="0 0 24 24"><use href="#i-term"/></svg></span>
-                <div><div class="f-title">原生 PTY 终端</div><div class="f-desc">低延迟渲染，完整支持转义序列与真彩色输出。</div></div>
+                <div><div class="f-title" id="f2Title">原生 PTY 终端</div><div class="f-desc" id="f2Desc">低延迟渲染，完整支持转义序列与真彩色输出。</div></div>
               </div>
               <div class="feature"><span class="f-icon"><svg viewBox="0 0 24 24"><use href="#i-blocks"/></svg></span>
-                <div><div class="f-title">Agent 与 MCP 扩展</div><div class="f-desc">连接模型与工具链，按需扩展工作台能力。</div></div>
+                <div><div class="f-title" id="f3Title">Agent 与 MCP 扩展</div><div class="f-desc" id="f3Desc">连接模型与工具链，按需扩展工作台能力。</div></div>
               </div>
             </div>
-            <p class="foot-hint"><svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg> 单击「下一步」继续。</p>
+            <p class="foot-hint"><svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg> <span id="welcomeFoot">单击「下一步」继续。</span></p>
           </section>
         </div>
 
         <!-- 第 2 步 · 安装位置 -->
         <div class="step" data-step="1">
           <div class="form-page">
-            <header class="headband"><h1>选择安装位置</h1><p>选择要安装 OMP Studio 的文件夹。</p></header>
+            <header class="headband"><h1 id="dirTitle">选择安装位置</h1><p id="dirLede">选择要安装 OMP Studio 的文件夹。若所选位置还不是产品目录，将自动新建 OMP Studio 文件夹。</p></header>
             <div class="form">
               <div class="group">
                 <span class="g-label">目标文件夹</span>
                 <div class="path-row">
-                  <input class="input" id="pathInput" value="C:\Users\Ada\AppData\Local\Programs\OMP Studio" spellcheck="false" aria-label="安装路径"/>
+                  <input class="input" id="pathInput" value="C:\Program Files\OMP Studio" spellcheck="false" aria-label="安装路径"/>
                   <button class="btn small" id="browseBtn"><svg viewBox="0 0 24 24"><use href="#i-folder"/></svg> 浏览(R)…</button>
                 </div>
+                <p class="path-hint" id="pathHint"><svg viewBox="0 0 24 24"><use href="#i-info"/></svg> <span id="pathHintText">将安装到所选文件夹（已是 OMP Studio 目录）。</span></p>
+              </div>
+              <div class="notice info" id="occupancyNotice" hidden>
+                <svg viewBox="0 0 24 24"><use href="#i-info"/></svg>
+                <span id="occupancyText"></span>
               </div>
               <div class="group">
                 <span class="g-label">所需磁盘空间</span>
@@ -127,10 +140,10 @@
               </div>
               <div class="group" style="margin-top:2px">
                 <span class="g-label">附加任务</span>
-                <label class="check"><input type="checkbox" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">将 OMP Studio 添加到 PATH 环境变量(推荐)</span></label>
-                <label class="check"><input type="checkbox" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">创建桌面快捷方式</span></label>
+                <label class="check is-locked" id="startMenuRow"><input type="checkbox" id="optStartMenu" checked disabled/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">创建开始菜单快捷方式<small>始终创建，便于从 Windows 搜索启动</small></span></label>
+                <label class="check" id="desktopRow"><input type="checkbox" id="optDesktop" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">创建桌面快捷方式<small>全新安装默认勾选；升级时不重建你已删除的图标</small></span></label>
               </div>
-              <p class="foot-hint" style="margin-top:auto"><svg viewBox="0 0 24 24"><use href="#i-info"/></svg> 安装完成后，可通过「设置 → 应用」卸载 OMP Studio。</p>
+              <p class="foot-hint" id="dirFootHint" style="margin-top:auto"><svg viewBox="0 0 24 24"><use href="#i-info"/></svg> <span id="dirFootText">安装完成后，可通过「设置 → 应用」卸载 OMP Studio。</span></p>
             </div>
           </div>
         </div>
@@ -138,7 +151,7 @@
         <!-- 第 3 步 · 安装进度 -->
         <div class="step" data-step="2">
           <div class="form-page">
-            <header class="headband"><h1>正在安装 OMP Studio</h1><p>请稍候，正在将 OMP Studio 安装到你的计算机。</p></header>
+            <header class="headband"><h1 id="progressTitle">正在安装 OMP Studio</h1><p id="progressLede">请稍候，正在将 OMP Studio 安装到你的计算机。</p></header>
             <div class="form" style="gap:12px">
               <div class="progress-block">
                 <div class="phase-row"><span class="phase" id="phase">正在准备…</span><span class="pct" id="pct">0 %</span></div>
@@ -165,7 +178,7 @@
             <h2>OMP Studio</h2>
             <p class="tagline">面向 OMP 开发者的桌面工作台</p>
             <span class="chip">v1.4.2 · x64</span>
-            <p class="runtime-note">&gt;_ 运行时已就绪 · <b>omp://</b> 已注册</p>
+            <p class="runtime-note" id="finishRuntime">&gt;_ 运行时已就绪 · <b>omp://</b> 已注册</p>
             <svg class="watermark" viewBox="0 0 96 96" aria-hidden="true">
               <defs><linearGradient id="lg2w" x1="0" y1="0" x2="96" y2="96" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#9db8ff"/></linearGradient></defs>
               <g fill="url(#lg2w)"><use href="#logo-glyph"/></g>
@@ -176,16 +189,16 @@
               <span class="halo"></span>
               <svg viewBox="0 0 62 62" fill="none"><circle class="ring" cx="31" cy="31" r="27.5"/><path class="tick" d="M20 32.5l7.5 7L42 24.5"/></svg>
             </div>
-            <h1 class="finish-item" style="animation-delay:240ms">安装完成</h1>
-            <p class="lede finish-item" style="animation-delay:320ms">OMP Studio 已成功安装，运行时与扩展组件均已就绪。</p>
+            <h1 class="finish-item" id="finishTitle" style="animation-delay:240ms">安装完成</h1>
+            <p class="lede finish-item" id="finishLede" style="animation-delay:320ms">OMP Studio 已成功安装，运行时与扩展组件均已就绪。</p>
             <div class="summary finish-item" style="animation-delay:420ms">
-              <div class="row"><span class="k">安装位置</span><span class="v" id="sumPath">C:\Users\Ada\AppData\Local\Programs\OMP Studio</span></div>
-              <div class="row"><span class="k">产品版本</span><span class="v ui-font">OMP Studio 1.4.2 (x64)</span></div>
-              <div class="row"><span class="k">内置运行时</span><span class="v ui-font">OMP Runtime 1.4.2 · PTY · MCP</span></div>
+              <div class="row"><span class="k" id="sumK0">安装位置</span><span class="v" id="sumPath">C:\Program Files\OMP Studio</span></div>
+              <div class="row"><span class="k" id="sumK1">产品版本</span><span class="v ui-font" id="sumV1">OMP Studio 1.4.2 (x64)</span></div>
+              <div class="row"><span class="k" id="sumK2">内置运行时</span><span class="v ui-font" id="sumV2">OMP Runtime 1.4.2 · PTY · MCP</span></div>
             </div>
-            <div class="finish-actions finish-item" style="animation-delay:520ms">
-              <label class="check"><input type="checkbox" id="runCheck" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">运行 OMP Studio(R)<small>勾选后，关闭向导将自动启动</small></span></label>
-              <a class="link" href="#" onclick="return false">查看发行说明 <svg viewBox="0 0 24 24"><use href="#i-ext"/></svg></a>
+            <div class="finish-actions finish-item" style="animation-delay:520ms" id="finishActions">
+              <label class="check" id="runCheckRow"><input type="checkbox" id="runCheck" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">运行 OMP Studio(R)<small>勾选后，关闭向导将自动启动</small></span></label>
+              <a class="link" id="finishLink" href="#" onclick="return false">查看发行说明 <svg viewBox="0 0 24 24"><use href="#i-ext"/></svg></a>
             </div>
           </section>
         </div>
@@ -195,7 +208,7 @@
           <div class="dialog">
             <div class="d-head">
               <span class="d-icon"><svg viewBox="0 0 24 24"><use href="#i-warn"/></svg></span>
-              <div><h3>取消安装</h3><p class="d-msg" id="confirmMsg">确定要退出 OMP Studio 安装向导吗？安装尚未完成。</p></div>
+              <div><h3 id="confirmTitle">取消安装</h3><p class="d-msg" id="confirmMsg">确定要退出 OMP Studio 安装向导吗？安装尚未完成。</p></div>
             </div>
             <div class="d-actions">
               <button class="btn" id="confirmQuit">退出安装(Q)</button>
@@ -216,6 +229,20 @@
             </div>
           </div>
         </div>
+
+        <!-- 相同版本 / 降级 / 进程占用 -->
+        <div class="overlay" id="occupyOv" hidden>
+          <div class="dialog">
+            <div class="d-head">
+              <span class="d-icon" id="occupyIcon"><svg viewBox="0 0 24 24"><use href="#i-warn"/></svg></span>
+              <div><h3 id="occupyTitle">已安装相同版本</h3><p class="d-msg" id="occupyMsg">本机已安装 OMP Studio 1.4.2。可以修复当前安装，或退出向导。</p></div>
+            </div>
+            <div class="d-actions">
+              <button class="btn" id="occupyAlt">退出</button>
+              <button class="btn primary" id="occupyOk">修复安装</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 底部操作条 -->
@@ -224,11 +251,11 @@
         <span class="spacer"></span>
         <div class="f-group" data-for="0">
           <button class="btn js-cancel">取消</button>
-          <button class="btn primary js-next">下一步(N) <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg></button>
+          <button class="btn primary js-next" id="welcomeNext">下一步(N) <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg></button>
         </div>
         <div class="f-group" data-for="1">
           <button class="btn js-back"><svg viewBox="0 0 24 24"><use href="#i-arrow-l"/></svg> 上一步(B)</button>
-          <button class="btn primary js-next">安装(I)</button>
+          <button class="btn primary js-install" id="installBtn">安装(I)</button>
           <button class="btn js-cancel">取消</button>
         </div>
         <div class="f-group" data-for="2">
@@ -246,7 +273,7 @@
   </div>
 
   <div class="stage-note">
-    <span><b>Enter</b> 下一步 · <b>Esc</b> 取消 · 主题默认跟随系统，可在右上覆盖</span>
+    <span><b>Enter</b> 下一步 · <b>Esc</b> 取消 · 左上切换安装情景 · 主题在右上</span>
     <span class="motion-badge"><i></i> 动效 <span id="motionText">标准</span> · <span class="mono">prefers-reduced-motion</span> 已适配</span>
   </div>
 </div>
@@ -258,7 +285,12 @@
   var hostMode = document.documentElement.getAttribute("data-host") === "installer";
   var installerShell = window.installerShell;
   var DURATION = 8600, step = -1, prevStep = null, simTimers = [], raf = 0;
-  var DEFAULT_PATH = "C:\\Users\\Ada\\AppData\\Local\\Programs\\OMP Studio";
+  var PRODUCT_DIR = "OMP Studio";
+  var PACKAGE_VERSION = "1.4.2";
+  var DEFAULT_PATH = "C:\\Program Files\\OMP Studio";
+  var scenario = "fresh";
+  var repairAccepted = false;
+  var occupyKind = null;
 
   /* ---------- 主题 ---------- */
   var saved = localStorage.getItem("omp-setup-theme") || "system";
@@ -285,22 +317,254 @@
       document.getElementById("scaleWrap").style.transform = "none";
       return;
     }
-    var s = Math.min(1, (innerWidth - 36) / 760, (innerHeight - 130) / 520);
+    var s = Math.min(1, (innerWidth - 36) / 760, (innerHeight - 160) / 520);
     document.getElementById("scaleWrap").style.transform = "scale(" + s + ")";
   }
   addEventListener("resize", fit); fit();
 
+  /* ---------- 安装情景 / 路径策略 ---------- */
+  var SCENARIOS = {
+    fresh: { occupancy: null, existingVersion: null, existingPath: null, running: false },
+    upgrade: { occupancy: "upgrade", existingVersion: "1.3.0", existingPath: DEFAULT_PATH, running: false },
+    same: { occupancy: "same", existingVersion: PACKAGE_VERSION, existingPath: DEFAULT_PATH, running: false },
+    downgrade: { occupancy: "downgrade", existingVersion: "1.5.0", existingPath: DEFAULT_PATH, running: false },
+    running: { occupancy: "upgrade", existingVersion: "1.3.0", existingPath: DEFAULT_PATH, running: true },
+    uninstall: { occupancy: "uninstall", existingVersion: PACKAGE_VERSION, existingPath: DEFAULT_PATH, running: false }
+  };
+
+  function normalizePath(p) {
+    return String(p || "").replace(/\//g, "\\").replace(/\\+$/g, "");
+  }
+  function lastSegment(p) {
+    var n = normalizePath(p);
+    var i = n.lastIndexOf("\\");
+    return i < 0 ? n : n.slice(i + 1);
+  }
+  function looksLikeProductDir(p) {
+    return lastSegment(p).toLowerCase() === PRODUCT_DIR.toLowerCase();
+  }
+  function resolveInstallDir(selected) {
+    var path = normalizePath(selected);
+    if (!path) return "";
+    if (looksLikeProductDir(path)) return path;
+    if (path.length === 2 && path.charAt(1) === ":") return path + "\\" + PRODUCT_DIR;
+    return path + "\\" + PRODUCT_DIR;
+  }
+  function describeResolve(selected) {
+    var raw = normalizePath(selected);
+    var resolved = resolveInstallDir(raw);
+    if (!raw) return { kind: "empty", text: "请选择安装位置。" };
+    if (raw.toLowerCase() === resolved.toLowerCase()) {
+      return { kind: "as-is", text: "将安装到所选文件夹（已是 OMP Studio 目录）。" };
+    }
+    return { kind: "append", text: "所选位置还不是产品目录，将新建文件夹  " };
+  }
+
+  function current() { return SCENARIOS[scenario] || SCENARIOS.fresh; }
+  function isUninstall() { return current().occupancy === "uninstall"; }
+  function isLockedDir() { return !!current().occupancy && !isUninstall(); }
+
+  function refreshPathHint() {
+    var input = document.getElementById("pathInput");
+    var hint = document.getElementById("pathHint");
+    var text = document.getElementById("pathHintText");
+    var extra = hint.querySelector("span.mono");
+    if (extra) extra.parentNode.removeChild(extra);
+    if (isLockedDir()) {
+      hint.className = "path-hint";
+      text.textContent = "已安装版本将原地更新，安装位置沿用上次目录。";
+      return;
+    }
+    var info = describeResolve(input.value);
+    text.textContent = info.text;
+    hint.className = "path-hint" + (info.kind === "append" ? " append" : info.kind === "empty" ? " warn" : "");
+    if (info.kind === "append") {
+      var code = document.createElement("span");
+      code.className = "mono";
+      code.textContent = resolveInstallDir(input.value);
+      hint.appendChild(code);
+    }
+  }
+
+  function applyScenario(id) {
+    if (!SCENARIOS[id]) id = "fresh";
+    scenario = id;
+    repairAccepted = false;
+    occupyKind = null;
+    var sc = current();
+    Array.prototype.forEach.call(document.querySelectorAll(".scenario-switch button"), function (b) {
+      b.classList.toggle("on", b.getAttribute("data-sc") === id);
+    });
+
+    var locked = isLockedDir();
+    var pathInput = document.getElementById("pathInput");
+    var browseBtn = document.getElementById("browseBtn");
+    pathInput.value = sc.existingPath || DEFAULT_PATH;
+    pathInput.readOnly = locked;
+    browseBtn.disabled = locked;
+
+    document.getElementById("optStartMenu").checked = true;
+    document.getElementById("optStartMenu").disabled = true;
+    document.getElementById("startMenuRow").classList.add("is-locked");
+    document.getElementById("optDesktop").checked = id === "fresh";
+    document.getElementById("tbAction").textContent = isUninstall() ? "OMP Studio 卸载" : "OMP Studio 安装";
+    document.title = isUninstall() ? "OMP Studio 卸载向导 · 视觉原型" : "OMP Studio 安装向导 · 视觉原型";
+    document.getElementById("runCheckRow").hidden = isUninstall();
+    document.getElementById("finishLink").hidden = isUninstall();
+    document.getElementById("finishActions").hidden = isUninstall();
+    document.getElementById("f1Title").textContent = "内置 OMP 运行时";
+    document.getElementById("f1Desc").textContent = "随应用一并安装与升级，无需手动配置开发环境。";
+    document.getElementById("f2Title").textContent = "原生 PTY 终端";
+    document.getElementById("f2Desc").textContent = "低延迟渲染，完整支持转义序列与真彩色输出。";
+    document.getElementById("f3Title").textContent = "Agent 与 MCP 扩展";
+    document.getElementById("f3Desc").textContent = "连接模型与工具链，按需扩展工作台能力。";
+    document.getElementById("welcomeRuntime").innerHTML = "&gt;_ 内置 <b>OMP Runtime 1.4.2</b>";
+    document.getElementById("finishRuntime").innerHTML = "&gt;_ 运行时已就绪 · <b>omp://</b> 已注册";
+    document.getElementById("progressTitle").textContent = "正在安装 OMP Studio";
+    document.getElementById("progressLede").textContent = "请稍候，正在将 OMP Studio 安装到你的计算机。";
+    document.getElementById("sumK0").textContent = "安装位置";
+    document.getElementById("sumK1").textContent = "产品版本";
+    document.getElementById("sumV1").textContent = "OMP Studio 1.4.2 (x64)";
+    document.getElementById("sumK2").textContent = "内置运行时";
+    document.getElementById("sumV2").textContent = "OMP Runtime 1.4.2 · PTY · MCP";
+
+    var notice = document.getElementById("occupancyNotice");
+    var occText = document.getElementById("occupancyText");
+    var noticeIcon = notice.querySelector("use");
+    if (sc.occupancy === "upgrade") {
+      notice.hidden = false;
+      notice.className = "notice info";
+      if (noticeIcon) noticeIcon.setAttribute("href", "#i-info");
+      occText.textContent = "检测到 OMP Studio " + sc.existingVersion + "。将原地更新到 " + PACKAGE_VERSION + "。会话留在 AppData；运行时随程序文件更新；头像覆盖写入同一文件。";
+    } else if (sc.occupancy === "same") {
+      notice.hidden = false;
+      notice.className = "notice info";
+      if (noticeIcon) noticeIcon.setAttribute("href", "#i-info");
+      occText.textContent = "已安装相同版本 " + PACKAGE_VERSION + "。继续将修复/覆盖程序文件；头像与会话仍在 AppData。";
+    } else if (sc.occupancy === "downgrade") {
+      notice.hidden = false;
+      notice.className = "notice warn";
+      if (noticeIcon) noticeIcon.setAttribute("href", "#i-warn");
+      occText.textContent = "已安装更高版本 " + sc.existingVersion + "。继续会降级到 " + PACKAGE_VERSION + "，可能不兼容现有数据。";
+    } else {
+      notice.hidden = true;
+    }
+
+    var welcomeTitle = document.getElementById("welcomeTitle");
+    var welcomeLede = document.getElementById("welcomeLede");
+    var welcomeNext = document.getElementById("welcomeNext");
+    var welcomeFoot = document.getElementById("welcomeFoot");
+    var installBtn = document.getElementById("installBtn");
+    var dirTitle = document.getElementById("dirTitle");
+    var dirLede = document.getElementById("dirLede");
+    var dirFoot = document.getElementById("dirFootText");
+    var finishTitle = document.getElementById("finishTitle");
+    var finishLede = document.getElementById("finishLede");
+
+    if (sc.occupancy === "uninstall") {
+      welcomeTitle.textContent = "卸载 OMP Studio";
+      welcomeLede.textContent = "将删除本机程序文件、开始菜单与桌面快捷方式，以及头像目录。会话与日志会留在 AppData。";
+      welcomeNext.textContent = "卸载(U)";
+      installBtn.textContent = "卸载(U)";
+      document.getElementById("f1Title").textContent = "删除程序文件";
+      document.getElementById("f1Desc").textContent = sc.existingPath + " 整目录删除（含旧版 userdata）。";
+      document.getElementById("f2Title").textContent = "删除快捷方式";
+      document.getElementById("f2Desc").textContent = "开始菜单与桌面的 OMP Studio 快捷方式一并移除。";
+      document.getElementById("f3Title").textContent = "删除头像，保留会话";
+      document.getElementById("f3Desc").textContent = "只清 %APPDATA%\\omp-studio\\profile；日志与会话不动。安装目录里的 omp.exe 随程序一起删除。";
+      document.getElementById("welcomeRuntime").innerHTML = "&gt;_ 将删除本机安装";
+      document.getElementById("finishRuntime").innerHTML = "&gt;_ 会话与日志仍在 AppData";
+      document.getElementById("progressTitle").textContent = "正在卸载 OMP Studio";
+      document.getElementById("progressLede").textContent = "请稍候，正在从这台计算机移除 OMP Studio。";
+      document.getElementById("sumK0").textContent = "已删除";
+      document.getElementById("sumK1").textContent = "已删除";
+      document.getElementById("sumV1").textContent = "头像 %APPDATA%\\omp-studio\\profile";
+      document.getElementById("sumK2").textContent = "已保留";
+      document.getElementById("sumV2").textContent = "会话 / 日志";
+      finishTitle.textContent = "卸载完成";
+      finishLede.textContent = "OMP Studio 已从本机移除。会话与日志仍在 AppData，再次安装即可继续使用。";
+    } else if (sc.occupancy === "upgrade") {
+      welcomeTitle.textContent = "更新 OMP Studio";
+      welcomeLede.textContent = "检测到本机已安装 " + sc.existingVersion + "。本向导将原地更新到 " + PACKAGE_VERSION + "。会话留在 AppData；运行时随程序文件更新；头像仍是同一份文件。";
+      welcomeNext.innerHTML = '下一步(N) <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg>';
+      installBtn.textContent = "更新(U)";
+      dirTitle.textContent = "确认安装位置";
+      dirLede.textContent = "更新将写入上次的安装目录，不会另建文件夹。";
+      dirFoot.textContent = "桌面快捷方式默认不重建（避免把你删掉的图标加回来）；开始菜单图标会保留。";
+      finishTitle.textContent = "更新完成";
+      finishLede.textContent = "OMP Studio 已更新到 " + PACKAGE_VERSION + "，运行时与扩展组件均已就绪。";
+    } else if (sc.occupancy === "same") {
+      welcomeTitle.textContent = "已安装此版本";
+      welcomeLede.textContent = "本机已安装 OMP Studio " + PACKAGE_VERSION + "。可以选择修复当前安装，或退出向导。";
+      welcomeNext.textContent = "修复(R)";
+      installBtn.textContent = "修复(R)";
+      dirTitle.textContent = "确认安装位置";
+      dirLede.textContent = "修复会覆盖程序文件，安装位置与用户数据保持不变。";
+      dirFoot.textContent = "修复不会删除 AppData 中的会话。安装目录里的运行时随程序文件覆盖。";
+      finishTitle.textContent = "修复完成";
+      finishLede.textContent = "OMP Studio " + PACKAGE_VERSION + " 已重新写入，用户数据未改动。";
+    } else if (sc.occupancy === "downgrade") {
+      welcomeTitle.textContent = "将安装较旧版本";
+      welcomeLede.textContent = "本机已安装 " + sc.existingVersion + "，当前安装包是 " + PACKAGE_VERSION + "。继续会降级；用户数据会保留，但不建议在日常使用中降级。";
+      welcomeNext.innerHTML = '下一步(N) <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg>';
+      installBtn.textContent = "降级(D)";
+      dirTitle.textContent = "确认安装位置";
+      dirLede.textContent = "降级写入上次的安装目录。若程序正在运行，开始安装前会先结束进程。";
+      dirFoot.textContent = "降级可能让新版本写入的配置无法被旧版本读取。";
+      finishTitle.textContent = "已降级安装";
+      finishLede.textContent = "OMP Studio " + PACKAGE_VERSION + " 已写入原目录。若工作台异常，请再装回更新的版本。";
+    } else {
+      welcomeTitle.textContent = "欢迎使用 OMP Studio 安装向导";
+      welcomeLede.textContent = "本向导将在你的计算机上安装 OMP Studio " + PACKAGE_VERSION + "，随附内置 OMP 运行时、原生 PTY 终端与 Agent / MCP 扩展支持，安装完成即可使用。";
+      welcomeNext.innerHTML = '下一步(N) <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg>';
+      installBtn.textContent = "安装(I)";
+      dirTitle.textContent = "选择安装位置";
+      dirLede.textContent = "选择要安装 OMP Studio 的文件夹。若所选位置还不是产品目录，将自动新建 OMP Studio 文件夹。";
+      dirFoot.textContent = "需要管理员权限，将安装给本机所有用户。完成后可在「设置 → 应用」卸载。";
+      finishTitle.textContent = "安装完成";
+      finishLede.textContent = "OMP Studio 已成功安装，运行时与扩展组件均已就绪。";
+    }
+    if (sc.occupancy === "uninstall") {
+      welcomeFoot.textContent = "单击「卸载」将先确认删除范围。";
+    } else if (sc.running) {
+      welcomeLede.textContent = "检测到 OMP Studio 正在运行。更新前需要先结束该进程，未保存的对话请先在应用内处理。";
+      welcomeFoot.textContent = "安装前会先确认结束占用进程。";
+    } else if (sc.occupancy === "same") {
+      welcomeFoot.textContent = "单击「修复」继续，或取消退出。";
+    } else if (sc.occupancy === "downgrade") {
+      welcomeFoot.textContent = "不建议降级。若仍要继续，单击「下一步」。";
+    } else if (sc.occupancy === "upgrade") {
+      welcomeFoot.textContent = "单击「下一步」确认更新位置。";
+    } else {
+      welcomeFoot.textContent = "单击「下一步」继续。";
+    }
+    refreshPathHint();
+    renderHints();
+  }
+
   /* ---------- 步骤机 ---------- */
   var steps = Array.prototype.slice.call(document.querySelectorAll(".step"));
-  var HINTS = [
-    "第 1 步，共 4 步 · 许可与组件已内置于运行时",
-    "第 2 步，共 4 步 · 预计占用 328 MB",
-    "第 3 步，共 4 步 · 正在写入文件，请勿关闭窗口",
-    "安装已完成 · 感谢使用 OMP Studio"
-  ];
+  function hintForStep() {
+    if (isUninstall()) {
+      if (step === 0) return "第 1 步，共 3 步 · 将卸载本机安装";
+      if (step === 2) return "第 2 步，共 3 步 · 正在删除程序文件，请勿关闭窗口";
+      return "卸载已完成 · 会话与日志仍在 AppData";
+    }
+    if (step === 0) {
+      var sc = current();
+      if (sc.occupancy === "upgrade") return "第 1 步，共 4 步 · 将更新已安装的 " + sc.existingVersion;
+      if (sc.occupancy === "same") return "第 1 步，共 4 步 · 已安装相同版本，可修复";
+      if (sc.occupancy === "downgrade") return "第 1 步，共 4 步 · 将从 " + sc.existingVersion + " 降级";
+      return "第 1 步，共 4 步 · 许可与组件已内置于运行时";
+    }
+    if (step === 1) return isLockedDir() ? "第 2 步，共 4 步 · 安装位置已锁定为现有目录" : "第 2 步，共 4 步 · 预计占用 328 MB";
+    if (step === 2) return "第 3 步，共 4 步 · 正在写入文件，请勿关闭窗口";
+    return current().occupancy === "upgrade" ? "更新已完成 · 感谢使用 OMP Studio" : "安装已完成 · 感谢使用 OMP Studio";
+  }
   function renderHints() {
+    if (step < 0) return;
     document.getElementById("footHint").innerHTML =
-      '<svg viewBox="0 0 24 24"><use href="#i-info"/></svg> ' + HINTS[step];
+      '<svg viewBox="0 0 24 24"><use href="#i-info"/></svg> ' + hintForStep();
     Array.prototype.forEach.call(document.querySelectorAll(".f-group"), function (g) {
       g.classList.toggle("on", +g.getAttribute("data-for") === step);
     });
@@ -320,9 +584,16 @@
       var i = +el.getAttribute("data-step");
       if (i !== step) el.className = "step";
     }); }, 420);
-    if (step === 1) requestAnimationFrame(function () { setTimeout(armMeter, 90); });
+    if (step === 1) {
+      refreshPathHint();
+      requestAnimationFrame(function () { setTimeout(armMeter, 90); });
+    }
     if (step === 2) startSim();
-    if (step === 3) document.getElementById("sumPath").textContent = document.getElementById("pathInput").value;
+    if (step === 3) {
+      document.getElementById("sumPath").textContent = isUninstall()
+        ? "程序文件与快捷方式"
+        : resolveInstallDir(document.getElementById("pathInput").value);
+    }
   }
 
   /* ---------- 磁盘指示 ---------- */
@@ -337,22 +608,60 @@
 
   /* ---------- 安装模拟 ---------- */
   var PCT_KEYS = [[0,0],[0.07,7],[0.13,12],[0.28,34],[0.52,68],[0.66,80],[0.74,86],[0.8,91],[0.87,95],[0.95,98],[1,100]];
-  var PLAN = [
-    { t: .01, time: "10:24:01", msg: "初始化安装环境", kind: "ok", phase: "正在准备安装环境…", file: "" },
-    { t: .07, time: "10:24:02", msg: "校验安装包完整性  (SHA-256) … 通过", kind: "ok", phase: "正在校验安装包…", file: "omp-studio-1.4.2-x64.msix" },
-    { t: .13, time: "10:24:02", msg: "释放文件: omp-studio.exe  (24.6 MB)", kind: "ok", phase: "正在释放文件…", file: "omp-studio.exe" },
-    { t: .2,  time: "10:24:03", msg: "释放文件: resources\\app.asar  (41.8 MB)", kind: "ok", file: "resources\\app.asar" },
-    { t: .29, time: "10:24:03", msg: "释放文件: runtime\\omp-runtime-1.4.2-win-x64.7z  (96.2 MB)", kind: "ok", file: "runtime\\omp-runtime-1.4.2-win-x64.7z" },
-    { t: .42, time: "10:24:04", msg: "释放文件: runtime\\node\\node.exe  (38.1 MB)", kind: "ok", file: "runtime\\node\\node.exe" },
-    { t: .52, time: "10:24:05", msg: "部署 OMP 运行时 v1.4.2 → runtime\\", kind: "hl", phase: "正在部署 OMP 运行时…", file: "runtime\\bin\\ompd.exe" },
-    { t: .6,  time: "10:24:05", msg: "部署内置扩展: agent-core, mcp-bridge", kind: "ok", file: "extensions\\mcp-bridge\\index.js" },
-    { t: .66, time: "10:24:06", msg: "注册 PTY 组件: winpty-agent.exe", kind: "ok", phase: "正在配置系统组件…", file: "pty\\winpty-agent.exe" },
-    { t: .74, time: "10:24:06", msg: "创建快捷方式: 开始菜单\\OMP Studio.lnk", kind: "ok", file: "" },
-    { t: .8,  time: "10:24:07", msg: "写入卸载信息: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\OMPStudio", kind: "ok", file: "" },
-    { t: .87, time: "10:24:07", msg: "注册 URI 协议处理器: omp://", kind: "ok", phase: "正在完成安装…", file: "" },
-    { t: .95, time: "10:24:08", msg: "共写入 1,284 个文件 · 328 MB", kind: "ok", file: "" },
-    { t: 1,   time: "10:24:08", msg: "安装完成", kind: "done", file: "" }
-  ];
+  function buildPlan() {
+    var sc = current();
+    if (isUninstall()) {
+      var items = [];
+      if (sc.running) {
+        items.push({ t: .01, time: "10:24:01", msg: "检测到 OMP Studio.exe 正在运行，正在结束进程…", kind: "hl", phase: "正在结束占用进程…", file: "" });
+        items.push({ t: .08, time: "10:24:01", msg: "进程已结束", kind: "ok", file: "" });
+      } else {
+        items.push({ t: .01, time: "10:24:01", msg: "初始化卸载", kind: "ok", phase: "正在准备卸载…", file: "" });
+      }
+      items.push({ t: .14, time: "10:24:02", msg: "删除快捷方式: 开始菜单\\OMP Studio.lnk", kind: "ok", phase: "正在删除快捷方式…", file: "" });
+      items.push({ t: .22, time: "10:24:02", msg: "删除快捷方式: 公共桌面\\OMP Studio.lnk", kind: "ok", file: "" });
+      items.push({ t: .34, time: "10:24:03", msg: "删除头像目录: %APPDATA%\\omp-studio\\profile", kind: "hl", phase: "正在删除头像…", file: "profile\\avatar.webp" });
+      items.push({ t: .46, time: "10:24:04", msg: "删除旧版 userdata（若仍在安装目录）", kind: "ok", file: "userdata\\" });
+      items.push({ t: .58, time: "10:24:05", msg: "删除程序文件: C:\\Program Files\\OMP Studio", kind: "ok", phase: "正在删除程序文件…", file: "OMP Studio.exe" });
+      items.push({ t: .78, time: "10:24:06", msg: "保留 %APPDATA%\\omp-studio 中的会话与日志", kind: "ok", file: "" });
+      items.push({ t: .9,  time: "10:24:07", msg: "写入卸载信息已清除", kind: "ok", phase: "正在完成卸载…", file: "" });
+      items.push({ t: 1,   time: "10:24:08", msg: "卸载完成", kind: "done", file: "" });
+      return items;
+    }
+    var desktop = document.getElementById("optDesktop").checked;
+    var verb = sc.occupancy === "upgrade" ? "更新" : sc.occupancy === "same" ? "修复" : sc.occupancy === "downgrade" ? "降级安装" : "安装";
+    var items = [];
+    if (sc.running) {
+      items.push({ t: .01, time: "10:24:01", msg: "检测到 OMP Studio.exe 正在运行，正在结束进程…", kind: "hl", phase: "正在结束占用进程…", file: "" });
+      items.push({ t: .06, time: "10:24:01", msg: "进程已结束", kind: "ok", file: "" });
+    } else {
+      items.push({ t: .01, time: "10:24:01", msg: "初始化安装环境", kind: "ok", phase: "正在准备安装环境…", file: "" });
+    }
+    items.push({ t: .07, time: "10:24:02", msg: "校验安装包完整性  (SHA-256) … 通过", kind: "ok", phase: "正在校验安装包…", file: "omp-studio-1.4.2-x64.exe" });
+    if (sc.occupancy) {
+      items.push({ t: .12, time: "10:24:02", msg: "头像位于 %APPDATA%\\omp-studio\\profile（覆盖写入，卸载时删除）", kind: "ok", phase: "正在" + verb + "文件…", file: "" });
+    }
+    items.push({ t: .13, time: "10:24:02", msg: "释放文件: OMP Studio.exe  (24.6 MB)", kind: "ok", phase: "正在释放文件…", file: "OMP Studio.exe" });
+    items.push({ t: .2,  time: "10:24:03", msg: "释放文件: resources\\app.asar  (41.8 MB)", kind: "ok", file: "resources\\app.asar" });
+    items.push({ t: .29, time: "10:24:03", msg: "释放文件: runtime\\omp-runtime-1.4.2-win-x64.7z  (96.2 MB)", kind: "ok", file: "runtime\\omp-runtime-1.4.2-win-x64.7z" });
+    items.push({ t: .42, time: "10:24:04", msg: "释放文件: runtime\\node\\node.exe  (38.1 MB)", kind: "ok", file: "runtime\\node\\node.exe" });
+    items.push({ t: .52, time: "10:24:05", msg: "部署 OMP 运行时 v1.4.2 → runtime\\", kind: "hl", phase: "正在部署 OMP 运行时…", file: "runtime\\bin\\ompd.exe" });
+    items.push({ t: .6,  time: "10:24:05", msg: "部署内置扩展: agent-core, mcp-bridge", kind: "ok", file: "extensions\\mcp-bridge\\index.js" });
+    items.push({ t: .66, time: "10:24:06", msg: "注册 PTY 组件: winpty-agent.exe", kind: "ok", phase: "正在配置系统组件…", file: "pty\\winpty-agent.exe" });
+    items.push({ t: .72, time: "10:24:06", msg: "创建快捷方式: 开始菜单\\OMP Studio.lnk（所有用户）", kind: "ok", file: "" });
+    if (desktop) {
+      items.push({ t: .76, time: "10:24:07", msg: "创建快捷方式: 公共桌面\\OMP Studio.lnk", kind: "ok", file: "" });
+    } else if (sc.occupancy) {
+      items.push({ t: .76, time: "10:24:07", msg: "保留现有桌面快捷方式（不强制重建）", kind: "ok", file: "" });
+    } else {
+      items.push({ t: .76, time: "10:24:07", msg: "跳过桌面快捷方式", kind: "ok", file: "" });
+    }
+    items.push({ t: .87, time: "10:24:07", msg: "写入卸载信息: HKLM\\…\\Uninstall\\OMPStudio", kind: "ok", phase: "正在完成" + verb + "…", file: "" });
+    items.push({ t: .91, time: "10:24:08", msg: "注册 URI 协议处理器: omp://", kind: "ok", file: "" });
+    items.push({ t: .95, time: "10:24:08", msg: "共写入 1,284 个文件 · 328 MB", kind: "ok", file: "" });
+    items.push({ t: 1,   time: "10:24:08", msg: verb + "完成", kind: "done", file: "" });
+    return items;
+  }
   function easeInOut(u) { return u < .5 ? 4*u*u*u : 1 - Math.pow(-2*u+2, 3)/2; }
   function smoothPct(t) {
     for (var i = 1; i < PCT_KEYS.length; i++) if (t <= PCT_KEYS[i][0]) {
@@ -369,8 +678,9 @@
     document.getElementById("phase").textContent = "正在准备…";
     document.getElementById("fileRow").innerHTML = "&nbsp;";
     setBar(0);
+    var plan = buildPlan();
     var t0 = performance.now();
-    PLAN.forEach(function (item) {
+    plan.forEach(function (item) {
       simTimers.push(setTimeout(function () {
         var div = document.createElement("div");
         div.className = "line " + item.kind;
@@ -387,7 +697,7 @@
       setBar(mq.matches ? quantPct(t) : smoothPct(t));
       if (t < 1) raf = requestAnimationFrame(tick);
       else {
-        document.getElementById("phase").textContent = "安装完成";
+        document.getElementById("phase").textContent = isUninstall() ? "卸载完成" : "安装完成";
         simTimers.push(setTimeout(function () { go(3); }, 1000));
       }
     };
@@ -402,21 +712,81 @@
     simTimers.forEach(clearTimeout); simTimers = [];
   }
 
-  /* ---------- 取消 / 浏览 / 完成 ---------- */
+  /* ---------- 取消 / 浏览 / 占用确认 / 完成 ---------- */
   var confirmOv = document.getElementById("confirmOv");
   var browseOv = document.getElementById("browseOv");
+  var occupyOv = document.getElementById("occupyOv");
   function openConfirm() {
-    document.getElementById("confirmMsg").textContent =
-      "确定要退出 OMP Studio 安装向导吗？安装尚未完成。" + (step === 2 ? " 取消将回滚已释放的文件。" : "");
+    var uninstall = isUninstall();
+    document.getElementById("confirmTitle").textContent = uninstall ? "取消卸载" : "取消安装";
+    document.getElementById("confirmQuit").textContent = uninstall ? "退出卸载(Q)" : "退出安装(Q)";
+    document.getElementById("confirmStay").textContent = uninstall ? "继续卸载" : "继续安装";
+    document.getElementById("confirmMsg").textContent = uninstall
+      ? "确定要退出 OMP Studio 卸载向导吗？卸载尚未完成。"
+      : ("确定要退出 OMP Studio 安装向导吗？安装尚未完成。" + (step === 2 ? " 取消将回滚已释放的文件。" : ""));
     confirmOv.hidden = false;
   }
-  function closeDialogs() { confirmOv.hidden = true; browseOv.hidden = true; }
+  function closeDialogs() { confirmOv.hidden = true; browseOv.hidden = true; occupyOv.hidden = true; occupyKind = null; }
   function closeInstallerShell() {
     if (installerShell && typeof installerShell.close === "function") {
       installerShell.close();
       return;
     }
     go(0);
+  }
+  function openOccupy(kind) {
+    occupyKind = kind;
+    var sc = current();
+    var title = document.getElementById("occupyTitle");
+    var msg = document.getElementById("occupyMsg");
+    var ok = document.getElementById("occupyOk");
+    var alt = document.getElementById("occupyAlt");
+    if (kind === "same") {
+      title.textContent = "已安装相同版本";
+      msg.textContent = "本机已安装 OMP Studio " + PACKAGE_VERSION + "。修复会覆盖程序文件；AppData 中的会话与头像文件保留（头像仍是覆盖写入）。";
+      ok.textContent = "修复安装";
+      alt.textContent = "退出";
+    } else if (kind === "downgrade") {
+      title.textContent = "确认降级？";
+      msg.textContent = "已安装 " + sc.existingVersion + "，继续将覆盖为 " + PACKAGE_VERSION + "。用户数据会保留，但新版本写入的配置可能无法被旧版本读取。";
+      ok.textContent = "仍然降级";
+      alt.textContent = "取消";
+    } else if (kind === "uninstall") {
+      title.textContent = "确认卸载 OMP Studio？";
+      msg.textContent = "将删除程序文件（含安装目录里的 omp.exe）、开始菜单与桌面快捷方式，以及 %APPDATA%\\omp-studio\\profile（头像）。会话与日志会留在 AppData。";
+      ok.textContent = "卸载";
+      alt.textContent = "取消";
+    } else {
+      title.textContent = "OMP Studio 正在运行";
+      msg.textContent = (isUninstall() ? "卸载前" : "安装前") + "需要先结束 OMP Studio。未保存的对话请先在应用内处理，然后继续。";
+      ok.textContent = "结束进程并继续";
+      alt.textContent = "取消";
+    }
+    occupyOv.hidden = false;
+  }
+  function beginInstall() {
+    var sc = current();
+    if (isUninstall()) {
+      if (sc.running && !repairAccepted) { openOccupy("running"); return; }
+      go(2);
+      return;
+    }
+    var input = document.getElementById("pathInput");
+    if (!isLockedDir()) input.value = resolveInstallDir(input.value);
+    if (!normalizePath(input.value)) return;
+    if (sc.occupancy === "same" && !repairAccepted) { openOccupy("same"); return; }
+    if (sc.occupancy === "downgrade" && !repairAccepted) { openOccupy("downgrade"); return; }
+    if (sc.running && !repairAccepted) { openOccupy("running"); return; }
+    go(2);
+  }
+  function onWelcomeNext() {
+    var sc = current();
+    if (isUninstall()) {
+      openOccupy("uninstall");
+      return;
+    }
+    if (sc.occupancy === "same" && !repairAccepted) { openOccupy("same"); return; }
+    go(1);
   }
   document.querySelectorAll(".js-cancel").forEach(function (b) { b.addEventListener("click", openConfirm); });
   document.getElementById("tbClose").addEventListener("click", function () {
@@ -429,21 +799,37 @@
   });
   document.getElementById("confirmStay").addEventListener("click", closeDialogs);
   confirmOv.addEventListener("mousedown", function (e) { if (e.target === confirmOv) closeDialogs(); });
+  occupyOv.addEventListener("mousedown", function (e) { if (e.target === occupyOv) closeDialogs(); });
   document.getElementById("confirmQuit").addEventListener("click", function () {
     closeDialogs(); stopSim(); closeInstallerShell();
   });
+  document.getElementById("occupyAlt").addEventListener("click", function () {
+    var kind = occupyKind;
+    closeDialogs();
+    if (kind === "same") { stopSim(); closeInstallerShell(); }
+  });
+  document.getElementById("occupyOk").addEventListener("click", function () {
+    var kind = occupyKind;
+    var sc = current();
+    closeDialogs();
+    if (kind === "uninstall") {
+      if (sc.running) { openOccupy("running"); return; }
+      go(2);
+      return;
+    }
+    repairAccepted = true;
+    if (kind === "same" && step === 0) go(1);
+    else beginInstall();
+  });
 
   var NODES = [
-    { id: "desktop", label: "桌面", depth: 0, icon: "#i-monitor", path: "C:\\Users\\Ada\\Desktop\\OMP Studio" },
+    { id: "desktop", label: "桌面", depth: 0, icon: "#i-monitor", path: "C:\\Users\\Public\\Desktop" },
     { id: "pc", label: "此电脑", depth: 0, icon: "#i-drive" },
-    { id: "c", label: "本地磁盘 (C:)", depth: 1, icon: "#i-drive", path: "C:\\OMP Studio" },
-    { id: "users", label: "Users", depth: 2, icon: "#i-folder" },
-    { id: "ada", label: "Ada", depth: 3, icon: "#i-folder" },
-    { id: "appdata", label: "AppData", depth: 4, icon: "#i-folder" },
-    { id: "local", label: "Local", depth: 5, icon: "#i-folder" },
-    { id: "programs", label: "Programs", depth: 6, icon: "#i-folder" },
-    { id: "omp", label: "OMP Studio", depth: 7, icon: "#i-folder", path: DEFAULT_PATH },
-    { id: "docs", label: "文档", depth: 0, icon: "#i-folder", path: "C:\\Users\\Ada\\Documents\\OMP Studio" }
+    { id: "c", label: "本地磁盘 (C:)", depth: 1, icon: "#i-drive", path: "C:\\" },
+    { id: "pf", label: "Program Files", depth: 2, icon: "#i-folder", path: "C:\\Program Files" },
+    { id: "omp", label: "OMP Studio", depth: 3, icon: "#i-folder", path: DEFAULT_PATH },
+    { id: "docs", label: "文档", depth: 0, icon: "#i-folder", path: "C:\\Users\\Ada\\Documents" },
+    { id: "dev", label: "Dev（空目录）", depth: 1, icon: "#i-folder", path: "D:\\Dev" }
   ];
   var browseSel = "omp";
   function renderTree() {
@@ -458,39 +844,78 @@
       tree.appendChild(d);
     });
     var sel = NODES.filter(function (n) { return n.id === browseSel; })[0];
-    document.getElementById("selPath").textContent = (sel && sel.path) || DEFAULT_PATH;
+    var picked = (sel && sel.path) || DEFAULT_PATH;
+    var resolved = resolveInstallDir(picked);
+    document.getElementById("selPath").textContent =
+      picked.toLowerCase() === resolved.toLowerCase()
+        ? "安装到: " + resolved
+        : "所选: " + picked + "  →  将安装到: " + resolved;
   }
-  document.getElementById("browseBtn").addEventListener("click", function () { browseOv.hidden = false; renderTree(); });
+  document.getElementById("browseBtn").addEventListener("click", function () {
+    if (isLockedDir()) return;
+    browseOv.hidden = false;
+    renderTree();
+  });
   document.getElementById("browseCancel").addEventListener("click", closeDialogs);
   browseOv.addEventListener("mousedown", function (e) { if (e.target === browseOv) closeDialogs(); });
   document.getElementById("browseOk").addEventListener("click", function () {
     var sel = NODES.filter(function (n) { return n.id === browseSel; })[0];
-    if (sel && sel.path) document.getElementById("pathInput").value = sel.path;
+    if (sel && sel.path) document.getElementById("pathInput").value = resolveInstallDir(sel.path);
+    refreshPathHint();
     closeDialogs();
+  });
+  document.getElementById("pathInput").addEventListener("input", refreshPathHint);
+  document.getElementById("pathInput").addEventListener("blur", function () {
+    if (isLockedDir()) return;
+    var input = document.getElementById("pathInput");
+    var resolved = resolveInstallDir(input.value);
+    if (resolved) input.value = resolved;
+    refreshPathHint();
   });
 
   document.getElementById("finishBtn").addEventListener("click", function () {
-    var run = document.getElementById("runCheck").checked;
+    var run = !isUninstall() && document.getElementById("runCheck").checked;
     var toast = document.getElementById("toast");
-    document.getElementById("toastMsg").textContent = run ? "正在启动 OMP Studio…" : "安装向导已退出";
+    document.getElementById("toastMsg").textContent = isUninstall()
+      ? "卸载向导已退出"
+      : (run ? "正在启动 OMP Studio…" : "安装向导已退出");
     toast.hidden = false;
     setTimeout(function () { toast.hidden = true; stopSim(); closeInstallerShell(); }, 2000);
   });
 
-  document.querySelectorAll(".js-next").forEach(function (b) { b.addEventListener("click", function () { go(step + 1); }); });
+  document.querySelectorAll(".js-next").forEach(function (b) {
+    b.addEventListener("click", function () { onWelcomeNext(); });
+  });
+  document.querySelectorAll(".js-install").forEach(function (b) {
+    b.addEventListener("click", beginInstall);
+  });
   document.querySelectorAll(".js-back").forEach(function (b) { b.addEventListener("click", function () { go(step - 1); }); });
+  Array.prototype.forEach.call(document.querySelectorAll(".scenario-switch button"), function (b) {
+    b.addEventListener("click", function () {
+      stopSim();
+      closeDialogs();
+      step = -1;
+      applyScenario(b.getAttribute("data-sc"));
+      go(0, 1);
+    });
+  });
 
   addEventListener("keydown", function (e) {
     if (e.key === "Escape") {
-      if (!browseOv.hidden || !confirmOv.hidden) closeDialogs();
+      if (!browseOv.hidden || !confirmOv.hidden || !occupyOv.hidden) closeDialogs();
       else if (step < 3) openConfirm();
     }
-    if (e.key === "Enter" && browseOv.hidden && confirmOv.hidden && step !== 2) {
+    if (e.key === "Enter" && browseOv.hidden && confirmOv.hidden && occupyOv.hidden && step !== 2) {
       if (step === 3) document.getElementById("finishBtn").click();
-      else go(step + 1);
+      else if (step === 1) beginInstall();
+      else onWelcomeNext();
+    } else if (e.key === "Enter" && !occupyOv.hidden) {
+      document.getElementById("occupyOk").click();
     }
   });
 
+  var initial = new URLSearchParams(window.location.search).get("scenario") || "fresh";
+  applyScenario(initial);
   go(0, 1);
 })();
 </script>

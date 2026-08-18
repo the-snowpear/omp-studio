@@ -128,6 +128,14 @@ export function deriveMinimapMarks(rows: readonly TimelineRow[]): MinimapMark[] 
         preview: row.item.shortSummary ?? row.item.summary,
         turn: 0,
       });
+    } else if (row.type === "compacting") {
+      marks.push({
+        itemId: "compacting",
+        type: "compact",
+        label: "压缩中",
+        preview: "正在压缩当前上下文",
+        turn: 0,
+      });
     } else {
       marks.push({
         itemId: row.item.itemId,
@@ -607,7 +615,7 @@ export function ConversationMinimap({
           <button
             type="button"
             className="icon-btn"
-            data-tip={keyOnly ? "筛选事件 · 当前仅关键节点" : "筛选事件"}
+            data-tip={keyOnly ? "仅关键" : "筛选"}
             aria-label="筛选事件"
             aria-haspopup="menu"
             aria-expanded={filterOpen}

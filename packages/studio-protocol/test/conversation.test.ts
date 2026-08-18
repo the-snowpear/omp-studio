@@ -23,6 +23,8 @@ import {
   parseStudioEventEnvelope,
   parseStudioReceipt,
   parseStudioSnapshotResponse,
+  publicConversationToolCallId,
+  truncateUtf8,
 } from "../src/index.js";
 
 const fixture = (name: string) => fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url));
@@ -429,4 +431,23 @@ test("live conversation events parse every kind and reject inner occurredAt", ()
     () => parseStudioEventEnvelope(envelope({ kind: "conversation.unknown", sessionId: "session-1" })),
     ContractValidationError,
   );
+});
+
+test("publicConversationToolCallId keeps distinct long ids unique", () => {
+  const prefix = "x".repeat(CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS);
+  const left = publicConversationToolCallId(`${prefix}a`, "fallback");
+  const right = publicConversationToolCallId(`${prefix}b`, "fallback");
+  assert.equal(left.truncated, true);
+  assert.equal(right.truncated, true);
+  assert.notEqual(left.id, right.id);
+  assert.ok(left.id.length <= CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS);
+  assert.equal(publicConversationToolCallId("", "tool:entry").id, "tool:entry");
+});
+
+test("truncateUtf8 does not split a multibyte codepoint", () => {
+  const cut = truncateUtf8("é", 1);
+  assert.equal(cut.truncated, true);
+  assert.equal(cut.text, "");
+  const ascii = truncateUtf8("ab", 1);
+  assert.equal(ascii.text, "a");
 });

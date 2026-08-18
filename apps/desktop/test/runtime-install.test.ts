@@ -16,8 +16,14 @@ import type { RuntimeInstallationManifest } from "@omp-studio/studio-protocol";
 import {
   collectManagedRuntimeArtifactRoots,
   createDesktopRuntimeInstallService,
+  createManagedArtifactLocator,
   loadInstallerTrustedKeys,
   locateManagedRuntimeArtifact,
+  packagedRuntimeInstallLayout,
+  probeManagedRuntimeInstall,
+  resolveManagedRuntimeInstallDirectory,
+  resolveManagedRuntimeInstallState,
+  seedManagedRuntimeFromArtifact,
 } from "../src/runtime-install.js";
 
 const passingSelfCheck = { run: async () => undefined };
@@ -204,6 +210,66 @@ test("install service copies a signed artifact and activates it", async () => {
   }
 });
 
+test("resolveManagedRuntimeInstallState reports local artifact updates", () => {
+  assert.deepEqual(resolveManagedRuntimeInstallState({}), { status: "not-installed", signature: "unknown" });
+  assert.deepEqual(resolveManagedRuntimeInstallState({ availableVersion: "1.0.1-studio.1" }), {
+    status: "not-installed",
+    signature: "unknown",
+    availableVersion: "1.0.1-studio.1",
+  });
+  assert.deepEqual(resolveManagedRuntimeInstallState({ installedVersion: "1.0.1-studio.1" }), {
+    status: "installed",
+    version: "1.0.1-studio.1",
+    signature: "verified",
+  });
+  assert.deepEqual(
+    resolveManagedRuntimeInstallState({ installedVersion: "1.0.1-studio.1", availableVersion: "1.0.1-studio.1" }),
+    { status: "installed", version: "1.0.1-studio.1", signature: "verified" },
+  );
+  assert.deepEqual(
+    resolveManagedRuntimeInstallState({ installedVersion: "1.0.0-studio.1", availableVersion: "1.0.2-studio.1" }),
+    {
+      status: "update-available",
+      version: "1.0.0-studio.1",
+      availableVersion: "1.0.2-studio.1",
+      signature: "verified",
+    },
+  );
+});
+
+test("probeManagedRuntimeInstall compares the newest local artifact to the installed version", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-probe-"));
+  try {
+    await writeArtifact(root, "1.0.0-studio.1", "stable");
+    await writeArtifact(root, "1.0.2-studio.1", "stable");
+    const update = await probeManagedRuntimeInstall({
+      platform: "win32-x64",
+      currentVersion: "1.0.0-studio.1",
+      locateArtifact: async () => locateManagedRuntimeArtifact({ platform: "win32-x64", roots: [root] }),
+    });
+    assert.equal(update.status, "update-available");
+    assert.equal(update.version, "1.0.0-studio.1");
+    assert.equal(update.availableVersion, "1.0.2-studio.1");
+
+    const current = await probeManagedRuntimeInstall({
+      platform: "win32-x64",
+      currentVersion: "1.0.2-studio.1",
+      locateArtifact: async () => locateManagedRuntimeArtifact({ platform: "win32-x64", roots: [root] }),
+    });
+    assert.equal(current.status, "installed");
+    assert.equal(current.availableVersion, undefined);
+
+    const missing = await probeManagedRuntimeInstall({
+      platform: "win32-x64",
+      locateArtifact: async () => locateManagedRuntimeArtifact({ platform: "win32-x64", roots: [root] }),
+    });
+    assert.equal(missing.status, "not-installed");
+    assert.equal(missing.availableVersion, "1.0.2-studio.1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("install service reactivates an already-installed version", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-reinst-"));
   try {
@@ -227,6 +293,179 @@ test("install service reactivates an already-installed version", async () => {
     const state = await service();
     assert.equal(state.status, "installed");
     assert.equal(state.version, "2.0.0-studio.1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("packagedRuntimeInstallLayout is the live RuntimeInstaller tree next to the exe", () => {
+  assert.equal(packagedRuntimeInstallLayout({ isPackaged: false, execPath: join("C:", "dev", "OMP Studio.exe") }), undefined);
+  const layout = packagedRuntimeInstallLayout({
+    isPackaged: true,
+    execPath: join("C:", "Program Files", "OMP Studio", "OMP Studio.exe"),
+  });
+  assert.deepEqual(layout, {
+    installDirectory: join("C:", "Program Files", "OMP Studio", "runtime"),
+    artifactRoot: join("C:", "Program Files", "OMP Studio", "runtime", "versions"),
+    keysDirectory: join("C:", "Program Files", "OMP Studio", "runtime-keys"),
+  });
+});
+
+test("resolveManagedRuntimeInstallDirectory prefers the packaged override", () => {
+  const profile = join("C:", "Users", "me", "AppData", "Roaming", "omp-studio");
+  assert.equal(resolveManagedRuntimeInstallDirectory({ stateDirectory: profile }), join(profile, "runtimes"));
+  assert.equal(
+    resolveManagedRuntimeInstallDirectory({
+      stateDirectory: profile,
+      installDirectory: join("C:", "Program Files", "OMP Studio", "runtime"),
+    }),
+    join("C:", "Program Files", "OMP Studio", "runtime"),
+  );
+});
+
+test("loadInstallerTrustedKeys tries bundled keys before the profile directory", async () => {
+  const bundled = await mkdtemp(join(tmpdir(), "omp-keys-bundled-"));
+  const profile = await mkdtemp(join(tmpdir(), "omp-keys-profile-"));
+  try {
+    await writeFile(join(profile, "key-id.txt"), "profile-key\n");
+    await writeFile(join(profile, "trusted-public.pem"), trustedPublicKey);
+    const missingBundled = await loadInstallerTrustedKeys([bundled, profile]);
+    assert.ok(missingBundled);
+    assert.deepEqual([...Object.keys(missingBundled.trustedKeys)], ["profile-key"]);
+    await writeFile(join(bundled, "key-id.txt"), "bundled-key\n");
+    await writeFile(join(bundled, "trusted-public.pem"), trustedPublicKey);
+    const fromBundled = await loadInstallerTrustedKeys([bundled, profile]);
+    assert.ok(fromBundled);
+    assert.deepEqual([...Object.keys(fromBundled.trustedKeys)], ["bundled-key"]);
+  } finally {
+    await rm(bundled, { recursive: true, force: true });
+    await rm(profile, { recursive: true, force: true });
+  }
+});
+
+test("createManagedArtifactLocator reads extraFiles-style runtime root", async () => {
+  const extra = await mkdtemp(join(tmpdir(), "omp-extra-runtime-"));
+  try {
+    await writeArtifact(extra, "4.1.0-studio.1");
+    const locate = createManagedArtifactLocator({
+      locateArtifact: async (input) => locateManagedRuntimeArtifact({ ...input, roots: [extra] }),
+    });
+    const found = await locate({ platform: "win32-x64" });
+    assert.equal(found, join(extra, "4.1.0-studio.1"));
+  } finally {
+    await rm(extra, { recursive: true, force: true });
+  }
+});
+
+test("seedManagedRuntimeFromArtifact skips without a key or artifact, and does not reinstall", async () => {
+  const calls: string[] = [];
+  const skippedKey = await seedManagedRuntimeFromArtifact({
+    backend: {
+      installer: { currentManifest: async () => {
+        calls.push("current");
+        return undefined;
+      } },
+      install: async () => {
+        calls.push("install");
+        throw new Error("must not install");
+      },
+      activate: async () => {
+        calls.push("activate");
+        throw new Error("must not activate");
+      },
+    },
+    platform: "win32-x64",
+    hasTrustedKey: false,
+  });
+  assert.equal(skippedKey, "skipped");
+  assert.deepEqual(calls, []);
+
+  const skippedArtifact = await seedManagedRuntimeFromArtifact({
+    backend: {
+      installer: { currentManifest: async () => undefined },
+      install: async () => {
+        throw new Error("must not install");
+      },
+      activate: async () => {
+        throw new Error("must not activate");
+      },
+    },
+    platform: "win32-x64",
+    hasTrustedKey: true,
+    locateArtifact: async () => undefined,
+  });
+  assert.equal(skippedArtifact, "skipped");
+
+  const already = await seedManagedRuntimeFromArtifact({
+    backend: {
+      installer: { currentManifest: async () => ({}) },
+      install: async () => {
+        throw new Error("must not install");
+      },
+      activate: async () => {
+        throw new Error("must not activate");
+      },
+    },
+    platform: "win32-x64",
+    hasTrustedKey: true,
+    locateArtifact: async () => {
+      throw new Error("must not locate");
+    },
+  });
+  assert.equal(already, "already-installed");
+});
+
+test("seedManagedRuntimeFromArtifact installs and activates a located artifact", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-seed-"));
+  try {
+    const artifact = await writeArtifact(root, "5.0.0-studio.1");
+    const installer = new RuntimeInstaller(join(root, "runtimes"), {
+      trustedKeys: { "test-key": trustedPublicKey },
+    });
+    const result = await seedManagedRuntimeFromArtifact({
+      backend: {
+        installer,
+        install: (directory) => installer.install(directory),
+        activate: async (version, activateOptions) =>
+          installer.activate(version, activateOptions ?? { selfCheck: passingSelfCheck }),
+      },
+      platform: "win32-x64",
+      hasTrustedKey: true,
+      locateArtifact: async () => artifact,
+      activateOptions: { selfCheck: passingSelfCheck },
+    });
+    assert.equal(result, "seeded");
+    const current = await installer.currentManifest();
+    assert.equal(current?.manifest.runtimeVersion, "5.0.0-studio.1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("seedManagedRuntimeFromArtifact activates a versions tree already in the installer root", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-seed-inplace-"));
+  try {
+    const installerRoot = join(root, "runtime");
+    const artifact = await writeArtifact(join(installerRoot, "versions"), "6.0.0-studio.1");
+    const installer = new RuntimeInstaller(installerRoot, {
+      trustedKeys: { "test-key": trustedPublicKey },
+    });
+    const result = await seedManagedRuntimeFromArtifact({
+      backend: {
+        installer,
+        install: (directory) => installer.install(directory),
+        activate: async (version, activateOptions) =>
+          installer.activate(version, activateOptions ?? { selfCheck: passingSelfCheck }),
+      },
+      platform: "win32-x64",
+      hasTrustedKey: true,
+      locateArtifact: async () => artifact,
+      activateOptions: { selfCheck: passingSelfCheck },
+    });
+    assert.equal(result, "seeded");
+    const current = await installer.currentManifest();
+    assert.equal(current?.manifest.runtimeVersion, "6.0.0-studio.1");
+    assert.equal(current?.entrypointPath, join(installerRoot, "versions", "6.0.0-studio.1", "omp.exe"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -408,14 +408,14 @@ export function SkillsDrawer({
         <span className="spacer" />
         <button
           className="icon-btn small"
-          data-tip="打开能力中心"
+          data-tip="能力中心"
           aria-label="打开能力中心"
           type="button"
           onClick={() => onOpenHub?.()}
         >
           <Icon name="external" extra="sm" />
         </button>
-        <button className="icon-btn small" data-tip="关闭 (Esc)" aria-label="关闭技能面板" onClick={onClose}>
+        <button className="icon-btn small" data-tip="关闭" aria-label="关闭技能面板" onClick={onClose}>
           <Icon name="x" extra="sm" />
         </button>
       </div>
@@ -823,7 +823,7 @@ function SkillCard({
         >
           <Icon name={glyph} />
           {used && !err ? (
-            <span className="sk-used-mark" aria-hidden="true" title="本轮对话用过">
+            <span className="sk-used-mark" aria-hidden="true" data-tip="用过">
               <Icon name="history" extra="sm" />
             </span>
           ) : null}

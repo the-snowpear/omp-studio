@@ -326,6 +326,7 @@ test("composition follows the P1 initialization order and bootstraps read-only w
 
     const bootstrap = await composition.facade.bootstrap();
     assertWithoutSnapshot(bootstrap);
+    assert.equal(bootstrap.runtime.unavailableCode, "resolution-rejected");
     assert.equal(bootstrap.authority.authorityId, "auth-0001");
     assert.equal(typeof bootstrap.authority.authorityEpoch, "number");
     assert.ok(bootstrap.authority.authorityEpoch >= 1);
@@ -366,6 +367,7 @@ test("a trusted resolution creates the runtime session and bootstraps ready", as
       assert.equal(context.resolution.classification, "compatible-system");
       assert.equal(context.endpoint.kind, "in-memory");
       assert.equal(context.profileDirectory, profileDirectory);
+      assert.equal(context.runtimeInstallDirectory, join(profileDirectory, "runtimes"));
 
       const bootstrap = await composition.facade.bootstrap();
       assert.equal(bootstrap.runtime.status, "connected");
@@ -375,6 +377,30 @@ test("a trusted resolution creates the runtime session and bootstraps ready", as
       assert.equal(bootstrap.stateVersion, 1);
       assert.equal(lock.released, false);
       assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+    });
+  });
+});
+
+test("managedInstall.installDirectory is handed to the runtime session as the live tree", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const installDirectory = await mkdtemp(join(tmpdir(), "omp-live-runtime-"));
+      try {
+        const session = fakeSessionPort({ ready: true });
+        const composition = await createDesktopHostComposition({
+          platform: fakePlatform(profileDirectory).port,
+          authorityLock: fakeAuthorityLock().port,
+          privateEndpoint: fakePrivateEndpoint().port,
+          runtimeSession: session.port,
+          resolver: { probe: fullParityProbe() },
+          preference: { kind: "system", executable: executablePath, allowLimited: false },
+          managedInstall: { installDirectory },
+        });
+        assert.equal(session.contexts[0]?.runtimeInstallDirectory, installDirectory);
+        await composition.shutdown();
+      } finally {
+        await rm(installDirectory, { recursive: true, force: true });
+      }
     });
   });
 });
@@ -393,7 +419,9 @@ test("a not-ready session port yields a read-only composition without a fake sna
       });
       assert.equal(composition.status, "read-only");
       assert.deepEqual(session.calls, ["session.start"]);
-      assertWithoutSnapshot(await composition.facade.bootstrap());
+      const bootstrap = await composition.facade.bootstrap();
+      assertWithoutSnapshot(bootstrap);
+      assert.equal(bootstrap.runtime.unavailableCode, "no-workspace");
     });
   });
 });
@@ -409,7 +437,9 @@ test("without a runtime session port the composition stays read-only even with a
         preference: { kind: "system", executable: executablePath, allowLimited: false },
       });
       assert.equal(composition.status, "read-only");
-      assertWithoutSnapshot(await composition.facade.bootstrap());
+      const bootstrap = await composition.facade.bootstrap();
+      assertWithoutSnapshot(bootstrap);
+      assert.equal(bootstrap.runtime.unavailableCode, "not-wired");
     });
   });
 });
@@ -624,7 +654,10 @@ test("a session start failure keeps a read-only Host facade", async () => {
         preference: { kind: "system", executable: executablePath, allowLimited: false },
       });
       assert.equal(composition.status, "read-only");
-      assertWithoutSnapshot(await composition.facade.bootstrap());
+      const bootstrap = await composition.facade.bootstrap();
+      assertWithoutSnapshot(bootstrap);
+      assert.equal(bootstrap.runtime.unavailableCode, "launch-failed");
+      assert.match(bootstrap.runtime.unavailableReason ?? "", /runtime failed to start/u);
       assert.deepEqual(session.calls, ["session.start", "session.stop"]);
       assert.deepEqual(endpoint.calls, ["endpoint.create"]);
       assert.deepEqual(lock.calls, ["acquire"]);

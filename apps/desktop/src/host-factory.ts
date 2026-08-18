@@ -39,7 +39,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { dialog } from "electron";
+import { app, dialog } from "electron";
 
 import type { ArchId, WorkspaceId } from "@omp-studio/client-contract";
 import { createOmpWorkspaceService } from "@omp-studio/host-client-api/workspaces";
@@ -62,7 +62,7 @@ import { createDesktopGithubService } from "./github-service.js";
 import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
 import { createDesktopRuntimeSessionPort } from "./runtime-session.js";
 import { createWorkspaceFileService } from "./workspace-files.js";
-import type { DesktopManagedInstallOptions } from "./runtime-install.js";
+import { packagedRuntimeInstallLayout, type DesktopManagedInstallOptions } from "./runtime-install.js";
 import type { DesktopHostComposition, DesktopHostFactory } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -562,21 +562,24 @@ function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
   };
 }
 
-/**
- * Production factory: real seams, no arguments (main.ts imports only this).
- *
- * Wires the Host-owned workspace registry (paths never leave it), the
- * system directory picker (`workspace.pick`), the production Runtime
- * session port (spawns the managed runtime under the selected workspace
- * cwd) and the workspaces facade seam whose `onActivated` restarts the
- * Runtime through the composition. Until a folder is picked the desktop
- * stays read-only — `%APPDATA%\omp-studio` is never used as a project cwd.
- */
-/**
- * Production factory plus the narrow Main-only workspace lookup used by
- * Desktop chrome (external editor / file manager / local terminal cwd).
- * These methods stay in the Main process and never cross the Host facade.
- */
+/** Packaged extraFiles layout; unpackaged keeps AppData runtimes + repo artifact discovery. */
+function productionManagedInstall(): DesktopManagedInstallOptions {
+  const layout = packagedRuntimeInstallLayout({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+  });
+  return {
+    seedOnStart: true,
+    ...(layout === undefined
+      ? {}
+      : {
+          installDirectory: layout.installDirectory,
+          artifactRoot: layout.artifactRoot,
+          trustedKeysDirectory: layout.keysDirectory,
+        }),
+  };
+}
+
 export interface ProductionDesktopHostFactory extends DesktopHostFactory {
   /** Resolve an opaque workspaceId to its Host-owned canonical cwd. */
   resolveWorkspaceCwd(workspaceId: string): Promise<string>;
@@ -584,7 +587,16 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
   activeWorkspaceCwd(): string | undefined;
 }
 
-export function createProductionHostFactory(options?: { readonly openUrl?: (url: string) => Promise<void> }): ProductionDesktopHostFactory {
+/**
+ * Production factory plus the narrow Main-only workspace lookup used by
+ * Desktop chrome (external editor / file manager / local terminal cwd).
+ * These methods stay in the Main process and never cross the Host facade.
+ * Packaged builds keep the live `omp.exe` under `$INSTDIR\runtime`.
+ */
+export function createProductionHostFactory(options?: {
+  readonly openUrl?: (url: string) => Promise<void>;
+  readonly revealDirectory?: (absDir: string) => Promise<void>;
+}): ProductionDesktopHostFactory {
   const registry = new WorkspaceRegistry(productionWorkspaceRegistryPath());
   let registryReady: Promise<void> | undefined;
   const ensureRegistry = (): Promise<void> => {
@@ -642,6 +654,7 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
   const facade: DesktopFacadeSeams = {
     hostLog,
     ...(options?.openUrl === undefined ? {} : { openUrl: options.openUrl }),
+    ...(options?.revealDirectory === undefined ? {} : { revealDirectory: options.revealDirectory }),
     workspaces,
     workspaceFiles: createWorkspaceFileService({ registry }),
     git,
@@ -667,7 +680,7 @@ export function createProductionHostFactory(options?: { readonly openUrl?: (url:
     authorityLockServices: createProductionAuthorityLockServices(),
     resolver: { probe: createProcessProbe() },
     runtimeSession,
-    managedInstall: {},
+    managedInstall: productionManagedInstall(),
     facade,
   };
   const factory = createDesktopHostFactory({

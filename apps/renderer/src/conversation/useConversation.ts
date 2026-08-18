@@ -16,6 +16,8 @@ export type UseConversationInput = {
 
 export type UseConversationResult = ConversationSnapshot & {
   loadOlder: () => void;
+  reload: () => Promise<void>;
+  restoreFromUser: (itemId: string) => boolean;
   trackPending: (pending: PendingUser) => void;
   failPending: (requestId: string, error: string) => void;
   dropPending: (requestId: string) => void;
@@ -77,6 +79,8 @@ export function useConversation(input: UseConversationInput): UseConversationRes
     loadOlder: () => {
       void engineRef.current?.loadOlder();
     },
+    reload: () => engineRef.current?.reload() ?? Promise.resolve(),
+    restoreFromUser: (itemId) => engineRef.current?.restoreFromUser(itemId) ?? false,
     trackPending: (pending) => engineRef.current?.trackPending(pending),
     failPending: (requestId, error) => engineRef.current?.failPending(requestId, error),
     dropPending: (requestId) => engineRef.current?.dropPending(requestId),

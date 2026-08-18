@@ -288,8 +288,8 @@ describe("WP-011 Studio Bridge runtime server", () => {
 		await started;
 		expect(response.runtimeInstanceId).toBe("runtime-instance-test");
 		expect(response.runtimeEpoch).toBe(7);
-		expect(response.runtimeVersion).toBe("17.2.12-studio.39");
-		expect(response.upstreamVersion).toBe("17.2.12");
+		expect(response.runtimeVersion).toBe("17.3.7-studio.1");
+		expect(response.upstreamVersion).toBe("17.3.7");
 		expect(responseFrame.header.runtimeEpoch).toBe(response.runtimeEpoch);
 		expect(response.capabilityManifest.profile).toBe("limited");
 		const capabilityIds = response.capabilityManifest.capabilities.map(entry => entry.id);

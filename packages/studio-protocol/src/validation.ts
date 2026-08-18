@@ -1,5 +1,6 @@
 import { ContractValidationError } from "./contract-error.js";
 import type { AgentTranscriptMessage, AgentTranscriptPage } from "./contracts/agents-jobs.js";
+import { parseBtwSnapshot } from "./btw-validation.js";
 import type { AgentId, Generation, OpaqueCursor } from "./contracts/ids.js";
 import {
   CONVERSATION_LIMITS,
@@ -33,6 +34,7 @@ import {
 } from "./telemetry-validation.js";
 
 export { ContractValidationError } from "./contract-error.js";
+export { isBtwErrorCode, isBtwStatus, parseBtwSnapshot } from "./btw-validation.js";
 export {
   parseConversationContentBlock,
   parseConversationItem,
@@ -565,7 +567,7 @@ export function parseStudioEventEnvelope(value: unknown): StudioEventEnvelope {
     if (error.details !== undefined) record(error.details, "$event.event.error.details");
   } else if (event.kind === "btw.changed") {
     exactKeys(event, ["kind", "snapshot"], "$event.event");
-    jsonValue(event.snapshot, "$event.event.snapshot");
+    parseBtwSnapshot(event.snapshot, "$event.event.snapshot");
   } else if (isSessionTelemetryEventKind(event.kind)) {
     parseSessionTelemetryEvent(event, "$event.event");
   } else if (isConversationRuntimeEventKind(event.kind)) {
@@ -911,6 +913,12 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
       }
     },
   },
+  "session.tree.branch": {
+    keys: ["kind", "targetId"],
+    validate: (operation) => {
+      nonEmptyString(operation.targetId, "$request.operation.targetId");
+    },
+  },
   "mode.plan.enter": {
     keys: ["kind", "initialPrompt"],
     validate: (operation) => {
@@ -929,7 +937,11 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   "mode.plan.review.respond": {
     keys: ["kind", "decision", "feedback"],
     validate: (operation) => {
-      if (!new Set(["approve", "refine", "dismiss"]).has(operation.decision as string)) {
+      if (
+        !new Set(["execute", "compact", "keep", "approve", "refine", "dismiss"]).has(
+          operation.decision as string,
+        )
+      ) {
         throw new ContractValidationError("invalid plan decision", "$request.operation.decision");
       }
       if (operation.feedback !== undefined) nonEmptyString(operation.feedback, "$request.operation.feedback");
@@ -1052,7 +1064,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "agent.send": {
-    keys: ["kind", "agentId", "expectedGeneration", "text", "mode"],
+    keys: ["kind", "agentId", "expectedGeneration", "text", "mode", "images"],
     validate: (operation) => {
       const agentId = nonEmptyString(operation.agentId, "$request.operation.agentId");
       const text = nonEmptyString(operation.text, "$request.operation.text");
@@ -1065,6 +1077,9 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
       positiveInteger(operation.expectedGeneration, "$request.operation.expectedGeneration");
       if (!new Set(["prompt", "steer", "followUp"]).has(operation.mode as string)) {
         throw new ContractValidationError("unsupported delivery mode", "$request.operation.mode");
+      }
+      if (operation.images !== undefined) {
+        optionalImageArray(operation.images, "$request.operation.images");
       }
     },
   },

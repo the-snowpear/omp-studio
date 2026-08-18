@@ -3,6 +3,14 @@
    主 Agent 横幅 · Roster（列表+详情） · Transcript · Jobs · IRC
    ============================================================ */
 
+/* 打开对话预览时 .page-body 改为 overflow:hidden，经典滚动条会消失。
+   Hub 页是 margin:0 auto 居中的，滚动条占宽一没，整块会往右跳。
+   始终预留滚动条槽，和模型配置页同一做法；用 data-route 而不是
+   :has(.is-chat-preview)，避免子节点挂上后 Chromium 晚一帧才匹配。 */
+.page-body[data-route="agent-hub"] {
+  scrollbar-gutter: stable;
+}
+
 /* ---------- 页面骨架：高度由内容决定，超过视口时自然滚动 ---------- */
 .hub-page {
   max-width: 1080px;
@@ -102,6 +110,92 @@
   grid-template-columns: minmax(0, 58fr) minmax(0, 42fr);
   gap: var(--sp-16);
   align-items: start;
+  transition: grid-template-columns 320ms var(--ease-nav);
+}
+
+.hub-page.is-chat-preview {
+  /* 页面仍用 .hub-page 的 1080px，避免顶栏/搜索随预览开关跳变。 */
+  flex: 1;
+  min-height: 0;
+}
+.hub-page.is-chat-preview .hub-cols {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+  /* 列表只略收窄；预览列吃剩余宽度。两侧都用 minmax(0, Nfr)，
+     才能和静止态插值，打开时列宽跟着滑动而不是瞬切。 */
+  grid-template-columns: minmax(0, 40fr) minmax(0, 60fr);
+}
+.hub-page.is-chat-preview .hub-list {
+  overflow: auto;
+  min-height: 0;
+}
+.hub-page.is-chat-closing .hub-cols {
+  align-items: stretch;
+  min-height: 0;
+  overflow: hidden;
+}
+.hub-page.is-chat-closing .hub-list {
+  overflow: auto;
+  min-height: 0;
+}
+.hub-detail.is-chat {
+  min-height: 0;
+  height: 100%;
+  max-width: calc(var(--doc-max-w) - var(--sp-32));
+  overflow: hidden;
+}
+.hub-face-stage {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.hub-face {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.hub-face-enter-fwd,
+.hub-face-enter-back,
+.hub-face-leave-fwd,
+.hub-face-leave-back {
+  backface-visibility: hidden;
+}
+.hub-face-enter-fwd,
+.hub-face-enter-back {
+  z-index: 1;
+}
+.hub-face-leave-fwd,
+.hub-face-leave-back {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.hub-face-enter-fwd {
+  animation: tab-pane-enter-fwd 320ms var(--ease-nav) both;
+}
+.hub-face-enter-back {
+  animation: tab-pane-enter-back 320ms var(--ease-nav) both;
+}
+.hub-face-leave-fwd {
+  animation: tab-pane-leave-fwd 240ms var(--ease-nav) both;
+}
+.hub-face-leave-back {
+  animation: tab-pane-leave-back 240ms var(--ease-nav) both;
+}
+.hub-chat-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12) 0;
+  flex: none;
 }
 
 .hub-list { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
@@ -420,6 +514,9 @@
   color: var(--red);
   margin-bottom: var(--sp-10);
 }
+.hub-notice.ok { background: var(--green-soft); color: var(--green); }
+.hub-notice.warn { background: var(--amber-soft); color: var(--amber); }
+.hub-notice.err { background: var(--red-soft); color: var(--red); }
 
 /* kv */
 .hub-kv { display: flex; flex-direction: column; }
@@ -584,7 +681,7 @@
   border: 1px dashed var(--border-strong);
   border-radius: var(--r-8);
 }
-.hub-empty-list .icon { width: 28px; height: 28px; stroke-width: 1.2; color: var(--glyph-faint); }
+.hub-empty-list > .icon { width: 28px; height: 28px; stroke-width: 1.2; color: var(--glyph-faint); }
 .hub-loading-row { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-12); color: var(--text-3); font-size: var(--fs-12); }
 
 /* ---------- 能力标注 ---------- */

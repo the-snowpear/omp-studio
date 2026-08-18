@@ -17,7 +17,18 @@ async function withTempHome<T>(run: (home: string, cwd: string) => Promise<T>): 
   try {
     return await run(home, cwd);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        await fs.rm(root, { recursive: true, force: true });
+        lastError = undefined;
+        break;
+      } catch (error) {
+        lastError = error;
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
+    if (lastError !== undefined) throw lastError;
   }
 }
 
@@ -342,4 +353,127 @@ args = []
     });
   });
 });
+
+const FAKE_MCP_SERVER = `process.stdin.resume();
+let buf = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("end", () => process.exit(0));
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  let idx;
+  while ((idx = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, idx).trim();
+    buf = buf.slice(idx + 1);
+    if (!line) continue;
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.method === "initialize") {
+      process.stdout.write(JSON.stringify({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: "fake" } },
+      }) + "\\n");
+    } else if (msg.method === "tools/list") {
+      process.stdout.write(JSON.stringify({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: { tools: [{ name: "read_file" }, { name: "write_file" }] },
+      }) + "\\n");
+    }
+  }
+});
+`;
+
+describe("mcp probe / refresh / logs", () => {
+  test("stdio handshake succeeds and never leaks command, url, or secrets", async () => {
+    await withTempHome(async (home, cwd) => {
+      const script = path.join(cwd, "fake-mcp.mjs");
+      await fs.writeFile(script, FAKE_MCP_SERVER, "utf8");
+      await fs.writeFile(
+        path.join(home, ".omp", "agent", "mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            filesystem: {
+              command: process.execPath,
+              args: [script],
+              env: { TOKEN: "sekrit-token" },
+            },
+          },
+        }),
+        "utf8",
+      );
+      const service = createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW });
+      const result = await service.test({ name: "filesystem" });
+      assert.equal(result.ok, true);
+      assert.equal(result.toolCount, 2);
+      assert.match(result.detail, /2 个工具/);
+      const json = JSON.stringify(result);
+      assert.equal(json.includes("sekrit-token"), false);
+      assert.equal("url" in result, false);
+      assert.equal("command" in result, false);
+      assert.equal("env" in result, false);
+      assert.equal("args" in result, false);
+      assert.equal("headers" in result, false);
+
+      const model = await service.get();
+      const row = model.servers.find((server) => server.name === "filesystem");
+      assert.equal(row?.lastProbe?.ok, true);
+      assert.equal(row?.lastProbe?.toolCount, 2);
+      const rowJson = JSON.stringify(row);
+      assert.equal(rowJson.includes("sekrit-token"), false);
+      assert.equal(rowJson.includes(script), false);
+
+      const logs = await service.logs({ name: "filesystem" });
+      assert.equal(logs.emptyReason, undefined);
+      assert.ok(logs.lines.some((line) => line.includes("tools=2")));
+      assert.equal(JSON.stringify(logs).includes("sekrit-token"), false);
+    });
+  });
+
+  test("failed probe and shadowed servers stay honest", async () => {
+    await withTempHome(async (home, cwd) => {
+      await fs.writeFile(
+        path.join(home, ".omp", "agent", "mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            shared: { command: "__omp_missing_mcp_bin__" },
+            broken: { command: "__omp_missing_mcp_bin__" },
+          },
+        }),
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(cwd, ".omp", "mcp.json"),
+        JSON.stringify({
+          mcpServers: {
+            shared: { command: "__omp_project_winner__" },
+          },
+        }),
+        "utf8",
+      );
+      const service = createOmpMcpService({ home, getCwd: () => cwd, now: () => NOW });
+      const failed = await service.test({ name: "broken" });
+      assert.equal(failed.ok, false);
+      assert.ok(failed.detail.length > 0);
+      assert.equal(JSON.stringify(failed).includes("__omp_missing_mcp_bin__"), false);
+      assert.equal("command" in failed, false);
+      assert.equal("url" in failed, false);
+
+      await assert.rejects(
+        async () => service.test({ name: "shared", scope: "user" }),
+        (error: unknown) =>
+          (error as { code?: string }).code === "INVALID_ARGUMENT" &&
+          (error as { message?: string }).message?.includes("覆盖"),
+      );
+
+      const empty = await service.logs({ name: "shared" });
+      assert.equal(empty.emptyReason, "尚无日志，请先测试连接");
+
+      const refreshed = await service.refresh({});
+      assert.equal(refreshed.applied, true);
+      assert.equal(refreshed.runtimeEffect, "new-session");
+    });
+  });
+});
+
 

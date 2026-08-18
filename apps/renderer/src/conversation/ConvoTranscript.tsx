@@ -1,10 +1,20 @@
 import { ConversationItemView } from "./ConversationItemView";
 import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
-import { collectTurnFileChanges, type SubagentHubTarget, type TurnFileChange } from "./toolMeta";
+import { timelineRowKey } from "./conversationViewModel";
+import {
+  assistantRunRanges,
+  collectPlanProposal,
+  collectTurnFileChanges,
+  sessionChangeTurnIdForRange,
+  type SubagentHubTarget,
+  type TurnFileChange,
+} from "./toolMeta";
+import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
 
 type TurnChangeBind = {
   readonly files: readonly TurnFileChange[];
   readonly defaultOpen: boolean;
+  readonly turnId: string;
 };
 
 function lastAssistantIndex(rows: readonly TimelineRow[]): number {
@@ -31,34 +41,55 @@ function turnSliceClosed(slice: readonly TimelineRow[]): boolean {
 /** Attach one change card to the last assistant row of each completed turn. */
 export function turnChangeBinds(rows: readonly TimelineRow[]): ReadonlyArray<TurnChangeBind | undefined> {
   const binds: Array<TurnChangeBind | undefined> = rows.map(() => undefined);
+  const ranges = assistantRunRanges(rows);
   const latest = lastAssistantIndex(rows);
-  let start = -1;
 
-  const flush = (end: number) => {
-    if (start < 0 || end <= start) {
-      start = -1;
-      return;
-    }
-    const slice = rows.slice(start, end);
-    if (!turnSliceClosed(slice)) {
-      start = -1;
-      return;
-    }
+  for (const range of ranges) {
+    const slice = rows.slice(range.start, range.end + 1);
+    if (!turnSliceClosed(slice)) continue;
     const files = collectTurnFileChanges(collectAssistantSegments(slice));
-    if (files.length > 0) {
-      binds[end - 1] = { files, defaultOpen: end - 1 === latest };
-    }
-    start = -1;
-  };
-
-  for (let index = 0; index < rows.length; index += 1) {
-    if (rows[index]?.type === "assistant") {
-      if (start < 0) start = index;
-      continue;
-    }
-    flush(index);
+    if (files.length === 0) continue;
+    binds[range.end] = {
+      files,
+      defaultOpen: range.end === latest,
+      turnId: sessionChangeTurnIdForRange(rows, range, ranges),
+    };
   }
-  flush(rows.length);
+  return binds;
+}
+
+function resolvedPlanLink(planLink: PlanCreatedLink, title: string): PlanCreatedLink {
+  return {
+    onOpen: planLink.onOpen,
+    title,
+    ...(planLink.demo === true ? { demo: true } : {}),
+  };
+}
+
+/**
+ * Pin the Created Plan card on the assistant row that actually ran `xd://propose`.
+ * After approval the execution turn may continue in the same assistant run;
+ * do not follow `range.end` to the latest message.
+ */
+export function planCreatedBinds(
+  rows: readonly TimelineRow[],
+  planLink?: PlanCreatedLink,
+): ReadonlyArray<PlanCreatedLink | undefined> {
+  const binds: Array<PlanCreatedLink | undefined> = rows.map(() => undefined);
+  if (planLink === undefined) return binds;
+  let attached = false;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row?.type !== "assistant") continue;
+    const proposal = collectPlanProposal(row.segments);
+    if (proposal === undefined) continue;
+    binds[index] = resolvedPlanLink(planLink, planLink.title?.trim() || proposal.title);
+    attached = true;
+  }
+  if (!attached && planLink.attachEvenWithoutPropose === true) {
+    const last = lastAssistantIndex(rows);
+    if (last >= 0) binds[last] = resolvedPlanLink(planLink, planLink.title?.trim() || "Plan");
+  }
   return binds;
 }
 
@@ -66,38 +97,58 @@ export function ConvoTranscript({
   rows,
   demo,
   onRestore,
+  onRestoreUserMessage,
+  onBranchUserMessage,
+  userRestoreDisabledReason,
   onReviewChanges,
   onInspectSubagent,
+  planLink,
 }: {
   rows: readonly TimelineRow[];
   demo?: boolean;
   onRestore?: (requestId: string) => void;
-  onReviewChanges?: () => void;
+  onRestoreUserMessage?: (itemId: string, text: string) => void;
+  onBranchUserMessage?: (itemId: string, text: string) => void;
+  userRestoreDisabledReason?: string;
+  onReviewChanges?: (turnId: string) => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
+  planLink?: PlanCreatedLink;
 }) {
   const binds = turnChangeBinds(rows);
+  const createdBinds = planCreatedBinds(rows, planLink);
   return (
     <>
       {demo ? (
         <div className="convo-demo-banner">
           <span className="chip gray xs">演示</span>
-          <span className="muted small">预览图鉴，不会查询 Host transcript。</span>
         </div>
       ) : null}
       {rows.map((row, index) => {
         const bind = binds[index];
+        const rowPlanLink = createdBinds[index];
         return (
           <ConversationItemView
-            key={row.type === "compaction" || row.type === "resetBoundary" ? row.item.itemId : row.itemId}
+            key={timelineRowKey(row)}
             row={row}
             {...(demo === true ? { expandAll: true, demo: true } : {})}
             {...(onRestore === undefined ? {} : { onRestore })}
+            {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
+            {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
+            {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
             {...(bind === undefined ? {} : { fileChanges: bind.files, changesDefaultOpen: bind.defaultOpen })}
-            {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
+            {...(onReviewChanges === undefined || bind === undefined ? {} : { onReviewChanges: () => onReviewChanges(bind.turnId) })}
             {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+            {...(rowPlanLink === undefined ? {} : { planLink: rowPlanLink })}
           />
         );
       })}
+      {planLink !== undefined && planLink.attachEvenWithoutPropose === true && lastAssistantIndex(rows) < 0 ? (
+        <PlanCreatedCard
+          title={planLink.title ?? "Plan"}
+          onOpen={planLink.onOpen}
+          {...(planLink.demo === true || demo === true ? { demo: true } : {})}
+        />
+      ) : null}
     </>
   );
 }

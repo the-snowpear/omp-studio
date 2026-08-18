@@ -1,7 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { useRef, useState } from "react";
 import { PreviewDeck } from "./PreviewDeck";
 import { PREVIEW_DECK_ITEMS } from "./deckFixtures";
+import { PlanCreatedCard } from "../deck/PlanCreatedCard";
 
 afterEach(cleanup);
 
@@ -35,6 +37,7 @@ describe("preview deck", () => {
     expect(document.querySelectorAll(".deck-card")).toHaveLength(1);
     expect(screen.getByRole("heading", { name: "实施步骤" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "放大计划" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "关闭计划" })).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -49,12 +52,18 @@ describe("preview deck", () => {
     expect(dialog.textContent).toContain("velocity *= 0.92");
     expect(dialog.querySelectorAll(".dk-actions button")).toHaveLength(4);
     expect(screen.getAllByRole("button", { name: "Approve and execute" })).toHaveLength(2);
+    expect(within(dialog).getByRole("button", { name: "批注 目标" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "批注 实施步骤" })).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "批注 验收" })).toBeTruthy();
+    expect(within(dialog).getByLabelText("全文批注")).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "收起计划" })).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: "关闭计划" })).toBeNull();
   });
 
   it("closing the expanded plan dialog keeps the compact plan card", async () => {
     render(<PreviewDeck />);
     fireEvent.click(screen.getByRole("button", { name: "放大计划" }));
-    fireEvent.click(screen.getByRole("button", { name: "关闭计划" }));
+    fireEvent.click(screen.getByRole("button", { name: "收起计划" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
@@ -65,6 +74,25 @@ describe("preview deck", () => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
     expect(screen.getByRole("button", { name: "Approve and execute" })).toBeTruthy();
+  });
+
+  it("closing the compact plan card dismisses it and keeps the ask queue", () => {
+    render(<PreviewDeck />);
+    fireEvent.click(screen.getByRole("button", { name: "关闭计划" }));
+    expect(screen.queryByText("Plan Review")).toBeNull();
+    expect(screen.getByText("缩放交互确认：拖拽平移是否需要惯性？")).toBeTruthy();
+  });
+
+  it("refining from the expanded dialog without notes still dismisses the demo plan card", async () => {
+    render(<PreviewDeck />);
+    fireEvent.click(screen.getByRole("button", { name: "放大计划" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refine plan" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(screen.queryByText("Plan Review")).toBeNull();
+    expect(screen.getByText("缩放交互确认：拖拽平移是否需要惯性？")).toBeTruthy();
   });
 
   it("approving from the expanded dialog dismisses the plan card and keeps the ask queue", async () => {
@@ -208,5 +236,49 @@ describe("preview deck", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByText("缩放交互确认：拖拽平移是否需要惯性？")).toBeNull();
     expect(screen.getByText(/如果做成设置项/)).toBeTruthy();
+  });
+
+  it("genies the ask deck in from the composer after the plan card, and genies out on the last dismiss", async () => {
+    render(<PreviewDeck />);
+    expect(document.querySelector(".deck.is-ask-enter")).toBeNull();
+    expect(document.querySelector(".deck.is-ask")).toBeNull();
+    dismissPlan();
+    expect(document.querySelector(".deck.active.is-ask.is-ask-enter")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(document.querySelector(".deck.is-ask-leave")).toBeTruthy();
+    await waitFor(() => {
+      expect(document.querySelector(".deck.active")).toBeNull();
+    });
+  });
+
+  it("opens the demo plan dialog from the created-plan entry without Host", () => {
+    function View() {
+      const originRef = useRef<HTMLElement | null>(null);
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <PlanCreatedCard
+            title="Preview 缩放惯性"
+            demo
+            onOpen={(origin) => {
+              originRef.current = origin;
+              setOpen(true);
+            }}
+          />
+          <PreviewDeck
+            planExpanded={open}
+            onPlanExpandedChange={setOpen}
+            planOriginRef={originRef}
+          />
+        </>
+      );
+    }
+    render(<View />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "打开计划：Preview 缩放惯性" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Plan Review · Preview 缩放惯性");
+    expect(screen.getAllByText("演示").length).toBeGreaterThan(0);
   });
 });

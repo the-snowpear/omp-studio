@@ -1,9 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationPages } from "@omp-studio/testkit";
+import type { AgentId, Generation, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { ConversationItemView } from "./ConversationItemView";
 import { SubagentInspectCard } from "./SubagentInspectCard";
 import type { SubagentConversationClient } from "./subagentConversationEngine";
+import type { SubagentComposerClient } from "./useSubagentComposer";
 import type { SubagentHubTarget } from "./toolMeta";
 
 afterEach(cleanup);
@@ -13,6 +15,49 @@ const TARGET: SubagentHubTarget = {
   toolCallId: "task-1",
   task: "audit lockfile",
 };
+
+const LIVE_AGENT: StudioAgentSnapshot = {
+  agentId: "agent-019fcb01" as AgentId,
+  generation: 1 as Generation,
+  kind: "task",
+  displayName: "deps",
+  status: "idle",
+  updatedAt: "2026-08-17T00:00:00.000Z",
+  hasLiveSession: true,
+  hasTranscript: true,
+  unreadCount: 0,
+  activeJobIds: [],
+};
+
+const SEND: SubagentComposerClient = {
+  command: vi.fn(),
+  subscribe: () => () => undefined,
+};
+
+function renderInspect(overrides: {
+  preview?: boolean;
+  client?: SubagentConversationClient | null;
+  sendClient?: SubagentComposerClient | null;
+  agents?: readonly StudioAgentSnapshot[];
+  canSend?: boolean;
+  runtimeConnected?: boolean;
+  onClose?: () => void;
+  onOpenHub?: (agentId: string) => void;
+} = {}) {
+  return render(
+    <SubagentInspectCard
+      target={TARGET}
+      preview={overrides.preview ?? true}
+      client={overrides.client ?? null}
+      sendClient={overrides.sendClient ?? null}
+      agents={overrides.agents ?? []}
+      canSend={overrides.canSend ?? false}
+      runtimeConnected={overrides.runtimeConnected ?? false}
+      onClose={overrides.onClose ?? (() => undefined)}
+      onOpenHub={overrides.onOpenHub ?? (() => undefined)}
+    />,
+  );
+}
 
 const taskRow = {
   type: "assistant" as const,
@@ -65,6 +110,47 @@ describe("subagent inspect card", () => {
     expect(batch?.classList.contains("open")).toBe(true);
   });
 
+  it("opens a Runtime-allocated task id such as deps", () => {
+    const onInspect = vi.fn();
+    render(
+      <ConversationItemView
+        row={{
+          ...taskRow,
+          segments: [
+            {
+              type: "batch",
+              key: "batch-runtime",
+              tools: [
+                {
+                  toolCallId: "task-3",
+                  toolName: "task",
+                  status: "succeeded",
+                  arguments: { spawn: { tasks: [{ name: "deps", task: "audit lockfile" }] } },
+                  result: {
+                    type: "toolResult",
+                    toolCallId: "task-3",
+                    toolName: "task",
+                    isError: false,
+                    data: { results: [{ id: "deps", agent: "scout", status: "completed", task: "audit lockfile" }] },
+                  },
+                },
+              ],
+            },
+          ],
+        }}
+        onInspectSubagent={onInspect}
+      />,
+    );
+    const card = screen.getByRole("button", { name: /deps/ });
+    expect(card.classList.contains("is-inspectable")).toBe(true);
+    fireEvent.click(card);
+    expect(onInspect).toHaveBeenCalledWith({
+      agentId: "deps",
+      toolCallId: "task-3",
+      task: "audit lockfile",
+    });
+  });
+
   it("keeps nameless task cards visible but not inspectable", () => {
     const onInspect = vi.fn();
     render(
@@ -108,66 +194,139 @@ describe("subagent inspect card", () => {
       query,
       subscribe: () => () => undefined,
     };
-    render(
-      <SubagentInspectCard
-        target={TARGET}
-        preview
-        client={client}
-        runtimeConnected
-        onClose={() => undefined}
-        onOpenHub={() => undefined}
-      />,
-    );
+    renderInspect({ preview: true, client, runtimeConnected: true });
     expect(screen.getByRole("dialog", { name: "audit lockfile" })).toBeTruthy();
+    expect(document.querySelector(".sa-inspect-dim")).toBeTruthy();
     expect(screen.getAllByText("演示").length).toBeGreaterThan(0);
     expect(screen.getByText(/已扫过 lockfile/)).toBeTruthy();
+    expect(document.querySelector("#saInspectComposer")).toBeNull();
     expect(query).not.toHaveBeenCalled();
   });
 
-  it("closes from the button, backdrop, and Escape, then restores focus", () => {
+  it("hides the composer in preview even when the roster would allow chat", () => {
+    renderInspect({
+      preview: true,
+      sendClient: SEND,
+      agents: [LIVE_AGENT],
+      canSend: true,
+      runtimeConnected: true,
+    });
+    expect(document.querySelector("#saInspectComposer")).toBeNull();
+  });
+
+  it("shows ChipComposer when the subagent can receive agent.send", () => {
+    const query = vi.fn(async () => conversationPages.userAssistant);
+    const client: SubagentConversationClient = {
+      query: query as SubagentConversationClient["query"],
+      subscribe: () => () => undefined,
+    };
+    renderInspect({
+      preview: false,
+      client,
+      sendClient: SEND,
+      agents: [LIVE_AGENT],
+      canSend: true,
+      runtimeConnected: true,
+    });
+    expect(document.querySelector(".sa-inspect.has-composer #saInspectComposer")).toBeTruthy();
+    expect(document.querySelector(".chip-composer-editor")?.getAttribute("aria-placeholder")).toMatch(/发给子 Agent/);
+    expect(screen.getByRole("button", { name: "附件 / 图片" })).toBeTruthy();
+  });
+
+  it("hides ChipComposer for a terminal agent", () => {
+    const query = vi.fn(async () => conversationPages.userAssistant);
+    const client: SubagentConversationClient = {
+      query: query as SubagentConversationClient["query"],
+      subscribe: () => () => undefined,
+    };
+    renderInspect({
+      preview: false,
+      client,
+      sendClient: SEND,
+      agents: [{ ...LIVE_AGENT, status: "aborted" }],
+      canSend: true,
+      runtimeConnected: true,
+    });
+    expect(document.querySelector("#saInspectComposer")).toBeNull();
+  });
+
+  it("closes from the button after the leave animation and restores focus", async () => {
     const onClose = vi.fn();
     const trigger = document.createElement("button");
     trigger.textContent = "open";
     document.body.append(trigger);
     trigger.focus();
-    const { unmount } = render(
-      <SubagentInspectCard
-        target={TARGET}
-        preview
-        client={null}
-        runtimeConnected={false}
-        onClose={onClose}
-        onOpenHub={() => undefined}
-      />,
-    );
+    const { unmount } = renderInspect({ preview: true, onClose });
     expect(screen.getByRole("button", { name: "关闭子 Agent 对话" })).toBe(document.activeElement);
     fireEvent.click(screen.getByRole("button", { name: "关闭子 Agent 对话" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-    fireEvent.mouseDown(document.querySelector(".sa-inspect-backdrop")!);
-    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector(".sa-inspect.is-leave")).toBeTruthy();
+    expect(document.querySelector(".sa-inspect-dim.is-leave")).toBeTruthy();
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    fireEvent.mouseDown(document.querySelector(".sa-inspect-dim")!);
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(onClose).toHaveBeenCalledTimes(3);
+    expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.mouseDown(document.querySelector(".sa-inspect")!);
-    expect(onClose).toHaveBeenCalledTimes(3);
+    expect(onClose).toHaveBeenCalledTimes(1);
     unmount();
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
   });
 
-  it("jumps to Agent Hub with the real agent id", () => {
+  it("closes from the dim and Escape after the leave animation, not from clicks on the dialog", async () => {
+    const onClose = vi.fn();
+    renderInspect({ preview: true, onClose });
+    fireEvent.mouseDown(document.querySelector(".sa-inspect")!);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector(".sa-inspect.is-leave")).toBeNull();
+    fireEvent.mouseDown(document.querySelector(".sa-inspect-dim")!);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector(".sa-inspect.is-leave")).toBeTruthy();
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("closes from Escape after the leave animation", async () => {
+    const onClose = vi.fn();
+    renderInspect({ preview: true, onClose });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.querySelector(".sa-inspect.is-leave")).toBeTruthy();
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("closes immediately when reduced motion is preferred", () => {
+    const previous = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+    try {
+      const onClose = vi.fn();
+      renderInspect({ preview: true, onClose });
+      fireEvent.click(screen.getByRole("button", { name: "关闭子 Agent 对话" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(document.querySelector(".sa-inspect.is-leave")).toBeNull();
+    } finally {
+      window.matchMedia = previous;
+    }
+  });
+
+  it("jumps to Agent Hub after the leave animation with the real agent id", async () => {
     const onOpenHub = vi.fn();
-    render(
-      <SubagentInspectCard
-        target={TARGET}
-        preview
-        client={null}
-        runtimeConnected={false}
-        onClose={() => undefined}
-        onOpenHub={onOpenHub}
-      />,
-    );
+    const onClose = vi.fn();
+    renderInspect({ preview: true, onOpenHub, onClose });
     fireEvent.click(screen.getByRole("button", { name: "前往 Agent Hub" }));
-    expect(onOpenHub).toHaveBeenCalledWith("agent-019fcb01");
+    expect(onOpenHub).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(onOpenHub).toHaveBeenCalledWith("agent-019fcb01");
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("does not recurse inspect into the nested transcript", async () => {
@@ -176,19 +335,79 @@ describe("subagent inspect card", () => {
       query: query as SubagentConversationClient["query"],
       subscribe: () => () => undefined,
     };
-    render(
-      <SubagentInspectCard
-        target={TARGET}
-        preview={false}
-        client={client}
-        runtimeConnected
-        onClose={() => undefined}
-        onOpenHub={() => undefined}
-      />,
-    );
+    renderInspect({
+      preview: false,
+      client,
+      runtimeConnected: true,
+    });
     await vi.waitFor(() => {
       expect(query).toHaveBeenCalledWith("agent.conversation.read", { agentId: "agent-019fcb01", limit: 50 });
     });
     expect(document.querySelector(".sa-inspect .sa-card.is-inspectable")).toBeNull();
+  });
+
+  it("puts token, tool, and cost counts on the compact card title row", () => {
+    const onInspect = vi.fn();
+    render(
+      <ConversationItemView
+        row={{
+          ...taskRow,
+          segments: [{
+            type: "batch",
+            key: "batch-metrics",
+            tools: [{
+              toolCallId: "task-1",
+              toolName: "task",
+              status: "succeeded",
+              arguments: { spawn: { tasks: [{ name: "deps", task: "audit lockfile" }] } },
+              result: {
+                type: "toolResult",
+                toolCallId: "task-1",
+                toolName: "task",
+                isError: false,
+                data: {
+                  progress: [{
+                    id: "agent-019fcb01",
+                    name: "deps",
+                    status: "running",
+                    task: "audit lockfile",
+                    tokens: "12.6k",
+                    tools: 8,
+                    cost: "¥ 0.51",
+                  }],
+                },
+              },
+            }],
+          }],
+        }}
+        onInspectSubagent={onInspect}
+      />,
+    );
+    const card = screen.getByRole("button", { name: /deps/ });
+    expect(card.querySelector(".sa-top .sa-tok")?.textContent).toBe("12.6ktok");
+    expect(card.querySelector(".sa-top .hub-num")?.textContent).toBe("tools8");
+    expect(card.querySelector(".sa-top .sa-cost")?.textContent).toBe("¥ 0.51");
+    expect(card.querySelector(":scope > .sa-metrics")).toBeNull();
+    fireEvent.click(card);
+    expect(onInspect).toHaveBeenCalledWith({
+      ...TARGET,
+      tokens: "12.6k",
+      tools: 8,
+      cost: "¥ 0.51",
+    });
+  });
+
+  it("shows live usage on the inspect title row in the same chips", () => {
+    renderInspect({
+      preview: true,
+      agents: [{
+        ...LIVE_AGENT,
+        usage: { tokens: 12_600, requests: 9, tools: 14, cost: 0.51, durationMs: 167_000 },
+      }],
+    });
+    const head = document.querySelector(".sa-inspect-head");
+    expect(head?.querySelector(".sa-tok")?.textContent).toBe("12.6ktok");
+    expect(head?.querySelector(".hub-num")?.textContent).toContain("14");
+    expect(head?.querySelector(".sa-cost")?.textContent).toBe("$0.510");
   });
 });

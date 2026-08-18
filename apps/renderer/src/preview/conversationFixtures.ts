@@ -94,7 +94,56 @@ export function previewConversationItems(threadId = "t1"): readonly Conversation
   return PREVIEW_CONVO_ITEMS;
 }
 
-export const PREVIEW_CONVO_LIVE: readonly ConversationRuntimeEvent[] = [];
+export const PREVIEW_CONVO_LIVE: readonly ConversationRuntimeEvent[] = [
+  {
+    kind: "conversation.message.started",
+    sessionId: session,
+    turnId: "preview-live-turn",
+    messageId: "preview-live-user",
+    role: "user",
+    createdAt: at(18),
+  },
+  {
+    kind: "conversation.message.completed",
+    sessionId: session,
+    turnId: "preview-live-turn",
+    messageId: "preview-live-user",
+    item: {
+      kind: "message",
+      itemId: "preview-live-user",
+      parentId: "preview-assistant-1",
+      createdAt: at(18),
+      role: "user",
+      content: [{ type: "text", text: "再跑一遍 typecheck，看着输出" }],
+    },
+  },
+  {
+    kind: "conversation.message.started",
+    sessionId: session,
+    turnId: "preview-live-turn",
+    messageId: "preview-live-assistant",
+    role: "assistant",
+    createdAt: at(20),
+  },
+  {
+    kind: "conversation.tool.started",
+    sessionId: session,
+    turnId: "preview-live-turn",
+    messageId: "preview-live-assistant",
+    toolCallId: "preview-bash-live",
+    toolName: "Bash",
+    arguments: { command: "npm run typecheck", cwd: "D:/Project/omp-web" },
+    startedAt: at(21),
+  },
+  {
+    kind: "conversation.tool.updated",
+    sessionId: session,
+    turnId: "preview-live-turn",
+    toolCallId: "preview-bash-live",
+    updateMode: "replace",
+    output: "\u001b[33m> tsc --noEmit\u001b[0m\n\nsrc/index.ts(12,5): error TS2322: Type 'string' is not assignable to type 'number'.\n",
+  },
+];
 
 export const PREVIEW_CONVO_IDENTITY = { runtimeEpoch: epoch, sessionId: session };
 

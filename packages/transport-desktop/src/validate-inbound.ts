@@ -264,12 +264,13 @@ function validateAgentSpawnInput(input: unknown): void {
 function validateAgentSendInput(input: unknown): void {
   const what = "agent.send input";
   assertPlainObject(input, what);
-  assertNoUnknownKeys(input, ["agentId", "expectedGeneration", "text", "mode"], what);
+  assertNoUnknownKeys(input, ["agentId", "expectedGeneration", "text", "mode", "images"], what);
   validateAgentIdGenerationFields(input, what);
   assertNonEmptyText(input.text, `${what}: text`);
   if (input.mode !== "prompt" && input.mode !== "steer" && input.mode !== "followUp") {
     throw new ValidationError(`${what}: mode must be prompt, steer, or followUp`);
   }
+  if (input.images !== undefined) validatePromptImages(input.images, what);
 }
 
 function validateAgentLifecycleInput(input: unknown): void {
@@ -650,11 +651,22 @@ function validateThreadInput(input: unknown, what: string): void {
 }
 
 function validateTextInput(input: unknown, what: string): void {
+  validateNamedTextInput(input, what, "text");
+}
+
+/** Single-field command input whose value is an opaque Runtime-minted token. */
+function validateOpaqueIdInput(input: unknown, what: string, field: string): void {
   assertPlainObject(input, what);
-  assertNoUnknownKeys(input, ["text"], what);
-  assertNonEmptyText(input.text, `${what}: text`);
-  if (input.text.length > MAX_TEXT_LENGTH) {
-    throw new ValidationError(`${what}: text exceeds the max length of ${MAX_TEXT_LENGTH}`);
+  assertNoUnknownKeys(input, [field], what);
+  assertOpaqueToken(input[field], `${what}: ${field}`);
+}
+
+function validateNamedTextInput(input: unknown, what: string, field: string): void {
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, [field], what);
+  assertNonEmptyText(input[field], `${what}: ${field}`);
+  if ((input[field] as string).length > MAX_TEXT_LENGTH) {
+    throw new ValidationError(`${what}: ${field} exceeds the max length of ${MAX_TEXT_LENGTH}`);
   }
 }
 
@@ -723,7 +735,16 @@ function validateLoopEnableInput(input: unknown): void {
 
 function validatePlanReviewInput(input: unknown): void {
   assertPlainObject(input, "mode.plan.review.respond input"); assertNoUnknownKeys(input, ["decision", "feedback"], "mode.plan.review.respond input");
-  if (input.decision !== "approve" && input.decision !== "refine" && input.decision !== "dismiss") throw new ValidationError("mode.plan.review.respond input: invalid decision");
+  if (
+    input.decision !== "execute" &&
+    input.decision !== "compact" &&
+    input.decision !== "keep" &&
+    input.decision !== "approve" &&
+    input.decision !== "refine" &&
+    input.decision !== "dismiss"
+  ) {
+    throw new ValidationError("mode.plan.review.respond input: invalid decision");
+  }
   if (input.feedback !== undefined) assertNonEmptyText(input.feedback, "mode.plan.review.respond input: feedback");
 }
 
@@ -735,6 +756,12 @@ function validateTreeNavigateInput(input: unknown): void {
   assertPlainObject(input, "session.tree.navigate input"); assertNoUnknownKeys(input, ["targetId", "summarize", "customInstructions", "reanswer"], "session.tree.navigate input"); assertOpaqueToken(input.targetId, "session.tree.navigate input: targetId");
   if (input.summarize !== undefined && typeof input.summarize !== "boolean") throw new ValidationError("session.tree.navigate input: summarize must be boolean");
   if (input.customInstructions !== undefined) assertNonEmptyText(input.customInstructions, "session.tree.navigate input: customInstructions");
+}
+
+function validateTreeBranchInput(input: unknown): void {
+  assertPlainObject(input, "session.tree.branch input");
+  assertNoUnknownKeys(input, ["targetId"], "session.tree.branch input");
+  assertOpaqueToken(input.targetId, "session.tree.branch input: targetId");
 }
 
 function validatePauseResumeInput(input: unknown): void {
@@ -1156,6 +1183,47 @@ function validateEnabledToggleInput(input: unknown, what: string): void {
   }
 }
 
+function validateNamedOptionalScopeInput(input: unknown, what: string, nameRequired: boolean): void {
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["name", "scope"], what);
+  if (nameRequired || input.name !== undefined) {
+    assertNonEmptyText(input.name, `${what}: name`);
+  }
+  if (input.scope !== undefined && input.scope !== "user" && input.scope !== "project") {
+    throw new ValidationError(`${what}: scope must be "user" or "project"`);
+  }
+}
+
+function validateSkillsRevealInput(input: unknown): void {
+  validateNamedOptionalScopeInput(input, "skills.reveal input", true);
+}
+
+function validateSkillsRevealRootInput(input: unknown): void {
+  assertPlainObject(input, "skills.revealRoot input");
+  assertNoUnknownKeys(input, ["scope"], "skills.revealRoot input");
+  if (input.scope !== undefined && input.scope !== "user" && input.scope !== "project") {
+    throw new ValidationError("skills.revealRoot input: scope must be \"user\" or \"project\"");
+  }
+}
+
+function validateMcpRefreshInput(input: unknown): void {
+  assertPlainObject(input, "mcp.refresh input");
+  assertNoUnknownKeys(input, ["name"], "mcp.refresh input");
+  if (input.name !== undefined) {
+    assertNonEmptyText(input.name, "mcp.refresh input: name");
+  }
+}
+
+function validateMcpTestInput(input: unknown): void {
+  validateNamedOptionalScopeInput(input, "mcp.test input", true);
+}
+
+function validateMcpLogsGetInput(input: unknown): void {
+  assertPlainObject(input, "mcp.logs.get input");
+  assertNoUnknownKeys(input, ["name"], "mcp.logs.get input");
+  assertNonEmptyText(input.name, "mcp.logs.get input: name");
+}
+
 function validatePluginsSetEnabledInput(input: unknown): void {
   validateEnabledToggleInput(input, "plugins.setEnabled input");
 }
@@ -1227,6 +1295,7 @@ function validateAgentDefinitionUpsertInput(input: unknown): void {
       "autoloadSkills",
       "readSummarize",
       "prewalk",
+      "advisor",
       "expectedHash",
     ],
     "agents.definition.upsert input",
@@ -1269,6 +1338,11 @@ function validateAgentDefinitionUpsertInput(input: unknown): void {
       throw new ValidationError("agents.definition.upsert input: prewalk must be boolean, string, or null");
     }
   }
+  if (input.advisor !== undefined && input.advisor !== null && typeof input.advisor !== "boolean") {
+    if (typeof input.advisor !== "string" || input.advisor.trim().length === 0) {
+      throw new ValidationError("agents.definition.upsert input: advisor must be boolean, string, or null");
+    }
+  }
   if (input.expectedHash !== undefined) assertNonEmptyText(input.expectedHash, "agents.definition.upsert input: expectedHash");
 }
 
@@ -1286,7 +1360,7 @@ function validateAgentDefinitionConfigureInput(input: unknown): void {
   assertPlainObject(input, "agents.definition.configure input");
   assertNoUnknownKeys(
     input,
-    ["name", "disabled", "overrideModel", "prewalkOverride"],
+    ["name", "disabled", "overrideModel", "prewalkOverride", "advisorOverride"],
     "agents.definition.configure input",
   );
   assertNonEmptyText(input.name, "agents.definition.configure input: name");
@@ -1301,6 +1375,11 @@ function validateAgentDefinitionConfigureInput(input: unknown): void {
   if (input.prewalkOverride !== undefined && input.prewalkOverride !== null) {
     if (typeof input.prewalkOverride !== "string" || input.prewalkOverride.trim().length === 0) {
       throw new ValidationError("agents.definition.configure input: prewalkOverride must be a non-empty string or null");
+    }
+  }
+  if (input.advisorOverride !== undefined && input.advisorOverride !== null) {
+    if (typeof input.advisorOverride !== "string" || input.advisorOverride.trim().length === 0) {
+      throw new ValidationError("agents.definition.configure input: advisorOverride must be a non-empty string or null");
     }
   }
 }
@@ -1324,6 +1403,7 @@ const QUERY_INPUT_VALIDATORS: {
   "models.get": (input) => validateEmptyInput(input, "models.get input"),
   "skills.get": (input) => validateEmptyInput(input, "skills.get input"),
   "mcp.get": (input) => validateEmptyInput(input, "mcp.get input"),
+  "mcp.logs.get": validateMcpLogsGetInput,
   "agents.definitions.get": (input) => validateEmptyInput(input, "agents.definitions.get input"),
   "projects.list": (input) => validateEmptyInput(input, "projects.list input"),
   "workspace.fileTree": validateWorkspaceFileTreeInput,
@@ -1384,6 +1464,7 @@ const COMMAND_INPUT_VALIDATORS: {
   },
   "session.prewalk.arm": (input) => validateOptionalTextFields(input, "session.prewalk.arm input", ["target"]),
   "session.prewalk.disarm": (input) => validateEmptyCommandInput(input, "session.prewalk.disarm input"),
+  "session.clearContext": (input) => validateEmptyCommandInput(input, "session.clearContext input"),
   "session.fork": (input) => validateEmptyCommandInput(input, "session.fork input"),
   "session.handoff": (input) => validateOptionalTextFields(input, "session.handoff input", ["customInstructions"]),
   "session.model.set": (input) => {
@@ -1402,7 +1483,13 @@ const COMMAND_INPUT_VALIDATORS: {
   },
   "session.tree.get": (input) => validateEmptyCommandInput(input, "session.tree.get input"),
   "session.tree.navigate": validateTreeNavigateInput,
+  "session.tree.branch": validateTreeBranchInput,
   "operator.invoke": validateOperatorInvokeInput,
+  "btw.ask": (input) => validateNamedTextInput(input, "btw.ask input", "question"),
+  "btw.abort": (input) => validateOpaqueIdInput(input, "btw.abort input", "ephemeralId"),
+  "btw.branch": (input) => validateOpaqueIdInput(input, "btw.branch input", "branchToken"),
+  "tan.start": (input) => validateNamedTextInput(input, "tan.start input", "work"),
+  "omfg.generate": (input) => validateNamedTextInput(input, "omfg.generate input", "complaint"),
   "agent.spawn": validateAgentSpawnInput,
   "agent.send": validateAgentSendInput,
   "agent.kill": validateAgentLifecycleInput,
@@ -1410,6 +1497,7 @@ const COMMAND_INPUT_VALIDATORS: {
   "agent.release": validateAgentLifecycleInput,
   "job.cancel": validateJobCancelInput,
   "runtime.install": validateRuntimeInstallInput,
+  "runtime.ensure": (input) => validateEmptyCommandInput(input, "runtime.ensure input"),
   "session.create": (input) => validateEmptyCommandInput(input, "session.create input"),
   "session.resume": (input) => validateThreadInput(input, "session.resume input"),
   "session.drop": (input) => validateThreadInput(input, "session.drop input"),
@@ -1442,7 +1530,11 @@ const COMMAND_INPUT_VALIDATORS: {
   "models.cycleOrder.set": validateModelsCycleOrderSetInput,
   "plugins.setEnabled": validatePluginsSetEnabledInput,
   "skills.setEnabled": validateSkillsSetEnabledInput,
+  "skills.reveal": validateSkillsRevealInput,
+  "skills.revealRoot": validateSkillsRevealRootInput,
   "mcp.setEnabled": validateMcpSetEnabledInput,
+  "mcp.refresh": validateMcpRefreshInput,
+  "mcp.test": validateMcpTestInput,
   "agents.definition.upsert": validateAgentDefinitionUpsertInput,
   "agents.definition.delete": validateAgentDefinitionDeleteInput,
   "agents.definition.configure": validateAgentDefinitionConfigureInput,

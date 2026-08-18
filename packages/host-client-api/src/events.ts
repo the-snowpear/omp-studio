@@ -27,7 +27,12 @@ import type {
   OperationProgress,
   GitRepositoryChanged,
 } from "@omp-studio/client-contract";
-import type { CommandLedgerEntry, ConversationRuntimeEvent, SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
+import type {
+  BtwSnapshot,
+  CommandLedgerEntry,
+  ConversationRuntimeEvent,
+  SessionTelemetrySnapshot,
+} from "@omp-studio/studio-protocol";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 /** Runtime state the bus consults when an event seed omits epoch/version. */
@@ -72,6 +77,12 @@ export type HostEventSeed =
       readonly sessionId: SessionId;
       readonly eventSeq: number;
       readonly update: ConversationRuntimeEvent;
+    })
+  | (HostEventSeedBase & {
+      readonly kind: "btw.changed";
+      readonly sessionId: SessionId;
+      readonly eventSeq: number;
+      readonly snapshot: BtwSnapshot;
     });
 
 interface Subscriber {

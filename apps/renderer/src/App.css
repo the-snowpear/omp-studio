@@ -114,6 +114,17 @@
   z-index: var(--z-menu);
 }
 
+.about-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-8);
+}
+
+.about-app-icon {
+  border-radius: var(--r-6);
+  flex: none;
+}
+
 .about-list {
   margin: 0;
 }

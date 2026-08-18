@@ -2,17 +2,21 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type 
 import { Icon } from "../icons";
 import { ActivityLine } from "./ActivityLine";
 import { ConvoTranscript } from "./ConvoTranscript";
-import { useConversationScroll } from "./useConversationScroll";
+import { conversationFollowKey, useConversationScroll } from "./useConversationScroll";
 import type { ConversationSnapshot } from "./conversationEngine";
-import { resetConversation, type ConversationState } from "./conversationViewModel";
-import { isRetryActivityNotice } from "./activityStatus";
+import { resetConversation, type ConversationState, withCompactingRow } from "./conversationViewModel";
+import { isRetryTranscriptNotice } from "./activityStatus";
 import { isTransientStatusNotice } from "./transientStatusNotice";
 import type { SubagentHubTarget } from "./toolMeta";
+import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
 
 export function ConversationPane({
   snapshot,
   onLoadOlder,
   onRestore,
+  onRestoreUserMessage,
+  onBranchUserMessage,
+  userRestoreDisabledReason,
   onReviewChanges,
   onInspectSubagent,
   scrollerRef: externalScrollerRef,
@@ -20,11 +24,16 @@ export function ConversationPane({
   activity,
   welcome,
   forceWelcome,
+  planLink,
+  compacting,
 }: {
   snapshot?: ConversationSnapshot;
   onLoadOlder: () => void;
   onRestore?: (requestId: string) => void;
-  onReviewChanges?: () => void;
+  onRestoreUserMessage?: (itemId: string, text: string) => void;
+  onBranchUserMessage?: (itemId: string, text: string) => void;
+  userRestoreDisabledReason?: string;
+  onReviewChanges?: (turnId: string) => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
   /** 由父级（WorkbenchCanvas）传入时，minimap 等兄弟组件共享同一 scroller。 */
   scrollerRef?: RefObject<HTMLElement | null>;
@@ -36,6 +45,10 @@ export function ConversationPane({
   welcome?: ReactNode;
   /** 后台新建会话时强制欢迎区，避免旧 transcript 在替换前闪一下。 */
   forceWelcome?: boolean;
+  /** 计划评审入口卡；点开 Composer 上方那套 Plan Review 弹窗。 */
+  planLink?: PlanCreatedLink;
+  /** Live snapshot / user-triggered compact: show the in-progress divider. */
+  compacting?: boolean;
 }) {
   const localScrollerRef = useRef<HTMLElement | null>(null);
   const scrollerRef = externalScrollerRef ?? localScrollerRef;
@@ -48,13 +61,15 @@ export function ConversationPane({
         loadingOlder: false,
         identityKey: "",
       };
-  const showWelcome = Boolean(welcome && (forceWelcome || rows.length === 0));
+  const showWelcome = Boolean(welcome && (forceWelcome || rows.length === 0) && compacting !== true);
+  const displayRows = withCompactingRow(rows, compacting === true, snapshot?.state.compacting?.action);
   const scroll = useConversationScroll({
     scrollerRef,
     identityKey,
-    itemCount: rows.length + (activity === undefined ? 0 : 1),
+    itemCount: displayRows.length + (activity === undefined ? 0 : 1),
     loadingOlder,
     pin: showWelcome ? "top" : "bottom",
+    contentKey: conversationFollowKey(state),
   });
   const prevLoading = useRef(loadingOlder);
 
@@ -101,7 +116,7 @@ export function ConversationPane({
             ) : null}
             {state.notices.map((notice) => {
               if (isTransientStatusNotice(notice.message, notice.source)) return null;
-              if (isRetryActivityNotice(notice.message, notice.source)) return null;
+              if (isRetryTranscriptNotice(notice.message, notice.source)) return null;
               const xdevGroups = parseXdevMountNotice(notice.message);
               if (xdevGroups !== null) {
                 return <XdevMountNotice key={notice.id} level={notice.level} groups={xdevGroups} />;
@@ -112,13 +127,28 @@ export function ConversationPane({
                 </div>
               );
             })}
-            {rows.length === 0 ? (welcome ?? <EmptyConversation state={state} demo={demo} />) : (
+            {displayRows.length === 0 ? (
+              <>
+                {welcome ?? <EmptyConversation state={state} demo={demo} />}
+                {planLink === undefined || planLink.attachEvenWithoutPropose !== true ? null : (
+                  <PlanCreatedCard
+                    title={planLink.title ?? "Plan"}
+                    onOpen={planLink.onOpen}
+                    {...(planLink.demo === true || demo === true ? { demo: true } : {})}
+                  />
+                )}
+              </>
+            ) : (
               <ConvoTranscript
-                rows={rows}
+                rows={displayRows}
                 demo={demo}
                 {...(onRestore === undefined ? {} : { onRestore })}
+                {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
+                {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
+                {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
                 {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
                 {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+                {...(planLink === undefined ? {} : { planLink })}
               />
             )}
             {state.hydrateStatus === "resyncing" ? (
@@ -134,7 +164,7 @@ export function ConversationPane({
         </button>
       ) : null}
       <div className="sr-only" aria-live="polite">
-        {latestAnnouncement(state, rows.length)}
+        {latestAnnouncement(state, displayRows.length)}
       </div>
     </main>
   );

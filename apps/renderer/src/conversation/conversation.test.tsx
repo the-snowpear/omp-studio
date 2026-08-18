@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useRef, useState } from "react";
 
 const { mermaidRenderMock } = vi.hoisted(() => ({ mermaidRenderMock: vi.fn() }));
 vi.mock("mermaid", () => ({
@@ -42,12 +43,15 @@ import {
   type ConversationIdentity,
 } from "./conversationHost";
 import { ConversationItemView } from "./ConversationItemView";
+import { serializedCopyFromHost } from "./UserMessageBody";
 import { ConversationPane, parseXdevMountNotice } from "./ConversationPane";
 import { ConvoTranscript, turnChangeBinds } from "./ConvoTranscript";
+import { PlanReviewDeck } from "../deck/PlanCard";
 import { ToolBody } from "./ToolBody";
-import { batchSummary, collectLatestTodos, collectTurnFileChanges, groupTodosByPhase, isTodoPhaseComplete, sessionTaskProgress, todoPhaseHeadersVisible, todoPhaseOpenByDefault, todoStepProgress, toolDiffStats, toolKind } from "./toolMeta";
-import { distanceFromBottom, shouldFollow } from "./useConversationScroll";
+import { batchSummary, collectLatestTodos, collectTurnFileChanges, groupTodosByPhase, isTodoPhaseComplete, sessionTaskProgress, todoPhaseHeadersVisible, todoPhaseOpenByDefault, todoStepProgress, toolDiffStats, toolKind, SESSION_CHANGE_LAST_ID } from "./toolMeta";
+import { conversationFollowKey, distanceFromBottom, shouldFollow } from "./useConversationScroll";
 import {
+  absorbPendingDisplays,
   applyLiveEvent,
   buildTimeline,
   emptyConversationState,
@@ -57,9 +61,11 @@ import {
   rowsFromConversationViews,
   segmentsFromContent,
   trackPending,
+  withCompactingRow,
   type ToolView,
 } from "./conversationViewModel";
-import { PREVIEW_CONVO_IDENTITY, PREVIEW_CONVO_ITEMS } from "../preview/conversationFixtures";
+import { PREVIEW_CONVO_IDENTITY, PREVIEW_CONVO_ITEMS, previewConversationRows } from "../preview/conversationFixtures";
+import { createMemoryThumbStore } from "./userMessageThumbs";
 
 afterEach(cleanup);
 
@@ -531,6 +537,42 @@ describe("live merge", () => {
     expect(after?.type === "batch" ? after.tools[0]?.status : undefined).toBe("succeeded");
   });
 
+  it("attaches a completed tool to its persisted owner when start was missed", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = {
+      ...state,
+      items: [
+        {
+          kind: "message",
+          itemId: "m1",
+          parentId: null,
+          createdAt: "2026-08-15T00:00:00.000Z",
+          role: "assistant",
+          content: [{ type: "toolCall", toolCallId: "c1", toolName: "Bash" }],
+        },
+      ],
+    };
+    state = applyLiveEvent(
+      state,
+      {
+        kind: "conversation.tool.completed",
+        sessionId: session,
+        turnId: "t1",
+        toolCallId: "c1",
+        result: { type: "toolResult", toolCallId: "c1", toolName: "Bash", output: "ok", isError: false },
+        completedAt: "2026-08-15T00:00:02.000Z",
+      },
+      identity,
+      1,
+    );
+    expect(state.liveTools.c1?.messageId).toBe("m1");
+    const batch = buildTimeline(state)
+      .flatMap((row) => (row.type === "assistant" ? row.segments : []))
+      .find((segment) => segment.type === "batch");
+    expect(batch?.type === "batch" ? batch.tools[0]?.status : undefined).toBe("succeeded");
+    expect(batch?.type === "batch" ? batch.tools[0]?.output : undefined).toBe("ok");
+  });
+
   it("ignores a completed item whose itemId does not equal messageId", () => {
     let state = resetConversation(1, identity, "ready");
     state = applyLiveEvent(state, {
@@ -814,6 +856,12 @@ describe("live merge", () => {
     engine.start();
     client.resolveNext(page({ items: [] }));
     await tick();
+    const error = {
+      message: "Upstream service temporarily unavailable",
+      status: 502,
+      provider: "sub2api-go",
+      model: "mimo-v2.5",
+    };
     client.pushLive({
       kind: "conversation.message.started",
       sessionId: session,
@@ -835,32 +883,46 @@ describe("live merge", () => {
         role: "assistant",
         content: [],
       },
-      error: {
-        message: "Model is not supported by composite groups",
-        status: 400,
-        provider: "sub2api-go",
-        model: "mimo-v2.5",
-      },
+      error,
     }, 2);
-    client.pushLive({ kind: "conversation.turn.completed", sessionId: session, turnId: "t1" }, 3);
-    const rows = engine.getSnapshot().rows.filter((row) => row.type === "assistant");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
+    client.pushLive({ kind: "conversation.turn.aborted", sessionId: session, turnId: "t1" }, 3);
+    const afterAbort = engine.getSnapshot().rows.filter((row) => row.type === "assistant");
+    expect(afterAbort).toHaveLength(1);
+    expect(afterAbort[0]).toMatchObject({
       itemId: "m1",
       status: "error",
       presentation: "reply",
-      error: {
-        message: "Model is not supported by composite groups",
-        status: 400,
-        provider: "sub2api-go",
-        model: "mimo-v2.5",
-      },
+      error,
     });
-    expect(client.conversation.itemErrors.m1?.status).toBe(400);
-    render(<ConversationItemView row={rows[0]!} />);
+    expect(client.conversation.itemErrors.m1?.status).toBe(502);
+    render(<ConversationItemView row={afterAbort[0]!} />);
     expect(screen.getByText("出错")).toBeTruthy();
-    expect(screen.getByText("400 · sub2api-go · mimo-v2.5")).toBeTruthy();
-    expect(screen.getByText("Model is not supported by composite groups")).toBeTruthy();
+    expect(screen.getByText("502 · sub2api-go · mimo-v2.5")).toBeTruthy();
+    expect(screen.getByText("Upstream service temporarily unavailable")).toBeTruthy();
+
+    const generation = client.beginTranscriptHydrate(identity);
+    client.hydrateTranscript(page({ items: [] }), generation);
+    const afterLeave = engine.getSnapshot().rows.filter((row) => row.type === "assistant");
+    expect(afterLeave).toHaveLength(1);
+    expect(afterLeave[0]).toMatchObject({ itemId: "m1", status: "error", error });
+
+    client.pushLive({
+      kind: "conversation.message.completed",
+      sessionId: session,
+      turnId: "t2",
+      messageId: "m2",
+      item: {
+        kind: "message",
+        itemId: "m2",
+        parentId: null,
+        createdAt: "2026-08-15T00:01:00.000Z",
+        role: "assistant",
+        content: [{ type: "text", text: "recovered" }],
+      },
+    }, 4);
+    const afterSuccess = engine.getSnapshot().rows.filter((row) => row.type === "assistant");
+    expect(afterSuccess.some((row) => row.type === "assistant" && row.error !== undefined)).toBe(false);
+    expect(client.conversation.itemErrors).toEqual({});
   });
 });
 
@@ -946,6 +1008,29 @@ describe("pagination and grouping", () => {
     expect(screen.getByText("检查完成，这是最终结论。")).toBeTruthy();
   });
 
+  it("keeps the identity header on the last text-bearing row when later items are tools only", () => {
+    const reply = assistantItem("reply", "先改这一处。");
+    const tools: ConversationItem = {
+      ...assistantItem("tools", ""),
+      content: [
+        { type: "toolCall", toolCallId: "bash-1", toolName: "Bash", arguments: { command: "npm test" } },
+        { type: "toolResult", toolCallId: "bash-1", toolName: "Bash", output: "ok", isError: false },
+      ],
+    };
+    const items = [userItem("u1", "改一下"), reply, tools];
+    const itemsById = Object.fromEntries(items.map((item) => [item.itemId, item]));
+    const rows = rowsFromConversationViews(selectConversationViews({
+      ...createInitialConversationState(),
+      order: items.map((item) => item.itemId),
+      itemsById,
+    }));
+    const assistants = rows.filter((row) => row.type === "assistant");
+    expect(assistants.map((row) => (row.type === "assistant" ? row.presentation : undefined))).toEqual([
+      "reply",
+      "process",
+    ]);
+  });
+
   it("ignores dot fillers and keeps following tools in the preceding mixed process chain", () => {
     const command: ConversationItem = {
       ...assistantItem("command", ""),
@@ -1026,6 +1111,18 @@ describe("scroll follow", () => {
     expect(shouldFollow(distanceFromBottom({ scrollHeight: 1000, scrollTop: 940, clientHeight: 80 }))).toBe(true);
     expect(shouldFollow(distanceFromBottom({ scrollHeight: 1000, scrollTop: 100, clientHeight: 80 }))).toBe(false);
   });
+
+  it("follow key changes when live bash output grows without a new row", () => {
+    const before = conversationFollowKey({
+      liveTools: { b1: { output: "a" } },
+      liveMessages: {},
+    });
+    const after = conversationFollowKey({
+      liveTools: { b1: { output: "abc" } },
+      liveMessages: {},
+    });
+    expect(before).not.toBe(after);
+  });
 });
 
 describe("composer pending semantics", () => {
@@ -1058,6 +1155,131 @@ describe("composer pending semantics", () => {
     state = hydratePage(state, page({ items: [userItem("u1", "hello")], hasMoreBefore: false }), 1, "replace");
     expect(state.pendingUsers).toEqual([]);
     expect(buildTimeline(state).filter((row) => row.type === "user")).toHaveLength(1);
+  });
+
+  it("transfers the composer doc onto the persisted user row so capsules survive send", () => {
+    const doc = {
+      nodes: [
+        { type: "text" as const, value: "看 " },
+        {
+          type: "chip" as const,
+          chip: { id: "c1", kind: "file" as const, label: "app.ts", path: "src/app.ts" },
+        },
+      ],
+    };
+    let state = resetConversation(1, identity, "ready");
+    state = trackPending(state, {
+      requestId: "req-1",
+      text: "看 @src/app.ts",
+      draft: "看 @src/app.ts",
+      status: "pending",
+      knownItemIds: [],
+      doc,
+    });
+    expect(buildTimeline(state).find((row) => row.type === "user")).toMatchObject({ doc });
+    state = hydratePage(state, page({ items: [userItem("u1", "看 @src/app.ts")], hasMoreBefore: false }), 1, "replace");
+    expect(state.pendingUsers).toEqual([]);
+    expect(state.userDisplays.u1).toEqual(doc);
+    expect(buildTimeline(state).find((row) => row.type === "user")).toMatchObject({
+      itemId: "u1",
+      text: "看 @src/app.ts",
+      doc,
+    });
+  });
+
+  it("keeps image thumbs on the persisted row after the pending doc is absorbed", () => {
+    const png = { type: "image" as const, mimeType: "image/png" as const, data: "aaa" };
+    const doc = {
+      nodes: [
+        { type: "text" as const, value: "看 " },
+        {
+          type: "chip" as const,
+          chip: { id: "c1", kind: "image" as const, label: "图1", image: png },
+        },
+      ],
+    };
+    let state = resetConversation(1, identity, "ready");
+    state = trackPending(state, {
+      requestId: "req-img",
+      text: "看 [图1]",
+      draft: "看 [图1]",
+      status: "pending",
+      knownItemIds: [],
+      doc,
+    });
+    state = hydratePage(state, page({ items: [userItem("u-img", "看 [图1]")], hasMoreBefore: false }), 1, "replace");
+    expect(state.userThumbs["u-img"]).toEqual([{ label: "图1", image: png }]);
+    expect(buildTimeline(state).find((row) => row.type === "user")).toMatchObject({
+      itemId: "u-img",
+      thumbs: [{ label: "图1", image: png }],
+    });
+  });
+
+  it("absorbPendingDisplays keeps failed pending and only maps matched items", () => {
+    const doc = { nodes: [{ type: "text" as const, value: "hello" }] };
+    const absorbed = absorbPendingDisplays(
+      [
+        {
+          requestId: "ok",
+          text: "hello",
+          draft: "hello",
+          status: "pending",
+          knownItemIds: [],
+          doc,
+        },
+        {
+          requestId: "fail",
+          text: "nope",
+          draft: "nope",
+          status: "failed",
+          knownItemIds: [],
+        },
+      ],
+      [userItem("u1", "hello")],
+    );
+    expect(absorbed.pending).toHaveLength(1);
+    expect(absorbed.pending[0]?.requestId).toBe("fail");
+    expect(absorbed.displays.u1).toEqual(doc);
+  });
+
+  it("persists thumbs locally and reloads them onto a new engine without the composer doc", async () => {
+    const png = { type: "image" as const, mimeType: "image/png" as const, data: "aaa" };
+    const doc = {
+      nodes: [
+        { type: "text" as const, value: "看 " },
+        {
+          type: "chip" as const,
+          chip: { id: "c1", kind: "image" as const, label: "图1", image: png },
+        },
+      ],
+    };
+    const store = createMemoryThumbStore();
+    const client = new FakeClient();
+    client.auto = page({ items: [userItem("u-img", "看 [图1]")], hasMoreBefore: false });
+    const writer = engineOf(client, { thumbStore: store });
+    writer.start();
+    writer.trackPending({
+      requestId: "req-img",
+      text: "看 [图1]",
+      draft: "看 [图1]",
+      status: "pending",
+      knownItemIds: [],
+      doc,
+    });
+    await tick();
+    expect(await store.load(session)).toEqual({ "u-img": [{ label: "图1", image: png }] });
+    writer.dispose();
+
+    const reader = engineOf(client, { thumbStore: store });
+    reader.start();
+    await tick();
+    const row = reader.getSnapshot().rows.find((entry) => entry.type === "user");
+    expect(row).toMatchObject({
+      itemId: "u-img",
+      text: "看 [图1]",
+      thumbs: [{ label: "图1", image: png }],
+    });
+    reader.dispose();
   });
 });
 
@@ -1398,6 +1620,8 @@ describe("runtime identity and XSS", () => {
     expect(document.querySelector(".tc-vibe")).not.toBeNull();
     expect(document.querySelector(".tc-resolve")).not.toBeNull();
     expect(document.querySelector(".subagent-strip .sa-card.running")).not.toBeNull();
+    expect(document.querySelector(".subagent-strip .sa-top .sa-tok")).not.toBeNull();
+    expect(document.querySelector(".subagent-strip .sa-card > .sa-metrics")).toBeNull();
   });
 });
 
@@ -1426,11 +1650,100 @@ describe("message copy", () => {
     const button = screen.getByRole("button", { name: "复制消息" });
     expect(button.textContent).toBe("");
     expect(container.querySelector(".ev-copy-host .ev-body")).toBeTruthy();
+    expect(container.querySelector(".cm-chip-file .cm-chip-clip")?.textContent).toBe("app.ts");
+    expect(container.querySelector(".ev-body")?.textContent).not.toContain("@src/app.ts");
     fireEvent.click(button);
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("打开 @src/app.ts");
     });
     expect(screen.getByRole("button", { name: "已复制" })).toBeTruthy();
+  });
+
+  it("keeps skill capsules in the bubble and copies the /skill: token", async () => {
+    const writeText = mockClipboard();
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-skill",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "请用 /skill:commit-msg 写说明",
+        }}
+      />,
+    );
+    expect(container.querySelector(".cm-chip-skill .cm-chip-clip")?.textContent).toBe("commit-msg");
+    expect(container.querySelector(".ev-body")?.textContent).not.toContain("/skill:commit-msg");
+    fireEvent.click(screen.getByRole("button", { name: "复制消息" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("请用 /skill:commit-msg 写说明");
+    });
+  });
+
+  it("attaches clipboard images above the bubble and opens the preview", () => {
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-img",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "看 [图1]",
+          doc: {
+            nodes: [
+              { type: "text", value: "看 " },
+              {
+                type: "chip",
+                chip: {
+                  id: "img-1",
+                  kind: "image",
+                  label: "图1",
+                  image: { type: "image", mimeType: "image/png", data: png },
+                },
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(container.querySelector(".ev-thumbs img")).toBeTruthy();
+    expect(container.querySelector(".cm-chip-image .cm-chip-clip")?.textContent).toBe("图1");
+    fireEvent.click(screen.getByRole("button", { name: "预览图1" }));
+    expect(screen.getByRole("dialog", { name: "预览图1" })).toBeTruthy();
+  });
+
+  it("rebuilds thumbnails from persisted thumbs after the composer doc is gone", () => {
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-reload",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "看 [图1]",
+          thumbs: [{ label: "图1", image: { type: "image", mimeType: "image/png", data: png } }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".ev-thumbs img")).toBeTruthy();
+    expect(container.querySelector(".cm-chip-image .cm-chip-clip")?.textContent).toBe("图1");
+  });
+
+  it("native copy of a capsule selection writes the serialized token", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-native-copy",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "打开 @src/app.ts",
+        }}
+      />,
+    );
+    const body = container.querySelector(".ev-user-rich");
+    expect(body).toBeInstanceOf(HTMLElement);
+    const range = document.createRange();
+    range.selectNodeContents(body as HTMLElement);
+    expect(serializedCopyFromHost(body as HTMLElement, range)).toBe("打开 @src/app.ts");
   });
 
   it("copies only the last assistant text body", async () => {
@@ -1929,6 +2242,7 @@ describe("streaming chain auto expand and fold", () => {
     const openItems = container.querySelectorAll(".tl-item.open");
     expect(openItems).toHaveLength(1);
     expect(openItems[0]?.getAttribute("data-status")).toBe("running");
+    expect(container.querySelector('.codeblock[data-live="tail"]')).not.toBeNull();
 
     rerender(
       <ConversationItemView
@@ -2010,6 +2324,7 @@ describe("streaming chain auto expand and fold", () => {
       />,
     );
     expect(container.querySelector('.tl-item.open[data-kind="think"]')).not.toBeNull();
+    expect(container.querySelector('.think-scroll[data-live="tail"]')).not.toBeNull();
 
     rerender(
       <ConversationItemView
@@ -2023,6 +2338,33 @@ describe("streaming chain auto expand and fold", () => {
       />,
     );
     expect(container.querySelector(".tl-item.open")).toBeNull();
+    expect(container.querySelector('.think-scroll[data-live="tail"]')).toBeNull();
+  });
+
+  it("stops tailing a running tool when the card is collapsed", () => {
+    const { container } = render(
+      <ConversationItemView
+        row={{
+          ...baseRow,
+          presentation: "process",
+          segments: [{
+            type: "batch",
+            key: "live-tools",
+            tools: [{
+              toolCallId: "bash-1",
+              toolName: "Bash",
+              status: "running",
+              arguments: { command: "npm test" },
+              output: "ok\n".repeat(8),
+            }],
+          }],
+        }}
+      />,
+    );
+    expect(container.querySelector('.codeblock[data-live="tail"]')).not.toBeNull();
+    fireEvent.click(container.querySelector(".tl-row") as HTMLButtonElement);
+    expect(container.querySelector(".tl-item.open")).toBeNull();
+    expect(container.querySelector('.codeblock[data-live="tail"]')).toBeNull();
   });
 
   it("keeps the chain open while a tool runs and folds it when the turn completes", () => {
@@ -2324,6 +2666,69 @@ describe("real OMP tool-card bindings", () => {
     expect(container.textContent).toContain("4│needle");
   });
 
+  it("running bash card follows live output and does not fake exit 0", () => {
+    const { container, rerender } = render(
+      <ToolBody
+        tool={{
+          toolCallId: "bash-live",
+          toolName: "bash",
+          status: "running",
+          arguments: { command: "npm run typecheck", cwd: "D:/repo" },
+          output: "\u001b[33mBuilding... 10%\u001b[0m\r\u001b[33mBuilding... 100%\u001b[0m\nerror TS2322",
+        }}
+      />,
+    );
+    expect(container.querySelector('.codeblock[data-live="tail"]')).not.toBeNull();
+    expect(container.textContent).toContain("$ npm run typecheck");
+    expect(container.textContent).toContain("Building... 100%");
+    expect(container.textContent).not.toContain("Building... 10%");
+    expect(container.textContent).toContain("error TS2322");
+    expect(container.textContent).toContain("运行中");
+    expect(container.textContent).not.toContain("exit 0");
+
+    rerender(
+      <ToolBody
+        tool={{
+          toolCallId: "bash-live",
+          toolName: "bash",
+          status: "succeeded",
+          arguments: { command: "npm run typecheck", cwd: "D:/repo" },
+          output: "done\n",
+          result: {
+            type: "toolResult",
+            toolCallId: "bash-live",
+            toolName: "bash",
+            isError: false,
+            data: { exitCode: 0, wallTimeMs: 800 },
+          },
+        }}
+      />,
+    );
+    expect(container.querySelector(".codeblock[data-live='tail']")).toBeNull();
+    expect(container.textContent).toContain("exit 0");
+    expect(container.textContent).not.toContain("运行中");
+  });
+
+  it("preview live transcript shows a running bash tail after the gallery", () => {
+    const rows = previewConversationRows();
+    expect(rows.some((row) => row.type === "user" && row.text === "再跑一遍 typecheck，看着输出")).toBe(true);
+    const live = rows.find((row) => row.type === "assistant" && row.itemId === "preview-live-assistant");
+    const tools = live?.type === "assistant"
+      ? live.segments.flatMap((segment) => (segment.type === "batch" ? segment.tools : []))
+      : [];
+    expect(tools).toEqual([
+      expect.objectContaining({
+        toolCallId: "preview-bash-live",
+        status: "running",
+        output: expect.stringContaining("tsc --noEmit"),
+      }),
+    ]);
+    const { container } = render(<ConvoTranscript rows={rows} demo />);
+    expect(screen.getByText("运行中")).toBeTruthy();
+    expect(container.textContent).toContain("TS2322");
+    expect(container.querySelector('.codeblock[data-live="tail"]')).not.toBeNull();
+  });
+
   it("renders real Eval, Ask, Task, Hub, and Web Search result shapes", () => {
     const evalTool = {
       toolCallId: "eval-real", toolName: "eval", status: "succeeded" as const,
@@ -2428,7 +2833,7 @@ describe("turn file-change card", () => {
     const { container } = render(
       <ConvoTranscript
         rows={[completed]}
-        onReviewChanges={() => { reviewed.push("review"); }}
+        onReviewChanges={(turnId) => { reviewed.push(turnId); }}
       />,
     );
     expect(container.querySelector(".turn-diff.open")).not.toBeNull();
@@ -2443,7 +2848,7 @@ describe("turn file-change card", () => {
     expect(screen.queryByRole("button", { name: "审查" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "审核" }));
-    expect(reviewed).toEqual(["review"]);
+    expect(reviewed).toEqual([SESSION_CHANGE_LAST_ID]);
   });
 
   it("collapses earlier turns and keeps the latest completed turn expanded", () => {
@@ -2463,6 +2868,7 @@ describe("turn file-change card", () => {
       presentation: "reply" as const,
       segments: [{ type: "batch" as const, key: "b2", tools: [edit] }],
     };
+    const reviewed: string[] = [];
     render(
       <ConvoTranscript
         rows={[
@@ -2471,12 +2877,17 @@ describe("turn file-change card", () => {
           { type: "user", itemId: "u2", createdAt: "2026-08-15T00:00:03.000Z", text: "第二轮" },
           second,
         ]}
+        onReviewChanges={(turnId) => { reviewed.push(turnId); }}
       />,
     );
     const toggles = screen.getAllByRole("button", { name: /个文件已更改/ });
     expect(toggles).toHaveLength(2);
     expect(toggles[0]?.getAttribute("aria-expanded")).toBe("false");
     expect(toggles[1]?.getAttribute("aria-expanded")).toBe("true");
+    const reviews = screen.getAllByRole("button", { name: "审核" });
+    fireEvent.click(reviews[0]!);
+    fireEvent.click(reviews[1]!);
+    expect(reviewed).toEqual(["turn-1", SESSION_CHANGE_LAST_ID]);
   });
 
   it("holds the latest card until the Runtime turn closes, even after file tools succeed", () => {
@@ -2534,6 +2945,197 @@ describe("turn file-change card", () => {
     expect(openContainer.querySelector(".turn-diff")).toBeNull();
     const { container: closedContainer } = render(<ConvoTranscript rows={closedRows} />);
     expect(closedContainer.querySelector(".turn-diff")).not.toBeNull();
+  });
+});
+
+describe("plan created card", () => {
+  const reply = {
+    type: "assistant" as const,
+    itemId: "plan-turn",
+    createdAt: "2026-08-15T00:00:02.000Z",
+    status: "completed" as const,
+    presentation: "reply" as const,
+    segments: [{ type: "text" as const, key: "t", text: "计划如下。" }],
+  };
+  const write = {
+    toolCallId: "write-plan-card",
+    toolName: "write",
+    status: "succeeded" as const,
+    arguments: { path: "local://plan-annotation-receipt-plan.md", content: "a\nb" },
+  };
+  const propose = {
+    toolCallId: "propose-1",
+    toolName: "write",
+    status: "succeeded" as const,
+    arguments: { path: "xd://propose", content: JSON.stringify({ title: "plan-annotation-receipt" }) },
+    result: {
+      type: "toolResult" as const,
+      toolCallId: "propose-1",
+      toolName: "write",
+      isError: false,
+      data: {
+        xdev: {
+          tool: "propose",
+          args: { title: "plan-annotation-receipt" },
+          inner: { result: "Plan ready for review." },
+        },
+      },
+    },
+  };
+  const processWrite = {
+    type: "assistant" as const,
+    itemId: "plan-write",
+    createdAt: "2026-08-15T00:00:01.000Z",
+    status: "completed" as const,
+    presentation: "process" as const,
+    segments: [{ type: "batch" as const, key: "w", tools: [write] }],
+  };
+  const replyPropose = {
+    ...reply,
+    itemId: "plan-propose",
+    segments: [
+      { type: "text" as const, key: "t", text: "计划已写入 local://plan-annotation-receipt-plan.md。现在提交审批：" },
+      { type: "batch" as const, key: "b", tools: [propose] },
+    ],
+  };
+  const withFiles = {
+    ...reply,
+    itemId: "plan-files",
+    segments: [
+      { type: "text" as const, key: "t", text: "改好了。" },
+      { type: "batch" as const, key: "b", tools: [write] },
+    ],
+  };
+  const reviewFallback = {
+    title: "User message restore",
+    onOpen: vi.fn(),
+    attachEvenWithoutPropose: true as const,
+  };
+
+  it("renders above the turn diff after xd://propose, without snapshot review", () => {
+    const { container } = render(
+      <ConvoTranscript rows={[processWrite, replyPropose]} planLink={{ onOpen: vi.fn() }} />,
+    );
+    const card = container.querySelector(".plan-created");
+    const diff = container.querySelector(".turn-diff");
+    expect(card).not.toBeNull();
+    expect(diff).not.toBeNull();
+    expect(card && diff && (card.compareDocumentPosition(diff) & Node.DOCUMENT_POSITION_FOLLOWING)).not.toBe(0);
+    expect(screen.getByRole("button", { name: "打开计划：plan-annotation-receipt" })).toBeTruthy();
+  });
+
+  it("stays on the propose row after later assistants in the same run", () => {
+    const afterApprove = {
+      type: "assistant" as const,
+      itemId: "after-approve",
+      createdAt: "2026-08-15T00:00:04.000Z",
+      status: "completed" as const,
+      presentation: "reply" as const,
+      segments: [
+        { type: "text" as const, key: "t", text: "开始执行计划。" },
+        {
+          type: "batch" as const,
+          key: "b",
+          tools: [{
+            toolCallId: "write-exec",
+            toolName: "write",
+            status: "succeeded" as const,
+            arguments: { path: "apps/renderer/src/App.tsx", content: "ok\n" },
+          }],
+        },
+      ],
+    };
+    const { container } = render(
+      <ConvoTranscript
+        rows={[processWrite, replyPropose, afterApprove]}
+        planLink={{ onOpen: vi.fn() }}
+      />,
+    );
+    const card = container.querySelector(".plan-created");
+    const proposeRow = container.querySelector('[data-item-id="plan-propose"]');
+    const laterRow = container.querySelector('[data-item-id="after-approve"]');
+    expect(card).not.toBeNull();
+    expect(proposeRow?.contains(card)).toBe(true);
+    expect(laterRow?.contains(card)).toBe(false);
+    expect(container.querySelectorAll(".plan-created")).toHaveLength(1);
+  });
+
+  it("shows the card as soon as xd://propose appears, before the turn closes", () => {
+    const streaming = {
+      ...replyPropose,
+      status: "streaming" as const,
+      turnOpen: true,
+      segments: [
+        { type: "text" as const, key: "t", text: "现在提交审批：" },
+        { type: "batch" as const, key: "b", tools: [{ ...propose, status: "running" as const }] },
+      ],
+    };
+    const { container } = render(<ConvoTranscript rows={[streaming]} planLink={{ onOpen: vi.fn() }} />);
+    expect(container.querySelector(".plan-created")).not.toBeNull();
+    expect(container.querySelector(".turn-diff")).toBeNull();
+  });
+
+  it("falls back to the last assistant row during review when there is no propose", () => {
+    const { container } = render(
+      <ConvoTranscript rows={[withFiles]} planLink={reviewFallback} />,
+    );
+    const card = container.querySelector(".plan-created");
+    const diff = container.querySelector(".turn-diff");
+    expect(card).not.toBeNull();
+    expect(diff).not.toBeNull();
+    expect(card && diff && (card.compareDocumentPosition(diff) & Node.DOCUMENT_POSITION_FOLLOWING)).not.toBe(0);
+    expect(screen.getByRole("button", { name: "打开计划：User message restore" })).toBeTruthy();
+  });
+
+  it("still appears on the last assistant row when there is no diff card", () => {
+    const { container } = render(
+      <ConvoTranscript rows={[reply]} planLink={reviewFallback} />,
+    );
+    expect(container.querySelector(".plan-created")).not.toBeNull();
+    expect(container.querySelector(".turn-diff")).toBeNull();
+  });
+
+  it("does not render a file write as a created plan without propose", () => {
+    const { container } = render(<ConvoTranscript rows={[withFiles]} planLink={{ onOpen: vi.fn() }} />);
+    expect(container.querySelector(".plan-created")).toBeNull();
+  });
+
+  it("does not render without a plan link", () => {
+    const { container } = render(<ConvoTranscript rows={[processWrite, replyPropose]} />);
+    expect(container.querySelector(".plan-created")).toBeNull();
+  });
+
+  it("opens the plan review dialog from the conversation entry", () => {
+    function Harness() {
+      const originRef = useRef<HTMLElement | null>(null);
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <ConvoTranscript
+            rows={[replyPropose]}
+            planLink={{
+              onOpen: (origin) => {
+                originRef.current = origin;
+                setOpen(true);
+              },
+            }}
+          />
+          <PlanReviewDeck
+            title="plan-annotation-receipt"
+            body="## 目标\n\nRestore the composer draft.\n"
+            expanded={open}
+            onExpandedChange={setOpen}
+            originRef={originRef}
+            onAction={vi.fn()}
+          />
+        </>
+      );
+    }
+    render(<Harness />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "打开计划：plan-annotation-receipt" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("dialog").textContent).toContain("Plan Review · plan-annotation-receipt");
   });
 });
 
@@ -2646,6 +3248,70 @@ describe("session task progress", () => {
       { path: "docs/UPSTREAM-SYNC.md", name: "UPSTREAM-SYNC.md", dir: "docs/", add: 2, del: 0, status: "added", note: "Write" },
     ]);
   });
+
+  it("hides a completed-only todo list, and drops previous-turn files after a new user prompt", () => {
+    const write = {
+      toolCallId: "write-1",
+      toolName: "write",
+      status: "succeeded" as const,
+      arguments: { path: "docs/a.md", content: "x" },
+    };
+    const finished = [
+      { type: "user" as const, itemId: "u1", createdAt: "2026-08-15T00:00:01.000Z", text: "写文档" },
+      {
+        type: "assistant" as const,
+        itemId: "a1",
+        createdAt: "2026-08-15T00:00:02.000Z",
+        status: "completed" as const,
+        presentation: "reply" as const,
+        segments: [{
+          type: "batch" as const,
+          key: "b1",
+          tools: [
+            todoTool("todo-1", [{ name: "文档", tasks: [{ content: "写文档", status: "done" }] }]),
+            write,
+          ],
+        }],
+      },
+    ];
+    const afterTurn = sessionTaskProgress(finished);
+    expect(afterTurn.todos).toEqual([]);
+    expect(afterTurn.files.map((file) => file.path)).toEqual(["docs/a.md"]);
+    expect(sessionTaskProgress([
+      ...finished,
+      { type: "user", itemId: "u2", createdAt: "2026-08-15T00:00:03.000Z", text: "下一件事" },
+    ])).toEqual({ todos: [], files: [] });
+  });
+
+  it("keeps open todos after a new user prompt, like the OMP HUD", () => {
+    const write = {
+      toolCallId: "write-1",
+      toolName: "write",
+      status: "succeeded" as const,
+      arguments: { path: "docs/a.md", content: "x" },
+    };
+    const progress = sessionTaskProgress([
+      { type: "user", itemId: "u1", createdAt: "2026-08-15T00:00:01.000Z", text: "列任务" },
+      {
+        type: "assistant",
+        itemId: "a1",
+        createdAt: "2026-08-15T00:00:02.000Z",
+        status: "completed",
+        presentation: "reply",
+        segments: [{
+          type: "batch",
+          key: "b1",
+          tools: [
+            todoTool("todo-1", [{ name: "文档", tasks: [{ content: "写文档", status: "doing" }] }]),
+            write,
+          ],
+        }],
+      },
+      { type: "user", itemId: "u2", createdAt: "2026-08-15T00:00:03.000Z", text: "继续" },
+    ]);
+    expect(progress.todos).toEqual([{ id: "文档-0", content: "写文档", status: "in_progress", phase: "文档" }]);
+    expect(progress.files).toEqual([]);
+  });
 });
 
 describe("xd:// mount notice", () => {
@@ -2716,6 +3382,20 @@ describe("xd:// mount notice", () => {
     expect(container.querySelector(".convo-notice")).toBeNull();
     expect(container.querySelector(".al-retry")?.textContent).toBe("Retry 5/10");
   });
+
+  it("does not render auto_retry_end notices in the transcript", () => {
+    const state = {
+      ...resetConversation(1, identity, "ready"),
+      notices: [{ id: "n0", level: "warning" as const, message: "Retry cancelled", source: "retry-end" }],
+    };
+    const { container } = render(
+      <ConversationPane
+        snapshot={{ state, rows: buildTimeline(state), demo: false, loadingOlder: false, identityKey: "retry-end" }}
+        onLoadOlder={() => {}}
+      />,
+    );
+    expect(container.querySelector(".convo-notice")).toBeNull();
+  });
 });
 
 describe("conversation activity line", () => {
@@ -2749,3 +3429,249 @@ describe("conversation activity line", () => {
     expect(container.querySelector(".activity-line")?.textContent).toContain("working");
   });
 });
+
+describe("user message restore", () => {
+  it("shows restore on a committed user row and reports itemId plus text", () => {
+    const onRestoreUserMessage = vi.fn();
+    render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-restore",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "打开 src/app.ts",
+        }}
+        onRestoreUserMessage={onRestoreUserMessage}
+      />,
+    );
+    const restore = screen.getByRole("button", { name: "恢复" });
+    expect(restore.innerHTML).toContain("M2.5 8a5.5 5.5 0 1 1 1.6 3.9");
+    fireEvent.click(restore);
+    expect(onRestoreUserMessage).toHaveBeenCalledWith("u-restore", "打开 src/app.ts");
+  });
+
+  it("shows branch on a committed user row", () => {
+    const onBranchUserMessage = vi.fn();
+    render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-branch",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "打开 src/app.ts",
+        }}
+        onRestoreUserMessage={() => {}}
+        onBranchUserMessage={onBranchUserMessage}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "新会话" }));
+    expect(onBranchUserMessage).toHaveBeenCalledWith("u-branch", "打开 src/app.ts");
+  });
+
+  it("disables restore when a busy reason is provided", () => {
+    const onRestoreUserMessage = vi.fn();
+    render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-busy",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "busy",
+        }}
+        onRestoreUserMessage={onRestoreUserMessage}
+        userRestoreDisabledReason="进行中"
+      />,
+    );
+    const button = screen.getByRole("button", { name: "恢复" });
+    expect(button).toHaveProperty("disabled", true);
+    expect(button.getAttribute("data-tip")).toBe("进行中");
+    fireEvent.click(button);
+    expect(onRestoreUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps failed-pending on the draft restore button and does not navigate", () => {
+    const onRestore = vi.fn();
+    const onRestoreUserMessage = vi.fn();
+    render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "pending:req-1",
+          createdAt: "",
+          text: "hello",
+          pending: "failed",
+          requestId: "req-1",
+          error: "rejected",
+        }}
+        onRestore={onRestore}
+        onRestoreUserMessage={onRestoreUserMessage}
+        onBranchUserMessage={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "恢复到输入框" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "恢复" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "新会话" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "恢复到输入框" }));
+    expect(onRestore).toHaveBeenCalledWith("req-1");
+    expect(onRestoreUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("hides restore on a still-sending pending row", () => {
+    render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "pending:req-2",
+          createdAt: "",
+          text: "hello",
+          pending: "pending",
+          requestId: "req-2",
+        }}
+        onRestoreUserMessage={() => {}}
+        onBranchUserMessage={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "恢复" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "新会话" })).toBeNull();
+  });
+
+  it("reload replaces the timeline with the new active branch", async () => {
+    const client = new FakeClient();
+    client.auto = page({
+      items: [userItem("u1", "one"), assistantItem("a1", "two"), userItem("u2", "three")],
+    });
+    const engine = engineOf(client);
+    engine.start();
+    await tick();
+    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["u1", "a1", "u2"]);
+    client.auto = page({ items: [userItem("u1", "one")] });
+    await engine.reload();
+    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["u1"]);
+    expect(engine.getSnapshot().rows.some((row) => row.type === "user" && row.itemId === "u2")).toBe(false);
+    engine.dispose();
+  });
+
+  it("preview restoreFromUser drops the target user and later rows without querying Host", async () => {
+    const client = new FakeClient();
+    const engine = engineOf(client, { preview: true, identity: PREVIEW_CONVO_IDENTITY });
+    engine.start();
+    await tick();
+    expect(client.reads).toEqual([]);
+    expect(engine.restoreFromUser("preview-user-1")).toBe(true);
+    const snap = engine.getSnapshot();
+    expect(snap.state.items.map((item) => item.itemId)).toEqual(["preview-reset-1"]);
+    expect(snap.rows.some((row) => row.type === "user")).toBe(false);
+    expect(Object.keys(snap.state.liveMessages)).toEqual([]);
+    expect(client.reads).toEqual([]);
+    engine.dispose();
+  });
+});
+
+describe("compaction timeline", () => {
+  it("turns compaction.started into an in-progress divider, then the summary bar on completed", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = applyLiveEvent(state, {
+      kind: "conversation.compaction.started",
+      sessionId: session,
+      action: "context-full",
+    }, identity, 1);
+    expect(state.compacting).toEqual({ action: "context-full" });
+    expect(state.notices).toEqual([]);
+    const pending = buildTimeline(state);
+    expect(pending).toEqual([{ type: "compacting", action: "context-full" }]);
+
+    state = applyLiveEvent(state, {
+      kind: "conversation.compaction.completed",
+      sessionId: session,
+      aborted: false,
+      item: {
+        kind: "compaction",
+        itemId: "cp-1",
+        parentId: null,
+        createdAt: "2026-08-19T00:00:00.000Z",
+        summary: "Earlier turns were summarized.",
+        shortSummary: "Summarized history",
+      },
+    }, identity, 2);
+    expect(state.compacting).toBeUndefined();
+    const done = buildTimeline(state);
+    expect(done).toHaveLength(1);
+    expect(done[0]).toMatchObject({
+      type: "compaction",
+      item: { itemId: "cp-1", shortSummary: "Summarized history" },
+    });
+  });
+
+  it("clears the in-progress divider and surfaces abort without a fake summary", () => {
+    let state = resetConversation(1, identity, "ready");
+    state = applyLiveEvent(state, {
+      kind: "conversation.compaction.started",
+      sessionId: session,
+      action: "manual",
+    }, identity);
+    state = applyLiveEvent(state, {
+      kind: "conversation.compaction.completed",
+      sessionId: session,
+      aborted: true,
+    }, identity);
+    expect(state.compacting).toBeUndefined();
+    expect(buildTimeline(state).some((row) => row.type === "compacting" || row.type === "compaction")).toBe(false);
+    expect(state.notices.some((notice) => notice.message === "上下文压缩已中止")).toBe(true);
+  });
+
+  it("paints 压缩中 from the compacting prop even without a live start event", () => {
+    const state = resetConversation(1, identity, "ready");
+    render(
+      <ConversationPane
+        snapshot={{ state, rows: [], demo: false, loadingOlder: false, identityKey: "compact-pending" }}
+        onLoadOlder={() => {}}
+        compacting
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toContain("压缩中");
+  });
+
+  it("replaces the in-progress divider with the compact summary in the transcript", () => {
+    const pending = withCompactingRow([], true);
+    render(<ConvoTranscript rows={pending} />);
+    expect(screen.getByText("压缩中")).toBeTruthy();
+    cleanup();
+    render(
+      <ConvoTranscript
+        rows={[{
+          type: "compaction",
+          item: {
+            kind: "compaction",
+            itemId: "cp-1",
+            parentId: null,
+            createdAt: "t",
+            summary: "Earlier turns were summarized.",
+            shortSummary: "Summarized history",
+          },
+        }]}
+      />,
+    );
+    expect(screen.queryByText("压缩中")).toBeNull();
+    expect(screen.getByText(/Summarized history/)).toBeTruthy();
+    expect(screen.getByText("Earlier turns were summarized.")).toBeTruthy();
+  });
+
+  it("appends 压缩中 after an existing compact summary on a later compact", () => {
+    const rows = withCompactingRow([{
+      type: "compaction",
+      item: {
+        kind: "compaction",
+        itemId: "cp-old",
+        parentId: null,
+        createdAt: "t",
+        summary: "Older turns were summarized.",
+        shortSummary: "Older history",
+      },
+    }], true);
+    expect(rows.map((row) => row.type)).toEqual(["compaction", "compacting"]);
+    render(<ConvoTranscript rows={rows} />);
+    expect(screen.getByText(/Older history/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("压缩中");
+  });
+});
+

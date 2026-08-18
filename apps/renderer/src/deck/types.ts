@@ -26,7 +26,11 @@ export type AskHeader = {
   readonly index: number;
 };
 
-export type PlanActionId = "execute" | "keep" | "compact" | "refine";
+export type PlanActionId = "execute" | "keep" | "compact" | "refine" | "dismiss";
+
+export type PlanActionDetail = {
+  readonly feedback?: string;
+};
 
 export const PLAN_ACTIONS: ReadonlyArray<{
   readonly id: PlanActionId;
@@ -38,6 +42,3 @@ export const PLAN_ACTIONS: ReadonlyArray<{
   { id: "compact", label: "Approve and compact context", primary: false },
   { id: "refine", label: "Refine plan", primary: false },
 ];
-
-/** Protocol `mode.plan.review.respond` requires non-empty feedback on refine. */
-export const PLAN_REFINE_FEEDBACK = "Please refine the plan.";

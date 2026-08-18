@@ -20,6 +20,7 @@
     "omp:keys": "node scripts/runtime-signing-keys.mjs",
     "omp:build:host": "node scripts/build-omp-host.mjs",
     "omp:artifact": "npm run build && node scripts/runtime-artifact.mjs",
+    "pack:win:prepare": "node scripts/prepare-installer-resources.mjs",
     "omp:test:metadata": "npm run build -w @omp-studio/runtime-installer && node --test scripts/runtime-artifact.test.mjs",
     "p5:gate": "node scripts/p5-gate.mjs",
     "omp:e2e:install": "node scripts/runtime-install-e2e.mjs",

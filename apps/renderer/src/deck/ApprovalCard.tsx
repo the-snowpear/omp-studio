@@ -61,7 +61,7 @@ export function ApprovalCard({
           type="button"
           className="btn small outline"
           disabled={disabled}
-          title="本次允许。工具级「始终允许」尚未接入 Studio Bridge。"
+          data-tip="始终允许（暂未实现）"
           onClick={onAlways}
         >
           始终允许

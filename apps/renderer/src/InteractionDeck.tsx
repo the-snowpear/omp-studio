@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ClientInteraction, InteractionResponseValue } from "@omp-studio/client-contract";
 import { ApprovalCard } from "./deck/ApprovalCard";
 import { AskActions, AskBody, AskHead } from "./deck/AskCard";
+import { ASK_GENIE_MS, prefersReducedMotion } from "./deck/askGenie";
 import { approvalFromInteraction } from "./deck/approvalContent";
 import {
   askAnswered,
@@ -188,10 +189,12 @@ function LiveAskQueue({
   interaction,
   onRespond,
   disabled,
+  leaving,
 }: {
   interaction: Extract<ClientInteraction, { kind: "ask" | "select" }>;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled: boolean;
+  leaving?: boolean;
 }) {
   const items = askItemsFrom(interaction);
   const answersRef = useRef<Record<string, DeckAskAnswer>>({});
@@ -231,6 +234,7 @@ function LiveAskQueue({
       regionLabel="待处理的审批与提问"
       {...(disabled ? { disabled: true } : {})}
       {...(submitError ? { submitError: true } : {})}
+      {...(leaving === true ? { leaving: true } : {})}
       onAskSubmit={(item, answer) => settle(item, "submit", answer)}
       onAskCancel={(item) => settle(item, "cancel")}
     />
@@ -246,10 +250,11 @@ function liveAskValue(
   return submitSelectValue(view, answers[view.question.id] ?? NO_ASK_ANSWER, interaction.multiple);
 }
 
-export function InteractionDeck({ interaction, onRespond, disabled }: {
+export function InteractionDeck({ interaction, onRespond, disabled, leaving }: {
   interaction: ClientInteraction | null;
   onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
   disabled: boolean;
+  leaving?: boolean;
 }) {
   if (interaction === null) {
     return <div className="deck" role="region" aria-label="待处理的审批与提问" />;
@@ -261,14 +266,49 @@ export function InteractionDeck({ interaction, onRespond, disabled }: {
         interaction={interaction}
         onRespond={onRespond}
         disabled={disabled}
+        {...(leaving === true ? { leaving: true } : {})}
       />
     );
   }
   return (
-    <div className="deck active preview-queue" role="region" aria-label="待处理的审批与提问" aria-live="polite">
+    <PromptDeckShell interaction={interaction} onRespond={onRespond} disabled={disabled} leaving={leaving === true} />
+  );
+}
+
+function PromptDeckShell({
+  interaction,
+  onRespond,
+  disabled,
+  leaving,
+}: {
+  interaction: ClientInteraction;
+  onRespond: (decision: "submit" | "cancel", value?: InteractionResponseValue) => void | Promise<boolean>;
+  disabled: boolean;
+  leaving: boolean;
+}) {
+  const [enter, setEnter] = useState(() => !prefersReducedMotion());
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setEnter(false);
+      return;
+    }
+    setEnter(true);
+    const timer = window.setTimeout(() => setEnter(false), ASK_GENIE_MS);
+    return () => window.clearTimeout(timer);
+  }, [interaction.interactionId]);
+  const askLike = interaction.kind === "input" || interaction.kind === "editor";
+  const askEnter = askLike && enter && !leaving;
+  const askLeave = askLike && leaving;
+  return (
+    <div
+      className={`deck active preview-queue${askLike ? " is-ask" : ""}${askEnter ? " is-ask-enter" : ""}${askLeave ? " is-ask-leave" : ""}`}
+      role="region"
+      aria-label="待处理的审批与提问"
+      aria-live="polite"
+    >
       <div className="deck-card">
         <div className="dk-stage">
-          <InteractionPrompt interaction={interaction} onRespond={onRespond} disabled={disabled} />
+          <InteractionPrompt interaction={interaction} onRespond={onRespond} disabled={disabled || leaving} />
         </div>
       </div>
     </div>

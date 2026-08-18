@@ -22,18 +22,20 @@ const SECRET_WORKTREE = "D:\\secret\\worktrees\\child-1";
 
 function makeLiveAgent(streaming = false): StudioLiveAgentPort & { calls: string[] } {
 	const calls: string[] = [];
+	const withImages = (name: string, text: string, images?: readonly unknown[]): string =>
+		images === undefined ? `${name}:${text}` : `${name}:${text}:images=${images.length}`;
 	return {
 		calls,
 		isStreaming: streaming,
-		async prompt(text) {
-			calls.push(`prompt:${text}`);
+		async prompt(text, options) {
+			calls.push(withImages("prompt", text, options?.images));
 			return true;
 		},
-		async steer(text) {
-			calls.push(`steer:${text}`);
+		async steer(text, images) {
+			calls.push(withImages("steer", text, images));
 		},
-		async followUp(text) {
-			calls.push(`followUp:${text}`);
+		async followUp(text, images) {
+			calls.push(withImages("followUp", text, images));
 		},
 		async abort(options) {
 			calls.push(`abort:${options?.reason ?? "none"}`);
@@ -365,6 +367,44 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 		await expect(
 			service.send({ agentId: "Idle-1", expectedGeneration: 1, text: "", mode: "prompt", callerAgentId: "Main" }),
 		).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+	});
+
+	test("send forwards optional images to prompt, steer, and followUp", async () => {
+		const { service, registry } = makeHub();
+		const live = makeLiveAgent(false);
+		registry.register(
+			makeRef("Idle-1", { status: "idle", parentId: "Main", session: live as unknown as AgentSession }),
+		);
+		const image = { type: "image", mimeType: "image/png", data: "abc" };
+		await service.send({
+			agentId: "Idle-1",
+			expectedGeneration: 1,
+			text: "[图1]",
+			mode: "prompt",
+			callerAgentId: "Main",
+			images: [image],
+		});
+		await service.send({
+			agentId: "Idle-1",
+			expectedGeneration: 1,
+			text: "[图1]",
+			mode: "steer",
+			callerAgentId: "Main",
+			images: [image],
+		});
+		await service.send({
+			agentId: "Idle-1",
+			expectedGeneration: 1,
+			text: "[图1]",
+			mode: "followUp",
+			callerAgentId: "Main",
+			images: [image],
+		});
+		expect(live.calls).toEqual([
+			"prompt:[图1]:images=1",
+			"steer:[图1]:images=1",
+			"followUp:[图1]:images=1",
+		]);
 	});
 
 	test("send to a parked agent revives through the lifecycle port and reports revived", async () => {

@@ -14,7 +14,8 @@
  * - Without a managed installation (`installer.currentManifest()`) the
  *   port returns `undefined` instead of throwing, so a missing runtime
  *   keeps the whole app read-only instead of killing startup.
- * - The executable path comes ONLY from `currentManifest().entrypointPath`;
+ * - The executable path comes ONLY from `currentManifest().entrypointPath`
+ *   under the Host installer root (packaged: `$INSTDIR\runtime`);
  *   `RuntimeResolution` never carries one.
  * - `stop` / `rebind` fail closed: the controller is disposed, the process
  *   is stopped and the bridge is closed — a dead Runtime is never reported
@@ -30,13 +31,14 @@ import { lstat } from "node:fs/promises";
 import type { Socket } from "node:net";
 import { join } from "node:path";
 
-import type { HostRuntimeHelloView } from "@omp-studio/host-client-api";
+import { redactText, type HostRuntimeHelloView, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
 import {
   CommandLedger,
   FileSessionLeaseStore,
   HostBackend,
   NodeRuntimeProcessPort,
   StudioBridgeClient,
+  StudioBridgeHandshakeError,
   StudioRuntimeSessionController,
   buildProcessProbeArgs,
   createBridgeBootstrap,
@@ -60,6 +62,7 @@ import type {
   ThreadId,
   WorkspaceId,
 } from "@omp-studio/studio-protocol";
+import type { RuntimeUnavailableCode } from "@omp-studio/client-contract";
 
 import type {
   DesktopRuntimeSession,
@@ -85,6 +88,10 @@ export interface DesktopRuntimeSessionPortOptions {
   readonly supportedProtocolVersions?: readonly number[];
   readonly handshakeTimeoutMs?: number;
   readonly requestTimeoutMs?: number;
+  /** Automatic relaunch after an unexpected drop; default 1. Zero disables. */
+  readonly autoRespawnLimit?: number;
+  /** Delay before an automatic relaunch; default 500ms. */
+  readonly autoRespawnDelayMs?: number;
   /** Maximum concurrently resident Runtime Workers; omitted means no application-level cap. */
   readonly maxResidentSessions?: number;
   /** Idle lifetime for a non-active, completed Worker before automatic hibernation. */
@@ -151,8 +158,8 @@ export function selectVerifiedCommandManifest(
 
 interface ResidentRuntime {
   readonly sessionId: string;
-  readonly port: DesktopRuntimeSessionPort;
-  readonly session: DesktopRuntimeSession;
+  port: DesktopRuntimeSessionPort;
+  session: DesktopRuntimeSession;
   readonly lease: SessionLease;
   lastSelected: number;
   idleSince: number | undefined;
@@ -185,6 +192,17 @@ export function createDesktopRuntimeSessionPort(
   let runtimeEpoch = 0;
   let selection = 0;
   let queue: Promise<unknown> = Promise.resolve();
+  let lastUnavailable: HostRuntimeUnavailable | undefined;
+  let lastDisconnect: HostRuntimeDisconnect | undefined;
+  let sessionSink: ((session: DesktopRuntimeSession | undefined) => void) | undefined;
+
+  const rememberUnavailable = (facts: HostRuntimeUnavailable | undefined): void => {
+    lastUnavailable = facts;
+  };
+
+  const rememberDisconnect = (facts: HostRuntimeDisconnect | undefined): void => {
+    lastDisconnect = facts === undefined ? undefined : { code: facts.code, reason: redactText(facts.reason) };
+  };
 
   const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
     const run = queue.then(operation, operation);
@@ -205,11 +223,27 @@ export function createDesktopRuntimeSessionPort(
     return leaseStore;
   };
 
-  const workerPort = (resumeSessionId?: string): DesktopRuntimeSessionPort =>
-    options.workerPortFactory?.({
-      ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
-      nextRuntimeEpoch,
-    }) ?? createSingleDesktopRuntimeSessionPort(options, resumeSessionId, nextRuntimeEpoch);
+  const workerPort = (resumeSessionId?: string): DesktopRuntimeSessionPort => {
+    const port =
+      options.workerPortFactory?.({
+        ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
+        nextRuntimeEpoch,
+      }) ?? createSingleDesktopRuntimeSessionPort(options, resumeSessionId, nextRuntimeEpoch);
+    port.attachSessionSink?.((session) => {
+      if (session !== undefined) {
+        const snapshot = session.controller.publication()?.snapshot;
+        const resident = snapshot === undefined ? undefined : residents.get(snapshot.sessionId);
+        if (resident !== undefined) {
+          resident.session = session;
+          resident.port = port;
+        }
+        rememberDisconnect(undefined);
+        rememberUnavailable(undefined);
+      }
+      sessionSink?.(session);
+    });
+    return port;
+  };
 
   const stopResident = async (resident: ResidentRuntime): Promise<void> => {
     await resident.port.stop();
@@ -243,7 +277,20 @@ export function createDesktopRuntimeSessionPort(
   const launchWorker = async (resumeSessionId?: string): Promise<DesktopRuntimeSession | undefined> => {
     const launchContext = context;
     const selected = workspace;
-    if (launchContext === undefined || selected === undefined) return undefined;
+    if (launchContext === undefined || selected === undefined) {
+      options.log?.write(
+        "warn",
+        "runtime.launch.skip",
+        launchContext === undefined ? "no-context" : "no-workspace",
+      );
+      rememberUnavailable(
+        unavailableFacts(
+          selected === undefined ? "no-workspace" : "launch-failed",
+          selected === undefined ? "no workspace is selected" : "runtime session context is not initialized",
+        ),
+      );
+      return undefined;
+    }
     await ensureCapacity();
     let lease: SessionLease | undefined;
     const port = workerPort(resumeSessionId);
@@ -254,6 +301,7 @@ export function createDesktopRuntimeSessionPort(
       const session = await port.start({ ...launchContext, workspace: selected });
       if (session === undefined) {
         await lease?.release();
+        rememberUnavailable(port.lastUnavailable?.() ?? unavailableFacts("launch-failed", "Runtime did not become ready"));
         return undefined;
       }
       const snapshot = session.controller.publication()?.snapshot;
@@ -284,13 +332,23 @@ export function createDesktopRuntimeSessionPort(
         resident.heartbeatTimer = setInterval(() => {
           void Promise.resolve(lease!.heartbeat!()).catch((error) => {
             options.log?.write("error", "runtime.worker.lease-lost", errorDetail(error));
-            void serialized(() => stopResident(resident)).catch(() => undefined);
+            rememberDisconnect({ code: "lease-lost", reason: "session writer lease was lost" });
+            void serialized(async () => {
+              const sessionId = resident.sessionId;
+              const wasActive = activeSessionId === sessionId;
+              await stopResident(resident);
+              if (!wasActive) return;
+              const next = await launchWorker(sessionId);
+              sessionSink?.(next);
+            }).catch(() => undefined);
           });
         }, 10_000);
         resident.heartbeatTimer.unref?.();
       }
       setActiveSession(snapshot.sessionId);
       options.log?.write("info", "runtime.worker.resident", `session=${snapshot.sessionId} count=${residents.size}`);
+      rememberUnavailable(undefined);
+      rememberDisconnect(undefined);
       // Re-sync a previously failed approval mode on activate/rebind
       // (plan §5.3.6): the fresh worker reads the persisted global mode from
       // disk; a non-persistent override keeps it aligned when persistence
@@ -300,6 +358,7 @@ export function createDesktopRuntimeSessionPort(
       }
       return session;
     } catch (error) {
+      rememberUnavailable(port.lastUnavailable?.() ?? launchFailedFacts(error));
       try {
         await port.stop();
       } catch {
@@ -405,7 +464,6 @@ export function createDesktopRuntimeSessionPort(
       type: "studio.request",
       requestId: randomUUID() as RequestId,
       runtimeEpoch: snapshot.runtimeEpoch,
-      expectedStateVersion: snapshot.stateVersion,
       operation: { kind: "permissions.mode.set", mode, persist },
     });
     if (receipt.status !== "completed" && receipt.status !== "accepted") {
@@ -469,10 +527,15 @@ export function createDesktopRuntimeSessionPort(
         if (launchContext.workspace !== undefined) workspace = launchContext.workspace;
         if (workspace === undefined) {
           options.log?.write("info", "runtime.start.skip", "no-workspace");
+          rememberUnavailable(unavailableFacts("no-workspace", "no workspace is selected"));
           return undefined;
         }
         const active = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
-        return active?.session ?? (await launchWorker());
+        if (active?.session !== undefined) {
+          rememberUnavailable(undefined);
+          return active.session;
+        }
+        return await launchWorker();
       });
     },
     stop(): Promise<void> {
@@ -499,6 +562,31 @@ export function createDesktopRuntimeSessionPort(
     }> {
       return await serialized(() => synchronizeApprovalMode(mode));
     },
+    lastUnavailable() {
+      return lastUnavailable;
+    },
+    lastDisconnect() {
+      const active = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
+      return lastDisconnect ?? active?.port.lastDisconnect?.();
+    },
+    ensure(): Promise<DesktopRuntimeSession | undefined> {
+      return serialized(async () => {
+        const active = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
+        if (active?.session.hello() !== undefined) {
+          rememberUnavailable(undefined);
+          rememberDisconnect(undefined);
+          return active.session;
+        }
+        const resumeId = active?.sessionId;
+        if (active !== undefined) await stopResident(active);
+        const next = await launchWorker(resumeId);
+        sessionSink?.(next);
+        return next;
+      });
+    },
+    attachSessionSink(listener) {
+      sessionSink = listener;
+    },
   };
 }
 
@@ -524,6 +612,22 @@ function createSingleDesktopRuntimeSessionPort(
   let generation = 0;
   /** Public start/stop/rebind/switch must not overlap; overlapping kills the live Runtime. */
   let queue: Promise<unknown> = Promise.resolve();
+  let lastUnavailable: HostRuntimeUnavailable | undefined;
+  let lastDisconnect: HostRuntimeDisconnect | undefined;
+  let lastExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  let sessionSink: ((session: DesktopRuntimeSession | undefined) => void) | undefined;
+  let stopping = false;
+  let draining = false;
+  let autoRespawns = 0;
+  let respawnScheduledFor = 0;
+
+  const rememberUnavailable = (facts: HostRuntimeUnavailable | undefined): void => {
+    lastUnavailable = facts;
+  };
+
+  const rememberDisconnect = (facts: HostRuntimeDisconnect | undefined): void => {
+    lastDisconnect = facts === undefined ? undefined : { code: facts.code, reason: redactText(facts.reason) };
+  };
 
   function serialized<T>(op: () => Promise<T>): Promise<T> {
     const run = queue.then(op, op);
@@ -534,11 +638,55 @@ function createSingleDesktopRuntimeSessionPort(
     return run;
   }
 
-  async function stopCurrent(): Promise<void> {
+  function scheduleAutoRespawn(fromGeneration: number): void {
+    const limit = options.autoRespawnLimit ?? 1;
+    if (stopping || draining || limit <= 0) return;
+    if (respawnScheduledFor === fromGeneration) return;
+    if (autoRespawns >= limit) return;
+    respawnScheduledFor = fromGeneration;
+    autoRespawns += 1;
+    const delay = options.autoRespawnDelayMs ?? 500;
+    log?.write("warn", "runtime.respawn.schedule", `generation=${fromGeneration} attempt=${autoRespawns}`);
+    const timer = setTimeout(() => {
+      void serialized(async () => {
+        if (stopping || fromGeneration !== generation) return;
+        if (alive && bundle?.hello() !== undefined) return;
+        await stopCurrent("replace");
+        const next = await launch();
+        if (next !== undefined) {
+          autoRespawns = 0;
+        }
+        sessionSink?.(next);
+      }).catch((error) => {
+        log?.write("error", "runtime.respawn.fail", errorDetail(error));
+      });
+    }, delay);
+    timer.unref?.();
+  }
+
+  function noteUnexpectedLoss(preferred: HostRuntimeDisconnect): void {
+    if (stopping || draining) return;
+    if (lastExit !== undefined) {
+      rememberDisconnect({
+        code: "process-exit",
+        reason: `Runtime process exited (code=${lastExit.code ?? "null"}, signal=${lastExit.signal ?? "none"})`,
+      });
+    } else if (lastDisconnect === undefined || lastDisconnect.code === "pipe-closed") {
+      rememberDisconnect(preferred);
+    }
+    scheduleAutoRespawn(generation);
+  }
+
+  async function stopCurrent(reason: "host-stop" | "replace" = "replace"): Promise<void> {
+    draining = true;
+    if (reason === "host-stop") {
+      stopping = true;
+      rememberDisconnect({ code: "host-stop", reason: "Host stopped the Runtime" });
+    }
     log?.write(
       "info",
       "runtime.stop",
-      `generation=${generation} hadSession=${bundle !== undefined} alive=${alive}`,
+      `generation=${generation} hadSession=${bundle !== undefined} alive=${alive} reason=${reason}`,
     );
     alive = false;
     unsubscribeProjection?.();
@@ -555,6 +703,7 @@ function createSingleDesktopRuntimeSessionPort(
     }
     bridge?.close();
     bridge = undefined;
+    draining = false;
   }
 
   async function launch(): Promise<DesktopRuntimeSession | undefined> {
@@ -562,25 +711,39 @@ function createSingleDesktopRuntimeSessionPort(
     const launchContext = context;
     if (selected === undefined || launchContext === undefined) {
       log?.write("info", "runtime.launch.skip", "no-workspace");
+      rememberUnavailable(unavailableFacts("no-workspace", "no workspace is selected"));
       return undefined;
     }
     if (launchContext.resolution.classification === "rejected") {
       log?.write("warn", "runtime.launch.skip", "resolution-rejected");
+      rememberUnavailable(
+        unavailableFacts(
+          "resolution-rejected",
+          launchContext.resolution.rejectionReason ?? "runtime probe rejected the executable",
+        ),
+      );
       return undefined;
     }
     if (!(await isUsableWorkspaceDirectory(selected.cwd))) {
       log?.write("warn", "runtime.launch.skip", "workspace-unusable");
+      rememberUnavailable(unavailableFacts("workspace-unusable", "workspace directory is unusable"));
       return undefined;
     }
-    const backend = new HostBackend({ stateDirectory: launchContext.profileDirectory });
+    const backend = new HostBackend({
+      stateDirectory: launchContext.profileDirectory,
+      runtimeInstallDirectory:
+        launchContext.runtimeInstallDirectory ?? join(launchContext.profileDirectory, "runtimes"),
+    });
     await backend.initialize();
     const installed = await backend.installer.currentManifest();
     if (installed === undefined) {
       log?.write("warn", "runtime.launch.skip", "no-managed-install");
+      rememberUnavailable(unavailableFacts("not-installed", "managed runtime is not installed"));
       return undefined;
     }
 
     const launchGeneration = ++generation;
+    lastExit = undefined;
     let becameReady = false;
     log?.write(
       "info",
@@ -638,6 +801,9 @@ function createSingleDesktopRuntimeSessionPort(
         }
         log?.write("warn", "runtime.disconnect", `generation=${launchGeneration} alive=${alive}`);
         alive = false;
+        if (!stopping && !draining) {
+          noteUnexpectedLoss({ code: "pipe-closed", reason: "Studio Bridge pipe closed" });
+        }
         const current = controller;
         if (current === undefined) {
           return;
@@ -685,11 +851,19 @@ function createSingleDesktopRuntimeSessionPort(
         waitUntilReady: async (child) => {
           attachRuntimeOutput(child, log);
           child.once("exit", (code, signal) => {
+            lastExit = { code, signal };
             log?.write(
               becameReady && launchGeneration === generation ? "error" : "info",
               "runtime.process.exit",
               `generation=${launchGeneration} code=${code} signal=${signal ?? "none"} afterReady=${becameReady}`,
             );
+            if (becameReady && launchGeneration === generation && !stopping && !draining) {
+              alive = false;
+              noteUnexpectedLoss({
+                code: "process-exit",
+                reason: `Runtime process exited (code=${code ?? "null"}, signal=${signal ?? "none"})`,
+              });
+            }
           });
           hello = await client.connectUntilReady({
             deadline: Date.now() + (options.handshakeTimeoutMs ?? 10_000),
@@ -743,10 +917,16 @@ function createSingleDesktopRuntimeSessionPort(
       alive = true;
       becameReady = true;
       log?.write("info", "runtime.launch.ready", `generation=${launchGeneration}`);
+      rememberUnavailable(undefined);
+      rememberDisconnect(undefined);
+      lastExit = undefined;
+      autoRespawns = 0;
+      stopping = false;
       return session;
     } catch (error) {
       log?.write("error", "runtime.launch.fail", `generation=${launchGeneration} ${errorDetail(error)}`);
-      await stopCurrent();
+      rememberUnavailable(classifyLaunchFailure(error));
+      await stopCurrent("replace");
       throw error;
     }
   }
@@ -760,6 +940,7 @@ function createSingleDesktopRuntimeSessionPort(
         }
         if (workspace === undefined) {
           log?.write("info", "runtime.start.skip", "no-workspace");
+          rememberUnavailable(unavailableFacts("no-workspace", "no workspace is selected"));
           return undefined;
         }
         return await launch();
@@ -767,13 +948,14 @@ function createSingleDesktopRuntimeSessionPort(
     },
 
     stop(): Promise<void> {
-      return serialized(() => stopCurrent());
+      return serialized(() => stopCurrent("host-stop"));
     },
 
     rebind(next: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         log?.write("info", "runtime.rebind", `generation=${generation}`);
-        await stopCurrent();
+        stopping = false;
+        await stopCurrent("replace");
         resumeSessionId = undefined;
         workspace = next;
         return await launch();
@@ -784,7 +966,8 @@ function createSingleDesktopRuntimeSessionPort(
       return serialized(async () => {
         const previousResume = resumeSessionId;
         log?.write("info", "runtime.switch.begin", `kind=${intent.kind} generation=${generation}`);
-        await stopCurrent();
+        stopping = false;
+        await stopCurrent("replace");
         resumeSessionId = intent.kind === "resume" ? intent.sessionId : undefined;
         try {
           const next = await launch();
@@ -795,7 +978,7 @@ function createSingleDesktopRuntimeSessionPort(
           log?.write("warn", "runtime.switch.empty", `kind=${intent.kind}`);
         } catch (error) {
           log?.write("error", "runtime.switch.fail", errorDetail(error));
-          await stopCurrent();
+          await stopCurrent("replace");
         }
         resumeSessionId = previousResume;
         log?.write("warn", "runtime.switch.fallback", `resume=${previousResume === undefined ? "no" : "yes"}`);
@@ -823,7 +1006,6 @@ function createSingleDesktopRuntimeSessionPort(
             type: "studio.request",
             requestId: randomUUID() as RequestId,
             runtimeEpoch: snapshot.runtimeEpoch,
-            expectedStateVersion: snapshot.stateVersion,
             operation: { kind: "permissions.mode.set", mode, persist: true },
           });
           if (receipt.status !== "completed" && receipt.status !== "accepted") {
@@ -834,6 +1016,30 @@ function createSingleDesktopRuntimeSessionPort(
           return { mode, syncStatus: "partial", appliedSessions: 0, failedSessions: 1 };
         }
       });
+    },
+    lastUnavailable() {
+      return lastUnavailable;
+    },
+    lastDisconnect() {
+      return lastDisconnect;
+    },
+    ensure(): Promise<DesktopRuntimeSession | undefined> {
+      return serialized(async () => {
+        if (alive && bundle?.hello() !== undefined) {
+          rememberUnavailable(undefined);
+          rememberDisconnect(undefined);
+          return bundle;
+        }
+        stopping = false;
+        await stopCurrent("replace");
+        const next = await launch();
+        if (next !== undefined) autoRespawns = 0;
+        sessionSink?.(next);
+        return next;
+      });
+    },
+    attachSessionSink(listener) {
+      sessionSink = listener;
     },
   };
 }
@@ -874,4 +1080,30 @@ function errorDetail(error: unknown): string {
     return `${error.name}: ${error.message}`;
   }
   return String(error);
+}
+
+function unavailableFacts(code: RuntimeUnavailableCode, reason: string): HostRuntimeUnavailable {
+  return { code, reason: redactText(reason) };
+}
+
+function classifyLaunchFailure(error: unknown): HostRuntimeUnavailable {
+  if (error instanceof StudioBridgeHandshakeError && error.code === "HANDSHAKE_TIMEOUT") {
+    return unavailableFacts("handshake-timeout", error.message);
+  }
+  const message = errorDetail(error);
+  if (/exited before ready/iu.test(message)) {
+    return unavailableFacts("exited-before-ready", message);
+  }
+  const code =
+    error !== null && typeof error === "object" && "code" in error ? String((error as { code: unknown }).code) : "";
+  if (code === "ENOENT" || /spawn .*ENOENT/iu.test(message)) {
+    return unavailableFacts("spawn-failed", message);
+  }
+  return unavailableFacts("launch-failed", message);
+}
+
+export { classifyLaunchFailure };
+
+function launchFailedFacts(error: unknown): HostRuntimeUnavailable {
+  return classifyLaunchFailure(error);
 }

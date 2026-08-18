@@ -10,7 +10,7 @@ import type {
   HostSemanticCommandService,
   HostSessionCatalogProvider,
 } from "@omp-studio/host-client-api";
-import { threadIdFor } from "@omp-studio/host-client-api";
+import { threadIdFor, formatRuntimeMissingMessage, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
 import { scanSessionCatalog, StudioHostError, type StudioSessionArchiveService } from "@omp-studio/studio-host";
 import type { ApprovalMode, RequestId, StudioOperation, ThreadId } from "@omp-studio/studio-protocol";
 import type { ConfigWriteResult } from "@omp-studio/client-contract";
@@ -44,6 +44,14 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   "session.fast.set",
   "session.prewalk.arm",
   "session.prewalk.disarm",
+  "permissions.mode.set",
+  // BTW runs beside the main turn by design, so a snapshot-derived
+  // `expectedStateVersion` would collide with every streaming delta. The
+  // Runtime's own single-slot guards (BUSY_STREAMING / INTERACTION_STALE)
+  // already express the real preconditions and give better error text.
+  "btw.ask",
+  "btw.abort",
+  "btw.branch",
 ]);
 
 export function fencesOnStateVersion(kind: StudioOperation["kind"]): boolean {
@@ -78,8 +86,24 @@ export function createDesktopSemanticCommands(options: {
   readonly supportsConcurrentSessions?: boolean;
   readonly bindSession: (session: DesktopRuntimeSession | undefined) => void;
   readonly interaction: DesktopInteractionHost;
+  /**
+   * Cold-start / read-only recovery: spawn the managed Runtime when
+   * `switchSession` cannot because `start` never ran (rejected probe, no
+   * workspace at boot, or a swallowed start failure).
+   */
+  readonly ensureRuntime?: () => Promise<DesktopRuntimeSession | undefined>;
+  /** Last skip/fail or drop facts for CAPABILITY_UNAVAILABLE copy. */
+  readonly runtimeMissing?: () => {
+    readonly unavailable?: HostRuntimeUnavailable;
+    readonly disconnect?: HostRuntimeDisconnect;
+  };
 }): HostSemanticCommandService {
   const archiveFactory = options.archive;
+  const missingRuntime = (fallback: string): StudioHostError => {
+    const facts = options.runtimeMissing?.();
+    const message = formatRuntimeMissingMessage(facts ?? {});
+    return new StudioHostError("CAPABILITY_UNAVAILABLE", message === "Runtime is not available" ? fallback : message);
+  };
   return {
     ...(archiveFactory === undefined
       ? {}
@@ -100,11 +124,14 @@ export function createDesktopSemanticCommands(options: {
       if (options.switchSession === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Fresh Runtime sessions are not available");
       }
-      const next = await options.switchSession({ kind: "fresh" });
+      let next = await options.switchSession({ kind: "fresh" });
+      if (next?.controller.publication()?.snapshot === undefined && options.ensureRuntime !== undefined) {
+        next = (await options.ensureRuntime()) ?? next;
+      }
       options.bindSession(next);
       const created = next?.controller.publication()?.snapshot;
       if (created === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime is not available");
+        throw missingRuntime("Runtime is not available");
       }
       return created;
     },
@@ -123,10 +150,15 @@ export function createDesktopSemanticCommands(options: {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime session switching is not available");
       }
       const next = await options.switchSession({ kind: "resume", sessionId: target });
-      options.bindSession(next);
-      const restored = next?.controller.publication()?.snapshot;
+      let restoredSession = next;
+      if (next?.controller.publication()?.snapshot === undefined && options.ensureRuntime !== undefined) {
+        await options.ensureRuntime();
+        restoredSession = (await options.switchSession({ kind: "resume", sessionId: target })) ?? next;
+      }
+      options.bindSession(restoredSession);
+      const restored = restoredSession?.controller.publication()?.snapshot;
       if (restored === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime is not available");
+        throw missingRuntime("Runtime is not available");
       }
       if (restored.sessionId !== target) {
         throw new StudioHostError("INTERNAL_ERROR", "Session resume failed; the previous session was kept when possible");
@@ -136,12 +168,12 @@ export function createDesktopSemanticCommands(options: {
     drop: async ({ threadId, requestId }) => {
       const session = options.sessionRef.current;
       if (session === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime is not available");
+        throw missingRuntime("Runtime is not available");
       }
       const snapshot = session.controller.publication()?.snapshot;
       const hello = session.hello();
       if (snapshot === undefined || hello === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime snapshot is unavailable");
+        throw missingRuntime("Runtime snapshot is unavailable");
       }
       const target = await resolveCatalogSessionId(options.catalog, threadId);
       if (snapshot.sessionId !== target) {
@@ -160,32 +192,27 @@ export function createDesktopSemanticCommands(options: {
     respond: async (input) => {
       const session = options.sessionRef.current;
       if (session === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime is not available");
+        throw missingRuntime("Runtime is not available");
       }
       const snapshot = session.controller.publication()?.snapshot;
       if (snapshot === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime snapshot is unavailable");
+        throw missingRuntime("Runtime snapshot is unavailable");
       }
       await options.interaction.respond(input);
       return session.controller.publication()?.snapshot ?? snapshot;
     },
     setApprovalMode: async ({ mode }) => {
-      // Session-exclusive (plan §5.4): reject while the Runtime is streaming
-      // or an interaction is pending so the mode change cannot race a turn.
+      // Session-exclusive (plan §5.4): accepted during a live turn. Runtime
+      // projects the new mode immediately and writes tools.approvalMode on
+      // the next user turn so in-flight tools keep the previous trust level.
       const session = options.sessionRef.current;
       if (session === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime is not available");
+        throw missingRuntime("Runtime is not available");
       }
       const snapshot = session.controller.publication()?.snapshot;
       const hello = session.hello();
       if (snapshot === undefined || hello === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime snapshot is unavailable");
-      }
-      if (snapshot.isStreaming) {
-        throw new StudioHostError("BUSY_STREAMING", "Cannot change the approval mode while the Runtime is streaming");
-      }
-      if (snapshot.pendingInteraction !== undefined) {
-        throw new StudioHostError("COMMAND_BLOCKED", "Cannot change the approval mode while an interaction is pending");
+        throw missingRuntime("Runtime snapshot is unavailable");
       }
       if (options.applyApprovalMode === undefined) {
         throw new StudioHostError(
@@ -201,12 +228,12 @@ export function createDesktopSemanticCommands(options: {
       }
       const session = options.sessionRef.current;
       if (session === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime is not available");
+        throw missingRuntime("Runtime is not available");
       }
       const snapshot = session.controller.publication()?.snapshot;
       const hello = session.hello();
       if (snapshot === undefined || hello === undefined) {
-        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime snapshot is unavailable");
+        throw missingRuntime("Runtime snapshot is unavailable");
       }
       const receipt = await session.controller.invoke({
         type: "studio.request",
@@ -226,6 +253,47 @@ export function createDesktopSemanticCommands(options: {
           snapshot: latest,
           output: Array.isArray(carried.output) ? carried.output.filter((line): line is string => typeof line === "string") : [],
           result: carried.result ?? { consumed: true },
+        };
+      }
+      if (operation.kind === "session.tree.navigate" || operation.kind === "session.tree.branch") {
+        // Keep the Runtime editor fill-back (text + images) next to the
+        // snapshot. Other P4 commands stay snapshot-only so callers such as
+        // session.fork waitReceipt<OperatorStateSnapshot> keep working.
+        return {
+          ...((receipt.result ?? {}) as object),
+          snapshot: latest,
+        };
+      }
+      if (operation.kind === "btw.ask") {
+        // `branchToken` exists only here: it is never republished on
+        // `btw.changed`, so losing it means the answer can no longer be
+        // branched even though it completed.
+        const carried = (receipt.result ?? {}) as { ephemeralId?: unknown; branchToken?: unknown };
+        if (typeof carried.ephemeralId !== "string" || typeof carried.branchToken !== "string") {
+          throw new StudioHostError("INTERNAL_ERROR", "Runtime did not return a BTW authorization");
+        }
+        return {
+          snapshot: latest,
+          ephemeralId: carried.ephemeralId,
+          branchToken: carried.branchToken,
+          status: "running" as const,
+        };
+      }
+      if (operation.kind === "btw.branch") {
+        const carried = (receipt.result ?? {}) as {
+          branched?: unknown;
+          newSessionId?: unknown;
+          newLeafId?: unknown;
+          reason?: unknown;
+        };
+        return {
+          snapshot: latest,
+          branched: carried.branched === true,
+          ...(typeof carried.newSessionId === "string" ? { newSessionId: carried.newSessionId } : {}),
+          // The Runtime reports a leaf-less branch as null; the contract omits
+          // the field instead of carrying a nullable id to the Renderer.
+          ...(typeof carried.newLeafId === "string" ? { newLeafId: carried.newLeafId } : {}),
+          ...(typeof carried.reason === "string" ? { reason: carried.reason } : {}),
         };
       }
       return latest;

@@ -1,8 +1,10 @@
 import {
   CONVERSATION_LIMITS,
+  truncateUtf8,
   type ClientError,
   type ClientEvent,
   type ConversationItem,
+  type ConversationMessageError,
   type ConversationMessageItem,
   type ConversationRuntimeEvent,
   type ConversationTranscriptPage,
@@ -13,6 +15,7 @@ import {
 
 import {
   CONVERSATION_STATE_ITEM_CAP,
+  CONVERSATION_STATE_LIVE_TOOLS_CAP,
   clearConversationState,
   createInitialConversationState,
   type ConversationLiveBlock,
@@ -20,9 +23,10 @@ import {
   type ConversationLiveTool,
   type ConversationIdentity,
   type ConversationState,
+  type StickyProviderError,
 } from "./conversation-state.js";
 
-/** UTF-16 unit cap for one accumulated live block; see appendBoundedText. */
+/** UTF-8 byte cap for one accumulated live block; see appendBoundedText. */
 const LIVE_BLOCK_TEXT_CAP = CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES;
 
 export type ConversationAction =
@@ -82,6 +86,7 @@ function beginHydrate(state: ConversationState, identity: ConversationIdentity):
     identity,
     hydrateStatus: "loading",
     hydrateGeneration: generation,
+    stickyProviderErrors: state.stickyProviderErrors,
   };
 }
 
@@ -128,9 +133,10 @@ function reduceHydrate(
     }
   }
   trimOldest(itemsById, order);
-  const dropLive = !prepend && state.resyncRequired;
-  const liveMessages = prepend ? state.liveMessages : dropLive ? {} : retainLive(state.liveMessages, itemsById);
-  const liveTools = prepend ? state.liveTools : dropLive ? {} : retainTools(state.liveTools, itemsById);
+  const liveMessages = prepend ? state.liveMessages : retainLive(state.liveMessages, itemsById);
+  const liveTools = prepend
+    ? state.liveTools
+    : capSettledLiveTools(retainTools(state.liveTools, itemsById));
   for (const messageId of Object.keys(liveMessages)) {
     if (!order.includes(messageId)) order.push(messageId);
   }
@@ -149,9 +155,14 @@ function reduceHydrate(
     ...(page.olderCursor === undefined ? {} : { olderCursor: page.olderCursor }),
     headCursor: page.headCursor,
     abortedTurns: prepend ? state.abortedTurns : {},
-    itemErrors: prepend ? state.itemErrors : {},
-    openTurnItems: dropLive ? {} : state.openTurnItems,
+    itemErrors: applyStickyProviderError(
+      prepend ? { ...state.itemErrors } : retainItemErrors(state.itemErrors, itemsById, liveMessages),
+      state.stickyProviderErrors[pageIdentity.sessionId],
+    ),
+    stickyProviderErrors: state.stickyProviderErrors,
+    openTurnItems: state.openTurnItems,
     ...(prepend && state.lastEventSeq !== undefined ? { lastEventSeq: state.lastEventSeq } : {}),
+    ...(state.compacting === undefined ? {} : { compacting: state.compacting }),
   };
   return next;
 }
@@ -231,7 +242,7 @@ function applyRuntimeEvent(state: ConversationState, update: ConversationRuntime
     case "conversation.turn.aborted":
       return abortTurn(state, update);
     case "conversation.compaction.started":
-      return state;
+      return { ...state, compacting: { action: update.action } };
     case "conversation.compaction.completed":
       return completeCompaction(state, update);
     case "conversation.notice": {
@@ -300,20 +311,11 @@ function deltaMessage(
 
 /**
  * Memory guard for the live streaming buffer: each delta is byte-bounded by
- * validation, but the accumulated block was not. The cap is measured in UTF-16
- * units (an upper display bound, cheaper than re-encoding on every delta); the
- * persisted item that replaces this buffer on completion carries the exact
- * byte-bounded text.
+ * validation, but the accumulated block was not. The cap matches the persisted
+ * sanitizer: UTF-8 bytes, never splitting a codepoint.
  */
 function appendBoundedText(existing: string, delta: string): { readonly text: string; readonly truncated: boolean } {
-  const max = LIVE_BLOCK_TEXT_CAP;
-  const room = max - existing.length;
-  if (room <= 0) return { text: existing, truncated: true };
-  if (delta.length <= room) return { text: existing + delta, truncated: false };
-  let end = room;
-  const lead = delta.charCodeAt(end - 1);
-  if (lead >= 0xd800 && lead <= 0xdbff) end -= 1;
-  return { text: existing + delta.slice(0, end), truncated: true };
+  return truncateUtf8(existing + delta, LIVE_BLOCK_TEXT_CAP);
 }
 
 function completeMessage(
@@ -339,21 +341,20 @@ function completeMessage(
       liveMessages: { ...state.liveMessages, [update.messageId]: live },
       order: state.order.includes(update.messageId) ? state.order : [...state.order, update.messageId],
       abortedTurns: { ...state.abortedTurns, [update.turnId]: true },
+      ...providerErrorState(state, update.sessionId, update.messageId, update.error, false),
     };
   }
   const itemsById = { ...state.itemsById, [update.item.itemId]: update.item };
   const liveMessages = { ...state.liveMessages };
   delete liveMessages[update.messageId];
   const order = state.order.includes(update.item.itemId) ? state.order : [...state.order, update.item.itemId];
-  const itemErrors = { ...state.itemErrors };
-  if (update.error !== undefined) itemErrors[update.messageId] = update.error;
   return {
     ...state,
     itemsById,
     liveMessages,
     order,
     openTurnItems: { ...state.openTurnItems, [update.item.itemId]: update.turnId },
-    itemErrors,
+    ...providerErrorState(state, update.sessionId, update.messageId, update.error, update.item.role === "assistant"),
   };
 }
 
@@ -374,17 +375,21 @@ function startTool(
   update: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.started" }>,
 ): ConversationState {
   const existing = state.liveTools[update.toolCallId];
-  if (existing?.status === "completed" || existing?.status === "aborted") return state;
+  if (existing?.status === "aborted") return state;
+  const existingStatus = existing?.status;
+  const keepStream = existingStatus !== undefined && existingStatus !== "completed";
   const tool: ConversationLiveTool = {
     toolCallId: update.toolCallId,
     turnId: update.turnId,
     messageId: update.messageId,
     toolName: update.toolName,
-    status: "started",
+    status: keepStream && existingStatus === "updated" ? "updated" : "started",
     startedAt: update.startedAt,
     ...(update.arguments === undefined ? {} : { arguments: update.arguments }),
+    ...(keepStream && existing?.output !== undefined ? { output: existing.output } : {}),
+    ...(keepStream && existing?.truncated === true ? { truncated: true } : {}),
   };
-  return { ...state, liveTools: { ...state.liveTools, [update.toolCallId]: tool } };
+  return { ...state, liveTools: capSettledLiveTools({ ...state.liveTools, [update.toolCallId]: tool }) };
 }
 
 /**
@@ -411,7 +416,10 @@ function updateTool(
   const existing = state.liveTools[update.toolCallId];
   if (existing?.status === "completed" || existing?.status === "aborted") return state;
   const previous = existing?.output ?? "";
-  const output = update.updateMode === "replace" ? (update.output ?? "") : previous + (update.output ?? "");
+  const raw = update.updateMode === "replace" ? (update.output ?? "") : previous + (update.output ?? "");
+  const bounded = truncateUtf8(raw, LIVE_BLOCK_TEXT_CAP);
+  const output = bounded.text;
+  const truncated = existing?.truncated === true || update.truncated === true || bounded.truncated;
   const messageId = existing?.messageId ?? ownerMessageId(state, update.toolCallId);
   const tool: ConversationLiveTool = {
     toolCallId: update.toolCallId,
@@ -422,9 +430,9 @@ function updateTool(
     ...(existing?.arguments === undefined ? {} : { arguments: existing.arguments }),
     ...(existing?.startedAt === undefined ? {} : { startedAt: existing.startedAt }),
     ...(output.length === 0 ? {} : { output }),
-    ...(update.truncated === undefined ? {} : { truncated: update.truncated }),
+    ...(truncated ? { truncated: true } : {}),
   };
-  return { ...state, liveTools: { ...state.liveTools, [update.toolCallId]: tool } };
+  return { ...state, liveTools: capSettledLiveTools({ ...state.liveTools, [update.toolCallId]: tool }) };
 }
 
 function completeTool(
@@ -448,7 +456,7 @@ function completeTool(
     ...(update.result.output === undefined ? existing?.output === undefined ? {} : { output: existing.output } : { output: update.result.output }),
     ...(update.result.truncated === undefined ? {} : { truncated: update.result.truncated }),
   };
-  return { ...state, liveTools: { ...state.liveTools, [update.toolCallId]: tool } };
+  return { ...state, liveTools: capSettledLiveTools({ ...state.liveTools, [update.toolCallId]: tool }) };
 }
 
 function abortTurn(
@@ -473,7 +481,7 @@ function abortTurn(
   return {
     ...closeTurn(state, update.turnId),
     liveMessages,
-    liveTools,
+    liveTools: capSettledLiveTools(liveTools),
     abortedTurns: { ...state.abortedTurns, [update.turnId]: true },
   };
 }
@@ -492,11 +500,24 @@ function completeCompaction(
   state: ConversationState,
   update: Extract<ConversationRuntimeEvent, { kind: "conversation.compaction.completed" }>,
 ): ConversationState {
-  if (update.item === undefined) return state;
+  const cleared = clearCompacting(state);
+  if (update.item === undefined) {
+    if (!update.aborted) return cleared;
+    return {
+      ...cleared,
+      notices: [...cleared.notices, { level: "warning" as const, message: "上下文压缩已中止" }].slice(-32),
+    };
+  }
   const item = update.item;
-  const itemsById = { ...state.itemsById, [item.itemId]: item };
-  const order = state.order.includes(item.itemId) ? state.order : [...state.order, item.itemId];
-  return { ...state, itemsById, order };
+  const itemsById = { ...cleared.itemsById, [item.itemId]: item };
+  const order = cleared.order.includes(item.itemId) ? cleared.order : [...cleared.order, item.itemId];
+  return { ...cleared, itemsById, order };
+}
+
+function clearCompacting(state: ConversationState): ConversationState {
+  if (state.compacting === undefined) return state;
+  const { compacting: _dropped, ...rest } = state;
+  return rest;
 }
 
 function sameIdentity(
@@ -519,4 +540,71 @@ function trimOldest(itemsById: Record<string, ConversationItem>, order: string[]
     if (oldest === undefined) break;
     delete itemsById[oldest];
   }
+}
+
+function capSettledLiveTools(
+  liveTools: ConversationState["liveTools"],
+): ConversationState["liveTools"] {
+  const entries = Object.entries(liveTools).filter(
+    (entry): entry is [string, ConversationLiveTool] => entry[1] !== undefined,
+  );
+  if (entries.length <= CONVERSATION_STATE_LIVE_TOOLS_CAP) return liveTools;
+  let overflow = entries.length - CONVERSATION_STATE_LIVE_TOOLS_CAP;
+  const drop = new Set<string>();
+  for (const [id, tool] of entries) {
+    if (overflow <= 0) break;
+    if (tool.status !== "completed" && tool.status !== "aborted") continue;
+    drop.add(id);
+    overflow -= 1;
+  }
+  if (drop.size === 0) return liveTools;
+  const next: Record<string, ConversationLiveTool> = {};
+  for (const [id, tool] of entries) {
+    if (!drop.has(id)) next[id] = tool;
+  }
+  return next;
+}
+
+function retainItemErrors(
+  current: ConversationState["itemErrors"],
+  itemsById: Readonly<Record<string, ConversationItem>>,
+  liveMessages: ConversationState["liveMessages"],
+): Record<string, ConversationMessageError> {
+  const next: Record<string, ConversationMessageError> = {};
+  for (const [id, error] of Object.entries(current)) {
+    if (error !== undefined && (itemsById[id] !== undefined || liveMessages[id] !== undefined)) {
+      next[id] = error;
+    }
+  }
+  return next;
+}
+
+function applyStickyProviderError(
+  itemErrors: Record<string, ConversationMessageError>,
+  sticky: StickyProviderError | undefined,
+): Record<string, ConversationMessageError> {
+  if (sticky === undefined) return itemErrors;
+  return { ...itemErrors, [sticky.itemId]: sticky.error };
+}
+
+function providerErrorState(
+  state: ConversationState,
+  sessionId: SessionId,
+  itemId: string,
+  error: ConversationMessageError | undefined,
+  clearOnSuccess: boolean,
+): Pick<ConversationState, "itemErrors" | "stickyProviderErrors"> {
+  if (error !== undefined) {
+    const sticky: StickyProviderError = { sessionId, itemId, error };
+    return {
+      itemErrors: { ...state.itemErrors, [itemId]: error },
+      stickyProviderErrors: { ...state.stickyProviderErrors, [sessionId]: sticky },
+    };
+  }
+  if (!clearOnSuccess) {
+    return { itemErrors: state.itemErrors, stickyProviderErrors: state.stickyProviderErrors };
+  }
+  const stickyProviderErrors = { ...state.stickyProviderErrors };
+  delete stickyProviderErrors[sessionId];
+  return { itemErrors: {}, stickyProviderErrors };
 }

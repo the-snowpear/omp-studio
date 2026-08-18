@@ -2,8 +2,11 @@
  * Renderer 请求的操作者头像读写（Main-only；preload 不得 import）。
  *
  * 固定命名通道 + 载荷校验，模式与 chrome-notify 相同。处理后的图片
- * 写入安装目录旁的 `userdata/profile/`，不把路径回传给 Renderer。
+ * 写入 `%APPDATA%\omp-studio\profile\`，不把路径回传给 Renderer。
  */
+
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { app, ipcMain, type WebContents } from "electron";
 
@@ -14,31 +17,34 @@ import {
 } from "./chrome-profile-shared.js";
 import {
   clearProfileAvatar,
+  migrateProfileAvatar,
   readProfileAvatar,
+  resolveLegacyInstallUserdataRoot,
   resolveProfilePersistRoot,
   writeProfileAvatar,
 } from "./chrome-profile-store.js";
 
-function persistRoot(): string {
-  return resolveProfilePersistRoot({
-    isPackaged: app.isPackaged,
-    execPath: app.getPath("exe"),
-    appPath: app.getAppPath(),
-  });
+function userAppDataRoot(): string {
+  if (process.platform === "darwin") {
+    return join(homedir(), "Library", "Application Support");
+  }
+  return process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
 }
 
-/** 若安装目录还没有头像，把上一版写在 Electron userData/profile 的文件迁过来。 */
-async function migrateLegacyAvatar(root: string): Promise<void> {
-  if (await readProfileAvatar(root) !== null) return;
-  const legacy = await readProfileAvatar(app.getPath("userData"));
-  if (legacy === null) return;
-  await writeProfileAvatar(root, legacy);
-  await clearProfileAvatar(app.getPath("userData"));
+function persistRoot(): string {
+  return resolveProfilePersistRoot(userAppDataRoot());
 }
 
 async function readyRoot(): Promise<string> {
   const root = persistRoot();
-  await migrateLegacyAvatar(root);
+  await migrateProfileAvatar(root, [
+    resolveLegacyInstallUserdataRoot({
+      isPackaged: app.isPackaged,
+      execPath: app.getPath("exe"),
+      appPath: app.getAppPath(),
+    }),
+    app.getPath("userData"),
+  ]);
   return root;
 }
 
@@ -60,7 +66,7 @@ export function registerChromeProfileIpc(options: {
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === "EACCES" || code === "EPERM") {
-        return { ok: false, message: "无法写入安装目录下的头像文件（没有权限）。" };
+        return { ok: false, message: "无法写入头像文件（没有权限）。" };
       }
       throw error;
     }

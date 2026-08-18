@@ -188,7 +188,7 @@ function PaletteRow({
       aria-selected={selected}
       aria-disabled={item.disabled === true}
       disabled={item.disabled === true}
-      title={item.disabledReason}
+      data-tip={item.disabledReason}
       onPointerEnter={onHover}
       onClick={() => {
         if (!item.disabled) onRun();

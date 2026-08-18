@@ -134,7 +134,7 @@ describe("WP-014 Runtime command arbiter", () => {
 				isStreaming: true,
 				isCompacting: false,
 			}),
-			["core.prompt", "session.model.set", "session.thinking.set", "mode.plan.enter"],
+			["core.prompt", "session.model.set", "session.thinking.set", "mode.plan.enter", "permissions.mode.set"],
 		);
 		const held = Promise.withResolvers<void>();
 		let modelSet = false;
@@ -160,6 +160,16 @@ describe("WP-014 Runtime command arbiter", () => {
 			planEntered = true;
 		});
 		expect(planEntered).toBe(true);
+		let approvalSet = false;
+		await arbiter.run(
+			request({ kind: "permissions.mode.set", mode: "write", persist: true }, "perm-1"),
+			"command-perm",
+			"gui",
+			() => {
+				approvalSet = true;
+			},
+		);
+		expect(approvalSet).toBe(true);
 		held.resolve();
 		await prompt;
 
@@ -170,7 +180,7 @@ describe("WP-014 Runtime command arbiter", () => {
 				isStreaming: false,
 				isCompacting: true,
 			}),
-			["session.thinking.set", "runtime.pause", "mode.plan.enter"],
+			["session.thinking.set", "runtime.pause", "mode.plan.enter", "permissions.mode.set"],
 		);
 		await compacting.run(
 			request({ kind: "session.thinking.set", level: "high" }, "think-1"),
@@ -179,8 +189,40 @@ describe("WP-014 Runtime command arbiter", () => {
 			() => {},
 		);
 		await compacting.run(request({ kind: "mode.plan.enter" }, "plan-1"), "command-plan", "gui", () => {});
+		await compacting.run(
+			request({ kind: "permissions.mode.set", mode: "always-ask", persist: false }, "perm-2"),
+			"command-perm-compact",
+			"gui",
+			() => {},
+		);
 		await expect(
 			compacting.run(request({ kind: "runtime.pause" }, "pause-1"), "command-pause", "gui", () => {}),
 		).rejects.toMatchObject({ code: "BUSY_COMPACTING" });
+	});
+
+	test("lets permissions.mode.set run while an interaction is open", async () => {
+		const arbiter = new StudioRuntimeCommandArbiter(
+			() => ({
+				runtimeEpoch: 7,
+				stateVersion: 4,
+				isStreaming: false,
+				isCompacting: false,
+			}),
+			["permissions.mode.set", "runtime.pause"],
+		);
+		arbiter.openInteraction("command-ask", "gui");
+		let approvalSet = false;
+		await arbiter.run(
+			request({ kind: "permissions.mode.set", mode: "write", persist: true }, "perm-ask"),
+			"command-perm-ask",
+			"gui",
+			() => {
+				approvalSet = true;
+			},
+		);
+		expect(approvalSet).toBe(true);
+		await expect(
+			arbiter.run(request({ kind: "runtime.pause" }, "pause-ask"), "command-pause-ask", "gui", () => {}),
+		).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
 	});
 });

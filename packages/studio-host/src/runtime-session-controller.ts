@@ -11,6 +11,7 @@ import type {
   StudioRequest,
 } from "@omp-studio/studio-protocol";
 import { StudioBridgeClient } from "./bridge-client.js";
+import { BtwEventFanout, type StudioBtwForward } from "./btw-events.js";
 import { CommandLedger } from "./command-ledger.js";
 import { StudioHostError } from "./command-arbiter.js";
 import {
@@ -33,6 +34,7 @@ export class StudioRuntimeSessionController {
   readonly #conversation = new ConversationEventFanout();
   readonly #interaction = new InteractionEventFanout();
   readonly #telemetry = new TelemetryEventFanout();
+  readonly #btw = new BtwEventFanout();
   readonly #publicationListeners = new Set<(publication: RuntimePublication) => void>();
 
   constructor(
@@ -46,6 +48,7 @@ export class StudioRuntimeSessionController {
     this.#unsubscribeEvent = bridge.onEvent((envelope) => {
       this.#conversation.forward(envelope);
       this.#telemetry.forward(envelope);
+      this.#btw.forward(envelope);
       this.#interaction.forward(envelope, (commandId) => this.requestIdForCommandId(commandId));
     });
     this.#unsubscribeResync = bridge.onResyncRequired(() => {
@@ -193,6 +196,10 @@ export class StudioRuntimeSessionController {
     return this.#telemetry.onEvent(listener);
   }
 
+  onBtwEvent(listener: (event: StudioBtwForward) => void): () => void {
+    return this.#btw.onEvent(listener);
+  }
+
   requestIdForCommandId(commandId: CommandId): string | undefined {
     return this.ledger.get(commandId)?.requestId ?? this.ledger.getByRequestId(String(commandId))?.requestId;
   }
@@ -233,5 +240,6 @@ export class StudioRuntimeSessionController {
     this.#conversation.dispose();
     this.#interaction.dispose();
     this.#telemetry.dispose();
+    this.#btw.dispose();
   }
 }

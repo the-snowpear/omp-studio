@@ -258,6 +258,7 @@ const QUERY_INPUTS = {
   "models.get": {},
   "skills.get": {},
   "mcp.get": {},
+  "mcp.logs.get": { name: "filesystem" },
   "agents.definitions.get": {},
   "projects.list": {},
   "workspace.fileTree": { workspaceId: WORKSPACE_ID },
@@ -333,6 +334,16 @@ const QUERY_RESPONSES = {
       servers: [],
       warnings: [],
       generatedAt: T0,
+    },
+  },
+  "mcp.logs.get": {
+    ok: true,
+    queryName: "mcp.logs.get",
+    result: {
+      name: "filesystem",
+      lines: [],
+      generatedAt: T0,
+      emptyReason: "尚无日志，请先测试连接",
     },
   },
   "agents.definitions.get": {

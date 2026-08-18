@@ -1,5 +1,7 @@
+import { createContext, useContext, type ComponentProps } from "react";
 import type { JsonValue } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
+import { bashDisplayRows } from "./bashDisplay";
 import { jsonRecord, jsonString, type ToolView } from "./conversationViewModel";
 import {
   askAnswer,
@@ -10,6 +12,13 @@ import {
   toolFields,
   toolKind,
 } from "./toolMeta";
+import { ToolCardScroll } from "./useToolCardFollowScroll";
+
+const ToolCardLive = createContext(false);
+
+function ScrollPane(props: Omit<ComponentProps<typeof ToolCardScroll>, "follow">) {
+  return <ToolCardScroll follow={useContext(ToolCardLive)} {...props} />;
+}
 
 export function TruncationMark() {
   return (
@@ -43,14 +52,14 @@ function Kv({ pairs }: { pairs: ReadonlyArray<readonly [string, JsonValue | stri
 
 function CodeLines({ lines, start = 1 }: { lines: readonly string[]; start?: number }) {
   return (
-    <div className="tc-code tool-card-scroll" data-tool-scroll="both">
+    <ScrollPane className="tc-code tool-card-scroll" data-tool-scroll="both">
       {lines.map((line, index) => (
         <div key={index} className="cl">
           <span className="ln">{start + index}</span>
           <span className="lx">{line || "\u00a0"}</span>
         </div>
       ))}
-    </div>
+    </ScrollPane>
   );
 }
 
@@ -66,7 +75,7 @@ function prettyJson(value: JsonValue): string {
 }
 
 function JsonBlock({ value }: { value: JsonValue }) {
-  return <div className="codeblock tc-json">{prettyJson(value)}</div>;
+  return <ScrollPane className="codeblock tc-json">{prettyJson(value)}</ScrollPane>;
 }
 
 function prettyText(value: string): string {
@@ -139,7 +148,7 @@ function DefaultBody({ tool }: { tool: ToolView }) {
       {output !== undefined ? (
         <>
           <div className="tc-label">Output</div>
-          <div className="codeblock">{outputText(output)}</div>
+          <ScrollPane className="codeblock">{outputText(output)}</ScrollPane>
         </>
       ) : null}
       {args === undefined && output === undefined && summary ? <div className="tc-summary">{summary}</div> : null}
@@ -169,7 +178,7 @@ function MatchTree({ matches, count }: { matches: JsonValue | undefined; count?:
   return (
     <>
       {count ? <div className="tc-summary">{count}</div> : null}
-      <div className="tc-tree">
+      <ScrollPane className="tc-tree">
         {files.map((file) => (
           <div key={file.file}>
             <div className="tt-file">{file.file}{file.count === undefined ? null : ` · ${file.count}`}</div>
@@ -181,7 +190,7 @@ function MatchTree({ matches, count }: { matches: JsonValue | undefined; count?:
             ))}
           </div>
         ))}
-      </div>
+      </ScrollPane>
     </>
   );
 }
@@ -252,7 +261,7 @@ function EditBody({ tool }: { tool: ToolView }) {
     return (
       <>
         {summaryNode}
-        <div className="tc-diff tool-card-scroll" data-tool-scroll="both">
+        <ScrollPane className="tc-diff tool-card-scroll" data-tool-scroll="both">
           {rows.map((line, index) => {
             const match = /^([ +\-])(\d*)\|(.*)$/.exec(line);
             const marker = match?.[1] ?? " ";
@@ -265,7 +274,7 @@ function EditBody({ tool }: { tool: ToolView }) {
               </div>
             );
           })}
-        </div>
+        </ScrollPane>
       </>
     );
   }
@@ -273,14 +282,14 @@ function EditBody({ tool }: { tool: ToolView }) {
     return (
       <>
         {summaryNode}
-        {tool.output ? <div className="codeblock">{tool.output}</div> : <DefaultBody tool={tool} />}
+        {tool.output ? <ScrollPane className="codeblock">{tool.output}</ScrollPane> : <DefaultBody tool={tool} />}
       </>
     );
   }
   return (
     <>
       {summaryNode}
-      <div className="tc-diff tool-card-scroll" data-tool-scroll="both">
+      <ScrollPane className="tc-diff tool-card-scroll" data-tool-scroll="both">
         {diff.map((row, index) => {
           if (!Array.isArray(row)) return null;
           const mark = row[0] === "+" ? "+" : row[0] === "-" ? "−" : " ";
@@ -294,7 +303,7 @@ function EditBody({ tool }: { tool: ToolView }) {
             </div>
           );
         })}
-      </div>
+      </ScrollPane>
     </>
   );
 }
@@ -303,30 +312,26 @@ function BashBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
   const cmd = jsonString(fields.cmd) ?? jsonString(fields.command) ?? jsonString(fields.target) ?? "";
   const exit = jsonNumber(fields.exit) ?? jsonNumber(fields.exitCode);
-  const failed = tool.status === "failed" || (exit !== undefined && exit !== 0);
-  const raw = fields.output;
-  const rows: Array<{ text: string; cls: string }> = [];
-  if (Array.isArray(raw)) {
-    for (const line of raw) {
-      if (Array.isArray(line)) rows.push({ text: String(line[0] ?? ""), cls: typeof line[1] === "string" && line[1] ? `c-${line[1]}` : "" });
-      else rows.push({ text: String(line), cls: "" });
-    }
-  } else if (typeof raw === "string") {
-    for (const line of raw.split("\n")) rows.push({ text: line, cls: "" });
-  }
+  const running = tool.status === "running";
+  const failed = tool.status === "failed" || (!running && exit !== undefined && exit !== 0);
+  const rows = bashDisplayRows(fields.output);
   return (
     <>
       <Kv pairs={[["cwd", fields.cwd]]} />
-      <div className="codeblock">
+      <ScrollPane className="codeblock">
         {cmd ? <div className="c-cmd">$ {cmd}</div> : null}
         {rows.map((row, index) => (
           <div key={index} className={row.cls || undefined}>{row.text || "\u00a0"}</div>
         ))}
-      </div>
+      </ScrollPane>
       <div className="tc-foot">
-        <span className={`chip ${failed ? "red" : "green"} xs`}>
-          {exit !== undefined ? `exit ${exit}` : failed ? "failed" : "exit 0"}
-        </span>
+        {running ? (
+          <span className="chip blue xs">运行中</span>
+        ) : (
+          <span className={`chip ${failed ? "red" : "green"} xs`}>
+            {exit !== undefined ? `exit ${exit}` : failed ? "failed" : "exit 0"}
+          </span>
+        )}
         {jsonString(fields.dur) || durationText(fields.wallTimeMs) ? (
           <span className="tc-dur">{jsonString(fields.dur) ?? durationText(fields.wallTimeMs)}</span>
         ) : null}
@@ -467,9 +472,9 @@ function GrepBody({ tool }: { tool: ToolView }) {
             matches={matches}
             {...(count === undefined ? {} : { count })}
           />
-          {display ? <div className="codeblock">{display}</div> : null}
+          {display ? <ScrollPane className="codeblock">{display}</ScrollPane> : null}
         </>
-      ) : tool.output ? <div className="codeblock">{tool.output}</div> : null}
+      ) : tool.output ? <ScrollPane className="codeblock">{tool.output}</ScrollPane> : null}
     </>
   );
 }
@@ -484,9 +489,9 @@ function GlobBody({ tool }: { tool: ToolView }) {
         ["pattern", fields.pattern ?? fields.target],
         ["files", files.length],
       ]} />
-      <div className="tc-tree">
+      <ScrollPane className="tc-tree">
         {files.length ? files.map((file) => <div key={file} className="tt-file">{file}</div>) : <div className="tc-note">No files found</div>}
-      </div>
+      </ScrollPane>
     </>
   );
 }
@@ -502,7 +507,7 @@ function AstEditBody({ tool }: { tool: ToolView }) {
         ["replacements", fields.replacements],
         ["files", fields.filesChanged],
       ]} />
-      <div className="tc-tree">
+      <ScrollPane className="tc-tree">
         {changes.map((entry, index) => {
           const record = jsonRecord(entry);
           const file = jsonString(record?.file) ?? `change-${index}`;
@@ -516,7 +521,7 @@ function AstEditBody({ tool }: { tool: ToolView }) {
             </div>
           );
         })}
-      </div>
+      </ScrollPane>
     </>
   );
 }
@@ -529,9 +534,9 @@ function DebugBody({ tool }: { tool: ToolView }) {
       <Kv pairs={[["action", fields.action], ["program", fields.program]]} />
       {jsonString(fields.snapshot) ? <div className="tc-summary">{jsonString(fields.snapshot)}</div> : null}
       {lines ? (
-        <div className="codeblock">
+        <ScrollPane className="codeblock">
           {lines.map((line, index) => <div key={index}>{line}</div>)}
-        </div>
+        </ScrollPane>
       ) : null}
     </>
   );
@@ -551,8 +556,8 @@ function EvalBody({ tool }: { tool: ToolView }) {
           <div key={index} className="ev-cell">
             <div className="tc-label">{jsonString(fields.lang) ?? jsonString(cell.lang) ?? "code"}</div>
             <CodeLines lines={code.split("\n")} />
-            {stdout ? <div className="codeblock"><div className="c-ok">{stdout}</div></div> : null}
-            {stderr ? <div className="codeblock"><div className="c-err">{stderr}</div></div> : null}
+            {stdout ? <ScrollPane className="codeblock"><div className="c-ok">{stdout}</div></ScrollPane> : null}
+            {stderr ? <ScrollPane className="codeblock"><div className="c-err">{stderr}</div></ScrollPane> : null}
             <div className="tc-foot">
               {jsonString(cell.status) ? <span className="chip gray xs">{jsonString(cell.status)}</span> : null}
               {jsonNumber(cell.exitCode) !== undefined ? <span className="chip green xs">exit {jsonNumber(cell.exitCode)}</span> : null}
@@ -595,7 +600,7 @@ function LspBody({ tool }: { tool: ToolView }) {
           );
         })}
       </div>
-      {rows.length === 0 && jsonString(fields.output) ? <div className="codeblock">{jsonString(fields.output)}</div> : null}
+      {rows.length === 0 && jsonString(fields.output) ? <ScrollPane className="codeblock">{jsonString(fields.output)}</ScrollPane> : null}
     </>
   );
 }
@@ -625,7 +630,7 @@ function BrowserBody({ tool }: { tool: ToolView }) {
           <CodeLines lines={code.split("\n")} />
         </>
       ) : null}
-      {output !== undefined ? <div className="codeblock">{typeof output === "string" ? output : JSON.stringify(output)}</div> : null}
+      {output !== undefined ? <ScrollPane className="codeblock">{typeof output === "string" ? output : JSON.stringify(output)}</ScrollPane> : null}
     </>
   );
 }
@@ -642,7 +647,7 @@ function ComputerBody({ tool }: { tool: ToolView }) {
           <CodeLines lines={code.split("\n")} />
         </>
       ) : null}
-      {jsonString(fields.output) ? <div className="codeblock">{jsonString(fields.output)}</div> : null}
+      {jsonString(fields.output) ? <ScrollPane className="codeblock">{jsonString(fields.output)}</ScrollPane> : null}
     </>
   );
 }
@@ -687,9 +692,9 @@ function HubBody({ tool }: { tool: ToolView }) {
       <>
         <Kv pairs={[["name", fields.app], ["pid", fields.pid], ["state", fields.state]]} />
         {log ? (
-          <div className="codeblock">
+          <ScrollPane className="codeblock">
             {log.map((line, index) => <div key={index}>{line}</div>)}
-          </div>
+          </ScrollPane>
         ) : null}
       </>
     );
@@ -871,9 +876,10 @@ function McpBody({ tool }: { tool: ToolView }) {
   );
 }
 
-export function ToolBody({ tool }: { tool: ToolView }) {
+export function ToolBody({ tool, follow }: { tool: ToolView; follow?: boolean }) {
   const kind = toolKind(tool);
   const fields = toolFields(tool);
+  const live = follow ?? tool.status === "running";
   const inner =
     kind === "read" ? <ReadBody tool={tool} /> :
     kind === "write" ? <WriteBody tool={tool} /> :
@@ -912,9 +918,9 @@ export function ToolBody({ tool }: { tool: ToolView }) {
     jsonString(fields.summary) ? <div className="tc-summary">{jsonString(fields.summary)}</div> :
     <DefaultBody tool={tool} />;
   return (
-    <>
+    <ToolCardLive.Provider value={live}>
       {tool.truncated === true ? <TruncationMark /> : null}
       {inner}
-    </>
+    </ToolCardLive.Provider>
   );
 }

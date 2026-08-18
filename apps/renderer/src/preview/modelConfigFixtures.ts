@@ -48,7 +48,7 @@ export const MODEL_PRESETS: ReadonlyArray<ModelPresetGroup> = [
       { id: "openai-codex", name: "OpenAI Codex", desc: "Codex 订阅额度（ChatGPT 账号）", api: "openai-codex-responses", auth: ["oauth"], oauth: true, endpoint: "https://api.openai.com/v1" },
       { id: "google-gemini", name: "Google Gemini", desc: "Gemini 系列模型官方 API", api: "google-generative-ai", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://generativelanguage.googleapis.com/v1beta" },
       { id: "gemini-cli", name: "Google Gemini CLI", desc: "Gemini Code Assist 订阅", api: "google-gemini-cli", auth: ["oauth"], oauth: true },
-      { id: "xai", name: "xAI", desc: "Grok 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.x.ai/v1" },
+      { id: "xai", name: "xAI", desc: "Grok 系列模型", api: "openai-responses", auth: ["api-key"], endpoint: "https://api.x.ai/v1" },
       { id: "groq", name: "Groq", desc: "高速推理（Llama / Mixtral）", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.groq.com/openai/v1" },
       { id: "deepseek", name: "DeepSeek", desc: "DeepSeek V / R 系列", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.deepseek.com/v1" },
       { id: "moonshot", name: "Moonshot / Kimi", desc: "Kimi K 系列模型", api: "openai-completions", auth: ["api-key"], endpoint: "https://api.moonshot.cn/v1" },
@@ -93,12 +93,12 @@ export const MODEL_API_TYPES: ReadonlyArray<{ id: ModelApiKind | string; label: 
   { id: "google-vertex", label: "Google Vertex" },
 ];
 
-export const MODEL_AUTH_TYPES: ReadonlyArray<{ id: ModelAuthType; label: string }> = [
-  { id: "oauth", label: "OMP Login / OAuth" },
-  { id: "api-key", label: "API Key" },
-  { id: "env", label: "Environment Variable" },
-  { id: "command", label: "External Command" },
-  { id: "none", label: "无需认证" },
+export const MODEL_AUTH_TYPES: ReadonlyArray<{ id: ModelAuthType; label: string; hint: string }> = [
+  { id: "oauth", label: "OMP Login / OAuth", hint: "用 omp login 写入本机凭据" },
+  { id: "api-key", label: "API Key", hint: "密钥写入 models.yml" },
+  { id: "env", label: "Environment Variable", hint: "从环境变量读取，不写密钥" },
+  { id: "command", label: "External Command", hint: "用命令取密，Secret 不落盘" },
+  { id: "none", label: "无需认证", hint: "适用于 Ollama 等本地服务" },
 ];
 
 export const MODEL_THINKING = [

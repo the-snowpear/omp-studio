@@ -4,8 +4,10 @@
  * then operator.invoke, then existing UI. Skills stay out of this list.
  */
 
+import type { CommandName, ThreadId } from "@omp-studio/client-contract";
+
 import { snapshotFromDoc, snapshotIsEmpty } from "./serialize";
-import type { ComposerSnapshot } from "./types";
+import type { ComposerDoc, ComposerSnapshot } from "./types";
 
 export type SlashGroup = "session" | "mode" | "model" | "context" | "capability" | "workspace" | "collab" | "help";
 
@@ -24,12 +26,13 @@ export type SlashNativeUi =
   | "command-palette"
   | "skills-drawer"
   | "session-tree"
+  | "user-message-branch"
   | "plan-review";
 
 export type SlashSelect = "run-now" | "complete-args" | "native-ui" | "chip";
 
 export type SlashTyped = {
-  readonly name: string;
+  readonly name: CommandName;
   readonly fromArgs?: (args: string) => Record<string, unknown>;
 };
 
@@ -64,7 +67,7 @@ export type SlashDraft = {
 
 export type SlashExecute =
   | { readonly kind: "native-ui"; readonly ui: SlashNativeUi }
-  | { readonly kind: "typed"; readonly name: string; readonly input: Record<string, unknown> }
+  | { readonly kind: "typed"; readonly name: CommandName; readonly input: Record<string, unknown> }
   | { readonly kind: "invoke"; readonly commandId: string; readonly arguments: string }
   | { readonly kind: "none" };
 
@@ -235,7 +238,7 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
   cmd("resume", "切换到另一会话", "session", { select: "native-ui", ui: "history" }),
   cmd("retry", "重试上一轮失败", "session", { select: "run-now", typed: { name: "turn.retry" } }),
   cmd("fork", "从先前消息分叉", "session", { select: "run-now", typed: { name: "session.fork" } }),
-  cmd("branch", "从先前消息建分支", "session", { select: "native-ui", ui: "session-tree" }),
+  cmd("branch", "从先前消息建分支", "session", { select: "native-ui", ui: "user-message-branch" }),
   cmd("tree", "打开会话树", "session", { select: "native-ui", ui: "session-tree" }),
   cmd("session", "会话信息 / 删除 / 固定账号", "session", {
     allowArgs: true,
@@ -325,8 +328,8 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
   }),
   cmd("export", "导出会话 HTML", "session", { select: "run-now", invokeId: "builtin.export" }),
   cmd("dump", "导出完整记录", "session", { select: "run-now", invokeId: "builtin.dump" }),
-  cmd("copy", "从对话复制", "session", { allowArgs: true, hint: "[code|cmd]", availability: "disabled", disabledReason: "桌面尚未接复制选择器", select: "run-now" }),
-  cmd("debug", "调试工具", "help", { availability: "disabled", disabledReason: "桌面尚未接调试面板", select: "run-now" }),
+  cmd("copy", "从对话复制", "session", { allowArgs: true, hint: "[code|cmd]", availability: "disabled", disabledReason: "复制（暂未实现）", select: "run-now" }),
+  cmd("debug", "调试工具", "help", { availability: "disabled", disabledReason: "调试（暂未实现）", select: "run-now" }),
   cmd("security", "安全扫描", "capability", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.security" }),
   cmd("ssh", "SSH 主机", "workspace", { allowArgs: true, hint: "<subcommand>", select: "complete-args", invokeId: "builtin.ssh" }),
   cmd("move", "移动会话工作目录", "workspace", { allowArgs: true, hint: "[<path>]", select: "complete-args", invokeId: "builtin.move" }),
@@ -335,9 +338,9 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
   cmd("dirs", "列出工作区目录", "workspace", { select: "run-now", invokeId: "builtin.dirs" }),
   cmd("force", "下一轮强制使用指定工具", "mode", { aliases: ["force:"], allowArgs: true, hint: "<tool-name> [prompt]", select: "complete-args", invokeId: "builtin.force" }),
   cmd("share", "生成分享链接", "collab", { select: "run-now", invokeId: "builtin.share" }),
-  cmd("collab", "实时协作", "collab", { allowArgs: true, hint: "[start|view|stop|status]", availability: "disabled", disabledReason: "桌面尚未接协作面板", select: "complete-args" }),
-  cmd("join", "加入协作", "collab", { allowArgs: true, hint: "<link>", availability: "disabled", disabledReason: "桌面尚未接协作面板", select: "complete-args" }),
-  cmd("leave", "离开协作", "collab", { availability: "disabled", disabledReason: "桌面尚未接协作面板", select: "run-now" }),
+  cmd("collab", "实时协作", "collab", { allowArgs: true, hint: "[start|view|stop|status]", availability: "disabled", disabledReason: "协作（暂未实现）", select: "complete-args" }),
+  cmd("join", "加入协作", "collab", { allowArgs: true, hint: "<link>", availability: "disabled", disabledReason: "协作（暂未实现）", select: "complete-args" }),
+  cmd("leave", "离开协作", "collab", { availability: "disabled", disabledReason: "协作（暂未实现）", select: "run-now" }),
   cmd("browser", "浏览器可见性", "capability", { allowArgs: true, hint: "[headless|visible]", select: "complete-args", invokeId: "builtin.browser" }),
   cmd("live", "实时语音", "collab", { availability: "hidden", select: "run-now" }),
   cmd("quit", "退出应用", "help", { aliases: ["q"], availability: "hidden", select: "run-now" }),
@@ -348,6 +351,23 @@ const CATALOG_BY_NAME = new Map<string, StudioSlashCommand>();
 for (const command of BUILTIN_SLASH_CATALOG) {
   CATALOG_BY_NAME.set(command.name, command);
   for (const alias of command.aliases) CATALOG_BY_NAME.set(alias, command);
+}
+
+/**
+ * Slash menu follows typed `/…` at the start of the draft.
+ * Skill capsules serialize as `/skill:name` and must not open the command menu.
+ * Mode capsules serialize empty, so they are skipped.
+ */
+export function typedSlashSource(doc: ComposerDoc): string {
+  let text = "";
+  for (const node of doc.nodes) {
+    if (node.type === "chip") {
+      if (node.chip.kind === "mode") continue;
+      break;
+    }
+    text += node.value;
+  }
+  return text;
 }
 
 export function parseSlashDraft(text: string): SlashDraft | null {
@@ -464,6 +484,25 @@ export function resolveSlashExecute(command: StudioSlashCommand, args: string): 
   }
   if (command.ui) return { kind: "native-ui", ui: command.ui };
   return { kind: "none" };
+}
+
+/**
+ * Host `session.drop` is catalog-scoped and needs the current threadId.
+ * Runtime `session.drop` is invoked by that Host command, not by the slash
+ * catalog sending an empty P4 payload.
+ */
+export function bindSlashTypedCommand(
+  execute: Extract<SlashExecute, { kind: "typed" }>,
+  context: { readonly threadId?: ThreadId },
+): { readonly ok: true; readonly name: CommandName; readonly input: Record<string, unknown> } | { readonly ok: false; readonly error: string } {
+  if (execute.name === "session.drop") {
+    const threadId = context.threadId;
+    if (threadId === undefined || threadId.length === 0) {
+      return { ok: false, error: "没有当前会话，无法执行 /drop" };
+    }
+    return { ok: true, name: "session.drop", input: { threadId } };
+  }
+  return { ok: true, name: execute.name, input: execute.input };
 }
 
 export function slashNeedsArgs(command: StudioSlashCommand, args: string): boolean {
@@ -613,4 +652,16 @@ export function planComposerSend(snapshot: ComposerSnapshot): SlashSendPlan {
   }
 
   return { kind: "prompt", snapshot: peeled.snapshot };
+}
+
+/**
+ * `/btw`, `/settings`, `/compact` and other slash-only sends. These must not
+ * wait on `promptChannelReady`: preview mode has no live prompt channel, and
+ * BTW is a side channel that has to run while the main turn is streaming.
+ */
+export function composerSlashExecute(
+  snapshot: ComposerSnapshot,
+): Extract<SlashSendPlan, { kind: "execute" }> | undefined {
+  const plan = planComposerSend(snapshot);
+  return plan.kind === "execute" ? plan : undefined;
 }

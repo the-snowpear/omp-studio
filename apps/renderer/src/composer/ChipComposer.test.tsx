@@ -262,6 +262,29 @@ describe("ChipComposer", () => {
     expect(snapshot?.text).toContain("/skill:commit-msg");
   });
 
+  it("does not open the command menu when a skill capsule is inserted", () => {
+    const ref = createRef<ChipComposerHandle>();
+    render(<ChipComposer ref={ref} placeholder="msg" />);
+    act(() => {
+      ref.current?.insertChip({ kind: "skill", label: "commit-msg", name: "commit-msg" });
+    });
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
+    expect(ref.current?.getSnapshot().text).toContain("/skill:commit-msg");
+    fireEvent.focus(editorOf());
+    expect(screen.queryByRole("listbox", { name: "指令" })).toBeNull();
+  });
+
+  it("opens a detached command menu over a skill capsule without inserting another slash", () => {
+    const ref = createRef<ChipComposerHandle>();
+    render(<ChipComposer ref={ref} placeholder="msg" />);
+    act(() => {
+      ref.current?.insertChip({ kind: "skill", label: "commit-msg", name: "commit-msg" });
+      ref.current?.openCommandMenu();
+    });
+    expect(screen.getByRole("listbox", { name: "指令" })).toBeDefined();
+    expect(ref.current?.getSnapshot().text.trim()).toBe("/skill:commit-msg");
+  });
+
   it("numbers clipboard images as 图N and keeps bytes on the snapshot", () => {
     const ref = createRef<ChipComposerHandle>();
     render(<ChipComposer ref={ref} placeholder="msg" />);
@@ -605,5 +628,29 @@ describe("ChipComposer", () => {
     expect(onQueue).toHaveBeenCalledTimes(1);
     expect(onFollowUp).not.toHaveBeenCalled();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("submits /btw while running instead of parking it in the queue", () => {
+    const onSubmit = vi.fn();
+    const onQueue = vi.fn();
+    render(
+      <ChipComposer
+        placeholder="msg"
+        running
+        onSubmit={onSubmit}
+        onQueue={onQueue}
+      />,
+    );
+    const editor = editorOf();
+    editor.focus();
+    fireEvent.paste(editor, {
+      clipboardData: {
+        files: [],
+        getData: (type: string) => (type === "text/plain" ? "/btw why the rename?" : ""),
+      },
+    });
+    fireEvent.keyDown(editor, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onQueue).not.toHaveBeenCalled();
   });
 });

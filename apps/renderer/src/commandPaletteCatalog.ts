@@ -6,7 +6,7 @@ import { PREVIEW_HISTORY, PREVIEW_PROJECTS } from "./preview/fixtures";
 import type { SettingsGroupId } from "./SettingsPage";
 import type { DrawerItem } from "./skillsPreview";
 
-export type SideTab = "changes" | "git" | "preview" | "agents";
+export type SideTab = "changes" | "git" | "preview" | "agents" | "btw";
 export type BottomTab = "terminal" | "problems" | "tests" | "output" | "logs" | "pvlogs";
 
 export type PaletteAction =
@@ -152,6 +152,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "open-git", icon: "branch", label: "打开 Git", keywords: "git branch commit push pull stage", action: { kind: "openSide", tab: "git" } },
         { id: "open-preview", icon: "eye", label: "打开 Preview", action: { kind: "openSide", tab: "preview" } },
         { id: "open-agents", icon: "bot", label: "打开 Agents", action: { kind: "openSide", tab: "agents" } },
+        { id: "open-btw", icon: "sparkles", label: "打开 BTW 面板", keywords: "btw 旁路 side channel 提问", action: { kind: "openSide", tab: "btw" } },
         { id: "open-skills", icon: "layers", label: "打开技能与插件", hint: "Ctrl+Shift+K", keywords: "skills plugins drawer", action: { kind: "openSkills" } },
       ],
     },

@@ -37,6 +37,7 @@
 import type {
   AuthorityEpoch,
   AuthorityId,
+  BtwSnapshot,
   ClientBootstrap,
   ClientCommandAccepted,
   ClientError,
@@ -89,12 +90,21 @@ export interface ClientConnectionState {
 export interface ClientEntitiesState {
   readonly snapshot: OperatorStateSnapshot | null;
   readonly telemetry: OperatorStateSnapshot["telemetry"] | null;
+  /**
+   * Latest BTW side-channel snapshot. Sits beside `telemetry` rather than
+   * inside `conversation` because a BTW turn is ephemeral: it never enters the
+   * transcript and has no conversation item to attach to. Cleared whenever the
+   * Runtime identity or the snapshot baseline is invalidated.
+   */
+  readonly btw: BtwSnapshot | null;
 }
 
 /**
  * Session-level interaction area. At most one pending interaction exists
  * (`interaction.required` always writes it; `interaction.resolved` clears
- * only the matching interactionId + leaseGeneration). Renderer reads the
+ * only the matching interactionId + leaseGeneration). A later snapshot that
+ * still carries the same GUI prompt must keep this card — clearing it would
+ * unmount the Renderer between every `state.changed`. Renderer reads the
  * pending card from here — never by scanning commands.
  */
 export interface ClientInteractionState {
@@ -182,7 +192,7 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
       selected: null,
       contractVersion: null,
     },
-    entities: { snapshot: null, telemetry: null },
+    entities: { snapshot: null, telemetry: null, btw: null },
     interaction: { pending: null },
     conversation: createInitialConversationState(),
     commands: {},
@@ -190,8 +200,14 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
   };
 }
 
-/** Mutations with external side effects; blocked while resync is required. */
-const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
+/**
+ * Mutations with external side effects; blocked while resync is required.
+ *
+ * The map is exhaustive over `CommandName` so a new command cannot silently
+ * default to "safe"; the few commands that must stay usable during resync are
+ * listed explicitly as `false`.
+ */
+const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "core.prompt": true,
   "core.steer": true,
   "core.followUp": true,
@@ -201,6 +217,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "runtime.resume": true,
   "turn.retry": true,
   "runtime.install": true,
+  "runtime.ensure": true,
   "session.create": true,
   "session.resume": true,
   "session.drop": true,
@@ -227,7 +244,11 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "models.cycleOrder.set": true,
   "plugins.setEnabled": true,
   "skills.setEnabled": true,
+  "skills.reveal": true,
+  "skills.revealRoot": true,
   "mcp.setEnabled": true,
+  "mcp.refresh": true,
+  "mcp.test": true,
   "agents.definition.upsert": true,
   "agents.definition.delete": true,
   "agents.definition.configure": true,
@@ -258,13 +279,22 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, true>> = {
   "session.fast.set": true,
   "session.prewalk.arm": true,
   "session.prewalk.disarm": true,
+  "session.clearContext": true,
   "session.fork": true,
   "session.handoff": true,
   "session.model.set": true,
   "session.thinking.set": true,
   "session.tree.get": true,
   "session.tree.navigate": true,
+  "session.tree.branch": true,
   "operator.invoke": true,
+  "btw.ask": true,
+  // Cancelling an in-flight side question is a safety valve, not a mutation
+  // that can drift from a stale snapshot: it must work during resync too.
+  "btw.abort": false,
+  "btw.branch": true,
+  "tan.start": true,
+  "omfg.generate": true,
   "agent.spawn": true,
   "agent.send": true,
   "agent.kill": true,
@@ -291,6 +321,36 @@ const TERMINAL_STATUSES: Readonly<Partial<Record<CommandState["status"], true>>>
 
 function isTerminal(status: CommandState["status"]): boolean {
   return TERMINAL_STATUSES[status] === true;
+}
+
+/**
+ * Bound retained receipts. In-flight commands are never dropped; oldest
+ * terminal rows go first. A long Studio session otherwise keeps every
+ * prompt/steer/follow-up receipt for the process lifetime.
+ */
+export const COMMAND_STATE_TERMINAL_CAP = 100;
+
+function capTerminalCommands(
+  commands: Readonly<Record<CommandRequestId, CommandState>>,
+): Readonly<Record<CommandRequestId, CommandState>> {
+  const keys = Object.keys(commands) as CommandRequestId[];
+  let terminalCount = 0;
+  for (const key of keys) {
+    const command = commands[key];
+    if (command !== undefined && isTerminal(command.status)) terminalCount += 1;
+  }
+  const extra = terminalCount - COMMAND_STATE_TERMINAL_CAP;
+  if (extra <= 0) return commands;
+  const next: Record<string, CommandState> = { ...commands };
+  let dropped = 0;
+  for (const key of keys) {
+    if (dropped >= extra) break;
+    const command = next[key];
+    if (command === undefined || !isTerminal(command.status)) continue;
+    delete next[key];
+    dropped += 1;
+  }
+  return next;
 }
 
 /**
@@ -372,6 +432,13 @@ function markPendingOutcomeUnknown(
 }
 
 export function reduceClientState(state: ClientState, action: ClientAction): ClientState {
+  const next = reduceClientStateCore(state, action);
+  if (next.commands === state.commands) return next;
+  const commands = capTerminalCommands(next.commands);
+  return commands === next.commands ? next : { ...next, commands };
+}
+
+function reduceClientStateCore(state: ClientState, action: ClientAction): ClientState {
   switch (action.type) {
     case "bootstrap.set":
       return reduceBootstrap(state, action.bootstrap, action.occurredAt);
@@ -490,7 +557,7 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
   return {
     ...state,
     connection,
-    entities: { snapshot: bootstrap.snapshot ?? null, telemetry: bootstrap.snapshot?.telemetry ?? null },
+    entities: { snapshot: bootstrap.snapshot ?? null, telemetry: bootstrap.snapshot?.telemetry ?? null, btw: null },
     interaction,
     conversation,
     commands,
@@ -526,7 +593,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
         state = {
           ...state,
           connection: { ...state.connection, runtimeEpoch: eventRuntimeEpoch, stateVersion: null },
-          entities: { snapshot: null, telemetry: null },
+          entities: { snapshot: null, telemetry: null, btw: null },
           interaction: { pending: null },
           commands: markPendingOutcomeUnknown(
             state.commands,
@@ -589,6 +656,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
         ...state,
         connection: advanceConnection(state.connection, event),
         entities: {
+          ...state.entities,
           snapshot: snapshot === null ? null : { ...snapshot, telemetry: event.telemetry },
           telemetry: event.telemetry,
         },
@@ -612,7 +680,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
           resyncRequired: true,
           resyncReason: event.reason,
         },
-        entities: { ...state.entities, telemetry: null },
+        entities: { ...state.entities, telemetry: null, btw: null },
         conversation: reduceConversationState(state.conversation, { type: "resync" }),
       };
     case "conversation.changed": {
@@ -624,6 +692,19 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
         conversation: applyToMain
           ? reduceConversationState(state.conversation, { type: "live", event })
           : state.conversation,
+      };
+    }
+    case "btw.changed": {
+      if (state.entities.snapshot?.sessionId !== event.sessionId) {
+        // Same global-cursor caveat as telemetry: consume the cursor so the
+        // next valid event does not look like a gap, but do not attribute a
+        // late side-channel delta to whichever session is current now.
+        return { ...state, connection: advanceConnection(state.connection, event) };
+      }
+      return {
+        ...state,
+        connection: advanceConnection(state.connection, event),
+        entities: { ...state.entities, btw: event.snapshot },
       };
     }
     default: {
@@ -654,6 +735,36 @@ function runtimeEpochOf(event: ClientEvent): RuntimeEpoch | undefined {
   return event.runtimeEpoch;
 }
 
+/**
+ * Snapshots are operator state, not a second copy of the mapped Client card.
+ * Keep the live pending card when the snapshot still names the same GUI
+ * prompt; drop it when the Runtime no longer has a GUI-owned interaction
+ * (or the session identity changed). A reconnect that has snapshot pending
+ * but no Client card stays empty here — the facade follows with
+ * `interaction.required` carrying the mapped ClientInteraction.
+ */
+function pendingAfterSnapshot(
+  current: ClientInteraction | null,
+  snapshot: OperatorStateSnapshot,
+  sessionChanged: boolean,
+): ClientInteraction | null {
+  if (sessionChanged) {
+    return null;
+  }
+  const pending = snapshot.pendingInteraction;
+  if (pending === undefined || pending.owner !== "gui") {
+    return null;
+  }
+  if (
+    current !== null &&
+    current.interactionId === pending.request.interactionId &&
+    current.leaseGeneration === pending.leaseGeneration
+  ) {
+    return current;
+  }
+  return current;
+}
+
 function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readonly kind: "snapshot" }>): ClientState {
   const snapshot = event.snapshot;
   // Version is monotonic only inside one Runtime identity and epoch. A
@@ -676,6 +787,8 @@ function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readon
       return state;
     }
   }
+  const sessionChanged =
+    state.entities.snapshot !== null && state.entities.snapshot.sessionId !== snapshot.sessionId;
   return {
     ...state,
     connection: {
@@ -686,12 +799,20 @@ function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readon
       resyncRequired: false,
       resyncReason: null,
     },
-    entities: { snapshot, telemetry: snapshot.telemetry ?? null },
-    interaction: { pending: null },
-    conversation:
-      state.entities.snapshot !== null && state.entities.snapshot.sessionId !== snapshot.sessionId
-        ? reduceConversationState(state.conversation, { type: "clear" })
-        : state.conversation,
+    entities: {
+      snapshot,
+      telemetry: snapshot.telemetry ?? null,
+      // A snapshot for a different session invalidates the side-channel; the
+      // Runtime has no replay entry for an in-flight BTW, so the panel starts
+      // empty rather than showing the previous session's answer.
+      btw: sessionChanged ? null : state.entities.btw,
+    },
+    interaction: {
+      pending: pendingAfterSnapshot(state.interaction.pending, snapshot, sessionChanged),
+    },
+    conversation: sessionChanged
+      ? reduceConversationState(state.conversation, { type: "clear" })
+      : state.conversation,
   };
 }
 
@@ -873,7 +994,7 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
       runtimeEpoch: nextRuntimeEpoch,
       ...(identityChanged || lost ? { stateVersion: null } : {}),
     },
-    ...(identityChanged || lost ? { entities: { snapshot: null, telemetry: null } } : {}),
+    ...(identityChanged || lost ? { entities: { snapshot: null, telemetry: null, btw: null } } : {}),
     interaction,
     commands,
     conversation,
@@ -882,6 +1003,10 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
 
 export function selectSessionTelemetry(state: ClientState): OperatorStateSnapshot["telemetry"] | null {
   return state.entities.telemetry;
+}
+
+export function selectBtwSnapshot(state: ClientState): BtwSnapshot | null {
+  return state.entities.btw;
 }
 
 interface CommandIssueAction {

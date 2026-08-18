@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { RuntimeConnection } from "@omp-studio/client-contract";
-import { HomePage } from "./HomePage";
+import { HomePage, SecondaryPage } from "./HomePage";
+import { PAGE_EXIT_MS } from "./pageTransition";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 import { __resetOperatorProfileForTests } from "./settings/operatorProfile";
@@ -13,10 +14,18 @@ beforeAll(() => {
     disconnect(): void {}
   }
   (globalThis as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }) as unknown as MediaQueryList;
 });
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
   __resetOperatorProfileForTests(null);
 });
@@ -73,5 +82,53 @@ describe("HomePage identity", () => {
     expect((photo as HTMLImageElement).getAttribute("src")).toBe("data:image/png;base64,QQ==");
     expect(screen.getByRole("heading", { level: 1, name: /，Ada$/ })).toBeTruthy();
     expect(document.querySelectorAll(".home-avatar").length).toBe(1);
+  });
+});
+
+describe("SecondaryPage body motion", () => {
+  function renderPage(
+    route: "home" | "settings",
+    title: string,
+    body: string,
+    className?: string,
+  ) {
+    return (
+      <SecondaryPage
+        route={route}
+        title={title}
+        theme="dark"
+        {...(className === undefined ? {} : { className })}
+        onRoute={() => undefined}
+        onToggleTheme={() => undefined}
+      >
+        <p>{body}</p>
+      </SecondaryPage>
+    );
+  }
+
+  it("does not play page-in on the body after mount or a same-route shell rerender", () => {
+    const { rerender } = render(renderPage("home", "首页", "home-body"));
+    expect(document.getElementById("pageBody")?.className).toBe("page-body");
+    expect(screen.getByText("home-body")).toBeTruthy();
+
+    rerender(renderPage("home", "首页", "home-body", "page-out"));
+    expect(document.getElementById("pageRoot")?.className).toBe("page page-out");
+    expect(document.getElementById("pageBody")?.className).toBe("page-body");
+  });
+
+  it("plays page-out then page-in on the body when switching secondary routes", async () => {
+    vi.useFakeTimers();
+    const { rerender } = render(renderPage("home", "首页", "home-body"));
+    rerender(renderPage("settings", "设置", "settings-body"));
+    expect(document.getElementById("pageBody")?.className).toBe("page-body page-out");
+    expect(screen.getByText("home-body")).toBeTruthy();
+    expect(screen.queryByText("settings-body")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(PAGE_EXIT_MS);
+    });
+    expect(document.getElementById("pageBody")?.className).toBe("page-body page-in");
+    expect(screen.getByText("settings-body")).toBeTruthy();
+    expect(screen.queryByText("home-body")).toBeNull();
   });
 });

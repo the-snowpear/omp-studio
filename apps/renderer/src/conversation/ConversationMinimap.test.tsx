@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TimelineRow } from "./conversationViewModel";
+import { timelineRowKey } from "./conversationViewModel";
 import {
   ConversationMinimap,
   deriveMinimapMarks,
@@ -50,6 +51,13 @@ describe("deriveMinimapMarks", () => {
     const marks = deriveMinimapMarks(ROWS);
     expect(marks.map((entry) => entry.type)).toEqual(["user", "assistant", "bash", "error", "compact"]);
     expect(marks.map((entry) => entry.turn)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("marks an in-progress compact divider as compact", () => {
+    const marks = deriveMinimapMarks([{ type: "compacting", action: "context-full" }]);
+    expect(marks).toEqual([
+      { itemId: "compacting", type: "compact", label: "压缩中", preview: "正在压缩当前上下文", turn: 1 },
+    ]);
   });
 
   it("预览文本取用户原文 / 工具摘要 / 压缩摘要", () => {
@@ -111,7 +119,7 @@ function Harness({ rows }: { rows: readonly TimelineRow[] }) {
       >
         <div className="convo-doc">
           {rows.map((row) => {
-            const itemId = row.type === "compaction" || row.type === "resetBoundary" ? row.item.itemId : row.itemId;
+            const itemId = timelineRowKey(row);
             return <div key={itemId} data-item-id={itemId} className="ev" />;
           })}
         </div>

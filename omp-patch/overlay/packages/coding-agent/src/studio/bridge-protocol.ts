@@ -78,6 +78,7 @@ export type StudioOperation =
 			customInstructions?: string;
 			reanswer?: unknown;
 	  }
+	| { kind: "session.tree.branch"; targetId: string }
 	| { kind: "turn.retry" }
 	| { kind: "core.prompt"; text: string; images?: unknown[] }
 	| { kind: "core.steer"; text: string; images?: unknown[] }
@@ -93,7 +94,11 @@ export type StudioOperation =
 	| { kind: "mode.plan.enter"; initialPrompt?: string }
 	| { kind: "mode.plan.exit"; discardDraft?: boolean }
 	| { kind: "mode.plan.review.open" }
-	| { kind: "mode.plan.review.respond"; decision: "approve" | "refine" | "dismiss"; feedback?: string }
+	| {
+			kind: "mode.plan.review.respond";
+			decision: "execute" | "compact" | "keep" | "approve" | "refine" | "dismiss";
+			feedback?: string;
+	  }
 	| { kind: "mode.vibe.enter"; initialPrompt?: string }
 	| { kind: "mode.vibe.exit" }
 	| { kind: "goal.create"; objective: string; tokenBudget?: number }
@@ -128,6 +133,7 @@ export type StudioOperation =
 			expectedGeneration: number;
 			text: string;
 			mode: "prompt" | "steer" | "followUp";
+			images?: unknown[];
 	  }
 	| { kind: "agent.kill"; agentId: string; expectedGeneration: number }
 	| { kind: "agent.revive"; agentId: string; expectedGeneration: number }
@@ -578,7 +584,11 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			break;
 		case "mode.plan.review.respond":
 			exactKeys(operation, ["kind", "decision", "feedback"]);
-			if (!new Set(["approve", "refine", "dismiss"]).has(operation.decision as string)) {
+			if (
+				!new Set(["execute", "compact", "keep", "approve", "refine", "dismiss"]).has(
+					operation.decision as string,
+				)
+			) {
 				throw new StudioFrameError("Invalid plan review decision");
 			}
 			if (operation.feedback !== undefined && !nonEmptyString(operation.feedback)) {
@@ -684,7 +694,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			}
 			break;
 		case "agent.send":
-			exactKeys(operation, ["kind", "agentId", "expectedGeneration", "text", "mode"]);
+			exactKeys(operation, ["kind", "agentId", "expectedGeneration", "text", "mode", "images"]);
 			if (
 				!nonEmptyString(operation.agentId) ||
 				!Number.isSafeInteger(operation.expectedGeneration) ||
@@ -693,6 +703,14 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 				!new Set(["prompt", "steer", "followUp"]).has(operation.mode as string)
 			) {
 				throw new StudioFrameError("Invalid agent message");
+			}
+			if (operation.images !== undefined) {
+				if (
+					!Array.isArray(operation.images) ||
+					operation.images.some(image => image === null || typeof image !== "object" || Array.isArray(image))
+				) {
+					throw new StudioFrameError("Invalid image attachments");
+				}
 			}
 			break;
 		case "agent.kill":
@@ -798,6 +816,10 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			if (operation.customInstructions !== undefined && !nonEmptyString(operation.customInstructions)) {
 				throw new StudioFrameError("Invalid tree instructions");
 			}
+			break;
+		case "session.tree.branch":
+			exactKeys(operation, ["kind", "targetId"]);
+			if (!nonEmptyString(operation.targetId)) throw new StudioFrameError("Invalid tree target");
 			break;
 		case "operator.invoke":
 			exactKeys(operation, ["kind", "commandId", "arguments"]);
@@ -939,6 +961,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"job.subscribe",
 	"session.tree.get",
 	"session.tree.navigate",
+	"session.tree.branch",
 	"session.fork",
 	"session.handoff",
 	"session.model.set",

@@ -7,7 +7,7 @@ export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/
 
 export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number];
 
-/** Wire shape for `core.prompt` / `core.steer` / `core.followUp` images. */
+/** Wire shape for `core.prompt` / `core.steer` / `core.followUp` / `agent.send` images. */
 export type PromptImage = {
   readonly type: "image";
   readonly mimeType: ImageMimeType;

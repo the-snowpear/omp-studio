@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
@@ -142,7 +142,7 @@ describe("ComposerModePicker", () => {
     expect((screen.getByRole("menuitemradio", { name: /^Vibe/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("真实模式：busy 或流式时仍可切 Plan，并提示下一轮生效", () => {
+  it("真实模式：busy 或流式时仍可切 Plan，立刻出现胶囊，并提示下一轮生效", () => {
     const onRun = vi.fn(async (_name: CommandName, _input: CommandInput<CommandName>) => true);
     render(
       <ComposerModePicker
@@ -159,7 +159,64 @@ describe("ComposerModePicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "会话模式" }));
     expect(screen.getByText("当前轮次仍用原模式，下一轮对话（含插入信息）才生效")).toBeTruthy();
     fireEvent.click(screen.getByRole("menuitemradio", { name: /^Plan/ }));
+    expect(document.querySelector(".mode-chip-label-full")?.textContent).toBe("Plan");
     expect(onRun).toHaveBeenCalledWith("mode.plan.enter", {});
+  });
+
+  it("流式且 capability/resync 不可用时，加号仍能加上 Plan 胶囊，本轮结束再打 Host", async () => {
+    const onRun = vi.fn(async (_name: CommandName, _input: CommandInput<CommandName>) => true);
+    function StreamHarness() {
+      const [streaming, setStreaming] = useState(true);
+      return (
+        <>
+          <ComposerModePicker
+            preview={false}
+            snapshot={{ isStreaming: streaming } as OperatorStateSnapshot}
+            can={() => false}
+            busy={false}
+            disabled={true}
+            keyword={null}
+            onKeywordChange={vi.fn()}
+            onRun={onRun}
+          />
+          <button type="button" onClick={() => setStreaming(false)}>
+            end-turn
+          </button>
+        </>
+      );
+    }
+    render(<StreamHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "会话模式" }));
+    const plan = screen.getByRole("menuitemradio", { name: /^Plan/ }) as HTMLButtonElement;
+    expect(plan.disabled).toBe(false);
+    fireEvent.click(plan);
+    expect(document.querySelector(".mode-chip-label-full")?.textContent).toBe("Plan");
+    expect(onRun).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "end-turn" }));
+    await waitFor(() => {
+      expect(onRun).toHaveBeenCalledWith("mode.plan.enter", {});
+    });
+  });
+
+  it("流式时 Plan / Vibe 互斥，只保留后点的胶囊", () => {
+    const onRun = vi.fn(async (_name: CommandName, _input: CommandInput<CommandName>) => true);
+    render(
+      <ComposerModePicker
+        preview={false}
+        snapshot={{ isStreaming: true } as OperatorStateSnapshot}
+        can={() => false}
+        busy={false}
+        disabled={false}
+        keyword={null}
+        onKeywordChange={vi.fn()}
+        onRun={onRun}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "会话模式" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Plan/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Vibe/ }));
+    expect([...document.querySelectorAll(".mode-chip-label-full")].map((node) => node.textContent)).toEqual(["Vibe"]);
+    expect(onRun).not.toHaveBeenCalled();
   });
 
   it("真实模式：Plan 走 mode.plan.enter，capability 缺失时 Fast 禁用", () => {

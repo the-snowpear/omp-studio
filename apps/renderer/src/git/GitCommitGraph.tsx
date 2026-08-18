@@ -160,7 +160,7 @@ export function GitCommitGraph({
                 <button
                   type="button"
                   className="icon-btn small git-graph-op"
-                  data-tip="提交操作"
+                  data-tip="操作"
                   aria-label="提交操作"
                   disabled={busy || preview}
                   onClick={() => setMenuOid(menuOid === row.id ? undefined : row.id)}

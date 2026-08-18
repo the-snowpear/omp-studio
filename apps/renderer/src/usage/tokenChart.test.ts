@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampPtsToPlot,
+  flattenToBaseline,
   lerpPoints,
   resamplePoints,
   sampleForMorph,
@@ -89,6 +90,16 @@ describe("clampPtsToPlot", () => {
     expect(clamped[0]).toEqual([0, 2]);
     expect(clamped[1]).toEqual([40, 90]);
     expect(clamped[2]).toEqual([200, 188]);
+  });
+});
+
+describe("flattenToBaseline", () => {
+  it("keeps each sample x and parks y on the baseline", () => {
+    expect(flattenToBaseline([[12, 40], [80, 10], [148, 30]], 188)).toEqual([
+      [12, 188],
+      [80, 188],
+      [148, 188],
+    ]);
   });
 });
 

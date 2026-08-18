@@ -141,6 +141,40 @@ export function isAbortEligible(input: {
   );
 }
 
+const PENDING_RUN_WINDOW_KEY = "__pending__";
+
+function runWindowKey(identityKey: string): string {
+  return identityKey === "" ? PENDING_RUN_WINDOW_KEY : identityKey;
+}
+
+/**
+ * Persist the run clock by session identity so leaving the workbench (homepage
+ * unmounts `WorkbenchCanvas`) does not restart elapsed time at 0s. An empty
+ * identity is stored as a pending key and migrated when the session id arrives.
+ */
+export function syncRunWindow(
+  identityKey: string,
+  active: boolean,
+  now: number,
+  store: Map<string, number>,
+): number | null {
+  const key = runWindowKey(identityKey);
+  if (!active) {
+    store.delete(key);
+    return null;
+  }
+  const existing = store.get(key) ?? (key === PENDING_RUN_WINDOW_KEY ? undefined : store.get(PENDING_RUN_WINDOW_KEY));
+  if (existing !== undefined) {
+    if (key !== PENDING_RUN_WINDOW_KEY && store.has(PENDING_RUN_WINDOW_KEY)) {
+      store.delete(PENDING_RUN_WINDOW_KEY);
+      store.set(key, existing);
+    }
+    return existing;
+  }
+  store.set(key, now);
+  return now;
+}
+
 const RETRY_NOTICE = /^Retry (\d+)\/(\d+)$/;
 
 export function parseRetryNotice(message: string, source?: string): ActivityRetry | undefined {
@@ -157,6 +191,15 @@ export function parseRetryNotice(message: string, source?: string): ActivityRetr
 
 export function isRetryActivityNotice(message: string, source?: string): boolean {
   return parseRetryNotice(message, source) !== undefined;
+}
+
+/** Runtime `auto_retry_end` — not shown in the transcript; clears the activity Retry latch. */
+export function isRetryEndNotice(_message: string, source?: string): boolean {
+  return source === "retry-end";
+}
+
+export function isRetryTranscriptNotice(message: string, source?: string): boolean {
+  return isRetryActivityNotice(message, source) || isRetryEndNotice(message, source);
 }
 
 export function formatRetry(retry: ActivityRetry): string {
@@ -183,16 +226,28 @@ function retryNoticeCount(notices: readonly { readonly message: string; readonly
   return count;
 }
 
+function retryEndNoticeCount(notices: readonly { readonly message: string; readonly source?: string }[]): number {
+  let count = 0;
+  for (const notice of notices) {
+    if (isRetryEndNotice(notice.message, notice.source)) count += 1;
+  }
+  return count;
+}
+
 /**
  * Hold the latest `Retry N/M` notice until that retry attempt's stream ends
  * without a further retry. A new notice during backoff refreshes the counter;
  * a streaming falling edge after the retried request has started clears it.
+ * User abort and Runtime `auto_retry_end` also clear it — backoff never
+ * starts a stream, so the falling-edge path alone leaves the stop button up.
  */
 export function reduceActivityRetry(
   prev: {
     readonly identityKey: string;
     readonly retry?: ActivityRetry;
     readonly noticeCount: number;
+    readonly endCount?: number;
+    readonly cancelGeneration?: number;
     readonly seenStream: boolean;
     readonly wasStreaming: boolean;
   },
@@ -201,48 +256,71 @@ export function reduceActivityRetry(
     readonly notices: readonly { readonly message: string; readonly source?: string }[];
     readonly streaming: boolean;
     readonly failed: boolean;
+    readonly cancelGeneration?: number;
   },
 ): {
   readonly identityKey: string;
   readonly retry?: ActivityRetry;
   readonly noticeCount: number;
+  readonly endCount: number;
+  readonly cancelGeneration: number;
   readonly seenStream: boolean;
   readonly wasStreaming: boolean;
 } {
   const noticeCount = retryNoticeCount(input.notices);
+  const endCount = retryEndNoticeCount(input.notices);
+  const cancelGeneration = input.cancelGeneration ?? 0;
   const latest = latestActivityRetry(input.notices);
   const hold = prev.identityKey === input.identityKey
-    ? prev
-    : { identityKey: input.identityKey, noticeCount: 0, seenStream: false, wasStreaming: false };
+    ? {
+        ...prev,
+        endCount: prev.endCount ?? 0,
+        cancelGeneration: prev.cancelGeneration ?? 0,
+      }
+    : {
+        identityKey: input.identityKey,
+        noticeCount: 0,
+        endCount: 0,
+        cancelGeneration: 0,
+        seenStream: false,
+        wasStreaming: false,
+      };
+  const cleared = {
+    identityKey: input.identityKey,
+    noticeCount,
+    endCount,
+    cancelGeneration,
+    seenStream: false,
+    wasStreaming: input.streaming,
+  };
   if (input.failed && !input.streaming) {
-    return { identityKey: input.identityKey, noticeCount, seenStream: false, wasStreaming: false };
+    return { ...cleared, wasStreaming: false };
+  }
+  if (cancelGeneration > hold.cancelGeneration || endCount > hold.endCount) {
+    return cleared;
   }
   if (latest !== undefined && noticeCount > hold.noticeCount) {
     return {
-      identityKey: input.identityKey,
+      ...cleared,
       retry: latest,
-      noticeCount,
       seenStream: false,
       wasStreaming: input.streaming,
     };
   }
   if (hold.retry === undefined) {
-    return {
-      identityKey: input.identityKey,
-      noticeCount,
-      seenStream: false,
-      wasStreaming: input.streaming,
-    };
+    return cleared;
   }
   const rising = !hold.wasStreaming && input.streaming;
   const seenStream = hold.seenStream || rising;
   if (hold.wasStreaming && !input.streaming && seenStream && noticeCount === hold.noticeCount) {
-    return { identityKey: input.identityKey, noticeCount, seenStream: false, wasStreaming: false };
+    return { ...cleared, wasStreaming: false };
   }
   return {
     identityKey: input.identityKey,
     retry: hold.retry,
     noticeCount,
+    endCount,
+    cancelGeneration,
     seenStream,
     wasStreaming: input.streaming,
   };

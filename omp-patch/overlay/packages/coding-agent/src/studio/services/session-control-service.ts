@@ -46,7 +46,7 @@ export class SessionControlError extends Error {
 }
 
 export interface SessionControlHooks {
-	/** Apply deferred model/mode preferences before a queued user message. */
+	/** Apply deferred model/mode/approval preferences before a queued user message. */
 	beforeQueuedUserTurn?: () => Promise<void>;
 }
 

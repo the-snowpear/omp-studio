@@ -78,7 +78,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
                 <span className="fname ellipsis">{node.name}</span>
                 <FileStat status={node.status} />
                 <span className="fop">
-                  <button type="button" className="icon-btn" data-tip="加入上下文" aria-label={`加入上下文 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context-dir"); }}><Icon name="at" /></button>
+                  <button type="button" className="icon-btn" data-tip="@" aria-label={`加入上下文 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context-dir"); }}><Icon name="at" /></button>
                   <button type="button" className="icon-btn" data-tip="更多" aria-label={`更多操作 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
                 </span>
               </div>
@@ -94,12 +94,16 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
             <span className="tw" />
             <span className="fi"><Icon name={code ? "file-code" : "file"} /></span>
             <span className="fname ellipsis">{node.name}</span>
-            {node.writing ? <span className="live" role="img" aria-label="OMP 正在写入"><span className="dot blue pulse" /></span> : null}
-            {node.reading ? <span className="live" role="img" aria-label="OMP 正在读取"><span className="dot purple pulse" /></span> : null}
+            {node.writing || node.reading ? (
+              <span className="live">
+                {node.reading ? <span className="dot red pulse" role="img" aria-label="读取中" data-tip="读取中" /> : null}
+                {node.writing ? <span className="dot green pulse" role="img" aria-label="写入中" data-tip="写入中" /> : null}
+              </span>
+            ) : null}
             {node.diagnostic ? <span className={`diag ${node.diagnostic === "error" ? "err" : "warn"}`} role="img" aria-label={node.diagnostic === "error" ? "存在诊断错误" : "存在诊断警告"} /> : null}
             <FileStat status={node.status} />
             <span className="fop">
-              <button type="button" className="icon-btn" data-tip="加入上下文" aria-label={`加入上下文 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context"); }}><Icon name="at" /></button>
+              <button type="button" className="icon-btn" data-tip="@" aria-label={`加入上下文 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context"); }}><Icon name="at" /></button>
               <button type="button" className="icon-btn" data-tip="更多" aria-label={`更多操作 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
             </span>
           </div>
@@ -236,7 +240,7 @@ export function PreviewContextPanel() {
         </div>
         <div className="ctxbar">
           {PREVIEW_CTX_PARTS.map((part) => (
-            <i key={part.name} style={{ width: `${part.pct}%`, background: part.color }} title={`${part.name} ${part.v}`} />
+            <i key={part.name} style={{ width: `${part.pct}%`, background: part.color }} data-tip={part.name} />
           ))}
         </div>
         <div className="ctx-legend">
@@ -286,7 +290,15 @@ function previewDiffFiles(rows: readonly { file: string; add: number; del: numbe
 const PREVIEW_TURN_LAST = "last";
 const PREVIEW_TURN_SESSION = "session";
 
-export function PreviewChanges({ focusPath }: { focusPath?: string }) {
+export function PreviewChanges({
+  focusPath,
+  focusTurnId,
+  focusKey,
+}: {
+  focusPath?: string;
+  focusTurnId?: string;
+  focusKey?: number;
+}) {
   const last = previewDelta(PREVIEW_CHANGES.turn);
   const session = previewDelta(PREVIEW_CHANGES.thread);
   const [turnId, setTurnId] = useState(PREVIEW_TURN_LAST);
@@ -294,13 +306,21 @@ export function PreviewChanges({ focusPath }: { focusPath?: string }) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const files = previewDiffFiles(turnId === PREVIEW_TURN_SESSION ? PREVIEW_CHANGES.thread : PREVIEW_CHANGES.turn);
   useEffect(() => {
+    if (focusTurnId === undefined) return;
+    if (focusTurnId === PREVIEW_TURN_SESSION || focusTurnId === PREVIEW_TURN_LAST) {
+      setTurnId(focusTurnId);
+      setExpanded(new Set());
+    }
+  }, [focusTurnId, focusKey]);
+  useEffect(() => {
+    if (focusTurnId !== undefined) return;
     if (focusPath === undefined) return;
     const inLast = PREVIEW_CHANGES.turn.some((row) => row.file === focusPath);
     const inSession = PREVIEW_CHANGES.thread.some((row) => row.file === focusPath);
     if (!inLast && !inSession) return;
     setTurnId(inLast ? PREVIEW_TURN_LAST : PREVIEW_TURN_SESSION);
     setExpanded(new Set([focusPath]));
-  }, [focusPath]);
+  }, [focusPath, focusTurnId]);
   return (
     <ChangesPanel
       demo
@@ -397,9 +417,9 @@ export function PreviewGitPanel() {
         <span className="git-branch-label ellipsis"><Icon name="branch" extra="sm" />{PREVIEW_GIT.branch}</span>
         <span className="chip gray xs">↑{PREVIEW_GIT.ahead} ↓{PREVIEW_GIT.behind}</span>
         <span className="spacer" />
-        <GitTip text="演示仓库，不会发给 Host"><button type="button" className="btn small outline" disabled>Fetch</button></GitTip>
-        <GitTip text="演示仓库，不会发给 Host"><button type="button" className="btn small outline" disabled>Pull</button></GitTip>
-        <GitTip text="演示仓库，不会发给 Host"><button type="button" className="btn small outline" disabled>Push</button></GitTip>
+        <GitTip text="演示"><button type="button" className="btn small outline" disabled>Fetch</button></GitTip>
+        <GitTip text="演示"><button type="button" className="btn small outline" disabled>Pull</button></GitTip>
+        <GitTip text="演示"><button type="button" className="btn small outline" disabled>Push</button></GitTip>
       </div>
       <div className="git-notice" role="status">演示仓库状态（omp-web / main）。预览模式下不执行任何 Git 操作。</div>
       <div className="git-actions">
@@ -408,14 +428,14 @@ export function PreviewGitPanel() {
       </div>
       <div className="ch-list">
         {group("已暂存", PREVIEW_GIT.staged, (
-          <GitTip text="演示：取消暂存全部，不会发给 Host">
+          <GitTip text="演示">
             <button type="button" className="icon-btn small" aria-label="取消暂存全部" disabled>
               <Icon name="minus" extra="sm" />
             </button>
           </GitTip>
         ))}
         {group("工作区", PREVIEW_GIT.working, (
-          <GitTip text="演示：暂存全部，不会发给 Host">
+          <GitTip text="演示">
             <button type="button" className="icon-btn small" aria-label="暂存全部" disabled>
               <Icon name="plus" extra="sm" />
             </button>
@@ -424,7 +444,7 @@ export function PreviewGitPanel() {
       </div>
       <div className="git-commit-box">
         <textarea disabled placeholder="Commit message（演示）" rows={1} readOnly value="" onChange={() => undefined} />
-        <GitTip text="演示仓库，不会创建 Commit"><button type="button" className="btn small primary" disabled>Commit</button></GitTip>
+        <GitTip text="演示"><button type="button" className="btn small primary" disabled>Commit</button></GitTip>
       </div>
       {active !== null ? (
         <>
@@ -574,7 +594,7 @@ export function PreviewProblems() {
         const sev = SEV[problem.sev];
         return (
           <div className="prob-row" key={`${problem.src}-${problem.msg}`}>
-            <button type="button" className="prob-open" disabled title="演示 Problems，不会打开文件">
+            <button type="button" className="prob-open" disabled data-tip="打开（演示）">
               <span className={`prob-sev sev-${sev.tone}`} role="img" aria-label={sev.label}><Icon name={sev.icon} extra="sm" /></span>
               <span className="chip gray xs">{problem.src}</span>
               <span className="ellipsis">{problem.msg}</span>
@@ -602,7 +622,7 @@ export function PreviewTests() {
               <span className={`chip ${pass ? "green" : "red"} sm`}>{test.pass}/{test.total} 通过</span>
               <span className="tiny muted mono">{test.time}</span>
               <span className="spacer" />
-              <button type="button" className="btn small outline" disabled title="演示 Tests，不会真正运行">重新运行</button>
+              <button type="button" className="btn small outline" disabled data-tip="重跑（演示）">重新运行</button>
             </div>
             {test.failDetail ? <pre className="test-fail">{test.failDetail}</pre> : null}
           </div>
@@ -633,7 +653,7 @@ export function PreviewSwitch({ enabled, preview, onToggle }: {
       type="button"
       className={`preview-switch${preview ? " on" : ""}`}
       aria-pressed={preview}
-      data-tip={preview ? "预览模式：演示数据。点击退出，使用真实数据。" : "进入预览模式，显示演示数据。"}
+      data-tip={preview ? "退出预览" : "预览"}
       aria-label={preview ? "退出预览模式" : "进入预览模式"}
       onClick={onToggle}
     >

@@ -124,4 +124,119 @@ describe("WP-034 StudioTreeService", () => {
 			details: { toolCallId: "ask-call" },
 		});
 	});
+
+	test("refuses to navigate while streaming without calling navigateTree", async () => {
+		let navigateCalls = 0;
+		const session = {
+			isStreaming: true,
+			isCompacting: false,
+			navigateTree: async () => {
+				navigateCalls += 1;
+				return { cancelled: false };
+			},
+			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+		} as unknown as AgentSession;
+		await expect(new StudioTreeService(session).navigate("cmd-1", { targetId: "entry-1" })).rejects.toMatchObject({
+			code: "BUSY_STREAMING",
+		});
+		expect(navigateCalls).toBe(0);
+	});
+
+	test("refuses to navigate while compacting without calling navigateTree", async () => {
+		let navigateCalls = 0;
+		const session = {
+			isStreaming: false,
+			isCompacting: true,
+			navigateTree: async () => {
+				navigateCalls += 1;
+				return { cancelled: false };
+			},
+			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+		} as unknown as AgentSession;
+		await expect(new StudioTreeService(session).navigate("cmd-1", { targetId: "entry-1" })).rejects.toMatchObject({
+			code: "BUSY_COMPACTING",
+		});
+		expect(navigateCalls).toBe(0);
+	});
+
+	test("navigate receipts include filtered editorImages", async () => {
+		const session = {
+			isStreaming: false,
+			isCompacting: false,
+			navigateTree: async () => ({
+				cancelled: false,
+				editorText: "look",
+				editorImages: [
+					{ type: "image", mimeType: "image/png", data: "aaa" },
+					{ type: "image", mimeType: "image/svg+xml", data: "skip" },
+					{ type: "text", text: "nope" },
+				],
+			}),
+			sessionManager: { getLeafId: () => "leaf", getTree: () => [] },
+		} as unknown as AgentSession;
+		await expect(new StudioTreeService(session).navigate("cmd-1", { targetId: "entry-1" })).resolves.toEqual({
+			cancelled: false,
+			aborted: false,
+			askReanswerCommitted: false,
+			leafId: "leaf",
+			editorText: "look",
+			editorImages: [{ type: "image", mimeType: "image/png", data: "aaa" }],
+		});
+	});
+
+	test("refuses to branch while streaming without calling branch", async () => {
+		let branchCalls = 0;
+		const session = {
+			isStreaming: true,
+			isCompacting: false,
+			branch: async () => {
+				branchCalls += 1;
+				return { selectedText: "x", selectedImages: [], cancelled: false };
+			},
+			sessionManager: { getLeafId: () => "leaf", getSessionId: () => "session-1", getTree: () => [] },
+		} as unknown as AgentSession;
+		await expect(new StudioTreeService(session).branch("cmd-1", { targetId: "entry-1" })).rejects.toMatchObject({
+			code: "BUSY_STREAMING",
+		});
+		expect(branchCalls).toBe(0);
+	});
+
+	test("refuses to branch while compacting without calling branch", async () => {
+		let branchCalls = 0;
+		const session = {
+			isStreaming: false,
+			isCompacting: true,
+			branch: async () => {
+				branchCalls += 1;
+				return { selectedText: "x", selectedImages: [], cancelled: false };
+			},
+			sessionManager: { getLeafId: () => "leaf", getSessionId: () => "session-1", getTree: () => [] },
+		} as unknown as AgentSession;
+		await expect(new StudioTreeService(session).branch("cmd-1", { targetId: "entry-1" })).rejects.toMatchObject({
+			code: "BUSY_COMPACTING",
+		});
+		expect(branchCalls).toBe(0);
+	});
+
+	test("branch receipts include sessionId, editorText, and filtered editorImages", async () => {
+		const session = {
+			isStreaming: false,
+			isCompacting: false,
+			branch: async () => ({
+				selectedText: "from user",
+				selectedImages: [
+					{ type: "image", mimeType: "image/jpeg", data: "bbb" },
+					{ type: "image", mimeType: "image/tiff", data: "skip" },
+				],
+				cancelled: false,
+			}),
+			sessionManager: { getLeafId: () => "leaf", getSessionId: () => "branched-session", getTree: () => [] },
+		} as unknown as AgentSession;
+		await expect(new StudioTreeService(session).branch("cmd-1", { targetId: "entry-1" })).resolves.toEqual({
+			cancelled: false,
+			sessionId: "branched-session",
+			editorText: "from user",
+			editorImages: [{ type: "image", mimeType: "image/jpeg", data: "bbb" }],
+		});
+	});
 });

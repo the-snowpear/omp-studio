@@ -23,10 +23,30 @@ export type ReconstructSessionBranch = {
 	branch: SessionEntry[];
 };
 
+function isActiveLeafPointer(entry: FileEntry): entry is FileEntry & { targetId: string } {
+	const record = entry as FileEntry & { targetId?: unknown };
+	return (
+		(entry as { type: string }).type === "active_leaf" &&
+		typeof record.targetId === "string" &&
+		record.targetId.length > 0
+	);
+}
+
 export function reconstructSessionBranch(entries: readonly FileEntry[]): ReconstructSessionBranch | undefined {
 	const header = entries.find(entry => entry.type === "session");
 	if (header === undefined || typeof header.id !== "string" || header.id.length === 0) return undefined;
-	const sessionEntries = entries.filter((entry): entry is SessionEntry => entry.type !== "session");
+	let activeLeafId: string | undefined;
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index];
+		if (entry !== undefined && isActiveLeafPointer(entry)) {
+			activeLeafId = entry.targetId;
+			break;
+		}
+	}
+	const sessionEntries = entries.filter((entry): entry is SessionEntry => {
+		if (entry.type === "session") return false;
+		return (entry as { type: string }).type !== "active_leaf";
+	});
 	if (sessionEntries.length === 0) {
 		return { sessionId: header.id, branchLeafId: "", branch: [] };
 	}
@@ -34,7 +54,8 @@ export function reconstructSessionBranch(entries: readonly FileEntry[]): Reconst
 	for (const entry of sessionEntries) {
 		if (typeof entry.id === "string" && entry.id.length > 0) byId.set(entry.id, entry);
 	}
-	const leaf = sessionEntries.at(-1);
+	const leaf =
+		(activeLeafId !== undefined ? byId.get(activeLeafId) : undefined) ?? sessionEntries.at(-1);
 	if (leaf === undefined || typeof leaf.id !== "string" || leaf.id.length === 0) {
 		return { sessionId: header.id, branchLeafId: "", branch: [] };
 	}

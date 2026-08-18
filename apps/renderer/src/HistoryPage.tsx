@@ -13,9 +13,9 @@ import {
 } from "./preview/fixtures";
 
 const CONTRACT = {
-  export: "导出会话不在公共 contract 中",
-  fork: "Fork 会话不在公共 contract 中",
-  more: "更多会话操作不在公共 contract 中",
+  export: "导出（暂未实现）",
+  fork: "Fork（暂未实现）",
+  more: "更多（暂未实现）",
 } as const;
 
 /** 工具栏状态筛选：纯客户端过滤已加载的会话模型，不涉及 Host 契约。 */
@@ -109,16 +109,16 @@ function PreviewHistRow({
         <button
           type="button"
           className="icon-btn small"
-          data-tip={row.status === "archived" ? "恢复：已归档会话需先取消归档" : `恢复：${row.title}`}
-          aria-label={`恢复：${row.title}`}
+          data-tip={row.status === "archived" ? "先取消归档" : "恢复"}
+          aria-label="恢复"
           disabled={row.status === "archived"}
           onClick={() => onAct("resume")}
         ><Icon name="refresh" extra="sm" /></button>
-        <button type="button" className="icon-btn small" data-tip={`Fork：${row.title}`} aria-label={`Fork：${row.title}`} onClick={() => onAct("fork")}><Icon name="fork" extra="sm" /></button>
+        <button type="button" className="icon-btn small" data-tip="Fork" aria-label="Fork" onClick={() => onAct("fork")}><Icon name="fork" extra="sm" /></button>
         {row.status === "archived" ? (
-          <button type="button" className="icon-btn small" data-tip={`取消归档：${row.title}`} aria-label={`取消归档：${row.title}`} onClick={() => onAct("unarchive")}><Icon name="external" extra="sm" /></button>
+          <button type="button" className="icon-btn small" data-tip="取消归档" aria-label="取消归档" onClick={() => onAct("unarchive")}><Icon name="external" extra="sm" /></button>
         ) : null}
-        <button type="button" className="icon-btn small" data-tip={`更多操作：${row.title}`} aria-label={`更多操作：${row.title}`} onClick={() => onAct("more")}><Icon name="more" extra="sm" /></button>
+        <button type="button" className="icon-btn small" data-tip="更多" aria-label="更多操作" onClick={() => onAct("more")}><Icon name="more" extra="sm" /></button>
       </div>
     </div>
   );
@@ -151,16 +151,16 @@ function HostHistRow({
         <button
           type="button"
           className="icon-btn small"
-          data-tip={archived ? "恢复：已归档会话需先取消归档" : `恢复：${entry.title}`}
-          aria-label={`恢复：${entry.title}`}
+          data-tip={archived ? "先取消归档" : "恢复"}
+          aria-label="恢复"
           disabled={archived}
           onClick={onOpen}
         ><Icon name="refresh" extra="sm" /></button>
-        <button type="button" className="icon-btn small" disabled title={CONTRACT.fork} data-tip={CONTRACT.fork} aria-label={`Fork：${entry.title}`}><Icon name="fork" extra="sm" /></button>
+        <button type="button" className="icon-btn small" disabled data-tip={CONTRACT.fork} aria-label="Fork"><Icon name="fork" extra="sm" /></button>
         {archived && onUnarchive !== undefined ? (
-          <button type="button" className="icon-btn small" data-tip={`取消归档：${entry.title}`} aria-label={`取消归档：${entry.title}`} onClick={onUnarchive}><Icon name="external" extra="sm" /></button>
+          <button type="button" className="icon-btn small" data-tip="取消归档" aria-label="取消归档" onClick={onUnarchive}><Icon name="external" extra="sm" /></button>
         ) : null}
-        <button type="button" className="icon-btn small" disabled title={CONTRACT.more} data-tip={CONTRACT.more} aria-label={`更多操作：${entry.title}`}><Icon name="more" extra="sm" /></button>
+        <button type="button" className="icon-btn small" disabled data-tip={CONTRACT.more} aria-label="更多操作"><Icon name="more" extra="sm" /></button>
       </div>
     </div>
   );
@@ -263,7 +263,7 @@ export function HistoryPage({
               </>
             )
             : (
-              <button type="button" className="btn outline" disabled title={CONTRACT.export}>
+              <button type="button" className="btn outline" disabled data-tip={CONTRACT.export}>
                 <Icon name="export" extra="sm" />导出
               </button>
             )}

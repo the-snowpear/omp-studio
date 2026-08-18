@@ -15,6 +15,7 @@ directories:
 files:
   - dist/**          # apps/desktop/dist — 编译后的 Electron Main
   - package.json
+  - resources/**     # window / notification / asar-local app icon
   - node_modules/**  # 依赖（含 @omp-studio/* workspace 包与 node-pty）
 
 # 原生模块：按 Electron ABI 重编译 node-pty（与 apps/desktop 的 @electron/rebuild 对应）
@@ -25,6 +26,15 @@ buildDependenciesFromSource: false
 asarUnpack:
   - "**/*.node"
 
+# 签名 Runtime 活副本，放在安装目录而不是 asar 里（omp.exe 必须能被 spawn）。
+# 目录对齐 RuntimeInstaller：`$INSTDIR\runtime\versions\<ver>\omp.exe`。
+# 打包前先 npm run omp:build:host，再 node scripts/prepare-installer-resources.mjs。
+extraFiles:
+  - from: packages/runtime-installer/dist/artifacts/win32-x64
+    to: runtime/versions
+  - from: packaging/runtime-keys
+    to: runtime-keys
+
 win:
   # 骨架阶段：x64 即可；正式发布再加 arm64
   target:
@@ -33,19 +43,30 @@ win:
         - x64
   # 复用 desktop 现有图标资源（ico 用于安装器/快捷方式）
   icon: apps/desktop/resources/icon.ico
+  requestedExecutionLevel: requireAdministrator
 
 nsis:
   # 向导式安装（非 oneClick）：允许选择安装目录，符合原型 UI 的交互
   oneClick: false
   allowToChangeInstallationDirectory: true
-  # 每用户安装（免管理员）；企业场景可改 perMachine
-  perMachine: false
+  # 所有用户安装（Program Files，需要管理员）。
+  # oneClick:false + perMachine:true = 不出现「仅为我 / 所有用户」页。
+  perMachine: true
+  # true = 全新安装默认创建；升级时不强迫重建用户已删的桌面图标。不要改 always。
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: OMP Studio
-  # 卸载时保留 Electron userData（运行时、会话等）
+  menuCategory: false
+  runAfterFinish: true
+  # 对 oneClick:false 无效。会话/运行时/日志必须保留；头像由 customUnInstall 在真卸载时删除。
+  # 该宏在升级时也会跑，custom.nsh 必须用 ${isUpdated} 跳过。
   deleteAppDataOnUninstall: false
-  # 升级时保留安装目录旁的 userdata/（头像等），不要整目录 RMDir
+  # customRemoveFiles：升级只清程序文件并留下 userdata；真卸载才 RMDir /r $INSTDIR
   include: packaging/nsis/custom.nsh
+  installerLanguages:
+    - zh_CN
+    - en_US
+  language: 2052
+  uninstallDisplayName: OMP Studio
   # 骨架阶段未完成签名；正式发布需替换为真实证书
   # signingHashAlgorithms: [sha256]

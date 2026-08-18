@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { AskActions, AskBody, AskHead } from "./AskCard";
+import { ASK_GENIE_HOLD_MS, ASK_GENIE_MS, prefersReducedMotion } from "./askGenie";
 import { askAnswered, nextPicked } from "./askContent";
 import { PlanCard } from "./PlanCard";
 import { type DeckQueue } from "./PromptHead";
 import { NO_ASK_ANSWER, type AskHeader, type DeckAskAnswer, type DeckAskQuestion } from "./types";
 import type { SlideDir } from "../pageTransition";
-
-function prefersReducedMotion(): boolean {
-  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 export type QueuedDeckItem =
   | {
@@ -84,10 +81,14 @@ export function QueuedDeck({
   submitError,
   regionLabel,
   previewMark,
+  planExpanded,
+  onPlanExpandedChange,
+  planOriginRef,
   onCurrentKind,
   onAskSubmit,
   onAskCancel,
   onPlanAction,
+  leaving,
 }: {
   readonly items: readonly QueuedDeckItem[];
   readonly demo?: boolean;
@@ -95,6 +96,10 @@ export function QueuedDeck({
   readonly submitError?: boolean;
   readonly regionLabel: string;
   readonly previewMark?: boolean;
+  readonly leaving?: boolean;
+  readonly planExpanded?: boolean;
+  readonly onPlanExpandedChange?: (open: boolean) => void;
+  readonly planOriginRef?: RefObject<HTMLElement | null>;
   readonly onCurrentKind?: (kind: "plan" | "ask" | null) => void;
   readonly onAskSubmit?: (item: QueuedAskItem, answer: DeckAskAnswer) => boolean | Promise<boolean>;
   readonly onAskCancel?: (item: QueuedAskItem) => boolean | Promise<boolean>;
@@ -112,11 +117,35 @@ export function QueuedDeck({
   const swapRef = useRef<HTMLDivElement>(null);
   const liveRef = useRef<HTMLDivElement>(null);
   const focusSlot = useRef<string | null>(null);
+  const leaveTimerRef = useRef<number | undefined>(undefined);
+  const [askPhase, setAskPhase] = useState<"enter" | "open" | "leave" | "idle">(
+    () => items[0]?.kind === "ask" && !prefersReducedMotion() ? "enter" : items[0]?.kind === "ask" ? "open" : "idle",
+  );
+  const prevKindRef = useRef(items[0]?.kind);
 
   const total = remaining.length;
   const index = total === 0 ? 0 : Math.min(pos, total - 1);
   const current = remaining[index];
-  const locked = disabled === true || busy;
+  const editsLocked = busy || askPhase === "leave" || leaving === true;
+  const actionsLocked = editsLocked || disabled === true;
+  const kind = current?.kind;
+  useLayoutEffect(() => {
+    const prev = prevKindRef.current;
+    if (kind === "ask" && prev !== "ask") {
+      setAskPhase(prefersReducedMotion() ? "open" : "enter");
+    } else if (kind === "plan") {
+      setAskPhase("idle");
+    }
+    prevKindRef.current = kind;
+  }, [kind]);
+  useEffect(() => {
+    if (askPhase !== "enter") return;
+    const timer = window.setTimeout(() => setAskPhase("open"), ASK_GENIE_MS);
+    return () => window.clearTimeout(timer);
+  }, [askPhase]);
+  useEffect(() => () => {
+    if (leaveTimerRef.current !== undefined) window.clearTimeout(leaveTimerRef.current);
+  }, []);
   useEffect(() => {
     if (onCurrentKind === undefined) return;
     onCurrentKind(current === undefined ? null : current.kind === "plan" ? "plan" : "ask");
@@ -183,12 +212,25 @@ export function QueuedDeck({
   }, [beginSwap, pos, remaining, total]);
 
   const drop = useCallback((id: string) => {
+    const gone = remaining.find((item) => item.id === id);
+    const next = remaining.filter((item) => item.id !== id);
+    const lastAsk = gone?.kind === "ask" && next.length === 0;
+    if (lastAsk && !prefersReducedMotion()) {
+      if (askPhase === "leave") return;
+      setAskPhase("leave");
+      leaveTimerRef.current = window.setTimeout(() => {
+        leaveTimerRef.current = undefined;
+        setRemaining(next);
+        setAskPhase("idle");
+      }, ASK_GENIE_HOLD_MS);
+      return;
+    }
     beginSwap(null, "fwd");
-    setRemaining((list) => list.filter((item) => item.id !== id));
-  }, [beginSwap]);
+    setRemaining(next);
+  }, [askPhase, beginSwap, remaining]);
 
   const dismissAsk = useCallback(async (item: QueuedAskItem, reason: "submit" | "cancel") => {
-    if (locked) return;
+    if (actionsLocked) return;
     if (reason === "submit" && onAskSubmit) {
       setBusy(true);
       try {
@@ -208,20 +250,20 @@ export function QueuedDeck({
       }
     }
     drop(item.id);
-  }, [answers, drop, locked, onAskCancel, onAskSubmit]);
+  }, [answers, drop, actionsLocked, onAskCancel, onAskSubmit]);
 
   const pick = useCallback((item: QueuedAskItem, label: string) => {
-    if (locked) return;
+    if (editsLocked) return;
     setAnswers((prev) => {
       const at = prev[item.id] ?? NO_ASK_ANSWER;
       return { ...prev, [item.id]: { ...at, picked: nextPicked(item.question, at.picked, label) } };
     });
-  }, [locked]);
+  }, [editsLocked]);
 
   const writeCustom = useCallback((id: string, custom: string) => {
-    if (locked) return;
+    if (editsLocked) return;
     setAnswers((prev) => ({ ...prev, [id]: { ...(prev[id] ?? NO_ASK_ANSWER), custom } }));
-  }, [locked]);
+  }, [editsLocked]);
 
   if (!current) {
     return <div className="deck" role="region" aria-label={regionLabel} />;
@@ -243,16 +285,19 @@ export function QueuedDeck({
     <AskBody
       question={item.question}
       answer={answers[item.id] ?? NO_ASK_ANSWER}
-      {...(locked ? { disabled: true } : {})}
+      {...(editsLocked ? { disabled: true } : {})}
       onPick={(label) => pick(item, label)}
       onCustom={(value) => writeCustom(item.id, value)}
       onSubmit={() => { void dismissAsk(item, "submit"); }}
     />
   );
 
+  const askShell = current?.kind === "ask" || askPhase === "leave" || leaving === true;
+  const askEnter = askPhase === "enter" && leaving !== true;
+  const askLeave = askPhase === "leave" || leaving === true;
   return (
     <div
-      className="deck active preview-queue"
+      className={`deck active preview-queue${askShell ? " is-ask" : ""}${askEnter ? " is-ask-enter" : ""}${askLeave ? " is-ask-leave" : ""}`}
       {...(previewMark === true ? { "data-preview-deck": true } : {})}
       role="region"
       aria-label={regionLabel}
@@ -266,6 +311,9 @@ export function QueuedDeck({
               body={current.body}
               {...(demo === true ? { demo: true } : {})}
               {...(current.meta ? { meta: current.meta } : {})}
+              {...(planExpanded === undefined ? {} : { expanded: planExpanded })}
+              {...(onPlanExpandedChange === undefined ? {} : { onExpandedChange: onPlanExpandedChange })}
+              {...(planOriginRef === undefined ? {} : { originRef: planOriginRef })}
               onAction={() => {
                 onPlanAction?.(current);
                 drop(current.id);
@@ -297,7 +345,7 @@ export function QueuedDeck({
                 </p>
               ) : null}
               <AskActions
-                {...(locked ? { disabled: true } : {})}
+                {...(actionsLocked ? { disabled: true } : {})}
                 canSubmit={askAnswered(answers[current.id] ?? NO_ASK_ANSWER)}
                 onCancel={() => { void dismissAsk(current, "cancel"); }}
                 onSubmit={() => { void dismissAsk(current, "submit"); }}

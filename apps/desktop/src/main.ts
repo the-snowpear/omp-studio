@@ -22,9 +22,10 @@ import {
   registerTitleBarOverlayIpc,
 } from "./titlebar-overlay.js";
 import { registerChromeImageIpc } from "./chrome-image.js";
+import { APP_USER_MODEL_ID, resolveAppIconPath } from "./app-icon.js";
 import { registerChromeNotifyIpc } from "./chrome-notify.js";
+import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
 import { registerChromeProfileIpc } from "./chrome-profile.js";
-import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 
@@ -63,24 +64,16 @@ const PRELOAD_OUTPUT = "dist/preload.cjs";
 /** Developer-only override for the renderer entry (Vite dev server). */
 const RENDERER_DEV_URL = process.env.OMP_RENDERER_DEV_URL;
 
-/** Window / dock icon next to `package.json` (`resources/icon.ico|.png`). */
-function resolveAppIconPath(): string | undefined {
-  const dir = join(app.getAppPath(), "resources");
-  const ico = join(dir, "icon.ico");
-  const png = join(dir, "icon.png");
-  if (process.platform === "win32" && existsSync(ico)) return ico;
-  if (existsSync(png)) return png;
-  if (existsSync(ico)) return ico;
-  return undefined;
-}
-
 export async function main(): Promise<void> {
+  if (process.platform === "win32") {
+    app.setAppUserModelId(APP_USER_MODEL_ID);
+  }
   await app.whenReady();
 
   const target = resolveRendererEntry(app.getAppPath(), RENDERER_DEV_URL);
   const allowedOrigin = rendererOriginFor(target);
   const preloadPath = join(app.getAppPath(), PRELOAD_OUTPUT);
-  const appIcon = resolveAppIconPath();
+  const appIcon = resolveAppIconPath({ appPath: app.getAppPath(), platform: process.platform });
   if (process.platform === "darwin" && appIcon) {
     app.dock?.setIcon(appIcon);
   }
@@ -91,6 +84,10 @@ export async function main(): Promise<void> {
     openUrl: async (url) => {
       if (!/^https?:\/\//i.test(url)) throw new Error("refusing to open a non-http login url");
       await shell.openExternal(url);
+    },
+    revealDirectory: async (absDir) => {
+      const error = await shell.openPath(absDir);
+      if (error.length > 0) throw new Error(error);
     },
   });
   const terminalManager = new TerminalSessionManager({
@@ -167,7 +164,22 @@ export async function main(): Promise<void> {
       isTrustedSender,
     });
     const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
-    const disposeNotify = registerChromeNotifyIpc({ isTrustedSender });
+    const disposeNotify = registerChromeNotifyIpc({
+      isTrustedSender,
+      ...(appIcon === undefined ? {} : { icon: appIcon }),
+    });
+    const disposeOpenUrl = registerChromeOpenUrlIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      openExternal: (url) => shell.openExternal(url),
+    });
     const disposeProfile = registerChromeProfileIpc({ isTrustedSender });
     const disposeImage = registerChromeImageIpc({
       ipcMain: {
@@ -263,6 +275,7 @@ export async function main(): Promise<void> {
         disposeTerminal.dispose();
         disposeImage.dispose();
         disposeProfile();
+        disposeOpenUrl.dispose();
         disposeNotify();
         disposeChrome();
         ipc.dispose();

@@ -35,6 +35,7 @@ import "./styles/workbench.css";
 import "./styles/pages.css";
 import "./styles/agent-hub.css";
 import "./styles/models-roles.css";
+import "./styles/btw.css";
 import "./App.css";
 
 /** Mount the renderer into `element` with an injected semantic client. */

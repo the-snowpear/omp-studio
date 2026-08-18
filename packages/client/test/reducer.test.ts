@@ -33,14 +33,16 @@ import type {
   StateVersion,
   ThreadId,
 } from "@omp-studio/client-contract";
-import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+import type { CommandId, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 import { MemoryClientTransport } from "../src/memory-transport.js";
 import {
   createInitialClientState,
   isSensitiveCommand,
   reduceClientState,
+  COMMAND_STATE_TERMINAL_CAP,
   RESYNC_REQUIRED_ERROR,
+  selectBtwSnapshot,
   type ClientState,
 } from "../src/reducer.js";
 import type { ClientClockAndIds } from "../src/clock.js";
@@ -425,6 +427,61 @@ test("stale-session telemetry consumes its cursor without replacing current tele
   assert.equal(state.connection.resyncRequired, false);
 });
 
+test("btw.changed writes the side-channel snapshot for the live session", () => {
+  let state = bootedState();
+  const snapshot = { ephemeralId: "ephemeral-1", status: "running" as const, text: "partial" };
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...base("11", { runtimeEpoch: 1 as RuntimeEpoch }),
+      kind: "btw.changed",
+      sessionId: "sess-1" as SessionId,
+      eventSeq: 4,
+      snapshot,
+    },
+  });
+  assert.equal(state.connection.cursor, "11");
+  assert.deepEqual(selectBtwSnapshot(state), snapshot);
+
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...base("12", { runtimeEpoch: 1 as RuntimeEpoch }),
+      kind: "resync.required",
+      reason: "cursor gap",
+    },
+  });
+  assert.equal(selectBtwSnapshot(state), null);
+});
+
+test("stale-session BTW consumes its cursor without replacing the live answer", () => {
+  let state = bootedState();
+  const live = { ephemeralId: "ephemeral-live", status: "completed" as const, text: "keep me" };
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...base("11", { runtimeEpoch: 1 as RuntimeEpoch }),
+      kind: "btw.changed",
+      sessionId: "sess-1" as SessionId,
+      eventSeq: 4,
+      snapshot: live,
+    },
+  });
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...base("12", { runtimeEpoch: 1 as RuntimeEpoch }),
+      kind: "btw.changed",
+      sessionId: "sess-old" as SessionId,
+      eventSeq: 5,
+      snapshot: { ephemeralId: "ephemeral-old", status: "running", text: "stale" },
+    },
+  });
+  assert.equal(state.connection.cursor, "12");
+  assert.deepEqual(selectBtwSnapshot(state), live);
+  assert.equal(state.connection.resyncRequired, false);
+});
+
 test("session.resume survives its expected connected epoch change until the completed receipt", () => {
   let state = bootedState();
   state = issue(state, "session.resume", REQ_1);
@@ -609,6 +666,64 @@ test("interaction.resolved clears pending only for matching id and generation", 
   assert.ok(state.interaction.pending);
 });
 
+test("a snapshot that still names the same GUI prompt keeps the pending card", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  const pending = state.interaction.pending;
+  assert.ok(pending);
+  state = reduceClientState(state, {
+    type: "event",
+    event: snapshotEvent(12, {
+      ...snapshot(2, 1),
+      pendingInteraction: {
+        request: {
+          kind: "confirm",
+          interactionId: "ia-1" as InteractionId,
+          commandId: "cmd-1" as CommandId,
+          title: "Confirm drop",
+          message: "Drop thread?",
+          destructive: true,
+        },
+        owner: "gui",
+        leaseGeneration: 1,
+      },
+    }),
+  });
+  assert.equal(state.interaction.pending, pending);
+  assert.equal(state.entities.snapshot?.stateVersion, 2);
+});
+
+test("a snapshot without a GUI prompt clears the pending card", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  assert.ok(state.interaction.pending);
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(2, 1)) });
+  assert.equal(state.interaction.pending, null);
+});
+
+test("a TUI-owned snapshot prompt does not keep a GUI pending card", () => {
+  let state = bootedState();
+  state = reduceClientState(state, { type: "event", event: interactionRequired(undefined, 11) });
+  state = reduceClientState(state, {
+    type: "event",
+    event: snapshotEvent(12, {
+      ...snapshot(2, 1),
+      pendingInteraction: {
+        request: {
+          kind: "confirm",
+          interactionId: "ia-1" as InteractionId,
+          commandId: "cmd-1" as CommandId,
+          title: "Confirm drop",
+          message: "Drop thread?",
+        },
+        owner: "tui",
+        leaseGeneration: 1,
+      },
+    }),
+  });
+  assert.equal(state.interaction.pending, null);
+});
+
 test("bootstrap restores pending interaction and clears it when absent", () => {
   const pending = {
     interactionId: "ia-1" as InteractionId,
@@ -678,6 +793,9 @@ test("sensitive mutations are blocked with RESYNC_REQUIRED while resync is requi
   }
   assert.equal(isSensitiveCommand("session.resume"), true);
   assert.equal(isSensitiveCommand("interaction.respond"), true);
+  assert.equal(isSensitiveCommand("btw.ask"), true);
+  assert.equal(isSensitiveCommand("btw.branch"), true);
+  assert.equal(isSensitiveCommand("btw.abort"), false);
   // workspace mutations change Host-side selection, so they are sensitive too
   assert.equal(isSensitiveCommand("workspace.open"), true);
   assert.equal(isSensitiveCommand("workspace.pick"), true);
@@ -1023,4 +1141,36 @@ test("child conversation.changed advances the cursor without stealing or polluti
   assert.equal(state.connection.cursor, "12");
   assert.equal(state.conversation.identity?.sessionId, "sess-1");
   assert.equal(state.conversation.lastEventSeq, 9);
+});
+
+test("terminal command receipts are capped so a long session cannot retain unbounded command state", () => {
+  let state = bootedState();
+  let cursor = 10;
+  const extra = 5;
+  const total = COMMAND_STATE_TERMINAL_CAP + extra;
+  for (let index = 0; index < total; index += 1) {
+    const requestId = `req-cap-${index}` as CommandRequestId;
+    state = reduceClientState(state, {
+      type: "command.issue",
+      requestId,
+      commandName: "runtime.install",
+      idempotencyKey: `idem-cap-${index}` as IdempotencyKey,
+      issuedAt: TS,
+    });
+    cursor += 1;
+    state = reduceClientState(state, { type: "event", event: completedReceipt(requestId, cursor) });
+  }
+  assert.equal(Object.keys(state.commands).length, COMMAND_STATE_TERMINAL_CAP);
+  assert.equal(state.commands["req-cap-0" as CommandRequestId], undefined);
+  assert.equal(state.commands[`req-cap-${extra}` as CommandRequestId]?.status, "completed");
+  const pendingId = "req-cap-inflight" as CommandRequestId;
+  state = reduceClientState(state, {
+    type: "command.issue",
+    requestId: pendingId,
+    commandName: "runtime.install",
+    idempotencyKey: "idem-inflight" as IdempotencyKey,
+    issuedAt: TS,
+  });
+  assert.equal(state.commands[pendingId]?.status, "local_pending");
+  assert.equal(Object.keys(state.commands).length, COMMAND_STATE_TERMINAL_CAP + 1);
 });

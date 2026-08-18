@@ -19,7 +19,9 @@ import type {
   ConfigWriteResult,
   DiagnosticEntryId,
   ExtensibilityReadModel,
+  McpLogsReadModel,
   McpReadModel,
+  McpTestResult,
   AgentDefinitionConfigureInput,
   AgentDefinitionDeleteInput,
   AgentDefinitionsReadModel,
@@ -37,10 +39,15 @@ import type {
   ModelProviderUpsertInput,
   ModelRoleCreateInput,
   ModelRolesWriteInput,
+  BtwAskOutcome,
+  BtwBranchOutcome,
   OperatorInvokeOutcome,
   OpaqueCursor,
+  SessionTreeCommandOutcome,
   RuntimeChannel,
   RuntimeInstallState,
+  RuntimeDisconnectCode,
+  RuntimeUnavailableCode,
   SessionHistoryStatus,
   ThreadId,
   WorkspaceId,
@@ -84,6 +91,7 @@ import {
   StudioHostError,
   type HostBackend,
   type RuntimePublication,
+  type StudioBtwForward,
   type StudioConversationForward,
   type StudioInteractionForward,
   type StudioTelemetryForward,
@@ -113,6 +121,87 @@ export interface HostRuntimeHelloView {
   readonly runtimeVersion?: string;
   readonly upstreamVersion?: string;
   readonly upstreamCommit?: string;
+}
+
+/**
+ * Last observed reason the Runtime never connected. Pre-redacted; never a
+ * path, PID or endpoint. The facade copies this onto `RuntimeConnection`
+ * when `hello()` is still undefined.
+ */
+export interface HostRuntimeUnavailable {
+  readonly code: RuntimeUnavailableCode;
+  readonly reason: string;
+}
+
+/**
+ * Last observed reason a previously connected Runtime dropped. Pre-redacted;
+ * never a path, PID or endpoint. The facade copies this onto
+ * `RuntimeConnection` when `hello()` becomes undefined after a prior hello.
+ */
+export interface HostRuntimeDisconnect {
+  readonly code: RuntimeDisconnectCode;
+  readonly reason: string;
+}
+
+/** English Host sentence for an unavailable code; the Renderer maps to Chinese. */
+export function formatRuntimeUnavailableMessage(facts: HostRuntimeUnavailable): string {
+  const reason = redactText(facts.reason).trim();
+  switch (facts.code) {
+    case "no-workspace":
+      return "Runtime is not available: no workspace is selected";
+    case "workspace-unusable":
+      return reason.length > 0
+        ? `Runtime is not available: workspace directory is unusable (${reason})`
+        : "Runtime is not available: workspace directory is unusable";
+    case "not-installed":
+      return reason.length > 0
+        ? `Runtime is not available: managed runtime is not installed (${reason})`
+        : "Runtime is not available: managed runtime is not installed";
+    case "resolution-rejected":
+      return reason.length > 0 ? `Runtime was rejected: ${reason}` : "Runtime was rejected";
+    case "resolution-limited":
+      return reason.length > 0 ? `Runtime is limited: ${reason}` : "Runtime is limited and was not started";
+    case "handshake-timeout":
+      return reason.length > 0 ? `Runtime handshake timed out: ${reason}` : "Runtime handshake timed out";
+    case "spawn-failed":
+      return reason.length > 0 ? `Runtime failed to spawn: ${reason}` : "Runtime failed to spawn";
+    case "exited-before-ready":
+      return reason.length > 0
+        ? `Runtime exited before it became ready: ${reason}`
+        : "Runtime exited before it became ready";
+    case "launch-failed":
+      return reason.length > 0 ? `Runtime failed to start: ${reason}` : "Runtime failed to start";
+    case "not-wired":
+      return "Runtime is not available: session port is not wired";
+  }
+}
+
+/** English Host sentence for a disconnect code; the Renderer maps to Chinese. */
+export function formatRuntimeDisconnectMessage(facts: HostRuntimeDisconnect): string {
+  const reason = redactText(facts.reason).trim();
+  switch (facts.code) {
+    case "process-exit":
+      return reason.length > 0 ? `Runtime process exited: ${reason}` : "Runtime process exited";
+    case "pipe-closed":
+      return reason.length > 0 ? `Runtime connection was lost: ${reason}` : "Runtime connection was lost";
+    case "lease-lost":
+      return reason.length > 0 ? `Runtime session lease was lost: ${reason}` : "Runtime session lease was lost";
+    case "host-stop":
+      return reason.length > 0 ? `Runtime was stopped: ${reason}` : "Runtime was stopped";
+  }
+}
+
+/**
+ * Command-path copy when a live Runtime is required. Prefers a disconnect
+ * reason (the process was up) over a never-connected skip/fail.
+ */
+export function formatRuntimeMissingMessage(input: {
+  readonly unavailable?: HostRuntimeUnavailable;
+  readonly disconnect?: HostRuntimeDisconnect;
+}): string {
+  if (input.disconnect !== undefined) return formatRuntimeDisconnectMessage(input.disconnect);
+  if (input.unavailable !== undefined) return formatRuntimeUnavailableMessage(input.unavailable);
+  return "Runtime is not available";
 }
 
 /**
@@ -161,6 +250,24 @@ export interface HostRuntimeAccess {
     readonly limit?: number;
   }) => Promise<ConversationTranscriptPage>;
   readonly hello: () => HostRuntimeHelloView | undefined;
+  /**
+   * Why the Runtime never connected. Read when `hello()` is undefined and
+   * no previous hello was observed. Optional: tests and read-only Hosts
+   * may omit it and the facade stays at the generic unavailable sentence.
+   */
+  readonly unavailable?: () => HostRuntimeUnavailable | undefined;
+  /**
+   * Why a previously connected Runtime dropped. Read when `hello()` is
+   * undefined after a prior hello. Optional: omitted means the generic
+   * disconnected sentence.
+   */
+  readonly disconnect?: () => HostRuntimeDisconnect | undefined;
+  /**
+   * Start or restart the managed Runtime under the current workspace.
+   * No-op when already connected. Optional: diagnostics `runtime.ensure`
+   * fails closed when omitted.
+   */
+  readonly ensure?: () => Promise<void>;
   readonly snapshot?: () => OperatorStateSnapshot | undefined;
   /** Opaque transcript head hint for bootstrap; never message bodies. */
   readonly messagesCursor?: () => OpaqueCursor | undefined;
@@ -169,7 +276,20 @@ export interface HostRuntimeAccess {
   readonly onConversationResync?: (listener: (reason: string) => void) => () => void;
   readonly onTelemetryEvent?: (listener: (event: StudioTelemetryForward) => void) => () => void;
   readonly onInteractionEvent?: (listener: (event: StudioInteractionForward) => void) => () => void;
+  readonly onBtwEvent?: (listener: (event: StudioBtwForward) => void) => () => void;
 }
+
+/**
+ * Every shape a Host `invoke` may return. Most operations resolve to the
+ * post-command snapshot; the exceptions carry extra facts that only exist on
+ * the receipt (operator output lines, editor fill-back, BTW branch token).
+ */
+export type HostInvokeOutcome =
+  | OperatorStateSnapshot
+  | OperatorInvokeOutcome
+  | SessionTreeCommandOutcome
+  | BtwAskOutcome
+  | BtwBranchOutcome;
 
 /** One session-history row as supplied by the Host-side catalog provider. */
 export interface HostCatalogEntry {
@@ -259,6 +379,13 @@ export type HostRuntimeInstallService = (
 ) => RuntimeInstallState | Promise<RuntimeInstallState>;
 
 /**
+ * Read-only local-artifact version probe for `environment.get`.
+ * Compares the installed runtime against the newest signed artifact on
+ * disk. Never downloads. Paths stay in the Host.
+ */
+export type HostRuntimeInstallProbe = () => RuntimeInstallState | Promise<RuntimeInstallState>;
+
+/**
  * Host-owned model/provider/role adapter. Paths and secrets stay here;
  * the facade only publishes the public read model and write receipts.
  */
@@ -313,6 +440,20 @@ export interface HostExtensibilityService {
     readonly enabled: boolean;
     readonly scope?: "user" | "project";
   }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  /**
+   * Open the winning skill directory in the system file manager. Paths stay
+   * in the adapter; the Renderer only supplies the skill name.
+   */
+  revealSkill(input: {
+    readonly name: string;
+    readonly scope?: "user" | "project";
+  }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  /**
+   * Open the native OMP skills root (user or project). Creates it if missing.
+   */
+  revealSkillRoot(input?: {
+    readonly scope?: "user" | "project";
+  }): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /**
@@ -326,6 +467,12 @@ export interface HostMcpService {
     readonly enabled: boolean;
     readonly scope?: "user" | "project";
   }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  refresh(input?: { readonly name?: string }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  test(input: {
+    readonly name: string;
+    readonly scope?: "user" | "project";
+  }): McpTestResult | Promise<McpTestResult>;
+  logs(input: { readonly name: string }): McpLogsReadModel | Promise<McpLogsReadModel>;
 }
 
 /**
@@ -428,8 +575,8 @@ export interface HostSemanticCommandService {
   /**
    * Apply the tool approval mode across resident Runtimes (plan §5.3): the
    * active Runtime persists the mode, siblings receive non-persistent
-   * overrides. Rejected while the Runtime is streaming or an interaction is
-   * pending. Failures surface as `syncStatus: "partial"`, never faked.
+   * overrides. Accepted during a live turn; Runtime applies the write on the
+   * next user turn. Failures surface as `syncStatus: "partial"`, never faked.
    */
   setApprovalMode?(input: {
     readonly mode: ApprovalMode;
@@ -450,16 +597,18 @@ export interface HostSemanticCommandService {
    * P4 Runtime primitive bridge. Pass the client `requestId` so ledger
    * rejected / outcome_unknown rows stay aligned with the same command.
    * The Host remains the sole operation owner. `operator.invoke` returns
-   * an `OperatorInvokeOutcome` (command output beside the snapshot); every
-   * other operation returns the post-command state snapshot.
+   * an `OperatorInvokeOutcome` (command output beside the snapshot);
+   * `session.tree.navigate` / `session.tree.branch` return the snapshot plus
+   * editor fill-back; `btw.ask` returns the ephemeral id and branch token,
+   * `btw.branch` the branch outcome; every other operation returns the
+   * post-command snapshot.
    */
   invoke?(
     operation: StudioOperation,
     requestId?: CommandRequestId,
   ):
-    | OperatorStateSnapshot
-    | OperatorInvokeOutcome
-    | Promise<OperatorStateSnapshot | OperatorInvokeOutcome>;
+    | HostInvokeOutcome
+    | Promise<HostInvokeOutcome>;
   /**
    * Archive a thread: the Host moves the session JSONL (gzip) and artifacts
    * into the OMP cold-archive tree, mirroring `omp gc`. A live resident

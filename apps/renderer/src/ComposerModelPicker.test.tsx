@@ -136,6 +136,7 @@ describe("ComposerModelPicker", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "选择模型" }).textContent!).toContain("Claude Sonnet 4.5"));
     expect(screen.getByRole("menuitemradio", { name: /Default/ }).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByText("演示")).toBeNull();
+    expect(screen.queryByText("只改当前会话，不写 models.yml")).toBeNull();
 
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Fast/ }));
     expect(onRun).toHaveBeenCalledWith("session.model.set", {

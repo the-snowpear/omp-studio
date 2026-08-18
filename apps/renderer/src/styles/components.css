@@ -409,6 +409,7 @@
 }
 .toast > .icon { flex: none; margin-top: 1px; }
 .toast > span { min-width: 0; }
+.toast.is-busy { align-items: center; }
 .toast.leaving {
   animation: omp-toast-out var(--dur-toast) var(--ease-in) forwards;
 }
@@ -436,46 +437,22 @@
 }
 
 /* ---------- Tooltip ----------
-   Two changes from hover-only:
-   - :focus-visible is included, so keyboard users reach the same text mouse
-     users get. Most of these tooltips label icon-only buttons, so hover-only
-     meant the label was unreachable without a pointer.
-   - z-index moved off --z-toast (100). At that tier a tooltip on a background
-     control could paint over an open modal; --z-menu keeps it above page
-     content but below modal and toast. */
-[data-tip] { position: relative; }
-[data-tip]:hover::after,
-[data-tip]:focus-visible::after,
-.git-tip:focus-within::after {
-  content: attr(data-tip);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+   Painted by TipHost as a body portal. Do not use native `title` or
+   ancestor-clipped `::after` bubbles. */
+.omp-tip-bubble {
+  position: fixed;
+  z-index: var(--z-tip);
   background: var(--text);
   color: var(--bg);
   font-size: var(--fs-11);
   line-height: 1.45;
   padding: 3px 8px;
   border-radius: var(--r-4);
-  /* Was nowrap, which pushed long tips ("收起 / 双击分隔条平分") off-screen.
-     Wrapping at a fixed measure keeps them inside the viewport. */
   width: max-content;
   max-width: 220px;
   text-align: center;
-  z-index: var(--z-menu);
   pointer-events: none;
-  /* 悬停意图延迟：backwards 让延迟期间保持不可见，指针快速扫过时
-     标签不会闪现；离开即消失，无退场动画。 */
-  animation: omp-fade-in var(--dur-fast) var(--ease-out) var(--tip-delay) backwards;
-}
-
-/* 靠近视口顶部的区域：tooltip 显示在元素下方，避免被屏幕顶边裁切 */
-.topbar [data-tip]:hover::after,
-.sb-top [data-tip]:hover::after,
-.page-head [data-tip]:hover::after {
-  top: calc(100% + 6px);
-  bottom: auto;
+  animation: omp-fade-in var(--dur-fast) var(--ease-out);
 }
 
 /* ---------- Form controls ---------- */

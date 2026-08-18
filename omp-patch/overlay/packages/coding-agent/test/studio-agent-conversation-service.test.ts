@@ -185,4 +185,40 @@ describe("StudioAgentConversationService", () => {
 		expect(branch?.branchLeafId).toBe("leaf");
 		expect(branch?.branch.map(entry => entry.id)).toEqual(["root", "leaf"]);
 	});
+
+	test("reconstructSessionBranch prefers a trailing active_leaf pointer", () => {
+		const branch = reconstructSessionBranch([
+			{ type: "session", id: "sess", timestamp: "2026-08-17T00:00:00.000Z", cwd: "/tmp" },
+			{
+				type: "message",
+				id: "root",
+				parentId: null,
+				timestamp: "2026-08-17T00:00:01.000Z",
+				message: { role: "user", content: "a", timestamp: 1 },
+			},
+			{
+				type: "message",
+				id: "side",
+				parentId: "root",
+				timestamp: "2026-08-17T00:00:02.000Z",
+				message: { role: "user", content: "b", timestamp: 2 },
+			},
+			{
+				type: "message",
+				id: "leaf",
+				parentId: "root",
+				timestamp: "2026-08-17T00:00:03.000Z",
+				message: { role: "user", content: "c", timestamp: 3 },
+			},
+			{
+				type: "active_leaf",
+				id: "ptr",
+				parentId: null,
+				timestamp: "2026-08-17T00:00:04.000Z",
+				targetId: "side",
+			} as never,
+		]);
+		expect(branch?.branchLeafId).toBe("side");
+		expect(branch?.branch.map(entry => entry.id)).toEqual(["root", "side"]);
+	});
 });

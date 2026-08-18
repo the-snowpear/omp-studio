@@ -246,6 +246,54 @@ test("session telemetry events validate numeric usage and reject unsafe fields",
   assert.throws(() => parseStudioEventEnvelope({ ...event, event: { ...event.event, telemetry: { ...telemetry, context: { ...telemetry.context, surprise: 1 } } } }), ContractValidationError);
 });
 
+test("btw.changed events validate the snapshot instead of accepting any JSON", () => {
+  const snapshot = { ephemeralId: "ephemeral-1", status: "running", text: "partial answer" };
+  const event = {
+    type: "studio.event",
+    runtimeEpoch: 1,
+    eventSeq: 3,
+    stateVersion: 0,
+    occurredAt: "2026-08-15T12:00:00.000Z",
+    event: { kind: "btw.changed", snapshot },
+  };
+  assert.equal((parseStudioEventEnvelope(event).event as { kind: string }).kind, "btw.changed");
+  const completed = {
+    ...snapshot,
+    status: "completed",
+    copy: "answer",
+  };
+  assert.equal(
+    (parseStudioEventEnvelope({ ...event, event: { kind: "btw.changed", snapshot: completed } }).event as {
+      snapshot: { status: string };
+    }).snapshot.status,
+    "completed",
+  );
+  const failed = {
+    ...snapshot,
+    status: "failed",
+    error: { code: "OUTPUT_LIMIT", message: "answer exceeded the output limit" },
+  };
+  assert.equal(
+    (parseStudioEventEnvelope({ ...event, event: { kind: "btw.changed", snapshot: failed } }).event as {
+      snapshot: { error: { code: string } };
+    }).snapshot.error.code,
+    "OUTPUT_LIMIT",
+  );
+  for (const bad of [
+    { ...snapshot, status: "pending" },
+    { ...snapshot, ephemeralId: "" },
+    { ...snapshot, text: 42 },
+    { ...snapshot, surprise: true },
+    { ...snapshot, error: { code: "TIMEOUT", message: "nope" } },
+    { ...snapshot, error: { code: "INTERNAL_ERROR" } },
+  ]) {
+    assert.throws(
+      () => parseStudioEventEnvelope({ ...event, event: { kind: "btw.changed", snapshot: bad } }),
+      ContractValidationError,
+    );
+  }
+});
+
 test("telemetry turns validate optional rate fields and reject deviations", () => {
   const telemetry = {
     sessionId: "session-1",
@@ -432,6 +480,10 @@ test("WP-030..035 validate Plan, Goal, Vibe, Tree, and Fork operations", () => {
     { kind: "mode.plan.exit", discardDraft: true },
     { kind: "mode.plan.review.open" },
     { kind: "mode.plan.review.respond", decision: "refine", feedback: "add tests" },
+    { kind: "mode.plan.review.respond", decision: "execute" },
+    { kind: "mode.plan.review.respond", decision: "compact" },
+    { kind: "mode.plan.review.respond", decision: "keep" },
+    { kind: "mode.plan.review.respond", decision: "approve" },
     { kind: "mode.vibe.enter", initialPrompt: "delegate this" },
     { kind: "mode.vibe.exit" },
     { kind: "goal.create", objective: "ship", tokenBudget: 1000 },
@@ -444,6 +496,7 @@ test("WP-030..035 validate Plan, Goal, Vibe, Tree, and Fork operations", () => {
     { kind: "goal.guided.start", initial: "ask me questions" },
     { kind: "session.tree.get" },
     { kind: "session.tree.navigate", targetId: "entry-1", summarize: true },
+    { kind: "session.tree.branch", targetId: "entry-1" },
     { kind: "session.fork" },
     { kind: "session.handoff" },
     { kind: "session.handoff", customInstructions: "focus on the parser bug" },
@@ -470,6 +523,8 @@ test("WP-030..035 validate Plan, Goal, Vibe, Tree, and Fork operations", () => {
     { kind: "goal.guided.start", initial: "" },
     { kind: "session.tree.navigate", targetId: "" },
     { kind: "session.tree.navigate", targetId: "entry-1", summarize: "yes" },
+    { kind: "session.tree.branch", targetId: "" },
+    { kind: "session.tree.branch", targetId: "entry-1", extra: true },
     { kind: "session.fork", extra: true },
     { kind: "session.handoff", customInstructions: "" },
     { kind: "session.handoff", extra: true },
@@ -848,6 +903,14 @@ test("M5 validates Agent Hub and Job operations at the trust boundary", () => {
       effort: "hi",
     },
     { kind: "agent.send", agentId: "Child-1", expectedGeneration: 1, text: "continue", mode: "steer" },
+    {
+      kind: "agent.send",
+      agentId: "Child-1",
+      expectedGeneration: 1,
+      text: "[图1]",
+      mode: "prompt",
+      images: [{ type: "image", mimeType: "image/png", data: "abc" }],
+    },
     { kind: "agent.kill", agentId: "Child-1", expectedGeneration: 1 },
     { kind: "agent.revive", agentId: "Child-1", expectedGeneration: 2 },
     { kind: "agent.release", agentId: "Child-1", expectedGeneration: 3 },
@@ -869,6 +932,7 @@ test("M5 validates Agent Hub and Job operations at the trust boundary", () => {
     { kind: "agent.spawn", definition: "researcher", assignment: "audit", effort: "high" },
     { kind: "agent.send", agentId: "Child-1", expectedGeneration: 0, text: "continue", mode: "prompt" },
     { kind: "agent.send", agentId: "Child-1", expectedGeneration: 1, text: "continue", mode: "broadcast" },
+    { kind: "agent.send", agentId: "Child-1", expectedGeneration: 1, text: "continue", mode: "prompt", images: [null] },
     { kind: "agent.kill", agentId: "Child-1", expectedGeneration: 1, force: true },
     { kind: "agent.transcript.read", agentId: "Child-1", limit: 101 },
     { kind: "agent.conversation.read", agentId: "Child-1", limit: 101 },

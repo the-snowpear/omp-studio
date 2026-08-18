@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { quoteMentionPath, serializeChip, serializeDoc, snapshotFromDoc } from "./serialize";
+import {
+  chipCopyToken,
+  displayDocForUserMessage,
+  displayDocFromSerializedText,
+  quoteMentionPath,
+  serializeChip,
+  serializeDoc,
+  snapshotFromDoc,
+  snapshotFromTextAndImages,
+} from "./serialize";
 import type { ComposerChip, ComposerDoc } from "./types";
 
 function chip(partial: Partial<ComposerChip> & Pick<ComposerChip, "kind" | "label">): ComposerChip {
@@ -140,5 +149,102 @@ describe("serializeDoc", () => {
       ],
     };
     expect(snapshotFromDoc(doc).text).toBe("use /skill:oss-audit");
+  });
+
+  it("snapshotFromTextAndImages overwrites a text draft with image capsules", () => {
+    const snapshot = snapshotFromTextAndImages("hello", [
+      { type: "image", mimeType: "image/png", data: "aaa" },
+    ]);
+    expect(snapshot.text).toBe("hello[图1]");
+    expect(snapshot.images).toEqual([{ type: "image", mimeType: "image/png", data: "aaa" }]);
+    expect(snapshot.doc.nodes).toEqual([
+      { type: "text", value: "hello" },
+      {
+        type: "chip",
+        chip: expect.objectContaining({
+          kind: "image",
+          label: "图",
+          image: { type: "image", mimeType: "image/png", data: "aaa" },
+        }),
+      },
+    ]);
+  });
+});
+
+describe("displayDocFromSerializedText", () => {
+  it("rebuilds file, folder, skill, agent and clipboard-image capsules", () => {
+    const parsed = displayDocFromSerializedText(
+      '看 @src/App.tsx 和 @apps/renderer/src/ 以及 /skill:commit-msg @explore [图1]',
+      [{ type: "image", mimeType: "image/png", data: "aaa" }],
+    );
+    expect(serializeDoc(parsed).text).toBe(
+      "看 @src/App.tsx 和 @apps/renderer/src/ 以及 /skill:commit-msg @explore [图1]",
+    );
+    const chips = parsed.nodes.filter((node) => node.type === "chip").map((node) => node.type === "chip" ? node.chip : undefined);
+    expect(chips).toEqual([
+      expect.objectContaining({ kind: "file", label: "App.tsx", path: "src/App.tsx" }),
+      expect.objectContaining({ kind: "dir", label: "src", path: "apps/renderer/src" }),
+      expect.objectContaining({ kind: "skill", label: "commit-msg", name: "commit-msg" }),
+      expect.objectContaining({ kind: "agent", label: "explore", name: "explore" }),
+      expect.objectContaining({
+        kind: "image",
+        label: "图1",
+        image: { type: "image", mimeType: "image/png", data: "aaa" },
+      }),
+    ]);
+  });
+
+  it("keeps emails as text and quotes paths that need them", () => {
+    const parsed = displayDocFromSerializedText('mail user@example.com then @"docs/my notes.md"');
+    expect(serializeDoc(parsed).text).toBe('mail user@example.com then @"docs/my notes.md"');
+    expect(parsed.nodes).toEqual([
+      { type: "text", value: "mail user@example.com then " },
+      {
+        type: "chip",
+        chip: expect.objectContaining({ kind: "file", label: "my notes.md", path: "docs/my notes.md" }),
+      },
+    ]);
+  });
+
+  it("treats an image extension mention as an image capsule", () => {
+    const parsed = displayDocFromSerializedText("看 @assets/logo.png");
+    expect(parsed.nodes).toEqual([
+      { type: "text", value: "看 " },
+      {
+        type: "chip",
+        chip: expect.objectContaining({ kind: "image", label: "logo.png", path: "assets/logo.png" }),
+      },
+    ]);
+  });
+
+  it("prefers the original composer doc so labels and preview bytes survive send", () => {
+    const doc: ComposerDoc = {
+      nodes: [
+        { type: "text", value: "看 " },
+        {
+          type: "chip",
+          chip: chip({
+            kind: "image",
+            label: "图1",
+            path: "assets/logo.png",
+            image: { type: "image", mimeType: "image/png", data: "aaa" },
+          }),
+        },
+      ],
+    };
+    const display = displayDocForUserMessage("看 @assets/logo.png", doc);
+    expect(display.nodes).toEqual(doc.nodes);
+  });
+
+  it("copies a clipboard image chip as [图N] from its label", () => {
+    expect(
+      chipCopyToken(
+        chip({
+          kind: "image",
+          label: "图2",
+          image: { type: "image", mimeType: "image/png", data: "aaa" },
+        }),
+      ),
+    ).toBe("[图2]");
   });
 });

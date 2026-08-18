@@ -185,6 +185,7 @@ interface ParsedAgentFile {
   readonly autoloadSkills?: string[];
   readonly readSummarize?: boolean;
   readonly prewalk?: boolean | string;
+  readonly advisor?: boolean | string;
   readonly error?: string;
   readonly contentHash: string;
 }
@@ -193,6 +194,7 @@ interface Overlays {
   readonly disabled: ReadonlySet<string>;
   readonly overrideModel: Readonly<Record<string, string>>;
   readonly prewalkOverride: Readonly<Record<string, string>>;
+  readonly advisorOverride: Readonly<Record<string, string>>;
 }
 
 export interface OmpAgentDefinitionsAdapterOptions {
@@ -269,6 +271,16 @@ function parseBoolean(value: unknown): boolean | undefined {
   return undefined;
 }
 
+function parseBoolOrPattern(value: unknown): boolean | string | undefined {
+  const asBool = parseBoolean(value);
+  if (asBool !== undefined) return asBool;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
 function parseSpawns(value: unknown): string[] | "*" | undefined {
   if (value === "*") return "*";
   if (typeof value === "string") {
@@ -303,11 +315,8 @@ function parseAgentMarkdown(content: string): ParsedAgentFile | undefined {
   const model = parseArrayOrCsv(frontmatter.model);
   const blocking = parseBoolean(frontmatter.blocking);
   const readSummarize = parseBoolean(frontmatter.readSummarize);
-  let prewalk: boolean | string | undefined = parseBoolean(frontmatter.prewalk);
-  if (prewalk === undefined && typeof frontmatter.prewalk === "string") {
-    const trimmed = frontmatter.prewalk.trim();
-    if (trimmed) prewalk = trimmed;
-  }
+  const prewalk = parseBoolOrPattern(frontmatter.prewalk);
+  const advisor = parseBoolOrPattern(frontmatter.advisor);
   const autoloadSkills = parseArrayOrCsv(frontmatter.autoloadSkills);
   return {
     name,
@@ -322,6 +331,7 @@ function parseAgentMarkdown(content: string): ParsedAgentFile | undefined {
     ...(autoloadSkills === undefined ? {} : { autoloadSkills }),
     ...(readSummarize === undefined ? {} : { readSummarize }),
     ...(prewalk === undefined ? {} : { prewalk }),
+    ...(advisor === undefined ? {} : { advisor }),
     contentHash: hashText(content),
   };
 }
@@ -369,6 +379,7 @@ function toRecord(
   const editable = source === "user" || source === "project";
   const overrideModel = overlays.overrideModel[name];
   const prewalkOverride = overlays.prewalkOverride[name];
+  const advisorOverride = overlays.advisorOverride[name];
   return {
     name,
     description,
@@ -382,6 +393,7 @@ function toRecord(
     ...(parsed.autoloadSkills === undefined ? {} : { autoloadSkills: parsed.autoloadSkills }),
     ...(parsed.readSummarize === undefined ? {} : { readSummarize: parsed.readSummarize }),
     ...(parsed.prewalk === undefined ? {} : { prewalk: parsed.prewalk }),
+    ...(parsed.advisor === undefined ? {} : { advisor: parsed.advisor }),
     source,
     sourceLabel: sourceLabelOf(source),
     editable,
@@ -390,6 +402,7 @@ function toRecord(
     disabled: overlays.disabled.has(name),
     ...(overrideModel === undefined ? {} : { overrideModel }),
     ...(prewalkOverride === undefined ? {} : { prewalkOverride }),
+    ...(advisorOverride === undefined ? {} : { advisorOverride }),
     contentHash: parsed.contentHash,
     ...(description.length === 0 ? { error: "缺少 description" } : {}),
     ...(packed ? { promptPacked: true } : {}),
@@ -416,13 +429,13 @@ async function loadConfigOverlays(configPath: string): Promise<Overlays> {
     text = await fs.readFile(configPath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return { disabled: new Set(), overrideModel: {}, prewalkOverride: {} };
+    return { disabled: new Set(), overrideModel: {}, prewalkOverride: {}, advisorOverride: {} };
   }
   let root: unknown;
   try {
     root = parseYaml(text);
   } catch {
-    return { disabled: new Set(), overrideModel: {}, prewalkOverride: {} };
+    return { disabled: new Set(), overrideModel: {}, prewalkOverride: {}, advisorOverride: {} };
   }
   const record = root && typeof root === "object" && !Array.isArray(root) ? (root as Record<string, unknown>) : {};
   const task = record.task && typeof record.task === "object" && !Array.isArray(record.task)
@@ -446,7 +459,13 @@ async function loadConfigOverlays(configPath: string): Promise<Overlays> {
       if (typeof value === "string" && value.trim()) prewalkOverride[key] = value.trim();
     }
   }
-  return { disabled, overrideModel, prewalkOverride };
+  const advisorOverride: Record<string, string> = {};
+  if (task.agentAdvisor && typeof task.agentAdvisor === "object" && !Array.isArray(task.agentAdvisor)) {
+    for (const [key, value] of Object.entries(task.agentAdvisor as Record<string, unknown>)) {
+      if (typeof value === "string" && value.trim()) advisorOverride[key] = value.trim();
+    }
+  }
+  return { disabled, overrideModel, prewalkOverride, advisorOverride };
 }
 
 function yamlStringifyScalar(value: string): string {
@@ -550,6 +569,9 @@ function serializeAgentMarkdown(input: AgentDefinitionUpsertInput): string {
   if (input.prewalk === true) frontmatter.prewalk = true;
   else if (input.prewalk === false) frontmatter.prewalk = false;
   else if (typeof input.prewalk === "string" && input.prewalk.trim()) frontmatter.prewalk = input.prewalk.trim();
+  if (input.advisor === true) frontmatter.advisor = true;
+  else if (input.advisor === false) frontmatter.advisor = false;
+  else if (typeof input.advisor === "string" && input.advisor.trim()) frontmatter.advisor = input.advisor.trim();
   if (input.autoloadSkills && input.autoloadSkills.length > 0) {
     frontmatter.autoloadSkills = [...input.autoloadSkills];
   }
@@ -789,6 +811,12 @@ export function createOmpAgentDefinitionsService(
           if (input.prewalkOverride === null || input.prewalkOverride.trim().length === 0) delete map[name];
           else map[name] = input.prewalkOverride.trim();
           setYamlStringMap(task, "agentPrewalk", map);
+        }
+        if (input.advisorOverride !== undefined) {
+          const map = readYamlStringMap(task, "agentAdvisor");
+          if (input.advisorOverride === null || input.advisorOverride.trim().length === 0) delete map[name];
+          else map[name] = input.advisorOverride.trim();
+          setYamlStringMap(task, "agentAdvisor", map);
         }
       });
       return WRITE_OK("已更新子代理会话覆盖。新会话后生效。");

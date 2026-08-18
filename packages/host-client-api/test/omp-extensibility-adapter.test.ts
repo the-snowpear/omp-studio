@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -594,6 +594,79 @@ describe("skills.setEnabled (whole-skill toggle)", () => {
         async () => service.setSkillEnabled({ name: "oss-audit", enabled: false, scope: "project" }),
         (error: unknown) => (error as { code?: string }).code === "INVALID_ARGUMENT",
       );
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("skills.reveal / skills.revealRoot", () => {
+  test("opens the winning skill directory and refuses unknown names", async () => {
+    const home = await mkdtemp(join(tmpdir(), "omp-ext-reveal-"));
+    const cwd = join(home, "project");
+    const opened: string[] = [];
+    try {
+      await writeSkill(
+        join(cwd, ".omp", "skills"),
+        "shared",
+        "---\nname: shared\ndescription: project copy\n---\n",
+      );
+      await writeSkill(
+        join(home, ".omp", "agent", "skills"),
+        "shared",
+        "---\nname: shared\ndescription: user copy\n---\n",
+      );
+      const service = createOmpExtensibilityService({
+        home,
+        cwd,
+        now: () => NOW,
+        revealDirectory: async (dir) => {
+          opened.push(dir);
+        },
+      });
+      const result = await service.revealSkill({ name: "shared" });
+      assert.equal(result.applied, true);
+      assert.deepEqual(opened, [join(cwd, ".omp", "skills", "shared")]);
+
+      await assert.rejects(
+        async () => service.revealSkill({ name: "ghost" }),
+        (error: unknown) =>
+          (error as { code?: string }).code === "INVALID_ARGUMENT" &&
+          (error as { message?: string }).message?.includes("ghost"),
+      );
+      assert.equal(opened.length, 1);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("is unavailable without a file manager and opens the user skills root", async () => {
+    const home = await mkdtemp(join(tmpdir(), "omp-ext-reveal-root-"));
+    const cwd = join(home, "project");
+    await mkdir(cwd);
+    const opened: string[] = [];
+    try {
+      const blocked = createOmpExtensibilityService({ home, cwd, now: () => NOW });
+      await assert.rejects(
+        async () => blocked.revealSkill({ name: "anything" }),
+        (error: unknown) =>
+          (error as { code?: string }).code === "UNAVAILABLE" &&
+          (error as { message?: string }).message?.includes("文件资源管理器"),
+      );
+
+      const service = createOmpExtensibilityService({
+        home,
+        cwd,
+        now: () => NOW,
+        revealDirectory: async (dir) => {
+          opened.push(dir);
+        },
+      });
+      const result = await service.revealSkillRoot({ scope: "user" });
+      assert.equal(result.applied, true);
+      const expected = join(home, ".omp", "agent", "skills");
+      assert.deepEqual(opened, [expected]);
+      await access(expected);
     } finally {
       await rm(home, { recursive: true, force: true });
     }

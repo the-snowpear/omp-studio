@@ -56,8 +56,12 @@ export function canFlushQueuedMessage(input: {
   readonly selectedSessionId?: string;
   readonly liveSessionId?: string;
   readonly entrySessionId?: string;
+  /** Head row id. Paired with `pausedEntryId` so editing the head holds flush. */
+  readonly entryId?: number;
+  readonly pausedEntryId?: number;
 }): boolean {
   if (input.running || input.pendingInteraction || !input.promptChannelReady) return false;
+  if (input.pausedEntryId !== undefined && input.entryId === input.pausedEntryId) return false;
   const { selectedSessionId, liveSessionId, entrySessionId } = input;
   if (selectedSessionId === undefined || liveSessionId === undefined || entrySessionId === undefined) {
     return false;

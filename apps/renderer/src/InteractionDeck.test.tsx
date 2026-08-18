@@ -176,12 +176,35 @@ describe("InteractionDeck real cards", () => {
     expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
   });
 
+  it("parent disabled still lets the user pick an option; only 取消/提交 stay locked", () => {
+    const onRespond = vi.fn();
+    render(<InteractionDeck interaction={select("Which backend?", ["SQLite", "PostgreSQL"])} onRespond={onRespond} disabled={true} />);
+    fireEvent.click(screen.getByRole("radio", { name: /SQLite/ }));
+    expect(screen.getByRole("radio", { name: /SQLite/ }).getAttribute("aria-checked")).toBe("true");
+    expect((screen.getByRole("button", { name: "提交" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "取消" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(onRespond).not.toHaveBeenCalled();
+  });
+
   it("select through the shared queue submits the picked option id", async () => {
     const onRespond = vi.fn(() => Promise.resolve(true));
     render(<InteractionDeck interaction={select("Which backend?", ["SQLite", "PostgreSQL"])} onRespond={onRespond} disabled={false} />);
     fireEvent.click(screen.getByRole("radio", { name: /SQLite/ }));
     fireEvent.click(screen.getByRole("button", { name: "提交" }));
     await waitFor(() => expect(onRespond).toHaveBeenCalledWith("submit", "option:0"));
+  });
+
+  it("genies Ask cards in from the composer and does not genie approval cards", () => {
+    const onRespond = vi.fn();
+    const askView = render(<InteractionDeck interaction={select("Which backend?", ["SQLite"])} onRespond={onRespond} disabled={false} />);
+    expect(document.querySelector(".deck.active.is-ask.is-ask-enter")).toBeTruthy();
+    askView.unmount();
+    const inputView = render(<InteractionDeck interaction={input("Name")} onRespond={onRespond} disabled={false} />);
+    expect(document.querySelector(".deck.active.is-ask.is-ask-enter")).toBeTruthy();
+    inputView.unmount();
+    render(<InteractionDeck interaction={approval("Allow bash")} onRespond={onRespond} disabled={false} />);
+    expect(document.querySelector(".deck.is-ask")).toBeNull();
+    expect(document.querySelector(".deck.is-ask-enter")).toBeNull();
   });
 
   it("deck identity includes leaseGeneration: same id with a higher generation replaces the card", () => {

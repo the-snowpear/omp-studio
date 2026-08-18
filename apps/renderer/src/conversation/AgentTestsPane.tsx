@@ -47,15 +47,15 @@ export function AgentTestsPane({
                   type="button"
                   className="test-open"
                   onClick={() => onReveal?.(run)}
-                  title="在对话中定位这次测试"
+                  data-tip="定位"
                   aria-label={`在对话中定位这次测试：${run.command}`}
                 >
                   <span className={`prob-sev sev-${ui.tone}`} role="img" aria-label={ui.label}>
                     <Icon name={ui.icon} extra="sm" />
                   </span>
                   <span className="test-open-body">
-                    <b className="mono test-suite ellipsis" title={run.command}>{run.command}</b>
-                    {run.cwd ? <span className="tiny muted mono ellipsis" title={run.cwd}>{run.cwd}</span> : null}
+                    <b className="mono test-suite ellipsis" data-tip={run.command}>{run.command}</b>
+                    {run.cwd ? <span className="tiny muted mono ellipsis" data-tip={run.cwd}>{run.cwd}</span> : null}
                   </span>
                   <span className={`chip ${ui.tone} sm`}>{ui.label}{run.exitCode === undefined ? "" : ` · exit ${run.exitCode}`}</span>
                   {run.durationMs !== undefined ? <span className="tiny muted mono">{formatTestDuration(run.durationMs)}</span> : null}
@@ -65,7 +65,7 @@ export function AgentTestsPane({
                   type="button"
                   className="btn small outline"
                   disabled={rerunDisabled}
-                  title={rerunTitle}
+                  data-tip={rerunTitle}
                   onClick={() => onRerun(run.command)}
                 >
                   请 Agent 再跑

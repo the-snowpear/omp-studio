@@ -1,8 +1,8 @@
 diff --git a/packages/coding-agent/package.json b/packages/coding-agent/package.json
-index 7e73dea..214413c 100644
+index 1e50e44..a98bb0f 100644
 --- a/packages/coding-agent/package.json
 +++ b/packages/coding-agent/package.json
-@@ -506,6 +506,10 @@
+@@ -504,6 +504,10 @@
        "types": "./src/session/*.ts",
        "import": "./src/session/*.ts"
      },
@@ -33,7 +33,7 @@ index 237fe99..382dd6b 100755
  		import("@oh-my-pi/pi-utils/cli"),
  		import("./cli-commands"),
 diff --git a/packages/coding-agent/src/cli/args.ts b/packages/coding-agent/src/cli/args.ts
-index f8785e8..4da9607 100644
+index 412e782..070f79a 100644
 --- a/packages/coding-agent/src/cli/args.ts
 +++ b/packages/coding-agent/src/cli/args.ts
 @@ -20,7 +20,7 @@ import { CliUsageError } from "./usage-error";
@@ -45,7 +45,7 @@ index f8785e8..4da9607 100644
  
  export interface Args {
  	cwd?: string;
-@@ -55,6 +55,9 @@ export interface Args {
+@@ -56,6 +56,9 @@ export interface Args {
  	help?: boolean;
  	version?: boolean;
  	mode?: Mode;
@@ -56,10 +56,10 @@ index f8785e8..4da9607 100644
  	sessionDir?: string;
  	providerSessionId?: string;
 diff --git a/packages/coding-agent/src/cli/flag-tables.ts b/packages/coding-agent/src/cli/flag-tables.ts
-index e0af25d..a3546a5 100644
+index 7e56921..ef246d5 100644
 --- a/packages/coding-agent/src/cli/flag-tables.ts
 +++ b/packages/coding-agent/src/cli/flag-tables.ts
-@@ -105,6 +105,14 @@ function parseMaxTimeSeconds(value: string): number {
+@@ -104,6 +104,14 @@ function parseMaxTimeSeconds(value: string): number {
  	);
  }
  
@@ -74,7 +74,7 @@ index e0af25d..a3546a5 100644
  /**
   * Setters for flags with string values. Most built-ins consume the next argv
   * token even when it starts with `-`; flags listed in
-@@ -122,10 +130,26 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
+@@ -121,10 +129,26 @@ export const STRING_SETTERS: Record<string, StringSetter> = {
  		result.addDir = [...(result.addDir ?? []), value];
  	},
  	"--mode": (result, value) => {
@@ -103,7 +103,7 @@ index e0af25d..a3546a5 100644
  		result.fork = value;
  	},
 diff --git a/packages/coding-agent/src/commands/launch-help.ts b/packages/coding-agent/src/commands/launch-help.ts
-index 98a9ea4..83a140e 100644
+index ffa7b0b..6ce3784 100644
 --- a/packages/coding-agent/src/commands/launch-help.ts
 +++ b/packages/coding-agent/src/commands/launch-help.ts
 @@ -40,8 +40,17 @@ export const launchHelp = {
@@ -127,10 +127,10 @@ index 98a9ea4..83a140e 100644
  		config: Flags.string({
  			description: "Load an extra config.yml-style overlay for this run (repeatable)",
 diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
-index c9de644..4e26eda 100644
+index 4a8f65c..4122d18 100644
 --- a/packages/coding-agent/src/main.ts
 +++ b/packages/coding-agent/src/main.ts
-@@ -83,15 +83,22 @@ import {
+@@ -85,15 +85,22 @@ import {
  	persistForeignSession,
  } from "./session/foreign-session-import";
  import type { ForeignSessionInfo, ForeignSessionSource, ForeignSessionStore } from "./session/foreign-session-store";
@@ -152,8 +152,8 @@ index c9de644..4e26eda 100644
 +import type { ToolUiFactory } from "./tools/context";
  import { getChangelogPath, resolveStartupChangelogForDisplay, type StartupChangelogSelection } from "./utils/changelog";
  import { EventBus } from "./utils/event-bus";
- import { withTimeoutSignal } from "./utils/fetch-timeout";
-@@ -100,7 +107,7 @@ type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
+ 
+@@ -101,7 +108,7 @@ type RunAcpMode = (createSession: AcpSessionFactory) => Promise<never>;
  type RunPrintMode = (session: AgentSession, options: PrintModeOptions) => Promise<void>;
  type RunRpcMode = (
  	session: AgentSession,
@@ -162,7 +162,7 @@ index c9de644..4e26eda 100644
  	eventBus?: EventBus,
  	input?: ReadableStream<Uint8Array>,
  ) => Promise<never>;
-@@ -447,7 +454,7 @@ async function runInteractiveMode(
+@@ -457,7 +464,7 @@ async function runInteractiveMode(
  	notifs: (InteractiveModeNotify | null)[],
  	versionCheckPromise: Promise<string | undefined>,
  	initialMessages: string[],
@@ -171,7 +171,7 @@ index c9de644..4e26eda 100644
  	lspServers: LspStartupServerInfo[] | undefined,
  	mcpManager: MCPManager | undefined,
  	resuming: boolean,
-@@ -457,6 +464,9 @@ async function runInteractiveMode(
+@@ -467,6 +474,9 @@ async function runInteractiveMode(
  	initialMessage?: string,
  	initialImages?: ImageContent[],
  	joinLink?: string,
@@ -181,7 +181,7 @@ index c9de644..4e26eda 100644
  ): Promise<void> {
  	const mode = new InteractiveMode(
  		session,
-@@ -466,6 +476,8 @@ async function runInteractiveMode(
+@@ -476,6 +486,8 @@ async function runInteractiveMode(
  		lspServers,
  		mcpManager,
  		eventBus,
@@ -190,7 +190,7 @@ index c9de644..4e26eda 100644
  	);
  
  	// Cold-launch gate: the full setup wizard (every scene + the overlay and
-@@ -561,8 +573,20 @@ async function runInteractiveMode(
+@@ -572,8 +584,20 @@ async function runInteractiveMode(
  	}
  
  	while (true) {
@@ -213,7 +213,7 @@ index c9de644..4e26eda 100644
  	}
  }
  
-@@ -752,13 +776,14 @@ export async function createSessionManager(
+@@ -763,13 +787,14 @@ export async function createSessionManager(
  	activeSettings: Settings = settings,
  	askToMoveSession: SessionPrompt = promptMoveSession,
  ): Promise<SessionManager | undefined> {
@@ -229,7 +229,7 @@ index c9de644..4e26eda 100644
  		}
  		const match = await resolveResumableSession(forkSource, cwd, parsed.sessionDir);
  		if (!match) {
-@@ -767,7 +792,7 @@ export async function createSessionManager(
+@@ -778,7 +803,7 @@ export async function createSessionManager(
  				"Run `omp --resume` without an argument to pick from recent sessions, or `omp` to start a new one.",
  			);
  		}
@@ -238,7 +238,7 @@ index c9de644..4e26eda 100644
  	}
  
  	if (parsed.noSession) {
-@@ -820,26 +845,26 @@ export async function createSessionManager(
+@@ -831,26 +856,26 @@ export async function createSessionManager(
  		return await SessionManager.open(match.session.path, parsed.sessionDir);
  	}
  	if (parsed.continue) {
@@ -270,7 +270,7 @@ index c9de644..4e26eda 100644
  }
  
  /** Discover SYSTEM.md file if no CLI system prompt was provided */
-@@ -1186,6 +1211,7 @@ interface RunRootCommandDependencies {
+@@ -1197,6 +1222,7 @@ interface RunRootCommandDependencies {
  	discoverAuthStorage?: typeof discoverAuthStorage;
  	selectSession?: typeof selectSession;
  	runAcpMode?: RunAcpMode;
@@ -278,7 +278,7 @@ index c9de644..4e26eda 100644
  	createForeignSessionStore?: (source: ForeignSessionSource) => ForeignSessionStore;
  	settings?: Settings;
  	forceSetupWizard?: boolean;
-@@ -1234,6 +1260,10 @@ export async function runRootCommand(
+@@ -1245,6 +1271,10 @@ export async function runRootCommand(
  		process.exit(1);
  	}
  	const mode = parsedArgs.mode || "text";
@@ -289,7 +289,7 @@ index c9de644..4e26eda 100644
  	// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
  	const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
  
-@@ -1268,10 +1298,11 @@ export async function runRootCommand(
+@@ -1279,10 +1309,11 @@ export async function runRootCommand(
  	// session-critical database connection picks the right busy timeout.
  	// See getDbBusyTimeoutMs().
  	const isProtocolMode = mode === "rpc" || mode === "rpc-ui" || mode === "acp";
@@ -303,7 +303,7 @@ index c9de644..4e26eda 100644
  	// Only the interactive host renders a focusable Agent Hub / subagent session
  	// tree; declare it so headless subagent optimizations (e.g. skipping replan
  	// title refresh) can tell a focusable process from a print/RPC/eval one.
-@@ -1438,6 +1469,9 @@ export async function runRootCommand(
+@@ -1463,6 +1494,9 @@ export async function runRootCommand(
  		}
  		throw error;
  	}
@@ -313,7 +313,7 @@ index c9de644..4e26eda 100644
  
  	if ((typeof parsedArgs.resume === "string" || foreignSource) && sessionManager) {
  		const previousCwd = cwd;
-@@ -1755,25 +1789,57 @@ export async function runRootCommand(
+@@ -1787,25 +1821,57 @@ export async function runRootCommand(
  
  			stopStartupWatchdog();
  			logger.endTiming();
@@ -390,7 +390,7 @@ index c9de644..4e26eda 100644
  			// Branch-only single-shot runner: keep print-mode code out of normal interactive startup.
  			stopStartupWatchdog();
  			const runPrintMode: RunPrintMode = (await import("./modes/print-mode")).runPrintMode;
-@@ -1790,6 +1856,8 @@ export async function runRootCommand(
+@@ -1823,6 +1889,8 @@ export async function runRootCommand(
  			await session.dispose();
  			stopThemeWatcher();
  			await postmortem.quit(0);

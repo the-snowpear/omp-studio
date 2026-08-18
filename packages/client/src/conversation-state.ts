@@ -16,7 +16,16 @@ import type {
 /** Max persisted items retained after prepend; older entries are dropped. */
 export const CONVERSATION_STATE_ITEM_CAP = 500;
 
+/** Max settled live tools kept after a turn; running tools are never dropped. */
+export const CONVERSATION_STATE_LIVE_TOOLS_CAP = 256;
+
 export type ConversationHydrateStatus = "idle" | "loading" | "ready" | "error";
+
+export interface StickyProviderError {
+  readonly sessionId: SessionId;
+  readonly itemId: string;
+  readonly error: ConversationMessageError;
+}
 
 export interface ConversationIdentity {
   readonly runtimeEpoch?: RuntimeEpoch;
@@ -80,11 +89,18 @@ export interface ConversationState {
   readonly resyncRequired: boolean;
   readonly abortedTurns: Readonly<Record<string, true>>;
   /**
-   * Persisted itemId → provider failure for assistant messages that ended with
-   * `stopReason: "error"`. Live-only: the transcript carries no error field, so
-   * these are dropped on a full re-hydrate just like `abortedTurns`.
+   * itemId → provider failure for assistant messages that ended with
+   * `stopReason: "error"`. The transcript item itself has no error field.
+   * Held until the next successful assistant return; abort and same-session
+   * hydrate keep it. Survives leaving the session via `stickyProviderErrors`.
    */
   readonly itemErrors: Readonly<Record<string, ConversationMessageError>>;
+  /**
+   * Last provider failure per session. Survives identity switches so coming
+   * back to the failed session can restore `itemErrors`. Cleared only when
+   * that session's next assistant message completes without an error.
+   */
+  readonly stickyProviderErrors: Readonly<Record<string, StickyProviderError>>;
   /**
    * Persisted itemId → owning turnId, kept only while that turn is still open.
    * The runtime persists an assistant item before the first tool of that item
@@ -92,6 +108,12 @@ export interface ConversationState {
    * Entries are dropped on `turn.completed` / `turn.aborted`.
    */
   readonly openTurnItems: Readonly<Record<string, string>>;
+  /**
+   * Live compaction (auto or manual). Set by `conversation.compaction.started`
+   * and cleared on completed / abort so the transcript can show an in-progress
+   * divider before the persisted compaction item arrives.
+   */
+  readonly compacting?: { readonly action: string };
   readonly error?: ClientError;
 }
 
@@ -108,6 +130,7 @@ export function createInitialConversationState(): ConversationState {
     resyncRequired: false,
     abortedTurns: {},
     itemErrors: {},
+    stickyProviderErrors: {},
     openTurnItems: {},
   };
 }
@@ -116,6 +139,7 @@ export function clearConversationState(state: ConversationState): ConversationSt
   return {
     ...createInitialConversationState(),
     hydrateGeneration: state.hydrateGeneration + 1,
+    stickyProviderErrors: state.stickyProviderErrors,
   };
 }
 
@@ -131,6 +155,10 @@ export type ConversationView =
       readonly kind: "live";
       readonly message: ConversationLiveMessage;
       readonly tools: readonly ConversationLiveTool[];
+    }
+  | {
+      readonly kind: "compacting";
+      readonly action: string;
     };
 
 export function selectConversationViews(state: ConversationState): readonly ConversationView[] {
@@ -171,6 +199,9 @@ export function selectConversationViews(state: ConversationState): readonly Conv
     const message = state.liveMessages[messageId];
     if (message === undefined) continue;
     views.push({ kind: "live", message, tools: toolsForMessage(state, messageId) });
+  }
+  if (state.compacting !== undefined) {
+    views.push({ kind: "compacting", action: state.compacting.action });
   }
   return views;
 }

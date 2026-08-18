@@ -43,6 +43,7 @@ function fakeWorkerFactory(state: {
   readonly stopped: string[];
   readonly streaming: Set<string>;
   readonly failInvoke: Set<string>;
+  readonly dead: Set<string>;
   readonly invokes: Array<{ sessionId: string; operation: StudioOperation }>;
 }): NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]> {
   let fresh = 0;
@@ -50,6 +51,7 @@ function fakeWorkerFactory(state: {
     const sessionId = resumeSessionId ?? `fresh-${++fresh}`;
     const epoch = nextRuntimeEpoch();
     state.created.push({ sessionId, epoch });
+    state.dead.delete(sessionId);
     let alive = true;
     const current = () => snapshot(sessionId, epoch, state.streaming.has(sessionId));
     const session = {
@@ -71,7 +73,7 @@ function fakeWorkerFactory(state: {
         },
       },
       hello: () =>
-        alive
+        alive && !state.dead.has(sessionId)
           ? ({ runtimeId: `runtime-${sessionId}`, runtimeEpoch: epoch, classification: "managed" } satisfies HostRuntimeHelloView)
           : undefined,
       capabilityManifest: () => undefined,
@@ -97,6 +99,7 @@ function createHarness(maxResidentSessions?: number, idleWorkerTtlMs = 10 * 60_0
     stopped: [] as string[],
     streaming: new Set<string>(),
     failInvoke: new Set<string>(),
+    dead: new Set<string>(),
     invokes: [] as Array<{ sessionId: string; operation: StudioOperation }>,
   };
   const port = createDesktopRuntimeSessionPort({
@@ -121,6 +124,7 @@ const context = {
   resolution: { classification: "managed" } as never,
   endpoint: { kind: "private", authority: "test" } as never,
   profileDirectory: "C:/profile",
+  runtimeInstallDirectory: "C:/runtime",
   workspace: { workspaceId: "workspace-a", cwd: "C:/workspace" },
 };
 
@@ -306,4 +310,29 @@ test("approval mode retry does not clear while any resident remains unsynchroniz
 test("applyApprovalMode fails closed without any resident Runtime", async () => {
   const { port } = createHarness();
   await assert.rejects(() => port.applyApprovalMode!("yolo"), /No Runtime session is available/);
+});
+
+test("ensure is a no-op when the active Runtime hello is still live", async () => {
+  const { port, state } = createHarness();
+  const first = await port.start(context);
+  assert.equal(first?.controller.publication()?.snapshot.sessionId, "fresh-1");
+  const next = await port.ensure!();
+  assert.equal(next, first);
+  assert.deepEqual(state.created, [{ sessionId: "fresh-1", epoch: 1 }]);
+  assert.deepEqual(state.stopped, []);
+  await port.stop();
+});
+
+test("ensure relaunches the active session when its hello is gone", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  state.dead.add("fresh-1");
+  const next = await port.ensure!();
+  assert.equal(next?.controller.publication()?.snapshot.sessionId, "fresh-1");
+  assert.deepEqual(state.stopped, ["fresh-1"]);
+  assert.deepEqual(state.created, [
+    { sessionId: "fresh-1", epoch: 1 },
+    { sessionId: "fresh-1", epoch: 2 },
+  ]);
+  await port.stop();
 });

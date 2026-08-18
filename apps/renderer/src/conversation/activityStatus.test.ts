@@ -10,6 +10,7 @@ import {
   reduceActivityRetry,
   reduceAwaitingTurn,
   shortenDetail,
+  syncRunWindow,
   WORKING_LABEL,
 } from "./activityStatus";
 import { emptyConversationState, type ConversationState, type LiveMessage, type LiveTool } from "./conversationViewModel";
@@ -182,6 +183,30 @@ describe("isAbortEligible", () => {
   });
 });
 
+describe("syncRunWindow", () => {
+  it("keeps the original start across remounts of the same active session", () => {
+    const store = new Map<string, number>();
+    expect(syncRunWindow("s1", true, 1_000, store)).toBe(1_000);
+    expect(syncRunWindow("s1", true, 8_000, store)).toBe(1_000);
+  });
+
+  it("starts a new clock after the run ends, and does not reset a sibling session", () => {
+    const store = new Map<string, number>();
+    expect(syncRunWindow("s1", true, 1_000, store)).toBe(1_000);
+    expect(syncRunWindow("s2", true, 2_000, store)).toBe(2_000);
+    expect(syncRunWindow("s1", false, 3_000, store)).toBeNull();
+    expect(syncRunWindow("s2", true, 4_000, store)).toBe(2_000);
+    expect(syncRunWindow("s1", true, 5_000, store)).toBe(5_000);
+  });
+
+  it("migrates a pending window onto the session identity when it arrives", () => {
+    const store = new Map<string, number>();
+    expect(syncRunWindow("", true, 1_000, store)).toBe(1_000);
+    expect(syncRunWindow("s1", true, 2_000, store)).toBe(1_000);
+    expect(syncRunWindow("s1", true, 3_000, store)).toBe(1_000);
+  });
+});
+
 describe("activity retry notices", () => {
   const idle = {
     identityKey: "s1",
@@ -249,6 +274,38 @@ describe("activity retry notices", () => {
       failed: false,
     });
     expect(next.retry).toEqual({ attempt: 6, maxAttempts: 10 });
+  });
+
+  it("clears Retry N/M when the user aborts during backoff, before a stream starts", () => {
+    const started = reduceActivityRetry(idle, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: false,
+      failed: false,
+    });
+    expect(started.retry).toEqual({ attempt: 5, maxAttempts: 10 });
+    expect(reduceActivityRetry(started, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: false,
+      failed: false,
+      cancelGeneration: 1,
+    }).retry).toBeUndefined();
+  });
+
+  it("clears Retry N/M when Runtime emits auto_retry_end", () => {
+    const started = reduceActivityRetry(idle, {
+      identityKey: "s1",
+      notices: [retryNotice],
+      streaming: false,
+      failed: false,
+    });
+    expect(reduceActivityRetry(started, {
+      identityKey: "s1",
+      notices: [retryNotice, { message: "Retry cancelled", source: "retry-end" }],
+      streaming: false,
+      failed: false,
+    }).retry).toBeUndefined();
   });
 });
 

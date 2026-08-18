@@ -1,13 +1,14 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { CONFIG_DIR_NAME, postmortem, prompt } from "@oh-my-pi/pi-utils";
+import { CONFIG_DIR_NAME, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import type { ExtensionUIContext, ToolDefinition } from "../extensibility/extensions";
 import { IrcBus } from "../irc/bus";
 import backgroundTanDispatchPrompt from "../prompts/system/background-tan-dispatch.md" with { type: "text" };
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+import { registerPersistedSubagents } from "../registry/persisted-agents";
 import * as sdk from "../sdk";
 import type { AgentSession } from "../session/agent-session";
 import { BACKGROUND_TAN_DISPATCH_MESSAGE_TYPE } from "../session/messages";
@@ -41,6 +42,7 @@ import { StudioLiveService, type StudioLiveSessionFactory } from "./services/liv
 import { StudioLoopService } from "./services/loop-service";
 import { StudioModeControlService } from "./services/mode-control-service";
 import { StudioModelControlService } from "./services/model-control-service";
+import { StudioPermissionControlService } from "./services/permission-control-service";
 import { StudioOmfgService } from "./services/omfg-service";
 import { type StudioPauseService, studioPauseService } from "./services/pause-service";
 import { StudioSessionTranscriptService } from "./services/session-transcript-service";
@@ -65,6 +67,7 @@ export interface StudioHostRuntime {
 		live: StudioLiveService;
 		modes: StudioModeControlService;
 		models: StudioModelControlService;
+		permissions?: StudioPermissionControlService;
 		tree: StudioTreeService;
 		fork: StudioForkService;
 		handoff: StudioHandoffService;
@@ -111,6 +114,28 @@ export interface StudioHostModeDependencies {
 	 * through it (plan §2.5) and invalidates it on dispose.
 	 */
 	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
+}
+
+function sessionFileOf(session: AgentSession): string | null {
+	const manager = session.sessionManager;
+	if (typeof manager.getSessionFile !== "function") return null;
+	return manager.getSessionFile() ?? null;
+}
+
+async function hydratePersistedStudioAgents(
+	registry: AgentRegistry,
+	sessionFile: string | null,
+	shouldContinue?: () => boolean,
+): Promise<void> {
+	try {
+		await registerPersistedSubagents(
+			registry,
+			sessionFile,
+			shouldContinue === undefined ? {} : { shouldContinue },
+		);
+	} catch (error) {
+		logger.warn("Failed to register persisted subagents", { error });
+	}
 }
 
 function createConfiguredBridge(bridgeConfig: StudioBridgeConfiguration): StudioBridgeLifecycle {
@@ -312,9 +337,11 @@ export function createStudioHostRuntime(
 	const live = new StudioLiveService(liveSessionFactory);
 	const modes = new StudioModeControlService(session);
 	const models = new StudioModelControlService(session);
+	const permissions = new StudioPermissionControlService(session);
 	session.setBeforeNextUserTurn(async () => {
 		await models.applyPending();
 		await modes.applyPending();
+		await permissions.applyPending();
 	});
 	const interaction = new StudioInteractionGateway();
 	const tree = new StudioTreeService(session, interaction);
@@ -640,6 +667,9 @@ export function createStudioHostRuntime(
 		registry,
 		runtimeEpoch: () => bridgeConfig.runtimeEpoch as number,
 	});
+	const shutdownSignal = Promise.withResolvers<void>();
+	let shutdownRequested = false;
+	let disposed = false;
 	const unsubscribeSessionChange =
 		typeof session.registerSessionChangeCallback === "function"
 			? session.registerSessionChangeCallback(() => {
@@ -650,14 +680,12 @@ export function createStudioHostRuntime(
 						sessionId: session.sessionManager.getSessionId(),
 						runtimeEpoch: bridgeConfig.runtimeEpoch as number,
 					});
+					void hydratePersistedStudioAgents(registry, sessionFileOf(session), () => !disposed);
 				})
 			: () => {};
 	const unsubscribe = session.subscribe(event => {
 		if (event.type === "agent_end") loop.scheduleNext();
 	});
-	const shutdownSignal = Promise.withResolvers<void>();
-	let shutdownRequested = false;
-	let disposed = false;
 	return Object.freeze({
 		runtimeId: createRuntimeId(),
 		runtimeEpoch: bridgeConfig.runtimeEpoch as number,
@@ -672,6 +700,7 @@ export function createStudioHostRuntime(
 			live,
 			modes,
 			models,
+			permissions,
 			tree,
 			fork,
 			handoff,
@@ -730,6 +759,7 @@ export async function runStudioHostMode(
 	const unregisterCleanup = postmortem.register(`studio-host-bridge:${runtime.runtimeId}`, () => bridge.stop());
 
 	try {
+		await hydratePersistedStudioAgents(AgentRegistry.global(), sessionFileOf(session));
 		await runtime.services.commands.refresh();
 		await bridge.start(runtime);
 		// Install the Remote UI factory so Ask / tool dialogs surface as

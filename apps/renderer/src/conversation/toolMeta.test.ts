@@ -8,9 +8,11 @@ import {
   isRealSubagentId,
   resolveSubagentHubTarget,
   subagentCardKey,
+  assistantRunRanges,
   listSessionChangeTurns,
   sessionChangeScope,
   sessionChangeTurnIdForPath,
+  sessionChangeTurnIdForRange,
   sessionFileChanges,
   sessionFilePatches,
   sessionTaskProgress,
@@ -18,6 +20,11 @@ import {
   SESSION_CHANGE_SESSION_ID,
   toolKind,
   toolLabel,
+  collectTurnFileChanges,
+  collectPlanProposal,
+  collectLatestPlanDocument,
+  isPlanArtifactPath,
+  isPlanProposeTool,
 } from "./toolMeta";
 
 const tool = (id: string, toolName: string, args: Record<string, JsonValue>, data?: Record<string, JsonValue>, status: ToolView["status"] = "succeeded"): ToolView => ({
@@ -90,25 +97,48 @@ describe("upstream tool schemas", () => {
     expect(collectAgents([reported]).map((agent) => resolveSubagentHubTarget(agent))).toEqual([undefined, undefined]);
   });
 
-  it("keeps a real Hub agentId and never treats the display name as identity", () => {
+  it("uses Runtime-allocated progress.id as identity, not the agent-type display field", () => {
     const reported = tool("t3", "task", { spawn: { tasks: [{ name: "deps", task: "audit lockfile" }] } }, {
+      results: [{ id: "deps", agent: "scout", status: "completed", task: "audit lockfile" }],
+    });
+    const [agent] = collectAgents([reported]);
+    expect(agent).toMatchObject({
+      name: "deps",
+      agentId: "deps",
+      toolCallId: "t3",
+      task: "audit lockfile",
+    });
+    expect(resolveSubagentHubTarget(agent!)).toEqual({
+      agentId: "deps",
+      toolCallId: "t3",
+      task: "audit lockfile",
+    });
+    expect(subagentCardKey(agent!)).toBe("t3:deps");
+    expect(isRealSubagentId("deps")).toBe(true);
+    expect(isRealSubagentId("Anna-2")).toBe(true);
+    expect(isRealSubagentId("Anna.Bob")).toBe(true);
+    expect(isRealSubagentId("agent-019fcb01")).toBe(true);
+    expect(isRealSubagentId("Main")).toBe(false);
+    expect(isRealSubagentId("")).toBe(false);
+  });
+
+  it("keeps a fixture Hub agentId and never treats a name-only row as identity", () => {
+    const reported = tool("t4", "task", { spawn: { tasks: [{ name: "deps", task: "audit lockfile" }] } }, {
       progress: [{ id: "agent-019fcb01", name: "deps", status: "running", task: "audit lockfile" }],
     });
     const [agent] = collectAgents([reported]);
     expect(agent).toMatchObject({
       name: "deps",
       agentId: "agent-019fcb01",
-      toolCallId: "t3",
+      toolCallId: "t4",
       task: "audit lockfile",
     });
     expect(resolveSubagentHubTarget(agent!)).toEqual({
       agentId: "agent-019fcb01",
-      toolCallId: "t3",
+      toolCallId: "t4",
       task: "audit lockfile",
     });
-    expect(subagentCardKey(agent!)).toBe("t3:agent-019fcb01");
-    expect(isRealSubagentId("deps")).toBe(false);
-    expect(isRealSubagentId("agent-019fcb01")).toBe(true);
+    expect(subagentCardKey(agent!)).toBe("t4:agent-019fcb01");
   });
 
   it("attributes ast_edit files and lines from fileReplacements and the grouped display tree", () => {
@@ -291,6 +321,17 @@ describe("listSessionChangeTurns", () => {
     expect(sessionChangeTurnIdForPath(rows, "src/b.ts")).toBe(SESSION_CHANGE_LAST_ID);
     expect(sessionChangeTurnIdForPath(rows, "missing.ts")).toBeUndefined();
   });
+
+  it("maps a historical run to its item id and the last run to last", () => {
+    const rows: readonly TimelineRow[] = [
+      assistantRow("a1", [tool("e1", "edit", { path: "src/a.ts" }, { diff: "+1|one" })]),
+      userRow("u2"),
+      assistantRow("a2", [tool("e2", "edit", { path: "src/b.ts" }, { diff: "+1|two" })]),
+    ];
+    const ranges = assistantRunRanges(rows);
+    expect(sessionChangeTurnIdForRange(rows, ranges[0]!, ranges)).toBe("a1");
+    expect(sessionChangeTurnIdForRange(rows, ranges[1]!, ranges)).toBe(SESSION_CHANGE_LAST_ID);
+  });
 });
 
 describe("sessionFilePatches", () => {
@@ -389,5 +430,43 @@ describe("sessionFilePatches", () => {
       { kind: "edit", lines: [{ mark: "+", oldLn: "", newLn: "1", text: "first" }] },
       { kind: "write", lines: [{ mark: "+", oldLn: "", newLn: "1", text: "rewritten" }] },
     ]);
+  });
+});
+
+describe("xd://propose", () => {
+  it("recognizes a write to xd://propose even before the xdev envelope arrives", () => {
+    const call = tool("p1", "write", { path: "xd://propose", content: '{"title":"plan-annotation-receipt"}' });
+    expect(isPlanProposeTool(call)).toBe(true);
+    expect(collectPlanProposal(batchSegments("a1", [call]))).toEqual({ title: "plan-annotation-receipt" });
+  });
+
+  it("reads the title from xdev.args when the propose device envelope is present", () => {
+    const call = tool("p1", "write", { path: "xd://propose" }, {
+      xdev: { tool: "propose", args: { title: "User message restore" }, inner: { result: "Plan ready for review." } },
+    });
+    expect(isPlanProposeTool(call)).toBe(true);
+    expect(toolKind(call)).toBe("propose");
+    expect(collectPlanProposal(batchSegments("a1", [call]))).toEqual({ title: "User message restore" });
+  });
+
+  it("collects the latest local:// plan markdown for viewing after approval", () => {
+    expect(isPlanArtifactPath("local://preview-plan.md")).toBe(true);
+    expect(isPlanArtifactPath("apps/renderer/src/App.tsx")).toBe(false);
+    const rows = [
+      assistantRow("w", [tool("w1", "write", { path: "local://preview-plan.md", content: "## 目标\n\nShip it.\n" })]),
+      assistantRow("p", [tool("p1", "write", { path: "xd://propose", content: '{"title":"Preview 缩放惯性"}' })]),
+      assistantRow("later", [tool("w2", "write", { path: "apps/renderer/src/App.tsx", content: "ok\n" })]),
+    ];
+    expect(collectLatestPlanDocument(rows)).toEqual({
+      title: "Preview 缩放惯性",
+      body: "## 目标\n\nShip it.\n",
+    });
+  });
+
+  it("does not treat a failed propose as a created plan, and skips xd:// paths in the turn diff", () => {
+    const failed = tool("p1", "write", { path: "xd://propose", content: '{"title":"nope"}' }, undefined, "failed");
+    const write = tool("w1", "write", { path: "local://plan.md", content: "body" });
+    expect(collectPlanProposal(batchSegments("a1", [failed, write]))).toBeUndefined();
+    expect(collectTurnFileChanges(batchSegments("a1", [failed, write])).map((file) => file.path)).toEqual(["local://plan.md"]);
   });
 });

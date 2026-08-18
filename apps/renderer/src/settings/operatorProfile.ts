@@ -2,7 +2,7 @@
  * 首页 / 侧栏展示的操作者资料（显示名 + 头像）。
  *
  * 显示名走 localStorage（与主题一样，不进 Host）。头像经裁切压缩后
- * 由桌面壳写入安装目录旁的 `userdata/profile/`；Renderer 只持有用于
+ * 由桌面壳写入 `%APPDATA%\omp-studio\profile\`；Renderer 只持有用于
  * 展示的 data URL，不把路径写进存储。
  */
 
@@ -27,7 +27,7 @@ const AVATAR_NAME_RE = /\.(gif|jpe?g|png|webp)$/iu;
 
 export interface OperatorProfile {
   readonly displayName: string;
-  /** 仅用于 <img src>；来自应用目录里的头像文件，不进 localStorage。 */
+  /** 仅用于 <img src>；来自 AppData 里的头像文件，不进 localStorage。 */
   readonly avatarSrc: string;
 }
 

@@ -6,6 +6,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import {
   CONVERSATION_LIMITS,
   CONVERSATION_REDACT_KEY_PATTERN,
+  publicConversationToolCallId,
   type ConversationContentBlock,
   type ConversationItem,
   type JsonValue,
@@ -666,16 +667,75 @@ function resolveBranchLeaf(entries: readonly ArchiveEntry[]): string | null {
   return entries.at(-1)?.id ?? null;
 }
 
+function unpairedToolCall(
+  item: Extract<ConversationItem, { kind: "message" }>,
+): Extract<ConversationContentBlock, { type: "toolCall" }> | undefined {
+  for (let index = item.content.length - 1; index >= 0; index -= 1) {
+    const block = item.content[index];
+    if (block?.type !== "toolCall") continue;
+    if (item.content.some((entry) => entry.type === "toolResult" && entry.toolCallId === block.toolCallId)) continue;
+    return block;
+  }
+  return undefined;
+}
+
+function attachToolResult(
+  items: ConversationItem[],
+  toolOwners: Map<string, number>,
+  result: Extract<ConversationContentBlock, { type: "toolResult" }>,
+  parentId: string | null,
+  rawToolCallId: string,
+): { index: number; result: Extract<ConversationContentBlock, { type: "toolResult" }> } | undefined {
+  const ownerIndex = toolOwners.get(result.toolCallId);
+  if (ownerIndex !== undefined) {
+    const owner = items[ownerIndex];
+    if (owner !== undefined && owner.kind === "message") return { index: ownerIndex, result };
+  }
+  if (rawToolCallId.length > 0 || parentId === null) return undefined;
+  const parentIndex = items.findIndex((item) => item.itemId === parentId);
+  const parent = parentIndex < 0 ? undefined : items[parentIndex];
+  if (parent === undefined || parent.kind !== "message") return undefined;
+  const call = unpairedToolCall(parent);
+  if (call === undefined) return undefined;
+  return { index: parentIndex, result: { ...result, toolCallId: call.toolCallId } };
+}
+
 function projectBranch(entries: readonly ArchiveEntry[]): ConversationItem[] {
   const items: ConversationItem[] = [];
   const toolOwners = new Map<string, number>();
-  const toolResults: Array<{ readonly entry: ArchiveEntry; readonly result: Extract<ConversationContentBlock, { type: "toolResult" }> }> = [];
 
   for (const entry of entries) {
     if (entry.type === "message") {
       const message = isRecord(entry.message) ? entry.message : {};
       if (message.role === "toolResult") {
-        toolResults.push({ entry, result: projectToolResult(message) });
+        const rawId = typeof message.toolCallId === "string" ? message.toolCallId : "";
+        const mapped = projectToolResult(message, `tool:${entry.id}`);
+        const attached = attachToolResult(items, toolOwners, mapped, entry.parentId, rawId);
+        if (attached !== undefined) {
+          const owner = items[attached.index];
+          if (owner !== undefined && owner.kind === "message") {
+            const content = owner.content.some(
+              (block) => block.type === "toolResult" && block.toolCallId === attached.result.toolCallId,
+            )
+              ? owner.content
+              : [...owner.content, attached.result];
+            items[attached.index] = { ...owner, content };
+          }
+          continue;
+        }
+        const toolCall: Extract<ConversationContentBlock, { type: "toolCall" }> = {
+          type: "toolCall",
+          toolCallId: mapped.toolCallId,
+          toolName: mapped.toolName ?? "tool",
+        };
+        items.push({
+          kind: "message",
+          itemId: entry.id,
+          parentId: entry.parentId,
+          createdAt: typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString(),
+          role: "assistant",
+          content: [toolCall, mapped],
+        });
         continue;
       }
     }
@@ -689,42 +749,6 @@ function projectBranch(entries: readonly ArchiveEntry[]): ConversationItem[] {
       if (block.type === "toolCall") toolOwners.set(block.toolCallId, index);
     }
   }
-
-  const orphanResults: Array<{ readonly entry: ArchiveEntry; readonly result: Extract<ConversationContentBlock, { type: "toolResult" }> }> = [];
-  for (const { entry, result } of toolResults) {
-    const ownerIndex = toolOwners.get(result.toolCallId);
-    if (ownerIndex === undefined) {
-      orphanResults.push({ entry, result });
-      continue;
-    }
-    const owner = items[ownerIndex];
-    if (owner === undefined || owner.kind !== "message") {
-      orphanResults.push({ entry, result });
-      continue;
-    }
-    const content = owner.content.some((block) => block.type === "toolResult" && block.toolCallId === result.toolCallId)
-      ? owner.content
-      : [...owner.content, result];
-    items[ownerIndex] = { ...owner, content };
-  }
-
-  // A corrupt/truncated archive may contain a result without its call. Keep it
-  // visible as a completed tool instead of producing an empty OMP row.
-  for (const { entry, result } of orphanResults) {
-    const toolCall: Extract<ConversationContentBlock, { type: "toolCall" }> = {
-      type: "toolCall",
-      toolCallId: result.toolCallId,
-      toolName: result.toolName ?? "tool",
-    };
-    items.push({
-      kind: "message",
-      itemId: entry.id,
-      parentId: entry.parentId,
-      createdAt: typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString(),
-      role: "assistant",
-      content: [toolCall, result],
-    });
-  }
   return items;
 }
 
@@ -735,14 +759,17 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
     if (message.role === "toolResult") {
       return undefined;
     }
-    const role = message.role === "user" ? "user" : message.role === "assistant" ? "assistant" : "system";
+    if (isHarnessInjectedUserMessage(message)) return undefined;
+    const role =
+      message.role === "user" ? "user" : message.role === "assistant" ? "assistant" : message.role === "system" ? "system" : undefined;
+    if (role === undefined) return undefined;
     return {
       kind: "message",
       itemId: entry.id,
       parentId: entry.parentId,
       createdAt,
       role,
-      content: projectContent(message.content),
+      content: projectContent(message.content, `tool:${entry.id}`),
     };
   }
   if (entry.type === "compaction" && typeof entry.summary === "string") {
@@ -762,7 +789,7 @@ function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
   return undefined;
 }
 
-function projectContent(value: unknown): ConversationContentBlock[] {
+function projectContent(value: unknown, fallbackPrefix: string): ConversationContentBlock[] {
   if (typeof value === "string") {
     const text = sanitizeText(value, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
     return [{ type: "text", text: text.text, ...(text.truncated ? { truncated: true } : {}) }];
@@ -778,14 +805,14 @@ function projectContent(value: unknown): ConversationContentBlock[] {
       const text = sanitizeText(item.thinking, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
       blocks.push({ type: "thinking", text: text.text, ...(text.truncated ? { truncated: true } : {}) });
     } else if (item.type === "toolCall" && typeof item.id === "string" && typeof item.name === "string") {
-      const toolCallId = item.id.slice(0, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS) || "tool-call";
-      const toolName = item.name.slice(0, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS) || "tool";
+      const publicId = publicConversationToolCallId(item.id, `${fallbackPrefix}:${blocks.length}`);
+      const toolName = sanitizeText(item.name, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
       const args = projectBoundedJson(item.arguments);
-      const truncated = toolCallId !== item.id || toolName !== item.name || args.truncated;
+      const truncated = publicId.truncated || toolName.truncated || args.truncated;
       blocks.push({
         type: "toolCall",
-        toolCallId,
-        toolName,
+        toolCallId: publicId.id.length > 0 ? publicId.id : `${fallbackPrefix}:${blocks.length}`,
+        toolName: toolName.text.length > 0 ? toolName.text : "tool",
         ...(args.value === undefined ? {} : { arguments: args.value }),
         ...(truncated ? { truncated: true } : {}),
       });
@@ -798,27 +825,54 @@ function projectContent(value: unknown): ConversationContentBlock[] {
   return blocks;
 }
 
-function projectToolResult(message: Record<string, unknown>): Extract<ConversationContentBlock, { type: "toolResult" }> {
+function projectToolResult(
+  message: Record<string, unknown>,
+  fallbackToolCallId: string,
+): Extract<ConversationContentBlock, { type: "toolResult" }> {
   const outputs: string[] = [];
+  let omittedBinary = false;
   if (typeof message.content === "string") outputs.push(message.content);
   if (Array.isArray(message.content)) {
     for (const item of message.content) {
       if (isRecord(item) && item.type === "text" && typeof item.text === "string") outputs.push(item.text);
+      else if (isRecord(item) && item.type === "image") omittedBinary = true;
     }
   }
   const output = sanitizeText(outputs.join("\n"), CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
   const details = projectBoundedJson(message.details);
-  const toolName = typeof message.toolName === "string" ? message.toolName.slice(0, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS) : undefined;
-  const nameTruncated = toolName !== undefined && toolName !== message.toolName;
-  return {
+  const rawId = typeof message.toolCallId === "string" ? message.toolCallId : "";
+  const publicId = publicConversationToolCallId(rawId, fallbackToolCallId);
+  const nameSource = typeof message.toolName === "string" ? message.toolName : undefined;
+  const toolName =
+    nameSource === undefined ? undefined : sanitizeText(nameSource, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
+  let truncated =
+    output.truncated ||
+    details.truncated ||
+    publicId.truncated ||
+    toolName?.truncated === true ||
+    omittedBinary;
+  const mapped: Extract<ConversationContentBlock, { type: "toolResult" }> = {
     type: "toolResult",
-    toolCallId: typeof message.toolCallId === "string" ? message.toolCallId.slice(0, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS) : "tool-call",
-    ...(toolName === undefined ? {} : { toolName }),
-    ...(output.text.length === 0 ? {} : { output: output.text }),
-    ...(details.value === undefined ? {} : { data: details.value }),
+    toolCallId: publicId.id.length > 0 ? publicId.id : fallbackToolCallId,
     isError: message.isError === true,
-    ...(output.truncated || details.truncated || nameTruncated ? { truncated: true } : {}),
   };
+  if (toolName !== undefined && toolName.text.length > 0) mapped.toolName = toolName.text;
+  if (output.text.length > 0) mapped.output = output.text;
+  if (omittedBinary) {
+    mapped.data = { omitted: "image" };
+    truncated = true;
+  }
+  if (details.value !== undefined) {
+    if (omittedBinary && details.value !== null && typeof details.value === "object" && !Array.isArray(details.value)) {
+      mapped.data = { ...(details.value as { readonly [key: string]: JsonValue }), omitted: "image" };
+    } else if (omittedBinary) {
+      mapped.data = { omitted: "image", details: details.value };
+    } else {
+      mapped.data = details.value;
+    }
+  }
+  if (truncated) mapped.truncated = true;
+  return mapped;
 }
 
 /** Byte-bounded JSON projection shared by toolCall arguments and toolResult details. */
@@ -845,7 +899,7 @@ function sanitizeJson(value: unknown, depth: number): JsonValue | undefined {
   if (!isRecord(value)) return undefined;
   const result: Record<string, JsonValue> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (CONVERSATION_REDACT_KEY_PATTERN.test(key)) result[key] = "[REDACTED]";
+    if (CONVERSATION_REDACT_KEY_PATTERN.test(key)) result[key] = "[redacted]";
     else {
       const safe = sanitizeJson(item, depth + 1);
       if (safe !== undefined) result[key] = safe;
@@ -918,4 +972,9 @@ function sameWorkspace(left: string, right: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Matches overlay `conversation-visibility.ts`: drop developer/custom and synthetic/steering user rows. */
+function isHarnessInjectedUserMessage(message: Record<string, unknown>): boolean {
+  return message.role === "user" && (message.synthetic === true || message.steering === true);
 }

@@ -85,6 +85,18 @@ test("backend composition wires Thread references into installer retention", asy
   assert.equal(backend.bindings.isRuntimeReferenced("17.2.12-studio.13"), false);
 });
 
+test("HostBackend keeps the managed Runtime tree at runtimeInstallDirectory", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-studio-backend-runtime-"));
+  const install = join(temporary, "install-runtime");
+  const backend = new HostBackend({
+    stateDirectory: join(temporary, "profile"),
+    runtimeInstallDirectory: install,
+  });
+  assert.equal(backend.installer.rootDirectory, install);
+  const defaulted = new HostBackend({ stateDirectory: join(temporary, "profile-default") });
+  assert.equal(defaulted.installer.rootDirectory, join(temporary, "profile-default", "runtimes"));
+});
+
 test("Windows Job Object containment attaches, terminates, and closes through the native seam", async () => {
   const calls: string[] = [];
   const containment = new WindowsJobObjectContainment({

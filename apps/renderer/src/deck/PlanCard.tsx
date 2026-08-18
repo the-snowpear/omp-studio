@@ -1,9 +1,65 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { MarkdownText } from "../conversation/markdown";
 import { Icon } from "../icons";
+import { PlanAnnotatedBody, type PlanAnnotatedBodyHandle } from "./PlanAnnotatedBody";
+import { formatPlanRefineFeedback, type PlanNotesBySection } from "./planFeedback";
+import { parsePlanSections } from "./planSections";
 import { PromptHead } from "./PromptHead";
-import { PLAN_ACTIONS, type PlanActionId } from "./types";
+import { PLAN_ACTIONS, type PlanActionDetail, type PlanActionId } from "./types";
+
+function PlanHeadActions({
+  expanded,
+  disabled,
+  collapseRef,
+  onToggle,
+  onDismiss,
+}: {
+  expanded: boolean;
+  disabled?: boolean;
+  collapseRef?: RefObject<HTMLButtonElement | null>;
+  onToggle: () => void;
+  onDismiss: () => void;
+}) {
+  if (expanded) {
+    return (
+      <span className="plan-head-actions">
+        <button
+          {...(collapseRef ? { ref: collapseRef } : {})}
+          type="button"
+          className="icon-btn small"
+          aria-label="收起计划"
+          disabled={disabled === true}
+          onClick={onToggle}
+        >
+          <Icon name="x" extra="sm" />
+        </button>
+      </span>
+    );
+  }
+  return (
+    <span className="plan-head-actions">
+      <button
+        type="button"
+        className="icon-btn small"
+        aria-label="放大计划"
+        disabled={disabled === true}
+        onClick={onToggle}
+      >
+        <Icon name="expand" extra="sm" />
+      </button>
+      <button
+        type="button"
+        className="icon-btn small"
+        aria-label="关闭计划"
+        disabled={disabled === true}
+        onClick={onDismiss}
+      >
+        <Icon name="x" extra="sm" />
+      </button>
+    </span>
+  );
+}
 
 function PlanActions({
   onPick,
@@ -34,6 +90,7 @@ function PlanActions({
 type Box = { top: number; left: number; width: number; height: number };
 
 const PLAN_MORPH_MS = 340;
+const PLAN_MORPH_LEAVE_MS = 200;
 const PLAN_CLIP_FULL = "inset(0px 0px 0px 0px round var(--r-10))";
 
 function prefersReducedMotion(): boolean {
@@ -66,20 +123,43 @@ function morphToFull(dialog: HTMLElement) {
   dialog.style.opacity = "1";
 }
 
+function readOrigin(
+  originRef: RefObject<HTMLElement | null>,
+  fallbackRef?: RefObject<HTMLElement | null>,
+): Box | undefined {
+  return readBox(originRef.current) ?? readBox(fallbackRef?.current ?? null);
+}
+
 function PlanReviewDialog({
   title,
   body,
+  notes,
+  overallNote,
+  viewOnly,
   originRef,
+  fallbackOriginRef,
+  annotateRef,
   disabled,
   onClose,
   onAction,
+  onPrepareAction,
+  onNotesChange,
+  onOverallNoteChange,
 }: {
   title: string;
   body: string;
+  notes: PlanNotesBySection;
+  overallNote: string;
+  viewOnly?: boolean;
   originRef: RefObject<HTMLElement | null>;
+  fallbackOriginRef?: RefObject<HTMLElement | null>;
+  annotateRef: RefObject<PlanAnnotatedBodyHandle | null>;
   disabled?: boolean;
   onClose: () => void;
-  onAction: (id: PlanActionId) => void;
+  onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
+  onPrepareAction?: (id: PlanActionId) => void;
+  onNotesChange: (notes: Record<number, string[]>) => void;
+  onOverallNoteChange: (note: string) => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -92,7 +172,7 @@ function PlanReviewDialog({
     leavingRef.current = true;
     const dialog = dialogRef.current;
     const overlay = overlayRef.current;
-    const origin = readBox(originRef.current);
+    const origin = readOrigin(originRef, fallbackOriginRef);
     let finished = false;
     const done = () => {
       if (finished) return;
@@ -113,14 +193,14 @@ function PlanReviewDialog({
     };
     dialog.addEventListener("transitionend", onEnd);
     morphToOrigin(dialog, origin);
-    window.setTimeout(done, PLAN_MORPH_MS + 80);
-  }, [onClose, originRef]);
+    window.setTimeout(done, PLAN_MORPH_LEAVE_MS + 40);
+  }, [fallbackOriginRef, onClose, originRef]);
 
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     const overlay = overlayRef.current;
     if (!dialog || !overlay) return;
-    const origin = readBox(originRef.current);
+    const origin = readOrigin(originRef, fallbackOriginRef);
     if (!origin || prefersReducedMotion()) {
       overlay.classList.add("is-open");
       closeRef.current?.focus();
@@ -133,7 +213,7 @@ function PlanReviewDialog({
     overlay.classList.add("is-open");
     morphToFull(dialog);
     closeRef.current?.focus();
-  }, [originRef]);
+  }, [fallbackOriginRef, originRef]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -166,20 +246,58 @@ function PlanReviewDialog({
           <span id="planReviewDialogTitle" className="plan-review-dialog-title">
             Plan Review · {title}
           </span>
-          <button
-            ref={closeRef}
-            type="button"
-            className="icon-btn small"
-            aria-label="关闭计划"
-            onClick={() => requestClose()}
-          >
-            <Icon name="x" extra="sm" />
-          </button>
+          <PlanHeadActions
+            expanded
+            collapseRef={closeRef}
+            onToggle={() => requestClose()}
+            onDismiss={() => requestClose()}
+            {...(disabled === true ? { disabled: true } : {})}
+          />
         </div>
         <div className="plan-review-dialog-body">
-          <MarkdownText text={body} />
+          {viewOnly === true ? (
+            body.trim().length > 0 ? (
+              <div className="plan-md-preview">
+                <MarkdownText text={body} />
+              </div>
+            ) : (
+              <p className="dk-sub">当前会话里没有找到计划正文。</p>
+            )
+          ) : (
+            <PlanAnnotatedBody
+              ref={annotateRef}
+              body={body}
+              notes={notes}
+              onNotesChange={onNotesChange}
+              {...(disabled === true ? { disabled: true } : {})}
+            />
+          )}
         </div>
-        <PlanActions onPick={(id) => requestClose(() => onAction(id))} large {...(disabled === true ? { disabled: true } : {})} />
+        {viewOnly === true ? null : (
+        <div className="plan-review-overall">
+          <label className="plan-review-overall-label" htmlFor="planOverallNote">全文批注</label>
+          <textarea
+            id="planOverallNote"
+            className="input"
+            rows={3}
+            value={overallNote}
+            disabled={disabled === true}
+            aria-label="全文批注"
+            placeholder="对整份计划的修改意见…"
+            onChange={(event) => onOverallNoteChange(event.target.value)}
+          />
+        </div>
+        )}
+        {viewOnly === true ? null : (
+        <PlanActions
+          onPick={(id) => {
+            onPrepareAction?.(id);
+            requestClose(() => onAction(id));
+          }}
+          large
+          {...(disabled === true ? { disabled: true } : {})}
+        />
+        )}
       </div>
     </div>,
     host,
@@ -192,6 +310,9 @@ export function PlanCard({
   demo,
   meta,
   disabled,
+  expanded: expandedProp,
+  onExpandedChange,
+  originRef,
   onAction,
 }: {
   title: string;
@@ -199,10 +320,50 @@ export function PlanCard({
   demo?: boolean;
   meta?: string;
   disabled?: boolean;
-  onAction: (id: PlanActionId) => void;
+  expanded?: boolean;
+  onExpandedChange?: (open: boolean) => void;
+  originRef?: RefObject<HTMLElement | null>;
+  onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
+  const controlled = expandedProp !== undefined;
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const expanded = controlled ? expandedProp : internalExpanded;
+  const setExpanded = useCallback((open: boolean) => {
+    if (!controlled) setInternalExpanded(open);
+    onExpandedChange?.(open);
+  }, [controlled, onExpandedChange]);
+  const revealFromCard = useCallback(() => {
+    if (originRef) originRef.current = cardRef.current;
+    setExpanded(true);
+  }, [originRef, setExpanded]);
+  const [notes, setNotes] = useState<Record<number, string[]>>({});
+  const [overallNote, setOverallNote] = useState("");
+  const notesRef = useRef(notes);
+  notesRef.current = notes;
+  const overallNoteRef = useRef(overallNote);
+  overallNoteRef.current = overallNote;
+  const annotateRef = useRef<PlanAnnotatedBodyHandle>(null);
+  const refineNotesRef = useRef<PlanNotesBySection | undefined>(undefined);
+  const sections = useMemo(() => parsePlanSections(body), [body]);
+  const captureRefineNotes = useCallback(() => {
+    refineNotesRef.current = annotateRef.current?.flushDraft() ?? notesRef.current;
+  }, []);
+  const emitAction = useCallback((id: PlanActionId) => {
+    if (id !== "refine") {
+      onAction(id);
+      return;
+    }
+    const latest = refineNotesRef.current ?? annotateRef.current?.flushDraft() ?? notesRef.current;
+    refineNotesRef.current = undefined;
+    const feedback = formatPlanRefineFeedback(sections, latest, overallNoteRef.current);
+    if (feedback === undefined) onAction("refine");
+    else onAction("refine", { feedback });
+  }, [onAction, sections]);
+  const closeDialog = useCallback(() => {
+    annotateRef.current?.flushDraft();
+    setExpanded(false);
+  }, [setExpanded]);
   return (
     <div className="approval-card" ref={cardRef}>
       <PromptHead
@@ -211,34 +372,86 @@ export function PlanCard({
         {...(demo === true ? { demo: true } : {})}
         {...(meta ? { meta } : {})}
         end={(
-          <button
-            type="button"
-            className="icon-btn small"
-            aria-label="放大计划"
-            onClick={() => setExpanded(true)}
-          >
-            <Icon name="expand" extra="sm" />
-          </button>
+          <PlanHeadActions
+            expanded={false}
+            onToggle={revealFromCard}
+            onDismiss={() => emitAction("dismiss")}
+            {...(disabled === true ? { disabled: true } : {})}
+          />
         )}
       />
-      <div className="approval-body">
+      <div
+        className="approval-body plan-preview-hit"
+        role="button"
+        tabIndex={disabled === true ? -1 : 0}
+        aria-label="展开完整计划"
+        aria-disabled={disabled === true}
+        onClick={(event) => {
+          if (disabled === true) return;
+          if (event.target instanceof Element && event.target.closest("a")) return;
+          revealFromCard();
+        }}
+        onKeyDown={(event) => {
+          if (disabled === true) return;
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          revealFromCard();
+        }}
+      >
         <p className="dk-sub">{title}</p>
         <div className="plan-md-preview">
           <MarkdownText text={body} />
         </div>
       </div>
-      <PlanActions onPick={onAction} {...(disabled === true ? { disabled: true } : {})} />
+      <PlanActions onPick={emitAction} {...(disabled === true ? { disabled: true } : {})} />
       {expanded ? (
         <PlanReviewDialog
           title={title}
           body={body}
-          originRef={cardRef}
-          onClose={() => setExpanded(false)}
-          onAction={onAction}
+          notes={notes}
+          overallNote={overallNote}
+          originRef={originRef ?? cardRef}
+          fallbackOriginRef={cardRef}
+          annotateRef={annotateRef}
+          onClose={closeDialog}
+          onAction={emitAction}
+          onPrepareAction={(id) => {
+            if (id === "refine") captureRefineNotes();
+          }}
+          onNotesChange={setNotes}
+          onOverallNoteChange={setOverallNote}
           {...(disabled === true ? { disabled: true } : {})}
         />
       ) : null}
     </div>
+  );
+}
+
+export function PlanViewDialog({
+  title,
+  body,
+  originRef,
+  onClose,
+}: {
+  title: string;
+  body: string;
+  originRef: RefObject<HTMLElement | null>;
+  onClose: () => void;
+}) {
+  return (
+    <PlanReviewDialog
+      title={title}
+      body={body}
+      notes={{}}
+      overallNote=""
+      viewOnly
+      originRef={originRef}
+      annotateRef={{ current: null }}
+      onClose={onClose}
+      onAction={() => {}}
+      onNotesChange={() => {}}
+      onOverallNoteChange={() => {}}
+    />
   );
 }
 
@@ -247,13 +460,19 @@ export function PlanReviewDeck({
   body,
   meta,
   disabled,
+  expanded,
+  onExpandedChange,
+  originRef,
   onAction,
 }: {
   title: string;
   body: string;
   meta?: string;
   disabled?: boolean;
-  onAction: (id: PlanActionId) => void;
+  expanded?: boolean;
+  onExpandedChange?: (open: boolean) => void;
+  originRef?: RefObject<HTMLElement | null>;
+  onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
 }) {
   return (
     <div className="deck active preview-queue" role="region" aria-label="待审核的计划" aria-live="polite">
@@ -264,6 +483,9 @@ export function PlanReviewDeck({
           onAction={onAction}
           {...(meta ? { meta } : {})}
           {...(disabled === true ? { disabled: true } : {})}
+          {...(expanded === undefined ? {} : { expanded })}
+          {...(onExpandedChange === undefined ? {} : { onExpandedChange })}
+          {...(originRef === undefined ? {} : { originRef })}
         />
       </div>
     </div>

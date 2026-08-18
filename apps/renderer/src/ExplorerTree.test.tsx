@@ -231,4 +231,76 @@ describe("RealFileTree", () => {
     await screen.findByRole("treeitem", { name: "src 文件夹" });
     expect(document.querySelector(".fstat")).toBeNull();
   });
+
+  it("shows a red live dot on a file the agent is reading", async () => {
+    const query = vi.fn(async () => tree([
+      { type: "dir", name: "src", path: "src", children: [{ type: "file", name: "main.ts", path: "src/main.ts" }] },
+      { type: "file", name: "README.md", path: "README.md" },
+    ]));
+    const client = { query } as unknown as StudioClient;
+
+    render(
+      <RealFileTree
+        client={client}
+        workspaceId={workspaceId}
+        label="OMP Studio"
+        refreshToken={0}
+        search=""
+        fileActivity={{ reading: ["src/main.ts"], writing: [] }}
+        {...noCreation}
+      />,
+    );
+
+    const fileRow = await waitFor(() => {
+      const row = screen.getByText("main.ts").closest<HTMLDivElement>("[role=treeitem]");
+      expect(row).not.toBeNull();
+      return row!;
+    });
+    expect(fileRow.querySelector(".dot.red.pulse")).not.toBeNull();
+    expect(fileRow.querySelector('[aria-label="OMP 正在读取"]')).not.toBeNull();
+    expect(fileRow.querySelector(".dot.green")).toBeNull();
+    const dirRow = screen.getByRole("treeitem", { name: "src 文件夹" });
+    expect(dirRow.querySelector(".dot.red.pulse")).not.toBeNull();
+    const untouched = screen.getByText("README.md").closest("[role=treeitem]");
+    expect(untouched!.querySelector(".live")).toBeNull();
+  });
+
+  it("shows a green live dot on a file the agent is writing", async () => {
+    const query = vi.fn(async () => tree([
+      { type: "file", name: "README.md", path: "README.md" },
+      { type: "file", name: "notes.md", path: "notes.md" },
+    ]));
+    const client = { query } as unknown as StudioClient;
+
+    render(
+      <RealFileTree
+        client={client}
+        workspaceId={workspaceId}
+        label="OMP Studio"
+        refreshToken={0}
+        search=""
+        fileActivity={{ reading: [], writing: ["README.md"] }}
+        {...noCreation}
+      />,
+    );
+
+    const fileRow = await waitFor(() => {
+      const row = screen.getByText("README.md").closest<HTMLDivElement>("[role=treeitem]");
+      expect(row).not.toBeNull();
+      return row!;
+    });
+    expect(fileRow.querySelector(".dot.green.pulse")).not.toBeNull();
+    expect(fileRow.querySelector('[aria-label="OMP 正在写入"]')).not.toBeNull();
+    const other = screen.getByText("notes.md").closest("[role=treeitem]");
+    expect(other!.querySelector(".live")).toBeNull();
+  });
+
+  it("hides live dots when file activity is empty", async () => {
+    const query = vi.fn(async () => tree([{ type: "file", name: "README.md", path: "README.md" }]));
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+    await screen.findByText("README.md");
+    expect(document.querySelector(".tree-row .live")).toBeNull();
+  });
 });

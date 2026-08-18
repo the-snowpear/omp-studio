@@ -1,3 +1,4 @@
+import type { BtwSnapshot } from "./btw";
 import type { StudioOperation } from "./commands";
 import type { ConversationRuntimeEvent } from "./conversation";
 import type {
@@ -138,7 +139,7 @@ export type StudioBridgeEvent =
   | ConversationRuntimeEvent
   | SessionTelemetryEvent
   | { kind: "state.changed"; snapshot: OperatorStateSnapshot }
-  | { kind: "btw.changed"; snapshot: unknown };
+  | { kind: "btw.changed"; snapshot: BtwSnapshot };
 
 export type RuntimeLifecycleEvent =
   | { kind: "runtime.ready" }

@@ -76,11 +76,77 @@ test("archive reader pages persistent history without a Runtime and redacts tool
     if (assistant?.kind === "message") {
       const call = assistant.content.find((block) => block.type === "toolCall");
       assert.equal(call?.type, "toolCall");
-      if (call?.type === "toolCall") assert.deepEqual(call.arguments, { path: "README.md", apiKey: "[REDACTED]" });
+      if (call?.type === "toolCall") assert.deepEqual(call.arguments, { path: "README.md", apiKey: "[redacted]" });
     }
     const older = await reader.readPage({ sessionId: "session-a", cursor: latest.olderCursor, limit: 2 });
     assert.deepEqual(older.items.map((item) => item.itemId), ["user-1"]);
     assert.equal(older.hasMoreBefore, false);
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader omits developer and synthetic/steering user harness messages", async () => {
+  const seed = await fixture([]);
+  const entries: Entry[] = [
+    { type: "session", id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" },
+    {
+      type: "message",
+      id: "user-1",
+      parentId: null,
+      timestamp: "2026-08-15T00:00:01.000Z",
+      message: { role: "user", content: "hello" },
+    },
+    {
+      type: "message",
+      id: "developer-1",
+      parentId: "user-1",
+      timestamp: "2026-08-15T00:00:01.500Z",
+      message: {
+        role: "developer",
+        content: [{ type: "text", text: "<system-reminder>\nYou stopped with 2 incomplete todo item(s):\n</system-reminder>" }],
+        attribution: "agent",
+      },
+    },
+    {
+      type: "message",
+      id: "synthetic-1",
+      parentId: "developer-1",
+      timestamp: "2026-08-15T00:00:01.600Z",
+      message: {
+        role: "user",
+        content: "<instruction>MUST read local://annotation-channel-v2-plan.md</instruction>",
+        synthetic: true,
+      },
+    },
+    {
+      type: "message",
+      id: "steer-1",
+      parentId: "synthetic-1",
+      timestamp: "2026-08-15T00:00:01.700Z",
+      message: { role: "user", content: "steer the turn", steering: true },
+    },
+    {
+      type: "message",
+      id: "assistant-1",
+      parentId: "steer-1",
+      timestamp: "2026-08-15T00:00:02.000Z",
+      message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+    },
+  ];
+  await writeFile(seed.file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  try {
+    const reader = new StudioSessionArchiveReader({
+      sessionsRoot: seed.sessions,
+      allowedCwd: seed.workspace,
+      cursorSecret: Buffer.alloc(32, 7),
+    });
+    const page = await reader.readPage({ sessionId: "session-a", limit: 10 });
+    assert.deepEqual(page.items.map((item) => item.itemId), ["user-1", "assistant-1"]);
+    const serialized = JSON.stringify(page);
+    assert.equal(serialized.includes("system-reminder"), false);
+    assert.equal(serialized.includes("<instruction>"), false);
+    assert.equal(serialized.includes("steer the turn"), false);
   } finally {
     await rm(seed.root, { recursive: true, force: true });
   }
@@ -116,7 +182,7 @@ test("archive reader joins independent tool results before paging and preserves 
         toolCallId: "call-1",
         toolName: "Read",
         output: "file body",
-        data: { lines: 3, preview: ["one", "two", "three"], token: "[REDACTED]" },
+        data: { lines: 3, preview: ["one", "two", "three"], token: "[redacted]" },
         isError: false,
       });
     }
@@ -442,6 +508,115 @@ test("archive reader emits image placeholders and shortens home paths like the o
       if (item.content[2]?.type === "toolCall") {
         assert.deepEqual(item.content[2].arguments, { path: "~/secret.txt" });
       }
+    }
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader inserts orphan tool results in chronological order", async () => {
+  const seed = await fixture([]);
+  const entries: Entry[] = [
+    { type: "session", id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" },
+    {
+      type: "message",
+      id: "user-1",
+      parentId: null,
+      timestamp: "2026-08-15T00:00:01.000Z",
+      message: { role: "user", content: "hi" },
+    },
+    {
+      type: "message",
+      id: "orphan-1",
+      parentId: "user-1",
+      timestamp: "2026-08-15T00:00:02.000Z",
+      message: {
+        role: "toolResult",
+        toolCallId: "missing",
+        toolName: "Bash",
+        content: [{ type: "text", text: "out" }],
+        isError: false,
+      },
+    },
+    {
+      type: "message",
+      id: "user-2",
+      parentId: "orphan-1",
+      timestamp: "2026-08-15T00:00:03.000Z",
+      message: { role: "user", content: "later" },
+    },
+  ];
+  await writeFile(seed.file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  try {
+    const reader = new StudioSessionArchiveReader({ sessionsRoot: seed.sessions, allowedCwd: seed.workspace });
+    const page = await reader.readPage({ sessionId: "session-a", limit: 10 });
+    assert.deepEqual(page.items.map((item) => item.itemId), ["user-1", "orphan-1", "user-2"]);
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("archive reader marks omitted tool-result images and unique empty ids", async () => {
+  const seed = await fixture([]);
+  const entries: Entry[] = [
+    { type: "session", id: "session-a", cwd: seed.workspace, timestamp: "2026-08-15T00:00:00.000Z" },
+    {
+      type: "message",
+      id: "res-1",
+      parentId: null,
+      timestamp: "2026-08-15T00:00:01.000Z",
+      message: {
+        role: "toolResult",
+        toolCallId: "",
+        toolName: "Read",
+        content: [
+          { type: "text", text: "caption" },
+          { type: "image", data: "base64", mimeType: "image/png" },
+        ],
+        details: { token: "secret" },
+        isError: false,
+      },
+    },
+    {
+      type: "message",
+      id: "res-2",
+      parentId: "res-1",
+      timestamp: "2026-08-15T00:00:02.000Z",
+      message: {
+        role: "toolResult",
+        toolCallId: "",
+        toolName: "Read",
+        content: [{ type: "text", text: "other" }],
+        isError: false,
+      },
+    },
+  ];
+  await writeFile(seed.file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  try {
+    const reader = new StudioSessionArchiveReader({ sessionsRoot: seed.sessions, allowedCwd: seed.workspace });
+    const page = await reader.readPage({ sessionId: "session-a", limit: 10 });
+    assert.equal(page.items.length, 2);
+    const first = page.items[0];
+    assert.equal(first?.kind, "message");
+    if (first?.kind === "message") {
+      const result = first.content.find((block) => block.type === "toolResult");
+      assert.equal(result?.type, "toolResult");
+      if (result?.type === "toolResult") {
+        assert.equal(result.output, "caption");
+        assert.equal(result.truncated, true);
+        assert.deepEqual(result.data, { token: "[redacted]", omitted: "image" });
+        assert.notEqual(result.toolCallId, "tool-call");
+      }
+    }
+    const second = page.items[1];
+    assert.equal(second?.kind, "message");
+    if (first?.kind === "message" && second?.kind === "message") {
+      const left = first.content.find((block) => block.type === "toolResult");
+      const right = second.content.find((block) => block.type === "toolResult");
+      assert.notEqual(
+        left?.type === "toolResult" ? left.toolCallId : "",
+        right?.type === "toolResult" ? right.toolCallId : "",
+      );
     }
   } finally {
     await rm(seed.root, { recursive: true, force: true });

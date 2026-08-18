@@ -20,6 +20,7 @@ import {
   type ConversationAction,
 } from "../src/conversation-reducer.js";
 import {
+  CONVERSATION_STATE_LIVE_TOOLS_CAP,
   createInitialConversationState,
   selectConversationHydrate,
   selectConversationViews,
@@ -443,8 +444,8 @@ test("tool events after message.completed stay attached to the persisted assista
 });
 
 test("a tool result whose start event was lost still attaches to its persisted item", () => {
-  // A resync drops liveTools, so the completion arrives without the messageId
-  // that only conversation.tool.started carries.
+  // Completion can arrive without conversation.tool.started; recover the owner
+  // from the persisted item that declared the call.
   let state = apply(undefined, {
     type: "hydrate",
     generation: 0,
@@ -542,42 +543,57 @@ test("turn abort closes the turn so its unstarted tools stop reading as pending"
   assert.equal(view.turnOpen, false);
 });
 
-test("provider error on message.completed is kept live-only and dropped on hydrate", () => {
+const PROVIDER_ERROR = {
+  message: "Upstream service temporarily unavailable",
+  status: 502,
+  provider: "sub2api-go",
+  model: "mimo-v2.5",
+} as const;
+
+function assistantCompleted(
+  messageId: string,
+  extra: {
+    readonly error?: typeof PROVIDER_ERROR;
+    readonly text?: string;
+    readonly seq?: number;
+  } = {},
+) {
+  return liveEvent(
+    {
+      kind: "conversation.message.completed",
+      sessionId: SESSION,
+      turnId: "t1",
+      messageId,
+      item: {
+        kind: "message",
+        itemId: messageId,
+        parentId: null,
+        createdAt: "2026-08-15T12:00:00.000Z",
+        role: "assistant",
+        content: extra.text === undefined ? [] : [{ type: "text", text: extra.text }],
+      },
+      ...(extra.error === undefined ? {} : { error: extra.error }),
+    },
+    extra.seq ?? 1,
+  );
+}
+
+test("provider error stays through hydrate, abort, and session switch until the next successful assistant return", () => {
   let state = apply(undefined, {
     type: "live",
-    event: liveEvent(
-      {
-        kind: "conversation.message.completed",
-        sessionId: SESSION,
-        turnId: "t1",
-        messageId: "msg-1",
-        item: {
-          kind: "message",
-          itemId: "msg-1",
-          parentId: null,
-          createdAt: "2026-08-15T12:00:00.000Z",
-          role: "assistant",
-          content: [],
-        },
-        error: {
-          message: "Model is not supported by composite groups",
-          status: 400,
-          provider: "sub2api-go",
-          model: "mimo-v2.5",
-        },
-      },
-      1,
-    ),
+    event: assistantCompleted("msg-1", { error: PROVIDER_ERROR }),
   });
-  assert.deepEqual(state.itemErrors["msg-1"], {
-    message: "Model is not supported by composite groups",
-    status: 400,
-    provider: "sub2api-go",
-    model: "mimo-v2.5",
-  });
+  assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
+  assert.deepEqual(state.stickyProviderErrors[SESSION]?.error, PROVIDER_ERROR);
   const item = state.itemsById["msg-1"];
   assert.ok(item && item.kind === "message");
   assert.equal("error" in item, false);
+
+  state = apply(state, {
+    type: "live",
+    event: liveEvent({ kind: "conversation.turn.aborted", sessionId: SESSION, turnId: "t1" }, 2),
+  });
+  assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
 
   state = apply(state, {
     type: "hydrate",
@@ -593,7 +609,84 @@ test("provider error on message.completed is kept live-only and dropped on hydra
       },
     ]),
   });
+  assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
+
+  state = apply(state, {
+    type: "beginHydrate",
+    identity: { runtimeEpoch: EPOCH, sessionId: OTHER },
+  });
   assert.deepEqual(state.itemErrors, {});
+  assert.deepEqual(state.stickyProviderErrors[SESSION]?.error, PROVIDER_ERROR);
+
+  state = apply(state, {
+    type: "beginHydrate",
+    identity: { runtimeEpoch: EPOCH, sessionId: SESSION },
+  });
+  state = apply(state, {
+    type: "hydrate",
+    generation: state.hydrateGeneration,
+    page: page([message("u1", "hello", "2026-08-15T11:00:00.000Z")]),
+  });
+  assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
+
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.completed",
+        sessionId: SESSION,
+        turnId: "t-user",
+        messageId: "u2",
+        item: {
+          kind: "message",
+          itemId: "u2",
+          parentId: null,
+          createdAt: "2026-08-15T12:01:00.000Z",
+          role: "user",
+          content: [{ type: "text", text: "retry" }],
+        },
+      },
+      3,
+    ),
+  });
+  assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
+
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.completed",
+        sessionId: SESSION,
+        turnId: "t2",
+        messageId: "msg-2",
+        item: {
+          kind: "message",
+          itemId: "msg-2",
+          parentId: null,
+          createdAt: "2026-08-15T12:02:00.000Z",
+          role: "assistant",
+          content: [{ type: "text", text: "ok" }],
+        },
+      },
+      4,
+    ),
+  });
+  assert.deepEqual(state.itemErrors, {});
+  assert.equal(state.stickyProviderErrors[SESSION], undefined);
+});
+
+test("aborted provider error keeps the 502 copy instead of dropping it", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent({ kind: "conversation.turn.aborted", sessionId: SESSION, turnId: "t1" }, 1),
+  });
+  state = apply(state, {
+    type: "live",
+    event: assistantCompleted("msg-1", { error: PROVIDER_ERROR, seq: 2 }),
+  });
+  assert.equal(state.liveMessages["msg-1"]?.aborted, true);
+  assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
+  assert.deepEqual(state.stickyProviderErrors[SESSION]?.error, PROVIDER_ERROR);
 });
 
 test("session/epoch live events for a different identity are dropped", () => {
@@ -680,7 +773,8 @@ test("rehydrate after a resync clears the flag and does not keep the old eventSe
   });
   assert.equal(state.resyncRequired, false);
   assert.equal(state.lastEventSeq, undefined);
-  assert.deepEqual(state.order, ["m1"]);
+  assert.deepEqual(state.order, ["m1", "msg-1"]);
+  assert.equal(state.liveMessages["msg-1"]?.role, "assistant");
 });
 
 test("selectConversationViews prefers completed items over live nodes", () => {
@@ -999,4 +1093,257 @@ test("live block accumulation is capped and later deltas for the block are dropp
   assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.truncated, true);
   state = apply(state, delta(4));
   assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.text.length, cap);
+});
+
+test("appended live tool output is capped so a broken append stream cannot grow past the text block budget", () => {
+  const cap = CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES;
+  const chunk = "x".repeat(200_000);
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        role: "assistant",
+        createdAt: "2026-08-15T12:00:00.000Z",
+      },
+      1,
+    ),
+  });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        startedAt: "2026-08-15T12:00:01.000Z",
+      },
+      2,
+    ),
+  });
+  const append = (seq: number): ConversationAction => ({
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.updated",
+        sessionId: SESSION,
+        turnId: "t1",
+        toolCallId: "call-1",
+        updateMode: "append",
+        output: chunk,
+      },
+      seq,
+    ),
+  });
+  state = apply(state, append(3));
+  assert.equal(state.liveTools["call-1"]?.output?.length, 200_000);
+  assert.equal(state.liveTools["call-1"]?.truncated, undefined);
+  state = apply(state, append(4));
+  assert.equal(state.liveTools["call-1"]?.output?.length, cap);
+  assert.equal(state.liveTools["call-1"]?.truncated, true);
+  state = apply(state, append(5));
+  assert.equal(state.liveTools["call-1"]?.output?.length, cap);
+});
+
+test("startTool keeps output that arrived before the start event", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        role: "assistant",
+        createdAt: "2026-08-15T12:00:00.000Z",
+      },
+      1,
+    ),
+  });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.updated",
+        sessionId: SESSION,
+        turnId: "t1",
+        toolCallId: "call-1",
+        updateMode: "replace",
+        output: "partial-stdout",
+      },
+      2,
+    ),
+  });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        startedAt: "2026-08-15T12:00:01.000Z",
+      },
+      3,
+    ),
+  });
+  assert.equal(state.liveTools["call-1"]?.output, "partial-stdout");
+  assert.equal(state.liveTools["call-1"]?.messageId, "msg-1");
+});
+
+test("rehydrate after a resync keeps in-flight live tools", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        role: "assistant",
+        createdAt: "2026-08-15T12:00:00.000Z",
+      },
+      1,
+    ),
+  });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.tool.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        toolCallId: "call-1",
+        toolName: "bash",
+        startedAt: "2026-08-15T12:00:01.000Z",
+      },
+      2,
+    ),
+  });
+  state = apply(state, { type: "resync" });
+  state = apply(state, { type: "beginHydrate", identity: { runtimeEpoch: EPOCH, sessionId: SESSION } });
+  state = apply(state, {
+    type: "hydrate",
+    generation: state.hydrateGeneration,
+    page: page([message("m1", "hello", "2026-08-15T00:00:01.000Z")]),
+  });
+  assert.equal(state.resyncRequired, false);
+  assert.equal(state.liveTools["call-1"]?.status, "started");
+  assert.equal(state.liveMessages["msg-1"]?.role, "assistant");
+});
+
+test("settled live tools are capped without dropping running ones", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "t1",
+        messageId: "msg-1",
+        role: "assistant",
+        createdAt: "2026-08-15T12:00:00.000Z",
+      },
+      1,
+    ),
+  });
+  let seq = 2;
+  for (let index = 0; index < CONVERSATION_STATE_LIVE_TOOLS_CAP + 1; index += 1) {
+    state = apply(state, {
+      type: "live",
+      event: liveEvent(
+        {
+          kind: "conversation.tool.completed",
+          sessionId: SESSION,
+          turnId: "t1",
+          toolCallId: `call-${index}`,
+          completedAt: "2026-08-15T12:00:01.000Z",
+          result: { type: "toolResult", toolCallId: `call-${index}`, isError: false, output: "ok" },
+        },
+        seq,
+      ),
+    });
+    seq += 1;
+  }
+  assert.equal(Object.keys(state.liveTools).length, CONVERSATION_STATE_LIVE_TOOLS_CAP);
+  assert.equal(state.liveTools["call-0"], undefined);
+  assert.equal(state.liveTools[`call-${CONVERSATION_STATE_LIVE_TOOLS_CAP}`]?.status, "completed");
+});
+
+test("compaction.started exposes a compacting view that completed replaces with the summary item", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.compaction.started",
+        sessionId: SESSION,
+        action: "context-full",
+      },
+      1,
+    ),
+  });
+  assert.deepEqual(state.compacting, { action: "context-full" });
+  const pending = selectConversationViews(state);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0]?.kind, "compacting");
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.compaction.completed",
+        sessionId: SESSION,
+        aborted: false,
+        item: {
+          kind: "compaction",
+          itemId: "cp-1",
+          parentId: null,
+          createdAt: "2026-08-19T00:00:00.000Z",
+          summary: "Earlier turns were summarized.",
+        },
+      },
+      2,
+    ),
+  });
+  assert.equal(state.compacting, undefined);
+  const views = selectConversationViews(state);
+  assert.equal(views.length, 1);
+  assert.equal(views[0]?.kind, "item");
+  assert.equal(views[0]?.kind === "item" ? views[0].item.itemId : "", "cp-1");
+});
+
+test("aborted compaction clears compacting and does not invent a summary item", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.compaction.started",
+        sessionId: SESSION,
+        action: "manual",
+      },
+      1,
+    ),
+  });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.compaction.completed",
+        sessionId: SESSION,
+        aborted: true,
+      },
+      2,
+    ),
+  });
+  assert.equal(state.compacting, undefined);
+  assert.equal(selectConversationViews(state).length, 0);
+  assert.equal(state.notices.at(-1)?.message, "上下文压缩已中止");
 });

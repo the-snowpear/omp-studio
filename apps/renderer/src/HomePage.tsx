@@ -7,6 +7,7 @@ import { pagePhaseClass, useDeferredKey } from "./pageTransition";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_ACTIVITY, PREVIEW_PROJECTS } from "./preview/fixtures";
 import { waitForCommandReceipt } from "./sessionLifecycle";
+import { formatRuntimeDisconnectCopy, formatRuntimeUnavailableCopy } from "./diagnosticsModel";
 import {
   DISPLAY_NAME_MAX,
   avatarInitial,
@@ -67,16 +68,19 @@ export function SecondaryPage({
   const navRef = useRef<HTMLElement>(null);
   const winRef = useRef<HTMLSpanElement>(null);
   const mirrorRef = useRef<HTMLSpanElement>(null);
-  const skipFirstBody = useRef(true);
   const heldChildren = useRef(children);
   const { shown, phase } = useDeferredKey(route);
   if (route === shown) heldChildren.current = children;
   const body = route === shown ? children : heldChildren.current;
-  const bodyPhase = skipFirstBody.current ? null : phase;
-
-  useLayoutEffect(() => {
-    skipFirstBody.current = false;
-  }, []);
+  /* Body motion is only for secondary ↔ secondary swaps.
+     First mount from the workbench already plays page-in on `.page`; do not
+     arm here. The old skipFirstBody flip after layout meant the next parent
+     render — often workbench ← home — attached page-in to `.page-body` while
+     the shell played page-out, so the home exit flashed twice.
+     Same live-on-key-change idea as ModelConfigPage `tabMotionLive`. */
+  const bodyMotionLive = useRef(false);
+  if (!Object.is(route, shown)) bodyMotionLive.current = true;
+  const bodyPhase = bodyMotionLive.current ? phase : null;
 
   useLayoutEffect(() => {
     const nav = navRef.current;
@@ -101,7 +105,7 @@ export function SecondaryPage({
         data-nav={item.id}
         className={route === item.id ? "active" : undefined}
         aria-disabled={wired ? undefined : true}
-        title={wired ? undefined : "尚未接入"}
+        data-tip={wired ? undefined : "（暂未实现）"}
         tabIndex={extra === "mirror" ? -1 : undefined}
         aria-hidden={extra === "mirror" ? true : undefined}
         onClick={(event) => {
@@ -118,7 +122,7 @@ export function SecondaryPage({
   return (
     <div className={className ? `page ${className}` : "page"} id="pageRoot">
       <header className="page-head" id="pageHead">
-        <button className="icon-btn" data-tip="返回工作台" aria-label="返回工作台" onClick={() => onRoute("workbench")}>
+        <button className="icon-btn" data-tip="工作台" aria-label="返回工作台" onClick={() => onRoute("workbench")}>
           <Icon name="arrow-l" />
         </button>
         <span className="ph-title">{titleIcon ? <Icon name={titleIcon} extra="sm" /> : null}{title}</span>
@@ -129,7 +133,7 @@ export function SecondaryPage({
           </span>
         </nav>
         <span className="spacer" />
-        <button className="icon-btn" data-tip="切换 Light / Dark" aria-label="切换主题" onClick={onToggleTheme}>
+        <button className="icon-btn" data-tip="主题" aria-label="切换主题" onClick={onToggleTheme}>
           <Icon name={theme === "dark" ? "moon" : "light"} />
         </button>
       </header>
@@ -164,11 +168,18 @@ function ompStatusText(
   preview: boolean,
   extras: readonly string[],
 ): string {
-  const head = preview || runtime?.status === "connected"
-    ? "omp is ready"
-    : runtime?.status
-      ? `omp ${runtime.status}`
-      : "omp unavailable";
+  let head = "omp unavailable";
+  if (preview || runtime?.status === "connected") {
+    head = "omp is ready";
+  } else if (runtime?.status === "unavailable" && runtime.unavailableCode !== undefined) {
+    head = formatRuntimeUnavailableCopy(runtime.unavailableCode, runtime.unavailableReason).title;
+  } else if (runtime?.status === "disconnected") {
+    head = runtime.disconnectCode !== undefined
+      ? formatRuntimeDisconnectCopy(runtime.disconnectCode, runtime.disconnectReason).title
+      : "omp disconnected";
+  } else if (runtime?.status) {
+    head = `omp ${runtime.status}`;
+  }
   return extras.length > 0 ? `${head} · ${extras.join(" · ")}` : head;
 }
 
@@ -760,14 +771,14 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
   const dashLabel =
     dash.phase === "opening" ? "正在打开…" : dash.phase === "opened" ? "已打开" : dash.phase === "error" ? "打开失败" : "OMP Stats";
   const dashTitle = preview
-    ? "预览模式不打开原生 Stats"
+    ? "预览"
     : dash.phase === "error"
-      ? (dash.message ?? "打开 OMP Stats 失败")
+      ? "失败"
       : dash.phase === "opening"
-        ? "正在打开 OMP Stats…"
+        ? "打开中"
         : dash.phase === "opened"
-          ? (dash.message ?? "已打开 OMP Stats")
-          : "在默认浏览器打开 OMP Stats";
+          ? "已打开"
+          : "Stats";
 
   return (
     <div className="card tk-card" id="tkCard" ref={cardRef}>
@@ -780,7 +791,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
           className="btn outline small"
           disabled={preview || !client || dash.phase === "opening"}
           aria-busy={dash.phase === "opening"}
-          title={dashTitle}
+          data-tip={dashTitle}
           onClick={() => {
             if (preview || !client || dash.phase === "opening") return;
             window.clearTimeout(dashTimer.current);
@@ -1006,8 +1017,7 @@ export function HomePage({
           <button
             type="button"
             className="icon-btn home-id-edit"
-            data-tip="编辑用户名和头像"
-            title="编辑用户名和头像"
+            data-tip="编辑"
             aria-label="编辑用户名和头像"
             onClick={() => setEditingProfile(true)}
           >
@@ -1025,7 +1035,7 @@ export function HomePage({
               }
               onPickFolder?.();
             }}
-            title={preview ? "预览模式演示" : "打开本地文件夹（系统选择器）"}
+            data-tip={preview ? "预览" : "打开"}
           >
             <Icon name="folder-open" extra="sm" />打开本地文件夹
           </button>
@@ -1033,7 +1043,7 @@ export function HomePage({
             <button
               className="btn outline"
               disabled={installing}
-              title="从本地签名制品安装托管 Runtime"
+              data-tip="安装"
               onClick={() => {
                 void (async () => {
                   setInstalling(true);
@@ -1062,7 +1072,7 @@ export function HomePage({
           <button
             className="btn outline"
             disabled={preview || !client}
-            title={preview ? "预览模式不执行 Git 操作" : "使用系统 Git 克隆，并通过系统选择器选择父目录"}
+            data-tip="克隆（暂未实现）"
             onClick={() => {
               // 克隆 URL 依赖 window.prompt 收集，而 Electron 渲染进程不支持 prompt
               // （electron/electron#472），桌面端无处输入；等输入对话框接入后恢复克隆流程。
@@ -1070,7 +1080,7 @@ export function HomePage({
             }}
           ><Icon name="branch" extra="sm" />克隆 Git 仓库</button>
           <button className="btn outline" onClick={() => onRoute("history")}><Icon name="history" extra="sm" />恢复最近对话</button>
-          <button className="btn outline" disabled title="临时工作区不在公共 contract 中"><Icon name="flask" extra="sm" />创建临时工作区</button>
+          <button className="btn outline" disabled data-tip="临时工作区（暂未实现）"><Icon name="flask" extra="sm" />创建临时工作区</button>
         </div>
       </div>
 

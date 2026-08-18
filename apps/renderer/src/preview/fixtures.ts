@@ -519,37 +519,29 @@ export function defaultPreviewSelection(): { projectId: string; threadId: string
   return { projectId: "p1", threadId: "t1" };
 }
 
-export type PreviewDiagProcess = { name: string; pid: number | string; role: string; mem: string };
+export type PreviewDiagScenario = "ok" | "update" | "fail";
 export type PreviewDiagError = { time: string; src: string; msg: string };
 export type PreviewDiagLog = { tone: "muted" | "err"; text: string };
 export type PreviewDiagnostics = {
-  ompPath: string;
   version: string;
-  rpc: string;
-  bridge: string;
-  cwd: string;
-  configDir: string;
-  processes: PreviewDiagProcess[];
+  availableVersion: string;
+  upstreamVersion: string;
+  upstreamCommit: string;
+  platform: string;
+  arch: string;
   capabilities: string[];
   errors: PreviewDiagError[];
   logs: PreviewDiagLog[];
 };
 
-/** 诊断中心演示数据，1:1 移植自 ui_reference/ver1 mock-data.js + diagnostics 模板。 */
+/** 诊断中心演示数据。主故事是版本与维护，不再把路径 / PID 当读模型。 */
 export const PREVIEW_DIAGNOSTICS: PreviewDiagnostics = {
-  ompPath: "C:\\Users\\snowpear\\AppData\\Local\\Programs\\omp\\omp.exe",
   version: "v0.82.1",
-  rpc: "omp-rpc/2.1",
-  bridge: "connected · pid 21480",
-  cwd: "C:\\Aspace\\Tools\\omp-web",
-  configDir: "C:\\Users\\snowpear\\.omp",
-  processes: [
-    { name: "omp bridge", pid: 21480, role: "Bridge", mem: "84 MB" },
-    { name: "omp agent (t1)", pid: 22104, role: "会话进程", mem: "312 MB" },
-    { name: "omp agent (t7)", pid: 22331, role: "会话进程", mem: "287 MB" },
-    { name: "vite dev (30141)", pid: 21996, role: "Preview 进程", mem: "406 MB" },
-    { name: "chokidar watcher", pid: "—", role: "文件 Watcher", mem: "—" },
-  ],
+  availableVersion: "v0.82.2",
+  upstreamVersion: "0.12.0",
+  upstreamCommit: "45e12e5",
+  platform: "win32",
+  arch: "x64",
   capabilities: [
     "agent.run", "agent.steer", "fs.read", "fs.write", "bash.exec",
     "preview.open", "preview.dom", "mcp.proxy", "checkpoint.create", "checkpoint.restore",

@@ -30,7 +30,7 @@ export interface StudioOperatorCommandManifest {
 	unclassifiedBuiltins: string[];
 }
 
-const UPSTREAM_COMMIT = "45e12e5bb758198a920c6070e7e64cb33b21beac";
+const UPSTREAM_COMMIT = "8500092296621a6826b7136e840f8a59ea338958";
 const DESTRUCTIVE = new Set(["drop", "clear", "fork"]);
 const READ_ONLY = new Set(["help", "version", "stats", "models", "tree", "branch", "goal"]);
 

@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import type { ConversationMessageError } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
+import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
 import { useAppSettings, type ToolActivityDetail } from "../settings/appSettings";
 import { BatchChain, type ChainItem } from "./BatchChain";
 import { TruncationMark } from "./ToolBody";
@@ -8,6 +9,7 @@ import { MarkdownText } from "./markdown";
 import { TurnDiffCard } from "./TurnDiffCard";
 import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
 import type { SubagentHubTarget, ThinkView, TurnFileChange } from "./toolMeta";
+import { UserMessageBody } from "./UserMessageBody";
 
 function formatTime(iso: string): string {
   if (!iso) return "";
@@ -22,12 +24,24 @@ function MessageBody({
   truncated,
   magicKeywords,
   copyText,
+  restore,
+  branch,
 }: {
   text: string;
   streaming?: boolean;
   truncated?: boolean;
   magicKeywords?: boolean;
   copyText?: string;
+  restore?: {
+    disabled?: boolean;
+    reason?: string;
+    onRestore: () => void;
+  };
+  branch?: {
+    disabled?: boolean;
+    reason?: string;
+    onBranch: () => void;
+  };
 }) {
   const body = (
     <MarkdownText
@@ -37,6 +51,18 @@ function MessageBody({
       {...(magicKeywords === true ? { magicKeywords: true } : {})}
     />
   );
+  if (restore !== undefined || branch !== undefined) {
+    return (
+      <div className="ev-copy-host">
+        {body}
+        <MessageUserActions
+          text={copyText ?? ""}
+          {...(restore === undefined ? {} : { restore })}
+          {...(branch === undefined ? {} : { branch })}
+        />
+      </div>
+    );
+  }
   if (copyText === undefined || copyText.length === 0) return body;
   return (
     <div className="ev-copy-host">
@@ -87,6 +113,7 @@ function MessageCopyButton({ text }: { text: string }) {
       type="button"
       className="ev-msg-copy"
       aria-label={copied ? "已复制" : "复制消息"}
+      data-tip={copied ? "已复制" : "复制"}
       onClick={() => {
         const clipboard = typeof navigator === "object" ? navigator.clipboard : undefined;
         if (!clipboard) return;
@@ -109,6 +136,55 @@ function MessageCopyActions({ text }: { text: string }) {
   return (
     <div className="ev-msg-actions">
       <MessageCopyButton text={text} />
+    </div>
+  );
+}
+
+function MessageUserActions({
+  text,
+  restore,
+  branch,
+}: {
+  text: string;
+  restore?: {
+    disabled?: boolean;
+    reason?: string;
+    onRestore: () => void;
+  };
+  branch?: {
+    disabled?: boolean;
+    reason?: string;
+    onBranch: () => void;
+  };
+}) {
+  if (text.length === 0 && restore === undefined && branch === undefined) return null;
+  return (
+    <div className="ev-msg-actions">
+      {restore ? (
+        <button
+          type="button"
+          className="ev-msg-copy"
+          aria-label="恢复"
+          data-tip={restore.disabled === true ? (restore.reason ?? "无法恢复") : "恢复"}
+          disabled={restore.disabled === true}
+          onClick={() => restore.onRestore()}
+        >
+          <Icon name="undo" extra="sm" />
+        </button>
+      ) : null}
+      {branch ? (
+        <button
+          type="button"
+          className="ev-msg-copy"
+          aria-label="新会话"
+          data-tip={branch.disabled === true ? (branch.reason ?? "无法新建") : "新会话"}
+          disabled={branch.disabled === true}
+          onClick={() => branch.onBranch()}
+        >
+          <Icon name="branch" extra="sm" />
+        </button>
+      ) : null}
+      {text.length > 0 ? <MessageCopyButton text={text} /> : null}
     </div>
   );
 }
@@ -232,27 +308,58 @@ function TurnChanges({
   );
 }
 
-export function ConversationItemView({
+function isCommittedUserRow(row: Extract<TimelineRow, { type: "user" }>): boolean {
+  return row.pending === undefined && !row.itemId.startsWith("pending:");
+}
+
+export const ConversationItemView = memo(function ConversationItemView({
   row,
   onRestore,
+  onRestoreUserMessage,
+  onBranchUserMessage,
+  userRestoreDisabledReason,
   expandAll = false,
   fileChanges,
   changesDefaultOpen,
   demo,
   onReviewChanges,
   onInspectSubagent,
+  planLink,
 }: {
   row: TimelineRow;
   onRestore?: (requestId: string) => void;
+  onRestoreUserMessage?: (itemId: string, text: string) => void;
+  onBranchUserMessage?: (itemId: string, text: string) => void;
+  userRestoreDisabledReason?: string;
   expandAll?: boolean;
   fileChanges?: readonly TurnFileChange[];
   changesDefaultOpen?: boolean;
   demo?: boolean;
   onReviewChanges?: () => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
+  planLink?: PlanCreatedLink;
 }) {
   const { settings: appSettings } = useAppSettings();
   if (row.type === "user") {
+    const committed = isCommittedUserRow(row);
+    const restore =
+      onRestoreUserMessage !== undefined && committed
+        ? {
+            ...(userRestoreDisabledReason === undefined
+              ? {}
+              : { disabled: true as const, reason: userRestoreDisabledReason }),
+            onRestore: () => onRestoreUserMessage(row.itemId, row.text),
+          }
+        : undefined;
+    const branch =
+      onBranchUserMessage !== undefined && committed
+        ? {
+            ...(userRestoreDisabledReason === undefined
+              ? {}
+              : { disabled: true as const, reason: userRestoreDisabledReason }),
+            onBranch: () => onBranchUserMessage(row.itemId, row.text),
+          }
+        : undefined;
     return (
       <div className="ev ev-user" data-item-id={row.itemId}>
         <div className="ev-head">
@@ -261,10 +368,23 @@ export function ConversationItemView({
           {row.pending === "pending" ? <span className="chip gray xs">发送中</span> : null}
           {row.pending === "failed" ? <span className="chip red xs">发送失败</span> : null}
         </div>
-        <MessageBody
+        <UserMessageBody
           text={row.text}
           magicKeywords
+          {...(row.doc === undefined ? {} : { doc: row.doc })}
+          {...(row.thumbs === undefined ? {} : { thumbs: row.thumbs })}
           {...(row.text.length > 0 ? { copyText: row.text } : {})}
+          {...(restore === undefined && branch === undefined && row.text.length === 0
+            ? {}
+            : {
+                actions: (
+                  <MessageUserActions
+                    text={row.text}
+                    {...(restore === undefined ? {} : { restore })}
+                    {...(branch === undefined ? {} : { branch })}
+                  />
+                ),
+              })}
         />
         {row.pending === "failed" && row.requestId && onRestore ? (
           <div className="err-actions">
@@ -286,6 +406,13 @@ export function ConversationItemView({
         {...(onReviewChanges === undefined ? {} : { onReview: onReviewChanges })}
       />
     );
+    const createdPlan = planLink === undefined ? null : (
+      <PlanCreatedCard
+        title={planLink.title ?? "Plan"}
+        onOpen={planLink.onOpen}
+        {...(planLink.demo === true || demo === true ? { demo: true } : {})}
+      />
+    );
     const gallery = expandAll && !hasAssistantText(row.segments);
     const displayOptions = {
       showThinking: appSettings.showThinkingSummary,
@@ -299,12 +426,13 @@ export function ConversationItemView({
         <div data-item-id={row.itemId}>
           {renderAssistantSegments(row.segments, { expandAll: true, standalone: true, ...displayOptions })}
           {row.error ? <ProviderErrorDetail error={row.error} /> : null}
+          {createdPlan}
           {changes}
         </div>
       );
     }
     const process = row.presentation === "process";
-    if (process && row.segments.length === 0 && row.error === undefined && (fileChanges === undefined || fileChanges.length === 0)) {
+    if (process && row.segments.length === 0 && row.error === undefined && (fileChanges === undefined || fileChanges.length === 0) && planLink === undefined) {
       return null;
     }
     // 每来一个 assistant item，同一轮里上一行就从 reply 降级成 process，身份头随之
@@ -326,6 +454,7 @@ export function ConversationItemView({
           ...(!process && row.status !== "streaming" ? { allowCopy: true } : {}),
         })}
         {row.error ? <ProviderErrorDetail error={row.error} /> : null}
+        {createdPlan}
         {changes}
       </div>
     );
@@ -333,12 +462,22 @@ export function ConversationItemView({
   if (row.type === "compaction") {
     return (
       <div className="ev" data-item-id={row.item.itemId}>
-        <div className="compact-bar">
+        <div className="compact-rule">
           <Icon name="minimize" extra="sm" />
           <span><b>Compact</b> · {row.item.shortSummary ?? row.item.summary}</span>
         </div>
         {row.item.warning ? <p className="muted small">{row.item.warning}</p> : null}
         <p className="convo-plain small">{row.item.summary}</p>
+      </div>
+    );
+  }
+  if (row.type === "compacting") {
+    return (
+      <div className="ev" data-item-id="compacting">
+        <div className="compact-rule is-pending" role="status" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
+          <span>压缩中</span>
+        </div>
       </div>
     );
   }
@@ -351,4 +490,4 @@ export function ConversationItemView({
       </div>
     </div>
   );
-}
+});

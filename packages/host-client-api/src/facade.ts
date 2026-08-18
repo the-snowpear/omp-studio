@@ -51,7 +51,9 @@ import type {
   EnvironmentReadModel,
   ConfigWriteResult,
   ExtensibilityReadModel,
+  McpLogsReadModel,
   McpReadModel,
+  McpTestResult,
   AgentDefinitionsReadModel,
   HomeReadModel,
   IdempotencyKey,
@@ -60,6 +62,7 @@ import type {
   ModelDiscoveryResult,
   ModelProviderTestResult,
   OperatorInvokeOutcome,
+  SessionTreeCommandOutcome,
   PlatformId,
   PublicAuthorityIdentity,
   QueryName,
@@ -108,7 +111,7 @@ import {
   parseSessionTelemetryReadResult,
   parseSessionTelemetrySnapshot,
 } from "@omp-studio/studio-protocol";
-import type { HostBackend, RuntimePublication, StudioConversationForward, StudioInteractionForward, StudioTelemetryForward } from "@omp-studio/studio-host";
+import type { HostBackend, RuntimePublication, StudioBtwForward, StudioConversationForward, StudioInteractionForward, StudioTelemetryForward } from "@omp-studio/studio-host";
 
 import {
   HostEventBus,
@@ -121,11 +124,14 @@ import {
   historyIdFor,
   neutralCapabilityManifest,
   neutralCommandManifest,
+  redactText,
   sanitizeDisplayText,
   threadIdFor,
 } from "./read-models.js";
 import { mapRemoteInteractionToClient } from "./interaction-map.js";
 import {
+  formatRuntimeDisconnectMessage,
+  formatRuntimeUnavailableMessage,
   toClientError,
   type HostCatalogEntry,
   type HostDiagnosticsFactory,
@@ -134,8 +140,12 @@ import {
   type HostAgentDefinitionsService,
   type HostManifestProvider,
   type HostModelsService,
+  type HostInvokeOutcome,
   type HostRuntimeAccess,
+  type HostRuntimeDisconnect,
   type HostRuntimeHelloView,
+  type HostRuntimeUnavailable,
+  type HostRuntimeInstallProbe,
   type HostRuntimeInstallService,
   type HostSemanticCommandService,
   type HostSessionCatalogProvider,
@@ -163,6 +173,10 @@ const HISTORY_MAX_LIMIT = 200;
 const HOME_RECENT_THREADS = 5;
 const HOME_RECENT_WORKSPACES = 8;
 const DEFAULT_REGISTRY_CAPACITY = 512;
+
+function guiInteractionKey(interactionId: string, leaseGeneration: number): string {
+  return `${interactionId}:${leaseGeneration}`;
+}
 
 /** Model-config write/test commands dispatched through the models adapter. */
 type ModelsCommandName =
@@ -212,6 +226,12 @@ export interface StudioHostClientFacadeOptions {
   readonly workspaceCwd?: () => string | undefined;
   readonly diagnostics: HostDiagnosticsFactory;
   readonly install: HostRuntimeInstallService;
+  /**
+   * Optional local-artifact version probe. When set, `environment.get`
+   * uses it instead of the last `runtime.install` receipt so a later
+   * newer artifact can surface as `update-available`.
+   */
+  readonly installProbe?: HostRuntimeInstallProbe;
   /** Optional semantic service for session.resume/drop and interaction.respond. */
   readonly commands?: HostSemanticCommandService;
   /** Optional OMP models.yml / config / login adapter. */
@@ -389,12 +409,66 @@ function isInteractionCommandInput(
   return decision === "submit" || decision === "cancel";
 }
 
+function unavailableDiagnostic(facts: HostRuntimeUnavailable | undefined): {
+  readonly message: string;
+  readonly detail?: Readonly<Record<string, unknown>>;
+} {
+  if (facts === undefined) {
+    return { message: "Runtime is not available" };
+  }
+  const reason = redactText(facts.reason);
+  return {
+    message: formatRuntimeUnavailableMessage(facts),
+    detail: { code: facts.code, reason },
+  };
+}
+
+function disconnectDiagnostic(facts: HostRuntimeDisconnect | undefined): {
+  readonly message: string;
+  readonly detail?: Readonly<Record<string, unknown>>;
+} {
+  if (facts === undefined) {
+    return { message: "Runtime connection was lost" };
+  }
+  const reason = redactText(facts.reason);
+  return {
+    message: formatRuntimeDisconnectMessage(facts),
+    detail: { code: facts.code, reason },
+  };
+}
+
+function readUnavailable(runtime: HostRuntimeAccess | undefined): HostRuntimeUnavailable | undefined {
+  try {
+    const facts = runtime?.unavailable?.();
+    if (facts === undefined) return undefined;
+    const reason = redactText(facts.reason).trim();
+    return { code: facts.code, reason };
+  } catch {
+    return undefined;
+  }
+}
+
+function readDisconnect(runtime: HostRuntimeAccess | undefined): HostRuntimeDisconnect | undefined {
+  try {
+    const facts = runtime?.disconnect?.();
+    if (facts === undefined) return undefined;
+    const reason = redactText(facts.reason).trim();
+    return { code: facts.code, reason };
+  } catch {
+    return undefined;
+  }
+}
+
 function connectionEquals(left: RuntimeConnection, right: RuntimeConnection): boolean {
   return (
     left.status === right.status &&
     left.classification === right.classification &&
     left.runtimeId === right.runtimeId &&
-    left.runtimeEpoch === right.runtimeEpoch
+    left.runtimeEpoch === right.runtimeEpoch &&
+    left.unavailableCode === right.unavailableCode &&
+    left.unavailableReason === right.unavailableReason &&
+    left.disconnectCode === right.disconnectCode &&
+    left.disconnectReason === right.disconnectReason
   );
 }
 
@@ -447,6 +521,9 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (typeof options.install !== "function") {
     throw new TypeError("facade runtime install service is required");
   }
+  if (options.installProbe !== undefined && typeof options.installProbe !== "function") {
+    throw new TypeError("facade runtime install probe must be a function");
+  }
   const runtime = options.runtime;
   if (runtime !== undefined && typeof runtime.hello !== "function") {
     throw new TypeError("facade runtime access requires a hello accessor");
@@ -463,6 +540,9 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (runtime?.onTelemetryEvent !== undefined && typeof runtime.onTelemetryEvent !== "function") {
     throw new TypeError("facade runtime telemetry hook must be a function");
   }
+  if (runtime?.onBtwEvent !== undefined && typeof runtime.onBtwEvent !== "function") {
+    throw new TypeError("facade runtime btw hook must be a function");
+  }
   if (runtime?.currentSession !== undefined && typeof runtime.currentSession !== "function") {
     throw new TypeError("facade runtime currentSession must be a function");
   }
@@ -474,6 +554,9 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   }
   if (runtime?.onInteractionEvent !== undefined && typeof runtime.onInteractionEvent !== "function") {
     throw new TypeError("facade runtime interaction hook must be a function");
+  }
+  if (runtime?.unavailable !== undefined && typeof runtime.unavailable !== "function") {
+    throw new TypeError("facade runtime unavailable accessor must be a function");
   }
 }
 
@@ -490,6 +573,7 @@ export class StudioHostClientFacade implements ClientTransport {
   #unsubscribeConversation: Unsubscribe | undefined;
   #unsubscribeConversationResync: Unsubscribe | undefined;
   #unsubscribeTelemetry: Unsubscribe | undefined;
+  #unsubscribeBtw: Unsubscribe | undefined;
   #unsubscribeInteraction: Unsubscribe | undefined;
   #unsubscribeGitProgress: Unsubscribe | undefined;
   #unsubscribeGitExternal: Unsubscribe | undefined;
@@ -500,6 +584,8 @@ export class StudioHostClientFacade implements ClientTransport {
   #lastPublishedVersion: StateVersion | undefined;
   #lastPublishedRuntimeId: RuntimeId | undefined;
   #lastPublishedEpoch: RuntimeEpoch | undefined;
+  /** Last GUI `interaction.required` published as `id:generation`. Snapshot recovery must not re-emit the same card. */
+  #lastGuiInteractionKey: string | undefined;
   #installInFlight = false;
   #lastInstallResult: RuntimeInstallState | undefined;
   /** Last workspace list seen; feeds the bootstrap selection (`projects.list` wins in the Renderer). */
@@ -518,6 +604,7 @@ export class StudioHostClientFacade implements ClientTransport {
     }
     this.#bindConversation();
     this.#bindTelemetry();
+    this.#bindBtw();
     this.#bindInteraction();
     this.#unsubscribeGitProgress = options.git?.onProgress?.((progress) => {
       this.#bus.emit({ kind: "operation.progress", progress });
@@ -639,6 +726,10 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryMcp();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "mcp.logs.get": {
+        const result = await this.#queryMcpLogs(request.input as { readonly name: string });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "agents.definitions.get": {
         const result = await this.#queryAgentDefinitions();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
@@ -749,6 +840,10 @@ export class StudioHostClientFacade implements ClientTransport {
         const installRequest = request as ClientCommandRequest<"runtime.install">;
         return this.#commandInstall(installRequest);
       }
+      case "runtime.ensure": {
+        const ensureRequest = request as ClientCommandRequest<"runtime.ensure">;
+        return this.#commandEnsure(ensureRequest);
+      }
       case "session.create": {
         const createRequest = request as ClientCommandRequest<"session.create">;
         return this.#commandCreate(createRequest);
@@ -804,11 +899,17 @@ export class StudioHostClientFacade implements ClientTransport {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
       }
       case "plugins.setEnabled":
-      case "skills.setEnabled": {
-        return this.#commandExtensibility(request as ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled">);
+      case "skills.setEnabled":
+      case "skills.reveal":
+      case "skills.revealRoot": {
+        return this.#commandExtensibility(
+          request as ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled" | "skills.reveal" | "skills.revealRoot">,
+        );
       }
-      case "mcp.setEnabled": {
-        return this.#commandMcp(request as ClientCommandRequest<"mcp.setEnabled">);
+      case "mcp.setEnabled":
+      case "mcp.refresh":
+      case "mcp.test": {
+        return this.#commandMcp(request as ClientCommandRequest<"mcp.setEnabled" | "mcp.refresh" | "mcp.test">);
       }
       case "agents.definition.upsert":
       case "agents.definition.delete":
@@ -901,7 +1002,7 @@ export class StudioHostClientFacade implements ClientTransport {
     return accepted;
   }
 
-  async #runP4Command(run: () => OperatorStateSnapshot | OperatorInvokeOutcome | Promise<OperatorStateSnapshot | OperatorInvokeOutcome>, requestId: CommandRequestId, commandName: CommandName): Promise<void> {
+  async #runP4Command(run: () => HostInvokeOutcome | Promise<HostInvokeOutcome>, requestId: CommandRequestId, commandName: CommandName): Promise<void> {
     try {
       const result = await run();
       this.#emitTerminal(requestId, { requestId, commandName, status: "completed", result, observedAt: this.#options.diagnostics.now() } as CommandReceipt);
@@ -931,6 +1032,8 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#unsubscribeConversationResync = undefined;
     this.#unsubscribeTelemetry?.();
     this.#unsubscribeTelemetry = undefined;
+    this.#unsubscribeBtw?.();
+    this.#unsubscribeBtw = undefined;
     this.#unsubscribeInteraction?.();
     this.#unsubscribeInteraction = undefined;
     this.#unsubscribeGitProgress?.();
@@ -1019,18 +1122,19 @@ export class StudioHostClientFacade implements ClientTransport {
   #currentConnection(): RuntimeConnection {
     const runtime = this.#options.runtime;
     if (runtime === undefined) {
-      return { status: "unavailable", classification: "unavailable" };
+      return this.#unavailableConnection();
     }
     const hello = this.#deriveHello();
     if (hello === undefined) {
       const last = this.#lastHello;
       if (last === undefined) {
-        return { status: "unavailable", classification: "unavailable" };
+        return this.#unavailableConnection();
       }
       // Runtime lost: keep the last known identity so clients can isolate
       // its epoch; nothing else is claimed.
       const runtimeId = last.runtimeId as RuntimeId;
       const runtimeEpoch = last.runtimeEpoch as RuntimeEpoch;
+      const lost = readDisconnect(runtime);
       return {
         status: "disconnected",
         classification: last.classification,
@@ -1040,6 +1144,12 @@ export class StudioHostClientFacade implements ClientTransport {
         ...(last.runtimeVersion === undefined ? {} : { runtimeVersion: last.runtimeVersion }),
         ...(last.upstreamVersion === undefined ? {} : { upstreamVersion: last.upstreamVersion }),
         ...(last.upstreamCommit === undefined ? {} : { upstreamCommit: last.upstreamCommit }),
+        ...(lost === undefined
+          ? {}
+          : {
+              disconnectCode: lost.code,
+              disconnectReason: lost.reason,
+            }),
       };
     }
     const snapshot = this.#currentSnapshot();
@@ -1054,6 +1164,20 @@ export class StudioHostClientFacade implements ClientTransport {
       ...(hello.runtimeVersion === undefined ? {} : { runtimeVersion: hello.runtimeVersion }),
       ...(hello.upstreamVersion === undefined ? {} : { upstreamVersion: hello.upstreamVersion }),
       ...(hello.upstreamCommit === undefined ? {} : { upstreamCommit: hello.upstreamCommit }),
+    };
+  }
+
+  #unavailableConnection(): RuntimeConnection {
+    const facts = readUnavailable(this.#options.runtime);
+    return {
+      status: "unavailable",
+      classification: "unavailable",
+      ...(facts === undefined
+        ? {}
+        : {
+            unavailableCode: facts.code,
+            unavailableReason: facts.reason,
+          }),
     };
   }
 
@@ -1087,9 +1211,15 @@ export class StudioHostClientFacade implements ClientTransport {
       this.#lastPublishedRuntimeId !== snapshot.runtimeId ||
       this.#lastPublishedEpoch !== snapshot.runtimeEpoch;
     if (identityChanged) {
+      const hadIdentity = this.#lastPublishedRuntimeId !== undefined;
       this.#lastPublishedRuntimeId = snapshot.runtimeId;
       this.#lastPublishedEpoch = snapshot.runtimeEpoch;
       this.#lastPublishedVersion = undefined;
+      // First publication is not a Runtime switch; keep a live-event key so
+      // the follow-up snapshot of the same lease does not toast again.
+      if (hadIdentity) {
+        this.#lastGuiInteractionKey = undefined;
+      }
     }
     let publishedSnapshot = false;
     if (this.#lastPublishedVersion === undefined || Number(version) > Number(this.#lastPublishedVersion)) {
@@ -1113,13 +1243,10 @@ export class StudioHostClientFacade implements ClientTransport {
           requestId,
         );
         if (mapped !== undefined) {
-          this.#bus.emit({
-            kind: "interaction.required",
-            runtimeEpoch: snapshot.runtimeEpoch,
-            stateVersion: version,
-            interaction: mapped,
-          });
+          this.#emitGuiRequiredOnce(mapped, snapshot.runtimeEpoch, version);
         }
+      } else {
+        this.#lastGuiInteractionKey = undefined;
       }
     }
     for (const entry of publication.terminalOutcomes) {
@@ -1179,6 +1306,42 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#options.telemetryStore?.record(event.sessionId, event.telemetry);
   }
 
+  #bindBtw(): void {
+    const runtime = this.#options.runtime;
+    if (runtime === undefined) return;
+    if (runtime.onBtwEvent !== undefined) {
+      this.#unsubscribeBtw = runtime.onBtwEvent((event) => this.#onBtwForward(event));
+      return;
+    }
+    const session = this.#runtimeSession();
+    if (session?.onBtwEvent !== undefined) {
+      this.#unsubscribeBtw = session.onBtwEvent((event) => this.#onBtwForward(event));
+    }
+  }
+
+  /**
+   * Attach the current session identity to a BTW delta. The Runtime scopes the
+   * side-channel to the live session implicitly, so unlike telemetry there is
+   * no sessionId on the wire to cross-check; a snapshot-less or epoch-mismatched
+   * forward is dropped rather than attributed to whatever session is current.
+   */
+  #onBtwForward(forward: StudioBtwForward): void {
+    this.#syncRuntimeEvents();
+    const snapshot = this.#currentSnapshot();
+    if (snapshot === undefined) return;
+    const envelope = forward.envelope;
+    if (envelope.runtimeEpoch !== snapshot.runtimeEpoch) return;
+    this.#bus.emit({
+      kind: "btw.changed",
+      runtimeEpoch: envelope.runtimeEpoch,
+      stateVersion: envelope.stateVersion,
+      occurredAt: envelope.occurredAt,
+      sessionId: snapshot.sessionId as SessionId,
+      eventSeq: Number(envelope.eventSeq),
+      snapshot: envelope.event.snapshot,
+    });
+  }
+
   #bindInteraction(): void {
     const runtime = this.#options.runtime;
     if (runtime?.onInteractionEvent === undefined) {
@@ -1199,6 +1362,9 @@ export class StudioHostClientFacade implements ClientTransport {
     }
     const event = envelope.event;
     if (event.kind === "interaction.resolved") {
+      if (this.#lastGuiInteractionKey === guiInteractionKey(event.interactionId, event.leaseGeneration)) {
+        this.#lastGuiInteractionKey = undefined;
+      }
       this.#bus.emit({
         kind: "interaction.resolved",
         runtimeEpoch: envelope.runtimeEpoch,
@@ -1225,12 +1391,26 @@ export class StudioHostClientFacade implements ClientTransport {
       this.#recordConversationDiagnostic("Dropped an interaction with an unsupported kind");
       return;
     }
+    this.#emitGuiRequiredOnce(mapped, envelope.runtimeEpoch, envelope.stateVersion, envelope.occurredAt);
+  }
+
+  #emitGuiRequiredOnce(
+    interaction: ClientInteraction,
+    runtimeEpoch: RuntimeEpoch,
+    stateVersion: StateVersion,
+    occurredAt?: string,
+  ): void {
+    const key = guiInteractionKey(interaction.interactionId, interaction.leaseGeneration);
+    if (this.#lastGuiInteractionKey === key) {
+      return;
+    }
+    this.#lastGuiInteractionKey = key;
     this.#bus.emit({
       kind: "interaction.required",
-      runtimeEpoch: envelope.runtimeEpoch,
-      stateVersion: envelope.stateVersion,
-      occurredAt: envelope.occurredAt,
-      interaction: mapped,
+      runtimeEpoch,
+      stateVersion,
+      ...(occurredAt === undefined ? {} : { occurredAt }),
+      interaction,
     });
   }
 
@@ -1324,7 +1504,7 @@ export class StudioHostClientFacade implements ClientTransport {
       arch: this.#options.arch,
       authority: { ...this.#options.authority },
       runtime: this.#currentConnection(),
-      installer: this.#installState(installed),
+      installer: await this.#installState(installed),
     };
   }
 
@@ -1344,8 +1524,21 @@ export class StudioHostClientFacade implements ClientTransport {
     const now = this.#options.diagnostics.now();
     const connection = this.#currentConnection();
     const installed = await this.#currentInstalledManifest();
+    const installer = await this.#installState(installed);
     const entries: DiagnosticEntry[] = [];
-    if (installed === undefined) {
+    if (installer.status === "update-available") {
+      entries.push({
+        entryId: this.#options.diagnostics.newEntryId(),
+        scope: "installer",
+        level: "warning",
+        message: "A newer trusted Runtime artifact is available locally",
+        detail: {
+          ...(installer.version === undefined ? {} : { version: installer.version }),
+          ...(installer.availableVersion === undefined ? {} : { availableVersion: installer.availableVersion }),
+        },
+        occurredAt: now,
+      });
+    } else if (installed === undefined) {
       entries.push({
         entryId: this.#options.diagnostics.newEntryId(),
         scope: "installer",
@@ -1364,15 +1557,25 @@ export class StudioHostClientFacade implements ClientTransport {
       });
     }
     switch (connection.status) {
-      case "unavailable":
+      case "unavailable": {
+        const diagnostic = unavailableDiagnostic(
+          connection.unavailableCode === undefined
+            ? undefined
+            : {
+                code: connection.unavailableCode,
+                reason: connection.unavailableReason ?? "",
+              },
+        );
         entries.push({
           entryId: this.#options.diagnostics.newEntryId(),
           scope: "host",
           level: "warning",
-          message: "Runtime is not available",
+          message: diagnostic.message,
+          ...(diagnostic.detail === undefined ? {} : { detail: diagnostic.detail }),
           occurredAt: now,
         });
         break;
+      }
       case "connecting":
         entries.push({
           entryId: this.#options.diagnostics.newEntryId(),
@@ -1382,15 +1585,18 @@ export class StudioHostClientFacade implements ClientTransport {
           occurredAt: now,
         });
         break;
-      case "disconnected":
+      case "disconnected": {
+        const diagnostic = disconnectDiagnostic(readDisconnect(this.#options.runtime));
         entries.push({
           entryId: this.#options.diagnostics.newEntryId(),
           scope: "host",
           level: "error",
-          message: "Runtime connection was lost",
+          message: diagnostic.message,
+          ...(diagnostic.detail === undefined ? {} : { detail: diagnostic.detail }),
           occurredAt: now,
         });
         break;
+      }
       case "connected":
         entries.push({
           entryId: this.#options.diagnostics.newEntryId(),
@@ -1748,6 +1954,14 @@ export class StudioHostClientFacade implements ClientTransport {
     return service.get();
   }
 
+  async #queryMcpLogs(input: { readonly name: string }): Promise<McpLogsReadModel> {
+    const service = this.#options.mcp;
+    if (service === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", "mcp.logs.get is not available: no MCP adapter is wired");
+    }
+    return service.logs(input);
+  }
+
   async #queryAgentDefinitions(): Promise<AgentDefinitionsReadModel> {
     const service = this.#options.agentDefinitions;
     if (service === undefined) {
@@ -1798,14 +2012,13 @@ export class StudioHostClientFacade implements ClientTransport {
     }
   }
 
-  #installState(installed: { readonly manifest: RuntimeInstallationManifest } | undefined): RuntimeInstallState {
+  async #installState(installed: { readonly manifest: RuntimeInstallationManifest } | undefined): Promise<RuntimeInstallState> {
     if (this.#installInFlight) {
       return { status: "installing", signature: "unknown" };
     }
-    // The install service is the Host's authoritative install path: its
-    // latest report is fresher than the persisted manifest snapshot.
-    if (this.#lastInstallResult !== undefined) {
-      return this.#lastInstallResult;
+    const probe = this.#options.installProbe;
+    if (probe !== undefined) {
+      return await probe();
     }
     if (installed !== undefined) {
       return { status: "installed", version: installed.manifest.runtimeVersion, signature: "verified" };
@@ -1838,6 +2051,55 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#bus.emit({ kind: "command.accepted", accepted });
     void this.#runInstall(channel, request.requestId);
     return accepted;
+  }
+
+  async #commandEnsure(request: ClientCommandRequest<"runtime.ensure">): Promise<ClientCommandAccepted<"runtime.ensure">> {
+    validateEnvelope(request);
+    if (request.input === null || typeof request.input !== "object" || Array.isArray(request.input) || Object.keys(request.input).length !== 0) {
+      throw clientError("INVALID_ARGUMENT", "runtime.ensure input must be empty");
+    }
+    const ensure = this.#options.runtime?.ensure;
+    if (ensure === undefined) {
+      throw clientError("CAPABILITY_UNAVAILABLE", "runtime.ensure is not available: no Runtime session port is wired");
+    }
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: "runtime.ensure", requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted: ClientCommandAccepted<"runtime.ensure"> = {
+      commandName: "runtime.ensure",
+      requestId: request.requestId,
+      status: "accepted",
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runEnsure(ensure, request.requestId);
+    return accepted;
+  }
+
+  async #runEnsure(ensure: () => Promise<void>, requestId: CommandRequestId): Promise<void> {
+    try {
+      await ensure();
+      this.#syncRuntimeEvents();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "runtime.ensure",
+        status: "completed",
+        result: this.#currentConnection(),
+        observedAt: this.#options.diagnostics.now(),
+      });
+    } catch (error) {
+      this.#syncRuntimeEvents();
+      this.#emitTerminal(requestId, {
+        requestId,
+        commandName: "runtime.ensure",
+        status: "failed",
+        error: toClientError(error),
+        observedAt: this.#options.diagnostics.now(),
+      });
+    }
   }
 
   async #commandResume(request: ClientCommandRequest<"session.resume">): Promise<ClientCommandAccepted<"session.resume">> {
@@ -1926,9 +2188,9 @@ export class StudioHostClientFacade implements ClientTransport {
 
   /**
    * `permissions.mode.set`: session-exclusive approval mode sync (plan §5.4).
-   * Requires a live Runtime snapshot and the injected semantic service;
-   * streaming / pending-interaction rejection happens in the desktop
-   * service. The receipt carries the sync statistics — never a fabricated
+   * Requires a live Runtime snapshot and the injected semantic service.
+   * A live turn records the mode immediately and writes it on the next user
+   * turn. The receipt carries the sync statistics — never a fabricated
    * "complete".
    */
   async #commandSetApprovalMode(
@@ -2112,11 +2374,16 @@ export class StudioHostClientFacade implements ClientTransport {
    * disk mutations and never require a Runtime snapshot.
    */
   async #commandExtensibility(
-    request: ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled">,
+    request: ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled" | "skills.reveal" | "skills.revealRoot">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.extensibility;
-    if (service?.setEnabled === undefined || service.setSkillEnabled === undefined) {
+    if (
+      service?.setEnabled === undefined
+      || service.setSkillEnabled === undefined
+      || service.revealSkill === undefined
+      || service.revealSkillRoot === undefined
+    ) {
       throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no extensibility adapter is wired`);
     }
     const acceptedAt = this.#options.diagnostics.now();
@@ -2137,14 +2404,18 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runExtensibilityCommand(
-    request: ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled">,
+    request: ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled" | "skills.reveal" | "skills.revealRoot">,
     service: HostExtensibilityService,
   ): Promise<void> {
     try {
       const result =
         request.commandName === "plugins.setEnabled"
           ? await service.setEnabled(request.input as never)
-          : await service.setSkillEnabled(request.input as never);
+          : request.commandName === "skills.setEnabled"
+            ? await service.setSkillEnabled(request.input as never)
+            : request.commandName === "skills.reveal"
+              ? await service.revealSkill(request.input as never)
+              : await service.revealSkillRoot(request.input as never);
       this.#emitTerminal(request.requestId, {
         requestId: request.requestId,
         commandName: request.commandName,
@@ -2164,13 +2435,15 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   /**
-   * MCP enable/disable: Host-owned mcp.json mutation; no Runtime required.
+   * MCP enable/disable, refresh, and one-shot probe: Host-owned; no Runtime required.
    */
-  async #commandMcp(request: ClientCommandRequest<"mcp.setEnabled">): Promise<ClientCommandAccepted> {
+  async #commandMcp(
+    request: ClientCommandRequest<"mcp.setEnabled" | "mcp.refresh" | "mcp.test">,
+  ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.mcp;
     if (service === undefined) {
-      throw clientError("CAPABILITY_UNAVAILABLE", "mcp.setEnabled is not available: no MCP adapter is wired");
+      throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available: no MCP adapter is wired`);
     }
     const acceptedAt = this.#options.diagnostics.now();
     const replay = this.#registry.accept(request, acceptedAt);
@@ -2189,9 +2462,23 @@ export class StudioHostClientFacade implements ClientTransport {
     return accepted;
   }
 
-  async #runMcpCommand(request: ClientCommandRequest<"mcp.setEnabled">, service: HostMcpService): Promise<void> {
+  async #runMcpCommand(
+    request: ClientCommandRequest<"mcp.setEnabled" | "mcp.refresh" | "mcp.test">,
+    service: HostMcpService,
+  ): Promise<void> {
     try {
-      const result = await service.setEnabled(request.input);
+      let result: ConfigWriteResult | McpTestResult;
+      switch (request.commandName) {
+        case "mcp.setEnabled":
+          result = await service.setEnabled(request.input as never);
+          break;
+        case "mcp.refresh":
+          result = await service.refresh(request.input as never);
+          break;
+        case "mcp.test":
+          result = await service.test(request.input as never);
+          break;
+      }
       this.#emitTerminal(request.requestId, {
         requestId: request.requestId,
         commandName: request.commandName,

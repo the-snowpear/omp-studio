@@ -247,9 +247,10 @@ export type ConversationRuntimeEvent =
       messageId: string;
       item: ConversationMessageItem;
       /**
-       * Present when the assistant message ended with a provider error. Live-only:
-       * the persisted item carries no error field, so a reloaded transcript shows
-       * the turn without it.
+       * Present when the assistant message ended with a provider error. The
+       * persisted item has no error field; the client latches the last live
+       * payload until that session's next assistant message completes without
+       * an error.
        */
       error?: ConversationMessageError;
     }

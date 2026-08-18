@@ -18,6 +18,11 @@ function reducedMotion(): boolean {
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+/** Identity of the todo snapshot; a new array of the same tasks must not retrigger scroll. */
+export function todoListEpoch(todos: readonly TodoTask[]): string {
+  return todos.map((todo) => `${todo.id}:${todo.status}:${todo.phase ?? ""}:${todo.content}`).join("\n");
+}
+
 /** Scroll only the task list, so the conversation behind the overlay does not jump. */
 export function scrollCurrentTodoIntoList(list: HTMLElement, row: HTMLElement): void {
   const port = list.getBoundingClientRect();
@@ -190,21 +195,35 @@ export function TaskProgressDock({
   const [phaseOpen, setPhaseOpen] = useState<Record<string, boolean>>({});
   const listRef = useRef<HTMLUListElement>(null);
   const currentRef = useRef<HTMLLIElement>(null);
+  const userPausedRef = useRef(false);
+  const seenEpochRef = useRef<string | undefined>(undefined);
   const currentTaskId = todos.find((todo) => todo.status === "in_progress")?.id;
-  const todoEpoch = todos.map((todo) => `${todo.id}:${todo.status}`).join("\n");
+  const todoEpoch = todoListEpoch(todos);
 
   useLayoutEffect(() => {
     const current = todos.find((todo) => todo.status === "in_progress");
-    if (current !== undefined) {
-      const nextGroups = groupTodosByPhase(todos);
-      const index = nextGroups.findIndex((group) => group.tasks.some((task) => task.id === current.id));
-      if (index >= 0) {
-        const key = phaseKey(nextGroups[index]!, index);
-        setPhaseOpen((prev) => (prev[key] === true ? prev : { ...prev, [key]: true }));
-      }
+    if (current === undefined) return;
+    const nextGroups = groupTodosByPhase(todos);
+    const index = nextGroups.findIndex((group) => group.tasks.some((task) => task.id === current.id));
+    if (index < 0) return;
+    const key = phaseKey(nextGroups[index]!, index);
+    setPhaseOpen((prev) => (prev[key] === true ? prev : { ...prev, [key]: true }));
+  }, [currentTaskId, todos]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      seenEpochRef.current = undefined;
+      userPausedRef.current = false;
+      return;
     }
-    if (!open) return;
+    if (seenEpochRef.current !== todoEpoch) {
+      userPausedRef.current = false;
+      seenEpochRef.current = todoEpoch;
+    }
+    if (userPausedRef.current) return;
+    let cancelled = false;
     const run = () => {
+      if (cancelled || userPausedRef.current) return;
       const list = listRef.current;
       const row = currentRef.current;
       if (list === null || row === null) return;
@@ -214,10 +233,17 @@ export function TaskProgressDock({
     const frame = requestAnimationFrame(run);
     const timer = window.setTimeout(run, 260);
     return () => {
+      cancelled = true;
       cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [open, currentTaskId, todoEpoch, todos]);
+  }, [open, todoEpoch]);
+
+  const pauseTodoAutoScroll = () => {
+    userPausedRef.current = true;
+    const list = listRef.current;
+    if (list !== null) list.scrollTop = list.scrollTop;
+  };
 
   if (todos.length === 0 && files.length === 0) return null;
 
@@ -246,11 +272,13 @@ export function TaskProgressDock({
           <div className="task-dock-panel">
             {todos.length > 0 ? (
               <section className="task-dock-col" aria-label="任务列表">
-                <div className="task-dock-col-head">
-                  <span>任务</span>
-                  {steps.total > 0 ? <span className="task-dock-col-meta">{steps.completed}/{steps.total}</span> : null}
-                </div>
-                <ul ref={listRef} className={`task-dock-todos${showPhases ? " phased" : ""}`}>
+                <ul
+                  ref={listRef}
+                  className={`task-dock-todos${showPhases ? " phased" : ""}`}
+                  onWheel={pauseTodoAutoScroll}
+                  onTouchMove={pauseTodoAutoScroll}
+                  onPointerDown={pauseTodoAutoScroll}
+                >
                   {showPhases
                     ? groups.map((group, index) => {
                         const key = phaseKey(group, index);
@@ -282,18 +310,6 @@ export function TaskProgressDock({
             ) : null}
             {files.length > 0 ? (
               <section className="task-dock-col" aria-label="文件修改">
-                <div className="task-dock-col-head">
-                  <span>文件修改</span>
-                  <button
-                    type="button"
-                    className="btn small task-dock-review"
-                    onClick={onReview}
-                    title={demo === true ? "打开右侧 Changes 面板（演示）" : "打开右侧 Changes 面板"}
-                  >
-                    <Icon name="diff" extra="sm" />
-                    审核
-                  </button>
-                </div>
                 <ul className="task-dock-file-list">
                   {files.map((file) => (
                     <li key={file.path} className="task-dock-file">
@@ -304,7 +320,7 @@ export function TaskProgressDock({
                         type="button"
                         className="task-dock-file-open"
                         aria-label={demo === true ? `打开 ${file.path}（演示）` : `打开 ${file.path}`}
-                        title={demo === true ? `打开 ${file.path}（演示）` : `打开 ${file.path}`}
+                        data-tip={demo === true ? "打开（演示）" : "打开"}
                         onClick={() => onOpen?.(file.path)}
                       >
                         <span className="task-dock-file-name">{file.name}</span>
@@ -324,26 +340,39 @@ export function TaskProgressDock({
           </div>
         </div>
         </div>
-        <button
-          type="button"
-          className="task-dock-pill"
-          aria-expanded={open}
-          aria-controls={panelId}
-          aria-label={toggleLabel}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <ProgressRing completed={steps.completed} total={steps.total} />
-          {stepText ? <span className="task-dock-step">{stepText}</span> : null}
-          {stepText && fileText ? <span className="task-dock-sep" aria-hidden="true">·</span> : null}
-          {fileText ? <span className="task-dock-files">{fileText}</span> : null}
-          {add || del ? (
-            <span className="task-dock-stats" aria-hidden="true">
-              <span className="add">+{add}</span>
-              <span className="del">-{del}</span>
-            </span>
+        <div className={`task-dock-bar${open && files.length > 0 ? " has-review" : ""}`}>
+          <button
+            type="button"
+            className="task-dock-pill"
+            aria-expanded={open}
+            aria-controls={panelId}
+            aria-label={toggleLabel}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {steps.total > 0 ? <ProgressRing completed={steps.completed} total={steps.total} /> : null}
+            {stepText ? <span className="task-dock-step">{stepText}</span> : null}
+            {stepText && fileText ? <span className="task-dock-sep" aria-hidden="true">·</span> : null}
+            {fileText ? <span className="task-dock-files">{fileText}</span> : null}
+            {add || del ? (
+              <span className="task-dock-stats" aria-hidden="true">
+                <span className="add">+{add}</span>
+                <span className="del">-{del}</span>
+              </span>
+            ) : null}
+            {demo === true ? <span className="chip gray xs">演示</span> : null}
+          </button>
+          {open && files.length > 0 ? (
+            <button
+              type="button"
+              className="btn small task-dock-review"
+              onClick={onReview}
+              data-tip={demo === true ? "Changes（演示）" : "Changes"}
+            >
+              <Icon name="diff" extra="sm" />
+              审核
+            </button>
           ) : null}
-          {demo === true ? <span className="chip gray xs">演示</span> : null}
-        </button>
+        </div>
       </div>
     </div>
   );

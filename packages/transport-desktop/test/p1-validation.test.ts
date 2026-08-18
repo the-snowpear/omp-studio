@@ -50,6 +50,7 @@ const QUERY_ENVELOPES: ReadonlyArray<{
   { name: "models.get", payload: { queryName: "models.get", input: {} } },
   { name: "skills.get", payload: { queryName: "skills.get", input: {} } },
   { name: "mcp.get", payload: { queryName: "mcp.get", input: {} } },
+  { name: "mcp.logs.get", payload: { queryName: "mcp.logs.get", input: { name: "filesystem" } } },
   { name: "agents.definitions.get", payload: { queryName: "agents.definitions.get", input: {} } },
   { name: "projects.list", payload: { queryName: "projects.list", input: {} } },
   { name: "workspace.fileTree", payload: { queryName: "workspace.fileTree", input: { workspaceId: "ws-0001" } } },
@@ -97,6 +98,12 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
   { name: "runtime.pause", payload: { commandName: "runtime.pause", input: {}, idempotencyKey: "idem-core-6", requestId: "req-core-6" } },
   { name: "runtime.resume", payload: { commandName: "runtime.resume", input: { expectedPauseEpoch: 0 }, idempotencyKey: "idem-core-7", requestId: "req-core-7" } },
   { name: "turn.retry", payload: { commandName: "turn.retry", input: {}, idempotencyKey: "idem-core-8", requestId: "req-core-8" } },
+  { name: "session.clearContext", payload: { commandName: "session.clearContext", input: {}, idempotencyKey: "idem-clear-1", requestId: "req-clear-1" } },
+  { name: "btw.ask", payload: { commandName: "btw.ask", input: { question: "why this file?" }, idempotencyKey: "idem-btw-1", requestId: "req-btw-1" } },
+  { name: "btw.abort", payload: { commandName: "btw.abort", input: { ephemeralId: "ephemeral-1" }, idempotencyKey: "idem-btw-abort", requestId: "req-btw-abort" } },
+  { name: "btw.branch", payload: { commandName: "btw.branch", input: { branchToken: "branch-token-1" }, idempotencyKey: "idem-btw-branch", requestId: "req-btw-branch" } },
+  { name: "tan.start", payload: { commandName: "tan.start", input: { work: "review tests" }, idempotencyKey: "idem-tan-1", requestId: "req-tan-1" } },
+  { name: "omfg.generate", payload: { commandName: "omfg.generate", input: { complaint: "avoid this" }, idempotencyKey: "idem-omfg-1", requestId: "req-omfg-1" } },
   {
     name: "session.model.set",
     payload: {
@@ -176,6 +183,15 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
       input: { channel: "stable" },
       idempotencyKey: "idem-1",
       requestId: "req-1",
+    },
+  },
+  {
+    name: "runtime.ensure",
+    payload: {
+      commandName: "runtime.ensure",
+      input: {},
+      idempotencyKey: "idem-ensure",
+      requestId: "req-ensure",
     },
   },
   {
@@ -440,12 +456,48 @@ const COMMAND_ENVELOPES: ReadonlyArray<{
     },
   },
   {
+    name: "skills.reveal",
+    payload: {
+      commandName: "skills.reveal",
+      input: { name: "upstream-sync", scope: "project" },
+      idempotencyKey: "idem-skills-reveal-1",
+      requestId: "req-skills-reveal-1",
+    },
+  },
+  {
+    name: "skills.revealRoot",
+    payload: {
+      commandName: "skills.revealRoot",
+      input: { scope: "user" },
+      idempotencyKey: "idem-skills-root-1",
+      requestId: "req-skills-root-1",
+    },
+  },
+  {
     name: "mcp.setEnabled",
     payload: {
       commandName: "mcp.setEnabled",
       input: { name: "filesystem", enabled: false, scope: "user" },
       idempotencyKey: "idem-mcp-1",
       requestId: "req-mcp-1",
+    },
+  },
+  {
+    name: "mcp.refresh",
+    payload: {
+      commandName: "mcp.refresh",
+      input: {},
+      idempotencyKey: "idem-mcp-refresh-1",
+      requestId: "req-mcp-refresh-1",
+    },
+  },
+  {
+    name: "mcp.test",
+    payload: {
+      commandName: "mcp.test",
+      input: { name: "filesystem", scope: "user" },
+      idempotencyKey: "idem-mcp-test-1",
+      requestId: "req-mcp-test-1",
     },
   },
   {
@@ -560,6 +612,7 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       "models.get",
       "skills.get",
       "mcp.get",
+      "mcp.logs.get",
       "agents.definitions.get",
       "projects.list",
       "workspace.fileTree",
@@ -818,13 +871,20 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       "session.fast.set",
       "session.prewalk.arm",
       "session.prewalk.disarm",
+      "session.clearContext",
       "session.fork",
       "session.handoff",
       "session.model.set",
       "session.thinking.set",
       "session.tree.get",
       "session.tree.navigate",
+      "session.tree.branch",
       "operator.invoke",
+      "btw.ask",
+      "btw.abort",
+      "btw.branch",
+      "tan.start",
+      "omfg.generate",
       "agent.spawn",
       "agent.send",
       "agent.kill",
@@ -832,6 +892,7 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       "agent.release",
       "job.cancel",
       "runtime.install",
+      "runtime.ensure",
       "session.create",
       "session.resume",
       "session.drop",
@@ -858,7 +919,11 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       "models.cycleOrder.set",
       "plugins.setEnabled",
       "skills.setEnabled",
+      "skills.reveal",
+      "skills.revealRoot",
       "mcp.setEnabled",
+      "mcp.refresh",
+      "mcp.test",
       "agents.definition.upsert",
       "agents.definition.delete",
       "agents.definition.configure",
@@ -904,6 +969,33 @@ describe("parseClientCommandRequest: envelope strictness", () => {
         input: { text: "x", images: [{ type: "image", mimeType: "image/png", data: "abc" }] },
         idempotencyKey: "idem-q-img",
         requestId: "req-q-img",
+      }),
+    );
+    const agentSend = parseClientCommandRequest({
+      commandName: "agent.send",
+      input: {
+        agentId: "agent-0001",
+        expectedGeneration: 1,
+        text: "[图1]",
+        mode: "prompt",
+        images: [{ type: "image", mimeType: "image/png", data: "abc" }],
+      },
+      idempotencyKey: "idem-agent-img-1",
+      requestId: "req-agent-img-1",
+    });
+    assert.equal(agentSend.commandName, "agent.send");
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "agent.send",
+        input: {
+          agentId: "agent-0001",
+          expectedGeneration: 1,
+          text: "x",
+          mode: "prompt",
+          images: [{ type: "file", mimeType: "image/png", data: "abc" }],
+        },
+        idempotencyKey: "idem-agent-img-bad",
+        requestId: "req-agent-img-bad",
       }),
     );
   });
@@ -1037,6 +1129,55 @@ describe("parseClientCommandRequest: envelope strictness", () => {
       }),
     );
     assert.match(message, /unknown field "windowId"/);
+  });
+
+  test("session.clearContext and composite slash commands reject empty or extra fields", () => {
+    parseClientCommandRequest({
+      commandName: "session.clearContext",
+      input: {},
+      idempotencyKey: "idem-clear-ok",
+      requestId: "req-clear-ok",
+    });
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "session.clearContext",
+        input: { droppedCount: 1 },
+        idempotencyKey: "idem-clear-extra",
+        requestId: "req-clear-extra",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "btw.ask",
+        input: { question: "" },
+        idempotencyKey: "idem-btw-empty",
+        requestId: "req-btw-empty",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "btw.abort",
+        input: { ephemeralId: "" },
+        idempotencyKey: "idem-btw-abort-empty",
+        requestId: "req-btw-abort-empty",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "btw.branch",
+        input: { branchToken: "" },
+        idempotencyKey: "idem-btw-branch-empty",
+        requestId: "req-btw-branch-empty",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "tan.start",
+        input: { text: "review tests" },
+        idempotencyKey: "idem-tan-wrong",
+        requestId: "req-tan-wrong",
+      }),
+    );
   });
 
   test("rejects missing, blank, or oversized requestId/idempotencyKey", () => {
@@ -1199,6 +1340,42 @@ describe("parseClientCommandRequest: envelope strictness", () => {
         requestId: "r",
       }),
     );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "skills.reveal",
+        input: { name: "" },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "skills.revealRoot",
+        input: { name: "upstream-sync" },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "mcp.refresh",
+        input: { extra: true },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "mcp.test",
+        input: { name: "" },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    const logsMessage = expectValidationError(() =>
+      parseClientQueryRequest({ queryName: "mcp.logs.get", input: { name: "" } }),
+    );
+    assert.match(logsMessage, /name/);
     expectValidationError(() =>
       parseClientCommandRequest({
         commandName: "agents.definition.upsert",
@@ -1575,6 +1752,28 @@ describe("assertClientEvent: outbound strictness", () => {
       runtimeEpoch: 2,
       connection: { status: "connected", classification: "managed", runtimeId: "r-1", backend: "studio-host" },
     });
+    assertClientEvent({
+      kind: "runtime.changed",
+      ...base,
+      connection: {
+        status: "unavailable",
+        classification: "unavailable",
+        unavailableCode: "no-workspace",
+        unavailableReason: "no workspace is selected",
+      },
+    });
+    assertClientEvent({
+      kind: "runtime.changed",
+      ...base,
+      connection: {
+        status: "disconnected",
+        classification: "managed",
+        runtimeId: "r-1",
+        runtimeEpoch: 2,
+        disconnectCode: "process-exit",
+        disconnectReason: "Runtime process exited (code=1)",
+      },
+    });
     assertClientEvent({ kind: "resync.required", ...base, reason: "cursor gap" });
     assertClientEvent({ kind: "diagnostics.changed", ...base });
     assertClientEvent({
@@ -1591,6 +1790,14 @@ describe("assertClientEvent: outbound strictness", () => {
         role: "assistant",
         createdAt: "2026-08-15T12:00:00.000Z",
       },
+    });
+    assertClientEvent({
+      kind: "btw.changed",
+      ...base,
+      runtimeEpoch: 1,
+      sessionId: "session-1",
+      eventSeq: 8,
+      snapshot: { ephemeralId: "ephemeral-1", status: "running", text: "partial" },
     });
   });
 
@@ -1638,6 +1845,31 @@ describe("assertClientEvent: outbound strictness", () => {
         kind: "runtime.changed",
         ...base,
         connection: { status: "connected", classification: "root", runtimeId: "r-1" },
+      }),
+    );
+    expectValidationError(() =>
+      assertClientEvent({
+        kind: "runtime.changed",
+        ...base,
+        connection: {
+          status: "unavailable",
+          classification: "unavailable",
+          unavailableCode: "made-up",
+          unavailableReason: "no workspace is selected",
+        },
+      }),
+    );
+    expectValidationError(() =>
+      assertClientEvent({
+        kind: "runtime.changed",
+        ...base,
+        connection: {
+          status: "disconnected",
+          classification: "managed",
+          runtimeId: "r-1",
+          disconnectCode: "made-up",
+          disconnectReason: "Runtime process exited",
+        },
       }),
     );
     expectValidationError(() =>
@@ -1711,5 +1943,66 @@ describe("assertClientEvent: outbound strictness", () => {
     }));
     expectValidationError(() => assertClientQueryResponse({ ok: true, queryName: "git.branches.list", result: { workspaceId: "ws-1", branches: [{ name: "main", remote: false, current: true, headOid: "abc", upstream: 42, ahead: 0, behind: 0 }] } }));
     expectValidationError(() => assertClientQueryResponse({ ok: true, queryName: "git.worktrees.list", result: { workspaceId: "ws-1", rootConfigured: true, worktrees: [{ worktreeId: "wt-1", name: "main", current: true, detached: false, bare: false, locked: false, prunable: false, workspaceId: {} }] } }));
+  });
+
+  test("validates BTW snapshots, receipts, and rejects illegal enums", () => {
+    assertClientEvent({
+      kind: "btw.changed",
+      ...base,
+      runtimeEpoch: 1,
+      sessionId: "session-1",
+      eventSeq: 8,
+      snapshot: {
+        ephemeralId: "ephemeral-1",
+        status: "failed",
+        text: "truncated",
+        error: { code: "OUTPUT_LIMIT", message: "too long" },
+      },
+    });
+    expectValidationError(() =>
+      assertClientEvent({
+        kind: "btw.changed",
+        ...base,
+        runtimeEpoch: 1,
+        sessionId: "session-1",
+        eventSeq: 8,
+        snapshot: { ephemeralId: "ephemeral-1", status: "pending", text: "" },
+      }),
+    );
+    assertClientEvent({
+      kind: "command.receipt",
+      ...base,
+      receipt: {
+        requestId: "req-btw-ask",
+        commandName: "btw.ask",
+        status: "completed",
+        result: { snapshot: { version: 1 }, ephemeralId: "ephemeral-1", branchToken: "token-1", status: "running" },
+        observedAt: base.occurredAt,
+      },
+    });
+    expectValidationError(() =>
+      assertClientEvent({
+        kind: "command.receipt",
+        ...base,
+        receipt: {
+          requestId: "req-btw-ask",
+          commandName: "btw.ask",
+          status: "completed",
+          result: { snapshot: {}, ephemeralId: "ephemeral-1", branchToken: "", status: "running" },
+          observedAt: base.occurredAt,
+        },
+      }),
+    );
+    assertClientEvent({
+      kind: "command.receipt",
+      ...base,
+      receipt: {
+        requestId: "req-btw-branch",
+        commandName: "btw.branch",
+        status: "completed",
+        result: { snapshot: { version: 1 }, branched: true, newSessionId: "session-2" },
+        observedAt: base.occurredAt,
+      },
+    });
   });
 });

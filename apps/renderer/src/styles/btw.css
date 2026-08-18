@@ -1,0 +1,325 @@
+/* ============================================================
+   BTW —— 旁路问答浮窗 / 胶囊 / 右侧栏页
+   浮动层用 --z-float：压住 popover 与菜单，让位给独占式 modal。
+   平面风格照 tokens.css 的约定：靠 --border-float 与 surface 分层，不叠阴影。
+   ============================================================ */
+
+/* 拖动期间全局抑制选中与命中，避免浮窗掠过对话时选到文字。 */
+body.is-btw-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+.btw-head,
+.btw-capsule,
+.btw-resize,
+.sp-head .tabs button.btw-tab {
+  touch-action: none;
+}
+body.is-btw-dragging .btw-window,
+body.is-btw-dragging .btw-capsule {
+  transition: none;
+}
+
+/* ---------------- 展开态浮窗 ---------------- */
+.btw-window {
+  position: fixed;
+  z-index: var(--z-float);
+  display: flex;
+  flex-direction: column;
+  min-width: 320px;
+  min-height: 220px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-10);
+  color: var(--text);
+  font-size: var(--fs-12);
+}
+
+.btw-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: none;
+  padding: var(--sp-6) var(--sp-8);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: grab;
+}
+body.is-btw-dragging .btw-head { cursor: grabbing; }
+.btw-head .spacer { flex: 1 1 auto; }
+.btw-grip {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-3);
+}
+.btw-title {
+  flex: none;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+}
+
+/* ---------------- 状态行 ----------------
+   复用主对话 working 行的视觉（al-turn 旋转 + al-sweep 扫光是 workbench.css
+   里的全局 keyframes），但不复用其 DOM：BTW 只有四态 + 计时。 */
+.btw-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  min-width: 0;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.btw-status-glyph {
+  display: inline-flex;
+  flex: none;
+  color: var(--accent);
+}
+.btw-status[data-status="running"] .btw-status-glyph {
+  animation: al-turn 3.6s linear infinite;
+}
+.btw-status-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.btw-status-label { flex: none; }
+.btw-status[data-status="running"] .btw-status-label {
+  background: linear-gradient(90deg, var(--text-3) 30%, var(--text) 50%, var(--text-3) 70%);
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: al-sweep 2.4s linear infinite;
+}
+.btw-status[data-status="failed"] .btw-status-label { color: var(--red); }
+.btw-status[data-status="aborted"] .btw-status-label { color: var(--text-3); }
+.btw-status[data-status="completed"] .btw-status-label { color: var(--text-2); }
+.btw-status-elapsed {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.btw-status.compact { font-size: var(--fs-11); }
+
+@media (prefers-reduced-motion: reduce) {
+  .btw-status[data-status="running"] .btw-status-glyph,
+  .btw-status[data-status="running"] .btw-status-label,
+  .btw-capsule.is-running .btw-cap-orb {
+    animation: none;
+  }
+  .btw-status[data-status="running"] .btw-status-label {
+    color: var(--text);
+    background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
+  }
+}
+
+/* ---------------- 内容体（浮窗与侧栏页共用） ---------------- */
+.btw-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--sp-8);
+  padding: var(--sp-10);
+}
+.btw-question {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex: none;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+.btw-question-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* hover 展开完整问题：浮窗窄，长问题默认单行截断。 */
+.btw-question:hover .btw-question-text {
+  white-space: normal;
+  overflow: visible;
+}
+.btw-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: var(--fs-12);
+}
+.btw-error {
+  flex: none;
+  margin: 0;
+  color: var(--red);
+}
+.btw-notice {
+  flex: none;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  text-align: left;
+}
+.btw-notice:hover { color: var(--text); }
+.btw-acts {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  flex: none;
+  padding-top: var(--sp-6);
+  border-top: 1px solid var(--border);
+}
+.btw-acts .spacer { flex: 1 1 auto; }
+
+.btw-compose {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-6);
+  flex: none;
+  padding-top: var(--sp-8);
+  border-top: 1px solid var(--border);
+}
+.btw-compose-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 96px;
+  padding: var(--sp-6) var(--sp-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  background: var(--surface-2);
+  resize: none;
+  font-size: var(--fs-12);
+  line-height: 1.45;
+}
+.btw-compose-input::placeholder {
+  color: var(--text-faint);
+}
+.btw-compose-input:focus,
+.btw-compose-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+.btw-compose-input:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+.btw-compose-send {
+  flex: none;
+  margin-bottom: 2px;
+}
+
+/* ---------------- 8 向 resize 把手 ---------------- */
+.btw-resize {
+  position: absolute;
+  z-index: var(--z-resizer);
+}
+.btw-resize.n, .btw-resize.s { left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.btw-resize.e, .btw-resize.w { top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.btw-resize.n { top: -1px; }
+.btw-resize.s { bottom: -1px; }
+.btw-resize.e { right: -1px; }
+.btw-resize.w { left: -1px; }
+.btw-resize.ne, .btw-resize.nw, .btw-resize.se, .btw-resize.sw {
+  width: 12px;
+  height: 12px;
+}
+.btw-resize.nw { top: -2px; left: -2px; cursor: nwse-resize; }
+.btw-resize.se { bottom: -2px; right: -2px; cursor: nwse-resize; }
+.btw-resize.ne { top: -2px; right: -2px; cursor: nesw-resize; }
+.btw-resize.sw { bottom: -2px; left: -2px; cursor: nesw-resize; }
+
+/* ---------------- 胶囊态 ---------------- */
+.btw-capsule {
+  position: fixed;
+  z-index: var(--z-float);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 188px;
+  height: 48px;
+  padding: 0 var(--sp-10);
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-full);
+  color: var(--text);
+  cursor: grab;
+}
+body.is-btw-dragging .btw-capsule { cursor: grabbing; }
+.btw-capsule:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.btw-cap-orb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--accent);
+}
+.btw-capsule.is-running .btw-cap-orb {
+  animation: al-turn 3.6s linear infinite;
+}
+.btw-cap-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.btw-cap-title {
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+}
+
+/* ---------------- 吸附落点提示 ---------------- */
+.btw-drop-hint {
+  position: fixed;
+  z-index: calc(var(--z-float) - 1);
+  pointer-events: none;
+  border: 1px dashed var(--accent);
+  border-radius: var(--r-8);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* ---------------- 右侧栏 tab ----------------
+   tab 按钮同时是拖出握把，所以要 grab 光标；小状态点让 BTW 在别的 tab
+   前台时也能看出它在跑。 */
+.sp-head .tabs button.btw-tab { cursor: grab; }
+body.is-btw-dragging .sp-head .tabs button.btw-tab { cursor: grabbing; }
+.btw-tab-dot {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--text-3);
+}
+.btw-tab-dot[data-status="running"] {
+  background: var(--accent);
+  animation: btw-pulse 1.6s ease-in-out infinite;
+}
+.btw-tab-dot[data-status="failed"] { background: var(--red); }
+.btw-tab-dot[data-status="completed"] { background: var(--green); }
+@keyframes btw-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btw-tab-dot[data-status="running"] { animation: none; }
+}
+
+/* 侧栏页里内容体自己撑满，不再有标题栏与把手。 */
+#spBtw .btw-panel { padding: var(--sp-12); }

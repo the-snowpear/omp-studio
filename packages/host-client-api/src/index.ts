@@ -13,6 +13,9 @@ export type { StudioHostClientFacadeOptions } from "./facade.js";
 
 export {
   createDefaultHostDiagnosticsFactory,
+  formatRuntimeDisconnectMessage,
+  formatRuntimeMissingMessage,
+  formatRuntimeUnavailableMessage,
   isClientError,
   toClientError,
 } from "./services.js";
@@ -26,7 +29,10 @@ export type {
   HostManifestProvider,
   HostModelsService,
   HostRuntimeAccess,
+  HostRuntimeDisconnect,
   HostRuntimeHelloView,
+  HostRuntimeUnavailable,
+  HostRuntimeInstallProbe,
   HostRuntimeInstallService,
   HostSemanticCommandService,
   HostSessionCatalogProvider,

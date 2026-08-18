@@ -135,6 +135,12 @@ function fixture() {
 			serviceCalls.push("session.model.applyPending");
 		},
 	};
+	const permissions = {
+		state: () => "yolo" as const,
+		applyPending: async () => {
+			serviceCalls.push("permissions.applyPending");
+		},
+	};
 	const runtime = {
 		runtimeId: "runtime-control-test",
 		runtimeEpoch: 7,
@@ -150,6 +156,7 @@ function fixture() {
 			loop: fakeLoopService(),
 			modes,
 			models,
+			permissions,
 			tree: {
 				getTree: () => {
 					serviceCalls.push("session.tree.get");
@@ -158,6 +165,10 @@ function fixture() {
 				navigate: async (commandId: string) => {
 					serviceCalls.push(`session.tree.navigate:${commandId}`);
 					return {};
+				},
+				branch: async (commandId: string) => {
+					serviceCalls.push(`session.tree.branch:${commandId}`);
+					return { cancelled: false, sessionId: "branched-session", editorText: "hello" };
 				},
 			},
 			fork: {
@@ -331,11 +342,11 @@ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
 		expect(frames.map(frame => (frame.body as StudioReceipt).status)).toEqual(["accepted", "completed"]);
 	});
 
-	test("core.steer applies deferred model and mode preferences before queuing", async () => {
+	test("core.steer applies deferred model, mode, and approval preferences before queuing", async () => {
 		const { session, serviceCalls, dispatcher, request } = fixture();
 		session.isStreaming = true;
 		await dispatcher.dispatch(request("steer-one", { kind: "core.steer", text: "use plan instead" }));
-		expect(serviceCalls).toEqual(["session.model.applyPending", "mode.applyPending"]);
+		expect(serviceCalls).toEqual(["session.model.applyPending", "mode.applyPending", "permissions.applyPending"]);
 		expect(session.steerCalls).toBe(1);
 	});
 
@@ -495,6 +506,19 @@ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
 		const accepted = frames.find(frame => (frame.body as StudioReceipt).status === "accepted")?.body as StudioReceipt;
 		expect(serviceCalls).toContain(`session.tree.navigate:${accepted.commandId}`);
 		expect((frames.at(-1)!.body as StudioReceipt).status).toBe("completed");
+	});
+
+	test("tree branch receives the arbiter command id and returns the new session fill-back", async () => {
+		const { dispatcher, frames, request, serviceCalls } = fixture();
+		await dispatcher.dispatch(request("tree-branch", { kind: "session.tree.branch", targetId: "entry-1" }));
+		const accepted = frames.find(frame => (frame.body as StudioReceipt).status === "accepted")?.body as StudioReceipt;
+		expect(serviceCalls).toContain(`session.tree.branch:${accepted.commandId}`);
+		expect((frames.at(-1)!.body as StudioReceipt).status).toBe("completed");
+		expect((frames.at(-1)!.body as StudioReceipt).result).toEqual({
+			cancelled: false,
+			sessionId: "branched-session",
+			editorText: "hello",
+		});
 	});
 
 	test("operator manifest and invocation route through the Runtime command service", async () => {

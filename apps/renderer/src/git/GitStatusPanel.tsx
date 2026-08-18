@@ -446,13 +446,13 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
         <span className="ch-count">{changes.length}</span>
         <span className="spacer" />
         {target === "working" ? (
-          <GitTip text={working.length === 0 ? "没有可暂存的更改" : `暂存全部（${working.length}）`}>
+          <GitTip text={working.length === 0 ? "无更改" : "暂存全部"}>
             <button type="button" className="icon-btn small" aria-label="暂存全部" disabled={busy || working.length === 0} onClick={() => void execute({ kind: "stage", paths: working.map((change) => change.path) })}>
               <Icon name="plus" extra="sm" />
             </button>
           </GitTip>
         ) : (
-          <GitTip text={staged.length === 0 ? "没有已暂存的更改" : `取消暂存全部（${staged.length}）`}>
+          <GitTip text={staged.length === 0 ? "无更改" : "取消暂存全部"}>
             <button type="button" className="icon-btn small" aria-label="取消暂存全部" disabled={busy || staged.length === 0} onClick={() => void execute({ kind: "unstage", paths: staged.map((change) => change.path) })}>
               <Icon name="minus" extra="sm" />
             </button>
@@ -468,7 +468,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
             <button type="button" className="icon-btn small" aria-label={target === "staged" ? "取消暂存" : "暂存"} disabled={busy} onClick={() => void execute({ kind: target === "staged" ? "unstage" : "stage", paths: [change.path] })}><Icon name={target === "staged" ? "minus" : "plus"} extra="sm" /></button>
           </GitTip>
           {target === "working" ? (
-            <GitTip text="丢弃更改">
+            <GitTip text="丢弃">
               <button type="button" className="icon-btn small danger" aria-label="丢弃更改" disabled={busy || !repository.revision} onClick={() => { if (repository.revision && window.confirm(`确认丢弃 ${change.path} 的工作区更改？`)) void execute({ kind: "discard", paths: [change.path], expectedRevision: repository.revision }); }}><Icon name="trash" extra="sm" /></button>
             </GitTip>
           ) : null}
@@ -500,7 +500,7 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       {rows("已暂存", staged, "staged")}
       {rows("工作区", working, "working")}
       {repository.changes.length === 0 ? <div className="empty" style={{ padding: 18 }}>工作区干净</div> : null}
-      {githubAuth?.authenticated && pullRequests?.pullRequests.length ? <div className="git-pr-list"><div className="ch-group-title">Open pull requests<span className="ch-count">{pullRequests.pullRequests.length}</span></div>{pullRequests.pullRequests.map((pr) => <div className="git-pr-row" key={pr.number}><span className="ellipsis">#{pr.number} {pr.title}</span><button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.checkout", number: pr.number })}>Checkout</button>{pr.draft ? <button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.ready", number: pr.number })}>Ready</button> : null}<GitTip text={pr.headOid ? "Squash merge" : "缺少远端 head OID"}><button className="btn small primary" disabled={busy || !pr.headOid} onClick={() => { if (pr.headOid && window.confirm(`确认 squash merge #${pr.number}？`)) void executeGithub({ kind: "pr.merge", number: pr.number, method: "squash", expectedHeadOid: pr.headOid, deleteBranch: true }); }}>Merge</button></GitTip></div>)}</div> : null}
+      {githubAuth?.authenticated && pullRequests?.pullRequests.length ? <div className="git-pr-list"><div className="ch-group-title">Open pull requests<span className="ch-count">{pullRequests.pullRequests.length}</span></div>{pullRequests.pullRequests.map((pr) => <div className="git-pr-row" key={pr.number}><span className="ellipsis">#{pr.number} {pr.title}</span><button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.checkout", number: pr.number })}>Checkout</button>{pr.draft ? <button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.ready", number: pr.number })}>Ready</button> : null}<GitTip text={pr.headOid ? "Squash" : "无 OID"}><button className="btn small primary" disabled={busy || !pr.headOid} onClick={() => { if (pr.headOid && window.confirm(`确认 squash merge #${pr.number}？`)) void executeGithub({ kind: "pr.merge", number: pr.number, method: "squash", expectedHeadOid: pr.headOid, deleteBranch: true }); }}>Merge</button></GitTip></div>)}</div> : null}
     </div>
     <div className="git-commit-box">
       <textarea value={commitMessage} placeholder="Commit message" rows={1} onChange={(event) => setCommitMessage(event.target.value)} />

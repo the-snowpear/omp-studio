@@ -47,6 +47,9 @@ export function useSubagentConversation(input: {
       target: input.target,
       runtimeConnected: input.runtimeConnected,
     });
+    // #region agent log
+    fetch("http://127.0.0.1:7773/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"84cd67"},body:JSON.stringify({sessionId:"84cd67",runId:"pre-fix",hypothesisId:"E",location:"useSubagentConversation.ts:start",message:"subagent engine created",data:{preview:input.preview,runtimeConnected:input.runtimeConnected,hasClient:clientRef.current!==null,agentId:input.target?.agentId??null,previewItemCount:input.target===null?0:previewSubagentConversationItems(input.target.agentId).length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     engineRef.current = engine;
     const off = engine.subscribe(() => bump());
     engine.start();

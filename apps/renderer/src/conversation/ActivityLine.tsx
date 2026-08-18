@@ -6,27 +6,23 @@ import {
   isLiveActivityPhase,
   reduceActivityRetry,
   reduceAwaitingTurn,
+  syncRunWindow,
   WORKING_LABEL,
   type ActivityRetry,
   type ActivityStatus,
 } from "./activityStatus";
 
+/** Survives WorkbenchCanvas unmount when the operator leaves for Home. */
+const runWindowStore = new Map<string, number>();
+
 /**
  * Start moment of the current run window. Token accounting stays in telemetry;
  * the activity line itself only shows working / elapsed / the live operation.
+ * The clock is keyed by session identity so homepage ↔ desktop remounts keep
+ * the same elapsed time.
  */
-export function useRunWindow(active: boolean): { readonly startedAt: number | null } {
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!active) {
-      setStartedAt(null);
-      return;
-    }
-    setStartedAt((previous) => previous ?? Date.now());
-  }, [active]);
-
-  return { startedAt };
+export function useRunWindow(active: boolean, identityKey: string): { readonly startedAt: number | null } {
+  return { startedAt: syncRunWindow(identityKey, active, Date.now(), runWindowStore) };
 }
 
 /**
@@ -67,16 +63,21 @@ export function useActivityRetry(input: {
   streaming: boolean;
   failed: boolean;
   identityKey: string;
+  cancelGeneration?: number;
 }): ActivityRetry | undefined {
   const ref = useRef<{
     identityKey: string;
     retry?: ActivityRetry;
     noticeCount: number;
+    endCount: number;
+    cancelGeneration: number;
     seenStream: boolean;
     wasStreaming: boolean;
   }>({
     identityKey: input.identityKey,
     noticeCount: 0,
+    endCount: 0,
+    cancelGeneration: 0,
     seenStream: false,
     wasStreaming: false,
   });
@@ -85,10 +86,13 @@ export function useActivityRetry(input: {
     notices: input.notices,
     streaming: input.streaming,
     failed: input.failed,
+    ...(input.cancelGeneration === undefined ? {} : { cancelGeneration: input.cancelGeneration }),
   });
   ref.current = {
     identityKey: next.identityKey,
     noticeCount: next.noticeCount,
+    endCount: next.endCount,
+    cancelGeneration: next.cancelGeneration,
     seenStream: next.seenStream,
     wasStreaming: next.wasStreaming,
     ...(next.retry === undefined ? {} : { retry: next.retry }),

@@ -9,8 +9,8 @@ import {
 	CONVERSATION_LIMITS,
 	type ConversationContentBlock,
 	type ConversationItem,
-	type ConversationRole,
 	type ConversationTranscriptPage,
+	type JsonValue,
 	parseConversationTranscriptPage,
 	parseSessionTranscriptReadLimit,
 } from "../conversation-protocol";
@@ -20,7 +20,9 @@ import {
 	sanitizeToolArguments,
 	truncateUtf8,
 	utf8ByteLength,
+	publicToolCallId,
 } from "./conversation-sanitizer";
+import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
 
 export type StudioSessionTranscriptSessionManager = {
 	getSessionId(): string;
@@ -58,13 +60,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 	return value as Record<string, unknown>;
 }
 
-function mapRole(role: unknown): ConversationRole {
-	if (role === "user") return "user";
-	if (role === "assistant" || role === "toolResult") return "assistant";
-	return "system";
-}
-
-function mapContentBlock(block: unknown): ConversationContentBlock | undefined {
+function mapContentBlock(block: unknown, fallbackToolCallId: string): ConversationContentBlock | undefined {
 	const record = asRecord(block);
 	if (record === undefined) return undefined;
 	if (record.type === "text" && typeof record.text === "string") {
@@ -76,14 +72,14 @@ function mapContentBlock(block: unknown): ConversationContentBlock | undefined {
 		return { type: "thinking", text: text.text, ...(text.truncated ? { truncated: true } : {}) };
 	}
 	if (record.type === "toolCall" && typeof record.id === "string" && typeof record.name === "string") {
-		const toolCallId = record.id.slice(0, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS);
+		const publicId = publicToolCallId(record.id, fallbackToolCallId);
 		const toolName = sanitizePublicText(record.name, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
 		const mapped: ConversationContentBlock = {
 			type: "toolCall",
-			toolCallId: toolCallId.length > 0 ? toolCallId : "tool-call",
+			toolCallId: publicId.id.length > 0 ? publicId.id : fallbackToolCallId,
 			toolName: toolName.text.length > 0 ? toolName.text : "tool",
 		};
-		let truncated = toolName.truncated || toolCallId !== record.id;
+		let truncated = toolName.truncated || publicId.truncated;
 		if ("arguments" in record) {
 			const args = sanitizeToolArguments(record.arguments);
 			if (args.arguments !== undefined) mapped.arguments = args.arguments;
@@ -104,18 +100,18 @@ function mapContentBlock(block: unknown): ConversationContentBlock | undefined {
 
 function mapToolResultMessage(
 	message: Record<string, unknown>,
-	fallbackName?: string,
+	fallbackName: string | undefined,
+	fallbackToolCallId: string,
 ): Extract<ConversationContentBlock, { type: "toolResult" }> {
-	const toolCallId =
-		typeof message.toolCallId === "string" && message.toolCallId.length > 0
-			? message.toolCallId.slice(0, CONVERSATION_LIMITS.ITEM_ID_MAX_CHARS)
-			: "tool-call";
+	const rawId = typeof message.toolCallId === "string" ? message.toolCallId : "";
+	const publicId = publicToolCallId(rawId, fallbackToolCallId);
+	const toolCallId = publicId.id.length > 0 ? publicId.id : fallbackToolCallId;
 	const nameSource = typeof message.toolName === "string" ? message.toolName : fallbackName;
 	const toolName =
 		nameSource === undefined ? undefined : sanitizePublicText(nameSource, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
 	const texts: string[] = [];
 	let omittedBinary = false;
-	let truncated = toolName?.truncated === true;
+	let truncated = toolName?.truncated === true || publicId.truncated;
 	if (Array.isArray(message.content)) {
 		for (const block of message.content) {
 			const record = asRecord(block);
@@ -141,7 +137,20 @@ function mapToolResultMessage(
 	}
 	if ("details" in message && message.details !== undefined) {
 		const details = sanitizeJsonValue(message.details);
-		if (details.value !== undefined) mapped.data = details.value;
+		if (details.value !== undefined) {
+			if (
+				omittedBinary &&
+				details.value !== null &&
+				typeof details.value === "object" &&
+				!Array.isArray(details.value)
+			) {
+				mapped.data = { ...(details.value as { readonly [key: string]: JsonValue }), omitted: "image" };
+			} else if (omittedBinary) {
+				mapped.data = { omitted: "image", details: details.value };
+			} else {
+				mapped.data = details.value;
+			}
+		}
 		truncated ||= details.truncated;
 	}
 	if (truncated) mapped.truncated = true;
@@ -155,6 +164,9 @@ function mapMessageEntry(entry: SessionEntry & { type: "message" }): Conversatio
 	if (message.role === "toolResult") {
 		return undefined;
 	}
+	if (isHarnessInjectedUserMessage(message)) return undefined;
+	const role = publicConversationRole(message.role);
+	if (role === undefined) return undefined;
 	const content: ConversationContentBlock[] = [];
 	if (typeof message.content === "string") {
 		const text = sanitizePublicText(message.content, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
@@ -162,7 +174,7 @@ function mapMessageEntry(entry: SessionEntry & { type: "message" }): Conversatio
 	} else if (Array.isArray(message.content)) {
 		for (const block of message.content) {
 			try {
-				const mapped = mapContentBlock(block);
+				const mapped = mapContentBlock(block, `tool:${entry.id}:${content.length}`);
 				if (mapped !== undefined) content.push(mapped);
 			} catch {
 				content.push({ type: "text", text: "", truncated: true });
@@ -175,7 +187,7 @@ function mapMessageEntry(entry: SessionEntry & { type: "message" }): Conversatio
 		itemId: entry.id,
 		parentId: entry.parentId,
 		createdAt,
-		role: mapRole(message.role),
+		role,
 		content,
 	};
 }
@@ -216,18 +228,72 @@ function projectEntry(entry: SessionEntry): ConversationItem | undefined {
 	return undefined;
 }
 
+function unpairedToolCall(
+	item: Extract<ConversationItem, { kind: "message" }>,
+): Extract<ConversationContentBlock, { type: "toolCall" }> | undefined {
+	for (let index = item.content.length - 1; index >= 0; index--) {
+		const block = item.content[index];
+		if (block?.type !== "toolCall") continue;
+		if (item.content.some(entry => entry.type === "toolResult" && entry.toolCallId === block.toolCallId)) continue;
+		return block;
+	}
+	return undefined;
+}
+
+function attachToolResult(
+	items: ConversationItem[],
+	toolOwners: Map<string, number>,
+	result: Extract<ConversationContentBlock, { type: "toolResult" }>,
+	parentId: string | null,
+	rawToolCallId: string,
+): { index: number; result: Extract<ConversationContentBlock, { type: "toolResult" }> } | undefined {
+	const ownerIndex = toolOwners.get(result.toolCallId);
+	if (ownerIndex !== undefined) {
+		const owner = items[ownerIndex];
+		if (owner !== undefined && owner.kind === "message") return { index: ownerIndex, result };
+	}
+	if (rawToolCallId.length > 0 || parentId === null) return undefined;
+	const parentIndex = items.findIndex(item => item.itemId === parentId);
+	const parent = parentIndex < 0 ? undefined : items[parentIndex];
+	if (parent === undefined || parent.kind !== "message") return undefined;
+	const call = unpairedToolCall(parent);
+	if (call === undefined) return undefined;
+	return { index: parentIndex, result: { ...result, toolCallId: call.toolCallId } };
+}
+
 export function projectConversationBranch(entries: readonly SessionEntry[]): ConversationItem[] {
 	const items: ConversationItem[] = [];
 	const toolOwners = new Map<string, number>();
-	const toolResults: Array<{
-		readonly entry: SessionEntry;
-		readonly result: Extract<ConversationContentBlock, { type: "toolResult" }>;
-	}> = [];
 	for (const entry of entries) {
 		if (entry.type === "message") {
 			const message = asRecord(entry.message) ?? {};
 			if (message.role === "toolResult") {
-				toolResults.push({ entry, result: mapToolResultMessage(message) });
+				const rawId = typeof message.toolCallId === "string" ? message.toolCallId : "";
+				const mapped = mapToolResultMessage(message, undefined, `tool:${entry.id}`);
+				const attached = attachToolResult(items, toolOwners, mapped, entry.parentId, rawId);
+				if (attached !== undefined) {
+					const owner = items[attached.index];
+					if (owner !== undefined && owner.kind === "message") {
+						const content = owner.content.some(
+							block => block.type === "toolResult" && block.toolCallId === attached.result.toolCallId,
+						)
+							? owner.content
+							: [...owner.content, attached.result];
+						items[attached.index] = { ...owner, content };
+					}
+					continue;
+				}
+				items.push({
+					kind: "message",
+					itemId: entry.id,
+					parentId: entry.parentId,
+					createdAt: typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString(),
+					role: "assistant",
+					content: [
+						{ type: "toolCall", toolCallId: mapped.toolCallId, toolName: mapped.toolName ?? "tool" },
+						mapped,
+					],
+				});
 				continue;
 			}
 		}
@@ -244,33 +310,6 @@ export function projectConversationBranch(entries: readonly SessionEntry[]): Con
 		} catch {
 			// A malformed entry is not allowed to create an empty public row.
 		}
-	}
-	const orphans: typeof toolResults = [];
-	for (const { entry, result } of toolResults) {
-		const ownerIndex = toolOwners.get(result.toolCallId);
-		if (ownerIndex === undefined) {
-			orphans.push({ entry, result });
-			continue;
-		}
-		const owner = items[ownerIndex];
-		if (owner === undefined || owner.kind !== "message") {
-			orphans.push({ entry, result });
-			continue;
-		}
-		const content = owner.content.some(block => block.type === "toolResult" && block.toolCallId === result.toolCallId)
-			? owner.content
-			: [...owner.content, result];
-		items[ownerIndex] = { ...owner, content };
-	}
-	for (const { entry, result } of orphans) {
-		items.push({
-			kind: "message",
-			itemId: entry.id,
-			parentId: entry.parentId,
-			createdAt: typeof entry.timestamp === "string" ? entry.timestamp : new Date(0).toISOString(),
-			role: "assistant",
-			content: [{ type: "toolCall", toolCallId: result.toolCallId, toolName: result.toolName ?? "tool" }, result],
-		});
 	}
 	return items;
 }

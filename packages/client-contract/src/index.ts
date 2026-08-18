@@ -145,6 +145,10 @@ export type {
   SessionThinkingSelector,
 } from "@omp-studio/studio-protocol";
 
+// BTW snapshot facts are protocol-owned; re-exported so surfaces and transport
+// adapters can type the side-channel without depending on studio-protocol.
+export type { BtwError, BtwErrorCode, BtwSnapshot, BtwStatus } from "@omp-studio/studio-protocol";
+
 export * from "./ids.js";
 export * from "./read-models.js";
 export * from "./operations.js";

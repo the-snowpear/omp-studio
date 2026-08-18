@@ -40,6 +40,19 @@ function cssEscape(value: string): string {
   return value.replace(/"/g, '\\"');
 }
 
+export function conversationFollowKey(state: {
+  readonly liveTools: { readonly [toolCallId: string]: { readonly output?: string } };
+  readonly liveMessages: { readonly [messageId: string]: { readonly blocks: readonly { readonly text: string }[] } };
+}): string {
+  const tools = Object.values(state.liveTools)
+    .map((tool) => String(tool.output?.length ?? 0))
+    .join(",");
+  const messages = Object.values(state.liveMessages)
+    .map((message) => String(message.blocks.reduce((sum, block) => sum + block.text.length, 0)))
+    .join(",");
+  return `${tools}|${messages}`;
+}
+
 export function useConversationScroll(args: {
   scrollerRef: RefObject<HTMLElement | null>;
   identityKey: string;
@@ -47,6 +60,11 @@ export function useConversationScroll(args: {
   loadingOlder: boolean;
   /** Welcome / new-chat surface stays at the top; transcripts stick to the bottom. */
   pin?: "top" | "bottom";
+  /**
+   * Grows when live text / tool stdout changes without adding a row.
+   * Same follow rules as itemCount: stick when pinned to bottom.
+   */
+  contentKey?: string;
 }): {
   follow: boolean;
   hasNewContent: boolean;
@@ -54,18 +72,24 @@ export function useConversationScroll(args: {
   jumpToLatest: () => void;
   preparePrepend: () => void;
 } {
-  const { scrollerRef, identityKey, itemCount, loadingOlder, pin = "bottom" } = args;
+  const { scrollerRef, identityKey, itemCount, loadingOlder, pin = "bottom", contentKey = "" } = args;
   const [follow, setFollow] = useState(pin === "bottom");
   const [hasNewContent, setHasNewContent] = useState(false);
   const followRef = useRef(pin === "bottom");
   const itemCountRef = useRef(itemCount);
+  const contentKeyRef = useRef(contentKey);
+  const contentKeyLiveRef = useRef(contentKey);
+  contentKeyLiveRef.current = contentKey;
   const anchorRef = useRef<ScrollAnchor | null>(null);
   const skipStickRef = useRef(false);
 
   const stick = useCallback(() => {
     const el = scrollerRef.current;
     if (!el) return;
+    if (pin === "bottom" && !followRef.current) return;
+    skipStickRef.current = true;
     el.scrollTop = pin === "top" ? 0 : el.scrollHeight;
+    skipStickRef.current = false;
   }, [pin, scrollerRef]);
 
   const stickAfterLayout = useCallback(() => {
@@ -80,13 +104,8 @@ export function useConversationScroll(args: {
     followRef.current = true;
     setFollow(true);
     setHasNewContent(false);
-    const el = scrollerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-    requestAnimationFrame(() => {
-      const next = scrollerRef.current;
-      if (next) next.scrollTop = next.scrollHeight;
-    });
-  }, [scrollerRef]);
+    stickAfterLayout();
+  }, [stickAfterLayout]);
 
   const onScroll = useCallback(
     (event: UIEvent<HTMLElement>) => {
@@ -112,6 +131,7 @@ export function useConversationScroll(args: {
     anchorRef.current = null;
     skipStickRef.current = false;
     itemCountRef.current = -1;
+    contentKeyRef.current = contentKeyLiveRef.current;
     setFollow(followBottom);
     setHasNewContent(false);
     stickAfterLayout();
@@ -137,6 +157,33 @@ export function useConversationScroll(args: {
       setHasNewContent(true);
     }
   }, [itemCount, loadingOlder, pin, scrollerRef, stickAfterLayout]);
+
+  useLayoutEffect(() => {
+    if (pin === "top") {
+      contentKeyRef.current = contentKey;
+      return;
+    }
+    if (contentKey === contentKeyRef.current) return;
+    contentKeyRef.current = contentKey;
+    if (followRef.current) {
+      stickAfterLayout();
+      setHasNewContent(false);
+    } else {
+      setHasNewContent(true);
+    }
+  }, [contentKey, pin, stickAfterLayout]);
+
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || pin === "top" || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      stick();
+    });
+    observer.observe(el);
+    const content = el.firstElementChild;
+    if (content) observer.observe(content);
+    return () => observer.disconnect();
+  }, [identityKey, pin, scrollerRef, stick]);
 
   return { follow, hasNewContent, onScroll, jumpToLatest, preparePrepend };
 }

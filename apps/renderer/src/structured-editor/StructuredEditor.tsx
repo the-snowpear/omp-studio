@@ -287,7 +287,7 @@ export function StructuredEditor({
           className="btn small outline"
           aria-pressed={allFolded}
           aria-label={allFolded ? "展开已折叠的代码" : "折叠所有可折叠的代码"}
-          title={allFolded ? "展开折叠" : "全部折叠"}
+          data-tip={allFolded ? "展开" : "折叠"}
           onClick={toggleFolds}
         >
           <Icon name={allFolded ? "chevron-d" : "chevron-ud"} extra="sm" />
@@ -304,7 +304,7 @@ export function StructuredEditor({
             type="button"
             className="btn small outline"
             disabled={!canRevert || saving}
-            title="还原对本段代码的修改"
+            data-tip="还原"
             onClick={onCancel}
           >
             <Icon name="x" extra="sm" />
@@ -327,7 +327,7 @@ export function StructuredEditor({
           className="btn small outline"
           aria-expanded={expanded}
           aria-label={expanded ? "收起编辑器" : "展开编辑器"}
-          title={expanded ? "收起（Esc）" : "展开"}
+          data-tip={expanded ? "收起" : "展开"}
           onClick={toggleExpanded}
         >
           <Icon name={expanded ? "restore" : "maximize"} extra="sm" />

@@ -143,7 +143,7 @@ describe("SettingsPage · 真实模式", () => {
     openTab("权限与安全");
     const manage = screen.getByRole("button", { name: "管理规则" });
     expect((manage as HTMLButtonElement).disabled).toBe(true);
-    expect((manage as HTMLButtonElement).title).toContain("规则读写不在公共 contract");
+    expect(manage.getAttribute("data-tip")).toBe("管理规则（暂未实现）");
   });
 });
 

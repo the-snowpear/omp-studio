@@ -83,6 +83,33 @@ describe("composer send path (simulated vs OMP)", () => {
     ).toBe(true);
   });
 
+  it("holds the flush while the queue head is being edited in Composer", () => {
+    expect(
+      canFlushQueuedMessage({
+        running: false,
+        pendingInteraction: false,
+        promptChannelReady: true,
+        selectedSessionId: "sess-a",
+        liveSessionId: "sess-a",
+        entrySessionId: "sess-a",
+        entryId: 1,
+        pausedEntryId: 1,
+      }),
+    ).toBe(false);
+    expect(
+      canFlushQueuedMessage({
+        running: false,
+        pendingInteraction: false,
+        promptChannelReady: true,
+        selectedSessionId: "sess-a",
+        liveSessionId: "sess-a",
+        entrySessionId: "sess-a",
+        entryId: 1,
+        pausedEntryId: 2,
+      }),
+    ).toBe(true);
+  });
+
   it("holds the flush while the live session is still streaming or waiting on interaction", () => {
     expect(
       canFlushQueuedMessage({

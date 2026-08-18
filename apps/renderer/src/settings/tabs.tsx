@@ -78,7 +78,7 @@ function TabHeader({ title, desc, ctl, resetKeys, resetTitle }: {
             type="button"
             className="btn small outline"
             disabled={ctl === undefined || ctl.preview}
-            title={ctl?.preview ? "预览模式不写入设置" : (resetTitle ?? "把本标签的 App 级设置恢复为默认值")}
+            data-tip={ctl?.preview ? "预览" : (resetTitle ?? "恢复默认")}
             onClick={() => ctl?.resetApp(resetKeys)}
           >
             恢复默认值
@@ -121,7 +121,7 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
             ))}
           </select>
         ) : (
-          <StaticSelect value={row.control.value} options={row.control.options} label={row.label} title={row.reason} />
+          <StaticSelect value={row.control.value} options={row.control.options} label={row.label} title="（暂未实现）" />
         )
       ) : demo ? (
         <Switch checked={demo.flag(row.key)} onChange={() => demo.toggle(row.key)} label={row.label} />
@@ -163,7 +163,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
       />
       <SettingSection title="应用">
         <SettingRow label="界面语言" desc="界面文案语言（概念术语保留英文）" source="unavailable" reason="界面国际化（i18n）尚未接入，当前界面为中文">
-          <StaticSelect value="中文" options={["中文", "English"]} label="界面语言" title="界面国际化（i18n）尚未接入" />
+          <StaticSelect value="中文" options={["中文", "English"]} label="界面语言" title="语言（暂未实现）" />
         </SettingRow>
         <SettingRow label="主题" desc="Light / Dark，实时生效并随应用持久化" source={appSource(app, "theme")}>
           <AppSelect
@@ -341,10 +341,10 @@ export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
           ]}
         />
         <SettingRow label="始终允许 / 始终禁止规则" desc="跨会话的授权与拒绝规则表" source="unavailable" reason="「始终允许」规则读写不在公共 contract 中">
-          <button type="button" className="btn small outline" disabled title="规则读写不在公共 contract 中">管理规则</button>
+          <button type="button" className="btn small outline" disabled data-tip="管理规则（暂未实现）">管理规则</button>
         </SettingRow>
         <SettingRow label="清除授权规则" desc="一次性清除已积累的授权" source="unavailable" reason="清除授权规则不在公共 contract 中">
-          <button type="button" className="btn small danger" disabled title="清除授权规则不在公共 contract 中">清除全部</button>
+          <button type="button" className="btn small danger" disabled data-tip="清除（暂未实现）">清除全部</button>
         </SettingRow>
       </SettingSection>
     </>
@@ -533,13 +533,13 @@ export function AdvancedTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
       </SettingSection>
       <SettingSection title="配置文件">
         <SettingRow label="打开用户配置 / 项目配置" desc="在编辑器中打开 config.yml" source="unavailable" reason="配置目录路径已脱敏，不在公共 contract 中">
-          <button type="button" className="btn small outline" disabled title="配置目录路径不在公共 contract 中（read model 已脱敏）">打开</button>
+          <button type="button" className="btn small outline" disabled data-tip="打开（暂未实现）">打开</button>
         </SettingRow>
         <SettingRow label="查看脱敏配置 / 导出" desc="导出当前生效配置（脱敏）" source="unavailable" reason="通用配置读取不在公共 contract 中">
-          <button type="button" className="btn small outline" disabled title="通用配置读取不在公共 contract 中">导出</button>
+          <button type="button" className="btn small outline" disabled data-tip="导出（暂未实现）">导出</button>
         </SettingRow>
         <SettingRow label="恢复默认配置" desc="把用户层配置恢复为默认值" source="unavailable" reason="配置批量恢复不在公共 contract 中">
-          <button type="button" className="btn small danger" disabled title="配置批量恢复不在公共 contract 中">恢复默认</button>
+          <button type="button" className="btn small danger" disabled data-tip="恢复默认（暂未实现）">恢复默认</button>
         </SettingRow>
       </SettingSection>
       <SettingSection title="高级行为">

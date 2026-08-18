@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import * as path from "node:path";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import {
 	createStudioHostRuntime,
@@ -6,10 +8,19 @@ import {
 	type StudioBridgeLifecycle,
 	type StudioHostRuntime,
 } from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
+import { TempDir } from "@oh-my-pi/pi-utils";
 
-function fakeSession(sessionId = "session-test"): AgentSession {
+function fakeSession(
+	sessionId = "session-test",
+	options: { getSessionFile?: () => string | null; sessionChangeListeners?: Array<() => void> } = {},
+): AgentSession {
+	const sessionChangeListeners = options.sessionChangeListeners ?? [];
 	return {
-		sessionManager: { getSessionId: () => sessionId, getCwd: () => process.cwd() },
+		sessionManager: {
+			getSessionId: () => sessionId,
+			getCwd: () => process.cwd(),
+			getSessionFile: options.getSessionFile ?? (() => null),
+		},
 		settings: { get: (key: string) => (key === "loop.mode" ? "prompt" : undefined) },
 		isStreaming: false,
 		isCompacting: false,
@@ -20,10 +31,52 @@ function fakeSession(sessionId = "session-test"): AgentSession {
 		resetSessionContext: async () => {},
 		subscribe: () => () => {},
 		setBeforeNextUserTurn: () => {},
+		registerSessionChangeCallback: (callback: () => void) => {
+			sessionChangeListeners.push(callback);
+			return () => {
+				const index = sessionChangeListeners.indexOf(callback);
+				if (index >= 0) sessionChangeListeners.splice(index, 1);
+			};
+		},
 	} as unknown as AgentSession;
 }
 
+function silentBridge(): StudioBridgeLifecycle {
+	return {
+		async start() {},
+		async stop() {},
+	};
+}
+
+async function writeTranscript(filePath: string, sessionId: string, text: string): Promise<void> {
+	const lines = [
+		JSON.stringify({ type: "session", id: sessionId, timestamp: "2026-08-17T00:00:00.000Z", cwd: "/tmp" }),
+		JSON.stringify({
+			type: "message",
+			id: "m1",
+			parentId: null,
+			timestamp: "2026-08-17T00:00:01.000Z",
+			message: { role: "user", content: text, timestamp: Date.parse("2026-08-17T00:00:01.000Z") },
+		}),
+	];
+	await Bun.write(filePath, `${lines.join("\n")}\n`);
+}
+
+async function waitForListedAgent(runtime: StudioHostRuntime, agentId: string, includePersisted = true) {
+	const deadline = Date.now() + 2_000;
+	while (Date.now() < deadline) {
+		const row = runtime.services.agents.list({ includePersisted }).find(agent => agent.agentId === agentId);
+		if (row) return row;
+		await Bun.sleep(10);
+	}
+	throw new Error(`Agent "${agentId}" did not appear in the Studio roster`);
+}
+
 describe("studio-host runtime", () => {
+	afterEach(() => {
+		AgentRegistry.resetGlobalForTests();
+	});
+
 	test("binds the TUI and Bridge lifecycle to one session identity", async () => {
 		const session = fakeSession();
 		let bridgeRuntime: StudioHostRuntime | undefined;
@@ -126,6 +179,83 @@ describe("studio-host runtime", () => {
 				session,
 				sessionManager: session.sessionManager,
 			}),
+		);
+	});
+
+	test("registers parked child transcripts before the Bridge handshake", async () => {
+		using tempDir = TempDir.createSync("@omp-studio-persisted-subagents-");
+		const parentFile = path.join(tempDir.path(), "parent.jsonl");
+		const childFile = path.join(tempDir.path(), "parent", "ToolTestA.jsonl");
+		await writeTranscript(parentFile, "parent-sess", "parent");
+		await writeTranscript(childFile, "child-sess", "extract notes");
+		const session = fakeSession("session-test", { getSessionFile: () => parentFile });
+		await runStudioHostMode(
+			session,
+			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 7 },
+			async runtime => {
+				const listed = runtime.services.agents.list({ includePersisted: true });
+				const row = listed.find(agent => agent.agentId === "ToolTestA");
+				expect(row?.status).toBe("parked");
+				const page = await runtime.services.agentConversation.read({ agentId: "ToolTestA" });
+				expect(page.sessionId).toBe("child-sess");
+				expect(page.items.some(item => item.kind === "message")).toBe(true);
+			},
+			{ createBridge: silentBridge, createRuntimeId: () => "runtime-persisted" },
+		);
+	});
+
+	test("keeps a tombstoned child readable as aborted", async () => {
+		using tempDir = TempDir.createSync("@omp-studio-persisted-tombstone-");
+		const parentFile = path.join(tempDir.path(), "parent.jsonl");
+		const childFile = path.join(tempDir.path(), "parent", "ToolTestA.jsonl");
+		await writeTranscript(parentFile, "parent-sess", "parent");
+		await writeTranscript(childFile, "child-sess", "killed worker notes");
+		await Bun.write(`${childFile}.tombstone`, "");
+		const session = fakeSession("session-test", { getSessionFile: () => parentFile });
+		await runStudioHostMode(
+			session,
+			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 7 },
+			async runtime => {
+				const listed = runtime.services.agents.list({ includePersisted: true });
+				const row = listed.find(agent => agent.agentId === "ToolTestA");
+				expect(row?.status).toBe("aborted");
+				const page = await runtime.services.agentConversation.read({ agentId: "ToolTestA" });
+				expect(page.sessionId).toBe("child-sess");
+				expect(page.items.some(item => item.kind === "message")).toBe(true);
+			},
+			{ createBridge: silentBridge, createRuntimeId: () => "runtime-tombstone" },
+		);
+	});
+
+	test("rescans child transcripts after an in-process session change", async () => {
+		using tempDir = TempDir.createSync("@omp-studio-persisted-switch-");
+		const firstParent = path.join(tempDir.path(), "first.jsonl");
+		const secondParent = path.join(tempDir.path(), "second.jsonl");
+		await writeTranscript(firstParent, "first-sess", "first");
+		await writeTranscript(path.join(tempDir.path(), "first", "ToolTestA.jsonl"), "child-a", "first child");
+		await writeTranscript(secondParent, "second-sess", "second");
+		await writeTranscript(path.join(tempDir.path(), "second", "ToolTestB.jsonl"), "child-b", "second child");
+		let sessionFile = firstParent;
+		const sessionChangeListeners: Array<() => void> = [];
+		const session = fakeSession("session-test", {
+			getSessionFile: () => sessionFile,
+			sessionChangeListeners,
+		});
+		await runStudioHostMode(
+			session,
+			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 7 },
+			async runtime => {
+				expect(runtime.services.agents.list({ includePersisted: true }).some(agent => agent.agentId === "ToolTestA")).toBe(
+					true,
+				);
+				sessionFile = secondParent;
+				for (const listener of sessionChangeListeners) listener();
+				const row = await waitForListedAgent(runtime, "ToolTestB");
+				expect(row.status).toBe("parked");
+				const page = await runtime.services.agentConversation.read({ agentId: "ToolTestB" });
+				expect(page.sessionId).toBe("child-b");
+			},
+			{ createBridge: silentBridge, createRuntimeId: () => "runtime-switch" },
 		);
 	});
 });

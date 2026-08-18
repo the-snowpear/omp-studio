@@ -30,14 +30,23 @@ export type SubagentHubTarget = {
   readonly agentId: string;
   readonly toolCallId: string;
   readonly task?: string;
+  readonly tokens?: string;
+  readonly tools?: string | number;
+  readonly requests?: string | number;
+  readonly files?: string | number;
+  readonly cost?: string;
 };
 
-/** Hub identities look like `agent-019fcb01`; task names such as `deps` are display-only. */
+/**
+ * Registry identities from Runtime `AgentOutputManager`: the task label
+ * (`deps`, `Anna-2`) or a nested child (`Anna.Bob`). Preview/Hub fixtures also
+ * use `agent-<ulid>`. `Main` is the parent session, not a child card.
+ * A display-only `name` without an `id`/`agentId` field is not an identity.
+ */
 export function isRealSubagentId(value: string): boolean {
-  if (value.length === 0) return false;
-  if (/^agent-[0-9a-z]+$/i.test(value)) return true;
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return true;
-  return false;
+  if (value.length === 0 || value.length > 512) return false;
+  if (/^main$/i.test(value)) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(value);
 }
 
 export function resolveSubagentHubTarget(agent: SubagentView): SubagentHubTarget | undefined {
@@ -46,6 +55,11 @@ export function resolveSubagentHubTarget(agent: SubagentView): SubagentHubTarget
     agentId: agent.agentId,
     toolCallId: agent.toolCallId,
     ...(agent.task === undefined ? {} : { task: agent.task }),
+    ...(agent.tokens === undefined ? {} : { tokens: agent.tokens }),
+    ...(agent.tools === undefined ? {} : { tools: agent.tools }),
+    ...(agent.requests === undefined ? {} : { requests: agent.requests }),
+    ...(agent.files === undefined ? {} : { files: agent.files }),
+    ...(agent.cost === undefined ? {} : { cost: agent.cost }),
   };
 }
 
@@ -213,6 +227,89 @@ export function toolFields(tool: ToolView): { readonly [key: string]: JsonValue 
     if (output !== undefined) merged.output = output;
   }
   return merged;
+}
+
+const PLAN_PROPOSE_PATH = /^xd:\/\/propose\/?$/i;
+
+export function isPlanProposeTool(tool: ToolView): boolean {
+  if (xdevToolName(tool) === "propose") return true;
+  const fields = toolFields(tool);
+  const path = jsonString(fields.transportPath) ?? jsonString(fields.path) ?? jsonString(jsonRecord(tool.arguments)?.path);
+  return path !== undefined && PLAN_PROPOSE_PATH.test(path.trim());
+}
+
+export type PlanProposal = {
+  readonly title: string;
+};
+
+export type PlanDocument = {
+  readonly title: string;
+  readonly body: string;
+};
+
+export function isPlanArtifactPath(path: string): boolean {
+  const normalized = path.trim().toLowerCase();
+  return normalized.startsWith("local://") && normalized.endsWith("plan.md");
+}
+
+function planProposalTitle(tool: ToolView): string {
+  const fields = toolFields(tool);
+  const titled = jsonString(fields.title)?.trim();
+  if (titled) return titled;
+  const content = jsonString(fields.content)?.trim();
+  if (!content) return "Plan";
+  if (content.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(content) as JsonValue;
+      const fromJson = jsonString(jsonRecord(parsed)?.title)?.trim();
+      if (fromJson) return fromJson;
+    } catch {
+      /* slug or markdown body */
+    }
+  }
+  if (content.length < 120 && !content.includes("\n")) return content;
+  return "Plan";
+}
+
+/** Latest plan markdown + propose title from the transcript, for viewing after approval. */
+export function collectLatestPlanDocument(rows: readonly TimelineRow[]): PlanDocument | undefined {
+  let title = "";
+  let body = "";
+  for (const row of rows) {
+    if (row.type !== "assistant") continue;
+    for (const segment of row.segments) {
+      if (segment.type !== "batch") continue;
+      for (const call of segment.tools) {
+        if (call.status === "failed" || call.status === "aborted" || call.status === "missing") continue;
+        if (isPlanProposeTool(call)) {
+          title = planProposalTitle(call);
+          continue;
+        }
+        if (toolKind(call) !== "write") continue;
+        const fields = toolFields(call);
+        const path = jsonString(fields.path) ?? jsonString(jsonRecord(call.arguments)?.path) ?? "";
+        if (!isPlanArtifactPath(path)) continue;
+        const content = jsonString(fields.content) ?? jsonString(jsonRecord(call.arguments)?.content);
+        if (content !== undefined && content.length > 0) body = content;
+      }
+    }
+  }
+  if (title.length === 0 && body.length === 0) return undefined;
+  return { title: title || "Plan", body };
+}
+
+/** Last succeeded/in-flight `xd://propose` in the slice; failed/aborted calls do not count. */
+export function collectPlanProposal(segments: readonly AssistantSegment[]): PlanProposal | undefined {
+  let found: PlanProposal | undefined;
+  for (const segment of segments) {
+    if (segment.type !== "batch") continue;
+    for (const call of segment.tools) {
+      if (!isPlanProposeTool(call)) continue;
+      if (call.status === "failed" || call.status === "aborted" || call.status === "missing") continue;
+      found = { title: planProposalTitle(call) };
+    }
+  }
+  return found;
 }
 
 export function toolKind(tool: ToolView): ToolKind {
@@ -503,7 +600,7 @@ function addTurnFile(
 ): void {
   if (path === undefined) return;
   const normalized = path.replaceAll("\\", "/").trim();
-  if (!normalized || normalized.includes(" → ")) return;
+  if (!normalized || normalized.includes(" → ") || normalized.toLowerCase().startsWith("xd://")) return;
   const previous = files.get(normalized);
   files.set(normalized, previous === undefined
     ? { add, del, kinds: [kind] }
@@ -822,6 +919,19 @@ function rangeTurnId(rows: readonly TimelineRow[], range: AssistantRunRange): st
   return row?.type === "assistant" ? row.itemId : `turn:${range.start}-${range.end}`;
 }
 
+/** 与 `listSessionChangeTurns` 同一套 id：最后一段为 last，其余为该段末行 itemId。 */
+export function sessionChangeTurnIdForRange(
+  rows: readonly TimelineRow[],
+  range: AssistantRunRange,
+  ranges: readonly AssistantRunRange[] = assistantRunRanges(rows),
+): string {
+  const last = ranges[ranges.length - 1];
+  if (last !== undefined && last.start === range.start && last.end === range.end) {
+    return SESSION_CHANGE_LAST_ID;
+  }
+  return rangeTurnId(rows, range);
+}
+
 function filesInRange(rows: readonly TimelineRow[], range: AssistantRunRange): TurnFileChange[] {
   return collectTurnFileChanges(assistantSegmentsOf(rows.slice(range.start, range.end + 1)));
 }
@@ -1063,11 +1173,31 @@ export function todoStepProgress(todos: readonly TodoTask[]): { current: number;
   return { current: Math.min(total, completed + 1), total, completed };
 }
 
-/** Session HUD: latest todo snapshot plus files from the current (possibly streaming) turn. */
+/** OMP HUD keeps a list that still has open work; completed-only snapshots auto-clear. */
+export function todoHudVisible(todos: readonly TodoTask[]): boolean {
+  return todos.some((task) => task.status === "pending" || task.status === "in_progress" || task.status === "blocked");
+}
+
+function lastUserRowIndex(rows: readonly TimelineRow[]): number {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (rows[index]?.type === "user") return index;
+  }
+  return -1;
+}
+
+/**
+ * Session HUD: latest session todo snapshot (OMP live HUD) plus files from the
+ * current turn. A new user message starts a turn — previous-turn files drop;
+ * completed-only todos stay hidden, matching OMP after auto-clear / `/new`.
+ */
 export function sessionTaskProgress(rows: readonly TimelineRow[]): TaskProgress {
-  const todos = collectLatestTodos(assistantSegmentsOf(rows));
+  const latest = collectLatestTodos(assistantSegmentsOf(rows));
+  const todos = todoHudVisible(latest) ? latest : [];
   const run = lastAssistantRunRange(rows);
-  if (run === undefined) return { todos, files: [] };
+  const user = lastUserRowIndex(rows);
+  if (run === undefined || (user >= 0 && run.end < user)) {
+    return { todos, files: [] };
+  }
   return { todos, files: collectTurnFileChanges(assistantSegmentsOf(rows.slice(run.start, run.end + 1))) };
 }
 
@@ -1167,7 +1297,7 @@ export function collectAgents(tools: readonly ToolView[]): SubagentView[] {
     for (const entry of agents) {
       const record = jsonRecord(entry);
       const rawId = jsonString(record?.agentId) ?? jsonString(record?.id);
-      const name = jsonString(record?.name) ?? jsonString(record?.agent) ?? rawId;
+      const name = jsonString(record?.name) ?? rawId ?? jsonString(record?.agent);
       if (!name) continue;
       const agentId = rawId !== undefined && isRealSubagentId(rawId) ? rawId : undefined;
       const task = jsonString(record?.task) ?? jsonString(record?.assignment) ?? taskTextForName(jsonRecord(tool.arguments), name);

@@ -32,7 +32,7 @@ import { discoverAll, discoverSkills } from "./omp-discovery/index.js";
 import type { DiscoveredSkill, DiscoveredPlugin } from "./omp-discovery/types.js";
 import { collectDeclaredItems } from "./omp-discovery/plugin-manifest.js";
 import { resolveActiveProjectRegistryPath } from "./omp-discovery/helpers.js";
-import { getPluginsDir } from "./omp-discovery/paths.js";
+import { getAgentDir, getPluginsDir, getProjectConfigDir } from "./omp-discovery/paths.js";
 
 const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const DESC_MAX = 240;
@@ -47,7 +47,10 @@ const WRITE_OK = (message: string): ConfigWriteResult => ({
 export interface OmpExtensibilityAdapterOptions {
   readonly home?: string;
   readonly cwd?: string;
+  readonly getCwd?: () => string | undefined;
   readonly now?: () => string;
+  /** Main-injected Explorer open; paths never leave this adapter. */
+  readonly revealDirectory?: (absDir: string) => Promise<void>;
 }
 
 function emptyModel(now: string, reason?: string): ExtensibilityReadModel {
@@ -314,13 +317,43 @@ export function createOmpExtensibilityService(
   options: OmpExtensibilityAdapterOptions = {}
 ): HostExtensibilityService {
   const now = options.now ?? (() => new Date().toISOString());
+  const resolveCwd = (): string => options.getCwd?.() ?? options.cwd ?? process.cwd();
+
+  const findSkill = async (input: {
+    readonly name: string;
+    readonly scope?: "user" | "project";
+  }): Promise<DiscoveredSkill> => {
+    const { name } = input;
+    if (typeof name !== "string" || name.trim().length === 0) {
+      throw { code: "INVALID_ARGUMENT", message: "skills name must not be empty" };
+    }
+    if (input.scope !== undefined && input.scope !== "user" && input.scope !== "project") {
+      throw { code: "INVALID_ARGUMENT", message: "skills scope must be 'user' or 'project'" };
+    }
+    const home = options.home ?? homedir();
+    const cwd = resolveCwd();
+    const { skills } = await discoverSkills({ home, cwd });
+    let target: DiscoveredSkill | undefined;
+    if (input.scope === undefined) {
+      target = skills.find((skill) => skill.name === name && skill.scope !== "builtin") ?? skills.find((skill) => skill.name === name);
+    } else {
+      const want = input.scope === "user" ? "global" : "workspace";
+      target = skills.find((skill) => skill.name === name && skill.scope === want)
+        ?? (want === "global" ? skills.find((skill) => skill.name === name && skill.scope === "builtin") : undefined);
+    }
+    if (target === undefined) {
+      const detail = input.scope === undefined ? "" : ` in ${input.scope} scope`;
+      throw { code: "INVALID_ARGUMENT", message: `Skill "${name}" is not installed${detail}` };
+    }
+    return target;
+  };
 
   return {
     async get(): Promise<ExtensibilityReadModel> {
       const generatedAt = now();
       try {
         const home = options.home ?? homedir();
-        const cwd = options.cwd ?? process.cwd();
+        const cwd = resolveCwd();
 
         // Call the new discovery layer
         const { skills, plugins, warnings } = await discoverAll({ home, cwd });
@@ -354,7 +387,7 @@ export function createOmpExtensibilityService(
       }
 
       const home = options.home ?? homedir();
-      const cwd = options.cwd ?? process.cwd();
+      const cwd = resolveCwd();
       const userDir = getPluginsDir(home);
       const projectRegistryPath = await resolveActiveProjectRegistryPath(cwd);
       const projectDir =
@@ -428,7 +461,7 @@ export function createOmpExtensibilityService(
       }
 
       const home = options.home ?? homedir();
-      const cwd = options.cwd ?? process.cwd();
+      const cwd = resolveCwd();
       const { skills } = await discoverSkills({ home, cwd });
 
       // The winning (deduplicated) record is the one the UI lists. An
@@ -459,6 +492,47 @@ export function createOmpExtensibilityService(
 
       const where = target.scope === "workspace" ? "（项目级）" : "（用户级）";
       return WRITE_OK(`已${enabled ? "启用" : "禁用"}技能 ${name}${where}。`);
+    },
+
+    async revealSkill(input: {
+      readonly name: string;
+      readonly scope?: "user" | "project";
+    }): Promise<ConfigWriteResult> {
+      const reveal = options.revealDirectory;
+      if (reveal === undefined) {
+        throw { code: "UNAVAILABLE", message: "无法打开系统文件资源管理器。" };
+      }
+      const target = await findSkill(input);
+      const directory = path.dirname(target.path);
+      try {
+        await fs.access(directory);
+      } catch {
+        throw { code: "UNAVAILABLE", message: `Skill "${target.name}" 没有本地目录` };
+      }
+      await reveal(directory);
+      return WRITE_OK(`已打开 ${target.name} 所在目录`);
+    },
+
+    async revealSkillRoot(input?: {
+      readonly scope?: "user" | "project";
+    }): Promise<ConfigWriteResult> {
+      const reveal = options.revealDirectory;
+      if (reveal === undefined) {
+        throw { code: "UNAVAILABLE", message: "无法打开系统文件资源管理器。" };
+      }
+      if (input?.scope !== undefined && input.scope !== "user" && input.scope !== "project") {
+        throw { code: "INVALID_ARGUMENT", message: "skills.revealRoot scope must be 'user' or 'project'" };
+      }
+      const home = options.home ?? homedir();
+      const cwd = resolveCwd();
+      const scope = input?.scope ?? "user";
+      const directory =
+        scope === "project"
+          ? path.join(getProjectConfigDir(cwd), "skills")
+          : path.join(getAgentDir(home), "skills");
+      await fs.mkdir(directory, { recursive: true });
+      await reveal(directory);
+      return WRITE_OK(scope === "project" ? "已打开项目技能目录" : "已打开用户技能目录");
     },
   };
 }

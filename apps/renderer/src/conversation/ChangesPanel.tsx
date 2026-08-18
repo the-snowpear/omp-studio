@@ -197,7 +197,7 @@ export function ChangesPanel({
             role="radio"
             aria-checked={!split}
             aria-label="上下对照"
-            title="上下对照"
+            data-tip="上下"
             className={split ? "" : "active"}
             onClick={() => onSplit(false)}
           >
@@ -208,7 +208,7 @@ export function ChangesPanel({
             role="radio"
             aria-checked={split}
             aria-label="左右对照"
-            title="左右对照"
+            data-tip="左右"
             className={split ? "active" : ""}
             onClick={() => onSplit(true)}
           >
@@ -227,7 +227,7 @@ export function ChangesPanel({
                 className="ch-row"
                 aria-expanded={open}
                 aria-label={`${open ? "收起" : "展开"} ${file.file} 的会话改动`}
-                title={file.file}
+                data-tip={file.file}
                 onClick={() => onToggle(file.file)}
               >
                 <Icon name="chevron-r" extra="sm ch-row-chev" />

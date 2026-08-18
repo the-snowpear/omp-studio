@@ -11,10 +11,10 @@ index f4f36c2..5d2b05f 100644
  
  /** Validate and normalize the agent-supplied plan title into a safe filename stem.
 diff --git a/packages/coding-agent/src/registry/agent-registry.ts b/packages/coding-agent/src/registry/agent-registry.ts
-index 500aef6..71e238d 100644
+index 15e395b..8f02e8e 100644
 --- a/packages/coding-agent/src/registry/agent-registry.ts
 +++ b/packages/coding-agent/src/registry/agent-registry.ts
-@@ -91,6 +91,7 @@ export type RegistryEvent =
+@@ -92,6 +92,7 @@ export type RegistryEvent =
  	| { type: "registered"; ref: AgentRef }
  	| { type: "status_changed"; ref: AgentRef }
  	| { type: "metadata_changed"; ref: AgentRef }
@@ -22,7 +22,7 @@ index 500aef6..71e238d 100644
  	| { type: "removed"; ref: AgentRef };
  
  type RegistryListener = (event: RegistryEvent) => void;
-@@ -198,8 +199,7 @@ export class AgentRegistry {
+@@ -209,8 +210,7 @@ export class AgentRegistry {
  	/**
  	 * Record a short activity gist for the work-aware roster. Display-only and
  	 * read on demand (`irc list`, peer roster), so it emits no event — keeping
@@ -32,7 +32,7 @@ index 500aef6..71e238d 100644
  	 * `running` agent has current work: a heartbeat for any other status is
  	 * dropped, so a late progress flush can't resurrect activity on a ref that
  	 * `setStatus` just cleared. Every running heartbeat refreshes `lastActivity`
-@@ -230,16 +230,20 @@ export class AgentRegistry {
+@@ -241,16 +241,20 @@ export class AgentRegistry {
  		// closes the race between a parked reviver claiming the ref and finishing
  		// createAgentSession after an explicit kill.
  		if (!ref || ref.status === "aborted" || !this.#matchesExpected(ref, expected)) return false;
@@ -54,7 +54,7 @@ index 500aef6..71e238d 100644
  	}
  
 diff --git a/packages/coding-agent/src/session/agent-session-types.ts b/packages/coding-agent/src/session/agent-session-types.ts
-index b424eb2..332cc3c 100644
+index 50f3be5..0c89b9b 100644
 --- a/packages/coding-agent/src/session/agent-session-types.ts
 +++ b/packages/coding-agent/src/session/agent-session-types.ts
 @@ -36,6 +36,7 @@ import type { SecretObfuscator } from "../secrets/obfuscator";
@@ -65,7 +65,7 @@ index b424eb2..332cc3c 100644
  import type { SessionManager } from "./session-manager";
  
  /** Maximum time the interactive shutdown path waits for Mnemopi consolidation. */
-@@ -302,6 +303,8 @@ export interface PromptOptions {
+@@ -304,6 +305,8 @@ export interface PromptOptions {
  	attribution?: MessageAttribution;
  	/** Skip pre-send compaction checks for this prompt. */
  	skipCompactionCheck?: boolean;
@@ -75,10 +75,10 @@ index b424eb2..332cc3c 100644
  
  /** Options for AgentSession.followUp(). */
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index 6ccceb0..1673861 100644
+index cb490b4..37c094d 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
-@@ -408,6 +408,8 @@ type ScheduledAgentContinueOptions = {
+@@ -414,6 +414,8 @@ type ScheduledAgentContinueOptions = {
  	shouldContinue?: () => boolean;
  	onSkip?: (reason: AgentContinueSkipReason) => void;
  	onError?: (error: unknown) => void;
@@ -87,7 +87,7 @@ index 6ccceb0..1673861 100644
  };
  
  type SessionTitleSource = "auto" | "user";
-@@ -597,6 +599,7 @@ export class AgentSession {
+@@ -636,6 +638,7 @@ export class AgentSession {
  	readonly #loopGuards: LoopGuards;
  	#promptInFlightCount = 0;
  	#abortInProgress = false;
@@ -95,7 +95,7 @@ index 6ccceb0..1673861 100644
  	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
  	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
  	// checks in #handleAgentEvent) still fire on the original schedule — only the
-@@ -885,13 +888,22 @@ export class AgentSession {
+@@ -930,13 +933,22 @@ export class AgentSession {
  		return this.#prewalk.arm(target, thinkingLevel);
  	}
  
@@ -119,7 +119,7 @@ index 6ccceb0..1673861 100644
  			suppliedTitle: title,
  			statePlanFilePath: state.planFilePath,
  			readPlan: url => this.#readPlanFile(url),
-@@ -899,7 +911,7 @@ export class AgentSession {
+@@ -944,7 +956,7 @@ export class AgentSession {
  		});
  		return {
  			content: [{ type: "text", text: "Plan ready for review." }],
@@ -128,7 +128,7 @@ index 6ccceb0..1673861 100644
  		};
  	}
  
-@@ -3019,7 +3031,7 @@ export class AgentSession {
+@@ -3180,7 +3192,7 @@ export class AgentSession {
  					return;
  				}
  			}
@@ -137,7 +137,7 @@ index 6ccceb0..1673861 100644
  				options?.onSkip?.("aborted");
  				return;
  			}
-@@ -3045,7 +3057,13 @@ export class AgentSession {
+@@ -3206,7 +3218,13 @@ export class AgentSession {
  				// streaming turn — agent.continue() here would race the handoff's session
  				// reset. The first-class fix is in #checkCompaction/the agent_end handler,
  				// but this guard catches anything that bypasses that path.
@@ -152,7 +152,7 @@ index 6ccceb0..1673861 100644
  					this.#skipAgentContinue("session-unavailable", options);
  					return;
  				}
-@@ -3053,6 +3071,14 @@ export class AgentSession {
+@@ -3214,6 +3232,14 @@ export class AgentSession {
  					this.#skipAgentContinue("should-continue-false", options);
  					return;
  				}
@@ -167,7 +167,7 @@ index 6ccceb0..1673861 100644
  				this.#beginInFlight();
  				try {
  					const reverted = await this.#recovery.maybeRestoreRetryFallbackPrimary();
-@@ -3110,6 +3136,7 @@ export class AgentSession {
+@@ -3271,6 +3297,7 @@ export class AgentSession {
  				delayMs: 100,
  				generation: options.generation,
  				shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -175,7 +175,7 @@ index 6ccceb0..1673861 100644
  			});
  			return true;
  		}
-@@ -3148,6 +3175,7 @@ export class AgentSession {
+@@ -3309,6 +3336,7 @@ export class AgentSession {
  					this.#scheduleAgentContinue({
  						generation,
  						shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -183,7 +183,7 @@ index 6ccceb0..1673861 100644
  					});
  					return;
  				}
-@@ -3510,6 +3538,19 @@ export class AgentSession {
+@@ -3694,6 +3722,19 @@ export class AgentSession {
  		}
  	}
  
@@ -203,7 +203,7 @@ index 6ccceb0..1673861 100644
  	/**
  	 * Subscribe to agent events.
  	 * Session persistence is handled internally (saves messages on message_end).
-@@ -5109,6 +5150,9 @@ export class AgentSession {
+@@ -5366,6 +5407,9 @@ export class AgentSession {
  			const streamingBehavior = options?.streamingBehavior;
  			if (!streamingBehavior) throw new AgentBusyError();
  
@@ -213,7 +213,7 @@ index 6ccceb0..1673861 100644
  			// Steer/follow-up the keyword notices BEFORE the queued user message so the
  			// model reads the steering notice ahead of the prompt it modifies.
  			for (const notice of keywordNotices) {
-@@ -5159,13 +5203,16 @@ export class AgentSession {
+@@ -5431,13 +5475,16 @@ export class AgentSession {
  		}
  
  		try {
@@ -234,7 +234,7 @@ index 6ccceb0..1673861 100644
  			});
  		} finally {
  			// Clean up residual eager-todo directive if the prompt never consumed it
-@@ -5246,6 +5293,9 @@ export class AgentSession {
+@@ -5519,6 +5566,9 @@ export class AgentSession {
  			acceptTerminalEmptyStop?: boolean;
  		},
  	): Promise<void> {
@@ -244,15 +244,15 @@ index 6ccceb0..1673861 100644
  		this.#beginInFlight();
  		const generation = this.#promptGeneration;
  		try {
-@@ -5731,6 +5781,7 @@ export class AgentSession {
+@@ -6037,6 +6087,7 @@ export class AgentSession {
  		}
  		this.#queuedMessageDrainScheduled = true;
  		this.#scheduleAgentContinue({
 +			applyBeforeNextUserTurn: true,
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
- 				return this.#canAutoContinueForFollowUp() && this.agent.hasQueuedMessages();
-@@ -7126,7 +7177,10 @@ export class AgentSession {
+ 				return (
+@@ -7428,7 +7479,10 @@ export class AgentSession {
  	}
  
  	/** Retry the last failed assistant turn when the session is idle. */
@@ -283,7 +283,7 @@ index bd361ba..0c9176c 100644
  	arm(target: Model, thinkingLevel?: ConfiguredThinkingLevel): boolean {
  		const active = this.#prewalk;
 diff --git a/packages/coding-agent/src/session/session-entries.ts b/packages/coding-agent/src/session/session-entries.ts
-index 36c6277..bec8fcb 100644
+index dc5d95b..d674a22 100644
 --- a/packages/coding-agent/src/session/session-entries.ts
 +++ b/packages/coding-agent/src/session/session-entries.ts
 @@ -10,6 +10,10 @@ export const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";
@@ -316,7 +316,7 @@ index 36c6277..bec8fcb 100644
  
  export interface SessionEntryBase {
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
-index dfe6955..c32a9f3 100644
+index 0bb9fb3..06c7b15 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
 @@ -52,6 +52,7 @@ import {
@@ -327,7 +327,7 @@ index dfe6955..c32a9f3 100644
  	type ThinkingLevelChangeEntry,
  	TITLE_CHANGE_ENTRY_TYPE,
  	type TitleChangeEntry,
-@@ -441,6 +442,9 @@ export class SessionManager {
+@@ -472,6 +473,9 @@ export class SessionManager {
  	#hasTitleSlot = true;
  	#entries: SessionEntry[] = [];
  	#index = new SessionEntryIndex();
@@ -337,16 +337,16 @@ index dfe6955..c32a9f3 100644
  
  	/** File reflects all current entries; appends can go incrementally. */
  	#fileIsCurrent = false;
-@@ -515,6 +519,8 @@ export class SessionManager {
+@@ -546,6 +550,8 @@ export class SessionManager {
  	 * back to the most-recent session instead of being treated as a fresh crumb.
  	 */
  	#breadcrumbFresh = false;
 +	/** Creation marker inherited by future `/new` sessions without mutating the currently opened header. */
 +	#newSessionStudioOrigin: StudioSessionOrigin | undefined;
  	#sessionNameChangedCallbacks = new Set<() => void>();
+ 	#persistenceErrorCallbacks = new Set<(error: Error) => void>();
  
- 	private constructor(cwd: string, sessionDir: string, persist: boolean, storage: SessionStorage) {
-@@ -1043,6 +1049,8 @@ export class SessionManager {
+@@ -1103,6 +1109,8 @@ export class SessionManager {
  			parentSession: options?.parentSession,
  			providerPromptCacheKey: options?.providerPromptCacheKey,
  		};
@@ -355,7 +355,7 @@ index dfe6955..c32a9f3 100644
  		const workspace = normalizeSessionWorkspace({
  			cwd: this.#cwd,
  			directories: options?.additionalDirectories ?? [],
-@@ -1055,6 +1063,7 @@ export class SessionManager {
+@@ -1115,6 +1123,7 @@ export class SessionManager {
  
  		this.#entries = [];
  		this.#index.clear();
@@ -363,7 +363,7 @@ index dfe6955..c32a9f3 100644
  		this.#fileIsCurrent = false;
  		this.#rewriteRequired = false;
  		this.#forceFileCreation = false;
-@@ -1089,16 +1098,80 @@ export class SessionManager {
+@@ -1149,16 +1158,80 @@ export class SessionManager {
  		this.#titleSource = header.titleSource;
  		this.#titleUpdatedAt = header.timestamp;
  		this.#index.rebuild(entries);
@@ -445,7 +445,7 @@ index dfe6955..c32a9f3 100644
  	#setLeaf(id: string | null): void {
  		this.#index.setLeaf(id);
  		const batch = this.#atomicEntryBatch;
-@@ -1879,6 +1952,10 @@ export class SessionManager {
+@@ -1946,6 +2019,10 @@ export class SessionManager {
  		return this.#sessionId;
  	}
  
@@ -456,7 +456,7 @@ index dfe6955..c32a9f3 100644
  	getSessionFile(): string | undefined {
  		return this.#sessionFile;
  	}
-@@ -2050,7 +2127,15 @@ export class SessionManager {
+@@ -2125,7 +2202,15 @@ export class SessionManager {
  			| PythonExecutionMessage
  			| FileMentionMessage,
  	): string {
@@ -473,7 +473,7 @@ index dfe6955..c32a9f3 100644
  		this.#recordEntry(entry);
  		return entry.id;
  	}
-@@ -2153,9 +2238,12 @@ export class SessionManager {
+@@ -2229,9 +2314,12 @@ export class SessionManager {
  		fromExtension?: boolean,
  		preserveData?: Record<string, unknown>,
  	): string {
@@ -487,7 +487,7 @@ index dfe6955..c32a9f3 100644
  			summary,
  			shortSummary,
  			firstKeptEntryId,
-@@ -2494,10 +2582,16 @@ export class SessionManager {
+@@ -2601,10 +2689,16 @@ export class SessionManager {
  	 * @param cwd Working directory (stored in the session header)
  	 * @param sessionDir Optional session directory; defaults to the cwd-derived dir.
  	 */
@@ -506,12 +506,17 @@ index dfe6955..c32a9f3 100644
  		return manager;
  	}
  
-@@ -2537,11 +2631,12 @@ export class SessionManager {
+@@ -2644,11 +2738,17 @@ export class SessionManager {
  		cwd: string,
  		sessionDir?: string,
  		storage: SessionStorage = new FileSessionStorage(),
--		options?: { suppressBreadcrumb?: boolean; sessionFile?: string },
-+		options?: { suppressBreadcrumb?: boolean; sessionFile?: string; studioOrigin?: StudioSessionOrigin },
+-		options?: { copyArtifacts?: boolean; suppressBreadcrumb?: boolean; sessionFile?: string },
++		options?: {
++			copyArtifacts?: boolean;
++			suppressBreadcrumb?: boolean;
++			sessionFile?: string;
++			studioOrigin?: StudioSessionOrigin;
++		},
  	): Promise<SessionManager> {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const manager = new SessionManager(cwd, dir, true, storage);
@@ -520,7 +525,7 @@ index dfe6955..c32a9f3 100644
  
  		const sourceEntries = structuredClone(await loadEntriesFromFile(sourcePath, storage)) as FileEntry[];
  		migrateToCurrentVersion(sourceEntries);
-@@ -2553,6 +2648,7 @@ export class SessionManager {
+@@ -2660,6 +2760,7 @@ export class SessionManager {
  			{
  				parentSession: sourceHeader?.id,
  				providerPromptCacheKey: sourceHeader?.providerPromptCacheKey ?? sourceHeader?.id,
@@ -528,7 +533,7 @@ index dfe6955..c32a9f3 100644
  			},
  			options?.sessionFile,
  		);
-@@ -2681,6 +2777,7 @@ export class SessionManager {
+@@ -2796,6 +2897,7 @@ export class SessionManager {
  		cwd: string,
  		sessionDir?: string,
  		storage: SessionStorage = new FileSessionStorage(),
@@ -536,7 +541,7 @@ index dfe6955..c32a9f3 100644
  	): Promise<SessionManager> {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const resolvedCwd = path.resolve(cwd);
-@@ -2696,7 +2793,8 @@ export class SessionManager {
+@@ -2811,7 +2913,8 @@ export class SessionManager {
  			// exists=false only when fresh, so this never masks a real stale crumb.
  			if (breadcrumb.fresh && !breadcrumb.exists) {
  				const manager = new SessionManager(cwd, dir, true, storage);
@@ -546,7 +551,7 @@ index dfe6955..c32a9f3 100644
  				return manager;
  			}
  
-@@ -2753,8 +2851,9 @@ export class SessionManager {
+@@ -2868,8 +2971,9 @@ export class SessionManager {
  		if (chosenSession === undefined) chosenSession = await findMostRecentSession(dir, storage);
  
  		const manager = new SessionManager(cwd, dir, true, storage);
@@ -558,10 +563,10 @@ index dfe6955..c32a9f3 100644
  	}
  
 diff --git a/packages/coding-agent/src/session/turn-recovery.ts b/packages/coding-agent/src/session/turn-recovery.ts
-index 3a05bcb..912d309 100644
+index a07cb11..8d66139 100644
 --- a/packages/coding-agent/src/session/turn-recovery.ts
 +++ b/packages/coding-agent/src/session/turn-recovery.ts
-@@ -179,6 +179,8 @@ type UsageLimitOutcome = {
+@@ -192,6 +192,8 @@ type UsageLimitOutcome = {
  export class TurnRecovery {
  	readonly #host: TurnRecoveryHost;
  	#retryAbortController: AbortController | undefined;
@@ -570,7 +575,7 @@ index 3a05bcb..912d309 100644
  	#retryAttempt = 0;
  	#retryPromise: Promise<void> | undefined;
  	#retryResolve: (() => void) | undefined;
-@@ -225,6 +227,7 @@ export class TurnRecovery {
+@@ -324,6 +326,7 @@ export class TurnRecovery {
  		this.#emptyStopRetryCount = 0;
  		this.#unexpectedStopRetryCount = 0;
  		this.#acceptTerminalEmptyStopForPrompt = false;
@@ -578,7 +583,7 @@ index 3a05bcb..912d309 100644
  	}
  
  	/** Sets whether one terminal empty stop is accepted for the current prompt. */
-@@ -1574,6 +1577,7 @@ export class TurnRecovery {
+@@ -1859,6 +1862,7 @@ export class TurnRecovery {
  		// not a retry loop, so it runs even when the user disabled retries: it switches
  		// the model once and lets the base turn proceed.
  		if (!retrySettings.enabled && !options?.fireworksFastFallback) return false;
@@ -586,7 +591,7 @@ index 3a05bcb..912d309 100644
  		const classifierRefusal = this.isClassifierRefusal(message);
  
  		const generation = this.#host.promptGeneration();
-@@ -1799,6 +1803,10 @@ export class TurnRecovery {
+@@ -2090,6 +2094,10 @@ export class TurnRecovery {
  
  		await this.#recordPendingRetryError(message, id, { switchedCredential, switchedModel, delayMs });
  
@@ -597,7 +602,7 @@ index 3a05bcb..912d309 100644
  		await this.#host.emitSessionEvent({
  			type: "auto_retry_start",
  			attempt: this.#retryAttempt,
-@@ -1819,6 +1827,10 @@ export class TurnRecovery {
+@@ -2111,6 +2119,10 @@ export class TurnRecovery {
  		// pattern instead of re-sampling the same stalled reasoning.
  		this.#maybeInjectThinkingLoopRedirect(id);
  
@@ -608,7 +613,7 @@ index 3a05bcb..912d309 100644
  		// Wait with exponential backoff (abortable).
  		const retryAbortController = new AbortController();
  		this.#retryAbortController?.abort();
-@@ -1829,24 +1841,16 @@ export class TurnRecovery {
+@@ -2121,24 +2133,16 @@ export class TurnRecovery {
  			if (this.#retryAbortController !== retryAbortController) {
  				return false;
  			}
@@ -638,7 +643,7 @@ index 3a05bcb..912d309 100644
  		// The identity-keyed removal above can miss when a context rebuild
  		// recreated the failed turn's message object between settle and retry
  		// (fresh identity, same failed tail — issue #5382). Agent.continue()
-@@ -1861,6 +1865,10 @@ export class TurnRecovery {
+@@ -2152,6 +2156,10 @@ export class TurnRecovery {
  			this.#stripFailedAssistantTail();
  		}
  
@@ -649,7 +654,7 @@ index 3a05bcb..912d309 100644
  		// Retry via continue() outside the agent_end event callback chain. A
  		// continuation that still fails locally must close the retry saga —
  		// otherwise auto_retry_end never fires, retryPromise stays pending, and
-@@ -1949,11 +1957,37 @@ export class TurnRecovery {
+@@ -2240,11 +2248,37 @@ export class TurnRecovery {
  	 * Cancel in-progress retry.
  	 */
  	abortRetry(): void {
@@ -688,7 +693,7 @@ index 3a05bcb..912d309 100644
  	async #promptAgentWithIdleRetry(messages: AgentMessage[], options?: { toolChoice?: ToolChoice }): Promise<void> {
  		const deadline = Date.now() + 30_000;
  		for (;;) {
-@@ -2026,6 +2060,7 @@ export class TurnRecovery {
+@@ -2317,6 +2351,7 @@ export class TurnRecovery {
  		}
  
  		// Reset retry budget for a fresh attempt

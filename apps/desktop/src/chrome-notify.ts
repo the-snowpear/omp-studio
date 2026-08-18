@@ -11,6 +11,7 @@ import { CHROME_NOTIFY_CHANNEL, parseChromeNotifyInput } from "./chrome-notify-s
 
 export function registerChromeNotifyIpc(options: {
   readonly isTrustedSender: (sender: Pick<WebContents, "isDestroyed" | "getURL">) => boolean;
+  readonly icon?: string;
 }): () => void {
   ipcMain.removeHandler(CHROME_NOTIFY_CHANNEL);
   ipcMain.handle(CHROME_NOTIFY_CHANNEL, (event, payload: unknown) => {
@@ -18,7 +19,11 @@ export function registerChromeNotifyIpc(options: {
     const input = parseChromeNotifyInput(payload);
     if (input === undefined) return;
     if (!Notification.isSupported()) return;
-    new Notification({ title: input.title, ...(input.body === undefined ? {} : { body: input.body }) }).show();
+    new Notification({
+      title: input.title,
+      ...(input.body === undefined ? {} : { body: input.body }),
+      ...(options.icon === undefined ? {} : { icon: options.icon }),
+    }).show();
   });
   return () => {
     ipcMain.removeHandler(CHROME_NOTIFY_CHANNEL);

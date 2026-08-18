@@ -549,13 +549,18 @@ img.profile-edit-avatar-img { display: block; }
   margin-bottom: var(--sp-20);
 }
 .env-summary.ok { background: var(--green-soft); border: 1px solid var(--green); }
+.env-summary.warn { background: var(--amber-soft); border: 1px solid var(--amber); }
 .env-summary.fail { background: var(--red-soft); border: 1px solid var(--red); }
 .env-summary .es-icon {
   width: 36px; height: 36px; border-radius: var(--r-full);
   display: flex; align-items: center; justify-content: center; flex: none;
 }
 .env-summary.ok .es-icon { background: var(--green); color: #fff; }
+.env-summary.warn .es-icon { background: var(--amber); color: #fff; }
 .env-summary.fail .es-icon { background: var(--red); color: #fff; }
+.env-summary .es-copy { flex: 1; min-width: 0; }
+.env-summary .es-copy b { font-size: var(--fs-14); display: block; }
+.env-summary .es-actions { display: flex; gap: var(--sp-8); flex: none; flex-wrap: wrap; }
 
 .check-row {
   display: flex; align-items: center; gap: var(--sp-12);
@@ -661,10 +666,21 @@ img.profile-edit-avatar-img { display: block; }
    每个标签面板自己滚 —— 切页时两层叠在同一视口里交叉淡入，
    高度塌缩不会把整页弹回顶部。 */
 .page-body:has(.cap-layout),
-.page-body:has(.set-layout) {
+.page-body:has(.set-layout),
+.page-body:has(.hub-page.is-chat-preview),
+.page-body:has(.hub-page.is-chat-closing) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.page-body:has(.hub-page.is-chat-preview) > .hub-page {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.page-body:has(.hub-page.is-chat-closing) > .hub-page {
+  width: 100%;
+  min-height: 0;
 }
 .page-body:has(.cap-layout) > .page-wide {
   flex: 1;
@@ -1067,6 +1083,14 @@ img.profile-edit-avatar-img { display: block; }
   .cap-slash-row > button { grid-area: actions; }
 }
 
+.cap-log-body {
+  max-height: 320px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ---------- 设置 ---------- */
 .set-layout { display: flex; gap: var(--sp-24); align-items: stretch; }
 .set-group { margin-bottom: 0; }
@@ -1175,6 +1199,46 @@ img.profile-edit-avatar-img { display: block; }
 .perm-card .pm-head { display: flex; align-items: center; gap: var(--sp-8); font-weight: var(--fw-semibold); margin-bottom: var(--sp-6); }
 
 /* ---------- 诊断中心 ---------- */
+.diag-page h1 { font-size: 18px; }
+.diag-head {
+  display: flex; align-items: flex-start; gap: var(--sp-12);
+  margin-bottom: var(--sp-16);
+}
+.diag-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex: none;
+}
+.diag-ver-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  overflow: hidden;
+  margin-bottom: var(--sp-20);
+}
+.diag-ver { background: var(--surface); padding: var(--sp-12) var(--sp-14); }
+.diag-ver .dv-k { font-size: var(--fs-11); color: var(--text-3); }
+.diag-ver .dv-v { font-family: var(--font-mono); font-size: var(--fs-14); margin-top: 4px; word-break: break-all; }
+.diag-ver .dv-s { font-size: var(--fs-11); color: var(--text-3); margin-top: 4px; }
+.diag-confirm {
+  display: flex; align-items: center; gap: var(--sp-16);
+  padding: var(--sp-12) var(--sp-14);
+  margin-bottom: var(--sp-20);
+  border: 1px solid var(--amber);
+  background: var(--amber-soft);
+  border-radius: var(--r-8);
+}
+.diag-confirm-acts { margin-left: auto; display: flex; gap: var(--sp-8); flex: none; }
+@media (max-width: 720px) {
+  .diag-ver-grid { grid-template-columns: 1fr; }
+  .env-summary { flex-wrap: wrap; }
+  .env-summary .es-actions { width: 100%; }
+}
 .diag-kv {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

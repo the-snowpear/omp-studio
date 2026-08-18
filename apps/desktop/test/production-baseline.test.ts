@@ -398,6 +398,7 @@ test("P0-1 clean start without a workspace does not start Runtime and stays read
       assert.equal(recorded.starts[0]?.workspace, undefined);
       const bootstrap = await composition.facade.bootstrap();
       assert.equal(bootstrap.runtime.status, "unavailable");
+      assert.equal(bootstrap.runtime.unavailableCode, "no-workspace");
       assert.equal("snapshot" in bootstrap, false);
       const capabilities = assertOk(
         await composition.facade.query({ queryName: "capabilities.get", input: {} }),

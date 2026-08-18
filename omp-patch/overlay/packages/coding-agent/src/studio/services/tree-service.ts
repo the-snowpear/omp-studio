@@ -4,6 +4,30 @@ import type { SessionTreeNode } from "../../session/session-entries";
 import type { AskToolDetails, AskToolInput, QuestionResult } from "../../tools/ask";
 import type { StudioInteractionPort } from "./interaction-port";
 
+const EDITOR_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+export type StudioEditorImage = {
+	type: "image";
+	mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+	data: string;
+};
+
+function editorImagesFrom(images: ReadonlyArray<{ type?: string; mimeType?: string; data?: string }> | undefined): StudioEditorImage[] {
+	if (images === undefined || images.length === 0) return [];
+	const out: StudioEditorImage[] = [];
+	for (const image of images) {
+		if (image.type !== "image") continue;
+		if (typeof image.data !== "string" || image.data.length === 0) continue;
+		if (!EDITOR_IMAGE_MIME.has(image.mimeType ?? "")) continue;
+		out.push({
+			type: "image",
+			mimeType: image.mimeType as StudioEditorImage["mimeType"],
+			data: image.data,
+		});
+	}
+	return out;
+}
+
 export interface StudioTreeNode {
 	id: string;
 	parentId: string | null;
@@ -17,7 +41,7 @@ export interface StudioTreeNode {
 
 export class StudioTreeError extends Error {
 	constructor(
-		readonly code: "INTERACTION_REQUIRED" | "INVALID_ARGUMENT",
+		readonly code: "INTERACTION_REQUIRED" | "INVALID_ARGUMENT" | "BUSY_STREAMING" | "BUSY_COMPACTING",
 		message: string,
 		readonly details?: Record<string, unknown>,
 	) {
@@ -58,6 +82,8 @@ export class StudioTreeService {
 		commandId: string,
 		input: { targetId: string; summarize?: boolean; customInstructions?: string },
 	): Promise<unknown> {
+		if (this.session.isStreaming) throw new StudioTreeError("BUSY_STREAMING", "Runtime is streaming");
+		if (this.session.isCompacting) throw new StudioTreeError("BUSY_COMPACTING", "Runtime is compacting");
 		let result = await this.session.navigateTree(input.targetId, {
 			summarize: input.summarize,
 			customInstructions: input.customInstructions,
@@ -87,12 +113,27 @@ export class StudioTreeService {
 			});
 		}
 		if (result.askReanswerCommitted) this.session.resumeAfterAskReanswer();
+		const editorImages = editorImagesFrom(result.editorImages);
 		return {
 			cancelled: result.cancelled,
 			aborted: result.aborted === true,
 			askReanswerCommitted: result.askReanswerCommitted === true,
 			leafId: this.session.sessionManager.getLeafId(),
 			...(result.editorText === undefined ? {} : { editorText: result.editorText }),
+			...(editorImages.length === 0 ? {} : { editorImages }),
+		};
+	}
+
+	async branch(_commandId: string, input: { targetId: string }): Promise<unknown> {
+		if (this.session.isStreaming) throw new StudioTreeError("BUSY_STREAMING", "Runtime is streaming");
+		if (this.session.isCompacting) throw new StudioTreeError("BUSY_COMPACTING", "Runtime is compacting");
+		const result = await this.session.branch(input.targetId);
+		const editorImages = editorImagesFrom(result.selectedImages);
+		return {
+			cancelled: result.cancelled,
+			sessionId: this.session.sessionManager.getSessionId(),
+			editorText: result.selectedText,
+			...(editorImages.length === 0 ? {} : { editorImages }),
 		};
 	}
 

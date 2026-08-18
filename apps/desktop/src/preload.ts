@@ -28,6 +28,7 @@ import {
   type DesktopIpcBridge,
 } from "./ipc-validation.js";
 import { CHROME_NOTIFY_CHANNEL } from "./chrome-notify-shared.js";
+import { CHROME_OPEN_URL_CHANNEL } from "./chrome-open-url-shared.js";
 import {
   CHROME_IMAGE_CHANNELS,
   type ChromeImageInput,
@@ -90,6 +91,9 @@ contextBridge.exposeInMainWorld(
     },
     notify(payload: { title: string; body?: string }): Promise<void> {
       return ipcRenderer.invoke(CHROME_NOTIFY_CHANNEL, payload) as Promise<void>;
+    },
+    openUrl(payload: { url: string }): Promise<void> {
+      return ipcRenderer.invoke(CHROME_OPEN_URL_CHANNEL, payload) as Promise<void>;
     },
     saveAvatar(input: ChromeAvatarBytes): Promise<ChromeAvatarSaveResult | { ok: false; message: string }> {
       return ipcRenderer.invoke(CHROME_PROFILE_CHANNELS.saveAvatar, input) as Promise<

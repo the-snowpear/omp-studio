@@ -110,7 +110,12 @@
   --z-panel: 30;
   --z-fab: 40;
   --z-menu: 60;
+  /* BTW 浮窗/胶囊：压住所有 popover 与菜单，但让位给独占式 modal —— 否则确认框
+     会被浮窗盖住而点不到。 */
+  --z-float: 70;
   --z-modal: 80;
+  /* Hover tips sit above modal content, below toast. */
+  --z-tip: 90;
   --z-toast: 100;
 }
 

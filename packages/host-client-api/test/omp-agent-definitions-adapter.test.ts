@@ -113,6 +113,17 @@ describe("createOmpAgentDefinitionsService", () => {
         description: "Use this agent when taking notes",
         systemPrompt: "Capture concise notes.",
         scope: "user",
+        advisor: true,
+      });
+      const withAdvisor = await readFile(join(home, ".omp", "agent", "agents", "notes.md"), "utf8");
+      assert.match(withAdvisor, /advisor: true/);
+      const afterAdvisor = await service.get();
+      assert.equal(afterAdvisor.agents.find((agent) => agent.name === "notes")?.advisor, true);
+      await service.upsert({
+        name: "notes",
+        description: "Use this agent when taking notes",
+        systemPrompt: "Capture concise notes.",
+        scope: "user",
         spawns: [],
       });
       const none = await service.get();
@@ -145,18 +156,20 @@ describe("createOmpAgentDefinitionsService", () => {
     const home = await mkdtemp(join(tmpdir(), "omp-agents-cfg-"));
     try {
       const service = createOmpAgentDefinitionsService({ home, now: () => NOW });
-      await service.configure({ name: "scout", disabled: true, overrideModel: "@smol", prewalkOverride: "off" });
+      await service.configure({ name: "scout", disabled: true, overrideModel: "@smol", prewalkOverride: "off", advisorOverride: "on" });
       const text = await readFile(join(home, ".omp", "agent", "config.yml"), "utf8");
       assert.match(text, /disabledAgents:/);
       assert.match(text, /scout/);
       assert.match(text, /agentModelOverrides:/);
       assert.match(text, /agentPrewalk:/);
+      assert.match(text, /agentAdvisor:/);
       const result = await service.get();
       const scout = result.agents.find((agent) => agent.name === "scout");
       assert.equal(scout?.disabled, true);
       assert.equal(scout?.overrideModel, "@smol");
       assert.equal(scout?.prewalkOverride, "off");
-      await service.configure({ name: "scout", disabled: false, overrideModel: null, prewalkOverride: null });
+      assert.equal(scout?.advisorOverride, "on");
+      await service.configure({ name: "scout", disabled: false, overrideModel: null, prewalkOverride: null, advisorOverride: null });
       const cleared = await service.get();
       const after = cleared.agents.find((agent) => agent.name === "scout");
       assert.equal(after?.disabled, false);

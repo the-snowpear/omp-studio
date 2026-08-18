@@ -25,6 +25,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 	"session.fast.set",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
+	"permissions.mode.set",
 ]);
 
 /** Queue-compatible interrupts. Host classifies these the same way; they must
@@ -48,6 +49,7 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	"session.fast.set",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
+	"permissions.mode.set",
 ]);
 
 const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
@@ -64,6 +66,7 @@ const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
 	"session.fast.set",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
+	"permissions.mode.set",
 ]);
 
 export class StudioRuntimeCommandError extends Error {
@@ -176,7 +179,7 @@ export class StudioRuntimeCommandArbiter {
 		if (!this.#registeredOperations.has(request.operation.kind)) {
 			throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Operation is not registered with the Runtime arbiter");
 		}
-		if (this.#interaction !== undefined) {
+		if (this.#interaction !== undefined && !DEFERRED_SESSION_PREFERENCE_KINDS.has(request.operation.kind)) {
 			throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "An interaction is active");
 		}
 		if (CONCURRENT_WITH_LEASE_OPERATION_KINDS.has(request.operation.kind)) {
