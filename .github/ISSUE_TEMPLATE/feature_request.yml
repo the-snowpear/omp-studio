@@ -1,0 +1,42 @@
+name: Feature Request
+description: Propose a capability or UX change
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is painful or missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should Studio do? Prefer a user-visible outcome over an implementation sketch.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Workbench / conversation
+        - Composer / approvals / Plan
+        - Agent Hub / Skills / MCP / models
+        - Git / file tree / workspace
+        - Terminal / settings / diagnostics
+        - Host / Runtime / installer
+        - Docs / CI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds, or why this should live in Studio rather than upstream oh-my-pi.
+  - type: markdown
+    attributes:
+      value: |
+        Studio does not scrape the OMP TUI. New control surfaces need a typed Bridge or Host API, not slash-text parsing.

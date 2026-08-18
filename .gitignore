@@ -55,6 +55,16 @@ outputs/
 # Architecture review packs / extracted archives (local working notes, not product code)
 architecture_review_v2_work/
 
+# Root scratch images (never product assets)
+/spacing-compare.png
+/Untitled*.png
+
+# UI experiment dumps (not the ver1/ver2 design reference)
+ui_reference/test/
+
+# Local visual QA notes (often contain machine-specific paths)
+doc/qa/
+
 # Local agent/IDE config (project skills live under repo .claude only on dev machines)
 .claude/
 skills-lock.json

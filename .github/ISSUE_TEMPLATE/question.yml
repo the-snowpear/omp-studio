@@ -1,0 +1,26 @@
+name: Question
+description: Usage or setup question
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What did you already try?
+      description: Docs page, command, error text.
+  - type: dropdown
+    id: topic
+    attributes:
+      label: Topic
+      options:
+        - Install / preview from source
+        - Runtime overlay / patches
+        - models.yml / provider login
+        - Preview mode vs real Host
+        - Building the Windows installer
+        - Other

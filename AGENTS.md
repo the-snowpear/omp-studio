@@ -17,6 +17,8 @@ OMP Studio 是 OMP Runtime / AgentSession 的 Windows 桌面控制台与配套 W
 
 Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`
 
+面向使用者和外部贡献者的入口是 [`README.md`](README.md)、[`docs/`](docs/README.md)、[`CHANGELOG.md`](CHANGELOG.md)、[`CONTRIBUTING.md`](CONTRIBUTING.md)。本文件是协作者的工作约定，不是产品说明书。
+
 ## 功能代码索引
 
 改某块产品功能前，打开 [`doc/feature-index.md`](doc/feature-index.md) 按表跳到文件，不要全库盲搜。那是功能 → 文件的地图，不是架构愿景；路径变更只改索引，不要把表格复制进本文件。

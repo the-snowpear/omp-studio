@@ -1,0 +1,30 @@
+OMP Studio
+Copyright (c) 2026 snowpear and OMP Studio contributors
+
+This product is licensed under the MIT License. See LICENSE.
+
+Third-party notices
+===================
+
+oh-my-pi (OMP Runtime)
+----------------------
+This repository vendors [oh-my-pi](https://github.com/can1357/oh-my-pi) as a
+Git submodule at `omp-patch/vendor/oh-my-pi`, pinned in `omp-patch/upstream.json`.
+Studio applies an overlay and a small set of seam patches to that tree in order
+to expose a typed Studio Bridge (`omp --mode studio-host`).
+
+oh-my-pi is a fork of Pi by Mario Zechner.
+
+    Copyright (c) 2025 Mario Zechner
+    Copyright (c) 2025-2026 Can Bölük
+    License: MIT
+    See `omp-patch/vendor/oh-my-pi/LICENSE` after `git submodule update --init`.
+
+The overlay (`omp-patch/overlay/`) and seam patches (`omp-patch/patches/`) are
+original Studio work, also under the MIT License of this repository.
+
+Other dependencies
+------------------
+npm packages used by this workspace (Electron, React, TypeScript, and others)
+remain under their own licenses. See each package's LICENSE file after
+`npm install`.

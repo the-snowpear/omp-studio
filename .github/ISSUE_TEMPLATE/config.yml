@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/the-snowpear/omp-studio/blob/main/docs/README.md
+    about: Getting started, development, architecture, and releasing
+  - name: Security advisory (private)
+    url: https://github.com/the-snowpear/omp-studio/security/advisories/new
+    about: Report a vulnerability privately — do not open a public issue
+  - name: Upstream OMP (oh-my-pi)
+    url: https://github.com/can1357/oh-my-pi
+    about: CLI / Runtime issues that are not Studio-specific

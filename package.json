@@ -2,7 +2,25 @@
   "name": "omp-studio",
   "version": "0.1.0",
   "private": true,
-  "description": "Backend foundation for the OMP Studio v5 architecture",
+  "description": "Desktop console for OMP Runtime — typed Studio Bridge, Electron workbench, Windows installer",
+  "license": "MIT",
+  "author": "snowpear",
+  "homepage": "https://github.com/the-snowpear/omp-studio",
+  "bugs": {
+    "url": "https://github.com/the-snowpear/omp-studio/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/the-snowpear/omp-studio.git"
+  },
+  "keywords": [
+    "omp",
+    "oh-my-pi",
+    "electron",
+    "desktop",
+    "coding-agent",
+    "windows"
+  ],
   "type": "module",
   "workspaces": [
     "packages/*",
