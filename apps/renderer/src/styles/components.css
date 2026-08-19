@@ -331,7 +331,56 @@
 .banner.amber { background: var(--amber-soft); color: var(--amber); }
 .banner.red { background: var(--red-soft); color: var(--red); }
 .banner .banner-detail { color: var(--text-2); }
-.banner .banner-actions { margin-left: auto; display: flex; gap: var(--sp-6); }
+.banner .banner-actions { margin-left: auto; display: flex; gap: var(--sp-6); flex: none; }
+.banner.is-busy { flex-wrap: wrap; }
+.banner .action-progress { flex: 1 1 100%; margin-top: 2px; }
+
+/* ---------- Action progress ---------- */
+.action-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 var(--sp-16);
+}
+.action-progress.compact { margin: 0; }
+.action-progress-copy {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+.action-progress-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  font-size: var(--fs-11);
+}
+.progress {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: var(--r-full);
+  overflow: hidden;
+}
+.progress-fill {
+  position: relative;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--r-full);
+  transition: width var(--dur) var(--ease);
+  min-width: 8%;
+}
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.35), transparent);
+  animation: action-progress-sheen 1.2s ease-in-out infinite;
+}
+@keyframes action-progress-sheen {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
 
 /* ---------- Modal ---------- */
 .modal-backdrop {

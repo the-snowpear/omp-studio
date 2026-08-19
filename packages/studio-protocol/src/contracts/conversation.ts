@@ -198,12 +198,23 @@ export const CONVERSATION_IGNORED_SESSION_ENTRY_TYPES = [
 export const CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION = false as const;
 
 /**
- * Key names matching this pattern are removed or replaced by the Runtime
- * sanitizer (Commit B) before a public item is emitted. The public parsers
- * still reject unknown item/block fields via exact-key checks.
+ * Secret-shaped key names. The Runtime sanitizer replaces matching keys
+ * before a public item is emitted, except usage-count keys that only share
+ * the substring `token` — see `conversationRedactKey`. Public parsers still
+ * reject unknown item/block fields via exact-key checks.
  */
 export const CONVERSATION_REDACT_KEY_PATTERN =
   /token|secret|password|api[_-]?key|authorization|cookie|providerpayload/iu;
+
+/** Usage totals that contain `token` but are not credentials. */
+const CONVERSATION_USAGE_TOKEN_KEYS =
+  /^(tokens|tokensBefore|contextTokens|inputTokens|outputTokens|totalTokens|tokenUsage|tokensPerSecond)$/iu;
+
+/** Whether a JSON key must be replaced with `[redacted]` on the public conversation surface. */
+export function conversationRedactKey(key: string): boolean {
+  if (CONVERSATION_USAGE_TOKEN_KEYS.test(key)) return false;
+  return CONVERSATION_REDACT_KEY_PATTERN.test(key);
+}
 
 /**
  * Live conversation events. Time source freeze:

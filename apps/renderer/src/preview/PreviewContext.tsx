@@ -13,23 +13,39 @@ const PreviewModeContext = createContext<PreviewModeValue>({
   setPreview: () => undefined,
 });
 
-export function PreviewModeProvider({ children }: { children: ReactNode }) {
-  const [stored, setStored] = useState(() => (PREVIEW_MODE_SWITCH_ENABLED ? readStoredPreviewMode() : false));
-  const preview = PREVIEW_MODE_SWITCH_ENABLED ? stored : false;
+function previewForcedByQuery(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get("preview") === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function PreviewModeProvider({
+  children,
+  switchEnabled = PREVIEW_MODE_SWITCH_ENABLED,
+}: {
+  children: ReactNode;
+  /** Tests keep the switch so fixture surfaces stay exercisable after ship. */
+  switchEnabled?: boolean;
+}) {
+  const forced = previewForcedByQuery();
+  const [stored, setStored] = useState(() => (forced ? true : (switchEnabled ? readStoredPreviewMode() : false)));
+  const preview = forced || (switchEnabled ? stored : false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-preview", preview ? "on" : "off");
   }, [preview]);
 
   const setPreview = useCallback((next: boolean) => {
-    if (!PREVIEW_MODE_SWITCH_ENABLED) return;
+    if (!switchEnabled) return;
     setStored(next);
     writeStoredPreviewMode(next);
-  }, []);
+  }, [switchEnabled]);
 
   const value = useMemo<PreviewModeValue>(
-    () => ({ enabled: PREVIEW_MODE_SWITCH_ENABLED, preview, setPreview }),
-    [preview, setPreview],
+    () => ({ enabled: switchEnabled, preview, setPreview }),
+    [preview, setPreview, switchEnabled],
   );
 
   return <PreviewModeContext.Provider value={value}>{children}</PreviewModeContext.Provider>;

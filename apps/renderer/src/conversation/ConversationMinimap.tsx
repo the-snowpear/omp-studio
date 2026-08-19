@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from "react";
 import { Icon } from "../icons";
+import { compactMinimapPreview } from "./compactSummary";
 import { batchSummary, toolKind, type ThinkView } from "./toolMeta";
 import type { AssistantSegment, TimelineRow, ToolView } from "./conversationViewModel";
 
@@ -125,7 +126,7 @@ export function deriveMinimapMarks(rows: readonly TimelineRow[]): MinimapMark[] 
         itemId: row.item.itemId,
         type: "compact",
         label: MARK_LABEL.compact,
-        preview: row.item.shortSummary ?? row.item.summary,
+        preview: compactMinimapPreview(row.item),
         turn: 0,
       });
     } else if (row.type === "compacting") {
@@ -363,92 +364,8 @@ export function ConversationMinimap({
       if (!scroller) return;
       const node = scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(itemId)}"]`);
       if (!node) return;
-      // #region agent log
-      const dumpLayout = (phase: string, extra?: Record<string, unknown>) => {
-        const ancestors: Array<Record<string, unknown>> = [];
-        let el: HTMLElement | null = scroller;
-        while (el) {
-          const cs = getComputedStyle(el);
-          ancestors.push({
-            tag: el.tagName,
-            id: el.id,
-            cls: String(el.className ?? "").slice(0, 80),
-            overflow: cs.overflow,
-            overflowY: cs.overflowY,
-            scrollTop: el.scrollTop,
-            scrollHeight: el.scrollHeight,
-            clientHeight: el.clientHeight,
-            top: Math.round(el.getBoundingClientRect().top),
-            bottom: Math.round(el.getBoundingClientRect().bottom),
-          });
-          el = el.parentElement;
-        }
-        const composer = document.querySelector(".composer-region");
-        const bp = document.querySelector(".bottom-panel");
-        const cRect = composer?.getBoundingClientRect();
-        const bRect = bp?.getBoundingClientRect();
-        const nRect = node.getBoundingClientRect();
-        const sRect = scroller.getBoundingClientRect();
-        fetch("/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b21151" },
-          body: JSON.stringify({
-            sessionId: "b21151",
-            runId: "post-fix",
-            hypothesisId: "A",
-            location: "ConversationMinimap.tsx:jumpTo",
-            message: phase,
-            data: {
-              itemId,
-              phase,
-              gap: cRect && bRect ? Math.round(bRect.top - cRect.bottom) : null,
-              composerBottom: cRect ? Math.round(cRect.bottom) : null,
-              bpTop: bRect ? Math.round(bRect.top) : null,
-              nodeTop: Math.round(nRect.top),
-              nodeHeight: Math.round(nRect.height),
-              scrollerTop: Math.round(sRect.top),
-              scrollerClientH: scroller.clientHeight,
-              scrollerScrollTop: scroller.scrollTop,
-              scrollerMaxScroll: scroller.scrollHeight - scroller.clientHeight,
-              htmlScrollTop: document.documentElement.scrollTop,
-              bodyScrollTop: document.body.scrollTop,
-              activeCls: String((document.activeElement as HTMLElement | null)?.className ?? "").slice(0, 80),
-              ancestors: ancestors.filter((a) => {
-                const st = Number(a.scrollTop);
-                const sh = Number(a.scrollHeight);
-                const ch = Number(a.clientHeight);
-                return st !== 0 || sh > ch + 1 || String(a.overflowY) !== "visible";
-              }),
-              ...extra,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-      };
-      dumpLayout("before-scrollIntoView");
-      const scrolledTargets: string[] = [];
-      const onAnyScroll = (event: Event) => {
-        const target = event.target;
-        const el = target instanceof HTMLElement ? target : target === document ? document.scrollingElement : null;
-        if (!(el instanceof HTMLElement)) return;
-        const key = `${el.tagName}#${el.id}.${String(el.className ?? "").slice(0, 40)}:st=${el.scrollTop}`;
-        if (!scrolledTargets.includes(key)) scrolledTargets.push(key);
-      };
-      document.addEventListener("scroll", onAnyScroll, true);
-      // #endregion
-      const targetTop = scrollRowInScroller(scroller, node);
+      scrollRowInScroller(scroller, node);
       flashRow(node);
-      // #region agent log
-      dumpLayout("after-scrollIntoView-sync");
-      requestAnimationFrame(() => {
-        dumpLayout("raf1");
-        requestAnimationFrame(() => dumpLayout("raf2", { scrolledTargets }));
-      });
-      window.setTimeout(() => {
-        document.removeEventListener("scroll", onAnyScroll, true);
-        dumpLayout("after-smooth-400ms", { scrolledTargets, targetTop });
-      }, 400);
-      // #endregion
     },
     [scrollerRef],
   );

@@ -49,6 +49,26 @@ describe("composer send path (simulated vs OMP)", () => {
     ).toBe(true);
   });
 
+  it("allows send on a new-conversation welcome page even when the prompt channel is down", () => {
+    expect(
+      composerPromptEnabled({
+        textReady: true,
+        running: false,
+        pendingInteraction: false,
+        promptChannelReady: false,
+        newConversation: true,
+      }),
+    ).toBe(true);
+    expect(
+      composerPromptEnabled({
+        textReady: true,
+        running: false,
+        pendingInteraction: false,
+        promptChannelReady: false,
+      }),
+    ).toBe(false);
+  });
+
   it("blocks a new prompt while an ask/approval card owns the interaction surface", () => {
     expect(
       composerPromptEnabled({

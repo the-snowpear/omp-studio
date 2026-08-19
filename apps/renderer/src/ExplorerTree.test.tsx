@@ -257,7 +257,7 @@ describe("RealFileTree", () => {
       return row!;
     });
     expect(fileRow.querySelector(".dot.red.pulse")).not.toBeNull();
-    expect(fileRow.querySelector('[aria-label="OMP 正在读取"]')).not.toBeNull();
+    expect(fileRow.querySelector('[aria-label="读取中"]')).not.toBeNull();
     expect(fileRow.querySelector(".dot.green")).toBeNull();
     const dirRow = screen.getByRole("treeitem", { name: "src 文件夹" });
     expect(dirRow.querySelector(".dot.red.pulse")).not.toBeNull();
@@ -290,7 +290,7 @@ describe("RealFileTree", () => {
       return row!;
     });
     expect(fileRow.querySelector(".dot.green.pulse")).not.toBeNull();
-    expect(fileRow.querySelector('[aria-label="OMP 正在写入"]')).not.toBeNull();
+    expect(fileRow.querySelector('[aria-label="写入中"]')).not.toBeNull();
     const other = screen.getByText("notes.md").closest("[role=treeitem]");
     expect(other!.querySelector(".live")).toBeNull();
   });

@@ -44,19 +44,20 @@ export async function resolveDroppedPath(cwd: string, absolutePath: string): Pro
     return { ok: false, reason: "invalid" };
   }
   const root = resolve(cwd);
-  let canonical: string;
-  try {
-    canonical = await realpath(resolve(absolutePath));
-  } catch {
-    return { ok: false, reason: "missing" };
-  }
+  const resolved = resolve(absolutePath);
   let metadata;
   try {
-    metadata = await lstat(canonical);
+    metadata = await lstat(resolved);
   } catch {
     return { ok: false, reason: "missing" };
   }
   if (metadata.isSymbolicLink()) return { ok: false, reason: "invalid" };
+  let canonical: string;
+  try {
+    canonical = await realpath(resolved);
+  } catch {
+    return { ok: false, reason: "missing" };
+  }
   const inside = insideWorkspace(root, canonical);
   const scope: DroppedPathScope = inside === null ? "absolute" : "workspace";
   const path = inside ?? toForward(canonical);

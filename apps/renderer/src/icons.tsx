@@ -93,6 +93,7 @@ const PATHS: Record<string, string> = {
   temp: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M9.2 4.8 6.3 8.6h2.1l-1.2 2.6 3-3.4H8.1z"/>',
   flask: '<path d="M6 2v4L2.8 12a1 1 0 0 0 .87 1.5h8.66A1 1 0 0 0 13.2 12L10 6V2M5 2h6M4.6 9.5h6.8"/>',
   panel: '<rect x="2" y="2.5" width="12" height="11" rx="1.2"/><path d="M10.5 2.5v11"/>',
+  "panel-bottom": '<rect x="2" y="2.5" width="12" height="11" rx="1.2"/><path d="M2 10.5h12"/>',
   grip: '<path d="M5 7h6M5 9.5h6" stroke-width="2"/>',
   light: '<circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3"/>',
   moon: '<path d="M13.5 9.5A6 6 0 1 1 6.5 2.5a4.8 4.8 0 0 0 7 7z"/>',

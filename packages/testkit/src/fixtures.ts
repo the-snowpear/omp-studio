@@ -267,6 +267,7 @@ const QUERY_INPUTS = {
   "agent.transcript.read": { agentId: AGENT_ID, limit: 50 },
   "agent.conversation.read": { agentId: AGENT_ID, limit: 50 },
   "session.transcript.readPage": { sessionId: SESSION_ID, limit: 50 },
+  "session.agents.list": { sessionId: SESSION_ID },
   "session.telemetry.read": { sessionId: SESSION_ID },
   "git.toolchain.get": {},
   "git.repository.get": { workspaceId: WORKSPACE_ID },
@@ -419,6 +420,27 @@ const QUERY_RESPONSES = {
       headCursor: conversationPages.userAssistant.headCursor,
       hasMoreBefore: false,
     } satisfies ConversationTranscriptReadPage,
+  },
+  "session.agents.list": {
+    ok: true,
+    queryName: "session.agents.list",
+    result: {
+      sessionId: SESSION_ID,
+      agents: [
+        {
+          agentId: AGENT_ID,
+          generation: 1 as Generation,
+          kind: "sub",
+          displayName: "WorkerEcho",
+          status: "parked",
+          updatedAt: "2026-08-19T00:00:00.000Z",
+          hasLiveSession: false,
+          hasTranscript: true,
+          unreadCount: 0,
+          activeJobIds: [],
+        },
+      ],
+    },
   },
   "git.toolchain.get": {
     ok: true,

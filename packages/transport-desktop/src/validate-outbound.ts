@@ -25,6 +25,7 @@ import type {
   RuntimeBackend,
   RuntimeClassification,
   RuntimeConnectionStatus,
+  RuntimeAutoRespawnStatus,
   RuntimeDisconnectCode,
   RuntimeUnavailableCode,
 } from "@omp-studio/client-contract";
@@ -125,6 +126,29 @@ function assertAgentTranscriptPage(value: unknown): void {
     }
     if (typeof message.text !== "string") {
       throw new ValidationError(`${what}: message.text must be a string`);
+    }
+  }
+}
+
+function assertSessionAgentsListResult(value: unknown): void {
+  const what = "session.agents.list result";
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["sessionId", "agents"], what);
+  assertOpaqueToken(value.sessionId, `${what}: sessionId`);
+  if (!Array.isArray(value.agents)) {
+    throw new ValidationError(`${what}: agents must be an array`);
+  }
+  for (const [index, agent] of value.agents.entries()) {
+    assertPlainObject(agent, `${what}: agents[${index}]`);
+    assertOpaqueToken(agent.agentId, `${what}: agents[${index}].agentId`);
+    if (typeof agent.displayName !== "string" || agent.displayName.length === 0) {
+      throw new ValidationError(`${what}: agents[${index}].displayName must be a non-empty string`);
+    }
+    if (typeof agent.status !== "string" || agent.status.length === 0) {
+      throw new ValidationError(`${what}: agents[${index}].status must be a non-empty string`);
+    }
+    if (typeof agent.hasTranscript !== "boolean") {
+      throw new ValidationError(`${what}: agents[${index}].hasTranscript must be a boolean`);
     }
   }
 }
@@ -470,6 +494,9 @@ export function assertClientQueryResponse(value: unknown): asserts value is Clie
     }
     if (queryName === "session.transcript.readPage") {
       assertConversationTranscriptReadPage(value.result);
+    }
+    if (queryName === "session.agents.list") {
+      assertSessionAgentsListResult(value.result);
     }
     if (queryName === "agent.transcript.read") {
       assertAgentTranscriptPage(value.result);
@@ -981,6 +1008,12 @@ const DISCONNECT_CODES = [
   "host-stop",
 ] as const satisfies readonly RuntimeDisconnectCode[];
 
+const AUTO_RESPAWN_STATUSES = [
+  "scheduled",
+  "failed",
+  "exhausted",
+] as const satisfies readonly RuntimeAutoRespawnStatus[];
+
 const RUNTIME_BACKENDS = ["studio-host", "rpc-ui", "acp"] as const satisfies readonly RuntimeBackend[];
 
 /** Assert a runtime connection fact payload. */
@@ -1002,6 +1035,8 @@ function assertRuntimeConnection(value: unknown): void {
       "unavailableReason",
       "disconnectCode",
       "disconnectReason",
+      "disconnectedAt",
+      "autoRespawn",
     ],
     "event: connection",
   );
@@ -1052,6 +1087,16 @@ function assertRuntimeConnection(value: unknown): void {
   if (value.disconnectCode !== undefined) {
     if (typeof value.disconnectCode !== "string" || !(DISCONNECT_CODES as readonly string[]).includes(value.disconnectCode)) {
       throw new ValidationError(`event: connection has unknown disconnectCode ${describe(value.disconnectCode)}`);
+    }
+  }
+  if (value.disconnectedAt !== undefined) {
+    if (typeof value.disconnectedAt !== "string" || value.disconnectedAt.length === 0) {
+      throw new ValidationError("event: connection disconnectedAt must be a non-empty string");
+    }
+  }
+  if (value.autoRespawn !== undefined) {
+    if (typeof value.autoRespawn !== "string" || !(AUTO_RESPAWN_STATUSES as readonly string[]).includes(value.autoRespawn)) {
+      throw new ValidationError(`event: connection has unknown autoRespawn ${describe(value.autoRespawn)}`);
     }
   }
 }

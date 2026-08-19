@@ -11,9 +11,10 @@
 
 import { useEffect, useState } from "react";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
+import { useI18n } from "./i18n";
 import { usePreviewMode } from "./preview/PreviewContext";
-import { PREVIEW_APPROVAL_MODE, usePreviewAppSettings, useRuntimeDemo } from "./preview/settingsPreview";
-import { useAppSettings } from "./settings/appSettings";
+import { PREVIEW_APP_SETTINGS, PREVIEW_APPROVAL_MODE, usePreviewAppSettings, useRuntimeDemo } from "./preview/settingsPreview";
+import { type AppSettings, useAppSettings } from "./settings/appSettings";
 import { SlidingTabs } from "./SlidingTabs";
 import { AdvancedTab, ContextTab, FilesTab, GeneralTab, InteractionTab, PermissionsTab, TasksTab, type ApprovalModeId, type RuntimeDemoApi, type SettingsCtl } from "./settings/tabs";
 
@@ -45,16 +46,6 @@ function takeSettingsIntent(): SettingsGroupId | null {
   }
 }
 
-const GROUPS: ReadonlyArray<readonly [GroupId, string, string]> = [
-  ["general", "settings", "常规"],
-  ["interaction", "message", "对话与交互"],
-  ["permissions", "shield", "权限与安全"],
-  ["context", "layers", "上下文与记忆"],
-  ["files", "terminal", "文件与终端"],
-  ["tasks", "play", "任务与执行"],
-  ["advanced", "wrench", "高级"],
-];
-
 export function SettingsPage({
   approvalMode,
   onSetApprovalMode,
@@ -63,9 +54,20 @@ export function SettingsPage({
   approvalMode?: ApprovalModeId;
   onSetApprovalMode: (mode: ApprovalModeId) => void;
 }) {
+  const { t } = useI18n();
+  const groups: ReadonlyArray<readonly [GroupId, string, string]> = [
+    ["general", "settings", t("settings.tabs.general")],
+    ["interaction", "message", t("settings.tabs.interaction")],
+    ["permissions", "shield", t("settings.tabs.permissions")],
+    ["context", "layers", t("settings.tabs.context")],
+    ["files", "terminal", t("settings.tabs.files")],
+    ["tasks", "play", t("settings.tabs.tasks")],
+    ["advanced", "wrench", t("settings.tabs.advanced")],
+  ];
+
   const [group, setGroup] = useState<GroupId>(() => takeSettingsIntent() ?? "general");
-  const groupIndex = GROUPS.findIndex(([id]) => id === group);
-  const { incoming, outgoing, dir, live, stageRef } = useOverlappingTabs(group, groupIndex);
+  const groupIndex = groups.findIndex(([id]) => id === group);
+  const { incoming, outgoing, dir, live, stageRef } = useOverlappingTabs(group, groupIndex >= 0 ? groupIndex : 0);
   const { preview } = usePreviewMode();
 
   const real = useAppSettings();
@@ -79,7 +81,7 @@ export function SettingsPage({
     return () => window.clearTimeout(timer);
   }, [flash]);
 
-  const flashDemo = () => setFlash("演示：仅改动预览状态，未写入设置存储与 Host");
+  const flashDemo = () => setFlash(t("settings.general.demoFlash"));
 
   const demoRuntime: RuntimeDemoApi | undefined = preview
     ? {
@@ -104,7 +106,14 @@ export function SettingsPage({
         previewApp.patch(patch);
         flashDemo();
       },
-      resetApp: () => flashDemo(),
+      resetApp: (keys) => {
+        const patch: Partial<AppSettings> = {};
+        for (const key of keys) {
+          (patch as Record<string, unknown>)[key] = PREVIEW_APP_SETTINGS[key];
+        }
+        previewApp.patch(patch);
+        flashDemo();
+      },
       approvalMode: PREVIEW_APPROVAL_MODE,
       setApprovalMode: () => flashDemo(),
     }
@@ -128,10 +137,10 @@ export function SettingsPage({
     <div className="page-wide set-layout">
       <SlidingTabs
         id="setSide"
-        ariaLabel="设置分组"
+        ariaLabel={t("settings.title")}
         value={group}
         onChange={setGroup}
-        items={GROUPS.map(([id, icon, label]) => ({
+        items={groups.map(([id, icon, label]) => ({
           id,
           icon,
           label,

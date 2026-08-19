@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CapabilityManifest } from "@omp-studio/studio-protocol";
-import { interactionDeckDisabled, usableCapabilityManifest } from "./interactionGate";
+import { interactionDeckDisabled, planReviewDeckDisabled, usableCapabilityManifest } from "./interactionGate";
 
 const emptyLimited: CapabilityManifest = {
   profile: "limited",
@@ -24,6 +24,34 @@ describe("interactionDeckDisabled", () => {
   it("locks only when the Host cannot accept interaction.respond", () => {
     expect(interactionDeckDisabled({ resyncRequired: true, runtimeConnected: true })).toBe(true);
     expect(interactionDeckDisabled({ resyncRequired: false, runtimeConnected: false })).toBe(true);
+  });
+});
+
+describe("planReviewDeckDisabled", () => {
+  it("does not lock Plan Review while composer gated flags are still catching up", () => {
+    expect(planReviewDeckDisabled({
+      resyncRequired: false,
+      runtimeConnected: true,
+      canRespond: true,
+    })).toBe(false);
+  });
+
+  it("locks when the Host cannot accept mode.plan.review.respond", () => {
+    expect(planReviewDeckDisabled({
+      resyncRequired: true,
+      runtimeConnected: true,
+      canRespond: true,
+    })).toBe(true);
+    expect(planReviewDeckDisabled({
+      resyncRequired: false,
+      runtimeConnected: false,
+      canRespond: true,
+    })).toBe(true);
+    expect(planReviewDeckDisabled({
+      resyncRequired: false,
+      runtimeConnected: true,
+      canRespond: false,
+    })).toBe(true);
   });
 });
 

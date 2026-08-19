@@ -189,9 +189,17 @@ function validateTranscriptReadInput(input: unknown): void {
 function validateTranscriptReadPageInput(input: unknown): void {
   const what = "session.transcript.readPage input";
   assertPlainObject(input, what);
-  assertNoUnknownKeys(input, ["sessionId", "cursor", "limit"], what);
+  assertNoUnknownKeys(input, ["sessionId", "agentId", "cursor", "limit"], what);
   assertOpaqueToken(input.sessionId, `${what}: sessionId`);
+  if (input.agentId !== undefined) assertOpaqueToken(input.agentId, `${what}: agentId`);
   validateTranscriptPaginationFields(input, what);
+}
+
+function validateSessionAgentsListInput(input: unknown): void {
+  const what = "session.agents.list input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["sessionId"], what);
+  assertOpaqueToken(input.sessionId, `${what}: sessionId`);
 }
 
 function validateSessionTelemetryReadInput(input: unknown): void {
@@ -709,6 +717,14 @@ function validatePromptInput(input: unknown, what: string): void {
 
 function validateEmptyCommandInput(input: unknown, what: string): void {
   validateEmptyInput(input, what);
+}
+
+function validateRuntimeEnsureInput(input: unknown): void {
+  assertPlainObject(input, "runtime.ensure input");
+  assertNoUnknownKeys(input, ["force"], "runtime.ensure input");
+  if (input.force !== undefined && typeof input.force !== "boolean") {
+    throw new ValidationError("runtime.ensure input: force must be boolean");
+  }
 }
 
 function validateOptionalTextFields(input: unknown, what: string, fields: readonly string[]): void {
@@ -1412,6 +1428,7 @@ const QUERY_INPUT_VALIDATORS: {
   "agent.transcript.read": validateAgentTranscriptReadInput,
   "agent.conversation.read": validateAgentConversationReadInput,
   "session.transcript.readPage": validateTranscriptReadPageInput,
+  "session.agents.list": validateSessionAgentsListInput,
   "session.telemetry.read": validateSessionTelemetryReadInput,
   "git.toolchain.get": (input) => validateEmptyInput(input, "git.toolchain.get input"),
   "git.repository.get": (input) => validateWorkspaceSelector(input, "git.repository.get input"),
@@ -1497,7 +1514,7 @@ const COMMAND_INPUT_VALIDATORS: {
   "agent.release": validateAgentLifecycleInput,
   "job.cancel": validateJobCancelInput,
   "runtime.install": validateRuntimeInstallInput,
-  "runtime.ensure": (input) => validateEmptyCommandInput(input, "runtime.ensure input"),
+  "runtime.ensure": validateRuntimeEnsureInput,
   "session.create": (input) => validateEmptyCommandInput(input, "session.create input"),
   "session.resume": (input) => validateThreadInput(input, "session.resume input"),
   "session.drop": (input) => validateThreadInput(input, "session.drop input"),

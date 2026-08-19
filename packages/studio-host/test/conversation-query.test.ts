@@ -333,6 +333,52 @@ test("readTranscript rejects a page whose session identity does not match the cu
   }
 });
 
+test("readAgentConversation rejects a page whose session identity matches the parent snapshot", async () => {
+  const token = "bridge-token-agent-conversation-identity";
+  const bridge = await listenForHello(token, {
+    onRequest(request, socket, hello) {
+      assert.equal(request.operation.kind, "agent.conversation.read");
+      socket.write(completedReceipt(request, hello, PAGE));
+    },
+  });
+  const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+  const controller = new StudioRuntimeSessionController(client, new CommandLedger());
+  try {
+    await client.connect();
+    await controller.refresh();
+    await assert.rejects(
+      () => controller.readAgentConversation({ agentId: "WorkerEcho" }),
+      (error: unknown) => error instanceof StudioHostError && error.code === "CURSOR_STALE",
+    );
+  } finally {
+    controller.dispose();
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("readAgentConversation accepts a child session identity", async () => {
+  const token = "bridge-token-agent-conversation-child";
+  const bridge = await listenForHello(token, {
+    onRequest(request, socket, hello) {
+      assert.equal(request.operation.kind, "agent.conversation.read");
+      socket.write(completedReceipt(request, hello, { ...PAGE, sessionId: "child-echo" }));
+    },
+  });
+  const client = new StudioBridgeClient({ endpoint: bridge.endpoint, token });
+  const controller = new StudioRuntimeSessionController(client, new CommandLedger());
+  try {
+    await client.connect();
+    await controller.refresh();
+    const page = await controller.readAgentConversation({ agentId: "WorkerEcho" });
+    assert.equal(page.sessionId, "child-echo");
+  } finally {
+    controller.dispose();
+    client.close();
+    await bridge.close();
+  }
+});
+
 test("onConversationEvent delivers the allow-listed sequence and isolates a throwing subscriber", async () => {
   const token = "bridge-token-conversation-live";
   const delta = {

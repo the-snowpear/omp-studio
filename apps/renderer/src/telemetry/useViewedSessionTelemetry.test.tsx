@@ -2,12 +2,12 @@ import { act, render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { SessionId, SessionTelemetryReadResult, SessionTelemetrySnapshot, SessionTelemetrySource } from "@omp-studio/studio-protocol";
-import { useViewedSessionTelemetry, type ViewedTelemetryClient, type ViewedSessionTelemetryState } from "./useViewedSessionTelemetry";
+import { preferFresherTelemetry, useViewedSessionTelemetry, type ViewedTelemetryClient, type ViewedSessionTelemetryState } from "./useViewedSessionTelemetry";
 
-function snapshot(sessionId: string, total: number): SessionTelemetrySnapshot {
+function snapshot(sessionId: string, total: number, capturedAt = "2026-08-16T00:00:00.000Z"): SessionTelemetrySnapshot {
   return {
     sessionId: sessionId as SessionId,
-    capturedAt: "2026-08-16T00:00:00.000Z",
+    capturedAt,
     tokens: { input: total, output: 1, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: total + 1, cost: 0 },
     context: null,
     unavailableReason: "model_context_unknown",
@@ -49,6 +49,7 @@ interface ProbeProps {
   readonly viewedSessionId: SessionId | undefined;
   readonly liveSessionId: SessionId | undefined;
   readonly liveTelemetry: SessionTelemetrySnapshot | undefined;
+  readonly refreshToken?: number;
 }
 
 function mountHook(initial: ProbeProps): {
@@ -191,5 +192,76 @@ describe("useViewedSessionTelemetry", () => {
     expect(state?.status).toBe("live");
     expect(state?.source).toBe("live");
     expect(state?.telemetry?.tokens.input).toBe(99);
+  });
+
+  it("re-reads archived telemetry when refreshToken increments instead of serving the cache", async () => {
+    const client = new FakeClient();
+    const base = {
+      client: client.queries,
+      preview: false,
+      viewedSessionId: "session-a" as SessionId,
+      liveSessionId: "session-live" as SessionId,
+      liveTelemetry: undefined as SessionTelemetrySnapshot | undefined,
+    };
+    const harness = mountHook(base);
+    await tick();
+    client.resolveNext(readResult("session-a", "persisted", 10));
+    await tick();
+    expect(harness.states.at(-1)?.telemetry?.tokens.input).toBe(10);
+    expect(client.calls).toEqual(["session-a"]);
+
+    harness.rerender({ ...base, refreshToken: 1 });
+    await tick();
+    expect(client.calls).toEqual(["session-a", "session-a"]);
+    client.resolveNext(readResult("session-a", "archive-recomputed", 3));
+    await tick();
+    expect(harness.states.at(-1)?.status).toBe("ready");
+    expect(harness.states.at(-1)?.source).toBe("archive-recomputed");
+    expect(harness.states.at(-1)?.telemetry?.tokens.input).toBe(3);
+  });
+
+  it("re-reads live Context after refreshToken and keeps the newer capturedAt snapshot", async () => {
+    const client = new FakeClient();
+    const live = snapshot("session-live", 42, "2026-08-16T00:00:00.000Z");
+    const harness = mountHook({
+      client: client.queries,
+      preview: false,
+      viewedSessionId: "session-live" as SessionId,
+      liveSessionId: "session-live" as SessionId,
+      liveTelemetry: live,
+    });
+    await tick();
+    expect(client.calls).toEqual([]);
+
+    harness.rerender({
+      client: client.queries,
+      preview: false,
+      viewedSessionId: "session-live" as SessionId,
+      liveSessionId: "session-live" as SessionId,
+      liveTelemetry: live,
+      refreshToken: 1,
+    });
+    await tick();
+    expect(client.calls).toEqual(["session-live"]);
+    client.resolveNext({
+      sessionId: "session-live" as SessionId,
+      source: "live",
+      semantics: "current-live",
+      telemetry: snapshot("session-live", 7, "2026-08-16T00:01:00.000Z"),
+    });
+    await tick();
+    const state = harness.states.at(-1);
+    expect(state?.status).toBe("live");
+    expect(state?.telemetry?.tokens.input).toBe(7);
+  });
+});
+
+describe("preferFresherTelemetry", () => {
+  it("keeps live when the read is older or missing a usable timestamp", () => {
+    const live = snapshot("s", 10, "2026-08-16T00:02:00.000Z");
+    const older = snapshot("s", 99, "2026-08-16T00:01:00.000Z");
+    expect(preferFresherTelemetry(live, older)).toBe(live);
+    expect(preferFresherTelemetry(live, undefined)).toBe(live);
+    expect(preferFresherTelemetry(undefined, older)).toBe(older);
   });
 });

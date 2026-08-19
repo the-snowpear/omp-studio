@@ -38,6 +38,7 @@ export function useSubagentComposer(input: {
   readonly enabled: boolean;
   readonly preview?: boolean;
   readonly running: boolean;
+  readonly pendingInteraction?: boolean;
   readonly client: SubagentComposerClient | null;
   readonly agent: SubagentComposerAgent | undefined;
   readonly sessionId: string | undefined;
@@ -54,12 +55,13 @@ export function useSubagentComposer(input: {
 
   const queueKey = input.sessionId ?? input.agent?.agentId;
   const preview = input.preview === true;
+  const pendingInteraction = input.pendingInteraction === true;
   const channelReady = input.enabled && input.agent !== undefined && !sending && (preview || input.client !== null);
   const textReady = !snapshotIsEmpty(draft);
   const promptEnabled = composerPromptEnabled({
     textReady,
     running: input.running,
-    pendingInteraction: false,
+    pendingInteraction,
     promptChannelReady: channelReady,
   });
   const queueEnabled = composerQueueEnabled({
@@ -70,7 +72,7 @@ export function useSubagentComposer(input: {
   const followUpEnabled = composerFollowUpEnabled({
     textReady,
     running: input.running,
-    pendingInteraction: false,
+    pendingInteraction,
     followUpChannelReady: channelReady,
   });
   const steerEnabled = channelReady;
@@ -237,7 +239,7 @@ export function useSubagentComposer(input: {
     if (
       !canFlushQueuedMessage({
         running: input.running,
-        pendingInteraction: false,
+        pendingInteraction,
         promptChannelReady: channelReady,
         entryId: head.id,
         ...(queueEdit === undefined ? {} : { pausedEntryId: queueEdit.entryId }),
@@ -255,7 +257,7 @@ export function useSubagentComposer(input: {
       flushBusyRef.current = false;
       setFlushTick((tick) => tick + 1);
     });
-  }, [channelReady, input.running, queueEdit, queueKey, queued, sendSnapshot, sending, flushTick]);
+  }, [channelReady, input.running, pendingInteraction, queueEdit, queueKey, queued, sendSnapshot, sending, flushTick]);
 
   const rejectSlash = useCallback(() => {
     setError("子 Agent 不支持斜杠指令");

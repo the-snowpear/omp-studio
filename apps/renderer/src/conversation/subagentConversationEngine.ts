@@ -1,5 +1,13 @@
 import type { ClientEvent, ConversationItem, ConversationRuntimeEvent, OpaqueCursor, QueryInput, SessionId, StudioClient } from "@omp-studio/client-contract";
-import { asClientError, identityKey, isStaleCursorError, sameIdentity } from "./conversationHost";
+import type { AgentId } from "@omp-studio/studio-protocol";
+import {
+  asClientError,
+  identityKey,
+  isStaleCursorError,
+  sameIdentity,
+  type ConversationTranscriptPage,
+  type ConversationTranscriptReadPage,
+} from "./conversationHost";
 import {
   applyLiveEvent,
   buildTimeline,
@@ -38,12 +46,68 @@ type BufferedLive = {
   readonly update: ConversationRuntimeEvent;
 };
 
+export function isAgentMissingError(error: unknown): boolean {
+  if (error === null || typeof error !== "object") return false;
+  const rec = error as { code?: unknown; message?: unknown; details?: unknown };
+  if (rec.code === "AGENT_NOT_FOUND") return true;
+  if (typeof rec.details === "object" && rec.details !== null) {
+    const reason = (rec.details as { reason?: unknown }).reason;
+    if (reason === "AGENT_NOT_FOUND") return true;
+  }
+  return /was not found/i.test(typeof rec.message === "string" ? rec.message : "");
+}
+
+export function shouldReadLiveAgentConversation(input: {
+  readonly runtimeConnected: boolean;
+  readonly parentSessionId?: SessionId;
+  readonly liveSessionId?: SessionId;
+}): boolean {
+  if (!input.runtimeConnected) return false;
+  if (input.parentSessionId === undefined) return true;
+  return input.liveSessionId === input.parentSessionId;
+}
+
+async function readAgentConversationPage(
+  client: SubagentConversationClient,
+  input: {
+    readonly agentId: string;
+    readonly parentSessionId?: SessionId;
+    readonly liveSessionId?: SessionId;
+    readonly runtimeConnected: boolean;
+    readonly cursor?: OpaqueCursor;
+    readonly limit: number;
+  },
+): Promise<ConversationTranscriptPage | ConversationTranscriptReadPage> {
+  if (shouldReadLiveAgentConversation(input)) {
+    try {
+      return await client.query("agent.conversation.read", {
+        agentId: input.agentId as QueryInput<"agent.conversation.read">["agentId"],
+        ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+        limit: input.limit,
+      });
+    } catch (cause) {
+      if (input.parentSessionId === undefined || !isAgentMissingError(cause)) throw cause;
+    }
+  }
+  if (input.parentSessionId === undefined) {
+    throw { code: "UNAVAILABLE", message: "当前没有已连接的 Runtime，无法读取子 Agent 对话。" };
+  }
+  return await client.query("session.transcript.readPage", {
+    sessionId: input.parentSessionId,
+    agentId: input.agentId as AgentId,
+    ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+    limit: input.limit,
+  });
+}
+
 export function createSubagentConversationEngine(input: {
   readonly preview: boolean;
   readonly previewItems: readonly ConversationItem[];
   readonly client: SubagentConversationClient | null;
   readonly target: SubagentHubTarget | null;
   readonly runtimeConnected: boolean;
+  readonly parentSessionId?: SessionId;
+  readonly liveSessionId?: SessionId;
 }): SubagentConversationEngine {
   let state = emptyConversationState();
   let loadingOlder = false;
@@ -54,6 +118,7 @@ export function createSubagentConversationEngine(input: {
   let replaying = false;
   let unsub: (() => void) | undefined;
   const listeners = new Set<() => void>();
+  const liveRead = shouldReadLiveAgentConversation(input);
 
   const emit = () => {
     for (const listener of listeners) listener();
@@ -110,16 +175,26 @@ export function createSubagentConversationEngine(input: {
     setState(next);
   };
 
+  const pageInput = (cursor?: OpaqueCursor) => ({
+    agentId: input.target?.agentId ?? "",
+    runtimeConnected: input.runtimeConnected,
+    limit: PAGE_LIMIT,
+    ...(cursor === undefined ? {} : { cursor }),
+    ...(input.parentSessionId === undefined ? {} : { parentSessionId: input.parentSessionId }),
+    ...(input.liveSessionId === undefined ? {} : { liveSessionId: input.liveSessionId }),
+  });
+
   const readLatest = async (generation: number) => {
     if (input.preview || input.client === null || input.target === null || disposed) return;
     setState({ ...resetConversation(state.generation, state.identity, "loading"), resyncRequired: state.resyncRequired });
     try {
-      const page = await input.client.query("agent.conversation.read", {
-        agentId: input.target.agentId as QueryInput<"agent.conversation.read">["agentId"],
-        limit: PAGE_LIMIT,
-      });
+      const page = await readAgentConversationPage(input.client, pageInput());
       if (disposed || generation !== requestGeneration) return;
-      const identity = { sessionId: page.sessionId as SessionId, runtimeEpoch: page.runtimeEpoch };
+      const identity = {
+        sessionId: page.sessionId as SessionId,
+        ...("runtimeEpoch" in page ? { runtimeEpoch: page.runtimeEpoch } : {}),
+        ...("transcriptRevision" in page ? { transcriptRevision: page.transcriptRevision } : {}),
+      };
       const seeded = resetConversation(generation, identity, "loading");
       setState(hydratePage(seeded, page, generation, "replace"));
       replayBuffer(page.sessionId);
@@ -189,12 +264,18 @@ export function createSubagentConversationEngine(input: {
         });
         return;
       }
-      if (!input.runtimeConnected || input.client === null) {
+      if (input.client === null) {
+        setState(resetConversation(generation, null, "unavailable", "当前 Client 未提供 transcript hydrate。"));
+        return;
+      }
+      if (!input.runtimeConnected && input.parentSessionId === undefined) {
         setState(resetConversation(generation, null, "unavailable", "当前没有已连接的 Runtime，无法读取子 Agent 对话。"));
         return;
       }
       setState(resetConversation(generation, null, "loading"));
-      unsub = input.client.subscribe({ scope: "runtime" }, onEvent);
+      if (liveRead) {
+        unsub = input.client.subscribe({ scope: "runtime" }, onEvent);
+      }
       void readLatest(generation);
     },
     dispose() {
@@ -214,11 +295,7 @@ export function createSubagentConversationEngine(input: {
       loadingOlder = true;
       emit();
       try {
-        const page = await input.client.query("agent.conversation.read", {
-          agentId: input.target.agentId as QueryInput<"agent.conversation.read">["agentId"],
-          cursor,
-          limit: PAGE_LIMIT,
-        });
+        const page = await readAgentConversationPage(input.client, pageInput(cursor));
         if (disposed || generation !== requestGeneration) return;
         if (!sameIdentity(page, identity)) return;
         setState(hydratePage(state, page, state.generation, "prepend"));

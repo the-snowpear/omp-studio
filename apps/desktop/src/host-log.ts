@@ -8,11 +8,34 @@
  */
 
 import { appendFile, mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { redactText } from "@omp-studio/host-client-api";
 
 export type HostLogLevel = "info" | "warn" | "error";
+
+const STATE_DIRECTORY_NAME = "omp-studio";
+
+/** Dated Host log basename: `host-YYYY-MM-DD.log`. */
+export const HOST_LOG_BASENAME = /^host-\d{4}-\d{2}-\d{2}\.log$/u;
+
+/** Logs directory under a Host profile directory. */
+export function hostLogsDirectory(profileDirectory: string): string {
+  return join(profileDirectory, "logs");
+}
+
+/**
+ * Production Host logs directory (`%APPDATA%\omp-studio\logs` on Windows).
+ * Shared by the file log writer and the diagnostics chrome IPC so the
+ * Renderer never has to learn a filesystem path.
+ */
+export function defaultHostLogsDirectory(): string {
+  const root = process.platform === "darwin"
+    ? join(homedir(), "Library", "Application Support")
+    : (process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"));
+  return join(root, STATE_DIRECTORY_NAME, "logs");
+}
 
 export interface HostLog {
   write(level: HostLogLevel, event: string, detail?: string): void;

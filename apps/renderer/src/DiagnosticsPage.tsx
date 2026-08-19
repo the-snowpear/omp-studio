@@ -16,15 +16,30 @@ import {
   deriveDiagnosticsView,
   formatCheckedAt,
   formatDiagnosticEntryMessage,
+  formatRuntimeConnectionFacts,
+  formatRuntimeConnectionLine,
+  runtimeCanReconnect,
+  runtimeCanRestart,
   type DiagnosticsCheck,
   type DiagnosticsHero,
 } from "./diagnosticsModel";
+import { ActionProgressBar } from "./ActionProgressBar";
+import { ensureRuntimeConnection } from "./runtimeEnsure";
 import { isUpdateCheckTimeout, queryWithTimeout } from "./updateCheck";
+
+type DiagAction = {
+  readonly kind: "reconnect" | "restart" | "install" | "update" | "reinstall" | "recheck" | "check-update";
+  readonly label: string;
+  readonly step: number;
+  readonly steps: number;
+};
 
 type CapManifest = ClientBootstrap["capabilityManifest"];
 
 export const DIAGNOSTICS_INTENT_KEY = "omp.diagnosticsIntent";
-export type DiagnosticsIntent = "check-update";
+export type DiagnosticsIntent = "check-update" | "reconnect" | "restart";
+
+const DIAGNOSTICS_INTENTS: ReadonlySet<string> = new Set(["check-update", "reconnect", "restart"]);
 
 export function setDiagnosticsIntent(intent: DiagnosticsIntent): void {
   try {
@@ -40,17 +55,13 @@ function takeDiagnosticsIntent(): DiagnosticsIntent | null {
     if (!raw) return null;
     sessionStorage.removeItem(DIAGNOSTICS_INTENT_KEY);
     const value = JSON.parse(raw) as { intent?: unknown };
-    return value.intent === "check-update" ? "check-update" : null;
+    return typeof value.intent === "string" && DIAGNOSTICS_INTENTS.has(value.intent)
+      ? (value.intent as DiagnosticsIntent)
+      : null;
   } catch {
     return null;
   }
 }
-
-const CONTRACT = {
-  export: "导出（暂未实现）",
-  logDir: "日志目录（暂未实现）",
-  restart: "重启（暂未实现）",
-} as const;
 
 const GRADE_TONE: Record<string, string> = {
   stable: "green",
@@ -183,21 +194,29 @@ function previewCapabilities(): CapManifest {
 
 function heroIcon(kind: DiagnosticsHero["kind"]): string {
   if (kind === "ok") return "check";
-  if (kind === "update" || kind === "installing") return "update";
+  if (kind === "update" || kind === "installing" || kind === "connecting") return "update";
   if (kind === "missing") return "package";
   return "alert-c";
 }
 
 function heroClass(kind: DiagnosticsHero["kind"]): string {
   if (kind === "ok") return "ok";
-  if (kind === "update" || kind === "installing") return "warn";
+  if (kind === "update" || kind === "installing" || kind === "connecting") return "warn";
   return "fail";
 }
 
-function primaryLabel(action: DiagnosticsHero["primary"], busy: boolean): string {
-  if (action === "install") return busy ? "正在安装…" : "安装 Runtime";
-  if (action === "update") return busy ? "正在更新…" : "更新 Runtime";
-  return busy ? "正在检测…" : "重新检测";
+function primaryLabel(action: DiagnosticsHero["primary"], busy: DiagAction | null): string {
+  if (action === "install") return busy?.kind === "install" ? "正在安装…" : "安装 Runtime";
+  if (action === "update") return busy?.kind === "update" ? "正在更新…" : "更新 Runtime";
+  if (action === "reconnect") return busy?.kind === "reconnect" || busy?.kind === "restart" ? "正在连接…" : "重新连接 Runtime";
+  return busy?.kind === "recheck" ? "正在检测…" : "重新检测";
+}
+
+function primaryIcon(action: DiagnosticsHero["primary"]): string {
+  if (action === "update") return "update";
+  if (action === "install") return "package";
+  if (action === "reconnect") return "refresh";
+  return "pulse";
 }
 
 export function DiagnosticsPage({
@@ -219,8 +238,9 @@ export function DiagnosticsPage({
   const [diag, setDiag] = useState<DiagnosticReadModel | undefined>(diagnostics);
   const [caps, setCaps] = useState<CapManifest | undefined>(capabilities);
   const [env, setEnv] = useState<EnvironmentReadModel | undefined>(environment);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<DiagAction | null>(null);
   const [confirmReinstall, setConfirmReinstall] = useState(false);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const [notice, show, dismissNotice] = useNotice();
 
   useEffect(() => setDiag(diagnostics), [diagnostics]);
@@ -242,40 +262,51 @@ export function DiagnosticsPage({
     [viewRuntime, viewEnv, viewDiag, viewCaps],
   );
 
-  const refresh = useCallback(async () => {
+  const refreshQueries = useCallback(async (): Promise<boolean> => {
+    const [d, c, e] = await Promise.allSettled([
+      client.query("diagnostics.get", {}),
+      client.query("capabilities.get", {}),
+      client.query("environment.get", {}),
+    ]);
+    if (d.status === "fulfilled") setDiag(d.value);
+    if (c.status === "fulfilled") setCaps(c.value);
+    if (e.status === "fulfilled") setEnv(e.value);
+    return d.status === "fulfilled";
+  }, [client]);
+
+  const beginAction = useCallback((action: DiagAction) => {
+    setBusy(action);
+  }, []);
+
+  const refresh = useCallback(async (mode: "recheck" | "reconnect" = "recheck") => {
     if (preview) {
-      show("已重新检测 OMP（演示）", "check");
+      show(mode === "reconnect" ? "已重新连接 Runtime（演示）" : "已重新检测 OMP（演示）", "check");
       return;
     }
-    setBusy(true);
+    beginAction(
+      mode === "reconnect"
+        ? { kind: "reconnect", label: "正在请求连接", step: 1, steps: 2 }
+        : { kind: "recheck", label: "正在重新检测", step: 1, steps: 1 },
+    );
     try {
-      const status = runtime?.status ?? env?.runtime?.status;
       let reconnected = false;
-      if (status === "unavailable" || status === "disconnected") {
-        try {
-          const handle = await client.command("runtime.ensure", {});
-          const receipt = await waitForCommandReceipt(client, handle.requestId);
-          if (receipt.status === "completed") {
-            const connection = receipt.result as RuntimeConnection | undefined;
-            reconnected = connection?.status === "connected";
-          } else if (receipt.status === "failed") {
-            show(receipt.error.message, "alert-c");
-          }
-        } catch (error) {
-          show(error instanceof Error ? error.message : "重新连接 Runtime 失败", "alert-c");
+      if (mode === "reconnect" || runtimeCanReconnect(runtime ?? env?.runtime)) {
+        const result = await ensureRuntimeConnection(client, {}, (progress) => {
+          beginAction({ kind: "reconnect", ...progress });
+        });
+        if (result.ok) {
+          reconnected = true;
+        } else {
+          show(result.message, "alert-c");
         }
       }
-      const [d, c, e] = await Promise.allSettled([
-        client.query("diagnostics.get", {}),
-        client.query("capabilities.get", {}),
-        client.query("environment.get", {}),
-      ]);
-      if (d.status === "fulfilled") setDiag(d.value);
-      if (c.status === "fulfilled") setCaps(c.value);
-      if (e.status === "fulfilled") setEnv(e.value);
+      if (mode === "recheck") {
+        beginAction({ kind: "recheck", label: "正在刷新诊断", step: 1, steps: 1 });
+      }
+      const queried = await refreshQueries();
       if (reconnected) {
         show("Runtime 已重新连接", "check");
-      } else if (d.status === "fulfilled") {
+      } else if (queried) {
         show("已重新检测 OMP", "check");
       } else {
         show("重新检测失败", "alert-c");
@@ -283,9 +314,9 @@ export function DiagnosticsPage({
     } catch {
       show("重新检测失败", "alert-c");
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
-  }, [client, preview, show, runtime, env]);
+  }, [beginAction, client, preview, show, runtime, env, refreshQueries]);
 
   const checkUpdate = useCallback(async (notify: boolean) => {
     if (preview) {
@@ -297,7 +328,7 @@ export function DiagnosticsPage({
       }
       return;
     }
-    if (notify) setBusy(true);
+    if (notify) beginAction({ kind: "check-update", label: "正在对照本地制品", step: 1, steps: 1 });
     try {
       const next = await queryWithTimeout(() => client.query("environment.get", {}));
       setEnv(next);
@@ -314,14 +345,29 @@ export function DiagnosticsPage({
     } catch (error) {
       if (notify) show(isUpdateCheckTimeout(error) ? "检查更新超时" : "检查更新失败", "alert-c");
     } finally {
-      if (notify) setBusy(false);
+      if (notify) setBusy(null);
     }
-  }, [client, preview, scenario, mock.availableVersion, show]);
+  }, [beginAction, client, preview, scenario, mock.availableVersion, show]);
 
   const checkUpdateRef = useRef(checkUpdate);
   checkUpdateRef.current = checkUpdate;
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
   useEffect(() => {
-    void checkUpdateRef.current(takeDiagnosticsIntent() === "check-update");
+    const intent = takeDiagnosticsIntent();
+    if (intent === "check-update") {
+      void checkUpdateRef.current(true);
+      return;
+    }
+    if (intent === "reconnect") {
+      void refreshRef.current("reconnect");
+      return;
+    }
+    if (intent === "restart") {
+      setConfirmRestart(true);
+      return;
+    }
+    void checkUpdateRef.current(false);
   }, []);
 
   const installRuntime = useCallback(async (kind: "install" | "update" | "reinstall") => {
@@ -331,10 +377,21 @@ export function DiagnosticsPage({
       show(labels[kind], "check");
       return;
     }
-    setBusy(true);
+    beginAction({
+      kind,
+      label: kind === "update" ? "正在更新 Runtime" : kind === "reinstall" ? "正在重装 Runtime" : "正在安装 Runtime",
+      step: 1,
+      steps: 2,
+    });
     try {
       const handle = await client.command("runtime.install", {});
       const receipt = await waitForCommandReceipt(client, handle.requestId);
+      beginAction({
+        kind,
+        label: "正在刷新环境",
+        step: 2,
+        steps: 2,
+      });
       const [d, e] = await Promise.allSettled([
         client.query("diagnostics.get", {}),
         client.query("environment.get", {}),
@@ -350,14 +407,76 @@ export function DiagnosticsPage({
     } catch (error) {
       show(error instanceof Error ? error.message : "安装失败", "alert-c");
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
-  }, [client, preview, show]);
+  }, [beginAction, client, preview, show]);
+
+  const restartRuntime = useCallback(async () => {
+    setConfirmRestart(false);
+    if (preview) {
+      show("已重启并重新连接 Runtime（演示）", "check");
+      return;
+    }
+    beginAction({ kind: "restart", label: "正在停止当前托管进程", step: 1, steps: 3 });
+    try {
+      const result = await ensureRuntimeConnection(client, { force: true }, (progress) => {
+        beginAction({ kind: "restart", ...progress });
+      });
+      beginAction({ kind: "restart", label: "正在刷新诊断", step: 3, steps: 3 });
+      await refreshQueries();
+      if (result.ok) show("Runtime 已重启并重新连接", "check");
+      else show(result.message, "alert-c");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "重启 Runtime 失败", "alert-c");
+    } finally {
+      setBusy(null);
+    }
+  }, [beginAction, client, preview, show, refreshQueries]);
+
+  const openLogDir = useCallback(async () => {
+    if (preview) {
+      show("演示：打开日志目录不会触发外部操作", "folder");
+      return;
+    }
+    const api = window.ompStudioChrome;
+    if (api?.openLogDir === undefined) {
+      show("当前环境无法打开日志目录", "alert-c");
+      return;
+    }
+    try {
+      const result = await api.openLogDir();
+      if (result.ok) show("已打开日志目录", "folder");
+      else show(result.message, "alert-c");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "无法打开日志目录", "alert-c");
+    }
+  }, [preview, show]);
+
+  const exportLogs = useCallback(async () => {
+    if (preview) {
+      show("演示：导出日志不会写文件", "export");
+      return;
+    }
+    const api = window.ompStudioChrome;
+    if (api?.exportLogs === undefined) {
+      show("当前环境无法导出日志", "alert-c");
+      return;
+    }
+    try {
+      const result = await api.exportLogs();
+      if (result.ok) show("已导出 Host 日志", "export");
+      else if ("cancelled" in result && result.cancelled) return;
+      else show("message" in result ? result.message : "导出失败", "alert-c");
+    } catch (error) {
+      show(error instanceof Error ? error.message : "导出失败", "alert-c");
+    }
+  }, [preview, show]);
 
   const runPrimary = useCallback(() => {
     if (view.hero.primary === "install") void installRuntime("install");
     else if (view.hero.primary === "update") void installRuntime("update");
-    else void refresh();
+    else if (view.hero.primary === "reconnect") void refresh("reconnect");
+    else void refresh("recheck");
   }, [view.hero.primary, installRuntime, refresh]);
 
   const runCheckAction = useCallback((action: NonNullable<DiagnosticsCheck["action"]>) => {
@@ -389,7 +508,7 @@ export function DiagnosticsPage({
       lines.push(
         `OMP 版本: ${viewRuntime?.runtimeVersion ?? "—"}`,
         `上游版本: ${viewRuntime?.upstreamVersion ?? "—"}${viewRuntime?.upstreamCommit ? ` (${viewRuntime.upstreamCommit.slice(0, 7)})` : ""}`,
-        `运行时状态: ${viewRuntime?.status ?? "unavailable"} · ${viewRuntime?.classification ?? "—"}`,
+        `运行时状态: ${viewRuntime ? formatRuntimeConnectionLine(viewRuntime) : "无法读取"}`,
         `托管安装: ${viewEnv?.installer.status ?? "—"}${viewEnv?.installer.availableVersion ? ` · 可更新到 ${viewEnv.installer.availableVersion}` : ""}`,
         `后端: ${viewRuntime?.backend ?? "—"}`,
         `平台: ${viewEnv ? `${viewEnv.platform} · ${viewEnv.arch}` : "—"}`,
@@ -414,13 +533,14 @@ export function DiagnosticsPage({
   const capList = viewCaps?.capabilities ?? [];
   const installer = viewEnv?.installer;
   const canReinstall = view.hero.showReinstall;
+  const canRestart = runtimeCanRestart(viewRuntime);
 
   return (
     <div className="page-wide diag-page">
       <div className="diag-head">
         <div>
           <h1>诊断中心</h1>
-          <p className="muted small">检测运行状态、核对版本，并从本地签名制品安装、更新或重装 Runtime。</p>
+          <p className="muted small">检测运行状态、核对版本，并从本地签名制品安装、更新或重装 Runtime。断开时可重新连接；已连接时可重启托管进程，完成后会自动重新连接。</p>
           {preview ? <p className="tiny muted">演示数据 · 预览开时覆盖真实读模型</p> : null}
         </div>
         <div className="diag-head-actions">
@@ -436,30 +556,33 @@ export function DiagnosticsPage({
               {PREVIEW_CYCLE.find((item) => item.id === scenario)?.label}
             </button>
           ) : null}
-          <button type="button" className="btn outline" disabled={busy} onClick={() => void checkUpdate(true)}>
+          <button type="button" className="btn outline" disabled={busy !== null} onClick={() => void checkUpdate(true)}>
             <Icon name="update" extra="sm" />检查更新
           </button>
         </div>
       </div>
 
-      <section className={`env-summary ${heroClass(view.hero.kind)}`} aria-labelledby="diagHeroTitle">
+      <section className={`env-summary ${heroClass(view.hero.kind)}`} aria-labelledby="diagHeroTitle" aria-busy={busy !== null}>
         <span className="es-icon" aria-hidden="true"><Icon name={heroIcon(view.hero.kind)} /></span>
         <div className="es-copy">
           <b id="diagHeroTitle">{view.hero.title}</b>
           <div className="small">{view.hero.detail}</div>
         </div>
         <div className="es-actions">
-          <button type="button" className="btn primary" disabled={busy} onClick={runPrimary}>
-            <Icon name={view.hero.primary === "recheck" ? "pulse" : view.hero.primary === "update" ? "update" : "package"} extra="sm" />
+          <button type="button" className="btn primary" disabled={busy !== null} onClick={runPrimary}>
+            <Icon name={primaryIcon(view.hero.primary)} extra="sm" />
             {primaryLabel(view.hero.primary, busy)}
           </button>
           {view.hero.kind === "down" || view.hero.kind === "failed" ? (
-            <button type="button" className="btn outline" disabled={busy || !canReinstall} onClick={() => setConfirmReinstall(true)}>
+            <button type="button" className="btn outline" disabled={busy !== null || !canReinstall} onClick={() => setConfirmReinstall(true)}>
               <Icon name="refresh" extra="sm" />重装
             </button>
           ) : null}
         </div>
       </section>
+      {busy !== null ? (
+        <ActionProgressBar label={busy.label} step={busy.step} steps={busy.steps} />
+      ) : null}
 
       <div className="diag-ver-grid">
         <div className="diag-ver">
@@ -480,7 +603,7 @@ export function DiagnosticsPage({
         <div className="diag-ver">
           <div className="dv-k">运行中 Runtime</div>
           <div className="dv-v">{viewRuntime?.runtimeVersion ?? "—"}</div>
-          <div className="dv-s">{viewRuntime ? `${viewRuntime.status}${viewRuntime.classification ? ` · ${viewRuntime.classification}` : ""}` : "无法读取连接"}</div>
+          <div className="dv-s">{viewRuntime ? formatRuntimeConnectionLine(viewRuntime) : "无法读取连接"}</div>
         </div>
         <div className="diag-ver">
           <div className="dv-k">上游 OMP</div>
@@ -488,6 +611,17 @@ export function DiagnosticsPage({
           <div className="dv-s">{viewRuntime?.upstreamCommit ? viewRuntime.upstreamCommit.slice(0, 7) : "无 commit"}</div>
         </div>
       </div>
+
+      {viewRuntime?.status === "disconnected" || viewRuntime?.status === "unavailable" ? (
+        <div className="diag-kv" aria-label="Runtime 断开详情">
+          {formatRuntimeConnectionFacts(viewRuntime).map((fact) => (
+            <div className="dk" key={fact.label}>
+              <div className="k">{fact.label}</div>
+              <div className="v">{fact.value}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="diag-section">
         <h3>环境检测</h3>
@@ -498,10 +632,10 @@ export function DiagnosticsPage({
                 <Icon name={check.tone === "ok" ? "check" : check.tone === "warn" ? "alert" : "x"} extra="sm" />
               </span>
               <span className="ck-name">{check.label}</span>
-              <span className="ck-detail ellipsis">{check.detail}</span>
+              <span className="ck-detail wrap">{check.detail}</span>
               <span className="ck-actions">
                 {check.action ? (
-                  <button type="button" className="btn small outline" disabled={busy && check.action !== "problems"} onClick={() => runCheckAction(check.action!)}>
+                  <button type="button" className="btn small outline" disabled={busy !== null && check.action !== "problems"} onClick={() => runCheckAction(check.action!)}>
                     {check.action === "install" ? "安装" : check.action === "update" ? "更新" : "查看"}
                   </button>
                 ) : null}
@@ -520,7 +654,7 @@ export function DiagnosticsPage({
               <div className="sr-desc">对照本地签名制品与已装版本，不下载远程更新</div>
             </div>
             <div className="sr-control">
-              <button type="button" className="btn outline" disabled={busy} onClick={() => void checkUpdate(true)}>
+              <button type="button" className="btn outline" disabled={busy !== null} onClick={() => void checkUpdate(true)}>
                 <Icon name="update" extra="sm" />检查更新
               </button>
             </div>
@@ -531,7 +665,7 @@ export function DiagnosticsPage({
               <div className="sr-desc">用本地签名制品覆盖当前安装并重新激活</div>
             </div>
             <div className="sr-control">
-              <button type="button" className="btn outline" disabled={busy || !canReinstall} onClick={() => setConfirmReinstall(true)}>
+              <button type="button" className="btn outline" disabled={busy !== null || !canReinstall} onClick={() => setConfirmReinstall(true)}>
                 <Icon name="refresh" extra="sm" />重装
               </button>
             </div>
@@ -547,41 +681,54 @@ export function DiagnosticsPage({
               </button>
             </div>
           </div>
-          <div className={`set-row${preview ? "" : " is-unavailable"}`} data-tip={preview ? undefined : CONTRACT.export}>
+          <div className="set-row">
             <div>
-              <div className="sr-label">导出日志</div>
-              <div className="sr-desc">{CONTRACT.export}</div>
+              <div className="sr-label">重启 Runtime</div>
+              <div className="sr-desc">停止当前托管进程并重新启动，完成后会自动重新连接。进行中的会话可能中断。</div>
             </div>
             <div className="sr-control">
-              <button type="button" className="btn outline" disabled={!preview} onClick={() => preview && show("演示：导出日志不会写文件", "export")}>
+              <button type="button" className="btn outline" disabled={busy !== null || !canRestart} onClick={() => setConfirmRestart(true)}>
+                <Icon name="refresh" extra="sm" />重启
+              </button>
+            </div>
+          </div>
+          <div className="set-row">
+            <div>
+              <div className="sr-label">导出日志</div>
+              <div className="sr-desc">另存近期 Host 日志。路径留在系统对话框，不会进入界面。</div>
+            </div>
+            <div className="sr-control">
+              <button type="button" className="btn outline" onClick={() => void exportLogs()}>
                 <Icon name="export" extra="sm" />导出
               </button>
             </div>
           </div>
-          <div className={`set-row${preview ? "" : " is-unavailable"}`} data-tip={preview ? undefined : CONTRACT.logDir}>
+          <div className="set-row">
             <div>
               <div className="sr-label">打开日志目录</div>
-              <div className="sr-desc">{CONTRACT.logDir}</div>
+              <div className="sr-desc">在资源管理器中打开 Host 日志目录。</div>
             </div>
             <div className="sr-control">
-              <button type="button" className="btn outline" disabled={!preview} onClick={() => preview && show("演示：打开日志目录不会触发外部操作", "folder")}>
+              <button type="button" className="btn outline" onClick={() => void openLogDir()}>
                 <Icon name="folder" extra="sm" />打开
-              </button>
-            </div>
-          </div>
-          <div className={`set-row${preview ? "" : " is-unavailable"}`} data-tip={preview ? undefined : CONTRACT.restart}>
-            <div>
-              <div className="sr-label">重启 OMP Bridge</div>
-              <div className="sr-desc">{CONTRACT.restart}</div>
-            </div>
-            <div className="sr-control">
-              <button type="button" className="btn outline" disabled={!preview} onClick={() => preview && show("演示：重启 Bridge 不会真的重启", "refresh")}>
-                <Icon name="refresh" extra="sm" />重启
               </button>
             </div>
           </div>
         </div>
       </div>
+
+      {confirmRestart ? (
+        <div className="diag-confirm" role="dialog" aria-labelledby="diagRestartTitle" aria-modal="true">
+          <div>
+            <div id="diagRestartTitle" className="sr-label">重启 Runtime？</div>
+            <p className="sr-desc">会停止当前托管进程并重新启动，完成后会自动重新连接。进行中的会话可能中断。</p>
+          </div>
+          <div className="diag-confirm-acts">
+            <button type="button" className="btn outline" onClick={() => setConfirmRestart(false)}>取消</button>
+            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void restartRuntime()}>确认重启</button>
+          </div>
+        </div>
+      ) : null}
 
       {confirmReinstall ? (
         <div className="diag-confirm" role="dialog" aria-labelledby="diagReinstallTitle" aria-modal="true">
@@ -591,7 +738,7 @@ export function DiagnosticsPage({
           </div>
           <div className="diag-confirm-acts">
             <button type="button" className="btn outline" onClick={() => setConfirmReinstall(false)}>取消</button>
-            <button type="button" className="btn primary" disabled={busy} onClick={() => void installRuntime("reinstall")}>确认重装</button>
+            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void installRuntime("reinstall")}>确认重装</button>
           </div>
         </div>
       ) : null}
@@ -604,7 +751,7 @@ export function DiagnosticsPage({
               <span className="prob-sev sev-red" role="img" aria-label="错误"><Icon name="alert-c" extra="sm" /></span>
               <span className="mono tiny muted">{error.time}</span>
               <span className="chip gray xs">{error.src}</span>
-              <span className="ellipsis">{error.msg}</span>
+              <span className="prob-msg">{error.msg}</span>
             </div>
           )) : problems.length ? problems.map((entry) => (
             <div className="prob-row diag-err-row" key={entry.entryId}>
@@ -613,7 +760,7 @@ export function DiagnosticsPage({
               </span>
               <span className="mono tiny muted">{fmtTime(entry.occurredAt)}</span>
               <span className="chip gray xs">{entry.scope}</span>
-              <span className="ellipsis">{formatDiagnosticEntryMessage(entry)}</span>
+              <span className="prob-msg">{formatDiagnosticEntryMessage(entry)}</span>
             </div>
           )) : (
             <div className="muted small" style={{ padding: "10px 8px" }}>无最近错误或警告</div>

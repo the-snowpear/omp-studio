@@ -1,8 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { conversationPages } from "@omp-studio/testkit";
 import type { StudioClient } from "@omp-studio/client-contract";
 import type {
+  AgentId,
+  CapabilityManifest,
   Generation,
   OperatorStateSnapshot,
   RuntimeEpoch,
@@ -79,6 +81,15 @@ function mockClient(query?: unknown): StudioClient {
   } as unknown as StudioClient;
 }
 
+function hubCapabilities(...ids: string[]): CapabilityManifest {
+  return {
+    profile: "full-parity-v1",
+    generatedAt: "1970-01-01T00:00:00.000Z",
+    hash: "test",
+    capabilities: ids.map((id) => ({ id, grade: "stable", version: 1, evidence: "test" })),
+  };
+}
+
 function renderHub(
   snapshot?: OperatorStateSnapshot,
   extras: {
@@ -86,17 +97,32 @@ function renderHub(
     client?: StudioClient;
     canSend?: boolean;
     runtimeConnected?: boolean;
+    runtime?: { status: "connected" | "disconnected" | "unavailable" | "connecting"; classification: "managed" | "unavailable" };
+    capabilities?: CapabilityManifest;
+    agents?: readonly StudioAgentSnapshot[];
+    persistedReady?: boolean;
+    parentSessionId?: SessionId;
+    liveSessionId?: SessionId;
+    pendingInteraction?: boolean;
   } = {},
 ) {
   localStorage.setItem("omp.previewMode", extras.preview === true ? "1" : "0");
   return render(
-    <PreviewModeProvider>
+    <PreviewModeProvider switchEnabled>
       <AgentHubPage
         {...(snapshot === undefined ? {} : { snapshot })}
         {...(extras.client === undefined ? {} : { client: extras.client })}
         {...(extras.canSend === undefined ? {} : { canSend: extras.canSend })}
         {...(extras.runtimeConnected === undefined ? {} : { runtimeConnected: extras.runtimeConnected })}
-        {...(extras.runtimeConnected === true ? { runtime: { status: "connected", classification: "managed" } } : {})}
+        {...(extras.runtime === undefined
+          ? (extras.runtimeConnected === true ? { runtime: { status: "connected" as const, classification: "managed" as const } } : {})
+          : { runtime: extras.runtime })}
+        {...(extras.capabilities === undefined ? {} : { capabilities: extras.capabilities })}
+        {...(extras.agents === undefined ? {} : { agents: extras.agents })}
+        {...(extras.persistedReady === undefined ? {} : { persistedReady: extras.persistedReady })}
+        {...(extras.parentSessionId === undefined ? {} : { parentSessionId: extras.parentSessionId })}
+        {...(extras.liveSessionId === undefined ? {} : { liveSessionId: extras.liveSessionId })}
+        {...(extras.pendingInteraction === undefined ? {} : { pendingInteraction: extras.pendingInteraction })}
         onOpenMain={() => undefined}
       />
     </PreviewModeProvider>,
@@ -159,6 +185,63 @@ describe("AgentHubPage real-mode projection", () => {
     expect(chat.disabled).toBe(true);
     expect(revive.getAttribute("data-tip") ?? "").toContain("read-only");
     expect(kill.getAttribute("data-tip") ?? "").toContain("read-only");
+  });
+
+  it("asks only whether to stop the task and submits agent.kill immediately", async () => {
+    const command = vi.fn(async () => ({
+      requestId: "req-kill",
+      commandName: "agent.kill" as const,
+      status: "local_pending" as const,
+      idempotencyKey: "idem-kill",
+      issuedAt: "2026-08-19T00:00:00.000Z",
+    }));
+    const client = {
+      ...mockClient(),
+      command,
+      getState: () => ({
+        commands: {
+          "req-kill": {
+            requestId: "req-kill",
+            commandName: "agent.kill",
+            status: "completed",
+            result: { killed: true },
+            observedAt: "2026-08-19T00:00:00.000Z",
+          },
+        },
+      }),
+    } as unknown as StudioClient;
+    renderHub(snapshotWith([snapshotAgent()]), {
+      client,
+      runtimeConnected: true,
+      canSend: true,
+      capabilities: hubCapabilities("agent.kill"),
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Kill$/ }));
+    const dialog = screen.getByRole("dialog", { name: "结束任务" });
+    expect(dialog.textContent).toMatch(/确定结束「Lockfile Auditor」吗？结束后无法恢复。/);
+    expect(dialog.textContent).not.toMatch(/tombstone|InteractionDeck|registry|abort/i);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Kill" }));
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith("agent.kill", {
+        agentId: "agent-0001",
+        expectedGeneration: 1,
+      });
+    });
+    expect(screen.queryByRole("dialog", { name: "结束任务" })).toBeNull();
+  });
+
+  it("shows persisted parked agents when the live snapshot roster is empty", () => {
+    renderHub(snapshotWith([]), {
+      agents: [snapshotAgent({
+        agentId: "WorkerEcho" as AgentId,
+        displayName: "WorkerEcho",
+        status: "parked",
+        hasLiveSession: false,
+      })],
+    });
+    expect(screen.getByRole("option", { name: /WorkerEcho/ })).toBeTruthy();
+    expect(screen.getByText("Parked")).toBeTruthy();
   });
 
   it("keeps the selected agent when search filters it out of the list", () => {
@@ -272,6 +355,39 @@ describe("AgentHubPage conversation preview", () => {
     expect(query).not.toHaveBeenCalled();
   });
 
+  it("opens a persisted child transcript when the live agent is missing", async () => {
+    const query = vi.fn(async (name: string) => {
+      if (name === "agent.conversation.read") {
+        throw { code: "UNAVAILABLE", message: 'Agent "WorkerEcho" was not found' };
+      }
+      if (name === "session.transcript.readPage") return conversationPages.userAssistant;
+      throw new Error(name);
+    });
+    renderHub(snapshotWith([]), {
+      client: mockClient(query),
+      runtimeConnected: true,
+      canSend: true,
+      parentSessionId: "parent-session" as SessionId,
+      agents: [snapshotAgent({
+        agentId: "WorkerEcho" as AgentId,
+        displayName: "WorkerEcho",
+        status: "parked",
+        hasLiveSession: false,
+      })],
+    });
+    fireEvent.click(screen.getByRole("option", { name: /WorkerEcho/ }));
+    fireEvent.click(screen.getByRole("button", { name: "打开" }));
+    await vi.waitFor(() => {
+      expect(query).not.toHaveBeenCalledWith("agent.conversation.read", expect.anything());
+      expect(query).toHaveBeenCalledWith("session.transcript.readPage", {
+        sessionId: "parent-session",
+        agentId: "WorkerEcho",
+        limit: 50,
+      });
+      expect(screen.getByText("hello")).toBeTruthy();
+    });
+  });
+
   it("opens conversation preview from a chat hub intent", async () => {
     const query = vi.fn(async (name: string) => {
       if (name === "agent.conversation.read") return conversationPages.userAssistant;
@@ -300,7 +416,7 @@ describe("AgentHubPage conversation preview", () => {
     const { rerender } = renderHub(undefined, { client, runtimeConnected: true, canSend: true });
     expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
     rerender(
-      <PreviewModeProvider>
+      <PreviewModeProvider switchEnabled>
         <AgentHubPage
           snapshot={snapshotWith([snapshotAgent()])}
           client={client}
@@ -320,5 +436,83 @@ describe("AgentHubPage conversation preview", () => {
   it("ignores invalid hub intent ids", () => {
     setHubIntent("Main", "chat");
     expect(sessionStorage.getItem("omp.hubIntent")).toBeNull();
+  });
+
+  it("does not drop a hub intent before the persisted roster is ready", () => {
+    setHubIntent("agent-0001", "chat");
+    renderHub(snapshotWith([]), {
+      agents: [],
+      persistedReady: false,
+      parentSessionId: "sess-1" as SessionId,
+      runtimeConnected: true,
+      canSend: true,
+      client: mockClient(),
+    });
+    expect(sessionStorage.getItem("omp.hubIntent")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "返回" })).toBeNull();
+  });
+
+  it("disables Hub writes when viewing a session that is not the live snapshot", () => {
+    const query = vi.fn(async (name: string) => {
+      if (name === "session.transcript.readPage") return conversationPages.userAssistant;
+      throw new Error(name);
+    });
+    const command = vi.fn();
+    renderHub(snapshotWith([snapshotAgent({ status: "parked" })]), {
+      client: { ...mockClient(query), command },
+      runtimeConnected: true,
+      canSend: true,
+      parentSessionId: "hist-session" as SessionId,
+      liveSessionId: "sess-1" as SessionId,
+      agents: [snapshotAgent({ status: "parked" })],
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const revive = screen.getByRole("button", { name: /Revive/ }) as HTMLButtonElement;
+    expect(revive.disabled).toBe(true);
+    expect(revive.getAttribute("data-tip") ?? "").toContain("历史会话");
+    fireEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+    expect(query).not.toHaveBeenCalledWith("agent.transcript.read", expect.anything());
+    expect(screen.getByText(/归档对话/)).toBeTruthy();
+  });
+
+  it("persists Hub selection per session id", () => {
+    renderHub(snapshotWith([
+      snapshotAgent(),
+      snapshotAgent({ agentId: "agent-0002" as AgentId, displayName: "Other Worker" }),
+    ]), {
+      parentSessionId: "sess-a" as SessionId,
+    });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const saved = JSON.parse(localStorage.getItem("omp.agentHub.state") ?? "{}") as {
+      selectedBySession?: Record<string, string>;
+    };
+    expect(saved.selectedBySession?.["sess-a"]).toBe("agent-0001");
+  });
+
+  it("reconnects a disconnected Runtime from the offline banner", async () => {
+    const command = vi.fn(async (name: string) => {
+      if (name !== "runtime.ensure") throw new Error(name);
+      return { requestId: "req-hub-ensure" };
+    });
+    const subscribe = vi.fn((_scope: unknown, listener: (event: { kind: string; receipt?: { status: string; result?: { status: string } } }) => void) => {
+      queueMicrotask(() => {
+        listener({
+          kind: "command.receipt",
+          receipt: { status: "completed", result: { status: "connected" } },
+        });
+      });
+      return () => undefined;
+    });
+    renderHub(snapshotWith([]), {
+      client: { ...mockClient(), command, subscribe } as unknown as StudioClient,
+      runtime: { status: "disconnected", classification: "managed" },
+      runtimeConnected: false,
+    });
+    expect(screen.getByText("Runtime 连接已断开")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重新连接" }));
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith("runtime.ensure", {});
+      expect(screen.getByText(/Runtime 已重新连接/)).toBeTruthy();
+    });
   });
 });

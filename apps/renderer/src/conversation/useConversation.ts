@@ -31,9 +31,26 @@ const emptySnapshot: ConversationSnapshot = {
   identityKey: "",
 };
 
+/**
+ * Keep the last transcript on screen while the engine remounts for the same
+ * session (archive → live after resume, or compact completion reload).
+ * An empty current snapshot for a *different* session is shown as-is.
+ */
+export function retainConversationWhileRemounting(
+  current: ConversationSnapshot,
+  previous: ConversationSnapshot | undefined,
+  sessionId: ConversationIdentity["sessionId"] | undefined,
+): ConversationSnapshot {
+  if (current.rows.length > 0) return current;
+  if (sessionId === undefined || previous === undefined || previous.rows.length === 0) return current;
+  if (previous.state.identity?.sessionId !== sessionId) return current;
+  return previous;
+}
+
 export function useConversation(input: UseConversationInput): UseConversationResult {
   const [, bump] = useReducer((value: number) => value + 1, 0);
   const engineRef = useRef<ConversationEngine | null>(null);
+  const heldRef = useRef<ConversationSnapshot | undefined>(undefined);
   const clientRef = useRef(input.client);
   clientRef.current = input.client;
   // Runtime residency is deliberately not part of the conversation engine
@@ -74,6 +91,8 @@ export function useConversation(input: UseConversationInput): UseConversationRes
   } catch {
     snapshot = emptySnapshot;
   }
+  snapshot = retainConversationWhileRemounting(snapshot, heldRef.current, input.identity?.sessionId);
+  if (snapshot.rows.length > 0) heldRef.current = snapshot;
   return {
     ...snapshot,
     loadOlder: () => {

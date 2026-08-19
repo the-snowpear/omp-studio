@@ -273,6 +273,91 @@ test("runtime.ensure completes with the current connection", async () => {
   });
 });
 
+test("runtime.ensure force is forwarded to the session port", async () => {
+  const ensured: Array<{ force?: boolean } | undefined> = [];
+  let hello: HostRuntimeHelloView | undefined = HELLO;
+  const runtime: HostRuntimeAccess = {
+    hello: () => hello,
+    snapshot: () => (hello === undefined ? undefined : snapshot()),
+    ensure: async (input) => {
+      ensured.push(input);
+      hello = HELLO;
+    },
+  };
+  await withFacade({ runtime }, async (facade) => {
+    const requestId = "req-ensure-force" as CommandRequestId;
+    const receipt = new Promise<void>((resolve) => {
+      const unsub = facade.subscribe({ scope: "command", requestId }, (event) => {
+        if (event.kind === "command.receipt") {
+          assert.equal(event.receipt.status, "completed");
+          unsub();
+          resolve();
+        }
+      });
+    });
+    const accepted = await facade.command({
+      commandName: "runtime.ensure",
+      input: { force: true },
+      idempotencyKey: "ensure-force" as IdempotencyKey,
+      requestId,
+    });
+    assert.equal(accepted.status, "accepted");
+    await receipt;
+    assert.deepEqual(ensured, [{ force: true }]);
+  });
+});
+
+test("diagnostics.get keeps the last disconnect after reconnect", async () => {
+  let hello: HostRuntimeHelloView | undefined = HELLO;
+  const runtime: HostRuntimeAccess = {
+    hello: () => hello,
+    snapshot: () => (hello === undefined ? undefined : snapshot()),
+    disconnect: () =>
+      hello === undefined
+        ? {
+            code: "process-exit",
+            reason: "Runtime process exited (code=1)",
+            occurredAt: "2026-08-19T08:00:00.000Z",
+            autoRespawn: "exhausted",
+          }
+        : undefined,
+    ensure: async () => {
+      hello = HELLO;
+    },
+  };
+  await withFacade({ runtime }, async (facade) => {
+    hello = undefined;
+    const down = await facade.query({ queryName: "environment.get", input: {} });
+    assert.equal(down.ok, true);
+    if (!down.ok) return;
+    assert.equal(down.result.runtime.status, "disconnected");
+    assert.equal(down.result.runtime.disconnectedAt, "2026-08-19T08:00:00.000Z");
+    assert.equal(down.result.runtime.autoRespawn, "exhausted");
+    const requestId = "req-ensure-history" as CommandRequestId;
+    const receipt = new Promise<void>((resolve) => {
+      const unsub = facade.subscribe({ scope: "command", requestId }, (event) => {
+        if (event.kind === "command.receipt") {
+          unsub();
+          resolve();
+        }
+      });
+    });
+    await facade.command({
+      commandName: "runtime.ensure",
+      input: {},
+      idempotencyKey: "ensure-history" as IdempotencyKey,
+      requestId,
+    });
+    await receipt;
+    const diagnostics = await facade.query({ queryName: "diagnostics.get", input: {} });
+    assert.equal(diagnostics.ok, true);
+    if (!diagnostics.ok) return;
+    const past = diagnostics.result.entries.find((entry) => entry.detail?.code === "process-exit");
+    assert.equal(past?.detail?.autoRespawn, "exhausted");
+    assert.equal(past?.occurredAt, "2026-08-19T08:00:00.000Z");
+  });
+});
+
 test("runtime.ensure fails closed when no ensure seam is wired", async () => {
   const runtime: HostRuntimeAccess = {
     hello: () => undefined,

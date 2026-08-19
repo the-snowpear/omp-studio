@@ -1,72 +1,103 @@
-# OMP Studio — electron-builder 配置（NSIS target，骨架阶段）
-# 用法：npx electron-builder --config packaging/electron-builder.yml --win nsis
+# OMP Studio — electron-builder NSIS installer (Windows x64).
+# Run from the repository root: npm run pack:win
 
-appId: com.ompstudio.app
+appId: com.ompstudio.desktop
 productName: OMP Studio
 copyright: Copyright © 2026 OMP Studio
-
-# 打包的应用根：apps/desktop（从仓库根执行的相对路径）
-appDirectory: apps/desktop
+forceCodeSigning: false
 
 directories:
+  app: apps/desktop
   output: outputs/installer
   buildResources: packaging/resources
 
-files:
-  - dist/**          # apps/desktop/dist — 编译后的 Electron Main
-  - package.json
-  - resources/**     # window / notification / asar-local app icon
-  - node_modules/**  # 依赖（含 @omp-studio/* workspace 包与 node-pty）
+# Keep the executable name stable for NSIS process checks and shortcuts.
+executableName: OMP Studio
+artifactName: OMP-Studio-Setup-${version}-${os}-${arch}.${ext}
 
-# 原生模块：按 Electron ABI 重编译 node-pty（与 apps/desktop 的 @electron/rebuild 对应）
+files:
+  - dist/**/*
+  - package.json
+  - resources/**/*
+  - "!dist/test/**"
+  - "!dist/**/*.map"
+  - "!**/*.tsbuildinfo"
+  # Workspace packages are copied in full; never ship local Runtime artifact caches
+  # or package tests inside asar / asar.unpacked.
+  - "!**/dist/artifacts/**"
+  - "!**/dist/test/**"
+  - "!**/*.exe"
+
+# Native PTY bits must not stay inside asar. Icons are also unpacked so a
+# fallback path exists if extraResources is missing.
+asarUnpack:
+  - "**/*.node"
+  - "**/node-pty/**"
+  - "resources/icon.ico"
+  - "resources/icon.png"
+
 npmRebuild: true
 buildDependenciesFromSource: false
 
-# asar 内保留原生模块（否则 node-pty 运行时找不到 .node 文件）
-asarUnpack:
-  - "**/*.node"
+# Renderer is loaded as appPath/../renderer/dist/index.html
+# (`app.asar` → `resources/renderer/dist`). See resolveRendererEntry.
+# Product icons live next to app.asar as real files: Windows Shell cannot
+# use an asar path for the taskbar / notifications.
+extraResources:
+  - from: apps/renderer/dist
+    to: renderer/dist
+    filter:
+      - "**/*"
+      - "!**/*.map"
+  - from: apps/desktop/resources/icon.ico
+    to: icon.ico
+  - from: apps/desktop/resources/icon.png
+    to: icon.png
 
-# 签名 Runtime 活副本，放在安装目录而不是 asar 里（omp.exe 必须能被 spawn）。
-# 目录对齐 RuntimeInstaller：`$INSTDIR\runtime\versions\<ver>\omp.exe`。
-# 打包前先 npm run omp:build:host，再 node scripts/prepare-installer-resources.mjs。
+# Signed Runtime live copy next to the exe (not inside asar).
+# Only the current series version is staged by pack:win:prepare.
+# Layout: $INSTDIR\runtime\versions\<ver>\omp.exe
 extraFiles:
-  - from: packages/runtime-installer/dist/artifacts/win32-x64
+  - from: packaging/runtime-payload
     to: runtime/versions
+    filter:
+      - "**/*"
+      - "!**/.staging-*/**"
+      - "!signing-private.pem"
   - from: packaging/runtime-keys
     to: runtime-keys
+    filter:
+      - key-id.txt
+      - trusted-public.pem
+      - "!signing-private.pem"
+      - "!**/*.pem.bak"
 
 win:
-  # 骨架阶段：x64 即可；正式发布再加 arm64
   target:
     - target: nsis
       arch:
         - x64
-  # 复用 desktop 现有图标资源（ico 用于安装器/快捷方式）
   icon: apps/desktop/resources/icon.ico
   requestedExecutionLevel: requireAdministrator
+  # Keep rcedit (icon / version resources). Skip Authenticode only.
+  signExecutable: false
 
 nsis:
-  # 向导式安装（非 oneClick）：允许选择安装目录，符合原型 UI 的交互
   oneClick: false
-  allowToChangeInstallationDirectory: true
-  # 所有用户安装（Program Files，需要管理员）。
-  # oneClick:false + perMachine:true = 不出现「仅为我 / 所有用户」页。
+  allowToChangeInstallationDirectory: false
   perMachine: true
-  # true = 全新安装默认创建；升级时不强迫重建用户已删的桌面图标。不要改 always。
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: OMP Studio
   menuCategory: false
-  runAfterFinish: true
-  # 对 oneClick:false 无效。会话/运行时/日志必须保留；头像由 customUnInstall 在真卸载时删除。
-  # 该宏在升级时也会跑，custom.nsh 必须用 ${isUpdated} 跳过。
+  runAfterFinish: false
   deleteAppDataOnUninstall: false
-  # customRemoveFiles：升级只清程序文件并留下 userdata；真卸载才 RMDir /r $INSTDIR
   include: packaging/nsis/custom.nsh
   installerLanguages:
     - zh_CN
     - en_US
   language: 2052
   uninstallDisplayName: OMP Studio
-  # 骨架阶段未完成签名；正式发布需替换为真实证书
+  artifactName: OMP-Studio-Setup-${version}-${os}-${arch}.${ext}
+  # Unsigned 0.1.0 preview. Replace with a real Authenticode cert before GitHub Releases.
   # signingHashAlgorithms: [sha256]

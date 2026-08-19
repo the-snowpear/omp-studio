@@ -1,5 +1,6 @@
 import { memo, useState, type ReactNode } from "react";
 import type { ConversationMessageError } from "@omp-studio/client-contract";
+import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
 import { useAppSettings, type ToolActivityDetail } from "../settings/appSettings";
@@ -7,6 +8,7 @@ import { BatchChain, type ChainItem } from "./BatchChain";
 import { TruncationMark } from "./ToolBody";
 import { MarkdownText } from "./markdown";
 import { TurnDiffCard } from "./TurnDiffCard";
+import { compactRuleLabel, compactSummaryFoldable } from "./compactSummary";
 import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
 import type { SubagentHubTarget, ThinkView, TurnFileChange } from "./toolMeta";
 import { UserMessageBody } from "./UserMessageBody";
@@ -204,6 +206,7 @@ function renderAssistantSegments(
     /** 设置 → 常规：流式输出（关闭后不带流式光标渲染）。 */
     showStreaming?: boolean;
     onInspectSubagent?: (target: SubagentHubTarget) => void;
+    liveAgents?: readonly StudioAgentSnapshot[];
     allowCopy?: boolean;
   } = {},
 ): ReactNode[] {
@@ -279,6 +282,7 @@ function renderAssistantSegments(
         {...(options.standalone === true ? { standalone: true } : {})}
         {...(liveTail ? { liveTail: true } : {})}
         {...(options.showToolIntent === false ? { showDetail: false } : {})}
+        {...(options.liveAgents === undefined ? {} : { liveAgents: options.liveAgents })}
         {...(options.onInspectSubagent === undefined ? {} : { onInspectSubagent: options.onInspectSubagent })}
       />,
     );
@@ -312,18 +316,52 @@ function isCommittedUserRow(row: Extract<TimelineRow, { type: "user" }>): boolea
   return row.pending === undefined && !row.itemId.startsWith("pending:");
 }
 
+function CompactionRule({ item }: { item: Extract<TimelineRow, { type: "compaction" }>["item"] }) {
+  const [open, setOpen] = useState(false);
+  const label = compactRuleLabel(item);
+  const summary = (item.summary.trim() || item.shortSummary?.trim() || "");
+  const foldable = compactSummaryFoldable(item);
+  const showBody = summary.length > 0 && (foldable ? open : summary !== label);
+  return (
+    <div className="ev" data-item-id={item.itemId}>
+      {foldable ? (
+        <button
+          type="button"
+          className={`compact-rule${open ? " is-open" : ""}`}
+          aria-expanded={open}
+          aria-label={`Compact · ${label}，${open ? "收起" : "展开"}详情`}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <Icon name="minimize" extra="sm compact-rule-icon" />
+          <span className="compact-rule-label"><b>Compact</b> · <span className="compact-rule-text">{label}</span></span>
+          <Icon name="chevron-d" extra="sm compact-rule-chev" />
+        </button>
+      ) : (
+        <div className="compact-rule">
+          <Icon name="minimize" extra="sm compact-rule-icon" />
+          <span className="compact-rule-label"><b>Compact</b> · <span className="compact-rule-text">{label}</span></span>
+        </div>
+      )}
+      {item.warning ? <p className="muted small">{item.warning}</p> : null}
+      {showBody ? <div className="compact-summary convo-plain small">{summary}</div> : null}
+    </div>
+  );
+}
+
 export const ConversationItemView = memo(function ConversationItemView({
   row,
   onRestore,
   onRestoreUserMessage,
   onBranchUserMessage,
   userRestoreDisabledReason,
+  userBranchDisabledReason,
   expandAll = false,
   fileChanges,
   changesDefaultOpen,
   demo,
   onReviewChanges,
   onInspectSubagent,
+  liveAgents,
   planLink,
 }: {
   row: TimelineRow;
@@ -331,12 +369,14 @@ export const ConversationItemView = memo(function ConversationItemView({
   onRestoreUserMessage?: (itemId: string, text: string) => void;
   onBranchUserMessage?: (itemId: string, text: string) => void;
   userRestoreDisabledReason?: string;
+  userBranchDisabledReason?: string;
   expandAll?: boolean;
   fileChanges?: readonly TurnFileChange[];
   changesDefaultOpen?: boolean;
   demo?: boolean;
   onReviewChanges?: () => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
+  liveAgents?: readonly StudioAgentSnapshot[];
   planLink?: PlanCreatedLink;
 }) {
   const { settings: appSettings } = useAppSettings();
@@ -351,12 +391,13 @@ export const ConversationItemView = memo(function ConversationItemView({
             onRestore: () => onRestoreUserMessage(row.itemId, row.text),
           }
         : undefined;
+    const branchReason = userBranchDisabledReason ?? userRestoreDisabledReason;
     const branch =
       onBranchUserMessage !== undefined && committed
         ? {
-            ...(userRestoreDisabledReason === undefined
+            ...(branchReason === undefined
               ? {}
-              : { disabled: true as const, reason: userRestoreDisabledReason }),
+              : { disabled: true as const, reason: branchReason }),
             onBranch: () => onBranchUserMessage(row.itemId, row.text),
           }
         : undefined;
@@ -420,6 +461,7 @@ export const ConversationItemView = memo(function ConversationItemView({
       showToolIntent: appSettings.showToolIntent,
       showStreaming: appSettings.streaming,
       ...(onInspectSubagent === undefined ? {} : { onInspectSubagent }),
+      ...(liveAgents === undefined ? {} : { liveAgents }),
     } as const;
     if (gallery) {
       return (
@@ -460,16 +502,7 @@ export const ConversationItemView = memo(function ConversationItemView({
     );
   }
   if (row.type === "compaction") {
-    return (
-      <div className="ev" data-item-id={row.item.itemId}>
-        <div className="compact-rule">
-          <Icon name="minimize" extra="sm" />
-          <span><b>Compact</b> · {row.item.shortSummary ?? row.item.summary}</span>
-        </div>
-        {row.item.warning ? <p className="muted small">{row.item.warning}</p> : null}
-        <p className="convo-plain small">{row.item.summary}</p>
-      </div>
-    );
+    return <CompactionRule item={row.item} />;
   }
   if (row.type === "compacting") {
     return (

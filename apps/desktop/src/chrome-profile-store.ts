@@ -3,7 +3,7 @@
  * 可注入目录与 fs，供无 Electron 的单测使用。
  *
  * 路径：{AppData}/omp-studio/profile/avatar.jpg（或 .png / .webp）
- * 同一时刻只保留一个文件：新上传先删旧文件再写。
+ * 同一时刻只保留一个文件：先写临时文件再覆盖目标，成功后再删其他扩展名。
  * 卸载时由 NSIS `customUnInstall` 删除该 profile 目录。
  */
 
@@ -67,8 +67,15 @@ export async function writeProfileAvatar(
 ): Promise<void> {
   const dir = profileDirectory(persistRoot);
   await fs.mkdir(dir, { recursive: true });
-  await clearProfileAvatar(persistRoot);
-  await fs.writeFile(avatarPath(persistRoot, avatar.mime), avatar.bytes);
+  const dest = avatarPath(persistRoot, avatar.mime);
+  const tmp = `${dest}.tmp`;
+  await fs.writeFile(tmp, avatar.bytes);
+  try {
+    await fs.copyFile(tmp, dest);
+  } finally {
+    await fs.unlink(tmp).catch(() => undefined);
+  }
+  await clearProfileAvatar(persistRoot, dest);
 }
 
 export async function readProfileAvatar(persistRoot: string): Promise<ChromeAvatarBytes | null> {
@@ -92,7 +99,7 @@ export async function readProfileAvatar(persistRoot: string): Promise<ChromeAvat
   return null;
 }
 
-export async function clearProfileAvatar(persistRoot: string): Promise<void> {
+export async function clearProfileAvatar(persistRoot: string, keepPath?: string): Promise<void> {
   const dir = profileDirectory(persistRoot);
   let names: string[];
   try {
@@ -101,9 +108,12 @@ export async function clearProfileAvatar(persistRoot: string): Promise<void> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
+  const keep = keepPath === undefined ? undefined : path.resolve(keepPath);
   await Promise.all(names.map(async (name) => {
     if (!/^avatar\.(jpg|jpeg|webp|png)$/u.test(name)) return;
-    await fs.unlink(path.join(dir, name));
+    const file = path.join(dir, name);
+    if (keep !== undefined && path.resolve(file) === keep) return;
+    await fs.unlink(file);
   }));
 }
 

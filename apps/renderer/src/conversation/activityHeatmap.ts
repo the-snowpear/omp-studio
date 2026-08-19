@@ -1,7 +1,5 @@
 import { DAY_MS, fmtTokens, intensity, startOfDay } from "../usage/tokenUsage";
 
-/** Inclusive trailing window shown on the empty-state board. */
-export const ACTIVITY_HEAT_DAYS = 365;
 /** Adjacent month labels need at least this many week columns or they collide. */
 export const MONTH_LABEL_MIN_GAP = 2;
 export const ACTIVITY_HEAT_WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"] as const;
@@ -50,19 +48,27 @@ export function heatCellTip(cell: ActivityHeatCell): string {
   return cell.tokens > 0 ? `${fmtTokens(cell.tokens)} tok · ${day}` : `无用量 · ${day}`;
 }
 
-export function yearWindowStart(now = Date.now()): { readonly today: number; readonly yearAgo: number; readonly start: number; readonly weeks: number } {
+export function yearWindowStart(now = Date.now()): {
+  readonly today: number;
+  readonly yearStart: number;
+  readonly yearEnd: number;
+  readonly start: number;
+  readonly weeks: number;
+} {
   const today = startOfDay(now);
-  const yearAgo = today - (ACTIVITY_HEAT_DAYS - 1) * DAY_MS;
-  const start = yearAgo - ((new Date(yearAgo).getDay() + 6) % 7) * DAY_MS;
-  const weeks = Math.floor((today - start) / (7 * DAY_MS)) + 1;
-  return { today, yearAgo, start, weeks };
+  const year = new Date(today).getFullYear();
+  const yearStart = new Date(year, 0, 1).getTime();
+  const yearEnd = new Date(year, 11, 31).getTime();
+  const start = yearStart - ((new Date(yearStart).getDay() + 6) % 7) * DAY_MS;
+  const weeks = Math.floor((yearEnd - start) / (7 * DAY_MS)) + 1;
+  return { today, yearStart, yearEnd, start, weeks };
 }
 
 export function buildActivityHeatmap(
   totalsByDay: ReadonlyMap<number, number>,
   now = Date.now(),
 ): ActivityHeatmap {
-  const { today, yearAgo, start, weeks } = yearWindowStart(now);
+  const { today, yearStart, yearEnd, start, weeks } = yearWindowStart(now);
   const windowTotals: number[] = [];
   const cells: ActivityHeatCell[] = [];
   const months: ActivityHeatMonth[] = [];
@@ -70,7 +76,7 @@ export function buildActivityHeatmap(
 
   for (let week = 0; week < weeks; week++) {
     const weekTs = start + week * 7 * DAY_MS;
-    const month = new Date(weekTs).getMonth();
+    const month = new Date(weekTs < yearStart ? yearStart : weekTs).getMonth();
     if (month !== prevMonth) {
       const last = months[months.length - 1];
       if (last === undefined || week - last.week >= MONTH_LABEL_MIN_GAP) {
@@ -80,8 +86,8 @@ export function buildActivityHeatmap(
     }
     for (let dow = 0; dow < 7; dow++) {
       const ts = start + (week * 7 + dow) * DAY_MS;
-      const future = ts > today;
-      const pad = ts < yearAgo;
+      const pad = ts < yearStart || ts > yearEnd;
+      const future = !pad && ts > today;
       const value = future || pad ? 0 : (totalsByDay.get(ts) ?? 0);
       if (!future && !pad) windowTotals.push(value);
       cells.push({ ts, week, dow, tokens: value, level: 0, future, pad });

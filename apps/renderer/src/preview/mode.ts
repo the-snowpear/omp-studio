@@ -1,5 +1,5 @@
-/** 发布时改为 false：顶栏开关消失，并强制真实数据。 */
-export const PREVIEW_MODE_SWITCH_ENABLED = true;
+/** 发布时为 false：顶栏开关消失，并强制真实数据。 */
+export const PREVIEW_MODE_SWITCH_ENABLED = false;
 export const PREVIEW_MODE_STORAGE_KEY = "omp.previewMode";
 
 export function readStoredPreviewMode(): boolean {
@@ -10,7 +10,7 @@ export function readStoredPreviewMode(): boolean {
   } catch {
     /* localStorage may be blocked */
   }
-  return true;
+  return false;
 }
 
 export function writeStoredPreviewMode(on: boolean): void {

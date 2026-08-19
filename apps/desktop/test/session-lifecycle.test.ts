@@ -412,6 +412,31 @@ test("btw.ask is forwarded to Runtime with the question payload", async () => {
   });
 });
 
+test("agent.send and job.cancel omit expectedStateVersion so they can run beside a live turn", async () => {
+  await withReady(async ({ composition, live }) => {
+    live.setSnapshot({ ...live.snapshot, isStreaming: true, stateVersion: 4 as StateVersion });
+    await composition.facade.command({
+      commandName: "agent.send",
+      input: { agentId: "WorkerEcho", expectedGeneration: 1, text: "continue", mode: "prompt" },
+      idempotencyKey: "idem-agent-send-live" as IdempotencyKey,
+      requestId: "client-req-agent-send-live" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 1);
+    assert.equal(live.invokes[0]?.operation.kind, "agent.send");
+    assert.equal("expectedStateVersion" in (live.invokes[0] ?? {}), false);
+
+    await composition.facade.command({
+      commandName: "job.cancel",
+      input: { jobId: "job-1", expectedGeneration: 1 },
+      idempotencyKey: "idem-job-cancel-live" as IdempotencyKey,
+      requestId: "client-req-job-cancel-live" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 2);
+    assert.equal(live.invokes[1]?.operation.kind, "job.cancel");
+    assert.equal("expectedStateVersion" in (live.invokes[1] ?? {}), false);
+  });
+});
+
 test("btw.ask omits expectedStateVersion so it can run beside a live turn", async () => {
   await withReady(async ({ composition, live }) => {
     live.setSnapshot({ ...live.snapshot, isStreaming: true, stateVersion: 4 as StateVersion });

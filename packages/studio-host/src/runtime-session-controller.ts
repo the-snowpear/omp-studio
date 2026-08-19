@@ -177,6 +177,9 @@ export class StudioRuntimeSessionController {
         "Agent conversation page runtime epoch does not match the current session",
       );
     }
+    if (page.sessionId === current.sessionId) {
+      throw new StudioHostError("CURSOR_STALE", "Agent conversation page belongs to the parent session");
+    }
     return page;
   }
 

@@ -30,22 +30,31 @@ the first public snapshot). Workspace packages share that version today.
 
 Do not put signing private keys, `%APPDATA%` logs, or `backup/` into the tag.
 
-## Windows installer (optional artifact)
+## Windows installer
 
-The NSIS path is a skeleton. It is **not** required for a source tag.
+Build the unsigned NSIS artifact from the repository root:
 
 ```powershell
-npm run omp:build:host
-npm run pack:win:prepare
-npx electron-builder --config packaging/electron-builder.yml --win nsis
+npm run pack:win
 ```
 
-`pack:win:prepare` copies the **public** Runtime key into
-`packaging/runtime-keys/` (gitignored) and fails if the signed artifact is
-missing. Output lands in `outputs/installer/` (gitignored).
+That rebuilds the signed Runtime (`omp:build:host`), emits the sandboxed
+preload, copies the **public** Runtime key into `packaging/runtime-keys/`
+(gitignored), runs electron-builder, then audits `outputs/installer/`
+(gitignored). Fail closed if the renderer, preload, `omp.exe`, or public key
+is missing, or if a private key is present.
+
+If electron-builder times out downloading Electron (common on some networks):
+
+```powershell
+$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
+npm run pack:win
+```
 
 Attach the installer to the GitHub Release only after you have confirmed it
 boots, verifies the Runtime signature, and does not embed the private key.
+0.1.0 is unsigned; do not publish the Setup exe until Authenticode signing is
+configured.
 
 Details: [`packaging/README.md`](../packaging/README.md).
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
+import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { ActivityLine } from "./ActivityLine";
 import { ConvoTranscript } from "./ConvoTranscript";
@@ -17,8 +18,10 @@ export function ConversationPane({
   onRestoreUserMessage,
   onBranchUserMessage,
   userRestoreDisabledReason,
+  userBranchDisabledReason,
   onReviewChanges,
   onInspectSubagent,
+  liveAgents,
   scrollerRef: externalScrollerRef,
   standby,
   activity,
@@ -33,8 +36,10 @@ export function ConversationPane({
   onRestoreUserMessage?: (itemId: string, text: string) => void;
   onBranchUserMessage?: (itemId: string, text: string) => void;
   userRestoreDisabledReason?: string;
+  userBranchDisabledReason?: string;
   onReviewChanges?: (turnId: string) => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
+  liveAgents?: readonly StudioAgentSnapshot[];
   /** 由父级（WorkbenchCanvas）传入时，minimap 等兄弟组件共享同一 scroller。 */
   scrollerRef?: RefObject<HTMLElement | null>;
   /** 后台创建新会话等场景：显示占位说明，不渲染旧 transcript 与通知。 */
@@ -146,8 +151,10 @@ export function ConversationPane({
                 {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
                 {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
                 {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
+                {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
                 {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
                 {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+                {...(liveAgents === undefined ? {} : { liveAgents })}
                 {...(planLink === undefined ? {} : { planLink })}
               />
             )}

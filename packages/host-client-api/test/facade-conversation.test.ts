@@ -16,7 +16,7 @@ import type {
   SessionId,
   StateVersion,
 } from "@omp-studio/client-contract";
-import type { AgentId, ConversationTranscriptPage, StudioOperation } from "@omp-studio/studio-protocol";
+import type { AgentId, ConversationTranscriptPage, StudioAgentSnapshot, StudioOperation } from "@omp-studio/studio-protocol";
 import type { ConversationTranscriptReadPage } from "@omp-studio/client-contract";
 import { HostBackend, type RuntimePublication, type StudioConversationForward, type StudioTelemetryForward } from "@omp-studio/studio-host";
 
@@ -92,7 +92,13 @@ function startedEnvelope(sessionId = "session-1"): StudioConversationForward {
 }
 
 type ArchiveProvider = {
-  readPage: (input: { sessionId: string; cursor?: OpaqueCursor; limit?: number }) => Promise<ConversationTranscriptReadPage>;
+  readPage: (input: {
+    sessionId: string;
+    agentId?: string;
+    cursor?: OpaqueCursor;
+    limit?: number;
+  }) => Promise<ConversationTranscriptReadPage>;
+  listPersistedAgents?: (sessionId: string) => Promise<readonly StudioAgentSnapshot[]>;
 };
 
 async function withFacade(
@@ -233,6 +239,71 @@ test("session.transcript.readPage uses the Runtime-independent archive provider"
     assert.equal(response.result.items[0]?.itemId, "msg-user-1");
   }, archive);
   assert.deepEqual(calls, [{ sessionId: SESSION, limit: 20 }]);
+});
+
+test("session.transcript.readPage forwards agentId to the archive provider", async () => {
+  const calls: Array<{ sessionId: string; agentId?: string; limit?: number }> = [];
+  const archive: ArchiveProvider = {
+    readPage: async (input) => {
+      calls.push({
+        sessionId: input.sessionId,
+        ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      });
+      return {
+        sessionId: "child-echo" as SessionId,
+        transcriptRevision: "revision-child",
+        branchLeafId: "leaf-child",
+        items: PAGE.items,
+        headCursor: "head-child" as OpaqueCursor,
+        hasMoreBefore: false,
+      };
+    },
+  };
+  await withFacade(undefined, undefined, async (facade) => {
+    const response = await facade.query({
+      queryName: "session.transcript.readPage",
+      input: { sessionId: SESSION, agentId: "WorkerEcho" as AgentId, limit: 20 },
+    });
+    assert.equal(response.ok, true);
+    if (!response.ok) return;
+    assert.equal(response.result.sessionId, "child-echo");
+  }, archive);
+  assert.deepEqual(calls, [{ sessionId: SESSION, agentId: "WorkerEcho", limit: 20 }]);
+});
+
+test("session.agents.list returns persisted child agents from the archive provider", async () => {
+  const archive: ArchiveProvider = {
+    readPage: async () => {
+      throw new Error("list must not read a page");
+    },
+    listPersistedAgents: async (sessionId) => {
+      assert.equal(sessionId, SESSION);
+      return [{
+        agentId: "WorkerEcho" as AgentId,
+        generation: 1 as StudioAgentSnapshot["generation"],
+        kind: "sub",
+        displayName: "WorkerEcho",
+        status: "parked",
+        updatedAt: T0,
+        hasLiveSession: false,
+        hasTranscript: true,
+        unreadCount: 0,
+        activeJobIds: [],
+      }];
+    },
+  };
+  await withFacade(undefined, undefined, async (facade) => {
+    const response = await facade.query({
+      queryName: "session.agents.list",
+      input: { sessionId: SESSION },
+    });
+    assert.equal(response.ok, true);
+    if (!response.ok) return;
+    assert.equal(response.result.sessionId, SESSION);
+    assert.equal(response.result.agents[0]?.agentId, "WorkerEcho");
+    assert.equal(response.result.agents[0]?.status, "parked");
+  }, archive);
 });
 
 test("session.transcript.read rejects a page whose identity does not match the current snapshot", async () => {

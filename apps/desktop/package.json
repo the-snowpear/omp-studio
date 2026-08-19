@@ -1,9 +1,11 @@
 {
   "name": "@omp-studio/desktop",
+  "productName": "OMP Studio",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./dist/src/main.js",
+  "author": "snowpear",
   "description": "OMP Studio Windows Desktop shell (Electron Main)",
   "scripts": {
     "dev": "electron .",

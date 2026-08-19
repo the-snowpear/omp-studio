@@ -356,7 +356,8 @@ test("MVP-B desktop: live sequence through composition is a single assistant + c
     const views = selectConversationViews(client.getState().conversation);
     const assistants = views.filter((view) => {
       if (view.kind === "item") return view.item.kind === "message" && view.item.role === "assistant";
-      return view.message.role === "assistant";
+      if (view.kind === "live") return view.message.role === "assistant";
+      return false;
     });
     assert.equal(assistants.length, 1);
     assert.equal(client.getState().conversation.liveMessages[CONVERSATION_FIXTURE_IDS.assistantItemId], undefined);

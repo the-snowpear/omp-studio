@@ -27,7 +27,7 @@ export const RENDERER_CSP =
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data:; " +
   "font-src 'self' data:; " +
-  "connect-src 'self' ws://localhost:* http://localhost:*; " +
+  "connect-src 'self'; " +
   "object-src 'none'; " +
   "base-uri 'self'; " +
   "form-action 'self'; " +
@@ -45,7 +45,7 @@ export function rendererCspFor(target: RendererTarget): string {
   const wsOrigin = `ws://${origin.host}`;
   return RENDERER_CSP
     .replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
-    .replace("connect-src 'self' ws://localhost:* http://localhost:*", `connect-src 'self' ${origin.origin} ${wsOrigin}`);
+    .replace("connect-src 'self'", `connect-src 'self' ${origin.origin} ${wsOrigin}`);
 }
 
 /** Fixed secure webPreferences for every renderer window; no runtime variation. */
@@ -81,14 +81,21 @@ export type RendererTarget =
  * Resolve the renderer entry: the dev server URL when one is configured,
  * otherwise the built renderer bundle. `devServerUrl` comes from an
  * explicit developer environment variable only — never from user input.
- * (The packaged asar layout is a packaging-phase concern and replaces the
- * dev-workspace relative path.)
+ * Packaged builds keep the same relative layout via extraResources:
+ * `app.asar` → `resources/renderer/dist/index.html`.
  */
 export function resolveRendererEntry(appPath: string, devServerUrl?: string): RendererTarget {
   if (devServerUrl !== undefined && devServerUrl !== "") {
     return { kind: "url", url: devServerUrl };
   }
   return { kind: "file", path: join(appPath, "..", "renderer", "dist", "index.html") };
+}
+
+/** Packaged builds ignore the developer Vite override. */
+export function rendererDevServerUrl(isPackaged: boolean, envUrl?: string): string | undefined {
+  if (isPackaged) return undefined;
+  if (envUrl === undefined || envUrl === "") return undefined;
+  return envUrl;
 }
 
 /** Origin that may drive the renderer: `file://` for packaged, dev-server origin otherwise. */
@@ -176,12 +183,19 @@ export function installCspHeaders(session: CspSession, csp: string): void {
   });
 }
 
+/** Renderer lifecycle events are emitted by WebContents, not BrowserWindow. */
+export interface RendererLifecycleSurface {
+  on(event: "did-finish-load" | "did-fail-load", listener: () => void): unknown;
+}
+
 /** Minimal structural window surface used by the secure window factory. */
 export interface WindowLike {
+  readonly webContents: RendererLifecycleSurface;
   loadFile(path: string): Promise<void>;
   loadURL(url: string): Promise<void>;
   once(event: "ready-to-show", listener: () => void): unknown;
   on?(event: string, listener: (...args: unknown[]) => void): unknown;
+  setIcon?(icon: unknown): void;
   show(): void;
 }
 
@@ -227,8 +241,8 @@ export function createSecureWindow<
   // Some Chromium failures (notably sandboxed preload errors) do not emit
   // ready-to-show. Ensure a diagnostic/error page is still visible instead of
   // leaving a window that looks like a blank white shell.
-  window.on?.("did-finish-load", () => window.show());
-  window.on?.("did-fail-load", () => window.show());
+  window.webContents.on("did-finish-load", () => window.show());
+  window.webContents.on("did-fail-load", () => window.show());
   if (!deps.deferLoad) loadRendererTarget(window, deps.target);
   return window;
 }

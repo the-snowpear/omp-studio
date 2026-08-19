@@ -474,9 +474,9 @@ export function ComposerModelPicker({
             setMenu("model");
           }}
         >
-          <Icon name="cpu" extra="sm" />
           <span className="cmp-model-label-full">{modelLabel}</span>
           <span className="cmp-model-label-initial" aria-hidden="true">{labelInitial(modelLabel)}</span>
+          <Icon name="chevron-d" extra="sm cmp-pill-caret" />
         </button>
         {menu === "model" ? (
           <ComposerModelMenu
@@ -517,8 +517,8 @@ export function ComposerModelPicker({
           }
           onClick={() => setMenu((current) => (current === "thinking" ? "none" : "thinking"))}
         >
-          <Icon name="brain" extra="sm" />
           <span>{thinkingLabel}</span>
+          <Icon name="chevron-d" extra="sm cmp-pill-caret" />
         </button>
         {menu === "thinking" ? (
           <>

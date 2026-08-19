@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from "react";
+import type { SessionId } from "@omp-studio/client-contract";
 import { ChipComposer } from "../composer/ChipComposer";
 import type { MentionCandidate } from "../composer/types";
 import { Icon } from "../icons";
@@ -30,6 +31,9 @@ export function SubagentConversationPane({
   agents,
   canSend,
   runtimeConnected,
+  parentSessionId,
+  liveSessionId,
+  pendingInteraction,
   workspaceId,
   loadMentions,
   composerId,
@@ -43,6 +47,9 @@ export function SubagentConversationPane({
   readonly agents: readonly SubagentComposerAgent[];
   readonly canSend: boolean;
   readonly runtimeConnected: boolean;
+  readonly parentSessionId?: SessionId;
+  readonly liveSessionId?: SessionId;
+  readonly pendingInteraction?: boolean;
   readonly workspaceId?: string;
   readonly loadMentions?: (trigger: "@" | "/", query: string) => Promise<readonly MentionCandidate[]>;
   readonly composerId?: string;
@@ -58,6 +65,8 @@ export function SubagentConversationPane({
     client,
     target,
     runtimeConnected,
+    ...(parentSessionId === undefined ? {} : { parentSessionId }),
+    ...(liveSessionId === undefined ? {} : { liveSessionId }),
   });
   const agent = findSubagentComposerAgent(agents, target.agentId);
   const composerAllowed = subagentComposerVisible({
@@ -72,6 +81,7 @@ export function SubagentConversationPane({
   const composer = useSubagentComposer({
     enabled: composerAllowed,
     running,
+    ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
     client: sendClient,
     agent,
     sessionId: snapshot.state.identity?.sessionId,
@@ -92,7 +102,7 @@ export function SubagentConversationPane({
 
   useEffect(() => {
     if (autoFocusComposer !== true || !composerAllowed) return;
-    composer.composerRef.current?.focus();
+    composer.composerRef.current?.focus({ preventScroll: true });
   }, [autoFocusComposer, composer.composerRef, composerAllowed, target.agentId, target.toolCallId]);
 
   const { state } = snapshot;

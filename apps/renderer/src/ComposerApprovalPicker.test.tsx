@@ -156,4 +156,22 @@ describe("ComposerApprovalPicker", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: /^Full Access/ }));
     expect(onChange).toHaveBeenCalledWith("yolo");
   });
+
+  it("点击胶囊按钮与选择菜单项时触发 onInteract", () => {
+    const onInteract = vi.fn();
+    render(
+      <ComposerApprovalPicker
+        preview={true}
+        mode="write"
+        disabled={false}
+        onChange={vi.fn()}
+        onInteract={onInteract}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "权限模式：Workspace" }));
+    expect(onInteract).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Review/ }));
+    expect(onInteract).toHaveBeenCalledTimes(2);
+  });
 });

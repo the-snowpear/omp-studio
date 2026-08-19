@@ -113,6 +113,11 @@ describe("conversation sanitizer", () => {
 			path: "ok",
 		});
 		expect(sanitizeToolArguments({ providerPayload: { token: "abc" } }).truncated).toBe(true);
+		expect(sanitizeJsonValue({ tokens: 12_600, requests: 4, token: "sk-secret" }).value).toEqual({
+			tokens: 12_600,
+			requests: 4,
+			token: "[redacted]",
+		});
 		const cyclic: Record<string, unknown> = { keep: true };
 		cyclic.self = cyclic;
 		const cyclicResult = sanitizeJsonValue(cyclic);

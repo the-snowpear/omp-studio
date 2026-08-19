@@ -99,6 +99,16 @@ export const CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION = false as cons
 export const CONVERSATION_REDACT_KEY_PATTERN =
 	/token|secret|password|api[_-]?key|authorization|cookie|providerpayload/iu;
 
+/** Usage totals that contain `token` but are not credentials. */
+const CONVERSATION_USAGE_TOKEN_KEYS =
+	/^(tokens|tokensBefore|contextTokens|inputTokens|outputTokens|totalTokens|tokenUsage|tokensPerSecond)$/iu;
+
+/** Whether a JSON key must be replaced with `[redacted]` on the public conversation surface. */
+export function conversationRedactKey(key: string): boolean {
+	if (CONVERSATION_USAGE_TOKEN_KEYS.test(key)) return false;
+	return CONVERSATION_REDACT_KEY_PATTERN.test(key);
+}
+
 /** Runtime dispatcher allow-list. session.history is advertised only after the reader exists. */
 export const STUDIO_CONVERSATION_DISPATCH_ALLOW_LIST = [SESSION_TRANSCRIPT_READ_KIND] as const;
 

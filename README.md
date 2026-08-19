@@ -14,7 +14,7 @@
   ·
   <a href="docs/README.md">文档</a>
   ·
-  <a href="CHANGELOG.md">Changelog</a>
+  <a href="CHANGELOG.md">更新日志</a>
   ·
   <a href="https://github.com/can1357/oh-my-pi">oh-my-pi</a>
 </p>
@@ -27,14 +27,64 @@
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
 </p>
 
-<p align="center">
-  <img src="ui_reference/ver2/__shots/dark-wb-streaming.png" alt="OMP Studio workbench (design reference)" width="920">
-</p>
-
 OMP Studio 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的桌面壳。它把会话、审批、Agent Hub 和工作区接到类型化的 Studio Bridge 上，而不是去解析 TUI 文本、ANSI 或按键宏。
 
+<p align="center">
+  <img src="docs/images/workbench.png" alt="OMP Studio 工作台：新建对话欢迎页、活动热力图与 Composer" width="920">
+</p>
+
+## 工作台亮点
+
+同一扇窗口里把 Skills、用量、供应商、能力和 Git 收齐，不用在 TUI 和一堆网页之间来回跳。
+
+### 1. 快速选择的 Skills 侧栏
+
+侧栏一键打开技能与插件抽屉，按项目 / 全局 / 内置分组。点「加入」就能把 skill 放进当前草稿，对话里的 `/skill:` 胶囊也能回看刚用过的技能。
+
+<p align="center">
+  <img src="docs/images/skills.png" alt="Skills 侧栏：按项目、全局、内置分组，一键加入草稿" width="920">
+</p>
+
+### 2. 好看的数据查看与统计
+
+首页有按年 / 月 / 周 / 日切换的 Token 折线与热力图。对话顶栏随时展开本轮用量、缓存命中、TPS 和子 Agent 花费，Agent Hub 里每个子代理也有自己的数字。
+
+<p align="center">
+  <img src="docs/images/home.png" alt="首页 Token 折线与热力图" width="432">
+  &nbsp;
+  <img src="docs/images/telemetry.png" alt="对话顶栏 Token 用量详情" width="432">
+</p>
+
+### 3. 统一供应商管理
+
+模型配置页把 Anthropic、OpenAI、OpenRouter、本地 LM Studio 等供应商收在一处，开关、端点和 `modelProviderOrder` 同页完成。角色页给 `@default` / `@plan` / `@task` 指定模型和思考强度。
+
+<p align="center">
+  <img src="docs/images/models.png" alt="模型配置：统一供应商列表" width="432">
+  &nbsp;
+  <img src="docs/images/roles.png" alt="角色配置：按任务指定模型" width="432">
+</p>
+
+### 4. 能力中心管理
+
+Skills、Plugins、MCP、Slash Commands 同一页开关、探测和打开目录。Agent Hub 盯着主会话和子 Agent 的状态、花费与上下文占用。
+
+<p align="center">
+  <img src="docs/images/capabilities.png" alt="能力中心：Skills / Plugins / MCP / Slash" width="432">
+  &nbsp;
+  <img src="docs/images/hub.png" alt="Agent Hub：子代理列表与用量详情" width="432">
+</p>
+
+### 5. Git 内嵌便捷工具
+
+右侧 Git 面板直接暂存、看 diff、写 commit，Fetch / Pull / Push 和提交图都在对话旁边，不用离开工作台。
+
+<p align="center">
+  <img src="docs/images/git.png" alt="工作台右侧 Git 面板：diff、commit 与提交图" width="920">
+</p>
+
 > [!IMPORTANT]
-> **0.1.0 是开发预览。** 工作台可从源码在 Windows 上跑起来；部分面板仍是诚实空壳；GitHub Releases 上还没有签名安装包。请把 bug 和改进想法开成 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
+> **0.1.0 是开发预览。** 工作台可从源码或本地打出的 **未签名** NSIS 安装包在 Windows 上运行；部分面板仍是诚实空壳；GitHub Releases 上还没有 Authenticode 签名安装包。请把 bug 和改进想法开成 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
 
 ## 能做什么
 
@@ -102,16 +152,16 @@ Renderer → StudioClient → Desktop IPC → Host facade
 
 ## 文档
 
-| | |
-|---|---|
-| [docs/getting-started.md](docs/getting-started.md) | 从源码运行 |
-| [docs/development.md](docs/development.md) | 开发循环、预览模式、补丁 regen |
-| [docs/architecture.md](docs/architecture.md) | 包职责与不变量 |
-| [docs/releasing.md](docs/releasing.md) | 版本、tag、安装器 |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 如何提 PR |
-| [SECURITY.md](SECURITY.md) | 漏洞披露 |
-| [CHANGELOG.md](CHANGELOG.md) | 面向用户的变更 |
-| [omp-patch/README.md](omp-patch/README.md) | overlay / 接缝补丁 |
+|                                                    |                    |
+| -------------------------------------------------- | ------------------ |
+| [docs/getting-started.md](docs/getting-started.md) | 从源码运行              |
+| [docs/development.md](docs/development.md)         | 开发循环、预览模式、补丁 regen |
+| [docs/architecture.md](docs/architecture.md)       | 包职责与不变量            |
+| [docs/releasing.md](docs/releasing.md)             | 版本、tag、安装器         |
+| [CONTRIBUTING.md](CONTRIBUTING.md)                 | 如何提 PR             |
+| [SECURITY.md](SECURITY.md)                         | 漏洞披露               |
+| [CHANGELOG.md](CHANGELOG.md)                       | 面向用户的变更            |
+| [omp-patch/README.md](omp-patch/README.md)         | overlay / 接缝补丁     |
 
 ## 贡献
 

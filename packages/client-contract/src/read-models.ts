@@ -78,6 +78,13 @@ export type RuntimeDisconnectCode =
   | "host-stop";
 
 /**
+ * Automatic relaunch after an unexpected drop. Present on a disconnected
+ * connection so the Renderer can explain why a manual reconnect is still
+ * needed. Never a path or PID.
+ */
+export type RuntimeAutoRespawnStatus = "scheduled" | "failed" | "exhausted";
+
+/**
  * Runtime connection facts exposed to the Renderer. Carries only public
  * display facts: opaque identity, epochs, backend and versions. Never
  * carries the runtime PID, process handle, private endpoint or session
@@ -110,6 +117,10 @@ export interface RuntimeConnection {
   readonly disconnectCode?: RuntimeDisconnectCode;
   /** Safe, pre-redacted sentence explaining why the Runtime dropped. */
   readonly disconnectReason?: string;
+  /** ISO timestamp of the drop; present with `disconnectCode` when known. */
+  readonly disconnectedAt?: string;
+  /** Automatic relaunch outcome after an unexpected drop. */
+  readonly autoRespawn?: RuntimeAutoRespawnStatus;
 }
 
 /**

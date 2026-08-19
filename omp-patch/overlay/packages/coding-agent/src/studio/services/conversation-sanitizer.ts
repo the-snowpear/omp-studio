@@ -3,11 +3,11 @@
  *
  * Truncates, redacts secret-shaped keys, drops providerPayload, and rejects
  * cyclic / non-JSON values. Import this module instead of copying
- * CONVERSATION_REDACT_KEY_PATTERN or a second redaction regex.
+ * conversationRedactKey or a second redaction regex.
  */
 import * as os from "node:os";
 import * as path from "node:path";
-import { CONVERSATION_LIMITS, CONVERSATION_REDACT_KEY_PATTERN, type JsonValue } from "../conversation-protocol";
+import { CONVERSATION_LIMITS, conversationRedactKey, type JsonValue } from "../conversation-protocol";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -54,7 +54,7 @@ function isPlainObject(value: object): boolean {
 }
 
 function redactKey(key: string): boolean {
-	return CONVERSATION_REDACT_KEY_PATTERN.test(key);
+	return conversationRedactKey(key);
 }
 
 export type SanitizeJsonResult = {

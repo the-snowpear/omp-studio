@@ -56,6 +56,11 @@ describe("ComposerModelPicker", () => {
     const { container } = renderPicker({ preview: true, client });
 
     const modelPill = screen.getByRole("button", { name: "选择模型" });
+    const thinkPill = screen.getByRole("button", { name: "思考强度" });
+    expect(modelPill.firstElementChild?.tagName).toBe("SPAN");
+    expect(thinkPill.firstElementChild?.tagName).toBe("SPAN");
+    expect(modelPill.lastElementChild?.classList.contains("cmp-pill-caret")).toBe(true);
+    expect(thinkPill.lastElementChild?.classList.contains("cmp-pill-caret")).toBe(true);
     fireEvent.click(modelPill);
 
     // 预览模式不查 Host

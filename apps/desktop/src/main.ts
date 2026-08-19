@@ -21,12 +21,14 @@ import {
   applyTitleBarOverlay,
   registerTitleBarOverlayIpc,
 } from "./titlebar-overlay.js";
-import { registerChromeImageIpc } from "./chrome-image.js";
 import { APP_USER_MODEL_ID, resolveAppIconPath } from "./app-icon.js";
+import { registerChromeImageIpc } from "./chrome-image.js";
 import { registerChromeNotifyIpc } from "./chrome-notify.js";
 import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
+import { registerChromeLogsIpc } from "./chrome-logs.js";
 import { registerChromeProfileIpc } from "./chrome-profile.js";
-import { writeFile } from "node:fs/promises";
+import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join } from "node:path";
 
 import { createDesktopApplication } from "./composition.js";
@@ -40,9 +42,11 @@ import {
   resolveRendererEntry,
   loadRendererTarget,
   rendererCspFor,
+  rendererDevServerUrl,
 } from "./security.js";
 import type { DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
 import { createProductionHostFactory } from "./host-factory.js";
+import { defaultHostLogsDirectory } from "./host-log.js";
 import {
   externalEditorCommandForPath,
   launchExternalEditor,
@@ -62,7 +66,7 @@ import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js"
 const PRELOAD_OUTPUT = "dist/preload.cjs";
 
 /** Developer-only override for the renderer entry (Vite dev server). */
-const RENDERER_DEV_URL = process.env.OMP_RENDERER_DEV_URL;
+const RENDERER_DEV_URL = rendererDevServerUrl(app.isPackaged, process.env.OMP_RENDERER_DEV_URL);
 
 export async function main(): Promise<void> {
   if (process.platform === "win32") {
@@ -74,10 +78,8 @@ export async function main(): Promise<void> {
   const allowedOrigin = rendererOriginFor(target);
   const preloadPath = join(app.getAppPath(), PRELOAD_OUTPUT);
   const appIcon = resolveAppIconPath({ appPath: app.getAppPath(), platform: process.platform });
-  if (process.platform === "darwin" && appIcon) {
-    app.dock?.setIcon(appIcon);
-  }
-
+  const appNativeIcon = appIcon !== undefined ? nativeImage.createFromPath(appIcon) : undefined;
+  const validAppIcon = appNativeIcon !== undefined && !appNativeIcon.isEmpty() ? appNativeIcon : undefined;
   installCspHeaders(session.defaultSession, rendererCspFor(target));
 
   const hostFactory = createProductionHostFactory({
@@ -141,7 +143,7 @@ export async function main(): Promise<void> {
         height: 800,
         show: false,
         title: "OMP Studio",
-        ...(appIcon ? { icon: appIcon } : {}),
+        ...(validAppIcon !== undefined ? { icon: validAppIcon } : appIcon !== undefined ? { icon: appIcon } : {}),
         backgroundColor: TITLEBAR_OVERLAY.light.color,
         titleBarStyle: "hidden" as const,
         titleBarOverlay: {
@@ -156,6 +158,9 @@ export async function main(): Promise<void> {
       deferLoad: true,
     });
     const windowSurface = window as typeof window & DesktopWindowSurface;
+    if (validAppIcon !== undefined && typeof window.setIcon === "function") {
+      window.setIcon(validAppIcon);
+    }
     // Fixed named channels only; every payload validated at this boundary.
     // `dispose` removes handlers before Host shutdown on app quit.
     const isTrustedSender = (sender: { getURL(): string }) => isTrustedRendererUrl(sender.getURL(), allowedOrigin);
@@ -166,7 +171,6 @@ export async function main(): Promise<void> {
     const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
     const disposeNotify = registerChromeNotifyIpc({
       isTrustedSender,
-      ...(appIcon === undefined ? {} : { icon: appIcon }),
     });
     const disposeOpenUrl = registerChromeOpenUrlIpc({
       ipcMain: {
@@ -179,6 +183,43 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       openExternal: (url) => shell.openExternal(url),
+    });
+    const logsDirectory = defaultHostLogsDirectory();
+    const disposeLogs = registerChromeLogsIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      actions: {
+        logsDirectory,
+        mkdirLogs: () => mkdir(logsDirectory, { recursive: true }).then(() => undefined),
+        openDirectory: () => shell.openPath(logsDirectory),
+        listBasenames: async () => {
+          const entries = await readdir(logsDirectory, { withFileTypes: true });
+          return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+        },
+        readFile: (name) => readFile(join(logsDirectory, name), "utf8"),
+        async showSaveDialog(sender, options) {
+          const owner = BrowserWindow.fromWebContents(sender as WebContents);
+          const dialogOptions = {
+            title: "导出 Host 日志",
+            defaultPath: options.defaultPath,
+            filters: [{ name: "文本文件", extensions: ["txt"] }],
+          };
+          const picked = owner
+            ? await dialog.showSaveDialog(owner, dialogOptions)
+            : await dialog.showSaveDialog(dialogOptions);
+          return { canceled: picked.canceled, ...(picked.filePath === undefined ? {} : { filePath: picked.filePath }) };
+        },
+        writeFile(filePath, text) {
+          return writeFile(filePath, text, "utf8");
+        },
+      },
     });
     const disposeProfile = registerChromeProfileIpc({ isTrustedSender });
     const disposeImage = registerChromeImageIpc({
@@ -253,6 +294,21 @@ export async function main(): Promise<void> {
         resolveDroppedPaths: (cwd, paths) => resolveDroppedPaths(cwd, paths),
       },
     });
+    const disposeAppUpdate = registerChromeAppUpdateIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      currentVersion: app.getVersion(),
+      updatesDirectory: join(app.getPath("temp"), "omp-studio-updates"),
+      openPath: (filePath) => shell.openPath(filePath),
+      quitApp: () => app.quit(),
+    });
     applyTitleBarOverlay(window, "light");
     window.webContents?.on?.("did-fail-load", (_event: unknown, errorCode: number, errorDescription: string, validatedURL: string) => {
       console.error(`[omp-studio] renderer failed to load (${errorCode}): ${errorDescription} ${validatedURL}`);
@@ -271,9 +327,11 @@ export async function main(): Promise<void> {
         windowSurface.close();
       },
       dispose: () => {
+        disposeAppUpdate.dispose();
         disposeWorkspaceShell.dispose();
         disposeTerminal.dispose();
         disposeImage.dispose();
+        disposeLogs.dispose();
         disposeProfile();
         disposeOpenUrl.dispose();
         disposeNotify();

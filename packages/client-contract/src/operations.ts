@@ -20,6 +20,7 @@ import type {
   OperatorStateSnapshot,
   SessionTelemetryReadResult,
   SessionThinkingSelector,
+  StudioAgentSnapshot,
 } from "@omp-studio/studio-protocol";
 
 import type { ConversationTranscriptReadPage } from "./conversation.js";
@@ -98,8 +99,14 @@ export interface QueryInputMap {
   /** Runtime-independent persisted transcript page for an explicit session. */
   "session.transcript.readPage": {
     readonly sessionId: SessionId;
+    /** When set, read that persisted child next to the parent session file. */
+    readonly agentId?: AgentId;
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
+  };
+  /** Parked/aborted child agents persisted next to a parent session. Independent of Runtime residency. */
+  "session.agents.list": {
+    readonly sessionId: SessionId;
   };
   /** Read-only telemetry for a session: live snapshot, persisted record, or recomputed archive probe. */
   "session.telemetry.read": {
@@ -152,6 +159,8 @@ export interface QueryResultMap {
   "agent.conversation.read": ConversationTranscriptPage;
   /** Persisted transcript page. Available independently of Runtime residency. */
   "session.transcript.readPage": ConversationTranscriptReadPage;
+  /** Persisted child-agent roster for an explicit parent session. */
+  "session.agents.list": { readonly sessionId: SessionId; readonly agents: readonly StudioAgentSnapshot[] };
   /** Session telemetry with provenance. Available independently of Runtime residency. */
   "session.telemetry.read": SessionTelemetryReadResult;
   "git.toolchain.get": GitToolchainReadModel;
@@ -398,7 +407,7 @@ export interface RuntimeCommandInputMap {
     readonly mode: "prompt" | "steer" | "followUp";
     readonly images?: ReadonlyArray<PromptImageInput>;
   };
-  /** Abort + tombstone a subagent. Destructive: the Runtime issues a confirmation gate. */
+  /** Stop a subagent. Confirmed in the Agent Hub dialog; Runtime does not issue a second gate. */
   "agent.kill": { readonly agentId: string; readonly expectedGeneration: number };
   /** Reattach a live session to a parked subagent. */
   "agent.revive": { readonly agentId: string; readonly expectedGeneration: number };
@@ -423,10 +432,11 @@ interface CoreCommandInputMap {
   "runtime.install": { readonly channel?: RuntimeChannel };
   /**
    * Start or restart the managed Runtime under the active workspace.
-   * No-op when already connected. Completes with the public connection
-   * facts so diagnostics can refresh without a second round-trip.
+   * Completes with the public connection facts so diagnostics can refresh
+   * without a second round-trip. Default is a no-op when already connected;
+   * `force: true` stops the live process and launches a new one.
    */
-  "runtime.ensure": EmptyInput;
+  "runtime.ensure": { readonly force?: boolean };
   /** Start a fresh Runtime session in the active workspace. */
   "session.create": EmptyInput;
   /** Resume a thread from history or the home page. */

@@ -159,7 +159,10 @@
   flex: 1;
   min-height: 0;
   display: flex;
-  overflow: hidden;
+  /* clip, not hidden: Chromium still scrolls overflow:hidden ancestors on
+     focus / scrollIntoView (inspect composer, minimap). clip is not a
+     scroll container, so the shell cannot be pushed under the titlebar. */
+  overflow: clip;
   background: var(--bg);
 }
 

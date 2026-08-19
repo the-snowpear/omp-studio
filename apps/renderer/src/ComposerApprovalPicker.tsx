@@ -62,6 +62,7 @@ export function ComposerApprovalPicker({
   disabled,
   nextTurnOnly = false,
   onChange,
+  onInteract,
 }: {
   preview: boolean;
   mode: ApprovalMode;
@@ -71,11 +72,13 @@ export function ComposerApprovalPicker({
   /** Live turn still uses the previous trust level. */
   nextTurnOnly?: boolean;
   onChange: (mode: ApprovalMode) => void;
+  onInteract?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const label = APPROVAL_MODE_LABELS[mode];
 
   const select = (next: ApprovalMode) => {
+    onInteract?.();
     setOpen(false);
     if (!indeterminate && next === mode) return;
     onChange(next);
@@ -87,7 +90,10 @@ export function ComposerApprovalPicker({
         type="button"
         className={`pill-btn${mode === "yolo" ? " danger" : ""}`}
         disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          onInteract?.();
+          setOpen((value) => !value);
+        }}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`权限模式：${label}`}

@@ -30,6 +30,10 @@ import {
 import { CHROME_NOTIFY_CHANNEL } from "./chrome-notify-shared.js";
 import { CHROME_OPEN_URL_CHANNEL } from "./chrome-open-url-shared.js";
 import {
+  CHROME_LOGS_CHANNELS,
+  type ChromeLogsResult,
+} from "./chrome-logs-shared.js";
+import {
   CHROME_IMAGE_CHANNELS,
   type ChromeImageInput,
   type ChromeImageResult,
@@ -39,6 +43,12 @@ import {
   type ChromeAvatarBytes,
   type ChromeAvatarSaveResult,
 } from "./chrome-profile-shared.js";
+import {
+  CHROME_APP_UPDATE_CHANNELS,
+  type AppUpdateInfo,
+  type ChromeAppUpdateDownloadResult,
+  type ChromeAppUpdateInstallResult,
+} from "./chrome-app-update-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
 import {
   WORKSPACE_SHELL_IPC_CHANNELS,
@@ -95,6 +105,12 @@ contextBridge.exposeInMainWorld(
     openUrl(payload: { url: string }): Promise<void> {
       return ipcRenderer.invoke(CHROME_OPEN_URL_CHANNEL, payload) as Promise<void>;
     },
+    openLogDir(): Promise<ChromeLogsResult> {
+      return ipcRenderer.invoke(CHROME_LOGS_CHANNELS.openDir, {}) as Promise<ChromeLogsResult>;
+    },
+    exportLogs(): Promise<ChromeLogsResult> {
+      return ipcRenderer.invoke(CHROME_LOGS_CHANNELS.exportLogs, {}) as Promise<ChromeLogsResult>;
+    },
     saveAvatar(input: ChromeAvatarBytes): Promise<ChromeAvatarSaveResult | { ok: false; message: string }> {
       return ipcRenderer.invoke(CHROME_PROFILE_CHANNELS.saveAvatar, input) as Promise<
         ChromeAvatarSaveResult | { ok: false; message: string }
@@ -131,6 +147,15 @@ contextBridge.exposeInMainWorld(
     },
     saveImage(input: ChromeImageInput): Promise<ChromeImageResult> {
       return ipcRenderer.invoke(CHROME_IMAGE_CHANNELS.saveImage, input) as Promise<ChromeImageResult>;
+    },
+    checkAppUpdate(): Promise<AppUpdateInfo | null> {
+      return ipcRenderer.invoke(CHROME_APP_UPDATE_CHANNELS.check) as Promise<AppUpdateInfo | null>;
+    },
+    downloadAppUpdate(url: string): Promise<ChromeAppUpdateDownloadResult> {
+      return ipcRenderer.invoke(CHROME_APP_UPDATE_CHANNELS.download, { url }) as Promise<ChromeAppUpdateDownloadResult>;
+    },
+    quitAndInstallUpdate(filePath: string): Promise<ChromeAppUpdateInstallResult> {
+      return ipcRenderer.invoke(CHROME_APP_UPDATE_CHANNELS.install, { filePath }) as Promise<ChromeAppUpdateInstallResult>;
     },
   }),
 );

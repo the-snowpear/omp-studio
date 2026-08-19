@@ -12,6 +12,7 @@ import {
   CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION,
   CONVERSATION_PUBLIC_ITEM_KINDS,
   CONVERSATION_REDACT_KEY_PATTERN,
+  conversationRedactKey,
   ContractValidationError,
   DEFAULT_MAX_CONTROL_FRAME_BYTES,
   SESSION_TRANSCRIPT_READ_CAPABILITY,
@@ -65,6 +66,11 @@ test("conversation contract freezes capability, concurrency, cursor, and mapping
   assert.ok(CONVERSATION_REDACT_KEY_PATTERN.test("apiKey"));
   assert.ok(CONVERSATION_REDACT_KEY_PATTERN.test("authorization"));
   assert.equal(CONVERSATION_REDACT_KEY_PATTERN.test("toolName"), false);
+  assert.equal(conversationRedactKey("token"), true);
+  assert.equal(conversationRedactKey("apiKey"), true);
+  assert.equal(conversationRedactKey("tokens"), false);
+  assert.equal(conversationRedactKey("tokensBefore"), false);
+  assert.equal(conversationRedactKey("contextTokens"), false);
 });
 
 test("session.transcript.read parses canonical fixture and optional cursor", async () => {

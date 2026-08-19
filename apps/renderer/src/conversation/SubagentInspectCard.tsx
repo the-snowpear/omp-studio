@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import type { SessionId } from "@omp-studio/client-contract";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import type { MentionCandidate } from "../composer/types";
 import { Icon } from "../icons";
@@ -30,6 +31,9 @@ export function SubagentInspectCard({
   agents,
   canSend,
   runtimeConnected,
+  parentSessionId,
+  liveSessionId,
+  pendingInteraction,
   workspaceId,
   loadMentions,
   onClose,
@@ -42,6 +46,9 @@ export function SubagentInspectCard({
   readonly agents: readonly StudioAgentSnapshot[];
   readonly canSend: boolean;
   readonly runtimeConnected: boolean;
+  readonly parentSessionId?: SessionId;
+  readonly liveSessionId?: SessionId;
+  readonly pendingInteraction?: boolean;
   readonly workspaceId?: string;
   readonly loadMentions?: (trigger: "@" | "/", query: string) => Promise<readonly MentionCandidate[]>;
   readonly onClose: () => void;
@@ -84,9 +91,9 @@ export function SubagentInspectCard({
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (!composerAllowed) closeRef.current?.focus();
+    if (!composerAllowed) closeRef.current?.focus({ preventScroll: true });
     return () => {
-      previous?.focus();
+      previous?.focus({ preventScroll: true });
     };
   }, [composerAllowed, target.agentId, target.toolCallId]);
 
@@ -107,10 +114,10 @@ export function SubagentInspectCard({
       const last = nodes[nodes.length - 1]!;
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
-        last.focus();
+        last.focus({ preventScroll: true });
       } else if (!event.shiftKey && document.activeElement === last) {
         event.preventDefault();
-        first.focus();
+        first.focus({ preventScroll: true });
       }
     };
     const onDown = (event: MouseEvent) => {
@@ -163,6 +170,9 @@ export function SubagentInspectCard({
         agents={agents}
         canSend={canSend}
         runtimeConnected={runtimeConnected}
+        {...(parentSessionId === undefined ? {} : { parentSessionId })}
+        {...(liveSessionId === undefined ? {} : { liveSessionId })}
+        {...(pendingInteraction === undefined ? {} : { pendingInteraction })}
         composerId="saInspectComposer"
         autoFocusComposer={composerAllowed}
         {...(workspaceId === undefined ? {} : { workspaceId })}

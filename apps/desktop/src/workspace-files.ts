@@ -32,6 +32,24 @@ function resolveInside(root: string, path: string): string {
   return target;
 }
 
+function escapedFrom(root: string, canonical: string): boolean {
+  const escaped = relative(root, canonical);
+  return escaped === ".." || escaped.startsWith(`..${sep}`);
+}
+
+async function assertMutableTarget(root: string, path: string): Promise<string> {
+  const target = resolveInside(root, path);
+  const parent = await realpath(dirname(target));
+  if (escapedFrom(root, parent)) throw new Error("workspace file path escapes the workspace");
+  try {
+    const metadata = await lstat(target);
+    if (metadata.isSymbolicLink()) throw new Error("workspace file path escapes the workspace");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  return target;
+}
+
 export function createWorkspaceFileService({ registry }: { readonly registry: WorkspaceRegistry }): HostWorkspaceFileService {
   const storedRoot = (workspaceId: WorkspaceId): string => {
     const workspace = registry.get(workspaceId);
@@ -67,18 +85,14 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
     async createFile(input): Promise<WorkspaceFileMutationResult> {
       const path = normalizeRelativePath(input.path);
       const root = storedRoot(input.workspaceId);
-      const target = resolveInside(root, path);
-      const parent = await realpath(dirname(target));
-      if (relative(root, parent) === ".." || relative(root, parent).startsWith(`..${sep}`)) throw new Error("workspace file path escapes the workspace");
+      const target = await assertMutableTarget(root, path);
       await writeFile(target, "", { encoding: "utf8", flag: "wx" });
       return { applied: true, kind: "file", path };
     },
     async createDirectory(input): Promise<WorkspaceFileMutationResult> {
       const path = normalizeRelativePath(input.path);
       const root = storedRoot(input.workspaceId);
-      const target = resolveInside(root, path);
-      const parent = await realpath(dirname(target));
-      if (relative(root, parent) === ".." || relative(root, parent).startsWith(`..${sep}`)) throw new Error("workspace file path escapes the workspace");
+      const target = await assertMutableTarget(root, path);
       await mkdir(target);
       return { applied: true, kind: "directory", path };
     },

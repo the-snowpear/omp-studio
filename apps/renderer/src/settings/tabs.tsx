@@ -145,7 +145,7 @@ const R_SETTINGS = "等待 settings contract 接入（读模型含 effective val
 /* ------------------------------------------------------------------ */
 
 const GENERAL_RESET_KEYS: readonly (keyof AppSettings)[] = [
-  "theme", "density", "streaming", "toolActivity",
+  "language", "theme", "density", "streaming", "toolActivity",
   "restoreLastProject", "restoreLastSession", "startupPage",
   "rememberLayout", "perProjectLayout",
   "notifyTaskDone", "notifyErrors", "notifyConfirmations", "notifyLongTasks",
@@ -162,8 +162,17 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
         resetKeys={GENERAL_RESET_KEYS}
       />
       <SettingSection title="应用">
-        <SettingRow label="界面语言" desc="界面文案语言（概念术语保留英文）" source="unavailable" reason="界面国际化（i18n）尚未接入，当前界面为中文">
-          <StaticSelect value="中文" options={["中文", "English"]} label="界面语言" title="语言（暂未实现）" />
+        <SettingRow label="界面语言" desc="界面文案语言（概念术语保留英文）" source={appSource(app, "language")}>
+          <AppSelect
+            label="界面语言"
+            value={app.language}
+            options={[
+              ["system", "跟随系统 (System)"],
+              ["zh", "简体中文 (Simplified Chinese)"],
+              ["en", "English"],
+            ]}
+            onChange={(language) => updateApp({ language })}
+          />
         </SettingRow>
         <SettingRow label="主题" desc="Light / Dark，实时生效并随应用持久化" source={appSource(app, "theme")}>
           <AppSelect

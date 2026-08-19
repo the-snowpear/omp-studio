@@ -11,6 +11,7 @@ afterEach(() => {
   vi.useRealTimers();
   window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
   window.sessionStorage.removeItem(DIAGNOSTICS_INTENT_KEY);
+  window.ompStudioChrome = undefined;
 });
 
 function fakeClient(): StudioClient & { readonly query: ReturnType<typeof vi.fn>; readonly command: ReturnType<typeof vi.fn> } {
@@ -35,7 +36,7 @@ function renderPage(options: {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === false ? "0" : "1");
   const client = options.client ?? fakeClient();
   render(
-    <PreviewModeProvider>
+    <PreviewModeProvider switchEnabled>
       <DiagnosticsPage
         client={client}
         {...(options.runtime === undefined ? {} : { runtime: options.runtime })}
@@ -93,7 +94,7 @@ describe("DiagnosticsPage", () => {
       },
     };
     render(
-      <PreviewModeProvider>
+      <PreviewModeProvider switchEnabled>
         <DiagnosticsPage
           client={fakeClient()}
           runtime={environment.runtime}
@@ -164,7 +165,7 @@ describe("DiagnosticsPage", () => {
       installer: { status: "installed", version: "1.0.0-studio.1", signature: "verified" },
     };
     render(
-      <PreviewModeProvider>
+      <PreviewModeProvider switchEnabled>
         <DiagnosticsPage
           client={fakeClient()}
           runtime={environment.runtime}
@@ -208,7 +209,7 @@ describe("DiagnosticsPage", () => {
       installer: { status: "installed", version: "1.0.0-studio.1", signature: "verified" },
     };
     render(
-      <PreviewModeProvider>
+      <PreviewModeProvider switchEnabled>
         <DiagnosticsPage
           client={fakeClient()}
           runtime={environment.runtime}
@@ -217,7 +218,8 @@ describe("DiagnosticsPage", () => {
       </PreviewModeProvider>,
     );
     expect(screen.getByText("Runtime 进程已退出")).toBeTruthy();
-    expect(screen.getAllByText(/Runtime 进程已退出：Runtime process exited \(code=1\)/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Runtime 进程已退出（退出码 1）/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Runtime process exited/)).toBeNull();
   });
 
   it("recheck ensures a disconnected runtime instead of only re-querying", async () => {
@@ -276,10 +278,162 @@ describe("DiagnosticsPage", () => {
       readonly command: ReturnType<typeof vi.fn>;
     };
     renderPage({ preview: false, client, runtime: disconnected, environment });
-    fireEvent.click(screen.getByRole("button", { name: "重新检测" }));
+    fireEvent.click(screen.getByRole("button", { name: "重新连接 Runtime" }));
     await waitFor(() => {
       expect(command).toHaveBeenCalledWith("runtime.ensure", {});
       expect(screen.getByText("Runtime 已重新连接")).toBeTruthy();
     });
+  });
+
+  it("does not ensure when the workspace is missing", async () => {
+    const query = vi.fn(async (name: string) => {
+      if (name === "environment.get") {
+        return environment;
+      }
+      if (name === "diagnostics.get") {
+        return { generatedAt: "2026-08-18T06:26:07.000Z", authority: environment.authority, redacted: true, entries: [] };
+      }
+      if (name === "capabilities.get") {
+        return { profile: "full-parity-v1", generatedAt: "2026-08-18T06:26:07.000Z", hash: "cap", capabilities: [] };
+      }
+      throw new Error(`unexpected query ${name}`);
+    });
+    const command = vi.fn(async () => {
+      throw new Error("runtime.ensure should not run");
+    });
+    const environment: EnvironmentReadModel = {
+      platform: "win32",
+      arch: "x64",
+      authority: {
+        authorityId: "auth-1" as EnvironmentReadModel["authority"]["authorityId"],
+        authorityEpoch: 1 as EnvironmentReadModel["authority"]["authorityEpoch"],
+      },
+      runtime: {
+        status: "unavailable",
+        classification: "unavailable",
+        unavailableCode: "no-workspace",
+      },
+      installer: { status: "installed", version: "1.0.0-studio.1", signature: "verified" },
+    };
+    const client = { query, command, subscribe: vi.fn(), bootstrap: vi.fn(), close: vi.fn() } as unknown as StudioClient & {
+      readonly query: ReturnType<typeof vi.fn>;
+      readonly command: ReturnType<typeof vi.fn>;
+    };
+    renderPage({ preview: false, client, runtime: environment.runtime, environment });
+    fireEvent.click(screen.getByRole("button", { name: "重新检测" }));
+    await waitFor(() => {
+      expect(query).toHaveBeenCalledWith("diagnostics.get", {});
+    });
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it("confirms a forced Runtime restart", async () => {
+    const requestId = "req-restart" as CommandRequestId;
+    const authority = {
+      authorityId: "auth-1" as EnvironmentReadModel["authority"]["authorityId"],
+      authorityEpoch: 1 as EnvironmentReadModel["authority"]["authorityEpoch"],
+    };
+    const connected: RuntimeConnection = { status: "connected", classification: "managed", runtimeVersion: "1.0.0-studio.1" };
+    const environment: EnvironmentReadModel = {
+      platform: "win32",
+      arch: "x64",
+      authority,
+      runtime: connected,
+      installer: { status: "installed", version: "1.0.0-studio.1", signature: "verified" },
+    };
+    const query = vi.fn(async (name: string) => {
+      if (name === "environment.get") return environment;
+      if (name === "diagnostics.get") {
+        return { generatedAt: "2026-08-18T06:26:07.000Z", authority, redacted: true, entries: [] };
+      }
+      if (name === "capabilities.get") {
+        return { profile: "full-parity-v1", generatedAt: "2026-08-18T06:26:07.000Z", hash: "cap", capabilities: [] };
+      }
+      throw new Error(`unexpected query ${name}`);
+    });
+    const command = vi.fn(async (name: string) => {
+      if (name !== "runtime.ensure") throw new Error(`unexpected command ${name}`);
+      return { requestId };
+    });
+    let emitReceipt: (() => void) | undefined;
+    const subscribe = vi.fn((_scope: unknown, listener: (event: { kind: string; receipt?: CommandReceipt }) => void) => {
+      emitReceipt = () => {
+        listener({
+          kind: "command.receipt",
+          receipt: {
+            requestId,
+            commandName: "runtime.ensure",
+            status: "completed",
+            result: connected,
+            observedAt: "2026-08-18T06:26:07.000Z",
+          },
+        });
+      };
+      return () => undefined;
+    });
+    const client = { query, command, subscribe, bootstrap: vi.fn(), close: vi.fn() } as unknown as StudioClient & {
+      readonly query: ReturnType<typeof vi.fn>;
+      readonly command: ReturnType<typeof vi.fn>;
+    };
+    renderPage({ preview: false, client, runtime: connected, environment });
+    fireEvent.click(screen.getByRole("button", { name: "重启" }));
+    expect(screen.getByRole("dialog", { name: "重启 Runtime？" })).toBeTruthy();
+    expect(screen.getByRole("dialog").textContent).toMatch(/完成后会自动重新连接/);
+    fireEvent.click(screen.getByRole("button", { name: "确认重启" }));
+    await waitFor(() => {
+      expect(screen.getByRole("progressbar")).toBeTruthy();
+    });
+    expect(typeof emitReceipt).toBe("function");
+    act(() => {
+      emitReceipt?.();
+    });
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith("runtime.ensure", { force: true });
+      expect(screen.getByText("Runtime 已重启并重新连接")).toBeTruthy();
+    });
+  });
+
+  it("opens Host logs through chrome in real mode", async () => {
+    const openLogDir = vi.fn(async () => ({ ok: true as const }));
+    const exportLogs = vi.fn(async () => ({ ok: true as const }));
+    window.ompStudioChrome = {
+      openLogDir,
+      exportLogs,
+    } as unknown as NonNullable<typeof window.ompStudioChrome>;
+    renderPage({
+      preview: false,
+      client: fakeClient(),
+      runtime: { status: "connected", classification: "managed", runtimeVersion: "1.0.0-studio.1" },
+      environment: {
+        platform: "win32",
+        arch: "x64",
+        authority: {
+          authorityId: "auth-1" as EnvironmentReadModel["authority"]["authorityId"],
+          authorityEpoch: 1 as EnvironmentReadModel["authority"]["authorityEpoch"],
+        },
+        runtime: { status: "connected", classification: "managed", runtimeVersion: "1.0.0-studio.1" },
+        installer: { status: "installed", version: "1.0.0-studio.1", signature: "verified" },
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "打开" }));
+    await waitFor(() => {
+      expect(openLogDir).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("已打开日志目录")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "导出" }));
+    await waitFor(() => {
+      expect(exportLogs).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("已导出 Host 日志")).toBeTruthy();
+    });
+  });
+
+  it("keeps log actions local in preview", () => {
+    const client = renderPage({ preview: true });
+    fireEvent.click(screen.getByRole("button", { name: "打开" }));
+    expect(screen.getByText("演示：打开日志目录不会触发外部操作")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "导出" }));
+    expect(screen.getByText("演示：导出日志不会写文件")).toBeTruthy();
+    expect(client.query).not.toHaveBeenCalled();
+    expect(client.command).not.toHaveBeenCalled();
   });
 });

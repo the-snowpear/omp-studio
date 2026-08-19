@@ -1,7 +1,8 @@
 # Getting started
 
-OMP Studio currently ships **from source**. There is no signed GitHub Release
-installer yet. Windows 10/11 x64 is the supported desktop.
+OMP Studio currently ships **from source**, or from an unsigned Windows NSIS
+installer built locally with `npm run pack:win`. There is no Authenticode-signed
+GitHub Release installer yet. Windows 10/11 x64 is the supported desktop.
 
 ## Requirements
 
@@ -36,9 +37,10 @@ npm run preview
 Or double-click `preview.cmd` / `启动预览.cmd` at the repository root. This builds the
 Electron main process and renderer, then opens the desktop window.
 
-The first start may take several minutes. The window’s **预览** switch uses
-in-app fixtures for read surfaces; composer, terminal, pause/resume, and
-approvals still talk to a real Host when one is running.
+The first start may take several minutes. This snapshot hides the in-app
+**预览** switch (`PREVIEW_MODE_SWITCH_ENABLED=false`) and uses Host / desktop
+data only. Composer, terminal, pause/resume, and approvals talk to a real Host
+when one is running.
 
 ## Run with a managed Runtime
 
@@ -57,6 +59,25 @@ submodule working tree. That **will** show as modified content inside
 source of truth is `omp-patch/overlay/` plus `omp-patch/patches/`.
 
 Host logs: `%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`.
+
+## Windows installer (unsigned)
+
+Requires a machine that can already `npm run omp:build:host` (Bun, MSVC, Rust,
+and `npm run omp:keys` once). Then:
+
+```powershell
+npm run pack:win
+```
+
+Output: `outputs/installer/OMP-Studio-Setup-0.1.0-win-x64.exe` (gitignored).
+The Setup is not Authenticode-signed; SmartScreen will warn. `pack:win` audits
+the unpacked tree so a Runtime **private** key cannot ship.
+
+Reuse an existing signed Runtime artifact:
+
+```powershell
+npm run pack:win -- --skip-host
+```
 
 ## Verify
 

@@ -17,9 +17,11 @@ export function composerPromptEnabled(input: {
   readonly pendingInteraction: boolean;
   readonly promptChannelReady: boolean;
   readonly sessionCreating?: boolean | undefined;
+  /** Welcome page with no live session: allow send, then surface Host errors. */
+  readonly newConversation?: boolean | undefined;
 }): boolean {
   if (!input.textReady || input.running || input.pendingInteraction) return false;
-  return input.promptChannelReady || input.sessionCreating === true;
+  return input.promptChannelReady || input.sessionCreating === true || input.newConversation === true;
 }
 
 export function composerQueueEnabled(input: {

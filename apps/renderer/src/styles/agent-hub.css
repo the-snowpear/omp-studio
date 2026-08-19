@@ -33,7 +33,10 @@
 .hub-conn.amber { background: var(--amber-soft); color: var(--amber); }
 .hub-conn.blue { background: var(--blue-soft); color: var(--blue); }
 .hub-conn .hc-detail { color: var(--text-2); flex: 1; min-width: 0; }
+.hub-conn .hc-copy { flex: 1; min-width: 0; }
 .hub-conn .hc-actions { display: flex; gap: var(--sp-6); flex: none; }
+.hub-conn.is-busy { flex-wrap: wrap; }
+.hub-conn .action-progress { flex: 1 1 100%; }
 
 /* ---------- 主 Agent 横幅卡 ---------- */
 .hub-main {

@@ -38,8 +38,11 @@
     "omp:keys": "node scripts/runtime-signing-keys.mjs",
     "omp:build:host": "node scripts/build-omp-host.mjs",
     "omp:artifact": "npm run build && node scripts/runtime-artifact.mjs",
+    "pack:win": "node scripts/pack-win.mjs",
     "pack:win:prepare": "node scripts/prepare-installer-resources.mjs",
-    "omp:test:metadata": "npm run build -w @omp-studio/runtime-installer && node --test scripts/runtime-artifact.test.mjs",
+    "pack:win:ui": "node scripts/build-installer-host.mjs",
+    "pack:win:audit": "node scripts/audit-installer.mjs",
+    "omp:test:metadata": "npm run build -w @omp-studio/runtime-installer && node --test scripts/runtime-artifact.test.mjs scripts/audit-installer.test.mjs scripts/installer-dir.test.mjs",
     "p5:gate": "node scripts/p5-gate.mjs",
     "omp:e2e:install": "node scripts/runtime-install-e2e.mjs",
     "omp:verify:prepatch": "node scripts/verify-omp-prepatch.mjs",
@@ -52,6 +55,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "electron-builder": "^26.0.0",
     "typescript": "^5.9.0"
   }
 }

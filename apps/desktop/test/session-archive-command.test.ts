@@ -120,6 +120,49 @@ test("session.archive aborts a streaming resident session, switches away, then s
   assert.equal(sessionRef.current, next.session);
 });
 
+test("session.archive evacuates a background resident without switching the active session", async () => {
+  const live = fakeSession(snapshotOf(SESSION_B, true));
+  const archived: Array<{ sessionId: string; skipWriteGrace?: boolean }> = [];
+  const switches: Array<{ kind: string }> = [];
+  const evacuated: string[] = [];
+  const sessionRef = { current: live.session as DesktopRuntimeSession | undefined };
+  const commands = createDesktopSemanticCommands({
+    sessionRef,
+    catalog: {
+      list: async () => [
+        { sessionId: SESSION_A, modifiedAt: T0, messageCount: 1, status: "active" as const },
+      ],
+    },
+    archive: () =>
+      ({
+        archive: async (sessionId: string, options?: { readonly skipWriteGrace?: boolean }) => {
+          archived.push({ sessionId, ...(options?.skipWriteGrace === true ? { skipWriteGrace: true } : {}) });
+          return { sessionId, archived: true };
+        },
+      }) as unknown as StudioSessionArchiveService,
+    switchSession: async (intent) => {
+      switches.push({ kind: intent.kind });
+      return live.session;
+    },
+    evacuateResident: async (sessionId) => {
+      evacuated.push(sessionId);
+      return sessionId === SESSION_A ? { found: true } : { found: false };
+    },
+    bindSession: (session) => {
+      sessionRef.current = session;
+    },
+    interaction: {} as DesktopInteractionHost,
+  });
+
+  const result = await commands.archive!({ threadId: threadIdFor(SESSION_A) as ThreadId });
+  assert.equal(result.applied, true);
+  assert.deepEqual(evacuated, [SESSION_A]);
+  assert.deepEqual(switches, []);
+  assert.equal(live.invokes.length, 0);
+  assert.deepEqual(archived, [{ sessionId: SESSION_A, skipWriteGrace: true }]);
+  assert.equal(sessionRef.current, live.session);
+});
+
 test("session.archive of a non-resident session does not abort or switch", async () => {
   const live = fakeSession(snapshotOf(SESSION_B, true));
   const archived: Array<{ sessionId: string; skipWriteGrace?: boolean }> = [];

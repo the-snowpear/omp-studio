@@ -37,6 +37,14 @@ declare global {
         notify(payload: { title: string; body?: string }): Promise<void>;
         /** 用系统默认浏览器打开 https 链接（Main `shell.openExternal`，不是 Electron 窗）。 */
         openUrl(payload: { url: string }): Promise<void>;
+        /** 打开 Host 日志目录。路径留在 Main，不回传。 */
+        openLogDir(): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
+        /** 另存近期 Host 日志。路径留在 Main，不回传。 */
+        exportLogs(): Promise<
+          | { readonly ok: true }
+          | { readonly ok: false; readonly cancelled: true }
+          | { readonly ok: false; readonly message: string }
+        >;
         /** 把处理后的头像写入 `%APPDATA%\omp-studio\profile\`，不回传路径。 */
         saveAvatar(input: { mime: "image/jpeg" | "image/webp" | "image/png"; bytes: Uint8Array }): Promise<
           { readonly ok: true } | { readonly ok: false; readonly message: string }
@@ -77,6 +85,29 @@ declare global {
         }): Promise<
           | { readonly ok: true }
           | { readonly ok: false; readonly cancelled: true }
+          | { readonly ok: false; readonly message: string }
+        >;
+        /** 检查 GitHub Releases 应用全量安装包更新。 */
+        checkAppUpdate(): Promise<{
+          readonly available: boolean;
+          readonly currentVersion: string;
+          readonly version?: string;
+          readonly name?: string;
+          readonly releaseNotes?: string;
+          readonly publishedAt?: string;
+          readonly htmlUrl?: string;
+          readonly downloadUrl?: string;
+          readonly assetName?: string;
+          readonly assetSize?: number;
+        } | null>;
+        /** 下载应用全量安装包。 */
+        downloadAppUpdate(url: string): Promise<
+          | { readonly ok: true; readonly filePath: string }
+          | { readonly ok: false; readonly message: string }
+        >;
+        /** 调起下载好的安装程序并退出当前应用。 */
+        quitAndInstallUpdate(filePath: string): Promise<
+          | { readonly ok: true }
           | { readonly ok: false; readonly message: string }
         >;
       }

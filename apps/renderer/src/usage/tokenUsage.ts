@@ -31,32 +31,58 @@ export function parseDateKey(date: string): number {
   return new Date(year, month - 1, day).getTime();
 }
 
-/** Preview-only series, ported from ui_reference/ver1 mock-data.js. */
+function seedBy(i: number, salt: number): number {
+  const value = Math.sin((i + 1) * 37.719 + salt * 97.31) * 46638.9426;
+  return value - Math.floor(value);
+}
+
+function isQuietPreviewDay(month: number, day: number): boolean {
+  if (month === 0 && day <= 11) return true;
+  if (month === 1 && day >= 15 && day <= 23) return true;
+  if (month === 3 && day >= 4 && day <= 12) return true;
+  if (month === 4 && day >= 1 && day <= 5) return true;
+  if (month === 6 && day >= 10 && day <= 27) return true;
+  return false;
+}
+
+function isCrunchPreviewDay(month: number, day: number): boolean {
+  return (month === 2 && day >= 16 && day <= 20) || (month === 7 && day >= 3 && day <= 7);
+}
+
+function weekdayUseChance(month: number): number {
+  if (month <= 1) return 0.32;
+  if (month <= 3) return 0.48;
+  if (month <= 5) return 0.55;
+  if (month === 6) return 0.5;
+  return 0.58;
+}
+
+function previewTokensForDay(date: number): TokenDay {
+  const d = new Date(date);
+  const month = d.getMonth();
+  const day = d.getDate();
+  const dow = d.getDay();
+  const weekend = dow === 0 || dow === 6;
+  const salt = month * 50 + day;
+  const roll = seedBy(salt, 7);
+  if (isQuietPreviewDay(month, day) || (weekend && roll > 0.12) || (!weekend && roll > weekdayUseChance(month))) {
+    return { date, claude: 0, codex: 0, total: 0 };
+  }
+  const crunch = isCrunchPreviewDay(month, day);
+  const light = !crunch && seedBy(salt, 4) < 0.38;
+  const base = crunch ? 62_000 : light ? 3_800 : weekend ? 8_500 : 20_500;
+  const amount = Math.round(base * (0.72 + seedBy(salt, 1) * 0.5));
+  const claude = Math.round(amount * (0.52 + seedBy(salt, 2) * 0.12));
+  return { date, claude, codex: amount - claude, total: amount };
+}
+
+/** Preview-only series: sparse real-looking year, no future days. */
 function buildMockTokenUsage(now = Date.now()): TokenDay[] {
-  const seedBy = (i: number, salt: number) => {
-    const value = Math.sin((i + 1) * 37.719 + salt * 97.31) * 46638.9426;
-    return value - Math.floor(value);
-  };
+  const today = startOfDay(now);
+  const yearStart = new Date(new Date(today).getFullYear(), 0, 1).getTime();
   const days: TokenDay[] = [];
-  const total = 600;
-  for (let i = total - 1; i >= 0; i--) {
-    const date = now - i * DAY_MS;
-    const dow = new Date(date).getDay();
-    const weekend = dow === 0 || dow === 6;
-    const friday = dow === 5;
-    let trend = 0;
-    if (i >= 590) trend = 0;
-    else if (i >= 560) trend = ((590 - i) / 30) * 0.45;
-    else if (i >= 270) trend = 0.45 + ((560 - i) / 290) * 0.55;
-    else trend = 1 + Math.sin((total - 1 - i) / 30) * 0.05;
-    if (trend === 0 || seedBy(i, 7) > 0.985) {
-      days.push({ date, claude: 0, codex: 0, total: 0 });
-      continue;
-    }
-    const base = weekend ? 9000 : friday ? 30000 : 26000;
-    const amount = Math.round(base * trend * (0.78 + seedBy(i, 1) * 0.44));
-    const claude = Math.round(amount * (0.55 + seedBy(i, 2) * 0.1));
-    days.push({ date, claude, codex: amount - claude, total: amount });
+  for (let date = yearStart; date <= today; date += DAY_MS) {
+    days.push(previewTokensForDay(date));
   }
   return days;
 }

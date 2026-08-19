@@ -33,7 +33,6 @@
     <g id="i-minus" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></g>
     <g id="i-x" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>
     <g id="i-warn" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></g>
-    <g id="logo-glyph"><rect x="18" y="19" width="60" height="13" rx="4.5"/><rect x="36.5" y="19" width="12.5" height="43" rx="4.5"/><rect x="57" y="19" width="12.5" height="58" rx="4.5"/></g>
   </defs>
 </svg>
 
@@ -73,20 +72,13 @@
           <aside class="banner">
             <div class="banner-dots"><i></i><i></i><i></i></div>
             <div class="logo-64">
-              <svg width="56" height="56" viewBox="0 0 96 96" role="img" aria-label="OMP Studio">
-                <defs><linearGradient id="lg1" x1="16" y1="14" x2="80" y2="84" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F95BD4"/><stop offset=".52" stop-color="#8B5CF6"/><stop offset="1" stop-color="#4C8DFF"/></linearGradient></defs>
-                <rect x="2.5" y="2.5" width="91" height="91" rx="24" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.22)"/>
-                <g fill="url(#lg1)"><use href="#logo-glyph"/></g>
-              </svg>
+              <img src="app-icon.png" width="56" height="56" alt="OMP Studio" />
             </div>
             <h2>OMP Studio</h2>
             <p class="tagline">面向 OMP 开发者的桌面工作台</p>
-            <span class="chip">v1.4.2 · x64</span>
+            <span class="chip" id="welcomeChip">v1.4.2 · x64</span>
             <p class="runtime-note" id="welcomeRuntime">&gt;_ 内置 <b>OMP Runtime 1.4.2</b></p>
-            <svg class="watermark" viewBox="0 0 96 96" aria-hidden="true">
-              <defs><linearGradient id="lg1w" x1="0" y1="0" x2="96" y2="96" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#9db8ff"/></linearGradient></defs>
-              <g fill="url(#lg1w)"><use href="#logo-glyph"/></g>
-            </svg>
+            <img class="watermark" src="app-icon.png" alt="" />
           </aside>
           <section class="pane">
             <h1 id="welcomeTitle">欢迎使用 OMP Studio 安装向导</h1>
@@ -109,7 +101,7 @@
         <!-- 第 2 步 · 安装位置 -->
         <div class="step" data-step="1">
           <div class="form-page">
-            <header class="headband"><h1 id="dirTitle">选择安装位置</h1><p id="dirLede">选择要安装 OMP Studio 的文件夹。若所选位置还不是产品目录，将自动新建 OMP Studio 文件夹。</p></header>
+            <header class="headband"><h1 id="dirTitle">选择安装位置</h1><p id="dirLede">选择要安装 OMP Studio 的文件夹。系统目录或非空文件夹会自动新建 OMP Studio 子目录；空目录或已是产品目录则原样使用。</p></header>
             <div class="form">
               <div class="group">
                 <span class="g-label">目标文件夹</span>
@@ -131,17 +123,19 @@
                     <div class="req" id="meterReq"></div>
                   </div>
                   <div class="space-legend">
-                    <span class="k req"><i></i>所需空间 <span class="val">328 MB</span></span>
-                    <span class="k free"><i></i>已使用 <span class="val">181 GB</span></span>
+                    <span class="k req"><i></i>所需空间 <span class="val" id="spaceReq">328 MB</span></span>
+                    <span class="k free"><i></i>已使用 <span class="val" id="spaceUsed">181 GB</span></span>
                     <span class="spacer"></span>
-                    <span class="drive">磁盘 C:\ · 可用 55.7 GB / 共 237 GB</span>
+                    <span class="drive" id="spaceDrive">磁盘 C:\ · 可用 55.7 GB / 共 237 GB</span>
                   </div>
                 </div>
               </div>
               <div class="group" style="margin-top:2px">
                 <span class="g-label">附加任务</span>
-                <label class="check is-locked" id="startMenuRow"><input type="checkbox" id="optStartMenu" checked disabled/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">创建开始菜单快捷方式<small>始终创建，便于从 Windows 搜索启动</small></span></label>
-                <label class="check" id="desktopRow"><input type="checkbox" id="optDesktop" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">创建桌面快捷方式<small>全新安装默认勾选；升级时不重建你已删除的图标</small></span></label>
+                <div class="shortcut-options">
+                  <label class="check is-locked" id="startMenuRow"><input type="checkbox" id="optStartMenu" checked disabled/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">创建开始菜单快捷方式<small>始终创建，便于从 Windows 搜索启动</small></span></label>
+                  <label class="check" id="desktopRow"><input type="checkbox" id="optDesktop" checked/><span class="box"><svg viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-6.5"/></svg></span><span class="c-text">创建桌面快捷方式<small>全新安装默认勾选；升级时不重建你已删除的图标</small></span></label>
+                </div>
               </div>
               <p class="foot-hint" id="dirFootHint" style="margin-top:auto"><svg viewBox="0 0 24 24"><use href="#i-info"/></svg> <span id="dirFootText">安装完成后，可通过「设置 → 应用」卸载 OMP Studio。</span></p>
             </div>
@@ -169,20 +163,13 @@
           <aside class="banner">
             <div class="banner-dots"><i></i><i></i><i></i></div>
             <div class="logo-64">
-              <svg width="56" height="56" viewBox="0 0 96 96" role="img" aria-label="OMP Studio">
-                <defs><linearGradient id="lg2" x1="16" y1="14" x2="80" y2="84" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#F95BD4"/><stop offset=".52" stop-color="#8B5CF6"/><stop offset="1" stop-color="#4C8DFF"/></linearGradient></defs>
-                <rect x="2.5" y="2.5" width="91" height="91" rx="24" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.22)"/>
-                <g fill="url(#lg2)"><use href="#logo-glyph"/></g>
-              </svg>
+              <img src="app-icon.png" width="56" height="56" alt="OMP Studio" />
             </div>
             <h2>OMP Studio</h2>
             <p class="tagline">面向 OMP 开发者的桌面工作台</p>
-            <span class="chip">v1.4.2 · x64</span>
+            <span class="chip" id="finishChip">v1.4.2 · x64</span>
             <p class="runtime-note" id="finishRuntime">&gt;_ 运行时已就绪 · <b>omp://</b> 已注册</p>
-            <svg class="watermark" viewBox="0 0 96 96" aria-hidden="true">
-              <defs><linearGradient id="lg2w" x1="0" y1="0" x2="96" y2="96" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#9db8ff"/></linearGradient></defs>
-              <g fill="url(#lg2w)"><use href="#logo-glyph"/></g>
-            </svg>
+            <img class="watermark" src="app-icon.png" alt="" />
           </aside>
           <section class="pane finish-pane">
             <div class="success-mark" aria-hidden="true" id="successMark">
@@ -284,20 +271,35 @@
   var stage = document.getElementById("stage");
   var hostMode = document.documentElement.getAttribute("data-host") === "installer";
   var installerShell = window.installerShell;
-  var DURATION = 8600, step = -1, prevStep = null, simTimers = [], raf = 0;
+  var liveState = null;
+  function isLive() { return !!(installerShell && installerShell.isLive); }
+  var DURATION = 8600, step = -1, prevStep = null, simTimers = [], raf = 0, pollTimer = 0;
   var PRODUCT_DIR = "OMP Studio";
+  var CONTAINER_NAMES = {
+    "program files": 1,
+    "program files (x86)": 1,
+    desktop: 1,
+    documents: 1,
+    downloads: 1,
+    windows: 1,
+    users: 1,
+    programdata: 1,
+    public: 1
+  };
   var PACKAGE_VERSION = "1.4.2";
+  var RUNTIME_VERSION = "1.4.2";
   var DEFAULT_PATH = "C:\\Program Files\\OMP Studio";
   var scenario = "fresh";
   var repairAccepted = false;
   var occupyKind = null;
 
   /* ---------- 主题 ---------- */
-  var saved = localStorage.getItem("omp-setup-theme") || "system";
+  var saved = "system";
+  try { saved = localStorage.getItem("omp-setup-theme") || "system"; } catch (e) {}
   setTheme(saved);
   function setTheme(t) {
     stage.setAttribute("data-theme", t);
-    localStorage.setItem("omp-setup-theme", t);
+    try { localStorage.setItem("omp-setup-theme", t); } catch (e) {}
     Array.prototype.forEach.call(document.querySelectorAll(".theme-switch button"), function (b) {
       b.classList.toggle("on", b.getAttribute("data-t") === t);
     });
@@ -343,27 +345,90 @@
   function looksLikeProductDir(p) {
     return lastSegment(p).toLowerCase() === PRODUCT_DIR.toLowerCase();
   }
-  function resolveInstallDir(selected) {
+  function isContainerName(name) {
+    return !!CONTAINER_NAMES[String(name || "").toLowerCase()];
+  }
+  function parentPath(p) {
+    var n = normalizePath(p);
+    var i = n.lastIndexOf("\\");
+    if (i <= 0) return "";
+    if (i === 2 && n.charAt(1) === ":") return n.slice(0, 3);
+    return n.slice(0, i);
+  }
+  function collapseProductSuffix(p) {
+    var current = normalizePath(p);
+    while (looksLikeProductDir(current) && looksLikeProductDir(parentPath(current))) {
+      current = normalizePath(parentPath(current));
+    }
+    return current;
+  }
+  function fixtureNode(path) {
+    var n = normalizePath(path).toLowerCase();
+    var found = null;
+    Array.prototype.forEach.call(NODES, function (node) {
+      if (node.path && normalizePath(node.path).toLowerCase() === n) found = node;
+    });
+    return found;
+  }
+  function specialFolders() {
+    return (liveState && liveState.specialFolders) || [];
+  }
+  function isSpecialFolder(path) {
+    var n = normalizePath(path).toLowerCase();
+    var folders = specialFolders();
+    for (var i = 0; i < folders.length; i++) {
+      if (normalizePath(folders[i]).toLowerCase() === n) return true;
+    }
+    return false;
+  }
+  function resolveInstallDir(selected, stat) {
     var path = normalizePath(selected);
     if (!path) return "";
+    path = collapseProductSuffix(path);
     if (looksLikeProductDir(path)) return path;
-    if (path.length === 2 && path.charAt(1) === ":") return path + "\\" + PRODUCT_DIR;
-    return path + "\\" + PRODUCT_DIR;
+    if (isLockedDir()) return path;
+    if (stat && stat.hasProductFiles) return path;
+    if (/^[A-Za-z]:\\?$/i.test(path)) return path.replace(/\\+$/g, "") + "\\" + PRODUCT_DIR;
+    if (isSpecialFolder(path) || isContainerName(lastSegment(path))) return path + "\\" + PRODUCT_DIR;
+    if (stat && stat.exists === true && stat.empty === false) return path + "\\" + PRODUCT_DIR;
+    if (stat && (stat.exists === false || stat.empty === true)) return path;
+    var node = fixtureNode(path);
+    if (node && node.empty) return path;
+    if (node && node.empty === false) return path + "\\" + PRODUCT_DIR;
+    return path;
   }
-  function describeResolve(selected) {
+  function describeResolve(selected, stat) {
     var raw = normalizePath(selected);
-    var resolved = resolveInstallDir(raw);
+    var resolved = resolveInstallDir(raw, stat);
     if (!raw) return { kind: "empty", text: "请选择安装位置。" };
     if (raw.toLowerCase() === resolved.toLowerCase()) {
-      return { kind: "as-is", text: "将安装到所选文件夹（已是 OMP Studio 目录）。" };
+      if (looksLikeProductDir(raw)) {
+        return { kind: "as-is", text: "将安装到所选文件夹（已是 OMP Studio 目录）。" };
+      }
+      return { kind: "as-is", text: "将安装到所选文件夹（空目录或不存在的路径，不再套一层）。" };
     }
-    return { kind: "append", text: "所选位置还不是产品目录，将新建文件夹  " };
+    return { kind: "append", text: "所选位置是系统目录或非空文件夹，将新建  " };
   }
 
-  function current() { return SCENARIOS[scenario] || SCENARIOS.fresh; }
+  function current() {
+    if (liveState) {
+      return {
+        occupancy: liveState.occupancy || null,
+        existingVersion: liveState.existingVersion || null,
+        existingPath: liveState.existingPath || liveState.defaultPath || DEFAULT_PATH,
+        running: !!liveState.running
+      };
+    }
+    return SCENARIOS[scenario] || SCENARIOS.fresh;
+  }
   function isUninstall() { return current().occupancy === "uninstall"; }
   function isLockedDir() { return !!current().occupancy && !isUninstall(); }
 
+  function liveStat(path) {
+    if (!isLive() || !installerShell.statDir) return null;
+    try { return installerShell.statDir(path); }
+    catch (e) { return null; }
+  }
   function refreshPathHint() {
     var input = document.getElementById("pathInput");
     var hint = document.getElementById("pathHint");
@@ -375,15 +440,17 @@
       text.textContent = "已安装版本将原地更新，安装位置沿用上次目录。";
       return;
     }
-    var info = describeResolve(input.value);
+    var stat = liveStat(input.value);
+    var info = describeResolve(input.value, stat);
     text.textContent = info.text;
     hint.className = "path-hint" + (info.kind === "append" ? " append" : info.kind === "empty" ? " warn" : "");
     if (info.kind === "append") {
       var code = document.createElement("span");
       code.className = "mono";
-      code.textContent = resolveInstallDir(input.value);
+      code.textContent = resolveInstallDir(input.value, stat);
       hint.appendChild(code);
     }
+    if (stat) updateSpaceMeter(stat);
   }
 
   function applyScenario(id) {
@@ -418,15 +485,20 @@
     document.getElementById("f2Desc").textContent = "低延迟渲染，完整支持转义序列与真彩色输出。";
     document.getElementById("f3Title").textContent = "Agent 与 MCP 扩展";
     document.getElementById("f3Desc").textContent = "连接模型与工具链，按需扩展工作台能力。";
-    document.getElementById("welcomeRuntime").innerHTML = "&gt;_ 内置 <b>OMP Runtime 1.4.2</b>";
+    document.getElementById("welcomeRuntime").innerHTML = "&gt;_ 内置 <b>OMP Runtime " + RUNTIME_VERSION + "</b>";
     document.getElementById("finishRuntime").innerHTML = "&gt;_ 运行时已就绪 · <b>omp://</b> 已注册";
     document.getElementById("progressTitle").textContent = "正在安装 OMP Studio";
     document.getElementById("progressLede").textContent = "请稍候，正在将 OMP Studio 安装到你的计算机。";
     document.getElementById("sumK0").textContent = "安装位置";
     document.getElementById("sumK1").textContent = "产品版本";
-    document.getElementById("sumV1").textContent = "OMP Studio 1.4.2 (x64)";
+    document.getElementById("sumV1").textContent = "OMP Studio " + PACKAGE_VERSION + " (x64)";
     document.getElementById("sumK2").textContent = "内置运行时";
-    document.getElementById("sumV2").textContent = "OMP Runtime 1.4.2 · PTY · MCP";
+    document.getElementById("sumV2").textContent = "OMP Runtime " + RUNTIME_VERSION + " · PTY · MCP";
+    var welcomeChip = document.getElementById("welcomeChip");
+    var finishChip = document.getElementById("finishChip");
+    if (welcomeChip) welcomeChip.textContent = "v" + PACKAGE_VERSION + " · x64";
+    if (finishChip) finishChip.textContent = "v" + PACKAGE_VERSION + " · x64";
+    document.getElementById("tbVersion").textContent = "v" + PACKAGE_VERSION;
 
     var notice = document.getElementById("occupancyNotice");
     var occText = document.getElementById("occupancyText");
@@ -519,7 +591,7 @@
       welcomeNext.innerHTML = '下一步(N) <svg viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg>';
       installBtn.textContent = "安装(I)";
       dirTitle.textContent = "选择安装位置";
-      dirLede.textContent = "选择要安装 OMP Studio 的文件夹。若所选位置还不是产品目录，将自动新建 OMP Studio 文件夹。";
+      dirLede.textContent = "选择要安装 OMP Studio 的文件夹。系统目录或非空文件夹会自动新建 OMP Studio 子目录；空目录或已是产品目录则原样使用。";
       dirFoot.textContent = "需要管理员权限，将安装给本机所有用户。完成后可在「设置 → 应用」卸载。";
       finishTitle.textContent = "安装完成";
       finishLede.textContent = "OMP Studio 已成功安装，运行时与扩展组件均已就绪。";
@@ -557,7 +629,7 @@
       if (sc.occupancy === "downgrade") return "第 1 步，共 4 步 · 将从 " + sc.existingVersion + " 降级";
       return "第 1 步，共 4 步 · 许可与组件已内置于运行时";
     }
-    if (step === 1) return isLockedDir() ? "第 2 步，共 4 步 · 安装位置已锁定为现有目录" : "第 2 步，共 4 步 · 预计占用 328 MB";
+    if (step === 1) return isLockedDir() ? "第 2 步，共 4 步 · 安装位置已锁定为现有目录" : "第 2 步，共 4 步 · 预计占用 " + spaceRequiredLabel();
     if (step === 2) return "第 3 步，共 4 步 · 正在写入文件，请勿关闭窗口";
     return current().occupancy === "upgrade" ? "更新已完成 · 感谢使用 OMP Studio" : "安装已完成 · 感谢使用 OMP Studio";
   }
@@ -588,16 +660,52 @@
       refreshPathHint();
       requestAnimationFrame(function () { setTimeout(armMeter, 90); });
     }
-    if (step === 2) startSim();
+    if (step === 2) {
+      if (isLive()) startLiveInstall();
+      else startSim();
+    }
     if (step === 3) {
       document.getElementById("sumPath").textContent = isUninstall()
         ? "程序文件与快捷方式"
-        : resolveInstallDir(document.getElementById("pathInput").value);
+        : resolveInstallDir(document.getElementById("pathInput").value, liveStat(document.getElementById("pathInput").value));
     }
   }
 
   /* ---------- 磁盘指示 ---------- */
+  function spaceRequiredMB() {
+    var n = liveState && liveState.spaceRequiredMB;
+    return n > 0 ? n : 328;
+  }
+  function spaceRequiredLabel() {
+    return spaceRequiredMB() + " MB";
+  }
+  function formatBytes(n) {
+    n = Number(n) || 0;
+    if (n >= 1024 * 1024 * 1024) return (n / (1024 * 1024 * 1024)).toFixed(1) + " GB";
+    if (n >= 1024 * 1024) return Math.round(n / (1024 * 1024)) + " MB";
+    return Math.round(n / 1024) + " KB";
+  }
+  function updateSpaceMeter(stat) {
+    if (!stat || !stat.totalBytes) return;
+    var used = Math.max(0, stat.totalBytes - stat.freeBytes);
+    var usedPct = Math.min(99, (used / stat.totalBytes) * 100);
+    var reqBytes = spaceRequiredMB() * 1024 * 1024;
+    var reqPct = Math.max(0.8, (reqBytes / stat.totalBytes) * 100);
+    document.getElementById("spaceReq").textContent = spaceRequiredLabel();
+    document.getElementById("spaceUsed").textContent = formatBytes(used);
+    document.getElementById("spaceDrive").textContent =
+      "磁盘 " + (stat.drive || "") + " · 可用 " + formatBytes(stat.freeBytes) + " / 共 " + formatBytes(stat.totalBytes);
+    var u = document.getElementById("meterUsed"), r = document.getElementById("meterReq");
+    u.style.width = "0%"; r.style.width = "0%"; r.style.left = "0%";
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      u.style.width = usedPct + "%"; r.style.left = usedPct + "%"; r.style.width = reqPct + "%";
+    }); });
+  }
   function armMeter() {
+    if (isLive()) {
+      updateSpaceMeter(liveStat(document.getElementById("pathInput").value) || liveStat(DEFAULT_PATH));
+      return;
+    }
     var used = 76.4, req = Math.max(1.7, 328 / (237 * 1024) * 100);
     var u = document.getElementById("meterUsed"), r = document.getElementById("meterReq");
     u.style.width = "0%"; r.style.width = "0%"; r.style.left = "0%";
@@ -672,6 +780,64 @@
   }
   function quantPct(t) { var p = 0; PCT_KEYS.forEach(function (k) { if (t >= k[0]) p = k[1]; }); return p; }
 
+  function startLiveInstall() {
+    stopSim();
+    var logview = document.getElementById("logview"); logview.innerHTML = "";
+    document.getElementById("phase").textContent = "正在准备…";
+    document.getElementById("fileRow").innerHTML = "&nbsp;";
+    setBar(0);
+    var pathInput = document.getElementById("pathInput");
+    var resolved = resolveInstallDir(pathInput.value, liveStat(pathInput.value));
+    if (resolved) pathInput.value = resolved;
+    if (installerShell && typeof installerShell.startInstall === "function") {
+      installerShell.startInstall({
+        path: pathInput.value,
+        desktopShortcut: document.getElementById("optDesktop").checked,
+        kill: !!current().running
+      });
+    }
+    function addLine(kind, msg, phase, file) {
+      var div = document.createElement("div");
+      div.className = "line " + kind;
+      var now = new Date();
+      var stamp = [now.getHours(), now.getMinutes(), now.getSeconds()].map(function (n) {
+        return (n < 10 ? "0" : "") + n;
+      }).join(":");
+      div.innerHTML = '<span class="t">[' + stamp + ']</span><span class="m"></span>';
+      div.querySelector(".m").textContent = msg;
+      logview.appendChild(div);
+      logview.scrollTop = logview.scrollHeight;
+      if (phase) document.getElementById("phase").textContent = phase;
+      if (file !== undefined) document.getElementById("fileRow").textContent = file ? "正在处理: " + file : "\u00a0";
+    }
+    addLine("ok", "开始写入程序文件", "正在释放文件…", "OMP Studio.exe");
+    var t0 = performance.now();
+    var finished = false;
+    function complete() {
+      if (finished) return;
+      finished = true;
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
+      addLine("done", "安装完成", "安装完成", "");
+      setBar(100);
+      simTimers.push(setTimeout(function () { go(3); }, 700));
+    }
+    pollTimer = setInterval(function () {
+      try {
+        var st = installerShell.poll();
+        if (st && st.done) complete();
+      } catch (e) {}
+    }, 300);
+    var tick = function (now) {
+      if (finished) return;
+      var t = Math.min(0.92, (now - t0) / 20000);
+      setBar(mq.matches ? quantPct(t) : smoothPct(t));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    simTimers.push(setTimeout(function () {
+      if (!finished) addLine("hl", "正在部署 OMP 运行时…", "正在部署 OMP 运行时…", "runtime\\");
+    }, 1800));
+  }
   function startSim() {
     stopSim();
     var logview = document.getElementById("logview"); logview.innerHTML = "";
@@ -709,6 +875,7 @@
   }
   function stopSim() {
     cancelAnimationFrame(raf);
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
     simTimers.forEach(clearTimeout); simTimers = [];
   }
 
@@ -772,7 +939,7 @@
       return;
     }
     var input = document.getElementById("pathInput");
-    if (!isLockedDir()) input.value = resolveInstallDir(input.value);
+    if (!isLockedDir()) input.value = resolveInstallDir(input.value, liveStat(input.value));
     if (!normalizePath(input.value)) return;
     if (sc.occupancy === "same" && !repairAccepted) { openOccupy("same"); return; }
     if (sc.occupancy === "downgrade" && !repairAccepted) { openOccupy("downgrade"); return; }
@@ -797,6 +964,14 @@
   if (minimizeBtn) minimizeBtn.addEventListener("click", function () {
     if (installerShell && typeof installerShell.minimize === "function") installerShell.minimize();
   });
+  var titlebar = document.querySelector(".titlebar");
+  if (titlebar) {
+    titlebar.addEventListener("mousedown", function (e) {
+      if (e.button !== 0) return;
+      if (e.target.closest && e.target.closest(".tb-btn")) return;
+      if (installerShell && typeof installerShell.drag === "function") installerShell.drag();
+    });
+  }
   document.getElementById("confirmStay").addEventListener("click", closeDialogs);
   confirmOv.addEventListener("mousedown", function (e) { if (e.target === confirmOv) closeDialogs(); });
   occupyOv.addEventListener("mousedown", function (e) { if (e.target === occupyOv) closeDialogs(); });
@@ -817,19 +992,22 @@
       go(2);
       return;
     }
+    if (kind === "running" && isLive() && installerShell.killApp) {
+      try { installerShell.killApp(); } catch (e) {}
+    }
     repairAccepted = true;
     if (kind === "same" && step === 0) go(1);
     else beginInstall();
   });
 
   var NODES = [
-    { id: "desktop", label: "桌面", depth: 0, icon: "#i-monitor", path: "C:\\Users\\Public\\Desktop" },
+    { id: "desktop", label: "桌面", depth: 0, icon: "#i-monitor", path: "C:\\Users\\Public\\Desktop", empty: false },
     { id: "pc", label: "此电脑", depth: 0, icon: "#i-drive" },
-    { id: "c", label: "本地磁盘 (C:)", depth: 1, icon: "#i-drive", path: "C:\\" },
-    { id: "pf", label: "Program Files", depth: 2, icon: "#i-folder", path: "C:\\Program Files" },
+    { id: "c", label: "本地磁盘 (C:)", depth: 1, icon: "#i-drive", path: "C:\\", empty: false },
+    { id: "pf", label: "Program Files", depth: 2, icon: "#i-folder", path: "C:\\Program Files", empty: false },
     { id: "omp", label: "OMP Studio", depth: 3, icon: "#i-folder", path: DEFAULT_PATH },
-    { id: "docs", label: "文档", depth: 0, icon: "#i-folder", path: "C:\\Users\\Ada\\Documents" },
-    { id: "dev", label: "Dev（空目录）", depth: 1, icon: "#i-folder", path: "D:\\Dev" }
+    { id: "docs", label: "文档", depth: 0, icon: "#i-folder", path: "C:\\Users\\Ada\\Documents", empty: false },
+    { id: "dev", label: "Dev（空目录）", depth: 1, icon: "#i-folder", path: "D:\\Dev", empty: true }
   ];
   var browseSel = "omp";
   function renderTree() {
@@ -853,6 +1031,15 @@
   }
   document.getElementById("browseBtn").addEventListener("click", function () {
     if (isLockedDir()) return;
+    if (isLive() && installerShell.browse) {
+      var picked = installerShell.browse(document.getElementById("pathInput").value);
+      if (picked) {
+        var stat = liveStat(picked);
+        document.getElementById("pathInput").value = resolveInstallDir(picked, stat);
+        refreshPathHint();
+      }
+      return;
+    }
     browseOv.hidden = false;
     renderTree();
   });
@@ -868,13 +1055,17 @@
   document.getElementById("pathInput").addEventListener("blur", function () {
     if (isLockedDir()) return;
     var input = document.getElementById("pathInput");
-    var resolved = resolveInstallDir(input.value);
+    var resolved = resolveInstallDir(input.value, liveStat(input.value));
     if (resolved) input.value = resolved;
     refreshPathHint();
   });
 
   document.getElementById("finishBtn").addEventListener("click", function () {
     var run = !isUninstall() && document.getElementById("runCheck").checked;
+    if (isLive() && installerShell.finish) {
+      installerShell.finish({ run: run });
+      return;
+    }
     var toast = document.getElementById("toast");
     document.getElementById("toastMsg").textContent = isUninstall()
       ? "卸载向导已退出"
@@ -914,8 +1105,27 @@
     }
   });
 
+  function applyLiveState(state) {
+    liveState = state || null;
+    if (!liveState) return;
+    PACKAGE_VERSION = liveState.version || PACKAGE_VERSION;
+    RUNTIME_VERSION = liveState.runtimeVersion || RUNTIME_VERSION;
+    DEFAULT_PATH = liveState.defaultPath || DEFAULT_PATH;
+    var occupancy = liveState.occupancy || "fresh";
+    if (occupancy === "same") scenario = "same";
+    else if (occupancy === "downgrade") scenario = "downgrade";
+    else if (occupancy === "upgrade") scenario = "upgrade";
+    else scenario = "fresh";
+  }
+
   var initial = new URLSearchParams(window.location.search).get("scenario") || "fresh";
-  applyScenario(initial);
+  if (isLive()) {
+    try { applyLiveState(installerShell.getState()); }
+    catch (e) { liveState = { occupancy: null, defaultPath: DEFAULT_PATH, version: PACKAGE_VERSION, runtimeVersion: RUNTIME_VERSION }; }
+    applyScenario(scenario);
+  } else {
+    applyScenario(initial);
+  }
   go(0, 1);
 })();
 </script>

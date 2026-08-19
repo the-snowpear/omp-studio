@@ -162,6 +162,7 @@ code, pre, .mono { font-family: var(--font-mono); }
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  position: relative;
 }
 
 /* Generic icon sizing */

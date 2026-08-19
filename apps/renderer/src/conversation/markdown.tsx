@@ -226,7 +226,26 @@ function createComponents(streaming: boolean, magicKeywords: boolean): Component
 
 export function MarkdownInline({ text }: { text: string; k?: string }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({ children }) => <>{children}</> }}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => <>{children}</>,
+        a({ href, children }) {
+          const url = typeof href === "string" ? href.trim() : "";
+          if (!isSafeHref(url)) return <span>{children}</span>;
+          return (
+            <a href={url} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          );
+        },
+        img({ src, alt }) {
+          const url = typeof src === "string" ? src.trim() : "";
+          if (!/^https?:\/\//i.test(url)) return null;
+          return <img src={url} alt={alt ?? ""} loading="lazy" referrerPolicy="no-referrer" />;
+        },
+      }}
+    >
       {text}
     </ReactMarkdown>
   );

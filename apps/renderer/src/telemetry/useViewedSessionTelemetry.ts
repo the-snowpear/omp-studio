@@ -26,6 +26,19 @@ interface CachedResult {
 
 const IDENTITY = { status: "preview" } as const;
 
+/** Prefer the snapshot that was captured later. Equal/invalid timestamps keep `live`. */
+export function preferFresherTelemetry(
+  live: SessionTelemetrySnapshot | undefined,
+  read: SessionTelemetrySnapshot | undefined,
+): SessionTelemetrySnapshot | undefined {
+  if (live === undefined) return read;
+  if (read === undefined) return live;
+  const liveAt = Date.parse(live.capturedAt);
+  const readAt = Date.parse(read.capturedAt);
+  if (Number.isNaN(readAt) || readAt <= liveAt) return live;
+  return read;
+}
+
 export function useViewedSessionTelemetry(options: {
   /** Real client; `null` in preview mode so no query is ever issued. */
   readonly client: ViewedTelemetryClient | null;
@@ -35,49 +48,63 @@ export function useViewedSessionTelemetry(options: {
   readonly viewedSessionId: SessionId | undefined;
   readonly liveSessionId: SessionId | undefined;
   readonly liveTelemetry: SessionTelemetrySnapshot | undefined;
+  /**
+   * Bump after a mutation that invalidates last-read Context (e.g. compact).
+   * Archived cache is dropped; live views also re-query `session.telemetry.read`.
+   */
+  readonly refreshToken?: number;
 }): ViewedSessionTelemetryState {
   const { client, preview, viewedSessionId, liveSessionId, liveTelemetry } = options;
+  const refreshToken = options.refreshToken ?? 0;
   const generationRef = useRef(0);
   /** Completed results cached per sessionId for this page lifecycle. */
   const cacheRef = useRef(new Map<string, CachedResult>());
   const [offline, setOffline] = useState<{ sessionId: string; result: CachedResult } | { sessionId: string; failed: true } | undefined>();
 
   const viewingLive = viewedSessionId === undefined || viewedSessionId === liveSessionId;
+  const targetSessionId = viewedSessionId ?? (viewingLive ? liveSessionId : undefined);
 
   useEffect(() => {
-    if (preview || viewingLive || client === null || viewedSessionId === undefined) {
-      return;
-    }
+    if (preview || client === null || targetSessionId === undefined) return;
+    const shouldQuery = !viewingLive || refreshToken > 0;
+    if (!shouldQuery) return;
     const generation = ++generationRef.current;
-    const cached = cacheRef.current.get(viewedSessionId);
+    const cached = refreshToken === 0 ? cacheRef.current.get(targetSessionId) : undefined;
     if (cached !== undefined) {
-      setOffline({ sessionId: viewedSessionId, result: cached });
+      setOffline({ sessionId: targetSessionId, result: cached });
       return;
     }
-    setOffline(undefined);
+    if (refreshToken > 0) cacheRef.current.delete(targetSessionId);
+    if (!viewingLive) setOffline(undefined);
     let cancelled = false;
     void (async () => {
       try {
-        const result = await client.query("session.telemetry.read", { sessionId: viewedSessionId });
+        const result = await client.query("session.telemetry.read", { sessionId: targetSessionId });
         // A completed result is valid for its sessionId even if the user
         // navigated away; only applying it to the view is generation-gated.
         const entry: CachedResult = { source: result.source, telemetry: result.telemetry };
-        cacheRef.current.set(viewedSessionId, entry);
+        cacheRef.current.set(targetSessionId, entry);
         if (cancelled || generation !== generationRef.current) return;
-        setOffline({ sessionId: viewedSessionId, result: entry });
+        setOffline({ sessionId: targetSessionId, result: entry });
       } catch {
         if (cancelled || generation !== generationRef.current) return;
-        setOffline({ sessionId: viewedSessionId, failed: true });
+        setOffline({ sessionId: targetSessionId, failed: true });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [client, preview, viewingLive, viewedSessionId]);
+  }, [client, preview, viewingLive, targetSessionId, refreshToken]);
 
   if (preview) return IDENTITY;
+  const read = offline !== undefined && offline.sessionId === targetSessionId && !("failed" in offline)
+    ? offline.result
+    : undefined;
   if (viewingLive) {
-    return { status: "live", ...(liveTelemetry === undefined ? {} : { source: "live" as const, telemetry: liveTelemetry }) };
+    const telemetry = preferFresherTelemetry(liveTelemetry, read?.telemetry);
+    if (telemetry === undefined) return { status: "live" };
+    const fromRead = read !== undefined && telemetry === read.telemetry;
+    return { status: "live", source: fromRead ? read.source : "live", telemetry };
   }
   if (offline === undefined || offline.sessionId !== viewedSessionId) return { status: "loading" };
   if ("failed" in offline) return { status: "unavailable" };

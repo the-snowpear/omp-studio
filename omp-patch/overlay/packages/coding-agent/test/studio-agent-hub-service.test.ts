@@ -462,16 +462,22 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 		expect(() => service.get("Worker")).toThrow(StudioAgentHubError);
 	});
 
-	test("kill and release require a confirmation boundary with destructive metadata", async () => {
-		const { service, registry } = makeHub();
+	test("kill proceeds without a confirmation gate and is not blocked by a denying gate", async () => {
+		const { service, registry, lifecycle } = makeHub();
 		registry.register(makeRef("Worker", { status: "idle", parentId: "Main" }));
+		const killed = await service.kill({ agentId: "Worker", expectedGeneration: 1, callerAgentId: "Main" });
+		expect(killed).toMatchObject({ killed: true, snapshot: { status: "aborted", generation: 1 } });
+		expect(lifecycle.calls()).toEqual(["release:Worker:tombstone"]);
+		const denied = makeHub({ gate: denyingGate });
+		denied.registry.register(makeRef("W2", { status: "idle", parentId: "Main" }));
 		await expect(
-			service.kill({ agentId: "Worker", expectedGeneration: 1, callerAgentId: "Main" }),
-		).rejects.toMatchObject({
-			code: "CONFIRMATION_REQUIRED",
-			action: { kind: "kill", agentId: "Worker", generation: 1, risk: "destructive" },
-		});
-		registry.setStatus("Worker", "parked");
+			denied.service.kill({ agentId: "W2", expectedGeneration: 1, callerAgentId: "Main" }),
+		).resolves.toMatchObject({ killed: true });
+	});
+
+	test("release requires a confirmation boundary with destructive metadata", async () => {
+		const { service, registry } = makeHub();
+		registry.register(makeRef("Worker", { status: "parked", parentId: "Main" }));
 		await expect(
 			service.release({ agentId: "Worker", expectedGeneration: 1, callerAgentId: "Main" }),
 		).rejects.toMatchObject({
@@ -481,7 +487,7 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 		const denied = makeHub({ gate: denyingGate });
 		denied.registry.register(makeRef("W2", { status: "parked", parentId: "Main" }));
 		await expect(
-			denied.service.kill({ agentId: "W2", expectedGeneration: 1, callerAgentId: "Main" }),
+			denied.service.release({ agentId: "W2", expectedGeneration: 1, callerAgentId: "Main" }),
 		).rejects.toMatchObject({
 			code: "CONFIRMATION_DENIED",
 		});
@@ -533,6 +539,16 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 		const again = await service.release({ agentId: "Parked-1", expectedGeneration: 1, callerAgentId: "Main" });
 		expect(again).toMatchObject({ released: true, gone: true });
 		expect(() => service.get("Parked-1")).toThrow(StudioAgentHubError);
+
+		const { service: siblingHub, registry: siblingRegistry } = makeHub({ gate: acceptingGate });
+		siblingRegistry.register(
+			makeRef("ChildA", { status: "idle", parentId: "Main", session: makeLiveAgent() as unknown as AgentSession }),
+		);
+		siblingRegistry.register(makeRef("Parked-B", { status: "parked", parentId: "Main", sessionFile: SECRET_SESSION }));
+		await siblingHub.release({ agentId: "Parked-B", expectedGeneration: 1, callerAgentId: "Main" });
+		await expect(
+			siblingHub.release({ agentId: "Parked-B", expectedGeneration: 1, callerAgentId: "ChildA" }),
+		).rejects.toMatchObject({ code: "NOT_OWNER" });
 
 		const { service: second, registry: secondRegistry } = makeHub({ gate: acceptingGate });
 		secondRegistry.register(

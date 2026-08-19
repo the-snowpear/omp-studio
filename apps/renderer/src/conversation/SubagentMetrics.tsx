@@ -1,12 +1,19 @@
-import type { StudioAgentUsage } from "@omp-studio/studio-protocol";
-import type { SubagentHubTarget } from "./toolMeta";
+import type { StudioAgentSnapshot, StudioAgentUsage } from "@omp-studio/studio-protocol";
+import { isRealSubagentId, type SubagentHubTarget, type SubagentView } from "./toolMeta";
+
+const REDACTED_METRIC = "[redacted]";
+
+function publicMetricString(value: string | undefined): string | undefined {
+  if (value === undefined || value === REDACTED_METRIC || value.trim() === "") return undefined;
+  return value;
+}
 
 export type SubagentMetricValues = {
-  readonly tokens?: string | undefined;
-  readonly tools?: string | number | undefined;
-  readonly requests?: string | number | undefined;
-  readonly files?: string | number | undefined;
-  readonly cost?: string | undefined;
+  readonly tokens?: string;
+  readonly tools?: string | number;
+  readonly requests?: string | number;
+  readonly files?: string | number;
+  readonly cost?: string;
 };
 
 function formatMetricTokens(count: number): string {
@@ -40,13 +47,89 @@ export function resolveSubagentMetrics(
   target: Pick<SubagentHubTarget, "tokens" | "tools" | "requests" | "files" | "cost">,
 ): SubagentMetricValues {
   const live = usage === undefined ? {} : metricsFromUsage(usage);
+  const tokens = publicMetricString(typeof target.tokens === "string" ? target.tokens : undefined)
+    ?? (typeof target.tokens === "number" ? String(target.tokens) : undefined);
+  const cost = publicMetricString(target.cost);
   return {
-    ...(target.tokens === undefined ? {} : { tokens: target.tokens }),
+    ...(tokens === undefined ? {} : { tokens }),
     ...(target.tools === undefined ? {} : { tools: target.tools }),
     ...(target.requests === undefined ? {} : { requests: target.requests }),
     ...(target.files === undefined ? {} : { files: target.files }),
-    ...(target.cost === undefined ? {} : { cost: target.cost }),
+    ...(cost === undefined ? {} : { cost }),
     ...live,
+  };
+}
+
+export function formatSubagentDuration(durationMs: number): string {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "";
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function elapsedSince(iso: string | undefined, nowMs: number): string | undefined {
+  if (iso === undefined) return undefined;
+  const started = Date.parse(iso);
+  if (!Number.isFinite(started)) return undefined;
+  const formatted = formatSubagentDuration(Math.max(0, nowMs - started));
+  return formatted === "" ? undefined : formatted;
+}
+
+export function findLiveSubagent(
+  agent: Pick<SubagentView, "agentId" | "name">,
+  roster: readonly StudioAgentSnapshot[],
+): StudioAgentSnapshot | undefined {
+  if (agent.agentId !== undefined) {
+    const byId = roster.find((live) => live.agentId === agent.agentId);
+    if (byId !== undefined) return byId;
+  }
+  const named = roster.filter((live) => live.displayName === agent.name || live.agentId === agent.name);
+  return named.length === 1 ? named[0] : undefined;
+}
+
+/** Overlay Agent Hub roster onto a transcript card. Live usage/status win. */
+export function applyLiveSubagentRoster(
+  agent: SubagentView,
+  roster: readonly StudioAgentSnapshot[],
+  nowMs: number = Date.now(),
+): SubagentView {
+  const live = findLiveSubagent(agent, roster);
+  if (live === undefined) {
+    const tokens = publicMetricString(agent.tokens);
+    const cost = publicMetricString(agent.cost);
+    if (tokens === agent.tokens && cost === agent.cost) return agent;
+    return {
+      name: agent.name,
+      status: agent.status,
+      toolCallId: agent.toolCallId,
+      ...(agent.agentId === undefined ? {} : { agentId: agent.agentId }),
+      ...(agent.task === undefined ? {} : { task: agent.task }),
+      ...(agent.activity === undefined ? {} : { activity: agent.activity }),
+      ...(agent.currentTool === undefined ? {} : { currentTool: agent.currentTool }),
+      ...(agent.dur === undefined ? {} : { dur: agent.dur }),
+      ...(tokens === undefined ? {} : { tokens }),
+      ...(agent.tools === undefined ? {} : { tools: agent.tools }),
+      ...(agent.requests === undefined ? {} : { requests: agent.requests }),
+      ...(agent.files === undefined ? {} : { files: agent.files }),
+      ...(cost === undefined ? {} : { cost }),
+    };
+  }
+  const metrics = resolveSubagentMetrics(live.usage, agent);
+  const liveDur = live.usage === undefined ? undefined : formatSubagentDuration(live.usage.durationMs);
+  const dur = (liveDur !== undefined && liveDur !== "" ? liveDur : undefined)
+    ?? elapsedSince(live.startedAt, nowMs)
+    ?? agent.dur;
+  const agentId = agent.agentId ?? (isRealSubagentId(live.agentId) ? live.agentId : undefined);
+  const task = live.assignment ?? agent.task;
+  return {
+    name: live.displayName || agent.name,
+    status: live.status,
+    toolCallId: agent.toolCallId,
+    ...(agentId === undefined ? {} : { agentId }),
+    ...(task === undefined ? {} : { task }),
+    ...(agent.activity === undefined ? {} : { activity: agent.activity }),
+    ...(agent.currentTool === undefined ? {} : { currentTool: agent.currentTool }),
+    ...(dur === undefined ? {} : { dur }),
+    ...(agent.files === undefined ? {} : { files: agent.files }),
+    ...metrics,
   };
 }
 

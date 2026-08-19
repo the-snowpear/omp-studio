@@ -194,8 +194,7 @@ export interface StudioTranscriptReaderPort {
 }
 
 export type StudioDestructiveAction =
-	| { kind: "kill"; agentId: string; generation: number; risk: "destructive" }
-	| { kind: "release"; agentId: string; generation: number; risk: "destructive" };
+	{ kind: "release"; agentId: string; generation: number; risk: "destructive" };
 
 export type StudioConfirmationGate = (action: StudioDestructiveAction) => boolean | Promise<boolean>;
 
@@ -552,12 +551,8 @@ export class StudioAgentHubService {
 			throw new StudioAgentHubError("AGENT_TERMINAL", `Agent "${args.agentId}" is terminal`, entry.snapshot);
 		}
 		this.#assertScope(args.callerAgentId, args.agentId, entry);
-		await this.#requireConfirmation({
-			kind: "kill",
-			agentId: args.agentId,
-			generation: entry.snapshot.generation,
-			risk: "destructive",
-		});
+		// Studio confirms kill in the Agent Hub dialog. Do not emit a second
+		// InteractionDeck gate — the command should settle immediately.
 		const live = this.#livePort(ref);
 		if (live && ref.status === "running") {
 			try {
@@ -630,10 +625,10 @@ export class StudioAgentHubService {
 			);
 		}
 		if (entry.kind === "terminal") {
-			// Releasing a terminal record removes it entirely.
 			if (entry.terminal.kind === "advisor") {
 				throw new StudioAgentHubError("READ_ONLY_TARGET", `Agent "${args.agentId}" is a read-only advisor`);
 			}
+			this.#assertScope(args.callerAgentId, args.agentId, entry);
 			await this.#requireConfirmation({
 				kind: "release",
 				agentId: args.agentId,
@@ -721,8 +716,8 @@ export class StudioAgentHubService {
 		} catch {
 			throw new StudioAgentHubError("TRANSCRIPT_UNAVAILABLE", "Transcript could not be read");
 		}
-		const messages = page.messages
-			.slice(0, limit)
+		const raw = page.messages.slice(0, limit);
+		const messages = raw
 			.map(message => ({
 				id: message.id,
 				role: message.role,
@@ -733,8 +728,8 @@ export class StudioAgentHubService {
 						: message.text,
 			}))
 			.filter(message => message.text.length > 0);
-		const eof = page.eof || messages.length < limit;
-		const nextOffset = offset + messages.length;
+		const eof = page.eof || raw.length < limit;
+		const nextOffset = offset + raw.length;
 		return {
 			agentId: args.agentId,
 			generation,

@@ -6,7 +6,7 @@
  * success fixtures.
  */
 
-import { CONVERSATION_REDACT_KEY_PATTERN } from "@omp-studio/studio-protocol";
+import { conversationRedactKey } from "@omp-studio/studio-protocol";
 
 /** Substrings that must never appear on a public conversation payload. */
 export const CONVERSATION_FORBIDDEN_SUBSTRINGS = [
@@ -43,7 +43,7 @@ function walk(value: unknown, path: string, violations: string[]): void {
     return;
   }
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (CONVERSATION_REDACT_KEY_PATTERN.test(key)) {
+    if (conversationRedactKey(key)) {
       violations.push(`redacted key ${JSON.stringify(key)} at ${path}`);
     }
     if (key === "__proto__" || key === "constructor" || key === "prototype") {

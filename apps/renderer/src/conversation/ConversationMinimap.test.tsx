@@ -67,6 +67,27 @@ describe("deriveMinimapMarks", () => {
     expect(marks[2]!.preview).toContain("运行 1 条命令");
     expect(marks[4]!.preview).toBe("早期对话压缩");
   });
+
+  it("does not put snapcompact HISTORY into the compact mark preview", () => {
+    const marks = deriveMinimapMarks([{
+      type: "compaction",
+      item: {
+        kind: "compaction",
+        itemId: "cp-snap",
+        parentId: null,
+        createdAt: "t",
+        summary: [
+          "You are resuming a prior conversation. Its earlier turns were archived to reclaim context.",
+          "",
+          "HISTORY",
+          "===================",
+        ].join("\n"),
+      },
+    }]);
+    expect(marks[0]!.preview.includes("You are resuming")).toBe(false);
+    expect(marks[0]!.preview.includes("HISTORY")).toBe(false);
+    expect(marks[0]!.preview.length).toBeLessThan(40);
+  });
 });
 
 describe("spaceMinimapMarks", () => {

@@ -1,12 +1,14 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { I18nProvider } from "./i18n";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 import {
   __resetAppSettingsForTests,
   getAppSettings,
   updateAppSettings,
+  type AppLanguage,
 } from "./settings/appSettings";
 import { setSettingsIntent, SettingsPage } from "./SettingsPage";
 
@@ -35,15 +37,18 @@ function renderSettings(options: {
   preview?: boolean;
   approvalMode?: "always-ask" | "write" | "yolo";
   onSetApprovalMode?: (mode: "always-ask" | "write" | "yolo") => void;
+  language?: AppLanguage;
 } = {}) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === true ? "1" : "0");
   const onSetApprovalMode = options.onSetApprovalMode ?? vi.fn();
   const view = render(
-    <PreviewModeProvider>
-      <SettingsPage
-        {...(options.approvalMode === undefined ? {} : { approvalMode: options.approvalMode })}
-        onSetApprovalMode={onSetApprovalMode}
-      />
+    <PreviewModeProvider switchEnabled>
+      <I18nProvider forcedLanguage={options.language ?? "zh"}>
+        <SettingsPage
+          {...(options.approvalMode === undefined ? {} : { approvalMode: options.approvalMode })}
+          onSetApprovalMode={onSetApprovalMode}
+        />
+      </I18nProvider>
     </PreviewModeProvider>,
   );
   return { onSetApprovalMode, ...view };
@@ -56,7 +61,7 @@ function openTab(name: string) {
 
 describe("SettingsPage · 结构", () => {
   it("渲染 7 个新标签，删除旧的 Models/Sessions/Preview 分组", () => {
-    renderSettings({ preview: false });
+    renderSettings({ preview: false, language: "zh" });
     const tabs = screen.getAllByRole("tab");
     const labels = tabs.map((tab) => tab.textContent ?? "");
     expect(labels).toContain("常规");
@@ -75,9 +80,23 @@ describe("SettingsPage · 结构", () => {
     expect(screen.queryByText("Full Access")).toBeNull();
   });
 
+  it("支持英文模式渲染 7 个英文标签", () => {
+    renderSettings({ preview: false, language: "en" });
+    const tabs = screen.getAllByRole("tab");
+    const labels = tabs.map((tab) => tab.textContent ?? "");
+    expect(labels).toContain("General");
+    expect(labels).toContain("Interaction");
+    expect(labels).toContain("Permissions");
+    expect(labels).toContain("Context & Memory");
+    expect(labels).toContain("Files & Terminal");
+    expect(labels).toContain("Tasks & Execution");
+    expect(labels).toContain("Advanced");
+    expect(labels).toHaveLength(7);
+  });
+
   it("支持深链 intent 直接打开目标标签", () => {
     setSettingsIntent("permissions");
-    renderSettings({ preview: false, approvalMode: "write" });
+    renderSettings({ preview: false, approvalMode: "write", language: "zh" });
     const tab = screen.getByRole("tab", { name: "权限与安全" });
     expect(tab.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("combobox", { name: "审批模式" })).toBeTruthy();
@@ -97,15 +116,23 @@ describe("SettingsPage · 真实模式", () => {
     fireEvent.change(densitySelect, { target: { value: "compact" } });
     expect(getAppSettings().density).toBe("compact");
     expect(window.localStorage.getItem("omp.appSettings")).toContain('"density":"compact"');
+
+    const languageSelect = screen.getByRole("combobox", { name: "界面语言" });
+    expect((languageSelect as HTMLSelectElement).value).toBe("system");
+    fireEvent.change(languageSelect, { target: { value: "en" } });
+    expect(getAppSettings().language).toBe("en");
+    expect(window.localStorage.getItem("omp.appSettings")).toContain('"language":"en"');
   });
 
   it("恢复默认值把本标签的 App 级设置重置", () => {
-    updateAppSettings({ theme: "dark", density: "cozy" });
+    updateAppSettings({ language: "en", theme: "dark", density: "cozy" });
     renderSettings({ preview: false });
     fireEvent.click(screen.getByRole("button", { name: "恢复默认值" }));
+    expect(getAppSettings().language).toBe("system");
     expect(getAppSettings().theme).toBe("light");
     expect(getAppSettings().density).toBe("standard");
     expect((screen.getByRole("combobox", { name: "主题" }) as HTMLSelectElement).value).toBe("light");
+    expect((screen.getByRole("combobox", { name: "界面语言" }) as HTMLSelectElement).value).toBe("system");
   });
 
   it("无 Runtime 时审批模式禁用并提示，有 Runtime 时写真实命令", () => {
@@ -129,8 +156,6 @@ describe("SettingsPage · 真实模式", () => {
 
   it("尚未接入的 Runtime 行为只渲染禁用的静态控件，不做假开关", () => {
     renderSettings({ preview: false });
-    expect((screen.getByRole("combobox", { name: "界面语言" }) as HTMLSelectElement).disabled).toBe(true);
-
     openTab("对话与交互");
     expect((screen.getByRole("combobox", { name: "Steering 消息处理" }) as HTMLSelectElement).disabled).toBe(true);
 

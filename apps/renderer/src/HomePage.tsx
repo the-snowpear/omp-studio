@@ -7,6 +7,7 @@ import { pagePhaseClass, useDeferredKey } from "./pageTransition";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_ACTIVITY, PREVIEW_PROJECTS } from "./preview/fixtures";
 import { waitForCommandReceipt } from "./sessionLifecycle";
+import { ActionProgressBar } from "./ActionProgressBar";
 import { formatRuntimeDisconnectCopy, formatRuntimeUnavailableCopy } from "./diagnosticsModel";
 import {
   DISPLAY_NAME_MAX,
@@ -30,16 +31,18 @@ import {
 } from "./usage/tokenUsage";
 import { useAxisCrossfade, useTokenChartMorph, type TokenChartModelPts } from "./usage/useTokenChartMorph";
 
+import { useI18n } from "./i18n";
+
 export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics";
 
-const PAGE_NAV: ReadonlyArray<{ id: PageRoute; icon: string; label: string }> = [
-  { id: "workbench", icon: "layout", label: "工作台" },
-  { id: "home", icon: "home", label: "首页" },
-  { id: "history", icon: "history", label: "会话历史" },
-  { id: "capabilities", icon: "package", label: "能力中心" },
-  { id: "model-config", icon: "server", label: "模型配置" },
-  { id: "settings", icon: "settings", label: "设置" },
-  { id: "diagnostics", icon: "pulse", label: "诊断中心" },
+const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: string; key: string }> = [
+  { id: "workbench", icon: "layout", key: "nav.workbench" },
+  { id: "home", icon: "home", key: "nav.home" },
+  { id: "history", icon: "history", key: "nav.history" },
+  { id: "capabilities", icon: "package", key: "nav.capabilities" },
+  { id: "model-config", icon: "server", key: "nav.modelConfig" },
+  { id: "settings", icon: "settings", key: "nav.settings" },
+  { id: "diagnostics", icon: "pulse", key: "nav.diagnostics" },
 ];
 
 function isAppRoute(id: string): id is Exclude<PageRoute, "agent-hub"> {
@@ -65,6 +68,7 @@ export function SecondaryPage({
   onToggleTheme: () => void;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   const navRef = useRef<HTMLElement>(null);
   const winRef = useRef<HTMLSpanElement>(null);
   const mirrorRef = useRef<HTMLSpanElement>(null);
@@ -72,12 +76,6 @@ export function SecondaryPage({
   const { shown, phase } = useDeferredKey(route);
   if (route === shown) heldChildren.current = children;
   const body = route === shown ? children : heldChildren.current;
-  /* Body motion is only for secondary ↔ secondary swaps.
-     First mount from the workbench already plays page-in on `.page`; do not
-     arm here. The old skipFirstBody flip after layout meant the next parent
-     render — often workbench ← home — attached page-in to `.page-body` while
-     the shell played page-out, so the home exit flashed twice.
-     Same live-on-key-change idea as ModelConfigPage `tabMotionLive`. */
   const bodyMotionLive = useRef(false);
   if (!Object.is(route, shown)) bodyMotionLive.current = true;
   const bodyPhase = bodyMotionLive.current ? phase : null;
@@ -94,9 +92,10 @@ export function SecondaryPage({
     mirror.style.left = `${-active.offsetLeft}px`;
   }, [route]);
 
-  const link = (id: (typeof PAGE_NAV)[number]["id"], extra?: string) => {
-    const item = PAGE_NAV.find((entry) => entry.id === id);
+  const link = (id: (typeof PAGE_NAV_DEFS)[number]["id"], extra?: string) => {
+    const item = PAGE_NAV_DEFS.find((entry) => entry.id === id);
     if (!item) return null;
+    const label = t(item.key);
     const wired = isAppRoute(item.id);
     return (
       <a
@@ -105,7 +104,7 @@ export function SecondaryPage({
         data-nav={item.id}
         className={route === item.id ? "active" : undefined}
         aria-disabled={wired ? undefined : true}
-        data-tip={wired ? undefined : "（暂未实现）"}
+        data-tip={wired ? undefined : t("common.notImplemented")}
         tabIndex={extra === "mirror" ? -1 : undefined}
         aria-hidden={extra === "mirror" ? true : undefined}
         onClick={(event) => {
@@ -114,7 +113,7 @@ export function SecondaryPage({
         }}
       >
         <Icon name={item.icon} extra="sm" />
-        {item.label}
+        {label}
       </a>
     );
   };
@@ -122,14 +121,14 @@ export function SecondaryPage({
   return (
     <div className={className ? `page ${className}` : "page"} id="pageRoot">
       <header className="page-head" id="pageHead">
-        <button className="icon-btn" data-tip="工作台" aria-label="返回工作台" onClick={() => onRoute("workbench")}>
+        <button className="icon-btn" data-tip={t("nav.workbench")} aria-label={t("nav.workbench")} onClick={() => onRoute("workbench")}>
           <Icon name="arrow-l" />
         </button>
         <span className="ph-title">{titleIcon ? <Icon name={titleIcon} extra="sm" /> : null}{title}</span>
-        <nav className={`page-nav${PAGE_NAV.some((item) => item.id === route) ? "" : " no-bubble"}`} ref={navRef} aria-label="二级页导航">
-          {PAGE_NAV.map((item) => link(item.id))}
+        <nav className={`page-nav${PAGE_NAV_DEFS.some((item) => item.id === route) ? "" : " no-bubble"}`} ref={navRef} aria-label="二级页导航">
+          {PAGE_NAV_DEFS.map((item) => link(item.id))}
           <span className="nav-window" ref={winRef} aria-hidden="true">
-            <span className="nav-mirror" ref={mirrorRef}>{PAGE_NAV.map((item) => link(item.id, "mirror"))}</span>
+            <span className="nav-mirror" ref={mirrorRef}>{PAGE_NAV_DEFS.map((item) => link(item.id, "mirror"))}</span>
           </span>
         </nav>
         <span className="spacer" />
@@ -168,17 +167,17 @@ function ompStatusText(
   preview: boolean,
   extras: readonly string[],
 ): string {
-  let head = "omp unavailable";
+  let head = "Runtime 不可用";
   if (preview || runtime?.status === "connected") {
-    head = "omp is ready";
+    head = "OMP 已就绪";
   } else if (runtime?.status === "unavailable" && runtime.unavailableCode !== undefined) {
     head = formatRuntimeUnavailableCopy(runtime.unavailableCode, runtime.unavailableReason).title;
   } else if (runtime?.status === "disconnected") {
     head = runtime.disconnectCode !== undefined
       ? formatRuntimeDisconnectCopy(runtime.disconnectCode, runtime.disconnectReason).title
-      : "omp disconnected";
-  } else if (runtime?.status) {
-    head = `omp ${runtime.status}`;
+      : "连接已断开";
+  } else if (runtime?.status === "connecting") {
+    head = "正在连接 Runtime";
   }
   return extras.length > 0 ? `${head} · ${extras.join(" · ")}` : head;
 }
@@ -999,6 +998,7 @@ export function HomePage({
   const [editingProfile, setEditingProfile] = useState(false);
   const activities = (history?.entries ?? []).slice(0, 5);
   const [installing, setInstalling] = useState(false);
+  const [installStep, setInstallStep] = useState(1);
   const [installMessage, setInstallMessage] = useState<string | undefined>(undefined);
   const runtimeMissing = !preview && runtime?.status !== "connected";
   const statusText = ompStatusText(runtime, preview, extraBits);
@@ -1025,6 +1025,9 @@ export function HomePage({
           </button>
         </div>
         {installMessage ? <p className="muted small">{installMessage}</p> : null}
+        {installing ? (
+          <ActionProgressBar label={installStep === 1 ? "正在安装 Runtime" : "正在刷新环境"} step={installStep} steps={2} />
+        ) : null}
         <div className="home-quick">
           <button
             className="btn primary"
@@ -1047,10 +1050,12 @@ export function HomePage({
               onClick={() => {
                 void (async () => {
                   setInstalling(true);
+                  setInstallStep(1);
                   setInstallMessage(undefined);
                   try {
                     const handle = await client.command("runtime.install", {});
                     const receipt = await waitForCommandReceipt(client, handle.requestId);
+                    setInstallStep(2);
                     if (receipt.status === "completed") {
                       setInstallMessage("托管 Runtime 已安装。打开项目后即可启动。");
                     } else if (receipt.status === "failed") {

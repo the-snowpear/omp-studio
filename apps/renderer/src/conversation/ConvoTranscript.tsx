@@ -1,3 +1,4 @@
+import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { ConversationItemView } from "./ConversationItemView";
 import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
 import { timelineRowKey } from "./conversationViewModel";
@@ -100,8 +101,10 @@ export function ConvoTranscript({
   onRestoreUserMessage,
   onBranchUserMessage,
   userRestoreDisabledReason,
+  userBranchDisabledReason,
   onReviewChanges,
   onInspectSubagent,
+  liveAgents,
   planLink,
 }: {
   rows: readonly TimelineRow[];
@@ -110,8 +113,10 @@ export function ConvoTranscript({
   onRestoreUserMessage?: (itemId: string, text: string) => void;
   onBranchUserMessage?: (itemId: string, text: string) => void;
   userRestoreDisabledReason?: string;
+  userBranchDisabledReason?: string;
   onReviewChanges?: (turnId: string) => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
+  liveAgents?: readonly StudioAgentSnapshot[];
   planLink?: PlanCreatedLink;
 }) {
   const binds = turnChangeBinds(rows);
@@ -135,9 +140,11 @@ export function ConvoTranscript({
             {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
             {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
             {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
+            {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
             {...(bind === undefined ? {} : { fileChanges: bind.files, changesDefaultOpen: bind.defaultOpen })}
             {...(onReviewChanges === undefined || bind === undefined ? {} : { onReviewChanges: () => onReviewChanges(bind.turnId) })}
             {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+            {...(liveAgents === undefined ? {} : { liveAgents })}
             {...(rowPlanLink === undefined ? {} : { planLink: rowPlanLink })}
           />
         );

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  ACTIVITY_HEAT_DAYS,
   MONTH_LABEL_MIN_GAP,
   buildActivityHeatmap,
   heatCellTip,
@@ -10,23 +9,28 @@ import {
 import { DAY_MS, startOfDay } from "../usage/tokenUsage";
 
 describe("activity heatmap", () => {
-  it("covers 365 inclusive days on a Monday-aligned board", () => {
+  it("covers this calendar year with future days after today on a Monday-aligned board", () => {
     const now = Date.parse("2026-08-17T12:00:00");
     const today = startOfDay(now);
+    const window = yearWindowStart(now);
     const map = new Map<number, number>([[today, 1200], [today - DAY_MS, 400]]);
     const heat = buildActivityHeatmap(map, now);
-    const window = yearWindowStart(now);
+    const pastDays = Math.round((today - window.yearStart) / DAY_MS) + 1;
+    const futureDays = Math.round((window.yearEnd - today) / DAY_MS);
 
     expect(heat.weeks).toBe(window.weeks);
-    expect(window.weeks).toBeGreaterThanOrEqual(53);
+    expect(window.weeks).toBeGreaterThanOrEqual(52);
     expect(window.weeks).toBeLessThanOrEqual(54);
     expect(heat.cells).toHaveLength(window.weeks * 7);
     expect(new Date(heat.cells[0]!.ts).getDay()).toBe(1);
-    expect(heat.cells.filter((cell) => !cell.future && !cell.pad)).toHaveLength(ACTIVITY_HEAT_DAYS);
+    expect(heat.cells.filter((cell) => !cell.future && !cell.pad)).toHaveLength(pastDays);
+    expect(heat.cells.filter((cell) => cell.future)).toHaveLength(futureDays);
+    expect(futureDays).toBeGreaterThan(120);
     expect(heat.tokens).toBe(1600);
     expect(heat.activeDays).toBe(2);
     expect(heat.cells.filter((cell) => cell.future || cell.pad).every((cell) => cell.level === 0 && cell.tokens === 0)).toBe(true);
     expect(heat.cells.find((cell) => cell.ts === today)?.level).toBeGreaterThan(0);
+    expect(heat.months[0]?.label).toBe("1月");
   });
 
   it("skips month labels that would sit on adjacent week columns", () => {

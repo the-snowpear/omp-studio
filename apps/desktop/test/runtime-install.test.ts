@@ -220,11 +220,11 @@ test("resolveManagedRuntimeInstallState reports local artifact updates", () => {
   assert.deepEqual(resolveManagedRuntimeInstallState({ installedVersion: "1.0.1-studio.1" }), {
     status: "installed",
     version: "1.0.1-studio.1",
-    signature: "verified",
+    signature: "unknown",
   });
   assert.deepEqual(
     resolveManagedRuntimeInstallState({ installedVersion: "1.0.1-studio.1", availableVersion: "1.0.1-studio.1" }),
-    { status: "installed", version: "1.0.1-studio.1", signature: "verified" },
+    { status: "installed", version: "1.0.1-studio.1", signature: "unknown" },
   );
   assert.deepEqual(
     resolveManagedRuntimeInstallState({ installedVersion: "1.0.0-studio.1", availableVersion: "1.0.2-studio.1" }),
@@ -232,8 +232,15 @@ test("resolveManagedRuntimeInstallState reports local artifact updates", () => {
       status: "update-available",
       version: "1.0.0-studio.1",
       availableVersion: "1.0.2-studio.1",
-      signature: "verified",
+      signature: "unknown",
     },
+  );
+  assert.deepEqual(
+    resolveManagedRuntimeInstallState({
+      installedVersion: "1.0.1-studio.1",
+      signature: "verified",
+    }),
+    { status: "installed", version: "1.0.1-studio.1", signature: "verified" },
   );
 });
 
@@ -265,6 +272,37 @@ test("probeManagedRuntimeInstall compares the newest local artifact to the insta
     });
     assert.equal(missing.status, "not-installed");
     assert.equal(missing.availableVersion, "1.0.2-studio.1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("install service reports failed when afterActivate throws", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-afteract-"));
+  try {
+    const artifact = await writeArtifact(root, "3.0.0-studio.1");
+    const installer = new RuntimeInstaller(join(root, "runtimes"), {
+      trustedKeys: { "test-key": trustedPublicKey },
+    });
+    const service = createDesktopRuntimeInstallService({
+      backend: {
+        install: (directory) => installer.install(directory),
+        activate: async (version, activateOptions) =>
+          installer.activate(version, activateOptions ?? { selfCheck: passingSelfCheck }),
+      },
+      platform: "win32-x64",
+      hasTrustedKey: true,
+      locateArtifact: async () => artifact,
+      activateOptions: { selfCheck: passingSelfCheck },
+      afterActivate: async () => {
+        throw new Error("Runtime did not start");
+      },
+    });
+    const state = await service("stable");
+    assert.equal(state.status, "failed");
+    assert.equal(state.version, "3.0.0-studio.1");
+    assert.equal(state.signature, "verified");
+    assert.equal(state.message, "Runtime did not start");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

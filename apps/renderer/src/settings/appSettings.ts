@@ -11,12 +11,14 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
+export type AppLanguage = "system" | "zh" | "en";
 export type AppTheme = "light" | "dark";
 export type InfoDensity = "compact" | "standard" | "cozy";
 export type ToolActivityDetail = "full" | "concise" | "hidden";
 export type StartupPage = "home" | "workbench" | "last";
 
 export interface AppSettings {
+  readonly language: AppLanguage;
   readonly theme: AppTheme;
   readonly density: InfoDensity;
   /** 关闭后助手消息不带流式光标（显示层行为）。运行状态仍在对话底部。 */
@@ -38,6 +40,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  language: "system",
   theme: "light",
   density: "standard",
   streaming: true,
@@ -58,6 +61,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 const APP_SETTINGS_STORAGE_KEY = "omp.appSettings";
 
+const LANGUAGES: ReadonlyArray<AppLanguage> = ["system", "zh", "en"];
 const THEMES: ReadonlyArray<AppTheme> = ["light", "dark"];
 const DENSITIES: ReadonlyArray<InfoDensity> = ["compact", "standard", "cozy"];
 const TOOL_ACTIVITY: ReadonlyArray<ToolActivityDetail> = ["full", "concise", "hidden"];
@@ -76,6 +80,7 @@ function parseStoredSettings(raw: string | null): AppSettings {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     return {
+      language: pick(value.language, LANGUAGES) ?? DEFAULT_APP_SETTINGS.language,
       theme: pick(value.theme, THEMES) ?? DEFAULT_APP_SETTINGS.theme,
       density: pick(value.density, DENSITIES) ?? DEFAULT_APP_SETTINGS.density,
       streaming: pickBoolean(value.streaming) ?? DEFAULT_APP_SETTINGS.streaming,
@@ -177,6 +182,8 @@ export interface LayoutMemory {
   readonly splitRatio: number;
   readonly sideOpen: boolean;
   readonly bottomOpen: boolean;
+  /** Entire bottom tab strip on screen; independent of `bottomOpen` (tab body). */
+  readonly bottomVisible: boolean;
   readonly sideTab: string;
   readonly bottomTab: string;
   readonly explorerOpen: boolean;
@@ -213,6 +220,7 @@ export function readLayoutMemory(scope: string): Partial<LayoutMemory> | undefin
       ...(typeof value.splitRatio === "number" && Number.isFinite(value.splitRatio) ? { splitRatio: value.splitRatio } : {}),
       ...(typeof value.sideOpen === "boolean" ? { sideOpen: value.sideOpen } : {}),
       ...(typeof value.bottomOpen === "boolean" ? { bottomOpen: value.bottomOpen } : {}),
+      ...(typeof value.bottomVisible === "boolean" ? { bottomVisible: value.bottomVisible } : {}),
       ...(typeof value.sideTab === "string" ? { sideTab: value.sideTab } : {}),
       ...(typeof value.bottomTab === "string" ? { bottomTab: value.bottomTab } : {}),
       ...(typeof value.explorerOpen === "boolean" ? { explorerOpen: value.explorerOpen } : {}),

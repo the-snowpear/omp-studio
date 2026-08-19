@@ -21,13 +21,14 @@ function renderEmpty(options: {
   onSelectThread?: (entry: SessionHistoryEntry) => void;
   onSelectPreviewThread?: (id: string) => void;
   onOpenHistory?: () => void;
+  runtimeConnected?: boolean;
 }) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === true ? "1" : "0");
   const onOpenHistory = options.onOpenHistory ?? vi.fn();
   const onSelectThread = options.onSelectThread ?? vi.fn();
   const onSelectPreviewThread = options.onSelectPreviewThread ?? vi.fn();
   render(
-    <PreviewModeProvider>
+    <PreviewModeProvider switchEnabled>
       <ConversationEmpty
         {...(options.client === undefined ? {} : { client: options.client })}
         {...(options.history === undefined ? {} : { history: options.history })}
@@ -35,6 +36,7 @@ function renderEmpty(options: {
         onSelectThread={onSelectThread}
         onSelectPreviewThread={onSelectPreviewThread}
         onOpenHistory={onOpenHistory}
+        {...(options.runtimeConnected === undefined ? {} : { runtimeConnected: options.runtimeConnected })}
       />
     </PreviewModeProvider>,
   );
@@ -65,7 +67,7 @@ describe("ConversationEmpty", () => {
     const { onSelectPreviewThread, onSelectThread } = renderEmpty({ preview: true, client });
     expect(screen.getByRole("heading", { name: /Studio/ })).toBeTruthy();
     expect(screen.getByText("演示")).toBeTruthy();
-    expect(screen.getByText(/近 1 年/)).toBeTruthy();
+    expect(screen.getByText(/今年/)).toBeTruthy();
     expect(document.querySelectorAll(".ce-hc").length).toBeGreaterThanOrEqual(365);
     expect(screen.getByText("跟踪上游 pi-web 更新到 omp-web")).toBeTruthy();
     expect(screen.getByText("Mermaid 渲染优化与全屏缩放拖拽")).toBeTruthy();
@@ -120,6 +122,18 @@ describe("ConversationEmpty", () => {
     expect(screen.getByText("暂无最近对话")).toBeTruthy();
     expect(screen.queryByText("跟踪上游 pi-web 更新到 omp-web")).toBeNull();
   });
+
+  it("does not claim Runtime is ready when it is disconnected", () => {
+    renderEmpty({ history: { entries: [], total: 0 }, runtimeConnected: false });
+    expect(screen.getByText("尚未连接 Runtime。开始一个新任务，或继续最近的对话。")).toBeTruthy();
+    expect(screen.queryByText("OMP 已就绪。开始一个新任务，或继续最近的对话。")).toBeNull();
+  });
+
+  it("offers reconnect when Runtime is down and a client is present", () => {
+    const client = fakeClient();
+    renderEmpty({ client, history: { entries: [], total: 0 }, runtimeConnected: false });
+    expect(screen.getByRole("button", { name: "重新连接 Runtime" })).toBeTruthy();
+  });
 });
 
 describe("ConversationPane welcome slot", () => {
@@ -157,6 +171,19 @@ describe("ConversationPane welcome slot", () => {
     );
     expect(screen.getByText("欢迎区")).toBeTruthy();
     expect(screen.queryByText("开始一段对话")).toBeNull();
+  });
+
+  it("renders the welcome surface when hydrate is unavailable if a welcome slot is provided", () => {
+    const state = resetConversation(0, null, "unavailable", "当前没有活动会话。");
+    render(
+      <ConversationPane
+        snapshot={{ state, rows: [], demo: false, loadingOlder: false, identityKey: "unavailable-welcome" }}
+        onLoadOlder={() => undefined}
+        welcome={<div>欢迎区</div>}
+      />,
+    );
+    expect(screen.getByText("欢迎区")).toBeTruthy();
+    expect(screen.queryByText("对话不可用")).toBeNull();
   });
 
   it("forceWelcome keeps the welcome surface even when transcript rows exist", () => {

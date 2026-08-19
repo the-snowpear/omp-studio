@@ -701,3 +701,100 @@ test("archive reader keeps the workspace boundary for gz members and caps their 
     await rm(seed.root, { recursive: true, force: true });
   }
 });
+
+test("archive reader pages a persisted child transcript next to the parent session file", async () => {
+  const seed = await fixture(records("wrong-cwd"));
+  const childDir = join(seed.sessions, "session");
+  await mkdir(childDir);
+  await writeFile(
+    join(childDir, "WorkerEcho.jsonl"),
+    [
+      JSON.stringify({ type: "session", id: "child-echo", cwd: seed.workspace, timestamp: "2026-08-18T00:00:00.000Z" }),
+      JSON.stringify({
+        type: "session_init",
+        id: "init-1",
+        parentId: null,
+        timestamp: "2026-08-18T00:00:00.000Z",
+        task: "Complete the assignment below, thoroughly: You are a demo worker.",
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "child-user",
+        parentId: null,
+        timestamp: "2026-08-18T00:00:01.000Z",
+        message: { role: "user", content: "simulate a style pass" },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "child-assistant",
+        parentId: "child-user",
+        timestamp: "2026-08-18T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "done" }],
+          usage: { input: 10, output: 8, cost: { total: 0.003 } },
+        },
+      }),
+    ].join("\n") + "\n",
+    "utf8",
+  );
+  await writeFile(seed.file, `${records(seed.workspace).map((entry) => JSON.stringify(entry)).join("\n")}\n`, "utf8");
+  try {
+    const reader = new StudioSessionArchiveReader({
+      sessionsRoot: seed.sessions,
+      allowedCwd: seed.workspace,
+      cursorSecret: Buffer.alloc(32, 7),
+    });
+    const page = await reader.readPage({ sessionId: "session-a", agentId: "WorkerEcho", limit: 10 });
+    assert.equal(page.sessionId, "child-echo");
+    assert.equal(page.items.some((item) => item.kind === "message" && item.role === "user"), true);
+    const listed = await reader.listPersistedAgents("session-a");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.agentId, "WorkerEcho");
+    assert.equal(listed[0]?.status, "parked");
+    assert.equal(listed[0]?.usage?.requests, 1);
+    await assert.rejects(
+      () => reader.readPage({ sessionId: "session-a", agentId: "MissingAgent" }),
+      (error: unknown) => error instanceof SessionArchiveError && error.code === "AGENT_NOT_FOUND",
+    );
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("agent-scoped archive reads still require the parent session to belong to the workspace", async () => {
+  const seed = await fixture(records("wrong-cwd"));
+  const childDir = join(seed.sessions, "session");
+  await mkdir(childDir);
+  await writeFile(
+    join(childDir, "WorkerEcho.jsonl"),
+    [
+      JSON.stringify({ type: "session", id: "child-echo", cwd: seed.workspace, timestamp: "2026-08-18T00:00:00.000Z" }),
+      JSON.stringify({
+        type: "message",
+        id: "child-user",
+        parentId: null,
+        timestamp: "2026-08-18T00:00:01.000Z",
+        message: { role: "user", content: "simulate a style pass" },
+      }),
+    ].join("\n") + "\n",
+    "utf8",
+  );
+  try {
+    const reader = new StudioSessionArchiveReader({
+      sessionsRoot: seed.sessions,
+      allowedCwd: seed.workspace,
+      cursorSecret: Buffer.alloc(32, 7),
+    });
+    await assert.rejects(
+      () => reader.readPage({ sessionId: "session-a", agentId: "WorkerEcho", limit: 10 }),
+      (error: unknown) => error instanceof SessionArchiveError && error.code === "WORKSPACE_MISMATCH",
+    );
+    await assert.rejects(
+      () => reader.listPersistedAgents("session-a"),
+      (error: unknown) => error instanceof SessionArchiveError && error.code === "WORKSPACE_MISMATCH",
+    );
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});

@@ -52,6 +52,21 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   "btw.ask",
   "btw.abort",
   "btw.branch",
+  // Subagent / job ops run beside the parent turn (Inspect, Hub chat,
+  // kill while a task tool is in flight). Same fence race as BTW.
+  "agent.list",
+  "agent.get",
+  "agent.spawn",
+  "agent.send",
+  "agent.kill",
+  "agent.revive",
+  "agent.release",
+  "agent.transcript.read",
+  "agent.subscribe",
+  "job.list",
+  "job.get",
+  "job.cancel",
+  "job.subscribe",
 ]);
 
 export function fencesOnStateVersion(kind: StudioOperation["kind"]): boolean {
@@ -83,6 +98,7 @@ export function createDesktopSemanticCommands(options: {
   readonly archive?: () => StudioSessionArchiveService;
   readonly switchSession?: DesktopRuntimeSessionPort["switchSession"];
   readonly applyApprovalMode?: DesktopRuntimeSessionPort["applyApprovalMode"];
+  readonly evacuateResident?: DesktopRuntimeSessionPort["evacuateResident"];
   readonly supportsConcurrentSessions?: boolean;
   readonly bindSession: (session: DesktopRuntimeSession | undefined) => void;
   readonly interaction: DesktopInteractionHost;
@@ -249,9 +265,10 @@ export function createDesktopSemanticCommands(options: {
         // it beside the post-command snapshot so the Renderer can surface
         // real command feedback (e.g. the /export target path).
         const carried = (receipt.result ?? {}) as { output?: unknown; result?: unknown };
+        const output = Array.isArray(carried.output) ? carried.output.filter((line): line is string => typeof line === "string") : [];
         return {
           snapshot: latest,
-          output: Array.isArray(carried.output) ? carried.output.filter((line): line is string => typeof line === "string") : [],
+          output,
           result: carried.result ?? { consumed: true },
         };
       }
@@ -310,10 +327,17 @@ async function releaseResidentSession(
   options: {
     readonly sessionRef: { current: DesktopRuntimeSession | undefined };
     readonly switchSession?: DesktopRuntimeSessionPort["switchSession"];
+    readonly evacuateResident?: DesktopRuntimeSessionPort["evacuateResident"];
     readonly bindSession: (session: DesktopRuntimeSession | undefined) => void;
   },
   sessionId: string,
 ): Promise<boolean> {
+  if (options.evacuateResident !== undefined) {
+    const result = await options.evacuateResident(sessionId);
+    if (!result.found) return false;
+    if (result.active !== undefined) options.bindSession(result.active);
+    return true;
+  }
   const session = options.sessionRef.current;
   const snapshot = session?.controller.publication()?.snapshot;
   if (session === undefined || snapshot === undefined || snapshot.sessionId !== sessionId) return false;

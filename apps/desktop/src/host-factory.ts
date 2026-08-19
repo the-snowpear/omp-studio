@@ -56,7 +56,7 @@ import {
   type DesktopFacadeSeams,
   type DesktopRuntimeSessionPort,
 } from "./host-composition.js";
-import { createHostFileLog } from "./host-log.js";
+import { createHostFileLog, defaultHostLogsDirectory } from "./host-log.js";
 import { createDesktopGitService } from "./git-service.js";
 import { createDesktopGithubService } from "./github-service.js";
 import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
@@ -605,7 +605,7 @@ export function createProductionHostFactory(options?: {
   };
   const pickDirectory = createProductionPickDirectory();
   const hostLog = createHostFileLog({
-    directory: join(userAppDataRoot(), STATE_DIRECTORY_NAME, "logs"),
+    directory: defaultHostLogsDirectory(),
   });
   const runtimeSession = createDesktopRuntimeSessionPort({ log: hostLog });
   const gitProcessRunner = new HostProcessRunner();

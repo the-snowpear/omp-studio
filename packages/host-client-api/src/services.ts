@@ -86,6 +86,7 @@ import type {
   RuntimeEpoch,
   RuntimeId,
   SessionTelemetrySnapshot,
+  StudioAgentSnapshot,
 } from "@omp-studio/studio-protocol";
 import {
   StudioHostError,
@@ -141,6 +142,10 @@ export interface HostRuntimeUnavailable {
 export interface HostRuntimeDisconnect {
   readonly code: RuntimeDisconnectCode;
   readonly reason: string;
+  /** ISO timestamp of the drop; stamped when the Host first observes it. */
+  readonly occurredAt?: string;
+  /** Automatic relaunch outcome after an unexpected drop. */
+  readonly autoRespawn?: "scheduled" | "failed" | "exhausted";
 }
 
 /** English Host sentence for an unavailable code; the Renderer maps to Chinese. */
@@ -264,10 +269,10 @@ export interface HostRuntimeAccess {
   readonly disconnect?: () => HostRuntimeDisconnect | undefined;
   /**
    * Start or restart the managed Runtime under the current workspace.
-   * No-op when already connected. Optional: diagnostics `runtime.ensure`
-   * fails closed when omitted.
+   * No-op when already connected unless `force` is true. Optional:
+   * diagnostics `runtime.ensure` fails closed when omitted.
    */
-  readonly ensure?: () => Promise<void>;
+  readonly ensure?: (input?: { readonly force?: boolean }) => Promise<void>;
   readonly snapshot?: () => OperatorStateSnapshot | undefined;
   /** Opaque transcript head hint for bootstrap; never message bodies. */
   readonly messagesCursor?: () => OpaqueCursor | undefined;
@@ -318,9 +323,12 @@ export interface HostSessionCatalogProvider {
 export interface HostSessionArchiveProvider {
   readPage(input: {
     readonly sessionId: string;
+    readonly agentId?: string;
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
   }): ConversationTranscriptReadPage | Promise<ConversationTranscriptReadPage>;
+  /** Optional persisted child roster for a parent session. */
+  listPersistedAgents?(sessionId: string): Promise<readonly StudioAgentSnapshot[]> | readonly StudioAgentSnapshot[];
   /** Optional current-revision lookup for archived-session telemetry. */
   readRevision?(sessionId: string): Promise<{ sessionId: string; transcriptRevision: string }> | { sessionId: string; transcriptRevision: string };
   /**

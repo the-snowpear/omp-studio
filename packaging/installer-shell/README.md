@@ -1,22 +1,18 @@
 # OMP Studio installer shell
 
-这是方案 2 的第一阶段宿主：Electron 只负责提供一个固定的无边框
-`720 × 480` Windows 窗口，并安全加载 `../ui/index.html?host=installer`。
-安装目录、文件复制、运行时部署、快捷方式、卸载和回滚均未接入；当前
-页面里的安装过程仍是视觉演示。
+本地预览设计向导：Electron 开一个固定无边框 `720 × 480` 窗口，加载
+`../ui/index.html?host=installer`。目录浏览、磁盘统计走本机 API；点
+「安装」只模拟进度（约 4 秒），不会写 Program Files。
 
-## 本地运行
-
-在仓库根目录执行：
+真实 Setup 不打包这个 Electron 壳。安装包用 WebView2 宿主
+（`packaging/installer-host`）显示同一套 HTML，NSIS 在后台拷文件。
 
 ```bash
 npm --prefix packaging/installer-shell run dev
 ```
 
-宿主 API 目前只暴露两个窗口操作：
+宿主 API（`window.installerShell`）：
 
-- `window.installerShell.minimize()`
-- `window.installerShell.close()`
-
-没有安装相关 API。后续接入 NSIS 时，NSIS 负责启动/打包这个宿主，
-再把安装协议通过受控 IPC 接入，而不是让页面直接访问文件系统。
+- `minimize` / `close` / `drag`
+- `getState` / `statDir` / `browse`
+- `startInstall` / `poll` / `finish` / `killApp`（预览里 kill 是空操作）

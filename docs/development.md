@@ -13,7 +13,7 @@ repository; Bun is required inside the vendored OMP tree.
 | `omp-patch/overlay/` | Studio-owned Runtime sources (`src/studio/**`) |
 | `omp-patch/patches/` | Seam patches on upstream-owned files |
 | `omp-patch/vendor/oh-my-pi/` | Pinned submodule; do not commit overlay dirt |
-| `packaging/` | electron-builder / NSIS skeleton |
+| `packaging/` | electron-builder / NSIS installer |
 | `ui_reference/ver1` | Visual reference (not runtime code) |
 | `doc/feature-index.md` | Feature → file map |
 
@@ -29,6 +29,7 @@ npm test
 npm run check          # typecheck && test
 npm run build
 npm run preview        # Electron from source
+npm run pack:win       # unsigned Windows NSIS installer
 ```
 
 Scoped UI work:
@@ -50,8 +51,8 @@ must not enter `client-contract`.
 | Preview off | Host / desktop truth only | Same |
 
 When you add a list, tree, or page, wire **both** paths. Do not fall back to
-mock data when the real model is empty. Set `PREVIEW_MODE_SWITCH_ENABLED` to
-`false` for a production build.
+mock data when the real model is empty. The 0.1.0 snapshot keeps
+`PREVIEW_MODE_SWITCH_ENABLED` at `false`; turn it on only for fixture work.
 
 ## Changing the Runtime fork
 

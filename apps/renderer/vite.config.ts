@@ -1,52 +1,33 @@
-import { appendFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { defineConfig, type Plugin } from "vitest/config";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
-// #region agent log
-/** Dev-only: renderer CSP blocks 127.0.0.1:7773, so same-origin ingest is written here and forwarded. */
-function debugIngestPlugin(): Plugin {
-  const ingestPath = "/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f";
-  const logFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../debug-b21151.log");
+// Must stay in lockstep with apps/desktop/src/security.ts RENDERER_CSP.
+// file:// loads do not reliably get webRequest CSP headers, so the packaged
+// index.html carries the policy as a meta tag. `frame-ancestors` is enforced
+// by the desktop response header because browsers ignore it in meta CSP.
+// Vite dev still needs HMR.
+const PACKAGED_RENDERER_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
+
+function packagedCspPlugin() {
   return {
-    name: "debug-ingest-b21151",
-    configureServer(server) {
-      server.middlewares.use(ingestPath, (req, res, next) => {
-        if (req.method !== "POST") {
-          next();
-          return;
-        }
-        const chunks: Buffer[] = [];
-        req.on("data", (chunk) => {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-        });
-        req.on("end", () => {
-          const body = Buffer.concat(chunks).toString("utf8");
-          try {
-            appendFileSync(logFile, `${body.trim()}\n`);
-          } catch {
-            /* ignore */
-          }
-          fetch("http://127.0.0.1:7773/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "b21151" },
-            body,
-          }).catch(() => {});
-          res.statusCode = 204;
-          res.end();
-        });
-      });
+    name: "omp-packaged-csp",
+    apply: "build" as const,
+    transformIndexHtml(html: string) {
+      if (html.includes("Content-Security-Policy")) return html;
+      return html.replace(
+        "<head>",
+        `<head>\n    <meta http-equiv="Content-Security-Policy" content="${PACKAGED_RENDERER_CSP}" />`,
+      );
     },
   };
 }
-// #endregion
 
 // P0 renderer: a pure browser build with no host-specific coupling. The
 // relative base keeps the same bundle loadable from any origin the shell
 // later serves it from (including file:// during early desktop bring-up).
 export default defineConfig({
-  plugins: [react(), debugIngestPlugin()],
+  plugins: [react(), packagedCspPlugin()],
   base: "./",
   test: {
     environment: "jsdom",

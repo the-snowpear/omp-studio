@@ -88,11 +88,12 @@ import {
   StudioSessionArchiveReader,
   StudioSessionArchiveService,
   type SessionArchiveReadInput,
+  type SessionPersistedAgentRecord,
 } from "@omp-studio/studio-host";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ApprovalMode, CapabilityManifest, OperatorCommandManifest, RuntimePreference } from "@omp-studio/studio-protocol";
+import type { ApprovalMode, CapabilityManifest, OperatorCommandManifest, RuntimePreference, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 
 import { DesktopInteractionHost, IsolatedForwarder } from "./interaction-host.js";
 import {
@@ -205,6 +206,17 @@ export interface DesktopRuntimeSessionPort {
     appliedSessions: number;
     failedSessions: number;
   }>;
+  /** True when a Runtime Worker currently holds this session file. */
+  isResident?(sessionId: string): boolean;
+  /**
+   * Abort a streaming turn if needed, stop that Worker, and launch a
+   * replacement when it was the active view. Background residents are
+   * stopped without changing the active binding.
+   */
+  evacuateResident?(sessionId: string): Promise<{
+    readonly found: boolean;
+    readonly active?: DesktopRuntimeSession;
+  }>;
   /**
    * Last skip/fail reason when `start`/`rebind` returned `undefined` or
    * threw. Cleared after a ready session. Pre-redacted; never a path.
@@ -216,9 +228,10 @@ export interface DesktopRuntimeSessionPort {
   lastDisconnect?(): HostRuntimeDisconnect | undefined;
   /**
    * Start or restart under the current workspace. No-op when already
-   * connected. Used by diagnostics `runtime.ensure` and session recovery.
+   * connected unless `force` is true. Used by diagnostics `runtime.ensure`
+   * and session recovery.
    */
-  ensure?(): Promise<DesktopRuntimeSession | undefined>;
+  ensure?(input?: { force?: boolean }): Promise<DesktopRuntimeSession | undefined>;
   /**
    * Composition binds here so an automatic relaunch can replace the live
    * session holder without a user command.
@@ -421,11 +434,14 @@ class DesktopPublicationForwarder implements SessionPublicationForwarder {
   }
 }
 
-async function ensureInstalledRuntime(context: FacadeContext): Promise<DesktopRuntimeSession | undefined> {
+async function ensureInstalledRuntime(
+  context: FacadeContext,
+  input?: { force?: boolean },
+): Promise<DesktopRuntimeSession | undefined> {
   const port = context.runtimeSession;
   if (port?.ensure !== undefined) {
     try {
-      const next = await port.ensure();
+      const next = await port.ensure(input);
       rememberUnavailable(
         context.lastUnavailable,
         next,
@@ -504,6 +520,29 @@ async function startInstalledRuntime(context: FacadeContext): Promise<DesktopRun
   return next;
 }
 
+function toPersistedStudioAgent(record: SessionPersistedAgentRecord): StudioAgentSnapshot {
+  return {
+    agentId: record.agentId as StudioAgentSnapshot["agentId"],
+    generation: 1 as StudioAgentSnapshot["generation"],
+    ...(record.parentAgentId === undefined
+      ? {}
+      : { parentAgentId: record.parentAgentId as StudioAgentSnapshot["parentAgentId"] }),
+    kind: "sub",
+    displayName: record.displayName,
+    status: record.status,
+    ...(record.assignment === undefined ? {} : { assignment: record.assignment }),
+    ...(record.startedAt === undefined ? {} : { startedAt: record.startedAt }),
+    updatedAt: record.updatedAt,
+    hasLiveSession: false,
+    hasTranscript: record.hasTranscript,
+    unreadCount: 0,
+    activeJobIds: [],
+    ...(record.usage === undefined ? {} : { usage: { ...record.usage } }),
+    ...(record.modelRole === undefined ? {} : { modelRole: record.modelRole }),
+    ...(record.resolvedModel === undefined ? {} : { resolvedModel: record.resolvedModel }),
+  };
+}
+
 function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const seams = context.seams;
   const sessionRef = context.sessionRef;
@@ -528,16 +567,25 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       archiveServiceCwd = cwd;
       archiveService = new StudioSessionArchiveService({
         allowedCwd: cwd,
-        isResident: (sessionId) => sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
+        isResident: (sessionId) =>
+          context.runtimeSession?.isResident?.(sessionId) === true
+          || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
       });
     }
     return archiveService;
   };
   const archive = seams.archive ?? {
-    readPage: async (input: { readonly sessionId: string; readonly cursor?: string; readonly limit?: number }) => {
+    readPage: async (input: {
+      readonly sessionId: string;
+      readonly agentId?: string;
+      readonly cursor?: string;
+      readonly limit?: number;
+    }) => {
       const page = await currentArchiveReader().readPage(input as unknown as SessionArchiveReadInput);
       return page as unknown as ConversationTranscriptReadPage;
     },
+    listPersistedAgents: async (sessionId: string) =>
+      (await currentArchiveReader().listPersistedAgents(sessionId)).map(toPersistedStudioAgent),
     readRevision: async (sessionId: string) => await currentArchiveReader().readRevision(sessionId),
     createProbeCopy: async (sessionId: string, destinationDirectory: string) =>
       await currentArchiveReader().createProbeCopy(sessionId, destinationDirectory),
@@ -599,6 +647,9 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       ...(context.runtimeSession?.applyApprovalMode === undefined
         ? {}
         : { applyApprovalMode: (mode) => context.runtimeSession!.applyApprovalMode!(mode) }),
+      ...(context.runtimeSession?.evacuateResident === undefined
+        ? {}
+        : { evacuateResident: (sessionId) => context.runtimeSession!.evacuateResident!(sessionId) }),
       supportsConcurrentSessions: context.runtimeSession?.supportsConcurrentSessions === true,
       bindSession: (session) => context.bindSession.current(session),
       interaction: context.interaction,
@@ -692,8 +743,8 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       hello: () => sessionRef.current?.hello(),
       unavailable: () => context.lastUnavailable.current,
       disconnect: () => context.lastDisconnect.current ?? context.runtimeSession?.lastDisconnect?.(),
-      ensure: async () => {
-        await ensureInstalledRuntime(context);
+      ensure: async (input) => {
+        await ensureInstalledRuntime(context, input);
       },
       snapshot: () => sessionRef.current?.controller.publication()?.snapshot,
       messagesCursor: () => sessionRef.current?.controller.messagesCursor?.(),
@@ -1033,6 +1084,22 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
             runtimeInstallDirectory,
             ...(activeWorkspace === undefined ? {} : { workspace: activeWorkspace }),
           });
+          // A cold preview can race the first Runtime process with Windows
+          // Defender/Bun startup. Retry once through the same serialized
+          // session port before exposing a read-only shell; manual reconnect
+          // should not be required for a transient launch failure.
+          if (
+            session === undefined &&
+            activeWorkspace !== undefined &&
+            runtimeSession.ensure !== undefined &&
+            runtimeSession.lastUnavailable?.()?.code !== "no-workspace" &&
+            runtimeSession.lastUnavailable?.()?.code !== "workspace-unusable" &&
+            runtimeSession.lastUnavailable?.()?.code !== "not-installed" &&
+            runtimeSession.lastUnavailable?.()?.code !== "resolution-rejected"
+          ) {
+            seams.hostLog?.write("warn", "runtime.start.retry", "retrying transient Runtime startup failure");
+            session = await runtimeSession.ensure();
+          }
           lastUnavailable = session === undefined
             ? runtimeSession.lastUnavailable?.() ??
               (activeWorkspace === undefined

@@ -1304,11 +1304,15 @@ export function collectAgents(tools: readonly ToolView[]): SubagentView[] {
       const status = jsonString(record?.status) ?? "done";
       const durationMs = jsonNumber(record?.durationMs);
       const dur = jsonString(record?.dur) ?? (durationMs === undefined ? undefined : `${(durationMs / 1000).toFixed(1)}s`);
-      const tokens = jsonString(record?.tokens) ?? (jsonNumber(record?.tokens) === undefined ? undefined : String(jsonNumber(record?.tokens)));
+      const rawTokens = jsonString(record?.tokens);
+      const tokens = rawTokens === "[redacted]"
+        ? undefined
+        : rawTokens ?? (jsonNumber(record?.tokens) === undefined ? undefined : String(jsonNumber(record?.tokens)));
       const toolsCount = metricValue(record?.tools);
       const requests = metricValue(record?.requests);
       const files = metricValue(record?.files);
-      const cost = jsonString(record?.cost);
+      const rawCost = jsonString(record?.cost);
+      const cost = rawCost === "[redacted]" ? undefined : rawCost;
       const activity = jsonString(record?.activity);
       const currentTool = jsonString(jsonRecord(record?.currentTool)?.name);
       out.push({
@@ -1394,9 +1398,15 @@ export function saPill(agent: SubagentView | string): { cls: string; label: stri
     }
     return { cls: "thinking", label: "Thinking" };
   }
+  if (status === "starting" || status === "reviving") return { cls: "thinking", label: "Starting" };
   if (status === "waiting") return { cls: "waiting", label: "Waiting for User" };
   if (status === "error" || status === "failed") return { cls: "aborted", label: "Failed" };
   if (status === "aborted") return { cls: "aborted", label: "Aborted" };
-  if (status === "done" || status === "succeeded" || status === "completed") return { cls: "idle", label: "Done" };
+  if (status === "done" || status === "succeeded" || status === "completed" || status === "released") {
+    return { cls: "idle", label: "Done" };
+  }
+  if (status === "idle") return { cls: "idle", label: "Idle" };
+  if (status === "parked") return { cls: "parked", label: "Parked" };
+  if (status === "pending") return { cls: "parked", label: "Pending" };
   return { cls: "parked", label: status };
 }

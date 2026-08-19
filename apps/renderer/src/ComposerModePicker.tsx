@@ -105,6 +105,8 @@ export function ComposerModePicker({
   onRun,
   openNonce = 0,
   openToggles = false,
+  onInteract,
+  onCapsulesChange,
 }: {
   preview: boolean;
   snapshot?: OperatorStateSnapshot;
@@ -117,6 +119,8 @@ export function ComposerModePicker({
   /** Increment to open the mode menu from `/plan` and friends. */
   openNonce?: number;
   openToggles?: boolean;
+  onInteract?: () => void;
+  onCapsulesChange?: (hasCapsules: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [togglesOpen, setTogglesOpen] = useState(false);
@@ -235,6 +239,7 @@ export function ComposerModePicker({
 
   const selectSession = (next: SessionMode, ready: boolean) => {
     if (!ready) return;
+    onInteract?.();
     if (preview) {
       setLocal((current) => ({ ...current, session: current.session === next ? null : next }));
       return;
@@ -259,11 +264,13 @@ export function ComposerModePicker({
   };
 
   const toggleKeyword = (next: MagicKeyword) => {
+    onInteract?.();
     onKeywordChange(keyword === next ? null : next);
   };
 
   const toggleLoop = () => {
     if (!loopReady) return;
+    onInteract?.();
     if (preview) {
       setLocal((current) => ({ ...current, loop: !current.loop }));
       return;
@@ -278,6 +285,7 @@ export function ComposerModePicker({
 
   const toggleFast = () => {
     if (!fastReady) return;
+    onInteract?.();
     if (preview) {
       setLocal((current) => ({ ...current, fast: !current.fast }));
       return;
@@ -287,6 +295,7 @@ export function ComposerModePicker({
 
   const togglePrewalk = () => {
     if (!prewalkReady) return;
+    onInteract?.();
     if (preview) {
       setLocal((current) => ({ ...current, prewalk: !current.prewalk }));
       return;
@@ -300,6 +309,7 @@ export function ComposerModePicker({
   };
 
   const applyLoopParams = (kind: LoopLimitKind, value: string) => {
+    onInteract?.();
     setLocal((current) => ({ ...current, loopKind: kind, loopValue: value }));
     if (preview || !loopOn || !loopReady) return;
     const limit = loopLimitOf(kind, value);
@@ -308,6 +318,7 @@ export function ComposerModePicker({
   };
 
   const applyPrewalkTarget = (value: string) => {
+    onInteract?.();
     setLocal((current) => ({ ...current, prewalkTarget: value }));
     if (preview || !prewalkOn || !prewalkReady) return;
     const target = value.trim();
@@ -324,13 +335,13 @@ export function ComposerModePicker({
     ...(session === "goal" ? [{ id: "goal", label: "Goal", tint: "blue" as const, onClear: () => selectSession("goal", goalReady) }] : []),
     ...(session === "vibe" ? [{ id: "vibe", label: "Vibe", tint: "blue" as const, onClear: () => selectSession("vibe", vibeReady) }] : []),
     ...(keyword === "ultrathink"
-      ? [{ id: "ultrathink", label: "Ultrathink", tint: "purple" as const, onClear: () => onKeywordChange(null) }]
+      ? [{ id: "ultrathink", label: "Ultrathink", tint: "purple" as const, onClear: () => toggleKeyword("ultrathink") }]
       : []),
     ...(keyword === "orchestrate"
-      ? [{ id: "orchestrate", label: "Orchestrate", tint: "purple" as const, onClear: () => onKeywordChange(null) }]
+      ? [{ id: "orchestrate", label: "Orchestrate", tint: "purple" as const, onClear: () => toggleKeyword("orchestrate") }]
       : []),
     ...(keyword === "workflowz"
-      ? [{ id: "workflowz", label: "Workflowz", tint: "purple" as const, onClear: () => onKeywordChange(null) }]
+      ? [{ id: "workflowz", label: "Workflowz", tint: "purple" as const, onClear: () => toggleKeyword("workflowz") }]
       : []),
     ...(loopOn
       ? [{
@@ -351,13 +362,20 @@ export function ComposerModePicker({
       : []),
   ];
 
+  useEffect(() => {
+    onCapsulesChange?.(capsules.length > 0);
+  }, [capsules.length, onCapsulesChange]);
+
   return (
     <>
       <span className="approval-pill-wrap">
         <button
           type="button"
           className="icon-btn small"
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => {
+            onInteract?.();
+            setOpen((value) => !value);
+          }}
           aria-haspopup="menu"
           aria-expanded={open}
           aria-label="会话模式"

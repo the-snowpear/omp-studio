@@ -230,15 +230,17 @@ test("applyApprovalMode persists on the active Runtime and overrides siblings", 
   await port.stop();
 });
 
-test("applyApprovalMode reports partial when a sibling fails and re-syncs the next launch", async () => {
+test("applyApprovalMode reports partial when a sibling fails and stops that Worker", async () => {
   const { port, state } = createHarness();
   await port.start(context); // fresh-1 active
   await port.switchSession?.({ kind: "resume", sessionId: "session-b" }); // session-b active
   state.failInvoke.add("fresh-1");
   const result = await port.applyApprovalMode?.("always-ask");
   assert.deepEqual(result, { mode: "always-ask", syncStatus: "partial", appliedSessions: 1, failedSessions: 1 });
-  // A fresh active Worker retries the durable write, then re-applies the
-  // mode to every resident before the pending marker can clear.
+  assert.deepEqual(state.stopped, ["fresh-1"]);
+  assert.equal(port.isResident?.("fresh-1"), false);
+  // Resume relaunches the stopped sibling; the durable persist already landed
+  // on the active Worker, so the new Worker reads that mode from disk.
   state.failInvoke.delete("fresh-1");
   await port.switchSession?.({ kind: "fresh" });
   await waitFor(() =>
@@ -250,19 +252,10 @@ test("applyApprovalMode reports partial when a sibling fails and re-syncs the ne
     (entry) => entry.sessionId === "fresh-2" && entry.operation.kind === "permissions.mode.set",
   );
   assert.deepEqual(reapply?.operation, { kind: "permissions.mode.set", mode: "always-ask", persist: true });
-  assert.equal(
-    state.invokes.some(
-      (entry) =>
-        entry.sessionId === "fresh-1" &&
-        entry.operation.kind === "permissions.mode.set" &&
-        entry.operation.persist === false,
-    ),
-    true,
-  );
   await port.stop();
 });
 
-test("approval mode retry does not clear while any resident remains unsynchronized", async () => {
+test("applyApprovalMode stops failed background residents so they cannot stay on a stale mode", async () => {
   const { port, state } = createHarness();
   await port.start(context); // fresh-1
   await port.switchSession?.({ kind: "resume", sessionId: "session-b" });
@@ -276,11 +269,18 @@ test("approval mode retry does not clear while any resident remains unsynchroniz
     appliedSessions: 1,
     failedSessions: 2,
   });
+  assert.equal(state.stopped.includes("fresh-1"), true);
+  assert.equal(state.stopped.includes("session-b"), true);
+  assert.equal(port.isResident?.("fresh-1"), false);
+  assert.equal(port.isResident?.("session-b"), false);
 
-  // session-b can now persist, but fresh-1 is still failing. The pending
-  // mode must remain after this otherwise-successful activation.
   state.failInvoke.delete("session-b");
+  state.failInvoke.delete("fresh-1");
   await port.switchSession?.({ kind: "resume", sessionId: "session-b" });
+  assert.equal(
+    state.created.some((entry) => entry.sessionId === "session-b" && entry.epoch > 2),
+    true,
+  );
   assert.equal(
     state.invokes.some(
       (entry) =>
@@ -290,20 +290,19 @@ test("approval mode retry does not clear while any resident remains unsynchroniz
     ),
     true,
   );
+  await port.stop();
+});
 
-  // Once the final failed resident recovers, selecting another resident
-  // retries the complete set and reaches fresh-1 before clearing pending.
-  state.failInvoke.delete("fresh-1");
-  await port.switchSession?.({ kind: "resume", sessionId: "session-c" });
-  assert.equal(
-    state.invokes.some(
-      (entry) =>
-        entry.sessionId === "fresh-1" &&
-        entry.operation.kind === "permissions.mode.set" &&
-        entry.operation.persist === false,
-    ),
-    true,
-  );
+test("evacuateResident stops a background Worker without switching the active session", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  await port.switchSession?.({ kind: "resume", sessionId: "session-b" });
+  assert.equal(port.isResident?.("fresh-1"), true);
+  const result = await port.evacuateResident?.("fresh-1");
+  assert.deepEqual(result, { found: true });
+  assert.equal(port.isResident?.("fresh-1"), false);
+  assert.equal(port.isResident?.("session-b"), true);
+  assert.deepEqual(state.stopped, ["fresh-1"]);
   await port.stop();
 });
 
@@ -320,6 +319,20 @@ test("ensure is a no-op when the active Runtime hello is still live", async () =
   assert.equal(next, first);
   assert.deepEqual(state.created, [{ sessionId: "fresh-1", epoch: 1 }]);
   assert.deepEqual(state.stopped, []);
+  await port.stop();
+});
+
+test("ensure force relaunches even when hello is still live", async () => {
+  const { port, state } = createHarness();
+  const first = await port.start(context);
+  const next = await port.ensure!({ force: true });
+  assert.notEqual(next, first);
+  assert.equal(next?.controller.publication()?.snapshot.sessionId, "fresh-1");
+  assert.deepEqual(state.stopped, ["fresh-1"]);
+  assert.deepEqual(state.created, [
+    { sessionId: "fresh-1", epoch: 1 },
+    { sessionId: "fresh-1", epoch: 2 },
+  ]);
   await port.stop();
 });
 

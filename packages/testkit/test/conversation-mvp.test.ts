@@ -241,7 +241,8 @@ test("MVP-B: live start/delta/tool/completed converges on one assistant and one 
       const views = selectConversationViews(conversation);
       const assistants = views.filter((view) => {
         if (view.kind === "item") return view.item.kind === "message" && view.item.role === "assistant";
-        return view.message.role === "assistant";
+        if (view.kind === "live") return view.message.role === "assistant";
+        return false;
       });
       assert.equal(assistants.length, 1);
       const assistant = assistants[0]!;

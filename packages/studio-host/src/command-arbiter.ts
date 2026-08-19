@@ -82,7 +82,13 @@ export function classifyOperation(operation: StudioOperation): CommandConcurrenc
     operation.kind === "loop.disable" ||
     operation.kind === "session.fast.set" ||
     operation.kind === "session.prewalk.arm" ||
-    operation.kind === "session.prewalk.disarm"
+    operation.kind === "session.prewalk.disarm" ||
+    operation.kind === "agent.spawn" ||
+    operation.kind === "agent.send" ||
+    operation.kind === "agent.kill" ||
+    operation.kind === "agent.revive" ||
+    operation.kind === "agent.release" ||
+    operation.kind === "job.cancel"
   ) {
     return "queue-compatible";
   }

@@ -48,7 +48,7 @@ import {
 } from "./commands";
 
 export type ChipComposerHandle = {
-  focus(): void;
+  focus(options?: FocusOptions): void;
   clear(): void;
   getSnapshot(): ComposerSnapshot;
   setSnapshot(snapshot: ComposerSnapshot): void;
@@ -281,8 +281,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   }, [thumbs]);
 
   useImperativeHandle(ref, () => ({
-    focus() {
-      editorRef.current?.focus();
+    focus(options) {
+      editorRef.current?.focus(options);
     },
     clear() {
       const editor = editorRef.current;

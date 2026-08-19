@@ -346,7 +346,59 @@ describe("subagent inspect card", () => {
     expect(document.querySelector(".sa-inspect .sa-card.is-inspectable")).toBeNull();
   });
 
-  it("puts token, tool, and cost counts on the compact card title row", () => {
+  it("overlays Hub roster usage onto a spawn-placeholder compact card", () => {
+    render(
+      <ConversationItemView
+        row={{
+          ...taskRow,
+          segments: [{
+            type: "batch",
+            key: "batch-placeholder",
+            tools: [{
+              toolCallId: "task-1",
+              toolName: "task",
+              status: "running",
+              arguments: { spawn: { tasks: [{ name: "WorkerAlpha", task: "scan lockfile" }] } },
+              result: {
+                type: "toolResult",
+                toolCallId: "task-1",
+                toolName: "task",
+                isError: false,
+                data: {
+                  progress: [{
+                    id: "WorkerAlpha",
+                    name: "WorkerAlpha",
+                    status: "pending",
+                    tokens: "[redacted]",
+                    requests: 0,
+                    durationMs: 0,
+                  }],
+                },
+              },
+            }],
+          }],
+        }}
+        liveAgents={[{
+          ...LIVE_AGENT,
+          agentId: "WorkerAlpha" as AgentId,
+          displayName: "WorkerAlpha",
+          status: "running",
+          assignment: "scan lockfile",
+          usage: { tokens: 12_600, requests: 9, tools: 14, cost: 0.51, durationMs: 38_000 },
+        }]}
+        onInspectSubagent={vi.fn()}
+      />,
+    );
+    const card = screen.getByRole("button", { name: /WorkerAlpha/ });
+    expect(card.classList.contains("running")).toBe(true);
+    expect(card.querySelector(".hub-act")?.textContent).toBe("Thinking");
+    expect(card.querySelector(".sa-dur")?.textContent).toBe("38.0s");
+    expect(card.querySelector(".sa-tok")?.textContent).toBe("12.6ktok");
+    expect(card.querySelector(".sa-metrics")?.textContent).toContain("req9");
+    expect(card.textContent).not.toContain("[redacted]");
+  });
+
+  it("puts token, tool, and cost counts on the compact card data row", () => {
     const onInspect = vi.fn();
     render(
       <ConversationItemView
@@ -384,10 +436,12 @@ describe("subagent inspect card", () => {
       />,
     );
     const card = screen.getByRole("button", { name: /deps/ });
-    expect(card.querySelector(".sa-top .sa-tok")?.textContent).toBe("12.6ktok");
-    expect(card.querySelector(".sa-top .hub-num")?.textContent).toBe("tools8");
-    expect(card.querySelector(".sa-top .sa-cost")?.textContent).toBe("¥ 0.51");
-    expect(card.querySelector(":scope > .sa-metrics")).toBeNull();
+    expect(card.querySelector(".sa-top .sa-name")?.textContent).toBe("deps");
+    expect(card.querySelector(".sa-top .sa-tok")).toBeNull();
+    const metrics = card.querySelector(":scope > .sa-metrics");
+    expect(metrics?.querySelector(".sa-tok")?.textContent).toBe("12.6ktok");
+    expect(metrics?.querySelector(".hub-num")?.textContent).toBe("tools8");
+    expect(metrics?.querySelector(".sa-cost")?.textContent).toBe("¥ 0.51");
     fireEvent.click(card);
     expect(onInspect).toHaveBeenCalledWith({
       ...TARGET,

@@ -15,6 +15,15 @@ export function interactionDeckDisabled(input: {
   return input.resyncRequired || !input.runtimeConnected;
 }
 
+/** Same lock as a visible ask: do not reuse Composer `gated` / executionMatches. */
+export function planReviewDeckDisabled(input: {
+  readonly resyncRequired: boolean;
+  readonly runtimeConnected: boolean;
+  readonly canRespond: boolean;
+}): boolean {
+  return input.resyncRequired || !input.runtimeConnected || !input.canRespond;
+}
+
 /** Prefer a manifest that actually lists capabilities over an empty limited fallback. */
 export function usableCapabilityManifest(
   ...candidates: Array<CapabilityManifest | null | undefined>

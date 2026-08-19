@@ -1,9 +1,10 @@
 import { useId, useState, type ReactNode } from "react";
+import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { ToolBody, TruncationMark } from "./ToolBody";
 import { ToolCardScroll } from "./useToolCardFollowScroll";
 import { jsonString, type ToolView } from "./conversationViewModel";
-import { SubagentMetrics } from "./SubagentMetrics";
+import { applyLiveSubagentRoster, resolveSubagentMetrics, SubagentMetrics } from "./SubagentMetrics";
 import {
   batchSummary,
   chainItemDetail,
@@ -25,16 +26,15 @@ import {
 
 function SubagentStrip({
   tools,
+  liveAgents,
   onInspectSubagent,
 }: {
   tools: readonly ToolView[];
+  liveAgents?: readonly StudioAgentSnapshot[];
   onInspectSubagent?: (target: SubagentHubTarget) => void;
 }) {
-  const agents = collectAgents(tools);
+  const agents = collectAgents(tools).map((agent) => applyLiveSubagentRoster(agent, liveAgents ?? []));
   if (agents.length === 0) return null;
-  // #region agent log
-  fetch("http://127.0.0.1:7773/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"84cd67"},body:JSON.stringify({sessionId:"84cd67",runId:"pre-fix",hypothesisId:"A",location:"BatchChain.tsx:SubagentStrip",message:"subagent strip render",data:{hasCallback:onInspectSubagent!==undefined,agents:agents.map((agent)=>({name:agent.name,agentId:agent.agentId??null,toolCallId:agent.toolCallId,inspectable:onInspectSubagent!==undefined&&resolveSubagentHubTarget(agent)!==undefined}))},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   return (
     <div className="subagent-strip">
       {agents.map((agent) => {
@@ -49,15 +49,9 @@ function SubagentStrip({
             <div className="sa-top">
               <span className={`hub-act ${pill.cls}`}>{pill.label}</span>
               <span className="sa-name">{agent.name}</span>
-              <SubagentMetrics
-                tokens={agent.tokens}
-                tools={agent.tools}
-                requests={agent.requests}
-                files={agent.files}
-                cost={agent.cost}
-              />
               {agent.dur ? <span className="sa-dur">{agent.dur}</span> : null}
             </div>
+            <SubagentMetrics {...resolveSubagentMetrics(undefined, agent)} />
           </>
         );
         if (inspectable) {
@@ -69,9 +63,6 @@ function SubagentStrip({
               aria-label={`${aria}，打开对话`}
               onClick={(event) => {
                 event.stopPropagation();
-                // #region agent log
-                fetch("http://127.0.0.1:7773/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"84cd67"},body:JSON.stringify({sessionId:"84cd67",runId:"pre-fix",hypothesisId:"B",location:"BatchChain.tsx:sa-card-click",message:"inspectable card click",data:{agentId:target.agentId,toolCallId:target.toolCallId,task:target.task??null},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
                 onInspectSubagent(target);
               }}
             >
@@ -85,11 +76,6 @@ function SubagentStrip({
             className={`sa-card ${agent.status}`}
             role="group"
             aria-label={target === undefined ? `${aria}，无法打开对话：缺少 Agent 身份` : aria}
-            onClick={() => {
-              // #region agent log
-              fetch("http://127.0.0.1:7773/ingest/2bbaa919-e4cf-4b69-9c53-c2287627953f",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"84cd67"},body:JSON.stringify({sessionId:"84cd67",runId:"pre-fix",hypothesisId:"A",location:"BatchChain.tsx:sa-card-dead-click",message:"non-inspectable card click",data:{name:agent.name,agentId:agent.agentId??null,hasCallback:onInspectSubagent!==undefined},timestamp:Date.now()})}).catch(()=>{});
-              // #endregion
-            }}
           >
             {body}
           </div>
@@ -212,6 +198,7 @@ export function BatchChain({
   standalone = false,
   liveTail = false,
   showDetail = true,
+  liveAgents,
   onInspectSubagent,
 }: {
   /** 已按模型产出顺序排好的链条目；相邻思考应在上游合并后再传进来。 */
@@ -223,6 +210,7 @@ export function BatchChain({
   liveTail?: boolean;
   /** 工具行上的意图摘要行（设置 → 对话与交互 → 显示工具调用意图）。 */
   showDetail?: boolean;
+  liveAgents?: readonly StudioAgentSnapshot[];
   onInspectSubagent?: (target: SubagentHubTarget) => void;
 }) {
   // 展开状态按「槽位」寻址而不是按 segment key：同一条链在 live → 落盘之间会换 key
@@ -258,11 +246,11 @@ export function BatchChain({
     }
     if (tool.status === "queued") nextQueuedId = tool.toolCallId;
   }
-  // 流式跟随：最后一个运行中的工具 → 下一个待跑的工具 → 链尾仍在输出的思考。
+  // 流式跟随：最后一个运行中的工具 → 下一个待跑的工具 → 链尾仍在输出的思考 / 等待模型回复中刚完成的末尾工具。
   // 链尾之前的思考已经被后面的工具接管，不该再跟着它。
   const tail = chain[chain.length - 1];
-  const tailThinkSlot = tail !== undefined && tail.item.kind === "think" ? tail.slot : undefined;
-  const activeKey = lastRunId ?? nextQueuedId ?? (liveTail ? tailThinkSlot : undefined);
+  const tailSlot = tail !== undefined ? tail.slot : undefined;
+  const activeKey = lastRunId ?? nextQueuedId ?? (liveTail ? tailSlot : undefined);
   // 用户手动切换过的项/链记入 override，之后不再被自动展开/折叠覆盖。
   const [manualOpen, setManualOpen] = useState<boolean | undefined>(undefined);
   const [overrides, setOverrides] = useState<Readonly<Record<string, boolean>>>({});
@@ -304,7 +292,11 @@ export function BatchChain({
         className={`${standalone ? "ev " : ""}ev-batch is-single${running ? " is-running" : ""}`}
         data-batch-key={batchKey}
       >
-        <SubagentStrip tools={visible} {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })} />
+        <SubagentStrip
+          tools={visible}
+          {...(liveAgents === undefined ? {} : { liveAgents })}
+          {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+        />
         {cards}
       </div>
     );
@@ -315,7 +307,11 @@ export function BatchChain({
       className={`${standalone ? "ev " : ""}ev-batch${open ? " open" : ""}${running ? " is-running" : ""}${expandAll || askOnly ? " is-pinned-open" : ""}`}
       data-batch-key={batchKey}
     >
-      <SubagentStrip tools={visible} {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })} />
+      <SubagentStrip
+        tools={visible}
+        {...(liveAgents === undefined ? {} : { liveAgents })}
+        {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+      />
       <button
         type="button"
         className="batch-sum"

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createInitialClientState, type ClientState } from "@omp-studio/client";
-import type { ClientEvent, CommandRequestId, EventCursor, IdempotencyKey, SessionId, StateVersion } from "@omp-studio/client-contract";
+import type { ClientEvent, CommandRequestId, EventCursor, IdempotencyKey, RuntimeEpoch, SessionId, StateVersion } from "@omp-studio/client-contract";
 import {
   clientShellChanged,
+  layoutRestoreNeeded,
   liveToolActivitySignature,
   shouldRecordShellEvent,
   toShellEventLogEntry,
@@ -48,7 +49,7 @@ function conversationChanged(kind: "conversation.message.delta" | "conversation.
   return {
     kind: "conversation.changed",
     authorityEpoch: 1 as ClientEvent["authorityEpoch"],
-    runtimeEpoch: 1 as ClientEvent["runtimeEpoch"],
+    runtimeEpoch: 1 as RuntimeEpoch,
     stateVersion: 1 as StateVersion,
     cursor: "42" as EventCursor,
     occurredAt: TS,
@@ -122,5 +123,34 @@ describe("shell memory gate", () => {
       },
     };
     expect(clientShellChanged(idle, next)).toBe(true);
+  });
+});
+
+describe("layoutRestoreNeeded", () => {
+  it("restores saved chrome when leaving preview even if the layout scope is unchanged", () => {
+    expect(layoutRestoreNeeded({
+      preview: false,
+      rememberLayout: true,
+      leavingPreview: true,
+      appliedScope: "global",
+      layoutScope: "global",
+    })).toBe(true);
+  });
+
+  it("skips restore while preview is on or layout memory is disabled", () => {
+    expect(layoutRestoreNeeded({
+      preview: true,
+      rememberLayout: true,
+      leavingPreview: false,
+      appliedScope: null,
+      layoutScope: "global",
+    })).toBe(false);
+    expect(layoutRestoreNeeded({
+      preview: false,
+      rememberLayout: false,
+      leavingPreview: true,
+      appliedScope: null,
+      layoutScope: "global",
+    })).toBe(false);
   });
 });

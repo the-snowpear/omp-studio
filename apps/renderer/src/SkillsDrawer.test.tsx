@@ -41,7 +41,7 @@ describe("SkillsDrawer real-mode draft join", () => {
     const onInsertSkill = vi.fn();
     const onRemoveSkill = vi.fn();
     const { rerender } = render(
-      <PreviewModeProvider>
+      <PreviewModeProvider switchEnabled>
         <SkillsDrawer
           open
           client={clientOf()}
@@ -57,7 +57,7 @@ describe("SkillsDrawer real-mode draft join", () => {
     expect(onInsertSkill).toHaveBeenCalledWith({ name: "commit-msg", desc: "写提交信息" });
 
     rerender(
-      <PreviewModeProvider>
+      <PreviewModeProvider switchEnabled>
         <SkillsDrawer
           open
           client={clientOf()}
@@ -78,7 +78,7 @@ describe("SkillsDrawer real-mode draft join", () => {
 
   it("shows a used-in-conversation mark from the transcript set", async () => {
     render(
-      <PreviewModeProvider>
+      <PreviewModeProvider switchEnabled>
         <SkillsDrawer
           open
           client={clientOf()}
@@ -128,7 +128,7 @@ describe("SkillsDrawer real-mode draft join", () => {
       generatedAt: "2026-08-17T00:00:00.000Z",
     };
     render(
-      <PreviewModeProvider>
+      <PreviewModeProvider switchEnabled>
         <SkillsDrawer open client={clientOf(model)} onClose={() => undefined} />
       </PreviewModeProvider>,
     );

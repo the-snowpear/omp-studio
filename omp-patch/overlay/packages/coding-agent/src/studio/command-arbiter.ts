@@ -26,6 +26,19 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
 	"permissions.mode.set",
+	"agent.list",
+	"agent.get",
+	"agent.spawn",
+	"agent.send",
+	"agent.kill",
+	"agent.revive",
+	"agent.release",
+	"agent.transcript.read",
+	"agent.subscribe",
+	"job.list",
+	"job.get",
+	"job.cancel",
+	"job.subscribe",
 ]);
 
 /** Queue-compatible interrupts. Host classifies these the same way; they must
@@ -50,6 +63,19 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
 	"permissions.mode.set",
+	"agent.list",
+	"agent.get",
+	"agent.spawn",
+	"agent.send",
+	"agent.kill",
+	"agent.revive",
+	"agent.release",
+	"agent.transcript.read",
+	"agent.subscribe",
+	"job.list",
+	"job.get",
+	"job.cancel",
+	"job.subscribe",
 ]);
 
 const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([

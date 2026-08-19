@@ -15,6 +15,7 @@ import {
   type ConversationResetBoundaryItem,
   type ConversationRuntimeEvent,
   type ConversationTranscriptPage,
+  type ConversationTranscriptReadPage,
   type JsonValue,
   type OpaqueCursor,
 } from "@omp-studio/client-contract";
@@ -323,7 +324,7 @@ function withUserDisplay(
 
 export function hydratePage(
   state: ConversationState,
-  page: ConversationTranscriptPage,
+  page: ConversationTranscriptPage | ConversationTranscriptReadPage,
   generation: number,
   mode: "replace" | "prepend",
 ): ConversationState {
@@ -1138,7 +1139,8 @@ function rowFromItem(
     });
   }
   // Tools normally live inside the persisted content, so the row is still
-  // streaming whenever any of its tool views is active — not only the extras.
+  // streaming whenever any of its tool views is active or its tool turn is still open.
+  const hasBatch = segments.some((segment) => segment.type === "batch");
   const running = segments.some(
     (segment) => segment.type === "batch" && segment.tools.some(isToolActive),
   );
@@ -1147,7 +1149,7 @@ function rowFromItem(
     itemId: item.itemId,
     createdAt: item.createdAt,
     segments,
-    status: error !== undefined ? "error" : running ? "streaming" : "completed",
+    status: error !== undefined ? "error" : (running || (turnOpen && hasBatch)) ? "streaming" : "completed",
     ...(turnOpen ? { turnOpen: true } : {}),
     ...(error === undefined ? {} : { error }),
   };

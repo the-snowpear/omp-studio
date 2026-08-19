@@ -128,7 +128,7 @@ function renderPage(options: {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === false ? "0" : "1");
   const client = options.client ?? fakeClient();
   render(
-    <PreviewModeProvider>
+    <PreviewModeProvider switchEnabled>
       <CapabilitiesPage
         client={client}
         {...(options.onRunSlash === undefined ? {} : { onRunSlash: options.onRunSlash as never })}

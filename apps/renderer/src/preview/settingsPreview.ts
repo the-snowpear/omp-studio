@@ -13,6 +13,7 @@ import type { RuntimeDemoApi } from "../settings/tabs";
 
 /** App 级设置的演示值（预览模式显示，不落盘）。 */
 export const PREVIEW_APP_SETTINGS: AppSettings = {
+  language: "system",
   theme: "dark",
   density: "compact",
   streaming: true,

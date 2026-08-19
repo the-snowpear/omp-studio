@@ -19,6 +19,8 @@ import { StudioStateProjector } from "./state-projector";
 import type { StudioBridgeLifecycle, StudioHostRuntime } from "./studio-host-mode";
 
 const UPSTREAM_COMMIT = "8500092296621a6826b7136e840f8a59ea338958";
+/** Must match `omp-patch/patches/series.json` `patchsetVersion`. */
+const PATCHSET_VERSION = "studio.3";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */
@@ -214,7 +216,7 @@ export class StudioBridgeServer implements StudioBridgeLifecycle {
 					type: "studio.hello.result",
 					requestId: hello.requestId,
 					selectedProtocolVersion: STUDIO_PROTOCOL_VERSION,
-					runtimeVersion: `${VERSION}-studio.1`,
+					runtimeVersion: `${VERSION}-${PATCHSET_VERSION}`,
 					upstreamVersion: VERSION,
 					upstreamCommit: UPSTREAM_COMMIT,
 					runtimeInstanceId: runtime.runtimeId,

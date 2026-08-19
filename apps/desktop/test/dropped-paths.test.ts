@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -59,5 +59,37 @@ describe("resolveDroppedPath", () => {
     const root = await makeWorkspace();
     const result = await resolveDroppedPath(root, join(root, "nope.ts"));
     assert.deepEqual(result, { ok: false, reason: "missing" });
+  });
+
+  test("rejects a symlink drop as invalid", async () => {
+    const root = await makeWorkspace();
+    const outside = await mkdtemp(join(tmpdir(), "omp-drop-link-"));
+    await writeFile(join(outside, "secret.ts"), "export {}\n");
+    const link = join(root, "trap.ts");
+    try {
+      await symlink(join(outside, "secret.ts"), link, "file");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EPERM" || code === "EACCES" || code === "ENOTSUP" || code === "EUNKNOWN") return;
+      throw error;
+    }
+    const result = await resolveDroppedPath(root, link);
+    assert.deepEqual(result, { ok: false, reason: "invalid" });
+  });
+
+  test("rejects a junction drop as invalid", async () => {
+    const root = await makeWorkspace();
+    const outside = await mkdtemp(join(tmpdir(), "omp-drop-junc-"));
+    await mkdir(join(outside, "assets"));
+    const link = join(root, "trap");
+    try {
+      await symlink(join(outside, "assets"), link, "junction");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EPERM" || code === "EACCES" || code === "ENOTSUP" || code === "EUNKNOWN") return;
+      throw error;
+    }
+    const result = await resolveDroppedPath(root, link);
+    assert.deepEqual(result, { ok: false, reason: "invalid" });
   });
 });

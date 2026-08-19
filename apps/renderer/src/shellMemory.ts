@@ -1,4 +1,5 @@
-import type { ClientEvent, ClientState } from "@omp-studio/client";
+import type { ClientEvent } from "@omp-studio/client-contract";
+import type { ClientState } from "@omp-studio/client";
 
 /** Bottom-bar event log row: identity only, never the live payload. */
 export type ShellEventLogEntry = {
@@ -21,6 +22,18 @@ export function shouldRecordShellEvent(event: ClientEvent): boolean {
 
 export function toShellEventLogEntry(event: ClientEvent): ShellEventLogEntry {
   return { cursor: event.cursor, kind: event.kind, occurredAt: event.occurredAt };
+}
+
+/** Restore saved chrome when leaving preview even if the layout scope is unchanged. */
+export function layoutRestoreNeeded(input: {
+  readonly preview: boolean;
+  readonly rememberLayout: boolean;
+  readonly leavingPreview: boolean;
+  readonly appliedScope: string | null;
+  readonly layoutScope: string;
+}): boolean {
+  if (input.preview || !input.rememberLayout) return false;
+  return input.leavingPreview || input.appliedScope !== input.layoutScope;
 }
 
 /**

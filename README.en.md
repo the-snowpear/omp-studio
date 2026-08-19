@@ -27,14 +27,64 @@
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
 </p>
 
-<p align="center">
-  <img src="ui_reference/ver2/__shots/dark-wb-streaming.png" alt="OMP Studio workbench (design reference)" width="920">
-</p>
-
 OMP Studio is a desktop shell for [oh-my-pi](https://github.com/can1357/oh-my-pi) (OMP). Sessions, approvals, Agent Hub, and the workspace are driven through a typed Studio Bridge — not by scraping TUI text, ANSI, or key macros.
 
+<p align="center">
+  <img src="docs/images/workbench.png" alt="OMP Studio workbench: new conversation welcome, activity heatmap, and composer" width="920">
+</p>
+
+## Why this workbench
+
+Skills, usage, providers, capabilities, and Git live in one window — no hopping between a TUI and a pile of web pages.
+
+### 1. Fast-select Skills sidebar
+
+Open the Skills & Plugins drawer from the left rail. Skills are grouped by project / global / built-in. Click **Add** to drop a skill into the current draft; `/skill:` capsules in the transcript show what you already used.
+
+<p align="center">
+  <img src="docs/images/skills.png" alt="Skills sidebar grouped by project, global, and built-in" width="920">
+</p>
+
+### 2. Usage and stats that are actually readable
+
+The home page has Token charts you can switch by year / month / week / day, plus a heatmap. The conversation header opens turn cost, cache hits, TPS, and sub-agent spend; Agent Hub repeats the same numbers per child.
+
+<p align="center">
+  <img src="docs/images/home.png" alt="Home page Token chart and heatmap" width="432">
+  &nbsp;
+  <img src="docs/images/telemetry.png" alt="Conversation Token usage popover" width="432">
+</p>
+
+### 3. Unified provider management
+
+The model-config page keeps Anthropic, OpenAI, OpenRouter, local LM Studio, and friends in one list — toggles, endpoints, and `modelProviderOrder` on the same screen. The Roles tab assigns models and thinking to `@default` / `@plan` / `@task`.
+
+<p align="center">
+  <img src="docs/images/models.png" alt="Model config: unified provider list" width="432">
+  &nbsp;
+  <img src="docs/images/roles.png" alt="Role config: models per task" width="432">
+</p>
+
+### 4. Capabilities center
+
+Skills, Plugins, MCP, and Slash Commands share one page for toggles, probes, and folders. Agent Hub watches the main session and every sub-agent’s status, cost, and context window.
+
+<p align="center">
+  <img src="docs/images/capabilities.png" alt="Capabilities center: Skills, Plugins, MCP, Slash" width="432">
+  &nbsp;
+  <img src="docs/images/hub.png" alt="Agent Hub: sub-agent list and usage" width="432">
+</p>
+
+### 5. Git, in the same window
+
+The right-hand Git panel stages, diffs, and commits next to the conversation. Fetch / Pull / Push and the commit graph stay beside the thread.
+
+<p align="center">
+  <img src="docs/images/git.png" alt="Workbench Git panel: diff, commit, and graph" width="920">
+</p>
+
 > [!IMPORTANT]
-> **0.1.0 is a development preview.** The workbench runs from source on Windows. Some panels are honest empty shells. There is no signed installer on GitHub Releases yet. Please file bugs and ideas as [Issues](https://github.com/the-snowpear/omp-studio/issues).
+> **0.1.0 is a development preview.** The workbench runs on Windows from source or from a locally built **unsigned** NSIS installer. Some panels are honest empty shells. There is no Authenticode-signed installer on GitHub Releases yet. Please file bugs and ideas as [Issues](https://github.com/the-snowpear/omp-studio/issues).
 
 ## What it does
 

@@ -62,9 +62,10 @@ import {
   segmentsFromContent,
   trackPending,
   withCompactingRow,
+  type TimelineRow,
   type ToolView,
 } from "./conversationViewModel";
-import { PREVIEW_CONVO_IDENTITY, PREVIEW_CONVO_ITEMS, previewConversationRows } from "../preview/conversationFixtures";
+import { PREVIEW_CONVO_IDENTITY, PREVIEW_CONVO_ITEMS, previewConversationRows, previewGalleryItems } from "../preview/conversationFixtures";
 import { createMemoryThumbStore } from "./userMessageThumbs";
 
 afterEach(cleanup);
@@ -1596,7 +1597,7 @@ describe("runtime identity and XSS", () => {
       <ConvoTranscript
         rows={buildTimeline({
           ...emptyConversationState(1),
-          items: PREVIEW_CONVO_ITEMS,
+          items: previewGalleryItems(),
           hydrateStatus: "ready",
           identity: PREVIEW_CONVO_IDENTITY,
         })}
@@ -1620,8 +1621,9 @@ describe("runtime identity and XSS", () => {
     expect(document.querySelector(".tc-vibe")).not.toBeNull();
     expect(document.querySelector(".tc-resolve")).not.toBeNull();
     expect(document.querySelector(".subagent-strip .sa-card.running")).not.toBeNull();
-    expect(document.querySelector(".subagent-strip .sa-top .sa-tok")).not.toBeNull();
-    expect(document.querySelector(".subagent-strip .sa-card > .sa-metrics")).toBeNull();
+    expect(document.querySelector(".subagent-strip .sa-top .sa-name")).not.toBeNull();
+    expect(document.querySelector(".subagent-strip .sa-top .sa-tok")).toBeNull();
+    expect(document.querySelector(".subagent-strip .sa-card > .sa-metrics .sa-tok")).not.toBeNull();
   });
 });
 
@@ -2711,7 +2713,7 @@ describe("real OMP tool-card bindings", () => {
 
   it("preview live transcript shows a running bash tail after the gallery", () => {
     const rows = previewConversationRows();
-    expect(rows.some((row) => row.type === "user" && row.text === "再跑一遍 typecheck，看着输出")).toBe(true);
+    expect(rows.some((row) => row.type === "user" && row.text?.includes("再跑一遍 typecheck"))).toBe(true);
     const live = rows.find((row) => row.type === "assistant" && row.itemId === "preview-live-assistant");
     const tools = live?.type === "assistant"
       ? live.segments.flatMap((segment) => (segment.type === "batch" ? segment.tools : []))
@@ -3489,6 +3491,27 @@ describe("user message restore", () => {
     expect(onRestoreUserMessage).not.toHaveBeenCalled();
   });
 
+  it("disables branch when a branch disabled reason is provided", () => {
+    const onBranchUserMessage = vi.fn();
+    render(
+      <ConversationItemView
+        row={{
+          type: "user",
+          itemId: "u-busy-branch",
+          createdAt: "2026-08-15T00:00:00.000Z",
+          text: "busy",
+        }}
+        onBranchUserMessage={onBranchUserMessage}
+        userBranchDisabledReason="创建中"
+      />,
+    );
+    const button = screen.getByRole("button", { name: "新会话" });
+    expect(button).toHaveProperty("disabled", true);
+    expect(button.getAttribute("data-tip")).toBe("创建中");
+    fireEvent.click(button);
+    expect(onBranchUserMessage).not.toHaveBeenCalled();
+  });
+
   it("keeps failed-pending on the draft restore button and does not navigate", () => {
     const onRestore = vi.fn();
     const onRestoreUserMessage = vi.fn();
@@ -3653,7 +3676,47 @@ describe("compaction timeline", () => {
     );
     expect(screen.queryByText("压缩中")).toBeNull();
     expect(screen.getByText(/Summarized history/)).toBeTruthy();
+    expect(screen.queryByText("Earlier turns were summarized.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /展开详情/ }));
     expect(screen.getByText("Earlier turns were summarized.")).toBeTruthy();
+  });
+
+  it("keeps snapcompact HISTORY folded until the compact bar is opened", () => {
+    const summary = [
+      "You are resuming a prior conversation. Its earlier turns were archived to reclaim context and are reproduced under HISTORY below, oldest to newest.",
+      "",
+      "The archived transcript uses compact scopes:",
+      "- `¶user:`, `¶think:`, `¶ai:`, and `¶call:` open user, assistant reasoning, assistant reply, and tool-call scopes.",
+      "",
+      "FILES",
+      "===================",
+      "package.json (Read)",
+      "",
+      "HISTORY",
+      "===================",
+    ].join("\n");
+    render(
+      <ConvoTranscript
+        rows={[{
+          type: "compaction",
+          item: {
+            kind: "compaction",
+            itemId: "cp-snap",
+            parentId: null,
+            createdAt: "t",
+            summary,
+            shortSummary: "Compacted from 114,276 tokens",
+          },
+        }]}
+      />,
+    );
+    expect(screen.getByText(/Compacted from 114,276 tokens/)).toBeTruthy();
+    expect(screen.queryByText(/You are resuming a prior conversation/)).toBeNull();
+    expect(screen.queryByText(/package\.json \(Read\)/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /展开详情/ }));
+    expect(screen.getByText(/You are resuming a prior conversation/)).toBeTruthy();
+    expect(screen.getByText(/package\.json \(Read\)/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /收起详情/ }).getAttribute("aria-expanded")).toBe("true");
   });
 
   it("appends 压缩中 after an existing compact summary on a later compact", () => {
@@ -3673,5 +3736,59 @@ describe("compaction timeline", () => {
     expect(screen.getByText(/Older history/)).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("压缩中");
   });
+
+  it("keeps the completed tool expanded during streaming while waiting for the model reply", () => {
+    const tool: ToolView = {
+      toolCallId: "t1",
+      toolName: "read",
+      status: "succeeded",
+      output: "file contents",
+    };
+    const row: TimelineRow = {
+      type: "assistant",
+      itemId: "m1",
+      createdAt: "2026-08-15T00:00:01.000Z",
+      status: "streaming",
+      turnOpen: true,
+      segments: [{ type: "batch", key: "b1", tools: [tool] }],
+    };
+    const { rerender } = render(<ConvoTranscript rows={[row]} />);
+    // 工具已成功执行完毕，但因为处于 liveTail（等待模型回复），工具卡片保持展开
+    const toolToggle = screen.getByRole("button", { name: /Read/ });
+    expect(toolToggle.getAttribute("aria-expanded")).toBe("true");
+
+    // 当模型开始输出下一段思考时，上一条工具收起，思考卡片展开
+    const rowWithThink: TimelineRow = {
+      type: "assistant",
+      itemId: "m1",
+      createdAt: "2026-08-15T00:00:01.000Z",
+      status: "streaming",
+      turnOpen: true,
+      segments: [
+        { type: "batch", key: "b1", tools: [tool] },
+        { type: "thinking", key: "th1", text: "模型正在思考下一步..." },
+      ],
+    };
+    rerender(<ConvoTranscript rows={[rowWithThink]} />);
+    expect(screen.getByRole("button", { name: /Read/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: /Think/ }).getAttribute("aria-expanded")).toBe("true");
+
+    // 当模型开始输出正文回复时，工具链整体收起
+    const rowWithText: TimelineRow = {
+      type: "assistant",
+      itemId: "m1",
+      createdAt: "2026-08-15T00:00:01.000Z",
+      status: "streaming",
+      turnOpen: true,
+      segments: [
+        { type: "batch", key: "b1", tools: [tool] },
+        { type: "text", key: "txt1", text: "这是最终的模型回复。" },
+      ],
+    };
+    rerender(<ConvoTranscript rows={[rowWithText]} />);
+    expect(screen.getByRole("button", { name: /Read/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByText("这是最终的模型回复。")).toBeTruthy();
+  });
 });
+
 

@@ -23,7 +23,7 @@ import type { ToolSession } from "../tools";
 import type { ToolUiFactory } from "../tools/context";
 import { StudioBridgeServer } from "./bridge-server";
 import { createStudioRemoteUiFactory } from "./remote-extension-ui";
-import { StudioAgentConversationService } from "./services/agent-conversation-service";
+import { StudioAgentConversationService, reconstructSessionBranch } from "./services/agent-conversation-service";
 import {
 	StudioAgentHubService,
 	type StudioAgentTelemetryPort,
@@ -537,6 +537,7 @@ export function createStudioHostRuntime(
 		getAllJobs: () => [],
 		cancel: () => false,
 	};
+	let agents!: StudioAgentHubService;
 	const jobs = new StudioJobService(jobsPort, registry, {
 		confirmationGate: async action =>
 			await interaction.confirm({
@@ -545,8 +546,23 @@ export function createStudioHostRuntime(
 				message: `Cancel job ${action.jobId}?`,
 				destructive: true,
 			}),
+		abortAgent: {
+			abortAgent: async agentId => {
+				let snapshot;
+				try {
+					snapshot = agents.get(agentId);
+				} catch {
+					return;
+				}
+				await agents.kill({
+					agentId,
+					expectedGeneration: snapshot.generation,
+					callerAgentId: session.getAgentId() ?? MAIN_AGENT_ID,
+				});
+			},
+		},
 	});
-	const agents = new StudioAgentHubService(
+	agents = new StudioAgentHubService(
 		registry,
 		lifecycle,
 		irc,
@@ -557,7 +573,7 @@ export function createStudioHostRuntime(
 					request.isolation === undefined
 						? undefined
 						: { requested: true, merge: request.isolation as "patch" | "branch" };
-				if (request.async === false) {
+				if (request.async === false || isolation !== undefined) {
 					const result = await runStructuredSubagent({
 						session: toolSession,
 						invocationKind: "task",
@@ -566,6 +582,7 @@ export function createStudioHostRuntime(
 						...(request.context === undefined ? {} : { context: request.context }),
 						...(effort === undefined ? {} : { effort }),
 						...(isolation === undefined ? {} : { isolation }),
+						...(request.async === false ? {} : { detached: true }),
 						keepAlive: true,
 						shareEvalSession: true,
 						enableLsp: session.settings.get("task.enableLsp") !== false,
@@ -593,11 +610,9 @@ export function createStudioHostRuntime(
 				const ref = registry.get(agentId);
 				if (!ref) throw new Error("Unknown agent");
 				const entries = ref.session
-					? ref.session.sessionManager.getEntries()
+					? [...ref.session.sessionManager.getBranch()]
 					: ref.sessionFile
-						? (await loadEntriesFromFile(ref.sessionFile)).filter(
-								(entry): entry is SessionEntry => entry.type !== "session",
-							)
+						? (reconstructSessionBranch(await loadEntriesFromFile(ref.sessionFile))?.branch ?? [])
 						: [];
 				const messages = entries.flatMap(entry => studioTranscriptMessage(entry));
 				return { messages: messages.slice(offset, offset + limit), eof: offset + limit >= messages.length };
@@ -607,8 +622,8 @@ export function createStudioHostRuntime(
 			confirmationGate: async action =>
 				await interaction.confirm({
 					commandId: `agent.${action.kind}:${action.agentId}`,
-					title: action.kind === "kill" ? "Kill agent?" : "Release agent?",
-					message: `${action.kind === "kill" ? "Kill" : "Release"} agent ${action.agentId}?`,
+					title: "Release agent?",
+					message: `Release agent ${action.agentId}?`,
 					destructive: true,
 				}),
 			activeJobIdsFor: agentId =>

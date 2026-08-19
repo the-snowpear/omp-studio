@@ -3,6 +3,8 @@ import type { SessionHistoryEntry, SessionHistoryReadModel, StudioClient, TokenU
 import { Icon } from "../icons";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useOperatorProfile } from "../settings/operatorProfile";
+import { ensureRuntimeConnection } from "../runtimeEnsure";
+import { ActionProgressBar, type ActionProgress } from "../ActionProgressBar";
 import {
   EMPTY_USAGE,
   USAGE_POLL_MS,
@@ -32,6 +34,8 @@ export function ConversationEmpty({
   onSelectThread,
   onSelectPreviewThread,
   onOpenHistory,
+  runtimeConnected = true,
+  onOpenDiagnostics,
 }: {
   client?: StudioClient;
   history?: SessionHistoryReadModel;
@@ -42,6 +46,9 @@ export function ConversationEmpty({
   onSelectThread?: (entry: SessionHistoryEntry) => void;
   onSelectPreviewThread?: (threadId: string) => void;
   onOpenHistory: () => void;
+  /** Real-mode subtitle: do not claim Runtime is ready when it is not. */
+  runtimeConnected?: boolean;
+  onOpenDiagnostics?: () => void;
 }) {
   const { preview } = usePreviewMode();
   const { profile } = useOperatorProfile();
@@ -108,6 +115,20 @@ export function ConversationEmpty({
 
   const greet = `${greetingPart()}，${profile.displayName}`;
   const usageReason = !preview && liveUsage?.unavailableReason ? liveUsage.unavailableReason : undefined;
+  const [reconnectBusy, setReconnectBusy] = useState(false);
+  const [reconnectNotice, setReconnectNotice] = useState<string | null>(null);
+  const [reconnectProgress, setReconnectProgress] = useState<ActionProgress | null>(null);
+
+  const reconnect = async () => {
+    if (preview || client === undefined) return;
+    setReconnectBusy(true);
+    setReconnectNotice(null);
+    setReconnectProgress({ label: "正在请求连接", step: 1, steps: 2 });
+    const result = await ensureRuntimeConnection(client, {}, setReconnectProgress);
+    setReconnectNotice(result.ok ? "Runtime 已重新连接" : result.message);
+    setReconnectBusy(false);
+    setReconnectProgress(null);
+  };
 
   return (
     <div className="convo-empty" role="region" aria-labelledby="ceGreet">
@@ -124,8 +145,28 @@ export function ConversationEmpty({
         </svg>
         <h1 className="ce-greet ce-anim" style={{ ["--d" as string]: "500ms" }} id="ceGreet">{greet}</h1>
         <p className="ce-sub ce-anim" style={{ ["--d" as string]: "620ms" }}>
-          {preview ? "预览模式 · 演示数据。开始一个新任务，或继续最近的对话。" : "OMP 已就绪。开始一个新任务，或继续最近的对话。"}
+          {preview
+            ? "预览模式 · 演示数据。开始一个新任务，或继续最近的对话。"
+            : runtimeConnected
+              ? "OMP 已就绪。开始一个新任务，或继续最近的对话。"
+              : "尚未连接 Runtime。开始一个新任务，或继续最近的对话。"}
         </p>
+        {!preview && !runtimeConnected ? (
+          <div className="ce-runtime-actions ce-anim" style={{ ["--d" as string]: "680ms" }}>
+            {client !== undefined ? (
+              <button type="button" className="btn primary" disabled={reconnectBusy} onClick={() => void reconnect()}>
+                {reconnectBusy ? "正在连接…" : "重新连接 Runtime"}
+              </button>
+            ) : null}
+            {onOpenDiagnostics ? (
+              <button type="button" className="btn outline" onClick={onOpenDiagnostics}>诊断中心</button>
+            ) : null}
+            {reconnectNotice ? <span className="tiny muted">{reconnectNotice}</span> : null}
+            {reconnectProgress !== null ? (
+              <ActionProgressBar compact label={reconnectProgress.label} step={reconnectProgress.step} steps={reconnectProgress.steps} />
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <section className="ce-heat" aria-labelledby="ceHeatH">
@@ -134,7 +175,7 @@ export function ConversationEmpty({
           <span className="ce-heat-stats">
             {usageReason
               ? usageReason
-              : <>近 1 年 · <b>{fmtTokens(heatmap.tokens)}</b> tok · <b>{heatmap.activeDays}</b> 活跃天</>}
+              : <>今年 · <b>{fmtTokens(heatmap.tokens)}</b> tok · <b>{heatmap.activeDays}</b> 活跃天</>}
           </span>
         </div>
         <div className="ce-heat-board" style={{ ["--ce-weeks" as string]: String(heatmap.weeks) }}>

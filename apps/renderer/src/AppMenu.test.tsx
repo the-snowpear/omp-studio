@@ -8,6 +8,8 @@ import { AppMenu } from "./App.js";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 
+import { I18nProvider } from "./i18n";
+
 type AppMenuChrome = Parameters<typeof AppMenu>[0]["chrome"];
 
 function fakeChrome(overrides: Partial<AppMenuChrome> = {}): AppMenuChrome {
@@ -55,12 +57,26 @@ describe("AppMenu", () => {
     expect(screen.getByText("新建对话").closest(".menu-item")!.querySelector(".kbd")!.textContent).toBe("Ctrl ⇧ O");
   });
 
+  it("renders English items when in English locale", () => {
+    render(
+      <I18nProvider forcedLanguage="en">
+        <AppMenu chrome={fakeChrome()} onRoute={vi.fn()} />
+      </I18nProvider>,
+    );
+    const button = screen.getByRole("button", { name: "App Menu" });
+    fireEvent.click(button);
+    expect(screen.getByText("Global Actions")).toBeTruthy();
+    expect(screen.getByText("New Chat")).toBeTruthy();
+    expect(screen.getByText("Open Local Project…")).toBeTruthy();
+    expect(screen.getByText("Home")).toBeTruthy();
+  });
+
   it("navigates to history and closes the menu", () => {
     const onRoute = vi.fn();
     renderMenu({ chrome: fakeChrome(), onRoute });
 
     fireEvent.click(screen.getByRole("button", { name: "应用菜单" }));
-    fireEvent.click(screen.getByText("打开会话历史"));
+    fireEvent.click(screen.getByText("会话历史"));
 
     expect(onRoute).toHaveBeenCalledWith("history");
     expect(screen.queryByRole("menu")).toBeNull();
@@ -87,8 +103,8 @@ describe("AppMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: "应用菜单" }));
 
     for (const [label, reason] of [
-      ["克隆 Git 仓库…", "克隆（暂未实现）"],
-      ["创建临时工作区", "临时工作区（暂未实现）"],
+      ["克隆 Git 仓库…", "暂未实现"],
+      ["创建临时工作区", "暂未实现"],
     ] as const) {
       const item = screen.getByText(label).closest<HTMLButtonElement>(".menu-item")!;
       expect(item.disabled).toBe(true);
@@ -137,8 +153,10 @@ describe("AppMenu", () => {
     const chrome = fakeChrome();
     const onRoute = vi.fn();
     render(
-      <PreviewModeProvider>
-        <AppMenu chrome={chrome} onRoute={onRoute} />
+      <PreviewModeProvider switchEnabled>
+        <I18nProvider forcedLanguage="zh">
+          <AppMenu chrome={chrome} onRoute={onRoute} />
+        </I18nProvider>
       </PreviewModeProvider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "应用菜单" }));
@@ -159,6 +177,9 @@ function renderMenu({ chrome, onRoute = vi.fn() }: {
   chrome: AppMenuChrome;
   onRoute?: ReturnType<typeof vi.fn>;
 }) {
-  // 无 PreviewModeProvider 时 usePreviewMode() 默认真实模式（preview=false）。
-  return render(<AppMenu chrome={chrome} onRoute={onRoute as unknown as Parameters<typeof AppMenu>[0]["onRoute"]} />);
+  return render(
+    <I18nProvider forcedLanguage="zh">
+      <AppMenu chrome={chrome} onRoute={onRoute as unknown as Parameters<typeof AppMenu>[0]["onRoute"]} />
+    </I18nProvider>,
+  );
 }

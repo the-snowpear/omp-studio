@@ -318,8 +318,8 @@ html, body { height: 100%; margin: 0; }
   padding-left: 10px;
   user-select: none;
 }
-.titlebar .tb-icon { width: 16px; height: 16px; border-radius: 4px; overflow: hidden; flex: 0 0 auto; display: flex; }
-.titlebar .tb-icon img { width: 16px; height: 16px; display: block; }
+.titlebar .tb-icon { width: 18px; height: 18px; border-radius: 5px; overflow: hidden; flex: 0 0 auto; display: flex; }
+.titlebar .tb-icon img { width: 18px; height: 18px; display: block; }
 .titlebar .tb-title {
   margin-left: 8px;
   font-size: 12px;
@@ -418,6 +418,7 @@ html, body { height: 100%; margin: 0; }
   height: 230px;
   opacity: 0.1;
   pointer-events: none;
+  object-fit: contain;
 }
 .banner-dots { position: relative; display: flex; gap: 7px; margin-bottom: 26px; }
 .banner-dots i { width: 9px; height: 9px; border-radius: 50%; }
@@ -426,6 +427,7 @@ html, body { height: 100%; margin: 0; }
 .banner-dots i:nth-child(3) { background: #57a3ff; }
 
 .banner .logo-64 { position: relative; width: 56px; height: 56px; margin-bottom: 16px; filter: drop-shadow(0 6px 18px rgba(139, 92, 246, 0.45)); }
+.banner .logo-64 img { width: 56px; height: 56px; display: block; border-radius: 14px; }
 .banner h2 { position: relative; font-size: 19px; font-weight: 650; letter-spacing: 0.01em; }
 .banner .tagline { position: relative; margin-top: 5px; font-size: 11.5px; line-height: 1.6; color: rgba(255, 255, 255, 0.72); }
 .banner .chip {
@@ -444,8 +446,9 @@ html, body { height: 100%; margin: 0; }
   margin-top: auto;
   font-family: var(--font-mono);
   font-size: 10.5px;
+  line-height: 1.45;
   color: rgba(255, 255, 255, 0.55);
-  white-space: nowrap;
+  white-space: normal;
 }
 .banner .runtime-note b { color: rgba(255, 255, 255, 0.8); font-weight: 500; }
 
@@ -661,6 +664,13 @@ html, body { height: 100%; margin: 0; }
 .check .c-text { font-size: 12px; color: var(--text-1); line-height: 1.5; }
 .check .c-text small { display: block; font-size: 11px; color: var(--text-3); }
 .check.is-locked { opacity: 0.72; }
+
+.shortcut-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+}
+.shortcut-options .check { width: auto; min-width: 0; }
 
 /* ---------- 9. 磁盘空间指示 ---------- */
 .space-block { display: flex; flex-direction: column; gap: 7px; }
@@ -964,16 +974,17 @@ html, body { height: 100%; margin: 0; }
 /* ---------- 14. Native host mode (Electron/WebView shell) ---------- */
 html[data-host="installer"],
 html[data-host="installer"] body {
-  width: 720px;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   overflow: hidden;
   background: #fdfdfe;
 }
 html[data-host="installer"] .omp-stage {
   position: relative;
   inset: auto;
-  width: 720px;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   display: block;
   background: var(--window-bg);
 }
@@ -985,12 +996,13 @@ html[data-host="installer"] .stage-note {
 }
 html[data-host="installer"] .scale-wrap {
   width: 720px;
-  height: 100vh;
-  transform: none !important;
+  height: 480px;
+  transform-origin: top left;
+  transform: scale(min(100vw / 720, 100vh / 480));
 }
 html[data-host="installer"] .omp-window {
   width: 720px;
-  height: 100vh;
+  height: 480px;
   margin: 0;
   border: 0;
   border-radius: 0;

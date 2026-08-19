@@ -311,4 +311,38 @@ describe("ComposerModePicker", () => {
     fireEvent.blur(into);
     expect(onRun).toHaveBeenCalledWith("session.prewalk.arm", { target: "opus" });
   });
+
+  it("点击按钮与操作模式时触发 onInteract，并经 onCapsulesChange 同步胶囊存在状态", () => {
+    const onInteract = vi.fn();
+    const onCapsulesChange = vi.fn();
+    render(
+      <ComposerModePicker
+        preview={true}
+        can={() => true}
+        busy={false}
+        disabled={false}
+        keyword={null}
+        onKeywordChange={vi.fn()}
+        onRun={run}
+        onInteract={onInteract}
+        onCapsulesChange={onCapsulesChange}
+      />,
+    );
+
+    expect(onCapsulesChange).toHaveBeenCalledWith(false);
+
+    // 点击加号展开菜单触发 onInteract
+    fireEvent.click(screen.getByRole("button", { name: "会话模式" }));
+    expect(onInteract).toHaveBeenCalledTimes(1);
+
+    // 选择 Plan 模式，胶囊出现并触发 onInteract 与 onCapsulesChange(true)
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Plan/ }));
+    expect(onInteract).toHaveBeenCalledTimes(2);
+    expect(onCapsulesChange).toHaveBeenLastCalledWith(true);
+
+    // 点击取消胶囊触发 onInteract 与 onCapsulesChange(false)
+    fireEvent.click(screen.getByRole("button", { name: "取消 Plan" }));
+    expect(onInteract).toHaveBeenCalledTimes(3);
+    expect(onCapsulesChange).toHaveBeenLastCalledWith(false);
+  });
 });

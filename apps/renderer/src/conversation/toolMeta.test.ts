@@ -7,6 +7,7 @@ import {
   collectAgents,
   isRealSubagentId,
   resolveSubagentHubTarget,
+  saPill,
   subagentCardKey,
   assistantRunRanges,
   listSessionChangeTurns,
@@ -139,6 +140,38 @@ describe("upstream tool schemas", () => {
       task: "audit lockfile",
     });
     expect(subagentCardKey(agent!)).toBe("t4:agent-019fcb01");
+  });
+
+  it("drops redacted usage strings so cards do not show [redacted] tok", () => {
+    const reported = tool("t5", "task", { spawn: { tasks: [{ name: "WorkerAlpha" }] } }, {
+      progress: [{
+        id: "WorkerAlpha",
+        name: "WorkerAlpha",
+        status: "pending",
+        tokens: "[redacted]",
+        cost: "[redacted]",
+        requests: 0,
+        durationMs: 0,
+      }],
+    });
+    const [agent] = collectAgents([reported]);
+    expect(agent).toMatchObject({
+      name: "WorkerAlpha",
+      agentId: "WorkerAlpha",
+      status: "pending",
+      requests: 0,
+      dur: "0.0s",
+    });
+    expect(agent?.tokens).toBeUndefined();
+    expect(agent?.cost).toBeUndefined();
+  });
+
+  it("labels Hub roster statuses the same way Agent Hub pills do", () => {
+    expect(saPill("idle")).toEqual({ cls: "idle", label: "Idle" });
+    expect(saPill("parked")).toEqual({ cls: "parked", label: "Parked" });
+    expect(saPill("pending")).toEqual({ cls: "parked", label: "Pending" });
+    expect(saPill("released")).toEqual({ cls: "idle", label: "Done" });
+    expect(saPill("starting")).toEqual({ cls: "thinking", label: "Starting" });
   });
 
   it("attributes ast_edit files and lines from fileReplacements and the grouped display tree", () => {

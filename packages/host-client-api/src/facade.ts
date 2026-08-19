@@ -102,6 +102,7 @@ import type {
   RuntimeInstallationManifest,
   SessionTelemetryReadResult,
   SessionTelemetrySnapshot,
+  StudioAgentSnapshot,
 } from "@omp-studio/studio-protocol";
 import type { StudioOperation } from "@omp-studio/studio-protocol";
 import {
@@ -433,7 +434,12 @@ function disconnectDiagnostic(facts: HostRuntimeDisconnect | undefined): {
   const reason = redactText(facts.reason);
   return {
     message: formatRuntimeDisconnectMessage(facts),
-    detail: { code: facts.code, reason },
+    detail: {
+      code: facts.code,
+      reason,
+      ...(facts.occurredAt === undefined ? {} : { occurredAt: facts.occurredAt }),
+      ...(facts.autoRespawn === undefined ? {} : { autoRespawn: facts.autoRespawn }),
+    },
   };
 }
 
@@ -453,7 +459,12 @@ function readDisconnect(runtime: HostRuntimeAccess | undefined): HostRuntimeDisc
     const facts = runtime?.disconnect?.();
     if (facts === undefined) return undefined;
     const reason = redactText(facts.reason).trim();
-    return { code: facts.code, reason };
+    return {
+      code: facts.code,
+      reason,
+      ...(facts.occurredAt === undefined ? {} : { occurredAt: facts.occurredAt }),
+      ...(facts.autoRespawn === undefined ? {} : { autoRespawn: facts.autoRespawn }),
+    };
   } catch {
     return undefined;
   }
@@ -468,7 +479,9 @@ function connectionEquals(left: RuntimeConnection, right: RuntimeConnection): bo
     left.unavailableCode === right.unavailableCode &&
     left.unavailableReason === right.unavailableReason &&
     left.disconnectCode === right.disconnectCode &&
-    left.disconnectReason === right.disconnectReason
+    left.disconnectReason === right.disconnectReason &&
+    left.disconnectedAt === right.disconnectedAt &&
+    left.autoRespawn === right.autoRespawn
   );
 }
 
@@ -591,6 +604,7 @@ export class StudioHostClientFacade implements ClientTransport {
   /** Last workspace list seen; feeds the bootstrap selection (`projects.list` wins in the Renderer). */
   #lastWorkspaceModel: WorkspaceListReadModel | undefined;
   readonly #conversationDiagnostics: DiagnosticEntry[] = [];
+  readonly #runtimeLossDiagnostics: DiagnosticEntry[] = [];
 
   constructor(options: StudioHostClientFacadeOptions) {
     validateOptions(options);
@@ -763,6 +777,11 @@ export class StudioHostClientFacade implements ClientTransport {
       case "session.transcript.readPage": {
         const archiveRequest = request as ClientQueryRequest<"session.transcript.readPage">;
         const result = await this.#queryArchiveTranscript(archiveRequest.input);
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "session.agents.list": {
+        const agentsRequest = request as ClientQueryRequest<"session.agents.list">;
+        const result = await this.#queryPersistedAgents(agentsRequest.input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "session.telemetry.read": {
@@ -1149,6 +1168,8 @@ export class StudioHostClientFacade implements ClientTransport {
           : {
               disconnectCode: lost.code,
               disconnectReason: lost.reason,
+              ...(lost.occurredAt === undefined ? {} : { disconnectedAt: lost.occurredAt }),
+              ...(lost.autoRespawn === undefined ? {} : { autoRespawn: lost.autoRespawn }),
             }),
       };
     }
@@ -1198,6 +1219,55 @@ export class StudioHostClientFacade implements ClientTransport {
       connection: next,
       ...(next.runtimeEpoch === undefined ? {} : { runtimeEpoch: next.runtimeEpoch }),
     });
+    if (
+      next.status === "disconnected" ||
+      next.status === "unavailable"
+    ) {
+      const lossChanged =
+        prev.status !== next.status ||
+        prev.disconnectCode !== next.disconnectCode ||
+        prev.autoRespawn !== next.autoRespawn ||
+        prev.unavailableCode !== next.unavailableCode;
+      if (lossChanged) this.#recordRuntimeLossDiagnostic(next);
+    }
+  }
+
+  #recordRuntimeLossDiagnostic(connection: RuntimeConnection): void {
+    const now = this.#options.diagnostics.now();
+    const diagnostic =
+      connection.status === "disconnected"
+        ? disconnectDiagnostic(
+            connection.disconnectCode === undefined
+              ? undefined
+              : {
+                  code: connection.disconnectCode,
+                  reason: connection.disconnectReason ?? "",
+                  ...(connection.disconnectedAt === undefined ? {} : { occurredAt: connection.disconnectedAt }),
+                  ...(connection.autoRespawn === undefined ? {} : { autoRespawn: connection.autoRespawn }),
+                },
+          )
+        : unavailableDiagnostic(
+            connection.unavailableCode === undefined
+              ? undefined
+              : { code: connection.unavailableCode, reason: connection.unavailableReason ?? "" },
+          );
+    const occurredAt = connection.disconnectedAt ?? now;
+    const last = this.#runtimeLossDiagnostics[this.#runtimeLossDiagnostics.length - 1];
+    const nextEntry: DiagnosticEntry = {
+      entryId: this.#options.diagnostics.newEntryId(),
+      scope: "host",
+      level: connection.status === "unavailable" ? "warning" : "error",
+      message: diagnostic.message,
+      ...(diagnostic.detail === undefined ? {} : { detail: diagnostic.detail }),
+      occurredAt,
+    };
+    if (last !== undefined && last.detail?.code === nextEntry.detail?.code && last.occurredAt === occurredAt) {
+      this.#runtimeLossDiagnostics[this.#runtimeLossDiagnostics.length - 1] = nextEntry;
+    } else {
+      this.#runtimeLossDiagnostics.push(nextEntry);
+      if (this.#runtimeLossDiagnostics.length > 8) this.#runtimeLossDiagnostics.shift();
+    }
+    this.#bus.emit({ kind: "diagnostics.changed" });
   }
 
   #onPublication(publication: RuntimePublication): void {
@@ -1498,6 +1568,7 @@ export class StudioHostClientFacade implements ClientTransport {
   // ------------------------------------------------------------------
 
   async #queryEnvironment(): Promise<EnvironmentReadModel> {
+    this.#syncRuntimeEvents();
     const installed = await this.#currentInstalledManifest();
     return {
       platform: this.#options.platform,
@@ -1521,6 +1592,7 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #queryDiagnostics(): Promise<DiagnosticReadModel> {
+    this.#syncRuntimeEvents();
     const now = this.#options.diagnostics.now();
     const connection = this.#currentConnection();
     const installed = await this.#currentInstalledManifest();
@@ -1593,7 +1665,7 @@ export class StudioHostClientFacade implements ClientTransport {
           level: "error",
           message: diagnostic.message,
           ...(diagnostic.detail === undefined ? {} : { detail: diagnostic.detail }),
-          occurredAt: now,
+          occurredAt: connection.disconnectedAt ?? now,
         });
         break;
       }
@@ -1611,6 +1683,16 @@ export class StudioHostClientFacade implements ClientTransport {
           occurredAt: now,
         });
         break;
+    }
+    const currentCode = connection.disconnectCode ?? connection.unavailableCode;
+    const currentAt = connection.disconnectedAt;
+    for (const past of this.#runtimeLossDiagnostics) {
+      const sameCurrentLoss =
+        (connection.status === "disconnected" || connection.status === "unavailable") &&
+        past.detail?.code === currentCode &&
+        (currentAt === undefined || past.occurredAt === currentAt);
+      if (sameCurrentLoss) continue;
+      entries.push(past);
     }
     entries.push(...this.#conversationDiagnostics);
     return buildDiagnosticsReadModel(now, { ...this.#options.authority }, entries);
@@ -1755,6 +1837,7 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #queryArchiveTranscript(input: {
     readonly sessionId: SessionId;
+    readonly agentId?: string;
     readonly cursor?: OpaqueCursor;
     readonly limit?: number;
   }): Promise<ConversationTranscriptReadPage> {
@@ -1765,6 +1848,28 @@ export class StudioHostClientFacade implements ClientTransport {
     try {
       return await archive.readPage(input);
     } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === "SESSION_NOT_FOUND" || code === "AGENT_NOT_FOUND") {
+        throw unavailableError(error instanceof Error ? error.message : "session is not available");
+      }
+      throw toClientError(error);
+    }
+  }
+
+  async #queryPersistedAgents(input: {
+    readonly sessionId: SessionId;
+  }): Promise<{ readonly sessionId: SessionId; readonly agents: readonly StudioAgentSnapshot[] }> {
+    const archive = this.#options.archive;
+    if (archive === undefined || archive.listPersistedAgents === undefined) {
+      throw unavailableError("session.agents.list is not available");
+    }
+    try {
+      const agents = await archive.listPersistedAgents(input.sessionId);
+      return { sessionId: input.sessionId, agents: [...agents] };
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code === "SESSION_NOT_FOUND") {
+        throw unavailableError("session is not available");
+      }
       throw toClientError(error);
     }
   }
@@ -2055,8 +2160,15 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #commandEnsure(request: ClientCommandRequest<"runtime.ensure">): Promise<ClientCommandAccepted<"runtime.ensure">> {
     validateEnvelope(request);
-    if (request.input === null || typeof request.input !== "object" || Array.isArray(request.input) || Object.keys(request.input).length !== 0) {
-      throw clientError("INVALID_ARGUMENT", "runtime.ensure input must be empty");
+    if (request.input === null || typeof request.input !== "object" || Array.isArray(request.input)) {
+      throw clientError("INVALID_ARGUMENT", "runtime.ensure input must be an object");
+    }
+    const keys = Object.keys(request.input);
+    if (keys.some((key) => key !== "force")) {
+      throw clientError("INVALID_ARGUMENT", "runtime.ensure input only accepts force");
+    }
+    if (request.input.force !== undefined && typeof request.input.force !== "boolean") {
+      throw clientError("INVALID_ARGUMENT", "runtime.ensure force must be boolean");
     }
     const ensure = this.#options.runtime?.ensure;
     if (ensure === undefined) {
@@ -2075,13 +2187,18 @@ export class StudioHostClientFacade implements ClientTransport {
       acceptedAt,
     };
     this.#bus.emit({ kind: "command.accepted", accepted });
-    void this.#runEnsure(ensure, request.requestId);
+    const force = request.input.force === true;
+    void this.#runEnsure(ensure, request.requestId, force);
     return accepted;
   }
 
-  async #runEnsure(ensure: () => Promise<void>, requestId: CommandRequestId): Promise<void> {
+  async #runEnsure(
+    ensure: (input?: { readonly force?: boolean }) => Promise<void>,
+    requestId: CommandRequestId,
+    force: boolean,
+  ): Promise<void> {
     try {
-      await ensure();
+      await ensure(force ? { force: true } : {});
       this.#syncRuntimeEvents();
       this.#emitTerminal(requestId, {
         requestId,

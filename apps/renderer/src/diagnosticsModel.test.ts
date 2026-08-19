@@ -67,7 +67,7 @@ describe("deriveDiagnosticsView", () => {
       ),
     });
     expect(view.hero.kind).toBe("down");
-    expect(view.hero.primary).toBe("recheck");
+    expect(view.hero.primary).toBe("reconnect");
     expect(view.hero.showReinstall).toBe(true);
   });
 
@@ -82,6 +82,7 @@ describe("deriveDiagnosticsView", () => {
     });
     expect(view.hero.kind).toBe("down");
     expect(view.hero.title).toBe("未选择工作区");
+    expect(view.hero.primary).toBe("recheck");
     expect(view.hero.detail).toContain("选择项目后才会启动 Runtime");
     expect(view.checks.find((check) => check.id === "runtime")?.detail).toContain("未选择工作区");
   });
@@ -125,8 +126,9 @@ describe("deriveDiagnosticsView", () => {
     });
     expect(view.hero.kind).toBe("down");
     expect(view.hero.title).toBe("Runtime 进程已退出");
-    expect(view.hero.detail).toContain("Runtime process exited (code=1)");
-    expect(view.checks.find((check) => check.id === "runtime")?.detail).toContain("Runtime 进程已退出");
+    expect(view.hero.detail).toContain("退出码 1");
+    expect(view.hero.detail).not.toContain("Runtime process exited");
+    expect(view.checks.find((check) => check.id === "runtime")?.detail).toBe("Runtime 进程已退出（退出码 1）");
     expect(formatDiagnosticEntryMessage({
       entryId: "diag-1" as never,
       scope: "host",
@@ -134,6 +136,42 @@ describe("deriveDiagnosticsView", () => {
       message: "Runtime process exited: Runtime process exited (code=1)",
       detail: { code: "process-exit", reason: "Runtime process exited (code=1)" },
       occurredAt: "2026-08-18T06:26:07.000Z",
-    })).toBe("Runtime 进程已退出：Runtime process exited (code=1)");
+    })).toBe("Runtime 进程已退出（退出码 1）");
+  });
+
+  it("does not call the connecting runtime healthy", () => {
+    const view = deriveDiagnosticsView({
+      runtime: runtime("connecting", { classification: "managed" }),
+      environment: environment({ status: "installed", version: "v0.82.1", signature: "verified" }, runtime("connecting", { classification: "managed" })),
+    });
+    expect(view.hero.kind).toBe("connecting");
+    expect(view.hero.title).toBe("正在连接 Runtime");
+    expect(view.hero.primary).toBe("recheck");
+    expect(view.checks.find((check) => check.id === "runtime")?.tone).toBe("warn");
+  });
+
+  it("surfaces auto-respawn on a process-exit disconnect", () => {
+    const connection = runtime("disconnected", {
+      classification: "managed",
+      disconnectCode: "process-exit",
+      disconnectReason: "Runtime process exited (code=1, signal=none)",
+      disconnectedAt: "2026-08-19T08:00:00.000Z",
+      autoRespawn: "exhausted",
+    });
+    const view = deriveDiagnosticsView({
+      runtime: connection,
+      environment: environment({ status: "installed", version: "v0.82.1", signature: "verified" }, connection),
+    });
+    expect(view.hero.primary).toBe("reconnect");
+    expect(view.hero.detail).toContain("自动重连已用尽");
+    expect(view.checks.find((check) => check.id === "runtime")?.detail).toContain("自动重连已用尽");
+    expect(formatDiagnosticEntryMessage({
+      entryId: "diag-2" as never,
+      scope: "host",
+      level: "error",
+      message: "Runtime process exited",
+      detail: { code: "process-exit", reason: "Runtime process exited (code=1, signal=none)", autoRespawn: "exhausted" },
+      occurredAt: "2026-08-19T08:00:00.000Z",
+    })).toBe("Runtime 进程已退出（退出码 1） · 自动重连已用尽");
   });
 });

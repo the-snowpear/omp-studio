@@ -560,3 +560,35 @@ export const PREVIEW_DIAGNOSTICS: PreviewDiagnostics = {
     { tone: "muted", text: "12:02:47.885 [plugin browser-lab] plugin skipped · 0 tools registered" },
   ],
 };
+
+export type PreviewAppUpdate = {
+  available: boolean;
+  currentVersion: string;
+  version: string;
+  name: string;
+  releaseNotes: string;
+  publishedAt: string;
+  htmlUrl: string;
+  downloadUrl: string;
+  assetName: string;
+  assetSize: number;
+};
+
+export const PREVIEW_APP_UPDATE: PreviewAppUpdate = {
+  available: true,
+  currentVersion: "0.1.0",
+  version: "0.2.0",
+  name: "OMP Studio 0.2.0",
+  releaseNotes: `### 新增功能与改进
+
+- **GitHub Release 自动更新**：支持静默检测与一键全量安装包升级。
+- **左下角状态提示**：发现新版本时在侧栏底部清晰展示更新提示徽标。
+- **双语国际化支持**：新增完整的中文与英文更新引导。
+- **性能与稳定性优化**：优化 Runtime Bridge 握手与 IPC 通信效率。`,
+  publishedAt: "2026-08-20T00:00:00Z",
+  htmlUrl: "https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.0",
+  downloadUrl: "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.0/OMP-Studio-Setup-0.2.0-win-x64.exe",
+  assetName: "OMP-Studio-Setup-0.2.0-win-x64.exe",
+  assetSize: 89452000,
+};
+

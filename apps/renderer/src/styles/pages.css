@@ -175,6 +175,7 @@
 img.home-avatar,
 img.profile-edit-avatar-img { display: block; }
 .home-quick { display: flex; gap: var(--sp-8); margin-top: var(--sp-16); flex-wrap: wrap; }
+.home-hero .action-progress { max-width: 420px; margin: var(--sp-12) 0 0; }
 
 .profile-edit-modal { width: 420px; }
 .profile-edit-head {
@@ -561,6 +562,9 @@ img.profile-edit-avatar-img { display: block; }
 .env-summary .es-copy { flex: 1; min-width: 0; }
 .env-summary .es-copy b { font-size: var(--fs-14); display: block; }
 .env-summary .es-actions { display: flex; gap: var(--sp-8); flex: none; flex-wrap: wrap; }
+.diag-page .action-progress {
+  margin: calc(var(--sp-16) * -1) 0 var(--sp-16);
+}
 
 .check-row {
   display: flex; align-items: center; gap: var(--sp-12);
@@ -571,6 +575,7 @@ img.profile-edit-avatar-img { display: block; }
 .check-row:last-child { border-bottom: none; }
 .check-row .ck-name { font-weight: var(--fw-medium); width: 180px; flex: none; }
 .check-row .ck-detail { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); flex: 1; min-width: 0; }
+.check-row .ck-detail.wrap { white-space: normal; overflow: visible; word-break: break-word; }
 .check-row .ck-actions { display: flex; gap: var(--sp-6); flex: none; }
 
 /* ---------- 会话历史 ---------- */
@@ -1256,7 +1261,8 @@ img.profile-edit-avatar-img { display: block; }
    `style="margin:0 4px 4px 0"`; a wrapping flex container replaces ~14 inline
    declarations with one rule. */
 .diag-caps { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
-.diag-err-row { cursor: default; }
+.diag-err-row { cursor: default; align-items: flex-start; }
+.diag-err-row .prob-msg { flex: 1; min-width: 0; white-space: normal; word-break: break-word; }
 .diag-section { margin-bottom: var(--sp-20); }
 .diag-section > h3 { font-size: var(--fs-14); font-weight: var(--fw-semibold); margin-bottom: var(--sp-8); display: flex; align-items: center; gap: var(--sp-8); }
 .diag-table { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }

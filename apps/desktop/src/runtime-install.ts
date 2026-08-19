@@ -20,7 +20,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { HostRuntimeInstallProbe, HostRuntimeInstallService } from "@omp-studio/host-client-api";
-import type { RuntimeChannel, RuntimeInstallState } from "@omp-studio/client-contract";
+import type { RuntimeChannel, RuntimeInstallState, SignatureStatus } from "@omp-studio/client-contract";
 import {
   parseRuntimeInstallationManifest,
   type ActivateOptions,
@@ -267,23 +267,25 @@ export async function locateManagedRuntimeArtifact(
 export function resolveManagedRuntimeInstallState(input: {
   readonly installedVersion?: string;
   readonly availableVersion?: string;
+  readonly signature?: SignatureStatus;
 }): RuntimeInstallState {
+  const signature = input.signature ?? "unknown";
   const installed = input.installedVersion;
   const available = input.availableVersion;
   if (installed === undefined) {
     return available === undefined
-      ? { status: "not-installed", signature: "unknown" }
-      : { status: "not-installed", signature: "unknown", availableVersion: available };
+      ? { status: "not-installed", signature }
+      : { status: "not-installed", signature, availableVersion: available };
   }
   if (available !== undefined && available.localeCompare(installed) > 0) {
     return {
       status: "update-available",
       version: installed,
       availableVersion: available,
-      signature: "verified",
+      signature,
     };
   }
-  return { status: "installed", version: installed, signature: "verified" };
+  return { status: "installed", version: installed, signature };
 }
 
 export type SeedManagedRuntimeResult = "seeded" | "already-installed" | "skipped";
@@ -427,7 +429,7 @@ export function createDesktopRuntimeInstallService(options: {
       await options.afterActivate?.(manifest);
     } catch (error) {
       return {
-        status: "installed",
+        status: "failed",
         version: manifest.runtimeVersion,
         signature: "verified",
         message: error instanceof Error ? error.message : "Runtime did not start",

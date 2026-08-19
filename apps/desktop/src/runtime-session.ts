@@ -201,7 +201,12 @@ export function createDesktopRuntimeSessionPort(
   };
 
   const rememberDisconnect = (facts: HostRuntimeDisconnect | undefined): void => {
-    lastDisconnect = facts === undefined ? undefined : { code: facts.code, reason: redactText(facts.reason) };
+    lastDisconnect = facts === undefined ? undefined : {
+      code: facts.code,
+      reason: redactText(facts.reason),
+      occurredAt: facts.occurredAt ?? lastDisconnect?.occurredAt ?? new Date().toISOString(),
+      ...(facts.autoRespawn === undefined ? {} : { autoRespawn: facts.autoRespawn }),
+    };
   };
 
   const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -340,7 +345,9 @@ export function createDesktopRuntimeSessionPort(
               if (!wasActive) return;
               const next = await launchWorker(sessionId);
               sessionSink?.(next);
-            }).catch(() => undefined);
+            }).catch((error) => {
+              options.log?.write("error", "runtime.worker.relaunch-failed", errorDetail(error));
+            });
           });
         }, 10_000);
         resident.heartbeatTimer.unref?.();
@@ -483,19 +490,21 @@ export function createDesktopRuntimeSessionPort(
     }
     let appliedSessions = 0;
     let failedSessions = 0;
-    const apply = async (session: DesktopRuntimeSession, persist: boolean): Promise<void> => {
+    const failedBackground: ResidentRuntime[] = [];
+    const apply = async (resident: ResidentRuntime, persist: boolean): Promise<void> => {
       try {
-        await invokePermissionMode(session, mode, persist);
+        await invokePermissionMode(resident.session, mode, persist);
         appliedSessions += 1;
       } catch {
         failedSessions += 1;
+        if (resident !== current) failedBackground.push(resident);
       }
     };
     // Re-run the complete resident set on every retry. Clearing a single
     // global pending value after only one Worker succeeded could otherwise
     // leave another resident on a stale, more permissive mode indefinitely.
     if (current !== undefined) {
-      await apply(current.session, true);
+      await apply(current, true);
       if (failedSessions > 0) {
         pendingApprovalMode = mode;
         return { mode, syncStatus: "partial", appliedSessions, failedSessions };
@@ -503,7 +512,15 @@ export function createDesktopRuntimeSessionPort(
     }
     for (const resident of residents.values()) {
       if (resident === current) continue;
-      await apply(resident.session, false);
+      await apply(resident, false);
+    }
+    for (const resident of failedBackground) {
+      options.log?.write(
+        "warn",
+        "runtime.approval-mode.stop-stale",
+        `session=${resident.sessionId} mode=${mode}`,
+      );
+      await stopResident(resident);
     }
     pendingApprovalMode = failedSessions > 0 ? mode : undefined;
     options.log?.write(
@@ -562,6 +579,33 @@ export function createDesktopRuntimeSessionPort(
     }> {
       return await serialized(() => synchronizeApprovalMode(mode));
     },
+    isResident(sessionId: string): boolean {
+      return residents.has(sessionId);
+    },
+    evacuateResident(sessionId: string): Promise<{ found: boolean; active?: DesktopRuntimeSession }> {
+      return serialized(async () => {
+        const resident = residents.get(sessionId);
+        if (resident === undefined) return { found: false };
+        const snapshot = resident.session.controller.publication()?.snapshot;
+        if (snapshot?.isStreaming === true) {
+          const receipt = await resident.session.controller.invoke({
+            type: "studio.request",
+            requestId: randomUUID() as RequestId,
+            runtimeEpoch: snapshot.runtimeEpoch,
+            operation: { kind: "core.abort" },
+          });
+          if (receipt.status !== "completed" && receipt.status !== "accepted") {
+            throw new Error(receipt.error?.message ?? `Runtime rejected abort (${receipt.status})`);
+          }
+        }
+        const wasActive = activeSessionId === sessionId;
+        await stopResident(resident);
+        if (!wasActive) return { found: true };
+        const active = await launchWorker();
+        sessionSink?.(active);
+        return active === undefined ? { found: true } : { found: true, active };
+      });
+    },
     lastUnavailable() {
       return lastUnavailable;
     },
@@ -569,10 +613,11 @@ export function createDesktopRuntimeSessionPort(
       const active = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
       return lastDisconnect ?? active?.port.lastDisconnect?.();
     },
-    ensure(): Promise<DesktopRuntimeSession | undefined> {
+    ensure(input?: { force?: boolean }): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         const active = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
-        if (active?.session.hello() !== undefined) {
+        const force = input?.force === true;
+        if (!force && active?.session.hello() !== undefined) {
           rememberUnavailable(undefined);
           rememberDisconnect(undefined);
           return active.session;
@@ -626,7 +671,12 @@ function createSingleDesktopRuntimeSessionPort(
   };
 
   const rememberDisconnect = (facts: HostRuntimeDisconnect | undefined): void => {
-    lastDisconnect = facts === undefined ? undefined : { code: facts.code, reason: redactText(facts.reason) };
+    lastDisconnect = facts === undefined ? undefined : {
+      code: facts.code,
+      reason: redactText(facts.reason),
+      occurredAt: facts.occurredAt ?? lastDisconnect?.occurredAt ?? new Date().toISOString(),
+      ...(facts.autoRespawn === undefined ? {} : { autoRespawn: facts.autoRespawn }),
+    };
   };
 
   function serialized<T>(op: () => Promise<T>): Promise<T> {
@@ -640,11 +690,20 @@ function createSingleDesktopRuntimeSessionPort(
 
   function scheduleAutoRespawn(fromGeneration: number): void {
     const limit = options.autoRespawnLimit ?? 1;
-    if (stopping || draining || limit <= 0) return;
+    if (stopping || draining || limit <= 0) {
+      if (lastDisconnect !== undefined && lastDisconnect.autoRespawn === undefined) {
+        rememberDisconnect({ ...lastDisconnect, autoRespawn: "exhausted" });
+      }
+      return;
+    }
     if (respawnScheduledFor === fromGeneration) return;
-    if (autoRespawns >= limit) return;
+    if (autoRespawns >= limit) {
+      if (lastDisconnect !== undefined) rememberDisconnect({ ...lastDisconnect, autoRespawn: "exhausted" });
+      return;
+    }
     respawnScheduledFor = fromGeneration;
     autoRespawns += 1;
+    if (lastDisconnect !== undefined) rememberDisconnect({ ...lastDisconnect, autoRespawn: "scheduled" });
     const delay = options.autoRespawnDelayMs ?? 500;
     log?.write("warn", "runtime.respawn.schedule", `generation=${fromGeneration} attempt=${autoRespawns}`);
     const timer = setTimeout(() => {
@@ -655,9 +714,13 @@ function createSingleDesktopRuntimeSessionPort(
         const next = await launch();
         if (next !== undefined) {
           autoRespawns = 0;
+        } else if (lastDisconnect !== undefined) {
+          rememberDisconnect({ ...lastDisconnect, autoRespawn: autoRespawns >= (options.autoRespawnLimit ?? 1) ? "exhausted" : "failed" });
         }
         sessionSink?.(next);
       }).catch((error) => {
+        if (lastDisconnect !== undefined) rememberDisconnect({ ...lastDisconnect, autoRespawn: "failed" });
+        sessionSink?.(undefined);
         log?.write("error", "runtime.respawn.fail", errorDetail(error));
       });
     }, delay);
@@ -1023,9 +1086,37 @@ function createSingleDesktopRuntimeSessionPort(
     lastDisconnect() {
       return lastDisconnect;
     },
-    ensure(): Promise<DesktopRuntimeSession | undefined> {
+    isResident(sessionId: string): boolean {
+      return bundle?.controller.publication()?.snapshot?.sessionId === sessionId;
+    },
+    evacuateResident(sessionId: string): Promise<{ found: boolean; active?: DesktopRuntimeSession }> {
       return serialized(async () => {
-        if (alive && bundle?.hello() !== undefined) {
+        const snapshot = bundle?.controller.publication()?.snapshot;
+        if (snapshot === undefined || snapshot.sessionId !== sessionId || bundle === undefined) {
+          return { found: false };
+        }
+        if (snapshot.isStreaming) {
+          const receipt = await bundle.controller.invoke({
+            type: "studio.request",
+            requestId: randomUUID() as RequestId,
+            runtimeEpoch: snapshot.runtimeEpoch,
+            operation: { kind: "core.abort" },
+          });
+          if (receipt.status !== "completed" && receipt.status !== "accepted") {
+            throw new Error(receipt.error?.message ?? `Runtime rejected abort (${receipt.status})`);
+          }
+        }
+        stopping = false;
+        await stopCurrent("replace");
+        const active = await launch();
+        sessionSink?.(active);
+        return active === undefined ? { found: true } : { found: true, active };
+      });
+    },
+    ensure(input?: { force?: boolean }): Promise<DesktopRuntimeSession | undefined> {
+      return serialized(async () => {
+        const force = input?.force === true;
+        if (!force && alive && bundle?.hello() !== undefined) {
           rememberUnavailable(undefined);
           rememberDisconnect(undefined);
           return bundle;

@@ -68,6 +68,10 @@ const QUERY_ENVELOPES: ReadonlyArray<{
     },
   },
   {
+    name: "session.agents.list",
+    payload: { queryName: "session.agents.list", input: { sessionId: "session-1" } },
+  },
+  {
     name: "session.telemetry.read",
     payload: { queryName: "session.telemetry.read", input: { sessionId: "session-1" } },
   },
@@ -621,6 +625,7 @@ describe("parseClientQueryRequest: envelope strictness", () => {
       "agent.transcript.read",
       "agent.conversation.read",
       "session.transcript.readPage",
+      "session.agents.list",
       "session.telemetry.read",
       "git.toolchain.get",
       "git.repository.get",
@@ -1239,6 +1244,29 @@ describe("parseClientCommandRequest: envelope strictness", () => {
         }),
       );
     }
+    // runtime.ensure: empty or { force: boolean } only
+    parseClientCommandRequest({
+      commandName: "runtime.ensure",
+      input: { force: true },
+      idempotencyKey: "k",
+      requestId: "r",
+    });
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "runtime.ensure",
+        input: { force: "yes" },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
+    expectValidationError(() =>
+      parseClientCommandRequest({
+        commandName: "runtime.ensure",
+        input: { force: true, extra: true },
+        idempotencyKey: "k",
+        requestId: "r",
+      }),
+    );
     // interaction.respond: decision, interactionId and a positive generation are required
     expectValidationError(() =>
       parseClientCommandRequest({
@@ -1772,6 +1800,8 @@ describe("assertClientEvent: outbound strictness", () => {
         runtimeEpoch: 2,
         disconnectCode: "process-exit",
         disconnectReason: "Runtime process exited (code=1)",
+        disconnectedAt: "2026-08-19T08:00:00.000Z",
+        autoRespawn: "scheduled",
       },
     });
     assertClientEvent({ kind: "resync.required", ...base, reason: "cursor gap" });

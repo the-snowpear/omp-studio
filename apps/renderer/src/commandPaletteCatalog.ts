@@ -11,6 +11,7 @@ export type BottomTab = "terminal" | "problems" | "tests" | "output" | "logs" | 
 
 export type PaletteAction =
   | { kind: "route"; route: PageRoute }
+  | { kind: "diagnostics"; intent?: "check-update" | "reconnect" | "restart" }
   | { kind: "newChat" }
   | { kind: "pickProject" }
   | { kind: "selectThread"; entry: SessionHistoryEntry }
@@ -133,6 +134,8 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "page-mc", icon: "server", label: "模型配置", action: { kind: "route", route: "model-config" } },
         { id: "page-set", icon: "settings", label: "设置", action: { kind: "route", route: "settings" } },
         { id: "page-diag", icon: "pulse", label: "诊断中心", action: { kind: "route", route: "diagnostics" } },
+        { id: "runtime-reconnect", icon: "refresh", label: "重新连接 Runtime", keywords: "reconnect ensure 断开 重连", action: { kind: "diagnostics", intent: "reconnect" } },
+        { id: "runtime-restart", icon: "refresh", label: "重启 Runtime", keywords: "restart force 重启", action: { kind: "diagnostics", intent: "restart" } },
       ],
     },
     {

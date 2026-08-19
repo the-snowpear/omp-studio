@@ -36,7 +36,7 @@ function renderHome(options: {
 } = {}) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === true ? "1" : "0");
   render(
-    <PreviewModeProvider>
+    <PreviewModeProvider switchEnabled>
       <HomePage
         {...(options.runtime === undefined ? {} : { runtime: options.runtime })}
         onRoute={() => undefined}
@@ -49,7 +49,7 @@ describe("HomePage identity", () => {
   it("shows the greeting with the local name, omp is ready, and a single user avatar", () => {
     renderHome({ runtime: { status: "connected", classification: "managed" } });
     expect(screen.getByRole("heading", { level: 1, name: /，Studio$/ })).toBeTruthy();
-    expect(screen.getByText("omp is ready")).toBeTruthy();
+    expect(screen.getByText("OMP 已就绪")).toBeTruthy();
     expect(screen.queryByText(/Runtime managed/)).toBeNull();
     expect(document.querySelectorAll(".home-avatar").length).toBe(1);
     expect(screen.getByRole("button", { name: "编辑用户名和头像" })).toBeTruthy();
@@ -57,8 +57,8 @@ describe("HomePage identity", () => {
 
   it("keeps an honest omp status when Runtime is down", () => {
     renderHome({ runtime: { status: "unavailable", classification: "unavailable" } });
-    expect(screen.getByText("omp unavailable")).toBeTruthy();
-    expect(screen.queryByText("omp is ready")).toBeNull();
+    expect(screen.getByText("Runtime 不可用")).toBeTruthy();
+    expect(screen.queryByText("OMP 已就绪")).toBeNull();
   });
 
   it("saves a new display name from the edit dialog", () => {

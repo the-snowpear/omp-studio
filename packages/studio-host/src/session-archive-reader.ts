@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from "node:path";
 
 import {
   CONVERSATION_LIMITS,
-  CONVERSATION_REDACT_KEY_PATTERN,
+  conversationRedactKey,
   publicConversationToolCallId,
   type ConversationContentBlock,
   type ConversationItem,
@@ -21,11 +21,39 @@ const CURSOR_NAMESPACE = "session.archive.v1";
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
 const DEFAULT_MAX_SCAN_FILES = 20_000;
 const DEFAULT_SNAPSHOT_CACHE_SIZE = 8;
+const AGENT_TOMBSTONE_SUFFIX = ".tombstone";
+const MAX_AGENT_ID_LENGTH = 512;
+const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
+const MAX_CHILD_WALK_FILES = 2_000;
 
 export interface SessionArchiveReadInput {
   readonly sessionId: string;
+  /** When set, read that persisted child transcript next to the parent session file. */
+  readonly agentId?: string;
   readonly cursor?: OpaqueCursor;
   readonly limit?: number;
+}
+
+/** Disk-backed child agent row. Paths never leave the Host. */
+export interface SessionPersistedAgentRecord {
+  readonly agentId: string;
+  readonly displayName: string;
+  readonly status: "parked" | "aborted";
+  readonly parentAgentId?: string;
+  readonly assignment?: string;
+  readonly startedAt?: string;
+  readonly updatedAt: string;
+  readonly hasTranscript: boolean;
+  readonly usage?: {
+    readonly tokens: number;
+    readonly requests: number;
+    readonly tools: number;
+    readonly cost: number;
+    readonly durationMs: number;
+    readonly durationKind: "span";
+  };
+  readonly modelRole?: string;
+  readonly resolvedModel?: string;
 }
 
 /** Runtime-independent persistent transcript page returned by the Host/Broker read plane. */
@@ -56,6 +84,7 @@ export interface SessionArchiveProbeCopy extends SessionArchiveRevision {
 
 export type SessionArchiveErrorCode =
   | "SESSION_NOT_FOUND"
+  | "AGENT_NOT_FOUND"
   | "SESSION_DUPLICATE"
   | "SESSION_CORRUPT"
   | "SESSION_TOO_LARGE"
@@ -98,6 +127,7 @@ type FileVersion = string;
 type IndexedHeader = {
   readonly id: string;
   readonly version: FileVersion;
+  readonly cwd?: string;
 };
 
 type CachedSnapshot = {
@@ -162,8 +192,16 @@ export class StudioSessionArchiveReader {
     ) {
       throw new SessionArchiveError("CURSOR_INVALID", "Transcript limit is invalid");
     }
-    const file = await this.#locate(input.sessionId);
-    const snapshot = await this.#readSnapshot(file, input.sessionId);
+    if (input.agentId !== undefined) this.#assertAgentId(input.agentId);
+    const parentFile = await this.#locate(input.sessionId);
+    await this.#assertParentWorkspace(parentFile, input.sessionId);
+    const located =
+      input.agentId === undefined
+        ? { path: parentFile, sessionId: input.sessionId }
+        : await this.#locatePersistedAgent(parentFile, input.agentId);
+    const snapshot = await this.#readSnapshot(located.path, located.sessionId, {
+      requireCwd: input.agentId === undefined,
+    });
     const branch = activeBranch(snapshot.entries, snapshot.branchLeafId);
     const items = projectBranch(branch);
     let endExclusive = items.length;
@@ -225,6 +263,27 @@ export class StudioSessionArchiveReader {
     return page;
   }
 
+  /**
+   * Parked/aborted child agents stored next to a parent session file.
+   * Mirrors the TUI `registerPersistedSubagents` scan; never returns paths.
+   */
+  async listPersistedAgents(sessionId: string): Promise<readonly SessionPersistedAgentRecord[]> {
+    if (sessionId.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session id is required");
+    const parentFile = await this.#locate(sessionId);
+    await this.#assertParentWorkspace(parentFile, sessionId);
+    const children = await this.#collectPersistedAgentFiles(parentStem(parentFile), "Main", 0);
+    const records: SessionPersistedAgentRecord[] = [];
+    for (const child of children) {
+      try {
+        records.push(await this.#persistedAgentRecord(child));
+      } catch {
+        // A single unreadable child must not hide the rest of the roster.
+      }
+    }
+    records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.agentId.localeCompare(right.agentId));
+    return records;
+  }
+
   /** Returns the current archive revision of a session without reading its content. */
   async readRevision(sessionId: string): Promise<SessionArchiveRevision> {
     if (sessionId.length === 0) throw new SessionArchiveError("SESSION_NOT_FOUND", "Session id is required");
@@ -261,7 +320,136 @@ export class StudioSessionArchiveReader {
     };
   }
 
-	async #locate(sessionId: string): Promise<string> {
+  #assertAgentId(agentId: string): void {
+    if (agentId.length === 0 || agentId.length > MAX_AGENT_ID_LENGTH || /^main$/iu.test(agentId) || !AGENT_ID_PATTERN.test(agentId)) {
+      throw new SessionArchiveError("CURSOR_INVALID", "Agent id is invalid");
+    }
+  }
+
+  async #assertParentWorkspace(parentFile: string, sessionId: string): Promise<void> {
+    const header = await readHeader(parentFile, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes);
+    if (header === undefined || header.id !== sessionId) {
+      throw new SessionArchiveError("SESSION_CORRUPT", "Session header is missing or invalid");
+    }
+    if (typeof header.cwd !== "string") {
+      throw new SessionArchiveError("SESSION_CORRUPT", "Session header is missing or invalid");
+    }
+    if (!sameWorkspace(header.cwd, this.#allowedCwd)) {
+      throw new SessionArchiveError("WORKSPACE_MISMATCH", "Session does not belong to the selected workspace");
+    }
+  }
+
+  async #locatePersistedAgent(
+    parentFile: string,
+    agentId: string,
+  ): Promise<{ path: string; sessionId: string }> {
+    const found = await this.#findPersistedAgentFile(parentStem(parentFile), agentId, 0);
+    if (found === undefined) {
+      throw new SessionArchiveError("AGENT_NOT_FOUND", `Agent "${agentId}" was not found`);
+    }
+    return found;
+  }
+
+  async #findPersistedAgentFile(
+    dir: string,
+    agentId: string,
+    walked: number,
+  ): Promise<{ path: string; sessionId: string } | undefined> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return undefined;
+    }
+    const plain = `${agentId}.jsonl`;
+    const compressed = `${agentId}.jsonl.gz`;
+    for (const entry of entries) {
+      if (walked >= MAX_CHILD_WALK_FILES) break;
+      if (entry.isSymbolicLink() || !entry.isFile()) continue;
+      if (entry.name !== plain && entry.name !== compressed) continue;
+      const path = join(dir, entry.name);
+      const header = await readHeader(path, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes);
+      if (header === undefined) continue;
+      return { path, sessionId: header.id };
+    }
+    for (const entry of entries) {
+      if (walked >= MAX_CHILD_WALK_FILES) break;
+      if (entry.isSymbolicLink() || !entry.isDirectory()) continue;
+      if (entry.name.endsWith(".bak") || entry.name.startsWith(".")) continue;
+      walked += 1;
+      const nested = await this.#findPersistedAgentFile(join(dir, entry.name), agentId, walked);
+      if (nested !== undefined) return nested;
+    }
+    return undefined;
+  }
+
+  async #collectPersistedAgentFiles(
+    dir: string,
+    parentAgentId: string,
+    walked: number,
+  ): Promise<Array<{ path: string; agentId: string; parentAgentId: string }>> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const found: Array<{ path: string; agentId: string; parentAgentId: string }> = [];
+    for (const entry of entries) {
+      if (walked >= MAX_CHILD_WALK_FILES) break;
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isFile() && isPersistedAgentTranscriptName(entry.name)) {
+        walked += 1;
+        found.push({
+          path: join(dir, entry.name),
+          agentId: agentIdFromTranscriptName(entry.name),
+          parentAgentId,
+        });
+        continue;
+      }
+      if (!entry.isDirectory() || entry.name.endsWith(".bak") || entry.name.startsWith(".")) continue;
+      walked += 1;
+      const childId = AGENT_ID_PATTERN.test(entry.name) ? entry.name : parentAgentId;
+      found.push(...(await this.#collectPersistedAgentFiles(join(dir, entry.name), childId, walked)));
+    }
+    return found;
+  }
+
+  async #persistedAgentRecord(child: {
+    path: string;
+    agentId: string;
+    parentAgentId: string;
+  }): Promise<SessionPersistedAgentRecord> {
+    const snapshot = await this.#readSnapshot(child.path, (await this.#headerId(child.path)) ?? child.agentId, {
+      requireCwd: false,
+    });
+    const tombstoned = await fileExists(`${child.path}${AGENT_TOMBSTONE_SUFFIX}`);
+    const usage = usageFromEntries(snapshot.entries);
+    const assignment = assignmentFromEntries(snapshot.entries);
+    const startedAt = timestampFromEntries(snapshot.entries, "first");
+    const updatedAt = timestampFromEntries(snapshot.entries, "last") ?? new Date(0).toISOString();
+    const model = modelFromEntries(snapshot.entries);
+    return {
+      agentId: child.agentId,
+      displayName: child.agentId,
+      status: tombstoned ? "aborted" : "parked",
+      ...(child.parentAgentId.length > 0 ? { parentAgentId: child.parentAgentId } : {}),
+      ...(assignment === undefined ? {} : { assignment }),
+      ...(startedAt === undefined ? {} : { startedAt }),
+      updatedAt,
+      hasTranscript: snapshot.entries.some((entry) => entry.type === "message" || entry.type === "custom_message"),
+      ...(usage === undefined ? {} : { usage }),
+      ...(model.modelRole === undefined ? {} : { modelRole: model.modelRole }),
+      ...(model.resolvedModel === undefined ? {} : { resolvedModel: model.resolvedModel }),
+    };
+  }
+
+  async #headerId(path: string): Promise<string | undefined> {
+    const header = await readHeader(path, Math.min(this.#maxSessionBytes, 64 * 1024), this.#maxSessionBytes);
+    return header?.id;
+  }
+
+  async #locate(sessionId: string): Promise<string> {
     const candidates = await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
     await this.#ensureIndex(candidates);
     let matches = this.#sessionIndex.get(sessionId) ?? [];
@@ -285,18 +473,26 @@ export class StudioSessionArchiveReader {
     return matches[0]!;
   }
 
-  async #readSnapshot(path: string, expectedSessionId: string): Promise<ArchiveSnapshot> {
-    const { snapshot } = await this.#readSnapshotVersioned(path, expectedSessionId);
+  async #readSnapshot(
+    path: string,
+    expectedSessionId: string,
+    options: { requireCwd?: boolean } = {},
+  ): Promise<ArchiveSnapshot> {
+    const { snapshot } = await this.#readSnapshotVersioned(path, expectedSessionId, options);
     return snapshot;
   }
 
-  async #readSnapshotVersioned(path: string, expectedSessionId: string): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
+  async #readSnapshotVersioned(
+    path: string,
+    expectedSessionId: string,
+    options: { requireCwd?: boolean } = {},
+  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
     const cached = this.#snapshotCache.get(path);
     const indexedVersion = this.#indexedVersions.get(path);
     if (cached !== undefined && indexedVersion === cached.version) return { snapshot: cached.snapshot, version: cached.version };
     const pending = this.#snapshotInFlight.get(path);
     if (pending !== undefined && pending.version === indexedVersion) return pending.promise;
-    const read = this.#readSnapshotUncached(path, expectedSessionId)
+    const read = this.#readSnapshotUncached(path, expectedSessionId, options)
       .then(({ snapshot, version }) => {
         this.#snapshotCache.delete(path);
         this.#snapshotCache.set(path, { snapshot, version });
@@ -393,18 +589,23 @@ export class StudioSessionArchiveReader {
     }
   }
 
-  async #readSnapshotUncached(path: string, expectedSessionId: string): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
+  async #readSnapshotUncached(
+    path: string,
+    expectedSessionId: string,
+    options: { requireCwd?: boolean } = {},
+  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
     const { bytes, identity, version } = await this.#readWholeFile(path);
     const complete = completeJsonlPrefix(bytes);
     const values = parseCompleteJsonl(complete.text);
     const header = values.find((value) => isRecord(value) && value.type === "session");
-    if (!isRecord(header) || typeof header.id !== "string" || typeof header.cwd !== "string") {
+    const requireCwd = options.requireCwd !== false;
+    if (!isRecord(header) || typeof header.id !== "string" || (requireCwd && typeof header.cwd !== "string")) {
       throw new SessionArchiveError("SESSION_CORRUPT", "Session header is missing or invalid");
     }
     if (header.id !== expectedSessionId) {
       throw new SessionArchiveError("SESSION_CORRUPT", "Session identity changed while it was being read");
     }
-    if (!sameWorkspace(header.cwd, this.#allowedCwd)) {
+    if (typeof header.cwd === "string" && !sameWorkspace(header.cwd, this.#allowedCwd)) {
       throw new SessionArchiveError("WORKSPACE_MISMATCH", "Session does not belong to the selected workspace");
     }
     const entries = values.flatMap((value) => {
@@ -551,6 +752,94 @@ function isCompressedSessionPath(path: string): boolean {
   return path.endsWith(".jsonl.gz");
 }
 
+function parentStem(sessionFile: string): string {
+  if (sessionFile.endsWith(".jsonl.gz")) return sessionFile.slice(0, -".jsonl.gz".length);
+  if (sessionFile.endsWith(".jsonl")) return sessionFile.slice(0, -".jsonl".length);
+  return sessionFile;
+}
+
+function isPersistedAgentTranscriptName(name: string): boolean {
+  if (name.includes(".bak") || name.startsWith("__advisor")) return false;
+  return (name.endsWith(".jsonl") && !name.endsWith(".jsonl.gz")) || name.endsWith(".jsonl.gz");
+}
+
+function agentIdFromTranscriptName(name: string): string {
+  return name.endsWith(".jsonl.gz") ? name.slice(0, -".jsonl.gz".length) : name.slice(0, -".jsonl".length);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    const metadata = await lstat(path);
+    return metadata.isFile() && !metadata.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function timestampFromEntries(entries: readonly ArchiveEntry[], which: "first" | "last"): string | undefined {
+  for (const entry of which === "first" ? entries : [...entries].reverse()) {
+    if (typeof entry.timestamp === "string" && Number.isFinite(Date.parse(entry.timestamp))) return entry.timestamp;
+  }
+  return undefined;
+}
+
+function assignmentFromEntries(entries: readonly ArchiveEntry[]): string | undefined {
+  for (const entry of entries) {
+    if (entry.type !== "session_init") continue;
+    const task = typeof entry.task === "string" ? entry.task.replace(/\s+/gu, " ").trim() : "";
+    if (task.length > 0) return task.slice(0, 1_000);
+  }
+  return undefined;
+}
+
+function modelFromEntries(entries: readonly ArchiveEntry[]): { modelRole?: string; resolvedModel?: string } {
+  let modelRole: string | undefined;
+  let resolvedModel: string | undefined;
+  for (const entry of entries) {
+    if (entry.type === "session_init") {
+      if (typeof entry.modelRole === "string") modelRole = entry.modelRole;
+      if (typeof entry.resolvedModel === "string") resolvedModel = entry.resolvedModel;
+    }
+    if (entry.type === "model_change" && typeof entry.model === "string") resolvedModel = entry.model;
+  }
+  return {
+    ...(modelRole === undefined ? {} : { modelRole }),
+    ...(resolvedModel === undefined ? {} : { resolvedModel }),
+  };
+}
+
+function usageFromEntries(entries: readonly ArchiveEntry[]): SessionPersistedAgentRecord["usage"] | undefined {
+  const first = timestampFromEntries(entries, "first");
+  const last = timestampFromEntries(entries, "last");
+  let tokens = 0;
+  let requests = 0;
+  let tools = 0;
+  let cost = 0;
+  for (const entry of entries) {
+    if (entry.type !== "message" || !isRecord(entry.message) || entry.message.role !== "assistant") continue;
+    const usage = isRecord(entry.message.usage) ? entry.message.usage : {};
+    const usageCost = isRecord(usage.cost) ? usage.cost : {};
+    const input = typeof usage.input === "number" && Number.isFinite(usage.input) ? usage.input : 0;
+    const output = typeof usage.output === "number" && Number.isFinite(usage.output) ? usage.output : 0;
+    const cacheWrite = typeof usage.cacheWrite === "number" && Number.isFinite(usage.cacheWrite) ? usage.cacheWrite : 0;
+    const totalTokens = typeof usage.totalTokens === "number" && Number.isFinite(usage.totalTokens) ? usage.totalTokens : 0;
+    tokens += input + output + cacheWrite > 0 ? input + output + cacheWrite : totalTokens;
+    cost += typeof usageCost.total === "number" && Number.isFinite(usageCost.total) ? usageCost.total : 0;
+    requests += 1;
+    const content = Array.isArray(entry.message.content) ? entry.message.content : [];
+    tools += content.filter((part) => isRecord(part) && part.type === "toolCall").length;
+  }
+  if (requests === 0) return undefined;
+  return {
+    tokens,
+    requests,
+    tools,
+    cost,
+    durationMs: Math.max(0, (last === undefined || first === undefined ? 0 : Date.parse(last) - Date.parse(first))),
+    durationKind: "span",
+  };
+}
+
 async function readHeader(path: string, byteLimit: number, maxSessionBytes: number): Promise<IndexedHeader | undefined> {
   let metadata;
   try {
@@ -581,7 +870,11 @@ async function readHeader(path: string, byteLimit: number, maxSessionBytes: numb
     try {
       const value = JSON.parse(line) as unknown;
       if (isRecord(value) && value.type === "session" && typeof value.id === "string" && value.id.length > 0) {
-        return { id: value.id, version: fileVersion(metadata) };
+        return {
+          id: value.id,
+          version: fileVersion(metadata),
+          ...(typeof value.cwd === "string" && value.cwd.length > 0 ? { cwd: value.cwd } : {}),
+        };
       }
     } catch {
       // A partial prefix line is not a usable header.
@@ -899,7 +1192,7 @@ function sanitizeJson(value: unknown, depth: number): JsonValue | undefined {
   if (!isRecord(value)) return undefined;
   const result: Record<string, JsonValue> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (CONVERSATION_REDACT_KEY_PATTERN.test(key)) result[key] = "[redacted]";
+    if (conversationRedactKey(key)) result[key] = "[redacted]";
     else {
       const safe = sanitizeJson(item, depth + 1);
       if (safe !== undefined) result[key] = safe;

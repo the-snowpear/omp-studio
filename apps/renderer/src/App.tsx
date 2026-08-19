@@ -34,13 +34,15 @@ import type {
 import { selectComposerReceipt, type ClientState, type ConversationHydrateClient } from "@omp-studio/client";
 import {
   clientShellChanged,
+  layoutRestoreNeeded,
   shouldRecordShellEvent,
   toShellEventLogEntry,
   type ShellEventLogEntry,
 } from "./shellMemory";
-import type { ApprovalMode, OperatorStateSnapshot, SessionTelemetrySnapshot } from "@omp-studio/studio-protocol";
+import type { ApprovalMode, OperatorStateSnapshot, SessionTelemetrySnapshot, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import type { OperatorCommandManifest } from "@omp-studio/studio-protocol";
 import { AppIcon, Icon } from "./icons";
+import { I18nProvider, useI18n } from "./i18n";
 import { HomePage, SecondaryPage } from "./HomePage";
 import { HistoryPage } from "./HistoryPage";
 import { AgentHubPage, setHubIntent } from "./AgentHub";
@@ -88,16 +90,25 @@ import { MessageQueueBar, type QueuedMessage } from "./MessageQueueBar";
 import { injectMagicKeyword, type MagicKeyword } from "./composerMode";
 import { SettingsPage, setSettingsIntent } from "./SettingsPage";
 import { DiagnosticsPage, setDiagnosticsIntent } from "./DiagnosticsPage";
+import { RuntimeLossBanner } from "./RuntimeLossBanner";
+import {
+  formatRuntimeClassification,
+  formatRuntimeStatusLabel,
+  runtimeCanReconnect,
+  runtimeCanRestart,
+} from "./diagnosticsModel";
 import { queryWithTimeout } from "./updateCheck";
 import { TerminalPane, type TerminalPaneHandle } from "./TerminalPane";
 import { TipHost } from "./TipHost";
 import { ToastHost } from "./ToastHost";
+import { compactNoticeFromOutput } from "./compactNotice";
 import { SkillsDrawer } from "./SkillsDrawer";
 import { CommandPalette, type CommandPaletteHandle } from "./CommandPalette";
 import { buildPaletteGroups, type BottomTab, type PaletteAction, type SideTab } from "./commandPaletteCatalog";
 import { toDrawerItems } from "./extensibilityMap";
 import { countEnabledDrawerItems, createPreviewDrawerItems, type DrawerItem } from "./skillsPreview";
 import { pagePhaseClass, useDeferredKey } from "./pageTransition";
+import { revealBottomBar, toggleBottomBarOpen, toggleBottomBarVisible } from "./bottomPanelChrome";
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "./telemetry/useViewedSessionTelemetry";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { asConversationClient } from "./conversation/conversationHost";
@@ -115,6 +126,7 @@ import { AgentTestsPane } from "./conversation/AgentTestsPane";
 import { agentTestRunSummary, projectAgentTestRuns, rerunTestPrompt } from "./conversation/agentTestRuns";
 import { revealConversationTool } from "./conversation/conversationReveal";
 import { useConversation } from "./conversation/useConversation";
+import { usePersistedSessionAgents } from "./conversation/persistedSessionAgents";
 import { deriveExplorerFileActivity, explorerRowActivity, EMPTY_EXPLORER_FILE_ACTIVITY, type ExplorerFileActivity } from "./conversation/explorerFileActivity";
 import {
   executeUserMessageBranch,
@@ -125,7 +137,6 @@ import {
 import { useUserMessageTreeConfirm } from "./conversation/UserMessageTreeConfirm";
 import { claimTransientToast, isTransientStatusNotice, transientStatusFamily } from "./conversation/transientStatusNotice";
 import { PreviewModeProvider, usePreviewMode } from "./preview/PreviewContext";
-import { PREVIEW_MODE_SWITCH_ENABLED, readStoredPreviewMode } from "./preview/mode";
 import {
   getAppSettings,
   readLastRoute,
@@ -136,8 +147,11 @@ import {
 } from "./settings/appSettings";
 import { desktopNotice, notifyAskConfirmation, clearAskConfirmationNotice } from "./settings/desktopNotice";
 import { StartupNotice } from "./StartupNotice";
+import { AppUpdateDialog } from "./AppUpdateDialog";
+import { useAppUpdate } from "./settings/appUpdate";
 import { avatarInitial, useOperatorProfile } from "./settings/operatorProfile";
 import {
+  PREVIEW_APP_UPDATE,
   PREVIEW_PROJECTS,
   PREVIEW_QUEUED_MESSAGES,
   PREVIEW_RUN_ACTIVITY,
@@ -172,14 +186,15 @@ import { useBtwSession, type BtwSessionApi } from "./btw/useBtwSession";
 import { useBtwWindow, type BtwWindowApi } from "./btw/useBtwWindow";
 import { InteractionDeck } from "./InteractionDeck";
 import { ASK_GENIE_HOLD_MS, isAskDeckInteraction, prefersReducedMotion } from "./deck/askGenie";
-import { interactionDeckDisabled, usableCapabilityManifest } from "./deck/interactionGate";
+import { interactionDeckDisabled, planReviewDeckDisabled, usableCapabilityManifest } from "./deck/interactionGate";
 import { PlanReviewDeck, PlanViewDialog } from "./deck/PlanCard";
 import { type PlanActionDetail, type PlanActionId } from "./deck/types";
 import { ThreadSpin } from "./sidebar/ThreadSpin";
 import { ThreadWaitChip } from "./sidebar/ThreadWaitChip";
 import { threadRunningFromLive } from "./sidebar/threadRunning";
 import { waitKindFromLive, type ThreadWaitKind } from "./sidebar/threadWait";
-import { ensureSelectedSessionActive } from "./sessionLifecycle";
+import { ensureSelectedSessionActive, type NewSessionWaitResult } from "./sessionLifecycle";
+import { isNewConversationSurface, shouldShowConversationWelcome } from "./conversation/welcomeGate";
 import { GitStatusPanel, useGitRepository } from "./git/GitStatusPanel";
 import { buildGitStatusLookup, GIT_STATUS_META, type TreeGitStatus } from "./git/treeStatus";
 
@@ -366,13 +381,17 @@ async function resyncRuntimeModel(client: ClientStateSource): Promise<Model> {
     client.query("commands.getManifest", {}),
     client.query("projects.list", {}),
     client.query("history.list", { limit: 20, status: "active" }),
+    client.query("environment.get", {}),
+    client.query("diagnostics.get", {}),
   ]);
-  const [capabilities, commandManifest, workspaces, history] = results;
+  const [capabilities, commandManifest, workspaces, history, environment, diagnostics] = results;
   return {
     ...(capabilities.status === "fulfilled" ? { capabilities: capabilities.value } : {}),
     ...(commandManifest.status === "fulfilled" ? { commandManifest: commandManifest.value } : {}),
     ...(workspaces.status === "fulfilled" ? { workspaces: workspaces.value } : {}),
     ...(history.status === "fulfilled" ? { history: history.value } : {}),
+    ...(environment.status === "fulfilled" ? { environment: environment.value } : {}),
+    ...(diagnostics.status === "fulfilled" ? { diagnostics: diagnostics.value } : {}),
   };
 }
 
@@ -424,9 +443,10 @@ function switchBlockedFilesOf(error: unknown): SwitchBlockedFile[] | undefined {
 
 function runtimeStatusLabel(runtime?: ClientBootstrap["runtime"]): { text: string; tone: "ok" | "warn" | "err" } {
   const status = runtime?.status ?? "unavailable";
-  if (status === "connected") return { text: "OMP Ready", tone: "ok" };
-  if (status === "unavailable") return { text: "OMP Unavailable", tone: "err" };
-  return { text: `OMP ${status}`, tone: "warn" };
+  if (status === "connected") return { text: "OMP 已就绪", tone: "ok" };
+  if (status === "connecting") return { text: "正在连接", tone: "warn" };
+  if (status === "disconnected") return { text: "连接已断开", tone: "err" };
+  return { text: formatRuntimeStatusLabel(status), tone: "err" };
 }
 
 type EditCommand = "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll";
@@ -540,6 +560,7 @@ export function AppMenu({ chrome, onRoute }: {
   onRoute: (route: Route) => void;
 }) {
   const { preview } = usePreviewMode();
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -608,8 +629,8 @@ export function AppMenu({ chrome, onRoute }: {
         ref={buttonRef}
         type="button"
         className="icon-btn"
-        data-tip="菜单"
-        aria-label="应用菜单"
+        data-tip={t("nav.menu")}
+        aria-label={t("nav.menu")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -622,33 +643,33 @@ export function AppMenu({ chrome, onRoute }: {
               ref={menuRef}
               className="menu app-menu-popover"
               role="menu"
-              aria-label="应用菜单"
+              aria-label={t("nav.menu")}
               style={{ top: pos.top, left: pos.left }}
             >
-              <div className="menu-label">全局操作</div>
-              <MenuItem icon="plus" kbd="Ctrl ⇧ O" onClick={() => run(chrome.onStartNewChat)}>新建对话</MenuItem>
+              <div className="menu-label">{t("shell.globalActions")}</div>
+              <MenuItem icon="plus" kbd="Ctrl ⇧ O" onClick={() => run(chrome.onStartNewChat)}>{t("nav.newChat")}</MenuItem>
               <MenuItem
                 icon="folder-open"
                 {...(preview
                   ? { disabled: true, title: "预览模式下不可用" }
                   : { onClick: () => run(chrome.onPickProject) })}
-              >打开本地项目…</MenuItem>
-              <MenuItem icon="branch" disabled title="克隆（暂未实现）">克隆 Git 仓库…</MenuItem>
-              <MenuItem icon="flask" disabled title="临时工作区（暂未实现）">创建临时工作区</MenuItem>
+              >{t("nav.openProject")}</MenuItem>
+              <MenuItem icon="branch" disabled title={t("common.notImplemented")}>{t("shell.cloneRepo")}</MenuItem>
+              <MenuItem icon="flask" disabled title={t("common.notImplemented")}>{t("shell.tempWorkspace")}</MenuItem>
               <div className="menu-sep" />
-              <MenuItem icon="plus" onClick={() => run(chrome.onCreateProject)}>新建项目</MenuItem>
-              <MenuItem icon="home" onClick={() => run(() => onRoute("home"))}>首页</MenuItem>
-              <MenuItem icon="history" onClick={() => run(() => onRoute("history"))}>打开会话历史</MenuItem>
+              <MenuItem icon="plus" onClick={() => run(chrome.onCreateProject)}>{t("nav.createProject")}</MenuItem>
+              <MenuItem icon="home" onClick={() => run(() => onRoute("home"))}>{t("nav.home")}</MenuItem>
+              <MenuItem icon="history" onClick={() => run(() => onRoute("history"))}>{t("nav.history")}</MenuItem>
               <div className="menu-sep" />
-              <MenuItem icon="search" kbd="Ctrl K" onClick={() => run(chrome.onOpenPalette)}>全局搜索</MenuItem>
-              <MenuItem icon="terminal" kbd="Ctrl J" onClick={() => run(chrome.onOpenTerminalPanel)}>打开终端</MenuItem>
-              <MenuItem icon="external" {...shellItemProps("editor")} onClick={() => run(chrome.onOpenProjectInEditor)}>在外部编辑器中打开项目</MenuItem>
-              <MenuItem icon="folder" {...shellItemProps("directory")} onClick={() => run(chrome.onOpenProjectDirectory)}>打开系统文件管理器</MenuItem>
-              <MenuItem icon="server" hint="供应商 · 角色" onClick={() => run(() => onRoute("model-config"))}>模型配置</MenuItem>
+              <MenuItem icon="search" kbd="Ctrl K" onClick={() => run(chrome.onOpenPalette)}>{t("nav.search")}</MenuItem>
+              <MenuItem icon="terminal" kbd="Ctrl J" onClick={() => run(chrome.onOpenTerminalPanel)}>{t("nav.terminal")}</MenuItem>
+              <MenuItem icon="external" {...shellItemProps("editor")} onClick={() => run(chrome.onOpenProjectInEditor)}>{t("shell.openInEditor")}</MenuItem>
+              <MenuItem icon="folder" {...shellItemProps("directory")} onClick={() => run(chrome.onOpenProjectDirectory)}>{t("shell.openInExplorer")}</MenuItem>
+              <MenuItem icon="server" hint="供应商 · 角色" onClick={() => run(() => onRoute("model-config"))}>{t("nav.modelConfig")}</MenuItem>
               <div className="menu-sep" />
-              <MenuItem icon="settings" onClick={() => run(() => onRoute("settings"))}>设置</MenuItem>
-              <MenuItem icon="keyboard" onClick={() => run(() => chrome.onOpenDialog("shortcuts"))}>快捷键</MenuItem>
-              <MenuItem icon="info" onClick={() => run(() => chrome.onOpenDialog("about"))}>关于 OMP Studio</MenuItem>
+              <MenuItem icon="settings" onClick={() => run(() => onRoute("settings"))}>{t("nav.settings")}</MenuItem>
+              <MenuItem icon="keyboard" onClick={() => run(() => chrome.onOpenDialog("shortcuts"))}>{t("nav.shortcuts")}</MenuItem>
+              <MenuItem icon="info" onClick={() => run(() => chrome.onOpenDialog("about"))}>{t("nav.about")}</MenuItem>
             </div>,
             document.body,
           )
@@ -1495,7 +1516,12 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   </>;
 }
 
-function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chrome: ShellChrome; client: StudioClient; onRoute: (route: Route) => void }) {
+function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDialog }: { state: ViewState; chrome: ShellChrome; client: StudioClient; onRoute: (route: Route) => void; onOpenAppUpdateDialog: () => void }) {
+  const { t } = useI18n();
+  const { preview } = usePreviewMode();
+  const appUpdate = useAppUpdate();
+  const effectiveUpdate = preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
+  const hasUpdate = effectiveUpdate?.available === true;
   const sidebarRef = useRef<HTMLElement>(null);
   const ompBtnRef = useRef<HTMLButtonElement>(null);
   const ompMenuRef = useRef<HTMLDivElement>(null);
@@ -1578,7 +1604,6 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
   const runtime = state.clientState?.connection.runtime ?? state.bootstrap?.runtime;
   const history = state.model.history;
   const omp = runtimeStatusLabel(runtime);
-  const { preview } = usePreviewMode();
   const liveSnapshot = snapshotFrom(state);
   const pendingInteraction = state.clientState?.interaction.pending ?? null;
   const threadWaitForSession = (sessionId: SessionId | undefined) => waitKindFromLive({
@@ -1615,7 +1640,7 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
   }, [gitWorkspaceId, refreshGitRepository]);
   const ompConnected = runtime?.status === "connected";
   const ompVersion = runtime?.runtimeVersion ?? (preview ? "v0.82.1" : "—");
-  const ompMeta = preview ? "rpc/2.1 · 演示" : (runtime?.classification ?? "unavailable");
+  const ompMeta = preview ? "托管 · 演示" : (runtime ? formatRuntimeClassification(runtime.classification) : "不可用");
   const { profile } = useOperatorProfile();
   useLayoutEffect(() => {
     if (!chrome.ompMenuOpen || !ompBtnRef.current) return;
@@ -1783,15 +1808,15 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
           chrome={chrome}
           onRoute={onRoute}
         />
-        <button className="sb-brand" data-tip="主页" onClick={() => onRoute("home")}>
+        <button className="sb-brand" data-tip={t("nav.home")} onClick={() => onRoute("home")}>
           <AppIcon className="logo" size={22} />
           <span className="name">OMP Studio</span>
         </button>
         <button
           className="icon-btn"
-          data-tip="命令面板"
+          data-tip={t("nav.search")}
           data-cmdk-anchor=""
-          aria-label="命令面板"
+          aria-label={t("nav.search")}
           aria-haspopup="dialog"
           aria-expanded={chrome.paletteOpen}
           {...(chrome.paletteOpen ? { "aria-controls": "cmdkList" } : {})}
@@ -1801,22 +1826,22 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
         </button>
       </div>
       <div className="sb-actions">
-        <button className="action-row new-convo-btn" aria-label="新建对话" onClick={() => chrome.onStartNewChat()}>
+        <button className="action-row new-convo-btn" aria-label={t("nav.newChat")} onClick={() => chrome.onStartNewChat()}>
           <Icon name="plus" />
-          <span className="lbl">新建对话</span>
+          <span className="lbl">{t("nav.newChat")}</span>
           <span className="meta"><span className="hint">Ctrl ⇧ O</span></span>
         </button>
-        <button className="action-row skills-btn" aria-label="技能与插件" aria-expanded={chrome.skillsOpen} aria-controls="skillsDrawer" onClick={chrome.onToggleSkills}>
+        <button className="action-row skills-btn" aria-label={t("capabilities.skillsTab")} aria-expanded={chrome.skillsOpen} aria-controls="skillsDrawer" onClick={chrome.onToggleSkills}>
           <Icon name="layers" />
-          <span className="lbl">技能 & 插件</span>
+          <span className="lbl">{t("capabilities.skillsTab")}</span>
           <span className="meta"><span className="count">{chrome.skillsEnabledCount}</span><Icon name="chevron-r" extra="sm chev" /></span>
         </button>
       </div>
       <section className="sb-section" id="sbProjects" aria-labelledby="sbProjectsTitle" style={{ ["--sb-proj-basis" as string]: `${projectShare.toFixed(3)}%` }}>
         <div className="sb-section-head">
-          <h2 id="sbProjectsTitle">项目与对话</h2>
+          <h2 id="sbProjectsTitle">{t("shell.projectAndChat")}</h2>
           <div className="sb-head-actions">
-            <button className="icon-btn" data-tip="新建项目（暂未实现）" aria-label="新建项目" disabled><Icon name="plus" extra="sm" /></button>
+            <button className="icon-btn" data-tip={t("common.notImplemented")} aria-label={t("nav.createProject")} disabled><Icon name="plus" extra="sm" /></button>
           </div>
         </div>
         <div className="sb-scroll" id="projectList">
@@ -2065,20 +2090,54 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
         <button
           ref={ompBtnRef}
           type="button"
-          className="sb-user"
-          aria-label={`${profile.displayName} · OMP 状态与环境菜单`}
+          className={`sb-user${hasUpdate ? " has-update" : ""}`}
+          aria-label={`${profile.displayName} · ${hasUpdate ? `${t("appUpdate.foundNewVersion")} v${effectiveUpdate?.version} · ` : ""}OMP 状态与环境菜单`}
           aria-haspopup="menu"
           aria-expanded={chrome.ompMenuOpen}
           onClick={chrome.onToggleOmpMenu}
         >
-          {profile.avatarSrc
-            ? <img className="avatar" src={profile.avatarSrc} alt="" draggable={false} />
-            : <span className="avatar" aria-hidden="true">{avatarInitial(profile.displayName)}</span>}
+          <div style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
+            {profile.avatarSrc
+              ? <img className="avatar" src={profile.avatarSrc} alt="" draggable={false} />
+              : <span className="avatar" aria-hidden="true">{avatarInitial(profile.displayName)}</span>}
+            {hasUpdate && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: -2,
+                  right: -2,
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  backgroundColor: "var(--accent, #3b82f6)",
+                  boxShadow: "0 0 0 2px var(--bg, #181825)",
+                }}
+                aria-hidden="true"
+              />
+            )}
+          </div>
           <span>
-            <span className="u-name">{profile.displayName}</span>
-            <span className={`u-status ${omp.tone}`} role="status" aria-live="polite">
-              <span className={`dot ${omp.tone === "ok" ? "green" : omp.tone === "err" ? "red" : "amber"}${omp.tone === "ok" ? " pulse" : ""}`} aria-hidden="true" />
-              <span>{omp.text}</span>
+            <span className="u-name" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span>{profile.displayName}</span>
+              {hasUpdate && (
+                <span
+                  style={{
+                    fontSize: "0.68rem",
+                    padding: "1px 5px",
+                    borderRadius: 4,
+                    background: "var(--accent, #3b82f6)",
+                    color: "#fff",
+                    fontWeight: 600,
+                    lineHeight: 1.2,
+                  }}
+                >
+                  v{effectiveUpdate?.version}
+                </span>
+              )}
+            </span>
+            <span className={`u-status ${hasUpdate ? "ok" : omp.tone}`} role="status" aria-live="polite">
+              <span className={`dot ${hasUpdate ? "green pulse" : omp.tone === "ok" ? "green pulse" : omp.tone === "err" ? "red" : "amber"}`} aria-hidden="true" />
+              <span>{hasUpdate ? `${t("appUpdate.foundNewVersion")} v${effectiveUpdate?.version}` : omp.text}</span>
             </span>
           </span>
           <Icon name="chevron-ud" extra="sm" />
@@ -2107,19 +2166,64 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
                 role="menuitem"
                 onClick={() => { chrome.onToggleOmpMenu(); onRoute("home"); }}
               >
-                {profile.avatarSrc
-                  ? <img className="avatar" src={profile.avatarSrc} alt="" draggable={false} />
-                  : <span className="avatar" aria-hidden="true">{avatarInitial(profile.displayName)}</span>}
+                <div style={{ position: "relative", display: "inline-flex", flexShrink: 0 }}>
+                  {profile.avatarSrc
+                    ? <img className="avatar" src={profile.avatarSrc} alt="" draggable={false} />
+                    : <span className="avatar" aria-hidden="true">{avatarInitial(profile.displayName)}</span>}
+                  {hasUpdate && (
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: -2,
+                        right: -2,
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        backgroundColor: "var(--accent, #3b82f6)",
+                        boxShadow: "0 0 0 2px var(--bg, #181825)",
+                      }}
+                      aria-hidden="true"
+                    />
+                  )}
+                </div>
                 <span>
                   <span className="u-name">{profile.displayName}</span>
                   <span className="v">
                     <span style={{ color: ompConnected ? "var(--green)" : "var(--red)" }}>
-                      {ompConnected ? "Ready" : "Disconnected"}
+                      {ompConnected ? "已就绪" : formatRuntimeStatusLabel(runtime?.status ?? "unavailable")}
                     </span>
                     {` · ${ompVersion} · ${ompMeta}`}
                   </span>
                 </span>
               </button>
+              {hasUpdate && (
+                <div
+                  style={{
+                    margin: "4px 8px 8px",
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    background: "var(--accent-subtle, rgba(59, 130, 246, 0.12))",
+                    border: "1px solid var(--accent, rgba(59, 130, 246, 0.3))",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    cursor: "pointer",
+                  }}
+                  onClick={() => {
+                    chrome.onToggleOmpMenu();
+                    onOpenAppUpdateDialog();
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", fontWeight: 600, color: "var(--accent, #3b82f6)" }}>
+                    <Icon name="update" extra="sm" />
+                    <span>{t("appUpdate.foundNewVersion")} v{effectiveUpdate?.version}</span>
+                  </div>
+                  <button type="button" className="btn primary sm" style={{ padding: "2px 8px", fontSize: "0.72rem" }}>
+                    {t("common.details")}
+                  </button>
+                </div>
+              )}
               {!ompConnected ? (
                 <div className="omp-menu-err">
                   <Icon name="alert" extra="sm" />
@@ -2127,11 +2231,31 @@ function AppSidebar({ state, chrome, client, onRoute }: { state: ViewState; chro
                 </div>
               ) : null}
               <div className="menu-sep" />
-              <MenuItem icon="pulse" onClick={() => { chrome.onToggleOmpMenu(); onRoute("diagnostics"); }}>打开诊断中心</MenuItem>
-              <MenuItem icon="update" onClick={() => { setDiagnosticsIntent("check-update"); chrome.onToggleOmpMenu(); onRoute("diagnostics"); }} {...(preview ? { hint: "v0.82.2 可用" } : {})}>检查更新</MenuItem>
-              <MenuItem icon="server" onClick={() => { chrome.onToggleOmpMenu(); onRoute("model-config"); }}>打开模型配置</MenuItem>
-              <MenuItem icon="settings" onClick={() => { chrome.onToggleOmpMenu(); onRoute("settings"); }}>打开设置</MenuItem>
-              <MenuItem icon="package" onClick={() => { chrome.onToggleOmpMenu(); onRoute("capabilities"); }}>打开能力中心</MenuItem>
+              {runtimeCanReconnect(runtime) ? (
+                <MenuItem icon="refresh" onClick={() => { setDiagnosticsIntent("reconnect"); chrome.onToggleOmpMenu(); onRoute("diagnostics"); }}>{t("shell.reconnectRuntime")}</MenuItem>
+              ) : null}
+              {runtimeCanRestart(runtime) ? (
+                <MenuItem icon="refresh" onClick={() => { setDiagnosticsIntent("restart"); chrome.onToggleOmpMenu(); onRoute("diagnostics"); }}>{t("shell.restartRuntime")}</MenuItem>
+              ) : null}
+              <MenuItem icon="pulse" onClick={() => { chrome.onToggleOmpMenu(); onRoute("diagnostics"); }}>{t("shell.openDiagnostics")}</MenuItem>
+              <MenuItem
+                icon="update"
+                onClick={() => {
+                  chrome.onToggleOmpMenu();
+                  if (hasUpdate) {
+                    onOpenAppUpdateDialog();
+                  } else {
+                    setDiagnosticsIntent("check-update");
+                    onRoute("diagnostics");
+                  }
+                }}
+                {...(hasUpdate ? { hint: `v${effectiveUpdate?.version} ${t("shell.updateAvailable")}` } : preview ? { hint: "v0.82.2 可用" } : {})}
+              >
+                {t("shell.checkUpdate")}
+              </MenuItem>
+              <MenuItem icon="server" onClick={() => { chrome.onToggleOmpMenu(); onRoute("model-config"); }}>{t("shell.openModelConfig")}</MenuItem>
+              <MenuItem icon="settings" onClick={() => { chrome.onToggleOmpMenu(); onRoute("settings"); }}>{t("shell.openSettings")}</MenuItem>
+              <MenuItem icon="package" onClick={() => { chrome.onToggleOmpMenu(); onRoute("capabilities"); }}>{t("shell.openCapabilities")}</MenuItem>
             </div>,
             document.body,
           )
@@ -2197,9 +2321,10 @@ function formatTelemetryDuration(ms: number): string {
 }
 
 function RealTokenPanel({ telemetry, view }: { telemetry: SessionTelemetrySnapshot | null; view: ViewedSessionTelemetryState | undefined }) {
+  const { t: tr } = useI18n();
   if (telemetry === null) {
     const reason = view?.status === "unavailable" ? "无法获取该会话的遥测数据。" : view?.status === "loading" ? "正在读取历史会话遥测…" : "Runtime telemetry 尚未就绪。";
-    return <><div className="tp-head"><Icon name="zap" extra="sm" />Token 用量<span className="spacer" /><span className="chip gray xs">{view?.status === "loading" ? "读取中" : "不可用"}</span></div><div className="tp-ctx"><div className="tiny muted">{reason}</div></div></>;
+    return <><div className="tp-head"><Icon name="zap" extra="sm" />{tr("shell.tokenUsage")}<span className="spacer" /><span className="chip gray xs">{view?.status === "loading" ? "读取中" : "不可用"}</span></div><div className="tp-ctx"><div className="tiny muted">{reason}</div></div></>;
   }
   const t = telemetry.tokens;
   const turn = telemetry.lastCompletedTurn;
@@ -2208,24 +2333,24 @@ function RealTokenPanel({ telemetry, view }: { telemetry: SessionTelemetrySnapsh
   const splitTotal = t.input + t.output + t.cacheRead + t.cacheWrite;
   const splitPct = (value: number): number => (splitTotal > 0 ? Math.min(100, (value / splitTotal) * 100) : 0);
   return <>
-    <div className="tp-head"><Icon name="zap" extra="sm" />Token 用量<span className="spacer" />{chip === undefined ? null : <span className={chip.cls}>{chip.label}</span>}</div>
-    <div className="tok-hero"><div className="th-cell"><div className="th-k">总消耗</div><div className="th-v">{formatTelemetryTokens(t.total)}</div><div className="th-sub">{turn ? `本轮 ${formatTelemetryTokens(turn.total)}` : "本轮 —"}</div></div><div className="th-cell"><div className="th-k">Cost</div><div className="th-v">{formatTelemetryCost(t.cost)}</div><div className="th-sub">缓存已省 <b>{cacheSavedPct}%</b></div></div></div>
+    <div className="tp-head"><Icon name="zap" extra="sm" />{tr("shell.tokenUsage")}<span className="spacer" />{chip === undefined ? null : <span className={chip.cls}>{chip.label}</span>}</div>
+    <div className="tok-hero"><div className="th-cell"><div className="th-k">{tr("shell.totalTokens")}</div><div className="th-v">{formatTelemetryTokens(t.total)}</div><div className="th-sub">{turn ? `本轮 ${formatTelemetryTokens(turn.total)}` : "本轮 —"}</div></div><div className="th-cell"><div className="th-k">{tr("shell.cost")}</div><div className="th-v">{formatTelemetryCost(t.cost)}</div><div className="th-sub">{tr("shell.cacheSaved")} <b>{cacheSavedPct}%</b></div></div></div>
     <div className="tok-split">
-      <div className="ts-top"><span>构成</span><b>{formatTelemetryTokens(t.input)} 入 / {formatTelemetryTokens(t.output)} 出</b></div>
+      <div className="ts-top"><span>{tr("shell.composition")}</span><b>{formatTelemetryTokens(t.input)} 入 / {formatTelemetryTokens(t.output)} 出</b></div>
       <div className="tok-bar">
         {splitTotal <= 0
           ? <i className="tb-none" />
           : <><i className="tb-in" style={{ width: `${splitPct(t.input)}%` }} /><i className="tb-out" style={{ width: `${splitPct(t.output)}%` }} /><i className="tb-cache" style={{ width: `${splitPct(t.cacheRead + t.cacheWrite)}%` }} /></>}
       </div>
       <div className="tok-keys">
-        <span><i className="tb-in" />输入</span>
-        <span><i className="tb-out" />输出</span>
-        <span><i className="tb-cache" />缓存 {formatTelemetryTokens(t.cacheRead + t.cacheWrite)} · 命中 <b>{cacheSavedPct}%</b></span>
+        <span><i className="tb-in" />{tr("shell.inputTokens")}</span>
+        <span><i className="tb-out" />{tr("shell.outputTokens")}</span>
+        <span><i className="tb-cache" />{tr("shell.cacheTokens")} {formatTelemetryTokens(t.cacheRead + t.cacheWrite)} · 命中 <b>{cacheSavedPct}%</b></span>
       </div>
     </div>
     <div className="tok-rows">
-      <div className="tr-row">本轮输入 / 输出<span className="tr-v">{turn ? `${formatTelemetryTokens(turn.input)} / ${formatTelemetryTokens(turn.output)}` : "—"}</span></div>
-      <div className="tr-row">本轮耗时<span className="tr-v">{turn?.durationMs !== undefined ? formatTelemetryDuration(turn.durationMs) : "—"}</span></div>
+      <div className="tr-row">{tr("shell.turnInputOutput")}<span className="tr-v">{turn ? `${formatTelemetryTokens(turn.input)} / ${formatTelemetryTokens(turn.output)}` : "—"}</span></div>
+      <div className="tr-row">{tr("shell.turnDuration")}<span className="tr-v">{turn?.durationMs !== undefined ? formatTelemetryDuration(turn.durationMs) : "—"}</span></div>
       <div className="tr-row">TPS<span className="tr-v">{turn?.tps !== undefined ? turn.tps.toFixed(1) : "—"}</span></div>
       <div className="tr-row">Reasoning<span className="tr-v">{formatTelemetryTokens(t.reasoning)}</span></div>
       <div className="tr-row">Cache read<span className="tr-v">{formatTelemetryTokens(t.cacheRead)}</span></div>
@@ -2258,7 +2383,7 @@ function RealContextPanel({ telemetry, view }: { telemetry: SessionTelemetrySnap
   return <><div className="tp-head"><Icon name="layers" extra="sm" />CONTEXT 构成<span className="spacer" /><span className={`chip ${tone} xs`}>{pct}%</span></div><div className="tp-ctx" style={{ paddingTop: 12 }}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}><span>已使用</span><b className="mono" style={{ fontSize: 13 }}>{formatTelemetryExact(context.usedTokens)} / {formatTelemetryExact(context.contextWindow)}（{context.percent.toFixed(1)}%）</b></div><div className="ctxbar">{TELEMETRY_CONTEXT_PARTS.map((part) => <i key={part.key} style={{ width: `${Math.min(100, ((context[part.key] as number) / ctxWindow) * 100)}%`, background: part.color }} data-tip={part.label} />)}{hasRest ? <i className="cb-rest" data-tip="未使用" /> : null}</div><div className="ctx-legend">{TELEMETRY_CONTEXT_PARTS.map((part) => <div key={part.key} className="cl-row"><span className="cl-dot" style={{ background: part.color }} /><span>{part.label}</span><span className="cl-v">{formatTelemetryTokens(context[part.key] as number)}</span></div>)}{hasRest ? <div className="cl-row"><span className="cl-dot" style={{ background: "var(--surface-3)" }} /><span>未使用</span><span className="cl-v">{formatTelemetryTokens(restTokens)}</span></div> : null}</div><div className="tiny muted" style={{ borderTop: "1px solid var(--border)", paddingTop: 8 }}>{context.anchored ? "Provider anchor" : "Estimated"}</div></div></>;
 }
 
-function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onToggleSide, onOpenChanges, onOpenGit, onOpenTerminal, viewedSessionId }: {
+function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onToggleSide, onOpenChanges, onOpenGit, onOpenTerminal, viewedSessionId, telemetryRefreshToken }: {
   state: ViewState;
   client: StudioClient;
   chrome: ShellChrome;
@@ -2272,6 +2397,8 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
   onOpenTerminal: () => void;
   /** Session being viewed when a history thread is open; undefined = live thread. */
   viewedSessionId: SessionId | undefined;
+  /** Bump after compact so Context 构成 re-reads the current session. */
+  telemetryRefreshToken?: number;
 }) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const { preview } = usePreviewMode();
@@ -2296,6 +2423,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
     viewedSessionId,
     liveSessionId: preview ? undefined : snapshotFrom(state)?.sessionId,
     liveTelemetry: preview ? undefined : (state.clientState?.entities.telemetry ?? undefined),
+    ...(telemetryRefreshToken === undefined ? {} : { refreshToken: telemetryRefreshToken }),
   });
   const telemetry = preview ? null : (viewedTelemetry.telemetry ?? null);
 
@@ -2613,14 +2741,17 @@ function useComposerCollisionCollapse() {
   return barRef;
 }
 
-function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, btwWindow, btwSession, btwSideHeadRect, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending }: {
+function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selectedThreadId, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, btwWindow, btwSession, btwSideHeadRect, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh }: {
   state: ViewState;
   client: ClientStateSource;
   selectedSessionId?: string;
+  viewedAgents?: readonly StudioAgentSnapshot[];
   selectedThreadId?: ThreadId;
   /** 后台 session.create 进行中：欢迎区照常显示，发送前再等就绪。 */
   sessionCreating?: boolean;
-  waitForNewSession?: () => Promise<boolean>;
+  waitForNewSession?: () => Promise<NewSessionWaitResult>;
+  /** Start session.create when sending from an empty workbench with no live session. */
+  ensureNewSession?: () => void;
   previewProjectId?: string;
   previewThreadId?: string;
   onPreviewDeckWait?: (kind: ThreadWaitKind | undefined) => void;
@@ -2639,6 +2770,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   onResizePanel: (width: number) => void;
   bottomOpen: boolean;
   onBottomOpenChange: (open: boolean) => void;
+  /** Entire tab strip on screen; independent of `bottomOpen` (tab body). */
+  bottomVisible: boolean;
+  onBottomVisibleChange: (visible: boolean) => void;
   /** 底部运行面板高度（px），由 bpResizer 拖拽调整，App 持久化到 --bottom-panel-h。 */
   bottomHeight: number;
   onResizeBottom: (height: number) => void;
@@ -2666,6 +2800,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   /** 顶栏 / slash Compact 已发出、命令尚未结束。 */
   compactPending?: boolean;
   onCompactPending?: (pending: boolean) => void;
+  onViewedTelemetryRefresh?: () => void;
 }) {
   const [draft, setDraft] = useState<ComposerSnapshot>(emptySnapshot);
   const [bottomResizing, setBottomResizing] = useState(false);
@@ -2788,6 +2923,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   const lastStatusToast = useRef<{ family: "fast-tier" | "prewalk-noop"; at: number } | undefined>(undefined);
   const [composerSubmitted, setComposerSubmitted] = useState(false);
   const [composerExpanded, setComposerExpanded] = useState(true);
+  const [modeCapsulesPresent, setModeCapsulesPresent] = useState(false);
   const composerInputRef = composerRef;
   // 流式期间按 Enter 的消息先排本地队列，本轮 run 结束后由 flush effect 按序发送。
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
@@ -2894,6 +3030,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     queueMicrotask(() => composerInputRef.current?.focus());
   }, [selectedSessionId]);
   const snapshot = snapshotFrom(state);
+  const rosterAgents = viewedAgents ?? snapshot?.agents;
   const connection = state.clientState?.connection;
   const runtime = connection?.runtime ?? state.bootstrap?.runtime;
   const commands = state.clientState?.commands ?? {};
@@ -3004,11 +3141,18 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
   }, [convo.state.notices]);
   /* ConversationPane 与 ConversationMinimap 共享同一 scroller（滚动同步/跳转不走 DOM id 查询）。 */
   const convoScrollerRef = useRef<HTMLElement | null>(null);
-  const isNewConversation = preview
-    ? previewThreadId === "t0"
-    : selectedSessionId === undefined && (sessionCreating === true || convo.rows.length === 0);
-  const showWelcome = sessionCreating === true || isNewConversation
-    || (convo.rows.length === 0 && (convo.demo || convo.state.hydrateStatus === "ready"));
+  const welcomeGate = {
+    preview,
+    compacting: compactingNow,
+    rowCount: convo.rows.length,
+    hydrateStatus: convo.state.hydrateStatus,
+    demo: convo.demo,
+    ...(sessionCreating === undefined ? {} : { sessionCreating }),
+    ...(previewThreadId === undefined ? {} : { previewThreadId }),
+    ...(selectedSessionId === undefined ? {} : { selectedSessionId }),
+  };
+  const isNewConversation = isNewConversationSurface(welcomeGate);
+  const showWelcome = shouldShowConversationWelcome(welcomeGate);
   const showContextStrip = isNewConversation && !composerSubmitted;
   const taskProgress = useMemo(() => {
     if (preview) {
@@ -3169,7 +3313,11 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     runtimeConnected,
   });
   const planReview = !preview && snapshot?.plan?.status === "review" ? snapshot.plan : undefined;
-  const planReviewDisabled = gated || !can("mode.plan.review.respond");
+  const planReviewDisabled = planReviewDeckDisabled({
+    resyncRequired: Boolean(connection?.resyncRequired),
+    runtimeConnected,
+    canRespond: can("mode.plan.review.respond"),
+  });
   const liveReviewKey = pendingInteraction || planReview === undefined
     ? ""
     : `${planReview.planReference ?? ""}:${planReview.title ?? ""}:${planReview.body ?? ""}`;
@@ -3271,9 +3419,31 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
         ...(runWindow.startedAt === null ? {} : { startedAt: runWindow.startedAt }),
         ...(preview ? { demo: true } : {}),
       };
+  const hasStatusCapsules =
+    modeCapsulesPresent ||
+    Boolean(magicKeyword) ||
+    Boolean(snapshot?.activeMode) ||
+    Boolean(snapshot?.loop) ||
+    Boolean(snapshot?.fast?.enabled) ||
+    Boolean(snapshot?.prewalk && snapshot.prewalk.status !== "off") ||
+    draft.doc.nodes.some((node) => node.type === "chip") ||
+    draft.images.length > 0 ||
+    queueEdit !== undefined;
+  const hasDraftContent = draft.text.trim().length > 0 || !snapshotIsEmpty(draft) || hasStatusCapsules;
   useEffect(() => {
-    if (running) setComposerExpanded(false);
+    if (running) {
+      if (hasStatusCapsules || hasDraftContent) {
+        setComposerExpanded(true);
+      } else {
+        setComposerExpanded(false);
+      }
+    }
   }, [running]);
+  useEffect(() => {
+    if (hasStatusCapsules) {
+      setComposerExpanded(true);
+    }
+  }, [hasStatusCapsules]);
   useLayoutEffect(() => {
     if (running && !composerExpanded) {
       document.getElementById("composerInput")?.scrollTo({ top: 0 });
@@ -3449,6 +3619,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     pendingInteraction: pendingInteraction !== null,
     promptChannelReady,
     sessionCreating,
+    newConversation: !preview && isNewConversation,
   });
   const slashExecuteReady = composerSlashExecute(draft) !== undefined;
   const testRerunDisabled = !promptChannelReady || running || pendingInteraction !== null;
@@ -3542,7 +3713,16 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     resyncRequired: Boolean(connection?.resyncRequired) || convo.state.resyncRequired,
     sessionCreating: sessionCreating === true,
     gated: !preview && gated,
-    canNavigateTree: can("session.tree"),
+    canNavigateTree: can("session.tree.navigate") || can("session.tree"),
+  });
+  const userBranchDisabledReason = userMessageRestoreDisabledReason({
+    preview,
+    running,
+    compacting: snapshot?.isCompacting === true,
+    resyncRequired: Boolean(connection?.resyncRequired) || convo.state.resyncRequired,
+    sessionCreating: sessionCreating === true,
+    gated: !preview && gated,
+    canNavigateTree: can("session.tree.branch") || can("session.tree"),
   });
   const restoreUserMessage = (itemId: string, text: string) => {
     if (userRestoreDisabledReason !== undefined) return;
@@ -3563,7 +3743,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     });
   };
   const branchUserMessage = (itemId: string, text: string) => {
-    if (userRestoreDisabledReason !== undefined) return;
+    if (userBranchDisabledReason !== undefined) return;
     void executeUserMessageBranch({
       preview,
       itemId,
@@ -3691,11 +3871,15 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
     setComposerError(undefined);
     composerInputRef.current?.clear();
     setDraft(emptySnapshot());
+    if (!preview && selectedSessionId === undefined && snapshot === undefined) {
+      ensureNewSession?.();
+    }
     if (waitForNewSession !== undefined) {
       const ready = await waitForNewSession();
-      if (!ready) {
+      if (!ready.ok) {
         setDraft(payload);
         composerInputRef.current?.setSnapshot(payload);
+        setComposerError(ready.error);
         return;
       }
       await new Promise<void>((resolve) => {
@@ -4027,9 +4211,14 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
           ...(execute.arguments ? { arguments: execute.arguments } : {}),
         });
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
-        const failed = compacting ? outcome.output.find((item) => /compaction failed/i.test(item)) : undefined;
-        const line = failed ?? outcome.output.find((item) => item.trim().length > 0);
-        setStatusToast(line ?? `已执行 /${command.name}`);
+        if (compacting) {
+          const notice = compactNoticeFromOutput(outcome.output, { successText: "已压缩上下文" });
+          setStatusToast(notice.text);
+          if (notice.ok) onViewedTelemetryRefresh?.();
+        } else {
+          const line = outcome.output.find((item) => item.trim().length > 0);
+          setStatusToast(line ?? `已执行 /${command.name}`);
+        }
         setComposerError(undefined);
         return true;
       } catch (error) {
@@ -4052,6 +4241,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
             onRestoreUserMessage={restoreUserMessage}
             onBranchUserMessage={branchUserMessage}
             {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
+            {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
             scrollerRef={convoScrollerRef}
             onReviewChanges={(turnId) => openChanges({ turnId })}
             planLink={planLink}
@@ -4059,6 +4249,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
             onInspectSubagent={(target) => {
               setInspectTarget(target);
             }}
+            {...(preview || rosterAgents === undefined ? {} : { liveAgents: rosterAgents })}
             {...(activity === undefined ? {} : { activity })}
             {...(showWelcome ? { forceWelcome: true } : {})}
             {...(showWelcome ? {
@@ -4073,6 +4264,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                   {...(onSelectThread === undefined ? {} : { onSelectThread })}
                   {...(onSelectPreviewThread === undefined ? {} : { onSelectPreviewThread })}
                   onOpenHistory={() => onRoute("history")}
+                  runtimeConnected={runtimeConnected}
+                  onOpenDiagnostics={() => onRoute("diagnostics")}
                 />
               ),
             } : {})}
@@ -4125,25 +4318,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                 onOpen={(path) => openChanges({ path })}
               />
             ) : null}
-            {inspectTarget === null ? null : (
-              <SubagentInspectCard
-                target={inspectTarget}
-                preview={preview}
-                client={preview ? null : conversationClient}
-                sendClient={preview ? null : client}
-                agents={snapshot?.agents ?? []}
-                canSend={can("agent.send")}
-                runtimeConnected={runtimeConnected}
-                {...(workspaceId === undefined ? {} : { workspaceId })}
-                loadMentions={fetchMentions}
-                onClose={() => setInspectTarget(null)}
-                onOpenHub={(agentId) => {
-                  setHubIntent(agentId, "chat");
-                  setInspectTarget(null);
-                  onRoute("agent-hub");
-                }}
-              />
-            )}
             {showContextStrip ? <div className="ctx-strip" role="status" aria-live="polite">
               <span className="ctx-project-wrap">
                 <button
@@ -4504,7 +4678,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                 ref={composerInputRef}
                 id="composerInput"
                 compact={running && !composerExpanded}
-                placeholder={queueEdit === undefined ? "输入消息… / 指令，@ 引用文件、Agent 或 Skill；拖入或粘贴文件变成胶囊" : "正在编辑排队消息…"}
+                placeholder={queueEdit === undefined ? "请输入消息..." : "正在编辑排队消息…"}
                 describedBy="composerHint"
                 {...(workspaceId === undefined ? {} : { workspaceId })}
                 loadMentions={fetchMentions}
@@ -4537,7 +4711,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                   });
                 }}
                 onBlur={() => {
-                  if (running) setComposerExpanded(false);
+                  if (running && !hasStatusCapsules && !hasDraftContent) setComposerExpanded(false);
                 }}
                 onError={setComposerError}
               />
@@ -4558,9 +4732,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
               ) : null}
               <div className="composer-bar" data-collapse="full" ref={composerBarRef}>
                 <div className="cb-group">
-                  <button className="icon-btn small" data-tip="附件" aria-label="附件 / 图片" onClick={() => composerInputRef.current?.openFilePicker()}><Icon name="attach" extra="sm" /></button>
-                  <button className="icon-btn small" data-tip="@ 引用" aria-label="@ 引用文件、文件夹、Agent 或 Skill" onClick={() => composerInputRef.current?.openMention("@")}><Icon name="at" extra="sm" /></button>
-                  <button className="icon-btn small" data-tip="指令" aria-label="指令" onClick={() => composerInputRef.current?.openCommandMenu()}><Icon name="slash" extra="sm" /></button>
+                  <button className="icon-btn small" data-tip="附件" aria-label="附件 / 图片" onClick={() => { setComposerExpanded(true); composerInputRef.current?.openFilePicker(); }}><Icon name="attach" extra="sm" /></button>
+                  <button className="icon-btn small" data-tip="@ 引用" aria-label="@ 引用文件、文件夹、Agent 或 Skill" onClick={() => { setComposerExpanded(true); composerInputRef.current?.openMention("@"); }}><Icon name="at" extra="sm" /></button>
+                  <button className="icon-btn small" data-tip="指令" aria-label="指令" onClick={() => { setComposerExpanded(true); composerInputRef.current?.openCommandMenu(); }}><Icon name="slash" extra="sm" /></button>
                 </div>
                 {queueEdit !== undefined ? (
                   <span className="pill-btn queue-edit" role="status">
@@ -4583,6 +4757,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                   {...(approvalIndeterminate ? { indeterminate: true } : {})}
                   disabled={approvalDisabled}
                   nextTurnOnly={approvalNextTurnOnly}
+                  onInteract={() => setComposerExpanded(true)}
                   onChange={(mode) => {
                     if (preview) {
                       setPreviewApprovalMode(mode);
@@ -4628,6 +4803,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                   onRun={run}
                   openNonce={modeMenuNonce}
                   openToggles={modeOpenToggles}
+                  onInteract={() => setComposerExpanded(true)}
+                  onCapsulesChange={setModeCapsulesPresent}
                 />
                 <span className="spacer" />
                 <ComposerModelPicker
@@ -4662,6 +4839,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                     className="send-btn"
                     disabled={queueEdit === undefined && !(promptEnabled || queueEnabled || slashExecuteReady || (preview && running))}
                     onClick={() => {
+                      setComposerExpanded(true);
                       if (queueEdit !== undefined) {
                         commitQueuedEdit();
                         return;
@@ -4685,12 +4863,48 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                     }
                     aria-label={queueEdit !== undefined ? "写回排队消息" : "发送"}
                   >
-                    <Icon name="send" extra="sm" />
+                    <Icon name="arrow-u" extra="sm" />
                   </button>
                 )}
               </div>
             </div>
           </div>
+          {/* 定位上下文是 .convo-wrap，不要放回 .composer-region，否则会按错误盒子算高并溢出底栏。 */}
+          {inspectTarget === null ? null : (
+            <SubagentInspectCard
+              target={inspectTarget}
+              preview={preview}
+              client={preview ? null : conversationClient}
+              sendClient={preview ? null : client}
+              agents={rosterAgents ?? []}
+              canSend={
+                can("agent.send")
+                && (selectedSessionId === undefined || snapshot?.sessionId === undefined || selectedSessionId === snapshot.sessionId)
+              }
+              runtimeConnected={runtimeConnected}
+              {...(selectedSessionId === undefined ? {} : { parentSessionId: selectedSessionId as SessionId })}
+              {...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId })}
+              pendingInteraction={pendingInteraction !== null}
+              {...(workspaceId === undefined ? {} : { workspaceId })}
+              loadMentions={fetchMentions}
+              onClose={() => setInspectTarget(null)}
+              onOpenHub={(agentId) => {
+                setHubIntent(agentId, "chat");
+                setInspectTarget(null);
+                onRoute("agent-hub");
+              }}
+            />
+          )}
+          <button
+            className="icon-btn small bp-reveal"
+            data-tip={bottomVisible ? "收起底栏" : "展开底栏"}
+            aria-label={bottomVisible ? "收起底栏" : "展开底栏"}
+            aria-expanded={bottomVisible}
+            aria-controls="bottomPanel"
+            onClick={() => onBottomVisibleChange(toggleBottomBarVisible({ visible: bottomVisible, open: bottomOpen }).visible)}
+          >
+            <Icon name="panel-bottom" extra="sm" />
+          </button>
         </div>
         <aside className={`side-panel${sideOpen ? " open" : ""}`} id="sidePanel" aria-label="功能面板" style={{ width: panelWidth }}>
           <div className="sp-resizer" id="spResizer" role="separator" tabIndex={0} aria-orientation="vertical" aria-label="调整右侧面板宽度" onPointerDown={onPanelResizePointerDown} />
@@ -4707,7 +4921,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
               </button>
               <button className={sideTab === "agents" ? "active" : ""} role="tab" aria-selected={sideTab === "agents"} aria-controls="spAgents" onClick={() => onSideTabChange("agents")}>
                 <Icon name="bot" extra="sm" />Agents
-                {preview ? <span className="chip gray xs">4<span className="sr-only"> 个 Agent</span></span> : snapshot ? <span className="chip gray xs">{snapshot.agents.length}<span className="sr-only"> 个 Agent</span></span> : null}
+                {preview ? <span className="chip gray xs">4<span className="sr-only"> 个 Agent</span></span> : rosterAgents !== undefined ? <span className="chip gray xs">{rosterAgents.length}<span className="sr-only"> 个 Agent</span></span> : snapshot ? <span className="chip gray xs">{snapshot.agents.length}<span className="sr-only"> 个 Agent</span></span> : null}
               </button>
               {btwWindow.open && btwWindow.placement === "docked" ? (
                 /* 这个按钮同时是拖出握把：移动超过阈值并离开标题栏就切回浮动态，
@@ -4749,9 +4963,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
             <div className={`sp-page${sideTab === "agents" ? " active" : ""}`} id="spAgents" role="tabpanel">
               {preview ? (
                 <PreviewSideAgents onOpenHub={() => onRoute("agent-hub")} />
-              ) : snapshot ? (
-                snapshot.agents.length ? (
-                  snapshot.agents.map((agent) => (
+              ) : rosterAgents !== undefined ? (
+                rosterAgents.length ? (
+                  rosterAgents.map((agent) => (
                     <div className="agent-row" key={agent.agentId}>
                       <span className="ag-ic" aria-hidden="true"><Icon name="bot" extra="sm" /></span>
                       <div className="ag-main">
@@ -4781,7 +4995,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                       </div>
                     </div>
                   ))
-                ) : <Deferred title="No agents" detail="当前 snapshot 中没有 Agent。" />
+                ) : <Deferred title="No agents" detail="当前会话没有可显示的 Agent。" />
               ) : <Deferred title="Agents deferred" detail="等待 Runtime snapshot。" />}
             </div>
             <div className={`sp-page${sideTab === "btw" ? " active" : ""}`} id="spBtw" role="tabpanel">
@@ -4806,7 +5020,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
           {...(preview ? { demo: true, onDemoNext: onBtwDemoNext } : {})}
         />
       </div>
-      <div className={`bottom-panel${bottomOpen ? "" : " collapsed"}${bottomResizing ? " resizing" : ""}`} id="bottomPanel">
+      <div className={`bottom-panel${bottomOpen ? "" : " collapsed"}${bottomVisible ? "" : " closed"}${bottomResizing ? " resizing" : ""}`} id="bottomPanel" {...(bottomVisible ? {} : { inert: true })}>
         <div
           className={`bp-resizer${bottomResizing ? " dragging" : ""}`}
           id="bpResizer"
@@ -4855,13 +5069,13 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
           >
             <Icon name="plus" extra="sm" />
           </button>
-          <button className="icon-btn small" data-tip={bottomOpen ? "收起" : "展开"} aria-expanded={bottomOpen} aria-controls="bottomPanel" onClick={() => onBottomOpenChange(!bottomOpen)}>
+          <button className="icon-btn small" data-tip={bottomOpen ? "收起" : "展开"} aria-expanded={bottomOpen} aria-controls="bottomPanel" onClick={() => onBottomOpenChange(toggleBottomBarOpen({ visible: bottomVisible, open: bottomOpen }).open)}>
             <Icon name={bottomOpen ? "chevron-d" : "chevron-u"} extra="sm" />
           </button>
         </div>
         <div className="bp-body">
           <div className={`bp-page${bottomTab === "terminal" ? " active" : ""}`} id="bpTerminal" role="tabpanel">
-            <TerminalPane ref={terminalRef} visible={bottomTab === "terminal" && bottomOpen} />
+            <TerminalPane ref={terminalRef} visible={bottomTab === "terminal" && bottomOpen && bottomVisible} />
           </div>
           <div className={`bp-page${bottomTab === "problems" ? " active" : ""}`} id="bpProblems" role="tabpanel">
             {preview ? <PreviewProblems /> : <Deferred title="Problems 不可用" detail="Problems 不在公共 contract 中。" />}
@@ -4891,6 +5105,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
                 ))}
               </ul>
             ) : <p className="muted">No commands issued.</p>}
+            {preview ? (
+              <>
             <div className="p4-grid">
               <div>
                 <h2>Modes</h2>
@@ -4915,6 +5131,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, selectedThreadId, p
             </div>
             {commandManifest && <GenericCommandForm manifest={commandManifest} busy={busy} enabled={can("operator.invoke")} onInvoke={(commandId, args) => void run("operator.invoke", { commandId, ...(args === undefined ? {} : { arguments: args }) })} />}
             {runtime?.classification === "limited-system" && <p className="capability-note">Runtime is Limited. P4 mutations are disabled until the capability manifest grants them.</p>}
+              </>
+            ) : null}
           </div>
           <div className={`bp-page${bottomTab === "logs" ? " active" : ""}`} id="bpLogs" role="tabpanel">
             <div className="panel-head"><div><h2>OMP Logs</h2><p className="muted">Virtualized semantic events；消息 transcript 不在公共 contract 中。</p></div><span className="mono">{state.events.length} events</span></div>
@@ -4942,7 +5160,10 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   onHistoryChange: (history: SessionHistoryReadModel) => void;
 }) {
   const previewMode = usePreviewMode();
-  const previewOn = () => PREVIEW_MODE_SWITCH_ENABLED && readStoredPreviewMode();
+  const appUpdate = useAppUpdate();
+  const effectiveUpdate = previewMode.preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
+  const [showAppUpdateDialog, setShowAppUpdateDialog] = useState(false);
+  const previewOn = () => previewMode.preview;
   const [collapsed, setCollapsed] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [skillsEnabledCount, setSkillsEnabledCount] = useState(() => previewOn() ? countEnabledDrawerItems(createPreviewDrawerItems()) : 0);
@@ -4980,6 +5201,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [splitRatio, setSplitRatio] = useState(0.46);
   const [sideOpen, setSideOpen] = useState(() => previewOn());
   const [bottomOpen, setBottomOpen] = useState(() => previewOn());
+  const [bottomVisible, setBottomVisible] = useState(true);
+  const applyBottomChrome = useCallback((next: { visible: boolean; open: boolean }) => {
+    setBottomVisible(next.visible);
+    setBottomOpen(next.open);
+  }, []);
   const [sideTab, setSideTab] = useState<SideTab>("changes");
   /** 右侧面板宽度：默认与 tokens.css 的 --panel-w(480px) 一致，spResizer 拖拽提交。 */
   const [panelWidth, setPanelWidth] = useState(480);
@@ -4993,9 +5219,13 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [creatingSession, setCreatingSession] = useState(false);
   /** 左上菜单「新建项目」：递增后 WorkbenchCanvas 打开已有创建项目对话框。 */
   const [createProjectNonce, setCreateProjectNonce] = useState(0);
-  const sessionCreateWaitRef = useRef<Promise<boolean> | null>(null);
+  const sessionCreateWaitRef = useRef<Promise<NewSessionWaitResult> | null>(null);
   const [shellNotice, setShellNotice] = useState<{ text: string; icon: string } | null>(null);
   const [compactPending, setCompactPending] = useState(false);
+  const [telemetryRefreshToken, setTelemetryRefreshToken] = useState(0);
+  const refreshViewedTelemetry = useCallback(() => {
+    setTelemetryRefreshToken((value) => value + 1);
+  }, []);
   const [paletteInventory, setPaletteInventory] = useState<DrawerItem[]>([]);
   const paletteRef = useRef<CommandPaletteHandle>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
@@ -5018,6 +5248,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [settingsNonce, setSettingsNonce] = useState(0);
   const [mcNonce, setMcNonce] = useState(0);
   const snapshot = snapshotFrom(state);
+  const pendingInteraction = state.clientState?.interaction.pending ?? null;
   const runtime = state.clientState?.connection.runtime ?? state.bootstrap?.runtime;
   const capabilities = usableCapabilityManifest(
     state.model.capabilities,
@@ -5041,14 +5272,6 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       return [];
     }
   }, [previewMode.preview, client, hubFileIndex]);
-  const hubRuntimeConnected = runtime?.status === "connected";
-  const hubCanSend = (() => {
-    const entry = capabilities?.capabilities.find((item) => item.id === "agent.send");
-    if (!entry || entry.grade === "unavailable") return false;
-    if (state.clientState?.connection.resyncRequired) return false;
-    if (runtime?.classification === "limited-system") return false;
-    return true;
-  })();
   /* BTW 旁路问答：状态挂在 AppShell 而不是 WorkbenchCanvas —— 回首页会卸载
      WorkbenchCanvas，浮窗不该跟着消失。演示轮次只改本地 UI，不碰 Host。 */
   const [btwDemoRound, setBtwDemoRound] = useState(0);
@@ -5086,7 +5309,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       void (async () => {
         try {
           const handle = await client.command("permissions.mode.set", { mode });
-          await waitReceipt(client, handle.requestId);
+          const result = await waitReceipt<{
+            readonly syncStatus?: "complete" | "partial";
+            readonly failedSessions?: number;
+          }>(client, handle.requestId);
+          if (result.syncStatus === "partial") {
+            setSessionActionError(`权限模式仅同步到部分 Runtime（${result.failedSessions ?? 0} 个失败），请稍后重试。`);
+            return;
+          }
           setSessionActionError(undefined);
         } catch (error) {
           setSessionActionError(hostErrorMessage(error, "切换权限模式失败"));
@@ -5097,6 +5327,25 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   );
   const selected = state.model.history?.entries.find((entry) => entry.historyId === selectedHistoryId)
     ?? historyAll?.entries.find((entry) => entry.historyId === selectedHistoryId);
+  const viewedSessionId = selected?.sessionId ?? snapshot?.sessionId;
+  const { agents: viewedAgents, ready: persistedAgentsReady } = usePersistedSessionAgents({
+    preview: previewMode.preview,
+    client,
+    sessionId: viewedSessionId,
+    liveSessionId: snapshot?.sessionId,
+    liveAgents: snapshot?.agents,
+  });
+  const hubRuntimeConnected =
+    runtime?.status === "connected"
+    && (viewedSessionId === undefined || viewedSessionId === snapshot?.sessionId);
+  const hubCanSend = (() => {
+    const entry = capabilities?.capabilities.find((item) => item.id === "agent.send");
+    if (!entry || entry.grade === "unavailable") return false;
+    if (state.clientState?.connection.resyncRequired) return false;
+    if (runtime?.classification === "limited-system") return false;
+    if (!hubRuntimeConnected) return false;
+    return true;
+  })();
   const wantHistoryAll = pageRoute === "history" && !previewMode.preview;
   useEffect(() => {
     if (!wantHistoryAll) return;
@@ -5162,9 +5411,17 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     : "global";
   const appliedLayoutScope = useRef<string | null>(null);
   const skipNextLayoutPersist = useRef(false);
+  const previewWasOn = useRef(previewMode.preview);
   useEffect(() => {
-    if (previewMode.preview || !appSettings.rememberLayout) return;
-    if (appliedLayoutScope.current === layoutScope) return;
+    const leavingPreview = previewWasOn.current && !previewMode.preview;
+    previewWasOn.current = previewMode.preview;
+    if (!layoutRestoreNeeded({
+      preview: previewMode.preview,
+      rememberLayout: appSettings.rememberLayout,
+      leavingPreview,
+      appliedScope: appliedLayoutScope.current,
+      layoutScope,
+    })) return;
     appliedLayoutScope.current = layoutScope;
     const memory = readLayoutMemory(layoutScope);
     if (memory === undefined) return;
@@ -5174,6 +5431,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (memory.splitRatio !== undefined) setSplitRatio(memory.splitRatio);
     if (memory.sideOpen !== undefined) setSideOpen(memory.sideOpen);
     if (memory.bottomOpen !== undefined) setBottomOpen(memory.bottomOpen);
+    if (memory.bottomVisible !== undefined) setBottomVisible(memory.bottomVisible);
     if (memory.sideTab === "changes" || memory.sideTab === "git" || memory.sideTab === "preview"
       || memory.sideTab === "agents" || memory.sideTab === "btw") setSideTab(memory.sideTab);
     if (memory.bottomTab === "terminal" || memory.bottomTab === "problems" || memory.bottomTab === "tests"
@@ -5207,6 +5465,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       splitRatio,
       sideOpen,
       bottomOpen,
+      bottomVisible,
       sideTab,
       bottomTab,
       explorerOpen,
@@ -5222,7 +5481,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       btwCapX: btwWindow.capsulePos.x,
       btwCapY: btwWindow.capsulePos.y,
     });
-  }, [previewMode.preview, appSettings.rememberLayout, layoutScope, collapsed, sidebarWidth, splitRatio, sideOpen, bottomOpen, sideTab, bottomTab, explorerOpen, panelWidth, bottomHeight, btwWindow.open, btwWindow.placement, btwWindow.minimized, btwWindow.rect, btwWindow.capsulePos]);
+  }, [previewMode.preview, appSettings.rememberLayout, layoutScope, collapsed, sidebarWidth, splitRatio, sideOpen, bottomOpen, bottomVisible, sideTab, bottomTab, explorerOpen, panelWidth, bottomHeight, btwWindow.open, btwWindow.placement, btwWindow.minimized, btwWindow.rect, btwWindow.capsulePos]);
 
   /* 任务完成 / 长任务系统通知：isStreaming 由真变假视为当前任务结束。 */
   const streamingSinceRef = useRef<{ on: boolean; since: number }>({ on: false, since: 0 });
@@ -5543,19 +5802,28 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     })();
   };
 
-  /** 顶栏 Compact：默认模式压缩上下文。手动 compact 不发 live start 事件，
-      用 compactPending 立刻画出「压缩中」横线；命令结束后再重读 transcript。 */
+  /** 顶栏 Compact：与 Composer 发送一样，先 ensureSelectedSessionActive（历史会话
+      只读打开时 Runtime 仍停在空会话上），再 operator.invoke builtin.compact。 */
   const compactThread = () => {
     setCompactPending(true);
     void (async () => {
+      const live = snapshotFrom(state);
+      const targetSessionId = selected?.sessionId;
+      const targetThreadId = selected?.threadId;
       try {
+        await ensureSelectedSessionActive(client, {
+          ...(live?.sessionId === undefined ? {} : { activeSessionId: live.sessionId }),
+          ...(targetSessionId === undefined ? {} : { selectedSessionId: targetSessionId }),
+          ...(targetThreadId === undefined ? {} : { selectedThreadId: targetThreadId }),
+        });
         const handle = await client.command("operator.invoke", { commandId: "builtin.compact" });
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
-        const failed = outcome.output.find((line) => /compaction failed/i.test(line));
+        const notice = compactNoticeFromOutput(outcome.output, { successText: "已压缩上下文" });
         setShellNotice({
-          text: failed ?? "已压缩上下文",
-          icon: failed === undefined ? "check" : "alert",
+          text: notice.text,
+          icon: notice.ok ? "check" : "alert",
         });
+        if (notice.ok) refreshViewedTelemetry();
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, "压缩失败"), icon: "alert" });
       } finally {
@@ -5579,15 +5847,19 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     })();
   };
 
-  const waitForNewSession = useCallback(() => sessionCreateWaitRef.current ?? Promise.resolve(true), []);
+  const waitForNewSession = useCallback(
+    () => sessionCreateWaitRef.current ?? Promise.resolve({ ok: true } as const),
+    [],
+  );
   const runSessionCreate = useCallback((work: () => Promise<void>) => {
     if (sessionCreateWaitRef.current) return;
     setCreatingSession(true);
     const pending = work()
-      .then(() => true)
-      .catch((error) => {
-        setShellNotice({ text: hostErrorMessage(error, "新建对话失败"), icon: "alert" });
-        return false;
+      .then((): NewSessionWaitResult => ({ ok: true }))
+      .catch((error): NewSessionWaitResult => {
+        const message = hostErrorMessage(error, "新建对话失败");
+        setShellNotice({ text: message, icon: "alert" });
+        return { ok: false, error: message };
       })
       .finally(() => {
         setCreatingSession(false);
@@ -5595,6 +5867,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       });
     sessionCreateWaitRef.current = pending;
   }, []);
+  const ensureNewSession = useCallback(() => {
+    if (previewMode.preview || sessionCreateWaitRef.current) return;
+    runSessionCreate(async () => {
+      const handle = await client.command("session.create", {});
+      await waitReceipt(client, handle.requestId);
+      refreshSessionTitles();
+    });
+  }, [client, previewMode.preview, runSessionCreate, refreshSessionTitles]);
 
   const startNewChat = useCallback(() => {
     if (previewMode.preview) {
@@ -5683,12 +5963,17 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           ...(execute.arguments ? { arguments: execute.arguments } : {}),
         });
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
-        const failed = compacting ? outcome.output.find((item) => /compaction failed/i.test(item)) : undefined;
-        const line = failed ?? outcome.output.find((item) => item.trim().length > 0);
-        setShellNotice({
-          text: line ?? `已执行 /${command.name}`,
-          icon: failed === undefined ? "check" : "alert",
-        });
+        if (compacting) {
+          const notice = compactNoticeFromOutput(outcome.output, { successText: "已压缩上下文" });
+          setShellNotice({ text: notice.text, icon: notice.ok ? "check" : "alert" });
+          if (notice.ok) refreshViewedTelemetry();
+        } else {
+          const line = outcome.output.find((item) => item.trim().length > 0);
+          setShellNotice({
+            text: line ?? `已执行 /${command.name}`,
+            icon: "check",
+          });
+        }
         return true;
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, `/${command.name} 失败`), icon: "alert" });
@@ -5780,6 +6065,10 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       case "route":
         go(action.route);
         return;
+      case "diagnostics":
+        if (action.intent !== undefined) setDiagnosticsIntent(action.intent);
+        go("diagnostics");
+        return;
       case "newChat":
         startNewChat();
         return;
@@ -5825,7 +6114,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         return;
       case "toggleBottom":
         go("workbench");
-        setBottomOpen((value) => !value);
+        applyBottomChrome(toggleBottomBarOpen({ visible: bottomVisible, open: bottomOpen }));
         return;
       case "toggleSide":
         go("workbench");
@@ -5841,7 +6130,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       case "openBottom":
         go("workbench");
         setBottomTab(action.tab);
-        setBottomOpen(true);
+        applyBottomChrome(revealBottomBar());
         return;
       case "openSide":
         go("workbench");
@@ -5936,12 +6225,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         startNewChat();
       } else if (key === "j" && !event.shiftKey) {
         event.preventDefault();
-        setBottomOpen((value) => !value);
+        applyBottomChrome(toggleBottomBarOpen({ visible: bottomVisible, open: bottomOpen }));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [archiveBusy, archivePending, dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
+  }, [archiveBusy, archivePending, applyBottomChrome, bottomOpen, bottomVisible, dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
 
   // 项目 shell 动作（外部编辑器 / 文件管理器）：AppShell 统一持有，
   // 顶栏面包屑菜单与侧栏应用菜单共用同一套状态与 Toast 提示。
@@ -6262,15 +6551,23 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           {state.hostError && (
             <div className="banner amber" role="alert">
               <Icon name="alert" />
-              <span><b>host unavailable</b> · <span className="banner-detail">{state.hostError.message}</span></span>
+              <span><b>Host 不可用</b> · <span className="banner-detail">{state.hostError.message}</span></span>
             </div>
           )}
           {state.clientState?.connection.resyncRequired && (
             <div className="banner amber" role="alert">
               <Icon name="alert" />
-              <span><b>resync required</b> · <span className="banner-detail">正在恢复最新 Runtime 状态，敏感操作已暂停。</span></span>
+              <span><b>需要重新同步</b> · <span className="banner-detail">正在恢复最新 Runtime 状态，敏感操作已暂停。</span></span>
             </div>
           )}
+          {pageRoute !== "diagnostics" ? (
+            <RuntimeLossBanner
+              {...(runtime === undefined ? {} : { runtime })}
+              client={client}
+              preview={previewMode.preview}
+              onOpenDiagnostics={() => go("diagnostics")}
+            />
+          ) : null}
           {pageRoute === "home" ? (
             <HomePage
               {...(runtime ? { runtime } : {})}
@@ -6307,6 +6604,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               client={client}
               canSend={hubCanSend}
               runtimeConnected={hubRuntimeConnected}
+              onOpenDiagnostics={() => go("diagnostics")}
+              agents={viewedAgents}
+              persistedReady={persistedAgentsReady}
+              {...(viewedSessionId === undefined ? {} : { parentSessionId: viewedSessionId as SessionId })}
+              {...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId })}
+              pendingInteraction={pendingInteraction !== null}
               {...(hubWorkspaceId === undefined ? {} : { workspaceId: hubWorkspaceId })}
               loadMentions={fetchHubMentions}
               onOpenMain={() => go("workbench")}
@@ -6333,7 +6636,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         </SecondaryPage>
       ) : (
       <div className={`app-body ${shellClass}`}>
-        <AppSidebar state={state} chrome={chrome} client={client} onRoute={go} />
+        <AppSidebar state={state} chrome={chrome} client={client} onRoute={go} onOpenAppUpdateDialog={() => setShowAppUpdateDialog(true)} />
         <div className="main-col">
           <AppTopbar
             state={state}
@@ -6347,25 +6650,34 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             onOpenGit={() => { setSideTab("git"); setSideOpen(true); }}
             onOpenTerminal={() => { setBottomTab("terminal"); setBottomOpen(true); }}
             viewedSessionId={selected?.sessionId}
+            telemetryRefreshToken={telemetryRefreshToken}
           />
           {state.hostError && (
             <div className="banner amber" role="alert">
               <Icon name="alert" />
-              <span><b>host unavailable</b> · <span className="banner-detail">{state.hostError.message}</span></span>
+              <span><b>Host 不可用</b> · <span className="banner-detail">{state.hostError.message}</span></span>
             </div>
           )}
           {state.clientState?.connection.resyncRequired && (
             <div className="banner amber" role="alert">
               <Icon name="alert" />
-              <span><b>resync required</b> · <span className="banner-detail">正在恢复最新 Runtime 状态，敏感操作已暂停。</span></span>
+              <span><b>需要重新同步</b> · <span className="banner-detail">正在恢复最新 Runtime 状态，敏感操作已暂停。</span></span>
             </div>
           )}
+          <RuntimeLossBanner
+            {...(runtime === undefined ? {} : { runtime })}
+            client={client}
+            preview={previewMode.preview}
+            onOpenDiagnostics={() => go("diagnostics")}
+          />
           <WorkbenchCanvas
             state={state}
             client={client}
             {...(selected?.sessionId === undefined ? {} : { selectedSessionId: selected.sessionId })}
+            viewedAgents={viewedAgents}
             {...(selected?.threadId === undefined ? {} : { selectedThreadId: selected.threadId })}
             waitForNewSession={waitForNewSession}
+            ensureNewSession={ensureNewSession}
             {...(creatingSession ? { sessionCreating: true } : {})}
             {...(previewMode.preview ? { previewProjectId: chrome.previewProjectId, previewThreadId: chrome.previewThreadId, onPreviewDeckWait: setPreviewDeckWait } : {})}
             onSelectProject={chrome.onSelectProject}
@@ -6382,6 +6694,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             onResizePanel={setPanelWidth}
             bottomOpen={bottomOpen}
             onBottomOpenChange={setBottomOpen}
+            bottomVisible={bottomVisible}
+            onBottomVisibleChange={setBottomVisible}
             bottomHeight={bottomHeight}
             onResizeBottom={(height) => setBottomHeight(clampBottomHeight(height))}
             bottomTab={bottomTab}
@@ -6401,6 +6715,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             onBtwPreviewAsk={() => setBtwDemoRound(0)}
             compactPending={compactPending}
             onCompactPending={setCompactPending}
+            onViewedTelemetryRefresh={refreshViewedTelemetry}
             {...(createProjectNonce === 0 ? {} : { createProjectNonce })}
             {...(selectedProject?.id === undefined ? {} : { workspaceId: selectedProject.id })}
           />
@@ -6533,7 +6848,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
           </div>
         </div>
       ) : null}
-      <ToastHost message={shellNotice?.text ?? null} icon={shellNotice?.icon ?? "info"} placement="top" onDismiss={() => setShellNotice(null)} />
+      <ToastHost message={shellNotice?.text ?? null} icon={shellNotice?.icon ?? "info"} onDismiss={() => setShellNotice(null)} />
       <CommandPalette
         ref={paletteRef}
         open={paletteOpen}
@@ -6543,6 +6858,16 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         onClose={closePalette}
         onRun={runPaletteAction}
       />
+      {showAppUpdateDialog && effectiveUpdate ? (
+        <AppUpdateDialog
+          update={effectiveUpdate}
+          preview={previewMode.preview}
+          isDownloading={appUpdate.state.downloading}
+          downloadError={appUpdate.state.downloadError}
+          onClose={() => setShowAppUpdateDialog(false)}
+          onDownloadAndInstall={() => appUpdate.downloadAndInstall()}
+        />
+      ) : null}
     </div>
   );
 }
@@ -6552,6 +6877,12 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
   const [state, dispatch] = useReducer(reduce, { loading: true, model: {}, events: [], route: "workbench" });
   const [route, setRoute] = useState<Route>(initialRouteFromSettings);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const { check: checkAppUpdate } = useAppUpdate();
+
+  useEffect(() => {
+    void checkAppUpdate(true);
+  }, [checkAppUpdate]);
+
   useEffect(() => {
     let cancelled = false;
     const offEvent = client.subscribe({ scope: "all" }, (event) => {
@@ -6610,7 +6941,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
   const runtimeEpoch = state.clientState?.connection.runtimeEpoch;
   const runtimeStatus = state.clientState?.connection.runtime?.status;
   useEffect(() => {
-    if (state.loading || runtimeStatus !== "connected") return;
+    if (state.loading || runtimeStatus === undefined) return;
     let cancelled = false;
     void resyncRuntimeModel(client).then((model) => {
       if (!cancelled) dispatch({ type: "model", model });
@@ -6675,9 +7006,11 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
   );
   return (
     <PreviewModeProvider>
-      {body}
-      <StartupNotice />
-      <TipHost />
+      <I18nProvider>
+        {body}
+        <StartupNotice />
+        <TipHost />
+      </I18nProvider>
     </PreviewModeProvider>
   );
 }

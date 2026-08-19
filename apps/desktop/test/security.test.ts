@@ -71,6 +71,7 @@ import {
   isTrustedRendererUrl,
   rendererOriginFor,
   rendererCspFor,
+  rendererDevServerUrl,
   resolveRendererEntry,
   secureWebPreferences,
   type CreateSecureWindowDeps,
@@ -549,11 +550,21 @@ describe("RENDERER_CSP: no unsafe-eval", () => {
 });
 
 test("rendererCspFor keeps packaged CSP strict and permits Vite refresh only in dev", () => {
-  assert.match(rendererCspFor({ kind: "file", path: "C:\\app\\index.html" }), /script-src 'self'(?:;|\s)/u);
+  const packaged = rendererCspFor({ kind: "file", path: "C:\\app\\index.html" });
+  assert.match(packaged, /script-src 'self'(?:;|\s)/u);
+  assert.match(packaged, /connect-src 'self';/u);
+  assert.equal(packaged.includes("localhost"), false);
+  assert.equal(packaged.includes("127.0.0.1"), false);
   const dev = rendererCspFor({ kind: "url", url: "http://127.0.0.1:5173" });
   assert.match(dev, /script-src 'self' 'unsafe-inline'/u);
   assert.match(dev, /connect-src .*127\.0\.0\.1:5173/u);
   assert.ok(!dev.includes("unsafe-eval"));
+});
+
+test("rendererDevServerUrl ignores the developer Vite override when packaged", () => {
+  assert.equal(rendererDevServerUrl(true, "http://127.0.0.1:5173"), undefined);
+  assert.equal(rendererDevServerUrl(false, "http://127.0.0.1:5173"), "http://127.0.0.1:5173");
+  assert.equal(rendererDevServerUrl(false, ""), undefined);
 });
 
 describe("navigation and new-window policy", () => {
@@ -624,6 +635,12 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
     shown = false;
     loaded = "";
     readonly listeners = new Map<string, Set<(...args: unknown[]) => unknown>>();
+    readonly webContents = {
+      on: (event: "did-finish-load" | "did-fail-load", listener: () => void): unknown => {
+        this.on(`webContents:${event}`, listener);
+        return this;
+      },
+    };
     constructor(options: Record<string, unknown>) {
       this.options = options;
     }
@@ -654,6 +671,9 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
         listener(...args);
       }
     }
+    fireRenderer(event: "did-finish-load" | "did-fail-load"): void {
+      this.fire(`webContents:${event}`);
+    }
   }
 
   test("secure webPreferences overwrite any caller-provided ones", () => {
@@ -682,6 +702,30 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
     assert.equal(window.shown, true);
   });
 
+  test("shows the window when WebContents finishes or fails to load", () => {
+    const finishWindow = createSecureWindow({
+      BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike & NavigationGuardedWindow,
+      windowOptions: {},
+      preloadPath: "C:\\app\\preload.cjs",
+      target: { kind: "file", path: "C:\\app\\renderer\\index.html" },
+      allowedOrigin: "file://",
+      deferLoad: true,
+    }) as unknown as FakeBrowserWindow;
+    finishWindow.fireRenderer("did-finish-load");
+    assert.equal(finishWindow.shown, true);
+
+    const failedWindow = createSecureWindow({
+      BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike & NavigationGuardedWindow,
+      windowOptions: {},
+      preloadPath: "C:\\app\\preload.cjs",
+      target: { kind: "file", path: "C:\\app\\renderer\\index.html" },
+      allowedOrigin: "file://",
+      deferLoad: true,
+    }) as unknown as FakeBrowserWindow;
+    failedWindow.fireRenderer("did-fail-load");
+    assert.equal(failedWindow.shown, true);
+  });
+
   test("loads the renderer target and installs navigation guards", () => {
     const window = createSecureWindow({
       BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike & NavigationGuardedWindow,
@@ -707,11 +751,20 @@ describe("renderer entry resolution", () => {
     });
   });
 
-  test("resolveRendererEntry falls back to the packaged renderer bundle", () => {
+  test("resolveRendererEntry falls back to the workspace renderer bundle", () => {
     const target = resolveRendererEntry("C:\\app\\desktop\\dist", undefined);
     assert.equal(target.kind, "file");
     assert.ok((target as { path: string }).path.endsWith("renderer\\dist\\index.html"));
     assert.equal(rendererOriginFor(target), "file://");
+  });
+
+  test("resolveRendererEntry maps the packaged asar onto extraResources renderer", () => {
+    const target = resolveRendererEntry("C:\\Program Files\\OMP Studio\\resources\\app.asar", undefined);
+    assert.equal(target.kind, "file");
+    assert.equal(
+      (target as { path: string }).path,
+      "C:\\Program Files\\OMP Studio\\resources\\renderer\\dist\\index.html",
+    );
   });
 
   test("rendererOriginFor derives the exact dev origin and fails closed on junk", () => {

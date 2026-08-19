@@ -1,24 +1,22 @@
 # OMP Studio Windows Installer — packaging 骨架
 
-安装器骨架：UI 先用零依赖 HTML 原型在浏览器里预览设计，
-确认后再翻译成 NSIS（electron-builder）原生界面。当前原型已按
-`omp-studio-installer-wizard-design.zip` 的视觉方案落地。
+安装器骨架：可见向导是 `packaging/ui` 那套 720×480 HTML，由 WebView2
+小宿主显示；NSIS 只负责提权和解包。浏览器里仍可直接打开原型预览。
 
 ## 目录结构
 
 ```
 packaging/
   electron-builder.yml   # electron-builder 配置（NSIS target）
-  installer-shell/       # 方案 2：承载 HTML UI 的 Electron 外壳（当前为视觉阶段）
-    main.cjs
-    preload.cjs
-    package.json
+  installer-host/        # WebView2 宿主源码（csc 在 pack:win 时编译）
+    InstallerHost.cs
+  installer-shell/       # 本地 Electron 预览同一套 HTML（不打进 Setup）
+  ui/                    # 安装器 UI（浏览器原型 = Setup 真界面）
+    index.html
+    styles.css
+    app-icon.png
     README.md
-  ui/                    # 安装器 UI HTML 原型（浏览器预览用）
-    index.html            # 四步向导与交互逻辑（内联、零依赖）
-    styles.css            # 亮色 / 暗色主题与动效
-    app-icon.png          # 安装器品牌图标
-    README.md             # 视觉方案与 NSIS 降级说明
+  nsis/custom.nsh        # 隐藏 MUI、启动宿主、读 options.ini
   README.md              # 本文件
 ```
 
@@ -28,7 +26,7 @@ packaging/
 # 方式一：直接浏览器打开（无服务依赖）
 open packaging/ui/index.html
 
-# 方式二：本地静态服务（推荐，复用 .claude/launch.json 的 "installer ui"）
+# 方式二：本地静态服务（推荐）
 python -m http.server 4175 --directory packaging/ui
 # 然后访问 http://127.0.0.1:4175
 ```
@@ -37,34 +35,72 @@ python -m http.server 4175 --directory packaging/ui
 
 ## 运行 HTML 宿主外壳
 
-当前阶段先验证真实 Windows 窗口中的视觉效果，安装逻辑仍未接入：
+本地用 Electron 预览真窗口（浏览/磁盘是本机的，安装进度是演示）：
 
 ```bash
 npm --prefix packaging/installer-shell run dev
 ```
 
-宿主使用固定无边框 `720 × 480` 窗口加载 `ui/index.html`，只通过受控
-preload 暴露最小化和关闭操作。后续 NSIS 集成时，NSIS 将负责启动/打包
-该宿主，目录选择、文件复制、运行时部署和回滚通过额外的安装协议接入。
+打进 Setup 的是 WebView2 宿主，不是第二份 Electron。`pack:win` 会编译
+`OmpInstallerUi.exe`，NSIS 启动它并隐藏 MUI 向导。本机没有 WebView2
+时回退到默认目录 + 原生进度页。
 
-## 构建真实安装器（骨架阶段，未验证）
+提权安装时不要用 `$PLUGINSDIR` 的 `file://`：NSIS 3 会把该临时目录锁成
+Administrators-only，而 WebView2 子进程是中完整性，会 `ERR_ACCESS_DENIED`。
+成熟做法是宿主把 HTML 拷到 `%ProgramData%\omp-studio\installer\ui`，
+用 `SetVirtualHostNameToFolderMapping` 打开 `https://omp-installer/…`，
+WebView2 缓存放 `%ProgramData%\omp-studio\installer-webview`（Users 可写）。
+握手 INI 仍在 `$PLUGINSDIR`（父进程已提权，写得进去）。
 
-```bash
-# 需要先完整构建 desktop 产物（apps/desktop/dist + apps/renderer/dist）
-npm run build
+## 构建真实安装器
 
-# 安装 electron-builder（workspace devDependency）
-npm install -D electron-builder
+从仓库根目录：
 
-# 用 electron-builder 打 NSIS 包（--win 指定 Windows 目标）
-npx electron-builder --config packaging/electron-builder.yml --win nsis
+```powershell
+npm run pack:win
 ```
 
-产物输出到 `outputs/installer/`（由 electron-builder.yml 的 `directories.output` 决定）。
+需要先能完成本机 `omp:build:host`（Bun、MSVC、Rust、已执行过 `omp:keys`）。
+产物在 `outputs/installer/`（gitignore）：
+
+- `win-unpacked/` — 安装布局（审计用）
+- `OMP-Studio-Setup-0.1.0-win-x64.exe` — NSIS Setup（未 Authenticode 签名）
+
+`pack:win` 会：构建 workspace 与 sandboxed preload、确认
+`apps/renderer/dist`、把公钥拷到 `packaging/runtime-keys`、调用 electron-builder、
+再扫描 unpacked 树与 Setup exe，发现 `signing-private.pem` 或 `BEGIN PRIVATE KEY`
+即失败。
+
+已有签名 Runtime 工件时：
+
+```powershell
+npm run pack:win -- --skip-host
+```
+
+单独步骤仍可用：
+
+```powershell
+npm run omp:build:host
+npm run pack:win:prepare
+npx electron-builder --config packaging/electron-builder.yml --win nsis --publish never
+npm run pack:win:audit
+```
 
 ## 安装行为（产品契约）
 
-原型 `packaging/ui/index.html` 左上角可切换情景预览（含卸载）。NSIS 落地应对齐下列规则。
+原型 `packaging/ui/index.html` 左上角可切换情景预览（含卸载）。浏览器打开
+仍是演示数据；Setup 里同一文件走 `?host=installer`，读注册表/磁盘真值。
+
+静默 `/S` 不启动 HTML，占用确认仍用系统 MessageBox（相同版本默认修复，
+降级默认拒绝）。electron-updater `/updated` 也不走 HTML。
+
+NSIS 落地在 `packaging/nsis/custom.nsh`：
+
+- 交互安装：隐藏 MUI 窗，只显示 WebView2 宿主；相同版本 / 降级 / 占用对话框在 HTML 里。
+  HTML 成功后跳过空的原生自定义页，拷贝文件时 InstFiles 保持隐藏。
+- `options.ini` 给出解析后的安装根和是否创建桌面快捷方式。
+- 已有安装时 HTML 锁定上次目录。
+- `customCheckAppRunning`：HTML 已确认结束进程则不再弹原生框；卸载仍用系统 MessageBox。
 
 ### 默认位置
 
@@ -72,15 +108,18 @@ npx electron-builder --config packaging/electron-builder.yml --win nsis
 
 ### 选择文件夹后是否新建
 
-浏览或手输的是「选中的文件夹」，真正写入的是解析后的安装根：
+浏览或手输的是「选中的文件夹」，真正写入的是解析后的安装根。规则与 Inno `AppendDefaultDirName`、常见国内安装包一致：只在「容器」上套一层产品目录，空目录或已是产品目录则原样使用。实现：`scripts/installer-dir.mjs` 与 `packaging/nsis/custom.nsh` `ompResolveInstDir`。
 
 | 选中路径 | 实际安装到 |
 |---|---|
-| 末级已是 `OMP Studio`（忽略大小写） | 原样使用 |
+| 末级已是 `OMP Studio`（忽略大小写），含误套的 `...\OMP Studio\OMP Studio` | 原样使用（双层收成一层） |
+| 目录里已有 `OMP Studio.exe` / 卸载器 | 原样使用 |
 | 已有本应用安装（升级 / 修复 / 降级） | 上次的 `InstallLocation`，不另建 |
-| 其他（含空目录、桌面、文档、盘符、`D:\Dev`） | 追加 `\OMP Studio` |
+| 盘符根、`Program Files`、桌面、文档、下载等系统目录 | 追加 `\OMP Studio` |
+| 已存在且非空的普通文件夹 | 追加 `\OMP Studio` |
+| 空目录，或不存在的路径（将创建） | 原样作为安装根 |
 
-不要用「目录非空就再套一层」：那会在二次安装时变成 `...\OMP Studio\OMP Studio`。
+不要用「只要末级不是产品名就一律套一层」：那会把用户建好的空目录 `D:\Dev` 变成 `D:\Dev\OMP Studio`。也不要只看「目录非空」而不看末级名：二次安装选中已有产品目录时会变成 `OMP Studio\OMP Studio`。
 
 ### 版本占用
 
@@ -90,7 +129,10 @@ npx electron-builder --config packaging/electron-builder.yml --win nsis
 | 更旧版本 | 原地更新；目录锁定；会话在 AppData；运行时随程序文件更新；头像覆盖同一文件 |
 | 相同版本 | 确认后修复覆盖程序文件；AppData 会话保留 |
 | 更高版本 | 警告确认后才允许降级 |
-| 进程占用 | 确认后结束 `OMP Studio.exe` 再写文件 |
+| 进程占用 | 确认后结束 `OMP Studio.exe`（及安装目录下的 `omp.exe`）再写文件 |
+
+交互安装的占用对话框在 HTML 里；`customInit` 的系统 MessageBox 只留给静默 `/S`
+（相同版本默认修复，降级默认拒绝）。electron-updater `/updated` 跳过版本确认。
 
 ### 卸载
 
@@ -128,23 +170,17 @@ NSIS `customInstall` 会给 `$INSTDIR\runtime` 开 Users 修改权，这样完�
 打包前：
 
 ```bash
-npm run omp:build:host
-npm run pack:win:prepare
-npx electron-builder --config packaging/electron-builder.yml --win nsis
+npm run pack:win
 ```
 
-`pack:win:prepare` 会确认 `packages/runtime-installer/dist/artifacts/win32-x64` 存在，并把本机 `%APPDATA%\omp-studio\keys` 里的公钥拷到 `packaging/runtime-keys`（gitignore）。没有工件或公钥时直接失败，避免打出不能用的安装包。
+`pack:win:prepare` 会确认 `packages/runtime-installer/dist/artifacts/win32-x64` 存在，并把本机 `%APPDATA%\omp-studio\keys` 里的公钥拷到 `packaging/runtime-keys`（gitignore）。没有工件或公钥时直接失败，避免打出不能用的安装包。Renderer 打进 `resources/renderer/dist`，对应 `resolveRendererEntry` 的 asar 相对路径。
 
-## 从原型到 NSIS 的翻译规则
+## 可见向导
 
-| 原型元素 | NSIS 对应 |
-|---|---|
-| 欢迎页 / 完成页 | MUI2 `WelcomePage` / `FinishPage` + 自定义 BMP 背景图 |
-| 安装目录选择 | MUI2 `DirectoryPage` |
-| 安装进度 | MUI2 `InstFilesPage`（内建进度条） |
-| 卸载 | MUI2 默认卸载欢迎 / 进度 / 完成；删除范围由 `custom.nsh` 实现，不是 HTML 向导 |
-| 自定义品牌色 / 字体 | NSIS branding text + MUI 图标 / 资源替换 |
-| 任意现代 CSS 布局 | ⚠️ 受限于 NSIS 原生控件，需降级为简单布局 |
+Setup 显示 `packaging/ui` 的 720×480 HTML（WebView2），不再用 MUI2 原生页。
+浏览器打开仍可预览情景开关；`?host=installer` 隐藏原型铬，走真实目录/占用。
+缺少 WebView2 时 NSIS 回退到默认安装位置 + 原生进度。卸载仍是 MUI2。
+HTML 经 ProgramData 虚拟主机加载，不是 NSIS 临时目录上的 `file://`。
 
 ## 关键坑位（实现 NSIS 时注意）
 

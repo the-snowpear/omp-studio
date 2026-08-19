@@ -71,6 +71,13 @@ skills-lock.json
 
 # Local generated installer public key (never the private signing key)
 packaging/runtime-keys/
+packaging/runtime-payload/
+
+# WebView2 installer host (compiled at pack:win)
+packaging/installer-host/.cache/
+packaging/installer-host/dist/
+packaging/resources/installer-ui/
+packaging/resources/installer-host/
 
 # Alternate lockfile (repo uses npm / package-lock.json)
 pnpm-lock.yaml
