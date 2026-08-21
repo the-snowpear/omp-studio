@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 import { useCallback, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { clampGitDiffHeight, GIT_DIFF_DEFAULT, GIT_DIFF_MIN, readGitDiffHeight, writeGitDiffHeight } from "./gitDiffMemory";
@@ -19,6 +20,7 @@ export function GitDiffResizer({
   readonly height: number;
   readonly onHeight: (px: number) => void;
 }) {
+  const { t } = useI18n();
   const paneOf = (handle: HTMLElement) => handle.closest(".git-status-pane");
   const slotOf = (pane: Element | null) => pane?.querySelector(".git-diff-slot");
   const paneHeight = (pane: Element | null) => (pane instanceof HTMLElement ? pane.clientHeight : undefined);
@@ -87,7 +89,7 @@ export function GitDiffResizer({
       className="ch-diff-resizer"
       role="separator"
       aria-orientation="horizontal"
-      aria-label="调整 Diff 预览高度"
+      aria-label={t("git.adjustDiffHeight")}
       aria-valuemin={GIT_DIFF_MIN}
       aria-valuenow={height}
       tabIndex={0}

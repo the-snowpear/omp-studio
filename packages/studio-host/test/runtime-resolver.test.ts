@@ -565,3 +565,51 @@ test("process probe reports PROBE_UNAVAILABLE when the bridge bootstrap fails", 
   assert.equal(outcome.failure, "PROBE_UNAVAILABLE");
   assert.equal(outcome.hello, undefined);
 });
+
+test("a transient probe failure is retried and a healthy second attempt is accepted", async () => {
+  const { path } = await executableFile();
+  const calls: RuntimeProbeContext[] = [];
+  const outcomes: RuntimeProbeOutcome[] = [{ failure: "PROBE_TIMEOUT", failureDetail: "cold first launch" }, fullOutcome()];
+  const resolution = await resolveRuntime(
+    { kind: "system", executable: path, allowLimited: false },
+    environment({
+      probe: {
+        probe: async (context) => {
+          calls.push(context);
+          return outcomes[calls.length - 1] ?? fullOutcome();
+        },
+      },
+    }),
+  );
+  assert.equal(calls.length, 2);
+  assert.equal(resolution.classification, "compatible-system");
+  assert.equal(resolution.probeFailure, undefined);
+  // A cold first launch pays for page faults, virus scanning and first-run
+  // config creation, so the default budget is not a warm-machine guess.
+  assert.equal(calls[0]?.probeTimeoutMs, 30_000);
+});
+
+test("a probe verdict is never retried and probeAttempts caps transient retries", async () => {
+  const { path } = await executableFile();
+  const verdictCalls: RuntimeProbeContext[] = [];
+  const verdict = await resolveRuntime(
+    { kind: "system", executable: path, allowLimited: true },
+    environment({ probe: probeWith(fullOutcome({ shutdown: "failed" }), verdictCalls) }),
+  );
+  assert.equal(verdictCalls.length, 1);
+  assert.equal(verdict.classification, "rejected");
+  const transientCalls: RuntimeProbeContext[] = [];
+  const transient = await resolveRuntime(
+    { kind: "system", executable: path, allowLimited: true },
+    environment({ probe: probeWith({ failure: "CONNECTION_FAILED" }, transientCalls), probeAttempts: 3 }),
+  );
+  assert.equal(transientCalls.length, 3);
+  assert.equal(transient.classification, "rejected");
+  assert.equal(transient.probeFailure, "CONNECTION_FAILED");
+  const singleCall: RuntimeProbeContext[] = [];
+  await resolveRuntime(
+    { kind: "system", executable: path, allowLimited: true },
+    environment({ probe: probeWith({ failure: "PROBE_TIMEOUT" }, singleCall), probeAttempts: 1 }),
+  );
+  assert.equal(singleCall.length, 1);
+});

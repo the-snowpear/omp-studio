@@ -1,6 +1,6 @@
 {
   "name": "omp-studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Desktop console for OMP Runtime — typed Studio Bridge, Electron workbench, Windows installer",
   "license": "MIT",

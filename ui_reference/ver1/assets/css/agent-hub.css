@@ -1,0 +1,686 @@
+/* ============================================================
+   OMP Studio — Agent Hub
+   主 Agent 横幅 · Roster（列表+详情） · Transcript · Jobs · IRC
+   ============================================================ */
+
+/* ---------- 页面骨架：高度由内容决定，超过视口时自然滚动 ---------- */
+.hub-page {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-14);
+}
+
+/* ---------- 连接横幅（offline / reconnecting / stale / resync / limited） ---------- */
+.hub-conn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: 8px var(--sp-14);
+  border-radius: var(--r-8);
+  font-size: var(--fs-12);
+}
+.hub-conn.red { background: var(--red-soft); color: var(--red); }
+.hub-conn.amber { background: var(--amber-soft); color: var(--amber); }
+.hub-conn.blue { background: var(--blue-soft); color: var(--blue); }
+.hub-conn .hc-detail { color: var(--text-2); flex: 1; min-width: 0; }
+.hub-conn .hc-actions { display: flex; gap: var(--sp-6); flex: none; }
+
+/* ---------- 主 Agent 横幅卡 ---------- */
+.hub-main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-12);
+  padding: var(--sp-14) var(--sp-16);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+}
+.hub-main .hm-ic {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-8);
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.hub-main .hm-main { flex: 1; min-width: 0; }
+.hub-main .hm-title { font-weight: var(--fw-semibold); font-size: var(--fs-14); display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
+.hub-main .hm-sub {
+  display: flex;
+  gap: var(--sp-8);
+  align-items: baseline;
+  margin-top: 2px;
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  flex-wrap: wrap;
+}
+.hub-main .hm-task { flex: 1; min-width: 0; }
+.hub-main .hm-meta { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); flex: none; }
+.hub-main .hm-conn { display: inline-flex; align-items: center; gap: var(--sp-6); color: var(--text-faint); }
+.hub-main .hm-conn .hm-dot { width: 6px; height: 6px; border-radius: var(--r-full); background: var(--glyph-faint); flex: none; }
+.hub-main .hm-conn .hm-dot.on { background: var(--green); }
+.hub-main .hm-actions { display: flex; gap: var(--sp-6); flex: none; align-items: center; }
+
+/* ---------- Roster 头：视图切换 + 状态计数 + 搜索 ---------- */
+.hub-roster-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  flex-wrap: wrap;
+}
+.hub-status-counts {
+  display: flex;
+  gap: var(--sp-12);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+}
+.hub-status-counts .sc-item { display: inline-flex; align-items: center; gap: var(--sp-6); }
+.hub-search { width: 220px; }
+
+/* ---------- 汇总 Usage 行（右侧挂 New Agent） ---------- */
+.hub-usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-10);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  padding: var(--sp-6) var(--sp-4);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---------- 列表 + 详情双列 ---------- */
+.hub-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 58fr) minmax(0, 42fr);
+  gap: var(--sp-16);
+  align-items: start;
+}
+
+.hub-list { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
+
+/* ============================================================
+   Agent 卡片 + 树状视图（2026-08-11 v3 重构，取代旧 .hub-row 平面文本版）
+   设计语言：实体状态点 + 条形卡片 pill + 大数字+迷你柱 + outline artifact chip；
+   树状 = 组头卡（父摘要）+ 竖向导线 + 缩进透明叶子（左缘状态色条）。
+   ============================================================ */
+
+/* ---------- 状态点：实体 dot + 状态色（旧版仅文字色圆点，存在感弱） ---------- */
+.hub-sd { width: 8px; height: 8px; flex: none; border-radius: var(--r-full); }
+.hub-sd.running { background: var(--green); }
+.hub-sd.idle    { background: var(--blue); }
+.hub-sd.parked  { background: var(--glyph-faint); }
+.hub-sd.aborted { background: var(--red); }
+.hub-sd.pulse   { animation: omp-pulse 1.8s var(--ease) infinite; }
+
+/* ---------- Activity pill：整粒状态色胶囊（软底 + 状态色文字，取消左缘色条） ---------- */
+.hub-act {
+  display: inline-flex; align-items: center; gap: var(--sp-6);
+  height: 22px; padding: 0 var(--sp-10);
+  border-radius: var(--r-full);
+  font-size: var(--fs-11); font-weight: var(--fw-medium);
+  white-space: nowrap; flex: none;
+}
+.hub-act.thinking { background: var(--accent-soft); color: var(--accent); }
+.hub-act.tool     { background: var(--blue-soft);   color: var(--blue); }
+.hub-act.waiting  { background: var(--amber-soft);  color: var(--amber); }
+.hub-act.idle     { background: var(--green-soft);  color: var(--green); }
+.hub-act.parked   { background: var(--surface-2);   color: var(--text-3); }
+.hub-act.aborted  { background: var(--red-soft);    color: var(--red); }
+
+/* role 标签：随 pill 条形化 */
+.hub-role {
+  display: inline-flex; align-items: center;
+  height: 18px; padding: 0 var(--sp-8);
+  border-radius: var(--r-6);
+  font-size: 10.5px; font-weight: var(--fw-medium);
+  background: var(--surface-2); color: var(--text-3);
+}
+
+/* unread / read-only 标记（沿用 pill 圆角，语义不变） */
+.hub-unread {
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 18px; padding: 0 var(--sp-6);
+  border-radius: var(--r-full);
+  font-size: 10.5px; font-weight: var(--fw-medium);
+  background: var(--amber-soft); color: var(--amber);
+}
+.hub-ro-tag {
+  display: inline-flex; align-items: center;
+  height: 18px; padding: 0 var(--sp-6);
+  border-radius: var(--r-full);
+  font-size: 10.5px; font-weight: var(--fw-medium);
+  background: var(--surface-2); color: var(--text-3);
+}
+
+.hub-model { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); }
+.hub-fallback { color: var(--amber); font-weight: var(--fw-medium); }
+
+/* ============================================================
+   卡片（Flat 视图 + 树状孤儿共用）
+   左主右栏：左 = 身份+任务，右 = 用量栏（右上时间，下大字成本 + req/tools/tok 竖排）
+   ============================================================ */
+.hub-card {
+  position: relative;
+  display: flex; align-items: stretch; gap: var(--sp-14);
+  width: 100%;
+  text-align: left; color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  padding: var(--sp-10) var(--sp-12) var(--sp-10) var(--sp-14);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.hub-card:hover { border-color: var(--accent-border); background: var(--surface-hover); }
+.hub-card.sel { border-color: var(--accent-border); background: var(--accent-softer); }
+.hub-card.sel::before {
+  content: ""; position: absolute;
+  left: 0; top: 10px; bottom: 10px;
+  width: 3px; border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+/* 左栏：身份 + 任务 */
+.hub-card .hc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hub-card .hc-top { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
+.hub-card .hc-name {
+  display: inline-flex; align-items: center; gap: var(--sp-6);
+  min-width: 0; font-weight: var(--fw-semibold); font-size: var(--fs-12);
+}
+.hub-card .hc-name > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-card .hc-flags { display: flex; align-items: center; gap: var(--sp-4); flex: none; }
+
+.hub-card .hc-task {
+  margin-top: 5px;
+  font-size: var(--fs-12); color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 左栏尾行：角色 · 模型 · artifact chip */
+.hub-card .hc-foot {
+  display: flex; align-items: center; gap: var(--sp-8);
+  margin-top: auto; padding-top: 8px;   /* 顶到左栏底部，与右栏基线呼应 */
+  min-width: 0; flex-wrap: wrap;
+}
+.hub-card .hc-art { display: flex; gap: var(--sp-4); flex: none; }
+.hub-art {
+  display: inline-flex; align-items: center;
+  height: 18px; padding: 0 var(--sp-6);
+  border: 1px solid var(--border);
+  border-radius: var(--r-6);
+  font-size: 10px; font-family: var(--font-mono);
+  color: var(--text-faint); background: transparent;
+}
+
+/* 右栏：用量栏（开始时刻 → tokens 主显 → req·tools 安静行 → 成本小字）
+   优先级：tokens > 运行节奏 > 成本。所有数字右对齐、tabular-nums，基线成一条直线。 */
+.hub-card .hc-side {
+  flex: none; margin-left: auto;
+  display: flex; flex-direction: column; align-items: flex-end;
+  text-align: right;
+}
+.hub-card .hc-side > * + * { margin-top: 7px; }
+
+/* 运行开始时刻（HH:MM）+ 时钟小图标 */
+.hub-card .hc-start {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  color: var(--text-faint); font-variant-numeric: tabular-nums; line-height: 1;
+}
+.hub-card .hc-start .icon { color: var(--glyph-faint); }
+
+/* tokens：右栏主显，大号 + 迷你柱 */
+.hub-card .hc-tokens {
+  display: inline-flex; align-items: baseline; gap: 5px;
+}
+.hub-card .hc-tokens b {
+  font-family: var(--font-mono); font-size: var(--fs-18); font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: var(--text); line-height: 1;
+}
+.hub-card .hc-tokens i { font-style: normal; font-size: 10px; color: var(--text-faint); }
+.hub-card .hc-tokens .hc-spark { padding-bottom: 1px; }
+
+/* req · tools：一行安静小字（单位在左、数字在右，右对齐成一条线） */
+.hub-card .hc-pace { display: inline-flex; gap: var(--sp-12); }
+.hub-num { display: inline-flex; align-items: baseline; gap: 4px; }
+.hub-num i { font-style: normal; font-size: 10px; color: var(--text-faint); }
+.hub-num b {
+  font-family: var(--font-mono); font-size: 12px; font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums; color: var(--text-2); line-height: 1;
+}
+
+/* 成本：降级为最底小字 */
+.hub-card .hc-cost {
+  font-family: var(--font-mono); font-size: 11px;
+  font-variant-numeric: tabular-nums; color: var(--text-faint); line-height: 1;
+}
+
+/* 迷你柱图（SVG 注入，currentColor 驱动） */
+.hb-bar { fill: var(--surface-3); }
+.hb-bar.hot { fill: var(--accent); }
+
+/* ============================================================
+   树状视图（By parent）
+   ============================================================ */
+.hub-tgroup { display: flex; flex-direction: column; }
+
+/* 组头：父 agent 摘要卡（可点选），比叶子更"实" */
+.hub-tg-head {
+  position: relative;
+  display: flex; align-items: center; gap: var(--sp-8);
+  width: 100%; text-align: left; color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  padding: 8px var(--sp-12) 8px var(--sp-14);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+.hub-tg-head:hover { border-color: var(--accent-border); background: var(--surface-hover); }
+.hub-tg-head.sel { border-color: var(--accent-border); background: var(--accent-softer); }
+.hub-tg-head.sel::before {
+  content: ""; position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 3px; border-radius: var(--r-full);
+  background: var(--accent);
+}
+.hub-tg-head .tg-ic {
+  width: 24px; height: 24px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-6);
+  background: var(--accent-soft); color: var(--accent);
+}
+.hub-tg-head .tg-name {
+  display: inline-flex; align-items: center; gap: var(--sp-6);
+  min-width: 0; font-weight: var(--fw-semibold); font-size: var(--fs-12);
+}
+.hub-tg-head .tg-task {
+  flex: 1; min-width: 0;
+  font-size: var(--fs-11); color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hub-tg-head .tg-right { margin-left: auto; flex: none; display: flex; align-items: center; gap: var(--sp-8); }
+.hub-tg-head .tg-cost { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.hub-tg-head .tg-caret { color: var(--glyph-faint); flex: none; }
+
+/* 导线列：竖线从组头底缘贯穿到最后一个叶子 */
+.hub-tchildren { display: flex; align-items: stretch; }
+.hub-trail {
+  width: 23px; flex: none;
+  margin-left: 11px;
+  border-left: 1.5px solid var(--border-strong);
+  border-bottom-left-radius: 7px;
+  margin-bottom: 9px;
+}
+.hub-tleaves {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; gap: var(--sp-8);
+  padding: var(--sp-8) 0 0 var(--sp-2);
+}
+
+/* 叶子节点：透明、左缘状态色条（与 pill 同一语义语言） */
+.hub-node {
+  position: relative;
+  display: block; width: 100%;
+  text-align: left; color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-left: 2.5px solid var(--node-c, var(--border-strong));
+  border-radius: 0 var(--r-8) var(--r-8) 0;
+  padding: 7px var(--sp-10);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.hub-node.st-running { --node-c: var(--green); }
+.hub-node.st-idle    { --node-c: var(--blue); }
+.hub-node.st-parked  { --node-c: var(--glyph-faint); }
+.hub-node.st-aborted { --node-c: var(--red); }
+.hub-node:hover { background: var(--surface-hover); }
+.hub-node.sel { background: var(--accent-softer); border-color: var(--accent-border); }
+
+.hub-node .hn-top { display: flex; align-items: center; gap: var(--sp-6); min-width: 0; }
+.hub-node .hn-name {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-width: 0; font-weight: var(--fw-medium); font-size: var(--fs-12);
+}
+.hub-node .hn-flags { margin-left: auto; display: flex; gap: var(--sp-4); flex: none; }
+.hub-node .hn-cost {
+  flex: none; font-family: var(--font-mono);
+  font-size: var(--fs-12); font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.hub-node .hn-task {
+  margin-top: 2px;
+  font-size: var(--fs-11); color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hub-node .hn-foot {
+  display: flex; align-items: center; gap: var(--sp-6);
+  margin-top: 4px; font-size: 10.5px; color: var(--text-faint);
+}
+.hub-node .hn-foot .mono { font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
+.hub-node .hn-foot .hn-art { margin-left: auto; display: flex; gap: var(--sp-4); }
+
+/* 树状模式下的孤儿（无父/父不可见）仍用整卡，视觉上比叶子更"独立" */
+.hub-tgroup.orphan { margin-bottom: 0; }
+
+/* ---------- 移动端微调 ---------- */
+@media (max-width: 560px) {
+  .hub-card .hc-spark { display: none; }
+  .hub-card .hc-tokens b { font-size: var(--fs-16); }
+  .hub-tg-head .tg-task { display: none; }
+}
+
+/* ---------- 详情列 ---------- */
+.hub-detail {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-10);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.hub-detail-head { padding: var(--sp-12) var(--sp-14) 0; }
+.hub-detail-head .hd-title { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
+.hub-detail-head .hd-title b { font-size: var(--fs-14); }
+.hub-detail-head .hd-sub {
+  margin-top: 3px;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  display: flex;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.hub-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  padding: var(--sp-10) var(--sp-14);
+  flex-wrap: wrap;
+}
+.hub-detail-tabs { border-bottom: 1px solid var(--border); padding: 0 var(--sp-8); }
+.hub-detail-body { padding: var(--sp-12) var(--sp-14); min-height: 260px; }
+
+/* 详情内联提示（revive/kill 拒绝、错误） */
+.hub-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-10);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  background: var(--red-soft);
+  color: var(--red);
+  margin-bottom: var(--sp-10);
+}
+
+/* kv */
+.hub-kv { display: flex; flex-direction: column; }
+.hub-kv .kv {
+  display: flex;
+  gap: var(--sp-12);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-12);
+}
+.hub-kv .kv:last-child { border-bottom: none; }
+.hub-kv .kv .k { width: 108px; flex: none; color: var(--text-3); font-size: var(--fs-11); padding-top: 1px; }
+.hub-kv .kv .v { flex: 1; min-width: 0; color: var(--text); word-break: break-word; }
+.hub-kv .kv .v.mono { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-2); }
+
+.hub-sec-title {
+  font-size: var(--fs-12);
+  font-weight: var(--fw-semibold);
+  color: var(--text-2);
+  margin: var(--sp-14) 0 var(--sp-6);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+.hub-sec-title:first-child { margin-top: 0; }
+
+.hub-lineage-row { display: flex; align-items: center; gap: var(--sp-6); flex-wrap: wrap; font-size: var(--fs-12); }
+.hub-child-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 2px var(--sp-8);
+  border-radius: var(--r-full);
+  border: 1px solid var(--border);
+  font-size: var(--fs-11);
+  color: var(--text-2);
+}
+.hub-child-link:hover { border-color: var(--accent-border); color: var(--accent); text-decoration: none; }
+
+/* context meter */
+.hub-ctx { display: flex; align-items: center; gap: var(--sp-8); }
+.hub-ctx .meter { flex: 1; }
+.hub-ctx .mono { font-size: var(--fs-11); color: var(--text-3); flex: none; }
+
+/* ---------- Transcript ---------- */
+.hub-transcript {
+  height: 360px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--bg-inset);
+  padding: var(--sp-10) var(--sp-12);
+  font-size: var(--fs-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.hub-tr-msg { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hub-tr-msg .tr-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.hub-tr-msg .tr-role { font-weight: var(--fw-semibold); color: var(--text-2); }
+.hub-tr-msg .tr-body {
+  border-left: 2px solid var(--border-strong);
+  padding-left: var(--sp-10);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.hub-tr-msg.user .tr-role { color: var(--accent); }
+.hub-tr-msg.tool .tr-body { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-3); }
+.hub-tr-msg.system .tr-body { color: var(--text-faint); }
+
+.hub-send { display: flex; gap: var(--sp-8); margin-top: var(--sp-10); align-items: flex-end; }
+.hub-send textarea { flex: 1; }
+/* .send-hint 是 .hub-send 的兄弟（transcript 模板里紧跟其后），不是子节点 */
+.hub-send + .send-hint {
+  display: block;
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+  margin-top: var(--sp-4);
+}
+
+/* read-only transcript 提示条 */
+.hub-ro-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-10);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  background: var(--surface-2);
+  color: var(--text-3);
+  margin-top: var(--sp-10);
+}
+
+/* ---------- Jobs ---------- */
+.hub-job {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: var(--sp-8) var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  margin-bottom: var(--sp-8);
+  font-size: var(--fs-12);
+  background: var(--surface);
+}
+.hub-job .jb-label { flex: 1; min-width: 0; }
+.hub-job .jb-label .mono { font-size: var(--fs-11); color: var(--text-3); display: block; margin-top: 1px; }
+
+/* ---------- IRC Messages ---------- */
+.hub-irc-out { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-12); align-items: flex-end; }
+.hub-irc-out .field { flex: 1; }
+.hub-irc-list { display: flex; flex-direction: column; gap: var(--sp-6); }
+.hub-irc-msg {
+  display: flex;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-10);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  font-size: var(--fs-12);
+  background: var(--surface);
+}
+.hub-irc-msg .im-dir { flex: none; font-weight: var(--fw-semibold); }
+.hub-irc-msg .im-dir.in { color: var(--blue); }
+.hub-irc-msg .im-dir.out { color: var(--accent); }
+.hub-irc-msg .im-main { flex: 1; min-width: 0; }
+.hub-irc-msg .im-meta { font-size: var(--fs-11); color: var(--text-3); display: flex; gap: var(--sp-6); flex-wrap: wrap; }
+.hub-irc-msg .im-body { margin-top: 2px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+
+/* outcome chip */
+.hub-outcome {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-full);
+  font-size: 10.5px;
+  font-weight: var(--fw-medium);
+}
+.hub-outcome.injected { background: var(--accent-soft); color: var(--accent); }
+.hub-outcome.woken { background: var(--green-soft); color: var(--green); }
+.hub-outcome.revived { background: var(--amber-soft); color: var(--amber); }
+.hub-outcome.failed { background: var(--red-soft); color: var(--red); }
+
+/* ---------- 空态 / 加载 ---------- */
+.hub-empty-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-32);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  text-align: center;
+  background: var(--surface);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-8);
+}
+.hub-empty-list .icon { width: 28px; height: 28px; stroke-width: 1.2; color: var(--glyph-faint); }
+.hub-loading-row { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-12); color: var(--text-3); font-size: var(--fs-12); }
+
+/* ---------- 能力标注 ---------- */
+.hub-cap-note {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
+/* ---------- New Agent / 菜单通用 ---------- */
+.hub-na-grid { display: flex; flex-direction: column; gap: var(--sp-12); }
+.hub-na-row { display: flex; gap: var(--sp-10); }
+.hub-na-row .field { flex: 1; }
+
+/* ---------- 移动端：<900px 详情变抽屉 ---------- */
+.hub-drawer-back { display: none; }
+@media (max-width: 900px) {
+  .hub-cols { grid-template-columns: 1fr; }
+  .hub-detail {
+    position: fixed;
+    top: var(--topbar-h);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: var(--z-panel);
+    border-radius: 0;
+    border-left: 1px solid var(--border);
+    transform: translateX(100%);
+    transition: transform var(--dur) var(--ease-out);
+    overflow-y: auto;
+  }
+  .hub-detail.open { transform: translateX(0); }
+  .hub-drawer-back { display: inline-flex; }
+  .hub-search { width: 100%; }
+  .hub-main { flex-wrap: wrap; }
+  .hub-main .hm-actions { width: 100%; }
+}
+
+/* ---------- running 状态呼吸（reduced-motion 下 base.css 统一收敛） ---------- */
+.hub-card .hub-sd.pulse,
+.hub-node .hub-sd.pulse,
+.hub-tg-head .hub-sd.pulse { animation-duration: 1.8s; }
+
+/* ============================================================
+   增量（2026-08-11 全新实现补充）
+   ============================================================ */
+/* 详情头部状态行：OMP inspector 的「status · duration · active age」模式 */
+.hub-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.hub-status-line .dot { width: 6px; height: 6px; }
+/* base.css 的 .dot 无 gray 态；parked 用实心灰点（glyph 色） */
+.dot.gray { background: var(--glyph-faint); }
+
+/* 未选中时详情列占位 */
+.hub-detail-placeholder {
+  align-items: stretch;
+  justify-content: center;
+  background: transparent;
+  border-style: dashed;
+}
+.hub-detail-placeholder .hub-empty-list { height: 100%; }
+
+/* 列表底部键盘提示 */
+.hub-kbd-hint {
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+  text-align: center;
+  padding: var(--sp-6) 0 var(--sp-2);
+  font-family: var(--font-mono);
+}
+
+/* 详情 tabs 激活态（沿用 components .tabs 结构，这里补 active 底色） */
+.hub-detail-tabs .tabs { display: flex; gap: var(--sp-2); }
+.hub-detail-tabs .tabs [role="tab"] {
+  padding: 7px var(--sp-12);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  border-radius: var(--r-6) var(--r-6) 0 0;
+  border-bottom: 2px solid transparent;
+}
+.hub-detail-tabs .tabs [role="tab"]:hover { color: var(--text); background: var(--surface-hover); }
+.hub-detail-tabs .tabs [role="tab"].active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: var(--fw-medium);
+}
+
+/* 骨架屏复用 components .card 即可，无需新增 */
+
+@media (max-width: 900px) {
+  .hub-detail-placeholder { display: none; }  /* 移动端未选中时只显示列表 */
+}

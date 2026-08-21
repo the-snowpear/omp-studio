@@ -4,6 +4,7 @@ import type { AgentDefinitionRecord, StudioClient } from "@omp-studio/client-con
 
 import { SubagentsPanel } from "./SubagentsPanel";
 import { createPreviewAgentDefinitions } from "./preview/subagentsPreview";
+import { I18nProvider } from "./i18n";
 
 beforeAll(() => {
   class ResizeObserverStub {
@@ -269,7 +270,7 @@ describe("SubagentsPanel create editor", () => {
 
 describe("SubagentsPanel editor model picker", () => {
   it("adds a role through the composer model menu", async () => {
-    render(<SubagentsPanel client={stubClient()} preview models={null} />);
+    render(<I18nProvider forcedLanguage="zh"><SubagentsPanel client={stubClient()} preview models={null} /></I18nProvider>);
     fireEvent.click(screen.getByRole("button", { name: "打开 notes 详情" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "添加模型" })).toBeTruthy());
 

@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMP Studio — 工作台</title>
+<!-- 单 HTML 壳：工作台（.app）与二级页（.page）两个常驻根，路由只换
+     内容。全部样式一次载入；各二级页视图的静态体在下方 <template> 里。 -->
+<link rel="stylesheet" href="assets/css/tokens.css?v=6">
+<link rel="stylesheet" href="assets/css/base.css?v=2">
+<link rel="stylesheet" href="assets/css/components.css?v=3">
+<link rel="stylesheet" href="assets/css/sidebar.css?v=7">
+<link rel="stylesheet" href="assets/css/workbench.css?v=30">
+<link rel="stylesheet" href="assets/css/pages.css?v=8">
+<link rel="stylesheet" href="assets/css/models-roles.css?v=10">
+<link rel="stylesheet" href="assets/css/agent-hub.css?v=4">
+</head>
+<body data-page="workbench">
+<!-- 工作台 skip link：侧栏与顶栏有 ~40 个可聚焦控件挡在对话前。 -->
+<a class="skip-link" href="#convoScroll">跳到对话内容</a>
+
+<!-- ================= 工作台根（常驻） ================= -->
+<div class="app" id="appRoot">
+
+  <!-- ================= 复合侧栏 ================= -->
+  <aside class="sidebar" id="sidebar" aria-label="项目与文件侧栏">
+    <div class="sidebar-resizer" id="sbResizer"></div>
+
+    <!-- 左上操作区：纯工具栏（汉堡 + 品牌 + 搜索）。
+         任务级常驻 action（新建对话 / 技能 & 插件）独立到下一行 .sb-actions，
+         与「项目与对话」h2 同级但保持一行内的明确分隔。 -->
+    <div class="sb-top">
+      <button class="icon-btn" id="btnAppMenu" data-tip="应用菜单"><svg class="icon" data-icon="menu"></svg></button>
+      <!-- Was a <div> with a click handler: not focusable, not announced as a
+           control, and unreachable without a mouse. -->
+      <button class="sb-brand" id="brandHome" data-tip="项目主页">
+        <span class="logo" aria-hidden="true">π</span>
+        <span class="name">OMP Studio</span>
+      </button>
+      <button class="icon-btn" id="btnSearch" data-tip="统一搜索 (Ctrl K)"><svg class="icon" data-icon="search"></svg></button>
+    </div>
+
+    <!-- 任务级常驻 action：两行 ghost row（对齐 Codex 截图）
+         行 1 = [+] 新建对话（整行宽，加号 accent 色）
+         行 2 = [⊞] 技能 & 插件 (n) →（toggle，选中态行底色 accent-soft）
+         位于 .sb-top 与「项目与对话」h2 之间，视觉重量低于 h2。 -->
+    <div class="sb-actions">
+      <button class="action-row new-convo-btn" id="btnNewConvo" data-tip="新建对话 (Ctrl Shift O)"
+              aria-label="新建对话">
+        <svg class="icon" data-icon="plus" aria-hidden="true"></svg>
+        <span class="lbl">新建对话</span>
+        <span class="meta"><span class="hint">Ctrl ⇧ O</span></span>
+      </button>
+      <button class="action-row skills-btn" id="btnSkills" data-tip="技能与插件 (Ctrl Shift K)"
+              aria-label="技能与插件"
+              aria-expanded="false" aria-controls="skillsDrawer">
+        <svg class="icon" data-icon="layers" aria-hidden="true"></svg>
+        <span class="lbl">技能 &amp; 插件</span>
+        <span class="meta">
+          <span class="count" id="skillsBadge">0</span>
+          <svg class="icon sm chev" data-icon="chevron-r" aria-hidden="true"></svg>
+        </span>
+      </button>
+    </div>
+
+    <!-- 项目与对话 -->
+    <section class="sb-section" id="sbProjects" aria-labelledby="sbProjectsTitle">
+      <div class="sb-section-head">
+        <h2 id="sbProjectsTitle">项目与对话</h2>
+        <!-- 项目区固定不折叠（对齐 Codex）：仅一个「新建项目」，悬停标题栏显示 -->
+        <div class="sb-head-actions">
+          <button class="icon-btn" id="btnNewProject" data-tip="新建项目"><svg class="icon sm" data-icon="plus"></svg></button>
+        </div>
+      </div>
+      <div class="sb-scroll" id="projectList"></div>
+    </section>
+
+    <!-- 可拖分隔条 -->
+    <div class="sb-divider" id="sbDivider" data-tip="拖动调整 · 双击平分 · 方向键微调"></div>
+
+    <!-- 文件树 -->
+    <section class="sb-section" id="sbFiles" aria-labelledby="sbFilesTitle">
+      <div class="sb-section-head">
+        <h2 id="sbFilesTitle">Explorer</h2>
+        <!-- hover 显示：新建文件 · 新建目录 · 搜索文件 · 刷新 -->
+        <div class="sb-head-actions">
+          <button class="icon-btn" data-tip="新建文件"><svg class="icon sm" data-icon="plus"></svg></button>
+          <button class="icon-btn" data-tip="新建目录"><svg class="icon sm" data-icon="folder"></svg></button>
+          <button class="icon-btn" data-tip="搜索文件"><svg class="icon sm" data-icon="search"></svg></button>
+          <button class="icon-btn" data-tip="刷新"><svg class="icon sm" data-icon="refresh"></svg></button>
+        </div>
+        <!-- 常驻：收起/展开（最右侧，不在 hover 组内） -->
+        <button class="icon-btn" id="btnCollapseFiles" data-tip="收起 Explorer"><svg class="icon sm" data-icon="chevron-d"></svg></button>
+      </div>
+      <div class="sb-scroll">
+        <div class="tree" id="fileTree"></div>
+      </div>
+    </section>
+
+    <!-- ================= 技能 & 插件 抽屉面板 =================
+         覆盖 .sb-actions（两枚 action 行）+ .sb-section 区域，
+         不覆盖 .sb-top 与 .sb-footer。
+         JS 通过 --drawer-top / --drawer-bottom 钉到两者下/上沿。 -->
+    <aside class="sb-drawer-mask" id="skillsDrawer"
+           role="dialog" aria-modal="false"
+           aria-labelledby="sdTitle" aria-hidden="true" hidden>
+
+      <div class="sd-head">
+        <div class="sd-title">
+          <svg class="icon sm" data-icon="layers" aria-hidden="true"></svg>
+          技能 &amp; 插件
+          <span class="count" id="sdCount">0</span>
+        </div>
+        <span class="spacer"></span>
+        <button class="icon-btn small" id="sdOpenHub" data-tip="打开能力中心"
+                aria-label="打开能力中心">
+          <svg class="icon sm" data-icon="external" aria-hidden="true"></svg>
+        </button>
+        <button class="icon-btn small" id="sdClose" data-tip="关闭 (Esc)"
+                aria-label="关闭技能面板">
+          <svg class="icon sm" data-icon="x" aria-hidden="true"></svg>
+        </button>
+      </div>
+
+      <label class="sd-search">
+        <svg class="icon sm" data-icon="search" aria-hidden="true"></svg>
+        <input id="sdSearchInput" type="text"
+               placeholder="搜索技能 / 插件…"
+               aria-label="在技能与插件中搜索">
+        <span class="kbd">/</span>
+      </label>
+
+      <nav class="sd-tabs" role="tablist" aria-label="技能分类">
+        <button class="sd-tab active" role="tab" aria-selected="true" data-cat="all">全部 <span class="count">0</span></button>
+        <button class="sd-tab" role="tab" aria-selected="false" data-cat="skill">技能 <span class="count">0</span></button>
+        <button class="sd-tab" role="tab" aria-selected="false" data-cat="plugin">插件 <span class="count">0</span></button>
+      </nav>
+
+      <div class="sd-body" id="sdBody" tabindex="-1">
+        <!-- 卡片由 app.js 的 skillsDrawer 模块渲染 -->
+      </div>
+
+      <div class="sd-foot">
+        <a class="sd-foot-link" href="#!capabilities"
+           aria-label="进入能力中心（管理全部技能与插件）">
+          <svg class="icon" data-icon="package" aria-hidden="true"></svg>
+          <span class="label">进入能力中心</span>
+          <span class="kbd">⌘ K → 技能</span>
+        </a>
+      </div>
+    </aside>
+
+    <!-- 左下用户与 OMP 状态 -->
+    <footer class="sb-footer">
+      <button class="sb-user" id="btnOmpMenu" aria-label="snowpear · OMP 状态与环境菜单">
+        <span class="avatar" aria-hidden="true">S</span>
+        <span>
+          <span class="u-name">snowpear</span>
+          <!-- OMP connection state changes on its own (reconnect, run start), so
+               it is announced politely rather than only repainted. -->
+          <span class="u-status ok" id="ompStatusLine" role="status" aria-live="polite">
+            <span class="dot green pulse" id="ompStatusDot" aria-hidden="true"></span><span id="ompStatusText">OMP Ready</span>
+          </span>
+        </span>
+        <svg class="icon sm" data-icon="chevron-ud" aria-hidden="true"></svg>
+      </button>
+    </footer>
+  </aside>
+
+  <!-- ================= 主区域 ================= -->
+  <div class="main-col">
+
+    <!-- 顶部工作区栏 -->
+    <header class="topbar">
+      <button class="icon-btn" id="btnToggleSidebar" data-tip="收起侧栏 (Ctrl B)"><svg class="icon" data-icon="layout"></svg></button>
+      <!-- Breadcrumb: project › branch › thread, ver2-style. Each segment is a
+           real button; project/branch/thread each open a menu, and the branch
+           menu carries the ahead/behind + dirty detail. -->
+      <div class="tb-left">
+        <nav class="tb-crumb" aria-label="当前位置">
+          <button class="crumb-item" id="tbProject" data-tip="切换项目" aria-haspopup="true" aria-expanded="false">
+            <svg class="icon sm" data-icon="folder-open" aria-hidden="true"></svg>
+            <span id="tbProjectName">omp-web</span>
+            <svg class="icon sm crumb-chevron" data-icon="chevron-d" aria-hidden="true"></svg>
+          </button>
+          <span class="crumb-sep" aria-hidden="true">›</span>
+          <button class="crumb-item" id="tbBranch" data-tip="查看分支详情" aria-haspopup="true" aria-expanded="false">
+            <svg class="icon sm" data-icon="branch" aria-hidden="true"></svg>
+            <span id="tbBranchName">main</span>
+            <span class="dot amber" id="tbBranchDot" data-tip="3 个未提交修改"></span>
+          </button>
+          <span class="crumb-sep" aria-hidden="true">›</span>
+          <button class="crumb-item crumb-current" id="tbThread" data-tip="对话选项" aria-haspopup="true" aria-expanded="false">
+            <span class="ellipsis" id="tbThreadName" title="跟踪上游 pi-web 更新到 omp-web">跟踪上游 pi-web 更新到 omp-web</span>
+            <svg class="icon sm crumb-chevron" data-icon="chevron-d" aria-hidden="true"></svg>
+          </button>
+        </nav>
+        <!-- Fork / Handoff：贴对话名右侧，随面包屑流动，不推到最右 -->
+        <button class="icon-btn" data-tip="Fork 对话" id="btnFork"><svg class="icon" data-icon="fork"></svg></button>
+        <button class="icon-btn" data-tip="Handoff 到新 Thread" id="btnHandoff"><svg class="icon" data-icon="handoff"></svg></button>
+      </div>
+      <!-- Agent Hub 加大，其后跟会话历史 -->
+      <button class="icon-btn lg" data-tip="Agent Hub" id="btnAgentHub"><svg class="icon lg" data-icon="bot"></svg></button>
+      <button class="icon-btn" data-tip="会话历史" id="btnHistory"><svg class="icon" data-icon="history"></svg></button>
+
+      <div class="tb-right">
+        <!-- Session Telemetry（紧凑）：Token 与 Context 分区独立点击
+             Both groups open a detail popover on click, so they were interactive
+             <span>s: no focus, no keyboard, no announced role. They are buttons
+             now. The outer wrapper kept cursor:pointer without a handler of its
+             own, which advertised a click that did nothing — dropped. -->
+        <div class="telemetry" id="telemetry">
+          <button class="t-group" id="tgTokens" aria-haspopup="true" aria-expanded="false"
+                  data-tip="输入 / 输出 Token 详情" aria-label="Token 用量：输入 3.5M，输出 73k，缓存 36.6M。展开详情">
+            <span class="t-item"><svg class="icon sm" data-icon="arrow-u" aria-hidden="true"></svg><b>3.5M</b></span>
+            <span class="t-item"><svg class="icon sm" data-icon="arrow-d" aria-hidden="true"></svg><b>73k</b></span>
+            <span class="t-sep" aria-hidden="true"></span>
+            <span class="t-item"><b>36.6M</b>&nbsp;cache</span>
+          </button>
+          <span class="t-sep" aria-hidden="true"></span>
+          <!-- The ring is a pure-colour gauge; role="img" + a name is what makes
+               the 22% legible without seeing it. -->
+          <button class="t-group" id="tgCtx" aria-haspopup="true" aria-expanded="false"
+                  data-tip="Context 构成" aria-label="Context 已使用 22%，上限 1.0M。展开构成明细">
+            <span class="ctx-ring" style="--p:22" aria-hidden="true"></span>
+            <span class="t-item"><b>22%</b>/1.0M</span>
+          </button>
+          <span class="t-sep" aria-hidden="true"></span>
+          <span class="t-item"><b>auto</b>&nbsp;compact</span>
+          <button class="tb-compact" id="btnCompact" data-tip="立即压缩当前会话上下文">
+            <svg class="icon sm" data-icon="minimize" aria-hidden="true"></svg>Compact
+          </button>
+        </div>
+
+        <button class="icon-btn" id="btnLayout" data-tip="展开 / 收起右侧面板" aria-controls="sidePanel" aria-expanded="false"><svg class="icon" data-icon="panel"></svg></button>
+        <button class="icon-btn" data-action="toggle-theme" data-tip="切换 Light / Dark">
+          <svg class="icon" data-theme-icon data-icon="light"></svg>
+        </button>
+        <a class="icon-btn" href="#!home" data-tip="项目主页"><svg class="icon" data-icon="home"></svg></a>
+      </div>
+    </header>
+
+    <!-- 全局异常横幅（OMP 断开重连等，默认隐藏）
+         role="alert" so a connection drop is announced when it appears rather
+         than only repainted. The dismiss button gets an explicit label because
+         "忽略" alone does not say what is being ignored. -->
+    <div class="banner amber hidden" id="globalBanner" role="alert">
+      <svg class="icon" data-icon="alert" aria-hidden="true"></svg>
+      <span><b>OMP Reconnecting</b> · <span class="banner-detail">与 OMP Bridge 的连接中断，正在自动重连（第 2 次尝试）…</span></span>
+      <div class="banner-actions">
+        <button class="btn small outline" id="bannerDiagnose">打开诊断中心</button>
+        <button class="btn small" id="bannerDismiss" aria-label="忽略此连接警告">忽略</button>
+      </div>
+    </div>
+
+    <!-- 主工作区 -->
+    <div class="workbench" id="workbench">
+      <div class="convo-wrap">
+        <!-- The conversation is the page's main content, so it carries <main>
+             (the skip link targets it) and is focusable via tabindex="-1" so the
+             skip link can actually move focus here, not just scroll. The log
+             role announces streamed events as they arrive. -->
+        <main class="convo-scroll" id="convoScroll" tabindex="-1" aria-label="对话内容">
+          <div class="convo-doc" id="convoDoc" role="log" aria-live="polite" aria-relevant="additions"></div>
+          <div class="turn-live hidden" id="turnLive" role="status" aria-live="off" aria-label="运行状态">
+            <span class="turn-live-icon" aria-hidden="true"><svg class="icon sm" data-icon="sparkles"></svg></span>
+            <span id="turnLiveVerb">thinking…</span>
+          </div>
+        </main>
+
+        <!-- Conversation Minimap: a scroll/navigation aid that duplicates what
+             the conversation already exposes, and its 8px dots are not usable
+             targets without a pointer. Hidden from the a11y tree rather than
+             half-exposed; the two tool buttons stay reachable below. -->
+        <div class="minimap" id="minimap">
+          <div class="minimap-track" id="mmTrack" aria-hidden="true"></div>
+          <!-- 视口位置指示条：跟随对话滚动，标示当前视口在整段对话中的位置 -->
+          <div class="mm-viewport" id="mmViewport" aria-hidden="true"></div>
+          <div class="minimap-tools">
+            <button class="icon-btn" data-tip="筛选事件" id="mmFilter" aria-haspopup="true" aria-expanded="false"><svg class="icon sm" data-icon="filter"></svg></button>
+            <button class="icon-btn" data-tip="回到最新" id="mmBottom"><svg class="icon sm" data-icon="arrow-d"></svg></button>
+          </div>
+        </div>
+        <!-- Not role="tooltip": the panel holds clickable outline headings, and a
+             tooltip is not allowed to contain interactive content. It is a
+             pointer-driven preview over an aria-hidden track, so it stays a
+             plain container. -->
+        <div class="mm-preview hidden" id="mmTip"></div>
+
+        <!-- Was a <div> with a click handler: the one control that gets you back
+             to live output, and it was mouse-only. -->
+        <button class="new-content-pill hidden" id="newContentPill">
+          <svg class="icon sm" data-icon="arrow-d" aria-hidden="true"></svg>有 3 条新事件
+        </button>
+
+        <!-- 输入区 -->
+        <div class="composer-region">
+          <!-- Todo Dock：任务清单固定在输入框上方，不随对话滚动；标题栏可折叠 -->
+          <div class="todo-dock" id="todoDock" aria-label="Todo 任务清单"></div>
+          <!-- Deck：待处理的审批 / 提问固定在输入框上方（最靠近输入，优先处理）。
+               决议后卡片从这里消失，对话流末尾追加一条历史记录。 -->
+          <div class="deck" id="deck" role="region" aria-label="待处理的审批与提问" aria-live="polite"></div>
+          <!-- 项目上下文条（Codex 风格）：初始/空闲对话显示项目、分支与已加载文件。
+               运行时 setRunning(true) 隐藏它、换成下方运行状态条。 -->
+          <div class="ctx-strip" id="ctxStrip" role="status" aria-live="polite">
+            <span class="ctx-item"><svg class="icon sm" data-icon="folder-open" aria-hidden="true"></svg><span id="ctxProjectName">omp-web</span></span>
+            <span class="ctx-item"><svg class="icon sm" data-icon="cpu" aria-hidden="true"></svg><span id="ctxMachineName">本地</span></span>
+            <span class="ctx-item"><svg class="icon sm" data-icon="branch" aria-hidden="true"></svg><span id="ctxBranchName">main</span><span class="dot amber" id="ctxBranchDot" data-tip="3 个未提交修改"></span></span>
+            <span class="spacer"></span>
+            <span class="ctx-item muted" id="ctxFileCount"><svg class="icon sm" data-icon="file" aria-hidden="true"></svg>41 个文件</span>
+          </div>
+          <!-- Steering / Follow-up 运行状态条 -->
+          <div class="run-strip hidden" id="runStrip" role="toolbar" aria-label="运行中操作">
+            <span class="spacer"></span>
+            <span class="fq-chip" id="fqChip"><svg class="icon sm" data-icon="queue" aria-hidden="true"></svg>Follow-up ×1</span>
+            <button class="btn small outline" id="btnSteer"><svg class="icon sm" data-icon="steering" aria-hidden="true"></svg>Steering</button>
+            <button class="btn small danger" id="btnAbort"><svg class="icon sm" data-icon="stop" aria-hidden="true"></svg>Abort</button>
+          </div>
+
+          <div class="composer" id="composer">
+            <div class="composer-ctx" id="ctxChips" aria-label="已引用的上下文" role="group"></div>
+            <!-- Placeholder-only labelling fails as soon as the user types: the
+                 field loses its name mid-input. A visually hidden <label> keeps
+                 the name permanent without changing the layout. The @ and /
+                 completion popup is announced via aria-controls/expanded, which
+                 the original had no equivalent of. -->
+            <label class="sr-only" for="composerInput">消息输入框。输入 / 触发命令，@ 引用文件、Agent、Diff 或 Preview 元素</label>
+            <textarea id="composerInput" rows="2"
+                      placeholder="输入消息… 输入 / 触发命令，@ 引用文件、Agent、Diff、Preview 元素"
+                      aria-describedby="composerHint" aria-controls="completePop" aria-expanded="false"></textarea>
+            <p class="sr-only" id="composerHint">按 Enter 发送，Shift+Enter 换行</p>
+            <!-- 单行操作栏：左（附件/引用/指令/权限模式） · 右（模型 / 思考强度 + 发送） -->
+            <div class="composer-bar">
+              <div class="cb-group">
+                <button class="icon-btn small" data-tip="附件 / 图片"><svg class="icon sm" data-icon="attach"></svg></button>
+                <button class="icon-btn small" data-tip="@ 引用"><svg class="icon sm" data-icon="at"></svg></button>
+                <button class="icon-btn small" data-tip="Slash Commands"><svg class="icon sm" data-icon="slash"></svg></button>
+              </div>
+              <!-- These four pills each open a menu and each show current state.
+                   aria-label carries the "what" so the visible text can stay a
+                   bare value ("default", "high") without being meaningless out
+                   of context. -->
+              <button class="pill-btn" id="btnPermission" data-tip="权限模式"
+                      aria-haspopup="true" aria-expanded="false" aria-label="权限模式：default">
+                <svg class="icon sm" data-icon="shield" aria-hidden="true"></svg><span id="permLabel">default</span>
+              </button>
+              <span class="spacer"></span>
+              <button class="pill-btn meta-model" id="btnModel" data-tip="切换模型"
+                      aria-haspopup="true" aria-expanded="false" aria-label="当前模型：gemini-3.6-flash">
+                <svg class="icon sm" data-icon="cpu" aria-hidden="true"></svg><span id="modelLabel">gemini-3.6-flash</span>
+              </button>
+              <button class="pill-btn" id="btnThinking" data-tip="思考强度 (Thinking Level)"
+                      aria-haspopup="true" aria-expanded="false" aria-label="思考强度：high">
+                <svg class="icon sm" data-icon="brain" aria-hidden="true"></svg><span id="thinkingLabel">high</span>
+              </button>
+              <button class="send-btn" id="btnSend" data-tip="发送 (Enter)"><svg class="icon sm" data-icon="send"></svg></button>
+            </div>
+          </div>
+          <div class="complete-pop hidden" id="completePop" role="listbox" aria-label="自动补全"></div>
+          <!-- Match count for the @ / popup. Announced politely so typing a query
+               tells you how many results appeared without interrupting input. -->
+          <div class="sr-only" role="status" aria-live="polite" id="completeCount"></div>
+        </div>
+      </div>
+
+      <!-- 右侧功能面板：Changes / Diff / Preview / Agents
+           Both panels are tab sets. They were styled as tabs but had no tab
+           semantics: role/aria-selected/aria-controls were all absent, so a
+           screen reader announced six unrelated buttons and there was no
+           arrow-key movement between them. The count badges also needed names —
+           a bare "8" next to "Changes" does not say 8 of what. -->
+      <aside class="side-panel" id="sidePanel" aria-label="功能面板">
+        <!-- 宽度调节条：面板左缘，拖拽/方向键调整宽度（对齐左侧栏体验） -->
+        <div class="sp-resizer" id="spResizer" role="separator" tabindex="0"
+             aria-orientation="vertical" aria-label="调整右侧面板宽度"></div>
+        <div class="sp-head">
+          <div class="tabs" id="spTabs" role="tablist" aria-label="面板视图">
+            <button data-sp="changes" class="active" role="tab" aria-selected="true" aria-controls="spChanges" id="spTabChanges">
+              <svg class="icon sm" data-icon="diff" aria-hidden="true"></svg>Changes
+              <span class="chip gray xs">8<span class="sr-only"> 个变更文件</span></span>
+            </button>
+            <button data-sp="preview" role="tab" aria-selected="false" aria-controls="spPreview" id="spTabPreview" tabindex="-1">
+              <svg class="icon sm" data-icon="globe" aria-hidden="true"></svg>Preview
+            </button>
+            <button data-sp="agents" role="tab" aria-selected="false" aria-controls="spAgents" id="spTabAgents" tabindex="-1">
+              <svg class="icon sm" data-icon="bot" aria-hidden="true"></svg>Agents
+              <span class="chip amber xs">1 等待</span>
+            </button>
+          </div>
+          <span class="spacer"></span>
+          <button class="icon-btn small" id="spClose" data-tip="关闭面板"><svg class="icon sm" data-icon="x"></svg></button>
+        </div>
+        <div class="sp-body">
+          <div class="sp-page active" id="spChanges" role="tabpanel" aria-labelledby="spTabChanges" tabindex="0"></div>
+          <div class="sp-page" id="spPreview" role="tabpanel" aria-labelledby="spTabPreview" tabindex="0"></div>
+          <div class="sp-page" id="spAgents" role="tabpanel" aria-labelledby="spTabAgents" tabindex="0"></div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 底部运行面板 -->
+    <div class="bottom-panel collapsed" id="bottomPanel">
+      <div class="bp-resizer" id="bpResizer"></div>
+      <div class="bp-head">
+        <div class="tabs" id="bpTabs" role="tablist" aria-label="运行面板视图">
+          <button data-bp="terminal" class="active" role="tab" aria-selected="true" aria-controls="bpTerminal" id="bpTabTerminal">
+            <svg class="icon sm" data-icon="terminal" aria-hidden="true"></svg>Terminal
+            <span class="chip blue xs">2<span class="sr-only"> 个终端</span></span>
+          </button>
+          <button data-bp="problems" role="tab" aria-selected="false" aria-controls="bpProblems" id="bpTabProblems" tabindex="-1">
+            <svg class="icon sm" data-icon="alert-c" aria-hidden="true"></svg>Problems
+            <span class="chip red xs">6<span class="sr-only"> 个问题</span></span>
+          </button>
+          <button data-bp="tests" role="tab" aria-selected="false" aria-controls="bpTests" id="bpTabTests" tabindex="-1">
+            <svg class="icon sm" data-icon="test" aria-hidden="true"></svg>Tests
+            <span class="chip gray xs">46/47<span class="sr-only"> 个测试通过</span></span>
+          </button>
+          <button data-bp="output" role="tab" aria-selected="false" aria-controls="bpOutput" id="bpTabOutput" tabindex="-1">
+            <svg class="icon sm" data-icon="console" aria-hidden="true"></svg>Output
+          </button>
+          <button data-bp="logs" role="tab" aria-selected="false" aria-controls="bpLogs" id="bpTabLogs" tabindex="-1">
+            <svg class="icon sm" data-icon="book" aria-hidden="true"></svg>OMP Logs
+          </button>
+          <button data-bp="pvlogs" role="tab" aria-selected="false" aria-controls="bpPvlogs" id="bpTabPvlogs" tabindex="-1">
+            <svg class="icon sm" data-icon="globe" aria-hidden="true"></svg>Preview Logs
+          </button>
+        </div>
+        <span class="spacer"></span>
+        <button class="icon-btn small" id="bpNewTerm" data-tip="新建终端"><svg class="icon sm" data-icon="plus"></svg></button>
+        <button class="icon-btn small" id="bpToggle" data-tip="展开 / 收起 (Ctrl J)" aria-expanded="false" aria-controls="bottomPanel"><svg class="icon sm" data-icon="chevron-u"></svg></button>
+      </div>
+      <div class="bp-body">
+        <div class="bp-page active" id="bpTerminal" role="tabpanel" aria-labelledby="bpTabTerminal" tabindex="0"></div>
+        <div class="bp-page" id="bpProblems" role="tabpanel" aria-labelledby="bpTabProblems" tabindex="0"></div>
+        <div class="bp-page" id="bpTests" role="tabpanel" aria-labelledby="bpTabTests" tabindex="0"></div>
+        <div class="bp-page" id="bpOutput" role="tabpanel" aria-labelledby="bpTabOutput" tabindex="0"></div>
+        <div class="bp-page" id="bpLogs" role="tabpanel" aria-labelledby="bpTabLogs" tabindex="0"></div>
+        <div class="bp-page" id="bpPvlogs" role="tabpanel" aria-labelledby="bpTabPvlogs" tabindex="0"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 二级页根（常驻，路由换内容） =================
+     页头 nav 由 pages.js 构建一次、永不重建；路由只换 .page-body 内容
+     与 .ph-title 文本。注意用 hidden 属性（router 切它），不是 .hidden 类。 -->
+<div class="page" id="pageRoot" hidden>
+  <header class="page-head" id="pageHead"></header>
+  <div class="page-body" id="pageBody" tabindex="-1"></div>
+</div>
+
+<!-- 场景切换器（演示入口，仅工作台视图可见） -->
+<button class="scenario-fab" id="scenarioFab" aria-haspopup="true" aria-expanded="false">
+  <svg class="icon sm" data-icon="play" aria-hidden="true"></svg>演示场景
+</button>
+
+<!-- Toast container declared as a live region once, so every toast appended to
+     it is announced without stealing focus from whatever the user is doing. -->
+<div class="toast-wrap" id="toastWrap" role="status" aria-live="polite" aria-atomic="false"></div>
+<div id="overlayRoot"></div>
+
+<!-- ================= 二级页视图模板 =================
+     路由注入这些模板的 innerHTML 到 #pageBody；JS 渲染部分（由
+     pages.js / page-model-config.js 负责）在注入后挂载。 -->
+
+<template id="tpl-home">
+  <div class="page-wide">
+    <div class="home-hero">
+      <h1>下午好，snowpear</h1>
+      <p class="muted">2 个任务正在运行 · 1 个 Agent 等待你的处理 · Preview 运行中（127.0.0.1:30141）</p>
+      <div class="home-quick">
+        <button class="btn primary"><svg class="icon sm" data-icon="folder-open"></svg>打开本地文件夹</button>
+        <button class="btn outline"><svg class="icon sm" data-icon="branch"></svg>克隆 Git 仓库</button>
+        <button class="btn outline"><svg class="icon sm" data-icon="history"></svg>恢复最近对话</button>
+        <button class="btn outline"><svg class="icon sm" data-icon="flask"></svg>创建临时工作区</button>
+      </div>
+    </div>
+
+    <h3 style="font-size:14px;margin-bottom:10px">最近项目</h3>
+    <div class="proj-grid" id="projGrid"></div>
+
+    <div class="card tk-card" id="tkCard"></div>
+
+    <h3 style="font-size:14px;margin-bottom:6px">最近活动</h3>
+    <div class="card" style="padding:6px" id="activityList"></div>
+  </div>
+</template>
+
+<template id="tpl-env">
+  <div class="page-narrow">
+    <div style="display:flex;align-items:center;margin-bottom:16px">
+      <div>
+        <h1 style="font-size:18px">环境检查</h1>
+        <p class="muted small">检测本机 OMP CLI、RPC 协议、模型认证与 Preview 依赖——开发环境健康检查，而非注册流程。</p>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn outline" id="envToggle"></button>
+    </div>
+    <div class="env-summary ok" id="envSummary"></div>
+    <div class="card" id="envList"></div>
+    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+      <button class="btn outline"><svg class="icon sm" data-icon="terminal"></svg>打开终端</button>
+      <button class="btn outline"><svg class="icon sm" data-icon="wrench"></svg>打开配置</button>
+      <button class="btn outline"><svg class="icon sm" data-icon="pulse"></svg>查看诊断</button>
+      <button class="btn outline"><svg class="icon sm" data-icon="update"></svg>检查更新</button>
+      <button class="btn outline"><svg class="icon sm" data-icon="book"></svg>打开安装说明</button>
+    </div>
+  </div>
+</template>
+
+<template id="tpl-history">
+  <!-- The two-column split was an inline grid declaration, so it could not
+       collapse on a narrow window — at ~900px the 380px Time Travel rail and
+       the session list both got squeezed with no way to reflow. Moved to a
+       class so pages.css can stack it below the breakpoint. -->
+  <div class="page-wide hist-layout">
+    <section aria-labelledby="histHeading">
+      <h2 class="sr-only" id="histHeading">会话列表</h2>
+      <div class="hist-toolbar">
+        <!-- Placeholder-only labelling disappears the moment the user types,
+             so the field loses its accessible name mid-search. -->
+        <label class="sr-only" for="histSearch">搜索对话标题、项目或分支</label>
+        <input class="input hist-search" id="histSearch" type="search"
+               placeholder="搜索对话标题 / 项目 / 分支…">
+        <button class="btn outline"><svg class="icon sm" data-icon="filter" aria-hidden="true"></svg>筛选</button>
+        <button class="btn outline"><svg class="icon sm" data-icon="export" aria-hidden="true"></svg>导出</button>
+      </div>
+      <div id="histList"></div>
+      <!-- Result count for the search above: filtering replaced the list
+           silently before, with no signal that results had changed. -->
+      <div class="sr-only" role="status" aria-live="polite" id="histCount"></div>
+    </section>
+    <section aria-labelledby="ttHeading">
+      <h2 class="tt-heading" id="ttHeading">Time Travel</h2>
+      <p class="muted small tt-desc">「跟踪上游 pi-web 更新到 omp-web」的执行历史。恢复操作会明确区分代码与对话的影响范围。</p>
+      <div class="tt-rail" id="ttRail"></div>
+    </section>
+  </div>
+</template>
+
+<template id="tpl-capabilities">
+  <div class="page-wide">
+    <div style="display:flex;align-items:center;margin-bottom:16px">
+      <div>
+        <h1 style="font-size:18px">能力中心</h1>
+        <p class="muted small">当前安装的 OMP CLI 通过 RPC 实际暴露的 Capability。每项能力区分：已配置 / 已加载 / 当前会话可用。</p>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn outline"><svg class="icon sm" data-icon="folder"></svg>打开来源目录</button>
+      <button class="btn primary"><svg class="icon sm" data-icon="plus"></svg>创建 Skill</button>
+    </div>
+    <div class="cap-layout">
+      <!-- #capSide is given role="tablist" at runtime (pages.js builds its
+           buttons), so the region it swaps needs the matching tabpanel role.
+           tabindex="0" lets keyboard users move from the tab into the list
+           they just selected. -->
+      <div class="cap-side" id="capSide"></div>
+      <div class="cap-main" id="capMain" role="tabpanel" tabindex="0" aria-label="能力列表"></div>
+    </div>
+  </div>
+</template>
+
+<template id="tpl-settings">
+  <div class="page-wide set-layout">
+    <div class="cap-side" id="setSide"></div>
+    <div class="cap-main" id="setMain">
+
+      <!-- General -->
+      <div class="set-group" id="set-general">
+        <h3>General</h3>
+        <p class="desc">界面语言、主题、编辑器行为与布局记忆。</p>
+        <div class="set-row"><div><div class="sr-label">界面语言</div><div class="sr-desc">界面文案语言（概念术语保留英文）</div></div><div class="sr-control"><select class="select"><option>中文</option><option>English</option></select></div></div>
+        <div class="set-row"><div><div class="sr-label">主题</div><div class="sr-desc">Light / Dark / 跟随系统</div></div><div class="sr-control"><select class="select"><option>Light</option><option>Dark</option><option>跟随系统</option></select></div></div>
+        <div class="set-row"><div><div class="sr-label">布局记忆</div><div class="sr-desc">侧栏宽度、上下区比例、面板状态按项目持久化</div></div><div class="sr-control"><button type="button" class="switch on" role="switch" aria-checked="true"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">默认项目行为</div><div class="sr-desc">启动时恢复最近项目与对话</div></div><div class="sr-control"><button type="button" class="switch on" role="switch" aria-checked="true"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">更新行为</div><div class="sr-desc">自动下载更新，重启前询问</div></div><div class="sr-control"><select class="select"><option>自动下载，询问安装</option><option>仅提醒</option></select></div></div>
+      </div>
+
+      <!-- Models and Providers -->
+      <div class="set-group hidden" id="set-models">
+        <h3>Models and Providers</h3>
+        <!-- 这两张卡以前指向两个独立页面，文案也这么写（「独立一级页面」）。
+             供应商与角色合并成一个「模型配置」页之后，这里改为指向同一页的
+             两个 tab —— 卡片保留两张，因为用户是按「供应商」「角色」这两个
+             名字来找的，不是按合并后的页名找。 -->
+        <p class="desc">Provider 认证、Endpoint、模型与角色路由都在「模型配置」页——这里只保留入口。</p>
+        <!-- 布局曾是 style="display:flex;align-items:center;gap:12px" 逐张内联，
+             覆盖 .proj-card 的 display:block；改成一个类，让样式表继续持有版式。 -->
+        <a class="proj-card set-entry" href="#!model-config/providers">
+          <span class="a-ic purple" aria-hidden="true"><svg class="icon sm" data-icon="server"></svg></span>
+          <span class="se-main">
+            <span class="pc-name">模型配置 · 供应商</span>
+            <span class="sr-desc">Provider · 认证 · Endpoint · API 类型 · 模型 · Discovery · models.yml 实时预览</span>
+          </span>
+          <span class="chip green">5 个可用</span>
+          <svg class="icon sm" data-icon="chevron-r" aria-hidden="true"></svg>
+        </a>
+        <a class="proj-card set-entry" href="#!model-config/roles">
+          <span class="a-ic blue" aria-hidden="true"><svg class="icon sm" data-icon="steering"></svg></span>
+          <span class="se-main">
+            <span class="pc-name">模型配置 · 角色</span>
+            <span class="sr-desc">@default · @smol · @slow · @vision … 角色 → 模型路由 · Fallback · Global / Project 覆盖 · config.yml 预览</span>
+          </span>
+          <span class="chip gray">12 个角色</span>
+          <svg class="icon sm" data-icon="chevron-r" aria-hidden="true"></svg>
+        </a>
+        <div class="set-row" style="margin-top:14px"><div><div class="sr-label">默认模型</div><div class="sr-desc">新对话使用的模型（即 @default 角色的当前生效值）</div></div><div class="sr-control"><span class="mono small muted">anthropic/claude-sonnet-4.5</span></div></div>
+      </div>
+
+      <!-- Permissions -->
+      <div class="set-group hidden" id="set-permissions">
+        <h3>Permissions</h3>
+        <p class="desc">三种模式：<b>Review</b>（所有写操作需审批）· <b>Workspace</b>（工作区内自动允许）· <b>Full Access</b>（完全信任）。当前：<span class="chip purple">Workspace</span></p>
+        <div class="perm-grid">
+          <div class="perm-card"><div class="pm-head"><svg class="icon sm" data-icon="file"></svg>文件读取</div><div class="sr-desc">工作区内文件自动允许</div><div class="sr-control" style="margin-top:8px;display:flex"><button type="button" class="switch on" role="switch" aria-checked="true"></button><span class="small muted" style="margin-left:8px">工作区内 · 自动</span></div></div>
+          <div class="perm-card"><div class="pm-head"><svg class="icon sm" data-icon="pencil"></svg>文件写入</div><div class="sr-desc">写入工作区文件</div><div class="sr-control" style="margin-top:8px;display:flex"><button type="button" class="switch on" role="switch" aria-checked="true"></button><span class="small muted" style="margin-left:8px">工作区内 · 自动</span></div></div>
+          <div class="perm-card"><div class="pm-head"><svg class="icon sm" data-icon="unlock"></svg>工作区外访问</div><div class="sr-desc">读写工作区以外的路径</div><div class="sr-control" style="margin-top:8px;display:flex"><button type="button" class="switch" role="switch" aria-checked="false"></button><span class="small muted" style="margin-left:8px">每次询问</span></div></div>
+          <div class="perm-card"><div class="pm-head"><svg class="icon sm" data-icon="terminal"></svg>Bash</div><div class="sr-desc">执行 Shell 命令</div><div class="sr-control" style="margin-top:8px;display:flex"><button type="button" class="switch" role="switch" aria-checked="false"></button><span class="small muted" style="margin-left:8px">每次询问</span></div></div>
+          <div class="perm-card"><div class="pm-head"><svg class="icon sm" data-icon="network"></svg>网络访问</div><div class="sr-desc">发起 HTTP 请求</div><div class="sr-control" style="margin-top:8px;display:flex"><button type="button" class="switch on" role="switch" aria-checked="true"></button><span class="small muted" style="margin-left:8px">域名白名单 · 3 条规则</span></div></div>
+          <div class="perm-card"><div class="pm-head"><svg class="icon sm" data-icon="globe"></svg>Browser / Preview</div><div class="sr-desc">受控浏览器与 Preview 操作</div><div class="sr-control" style="margin-top:8px;display:flex"><button type="button" class="switch on" role="switch" aria-checked="true"></button><span class="small muted" style="margin-left:8px">自动</span></div></div>
+          <div class="perm-card"><div class="pm-head"><svg class="icon sm" data-icon="plug"></svg>MCP / Plugins</div><div class="sr-desc">第三方工具调用</div><div class="sr-control" style="margin-top:8px;display:flex"><button type="button" class="switch" role="switch" aria-checked="false"></button><span class="small muted" style="margin-left:8px">每次询问</span></div></div>
+          <div class="perm-card"><div class="pm-head"><svg class="icon sm" data-icon="monitor"></svg>桌面操作</div><div class="sr-desc">系统集成与外部编辑器</div><div class="sr-control" style="margin-top:8px;display:flex"><button type="button" class="switch" role="switch" aria-checked="false"></button><span class="small muted" style="margin-left:8px">每次询问</span></div></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="btn outline"><svg class="icon sm" data-icon="book"></svg>管理「始终允许」规则（12）</button>
+          <button class="btn outline danger"><svg class="icon sm" data-icon="trash"></svg>清除全部授权规则</button>
+        </div>
+      </div>
+
+      <!-- Sessions -->
+      <div class="set-group hidden" id="set-sessions">
+        <h3>Sessions</h3>
+        <p class="desc">会话保存、自动命名、Checkpoint 与 Compact 策略。</p>
+        <div class="set-row"><div><div class="sr-label">自动保存会话</div><div class="sr-desc">每个 Turn 结束后持久化到本地</div></div><div class="sr-control"><button type="button" class="switch on" role="switch" aria-checked="true"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">自动命名</div><div class="sr-desc">根据首条消息生成对话标题</div></div><div class="sr-control"><button type="button" class="switch on" role="switch" aria-checked="true"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">自动归档</div><div class="sr-desc">30 天未活跃的对话移入归档</div></div><div class="sr-control"><button type="button" class="switch" role="switch" aria-checked="false"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">Checkpoint</div><div class="sr-desc">关键节点自动创建（代码 + 对话）</div></div><div class="sr-control"><select class="select"><option>每个 Turn 结束</option><option>仅手动</option></select></div></div>
+        <div class="set-row"><div><div class="sr-label">Compact 阈值</div><div class="sr-desc">Context 使用达到该比例时自动压缩</div></div><div class="sr-control"><select class="select"><option>80%</option><option>70%</option><option>90%</option></select></div></div>
+        <div class="set-row"><div><div class="sr-label">历史清理</div><div class="sr-desc">删除 90 天前的归档对话（不可恢复）</div></div><div class="sr-control"><button class="btn small danger">立即清理</button></div></div>
+      </div>
+
+      <!-- Preview -->
+      <div class="set-group hidden" id="set-preview">
+        <h3>Preview</h3>
+        <p class="desc">本地开发服务器与受控浏览器行为。</p>
+        <div class="set-row"><div><div class="sr-label">启动命令</div><div class="sr-desc">留空则自动检测（package.json scripts）</div></div><div class="sr-control"><input class="input mono" value="npm run dev"></div></div>
+        <div class="set-row"><div><div class="sr-label">包管理器</div><div class="sr-desc">安装依赖时优先使用</div></div><div class="sr-control"><select class="select"><option>npm</option><option>pnpm</option><option>bun</option></select></div></div>
+        <div class="set-row"><div><div class="sr-label">默认端口</div><div class="sr-desc">端口冲突时自动 +1</div></div><div class="sr-control"><input class="input mono" value="30141"></div></div>
+        <div class="set-row"><div><div class="sr-label">自动启动</div><div class="sr-desc">打开项目时自动启动 Dev Server</div></div><div class="sr-control"><button type="button" class="switch on" role="switch" aria-checked="true"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">自动刷新</div><div class="sr-desc">文件变化后热更新页面</div></div><div class="sr-control"><button type="button" class="switch on" role="switch" aria-checked="true"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">浏览器隔离</div><div class="sr-desc">受控浏览器使用独立 Profile</div></div><div class="sr-control"><button type="button" class="switch on" role="switch" aria-checked="true"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">Console / Network 采集</div><div class="sr-desc">供 OMP 读取页面错误与请求</div></div><div class="sr-control"><select class="select"><option>错误与失败请求</option><option>全部</option><option>关闭</option></select></div></div>
+      </div>
+
+      <!-- Advanced -->
+      <div class="set-group hidden" id="set-advanced">
+        <h3>Advanced</h3>
+        <p class="desc">OMP 路径、RPC / Bridge 与实验性能力。修改前请确认你了解其影响。</p>
+        <div class="set-row"><div><div class="sr-label">OMP 路径</div><div class="sr-desc">留空则自动检测</div></div><div class="sr-control"><input class="input mono" value="自动检测（omp.exe）"></div></div>
+        <div class="set-row"><div><div class="sr-label">配置目录</div><div class="sr-desc">OMP 配置与会话存储位置</div></div><div class="sr-control"><span class="mono small muted">C:\Users\snowpear\.omp</span><button class="btn small outline">打开</button></div></div>
+        <div class="set-row"><div><div class="sr-label">日志级别</div><div class="sr-desc">OMP Logs 输出详细程度</div></div><div class="sr-control"><select class="select"><option>info</option><option>debug</option><option>warn</option></select></div></div>
+        <div class="set-row"><div><div class="sr-label">RPC 超时</div><div class="sr-desc">单次调用超时时间（毫秒）</div></div><div class="sr-control"><input class="input mono" value="30000"></div></div>
+        <div class="set-row"><div><div class="sr-label">Bridge 自动重启</div><div class="sr-desc">连接中断后自动重启 Bridge 进程</div></div><div class="sr-control"><button type="button" class="switch on" role="switch" aria-checked="true"></button></div></div>
+        <div class="set-row"><div><div class="sr-label">实验性能力</div><div class="sr-desc">启用 preview.dom v3、多 Preview 实例</div></div><div class="sr-control"><button type="button" class="switch" role="switch" aria-checked="false"></button></div></div>
+      </div>
+
+    </div>
+  </div>
+</template>
+
+<template id="tpl-diagnostics">
+  <div class="page-wide">
+    <div style="display:flex;align-items:center;margin-bottom:16px">
+      <div>
+        <h1 style="font-size:18px">诊断中心</h1>
+        <p class="muted small">面向开源项目用户与开发者的运行状态全景。普通信息优先，高级细节已折叠。</p>
+      </div>
+      <span class="spacer"></span>
+      <div id="diagActions" style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn outline"><svg class="icon sm" data-icon="copy"></svg>复制诊断报告</button>
+        <button class="btn outline"><svg class="icon sm" data-icon="export"></svg>导出日志</button>
+        <button class="btn outline"><svg class="icon sm" data-icon="folder"></svg>打开日志目录</button>
+        <button class="btn outline"><svg class="icon sm" data-icon="refresh"></svg>重启 OMP Bridge</button>
+        <button class="btn primary"><svg class="icon sm" data-icon="pulse"></svg>重新检测 OMP</button>
+      </div>
+    </div>
+
+    <div class="diag-kv" id="diagKv"></div>
+
+    <div class="diag-section">
+      <h3><svg class="icon sm" data-icon="cpu"></svg>活跃进程</h3>
+      <div class="card" style="padding:0 4px">
+        <table class="diag-table">
+          <thead><tr><th>进程</th><th>PID</th><th>角色</th><th>内存</th></tr></thead>
+          <tbody id="diagProc"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="diag-section">
+      <h3><svg class="icon sm" data-icon="zap"></svg>Capability 列表（RPC 协商）</h3>
+      <div class="card" style="padding:12px 14px" id="diagCap"></div>
+    </div>
+
+    <div class="diag-section">
+      <h3><svg class="icon sm" data-icon="alert-c"></svg>最近错误</h3>
+      <div class="card" style="padding:6px" id="diagErr"></div>
+    </div>
+
+    <details class="diag-advanced">
+      <summary><svg class="icon sm" data-icon="chevron-r"></svg> 高级细节 · 原始 RPC 日志 / Extension / Plugin / MCP 错误</summary>
+      <div class="da-body">
+        <div class="term" style="font-size:10.5px">
+          <div class="muted">13:58:12.481 [rpc →] {"jsonrpc":"2.0","id":481,"method":"capability.call","params":{"cap":"preview.dom","session":"t1"}}</div>
+          <div class="muted">13:58:12.512 [rpc ←] {"jsonrpc":"2.0","id":481,"result":{"ok":true,"nodes":142}} · 31ms</div>
+          <div class="err">13:58:15.901 [mcp playwright] transport closed unexpectedly (code 1006) · attempt 3/5</div>
+          <div class="err">13:41:03.220 [rpc] handshake: capability "browser.controlled" not declared by cli v0.82.1</div>
+          <div class="err">12:02:47.884 [plugin browser-lab] manifest validation failed: missing required field "omp"</div>
+          <div class="muted">12:02:47.885 [plugin browser-lab] plugin skipped · 0 tools registered</div>
+        </div>
+      </div>
+    </details>
+  </div>
+</template>
+
+<template id="tpl-agent-hub">
+  <div class="hub-page" id="hubRoot"></div>
+</template>
+
+<template id="tpl-model-config">
+  <!-- 越过页头导航直达内容。页头有 7 个导航项 + tab 组，键盘用户否则每次
+       进页面都要先穿过它们。 -->
+  <a class="skip-link" href="#mcPanels">跳到内容</a>
+  <div class="page-wide" id="mcRoot">
+
+    <!-- tab 组由 page-model-config.js 构建（要按实时数据算徽标）。
+         容器上先写好 role/aria，这样脚本失败时结构语义仍然成立。 -->
+    <div class="mc-tabbar">
+      <div class="mc-tabs" id="mcTabs" role="tablist" aria-label="模型配置视图"></div>
+    </div>
+
+    <div id="mcPanels" tabindex="-1">
+      <!-- 两个面板都常驻 DOM，切换只改 hidden：面板内部各自维护草稿
+           与展开状态，卸载重建会把它们全丢掉 —— 这正是合并要解决的
+           问题，不能在外壳这一层重新引入。 -->
+      <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" tabindex="0">
+        <div id="mpRoot"></div>
+      </section>
+      <section id="mcPanelRoles" role="tabpanel" aria-labelledby="mcTabRoles" tabindex="0" hidden>
+        <div id="roleRoot"></div>
+      </section>
+    </div>
+
+  </div>
+</template>
+
+<script src="assets/js/icons.js?v=5"></script>
+<script src="assets/js/brands.js?v=5"></script>
+<script src="assets/js/theme.js?v=2"></script>
+<script src="assets/js/mock-data.js?v=16"></script>
+<script src="assets/js/models-data.js?v=2"></script>
+<script src="assets/js/app.js?v=6"></script>
+<script src="assets/js/pages.js?v=11"></script>
+<script src="assets/js/workbench.js?v=23"></script>
+<script src="assets/js/page-models.js?v=5"></script>
+<script src="assets/js/page-roles.js?v=2"></script>
+<script src="assets/js/page-model-config.js?v=2"></script>
+<script src="assets/js/page-agent-hub.js?v=4"></script>
+<script src="assets/js/router.js?v=4"></script>
+<script>OMP.injectIcons();</script>
+</body>
+</html>

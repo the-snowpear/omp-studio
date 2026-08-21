@@ -13,6 +13,7 @@ import type {
   ModelFallbackRevertPolicy,
   ModelOverridePatch,
   ModelPresetItem,
+  ModelProviderProbeInput,
   ModelProviderRecord,
   ModelProviderRemoteCompaction,
   ModelProviderTestResult,
@@ -29,6 +30,7 @@ import {
 } from "@omp-studio/client-contract";
 import { Brand, hasBrand } from "./brands";
 import { Icon } from "./icons";
+import { useI18n } from "./i18n";
 import { ToastHost } from "./ToastHost";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { pagePhaseClass, useDeferredKey, useDeferredPresence, useOverlayPresence } from "./pageTransition";
@@ -38,13 +40,25 @@ import {
   MODEL_API_TYPES,
   MODEL_AUTH_TYPES,
   MODEL_THINKING,
+  createPreviewFetchedModels,
   createPreviewModelConfig,
 } from "./preview/modelConfigFixtures";
+import {
+  candidatesToEntries,
+  type FetchedModelCandidate,
+  mergeImportedModels,
+  pickedCount,
+  setAllPicked,
+  toCandidates,
+  togglePicked,
+} from "./models/fetchedModels";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { createPreviewAgentDefinitions } from "./preview/subagentsPreview";
 
 export const MC_INTENT_KEY = "omp.modelConfigIntent";
 const PROVIDER_ORDER_KEY = "omp.providerDisplayOrder";
+
+type I18nT = ReturnType<typeof useI18n>["t"];
 
 export type McTab = "providers" | "roles" | "subagents";
 
@@ -82,6 +96,7 @@ type TestResultView = ModelProviderTestResult & {
  * while the notice slides in from above.
  */
 function ProviderTestRow({ result }: { result: TestResultView }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const frame = requestAnimationFrame(() => setOpen(true));
@@ -92,7 +107,7 @@ function ProviderTestRow({ result }: { result: TestResultView }) {
       <div className={`pv-test ${result.ok ? "ok" : "fail"}`} role="status">
         <Icon name={result.ok ? "check" : "alert"} extra="sm" />
         <div className="tr-lines">
-          <b>{result.ok ? "连接成功" : "连接失败"}</b>
+          <b>{result.ok ? t("modelConfig.connectSuccess") : t("modelConfig.connectFailed")}</b>
           <span className="mono">{result.detail} · {result.latencyMs}ms</span>
         </div>
       </div>
@@ -124,16 +139,17 @@ export function modelConfigHasUnsavedChanges(): boolean {
   return modelConfigDirty;
 }
 
-function confirmDiscardDirty(): boolean {
-  return window.confirm("有未保存的更改，确定放弃吗？");
+function confirmDiscardDirty(t: I18nT): boolean {
+  return window.confirm(t("modelConfig.discardDirtyConfirm"));
 }
 
 function DiscoveryResultBlock({ result }: { result: ModelDiscoveryResult }) {
+  const { t } = useI18n();
   return (
     <div className={`test-result ${result.ok ? "ok" : "fail"}`} role="status" style={{ marginTop: 10 }}>
       <Icon name={result.ok ? "check" : "alert"} extra="sm" />
       <div className="tr-lines">
-        <b>{result.ok ? `探测成功 · ${result.found} found / ${result.usable} usable` : "探测失败"}</b>
+        <b>{result.ok ? t("modelConfig.probeSuccess", { found: result.found, usable: result.usable }) : t("modelConfig.probeFailed")}</b>
         <span className="mono">{result.detail} · {result.latencyMs}ms</span>
         {result.models.length > 0 ? (
           <span className="mono">{result.models.slice(0, 12).map((model) => model.id).join(" · ")}{result.models.length > 12 ? ` · +${result.models.length - 12}` : ""}</span>
@@ -278,12 +294,13 @@ function flattenModelGroups(
 }
 
 export function ModelPickCaps({ model }: { model: ModelPickItem }) {
+  const { t } = useI18n();
   return (
     <span className="rms-option-caps">
-      {model.reasoning ? <span className="chip purple xs chip-icon" data-tip="思考"><Icon name="brain" extra="sm" /></span> : null}
-      {model.image ? <span className="chip blue xs chip-icon" data-tip="多模态"><Icon name="image" extra="sm" /></span> : null}
-      {model.tools ? <span className="chip gray xs chip-icon" data-tip="工具"><Icon name="wrench" extra="sm" /></span> : null}
-      <span className="chip gray xs" data-tip="上下文">{fmtK(model.contextWindow)}</span>
+      {model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.tipThinking")}><Icon name="brain" extra="sm" /></span> : null}
+      {model.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.tipMultimodal")}><Icon name="image" extra="sm" /></span> : null}
+      {model.tools ? <span className="chip gray xs chip-icon" data-tip={t("modelConfig.tipTools")}><Icon name="wrench" extra="sm" /></span> : null}
+      <span className="chip gray xs" data-tip={t("modelConfig.tipContext")}>{fmtK(model.contextWindow)}</span>
     </span>
   );
 }
@@ -392,8 +409,9 @@ function ThinkingEffortSelect({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState({ top: 0, left: 0, width: 168 });
+  const { t } = useI18n();
   const selected = MODEL_CONFIG_THINKING_EFFORTS.filter((id) => value.includes(id));
-  const label = selected.length > 0 ? selected.join(", ") : "off, low, medium…";
+  const label = selected.length > 0 ? selected.join(", ") : "low, medium, high…";
 
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
@@ -430,7 +448,7 @@ function ThinkingEffortSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label="thinking effort"
-        data-tip={selected.length > 0 ? selected.join(", ") : "思考"}
+        data-tip={selected.length > 0 ? selected.join(", ") : t("modelConfig.tipThinking")}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
@@ -491,6 +509,7 @@ function AuthTypeSelect({
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState({ top: 0, left: 0, width: 280 });
+  const { t } = useI18n();
   const selected = MODEL_AUTH_TYPES.find((item) => item.id === value) ?? MODEL_AUTH_TYPES[1];
 
   useLayoutEffect(() => {
@@ -533,7 +552,7 @@ function AuthTypeSelect({
         className={`select mc-select-btn${open ? " is-open" : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label="认证方式"
+        aria-label={t("modelConfig.authType")}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
@@ -557,7 +576,7 @@ function AuthTypeSelect({
               ref={menuRef}
               className="menu mc-select-menu"
               role="listbox"
-              aria-label="认证方式"
+              aria-label={t("modelConfig.authType")}
               style={{ top: anchor.top, left: anchor.left, width: anchor.width }}
               onMouseDown={(event) => event.stopPropagation()}
             >
@@ -852,13 +871,14 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
 }
 
 function ModelCaps({ model }: { model: ModelCatalogEntry }) {
+  const { t } = useI18n();
   return (
     <span className="pm-meta">
       <span className="chip gray xs">{fmtK(model.contextWindow)} ctx</span>
       {model.maxTokens ? <span className="chip gray xs">{fmtK(model.maxTokens)} out</span> : null}
-      {model.image ? <span className="chip blue xs chip-icon" data-tip="图片"><Icon name="image" extra="sm" /></span> : null}
-      {model.reasoning ? <span className="chip purple xs chip-icon" data-tip="思考"><Icon name="brain" extra="sm" /></span> : null}
-      {model.tools ? <span className="chip gray xs chip-icon" data-tip="工具"><Icon name="wrench" extra="sm" /></span> : null}
+      {model.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.tipImage")}><Icon name="image" extra="sm" /></span> : null}
+      {model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.tipThinking")}><Icon name="brain" extra="sm" /></span> : null}
+      {model.tools ? <span className="chip gray xs chip-icon" data-tip={t("modelConfig.tipTools")}><Icon name="wrench" extra="sm" /></span> : null}
       {model.cost?.input !== undefined || model.cost?.output !== undefined
         ? <span className="chip gray xs">${model.cost.input ?? "—"}/${model.cost.output ?? "—"}</span>
         : null}
@@ -938,7 +958,7 @@ async function runTest(
 
 async function runProbe(
   client: StudioClient,
-  input: { readonly providerId: string; readonly endpointUrl?: string; readonly apiKey?: string; readonly discoveryType?: string; readonly timeoutMs?: number },
+  input: ModelProviderProbeInput,
 ): Promise<ModelDiscoveryResult> {
   const handle = await client.command("models.provider.probe", input as never);
   return waitReceipt<ModelDiscoveryResult>(client, handle.requestId);
@@ -1158,7 +1178,7 @@ function withPreviewLogin(record: ModelProviderRecord, current: ModelConfigReadM
   return {
     ...record,
     status: record.enabled ? "available" : record.status,
-    statusDetail: "已登录 · 演示账号",
+    statusDetail: "Logged in · Demo Account",
     auth: {
       ...record.auth,
       hasSecret: true,
@@ -1173,7 +1193,7 @@ function previewProviderFromDraft(editor: Draft): ModelProviderRecord {
     name: editor.name.trim(),
     source: "custom",
     status: editor.enabled ? "available" : "disabled",
-    statusDetail: "演示 · 未写入 Host",
+    statusDetail: "Demo · Not written to Host",
     api: editor.api,
     ...(editor.endpointUrl ? { endpointUrl: editor.endpointUrl } : {}),
     local: editor.local,
@@ -1265,8 +1285,10 @@ function roleAssignModCount(
   return added.length + removed.length;
 }
 
-function missingModelSaveError(labels: ReadonlyArray<string>): string {
-  return `无法保存：角色 ${labels.join("、")} 取消后没有主模型，请先设置另一个模型`;
+function missingModelSaveError(labels: ReadonlyArray<string>, t?: (k: string, p?: any) => string): string {
+  return t
+    ? t("modelConfig.cannotSaveRoleNoPrimary", { labels: labels.join(", ") })
+    : `Cannot save: role ${labels.join(", ")} has no primary model`;
 }
 
 function nextRolePrimaries(
@@ -1360,6 +1382,7 @@ function RoleAssignControl({
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState({ top: 0, left: 0 });
+  const { t } = useI18n();
   const [picked, setPicked] = useState<string[]>([]);
   const baselineRef = useRef<string[]>([]);
   const pickedRef = useRef<string[]>([]);
@@ -1429,8 +1452,8 @@ function RoleAssignControl({
         ref={btnRef}
         type="button"
         className={`icon-btn small role-assign-btn${open ? " is-open" : ""}`}
-        data-tip="角色"
-        aria-label="选择角色"
+        data-tip={t("modelConfig.tabRoles")}
+        aria-label={t("modelConfig.selectRoles")}
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled}
@@ -1460,16 +1483,16 @@ function RoleAssignControl({
               className="menu role-assign-pop"
               role="listbox"
               aria-multiselectable="true"
-              aria-label="选择角色"
+              aria-label={t("modelConfig.selectRoles")}
               style={{ top: anchor.top, left: anchor.left }}
               onMouseDown={(event) => event.stopPropagation()}
             >
               <div className="rap-head">
-                <b>选择角色</b>
+                <b>{t("modelConfig.selectRoles")}</b>
                 <span className="mono">{selector}</span>
               </div>
               {roles.length === 0 ? (
-                <div className="rap-empty">还没有角色</div>
+                <div className="rap-empty">{t("modelConfig.noRoles")}</div>
               ) : (
                 <div className="rap-list">
                   {roles.map((role) => {
@@ -1499,7 +1522,9 @@ function RoleAssignControl({
                           <span className="mono muted small">{role.alias}</span>
                         </span>
                         <span className="hint ellipsis">
-                          {on ? (wasCurrent ? "当前" : (role.primary || "未分配")) : (wasCurrent ? "将取消" : (role.primary || "未分配"))}
+                          {on
+                            ? (wasCurrent ? t("modelConfig.current") : (role.primary || t("modelConfig.unassigned")))
+                            : (wasCurrent ? t("modelConfig.willCancel") : (role.primary || t("modelConfig.unassigned")))}
                         </span>
                       </button>
                     );
@@ -1508,8 +1533,8 @@ function RoleAssignControl({
               )}
               {showSave || changeCount > 0 ? (
                 <div className="rap-foot">
-                  <span>{changeCount > 0 ? `将修改 ${changeCount} 个角色` : "未更改"}</span>
-                  {showSave ? <button type="button" className="btn small primary" onClick={trySave}>保存</button> : <span className="rap-hint">保存供应商时生效</span>}
+                  <span>{changeCount > 0 ? t("modelConfig.roleChangeCount", { count: changeCount }) : t("modelConfig.noChanges")}</span>
+                  {showSave ? <button type="button" className="btn small primary" onClick={trySave}>{t("common.save")}</button> : <span className="rap-hint">{t("modelConfig.savedOnProviderSave")}</span>}
                 </div>
               ) : null}
             </div>,
@@ -1533,6 +1558,7 @@ function RoleModelPicker({
 }) {
   const uid = useId();
   const listId = `${uid}-list`;
+  const { t } = useI18n();
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -1633,7 +1659,7 @@ function RoleModelPicker({
     };
   }, [open, flat, value]);
 
-  const label = selected?.name || value || "选择模型";
+  const label = selected?.name || value || t("modelConfig.selectModel");
   const missing = Boolean(value) && !selectedGroup;
 
   return (
@@ -1646,7 +1672,7 @@ function RoleModelPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-label="主模型"
+        aria-label={t("modelConfig.primaryModel")}
         data-tip={value || undefined}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -1675,12 +1701,12 @@ function RoleModelPicker({
               id={listId}
               className="menu rms-pop"
               role="listbox"
-              aria-label="按供应商选择模型"
+              aria-label={t("modelConfig.pickByProvider")}
               style={{ top: anchor.top, left: anchor.left, width: anchor.width }}
               onMouseDown={(event) => event.stopPropagation()}
             >
               {flat.length === 0 ? (
-                <div className="rms-empty">没有可用模型</div>
+                <div className="rms-empty">{t("modelConfig.noAvailableModels")}</div>
               ) : (
                 <>
                   {missing ? (
@@ -1695,7 +1721,7 @@ function RoleModelPicker({
                     >
                       <span className="rms-option-copy">
                         <b>{value}</b>
-                        <span>当前值不在可用列表</span>
+                        <span>{t("modelConfig.currentNotInList")}</span>
                       </span>
                     </button>
                   ) : null}
@@ -1743,7 +1769,51 @@ function RoleModelPicker({
   );
 }
 
+
+const BUILTIN_ROLE_DESC_KEYS: Record<string, string> = {
+  default: "modelConfig.roleDescDefault",
+  smol: "modelConfig.roleDescFast",
+  slow: "modelConfig.roleDescThinking",
+  vision: "modelConfig.roleDescVision",
+  plan: "modelConfig.roleDescArchitect",
+  designer: "modelConfig.roleDescDesigner",
+  commit: "modelConfig.roleDescCommit",
+  tiny: "modelConfig.roleDescTiny",
+  task: "modelConfig.roleDescSubtask",
+  advisor: "modelConfig.roleDescAdvisor",
+};
+
+function formatRoleDesc(role: { id: string; desc: string; builtin?: boolean }, t: (k: string) => string): string {
+  const key = BUILTIN_ROLE_DESC_KEYS[role.id];
+  if (role.builtin && key) {
+    return t(key);
+  }
+  return role.desc;
+}
+
+
+const PROVIDER_STATUS_DETAIL_KEYS: Record<string, string> = {
+  "OMP 已解析到可用模型": "modelConfig.statusOmpResolved",
+  "已从 models.yml 读取": "modelConfig.statusReadFromModelsYml",
+  "已在 disabledProviders 中禁用": "modelConfig.statusDisabledInConfig",
+  "已禁用": "modelConfig.statusDisabled",
+  "尚未登录": "modelConfig.statusNotLoggedIn",
+  "尚未配置凭据": "modelConfig.statusNoCredentials",
+  "已登录 · 演示账号": "modelConfig.statusDemoAccount",
+  "API Key 已保存": "modelConfig.statusApiKeySaved",
+  "本地服务未运行": "modelConfig.statusLocalServiceNotRunning",
+};
+
+function formatProviderStatusDetail(detail: string | undefined, t: (k: string) => string): string {
+  if (!detail) return "";
+  if (PROVIDER_STATUS_DETAIL_KEYS[detail]) {
+    return t(PROVIDER_STATUS_DETAIL_KEYS[detail]);
+  }
+  return detail;
+}
+
 export function ModelConfigPage({ client }: { client: StudioClient }) {
+  const { t } = useI18n();
   const { preview } = usePreviewMode();
   const [tab, setTab] = useState<McTab>("providers");
   const { shown: shownTab, phase: tabPhase } = useDeferredKey(tab);
@@ -1791,6 +1861,9 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   const [orderDraft, setOrderDraft] = useState<string[]>([]);
   const [probeResult, setProbeResult] = useState<ModelDiscoveryResult | null>(null);
   const [probing, setProbing] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [fetchDetail, setFetchDetail] = useState<{ ok: boolean; text: string } | null>(null);
+  const [candidates, setCandidates] = useState<FetchedModelCandidate[] | null>(null);
   const [createRoleOpen, setCreateRoleOpen] = useState(false);
   const [newRole, setNewRole] = useState({ id: "", name: "", desc: "" });
   const [fallbackDraft, setFallbackDraft] = useState<string[] | null>(null);
@@ -1851,6 +1924,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     setProviderBaseline(null);
     setRoleBaseline(null);
     setProbeResult(null);
+    setFetchDetail(null);
+    setCandidates(null);
     setFallbackDraft(null);
     setRevertPolicyDraft(null);
     setCreateRoleOpen(false);
@@ -1866,6 +1941,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       setModelsYmlDraft(null);
       setModelEdit(null);
       setProbeResult(null);
+      setFetchDetail(null);
+      setCandidates(null);
     }
   }, [hasProviderEditor]);
 
@@ -1876,6 +1953,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   useEffect(() => {
     if (!editorState) return;
     setModelsYmlDraft(null);
+    setFetchDetail(null);
+    setCandidates(null);
     const hasCatalog = editorState.models.some((m) => m.source === "catalog" || m.source === "extension");
     if (editorState.discoveryType) setModelsTab("discovery");
     else if (hasCatalog) setModelsTab("catalog");
@@ -1980,21 +2059,35 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     const win = tabWinRef.current;
     const mirror = tabMirrorRef.current;
     if (!tabs || !win || !mirror) return;
-    const active = tabs.querySelector<HTMLElement>(`#${TAB_BUTTON_ID[tab]}`);
-    if (!active) return;
-    const animate = tabWinPrimed.current;
-    if (!animate) {
-      win.style.transition = "none";
-      mirror.style.transition = "none";
-    }
-    win.style.left = `${active.offsetLeft}px`;
-    win.style.width = `${active.offsetWidth}px`;
-    mirror.style.left = `${-active.offsetLeft}px`;
-    if (!animate) {
-      void win.offsetWidth;
-      win.style.removeProperty("transition");
-      mirror.style.removeProperty("transition");
-      tabWinPrimed.current = true;
+
+    const sync = () => {
+      const active = tabs.querySelector<HTMLElement>(`#${TAB_BUTTON_ID[tab]}`);
+      if (!active) return;
+      const animate = tabWinPrimed.current;
+      if (!animate) {
+        win.style.transition = "none";
+        mirror.style.transition = "none";
+      }
+      win.style.left = `${active.offsetLeft}px`;
+      win.style.width = `${active.offsetWidth}px`;
+      mirror.style.left = `${-active.offsetLeft}px`;
+      if (!animate) {
+        void win.offsetWidth;
+        win.style.removeProperty("transition");
+        mirror.style.removeProperty("transition");
+        tabWinPrimed.current = true;
+      }
+    };
+
+    sync();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => sync());
+      observer.observe(tabs);
+      for (const btn of tabs.querySelectorAll('[role="tab"]')) {
+        observer.observe(btn);
+      }
+      return () => observer.disconnect();
     }
   }, [tab, providers.length, roles.length, agentCount]);
 
@@ -2167,7 +2260,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
   const persistModelsYml = async (text: string, overlayForm: boolean, close: boolean): Promise<boolean> => {
     if (!providerYamlId) {
-      toast("请先填写 Provider ID");
+      toast(t("modelConfig.fillProviderId"));
       return false;
     }
     const merged = mergeYamlMapEntry(modelsYmlSource, ["providers", providerYamlId], text);
@@ -2183,7 +2276,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     const fullText = merged.text;
     const draft = editorState;
     if (overlayForm && (!draft || !draft.id.trim() || !draft.name.trim())) {
-      toast("名称和 Provider ID 不能为空");
+      toast(t("modelConfig.nameAndIdRequired"));
       return false;
     }
     if (preview) {
@@ -2198,7 +2291,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       if (overlayForm && draft) setProviderBaseline(draft);
       setModelsYmlDraft(null);
       if (close) setEditor(null);
-      toast("演示：已更新本地 YAML，未写入 Host");
+      toast(t("modelConfig.demoYamlUpdated"));
       return true;
     }
     setBusy(true);
@@ -2209,7 +2302,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         ...(data?.contentHash ? { expectedHash: data.contentHash } : {}),
         ...(overlay ? { overlay } : {}),
       });
-      toast(result.message ?? "已写入 models.yml");
+      toast(result.message ?? t("modelConfig.modelsYmlWritten"));
       setModelsYmlDraft(null);
       if (overlayForm && draft) setProviderBaseline(draft);
       mergeContentHash(result.contentHash);
@@ -2217,7 +2310,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       await refresh();
       return true;
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
       return false;
     } finally {
       setBusy(false);
@@ -2226,7 +2319,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
   const persistConfigYml = async (text: string, overlayForm: boolean, close: boolean): Promise<boolean> => {
     if (!roleYamlId) {
-      toast("角色 id 不能为空");
+      toast(t("modelConfig.roleIdRequired"));
       return false;
     }
     const merged = mergeYamlMapEntry(configYmlSource, ["modelRoles", roleYamlId], text);
@@ -2271,13 +2364,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         setRoleDraft(null);
         setRoleId(null);
       }
-      toast("演示：已更新本地角色 YAML，未写入 Host");
+      toast(t("modelConfig.demoRoleYamlUpdated"));
       return true;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.roles.write", { roles: rolesMap });
-      toast(result.message ?? "已保存到 config.yml");
+      toast(result.message ?? t("modelConfig.savedToConfigYml"));
       setConfigYmlDraft(null);
       if (overlayForm && draft) setRoleBaseline(draft);
       if (close) {
@@ -2287,7 +2380,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       await refresh();
       return true;
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
       return false;
     } finally {
       setBusy(false);
@@ -2298,15 +2391,15 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     event?.preventDefault();
     if (!editorState) return;
     if (!editorState.id.trim() || !editorState.name.trim()) {
-      toast("名称和 Provider ID 不能为空");
+      toast(t("modelConfig.nameAndIdRequired"));
       return;
     }
     if (editorState.authType === "env" && editorState.envName.trim() && !isModelEnvConfigName(editorState.envName.trim())) {
-      toast("环境变量名只能使用字母、数字和下划线，例如 OPENAI_API_KEY");
+      toast(t("modelConfig.envNameInvalid"));
       return;
     }
     if (editorState.authType === "command" && !editorState.command.trim() && !editExisting) {
-      toast("请填写获取 Secret 的命令");
+      toast(t("modelConfig.fillSecretCommand"));
       return;
     }
     const roleUpdates = rolePrimaryUpdates(roles, roleAssignDraft);
@@ -2331,7 +2424,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       });
       setRoleAssignDraft({});
       setEditor(null);
-      toast(roleUpdates.length > 0 ? "演示：已更新本地列表与角色，未写入 Host" : "演示：已更新本地列表，未写入 models.yml");
+      toast(roleUpdates.length > 0 ? t("modelConfig.demoUpdatedListAndRoles") : t("modelConfig.demoUpdatedList"));
       return;
     }
     setBusy(true);
@@ -2344,11 +2437,11 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       await applyRolePrimaryUpdates(roleUpdates, { announce: false, refreshAfter: false });
       setRoleAssignDraft({});
       mergeContentHash(result.contentHash);
-      toast(roleUpdates.length > 0 ? `${result.message ?? "已保存"} · 已更新 ${roleUpdates.length} 个角色` : (result.message ?? "已保存"));
+      toast(roleUpdates.length > 0 ? t("modelConfig.savedAndRolesUpdated", { message: result.message ?? t("modelConfig.saved"), count: roleUpdates.length }) : (result.message ?? t("modelConfig.saved")));
       setEditor(null);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
     } finally {
       setBusy(false);
     }
@@ -2356,7 +2449,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
   const persistProviderDraft = async (draft: Draft, okMessage: string) => {
     if (!draft.id.trim() || !draft.name.trim()) {
-      toast("名称和 Provider ID 不能为空");
+      toast(t("modelConfig.nameAndIdRequired"));
       return;
     }
     if (preview) {
@@ -2368,7 +2461,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
           providers: [...current.providers.filter((item) => item.id !== saved.id), saved],
         };
       });
-      toast(`演示：${okMessage}，未写入 models.yml`);
+      toast(t("modelConfig.demoOkMessage", { message: okMessage }));
       return;
     }
     setBusy(true);
@@ -2378,7 +2471,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       toast(result.message ?? okMessage);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
     } finally {
       setBusy(false);
     }
@@ -2387,17 +2480,17 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   const deleteProvider = async (id: string) => {
     if (preview) {
       mutateLocal((current) => ({ ...current, providers: current.providers.filter((item) => item.id !== id) }));
-      toast("演示：已从本地列表移除");
+      toast(t("modelConfig.demoRemoved"));
       return;
     }
     setBusy(true);
     try {
       await runWrite(client, "models.provider.delete", { id, ...(data?.contentHash ? { expectedHash: data.contentHash } : {}) });
-      toast("已从 models.yml 删除");
+      toast(t("modelConfig.deletedFromModelsYml"));
       setEditor(null);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "删除失败"));
+      toast(hostErrorMessage(error, t("modelConfig.deleteFailed")));
     } finally {
       setBusy(false);
     }
@@ -2416,7 +2509,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     const enabled = !provider.enabled;
     applyEnabledLocal(provider.id, enabled);
     if (preview) {
-      toast(enabled ? `演示：已启用 ${provider.name}` : `演示：已禁用 ${provider.name}`);
+      toast(enabled ? t("modelConfig.demoEnabled", { name: provider.name }) : t("modelConfig.demoDisabled", { name: provider.name }));
       return;
     }
     const snapshot = data;
@@ -2427,11 +2520,11 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       if (nextHash) {
         mutateLocal((current) => ({ ...current, contentHash: nextHash }));
       }
-      toast(enabled ? `已启用 ${provider.name}` : `已禁用 ${provider.name}，其模型不再参与路由`);
+      toast(enabled ? t("modelConfig.enabled", { name: provider.name }) : t("modelConfig.disabledNoRouting", { name: provider.name }));
     } catch (error) {
       if (snapshot) setData(snapshot);
       else applyEnabledLocal(provider.id, provider.enabled);
-      toast(hostErrorMessage(error, "更新失败"));
+      toast(hostErrorMessage(error, t("modelConfig.updateFailed")));
     } finally {
       setBusy(false);
     }
@@ -2444,7 +2537,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     if (updates.length === 0) return;
     if (preview) {
       mutateLocal((current) => withRolePrimaryUpdates(current, updates));
-      if (opts?.announce !== false) toast(`演示：已将模型分配给 ${updates.length} 个角色，未写入 config.yml`);
+      if (opts?.announce !== false) toast(t("modelConfig.demoAssignedRoles", { count: updates.length }));
       return;
     }
     let last: ConfigWriteResult | undefined;
@@ -2455,7 +2548,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         selector: item.selector ? roleSelector(withRoleModel(item.role, item.selector, model)) : "",
       });
     }
-    if (opts?.announce !== false) toast(last?.message ?? `已将模型分配给 ${updates.length} 个角色`);
+    if (opts?.announce !== false) toast(last?.message ?? t("modelConfig.assignedRoles", { count: updates.length }));
     if (opts?.refreshAfter !== false) await refresh();
   };
 
@@ -2470,7 +2563,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     try {
       await applyRolePrimaryUpdates(targets.map((role) => ({ role, selector })));
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
     } finally {
       setBusy(false);
     }
@@ -2520,20 +2613,20 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     );
     if (!role.builtin) {
       if (!/^[a-z][a-z0-9_-]*$/.test(id)) {
-        toast("角色 id 只能使用小写字母、数字、连字符和下划线");
+        toast(t("modelConfig.roleIdInvalid"));
         return;
       }
       if (!name) {
-        toast("请填写角色名称");
+        toast(t("modelConfig.fillRoleName"));
         return;
       }
       const taken = roles.some((item) => item.id === id && item.id !== (baseline?.id ?? role.id));
       if (taken) {
-        toast("该角色 id 已被占用");
+        toast(t("modelConfig.roleIdTaken"));
         return;
       }
     } else if (!role.primary) {
-      toast("请先选择主模型");
+      toast(t("modelConfig.selectPrimaryFirst"));
       return;
     }
     const renamed = Boolean(persistIdentity && baseline && baseline.id !== id);
@@ -2550,7 +2643,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
           roles: current.roles.map((item) => (item.id === (baseline?.id ?? role.id) ? record : item)),
         };
       });
-      toast("演示：已更新本地角色，未写入 config.yml");
+      toast(t("modelConfig.demoRoleUpdated"));
       setRoleId(null);
       setRoleDraft(null);
       return;
@@ -2570,15 +2663,15 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       } else if (selector) {
         await runWrite(client, "models.roles.set", { roleId: id, selector });
       } else {
-        toast("请先选择主模型");
+        toast(t("modelConfig.selectPrimaryFirst"));
         return;
       }
-      toast("已保存到 config.yml");
+      toast(t("modelConfig.savedToConfigToast"));
       setRoleId(null);
       setRoleDraft(null);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
     } finally {
       setBusy(false);
     }
@@ -2586,7 +2679,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
   const startLogin = async (providerId: string) => {
     if (!providerId.trim()) {
-      toast("请先填写 Provider ID");
+      toast(t("modelConfig.fillProviderId"));
       return;
     }
     if (preview) {
@@ -2607,26 +2700,26 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
             ? {
                 ...item,
                 status: item.enabled ? "available" : item.status,
-                statusDetail: "已登录 · 演示账号",
+                statusDetail: t("modelConfig.statusDemoAccount"),
                 auth: { ...item.auth, type: "oauth", hasSecret: true, account: item.auth.account ?? "demo@local" },
               }
             : item),
         };
       });
-      toast("演示：已模拟登录，未写入 Host");
+      toast(t("modelConfig.toastDemoLogin"));
       return;
     }
     if (!data?.loginAvailable) {
-      toast(`请在终端运行 omp login ${providerId}`);
+      toast(t("modelConfig.toastTerminalLogin", { providerId }));
       return;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.login.start", { providerId });
-      toast(result.message ?? "登录完成");
+      toast(result.message ?? t("modelConfig.toastLoginCompleted"));
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, `登录失败，请运行 omp login ${providerId}`));
+      toast(hostErrorMessage(error, t("modelConfig.toastLoginFailed", { providerId })));
     } finally {
       setBusy(false);
     }
@@ -2640,19 +2733,19 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         providers: current.providers.map((item) => {
           if (item.id !== providerId) return item;
           const { account: _dropped, ...auth } = item.auth;
-          return { ...item, statusDetail: "尚未登录", auth: { ...auth, hasSecret: false } };
+          return { ...item, statusDetail: t("modelConfig.statusNotLoggedIn"), auth: { ...auth, hasSecret: false } };
         }),
       }));
-      toast("演示：已登出，未写入 Host");
+      toast(t("modelConfig.toastDemoLogout"));
       return;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.login.logout", { providerId });
-      toast(result.message ?? `已登出 ${providerId}`);
+      toast(result.message ?? t("modelConfig.toastLogoutNamed", { providerId }));
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "登出失败"));
+      toast(hostErrorMessage(error, t("modelConfig.toastLogoutFailed")));
     } finally {
       setBusy(false);
     }
@@ -2666,7 +2759,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         providerId,
         ok: true,
         latencyMs: 23 + Math.floor(Math.random() * 60),
-        detail: "演示：模拟连接成功 · HTTP 200",
+        detail: t("modelConfig.detailDemoConnectHttp200"),
       });
       return;
     }
@@ -2681,7 +2774,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       });
       setTestResult({ source, providerId, ...result });
     } catch (error) {
-      setTestResult({ source, providerId, ok: false, latencyMs: 0, detail: hostErrorMessage(error, "测试失败") });
+      setTestResult({ source, providerId, ok: false, latencyMs: 0, detail: hostErrorMessage(error, t("modelConfig.detailTestFailed")) });
     } finally {
       setTesting(false);
     }
@@ -2697,13 +2790,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       { id: "deepseek-r1", name: "deepseek-r1" },
     ],
     latencyMs: 28,
-    detail: `演示：探测 ${providerId} 成功`,
+    detail: t("modelConfig.detailDemoProbeSuccess", { providerId }),
   });
 
   const onProbe = async (providerId: string, endpointUrl?: string, apiKey?: string, discoveryType?: string, timeoutMs?: number) => {
     if (preview) {
       setProbeResult(previewProbeResult(providerId));
-      toast("演示：Discovery 探测未调用 Host");
+      toast(t("modelConfig.toastDemoDiscoveryNoHost"));
       return;
     }
     setProbing(true);
@@ -2724,25 +2817,93 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         usable: 0,
         models: [],
         latencyMs: 0,
-        detail: hostErrorMessage(error, "探测失败"),
+        detail: hostErrorMessage(error, t("modelConfig.detailProbeFailed")),
       });
     } finally {
       setProbing(false);
     }
   };
 
+  /**
+   * Fetch the provider's model list over HTTP and offer it as a checklist.
+   * Deliberately omits `discoveryType` so the Host picks the model-list URL and
+   * auth header from the wire API — that is what makes this work for ordinary
+   * providers that have no `discovery` block.
+   */
+  const onFetchModels = async (draft: Draft) => {
+    // `editor` is the deferred-presence copy, so a click landing during the
+    // editor's exit animation must not resurrect a closed form.
+    if (editorState === null) return;
+    const providerId = draft.id.trim();
+    const endpointUrl = draft.endpointUrl.trim();
+    if (!providerId || !endpointUrl) {
+      toast(!providerId ? t("modelConfig.toastFillProviderIdFirst") : t("modelConfig.toastFillBaseUrlFirst"));
+      return;
+    }
+    if (preview) {
+      const demo = createPreviewFetchedModels();
+      setCandidates(toCandidates(demo, draft.models, data?.availableModels ?? []));
+      setFetchDetail({ ok: true, text: t("modelConfig.detailDemoFetchNoHost", { count: demo.length }) });
+      setModelsTab("custom");
+      toast(t("modelConfig.toastDemoAutoFetchNoHost"));
+      return;
+    }
+    setFetching(true);
+    setFetchDetail(null);
+    setCandidates(null);
+    try {
+      const secret = editorTestSecret(draft);
+      const headers = parseHeaders(draft.headersText);
+      const result = await runProbe(client, {
+        providerId,
+        endpointUrl,
+        api: draft.api,
+        ...(secret ? { apiKey: secret } : {}),
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
+        ...(draft.discoveryTimeoutMs === undefined ? {} : { timeoutMs: draft.discoveryTimeoutMs }),
+      });
+      if (!result.ok) {
+        setFetchDetail({ ok: false, text: `${result.detail} · ${result.latencyMs}ms` });
+        return;
+      }
+      const next = toCandidates(result.models, draft.models, data?.availableModels ?? []);
+      setCandidates(next);
+      setModelsTab("custom");
+      setFetchDetail({
+        ok: true,
+        text: next.length === 0
+          ? t("modelConfig.detailEndpointEmptyList", { detail: result.detail, latencyMs: result.latencyMs })
+          : t("modelConfig.detailFetchSuccessStats", { total: next.length, added: next.filter((item) => !item.existing).length, latencyMs: result.latencyMs }),
+      });
+    } catch (error) {
+      setFetchDetail({ ok: false, text: hostErrorMessage(error, t("modelConfig.textFetchModelsFailed")) });
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const importCandidates = (host: Draft, picked: ReadonlyArray<FetchedModelCandidate>) => {
+    const entries = candidatesToEntries(host.id.trim(), picked);
+    if (entries.length === 0) return;
+    setEditor({ ...host, models: mergeImportedModels(host.models, entries) });
+    setCandidates(null);
+    setFetchDetail(null);
+    setModelsTab("custom");
+    toast(t("modelConfig.toastImportDraftModels", { count: entries.length }));
+  };
+
   const refreshDiscovery = async () => {
     if (preview) {
-      toast("演示：不会执行 omp models refresh");
+      toast(t("modelConfig.toastDemoNoRefresh"));
       return;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.discovery.refresh", {});
-      toast(result.message ?? "已重新扫描 Discovery 缓存");
+      toast(result.message ?? t("modelConfig.toastRescannedDiscovery"));
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "刷新失败"));
+      toast(hostErrorMessage(error, t("modelConfig.toastRefreshFailed")));
     } finally {
       setBusy(false);
     }
@@ -2755,16 +2916,16 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         modelRoleStorage: storage,
         roles: current.roles.map((role) => ({ ...role, scope: storage })),
       }));
-      toast(storage === "project" ? "演示：已切到 Project 作用域" : "演示：已恢复全局");
+      toast(storage === "project" ? t("modelConfig.toastDemoScopeProject") : t("modelConfig.toastDemoScopeGlobal"));
       return;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.roleStorage.set", { storage });
-      toast(result.message ?? "已更新角色作用域");
+      toast(result.message ?? t("modelConfig.toastScopeUpdated"));
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "切换作用域失败"));
+      toast(hostErrorMessage(error, t("modelConfig.toastScopeUpdateFailed")));
     } finally {
       setBusy(false);
     }
@@ -2774,7 +2935,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     const id = newRole.id.trim();
     const name = newRole.name.trim() || id;
     if (!id) {
-      toast("请填写角色 id");
+      toast(t("modelConfig.toastFillRoleId"));
       return;
     }
     if (preview) {
@@ -2784,7 +2945,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
           id,
           alias: `@${id}`,
           name,
-          desc: newRole.desc.trim() || "自定义角色",
+          desc: newRole.desc.trim() || t("modelConfig.defaultCustomRoleDesc"),
           builtin: false,
           primary: "",
           scope: current.modelRoleStorage,
@@ -2792,7 +2953,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       }));
       setCreateRoleOpen(false);
       setNewRole({ id: "", name: "", desc: "" });
-      toast("演示：已创建自定义角色，未写入 Host");
+      toast(t("modelConfig.toastDemoCustomRoleCreated"));
       return;
     }
     setBusy(true);
@@ -2802,12 +2963,12 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         name,
         ...(newRole.desc.trim() ? { desc: newRole.desc.trim() } : {}),
       });
-      toast(result.message ?? `已创建角色 ${id}`);
+      toast(result.message ?? t("modelConfig.toastRoleCreatedNamed", { id }));
       setCreateRoleOpen(false);
       setNewRole({ id: "", name: "", desc: "" });
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "创建角色失败"));
+      toast(hostErrorMessage(error, t("modelConfig.toastRoleCreateFailed")));
     } finally {
       setBusy(false);
     }
@@ -2818,18 +2979,18 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       mutateLocal((current) => ({ ...current, roles: current.roles.filter((role) => role.id !== roleId) }));
       setRoleDraft(null);
       setRoleId(null);
-      toast("演示：已删除自定义角色");
+      toast(t("modelConfig.toastDemoCustomRoleDeleted"));
       return;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.roles.delete", { roleId });
-      toast(result.message ?? `已删除角色 ${roleId}`);
+      toast(result.message ?? t("modelConfig.toastRoleDeletedNamed", { roleId }));
       setRoleDraft(null);
       setRoleId(null);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "删除角色失败"));
+      toast(hostErrorMessage(error, t("modelConfig.toastRoleDeleteFailed")));
     } finally {
       setBusy(false);
     }
@@ -2845,18 +3006,18 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       mutateLocal((current) => ({ ...current, fallbackChains: chains, fallbackRevertPolicy: revertPolicy }));
       setFallbackDraft(nextChain);
       setRevertPolicyDraft(revertPolicy);
-      toast("演示：已更新 Fallback，未写入 Host");
+      toast(t("modelConfig.toastDemoFallbackUpdated"));
       return;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.fallback.set", { chains, revertPolicy });
-      toast(result.message ?? "已保存 Fallback 链");
+      toast(result.message ?? t("modelConfig.toastFallbackSaved"));
       setFallbackDraft(nextChain);
       setRevertPolicyDraft(revertPolicy);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "保存 Fallback 失败"));
+      toast(hostErrorMessage(error, t("modelConfig.toastFallbackSaveFailed")));
     } finally {
       setBusy(false);
     }
@@ -2865,30 +3026,30 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   const saveProviderOrder = async () => {
     if (preview) {
       mutateLocal((current) => ({ ...current, modelProviderOrder: orderDraft.slice() }));
-      toast("演示：已更新 modelProviderOrder，未写入 Host");
+      toast(t("modelConfig.toastDemoModelProviderOrderUpdated"));
       setOrderEdit(false);
       return;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.providerOrder.set", { order: orderDraft.slice() });
-      toast(result.message ?? "已保存 modelProviderOrder");
+      toast(result.message ?? t("modelConfig.toastModelProviderOrderSaved"));
       setOrderEdit(false);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
     } finally {
       setBusy(false);
     }
   };
 
   const closeProviderEditor = () => {
-    if ((providerFormDirty || modelsYmlDirty) && !confirmDiscardDirty()) return;
+    if ((providerFormDirty || modelsYmlDirty) && !confirmDiscardDirty(t)) return;
     setEditor(null);
   };
 
   const closeRoleEditor = () => {
-    if ((roleFormDirty || configYmlDirty || fallbackDirty) && !confirmDiscardDirty()) return;
+    if ((roleFormDirty || configYmlDirty || fallbackDirty) && !confirmDiscardDirty(t)) return;
     setRoleDraft(null);
     setRoleId(null);
   };
@@ -2896,18 +3057,18 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   const saveCycle = async () => {
     if (preview) {
       mutateLocal((current) => ({ ...current, cycleOrder: cycleDraft.slice() }));
-      toast("演示：已更新本地顺序");
+      toast(t("modelConfig.toastDemoLocalOrderUpdated"));
       setCycleEdit(false);
       return;
     }
     setBusy(true);
     try {
       const result = await runWrite(client, "models.cycleOrder.set", { order: cycleDraft.slice() });
-      toast(result.message ?? "已保存顺序");
+      toast(result.message ?? t("modelConfig.toastOrderSaved"));
       setCycleEdit(false);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
     } finally {
       setBusy(false);
     }
@@ -2961,26 +3122,26 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
   return (
     <div className="page-wide" id="mcRoot">
-      <a className="skip-link" href="#mcPanels">跳到内容</a>
+      <a className="skip-link" href="#mcPanels">{t("common.skipToContent")}</a>
       <div className="mc-tabbar">
-        <div className="mc-tabs" id="mcTabs" ref={mcTabsRef} role="tablist" aria-label="模型配置视图" onKeyDown={onTabKey}>
+        <div className="mc-tabs" id="mcTabs" ref={mcTabsRef} role="tablist" aria-label={t("modelConfig.modelConfigView")} onKeyDown={onTabKey}>
           <button role="tab" id="mcTabProviders" aria-controls="mcPanelProviders" aria-selected={tab === "providers"} tabIndex={tab === "providers" ? 0 : -1} className={tab === "providers" ? "active" : undefined} onClick={() => activate("providers")}>
-            <Icon name="server" extra="sm" /><span>供应商</span>
-            <span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> 个供应商</span></span>
+            <Icon name="server" extra="sm" /><span>{t("modelConfig.providersTab")}</span>
+            <span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> {t("modelConfig.providersCountAria", { count: providers.length })}</span></span>
           </button>
           <button role="tab" id="mcTabRoles" aria-controls="mcPanelRoles" aria-selected={tab === "roles"} tabIndex={tab === "roles" ? 0 : -1} className={tab === "roles" ? "active" : undefined} onClick={() => activate("roles")}>
-            <Icon name="steering" extra="sm" /><span>角色</span>
-            <span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> 个角色</span></span>
+            <Icon name="steering" extra="sm" /><span>{t("modelConfig.rolesTab")}</span>
+            <span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span>
           </button>
           <button role="tab" id="mcTabSubagents" aria-controls="mcPanelSubagents" aria-selected={tab === "subagents"} tabIndex={tab === "subagents" ? 0 : -1} className={tab === "subagents" ? "active" : undefined} onClick={() => activate("subagents")}>
-            <Icon name="bot" extra="sm" /><span>子代理</span>
-            <span className="chip gray xs">{agentCount}<span className="sr-only"> 个子代理</span></span>
+            <Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span>
+            <span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span>
           </button>
           <span className="mc-tab-window" ref={tabWinRef} aria-hidden="true">
             <span className="mc-tab-mirror" ref={tabMirrorRef}>
-              <button type="button" tabIndex={-1}><Icon name="server" extra="sm" /><span>供应商</span><span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> 个供应商</span></span></button>
-              <button type="button" tabIndex={-1}><Icon name="steering" extra="sm" /><span>角色</span><span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> 个角色</span></span></button>
-              <button type="button" tabIndex={-1}><Icon name="bot" extra="sm" /><span>子代理</span><span className="chip gray xs">{agentCount}<span className="sr-only"> 个子代理</span></span></button>
+              <button type="button" tabIndex={-1}><Icon name="server" extra="sm" /><span>{t("modelConfig.providersTab")}</span><span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> {t("modelConfig.providersCountAria", { count: providers.length })}</span></span></button>
+              <button type="button" tabIndex={-1}><Icon name="steering" extra="sm" /><span>{t("modelConfig.rolesTab")}</span><span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span></button>
+              <button type="button" tabIndex={-1}><Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span><span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span></button>
             </span>
           </span>
         </div>
@@ -2991,12 +3152,12 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         <div className="role-issue-banner mc-page-banner">
           <Icon name="info" extra="sm" />
           <div>
-            <div className="rib-title">当前是演示数据，不是本机 ~/.omp 配置</div>
-            <div className="rib-text">关掉顶栏右上角「预览」后再进本页，才会直接读取 ~/.omp/agent/models.yml 和 config.yml。</div>
+            <div className="rib-title">{t("modelConfig.previewBannerTitle")}</div>
+            <div className="rib-text">{t("modelConfig.previewBannerText")}</div>
           </div>
         </div>
       ) : null}
-      {!preview && loadError ? <div className="role-issue-banner mc-page-banner"><Icon name="alert" extra="sm" /><div><div className="rib-title">读取说明</div><div className="rib-text">{loadError}</div></div></div> : null}
+      {!preview && loadError ? <div className="role-issue-banner mc-page-banner"><Icon name="alert" extra="sm" /><div><div className="rib-title">{t("modelConfig.loadErrorTitle")}</div><div className="rib-text">{loadError}</div></div></div> : null}
 
       <div id="mcPanels" tabIndex={-1}>
         <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} className={tabPanelClass("providers")}>
@@ -3007,8 +3168,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
               <div className="mr-toolbar">
                 <button type="button" className="icon-btn" onClick={closeProviderEditor}><Icon name="arrow-l" /></button>
                 {hasBrand(editor.id) ? <Brand id={editor.id} extra="lg" /> : null}
-                <b style={{ fontSize: "var(--fs-14)" }}>{editExisting ? `编辑 · ${editor.name}` : "新建供应商"}</b>
-                {presetSel ? <span className="chip blue xs">预设模板：{presetSel}</span> : <span className="chip purple xs">自定义供应商</span>}
+                <b style={{ fontSize: "var(--fs-14)" }}>{editExisting ? t("modelConfig.editProviderNamed", { name: editor.name }) : t("modelConfig.newProvider")}</b>
+                {presetSel ? <span className="chip blue xs">{t("modelConfig.presetTemplateNamed", { name: presetSel })}</span> : <span className="chip purple xs">{t("modelConfig.customProviderBadge")}</span>}
               </div>
 
               {!editExisting ? (
@@ -3016,14 +3177,14 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                   <button type="button" className="preset-toggle" aria-expanded={presetOpen} onClick={() => setPresetOpen((value) => !value)}>
                     <span className="tw"><Icon name="chevron-r" /></span>
                     <Icon name="layers" extra="sm" />
-                    <b>从预设模板创建</b>
-                    <span className="hint">选择后自动预填写配置</span>
+                    <b>{t("modelConfig.createFromPresetTemplate")}</b>
+                    <span className="hint">{t("modelConfig.createFromPresetHint")}</span>
                     <span className="spacer" />
-                    <span className="chip gray xs">{presets.reduce((n, group) => n + group.items.length, 0)} 个预设</span>
+                    <span className="chip gray xs">{t("modelConfig.presetsCount", { count: presets.reduce((n, group) => n + group.items.length, 0) })}</span>
                   </button>
                   {presetOpen ? (
                     <div className="preset-body">
-                      <input className="input preset-search" placeholder="搜索预设 Provider…" value={presetQuery} onChange={(event) => setPresetQuery(event.target.value)} />
+                      <input className="input preset-search" placeholder={t("modelConfig.searchPresetPlaceholder")} value={presetQuery} onChange={(event) => setPresetQuery(event.target.value)} />
                       {presets.map((group) => {
                         const items = group.items.filter((item) => !presetQuery || item.name.toLowerCase().includes(presetQuery.toLowerCase()) || item.id.includes(presetQuery.toLowerCase()));
                         if (!items.length) return null;
@@ -3033,7 +3194,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                             <div className="preset-grid">
                               {items.map((item) => (
                                 <button type="button" key={item.id} className={`preset-item${presetSel === item.id ? " sel" : ""}`} onClick={() => { setProviderBaseline(null); setEditor(draftFromPreset(item)); setPresetSel(item.id); }}>
-                                  <span className="pi-name">{hasBrand(item.id) ? <Brand id={item.id} extra="sm" /> : null}{item.name}{item.popular ? <span className="chip purple xs">常用</span> : null}{item.local ? <span className="chip blue xs">本地</span> : null}</span>
+                                  <span className="pi-name">{hasBrand(item.id) ? <Brand id={item.id} extra="sm" /> : null}{item.name}{item.popular ? <span className="chip purple xs">{t("modelConfig.popularBadge")}</span> : null}{item.local ? <span className="chip blue xs">{t("modelConfig.localBadge")}</span> : null}</span>
                                   <span className="pi-desc">{item.desc}</span>
                                   <span className="pi-desc">{item.auth.map((auth) => MODEL_AUTH_TYPES.find((entry) => entry.id === auth)?.label ?? auth).join(" · ")}</span>
                                 </button>
@@ -3048,9 +3209,9 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
               ) : null}
 
               <div className="mp-sec">
-                <h3>基础信息</h3>
+                <h3>{t("modelConfig.basicInfoSection")}</h3>
                 <div className="f-grid">
-                  <div className="field"><label htmlFor="f-name">供应商名称</label><input className="input" id="f-name" value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} /></div>
+                  <div className="field"><label htmlFor="f-name">{t("modelConfig.providerNameLabel")}</label><input className="input" id="f-name" value={editor.name} onChange={(event) => setEditor({ ...editor, name: event.target.value })} /></div>
                   <div className="field">
                     <label htmlFor="f-id">Provider ID</label>
                     <input className="input mono" id="f-id" value={editor.id} readOnly={editExisting} onChange={(event) => {
@@ -3063,15 +3224,15 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                         envName: !editor.envName.trim() || editor.envName === prevConv ? nextConv : editor.envName,
                       });
                     }} />
-                    <span className="desc">Model Selector 形如 <span className="chip-code">{editor.id || "provider-id"}/model-id</span></span>
+                    <span className="desc">{t("modelConfig.providerIdHelper", { format: `${editor.id || "provider-id"}/model-id` })}</span>
                   </div>
-                  <div className="field"><label htmlFor="f-site">官网链接</label><input className="input mono" id="f-site" value={editor.website} onChange={(event) => setEditor({ ...editor, website: event.target.value })} /></div>
-                  <div className="field"><label htmlFor="f-note">备注</label><input className="input" id="f-note" value={editor.note} onChange={(event) => setEditor({ ...editor, note: event.target.value })} /></div>
+                  <div className="field"><label htmlFor="f-site">{t("modelConfig.websiteLabel")}</label><input className="input mono" id="f-site" value={editor.website} onChange={(event) => setEditor({ ...editor, website: event.target.value })} /></div>
+                  <div className="field"><label htmlFor="f-note">{t("modelConfig.notesLabel")}</label><input className="input" id="f-note" value={editor.note} onChange={(event) => setEditor({ ...editor, note: event.target.value })} /></div>
                 </div>
 
                 <div className="mp-sec-divider" aria-hidden="true" />
 
-                <h3>认证</h3>
+                <h3>{t("modelConfig.authSection")}</h3>
                 <AuthTypeSelect
                   value={editor.authType}
                   onChange={(authType) => {
@@ -3091,20 +3252,20 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           <Icon name={authed ? "check" : data?.loginAvailable ? "key" : "info"} extra="sm" />
                           <span>
                             {authed
-                              ? <>已登录{account ? <> <b>{account}</b></> : "本机 OAuth 凭据"}。</>
+                              ? <>{t("modelConfig.loginCompleted", { account: account ? ` ${account}` : ` ${t("modelConfig.localOauthCredential")}` })}</>
                               : data?.loginAvailable
-                                ? "尚未登录 — 可在应用内完成 OAuth 授权。"
-                                : <>请用终端 <span className="chip-code">omp login {editor.id || "provider"}</span>。</>}
+                                ? t("modelConfig.loginPrompt")
+                                : <>{t("modelConfig.loginCliPrompt", { provider: editor.id || "provider" })}</>}
                           </span>
-                          <span className={`chip ${authed ? "green" : "gray"} xs`}>{authed ? "凭据有效" : "未登录"}</span>
+                          <span className={`chip ${authed ? "green" : "gray"} xs`}>{authed ? t("modelConfig.credentialValid") : t("modelConfig.notLoggedIn")}</span>
                         </div>
                         <div className="auth-actions">
                           <button type="button" className={`btn small ${authed ? "outline" : "primary"}`} disabled={busy} onClick={() => void startLogin(editor.id)}>
                             <Icon name="key" extra="sm" />
-                            {authed ? "重新登录" : "登录"}
+                            {authed ? t("modelConfig.relogin") : t("modelConfig.login")}
                           </button>
                           {authed ? (
-                            <button type="button" className="btn small outline" disabled={busy} onClick={() => void logoutProvider(editor.id)}>登出</button>
+                            <button type="button" className="btn small outline" disabled={busy} onClick={() => void logoutProvider(editor.id)}>{t("modelConfig.logout")}</button>
                           ) : null}
                         </div>
                       </>
@@ -3119,22 +3280,22 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           id="f-key"
                           type={showKey ? "text" : "password"}
                           value={editor.apiKey}
-                          placeholder="留空则保留已保存密钥"
+                          placeholder={t("modelConfig.apiKeyPlaceholder")}
                           autoComplete="off"
                           onChange={(event) => setEditor({ ...editor, apiKey: event.target.value })}
                         />
                         <button
                           type="button"
                           className="pwd-toggle"
-                          aria-label={showKey ? "隐藏 API Key" : "显示 API Key"}
+                          aria-label={showKey ? t("modelConfig.hideApiKeyAria") : t("modelConfig.showApiKeyAria")}
                           aria-pressed={showKey}
-                          data-tip={showKey ? "隐藏" : "显示"}
+                          data-tip={showKey ? t("common.hide") : t("common.show")}
                           onClick={() => setShowKey((value) => !value)}
                         >
                           <Icon name={showKey ? "eye-off" : "eye"} extra="sm" />
                         </button>
                       </div>
-                      <span className="desc">{editor.apiKey ? "将写入 models.yml 的 apiKey" : "尚未配置凭据 · 留空保存则保留已有密钥"}</span>
+                      <span className="desc">{editor.apiKey ? t("modelConfig.apiKeyHelperConfigured") : t("modelConfig.apiKeyHelperNotConfigured")}</span>
                     </div>
                   ) : null}
                   {editor.authType === "env" ? (() => {
@@ -3149,35 +3310,35 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           className="input mono"
                           id="f-env"
                           value={editor.envName}
-                          placeholder="如 OPENAI_API_KEY / ANTHROPIC_API_KEY"
+                          placeholder={t("modelConfig.envVarPlaceholder")}
                           aria-invalid={!valid}
                           onChange={(event) => setEditor({ ...editor, envName: event.target.value })}
                         />
                         <span className="desc">
                           {!valid
-                            ? "环境变量名只能使用字母、数字和下划线，例如 OPENAI_API_KEY"
+                            ? t("modelConfig.envVarInvalidDesc")
                             : name
                               ? detected
-                                ? <span className="auth-env-ok">已在本机环境中检测到 {name}</span>
+                                ? <span className="auth-env-ok">{t("modelConfig.envVarDetectedDesc", { name })}</span>
                                 : preview
-                                  ? `演示：保存后写入 apiKey: ${name}，不把密钥写入配置`
-                                  : `OMP 把 apiKey 当作环境变量名读取。保存后按本机环境检测 ${name}`
-                              : "OMP 启动时从环境变量读取，不把密钥写入 models.yml"}
+                                  ? t("modelConfig.envVarPreviewDesc", { name })
+                                  : t("modelConfig.envVarRealDesc", { name })
+                              : t("modelConfig.envVarDefaultDesc")}
                         </span>
                       </div>
                     );
                   })() : null}
                   {editor.authType === "command" ? (
                     <div className="field">
-                      <label htmlFor="f-cmd">获取 Secret 的命令</label>
+                      <label htmlFor="f-cmd">{t("modelConfig.commandAuthLabel")}</label>
                       <input className="input mono" id="f-cmd" value={editor.command} placeholder="!op read op://dev/openai/api-key" onChange={(event) => setEditor({ ...editor, command: event.target.value })} />
-                      <span className="desc">写入 models.yml 的 <span className="chip-code">apiKey: !command</span>。OMP 执行该命令取凭据（1Password CLI、pass 等），Secret 不落盘</span>
+                      <span className="desc">{t("modelConfig.commandAuthDesc")}</span>
                     </div>
                   ) : null}
                   {editor.authType === "none" ? (
                     <div className="auth-status" style={{ marginBottom: 0 }}>
                       <Icon name="check" extra="sm" />
-                      <span>无需认证 — 适用于 Ollama、LM Studio、llama.cpp 等本地服务。保存为 <span className="chip-code">auth: none</span>。</span>
+                      <span>{t("modelConfig.noneAuthDesc")}</span>
                     </div>
                   ) : null}
                 </div>
@@ -3192,27 +3353,97 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
                 <div className="mp-sec-divider" aria-hidden="true" />
 
-                <h3>API 类型</h3>
+                <h3>{t("modelConfig.apiTypeSection")}</h3>
                 <select className="select" style={{ maxWidth: 320 }} value={editor.api} onChange={(event) => setEditor({ ...editor, api: event.target.value })}>
                   {MODEL_API_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                 </select>
               </div>
 
               <div className="mp-sec">
-                <h3>模型</h3>
-                <p className="sec-desc">该 Provider 下的模型 — 角色与工作台按 <span className="chip-code">{editor.id || "provider-id"}/model-id</span> 引用。</p>
-                <div className="seg" role="tablist" aria-label="模型来源" style={{ marginBottom: 10 }}>
-                  <button type="button" role="tab" aria-selected={modelsTab === "catalog"} className={modelsTab === "catalog" ? "active" : undefined} onClick={() => setModelsTab("catalog")}>OMP Catalog</button>
-                  {editor.discoveryType ? (
-                    <button type="button" role="tab" aria-selected={modelsTab === "discovery"} className={modelsTab === "discovery" ? "active" : undefined} onClick={() => setModelsTab("discovery")}>Runtime Discovery</button>
-                  ) : null}
-                  <button type="button" role="tab" aria-selected={modelsTab === "custom"} className={modelsTab === "custom" ? "active" : undefined} onClick={() => setModelsTab("custom")}>Custom Models</button>
+                <h3>{t("modelConfig.modelsSection")}</h3>
+                <p className="sec-desc">{t("modelConfig.modelsSectionDesc", { prefix: editor.id || "provider-id" })}</p>
+                <div className="mc-models-bar">
+                  <div className="seg" role="tablist" aria-label={t("modelConfig.modelsSourceAria")}>
+                    <button type="button" role="tab" aria-selected={modelsTab === "catalog"} className={modelsTab === "catalog" ? "active" : undefined} onClick={() => setModelsTab("catalog")}>OMP Catalog</button>
+                    {editor.discoveryType ? (
+                      <button type="button" role="tab" aria-selected={modelsTab === "discovery"} className={modelsTab === "discovery" ? "active" : undefined} onClick={() => setModelsTab("discovery")}>Runtime Discovery</button>
+                    ) : null}
+                    <button type="button" role="tab" aria-selected={modelsTab === "custom"} className={modelsTab === "custom" ? "active" : undefined} onClick={() => setModelsTab("custom")}>Custom Models</button>
+                  </div>
+                  {(() => {
+                    const missing = !editor.id.trim() ? t("modelConfig.fillProviderIdFirst") : !editor.endpointUrl.trim() ? t("modelConfig.fillBaseUrlFirst") : "";
+                    return (
+                      <button
+                        type="button"
+                        className="btn small outline mc-fetch-btn"
+                        disabled={busy || fetching || missing !== ""}
+                        data-tip={missing || t("modelConfig.readProviderModelsTip")}
+                        onClick={() => void onFetchModels(editor)}
+                      >
+                        {fetching ? <><span className="spinner" />{t("modelConfig.fetchingModels")}</> : <><Icon name="refresh" extra="sm" />{t("modelConfig.autoFetchModels")}</>}
+                      </button>
+                    );
+                  })()}
                 </div>
+
+                {fetchDetail && !candidates ? (
+                  <div className={`test-result ${fetchDetail.ok ? "ok" : "fail"}`} role="status">
+                    <Icon name={fetchDetail.ok ? "check" : "alert"} extra="sm" />
+                    <div className="tr-lines"><b>{fetchDetail.ok ? t("modelConfig.fetchSuccess") : t("modelConfig.fetchFailed")}</b><span className="mono">{fetchDetail.text}</span></div>
+                  </div>
+                ) : null}
+
+                {candidates ? (
+                  <div className="mc-fetch-panel">
+                    <div className={`test-result ${fetchDetail?.ok === false ? "fail" : "ok"}`} role="status" style={{ marginTop: 0 }}>
+                      <Icon name={fetchDetail?.ok === false ? "alert" : "check"} extra="sm" />
+                      <div className="tr-lines">
+                        <b>{fetchDetail?.ok === false ? t("modelConfig.fetchFailed") : t("modelConfig.selectModelsToAdd")}</b>
+                        <span className="mono">{fetchDetail?.text ?? ""}</span>
+                      </div>
+                    </div>
+                    {candidates.length === 0 ? (
+                      <div className="pm-empty"><Icon name="box" extra="sm" />{t("modelConfig.endpointNoModels")}</div>
+                    ) : candidates.map((item) => (
+                      <label className={`pm-row mc-fetch-row${item.existing ? " is-off" : ""}`} key={item.id}>
+                        <input type="checkbox" checked={item.picked} onChange={() => setCandidates(togglePicked(candidates, item.id))} />
+                        <span className="pm-name">{item.name}</span>
+                        <span className="pm-sel ellipsis">{`${editor.id || "provider"}/${item.id}`}</span>
+                        <span className="pm-meta">
+                          {item.contextWindow ? <span className="chip gray xs">{fmtK(item.contextWindow)} ctx</span> : null}
+                          {item.maxTokens ? <span className="chip gray xs">{fmtK(item.maxTokens)} out</span> : null}
+                          {item.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.badgeImage")}><Icon name="image" extra="sm" /></span> : null}
+                          {item.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.badgeReasoning")}><Icon name="brain" extra="sm" /></span> : null}
+                          {item.enriched ? <span className="chip gray xs" data-tip={t("modelConfig.localEnrichedTip")}>{t("modelConfig.localEnriched")}</span> : null}
+                          {item.existing ? <span className="chip gray xs">{t("modelConfig.alreadyExists")}</span> : null}
+                        </span>
+                      </label>
+                    ))}
+                    <div className="mc-fetch-foot">
+                      {candidates.length > 0 ? (
+                        <button type="button" className="btn small outline" onClick={() => setCandidates(setAllPicked(candidates, pickedCount(candidates) !== candidates.length))}>
+                          {pickedCount(candidates) === candidates.length ? t("modelConfig.deselectAll") : t("modelConfig.selectAll")}
+                        </button>
+                      ) : null}
+                      <span className="spacer" />
+                      <button type="button" className="btn small outline" onClick={() => { setCandidates(null); setFetchDetail(null); }}>{t("common.close")}</button>
+                      <button
+                        type="button"
+                        className="btn small primary"
+                        disabled={pickedCount(candidates) === 0}
+                        onClick={() => importCandidates(editor, candidates.filter((item) => item.picked))}
+                      >
+                        <Icon name="plus" extra="sm" />{t("modelConfig.importModelsCount", { count: pickedCount(candidates) })}
+                      </button>
+                    </div>
+                    <p className="sec-desc" style={{ marginTop: 8 }}>{t("modelConfig.importDraftNotice", { action: editExisting ? t("modelConfig.saveChanges") : t("modelConfig.addProvider") })}</p>
+                  </div>
+                ) : null}
 
                 {modelsTab === "catalog" ? (() => {
                   const catalog = editor.models.filter((m) => m.source === "catalog" || m.source === "extension");
                   if (catalog.length === 0) {
-                    return <div className="pm-empty"><Icon name="box" extra="sm" />该 Provider 暂无 OMP Catalog 模型</div>;
+                    return <div className="pm-empty"><Icon name="box" extra="sm" />{t("modelConfig.noCatalogModels")}</div>;
                   }
                   return catalog.map((model) => {
                     const sel = model.selector || `${editor.id}/${model.id}`;
@@ -3222,7 +3453,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           <span className="mono">{model.id}</span>
                           <span className="muted small">{model.name}</span>
                           <span className="spacer" />
-                          <button type="button" className="icon-btn small" data-tip="编辑" onClick={() => setModelEdit({ kind: "override", modelId: model.id, draft: blankOverrideForm(editor.modelOverrides[model.id]) })}><Icon name="pencil" extra="sm" /></button>
+                          <button type="button" className="icon-btn small" data-tip={t("common.edit")} onClick={() => setModelEdit({ kind: "override", modelId: model.id, draft: blankOverrideForm(editor.modelOverrides[model.id]) })}><Icon name="pencil" extra="sm" /></button>
                           <RoleAssignControl
                             selector={sel}
                             open={assignPopSel === sel}
@@ -3253,16 +3484,16 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       }} />
                     </span></div>
                     <div className="kv-row">
-                      <span className="k">探测 / 扫描</span>
+                      <span className="k">{t("modelConfig.probeScan")}</span>
                       <span className="v" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button type="button" className="btn small outline" disabled={busy || probing} onClick={() => void onProbe(editor.id, editor.endpointUrl || undefined, editorTestSecret(editor), editor.discoveryType || undefined, editor.discoveryTimeoutMs)}>
-                          {probing ? "探测中…" : "探测"}
+                          {probing ? t("modelConfig.probing") : t("modelConfig.probe")}
                         </button>
-                        <button type="button" className="btn small outline" disabled={busy} onClick={() => void refreshDiscovery()}>重新扫描</button>
+                        <button type="button" className="btn small outline" disabled={busy} onClick={() => void refreshDiscovery()}>{t("modelConfig.rescan")}</button>
                       </span>
                     </div>
                     {probeResult ? <DiscoveryResultBlock result={probeResult} /> : null}
-                    <p className="sec-desc" style={{ marginTop: 8 }}>探测只读远端模型列表，不写盘。重新扫描会执行 <span className="chip-code">omp models refresh</span> 并刷新 models.db。</p>
+                    <p className="sec-desc" style={{ marginTop: 8 }}>{t("modelConfig.probeNotice")}</p>
                   </div>
                 ) : null}
 
@@ -3274,10 +3505,10 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       return (
                         <div className="mdl-edit" key={`${model.id}-${index}`}>
                           <div className="me-head">
-                            <span className="mono">{model.id || "新模型"}</span>
+                            <span className="mono">{model.id || t("modelConfig.newModel")}</span>
                             <span className="muted small">{model.name}</span>
                             <span className="spacer" />
-                            <button type="button" className="icon-btn small" data-tip="编辑" onClick={() => setModelEdit({ kind: "custom", index, draft: blankCustomForm(model) })}><Icon name="pencil" extra="sm" /></button>
+                            <button type="button" className="icon-btn small" data-tip={t("common.edit")} onClick={() => setModelEdit({ kind: "custom", index, draft: blankCustomForm(model) })}><Icon name="pencil" extra="sm" /></button>
                             <RoleAssignControl
                               selector={sel}
                               open={assignPopSel === sel}
@@ -3290,7 +3521,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                               onDraftChange={onRoleAssignDraft}
                               onError={toast}
                             />
-                            <button type="button" className="icon-btn small" data-tip="删除" onClick={() => {
+                            <button type="button" className="icon-btn small" data-tip={t("common.delete")} onClick={() => {
                               const models = editor.models.filter((_, i) => i !== index);
                               setEditor({ ...editor, models });
                             }}><Icon name="trash" extra="sm" /></button>
@@ -3299,30 +3530,30 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                         </div>
                       );
                     })}
-                    <button type="button" className="btn outline" onClick={() => setModelEdit({ kind: "add", draft: blankCustomForm() })}><Icon name="plus" extra="sm" />添加模型</button>
+                    <button type="button" className="btn outline" onClick={() => setModelEdit({ kind: "add", draft: blankCustomForm() })}><Icon name="plus" extra="sm" />{t("modelConfig.addModel")}</button>
                   </>
                 ) : null}
               </div>
 
               <details className="mp-advanced">
-                <summary><span className="tw"><Icon name="chevron-r" extra="sm" /></span>高级设置 <span className="hint">Custom Headers · Strict Tools · Transport · Remote Compaction</span></summary>
+                <summary><span className="tw"><Icon name="chevron-r" extra="sm" /></span>{t("modelConfig.advancedSettingsSummary")} <span className="hint">Custom Headers · Strict Tools · Transport · Remote Compaction</span></summary>
                 <div className="adv-body">
                   <div className="f-grid">
                     <div className="field span2">
-                      <label>Custom Headers（每行一个 Header: Value）</label>
+                      <label>{t("modelConfig.customHeadersLabel")}</label>
                       <textarea className="input mono" rows={3} value={editor.headersText} placeholder={"X-Org-Id: org-123\nX-Api-Version: 2"} onChange={(event) => setEditor({ ...editor, headersText: event.target.value })} />
                     </div>
                     <div className="kv-row" style={{ border: "none", padding: "4px 0" }}>
                       <span className="k">Disable Strict Tools</span>
                       <span className="v">
                         <button type="button" className={`switch${editor.disableStrictTools ? " on" : ""}`} role="switch" aria-checked={editor.disableStrictTools} onClick={() => setEditor({ ...editor, disableStrictTools: !editor.disableStrictTools })} />
-                        <span className="desc">放宽工具调用 Schema 校验</span>
+                        <span className="desc">{t("modelConfig.disableStrictToolsDesc")}</span>
                       </span>
                     </div>
                     <div className="field">
                       <label>Transport</label>
                       <select className="select" value={editor.transport} onChange={(event) => setEditor({ ...editor, transport: event.target.value as "" | "pi-native" })}>
-                        <option value="">HTTP / SSE（默认）</option>
+                        <option value="">{t("modelConfig.httpSseDefault")}</option>
                         <option value="pi-native">pi-native</option>
                       </select>
                     </div>
@@ -3330,7 +3561,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       <span className="k">Remote Compaction</span>
                       <span className="v">
                         <button type="button" className={`switch${editor.remoteCompactionEnabled ? " on" : ""}`} role="switch" aria-checked={editor.remoteCompactionEnabled} onClick={() => setEditor({ ...editor, remoteCompactionEnabled: !editor.remoteCompactionEnabled })} />
-                        <span className="desc">由 Provider 端执行上下文压缩</span>
+                        <span className="desc">{t("modelConfig.remoteCompactionDesc")}</span>
                       </span>
                     </div>
                     {editor.remoteCompactionEnabled ? (
@@ -3348,28 +3579,28 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 value={modelsYmlValue}
                 onChange={setModelsYmlDraft}
                 allowEmpty={false}
-                title={providerYamlId || "供应商代码块"}
+                title={providerYamlId || t("modelConfig.providerYamlTitle")}
                 path={providerYamlId ? `models.yml · providers.${providerYamlId}` : "models.yml"}
                 minHeight={320}
                 maxHeight={420}
                 dirty={modelsYmlDirty}
                 saving={busy}
                 saveDisabled={!providerYamlId || (!modelsYmlDirty && !providerFormDirty)}
-                saveHint={!providerYamlId ? "先填写 Provider ID" : providerFormDirty ? "将同步表单" : ""}
+                saveHint={!providerYamlId ? t("modelConfig.fillProviderIdSaveHint") : providerFormDirty ? t("modelConfig.syncFormSaveHint") : ""}
                 onSave={(text) => void persistModelsYml(text, providerFormDirty, false)}
               />
 
               <div className="mp-foot">
-                <button type="button" className="btn outline" onClick={closeProviderEditor}>取消</button>
+                <button type="button" className="btn outline" onClick={closeProviderEditor}>{t("common.cancel")}</button>
                 {editExisting && !preview ? (
                   confirmDelete ? (
                     <span className="confirm-delete" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span className="desc">删除会移除 models.yml 中的该供应商，引用其模型的角色会变为不可用。</span>
-                      <button type="button" className="btn danger" disabled={busy} onClick={() => void deleteProvider(editor.id)}>确认删除</button>
-                      <button type="button" className="btn outline" onClick={() => setConfirmDelete(false)}>取消</button>
+                      <span className="desc">{t("modelConfig.deleteProviderNotice")}</span>
+                      <button type="button" className="btn danger" disabled={busy} onClick={() => void deleteProvider(editor.id)}>{t("modelConfig.confirmDelete")}</button>
+                      <button type="button" className="btn outline" onClick={() => setConfirmDelete(false)}>{t("common.cancel")}</button>
                     </span>
                   ) : (
-                    <button type="button" className="btn danger" disabled={busy} onClick={() => setConfirmDelete(true)}><Icon name="trash" extra="sm" />删除</button>
+                    <button type="button" className="btn danger" disabled={busy} onClick={() => setConfirmDelete(true)}><Icon name="trash" extra="sm" />{t("common.delete")}</button>
                   )
                 ) : null}
                 <span className="right">
@@ -3377,13 +3608,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                     <span className={`test-result inline ${testResult.ok ? "ok" : "fail"}`} role="status">
                       <Icon name={testResult.ok ? "check" : "alert"} extra="sm" />
                       <div className="tr-lines">
-                        <b>{testResult.ok ? "连接成功" : "连接失败"}</b>
+                        <b>{testResult.ok ? t("modelConfig.connectionSuccess") : t("modelConfig.connectionFailed")}</b>
                         <span className="mono">{testResult.detail} · {testResult.latencyMs}ms</span>
                       </div>
                     </span>
                   ) : null}
-                  <button type="button" className="btn outline" disabled={busy || testing} onClick={() => void onTest("editor", editExisting ? editor.id : undefined, editor.api, editor.endpointUrl, editorTestSecret(editor))}>{testing ? "测试中…" : "测试连接"}</button>
-                  <button type="submit" className="btn primary" disabled={busy}><Icon name="check" extra="sm" />{editExisting ? "保存修改" : "添加供应商"}</button>
+                  <button type="button" className="btn outline" disabled={busy || testing} onClick={() => void onTest("editor", editExisting ? editor.id : undefined, editor.api, editor.endpointUrl, editorTestSecret(editor))}>{testing ? t("modelConfig.testingConnection") : t("modelConfig.testConnection")}</button>
+                  <button type="submit" className="btn primary" disabled={busy}><Icon name="check" extra="sm" />{editExisting ? t("modelConfig.saveChanges") : t("modelConfig.addProvider")}</button>
                 </span>
               </div>
             </form>
@@ -3392,25 +3623,25 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
           ) : (
             <>
               <div className="mr-toolbar">
-                <input className="input" placeholder="搜索供应商名称或 Provider ID…" value={query} onChange={(event) => setQuery(event.target.value)} />
-                <span className="mr-count">{providers.length} 个供应商 · {availCount} 个可用</span>
-                <span className="seg src-filter" role="tablist" aria-label="供应商来源筛选">
-                  <button type="button" className={sourceFilter === "all" ? "active" : undefined} onClick={() => setSourceFilter("all")}>全部</button>
-                  <button type="button" className={sourceFilter === "native" ? "active" : undefined} onClick={() => setSourceFilter("native")}>原生</button>
-                  <button type="button" className={sourceFilter === "third" ? "active" : undefined} onClick={() => setSourceFilter("third")}>第三方</button>
+                <input className="input" placeholder={t("modelConfig.searchProviderPlaceholder")} value={query} onChange={(event) => setQuery(event.target.value)} />
+                <span className="mr-count">{t("modelConfig.providerCounts", { total: providers.length, available: availCount })}</span>
+                <span className="seg src-filter" role="tablist" aria-label={t("modelConfig.sourceFilterAria")}>
+                  <button type="button" className={sourceFilter === "all" ? "active" : undefined} onClick={() => setSourceFilter("all")}>{t("common.all")}</button>
+                  <button type="button" className={sourceFilter === "native" ? "active" : undefined} onClick={() => setSourceFilter("native")}>{t("modelConfig.nativeFilter")}</button>
+                  <button type="button" className={sourceFilter === "third" ? "active" : undefined} onClick={() => setSourceFilter("third")}>{t("modelConfig.customFilter")}</button>
                 </span>
                 <span className="spacer" />
-                <button type="button" className="btn outline" disabled={preview} data-tip={preview ? "预览" : undefined} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />刷新状态</button>
-                <button type="button" className="btn primary" onClick={() => { setModelEdit(null); setEditor(blankDraft()); setEditExisting(false); setPresetOpen(false); setPresetSel(null); setConfirmDelete(false); setTestResult(null); }}><Icon name="plus" extra="sm" />添加供应商</button>
+                <button type="button" className="btn outline" disabled={preview} data-tip={preview ? t("common.demo") : undefined} onClick={() => void refresh()}><Icon name="refresh" extra="sm" />{t("modelConfig.refreshStatus")}</button>
+                <button type="button" className="btn primary" onClick={() => { setModelEdit(null); setEditor(blankDraft()); setEditExisting(false); setPresetOpen(false); setPresetSel(null); setConfirmDelete(false); setTestResult(null); }}><Icon name="plus" extra="sm" />{t("modelConfig.addProvider")}</button>
               </div>
               {!data && !loadError ? (
                 <div className="pv-list is-pending" role="status">
                   <Icon name="refresh" extra="sm" />
-                  <span>正在读取本机 OMP 配置…</span>
+                  <span>{t("modelConfig.readingLocalConfig")}</span>
                 </div>
               ) : (
               <>
-              {filtered.length === 0 ? <div className="empty"><Icon name="search" />{providers.length === 0 ? "还没有供应商。添加一个或确认本机 omp 可用。" : "没有匹配的供应商"}</div> : null}
+              {filtered.length === 0 ? <div className="empty"><Icon name="search" />{providers.length === 0 ? t("modelConfig.noProviders") : t("modelConfig.noMatchingProviders")}</div> : null}
               <div className={`pv-list${draggingId && dragPhase === "dragging" ? " is-sorting" : ""}`} ref={listRef}>
               {filtered.map((provider) => {
                 const open = expanded.has(provider.id);
@@ -3426,8 +3657,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       <button
                         type="button"
                         className="pv-drag"
-                        aria-label={`拖动调整 ${provider.name} 的显示顺序`}
-                        data-tip="拖动"
+                        aria-label={t("modelConfig.dragAdjustOrder", { name: provider.name })}
+                        data-tip={t("modelConfig.drag")}
                         onPointerDown={(event) => onProviderDragPointerDown(event, provider.id)}
                       />
                       <BrandMark id={provider.id} local={provider.local} status={provider.status} />
@@ -3435,23 +3666,23 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                         <div className="pv-name">
                           <span>{provider.name}</span>
                           <span className="chip-code">{provider.id}</span>
-                          <span className={`chip ${SOURCE_GROUP(provider.source) === "native" ? "blue" : "gray"} xs`}>{SOURCE_GROUP(provider.source) === "native" ? "原生" : "第三方"}</span>
-                          <span className="pv-count"><span className={`pv-dot dot ${st?.dot || "gray"}`} />{provider.models.length} 个模型</span>
+                          <span className={`chip ${SOURCE_GROUP(provider.source) === "native" ? "blue" : "gray"} xs`}>{SOURCE_GROUP(provider.source) === "native" ? t("modelConfig.nativeProviderBadge") : t("modelConfig.customProviderBadge")}</span>
+                          <span className="pv-count"><span className={`pv-dot dot ${st?.dot || "gray"}`} />{t("modelConfig.modelCount", { count: provider.models.length })}</span>
                         </div>
-                        <div className="pv-sub"><span className="pv-url ellipsis">{provider.endpointUrl || provider.statusDetail}</span></div>
+                        <div className="pv-sub"><span className="pv-url ellipsis">{provider.endpointUrl || formatProviderStatusDetail(provider.statusDetail, t)}</span></div>
                       </div>
                       <div className="pv-acts">
-                        <button type="button" className={`pv-act is-action${testing ? " is-testing" : ""}`} disabled={busy || testing} data-tip="测试" aria-label="测试连接" onClick={() => void onTest("list", provider.id)}><Icon name="pulse" /></button>
-                        <button type="button" className="pv-act is-action" disabled={busy} data-tip="刷新" aria-label="刷新模型" onClick={() => void refreshDiscovery()}><Icon name="refresh" /></button>
-                        <button type="button" className="pv-act is-action is-edit" data-tip="编辑" aria-label="编辑供应商" onClick={() => { setModelEdit(null); setEditor(draftFromProvider(provider)); setEditExisting(true); setConfirmDelete(false); setTestResult(null); }}><Icon name="pencil" /></button>
-                        <button type="button" className="pv-act is-action is-copy" data-tip="复制" aria-label="复制 Provider ID" onClick={() => { void navigator.clipboard.writeText(provider.id); toast(`已复制 ${provider.id}`); }}><Icon name="copy" /></button>
+                        <button type="button" className={`pv-act is-action${testing ? " is-testing" : ""}`} disabled={busy || testing} data-tip={t("common.test")} aria-label={t("modelConfig.testConnection")} onClick={() => void onTest("list", provider.id)}><Icon name="pulse" /></button>
+                        <button type="button" className="pv-act is-action" disabled={busy} data-tip={t("common.refresh")} aria-label={t("modelConfig.refreshModels")} onClick={() => void refreshDiscovery()}><Icon name="refresh" /></button>
+                        <button type="button" className="pv-act is-action is-edit" data-tip={t("common.edit")} aria-label={t("modelConfig.editProvider")} onClick={() => { setModelEdit(null); setEditor(draftFromProvider(provider)); setEditExisting(true); setConfirmDelete(false); setTestResult(null); }}><Icon name="pencil" /></button>
+                        <button type="button" className="pv-act is-action is-copy" data-tip={t("common.copy")} aria-label={t("modelConfig.copyProviderId")} onClick={() => { void navigator.clipboard.writeText(provider.id); toast(`${t("common.copied")} ${provider.id}`); }}><Icon name="copy" /></button>
                         <span className="pv-act is-switch">
                           <button
                             type="button"
                             className={`switch${provider.enabled ? " on" : ""}`}
                             role="switch"
                             aria-checked={provider.enabled}
-                            aria-label={provider.enabled ? `禁用 ${provider.name}` : `启用 ${provider.name}`}
+                            aria-label={provider.enabled ? t("modelConfig.disableProvider", { name: provider.name }) : t("modelConfig.enableProvider", { name: provider.name })}
                             disabled={busy}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -3473,23 +3704,23 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                     ) : null}
                     <div className={`pv-models-shell${open ? " open" : ""}`} aria-hidden={!open}>
                       <div className="pv-models">
-                        {provider.models.length === 0 ? <div className="pm-empty"><Icon name="box" extra="sm" />暂无模型</div> : provider.models.map((model, index) => (
+                        {provider.models.length === 0 ? <div className="pm-empty"><Icon name="box" extra="sm" />{t("modelConfig.noModels")}</div> : provider.models.map((model, index) => (
                           <div className={`pm-row${model.status !== "available" ? " is-off" : ""}`} key={model.selector} style={{ "--pm-i": index } as CSSProperties}>
                             <span className="pm-name"><span className={`dot ${model.status === "available" ? "green" : "amber"}`} />{model.name}</span>
                             <span className="pm-sel ellipsis">{model.selector}</span>
                             <span className="pm-meta">
                               <span className="chip gray xs">{fmtK(model.contextWindow)} ctx</span>
-                              {model.image ? <span className="chip blue xs chip-icon" data-tip="图片"><Icon name="image" extra="sm" /></span> : null}
-                              {model.reasoning ? <span className="chip purple xs chip-icon" data-tip="思考"><Icon name="brain" extra="sm" /></span> : null}
-                              {model.tools ? <span className="chip gray xs chip-icon" data-tip="工具"><Icon name="wrench" extra="sm" /></span> : null}
+                              {model.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.badgeImage")}><Icon name="image" extra="sm" /></span> : null}
+                              {model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.badgeReasoning")}><Icon name="brain" extra="sm" /></span> : null}
+                              {model.tools ? <span className="chip gray xs chip-icon" data-tip={t("modelConfig.badgeTools")}><Icon name="wrench" extra="sm" /></span> : null}
                             </span>
-                            <button type="button" className="icon-btn small" data-tip="复制" onClick={() => { void navigator.clipboard.writeText(model.selector); toast(`已复制 ${model.selector}`); }}><Icon name="copy" extra="sm" /></button>
+                            <button type="button" className="icon-btn small" data-tip={t("common.copy")} onClick={() => { void navigator.clipboard.writeText(model.selector); toast(t("modelConfig.copiedSelector", { selector: model.selector })); }}><Icon name="copy" extra="sm" /></button>
                             {(model.source === "catalog" || model.source === "extension") ? (
-                              <button type="button" className="icon-btn small" data-tip="编辑" onClick={() => {
+                              <button type="button" className="icon-btn small" data-tip={t("common.edit")} onClick={() => {
                                 setModelEdit({ kind: "override", modelId: model.id, draft: blankOverrideForm(provider.modelOverrides?.[model.id]), providerId: provider.id });
                               }}><Icon name="pencil" extra="sm" /></button>
                             ) : model.source === "custom" ? (
-                              <button type="button" className="icon-btn small" data-tip="编辑" onClick={() => {
+                              <button type="button" className="icon-btn small" data-tip={t("common.edit")} onClick={() => {
                                 const index = provider.models.findIndex((item) => item.id === model.id && item.source === "custom");
                                 if (index >= 0) setModelEdit({ kind: "custom", index, draft: blankCustomForm(model), providerId: provider.id });
                               }}><Icon name="pencil" extra="sm" /></button>
@@ -3515,15 +3746,15 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
               </>
               )}
               <div className="mp-sec" style={{ marginTop: 20 }}>
-                <h3>歧义模型供应商顺序 <span className="chip-code">modelProviderOrder</span></h3>
-                <p className="sec-desc">当多个供应商提供同一 model-id 时，OMP 按此顺序选供应商。卡片拖拽只改本机显示顺序，不会写入这项。</p>
+                <h3>{t("modelConfig.providerOrderTitle")} <span className="chip-code">modelProviderOrder</span></h3>
+                <p className="sec-desc">{t("modelConfig.providerOrderSubtitle")}</p>
                 {orderEdit ? (
                   <>
                     <div className="cycle-pool">
                       {orderDraft.map((id, index) => (
                         <span key={id} className="cycle-chip" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                           <span className="mono">{id}</span>
-                          <button type="button" className="icon-btn small" disabled={index === 0} aria-label="上移" onClick={() => setOrderDraft((current) => {
+                          <button type="button" className="icon-btn small" disabled={index === 0} aria-label={t("modelConfig.moveUp")} onClick={() => setOrderDraft((current) => {
                             if (index === 0) return current;
                             const next = current.slice();
                             const prev = next[index - 1]!;
@@ -3531,7 +3762,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                             next[index] = prev;
                             return next;
                           })}><Icon name="arrow-l" extra="sm" /></button>
-                          <button type="button" className="icon-btn small" disabled={index === orderDraft.length - 1} aria-label="下移" onClick={() => setOrderDraft((current) => {
+                          <button type="button" className="icon-btn small" disabled={index === orderDraft.length - 1} aria-label={t("modelConfig.moveDown")} onClick={() => setOrderDraft((current) => {
                             if (index >= current.length - 1) return current;
                             const next = current.slice();
                             const after = next[index + 1]!;
@@ -3544,27 +3775,27 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       ))}
                     </div>
                     <div className="cycle-pool">
-                      <span className="cycle-pool-label">可加入</span>
+                      <span className="cycle-pool-label">{t("modelConfig.availableToAdd")}</span>
                       {providers.filter((provider) => !orderDraft.includes(provider.id)).map((provider) => (
                         <button type="button" key={provider.id} className="btn small outline" onClick={() => setOrderDraft((current) => [...current, provider.id])}>{provider.name}</button>
                       ))}
                     </div>
                     <div className="cycle-edit-actions">
-                      <button type="button" className="btn small primary" disabled={busy} onClick={() => void saveProviderOrder()}><Icon name="check" extra="sm" />保存顺序</button>
-                      <button type="button" className="btn small outline" onClick={() => setOrderEdit(false)}>取消</button>
+                      <button type="button" className="btn small primary" disabled={busy} onClick={() => void saveProviderOrder()}><Icon name="check" extra="sm" />{t("modelConfig.saveOrder")}</button>
+                      <button type="button" className="btn small outline" onClick={() => setOrderEdit(false)}>{t("common.cancel")}</button>
                     </div>
                   </>
                 ) : (
                   <>
                     <div className="cycle-flow">
-                      {(data?.modelProviderOrder ?? []).length === 0 ? <span className="muted small">尚未设置</span> : (data?.modelProviderOrder ?? []).map((id, index) => (
+                      {(data?.modelProviderOrder ?? []).length === 0 ? <span className="muted small">{t("modelConfig.notConfigured")}</span> : (data?.modelProviderOrder ?? []).map((id, index) => (
                         <span key={id} style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
                           {index ? <span className="cycle-arrow"><Icon name="arrow-r" extra="sm" /></span> : null}
                           <span className="cycle-chip"><span className="mono">{id}</span></span>
                         </span>
                       ))}
                     </div>
-                    <div style={{ marginTop: 12 }}><button type="button" className="btn small outline" onClick={() => { setOrderEdit(true); setOrderDraft([...(data?.modelProviderOrder ?? [])]); }}><Icon name="pencil" extra="sm" />编辑顺序</button></div>
+                    <div style={{ marginTop: 12 }}><button type="button" className="btn small outline" onClick={() => { setOrderEdit(true); setOrderDraft([...(data?.modelProviderOrder ?? [])]); }}><Icon name="pencil" extra="sm" />{t("modelConfig.editOrder")}</button></div>
                   </>
                 )}
               </div>
@@ -3572,16 +3803,16 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
           )}
             {modelEditView && modelEditHost ? createPortal(
               <div className={`modal-backdrop mc-model-modal${modelEditLeaving ? " is-leaving" : ""}`} role="presentation" onMouseDown={() => { if (!modelEditLeaving) setModelEdit(null); }}>
-                <div className="modal" role="dialog" aria-modal="true" aria-label={modelEditView.kind === "override" ? "Model Override" : "编辑模型"} style={{ width: 600 }} onMouseDown={(event) => event.stopPropagation()}>
+                <div className="modal" role="dialog" aria-modal="true" aria-label={modelEditView.kind === "override" ? "Model Override" : t("modelConfig.editModel")} style={{ width: 600 }} onMouseDown={(event) => event.stopPropagation()}>
                   {modelEditView.kind === "override" ? (
                     <>
                       <div className="modal-head">Model Override · <span className="mono">{modelEditView.modelId}</span></div>
                       <div className="modal-body">
-                        <p className="small muted" style={{ marginBottom: 10 }}>只覆盖需要修改的字段，其余继承 OMP Catalog。留空即不覆盖。</p>
+                        <p className="small muted" style={{ marginBottom: 10 }}>{t("modelConfig.overrideInheritCatalogDesc")}</p>
                         <div className="f-grid">
-                          <div className="field"><label>Name</label><input className="input" placeholder="继承" value={modelEditView.draft.name} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, name: e.target.value } })} /></div>
-                          <div className="field"><label>Context Window</label><input className="input mono" type="number" placeholder="继承" value={modelEditView.draft.contextWindow} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, contextWindow: e.target.value } })} /></div>
-                          <div className="field"><label>Max Tokens</label><input className="input mono" type="number" placeholder="继承" value={modelEditView.draft.maxTokens} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, maxTokens: e.target.value } })} /></div>
+                          <div className="field"><label>Name</label><input className="input" placeholder={t("common.inherit")} value={modelEditView.draft.name} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, name: e.target.value } })} /></div>
+                          <div className="field"><label>Context Window</label><input className="input mono" type="number" placeholder={t("common.inherit")} value={modelEditView.draft.contextWindow} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, contextWindow: e.target.value } })} /></div>
+                          <div className="field"><label>Max Tokens</label><input className="input mono" type="number" placeholder={t("common.inherit")} value={modelEditView.draft.maxTokens} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, maxTokens: e.target.value } })} /></div>
                           <div className="field"><label>Reasoning</label>
                             <select className="select" value={modelEditView.draft.reasoning} onChange={(e) => {
                               const reasoning = e.target.value as DraftOverrideForm["reasoning"];
@@ -3594,17 +3825,17 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                                 },
                               });
                             }}>
-                              <option value="">继承</option><option value="true">开</option><option value="false">关</option>
+                              <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
                             </select>
                           </div>
                           <div className="field"><label>Tools</label>
                             <select className="select" value={modelEditView.draft.tools} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, tools: e.target.value as DraftOverrideForm["tools"] } })}>
-                              <option value="">继承</option><option value="true">开</option><option value="false">关</option>
+                              <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
                             </select>
                           </div>
                           <div className="field"><label>Image Input</label>
                             <select className="select" value={modelEditView.draft.image} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, image: e.target.value as DraftOverrideForm["image"] } })}>
-                              <option value="">继承</option><option value="true">开</option><option value="false">关</option>
+                              <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
                             </select>
                           </div>
                           {modelEditView.draft.reasoning === "true" ? (
@@ -3615,7 +3846,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                               />
                             </div>
                           ) : null}
-                          <div className="field span2"><label>Cost（$/M tokens，留空表示继承）</label>
+                          <div className="field span2"><label>{t("modelConfig.costTokensUnit")}</label>
                             <div className="cost-grid">
                               <input className="input mono" placeholder="Input" value={modelEditView.draft.costIn} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, costIn: e.target.value } })} />
                               <input className="input mono" placeholder="Output" value={modelEditView.draft.costOut} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, costOut: e.target.value } })} />
@@ -3625,19 +3856,19 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           </div>
                         </div>
                         <details className="mp-advanced mc-model-adv">
-                          <summary><span className="tw"><Icon name="chevron-r" extra="sm" /></span>高级设置 <span className="hint">Headers · Compaction · omitMaxOutputTokens</span></summary>
+                          <summary><span className="tw"><Icon name="chevron-r" extra="sm" /></span>{t("modelConfig.advancedSettings")} <span className="hint">Headers · Compaction · omitMaxOutputTokens</span></summary>
                           <div className="adv-body">
                             <div className="f-grid">
                               <div className="field"><label>Omit Max Output Tokens</label>
                                 <select className="select" value={modelEditView.draft.omitMaxOutputTokens} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, omitMaxOutputTokens: e.target.value as DraftOverrideForm["omitMaxOutputTokens"] } })}>
-                                  <option value="">继承</option><option value="true">开</option><option value="false">关</option>
+                                  <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
                                 </select>
                               </div>
                               <div className="field"><label>Premium Multiplier</label>
-                                <input className="input mono" placeholder="继承" value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
+                                <input className="input mono" placeholder={t("common.inherit")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
                               </div>
-                              <div className="field span2"><label>Headers（每行一个 Header: Value）</label>
-                                <textarea className="input mono" rows={2} placeholder="留空继承供应商" value={modelEditView.draft.headersText} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, headersText: e.target.value } })} />
+                              <div className="field span2"><label>{t("modelConfig.headersPerLine")}</label>
+                                <textarea className="input mono" rows={2} placeholder={t("modelConfig.headersInheritPlaceholder")} value={modelEditView.draft.headersText} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, headersText: e.target.value } })} />
                               </div>
                               <div className="field"><label>Context Promotion Target</label>
                                 <input className="input mono" placeholder="provider/model" value={modelEditView.draft.contextPromotionTarget} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, contextPromotionTarget: e.target.value } })} />
@@ -3647,49 +3878,49 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                               </div>
                               <div className="field"><label>Remote Compaction</label>
                                 <select className="select" value={modelEditView.draft.rcEnabled} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcEnabled: e.target.value as DraftOverrideForm["rcEnabled"] } })}>
-                                  <option value="">继承</option><option value="true">开</option><option value="false">关</option>
+                                  <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
                                 </select>
                               </div>
                               <div className="field"><label>Compaction Endpoint</label>
-                                <input className="input mono" placeholder="继承" value={modelEditView.draft.rcEndpoint} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcEndpoint: e.target.value } })} />
+                                <input className="input mono" placeholder={t("common.inherit")} value={modelEditView.draft.rcEndpoint} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcEndpoint: e.target.value } })} />
                               </div>
                               <div className="field span2"><label>Compaction Model（remoteCompaction.model）</label>
-                                <input className="input mono" placeholder="继承" value={modelEditView.draft.rcModel} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcModel: e.target.value } })} />
+                                <input className="input mono" placeholder={t("common.inherit")} value={modelEditView.draft.rcModel} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcModel: e.target.value } })} />
                               </div>
                             </div>
                           </div>
                         </details>
                       </div>
                       <div className="modal-foot">
-                        <button type="button" className="btn outline" onClick={() => setModelEdit(null)}>取消</button>
+                        <button type="button" className="btn outline" onClick={() => setModelEdit(null)}>{t("common.cancel")}</button>
                         <button type="button" className="btn primary" onClick={() => {
                           if (!modelEditHost) return;
                           const { next, parsed } = applyOverrideToDraft(modelEditHost, modelEditView.modelId, modelEditView.draft);
                           if (modelEditView.providerId) {
                             setModelEdit(null);
-                            void persistProviderDraft(next, parsed ? "已保存 Override" : "已清除 Override");
+                            void persistProviderDraft(next, parsed ? t("modelConfig.savedOverrideToast") : t("modelConfig.clearedOverrideToast"));
                             return;
                           }
                           setEditor(next);
                           setModelEdit(null);
-                          toast(parsed ? "已写入 Override（保存供应商后生效）" : "已清除 Override");
-                        }}>保存 Override</button>
+                          toast(parsed ? t("modelConfig.writeOverrideToast") : t("modelConfig.clearedOverrideToast"));
+                        }}>{t("modelConfig.saveOverride")}</button>
                       </div>
                     </>
                   ) : (
                     <>
-                      <div className="modal-head">{modelEditView.kind === "add" ? "添加自定义模型" : <>编辑模型 · <span className="mono">{modelEditView.draft.id}</span></>}</div>
+                      <div className="modal-head">{modelEditView.kind === "add" ? t("modelConfig.addCustomModel") : <>{t("modelConfig.editModel")} · <span className="mono">{modelEditView.draft.id}</span></>}</div>
                       <div className="modal-body">
                         <div className="f-grid">
                           <div className="field"><label>Model ID</label>
-                            <input className="input mono" value={modelEditView.draft.id} disabled={modelEditView.kind === "custom"} placeholder="如 gpt-example" onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, id: e.target.value } })} />
+                            <input className="input mono" value={modelEditView.draft.id} disabled={modelEditView.kind === "custom"} placeholder={t("modelConfig.modelIdPlaceholder")} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, id: e.target.value } })} />
                           </div>
-                          <div className="field"><label>显示名称</label>
-                            <input className="input" value={modelEditView.draft.name} placeholder="如 GPT Example" onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, name: e.target.value } })} />
+                          <div className="field"><label>{t("modelConfig.displayName")}</label>
+                            <input className="input" value={modelEditView.draft.name} placeholder={t("modelConfig.displayNamePlaceholder")} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, name: e.target.value } })} />
                           </div>
                           <div className="field span2"><label>API Type</label>
                             <select className="select" value={modelEditView.draft.api} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, api: e.target.value } })}>
-                              <option value="inherit">Inherit Provider（跟随供应商）</option>
+                              <option value="inherit">{t("modelConfig.inheritProvider")}</option>
                               {MODEL_API_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                             </select>
                           </div>
@@ -3732,7 +3963,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                               />
                             </div>
                           ) : null}
-                          <div className="field span2"><label>Cost（$/M tokens，留空表示未知）</label>
+                          <div className="field span2"><label>{t("modelConfig.costTitle")}</label>
                             <div className="cost-grid">
                               <input className="input mono" placeholder="Input" value={modelEditView.draft.costIn} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, costIn: e.target.value } })} />
                               <input className="input mono" placeholder="Output" value={modelEditView.draft.costOut} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, costOut: e.target.value } })} />
@@ -3742,23 +3973,23 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           </div>
                         </div>
                         <details className="mp-advanced mc-model-adv">
-                          <summary><span className="tw"><Icon name="chevron-r" extra="sm" /></span>高级设置 <span className="hint">Base URL · Headers · Compaction · omitMaxOutputTokens</span></summary>
+                          <summary><span className="tw"><Icon name="chevron-r" extra="sm" /></span>{t("modelConfig.advancedSettings")} <span className="hint">{t("modelConfig.advancedSettingsHint")}</span></summary>
                           <div className="adv-body">
                             <div className="f-grid">
-                              <div className="field span2"><label>Base URL <span className="muted">（可选，覆盖供应商）</span></label>
-                                <input className="input mono" placeholder="留空跟随供应商" value={modelEditView.draft.baseUrl} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, baseUrl: e.target.value } })} />
+                              <div className="field span2"><label>{t("modelConfig.baseUrlOverride")}</label>
+                                <input className="input mono" placeholder={t("modelConfig.baseUrlInheritPlaceholder")} value={modelEditView.draft.baseUrl} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, baseUrl: e.target.value } })} />
                               </div>
                               <div className="kv-row span2" style={{ border: "none", padding: "4px 0" }}>
                                 <span className="k">Omit Max Output Tokens</span>
                                 <span className="v">
                                   <button type="button" className={`switch${modelEditView.draft.omitMaxOutputTokens ? " on" : ""}`} role="switch" aria-checked={modelEditView.draft.omitMaxOutputTokens} onClick={() => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, omitMaxOutputTokens: !modelEditView.draft.omitMaxOutputTokens } })} />
-                                  <span className="desc">请求里不带 max tokens，本地预算仍用上面的值</span>
+                                  <span className="desc">{t("modelConfig.omitMaxOutputTokensDesc")}</span>
                                 </span>
                               </div>
                               <div className="field"><label>Premium Multiplier</label>
-                                <input className="input mono" placeholder="未设" value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
+                                <input className="input mono" placeholder={t("common.notSet")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
                               </div>
-                              <div className="field span2"><label>Headers（每行一个 Header: Value）</label>
+                              <div className="field span2"><label>{t("modelConfig.headersPerLine")}</label>
                                 <textarea className="input mono" rows={2} placeholder="X-Model: value" value={modelEditView.draft.headersText} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, headersText: e.target.value } })} />
                               </div>
                               <div className="field"><label>Context Promotion Target</label>
@@ -3771,7 +4002,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                                 <span className="k">Remote Compaction</span>
                                 <span className="v">
                                   <button type="button" className={`switch${modelEditView.draft.rcEnabled ? " on" : ""}`} role="switch" aria-checked={modelEditView.draft.rcEnabled} onClick={() => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, rcEnabled: !modelEditView.draft.rcEnabled } })} />
-                                  <span className="desc">由 Provider 端执行上下文压缩</span>
+                                  <span className="desc">{t("modelConfig.remoteCompactionProviderDesc")}</span>
                                 </span>
                               </div>
                               <div className="field"><label>Compaction Endpoint</label>
@@ -3785,18 +4016,18 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                         </details>
                       </div>
                       <div className="modal-foot">
-                        <button type="button" className="btn outline" onClick={() => setModelEdit(null)}>取消</button>
+                        <button type="button" className="btn outline" onClick={() => setModelEdit(null)}>{t("common.cancel")}</button>
                         <button type="button" className="btn primary" onClick={() => {
                           if (!modelEditHost) return;
                           const entry = entryFromCustomForm(modelEditHost.id || "provider-id", modelEditView.draft);
                           if (!entry) {
-                            toast("请填写 Model ID");
+                            toast(t("modelConfig.pleaseFillModelId"));
                             return;
                           }
                           const models = modelEditHost.models.slice();
                           if (modelEditView.kind === "add") {
                             if (models.some((m) => m.source === "custom" && m.id === entry.id)) {
-                              toast(`模型 ${entry.id} 已存在`);
+                              toast(t("modelConfig.modelIdExists", { id: entry.id }));
                               return;
                             }
                             models.push(entry);
@@ -3806,13 +4037,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           const next = { ...modelEditHost, models };
                           if (modelEditView.providerId) {
                             setModelEdit(null);
-                            void persistProviderDraft(next, modelEditView.kind === "add" ? "已添加模型" : "已保存模型");
+                            void persistProviderDraft(next, modelEditView.kind === "add" ? t("modelConfig.addedModelToast") : t("modelConfig.savedModelToast"));
                             return;
                           }
                           setEditor(next);
                           setModelsTab("custom");
                           setModelEdit(null);
-                        }}>{modelEditView.kind === "add" ? "保存模型" : "保存修改"}</button>
+                        }}>{modelEditView.kind === "add" ? t("modelConfig.saveModel") : t("modelConfig.saveChanges")}</button>
                       </div>
                     </>
                   )}
@@ -3830,10 +4061,10 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 <button type="button" className="icon-btn" onClick={closeRoleEditor}><Icon name="arrow-l" /></button>
                 <b style={{ fontSize: "var(--fs-14)" }}>{roleDraft.name}</b>
                 <span className="chip-code">{roleDraft.alias}</span>
-                <span className={`chip ${roleDraft.builtin ? "gray" : "purple"} xs`}>{roleDraft.builtin ? "内置角色" : "自定义角色"}</span>
+                <span className={`chip ${roleDraft.builtin ? "gray" : "purple"} xs`}>{roleDraft.builtin ? t("modelConfig.builtinRole") : t("modelConfig.customRole")}</span>
                 <span className="chip blue xs">{roleDraft.scope === "project" ? "Project" : "Global"}</span>
                 {!roleDraft.builtin ? (
-                  <button type="button" className="btn small danger" disabled={busy} onClick={() => void deleteCustomRole(roleDraft.id)}>删除</button>
+                  <button type="button" className="btn small danger" disabled={busy} onClick={() => void deleteCustomRole(roleDraft.id)}>{t("common.delete")}</button>
                 ) : null}
               </div>
               {roleDraft.issue ? (
@@ -3844,8 +4075,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
               ) : null}
               {!roleDraft.builtin ? (
                 <div className="mp-sec">
-                  <h3>身份</h3>
-                  <p className="sec-desc">写入全局 <span className="chip-code">modelTags</span>。id 是角色别名（<span className="chip-code">@{roleDraft.id || "id"}</span>）的来源。</p>
+                  <h3>{t("modelConfig.identity")}</h3>
+                  <p className="sec-desc">{t("modelConfig.identityDesc", { id: roleDraft.id || "id" })}</p>
                   <div className="f-grid">
                     <div className="field">
                       <label htmlFor="role-id">id</label>
@@ -3858,22 +4089,22 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                           setRoleDraft({ ...roleDraft, id: nextId, alias: `@${nextId.trim()}` });
                         }}
                       />
-                      <span className="desc">小写字母开头，可含数字、连字符、下划线</span>
+                      <span className="desc">{t("modelConfig.roleIdHint")}</span>
                     </div>
                     <div className="field">
-                      <label htmlFor="role-name">名称</label>
+                      <label htmlFor="role-name">{t("modelConfig.roleName")}</label>
                       <input className="input" id="role-name" value={roleDraft.name} onChange={(event) => setRoleDraft({ ...roleDraft, name: event.target.value })} />
                     </div>
                     <div className="field span2">
-                      <label htmlFor="role-desc">说明</label>
+                      <label htmlFor="role-desc">{t("modelConfig.roleDesc")}</label>
                       <textarea className="input" id="role-desc" rows={2} value={roleDraft.desc} onChange={(event) => setRoleDraft({ ...roleDraft, desc: event.target.value })} />
                     </div>
                   </div>
                 </div>
               ) : null}
               <div className="mp-sec">
-                <h3>模型路由</h3>
-                <p className="sec-desc">角色只决定「用哪个模型、以什么思考强度」。写入当前 <span className="chip-code">modelRoles</span> 作用域（{data?.modelRoleStorage === "project" ? "项目" : "全局"}）。</p>
+                <h3>{t("modelConfig.modelRouting")}</h3>
+                <p className="sec-desc">{t("modelConfig.modelRoutingDesc", { scope: data?.modelRoleStorage === "project" ? t("modelConfig.projectScope") : t("modelConfig.globalScope") })}</p>
                 <div className="kv-list">
                   <div className="kv-row">
                     <span className="k">Primary Model</span>
@@ -3894,8 +4125,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 </div>
               </div>
               <div className="mp-sec">
-                <h3>Fallback 链</h3>
-                <p className="sec-desc">写入 <span className="chip-code">retry.fallbackChains</span>，按 Primary Model 的 selector 作为键。Recovery 对应 <span className="chip-code">retry.fallbackRevertPolicy</span>。</p>
+                <h3>{t("modelConfig.fallbackChains")}</h3>
+                <p className="sec-desc">{t("modelConfig.fallbackChainsDesc")}</p>
                 <div className="kv-list">
                   <div className="kv-row">
                     <span className="k">Recovery</span>
@@ -3923,7 +4154,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                   ))}
                 </div>
                 <div className="cycle-pool">
-                  <span className="cycle-pool-label">加入 Fallback</span>
+                  <span className="cycle-pool-label">{t("modelConfig.addToFallback")}</span>
                   {usable.filter((model) => model.selector !== roleDraft.primary && !(fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? []).includes(model.selector)).slice(0, 12).map((model) => (
                     <button type="button" key={model.selector} className="btn small outline" onClick={() => {
                       const current = fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? [];
@@ -3932,7 +4163,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                   ))}
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <button type="button" className="btn small outline" disabled={busy || !roleDraft.primary} onClick={() => void saveFallback(roleDraft.primary)}>保存 Fallback</button>
+                  <button type="button" className="btn small outline" disabled={busy || !roleDraft.primary} onClick={() => void saveFallback(roleDraft.primary)}>{t("modelConfig.saveFallback")}</button>
                 </div>
               </div>
               <StructuredEditor
@@ -3947,11 +4178,11 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 dirty={configYmlDirty}
                 saving={busy}
                 saveDisabled={!configYmlDirty && !roleFormDirty}
-                saveHint={roleFormDirty ? "将同步表单" : ""}
+                saveHint={roleFormDirty ? t("modelConfig.syncFormHint") : ""}
                 onSave={(text) => void persistConfigYml(text, roleFormDirty, false)}
               />
               <div className="mp-foot">
-                <button type="button" className="btn outline" onClick={closeRoleEditor}>返回</button>
+                <button type="button" className="btn outline" onClick={closeRoleEditor}>{t("common.back")}</button>
                 <span className="right"><button type="button" className="btn primary" disabled={busy} onClick={() => {
                   void (async () => {
                     if (configYmlDirty) {
@@ -3960,13 +4191,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                     }
                     await saveRole(roleDraft);
                   })();
-                }}><Icon name="check" extra="sm" />保存到 {data?.modelRoleStorage === "project" ? "Project" : "Global"}</button></span>
+                }}><Icon name="check" extra="sm" />{t("modelConfig.saveToStorage", { storage: data?.modelRoleStorage === "project" ? "Project" : "Global" })}</button></span>
               </div>
             </>
           ) : (
             <>
               <div className="mr-toolbar">
-                <span className="seg" role="tablist" aria-label="角色作用域">
+                <span className="seg" role="tablist" aria-label={t("modelConfig.roleScope")}>
                   <button
                     type="button"
                     role="tab"
@@ -3974,29 +4205,29 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                     className={(data?.modelRoleStorage ?? "global") === "global" ? "active" : undefined}
                     disabled={busy}
                     onClick={() => { if ((data?.modelRoleStorage ?? "global") !== "global") void setRoleStorage("global"); }}
-                  >全局</button>
+                  >{t("modelConfig.globalScope")}</button>
                   <button
                     type="button"
                     role="tab"
                     aria-selected={(data?.modelRoleStorage ?? "global") === "project"}
                     className={(data?.modelRoleStorage ?? "global") === "project" ? "active" : undefined}
                     disabled={busy || !data?.projectScopeAvailable}
-                    data-tip={data?.projectScopeAvailable ? undefined : "无工作区"}
+                    data-tip={data?.projectScopeAvailable ? undefined : t("modelConfig.noWorkspaceTip")}
                     onClick={() => { if (data?.projectScopeAvailable && (data?.modelRoleStorage ?? "global") !== "project") void setRoleStorage("project"); }}
-                  >项目</button>
+                  >{t("modelConfig.projectScope")}</button>
                 </span>
-                <b style={{ fontSize: "var(--fs-13)" }}>角色</b>
-                <span className="mr-count">{roles.length} 个</span>
+                <b style={{ fontSize: "var(--fs-13)" }}>{t("modelConfig.rolesTab")}</b>
+                <span className="mr-count">{roles.length}</span>
                 <span className="spacer" />
-                <button type="button" className="btn primary" onClick={() => setCreateRoleOpen(true)}><Icon name="plus" extra="sm" />创建自定义角色</button>
+                <button type="button" className="btn primary" onClick={() => setCreateRoleOpen(true)}><Icon name="plus" extra="sm" />{t("modelConfig.createCustomRole")}</button>
               </div>
               {createRoleOpen ? (
                 <div className="preset-banner" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <input className="input mono" placeholder="id（小写）" value={newRole.id} onChange={(event) => setNewRole({ ...newRole, id: event.target.value })} style={{ width: 140 }} />
-                  <input className="input" placeholder="名称" value={newRole.name} onChange={(event) => setNewRole({ ...newRole, name: event.target.value })} style={{ width: 140 }} />
-                  <input className="input" placeholder="说明（可选）" value={newRole.desc} onChange={(event) => setNewRole({ ...newRole, desc: event.target.value })} style={{ flex: 1, minWidth: 160 }} />
-                  <button type="button" className="btn small primary" disabled={busy} onClick={() => void createCustomRole()}>创建</button>
-                  <button type="button" className="btn small outline" onClick={() => setCreateRoleOpen(false)}>取消</button>
+                  <input className="input mono" placeholder={t("modelConfig.roleIdPlaceholder")} value={newRole.id} onChange={(event) => setNewRole({ ...newRole, id: event.target.value })} style={{ width: 140 }} />
+                  <input className="input" placeholder={t("modelConfig.roleNamePlaceholder")} value={newRole.name} onChange={(event) => setNewRole({ ...newRole, name: event.target.value })} style={{ width: 140 }} />
+                  <input className="input" placeholder={t("modelConfig.roleDescPlaceholder")} value={newRole.desc} onChange={(event) => setNewRole({ ...newRole, desc: event.target.value })} style={{ flex: 1, minWidth: 160 }} />
+                  <button type="button" className="btn small primary" disabled={busy} onClick={() => void createCustomRole()}>{t("common.create")}</button>
+                  <button type="button" className="btn small outline" onClick={() => setCreateRoleOpen(false)}>{t("common.cancel")}</button>
                 </div>
               ) : null}
               {roles.map((role) => {
@@ -4006,19 +4237,19 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                   <button type="button" className="role-row-nav" onClick={() => { setRoleId(role.id); setRoleDraft({ ...role }); }}>
                     <span className="role-icon-area"><span className={`a-ic${role.issue ? " amber" : ""}`}><Icon name={ROLE_ICONS[role.id] ?? "cpu"} extra="sm" /></span></span>
                     <span className="role-name-section">
-                      <div className="role-header"><span className="r-name">{role.name}<span className="alias">{role.alias}</span></span>{role.scope === "project" ? <span className="chip blue xs">Project</span> : null}{role.builtin ? null : <span className="chip purple xs">自定义</span>}</div>
-                      <span className="r-desc">{role.desc}</span>
+                      <div className="role-header"><span className="r-name">{role.name}<span className="alias">{role.alias}</span></span>{role.scope === "project" ? <span className="chip blue xs">Project</span> : null}{role.builtin ? null : <span className="chip purple xs">{t("modelConfig.customRole")}</span>}</div>
+                      <span className="r-desc">{formatRoleDesc(role, t)}</span>
                     </span>
                   </button>
                   <span className="role-model-section">
-                    {role.issue ? <span className="role-model"><span className="model-name unavailable">{role.primary || "未分配"}</span></span> : (
+                    {role.issue ? <span className="role-model"><span className="model-name unavailable">{role.primary || t("modelConfig.unassigned")}</span></span> : (
                       <>
                         <RoleModelPicker
                           value={role.primary}
                           groups={usableGroups}
                           onChange={(primary) => { void saveRole(withRoleModel(role, primary, availableBySelector.get(primary))); }}
                         />
-                        <select className="effort-select" value={thinking.value} disabled={thinking.disabled} aria-label="推理强度" onChange={(event) => {
+                        <select className="effort-select" value={thinking.value} disabled={thinking.disabled} aria-label={t("modelConfig.thinkingEffort")} onChange={(event) => {
                           const next = { ...role };
                           if (event.target.value === "off") delete next.thinking;
                           else next.thinking = event.target.value;
@@ -4032,7 +4263,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       <button
                         type="button"
                         className="role-delete"
-                        aria-label={`删除 ${role.name}`}
+                        aria-label={t("modelConfig.deleteRoleAria", { name: role.name })}
                         disabled={busy}
                         onClick={(event) => { event.stopPropagation(); void deleteCustomRole(role.id); }}
                       >
@@ -4040,15 +4271,15 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       </button>
                     ) : null}
                   </span>
-                  <button type="button" className="role-chevron" aria-label={`编辑 ${role.name}`} onClick={() => { setRoleId(role.id); setRoleDraft({ ...role }); }}>
+                  <button type="button" className="role-chevron" aria-label={t("modelConfig.editRoleAria", { name: role.name })} onClick={() => { setRoleId(role.id); setRoleDraft({ ...role }); }}>
                     <Icon name="chevron-r" extra="sm" />
                   </button>
                 </div>
                 );
               })}
               <div className="mp-sec" style={{ marginTop: 20 }}>
-                <h3>快速模型切换顺序 <span className="chip-code">Cycle Order</span></h3>
-                <p className="sec-desc">工作台循环切换模型时按此顺序轮转。</p>
+                <h3>{t("modelConfig.cycleOrderTitle")} <span className="chip-code">Cycle Order</span></h3>
+                <p className="sec-desc">{t("modelConfig.cycleOrderDesc")}</p>
                 {cycleEdit ? (
                   <>
                     <div className="cycle-flow">
@@ -4066,14 +4297,14 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       })}
                     </div>
                     <div className="cycle-pool">
-                      <span className="cycle-pool-label">可加入循环的角色</span>
+                      <span className="cycle-pool-label">{t("modelConfig.cyclePoolLabel")}</span>
                       {roles.filter((role) => !cycleDraft.includes(role.id)).map((role) => (
                         <button type="button" key={role.id} className="btn small outline" onClick={() => setCycleDraft((current) => [...current, role.id])}><Icon name="plus" extra="sm" />{role.name} <span className="mono">{role.alias}</span></button>
                       ))}
                     </div>
                     <div className="cycle-edit-actions">
-                      <button type="button" className="btn small primary" disabled={busy} onClick={() => void saveCycle()}><Icon name="check" extra="sm" />保存顺序</button>
-                      <button type="button" className="btn small outline" onClick={() => setCycleEdit(false)}>取消</button>
+                      <button type="button" className="btn small primary" disabled={busy} onClick={() => void saveCycle()}><Icon name="check" extra="sm" />{t("modelConfig.saveCycleOrder")}</button>
+                      <button type="button" className="btn small outline" onClick={() => setCycleEdit(false)}>{t("common.cancel")}</button>
                     </div>
                   </>
                 ) : (
@@ -4090,14 +4321,14 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                         );
                       })}
                     </div>
-                    <div style={{ marginTop: 12 }}><button type="button" className="btn small outline" onClick={() => { setCycleEdit(true); setCycleDraft([...(data?.cycleOrder ?? [])]); }}><Icon name="pencil" extra="sm" />编辑顺序</button></div>
+                    <div style={{ marginTop: 12 }}><button type="button" className="btn small outline" onClick={() => { setCycleEdit(true); setCycleDraft([...(data?.cycleOrder ?? [])]); }}><Icon name="pencil" extra="sm" />{t("modelConfig.editCycleOrder")}</button></div>
                   </>
                 )}
               </div>
               {assignSel ? (
                 <div className="preset-banner">
                   <Icon name="user" extra="sm" />
-                  <span>为 <span className="chip-code">{assignSel}</span> 选择角色</span>
+                  <span>{t("modelConfig.selectRoleForModel", { model: assignSel })}</span>
                   <span className="spacer" />
                   {roles.map((role) => (
                     <button type="button" key={role.id} className="btn small outline" onClick={() => { void saveRole({ ...role, primary: assignSel }); setAssignSel(null); }}>{role.alias}</button>

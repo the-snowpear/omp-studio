@@ -18,6 +18,7 @@ function fixture(
 		current?: Model;
 		available?: Model[];
 		setModelError?: Error;
+		onRefresh?: (strategy?: string) => void | Promise<void>;
 	} = {},
 ) {
 	const sonnet = model("claude-sonnet-4-5");
@@ -25,7 +26,7 @@ function fixture(
 	let current: Model | undefined = "current" in overrides ? overrides.current : sonnet;
 	let thinking: string | undefined = "medium";
 	let configured: string | undefined = "medium";
-	const available = overrides.available ?? [sonnet, opus, model("gpt-5-mini", "openai")];
+	let available = overrides.available ?? [sonnet, opus, model("gpt-5-mini", "openai")];
 	const session = {
 		get model() {
 			return current;
@@ -41,6 +42,11 @@ function fixture(
 			return overrides.compacting === true;
 		},
 		getAvailableModels: () => available,
+		modelRegistry: {
+			refresh: async (strategy?: string) => {
+				if (overrides.onRefresh) await overrides.onRefresh(strategy);
+			},
+		},
 		async setModel(next: Model) {
 			if (overrides.setModelError) throw overrides.setModelError;
 			current = next;
@@ -56,6 +62,9 @@ function fixture(
 		service: new StudioModelControlService(session),
 		getCurrent: () => current,
 		getConfigured: () => configured,
+		setAvailable: (next: Model[]) => {
+			available = next;
+		},
 	};
 }
 
@@ -151,5 +160,71 @@ describe("StudioModelControlService", () => {
 		expect(() =>
 			parseStudioRequest({ ...base, operation: { kind: "session.model.set", selector: "", thinking: "high" } }),
 		).toThrow(StudioFrameError);
+	});
+
+	test("automatically refreshes modelRegistry and switches when unknown model was recently added", async () => {
+		const custom = model("deepseek-chat", "deepseek");
+		let refreshed: string | undefined;
+		const { service, getCurrent, setAvailable } = fixture({
+			available: [model("claude-sonnet-4-5")],
+			onRefresh: strategy => {
+				refreshed = strategy;
+				setAvailable([model("claude-sonnet-4-5"), custom]);
+			},
+		});
+		expect(await service.setModel("deepseek/deepseek-chat")).toMatchObject({
+			selector: "deepseek/deepseek-chat",
+			provider: "deepseek",
+			id: "deepseek-chat",
+		});
+		expect(refreshed).toBe("offline");
+		expect(getCurrent()?.id).toBe("deepseek-chat");
+	});
+
+	test("automatically refreshes and queues model while streaming", async () => {
+		const custom = model("deepseek-coder", "deepseek");
+		let refreshed = false;
+		const { service, getCurrent, setAvailable } = fixture({
+			streaming: true,
+			available: [model("claude-sonnet-4-5")],
+			onRefresh: () => {
+				refreshed = true;
+				setAvailable([model("claude-sonnet-4-5"), custom]);
+			},
+		});
+		expect(await service.setModel("deepseek/deepseek-coder")).toMatchObject({
+			selector: "deepseek/deepseek-coder",
+		});
+		expect(refreshed).toBe(true);
+		expect(getCurrent()?.id).toBe("claude-sonnet-4-5");
+		await service.applyPending();
+		expect(getCurrent()?.id).toBe("deepseek-coder");
+	});
+
+	test("still uses the reloaded catalog when refresh fails after the local models.yml reload", async () => {
+		const custom = model("deepseek-reasoner", "deepseek");
+		const { service, getCurrent, setAvailable } = fixture({
+			available: [model("claude-sonnet-4-5")],
+			onRefresh: () => {
+				// Simulate `ModelRegistry.refresh`: the static reload landed first,
+				// then a later discovery pass threw.
+				setAvailable([model("claude-sonnet-4-5"), custom]);
+				throw new Error("discovery failed after local reload");
+			},
+		});
+		expect(await service.setModel("deepseek/deepseek-reasoner")).toMatchObject({
+			selector: "deepseek/deepseek-reasoner",
+		});
+		expect(getCurrent()?.id).toBe("deepseek-reasoner");
+	});
+
+	test("keeps rejecting unknown models when refresh does not surface the selector", async () => {
+		const { service } = fixture({
+			available: [model("claude-sonnet-4-5")],
+			onRefresh: () => {
+				throw new Error("refresh unavailable");
+			},
+		});
+		await expect(service.setModel("deepseek/deepseek-chat")).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
 	});
 });

@@ -1,0 +1,555 @@
+/* ==========================================================================
+   OMP Studio — composer (input area)
+   Fixed at the bottom of the center conversation pane. 2–12 lines auto-
+   expanding textarea, context chips, attachment controls, send/abort.
+
+   Context pressure: when ≥80% used, a warning appears. At ≥92% the composer
+   shows a stronger alert and surfaces Compact / Clear actions inline.
+   ========================================================================== */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  background: var(--bg-app);
+  border-top: 1px solid var(--border-default);
+  position: relative;
+  z-index: var(--z-sticky);
+}
+
+/* Context pressure banner — only visible when ≥80% */
+.composer-warning {
+  display: none;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+  background: var(--warn-subtle);
+  border-bottom: 1px solid var(--warn-border);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  line-height: var(--lh-snug);
+  animation: slideDown var(--dur) var(--ease);
+}
+
+.composer[data-context-warn="true"] .composer-warning {
+  display: flex;
+}
+
+.composer[data-context-danger="true"] .composer-warning {
+  background: var(--danger-subtle);
+  border-bottom-color: var(--danger-border);
+}
+
+.composer-warning-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--warn);
+}
+
+.composer[data-context-danger="true"] .composer-warning-icon {
+  color: var(--danger);
+}
+
+.composer-warning-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-warning-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+/* ---- Main input area -------------------------------------------------- */
+.composer-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-6);
+}
+
+/* Context chips — attached files, directories, references */
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-height: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.composer-chips:empty {
+  display: none;
+}
+
+/* The expanding textarea */
+.composer-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  min-height: 48px;
+}
+
+.composer-textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  max-height: 320px;
+  padding: var(--sp-4);
+  font-size: var(--fs-body);
+  line-height: var(--lh-snug);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  resize: none;
+  overflow-y: auto;
+  transition: border-color var(--dur-fast) var(--ease);
+  font-family: var(--font-ui);
+}
+
+.composer-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.composer-textarea:hover {
+  border-color: var(--border-strong);
+}
+
+.composer-textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.composer-textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Send / Abort button — dynamically switches */
+.composer-send {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease),
+              transform var(--dur-fast) var(--ease);
+}
+
+.composer-send:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.composer-send:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.composer-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer-send svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* When running, the button becomes Abort with stop icon */
+.composer[data-running="true"] .composer-send {
+  background: var(--danger);
+}
+
+.composer[data-running="true"] .composer-send:hover {
+  background: var(--danger);
+  filter: brightness(1.1);
+}
+
+/* ---- Controls row (attachments, model, steering, follow-up) ----------- */
+.composer-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.composer-controls-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.composer-controls-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.composer-control-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 24px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+  white-space: nowrap;
+}
+
+.composer-control-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.composer-control-btn svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.composer-control-btn[data-active="true"] {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* Steering / Follow-up mode indicators */
+.composer-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  height: 20px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+
+.composer-mode-badge svg {
+  width: 11px;
+  height: 11px;
+}
+
+.composer-mode-steering {
+  background: var(--run-subtle);
+  color: var(--run);
+}
+
+.composer-mode-followup {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.composer-mode-badge button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: var(--sp-1);
+  border-radius: 50%;
+  color: inherit;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.composer-mode-badge button:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.composer-mode-badge button svg {
+  width: 9px;
+  height: 9px;
+}
+
+/* Model pill — quick indicator of current model */
+.composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  height: 20px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-tertiary);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-full);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease);
+  white-space: nowrap;
+}
+
+.composer-model:hover {
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+
+.composer-model svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Token count live indicator */
+.composer-tokens {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.composer-tokens svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* ---- Attachment picker popover ---------------------------------------- */
+.attachment-menu {
+  position: fixed;
+  z-index: var(--z-popover);
+  min-width: 240px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-popover);
+  padding: var(--sp-2);
+  animation: popoverIn var(--dur-fast) var(--ease);
+}
+
+.attachment-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: var(--h-menu);
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.attachment-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.attachment-menu-item svg {
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  color: var(--text-tertiary);
+}
+
+.attachment-menu-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.attachment-menu-item-label {
+  display: block;
+  font-weight: var(--fw-medium);
+}
+
+.attachment-menu-item-hint {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  margin-top: 1px;
+  line-height: var(--lh-snug);
+}
+
+.attachment-menu-item-kbd {
+  flex-shrink: 0;
+}
+
+/* ---- Steering / Follow-up explanation --------------------------------- */
+.composer-mode-info {
+  display: none;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--bg-inset);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+  margin-top: var(--sp-3);
+  animation: fadeIn var(--dur-fast) var(--ease);
+}
+
+.composer[data-mode="steering"] .composer-mode-info-steering,
+.composer[data-mode="followup"] .composer-mode-info-followup {
+  display: flex;
+}
+
+.composer-mode-info svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  margin-top: 1px;
+}
+
+.composer-mode-info strong {
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+}
+
+/* ---- Keyboard hint ---------------------------------------------------- */
+.composer-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  /* Right gutter keeps the hints clear of the scenario switcher FAB,
+     which is a prototype affordance pinned to the bottom-right corner. */
+  padding: 0 152px var(--sp-3) var(--sp-6);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.composer-hint-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.composer-hint-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: nowrap;
+}
+
+.composer-hint-sep {
+  color: var(--border-default);
+  user-select: none;
+}
+
+/* ---- Disabled / loading state ----------------------------------------- */
+.composer[data-disabled="true"] .composer-textarea,
+.composer[data-disabled="true"] .composer-send,
+.composer[data-disabled="true"] .composer-control-btn {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.composer[data-disabled="true"] .composer-hint {
+  opacity: 0.5;
+}
+
+/* ---- Empty state ------------------------------------------------------ */
+.composer-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-8) var(--sp-6);
+  text-align: center;
+}
+
+.composer-empty-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--text-tertiary);
+  opacity: 0.4;
+}
+
+.composer-empty-text {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  max-width: 360px;
+  line-height: var(--lh-snug);
+}
+
+/* ---- Slash command autocomplete --------------------------------------- */
+.composer-autocomplete {
+  position: absolute;
+  bottom: 100%;
+  left: var(--sp-6);
+  right: var(--sp-6);
+  margin-bottom: var(--sp-2);
+  z-index: var(--z-popover);
+  max-height: 240px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-popover);
+  overflow-y: auto;
+  animation: slideUp var(--dur-fast) var(--ease);
+}
+
+.composer-autocomplete-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.composer-autocomplete-item:hover,
+.composer-autocomplete-item[data-selected="true"] {
+  background: var(--bg-hover);
+}
+
+.composer-autocomplete-item[data-selected="true"] {
+  background: var(--accent-subtle);
+}
+
+.composer-autocomplete-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+.composer-autocomplete-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-autocomplete-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.composer-autocomplete-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+
+.composer-autocomplete-source {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 0 var(--sp-2);
+  height: 15px;
+  line-height: 15px;
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
+  margin-top: 2px;
+}
+
+/* ---- Context chips (referenced files, diffs, agents, etc.) ------------ */
+/* Already defined in components.css as .chip, but composer-specific
+   overrides can go here if needed. */

@@ -19,7 +19,7 @@ export type RoleThinkingLevel = (typeof ROLE_THINKING_LEVELS)[number];
 
 /** Efforts a custom/override model may advertise in `models.yml` `thinking.efforts`. */
 export const MODEL_CONFIG_THINKING_EFFORTS = [
-  "off",
+  "minimal",
   "low",
   "medium",
   "high",
@@ -82,7 +82,7 @@ export function parseCacheThinkingEfforts(value: unknown): string[] {
 
 /**
  * Parse `models.yml` `thinking` / `thinking.efforts` for the model editor.
- * Keeps `off` (a selectable disable tier) and drops unknown ids including `minimal`.
+ * Drops unknown ids (and ignores 'off' which is a role/session control level, not a model effort).
  */
 export function parseModelThinkingEfforts(value: unknown): ModelConfigThinkingEffort[] {
   const allowed = new Set<ModelConfigThinkingEffort>();

@@ -18,6 +18,7 @@ import {
   envNameForProvider,
   isEnvConfigName,
   isRetryableTestFailure,
+  modelListRequest,
   networkErrorDetail,
   ollamaTagsUrl,
   parseDiscoveryModels,
@@ -253,9 +254,11 @@ describe("toYamlProvider auth boundary", () => {
     };
     const out = toYamlProvider(input, undefined);
     assert.deepEqual((out.models as Array<Record<string, unknown>>)[0]?.thinking, {
-      efforts: ["off", "low", "max"],
+      mode: "effort",
+      efforts: ["minimal", "low", "max"],
     });
     assert.deepEqual((out.modelOverrides as Record<string, Record<string, unknown>>)["catalog-1"]?.thinking, {
+      mode: "effort",
       efforts: ["high", "xhigh"],
     });
   });
@@ -848,6 +851,91 @@ describe("parseDiscoveryModels", () => {
       ["gpt-4.1", "gpt-4.1-mini"],
     );
   });
+
+  test("keeps metadata absent when the endpoint reports none", () => {
+    assert.deepEqual(parseDiscoveryModels({ data: [{ id: "gpt-4.1" }] }), [{ id: "gpt-4.1", name: "gpt-4.1" }]);
+  });
+
+  test("extracts OpenAI-compatible context and output limits", () => {
+    const [model] = parseDiscoveryModels({
+      data: [{
+        id: "acme/big",
+        context_length: 1_000_000,
+        top_provider: { max_completion_tokens: 64_000 },
+        architecture: { input_modalities: ["text", "image"] },
+        supported_parameters: ["reasoning", "tools"],
+      }],
+    });
+    assert.equal(model?.contextWindow, 1_000_000);
+    assert.equal(model?.maxTokens, 64_000);
+    assert.equal(model?.image, true);
+    assert.equal(model?.reasoning, true);
+  });
+
+  test("reads vLLM max_model_len and text-only modality", () => {
+    const [model] = parseDiscoveryModels({ data: [{ id: "local", max_model_len: "32768", input_modalities: ["text"] }] });
+    assert.equal(model?.contextWindow, 32_768);
+    assert.equal(model?.image, false);
+    assert.equal(model?.maxTokens, undefined);
+  });
+
+  test("uses the Anthropic display_name as the label", () => {
+    const [model] = parseDiscoveryModels({ data: [{ id: "claude-opus-4-5", display_name: "Claude Opus 4.5" }] });
+    assert.equal(model?.id, "claude-opus-4-5");
+    assert.equal(model?.name, "Claude Opus 4.5");
+  });
+
+  test("strips the Google models/ prefix and maps token limits", () => {
+    const [model] = parseDiscoveryModels({
+      models: [{ name: "models/gemini-3-pro", displayName: "Gemini 3 Pro", inputTokenLimit: 1_048_576, outputTokenLimit: 65_536 }],
+    });
+    assert.equal(model?.id, "gemini-3-pro");
+    assert.equal(model?.name, "Gemini 3 Pro");
+    assert.equal(model?.contextWindow, 1_048_576);
+    assert.equal(model?.maxTokens, 65_536);
+  });
+
+  test("reads Ollama thinking capability", () => {
+    const [model] = parseDiscoveryModels({ models: [{ name: "qwen3:32b", capabilities: ["completion", "thinking"] }] });
+    assert.equal(model?.reasoning, true);
+  });
+
+  test("ignores non-positive and unparsable limits", () => {
+    const [model] = parseDiscoveryModels({ data: [{ id: "x", context_length: 0, max_output_tokens: "n/a" }] });
+    assert.equal(model?.contextWindow, undefined);
+    assert.equal(model?.maxTokens, undefined);
+  });
+});
+
+describe("modelListRequest", () => {
+  test("openai-compatible bases try /models then the /v1 variant", () => {
+    assert.deepEqual(modelListRequest("https://acme.test", "openai-completions").urls, [
+      "https://acme.test/models",
+      "https://acme.test/v1/models",
+    ]);
+    assert.deepEqual(modelListRequest("https://acme.test/v1", "openai-completions").urls, [
+      "https://acme.test/v1/models",
+    ]);
+  });
+
+  test("anthropic uses x-api-key with an explicit api version", () => {
+    const request = modelListRequest("https://api.anthropic.com", "anthropic-messages", "sk");
+    assert.deepEqual(request.urls, ["https://api.anthropic.com/v1/models"]);
+    assert.equal(request.headers["x-api-key"], "sk");
+    assert.equal(request.headers["anthropic-version"], "2023-06-01");
+    assert.equal(request.headers.Authorization, undefined);
+  });
+
+  test("google apis use x-goog-api-key", () => {
+    const request = modelListRequest("https://generativelanguage.googleapis.com/v1beta", "google-generative-ai", "key");
+    assert.equal(request.headers["x-goog-api-key"], "key");
+    assert.equal(request.headers.Authorization, undefined);
+  });
+
+  test("apis without a model-list surface yield no urls", () => {
+    assert.deepEqual(modelListRequest("https://bedrock.test", "bedrock-converse-stream", "sk").urls, []);
+    assert.deepEqual(modelListRequest("https://gemini.test", "google-gemini-cli").urls, []);
+  });
 });
 
 describe("envNameForProvider", () => {
@@ -1108,6 +1196,125 @@ describe("P1/P2 model-config adapter surfaces", () => {
       assert.equal(calls[0], ollamaTagsUrl("http://127.0.0.1:11434/v1"));
       assert.equal(await readFile(join(dir, "models.yml"), "utf8"), before);
       assert.equal(await readFile(join(dir, "models.db"), "utf8").then(() => "exists").catch(() => "missing"), "missing");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("probe without a discovery type fetches the wire API model list", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-api-"));
+    try {
+      await writeFile(
+        join(dir, "models.yml"),
+        "providers:\n  gateway:\n    api: openai-completions\n    baseUrl: \"https://gw.test/v1\"\n    apiKey: sk-gateway\n",
+        "utf8",
+      );
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async (input, init?: RequestInit) => {
+          calls.push({ url: String(input), headers: { ...((init?.headers ?? {}) as Record<string, string>) } });
+          return new Response(
+            JSON.stringify({ data: [{ id: "glm-5", context_length: 200_000 }] }),
+            { status: 200 },
+          );
+        }) as typeof fetch,
+      });
+      const before = await readFile(join(dir, "models.yml"), "utf8");
+      const result = await service.probeProvider({ providerId: "gateway", headers: { "X-Org-Id": "org-1" } });
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.models, [{ id: "glm-5", name: "glm-5", contextWindow: 200_000 }]);
+      assert.equal(calls[0]?.url, "https://gw.test/v1/models");
+      assert.equal(calls[0]?.headers.Authorization, "Bearer sk-gateway");
+      assert.equal(calls[0]?.headers["X-Org-Id"], "org-1");
+      assert.equal(await readFile(join(dir, "models.yml"), "utf8"), before);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("probe honors the request api over models.yml and never lets headers shadow auth", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-anthropic-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async (input, init?: RequestInit) => {
+          calls.push({ url: String(input), headers: { ...((init?.headers ?? {}) as Record<string, string>) } });
+          return new Response(JSON.stringify({ data: [{ id: "claude-opus-4-5", display_name: "Claude Opus 4.5" }] }), { status: 200 });
+        }) as typeof fetch,
+      });
+      const result = await service.probeProvider({
+        providerId: "proxy",
+        api: "anthropic-messages",
+        endpointUrl: "https://proxy.test",
+        apiKey: "sk-live",
+        headers: { "x-api-key": "attacker", "anthropic-version": "1999-01-01" },
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.models, [{ id: "claude-opus-4-5", name: "Claude Opus 4.5" }]);
+      assert.equal(calls[0]?.url, "https://proxy.test/v1/models");
+      assert.equal(calls[0]?.headers["x-api-key"], "sk-live");
+      assert.equal(calls[0]?.headers["anthropic-version"], "2023-06-01");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("probe reports command credentials and apis without a model list instead of firing blind requests", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-guard-"));
+    try {
+      await writeFile(
+        join(dir, "models.yml"),
+        "providers:\n  vault:\n    api: openai-completions\n    baseUrl: \"https://vault.test/v1\"\n    apiKey: \"!op read op://dev/key\"\n",
+        "utf8",
+      );
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      let calls = 0;
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async () => {
+          calls += 1;
+          return new Response(null, { status: 200 });
+        }) as typeof fetch,
+      });
+      const command = await service.probeProvider({ providerId: "vault" });
+      assert.equal(command.ok, false);
+      assert.match(command.detail, /外部命令取凭据/);
+      const noList = await service.probeProvider({
+        providerId: "bedrock",
+        api: "bedrock-converse-stream",
+        endpointUrl: "https://bedrock.test",
+      });
+      assert.equal(noList.ok, false);
+      assert.match(noList.detail, /没有模型列表接口/);
+      assert.equal(calls, 0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("probe surfaces invalid credentials distinctly from a plain failure", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-probe-401-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const service = createOmpModelsService({
+        agentDir: dir,
+        fetch: (async () => new Response(null, { status: 401 })) as typeof fetch,
+      });
+      const result = await service.probeProvider({
+        providerId: "gateway",
+        api: "openai-completions",
+        endpointUrl: "https://gw.test/v1",
+        apiKey: "bad",
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.httpStatus, 401);
+      assert.match(result.detail, /凭据无效/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

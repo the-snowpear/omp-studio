@@ -1,0 +1,305 @@
+/* ==========================================================================
+   OMP Studio — minimap
+   The far-right semantic ribbon. 14px quiet rail at rest, expands to 220px
+   event list on hover/pin.
+
+   Renders the conversation as a vertical strip of colored event markers so
+   you can scan a long session's structure at a glance and jump to any point.
+   ========================================================================== */
+
+.minimap {
+  width: var(--minimap-w);
+  flex-shrink: 0;
+  background: var(--bg-sunken);
+  border-left: 1px solid var(--border-subtle);
+  position: relative;
+  overflow: hidden;
+  transition: width var(--dur) var(--ease);
+}
+
+.minimap:hover,
+.minimap[data-pinned="true"] {
+  width: var(--minimap-w-open);
+}
+
+/* ---- Collapsed state: pure event strip -------------------------------- */
+.minimap-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--minimap-w);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-2) 0;
+  overflow: hidden;
+}
+
+.minimap-event {
+  height: 4px;
+  margin: 1px 0;
+  background: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.minimap-event:hover {
+  background: var(--accent);
+}
+
+/* Event kinds — match MINIMAP_KINDS in timeline.js */
+.minimap-event[data-kind="user"] { background: var(--accent); height: 6px; }
+.minimap-event[data-kind="assistant"] { background: var(--text-tertiary); }
+.minimap-event[data-kind="thinking"] { background: var(--muted); }
+.minimap-event[data-kind="tool"] { background: var(--text-secondary); }
+.minimap-event[data-kind="bash"] { background: var(--run); }
+.minimap-event[data-kind="file"] { background: var(--git-modified); }
+.minimap-event[data-kind="approval"] { background: var(--warn); height: 6px; }
+.minimap-event[data-kind="error"] { background: var(--danger); height: 5px; }
+.minimap-event[data-kind="subagent"] { background: var(--accent); }
+.minimap-event[data-kind="checkpoint"] { background: var(--ok); height: 5px; }
+.minimap-event[data-kind="compact"] { background: var(--muted); }
+.minimap-event[data-kind="preview"] { background: var(--run); }
+.minimap-event[data-kind="test"] { background: var(--ok); }
+.minimap-event[data-kind="summary"] { background: var(--accent); height: 6px; }
+
+/* Current viewport indicator — a translucent overlay */
+.minimap-viewport {
+  position: absolute;
+  left: 0;
+  width: var(--minimap-w);
+  background: var(--accent);
+  opacity: 0.18;
+  pointer-events: none;
+  transition: top var(--dur-fast) linear,
+              height var(--dur-fast) linear;
+}
+
+/* ---- Expanded state: event list --------------------------------------- */
+.minimap-list {
+  position: absolute;
+  top: 0;
+  left: var(--minimap-w);
+  width: calc(var(--minimap-w-open) - var(--minimap-w));
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.minimap:hover .minimap-list,
+.minimap[data-pinned="true"] .minimap-list {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.minimap-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+  margin-bottom: 1px;
+}
+
+.minimap-list-item:hover {
+  background: var(--bg-hover);
+}
+
+.minimap-list-item[data-active="true"] {
+  background: var(--accent-subtle);
+}
+
+.minimap-list-item-marker {
+  width: 3px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: var(--r-full);
+  flex-shrink: 0;
+}
+
+/* Reuse the kind colors */
+.minimap-list-item[data-kind="user"] .minimap-list-item-marker { background: var(--accent); }
+.minimap-list-item[data-kind="assistant"] .minimap-list-item-marker { background: var(--text-tertiary); }
+.minimap-list-item[data-kind="thinking"] .minimap-list-item-marker { background: var(--muted); }
+.minimap-list-item[data-kind="tool"] .minimap-list-item-marker { background: var(--text-secondary); }
+.minimap-list-item[data-kind="bash"] .minimap-list-item-marker { background: var(--run); }
+.minimap-list-item[data-kind="file"] .minimap-list-item-marker { background: var(--git-modified); }
+.minimap-list-item[data-kind="approval"] .minimap-list-item-marker { background: var(--warn); }
+.minimap-list-item[data-kind="error"] .minimap-list-item-marker { background: var(--danger); }
+.minimap-list-item[data-kind="subagent"] .minimap-list-item-marker { background: var(--accent); }
+.minimap-list-item[data-kind="checkpoint"] .minimap-list-item-marker { background: var(--ok); }
+.minimap-list-item[data-kind="compact"] .minimap-list-item-marker { background: var(--muted); }
+.minimap-list-item[data-kind="preview"] .minimap-list-item-marker { background: var(--run); }
+.minimap-list-item[data-kind="test"] .minimap-list-item-marker { background: var(--ok); }
+.minimap-list-item[data-kind="summary"] .minimap-list-item-marker { background: var(--accent); }
+
+.minimap-list-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.minimap-list-item-label {
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  line-height: var(--lh-snug);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minimap-list-item-meta {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+/* ---- Header (only visible when expanded) ------------------------------ */
+.minimap-header {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 var(--sp-3) 0 calc(var(--minimap-w) + var(--sp-3));
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-sunken);
+}
+
+.minimap:hover .minimap-header,
+.minimap[data-pinned="true"] .minimap-header {
+  display: flex;
+}
+
+.minimap-title {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.minimap-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* Pin button — keeps the minimap expanded */
+.minimap-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-tertiary);
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+
+.minimap-pin:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.minimap[data-pinned="true"] .minimap-pin {
+  color: var(--accent);
+}
+
+.minimap-pin svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Filter popover — toggles event kinds on/off */
+.minimap-filter-menu {
+  position: fixed;
+  z-index: var(--z-popover);
+  min-width: 200px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-popover);
+  padding: var(--sp-2);
+  animation: popoverIn var(--dur-fast) var(--ease);
+}
+
+.minimap-filter-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--h-menu);
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.minimap-filter-item:hover {
+  background: var(--bg-hover);
+}
+
+.minimap-filter-marker {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.minimap-filter-label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}
+
+.minimap-filter-check {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+
+.minimap-filter-item[data-hidden="true"] {
+  opacity: 0.5;
+}
+
+.minimap-filter-item[data-hidden="true"] .minimap-filter-check {
+  display: none;
+}
+
+/* ---- Responsive: <880px degrades to a pure color scale ---------------- */
+@media (max-width: 880px) {
+  .minimap {
+    width: 8px;
+  }
+
+  .minimap:hover,
+  .minimap[data-pinned="true"] {
+    width: 8px;
+  }
+
+  .minimap-strip {
+    width: 8px;
+  }
+
+  .minimap-viewport {
+    width: 8px;
+  }
+
+  .minimap-list,
+  .minimap-header {
+    display: none !important;
+  }
+}

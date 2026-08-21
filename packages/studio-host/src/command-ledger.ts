@@ -22,6 +22,23 @@ const TRANSITIONS: Readonly<Record<LedgerStatus, ReadonlySet<LedgerStatus>>> = {
   outcome_unknown: new Set(),
 };
 
+/**
+ * Longest Runtime failure text the ledger keeps. The ledger is fsynced per
+ * append, so an unbounded message would be paid for on every write; the
+ * failures worth reading ("Model is not available: provider/id") are short.
+ */
+const MAX_LEDGER_ERROR_MESSAGE_CHARS = 512;
+
+/** Trim and cap a Runtime failure message; undefined when it carries nothing. */
+function ledgerErrorMessage(message: string | undefined): string | undefined {
+  if (typeof message !== "string") return undefined;
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.length > MAX_LEDGER_ERROR_MESSAGE_CHARS
+    ? trimmed.slice(0, MAX_LEDGER_ERROR_MESSAGE_CHARS)
+    : trimmed;
+}
+
 export class CommandLedger {
   readonly #entries = new Map<CommandId, CommandLedgerEntry>();
 
@@ -62,7 +79,7 @@ export class CommandLedger {
   transition(
     commandId: CommandId,
     status: LedgerStatus,
-    options: { stateVersionAfter?: StateVersion; errorCode?: string } = {},
+    options: { stateVersionAfter?: StateVersion; errorCode?: string; errorMessage?: string } = {},
   ): CommandLedgerEntry {
     const current = this.#entries.get(commandId);
     if (current === undefined) {
@@ -76,6 +93,7 @@ export class CommandLedger {
       status,
       ...(options.stateVersionAfter === undefined ? {} : { stateVersionAfter: options.stateVersionAfter }),
       ...(options.errorCode === undefined ? {} : { errorCode: options.errorCode }),
+      ...(options.errorMessage === undefined ? {} : { errorMessage: options.errorMessage }),
       ...(TERMINAL.has(status) ? { terminalAt: this.now() } : {}),
     };
     this.#entries.set(commandId, next);
@@ -99,9 +117,11 @@ export class CommandLedger {
     if (receipt.status === "completed" && current.status === "requested") {
       current = this.transition(current.commandId, "accepted", { stateVersionAfter: receipt.stateVersion });
     }
+    const errorMessage = receipt.error === undefined ? undefined : ledgerErrorMessage(receipt.error.message);
     return this.transition(current.commandId, receipt.status, {
       stateVersionAfter: receipt.stateVersion,
       ...(receipt.error === undefined ? {} : { errorCode: receipt.error.code }),
+      ...(errorMessage === undefined ? {} : { errorMessage }),
     });
   }
 

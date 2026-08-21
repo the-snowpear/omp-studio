@@ -14,6 +14,8 @@ afterEach(() => {
   __resetOperatorProfileForTests(null);
 });
 
+import { I18nProvider } from "../i18n";
+
 function renderEmpty(options: {
   preview?: boolean;
   client?: StudioClient;
@@ -28,17 +30,19 @@ function renderEmpty(options: {
   const onSelectThread = options.onSelectThread ?? vi.fn();
   const onSelectPreviewThread = options.onSelectPreviewThread ?? vi.fn();
   render(
-    <PreviewModeProvider switchEnabled>
-      <ConversationEmpty
-        {...(options.client === undefined ? {} : { client: options.client })}
-        {...(options.history === undefined ? {} : { history: options.history })}
-        projectName="omp-studio"
-        onSelectThread={onSelectThread}
-        onSelectPreviewThread={onSelectPreviewThread}
-        onOpenHistory={onOpenHistory}
-        {...(options.runtimeConnected === undefined ? {} : { runtimeConnected: options.runtimeConnected })}
-      />
-    </PreviewModeProvider>,
+    <I18nProvider forcedLanguage="zh">
+      <PreviewModeProvider switchEnabled>
+        <ConversationEmpty
+          {...(options.client === undefined ? {} : { client: options.client })}
+          {...(options.history === undefined ? {} : { history: options.history })}
+          projectName="omp-studio"
+          onSelectThread={onSelectThread}
+          onSelectPreviewThread={onSelectPreviewThread}
+          onOpenHistory={onOpenHistory}
+          {...(options.runtimeConnected === undefined ? {} : { runtimeConnected: options.runtimeConnected })}
+        />
+      </PreviewModeProvider>
+    </I18nProvider>,
   );
   return { onOpenHistory, onSelectThread, onSelectPreviewThread };
 }

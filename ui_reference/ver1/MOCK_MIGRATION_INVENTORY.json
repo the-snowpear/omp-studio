@@ -1,0 +1,457 @@
+{
+  "meta": {
+    "inventoryOf": "window.OMP_DATA (ui_reference/ver1/assets/js/mock-data.js)",
+    "purpose": "P0 contract & skeleton phase: exhaustively inventory every top-level OMP_DATA field consumed by the ver1 app so contracts can be built before any page is migrated. Inventory only; no page migration, no Host availability assumed.",
+    "generatedFrom": [
+      "ui_reference/ver1/assets/js/mock-data.js",
+      "ui_reference/ver1/assets/js/pages.js",
+      "ui_reference/ver1/assets/js/workbench.js",
+      "ui_reference/ver1/assets/js/app.js",
+      "ui_reference/ver1/assets/js/page-agent-hub.js",
+      "ui_reference/ver1/assets/js/page-models.js",
+      "ui_reference/ver1/assets/js/page-roles.js",
+      "ui_reference/ver1/assets/js/page-model-config.js",
+      "ui_reference/ver1/assets/js/router.js",
+      "FRONTEND_INTEGRATION.md (sections 5.1, 7, 8.1, 12, 13)"
+    ],
+    "sensitivityEnums": {
+      "public-safe": "safe for a public read model / bootstrap",
+      "contains-path": "carries filesystem, home, or local-endpoint path-like data; must be redacted or served via private endpoint",
+      "contains-pid": "carries process identifiers (pid or pid-embedding text)",
+      "contains-secret-risk": "carries bridge tokens, credentials, or secret-adjacent data",
+      "ui-only": "presentation-local data; safe to derive or keep renderer-side"
+    },
+    "sourceCategories": {
+      "client-bootstrap": "delivered in ClientBootstrap (public authority/runtime identity, manifest summary, opaque selected IDs, surface capabilities only)",
+      "query": "read model fetched via StudioClient.query",
+      "subscription": "live stream via StudioClient.subscribe",
+      "renderer-ui": "derived client-side in the renderer from other read models",
+      "deferred-p1plus": "post-P0 capability (FRONTEND_INTEGRATION.md 12.2/12.5); no P0 channel commitment"
+    },
+    "mutationLifecycle": "local_pending -> accepted -> optional interaction_required -> terminal completed|failed|rejected|outcome_unknown (applies to future mutations; none of these fields is a mutation)",
+    "coverage": {
+      "totalTopLevelFields": 22,
+      "fields": ["projects", "fileTree", "telemetry", "events", "minimap", "changes", "diff", "agents", "preview", "problems", "tests", "terminals", "skills", "plugins", "mcp", "slashCommands", "hostTools", "diagnostics", "history", "activity", "tokenUsage", "hub"],
+      "note": "Every top-level D.<field> assignment in mock-data.js is represented exactly once below. No field is shared between bootstrap and a read model; risky path/pid data is marked for redaction, never placed in a public read model."
+    }
+  },
+  "fields": [
+    {
+      "name": "projects",
+      "definitionLine": 9,
+      "shape": "array of { id, name, path, branch, worktree, dirty, running, attention, preview, pinned, threads[] }",
+      "sensitivity": "contains-path",
+      "riskySubfields": [
+        { "subfield": "path", "risk": "absolute filesystem path (project root / worktree dir)", "redaction": "never in bootstrap or public read model; expose only via PlatformPort PrivateEndpoint/ResourceHandle on demand" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "project.list (Host read model; threads summary embedded; live flags via subscription)",
+      "phase": "P0 first batch (home, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "home", "feature": "project cards grid", "fieldsUsed": ["name", "path", "branch", "preview", "running", "attention", "dirty", "pinned", "threads[0].title", "threads[0].time"] },
+        { "file": "assets/js/app.js", "page": "shell sidebar", "feature": "project/thread explorer", "fieldsUsed": ["id", "name", "running", "attention", "preview", "dirty", "threads[].id/title/status/pinned/hasSub/unread/time/msgs"] },
+        { "file": "assets/js/app.js", "page": "shell topbar", "feature": "active project + switch-project menu", "fieldsUsed": ["id", "name", "worktree", "dirty"] }
+      ]
+    },
+    {
+      "name": "fileTree",
+      "definitionLine": 42,
+      "shape": "recursive array of { type, name, children, open, status, turn, reading, writing, dirty, diagnostic }",
+      "sensitivity": "ui-only",
+      "riskySubfields": [
+        { "subfield": "none", "risk": "names are workspace-relative only; no absolute paths in mock", "redaction": "keep workspace-relative; must never be joined with host paths in the renderer" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "workspace.fileTree",
+      "phase": "P1+ (app shell, not in section 12.1 batch)",
+      "consumers": [
+        { "file": "assets/js/app.js", "page": "shell sidebar", "feature": "explorer file tree (expand/collapse)", "fieldsUsed": ["type", "name", "children", "open", "status", "turn", "reading", "writing", "dirty", "diagnostic"] },
+        { "file": "assets/js/app.js", "page": "shell topbar", "feature": "context file count", "fieldsUsed": ["countFiles(D.fileTree)"] }
+      ]
+    },
+    {
+      "name": "telemetry",
+      "definitionLine": 69,
+      "shape": "object of session telemetry counters (model, thinking, permission, fastMode, serviceTier, compact, inputTokens, outputTokens, cacheTokens, ctxUsed, ctxTotal, ctxPct, turnTime, sessionTime, cost, retries, fallback, subagentCost)",
+      "sensitivity": "public-safe",
+      "riskySubfields": [],
+      "plannedSource": "subscription",
+      "targetReadModel": "session.telemetry (live); snapshot query session.telemetrySnapshot for cold render",
+      "phase": "P3 (workbench, section 12.2)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "telemetry detail panel (token/context/cache previews)", "fieldsUsed": ["model", "thinking", "permission", "fastMode", "serviceTier", "compact", "inputTokens", "outputTokens", "cacheTokens", "ctxUsed", "ctxTotal", "ctxPct", "turnTime", "sessionTime", "cost", "retries", "fallback", "subagentCost"] }
+      ]
+    },
+    {
+      "name": "events",
+      "definitionLine": 79,
+      "shape": "array of session events (user/assistant/batch/approval/error/checkpoint/compact)",
+      "sensitivity": "public-safe",
+      "riskySubfields": [
+        { "subfield": "html/tool.target/summary", "risk": "free-form transcript content may embed relative workspace paths and loopback URLs (e.g. 127.0.0.1:30141 in tool targets)", "redaction": "content is transcript payload, not metadata; keep opaque, optionally scrub loopback URLs in P1" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "session.transcript (snapshot) + transcript cursor subscription",
+      "phase": "P3 (workbench, section 12.2)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "conversation timeline", "fieldsUsed": ["id", "type", "time", "html", "refs", "batch.items", "approval", "cmd", "status", "error", "checkpoint", "compact"] },
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "minimap click/keyboard scroll-to-event", "fieldsUsed": ["find by evId"] }
+      ]
+    },
+    {
+      "name": "minimap",
+      "definitionLine": 172,
+      "shape": "array of { type, evId, at, userPreview, headings } — derived index over events",
+      "sensitivity": "ui-only",
+      "riskySubfields": [],
+      "plannedSource": "renderer-ui",
+      "targetReadModel": "derived client-side from session.transcript (no dedicated read model)",
+      "phase": "P3 (workbench, section 12.2)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "minimap rail, hover previews, type filter, click-to-scroll", "fieldsUsed": ["type", "evId", "at", "userPreview", "headings"] }
+      ]
+    },
+    {
+      "name": "changes",
+      "definitionLine": 212,
+      "shape": "object of { turn[], thread[], preexisting[] } each { file, status, add, del, agent, note }",
+      "sensitivity": "public-safe",
+      "riskySubfields": [
+        { "subfield": "file", "risk": "workspace-relative paths only in mock", "redaction": "none required; keep relative" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "session.changes (diff summary by scope: turn/thread/preexisting)",
+      "phase": "P3 (workbench, section 12.2)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "right panel Changes lists (turn/thread/preexisting)", "fieldsUsed": ["turn", "thread", "preexisting", "file", "status", "add", "del", "agent", "note"] }
+      ]
+    },
+    {
+      "name": "diff",
+      "definitionLine": 230,
+      "shape": "object of { file, add, del, hunks[] } hunks { head, lines[][] } incl. collapse markers",
+      "sensitivity": "public-safe",
+      "riskySubfields": [],
+      "plannedSource": "query",
+      "targetReadModel": "workspace.diff (file-scoped)",
+      "phase": "P3 (workbench, section 12.2)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "split diff viewer", "fieldsUsed": ["file", "add", "del", "hunks", "head", "lines"] }
+      ]
+    },
+    {
+      "name": "agents",
+      "definitionLine": 255,
+      "shape": "array of { id, hubId, name, role, parent, task, status, statusText, lastTool, time, tokens, cost, files, waiting, error }",
+      "sensitivity": "public-safe",
+      "riskySubfields": [],
+      "plannedSource": "query",
+      "targetReadModel": "hub.registry (consolidate with hub.agents; this flat list is a legacy duplicate)",
+      "phase": "P4 (agent hub, section 12.4)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "agents side panel (rows, status, open-in-hub)", "fieldsUsed": ["id", "hubId", "name", "role", "parent", "task", "status", "statusText", "lastTool", "time", "tokens", "cost", "files", "waiting", "error"] },
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "workbench -> agent-hub intent handoff", "fieldsUsed": ["id", "hubId", "cross-check D.hub.agents"] }
+      ]
+    },
+    {
+      "name": "preview",
+      "definitionLine": 271,
+      "shape": "object of { url, path, status, viewport, logs[], error{ summary, file, line, stack } }",
+      "sensitivity": "contains-path",
+      "riskySubfields": [
+        { "subfield": "url", "risk": "local dev-server endpoint (127.0.0.1:30141)", "redaction": "loopback endpoint is host-local; do not place in a public read model, render from preview.state private field" },
+        { "subfield": "path", "risk": "query string embeds a session id ('/?session=019fac94-5e18-7000')", "redaction": "session identifier must be stripped/opaque before any public model" },
+        { "subfield": "error.stack", "risk": "internal build paths/line numbers", "redaction": "serve via private endpoint or truncate; never in bootstrap" }
+      ],
+      "plannedSource": "deferred-p1plus",
+      "targetReadModel": "preview.state (query) + preview.event (subscription) — section 12.5 capability",
+      "phase": "P5 (last batch, section 12.5)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "preview side panel (url bar, status, error card, console logs)", "fieldsUsed": ["url", "path", "error.summary", "error.file", "error.line", "error.stack", "logs"] },
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "scenario presets drive mode", "fieldsUsed": ["status (not read directly; mode passed by caller)"] }
+      ]
+    },
+    {
+      "name": "problems",
+      "definitionLine": 289,
+      "shape": "array of { sev, src, msg, file, line }",
+      "sensitivity": "public-safe",
+      "riskySubfields": [
+        { "subfield": "file", "risk": "workspace-relative paths only", "redaction": "none required" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "workspace.problems (+ subscription for live updates)",
+      "phase": "P3 (workbench, section 12.2)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "bottom panel Problems list", "fieldsUsed": ["sev", "src", "msg", "file", "line"] }
+      ]
+    },
+    {
+      "name": "tests",
+      "definitionLine": 299,
+      "shape": "array of { suite, total, pass, fail, time, status, failDetail }",
+      "sensitivity": "public-safe",
+      "riskySubfields": [],
+      "plannedSource": "query",
+      "targetReadModel": "workspace.testResults (+ subscription for live updates)",
+      "phase": "P3 (workbench, section 12.2)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "bottom panel Tests list", "fieldsUsed": ["suite", "total", "pass", "fail", "time", "status", "failDetail"] }
+      ]
+    },
+    {
+      "name": "terminals",
+      "definitionLine": 307,
+      "shape": "array of { id, name, pid, src, status, active, cwd, lines[][] }",
+      "sensitivity": "contains-pid",
+      "riskySubfields": [
+        { "subfield": "pid", "risk": "OS process id, rendered in list and header ('PID <n>')", "redaction": "never in a public read model; terminal list/stream must go through a PrivateEndpoint" },
+        { "subfield": "cwd", "risk": "absolute filesystem path rendered in terminal header", "redaction": "redact or expose via private endpoint only" },
+        { "subfield": "lines", "risk": "output may embed paths/commands", "redaction": "terminal output is a PTY stream; treat as opaque private stream" }
+      ],
+      "plannedSource": "deferred-p1plus",
+      "targetReadModel": "terminal.list + terminal.output stream — section 12.5 capability (P0 adapter is in-process semantic only)",
+      "phase": "P5 (last batch, section 12.5)",
+      "consumers": [
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "bottom panel terminal listbox + output view (also mutates D.terminals on 'new terminal')", "fieldsUsed": ["id", "name", "pid", "src", "status", "cwd", "lines"] }
+      ]
+    },
+    {
+      "name": "skills",
+      "definitionLine": 352,
+      "shape": "array of { name, desc, src, scope, path, enabled, loaded, session, error }",
+      "sensitivity": "contains-path",
+      "riskySubfields": [
+        { "subfield": "path", "risk": "workspace-relative and home-relative paths ('~/.omp/skills/...', 'omp:builtin/...')", "redaction": "replace with opaque skill id in public read model; never resolve '~' client-side" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "capabilities.skills (manifest-derived)",
+      "phase": "P0 first batch (capabilities, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "capabilities", "feature": "Skills tab (summary + list)", "fieldsUsed": ["name", "desc", "src", "scope", "path", "enabled", "loaded", "session", "error"] },
+        { "file": "assets/js/app.js", "page": "shell", "feature": "command palette + skills drawer", "fieldsUsed": ["name", "desc"] }
+      ]
+    },
+    {
+      "name": "plugins",
+      "definitionLine": 359,
+      "shape": "array of { name, src, status, tools, commands, hooks, ui, err, toolItems, commandItems, hookItems, uiItems }",
+      "sensitivity": "contains-path",
+      "riskySubfields": [
+        { "subfield": "src", "risk": "may embed home-relative local directory ('本地目录 · ~/omp-plugins/browser-lab')", "redaction": "use opaque plugin id; home path must not surface" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "capabilities.plugins (manifest-derived)",
+      "phase": "P0 first batch (capabilities, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "capabilities", "feature": "Plugins tab (summary + list)", "fieldsUsed": ["name", "src", "status", "tools", "commands", "hooks", "ui", "err", "toolItems", "commandItems", "hookItems", "uiItems"] },
+        { "file": "assets/js/app.js", "page": "shell", "feature": "command palette", "fieldsUsed": ["name", "desc"] }
+      ]
+    },
+    {
+      "name": "mcp",
+      "definitionLine": 372,
+      "shape": "array of { name, transport, status, tools, resources, prompts, last }",
+      "sensitivity": "ui-only",
+      "riskySubfields": [
+        { "subfield": "transport", "risk": "may embed local port ('http · :38412')", "redaction": "port is host-local endpoint detail; keep out of public read model or strip" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "capabilities.mcp (manifest-derived)",
+      "phase": "P0 first batch (capabilities, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "capabilities", "feature": "MCP tab (summary + list)", "fieldsUsed": ["name", "transport", "status", "tools", "resources", "prompts", "last"] }
+      ]
+    },
+    {
+      "name": "slashCommands",
+      "definitionLine": 378,
+      "shape": "array of { name, desc, src, args, ok }",
+      "sensitivity": "public-safe",
+      "riskySubfields": [],
+      "plannedSource": "query",
+      "targetReadModel": "capabilities.slashCommands",
+      "phase": "P0 first batch (capabilities, section 12.1); workbench composer use is P3",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "capabilities", "feature": "Slash Commands tab (summary + list)", "fieldsUsed": ["name", "desc", "src", "args", "ok"] },
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "composer '@' completion popup (module-level SLASH_ITEMS)", "fieldsUsed": ["name", "args", "desc"] }
+      ]
+    },
+    {
+      "name": "hostTools",
+      "definitionLine": 388,
+      "shape": "array of { name, desc, registered, calls }",
+      "sensitivity": "public-safe",
+      "riskySubfields": [],
+      "plannedSource": "query",
+      "targetReadModel": "capabilities.hostTools (capability manifest evidence)",
+      "phase": "P0 first batch (capabilities, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "capabilities", "feature": "Host Tools tab (summary + list)", "fieldsUsed": ["name", "desc", "registered", "calls"] }
+      ]
+    },
+    {
+      "name": "diagnostics",
+      "definitionLine": 398,
+      "shape": "object of { ompPath, version, rpc, bridge, processes[], cwd, configDir, capabilities[], errors[] }",
+      "sensitivity": "contains-pid",
+      "riskySubfields": [
+        { "subfield": "ompPath", "risk": "absolute path to omp executable", "redaction": "redacted; full detail only via PrivateEndpoint (section 12.1 requires '已脱敏' diagnostics)" },
+        { "subfield": "cwd", "risk": "absolute working directory", "redaction": "redacted in public model" },
+        { "subfield": "configDir", "risk": "absolute config directory", "redaction": "redacted in public model" },
+        { "subfield": "processes[].pid", "risk": "OS process ids (bridge/agent/preview/watcher)", "redaction": "redacted in public model" },
+        { "subfield": "bridge", "risk": "status string embeds pid ('connected · pid 21480')", "redaction": "strip pid text; expose structured state only" }
+      ],
+      "plannedSource": "query",
+      "targetReadModel": "diagnostics.summary (redacted: version/rpc/capabilities/error summaries public; paths and pids via PrivateEndpoint)",
+      "phase": "P0 first batch (diagnostics, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "diagnostics", "feature": "diagnostics key/value, process table, capability chips, error rows", "fieldsUsed": ["ompPath", "version", "rpc", "bridge", "cwd", "configDir", "processes", "capabilities", "errors"] }
+      ]
+    },
+    {
+      "name": "history",
+      "definitionLine": 419,
+      "shape": "array of { title, project, branch, time, model, status, files, cost, forkedFrom, checkpoints, pinned }",
+      "sensitivity": "public-safe",
+      "riskySubfields": [],
+      "plannedSource": "query",
+      "targetReadModel": "sessionCatalog.list (opaque session IDs + safe summaries per section 12.1)",
+      "phase": "P0 first batch (history, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "history", "feature": "session history list + search (Time Travel rail is a hardcoded local array, no OMP_DATA dependency)", "fieldsUsed": ["title", "project", "branch", "time", "model", "status", "files", "cost", "forkedFrom", "checkpoints", "pinned"] }
+      ]
+    },
+    {
+      "name": "activity",
+      "definitionLine": 429,
+      "shape": "array of { icon, color, text, time }",
+      "sensitivity": "public-safe",
+      "riskySubfields": [
+        { "subfield": "text", "risk": "free-form feed text may mention loopback URLs (127.0.0.1:30141)", "redaction": "feed copy; acceptable, optionally scrub URLs" }
+      ],
+      "plannedSource": "subscription",
+      "targetReadModel": "activity.feed (snapshot query + live subscription)",
+      "phase": "P0 first batch (home, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "home", "feature": "activity feed rows", "fieldsUsed": ["icon", "color", "text", "time"] }
+      ]
+    },
+    {
+      "name": "tokenUsage",
+      "definitionLine": 443,
+      "shape": "600-day series of { date, claude, codex, total } (mock-generated)",
+      "sensitivity": "public-safe",
+      "riskySubfields": [],
+      "plannedSource": "query",
+      "targetReadModel": "usage.tokenHistory (aggregated series; page/aggregate server-side, not 600 rows to the renderer)",
+      "phase": "P0 first batch (home, section 12.1)",
+      "consumers": [
+        { "file": "assets/js/pages.js", "page": "home", "feature": "GitHub-style token heatmap + year/month/week/day curves", "fieldsUsed": ["date", "claude", "codex", "total"] }
+      ]
+    },
+    {
+      "name": "hub",
+      "definitionLine": 493,
+      "shape": "object of { runtime{label,pid,missingCaps}, conn{state}, main, agents[], usage, jobs[], irc[], transcripts{} }",
+      "sensitivity": "contains-pid",
+      "riskySubfields": [
+        { "subfield": "runtime.pid", "risk": "OS process id", "redaction": "never in public read model; pid only via private endpoint", "consumed": false },
+        { "subfield": "agents[].sessionFile", "risk": "artifact file identifier ('agent-<id>.jsonl')", "redaction": "surface as opaque artifact ref (agent://<id>), never a raw file name", "consumed": true },
+        { "subfield": "agents[].outputPath", "risk": "artifact file identifier ('agent-<id>.md')", "redaction": "surface as opaque artifact ref", "consumed": true },
+        { "subfield": "agents[].patchPath", "risk": "artifact file identifier ('agent-<id>.patch')", "redaction": "surface as opaque artifact ref", "consumed": true },
+        { "subfield": "agents[].branchName", "risk": "workspace worktree branch name ('agent/typecheck-<id>')", "redaction": "branch name is workspace metadata; acceptable as opaque label", "consumed": true }
+      ],
+      "plannedSource": "subscription",
+      "targetReadModel": "hub.registry (snapshot query + hub.event subscription); hub.transcript as separate query (heavy)",
+      "phase": "P4 (agent hub, section 12.4)",
+      "consumers": [
+        { "file": "assets/js/page-agent-hub.js", "page": "agent-hub", "feature": "roster, main card, agent detail (metrics/artifacts), jobs, IRC, transcripts; local mutations on send/revive/kill", "fieldsUsed": ["runtime.label", "main.name/statusText/task/model/durationMs/contextPct", "agents[].id/kind/parentId/status/activity/waitingPrompt/task/currentTool/lastIntent/retryState/modelRole/resolvedModel/fallback/metrics/readOnly/outputPath/patchPath/branchName/children/ircUnread/sessionFile/createdAt/lastActivity/hasTranscript", "jobs[].id/type/status/label/durationMs/ownerId/resultText/errorText", "irc[].dir/from/to/text/time/outcome/read", "transcripts.<agentId>[].role/time/body"] },
+        { "file": "assets/js/workbench.js", "page": "workbench", "feature": "agents panel -> hub intent handoff (existence check only)", "fieldsUsed": ["agents (ids matched against D.agents[].hubId)"] }
+      ],
+      "unconsumedSubfields": {
+        "fields": ["runtime.pid", "runtime.missingCaps", "conn.state", "usage"],
+        "note": "mock comment reserves usage for OMP.agentHub.summary alignment; conn is duplicated as page-local state in page-agent-hub.js (S.conn)"
+      }
+    }
+  ],
+  "pageChecklist": [
+    {
+      "page": "home",
+      "routerKey": "home",
+      "migrationPhase": "P0 first batch (section 12.1)",
+      "mockDependencies": ["projects", "activity", "tokenUsage"],
+      "notes": "Project cards must drop p.path from the public model (redact; ResourceHandle on demand). Runtime flags (running/attention/preview) should ride project.list subscription once available. After migration the page must not read OMP_DATA (section 12.1)."
+    },
+    {
+      "page": "env-check",
+      "routerKey": "env-check",
+      "migrationPhase": "P0 first batch (section 12.1)",
+      "mockDependencies": [],
+      "notes": "No direct OMP_DATA reads: initEnv uses a hardcoded check table that duplicates diagnostics values (ompPath, version, rpc, configDir). Data source must become Runtime resolver/installer/self-check surfaced via client-bootstrap (public authority/runtime identity + surface capabilities only). The duplicated path values are exactly what bootstrap must exclude."
+    },
+    {
+      "page": "history",
+      "routerKey": "history",
+      "migrationPhase": "P0 first batch (section 12.1)",
+      "mockDependencies": ["history"],
+      "notes": "Time Travel rail is a hardcoded local array (no OMP_DATA dependency). Session list -> sessionCatalog.list exposing opaque IDs and safe summaries only."
+    },
+    {
+      "page": "capabilities",
+      "routerKey": "capabilities",
+      "migrationPhase": "P0 first batch (section 12.1)",
+      "mockDependencies": ["skills", "plugins", "mcp", "hostTools", "slashCommands"],
+      "notes": "Manifest-driven: skills/plugins/mcp/hostTools/slashCommands map to capability manifest read models. skills[].path and plugins[].src carry home-relative paths -> opaque ids, never raw paths."
+    },
+    {
+      "page": "diagnostics",
+      "routerKey": "diagnostics",
+      "migrationPhase": "P0 first batch (section 12.1)",
+      "mockDependencies": ["diagnostics"],
+      "notes": "Section 12.1 explicitly requires copyable, redacted (已脱敏) diagnostics. Public model carries version/rpc/capabilities/error summaries only; ompPath/cwd/configDir/processes[].pid/bridge-pid go through PrivateEndpoint."
+    },
+    {
+      "page": "settings",
+      "routerKey": "settings",
+      "migrationPhase": "P5 deferred (config persistence is section 12.5 last-batch)",
+      "mockDependencies": [],
+      "notes": "initSettings is self-contained UI with no OMP_DATA reads. Future dependency: config persistence channel (deferred-p1plus)."
+    },
+    {
+      "page": "workbench",
+      "routerKey": "workbench (index)",
+      "migrationPhase": "P3 second batch (section 12.2)",
+      "mockDependencies": ["events", "minimap", "telemetry", "changes", "diff", "problems", "tests", "agents", "slashCommands", "preview", "terminals", "hub"],
+      "notes": "Core workbench slice: transcript snapshot + cursor subscription for events; telemetry subscription; changes/diff/problems/tests as workspace read models; minimap derived renderer-side. Agents panel is P4 (hub.registry); preview/terminals are P5 (section 12.5) and carry the redaction rules above (pid/cwd/url/path/session query)."
+    },
+    {
+      "page": "agent-hub",
+      "routerKey": "agent-hub",
+      "migrationPhase": "P4 fourth batch (section 12.4)",
+      "mockDependencies": ["hub"],
+      "notes": "hub.registry snapshot + hub.event subscription; transcripts as separate heavy query. sessionFile/outputPath/patchPath must render as opaque artifact refs (agent://<id>), never raw file names; runtime.pid excluded from public model."
+    },
+    {
+      "page": "models",
+      "routerKey": "models (page-models.js)",
+      "migrationPhase": "P1+ deferred (not in section 12 batches)",
+      "mockDependencies": [],
+      "notes": "Reads window.OMP_MR (models-data.js), not OMP_DATA. No P0 dependency; model registry should eventually come from a query, but P0 does not invent Host availability for it."
+    },
+    {
+      "page": "roles",
+      "routerKey": "roles (page-roles.js)",
+      "migrationPhase": "P1+ deferred (not in section 12 batches)",
+      "mockDependencies": [],
+      "notes": "Reads window.OMP_MR (models-data.js), not OMP_DATA. No P0 dependency."
+    },
+    {
+      "page": "model-config",
+      "routerKey": "model-config",
+      "migrationPhase": "P1+ deferred (not in section 12 batches)",
+      "mockDependencies": [],
+      "notes": "Reads window.OMP_MR (models-data.js), not OMP_DATA. No P0 dependency; tied to provider/model configuration persistence."
+    }
+  ]
+}

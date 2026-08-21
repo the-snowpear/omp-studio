@@ -13,7 +13,7 @@ import type {
   StudioHelloResponse,
 } from "@omp-studio/studio-protocol";
 import { FULL_PARITY_REQUIRED_CAPABILITIES, STUDIO_PROTOCOL_VERSION } from "@omp-studio/studio-protocol";
-import { StudioBridgeClient, StudioBridgeHandshakeError } from "./bridge-client.js";
+import { StudioBridgeClient, StudioBridgeHandshakeError, StudioBridgeRequestError } from "./bridge-client.js";
 import {
   createBridgeBootstrap,
   createWindowsBridgeAclPort,
@@ -48,6 +48,31 @@ export type RuntimeProbeFailureCode =
   | "PROCESS_CRASHED"
   | "SMOKE_FAILED"
   | "SHUTDOWN_FAILED";
+
+/**
+ * Probe budget. A cold first launch pays for page-faulting a ~150 MB
+ * single-file executable, on-access virus scanning and the Runtime's own
+ * first-run config creation, so the budget matches the build-time identity
+ * probe in `scripts/runtime-artifact.mjs` instead of a warm-machine guess.
+ */
+const DEFAULT_PROBE_TIMEOUT_MS = 30_000;
+
+const DEFAULT_PROBE_ATTEMPTS = 2;
+
+/** Drain grace for the graceful-shutdown gate, independent of the connect budget. */
+const SHUTDOWN_EXIT_GRACE_MS = 10_000;
+
+/**
+ * Failures that carry no evidence about the executable itself: the candidate
+ * never got far enough to say anything. Everything else (protocol, auth,
+ * hello, identity, smoke, shutdown) is a verdict and is never retried.
+ */
+const TRANSIENT_PROBE_FAILURES: Partial<Record<RuntimeProbeFailureCode, true>> = {
+  SPAWN_FAILED: true,
+  PROBE_TIMEOUT: true,
+  CONNECTION_FAILED: true,
+  PROCESS_CRASHED: true,
+};
 
 export interface RuntimeProbeOutcome {
   /** Parsed and authenticated Studio Hello, when the probe succeeded. */
@@ -122,6 +147,16 @@ export interface RuntimeResolverEnvironment {
   /** Workspace handed to the probe; defaults to os.tmpdir(). */
   workspaceDirectory?: string;
   probeTimeoutMs?: number;
+  /**
+   * Attempts for a *transient* probe failure (timeout, connection loss, spawn
+   * or crash). First install is the worst case: a freshly written 150 MB
+   * single-file executable is cold on disk, on-access virus scanning runs
+   * against it, and the Runtime creates its config tree during the very first
+   * launch. A single cold attempt is not evidence that the executable is
+   * broken. Evidence requirements never change between attempts; only
+   * transient codes are retried. Defaults to 2, minimum 1.
+   */
+  probeAttempts?: number;
 }
 
 export interface RuntimeResolution extends RuntimeProbeResult {
@@ -277,14 +312,23 @@ export async function resolveRuntime(
     });
   }
 
-  const outcome = await environment.probe.probe({
+  const probeContext = {
     executablePath,
     platform,
     arch,
     workspaceDirectory: environment.workspaceDirectory ?? tmpdir(),
     supportedProtocolVersions,
-    probeTimeoutMs: environment.probeTimeoutMs ?? 10_000,
-  });
+    probeTimeoutMs: environment.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,
+  };
+  const attempts = Math.max(1, Math.trunc(environment.probeAttempts ?? DEFAULT_PROBE_ATTEMPTS));
+  let outcome = await environment.probe.probe(probeContext);
+  for (
+    let attempt = 2;
+    attempt <= attempts && outcome.failure !== undefined && TRANSIENT_PROBE_FAILURES[outcome.failure] === true;
+    attempt += 1
+  ) {
+    outcome = await environment.probe.probe(probeContext);
+  }
   try {
     if ((await fingerprintExecutable(platform, executablePath)) !== executableIdentity) {
       return rejectedResolution(candidateInfo.source, describeProbeFailure("IDENTITY_MISMATCH"), {
@@ -527,6 +571,8 @@ export interface ProcessProbeOptions {
   /** Required on win32 when using the default createBridgeBootstrap. */
   windowsAcl?: WindowsBridgeAclPort;
   connectSocket?: (endpoint: string) => Socket;
+  /** Drain grace for the shutdown gate; defaults to SHUTDOWN_EXIT_GRACE_MS. */
+  shutdownGraceMs?: number;
   /** Remove the temporary probe workspace afterwards; defaults to true. */
   cleanupWorkspace?: boolean;
 }
@@ -663,12 +709,19 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
         }
         let shutdown: "passed" | "failed" | "skipped" = "skipped";
         if (connectedClient.state === "ready") {
+          // The Runtime destroys its Bridge socket while exiting, so the
+          // shutdown receipt can be dropped in flight. A lost ack is a
+          // delivery race; graceful shutdown is proven by a clean exit.
+          let ackFailed = false;
           try {
             await connectedClient.shutdown();
-            shutdown = (await childExitsWithin(child, Math.max(1, deadline - Date.now()))) ? "passed" : "failed";
-          } catch {
-            shutdown = "failed";
+          } catch (error) {
+            ackFailed = !(error instanceof StudioBridgeRequestError || error instanceof StudioBridgeHandshakeError);
           }
+          // The drain wait is deliberately independent of the connect budget:
+          // a runtime that answered late still gets the full grace to exit.
+          const exited = await childExitsWithin(child, options.shutdownGraceMs ?? SHUTDOWN_EXIT_GRACE_MS);
+          shutdown = !ackFailed && exited && child.exitCode === 0 ? "passed" : "failed";
         }
         if (commandManifestIdentityMismatch) {
           return {

@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OMP Studio - Chat Features Demo</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #0B0E14;
+      color: #F8FAFC;
+      padding: 2rem;
+      line-height: 1.6;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, #38BDF8, #F97316);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .subtitle {
+      font-size: 1.25rem;
+      color: #94A3B8;
+      margin-bottom: 3rem;
+    }
+    
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 2rem;
+      margin-bottom: 3rem;
+    }
+    
+    .demo-card {
+      background: #0F172A;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 12px;
+      padding: 2rem;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    
+    .demo-card:hover {
+      border-color: #38BDF8;
+      transform: translateY(-2px);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    }
+    
+    .demo-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 1rem;
+      color: #F8FAFC;
+    }
+    
+    .demo-card p {
+      color: #CBD5E1;
+      margin-bottom: 1.5rem;
+    }
+    
+    .demo-card ul {
+      list-style: none;
+      margin-bottom: 1.5rem;
+    }
+    
+    .demo-card li {
+      padding: 0.5rem 0;
+      color: #94A3B8;
+      position: relative;
+      padding-left: 1.5rem;
+    }
+    
+    .demo-card li::before {
+      content: '→';
+      position: absolute;
+      left: 0;
+      color: #38BDF8;
+    }
+    
+    .btn {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background: #38BDF8;
+      color: #0B0E14;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    
+    .btn:hover {
+      background: #0EA5E9;
+      transform: scale(1.02);
+    }
+    
+    .feature-section {
+      background: #0F172A;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 12px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+    }
+    
+    .feature-section h2 {
+      font-size: 2rem;
+      margin-bottom: 1.5rem;
+      color: #F8FAFC;
+    }
+    
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1.5rem;
+    }
+    
+    .feature-item {
+      background: #1E293B;
+      padding: 1.5rem;
+      border-radius: 8px;
+      border-left: 3px solid #38BDF8;
+    }
+    
+    .feature-item h3 {
+      font-size: 1.125rem;
+      margin-bottom: 0.5rem;
+      color: #F8FAFC;
+    }
+    
+    .feature-item p {
+      color: #94A3B8;
+      font-size: 0.875rem;
+    }
+    
+    .code-preview {
+      background: #1E293B;
+      padding: 1rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 1rem 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.875rem;
+      color: #CBD5E1;
+    }
+    
+    .tech-stack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+    
+    .tech-badge {
+      padding: 0.25rem 0.75rem;
+      background: #1E293B;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 6px;
+      font-size: 0.75rem;
+      color: #94A3B8;
+      font-weight: 500;
+    }
+    
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: rgba(79, 209, 197, 0.15);
+      border: 1px solid #4FD1C5;
+      border-radius: 6px;
+      color: #4FD1C5;
+      font-weight: 500;
+      margin-bottom: 2rem;
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: #4FD1C5;
+      border-radius: 50%;
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .screenshot {
+      width: 100%;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      margin: 2rem 0;
+    }
+    
+    footer {
+      text-align: center;
+      color: #64748B;
+      padding: 3rem 0 2rem;
+      border-top: 1px solid rgba(148, 163, 184, 0.12);
+      margin-top: 4rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>OMP Studio - Chat Interface Demo</h1>
+    <p class="subtitle">综合性对话区域 UI 参考实现 - 包含工具调用、思考链、TodoList、子 Agent 等完整功能</p>
+    
+    <div class="status-indicator">
+      <div class="status-dot"></div>
+      <span>所有功能组件已实现 • 可直接预览</span>
+    </div>
+    
+    <!-- Main Demo Cards -->
+    <div class="demo-grid">
+      <div class="demo-card">
+        <h2>🎨 完整界面</h2>
+        <p>三栏布局，包含会话列表、主对话区、上下文面板</p>
+        <ul>
+          <li>响应式设计</li>
+          <li>深色主题</li>
+          <li>流畅动画</li>
+          <li>专业配色</li>
+        </ul>
+        <a href="index.html" class="btn">查看完整界面</a>
+      </div>
+      
+      <div class="demo-card">
+        <h2>💬 消息类型</h2>
+        <p>支持多种消息类型和富内容展示</p>
+        <ul>
+          <li>用户消息</li>
+          <li>AI 回复</li>
+          <li>系统通知</li>
+          <li>Markdown 渲染</li>
+        </ul>
+        <a href="index.html" class="btn">查看消息示例</a>
+      </div>
+      
+      <div class="demo-card">
+        <h2>🔧 工具调用</h2>
+        <p>可视化展示工具执行过程和结果</p>
+        <ul>
+          <li>Shell 命令</li>
+          <li>文件读写</li>
+          <li>代码搜索</li>
+          <li>状态指示</li>
+        </ul>
+        <a href="index.html" class="btn">查看工具展示</a>
+      </div>
+      
+      <div class="demo-card">
+        <h2>🧠 思考链</h2>
+        <p>AI 推理过程的可折叠展示</p>
+        <ul>
+          <li>可展开/折叠</li>
+          <li>等宽字体</li>
+          <li>代码友好</li>
+          <li>易于调试</li>
+        </ul>
+        <a href="index.html" class="btn">查看思考链</a>
+      </div>
+      
+      <div class="demo-card">
+        <h2>✅ TodoList</h2>
+        <p>任务进度追踪和状态管理</p>
+        <ul>
+          <li>三种状态</li>
+          <li>进度统计</li>
+          <li>视觉反馈</li>
+          <li>动态更新</li>
+        </ul>
+        <a href="index.html" class="btn">查看任务列表</a>
+      </div>
+      
+      <div class="demo-card">
+        <h2>🤖 子 Agent</h2>
+        <p>子代理调用的可视化卡片</p>
+        <ul>
+          <li>状态指示器</li>
+          <li>任务描述</li>
+          <li>结果展示</li>
+          <li>实时更新</li>
+        </ul>
+        <a href="index.html" class="btn">查看子 Agent</a>
+      </div>
+    </div>
+    
+    <!-- Features Section -->
+    <div class="feature-section">
+      <h2>核心功能特性</h2>
+      <div class="feature-grid">
+        <div class="feature-item">
+          <h3>三栏布局</h3>
+          <p>左侧会话列表 + 中间对话区 + 右侧上下文面板，清晰的信息架构</p>
+        </div>
+        <div class="feature-item">
+          <h3>实时消息流</h3>
+          <p>支持流式响应展示，消息自动滚动，输入中指示器</p>
+        </div>
+        <div class="feature-item">
+          <h3>Markdown 渲染</h3>
+          <p>完整的 Markdown 支持，代码语法高亮，行内代码样式</p>
+        </div>
+        <div class="feature-item">
+          <h3>工具可视化</h3>
+          <p>工具调用过程和结果的清晰展示，支持展开/折叠</p>
+        </div>
+        <div class="feature-item">
+          <h3>思考过程</h3>
+          <p>AI 推理链的透明展示，便于理解和调试</p>
+        </div>
+        <div class="feature-item">
+          <h3>任务管理</h3>
+          <p>TodoList 进度追踪，三种状态可视化</p>
+        </div>
+        <div class="feature-item">
+          <h3>多 Agent 协作</h3>
+          <p>主 Agent 和子 Agent 的状态展示和协调</p>
+        </div>
+        <div class="feature-item">
+          <h3>响应式设计</h3>
+          <p>适配桌面、平板、移动设备的流畅体验</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Tech Stack -->
+    <div class="feature-section">
+      <h2>技术栈</h2>
+      <p style="color: #CBD5E1; margin-bottom: 1rem;">基于现代 Web 标准构建，无框架依赖，易于集成</p>
+      <div class="tech-stack">
+        <span class="tech-badge">HTML5</span>
+        <span class="tech-badge">CSS3 Grid/Flexbox</span>
+        <span class="tech-badge">Vanilla JavaScript</span>
+        <span class="tech-badge">marked.js</span>
+        <span class="tech-badge">highlight.js</span>
+        <span class="tech-badge">响应式设计</span>
+        <span class="tech-badge">无构建工具</span>
+        <span class="tech-badge">易于集成</span>
+      </div>
+    </div>
+    
+    <!-- Design System -->
+    <div class="feature-section">
+      <h2>设计系统</h2>
+      <div class="feature-grid">
+        <div class="feature-item" style="border-left-color: #38BDF8;">
+          <h3>颜色方案</h3>
+          <p>深色 Slate 基调 + 天蓝/橙色强调色，专业开发者工具风格</p>
+          <div class="code-preview">
+--accent-cool: #38BDF8
+--accent-warm: #F97316
+--surface-0: #0B0E14
+--text-primary: #F8FAFC</div>
+        </div>
+        <div class="feature-item" style="border-left-color: #F97316;">
+          <h3>间距系统</h3>
+          <p>基于 8pt 网格的系统化间距，保持视觉节奏</p>
+          <div class="code-preview">
+--space-2: 8px
+--space-4: 16px
+--space-5: 24px
+--space-6: 32px</div>
+        </div>
+        <div class="feature-item" style="border-left-color: #4FD1C5;">
+          <h3>动画参数</h3>
+          <p>流畅的缓动曲线和适中的时长，提升交互体验</p>
+          <div class="code-preview">
+--duration-fast: 150ms
+--ease-out: cubic-bezier(
+  0.16, 1, 0.3, 1
+)</div>
+        </div>
+        <div class="feature-item" style="border-left-color: #F59E0B;">
+          <h3>字体系统</h3>
+          <p>系统字体栈 + JetBrains Mono 等宽字体</p>
+          <div class="code-preview">
+--font-sans: Inter, system-ui
+--font-mono: JetBrains Mono
+font-size: 15px base</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- File Structure -->
+    <div class="feature-section">
+      <h2>文件结构</h2>
+      <div class="code-preview" style="font-size: 0.8125rem;">
+D:\Project\omp-studio\ui_reference\chat\
+├── index.html          # 主界面 HTML 结构
+├── styles.css          # 完整样式系统（设计 tokens + 组件样式）
+├── script.js           # 交互逻辑和消息渲染
+├── README.md           # 详细文档和使用指南
+└── demo.html           # 本页面（功能总览）
+      </div>
+    </div>
+    
+    <!-- Quick Start -->
+    <div class="feature-section">
+      <h2>快速开始</h2>
+      <p style="color: #CBD5E1; margin-bottom: 1.5rem;">三种方式预览界面：</p>
+      
+      <div style="margin-bottom: 1.5rem;">
+        <h3 style="color: #F8FAFC; font-size: 1.125rem; margin-bottom: 0.75rem;">1. 直接打开</h3>
+        <p style="color: #94A3B8; margin-bottom: 0.5rem;">在浏览器中直接打开 <code style="background: #1E293B; padding: 0.25rem 0.5rem; border-radius: 4px; color: #38BDF8;">index.html</code></p>
+      </div>
+      
+      <div style="margin-bottom: 1.5rem;">
+        <h3 style="color: #F8FAFC; font-size: 1.125rem; margin-bottom: 0.75rem;">2. 使用本地服务器</h3>
+        <div class="code-preview">
+# Python
+python -m http.server 8080
+
+# Node.js
+npx http-server -p 8080
+
+# PHP
+php -S localhost:8080</div>
+      </div>
+      
+      <div>
+        <h3 style="color: #F8FAFC; font-size: 1.125rem; margin-bottom: 0.75rem;">3. 集成到项目</h3>
+        <div class="code-preview">
+&lt;!-- 引入样式 -->
+&lt;link rel="stylesheet" href="path/to/chat/styles.css">
+
+&lt;!-- 引入依赖 -->
+&lt;script src="https://cdn.../marked.min.js">&lt;/script>
+&lt;script src="https://cdn.../highlight.min.js">&lt;/script>
+
+&lt;!-- 引入脚本 -->
+&lt;script src="path/to/chat/script.js">&lt;/script></div>
+      </div>
+    </div>
+    
+    <!-- Next Steps -->
+    <div class="feature-section">
+      <h2>后续集成工作</h2>
+      <p style="color: #CBD5E1; margin-bottom: 1.5rem;">该实现为静态 Demo，实际集成时需要：</p>
+      <div class="feature-grid">
+        <div class="feature-item">
+          <h3>API 连接</h3>
+          <p>连接到真实的 OMP Runtime / AgentSession API</p>
+        </div>
+        <div class="feature-item">
+          <h3>实时通信</h3>
+          <p>实现 WebSocket 实时消息推送</p>
+        </div>
+        <div class="feature-item">
+          <h3>消息持久化</h3>
+          <p>本地存储和会话历史管理</p>
+        </div>
+        <div class="feature-item">
+          <h3>文件上传</h3>
+          <p>实现附件上传和预览功能</p>
+        </div>
+        <div class="feature-item">
+          <h3>用户认证</h3>
+          <p>添加用户认证和权限管理</p>
+        </div>
+        <div class="feature-item">
+          <h3>性能优化</h3>
+          <p>虚拟滚动、消息分页、懒加载</p>
+        </div>
+        <div class="feature-item">
+          <h3>搜索过滤</h3>
+          <p>消息搜索和会话过滤功能</p>
+        </div>
+        <div class="feature-item">
+          <h3>多人协作</h3>
+          <p>团队协作和实时在线状态</p>
+        </div>
+      </div>
+    </div>
+    
+    <footer>
+      <p>OMP Studio Chat Interface Reference Implementation</p>
+      <p style="margin-top: 0.5rem; font-size: 0.875rem;">Created: 2026-08-12 | Version: 1.0.0</p>
+    </footer>
+  </div>
+</body>
+</html>

@@ -759,6 +759,40 @@ body.is-pv-sorting * {
 .pv-test .tr-lines .mono { font-size: var(--fs-11); opacity: 0.85; }
 .pv-test .icon { width: 13px; height: 13px; margin-top: 2px; flex: none; }
 
+/* ---------- 模型区块工具条 + 自动获取模型候选清单 ---------- */
+.mc-models-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-10);
+}
+.mc-models-bar > .seg { margin-bottom: 0; }
+.mc-models-bar .mc-fetch-btn { margin-left: auto; }
+
+.mc-fetch-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  background: var(--bg);
+  padding: var(--sp-12);
+  margin-bottom: var(--sp-12);
+}
+.mc-fetch-panel > .pm-empty { padding: var(--sp-12) 0; }
+.mc-fetch-panel .mc-fetch-row {
+  cursor: pointer;
+  padding-left: 0;
+  padding-right: 0;
+}
+.mc-fetch-panel .mc-fetch-row:first-of-type { border-top: 1px solid var(--border); margin-top: var(--sp-10); }
+.mc-fetch-panel .mc-fetch-row input[type="checkbox"] { flex: none; }
+.mc-fetch-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  margin-top: var(--sp-10);
+}
+.mc-fetch-foot .spacer { flex: 1; }
+
 /* ---------- 模型编辑行（Custom Models / Override） ---------- */
 .mdl-edit {
   border: 1px solid var(--border); border-radius: var(--r-6);

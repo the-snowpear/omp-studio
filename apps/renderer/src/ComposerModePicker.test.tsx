@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
@@ -7,6 +7,11 @@ import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 import { ComposerModePicker } from "./ComposerModePicker";
 import { containsStandaloneKeyword, injectMagicKeyword, type MagicKeyword } from "./composerMode";
+import { I18nProvider } from "./i18n";
+
+function render(ui: React.ReactElement) {
+  return rtlRender(<I18nProvider forcedLanguage="zh">{ui}</I18nProvider>);
+}
 
 afterEach(cleanup);
 

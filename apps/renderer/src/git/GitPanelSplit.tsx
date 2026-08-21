@@ -1,6 +1,7 @@
 import { useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 
 export function GitPanelSplit({
   top,
@@ -21,6 +22,7 @@ export function GitPanelSplit({
   readonly preview?: boolean;
   readonly children: ReactNode;
 }) {
+  const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
   const topShare = graphOpen ? `${(splitRatio * 100).toFixed(3)}%` : "100%";
   const graphShare = graphOpen ? `${((1 - splitRatio) * 100).toFixed(3)}%` : "0%";
@@ -96,15 +98,15 @@ export function GitPanelSplit({
       ) : null}
       <section className={`git-graph-pane${graphOpen ? "" : " collapse"}`} style={{ ["--git-graph-basis" as string]: graphShare }} aria-labelledby="gitGraphTitle">
         <div className="git-graph-head">
-          <h2 id="gitGraphTitle">提交历史</h2>
+          <h2 id="gitGraphTitle">{t("git.commitHistoryTitle")}</h2>
           {preview ? <span className="chip gray xs">演示</span> : null}
           {meta}
           <span className="spacer" />
           <button
             type="button"
             className={`icon-btn sb-collapse-btn${graphOpen ? "" : " is-collapsed"}`}
-            data-tip={graphOpen ? "收起" : "展开"}
-            aria-label={graphOpen ? "收起提交历史" : "展开提交历史"}
+            data-tip={graphOpen ? t("common.collapse") : t("common.expand")}
+            aria-label={graphOpen ? t("git.collapseCommitHistory") : t("git.expandCommitHistory")}
             aria-expanded={graphOpen}
             onClick={onToggle}
           >

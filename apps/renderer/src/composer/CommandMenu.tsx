@@ -1,4 +1,5 @@
-import { SLASH_GROUP_LABEL, type SlashGroup, type StudioSlashCommand } from "./commands";
+import { SLASH_GROUP_KEY, SLASH_GROUP_LABEL, type SlashGroup, type StudioSlashCommand } from "./commands";
+import { useI18n } from "../i18n";
 
 function formatCommandHint(raw: string): string {
   const hint = raw.trim();
@@ -19,23 +20,27 @@ export function CommandMenu({
   onSelect: (item: StudioSlashCommand) => void;
   onHover: (index: number) => void;
 }) {
+  const { t } = useI18n();
   let lastGroup: SlashGroup | undefined;
   return (
-    <div className="cm-mention cm-command" role="listbox" aria-label="指令">
+    <div className="cm-mention cm-command" role="listbox" aria-label={t("composer.slashCommands")}>
       <div className="cm-mention-head">
-        <span>指令</span>
+        <span>{t("composer.slashCommands")}</span>
         {query ? <span className="muted tiny">{query}</span> : null}
       </div>
       {items.length === 0 ? (
-        <div className="cm-mention-empty muted small">没有匹配的指令</div>
+        <div className="cm-mention-empty muted small">{t("composer.noMatchingCommands")}</div>
       ) : (
         items.map((item, index) => {
           const showGroup = item.group !== lastGroup;
           lastGroup = item.group;
-          const hint = item.hint ?? (item.allowArgs ? "参数" : undefined);
+          const hint = item.hint ?? (item.allowArgs ? t("composer.paramPlaceholder") : undefined);
+          const descKey = `composer.slashDesc.${item.name}`;
+          const localizedDesc = t(descKey);
+          const desc = localizedDesc !== descKey ? localizedDesc : item.description;
           return (
             <div key={item.name}>
-              {showGroup ? <div className="cm-mention-group">{SLASH_GROUP_LABEL[item.group]}</div> : null}
+              {showGroup ? <div className="cm-mention-group">{t(SLASH_GROUP_KEY[item.group] ?? SLASH_GROUP_LABEL[item.group])}</div> : null}
               <button
                 type="button"
                 role="option"
@@ -50,7 +55,7 @@ export function CommandMenu({
               >
                 <span className="cm-command-id">/{item.name}</span>
                 {hint ? <span className="cm-command-hint">{formatCommandHint(hint)}</span> : null}
-                <span className="cm-mention-detail">{item.disabledReason ?? item.description}</span>
+                <span className="cm-mention-detail">{item.disabledReason ?? desc}</span>
               </button>
             </div>
           );

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark" data-density="compact">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OMP Studio</title>
+  <meta name="description" content="OMP Studio — Oh My Pi CLI 的桌面图形化客户端 · UI Reference v2">
+
+  <!-- Design tokens first: everything else reads from them -->
+  <link rel="stylesheet" href="styles/reset.css">
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/base.css">
+
+  <!-- Structure -->
+  <link rel="stylesheet" href="styles/layout.css">
+  <link rel="stylesheet" href="styles/components.css">
+
+  <!-- Regions -->
+  <link rel="stylesheet" href="styles/sidebar.css">
+  <link rel="stylesheet" href="styles/topbar.css">
+  <link rel="stylesheet" href="styles/conversation.css">
+  <link rel="stylesheet" href="styles/tool-card.css">
+  <link rel="stylesheet" href="styles/minimap.css">
+  <link rel="stylesheet" href="styles/composer.css">
+  <link rel="stylesheet" href="styles/changes.css">
+  <link rel="stylesheet" href="styles/preview.css">
+  <link rel="stylesheet" href="styles/panels.css">
+  <link rel="stylesheet" href="styles/screens.css">
+</head>
+<body>
+  <div id="root"></div>
+
+  <!--
+    Classic scripts, not ES modules.
+
+    Modules would be the natural choice, but browsers block `import` from a
+    file:// origin (CORS), which would break double-clicking index.html.
+    Each file is an IIFE that registers itself on window.OMP.mod[...], so the
+    file organisation stays modular while remaining zero-dependency.
+
+    Load order = dependency order.
+  -->
+
+  <!-- 1. Core utilities (no dependencies) -->
+  <script src="js/dom.js"></script>
+  <script src="js/icons.js"></script>
+  <script src="js/store.js"></script>
+
+  <!-- 2. Mock data (no dependencies) -->
+  <script src="data/workspaces.js"></script>
+  <script src="data/threads.js"></script>
+  <script src="data/timeline.js"></script>
+  <script src="data/changes.js"></script>
+  <script src="data/agents.js"></script>
+  <script src="data/preview.js"></script>
+  <script src="data/capabilities.js"></script>
+  <script src="data/diagnostics.js"></script>
+  <script src="data/telemetry.js"></script>
+
+  <!-- 3. Infrastructure (depends on core) -->
+  <script src="js/bus.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/scenarios.js"></script>
+
+  <!-- 4. Components -->
+  <script src="js/components/sidebar.js"></script>
+  <script src="js/components/topbar.js"></script>
+  <script src="js/components/timeline.js"></script>
+  <script src="js/components/minimap.js"></script>
+  <script src="js/components/composer.js"></script>
+  <script src="js/components/changes.js"></script>
+  <script src="js/components/preview.js"></script>
+  <script src="js/components/panels.js"></script>
+  <script src="js/components/overlays.js"></script>
+
+  <!-- 5. Screens + composition root -->
+  <script src="js/screens.js"></script>
+  <script src="js/app.js"></script>
+
+  <script>
+    OMP.mod['js/app'].mount(document.getElementById('root'));
+  </script>
+</body>
+</html>

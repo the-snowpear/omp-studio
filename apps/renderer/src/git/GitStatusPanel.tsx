@@ -21,6 +21,7 @@ import type {
 
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 
 import { GitCommitGraph } from "./GitCommitGraph";
 import { GitDiffResizer, useGitDiffHeight } from "./GitDiffResizer";
@@ -118,11 +119,11 @@ const PENDING_INPUT_LABELS: Record<string, string> = {
   "pr.reopen": "重新打开 PR",
 };
 
-function statusLabel(index: string, worktree: string): string {
-  if (index === "conflicted" || worktree === "conflicted") return "冲突";
-  if (index !== "unmodified" && worktree !== "unmodified") return "已暂存 + 工作区";
-  if (index !== "unmodified") return "已暂存";
-  return worktree === "untracked" ? "未跟踪" : "工作区";
+function statusLabel(index: string, worktree: string, t: (k: string) => string): string {
+  if (index === "conflicted" || worktree === "conflicted") return t("git.conflict");
+  if (index !== "unmodified" && worktree !== "unmodified") return t("git.stagedAndWorking");
+  if (index !== "unmodified") return t("git.staged");
+  return worktree === "untracked" ? t("git.untracked") : t("git.workingTree");
 }
 
 function patchLines(patch: string) {
@@ -133,6 +134,7 @@ function patchLines(patch: string) {
 }
 
 export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly client: StudioClient; readonly workspaceId?: WorkspaceId; readonly focusPath?: string }) {
+  const { t } = useI18n();
   const repositoryHook = useGitRepository(client, workspaceId);
   const repository = repositoryHook.repository;
   const [branches, setBranches] = useState<GitBranchListReadModel>();
@@ -446,14 +448,14 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
         <span className="ch-count">{changes.length}</span>
         <span className="spacer" />
         {target === "working" ? (
-          <GitTip text={working.length === 0 ? "无更改" : "暂存全部"}>
-            <button type="button" className="icon-btn small" aria-label="暂存全部" disabled={busy || working.length === 0} onClick={() => void execute({ kind: "stage", paths: working.map((change) => change.path) })}>
+          <GitTip text={working.length === 0 ? t("git.noChanges") : t("git.stageAll")}>
+            <button type="button" className="icon-btn small" aria-label={t("git.stageAll")} disabled={busy || working.length === 0} onClick={() => void execute({ kind: "stage", paths: working.map((change) => change.path) })}>
               <Icon name="plus" extra="sm" />
             </button>
           </GitTip>
         ) : (
-          <GitTip text={staged.length === 0 ? "无更改" : "取消暂存全部"}>
-            <button type="button" className="icon-btn small" aria-label="取消暂存全部" disabled={busy || staged.length === 0} onClick={() => void execute({ kind: "unstage", paths: staged.map((change) => change.path) })}>
+          <GitTip text={staged.length === 0 ? t("git.noChanges") : t("git.unstageAll")}>
+            <button type="button" className="icon-btn small" aria-label={t("git.unstageAll")} disabled={busy || staged.length === 0} onClick={() => void execute({ kind: "unstage", paths: staged.map((change) => change.path) })}>
               <Icon name="minus" extra="sm" />
             </button>
           </GitTip>
@@ -462,14 +464,14 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       {changes.map((change) => (
         <div className={`git-change-line${selected?.path === change.path && selected.target === target ? " selected" : ""}`} key={`${target}-${change.path}`}>
           <button className="ch-row" aria-label={`查看 ${change.path} 的 ${target === "staged" ? "暂存" : "工作区"} Diff`} onClick={() => setSelected({ path: change.path, target })}>
-            <span className="ch-file ellipsis">{change.path}</span><span className="ch-note">{statusLabel(change.index, change.worktree)}</span>
+            <span className="ch-file ellipsis">{change.path}</span><span className="ch-note">{statusLabel(change.index, change.worktree, t)}</span>
           </button>
-          <GitTip text={target === "staged" ? "取消暂存" : "暂存"}>
-            <button type="button" className="icon-btn small" aria-label={target === "staged" ? "取消暂存" : "暂存"} disabled={busy} onClick={() => void execute({ kind: target === "staged" ? "unstage" : "stage", paths: [change.path] })}><Icon name={target === "staged" ? "minus" : "plus"} extra="sm" /></button>
+          <GitTip text={target === "staged" ? t("git.unstage") : t("git.stage")}>
+            <button type="button" className="icon-btn small" aria-label={target === "staged" ? t("git.unstage") : t("git.stage")} disabled={busy} onClick={() => void execute({ kind: target === "staged" ? "unstage" : "stage", paths: [change.path] })}><Icon name={target === "staged" ? "minus" : "plus"} extra="sm" /></button>
           </GitTip>
           {target === "working" ? (
-            <GitTip text="丢弃">
-              <button type="button" className="icon-btn small danger" aria-label="丢弃更改" disabled={busy || !repository.revision} onClick={() => { if (repository.revision && window.confirm(`确认丢弃 ${change.path} 的工作区更改？`)) void execute({ kind: "discard", paths: [change.path], expectedRevision: repository.revision }); }}><Icon name="trash" extra="sm" /></button>
+            <GitTip text={t("git.discard")}>
+              <button type="button" className="icon-btn small danger" aria-label={t("git.discardChanges")} disabled={busy || !repository.revision} onClick={() => { if (repository.revision && window.confirm(t("git.confirmDiscard", { path: change.path }))) void execute({ kind: "discard", paths: [change.path], expectedRevision: repository.revision }); }}><Icon name="trash" extra="sm" /></button>
             </GitTip>
           ) : null}
         </div>
@@ -479,27 +481,27 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
 
   return wrap(<>
     <div className="ch-toolbar git-toolbar">
-      <GitTip text="刷新">
-        <button type="button" className="icon-btn small" aria-label="刷新" disabled={busy} onClick={() => void refreshAll()}><Icon name="refresh" extra="sm" /></button>
+      <GitTip text={t("common.refresh")}>
+        <button type="button" className="icon-btn small" aria-label={t("common.refresh")} disabled={busy} onClick={() => void refreshAll()}><Icon name="refresh" extra="sm" /></button>
       </GitTip>
       <span className="git-branch-label ellipsis"><Icon name="branch" extra="sm" />{repository.branch ?? "detached HEAD"}</span>
       {repository.ahead || repository.behind ? <span className="chip gray xs">↑{repository.ahead} ↓{repository.behind}</span> : null}
       <span className="spacer" />
-      {activeRequest ? <button className="btn small danger" onClick={() => void cancelActive()}>取消</button> : null}
+      {activeRequest ? <button className="btn small danger" onClick={() => void cancelActive()}>{t("common.cancel")}</button> : null}
       <button className="btn small outline" disabled={busy} onClick={() => void execute({ kind: "fetch", prune: true })}>Fetch</button>
       <button className="btn small outline" disabled={busy} onClick={() => void execute({ kind: "pull", strategy: "ff-only" })}>Pull</button>
       <button className="btn small outline" disabled={busy} onClick={() => void execute({ kind: "push" })}>Push</button>
     </div>
     {notice ? <div className="git-notice" role="status">{notice}</div> : null}
-    {repository.operation ? <div className="git-operation"><b>{repository.operation}</b> 正在进行 <span className="spacer" /><button className="btn small outline" disabled={busy} onClick={() => void execute({ kind: "continue", operation: repository.operation! })}>继续</button><button className="btn small danger" disabled={busy} onClick={() => void execute({ kind: "abort", operation: repository.operation! })}>中止</button></div> : null}
+    {repository.operation ? <div className="git-operation"><b>{repository.operation}</b> {t("git.inProgress")} <span className="spacer" /><button className="btn small outline" disabled={busy} onClick={() => void execute({ kind: "continue", operation: repository.operation! })}>{t("git.continue")}</button><button className="btn small danger" disabled={busy} onClick={() => void execute({ kind: "abort", operation: repository.operation! })}>{t("git.abort")}</button></div> : null}
     <div className="git-actions">
       <GitMoreActionsMenu disabled={busy} githubDisabled={githubAuth?.available === false} onPick={runAdvanced} />
       <span className="tiny muted">{branches ? branches.branches.length : "—"} branches · {worktrees ? worktrees.worktrees.length : "—"} worktrees · {repository.stashCount} stash{githubAuth?.available === false ? ` · ${githubAuth.unavailableReason ?? "GitHub CLI 不可用"}` : ""}</span>
     </div>
     <div className="ch-list">
-      {rows("已暂存", staged, "staged")}
-      {rows("工作区", working, "working")}
-      {repository.changes.length === 0 ? <div className="empty" style={{ padding: 18 }}>工作区干净</div> : null}
+      {rows(t("git.staged"), staged, "staged")}
+      {rows(t("git.workingTree"), working, "working")}
+      {repository.changes.length === 0 ? <div className="empty" style={{ padding: 18 }}>{t("git.workingTreeClean")}</div> : null}
       {githubAuth?.authenticated && pullRequests?.pullRequests.length ? <div className="git-pr-list"><div className="ch-group-title">Open pull requests<span className="ch-count">{pullRequests.pullRequests.length}</span></div>{pullRequests.pullRequests.map((pr) => <div className="git-pr-row" key={pr.number}><span className="ellipsis">#{pr.number} {pr.title}</span><button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.checkout", number: pr.number })}>Checkout</button>{pr.draft ? <button className="btn small outline" disabled={busy} onClick={() => void executeGithub({ kind: "pr.ready", number: pr.number })}>Ready</button> : null}<GitTip text={pr.headOid ? "Squash" : "无 OID"}><button className="btn small primary" disabled={busy || !pr.headOid} onClick={() => { if (pr.headOid && window.confirm(`确认 squash merge #${pr.number}？`)) void executeGithub({ kind: "pr.merge", number: pr.number, method: "squash", expectedHeadOid: pr.headOid, deleteBranch: true }); }}>Merge</button></GitTip></div>)}</div> : null}
     </div>
     <div className="git-commit-box">
@@ -510,8 +512,8 @@ export function GitStatusPanel({ client, workspaceId, focusPath }: { readonly cl
       <>
         <GitDiffResizer height={diffHeight} onHeight={setDiffHeight} />
         <div className="ch-diff-slot git-diff-slot" style={{ height: diffHeight }}>
-          <div className="diff-toolbar"><Icon name="file-code" extra="sm" /><span className="mono small ellipsis">{selected.path}</span><span className="chip gray xs">{selected.target === "staged" ? "staged" : "working"}</span>{diff?.truncated ? <span className="chip gray xs">已截断</span> : null}</div>
-          <div className="diff-scroll">{diff ? (diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 && repository.changes.some((change) => change.path === selected.path && change.worktree === "untracked") ? <div className="empty">未跟踪文件暂时没有 Git diff；暂存后可查看。</div> : patchLines(diff.patch)) : <div className="empty">读取 Diff…</div>}</div>
+          <div className="diff-toolbar"><Icon name="file-code" extra="sm" /><span className="mono small ellipsis">{selected.path}</span><span className="chip gray xs">{selected.target === "staged" ? "staged" : "working"}</span>{diff?.truncated ? <span className="chip gray xs">{t("common.truncated")}</span> : null}</div>
+          <div className="diff-scroll">{diff ? (diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 && repository.changes.some((change) => change.path === selected.path && change.worktree === "untracked") ? <div className="empty">{t("git.untrackedNoDiff")}</div> : patchLines(diff.patch)) : <div className="empty">{t("git.readingDiff")}</div>}</div>
         </div>
       </>
     ) : null}

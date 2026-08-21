@@ -1,0 +1,687 @@
+/* ==========================================================================
+   OMP Studio — topbar
+   Workspace header: breadcrumb nav (project › branch › thread), actions,
+   layout mode switcher, connection status, and the session telemetry strip.
+
+   Telemetry default: 4 compact items (model · tokens · context ring · time).
+   Hover/click: detailed flyout with full breakdown.
+   ========================================================================== */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  height: var(--h-topbar);
+  padding: 0 var(--sp-6);
+  flex-shrink: 0;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* ---- Left: breadcrumb nav --------------------------------------------- */
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 1;
+}
+
+.topbar-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 24px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+
+.topbar-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.topbar-nav-item svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.topbar-nav-item-current {
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+}
+
+.topbar-nav-sep {
+  color: var(--text-tertiary);
+  font-size: var(--fs-sm);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* ---- Center: actions -------------------------------------------------- */
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ---- Right: layout + status + telemetry ------------------------------- */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-left: auto;
+}
+
+/* Layout mode switcher — 3-button segmented control */
+.topbar-layout {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+}
+
+.topbar-layout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  color: var(--text-tertiary);
+  border-radius: 3px;
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+
+.topbar-layout-btn:hover:not([data-active="true"]) {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.topbar-layout-btn[data-active="true"] {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.topbar-layout-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Connection status dot */
+.topbar-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+
+.topbar-status[data-status="running"] {
+  background: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.topbar-status[data-status="reconnecting"] {
+  background: var(--warn);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.topbar-status[data-status="disconnected"],
+.topbar-status[data-status="error"] {
+  background: var(--danger);
+}
+
+/* ==========================================================================
+   Session Telemetry
+   Compact strip by default; detailed flyout on hover/click.
+   ========================================================================== */
+
+.telemetry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: var(--h-btn);
+  padding: 0 var(--sp-4);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease);
+  position: relative;
+  user-select: none;
+}
+
+.telemetry:hover {
+  border-color: var(--border-default);
+  background: var(--bg-surface);
+}
+
+.telemetry-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  white-space: nowrap;
+}
+
+.telemetry-item svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.telemetry-label {
+  color: var(--text-tertiary);
+}
+
+.telemetry-value {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+}
+
+/* Context ring — small circular percentage indicator */
+.telemetry .ring {
+  width: 14px;
+  height: 14px;
+}
+
+/* Divider between items */
+.telemetry-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* Warn/danger states for context pressure */
+.telemetry[data-context-tone="warn"] {
+  border-color: var(--warn-border);
+  background: var(--warn-subtle);
+}
+
+.telemetry[data-context-tone="danger"] {
+  border-color: var(--danger-border);
+  background: var(--danger-subtle);
+}
+
+/* ==========================================================================
+   Telemetry Flyout — detailed breakdown
+   Appears below the telemetry strip on hover/click.
+   ========================================================================== */
+
+.telemetry-flyout {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: var(--z-popover);
+  width: 380px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-popover);
+  padding: var(--sp-5);
+  animation: popoverIn var(--dur-fast) var(--ease);
+}
+
+.telemetry-flyout-section {
+  margin-bottom: var(--sp-5);
+}
+
+.telemetry-flyout-section:last-child {
+  margin-bottom: 0;
+}
+
+.telemetry-flyout-title {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--sp-3);
+}
+
+.telemetry-flyout-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-5);
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-sm);
+}
+
+.telemetry-flyout-label {
+  color: var(--text-secondary);
+}
+
+.telemetry-flyout-value {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+  text-align: right;
+}
+
+.telemetry-flyout-value-muted {
+  color: var(--text-tertiary);
+  font-weight: var(--fw-normal);
+}
+
+.telemetry-flyout-value-warn {
+  color: var(--warn);
+}
+
+.telemetry-flyout-value-danger {
+  color: var(--danger);
+}
+
+/* Context breakdown stacked bar */
+.telemetry-breakdown {
+  display: flex;
+  height: 20px;
+  background: var(--bg-inset);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  margin-top: var(--sp-3);
+}
+
+.telemetry-breakdown-segment {
+  height: 100%;
+  position: relative;
+  transition: flex-basis var(--dur) var(--ease);
+}
+
+.telemetry-breakdown-segment:hover {
+  opacity: 0.8;
+}
+
+/* Legend below the bar */
+.telemetry-legend {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--sp-2) var(--sp-4);
+  margin-top: var(--sp-4);
+}
+
+.telemetry-legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.telemetry-legend-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.telemetry-legend-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telemetry-legend-value {
+  font-family: var(--font-mono);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+
+/* Model switcher — inline in the flyout */
+.telemetry-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  margin-top: var(--sp-3);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.telemetry-model-row:hover {
+  border-color: var(--border-default);
+}
+
+.telemetry-model-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.telemetry-model-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+
+.telemetry-model-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.telemetry-model-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.telemetry-model-chevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+}
+
+/* Subagent summary — mini table */
+.telemetry-subagents {
+  margin-top: var(--sp-3);
+}
+
+.telemetry-subagent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-xs);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.telemetry-subagent-row:last-child {
+  border-bottom: none;
+}
+
+.telemetry-subagent-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.telemetry-subagent-tokens,
+.telemetry-subagent-cost {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+/* Compact history indicator */
+.telemetry-compact-note {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--bg-inset);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  margin-top: var(--sp-3);
+}
+
+.telemetry-compact-note svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+/* Cache hit badge */
+.telemetry-cache-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 var(--sp-2);
+  height: 16px;
+  font-size: 10px;
+  font-weight: var(--fw-semi);
+  border-radius: var(--r-xs);
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.telemetry-cache-badge svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* ==========================================================================
+   Model switcher popover (opened from the flyout)
+   ========================================================================== */
+
+.model-menu {
+  position: fixed;
+  z-index: var(--z-popover);
+  min-width: 320px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-popover);
+  padding: var(--sp-2);
+  animation: popoverIn var(--dur-fast) var(--ease);
+}
+
+.model-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.model-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.model-menu-item[data-active="true"] {
+  background: var(--accent-subtle);
+}
+
+.model-menu-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.model-menu-item-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+
+.model-menu-item[data-active="true"] .model-menu-item-name {
+  color: var(--accent);
+}
+
+.model-menu-item-check {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.model-menu-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.model-menu-item-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.model-menu-item-badges {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+.model-menu-item-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 var(--sp-2);
+  height: 16px;
+  font-size: 10px;
+  font-weight: var(--fw-semi);
+  border-radius: var(--r-xs);
+  background: var(--bg-inset);
+  color: var(--text-tertiary);
+}
+
+.model-menu-item-badge svg {
+  width: 10px;
+  height: 10px;
+}
+
+.model-menu-sep {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--sp-2) 0;
+}
+
+/* Settings group in the model menu */
+.model-menu-settings {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.model-menu-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+}
+
+.model-menu-setting-label {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}
+
+.model-menu-setting-control {
+  flex-shrink: 0;
+}
+
+/* Thinking level select */
+.thinking-select {
+  height: 24px;
+  padding: 0 24px 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  border-radius: var(--r-sm);
+}
+
+/* Fast mode toggle */
+.model-menu-setting .switch {
+  width: 32px;
+  height: 18px;
+}
+
+/* Permission mode menu item */
+.permission-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.permission-item:hover {
+  background: var(--bg-hover);
+}
+
+.permission-item[data-active="true"] {
+  background: var(--accent-subtle);
+}
+
+.permission-item-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+.permission-item[data-active="true"] .permission-item-icon {
+  color: var(--accent);
+}
+
+.permission-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.permission-item-name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.permission-item[data-active="true"] .permission-item-name {
+  color: var(--accent);
+}
+
+.permission-item-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+  margin-bottom: 3px;
+}
+
+.permission-item-detail {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  line-height: var(--lh-snug);
+}
+
+.permission-item-check {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  margin-top: 1px;
+}

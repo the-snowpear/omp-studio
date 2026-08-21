@@ -80,7 +80,7 @@ describe("SettingsPage · 结构", () => {
     expect(screen.queryByText("Full Access")).toBeNull();
   });
 
-  it("支持英文模式渲染 7 个英文标签", () => {
+  it("支持英文模式渲染 7 个英文标签与所有子面板的英文文案", () => {
     renderSettings({ preview: false, language: "en" });
     const tabs = screen.getAllByRole("tab");
     const labels = tabs.map((tab) => tab.textContent ?? "");
@@ -92,6 +92,45 @@ describe("SettingsPage · 结构", () => {
     expect(labels).toContain("Tasks & Execution");
     expect(labels).toContain("Advanced");
     expect(labels).toHaveLength(7);
+
+    // General tab English checks
+    expect(screen.getByRole("combobox", { name: "Interface Language" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Theme" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Information Density" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset to Defaults" })).toBeTruthy();
+
+    // Interaction tab English checks
+    openTab("Interaction");
+    expect(screen.getByRole("combobox", { name: "Steering Message Handling" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Follow-up Message Handling" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Interrupt Timing" })).toBeTruthy();
+
+    // Permissions tab English checks
+    openTab("Permissions");
+    expect(screen.getByRole("combobox", { name: "Approval Mode" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "File Read" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Outside Workspace Policy" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Manage Rules" })).toBeTruthy();
+
+    // Context & Memory tab English checks
+    openTab("Context & Memory");
+    expect(screen.getByRole("combobox", { name: "Compact Strategy" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Memory Backend" })).toBeTruthy();
+
+    // Files & Terminal tab English checks
+    openTab("Files & Terminal");
+    expect(screen.getByRole("combobox", { name: "Edit Mode" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Single Read Limit" })).toBeTruthy();
+
+    // Tasks & Execution tab English checks
+    openTab("Tasks & Execution");
+    expect(screen.getByRole("combobox", { name: "Loop Mode" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Max Subtask Concurrency" })).toBeTruthy();
+
+    // Advanced tab English checks
+    openTab("Advanced");
+    expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
   });
 
   it("支持深链 intent 直接打开目标标签", () => {

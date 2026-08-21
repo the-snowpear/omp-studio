@@ -24,6 +24,7 @@ import {
   type DiagnosticsHero,
 } from "./diagnosticsModel";
 import { ActionProgressBar } from "./ActionProgressBar";
+import { useI18n } from "./i18n";
 import { ensureRuntimeConnection } from "./runtimeEnsure";
 import { isUpdateCheckTimeout, queryWithTimeout } from "./updateCheck";
 
@@ -70,10 +71,10 @@ const GRADE_TONE: Record<string, string> = {
   unavailable: "gray",
 };
 
-const PREVIEW_CYCLE: ReadonlyArray<{ id: PreviewDiagScenario; label: string }> = [
-  { id: "update", label: "预览：有可用更新" },
-  { id: "ok", label: "预览：环境正常" },
-  { id: "fail", label: "预览：检查失败" },
+const PREVIEW_CYCLE: ReadonlyArray<{ id: PreviewDiagScenario; labelKey: string }> = [
+  { id: "update", labelKey: "diagnostics.previewUpdateAvailable" },
+  { id: "ok", labelKey: "diagnostics.previewEnvironmentOk" },
+  { id: "fail", labelKey: "diagnostics.previewCheckFailed" },
 ];
 
 function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void, dismiss: () => void] {
@@ -133,10 +134,10 @@ function previewRuntime(scenario: PreviewDiagScenario): RuntimeConnection {
   };
 }
 
-function previewInstaller(scenario: PreviewDiagScenario): RuntimeInstallState {
+function previewInstaller(scenario: PreviewDiagScenario, t: (key: string) => string): RuntimeInstallState {
   const mock = PREVIEW_DIAGNOSTICS;
   if (scenario === "fail") {
-    return { status: "failed", version: mock.version, signature: "unknown", message: "本地制品激活失败（演示）" };
+    return { status: "failed", version: mock.version, signature: "unknown", message: t("diagnostics.previewActivationFailed") };
   }
   if (scenario === "ok") {
     return { status: "installed", version: mock.version, signature: "verified" };
@@ -205,11 +206,11 @@ function heroClass(kind: DiagnosticsHero["kind"]): string {
   return "fail";
 }
 
-function primaryLabel(action: DiagnosticsHero["primary"], busy: DiagAction | null): string {
-  if (action === "install") return busy?.kind === "install" ? "正在安装…" : "安装 Runtime";
-  if (action === "update") return busy?.kind === "update" ? "正在更新…" : "更新 Runtime";
-  if (action === "reconnect") return busy?.kind === "reconnect" || busy?.kind === "restart" ? "正在连接…" : "重新连接 Runtime";
-  return busy?.kind === "recheck" ? "正在检测…" : "重新检测";
+function primaryLabel(action: DiagnosticsHero["primary"], busy: DiagAction | null, t: (key: string) => string): string {
+  if (action === "install") return busy?.kind === "install" ? t("diagnostics.installProgress") : t("diagnostics.installRuntime");
+  if (action === "update") return busy?.kind === "update" ? t("diagnostics.updateProgress") : t("diagnostics.updateRuntime");
+  if (action === "reconnect") return busy?.kind === "reconnect" || busy?.kind === "restart" ? t("diagnostics.connectProgress") : t("diagnostics.reconnect");
+  return busy?.kind === "recheck" ? t("diagnostics.recheckProgress") : t("diagnostics.recheck");
 }
 
 function primaryIcon(action: DiagnosticsHero["primary"]): string {
@@ -233,6 +234,7 @@ export function DiagnosticsPage({
   environment?: EnvironmentReadModel;
 }) {
   const { preview } = usePreviewMode();
+  const { t } = useI18n();
   const mock = PREVIEW_DIAGNOSTICS;
   const [scenario, setScenario] = useState<PreviewDiagScenario>("update");
   const [diag, setDiag] = useState<DiagnosticReadModel | undefined>(diagnostics);
@@ -247,7 +249,8 @@ export function DiagnosticsPage({
   useEffect(() => setCaps(capabilities), [capabilities]);
   useEffect(() => setEnv(environment), [environment]);
 
-  const previewInstallerState = previewInstaller(scenario);
+  const previewInstallerState = previewInstaller(scenario, t);
+  const currentPreviewScenario = PREVIEW_CYCLE.find((item) => item.id === scenario);
   const viewRuntime = preview ? previewRuntime(scenario) : runtime ?? env?.runtime;
   const viewEnv = preview ? previewEnvironment(scenario, previewInstallerState) : env;
   const viewDiag = preview ? previewDiagnostics(scenario) : diag;
@@ -258,8 +261,8 @@ export function DiagnosticsPage({
       ...(viewEnv === undefined ? {} : { environment: viewEnv }),
       ...(viewDiag === undefined ? {} : { diagnostics: viewDiag }),
       ...(viewCaps === undefined ? {} : { capabilities: viewCaps }),
-    }),
-    [viewRuntime, viewEnv, viewDiag, viewCaps],
+    }, (k, p) => t(k, p as any)),
+    [viewRuntime, viewEnv, viewDiag, viewCaps, t],
   );
 
   const refreshQueries = useCallback(async (): Promise<boolean> => {
@@ -280,13 +283,13 @@ export function DiagnosticsPage({
 
   const refresh = useCallback(async (mode: "recheck" | "reconnect" = "recheck") => {
     if (preview) {
-      show(mode === "reconnect" ? "已重新连接 Runtime（演示）" : "已重新检测 OMP（演示）", "check");
+      show(mode === "reconnect" ? t("diagnostics.reconnectedRuntimeDemo") : t("diagnostics.recheckedOmpDemo"), "check");
       return;
     }
     beginAction(
       mode === "reconnect"
-        ? { kind: "reconnect", label: "正在请求连接", step: 1, steps: 2 }
-        : { kind: "recheck", label: "正在重新检测", step: 1, steps: 1 },
+        ? { kind: "reconnect", label: t("diagnostics.requestingConnection"), step: 1, steps: 2 }
+        : { kind: "recheck", label: t("diagnostics.rechecking"), step: 1, steps: 1 },
     );
     try {
       let reconnected = false;
@@ -301,53 +304,62 @@ export function DiagnosticsPage({
         }
       }
       if (mode === "recheck") {
-        beginAction({ kind: "recheck", label: "正在刷新诊断", step: 1, steps: 1 });
+        beginAction({ kind: "recheck", label: t("diagnostics.refreshingDiagnostics"), step: 1, steps: 1 });
       }
       const queried = await refreshQueries();
       if (reconnected) {
-        show("Runtime 已重新连接", "check");
+        show(t("diagnostics.runtimeReconnected"), "check");
       } else if (queried) {
-        show("已重新检测 OMP", "check");
+        show(t("diagnostics.ompRechecked"), "check");
       } else {
-        show("重新检测失败", "alert-c");
+        show(t("diagnostics.recheckFailed"), "alert-c");
       }
     } catch {
-      show("重新检测失败", "alert-c");
+      show(t("diagnostics.recheckFailed"), "alert-c");
     } finally {
       setBusy(null);
     }
-  }, [beginAction, client, preview, show, runtime, env, refreshQueries]);
+  }, [beginAction, client, preview, show, runtime, env, refreshQueries, t]);
 
   const checkUpdate = useCallback(async (notify: boolean) => {
     if (preview) {
       if (notify) {
         show(
-          scenario === "update" ? `已检查更新（演示）· ${mock.availableVersion} 可用` : scenario === "ok" ? "已是本地最新制品（演示）" : "检查更新失败（演示）",
+          scenario === "update"
+            ? t("diagnostics.updateCheckedDemo", { version: mock.availableVersion })
+            : scenario === "ok"
+              ? t("diagnostics.latestArtifactDemo")
+              : t("diagnostics.checkUpdateFailedDemo"),
           scenario === "fail" ? "alert-c" : "check",
         );
       }
       return;
     }
-    if (notify) beginAction({ kind: "check-update", label: "正在对照本地制品", step: 1, steps: 1 });
+    if (notify) beginAction({ kind: "check-update", label: t("diagnostics.comparingLocalArtifact"), step: 1, steps: 1 });
     try {
       const next = await queryWithTimeout(() => client.query("environment.get", {}));
       setEnv(next);
       if (!notify) return;
       if (next.installer.status === "update-available") {
-        show(`发现本地更新${next.installer.availableVersion ? ` ${next.installer.availableVersion}` : ""}`, "update");
+        show(
+          next.installer.availableVersion
+            ? t("diagnostics.foundLocalUpdateWith", { version: next.installer.availableVersion })
+            : t("diagnostics.foundLocalUpdate"),
+          "update",
+        );
       } else if (next.installer.status === "not-installed") {
-        show(next.installer.availableVersion ? `未安装 · 发现本地制品 ${next.installer.availableVersion}` : "未发现可安装的本地制品", "package");
+        show(next.installer.availableVersion ? t("diagnostics.notInstalledWithArtifact", { version: next.installer.availableVersion }) : t("diagnostics.noInstallableArtifact"), "package");
       } else if (next.installer.status === "failed") {
-        show(next.installer.message ?? "安装状态失败", "alert-c");
+        show(next.installer.message ?? t("diagnostics.installStateFailed"), "alert-c");
       } else {
-        show("已是本地最新制品", "check");
+        show(t("diagnostics.latestArtifact"), "check");
       }
     } catch (error) {
-      if (notify) show(isUpdateCheckTimeout(error) ? "检查更新超时" : "检查更新失败", "alert-c");
+      if (notify) show(isUpdateCheckTimeout(error) ? t("diagnostics.updateCheckTimeout") : t("diagnostics.updateCheckFailed"), "alert-c");
     } finally {
       if (notify) setBusy(null);
     }
-  }, [beginAction, client, preview, scenario, mock.availableVersion, show]);
+  }, [beginAction, client, preview, scenario, mock.availableVersion, show, t]);
 
   const checkUpdateRef = useRef(checkUpdate);
   checkUpdateRef.current = checkUpdate;
@@ -373,13 +385,13 @@ export function DiagnosticsPage({
   const installRuntime = useCallback(async (kind: "install" | "update" | "reinstall") => {
     setConfirmReinstall(false);
     if (preview) {
-      const labels = { install: "已安装 Runtime（演示）", update: "已更新 Runtime（演示）", reinstall: "已重装 Runtime（演示）" };
+      const labels = { install: t("diagnostics.installedRuntimeDemo"), update: t("diagnostics.updatedRuntimeDemo"), reinstall: t("diagnostics.reinstalledRuntimeDemo") };
       show(labels[kind], "check");
       return;
     }
     beginAction({
       kind,
-      label: kind === "update" ? "正在更新 Runtime" : kind === "reinstall" ? "正在重装 Runtime" : "正在安装 Runtime",
+      label: kind === "update" ? t("diagnostics.updatingRuntime") : kind === "reinstall" ? t("diagnostics.reinstallingRuntime") : t("diagnostics.installingRuntime"),
       step: 1,
       steps: 2,
     });
@@ -388,7 +400,7 @@ export function DiagnosticsPage({
       const receipt = await waitForCommandReceipt(client, handle.requestId);
       beginAction({
         kind,
-        label: "正在刷新环境",
+        label: t("diagnostics.refreshingEnv"),
         step: 2,
         steps: 2,
       });
@@ -399,13 +411,13 @@ export function DiagnosticsPage({
       if (d.status === "fulfilled") setDiag(d.value);
       if (e.status === "fulfilled") setEnv(e.value);
       if (receipt.status === "completed") {
-        show(kind === "update" ? "托管 Runtime 已更新" : kind === "reinstall" ? "托管 Runtime 已重装" : "托管 Runtime 已安装", "check");
+        show(kind === "update" ? t("diagnostics.runtimeUpdated") : kind === "reinstall" ? t("diagnostics.runtimeReinstalled") : t("diagnostics.runtimeInstalled"), "check");
       } else {
-        const message = receipt.status === "failed" ? receipt.error.message : "安装未完成";
+        const message = receipt.status === "failed" ? receipt.error.message : t("diagnostics.installIncomplete");
         show(message, "alert-c");
       }
     } catch (error) {
-      show(error instanceof Error ? error.message : "安装失败", "alert-c");
+      show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c");
     } finally {
       setBusy(null);
     }
@@ -414,20 +426,20 @@ export function DiagnosticsPage({
   const restartRuntime = useCallback(async () => {
     setConfirmRestart(false);
     if (preview) {
-      show("已重启并重新连接 Runtime（演示）", "check");
+      show(t("diagnostics.restartedDemo"), "check");
       return;
     }
-    beginAction({ kind: "restart", label: "正在停止当前托管进程", step: 1, steps: 3 });
+    beginAction({ kind: "restart", label: t("diagnostics.stoppingManagedProcess"), step: 1, steps: 3 });
     try {
       const result = await ensureRuntimeConnection(client, { force: true }, (progress) => {
         beginAction({ kind: "restart", ...progress });
       });
-      beginAction({ kind: "restart", label: "正在刷新诊断", step: 3, steps: 3 });
+      beginAction({ kind: "restart", label: t("diagnostics.refreshingDiagnostics"), step: 3, steps: 3 });
       await refreshQueries();
-      if (result.ok) show("Runtime 已重启并重新连接", "check");
+      if (result.ok) show(t("diagnostics.runtimeRestarted"), "check");
       else show(result.message, "alert-c");
     } catch (error) {
-      show(error instanceof Error ? error.message : "重启 Runtime 失败", "alert-c");
+      show(error instanceof Error ? error.message : t("diagnostics.restartRuntimeFailed"), "alert-c");
     } finally {
       setBusy(null);
     }
@@ -435,40 +447,40 @@ export function DiagnosticsPage({
 
   const openLogDir = useCallback(async () => {
     if (preview) {
-      show("演示：打开日志目录不会触发外部操作", "folder");
+      show(t("diagnostics.openLogsDemoToast"), "folder");
       return;
     }
     const api = window.ompStudioChrome;
     if (api?.openLogDir === undefined) {
-      show("当前环境无法打开日志目录", "alert-c");
+      show(t("diagnostics.openLogsUnavailable"), "alert-c");
       return;
     }
     try {
       const result = await api.openLogDir();
-      if (result.ok) show("已打开日志目录", "folder");
+      if (result.ok) show(t("diagnostics.openedLogs"), "folder");
       else show(result.message, "alert-c");
     } catch (error) {
-      show(error instanceof Error ? error.message : "无法打开日志目录", "alert-c");
+      show(error instanceof Error ? error.message : t("diagnostics.openLogsFailed"), "alert-c");
     }
   }, [preview, show]);
 
   const exportLogs = useCallback(async () => {
     if (preview) {
-      show("演示：导出日志不会写文件", "export");
+      show(t("diagnostics.exportLogsDemoToast"), "export");
       return;
     }
     const api = window.ompStudioChrome;
     if (api?.exportLogs === undefined) {
-      show("当前环境无法导出日志", "alert-c");
+      show(t("diagnostics.exportLogsUnavailable"), "alert-c");
       return;
     }
     try {
       const result = await api.exportLogs();
-      if (result.ok) show("已导出 Host 日志", "export");
+      if (result.ok) show(t("diagnostics.exportedLogs"), "export");
       else if ("cancelled" in result && result.cancelled) return;
-      else show("message" in result ? result.message : "导出失败", "alert-c");
+      else show("message" in result ? result.message : t("diagnostics.exportLogsFailed"), "alert-c");
     } catch (error) {
-      show(error instanceof Error ? error.message : "导出失败", "alert-c");
+      show(error instanceof Error ? error.message : t("diagnostics.exportLogsFailed"), "alert-c");
     }
   }, [preview, show]);
 
@@ -488,44 +500,44 @@ export function DiagnosticsPage({
   }, [installRuntime]);
 
   const copyReport = useCallback(async () => {
-    const lines: string[] = ["# OMP Studio 诊断报告"];
+    const lines: string[] = [t("diagnostics.reportTitle")];
     if (preview) {
       lines.push(
-        `OMP 版本: ${mock.version}`,
-        `可用制品: ${mock.availableVersion}`,
-        `上游版本: ${mock.upstreamVersion} (${mock.upstreamCommit})`,
-        `平台: ${mock.platform} · ${mock.arch}`,
-        `演示场景: ${scenario}`,
+        `${t("diagnostics.reportOmpVersion")}: ${mock.version}`,
+        `${t("diagnostics.reportAvailableArtifact")}: ${mock.availableVersion}`,
+        `${t("diagnostics.reportUpstreamVersion")}: ${mock.upstreamVersion} (${mock.upstreamCommit})`,
+        `${t("diagnostics.reportPlatform")}: ${mock.platform} · ${mock.arch}`,
+        `${t("diagnostics.reportDemoScenario")}: ${scenario}`,
         "",
         `Capabilities: ${mock.capabilities.join(", ")}`,
         "",
-        "最近错误:",
+        `${t("diagnostics.reportRecentErrors")}:`,
         ...mock.errors.map((error) => `  ${error.time} [${error.src}] ${error.msg}`),
       );
     } else {
       const authority = viewDiag?.authority ?? viewEnv?.authority;
       const capList = viewCaps?.capabilities ?? [];
       lines.push(
-        `OMP 版本: ${viewRuntime?.runtimeVersion ?? "—"}`,
-        `上游版本: ${viewRuntime?.upstreamVersion ?? "—"}${viewRuntime?.upstreamCommit ? ` (${viewRuntime.upstreamCommit.slice(0, 7)})` : ""}`,
-        `运行时状态: ${viewRuntime ? formatRuntimeConnectionLine(viewRuntime) : "无法读取"}`,
-        `托管安装: ${viewEnv?.installer.status ?? "—"}${viewEnv?.installer.availableVersion ? ` · 可更新到 ${viewEnv.installer.availableVersion}` : ""}`,
-        `后端: ${viewRuntime?.backend ?? "—"}`,
-        `平台: ${viewEnv ? `${viewEnv.platform} · ${viewEnv.arch}` : "—"}`,
-        `授权: ${authority ? `${authority.authorityId} · epoch ${authority.authorityEpoch}` : "—"}`,
-        `报告生成时间: ${viewDiag?.generatedAt ? fmtDateTime(viewDiag.generatedAt) : "—"}`,
+        `${t("diagnostics.reportOmpVersion")}: ${viewRuntime?.runtimeVersion ?? "—"}`,
+        `${t("diagnostics.reportUpstreamVersion")}: ${viewRuntime?.upstreamVersion ?? "—"}${viewRuntime?.upstreamCommit ? ` (${viewRuntime.upstreamCommit.slice(0, 7)})` : ""}`,
+        `${t("diagnostics.reportRuntimeStatus")}: ${viewRuntime ? formatRuntimeConnectionLine(viewRuntime, (k) => t(k)) : t("diagnostics.cannotRead")}`,
+        `${t("diagnostics.reportManagedInstall")}: ${viewEnv?.installer.status ?? "—"}${viewEnv?.installer.availableVersion ? ` · ${t("diagnostics.updatableTo", { version: viewEnv.installer.availableVersion })}` : ""}`,
+        `${t("diagnostics.reportBackend")}: ${viewRuntime?.backend ?? "—"}`,
+        `${t("diagnostics.reportPlatform")}: ${viewEnv ? `${viewEnv.platform} · ${viewEnv.arch}` : "—"}`,
+        `${t("diagnostics.reportAuthority")}: ${authority ? `${authority.authorityId} · epoch ${authority.authorityEpoch}` : "—"}`,
+        `${t("diagnostics.reportGeneratedAt")}: ${viewDiag?.generatedAt ? fmtDateTime(viewDiag.generatedAt) : "—"}`,
         "",
         `Capabilities (${capList.length}): ${capList.map((capability) => `${capability.id}@${capability.grade}`).join(", ") || "—"}`,
         "",
-        `诊断条目 (${viewDiag?.entries.length ?? 0}):`,
+        `${t("diagnostics.reportDiagEntries")} (${viewDiag?.entries.length ?? 0}):`,
         ...(viewDiag?.entries ?? []).map((entry) => `  ${fmtTime(entry.occurredAt)} [${entry.level} · ${entry.scope}] ${formatDiagnosticEntryMessage(entry)}`),
       );
     }
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
-      show("诊断报告已复制到剪贴板", "copy");
+      show(t("diagnostics.diagReportCopied"), "copy");
     } catch {
-      show("复制失败：剪贴板不可用", "alert-c");
+      show(t("diagnostics.diagReportCopyFailed"), "alert-c");
     }
   }, [preview, mock, scenario, viewRuntime, viewEnv, viewDiag, viewCaps, show]);
 
@@ -539,9 +551,9 @@ export function DiagnosticsPage({
     <div className="page-wide diag-page">
       <div className="diag-head">
         <div>
-          <h1>诊断中心</h1>
-          <p className="muted small">检测运行状态、核对版本，并从本地签名制品安装、更新或重装 Runtime。断开时可重新连接；已连接时可重启托管进程，完成后会自动重新连接。</p>
-          {preview ? <p className="tiny muted">演示数据 · 预览开时覆盖真实读模型</p> : null}
+          <h1>{t("diagnostics.title")}</h1>
+          <p className="muted small">{t("diagnostics.desc")}</p>
+          {preview ? <p className="tiny muted">{t("diagnostics.previewNote")}</p> : null}
         </div>
         <div className="diag-head-actions">
           {preview ? (
@@ -553,11 +565,11 @@ export function DiagnosticsPage({
                 setScenario(PREVIEW_CYCLE[(index + 1) % PREVIEW_CYCLE.length]!.id);
               }}
             >
-              {PREVIEW_CYCLE.find((item) => item.id === scenario)?.label}
+              {currentPreviewScenario ? t(currentPreviewScenario.labelKey) : ""}
             </button>
           ) : null}
           <button type="button" className="btn outline" disabled={busy !== null} onClick={() => void checkUpdate(true)}>
-            <Icon name="update" extra="sm" />检查更新
+            <Icon name="update" extra="sm" />{t("diagnostics.checkUpdate")}
           </button>
         </div>
       </div>
@@ -571,11 +583,11 @@ export function DiagnosticsPage({
         <div className="es-actions">
           <button type="button" className="btn primary" disabled={busy !== null} onClick={runPrimary}>
             <Icon name={primaryIcon(view.hero.primary)} extra="sm" />
-            {primaryLabel(view.hero.primary, busy)}
+            {primaryLabel(view.hero.primary, busy, t)}
           </button>
           {view.hero.kind === "down" || view.hero.kind === "failed" ? (
             <button type="button" className="btn outline" disabled={busy !== null || !canReinstall} onClick={() => setConfirmReinstall(true)}>
-              <Icon name="refresh" extra="sm" />重装
+              <Icon name="refresh" extra="sm" />{t("diagnostics.reinstallRuntime")}
             </button>
           ) : null}
         </div>
@@ -586,34 +598,34 @@ export function DiagnosticsPage({
 
       <div className="diag-ver-grid">
         <div className="diag-ver">
-          <div className="dv-k">托管 Runtime</div>
-          <div className="dv-v">{installer?.version ?? "未安装"}</div>
+          <div className="dv-k">{t("diagnostics.managedRuntimeTitle")}</div>
+          <div className="dv-v">{installer?.version ?? t("common.notInstalled")}</div>
           <div className="dv-s">
             {installer?.status === "update-available" && installer.availableVersion
-              ? `可更新到 ${installer.availableVersion}`
+              ? t("diagnostics.updatableTo", { version: installer.availableVersion })
               : installer?.status === "not-installed" && installer.availableVersion
-                ? `本地制品 ${installer.availableVersion}`
+                ? t("diagnostics.localArtifact", { version: installer.availableVersion })
                 : installer?.status === "failed"
-                  ? installer.message ?? "安装失败"
+                  ? installer.message ?? t("diagnostics.installFailed")
                   : installer?.status === "installed"
-                    ? "已是当前安装"
-                    : "尚无托管安装"}
+                    ? t("diagnostics.isCurrentInstall")
+                    : t("diagnostics.noManagedInstall")}
           </div>
         </div>
         <div className="diag-ver">
-          <div className="dv-k">运行中 Runtime</div>
+          <div className="dv-k">{t("diagnostics.runningRuntimeTitle")}</div>
           <div className="dv-v">{viewRuntime?.runtimeVersion ?? "—"}</div>
-          <div className="dv-s">{viewRuntime ? formatRuntimeConnectionLine(viewRuntime) : "无法读取连接"}</div>
+          <div className="dv-s">{viewRuntime ? formatRuntimeConnectionLine(viewRuntime, (k) => t(k)) : t("diagnostics.cannotReadConnection")}</div>
         </div>
         <div className="diag-ver">
-          <div className="dv-k">上游 OMP</div>
+          <div className="dv-k">{t("diagnostics.upstreamOmpTitle")}</div>
           <div className="dv-v">{viewRuntime?.upstreamVersion ?? "—"}</div>
-          <div className="dv-s">{viewRuntime?.upstreamCommit ? viewRuntime.upstreamCommit.slice(0, 7) : "无 commit"}</div>
+          <div className="dv-s">{viewRuntime?.upstreamCommit ? viewRuntime.upstreamCommit.slice(0, 7) : t("diagnostics.noCommit")}</div>
         </div>
       </div>
 
       {viewRuntime?.status === "disconnected" || viewRuntime?.status === "unavailable" ? (
-        <div className="diag-kv" aria-label="Runtime 断开详情">
+        <div className="diag-kv" aria-label={t("diagnostics.disconnectDetailsAria")}>
           {formatRuntimeConnectionFacts(viewRuntime).map((fact) => (
             <div className="dk" key={fact.label}>
               <div className="k">{fact.label}</div>
@@ -624,7 +636,7 @@ export function DiagnosticsPage({
       ) : null}
 
       <div className="diag-section">
-        <h3>环境检测</h3>
+        <h3>{t("diagnostics.envCheckTitle")}</h3>
         <div className="card" id="diagChecks">
           {view.checks.map((check) => (
             <div className="check-row" key={check.id}>
@@ -636,7 +648,7 @@ export function DiagnosticsPage({
               <span className="ck-actions">
                 {check.action ? (
                   <button type="button" className="btn small outline" disabled={busy !== null && check.action !== "problems"} onClick={() => runCheckAction(check.action!)}>
-                    {check.action === "install" ? "安装" : check.action === "update" ? "更新" : "查看"}
+                    {check.action === "install" ? t("common.install") : check.action === "update" ? t("common.update") : t("common.view")}
                   </button>
                 ) : null}
               </span>
@@ -646,71 +658,71 @@ export function DiagnosticsPage({
       </div>
 
       <div className="diag-section">
-        <h3>维护</h3>
+        <h3>{t("diagnostics.maintenanceTitle")}</h3>
         <div className="set-section">
           <div className="set-row">
             <div>
-              <div className="sr-label">检查更新</div>
-              <div className="sr-desc">对照本地签名制品与已装版本，不下载远程更新</div>
+              <div className="sr-label">{t("diagnostics.checkUpdateLabel")}</div>
+              <div className="sr-desc">{t("diagnostics.checkUpdateDesc")}</div>
             </div>
             <div className="sr-control">
               <button type="button" className="btn outline" disabled={busy !== null} onClick={() => void checkUpdate(true)}>
-                <Icon name="update" extra="sm" />检查更新
+                <Icon name="update" extra="sm" />{t("diagnostics.checkUpdateLabel")}
               </button>
             </div>
           </div>
           <div className="set-row">
             <div>
-              <div className="sr-label">重装 Runtime</div>
-              <div className="sr-desc">用本地签名制品覆盖当前安装并重新激活</div>
+              <div className="sr-label">{t("diagnostics.reinstallRuntimeLabel")}</div>
+              <div className="sr-desc">{t("diagnostics.reinstallRuntimeDesc")}</div>
             </div>
             <div className="sr-control">
               <button type="button" className="btn outline" disabled={busy !== null || !canReinstall} onClick={() => setConfirmReinstall(true)}>
-                <Icon name="refresh" extra="sm" />重装
+                <Icon name="refresh" extra="sm" />{t("common.reinstall")}
               </button>
             </div>
           </div>
           <div className="set-row">
             <div>
-              <div className="sr-label">复制诊断报告</div>
-              <div className="sr-desc">复制脱敏后的版本、连接与问题摘要</div>
+              <div className="sr-label">{t("diagnostics.copyReportLabel")}</div>
+              <div className="sr-desc">{t("diagnostics.copyReportDesc")}</div>
             </div>
             <div className="sr-control">
               <button type="button" className="btn outline" onClick={() => void copyReport()}>
-                <Icon name="copy" extra="sm" />复制
+                <Icon name="copy" extra="sm" />{t("common.copy")}
               </button>
             </div>
           </div>
           <div className="set-row">
             <div>
-              <div className="sr-label">重启 Runtime</div>
-              <div className="sr-desc">停止当前托管进程并重新启动，完成后会自动重新连接。进行中的会话可能中断。</div>
+              <div className="sr-label">{t("diagnostics.restartRuntimeLabel")}</div>
+              <div className="sr-desc">{t("diagnostics.restartRuntimeDesc")}</div>
             </div>
             <div className="sr-control">
               <button type="button" className="btn outline" disabled={busy !== null || !canRestart} onClick={() => setConfirmRestart(true)}>
-                <Icon name="refresh" extra="sm" />重启
+                <Icon name="refresh" extra="sm" />{t("common.restart")}
               </button>
             </div>
           </div>
           <div className="set-row">
             <div>
-              <div className="sr-label">导出日志</div>
-              <div className="sr-desc">另存近期 Host 日志。路径留在系统对话框，不会进入界面。</div>
+              <div className="sr-label">{t("diagnostics.exportLogsLabel")}</div>
+              <div className="sr-desc">{t("diagnostics.exportLogsDesc")}</div>
             </div>
             <div className="sr-control">
               <button type="button" className="btn outline" onClick={() => void exportLogs()}>
-                <Icon name="export" extra="sm" />导出
+                <Icon name="export" extra="sm" />{t("common.export")}
               </button>
             </div>
           </div>
           <div className="set-row">
             <div>
-              <div className="sr-label">打开日志目录</div>
-              <div className="sr-desc">在资源管理器中打开 Host 日志目录。</div>
+              <div className="sr-label">{t("diagnostics.openLogsLabel")}</div>
+              <div className="sr-desc">{t("diagnostics.openLogsDesc")}</div>
             </div>
             <div className="sr-control">
               <button type="button" className="btn outline" onClick={() => void openLogDir()}>
-                <Icon name="folder" extra="sm" />打开
+                <Icon name="folder" extra="sm" />{t("common.open")}
               </button>
             </div>
           </div>
@@ -720,12 +732,12 @@ export function DiagnosticsPage({
       {confirmRestart ? (
         <div className="diag-confirm" role="dialog" aria-labelledby="diagRestartTitle" aria-modal="true">
           <div>
-            <div id="diagRestartTitle" className="sr-label">重启 Runtime？</div>
-            <p className="sr-desc">会停止当前托管进程并重新启动，完成后会自动重新连接。进行中的会话可能中断。</p>
+            <div id="diagRestartTitle" className="sr-label">{t("diagnostics.restartConfirmTitle")}</div>
+            <p className="sr-desc">{t("diagnostics.restartConfirmDesc")}</p>
           </div>
           <div className="diag-confirm-acts">
-            <button type="button" className="btn outline" onClick={() => setConfirmRestart(false)}>取消</button>
-            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void restartRuntime()}>确认重启</button>
+            <button type="button" className="btn outline" onClick={() => setConfirmRestart(false)}>{t("common.cancel")}</button>
+            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void restartRuntime()}>{t("diagnostics.confirmRestart")}</button>
           </div>
         </div>
       ) : null}
@@ -733,29 +745,29 @@ export function DiagnosticsPage({
       {confirmReinstall ? (
         <div className="diag-confirm" role="dialog" aria-labelledby="diagReinstallTitle" aria-modal="true">
           <div>
-            <div id="diagReinstallTitle" className="sr-label">重装托管 Runtime？</div>
-            <p className="sr-desc">会用本地签名制品覆盖当前安装并重新激活。进行中的会话可能中断。</p>
+            <div id="diagReinstallTitle" className="sr-label">{t("diagnostics.reinstallConfirmTitle")}</div>
+            <p className="sr-desc">{t("diagnostics.reinstallConfirmDesc")}</p>
           </div>
           <div className="diag-confirm-acts">
-            <button type="button" className="btn outline" onClick={() => setConfirmReinstall(false)}>取消</button>
-            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void installRuntime("reinstall")}>确认重装</button>
+            <button type="button" className="btn outline" onClick={() => setConfirmReinstall(false)}>{t("common.cancel")}</button>
+            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void installRuntime("reinstall")}>{t("diagnostics.confirmReinstall")}</button>
           </div>
         </div>
       ) : null}
 
       <div className="diag-section" id="diagProblems">
-        <h3><Icon name="alert-c" extra="sm" />最近问题</h3>
+        <h3><Icon name="alert-c" extra="sm" />{t("diagnostics.recentIssuesTitle")}</h3>
         <div className="card" style={{ padding: 6 }}>
           {preview && scenario !== "ok" && scenario !== "fail" ? mock.errors.map((error) => (
             <div className="prob-row diag-err-row" key={`${error.time}-${error.src}`}>
-              <span className="prob-sev sev-red" role="img" aria-label="错误"><Icon name="alert-c" extra="sm" /></span>
+              <span className="prob-sev sev-red" role="img" aria-label={t("diagnostics.levelError")}><Icon name="alert-c" extra="sm" /></span>
               <span className="mono tiny muted">{error.time}</span>
               <span className="chip gray xs">{error.src}</span>
               <span className="prob-msg">{error.msg}</span>
             </div>
           )) : problems.length ? problems.map((entry) => (
             <div className="prob-row diag-err-row" key={entry.entryId}>
-              <span className={`prob-sev ${entry.level === "error" ? "sev-red" : ""}`} style={entry.level === "warning" ? { color: "var(--amber)" } : undefined} role="img" aria-label={entry.level === "error" ? "错误" : "警告"}>
+              <span className={`prob-sev ${entry.level === "error" ? "sev-red" : ""}`} style={entry.level === "warning" ? { color: "var(--amber)" } : undefined} role="img" aria-label={entry.level === "error" ? t("diagnostics.levelError") : t("diagnostics.levelWarning")}>
                 <Icon name={entry.level === "error" ? "alert-c" : "alert"} extra="sm" />
               </span>
               <span className="mono tiny muted">{fmtTime(entry.occurredAt)}</span>
@@ -763,18 +775,18 @@ export function DiagnosticsPage({
               <span className="prob-msg">{formatDiagnosticEntryMessage(entry)}</span>
             </div>
           )) : (
-            <div className="muted small" style={{ padding: "10px 8px" }}>无最近错误或警告</div>
+            <div className="muted small" style={{ padding: "10px 8px" }}>{t("diagnostics.noRecentErrorsOrWarnings")}</div>
           )}
         </div>
       </div>
 
       <details className="diag-advanced">
-        <summary><Icon name="chevron-r" extra="sm" /> 高级细节 · Capability 与原始条目</summary>
+        <summary><Icon name="chevron-r" extra="sm" /> {t("diagnostics.advancedDetailsSummary")}</summary>
         <div className="da-body">
           <div className="diag-caps" style={{ marginBottom: 12 }}>
             {capList.length ? capList.map((capability) => (
               <span key={capability.id} className={`chip ${GRADE_TONE[capability.grade] ?? "gray"}`} data-tip={`${capability.grade} · v${capability.version}`}>{capability.id}</span>
-            )) : <span className="muted small">无 capability 清单</span>}
+            )) : <span className="muted small">{t("diagnostics.noCapabilities")}</span>}
           </div>
           <div className="term" style={{ fontSize: "10.5px" }}>
             {preview ? mock.logs.map((line, index) => (
@@ -783,12 +795,12 @@ export function DiagnosticsPage({
               <div key={entry.entryId} className={entry.level === "error" ? "err" : entry.level === "warning" ? "warn" : "muted"}>
                 {`${fmtTime(entry.occurredAt)} [${entry.level} · ${entry.scope}] ${formatDiagnosticEntryMessage(entry)}`}
               </div>
-            )) : <div className="muted">无原始日志条目（read model 未提供）</div>)}
+            )) : <div className="muted">{t("diagnostics.noRawLogEntries")}</div>)}
           </div>
         </div>
       </details>
 
-      <p className="tiny muted" style={{ marginTop: 16 }}>上次检测 {formatCheckedAt(viewDiag?.generatedAt)}</p>
+      <p className="tiny muted" style={{ marginTop: 16 }}>{t("diagnostics.lastChecked", { time: formatCheckedAt(viewDiag?.generatedAt) })}</p>
       <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />
     </div>
   );

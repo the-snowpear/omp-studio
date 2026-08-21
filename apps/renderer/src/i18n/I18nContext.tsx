@@ -16,6 +16,9 @@ export function detectSystemLanguage(): Locale {
     if (lang.startsWith("zh")) {
       return "zh";
     }
+    if (lang.startsWith("en")) {
+      return "en";
+    }
   } catch {
     /* fallback to English if navigator is not accessible */
   }

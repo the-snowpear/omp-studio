@@ -61,7 +61,7 @@ export class StudioModelControlService {
 	/** Switch the live session model, optionally pinning a thinking level with it. */
 	async setModel(selector: string, thinking?: string): Promise<StudioModelState> {
 		const level = thinking === undefined ? undefined : this.#parseLevel(thinking);
-		const model = this.#resolve(selector);
+		const model = await this.#resolve(selector);
 		if (this.#shouldDefer()) {
 			this.#pending = level === undefined ? { model } : { model, thinking: level };
 			return this.#requireState();
@@ -153,11 +153,26 @@ export class StudioModelControlService {
 	}
 
 	/** Accept the canonical `provider/id` selector plus a bare model id, like `/model`. */
-	#resolve(selector: string): Model {
+	async #resolve(selector: string): Promise<Model> {
 		const wanted = selector.trim();
 		if (wanted.length === 0) throw new StudioModelControlError("INVALID_ARGUMENT", "Model selector is empty");
-		const available = this.session.getAvailableModels();
-		const match = available.find(model => `${model.provider}/${model.id}` === wanted || model.id === wanted);
+		let available = this.session.getAvailableModels();
+		let match = available.find(model => `${model.provider}/${model.id}` === wanted || model.id === wanted);
+		if (match === undefined && this.session.modelRegistry !== undefined) {
+			// models.yml is written by the desktop Host in another process, so the
+			// Runtime registry can still hold the pre-write snapshot. Reload local
+			// configuration without starting network discovery: the model was just
+			// persisted as a static `models:` entry (or is already in models.db for
+			// discovery-backed providers), and `offline` still refreshes both.
+			try {
+				await this.session.modelRegistry.refresh("offline");
+			} catch {
+				// A refresh can fail after the static reload already happened; the
+				// retry below still sees that partial progress.
+			}
+			available = this.session.getAvailableModels();
+			match = available.find(model => `${model.provider}/${model.id}` === wanted || model.id === wanted);
+		}
 		if (match === undefined) {
 			throw new StudioModelControlError("INVALID_ARGUMENT", `Model is not available: ${wanted}`);
 		}

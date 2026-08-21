@@ -87,6 +87,23 @@ describe("deriveDiagnosticsView", () => {
     expect(view.checks.find((check) => check.id === "runtime")?.detail).toContain("未选择工作区");
   });
 
+  it("offers a re-probe when the probe rejected the installed runtime", () => {
+    const connection = runtime("unavailable", {
+      classification: "rejected",
+      unavailableCode: "resolution-rejected",
+      unavailableReason: "runtime probe timed out",
+    });
+    const view = deriveDiagnosticsView({
+      runtime: connection,
+      environment: environment({ status: "installed", version: "v0.82.1", signature: "verified" }, connection),
+    });
+    expect(view.hero.title).toBe("Runtime 未被接受");
+    // `runtime.ensure` re-resolves, so a transient probe failure stays
+    // recoverable without restarting the app.
+    expect(view.hero.primary).toBe("reconnect");
+    expect(view.hero.showReinstall).toBe(true);
+  });
+
   it("names a launch failure with the Host reason", () => {
     const connection = runtime("unavailable", {
       unavailableCode: "launch-failed",

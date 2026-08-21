@@ -9,6 +9,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { Icon } from "./icons";
+import { useI18n } from "./i18n";
 
 export type TerminalPaneHandle = {
   create: () => void;
@@ -61,6 +62,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
   { visible },
   ref,
 ) {
+  const { t } = useI18n();
   const api = globalThis.ompStudioTerminal;
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -142,8 +144,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
     return (
       <div className="empty">
         <Icon name="terminal" extra="lg" />
-        <p>终端仅桌面端可用</p>
-        <p className="muted small">本机 Shell 由 Electron 主进程提供，浏览器预览无法启动 PTY。</p>
+        <p>{t("terminal.desktopOnly")}</p>
+        <p className="muted small">{t("terminal.desktopOnlyDetail")}</p>
       </div>
     );
   }
@@ -152,7 +154,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
 
   return (
     <div className="term-layout">
-      <div className="term-list" role="listbox" aria-label="终端列表">
+      <div className="term-list" role="listbox" aria-label={t("terminal.listAria")}>
         {sessions.map((session) => {
           const selected = session.id === active?.id;
           return (
@@ -169,17 +171,17 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
               </span>
               <span className="ti-main">
                 <span className="ti-name ellipsis">{session.name}</span>
-                <span className="ti-sub">{session.status === "ended" ? "已结束" : "运行中"}</span>
+                <span className="ti-sub">{session.status === "ended" ? t("terminal.statusEnded") : t("terminal.statusRunning")}</span>
               </span>
               <span className="ti-badge gray">
-                YOU<span className="sr-only"> 手动创建的终端</span>
+                YOU<span className="sr-only"> {t("terminal.userCreated")}</span>
               </span>
             </div>
           );
         })}
         <button className="term-new" type="button" disabled={creating} onClick={() => void createSession()}>
           <Icon name="plus" extra="sm" />
-          新建终端
+          {t("terminal.newTerminal")}
         </button>
       </div>
       <div className="term-view">
@@ -190,7 +192,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
               <span className="ellipsis">{active.cwd}</span>
               {active.status === "ended" ? (
                 <span className="chip gray xs" style={{ marginLeft: "auto" }}>
-                  已结束
+                  {t("terminal.statusEnded")}
                 </span>
               ) : (
                 <span className="chip green xs" style={{ marginLeft: "auto" }}>
@@ -214,8 +216,8 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
         ) : (
           <div className="empty">
             <Icon name="terminal" extra="lg" />
-            <p>{creating ? "正在启动终端…" : "还没有终端会话"}</p>
-            {error ? <p className="muted small">{error}</p> : <p className="muted small">点「新建终端」启动本机 Shell。</p>}
+            <p>{creating ? t("terminal.starting") : t("terminal.noSessions")}</p>
+            {error ? <p className="muted small">{error}</p> : <p className="muted small">{t("terminal.clickToStart")}</p>}
           </div>
         )}
       </div>

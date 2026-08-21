@@ -11,6 +11,7 @@ import { Icon } from "./icons";
 import { ToastHost } from "./ToastHost";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
 import { SlidingTabs } from "./SlidingTabs";
+import { useI18n, type TranslationParams } from "./i18n";
 import {
   createPreviewMcp,
   createPreviewSlashCommands,
@@ -39,22 +40,22 @@ export type CapTab = "skills" | "plugins" | "mcp" | "slash";
 
 type CapIntent = { tab?: CapTab; name?: string };
 
-const TABS: ReadonlyArray<readonly [CapTab, string, string]> = [
-  ["skills", "book", "Skills"],
-  ["plugins", "package", "Plugins"],
-  ["mcp", "plug", "MCP"],
-  ["slash", "slash", "Slash Commands"],
+/** Translation function signature shared by module-scope display builders. */
+type TFunc = (key: string, params?: TranslationParams) => string;
+
+const TABS: ReadonlyArray<readonly [CapTab, string]> = [
+  ["skills", "book"],
+  ["plugins", "package"],
+  ["mcp", "plug"],
+  ["slash", "slash"],
 ];
 
-const CONTRACT = {
-  create: "创建（暂未实现）",
-  view: "查看（暂未实现）",
-  remove: "删除（暂未实现）",
-  plugin: "插件（暂未实现）",
-  builtinDir: "内置技能无本地目录",
-  shadowed: "被更高优先级配置覆盖",
-  slashComposer: "请在 Composer 输入",
-} as const;
+const TAB_LABELS: Record<CapTab, string> = {
+  skills: "capabilities.skillsTab",
+  plugins: "capabilities.pluginsTab",
+  mcp: "capabilities.mcpTab",
+  slash: "capabilities.slashTab",
+};
 
 type McpLogView = {
   readonly name: string;
@@ -62,11 +63,11 @@ type McpLogView = {
   readonly emptyReason?: string;
 };
 
-function slashToPreview(command: StudioSlashCommand): PreviewSlash {
+function slashToPreview(t: TFunc, command: StudioSlashCommand): PreviewSlash {
   return {
     name: `/${command.name}`,
     desc: command.description,
-    src: "内置",
+    src: t("capabilities.scopeBuiltin"),
     args: command.hint ?? "",
     ok: command.availability === "available",
   };
@@ -106,13 +107,14 @@ function previewPlugins(): PluginPreview[] {
   return createPreviewDrawerItems().filter((item): item is PluginPreview => item.kind === "plugin");
 }
 
-function scopeOf(skill: SkillPreview): { cls: "global" | "builtin" | "project"; label: string } {
-  if (skill.scope === "global") return { cls: "global", label: "全局" };
-  if (skill.scope === "builtin") return { cls: "builtin", label: "内置" };
-  return { cls: "project", label: "项目" };
+function scopeOf(t: TFunc, skill: SkillPreview): { cls: "global" | "builtin" | "project"; label: string } {
+  if (skill.scope === "global") return { cls: "global", label: t("capabilities.scopeGlobal") };
+  if (skill.scope === "builtin") return { cls: "builtin", label: t("capabilities.scopeBuiltin") };
+  return { cls: "project", label: t("capabilities.scopeProject") };
 }
 
 function Switch({ on, label, onToggle, disabled }: { on: boolean; label: string; onToggle: () => void; disabled?: boolean }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
@@ -121,7 +123,7 @@ function Switch({ on, label, onToggle, disabled }: { on: boolean; label: string;
       aria-checked={on}
       aria-label={label}
       disabled={disabled}
-      data-tip={disabled ? "写入中" : undefined}
+      data-tip={disabled ? t("common.writing") : undefined}
       onClick={onToggle}
     />
   );
@@ -136,6 +138,7 @@ function Disabled({ className, tip, children }: { className: string; tip: string
 }
 
 function Stepper({ loaded, session, configuredOnly }: { loaded: boolean; session: boolean; configuredOnly?: boolean }) {
+  const { t } = useI18n();
   const seg = (on: boolean, label: string) => (
     <span className={`cap-step ${on ? "on" : "off"}`}>
       <Icon name={on ? "check" : "x"} extra="xs" />
@@ -143,15 +146,16 @@ function Stepper({ loaded, session, configuredOnly }: { loaded: boolean; session
     </span>
   );
   return (
-    <span className="cap-stepper" role="group" aria-label="能力状态：已配置 / 已加载 / 当前会话可用">
-      {seg(true, "已配置")}
-      {seg(configuredOnly ? false : loaded, configuredOnly ? "已加载未知" : "已加载")}
-      {seg(configuredOnly ? false : session, configuredOnly ? "会话未知" : "当前会话可用")}
+    <span className="cap-stepper" role="group" aria-label={t("capabilities.stepperAria")}>
+      {seg(true, t("capabilities.configured"))}
+      {seg(configuredOnly ? false : loaded, configuredOnly ? t("capabilities.loadedUnknown") : t("capabilities.loaded"))}
+      {seg(configuredOnly ? false : session, configuredOnly ? t("capabilities.sessionUnknown") : t("capabilities.sessionAvailable"))}
     </span>
   );
 }
 
 function Provide({ icon, label, count, items }: { icon: string; label: string; count: number; items: string[] }) {
+  const { t } = useI18n();
   return (
     <div className="cap-provide">
       <div className="cap-provide-head">
@@ -161,7 +165,7 @@ function Provide({ icon, label, count, items }: { icon: string; label: string; c
       </div>
       {items.length
         ? <div className="cap-provide-items">{items.map((item) => <span key={item} className="cap-provide-item">{item}</span>)}</div>
-        : <div className="cap-provide-empty">无</div>}
+        : <div className="cap-provide-empty">{t("common.none")}</div>}
     </div>
   );
 }
@@ -173,12 +177,13 @@ function Summary({
   total: number;
   stats: Array<{ cls: string; n: number; label: string }>;
 }) {
+  const { t } = useI18n();
   return (
     <div className="cap-summary">
       <span className="cap-sum-stat">
         <Icon name="layers" extra="xs" />
         <strong>{total}</strong>
-        <span className="muted">项</span>
+        <span className="muted">{t("capabilities.items")}</span>
       </span>
       {stats.filter((stat) => stat.n > 0).map((stat) => (
         <span key={stat.label} className="cap-sum-stat">
@@ -191,6 +196,15 @@ function Summary({
   );
 }
 
+
+function formatMcpSourceLabel(label: string | undefined, t: (k: string) => string): string {
+  if (!label) return "";
+  if (label === "用户" || label === "User") return t("subagents.scopeUser");
+  if (label === "项目" || label === "Project") return t("subagents.scopeProject");
+  if (label === "OMP" || label === "内置") return t("skills.scopeBuiltin");
+  return label;
+}
+
 export function CapabilitiesPage({
   client,
   onRunSlash,
@@ -198,6 +212,7 @@ export function CapabilitiesPage({
   client: StudioClient;
   onRunSlash?: (command: StudioSlashCommand, args: string) => Promise<boolean>;
 }) {
+  const { t } = useI18n();
   const { preview } = usePreviewMode();
   const [tab, setTab] = useState<CapTab>("skills");
   const [skills, setSkills] = useState<SkillPreview[]>(() => preview ? previewSkills() : []);
@@ -216,9 +231,20 @@ export function CapabilitiesPage({
   const tabIndex = TABS.findIndex(([id]) => id === tab);
   const { incoming, outgoing, dir, live, stageRef } = useOverlappingTabs(tab, tabIndex);
 
+  /** Tooltips / hints for placeholder controls; resolved at render time. */
+  const CONTRACT = {
+    create: t("capabilities.createNotImplemented"),
+    view: t("capabilities.viewNotImplemented"),
+    remove: t("capabilities.removeNotImplemented"),
+    plugin: t("capabilities.pluginNotImplemented"),
+    builtinDir: t("capabilities.builtinNoDir"),
+    shadowed: t("capabilities.shadowedTip"),
+    slashComposer: t("composer.paramPlaceholder"),
+  };
+
   const slash = useMemo(
-    () => (preview ? createPreviewSlashCommands() : visibleSlashCatalog().map(slashToPreview)),
-    [preview],
+    () => (preview ? createPreviewSlashCommands() : visibleSlashCatalog().map((command) => slashToPreview(t, command))),
+    [preview, t],
   );
 
   const refresh = useCallback(async () => {
@@ -308,35 +334,35 @@ export function CapabilitiesPage({
 
   const revealSkill = async (skill: SkillPreview) => {
     if (preview) {
-      toast("演示：已打开目录");
+      toast(t("capabilities.demoOpenedDir"));
       return;
     }
     try {
       const handle = await client.command("skills.reveal", { name: skill.name });
       const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-      toast(receipt.message ?? `已打开 ${skill.name} 所在目录`);
+      toast(receipt.message ?? t("capabilities.openedSkillDir", { name: skill.name }));
     } catch (error) {
-      toast(hostErrorMessage(error, "无法打开目录"));
+      toast(hostErrorMessage(error, t("capabilities.openDirFailed")));
     }
   };
 
   const revealSkillRoot = async () => {
     if (preview) {
-      toast("演示：已打开目录");
+      toast(t("capabilities.demoOpenedDir"));
       return;
     }
     try {
       const handle = await client.command("skills.revealRoot", { scope: "user" });
       const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-      toast(receipt.message ?? "已打开用户技能目录");
+      toast(receipt.message ?? t("capabilities.openedUserSkillDir"));
     } catch (error) {
-      toast(hostErrorMessage(error, "无法打开目录"));
+      toast(hostErrorMessage(error, t("capabilities.openDirFailed")));
     }
   };
 
   const refreshMcp = async (item: McpServerRecord | PreviewMcp) => {
     if (preview) {
-      toast("演示：已刷新配置");
+      toast(t("capabilities.demoRefreshed"));
       return;
     }
     if ("status" in item && item.status === "shadowed") return;
@@ -344,10 +370,10 @@ export function CapabilitiesPage({
       try {
         const handle = await client.command("mcp.refresh", { name: item.name });
         const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-        toast(receipt.message ?? "已刷新配置");
+        toast(receipt.message ?? t("capabilities.refreshedConfig"));
         await refresh();
       } catch (error) {
-        toast(hostErrorMessage(error, "刷新失败"));
+        toast(hostErrorMessage(error, t("capabilities.refreshFailed")));
       }
     });
   };
@@ -355,7 +381,7 @@ export function CapabilitiesPage({
   const testMcp = async (item: McpServerRecord | PreviewMcp) => {
     if (preview) {
       const tools = "tools" in item && typeof item.tools === "number" ? item.tools : 0;
-      toast(`演示：已连接（${tools} 个工具）`);
+      toast(t("capabilities.demoConnected", { count: tools }));
       return;
     }
     if ("status" in item && item.status === "shadowed") return;
@@ -366,17 +392,17 @@ export function CapabilitiesPage({
           ...("scope" in item ? { scope: item.scope } : {}),
         });
         const result = await waitReceipt<McpTestResult>(client, handle.requestId);
-        toast(result.ok ? (result.detail || `已连接（${result.toolCount ?? 0} 个工具）`) : result.detail);
+        toast(result.ok ? (result.detail || t("capabilities.connectedTools", { count: result.toolCount ?? 0 })) : result.detail);
         await refresh();
       } catch (error) {
-        toast(hostErrorMessage(error, "测试连接失败"));
+        toast(hostErrorMessage(error, t("capabilities.testConnectionFailed")));
       }
     }, true);
   };
 
   const openMcpLogs = async (item: McpServerRecord | PreviewMcp) => {
     if (preview) {
-      setMcpLogs({ name: item.name, lines: [], emptyReason: "尚无日志，请先测试连接" });
+      setMcpLogs({ name: item.name, lines: [], emptyReason: t("capabilities.noLogsYet") });
       return;
     }
     try {
@@ -387,13 +413,13 @@ export function CapabilitiesPage({
         ...(result.emptyReason === undefined ? {} : { emptyReason: result.emptyReason }),
       });
     } catch (error) {
-      toast(hostErrorMessage(error, "无法读取日志"));
+      toast(hostErrorMessage(error, t("capabilities.readLogsFailed")));
     }
   };
 
   const runSlash = async (row: PreviewSlash) => {
     if (preview) {
-      toast(`演示：已执行 ${row.name}`);
+      toast(t("capabilities.demoRanSlash", { name: row.name }));
       return;
     }
     const command = lookupSlashCommand(slashBareName(row.name));
@@ -402,7 +428,7 @@ export function CapabilitiesPage({
     try {
       await onRunSlash(command, "");
     } catch (error) {
-      toast(hostErrorMessage(error, `执行 ${row.name} 失败`));
+      toast(hostErrorMessage(error, t("capabilities.runSlashFailed", { name: row.name })));
     }
   };
 
@@ -421,10 +447,10 @@ export function CapabilitiesPage({
     try {
       const handle = await client.command("skills.setEnabled", { name: skill.name, enabled: next });
       const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-      toast(receipt.message ?? (next ? "已启用" : "已禁用"));
+      toast(receipt.message ?? (next ? t("common.enabled") : t("common.disabled")));
       await refresh();
     } catch (error) {
-      toast(error instanceof Error ? error.message : "技能开关失败");
+      toast(error instanceof Error ? error.message : t("capabilities.skillToggleFailed"));
     } finally {
       setSkillBusy((current) => {
         const nextSet = new Set(current);
@@ -450,10 +476,10 @@ export function CapabilitiesPage({
     try {
       const handle = await client.command("plugins.setEnabled", { name: plugin.name, enabled: next });
       const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-      toast(receipt.message ?? (next ? "已启用" : "已禁用"));
+      toast(receipt.message ?? (next ? t("common.enabled") : t("common.disabled")));
       await refresh();
     } catch (error) {
-      toast(error instanceof Error ? error.message : "插件开关失败");
+      toast(error instanceof Error ? error.message : t("capabilities.pluginToggleFailed"));
     } finally {
       setPluginBusy((current) => {
         const nextSet = new Set(current);
@@ -474,10 +500,10 @@ export function CapabilitiesPage({
         scope: server.scope,
       });
       const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-      toast(receipt.message ?? (next ? "已启用" : "已禁用"));
+      toast(receipt.message ?? (next ? t("common.enabled") : t("common.disabled")));
       await refresh();
     } catch (error) {
-      toast(error instanceof Error ? error.message : "MCP 开关失败");
+      toast(error instanceof Error ? error.message : t("capabilities.mcpToggleFailed"));
     } finally {
       setMcpBusy((current) => {
         const nextSet = new Set(current);
@@ -496,13 +522,13 @@ export function CapabilitiesPage({
         <Summary
           total={skills.length}
           stats={[
-            { cls: "green", n: ok, label: preview ? "可用" : "已配置" },
-            { cls: "gray", n: disabled, label: "已禁用" },
-            { cls: "red", n: fail, label: "失败" },
+            { cls: "green", n: ok, label: preview ? t("capabilities.available") : t("capabilities.configured") },
+            { cls: "gray", n: disabled, label: t("common.disabled") },
+            { cls: "red", n: fail, label: t("common.failed") },
           ]}
         />
         {withUniqueDrawerKeys(skills).map(({ item: skill, key }) => {
-          const scope = scopeOf(skill);
+          const scope = scopeOf(t, skill);
           const tone = skill.error ? "amber" : preview ? (skill.session ? "purple" : "gray") : "purple";
           const sourcePath = skill.path && skill.path !== skill.src ? skill.path : "";
           return (
@@ -527,30 +553,30 @@ export function CapabilitiesPage({
                   {preview ? (
                     <Switch
                       on={skill.enabled}
-                      label={`启用 Skill ${skill.name}`}
+                      label={t("capabilities.toggleSkillAria", { name: skill.name })}
                       onToggle={() => void toggleSkill(skill)}
                     />
                   ) : skill.scope === "builtin" ? (
-                    <Disabled className="switch" tip="内置">
-                      <span className="sr-only">启用 Skill {skill.name}</span>
+                    <Disabled className="switch" tip={t("capabilities.scopeBuiltin")}>
+                      <span className="sr-only">{t("capabilities.toggleSkillAria", { name: skill.name })}</span>
                     </Disabled>
                   ) : (
                     <Switch
                       on={skill.enabled}
-                      label={`启用 Skill ${skill.name}`}
+                      label={t("capabilities.toggleSkillAria", { name: skill.name })}
                       disabled={skillBusy.has(skill.name)}
                       onToggle={() => void toggleSkill(skill)}
                     />
                   )}
-                  <Disabled className="btn small outline" tip={CONTRACT.view}>查看</Disabled>
+                  <Disabled className="btn small outline" tip={CONTRACT.view}>{t("capabilities.viewDetails")}</Disabled>
                   {skill.scope === "builtin" ? (
                     <Disabled className="icon-btn small" tip={CONTRACT.builtinDir}><Icon name="folder-open" extra="sm" /></Disabled>
                   ) : (
                     <button
                       type="button"
                       className="icon-btn small"
-                      data-tip="打开来源目录"
-                      aria-label={`打开来源目录：${skill.name}`}
+                      data-tip={t("capabilities.openSourceDir")}
+                      aria-label={t("capabilities.openSourceDirAria", { name: skill.name })}
                       onClick={() => void revealSkill(skill)}
                     >
                       <Icon name="folder-open" extra="sm" />
@@ -585,19 +611,19 @@ export function CapabilitiesPage({
         <Summary
           total={plugins.length}
           stats={[
-            { cls: "green", n: ok, label: "已启用" },
-            { cls: "gray", n: off, label: "已禁用" },
-            { cls: "red", n: fail, label: "失败" },
+            { cls: "green", n: ok, label: t("capabilities.statusEnabled") },
+            { cls: "gray", n: off, label: t("capabilities.statusDisabled") },
+            { cls: "red", n: fail, label: t("capabilities.statusFailed") },
           ]}
         />
         {withUniqueDrawerKeys(plugins).map(({ item: plugin, key }) => {
           const err = Boolean(plugin.err);
           const enabled = plugin.enabled ?? plugin.status === "loaded";
           const chip = err
-            ? { text: "加载失败", cls: "red" }
+            ? { text: t("capabilities.statusLoadFailed"), cls: "red" }
             : enabled
-              ? { text: "已加载", cls: "green" }
-              : { text: "已禁用", cls: "gray" };
+              ? { text: t("capabilities.statusLoaded"), cls: "green" }
+              : { text: t("capabilities.statusDisabled"), cls: "gray" };
           return (
             <div
               key={key}
@@ -618,23 +644,23 @@ export function CapabilitiesPage({
                 <div className="cap-item-actions">
                   <Switch
                     on={enabled}
-                    label={`启用插件 ${plugin.name}`}
+                    label={t("capabilities.togglePluginAria", { name: plugin.name })}
                     disabled={pluginBusy.has(plugin.name)}
                     onToggle={() => void togglePlugin(plugin)}
                   />
-                  <Disabled className="btn small outline" tip={CONTRACT.plugin}>{err ? "查看错误" : "详情"}</Disabled>
+                  <Disabled className="btn small outline" tip={CONTRACT.plugin}>{err ? t("capabilities.viewError") : t("capabilities.details")}</Disabled>
                   <Disabled className="icon-btn small" tip={CONTRACT.plugin}><Icon name="more" extra="sm" /></Disabled>
                 </div>
               </div>
               <div className="cap-item-provides">
-                <Provide icon="terminal" label="工具" count={plugin.tools} items={plugin.toolItems ?? []} />
-                <Provide icon="slash" label="指令" count={plugin.commands} items={plugin.commandItems ?? []} />
+                <Provide icon="terminal" label={t("capabilities.toolsProvided")} count={plugin.tools} items={plugin.toolItems ?? []} />
+                <Provide icon="slash" label={t("capabilities.commandsProvided")} count={plugin.commands} items={plugin.commandItems ?? []} />
                 <Provide icon="zap" label="Hook" count={plugin.hooks} items={plugin.hookItems ?? []} />
                 <Provide
                   icon="monitor"
-                  label="UI 能力"
+                  label={t("capabilities.uiProvided")}
                   count={plugin.uiItems?.length ?? (plugin.ui ? 1 : 0)}
-                  items={plugin.uiItems ?? (plugin.ui ? ["提供 UI"] : [])}
+                  items={plugin.uiItems ?? (plugin.ui ? [t("capabilities.provideUi")] : [])}
                 />
               </div>
               {plugin.err ? (
@@ -660,9 +686,9 @@ export function CapabilitiesPage({
           <Summary
             total={mcp.length}
             stats={[
-              { cls: "green", n: ok, label: "已连接" },
-              { cls: "red", n: fail, label: "失败" },
-              { cls: "gray", n: off, label: "未连接" },
+              { cls: "green", n: ok, label: t("capabilities.statusConnected") },
+              { cls: "red", n: fail, label: t("capabilities.statusFailed") },
+              { cls: "gray", n: off, label: t("capabilities.statusDisconnected") },
             ]}
           />
           {mcp.map((item) => {
@@ -687,24 +713,24 @@ export function CapabilitiesPage({
                     </div>
                   </div>
                   <div className="cap-item-actions">
-                    <button type="button" className="btn small outline" aria-label={`测试连接：${item.name}`} onClick={() => void testMcp(item)}>
-                      测试连接
+                    <button type="button" className="btn small outline" aria-label={t("capabilities.testMcpAria", { name: item.name })} onClick={() => void testMcp(item)}>
+                      {t("capabilities.testConnectionBtn")}
                     </button>
-                    <button type="button" className="btn small outline" aria-label={`日志：${item.name}`} onClick={() => void openMcpLogs(item)}>
-                      日志
+                    <button type="button" className="btn small outline" aria-label={t("capabilities.mcpLogsAria", { name: item.name })} onClick={() => void openMcpLogs(item)}>
+                      {t("capabilities.logsBtn")}
                     </button>
                     <button
                       type="button"
                       className="icon-btn small"
-                      data-tip="刷新"
-                      aria-label={`刷新：${item.name}`}
+                      data-tip={t("common.refresh")}
+                      aria-label={t("capabilities.refreshMcpAria", { name: item.name })}
                       onClick={() => void refreshMcp(item)}
                     >
                       <Icon name="refresh" extra="sm" />
                     </button>
                     <Switch
                       on={isOn}
-                      label={`启用 MCP 服务器 ${item.name}`}
+                      label={t("capabilities.toggleMcpAria", { name: item.name })}
                       onToggle={() => setMcp((current) => current.map((entry) => entry.name === item.name ? togglePreviewMcp(entry) : entry))}
                     />
                   </div>
@@ -714,7 +740,7 @@ export function CapabilitiesPage({
                     <span>Tools {item.tools}</span>
                     <span>Resources {item.resources}</span>
                     <span>Prompts {item.prompts}</span>
-                    <span className="mono">最近调用 {item.last}</span>
+                    <span className="mono">{t("capabilities.recentCall", { time: item.last })}</span>
                   </div>
                 </div>
               </div>
@@ -732,13 +758,13 @@ export function CapabilitiesPage({
         <Summary
           total={mcpServers.length}
           stats={[
-            { cls: "green", n: on, label: "已启用" },
-            { cls: "gray", n: off, label: "已禁用" },
-            { cls: "amber", n: shadowed, label: "被覆盖" },
+            { cls: "green", n: on, label: t("capabilities.statusEnabled") },
+            { cls: "gray", n: off, label: t("capabilities.statusDisabled") },
+            { cls: "amber", n: shadowed, label: t("capabilities.statusShadowed") },
           ]}
         />
         {mcpServers.length === 0 ? (
-          <p className="muted small">未发现 MCP 配置。OMP 会扫描本机 mcp.json，以及 Codex / Cursor / Claude / Gemini 等来源。</p>
+          <p className="muted small">{t("capabilities.noMcpConfigFound")}</p>
         ) : null}
         {mcpServers.map((item) => {
           const tone = item.status === "enabled" ? "green" : item.status === "shadowed" ? "amber" : "gray";
@@ -759,15 +785,15 @@ export function CapabilitiesPage({
                     <span className="cap-item-name">{item.name}</span>
                     <span className={`chip ${tone} xs`}>{chipLabel}</span>
                     <span className="chip outline xs">{item.transport}</span>
-                    <span className="chip outline xs">{item.sourceLabel}</span>
+                    <span className="chip outline xs">{formatMcpSourceLabel(item.sourceLabel, t)}</span>
                   </div>
                 </div>
                 <div className="cap-item-actions">
                   {item.status === "shadowed" ? (
                     <>
-                      <button type="button" className="btn small outline" disabled data-tip={CONTRACT.shadowed} aria-label={`测试连接：${item.name}`}>测试连接</button>
-                      <button type="button" className="btn small outline" aria-label={`日志：${item.name}`} onClick={() => void openMcpLogs(item)}>
-                        日志
+                      <button type="button" className="btn small outline" disabled data-tip={CONTRACT.shadowed} aria-label={t("capabilities.testMcpAria", { name: item.name })}>{t("capabilities.testConnectionBtn")}</button>
+                      <button type="button" className="btn small outline" aria-label={t("capabilities.mcpLogsAria", { name: item.name })} onClick={() => void openMcpLogs(item)}>
+                        {t("capabilities.logsBtn")}
                       </button>
                       <Disabled className="icon-btn small" tip={CONTRACT.shadowed}><Icon name="refresh" extra="sm" /></Disabled>
                     </>
@@ -776,20 +802,20 @@ export function CapabilitiesPage({
                       <button
                         type="button"
                         className="btn small outline"
-                        aria-label={`测试连接：${item.name}`}
+                        aria-label={t("capabilities.testMcpAria", { name: item.name })}
                         disabled={mcpBusy.has(item.name)}
                         onClick={() => void testMcp(item)}
                       >
-                        测试连接
+                        {t("capabilities.testConnectionBtn")}
                       </button>
-                      <button type="button" className="btn small outline" aria-label={`日志：${item.name}`} onClick={() => void openMcpLogs(item)}>
-                        日志
+                      <button type="button" className="btn small outline" aria-label={t("capabilities.mcpLogsAria", { name: item.name })} onClick={() => void openMcpLogs(item)}>
+                        {t("capabilities.logsBtn")}
                       </button>
                       <button
                         type="button"
                         className="icon-btn small"
-                        data-tip="刷新"
-                        aria-label={`刷新：${item.name}`}
+                        data-tip={t("common.refresh")}
+                        aria-label={t("capabilities.refreshMcpAria", { name: item.name })}
                         disabled={mcpBusy.has(item.name)}
                         onClick={() => void refreshMcp(item)}
                       >
@@ -799,7 +825,7 @@ export function CapabilitiesPage({
                   )}
                   <Switch
                     on={item.enabled}
-                    label={`启用 MCP 服务器 ${item.name}`}
+                    label={t("capabilities.toggleMcpAria", { name: item.name })}
                     disabled={mcpBusy.has(item.name) || item.status === "shadowed"}
                     onToggle={() => void toggleMcpServer(item)}
                   />
@@ -812,8 +838,8 @@ export function CapabilitiesPage({
                   <span>Prompts —</span>
                   <span className="mono">
                     {item.lastProbe
-                      ? (item.lastProbe.ok ? item.lastProbe.detail : `探测失败 · ${item.lastProbe.detail}`)
-                      : "配置库存（非连接态）"}
+                      ? (item.lastProbe.ok ? item.lastProbe.detail : t("capabilities.probeFailedDetail", { detail: item.lastProbe.detail }))
+                      : t("capabilities.configInventoryNonConnected")}
                   </span>
                 </div>
               </div>
@@ -831,8 +857,8 @@ export function CapabilitiesPage({
         <Summary
           total={slash.length}
           stats={[
-            { cls: "green", n: ok, label: "当前可用" },
-            { cls: "gray", n: slash.length - ok, label: "不可用" },
+            { cls: "green", n: ok, label: t("capabilities.statusAvailable") },
+            { cls: "gray", n: slash.length - ok, label: t("capabilities.statusUnavailable") },
           ]}
         />
         <div className="cap-slash-list">
@@ -845,7 +871,7 @@ export function CapabilitiesPage({
             const tip = preview
               ? undefined
               : !command.ok
-                ? (catalog?.disabledReason ?? "当前会话不可用")
+                ? (catalog?.disabledReason ?? t("capabilities.disabledInSession"))
                 : needsArgs
                   ? `${CONTRACT.slashComposer} ${command.name} …`
                   : undefined;
@@ -864,13 +890,13 @@ export function CapabilitiesPage({
                   <span className="muted">{command.args}</span>
                 </div>
                 <div className="cap-slash-desc">{command.desc}<span className="muted"> · {command.src}</span></div>
-                <span className={`chip ${command.ok ? "green" : "gray"} sm`}>{command.ok ? "当前会话可用" : "不可用"}</span>
+                <span className={`chip ${command.ok ? "green" : "gray"} sm`}>{command.ok ? t("capabilities.statusAvailable") : t("capabilities.statusUnavailable")}</span>
                 {canRun ? (
                   <button className="btn small primary" type="button" onClick={() => void runSlash(command)}>
-                    执行
+                    {t("capabilities.runBtn")}
                   </button>
                 ) : (
-                  <Disabled className="btn small primary" tip={tip ?? "无法执行"}>执行</Disabled>
+                  <Disabled className="btn small primary" tip={tip ?? t("capabilities.cannotRunTip")}>{t("capabilities.runBtn")}</Disabled>
                 )}
               </div>
             );
@@ -891,37 +917,37 @@ export function CapabilitiesPage({
     <div className="page-wide">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: 18 }}>能力中心</h1>
-          <p className="muted small">这里汇总了你的全部能力，包括来自多个应用和插件市场的 Skills 与 Plugins。</p>
+          <h1 style={{ fontSize: 18 }}>{t("capabilities.pageTitle")}</h1>
+          <p className="muted small">{t("capabilities.pageSubtitle")}</p>
           {preview || loadError ? (
-            <p className="tiny muted">{preview ? "演示模式：展示示例能力，不代表你的真实配置。" : loadError}</p>
+            <p className="tiny muted">{preview ? t("capabilities.previewSubtitle") : loadError}</p>
           ) : null}
         </div>
         <span className="spacer" />
         <button type="button" className="btn outline" onClick={() => void revealSkillRoot()}>
-          <Icon name="folder" extra="sm" />打开来源目录
+          <Icon name="folder" extra="sm" />{t("capabilities.openSourceDir")}
         </button>
-        <Disabled className="btn primary" tip={CONTRACT.create}><Icon name="plus" extra="sm" />创建 Skill</Disabled>
+        <Disabled className="btn primary" tip={CONTRACT.create}><Icon name="plus" extra="sm" />{t("capabilities.createSkill")}</Disabled>
       </div>
       <ToastHost
-        message={mcpTesting.size === 0 ? flash : `正在测试 ${[...mcpTesting].join("、")}…`}
+        message={mcpTesting.size === 0 ? flash : t("capabilities.mcpTesting", { name: [...mcpTesting].join(", ") })}
         sticky={mcpTesting.size > 0}
         onDismiss={() => setFlash(null)}
       />
       <div className="cap-layout">
         <SlidingTabs
           id="capSide"
-          ariaLabel="能力分类"
+          ariaLabel={t("capabilities.catAria")}
           value={tab}
           onChange={setTab}
           syncKey={TABS.map(([id]) => String(counts[id])).join(",")}
-          items={TABS.map(([id, icon, label]) => ({
+          items={TABS.map(([id, icon]) => ({
             id,
             icon,
-            label,
+            label: t(TAB_LABELS[id]),
             buttonId: `capTab-${id}`,
             panelId: `cap-${id}`,
-            badge: <span className="cnt">{counts[id]}<span className="sr-only"> 项</span></span>,
+            badge: <span className="cnt">{counts[id]}<span className="sr-only"> {t("capabilities.catItemCount", { count: counts[id] })}</span></span>,
           }))}
         />
         <div className="cap-main" id="capMain">
@@ -967,21 +993,21 @@ export function CapabilitiesPage({
             <div className="create-project-head">
               <div>
                 <span className="create-project-kicker">MCP</span>
-                <h2 id="capMcpLogTitle">{mcpLogs.name} 日志</h2>
+                <h2 id="capMcpLogTitle">{t("capabilities.mcpLogTitle", { name: mcpLogs.name })}</h2>
               </div>
-              <button type="button" className="icon-btn" aria-label="关闭" onClick={() => setMcpLogs(null)}>
+              <button type="button" className="icon-btn" aria-label={t("capabilities.closeLog")} onClick={() => setMcpLogs(null)}>
                 <Icon name="x" />
               </button>
             </div>
             <div className="create-project-body">
               {mcpLogs.lines.length === 0 ? (
-                <p className="muted">{mcpLogs.emptyReason ?? "尚无日志，请先测试连接"}</p>
+                <p className="muted">{mcpLogs.emptyReason ?? t("capabilities.noLogsYet")}</p>
               ) : (
                 <pre className="cap-log-body mono">{mcpLogs.lines.join("\n")}</pre>
               )}
             </div>
             <div className="create-project-foot">
-              <button type="button" className="btn outline" onClick={() => setMcpLogs(null)}>关闭</button>
+              <button type="button" className="btn outline" onClick={() => setMcpLogs(null)}>{t("capabilities.closeLog")}</button>
             </div>
           </section>
         </div>,

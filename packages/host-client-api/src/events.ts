@@ -146,7 +146,7 @@ export function receiptFromLedgerEntry(
         requestId: entry.requestId as CommandRequestId,
         commandName,
         status: "rejected",
-        reason: entry.errorCode === undefined ? "rejected by runtime" : `runtime rejected request: ${entry.errorCode}`,
+        reason: ledgerReason(entry, "rejected by runtime", (code) => `runtime rejected request: ${code}`),
         observedAt,
       };
     case "outcome_unknown":
@@ -154,7 +154,11 @@ export function receiptFromLedgerEntry(
         requestId: entry.requestId as CommandRequestId,
         commandName,
         status: "outcome_unknown",
-        reason: entry.errorCode === undefined ? "runtime lost; outcome unknown" : `runtime lost (${entry.errorCode}); outcome unknown`,
+        reason: ledgerReason(
+          entry,
+          "runtime lost; outcome unknown",
+          (code) => `runtime lost (${code}); outcome unknown`,
+        ),
         observedAt,
       };
     default:
@@ -162,20 +166,68 @@ export function receiptFromLedgerEntry(
   }
 }
 
+/**
+ * Reason line for a non-`failed` terminal ledger status. The Runtime's own text
+ * wins when it has one — it names the offending argument, which the code alone
+ * cannot — and the code-derived phrasing stays as the fallback.
+ */
+function ledgerReason(
+  entry: CommandLedgerEntry,
+  whenBare: string,
+  fromCode: (code: string) => string,
+): string {
+  const detail = entry.errorMessage?.trim();
+  if (detail !== undefined && detail.length > 0) {
+    return entry.errorCode === undefined ? detail : `${fromCode(entry.errorCode)}: ${detail}`;
+  }
+  return entry.errorCode === undefined ? whenBare : fromCode(entry.errorCode);
+}
+
+/**
+ * Client error for a `failed` ledger entry. The code mapping is fixed by
+ * contract; the message prefers the Runtime's own text so a mirrored failure
+ * reads the same as one returned through the facade-driven command path.
+ */
 function ledgerError(entry: CommandLedgerEntry): ClientError {
-  switch (entry.errorCode) {
+  const code = ledgerErrorCode(entry.errorCode);
+  const detail = entry.errorMessage?.trim();
+  return {
+    code,
+    message: detail !== undefined && detail.length > 0 ? detail : ledgerFallbackMessage(entry.errorCode),
+  };
+}
+
+function ledgerErrorCode(errorCode: string | undefined): ClientError["code"] {
+  switch (errorCode) {
     case "RUNTIME_EPOCH_STALE":
-      return { code: "STALE_EPOCH", message: "runtime epoch is stale" };
+      return "STALE_EPOCH";
     case "STATE_VERSION_CONFLICT":
-      return { code: "STATE_VERSION_CONFLICT", message: "state version conflict" };
+      return "STATE_VERSION_CONFLICT";
     case "CAPABILITY_UNAVAILABLE":
-      return { code: "CAPABILITY_UNAVAILABLE", message: "runtime capability is unavailable" };
+      return "CAPABILITY_UNAVAILABLE";
     case "INVALID_ARGUMENT":
-      return { code: "INVALID_ARGUMENT", message: "runtime rejected the request arguments" };
+      return "INVALID_ARGUMENT";
     case "RESYNC_REQUIRED":
-      return { code: "RESYNC_REQUIRED", message: "runtime requires resync" };
+      return "RESYNC_REQUIRED";
     default:
-      return { code: "INTERNAL_ERROR", message: `runtime reported failure: ${entry.errorCode ?? "unknown"}` };
+      return "INTERNAL_ERROR";
+  }
+}
+
+function ledgerFallbackMessage(errorCode: string | undefined): string {
+  switch (errorCode) {
+    case "RUNTIME_EPOCH_STALE":
+      return "runtime epoch is stale";
+    case "STATE_VERSION_CONFLICT":
+      return "state version conflict";
+    case "CAPABILITY_UNAVAILABLE":
+      return "runtime capability is unavailable";
+    case "INVALID_ARGUMENT":
+      return "runtime rejected the request arguments";
+    case "RESYNC_REQUIRED":
+      return "runtime requires resync";
+    default:
+      return `runtime reported failure: ${errorCode ?? "unknown"}`;
   }
 }
 

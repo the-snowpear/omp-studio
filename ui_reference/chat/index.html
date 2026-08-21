@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OMP Studio - Chat Interface Reference</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+</head>
+<body>
+  <div class="chat-container">
+    <!-- Sidebar with session list -->
+    <aside class="sessions-sidebar">
+      <div class="sidebar-header">
+        <h2>Sessions</h2>
+        <button class="icon-btn" aria-label="New session">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="session-list">
+        <div class="session-item active">
+          <div class="session-info">
+            <div class="session-title">UI Design Discussion</div>
+            <div class="session-meta">2 agents active • 3m ago</div>
+          </div>
+        </div>
+        <div class="session-item">
+          <div class="session-info">
+            <div class="session-title">Backend Refactoring</div>
+            <div class="session-meta">1 agent • 1h ago</div>
+          </div>
+        </div>
+        <div class="session-item">
+          <div class="session-info">
+            <div class="session-title">Database Migration</div>
+            <div class="session-meta">Completed • 3h ago</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main chat area -->
+    <main class="chat-main">
+      <!-- Active agents indicator -->
+      <div class="active-agents-bar">
+        <div class="agent-chip">
+          <div class="agent-status-dot active"></div>
+          <span>Main Agent</span>
+          <span class="agent-model">claude-3.5-sonnet</span>
+        </div>
+        <div class="agent-chip">
+          <div class="agent-status-dot thinking"></div>
+          <span>Subagent #1</span>
+          <span class="agent-model">gpt-4</span>
+        </div>
+      </div>
+
+      <!-- Messages container -->
+      <div class="messages-container" id="messagesContainer">
+        <!-- Demo messages will be inserted here by JS -->
+      </div>
+
+      <!-- Input area -->
+      <div class="input-container">
+        <div class="input-wrapper">
+          <button class="icon-btn attach-btn" aria-label="Attach file">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+            </svg>
+          </button>
+          <textarea 
+            id="messageInput" 
+            placeholder="Ask anything or type @ to reference files..." 
+            rows="1"
+          ></textarea>
+          <button class="icon-btn send-btn" id="sendBtn" aria-label="Send message">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hints">
+          <kbd>Shift</kbd> + <kbd>Enter</kbd> for new line • <kbd>@</kbd> to reference files
+        </div>
+      </div>
+    </main>
+
+    <!-- Right panel for context/tools -->
+    <aside class="context-panel">
+      <div class="panel-tabs">
+        <button class="panel-tab active" data-panel="context">Context</button>
+        <button class="panel-tab" data-panel="agents">Agents</button>
+        <button class="panel-tab" data-panel="settings">Settings</button>
+      </div>
+
+      <div class="panel-content active" id="contextPanel">
+        <div class="context-section">
+          <h3>Referenced Files</h3>
+          <div class="file-list">
+            <div class="file-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                <polyline points="13 2 13 9 20 9"></polyline>
+              </svg>
+              <span>src/components/Chat.tsx</span>
+            </div>
+            <div class="file-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                <polyline points="13 2 13 9 20 9"></polyline>
+              </svg>
+              <span>styles/chat.css</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="context-section">
+          <h3>Active Tools</h3>
+          <div class="tool-list">
+            <div class="tool-item">
+              <span class="tool-name">File Read</span>
+              <span class="tool-count">3</span>
+            </div>
+            <div class="tool-item">
+              <span class="tool-name">Shell Command</span>
+              <span class="tool-count">1</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-content" id="agentsPanel">
+        <div class="agent-detail">
+          <h3>Agent Performance</h3>
+          <div class="perf-metric">
+            <span>Total Tokens</span>
+            <span class="metric-value">12,450</span>
+          </div>
+          <div class="perf-metric">
+            <span>Response Time</span>
+            <span class="metric-value">2.3s avg</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-content" id="settingsPanel">
+        <div class="settings-group">
+          <h3>Preferences</h3>
+          <label class="setting-item">
+            <span>Show Thinking Process</span>
+            <input type="checkbox" checked>
+          </label>
+          <label class="setting-item">
+            <span>Auto-scroll</span>
+            <input type="checkbox" checked>
+          </label>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/11.1.1/marked.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>OMP Studio — 已迁移到单页</title>
+<!-- 原多页入口已合并为单 HTML（index.html#!…）。此页是转发 stub；
+     旧的 #permissions / #models 等分组 hash 一并带过去。 -->
+<meta http-equiv="refresh" content="0; url=index.html#!settings">
+<script>
+  (function () {
+    var h = location.hash.slice(1);
+    location.replace('index.html#!settings' + (h ? '/' + h : ''));
+  })();
+</script>
+</head>
+<body>
+<p style="padding:24px;font-size:13px">
+  设置已合并到 <a href="index.html#!settings">OMP Studio</a>。
+</p>
+</body>
+</html>

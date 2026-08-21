@@ -4,6 +4,7 @@ import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
 import { useAppSettings, type ToolActivityDetail } from "../settings/appSettings";
+import { useI18n } from "../i18n";
 import { BatchChain, type ChainItem } from "./BatchChain";
 import { TruncationMark } from "./ToolBody";
 import { MarkdownText } from "./markdown";
@@ -159,6 +160,7 @@ function MessageUserActions({
     onBranch: () => void;
   };
 }) {
+  const { t } = useI18n();
   if (text.length === 0 && restore === undefined && branch === undefined) return null;
   return (
     <div className="ev-msg-actions">
@@ -166,8 +168,8 @@ function MessageUserActions({
         <button
           type="button"
           className="ev-msg-copy"
-          aria-label="恢复"
-          data-tip={restore.disabled === true ? (restore.reason ?? "无法恢复") : "恢复"}
+          aria-label={t("conversation.restore")}
+          data-tip={restore.disabled === true ? (restore.reason ?? t("conversation.cannotRestore")) : t("conversation.restore")}
           disabled={restore.disabled === true}
           onClick={() => restore.onRestore()}
         >
@@ -178,8 +180,8 @@ function MessageUserActions({
         <button
           type="button"
           className="ev-msg-copy"
-          aria-label="新会话"
-          data-tip={branch.disabled === true ? (branch.reason ?? "无法新建") : "新会话"}
+          aria-label={t("conversation.branchSession")}
+          data-tip={branch.disabled === true ? (branch.reason ?? t("conversation.cannotCreate")) : t("conversation.branchSession")}
           disabled={branch.disabled === true}
           onClick={() => branch.onBranch()}
         >

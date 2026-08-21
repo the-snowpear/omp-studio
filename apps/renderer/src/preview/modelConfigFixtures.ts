@@ -8,6 +8,7 @@ import type {
   ModelAuthType,
   ModelCatalogEntry,
   ModelConfigReadModel,
+  ModelDiscoveryModel,
   ModelPresetGroup,
   ModelProviderRecord,
   ModelRoleRecord,
@@ -228,4 +229,18 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     },
     fallbackRevertPolicy: "cooldown-expiry",
   };
+}
+
+/**
+ * Demo payload for the editor's "auto-fetch models" button: what an
+ * OpenAI-compatible `/v1/models` would plausibly return for a gateway. Display
+ * only — preview mode never calls the Host for this.
+ */
+export function createPreviewFetchedModels(): ModelDiscoveryModel[] {
+  return [
+    { id: "glm-5", name: "GLM-5", contextWindow: 200_000, maxTokens: 64_000, reasoning: true },
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", contextWindow: 1_000_000, reasoning: true },
+    { id: "qwen3-max", name: "Qwen3 Max", contextWindow: 262_144, image: true },
+    { id: "gpt-5-mini", name: "GPT-5 mini" },
+  ];
 }

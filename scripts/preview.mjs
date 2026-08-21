@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, rm, rename, symlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import process from "node:process";
 
 const root = process.cwd();
@@ -17,6 +17,11 @@ const esbuildCli = join(
   "esbuild",
 );
 const electronDist = join(root, "node_modules", "electron", "dist");
+/**
+ * Managed-Runtime tree an earlier preview run wrote into the Electron
+ * distribution (see preparePreviewElectron). Never copied forward.
+ */
+const staleRuntimeDir = join(electronDist, "runtime");
 const previewElectronDir = join(root, "outputs", "preview-electron");
 const previewElectronExe = join(previewElectronDir, "OMP Studio.exe");
 const appIcon = join(root, "apps", "desktop", "resources", "icon.ico");
@@ -208,7 +213,21 @@ async function preparePreviewElectron() {
 
   await rm(previewElectronDir, { recursive: true, force: true });
   await mkdir(previewElectronDir, { recursive: true });
-  await cp(electronDist, previewElectronDir, { recursive: true });
+  // Renaming electron.exe makes Electron report app.isPackaged === true, so the
+  // Desktop Host puts its managed Runtime tree at <previewElectronDir>/runtime.
+  // Anything named `runtime` inside the Electron distribution is therefore a
+  // leftover from an earlier preview run, and copying it in would resurrect a
+  // stale omp.exe that `rm -rf outputs/preview-electron` cannot reach (it lives
+  // under the gitignored node_modules). Skip it so seeding installs the freshly
+  // built, signed artifact instead.
+  await cp(electronDist, previewElectronDir, {
+    recursive: true,
+    filter: (source) => source !== staleRuntimeDir && !source.startsWith(`${staleRuntimeDir}${sep}`),
+  });
+  if (existsSync(staleRuntimeDir)) {
+    await rm(staleRuntimeDir, { recursive: true, force: true });
+    console.log(`[preview] Removed a stale Runtime tree from the Electron distribution: ${staleRuntimeDir}`);
+  }
   await rename(join(previewElectronDir, "electron.exe"), previewElectronExe);
 
   await run(rceditExe, [

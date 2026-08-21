@@ -26,6 +26,7 @@ import { SESSION_THINKING_SELECTORS, clampRoleThinking, roleThinkingControl } fr
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 import { Icon } from "./icons";
+import { useI18n } from "./i18n";
 import { hostErrorMessage } from "./hostError";
 import { MODEL_THINKING, createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { ModelPickCaps, ProviderGlyph, ROLE_ICONS, ROLE_TINTS, groupModelsByProvider } from "./ModelConfigPage";
@@ -106,6 +107,7 @@ export function ComposerModelMenu({
   onChooseModel: (selector: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [moreOpen, setMoreOpen] = useState(false);
   const [flyoutSide, setFlyoutSide] = useState<"right" | "left">("right");
   const flyoutTimer = useRef<number | undefined>(undefined);
@@ -160,16 +162,16 @@ export function ComposerModelMenu({
       <div
         className={`cmp-menu${placement === "down" ? " cmp-menu-down" : ""}`}
         role="menu"
-        aria-label="选择模型"
+        aria-label={t("composer.selectModel")}
         ref={menuRef}
       >
         <div className="cmp-roles">
           {loading && !data ? (
-            <div className="cmp-empty">加载模型配置…</div>
+            <div className="cmp-empty">{t("composer.loadingModels")}</div>
           ) : loadError && rolesWithModel.length === 0 ? (
             <div className="cmp-empty cmp-error">{loadError}</div>
           ) : rolesWithModel.length === 0 ? (
-            <div className="cmp-empty">没有已分配可用模型的角色</div>
+            <div className="cmp-empty">{t("composer.noRoleWithModel")}</div>
           ) : (
             rolesWithModel.map((role) => {
               const on = isRoleSelected(role);
@@ -220,7 +222,7 @@ export function ComposerModelMenu({
             onClick={() => setMoreOpen((open) => !open)}
           >
             <Icon name="more" extra="sm" />
-            <span>更多模型</span>
+            <span>{t("composer.moreModels")}</span>
             <span className="spacer" />
             <Icon name={flyoutSide === "right" ? "chevron-r" : "chevron-l"} extra="sm" />
           </button>
@@ -229,12 +231,12 @@ export function ComposerModelMenu({
           <div
             className={`menu rms-pop cmp-flyout side-${flyoutSide}`}
             role="listbox"
-            aria-label="全部模型"
+            aria-label={t("composer.allModels")}
             onMouseEnter={keepFlyoutOpen}
             onMouseLeave={scheduleFlyoutClose}
           >
             {groups.length === 0 ? (
-              <div className="rms-empty">没有可用模型</div>
+              <div className="rms-empty">{t("composer.noAvailableModels")}</div>
             ) : (
               groups.map((group) => (
                 <div className="rms-group" key={group.providerId} role="group" aria-label={group.providerName}>
@@ -273,8 +275,8 @@ export function ComposerModelMenu({
         ) : null}
         {preview ? (
           <div className="cmp-menu-note">
-            <span className="chip gray xs">演示</span>
-            <span>{note ?? "演示数据，不写入本机配置"}</span>
+            <span className="chip gray xs">{t("common.demo")}</span>
+            <span>{note ?? t("composer.previewModelNote")}</span>
           </div>
         ) : note ? (
           <div className="cmp-menu-note">{note}</div>
@@ -456,6 +458,8 @@ export function ComposerModelPicker({
     apply("session.thinking.set", { level });
   };
 
+  const { t } = useI18n();
+
   return (
     <>
       <span className="cmp-pill-wrap">
@@ -464,8 +468,8 @@ export function ComposerModelPicker({
           className="pill-btn meta-model"
           aria-haspopup="menu"
           aria-expanded={menu === "model"}
-          aria-label="选择模型"
-          data-tip={!modelReady ? "模型（暂未实现）" : "模型"}
+          aria-label={t("composer.selectModel")}
+          data-tip={!modelReady ? t("common.notImplemented") : t("composer.model")}
           onClick={() => {
             if (menu === "model") {
               closeAll();
@@ -491,8 +495,8 @@ export function ComposerModelPicker({
               ? {}
               : {
                   note: !modelReady
-                    ? "Runtime 未暴露 session.model.set"
-                    : "当前轮次仍用原模型，下一轮对话才生效",
+                    ? t("composer.runtimeNotExposedModelSet")
+                    : t("composer.modelNoteNextTurn"),
                 })}
             onChooseRole={chooseRole}
             onChooseModel={chooseModel}
@@ -507,13 +511,13 @@ export function ComposerModelPicker({
           disabled={!pick || thinking.disabled || !thinkingReady}
           aria-haspopup="menu"
           aria-expanded={menu === "thinking"}
-          aria-label="思考强度"
+          aria-label={t("composer.reasoningEffort")}
           data-tip={
             !thinkingReady
-              ? "思考（暂未实现）"
+              ? t("common.notImplemented")
               : thinking.disabled
-                ? "不支持"
-                : "思考"
+                ? t("composer.thinkingNotSupported")
+                : t("composer.reasoningEffort")
           }
           onClick={() => setMenu((current) => (current === "thinking" ? "none" : "thinking"))}
         >
@@ -523,7 +527,7 @@ export function ComposerModelPicker({
         {menu === "thinking" ? (
           <>
             <div className="approval-menu-backdrop" onClick={closeAll} />
-            <div className="cmp-menu cmp-think-menu" role="menu" aria-label="思考强度">
+            <div className="cmp-menu cmp-think-menu" role="menu" aria-label={t("composer.reasoningEffort")}>
               {thinking.items.map((item) => {
                 const on = thinking.value === item.id;
                 return (

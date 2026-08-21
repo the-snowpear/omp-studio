@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 /** Folder-column slot on a sidebar thread row. Occupies the same 14px
  *  gutter as the project folder icon so titles stay left-aligned. */
 export function ThreadSpin({ running }: { running: boolean }) {

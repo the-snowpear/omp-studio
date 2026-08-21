@@ -1,0 +1,956 @@
+/* ==========================================================================
+   OMP Studio — tool cards, approvals, ask-user, checkpoints
+
+   One skeleton serves all 13 tool types. Each type differs only in its
+   icon and its summary line — the frame, states and affordances stay
+   identical so a long run of cards is scannable rather than noisy.
+   ========================================================================== */
+
+.tool-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+  transition: border-color var(--dur-fast) var(--ease);
+  max-width: var(--card-max);
+}
+
+.tool-card:hover {
+  border-color: var(--border-default);
+}
+
+/* ---- Collapsed row (the default) -------------------------------------- */
+.tool-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 30px;
+  padding: var(--sp-2) var(--sp-4);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.tool-card-head:hover {
+  background: var(--bg-hover);
+}
+
+.tool-card-chevron {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.tool-card[data-expanded="true"] .tool-card-chevron {
+  transform: rotate(90deg);
+}
+
+.tool-card-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+}
+
+.tool-card-name {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+}
+
+/* The operation target — path, command, URL, query */
+.tool-card-target {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* Diff stat inline (+n −m) */
+.tool-card-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+
+.tool-card-stat-add { color: var(--add); }
+.tool-card-stat-del { color: var(--del); }
+
+/* Workspace-affecting marker */
+.tool-card-affects {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 0 var(--sp-2);
+  height: 15px;
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
+}
+
+.tool-card-affects svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* ---- Status states ---------------------------------------------------- */
+.tool-card[data-status="pending"] .tool-card-icon { color: var(--muted); }
+.tool-card[data-status="pending"] { opacity: 0.7; }
+
+.tool-card[data-status="running"] {
+  border-color: var(--run-border);
+}
+
+.tool-card[data-status="running"] .tool-card-icon {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.tool-card[data-status="completed"] .tool-card-icon { color: var(--text-tertiary); }
+
+.tool-card[data-status="failed"] {
+  border-color: var(--danger-border);
+  border-left: 2px solid var(--danger);
+}
+
+.tool-card[data-status="failed"] .tool-card-icon { color: var(--danger); }
+
+.tool-card[data-status="awaiting-approval"] {
+  border-color: var(--warn-border);
+  border-left: 2px solid var(--warn);
+  background: var(--warn-subtle);
+}
+
+.tool-card[data-status="awaiting-approval"] .tool-card-icon { color: var(--warn); }
+
+.tool-card[data-status="aborted"] { opacity: 0.6; }
+.tool-card[data-status="aborted"] .tool-card-icon { color: var(--muted); }
+
+/* ---- Expanded body ---------------------------------------------------- */
+.tool-card-body {
+  display: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.tool-card[data-expanded="true"] .tool-card-body {
+  display: block;
+  animation: fadeIn var(--dur-fast) var(--ease);
+}
+
+.tool-card-section {
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tool-card-section:last-child {
+  border-bottom: none;
+}
+
+.tool-card-section-label {
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--sp-3);
+}
+
+.tool-card-params {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.tool-card-param {
+  display: flex;
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+  line-height: var(--lh-code);
+}
+
+.tool-card-param-key {
+  flex-shrink: 0;
+  min-width: 90px;
+  color: var(--text-tertiary);
+}
+
+.tool-card-param-value {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+/* Output / error block */
+.tool-card-output {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-code);
+  color: var(--text-secondary);
+  background: var(--bg-inset);
+  padding: var(--sp-4);
+  border-radius: var(--r-sm);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tool-card-output-error {
+  color: var(--danger);
+  background: var(--danger-subtle);
+}
+
+.tool-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+}
+
+/* Related files list */
+.tool-card-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.tool-card-file {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 24px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.tool-card-file:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tool-card-file svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+/* ==========================================================================
+   Tool group — collapses N consecutive same-type calls into one card
+   Prevents the timeline from drowning in repetition (§7.3).
+   ========================================================================== */
+
+.tool-group {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+  max-width: var(--card-max);
+}
+
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 30px;
+  padding: var(--sp-2) var(--sp-4);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.tool-group-head:hover {
+  background: var(--bg-hover);
+}
+
+.tool-group-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 var(--sp-2);
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  font-family: var(--font-mono);
+  border-radius: var(--r-xs);
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.tool-group-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-body {
+  display: none;
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--sp-2);
+}
+
+.tool-group[data-expanded="true"] .tool-group-body {
+  display: block;
+  animation: fadeIn var(--dur-fast) var(--ease);
+}
+
+/* Child rows inside a group */
+.tool-group-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 26px;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  transition: background var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+
+.tool-group-item:hover {
+  background: var(--bg-hover);
+}
+
+.tool-group-item svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.tool-group-item-target {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-item-meta {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+/* A failed child auto-expands and is marked */
+.tool-group-item[data-status="failed"] {
+  background: var(--danger-subtle);
+  border-left: 2px solid var(--danger);
+}
+
+.tool-group-item[data-status="failed"] svg { color: var(--danger); }
+
+.tool-group-item[data-status="running"] svg {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+/* ==========================================================================
+   Approval card
+   The single highest-priority attention target in the product.
+   Amber, inline (not a modal), with the full impact spelled out.
+   ========================================================================== */
+
+.approval {
+  border: 1px solid var(--warn-border);
+  border-left: 2px solid var(--warn);
+  border-radius: var(--r-md);
+  background: var(--warn-subtle);
+  overflow: hidden;
+  max-width: var(--card-max);
+  animation: approvalIn var(--dur-slow) var(--ease);
+}
+
+@keyframes approvalIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.approval-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+}
+
+.approval-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--warn);
+  margin-top: 1px;
+}
+
+.approval-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.approval-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+  margin-bottom: var(--sp-2);
+}
+
+.approval-desc {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+
+/* The thing OMP wants to run — command, path, URL */
+.approval-target {
+  margin: var(--sp-4) var(--sp-5) 0;
+  padding: var(--sp-4);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-code);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  position: relative;
+}
+
+.approval-target-editable {
+  border-color: var(--accent-border);
+}
+
+.approval-target-edit-hint {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+}
+
+/* Risk + impact */
+.approval-risk {
+  margin: var(--sp-4) var(--sp-5) 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+
+.approval-risk svg {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  color: var(--warn);
+  margin-top: 1px;
+}
+
+.approval-impact {
+  margin: var(--sp-4) var(--sp-5) 0;
+}
+
+.approval-impact-label {
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: var(--sp-2);
+}
+
+.approval-impact-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.approval-impact-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.approval-impact-item svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+/* Four actions, always in the same order */
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  margin-top: var(--sp-2);
+}
+
+.approval-actions .btn-primary {
+  background: var(--warn);
+}
+
+.approval-actions .btn-primary:hover {
+  background: var(--warn);
+  filter: brightness(1.08);
+}
+
+.approval-actions-spacer {
+  flex: 1;
+}
+
+/* Resolved state — the card stays in the timeline as a record */
+.approval[data-resolved] {
+  border-color: var(--border-subtle);
+  border-left-color: var(--border-default);
+  background: var(--bg-surface);
+  opacity: 0.75;
+}
+
+.approval[data-resolved] .approval-icon { color: var(--text-tertiary); }
+.approval[data-resolved] .approval-actions { display: none; }
+
+.approval-resolved-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  height: 18px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  border-radius: var(--r-full);
+}
+
+.approval[data-resolved="allowed-once"] .approval-resolved-badge,
+.approval[data-resolved="allowed-always"] .approval-resolved-badge {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.approval[data-resolved="denied"] .approval-resolved-badge {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+/* ==========================================================================
+   Ask User card — 7 input kinds
+   ========================================================================== */
+
+.askuser {
+  border: 1px solid var(--accent-border);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+  max-width: var(--card-max);
+}
+
+.askuser-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+}
+
+.askuser-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+  margin-top: 1px;
+}
+
+.askuser-question {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-snug);
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+}
+
+.askuser-body {
+  padding: 0 var(--sp-5) var(--sp-5);
+}
+
+.askuser-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.askuser-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease);
+}
+
+.askuser-option:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.askuser-option[data-selected="true"] {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.askuser-option-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.askuser-option-label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.askuser-option-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+
+.askuser-actions {
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+}
+
+/* ==========================================================================
+   Checkpoint card
+   ========================================================================== */
+
+.checkpoint {
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+  max-width: var(--card-max);
+}
+
+.checkpoint-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+}
+
+.checkpoint-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--ok);
+}
+
+.checkpoint-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.checkpoint-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.checkpoint-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-5);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.checkpoint-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+}
+
+.checkpoint-meta-item svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Verification badges — tests / build / preview */
+.checkpoint-badges {
+  display: flex;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.checkpoint-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  height: 20px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+
+.checkpoint-badge svg {
+  width: 11px;
+  height: 11px;
+}
+
+.checkpoint-badge-ok {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.checkpoint-badge-fail {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.checkpoint-badge-run {
+  background: var(--run-subtle);
+  color: var(--run);
+}
+
+.checkpoint-badge-muted {
+  background: var(--muted-subtle);
+  color: var(--muted);
+}
+
+.checkpoint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-5) var(--sp-5);
+}
+
+/* Committed marker */
+.checkpoint-commit {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--bg-inset);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.checkpoint-commit svg {
+  width: 12px;
+  height: 12px;
+  color: var(--ok);
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Subagent group card
+   ========================================================================== */
+
+.subagent-group {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+  max-width: var(--card-max);
+}
+
+.subagent-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 30px;
+  padding: var(--sp-2) var(--sp-4);
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.subagent-group-head:hover {
+  background: var(--bg-hover);
+}
+
+.subagent-group-head svg:nth-child(2) {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.subagent-group-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+}
+
+.subagent-list {
+  padding: var(--sp-2);
+}
+
+.subagent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 34px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+
+.subagent-row:hover {
+  background: var(--bg-hover);
+}
+
+.subagent-row-status {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.subagent-row[data-status="running-tool"] .subagent-row-status,
+.subagent-row[data-status="thinking"] .subagent-row-status {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.subagent-row[data-status="waiting-agent"] .subagent-row-status { color: var(--muted); }
+.subagent-row[data-status="waiting-user"] .subagent-row-status { color: var(--warn); }
+.subagent-row[data-status="completed"] .subagent-row-status { color: var(--ok); }
+.subagent-row[data-status="failed"] .subagent-row-status { color: var(--danger); }
+.subagent-row[data-status="aborted"] .subagent-row-status { color: var(--muted); }
+
+.subagent-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.subagent-row-name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.subagent-row-role {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+/* Waiting-for annotation */
+.subagent-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 0 var(--sp-2);
+  height: 15px;
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
+}
+
+/* ==========================================================================
+   File-change progress inline indicator
+   Distinguishes "the tool said it wrote" from "the watcher saw it land".
+   ========================================================================== */
+
+.change-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  padding: 0 var(--sp-3);
+  height: 18px;
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+
+.change-progress-pending { background: var(--muted-subtle); color: var(--muted); }
+.change-progress-writing { background: var(--run-subtle); color: var(--run); }
+.change-progress-changed { background: var(--accent-subtle); color: var(--accent); }
+.change-progress-building { background: var(--run-subtle); color: var(--run); }
+.change-progress-refreshed { background: var(--run-subtle); color: var(--run); }
+.change-progress-verified { background: var(--ok-subtle); color: var(--ok); }
+.change-progress-failed { background: var(--danger-subtle); color: var(--danger); }
+
+.change-progress-writing .dot,
+.change-progress-building .dot {
+  animation: breathe 1.6s ease-in-out infinite;
+}

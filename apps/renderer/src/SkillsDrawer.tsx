@@ -20,13 +20,14 @@ import {
   type SkillTone,
 } from "./skillsPreview";
 import { usePreviewMode } from "./preview/PreviewContext";
+import { useI18n } from "./i18n";
 
 type GroupKey = "workspace" | "global" | "builtin-plugin";
 
-const GROUPS: Array<{ key: GroupKey; label: string }> = [
-  { key: "workspace", label: "项目" },
-  { key: "global", label: "全局" },
-  { key: "builtin-plugin", label: "内置与插件" },
+const GROUPS: Array<{ key: GroupKey; labelKey: string }> = [
+  { key: "workspace", labelKey: "skills.groupWorkspace" },
+  { key: "global", labelKey: "skills.groupGlobal" },
+  { key: "builtin-plugin", labelKey: "skills.groupBuiltinPlugin" },
 ];
 
 const SCOPE_SHORT: Record<string, string> = {
@@ -37,10 +38,10 @@ const SCOPE_SHORT: Record<string, string> = {
 };
 
 const SCOPE_LABEL: Record<string, string> = {
-  workspace: "项目技能",
-  global: "全局技能",
-  builtin: "内置技能",
-  plugin: "插件",
+  workspace: "skills.scopeWorkspace",
+  global: "skills.scopeGlobal",
+  builtin: "skills.scopeBuiltin",
+  plugin: "skills.scopePlugin",
 };
 
 const HOVER_PREVIEW_MS = 420;
@@ -175,8 +176,8 @@ function itemIcon(item: DrawerItem): string {
   return drawerItemIcon(item);
 }
 
-function itemDesc(item: DrawerItem): string {
-  if (item.retrying) return "正在重新加载清单…";
+function itemDesc(item: DrawerItem, t: (key: string) => string): string {
+  if (item.retrying) return t("skills.reloadingList");
   if (item.kind === "skill") return item.desc;
   return item.err ?? "—";
 }
@@ -211,6 +212,7 @@ export function SkillsDrawer({
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState<DrawerCat>("all");
   const [collapsed, setCollapsed] = useState<Set<GroupKey>>(() => new Set());
+  const { t } = useI18n();
   const { preview } = usePreviewMode();
   const [items, setItems] = useState<DrawerItem[]>(() => preview ? createPreviewDrawerItems() : []);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -336,6 +338,7 @@ export function SkillsDrawer({
 
   const grouped = GROUPS.map((group) => ({
     ...group,
+    label: t(group.labelKey),
     entries: slots.filter((slot) => groupOf(slot.item) === group.key),
   })).filter((group) => group.entries.length > 0);
 
@@ -402,20 +405,20 @@ export function SkillsDrawer({
       <div className="sd-head">
         <div className="sd-title" id="sdTitle">
           <Icon name="layers" extra="sm" />
-          技能 & 插件
+          {t("skills.title")}
           <span className="count">{items.length}</span>
         </div>
         <span className="spacer" />
         <button
           className="icon-btn small"
-          data-tip="能力中心"
-          aria-label="打开能力中心"
+          data-tip={t("nav.capabilities")}
+          aria-label={t("shell.openCapabilities")}
           type="button"
           onClick={() => onOpenHub?.()}
         >
           <Icon name="external" extra="sm" />
         </button>
-        <button className="icon-btn small" data-tip="关闭" aria-label="关闭技能面板" onClick={onClose}>
+        <button className="icon-btn small" data-tip={t("common.close")} aria-label={t("skills.closeAria")} onClick={onClose}>
           <Icon name="x" extra="sm" />
         </button>
       </div>
@@ -426,17 +429,17 @@ export function SkillsDrawer({
           id="sdSearchInput"
           type="text"
           value={query}
-          placeholder="搜索技能 / 插件…"
-          aria-label="在技能与插件中搜索"
+          placeholder={t("skills.searchPlaceholder")}
+          aria-label={t("skills.searchAria")}
           onChange={(event) => setQuery(event.target.value)}
         />
         <span className="kbd">/</span>
       </label>
-      <nav className="sd-tabs" role="tablist" aria-label="技能分类">
+      <nav className="sd-tabs" role="tablist" aria-label={t("skills.categoriesAria")}>
         {([
-          ["all", "全部", items.length],
-          ["skill", "技能", skillN],
-          ["plugin", "插件", pluginN],
+          ["all", t("common.all"), items.length],
+          ["skill", t("skills.tabSkills"), skillN],
+          ["plugin", t("skills.tabPlugins"), pluginN],
         ] as const).map(([key, label, count]) => (
           <button
             key={key}
@@ -460,18 +463,18 @@ export function SkillsDrawer({
           <div className="sd-empty">
             <Icon name="search" extra="lg" />
             {preview
-              ? "没有匹配的技能或插件"
+              ? t("skills.emptyNoMatch")
               : loadError
                 ? loadError
                 : items.length === 0
-                  ? "未发现已配置的技能 / 插件"
-                  : "没有匹配的技能或插件"}
+                  ? t("skills.emptyNone")
+                  : t("skills.emptyNoMatch")}
             <br />
             {preview
-              ? "试试换个关键词，或在「能力中心」浏览全部"
+              ? t("skills.emptyNoMatchHint")
               : loadError
-                ? "Host 未能读取本机 OMP 配置目录"
-                : "已扫描本机的 OMP 兼容目录与已安装插件"}
+                ? t("skills.emptyLoadError")
+                : t("skills.emptyScannedHint")}
           </div>
         ) : (
           grouped.map((group) => {
@@ -526,14 +529,14 @@ export function SkillsDrawer({
         <a
           className="sd-foot-link"
           href="#!capabilities"
-          aria-label="进入能力中心（管理全部技能与插件）"
+          aria-label={t("skills.enterHubAria")}
           onClick={(event) => {
             event.preventDefault();
             onOpenHub?.();
           }}
         >
           <Icon name="package" />
-          <span className="label">进入能力中心</span>
+          <span className="label">{t("skills.enterHub")}</span>
         </a>
       </div>
     </aside>
@@ -635,11 +638,12 @@ function SkillCard({
   onToggle: () => void;
   onOpenHub?: () => void;
 }) {
+  const { t } = useI18n();
   const err = isDrawerItemError(item);
   const retrying = Boolean(item.retrying);
   const scope = itemScope(item);
   const tone = itemTone(item);
-  const desc = itemDesc(item);
+  const desc = itemDesc(item, t);
   const meta = itemMeta(item);
   const glyph = retrying ? "refresh" : itemIcon(item);
   const epochRef = useRef(filterEpoch);
@@ -823,7 +827,7 @@ function SkillCard({
         >
           <Icon name={glyph} />
           {used && !err ? (
-            <span className="sk-used-mark" aria-hidden="true" data-tip="用过">
+            <span className="sk-used-mark" aria-hidden="true" data-tip={t("skills.usedTip")}>
               <Icon name="history" extra="sm" />
             </span>
           ) : null}
@@ -852,13 +856,13 @@ function SkillCard({
       </div>
       <div className="sk-action-zone">
         <div className="sk-actions">
-          {retrying ? <span className="sk-persistent">重试中…</span> : null}
+          {retrying ? <span className="sk-persistent">{t("skills.retrying")}</span> : null}
           {err ? (
             !retrying ? (
               <button
                 className="add-btn hover-action retry-hover"
                 type="button"
-                aria-label={`重试加载 ${item.name}`}
+                aria-label={t("skills.retryAria", { name: item.name })}
                 onClick={(event) => {
                   event.stopPropagation();
                   onToggle();
@@ -866,14 +870,14 @@ function SkillCard({
                 }}
               >
                 <Icon name="refresh" extra="sm" />
-                重试
+                {t("common.retry")}
               </button>
             ) : null
           ) : !retrying && added ? (
             <button
               className="add-btn hover-action"
               type="button"
-              aria-label={`从当前草稿移除 ${item.name}`}
+              aria-label={t("skills.removeAria", { name: item.name })}
               onClick={(event) => {
                 event.stopPropagation();
                 onToggle();
@@ -881,13 +885,13 @@ function SkillCard({
               }}
             >
               <Icon name="x" extra="sm" />
-              移出
+              {t("skills.remove")}
             </button>
           ) : !retrying ? (
             <button
               className="add-btn hover-action"
               type="button"
-              aria-label={`把 ${item.name} 加入当前草稿`}
+              aria-label={t("skills.addAria", { name: item.name })}
               disabled={insertDisabled}
               onClick={(event) => {
                 event.stopPropagation();
@@ -896,12 +900,12 @@ function SkillCard({
               }}
             >
               <Icon name="plus" extra="sm" />
-              加入
+              {t("skills.add")}
             </button>
           ) : null}
           <button
             className="icon-btn open-hub"
-            aria-label={`打开能力中心查看 ${item.name}`}
+            aria-label={t("skills.openHubViewAria", { name: item.name })}
             type="button"
             onClick={(event) => {
               event.stopPropagation();
@@ -958,6 +962,7 @@ function SkillFlyout({
   onPointerEnter: () => void;
   onPointerLeave: () => void;
 }) {
+  const { t } = useI18n();
   const glyph = itemIcon(item);
   const ref = useRef<HTMLDivElement>(null);
   const [entered, setEntered] = useState(false);
@@ -1020,12 +1025,12 @@ function SkillFlyout({
         >
           <Icon name={glyph} />
         </span>
-        {SCOPE_LABEL[scope] ?? "技能"}
+        {SCOPE_LABEL[scope] ? t(SCOPE_LABEL[scope]) : t("skills.skillBadge")}
         {item.kind === "skill" && item.src ? <span className="chip outline xs">{item.src}</span> : null}
       </div>
       <div className="sk-fly-name">{item.name}</div>
       <div className="sk-fly-rule" aria-hidden="true" />
-      <div className="sk-fly-desc">{desc || "暂无简介"}</div>
+      <div className="sk-fly-desc">{desc || t("skills.noDesc")}</div>
     </div>
   );
 }

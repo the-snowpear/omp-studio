@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CommandInput, CommandName, StudioClient } from "@omp-studio/client-contract";
@@ -6,6 +6,15 @@ import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 import { createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { I18nProvider } from "./i18n";
+
+function render(ui: React.ReactElement) {
+  const result = rtlRender(<I18nProvider forcedLanguage="zh">{ui}</I18nProvider>);
+  return {
+    ...result,
+    rerender: (nextUi: React.ReactElement) => result.rerender(<I18nProvider forcedLanguage="zh">{nextUi}</I18nProvider>),
+  };
+}
 
 afterEach(cleanup);
 
@@ -37,7 +46,7 @@ function renderPicker({
   snapshot?: OperatorStateSnapshot;
   refreshKey?: string;
 } = {}) {
-  return render(
+  const result = render(
     <ComposerModelPicker
       preview={preview}
       client={client}
@@ -48,6 +57,10 @@ function renderPicker({
       {...(refreshKey === undefined ? {} : { refreshKey })}
     />,
   );
+  return {
+    ...result,
+    rerender: (ui: React.ReactElement) => result.rerender(<I18nProvider forcedLanguage="zh">{ui}</I18nProvider>),
+  };
 }
 
 describe("ComposerModelPicker", () => {

@@ -4,6 +4,7 @@ import { Compartment, EditorState, Transaction } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { foldAll, foldedRanges, forceParsing, unfoldAll } from "@codemirror/language";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 import { coreEditorExtensions, languageExtensions } from "./extensions";
 import {
   convertStructured,
@@ -65,6 +66,7 @@ export function StructuredEditor({
   dirty = false,
   saveHint,
 }: StructuredEditorProps) {
+  const { t } = useI18n();
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const langConf = useRef(new Compartment());
@@ -227,7 +229,7 @@ export function StructuredEditor({
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
-      setIssue("复制失败");
+      setIssue(t("common.copyFailed"));
     }
   };
 
@@ -260,13 +262,13 @@ export function StructuredEditor({
         </span>
         {path ? <span className="yml-path">{path}</span> : null}
         <span className="chip gray xs">{mode.toUpperCase()}</span>
-        {live && !dirty ? <span className="chip green xs">实时</span> : null}
-        {dirty ? <span className="chip amber xs">未保存</span> : null}
+        {live && !dirty ? <span className="chip green xs">{t("common.live")}</span> : null}
+        {dirty ? <span className="chip amber xs">{t("common.unsaved")}</span> : null}
         {saveHint ? <span className="chip blue xs">{saveHint}</span> : null}
-        {readOnly ? <span className="chip gray xs">只读</span> : null}
+        {readOnly ? <span className="chip gray xs">{t("common.readOnly")}</span> : null}
         <span className="spacer" />
         {modes ? (
-          <span className="seg st-lang" role="tablist" aria-label="编码">
+          <span className="seg st-lang" role="tablist" aria-label={t("common.encoding")}>
             {modes.map((item) => (
               <button
                 type="button"
@@ -286,17 +288,17 @@ export function StructuredEditor({
           type="button"
           className="btn small outline"
           aria-pressed={allFolded}
-          aria-label={allFolded ? "展开已折叠的代码" : "折叠所有可折叠的代码"}
-          data-tip={allFolded ? "展开" : "折叠"}
+          aria-label={allFolded ? t("common.unfoldAll") : t("common.foldAll")}
+          data-tip={allFolded ? t("common.unfold") : t("common.fold")}
           onClick={toggleFolds}
         >
           <Icon name={allFolded ? "chevron-d" : "chevron-ud"} extra="sm" />
-          {allFolded ? "展开折叠" : "全部折叠"}
+          {allFolded ? t("common.unfoldAll") : t("common.foldAll")}
         </button>
         {showCopy ? (
           <button type="button" className="btn small outline" onClick={() => void onCopy()}>
             <Icon name="copy" extra="sm" />
-            {copied ? "已复制" : "复制"}
+            {copied ? t("common.copied") : t("common.copy")}
           </button>
         ) : null}
         {onChange && !locked ? (
@@ -304,11 +306,11 @@ export function StructuredEditor({
             type="button"
             className="btn small outline"
             disabled={!canRevert || saving}
-            data-tip="还原"
+            data-tip={t("common.revert")}
             onClick={onCancel}
           >
             <Icon name="x" extra="sm" />
-            取消
+            {t("common.cancel")}
           </button>
         ) : null}
         {onSave ? (
@@ -319,19 +321,19 @@ export function StructuredEditor({
             onClick={() => void onSave(value)}
           >
             <Icon name="check" extra="sm" />
-            {saving ? "保存中…" : "保存"}
+            {saving ? t("common.saving") : t("common.save")}
           </button>
         ) : null}
         <button
           type="button"
           className="btn small outline"
           aria-expanded={expanded}
-          aria-label={expanded ? "收起编辑器" : "展开编辑器"}
-          data-tip={expanded ? "收起" : "展开"}
+          aria-label={expanded ? t("common.collapse") : t("common.expand")}
+          data-tip={expanded ? t("common.collapse") : t("common.expand")}
           onClick={toggleExpanded}
         >
           <Icon name={expanded ? "restore" : "maximize"} extra="sm" />
-          {expanded ? "收起" : "展开"}
+          {expanded ? t("common.collapse") : t("common.expand")}
         </button>
       </div>
       <div

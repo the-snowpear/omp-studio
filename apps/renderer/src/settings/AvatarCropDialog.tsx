@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 import {
   AVATAR_CROP_CIRCLE_SIZE,
   AVATAR_CROP_VIEW_SIZE,
@@ -27,6 +28,7 @@ export function AvatarCropDialog({
   onRetake: () => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
@@ -106,8 +108,8 @@ export function AvatarCropDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="modal-head profile-edit-head">
-          <h2 id="avatarCropTitle">裁切头像</h2>
-          <button type="button" className="icon-btn" aria-label="关闭" disabled={inactive} onClick={onClose}>
+          <h2 id="avatarCropTitle">{t("settings.avatarCrop.title")}</h2>
+          <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={inactive} onClick={onClose}>
             <Icon name="x" />
           </button>
         </div>
@@ -133,7 +135,7 @@ export function AvatarCropDialog({
             />
             <div className="avatar-crop-circle" aria-hidden="true" />
           </div>
-          <p className="muted small">拖动调整位置，滚轮缩放</p>
+          <p className="muted small">{t("settings.avatarCrop.hint")}</p>
           {notice || error ? (
             <p className="profile-edit-error" role="alert">
               <Icon name="alert" extra="sm" />{notice ?? error}
@@ -141,7 +143,7 @@ export function AvatarCropDialog({
           ) : null}
         </div>
         <div className="modal-foot avatar-crop-foot">
-          <button type="button" className="btn outline" disabled={inactive} onClick={onRetake}>重拍</button>
+          <button type="button" className="btn outline" disabled={inactive} onClick={onRetake}>{t("settings.avatarCrop.retake")}</button>
           <button
             type="button"
             className="btn primary"
@@ -152,13 +154,13 @@ export function AvatarCropDialog({
               void encodeAvatarCrop(image.source, cropSourceRect(view)).then(
                 (avatar) => onConfirm(avatar),
                 (cause: unknown) => {
-                  setError(cause instanceof Error ? cause.message : "无法处理图片。");
+                  setError(cause instanceof Error ? cause.message : t("settings.avatarCrop.errorProcessing"));
                   setBusy(false);
                 },
               );
             }}
           >
-            {busy ? "处理中…" : "确认"}
+            {busy ? t("common.processing") : t("common.confirm")}
           </button>
         </div>
       </section>

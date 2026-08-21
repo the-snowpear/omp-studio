@@ -18,7 +18,13 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { OVERLAY_DIRECTORY, PATCHES_SUBDIRECTORY, seamPatchNames } from "./omp-seam.mjs";
+import {
+  OVERLAY_DIRECTORY,
+  PATCHES_SUBDIRECTORY,
+  PATCHSET_VERSION_FILE,
+  digestibleOverlaySource,
+  seamPatchNames,
+} from "./omp-seam.mjs";
 import { ompSourceDirectory, repositoryRoot, run } from "./omp-tooling.mjs";
 
 export const overlayRoot = join(repositoryRoot, ...OVERLAY_DIRECTORY.split("/"));
@@ -104,12 +110,19 @@ export async function captureOverlay(targetDirectory = ompSourceDirectory, root 
 /**
  * Deterministic digest over overlay path/content pairs. Renaming a file changes
  * the digest even when the bytes are unchanged, so provenance tracks layout too.
+ *
+ * One file is normalized first: the `PATCHSET_VERSION` literal is *derived* from
+ * this digest, so hashing it verbatim would make every bump demand another bump.
+ * See `digestibleOverlaySource`.
  */
 export async function overlayHash(root = overlayRoot) {
   const files = await overlayFiles(root);
   const digest = createHash("sha256");
   for (const file of files) {
-    const content = await readFile(join(root, ...file.split("/")));
+    // Bytes for every file but the one carrying the derived version literal, so
+    // existing digests stay byte-exact and no file has to be valid UTF-8.
+    const raw = await readFile(join(root, ...file.split("/")));
+    const content = file === PATCHSET_VERSION_FILE ? digestibleOverlaySource(file, raw.toString("utf8")) : raw;
     digest.update(file);
     digest.update("\0");
     digest.update(createHash("sha256").update(content).digest("hex"));

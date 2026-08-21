@@ -1,8 +1,9 @@
 import { DAY_MS, fmtTokens, intensity, startOfDay } from "../usage/tokenUsage";
 
-/** Adjacent month labels need at least this many week columns or they collide. */
 export const MONTH_LABEL_MIN_GAP = 2;
-export const ACTIVITY_HEAT_WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"] as const;
+export const ACTIVITY_HEAT_WEEKDAYS_ZH = ["一", "二", "三", "四", "五", "六", "日"] as const;
+export const ACTIVITY_HEAT_WEEKDAYS_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+export const ACTIVITY_HEAT_MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 
 export type ActivityHeatLevel = 0 | 1 | 2 | 3 | 4;
 
@@ -35,17 +36,24 @@ export function usageLevel(tokens: number, cap: number): ActivityHeatLevel {
   return Math.min(4, Math.ceil(intensity(tokens, cap) * 5) - 1) as ActivityHeatLevel;
 }
 
-export function heatDayLabel(ts: number): string {
+export function heatDayLabel(ts: number, lang: "zh" | "en" = "zh"): string {
   const date = new Date(ts);
-  const weekday = ACTIVITY_HEAT_WEEKDAYS[(date.getDay() + 6) % 7] ?? "";
+  const dowIndex = (date.getDay() + 6) % 7;
+  if (lang === "en") {
+    const month = ACTIVITY_HEAT_MONTHS_EN[date.getMonth()] ?? "";
+    const weekday = ACTIVITY_HEAT_WEEKDAYS_EN[dowIndex] ?? "";
+    return `${month} ${date.getDate()}, ${weekday}`;
+  }
+  const weekday = ACTIVITY_HEAT_WEEKDAYS_ZH[dowIndex] ?? "";
   return `${date.getMonth() + 1}月${date.getDate()}日 周${weekday}`;
 }
 
-export function heatCellTip(cell: ActivityHeatCell): string {
-  const day = heatDayLabel(cell.ts);
-  if (cell.future) return `未来 · ${day}`;
+export function heatCellTip(cell: ActivityHeatCell, lang: "zh" | "en" = "zh"): string {
+  const day = heatDayLabel(cell.ts, lang);
+  if (cell.future) return lang === "en" ? `Future · ${day}` : `未来 · ${day}`;
   if (cell.pad) return day;
-  return cell.tokens > 0 ? `${fmtTokens(cell.tokens)} tok · ${day}` : `无用量 · ${day}`;
+  if (cell.tokens > 0) return `${fmtTokens(cell.tokens)} tok · ${day}`;
+  return lang === "en" ? `No usage · ${day}` : `无用量 · ${day}`;
 }
 
 export function yearWindowStart(now = Date.now()): {
@@ -67,6 +75,7 @@ export function yearWindowStart(now = Date.now()): {
 export function buildActivityHeatmap(
   totalsByDay: ReadonlyMap<number, number>,
   now = Date.now(),
+  lang: "zh" | "en" = "zh",
 ): ActivityHeatmap {
   const { today, yearStart, yearEnd, start, weeks } = yearWindowStart(now);
   const windowTotals: number[] = [];
@@ -80,7 +89,8 @@ export function buildActivityHeatmap(
     if (month !== prevMonth) {
       const last = months[months.length - 1];
       if (last === undefined || week - last.week >= MONTH_LABEL_MIN_GAP) {
-        months.push({ week, label: `${month + 1}月` });
+        const label = lang === "en" ? (ACTIVITY_HEAT_MONTHS_EN[month] ?? `${month + 1}`) : `${month + 1}月`;
+        months.push({ week, label });
       }
       prevMonth = month;
     }

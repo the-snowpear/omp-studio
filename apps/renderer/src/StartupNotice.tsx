@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, t
 import { createPortal } from "react-dom";
 import { Brand } from "./brands";
 import { Icon } from "./icons";
+import { useI18n } from "./i18n";
 import {
   PROJECT_GITHUB_HOST,
   PROJECT_GITHUB_URL,
@@ -18,6 +19,7 @@ export function StartupNoticeDialog({
   readonly onDontRemind: () => void;
 }): ReactNode {
   const copy = STARTUP_NOTICE_COPY;
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -69,7 +71,7 @@ export function StartupNoticeDialog({
             <h2 id="startupNoticeTitle">{copy.title}</h2>
             <p className="create-branch-sub">{copy.body}</p>
           </div>
-          <button type="button" className="icon-btn" aria-label="关闭提示" onClick={onClose}><Icon name="x" /></button>
+          <button type="button" className="icon-btn" aria-label={t("common.closeTip")} onClick={onClose}><Icon name="x" /></button>
         </div>
         <div className="create-project-body startup-notice-body">
           <p className="create-branch-hint">{copy.hint}</p>
@@ -92,8 +94,8 @@ export function StartupNoticeDialog({
             <button
               type="button"
               className="icon-btn"
-              aria-label={copied ? "已复制项目地址" : "复制项目地址"}
-              data-tip={copied ? "已复制" : "复制"}
+              aria-label={copied ? t("common.copiedRepoUrl") : t("common.copyRepoUrl")}
+              data-tip={copied ? t("common.copied") : t("common.copy")}
               onClick={(event) => { void copyUrl(event); }}
             >
               <Icon name={copied ? "check" : "copy"} extra="sm" />
@@ -103,8 +105,8 @@ export function StartupNoticeDialog({
         <div className="create-project-foot startup-notice-foot">
           <p className="startup-notice-thanks">{copy.thanks}</p>
           <div className="startup-notice-actions">
-            <button type="button" className="btn outline" onClick={onDontRemind}>不再提醒</button>
-            <button type="button" className="btn primary" autoFocus onClick={onClose}>关闭</button>
+            <button type="button" className="btn outline" onClick={onDontRemind}>{t("common.dontRemind")}</button>
+            <button type="button" className="btn primary" autoFocus onClick={onClose}>{t("common.close")}</button>
           </div>
         </div>
       </section>

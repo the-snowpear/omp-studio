@@ -21,6 +21,15 @@
 export const OVERLAY_DIRECTORY = "omp-patch/overlay";
 export const PATCHES_SUBDIRECTORY = "omp-patch/patches";
 
+/**
+ * Overlay file whose `PATCHSET_VERSION` the Runtime reports in its Studio
+ * Hello. It must equal `series.json` `patchsetVersion`: packaging probes the
+ * built binary and refuses to sign an artifact whose reported identity
+ * disagrees with the series, so a stale constant otherwise fails only after a
+ * full native build.
+ */
+export const PATCHSET_VERSION_FILE = "packages/coding-agent/src/studio/bridge-server.ts";
+
 /** Upstream paths intentionally left unpatched even when the vendor tree changes them. */
 export const SEAM_EXCLUDED = Object.freeze([
   // Fork-local changelog prose conflicts on every upstream release and carries
@@ -89,4 +98,38 @@ export function seamPatchNames() {
 
 export function seamPathOwner(filePath) {
   return SEAM_GROUPS.find(group => group.paths.includes(filePath));
+}
+
+const PATCHSET_VERSION_PATTERN = /^const PATCHSET_VERSION = "([^"]+)";$/mu;
+
+/**
+ * Placeholder substituted for the version literal when hashing the overlay.
+ *
+ * The literal is derived *from* the overlay digest, so hashing it verbatim
+ * would be circular: writing the newly derived version back into the file
+ * would change the digest and demand another bump, forever. Provenance does
+ * not lose the version — the artifact manifest records `runtimeVersion`, and
+ * packaging probes the built binary to confirm it reports exactly that.
+ */
+const PATCHSET_VERSION_PLACEHOLDER = 'const PATCHSET_VERSION = "<derived-from-series>";';
+
+/** The `PATCHSET_VERSION` literal declared in an overlay `bridge-server.ts`. */
+export function readPatchsetVersionConstant(source) {
+  const match = PATCHSET_VERSION_PATTERN.exec(source);
+  if (match === null) {
+    throw new Error(`${PATCHSET_VERSION_FILE} does not declare a PATCHSET_VERSION constant`);
+  }
+  return match[1];
+}
+
+/** Same source with the version literal replaced; unchanged when already equal. */
+export function withPatchsetVersionConstant(source, patchsetVersion) {
+  readPatchsetVersionConstant(source);
+  return source.replace(PATCHSET_VERSION_PATTERN, `const PATCHSET_VERSION = "${patchsetVersion}";`);
+}
+
+/** Version-independent view of an overlay file, for digesting. */
+export function digestibleOverlaySource(overlayRelativePath, source) {
+  if (overlayRelativePath !== PATCHSET_VERSION_FILE) return source;
+  return source.replace(PATCHSET_VERSION_PATTERN, PATCHSET_VERSION_PLACEHOLDER);
 }

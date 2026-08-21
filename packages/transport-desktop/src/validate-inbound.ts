@@ -1076,9 +1076,23 @@ function validateModelsProviderSetEnabledInput(input: unknown): void {
   if (typeof input.enabled !== "boolean") throw new ValidationError("models.provider.setEnabled input: enabled must be boolean");
 }
 
+/** Custom request headers carried by model provider inputs. Never a secret store. */
+function validateModelsHeaderMap(input: unknown, what: string): void {
+  assertPlainObject(input, what);
+  const entries = Object.entries(input);
+  if (entries.length > MAX_LIST_ITEMS) throw new ValidationError(`${what}: exceeds max length`);
+  for (const [name, value] of entries) {
+    assertNonEmptyText(name, `${what}: header name`);
+    assertNonEmptyText(value, `${what}: ${name}`);
+    if (name.length > MAX_TEXT_LENGTH || (value as string).length > MAX_TEXT_LENGTH) {
+      throw new ValidationError(`${what}: ${name} exceeds max length`);
+    }
+  }
+}
+
 function validateModelsProviderProbeInput(input: unknown): void {
   assertPlainObject(input, "models.provider.probe input");
-  assertNoUnknownKeys(input, ["providerId", "endpointUrl", "apiKey", "discoveryType", "timeoutMs"], "models.provider.probe input");
+  assertNoUnknownKeys(input, ["providerId", "endpointUrl", "apiKey", "discoveryType", "timeoutMs", "api", "headers"], "models.provider.probe input");
   assertNonEmptyText(input.providerId, "models.provider.probe input: providerId");
   if (input.endpointUrl !== undefined) {
     if (typeof input.endpointUrl !== "string") throw new ValidationError("models.provider.probe input: endpointUrl must be a string");
@@ -1086,6 +1100,8 @@ function validateModelsProviderProbeInput(input: unknown): void {
   }
   if (input.apiKey !== undefined) assertNonEmptyText(input.apiKey, "models.provider.probe input: apiKey");
   if (input.discoveryType !== undefined) assertNonEmptyText(input.discoveryType, "models.provider.probe input: discoveryType");
+  if (input.api !== undefined) assertNonEmptyText(input.api, "models.provider.probe input: api");
+  if (input.headers !== undefined) validateModelsHeaderMap(input.headers, "models.provider.probe input: headers");
   if (input.timeoutMs !== undefined && (typeof input.timeoutMs !== "number" || !Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0)) {
     throw new ValidationError("models.provider.probe input: timeoutMs must be a positive integer");
   }

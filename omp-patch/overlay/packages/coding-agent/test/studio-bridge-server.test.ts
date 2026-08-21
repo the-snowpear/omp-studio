@@ -288,8 +288,13 @@ describe("WP-011 Studio Bridge runtime server", () => {
 		await started;
 		expect(response.runtimeInstanceId).toBe("runtime-instance-test");
 		expect(response.runtimeEpoch).toBe(7);
-		expect(response.runtimeVersion).toBe("17.3.7-studio.3");
 		expect(response.upstreamVersion).toBe("17.3.7");
+		// The `studio.<n>` suffix is derived from `omp-patch/patches/series.json` and
+		// bumps whenever fork content changes, so assert the composition rather than
+		// the number. The exact value is pinned outside this tree:
+		// `scripts/build-omp-host.mjs` refuses to package unless the constant, the
+		// series, and the probed binary all agree.
+		expect(response.runtimeVersion).toMatch(/^17\.3\.7-studio\.\d+$/u);
 		expect(responseFrame.header.runtimeEpoch).toBe(response.runtimeEpoch);
 		expect(response.capabilityManifest.profile).toBe("limited");
 		const capabilityIds = response.capabilityManifest.capabilities.map(entry => entry.id);

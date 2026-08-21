@@ -22,7 +22,13 @@ import {
   seriesDigest,
   sha256Hex,
 } from "./runtime-artifact.mjs";
-import { assertOverlayPresent, overlayHash } from "./omp-overlay.mjs";
+import { assertOverlayPresent, overlayHash, overlayRoot } from "./omp-overlay.mjs";
+import {
+  PATCHSET_VERSION_FILE,
+  digestibleOverlaySource,
+  readPatchsetVersionConstant,
+  withPatchsetVersionConstant,
+} from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
 const REAL_UPSTREAM_COMMIT = "8500092296621a6826b7136e840f8a59ea338958";
@@ -321,6 +327,38 @@ test("patchset version is recorded, not counted, so consolidating patches cannot
   assert.equal(nextPatchsetVersion("studio.35"), "studio.36");
   assert.throws(() => nextPatchsetVersion("35"), /studio\.<n>/u);
   assert.throws(() => nextPatchsetVersion(undefined), /studio\.<n>/u);
+});
+
+test("the Runtime's reported patchset version matches series.json", async () => {
+  const series = await readPatchSeries();
+  const source = await readFile(join(overlayRoot, ...PATCHSET_VERSION_FILE.split("/")), "utf8");
+  assert.equal(readPatchsetVersionConstant(source), series.patchsetVersion);
+});
+
+test("the overlay digest ignores the derived patchset version literal", () => {
+  const source = [
+    'const UPSTREAM_COMMIT = "abc";',
+    'const PATCHSET_VERSION = "studio.4";',
+    "const other = 1;",
+    "",
+  ].join("\n");
+  const bumped = withPatchsetVersionConstant(source, "studio.5");
+
+  // Rewriting the literal is a real edit...
+  assert.notEqual(bumped, source);
+  assert.equal(readPatchsetVersionConstant(bumped), "studio.5");
+  // ...but the digest must not see it, or every bump would demand another bump.
+  assert.equal(
+    digestibleOverlaySource(PATCHSET_VERSION_FILE, source),
+    digestibleOverlaySource(PATCHSET_VERSION_FILE, bumped),
+  );
+  // Other content in the same file still counts, and other files are untouched.
+  assert.notEqual(
+    digestibleOverlaySource(PATCHSET_VERSION_FILE, source),
+    digestibleOverlaySource(PATCHSET_VERSION_FILE, source.replace("const other = 1;", "const other = 2;")),
+  );
+  assert.equal(digestibleOverlaySource("packages/coding-agent/src/studio/other.ts", source), source);
+  assert.throws(() => readPatchsetVersionConstant("const NOPE = 1;\n"), /does not declare a PATCHSET_VERSION/u);
 });
 
 test("series digest changes with overlay content and with seam patch content", () => {

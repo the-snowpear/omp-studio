@@ -8,25 +8,20 @@
  */
 
 import type { ReactNode } from "react";
+import { useI18n } from "../i18n";
 
 export type SettingSource = "default" | "user" | "project" | "runtime" | "unavailable";
 
-const SOURCE_LABELS: Readonly<Record<SettingSource, string>> = {
-  default: "默认值",
-  user: "用户",
-  project: "项目",
-  runtime: "运行时",
-  unavailable: "尚未接入",
-};
-
 export function SourceBadge({ source, reason }: { source: SettingSource; reason?: string | undefined }) {
+  const { t } = useI18n();
+  const label = t(`settings.sources.${source}`);
   return (
     <span
       className={`src-badge${source === "unavailable" ? " is-unavailable" : ""}`}
       data-source={source}
-      data-tip={source === "unavailable" ? "（暂未实现）" : undefined}
+      data-tip={source === "unavailable" ? (reason ?? `（${t("common.notImplemented")}）`) : undefined}
     >
-      {SOURCE_LABELS[source]}
+      {label}
     </span>
   );
 }
@@ -54,8 +49,9 @@ export function SettingRow({
   reason?: string;
   children: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
-    <div className={`set-row${source === "unavailable" ? " is-unavailable" : ""}`} data-tip={source === "unavailable" ? "（暂未实现）" : undefined}>
+    <div className={`set-row${source === "unavailable" ? " is-unavailable" : ""}`} data-tip={source === "unavailable" ? (reason ?? `（${t("common.notImplemented")}）`) : undefined}>
       <div>
         <div className="sr-label">
           {label} <SourceBadge source={source} reason={reason} />
@@ -103,15 +99,20 @@ export function StaticSelect({
   title,
 }: {
   value: string;
-  options: ReadonlyArray<string>;
+  options: ReadonlyArray<string | readonly [string, string]>;
   label: string;
   title?: string;
 }) {
+  const { t } = useI18n();
   return (
-    <select className="select" value={value} disabled aria-label={label} data-tip={title ?? "（暂未实现）"}>
-      {options.map((option) => (
-        <option key={option} value={option}>{option}</option>
-      ))}
+    <select className="select" value={value} disabled aria-label={label} data-tip={title ?? `（${t("common.notImplemented")}）`}>
+      {options.map((option) => {
+        const [optVal, optLabel] = Array.isArray(option) ? option : [option, option];
+        return (
+          <option key={optVal} value={optVal}>{optLabel}</option>
+        );
+      })}
     </select>
   );
 }
+

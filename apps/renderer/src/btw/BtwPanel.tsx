@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type FormEvent, type KeyboardEvent } from "react";
 import { Icon } from "../icons";
 import { MarkdownText } from "../conversation/markdown";
+import { useI18n } from "../i18n";
 import type { BtwSessionApi } from "./useBtwSession";
 
 /** Distance from the bottom within which the answer keeps auto-following. */
@@ -29,6 +30,7 @@ export function BtwPanel({
   const followRef = useRef(true);
   const roundId = snapshot?.ephemeralId ?? null;
 
+  const { t } = useI18n();
   const text = snapshot?.text ?? "";
   useEffect(() => {
     followRef.current = true;
@@ -92,10 +94,10 @@ export function BtwPanel({
           type="button"
           className="btn ghost small"
           disabled={text === ""}
-          data-tip={text === "" ? "无内容" : "复制"}
+          data-tip={text === "" ? t("btw.noContent") : t("common.copy")}
           onClick={() => void session.copy()}
         >
-          <Icon name="copy" extra="sm" />复制
+          <Icon name="copy" extra="sm" />{t("common.copy")}
         </button>
         <span className="spacer" />
         <button
@@ -105,13 +107,13 @@ export function BtwPanel({
           {...(session.branchBlockedReason === undefined ? {} : { "data-tip": session.branchBlockedReason })}
           onClick={() => void session.branch()}
         >
-          <Icon name="branch" extra="sm" />分支为新会话
+          <Icon name="branch" extra="sm" />{t("btw.branchToNewSession")}
         </button>
         {demo !== true ? null : onDemoNext === undefined ? (
-          <span className="chip gray xs">演示</span>
+          <span className="chip gray xs">{t("common.demo")}</span>
         ) : (
-          <button type="button" className="chip gray xs btw-demo-next" data-tip="演示" onClick={onDemoNext}>
-            演示
+          <button type="button" className="chip gray xs btw-demo-next" data-tip={t("common.demo")} onClick={onDemoNext}>
+            {t("common.demo")}
           </button>
         )}
       </div>
@@ -121,6 +123,7 @@ export function BtwPanel({
 }
 
 function BtwComposer({ session }: { session: BtwSessionApi }) {
+  const { t } = useI18n();
   const inputId = useId();
   const sending = session.pending;
   const draft = session.draft;
@@ -147,12 +150,12 @@ function BtwComposer({ session }: { session: BtwSessionApi }) {
 
   return (
     <form className="btw-compose" onSubmit={onSubmit}>
-      <label className="sr-only" htmlFor={inputId}>BTW 问题</label>
+      <label className="sr-only" htmlFor={inputId}>{t("btw.questionLabel")}</label>
       <textarea
         id={inputId}
         className="btw-compose-input"
         rows={2}
-        placeholder={running ? "再问一句会覆盖正在回答的这一轮" : "旁路问一句，不进主对话…"}
+        placeholder={running ? t("btw.overwritePlaceholder") : t("btw.placeholder")}
         value={draft}
         disabled={sending}
         onChange={(event) => session.setDraft(event.target.value)}
@@ -162,8 +165,8 @@ function BtwComposer({ session }: { session: BtwSessionApi }) {
         type="submit"
         className="icon-btn small btw-compose-send"
         disabled={!ready}
-        data-tip={running ? "覆盖" : "发送"}
-        aria-label={running ? "覆盖本轮并提问" : "发送"}
+        data-tip={running ? t("btw.overwrite") : t("common.send")}
+        aria-label={running ? t("btw.overwriteAndAsk") : t("common.send")}
       >
         <Icon name="send" extra="sm" />
       </button>

@@ -1,0 +1,563 @@
+/* ============================================================
+   OMP Studio — Shared components
+   ============================================================ */
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+  height: 28px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  color: var(--text-2);
+  border: 1px solid transparent;
+  transition: background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform var(--dur-tactile) var(--ease-out);
+  white-space: nowrap;
+  user-select: none;
+}
+.btn:hover { background: var(--surface-hover); color: var(--text); }
+.btn:active {
+  background: var(--surface-active);
+  transform: translateY(1px);  /* Physical push feedback */
+}
+
+.btn.primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+.btn.primary:hover { background: var(--accent-hover); color: var(--text-on-accent); }
+.btn.primary:active {
+  background: var(--accent-hover);
+  transform: translateY(1px);
+}
+
+.btn.outline {
+  border-color: var(--border-strong);
+  color: var(--text-2);
+  background: var(--surface);
+}
+.btn.outline:hover { border-color: var(--text-3); color: var(--text); }
+.btn.outline:active {
+  border-color: var(--text-3);
+  color: var(--text);
+  transform: translateY(1px);
+}
+
+.btn.danger { color: var(--red); }
+.btn.danger:hover { background: var(--red-soft); }
+.btn.danger:active {
+  background: var(--red-soft);
+  transform: translateY(1px);
+}
+
+.btn.small { height: 24px; padding: 0 var(--sp-8); font-size: var(--fs-11); }
+/* Disabled: opacity alone can still read as "just quiet text" on a tinted
+   button, so pointer-events are dropped too — the control cannot be hovered
+   into looking live. 0.45 sits inside the 0.38-0.5 disabled range. */
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+/* Destructive actions carry the danger colour on their own fill rather than
+   inheriting the neutral primary, so "确认恢复" cannot be mistaken for a
+   routine confirm. */
+.btn.danger.solid {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
+.btn.danger.solid:hover { background: var(--red); filter: brightness(0.92); }
+.btn.danger.solid:active {
+  background: var(--red);
+  filter: brightness(0.92);
+  transform: translateY(1px);
+}
+
+/* Icon-only button */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-6);
+  color: var(--text-3);
+  flex: none;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    transform var(--dur-tactile) var(--ease-out);
+  position: relative;
+}
+.icon-btn:hover { background: var(--surface-hover); color: var(--text); }
+.icon-btn:active {
+  background: var(--surface-active);
+  color: var(--text);
+  transform: scale(0.92);  /* Subtle squeeze feedback */
+}
+.icon-btn.active { background: var(--accent-soft); color: var(--accent); }
+.icon-btn.small { width: 22px; height: 22px; }
+/* 主入口按钮（如 Agent Hub）：比标准 26px 大一圈 */
+.icon-btn.lg { width: 32px; height: 32px; }
+/* Destructive icon button (e.g. delete on Skill cards). Same red treatment
+   as .btn.danger but sized for the 22px chrome. Without this the X reads as
+   a neutral close icon and the data-tip is the only warning. */
+.icon-btn.danger { color: var(--text-3); }
+.icon-btn.danger:hover,
+.icon-btn.danger:focus-visible {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+/* Pointer target expansion.
+   Dense IDE chrome draws 18-22px buttons, which are under the 24x24 CSS-pixel
+   minimum (WCAG 2.2 SC 2.5.8). Growing the visual box would break the
+   toolbars, so an invisible centred hit area is stretched to --tap-min
+   instead — the paint size is unchanged, the clickable size is compliant. */
+.icon-btn::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, var(--tap-min));
+  height: max(100%, var(--tap-min));
+  transform: translate(-50%, -50%);
+}
+/* Same for the smallest inline affordances. */
+.ctx-chip .x,
+.tree-row .fop .icon-btn,
+.minimap-tools .icon-btn { position: relative; }
+.icon-btn .badge-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--red);
+  border: 1.5px solid var(--surface);
+}
+
+/* ---------- Status chip ---------- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 20px;
+  padding: 0 var(--sp-8);
+  border-radius: var(--r-full);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+  user-select: none;
+}
+.chip.green { background: var(--green-soft); color: var(--green); }
+.chip.amber { background: var(--amber-soft); color: var(--amber); }
+.chip.red { background: var(--red-soft); color: var(--red); }
+.chip.blue { background: var(--blue-soft); color: var(--blue); }
+.chip.purple { background: var(--accent-soft); color: var(--accent); }
+.chip.gray { background: var(--surface-2); color: var(--text-3); }
+.chip.outline {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-2);
+}
+/* Compact chip tiers. These existed only as repeated inline
+   `style="height:16px;padding:0 5px"` on 23 call sites, which meant the sizes
+   were unversioned and drifted (16px vs 18px, 5px vs 6px). Same values,
+   now named. */
+.chip.xs { height: 16px; padding: 0 var(--sp-6); font-size: 10.5px; }
+.chip.sm { height: 18px; padding: 0 var(--sp-6); }
+
+/* ---------- Menu / Popover ---------- */
+.menu {
+  position: absolute;
+  min-width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-8);
+  box-shadow: var(--shadow-menu);
+  padding: var(--sp-6);
+  z-index: var(--z-menu);
+  animation: omp-menu-in var(--dur-fast) var(--ease-out);
+}
+@keyframes omp-menu-in {
+  from { opacity: 0; transform: translateY(-3px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  padding: 6px var(--sp-8);
+  border-radius: var(--r-6);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  text-align: left;
+}
+.menu-item:hover { background: var(--surface-hover); color: var(--text); }
+.menu-item .kbd, .menu-item .hint {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-11);
+}
+.menu-item.danger { color: var(--red); }
+.menu-item.danger:hover { background: var(--red-soft); }
+.menu-sep { height: 1px; background: var(--border); margin: var(--sp-6) var(--sp-4); }
+.menu-label {
+  padding: var(--sp-4) var(--sp-8);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+  font-weight: var(--fw-medium);
+}
+
+/* 分支菜单头部：分支名 + 状态详情（对齐 ver2 menu-header） */
+.branch-menu-head {
+  padding: var(--sp-6) var(--sp-8) var(--sp-8);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-6);
+}
+.branch-menu-head .bmh-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-13);
+  color: var(--text);
+}
+.branch-menu-head .bmh-title .icon { color: var(--accent); }
+.branch-menu-head .bmh-meta {
+  margin-top: 3px;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--r-4);
+  color: var(--text-3);
+  background: var(--surface);
+}
+
+/* ---------- Segmented control / Tabs ---------- */
+.seg {
+  display: inline-flex;
+  background: var(--surface-2);
+  border-radius: var(--r-6);
+  padding: 2px;
+  gap: 2px;
+}
+.seg button {
+  height: 22px;
+  padding: 0 var(--sp-10);
+  border-radius: var(--r-4);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-medium);
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.seg button:hover { color: var(--text); }
+.seg button.active {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+:root[data-theme="dark"] .seg button.active { background: var(--surface-3); }
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.tabs button {
+  height: 32px;
+  padding: 0 var(--sp-10);
+  font-size: var(--fs-12);
+  color: var(--text-3);
+  font-weight: var(--fw-medium);
+  border-bottom: 2px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+.tabs button:hover { color: var(--text); }
+.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ---------- Card ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+}
+
+/* ---------- Banner (全局异常) ---------- */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-10);
+  padding: 7px var(--sp-16);
+  font-size: var(--fs-12);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.banner.amber { background: var(--amber-soft); color: var(--amber); }
+.banner.red { background: var(--red-soft); color: var(--red); }
+.banner .banner-detail { color: var(--text-2); }
+.banner .banner-actions { margin-left: auto; display: flex; gap: var(--sp-6); }
+
+/* ---------- Modal ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  /* 0.4 was too weak to isolate a white modal from a light-mode workbench —
+     the dense UI behind it stayed legible and competed for attention. 0.5 is
+     in the 40-60% range that reliably reads as "the layer below is inert". */
+  background: rgba(15, 15, 25, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: var(--z-modal);
+  animation: omp-fade-in var(--dur-fast) var(--ease-out);
+  /* Long modal content (checkpoint scope lists) was unreachable — the backdrop
+     is a fixed full-viewport box with no scroll, so overflow was clipped. */
+  overflow-y: auto;
+  padding-bottom: var(--sp-24);
+}
+:root[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.6); }
+@keyframes omp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  width: 480px;
+  max-width: calc(100vw - 48px);
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-10);
+  box-shadow: var(--shadow-modal);
+  animation: omp-menu-in var(--dur) var(--ease-out);
+}
+.modal-head {
+  padding: var(--sp-16) var(--sp-20) 0;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.modal-body { padding: var(--sp-12) var(--sp-20); color: var(--text-2); font-size: var(--fs-14); }
+.modal-foot {
+  padding: var(--sp-12) var(--sp-20) var(--sp-16);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-8);
+}
+
+/* ---------- Toast ---------- */
+.toast-wrap {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  align-items: center;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  background: var(--surface);
+  border: 1px solid var(--border-float);
+  border-radius: var(--r-8);
+  box-shadow: var(--shadow-menu);
+  padding: 8px var(--sp-14);
+  font-size: var(--fs-12);
+  color: var(--text);
+  animation: omp-toast-in var(--dur) var(--ease-out);
+}
+@keyframes omp-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- Tooltip ----------
+   Two changes from hover-only:
+   - :focus-visible is included, so keyboard users reach the same text mouse
+     users get. Most of these tooltips label icon-only buttons, so hover-only
+     meant the label was unreachable without a pointer.
+   - z-index moved off --z-toast (100). At that tier a tooltip on a background
+     control could paint over an open modal; --z-menu keeps it above page
+     content but below modal and toast. */
+[data-tip] { position: relative; }
+[data-tip]:hover::after,
+[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+  padding: 3px 8px;
+  border-radius: var(--r-4);
+  /* Was nowrap, which pushed long tips ("收起 / 双击分隔条平分") off-screen.
+     Wrapping at a fixed measure keeps them inside the viewport. */
+  width: max-content;
+  max-width: 220px;
+  text-align: center;
+  z-index: var(--z-menu);
+  pointer-events: none;
+}
+
+/* 靠近视口顶部的区域：tooltip 显示在元素下方，避免被屏幕顶边裁切 */
+.topbar [data-tip]:hover::after,
+.sb-top [data-tip]:hover::after,
+.page-head [data-tip]:hover::after {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+/* ---------- Form controls ---------- */
+.field { display: flex; flex-direction: column; gap: var(--sp-6); }
+.field label { font-size: var(--fs-12); font-weight: var(--fw-medium); color: var(--text-2); }
+.field .desc { font-size: var(--fs-11); color: var(--text-3); }
+.field .error {
+  font-size: var(--fs-11);
+  color: var(--red);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.input, .select {
+  /* 30px was below the 4.5:1-adjacent usability floor for pointer targets and
+     forced 12px text; 32px fits the 4px rhythm and takes 13px comfortably. */
+  height: 32px;
+  padding: 0 var(--sp-10);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-6);
+  background: var(--surface);
+  font-size: var(--fs-14);
+  width: 100%;
+  transition: border-color var(--dur-fast) var(--ease),
+              box-shadow var(--dur-fast) var(--ease);
+}
+/* 聚焦特效 = 外发光：3px 柔光环 + 弥散光晕，边框颜色保持不变；
+   关闭全局 2px 实线 outline（即用户不想要的"紫色边线"）。 */
+.input:focus, .select:focus,
+.input:focus-visible, .select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-softer),
+              0 0 14px 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.input:disabled, .select:disabled {
+  background: var(--surface-2);
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+/* Read-only is not disabled: the value still matters and stays selectable, so
+   it keeps full text contrast and only loses the editable affordance. */
+.input[readonly] {
+  background: var(--surface-2);
+  border-style: dashed;
+  cursor: default;
+}
+.input[aria-invalid="true"], .select[aria-invalid="true"] { border-color: var(--red); }
+textarea.input { height: auto; min-height: 72px; padding: var(--sp-8) var(--sp-10); resize: vertical; }
+
+/* Switch.
+   Rendered as <button role="switch"> rather than <span> so it is focusable,
+   operable with Space/Enter, and announces its on/off state. Visual state now
+   keys off [aria-checked] so the DOM attribute is the single source of truth
+   instead of a cosmetic .on class. */
+.switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  flex: none;
+  padding: 0;
+  transition: background var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--r-full);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+/* The 34x20 paint is under the 24px pointer minimum on one axis. */
+.switch::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: var(--tap-min);
+  transform: translate(-50%, -50%);
+}
+.switch.on,
+.switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.switch.on::after,
+.switch[aria-checked="true"]::after { transform: translateX(14px); }
+.switch:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- Empty state ---------- */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: var(--sp-32);
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  text-align: center;
+}
+.empty .icon { width: 28px; height: 28px; stroke-width: 1.2; color: var(--glyph-faint); }
+
+/* ---------- Progress bar (context usage 等) ---------- */
+.meter {
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+  flex: none;
+}
+.meter > i {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+.meter.warn > i { background: var(--amber); }
+.meter.danger > i { background: var(--red); }
+
+/* ---------- Agent status chip 颜色映射 ---------- */
+.st-thinking { color: var(--accent); }
+.st-running { color: var(--blue); }
+.st-waiting { color: var(--amber); }
+.st-done { color: var(--green); }
+.st-failed { color: var(--red); }
+.st-aborted { color: var(--text-3); }

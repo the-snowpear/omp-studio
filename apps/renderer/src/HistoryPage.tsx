@@ -11,20 +11,15 @@ import {
   type PreviewHistoryStatus,
   type PreviewTtNode,
 } from "./preview/fixtures";
-
-const CONTRACT = {
-  export: "导出（暂未实现）",
-  fork: "Fork（暂未实现）",
-  more: "更多（暂未实现）",
-} as const;
+import { useI18n } from "./i18n";
 
 /** 工具栏状态筛选：纯客户端过滤已加载的会话模型，不涉及 Host 契约。 */
 type StatusTab = "all" | "active" | "archived";
 
-const STATUS_TABS: ReadonlyArray<{ readonly id: StatusTab; readonly label: string }> = [
-  { id: "all", label: "全部" },
-  { id: "active", label: "进行中" },
-  { id: "archived", label: "已归档" },
+const STATUS_TABS: ReadonlyArray<{ readonly id: StatusTab; readonly key: string }> = [
+  { id: "all", key: "history.all" },
+  { id: "active", key: "history.active" },
+  { id: "archived", key: "history.archived" },
 ];
 
 function matchesStatusTab(status: string, tab: StatusTab): boolean {
@@ -32,30 +27,30 @@ function matchesStatusTab(status: string, tab: StatusTab): boolean {
   return tab === "archived" ? status === "archived" : status !== "archived";
 }
 
-const PREVIEW_STATUS: Record<PreviewHistoryStatus, { chip: string; label: string }> = {
-  running: { chip: "blue", label: "运行中" },
-  completed: { chip: "green", label: "已完成" },
-  failed: { chip: "red", label: "失败" },
-  archived: { chip: "gray", label: "已归档" },
+const PREVIEW_STATUS: Record<PreviewHistoryStatus, { chip: string; key: string }> = {
+  running: { chip: "blue", key: "common.running" },
+  completed: { chip: "green", key: "common.completed" },
+  failed: { chip: "red", key: "common.failed" },
+  archived: { chip: "gray", key: "history.archived" },
 };
 
-const HOST_STATUS: Record<SessionHistoryStatus, { chip: string; label: string }> = {
-  active: { chip: "blue", label: "进行中" },
-  archived: { chip: "gray", label: "已归档" },
-  closed: { chip: "gray", label: "已关闭" },
+const HOST_STATUS: Record<SessionHistoryStatus, { chip: string; key: string }> = {
+  active: { chip: "blue", key: "history.active" },
+  archived: { chip: "gray", key: "history.archived" },
+  closed: { chip: "gray", key: "history.closed" },
 };
 
 const TT_RESTORE = {
-  code: "仅恢复代码：工作区回滚，对话保留",
-  convo: "仅恢复对话：对话回滚，工作区保留",
-  both: "恢复代码与对话：两者同时回滚到该节点",
+  code: "history.restoreCodeOnly",
+  convo: "history.restoreConvoOnly",
+  both: "history.restoreBoth",
 } as const;
 
-function formatHostTime(value: string): string {
+function formatHostTime(value: string, t: (key: string) => string): string {
   const then = Date.parse(value);
   if (!Number.isFinite(then)) return value;
   const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return "刚刚";
+  if (seconds < 60) return t("common.justNow");
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d ago`;
@@ -86,39 +81,40 @@ function PreviewHistRow({
   onAct: (kind: "resume" | "fork" | "more" | "unarchive") => void;
 }) {
   const status = PREVIEW_STATUS[row.status];
+  const { t } = useI18n();
   return (
     <div className="hist-row">
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
         <span className="h-title ellipsis">
-          {row.pinned ? <span className="t-pin" role="img" aria-label="已置顶"><Icon name="pin" extra="sm" /></span> : null}
+          {row.pinned ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
           {row.title}
         </span>
         <span className="h-sub">
           <span>{row.project} · {row.branch}</span>
           <span>{row.time}</span>
           <span>{row.model}</span>
-          <span>{row.files} 文件</span>
+          <span>{t("history.filesCount", { count: row.files })}</span>
           <span>{row.cost}</span>
           <span>Checkpoint ×{row.checkpoints}</span>
-          {row.forkedFrom ? <span className="h-fork">forked from「{row.forkedFrom}」</span> : null}
+          {row.forkedFrom ? <span className="h-fork">{t("history.forkedFrom", { title: row.forkedFrom })}</span> : null}
         </span>
       </a>
-      <span className={`chip ${status.chip}`}>{status.label}</span>
+      <span className={`chip ${status.chip}`}>{t(status.key)}</span>
       <div className="h-acts">
         <button
           type="button"
           className="icon-btn small"
-          data-tip={row.status === "archived" ? "先取消归档" : "恢复"}
-          aria-label="恢复"
+          data-tip={row.status === "archived" ? t("history.unarchiveFirst") : t("history.resume")}
+          aria-label={t("history.resume")}
           disabled={row.status === "archived"}
           onClick={() => onAct("resume")}
         ><Icon name="refresh" extra="sm" /></button>
         <button type="button" className="icon-btn small" data-tip="Fork" aria-label="Fork" onClick={() => onAct("fork")}><Icon name="fork" extra="sm" /></button>
         {row.status === "archived" ? (
-          <button type="button" className="icon-btn small" data-tip="取消归档" aria-label="取消归档" onClick={() => onAct("unarchive")}><Icon name="external" extra="sm" /></button>
+          <button type="button" className="icon-btn small" data-tip={t("history.unarchiveSession")} aria-label={t("history.unarchiveSession")} onClick={() => onAct("unarchive")}><Icon name="external" extra="sm" /></button>
         ) : null}
-        <button type="button" className="icon-btn small" data-tip="更多" aria-label="更多操作" onClick={() => onAct("more")}><Icon name="more" extra="sm" /></button>
+        <button type="button" className="icon-btn small" data-tip={t("common.more")} aria-label={t("common.moreActions")} onClick={() => onAct("more")}><Icon name="more" extra="sm" /></button>
       </div>
     </div>
   );
@@ -135,38 +131,40 @@ function HostHistRow({
 }) {
   const status = HOST_STATUS[entry.status];
   const archived = entry.status === "archived";
+  const { t } = useI18n();
   return (
     <div className="hist-row">
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
         <span className="h-title ellipsis">{entry.title}</span>
         <span className="h-sub">
-          <span>{entry.messageCount} messages</span>
-          <span>{formatHostTime(entry.lastActiveAt)}</span>
+          <span>{t("history.messagesCount", { count: entry.messageCount })}</span>
+          <span>{formatHostTime(entry.lastActiveAt, t)}</span>
           {entry.summary ? <span>{entry.summary}</span> : null}
         </span>
       </a>
-      <span className={`chip ${status.chip}`}>{status.label}</span>
+      <span className={`chip ${status.chip}`}>{t(status.key)}</span>
       <div className="h-acts">
         <button
           type="button"
           className="icon-btn small"
-          data-tip={archived ? "先取消归档" : "恢复"}
-          aria-label="恢复"
+          data-tip={archived ? t("history.unarchiveFirst") : t("history.resume")}
+          aria-label={t("history.resume")}
           disabled={archived}
           onClick={onOpen}
         ><Icon name="refresh" extra="sm" /></button>
-        <button type="button" className="icon-btn small" disabled data-tip={CONTRACT.fork} aria-label="Fork"><Icon name="fork" extra="sm" /></button>
+        <button type="button" className="icon-btn small" disabled data-tip={t("history.forkNotImplemented")} aria-label="Fork"><Icon name="fork" extra="sm" /></button>
         {archived && onUnarchive !== undefined ? (
-          <button type="button" className="icon-btn small" data-tip="取消归档" aria-label="取消归档" onClick={onUnarchive}><Icon name="external" extra="sm" /></button>
+          <button type="button" className="icon-btn small" data-tip={t("history.unarchiveSession")} aria-label={t("history.unarchiveSession")} onClick={onUnarchive}><Icon name="external" extra="sm" /></button>
         ) : null}
-        <button type="button" className="icon-btn small" disabled data-tip={CONTRACT.more} aria-label="更多操作"><Icon name="more" extra="sm" /></button>
+        <button type="button" className="icon-btn small" disabled data-tip={t("common.moreNotImplemented")} aria-label={t("common.moreActions")}><Icon name="more" extra="sm" /></button>
       </div>
     </div>
   );
 }
 
 function TimeTravelRail({ onRestore }: { onRestore: (kind: keyof typeof TT_RESTORE) => void }) {
+  const { t } = useI18n();
   return (
     <div className="tt-rail">
       {PREVIEW_TIME_TRAVEL.map((node: PreviewTtNode, index) => (
@@ -175,13 +173,13 @@ function TimeTravelRail({ onRestore }: { onRestore: (kind: keyof typeof TT_RESTO
             <div className="tt-card-head">
               <b>{node.title}</b>
               <span className="tiny muted mono">{node.time}</span>
-              {node.restorable ? <span className="chip purple xs">可恢复</span> : null}
+              {node.restorable ? <span className="chip purple xs">{t("history.restorable")}</span> : null}
               {node.restorable ? <span className="spacer" /> : null}
               {node.restorable ? (
                 <>
-                  <button type="button" className="btn small outline" onClick={() => onRestore("code")}>仅恢复代码</button>
-                  <button type="button" className="btn small outline" onClick={() => onRestore("convo")}>仅恢复对话</button>
-                  <button type="button" className="btn small primary" onClick={() => onRestore("both")}>恢复代码与对话</button>
+                  <button type="button" className="btn small outline" onClick={() => onRestore("code")}>{t("history.btnRestoreCode")}</button>
+                  <button type="button" className="btn small outline" onClick={() => onRestore("convo")}>{t("history.btnRestoreConvo")}</button>
+                  <button type="button" className="btn small primary" onClick={() => onRestore("both")}>{t("history.btnRestoreBoth")}</button>
                 </>
               ) : null}
             </div>
@@ -206,6 +204,7 @@ export function HistoryPage({
   onUnarchive?: (entry: SessionHistoryEntry) => void;
 }) {
   const { preview } = usePreviewMode();
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [notice, show, dismissNotice] = useNotice();
@@ -225,24 +224,24 @@ export function HistoryPage({
   );
 
   const rows = preview ? previewRows : hostRows;
-  const live = rows.length ? `${rows.length} 个对话` : "没有匹配的对话";
+  const live = rows.length ? t("history.conversationsCount", { count: rows.length }) : t("history.noMatches");
 
   return (
     <div className="page-wide hist-layout">
       <section aria-labelledby="histHeading">
-        <h2 className="sr-only" id="histHeading">会话列表</h2>
+        <h2 className="sr-only" id="histHeading">{t("history.listHeading")}</h2>
         <div className="hist-toolbar">
-          <label className="sr-only" htmlFor="histSearch">搜索对话标题、项目或分支</label>
+          <label className="sr-only" htmlFor="histSearch">{t("history.searchLabel")}</label>
           <input
             className="input hist-search"
             id="histSearch"
             type="search"
             value={query}
-            placeholder="搜索对话标题 / 项目 / 分支…"
+            placeholder={t("history.searchByTitle")}
             onChange={(event) => setQuery(event.target.value)}
           />
           {/* 状态筛选是纯客户端过滤（已加载会话模型），两种模式行为一致 */}
-          <div className="hist-tabs" role="group" aria-label="按状态筛选会话">
+          <div className="hist-tabs" role="group" aria-label={t("history.filterByStatus")}>
             {STATUS_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -250,21 +249,21 @@ export function HistoryPage({
                 className={`btn small ${statusTab === tab.id ? "primary" : "outline"}`}
                 aria-pressed={statusTab === tab.id}
                 onClick={() => setStatusTab(tab.id)}
-              >{tab.label}</button>
+              >{t(tab.key)}</button>
             ))}
           </div>
           {preview
             ? (
               <>
-                <button type="button" className="btn outline" onClick={() => show("演示：导出不会写文件", "export")}>
-                  <Icon name="export" extra="sm" />导出
+                <button type="button" className="btn outline" onClick={() => show(t("history.demoExportToast"), "export")}>
+                  <Icon name="export" extra="sm" />{t("history.export")}
                 </button>
-                <span className="chip gray xs">演示</span>
+                <span className="chip gray xs">{t("common.demo")}</span>
               </>
             )
             : (
-              <button type="button" className="btn outline" disabled data-tip={CONTRACT.export}>
-                <Icon name="export" extra="sm" />导出
+              <button type="button" className="btn outline" disabled data-tip={t("history.exportNotImplemented")}>
+                <Icon name="export" extra="sm" />{t("history.export")}
               </button>
             )}
         </div>
@@ -277,19 +276,19 @@ export function HistoryPage({
                 onOpen={() => onRoute("workbench")}
                 onAct={(kind) => {
                   if (kind === "resume") {
-                    show(`演示：恢复「${row.title}」`, "refresh");
+                    show(t("history.demoResumeToast", { title: row.title }), "refresh");
                     onRoute("workbench");
                     return;
                   }
                   if (kind === "unarchive") {
-                    show(`演示：取消归档「${row.title}」不会改 Host`, "archive");
+                    show(t("history.demoUnarchiveToast", { title: row.title }), "archive");
                     return;
                   }
-                  show(kind === "fork" ? `演示：Fork「${row.title}」不会创建 Thread` : `演示：更多操作不会改 Host`, kind === "fork" ? "fork" : "more");
+                  show(kind === "fork" ? t("history.demoForkToast", { title: row.title }) : t("history.demoMoreToast"), kind === "fork" ? "fork" : "more");
                 }}
               />
             ))
-            : <HistEmpty text="没有匹配的对话" />)
+            : <HistEmpty text={t("history.noMatches")} />)
           : (hostRows.length
             ? hostRows.map((entry) => (
               <HostHistRow
@@ -299,18 +298,18 @@ export function HistoryPage({
                 onUnarchive={entry.status === "archived" && onUnarchive !== undefined ? () => onUnarchive(entry) : undefined}
               />
             ))
-            : <HistEmpty text={history ? "没有匹配的对话" : "无法读取 session catalog"} />)}
+            : <HistEmpty text={history ? t("history.noMatches") : t("history.catalogUnavailable")} />)}
         <div className="sr-only" role="status" aria-live="polite">{live}</div>
       </section>
       <section aria-labelledby="ttHeading">
         <h2 className="tt-heading" id="ttHeading">Time Travel</h2>
-        <p className="muted small tt-desc">「跟踪上游 pi-web 更新到 omp-web」的执行历史。恢复操作会明确区分代码与对话的影响范围。</p>
+        <p className="muted small tt-desc">{t("history.timeTravelDesc")}</p>
         {preview ? (
-          <TimeTravelRail onRestore={(kind) => show(`演示：${TT_RESTORE[kind]}`, "history")} />
+          <TimeTravelRail onRestore={(kind) => show(t("history.demoRestoreToast", { desc: t(TT_RESTORE[kind]) }), "history")} />
         ) : (
           <div className="empty">
             <Icon name="history" />
-            当前功能等待后续接入
+            {t("shell.previewUnavailableDetail")}
           </div>
         )}
       </section>

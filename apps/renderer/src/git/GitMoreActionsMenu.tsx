@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { createPortal } from "react-dom";
 
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 
 export type GitMoreActionItem = {
   readonly value: string;
@@ -16,78 +17,126 @@ export type GitMoreActionGroup = {
   readonly disabled?: boolean;
 };
 
-export const GIT_MORE_ACTION_GROUPS: readonly GitMoreActionGroup[] = [
+const GROUP_LABEL_KEYS: Record<string, string> = {
+  branch: "git.moreGroupBranch",
+  worktree: "git.moreGroupWorktree",
+  history: "git.moreGroupHistory",
+  remote: "git.moreGroupRemote",
+  github: "git.moreGroupGithub",
+};
+
+const ACTION_LABEL_KEYS: Record<string, string> = {
+  "branch.create": "git.actionBranchCreate",
+  "branch.switch": "git.actionBranchSwitch",
+  "branch.rename": "git.actionBranchRename",
+  "branch.delete": "git.actionBranchDelete",
+  "worktree.root": "git.actionWorktreeRoot",
+  "worktree.create": "git.actionWorktreeCreate",
+  "worktree.lock": "git.actionWorktreeLock",
+  "worktree.unlock": "git.actionWorktreeUnlock",
+  "worktree.remove": "git.actionWorktreeRemove",
+  "worktree.prune": "git.actionWorktreePrune",
+  "stash": "git.actionStash",
+  "stash.pop": "git.actionStashPop",
+  "merge": "git.actionMerge",
+  "rebase": "git.actionRebase",
+  "cherry-pick": "git.actionCherryPick",
+  "revert": "git.actionRevert",
+  "reset": "git.actionReset",
+  "tag.create": "git.actionTagCreate",
+  "tag.delete": "git.actionTagDelete",
+  "pull.rebase": "git.actionPullRebase",
+  "pull.merge": "git.actionPullMerge",
+  "push.force": "git.actionPushForce",
+  "remote.add": "git.actionRemoteAdd",
+  "remote.set": "git.actionRemoteSet",
+  "remote.remove": "git.actionRemoteRemove",
+  "auth": "git.actionAuthLogin",
+  "auth.logout": "git.actionAuthLogout",
+  "pr.create": "git.actionPrCreate",
+  "pr.edit": "git.actionPrEdit",
+  "pr.comment": "git.actionPrComment",
+  "pr.review": "git.actionPrReview",
+  "pr.update": "git.actionPrUpdate",
+  "pr.merge": "git.actionPrMerge",
+  "pr.close": "git.actionPrClose",
+  "pr.reopen": "git.actionPrReopen",
+};
+
+export const RAW_GIT_MORE_ACTION_GROUPS = [
   {
     id: "branch",
-    label: "分支",
     icon: "branch",
     items: [
-      { value: "branch.create", label: "新建并切换分支" },
-      { value: "branch.switch", label: "切换分支" },
-      { value: "branch.rename", label: "重命名当前分支" },
-      { value: "branch.delete", label: "删除分支" },
+      { value: "branch.create", defaultLabel: "新建并切换分支" },
+      { value: "branch.switch", defaultLabel: "切换分支" },
+      { value: "branch.rename", defaultLabel: "重命名当前分支" },
+      { value: "branch.delete", defaultLabel: "删除分支" },
     ],
   },
   {
     id: "worktree",
-    label: "Worktree",
     icon: "worktree",
     items: [
-      { value: "worktree.root", label: "选择 Worktree 根目录" },
-      { value: "worktree.create", label: "新建 Worktree" },
-      { value: "worktree.lock", label: "锁定 Worktree" },
-      { value: "worktree.unlock", label: "解锁 Worktree" },
-      { value: "worktree.remove", label: "移除 Worktree" },
-      { value: "worktree.prune", label: "Prune Worktree" },
+      { value: "worktree.root", defaultLabel: "选择 Worktree 根目录" },
+      { value: "worktree.create", defaultLabel: "新建 Worktree" },
+      { value: "worktree.lock", defaultLabel: "锁定 Worktree" },
+      { value: "worktree.unlock", defaultLabel: "解锁 Worktree" },
+      { value: "worktree.remove", defaultLabel: "移除 Worktree" },
+      { value: "worktree.prune", defaultLabel: "Prune Worktree" },
     ],
   },
   {
     id: "history",
-    label: "历史",
     icon: "history",
     items: [
-      { value: "stash", label: "Stash 全部" },
-      { value: "stash.pop", label: "Pop Stash" },
-      { value: "merge", label: "Merge" },
-      { value: "rebase", label: "Rebase" },
-      { value: "cherry-pick", label: "Cherry-pick" },
-      { value: "revert", label: "Revert" },
-      { value: "reset", label: "Hard reset…" },
-      { value: "tag.create", label: "创建 Tag" },
-      { value: "tag.delete", label: "删除 Tag" },
+      { value: "stash", defaultLabel: "Stash 全部" },
+      { value: "stash.pop", defaultLabel: "Pop Stash" },
+      { value: "merge", defaultLabel: "Merge" },
+      { value: "rebase", defaultLabel: "Rebase" },
+      { value: "cherry-pick", defaultLabel: "Cherry-pick" },
+      { value: "revert", defaultLabel: "Revert" },
+      { value: "reset", defaultLabel: "Hard reset…" },
+      { value: "tag.create", defaultLabel: "创建 Tag" },
+      { value: "tag.delete", defaultLabel: "删除 Tag" },
     ],
   },
   {
     id: "remote",
-    label: "远端",
     icon: "globe",
     items: [
-      { value: "pull.rebase", label: "Pull --rebase" },
-      { value: "pull.merge", label: "Pull --merge" },
-      { value: "push.force", label: "Force-with-lease Push" },
-      { value: "remote.add", label: "添加 Remote" },
-      { value: "remote.set", label: "修改 Remote URL" },
-      { value: "remote.remove", label: "移除 Remote" },
+      { value: "pull.rebase", defaultLabel: "Pull --rebase" },
+      { value: "pull.merge", defaultLabel: "Pull --merge" },
+      { value: "push.force", defaultLabel: "Force-with-lease Push" },
+      { value: "remote.add", defaultLabel: "添加 Remote" },
+      { value: "remote.set", defaultLabel: "修改 Remote URL" },
+      { value: "remote.remove", defaultLabel: "移除 Remote" },
     ],
   },
   {
     id: "github",
-    label: "GitHub",
     icon: "link",
     items: [
-      { value: "auth", label: "登录 GitHub" },
-      { value: "auth.logout", label: "退出 GitHub" },
-      { value: "pr.create", label: "创建 PR" },
-      { value: "pr.edit", label: "编辑 PR" },
-      { value: "pr.comment", label: "评论 PR" },
-      { value: "pr.review", label: "Review PR" },
-      { value: "pr.update", label: "更新 PR 分支" },
-      { value: "pr.merge", label: "合并 PR" },
-      { value: "pr.close", label: "关闭 PR" },
-      { value: "pr.reopen", label: "重新打开 PR" },
+      { value: "auth", defaultLabel: "登录 GitHub" },
+      { value: "auth.logout", defaultLabel: "退出 GitHub" },
+      { value: "pr.create", defaultLabel: "创建 PR" },
+      { value: "pr.edit", defaultLabel: "编辑 PR" },
+      { value: "pr.comment", defaultLabel: "评论 PR" },
+      { value: "pr.review", defaultLabel: "Review PR" },
+      { value: "pr.update", defaultLabel: "更新 PR 分支" },
+      { value: "pr.merge", defaultLabel: "合并 PR" },
+      { value: "pr.close", defaultLabel: "关闭 PR" },
+      { value: "pr.reopen", defaultLabel: "重新打开 PR" },
     ],
   },
-];
+] as const;
+
+export const GIT_MORE_ACTION_GROUPS: readonly GitMoreActionGroup[] = RAW_GIT_MORE_ACTION_GROUPS.map((g) => ({
+  id: g.id,
+  label: g.id === "branch" ? "分支" : g.id === "history" ? "历史" : g.id === "remote" ? "远端" : g.id === "worktree" ? "Worktree" : "GitHub",
+  icon: g.icon,
+  items: g.items.map((i) => ({ value: i.value, label: i.defaultLabel })),
+}));
 
 function flatten(groups: readonly GitMoreActionGroup[]): GitMoreActionItem[] {
   return groups.flatMap((group) => (group.disabled ? [] : [...group.items]));
@@ -102,6 +151,7 @@ export function GitMoreActionsMenu({
   readonly githubDisabled?: boolean;
   readonly onPick?: (value: string) => void;
 }) {
+  const { t } = useI18n();
   const uid = useId();
   const listId = `${uid}-list`;
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -114,9 +164,22 @@ export function GitMoreActionsMenu({
   activeRef.current = active;
   onPickRef.current = onPick;
 
-  const groups = useMemo(
-    () => GIT_MORE_ACTION_GROUPS.map((group) => (group.id === "github" && githubDisabled ? { ...group, disabled: true } : group)),
-    [githubDisabled],
+  const groups: readonly GitMoreActionGroup[] = useMemo(
+    () =>
+      RAW_GIT_MORE_ACTION_GROUPS.map((group) => {
+        const item: GitMoreActionGroup = {
+          id: group.id,
+          label: GROUP_LABEL_KEYS[group.id] ? t(GROUP_LABEL_KEYS[group.id]!) : group.id,
+          icon: group.icon,
+          ...(group.id === "github" && githubDisabled ? { disabled: true } : {}),
+          items: group.items.map((it) => ({
+            value: it.value,
+            label: ACTION_LABEL_KEYS[it.value] ? t(ACTION_LABEL_KEYS[it.value]!) : it.defaultLabel,
+          })),
+        };
+        return item;
+      }),
+    [githubDisabled, t],
   );
   const flat = useMemo(() => flatten(groups), [groups]);
 
@@ -157,45 +220,37 @@ export function GitMoreActionsMenu({
       }
       const current = activeRef.current;
       const index = Math.max(0, flat.findIndex((item) => item.value === current));
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (event.key === "ArrowDown") {
         event.preventDefault();
-        if (flat.length === 0) return;
-        const delta = event.key === "ArrowDown" ? 1 : -1;
-        const next = flat[(index + delta + flat.length) % flat.length];
-        if (next) setActive(next.value);
-        return;
-      }
-      if (event.key === "Enter" || event.key === " ") {
+        const next = (index + 1) % flat.length;
+        setActive(flat[next]?.value);
+      } else if (event.key === "ArrowUp") {
         event.preventDefault();
-        const item = flat.find((entry) => entry.value === current) ?? flat[index];
-        if (item) pick(item.value);
+        const prev = (index - 1 + flat.length) % flat.length;
+        setActive(flat[prev]?.value);
+      } else if (event.key === "Enter" && current) {
+        event.preventDefault();
+        pick(current);
       }
     };
-    const onDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (btnRef.current?.contains(target) || popRef.current?.contains(target)) return;
-      dismiss();
-    };
-    const onReposition = () => place();
     window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("resize", onReposition);
-    window.addEventListener("scroll", onReposition, true);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("resize", onReposition);
-      window.removeEventListener("scroll", onReposition, true);
-    };
+    return () => window.removeEventListener("keydown", onKey);
   }, [open, flat]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!open) return;
-    popRef.current?.querySelector<HTMLElement>("[data-active='true']")?.scrollIntoView({ block: "nearest" });
-  }, [open, active]);
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (btnRef.current?.contains(target)) return;
+      if (popRef.current?.contains(target)) return;
+      dismiss();
+    };
+    window.addEventListener("mousedown", onDoc);
+    return () => window.removeEventListener("mousedown", onDoc);
+  }, [open]);
 
   return (
-    <div className="git-more">
+    <>
       <button
         ref={btnRef}
         type="button"
@@ -204,7 +259,7 @@ export function GitMoreActionsMenu({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-label="更多 Git 操作"
+        aria-label={t("git.moreActions")}
         onClick={() => {
           if (open) {
             dismiss();
@@ -213,7 +268,7 @@ export function GitMoreActionsMenu({
           setOpen(true);
         }}
       >
-        <span>更多操作…</span>
+        <span>{t("git.moreActions")}</span>
         <Icon name={open ? "chevron-u" : "chevron-d"} extra="sm" />
       </button>
       {open
@@ -223,41 +278,39 @@ export function GitMoreActionsMenu({
               id={listId}
               className="menu rms-pop git-more-pop"
               role="listbox"
-              aria-label="更多 Git 操作"
-              style={{ top: anchor.top, left: anchor.left, width: anchor.width }}
-              onMouseDown={(event) => event.stopPropagation()}
+              aria-label={t("git.moreActions")}
+              style={{ top: anchor.top, left: anchor.left, minWidth: anchor.width }}
             >
               {groups.map((group) => (
-                <div className="rms-group" key={group.id} role="group" aria-label={group.label} aria-disabled={group.disabled || undefined}>
-                  <div className="rms-group-label">
-                    <span className="rms-brand" aria-hidden="true"><Icon name={group.icon} extra="sm" /></span>
-                    <span className="rms-group-name">{group.label}</span>
-                    <span className="rms-group-count">{group.items.length}</span>
+                <div key={group.id} className="git-more-group" role="group" aria-label={group.label}>
+                  <div className="git-more-group-label">
+                    <Icon name={group.icon} extra="sm" />
+                    <span>{group.label}</span>
+                    <span className="spacer" />
+                    <span className="tiny muted">{group.items.length}</span>
                   </div>
-                  {group.items.map((item) => {
-                    const isActive = item.value === active;
-                    return (
+                  <div className="git-more-group-items">
+                    {group.items.map((item) => (
                       <button
                         type="button"
                         key={item.value}
                         role="option"
-                        aria-selected={isActive}
-                        data-active={isActive ? "true" : undefined}
-                        className={`menu-item rms-option git-more-option${isActive ? " is-active" : ""}`}
-                        disabled={disabled || group.disabled}
-                        onMouseDown={(event) => event.preventDefault()}
+                        aria-selected={active === item.value}
+                        className={`menu-item${active === item.value ? " active" : ""}`}
+                        disabled={group.disabled}
+                        onMouseEnter={() => setActive(item.value)}
                         onClick={() => pick(item.value)}
                       >
-                        {item.label}
+                        <span>{item.label}</span>
                       </button>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>,
             document.body,
           )
         : null}
-    </div>
+    </>
   );
 }

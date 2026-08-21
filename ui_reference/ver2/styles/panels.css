@@ -1,0 +1,715 @@
+/* ==========================================================================
+   OMP Studio — bottom run panel + Agent Hub
+   Terminal / Problems / Tests / Output / OMP Logs / Preview Logs.
+
+   Logs stay out of the way for ordinary users but remain fully available
+   to advanced ones — no hiding real failures behind a friendly summary.
+   ========================================================================== */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ==========================================================================
+   Terminal
+   ========================================================================== */
+
+.terminal {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Left list of terminal sessions */
+.terminal-list {
+  width: 200px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
+  overflow-y: auto;
+  padding: var(--sp-2);
+}
+
+.terminal-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 30px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.terminal-list-item:hover {
+  background: var(--bg-hover);
+}
+
+.terminal-list-item[data-active="true"] {
+  background: var(--accent-subtle);
+}
+
+.terminal-list-item-icon {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  color: var(--text-tertiary);
+}
+
+.terminal-list-item[data-running="true"] .terminal-list-item-icon {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.terminal-list-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-list-item-name {
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-list-item-meta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+
+/* Owner badge — distinguishes OMP-started from user-started */
+.terminal-owner {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: var(--fw-semi);
+  padding: 0 3px;
+  height: 14px;
+  line-height: 14px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.terminal-owner-omp {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.terminal-owner-user {
+  background: var(--muted-subtle);
+  color: var(--muted);
+}
+
+/* Terminal output area */
+.terminal-output {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.terminal-output-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 28px;
+  padding: 0 var(--sp-4);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+.terminal-output-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0;
+}
+
+.terminal-output-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-code);
+  background: var(--bg-inset);
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+}
+
+.terminal-line[data-kind="cmd"] {
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+}
+
+.terminal-line[data-kind="ok"] { color: var(--ok); }
+.terminal-line[data-kind="err"] { color: var(--danger); }
+.terminal-line[data-kind="warn"] { color: var(--warn); }
+
+/* Blinking cursor at the end of a running terminal */
+.terminal-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  background: var(--text-secondary);
+  vertical-align: text-bottom;
+  animation: cursorPulse 1.1s step-end infinite;
+}
+
+/* ==========================================================================
+   Problems
+   ========================================================================== */
+
+.problems-list {
+  padding: var(--sp-2) 0;
+}
+
+.problem-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.problem-row:hover {
+  background: var(--bg-hover);
+}
+
+.problem-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+}
+
+.problem-row[data-severity="error"] .problem-icon { color: var(--danger); }
+.problem-row[data-severity="warn"] .problem-icon { color: var(--warn); }
+.problem-row[data-severity="info"] .problem-icon { color: var(--run); }
+
+.problem-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.problem-message {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  line-height: var(--lh-snug);
+  margin-bottom: 3px;
+}
+
+.problem-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.problem-location {
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.problem-location:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.problem-source {
+  padding: 0 var(--sp-2);
+  height: 15px;
+  line-height: 15px;
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
+  font-family: var(--font-ui);
+}
+
+.problem-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.problem-row:hover .problem-actions {
+  opacity: 1;
+}
+
+/* ==========================================================================
+   Tests
+   ========================================================================== */
+
+.tests {
+  padding: var(--sp-2) 0;
+}
+
+.tests-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+}
+
+.tests-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.tests-summary-passed { color: var(--ok); }
+.tests-summary-failed { color: var(--danger); }
+.tests-summary-skipped { color: var(--muted); }
+.tests-summary-running { color: var(--run); }
+
+.test-suite {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.test-suite-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 30px;
+  padding: var(--sp-2) var(--sp-5);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+  user-select: none;
+}
+
+.test-suite-header:hover {
+  background: var(--bg-hover);
+}
+
+.test-suite-chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.test-suite[data-expanded="true"] .test-suite-chevron {
+  transform: rotate(90deg);
+}
+
+.test-suite-status {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.test-suite[data-status="passed"] .test-suite-status { color: var(--ok); }
+.test-suite[data-status="failed"] .test-suite-status { color: var(--danger); }
+.test-suite[data-status="running"] .test-suite-status {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.test-suite-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-suite-duration {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+.test-suite-body {
+  display: none;
+  padding: 0 0 var(--sp-3);
+}
+
+.test-suite[data-expanded="true"] .test-suite-body {
+  display: block;
+}
+
+.test-case {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 24px;
+  padding: var(--sp-1) var(--sp-5) var(--sp-1) calc(var(--sp-5) + 20px);
+  font-size: var(--fs-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.test-case:hover {
+  background: var(--bg-hover);
+}
+
+.test-case-status {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+}
+
+.test-case[data-status="passed"] .test-case-status { color: var(--ok); }
+.test-case[data-status="failed"] .test-case-status { color: var(--danger); }
+.test-case[data-status="skipped"] .test-case-status { color: var(--muted); }
+.test-case[data-status="running"] .test-case-status {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.test-case-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-case[data-status="failed"] .test-case-name {
+  color: var(--text-primary);
+}
+
+.test-case[data-status="skipped"] .test-case-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.test-case-duration {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+.test-case-error {
+  margin: var(--sp-2) var(--sp-5) var(--sp-3) calc(var(--sp-5) + 20px);
+  padding: var(--sp-4);
+  background: var(--danger-subtle);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-code);
+  color: var(--danger);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.test-case-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin: var(--sp-2) var(--sp-5) var(--sp-3) calc(var(--sp-5) + 20px);
+}
+
+/* ==========================================================================
+   Logs / Output
+   ========================================================================== */
+
+.logs {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-code);
+}
+
+.logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.log-row {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-5);
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.log-row:hover {
+  background: var(--bg-hover);
+}
+
+.log-time {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.log-source {
+  flex-shrink: 0;
+  width: 84px;
+  font-size: 10px;
+  font-family: var(--font-ui);
+  color: var(--text-tertiary);
+}
+
+.log-level {
+  flex-shrink: 0;
+  width: 44px;
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: var(--fw-semi);
+}
+
+.log-row[data-level="error"] .log-level { color: var(--danger); }
+.log-row[data-level="warn"] .log-level { color: var(--warn); }
+.log-row[data-level="info"] .log-level { color: var(--run); }
+.log-row[data-level="debug"] .log-level { color: var(--muted); }
+
+.log-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.log-row[data-level="error"] .log-text { color: var(--danger); }
+.log-row[data-level="warn"] .log-text { color: var(--warn); }
+
+/* ==========================================================================
+   Agent Hub — indented hierarchy list, not a graph
+   ========================================================================== */
+
+.agent-hub {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.agent-hub-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.agent-hub-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-2) 0;
+}
+
+.agent-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  padding-left: calc(var(--sp-5) + var(--agent-depth, 0) * 20px);
+  cursor: pointer;
+  position: relative;
+  transition: background var(--dur-fast) var(--ease);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.agent-card:hover {
+  background: var(--bg-hover);
+}
+
+.agent-card[data-active="true"] {
+  background: var(--accent-subtle);
+}
+
+/* Depth connector line for subagents */
+.agent-card[data-depth="1"]::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--sp-5) + 7px);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-default);
+}
+
+.agent-status-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+
+.agent-card[data-status="running-tool"] .agent-status-icon,
+.agent-card[data-status="thinking"] .agent-status-icon {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.agent-card[data-status="waiting-agent"] .agent-status-icon { color: var(--muted); }
+.agent-card[data-status="waiting-user"] .agent-status-icon { color: var(--warn); }
+.agent-card[data-status="completed"] .agent-status-icon { color: var(--ok); }
+.agent-card[data-status="failed"] .agent-status-icon { color: var(--danger); }
+.agent-card[data-status="aborted"] .agent-status-icon { color: var(--muted); }
+.agent-card[data-status="starting"] .agent-status-icon { color: var(--muted); }
+
+.agent-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: 3px;
+}
+
+.agent-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.agent-role {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-task {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+  margin-bottom: var(--sp-3);
+}
+
+.agent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-5);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.agent-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.agent-meta-item svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Last tool call — shown as a mono chip */
+.agent-last-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  height: 18px;
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Waiting-for annotation */
+.agent-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  height: 18px;
+  background: var(--muted-subtle);
+  border-radius: var(--r-xs);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.agent-card[data-status="waiting-user"] .agent-waiting {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.agent-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.agent-card:hover .agent-actions {
+  opacity: 1;
+}
+
+/* Agent error block */
+.agent-error {
+  margin: var(--sp-3) 0 0;
+}
+
+/* Agent summary (when a subagent reports back) */
+.agent-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--ok-subtle);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+
+.agent-summary svg {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  color: var(--ok);
+  margin-top: 1px;
+}

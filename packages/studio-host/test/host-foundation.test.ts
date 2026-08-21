@@ -4,7 +4,8 @@ import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
 import { createConnection, createServer, Socket, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
+import type { ChildProcess, spawn } from "node:child_process";
 import { test } from "node:test";
 import {
   FrameDecoder,
@@ -46,12 +47,14 @@ import {
   StudioHostRuntimeActor,
   StudioRuntimeSessionController,
   classifyOperation,
+  createProcessProbe,
   consumeBridgeToken,
   createBridgeBootstrap,
   createChallengeProof,
   createWindowsBridgeAclPort,
   parseWindowsUserSid,
   verifyChallengeProof,
+  type RuntimeProbeOutcome,
 } from "../src/index.js";
 import { SimulatedPauseRuntime, initialSnapshot } from "./support/simulated-runtime.js";
 
@@ -1137,6 +1140,59 @@ test("PR-009 terminal ledger outcomes survive a Host restart", () => {
   assert.equal(restored.get(commandId)?.stateVersionAfter, 1);
 });
 
+test("ledger keeps the Runtime failure message beside the code and caps its length", () => {
+  const directory = join(tmpdir(), `omp-studio-ledger-message-${randomUUID()}`);
+  const store = new JsonlCommandLedgerStore(join(directory, "commands.jsonl"));
+  const ledger = new CommandLedger(() => "2026-08-21T00:00:00.000Z", store);
+  const commandId = "message-command" as CommandId;
+  ledger.request(commandId, request({ kind: "session.model.set", selector: "x/y" }, "message-request"), runtimeId);
+  ledger.transition(commandId, "accepted");
+  ledger.reconcileReceipt({
+    type: "studio.receipt",
+    requestId: "message-request" as RequestId,
+    commandId,
+    runtimeEpoch: epoch,
+    stateVersion: 2 as StateVersion,
+    status: "failed",
+    error: { code: "INVALID_ARGUMENT", message: "  Model is not available: deepseek/deepseek-v9  ", retryable: false },
+  });
+  const entry = ledger.get(commandId);
+  assert.equal(entry?.errorCode, "INVALID_ARGUMENT");
+  assert.equal(entry?.errorMessage, "Model is not available: deepseek/deepseek-v9");
+  // Survives a Host restart through the durable store.
+  const restored = new CommandLedger(() => "2026-08-21T00:00:01.000Z", store);
+  assert.equal(restored.get(commandId)?.errorMessage, "Model is not available: deepseek/deepseek-v9");
+
+  // A blank message adds nothing, and an oversized one is capped at 512 chars.
+  const blankCommand = "blank-command" as CommandId;
+  ledger.request(blankCommand, request({ kind: "runtime.pause" }, "blank-request"), runtimeId);
+  ledger.transition(blankCommand, "accepted");
+  ledger.reconcileReceipt({
+    type: "studio.receipt",
+    requestId: "blank-request" as RequestId,
+    commandId: blankCommand,
+    runtimeEpoch: epoch,
+    stateVersion: 3 as StateVersion,
+    status: "failed",
+    error: { code: "INTERNAL_ERROR", message: "   ", retryable: false },
+  });
+  assert.equal(ledger.get(blankCommand)?.errorMessage, undefined);
+
+  const longCommand = "long-command" as CommandId;
+  ledger.request(longCommand, request({ kind: "runtime.pause" }, "long-request"), runtimeId);
+  ledger.transition(longCommand, "accepted");
+  ledger.reconcileReceipt({
+    type: "studio.receipt",
+    requestId: "long-request" as RequestId,
+    commandId: longCommand,
+    runtimeEpoch: epoch,
+    stateVersion: 4 as StateVersion,
+    status: "failed",
+    error: { code: "INTERNAL_ERROR", message: "z".repeat(900), retryable: false },
+  });
+  assert.equal(ledger.get(longCommand)?.errorMessage?.length, 512);
+});
+
 test("REC-002 ledger recovery ignores only a crash-truncated tail record", async () => {
   const directory = join(tmpdir(), `omp-studio-ledger-tail-${randomUUID()}`);
   const path = join(directory, "commands.jsonl");
@@ -1447,4 +1503,80 @@ test("WP-014 confirmation registry evicts the oldest token at capacity", () => {
     () => registry.consume(first, { kind: "session.drop" }, "gui"),
     (error: unknown) => error instanceof StudioHostError && error.code === "INTERACTION_STALE",
   );
+});
+
+/**
+ * Stand-in for the spawned Runtime. The probe only reads `exitCode` /
+ * `signalCode` and waits for `close`, so nothing needs to be executed.
+ */
+class FakeProbeChild extends EventEmitter {
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+
+  exit(code: number): void {
+    this.exitCode = code;
+    this.emit("close", code, null);
+  }
+
+  kill(): boolean {
+    if (this.exitCode === null) setImmediate(() => this.exit(143));
+    return true;
+  }
+}
+
+async function probeWithLostShutdownAck(exitCodeAfterShutdown?: number): Promise<RuntimeProbeOutcome> {
+  const token = "bridge-token-probe-shutdown";
+  const child = new FakeProbeChild();
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    onRequest(request, socket, hello) {
+      if (request.operation.kind === "runtime.shutdown") {
+        // The Runtime tears its Bridge down while exiting, so the completion
+        // receipt and `runtime.shutdownComplete` never reach the Host.
+        socket.destroy();
+        if (exitCodeAfterShutdown !== undefined) child.exit(exitCodeAfterShutdown);
+        return;
+      }
+      socket.write(
+        encodeFrame(`receipt:${request.requestId}`, hello.runtimeEpoch, {
+          type: "studio.receipt",
+          requestId: request.requestId,
+          commandId: `command-${request.requestId}`,
+          runtimeEpoch: hello.runtimeEpoch,
+          stateVersion: 0,
+          status: "failed",
+          error: { code: "COMMAND_BLOCKED", message: "manifest route is unavailable", retryable: false },
+        }),
+      );
+    },
+  });
+  const probe = createProcessProbe({
+    createBootstrap: async () => ({ endpoint: bridge.endpoint, token, tokenFile: "unused" }),
+    spawnProcess: (() => child as unknown as ChildProcess) as unknown as typeof spawn,
+    shutdownGraceMs: 250,
+  });
+  try {
+    return await probe.probe({
+      executablePath: process.execPath,
+      platform: process.platform,
+      arch: process.arch,
+      workspaceDirectory: tmpdir(),
+      supportedProtocolVersions: [1],
+      probeTimeoutMs: 5_000,
+    });
+  } finally {
+    await bridge.close();
+  }
+}
+
+test("probe scores graceful shutdown from a clean exit when the ack is lost in flight", async () => {
+  const outcome = await probeWithLostShutdownAck(0);
+  assert.equal(outcome.failure, undefined);
+  assert.equal(outcome.smoke, "passed");
+  assert.equal(outcome.shutdown, "passed", JSON.stringify(outcome));
+});
+
+test("probe fails the shutdown gate when the Runtime neither acks nor exits", async () => {
+  const outcome = await probeWithLostShutdownAck(undefined);
+  assert.equal(outcome.smoke, "passed");
+  assert.equal(outcome.shutdown, "failed");
 });

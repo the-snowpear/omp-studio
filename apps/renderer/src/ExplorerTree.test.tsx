@@ -1,14 +1,19 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { StudioClient, WorkspaceFileTreeReadModel, WorkspaceId } from "@omp-studio/client-contract";
 
 import { buildGitStatusLookup } from "./git/treeStatus";
+import { I18nProvider } from "./i18n";
 
 vi.mock("@xterm/xterm", () => ({ Terminal: class Terminal {} }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class FitAddon {} }));
 
 import { RealFileTree } from "./App.js";
+
+function render(ui: React.ReactElement) {
+  return rtlRender(<I18nProvider forcedLanguage="zh">{ui}</I18nProvider>);
+}
 
 const workspaceId = "workspace-test" as WorkspaceId;
 const noCreation = {

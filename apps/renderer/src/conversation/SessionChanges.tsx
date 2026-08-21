@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChangesPanel, type ChangesDiffFile, type ChangesTurnOption } from "./ChangesPanel";
+import { useI18n } from "../i18n";
 import type { TimelineRow } from "./conversationViewModel";
 import {
   listSessionChangeTurns,
@@ -61,6 +62,7 @@ export function SessionChanges({
   /** 同一轮再次审核时递增，避免被轮次菜单改过之后无法跳回。 */
   focusKey?: number;
 }) {
+  const { t } = useI18n();
   const turns = useMemo(() => listSessionChangeTurns(rows).map(toTurnOption), [rows]);
   const [turnId, setTurnId] = useState(SESSION_CHANGE_LAST_ID);
   const [split, setSplit] = useState(false);
@@ -116,11 +118,11 @@ export function SessionChanges({
       empty={(
         <div className="empty" style={{ padding: 18 }}>
           {sessionHasFiles ? (
-            <p>这一轮还没有文件改动。</p>
+            <p>{t("changes.emptyTurnTitle")}</p>
           ) : (
             <>
-              <p>本会话还没有文件改动。</p>
-              <p>Agent 修改文件后，这里按对话记录汇总每个文件的增删。</p>
+              <p>{t("changes.emptySessionTitle")}</p>
+              <p>{t("changes.emptySessionDetail")}</p>
             </>
           )}
         </div>

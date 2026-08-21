@@ -1,0 +1,351 @@
+/* ==========================================================================
+   OMP Studio — base
+   Typography, focus, scrollbars, animation primitives. Builds on tokens.css.
+   ========================================================================== */
+
+html {
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  font-weight: var(--fw-normal);
+  color: var(--text-primary);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1, "liga" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+body {
+  min-width: 880px; /* below this the app's spatial structure collapses */
+}
+
+/* ---- Focus ----------------------------------------------------------
+   Single consistent ring, only on keyboard focus, never on mouse click.
+   ---------------------------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="menuitem"]:focus-visible {
+  outline-offset: -2px; /* inset for interactive controls */
+}
+
+/* ---- Selection ------------------------------------------------------- */
+::selection {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+}
+
+/* ---- Code ------------------------------------------------------------ */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
+code {
+  background: var(--bg-inset);
+  padding: 1px 4px;
+  border-radius: var(--r-xs);
+}
+
+pre code {
+  background: none;
+  padding: 0;
+}
+
+/* ---- Scrollbars ------------------------------------------------------
+   Consistent across platforms. Thin, unobtrusive, only visible when needed.
+   ---------------------------------------------------------------------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* ---- Animation primitives --------------------------------------------
+   Reusable classes. Components compose these rather than re-declaring.
+   ---------------------------------------------------------------------- */
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Running state — gentle 1.6s pulse, never a spinning circle.
+   Long-running tasks need something calm that won't annoy. */
+@keyframes breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-breathe {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+/* Streaming text — 12px fade-up, not per-character cursor flash */
+@keyframes streamIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stream-chunk {
+  animation: streamIn var(--dur-fast) var(--ease);
+}
+
+/* ---- Utility classes -------------------------------------------------
+   Single-purpose, low-specificity. Keep minimal — this is not Tailwind.
+   ---------------------------------------------------------------------- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Clickable path/file references */
+.path-link {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-default);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.path-link:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+/* Status pills */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  height: 18px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+
+.pill-muted {
+  background: var(--muted-subtle);
+  color: var(--muted);
+}
+
+.pill-run {
+  background: var(--run-subtle);
+  color: var(--run);
+}
+
+.pill-ok {
+  background: var(--ok-subtle);
+  color: var(--ok);
+}
+
+.pill-warn {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.pill-danger {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.pill-accent {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* Badges (notification counts, event counts) */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: var(--fw-semi);
+  line-height: 1;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.badge-warn {
+  background: var(--warn);
+  color: var(--text-on-accent);
+}
+
+.badge-danger {
+  background: var(--danger);
+  color: var(--text-on-accent);
+}
+
+/* State dots */
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-muted { background: var(--muted); }
+.dot-run { background: var(--run); }
+.dot-ok { background: var(--ok); }
+.dot-warn { background: var(--warn); }
+.dot-danger { background: var(--danger); }
+.dot-accent { background: var(--accent); }
+
+/* Empty states */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-5);
+  padding: var(--sp-10);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.empty-state-title {
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+
+.empty-state-desc {
+  font-size: var(--fs-sm);
+  max-width: 400px;
+}
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--bg-inset) 0%,
+    var(--bg-hover) 50%,
+    var(--bg-inset) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--r-sm);
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Dividers */
+.divider {
+  height: 1px;
+  background: var(--border-subtle);
+  border: none;
+  margin: 0;
+}
+
+.divider-vertical {
+  width: 1px;
+  height: auto;
+  background: var(--border-subtle);
+}
+
+/* Icon sizing */
+.icon-sm { width: 14px; height: 14px; }
+.icon { width: 16px; height: 16px; }
+.icon-lg { width: 20px; height: 20px; }

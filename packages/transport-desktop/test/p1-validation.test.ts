@@ -1049,6 +1049,41 @@ describe("parseClientCommandRequest: envelope strictness", () => {
     assert.equal(probe.commandName, "models.provider.probe");
   });
 
+  test("models.provider.probe accepts a wire api and custom headers", () => {
+    const parsed = parseClientCommandRequest({
+      commandName: "models.provider.probe",
+      input: {
+        providerId: "gateway",
+        api: "anthropic-messages",
+        endpointUrl: "https://gw.example.com",
+        apiKey: "sk-live",
+        headers: { "X-Org-Id": "org-1" },
+        timeoutMs: 8000,
+      },
+      idempotencyKey: "idem-models-probe-api-1",
+      requestId: "req-models-probe-api-1",
+    });
+    assert.equal(parsed.commandName, "models.provider.probe");
+  });
+
+  test("models.provider.probe rejects unknown fields and malformed headers", () => {
+    const bad: ReadonlyArray<Record<string, unknown>> = [
+      { providerId: "gateway", discovery: "ollama" },
+      { providerId: "gateway", api: "" },
+      { providerId: "gateway", headers: [] },
+      { providerId: "gateway", headers: { "X-Org-Id": "" } },
+      { providerId: "gateway", headers: { "X-Org-Id": 1 } },
+    ];
+    for (const input of bad) {
+      expectValidationError(() => parseClientCommandRequest({
+        commandName: "models.provider.probe",
+        input,
+        idempotencyKey: "idem-models-probe-bad-1",
+        requestId: "req-models-probe-bad-1",
+      }));
+    }
+  });
+
   test("Git remote inputs accept network transports and reject local/helper schemes", () => {
     for (const url of ["https://github.com/acme/repo.git", "ssh://git@github.com/acme/repo.git", "git@github.com:acme/repo.git"]) {
       const parsed = parseClientCommandRequest({
@@ -1092,7 +1127,7 @@ describe("parseClientCommandRequest: envelope strictness", () => {
         name: "Acme",
         api: "openai-completions",
         auth: { type: "api-key" },
-        models: [{ id: "custom-1", reasoning: true, thinking: ["off", "low", "max"] }],
+        models: [{ id: "custom-1", reasoning: true, thinking: ["minimal", "low", "max"] }],
         modelOverrides: { "catalog-1": { reasoning: true, thinking: ["high", "xhigh"] } },
       },
       idempotencyKey: "idem-models-thinking-1",
@@ -1107,7 +1142,7 @@ describe("parseClientCommandRequest: envelope strictness", () => {
           name: "Acme",
           api: "openai-completions",
           auth: { type: "api-key" },
-          models: [{ id: "custom-1", thinking: ["minimal"] }],
+          models: [{ id: "custom-1", thinking: ["off"] }],
         },
         idempotencyKey: "k",
         requestId: "r",

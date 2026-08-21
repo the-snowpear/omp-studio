@@ -75,7 +75,7 @@ function parseLedgerEntry(value: object, line: number): CommandLedgerEntry {
       throw new TypeError(`Invalid command ledger entry at line ${line}`);
     }
   }
-  for (const field of ["terminalAt", "errorCode"] as const) {
+  for (const field of ["terminalAt", "errorCode", "errorMessage"] as const) {
     if (input[field] !== undefined && typeof input[field] !== "string") {
       throw new TypeError(`Invalid command ledger entry at line ${line}`);
     }

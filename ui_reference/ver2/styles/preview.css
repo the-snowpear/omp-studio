@@ -1,0 +1,656 @@
+/* ==========================================================================
+   OMP Studio — Preview
+   Live app preview: toolbar, viewport frame, element picker overlay,
+   console/network tabs, and 12 lifecycle states.
+   ========================================================================== */
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+/* ---- Toolbar ---------------------------------------------------------- */
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-app);
+}
+
+.preview-nav {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Address bar */
+.preview-url {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 26px;
+  padding: 0 var(--sp-4);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.preview-url:hover {
+  border-color: var(--border-default);
+}
+
+.preview-url:focus-within {
+  border-color: var(--accent);
+}
+
+.preview-url-status {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.preview-url input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+}
+
+.preview-url-meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.preview-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+/* Viewport switcher */
+.preview-viewports {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+}
+
+.preview-viewport-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  color: var(--text-tertiary);
+  border-radius: 3px;
+  transition: background var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+}
+
+.preview-viewport-btn:hover:not([data-active="true"]) {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.preview-viewport-btn[data-active="true"] {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.preview-viewport-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Element picker toggle — active state is prominent */
+.preview-pick-btn[data-active="true"] {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+/* ---- Viewport frame --------------------------------------------------- */
+.preview-frame {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: var(--bg-sunken);
+  position: relative;
+}
+
+.preview-viewport {
+  background: #FFFFFF;
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  position: relative;
+  transition: width var(--dur) var(--ease),
+              height var(--dur) var(--ease);
+}
+
+.preview-viewport[data-size="desktop"] { width: 100%; height: 100%; min-height: 480px; }
+.preview-viewport[data-size="laptop"] { width: 1280px; height: 800px; }
+.preview-viewport[data-size="tablet"] { width: 768px; height: 1024px; }
+.preview-viewport[data-size="mobile"] { width: 375px; height: 667px; }
+
+/* The mock page render — a simplified fake app */
+.preview-page {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  font-family: var(--font-ui);
+  color: #1A1D21;
+  background: #FFFFFF;
+}
+
+/* ---- Element picker overlay ------------------------------------------- */
+.preview-picker-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  cursor: crosshair;
+  background: rgba(124, 107, 240, 0.04);
+}
+
+.preview-picker-highlight {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: rgba(124, 107, 240, 0.12);
+  pointer-events: none;
+  border-radius: 2px;
+  transition: all 80ms linear;
+}
+
+/* Dimension label attached to the highlight */
+.preview-picker-label {
+  position: absolute;
+  top: -22px;
+  left: -2px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 20px;
+  padding: 0 var(--sp-3);
+  background: var(--accent);
+  color: #FFFFFF;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-semi);
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+}
+
+.preview-picker-dims {
+  position: absolute;
+  bottom: -20px;
+  right: -2px;
+  padding: 0 var(--sp-2);
+  height: 18px;
+  line-height: 18px;
+  background: var(--accent);
+  color: #FFFFFF;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+}
+
+/* Picker hint bar */
+.preview-picker-hint {
+  position: absolute;
+  top: var(--sp-5);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 30px;
+  padding: 0 var(--sp-5);
+  background: var(--bg-raised);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  white-space: nowrap;
+  animation: slideDown var(--dur) var(--ease);
+}
+
+.preview-picker-hint svg {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+
+/* ---- Picked element result card --------------------------------------- */
+.picked-element {
+  border: 1px solid var(--accent-border);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+  margin: var(--sp-5);
+}
+
+.picked-element-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.picked-element-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.picked-element-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.picked-element-body {
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.picked-element-row {
+  display: flex;
+  gap: var(--sp-4);
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+}
+
+.picked-element-key {
+  flex-shrink: 0;
+  width: 80px;
+  color: var(--text-tertiary);
+}
+
+.picked-element-value {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.picked-element-actions {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-5);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ---- State screens (12 states) ---------------------------------------- */
+.preview-state {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-5);
+  padding: var(--sp-10);
+  text-align: center;
+  overflow-y: auto;
+}
+
+.preview-state-icon {
+  width: 36px;
+  height: 36px;
+  color: var(--text-tertiary);
+}
+
+.preview-state[data-tone="run"] .preview-state-icon {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.preview-state[data-tone="ok"] .preview-state-icon { color: var(--ok); }
+.preview-state[data-tone="warn"] .preview-state-icon { color: var(--warn); }
+.preview-state[data-tone="danger"] .preview-state-icon { color: var(--danger); }
+
+.preview-state-title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+
+.preview-state-message {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  max-width: 480px;
+  line-height: var(--lh-snug);
+  font-family: var(--font-mono);
+}
+
+.preview-state-progress {
+  width: 240px;
+}
+
+.preview-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  justify-content: center;
+  max-width: 520px;
+}
+
+/* Error detail block within a state screen */
+.preview-state .error-region {
+  max-width: 640px;
+  width: 100%;
+  text-align: left;
+  margin-top: var(--sp-3);
+}
+
+/* ---- HMR flash -------------------------------------------------------- */
+.preview-hmr-flash {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--run);
+  z-index: 30;
+  animation: hmrFlash 800ms var(--ease);
+}
+
+@keyframes hmrFlash {
+  0% { opacity: 0; transform: scaleX(0); transform-origin: left; }
+  30% { opacity: 1; transform: scaleX(1); }
+  100% { opacity: 0; transform: scaleX(1); }
+}
+
+.preview-hmr-toast {
+  position: absolute;
+  top: var(--sp-5);
+  right: var(--sp-5);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 26px;
+  padding: 0 var(--sp-4);
+  background: var(--bg-raised);
+  border: 1px solid var(--run-border);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  white-space: nowrap;
+  animation: slideDown var(--dur) var(--ease);
+}
+
+.preview-hmr-toast svg {
+  width: 12px;
+  height: 12px;
+  color: var(--run);
+}
+
+/* ---- Bottom tabs: Console / Network / Errors / Logs ------------------- */
+.preview-panel {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-sunken);
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+}
+
+.preview-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-code);
+}
+
+/* Console rows */
+.console-row {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-5);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.console-row:hover {
+  background: var(--bg-hover);
+}
+
+.console-time {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.console-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.console-source {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.console-source:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.console-row[data-kind="warn"] {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.console-row[data-kind="error"] {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+/* Network rows */
+.network-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-2) var(--sp-5);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-xs);
+}
+
+.network-row:hover {
+  background: var(--bg-hover);
+}
+
+.network-method {
+  flex-shrink: 0;
+  width: 44px;
+  font-weight: var(--fw-semi);
+  color: var(--text-tertiary);
+}
+
+.network-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.network-status {
+  flex-shrink: 0;
+  width: 36px;
+  text-align: right;
+}
+
+.network-status[data-ok="true"] { color: var(--ok); }
+.network-status[data-ok="false"] { color: var(--danger); }
+
+.network-size,
+.network-time {
+  flex-shrink: 0;
+  width: 60px;
+  text-align: right;
+  color: var(--text-tertiary);
+}
+
+.network-cached {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 0 var(--sp-2);
+  height: 15px;
+  line-height: 15px;
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
+}
+
+/* ==========================================================================
+   Mock preview page content — a stylized fake app so the preview frame
+   shows something believable rather than an empty white box.
+   ========================================================================== */
+
+.mock-app {
+  font-family: var(--font-ui);
+  color: #1A1D21;
+  background: #FAFAF9;
+  min-height: 100%;
+}
+
+.mock-app-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 56px;
+  padding: 0 24px;
+  background: #FFFFFF;
+  border-bottom: 1px solid #E6E4E0;
+}
+
+.mock-app-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #5B4BD6;
+}
+
+.mock-app-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mock-app-nav {
+  margin-left: auto;
+  display: flex;
+  gap: 20px;
+  font-size: 13px;
+  color: #5C6270;
+}
+
+.mock-app-body {
+  padding: 32px 24px;
+  max-width: 720px;
+}
+
+.mock-app-h1 {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.mock-app-p {
+  font-size: 14px;
+  line-height: 1.7;
+  color: #5C6270;
+  margin-bottom: 24px;
+}
+
+.mock-app-card {
+  background: #FFFFFF;
+  border: 1px solid #E6E4E0;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.mock-app-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.mock-app-card-desc {
+  font-size: 13px;
+  color: #5C6270;
+  line-height: 1.6;
+}
+
+.mock-app-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.mock-app-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+}
+
+.mock-app-btn-primary {
+  background: #5B4BD6;
+  color: #FFFFFF;
+}
+
+.mock-app-btn-ghost {
+  border: 1px solid #D7D4CF;
+  color: #1A1D21;
+}

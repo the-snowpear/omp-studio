@@ -285,6 +285,70 @@ describe("DiagnosticsPage", () => {
     });
   });
 
+  it("re-probes a Runtime that a transient first-install probe failure rejected", async () => {
+    const requestId = "req-reprobe" as CommandRequestId;
+    const authority = {
+      authorityId: "auth-1" as EnvironmentReadModel["authority"]["authorityId"],
+      authorityEpoch: 1 as EnvironmentReadModel["authority"]["authorityEpoch"],
+    };
+    const rejected: RuntimeConnection = {
+      status: "unavailable",
+      classification: "rejected",
+      unavailableCode: "resolution-rejected",
+      unavailableReason: "runtime probe timed out",
+    };
+    const connected: RuntimeConnection = { status: "connected", classification: "managed", runtimeVersion: "1.0.0-studio.1" };
+    const environment: EnvironmentReadModel = {
+      platform: "win32",
+      arch: "x64",
+      authority,
+      runtime: rejected,
+      installer: { status: "installed", version: "1.0.0-studio.1", signature: "verified" },
+    };
+    const query = vi.fn(async (name: string) => {
+      if (name === "environment.get") {
+        return { ...environment, runtime: connected };
+      }
+      if (name === "diagnostics.get") {
+        return { generatedAt: "2026-08-18T06:26:07.000Z", authority, redacted: true, entries: [] };
+      }
+      if (name === "capabilities.get") {
+        return { profile: "full-parity-v1", generatedAt: "2026-08-18T06:26:07.000Z", hash: "cap", capabilities: [] };
+      }
+      throw new Error(`unexpected query ${name}`);
+    });
+    const command = vi.fn(async (name: string) => {
+      if (name !== "runtime.ensure") throw new Error(`unexpected command ${name}`);
+      return { requestId };
+    });
+    const subscribe = vi.fn((_scope: unknown, listener: (event: { kind: string; receipt?: CommandReceipt }) => void) => {
+      queueMicrotask(() => {
+        listener({
+          kind: "command.receipt",
+          receipt: {
+            requestId,
+            commandName: "runtime.ensure",
+            status: "completed",
+            result: connected,
+            observedAt: "2026-08-18T06:26:07.000Z",
+          },
+        });
+      });
+      return () => undefined;
+    });
+    const client = { query, command, subscribe, bootstrap: vi.fn(), close: vi.fn() } as unknown as StudioClient & {
+      readonly query: ReturnType<typeof vi.fn>;
+      readonly command: ReturnType<typeof vi.fn>;
+    };
+    renderPage({ preview: false, client, runtime: rejected, environment });
+    expect(screen.getByText("Runtime 未被接受")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重新连接 Runtime" }));
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith("runtime.ensure", {});
+      expect(screen.getByText("Runtime 已重新连接")).toBeTruthy();
+    });
+  });
+
   it("does not ensure when the workspace is missing", async () => {
     const query = vi.fn(async (name: string) => {
       if (name === "environment.get") {

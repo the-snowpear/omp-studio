@@ -11,10 +11,10 @@
 // supported way to produce a .patch file — hand-written patches drift from the
 // group definition and reintroduce the ordering problems this model removes.
 
-import { rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assertOverlayPresent, captureOverlay, overlayHash } from "./omp-overlay.mjs";
-import { SEAM_EXCLUDED, SEAM_GROUPS } from "./omp-seam.mjs";
+import { assertOverlayPresent, captureOverlay, overlayHash, overlayRoot } from "./omp-overlay.mjs";
+import { PATCHSET_VERSION_FILE, SEAM_EXCLUDED, SEAM_GROUPS, withPatchsetVersionConstant } from "./omp-seam.mjs";
 import { ompSourceDirectory, repositoryRoot, run } from "./omp-tooling.mjs";
 import {
   PATCHES_DIRECTORY,
@@ -79,6 +79,28 @@ await writePatchSeries({
   patchsetDigest: digest,
   patches: written,
 });
+
+// The Runtime reports `${VERSION}-${PATCHSET_VERSION}` in its Studio Hello, and
+// packaging refuses to sign an artifact whose probed identity disagrees with the
+// series. Writing the derived version here means a bump can never be discovered
+// only at the end of a ~10-minute native build. The digest deliberately ignores
+// this literal (see digestibleOverlaySource), so rewriting it does not demand
+// another bump on the next run.
+const versionFilePaths = [
+  join(overlayRoot, ...PATCHSET_VERSION_FILE.split("/")),
+  join(ompSourceDirectory, ...PATCHSET_VERSION_FILE.split("/")),
+];
+let rewroteVersionConstant = false;
+for (const path of versionFilePaths) {
+  const source = await readFile(path, "utf8");
+  const next = withPatchsetVersionConstant(source, patchsetVersion);
+  if (next === source) continue;
+  await writeFile(path, next, "utf8");
+  rewroteVersionConstant = true;
+}
+if (rewroteVersionConstant) {
+  console.log(`Synced PATCHSET_VERSION to ${patchsetVersion} in ${PATCHSET_VERSION_FILE}`);
+}
 
 console.log(
   `series.json: ${written.length} seam patch(es), patchsetVersion=${patchsetVersion}` +

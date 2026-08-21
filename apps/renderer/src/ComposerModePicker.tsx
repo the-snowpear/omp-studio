@@ -17,6 +17,7 @@ import type { CommandInput, CommandName } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
 import { Icon } from "./icons";
+import { useI18n } from "./i18n";
 import type { MagicKeyword } from "./composerMode";
 
 type SessionMode = "plan" | "goal" | "vibe";
@@ -366,6 +367,8 @@ export function ComposerModePicker({
     onCapsulesChange?.(capsules.length > 0);
   }, [capsules.length, onCapsulesChange]);
 
+  const { t } = useI18n();
+
   return (
     <>
       <span className="approval-pill-wrap">
@@ -378,8 +381,8 @@ export function ComposerModePicker({
           }}
           aria-haspopup="menu"
           aria-expanded={open}
-          aria-label="会话模式"
-          data-tip="模式"
+          aria-label={t("composer.sessionMode")}
+          data-tip={t("composer.mode")}
         >
           <Icon name="plus" extra="sm" />
         </button>
@@ -389,24 +392,24 @@ export function ComposerModePicker({
             <div
               className="approval-menu cmp-mode-menu"
               role="menu"
-              aria-label="会话模式"
+              aria-label={t("composer.sessionMode")}
               ref={menuRef}
               onMouseDown={retainComposerFocus}
             >
-              {preview ? <p className="cmp-menu-note"><span className="chip gray xs">演示</span>预览下不调用 Host</p> : null}
-              {nextTurnOnly ? <p className="cmp-menu-note">当前轮次仍用原模式，下一轮对话（含插入信息）才生效</p> : null}
-              <p className="menu-label">会话模式</p>
+              {preview ? <p className="cmp-menu-note"><span className="chip gray xs">{t("common.demo")}</span>{t("composer.previewModelNote")}</p> : null}
+              {nextTurnOnly ? <p className="cmp-menu-note">{t("composer.modeNoteNextTurn")}</p> : null}
+              <p className="menu-label">{t("composer.sessionMode")}</p>
               <button
                 type="button"
                 role="menuitemradio"
                 aria-checked={session === "plan"}
                 className={`approval-menu-item${session === "plan" ? " selected" : ""}`}
                 disabled={!planReady}
-                data-tip={planReady ? undefined : "Plan（暂未实现）"}
+                data-tip={planReady ? undefined : t("common.notImplemented")}
                 onClick={() => selectSession("plan", planReady)}
               >
                 <span className="am-label">Plan</span>
-                <span className="am-desc">只读规划，审批后再改代码</span>
+                <span className="am-desc">{t("composer.modePlanDesc")}</span>
               </button>
               <button
                 type="button"
@@ -414,11 +417,11 @@ export function ComposerModePicker({
                 aria-checked={session === "goal"}
                 className={`approval-menu-item${session === "goal" ? " selected" : ""}`}
                 disabled={!goalReady}
-                data-tip={goalReady ? undefined : "Goal（暂未实现）"}
+                data-tip={goalReady ? undefined : t("common.notImplemented")}
                 onClick={() => selectSession("goal", goalReady)}
               >
                 <span className="am-label">Goal</span>
-                <span className="am-desc">目标驱动，可设 token 预算</span>
+                <span className="am-desc">{t("composer.modeGoalDesc")}</span>
               </button>
               <button
                 type="button"
@@ -426,15 +429,15 @@ export function ComposerModePicker({
                 aria-checked={session === "vibe"}
                 className={`approval-menu-item${session === "vibe" ? " selected" : ""}`}
                 disabled={!vibeReady}
-                data-tip={vibeReady ? undefined : "Vibe（暂未实现）"}
+                data-tip={vibeReady ? undefined : t("common.notImplemented")}
                 onClick={() => selectSession("vibe", vibeReady)}
               >
                 <span className="am-label">Vibe</span>
-                <span className="am-desc">持久 director，与 Plan、Goal 互斥</span>
+                <span className="am-desc">{t("composer.modeVibeDesc")}</span>
               </button>
 
               <div className="cmp-menu-sep" />
-              <p className="menu-label">编排</p>
+              <p className="menu-label">{t("composer.orchestration")}</p>
               <button
                 type="button"
                 role="menuitemradio"
@@ -443,7 +446,7 @@ export function ComposerModePicker({
                 onClick={() => toggleKeyword("ultrathink")}
               >
                 <span className="am-label">Ultrathink</span>
-                <span className="am-desc">该轮拉到最高思考档；胶囊取消前每次发送都注入</span>
+                <span className="am-desc">{t("composer.ultrathinkDesc")}</span>
               </button>
               <button
                 type="button"
@@ -453,7 +456,7 @@ export function ComposerModePicker({
                 onClick={() => toggleKeyword("orchestrate")}
               >
                 <span className="am-label">Orchestrate</span>
-                <span className="am-desc">该轮并行拆任务；胶囊取消前每次发送都注入</span>
+                <span className="am-desc">{t("composer.orchestrateDesc")}</span>
               </button>
               <button
                 type="button"
@@ -463,7 +466,7 @@ export function ComposerModePicker({
                 onClick={() => toggleKeyword("workflowz")}
               >
                 <span className="am-label">Workflowz</span>
-                <span className="am-desc">确定性多子代理工作流 keyword</span>
+                <span className="am-desc">{t("composer.workflowzDesc")}</span>
               </button>
 
               <div className="cmp-menu-sep" />
@@ -477,10 +480,10 @@ export function ComposerModePicker({
                   className="cmp-more"
                   aria-haspopup="menu"
                   aria-expanded={togglesOpen}
-                  aria-label="更多模式"
+                  aria-label={t("composer.moreModes")}
                   onClick={() => setTogglesOpen((value) => !value)}
                 >
-                  <span>更多模式</span>
+                  <span>{t("composer.moreModes")}</span>
                   <span className="spacer" />
                   <Icon name={flyoutSide === "right" ? "chevron-r" : "chevron-l"} extra="sm" />
                 </button>
@@ -489,27 +492,27 @@ export function ComposerModePicker({
                 <div
                   className={`menu rms-pop cmp-flyout cmp-mode-flyout side-${flyoutSide}`}
                   role="menu"
-                  aria-label="更多模式（可多选）"
+                  aria-label={t("composer.moreModesFlyoutAria")}
                   onMouseDown={retainComposerFocus}
                   onMouseEnter={keepFlyoutOpen}
                   onMouseLeave={scheduleFlyoutClose}
                 >
-                  <p className="menu-label">可多选</p>
+                  <p className="menu-label">{t("composer.multipleSelectable")}</p>
                   <label className={`cmp-mode-check${loopOn ? " selected" : ""}`}>
                     <input type="checkbox" checked={loopOn} disabled={!loopReady} onChange={toggleLoop} />
                     <span>
                       <span className="am-label">Loop</span>
-                      <span className="am-desc">下一条消息循环重交</span>
+                      <span className="am-desc">{t("composer.loopDesc")}</span>
                     </span>
                   </label>
                   <div className="cmp-mode-params">
                     <select
-                      aria-label="Loop 限制类型"
+                      aria-label={t("composer.loopLimitType")}
                       value={loopKind}
                       disabled={!loopReady}
                       onChange={(event) => applyLoopParams(event.target.value as LoopLimitKind, loopValue)}
                     >
-                      <option value="none">不限</option>
+                      <option value="none">{t("composer.loopUnlimited")}</option>
                       <option value="turns">turns</option>
                       <option value="minutes">minutes</option>
                     </select>
@@ -517,7 +520,7 @@ export function ComposerModePicker({
                       <input
                         type="number"
                         min={1}
-                        aria-label="Loop 限制数值"
+                        aria-label={t("composer.loopLimitValue")}
                         value={loopValue}
                         disabled={!loopReady}
                         onChange={(event) => setLocal((current) => ({ ...current, loopValue: event.target.value }))}
@@ -528,24 +531,24 @@ export function ComposerModePicker({
                       />
                     ) : null}
                   </div>
-                  <label className={`cmp-mode-check${fastOn ? " selected" : ""}`} data-tip={fastReady ? undefined : "Fast（暂未实现）"}>
+                  <label className={`cmp-mode-check${fastOn ? " selected" : ""}`} data-tip={fastReady ? undefined : t("common.notImplemented")}>
                     <input type="checkbox" checked={fastOn} disabled={!fastReady} onChange={toggleFast} />
                     <span>
                       <span className="am-label">Fast</span>
-                      <span className="am-desc">当前会话打开 priority / speed=fast</span>
+                      <span className="am-desc">{t("composer.fastDesc")}</span>
                     </span>
                   </label>
-                  <label className={`cmp-mode-check${prewalkOn ? " selected" : ""}`} data-tip={prewalkReady ? undefined : "Prewalk（暂未实现）"}>
+                  <label className={`cmp-mode-check${prewalkOn ? " selected" : ""}`} data-tip={prewalkReady ? undefined : t("common.notImplemented")}>
                     <input type="checkbox" checked={prewalkOn} disabled={!prewalkReady} onChange={togglePrewalk} />
                     <span>
                       <span className="am-label">Prewalk</span>
-                      <span className="am-desc">规划完切到 into 模型（默认 @smol）</span>
+                      <span className="am-desc">{t("composer.prewalkDesc")}</span>
                     </span>
                   </label>
                   <div className="cmp-mode-params">
                     <input
                       type="text"
-                      aria-label="Prewalk into"
+                      aria-label={t("composer.prewalkInto")}
                       placeholder="@smol"
                       value={prewalkTarget}
                       disabled={!prewalkReady}
@@ -571,7 +574,7 @@ export function ComposerModePicker({
               <button
                 type="button"
                 className="mode-chip-clear"
-                aria-label={`取消 ${capsule.label}`}
+                aria-label={`${t("common.cancel")} ${capsule.label}`}
                 onClick={capsule.onClear}
               >
                 <Icon name="x" extra="sm" />

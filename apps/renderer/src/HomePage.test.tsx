@@ -30,18 +30,22 @@ afterEach(() => {
   __resetOperatorProfileForTests(null);
 });
 
+import { I18nProvider } from "./i18n";
+
 function renderHome(options: {
   preview?: boolean;
   runtime?: RuntimeConnection;
 } = {}) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === true ? "1" : "0");
   render(
-    <PreviewModeProvider switchEnabled>
-      <HomePage
-        {...(options.runtime === undefined ? {} : { runtime: options.runtime })}
-        onRoute={() => undefined}
-      />
-    </PreviewModeProvider>,
+    <I18nProvider forcedLanguage="zh">
+      <PreviewModeProvider switchEnabled>
+        <HomePage
+          {...(options.runtime === undefined ? {} : { runtime: options.runtime })}
+          onRoute={() => undefined}
+        />
+      </PreviewModeProvider>
+    </I18nProvider>,
   );
 }
 
@@ -93,16 +97,18 @@ describe("SecondaryPage body motion", () => {
     className?: string,
   ) {
     return (
-      <SecondaryPage
-        route={route}
-        title={title}
-        theme="dark"
-        {...(className === undefined ? {} : { className })}
-        onRoute={() => undefined}
-        onToggleTheme={() => undefined}
-      >
-        <p>{body}</p>
-      </SecondaryPage>
+      <I18nProvider forcedLanguage="zh">
+        <SecondaryPage
+          route={route}
+          title={title}
+          theme="dark"
+          {...(className === undefined ? {} : { className })}
+          onRoute={() => undefined}
+          onToggleTheme={() => undefined}
+        >
+          <p>{body}</p>
+        </SecondaryPage>
+      </I18nProvider>
     );
   }
 

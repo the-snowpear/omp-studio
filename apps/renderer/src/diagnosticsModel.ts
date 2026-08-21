@@ -10,8 +10,45 @@ import type {
   RuntimeInstallState,
   RuntimeUnavailableCode,
 } from "@omp-studio/client-contract";
+import { zh } from "./i18n/locales/zh";
 
 type CapabilityManifest = ClientBootstrap["capabilityManifest"];
+
+/**
+ * Translation function signature used by the diagnostics copy builders.
+ * `t` resolves i18n keys (optionally with `{param}` interpolation) to localized
+ * strings. React components pass `useI18n().t`; non-React callers may pass
+ * `translate(locale, key, params)` from I18nContext. Every builder defaults to
+ * `zhT` so existing callers keep producing the original Chinese copy.
+ */
+export type I18nT = (key: string, params?: Record<string, unknown>) => string;
+
+function lookupKey(dict: Record<string, unknown>, path: string): string | undefined {
+  const parts = path.split(".");
+  let current: unknown = dict;
+  for (const part of parts) {
+    if (current && typeof current === "object" && part in current) {
+      current = (current as Record<string, unknown>)[part];
+    } else {
+      return undefined;
+    }
+  }
+  return typeof current === "string" ? current : undefined;
+}
+
+function formatParams(template: string, params?: Record<string, unknown>): string {
+  if (params === undefined) return template;
+  return template.replace(/\{(\w+)\}/g, (match, key: string) => {
+    return key in params ? String(params[key]) : match;
+  });
+}
+
+/** Fallback translator: resolves keys against the zh dictionary. */
+const zhT: I18nT = (key, params) => {
+  const template = lookupKey(zh as unknown as Record<string, unknown>, key);
+  if (template === undefined) return key;
+  return formatParams(template, params);
+};
 
 export type DiagnosticsHeroKind = "ok" | "update" | "missing" | "down" | "failed" | "installing" | "connecting";
 export type DiagnosticsHeroAction = "recheck" | "install" | "update" | "reconnect";
@@ -45,40 +82,54 @@ export interface DiagnosticsFact {
   readonly value: string;
 }
 
+/**
+ * i18n KEYS for runtime connection status labels. The key sets are stable
+ * identifiers; resolve with `t(key)` at use sites.
+ */
 const RUNTIME_LABEL: Record<RuntimeConnection["status"], string> = {
-  connected: "已连接",
-  connecting: "正在连接",
-  disconnected: "连接已断开",
-  unavailable: "不可用",
+  connected: "diagnostics.statusConnected",
+  connecting: "diagnostics.statusConnecting",
+  disconnected: "diagnostics.statusDisconnected",
+  unavailable: "diagnostics.statusUnavailable",
 };
 
 const CLASSIFICATION_LABEL: Record<RuntimeClassification, string> = {
-  managed: "托管",
-  unavailable: "不可用",
-  "compatible-system": "系统兼容",
-  "limited-system": "系统受限",
-  rejected: "已拒绝",
+  managed: "diagnostics.classificationManaged",
+  unavailable: "diagnostics.classificationUnavailable",
+  "compatible-system": "diagnostics.classificationCompatibleSystem",
+  "limited-system": "diagnostics.classificationLimitedSystem",
+  rejected: "diagnostics.classificationRejected",
 };
 
 const DISCONNECT_CODE_LABEL: Record<RuntimeDisconnectCode, string> = {
-  "pipe-closed": "管道关闭",
-  "process-exit": "进程退出",
-  "lease-lost": "租约丢失",
-  "host-stop": "Host 停止",
+  "pipe-closed": "diagnostics.disconnectCodePipeClosed",
+  "process-exit": "diagnostics.disconnectCodeProcessExit",
+  "lease-lost": "diagnostics.disconnectCodeLeaseLost",
+  "host-stop": "diagnostics.disconnectCodeHostStop",
 };
 
 const AUTO_RESPAWN_LABEL: Record<RuntimeAutoRespawnStatus, string> = {
-  scheduled: "已安排自动重连",
-  failed: "自动重连失败",
-  exhausted: "自动重连已用尽",
+  scheduled: "diagnostics.autoRespawnScheduled",
+  failed: "diagnostics.autoRespawnFailed",
+  exhausted: "diagnostics.autoRespawnExhausted",
 };
 
-/** Unavailable codes where `runtime.ensure` cannot recover the session. */
+const SIGNATURE_LABEL: Record<RuntimeInstallState["signature"], string> = {
+  verified: "diagnostics.signatureVerified",
+  unverified: "diagnostics.signatureUnverified",
+  unknown: "diagnostics.signatureUnknown",
+};
+
+/**
+ * Unavailable codes where `runtime.ensure` cannot recover the session.
+ * `resolution-rejected` is absent on purpose: `runtime.ensure` re-resolves,
+ * so it re-probes the installed Runtime. A transient first-install probe
+ * failure must not pin the workbench until the app is restarted.
+ */
 const NON_RECONNECT_UNAVAILABLE: ReadonlySet<string> = new Set([
   "no-workspace",
   "workspace-unusable",
   "not-installed",
-  "resolution-rejected",
   "resolution-limited",
   "not-wired",
 ]);
@@ -117,20 +168,20 @@ export function isRuntimeAutoRespawnStatus(value: unknown): value is RuntimeAuto
   return value === "scheduled" || value === "failed" || value === "exhausted";
 }
 
-export function formatRuntimeStatusLabel(status: RuntimeConnection["status"]): string {
-  return RUNTIME_LABEL[status];
+export function formatRuntimeStatusLabel(status: RuntimeConnection["status"], t: I18nT = zhT): string {
+  return t(RUNTIME_LABEL[status]);
 }
 
-export function formatRuntimeClassification(classification: RuntimeClassification): string {
-  return CLASSIFICATION_LABEL[classification];
+export function formatRuntimeClassification(classification: RuntimeClassification, t: I18nT = zhT): string {
+  return t(CLASSIFICATION_LABEL[classification]);
 }
 
-export function formatRuntimeAutoRespawnCopy(status: RuntimeAutoRespawnStatus): string {
-  return AUTO_RESPAWN_LABEL[status];
+export function formatRuntimeAutoRespawnCopy(status: RuntimeAutoRespawnStatus, t: I18nT = zhT): string {
+  return t(AUTO_RESPAWN_LABEL[status]);
 }
 
-export function formatRuntimeDisconnectCode(code: RuntimeDisconnectCode): string {
-  return DISCONNECT_CODE_LABEL[code];
+export function formatRuntimeDisconnectCode(code: RuntimeDisconnectCode, t: I18nT = zhT): string {
+  return t(DISCONNECT_CODE_LABEL[code]);
 }
 
 /**
@@ -153,74 +204,93 @@ export function runtimeCanRestart(runtime: RuntimeConnection | undefined): boole
 export function formatRuntimeUnavailableCopy(
   code: RuntimeUnavailableCode | undefined,
   reason: string | undefined,
+  t: I18nT = zhT,
 ): { readonly title: string; readonly detail: string; readonly problem: string } {
   const extra = usefulHostReason(reason);
   switch (code) {
     case "no-workspace":
       return {
-        title: "未选择工作区",
-        detail: "选择项目后才会启动 Runtime。",
-        problem: "未选择工作区，Runtime 不会启动",
+        title: t("diagnostics.unavailableNoWorkspaceTitle"),
+        detail: t("diagnostics.unavailableNoWorkspaceDetail"),
+        problem: t("diagnostics.unavailableNoWorkspaceProblem"),
       };
     case "workspace-unusable":
       return {
-        title: "工作区不可用",
-        detail: extra ?? "工作区目录不存在、不是目录，或为符号链接。",
-        problem: extra ? `工作区不可用：${extra}` : "工作区不可用，Runtime 不会启动",
+        title: t("diagnostics.unavailableWorkspaceUnusableTitle"),
+        detail: extra ?? t("diagnostics.unavailableWorkspaceUnusableDetail"),
+        problem: extra
+          ? t("diagnostics.workspaceUnavailableDetail", { extra })
+          : t("diagnostics.unavailableWorkspaceUnusableProblem"),
       };
     case "not-installed":
       return {
-        title: "尚未安装托管 Runtime",
-        detail: extra ?? "未发现已安装的托管 Runtime。",
-        problem: extra ? `尚未安装托管 Runtime：${extra}` : "尚未安装托管 Runtime",
+        title: t("diagnostics.unavailableNotInstalledTitle"),
+        detail: extra ?? t("diagnostics.unavailableNotInstalledDetail"),
+        problem: extra
+          ? t("diagnostics.unavailableNotInstalledProblemWithReason", { extra })
+          : t("diagnostics.unavailableNotInstalledProblem"),
       };
     case "resolution-rejected":
       return {
-        title: "Runtime 未被接受",
-        detail: extra ?? "探测未通过，Runtime 未启动。",
-        problem: extra ? `Runtime 未被接受：${extra}` : "Runtime 未被接受",
+        title: t("diagnostics.unavailableNotAcceptedTitle"),
+        detail: extra ?? t("diagnostics.unavailableResolutionRejectedDetail"),
+        problem: extra
+          ? t("diagnostics.unavailableResolutionRejectedProblemWithReason", { extra })
+          : t("diagnostics.unavailableResolutionRejectedProblem"),
       };
     case "resolution-limited":
       return {
-        title: "Runtime 未被接受",
-        detail: extra ?? "能力不足，Runtime 未启动。",
-        problem: extra ? `Runtime 能力不足：${extra}` : "Runtime 能力不足，未启动",
+        title: t("diagnostics.unavailableNotAcceptedTitle"),
+        detail: extra ?? t("diagnostics.unavailableResolutionLimitedDetail"),
+        problem: extra
+          ? t("diagnostics.unavailableResolutionLimitedProblemWithReason", { extra })
+          : t("diagnostics.unavailableResolutionLimitedProblem"),
       };
     case "handshake-timeout":
       return {
-        title: "Runtime 握手超时",
-        detail: extra ?? "Studio Bridge 握手超时。",
-        problem: extra ? `Runtime 握手超时：${extra}` : "Runtime 握手超时",
+        title: t("diagnostics.unavailableHandshakeTimeoutTitle"),
+        detail: extra ?? t("diagnostics.unavailableHandshakeTimeoutDetail"),
+        problem: extra
+          ? t("diagnostics.unavailableHandshakeTimeoutProblemWithReason", { extra })
+          : t("diagnostics.unavailableHandshakeTimeoutProblem"),
       };
     case "spawn-failed":
       return {
-        title: "Runtime 无法启动",
-        detail: extra ?? "托管进程未能启动。",
-        problem: extra ? `Runtime 无法启动：${extra}` : "Runtime 无法启动",
+        title: t("diagnostics.unavailableSpawnFailedTitle"),
+        detail: extra ?? t("diagnostics.unavailableSpawnFailedDetail"),
+        problem: extra
+          ? t("diagnostics.unavailableSpawnFailedProblemWithReason", { extra })
+          : t("diagnostics.unavailableSpawnFailedProblem"),
       };
     case "exited-before-ready":
       return {
-        title: "Runtime 启动后退出",
-        detail: extra ?? "进程在握手完成前退出。",
-        problem: extra ? `Runtime 启动后退出：${extra}` : "Runtime 在就绪前退出",
+        title: t("diagnostics.unavailableExitedBeforeReadyTitle"),
+        detail: extra ?? t("diagnostics.unavailableExitedBeforeReadyDetail"),
+        problem: extra
+          ? t("diagnostics.unavailableExitedBeforeReadyProblemWithReason", { extra })
+          : t("diagnostics.unavailableExitedBeforeReadyProblem"),
       };
     case "launch-failed":
       return {
-        title: "Runtime 启动失败",
-        detail: extra ?? "进程启动或握手失败。",
-        problem: extra ? `Runtime 启动失败：${extra}` : "Runtime 启动失败",
+        title: t("diagnostics.unavailableLaunchFailedTitle"),
+        detail: extra ?? t("diagnostics.unavailableLaunchFailedDetail"),
+        problem: extra
+          ? t("diagnostics.unavailableLaunchFailedProblemWithReason", { extra })
+          : t("diagnostics.unavailableLaunchFailedProblem"),
       };
     case "not-wired":
       return {
-        title: "Runtime 未接入",
-        detail: extra ?? "当前 Host 未接入 Runtime 会话端口。",
-        problem: extra ? `Runtime 未接入：${extra}` : "Runtime 未接入会话端口",
+        title: t("diagnostics.unavailableNotWiredTitle"),
+        detail: extra ?? t("diagnostics.unavailableNotWiredDetail"),
+        problem: extra
+          ? t("diagnostics.unavailableNotWiredProblemWithReason", { extra })
+          : t("diagnostics.unavailableNotWiredProblem"),
       };
     default:
       return {
-        title: "Runtime 不可用",
-        detail: extra ?? "不可用",
-        problem: extra ?? "Runtime 不可用",
+        title: t("diagnostics.unavailableDefaultTitle"),
+        detail: extra ?? t("diagnostics.unavailableDefaultDetail"),
+        problem: extra ?? t("diagnostics.unavailableDefaultProblem"),
       };
   }
 }
@@ -228,161 +298,169 @@ export function formatRuntimeUnavailableCopy(
 export function formatRuntimeDisconnectCopy(
   code: RuntimeDisconnectCode | undefined,
   reason: string | undefined,
+  t: I18nT = zhT,
 ): { readonly title: string; readonly detail: string; readonly problem: string } {
   switch (code) {
     case "process-exit": {
-      const exit = parseProcessExitReason(reason);
-      const detail = exit.summary ?? "托管进程在连接后退出。";
+      const exit = parseProcessExitReason(reason, t);
+      const detail = exit.summary ?? t("diagnostics.disconnectProcessExitFallbackDetail");
       return {
-        title: "Runtime 进程已退出",
+        title: t("diagnostics.disconnectProcessExitTitle"),
         detail,
         problem: exit.problem,
       };
     }
     case "pipe-closed":
       return {
-        title: "Runtime 连接已断开",
-        detail: cannedOrReason(reason, ["Studio Bridge pipe closed"], "Studio Bridge 管道已关闭。"),
-        problem: "Runtime 连接已断开",
+        title: t("diagnostics.disconnectPipeClosedTitle"),
+        detail: cannedOrReason(reason, ["Studio Bridge pipe closed"], t("diagnostics.disconnectPipeClosedDetail")),
+        problem: t("diagnostics.disconnectPipeClosedProblem"),
       };
     case "lease-lost":
       return {
-        title: "Runtime 会话租约丢失",
-        detail: cannedOrReason(reason, ["session writer lease was lost"], "会话写租约失效，进程已停止。"),
-        problem: "Runtime 会话租约丢失",
+        title: t("diagnostics.disconnectLeaseLostTitle"),
+        detail: cannedOrReason(reason, ["session writer lease was lost"], t("diagnostics.disconnectLeaseLostDetail")),
+        problem: t("diagnostics.disconnectLeaseLostProblem"),
       };
     case "host-stop":
       return {
-        title: "Runtime 已停止",
-        detail: cannedOrReason(reason, ["Host stopped the Runtime"], "Host 主动停止了 Runtime。"),
-        problem: "Runtime 已停止",
+        title: t("diagnostics.disconnectHostStopTitle"),
+        detail: cannedOrReason(reason, ["Host stopped the Runtime"], t("diagnostics.disconnectHostStopDetail")),
+        problem: t("diagnostics.disconnectHostStopProblem"),
       };
     default:
       return {
-        title: "Runtime 连接已断开",
-        detail: usefulHostReason(reason) ?? "连接已断开。",
-        problem: usefulHostReason(reason) ?? "Runtime 连接已断开",
+        title: t("diagnostics.disconnectDefaultTitle"),
+        detail: usefulHostReason(reason) ?? t("diagnostics.disconnectDefaultDetail"),
+        problem: usefulHostReason(reason) ?? t("diagnostics.disconnectDefaultProblem"),
       };
   }
 }
 
-export function formatDiagnosticEntryMessage(entry: DiagnosticEntry): string {
+export function formatDiagnosticEntryMessage(entry: DiagnosticEntry, t: I18nT = zhT): string {
   const code = entry.detail?.code;
   const autoRespawn = entry.detail?.autoRespawn;
   const auto = isRuntimeAutoRespawnStatus(autoRespawn)
-    ? formatRuntimeAutoRespawnCopy(autoRespawn)
+    ? formatRuntimeAutoRespawnCopy(autoRespawn, t)
     : undefined;
   let message: string;
   if (isRuntimeUnavailableCode(code)) {
     const reason = typeof entry.detail?.reason === "string" ? entry.detail.reason : undefined;
-    message = formatRuntimeUnavailableCopy(code, reason).problem;
+    message = formatRuntimeUnavailableCopy(code, reason, t).problem;
   } else if (isRuntimeDisconnectCode(code)) {
     const reason = typeof entry.detail?.reason === "string" ? entry.detail.reason : undefined;
-    message = formatRuntimeDisconnectCopy(code, reason).problem;
+    message = formatRuntimeDisconnectCopy(code, reason, t).problem;
   } else {
     message = entry.message;
   }
   return auto === undefined ? message : `${message} · ${auto}`;
 }
 
-export function formatRuntimeConnectionLine(runtime: RuntimeConnection): string {
-  const status = RUNTIME_LABEL[runtime.status];
-  const kind = CLASSIFICATION_LABEL[runtime.classification];
+export function formatRuntimeConnectionLine(runtime: RuntimeConnection, t: I18nT = zhT): string {
+  const status = t(RUNTIME_LABEL[runtime.status]);
+  const kind = t(CLASSIFICATION_LABEL[runtime.classification]);
   return `${status} · ${kind}`;
 }
 
-export function formatRuntimeConnectionFacts(runtime: RuntimeConnection | undefined): ReadonlyArray<DiagnosticsFact> {
+export function formatRuntimeConnectionFacts(runtime: RuntimeConnection | undefined, t: I18nT = zhT): ReadonlyArray<DiagnosticsFact> {
   if (runtime === undefined) {
-    return [{ label: "状态", value: "无法读取连接" }];
+    return [{ label: t("diagnostics.factStatus"), value: t("diagnostics.factUnreadable") }];
   }
   const facts: DiagnosticsFact[] = [
-    { label: "状态", value: RUNTIME_LABEL[runtime.status] },
-    { label: "类型", value: CLASSIFICATION_LABEL[runtime.classification] },
+    { label: t("diagnostics.factStatus"), value: t(RUNTIME_LABEL[runtime.status]) },
+    { label: t("diagnostics.factType"), value: t(CLASSIFICATION_LABEL[runtime.classification]) },
   ];
   if (runtime.status === "unavailable") {
-    const copy = formatRuntimeUnavailableCopy(runtime.unavailableCode, runtime.unavailableReason);
-    facts.push({ label: "原因码", value: runtime.unavailableCode ?? "—" });
-    facts.push({ label: "说明", value: copy.detail });
+    const copy = formatRuntimeUnavailableCopy(runtime.unavailableCode, runtime.unavailableReason, t);
+    facts.push({ label: t("diagnostics.factReasonCode"), value: runtime.unavailableCode ?? "—" });
+    facts.push({ label: t("diagnostics.factDetail"), value: copy.detail });
   }
   if (runtime.status === "disconnected") {
-    const copy = formatRuntimeDisconnectCopy(runtime.disconnectCode, runtime.disconnectReason);
+    const copy = formatRuntimeDisconnectCopy(runtime.disconnectCode, runtime.disconnectReason, t);
     facts.push({
-      label: "原因码",
-      value: runtime.disconnectCode === undefined ? "—" : DISCONNECT_CODE_LABEL[runtime.disconnectCode],
+      label: t("diagnostics.factReasonCode"),
+      value: runtime.disconnectCode === undefined ? "—" : t(DISCONNECT_CODE_LABEL[runtime.disconnectCode]),
     });
-    facts.push({ label: "说明", value: copy.detail });
+    facts.push({ label: t("diagnostics.factDetail"), value: copy.detail });
     if (runtime.disconnectedAt !== undefined) {
-      facts.push({ label: "断开时间", value: formatCheckedAt(runtime.disconnectedAt) });
+      facts.push({ label: t("diagnostics.factDisconnectedAt"), value: formatCheckedAt(runtime.disconnectedAt, t) });
     }
     if (runtime.autoRespawn !== undefined) {
-      facts.push({ label: "自动重连", value: AUTO_RESPAWN_LABEL[runtime.autoRespawn] });
+      facts.push({ label: t("diagnostics.factAutoRespawn"), value: t(AUTO_RESPAWN_LABEL[runtime.autoRespawn]) });
     }
   }
   return facts;
 }
 
-const SIGNATURE_LABEL: Record<RuntimeInstallState["signature"], string> = {
-  verified: "已验证",
-  unverified: "未验证",
-  unknown: "未知",
-};
-
-export function formatCheckedAt(iso: string | undefined): string {
-  if (iso === undefined) return "尚未检测";
+export function formatCheckedAt(iso: string | undefined, t: I18nT = zhT): string {
+  if (iso === undefined) return t("diagnostics.notCheckedYet");
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return iso;
   return new Date(then).toLocaleString();
 }
 
-export function deriveDiagnosticsView(input: {
-  readonly runtime?: RuntimeConnection;
-  readonly environment?: EnvironmentReadModel;
-  readonly diagnostics?: DiagnosticReadModel;
-  readonly capabilities?: CapabilityManifest;
-}): DiagnosticsViewModel {
+export function deriveDiagnosticsView(
+  input: {
+    readonly runtime?: RuntimeConnection;
+    readonly environment?: EnvironmentReadModel;
+    readonly diagnostics?: DiagnosticReadModel;
+    readonly capabilities?: CapabilityManifest;
+  },
+  t: I18nT = zhT,
+): DiagnosticsViewModel {
   const installer = input.environment?.installer;
   const runtime = input.runtime ?? input.environment?.runtime;
   const problems = (input.diagnostics?.entries ?? []).filter((entry) => entry.level === "error" || entry.level === "warning");
   const capCount = input.capabilities?.capabilities.length ?? 0;
   const runtimeVersion = runtime?.runtimeVersion ?? installer?.version;
   const generatedAt = input.diagnostics?.generatedAt;
-  const hero = deriveHero({
-    problemCount: problems.length,
-    ...(runtime === undefined ? {} : { runtime }),
-    ...(installer === undefined ? {} : { installer }),
-    ...(runtimeVersion === undefined ? {} : { runtimeVersion }),
-    ...(generatedAt === undefined ? {} : { generatedAt }),
-  });
+  const hero = deriveHero(
+    {
+      problemCount: problems.length,
+      ...(runtime === undefined ? {} : { runtime }),
+      ...(installer === undefined ? {} : { installer }),
+      ...(runtimeVersion === undefined ? {} : { runtimeVersion }),
+      ...(generatedAt === undefined ? {} : { generatedAt }),
+    },
+    t,
+  );
   return {
     hero,
     problemCount: problems.length,
     checks: [
-      runtimeCheck(runtime),
-      installCheck(installer),
-      signatureCheck(installer),
-      platformCheck(input.environment),
-      capabilityCheck(capCount),
-      problemsCheck(problems.length),
+      runtimeCheck(runtime, t),
+      installCheck(installer, t),
+      signatureCheck(installer, t),
+      platformCheck(input.environment, t),
+      capabilityCheck(capCount, t),
+      problemsCheck(problems.length, t),
     ],
   };
 }
 
-function deriveHero(input: {
-  readonly runtime?: RuntimeConnection;
-  readonly installer?: RuntimeInstallState;
-  readonly problemCount: number;
-  readonly runtimeVersion?: string;
-  readonly generatedAt?: string;
-}): DiagnosticsHero {
-  const checked = `上次检测 ${formatCheckedAt(input.generatedAt)}`;
-  const version = input.runtimeVersion ? `当前 ${input.runtimeVersion}` : "版本未知";
-  const signature = input.installer ? `签名${SIGNATURE_LABEL[input.installer.signature]}` : "签名未知";
+function deriveHero(
+  input: {
+    readonly runtime?: RuntimeConnection;
+    readonly installer?: RuntimeInstallState;
+    readonly problemCount: number;
+    readonly runtimeVersion?: string;
+    readonly generatedAt?: string;
+  },
+  t: I18nT,
+): DiagnosticsHero {
+  const checked = t("diagnostics.heroCheckedAt", { time: formatCheckedAt(input.generatedAt, t) });
+  const version = input.runtimeVersion
+    ? t("diagnostics.heroCurrentVersion", { version: input.runtimeVersion })
+    : t("diagnostics.versionUnknown");
+  const signature = input.installer
+    ? t("diagnostics.heroSignature", { signature: t(SIGNATURE_LABEL[input.installer.signature]) })
+    : t("diagnostics.heroSignatureUnknown");
   const baseDetail = `${version} · ${signature} · ${checked}`;
 
   if (input.installer?.status === "installing") {
     return {
       kind: "installing",
-      title: "正在安装 Runtime",
+      title: t("diagnostics.heroInstallingTitle"),
       detail: baseDetail,
       primary: "recheck",
       showReinstall: false,
@@ -391,27 +469,31 @@ function deriveHero(input: {
   if (input.installer?.status === "failed") {
     return {
       kind: "failed",
-      title: "Runtime 安装失败",
+      title: t("diagnostics.heroInstallFailedTitle"),
       detail: input.installer.message ? `${input.installer.message} · ${checked}` : baseDetail,
       primary: "recheck",
       showReinstall: true,
     };
   }
   if (input.installer?.status === "not-installed") {
-    const available = input.installer.availableVersion ? `发现本地制品 ${input.installer.availableVersion}。` : "未发现本地签名制品。";
+    const available = input.installer.availableVersion
+      ? t("diagnostics.heroFoundLocalArtifact", { version: input.installer.availableVersion })
+      : t("diagnostics.heroNoLocalArtifact");
     return {
       kind: "missing",
-      title: "尚未安装托管 Runtime",
+      title: t("diagnostics.heroNotInstalledTitle"),
       detail: `${available} ${checked}`,
       primary: "install",
       showReinstall: false,
     };
   }
   if (input.installer?.status === "update-available") {
-    const next = input.installer.availableVersion ? `可更新到 ${input.installer.availableVersion}` : "发现更新的本地制品";
+    const next = input.installer.availableVersion
+      ? t("diagnostics.heroUpdateTo", { version: input.installer.availableVersion })
+      : t("diagnostics.heroFoundNewerArtifact");
     return {
       kind: "update",
-      title: "有可用 Runtime 更新",
+      title: t("diagnostics.heroUpdateTitle"),
       detail: `${version} · ${next} · ${checked}`,
       primary: "update",
       showReinstall: true,
@@ -420,14 +502,14 @@ function deriveHero(input: {
   if (input.runtime?.status === "connecting") {
     return {
       kind: "connecting",
-      title: "正在连接 Runtime",
+      title: t("diagnostics.heroConnectingTitle"),
       detail: baseDetail,
       primary: "recheck",
       showReinstall: input.installer?.status === "installed",
     };
   }
   if (input.runtime?.status === "unavailable") {
-    const copy = formatRuntimeUnavailableCopy(input.runtime.unavailableCode, input.runtime.unavailableReason);
+    const copy = formatRuntimeUnavailableCopy(input.runtime.unavailableCode, input.runtime.unavailableReason, t);
     return {
       kind: "down",
       title: copy.title,
@@ -437,8 +519,8 @@ function deriveHero(input: {
     };
   }
   if (input.runtime?.status === "disconnected") {
-    const copy = formatRuntimeDisconnectCopy(input.runtime.disconnectCode, input.runtime.disconnectReason);
-    const auto = input.runtime.autoRespawn === undefined ? "" : ` · ${AUTO_RESPAWN_LABEL[input.runtime.autoRespawn]}`;
+    const copy = formatRuntimeDisconnectCopy(input.runtime.disconnectCode, input.runtime.disconnectReason, t);
+    const auto = input.runtime.autoRespawn === undefined ? "" : ` · ${t(AUTO_RESPAWN_LABEL[input.runtime.autoRespawn])}`;
     return {
       kind: "down",
       title: copy.title,
@@ -447,123 +529,145 @@ function deriveHero(input: {
       showReinstall: input.installer?.status === "installed",
     };
   }
-  const extra = input.problemCount > 0 ? ` · ${input.problemCount} 条最近问题` : "";
+  const extra = input.problemCount > 0 ? ` · ${t("diagnostics.heroRecentProblems", { count: input.problemCount })}` : "";
   return {
     kind: "ok",
-    title: "Runtime 正常",
+    title: t("diagnostics.heroOkTitle"),
     detail: `${baseDetail}${extra}`,
     primary: "recheck",
     showReinstall: input.installer?.status === "installed",
   };
 }
 
-function runtimeCheck(runtime: RuntimeConnection | undefined): DiagnosticsCheck {
+function runtimeCheck(runtime: RuntimeConnection | undefined, t: I18nT): DiagnosticsCheck {
   if (runtime === undefined) {
-    return { id: "runtime", label: "Runtime 连接", detail: "无法读取连接状态", tone: "warn" };
+    return { id: "runtime", label: t("diagnostics.checkRuntimeLabel"), detail: t("diagnostics.checkRuntimeUnreadable"), tone: "warn" };
   }
   if (runtime.status === "connected") {
-    return { id: "runtime", label: "Runtime 连接", detail: formatRuntimeConnectionLine(runtime), tone: "ok" };
+    return { id: "runtime", label: t("diagnostics.checkRuntimeLabel"), detail: formatRuntimeConnectionLine(runtime, t), tone: "ok" };
   }
   if (runtime.status === "connecting") {
-    return { id: "runtime", label: "Runtime 连接", detail: RUNTIME_LABEL.connecting, tone: "warn" };
+    return { id: "runtime", label: t("diagnostics.checkRuntimeLabel"), detail: t(RUNTIME_LABEL.connecting), tone: "warn" };
   }
   if (runtime.status === "unavailable") {
-    const copy = formatRuntimeUnavailableCopy(runtime.unavailableCode, runtime.unavailableReason);
-    return { id: "runtime", label: "Runtime 连接", detail: copy.problem, tone: "error" };
+    const copy = formatRuntimeUnavailableCopy(runtime.unavailableCode, runtime.unavailableReason, t);
+    return { id: "runtime", label: t("diagnostics.checkRuntimeLabel"), detail: copy.problem, tone: "error" };
   }
   if (runtime.status === "disconnected") {
-    const copy = formatRuntimeDisconnectCopy(runtime.disconnectCode, runtime.disconnectReason);
-    const auto = runtime.autoRespawn === undefined ? "" : ` · ${AUTO_RESPAWN_LABEL[runtime.autoRespawn]}`;
-    return { id: "runtime", label: "Runtime 连接", detail: `${copy.problem}${auto}`, tone: "error" };
+    const copy = formatRuntimeDisconnectCopy(runtime.disconnectCode, runtime.disconnectReason, t);
+    const auto = runtime.autoRespawn === undefined ? "" : ` · ${t(AUTO_RESPAWN_LABEL[runtime.autoRespawn])}`;
+    return { id: "runtime", label: t("diagnostics.checkRuntimeLabel"), detail: `${copy.problem}${auto}`, tone: "error" };
   }
-  return { id: "runtime", label: "Runtime 连接", detail: RUNTIME_LABEL[runtime.status], tone: "error" };
+  return { id: "runtime", label: t("diagnostics.checkRuntimeLabel"), detail: t(RUNTIME_LABEL[runtime.status]), tone: "error" };
 }
 
-function installCheck(installer: RuntimeInstallState | undefined): DiagnosticsCheck {
+function installCheck(installer: RuntimeInstallState | undefined, t: I18nT): DiagnosticsCheck {
   if (installer === undefined) {
-    return { id: "install", label: "托管安装", detail: "无法读取安装状态", tone: "warn" };
+    return { id: "install", label: t("diagnostics.checkInstallLabel"), detail: t("diagnostics.checkInstallUnreadable"), tone: "warn" };
   }
   if (installer.status === "installed") {
-    return { id: "install", label: "托管安装", detail: installer.version ? `已安装 ${installer.version}` : "已安装", tone: "ok" };
+    return {
+      id: "install",
+      label: t("diagnostics.checkInstallLabel"),
+      detail: installer.version ? t("diagnostics.installedVersion", { version: installer.version }) : t("diagnostics.installed"),
+      tone: "ok",
+    };
   }
   if (installer.status === "update-available") {
     return {
       id: "install",
-      label: "托管安装",
-      detail: `${installer.version ?? "已安装"} · 可更新到 ${installer.availableVersion ?? "新版本"}`,
+      label: t("diagnostics.checkInstallLabel"),
+      detail: `${installer.version ?? t("diagnostics.installed")} · ${t("diagnostics.updateAvailableTo", {
+        version: installer.availableVersion ?? t("diagnostics.newVersion"),
+      })}`,
       tone: "warn",
       action: "update",
     };
   }
   if (installer.status === "installing") {
-    return { id: "install", label: "托管安装", detail: "正在安装", tone: "warn" };
+    return { id: "install", label: t("diagnostics.checkInstallLabel"), detail: t("diagnostics.installing"), tone: "warn" };
   }
   if (installer.status === "failed") {
-    return { id: "install", label: "托管安装", detail: installer.message ?? "安装失败", tone: "error", action: "install" };
+    return {
+      id: "install",
+      label: t("diagnostics.checkInstallLabel"),
+      detail: installer.message ?? t("diagnostics.installFailed"),
+      tone: "error",
+      action: "install",
+    };
   }
   return {
     id: "install",
-    label: "托管安装",
-    detail: installer.availableVersion ? `未安装 · 本地制品 ${installer.availableVersion}` : "未安装",
+    label: t("diagnostics.checkInstallLabel"),
+    detail: installer.availableVersion
+      ? t("diagnostics.notInstalledWithArtifact", { version: installer.availableVersion })
+      : t("diagnostics.notInstalled"),
     tone: "error",
     action: "install",
   };
 }
 
-function signatureCheck(installer: RuntimeInstallState | undefined): DiagnosticsCheck {
+function signatureCheck(installer: RuntimeInstallState | undefined, t: I18nT): DiagnosticsCheck {
   if (installer === undefined) {
-    return { id: "signature", label: "签名", detail: "无法读取签名", tone: "warn" };
+    return { id: "signature", label: t("diagnostics.checkSignatureLabel"), detail: t("diagnostics.checkSignatureUnreadable"), tone: "warn" };
   }
   if (installer.signature === "verified") {
-    return { id: "signature", label: "签名", detail: SIGNATURE_LABEL.verified, tone: "ok" };
+    return { id: "signature", label: t("diagnostics.checkSignatureLabel"), detail: t(SIGNATURE_LABEL.verified), tone: "ok" };
   }
   if (installer.signature === "unverified") {
-    return { id: "signature", label: "签名", detail: SIGNATURE_LABEL.unverified, tone: "error" };
+    return { id: "signature", label: t("diagnostics.checkSignatureLabel"), detail: t(SIGNATURE_LABEL.unverified), tone: "error" };
   }
-  return { id: "signature", label: "签名", detail: SIGNATURE_LABEL.unknown, tone: "warn" };
+  return { id: "signature", label: t("diagnostics.checkSignatureLabel"), detail: t(SIGNATURE_LABEL.unknown), tone: "warn" };
 }
 
-function platformCheck(environment: EnvironmentReadModel | undefined): DiagnosticsCheck {
+function platformCheck(environment: EnvironmentReadModel | undefined, t: I18nT): DiagnosticsCheck {
   if (environment === undefined) {
-    return { id: "platform", label: "平台", detail: "无法读取平台", tone: "warn" };
+    return { id: "platform", label: t("diagnostics.checkPlatformLabel"), detail: t("diagnostics.checkPlatformUnreadable"), tone: "warn" };
   }
-  return { id: "platform", label: "平台", detail: `${environment.platform} · ${environment.arch}`, tone: "ok" };
+  return { id: "platform", label: t("diagnostics.checkPlatformLabel"), detail: `${environment.platform} · ${environment.arch}`, tone: "ok" };
 }
 
-function capabilityCheck(count: number): DiagnosticsCheck {
+function capabilityCheck(count: number, t: I18nT): DiagnosticsCheck {
   if (count === 0) {
-    return { id: "capability", label: "Capability", detail: "无 capability 清单", tone: "warn" };
+    return { id: "capability", label: "Capability", detail: t("diagnostics.noCapabilityManifest"), tone: "warn" };
   }
-  return { id: "capability", label: "Capability", detail: `${count} 项已协商`, tone: "ok" };
+  return { id: "capability", label: "Capability", detail: t("diagnostics.capabilitiesNegotiated", { count }), tone: "ok" };
 }
 
-function problemsCheck(count: number): DiagnosticsCheck {
+function problemsCheck(count: number, t: I18nT): DiagnosticsCheck {
   if (count === 0) {
-    return { id: "problems", label: "最近问题", detail: "无错误或警告", tone: "ok" };
+    return { id: "problems", label: t("diagnostics.checkProblemsLabel"), detail: t("diagnostics.noProblems"), tone: "ok" };
   }
-  return { id: "problems", label: "最近问题", detail: `${count} 条错误或警告`, tone: count > 0 ? "warn" : "ok", action: "problems" };
+  return {
+    id: "problems",
+    label: t("diagnostics.checkProblemsLabel"),
+    detail: t("diagnostics.problemCount", { count }),
+    tone: count > 0 ? "warn" : "ok",
+    action: "problems",
+  };
 }
 
-function parseProcessExitReason(reason: string | undefined): { readonly summary?: string; readonly problem: string } {
+function parseProcessExitReason(reason: string | undefined, t: I18nT): { readonly summary?: string; readonly problem: string } {
   const trimmed = reason?.trim();
   if (trimmed === undefined || trimmed.length === 0) {
-    return { problem: "Runtime 进程已退出" };
+    return { problem: t("diagnostics.disconnectProcessExitProblem") };
   }
   const match = PROCESS_EXIT_RE.exec(trimmed);
   if (match === null) {
-    return { summary: trimmed, problem: `Runtime 进程已退出：${trimmed}` };
+    return { summary: trimmed, problem: t("diagnostics.disconnectProcessExitProblemWithReason", { reason: trimmed }) };
   }
   const code = match[1];
   const signal = match[2];
-  const codePart = code !== undefined && code !== "null" ? `退出码 ${code}` : undefined;
-  const signalPart = signal !== undefined && signal !== "none" ? `信号 ${signal}` : undefined;
+  const codePart = code !== undefined && code !== "null" ? t("diagnostics.exitCode", { code }) : undefined;
+  const signalPart = signal !== undefined && signal !== "none" ? t("diagnostics.exitSignal", { signal }) : undefined;
   const bits = [codePart, signalPart].filter((bit): bit is string => bit !== undefined);
   if (bits.length === 0) {
-    return { problem: "Runtime 进程已退出" };
+    return { problem: t("diagnostics.disconnectProcessExitProblem") };
   }
+  const joined = bits.join(t("diagnostics.listSeparator"));
   return {
-    summary: `托管进程在连接后退出（${bits.join("，")}）。`,
-    problem: `Runtime 进程已退出（${bits.join("，")}）`,
+    summary: t("diagnostics.managedProcessExitedSummary", { bits: joined }),
+    problem: t("diagnostics.disconnectProcessExitProblemWithBits", { bits: joined }),
   };
 }
 

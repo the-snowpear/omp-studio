@@ -11,6 +11,7 @@ import { useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { ApprovalMode } from "@omp-studio/studio-protocol";
 
 import { Icon } from "./icons";
+import { useI18n } from "./i18n";
 
 export function approvalPickerDisabled(input: {
   readonly preview: boolean;
@@ -34,11 +35,11 @@ export function approvalPickerDisabled(input: {
 export const APPROVAL_MODE_OPTIONS: ReadonlyArray<{
   readonly mode: ApprovalMode;
   readonly label: string;
-  readonly description: string;
+  readonly descriptionKey: "composer.permissionReviewDesc" | "composer.permissionWorkspaceDesc" | "composer.permissionFullAccessDesc";
 }> = [
-  { mode: "always-ask", label: "Review", description: "所有写操作需审批" },
-  { mode: "write", label: "Workspace", description: "工作区内自动允许" },
-  { mode: "yolo", label: "Full Access", description: "完全信任" },
+  { mode: "always-ask", label: "Review", descriptionKey: "composer.permissionReviewDesc" },
+  { mode: "write", label: "Workspace", descriptionKey: "composer.permissionWorkspaceDesc" },
+  { mode: "yolo", label: "Full Access", descriptionKey: "composer.permissionFullAccessDesc" },
 ];
 
 export const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
@@ -74,6 +75,7 @@ export function ComposerApprovalPicker({
   onChange: (mode: ApprovalMode) => void;
   onInteract?: () => void;
 }) {
+  const { t, resolvedLanguage } = useI18n();
   const [open, setOpen] = useState(false);
   const label = APPROVAL_MODE_LABELS[mode];
 
@@ -96,8 +98,8 @@ export function ComposerApprovalPicker({
         }}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`权限模式：${label}`}
-        data-tip={disabled ? "无法切换" : "权限"}
+        aria-label={`${t("composer.permissionMode")}${resolvedLanguage === "zh" ? "：" : ": "}${label}`}
+        data-tip={disabled ? t("composer.cannotSwitchPermission") : t("composer.permissionPillTip")}
       >
         <Icon name="shield" extra="sm" />
         <span>{label}</span>
@@ -108,15 +110,15 @@ export function ComposerApprovalPicker({
           <div
             className="approval-menu"
             role="menu"
-            aria-label="权限模式"
+            aria-label={t("composer.permissionMode")}
             onMouseDown={retainComposerFocus}
           >
             {preview ? (
               <p className="cmp-menu-note">
-                <span className="chip gray xs">演示</span>预览下不调用 Host
+                <span className="chip gray xs">{t("common.demo")}</span>{t("composer.previewModelNote")}
               </p>
             ) : null}
-            {nextTurnOnly ? <p className="cmp-menu-note">当前轮次仍用原权限，下一轮对话才生效</p> : null}
+            {nextTurnOnly ? <p className="cmp-menu-note">{t("composer.permissionNoteNextTurn")}</p> : null}
             {APPROVAL_MODE_OPTIONS.map((option) => (
               <button
                 type="button"
@@ -127,7 +129,7 @@ export function ComposerApprovalPicker({
                 onClick={() => select(option.mode)}
               >
                 <span className="am-label">{option.label}</span>
-                <span className="am-desc">{option.description}</span>
+                <span className="am-desc">{t(option.descriptionKey)}</span>
               </button>
             ))}
           </div>

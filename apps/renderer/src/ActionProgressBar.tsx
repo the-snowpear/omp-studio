@@ -21,7 +21,7 @@ export function ActionProgressBar({
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={pct}
-      aria-valuetext={`${label}（${current}/${total}）`}
+      aria-valuetext={`${label} (${current}/${total})`}
     >
       <div className="action-progress-copy">
         <span>{label}</span>

@@ -14,6 +14,7 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import { Icon } from "./icons";
+import { useI18n } from "./i18n";
 import { ToastHost } from "./ToastHost";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { pagePhaseClass, useDeferredPresence } from "./pageTransition";
@@ -76,22 +77,25 @@ const SOURCE_ORDER: ReadonlyArray<AgentDefinitionSource> = ["project", "user", "
 
 /** Matches Host `omp-agent-definitions-adapter` AGENT_NAME. */
 const AGENT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const AGENT_NAME_HINT = "名称限 1–64 位字母、数字、点、下划线或连字符，且须以字母或数字开头";
+const AGENT_NAME_HINT = "subagents.agentNameHintLong";
 
-const FILTERS: ReadonlyArray<{ id: SourceFilter; label: string }> = [
-  { id: "all", label: "全部" },
-  { id: "project", label: "项目" },
-  { id: "user", label: "用户" },
-  { id: "bundled", label: "内置" },
-  { id: "plugin", label: "插件" },
-  { id: "disabled", label: "已禁用" },
+const FILTER_KEYS: ReadonlyArray<{ id: SourceFilter; key: string }> = [
+  { id: "all", key: "history.all" },
+  { id: "project", key: "subagents.scopeProject" },
+  { id: "user", key: "subagents.scopeUser" },
+  { id: "bundled", key: "skills.scopeBuiltin" },
+  { id: "plugin", key: "skills.scopePlugin" },
+  { id: "disabled", key: "modelConfig.disabled" },
 ];
 
-function sourceLabel(source: AgentDefinitionSource): string {
-  if (source === "project") return "项目";
-  if (source === "user") return "用户";
-  if (source === "plugin") return "插件";
-  return "内置";
+function sourceLabel(source: AgentDefinitionSource, t?: (k: string) => string): string {
+  if (t) {
+    if (source === "project") return t("subagents.scopeProject");
+    if (source === "user") return t("subagents.scopeUser");
+    if (source === "plugin") return t("skills.scopePlugin");
+    return t("skills.scopeBuiltin");
+  }
+  return source;
 }
 
 async function runWrite<T extends Extract<CommandName, `agents.definition.${string}`>>(
@@ -206,10 +210,10 @@ function modelChipLabel(value: string, catalog: ModelConfigReadModel | null): st
   return tail.split(":")[0] || value;
 }
 
-function toolCount(agent: AgentDefinitionRecord): string {
-  if (!agent.tools) return "继承全部工具";
+function toolCount(agent: AgentDefinitionRecord, t: (k: string, p?: any) => string): string {
+  if (!agent.tools) return t("subagents.inheritAllTools");
   const n = agent.tools.filter((name) => name !== "yield").length;
-  return `${n} 个工具`;
+  return `${n} ${t("capabilities.toolsProvided")}`;
 }
 
 export function SubagentsPanel({
@@ -225,6 +229,7 @@ export function SubagentsPanel({
   initialAgent?: string;
   onCount?: (count: number) => void;
 }) {
+  const { t } = useI18n();
   const [data, setData] = useState<AgentDefinitionsReadModel | null>(preview ? createPreviewAgentDefinitions() : null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -339,14 +344,14 @@ export function SubagentsPanel({
         ...current,
         agents: current.agents.map((item) => (item.name === agent.name ? { ...item, disabled: !enabled } : item)),
       }));
-      toast("演示：已切换启用状态，未写入 config.yml");
+      toast(t("subagents.demoToggledEnabled"));
       return;
     }
     try {
       await runWrite(client, "agents.definition.configure", { name: agent.name, disabled: !enabled });
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "更新失败"));
+      toast(hostErrorMessage(error, t("modelConfig.updateFailed")));
     }
   };
 
@@ -357,7 +362,7 @@ export function SubagentsPanel({
     const name = draft.name.trim();
     const description = draft.description.trim();
     if (!name || !description) {
-      const message = "名称和描述为必填";
+      const message = t("subagents.nameDescRequired");
       setSaveHint(message);
       toast(message);
       return;
@@ -372,7 +377,7 @@ export function SubagentsPanel({
     if (draft.outputText.trim()) {
       const parsed = parseJsonOrYaml(draft.outputText);
       if (!parsed.ok) {
-        toast("output schema 无法解析（需要合法 JSON 或 YAML）");
+        toast(t("subagents.schemaInvalid"));
         return;
       }
       output = parsed.value;
@@ -429,7 +434,7 @@ export function SubagentsPanel({
           ...(prewalk === null || prewalk === undefined ? {} : { prewalk }),
           ...(advisor === null || advisor === undefined ? {} : { advisor }),
           source: draft.scope === "project" ? "project" : "user",
-          sourceLabel: draft.scope === "project" ? "项目" : "用户",
+          sourceLabel: draft.scope === "project" ? t("subagents.scopeProject") : t("subagents.scopeUser"),
           editable: true,
           canDelete: true,
           canFork: false,
@@ -442,7 +447,7 @@ export function SubagentsPanel({
           ...current,
           agents: [...current.agents.filter((item) => item.name !== record.name), record],
         }));
-        toast("演示：已更新本地列表，未写入磁盘");
+        toast(t("subagents.demoListUpdated"));
       } else {
         mutateLocal((current) => ({
           ...current,
@@ -458,7 +463,7 @@ export function SubagentsPanel({
             };
           }),
         }));
-        toast("演示：已更新会话覆盖，未写入 config.yml");
+        toast(t("subagents.demoOverrideUpdated"));
       }
       setDraft(null);
       return;
@@ -484,11 +489,11 @@ export function SubagentsPanel({
           advisorOverride: draft.advisorOverride.trim() ? draft.advisorOverride.trim() : null,
         });
       }
-      toast(draft.editable ? "已保存子代理" : "已更新会话覆盖");
+      toast(draft.editable ? t("subagents.savedAgent") : t("subagents.savedOverride"));
       setDraft(null);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "保存失败"));
+      toast(hostErrorMessage(error, t("modelConfig.saveFailed")));
     } finally {
       setBusy(false);
     }
@@ -505,7 +510,7 @@ export function SubagentsPanel({
         agents: current.agents.filter((item) => item.name !== input.name),
       }));
       if (draftState?.name === input.name) setDraft(null);
-      toast("演示：已从本地列表移除");
+      toast(t("subagents.demoRemovedFromList"));
       setPendingDelete(null);
       return;
     }
@@ -516,12 +521,12 @@ export function SubagentsPanel({
         scope: input.scope,
         ...(input.contentHash ? { expectedHash: input.contentHash } : {}),
       });
-      toast("已删除");
+      toast(t("modelConfig.saved"));
       if (draftState?.name === input.name) setDraft(null);
       setPendingDelete(null);
       await refresh();
     } catch (error) {
-      toast(hostErrorMessage(error, "删除失败"));
+      toast(hostErrorMessage(error, t("modelConfig.deleteFailed")));
     } finally {
       setBusy(false);
     }
@@ -554,7 +559,7 @@ export function SubagentsPanel({
       scope: data?.projectScopeAvailable ? "project" : "user",
       source: data?.projectScopeAvailable ? "project" : "user",
     });
-    toast("已复制为可编辑草稿，保存后会覆盖同名内置代理");
+    toast(t("subagents.forkDraftToast"));
   };
 
   const catalog = models ?? (preview ? createPreviewModelConfig() : null);
@@ -589,43 +594,43 @@ export function SubagentsPanel({
           <button type="button" className="icon-btn" onClick={() => { setModelMenuOpen(false); setDraft(null); }}>
             <Icon name="arrow-l" />
           </button>
-          <b style={{ fontSize: "var(--fs-14)" }}>{draft.existing ? `编辑 · ${draft.name}` : "新建子代理"}</b>
-          {draft.source ? <span className={`chip ${SOURCE_CHIP[draft.source]} xs`}>{sourceLabel(draft.source)}</span> : <span className="chip purple xs">自定义</span>}
-          {preview ? <span className="chip purple xs">演示</span> : null}
+          <b style={{ fontSize: "var(--fs-14)" }}>{draft.existing ? t("subagents.editSubagent", { name: draft.name }) : t("subagents.newSubagent")}</b>
+          {draft.source ? <span className={`chip ${SOURCE_CHIP[draft.source]} xs`}>{sourceLabel(draft.source, t)}</span> : <span className="chip purple xs">{t("common.custom") || "Custom"}</span>}
+          {preview ? <span className="chip purple xs">{t("common.demo")}</span> : null}
         </div>
         <ToastHost message={flash} onDismiss={() => setFlash(null)} />
 
         <div className="mp-sec">
-          <h3>身份</h3>
-          <p className="sec-desc">OMP 用 <span className="chip-code">name</span> 作为 task 工具里的代理类型。描述会出现在子代理名册里，建议以 “Use this agent when…” 开头。</p>
+          <h3>{t("subagents.title")}</h3>
+          <p className="sec-desc">{t("subagents.identityDesc")}</p>
           <div className="f-grid">
             <div className="field">
-              <label htmlFor="sa-name">名称</label>
+              <label htmlFor="sa-name">{t("common.name") || "Name"}</label>
               <input className="input mono" id="sa-name" value={draft.name} readOnly={draft.existing} disabled={definitionLocked && draft.existing} {...(saveHint ? { "aria-invalid": true as const } : {})} onChange={(event) => { setSaveHint(null); setDraft({ ...draft, name: event.target.value }); }} />
-              {saveHint ? <span className="desc sa-field-error" role="alert">{saveHint}</span> : <span className="desc">字母、数字、点、下划线或连字符，例如 local-review</span>}
+              {saveHint ? <span className="desc sa-field-error" role="alert">{saveHint.startsWith("subagents.") ? t(saveHint) : saveHint}</span> : <span className="desc">{t("subagents.nameHint")}</span>}
             </div>
             <div className="field">
-              <label>保存位置</label>
+              <label>{t("subagents.savePosition")}</label>
               <div className="seg">
-                <button type="button" className={draft.scope === "user" ? "active" : undefined} disabled={definitionLocked && draft.existing} onClick={() => setDraft({ ...draft, scope: "user" })}>用户</button>
-                <button type="button" className={draft.scope === "project" ? "active" : undefined} disabled={(definitionLocked && draft.existing) || !data?.projectScopeAvailable} data-tip={data?.projectScopeAvailable ? undefined : "无工作区"} onClick={() => setDraft({ ...draft, scope: "project" })}>项目</button>
+                <button type="button" className={draft.scope === "user" ? "active" : undefined} disabled={definitionLocked && draft.existing} onClick={() => setDraft({ ...draft, scope: "user" })}>{t("subagents.scopeUser")}</button>
+                <button type="button" className={draft.scope === "project" ? "active" : undefined} disabled={(definitionLocked && draft.existing) || !data?.projectScopeAvailable} data-tip={data?.projectScopeAvailable ? undefined : t("subagents.noWorkspaceTip")} onClick={() => setDraft({ ...draft, scope: "project" })}>{t("subagents.scopeProject")}</button>
               </div>
-              <span className="desc">{draft.scope === "project" ? "写入当前工作区 .omp/agents/" : "写入用户 agents 目录"}</span>
+              <span className="desc">{draft.scope === "project" ? t("subagents.scopeProjectDesc") : t("subagents.scopeUserDesc")}</span>
             </div>
             <div className="field span2">
-              <label htmlFor="sa-desc">描述</label>
+              <label htmlFor="sa-desc">{t("common.description") || "Description"}</label>
               <textarea className="input sa-textarea" id="sa-desc" rows={2} value={draft.description} disabled={definitionLocked} onChange={(event) => { setSaveHint(null); setDraft({ ...draft, description: event.target.value }); }} />
             </div>
           </div>
         </div>
 
         <div className="mp-sec">
-          <h3>模型</h3>
-          <p className="sec-desc">按顺序尝试。可选角色别名（如 @task）或具体模型。留空则继承父会话模型。</p>
+          <h3>{t("subagents.modelSectionTitle")}</h3>
+          <p className="sec-desc">{t("subagents.modelSectionDesc")}</p>
           <div className="sa-model-pick">
             <div className="sa-model-pills">
               {draft.models.length === 0 ? (
-                <span className="sa-model-inherit">继承父会话模型</span>
+                <span className="sa-model-inherit">{t("subagents.inheritModel")}</span>
               ) : (
                 draft.models.map((item) => (
                   <span className="sa-model-pill" key={item} data-tip={item}>
@@ -636,7 +641,7 @@ export function SubagentsPanel({
                         type="button"
                         className="sa-chip-x"
                         onClick={() => setDraft({ ...draft, models: draft.models.filter((value) => value !== item) })}
-                        aria-label={`移除 ${item}`}
+                        aria-label={`${t("common.remove")} ${item}`}
                       >
                         <Icon name="x" extra="sm" />
                       </button>
@@ -651,11 +656,11 @@ export function SubagentsPanel({
                     className="pill-btn"
                     aria-haspopup="menu"
                     aria-expanded={modelMenuOpen}
-                    aria-label="添加模型"
+                    aria-label={t("subagents.addModel")}
                     onClick={() => setModelMenuOpen((open) => !open)}
                   >
                     <Icon name="plus" extra="sm" />
-                    <span>添加模型</span>
+                    <span>{t("subagents.addModel")}</span>
                   </button>
                   {modelMenuOpen ? (
                     <ComposerModelMenu
@@ -666,7 +671,7 @@ export function SubagentsPanel({
                       placement="down"
                       isRoleSelected={(role) => draft.models.includes(role.alias) || draft.models.includes(role.primary)}
                       isModelSelected={(selector) => draft.models.includes(selector)}
-                      note={preview ? "加入本地列表，不写入磁盘" : "写入此子代理的 model 列表"}
+                      note={preview ? t("subagents.demoNoticeDesc") : t("subagents.addModelNote")}
                       onChooseRole={chooseRoleModel}
                       onChooseModel={addModelValue}
                       onClose={() => setModelMenuOpen(false)}
@@ -677,7 +682,7 @@ export function SubagentsPanel({
             </div>
           </div>
           <div className="field" style={{ marginTop: 12 }}>
-            <label>思考等级</label>
+            <label>{t("subagents.thinkingLevel")}</label>
             <div className="seg sa-seg-wrap">
               {AGENT_THINKING.map((item) => (
                 <button type="button" key={item.id || "inherit"} className={draft.thinkingLevel === item.id ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, thinkingLevel: item.id as AgentDraft["thinkingLevel"] })}>{item.label}</button>
@@ -687,23 +692,23 @@ export function SubagentsPanel({
         </div>
 
         <div className="mp-sec">
-          <h3>系统提示</h3>
+          <h3>{t("subagents.promptSectionTitle")}</h3>
           {draft.promptPacked ? (
             <div className="preset-banner">
               <Icon name="info" extra="sm" />
-              <span>内置提示词打包在运行时里。复制到用户/项目后可在此编写，或先在终端执行 omp agents unpack 再编辑。</span>
+              <span>{t("subagents.promptSectionDesc")}</span>
             </div>
           ) : (
-            <textarea className="input sa-prompt" rows={12} value={draft.systemPrompt} disabled={definitionLocked} onChange={(event) => setDraft({ ...draft, systemPrompt: event.target.value })} placeholder="子代理的系统提示词（frontmatter 以下的 Markdown 正文）" />
+            <textarea className="input sa-prompt" rows={12} value={draft.systemPrompt} disabled={definitionLocked} onChange={(event) => setDraft({ ...draft, systemPrompt: event.target.value })} placeholder={t("subagents.promptPlaceholder")} />
           )}
         </div>
 
         <div className="mp-sec">
-          <h3>工具</h3>
-          <p className="sec-desc">留空表示继承父会话全部工具。显式列表会自动附带 <span className="chip-code">yield</span>。</p>
+          <h3>{t("subagents.toolsSectionTitle")}</h3>
+          <p className="sec-desc">{t("subagents.toolsSectionDesc")}</p>
           <div className="seg">
-            <button type="button" className={draft.toolsMode === "inherit" ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, toolsMode: "inherit" })}>继承全部</button>
-            <button type="button" className={draft.toolsMode === "custom" ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, toolsMode: "custom" })}>指定工具</button>
+            <button type="button" className={draft.toolsMode === "inherit" ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, toolsMode: "inherit" })}>{t("subagents.inheritAllTools")}</button>
+            <button type="button" className={draft.toolsMode === "custom" ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, toolsMode: "custom" })}>{t("subagents.customTools")}</button>
           </div>
           {draft.toolsMode === "custom" ? (
             <>
@@ -720,7 +725,7 @@ export function SubagentsPanel({
               {definitionLocked ? null : (
                 <div className="sa-add-row">
                   <input className="input mono" placeholder="mcp__server_tool" value={draft.customTool} onChange={(event) => setDraft({ ...draft, customTool: event.target.value })} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomTool(); } }} />
-                  <button type="button" className="btn small outline" onClick={addCustomTool}>添加 MCP 工具</button>
+                  <button type="button" className="btn small outline" onClick={addCustomTool}>{t("subagents.addMcpTool")}</button>
                 </div>
               )}
             </>
@@ -728,10 +733,10 @@ export function SubagentsPanel({
         </div>
 
         <div className="mp-sec">
-          <h3>可派生</h3>
-          <p className="sec-desc">控制此代理能否再用 task 拉起其他子代理。含 task 工具且未写 spawns 时，OMP 会推断为任意。</p>
+          <h3>{t("subagents.spawnsSectionTitle")}</h3>
+          <p className="sec-desc">{t("subagents.spawnsSectionDesc")}</p>
           <div className="seg">
-            {([["inherit", "继承"], ["none", "禁止"], ["any", "任意 *"], ["list", "指定"]] as const).map(([id, label]) => (
+            {([["inherit", t("subagents.spawnInherit")], ["none", t("subagents.spawnNone")], ["any", t("subagents.spawnAny")], ["list", t("subagents.spawnList")]] as const).map(([id, label]) => (
               <button type="button" key={id} className={draft.spawnsMode === id ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, spawnsMode: id })}>{label}</button>
             ))}
           </div>
@@ -750,49 +755,49 @@ export function SubagentsPanel({
         </div>
 
         <div className="mp-sec">
-          <h3>行为</h3>
+          <h3>{t("subagents.behaviorSectionTitle")}</h3>
           <div className="f-grid">
             <div className="field">
-              <label>阻塞父会话</label>
+              <label>{t("subagents.blockParent")}</label>
               <button type="button" className={`switch${draft.blocking ? " on" : ""}`} role="switch" aria-checked={draft.blocking} disabled={definitionLocked} onClick={() => setDraft({ ...draft, blocking: !draft.blocking })} />
               <span className="desc">frontmatter blocking</span>
             </div>
             <div className="field">
-              <label>Read 摘要</label>
+              <label>{t("subagents.readSummary")}</label>
               <button type="button" className={`switch${draft.readSummarize ? " on" : ""}`} role="switch" aria-checked={draft.readSummarize} disabled={definitionLocked} onClick={() => setDraft({ ...draft, readSummarize: !draft.readSummarize })} />
-              <span className="desc">关闭后 read 返回原文</span>
+              <span className="desc">{t("subagents.readSummaryDesc")}</span>
             </div>
             <div className="field span2">
               <label>Prewalk</label>
               <div className="seg">
-                {([["inherit", "默认"], ["off", "关"], ["on", "默认目标"], ["custom", "自定义"]] as const).map(([id, label]) => (
+                {([["inherit", t("common.default") || "Default"], ["off", t("common.off") || "Off"], ["on", t("common.on") || "On"], ["custom", t("common.custom") || "Custom"]] as const).map(([id, label]) => (
                   <button type="button" key={id} className={draft.prewalkMode === id ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, prewalkMode: id })}>{label}</button>
                 ))}
               </div>
               {draft.prewalkMode === "custom" ? (
-                <input className="input mono" style={{ marginTop: 8 }} placeholder="@smol 或 provider/model" value={draft.prewalkPattern} disabled={definitionLocked} onChange={(event) => setDraft({ ...draft, prewalkPattern: event.target.value })} />
+                <input className="input mono" style={{ marginTop: 8 }} placeholder={t("composer.modelOrRolePlaceholder") || "@smol / provider/model"} value={draft.prewalkPattern} disabled={definitionLocked} onChange={(event) => setDraft({ ...draft, prewalkPattern: event.target.value })} />
               ) : null}
             </div>
             <div className="field span2">
               <label>Advisor</label>
               <div className="seg">
-                {([["inherit", "默认"], ["off", "关"], ["on", "默认角色"], ["custom", "自定义"]] as const).map(([id, label]) => (
+                {([["inherit", t("common.default") || "Default"], ["off", t("common.off") || "Off"], ["on", t("common.on") || "On"], ["custom", t("common.custom") || "Custom"]] as const).map(([id, label]) => (
                   <button type="button" key={id} className={draft.advisorMode === id ? "active" : undefined} disabled={definitionLocked} onClick={() => setDraft({ ...draft, advisorMode: id })}>{label}</button>
                 ))}
               </div>
               {draft.advisorMode === "custom" ? (
-                <input className="input mono" style={{ marginTop: 8 }} placeholder="@advisor 或 provider/model" value={draft.advisorPattern} disabled={definitionLocked} onChange={(event) => setDraft({ ...draft, advisorPattern: event.target.value })} />
+                <input className="input mono" style={{ marginTop: 8 }} placeholder={t("composer.modelOrRolePlaceholder") || "@advisor / provider/model"} value={draft.advisorPattern} disabled={definitionLocked} onChange={(event) => setDraft({ ...draft, advisorPattern: event.target.value })} />
               ) : null}
             </div>
             <div className="field span2">
-              <label htmlFor="sa-skills">自动加载 Skills</label>
+              <label htmlFor="sa-skills">{t("subagents.autoLoadSkills")}</label>
               <input className="input" id="sa-skills" placeholder="skill-a, skill-b" value={draft.autoloadSkills} disabled={definitionLocked} onChange={(event) => setDraft({ ...draft, autoloadSkills: event.target.value })} />
             </div>
           </div>
         </div>
 
         <details className="mp-advanced">
-          <summary>高级 · 结构化 output 与生成预览</summary>
+          <summary>{t("subagents.advancedMarkdown")}</summary>
           <div className="adv-body">
             <StructuredEditor
               className="st-card-embed"
@@ -812,7 +817,7 @@ export function SubagentsPanel({
               value={previewMd(draft)}
               readOnly
               lint={false}
-              title="将写入的 Markdown"
+              title={t("subagents.markdownPreviewTitle")}
               minHeight={240}
               maxHeight={360}
             />
@@ -820,23 +825,23 @@ export function SubagentsPanel({
         </details>
 
         <div className="mp-sec">
-          <h3>会话覆盖</h3>
-          <p className="sec-desc">写入 config.yml 的 task.disabledAgents / agentModelOverrides / agentPrewalk / agentAdvisor，对内置代理同样生效。</p>
+          <h3>{t("subagents.sessionOverrideTitle")}</h3>
+          <p className="sec-desc">{t("subagents.sessionOverrideDesc")}</p>
           <div className="f-grid">
             <div className="field">
-              <label>启用</label>
+              <label>{t("subagents.overrideEnable")}</label>
               <button type="button" className={`switch${!draft.disabled ? " on" : ""}`} role="switch" aria-checked={!draft.disabled} onClick={() => setDraft({ ...draft, disabled: !draft.disabled })} />
             </div>
             <div className="field">
-              <label htmlFor="sa-override">模型覆盖</label>
-              <input className="input mono" id="sa-override" list="sa-model-suggest" placeholder="留空 = 使用定义" value={draft.overrideModel} onChange={(event) => setDraft({ ...draft, overrideModel: event.target.value })} />
+              <label htmlFor="sa-override">{t("subagents.overrideModel")}</label>
+              <input className="input mono" id="sa-override" list="sa-model-suggest" placeholder={t("subagents.overrideModelPlaceholder")} value={draft.overrideModel} onChange={(event) => setDraft({ ...draft, overrideModel: event.target.value })} />
             </div>
             <div className="field">
-              <label htmlFor="sa-prewalk-ov">Prewalk 覆盖</label>
+              <label htmlFor="sa-prewalk-ov">{t("subagents.overridePrewalk")}</label>
               <input className="input mono" id="sa-prewalk-ov" placeholder="on / off / @smol" value={draft.prewalkOverride} onChange={(event) => setDraft({ ...draft, prewalkOverride: event.target.value })} />
             </div>
             <div className="field">
-              <label htmlFor="sa-advisor-ov">Advisor 覆盖</label>
+              <label htmlFor="sa-advisor-ov">{t("subagents.overrideAdvisor")}</label>
               <input className="input mono" id="sa-advisor-ov" placeholder="on / off / @advisor" value={draft.advisorOverride} onChange={(event) => setDraft({ ...draft, advisorOverride: event.target.value })} />
             </div>
           </div>
@@ -854,12 +859,12 @@ export function SubagentsPanel({
                 ...(draft.contentHash ? { contentHash: draft.contentHash } : {}),
               })}
             >
-              删除
+              {t("common.delete")}
             </button>
           ) : null}
-          {draft.canFork ? <button type="button" className="btn outline" onClick={forkDraft}>复制并自定义</button> : null}
+          {draft.canFork ? <button type="button" className="btn outline" onClick={forkDraft}>{t("subagents.forkAndCustomize")}</button> : null}
           <div className="right">
-            <button type="button" className="btn outline" onClick={() => setDraft(null)}>取消</button>
+            <button type="button" className="btn outline" onClick={() => setDraft(null)}>{t("common.cancel")}</button>
             <button
               type="submit"
               className="btn primary"
@@ -869,7 +874,7 @@ export function SubagentsPanel({
                 void saveDraft();
               }}
             >
-              {busy ? "保存中…" : draft.editable ? "保存" : "保存覆盖"}
+              {busy ? t("common.saving") : draft.editable ? t("common.save") : t("subagents.saveOverride")}
             </button>
           </div>
         </div>
@@ -877,41 +882,41 @@ export function SubagentsPanel({
       ) : (
     <>
       <div className="mr-toolbar">
-        <input className="input" placeholder="搜索子代理…" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input className="input" placeholder={t("subagents.searchPlaceholder")} value={query} onChange={(event) => setQuery(event.target.value)} />
         <div className="seg src-filter">
-          {FILTERS.map((item) => (
-            <button type="button" key={item.id} className={sourceFilter === item.id ? "active" : undefined} onClick={() => setSourceFilter(item.id)}>{item.label}</button>
+          {FILTER_KEYS.map((item) => (
+            <button type="button" key={item.id} className={sourceFilter === item.id ? "active" : undefined} onClick={() => setSourceFilter(item.id)}>{t(item.key)}</button>
           ))}
         </div>
         <span className="mr-count">{filtered.length} / {agents.length}</span>
         <span className="spacer" />
-        <button type="button" className="btn small outline" disabled={preview} onClick={() => void refresh()} data-tip={preview ? "预览" : undefined}>
-          <Icon name="refresh" extra="sm" />刷新
+        <button type="button" className="btn small outline" disabled={preview} onClick={() => void refresh()} data-tip={preview ? t("common.demo") : undefined}>
+          <Icon name="refresh" extra="sm" />{t("common.refresh")}
         </button>
         <button type="button" className="btn small primary" disabled={Boolean(loadError) && !preview} onClick={openNew}>
-          <Icon name="plus" extra="sm" />新建子代理
+          <Icon name="plus" extra="sm" />{t("subagents.newSubagent")}
         </button>
       </div>
       <ToastHost message={flash} onDismiss={() => setFlash(null)} />
-      {preview ? <div className="role-issue-banner"><Icon name="sparkles" extra="sm" /><div><div className="rib-title">当前是演示数据</div><div className="rib-text">写入只改本地列表，不会碰到本机或项目 agents 目录。</div></div></div> : null}
-      {!preview && !data && !loadError ? <div className="preset-banner" role="status"><Icon name="refresh" extra="sm" /><span>正在读取本机子代理定义…</span></div> : null}
-      {!preview && loadError ? <div className="role-issue-banner"><Icon name="alert" extra="sm" /><div><div className="rib-title">读取说明</div><div className="rib-text">{loadError}</div></div></div> : null}
+      {preview ? <div className="role-issue-banner"><Icon name="sparkles" extra="sm" /><div><div className="rib-title">{t("subagents.demoNoticeTitle")}</div><div className="rib-text">{t("subagents.demoNoticeDesc")}</div></div></div> : null}
+      {!preview && !data && !loadError ? <div className="preset-banner" role="status"><Icon name="refresh" extra="sm" /><span>{t("subagents.readingDefinitions")}</span></div> : null}
+      {!preview && loadError ? <div className="role-issue-banner"><Icon name="alert" extra="sm" /><div><div className="rib-title">{t("subagents.readDescription")}</div><div className="rib-text">{loadError}</div></div></div> : null}
       {data?.warnings.length ? (
         <div className="preset-banner" role="status">
           <Icon name="alert" extra="sm" />
-          <span>{data.warnings[0]}{data.warnings.length > 1 ? ` · 另有 ${data.warnings.length - 1} 条` : ""}</span>
+          <span>{data.warnings[0]}{data.warnings.length > 1 ? t("subagents.andMoreWarnings", { count: data.warnings.length - 1 }) : ""}</span>
         </div>
       ) : null}
 
       {grouped.length === 0 ? (
         <div className="empty">
           <Icon name="bot" />
-          <div>{agents.length === 0 ? "还没有可显示的子代理定义" : "没有匹配的子代理"}</div>
+          <div>{agents.length === 0 ? t("subagents.noAvailableAgents") : t("subagents.noMatchingAgents")}</div>
         </div>
       ) : (
         grouped.map((group) => (
           <div className="sa-group" key={group.source}>
-            <div className="sa-group-label">{sourceLabel(group.source)} · {group.items.length}</div>
+            <div className="sa-group-label">{sourceLabel(group.source, t)} · {group.items.length}</div>
             <div className="pv-list">
               {group.items.map((agent) => (
                 <article key={agent.name} className={`pv-card sa-card${agent.disabled ? " is-disabled" : ""}`}>
@@ -919,15 +924,15 @@ export function SubagentsPanel({
                     <div className="sa-card-top">
                       <Icon name="bot" extra="sm" />
                       <b>{agent.name}</b>
-                      <span className={`chip ${SOURCE_CHIP[agent.source]} xs`}>{agent.sourceLabel}</span>
-                      {agent.disabled ? <span className="chip gray xs">已禁用</span> : null}
-                      {agent.promptPacked ? <span className="chip gray xs">内置提示词</span> : null}
+                      <span className={`chip ${SOURCE_CHIP[agent.source]} xs`}>{sourceLabel(agent.source, t)}</span>
+                      {agent.disabled ? <span className="chip gray xs">{t("modelConfig.disabled")}</span> : null}
+                      {agent.promptPacked ? <span className="chip gray xs">{t("skills.scopeBuiltin")}</span> : null}
                     </div>
                     <div className="sa-card-desc">{agent.description}</div>
                     <div className="sa-card-meta">
-                      {agent.model?.length ? <span className="chip-code">{agent.model[0]}{agent.model.length > 1 ? ` +${agent.model.length - 1}` : ""}</span> : <span className="muted">继承模型</span>}
+                      {agent.model?.length ? <span className="chip-code">{agent.model[0]}{agent.model.length > 1 ? ` +${agent.model.length - 1}` : ""}</span> : <span className="muted">{t("subagents.inheritedModelBadge")}</span>}
                       {agent.thinkingLevel ? <span className="chip gray xs">{agent.thinkingLevel}</span> : null}
-                      <span className="muted">{toolCount(agent)}</span>
+                      <span className="muted">{toolCount(agent, t)}</span>
                       {agent.prewalk === true || typeof agent.prewalk === "string" ? <span className="chip blue xs">prewalk</span> : null}
                       {agent.advisor === true || typeof agent.advisor === "string" ? <span className="chip blue xs">advisor</span> : null}
                       {agent.blocking ? <span className="chip amber xs">blocking</span> : null}
@@ -938,7 +943,7 @@ export function SubagentsPanel({
                       <button
                         type="button"
                         className="sa-card-delete"
-                        aria-label={`删除 ${agent.name}`}
+                        aria-label={`${t("common.delete")} ${agent.name}`}
                         disabled={busy}
                         onClick={(event) => {
                           event.stopPropagation();
@@ -957,7 +962,7 @@ export function SubagentsPanel({
                       className={`switch${agent.disabled ? "" : " on"}`}
                       role="switch"
                       aria-checked={!agent.disabled}
-                      aria-label={agent.disabled ? `启用 ${agent.name}` : `禁用 ${agent.name}`}
+                      aria-label={agent.disabled ? `${t("common.enable")} ${agent.name}` : `${t("common.disable")} ${agent.name}`}
                       onClick={(event) => {
                         event.stopPropagation();
                         void toggleEnabled(agent, agent.disabled);
@@ -966,7 +971,7 @@ export function SubagentsPanel({
                     <button
                       type="button"
                       className="pv-act is-expand"
-                      aria-label={`打开 ${agent.name} 详情`}
+                      aria-label={t("subagents.openDetail", { name: agent.name })}
                       onClick={() => openAgent(agent)}
                     >
                       <Icon name="chevron-r" />
@@ -990,17 +995,17 @@ export function SubagentsPanel({
                 aria-labelledby="saDeleteTitle"
                 onMouseDown={(event) => event.stopPropagation()}
               >
-                <div className="modal-head" id="saDeleteTitle">确认删除</div>
+                <div className="modal-head" id="saDeleteTitle">{t("subagents.deleteConfirmTitle")}</div>
                 <div className="modal-body">
-                  <p>确定删除子代理 <span className="chip-code">{pendingDelete.name}</span> 吗？</p>
+                  <p>{t("subagents.deleteConfirmDesc", { name: pendingDelete.name })}</p>
                   <p className="desc">
-                    {preview ? "演示：只会从本地列表移除，不会写入磁盘。" : "将删除该定义文件，新会话后生效。"}
+                    {preview ? t("subagents.deleteConfirmDemo") : t("subagents.deleteConfirmReal")}
                   </p>
                 </div>
                 <div className="modal-foot">
-                  <button type="button" className="btn outline" autoFocus disabled={busy} onClick={cancelPendingDelete}>取消</button>
+                  <button type="button" className="btn outline" autoFocus disabled={busy} onClick={cancelPendingDelete}>{t("common.cancel")}</button>
                   <button type="button" className="btn danger" disabled={busy} onClick={() => void confirmPendingDelete()}>
-                    {busy ? "正在删除" : "删除"}
+                    {busy ? t("subagents.deleting") : t("common.delete")}
                   </button>
                 </div>
               </div>

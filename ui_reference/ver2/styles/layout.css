@@ -1,0 +1,418 @@
+/* ==========================================================================
+   OMP Studio — layout
+   App shell, split panes, resizers.
+
+   Dragging is 1:1 with the pointer (no transition). Clicking a
+   collapse/expand/layout control animates. These are different gestures and
+   must feel different.
+   ========================================================================== */
+
+/* ==========================================================================
+   App shell — flex, not grid, so resizers can set explicit pixel widths
+   ========================================================================== */
+
+.app {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-app);
+}
+
+.app-sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app[data-animating="true"] .app-sidebar,
+.app[data-animating="true"] .wb-right,
+.app[data-animating="true"] .wb-bottom {
+  transition: width var(--dur) var(--ease), height var(--dur) var(--ease);
+}
+
+.app-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---- Workbench ------------------------------------------------------- */
+.workbench {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.wb-split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.wb-split[data-layout="split-v"] {
+  flex-direction: column;
+}
+
+.wb-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  background: var(--bg-app);
+}
+
+.wb-pane-primary { flex: 1 1 60%; }
+
+.wb-pane-secondary {
+  flex: 1 1 40%;
+  border-left: 1px solid var(--border-default);
+}
+
+.wb-split[data-layout="split-v"] .wb-pane-secondary {
+  border-left: none;
+  border-top: 1px solid var(--border-default);
+}
+
+/* Conversation pane: timeline + minimap side by side, composer beneath */
+.wb-conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wb-conv-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ---- Right panel ----------------------------------------------------- */
+.wb-right {
+  display: flex;
+  flex-direction: column;
+  width: var(--rightpanel-w);
+  flex-shrink: 0;
+  min-width: 0;
+  background: var(--bg-sunken);
+  border-left: 1px solid var(--border-subtle);
+  overflow: hidden;
+  position: relative;
+}
+
+.wb-right-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The panel hosts full components (preview/diff), so they must stretch */
+.wb-right-body > * {
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 1280px) {
+  .wb-right {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-popover);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* ---- Bottom panel ---------------------------------------------------- */
+.wb-bottom {
+  display: flex;
+  flex-direction: column;
+  height: var(--bottompanel-h);
+  flex-shrink: 0;
+  min-height: 0;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border-default);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ---- Non-workbench screens ------------------------------------------- */
+.screen-host {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Pane header — identifies which mode a pane is showing */
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: var(--h-tab);
+  padding: 0 var(--sp-5);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-app);
+}
+
+.pane-header-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+}
+
+.pane-header-title svg {
+  color: var(--text-tertiary);
+}
+
+.pane-header-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.pane-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Right panel ----------------------------------------------------- */
+.wb-right {
+  display: flex;
+  flex-direction: column;
+  width: var(--rightpanel-w);
+  flex-shrink: 0;
+  min-width: 0;
+  background: var(--bg-sunken);
+  border-left: 1px solid var(--border-subtle);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Below 1280px the right panel becomes an overlay drawer rather than
+   squeezing the conversation below a readable measure. */
+@media (max-width: 1280px) {
+  .wb-right {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-popover);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+/* ---- Bottom panel ---------------------------------------------------- */
+.wb-bottom {
+  display: flex;
+  flex-direction: column;
+  height: var(--bottompanel-h);
+  flex-shrink: 0;
+  min-height: 0;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border-default);
+  overflow: hidden;
+  position: relative;
+}
+
+/* ==========================================================================
+   Resizers
+   6px hit area, 1px visual. Generous enough to grab, invisible until needed.
+   ========================================================================== */
+
+.resizer {
+  position: absolute;
+  z-index: var(--z-resizer);
+  background: transparent;
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.resizer::after {
+  content: '';
+  position: absolute;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.resizer:hover::after,
+.resizer[data-dragging="true"]::after {
+  opacity: 1;
+}
+
+/* Vertical resizer (adjusts width) */
+.resizer-v {
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.resizer-v::after {
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+}
+
+.resizer-v-right { right: -3px; }
+.resizer-v-left { left: -3px; }
+
+/* Horizontal resizer (adjusts height) */
+.resizer-h {
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: row-resize;
+}
+
+.resizer-h::after {
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 2px;
+}
+
+.resizer-h-top { top: -3px; }
+.resizer-h-bottom { bottom: -3px; }
+
+/* While dragging, suppress text selection and pointer events on iframes */
+body[data-resizing="true"] {
+  user-select: none;
+  cursor: var(--resize-cursor, col-resize);
+}
+
+body[data-resizing="true"] iframe {
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Screen container (for non-workbench screens)
+   ========================================================================== */
+
+.screen {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-app);
+}
+
+.screen-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: var(--sp-9) var(--sp-8) var(--sp-10);
+}
+
+.screen-inner-wide {
+  max-width: 1280px;
+}
+
+.screen-header {
+  margin-bottom: var(--sp-8);
+}
+
+.screen-title {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  margin-bottom: var(--sp-2);
+}
+
+.screen-subtitle {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+  max-width: 640px;
+}
+
+.screen-section {
+  margin-bottom: var(--sp-9);
+}
+
+.screen-section-title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  color: var(--text-primary);
+  margin-bottom: var(--sp-2);
+}
+
+.screen-section-desc {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-5);
+  line-height: var(--lh-snug);
+}
+
+/* Section label (uppercase, tracked) */
+.section-label {
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* ==========================================================================
+   Responsive: three breakpoints per the plan
+   ========================================================================== */
+
+/* <1040px — sidebar auto-collapses to the mini rail. The user's chosen
+   width is remembered and restored when the window grows back. */
+@media (max-width: 1040px) {
+  .app:not([data-sidebar-user-expanded="true"]) {
+    grid-template-columns: var(--sidebar-mini) 1fr;
+  }
+}
+
+/* <880px — minimap degrades to a plain event scale */
+@media (max-width: 880px) {
+  .minimap {
+    --minimap-w: 8px;
+  }
+}

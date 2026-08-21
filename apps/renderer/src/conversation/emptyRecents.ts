@@ -26,23 +26,31 @@ function previewAgeMinutes(time: string): number {
   return amount * 1440;
 }
 
-function previewStatus(thread: PreviewThread): { status: EmptyRecentStatus; statusLabel: string } {
-  if (thread.status === "running") return { status: "running", statusLabel: "运行中" };
+function previewStatus(thread: PreviewThread, lang: "zh" | "en" = "zh"): { status: EmptyRecentStatus; statusLabel: string } {
+  if (thread.status === "running") return { status: "running", statusLabel: lang === "en" ? "Running" : "运行中" };
   if (thread.wait === "approval" || thread.wait === "plan" || thread.wait === "ask") {
-    return { status: "approval", statusLabel: thread.wait === "ask" ? "等待回答" : "等待审批" };
+    return {
+      status: "approval",
+      statusLabel: thread.wait === "ask"
+        ? (lang === "en" ? "Waiting for reply" : "等待回答")
+        : (lang === "en" ? "Waiting for approval" : "等待审批"),
+    };
   }
-  return { status: "idle", statusLabel: "空闲" };
+  return { status: "idle", statusLabel: lang === "en" ? "Idle" : "空闲" };
 }
 
 /** Preview recents: flatten ver1 projects, skip archived / the blank t0 thread. */
-export function collectPreviewRecents(hiddenIds: ReadonlySet<string> = new Set()): EmptyRecentRow[] {
+export function collectPreviewRecents(
+  hiddenIds: ReadonlySet<string> = new Set(),
+  lang: "zh" | "en" = "zh",
+): EmptyRecentRow[] {
   return PREVIEW_PROJECTS
     .flatMap((project) => project.threads.map((thread) => ({ project: project.name, thread })))
     .filter(({ thread }) => thread.status !== "archived" && thread.id !== "t0" && !hiddenIds.has(thread.id))
     .sort((left, right) => previewAgeMinutes(left.thread.time) - previewAgeMinutes(right.thread.time))
     .slice(0, RECENT_LIMIT)
     .map(({ project, thread }) => {
-      const tone = previewStatus(thread);
+      const tone = previewStatus(thread, lang);
       return {
         id: thread.id,
         title: thread.title,
@@ -55,15 +63,15 @@ export function collectPreviewRecents(hiddenIds: ReadonlySet<string> = new Set()
     });
 }
 
-export function relativeTime(iso: string, now = Date.now()): string {
+export function relativeTime(iso: string, now = Date.now(), lang: "zh" | "en" = "zh"): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return "";
   const seconds = Math.max(0, Math.round((now - then) / 1000));
-  if (seconds < 60) return "刚刚";
+  if (seconds < 60) return lang === "en" ? "just now" : "刚刚";
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d`;
-  return new Date(then).toLocaleDateString();
+  return new Date(then).toLocaleDateString(lang === "en" ? "en-US" : "zh-CN");
 }
 
 export function collectHistoryRecents(input: {
@@ -72,7 +80,9 @@ export function collectHistoryRecents(input: {
   readonly runningSessionId?: string;
   readonly waitingSessionId?: string;
   readonly now?: number;
+  readonly lang?: "zh" | "en";
 }): EmptyRecentRow[] {
+  const lang = input.lang ?? "zh";
   return input.entries
     .filter((entry) => entry.status !== "archived")
     .slice()
@@ -82,13 +92,18 @@ export function collectHistoryRecents(input: {
       const running = input.runningSessionId !== undefined && entry.sessionId === input.runningSessionId;
       const waiting = input.waitingSessionId !== undefined && entry.sessionId === input.waitingSessionId;
       const status: EmptyRecentStatus = running ? "running" : waiting ? "approval" : "idle";
+      const statusLabel = status === "running"
+        ? (lang === "en" ? "Running" : "运行中")
+        : status === "approval"
+          ? (lang === "en" ? "Waiting for approval" : "等待审批")
+          : (lang === "en" ? "Idle" : "空闲");
       return {
         id: entry.historyId,
         title: entry.title,
         project: input.projectName,
-        time: relativeTime(entry.lastActiveAt, input.now),
+        time: relativeTime(entry.lastActiveAt, input.now, lang),
         status,
-        statusLabel: status === "running" ? "运行中" : status === "approval" ? "等待审批" : "空闲",
+        statusLabel,
         entry,
       };
     });

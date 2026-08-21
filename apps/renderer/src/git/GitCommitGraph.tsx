@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import type { GitCommitChangeRecord, GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadModel, GitLogRef } from "@omp-studio/client-contract";
 
 import { Icon } from "../icons";
+import { useI18n } from "../i18n";
 
 import { buildGitGraphRows, GRAPH_COLORS, renderGraphRow, renderGraphThroughLanes, SWIMLANE_HEIGHT, SWIMLANE_WIDTH, type GraphRow } from "./gitGraphLayout";
 
@@ -102,6 +103,7 @@ export function GitCommitGraph({
 }) {
   const rows = useMemo(() => (model ? buildGitGraphRows(model) : []), [model]);
   const [menuOid, setMenuOid] = useState<string>();
+  const { t } = useI18n();
   const [branchOid, setBranchOid] = useState<string>();
   const [branchName, setBranchName] = useState("");
 
@@ -115,9 +117,9 @@ export function GitCommitGraph({
     return file.path;
   };
 
-  if (loading && model === undefined) return <div className="empty" style={{ padding: 12 }}>正在读取提交历史…</div>;
-  if (error) return <div className="empty" style={{ padding: 12 }}><p>{error}</p>{onRefresh ? <button type="button" className="btn small outline" onClick={onRefresh}>重试</button> : null}</div>;
-  if (!model || rows.length === 0) return <div className="empty" style={{ padding: 12 }}>还没有提交历史</div>;
+  if (loading && model === undefined) return <div className="empty" style={{ padding: 12 }}>{t("git.readingCommitHistory")}</div>;
+  if (error) return <div className="empty" style={{ padding: 12 }}><p>{error}</p>{onRefresh ? <button type="button" className="btn small outline" onClick={onRefresh}>{t("common.retry")}</button> : null}</div>;
+  if (!model || rows.length === 0) return <div className="empty" style={{ padding: 12 }}>{t("git.noCommitHistory")}</div>;
 
   return (
     <div className="git-graph-list">
@@ -144,7 +146,13 @@ export function GitCommitGraph({
                   setMenuOid(undefined);
                 }}
               >
-                <span className="git-graph-subject-scroll">{row.subject}</span>
+                <span className="git-graph-subject-scroll">
+                  {row.kind === "outgoing-changes"
+                    ? t("git.outgoingChanges")
+                    : row.kind === "incoming-changes"
+                      ? t("git.incomingChanges")
+                      : row.subject}
+                </span>
               </button>
               {pills.length > 0 ? (
                 <div className="git-graph-refs">
@@ -160,8 +168,8 @@ export function GitCommitGraph({
                 <button
                   type="button"
                   className="icon-btn small git-graph-op"
-                  data-tip="操作"
-                  aria-label="提交操作"
+                  data-tip={t("common.actions")}
+                  aria-label={t("git.commitActions")}
                   disabled={busy || preview}
                   onClick={() => setMenuOid(menuOid === row.id ? undefined : row.id)}
                 >
@@ -171,11 +179,11 @@ export function GitCommitGraph({
             </div>
             {menuOid === row.id && row.commit ? (
               <div className="git-graph-menu" role="menu">
-                <button type="button" role="menuitem" disabled={busy} onClick={() => { onCheckout?.(row.id); setMenuOid(undefined); }}>检出此提交</button>
-                <button type="button" role="menuitem" disabled={busy} onClick={() => { setBranchOid(row.id); setBranchName(""); setMenuOid(undefined); }}>从此创建分支</button>
+                <button type="button" role="menuitem" disabled={busy} onClick={() => { onCheckout?.(row.id); setMenuOid(undefined); }}>{t("git.checkoutCommit")}</button>
+                <button type="button" role="menuitem" disabled={busy} onClick={() => { setBranchOid(row.id); setBranchName(""); setMenuOid(undefined); }}>{t("git.branchFromCommit")}</button>
                 <button type="button" role="menuitem" disabled={busy} onClick={() => { onCherryPick?.(row.id); setMenuOid(undefined); }}>Cherry-pick</button>
                 <button type="button" role="menuitem" disabled={busy} onClick={() => { onRevert?.(row.id); setMenuOid(undefined); }}>Revert</button>
-                <button type="button" role="menuitem" onClick={() => void copyOid(row.id)}>复制哈希</button>
+                <button type="button" role="menuitem" onClick={() => void copyOid(row.id)}>{t("git.copyHash")}</button>
               </div>
             ) : null}
             {branchOid === row.id ? (
@@ -190,15 +198,15 @@ export function GitCommitGraph({
                   setBranchName("");
                 }}
               >
-                <input value={branchName} onChange={(event) => setBranchName(event.target.value)} placeholder="新分支名称" autoFocus />
-                <button type="submit" className="btn small primary" disabled={busy || !branchName.trim()}>创建</button>
-                <button type="button" className="btn small outline" onClick={() => setBranchOid(undefined)}>取消</button>
+                <input value={branchName} onChange={(event) => setBranchName(event.target.value)} placeholder={t("git.newBranchPlaceholder")} autoFocus />
+                <button type="submit" className="btn small primary" disabled={busy || !branchName.trim()}>{t("common.create")}</button>
+                <button type="button" className="btn small outline" onClick={() => setBranchOid(undefined)}>{t("common.cancel")}</button>
               </form>
             ) : null}
             {selected && !synthetic ? (
               <div className="git-graph-details">
                 {row.commit ? <div className="tiny muted">{row.commit.authorName} · {row.commit.oid.slice(0, 7)}</div> : null}
-                {changesLoading ? <div className="empty" style={{ padding: 8 }}>读取文件列表…</div> : null}
+                {changesLoading ? <div className="empty" style={{ padding: 8 }}>{t("git.readingFileList")}</div> : null}
                 {changes && changes.oid === row.id ? (
                   <div className="git-graph-files">
                     {changes.files.map((file) => (
@@ -212,13 +220,13 @@ export function GitCommitGraph({
                         <span className="ellipsis">{fileLabel(file)}</span>
                       </button>
                     ))}
-                    {changes.files.length === 0 ? <div className="empty" style={{ padding: 8 }}>没有文件变更</div> : null}
+                    {changes.files.length === 0 ? <div className="empty" style={{ padding: 8 }}>{t("git.noFileChanges")}</div> : null}
                   </div>
                 ) : null}
                 {selectedPath && diff && diff.oid === row.id && diff.path === selectedPath ? (
                   <div className="git-graph-diff">
-                    {diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 ? <div className="empty">没有 Diff</div> : patchLines(diff.patch)}
-                    {diff.truncated ? <div className="tiny muted">已截断</div> : null}
+                    {diff.binary ? <div className="empty">Binary diff</div> : diff.patch.length === 0 ? <div className="empty">{t("git.noDiff")}</div> : patchLines(diff.patch)}
+                    {diff.truncated ? <div className="tiny muted">{t("common.truncated")}</div> : null}
                   </div>
                 ) : null}
               </div>

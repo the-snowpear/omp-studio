@@ -1,0 +1,303 @@
+/* ============================================================
+   OMP Studio — Base reset & shared primitives
+   ============================================================ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Paint the theme background on <html> itself, not just <body>.
+   When a full page navigates, the browser shows the <html> background behind
+   the freshly-loaded document for a frame or two. If only <body> carried the
+   colour, that gap flashes white (light) / black (dark) before the new page
+   paints — jarring when the header pops in. Putting --bg on <html> keeps that
+   pre-paint frame the same colour as the page, so switching pages never
+   flashes the wrong theme. */
+html {
+  background: var(--bg);
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-14);
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  /* 页头不参与淡入：整页跳转时 body 若整层淡入，页头会跟着重现（闪）。
+     淡入只作用于内容容器 —— 二级页 .page-body、工作台 .workbench。
+     主题切换仍是背景 crossfade（上面的 transition），不受影响。 */
+}
+
+/* 内容淡入：被 .page-body（二级页）与 .workbench（工作台）复用。
+   页头恒在，不参与 —— 消除整页跳转时页头重现场景。 */
+@keyframes page-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+::selection { background: var(--selection); }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text);
+}
+
+code, pre, .mono { font-family: var(--font-mono); }
+
+/* Focus ring.
+   Was `box-shadow: var(--focus-ring)` plus a forced `border-radius: var(--r-4)`,
+   which reshaped whatever it focused — pill buttons went square, 12px cards
+   went to 6px. Outline follows the element's own border-radius, so the ring
+   traces the real shape; the offset gap does the same job the inner white ring
+   was doing (separating the accent from the control's own fill). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Inside the accent-tinted rows the accent ring would sit on accent, so those
+   switch to the text colour to keep 3:1 against their own background. */
+.thread.active :focus-visible,
+.cmdk-item.sel :focus-visible,
+.complete-item.sel :focus-visible {
+  outline-color: var(--text);
+}
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: var(--r-full);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+*::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
+
+/* Screen-reader-only text. Used to give icon-only controls and status regions
+   a real accessible name without changing the visual density. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link — the workbench puts ~40 focusable controls (sidebar tree, thread
+   list, topbar) ahead of the conversation, so keyboard users need a way past
+   them. Visually hidden until focused. */
+.skip-link {
+  position: fixed;
+  top: var(--sp-8);
+  left: var(--sp-8);
+  z-index: var(--z-toast);
+  padding: var(--sp-8) var(--sp-12);
+  border-radius: var(--r-6);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-medium);
+  transform: translateY(-200%);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.skip-link:focus-visible {
+  transform: none;
+  text-decoration: none;
+  outline-color: var(--text);
+}
+
+/* App shell */
+.app {
+  display: flex;
+  /* dvh over vh: 100vh overflows whenever a browser chrome bar is present,
+     which clips the composer at the bottom of the layout. */
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* SPA 单壳：.app（工作台）与 .page（二级页）是同一文档里的两个根，
+   路由只切 hidden。两者都声明了 display:flex，UA 的 [hidden]（display:none）
+   压不住更具体的类规则，必须 !important。 */
+.app[hidden], .page[hidden] { display: none !important; }
+
+.main-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* Generic icon sizing */
+.icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: inline-block;
+  vertical-align: -3px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon.sm { width: 13px; height: 13px; }
+.icon.lg { width: 18px; height: 18px; }
+
+/* Utility */
+.muted { color: var(--text-3); }
+.text2 { color: var(--text-2); }
+.small { font-size: var(--fs-12); }
+.tiny { font-size: var(--fs-11); }
+.hidden { display: none !important; }
+.spacer { flex: 1; }
+.ellipsis {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Inline code chip（路径 / 文件名 / 版本号） */
+.chip-code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  padding: 1px 6px;
+  border-radius: var(--r-4);
+  background: var(--code-chip-bg);
+  color: var(--code-chip-text);
+  white-space: nowrap;
+}
+.chip-file {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  padding: 1px 6px;
+  border-radius: var(--r-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chip-file:hover { border-color: var(--accent-border); color: var(--accent); }
+
+/* Pulsing dot for running states */
+@keyframes omp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-full);
+  flex: none;
+  display: inline-block;
+}
+.dot.green { background: var(--green); }
+.dot.amber { background: var(--amber); }
+.dot.red { background: var(--red); }
+.dot.blue { background: var(--blue); }
+.dot.purple { background: var(--accent); }
+.dot.pulse { animation: omp-pulse 1.4s var(--ease) infinite; }
+
+/* Blinking caret for streaming text */
+@keyframes omp-caret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.stream-caret {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--accent);
+  animation: omp-caret 0.9s steps(1) infinite;
+  border-radius: 1px;
+}
+
+/* Spinner */
+@keyframes omp-spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 13px;
+  height: 13px;
+  border: 1.6px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: var(--r-full);
+  animation: omp-spin 0.8s linear infinite;
+  flex: none;
+}
+
+/* Skeleton shimmer */
+@keyframes omp-shimmer { to { background-position: -200% 0; } }
+.skeleton {
+  border-radius: var(--r-4);
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-3) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 200% 100%;
+  animation: omp-shimmer 1.4s linear infinite;
+}
+
+/* Scroll fade for long lists */
+.fade-bottom {
+  mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
+}
+
+/* ==========================================================================
+   Reduced motion
+   Four animations here loop forever — pulse, caret, spin, shimmer — and each
+   one is a status signal, not decoration. So this does not remove them: it
+   collapses duration to near-zero, which holds the final painted frame. The
+   running dot stays visible, the spinner stays where it is, the caret stops
+   blinking. Transitions become instant rather than absent, so hover and
+   active states still read as state changes.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Pulse conveys "running" purely through opacity, so a held frame could
+     land at 0.35 and read as disabled. Pin it opaque instead. */
+  .dot.pulse {
+    opacity: 1 !important;
+  }
+
+  /* Same trap: the caret's blink is a steps(1) opacity flip, so a frozen
+     frame is a 50/50 chance of an invisible cursor. */
+  .stream-caret {
+    opacity: 1 !important;
+  }
+
+  /* Shimmer's gradient is only legible while it travels; frozen mid-sweep it
+     looks like a rendering artifact. Fall back to a flat placeholder tone. */
+  .skeleton {
+    background: var(--surface-3) !important;
+  }
+}

@@ -770,10 +770,22 @@ export interface ModelProviderTestResult {
   readonly retryCount?: number;
 }
 
-/** One model id returned by a discovery probe. Never a secret. */
+/**
+ * One model returned by a discovery probe. Never a secret.
+ *
+ * The metadata fields are present only when the endpoint actually reported
+ * them (OpenAI-compatible `context_length` / `max_model_len`, Gemini's
+ * `inputTokenLimit`, OpenRouter modalities). Absent means "unknown" — OMP's
+ * bundled catalog and its own defaults fill the gap at load time, so callers
+ * must not substitute values of their own.
+ */
 export interface ModelDiscoveryModel {
   readonly id: string;
   readonly name: string;
+  readonly contextWindow?: number;
+  readonly maxTokens?: number;
+  readonly reasoning?: boolean;
+  readonly image?: boolean;
 }
 
 /** Terminal result of a non-persisting discovery probe. */

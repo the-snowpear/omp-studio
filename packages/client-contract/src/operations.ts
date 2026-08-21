@@ -240,13 +240,24 @@ export interface ModelProviderSetEnabledInput {
   readonly enabled: boolean;
 }
 
-/** One-shot runtime discovery probe. Never persists `models.db`. */
+/**
+ * One-shot model-list probe. Never persists `models.db`.
+ *
+ * With `discoveryType` this is the Runtime Discovery probe (ollama `/api/tags`,
+ * LiteLLM model info, …). Without it the Host picks the model-list URL and auth
+ * header from `api` instead, which is what the editor's "auto-fetch models"
+ * button uses for ordinary providers that have no `discovery` block.
+ */
 export interface ModelProviderProbeInput {
   readonly providerId: string;
   readonly endpointUrl?: string;
   readonly apiKey?: string;
   readonly discoveryType?: string;
   readonly timeoutMs?: number;
+  /** Wire API used to pick the model-list URL and auth header when `discoveryType` is absent. */
+  readonly api?: ModelApiKind | string;
+  /** Draft custom headers (gateways that require `X-Org-Id` and friends). */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /** Replace the whole `modelRoles` map so deleted keys leave disk. */

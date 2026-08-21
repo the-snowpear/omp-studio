@@ -154,6 +154,17 @@ export interface CommandLedgerEntry {
   stateVersionBefore?: StateVersion;
   stateVersionAfter?: StateVersion;
   errorCode?: string;
+  /**
+   * Runtime's own failure text for this command, kept beside `errorCode`.
+   *
+   * The ledger mirror is the only path some failures take to the client (the
+   * facade-driven path returns the receipt directly), and a code alone cannot
+   * say *which* argument the Runtime rejected — `INVALID_ARGUMENT` covers both
+   * "Model is not available: x/y" and "Unsupported thinking level: z". Host
+   * ledger entries never leave the Host process except as the message of a
+   * `CommandReceipt`, so this carries no more than the direct path already does.
+   */
+  errorMessage?: string;
 }
 
 /** Force import/use of opaque job id in downstream projections without paths. */

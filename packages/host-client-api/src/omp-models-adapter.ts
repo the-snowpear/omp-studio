@@ -220,14 +220,135 @@ export function litellmInfoUrls(base: string): string[] {
   return [`${root}/model_group/info`, `${root}/v2/model/info`, `${root}/model/info`, `${root}/v1/model/info`, `${root}/v1/models`, `${root}/models`];
 }
 
+/** Anthropic rejects `/v1/models` without an explicit API version header. */
+const ANTHROPIC_VERSION = "2023-06-01";
+
+/**
+ * Model-list request for a wire API: candidate URLs plus the auth header shape
+ * that API expects. Shared by the connection test (single authoritative URL)
+ * and the model-list fetch (which also retries the `/v1/models` variant when a
+ * base URL omits the version segment).
+ *
+ * `urls` is empty for APIs with no model-list surface (bedrock, gemini-cli);
+ * callers must fall back to plain reachability or report the gap.
+ */
+export function modelListRequest(
+  base: string,
+  api: string,
+  apiKey?: string,
+): { urls: string[]; headers: Record<string, string> } {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (apiKey) {
+    if (api === "anthropic-messages") {
+      headers["x-api-key"] = apiKey;
+      headers["anthropic-version"] = ANTHROPIC_VERSION;
+    } else if (api === "google-generative-ai" || api === "google-vertex") {
+      headers["x-goog-api-key"] = apiKey;
+    } else {
+      headers.Authorization = `Bearer ${apiKey}`;
+    }
+  } else if (api === "anthropic-messages") {
+    headers["anthropic-version"] = ANTHROPIC_VERSION;
+  }
+  const primary = authProbeUrl(base, api);
+  if (primary === undefined) return { urls: [], headers };
+  const trimmed = base.replace(/\/+$/, "");
+  const versioned = `${trimmed.replace(/\/v1$/i, "")}/v1/models`;
+  const urls = primary === versioned ? [primary] : [primary, versioned];
+  return { urls, headers };
+}
+
+/** Positive integer from a number or numeric string; undefined when unusable. */
+function probePositiveInt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.trunc(value);
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.trunc(parsed);
+  }
+  return undefined;
+}
+
+function probeRecord(value: unknown): Record<string, unknown> | undefined {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Image input as reported by the endpoint: an `input_modalities` list
+ * (OpenRouter / vLLM) or a `modality` string like `text+image->text`.
+ * Undefined when the endpoint says nothing.
+ */
+function probeImageInput(row: Record<string, unknown>): boolean | undefined {
+  const architecture = probeRecord(row.architecture);
+  for (const candidate of [row.input_modalities, row.input, architecture?.input_modalities, architecture?.modality]) {
+    if (Array.isArray(candidate)) {
+      return candidate.some((item) => typeof item === "string" && item.toLowerCase().includes("image"));
+    }
+    if (typeof candidate === "string" && candidate.length > 0) {
+      const inputs = candidate.split("->")[0] ?? "";
+      return inputs.toLowerCase().includes("image");
+    }
+  }
+  return undefined;
+}
+
+/** Reasoning support as reported by the endpoint (OpenRouter / Ollama shapes). */
+function probeReasoning(row: Record<string, unknown>): boolean | undefined {
+  if (Array.isArray(row.supported_parameters)) {
+    return row.supported_parameters.some((item) => typeof item === "string" && item.toLowerCase().includes("reasoning"));
+  }
+  if (Array.isArray(row.capabilities)) {
+    return row.capabilities.some(
+      (item) => typeof item === "string" && (item.toLowerCase() === "thinking" || item.toLowerCase() === "reasoning"),
+    );
+  }
+  return undefined;
+}
+
+/**
+ * Metadata an endpoint volunteered about one model. Keys are omitted when
+ * unknown so nothing overrides OMP's bundled catalog on import.
+ */
+function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel, "id" | "name"> {
+  const topProvider = probeRecord(row.top_provider);
+  const contextWindow =
+    probePositiveInt(row.context_length) ??
+    probePositiveInt(row.max_model_len) ??
+    probePositiveInt(row.context_window) ??
+    probePositiveInt(row.inputTokenLimit) ??
+    probePositiveInt(topProvider?.context_length);
+  const maxTokens =
+    probePositiveInt(topProvider?.max_completion_tokens) ??
+    probePositiveInt(row.max_output_tokens) ??
+    probePositiveInt(row.outputTokenLimit) ??
+    probePositiveInt(row.max_tokens);
+  const reasoning = probeReasoning(row);
+  const image = probeImageInput(row);
+  return {
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxTokens === undefined ? {} : { maxTokens }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(image === undefined ? {} : { image }),
+  };
+}
+
+/**
+ * Normalize a model-list payload into `{ id, name, …metadata }` rows.
+ *
+ * Tolerates the shapes real endpoints return: OpenAI-compatible
+ * `{ data: [{ id }] }`, Anthropic's `display_name`, Google Generative AI's
+ * `{ models: [{ name: "models/x", displayName, inputTokenLimit }] }`, Ollama
+ * `{ models: [{ name: "qwen3:32b" }] }`, LiteLLM `model_name`, and bare arrays.
+ */
 export function parseDiscoveryModels(payload: unknown): ModelDiscoveryModel[] {
   const out: ModelDiscoveryModel[] = [];
   const seen = new Set<string>();
-  const push = (id: string, name?: string) => {
+  const push = (id: string, name?: string, meta?: Omit<ModelDiscoveryModel, "id" | "name">) => {
     const trimmed = id.trim();
     if (!trimmed || seen.has(trimmed)) return;
     seen.add(trimmed);
-    out.push({ id: trimmed, name: name && name.trim().length > 0 ? name.trim() : trimmed });
+    out.push({ id: trimmed, name: name && name.trim().length > 0 ? name.trim() : trimmed, ...(meta ?? {}) });
   };
   if (!payload || typeof payload !== "object") return out;
   const record = payload as Record<string, unknown>;
@@ -236,9 +357,15 @@ export function parseDiscoveryModels(payload: unknown): ModelDiscoveryModel[] {
       if (typeof item === "string") push(item);
       else if (item && typeof item === "object") {
         const row = item as Record<string, unknown>;
-        const id = typeof row.name === "string" ? row.name : typeof row.model === "string" ? row.model : typeof row.id === "string" ? row.id : "";
-        const name = typeof row.name === "string" ? row.name : typeof row.id === "string" ? row.id : undefined;
-        push(id, name);
+        const rawName = typeof row.name === "string" ? row.name : undefined;
+        // Google Generative AI names models `models/<id>` and carries the
+        // human label in `displayName`; Ollama's `name` already is the id.
+        const googleId = rawName?.startsWith("models/") === true ? rawName.slice("models/".length) : undefined;
+        const id = googleId ?? rawName ?? (typeof row.model === "string" ? row.model : typeof row.id === "string" ? row.id : "");
+        const label = typeof row.displayName === "string"
+          ? row.displayName
+          : googleId ?? rawName ?? (typeof row.id === "string" ? row.id : undefined);
+        push(id, label, probeModelMeta(row));
       }
     }
   }
@@ -248,7 +375,10 @@ export function parseDiscoveryModels(payload: unknown): ModelDiscoveryModel[] {
       else if (item && typeof item === "object") {
         const row = item as Record<string, unknown>;
         const id = typeof row.id === "string" ? row.id : typeof row.model_name === "string" ? row.model_name : "";
-        push(id, typeof row.name === "string" ? row.name : undefined);
+        const label = typeof row.display_name === "string"
+          ? row.display_name
+          : typeof row.name === "string" ? row.name : undefined;
+        push(id, label, probeModelMeta(row));
       }
     }
   }
@@ -258,7 +388,7 @@ export function parseDiscoveryModels(payload: unknown): ModelDiscoveryModel[] {
       else if (item && typeof item === "object") {
         const row = item as Record<string, unknown>;
         const id = typeof row.id === "string" ? row.id : typeof row.name === "string" ? row.name : "";
-        push(id);
+        push(id, undefined, probeModelMeta(row));
       }
     }
   }
@@ -551,13 +681,27 @@ function writeRemoteCompaction(rc: ModelProviderRemoteCompaction | undefined): R
   return Object.keys(row).length > 0 ? row : undefined;
 }
 
-function writeThinking(efforts: ReadonlyArray<string> | undefined): Record<string, YamlValue> | undefined {
+function writeThinking(
+  efforts: ReadonlyArray<string> | undefined,
+  mode: string = "effort",
+  prevThinking?: Record<string, YamlValue>,
+): Record<string, YamlValue> | undefined {
   const parsed = parseModelThinkingEfforts(efforts);
   if (parsed.length === 0) return undefined;
-  return { efforts: [...parsed] };
+  const out: Record<string, YamlValue> = {
+    mode,
+    efforts: [...parsed],
+  };
+  if (prevThinking?.defaultLevel !== undefined) out.defaultLevel = prevThinking.defaultLevel;
+  if (prevThinking?.effortMap !== undefined) out.effortMap = prevThinking.effortMap;
+  if (prevThinking?.supportsDisplay !== undefined) out.supportsDisplay = prevThinking.supportsDisplay;
+  return out;
 }
 
-function writeOverrideRow(override: ModelOverridePatch): Record<string, YamlValue> | undefined {
+function writeOverrideRow(
+  override: ModelOverridePatch,
+  prevOverride?: Record<string, YamlValue>,
+): Record<string, YamlValue> | undefined {
   const row: Record<string, YamlValue> = {};
   if (override.name !== undefined) row.name = override.name;
   if (override.contextWindow !== undefined) row.contextWindow = override.contextWindow;
@@ -575,7 +719,9 @@ function writeOverrideRow(override: ModelOverridePatch): Record<string, YamlValu
   if (override.compactionModel) row.compactionModel = override.compactionModel;
   const rc = writeRemoteCompaction(override.remoteCompaction);
   if (rc) row.remoteCompaction = rc;
-  const thinking = writeThinking(override.thinking);
+  const prevThinking = asRecord(prevOverride?.thinking);
+  const prevMode = stringOf(prevThinking?.mode);
+  const thinking = writeThinking(override.thinking, prevMode ?? "effort", prevThinking);
   if (thinking) row.thinking = thinking;
   return Object.keys(row).length > 0 ? row : undefined;
 }
@@ -910,6 +1056,7 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
     }
   }
   if (input.models) {
+    const prevModelsList = Array.isArray(previous?.models) ? previous.models : undefined;
     next.models = input.models.map((model) => {
       const row: Record<string, YamlValue> = { id: model.id };
       if (model.name) row.name = model.name;
@@ -929,7 +1076,10 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
       if (model.compactionModel) row.compactionModel = model.compactionModel;
       const rc = writeRemoteCompaction(model.remoteCompaction);
       if (rc) row.remoteCompaction = rc;
-      const thinking = writeThinking(model.thinking);
+      const prevModel = prevModelsList?.find((item): item is Record<string, YamlValue> => Boolean(item) && typeof item === "object" && !Array.isArray(item) && (item as Record<string, YamlValue>).id === model.id);
+      const prevThinking = asRecord(prevModel?.thinking);
+      const prevMode = stringOf(prevThinking?.mode);
+      const thinking = writeThinking(model.thinking, prevMode ?? "effort", prevThinking);
       if (thinking) row.thinking = thinking;
       return row;
     });
@@ -939,8 +1089,10 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
       delete next.modelOverrides;
     } else {
       const mapped: Record<string, YamlValue> = {};
+      const prevOverrides = asRecord(previous?.modelOverrides);
       for (const [modelId, override] of Object.entries(input.modelOverrides)) {
-        const row = writeOverrideRow(override);
+        const prevOverride = asRecord(prevOverrides?.[modelId]);
+        const row = writeOverrideRow(override, prevOverride);
         if (row) mapped[modelId] = row;
       }
       if (Object.keys(mapped).length > 0) next.modelOverrides = mapped;
@@ -1844,16 +1996,12 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       }
 
       // With credentials, verify them against the API's model-list endpoint
-      // (per-wire URL), falling back to plain reachability when that endpoint
-      // is missing (404/405) or the API has no model-list surface at all.
-      const authHeaders: Record<string, string> =
-        api === "anthropic-messages"
-          ? { "x-api-key": apiKey, Accept: "application/json" }
-          : api === "google-generative-ai" || api === "google-vertex"
-            ? { "x-goog-api-key": apiKey, Accept: "application/json" }
-            : { Authorization: `Bearer ${apiKey}`, Accept: "application/json" };
-
-      const authProbe = authProbeUrl(base, api ?? "openai-completions");
+      // (per-wire URL and auth header, shared with probeProvider), falling back
+      // to plain reachability when that endpoint is missing (404/405) or the API
+      // has no model-list surface at all.
+      const listRequest = modelListRequest(base, api ?? "openai-completions", apiKey);
+      const authHeaders = listRequest.headers;
+      const authProbe = listRequest.urls[0];
       if (authProbe !== undefined) {
         const authResult = await probeWithRetry(authProbe, authHeaders);
         if (authResult.error !== null) {
@@ -1908,13 +2056,27 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
     async probeProvider(input: ModelProviderProbeInput): Promise<ModelDiscoveryResult> {
       const started = Date.now();
+      const fail = (detail: string, httpStatus?: number): ModelDiscoveryResult => ({
+        ok: false,
+        found: 0,
+        usable: 0,
+        models: [],
+        latencyMs: Date.now() - started,
+        detail,
+        ...(httpStatus === undefined ? {} : { httpStatus }),
+      });
       let endpointUrl = input.endpointUrl;
       let apiKey = input.apiKey;
+      let api = input.api;
       let discoveryType = input.discoveryType;
       let timeoutMs = input.timeoutMs ?? TEST_TIMEOUT_MS;
       if (apiKey) {
         const resolved = resolveRequestApiKey(apiKey);
-        apiKey = "value" in resolved ? resolved.value : undefined;
+        if ("command" in resolved) {
+          return fail("该供应商使用外部命令取凭据，无法在此自动获取模型，请在终端验证。");
+        }
+        if ("missingEnv" in resolved) return fail(`未在环境中检测到 ${resolved.missingEnv}`);
+        apiKey = resolved.value;
       }
       const paths = await resolvePaths();
       if (paths) {
@@ -1922,9 +2084,17 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           const file = await readModelsFile(paths.modelsPath);
           const raw = asRecord((asRecord(file.root.providers) ?? {})[input.providerId]) ?? {};
           if (!endpointUrl) endpointUrl = stringOf(raw.baseUrl);
+          if (!api) api = stringOf(raw.api);
           if (!apiKey) {
-            const resolved = resolveRequestApiKey(stringOf(raw.apiKey), input.providerId);
-            if ("value" in resolved) apiKey = resolved.value;
+            const yamlAuth = stringOf(raw.auth);
+            if (yamlAuth !== "none" && yamlAuth !== "oauth") {
+              const resolved = resolveRequestApiKey(stringOf(raw.apiKey), input.providerId);
+              if ("command" in resolved) {
+                return fail("该供应商使用外部命令取凭据，无法在此自动获取模型，请在终端验证。");
+              }
+              if ("missingEnv" in resolved) return fail(`未在环境中检测到 ${resolved.missingEnv}`);
+              apiKey = resolved.value;
+            }
           }
           const discovery = asRecord(raw.discovery);
           if (!discoveryType) discoveryType = stringOf(discovery?.type);
@@ -1938,20 +2108,24 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       }
       const preset = PRESET_GROUPS.flatMap((group) => group.items).find((item) => item.id === input.providerId);
       if (!endpointUrl) endpointUrl = preset?.endpoint;
+      if (!api) api = preset?.api;
       if (!discoveryType) discoveryType = preset?.discovery;
-      if (!endpointUrl) {
-        return { ok: false, found: 0, usable: 0, models: [], latencyMs: Date.now() - started, detail: "未配置 Base URL。" };
-      }
-      if (!discoveryType) {
-        return { ok: false, found: 0, usable: 0, models: [], latencyMs: Date.now() - started, detail: "该供应商未配置 Discovery Type。" };
-      }
-      const headers: Record<string, string> = { Accept: "application/json" };
-      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      if (!endpointUrl) return fail("未配置 Base URL。");
+
+      // With a discovery type the runtime protocol dictates the endpoint
+      // (Ollama tags, LiteLLM model info); without one the wire API does, which
+      // is what the editor's model fetch uses for ordinary providers.
+      const listRequest = modelListRequest(endpointUrl, api ?? "openai-completions", apiKey);
       const urls = discoveryType === "ollama"
         ? [ollamaTagsUrl(endpointUrl)]
         : discoveryType === "litellm"
           ? litellmInfoUrls(endpointUrl)
-          : [`${endpointUrl.replace(/\/+$/, "")}/models`, `${endpointUrl.replace(/\/+$/, "").replace(/\/v1$/i, "")}/v1/models`];
+          : listRequest.urls;
+      if (urls.length === 0) {
+        return fail("该 API 类型没有模型列表接口，无法自动获取模型。");
+      }
+      // Draft custom headers never overwrite the auth headers above.
+      const headers: Record<string, string> = { ...(input.headers ?? {}), ...listRequest.headers };
       let lastStatus = 0;
       let lastError: unknown = null;
       for (const url of urls) {
@@ -1978,15 +2152,11 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           clearTimeout(timer);
         }
       }
-      return {
-        ok: false,
-        found: 0,
-        usable: 0,
-        models: [],
-        latencyMs: Date.now() - started,
-        detail: lastError ? networkErrorDetail(lastError) : `探测失败${lastStatus ? ` · HTTP ${lastStatus}` : ""}`,
-        ...(lastStatus ? { httpStatus: lastStatus } : {}),
-      };
+      if (lastError) return fail(networkErrorDetail(lastError));
+      if (lastStatus === 401 || lastStatus === 403) {
+        return fail(`探测失败：端点可达 · HTTP ${lastStatus} · 凭据无效`, lastStatus);
+      }
+      return fail(`探测失败${lastStatus ? ` · HTTP ${lastStatus}` : ""}`, lastStatus || undefined);
     },
 
     async refreshDiscovery(): Promise<ConfigWriteResult> {

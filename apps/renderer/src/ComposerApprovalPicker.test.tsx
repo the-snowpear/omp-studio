@@ -1,10 +1,15 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
 import type { ApprovalMode } from "@omp-studio/studio-protocol";
 
 import { approvalPickerDisabled, ComposerApprovalPicker } from "./ComposerApprovalPicker";
+import { I18nProvider } from "./i18n";
+
+function render(ui: React.ReactElement) {
+  return rtlRender(<I18nProvider forcedLanguage="zh">{ui}</I18nProvider>);
+}
 
 afterEach(cleanup);
 

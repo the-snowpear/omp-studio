@@ -1,7 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assertForkApplied } from "./omp-overlay.mjs";
+import { assertForkApplied, overlayRoot } from "./omp-overlay.mjs";
+import { PATCHSET_VERSION_FILE, readPatchsetVersionConstant } from "./omp-seam.mjs";
 import { findBun, npmInvocation, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 import {
@@ -16,6 +17,21 @@ import {
   readUpstreamVersion,
 } from "./runtime-artifact.mjs";
 
+/** Fail fast when the Runtime would report a version the series does not expect. */
+async function assertPatchsetVersionInSync() {
+  const expected = (await readPatchSeries()).patchsetVersion;
+  for (const root of [overlayRoot, ompSourceDirectory]) {
+    const path = join(root, ...PATCHSET_VERSION_FILE.split("/"));
+    const found = readPatchsetVersionConstant(await readFile(path, "utf8"));
+    if (found !== expected) {
+      throw new Error(
+        `PATCHSET_VERSION is ${found} in ${path} but series.json says ${expected}. Run npm run omp:patches:regen.`,
+      );
+    }
+  }
+}
+
+
 const bun = findBun();
 const env = toolingEnvironment({
   CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
@@ -25,6 +41,11 @@ const env = toolingEnvironment({
 // studio-host mode. That only surfaces much later, as an opaque identity probe
 // failure after a full Rust build, so check the cheap precondition first.
 await assertForkApplied();
+// Same reasoning for the version the Runtime will report: packaging refuses to
+// sign an artifact whose probed identity disagrees with series.json, and that
+// check lands only after the native build. `npm run omp:patches:regen` keeps the
+// two in sync; this catches a hand-edited constant before the build starts.
+await assertPatchsetVersionInSync();
 
 run(bun, ["--cwd=packages/natives", "run", "build"], { cwd: ompSourceDirectory, env });
 run(bun, ["--cwd=packages/coding-agent", "run", "build"], { cwd: ompSourceDirectory, env });

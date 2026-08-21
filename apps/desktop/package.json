@@ -1,7 +1,7 @@
 {
   "name": "@omp-studio/desktop",
   "productName": "OMP Studio",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "./dist/src/main.js",
@@ -14,15 +14,15 @@
     "test": "npm run build && node --test dist/test/*.test.js"
   },
   "dependencies": {
-    "@omp-studio/client": "0.1.0",
-    "@omp-studio/client-contract": "0.1.0",
-    "@omp-studio/host-client-api": "0.1.0",
-    "@omp-studio/platform": "0.1.0",
-    "@omp-studio/platform-darwin": "0.1.0",
-    "@omp-studio/platform-win32": "0.1.0",
-    "@omp-studio/runtime-installer": "0.1.0",
-    "@omp-studio/studio-host": "0.1.0",
-    "@omp-studio/transport-desktop": "0.1.0",
+    "@omp-studio/client": "0.1.1",
+    "@omp-studio/client-contract": "0.1.1",
+    "@omp-studio/host-client-api": "0.1.1",
+    "@omp-studio/platform": "0.1.1",
+    "@omp-studio/platform-darwin": "0.1.1",
+    "@omp-studio/platform-win32": "0.1.1",
+    "@omp-studio/runtime-installer": "0.1.1",
+    "@omp-studio/studio-host": "0.1.1",
+    "@omp-studio/transport-desktop": "0.1.1",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
@@ -30,6 +30,6 @@
     "@types/node": "^24.0.0",
     "electron": "^43.4.0",
     "typescript": "^5.9.0",
-    "@omp-studio/testkit": "0.1.0"
+    "@omp-studio/testkit": "0.1.1"
   }
 }

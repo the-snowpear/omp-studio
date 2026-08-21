@@ -1,0 +1,307 @@
+/* ==========================================================================
+   OMP Studio — design tokens
+   The ONLY place colors are defined. Nothing else in this codebase may
+   contain a raw hex value. Both themes are declared here side by side so
+   any change can be checked against its counterpart immediately.
+
+   Visual direction: "Quiet Instrument"
+     - structure comes from borders + surface elevation, never shadow stacks
+     - color carries semantics only; decorative color budget is zero
+     - at rest the UI is silent. Only Running / Awaiting Approval / Error
+       are permitted to actively pull attention.
+   ========================================================================== */
+
+:root {
+  /* ---- Typography -------------------------------------------------- */
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+             "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC",
+             system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", "Consolas",
+               ui-monospace, Menlo, monospace;
+
+  /* Type scale (px). Deliberately narrow — a dev tool needs 8 sizes, not 14. */
+  --fs-micro: 10.5px;   /* section headers, minimap labels */
+  --fs-xs:    11.5px;   /* telemetry digits, badges, meta */
+  --fs-sm:    12.5px;   /* sidebar rows, menus, tool cards, code */
+  --fs-base:  13px;     /* form fields, table cells */
+  --fs-body:  14.5px;   /* conversation prose — tuned for long Markdown */
+  --fs-lg:    16px;     /* h2 in conversation, screen section titles */
+  --fs-xl:    20px;     /* screen titles */
+  --fs-2xl:   26px;     /* empty-state / hero */
+
+  --lh-tight: 1.3;
+  --lh-snug:  1.4;
+  --lh-code:  1.58;
+  --lh-prose: 1.72;     /* long-form reading */
+
+  --fw-normal: 400;
+  --fw-medium: 450;     /* sidebar rows — slightly up from normal for legibility at 12.5px */
+  --fw-semi:   550;     /* tool card titles, active tabs */
+  --fw-bold:   600;     /* headings, section labels */
+
+  /* ---- Spacing (4px grid) ------------------------------------------ */
+  --sp-0:  0;
+  --sp-1:  2px;
+  --sp-2:  4px;
+  --sp-3:  6px;
+  --sp-4:  8px;
+  --sp-5:  12px;
+  --sp-6:  16px;
+  --sp-7:  20px;
+  --sp-8:  24px;
+  --sp-9:  32px;
+  --sp-10: 48px;
+
+  /* ---- Control heights (Compact density is the default) ------------- */
+  --h-row:      28px;   /* sidebar row, file tree row */
+  --h-menu:     30px;   /* menu item */
+  --h-btn:      26px;   /* toolbar button */
+  --h-btn-lg:   30px;   /* primary action */
+  --h-tab:      32px;   /* panel tab */
+  --h-table:    34px;   /* table row */
+  --h-field:    28px;   /* input */
+  --h-topbar:   44px;
+  --h-statusbar: 32px;
+
+  /* ---- Radii -------------------------------------------------------- */
+  --r-xs:   3px;    /* inline code */
+  --r-sm:   4px;    /* inputs, rows, buttons */
+  --r-md:   6px;    /* cards, tool cards */
+  --r-lg:   8px;    /* panels, dialogs, popovers */
+  --r-full: 999px;  /* status pills */
+
+  /* ---- Motion ------------------------------------------------------- */
+  --dur-fast: 120ms;
+  --dur:      180ms;
+  --dur-slow: 260ms;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+
+  /* ---- Layout geometry ---------------------------------------------- */
+  --sidebar-w: 272px;
+  --sidebar-min: 208px;
+  --sidebar-max: 440px;
+  --sidebar-mini: 48px;
+  --minimap-w: 14px;
+  --minimap-w-open: 220px;
+  --rightpanel-w: 380px;
+  --bottompanel-h: 260px;
+  --prose-max: 760px;   /* optimal measure for long Markdown */
+  --card-max: 880px;    /* tool cards / diff can run wider */
+
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-resizer: 20;
+  --z-popover: 100;
+  --z-dialog: 200;
+  --z-toast: 300;
+  --z-palette: 400;
+}
+
+/* ==========================================================================
+   DARK — desaturated blue slate. Not pure black: avoids OLED smearing and
+   the harsh contrast that makes long sessions tiring.
+   ========================================================================== */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-app:     #0E1116;
+  --bg-sunken:  #0A0D11;
+  --bg-surface: #151A21;
+  --bg-raised:  #1C222B;
+  --bg-inset:   #11151B;
+  --bg-hover:   #FFFFFF08;
+  --bg-active:  #FFFFFF12;
+
+  --border-subtle:  #1F2630;
+  --border-default: #2A323E;
+  --border-strong:  #3A4553;
+
+  --text-primary:   #E4E7EB;
+  --text-secondary: #9AA4B2;
+  --text-tertiary:  #6B7480;
+  --text-on-accent: #FFFFFF;
+
+  /* Accent — Iris. Chosen because blue/green/amber/red are all spoken for
+     by semantic states; the accent must not collide with any of them. */
+  --accent:        #7C6BF0;
+  --accent-hover:  #8D7DF3;
+  --accent-subtle: #7C6BF01F;
+  --accent-border: #7C6BF059;
+
+  /* Semantic — one color per state, never reused for decoration */
+  --run:    #4A9EFF;   /* Running, Streaming, HMR, Reconnecting */
+  --ok:     #3FB950;   /* Completed, tests pass, build pass */
+  --warn:   #E3A008;   /* Awaiting Approval, context near limit */
+  --danger: #F0616D;   /* Failed, Error, Conflict, destructive */
+  --muted:  #6B7480;   /* Pending, Aborted, Archived, pre-existing */
+
+  --run-subtle:    #4A9EFF1A;
+  --ok-subtle:     #3FB9501A;
+  --warn-subtle:   #E3A0081F;
+  --danger-subtle: #F0616D1A;
+  --muted-subtle:  #6B748014;
+
+  --run-border:    #4A9EFF4D;
+  --ok-border:     #3FB9504D;
+  --warn-border:   #E3A00866;
+  --danger-border: #F0616D4D;
+
+  /* Diff */
+  --add:        #3FB950;
+  --del:        #F0616D;
+  --add-bg:     #3FB95014;
+  --del-bg:     #F0616D14;
+  --add-bg-em:  #3FB95026;   /* changed word within a changed line */
+  --del-bg-em:  #F0616D26;
+  --diff-gutter: #0D1117;
+
+  /* Git file status — kept distinct from semantic scale so the tree
+     doesn't read as "everything is a warning" */
+  --git-modified:  #E3A008;
+  --git-added:     #3FB950;
+  --git-deleted:   #F0616D;
+  --git-renamed:   #4A9EFF;
+  --git-untracked: #6B7480;
+  --git-conflict:  #F0616D;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .28);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, .40);
+  --shadow-lg: 0 8px 28px -6px rgba(0, 0, 0, .55);
+  --shadow-popover: 0 8px 28px -6px rgba(0, 0, 0, .55);
+
+  --scrollbar-thumb: #FFFFFF1A;
+  --scrollbar-thumb-hover: #FFFFFF2E;
+
+  /* Syntax highlighting */
+  --syn-keyword:  #C792EA;
+  --syn-string:   #A5D6A7;
+  --syn-number:   #F5A97F;
+  --syn-comment:  #5C6673;
+  --syn-function: #82AAFF;
+  --syn-type:     #7FDBCA;
+  --syn-variable: #E4E7EB;
+  --syn-operator: #9AA4B2;
+  --syn-punct:    #7A8493;
+  --syn-tag:      #F0616D;
+  --syn-attr:     #E3A008;
+}
+
+/* ==========================================================================
+   LIGHT — faintly warm paper. Not pure white: less eye strain over a
+   long working day, and it lets pure-white cards read as raised.
+   ========================================================================== */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-app:     #F7F6F4;
+  --bg-sunken:  #EFEEEB;
+  --bg-surface: #FFFFFF;
+  --bg-raised:  #FFFFFF;
+  --bg-inset:   #F2F1EE;
+  --bg-hover:   #0000000A;
+  --bg-active:  #00000012;
+
+  --border-subtle:  #E6E4E0;
+  --border-default: #D7D4CF;
+  --border-strong:  #B9B5AE;
+
+  --text-primary:   #1A1D21;
+  --text-secondary: #5C6270;
+  --text-tertiary:  #8B9099;
+  --text-on-accent: #FFFFFF;
+
+  --accent:        #5B4BD6;
+  --accent-hover:  #4E3FC4;
+  --accent-subtle: #5B4BD614;
+  --accent-border: #5B4BD64D;
+
+  /* Darkened for >=4.5:1 against paper white — the dark-mode values
+     would fail contrast here. */
+  --run:    #0B72D9;
+  --ok:     #177E33;
+  --warn:   #B26A00;
+  --danger: #C7283A;
+  --muted:  #8B9099;
+
+  --run-subtle:    #0B72D912;
+  --ok-subtle:     #177E3312;
+  --warn-subtle:   #B26A0016;
+  --danger-subtle: #C7283A12;
+  --muted-subtle:  #8B90990F;
+
+  --run-border:    #0B72D93D;
+  --ok-border:     #177E333D;
+  --warn-border:   #B26A0052;
+  --danger-border: #C7283A3D;
+
+  --add:        #177E33;
+  --del:        #C7283A;
+  --add-bg:     #177E3314;
+  --del-bg:     #C7283A14;
+  --add-bg-em:  #177E332E;
+  --del-bg-em:  #C7283A2E;
+  --diff-gutter: #F7F6F4;
+
+  --git-modified:  #B26A00;
+  --git-added:     #177E33;
+  --git-deleted:   #C7283A;
+  --git-renamed:   #0B72D9;
+  --git-untracked: #8B9099;
+  --git-conflict:  #C7283A;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .05);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, .10);
+  --shadow-lg: 0 8px 28px -6px rgba(0, 0, 0, .18);
+  --shadow-popover: 0 8px 28px -6px rgba(0, 0, 0, .18);
+
+  --scrollbar-thumb: #00000024;
+  --scrollbar-thumb-hover: #0000003D;
+
+  --syn-keyword:  #8250DF;
+  --syn-string:   #0A6E3D;
+  --syn-number:   #B5451B;
+  --syn-comment:  #8B9099;
+  --syn-function: #0B5FBF;
+  --syn-type:     #0F6B68;
+  --syn-variable: #1A1D21;
+  --syn-operator: #5C6270;
+  --syn-punct:    #6E7581;
+  --syn-tag:      #C7283A;
+  --syn-attr:     #B26A00;
+}
+
+/* ==========================================================================
+   Density — Comfortable adds 4px to every interactive row.
+   ========================================================================== */
+[data-density="comfortable"] {
+  --h-row:    32px;
+  --h-menu:   34px;
+  --h-btn:    30px;
+  --h-btn-lg: 34px;
+  --h-tab:    36px;
+  --h-table:  38px;
+  --h-field:  32px;
+  --lh-prose: 1.8;
+}
+
+/* ==========================================================================
+   Reduced motion — kill transitions but keep state changes instant and
+   legible. Never remove a state cue, only its animation.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0.01ms;
+    --dur:      0.01ms;
+    --dur-slow: 0.01ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

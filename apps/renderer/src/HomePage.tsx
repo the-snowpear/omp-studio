@@ -85,12 +85,26 @@ export function SecondaryPage({
     const win = winRef.current;
     const mirror = mirrorRef.current;
     if (!nav || !win || !mirror) return;
-    const active = nav.querySelector<HTMLElement>(`[data-nav="${route}"]`);
-    if (!active) return;
-    win.style.left = `${active.offsetLeft}px`;
-    win.style.width = `${active.offsetWidth}px`;
-    mirror.style.left = `${-active.offsetLeft}px`;
-  }, [route]);
+
+    const sync = () => {
+      const active = nav.querySelector<HTMLElement>(`[data-nav="${route}"]`);
+      if (!active) return;
+      win.style.left = `${active.offsetLeft}px`;
+      win.style.width = `${active.offsetWidth}px`;
+      mirror.style.left = `${-active.offsetLeft}px`;
+    };
+
+    sync();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => sync());
+      observer.observe(nav);
+      for (const linkEl of nav.querySelectorAll("[data-nav]")) {
+        observer.observe(linkEl);
+      }
+      return () => observer.disconnect();
+    }
+  }, [route, t]);
 
   const link = (id: (typeof PAGE_NAV_DEFS)[number]["id"], extra?: string) => {
     const item = PAGE_NAV_DEFS.find((entry) => entry.id === id);
@@ -125,14 +139,14 @@ export function SecondaryPage({
           <Icon name="arrow-l" />
         </button>
         <span className="ph-title">{titleIcon ? <Icon name={titleIcon} extra="sm" /> : null}{title}</span>
-        <nav className={`page-nav${PAGE_NAV_DEFS.some((item) => item.id === route) ? "" : " no-bubble"}`} ref={navRef} aria-label="二级页导航">
+        <nav className={`page-nav${PAGE_NAV_DEFS.some((item) => item.id === route) ? "" : " no-bubble"}`} ref={navRef} aria-label={t("home.secondaryNav")}>
           {PAGE_NAV_DEFS.map((item) => link(item.id))}
           <span className="nav-window" ref={winRef} aria-hidden="true">
             <span className="nav-mirror" ref={mirrorRef}>{PAGE_NAV_DEFS.map((item) => link(item.id, "mirror"))}</span>
           </span>
         </nav>
         <span className="spacer" />
-        <button className="icon-btn" data-tip="主题" aria-label="切换主题" onClick={onToggleTheme}>
+        <button className="icon-btn" data-tip={t("shell.theme")} aria-label={t("shell.toggleTheme")} onClick={onToggleTheme}>
           <Icon name={theme === "dark" ? "moon" : "light"} />
         </button>
       </header>
@@ -148,13 +162,13 @@ export function SecondaryPage({
   );
 }
 
-function greeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 5) return "夜深了";
-  if (hour < 11) return "上午好";
-  if (hour < 13) return "中午好";
-  if (hour < 18) return "下午好";
-  return "晚上好";
+function greeting(now: Date, t: (key: string) => string): string {
+  const hour = now.getHours();
+  if (hour < 5) return t("home.greetingLateNight");
+  if (hour < 11) return t("home.greetingMorning");
+  if (hour < 13) return t("home.greetingNoon");
+  if (hour < 18) return t("home.greetingAfternoon");
+  return t("home.greetingEvening");
 }
 
 function ProfileAvatar({ name, src, className }: { name: string; src: string; className: string }) {
@@ -166,18 +180,19 @@ function ompStatusText(
   runtime: ClientBootstrap["runtime"] | undefined,
   preview: boolean,
   extras: readonly string[],
+  t: (key: string) => string,
 ): string {
-  let head = "Runtime 不可用";
+  let head = t("runtime.unavailable");
   if (preview || runtime?.status === "connected") {
-    head = "OMP 已就绪";
+    head = t("runtime.ready");
   } else if (runtime?.status === "unavailable" && runtime.unavailableCode !== undefined) {
     head = formatRuntimeUnavailableCopy(runtime.unavailableCode, runtime.unavailableReason).title;
   } else if (runtime?.status === "disconnected") {
     head = runtime.disconnectCode !== undefined
       ? formatRuntimeDisconnectCopy(runtime.disconnectCode, runtime.disconnectReason).title
-      : "连接已断开";
+      : t("runtime.disconnected");
   } else if (runtime?.status === "connecting") {
-    head = "正在连接 Runtime";
+    head = t("runtime.connecting");
   }
   return extras.length > 0 ? `${head} · ${extras.join(" · ")}` : head;
 }
@@ -193,6 +208,7 @@ function ProfileEditDialog({
   onClose: () => void;
   onSave: (next: { displayName: string; avatar: ProcessedAvatar | null | undefined }) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [draftName, setDraftName] = useState(name);
   const [draftSrc, setDraftSrc] = useState(avatar);
   const [draftAvatar, setDraftAvatar] = useState<ProcessedAvatar | null | undefined>(undefined);
@@ -246,7 +262,7 @@ function ProfileEditDialog({
         setBusy(false);
       },
       (cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : "头像读取失败。");
+        setError(cause instanceof Error ? cause.message : t("home.avatarReadFailed"));
         setBusy(false);
       },
     );
@@ -265,9 +281,9 @@ function ProfileEditDialog({
         <div className="modal-head profile-edit-head">
           <div>
             <span className="profile-edit-kicker">PROFILE</span>
-            <h2 id="profileEditTitle">编辑个人资料</h2>
+            <h2 id="profileEditTitle">{t("home.editProfileHeader")}</h2>
           </div>
-          <button type="button" className="icon-btn" aria-label="关闭" disabled={busy} onClick={onClose}>
+          <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={busy} onClick={onClose}>
             <Icon name="x" />
           </button>
         </div>
@@ -277,7 +293,7 @@ function ProfileEditDialog({
               type="button"
               className="profile-edit-avatar-btn"
               disabled={busy}
-              aria-label="上传头像"
+              aria-label={t("home.changeAvatar")}
               onClick={() => fileRef.current?.click()}
             >
               <ProfileAvatar name={draftName} src={draftSrc} className="profile-edit-avatar-img" />
@@ -286,8 +302,8 @@ function ProfileEditDialog({
               </span>
             </button>
             <div className="profile-edit-avatar-copy">
-              <b>头像</b>
-              <span>点击头像上传本地图片</span>
+              <b>{t("home.avatar")}</b>
+              <span>{t("home.avatarUploadHint")}</span>
               {draftSrc ? (
                 <button
                   type="button"
@@ -295,7 +311,7 @@ function ProfileEditDialog({
                   disabled={busy}
                   onClick={() => { setDraftAvatar(null); setDraftSrc(""); setError(undefined); }}
                 >
-                  移除头像
+                  {t("home.removeAvatar")}
                 </button>
               ) : null}
             </div>
@@ -308,7 +324,7 @@ function ProfileEditDialog({
             />
           </div>
           <div className="field">
-            <label htmlFor="profileDisplayName">用户名</label>
+            <label htmlFor="profileDisplayName">{t("home.displayNameField")}</label>
             <input
               id="profileDisplayName"
               className="input"
@@ -322,7 +338,7 @@ function ProfileEditDialog({
           {error ? <p className="profile-edit-error" role="alert"><Icon name="alert" extra="sm" />{error}</p> : null}
         </div>
         <div className="modal-foot">
-          <button type="button" className="btn outline" disabled={busy} onClick={onClose}>取消</button>
+          <button type="button" className="btn outline" disabled={busy} onClick={onClose}>{t("common.cancel")}</button>
           <button
             type="button"
             className="btn primary"
@@ -333,13 +349,13 @@ function ProfileEditDialog({
               void onSave({ displayName: draftName, avatar: draftAvatar }).then(
                 () => undefined,
                 (cause: unknown) => {
-                  setError(cause instanceof Error ? cause.message : "保存失败。");
+                  setError(cause instanceof Error ? cause.message : t("home.saveFailed"));
                   setBusy(false);
                 },
               );
             }}
           >
-            {busy ? "处理中…" : "保存"}
+            {busy ? t("home.processing") : t("common.save")}
           </button>
         </div>
       </section>
@@ -368,15 +384,15 @@ function ProfileEditDialog({
   );
 }
 
-function relativeTime(iso: string): string {
+function relativeTime(iso: string, lang: "zh" | "en", t: (key: string) => string): string {
   const then = Date.parse(iso);
   if (!Number.isFinite(then)) return "";
   const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (seconds < 60) return "刚刚";
+  if (seconds < 60) return t("common.justNow");
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   if (seconds < 86400 * 7) return `${Math.floor(seconds / 86400)}d`;
-  return new Date(then).toLocaleDateString();
+  return new Date(then).toLocaleDateString(lang === "en" ? "en-US" : "zh-CN");
 }
 
 type TokenView = "year" | "month" | "week" | "day";
@@ -388,12 +404,6 @@ type ChartPoint = {
 };
 
 const OTHER_MODEL_ID = "其他";
-const TOKEN_VIEWS: ReadonlyArray<{ id: TokenView; label: string }> = [
-  { id: "year", label: "年" },
-  { id: "month", label: "月" },
-  { id: "week", label: "周" },
-  { id: "day", label: "日" },
-];
 const TOKEN_STEPS = [
   "var(--accent-softer)",
   "color-mix(in srgb, var(--accent) 24%, var(--accent-softer))",
@@ -419,8 +429,13 @@ function pointMax(point: ChartPoint): number {
   return max;
 }
 
-function dayLabel(ts: number): string {
+const MONTHS_SHORT_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+function dayLabel(ts: number, lang: "zh" | "en" = "zh"): string {
   const date = new Date(ts);
+  if (lang === "en") {
+    return `${MONTHS_SHORT_EN[date.getMonth()]} ${date.getDate()}`;
+  }
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
@@ -433,18 +448,26 @@ function waitReceipt<T>(client: StudioClient, requestId: string): Promise<T> {
       if (event.kind !== "command.receipt" || event.receipt.requestId !== requestId) return;
       unsub();
       if (event.receipt.status === "completed") resolve(event.receipt.result as T);
-      else if (event.receipt.status === "failed") reject(new Error(event.receipt.error?.message ?? "命令失败"));
-      else reject(new Error(`命令未完成：${event.receipt.status}`));
+      else if (event.receipt.status === "failed") reject(new Error(event.receipt.error?.message ?? "Command failed"));
+      else reject(new Error(`Command incomplete: ${event.receipt.status}`));
     });
   });
 }
 
 function TokenUsageCard({ client }: { client?: StudioClient }) {
+  const { t, resolvedLanguage } = useI18n();
   const { preview } = usePreviewMode();
   const previewUsage = useMemo(() => buildPreviewUsage(), []);
   const [liveUsage, setLiveUsage] = useState<TokenUsageReadModel | null>(null);
   const [view, setView] = useState<TokenView>("month");
   const [chartWidth, setChartWidth] = useState(0);
+  const tokenViews = useMemo(() => [
+    { id: "year" as TokenView, label: t("home.rangeYear") },
+    { id: "month" as TokenView, label: t("home.rangeMonth") },
+    { id: "week" as TokenView, label: t("home.rangeWeek") },
+    { id: "day" as TokenView, label: t("home.rangeDay") },
+  ], [t]);
+  const modelLabel = (id: string) => (id === OTHER_MODEL_ID ? t("home.other") : id);
   const [hover, setHover] = useState<{ index: number; x: number; y: number; source: "chart" | "cell" } | null>(null);
   const [cellTip, setCellTip] = useState<{ ts: number } | null>(null);
   const [cellTipPos, setCellTipPos] = useState({ left: 0, top: 0 });
@@ -474,7 +497,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
           setLiveUsage({
             ...EMPTY_USAGE,
             generatedAt: new Date().toISOString(),
-            unavailableReason: "用量读取失败。",
+            unavailableReason: t("home.usageLoadFailed"),
           });
         }
       }
@@ -485,7 +508,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [preview, client]);
+  }, [preview, client, resolvedLanguage, t]);
 
   useEffect(() => () => window.clearTimeout(dashTimer.current), []);
 
@@ -541,12 +564,13 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
       if (!cell) return;
       const month = new Date(cell.ts).getMonth();
       if (month !== prevMonth) {
-        nextMonths.push({ column: Math.floor(index / 7) + 1, label: `${month + 1}月` });
+        const label = resolvedLanguage === "en" ? (MONTHS_SHORT_EN[month] ?? `${month + 1}`) : `${month + 1}月`;
+        nextMonths.push({ column: Math.floor(index / 7) + 1, label });
         prevMonth = month;
       }
     });
     return { cells: nextCells, weeks: nextWeeks, monthLabels: nextMonths };
-  }, [yearEnd, yearStart]);
+  }, [resolvedLanguage, yearEnd, yearStart]);
   const { cells, weeks, monthLabels } = calendar;
 
   const yearTotals: number[] = [];
@@ -656,12 +680,15 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
     if (view === "month") {
       return series
         .filter((point, index) => point.ts !== undefined && (index === 0 || index === series.length - 1 || new Date(point.ts).getDate() % 5 === 0))
-        .map((point) => ({ x: xOf(point.x, series.length), lbl: `${new Date(point.ts!).getDate()}日` }));
+        .map((point) => ({ x: xOf(point.x, series.length), lbl: `${new Date(point.ts!).getDate()}${resolvedLanguage === "en" ? "" : "日"}` }));
     }
     if (view === "week") {
+      const weekdays = resolvedLanguage === "en"
+        ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        : ["一", "二", "三", "四", "五", "六", "日"];
       return series.map((point) => {
         const dow = point.ts ? new Date(point.ts).getDay() : 0;
-        return { x: xOf(point.x, series.length), lbl: ["一", "二", "三", "四", "五", "六", "日"][dow === 0 ? 6 : dow - 1]! };
+        return { x: xOf(point.x, series.length), lbl: weekdays[dow === 0 ? 6 : dow - 1]! };
       });
     }
     return [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22].map((hour) => ({ x: xOf(hour, series.length), lbl: `${hour}:00` }));
@@ -756,33 +783,33 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
     ? view === "day"
       ? `${hoverPoint.hour ?? hoverPoint.x}:00`
       : view === "year"
-        ? `第 ${hoverPoint.x + 1} 周`
+        ? t("home.weekNumber", { n: hoverPoint.x + 1 })
         : hoverPoint.ts
-          ? dayLabel(hoverPoint.ts)
+          ? dayLabel(hoverPoint.ts, resolvedLanguage)
           : ""
     : "";
   const rangeText = preview
-    ? "演示数据"
+    ? t("common.demo")
     : loading
-      ? "正在同步用量…"
-      : usage.unavailableReason ?? "本机用量";
+      ? t("home.syncingUsage")
+      : usage.unavailableReason ?? t("home.localUsage");
 
   const dashLabel =
-    dash.phase === "opening" ? "正在打开…" : dash.phase === "opened" ? "已打开" : dash.phase === "error" ? "打开失败" : "OMP Stats";
+    dash.phase === "opening" ? t("home.openingStats") : dash.phase === "opened" ? t("home.openedStats") : dash.phase === "error" ? t("home.openStatsFailed") : t("home.openStats");
   const dashTitle = preview
-    ? "预览"
+    ? t("common.preview")
     : dash.phase === "error"
-      ? "失败"
+      ? t("common.failed")
       : dash.phase === "opening"
-        ? "打开中"
+        ? t("home.openingStats")
         : dash.phase === "opened"
-          ? "已打开"
+          ? t("home.openedStats")
           : "Stats";
 
   return (
     <div className="card tk-card" id="tkCard" ref={cardRef}>
       <div className="tk-head">
-        <span className="tk-title"><Icon name="pulse" extra="sm" />Token 使用</span>
+        <span className="tk-title"><Icon name="pulse" extra="sm" />{t("home.tokenUsage")}</span>
         <span className="tk-range">{rangeText}</span>
         <span className="spacer" />
         <button
@@ -799,12 +826,12 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
               try {
                 const handle = await client.command("usage.openDashboard", {});
                 const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-                setDash({ phase: "opened", message: receipt.message ?? "已打开 OMP Stats" });
+                setDash({ phase: "opened", message: receipt.message ?? "OMP Stats" });
                 dashTimer.current = window.setTimeout(() => {
                   setDash((prev) => (prev.phase === "opened" ? { phase: "idle" } : prev));
                 }, 2500);
               } catch (error) {
-                const message = error instanceof Error ? error.message : "打开 OMP Stats 失败";
+                const message = error instanceof Error ? error.message : t("home.openStatsFailed");
                 setDash({ phase: "error", message });
               }
             })();
@@ -812,8 +839,8 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
         >
           <Icon name="external" extra="sm" />{dashLabel}
         </button>
-        <div className="seg tk-views" role="group" aria-label="Token 视图切换">
-          {TOKEN_VIEWS.map((entry) => (
+        <div className="seg tk-views" role="group" aria-label={t("home.tokenUsage")}>
+          {tokenViews.map((entry) => (
             <button
               key={entry.id}
               type="button"
@@ -828,14 +855,14 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
         </div>
       </div>
       <div className="tk-kpis">
-        <div className="tk-kpi"><span className="tk-kpi-v mono">{fmtTokens(yearTotal)}</span><span className="tk-kpi-l"><i className="tk-dot total" />年内总用量</span></div>
-        <div className="tk-kpi"><span className="tk-kpi-v mono">{fmtTokens(avg7)}</span><span className="tk-kpi-l">近 7 天日均</span></div>
-        <div className="tk-kpi"><span className="tk-kpi-v mono">{fmtTokens(peakTotal)}</span><span className="tk-kpi-l">年内峰值</span></div>
+        <div className="tk-kpi"><span className="tk-kpi-v mono">{fmtTokens(yearTotal)}</span><span className="tk-kpi-l"><i className="tk-dot total" />{t("home.yearTotalUsage")}</span></div>
+        <div className="tk-kpi"><span className="tk-kpi-v mono">{fmtTokens(avg7)}</span><span className="tk-kpi-l">{t("home.last7DaysAvg")}</span></div>
+        <div className="tk-kpi"><span className="tk-kpi-v mono">{fmtTokens(peakTotal)}</span><span className="tk-kpi-l">{t("home.yearPeak")}</span></div>
       </div>
       {modelIds.length > 0 ? (
         <div className="tk-legend">
           {modelIds.map((id) => (
-            <span key={id}><i className={`tk-dot ${modelTone(modelIds, id)}`} />{id}</span>
+            <span key={id}><i className={`tk-dot ${modelTone(modelIds, id)}`} />{modelLabel(id)}</span>
           ))}
         </div>
       ) : null}
@@ -845,7 +872,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
         viewBox={`0 0 ${Math.max(chartWidth, 1)} ${vbH}`}
         preserveAspectRatio="none"
         role="img"
-        aria-label={`常用模型 ${TOKEN_VIEWS.find((entry) => entry.id === view)?.label ?? ""} 视图 token 用量折线图`}
+        aria-label={`${t("home.tokenUsage")} ${tokenViews.find((entry) => entry.id === view)?.label ?? ""}`}
         onPointerMove={onChartMove}
         onPointerLeave={() => { setHover((prev) => (prev?.source === "chart" ? null : prev)); }}
       >
@@ -903,7 +930,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
           {modelIds.map((id) => (
             <span key={id} className="tk-tip-row">
               <i className={`tk-dot ${modelTone(modelIds, id)}`} />
-              {id}
+              {modelLabel(id)}
               <b className="mono">{fmtTokens(hoverPoint.byModel[id] ?? 0)} tok</b>
             </span>
           ))}
@@ -917,7 +944,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
           aria-hidden="false"
           style={{ display: "block", left: cellTipPos.left, top: cellTipPos.top }}
         >
-          <b>{dayLabel(cellTip.ts)}{cellTip.ts > today ? "（未来）" : ""}</b>
+          <b>{dayLabel(cellTip.ts, resolvedLanguage)}{cellTip.ts > today ? ` (${t("home.future")})` : ""}</b>
           <span className="mono">{fmtTokens(totalsByDay.get(cellTip.ts) ?? 0)} tok</span>
         </div>
       ) : null}
@@ -942,7 +969,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
                 data-ts={cell.ts}
                 tabIndex={0}
                 role="img"
-                aria-label={future ? `${dayLabel(cell.ts)}（未来）` : `${dayLabel(cell.ts)}，${fmtTokens(total)} tok`}
+                aria-label={future ? `${dayLabel(cell.ts, resolvedLanguage)} (${t("home.future")})` : `${dayLabel(cell.ts, resolvedLanguage)}, ${fmtTokens(total)} tok`}
                 style={future ? undefined : { background: tokenFill(total, heatCap) }}
                 onMouseEnter={() => onCellEnter(cell.ts)}
                 onFocus={() => onCellEnter(cell.ts)}
@@ -956,10 +983,10 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
           ))}
         </div>
         <div className="tk-cal-foot">
-          <span className="tiny muted">{preview ? "颜色按每日总用量分级 · 演示数据" : "颜色按每日总用量分级"}</span>
+          <span className="tiny muted">{preview ? t("home.colorByDailyUsageDemo") : t("home.colorByDailyUsage")}</span>
           <span className="spacer" />
-          <span className="tk-scale" aria-hidden="true">少
-            <i data-s="0" /><i data-s="1" /><i data-s="2" /><i data-s="3" /><i data-s="4" /><i className="tk-scale-max">多</i>
+          <span className="tk-scale" aria-hidden="true">{t("home.less")}
+            <i data-s="0" /><i data-s="1" /><i data-s="2" /><i data-s="3" /><i data-s="4" /><i className="tk-scale-max">{t("home.more")}</i>
           </span>
         </div>
       </div>
@@ -988,10 +1015,11 @@ export function HomePage({
   onOpenWorkspace?: (workspaceId: string) => void;
   onRoute: (route: PageRoute) => void;
 }) {
+  const { t, resolvedLanguage } = useI18n();
   const waiting = snapshot?.agents.filter((agent) => agent.status === "idle" || agent.status === "parked").length ?? 0;
   const extraBits: string[] = [];
-  if (snapshot?.isStreaming) extraBits.push("任务正在运行");
-  if (waiting > 0) extraBits.push(`${waiting} 个 Agent 空闲`);
+  if (snapshot?.isStreaming) extraBits.push(t("runtime.taskRunning"));
+  if (waiting > 0) extraBits.push(t("runtime.agentsIdle", { count: waiting }));
 
   const { preview } = usePreviewMode();
   const { profile, update, persistAvatar } = useOperatorProfile();
@@ -1001,7 +1029,7 @@ export function HomePage({
   const [installStep, setInstallStep] = useState(1);
   const [installMessage, setInstallMessage] = useState<string | undefined>(undefined);
   const runtimeMissing = !preview && runtime?.status !== "connected";
-  const statusText = ompStatusText(runtime, preview, extraBits);
+  const statusText = ompStatusText(runtime, preview, extraBits, t);
 
   return (
     <div className="page-wide">
@@ -1011,14 +1039,14 @@ export function HomePage({
             <ProfileAvatar name={profile.displayName} src={profile.avatarSrc} className="home-avatar" />
           </span>
           <div className="home-identity-copy">
-            <h1>{greeting()}，{profile.displayName}</h1>
+            <h1>{greeting(new Date(), t)}，{profile.displayName}</h1>
             <p className="muted">{statusText}</p>
           </div>
           <button
             type="button"
             className="icon-btn home-id-edit"
-            data-tip="编辑"
-            aria-label="编辑用户名和头像"
+            data-tip={t("home.editProfile")}
+            aria-label={t("home.editProfile")}
             onClick={() => setEditingProfile(true)}
           >
             <Icon name="pencil" />
@@ -1026,7 +1054,7 @@ export function HomePage({
         </div>
         {installMessage ? <p className="muted small">{installMessage}</p> : null}
         {installing ? (
-          <ActionProgressBar label={installStep === 1 ? "正在安装 Runtime" : "正在刷新环境"} step={installStep} steps={2} />
+          <ActionProgressBar label={installStep === 1 ? t("home.installingRuntime") : t("home.refreshingEnv")} step={installStep} steps={2} />
         ) : null}
         <div className="home-quick">
           <button
@@ -1038,15 +1066,15 @@ export function HomePage({
               }
               onPickFolder?.();
             }}
-            data-tip={preview ? "预览" : "打开"}
+            data-tip={preview ? t("common.preview") : t("common.open")}
           >
-            <Icon name="folder-open" extra="sm" />打开本地文件夹
+            <Icon name="folder-open" extra="sm" />{t("home.openLocalFolder")}
           </button>
           {runtimeMissing && client ? (
             <button
               className="btn outline"
               disabled={installing}
-              data-tip="安装"
+              data-tip={t("home.installRuntime")}
               onClick={() => {
                 void (async () => {
                   setInstalling(true);
@@ -1057,47 +1085,47 @@ export function HomePage({
                     const receipt = await waitForCommandReceipt(client, handle.requestId);
                     setInstallStep(2);
                     if (receipt.status === "completed") {
-                      setInstallMessage("托管 Runtime 已安装。打开项目后即可启动。");
+                      setInstallMessage(t("home.installRuntimeSuccess"));
                     } else if (receipt.status === "failed") {
                       setInstallMessage(receipt.error.message);
                     } else {
-                      setInstallMessage("安装未完成");
+                      setInstallMessage(t("home.installRuntimeIncomplete"));
                     }
                   } catch (error) {
-                    setInstallMessage(error instanceof Error ? error.message : "安装失败");
+                    setInstallMessage(error instanceof Error ? error.message : t("home.installRuntimeFailed"));
                   } finally {
                     setInstalling(false);
                   }
                 })();
               }}
             >
-              <Icon name="package" extra="sm" />{installing ? "正在安装…" : "安装 Runtime"}
+              <Icon name="package" extra="sm" />{installing ? `${t("home.installingRuntime")}…` : t("home.installRuntime")}
             </button>
           ) : null}
           <button
             className="btn outline"
             disabled={preview || !client}
-            data-tip="克隆（暂未实现）"
+            data-tip={t("home.cloneRepo")}
             onClick={() => {
               // 克隆 URL 依赖 window.prompt 收集，而 Electron 渲染进程不支持 prompt
               // （electron/electron#472），桌面端无处输入；等输入对话框接入后恢复克隆流程。
-              setInstallMessage("克隆功能待后续实现：需要文本输入对话框（Host 侧 clone 已就绪）");
+              setInstallMessage(t("home.clonePending"));
             }}
-          ><Icon name="branch" extra="sm" />克隆 Git 仓库</button>
-          <button className="btn outline" onClick={() => onRoute("history")}><Icon name="history" extra="sm" />恢复最近对话</button>
-          <button className="btn outline" disabled data-tip="临时工作区（暂未实现）"><Icon name="flask" extra="sm" />创建临时工作区</button>
+          ><Icon name="branch" extra="sm" />{t("home.cloneRepo")}</button>
+          <button className="btn outline" onClick={() => onRoute("history")}><Icon name="history" extra="sm" />{t("home.resumeRecentChat")}</button>
+          <button className="btn outline" disabled data-tip={t("home.tempWorkspace")}><Icon name="flask" extra="sm" />{t("home.tempWorkspace")}</button>
         </div>
       </div>
 
-      <h3 className="home-h">最近项目</h3>
+      <h3 className="home-h">{t("home.recentProjects")}</h3>
       <div className="proj-grid" id="projGrid">
         {preview ? PREVIEW_PROJECTS.map((project) => (
           <button key={project.id} className="proj-card" type="button" onClick={() => onRoute("workbench")}>
             <span className="pc-name"><Icon name="folder-open" /><span className="ellipsis">{project.name}</span></span>
             <span className="pc-path ellipsis">{project.path}</span>
             <span className="pc-flags">
-              {project.running ? <span className="chip blue">任务运行中</span> : <span className="chip gray">空闲</span>}
-              {project.dirty > 0 ? <span className="chip amber">{project.dirty} dirty</span> : null}
+              {project.running ? <span className="chip blue">{t("home.taskRunning")}</span> : <span className="chip gray">{t("home.idle")}</span>}
+              {project.dirty > 0 ? <span className="chip amber">{project.dirty} {t("common.uncommitted")}</span> : null}
             </span>
             <span className="pc-foot">
               <span className="ellipsis">{project.branch} · {project.threads[0]?.title ?? ""}</span>
@@ -1119,22 +1147,22 @@ export function HomePage({
             {/* Never a path: the Host registry is the only path holder. */}
             <span className="pc-path ellipsis">—</span>
             <span className="pc-flags">
-              {workspace.active ? <span className="chip blue">当前项目</span> : <span className="chip gray">空闲</span>}
+              {workspace.active ? <span className="chip blue">{t("home.currentProject")}</span> : <span className="chip gray">{t("home.idle")}</span>}
             </span>
             <span className="pc-foot">
-              <span className="ellipsis">{workspace.active ? "已打开 · 最近使用" : "最近使用"}</span>
+              <span className="ellipsis">{workspace.active ? t("home.openedAndRecentlyUsed") : t("home.recentlyUsed")}</span>
               <span className="spacer" />
-              <span>{relativeTime(workspace.lastOpenedAt)}</span>
+              <span>{relativeTime(workspace.lastOpenedAt, resolvedLanguage, t)}</span>
             </span>
           </button>
         )) : (
-          <div className="empty-inline">暂无最近项目</div>
+          <div className="empty-inline">{t("home.noRecentProjects")}</div>
         )}
       </div>
 
       <TokenUsageCard {...(client ? { client } : {})} />
 
-      <h3 className="home-h home-h-tight">最近活动</h3>
+      <h3 className="home-h home-h-tight">{t("home.recentActivity")}</h3>
       <div className="card" style={{ padding: 6 }} id="activityList">
         {preview ? PREVIEW_ACTIVITY.map((entry) => (
           <button key={entry.text} className="activity-row" type="button" onClick={() => onRoute("workbench")}>
@@ -1146,12 +1174,12 @@ export function HomePage({
         )) : activities.length ? activities.map((entry) => (
           <button key={entry.historyId} className="activity-row" type="button" onClick={() => onRoute("workbench")}>
             <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
-            <span className="ellipsis">会话 · {entry.title}</span>
+            <span className="ellipsis">{t("home.sessionEntry", { title: entry.title })}</span>
             <span className="spacer" />
-            <span className="tiny muted">{relativeTime(entry.lastActiveAt)}</span>
+            <span className="tiny muted">{relativeTime(entry.lastActiveAt, resolvedLanguage, t)}</span>
           </button>
         )        ) : (
-          <div className="empty" style={{ padding: 16 }}>暂无最近活动</div>
+          <div className="empty" style={{ padding: 16 }}>{t("home.noRecentActivity")}</div>
         )}
       </div>
       {editingProfile ? (

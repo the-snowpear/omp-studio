@@ -16,6 +16,8 @@
 import type { AppSettings } from "./appSettings";
 import { DEFAULT_APP_SETTINGS } from "./appSettings";
 import { SettingRow, SettingSection, StaticSelect, Switch, type SettingSource } from "./SettingRow";
+import { useI18n } from "../i18n";
+
 
 export type ApprovalModeId = "always-ask" | "write" | "yolo";
 
@@ -68,9 +70,10 @@ function TabHeader({ title, desc, ctl, resetKeys, resetTitle }: {
   resetKeys?: readonly (keyof AppSettings)[];
   resetTitle?: string;
 }) {
+  const { t } = useI18n();
   return (
     <>
-      <h3>{title}{ctl?.preview ? <span className="chip amber xs demo-chip">演示</span> : null}</h3>
+      <h3>{title}{ctl?.preview ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}</h3>
       <p className="desc">{desc}</p>
       {resetKeys ? (
         <div className="set-toolbar">
@@ -78,10 +81,10 @@ function TabHeader({ title, desc, ctl, resetKeys, resetTitle }: {
             type="button"
             className="btn small outline"
             disabled={ctl === undefined || ctl.preview}
-            data-tip={ctl?.preview ? "预览" : (resetTitle ?? "恢复默认")}
+            data-tip={ctl?.preview ? t("common.preview") : (resetTitle ?? t("common.resetDefaults"))}
             onClick={() => ctl?.resetApp(resetKeys)}
           >
-            恢复默认值
+            {resetTitle ?? t("common.resetDefaults")}
           </button>
         </div>
       ) : null}
@@ -94,7 +97,7 @@ function TabHeader({ title, desc, ctl, resetKeys, resetTitle }: {
 /* ------------------------------------------------------------------ */
 
 type FutureControl =
-  | { readonly type: "select"; readonly value: string; readonly options: ReadonlyArray<string> }
+  | { readonly type: "select"; readonly value: string; readonly options: ReadonlyArray<string | readonly [string, string]> }
   | { readonly type: "toggle"; readonly on: boolean };
 
 interface FutureRowDef {
@@ -106,6 +109,7 @@ interface FutureRowDef {
 }
 
 function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
   return rows.map((row) => (
     <SettingRow key={row.key} label={row.label} desc={row.desc} source="unavailable" reason={row.reason}>
       {row.control.type === "select" ? (
@@ -116,12 +120,15 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
             value={demo.value(row.key)}
             onChange={(event) => demo.setValue(row.key, event.target.value)}
           >
-            {row.control.options.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
+            {row.control.options.map((option) => {
+              const [optVal, optLabel] = Array.isArray(option) ? option : [option, option];
+              return (
+                <option key={optVal} value={optVal}>{optLabel}</option>
+              );
+            })}
           </select>
         ) : (
-          <StaticSelect value={row.control.value} options={row.control.options} label={row.label} title="（暂未实现）" />
+          <StaticSelect value={row.control.value} options={row.control.options} label={row.label} title={row.reason} />
         )
       ) : demo ? (
         <Switch checked={demo.flag(row.key)} onChange={() => demo.toggle(row.key)} label={row.label} />
@@ -131,14 +138,6 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
     </SettingRow>
   ));
 }
-
-const R_COMPACTION = "compaction.* 未接入 Studio Bridge（Runtime schema 已支持）";
-const R_MEMORY = "memory.* 未接入 Studio Bridge（Runtime schema 已支持）";
-const R_EDIT = "edit.* 未接入 Studio Bridge（Runtime schema 已支持）";
-const R_LSP = "lsp.* 未接入 Studio Bridge（Runtime schema 已支持）";
-const R_SHELL = "shell.* 未接入 Studio Bridge（Runtime schema 已支持）";
-const R_TASK = "task.* 未接入 Studio Bridge（Runtime schema 已支持）";
-const R_SETTINGS = "等待 settings contract 接入（读模型含 effective value + source）";
 
 /* ------------------------------------------------------------------ */
 /* 1. 常规                                                              */
@@ -152,90 +151,106 @@ const GENERAL_RESET_KEYS: readonly (keyof AppSettings)[] = [
 ];
 
 export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
+  const { t } = useI18n();
   const { app, updateApp } = ctl;
   return (
     <>
       <TabHeader
-        title="常规"
-        desc="应用外观、启动行为与通知。这里不出现模型、Provider、会话归档或 Runtime 版本。"
+        title={t("settings.general.title")}
+        desc={t("settings.general.desc")}
         ctl={ctl}
         resetKeys={GENERAL_RESET_KEYS}
       />
-      <SettingSection title="应用">
-        <SettingRow label="界面语言" desc="界面文案语言（概念术语保留英文）" source={appSource(app, "language")}>
+      <SettingSection title={t("settings.general.sectionApp")}>
+        <SettingRow label={t("settings.general.language")} desc={t("settings.general.languageDesc")} source={appSource(app, "language")}>
           <AppSelect
-            label="界面语言"
+            label={t("settings.general.language")}
             value={app.language}
             options={[
-              ["system", "跟随系统 (System)"],
-              ["zh", "简体中文 (Simplified Chinese)"],
-              ["en", "English"],
+              ["system", t("settings.general.langSystem")],
+              ["zh", t("settings.general.langZh")],
+              ["en", t("settings.general.langEn")],
             ]}
             onChange={(language) => updateApp({ language })}
           />
         </SettingRow>
-        <SettingRow label="主题" desc="Light / Dark，实时生效并随应用持久化" source={appSource(app, "theme")}>
+        <SettingRow label={t("settings.general.theme")} desc={t("settings.general.themeDesc")} source={appSource(app, "theme")}>
           <AppSelect
-            label="主题"
+            label={t("settings.general.theme")}
             value={app.theme}
-            options={[["light", "Light"], ["dark", "Dark"]]}
+            options={[
+              ["light", t("settings.general.themeLight")],
+              ["dark", t("settings.general.themeDark")],
+            ]}
             onChange={(theme) => updateApp({ theme })}
           />
         </SettingRow>
-        <SettingRow label="信息密度" desc="紧凑 / 标准 / 宽松，调整全局间距" source={appSource(app, "density")}>
+        <SettingRow label={t("settings.general.density")} desc={t("settings.general.densityDesc")} source={appSource(app, "density")}>
           <AppSelect
-            label="信息密度"
+            label={t("settings.general.density")}
             value={app.density}
-            options={[["compact", "紧凑"], ["standard", "标准"], ["cozy", "宽松"]]}
+            options={[
+              ["compact", t("settings.general.densityCompact")],
+              ["standard", t("settings.general.densityStandard")],
+              ["cozy", t("settings.general.densityCozy")],
+            ]}
             onChange={(density) => updateApp({ density })}
           />
         </SettingRow>
-        <SettingRow label="流式输出" desc="助手回复的流式渲染与底部运行状态" source={appSource(app, "streaming")}>
-          <Switch checked={app.streaming} onChange={(streaming) => updateApp({ streaming })} label="流式输出" />
+        <SettingRow label={t("settings.general.streaming")} desc={t("settings.general.streamingDesc")} source={appSource(app, "streaming")}>
+          <Switch checked={app.streaming} onChange={(streaming) => updateApp({ streaming })} label={t("settings.general.streaming")} />
         </SettingRow>
-        <SettingRow label="工具活动显示" desc="工具链的展开方式" source={appSource(app, "toolActivity")}>
+        <SettingRow label={t("settings.general.toolActivity")} desc={t("settings.general.toolActivityDesc")} source={appSource(app, "toolActivity")}>
           <AppSelect
-            label="工具活动显示"
+            label={t("settings.general.toolActivity")}
             value={app.toolActivity}
-            options={[["full", "完整"], ["concise", "简洁"], ["hidden", "隐藏"]]}
+            options={[
+              ["full", t("settings.general.toolFull")],
+              ["concise", t("settings.general.toolConcise")],
+              ["hidden", t("settings.general.toolHidden")],
+            ]}
             onChange={(toolActivity) => updateApp({ toolActivity })}
           />
         </SettingRow>
       </SettingSection>
-      <SettingSection title="启动">
-        <SettingRow label="启动时恢复最近项目" desc="关闭后启动停留在首页，不直接进入工作台" source={appSource(app, "restoreLastProject")}>
-          <Switch checked={app.restoreLastProject} onChange={(restoreLastProject) => updateApp({ restoreLastProject })} label="启动时恢复最近项目" />
+      <SettingSection title={t("settings.general.sectionStartup")}>
+        <SettingRow label={t("settings.general.restoreLastProject")} desc={t("settings.general.restoreLastProjectDesc")} source={appSource(app, "restoreLastProject")}>
+          <Switch checked={app.restoreLastProject} onChange={(restoreLastProject) => updateApp({ restoreLastProject })} label={t("settings.general.restoreLastProject")} />
         </SettingRow>
-        <SettingRow label="启动时恢复最近会话" desc="冷启动且无驻留 Runtime 会话时，自动选中最近活跃会话" source={appSource(app, "restoreLastSession")}>
-          <Switch checked={app.restoreLastSession} onChange={(restoreLastSession) => updateApp({ restoreLastSession })} label="启动时恢复最近会话" />
+        <SettingRow label={t("settings.general.restoreLastSession")} desc={t("settings.general.restoreLastSessionDesc")} source={appSource(app, "restoreLastSession")}>
+          <Switch checked={app.restoreLastSession} onChange={(restoreLastSession) => updateApp({ restoreLastSession })} label={t("settings.general.restoreLastSession")} />
         </SettingRow>
-        <SettingRow label="启动后默认页面" desc="应用启动时打开的页面" source={appSource(app, "startupPage")}>
+        <SettingRow label={t("settings.general.startupPage")} desc={t("settings.general.startupPageDesc")} source={appSource(app, "startupPage")}>
           <AppSelect
-            label="启动后默认页面"
+            label={t("settings.general.startupPage")}
             value={app.startupPage}
-            options={[["home", "首页"], ["workbench", "工作台"], ["last", "上次页面"]]}
+            options={[
+              ["home", t("settings.general.startupHome")],
+              ["workbench", t("settings.general.startupWorkbench")],
+              ["last", t("settings.general.startupLast")],
+            ]}
             onChange={(startupPage) => updateApp({ startupPage })}
           />
         </SettingRow>
-        <SettingRow label="记住面板布局" desc="侧栏宽度、底栏高度、上下区比例与面板开关状态" source={appSource(app, "rememberLayout")}>
-          <Switch checked={app.rememberLayout} onChange={(rememberLayout) => updateApp({ rememberLayout })} label="记住面板布局" />
+        <SettingRow label={t("settings.general.rememberLayout")} desc={t("settings.general.rememberLayoutDesc")} source={appSource(app, "rememberLayout")}>
+          <Switch checked={app.rememberLayout} onChange={(rememberLayout) => updateApp({ rememberLayout })} label={t("settings.general.rememberLayout")} />
         </SettingRow>
-        <SettingRow label="按项目保存布局" desc="每个项目独立记忆面板布局" source={appSource(app, "perProjectLayout")}>
-          <Switch checked={app.perProjectLayout} onChange={(perProjectLayout) => updateApp({ perProjectLayout })} label="按项目保存布局" />
+        <SettingRow label={t("settings.general.perProjectLayout")} desc={t("settings.general.perProjectLayoutDesc")} source={appSource(app, "perProjectLayout")}>
+          <Switch checked={app.perProjectLayout} onChange={(perProjectLayout) => updateApp({ perProjectLayout })} label={t("settings.general.perProjectLayout")} />
         </SettingRow>
       </SettingSection>
-      <SettingSection title="通知" desc="系统级通知；任务完成与长任务提醒只在窗口失焦时打扰。">
-        <SettingRow label="任务完成通知" desc="会话结束当前任务时通知" source={appSource(app, "notifyTaskDone")}>
-          <Switch checked={app.notifyTaskDone} onChange={(notifyTaskDone) => updateApp({ notifyTaskDone })} label="任务完成通知" />
+      <SettingSection title={t("settings.general.sectionNotify")} desc={t("settings.general.notifyDesc")}>
+        <SettingRow label={t("settings.general.notifyTaskDone")} desc={t("settings.general.notifyTaskDoneDesc")} source={appSource(app, "notifyTaskDone")}>
+          <Switch checked={app.notifyTaskDone} onChange={(notifyTaskDone) => updateApp({ notifyTaskDone })} label={t("settings.general.notifyTaskDone")} />
         </SettingRow>
-        <SettingRow label="错误通知" desc="命令失败或需要重新同步时通知" source={appSource(app, "notifyErrors")}>
-          <Switch checked={app.notifyErrors} onChange={(notifyErrors) => updateApp({ notifyErrors })} label="错误通知" />
+        <SettingRow label={t("settings.general.notifyErrors")} desc={t("settings.general.notifyErrorsDesc")} source={appSource(app, "notifyErrors")}>
+          <Switch checked={app.notifyErrors} onChange={(notifyErrors) => updateApp({ notifyErrors })} label={t("settings.general.notifyErrors")} />
         </SettingRow>
-        <SettingRow label="等待确认通知" desc="Runtime 发起 Ask / 审批交互时通知" source={appSource(app, "notifyConfirmations")}>
-          <Switch checked={app.notifyConfirmations} onChange={(notifyConfirmations) => updateApp({ notifyConfirmations })} label="等待确认通知" />
+        <SettingRow label={t("settings.general.notifyConfirmations")} desc={t("settings.general.notifyConfirmationsDesc")} source={appSource(app, "notifyConfirmations")}>
+          <Switch checked={app.notifyConfirmations} onChange={(notifyConfirmations) => updateApp({ notifyConfirmations })} label={t("settings.general.notifyConfirmations")} />
         </SettingRow>
-        <SettingRow label="长时间任务提醒" desc="任务连续运行超过 5 分钟时提醒一次" source={appSource(app, "notifyLongTasks")}>
-          <Switch checked={app.notifyLongTasks} onChange={(notifyLongTasks) => updateApp({ notifyLongTasks })} label="长时间任务提醒" />
+        <SettingRow label={t("settings.general.notifyLongTasks")} desc={t("settings.general.notifyLongTasksDesc")} source={appSource(app, "notifyLongTasks")}>
+          <Switch checked={app.notifyLongTasks} onChange={(notifyLongTasks) => updateApp({ notifyLongTasks })} label={t("settings.general.notifyLongTasks")} />
         </SettingRow>
       </SettingSection>
     </>
@@ -247,44 +262,45 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
 /* ------------------------------------------------------------------ */
 
 export function InteractionTab({ ctl, demo }: { ctl: SettingsCtl; demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
   const { app, updateApp } = ctl;
   return (
     <>
       <TabHeader
-        title="对话与交互"
-        desc="输入行为与回答表现。当前模型、Provider、Thinking 等级与 Fallback 都在「模型配置」页。"
+        title={t("settings.interaction.title")}
+        desc={t("settings.interaction.desc")}
         ctl={ctl}
         resetKeys={["showThinkingSummary", "showToolIntent"]}
       />
-      <SettingSection title="输入行为">
+      <SettingSection title={t("settings.interaction.sectionInput")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "input.steering", label: "Steering 消息处理", desc: "运行中插入的转向消息", control: { type: "select", value: "一次处理一条", options: ["一次处理全部", "一次处理一条"] }, reason: "Steering 处理语义未接入 settings contract" },
-            { key: "input.followup", label: "Follow-up 消息处理", desc: "排队消息的消费方式", control: { type: "select", value: "一次处理全部", options: ["一次处理全部", "一次处理一条"] }, reason: "Follow-up 处理语义未接入 settings contract" },
-            { key: "input.interrupt", label: "中断时机", desc: "请求中断后何时停下", control: { type: "select", value: "当前工具完成后中断", options: ["立即中断", "当前工具完成后中断"] }, reason: "中断策略未接入 settings contract" },
-            { key: "input.paste", label: "大段粘贴处理", desc: "粘贴超长文本时的处理方式", control: { type: "select", value: "自动转文件", options: ["直接插入", "自动转文件", "自动包裹代码块"] }, reason: "Composer 粘贴策略尚未实现" },
-            { key: "input.autocomplete", label: "自动补全最大显示数量", desc: "输入建议列表上限", control: { type: "select", value: "8 条", options: ["5 条", "8 条", "12 条"] }, reason: "Composer 自动补全尚未实现" },
-            { key: "input.emoji", label: "Emoji 自动补全", desc: "输入 : 时建议 Emoji", control: { type: "toggle", on: true }, reason: "Composer 自动补全尚未实现" },
+            { key: "input.steering", label: t("settings.interaction.steering"), desc: t("settings.interaction.steeringDesc"), control: { type: "select", value: "一次处理一条", options: [["一次处理全部", t("settings.interaction.steeringAll")], ["一次处理一条", t("settings.interaction.steeringOne")]] }, reason: t("settings.interaction.steeringReason") },
+            { key: "input.followup", label: t("settings.interaction.followup"), desc: t("settings.interaction.followupDesc"), control: { type: "select", value: "一次处理全部", options: [["一次处理全部", t("settings.interaction.followupAll")], ["一次处理一条", t("settings.interaction.followupOne")]] }, reason: t("settings.interaction.followupReason") },
+            { key: "input.interrupt", label: t("settings.interaction.interrupt"), desc: t("settings.interaction.interruptDesc"), control: { type: "select", value: "当前工具完成后中断", options: [["立即中断", t("settings.interaction.interruptImmediate")], ["当前工具完成后中断", t("settings.interaction.interruptAfterTool")]] }, reason: t("settings.interaction.interruptReason") },
+            { key: "input.paste", label: t("settings.interaction.paste"), desc: t("settings.interaction.pasteDesc"), control: { type: "select", value: "自动转文件", options: [["直接插入", t("settings.interaction.pasteDirect")], ["自动转文件", t("settings.interaction.pasteFile")], ["自动包裹代码块", t("settings.interaction.pasteCodeblock")]] }, reason: t("settings.interaction.pasteReason") },
+            { key: "input.autocomplete", label: t("settings.interaction.autocomplete"), desc: t("settings.interaction.autocompleteDesc"), control: { type: "select", value: "8 条", options: [["5 条", t("settings.interaction.count5")], ["8 条", t("settings.interaction.count8")], ["12 条", t("settings.interaction.count12")]] }, reason: t("settings.interaction.autocompleteReason") },
+            { key: "input.emoji", label: t("settings.interaction.emoji"), desc: t("settings.interaction.emojiDesc"), control: { type: "toggle", on: true }, reason: t("settings.interaction.emojiReason") },
           ]}
         />
       </SettingSection>
-      <SettingSection title="回答表现">
+      <SettingSection title={t("settings.interaction.sectionReply")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "reply.style", label: "回答风格", desc: "助手回答的语气风格", control: { type: "select", value: "Default", options: ["Default", "Friendly", "Pragmatic", "None"] }, reason: "回答风格为 Runtime 配置，未接入 settings contract" },
-            { key: "reply.detail", label: "回答详略", desc: "回答的详细程度", control: { type: "select", value: "Balanced", options: ["Concise", "Balanced", "Detailed"] }, reason: "回答详略为 Runtime 配置，未接入 settings contract" },
+            { key: "reply.style", label: t("settings.interaction.replyStyle"), desc: t("settings.interaction.replyStyleDesc"), control: { type: "select", value: "Default", options: [["Default", "Default"], ["Friendly", "Friendly"], ["Pragmatic", "Pragmatic"], ["None", "None"]] }, reason: t("settings.interaction.replyStyleReason") },
+            { key: "reply.detail", label: t("settings.interaction.replyDetail"), desc: t("settings.interaction.replyDetailDesc"), control: { type: "select", value: "Balanced", options: [["Concise", t("settings.interaction.detailConcise")], ["Balanced", t("settings.interaction.detailBalanced")], ["Detailed", t("settings.interaction.detailDetailed")]] }, reason: t("settings.interaction.replyDetailReason") },
           ]}
         />
-        <SettingRow label="显示 Thinking 摘要" desc="助手回复中的 Think 摘要卡片" source={appSource(app, "showThinkingSummary")}>
-          <Switch checked={app.showThinkingSummary} onChange={(showThinkingSummary) => updateApp({ showThinkingSummary })} label="显示 Thinking 摘要" />
+        <SettingRow label={t("settings.interaction.showThinkingSummary")} desc={t("settings.interaction.showThinkingSummaryDesc")} source={appSource(app, "showThinkingSummary")}>
+          <Switch checked={app.showThinkingSummary} onChange={(showThinkingSummary) => updateApp({ showThinkingSummary })} label={t("settings.interaction.showThinkingSummary")} />
         </SettingRow>
-        <SettingRow label="显示工具调用意图" desc="工具行上的意图摘要行" source={appSource(app, "showToolIntent")}>
-          <Switch checked={app.showToolIntent} onChange={(showToolIntent) => updateApp({ showToolIntent })} label="显示工具调用意图" />
+        <SettingRow label={t("settings.interaction.showToolIntent")} desc={t("settings.interaction.showToolIntentDesc")} source={appSource(app, "showToolIntent")}>
+          <Switch checked={app.showToolIntent} onChange={(showToolIntent) => updateApp({ showToolIntent })} label={t("settings.interaction.showToolIntent")} />
         </SettingRow>
-        <SettingRow label="显示 Token 使用情况" desc="对话内的 Token 用量展示" source="unavailable" reason="对话内 Token 用量视图尚未实现（全局用量在首页）">
-          <Switch checked={app.showTokenUsage} onChange={() => undefined} disabled label="显示 Token 使用情况" />
+        <SettingRow label={t("settings.interaction.showTokenUsage")} desc={t("settings.interaction.showTokenUsageDesc")} source="unavailable" reason={t("settings.interaction.showTokenUsageReason")}>
+          <Switch checked={app.showTokenUsage} onChange={() => undefined} disabled label={t("settings.interaction.showTokenUsage")} />
         </SettingRow>
       </SettingSection>
     </>
@@ -295,30 +311,38 @@ export function InteractionTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
 /* 3. 权限与安全                                                        */
 /* ------------------------------------------------------------------ */
 
-const TOOL_POLICY_ROWS: readonly FutureRowDef[] = [
-  { key: "tool.fileRead", label: "文件读取", desc: "读取工作区文件", control: { type: "select", value: "允许", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.fileWrite", label: "文件写入", desc: "写入 / 编辑工作区文件", control: { type: "select", value: "允许", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.outside", label: "工作区外路径", desc: "读写工作区以外的路径", control: { type: "select", value: "询问", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.bash", label: "Bash / Shell", desc: "执行 Shell 命令", control: { type: "select", value: "询问", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.network", label: "网络请求", desc: "发起 HTTP 请求", control: { type: "select", value: "询问", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.browser", label: "Browser", desc: "受控浏览器操作", control: { type: "select", value: "询问", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.computer", label: "Computer", desc: "桌面 / 系统集成操作", control: { type: "select", value: "禁止", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.github", label: "GitHub", desc: "GitHub 集成调用", control: { type: "select", value: "询问", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.fetch", label: "Fetch / Web Search", desc: "抓取网页与搜索", control: { type: "select", value: "允许", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-  { key: "tool.mcp", label: "MCP / Plugins", desc: "第三方工具调用", control: { type: "select", value: "询问", options: ["允许", "询问", "禁止"] }, reason: "tools.approval 工具级审批未接入 Studio Bridge" },
-];
-
 export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
   const { approvalMode, setApprovalMode } = ctl;
+
+  const toolPolicyOptions: ReadonlyArray<readonly [string, string]> = [
+    ["允许", t("settings.permissions.allow")],
+    ["询问", t("settings.permissions.ask")],
+    ["禁止", t("settings.permissions.deny")],
+  ];
+
+  const toolPolicyRows: readonly FutureRowDef[] = [
+    { key: "tool.fileRead", label: t("settings.permissions.toolFileRead"), desc: t("settings.permissions.toolFileReadDesc"), control: { type: "select", value: "允许", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.fileWrite", label: t("settings.permissions.toolFileWrite"), desc: t("settings.permissions.toolFileWriteDesc"), control: { type: "select", value: "允许", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.outside", label: t("settings.permissions.toolOutside"), desc: t("settings.permissions.toolOutsideDesc"), control: { type: "select", value: "询问", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.bash", label: t("settings.permissions.toolBash"), desc: t("settings.permissions.toolBashDesc"), control: { type: "select", value: "询问", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.network", label: t("settings.permissions.toolNetwork"), desc: t("settings.permissions.toolNetworkDesc"), control: { type: "select", value: "询问", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.browser", label: t("settings.permissions.toolBrowser"), desc: t("settings.permissions.toolBrowserDesc"), control: { type: "select", value: "询问", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.computer", label: t("settings.permissions.toolComputer"), desc: t("settings.permissions.toolComputerDesc"), control: { type: "select", value: "禁止", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.github", label: t("settings.permissions.toolGithub"), desc: t("settings.permissions.toolGithubDesc"), control: { type: "select", value: "询问", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.fetch", label: t("settings.permissions.toolFetch"), desc: t("settings.permissions.toolFetchDesc"), control: { type: "select", value: "允许", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+    { key: "tool.mcp", label: t("settings.permissions.toolMcp"), desc: t("settings.permissions.toolMcpDesc"), control: { type: "select", value: "询问", options: toolPolicyOptions }, reason: t("settings.permissions.toolPolicyReason") },
+  ];
+
   return (
     <>
-      <TabHeader title="权限与安全" desc="默认审批模式、工具级审批策略与安全规则。能力启停（Skills / Plugins / MCP）在「能力中心」管理，这里只管调用时如何审批。" />
-      <SettingSection title="默认审批模式" desc="OMP 授权语义：活动 Runtime 持久化到全局配置，其余驻留会话收到非持久覆盖。">
+      <TabHeader title={t("settings.permissions.title")} desc={t("settings.permissions.desc")} />
+      <SettingSection title={t("settings.permissions.sectionDefaultMode")} desc={t("settings.permissions.sectionDefaultModeDesc")}>
         <SettingRow
-          label="审批模式"
-          desc="Always ask 只自动允许只读操作；Write 额外自动允许工作区写入；Yolo 自动允许读、写、执行"
+          label={t("settings.permissions.approvalMode")}
+          desc={t("settings.permissions.approvalModeDesc")}
           source={approvalMode === undefined ? "unavailable" : "runtime"}
-          reason="当前值来自运行时会话快照（override 层优先）；无 Runtime 时不可写"
+          reason={t("settings.permissions.approvalModeReason")}
         >
           <select
             className={`select${approvalMode === "yolo" ? " danger" : ""}`}
@@ -329,31 +353,73 @@ export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
               if (mode === approvalMode) return;
               setApprovalMode(mode);
             }}
-            aria-label="审批模式"
+            aria-label={t("settings.permissions.approvalMode")}
           >
-            {approvalMode === undefined ? <option value="" disabled>无 Runtime</option> : null}
+            {approvalMode === undefined ? <option value="" disabled>{t("settings.permissions.noRuntime")}</option> : null}
             <option value="always-ask">Always ask</option>
             <option value="write">Write</option>
             <option value="yolo">Yolo</option>
           </select>
         </SettingRow>
       </SettingSection>
-      <SettingSection title="工具级策略" desc="每类工具的调用审批：允许 / 询问 / 禁止。">
-        <FutureRows demo={demo} rows={TOOL_POLICY_ROWS} />
+      <SettingSection title={t("settings.permissions.sectionToolPolicy")} desc={t("settings.permissions.sectionToolPolicyDesc")}>
+        <FutureRows demo={demo} rows={toolPolicyRows} />
       </SettingSection>
-      <SettingSection title="安全规则">
+      <SettingSection title={t("settings.permissions.sectionSecurityRules")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "security.outside", label: "工作区外访问策略", desc: "默认如何处理工作区外路径", control: { type: "select", value: "每次询问", options: ["每次询问", "始终允许", "始终禁止"] }, reason: "路径审批规则未接入 Studio Bridge" },
-            { key: "security.bashRules", label: "Bash 命令拦截规则", desc: "按命令模式允许 / 拦截", control: { type: "select", value: "默认规则集", options: ["默认规则集", "严格", "关闭"] }, reason: "tools.bashApprovalRules 未接入 Studio Bridge" },
+            {
+              key: "security.outside",
+              label: t("settings.permissions.securityOutside"),
+              desc: t("settings.permissions.securityOutsideDesc"),
+              control: {
+                type: "select",
+                value: "每次询问",
+                options: [
+                  ["每次询问", t("settings.permissions.askEachTime")],
+                  ["始终允许", t("settings.permissions.alwaysAllow")],
+                  ["始终禁止", t("settings.permissions.alwaysDeny")],
+                ],
+              },
+              reason: t("settings.permissions.securityOutsideReason"),
+            },
+            {
+              key: "security.bashRules",
+              label: t("settings.permissions.bashRules"),
+              desc: t("settings.permissions.bashRulesDesc"),
+              control: {
+                type: "select",
+                value: "默认规则集",
+                options: [
+                  ["默认规则集", t("settings.permissions.rulesDefault")],
+                  ["严格", t("settings.permissions.rulesStrict")],
+                  ["关闭", t("settings.permissions.rulesOff")],
+                ],
+              },
+              reason: t("settings.permissions.bashRulesReason"),
+            },
           ]}
         />
-        <SettingRow label="始终允许 / 始终禁止规则" desc="跨会话的授权与拒绝规则表" source="unavailable" reason="「始终允许」规则读写不在公共 contract 中">
-          <button type="button" className="btn small outline" disabled data-tip="管理规则（暂未实现）">管理规则</button>
+        <SettingRow
+          label={t("settings.permissions.ruleTableLabel")}
+          desc={t("settings.permissions.ruleTableDesc")}
+          source="unavailable"
+          reason={t("settings.permissions.ruleTableReason")}
+        >
+          <button type="button" className="btn small outline" disabled data-tip={`${t("settings.permissions.manageRulesBtn")}（${t("common.notImplemented")}）`}>
+            {t("settings.permissions.manageRulesBtn")}
+          </button>
         </SettingRow>
-        <SettingRow label="清除授权规则" desc="一次性清除已积累的授权" source="unavailable" reason="清除授权规则不在公共 contract 中">
-          <button type="button" className="btn small danger" disabled data-tip="清除（暂未实现）">清除全部</button>
+        <SettingRow
+          label={t("settings.permissions.clearRulesLabel")}
+          desc={t("settings.permissions.clearRulesDesc")}
+          source="unavailable"
+          reason={t("settings.permissions.clearRulesReason")}
+        >
+          <button type="button" className="btn small danger" disabled data-tip={`${t("settings.permissions.clearAllBtn")}（${t("common.notImplemented")}）`}>
+            {t("settings.permissions.clearAllBtn")}
+          </button>
         </SettingRow>
       </SettingSection>
     </>
@@ -365,42 +431,43 @@ export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
 /* ------------------------------------------------------------------ */
 
 export function ContextTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
   return (
     <>
-      <TabHeader title="上下文与记忆" desc="上下文压缩、工作区上下文与记忆后端。会话列表、归档与导出在「会话历史」页。" />
-      <SettingSection title="上下文压缩">
+      <TabHeader title={t("settings.context.title")} desc={t("settings.context.desc")} />
+      <SettingSection title={t("settings.context.sectionCompaction")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "compact.auto", label: "自动 Compact", desc: "达到阈值时自动压缩上下文", control: { type: "toggle", on: true }, reason: R_COMPACTION },
-            { key: "compact.strategy", label: "Compact 策略", desc: "压缩算法（OMP compaction.strategy）", control: { type: "select", value: "Snapcompact", options: ["Context-full", "Handoff", "Shake", "Snapcompact", "Off"] }, reason: R_COMPACTION },
-            { key: "compact.threshold", label: "Compact 阈值", desc: "Context 使用比例达到该值时触发", control: { type: "select", value: "80%", options: ["默认", "70%", "80%", "90%"] }, reason: R_COMPACTION },
-            { key: "compact.midTurn", label: "Turn 中途 Compact", desc: "允许在工具循环中间压缩", control: { type: "toggle", on: false }, reason: R_COMPACTION },
-            { key: "compact.idle", label: "空闲时 Compact", desc: "会话空闲时后台压缩", control: { type: "toggle", on: true }, reason: R_COMPACTION },
-            { key: "compact.promote", label: "溢出时提升上下文", desc: "Context 满时切换到更大上下文的模型", control: { type: "toggle", on: false }, reason: R_COMPACTION },
-            { key: "compact.pruneReads", label: "清理旧读取结果", desc: "移除已被新读取替代的旧结果", control: { type: "toggle", on: true }, reason: R_COMPACTION },
+            { key: "compact.auto", label: t("settings.context.compactAuto"), desc: t("settings.context.compactAutoDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.compaction") },
+            { key: "compact.strategy", label: t("settings.context.compactStrategy"), desc: t("settings.context.compactStrategyDesc"), control: { type: "select", value: "Snapcompact", options: [["Context-full", "Context-full"], ["Handoff", "Handoff"], ["Shake", "Shake"], ["Snapcompact", "Snapcompact"], ["Off", "Off"]] }, reason: t("settings.reasons.compaction") },
+            { key: "compact.threshold", label: t("settings.context.compactThreshold"), desc: t("settings.context.compactThresholdDesc"), control: { type: "select", value: "80%", options: [["默认", t("settings.context.thresholdDefault")], ["70%", "70%"], ["80%", "80%"], ["90%", "90%"]] }, reason: t("settings.reasons.compaction") },
+            { key: "compact.midTurn", label: t("settings.context.compactMidTurn"), desc: t("settings.context.compactMidTurnDesc"), control: { type: "toggle", on: false }, reason: t("settings.reasons.compaction") },
+            { key: "compact.idle", label: t("settings.context.compactIdle"), desc: t("settings.context.compactIdleDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.compaction") },
+            { key: "compact.promote", label: t("settings.context.compactPromote"), desc: t("settings.context.compactPromoteDesc"), control: { type: "toggle", on: false }, reason: t("settings.reasons.compaction") },
+            { key: "compact.pruneReads", label: t("settings.context.compactPruneReads"), desc: t("settings.context.compactPruneReadsDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.compaction") },
           ]}
         />
       </SettingSection>
-      <SettingSection title="工作区上下文">
+      <SettingSection title={t("settings.context.sectionWorkspace")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "workspace.extraDirs", label: "附加工作区目录", desc: "工作区之外允许引用的目录", control: { type: "select", value: "无", options: ["无", "已配置 2 个目录"] }, reason: "附加目录配置未接入 Studio Bridge" },
-            { key: "workspace.tree", label: "工作区树加入上下文", desc: "把目录结构提供给助手", control: { type: "toggle", on: true }, reason: "工作区上下文配置未接入 Studio Bridge" },
-            { key: "workspace.restore", label: "自动恢复项目上下文", desc: "打开项目时恢复上次的项目上下文", control: { type: "toggle", on: true }, reason: "工作区上下文配置未接入 Studio Bridge" },
+            { key: "workspace.extraDirs", label: t("settings.context.workspaceExtraDirs"), desc: t("settings.context.workspaceExtraDirsDesc"), control: { type: "select", value: "已配置 2 个目录", options: [["无", t("settings.context.extraDirsNone")], ["已配置 2 个目录", t("settings.context.extraDirsConfigured")]] }, reason: t("settings.context.workspaceExtraDirsReason") },
+            { key: "workspace.tree", label: t("settings.context.workspaceTree"), desc: t("settings.context.workspaceTreeDesc"), control: { type: "toggle", on: true }, reason: t("settings.context.workspaceTreeReason") },
+            { key: "workspace.restore", label: t("settings.context.workspaceRestore"), desc: t("settings.context.workspaceRestoreDesc"), control: { type: "toggle", on: true }, reason: t("settings.context.workspaceRestoreReason") },
           ]}
         />
       </SettingSection>
-      <SettingSection title="记忆">
+      <SettingSection title={t("settings.context.sectionMemory")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "memory.backend", label: "记忆后端", desc: "Off / Local / Hindsight / Mnemopi（OMP memory.backend）", control: { type: "select", value: "Local", options: ["Off", "Local", "Hindsight", "Mnemopi"] }, reason: R_MEMORY },
-            { key: "memory.recall", label: "自动召回记忆", desc: "相关记忆自动注入上下文", control: { type: "toggle", on: true }, reason: R_MEMORY },
-            { key: "memory.retain", label: "自动保留经验", desc: "会话结束后自动沉淀经验", control: { type: "toggle", on: false }, reason: R_MEMORY },
-            { key: "memory.injectLimit", label: "记忆注入上限", desc: "单次注入的记忆条数", control: { type: "select", value: "8 条", options: ["4 条", "8 条", "16 条"] }, reason: R_MEMORY },
-            { key: "memory.debug", label: "记忆调试信息", desc: "显示召回命中与注入明细", control: { type: "toggle", on: false }, reason: R_MEMORY },
+            { key: "memory.backend", label: t("settings.context.memoryBackend"), desc: t("settings.context.memoryBackendDesc"), control: { type: "select", value: "Local", options: [["Off", "Off"], ["Local", "Local"], ["Hindsight", "Hindsight"], ["Mnemopi", "Mnemopi"]] }, reason: t("settings.reasons.memory") },
+            { key: "memory.recall", label: t("settings.context.memoryRecall"), desc: t("settings.context.memoryRecallDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.memory") },
+            { key: "memory.retain", label: t("settings.context.memoryRetain"), desc: t("settings.context.memoryRetainDesc"), control: { type: "toggle", on: false }, reason: t("settings.reasons.memory") },
+            { key: "memory.injectLimit", label: t("settings.context.memoryInjectLimit"), desc: t("settings.context.memoryInjectLimitDesc"), control: { type: "select", value: "8 条", options: [["4 条", t("settings.context.count4")], ["8 条", t("settings.interaction.count8")], ["16 条", t("settings.context.count16")]] }, reason: t("settings.reasons.memory") },
+            { key: "memory.debug", label: t("settings.context.memoryDebug"), desc: t("settings.context.memoryDebugDesc"), control: { type: "toggle", on: false }, reason: t("settings.reasons.memory") },
           ]}
         />
       </SettingSection>
@@ -413,55 +480,56 @@ export function ContextTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
 /* ------------------------------------------------------------------ */
 
 export function FilesTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
   return (
     <>
-      <TabHeader title="文件与终端" desc="文件编辑、读取、LSP 与 Shell 行为。Browser、MCP、Skills、Plugins 的目录与启停在「能力中心」。" />
-      <SettingSection title="文件编辑">
+      <TabHeader title={t("settings.files.title")} desc={t("settings.files.desc")} />
+      <SettingSection title={t("settings.files.sectionEdit")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "edit.mode", label: "Edit Mode", desc: "Replace / Patch / Hashline / Apply Patch（OMP edit.mode）", control: { type: "select", value: "Hashline", options: ["Replace", "Patch", "Hashline", "Apply Patch"] }, reason: R_EDIT },
-            { key: "edit.fuzzy", label: "模糊匹配", desc: "编辑定位时允许模糊匹配", control: { type: "toggle", on: true }, reason: R_EDIT },
-            { key: "edit.fuzzyThreshold", label: "模糊匹配阈值", desc: "匹配的宽松程度", control: { type: "select", value: "默认", options: ["默认", "宽松", "严格"] }, reason: R_EDIT },
-            { key: "edit.guardGenerated", label: "阻止修改自动生成文件", desc: "锁定文件（lockfiles 等）默认拦截", control: { type: "toggle", on: true }, reason: R_EDIT },
-            { key: "edit.seenLine", label: "Seen-Line Guard", desc: "只允许编辑已读过的行", control: { type: "toggle", on: true }, reason: R_EDIT },
+            { key: "edit.mode", label: t("settings.files.editMode"), desc: t("settings.files.editModeDesc"), control: { type: "select", value: "Hashline", options: [["Replace", "Replace"], ["Patch", "Patch"], ["Hashline", "Hashline"], ["Apply Patch", "Apply Patch"]] }, reason: t("settings.reasons.edit") },
+            { key: "edit.fuzzy", label: t("settings.files.editFuzzy"), desc: t("settings.files.editFuzzyDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.edit") },
+            { key: "edit.fuzzyThreshold", label: t("settings.files.editFuzzyThreshold"), desc: t("settings.files.editFuzzyThresholdDesc"), control: { type: "select", value: "默认", options: [["默认", t("settings.context.thresholdDefault")], ["宽松", t("settings.files.thresholdLenient")], ["严格", t("settings.files.thresholdStrict")]] }, reason: t("settings.reasons.edit") },
+            { key: "edit.guardGenerated", label: t("settings.files.editGuardGenerated"), desc: t("settings.files.editGuardGeneratedDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.edit") },
+            { key: "edit.seenLine", label: t("settings.files.editSeenLine"), desc: t("settings.files.editSeenLineDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.edit") },
           ]}
         />
       </SettingSection>
-      <SettingSection title="文件读取">
+      <SettingSection title={t("settings.files.sectionRead")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "read.lineNumbers", label: "默认显示行号", desc: "读取结果的行号显示", control: { type: "toggle", on: true }, reason: "读取呈现为 Runtime 行为，未接入 settings contract" },
-            { key: "read.limit", label: "单次读取上限", desc: "一次读取的最大行数", control: { type: "select", value: "2000 行", options: ["500 行", "1000 行", "2000 行"] }, reason: "读取呈现为 Runtime 行为，未接入 settings contract" },
-            { key: "read.summary", label: "自动生成读取摘要", desc: "长文件读取时生成摘要", control: { type: "toggle", on: true }, reason: "读取呈现为 Runtime 行为，未接入 settings contract" },
-            { key: "read.markdown", label: "Markdown 渲染", desc: "Markdown 文件读取后的渲染方式", control: { type: "select", value: "渲染", options: ["渲染", "纯文本"] }, reason: "读取呈现为 Runtime 行为，未接入 settings contract" },
-            { key: "read.previewLength", label: "工具结果预览长度", desc: "工具卡片里结果摘要的长度", control: { type: "select", value: "标准", options: ["简短", "标准", "加长"] }, reason: "读取呈现为 Runtime 行为，未接入 settings contract" },
+            { key: "read.lineNumbers", label: t("settings.files.readLineNumbers"), desc: t("settings.files.readLineNumbersDesc"), control: { type: "toggle", on: true }, reason: t("settings.files.readReason") },
+            { key: "read.limit", label: t("settings.files.readLimit"), desc: t("settings.files.readLimitDesc"), control: { type: "select", value: "2000 行", options: [["500 行", t("settings.files.lines500")], ["1000 行", t("settings.files.lines1000")], ["2000 行", t("settings.files.lines2000")]] }, reason: t("settings.files.readReason") },
+            { key: "read.summary", label: t("settings.files.readSummary"), desc: t("settings.files.readSummaryDesc"), control: { type: "toggle", on: true }, reason: t("settings.files.readReason") },
+            { key: "read.markdown", label: t("settings.files.readMarkdown"), desc: t("settings.files.readMarkdownDesc"), control: { type: "select", value: "渲染", options: [["渲染", t("settings.files.readRender")], ["纯文本", t("settings.files.readPlainText")]] }, reason: t("settings.files.readReason") },
+            { key: "read.previewLength", label: t("settings.files.readPreviewLength"), desc: t("settings.files.readPreviewLengthDesc"), control: { type: "select", value: "标准", options: [["简短", t("settings.files.previewShort")], ["标准", t("settings.files.previewStandard")], ["加长", t("settings.files.previewLong")]] }, reason: t("settings.files.readReason") },
           ]}
         />
       </SettingSection>
-      <SettingSection title="LSP">
+      <SettingSection title={t("settings.files.sectionLsp")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "lsp.enabled", label: "启用 LSP", desc: "语言服务器集成", control: { type: "toggle", on: true }, reason: R_LSP },
-            { key: "lsp.lazy", label: "延迟启动 LSP", desc: "首次需要时再启动语言服务器", control: { type: "toggle", on: true }, reason: R_LSP },
-            { key: "lsp.shared", label: "子代理共享 LSP", desc: "子任务复用主会话的语言服务器", control: { type: "toggle", on: true }, reason: R_LSP },
-            { key: "lsp.formatOnWrite", label: "写入时格式化", desc: "文件写入后自动格式化", control: { type: "toggle", on: false }, reason: R_LSP },
-            { key: "lsp.diagOnWrite", label: "写入时诊断", desc: "写入后立即跑诊断", control: { type: "toggle", on: true }, reason: R_LSP },
-            { key: "lsp.diagOnEdit", label: "编辑时诊断", desc: "编辑过程中增量诊断", control: { type: "toggle", on: true }, reason: R_LSP },
+            { key: "lsp.enabled", label: t("settings.files.lspEnabled"), desc: t("settings.files.lspEnabledDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.lsp") },
+            { key: "lsp.lazy", label: t("settings.files.lspLazy"), desc: t("settings.files.lspLazyDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.lsp") },
+            { key: "lsp.shared", label: t("settings.files.lspShared"), desc: t("settings.files.lspSharedDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.lsp") },
+            { key: "lsp.formatOnWrite", label: t("settings.files.lspFormatOnWrite"), desc: t("settings.files.lspFormatOnWriteDesc"), control: { type: "toggle", on: false }, reason: t("settings.reasons.lsp") },
+            { key: "lsp.diagOnWrite", label: t("settings.files.lspDiagOnWrite"), desc: t("settings.files.lspDiagOnWriteDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.lsp") },
+            { key: "lsp.diagOnEdit", label: t("settings.files.lspDiagOnEdit"), desc: t("settings.files.lspDiagOnEditDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.lsp") },
           ]}
         />
       </SettingSection>
-      <SettingSection title="Shell">
+      <SettingSection title={t("settings.files.sectionShell")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "shell.enabled", label: "启用 Bash", desc: "允许执行 Shell 命令", control: { type: "toggle", on: true }, reason: R_SHELL },
-            { key: "shell.longCommand", label: "长命令自动转后台任务", desc: "超时命令转后台并轮询", control: { type: "toggle", on: true }, reason: R_SHELL },
-            { key: "shell.direnv", label: "自动加载 direnv", desc: "进入目录时加载 direnv 环境", control: { type: "toggle", on: true }, reason: R_SHELL },
-            { key: "shell.minimizer", label: "Shell Minimizer", desc: "压缩长命令输出", control: { type: "toggle", on: true }, reason: R_SHELL },
-            { key: "shell.runtimes", label: "Python / JavaScript / Ruby / Julia", desc: "内联执行环境的解释器选择", control: { type: "select", value: "自动检测", options: ["自动检测", "独立环境", "关闭"] }, reason: R_SHELL },
+            { key: "shell.enabled", label: t("settings.files.shellEnabled"), desc: t("settings.files.shellEnabledDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.shell") },
+            { key: "shell.longCommand", label: t("settings.files.shellLongCommand"), desc: t("settings.files.shellLongCommandDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.shell") },
+            { key: "shell.direnv", label: t("settings.files.shellDirenv"), desc: t("settings.files.shellDirenvDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.shell") },
+            { key: "shell.minimizer", label: t("settings.files.shellMinimizer"), desc: t("settings.files.shellMinimizerDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.shell") },
+            { key: "shell.runtimes", label: t("settings.files.shellRuntimes"), desc: t("settings.files.shellRuntimesDesc"), control: { type: "select", value: "自动检测", options: [["自动检测", t("settings.files.runtimesAuto")], ["独立环境", t("settings.files.runtimesIsolated")], ["关闭", t("settings.files.runtimesDisabled")]] }, reason: t("settings.reasons.shell") },
           ]}
         />
       </SettingSection>
@@ -474,44 +542,45 @@ export function FilesTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
 /* ------------------------------------------------------------------ */
 
 export function TasksTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
   return (
     <>
-      <TabHeader title="任务与执行" desc="工作模式默认值、任务执行与子任务运行约束。子代理定义、工具与模型分配在「模型配置 · 子代理」。" />
-      <SettingSection title="工作模式">
+      <TabHeader title={t("settings.tasks.title")} desc={t("settings.tasks.desc")} />
+      <SettingSection title={t("settings.tasks.sectionWorkMode")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "plan.enabled", label: "启用 Plan 模式", desc: "允许进入 Plan 模式", control: { type: "toggle", on: true }, reason: "plan.enabled 为 Runtime 配置；会话内 Plan 命令已可用" },
-            { key: "plan.default", label: "新会话默认进入 Plan 模式", desc: "新会话的初始模式", control: { type: "toggle", on: false }, reason: "新会话默认模式未接入 settings contract" },
-            { key: "goal.enabled", label: "启用 Goal 模式", desc: "允许创建 Goal", control: { type: "toggle", on: true }, reason: "goal.enabled 为 Runtime 配置；会话内 Goal 命令已可用" },
-            { key: "goal.status", label: "显示 Goal 状态", desc: "工作台展示 Goal 进度", control: { type: "toggle", on: true }, reason: "Goal 状态呈现未接入 settings contract" },
-            { key: "goal.autoplay", label: "Goal 自动继续策略", desc: "Goal 阶段结束后的动作", control: { type: "select", value: "手动继续", options: ["手动继续", "自动继续"] }, reason: "Goal 自动继续未接入 settings contract" },
+            { key: "plan.enabled", label: t("settings.tasks.planEnabled"), desc: t("settings.tasks.planEnabledDesc"), control: { type: "toggle", on: true }, reason: t("settings.tasks.planEnabledReason") },
+            { key: "plan.default", label: t("settings.tasks.planDefault"), desc: t("settings.tasks.planDefaultDesc"), control: { type: "toggle", on: false }, reason: t("settings.tasks.planDefaultReason") },
+            { key: "goal.enabled", label: t("settings.tasks.goalEnabled"), desc: t("settings.tasks.goalEnabledDesc"), control: { type: "toggle", on: true }, reason: t("settings.tasks.goalEnabledReason") },
+            { key: "goal.status", label: t("settings.tasks.goalStatus"), desc: t("settings.tasks.goalStatusDesc"), control: { type: "toggle", on: true }, reason: t("settings.tasks.goalStatusReason") },
+            { key: "goal.autoplay", label: t("settings.tasks.goalAutoplay"), desc: t("settings.tasks.goalAutoplayDesc"), control: { type: "select", value: "自动继续", options: [["手动继续", t("settings.tasks.continueManual")], ["自动继续", t("settings.tasks.continueAuto")]] }, reason: t("settings.tasks.goalAutoplayReason") },
           ]}
         />
       </SettingSection>
-      <SettingSection title="任务执行">
+      <SettingSection title={t("settings.tasks.sectionExecution")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "loop.mode", label: "Loop 模式", desc: "Prompt / Compact / Reset（OMP loop.mode）", control: { type: "select", value: "Prompt", options: ["Prompt", "Compact", "Reset"] }, reason: "loop.mode 为 Runtime 配置；会话内 Loop 命令已可用" },
-            { key: "exec.async", label: "异步任务", desc: "长任务异步执行", control: { type: "toggle", on: true }, reason: R_TASK },
-            { key: "exec.toolTimeout", label: "工具最大超时时间", desc: "单次工具调用的超时", control: { type: "select", value: "10 分钟", options: ["5 分钟", "10 分钟", "30 分钟"] }, reason: R_TASK },
-            { key: "exec.maxConcurrency", label: "最大并发任务数", desc: "同时运行的任务上限", control: { type: "select", value: "4", options: ["2", "4", "8"] }, reason: R_TASK },
-            { key: "exec.polling", label: "后台任务轮询策略", desc: "后台任务的轮询节奏", control: { type: "select", value: "自适应", options: ["自适应", "固定间隔"] }, reason: R_TASK },
+            { key: "loop.mode", label: t("settings.tasks.loopMode"), desc: t("settings.tasks.loopModeDesc"), control: { type: "select", value: "Prompt", options: [["Prompt", "Prompt"], ["Compact", "Compact"], ["Reset", "Reset"]] }, reason: t("settings.tasks.loopModeReason") },
+            { key: "exec.async", label: t("settings.tasks.execAsync"), desc: t("settings.tasks.execAsyncDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.task") },
+            { key: "exec.toolTimeout", label: t("settings.tasks.execToolTimeout"), desc: t("settings.tasks.execToolTimeoutDesc"), control: { type: "select", value: "10 分钟", options: [["5 分钟", t("settings.tasks.mins5")], ["10 分钟", t("settings.tasks.mins10")], ["30 分钟", t("settings.tasks.mins30")]] }, reason: t("settings.reasons.task") },
+            { key: "exec.maxConcurrency", label: t("settings.tasks.execMaxConcurrency"), desc: t("settings.tasks.execMaxConcurrencyDesc"), control: { type: "select", value: "4", options: [["2", "2"], ["4", "4"], ["8", "8"]] }, reason: t("settings.reasons.task") },
+            { key: "exec.polling", label: t("settings.tasks.execPolling"), desc: t("settings.tasks.execPollingDesc"), control: { type: "select", value: "自适应", options: [["自适应", t("settings.tasks.pollingAdaptive")], ["固定间隔", t("settings.tasks.pollingFixed")]] }, reason: t("settings.reasons.task") },
           ]}
         />
       </SettingSection>
-      <SettingSection title="子任务运行约束" desc="只放全局运行限制；Agent 定义、模型覆盖与系统提示在「模型配置 · 子代理」。">
+      <SettingSection title={t("settings.tasks.sectionSubtaskLimits")} desc={t("settings.tasks.sectionSubtaskLimitsDesc")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "task.maxConcurrency", label: "子任务最大并发数", desc: "同时运行的子任务上限（OMP task.maxConcurrency）", control: { type: "select", value: "8", options: ["4", "8", "16"] }, reason: R_TASK },
-            { key: "task.maxDepth", label: "最大递归深度", desc: "子任务嵌套上限（task.maxRecursionDepth）", control: { type: "select", value: "3", options: ["2", "3", "5"] }, reason: R_TASK },
-            { key: "task.maxRuntime", label: "单个子任务最大运行时长", desc: "超时自动终止（task.maxRuntimeMs）", control: { type: "select", value: "30 分钟", options: ["10 分钟", "30 分钟", "不限"] }, reason: R_TASK },
-            { key: "task.budget", label: "子任务请求预算", desc: "单个子任务的请求上限（task.softRequestBudget）", control: { type: "select", value: "默认", options: ["默认", "1000 次", "500 次"] }, reason: R_TASK },
-            { key: "task.preferDelegate", label: "优先委派给子代理", desc: "可拆分任务优先派发给子代理", control: { type: "toggle", on: true }, reason: R_TASK },
-            { key: "task.isolation", label: "子任务隔离模式", desc: "共享工作区或隔离副本", control: { type: "select", value: "共享工作区", options: ["共享工作区", "隔离副本"] }, reason: R_TASK },
-            { key: "task.merge", label: "隔离修改合并方式", desc: "隔离副本的改动如何回来", control: { type: "select", value: "Patch", options: ["Patch", "Branch"] }, reason: R_TASK },
+            { key: "task.maxConcurrency", label: t("settings.tasks.taskMaxConcurrency"), desc: t("settings.tasks.taskMaxConcurrencyDesc"), control: { type: "select", value: "8", options: [["4", "4"], ["8", "8"], ["16", "16"]] }, reason: t("settings.reasons.task") },
+            { key: "task.maxDepth", label: t("settings.tasks.taskMaxDepth"), desc: t("settings.tasks.taskMaxDepthDesc"), control: { type: "select", value: "3", options: [["2", "2"], ["3", "3"], ["5", "5"]] }, reason: t("settings.reasons.task") },
+            { key: "task.maxRuntime", label: t("settings.tasks.taskMaxRuntime"), desc: t("settings.tasks.taskMaxRuntimeDesc"), control: { type: "select", value: "30 分钟", options: [["10 分钟", t("settings.tasks.mins10")], ["30 分钟", t("settings.tasks.mins30")], ["不限", t("settings.tasks.runtimeUnlimited")]] }, reason: t("settings.reasons.task") },
+            { key: "task.budget", label: t("settings.tasks.taskBudget"), desc: t("settings.tasks.taskBudgetDesc"), control: { type: "select", value: "默认", options: [["默认", t("settings.context.thresholdDefault")], ["1000 次", t("settings.tasks.budget1000")], ["500 次", t("settings.tasks.budget500")]] }, reason: t("settings.reasons.task") },
+            { key: "task.preferDelegate", label: t("settings.tasks.taskPreferDelegate"), desc: t("settings.tasks.taskPreferDelegateDesc"), control: { type: "toggle", on: true }, reason: t("settings.reasons.task") },
+            { key: "task.isolation", label: t("settings.tasks.taskIsolation"), desc: t("settings.tasks.taskIsolationDesc"), control: { type: "select", value: "共享工作区", options: [["共享工作区", t("settings.tasks.isolationShared")], ["隔离副本", t("settings.tasks.isolationCopy")]] }, reason: t("settings.reasons.task") },
+            { key: "task.merge", label: t("settings.tasks.taskMerge"), desc: t("settings.tasks.taskMergeDesc"), control: { type: "select", value: "Patch", options: [["Patch", "Patch"], ["Branch", "Branch"]] }, reason: t("settings.reasons.task") },
           ]}
         />
       </SettingSection>
@@ -523,45 +592,109 @@ export function TasksTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
 /* 7. 高级                                                              */
 /* ------------------------------------------------------------------ */
 
-const CONFIG_LAYERS = ["用户配置", "当前项目配置", "CLI Overlay", "Runtime Override", "当前生效值"] as const;
-
 export function AdvancedTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
+
+  const configLayers: ReadonlyArray<readonly [string, string]> = [
+    ["user", t("settings.advanced.layerUser")],
+    ["project", t("settings.advanced.layerProject")],
+    ["cli", t("settings.advanced.layerCli")],
+    ["override", t("settings.advanced.layerOverride")],
+    ["effective", t("settings.advanced.layerEffective")],
+  ];
+
   return (
     <>
-      <TabHeader title="高级" desc="配置层级、配置文件与高级行为。OMP 路径、RPC Endpoint、Bridge 管理与日志在「诊断中心」。" />
-      <SettingSection title="配置层级" desc="只读展示各层配置与当前生效值（默认 < 用户 < 项目 < 覆盖）。">
+      <TabHeader title={t("settings.advanced.title")} desc={t("settings.advanced.desc")} />
+      <SettingSection title={t("settings.advanced.sectionConfigLayers")} desc={t("settings.advanced.sectionConfigLayersDesc")}>
         <div className="config-layer-list">
-          {CONFIG_LAYERS.map((layer) => (
-            <div key={layer} className="config-layer-row">
-              <span>{layer}</span>
-              <span className="small muted">{demo ? "演示值" : "尚未接入"}</span>
+          {configLayers.map(([key, label]) => (
+            <div key={key} className="config-layer-row">
+              <span>{label}</span>
+              <span className="small muted">{demo ? t("settings.advanced.demoValue") : t("settings.advanced.notConnected")}</span>
             </div>
           ))}
         </div>
-        <p className="small muted set-note">{demo ? "预览模式：配置层级为演示数据，不读取真实配置。" : "依赖通用 settings 读模型（含 effective value + source），Phase 2 接入。" }</p>
+        <p className="small muted set-note">
+          {demo ? t("settings.advanced.layerNoteDemo") : t("settings.advanced.layerNoteReal")}
+        </p>
       </SettingSection>
-      <SettingSection title="配置文件">
-        <SettingRow label="打开用户配置 / 项目配置" desc="在编辑器中打开 config.yml" source="unavailable" reason="配置目录路径已脱敏，不在公共 contract 中">
-          <button type="button" className="btn small outline" disabled data-tip="打开（暂未实现）">打开</button>
+      <SettingSection title={t("settings.advanced.sectionConfigFiles")}>
+        <SettingRow
+          label={t("settings.advanced.openConfig")}
+          desc={t("settings.advanced.openConfigDesc")}
+          source="unavailable"
+          reason={t("settings.advanced.openConfigReason")}
+        >
+          <button type="button" className="btn small outline" disabled data-tip={`${t("settings.advanced.openBtn")}（${t("common.notImplemented")}）`}>
+            {t("settings.advanced.openBtn")}
+          </button>
         </SettingRow>
-        <SettingRow label="查看脱敏配置 / 导出" desc="导出当前生效配置（脱敏）" source="unavailable" reason="通用配置读取不在公共 contract 中">
-          <button type="button" className="btn small outline" disabled data-tip="导出（暂未实现）">导出</button>
+        <SettingRow
+          label={t("settings.advanced.viewSanitized")}
+          desc={t("settings.advanced.viewSanitizedDesc")}
+          source="unavailable"
+          reason={t("settings.advanced.viewSanitizedReason")}
+        >
+          <button type="button" className="btn small outline" disabled data-tip={`${t("settings.advanced.exportBtn")}（${t("common.notImplemented")}）`}>
+            {t("settings.advanced.exportBtn")}
+          </button>
         </SettingRow>
-        <SettingRow label="恢复默认配置" desc="把用户层配置恢复为默认值" source="unavailable" reason="配置批量恢复不在公共 contract 中">
-          <button type="button" className="btn small danger" disabled data-tip="恢复默认（暂未实现）">恢复默认</button>
+        <SettingRow
+          label={t("settings.advanced.resetDefaults")}
+          desc={t("settings.advanced.resetDefaultsDesc")}
+          source="unavailable"
+          reason={t("settings.advanced.resetDefaultsReason")}
+        >
+          <button type="button" className="btn small danger" disabled data-tip={`${t("settings.advanced.resetDefaultsBtn")}（${t("common.notImplemented")}）`}>
+            {t("settings.advanced.resetDefaultsBtn")}
+          </button>
         </SettingRow>
       </SettingSection>
-      <SettingSection title="高级行为">
+      <SettingSection title={t("settings.advanced.sectionAdvancedBehavior")}>
         <FutureRows
           demo={demo}
           rows={[
-            { key: "advanced.retry", label: "自动重试策略", desc: "失败后的重试方式", control: { type: "select", value: "指数退避", options: ["指数退避", "固定间隔", "关闭"] }, reason: R_SETTINGS },
-            { key: "advanced.retryCount", label: "重试次数", desc: "单次调用的最大重试", control: { type: "select", value: "3", options: ["2", "3", "5"] }, reason: R_SETTINGS },
-            { key: "advanced.loopGuard", label: "工具调用循环保护", desc: "检测重复工具调用循环", control: { type: "toggle", on: true }, reason: R_SETTINGS },
-            { key: "advanced.repeatThreshold", label: "重复工具调用阈值", desc: "相同调用连续出现该次数后告警", control: { type: "select", value: "10", options: ["5", "10", "20"] }, reason: R_SETTINGS },
+            {
+              key: "advanced.retry",
+              label: t("settings.advanced.retryPolicy"),
+              desc: t("settings.advanced.retryPolicyDesc"),
+              control: {
+                type: "select",
+                value: "指数退避",
+                options: [
+                  ["指数退避", t("settings.advanced.retryExponential")],
+                  ["固定间隔", t("settings.advanced.retryFixed")],
+                  ["关闭", t("settings.advanced.retryDisabled")],
+                ],
+              },
+              reason: t("settings.reasons.settingsContract"),
+            },
+            {
+              key: "advanced.retryCount",
+              label: t("settings.advanced.retryCount"),
+              desc: t("settings.advanced.retryCountDesc"),
+              control: { type: "select", value: "3", options: [["2", "2"], ["3", "3"], ["5", "5"]] },
+              reason: t("settings.reasons.settingsContract"),
+            },
+            {
+              key: "advanced.loopGuard",
+              label: t("settings.advanced.loopGuard"),
+              desc: t("settings.advanced.loopGuardDesc"),
+              control: { type: "toggle", on: true },
+              reason: t("settings.reasons.settingsContract"),
+            },
+            {
+              key: "advanced.repeatThreshold",
+              label: t("settings.advanced.repeatThreshold"),
+              desc: t("settings.advanced.repeatThresholdDesc"),
+              control: { type: "select", value: "10", options: [["5", "5"], ["10", "10"], ["20", "20"]] },
+              reason: t("settings.reasons.settingsContract"),
+            },
           ]}
         />
       </SettingSection>
     </>
   );
 }
+

@@ -1,0 +1,814 @@
+/* ==========================================================================
+   OMP Studio — conversation timeline
+   Document-style, single column. NOT chat bubbles.
+
+   Turn boundaries are sticky headers, so a long session reads like a
+   document with chapters rather than an undifferentiated scroll.
+   ========================================================================== */
+
+.timeline {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+  position: relative;
+  padding-bottom: 24px; /* clear the composer so last event is fully visible */
+}
+
+.timeline-inner {
+  max-width: var(--card-max);
+  margin: 0 auto;
+  padding: var(--sp-6) var(--sp-8) var(--sp-10);
+}
+
+/* ---- Turn header (sticky) --------------------------------------------- */
+.turn-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: 28px;
+  margin: var(--sp-8) 0 var(--sp-5);
+  padding: 0 var(--sp-4);
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-xs);
+  user-select: none;
+}
+
+.turn-header:first-child {
+  margin-top: 0;
+}
+
+.turn-header-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: var(--fw-bold);
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.turn-header[data-active="true"] .turn-header-label {
+  color: var(--accent);
+}
+
+.turn-header-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.turn-header-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.turn-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.turn-header:hover .turn-header-actions {
+  opacity: 1;
+}
+
+/* Running indicator on the active turn */
+.turn-header-running {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--run);
+  font-weight: var(--fw-medium);
+}
+
+.turn-header-running .dot {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+/* ---- Timeline entries ------------------------------------------------- */
+.entry {
+  margin-bottom: var(--sp-6);
+  position: relative;
+}
+
+.entry:last-child {
+  margin-bottom: 0;
+}
+
+/* ==========================================================================
+   User message
+   No bubble. A 2px accent rail + quote-block treatment.
+   ========================================================================== */
+
+.msg-user {
+  padding: var(--sp-4) 0 var(--sp-4) var(--sp-5);
+  border-left: 2px solid var(--accent);
+  margin-bottom: var(--sp-6);
+}
+
+.msg-user-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.msg-user-avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  flex-shrink: 0;
+}
+
+.msg-user-name {
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+.msg-user-time {
+  font-family: var(--font-mono);
+}
+
+.msg-user-body {
+  font-size: var(--fs-body);
+  line-height: var(--lh-prose);
+  color: var(--text-primary);
+  max-width: var(--prose-max);
+}
+
+.msg-user-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
+/* ==========================================================================
+   Assistant content — pure document flow
+   ========================================================================== */
+
+.msg-assistant {
+  font-size: var(--fs-body);
+  line-height: var(--lh-prose);
+  color: var(--text-primary);
+  max-width: var(--prose-max);
+}
+
+/* Markdown rendering inside assistant messages */
+.md > * + * {
+  margin-top: var(--sp-5);
+}
+
+.md h1, .md h2, .md h3, .md h4 {
+  font-weight: var(--fw-bold);
+  color: var(--text-primary);
+  line-height: var(--lh-snug);
+  letter-spacing: -0.005em;
+}
+
+.md h1 { font-size: var(--fs-lg); margin-top: var(--sp-8); }
+.md h2 { font-size: var(--fs-lg); margin-top: var(--sp-8); }
+.md h3 { font-size: var(--fs-body); margin-top: var(--sp-6); }
+.md h4 { font-size: var(--fs-body); margin-top: var(--sp-5); }
+
+.md h1:first-child, .md h2:first-child,
+.md h3:first-child, .md h4:first-child {
+  margin-top: 0;
+}
+
+.md p {
+  line-height: var(--lh-prose);
+}
+
+.md ul, .md ol {
+  padding-left: var(--sp-7);
+}
+
+.md ul { list-style: disc; }
+.md ol { list-style: decimal; }
+
+.md li {
+  margin-bottom: var(--sp-2);
+  line-height: var(--lh-prose);
+}
+
+.md li::marker {
+  color: var(--text-tertiary);
+}
+
+.md li > ul, .md li > ol {
+  margin-top: var(--sp-2);
+}
+
+.md strong {
+  font-weight: var(--fw-bold);
+  color: var(--text-primary);
+}
+
+.md em { font-style: italic; }
+
+.md a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-border);
+  text-underline-offset: 2px;
+}
+
+.md a:hover {
+  text-decoration-color: var(--accent);
+}
+
+.md blockquote {
+  padding-left: var(--sp-5);
+  border-left: 2px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+.md hr {
+  height: 1px;
+  background: var(--border-subtle);
+  border: none;
+  margin: var(--sp-7) 0;
+}
+
+/* Inline code — paths, identifiers, commands */
+.md code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  padding: 1.5px 5px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--border-subtle);
+  word-break: break-word;
+}
+
+/* Code blocks */
+.md pre {
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  padding: var(--sp-5);
+  overflow-x: auto;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-code);
+}
+
+.md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Code block with a filename header */
+.code-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-inset);
+}
+
+.code-block-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 28px;
+  padding: 0 var(--sp-4);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.code-block-lang {
+  margin-left: auto;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.code-block-actions {
+  display: flex;
+  gap: var(--sp-1);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.code-block:hover .code-block-actions {
+  opacity: 1;
+}
+
+.code-block pre {
+  border: none;
+  border-radius: 0;
+  margin: 0;
+}
+
+/* Tables in markdown */
+.md table {
+  width: 100%;
+  font-size: var(--fs-sm);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.md th {
+  background: var(--bg-inset);
+  padding: var(--sp-3) var(--sp-4);
+  text-align: left;
+  font-weight: var(--fw-semi);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.md td {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.md tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---- Streaming cursor -------------------------------------------------- */
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: cursorPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes cursorPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+/* ==========================================================================
+   Thinking block — collapsed to one line by default
+   ========================================================================== */
+
+.thinking {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+  max-width: var(--prose-max);
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 30px;
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+  user-select: none;
+}
+
+.thinking-header:hover {
+  background: var(--bg-hover);
+}
+
+.thinking-header svg:first-child {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.thinking-label {
+  font-weight: var(--fw-medium);
+}
+
+.thinking-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.thinking-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease);
+  flex-shrink: 0;
+}
+
+.thinking[data-expanded="true"] .thinking-chevron {
+  transform: rotate(90deg);
+}
+
+.thinking-body {
+  display: none;
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-prose);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+.thinking[data-expanded="true"] .thinking-body {
+  display: block;
+  animation: fadeIn var(--dur-fast) var(--ease);
+}
+
+/* Streaming thinking — shows live text even while collapsed */
+.thinking[data-streaming="true"] .thinking-header svg:first-child {
+  animation: breathe 1.6s ease-in-out infinite;
+  color: var(--run);
+}
+
+.thinking-stream-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+
+/* ==========================================================================
+   Plan block — task list that advances as work proceeds
+   ========================================================================== */
+
+.plan {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+  max-width: var(--prose-max);
+}
+
+.plan-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 30px;
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+}
+
+.plan-header svg {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.plan-progress {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.plan-list {
+  padding: var(--sp-3) var(--sp-4);
+}
+
+.plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  color: var(--text-primary);
+}
+
+.plan-item-check {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.plan-item[data-done="true"] .plan-item-check {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #FFFFFF;
+}
+
+.plan-item[data-done="true"] .plan-item-text {
+  color: var(--text-tertiary);
+}
+
+.plan-item[data-active="true"] .plan-item-check {
+  border-color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.plan-item[data-active="true"] .plan-item-text {
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+}
+
+.plan-item-check svg {
+  width: 10px;
+  height: 10px;
+}
+
+.plan-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ==========================================================================
+   Final summary — subtly wrapped so it reads as a conclusion
+   ========================================================================== */
+
+.summary-block {
+  padding: var(--sp-5);
+  background: var(--accent-subtle);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  max-width: var(--prose-max);
+}
+
+.summary-block-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.summary-block-header svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ==========================================================================
+   Reference chips inside messages (file, dir, diff, agent, preview, ...)
+   ========================================================================== */
+
+.ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 22px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease),
+              color var(--dur-fast) var(--ease);
+  max-width: 280px;
+}
+
+.ref-chip:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.ref-chip svg {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+}
+
+.ref-chip:hover svg {
+  color: var(--accent);
+}
+
+.ref-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Compact marker — a horizontal rule with a label
+   ========================================================================== */
+
+.compact-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin: var(--sp-7) 0;
+  color: var(--text-tertiary);
+  font-size: var(--fs-xs);
+}
+
+.compact-marker::before,
+.compact-marker::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.compact-marker-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  white-space: nowrap;
+}
+
+.compact-marker-label svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Compact in progress */
+.compact-active {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-md);
+  margin: var(--sp-6) 0;
+  max-width: var(--prose-max);
+}
+
+.compact-active-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--run);
+  flex-shrink: 0;
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.compact-active-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.compact-active-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.compact-active-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: var(--lh-snug);
+}
+
+/* ==========================================================================
+   Scroll-to-latest floating button
+   ========================================================================== */
+
+.scroll-latest {
+  position: absolute;
+  bottom: var(--sp-6);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 28px;
+  padding: 0 var(--sp-4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+  z-index: var(--z-sticky);
+  animation: slideUp var(--dur) var(--ease);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.scroll-latest:hover {
+  border-color: var(--accent-border);
+}
+
+.scroll-latest svg {
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
+}
+
+.scroll-latest-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: var(--fw-semi);
+  border-radius: var(--r-full);
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+/* ==========================================================================
+   Empty conversation state
+   ========================================================================== */
+
+.timeline-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  gap: var(--sp-5);
+  padding: var(--sp-10);
+  text-align: center;
+}
+
+.timeline-empty-icon {
+  width: 40px;
+  height: 40px;
+  color: var(--text-tertiary);
+  opacity: 0.4;
+}
+
+.timeline-empty-title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+}
+
+.timeline-empty-desc {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  max-width: 420px;
+  line-height: var(--lh-prose);
+}
+
+.timeline-empty-hints {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  padding: var(--sp-5);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+  text-align: left;
+  min-width: 320px;
+}
+
+.timeline-empty-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.timeline-empty-hint kbd {
+  flex-shrink: 0;
+}

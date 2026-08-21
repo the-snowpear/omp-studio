@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>OMP Studio — 已迁移到单页</title>
+<!-- 原「模型 / 供应商」独立页已合并为 model-config（index.html#!model-config）。
+     转发 stub：默认落在供应商 tab；#s= 场景键补 p: 前缀（重名键归供应商），
+     其余 hash 原样带过去。 -->
+<meta http-equiv="refresh" content="0; url=index.html#!model-config/providers">
+<script>
+  (function () {
+    var h = location.hash.slice(1);
+    if (h.indexOf('s=') === 0) h = 's=p:' + h.slice(2);
+    location.replace('index.html#!model-config/' + (h || 'providers'));
+  })();
+</script>
+</head>
+<body>
+<p style="padding:24px;font-size:13px">
+  「模型 / 供应商」已合并到 <a href="index.html#!model-config/providers">模型配置</a> 页面。
+</p>
+</body>
+</html>

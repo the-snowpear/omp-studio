@@ -71,6 +71,17 @@ export type SlashExecute =
   | { readonly kind: "invoke"; readonly commandId: string; readonly arguments: string }
   | { readonly kind: "none" };
 
+export const SLASH_GROUP_KEY: Record<SlashGroup, string> = {
+  session: "composer.slashGroupSession",
+  mode: "composer.slashGroupMode",
+  model: "composer.slashGroupModel",
+  context: "composer.slashGroupContext",
+  capability: "composer.slashGroupCapability",
+  workspace: "composer.slashGroupWorkspace",
+  collab: "composer.slashGroupCollab",
+  help: "composer.slashGroupHelp",
+};
+
 export const SLASH_GROUP_LABEL: Record<SlashGroup, string> = {
   session: "会话",
   mode: "模式",

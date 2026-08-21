@@ -2,6 +2,7 @@ import { useId, useState, type ReactNode } from "react";
 import { GIT_STATUS_META, type TreeGitStatus } from "../git/treeStatus";
 import { Icon } from "../icons";
 import { splitDisplayPath } from "./toolMeta";
+import { useI18n } from "../i18n";
 
 export type ChangesDiffLine =
   | { readonly kind: "row"; readonly mark: "+" | "-" | " "; readonly oldLn: string; readonly newLn: string; readonly text: string }
@@ -45,11 +46,12 @@ export function FileStat({ status }: { status: TreeGitStatus | undefined }) {
 }
 
 export function ChangeDelta({ add, del }: { add: number; del: number }) {
+  const { t } = useI18n();
   if (add === 0 && del === 0) return null;
   return (
     <span className="ch-delta">
-      {add > 0 ? <span className="ch-add">+{add}<span className="sr-only"> 行新增</span></span> : null}
-      {del > 0 ? <span className="ch-del">−{del}<span className="sr-only"> 行删除</span></span> : null}
+      {add > 0 ? <span className="ch-add">+{add}<span className="sr-only">{t("changes.linesAdded")}</span></span> : null}
+      {del > 0 ? <span className="ch-del">−{del}<span className="sr-only">{t("changes.linesDeleted")}</span></span> : null}
     </span>
   );
 }
@@ -80,13 +82,14 @@ function DiffLine({ line, split }: { line: ChangesDiffLine; split: boolean }) {
 }
 
 function FileDiff({ file, split }: { file: ChangesDiffFile; split: boolean }) {
+  const { t } = useI18n();
   const lines = file.hunks.flatMap((hunk) => hunk.lines);
   return (
     <div className={`ch-file-diff diff-scroll${split ? " diff-split" : ""}`}>
       <div className="ch-file-diff-inner">
-        {file.truncated ? <span className="chip gray xs">部分截断</span> : null}
+        {file.truncated ? <span className="chip gray xs">{t("changes.truncated")}</span> : null}
         {lines.length === 0 ? (
-          <div className="ch-file-diff-empty">没有可显示的 Diff。</div>
+          <div className="ch-file-diff-empty">{t("changes.noDiffToShow")}</div>
         ) : (
           file.hunks.map((hunk, hunkIndex) => (
             <div className="ch-file-hunk" key={`${file.file}-${hunkIndex}`}>
@@ -115,9 +118,16 @@ function TurnPicker({
   turnId: string;
   onTurnChange: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const menuId = useId();
   const [open, setOpen] = useState(false);
   const active = turns.find((turn) => turn.id === turnId) ?? turns[0];
+  const formatLabel = (turn?: ChangesTurnOption) => {
+    if (!turn) return t("changes.latestTurn");
+    if (turn.id === "last") return t("changes.latestTurn");
+    if (turn.id === "session") return t("changes.entireSession");
+    return turn.label;
+  };
   return (
     <div className={`ch-turn${open ? " is-open" : ""}`}>
       <button
@@ -126,19 +136,19 @@ function TurnPicker({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        aria-label="选择改动轮次"
+        aria-label={t("changes.selectTurn")}
         disabled={turns.length === 0}
         onClick={() => setOpen((value) => !value)}
       >
         <Icon name="branch" extra="sm" />
-        <span className="ch-turn-label ellipsis">{active?.label ?? "最近一轮"}</span>
+        <span className="ch-turn-label ellipsis">{formatLabel(active)}</span>
         {active ? <ChangeDelta add={active.add} del={active.del} /> : null}
         <Icon name="chevron-d" extra="sm" />
       </button>
       {open ? (
         <>
-          <button type="button" className="ch-turn-backdrop" aria-label="关闭轮次菜单" onClick={() => setOpen(false)} />
-          <div className="menu ch-turn-menu" id={menuId} role="menu" aria-label="改动轮次">
+          <button type="button" className="ch-turn-backdrop" aria-label={t("changes.closeTurnsMenu")} onClick={() => setOpen(false)} />
+          <div className="menu ch-turn-menu" id={menuId} role="menu" aria-label={t("changes.turnsMenu")}>
             {turns.map((turn) => (
               <button
                 key={turn.id}
@@ -151,7 +161,7 @@ function TurnPicker({
                   setOpen(false);
                 }}
               >
-                <span>{turn.label}</span>
+                <span>{formatLabel(turn)}</span>
                 <ChangeDelta add={turn.add} del={turn.del} />
               </button>
             ))}
@@ -185,19 +195,20 @@ export function ChangesPanel({
   onSplit: (next: boolean) => void;
   empty?: ReactNode;
 }) {
+  const { t } = useI18n();
   return (
     <>
       <div className="ch-toolbar">
         <TurnPicker turns={turns} turnId={turnId} onTurnChange={onTurnChange} />
-        {demo === true ? <span className="chip gray xs">演示</span> : null}
+        {demo === true ? <span className="chip gray xs">{t("common.demo")}</span> : null}
         <span className="spacer" />
-        <span className="seg" role="radiogroup" aria-label="Diff 显示模式">
+        <span className="seg" role="radiogroup" aria-label={t("changes.diffDisplayMode")}>
           <button
             type="button"
             role="radio"
             aria-checked={!split}
-            aria-label="上下对照"
-            data-tip="上下"
+            aria-label={t("changes.unifiedDiff")}
+            data-tip={t("changes.unified")}
             className={split ? "" : "active"}
             onClick={() => onSplit(false)}
           >
@@ -207,8 +218,8 @@ export function ChangesPanel({
             type="button"
             role="radio"
             aria-checked={split}
-            aria-label="左右对照"
-            data-tip="左右"
+            aria-label={t("changes.splitDiff")}
+            data-tip={t("changes.split")}
             className={split ? "active" : ""}
             onClick={() => onSplit(true)}
           >
@@ -226,7 +237,7 @@ export function ChangesPanel({
                 type="button"
                 className="ch-row"
                 aria-expanded={open}
-                aria-label={`${open ? "收起" : "展开"} ${file.file} 的会话改动`}
+                aria-label={open ? t("changes.collapseChanges", { file: file.file }) : t("changes.expandChanges", { file: file.file })}
                 data-tip={file.file}
                 onClick={() => onToggle(file.file)}
               >

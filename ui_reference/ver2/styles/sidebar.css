@@ -1,0 +1,809 @@
+/* ==========================================================================
+   OMP Studio — sidebar
+   The composite left rail: app header, project/threads, file tree, divider,
+   OMP status footer. Two menus (app menu + OMP menu) are popovers, defined
+   in components.css but triggered from here.
+   ========================================================================== */
+
+/* ---- Container -------------------------------------------------------- */
+/* ---- Container -------------------------------------------------------- */
+/* min-height:0 on the flex child is what lets the body shrink instead of
+   pushing the footer off-screen — the footer must always stay visible. */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+/* Collapsed → mini rail. The .sidebar-mini class shows only icons. */
+.sidebar-mini {
+  width: var(--sidebar-mini);
+}
+
+.sidebar-mini .sidebar-header-title,
+.sidebar-mini .sidebar-footer-name,
+.sidebar-mini .sidebar-footer-status,
+.sidebar-mini .tree,
+.sidebar-mini .threads,
+.sidebar-mini .section-label {
+  display: none;
+}
+
+.sidebar-mini .sidebar-header {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar-mini .sidebar-header-actions {
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.sidebar-mini .sidebar-footer {
+  padding: var(--sp-3);
+  justify-content: center;
+}
+
+/* ---- Header ----------------------------------------------------------- */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: var(--h-topbar);
+  padding: 0 var(--sp-4);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-header-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--h-btn);
+  height: var(--h-btn);
+  flex-shrink: 0;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.sidebar-header-logo:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-header-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+  color: var(--text-primary);
+  user-select: none;
+}
+
+.sidebar-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* ---- Body: scrollable project/threads + file tree -------------------- */
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---- Section (either threads or files) -------------------------------
+   min-height:0 is required: applyRatio() sets `flex: <ratio> 1 0`, and a
+   non-zero min-height would stop the section shrinking, overflow the body,
+   and push the footer off-screen. The header keeps its own height via
+   flex-shrink:0 below.
+   ---------------------------------------------------------------------- */
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 var(--sp-4);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.sidebar-section-header .section-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.sidebar-section-header:hover .sidebar-section-actions,
+.sidebar-section-actions:focus-within {
+  opacity: 1;
+}
+
+.sidebar-section-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sidebar-section-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sidebar-section-collapsed .sidebar-section-body {
+  display: none;
+}
+
+/* Collapse chevron in the section header */
+.section-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-tertiary);
+  border-radius: var(--r-sm);
+  transition: transform var(--dur-fast) var(--ease),
+              background var(--dur-fast) var(--ease);
+}
+
+.section-collapse-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.sidebar-section-collapsed .section-collapse-btn {
+  transform: rotate(-90deg);
+}
+
+/* ---- Project row ------------------------------------------------------ */
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--h-row);
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  border-radius: var(--r-sm);
+  margin: 0 var(--sp-2);
+  transition: background var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+
+.project-row:hover {
+  background: var(--bg-hover);
+}
+
+.project-row[data-active="true"] {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.project-row[data-active="true"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.project-row-icon {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.project-row[data-active="true"] .project-row-icon {
+  color: var(--accent);
+}
+
+.project-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-row-name {
+  font-weight: var(--fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-row-path {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Elide middle instead of end for paths — but CSS can't do this
+     natively, so we fake it with direction RTL + a [dir=ltr] inner span.
+     The mock doesn't implement this JS, but the visual spec is here. */
+}
+
+.project-row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.project-row-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 var(--sp-2);
+  height: 16px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  background: var(--bg-inset);
+  border-radius: var(--r-xs);
+}
+
+.project-row-branch svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* Status dots — convey 4 states via color + animation.
+   Thread rows have similar dots. */
+.status-dots {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.status-dot-dirty { background: var(--git-modified); }
+.status-dot-run { background: var(--run); animation: breathe 1.6s ease-in-out infinite; }
+.status-dot-warn { background: var(--warn); }
+.status-dot-preview { background: var(--run); }
+
+/* ---- Thread row ------------------------------------------------------- */
+.thread-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--h-row);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  border-radius: var(--r-sm);
+  margin: 0 var(--sp-2);
+  position: relative;
+  transition: background var(--dur-fast) var(--ease);
+  cursor: pointer;
+}
+
+.thread-row:hover {
+  background: var(--bg-hover);
+}
+
+.thread-row[data-active="true"] {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.thread-row[data-active="true"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.thread-row-status {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+}
+
+.thread-row[data-status="running"] .thread-row-status {
+  color: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.thread-row[data-status="awaiting-approval"] .thread-row-status {
+  color: var(--warn);
+}
+
+.thread-row[data-status="failed"] .thread-row-status {
+  color: var(--danger);
+}
+
+.thread-row[data-status="completed"] .thread-row-status {
+  color: var(--ok);
+}
+
+.thread-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.thread-row-title {
+  font-weight: var(--fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: var(--lh-snug);
+}
+
+.thread-row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+.thread-row-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.thread-row-meta-item svg {
+  width: 11px;
+  height: 11px;
+}
+
+.thread-row-badges {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
+.thread-row-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+  font-weight: var(--fw-semi);
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-tertiary);
+}
+
+.thread-row-badge-warn {
+  background: var(--warn-subtle);
+  color: var(--warn);
+}
+
+.thread-row-badge-danger {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.thread-row-badge svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* New event dot — absolute positioned in the top-right */
+.thread-row-new {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Archived threads are muted */
+.thread-row[data-archived="true"] {
+  opacity: 0.6;
+}
+
+.thread-row[data-archived="true"]:hover {
+  opacity: 1;
+}
+
+/* Pinned threads get a small pin icon */
+.thread-row[data-pinned="true"] .thread-row-title::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 4px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239AA4B2' stroke-width='1.5'%3E%3Cpath d='M6 10L2.5 13.5M9.5 2.5l4 4M11.5 4.5l-1 1a1 1 0 000 1.4l.6.6a1 1 0 010 1.4L9.7 10a1 1 0 01-1.4 0L6 7.7a1 1 0 010-1.4l1.1-1.1a1 1 0 011.4 0l.6.6a1 1 0 001.4 0l1-1'/%3E%3C/svg%3E") no-repeat center;
+  background-size: contain;
+  vertical-align: -1px;
+}
+
+/* ---- File tree -------------------------------------------------------- */
+.tree {
+  font-size: var(--fs-sm);
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--h-row);
+  padding: 0 var(--sp-3);
+  padding-left: calc(var(--sp-3) + var(--depth, 0) * 12px);
+  color: var(--text-primary);
+  cursor: pointer;
+  position: relative;
+  transition: background var(--dur-fast) var(--ease);
+  user-select: none;
+}
+
+.tree-row:hover {
+  background: var(--bg-hover);
+}
+
+.tree-row[data-active="true"] {
+  background: var(--accent-subtle);
+}
+
+.tree-row[data-active="true"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.tree-row-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.tree-row-expand svg {
+  width: 12px;
+  height: 12px;
+}
+
+.tree-row[data-expanded="true"] .tree-row-expand {
+  transform: rotate(90deg);
+}
+
+.tree-row[data-type="file"] .tree-row-expand {
+  visibility: hidden;
+}
+
+.tree-row-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+}
+
+.tree-row[data-type="dir"] .tree-row-icon {
+  color: var(--accent);
+}
+
+.tree-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--fw-medium);
+}
+
+.tree-row-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: var(--fw-semi);
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  padding: 0 3px;
+  height: 14px;
+  line-height: 14px;
+  border-radius: 2px;
+}
+
+.tree-row-status-M {
+  color: var(--git-modified);
+  background: color-mix(in srgb, var(--git-modified) 12%, transparent);
+}
+
+.tree-row-status-A {
+  color: var(--git-added);
+  background: color-mix(in srgb, var(--git-added) 12%, transparent);
+}
+
+.tree-row-status-D {
+  color: var(--git-deleted);
+  background: color-mix(in srgb, var(--git-deleted) 12%, transparent);
+}
+
+.tree-row-status-R {
+  color: var(--git-renamed);
+  background: color-mix(in srgb, var(--git-renamed) 12%, transparent);
+}
+
+.tree-row-status-U {
+  color: var(--git-untracked);
+  background: color-mix(in srgb, var(--git-untracked) 12%, transparent);
+}
+
+.tree-row-status-C {
+  color: var(--git-conflict);
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--git-conflict) 8%, transparent),
+    color-mix(in srgb, var(--git-conflict) 8%, transparent) 2px,
+    color-mix(in srgb, var(--git-conflict) 16%, transparent) 2px,
+    color-mix(in srgb, var(--git-conflict) 16%, transparent) 4px
+  );
+}
+
+/* Process states — additive to Git status */
+.tree-row[data-activity="reading"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--run);
+}
+
+.tree-row[data-activity="writing"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--run);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.tree-row[data-activity="turn-modified"]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.tree-row[data-activity="unsaved"] .tree-row-label::after {
+  content: '●';
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  vertical-align: middle;
+}
+
+.tree-row[data-diagnostics] .tree-row-label {
+  text-decoration: underline;
+  text-decoration-color: var(--danger);
+  text-decoration-style: wavy;
+  text-underline-offset: 2px;
+}
+
+/* ---- Divider (resizable split between threads and files) ------------- */
+.sidebar-divider {
+  position: relative;
+  height: 6px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-sunken);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.sidebar-divider:hover,
+.sidebar-divider[data-dragging="true"] {
+  background: var(--bg-hover);
+}
+
+.sidebar-divider::before {
+  content: '';
+  width: 28px;
+  height: 2px;
+  background: var(--border-default);
+  border-radius: var(--r-full);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.sidebar-divider:hover::before,
+.sidebar-divider[data-dragging="true"]::before {
+  background: var(--accent);
+}
+
+/* Double-click the divider to cycle through three ratio presets */
+.sidebar-divider-hint {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px var(--sp-3);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-micro);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: var(--z-popover);
+  box-shadow: var(--shadow-sm);
+  animation: fadeIn var(--dur-fast) var(--ease);
+}
+
+/* ---- Footer: OMP status ----------------------------------------------- */
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--h-statusbar);
+  padding: 0 var(--sp-4);
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+  user-select: none;
+}
+
+.sidebar-footer:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-footer-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  flex-shrink: 0;
+}
+
+.sidebar-footer-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar-footer-name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-footer-status {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-footer[data-status="ready"] .sidebar-footer-status {
+  color: var(--ok);
+}
+
+.sidebar-footer[data-status="running"] .sidebar-footer-status {
+  color: var(--run);
+}
+
+.sidebar-footer[data-status="reconnecting"] .sidebar-footer-status {
+  color: var(--warn);
+}
+
+.sidebar-footer[data-status="disconnected"],
+.sidebar-footer[data-status="error"] {
+  background: var(--danger-subtle);
+  border-top-color: var(--danger-border);
+}
+
+.sidebar-footer[data-status="disconnected"] .sidebar-footer-status,
+.sidebar-footer[data-status="error"] .sidebar-footer-status {
+  color: var(--danger);
+}
+
+.sidebar-footer[data-status="update-available"] .sidebar-footer-status {
+  color: var(--warn);
+}
+
+.sidebar-footer-chevron {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.sidebar-footer[data-menu-open="true"] .sidebar-footer-chevron {
+  transform: rotate(180deg);
+}
+
+/* ---- Empty states ----------------------------------------------------- */
+.sidebar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-8) var(--sp-5);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.sidebar-empty-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--text-tertiary);
+  opacity: 0.5;
+}
+
+.sidebar-empty-text {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+}
+
+.sidebar-empty-action {
+  margin-top: var(--sp-2);
+}

@@ -1,6 +1,7 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "./icons";
+import { useI18n } from "./i18n";
 import {
   flattenPaletteItems,
   type PaletteAction,
@@ -20,6 +21,7 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
   onClose: () => void;
   onRun: (action: PaletteAction) => void;
 }>(function CommandPalette({ open, groups, query, onQueryChange, onClose, onRun }, ref) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState(0);
@@ -113,7 +115,7 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
           className="cmdk"
           role="dialog"
           aria-modal="true"
-          aria-label="命令面板"
+          aria-label={t("menu.commandPalette")}
           onMouseDown={(event) => event.stopPropagation()}
         >
         <div className="cmdk-input">
@@ -125,23 +127,23 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
             aria-expanded="true"
             aria-controls="cmdkList"
             aria-autocomplete="list"
-            aria-label="搜索命令、会话、页面"
+            aria-label={t("palette.searchAria")}
             {...(activeDescendant ? { "aria-activedescendant": activeDescendant } : {})}
-            placeholder="搜索命令、会话、页面…"
+            placeholder={t("palette.searchPlaceholder")}
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
           />
           <span className="kbd" aria-hidden="true">Esc</span>
         </div>
-        <div className="cmdk-list" id="cmdkList" ref={listRef} role="listbox" aria-label="搜索结果">
+        <div className="cmdk-list" id="cmdkList" ref={listRef} role="listbox" aria-label={t("palette.resultsAria")}>
           {flat.length === 0 ? (
             <div className="cmdk-empty">
               <Icon name="search" />
-              无匹配结果
+              {t("palette.noResults")}
             </div>
           ) : groups.map((group) => (
-            <div className="cmdk-group" key={group.id} role="group" aria-label={group.label}>
-              <div className="cmdk-group-label">{group.label}</div>
+            <div className="cmdk-group" key={group.id} role="group" aria-label={t(group.label)}>
+              <div className="cmdk-group-label">{t(group.label)}</div>
               {group.items.map((item) => (
                 <PaletteRow
                   key={item.id}
@@ -158,7 +160,7 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
           ))}
         </div>
         <div className="sr-only" role="status" aria-live="polite">
-          {flat.length ? `${flat.length} 个结果` : "无匹配结果"}
+          {flat.length ? t("palette.resultsCount", { count: flat.length }) : t("palette.noResults")}
         </div>
       </div>
       </div>
@@ -178,6 +180,7 @@ function PaletteRow({
   onHover: () => void;
   onRun: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
@@ -195,7 +198,7 @@ function PaletteRow({
       }}
     >
       <Icon name={item.icon} extra="sm" />
-      <span className="cmdk-item-label">{item.label}</span>
+      <span className="cmdk-item-label">{t(item.label)}</span>
       {item.meta ? <span className="cmdk-item-meta">{item.meta}</span> : null}
       {item.hint ? <span className="kbd">{item.hint}</span> : null}
     </button>
