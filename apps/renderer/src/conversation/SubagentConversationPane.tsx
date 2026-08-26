@@ -151,8 +151,14 @@ export function SubagentConversationPane({
         </div>
       </section>
       {scroll.hasNewContent ? (
-        <button type="button" className="new-content-pill" onClick={scroll.jumpToLatest}>
-          有新内容 · 回到最新
+        <button
+          type="button"
+          className="new-content-pill"
+          onClick={scroll.jumpToLatest}
+          aria-label="回到最新"
+          data-tip="回到最新"
+        >
+          <Icon name="chevron-d" />
         </button>
       ) : null}
       {composerAllowed ? (

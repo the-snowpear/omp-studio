@@ -250,6 +250,41 @@ describe("useConversationScroll pin", () => {
     expect(el.scrollTop).toBe(3200);
   });
 
+  it("surfaces the jump-to-latest pill when the user scrolls up, even with no new content", () => {
+    const { el } = mutableScroller(2000);
+    const scrollerRef = { current: el };
+    const { result } = renderHook(() => useConversationScroll({
+      scrollerRef,
+      identityKey: "thread",
+      itemCount: 4,
+      loadingOlder: false,
+      contentKey: "10",
+    }));
+    expect(result.current.hasNewContent).toBe(false);
+
+    el.scrollTop = 100;
+    act(() => {
+      result.current.onScroll(scrollEvent(el));
+    });
+    expect(result.current.follow).toBe(false);
+    expect(result.current.hasNewContent).toBe(true);
+  });
+
+  it("does not surface the pill when a load-older prepend detaches the view", () => {
+    const { el } = mutableScroller(2000);
+    const scrollerRef = { current: el };
+    const { result } = renderHook(() => useConversationScroll({
+      scrollerRef,
+      identityKey: "thread",
+      itemCount: 6,
+      loadingOlder: false,
+      contentKey: "10",
+    }));
+    act(() => result.current.preparePrepend());
+    expect(result.current.follow).toBe(false);
+    expect(result.current.hasNewContent).toBe(false);
+  });
+
   it("stays pinned on viewport resize while following, and ignores resize after scroll-up", () => {
     const observers: ResizeObserverCallback[] = [];
     const previous = globalThis.ResizeObserver;

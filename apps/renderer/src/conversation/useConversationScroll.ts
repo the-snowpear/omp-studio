@@ -210,10 +210,21 @@ export function useConversationScroll(args: {
   /** Last scrollTop we know about, so a scroll event can be read as a direction. */
   const lastTopRef = useRef(0);
 
-  const setPin = useCallback((next: boolean) => {
+  /**
+   * Pins / unpins the tail. `userScroll` marks an unpin caused by the user
+   * scrolling away from the tail (wheel/keyboard/touch gesture or scroll event)
+   * — the only unpins that surface the "回到最新" pill. `preparePrepend` also
+   * unpins to hold the scroll position across a load-older page, but that must
+   * not look like the user left the tail, so it does not pass `userScroll`.
+   */
+  const setPin = useCallback((next: boolean, userScroll = false) => {
     followRef.current = next;
     setFollow(next);
-    if (next) setHasNewContent(false);
+    if (next) {
+      setHasNewContent(false);
+    } else if (userScroll) {
+      setHasNewContent(true);
+    }
   }, []);
 
   const stick = useCallback(() => {
@@ -275,7 +286,7 @@ export function useConversationScroll(args: {
         return;
       }
       if (moved < 0) {
-        if (followRef.current) setPin(false);
+        if (followRef.current) setPin(false, true);
         return;
       }
       if (moved > 0 && !followRef.current && shouldFollow(distance)) setPin(true);
@@ -314,7 +325,7 @@ export function useConversationScroll(args: {
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (!el || pin === "top") return;
-    return bindTailGestures(el, () => followRef.current, () => setPin(false));
+    return bindTailGestures(el, () => followRef.current, () => setPin(false, true));
   }, [identityKey, pin, scrollerRef, setPin]);
 
   useLayoutEffect(() => {
