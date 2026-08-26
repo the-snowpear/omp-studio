@@ -559,11 +559,6 @@
   list-style: none;
   border-top: 1px solid var(--border);
 }
-/* 限高态：最多可见 --turn-diff-cap-rows 行（行高恒 36px），其余在卡内滚动 */
-.turn-diff.capped .turn-diff-files {
-  max-height: calc(var(--turn-diff-cap-rows, 6) * 36px);
-  overflow-y: auto;
-}
 .turn-diff-row {
   display: flex;
   align-items: center;
@@ -1061,7 +1056,7 @@
   flex: 1 1 0;
 }
 .sa-inspect .new-content-pill,
-.subagent-convo .new-content-pill { position: absolute; right: 16px; left: auto; margin: 0; bottom: 16px; }
+.subagent-convo .new-content-pill { position: absolute; right: 16px; left: auto; transform: none; bottom: 16px; }
 .sa-inspect.has-composer .new-content-pill,
 .subagent-convo.has-composer .new-content-pill { bottom: 112px; }
 .sa-inspect-composer {
@@ -1900,45 +1895,34 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   font-size: 10px;
 }
 
-/* 新内容提示 — 圆形图标按钮（淡紫底 + 深紫下尖角），悬浮在 composer 右上角。
-   行容器 sticky 而不是 absolute：它是 .convo-scroll 滚动容器的直接子节点，
+/* 新内容提示 — a real <button> now (it was a click-handled div), so the button
+   defaults have to be reset back to the original appearance.
+   用 sticky 而不是 absolute：胶囊是 .convo-scroll 滚动容器的直接子节点，
    absolute 会锚到容器在内容顶部的 padding box，随 transcript 一起滚走（卡在对话中部）；
    sticky 把它钉在滚动视口底部，任意滚动态下都悬浮在 composer 上方。
-   水平盒子复用 .convo-doc 的补偿式 max-width + 自动居中（含 minimap 让位），
-   行内 flex-end 让按钮右缘与 composer 右缘在任意视口宽度下精确对齐；
-   行容器 pointer-events:none 不挡对话点击，按钮自身恢复。
-   不用 transform 定位（omp-toast-in 动画的 transform:none 会覆盖它造成跳动）。 */
-.new-content-pill-row {
+   居中走 width:max-content + 自动外边距，避免依赖 transform（omp-toast-in 动画
+   的 transform:none 会覆盖 translateX(-50%) 造成水平跳动）。 */
+.new-content-pill {
   position: sticky;
   bottom: 12px;
-  margin: 0 auto;
-  max-width: calc(var(--doc-max-w) + var(--sp-32) + var(--sp-32) + var(--minimap-w) + 8px);
-  padding-left: var(--sp-32);
-  padding-right: calc(var(--sp-32) + var(--minimap-w) + 8px);
-  display: flex;
-  justify-content: flex-end;
-  pointer-events: none;
-  z-index: var(--z-scroll-aid);
-}
-.new-content-pill {
-  pointer-events: auto;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--accent-soft);
-  color: var(--accent);
+  width: max-content;
+  margin-left: auto;
+  margin-right: auto;
+  display: flex; align-items: center; gap: var(--sp-6);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-family: inherit;
+  font-size: var(--fs-11);
+  padding: 4px var(--sp-12);
   border: none;
   border-radius: var(--r-full);
   box-shadow: var(--shadow-menu);
   cursor: pointer;
+  z-index: var(--z-scroll-aid);
   animation: omp-toast-in var(--dur) var(--ease-out);
 }
-.new-content-pill:hover {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent-hover);
-}
-.new-content-pill:focus-visible { outline-color: var(--accent); }
+/* The pill sits on the accent fill, so an accent ring would be invisible. */
+.new-content-pill:focus-visible { outline-color: var(--text); }
 
 /* ---------- 运行活动行 ----------
    对话文档的最后一块，随内容一起滚动（同 Cursor / Claude）。无边框无底色：

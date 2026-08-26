@@ -1,5 +1,4 @@
 import { scrollOffsetToCenter } from "./ConversationMinimap";
-import { requestVirtualConversationReveal } from "./virtualConversationReveal";
 
 const FLASH_MS = 900;
 
@@ -27,11 +26,7 @@ export function revealConversationTool(
       ? null
       : scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(target.itemId)}"]`)
   );
-  if (node === null) {
-    return target.itemId === undefined
-      ? false
-      : requestVirtualConversationReveal(scroller, { itemId: target.itemId, toolCallId: target.toolCallId });
-  }
+  if (node === null) return false;
   if (toolNode !== null && !toolNode.classList.contains("open")) {
     toolNode.querySelector<HTMLButtonElement>("button.tl-row")?.click();
   }

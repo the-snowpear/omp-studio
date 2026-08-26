@@ -21,10 +21,7 @@ function formatTime(iso: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-/** 元素常量：截断标记没有 props，每次渲染新建只会让 MarkdownText 的 memo 白丢一次。 */
-const TRUNCATION_MARK = <TruncationMark />;
-
-const MessageBody = memo(function MessageBody({
+function MessageBody({
   text,
   streaming,
   truncated,
@@ -53,7 +50,7 @@ const MessageBody = memo(function MessageBody({
     <MarkdownText
       text={text}
       {...(streaming === true ? { streaming: true } : {})}
-      {...(truncated === true ? { truncated: true, mark: TRUNCATION_MARK } : {})}
+      {...(truncated === true ? { truncated: true, mark: <TruncationMark /> } : {})}
       {...(magicKeywords === true ? { magicKeywords: true } : {})}
     />
   );
@@ -76,7 +73,7 @@ const MessageBody = memo(function MessageBody({
       <MessageCopyActions text={copyText} />
     </div>
   );
-});
+}
 
 function AssistantStatus({ status }: { status: Extract<TimelineRow, { type: "assistant" }>["status"] }) {
   if (status === "aborted") return <span className="chip gray xs">已中止</span>;

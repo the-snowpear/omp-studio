@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 import type { SessionId } from "@omp-studio/client-contract";
 import { ChipComposer } from "../composer/ChipComposer";
 import type { MentionCandidate } from "../composer/types";
@@ -60,11 +60,6 @@ export function SubagentConversationPane({
   const composerDomId = composerId ?? `subagentComposer${generatedId}`;
   const hintId = `${composerDomId}Hint`;
   const scrollerRef = useRef<HTMLElement | null>(null);
-  const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
-  const bindScroller = useCallback((node: HTMLElement | null) => {
-    scrollerRef.current = node;
-    setScrollParent((current) => current === node ? current : node);
-  }, []);
   const snapshot = useSubagentConversation({
     preview,
     client,
@@ -121,7 +116,7 @@ export function SubagentConversationPane({
     <div className={`subagent-convo${composerAllowed ? " has-composer" : ""}`}>
       <section
         className="sa-inspect-scroll"
-        ref={bindScroller}
+        ref={scrollerRef}
         tabIndex={-1}
         aria-label="子 Agent 对话"
         onScroll={scroll.onScroll}
@@ -148,7 +143,7 @@ export function SubagentConversationPane({
               <p>正在读取子 Agent 对话…</p>
             </div>
           ) : (
-            <ConvoTranscript rows={snapshot.rows} scrollParent={scrollParent} {...(snapshot.demo ? { demo: true } : {})} />
+            <ConvoTranscript rows={snapshot.rows} {...(snapshot.demo ? { demo: true } : {})} />
           )}
           {state.hydrateStatus === "resyncing" ? (
             <div className="convo-notice info" role="status">正在同步</div>
@@ -156,14 +151,8 @@ export function SubagentConversationPane({
         </div>
       </section>
       {scroll.hasNewContent ? (
-        <button
-          type="button"
-          className="new-content-pill"
-          onClick={scroll.jumpToLatest}
-          aria-label="回到最新"
-          data-tip="回到最新"
-        >
-          <Icon name="chevron-d" />
+        <button type="button" className="new-content-pill" onClick={scroll.jumpToLatest}>
+          有新内容 · 回到最新
         </button>
       ) : null}
       {composerAllowed ? (

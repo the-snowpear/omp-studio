@@ -74,6 +74,7 @@ describe("scroll gesture classification", () => {
     expect(innerAbsorbsScroll([box({ scrollTop: 0, scrollHeight: 200, clientHeight: 200 })], "up")).toBe(false);
   });
 });
+
 describe("useConversationScroll pin", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -249,41 +250,6 @@ describe("useConversationScroll pin", () => {
     expect(el.scrollTop).toBe(3200);
   });
 
-  it("surfaces the jump-to-latest pill when the user scrolls up, even with no new content", () => {
-    const { el } = mutableScroller(2000);
-    const scrollerRef = { current: el };
-    const { result } = renderHook(() => useConversationScroll({
-      scrollerRef,
-      identityKey: "thread",
-      itemCount: 4,
-      loadingOlder: false,
-      contentKey: "10",
-    }));
-    expect(result.current.hasNewContent).toBe(false);
-
-    el.scrollTop = 100;
-    act(() => {
-      result.current.onScroll(scrollEvent(el));
-    });
-    expect(result.current.follow).toBe(false);
-    expect(result.current.hasNewContent).toBe(true);
-  });
-
-  it("does not surface the pill when a load-older prepend detaches the view", () => {
-    const { el } = mutableScroller(2000);
-    const scrollerRef = { current: el };
-    const { result } = renderHook(() => useConversationScroll({
-      scrollerRef,
-      identityKey: "thread",
-      itemCount: 6,
-      loadingOlder: false,
-      contentKey: "10",
-    }));
-    act(() => result.current.preparePrepend());
-    expect(result.current.follow).toBe(false);
-    expect(result.current.hasNewContent).toBe(false);
-  });
-
   it("stays pinned on viewport resize while following, and ignores resize after scroll-up", () => {
     const observers: ResizeObserverCallback[] = [];
     const previous = globalThis.ResizeObserver;
@@ -433,9 +399,46 @@ describe("useConversationScroll detach on gesture", () => {
   });
 });
 
-describe("useConversationScroll load-older ownership", () => {
-  it("releases tail following but leaves prepend positioning to Virtuoso", () => {
-    const { el, setHeight } = mutableScroller(2000);
+describe("useConversationScroll load-older anchor", () => {
+  /** A scroller whose rows and height are driven by hand, since jsdom has no layout. */
+  function historyScroller(): {
+    el: HTMLElement;
+    setHeight: (next: number) => void;
+    /** Move the anchor row down, as a prepended page would. */
+    prepend: (rowId: string, pushRowDownBy: number) => void;
+  } {
+    const el = document.createElement("div");
+    let height = 2000;
+    let rowTop = 40;
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => height });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 400 });
+    el.scrollTop = 900;
+    el.getBoundingClientRect = () => ({ top: 0, bottom: 400, height: 400 }) as DOMRect;
+
+    const row = document.createElement("div");
+    row.dataset.itemId = "anchor-row";
+    row.getBoundingClientRect = () => ({ top: rowTop, bottom: rowTop + 20, height: 20 }) as DOMRect;
+    el.append(row);
+
+    return {
+      el,
+      setHeight: (next) => { height = next; },
+      prepend: (rowId, pushRowDownBy) => {
+        const older = document.createElement("div");
+        older.dataset.itemId = rowId;
+        older.getBoundingClientRect = () => ({ top: -pushRowDownBy, bottom: 0, height: pushRowDownBy }) as DOMRect;
+        el.prepend(older);
+        rowTop += pushRowDownBy;
+      },
+    };
+  }
+
+  /**
+   * "加载更早消息" prepends rows above the viewport. The scroller must keep the
+   * row the user was reading under the cursor, not jump to the new top.
+   */
+  it("restores the reading position after the older page is prepended", () => {
+    const { el, setHeight, prepend } = historyScroller();
     const scrollerRef = { current: el };
     const { result, rerender } = renderHook(
       ({ itemCount, loadingOlder }) => useConversationScroll({
@@ -448,15 +451,83 @@ describe("useConversationScroll load-older ownership", () => {
       { initialProps: { itemCount: 6, loadingOlder: false } },
     );
 
-    act(() => result.current.preparePrepend());
+    act(() => {
+      result.current.preparePrepend();
+    });
+    /* Reading history: the pin is released so no stream tick can pull us away. */
     expect(result.current.follow).toBe(false);
-    const beforeTop = el.scrollTop;
+
     rerender({ itemCount: 6, loadingOlder: true });
+    const beforeTop = el.scrollTop;
+
     setHeight(3200);
+    prepend("older-page-head", 600);
     rerender({ itemCount: 56, loadingOlder: false });
 
-    expect(el.scrollTop).toBe(beforeTop);
+    expect(el.scrollTop).toBe(beforeTop + 600);
+    expect(result.current.follow).toBe(false);
     expect(result.current.hasNewContent).toBe(false);
+  });
+
+  /** A live row appended at the tail mid-request must not be mistaken for the page. */
+  it("keeps the anchor when a live row lands at the tail while the page is in flight", () => {
+    const { el, setHeight, prepend } = historyScroller();
+    const scrollerRef = { current: el };
+    const { result, rerender } = renderHook(
+      ({ itemCount, loadingOlder }) => useConversationScroll({
+        scrollerRef,
+        identityKey: "thread",
+        itemCount,
+        loadingOlder,
+        contentKey: "10",
+      }),
+      { initialProps: { itemCount: 6, loadingOlder: false } },
+    );
+
+    act(() => {
+      result.current.preparePrepend();
+    });
+    rerender({ itemCount: 6, loadingOlder: true });
+    const beforeTop = el.scrollTop;
+
+    /* Tail row: first row unchanged, so the anchor is still owed a prepend. */
+    setHeight(2300);
+    rerender({ itemCount: 7, loadingOlder: true });
+    expect(el.scrollTop).toBe(beforeTop);
+    expect(result.current.hasNewContent).toBe(true);
+
+    setHeight(3500);
+    prepend("older-page-head", 600);
+    rerender({ itemCount: 57, loadingOlder: false });
+    expect(el.scrollTop).toBe(beforeTop + 600);
+  });
+
+  /** The pane captures on click; the loadingOlder effect calls again right after. */
+  it("ignores a second preparePrepend for the same request", () => {
+    const { el, setHeight, prepend } = historyScroller();
+    const scrollerRef = { current: el };
+    const { result, rerender } = renderHook(
+      ({ itemCount, loadingOlder }) => useConversationScroll({
+        scrollerRef,
+        identityKey: "thread",
+        itemCount,
+        loadingOlder,
+        contentKey: "10",
+      }),
+      { initialProps: { itemCount: 6, loadingOlder: false } },
+    );
+
+    act(() => {
+      result.current.preparePrepend();
+      result.current.preparePrepend();
+    });
+    rerender({ itemCount: 6, loadingOlder: true });
+    const beforeTop = el.scrollTop;
+
+    setHeight(3200);
+    prepend("older-page-head", 600);
+    rerender({ itemCount: 56, loadingOlder: false });
+    expect(el.scrollTop).toBe(beforeTop + 600);
   });
 
   it("drops a stale anchor when the request finishes without prepending", () => {
@@ -480,10 +551,12 @@ describe("useConversationScroll load-older ownership", () => {
     rerender({ itemCount: 4, loadingOlder: true });
     rerender({ itemCount: 4, loadingOlder: false });
 
-    /* A later live row must be reported as new content, not swallowed by the request. */
+    /* A later live row must be reported as new content, not swallowed by the
+       leftover anchor. */
     setHeight(2400);
     rerender({ itemCount: 5, loadingOlder: false });
     expect(result.current.hasNewContent).toBe(true);
     expect(el.scrollTop).toBe(120);
   });
 });
+

@@ -37,8 +37,6 @@ export interface ConversationLiveBlock {
   readonly blockId: string;
   readonly blockType: "text" | "thinking";
   readonly text: string;
-  /** Cached UTF-8 size so an append only encodes the incoming delta. */
-  readonly textBytes: number;
   /** Set once the live buffer hit its cap; later deltas for the block are dropped. */
   readonly truncated?: boolean;
 }
@@ -60,8 +58,6 @@ export interface ConversationLiveTool {
   readonly toolName?: string;
   readonly arguments?: JsonValue;
   readonly output?: string;
-  /** Cached UTF-8 size of output; present whenever output is accumulated live. */
-  readonly outputBytes?: number;
   readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>;
   readonly truncated?: boolean;
   readonly isError?: boolean;
@@ -170,13 +166,6 @@ export type ConversationView =
 export function selectConversationViews(state: ConversationState): readonly ConversationView[] {
   const views: ConversationView[] = [];
   const seenLive = new Set<string>();
-  const toolsByMessage = new Map<string, ConversationLiveTool[]>();
-  for (const tool of Object.values(state.liveTools)) {
-    if (tool?.messageId === undefined) continue;
-    const tools = toolsByMessage.get(tool.messageId);
-    if (tools === undefined) toolsByMessage.set(tool.messageId, [tool]);
-    else tools.push(tool);
-  }
   for (const id of state.order) {
     const live = state.liveMessages[id];
     if (live?.aborted) {
@@ -184,7 +173,7 @@ export function selectConversationViews(state: ConversationState): readonly Conv
       views.push({
         kind: "live",
         message: live,
-        tools: toolsByMessage.get(id) ?? [],
+        tools: toolsForMessage(state, id),
       });
       continue;
     }
@@ -193,7 +182,7 @@ export function selectConversationViews(state: ConversationState): readonly Conv
       views.push({
         kind: "item",
         item,
-        tools: toolsByMessage.get(id) ?? [],
+        tools: toolsForMessage(state, id),
         turnOpen: state.openTurnItems[id] !== undefined,
       });
       continue;
@@ -203,7 +192,7 @@ export function selectConversationViews(state: ConversationState): readonly Conv
       views.push({
         kind: "live",
         message: live,
-        tools: toolsByMessage.get(id) ?? [],
+        tools: toolsForMessage(state, id),
       });
     }
   }
@@ -211,7 +200,7 @@ export function selectConversationViews(state: ConversationState): readonly Conv
     if (seenLive.has(messageId)) continue;
     const message = state.liveMessages[messageId];
     if (message === undefined) continue;
-    views.push({ kind: "live", message, tools: toolsByMessage.get(messageId) ?? [] });
+    views.push({ kind: "live", message, tools: toolsForMessage(state, messageId) });
   }
   if (state.compacting !== undefined) {
     views.push({ kind: "compacting", action: state.compacting.action });
@@ -227,6 +216,14 @@ export function selectConversationHydrate(state: ConversationState): {
     return { status: state.hydrateStatus };
   }
   return { status: state.hydrateStatus, error: state.error };
+}
+
+function toolsForMessage(state: ConversationState, messageId: string): ConversationLiveTool[] {
+  const tools: ConversationLiveTool[] = [];
+  for (const tool of Object.values(state.liveTools)) {
+    if (tool?.messageId === messageId) tools.push(tool);
+  }
+  return tools;
 }
 
 export function conversationIdentityOf(

@@ -45,7 +45,7 @@ import {
 import { ConversationItemView } from "./ConversationItemView";
 import { serializedCopyFromHost } from "./UserMessageBody";
 import { ConversationPane, parseXdevMountNotice } from "./ConversationPane";
-import { ConvoTranscript, planCreatedBinds, turnChangeBinds } from "./ConvoTranscript";
+import { ConvoTranscript, turnChangeBinds } from "./ConvoTranscript";
 import { PlanReviewDeck } from "../deck/PlanCard";
 import { ToolBody } from "./ToolBody";
 import { batchSummary, collectLatestTodos, collectTurnFileChanges, groupTodosByPhase, isTodoPhaseComplete, sessionTaskProgress, todoPhaseHeadersVisible, todoPhaseOpenByDefault, todoStepProgress, toolDiffStats, toolKind, SESSION_CHANGE_LAST_ID } from "./toolMeta";
@@ -54,7 +54,6 @@ import {
   absorbPendingDisplays,
   applyLiveEvent,
   buildTimeline,
-  ConversationRowsProjector,
   emptyConversationState,
   failPending,
   hydratePage,
@@ -255,9 +254,8 @@ class FakeClient implements ConversationClient {
 }
 
 async function tick(): Promise<void> {
-  // Logical transcript windows may cross several physical pages before the
-  // single reducer commit; drain the short promise chain deterministically.
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function engineOf(client: ConversationClient | null, overrides: Partial<Parameters<typeof createConversationEngine>[0]> = {}) {
@@ -330,146 +328,6 @@ describe("preview vs real isolation", () => {
   });
 });
 
-describe("streaming projection caches", () => {
-  it("reuses settled rows while only the live tail changes", () => {
-    const projector = new ConversationRowsProjector();
-    const settled = assistantItem("settled", "历史回复");
-    const live = {
-      messageId: "live",
-      turnId: "turn-live",
-      role: "assistant" as const,
-      createdAt: "2026-08-25T00:00:00.000Z",
-      blocks: {
-        text: { blockId: "text", blockType: "text" as const, text: "a", textBytes: 1 },
-      },
-      completed: false,
-      aborted: false,
-    };
-    const base = createInitialConversationState();
-    const firstState = {
-      ...base,
-      order: ["settled", "live"],
-      itemsById: { settled },
-      liveMessages: { live },
-    };
-    const first = projector.project(selectConversationViews(firstState));
-    const nextLive = {
-      ...live,
-      blocks: {
-        text: { ...live.blocks.text, text: "ab", textBytes: 2 },
-      },
-    };
-    const second = projector.project(selectConversationViews({ ...firstState, liveMessages: { live: nextLive } }));
-
-    expect(second[0]).toBe(first[0]);
-    expect(second[1]).not.toBe(first[1]);
-  });
-
-  it("rebuilds only the row that owns a changed live tool", () => {
-    const projector = new ConversationRowsProjector();
-    const firstItem = {
-      ...assistantItem("tool-owner-1", ""),
-      content: [{ type: "toolCall" as const, toolCallId: "call-1", toolName: "bash", arguments: { command: "one" } }],
-    };
-    const secondItem = {
-      ...assistantItem("tool-owner-2", ""),
-      content: [{ type: "toolCall" as const, toolCallId: "call-2", toolName: "bash", arguments: { command: "two" } }],
-    };
-    const firstTool = {
-      toolCallId: "call-1",
-      turnId: "turn-1",
-      messageId: "tool-owner-1",
-      toolName: "bash",
-      output: "one",
-      outputBytes: 3,
-      status: "updated" as const,
-    };
-    const secondTool = {
-      toolCallId: "call-2",
-      turnId: "turn-2",
-      messageId: "tool-owner-2",
-      toolName: "bash",
-      output: "two",
-      outputBytes: 3,
-      status: "updated" as const,
-    };
-    const separator = {
-      kind: "message" as const,
-      itemId: "tool-separator",
-      parentId: null,
-      createdAt: "2026-08-25T00:00:01.000Z",
-      role: "user" as const,
-      content: [{ type: "text" as const, text: "next" }],
-    };
-    const base = {
-      ...createInitialConversationState(),
-      order: [firstItem.itemId, separator.itemId, secondItem.itemId],
-      itemsById: {
-        [firstItem.itemId]: firstItem,
-        [separator.itemId]: separator,
-        [secondItem.itemId]: secondItem,
-      },
-      liveTools: { "call-1": firstTool, "call-2": secondTool },
-    };
-    const first = projector.project(selectConversationViews(base));
-    const changedTool = { ...secondTool, output: "two+", outputBytes: 4 };
-    const second = projector.project(selectConversationViews({
-      ...base,
-      liveTools: { "call-1": firstTool, "call-2": changedTool },
-    }));
-
-    expect(second[0]).toBe(first[0]);
-    expect(second[1]).toBe(first[1]);
-    expect(second[2]).not.toBe(first[2]);
-  });
-
-  it("reuses historical turn and plan derivations when a later tail changes", () => {
-    const write: ToolView = {
-      toolCallId: "write-history",
-      toolName: "write",
-      status: "succeeded",
-      arguments: { path: "src/history.ts", content: "export const stable = true;" },
-    };
-    const propose: ToolView = {
-      toolCallId: "propose-history",
-      toolName: "write",
-      status: "succeeded",
-      arguments: { path: "xd://propose", content: JSON.stringify({ title: "Stable plan" }) },
-    };
-    const historical: TimelineRow = {
-      type: "assistant",
-      itemId: "historical",
-      createdAt: "2026-08-25T00:00:00.000Z",
-      status: "completed",
-      segments: [{ type: "batch", key: "history-tools", tools: [write, propose] }],
-    };
-    const user: TimelineRow = {
-      type: "user",
-      itemId: "next-user",
-      createdAt: "2026-08-25T00:00:01.000Z",
-      text: "next",
-    };
-    const tail: TimelineRow = {
-      type: "assistant",
-      itemId: "tail",
-      createdAt: "2026-08-25T00:00:02.000Z",
-      status: "streaming",
-      turnOpen: true,
-      segments: [{ type: "text", key: "tail-text", text: "a" }],
-    };
-    const nextTail: TimelineRow = {
-      ...tail,
-      segments: [{ type: "text", key: "tail-text", text: "ab" }],
-    };
-    const planLink = { onOpen: vi.fn() };
-    const firstRows = [historical, user, tail];
-    const nextRows = [historical, user, nextTail];
-
-    expect(turnChangeBinds(nextRows)[0]).toBe(turnChangeBinds(firstRows)[0]);
-    expect(planCreatedBinds(nextRows, planLink)[0]).toBe(planCreatedBinds(firstRows, planLink)[0]);
-  });
-});
-
 describe("hydrate", () => {
   it("loads the latest page via beginHydrate + session.transcript.read + hydrateTranscript", async () => {
     const client = new FakeClient();
@@ -509,60 +367,6 @@ describe("hydrate", () => {
     expect(engine.getSnapshot().state.hydrateStatus).toBe("ready");
     expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["b1"]);
     expect(client.reads[0]?.name).toBe(ARCHIVE_TRANSCRIPT_QUERY_NAME);
-  });
-
-  it("defers the archive read while the selected session is being activated", async () => {
-    const client = new FakeClient();
-    const archiveIdentity: ConversationIdentity = { sessionId: other.sessionId };
-    const engine = engineOf(client, { identity: archiveIdentity, deferHydrate: () => true });
-    engine.start();
-    await tick();
-
-    // 状态已经进入 loading（不会反复重试），但没有发出任何 transcript 读取。
-    expect(client.begins).toBe(1);
-    expect(client.conversation.hydrateStatus).toBe("loading");
-    expect(client.reads).toEqual([]);
-    engine.dispose();
-  });
-
-  it("reads the live page once the activation window is over", async () => {
-    const client = new FakeClient();
-    let activating = true;
-    const engine = engineOf(client, { identity: { sessionId: other.sessionId }, deferHydrate: () => activating });
-    engine.start();
-    await tick();
-    expect(client.reads).toEqual([]);
-
-    activating = false;
-    const reload = engine.reload();
-    await tick();
-    client.resolveNext(archivePage(other.sessionId, [userItem("b1", "historical session")]));
-    await reload;
-
-    expect(client.reads.map((read) => read.name)).toEqual([ARCHIVE_TRANSCRIPT_QUERY_NAME]);
-    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["b1"]);
-    engine.dispose();
-  });
-
-  it("reuses rows handed in as the switch-back baseline instead of rebuilding them", async () => {
-    const first = new FakeClient();
-    const seedEngine = engineOf(first, { identity: { sessionId: other.sessionId } });
-    seedEngine.start();
-    first.resolveNext(archivePage(other.sessionId, [userItem("b1", "historical session"), assistantItem("a1", "answer")]));
-    await tick();
-    const seeded = seedEngine.getSnapshot().rows;
-    expect(seeded.length).toBeGreaterThan(0);
-    seedEngine.dispose();
-
-    const client = new FakeClient();
-    const engine = engineOf(client, { identity: { sessionId: other.sessionId }, initialRows: seeded });
-    engine.start();
-    client.resolveNext(archivePage(other.sessionId, [userItem("b1", "historical session"), assistantItem("a1", "answer")]));
-    await tick();
-
-    // 同一份内容重新落地时沿用旧行对象：memo 命中，正文不再解析一遍。
-    expect(engine.getSnapshot().rows).toBe(seeded);
-    engine.dispose();
   });
 
   it("hydrate UNAVAILABLE goes through failTranscriptHydrate and selectConversationHydrate", async () => {
@@ -619,29 +423,6 @@ describe("hydrate", () => {
     expect(client.reads[1]?.input.cursor).toBe("older-2");
     expect(client.hydrateCalls[1]).toEqual({ mode: "prepend", generation });
     expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["u1", "u2"]);
-  });
-
-  it("submits one prepend only after multiple physical pages close the older turn", async () => {
-    const client = new FakeClient();
-    const engine = engineOf(client);
-    engine.start();
-    client.resolveNext(page({ items: [userItem("u2", "later")], olderCursor: "older-2" as OpaqueCursor, hasMoreBefore: true }));
-    await tick();
-
-    const older = engine.loadOlder();
-    client.resolveNext(page({
-      items: [assistantItem("a1", "older answer tail")],
-      olderCursor: "older-1" as OpaqueCursor,
-      hasMoreBefore: true,
-    }));
-    await tick();
-    expect(client.reads.at(-1)?.input.cursor).toBe("older-1");
-    expect(client.hydrateCalls).toHaveLength(1);
-
-    client.resolveNext(page({ items: [userItem("u1", "older prompt")], hasMoreBefore: false }));
-    await older;
-    expect(client.hydrateCalls.map((entry) => entry.mode)).toEqual(["hydrate", "prepend"]);
-    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["u1", "a1", "u2"]);
   });
 });
 
@@ -1053,7 +834,7 @@ describe("live merge", () => {
           turnId: "t1",
           role: "assistant",
           createdAt: "2026-08-15T00:00:00.000Z",
-          blocks: { b1: { blockId: "b1", blockType: "text", text: "partial", textBytes: 7 } },
+          blocks: { b1: { blockId: "b1", blockType: "text", text: "partial" } },
           completed: false,
           aborted: true,
         },
@@ -2071,101 +1852,6 @@ describe("message copy", () => {
 });
 
 describe("gap resync signal", () => {
-  it("does not flush the main transcript for a child session terminal event", async () => {
-    const client = new FakeClient();
-    client.auto = page({ items: [] });
-    const engine = engineOf(client);
-    engine.start();
-    await tick();
-    const listener = vi.fn();
-    const off = engine.subscribe(listener);
-    const childSession = "child-session" as SessionId;
-
-    client.emit({
-      ...envelope(),
-      kind: "conversation.changed",
-      sessionId: childSession,
-      eventSeq: 1,
-      update: { kind: "conversation.turn.completed", sessionId: childSession, turnId: "child-turn" },
-    });
-    expect(listener).not.toHaveBeenCalled();
-
-    client.emit({
-      ...envelope(),
-      kind: "conversation.changed",
-      sessionId: session,
-      eventSeq: 2,
-      update: { kind: "conversation.turn.completed", sessionId: session, turnId: "main-turn" },
-    });
-    expect(listener).toHaveBeenCalledTimes(1);
-    off();
-    engine.dispose();
-  });
-
-  it("retries hydrate when a Runtime session switch clears the in-flight generation", async () => {
-    const client = new FakeClient();
-    const engine = engineOf(client);
-    engine.start();
-    await tick();
-    expect(client.reads).toHaveLength(1);
-    expect(client.conversation.hydrateStatus).toBe("loading");
-
-    // session.resume publishes a Runtime/session identity change while the
-    // first transcript query is still in flight. The Client correctly clears
-    // the previous conversation and advances its hydrate generation.
-    client.conversation = reduceConversationState(client.conversation, { type: "clear" });
-    client.emitState();
-    client.resolveNext(page({ items: [userItem("u-stale", "stale generation")] }));
-    await tick();
-
-    expect(client.begins).toBe(2);
-    expect(client.reads).toHaveLength(2);
-    expect(client.conversation.hydrateStatus).toBe("loading");
-
-    client.resolveNext(page({ items: [userItem("u-current", "current generation")] }));
-    await tick();
-    expect(engine.getSnapshot().state.hydrateStatus).toBe("ready");
-    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["u-current"]);
-    engine.dispose();
-  });
-
-  it("restarts hydrate when a later Runtime switch clears a ready conversation", async () => {
-    const client = new FakeClient();
-    const engine = engineOf(client);
-    engine.start();
-    await tick();
-    client.resolveNext(page({ items: [userItem("u-before", "before switch")] }));
-    await tick();
-    expect(client.conversation.hydrateStatus).toBe("ready");
-
-    client.conversation = reduceConversationState(client.conversation, { type: "clear" });
-    client.emitState();
-    await tick();
-
-    expect(client.begins).toBe(2);
-    expect(client.reads).toHaveLength(2);
-    expect(client.conversation.hydrateStatus).toBe("loading");
-
-    client.resolveNext(page({ items: [userItem("u-after", "after switch")] }));
-    await tick();
-    expect(engine.getSnapshot().state.items.map((item) => item.itemId)).toEqual(["u-after"]);
-    engine.dispose();
-  });
-
-  it("fails explicitly instead of staying loading when the transcript belongs to another session", async () => {
-    const client = new FakeClient();
-    const engine = engineOf(client);
-    engine.start();
-    await tick();
-
-    client.resolveNext(page({ sessionId: "session-other" as SessionId, items: [] }));
-    await tick();
-
-    expect(engine.getSnapshot().state.hydrateStatus).toBe("error");
-    expect(engine.getSnapshot().state.error?.code).toBe("STALE_EPOCH");
-    engine.dispose();
-  });
-
   it("keeps later conversation events when eventSeq skips non-conversation traffic", () => {
     let state = resetConversation(1, identity, "ready");
     state = applyLiveEvent(state, {
@@ -3370,65 +3056,6 @@ describe("turn file-change card", () => {
     expect(reviewed).toEqual(["turn-1", SESSION_CHANGE_LAST_ID]);
   });
 
-  it("caps lists over six files and cycles collapsed → capped → full → collapsed", () => {
-    const tools = Array.from({ length: 8 }, (_, index) => ({
-      ...write,
-      toolCallId: `write-cap-${index}`,
-      arguments: { path: `apps/renderer/src/mod-${index}.ts`, content: "a\nb" },
-    }));
-    const { container } = render(
-      <ConvoTranscript
-        rows={[
-          {
-            type: "assistant" as const,
-            itemId: "cap-turn",
-            createdAt: "2026-08-15T00:00:02.000Z",
-            status: "completed" as const,
-            presentation: "reply" as const,
-            segments: [{ type: "batch" as const, key: "b", tools }],
-          },
-        ]}
-      />,
-    );
-    expect(container.querySelector(".turn-diff")?.className).toContain("open");
-    expect(container.querySelector(".turn-diff")?.className).toContain("capped");
-    const toggle = screen.getAllByRole("button", { name: /个文件已更改/ })[0]!;
-    fireEvent.click(toggle);
-    expect(container.querySelector(".turn-diff")?.className).not.toContain("capped");
-    expect(container.querySelector(".turn-diff")?.className).toContain("open");
-    fireEvent.click(toggle);
-    expect(container.querySelector(".turn-diff")?.className).not.toContain("open");
-    fireEvent.click(toggle);
-    expect(container.querySelector(".turn-diff")?.className).toContain("open");
-    expect(container.querySelector(".turn-diff")?.className).toContain("capped");
-  });
-
-  it("skips the capped stage when files fit within the limit", () => {
-    const { container } = render(
-      <ConvoTranscript
-        rows={[
-          {
-            type: "assistant" as const,
-            itemId: "small-turn",
-            createdAt: "2026-08-15T00:00:02.000Z",
-            status: "completed" as const,
-            presentation: "reply" as const,
-            segments: [{ type: "batch" as const, key: "b", tools: [write, edit] }],
-          },
-        ]}
-      />,
-    );
-    const toggle = screen.getByRole("button", { name: /2 个文件已更改/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(container.querySelector(".turn-diff")?.className).not.toContain("capped");
-    fireEvent.click(toggle);
-    expect(container.querySelector(".turn-diff")?.className).not.toContain("open");
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(toggle);
-    expect(container.querySelector(".turn-diff")?.className).not.toContain("capped");
-    expect(container.querySelector(".turn-diff")?.className).toContain("open");
-  });
-
   it("holds the latest card until the Runtime turn closes, even after file tools succeed", () => {
     const writeItem: Extract<ConversationItem, { kind: "message" }> = {
       ...assistantItem("m-write", ""),
@@ -4327,3 +3954,5 @@ describe("compaction timeline", () => {
     expect(screen.getByText("这是最终的模型回复。")).toBeTruthy();
   });
 });
+
+

@@ -1,5 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject, type UIEvent } from "react";
-import { recallSessionConversation } from "./sessionConversationCache";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject, type UIEvent } from "react";
 
 /** How close to the tail counts as "back at the tail" when the user returns. */
 export const FOLLOW_THRESHOLD_PX = 72;
@@ -198,35 +197,23 @@ export function useConversationScroll(args: {
   preparePrepend: () => void;
 } {
   const { scrollerRef, identityKey, itemCount, loadingOlder, pin = "bottom", contentKey = "" } = args;
-  const initialAtBottom = useRef(
-    pin === "bottom" && (recallSessionConversation(identityKey)?.viewport?.atBottom ?? true),
-  ).current;
-  const [follow, setFollow] = useState(initialAtBottom);
+  const [follow, setFollow] = useState(pin === "bottom");
   const [hasNewContent, setHasNewContent] = useState(false);
-  const followRef = useRef(initialAtBottom);
+  const followRef = useRef(pin === "bottom");
   const itemCountRef = useRef(itemCount);
   const contentKeyRef = useRef(contentKey);
   const contentKeyLiveRef = useRef(contentKey);
   contentKeyLiveRef.current = contentKey;
-  const prependPendingRef = useRef(false);
+  const anchorRef = useRef<ScrollAnchor | null>(null);
+  /** First row id at the moment "加载更早消息" was clicked; a prepend changes it. */
+  const prependFromRef = useRef<string | null>(null);
   /** Last scrollTop we know about, so a scroll event can be read as a direction. */
   const lastTopRef = useRef(0);
 
-  /**
-   * Pins / unpins the tail. `userScroll` marks an unpin caused by the user
-   * scrolling away from the tail (wheel/keyboard/touch gesture or scroll event)
-   * — the only unpins that surface the "回到最新" pill. `preparePrepend` also
-   * unpins to hold the scroll position across a load-older page, but that must
-   * not look like the user left the tail, so it does not pass `userScroll`.
-   */
-  const setPin = useCallback((next: boolean, userScroll = false) => {
+  const setPin = useCallback((next: boolean) => {
     followRef.current = next;
     setFollow(next);
-    if (next) {
-      setHasNewContent(false);
-    } else if (userScroll) {
-      setHasNewContent(true);
-    }
+    if (next) setHasNewContent(false);
   }, []);
 
   const stick = useCallback(() => {
@@ -237,10 +224,29 @@ export function useConversationScroll(args: {
     lastTopRef.current = el.scrollTop;
   }, [pin, scrollerRef]);
 
-  /** Virtuoso/ResizeObserver own late measurements; one synchronous tail write is enough. */
+  /**
+   * 一次提交里有多个 effect 会要求贴底（identity 重置、行数增长、contentKey 变化、
+   * ResizeObserver），每次都排三次写入的话一次切换要写六到九次 scrollTop，还每次强制
+   * 同步布局。这里把「本帧的贴底」合成一条链：立刻贴一次，再在随后两帧各补一次，
+   * 让晚到的图片 / 代码块布局也能收进来。
+   */
+  const stickFrameRef = useRef<number | undefined>(undefined);
   const stickAfterLayout = useCallback(() => {
     stick();
+    if (typeof requestAnimationFrame !== "function") return;
+    if (stickFrameRef.current !== undefined) return;
+    stickFrameRef.current = requestAnimationFrame(() => {
+      stick();
+      stickFrameRef.current = requestAnimationFrame(() => {
+        stickFrameRef.current = undefined;
+        stick();
+      });
+    });
   }, [stick]);
+
+  useEffect(() => () => {
+    if (stickFrameRef.current !== undefined) cancelAnimationFrame(stickFrameRef.current);
+  }, []);
 
   const jumpToLatest = useCallback(() => {
     setPin(true);
@@ -269,7 +275,7 @@ export function useConversationScroll(args: {
         return;
       }
       if (moved < 0) {
-        if (followRef.current) setPin(false, true);
+        if (followRef.current) setPin(false);
         return;
       }
       if (moved > 0 && !followRef.current && shouldFollow(distance)) setPin(true);
@@ -278,19 +284,29 @@ export function useConversationScroll(args: {
   );
 
   const preparePrepend = useCallback(() => {
-    prependPendingRef.current = true;
+    const el = scrollerRef.current;
+    if (!el) return;
+    /* Idempotent: the click handler captures first, and the loadingOlder effect
+       fires right after for callers that trigger loadOlder programmatically.
+       The second call must not re-capture — by then the page may have landed. */
+    if (anchorRef.current !== null) return;
+    anchorRef.current = captureAnchor(el);
+    prependFromRef.current = firstItemId(el);
+    /* Asking for older messages is an explicit "I am reading history" — never let
+       the incoming page or the next stream chunk yank the view back to the tail. */
     if (followRef.current) setPin(false);
-  }, [setPin]);
+  }, [scrollerRef, setPin]);
 
   useLayoutEffect(() => {
-    const followBottom = pin === "bottom" && (recallSessionConversation(identityKey)?.viewport?.atBottom ?? true);
-    prependPendingRef.current = false;
+    const followBottom = pin === "bottom";
+    anchorRef.current = null;
+    prependFromRef.current = null;
     itemCountRef.current = -1;
     contentKeyRef.current = contentKeyLiveRef.current;
     lastTopRef.current = scrollerRef.current?.scrollTop ?? 0;
     setPin(followBottom);
     setHasNewContent(false);
-    if (followBottom || pin === "top") stickAfterLayout();
+    stickAfterLayout();
   }, [identityKey, pin, scrollerRef, setPin, stickAfterLayout]);
 
   /* Unpin the instant a gesture asks to go up — before the scroll event lands,
@@ -298,7 +314,7 @@ export function useConversationScroll(args: {
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (!el || pin === "top") return;
-    return bindTailGestures(el, () => followRef.current, () => setPin(false, true));
+    return bindTailGestures(el, () => followRef.current, () => setPin(false));
   }, [identityKey, pin, scrollerRef, setPin]);
 
   useLayoutEffect(() => {
@@ -307,10 +323,26 @@ export function useConversationScroll(args: {
     const previous = itemCountRef.current;
     const grew = itemCount > previous;
     itemCountRef.current = itemCount;
-    const prepending = prependPendingRef.current && (loadingOlder || grew);
-    if (!loadingOlder) prependPendingRef.current = false;
+    const anchor = anchorRef.current;
+    if (anchor !== null) {
+      /* Rows appeared *above* the viewport: the older page landed. Put the row the
+         user was reading back under the cursor instead of jumping to the new top.
+         A row appended at the tail while the request was in flight leaves the first
+         row alone, so it does not consume the anchor. */
+      if (grew && previous >= 0 && firstItemId(el) !== prependFromRef.current) {
+        anchorRef.current = null;
+        prependFromRef.current = null;
+        restoreAnchor(el, anchor);
+        lastTopRef.current = el.scrollTop;
+        return;
+      }
+      /* Request settled without prepending anything — the anchor is stale. */
+      if (!loadingOlder) {
+        anchorRef.current = null;
+        prependFromRef.current = null;
+      }
+    }
     if (!grew || pin === "top") return;
-    if (prepending) return;
     if (followRef.current) {
       stickAfterLayout();
       setHasNewContent(false);

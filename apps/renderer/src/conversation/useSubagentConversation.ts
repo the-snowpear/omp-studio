@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import type { SessionId } from "@omp-studio/client-contract";
 import { previewSubagentConversationItems } from "../preview/subagentConversation";
 import {
@@ -9,7 +9,6 @@ import {
 } from "./subagentConversationEngine";
 import { emptyConversationState } from "./conversationViewModel";
 import type { SubagentHubTarget } from "./toolMeta";
-import { createConversationCommitGate } from "./conversationCommitGate";
 
 export type UseSubagentConversationResult = SubagentConversationSnapshot & {
   loadOlder: () => void;
@@ -32,7 +31,6 @@ export function useSubagentConversation(input: {
   readonly liveSessionId?: SessionId;
 }): UseSubagentConversationResult {
   const [, bump] = useReducer((value: number) => value + 1, 0);
-  const gate = useMemo(() => createConversationCommitGate(() => bump()), []);
   const engineRef = useRef<SubagentConversationEngine | null>(null);
   const clientRef = useRef(input.client);
   clientRef.current = input.client;
@@ -55,16 +53,15 @@ export function useSubagentConversation(input: {
       ...(input.liveSessionId === undefined ? {} : { liveSessionId: input.liveSessionId }),
     });
     engineRef.current = engine;
-    const off = engine.subscribe(gate.notify);
+    const off = engine.subscribe(() => bump());
     engine.start();
     bump();
     return () => {
       off();
       engine.dispose();
-      gate.reset();
       if (engineRef.current === engine) engineRef.current = null;
     };
-  }, [key, gate]);
+  }, [key]);
 
   let snapshot = emptySnapshot;
   try {

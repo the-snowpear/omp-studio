@@ -18,8 +18,6 @@ import {
   type TimelineRow,
 } from "./conversationViewModel";
 import type { SubagentHubTarget } from "./toolMeta";
-import type { ConversationCommitPriority } from "./conversationCommitGate";
-import { reuseTimelineRows } from "./rowReuse";
 
 const LIVE_BUFFER_LIMIT = 128;
 const PAGE_LIMIT = 50;
@@ -28,7 +26,7 @@ export type SubagentConversationClient = Pick<StudioClient, "query" | "subscribe
 
 export type SubagentConversationSnapshot = {
   readonly state: ConversationState;
-  readonly rows: readonly TimelineRow[];
+  readonly rows: TimelineRow[];
   readonly demo: boolean;
   readonly loadingOlder: boolean;
   readonly identityKey: string;
@@ -36,7 +34,7 @@ export type SubagentConversationSnapshot = {
 
 export type SubagentConversationEngine = {
   getSnapshot(): SubagentConversationSnapshot;
-  subscribe(listener: (priority?: ConversationCommitPriority) => void): () => void;
+  subscribe(listener: () => void): () => void;
   start(): void;
   dispose(): void;
   loadOlder(): Promise<void>;
@@ -119,18 +117,16 @@ export function createSubagentConversationEngine(input: {
   let liveBuffer: BufferedLive[] = [];
   let replaying = false;
   let unsub: (() => void) | undefined;
-  const listeners = new Set<(priority?: ConversationCommitPriority) => void>();
+  const listeners = new Set<() => void>();
   const liveRead = shouldReadLiveAgentConversation(input);
-  let snapshotCacheState: ConversationState | undefined;
-  let snapshotCacheRows: readonly TimelineRow[] = [];
 
-  const emit = (priority: ConversationCommitPriority = "normal") => {
-    for (const listener of listeners) listener(priority);
+  const emit = () => {
+    for (const listener of listeners) listener();
   };
 
-  const setState = (next: ConversationState, priority: ConversationCommitPriority = "normal") => {
+  const setState = (next: ConversationState) => {
     state = next;
-    emit(priority);
+    emit();
   };
 
   const enqueueLive = (event: Extract<ClientEvent, { kind: "conversation.changed" }>) => {
@@ -152,13 +148,7 @@ export function createSubagentConversationEngine(input: {
       enqueueLive(event);
       return;
     }
-    const terminal =
-      event.update.kind === "conversation.message.completed" ||
-      event.update.kind === "conversation.tool.completed" ||
-      event.update.kind === "conversation.turn.completed" ||
-      event.update.kind === "conversation.turn.aborted" ||
-      event.update.kind === "conversation.compaction.completed";
-    setState(applyLiveEvent(state, event.update, identity, event.eventSeq), terminal ? "terminal" : "normal");
+    setState(applyLiveEvent(state, event.update, identity, event.eventSeq));
   };
 
   const replayBuffer = (sessionId: string) => {
@@ -238,13 +228,9 @@ export function createSubagentConversationEngine(input: {
 
   return {
     getSnapshot() {
-      if (snapshotCacheState !== state) {
-        snapshotCacheRows = reuseTimelineRows(snapshotCacheRows, buildTimeline(state));
-        snapshotCacheState = state;
-      }
       return {
         state,
-        rows: snapshotCacheRows,
+        rows: buildTimeline(state),
         demo: input.preview,
         loadingOlder,
         identityKey: identityKey(state.identity),

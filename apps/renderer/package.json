@@ -28,12 +28,10 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "codemirror": "^6.0.2",
-    "mdast-util-from-markdown": "^2.0.3",
     "mermaid": "^11.16.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
-    "react-virtuoso": "^4.18.12",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "yaml": "^2.9.0"

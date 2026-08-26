@@ -123,8 +123,6 @@ import { ConversationPane } from "./conversation/ConversationPane";
 import { SubagentInspectCard } from "./conversation/SubagentInspectCard";
 import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, type SubagentHubTarget } from "./conversation/toolMeta";
 import { ConversationMinimap } from "./conversation/ConversationMinimap";
-import { createConversationViewportController } from "./conversation/conversationViewportController";
-import { useStableCallback } from "./useStableCallback";
 import { TaskProgressDock } from "./conversation/TaskProgressDock";
 import { sessionTaskProgress } from "./conversation/toolMeta";
 import { SessionChanges } from "./conversation/SessionChanges";
@@ -142,7 +140,6 @@ import {
 } from "./conversation/userMessageRestore";
 import { useUserMessageTreeConfirm } from "./conversation/UserMessageTreeConfirm";
 import { getDefaultThumbStore } from "./conversation/userMessageThumbs";
-import { forgetSessionConversation } from "./conversation/sessionConversationCache";
 import { claimTransientToast, isTransientStatusNotice, transientStatusFamily } from "./conversation/transientStatusNotice";
 import { PreviewModeProvider, usePreviewMode } from "./preview/PreviewContext";
 import {
@@ -3555,13 +3552,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
         sessionId: selectedSessionId as SessionId,
         ...(snapshot?.sessionId === selectedSessionId ? { runtimeEpoch: snapshot.runtimeEpoch } : {}),
       };
-  /* 选中的会话有 Runtime 驻留但还不是活动会话：AppShell 正在为它发 `session.resume`，
-     identity 很快会补上 `runtimeEpoch`。此时先别读归档页，等 live 页一次读完
-     （`useConversation` 内部有兜底：epoch 迟迟不来仍会回落到归档读取）。 */
-  const selectedIsResident =
-    selectedSessionId !== undefined
-    && residentForSession(state.clientState?.entities.residents, selectedSessionId) !== undefined
-    && snapshot?.sessionId !== selectedSessionId;
   const convo = useConversation({
     preview,
     client: conversationClient,
@@ -3570,7 +3560,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     // currently connected Runtime capability manifest.
     canRead: true,
     runtimeConnected,
-    activating: selectedIsResident,
     ...(previewThreadId === undefined ? {} : { previewThreadId }),
   });
   const [compactReloadHold, setCompactReloadHold] = useState(false);
@@ -3614,7 +3603,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   }, [convo.state.notices]);
   /* ConversationPane 与 ConversationMinimap 共享同一 scroller（滚动同步/跳转不走 DOM id 查询）。 */
   const convoScrollerRef = useRef<HTMLElement | null>(null);
-  const convoViewportController = useMemo(() => createConversationViewportController(), []);
   const welcomeGate = {
     preview,
     compacting: compactingNow,
@@ -4259,7 +4247,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     try {
       const handle = await client.command(name, { targetId });
       const outcome = await waitReceipt<SessionTreeCommandOutcome>(client, handle.requestId);
-      if (selectedSessionId !== undefined) forgetSessionConversation(String(selectedSessionId));
       setComposerError(undefined);
       return outcome;
     } catch (error) {
@@ -4338,12 +4325,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       onPreviewDone: () => setStatusToast("演示：已从这条消息新建会话（未调用 Host）"),
     });
   };
-  // 传进对话子树的 handler 必须是恒定引用：它们闭包里的 disabled 原因、busy、临时
-  // 闭包每帧都在变，useCallback 依赖同样不稳定，只有 ref 转发能让 memo 真正生效。
-  const handleRestorePending = useStableCallback(restorePending);
-  const handleRestoreUserMessage = useStableCallback(restoreUserMessage);
-  const handleBranchUserMessage = useStableCallback(branchUserMessage);
-  const handleReviewChanges = useStableCallback((turnId: string) => openChanges({ turnId }));
   const promptInputOf = (payload: ComposerSnapshot): { text: string; images?: PromptImageInput[] } => {
     const text = injectMagicKeyword(payload.text.trim(), magicKeyword);
     return payload.images.length === 0 ? { text } : { text, images: [...payload.images] };
@@ -4830,17 +4811,18 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
           <ConversationPane
             snapshot={convo}
             onLoadOlder={convo.loadOlder}
-            onRestore={handleRestorePending}
-            onRestoreUserMessage={handleRestoreUserMessage}
-            onBranchUserMessage={handleBranchUserMessage}
+            onRestore={restorePending}
+            onRestoreUserMessage={restoreUserMessage}
+            onBranchUserMessage={branchUserMessage}
             {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
             {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
             scrollerRef={convoScrollerRef}
-            viewportController={convoViewportController}
-            onReviewChanges={handleReviewChanges}
+            onReviewChanges={(turnId) => openChanges({ turnId })}
             planLink={planLink}
             compacting={compactingNow}
-            onInspectSubagent={setInspectTarget}
+            onInspectSubagent={(target) => {
+              setInspectTarget(target);
+            }}
             {...(preview || rosterAgents === undefined ? {} : { liveAgents: rosterAgents })}
             {...(activity === undefined ? {} : { activity })}
             {...(showWelcome ? { forceWelcome: true } : {})}
@@ -4865,7 +4847,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
           <ConversationMinimap
             rows={sessionCreating === true ? [] : convo.rows}
             scrollerRef={convoScrollerRef}
-            viewportController={convoViewportController}
             preview={preview}
           />
           <div className="composer-region">
@@ -6801,7 +6782,6 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             return next;
           });
           // 删除该会话的 IndexedDB 缩略图预览字节，避免 UI 残留。
-          forgetSessionConversation(String(entry.sessionId));
           await getDefaultThumbStore().dropSession(String(entry.sessionId)).catch(() => {});
         }
         if (selectedHistoryId === entry.historyId) onNewThread();
