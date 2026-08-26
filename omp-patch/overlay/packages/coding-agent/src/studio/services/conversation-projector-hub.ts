@@ -77,7 +77,7 @@ export class ConversationProjectorHub {
 	}
 
 	#shouldBind(ref: AgentRef): boolean {
-		return ref.id !== MAIN_AGENT_ID && ref.kind === "sub" && ref.status === "running" && ref.session !== null;
+		return ref.id !== MAIN_AGENT_ID && ref.kind === "sub" && ref.session !== null;
 	}
 
 	#onRegistry(event: RegistryEvent): void {
@@ -117,8 +117,8 @@ export class ConversationProjectorHub {
 		const existing = this.#children.get(agentId);
 		if (existing === undefined) return;
 		this.#children.delete(agentId);
-		existing.projector.flush();
 		existing.unsubscribe();
+		existing.projector.flush();
 		existing.projector.dispose();
 	}
 

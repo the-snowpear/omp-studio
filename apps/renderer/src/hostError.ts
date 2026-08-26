@@ -72,56 +72,48 @@ type StateWatchClient = StudioClient & {
 
 const stateWatchClient = (client: StudioClient): StateWatchClient => client as StateWatchClient;
 
-export async function waitReceipt<T>(client: ReceiptClient, requestId: string, timeoutMs?: number): Promise<T> {
+export async function waitReceipt<T>(client: ReceiptClient, requestId: string, timeoutMs = RECEIPT_TIMEOUT_MS): Promise<T> {
   const watched = stateWatchClient(client);
-  const command = commandStateOf(watched, requestId);
-  const existing = isTerminalReceipt(command) ? command : undefined;
+  const existing = receiptFromState(watched, requestId);
   if (existing !== undefined) {
     return await new Promise<T>((resolve, reject) => settleReceipt(existing, resolve, reject));
   }
-  const effectiveTimeoutMs = timeoutMs ?? (command?.commandName === "core.prompt" ? undefined : RECEIPT_TIMEOUT_MS);
   return await new Promise((resolve, reject) => {
     let settled = false;
-    let unsub: Unsubscribe = () => undefined;
-    let offState: Unsubscribe = () => undefined;
     const succeed = (result: T) => {
       if (settled) return;
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(timer);
       unsub();
-      offState();
+      offState?.();
       resolve(result);
     };
     const fail = (error: unknown) => {
       if (settled) return;
       settled = true;
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(timer);
       unsub();
-      offState();
+      offState?.();
       reject(error);
     };
-    const timer =
-      effectiveTimeoutMs === undefined
-        ? undefined
-        : setTimeout(() => fail({ code: "UNAVAILABLE", message: "等待 Host 回执超时" }), effectiveTimeoutMs);
-    unsub = client.subscribe({ scope: "command", requestId: requestId as CommandRequestId }, (event) => {
+    const timer = setTimeout(() => fail({ code: "UNAVAILABLE", message: "等待 Host 回执超时" }), timeoutMs);
+    const unsub = client.subscribe({ scope: "command", requestId: requestId as CommandRequestId }, (event) => {
       if (event.kind !== "command.receipt" || event.receipt.requestId !== requestId) return;
       settleReceipt(event.receipt, succeed, fail);
     });
-    if (settled) unsub();
     // The reducer can mark an in-flight command outcome_unknown without any
     // matching command.receipt event: re-bootstrap / resync, runtime epoch
     // change, runtime loss. Re-check the command state on every reducer
     // update so the wait settles with the real terminal reason instead of
     // hanging until the timeout ("等待 Host 回执超时") for a command that
     // actually succeeded.
-    if (!settled && typeof watched.onState === "function") {
-      offState = watched.onState(() => {
-        const raced = receiptFromState(watched, requestId);
-        if (raced !== undefined) settleReceipt(raced, succeed, fail);
-      });
-      if (settled) offState();
-    }
+    const offState =
+      typeof watched.onState === "function"
+        ? watched.onState(() => {
+            const raced = receiptFromState(watched, requestId);
+            if (raced !== undefined) settleReceipt(raced, succeed, fail);
+          })
+        : undefined;
     const raced = receiptFromState(watched, requestId);
     if (raced !== undefined) {
       settleReceipt(raced, succeed, fail);

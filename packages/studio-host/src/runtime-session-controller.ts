@@ -86,10 +86,8 @@ export class StudioRuntimeSessionController {
     try {
       return await this.bridge.invoke(request, (receipt) => {
         this.ledger.reconcileReceipt(receipt);
-        if (TERMINAL.has(receipt.status)) {
-          const current = this.bridge.projectionSnapshot();
-          if (current !== undefined) this.#publish(current);
-        }
+        const current = this.bridge.projectionSnapshot();
+        if (current !== undefined) this.#publish(current);
       });
     } catch (error) {
       const entry = this.ledger.getByRequestId(request.requestId);

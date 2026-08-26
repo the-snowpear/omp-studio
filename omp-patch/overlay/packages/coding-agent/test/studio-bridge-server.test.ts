@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as crypto from "node:crypto";
-import { EventEmitter } from "node:events";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -14,7 +13,7 @@ import {
 	type StudioHelloResponse,
 	type StudioSnapshotResponse,
 } from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
-import { StudioBridgeServer, StudioBridgeWritePump } from "@oh-my-pi/pi-coding-agent/studio/bridge-server";
+import { StudioBridgeServer } from "@oh-my-pi/pi-coding-agent/studio/bridge-server";
 import { StudioCommandManifestService } from "@oh-my-pi/pi-coding-agent/studio/services/command-manifest-service";
 import { StudioInteractionGateway } from "@oh-my-pi/pi-coding-agent/studio/services/interaction-port";
 import { StudioLiveService } from "@oh-my-pi/pi-coding-agent/studio/services/live-service";
@@ -24,62 +23,6 @@ import type { StudioHostRuntime } from "@oh-my-pi/pi-coding-agent/studio/studio-
 
 const servers: StudioBridgeServer[] = [];
 const sockets: net.Socket[] = [];
-
-class SlowSocketDouble extends EventEmitter {
-	destroyed = false;
-	blocked = true;
-	readonly writes: string[] = [];
-	readonly callbacks: Array<(error?: Error | null) => void> = [];
-	destroyError: Error | undefined;
-
-	write(frame: Buffer, callback: (error?: Error | null) => void): boolean {
-		this.writes.push(frame.toString("utf8"));
-		this.callbacks.push(callback);
-		return !this.blocked;
-	}
-
-	destroy(error?: Error): this {
-		this.destroyed = true;
-		this.destroyError = error;
-		this.emit("close");
-		return this;
-	}
-
-	drain(): void {
-		this.blocked = false;
-		this.emit("drain");
-	}
-
-	flush(): void {
-		for (const callback of this.callbacks.splice(0)) callback();
-	}
-}
-
-test("Bridge writer waits for drain and prioritizes queued control frames", () => {
-	const socket = new SlowSocketDouble();
-	const writer = new StudioBridgeWritePump(socket as unknown as net.Socket, 1024);
-	expect(writer.send(Buffer.from("event-a"), "event")).toBe(true);
-	expect(writer.send(Buffer.from("event-b"), "event")).toBe(true);
-	expect(writer.send(Buffer.from("receipt"), "control")).toBe(true);
-	expect(socket.writes).toEqual(["event-a"]);
-
-	socket.drain();
-	expect(socket.writes).toEqual(["event-a", "receipt", "event-b"]);
-	socket.flush();
-	expect(writer.bufferedBytes).toBe(0);
-	expect(socket.destroyed).toBe(false);
-});
-
-test("Bridge writer closes a slow connection before its byte queue can grow without bound", () => {
-	const socket = new SlowSocketDouble();
-	const writer = new StudioBridgeWritePump(socket as unknown as net.Socket, 12);
-	expect(writer.send(Buffer.from("123456"), "event")).toBe(true);
-	expect(writer.send(Buffer.from("abcdef"), "event")).toBe(true);
-	expect(writer.bufferedBytes).toBe(12);
-	expect(writer.send(Buffer.from("x"), "event")).toBe(false);
-	expect(socket.destroyed).toBe(true);
-	expect(socket.destroyError?.message).toContain("overflow");
-});
 
 function fakeLoopService(): StudioLoopService {
 	return new StudioLoopService({

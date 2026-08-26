@@ -16,7 +16,6 @@ import {
 	sanitizeJsonValue,
 	sanitizePublicText,
 	sanitizeToolArguments,
-	truncateUtf8,
 	utf8ByteLength,
 } from "./conversation-sanitizer";
 import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
@@ -24,17 +23,6 @@ import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversa
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
 export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
 export const CONVERSATION_LIVE_QUEUE_LIMIT = 128;
-
-const TERMINAL_LATE_EVENT_TYPES = new Set<AgentSessionEvent["type"]>([
-	"message_start",
-	"message_update",
-	"message_end",
-	"tool_execution_start",
-	"tool_execution_update",
-	"tool_execution_end",
-	"auto_compaction_start",
-	"auto_compaction_end",
-]);
 
 export interface ConversationLiveClock {
 	nowMs(): number;
@@ -80,7 +68,7 @@ type OpenMessage = {
 	role: ConversationRole;
 	createdAt: string;
 	parentId: string | null;
-	blocks: Map<string, { blockType: "text" | "thinking"; text: string; bytes: number; truncated: boolean }>;
+	blocks: Map<string, { blockType: "text" | "thinking"; text: string }>;
 	toolCalls: Map<string, Extract<ConversationContentBlock, { type: "toolCall" }>>;
 	completed: boolean;
 };
@@ -306,7 +294,6 @@ export class ConversationLiveProjector {
 	}
 
 	#project(event: AgentSessionEvent): void {
-		if (this.#turnCompleted && TERMINAL_LATE_EVENT_TYPES.has(event.type)) return;
 		switch (event.type) {
 			case "agent_start":
 				this.#onAgentStart();
@@ -396,7 +383,7 @@ export class ConversationLiveProjector {
 			this.#emitParsed({ kind: "conversation.turn.completed", sessionId: this.#sessionId, turnId });
 		}
 		this.#turnCompleted = true;
-		this.#clearTurnBuffers();
+		this.#openAssistantId = undefined;
 	}
 
 	#onMessageStart(message: AgentMessage): void {
@@ -678,17 +665,12 @@ export class ConversationLiveProjector {
 	#appendDelta(open: OpenMessage, contentIndex: number, blockType: "text" | "thinking", delta: string): void {
 		if (delta.length === 0) return;
 		const blockId = this.#blockId(open.messageId, contentIndex, blockType);
-		const existing = open.blocks.get(blockId) ?? { blockType, text: "", bytes: 0, truncated: false };
-		const remaining = Math.max(0, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES - existing.bytes);
-		const appended = truncateUtf8(delta, remaining);
-		existing.text += appended.text;
-		existing.bytes += utf8ByteLength(appended.text);
-		existing.truncated ||= appended.truncated;
+		const existing = open.blocks.get(blockId) ?? { blockType, text: "" };
+		existing.text += delta;
 		open.blocks.set(blockId, existing);
-		if (appended.text.length === 0) return;
 		const pendingKey = `${open.messageId}:${blockId}`;
 		const pending = this.#pending.get(pendingKey);
-		if (pending !== undefined) pending.delta += appended.text;
+		if (pending !== undefined) pending.delta += delta;
 		else {
 			this.#pending.set(pendingKey, {
 				sessionId: this.#sessionId,
@@ -696,7 +678,7 @@ export class ConversationLiveProjector {
 				messageId: open.messageId,
 				blockId,
 				blockType,
-				delta: appended.text,
+				delta,
 			});
 		}
 		const threshold = this.#options.coalesceCharThreshold ?? CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD;
@@ -711,12 +693,7 @@ export class ConversationLiveProjector {
 			if (text.length > 0) {
 				const blockId = this.#blockId(open.messageId, 0, "text");
 				const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, {
-					blockType: "text",
-					text: sanitized.text,
-					bytes: utf8ByteLength(sanitized.text),
-					truncated: sanitized.truncated,
-				});
+				open.blocks.set(blockId, { blockType: "text", text: sanitized.text });
 			}
 			return;
 		}
@@ -725,23 +702,13 @@ export class ConversationLiveProjector {
 			if (block.type === "text") {
 				const blockId = this.#blockId(open.messageId, index, "text");
 				const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, {
-					blockType: "text",
-					text: sanitized.text,
-					bytes: utf8ByteLength(sanitized.text),
-					truncated: sanitized.truncated,
-				});
+				open.blocks.set(blockId, { blockType: "text", text: sanitized.text });
 				return;
 			}
 			if (block.type === "thinking") {
 				const blockId = this.#blockId(open.messageId, index, "thinking");
 				const sanitized = sanitizePublicText(block.thinking, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, {
-					blockType: "thinking",
-					text: sanitized.text,
-					bytes: utf8ByteLength(sanitized.text),
-					truncated: sanitized.truncated,
-				});
+				open.blocks.set(blockId, { blockType: "thinking", text: sanitized.text });
 				return;
 			}
 			if (block.type === "toolCall") this.#recordToolCall(open, block);
@@ -751,9 +718,10 @@ export class ConversationLiveProjector {
 	#contentFromLiveBuffers(open: OpenMessage): ConversationContentBlock[] {
 		const content: ConversationContentBlock[] = [];
 		for (const block of open.blocks.values()) {
-			if (block.text.length === 0 && !block.truncated) continue;
-			const item: ConversationContentBlock = { type: block.blockType, text: block.text };
-			if (block.truncated) item.truncated = true;
+			const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+			if (sanitized.text.length === 0 && !sanitized.truncated) continue;
+			const item: ConversationContentBlock = { type: block.blockType, text: sanitized.text };
+			if (sanitized.truncated) item.truncated = true;
 			content.push(item);
 		}
 		for (const toolCall of open.toolCalls.values()) content.push(toolCall);
@@ -1057,23 +1025,19 @@ export class ConversationLiveProjector {
 	}
 
 	#clearLiveState(): void {
-		this.#clearTurnBuffers();
-		this.#queue.length = 0;
-		this.#turnId = undefined;
-		this.#continuationPending = false;
-		this.#turnAborted = false;
-		this.#turnCompleted = false;
-		this.#lastItemId = null;
-	}
-
-	#clearTurnBuffers(): void {
 		this.#clearCoalesceTimer();
 		this.#pending.clear();
+		this.#queue.length = 0;
 		this.#openMessages.clear();
 		this.#completedMessageIds.clear();
 		this.#completedToolIds.clear();
 		this.#toolOutput.clear();
 		this.#toolOwners.clear();
+		this.#turnId = undefined;
+		this.#continuationPending = false;
+		this.#turnAborted = false;
+		this.#turnCompleted = false;
+		this.#lastItemId = null;
 		this.#lastAssistantId = undefined;
 		this.#openAssistantId = undefined;
 		this.#releaseOpenCompaction();

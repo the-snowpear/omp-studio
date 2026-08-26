@@ -106,11 +106,6 @@ const TERMINAL_RECEIPT_STATUSES = new Set<StudioReceipt["status"]>([
   "outcome_unknown",
 ]);
 
-export const READY_EVENT_QUEUE_MAX_FRAMES = 4_096;
-export const READY_EVENT_QUEUE_MAX_BYTES = 8 * 1024 * 1024;
-const READY_EVENT_DRAIN_MAX_FRAMES = 256;
-const READY_EVENT_DRAIN_BUDGET_MS = 4;
-
 export class StudioBridgeClient {
   #state: StudioBridgeClientState = "idle";
   #socket: Socket | undefined;
@@ -119,11 +114,6 @@ export class StudioBridgeClient {
   #runtimeEpoch: RuntimeEpoch | undefined;
   #hello: StudioHelloResponse | undefined;
   #readyDataListener: ((chunk: Buffer) => void) | undefined;
-  #readyEventQueue: DecodedFrame[] = [];
-  #readyEventQueueHead = 0;
-  #readyEventQueueBytes = 0;
-  #readyEventDrainScheduled = false;
-  #snapshotRecoveryScheduled = false;
   readonly #pendingRequests = new Map<string, PendingRequest>();
   readonly #projectionListeners = new Set<(snapshot: StudioSnapshotResponse["snapshot"]) => void>();
   readonly #eventListeners = new Set<(event: StudioEventEnvelope) => void>();
@@ -282,7 +272,7 @@ export class StudioBridgeClient {
         cleanup();
         this.#state = "ready";
         this.#publishProjection(response.snapshot);
-        this.#processReadyFrames(frames.slice(snapshotIndex + 1));
+        for (const frame of frames.slice(snapshotIndex + 1)) this.#processReadyFrame(frame);
         if (this.#state === "ready") this.#attachReadyListener(socket, decoder);
         resolve(response);
       };
@@ -308,7 +298,6 @@ export class StudioBridgeClient {
           : setTimeout(() => {
               this.#pendingRequests.delete(request.requestId);
               reject(new StudioBridgeRequestError("OUTCOME_UNKNOWN"));
-              this.#scheduleSnapshotRecovery();
             }, timeoutMs);
       this.#pendingRequests.set(request.requestId, {
         resolve,
@@ -632,7 +621,7 @@ export class StudioBridgeClient {
   #attachReadyListener(socket: Socket, decoder = new FrameDecoder()): void {
     const listener = (chunk: Buffer): void => {
       try {
-        this.#processReadyFrames(decoder.push(chunk));
+        for (const frame of decoder.push(chunk)) this.#processReadyFrame(frame);
       } catch {
         socket.destroy();
       }
@@ -641,19 +630,7 @@ export class StudioBridgeClient {
     socket.on("data", listener);
   }
 
-  #processReadyFrames(frames: readonly DecodedFrame[]): void {
-    const eventFrames: DecodedFrame[] = [];
-    for (const frame of frames) {
-      if (!this.#tryProcessReceiptFrame(frame)) eventFrames.push(frame);
-    }
-    if (this.#state !== "ready") return;
-    for (const frame of eventFrames) {
-      if (!this.#enqueueReadyEvent(frame)) break;
-    }
-    this.#drainReadyEvents();
-  }
-
-  #tryProcessReceiptFrame(frame: DecodedFrame): boolean {
+  #processReadyFrame(frame: DecodedFrame): void {
     if (
       frame.body !== null &&
       typeof frame.body === "object" &&
@@ -671,78 +648,26 @@ export class StudioBridgeClient {
         if (pending.timer !== undefined) clearTimeout(pending.timer);
         this.#pendingRequests.delete(receipt.requestId);
         pending.resolve(receipt);
-        this.#scheduleSnapshotRecovery();
       }
-      return true;
-    }
-    return false;
-  }
-
-  #enqueueReadyEvent(frame: DecodedFrame): boolean {
-    const queuedFrames = this.#readyEventQueue.length - this.#readyEventQueueHead;
-    if (
-      queuedFrames >= READY_EVENT_QUEUE_MAX_FRAMES ||
-      this.#readyEventQueueBytes + frame.header.bodyLength > READY_EVENT_QUEUE_MAX_BYTES
-    ) {
-      this.#requireSnapshot("Studio event queue exceeded the Host limit; request a fresh snapshot");
-      return false;
-    }
-    this.#readyEventQueue.push(frame);
-    this.#readyEventQueueBytes += frame.header.bodyLength;
-    return true;
-  }
-
-  #scheduleReadyEventDrain(): void {
-    if (
-      this.#readyEventDrainScheduled ||
-      this.#state !== "ready" ||
-      this.#readyEventQueueHead >= this.#readyEventQueue.length
-    ) {
       return;
     }
-    this.#readyEventDrainScheduled = true;
-    setImmediate(() => {
-      this.#readyEventDrainScheduled = false;
-      try {
-        this.#drainReadyEvents();
-      } catch {
-        this.#socket?.destroy();
-      }
-    });
-  }
-
-  #drainReadyEvents(): void {
-    const deadline = Date.now() + READY_EVENT_DRAIN_BUDGET_MS;
-    let processed = 0;
-    while (
-      this.#state === "ready" &&
-      this.#readyEventQueueHead < this.#readyEventQueue.length &&
-      processed < READY_EVENT_DRAIN_MAX_FRAMES &&
-      Date.now() <= deadline
-    ) {
-      const frame = this.#readyEventQueue[this.#readyEventQueueHead++]!;
-      this.#readyEventQueueBytes -= frame.header.bodyLength;
-      this.#processReadyEventFrame(frame);
-      processed += 1;
-    }
-    if (this.#readyEventQueueHead >= this.#readyEventQueue.length) {
-      this.#clearReadyEventQueue();
-    } else if (this.#readyEventQueueHead >= 1_024) {
-      this.#readyEventQueue = this.#readyEventQueue.slice(this.#readyEventQueueHead);
-      this.#readyEventQueueHead = 0;
-    }
-    this.#scheduleReadyEventDrain();
-  }
-
-  #processReadyEventFrame(frame: DecodedFrame): void {
     const event = parseStudioEventEnvelope(frame.body);
     if (frame.header.runtimeEpoch !== event.runtimeEpoch) throw new Error("Event epoch mismatch");
     const result = this.#projection.applyEvent(event);
-    if (result === "gap" || result === "snapshot-required") {
-      this.#requireSnapshot("Studio event sequence requires a fresh snapshot");
+    if (result === "gap") {
+      this.#state = "snapshot-required";
+      this.#detachReadyListener();
+      this.options.onResyncRequired?.();
+      for (const listener of [...this.#resyncListeners]) {
+        try {
+          listener();
+        } catch {
+          // Isolate resync subscribers from the socket handler.
+        }
+      }
       return;
     }
-    if (result === "applied" || result === "applied-unprojected") {
+    if (result === "applied") {
       try {
         this.options.onEvent?.(event);
       } catch {
@@ -755,56 +680,14 @@ export class StudioBridgeClient {
           // Isolate sibling event listeners from the socket handler.
         }
       }
-      if (result === "applied") {
-        const snapshot = this.#projection.snapshot();
-        if (snapshot !== undefined) this.#publishProjection(snapshot);
-      }
+      const snapshot = this.#projection.snapshot();
+      if (snapshot !== undefined) this.#publishProjection(snapshot);
     }
-  }
-
-  #requireSnapshot(_reason: string): void {
-    if (this.#state === "snapshot-required") return;
-    this.#state = "snapshot-required";
-    this.#clearReadyEventQueue();
-    this.options.onResyncRequired?.();
-    for (const listener of [...this.#resyncListeners]) {
-      try {
-        listener();
-      } catch {
-        // Isolate resync subscribers from the socket handler.
-      }
-    }
-    this.#scheduleSnapshotRecovery();
-  }
-
-  #scheduleSnapshotRecovery(): void {
-    if (
-      this.#snapshotRecoveryScheduled ||
-      this.#state !== "snapshot-required" ||
-      this.#pendingRequests.size > 0
-    ) {
-      return;
-    }
-    this.#snapshotRecoveryScheduled = true;
-    setImmediate(() => {
-      this.#snapshotRecoveryScheduled = false;
-      if (this.#state !== "snapshot-required" || this.#pendingRequests.size > 0) return;
-      void this.requestSnapshot().catch(() => {
-        this.#socket?.destroy();
-      });
-    });
-  }
-
-  #clearReadyEventQueue(): void {
-    this.#readyEventQueue = [];
-    this.#readyEventQueueHead = 0;
-    this.#readyEventQueueBytes = 0;
   }
 
   #detachReadyListener(socket = this.#socket): void {
     if (this.#readyDataListener !== undefined) socket?.off("data", this.#readyDataListener);
     this.#readyDataListener = undefined;
-    this.#clearReadyEventQueue();
   }
 
   #handleSocketClosed(socket: Socket): void {

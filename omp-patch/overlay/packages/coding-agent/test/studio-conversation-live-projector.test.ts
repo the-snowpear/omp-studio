@@ -399,60 +399,6 @@ describe("ConversationLiveProjector", () => {
 		expect(deltas(events)).toBe("Hi");
 	});
 
-	test("terminal agent_end rejects late message, tool, and compaction events until the next agent_start", () => {
-		const { projector, events } = createProjector();
-		const completed = assistant([{ type: "text", text: "done" }]);
-		projector.project({ type: "agent_start" });
-		projector.project({ type: "message_start", message: completed });
-		projector.project({ type: "message_end", message: completed });
-		projector.project({ type: "agent_end", messages: [completed] });
-		const terminalEvents = [...events];
-
-		const late = assistant([{ type: "text", text: "late" }], { timestamp: TS + 1 });
-		projector.project({ type: "message_start", message: late });
-		projector.project(update(late, { type: "text_delta", contentIndex: 0, delta: "late", partial: late }));
-		projector.project({ type: "message_end", message: late });
-		projector.project({ type: "tool_execution_start", toolCallId: "late-tool", toolName: "Read", args: {} });
-		projector.project({
-			type: "tool_execution_update",
-			toolCallId: "late-tool",
-			toolName: "Read",
-			args: {},
-			partialResult: { content: [{ type: "text", text: "late" }] },
-		});
-		projector.project({
-			type: "tool_execution_end",
-			toolCallId: "late-tool",
-			toolName: "Read",
-			result: { content: [{ type: "text", text: "late" }], isError: false },
-			isError: false,
-		});
-		projector.project({ type: "auto_compaction_start", reason: "idle", action: "shake" });
-		projector.project({
-			type: "auto_compaction_end",
-			action: "shake",
-			result: undefined,
-			aborted: false,
-			willRetry: false,
-			skipped: true,
-		});
-		expect(events).toEqual(terminalEvents);
-
-		const next = assistant([{ type: "text", text: "next" }], { timestamp: TS + 2 });
-		projector.project({ type: "agent_start" });
-		projector.project({ type: "message_start", message: next });
-		projector.project({ type: "message_end", message: next });
-		projector.project({ type: "agent_end", messages: [next] });
-		expect(events.filter(event => event.kind === "conversation.turn.completed")).toHaveLength(2);
-		expect(
-			events.find(
-				(event): event is Extract<ConversationRuntimeEvent, { kind: "conversation.message.completed" }> =>
-					event.kind === "conversation.message.completed" &&
-					event.item.content.some(block => block.type === "text" && block.text === "next"),
-			)?.turnId,
-		).toBe("turn-2");
-	});
-
 	test("abort keeps received content and drops later deltas for that turn", () => {
 		const { projector, events } = createProjector();
 		const streaming = assistant([{ type: "text", text: "Hel" }], { stopReason: "aborted" });
@@ -614,32 +560,6 @@ describe("ConversationLiveProjector", () => {
 		expect(deltaEvents.length).toBeGreaterThan(0);
 		expect(deltas(events, "text")).toBe("x".repeat(10_000));
 		expect(events.length).toBeLessThan(deltaEvents.length + 8);
-	});
-
-	test("caps cumulative live deltas and the active fallback buffer, then marks it truncated", () => {
-		const { projector, events } = createProjector();
-		const message = assistant([]);
-		const oversized = "界".repeat(100_000);
-		projector.project({ type: "agent_start" });
-		projector.project({ type: "message_start", message });
-		projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: oversized, partial: message }));
-		projector.project({ type: "message_end", message: { ...message, content: undefined as never } });
-		const completed = events.find(
-			(event): event is Extract<ConversationRuntimeEvent, { kind: "conversation.message.completed" }> =>
-				event.kind === "conversation.message.completed",
-		);
-		const block = completed?.item.content.find(item => item.type === "text");
-		expect(block?.type).toBe("text");
-		if (block?.type !== "text") throw new Error("expected a text block");
-		const liveText = deltas(events, "text");
-		expect(new TextEncoder().encode(liveText).byteLength).toBeLessThanOrEqual(
-			CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES,
-		);
-		expect(liveText).toBe(block.text);
-		expect(new TextEncoder().encode(block.text).byteLength).toBeLessThanOrEqual(
-			CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES,
-		);
-		expect(block.truncated).toBe(true);
 	});
 
 	test("omits providerPayload and secret keys from serialized live frames", () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type {
   ClientEvent,
   CommandReceipt,
@@ -58,10 +58,10 @@ function fakeClient(initial: Record<string, CommandState> = {}): StudioClient & 
   return client as StudioClient & FakeClientHooks;
 }
 
-const accepted = (commandName = "core.steer"): CommandState =>
+const accepted = (): CommandState =>
   ({
     requestId: REQ,
-    commandName,
+    commandName: "core.steer",
     status: "accepted",
     acceptedAt: "2026-01-01T00:00:00.000Z",
   }) as unknown as CommandState;
@@ -83,10 +83,6 @@ const cursorlessEvent = (kind: ClientEvent["kind"], payload: Record<string, unkn
   ({ kind, ...payload }) as ClientEvent;
 
 describe("waitReceipt", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("resolves with the result when a terminal command.receipt event arrives", async () => {
     const client = fakeClient({ [REQ]: accepted() });
     const pendingPromise = waitReceipt(client, REQ, 2_000);
@@ -96,49 +92,6 @@ describe("waitReceipt", () => {
       }),
     );
     await expect(pendingPromise).resolves.toEqual({ ok: true });
-  });
-
-  it("cleans up when subscribe synchronously replays a terminal receipt", async () => {
-    let unsubscribed = false;
-    const client = {
-      getState: () => ({ commands: { [REQ]: accepted() } }),
-      subscribe(_scope: SubscriptionScope, listener: (event: ClientEvent) => void): Unsubscribe {
-        listener(cursorlessEvent("command.receipt", {
-          receipt: receipt("completed", { result: { ok: true } }),
-        }));
-        return () => {
-          unsubscribed = true;
-        };
-      },
-    } as unknown as StudioClient;
-
-    await expect(waitReceipt(client, REQ, 2_000)).resolves.toEqual({ ok: true });
-    expect(unsubscribed).toBe(true);
-  });
-
-  it("cleans up when onState synchronously replays a terminal state", async () => {
-    let command = accepted();
-    let eventUnsubscribed = false;
-    let stateUnsubscribed = false;
-    const client = {
-      getState: () => ({ commands: { [REQ]: command } }),
-      subscribe(): Unsubscribe {
-        return () => {
-          eventUnsubscribed = true;
-        };
-      },
-      onState(listener: () => void): Unsubscribe {
-        command = receipt("completed", { result: { ok: true } }) as unknown as CommandState;
-        listener();
-        return () => {
-          stateUnsubscribed = true;
-        };
-      },
-    } as unknown as StudioClient;
-
-    await expect(waitReceipt(client, REQ, 2_000)).resolves.toEqual({ ok: true });
-    expect(eventUnsubscribed).toBe(true);
-    expect(stateUnsubscribed).toBe(true);
   });
 
   it("settles with the real reason when a re-bootstrap marks the command outcome_unknown — not the timeout", async () => {
@@ -183,36 +136,6 @@ describe("waitReceipt", () => {
       code: "UNAVAILABLE",
       message: "等待 Host 回执超时",
     });
-  });
-
-  it("does not apply the generic 120-second timeout to core.prompt", async () => {
-    vi.useFakeTimers();
-    const client = fakeClient({ [REQ]: accepted("core.prompt") });
-    let settled = false;
-    const pendingPromise = waitReceipt<{ ok: boolean }>(client, REQ).finally(() => {
-      settled = true;
-    });
-
-    await vi.advanceTimersByTimeAsync(120_001);
-    expect(settled).toBe(false);
-    client.emitEvent(
-      cursorlessEvent("command.receipt", {
-        receipt: receipt("completed", { result: { ok: true } }),
-      }),
-    );
-    await expect(pendingPromise).resolves.toEqual({ ok: true });
-  });
-
-  it("honors an explicit timeout for core.prompt", async () => {
-    vi.useFakeTimers();
-    const client = fakeClient({ [REQ]: accepted("core.prompt") });
-    const pendingPromise = waitReceipt(client, REQ, 30);
-    const expectation = expect(pendingPromise).rejects.toMatchObject({
-      code: "UNAVAILABLE",
-      message: "等待 Host 回执超时",
-    });
-    await vi.advanceTimersByTimeAsync(30);
-    await expectation;
   });
 
   it("returns the terminal state immediately when it already exists", async () => {

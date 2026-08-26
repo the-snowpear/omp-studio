@@ -1,23 +1,10 @@
-import { randomUUID } from "node:crypto";
-import {
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-  writeSync,
-} from "node:fs";
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import type { CommandLedgerEntry } from "@omp-studio/studio-protocol";
 
 export interface CommandLedgerStore {
   load(): CommandLedgerEntry[];
   append(entry: CommandLedgerEntry): void;
-  compact?(entries: readonly CommandLedgerEntry[]): void;
 }
 
 export class JsonlCommandLedgerStore implements CommandLedgerStore {
@@ -57,29 +44,6 @@ export class JsonlCommandLedgerStore implements CommandLedgerStore {
       fsyncSync(descriptor);
     } finally {
       closeSync(descriptor);
-    }
-  }
-
-  compact(entries: readonly CommandLedgerEntry[]): void {
-    mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-    const temporaryPath = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      const descriptor = openSync(temporaryPath, "wx", 0o600);
-      try {
-        const content = entries.length === 0 ? "" : `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
-        writeFileSync(descriptor, content, "utf8");
-        fsyncSync(descriptor);
-      } finally {
-        closeSync(descriptor);
-      }
-      renameSync(temporaryPath, this.path);
-    } catch (error) {
-      try {
-        unlinkSync(temporaryPath);
-      } catch {
-        // The temporary file may not exist or may already have been renamed.
-      }
-      throw error;
     }
   }
 }
