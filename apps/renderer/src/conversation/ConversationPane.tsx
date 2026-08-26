@@ -202,9 +202,17 @@ export function ConversationPane({
           )}
         </div>
         {scroll.hasNewContent ? (
-          <button type="button" className="new-content-pill" onClick={scroll.jumpToLatest}>
-            有新内容 · 回到最新
-          </button>
+          <div className="new-content-pill-row">
+            <button
+              type="button"
+              className="new-content-pill"
+              onClick={scroll.jumpToLatest}
+              aria-label="回到最新"
+              data-tip="回到最新"
+            >
+              <Icon name="chevron-d" />
+            </button>
+          </div>
         ) : null}
       </main>
       <div className="sr-only" aria-live="polite">

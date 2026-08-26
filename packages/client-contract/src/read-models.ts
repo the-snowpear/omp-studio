@@ -563,6 +563,77 @@ export interface ModelLoginProviderRecord {
 }
 
 /**
+ * One web_search provider surfaced to the model-config page. Names are
+ * display labels; `hasCredential` is a Host-side approximation (env var or
+ * stored auth), never a secret value.
+ */
+export interface WebSearchProviderRecord {
+  readonly id: string;
+  readonly name: string;
+  /** True when the provider works with no credential at all (scraper engines, public). */
+  readonly credentialFree: boolean;
+  /** True when the Host detects an env var or stored/OAuth credential. */
+  readonly hasCredential: boolean;
+}
+
+/** Per-provider web search options edited in the advanced section. */
+export interface WebSearchAdvancedConfig {
+  readonly searxng?: {
+    readonly endpoint?: string;
+    /** True when a token is configured; the value itself never leaves the Host. */
+    readonly tokenSet?: boolean;
+    readonly basicUsername?: string;
+    /** True when a basic-auth password is configured; the value never leaves the Host. */
+    readonly passwordSet?: boolean;
+  };
+  readonly exa?: {
+    readonly enabled?: boolean;
+    readonly searchDelayMs?: number;
+  };
+}
+
+/** Web-search configuration section of the model-config read model. */
+export interface WebSearchConfigReadModel {
+  /** `web_search.enabled` — global tool switch. */
+  readonly enabled: boolean;
+  /** `providers.webSearchOrder` — explicit priority list; empty = built-in order. */
+  readonly order: ReadonlyArray<string>;
+  /** `providers.webSearchExclude` — providers never used, even as fallbacks. */
+  readonly exclude: ReadonlyArray<string>;
+  /** `providers.webSearchTimeoutSeconds` — per-provider transport hard timeout. */
+  readonly timeoutSeconds: number;
+  /** `providers.webSearchGeminiModel` — Gemini grounding model; empty = runtime default. */
+  readonly geminiModel: string;
+  /** Static catalog of the 23 built-in search providers, in runtime chain order. */
+  readonly providers: ReadonlyArray<WebSearchProviderRecord>;
+  readonly advanced: WebSearchAdvancedConfig;
+}
+
+/**
+ * Targeted web-search config write: only the fields explicitly provided are
+ * written to `config.yml`; everything else is left untouched. Empty strings
+ * clear scalar values except `searxng.token` / `searxng.basicPassword`, where
+ * an empty string keeps the existing secret (values are never read back).
+ */
+export interface ModelWebSearchSetInput {
+  readonly enabled?: boolean;
+  readonly order?: ReadonlyArray<string>;
+  readonly exclude?: ReadonlyArray<string>;
+  readonly timeoutSeconds?: number;
+  readonly geminiModel?: string;
+  readonly searxng?: {
+    readonly endpoint?: string;
+    readonly token?: string;
+    readonly basicUsername?: string;
+    readonly basicPassword?: string;
+  };
+  readonly exa?: {
+    readonly enabled?: boolean;
+    readonly searchDelayMs?: number;
+  };
+}
+
+/**
  * Model-config page read model. Paths, API keys and auth-store secrets
  * never appear. `generated*Yml` is Host-built and already redacted.
  */
@@ -585,6 +656,7 @@ export interface ModelConfigReadModel {
   readonly modelProviderOrder: ReadonlyArray<string>;
   readonly fallbackChains: Readonly<Record<string, ReadonlyArray<string>>>;
   readonly fallbackRevertPolicy: ModelFallbackRevertPolicy;
+  readonly webSearch: WebSearchConfigReadModel;
 }
 
 /** Skill origin as OMP discovery would classify it. Never a filesystem path. */

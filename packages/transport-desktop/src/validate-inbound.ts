@@ -1364,6 +1364,53 @@ function validateModelsCycleOrderSetInput(input: unknown): void {
   }
 }
 
+function validateModelsWebSearchSetInput(input: unknown): void {
+  assertPlainObject(input, "models.webSearch.set input");
+  assertNoUnknownKeys(
+    input,
+    ["enabled", "order", "exclude", "timeoutSeconds", "geminiModel", "searxng", "exa"],
+    "models.webSearch.set input",
+  );
+  if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
+    throw new ValidationError("models.webSearch.set input: enabled must be boolean");
+  }
+  for (const key of ["order", "exclude"] as const) {
+    if (input[key] !== undefined) {
+      if (!Array.isArray(input[key]) || input[key].some((item) => typeof item !== "string" || item.length === 0)) {
+        throw new ValidationError(`models.webSearch.set input: ${key} must be an array of non-empty strings`);
+      }
+      if (new Set(input[key]).size !== input[key].length) {
+        throw new ValidationError(`models.webSearch.set input: ${key} must not contain duplicates`);
+      }
+    }
+  }
+  if (input.timeoutSeconds !== undefined && (typeof input.timeoutSeconds !== "number" || !Number.isFinite(input.timeoutSeconds) || input.timeoutSeconds <= 0)) {
+    throw new ValidationError("models.webSearch.set input: timeoutSeconds must be a positive number");
+  }
+  if (input.geminiModel !== undefined && typeof input.geminiModel !== "string") {
+    throw new ValidationError("models.webSearch.set input: geminiModel must be a string");
+  }
+  if (input.searxng !== undefined) {
+    assertPlainObject(input.searxng, "models.webSearch.set input: searxng");
+    assertNoUnknownKeys(input.searxng, ["endpoint", "token", "basicUsername", "basicPassword"], "models.webSearch.set input: searxng");
+    for (const key of ["endpoint", "token", "basicUsername", "basicPassword"] as const) {
+      if (input.searxng[key] !== undefined && typeof input.searxng[key] !== "string") {
+        throw new ValidationError(`models.webSearch.set input: searxng.${key} must be a string`);
+      }
+    }
+  }
+  if (input.exa !== undefined) {
+    assertPlainObject(input.exa, "models.webSearch.set input: exa");
+    assertNoUnknownKeys(input.exa, ["enabled", "searchDelayMs"], "models.webSearch.set input: exa");
+    if (input.exa.enabled !== undefined && typeof input.exa.enabled !== "boolean") {
+      throw new ValidationError("models.webSearch.set input: exa.enabled must be boolean");
+    }
+    if (input.exa.searchDelayMs !== undefined && (typeof input.exa.searchDelayMs !== "number" || !Number.isFinite(input.exa.searchDelayMs) || input.exa.searchDelayMs < 0)) {
+      throw new ValidationError("models.webSearch.set input: exa.searchDelayMs must be a non-negative number");
+    }
+  }
+}
+
 function validateModelsLoginStartInput(input: unknown): void {
   assertPlainObject(input, "models.login.start input");
   assertNoUnknownKeys(input, ["providerId"], "models.login.start input");
@@ -1733,6 +1780,7 @@ const COMMAND_INPUT_VALIDATORS: {
   "models.provider.probe": validateModelsProviderProbeInput,
   "models.discovery.refresh": (input) => validateEmptyCommandInput(input, "models.discovery.refresh input"),
   "models.cycleOrder.set": validateModelsCycleOrderSetInput,
+  "models.webSearch.set": validateModelsWebSearchSetInput,
   "plugins.setEnabled": validatePluginsSetEnabledInput,
   "skills.setEnabled": validateSkillsSetEnabledInput,
   "skills.reveal": validateSkillsRevealInput,

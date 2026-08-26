@@ -3025,20 +3025,20 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
         </nav>
         <button
           className="icon-btn"
-          data-tip={sessionLive && !sessionBusy ? "Fork" : sessionActionReason}
+          data-tip={sessionLive && !sessionBusy ? t("shell.tipForkThread") : sessionActionReason}
           aria-label={t("shell.forkThread")}
           disabled={!sessionLive || sessionBusy}
           onClick={() => run(chrome.onForkThread)}
         ><Icon name="fork" /></button>
         <button
           className="icon-btn"
-          data-tip={sessionLive && !sessionBusy ? "Handoff" : sessionActionReason}
+          data-tip={sessionLive && !sessionBusy ? t("shell.tipHandoffThread") : sessionActionReason}
           aria-label={t("shell.handoffThread")}
           disabled={!sessionLive || sessionBusy}
           onClick={() => run(chrome.onHandoffThread)}
         ><Icon name="handoff" /></button>
       </div>
-      <button className="icon-btn lg" data-tip="Agent Hub" aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
+      <button className="icon-btn lg" data-tip={t("menu.agentHub")} aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
       <button className="icon-btn" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
       <div className="tb-right">
         <div className="telemetry">
@@ -3070,7 +3070,6 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
             {preview ? <PreviewContextTrigger /> : <RealContextTrigger telemetry={telemetry} />}
           </AnchoredPop>
           <span className="t-sep" aria-hidden="true" />
-          <span className="t-item"><b>auto</b>&nbsp;compact</span>
           {chrome.compactPending === true || liveSnapshot?.isCompacting === true ? (
             <button
               className="tb-compact"
@@ -3086,7 +3085,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
             <button
               className="tb-compact"
               disabled={!sessionLive}
-              data-tip={!sessionLive ? sessionActionReason : "Compact"}
+              data-tip={!sessionLive ? sessionActionReason : t("shell.tipCompactThread")}
               aria-label={t("shell.compactThread")}
               onClick={() => run(chrome.onCompactThread)}
             >

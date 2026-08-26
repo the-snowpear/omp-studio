@@ -248,6 +248,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "models.provider.probe": true,
   "models.discovery.refresh": true,
   "models.cycleOrder.set": true,
+  "models.webSearch.set": true,
   "plugins.setEnabled": true,
   "skills.setEnabled": true,
   "skills.reveal": true,

@@ -23,6 +23,7 @@ import {
   ollamaTagsUrl,
   parseDiscoveryModels,
   toYamlProvider,
+  upsertNestedRecordList,
   upsertYamlRecordEntry,
   upsertYamlStringList,
 } from "../src/omp-models-adapter.js";
@@ -1450,5 +1451,152 @@ describe("provider presets", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("upsertNestedRecordList", () => {
+  test("inserts a block-form list into an existing block record", () => {
+    const source = "providers:\n  tinyModel: online\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["perplexity", "exa"]);
+    assert.equal(out, "providers:\n  tinyModel: online\n  webSearchOrder:\n    - perplexity\n    - exa\n");
+  });
+
+  test("replaces an inline list entry inside a block record", () => {
+    const source = "providers:\n  webSearchOrder: [perplexity]\n  tinyModel: online\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["gemini"]);
+    assert.equal(out, "providers:\n  webSearchOrder:\n    - gemini\n  tinyModel: online\n");
+  });
+
+  test("consumes a block-form list entry so no stray items remain", () => {
+    const source = "providers:\n  webSearchOrder:\n    - perplexity\n    - gemini\n  tinyModel: online\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["duckduckgo"]);
+    assert.equal(out, "providers:\n  webSearchOrder:\n    - duckduckgo\n  tinyModel: online\n");
+  });
+
+  test("writes an empty list as inline [] and clears block items", () => {
+    const source = "providers:\n  webSearchOrder:\n    - perplexity\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", []);
+    assert.equal(out, "providers:\n  webSearchOrder: []\n");
+  });
+
+  test("updates an entry inside an inline record form", () => {
+    const source = "providers: { tinyModel: online }\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["perplexity", "exa"]);
+    assert.equal(out, "providers: { tinyModel: online, webSearchOrder: [perplexity, exa] }\n");
+  });
+
+  test("appends block form when the record is absent", () => {
+    const source = "theme:\n  dark: titanium\n";
+    const out = upsertNestedRecordList(source, "providers", "webSearchOrder", ["google"]);
+    assert.equal(out, "theme:\n  dark: titanium\nproviders:\n  webSearchOrder:\n    - google\n");
+  });
+});
+
+describe("web search config", () => {
+  async function withDir<T>(run: (dir: string, service: ReturnType<typeof createOmpModelsService>) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-websearch-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers: {}\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\nproviders:\n  tinyModel: online\n", "utf8");
+      return await run(dir, createOmpModelsService({ agentDir: dir }));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("setWebSearch writes core keys and get() reads them back", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({
+        enabled: false,
+        order: ["perplexity", "exa", "duckduckgo"],
+        exclude: ["mojeek"],
+        timeoutSeconds: 120,
+        geminiModel: "gemini-2.5-flash",
+      });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.enabled, false);
+      assert.deepEqual(ws.order, ["perplexity", "exa", "duckduckgo"]);
+      assert.deepEqual(ws.exclude, ["mojeek"]);
+      assert.equal(ws.timeoutSeconds, 120);
+      assert.equal(ws.geminiModel, "gemini-2.5-flash");
+      const raw = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(raw, /webSearchOrder:\n    - perplexity/);
+      assert.match(raw, /webSearchExclude:\n    - mojeek/);
+      assert.match(raw, /webSearchTimeoutSeconds: 120/);
+      assert.match(raw, /webSearchGeminiModel: gemini-2\.5-flash/);
+      assert.match(raw, /web_search:\n  enabled: false/);
+    });
+  });
+
+  test("setWebSearch keeps unrelated config.yml keys and comments", async () => {
+    await withDir(async (dir, service) => {
+      const withComment = "modelRoles: {}\n# a comment\nproviders:\n  tinyModel: online\n";
+      await writeFile(join(dir, "config.yml"), withComment, "utf8");
+      await service.setWebSearch({ order: ["google"] });
+      const raw = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(raw, /# a comment/);
+      assert.match(raw, /tinyModel: online/);
+      assert.match(raw, /webSearchOrder:\n    - google/);
+    });
+  });
+
+  test("setWebSearch filters unknown ids and dedupes the order", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({ order: ["perplexity", "not-a-provider", "perplexity"] });
+      const ws = (await service.get()).webSearch;
+      assert.deepEqual(ws.order, ["perplexity"]);
+    });
+  });
+
+  test("setWebSearch clamps timeout to the runtime ceiling", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({ timeoutSeconds: 9999 });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.timeoutSeconds, 300);
+    });
+  });
+
+  test("empty geminiModel clears the key back to the default", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({ geminiModel: "gemini-2.5-flash" });
+      await service.setWebSearch({ geminiModel: "" });
+      const ws = (await service.get()).webSearch;
+      assert.equal(ws.geminiModel, "");
+    });
+  });
+
+  test("searxng token is set but never read back; blank keeps it", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({ searxng: { endpoint: "https://search.example.com", token: "tok-123" } });
+      const first = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(first?.endpoint, "https://search.example.com");
+      assert.equal(first?.tokenSet, true);
+      const raw = await readFile(join(dir, "config.yml"), "utf8");
+      assert.match(raw, /token: tok-123/);
+      // Blank token leaves the configured secret untouched.
+      await service.setWebSearch({ searxng: { token: "" } });
+      const second = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(second?.tokenSet, true);
+      assert.match(await readFile(join(dir, "config.yml"), "utf8"), /token: tok-123/);
+    });
+  });
+
+  test("exa advanced options round-trip", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({ exa: { enabled: false, searchDelayMs: 250 } });
+      const ws = (await service.get()).webSearch.advanced.exa;
+      assert.equal(ws?.enabled, false);
+      assert.equal(ws?.searchDelayMs, 250);
+    });
+  });
+
+  test("web search provider catalog carries credential-free flags", async () => {
+    await withDir(async (_dir, service) => {
+      const ws = (await service.get()).webSearch;
+      assert.ok(ws.providers.length >= 23);
+      const byId = new Map(ws.providers.map((p) => [p.id, p]));
+      assert.equal(byId.get("duckduckgo")?.credentialFree, true);
+      assert.equal(byId.get("perplexity")?.credentialFree, false);
+    });
   });
 });

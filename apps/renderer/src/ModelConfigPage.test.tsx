@@ -89,6 +89,15 @@ function readModel(): ModelConfigReadModel {
     modelProviderOrder: [],
     fallbackChains: {},
     fallbackRevertPolicy: "cooldown-expiry",
+    webSearch: {
+      enabled: true,
+      order: [],
+      exclude: [],
+      timeoutSeconds: 60,
+      geminiModel: "",
+      providers: [],
+      advanced: { searxng: { endpoint: "", tokenSet: false, basicUsername: "", passwordSet: false }, exa: { enabled: true, searchDelayMs: 1000 } },
+    },
   };
 }
 

@@ -67,6 +67,7 @@ import type {
   ModelDiscoveryResult,
   ModelOverridePatch,
   ModelProviderTestResult,
+  ModelWebSearchSetInput,
   RuntimeConnection,
   RuntimeInstallState,
   ResidentsReadModel,
@@ -541,6 +542,8 @@ interface CoreCommandInputMap {
   "models.discovery.refresh": EmptyInput;
   /** Persist the quick model-switch rotation order into config.yml. */
   "models.cycleOrder.set": { readonly order: ReadonlyArray<string> };
+  /** Targeted web-search config write (web_search.* / providers.webSearch* / searxng.* / exa.*). */
+  "models.webSearch.set": ModelWebSearchSetInput;
   /** Activate a known workspace (Host-owned registry; never a path). */
   "workspace.open": { readonly workspaceId: WorkspaceId };
   /** Open the system directory picker and register the chosen folder. */
@@ -664,6 +667,7 @@ interface CoreCommandResultMap {
   "models.provider.probe": ModelDiscoveryResult;
   "models.discovery.refresh": ConfigWriteResult;
   "models.cycleOrder.set": ConfigWriteResult;
+  "models.webSearch.set": ConfigWriteResult;
   "workspace.open": WorkspaceListReadModel;
   "workspace.pick": WorkspaceListReadModel;
   "workspace.file.create": WorkspaceFileMutationResult;

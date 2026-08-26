@@ -39,6 +39,7 @@ import type {
   ModelProviderUpsertInput,
   ModelRoleCreateInput,
   ModelRolesWriteInput,
+  ModelWebSearchSetInput,
   BtwAskOutcome,
   BtwBranchOutcome,
   OperatorInvokeOutcome,
@@ -442,6 +443,7 @@ export interface HostModelsService {
   probeProvider(input: ModelProviderProbeInput): ModelDiscoveryResult | Promise<ModelDiscoveryResult>;
   refreshDiscovery(): ConfigWriteResult | Promise<ConfigWriteResult>;
   setCycleOrder(input: { readonly order: ReadonlyArray<string> }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  setWebSearch(input: ModelWebSearchSetInput): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /**

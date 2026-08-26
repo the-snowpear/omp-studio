@@ -36,6 +36,8 @@ import type {
   ModelRoleRecord,
   ModelRoleStorage,
   ModelRolesWriteInput,
+  ModelWebSearchSetInput,
+  WebSearchConfigReadModel,
 } from "@omp-studio/client-contract";
 import { isModelEnvConfigName, parseCacheThinkingEfforts, parseModelThinkingEfforts } from "@omp-studio/client-contract";
 
@@ -59,6 +61,90 @@ const BUILTIN_ROLES: ReadonlyArray<{ id: string; alias: string; name: string; de
   { id: "task", alias: "@task", name: "Subtask", desc: "通用子任务" },
   { id: "advisor", alias: "@advisor", name: "Advisor", desc: "第二模型审查" },
 ];
+
+/**
+ * Web-search providers in the runtime's built-in chain order
+ * (`SEARCH_PROVIDER_ORDER`). `credentialFree` mirrors the runtime: scraper
+ * engines and the public aggregate need no credential. Kept in sync with
+ * `packages/coding-agent/src/web/search/types.ts` upstream.
+ */
+const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{ id: string; name: string; credentialFree: boolean }> = [
+  { id: "perplexity", name: "Perplexity", credentialFree: false },
+  { id: "gemini", name: "Gemini", credentialFree: false },
+  { id: "anthropic", name: "Anthropic", credentialFree: false },
+  { id: "codex", name: "OpenAI Codex", credentialFree: false },
+  { id: "xai", name: "xAI", credentialFree: false },
+  { id: "zai", name: "Z.AI", credentialFree: false },
+  { id: "exa", name: "Exa", credentialFree: false },
+  { id: "tinyfish", name: "TinyFish", credentialFree: false },
+  { id: "jina", name: "Jina", credentialFree: false },
+  { id: "kagi", name: "Kagi", credentialFree: false },
+  { id: "tavily", name: "Tavily", credentialFree: false },
+  { id: "firecrawl", name: "Firecrawl", credentialFree: false },
+  { id: "brave", name: "Brave", credentialFree: false },
+  { id: "kimi", name: "Kimi", credentialFree: false },
+  { id: "parallel", name: "Parallel", credentialFree: false },
+  { id: "synthetic", name: "Synthetic", credentialFree: false },
+  { id: "searxng", name: "SearXNG", credentialFree: true },
+  { id: "startpage", name: "Startpage", credentialFree: true },
+  { id: "duckduckgo", name: "DuckDuckGo", credentialFree: true },
+  { id: "ecosia", name: "Ecosia", credentialFree: true },
+  { id: "google", name: "Google", credentialFree: true },
+  { id: "mojeek", name: "Mojeek", credentialFree: true },
+  { id: "public", name: "Public Web", credentialFree: true },
+];
+
+/** Search-specific env vars per provider id (mirrors upstream credential lookup). */
+const WEB_SEARCH_ENV_CREDENTIALS: Readonly<Record<string, readonly string[]>> = {
+  anthropic: ["ANTHROPIC_SEARCH_API_KEY", "ANTHROPIC_API_KEY"],
+  gemini: ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY"],
+  codex: [],
+  xai: ["XAI_API_KEY"],
+  zai: ["ZAI_API_KEY"],
+  exa: ["EXA_API_KEY"],
+  tinyfish: ["TINYFISH_API_KEY"],
+  jina: ["JINA_API_KEY"],
+  kagi: ["KAGI_API_KEY"],
+  tavily: ["TAVILY_API_KEY"],
+  firecrawl: ["FIRECRAWL_API_KEY"],
+  brave: ["BRAVE_API_KEY"],
+  kimi: ["MOONSHOT_SEARCH_API_KEY", "KIMI_SEARCH_API_KEY"],
+  parallel: ["PARALLEL_API_KEY"],
+  synthetic: ["SYNTHETIC_API_KEY"],
+  searxng: ["SEARXNG_ENDPOINT"],
+  perplexity: ["PERPLEXITY_API_KEY", "PERPLEXITY_COOKIES"],
+};
+
+/** agent.db auth ids that satisfy a search provider's credential (OAuth/登录). */
+const WEB_SEARCH_AUTH_IDS: Readonly<Record<string, readonly string[]>> = {
+  anthropic: ["anthropic"],
+  gemini: ["google-gemini-cli", "google-antigravity", "google-gemini", "gemini"],
+  codex: ["openai-codex"],
+  xai: ["xai"],
+  zai: ["zai"],
+  exa: ["exa"],
+  tinyfish: ["tinyfish"],
+  kimi: ["kimi-code", "moonshot"],
+  kagi: ["kagi"],
+  parallel: ["parallel"],
+  synthetic: ["synthetic"],
+  tavily: ["tavily"],
+  firecrawl: ["firecrawl"],
+  brave: ["brave"],
+  perplexity: ["perplexity"],
+};
+
+function hasWebSearchCredential(
+  providerId: string,
+  catalogEntry: { credentialFree: boolean },
+  authenticated: ReadonlySet<string>,
+): boolean {
+  if (catalogEntry.credentialFree) return true;
+  const envNames = WEB_SEARCH_ENV_CREDENTIALS[providerId] ?? [];
+  if (envNames.some((name) => (process.env[name] ?? "").length > 0)) return true;
+  const authIds = WEB_SEARCH_AUTH_IDS[providerId] ?? [];
+  return authIds.some((id) => authenticated.has(id));
+}
 
 const PRESET_GROUPS: ReadonlyArray<ModelPresetGroup> = [
   {
@@ -409,6 +495,26 @@ interface ProviderYaml {
   transport?: string;
 }
 
+function emptyWebSearch(): WebSearchConfigReadModel {
+  return {
+    enabled: true,
+    order: [],
+    exclude: [],
+    timeoutSeconds: 60,
+    geminiModel: "",
+    providers: WEB_SEARCH_PROVIDER_CATALOG.map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+      credentialFree: provider.credentialFree,
+      hasCredential: provider.credentialFree,
+    })),
+    advanced: {
+      searxng: { endpoint: "", tokenSet: false, basicUsername: "", passwordSet: false },
+      exa: { enabled: true, searchDelayMs: 1000 },
+    },
+  };
+}
+
 function emptyModel(reason: string, ompAvailable: boolean): ModelConfigReadModel {
   return {
     providers: [],
@@ -433,6 +539,7 @@ function emptyModel(reason: string, ompAvailable: boolean): ModelConfigReadModel
     modelProviderOrder: [],
     fallbackChains: {},
     fallbackRevertPolicy: "cooldown-expiry",
+    webSearch: emptyWebSearch(),
   };
 }
 
@@ -1211,6 +1318,91 @@ export function upsertYamlRecordEntry(source: string, recordKey: string, entryKe
 }
 
 /**
+ * Replace a string-list at `recordKey.entryKey` (e.g. `providers.webSearchOrder`)
+ * with a targeted splice, so unrelated keys and comments in config.yml stay.
+ * Handles the block record form (`providers:`), the inline record form
+ * (`providers: { ... }`), and both block and inline list entries. A missing
+ * record is appended as block form. Unlike `upsertYamlRecordEntry`, a
+ * block-form list entry (`  entryKey:` + indented `- items`) is consumed
+ * entirely so no stray items are left behind.
+ */
+export function upsertNestedRecordList(
+  source: string,
+  recordKey: string,
+  entryKey: string,
+  items: ReadonlyArray<string>,
+): string {
+  const newline = source.includes("\r\n") ? "\r\n" : "\n";
+  const lines = source.split(/\r?\n/);
+  const entryHeader = items.length === 0 ? `  ${entryKey}: []` : `  ${entryKey}:`;
+  const itemLines = items.map((item) => `    - ${item}`);
+
+  // Block record form: `recordKey:` on its own line followed by indented entries.
+  const headerAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*$`).test(line));
+  if (headerAt >= 0) {
+    let cursor = headerAt + 1;
+    let found: number | undefined;
+    let insertAt: number | undefined;
+    while (cursor < lines.length) {
+      const line = lines[cursor] ?? "";
+      if (line.trim().length === 0) {
+        if (insertAt === undefined) insertAt = cursor;
+        cursor += 1;
+        continue;
+      }
+      if (!/^[ \t]/.test(line)) {
+        if (insertAt === undefined) insertAt = cursor;
+        break;
+      }
+      if (new RegExp(`^[ \\t]+${entryKey}:\\s*`).test(line)) {
+        found = cursor;
+        break;
+      }
+      cursor += 1;
+    }
+    if (found !== undefined) {
+      let end = found + 1;
+      // Consume the trailing indented `- item` lines owned by a block list entry.
+      if (new RegExp(`^[ \\t]+${entryKey}:\\s*$`).test(lines[found] ?? "")) {
+        while (end < lines.length) {
+          const line = lines[end] ?? "";
+          if (line.trim().length === 0) break;
+          if (!/^[ \t]+-/.test(line)) break;
+          end += 1;
+        }
+      }
+      lines.splice(found, end - found, entryHeader, ...itemLines);
+      return lines.join(newline);
+    }
+    lines.splice(insertAt ?? cursor, 0, entryHeader, ...itemLines);
+    return lines.join(newline);
+  }
+
+  // Inline record form: `recordKey: { key: value, ... }` on a single line.
+  const inlineAt = lines.findIndex((line) => new RegExp(`^${recordKey}:\\s*\\{.*\\}\\s*$`).test(line));
+  if (inlineAt >= 0) {
+    const line = lines[inlineAt] ?? "";
+    const open = line.indexOf("{");
+    const close = line.lastIndexOf("}");
+    const body = line.slice(open + 1, close).trim();
+    const encoded = `[${items.join(", ")}]`;
+    const entryRe = new RegExp(`(^|,\\s*)${entryKey}\\s*:\\s*[^,]*`);
+    let nextBody: string;
+    if (entryRe.test(body)) {
+      nextBody = body.replace(entryRe, `$1${entryKey}: ${encoded}`);
+    } else {
+      nextBody = body.length > 0 ? `${body}, ${entryKey}: ${encoded}` : `${entryKey}: ${encoded}`;
+    }
+    lines[inlineAt] = `${recordKey}: { ${nextBody.trim()} }`;
+    return lines.join(newline);
+  }
+
+  // Missing record: append block form.
+  const suffix = source.endsWith("\n") ? "" : newline;
+  return `${source}${suffix}${recordKey}:${newline}${entryHeader}${itemLines.length > 0 ? newline + itemLines.join(newline) : ""}${newline}`;
+}
+
+/**
  * Replace a top-level YAML string-list (`recordKey:`) with the given items
  * using a targeted splice, so unrelated keys and comments in config.yml are
  * left untouched. Handles the block form (`  - item`), the inline form
@@ -1509,6 +1701,82 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     }
   }
 
+  /** Walk a dotted path into parsed config.yml (e.g. ["providers", "webSearchOrder"]). */
+  async function readNested(configPath: string, path: readonly string[]): Promise<unknown> {
+    try {
+      const parsed = parseYaml(await readConfigText(configPath)) as unknown;
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+      let current: unknown = parsed;
+      for (const key of path) {
+        if (current === null || typeof current !== "object" || Array.isArray(current)) return undefined;
+        current = (current as Record<string, unknown>)[key];
+      }
+      return current;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async function readNestedStringList(configPath: string, path: readonly string[]): Promise<string[]> {
+    const value = await readNested(configPath, path);
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  }
+
+  async function readNestedBool(configPath: string, path: readonly string[], fallback: boolean): Promise<boolean> {
+    const value = await readNested(configPath, path);
+    return typeof value === "boolean" ? value : fallback;
+  }
+
+  async function readNestedNumber(configPath: string, path: readonly string[], fallback: number): Promise<number> {
+    const value = await readNested(configPath, path);
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  }
+
+  async function readNestedString(configPath: string, path: readonly string[]): Promise<string> {
+    const value = await readNested(configPath, path);
+    return typeof value === "string" ? value : "";
+  }
+
+  async function readWebSearch(
+    configPath: string,
+    authenticated: ReadonlySet<string>,
+  ): Promise<WebSearchConfigReadModel> {
+    const enabled = await readNestedBool(configPath, ["web_search", "enabled"], true);
+    const order = await readNestedStringList(configPath, ["providers", "webSearchOrder"]);
+    const exclude = await readNestedStringList(configPath, ["providers", "webSearchExclude"]);
+    const timeoutSeconds = await readNestedNumber(configPath, ["providers", "webSearchTimeoutSeconds"], 60);
+    const geminiModel = await readNestedString(configPath, ["providers", "webSearchGeminiModel"]);
+    const searxngEndpoint = await readNestedString(configPath, ["searxng", "endpoint"]);
+    const searxngTokenSet = Boolean(await readNestedString(configPath, ["searxng", "token"]));
+    const searxngBasicUsername = await readNestedString(configPath, ["searxng", "basicUsername"]);
+    const searxngPasswordSet = Boolean(await readNestedString(configPath, ["searxng", "basicPassword"]));
+    const exaEnabled = await readNestedBool(configPath, ["exa", "enabled"], true);
+    const exaSearchDelayMs = await readNestedNumber(configPath, ["exa", "searchDelayMs"], 1000);
+    return {
+      enabled,
+      order,
+      exclude,
+      timeoutSeconds,
+      geminiModel,
+      providers: WEB_SEARCH_PROVIDER_CATALOG.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        credentialFree: provider.credentialFree,
+        hasCredential: hasWebSearchCredential(provider.id, provider, authenticated),
+      })),
+      advanced: {
+        searxng: {
+          endpoint: searxngEndpoint,
+          tokenSet: searxngTokenSet,
+          basicUsername: searxngBasicUsername,
+          passwordSet: searxngPasswordSet,
+        },
+        exa: { enabled: exaEnabled, searchDelayMs: exaSearchDelayMs },
+      },
+    };
+  }
+
   async function readFallback(configPath: string): Promise<{ chains: Record<string, string[]>; revertPolicy: ModelFallbackRevertPolicy }> {
     try {
       const parsed = parseYaml(await readConfigText(configPath)) as unknown;
@@ -1719,6 +1987,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         ...roles.filter((role) => role.primary).map((role) => `  ${role.id}: ${role.primary}${role.thinking ? `:${role.thinking}` : ""}`),
         modelProviderOrder.length > 0 ? `modelProviderOrder:\n${modelProviderOrder.map((id) => `  - ${id}`).join("\n")}` : "",
       ].filter((line) => line.length > 0).join("\n") + "\n";
+      const webSearch: WebSearchConfigReadModel = await readWebSearch(paths.configPath, authenticated);
       return {
         providers,
         presets: PRESET_GROUPS,
@@ -1756,6 +2025,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         modelProviderOrder,
         fallbackChains: fallback.chains,
         fallbackRevertPolicy: fallback.revertPolicy,
+        webSearch,
       };
     },
 
@@ -2300,6 +2570,75 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
       await writeConfigStringList(paths.configPath, "cycleOrder", input.order);
       return WRITE_OK;
+    },
+
+    async setWebSearch(input: ModelWebSearchSetInput): Promise<ConfigWriteResult> {
+      const paths = await resolvePaths();
+      if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
+      const known = new Set(WEB_SEARCH_PROVIDER_CATALOG.map((provider) => provider.id));
+      const filterIds = (items: ReadonlyArray<string>): string[] => {
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const item of items) {
+          if (!known.has(item) || seen.has(item)) continue;
+          seen.add(item);
+          out.push(item);
+        }
+        return out;
+      };
+      let next = await readConfigText(paths.configPath);
+      // Global tool switch.
+      if (input.enabled !== undefined) {
+        next = upsertYamlRecordEntry(next, "web_search", "enabled", input.enabled ? "true" : "false");
+      }
+      // Priority / exclusion lists (empty = built-in order / nothing excluded).
+      if (input.order !== undefined) next = upsertNestedRecordList(next, "providers", "webSearchOrder", filterIds(input.order));
+      if (input.exclude !== undefined) next = upsertNestedRecordList(next, "providers", "webSearchExclude", filterIds(input.exclude));
+      // Per-provider transport timeout (clamped like the runtime: 1..300s).
+      if (input.timeoutSeconds !== undefined) {
+        const clamped = Number.isFinite(input.timeoutSeconds)
+          ? Math.min(300, Math.max(1, Math.round(input.timeoutSeconds)))
+          : 60;
+        next = upsertYamlRecordEntry(next, "providers", "webSearchTimeoutSeconds", String(clamped));
+      }
+      // Gemini grounding model: empty clears back to the runtime default.
+      if (input.geminiModel !== undefined) {
+        next = input.geminiModel.length > 0
+          ? upsertYamlRecordEntry(next, "providers", "webSearchGeminiModel", quoteInline(input.geminiModel.trim()))
+          : deleteYamlRecordEntry(next, "providers", "webSearchGeminiModel");
+      }
+      // SearXNG advanced: endpoint / basic username are clearable; token and
+      // basic password only ever set (blank keeps the existing secret).
+      if (input.searxng !== undefined) {
+        if (input.searxng.endpoint !== undefined) {
+          next = input.searxng.endpoint.length > 0
+            ? upsertYamlRecordEntry(next, "searxng", "endpoint", quoteInline(input.searxng.endpoint.trim()))
+            : deleteYamlRecordEntry(next, "searxng", "endpoint");
+        }
+        if (input.searxng.token !== undefined && input.searxng.token.length > 0) {
+          next = upsertYamlRecordEntry(next, "searxng", "token", quoteInline(input.searxng.token.trim()));
+        }
+        if (input.searxng.basicUsername !== undefined) {
+          next = input.searxng.basicUsername.length > 0
+            ? upsertYamlRecordEntry(next, "searxng", "basicUsername", quoteInline(input.searxng.basicUsername.trim()))
+            : deleteYamlRecordEntry(next, "searxng", "basicUsername");
+        }
+        if (input.searxng.basicPassword !== undefined && input.searxng.basicPassword.length > 0) {
+          next = upsertYamlRecordEntry(next, "searxng", "basicPassword", quoteInline(input.searxng.basicPassword.trim()));
+        }
+      }
+      // Exa advanced.
+      if (input.exa !== undefined) {
+        if (input.exa.enabled !== undefined) {
+          next = upsertYamlRecordEntry(next, "exa", "enabled", input.exa.enabled ? "true" : "false");
+        }
+        if (input.exa.searchDelayMs !== undefined && Number.isFinite(input.exa.searchDelayMs)) {
+          const clamped = Math.min(60000, Math.max(0, Math.round(input.exa.searchDelayMs)));
+          next = upsertYamlRecordEntry(next, "exa", "searchDelayMs", String(clamped));
+        }
+      }
+      await writeConfigText(paths.configPath, next);
+      return { ...WRITE_OK, message: "已保存网络搜索配置" };
     },
   };
 }

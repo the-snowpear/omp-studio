@@ -53,6 +53,7 @@ import {
   togglePicked,
 } from "./models/fetchedModels";
 import { SubagentsPanel } from "./SubagentsPanel";
+import { WebSearchPanel } from "./models/WebSearchPanel";
 import { createPreviewAgentDefinitions } from "./preview/subagentsPreview";
 
 export const MC_INTENT_KEY = "omp.modelConfigIntent";
@@ -60,7 +61,7 @@ const PROVIDER_ORDER_KEY = "omp.providerDisplayOrder";
 
 type I18nT = ReturnType<typeof useI18n>["t"];
 
-export type McTab = "providers" | "roles" | "subagents";
+export type McTab = "providers" | "roles" | "subagents" | "websearch";
 
 type McIntent = { tab?: McTab; edit?: string; role?: string; assign?: string; agent?: string };
 
@@ -68,6 +69,7 @@ const TAB_BUTTON_ID: Record<McTab, string> = {
   providers: "mcTabProviders",
   roles: "mcTabRoles",
   subagents: "mcTabSubagents",
+  websearch: "mcTabWebSearch",
 };
 
 const STATUS_META: Record<string, { label: string; chip: string; dot: string }> = {
@@ -1985,6 +1987,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     if (!intent) return;
     if (intent.tab === "roles" || intent.role || intent.assign) setTab("roles");
     if (intent.tab === "subagents" || intent.agent) setTab("subagents");
+    if (intent.tab === "websearch") setTab("websearch");
     if (intent.edit) {
       setTab("providers");
     }
@@ -2007,6 +2010,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
   const providers = data?.providers ?? [];
   const roles = data?.roles ?? [];
+  const webSearchOrderCount = data?.webSearch.order.length ?? 0;
   const presets = data?.presets ?? [];
   const modelEditListProvider = modelEditView?.providerId
     ? providers.find((item) => item.id === modelEditView.providerId)
@@ -2097,13 +2101,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   };
 
   const onTabKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const keys: McTab[] = ["providers", "roles", "subagents"];
+    const keys: McTab[] = ["providers", "roles", "subagents", "websearch"];
     const index = keys.indexOf(tab);
     let next: McTab | null = null;
     if (event.key === "ArrowRight") next = keys[(index + 1) % keys.length] ?? "providers";
     else if (event.key === "ArrowLeft") next = keys[(index - 1 + keys.length) % keys.length] ?? "providers";
     else if (event.key === "Home") next = "providers";
-    else if (event.key === "End") next = "subagents";
+    else if (event.key === "End") next = "websearch";
     if (!next) return;
     event.preventDefault();
     activate(next, true);
@@ -3137,11 +3141,16 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
             <Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span>
             <span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span>
           </button>
+          <button role="tab" id="mcTabWebSearch" aria-controls="mcPanelWebSearch" aria-selected={tab === "websearch"} tabIndex={tab === "websearch" ? 0 : -1} className={tab === "websearch" ? "active" : undefined} onClick={() => activate("websearch")}>
+            <Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span>
+            <span className="chip gray xs">{webSearchOrderCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchOrderCount })}</span></span>
+          </button>
           <span className="mc-tab-window" ref={tabWinRef} aria-hidden="true">
             <span className="mc-tab-mirror" ref={tabMirrorRef}>
               <button type="button" tabIndex={-1}><Icon name="server" extra="sm" /><span>{t("modelConfig.providersTab")}</span><span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> {t("modelConfig.providersCountAria", { count: providers.length })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="steering" extra="sm" /><span>{t("modelConfig.rolesTab")}</span><span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span><span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span></button>
+              <button type="button" tabIndex={-1}><Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span><span className="chip gray xs">{webSearchOrderCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchOrderCount })}</span></span></button>
             </span>
           </span>
         </div>
@@ -4348,6 +4357,19 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
             onCount={setAgentCount}
             {...(agentIntent === undefined ? {} : { initialAgent: agentIntent })}
           />
+        </section>
+        <section id="mcPanelWebSearch" role="tabpanel" aria-labelledby="mcTabWebSearch" hidden={shownTab !== "websearch"} className={tabPanelClass("websearch")}>
+          {data?.webSearch ? (
+            <WebSearchPanel
+              client={client}
+              preview={preview}
+              webSearch={data.webSearch}
+              onSaved={() => void refresh()}
+              onPreviewSave={(next) => mutateLocal((current) => ({ ...current, webSearch: next }))}
+            />
+          ) : (
+            <div className="ws-empty ws-empty-page">{t("modelConfig.loadErrorTitle")}</div>
+          )}
         </section>
       </div>
     </div>

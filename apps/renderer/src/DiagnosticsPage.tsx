@@ -730,15 +730,27 @@ export function DiagnosticsPage({
       </div>
 
       {confirmRestart ? (
-        <div className="diag-confirm" role="dialog" aria-labelledby="diagRestartTitle" aria-modal="true">
-          <div>
-            <div id="diagRestartTitle" className="sr-label">{t("diagnostics.restartConfirmTitle")}</div>
-            <p className="sr-desc">{t("diagnostics.restartConfirmDesc")}</p>
-          </div>
-          <div className="diag-confirm-acts">
-            <button type="button" className="btn outline" onClick={() => setConfirmRestart(false)}>{t("common.cancel")}</button>
-            <button type="button" className="btn primary" disabled={busy !== null} onClick={() => void restartRuntime()}>{t("diagnostics.confirmRestart")}</button>
-          </div>
+        <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={() => { if (busy === null) setConfirmRestart(false); }}>
+          <section
+            className="modal create-project-modal create-branch-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="diagRestartTitle"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="create-project-head">
+              <div>
+                <span className="create-project-kicker">RUNTIME</span>
+                <h2 id="diagRestartTitle">{t("diagnostics.restartConfirmTitle")}</h2>
+                <p className="create-branch-sub">{t("diagnostics.restartConfirmDesc")}</p>
+              </div>
+              <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={busy !== null} onClick={() => setConfirmRestart(false)}><Icon name="x" /></button>
+            </div>
+            <div className="create-project-foot">
+              <button type="button" className="btn outline" disabled={busy !== null} onClick={() => setConfirmRestart(false)}>{t("common.cancel")}</button>
+              <button type="button" className="btn primary" autoFocus disabled={busy !== null} onClick={() => void restartRuntime()}>{t("diagnostics.confirmRestart")}</button>
+            </div>
+          </section>
         </div>
       ) : null}
 

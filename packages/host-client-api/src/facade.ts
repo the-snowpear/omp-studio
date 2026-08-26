@@ -200,7 +200,8 @@ type ModelsCommandName =
   | "models.provider.test"
   | "models.provider.probe"
   | "models.discovery.refresh"
-  | "models.cycleOrder.set";
+  | "models.cycleOrder.set"
+  | "models.webSearch.set";
 
 type AgentDefinitionsCommandName =
   | "agents.definition.upsert"
@@ -996,7 +997,8 @@ export class StudioHostClientFacade implements ClientTransport {
       case "models.provider.test":
       case "models.provider.probe":
       case "models.discovery.refresh":
-      case "models.cycleOrder.set": {
+      case "models.cycleOrder.set":
+      case "models.webSearch.set": {
         return this.#commandModels(request as ClientCommandRequest<ModelsCommandName>);
       }
       case "workspace.open":
@@ -2248,6 +2250,15 @@ export class StudioHostClientFacade implements ClientTransport {
         modelProviderOrder: [],
         fallbackChains: {},
         fallbackRevertPolicy: "cooldown-expiry",
+        webSearch: {
+          enabled: true,
+          order: [],
+          exclude: [],
+          timeoutSeconds: 60,
+          geminiModel: "",
+          providers: [],
+          advanced: { searxng: { endpoint: "", tokenSet: false, basicUsername: "", passwordSet: false }, exa: { enabled: true, searchDelayMs: 1000 } },
+        },
       };
     }
     return service.get();
@@ -2643,6 +2654,9 @@ export class StudioHostClientFacade implements ClientTransport {
           break;
         case "models.cycleOrder.set":
           result = await service.setCycleOrder(request.input as { readonly order: ReadonlyArray<string> });
+          break;
+        case "models.webSearch.set":
+          result = await service.setWebSearch(request.input as never);
           break;
       }
       this.#emitTerminal(request.requestId, {

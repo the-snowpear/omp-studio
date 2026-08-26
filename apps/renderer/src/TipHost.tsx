@@ -7,6 +7,23 @@ export const TIP_DELAY_MS = 500;
 const GAP = 6;
 const PAD = 8;
 
+/**
+ * Electron `titleBarOverlay` reserves the top-right corner for the OS caption
+ * buttons (minimize/maximize/close). Those buttons are painted by the OS above
+ * the DOM, so a bubble placed there would be covered. The reserved rectangle is
+ * derived from `.app-titlebar`: its height and its right padding, which resolves
+ * `env(titlebar-area-width)`. In a plain browser the env falls back to 10px, so
+ * the zone is effectively empty and no bubble flips.
+ */
+function captionZone(): { height: number; width: number } {
+  const titlebar = document.querySelector<HTMLElement>(".app-titlebar");
+  if (titlebar) {
+    const width = Number.parseFloat(getComputedStyle(titlebar).paddingRight);
+    return { height: titlebar.offsetHeight, width: Number.isFinite(width) ? width : 140 };
+  }
+  return { height: 36, width: 140 };
+}
+
 function readTip(el: Element): string {
   return el.getAttribute("data-tip")?.trim() ?? "";
 }
@@ -113,9 +130,19 @@ export function TipHost() {
     const bubble = bubbleRef.current.getBoundingClientRect();
     const anchor = tip.el.getBoundingClientRect();
     const above = anchor.top - GAP - bubble.height;
-    const top = above >= PAD ? above : anchor.bottom + GAP;
+    let top = above >= PAD ? above : anchor.bottom + GAP;
     let left = anchor.left + anchor.width / 2 - bubble.width / 2;
     left = Math.max(PAD, Math.min(left, window.innerWidth - bubble.width - PAD));
+    // OS caption buttons always paint over the DOM in the top-right corner, so
+    // a bubble overlapping that zone (e.g. rightmost topbar buttons) would be
+    // covered — flip it below the anchor instead. Only flip when a real
+    // titleBarOverlay inset is present; the env() browser fallback (10px) means
+    // no caption zone exists.
+    const zone = captionZone();
+    const hasCaptionOverlay = zone.width > 40;
+    if (hasCaptionOverlay && top < zone.height && left + bubble.width > window.innerWidth - zone.width) {
+      top = anchor.bottom + GAP;
+    }
     setBox({ top, left });
     setReady(true);
   }, [tip]);
