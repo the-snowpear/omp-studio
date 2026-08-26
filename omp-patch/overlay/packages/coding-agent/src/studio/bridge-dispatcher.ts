@@ -14,12 +14,10 @@ import { StudioLiveError } from "./services/live-service";
 import { StudioLoopError } from "./services/loop-service";
 import { StudioModeError } from "./services/mode-control-service";
 import { StudioModelControlError } from "./services/model-control-service";
-import {
-	StudioPermissionControlError,
-	StudioPermissionControlService,
-} from "./services/permission-control-service";
 import { StudioOmfgError } from "./services/omfg-service";
 import { StudioPauseError } from "./services/pause-service";
+import { StudioPermissionControlError, StudioPermissionControlService } from "./services/permission-control-service";
+import { StudioRuntimeSettingsError } from "./services/runtime-settings-service";
 import { SessionControlError, SessionControlService } from "./services/session-control-service";
 import { StudioSessionTranscriptError, StudioSessionTranscriptService } from "./services/session-transcript-service";
 import { expandSkillPrompts } from "./services/skill-prompt-expansion";
@@ -40,6 +38,8 @@ interface RememberedReceipt {
 
 const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"runtime.shutdown",
+	"runtime.settings.get",
+	"runtime.settings.set",
 	"live.start",
 	"live.stop",
 	"queue.enqueue",
@@ -56,6 +56,7 @@ const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"mode.plan.enter",
 	"mode.plan.exit",
 	"mode.plan.review.open",
+	"mode.plan.review.saveAndQuit",
 	"mode.plan.review.respond",
 	"mode.vibe.enter",
 	"mode.vibe.exit",
@@ -134,6 +135,7 @@ function protocolError(error: unknown): StudioProtocolError {
 	}
 	if (
 		error instanceof StudioModeError ||
+		error instanceof StudioRuntimeSettingsError ||
 		error instanceof StudioForkError ||
 		error instanceof StudioHandoffError ||
 		error instanceof StudioModelControlError ||
@@ -582,6 +584,10 @@ export class StudioBridgeDispatcher {
 		switch (operation.kind) {
 			case "queue.enqueue":
 				return await this.#sessionControl.enqueue(operation.text);
+			case "runtime.settings.get":
+				return this.runtime.services.settings.get(operation.keys);
+			case "runtime.settings.set":
+				return await this.runtime.services.settings.set(operation.key, operation.value, operation.persist);
 			case "session.clearContext":
 				return await this.#sessionControl.clearContext();
 			case "session.drop": {
@@ -676,6 +682,8 @@ export class StudioBridgeDispatcher {
 				return await this.runtime.services.modes.exitPlan(operation.discardDraft === true);
 			case "mode.plan.review.open":
 				return await this.runtime.services.modes.openPlanReview();
+			case "mode.plan.review.saveAndQuit":
+				return await this.runtime.services.modes.savePlanAndQuit(operation.path);
 			case "mode.plan.review.respond":
 				return await this.runtime.services.modes.respondPlanReview(operation.decision, operation.feedback);
 			case "mode.vibe.enter":

@@ -5,6 +5,7 @@
  */
 
 import type { CommandName, ThreadId } from "@omp-studio/client-contract";
+import type { CommandSource, OperatorCommandManifest, OperatorCommandManifestEntry } from "@omp-studio/studio-protocol";
 
 import { snapshotFromDoc, snapshotIsEmpty } from "./serialize";
 import type { ComposerDoc, ComposerSnapshot } from "./types";
@@ -57,6 +58,8 @@ export type StudioSlashCommand = {
   readonly ui?: SlashNativeUi;
   readonly typed?: SlashTyped;
   readonly invokeId?: string;
+  /** Runtime manifest source; absent for legacy static entries. */
+  readonly source?: CommandSource;
 };
 
 export type SlashDraft = {
@@ -121,6 +124,88 @@ function cmd(
     ...(extra.typed === undefined ? {} : { typed: extra.typed }),
     ...(extra.invokeId === undefined ? {} : { invokeId: extra.invokeId }),
   };
+}
+
+function bareSlashName(name: string): string {
+  return name.startsWith("/") ? name.slice(1) : name;
+}
+
+function normalizedSlashName(name: string): string {
+  return bareSlashName(name).trim().toLowerCase();
+}
+
+function manifestMatchesStatic(entry: OperatorCommandManifestEntry, command: StudioSlashCommand): boolean {
+  if (command.invokeId === entry.id) return true;
+  if (entry.source !== "builtin") return false;
+  const manifestNames = [entry.name, ...entry.aliases].map(normalizedSlashName);
+  return [command.name, ...command.aliases].some((name) => manifestNames.includes(normalizedSlashName(name)));
+}
+
+function manifestGroup(source: CommandSource): SlashGroup {
+  if (source === "file-command") return "workspace";
+  if (source === "skill" || source === "extension" || source === "prompt-template") return "capability";
+  return "help";
+}
+
+function manifestAllowsArgs(entry: OperatorCommandManifestEntry): boolean {
+  return entry.argumentSchema !== undefined && Object.keys(entry.argumentSchema).length > 0;
+}
+
+function hasLocalSlashMapping(metadata: StudioSlashCommand | undefined): boolean {
+  return (metadata?.select === "native-ui" && metadata.ui !== undefined) || metadata?.typed !== undefined;
+}
+
+function manifestAvailability(entry: OperatorCommandManifestEntry, metadata: StudioSlashCommand | undefined): StudioSlashCommand["availability"] {
+  if (entry.presentation === "terminal" && !hasLocalSlashMapping(metadata)) return "disabled";
+  return entry.availability === "available" ? "available" : "disabled";
+}
+
+function manifestDisabledReason(entry: OperatorCommandManifestEntry, metadata: StudioSlashCommand | undefined): string | undefined {
+  if (entry.presentation === "terminal" && !hasLocalSlashMapping(metadata)) return "此指令需要终端交互，暂不能在 Studio 中执行";
+  if (entry.availability === "available") return undefined;
+  return entry.availability === "blocked" ? "Runtime 已阻止此指令" : "Runtime 已禁用此指令";
+}
+
+/**
+ * Project the Runtime operator manifest into the slash-command presentation.
+ *
+ * An omitted manifest is the compatibility path used by preview/legacy callers
+ * and returns the existing static catalog. Once a manifest is supplied, it is
+ * the complete Runtime set: static entries may only enrich a matching row
+ * (native UI, typed mapping, group, and argument hints), never add a command.
+ */
+export function mergeSlashCatalogWithManifest(manifest?: OperatorCommandManifest): StudioSlashCommand[] {
+  if (manifest === undefined) return visibleSlashCatalog();
+
+  return manifest.commands.map((entry) => {
+    const metadata = BUILTIN_SLASH_CATALOG.find((command) => manifestMatchesStatic(entry, command));
+    const schemaAllowsArgs = manifestAllowsArgs(entry);
+    const allowArgs = metadata?.allowArgs === true || schemaAllowsArgs;
+    const localSelect = metadata?.select === "native-ui" || metadata?.typed !== undefined
+      ? metadata.select
+      : undefined;
+    const select = localSelect ?? (allowArgs ? "complete-args" : "run-now");
+    const aliases = [...new Set(entry.aliases.map(bareSlashName).filter((alias) => alias.length > 0))];
+    const name = bareSlashName(entry.name);
+    const disabledReason = manifestDisabledReason(entry, metadata);
+    return {
+      name,
+      aliases,
+      description: entry.description || metadata?.description || name,
+      group: metadata?.group ?? manifestGroup(entry.source),
+      allowArgs,
+      ...(metadata?.hint === undefined && allowArgs ? { hint: "[arguments]" } : metadata?.hint === undefined ? {} : { hint: metadata.hint }),
+      ...(metadata?.subcommands === undefined ? {} : { subcommands: metadata.subcommands }),
+      availability: manifestAvailability(entry, metadata),
+      ...(disabledReason === undefined ? {} : { disabledReason }),
+      risk: entry.risk,
+      select,
+      ...(metadata?.ui === undefined ? {} : { ui: metadata.ui }),
+      ...(metadata?.typed === undefined ? {} : { typed: metadata.typed }),
+      invokeId: entry.id,
+      source: entry.source,
+    } satisfies StudioSlashCommand;
+  });
 }
 
 function onOffStatus(extra: string): readonly SlashSubcommand[] {
@@ -398,8 +483,10 @@ export function parseSlashDraft(text: string): SlashDraft | null {
   };
 }
 
-export function lookupSlashCommand(name: string): StudioSlashCommand | undefined {
-  return CATALOG_BY_NAME.get(name.toLowerCase());
+export function lookupSlashCommand(name: string, catalog?: readonly StudioSlashCommand[]): StudioSlashCommand | undefined {
+  const key = normalizedSlashName(name);
+  if (catalog === undefined) return CATALOG_BY_NAME.get(key);
+  return catalog.find((command) => [command.name, ...command.aliases].some((candidate) => normalizedSlashName(candidate) === key));
 }
 
 export function visibleSlashCatalog(): StudioSlashCommand[] {
@@ -582,8 +669,8 @@ function resolveModeApplies(names: readonly string[]): string[] {
   return mutex === undefined ? solos : [...solos, mutex];
 }
 
-function lookupAvailable(name: string): StudioSlashCommand | undefined {
-  const command = lookupSlashCommand(name);
+function lookupAvailable(name: string, catalog?: readonly StudioSlashCommand[]): StudioSlashCommand | undefined {
+  const command = lookupSlashCommand(name, catalog);
   if (command === undefined || command.availability !== "available") return undefined;
   return command;
 }
@@ -611,22 +698,22 @@ export function stripLeadingSlashCommand(snapshot: ComposerSnapshot, commandToke
   return snapshotFromDoc({ nodes });
 }
 
-function appliesOf(names: readonly string[]): SlashApply[] {
+function appliesOf(names: readonly string[], catalog?: readonly StudioSlashCommand[]): SlashApply[] {
   const apply: SlashApply[] = [];
   for (const name of resolveModeApplies(names)) {
-    const command = lookupAvailable(name);
+    const command = lookupAvailable(name, catalog);
     if (command) apply.push({ command, args: "" });
   }
   return apply;
 }
 
 /** Decide whether sending a composer snapshot runs a builtin, applies a mode then prompts, or goes to the LLM. */
-export function planComposerSend(snapshot: ComposerSnapshot): SlashSendPlan {
+export function planComposerSend(snapshot: ComposerSnapshot, catalog?: readonly StudioSlashCommand[]): SlashSendPlan {
   const peeled = splitModeChips(snapshot);
   const trimmed = peeled.snapshot.text.trim();
   const draft = parseSlashDraft(trimmed);
-  const command = draft && draft.name.length > 0 ? lookupAvailable(draft.name) : undefined;
-  const chipApplies = appliesOf(peeled.names);
+  const command = draft && draft.name.length > 0 ? lookupAvailable(draft.name, catalog) : undefined;
+  const chipApplies = appliesOf(peeled.names, catalog);
 
   if (command !== undefined && draft !== null) {
     if (command.select === "chip") {
@@ -672,7 +759,8 @@ export function planComposerSend(snapshot: ComposerSnapshot): SlashSendPlan {
  */
 export function composerSlashExecute(
   snapshot: ComposerSnapshot,
+  catalog?: readonly StudioSlashCommand[],
 ): Extract<SlashSendPlan, { kind: "execute" }> | undefined {
-  const plan = planComposerSend(snapshot);
+  const plan = planComposerSend(snapshot, catalog);
   return plan.kind === "execute" ? plan : undefined;
 }

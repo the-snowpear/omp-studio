@@ -60,3 +60,20 @@ test("FileSessionLeaseStore does not allow a stale owner to release a replacemen
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("FileSessionLeaseStore.removeForSession drops the lease and epoch files", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-session-lease-"));
+  try {
+    const store = new FileSessionLeaseStore({ directory });
+    const lease = await store.acquire({ sessionId: "session-a", ownerId: "broker-a" });
+    await lease.release();
+    await store.removeForSession("session-a");
+    // 文件已删：重新 acquire 直接从 epoch 0 起算。
+    const replacement = await store.acquire({ sessionId: "session-a", ownerId: "broker-b" });
+    assert.equal(replacement.leaseEpoch, 1);
+    await replacement.release();
+    await store.removeForSession("session-missing"); // 容错：不存在的会话无操作
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

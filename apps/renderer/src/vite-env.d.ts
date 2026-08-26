@@ -74,6 +74,15 @@ declare global {
             | { readonly ok: false; readonly reason: "missing" | "invalid" }
           >
         >;
+        /**
+         * 原生另存为对话框选计划保存位置（Main 弹窗，默认 `<工作区>/PLAN.md`）。
+         * `picked` 回传工作区相对路径（正斜杠）；`outside-workspace` = 选到工作区外。
+         */
+        pickPlanSavePath(input: { workspaceId: string }): Promise<
+          | { readonly status: "picked"; readonly relativePath: string }
+          | { readonly status: "cancelled" }
+          | { readonly status: "outside-workspace"; readonly fileName: string }
+        >;
         copyImage(input: {
           mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
           bytes: Uint8Array;

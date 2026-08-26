@@ -99,7 +99,7 @@ export function collectHistoryRecents(input: {
           : (lang === "en" ? "Idle" : "空闲");
       return {
         id: entry.historyId,
-        title: entry.title,
+        title: entry.title ?? (lang === "en" ? "Untitled session" : "未命名会话"),
         project: input.projectName,
         time: relativeTime(entry.lastActiveAt, input.now, lang),
         status,

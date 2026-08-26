@@ -54,8 +54,7 @@ export function reconstructSessionBranch(entries: readonly FileEntry[]): Reconst
 	for (const entry of sessionEntries) {
 		if (typeof entry.id === "string" && entry.id.length > 0) byId.set(entry.id, entry);
 	}
-	const leaf =
-		(activeLeafId !== undefined ? byId.get(activeLeafId) : undefined) ?? sessionEntries.at(-1);
+	const leaf = (activeLeafId !== undefined ? byId.get(activeLeafId) : undefined) ?? sessionEntries.at(-1);
 	if (leaf === undefined || typeof leaf.id !== "string" || leaf.id.length === 0) {
 		return { sessionId: header.id, branchLeafId: "", branch: [] };
 	}

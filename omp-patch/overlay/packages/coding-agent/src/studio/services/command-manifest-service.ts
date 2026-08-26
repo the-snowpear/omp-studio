@@ -30,7 +30,8 @@ export interface StudioOperatorCommandManifest {
 	unclassifiedBuiltins: string[];
 }
 
-const UPSTREAM_COMMIT = "8500092296621a6826b7136e840f8a59ea338958";
+const UPSTREAM_COMMIT = "160ed439ac0df594347e7d7018b813a7ffdb5e81";
+const STUDIO_SESSION_TITLE_ENSURE_ID = "studio.session-title.ensure";
 const DESTRUCTIVE = new Set(["drop", "clear", "fork"]);
 const READ_ONLY = new Set(["help", "version", "stats", "models", "tree", "branch", "goal"]);
 
@@ -50,7 +51,7 @@ export class StudioCommandManifestService {
 	#commandsById = new Map<string, StudioOperatorCommand>();
 
 	constructor(private readonly session: AgentSession) {
-		this.#current = this.#replace(BUILTIN_SLASH_COMMANDS_INTERNAL.map(command => builtinDescriptor(command)));
+		this.#current = this.#replace([...builtinCommands(), studioCommandDescriptor()]);
 	}
 
 	manifest(): StudioOperatorCommandManifest {
@@ -63,7 +64,7 @@ export class StudioCommandManifestService {
 
 	async refresh(): Promise<StudioOperatorCommandManifest> {
 		const { buildAvailableSlashCommands } = await import("../../slash-commands/available-commands");
-		const commands = BUILTIN_SLASH_COMMANDS_INTERNAL.map(command => builtinDescriptor(command));
+		const commands = [...builtinCommands(), studioCommandDescriptor()];
 		const availableSession = {
 			extensionRunner: this.session.extensionRunner,
 			customCommands: this.session.customCommands ?? [],
@@ -109,6 +110,7 @@ export class StudioCommandManifestService {
 			throw new StudioCommandManifestError("COMMAND_UNKNOWN", `Unknown operator command ${commandId}`);
 		}
 		const argumentText = normalizeArguments(args);
+		if (commandId === STUDIO_SESSION_TITLE_ENSURE_ID) return await this.#ensureSessionTitle(argumentText);
 		if (!command && descriptor !== undefined) return await this.#invokeDynamic(descriptor, argumentText);
 		if (!command) throw new StudioCommandManifestError("COMMAND_UNKNOWN", `Unknown operator command ${commandId}`);
 		if (!command.handle) {
@@ -140,6 +142,28 @@ export class StudioCommandManifestService {
 			runtime,
 		);
 		return { output, result: result ?? { consumed: true } };
+	}
+
+	async #ensureSessionTitle(title: string): Promise<unknown> {
+		if (!title) {
+			throw new StudioCommandManifestError(
+				"INVALID_ARGUMENT",
+				"studio.session-title.ensure requires a non-empty title",
+			);
+		}
+
+		const sessionManager = this.session.sessionManager;
+		const existingTitle = sessionManager.getSessionName();
+		if (existingTitle) {
+			return { applied: false, title: existingTitle, source: sessionManager.titleSource };
+		}
+
+		const applied = await sessionManager.setSessionName(title, "auto", "studio-provisional-fallback");
+		return {
+			applied,
+			title: sessionManager.getSessionName(),
+			source: sessionManager.titleSource,
+		};
 	}
 
 	#replace(commands: StudioOperatorCommand[]): StudioOperatorCommandManifest {
@@ -194,6 +218,28 @@ function manifestSource(
 		default:
 			return source;
 	}
+}
+
+function builtinCommands(): StudioOperatorCommand[] {
+	return BUILTIN_SLASH_COMMANDS_INTERNAL.map(command => builtinDescriptor(command));
+}
+
+function studioCommandDescriptor(): StudioOperatorCommand {
+	return {
+		id: STUDIO_SESSION_TITLE_ENSURE_ID,
+		name: "session-title.ensure",
+		aliases: [],
+		description: "Ensure the session has a provisional title.",
+		source: "builtin",
+		implementation: "shared-service",
+		interactionKinds: [],
+		presentation: "native",
+		availability: "available",
+		argumentSchema: { type: "string", hint: "Session title" },
+		risk: "normal",
+		effect: "session",
+		contractTestId: "CMD-STUDIO-SESSION-TITLE-ENSURE",
+	};
 }
 
 function builtinDescriptor(command: (typeof BUILTIN_SLASH_COMMANDS_INTERNAL)[number]): StudioOperatorCommand {

@@ -71,6 +71,7 @@ import type {
   RuntimeEpoch,
   RuntimeId,
   RuntimeInstallState,
+  ResidentsReadModel,
   SessionHistoryEntry,
   SessionHistoryReadModel,
   SessionHistoryStatus,
@@ -109,6 +110,7 @@ import {
   canonicalJson,
   parseConversationRuntimeEvent,
   parseConversationTranscriptPage,
+  parseFoundationStudioRequest,
   parseSessionTelemetryReadResult,
   parseSessionTelemetrySnapshot,
 } from "@omp-studio/studio-protocol";
@@ -146,6 +148,7 @@ import {
   type HostRuntimeDisconnect,
   type HostRuntimeHelloView,
   type HostRuntimeUnavailable,
+  type HostResidentsService,
   type HostRuntimeInstallProbe,
   type HostRuntimeInstallService,
   type HostSemanticCommandService,
@@ -214,6 +217,8 @@ export interface StudioHostClientFacadeOptions {
   readonly commandManifest: HostManifestProvider<OperatorCommandManifest>;
   /** Optional ready Runtime session controller plus safe hello/snapshot access. */
   readonly runtime?: HostRuntimeAccess;
+  /** Optional authority-level Runtime resident projection. */
+  readonly residents?: HostResidentsService;
   readonly catalog: HostSessionCatalogProvider;
   /** Optional Runtime-independent persistent transcript reader. */
   readonly archive?: HostSessionArchiveProvider;
@@ -366,6 +371,34 @@ function validateEnvelope(request: {
   }
 }
 
+/** Re-validate the three Runtime mirror commands at the in-process Host seam. */
+function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unknown): void {
+  if (
+    commandName !== "runtime.settings.get" &&
+    commandName !== "runtime.settings.set" &&
+    commandName !== "mode.plan.review.saveAndQuit"
+  ) {
+    return;
+  }
+  try {
+    const operation = {
+      kind: commandName,
+      ...(input !== null && typeof input === "object" ? input : {}),
+    };
+    parseFoundationStudioRequest({
+      type: "studio.request",
+      requestId: "host-validation",
+      runtimeEpoch: 1,
+      operation,
+    });
+  } catch (error) {
+    throw clientError(
+      "INVALID_ARGUMENT",
+      `${commandName} input is invalid: ${error instanceof Error ? error.message : "invalid"}`,
+    );
+  }
+}
+
 function validateInteractionValue(value: unknown): void {
   const MAX_TEXT = 128 * 1024;
   const MAX_ITEMS = 256;
@@ -485,6 +518,22 @@ function connectionEquals(left: RuntimeConnection, right: RuntimeConnection): bo
   );
 }
 
+function residentsEqual(left: ResidentsReadModel | undefined, right: ResidentsReadModel): boolean {
+  if (left === undefined || left.activeSessionId !== right.activeSessionId || left.residents.length !== right.residents.length) {
+    return false;
+  }
+  return left.residents.every((previous, index) => {
+    const next = right.residents[index];
+    return next !== undefined &&
+      previous.sessionId === next.sessionId &&
+      previous.workspaceId === next.workspaceId &&
+      previous.phase === next.phase &&
+      previous.pendingMessages === next.pendingMessages &&
+      previous.waitKind === next.waitKind &&
+      previous.lastActivityAt === next.lastActivityAt;
+  });
+}
+
 function validateOptions(options: StudioHostClientFacadeOptions): void {
   if (options.authority.authorityId.length === 0) {
     throw new TypeError("facade authority id is required");
@@ -509,6 +558,15 @@ function validateOptions(options: StudioHostClientFacadeOptions): void {
   }
   if (options.catalog === null || typeof options.catalog.list !== "function") {
     throw new TypeError("facade session catalog provider is required");
+  }
+  if (options.residents !== undefined && typeof options.residents.list !== "function") {
+    throw new TypeError("facade residents service must expose list");
+  }
+  if (options.residents?.onChanged !== undefined && typeof options.residents.onChanged !== "function") {
+    throw new TypeError("facade residents change hook must be a function");
+  }
+  if (options.residents?.onTerminalOutcomes !== undefined && typeof options.residents.onTerminalOutcomes !== "function") {
+    throw new TypeError("facade resident terminal hook must be a function");
   }
   if (options.archive !== undefined && typeof options.archive.readPage !== "function") {
     throw new TypeError("facade session archive provider must expose readPage");
@@ -587,6 +645,8 @@ export class StudioHostClientFacade implements ClientTransport {
   #unsubscribeConversationResync: Unsubscribe | undefined;
   #unsubscribeTelemetry: Unsubscribe | undefined;
   #unsubscribeBtw: Unsubscribe | undefined;
+  #unsubscribeResidents: Unsubscribe | undefined;
+  #unsubscribeResidentTerminalOutcomes: Unsubscribe | undefined;
   #unsubscribeInteraction: Unsubscribe | undefined;
   #unsubscribeGitProgress: Unsubscribe | undefined;
   #unsubscribeGitExternal: Unsubscribe | undefined;
@@ -603,6 +663,11 @@ export class StudioHostClientFacade implements ClientTransport {
   #lastInstallResult: RuntimeInstallState | undefined;
   /** Last workspace list seen; feeds the bootstrap selection (`projects.list` wins in the Renderer). */
   #lastWorkspaceModel: WorkspaceListReadModel | undefined;
+  #lastResidents: ResidentsReadModel | undefined;
+  /** Ledger entries repeat on every resident publication until its commit is
+   * replaced; keep a request/status fingerprint so background receipts emit
+   * once even after the active Worker changes. */
+  #ledgerReceiptKeys = new Set<string>();
   readonly #conversationDiagnostics: DiagnosticEntry[] = [];
   readonly #runtimeLossDiagnostics: DiagnosticEntry[] = [];
 
@@ -615,6 +680,16 @@ export class StudioHostClientFacade implements ClientTransport {
     const onPublication = options.runtime?.onPublication;
     if (onPublication !== undefined) {
       this.#unsubscribePublication = onPublication((publication) => this.#onPublication(publication));
+    }
+    const onResidentsChanged = options.residents?.onChanged;
+    if (onResidentsChanged !== undefined) {
+      this.#unsubscribeResidents = onResidentsChanged((residents) => this.#onResidentsChanged(residents));
+    }
+    const onResidentTerminalOutcomes = options.residents?.onTerminalOutcomes;
+    if (onResidentTerminalOutcomes !== undefined) {
+      this.#unsubscribeResidentTerminalOutcomes = onResidentTerminalOutcomes((outcomes) => {
+        for (const entry of outcomes) this.#emitLedgerReceipt(entry);
+      });
     }
     this.#bindConversation();
     this.#bindTelemetry();
@@ -644,6 +719,7 @@ export class StudioHostClientFacade implements ClientTransport {
     const now = this.#options.diagnostics.now();
     const capabilityManifest = await this.#resolveManifest(this.#options.capabilityManifest, () => neutralCapabilityManifest(now));
     const commandManifest = await this.#resolveManifest(this.#options.commandManifest, () => neutralCommandManifest(now));
+    const residents = await this.#readResidentsForBootstrap();
     const snapshot = this.#currentSnapshot();
     const connection = this.#currentConnection();
     this.#lastEmittedConnection = connection;
@@ -655,6 +731,7 @@ export class StudioHostClientFacade implements ClientTransport {
       capabilityManifest,
       commandManifestHash: commandManifest.hash,
       selected: this.#selection(snapshot),
+      ...(residents === undefined ? {} : { residents }),
     };
     if (snapshot === undefined) {
       // Without-snapshot variant: the three snapshot keys stay structurally
@@ -717,7 +794,20 @@ export class StudioHostClientFacade implements ClientTransport {
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "history.list": {
-        const result = await this.#queryHistory(request.input as { readonly limit?: number; readonly status?: SessionHistoryStatus });
+        const result = await this.#queryHistory(request.input as {
+          readonly limit?: number;
+          readonly status?: SessionHistoryStatus;
+          readonly workspaceId?: WorkspaceId;
+        });
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "residents.list": {
+        const service = this.#options.residents;
+        if (service === undefined) {
+          throw clientError("CAPABILITY_UNAVAILABLE", "residents.list is not available on this Host");
+        }
+        const result = await service.list();
+        this.#lastResidents = result;
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "session.state": {
@@ -879,6 +969,9 @@ export class StudioHostClientFacade implements ClientTransport {
       case "session.unarchive": {
         return this.#commandArchiveToggle(request as ClientCommandRequest<"session.archive" | "session.unarchive">);
       }
+      case "session.delete": {
+        return this.#commandDelete(request as ClientCommandRequest<"session.delete">);
+      }
       case "interaction.respond": {
         const respondRequest = request as ClientCommandRequest<"interaction.respond">;
         return this.#commandRespond(respondRequest);
@@ -1008,6 +1101,7 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #commandP4(request: ClientCommandRequest): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
+    validateRuntimeMirrorCommandInput(request.commandName, request.input);
     const service = this.#options.commands;
     if (service?.invoke === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available on this Host`);
     if (this.#currentSnapshot() === undefined) throw unavailableError(`${request.commandName} requires a Runtime snapshot`);
@@ -1053,6 +1147,10 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#unsubscribeTelemetry = undefined;
     this.#unsubscribeBtw?.();
     this.#unsubscribeBtw = undefined;
+    this.#unsubscribeResidents?.();
+    this.#unsubscribeResidents = undefined;
+    this.#unsubscribeResidentTerminalOutcomes?.();
+    this.#unsubscribeResidentTerminalOutcomes = undefined;
     this.#unsubscribeInteraction?.();
     this.#unsubscribeInteraction = undefined;
     this.#unsubscribeGitProgress?.();
@@ -1103,6 +1201,34 @@ export class StudioHostClientFacade implements ClientTransport {
     } catch {
       return fallback();
     }
+  }
+
+  async #readResidentsForBootstrap(): Promise<ResidentsReadModel | undefined> {
+    const service = this.#options.residents;
+    if (service === undefined) return undefined;
+    try {
+      const residents = await service.list();
+      this.#lastResidents = residents;
+      return residents;
+    } catch {
+      // Bootstrap remains useful when a broker read races shutdown; the
+      // explicit residents.list query still fails closed through its service.
+      return undefined;
+    }
+  }
+
+  #onResidentsChanged(residents: ResidentsReadModel): void {
+    if (residentsEqual(this.#lastResidents, residents)) return;
+    this.#lastResidents = residents;
+    // Resident summaries are authority/broker facts, not a projection of the
+    // currently selected Worker. Do not inherit the active Runtime epoch or
+    // state version onto this event.
+    this.#bus.emit({
+      kind: "residents.changed",
+      residents,
+      runtimeEpoch: null,
+      stateVersion: 0 as StateVersion,
+    });
   }
 
   // ------------------------------------------------------------------
@@ -1547,6 +1673,10 @@ export class StudioHostClientFacade implements ClientTransport {
    */
   #emitLedgerReceipt(entry: CommandLedgerEntry): void {
     const requestId = entry.requestId as CommandRequestId;
+    const ledgerKey = `${entry.requestId}:${entry.commandId}:${entry.status}:${entry.terminalAt ?? ""}`;
+    if (this.#ledgerReceiptKeys.has(ledgerKey)) {
+      return;
+    }
     if (this.#terminalEmitted.has(requestId)) {
       return;
     }
@@ -1558,6 +1688,7 @@ export class StudioHostClientFacade implements ClientTransport {
     if (receipt === undefined) {
       return;
     }
+    this.#ledgerReceiptKeys.add(ledgerKey);
     this.#terminalEmitted.add(requestId);
     this.#registry.recordTerminal(requestId, receipt);
     this.#bus.emit({ kind: "command.receipt", receipt, runtimeEpoch: entry.runtimeEpoch });
@@ -1698,7 +1829,11 @@ export class StudioHostClientFacade implements ClientTransport {
     return buildDiagnosticsReadModel(now, { ...this.#options.authority }, entries);
   }
 
-  async #queryHistory(input: { readonly limit?: number; readonly status?: SessionHistoryStatus }): Promise<SessionHistoryReadModel> {
+  async #queryHistory(input: {
+    readonly limit?: number;
+    readonly status?: SessionHistoryStatus;
+    readonly workspaceId?: WorkspaceId;
+  }): Promise<SessionHistoryReadModel> {
     const requested = input.limit ?? HISTORY_DEFAULT_LIMIT;
     if (!Number.isSafeInteger(requested) || requested < 1) {
       throw clientError("INVALID_ARGUMENT", "history limit must be a positive integer");
@@ -1707,17 +1842,22 @@ export class StudioHostClientFacade implements ClientTransport {
       throw clientError("INVALID_ARGUMENT", "history status must be active, archived or closed");
     }
     const limit = Math.min(requested, HISTORY_MAX_LIMIT);
-    const catalog = await this.#options.catalog.list();
+    const catalog = await this.#options.catalog.list(
+      input.workspaceId === undefined ? undefined : { workspaceId: input.workspaceId },
+    );
     const filtered = input.status === undefined ? catalog : catalog.filter((entry) => entry.status === input.status);
     const sorted = [...filtered].sort(
-      (left, right) => right.modifiedAt.localeCompare(left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
+      (left, right) =>
+        Number(right.pinned === true) - Number(left.pinned === true) ||
+        right.modifiedAt.localeCompare(left.modifiedAt) ||
+        left.sessionId.localeCompare(right.sessionId),
     );
     const entries = sorted.map((entry) => this.#mapHistoryEntry(entry));
     return { entries: entries.slice(0, limit), total: entries.length };
   }
 
   #mapHistoryEntry(entry: HostCatalogEntry): SessionHistoryEntry {
-    const title = sanitizeDisplayText(entry.title, 120) ?? "Untitled session";
+    const title = sanitizeDisplayText(entry.title, 120);
     const summary = sanitizeDisplayText(entry.summary, 200);
     // Boundary: the catalog's opaque session identity becomes the client
     // SessionId brand; the id itself is never a path.
@@ -1727,12 +1867,13 @@ export class StudioHostClientFacade implements ClientTransport {
       threadId: threadIdFor(entry.sessionId),
       environmentId: environmentIdFor(this.#options.authority.authorityId),
       ...(entry.sessionId.length === 0 ? {} : { sessionId }),
-      title,
+      ...(title === undefined ? {} : { title }),
       ...(summary === undefined ? {} : { summary }),
       startedAt: entry.createdAt ?? entry.modifiedAt,
       lastActiveAt: entry.modifiedAt,
       messageCount: entry.messageCount,
       status: entry.status,
+      ...(entry.pinned === undefined ? {} : { pinned: entry.pinned }),
     };
   }
 
@@ -1757,11 +1898,14 @@ export class StudioHostClientFacade implements ClientTransport {
         (left, right) => right.modifiedAt.localeCompare(left.modifiedAt) || left.sessionId.localeCompare(right.sessionId),
       )
       .slice(0, HOME_RECENT_THREADS)
-      .map((entry) => ({
-        threadId: threadIdFor(entry.sessionId),
-        title: sanitizeDisplayText(entry.title, 120) ?? "Untitled session",
-        lastActiveAt: entry.modifiedAt,
-      }));
+      .map((entry) => {
+        const title = sanitizeDisplayText(entry.title, 120);
+        return {
+          threadId: threadIdFor(entry.sessionId),
+          ...(title === undefined ? {} : { title }),
+          lastActiveAt: entry.modifiedAt,
+        };
+      });
     const workspaces = this.#options.workspaces;
     const recentWorkspaces =
       workspaces === undefined ? undefined : (await workspaces.list()).workspaces.slice(0, HOME_RECENT_WORKSPACES);
@@ -2277,7 +2421,7 @@ export class StudioHostClientFacade implements ClientTransport {
   async #runArchiveToggle(
     run: () => ConfigWriteResult | Promise<ConfigWriteResult>,
     requestId: CommandRequestId,
-    commandName: "session.archive" | "session.unarchive",
+    commandName: "session.archive" | "session.unarchive" | "session.delete",
   ): Promise<void> {
     try {
       const result = await run();
@@ -2297,6 +2441,42 @@ export class StudioHostClientFacade implements ClientTransport {
         observedAt: this.#options.diagnostics.now(),
       } as CommandReceipt);
     }
+  }
+
+  /**
+   * `session.delete`: destructive Host-owned removal of the thread's session
+   * files and every related local artifact. Like archive it needs an explicit
+   * injected service and fails closed without one; the Renderer must confirm
+   * before issuing this command.
+   */
+  async #commandDelete(request: ClientCommandRequest<"session.delete">): Promise<ClientCommandAccepted<"session.delete">> {
+    validateEnvelope(request);
+    const service = this.#options.commands;
+    if (service?.delete === undefined) {
+      throw clientError(
+        "CAPABILITY_UNAVAILABLE",
+        "session.delete is not available: no delete capability is wired on the semantic command service",
+      );
+    }
+    if (!isThreadCommandInput(request.input)) {
+      throw clientError("INVALID_ARGUMENT", "session.delete threadId must not be empty");
+    }
+    const threadId = request.input.threadId;
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: "session.delete", requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted: ClientCommandAccepted<"session.delete"> = {
+      commandName: "session.delete",
+      requestId: request.requestId,
+      status: "accepted" as const,
+      acceptedAt,
+    };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void this.#runArchiveToggle(() => service.delete!({ threadId }), request.requestId, "session.delete");
+    return accepted;
   }
 
   async #commandRespond(request: ClientCommandRequest<"interaction.respond">): Promise<ClientCommandAccepted<"interaction.respond">> {

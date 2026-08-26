@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type CSSProperties } from "react";
 import { Icon } from "../icons";
 import type { TurnFileChange } from "./toolMeta";
 
@@ -6,6 +6,22 @@ const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|css|scss|html?|json|md|py|rs|go|vue|svel
 
 function fileIcon(name: string): "file-code" | "file" {
   return CODE_FILE.test(name) ? "file-code" : "file";
+}
+
+/** 限高态可见行数：超过该数的列表在卡内滚动（与 workbench.css 的 36px 行高配套）。 */
+const ROW_CAP = 6;
+
+type TurnDiffStage = "collapsed" | "capped" | "full";
+
+function stageHint(stage: TurnDiffStage): string {
+  if (stage === "collapsed") return "已收起，点击展开";
+  if (stage === "capped") return "限高显示，点击全部展开";
+  return "全部展开，点击收起";
+}
+
+function nextStage(stage: TurnDiffStage, capped: boolean): TurnDiffStage {
+  if (!capped) return stage === "collapsed" ? "full" : "collapsed";
+  return stage === "collapsed" ? "capped" : stage === "capped" ? "full" : "collapsed";
 }
 
 export function TurnDiffCard({
@@ -20,23 +36,30 @@ export function TurnDiffCard({
   onReview?: () => void;
 }) {
   const panelId = useId();
-  const [open, setOpen] = useState(defaultOpen === true);
+  const capped = files.length > ROW_CAP;
+  // 最新完成轮默认进限高态；不超过限高时直接全展，避免一次无视觉效果的多余点击
+  const [stage, setStage] = useState<TurnDiffStage>(
+    defaultOpen === true ? (capped ? "capped" : "full") : "collapsed",
+  );
   const add = files.reduce((sum, file) => sum + file.add, 0);
   const del = files.reduce((sum, file) => sum + file.del, 0);
   const countLabel = `${files.length} 个文件已更改`;
   const statsLabel = [add ? `新增 ${add} 行` : "", del ? `删除 ${del} 行` : ""].filter(Boolean).join("，");
-  const toggleLabel = `${countLabel}${statsLabel ? `，${statsLabel}` : ""}，${open ? "收起" : "展开"}文件列表`;
+  const toggleLabel = `${countLabel}${statsLabel ? `，${statsLabel}` : ""}，${stageHint(stage)}`;
 
   return (
-    <div className={`turn-diff${open ? " open" : ""}`}>
+    <div
+      className={`turn-diff${stage !== "collapsed" ? " open" : ""}${stage === "capped" ? " capped" : ""}`}
+      style={{ "--turn-diff-cap-rows": ROW_CAP } as CSSProperties}
+    >
       <div className="turn-diff-head">
         <button
           type="button"
           className="turn-diff-toggle"
-          aria-expanded={open}
+          aria-expanded={stage !== "collapsed"}
           aria-controls={panelId}
           aria-label={toggleLabel}
-          onClick={() => setOpen((value) => !value)}
+          onClick={() => setStage((value) => nextStage(value, capped))}
         >
           <Icon name="chevron-r" extra="sm turn-diff-chev" />
           <span className="turn-diff-count">{countLabel}</span>
@@ -62,8 +85,8 @@ export function TurnDiffCard({
       <div
         className="turn-diff-panel"
         id={panelId}
-        aria-hidden={!open}
-        inert={open ? undefined : true}
+        aria-hidden={stage === "collapsed"}
+        inert={stage === "collapsed" ? undefined : true}
       >
         <div className="turn-diff-panel-inner">
           <ul className="turn-diff-files">

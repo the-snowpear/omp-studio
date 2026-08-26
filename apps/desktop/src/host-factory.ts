@@ -62,6 +62,7 @@ import { createDesktopGithubService } from "./github-service.js";
 import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
 import { createDesktopRuntimeSessionPort } from "./runtime-session.js";
 import { createWorkspaceFileService } from "./workspace-files.js";
+import { createWorkspaceSessionCatalog } from "./session-commands.js";
 import { packagedRuntimeInstallLayout, type DesktopManagedInstallOptions } from "./runtime-install.js";
 import type { DesktopHostComposition, DesktopHostFactory } from "./types.js";
 
@@ -620,6 +621,14 @@ export function createProductionHostFactory(options?: {
   const github = createDesktopGithubService({ registry, runner: gitProcessRunner, queue: gitWriteQueue });
   let activeComposition: DesktopHostComposition | undefined;
   const workspaceCwd: { current: string | undefined } = { current: undefined };
+  // Selecting a Session that belongs to another project moves the active
+  // workspace inside the Broker (e.g. resuming a background thread from the
+  // palette). Main-process chrome — external editor, file manager, local PTY
+  // cwd — has to follow that, not just the explicit workspace.open path.
+  let detachWorkspaceSink: (() => void) | undefined;
+  detachWorkspaceSink = runtimeSession.attachWorkspaceSink?.((workspace) => {
+    workspaceCwd.current = workspace.cwd;
+  });
   const innerWorkspaces = createOmpWorkspaceService({
     registry,
     pickDirectory,
@@ -653,6 +662,13 @@ export function createProductionHostFactory(options?: {
   };
   const facade: DesktopFacadeSeams = {
     hostLog,
+    catalog: createWorkspaceSessionCatalog(
+      () => workspaceCwd.current,
+      async (workspaceId) => {
+        await ensureRegistry();
+        return registry.get(workspaceId)?.canonicalPath;
+      },
+    ),
     ...(options?.openUrl === undefined ? {} : { openUrl: options.openUrl }),
     ...(options?.revealDirectory === undefined ? {} : { revealDirectory: options.revealDirectory }),
     workspaces,
@@ -660,6 +676,8 @@ export function createProductionHostFactory(options?: {
     git,
     github,
     disposeHostOperations: () => {
+      detachWorkspaceSink?.();
+      detachWorkspaceSink = undefined;
       gitProcessRunner.cancelAll();
       git.dispose();
     },

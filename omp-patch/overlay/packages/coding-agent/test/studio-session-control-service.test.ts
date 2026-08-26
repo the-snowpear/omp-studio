@@ -171,21 +171,24 @@ describe("WP-021/022/023/024/025 SessionControlService", () => {
 		expect(session.retryCalls).toBe(0);
 	});
 
-	test("core.prompt reuses AgentSession.prompt and fails closed while streaming", async () => {
+	test("core.prompt reuses AgentSession.prompt and degrades to followUp while streaming", async () => {
 		const session = new FakeSessionControlSession();
 		const service = new SessionControlService(session);
 		await expect(service.prompt("do the thing")).resolves.toEqual({ started: true });
 		expect(session.promptCalls).toEqual(["do the thing"]);
 		session.isStreaming = true;
-		await expect(service.prompt("second")).rejects.toMatchObject({ code: "BUSY_STREAMING" });
+		await expect(service.prompt("second")).resolves.toEqual({ started: false });
 		expect(session.promptCalls).toEqual(["do the thing"]);
+		expect(session.followUpCalls).toEqual(["second"]);
 	});
 
-	test("core.prompt maps an AgentBusyError race to BUSY_STREAMING", async () => {
+	test("core.prompt degrades an AgentBusyError race to a queued followUp", async () => {
 		const session = new FakeSessionControlSession();
 		session.promptError = new AgentBusyError();
 		const service = new SessionControlService(session);
-		await expect(service.prompt("raced")).rejects.toMatchObject({ code: "BUSY_STREAMING" });
+		await expect(service.prompt("raced")).resolves.toEqual({ started: false });
+		expect(session.promptCalls).toEqual(["raced"]);
+		expect(session.followUpCalls).toEqual(["raced"]);
 	});
 
 	test("core.prompt forwards skill preludes as prependMessages", async () => {
@@ -263,8 +266,8 @@ describe("WP-021/022/023/024/025 SessionControlService", () => {
 		await expect(service.prompt("fix the resolver")).resolves.toEqual({ started: true });
 		expect(session.titleGenerationCalls).toEqual(["fix the resolver"]);
 		session.isStreaming = true;
-		await expect(service.prompt("second")).rejects.toMatchObject({ code: "BUSY_STREAMING" });
-		expect(session.titleGenerationCalls).toEqual(["fix the resolver"]);
+		await expect(service.prompt("second")).resolves.toEqual({ started: false });
+		expect(session.titleGenerationCalls).toEqual(["fix the resolver", "second"]);
 	});
 
 	test("steer, followUp, and enqueue retry title generation from later user text", async () => {
@@ -285,18 +288,19 @@ describe("WP-021/022/023/024/025 SessionControlService", () => {
 		expect(session.titleGenerationCalls).toEqual([]);
 	});
 
-	test("compacting refuses user turns before title generation", async () => {
+	test("compacting refuses user turns before title generation but lets abort cancel", async () => {
 		const session = new FakeSessionControlSession();
 		session.isCompacting = true;
 		const service = new SessionControlService(session);
 		await expect(service.prompt("x")).rejects.toMatchObject({ code: "BUSY_COMPACTING" });
 		await expect(service.steer("x")).rejects.toMatchObject({ code: "BUSY_COMPACTING" });
 		await expect(service.followUp("x")).rejects.toMatchObject({ code: "BUSY_COMPACTING" });
-		await expect(service.abort()).rejects.toMatchObject({ code: "BUSY_COMPACTING" });
+		// core.abort cancels an in-flight compaction instead of being refused.
+		await expect(service.abort()).resolves.toEqual({ aborted: true });
 		expect(session.promptCalls).toEqual([]);
 		expect(session.steerCalls).toEqual([]);
 		expect(session.followUpCalls).toEqual([]);
-		expect(session.abortCalls).toEqual([]);
+		expect(session.abortCalls).toEqual([{ reason: "Interrupted by user" }]);
 		expect(session.titleGenerationCalls).toEqual([]);
 	});
 

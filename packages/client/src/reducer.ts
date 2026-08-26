@@ -53,6 +53,7 @@ import type {
   IdempotencyKey,
   RuntimeConnection,
   RuntimeEpoch,
+  ResidentsReadModel,
   StateVersion,
   SurfaceCapabilities,
 } from "@omp-studio/client-contract";
@@ -90,6 +91,8 @@ export interface ClientConnectionState {
 export interface ClientEntitiesState {
   readonly snapshot: OperatorStateSnapshot | null;
   readonly telemetry: OperatorStateSnapshot["telemetry"] | null;
+  /** Authority-level broker overview; survives Runtime epoch changes. */
+  readonly residents: ResidentsReadModel | null;
   /**
    * Latest BTW side-channel snapshot. Sits beside `telemetry` rather than
    * inside `conversation` because a BTW turn is ephemeral: it never enters the
@@ -192,7 +195,7 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
       selected: null,
       contractVersion: null,
     },
-    entities: { snapshot: null, telemetry: null, btw: null },
+    entities: { snapshot: null, telemetry: null, btw: null, residents: null },
     interaction: { pending: null },
     conversation: createInitialConversationState(),
     commands: {},
@@ -215,6 +218,8 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "queue.enqueue": true,
   "runtime.pause": true,
   "runtime.resume": true,
+  "runtime.settings.get": false,
+  "runtime.settings.set": true,
   "turn.retry": true,
   "runtime.install": true,
   "runtime.ensure": true,
@@ -223,6 +228,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "session.drop": true,
   "session.archive": true,
   "session.unarchive": true,
+  "session.delete": true,
   "interaction.respond": true,
   "permissions.mode.set": true,
   "models.provider.upsert": true,
@@ -263,6 +269,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "mode.plan.exit": true,
   "mode.plan.review.open": true,
   "mode.plan.review.respond": true,
+  "mode.plan.review.saveAndQuit": true,
   "mode.vibe.enter": true,
   "mode.vibe.exit": true,
   "goal.create": true,
@@ -557,7 +564,12 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
   return {
     ...state,
     connection,
-    entities: { snapshot: bootstrap.snapshot ?? null, telemetry: bootstrap.snapshot?.telemetry ?? null, btw: null },
+    entities: {
+      snapshot: bootstrap.snapshot ?? null,
+      telemetry: bootstrap.snapshot?.telemetry ?? null,
+      btw: null,
+      residents: bootstrap.residents ?? null,
+    },
     interaction,
     conversation,
     commands,
@@ -593,7 +605,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
         state = {
           ...state,
           connection: { ...state.connection, runtimeEpoch: eventRuntimeEpoch, stateVersion: null },
-          entities: { snapshot: null, telemetry: null, btw: null },
+          entities: { ...state.entities, snapshot: null, telemetry: null, btw: null },
           interaction: { pending: null },
           commands: markPendingOutcomeUnknown(
             state.commands,
@@ -644,6 +656,12 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
     case "operation.progress":
     case "git.repository.changed":
       return { ...state, connection: advanceConnection(state.connection, event) };
+    case "residents.changed":
+      return {
+        ...state,
+        connection: advanceConnection(state.connection, event),
+        entities: { ...state.entities, residents: event.residents },
+      };
     case "telemetry.changed": {
       if (state.entities.snapshot?.sessionId !== event.sessionId) {
         // The Host cursor is global to the event stream. Ignore a delayed
@@ -732,6 +750,12 @@ function runtimeEpochOf(event: ClientEvent): RuntimeEpoch | undefined {
   if (event.kind === "snapshot") {
     return event.snapshot.runtimeEpoch;
   }
+  // Residents are an authority-level broker view and terminal receipts can
+  // arrive from a background resident. Their envelope runtimeEpoch is not a
+  // freshness fence; cursor order remains authoritative for both events.
+  if (event.kind === "command.receipt" || event.kind === "residents.changed") {
+    return undefined;
+  }
   return event.runtimeEpoch;
 }
 
@@ -806,6 +830,7 @@ function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readon
       // Runtime has no replay entry for an in-flight BTW, so the panel starts
       // empty rather than showing the previous session's answer.
       btw: sessionChanged ? null : state.entities.btw,
+      residents: state.entities.residents,
     },
     interaction: {
       pending: pendingAfterSnapshot(state.interaction.pending, snapshot, sessionChanged),
@@ -994,7 +1019,9 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
       runtimeEpoch: nextRuntimeEpoch,
       ...(identityChanged || lost ? { stateVersion: null } : {}),
     },
-    ...(identityChanged || lost ? { entities: { snapshot: null, telemetry: null, btw: null } } : {}),
+    ...(identityChanged || lost
+      ? { entities: { ...state.entities, snapshot: null, telemetry: null, btw: null } }
+      : {}),
     interaction,
     commands,
     conversation,

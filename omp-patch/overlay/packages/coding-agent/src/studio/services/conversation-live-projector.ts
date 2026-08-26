@@ -16,6 +16,7 @@ import {
 	sanitizeJsonValue,
 	sanitizePublicText,
 	sanitizeToolArguments,
+	truncateUtf8,
 	utf8ByteLength,
 } from "./conversation-sanitizer";
 import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
@@ -23,6 +24,17 @@ import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversa
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
 export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
 export const CONVERSATION_LIVE_QUEUE_LIMIT = 128;
+
+const TERMINAL_LATE_EVENT_TYPES = new Set<AgentSessionEvent["type"]>([
+	"message_start",
+	"message_update",
+	"message_end",
+	"tool_execution_start",
+	"tool_execution_update",
+	"tool_execution_end",
+	"auto_compaction_start",
+	"auto_compaction_end",
+]);
 
 export interface ConversationLiveClock {
 	nowMs(): number;
@@ -68,7 +80,7 @@ type OpenMessage = {
 	role: ConversationRole;
 	createdAt: string;
 	parentId: string | null;
-	blocks: Map<string, { blockType: "text" | "thinking"; text: string }>;
+	blocks: Map<string, { blockType: "text" | "thinking"; text: string; bytes: number; truncated: boolean }>;
 	toolCalls: Map<string, Extract<ConversationContentBlock, { type: "toolCall" }>>;
 	completed: boolean;
 };
@@ -222,6 +234,7 @@ export class ConversationLiveProjector {
 	#generation = 0;
 	#turnSeq = 0;
 	#turnId: string | undefined;
+	#continuationPending = false;
 	#turnAborted = false;
 	#turnCompleted = false;
 	#lastItemId: string | null = null;
@@ -293,12 +306,13 @@ export class ConversationLiveProjector {
 	}
 
 	#project(event: AgentSessionEvent): void {
+		if (this.#turnCompleted && TERMINAL_LATE_EVENT_TYPES.has(event.type)) return;
 		switch (event.type) {
 			case "agent_start":
 				this.#onAgentStart();
 				return;
 			case "agent_end":
-				this.#onAgentEnd();
+				this.#onAgentEnd(event);
 				return;
 			case "message_start":
 				this.#onMessageStart(event.message);
@@ -334,6 +348,13 @@ export class ConversationLiveProjector {
 					"retry-end",
 				);
 				return;
+			case "unexpected_stop_retry":
+				this.#emitNotice(
+					"warning",
+					`Assistant stop recovered automatically (${event.attempt}/${event.maxAttempts})`,
+					"unexpected-stop",
+				);
+				return;
 			case "notice":
 				this.#emitNotice(event.level, event.message, event.source);
 				return;
@@ -343,6 +364,14 @@ export class ConversationLiveProjector {
 	}
 
 	#onAgentStart(): void {
+		if (this.#continuationPending && this.#turnId !== undefined) {
+			// Unexpected-stop recovery starts another AgentSession run, but it is
+			// still the same logical Studio turn. Keep its identity and only allow
+			// the next assistant message to open under that existing turn.
+			this.#continuationPending = false;
+			this.#openAssistantId = undefined;
+			return;
+		}
 		this.#turnSeq += 1;
 		this.#turnId = `turn-${this.#turnSeq}`;
 		this.#turnAborted = false;
@@ -350,16 +379,24 @@ export class ConversationLiveProjector {
 		this.#openAssistantId = undefined;
 	}
 
-	#onAgentEnd(): void {
+	#onAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
 		this.#flushPendingDeltas();
 		const turnId = this.#ensureTurnId();
+		if (event.isTerminal === false) {
+			// The Runtime has already scheduled another continuation. Keep the
+			// logical turn open instead of exposing a false completed event.
+			this.#continuationPending = true;
+			this.#openAssistantId = undefined;
+			return;
+		}
+		this.#continuationPending = false;
 		if (this.#turnAborted) {
 			this.#emitParsed({ kind: "conversation.turn.aborted", sessionId: this.#sessionId, turnId });
 		} else if (!this.#turnCompleted) {
 			this.#emitParsed({ kind: "conversation.turn.completed", sessionId: this.#sessionId, turnId });
 		}
 		this.#turnCompleted = true;
-		this.#openAssistantId = undefined;
+		this.#clearTurnBuffers();
 	}
 
 	#onMessageStart(message: AgentMessage): void {
@@ -641,12 +678,17 @@ export class ConversationLiveProjector {
 	#appendDelta(open: OpenMessage, contentIndex: number, blockType: "text" | "thinking", delta: string): void {
 		if (delta.length === 0) return;
 		const blockId = this.#blockId(open.messageId, contentIndex, blockType);
-		const existing = open.blocks.get(blockId) ?? { blockType, text: "" };
-		existing.text += delta;
+		const existing = open.blocks.get(blockId) ?? { blockType, text: "", bytes: 0, truncated: false };
+		const remaining = Math.max(0, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES - existing.bytes);
+		const appended = truncateUtf8(delta, remaining);
+		existing.text += appended.text;
+		existing.bytes += utf8ByteLength(appended.text);
+		existing.truncated ||= appended.truncated;
 		open.blocks.set(blockId, existing);
+		if (appended.text.length === 0) return;
 		const pendingKey = `${open.messageId}:${blockId}`;
 		const pending = this.#pending.get(pendingKey);
-		if (pending !== undefined) pending.delta += delta;
+		if (pending !== undefined) pending.delta += appended.text;
 		else {
 			this.#pending.set(pendingKey, {
 				sessionId: this.#sessionId,
@@ -654,7 +696,7 @@ export class ConversationLiveProjector {
 				messageId: open.messageId,
 				blockId,
 				blockType,
-				delta,
+				delta: appended.text,
 			});
 		}
 		const threshold = this.#options.coalesceCharThreshold ?? CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD;
@@ -669,7 +711,12 @@ export class ConversationLiveProjector {
 			if (text.length > 0) {
 				const blockId = this.#blockId(open.messageId, 0, "text");
 				const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, { blockType: "text", text: sanitized.text });
+				open.blocks.set(blockId, {
+					blockType: "text",
+					text: sanitized.text,
+					bytes: utf8ByteLength(sanitized.text),
+					truncated: sanitized.truncated,
+				});
 			}
 			return;
 		}
@@ -678,13 +725,23 @@ export class ConversationLiveProjector {
 			if (block.type === "text") {
 				const blockId = this.#blockId(open.messageId, index, "text");
 				const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, { blockType: "text", text: sanitized.text });
+				open.blocks.set(blockId, {
+					blockType: "text",
+					text: sanitized.text,
+					bytes: utf8ByteLength(sanitized.text),
+					truncated: sanitized.truncated,
+				});
 				return;
 			}
 			if (block.type === "thinking") {
 				const blockId = this.#blockId(open.messageId, index, "thinking");
 				const sanitized = sanitizePublicText(block.thinking, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, { blockType: "thinking", text: sanitized.text });
+				open.blocks.set(blockId, {
+					blockType: "thinking",
+					text: sanitized.text,
+					bytes: utf8ByteLength(sanitized.text),
+					truncated: sanitized.truncated,
+				});
 				return;
 			}
 			if (block.type === "toolCall") this.#recordToolCall(open, block);
@@ -694,10 +751,9 @@ export class ConversationLiveProjector {
 	#contentFromLiveBuffers(open: OpenMessage): ConversationContentBlock[] {
 		const content: ConversationContentBlock[] = [];
 		for (const block of open.blocks.values()) {
-			const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-			if (sanitized.text.length === 0 && !sanitized.truncated) continue;
-			const item: ConversationContentBlock = { type: block.blockType, text: sanitized.text };
-			if (sanitized.truncated) item.truncated = true;
+			if (block.text.length === 0 && !block.truncated) continue;
+			const item: ConversationContentBlock = { type: block.blockType, text: block.text };
+			if (block.truncated) item.truncated = true;
 			content.push(item);
 		}
 		for (const toolCall of open.toolCalls.values()) content.push(toolCall);
@@ -1001,18 +1057,23 @@ export class ConversationLiveProjector {
 	}
 
 	#clearLiveState(): void {
+		this.#clearTurnBuffers();
+		this.#queue.length = 0;
+		this.#turnId = undefined;
+		this.#continuationPending = false;
+		this.#turnAborted = false;
+		this.#turnCompleted = false;
+		this.#lastItemId = null;
+	}
+
+	#clearTurnBuffers(): void {
 		this.#clearCoalesceTimer();
 		this.#pending.clear();
-		this.#queue.length = 0;
 		this.#openMessages.clear();
 		this.#completedMessageIds.clear();
 		this.#completedToolIds.clear();
 		this.#toolOutput.clear();
 		this.#toolOwners.clear();
-		this.#turnId = undefined;
-		this.#turnAborted = false;
-		this.#turnCompleted = false;
-		this.#lastItemId = null;
 		this.#lastAssistantId = undefined;
 		this.#openAssistantId = undefined;
 		this.#releaseOpenCompaction();

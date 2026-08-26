@@ -12,6 +12,14 @@ import { Icon } from "../icons";
 import { compactMinimapPreview } from "./compactSummary";
 import { batchSummary, toolKind, type ThinkView } from "./toolMeta";
 import type { AssistantSegment, TimelineRow, ToolView } from "./conversationViewModel";
+import {
+  createAnimationFrameGate,
+  createConversationViewportController,
+  nearestSortedIndex,
+  type ConversationRowMeasurement,
+  type ConversationViewportController,
+} from "./conversationViewportController";
+import { requestVirtualConversationReveal } from "./virtualConversationReveal";
 
 /** 底部工具按钮区预留高度（与 ver1 syncViewport 的 52px 一致）。 */
 const TOOLS_RESERVE_PX = 52;
@@ -257,10 +265,13 @@ export function ConversationMinimap({
   rows,
   scrollerRef,
   preview = false,
+  viewportController: suppliedViewportController,
 }: {
   rows: readonly TimelineRow[];
   scrollerRef: RefObject<HTMLElement | null>;
   preview?: boolean;
+  /** Optional shared controller for direct Virtuoso itemsRendered telemetry. */
+  viewportController?: ConversationViewportController;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -269,6 +280,23 @@ export function ConversationMinimap({
   const filterWrapRef = useRef<HTMLSpanElement | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const hideTimerRef = useRef<number | null>(null);
+  const markElementsRef = useRef(new Map<string, HTMLElement>());
+  const viewportControllerRef = useRef<ReturnType<typeof createConversationViewportController> | null>(null);
+  if (viewportControllerRef.current === null) {
+    viewportControllerRef.current = createConversationViewportController();
+  }
+  const viewportController = suppliedViewportController ?? viewportControllerRef.current;
+  const measureRequestedRef = useRef(true);
+  const pendingScrollTopRef = useRef<number | null>(null);
+  const draggingRef = useRef(false);
+  const visiblePositionsRef = useRef<readonly { itemId: string; fraction: number }[]>([]);
+  const visibleFractionsRef = useRef<readonly number[]>([]);
+  const viewportLayoutRef = useRef({ height: -1, display: true });
+  const frameCallbackRef = useRef<() => void>(() => undefined);
+  const frameGateRef = useRef<ReturnType<typeof createAnimationFrameGate> | null>(null);
+  if (frameGateRef.current === null) {
+    frameGateRef.current = createAnimationFrameGate(() => frameCallbackRef.current());
+  }
 
   const [fractions, setFractions] = useState<MarkFractions>({});
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
@@ -279,83 +307,139 @@ export function ConversationMinimap({
   const marksRef = useRef(marks);
   marksRef.current = marks;
 
-  const syncViewport = useCallback(() => {
+  const fractionsRef = useRef(fractions);
+  fractionsRef.current = fractions;
+
+  const scheduleFrame = useCallback(() => frameGateRef.current?.request(), []);
+
+  const refreshFractions = useCallback(() => {
+    const next = viewportController.fractions();
+    const current = fractionsRef.current;
+    const changed = marksRef.current.some((mark) => current[mark.itemId] !== next[mark.itemId])
+      || Object.keys(current).length !== marksRef.current.length;
+    if (changed) setFractions(next);
+    scheduleFrame();
+  }, [scheduleFrame, viewportController]);
+
+  frameCallbackRef.current = () => {
     const scroller = scrollerRef.current;
     const viewport = viewportRef.current;
     const track = trackRef.current;
     if (!scroller || !viewport || !track) return;
-    const maxScroll = scroller.scrollHeight - scroller.clientHeight;
-    if (maxScroll <= 0) {
-      viewport.style.display = "none";
-      return;
-    }
-    viewport.style.display = "";
-    const range = track.clientHeight - TOOLS_RESERVE_PX;
-    const viewportH = Math.max(MIN_VIEWPORT_H, (scroller.clientHeight / scroller.scrollHeight) * range);
-    const progress = scroller.scrollTop / maxScroll;
-    viewport.style.height = `${viewportH}px`;
-    viewport.style.top = `${progress * (range - viewportH)}px`;
-    syncActiveMark(scroller, track, activeIdRef);
-  }, [scrollerRef]);
 
-  const measure = useCallback(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
+    // Batch all layout reads before the scroll/viewport/class writes below.
     const scrollHeight = scroller.scrollHeight;
-    if (scrollHeight <= 0) return;
-    const base = scroller.getBoundingClientRect().top;
-    const next: Record<string, number> = {};
-    let changed = false;
-    for (const mark of marksRef.current) {
-      const node = scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(mark.itemId)}"]`);
-      if (!node) continue;
-      const rect = node.getBoundingClientRect();
-      const center = rect.top - base + scroller.scrollTop + rect.height / 2;
-      const fraction = Math.min(0.985, Math.max(0.015, center / scrollHeight));
-      const rounded = Math.round(fraction * 10000) / 10000;
-      next[mark.itemId] = rounded;
-      if (fractionsRef.current[mark.itemId] !== rounded) changed = true;
-    }
-    if (changed) setFractions(next);
-  }, [scrollerRef]);
+    const clientHeight = scroller.clientHeight;
+    const trackHeight = track.clientHeight;
+    const maxScroll = Math.max(0, scrollHeight - clientHeight);
+    const requestedScrollTop = pendingScrollTopRef.current;
+    pendingScrollTopRef.current = null;
+    const scrollTop = requestedScrollTop === null
+      ? scroller.scrollTop
+      : Math.max(0, Math.min(maxScroll, requestedScrollTop));
 
-  const fractionsRef = useRef(fractions);
-  fractionsRef.current = fractions;
+    if (measureRequestedRef.current && suppliedViewportController === undefined && scrollHeight > 0) {
+      measureRequestedRef.current = false;
+      const base = scroller.getBoundingClientRect().top;
+      const markIds = new Set(marksRef.current.map((mark) => mark.itemId));
+      const measurements: ConversationRowMeasurement[] = [];
+      // Virtuoso bounds this collection to mounted rows. Query it once instead
+      // of querying the whole transcript once for every minimap mark.
+      const mountedRows = scroller.querySelectorAll<HTMLElement>("[data-item-id]");
+      const seen = new Set<string>();
+      for (const node of mountedRows) {
+        const itemId = node.dataset.itemId;
+        if (!itemId || seen.has(itemId) || !markIds.has(itemId)) continue;
+        seen.add(itemId);
+        const rect = node.getBoundingClientRect();
+        measurements.push({ itemId, offset: rect.top - base + scrollTop, size: rect.height });
+      }
+      viewportController.recordMeasurements(measurements, scrollHeight);
+      const next = viewportController.fractions();
+      const current = fractionsRef.current;
+      const changed = marksRef.current.some((mark) => current[mark.itemId] !== next[mark.itemId])
+        || Object.keys(current).length !== marksRef.current.length;
+      if (changed) setFractions(next);
+    }
+
+    const range = Math.max(0, trackHeight - TOOLS_RESERVE_PX);
+    const hasViewport = maxScroll > 0 && range > 0;
+    const viewportH = hasViewport ? Math.max(MIN_VIEWPORT_H, (clientHeight / scrollHeight) * range) : 0;
+    const progress = hasViewport ? scrollTop / maxScroll : 0;
+    const viewportTop = progress * Math.max(0, range - viewportH);
+    const contentMidpoint = scrollHeight > 0 ? (scrollTop + clientHeight * 0.5) / scrollHeight : 0;
+    const visiblePositions = visiblePositionsRef.current;
+    const activeIndex = nearestSortedIndex(visibleFractionsRef.current, contentMidpoint);
+    const nextActiveId = activeIndex < 0 ? null : visiblePositions[activeIndex]?.itemId ?? null;
+    const previousActiveId = activeIdRef.current;
+
+    if (requestedScrollTop !== null && scroller.scrollTop !== scrollTop) scroller.scrollTop = scrollTop;
+    if (viewportLayoutRef.current.display !== hasViewport) {
+      viewport.style.display = hasViewport ? "" : "none";
+      viewportLayoutRef.current.display = hasViewport;
+    }
+    if (hasViewport) {
+      if (viewportLayoutRef.current.height !== viewportH) {
+        viewport.style.height = `${viewportH}px`;
+        viewportLayoutRef.current.height = viewportH;
+      }
+      viewport.style.top = "0";
+      viewport.style.transform = `translateY(${viewportTop}px)`;
+    }
+    if (previousActiveId !== nextActiveId) {
+      if (previousActiveId !== null) markElementsRef.current.get(previousActiveId)?.classList.remove("active");
+      if (nextActiveId !== null) markElementsRef.current.get(nextActiveId)?.classList.add("active");
+      activeIdRef.current = nextActiveId;
+    }
+  };
 
   /* 测量圆点位置：行变化 + 内容高度变化（流式增长、工具展开、窗口缩放）。 */
   useLayoutEffect(() => {
-    measure();
-    syncViewport();
+    viewportController.setItems(marks.map((mark) => mark.itemId));
+    // setItems publishes synchronously. Pull the snapshot as well so a newly
+    // mounted minimap cannot miss that publication before its subscription is
+    // installed and remain empty until the next scroll measurement.
+    refreshFractions();
+    measureRequestedRef.current = true;
+    scheduleFrame();
     if (typeof ResizeObserver !== "function") return;
     const scroller = scrollerRef.current;
     const doc = scroller?.querySelector(".convo-doc") ?? null;
     const observer = new ResizeObserver(() => {
-      measure();
-      syncViewport();
+      measureRequestedRef.current = true;
+      scheduleFrame();
     });
     if (scroller) observer.observe(scroller);
     if (doc) observer.observe(doc);
     if (trackRef.current) observer.observe(trackRef.current);
     return () => observer.disconnect();
-  }, [measure, syncViewport, scrollerRef, rows]);
+  }, [marks, refreshFractions, scheduleFrame, scrollerRef, viewportController]);
+
+  useLayoutEffect(() => viewportController.subscribe(refreshFractions), [refreshFractions, viewportController]);
 
   /* 滚动同步视口条（passive，高频，全部走命令式更新）。 */
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    scroller.addEventListener("scroll", syncViewport, { passive: true });
-    const frame = requestAnimationFrame(syncViewport);
+    scroller.addEventListener("scroll", scheduleFrame, { passive: true });
+    scheduleFrame();
     return () => {
-      scroller.removeEventListener("scroll", syncViewport);
-      cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", scheduleFrame);
+      frameGateRef.current?.cancel();
     };
-  }, [syncViewport, scrollerRef]);
+  }, [scheduleFrame, scrollerRef]);
 
   const placed = useMemo(() => spaceMinimapMarks(marks, fractions), [marks, fractions]);
   const visible = useMemo(
     () => (keyOnly ? placed.filter((mark) => KEY_TYPES.includes(mark.type)) : placed),
     [placed, keyOnly],
   );
+  useLayoutEffect(() => {
+    const positions = visible.map((mark) => ({ itemId: mark.itemId, fraction: fractions[mark.itemId] ?? 0 }));
+    visiblePositionsRef.current = positions;
+    visibleFractionsRef.current = positions.map((entry) => entry.fraction);
+    scheduleFrame();
+  }, [fractions, scheduleFrame, visible]);
   const hoveredMark = hoveredItemId === null ? null : visible.find((mark) => mark.itemId === hoveredItemId) ?? null;
 
   const jumpTo = useCallback(
@@ -363,7 +447,10 @@ export function ConversationMinimap({
       const scroller = scrollerRef.current;
       if (!scroller) return;
       const node = scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(itemId)}"]`);
-      if (!node) return;
+      if (!node) {
+        requestVirtualConversationReveal(scroller, { itemId });
+        return;
+      }
       scrollRowInScroller(scroller, node);
       flashRow(node);
     },
@@ -413,16 +500,19 @@ export function ConversationMinimap({
     if (!scroller || !track) return;
     event.preventDefault();
     track.setPointerCapture?.(event.pointerId);
+    draggingRef.current = true;
+    cancelHide();
+    setHoveredItemId(null);
     const startY = event.clientY;
     let moved = false;
-    const maxScroll = () => scroller.scrollHeight - scroller.clientHeight;
+    const trackRect = track.getBoundingClientRect();
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const apply = (clientY: number, smooth: boolean) => {
-      const rect = track.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
-      const target = ratio * maxScroll();
+      const ratio = Math.min(1, Math.max(0, (clientY - trackRect.top) / trackRect.height));
+      const target = ratio * maxScroll;
       if (smooth) scroller.scrollTo({ top: target, behavior: "smooth" });
-      else scroller.scrollTop = target;
-      syncViewport();
+      else pendingScrollTopRef.current = target;
+      scheduleFrame();
     };
     const onMove = (moveEvent: PointerEvent) => {
       if (Math.abs(moveEvent.clientY - startY) > 3) moved = true;
@@ -432,7 +522,8 @@ export function ConversationMinimap({
       track.removeEventListener("pointermove", onMove);
       track.removeEventListener("pointerup", finish);
       track.removeEventListener("pointercancel", finish);
-      if (!moved) apply(upEvent.clientY, true);
+      if (upEvent.type === "pointerup") apply(upEvent.clientY, !moved);
+      draggingRef.current = false;
     };
     track.addEventListener("pointermove", onMove);
     track.addEventListener("pointerup", finish);
@@ -448,21 +539,26 @@ export function ConversationMinimap({
     event.preventDefault();
     event.stopPropagation();
     viewport.setPointerCapture?.(event.pointerId);
-    const grab = event.clientY - viewport.getBoundingClientRect().top;
-    const maxScroll = scroller.scrollHeight - scroller.clientHeight;
-    const range = track.clientHeight - TOOLS_RESERVE_PX;
-    const sliderSpan = range - viewport.offsetHeight;
+    draggingRef.current = true;
+    cancelHide();
+    setHoveredItemId(null);
+    const trackRect = track.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
+    const grab = event.clientY - viewportRect.top;
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const range = trackRect.height - TOOLS_RESERVE_PX;
+    const sliderSpan = range - viewportRect.height;
     const onMove = (moveEvent: PointerEvent) => {
       if (sliderSpan <= 0) return;
-      const trackTop = track.getBoundingClientRect().top;
-      const top = Math.min(Math.max(0, moveEvent.clientY - grab - trackTop), sliderSpan);
-      scroller.scrollTop = (top / sliderSpan) * maxScroll;
-      syncViewport();
+      const top = Math.min(Math.max(0, moveEvent.clientY - grab - trackRect.top), sliderSpan);
+      pendingScrollTopRef.current = (top / sliderSpan) * maxScroll;
+      scheduleFrame();
     };
     const finish = () => {
       viewport.removeEventListener("pointermove", onMove);
       viewport.removeEventListener("pointerup", finish);
       viewport.removeEventListener("pointercancel", finish);
+      draggingRef.current = false;
     };
     viewport.addEventListener("pointermove", onMove);
     viewport.addEventListener("pointerup", finish);
@@ -491,6 +587,13 @@ export function ConversationMinimap({
             key={mark.itemId}
             type="button"
             data-mark-id={mark.itemId}
+            ref={(node) => {
+              if (node) {
+                markElementsRef.current.set(mark.itemId, node);
+                if (activeIdRef.current === mark.itemId) node.classList.add("active");
+              }
+              else markElementsRef.current.delete(mark.itemId);
+            }}
             className={`mm-mark ${mark.type}`}
             style={
               fractions[mark.itemId] === undefined
@@ -500,6 +603,7 @@ export function ConversationMinimap({
             aria-label={`#${mark.turn} ${mark.label}`}
             onClick={() => jumpTo(mark.itemId)}
             onMouseEnter={() => {
+              if (draggingRef.current) return;
               cancelHide();
               setHoveredItemId(mark.itemId);
             }}
@@ -585,32 +689,4 @@ export function ConversationMinimap({
       </div>
     </div>
   );
-}
-
-/** 活跃圆点 = 离 scroller 视口中线最近的圆点（命令式 class 切换）。 */
-function syncActiveMark(
-  scroller: HTMLElement,
-  track: HTMLElement,
-  activeIdRef: { current: string | null },
-): void {
-  const scrollerTop = scroller.getBoundingClientRect().top;
-  const mid = scroller.clientHeight * 0.5;
-  let bestId: string | null = null;
-  let bestDistance = Infinity;
-  for (const el of Array.from(track.querySelectorAll<HTMLElement>(".mm-mark"))) {
-    const rect = el.getBoundingClientRect();
-    const center = rect.top + rect.height / 2 - scrollerTop;
-    const distance = Math.abs(center - mid);
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestId = el.dataset.markId ?? null;
-    }
-  }
-  for (const el of Array.from(track.querySelectorAll<HTMLElement>(".mm-mark.active"))) {
-    if (el.dataset.markId !== bestId) el.classList.remove("active");
-  }
-  if (bestId !== null) {
-    track.querySelector<HTMLElement>(`.mm-mark[data-mark-id="${cssEscape(bestId)}"]`)?.classList.add("active");
-  }
-  activeIdRef.current = bestId;
 }

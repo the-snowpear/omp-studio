@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { SessionHistoryEntry, SessionHistoryReadModel, SessionHistoryStatus } from "@omp-studio/client-contract";
 import { Icon } from "./icons";
 import { ToastHost } from "./ToastHost";
@@ -57,6 +58,11 @@ function formatHostTime(value: string, t: (key: string) => string): string {
   return new Date(then).toLocaleDateString();
 }
 
+function hostHistoryTitle(entry: SessionHistoryEntry, untitledTitle: string): string {
+  const title = entry.title?.trim();
+  return title && title.length > 0 ? title : untitledTitle;
+}
+
 function useNotice(): [notice: { text: string; icon: string } | null, show: (text: string, icon?: string) => void, dismiss: () => void] {
   const [notice, setNotice] = useState<{ text: string; icon: string } | null>(null);
   return [notice, (text, icon = "info") => setNotice({ text, icon }), () => setNotice(null)];
@@ -71,14 +77,136 @@ function HistEmpty({ text }: { text: string }) {
   );
 }
 
+/**
+ * Per-row "⋮" popup. Only one item today (删除会话); the anchor is the row's
+ * trigger button rect so the menu floats next to the row that owns it.
+ */
+function HistMoreMenu({
+  open,
+  rect,
+  onClose,
+  onDelete,
+}: {
+  open: boolean;
+  rect: { top: number; left: number; width: number; bottom: number } | null;
+  onClose: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useI18n();
+  const popRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 200 });
+
+  useEffect(() => {
+    if (!open || rect === null) return;
+    const width = Math.max(rect.width, 200);
+    const height = popRef.current?.offsetHeight ?? 0;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    let top = rect.bottom + 6;
+    if (height > 0 && top + height > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - height - 6);
+    }
+    setAnchor({ top, left, width });
+  }, [open, rect]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    const onDoc = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (popRef.current?.contains(target)) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDoc);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDoc);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+  return createPortal(
+    <div
+      ref={popRef}
+      className="menu hist-more-pop"
+      role="menu"
+      aria-label={t("common.moreActions")}
+      style={{ top: anchor.top, left: anchor.left, minWidth: anchor.width }}
+    >
+      <button type="button" role="menuitem" className="menu-item danger" onClick={onDelete}>
+        <Icon name="trash" extra="sm" />
+        <span>{t("history.deleteSession")}</span>
+      </button>
+    </div>,
+    document.body,
+  );
+}
+
+/** Application-internal delete confirmation (same style family as archive confirm). */
+function DeleteSessionDialog({
+  title,
+  preview,
+  busy,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  preview: boolean;
+  busy: boolean;
+  error?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  return createPortal(
+    <div className="modal-backdrop hist-delete-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="histDeleteTitle"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head" id="histDeleteTitle">
+          <span>{t("history.deleteConfirmTitle")}</span>
+          <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={busy} onClick={onCancel}><Icon name="x" extra="sm" /></button>
+        </div>
+        <div className="modal-body">
+          <p>{t("history.deleteConfirmDesc", { title })}</p>
+          <p className="desc">
+            {preview ? t("history.deleteConfirmDemo") : t("history.deleteConfirmReal")}
+          </p>
+          {error !== undefined ? <p className="hist-delete-error" role="alert">{error}</p> : null}
+        </div>
+        <div className="modal-foot">
+          <button type="button" className="btn outline" autoFocus disabled={busy} onClick={onCancel}>{t("common.cancel")}</button>
+          <button type="button" className="btn danger" disabled={busy} onClick={onConfirm}>
+            {busy ? <><span className="spinner" aria-hidden="true" />{t("history.deleting")}</> : <Icon name="trash" extra="sm" />}
+            <span>{busy ? t("history.deleting") : t("history.deleteSession")}</span>
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function PreviewHistRow({
   row,
   onOpen,
   onAct,
+  onMore,
 }: {
   row: PreviewHistoryRow;
   onOpen: () => void;
   onAct: (kind: "resume" | "fork" | "more" | "unarchive") => void;
+  onMore: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const status = PREVIEW_STATUS[row.status];
   const { t } = useI18n();
@@ -114,7 +242,7 @@ function PreviewHistRow({
         {row.status === "archived" ? (
           <button type="button" className="icon-btn small" data-tip={t("history.unarchiveSession")} aria-label={t("history.unarchiveSession")} onClick={() => onAct("unarchive")}><Icon name="external" extra="sm" /></button>
         ) : null}
-        <button type="button" className="icon-btn small" data-tip={t("common.more")} aria-label={t("common.moreActions")} onClick={() => onAct("more")}><Icon name="more" extra="sm" /></button>
+        <button type="button" className="icon-btn small" data-tip={t("common.more")} aria-label={t("common.moreActions")} onClick={onMore}><Icon name="more" extra="sm" /></button>
       </div>
     </div>
   );
@@ -124,19 +252,25 @@ function HostHistRow({
   entry,
   onOpen,
   onUnarchive,
+  onMore,
 }: {
   entry: SessionHistoryEntry;
   onOpen: () => void;
   onUnarchive: (() => void) | undefined;
+  onMore: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const status = HOST_STATUS[entry.status];
   const archived = entry.status === "archived";
   const { t } = useI18n();
+  const title = hostHistoryTitle(entry, t("conversation.untitledSession"));
   return (
     <div className="hist-row">
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
-        <span className="h-title ellipsis">{entry.title}</span>
+        <span className="h-title ellipsis">
+          {entry.pinned === true ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
+          {title}
+        </span>
         <span className="h-sub">
           <span>{t("history.messagesCount", { count: entry.messageCount })}</span>
           <span>{formatHostTime(entry.lastActiveAt, t)}</span>
@@ -157,7 +291,7 @@ function HostHistRow({
         {archived && onUnarchive !== undefined ? (
           <button type="button" className="icon-btn small" data-tip={t("history.unarchiveSession")} aria-label={t("history.unarchiveSession")} onClick={onUnarchive}><Icon name="external" extra="sm" /></button>
         ) : null}
-        <button type="button" className="icon-btn small" disabled data-tip={t("common.moreNotImplemented")} aria-label={t("common.moreActions")}><Icon name="more" extra="sm" /></button>
+        <button type="button" className="icon-btn small" data-tip={t("common.more")} aria-label={t("common.moreActions")} onClick={onMore}><Icon name="more" extra="sm" /></button>
       </div>
     </div>
   );
@@ -196,12 +330,15 @@ export function HistoryPage({
   onRoute,
   onSelectThread,
   onUnarchive,
+  onDeleteSession,
 }: {
   history?: SessionHistoryReadModel;
   onRoute: (route: PageRoute) => void;
   onSelectThread: (entry: SessionHistoryEntry) => void;
   /** 真实模式「取消归档」（session.unarchive）；预览模式下为 undefined（走演示 toast）。 */
   onUnarchive?: (entry: SessionHistoryEntry) => void;
+  /** 真实模式「删除会话」；预览模式下为 undefined（走演示确认 + toast）。 */
+  onDeleteSession?: (entry: SessionHistoryEntry) => Promise<boolean> | boolean;
 }) {
   const { preview } = usePreviewMode();
   const { t } = useI18n();
@@ -209,6 +346,52 @@ export function HistoryPage({
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [notice, show, dismissNotice] = useNotice();
   const q = query.trim().toLowerCase();
+  /** 哪个行的「⋮」菜单打开：id + 触发按钮 rect（菜单用 portal 定位到 body）。 */
+  const [menu, setMenu] = useState<{ id: string; rect: { top: number; left: number; width: number; bottom: number } | null } | null>(null);
+  const [deleteFor, setDeleteFor] = useState<{ title: string; entry?: SessionHistoryEntry } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | undefined>(undefined);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const openMenu = useCallback((id: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu({ id, rect: { top: rect.top, left: rect.left, width: rect.width, bottom: rect.bottom } });
+  }, []);
+
+  const requestDelete = useCallback((title: string, entry?: SessionHistoryEntry) => {
+    setMenu(null);
+    setDeleteError(undefined);
+    setDeleteFor(entry === undefined ? { title } : { title, entry });
+  }, []);
+
+  const cancelDelete = useCallback(() => {
+    if (deleting) return;
+    setDeleteFor(null);
+    setDeleteError(undefined);
+  }, [deleting]);
+
+  const confirmDelete = useCallback(() => {
+    if (deleteFor === null || deleting) return;
+    if (preview || deleteFor.entry === undefined || onDeleteSession === undefined) {
+      show(t("history.demoDeleteToast", { title: deleteFor.title }), "trash");
+      setDeleteFor(null);
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(undefined);
+    void Promise.resolve(onDeleteSession(deleteFor.entry))
+      .then((ok) => {
+        if (ok) {
+          setDeleteFor(null);
+          setDeleteError(undefined);
+        }
+        setDeleting(false);
+      })
+      .catch((error) => {
+        setDeleteError(error instanceof Error && error.message.length > 0 ? error.message : String(error));
+        setDeleting(false);
+      });
+  }, [deleteFor, deleting, preview, onDeleteSession, show, t]);
 
   const previewRows = useMemo(
     () => PREVIEW_HISTORY
@@ -218,9 +401,9 @@ export function HistoryPage({
   );
   const hostRows = useMemo(
     () => (history?.entries ?? [])
-      .filter((entry) => `${entry.title} ${entry.summary ?? ""}`.toLowerCase().includes(q))
+      .filter((entry) => `${hostHistoryTitle(entry, t("conversation.untitledSession"))} ${entry.summary ?? ""}`.toLowerCase().includes(q))
       .filter((entry) => matchesStatusTab(entry.status, statusTab)),
-    [history, q, statusTab],
+    [history, q, statusTab, t],
   );
 
   const rows = preview ? previewRows : hostRows;
@@ -284,8 +467,12 @@ export function HistoryPage({
                     show(t("history.demoUnarchiveToast", { title: row.title }), "archive");
                     return;
                   }
-                  show(kind === "fork" ? t("history.demoForkToast", { title: row.title }) : t("history.demoMoreToast"), kind === "fork" ? "fork" : "more");
+                  if (kind === "more") {
+                    return;
+                  }
+                  show(t("history.demoForkToast", { title: row.title }), "fork");
                 }}
+                onMore={(event) => openMenu(row.id, event)}
               />
             ))
             : <HistEmpty text={t("history.noMatches")} />)
@@ -296,6 +483,7 @@ export function HistoryPage({
                 entry={entry}
                 onOpen={() => onSelectThread(entry)}
                 onUnarchive={entry.status === "archived" && onUnarchive !== undefined ? () => onUnarchive(entry) : undefined}
+                onMore={(event) => openMenu(entry.historyId, event)}
               />
             ))
             : <HistEmpty text={history ? t("history.noMatches") : t("history.catalogUnavailable")} />)}
@@ -313,6 +501,35 @@ export function HistoryPage({
           </div>
         )}
       </section>
+      <HistMoreMenu
+        open={menu !== null}
+        rect={menu?.rect ?? null}
+        onClose={closeMenu}
+        onDelete={() => {
+          if (menu === null) return;
+          const hostEntry = hostRows.find((entry) => entry.historyId === menu.id);
+          if (hostEntry !== undefined) {
+            requestDelete(hostHistoryTitle(hostEntry, t("conversation.untitledSession")), hostEntry);
+            return;
+          }
+          const previewRow = previewRows.find((row) => row.id === menu.id);
+          if (previewRow !== undefined) {
+            requestDelete(previewRow.title);
+            return;
+          }
+          closeMenu();
+        }}
+      />
+      {deleteFor !== null ? (
+        <DeleteSessionDialog
+          title={deleteFor.title}
+          preview={preview}
+          busy={deleting}
+          {...(deleteError === undefined ? {} : { error: deleteError })}
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+        />
+      ) : null}
       <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />
     </div>
   );

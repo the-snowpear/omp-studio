@@ -1,4 +1,4 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationMessageError } from "@omp-studio/client-contract";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
@@ -21,7 +21,10 @@ function formatTime(iso: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function MessageBody({
+/** 元素常量：截断标记没有 props，每次渲染新建只会让 MarkdownText 的 memo 白丢一次。 */
+const TRUNCATION_MARK = <TruncationMark />;
+
+const MessageBody = memo(function MessageBody({
   text,
   streaming,
   truncated,
@@ -50,7 +53,7 @@ function MessageBody({
     <MarkdownText
       text={text}
       {...(streaming === true ? { streaming: true } : {})}
-      {...(truncated === true ? { truncated: true, mark: <TruncationMark /> } : {})}
+      {...(truncated === true ? { truncated: true, mark: TRUNCATION_MARK } : {})}
       {...(magicKeywords === true ? { magicKeywords: true } : {})}
     />
   );
@@ -73,7 +76,7 @@ function MessageBody({
       <MessageCopyActions text={copyText} />
     </div>
   );
-}
+});
 
 function AssistantStatus({ status }: { status: Extract<TimelineRow, { type: "assistant" }>["status"] }) {
   if (status === "aborted") return <span className="chip gray xs">已中止</span>;
@@ -111,6 +114,14 @@ function concludingReplyText(segments: readonly AssistantSegment[]): { key: stri
 
 function MessageCopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== undefined) clearTimeout(timerRef.current);
+    };
+  }, []);
+
   return (
     <button
       type="button"
@@ -124,7 +135,8 @@ function MessageCopyButton({ text }: { text: string }) {
           .writeText(text)
           .then(() => {
             setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
+            if (timerRef.current !== undefined) clearTimeout(timerRef.current);
+            timerRef.current = setTimeout(() => setCopied(false), 1500);
           })
           .catch(() => {});
       }}
@@ -198,7 +210,8 @@ function renderAssistantSegments(
   options: {
     expandAll?: boolean;
     standalone?: boolean;
-    streaming?: boolean;
+    /** 仅 transcript 尾行且仍在流式输出时为 true。 */
+    liveTail?: boolean;
     /** 设置 → 对话与交互：显示 Thinking 摘要。 */
     showThinking?: boolean;
     /** 设置 → 常规：工具活动显示（full 展开 / concise 默认 / hidden 隐藏工具链）。 */
@@ -272,8 +285,9 @@ function renderAssistantSegments(
     if (items.length === 0) continue;
     const batchKey = `chain-${chainCount}`;
     chainCount += 1;
-    // 该组之后没有别的段落（即 AI 尚未开始输出其后的文本段）时视为流式尾部链。
-    const liveTail = options.streaming === true && index >= segments.length;
+    // 该组之后没有别的段落（即 AI 尚未开始输出其后的文本段），且该行是 transcript
+    // 尾行、仍在流式输出时，才视为流式尾部链。
+    const liveTail = options.liveTail === true && index >= segments.length;
     const chainExpandAll = options.expandAll === true || toolActivity === "full";
     nodes.push(
       <BatchChain
@@ -359,6 +373,7 @@ export const ConversationItemView = memo(function ConversationItemView({
   userBranchDisabledReason,
   expandAll = false,
   fileChanges,
+  tail = true,
   changesDefaultOpen,
   demo,
   onReviewChanges,
@@ -373,6 +388,8 @@ export const ConversationItemView = memo(function ConversationItemView({
   userRestoreDisabledReason?: string;
   userBranchDisabledReason?: string;
   expandAll?: boolean;
+  /** 该行是 transcript 里最后一个 assistant 行；只有它的链尾允许作为流式尾部自动展开/跟随。 */
+  tail?: boolean;
   fileChanges?: readonly TurnFileChange[];
   changesDefaultOpen?: boolean;
   demo?: boolean;
@@ -493,7 +510,7 @@ export const ConversationItemView = memo(function ConversationItemView({
         )}
         {renderAssistantSegments(row.segments, {
           ...(expandAll === true && !process ? { expandAll: true } : {}),
-          ...(row.status === "streaming" ? { streaming: true } : {}),
+          ...(row.status === "streaming" && tail ? { liveTail: true } : {}),
           ...displayOptions,
           ...(!process && row.status !== "streaming" ? { allowCopy: true } : {}),
         })}

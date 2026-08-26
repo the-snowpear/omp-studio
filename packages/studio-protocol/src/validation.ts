@@ -19,6 +19,14 @@ import {
 } from "./contracts/protocol.js";
 import { SESSION_THINKING_LEVELS, SESSION_THINKING_SELECTORS } from "./contracts/state.js";
 import type { OperatorStateSnapshot } from "./contracts/state.js";
+import {
+  STUDIO_RUNTIME_CODE_MODES,
+  STUDIO_RUNTIME_COMPACTION_METHODS,
+  STUDIO_RUNTIME_SETTING_KEYS,
+  STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS,
+  STUDIO_RUNTIME_UNEXPECTED_STOP_MODES,
+  type StudioRuntimeSettingKey,
+} from "./contracts/runtime-settings.js";
 import type { OperatorCommandManifest } from "./contracts/manifests.js";
 import {
   isConversationRuntimeEventKind,
@@ -126,6 +134,94 @@ function positiveInteger(value: unknown, path: string): number {
     throw new ContractValidationError("expected a positive safe integer", path);
   }
   return value as number;
+}
+
+function oneOf(value: unknown, values: readonly string[], path: string): string {
+  if (typeof value !== "string" || !values.includes(value)) {
+    throw new ContractValidationError("unsupported value", path);
+  }
+  return value;
+}
+
+function validateRuntimeSettingValue(
+  key: StudioRuntimeSettingKey,
+  value: unknown,
+  path: string,
+): void {
+  switch (key) {
+    case "edit.autoRepair.enabled":
+    case "extendedContext":
+    case "compaction.asyncEnabled":
+      booleanValue(value, path);
+      return;
+    case "features.unexpectedStopDetection":
+      oneOf(value, STUDIO_RUNTIME_UNEXPECTED_STOP_MODES, path);
+      return;
+    case "providers.unexpectedStopModel":
+      oneOf(value, STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS, path);
+      return;
+    case "providers.openai-codex.codeMode":
+      oneOf(value, STUDIO_RUNTIME_CODE_MODES, path);
+      return;
+    case "compaction.methodOrder":
+      if (
+        !Array.isArray(value) ||
+        value.length === 0 ||
+        value.some((item) => !STUDIO_RUNTIME_COMPACTION_METHODS.includes(item as (typeof STUDIO_RUNTIME_COMPACTION_METHODS)[number])) ||
+        new Set(value).size !== value.length
+      ) {
+        throw new ContractValidationError("expected a non-empty array of unique compaction methods", path);
+      }
+      return;
+  }
+}
+
+function validateRuntimeSettingsSnapshot(value: unknown, path: string): void {
+  const settings = record(value, path);
+  exactKeys(settings, STUDIO_RUNTIME_SETTING_KEYS, path);
+  for (const key of STUDIO_RUNTIME_SETTING_KEYS) {
+    validateRuntimeSettingValue(key, settings[key], `${path}.${key}`);
+  }
+}
+
+function validateRuntimeSettingsSelection(value: unknown, path: string): void {
+  if (!Array.isArray(value) || value.length === 0 || value.length > STUDIO_RUNTIME_SETTING_KEYS.length) {
+    throw new ContractValidationError("expected a non-empty settings key array", path);
+  }
+  if (
+    value.some((key) => !STUDIO_RUNTIME_SETTING_KEYS.includes(key as StudioRuntimeSettingKey)) ||
+    new Set(value).size !== value.length
+  ) {
+    throw new ContractValidationError("expected unique supported settings keys", path);
+  }
+}
+
+function validatePlanSavePath(value: unknown, path: string): void {
+  const rawPath = nonEmptyString(value, path);
+  if (
+    rawPath.length > 1024 ||
+    rawPath.includes("\0") ||
+    rawPath !== rawPath.trim() ||
+    ((rawPath.startsWith('"') && rawPath.endsWith('"')) || (rawPath.startsWith("'") && rawPath.endsWith("'")))
+  ) {
+    throw new ContractValidationError("invalid plan save path", path);
+  }
+  const normalized = rawPath.replaceAll("\\", "/");
+  if (
+    normalized.startsWith("/") ||
+    normalized.startsWith("~") ||
+    /^[A-Za-z]:/.test(rawPath) ||
+    normalized.endsWith("/")
+  ) {
+    throw new ContractValidationError("plan save path must be workspace-relative", path);
+  }
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === ".." || segment.includes(":"))) {
+    throw new ContractValidationError("plan save path escapes the workspace", path);
+  }
+  if (segments.every((segment) => segment.length === 0 || segment === ".")) {
+    throw new ContractValidationError("plan save path must name a file", path);
+  }
 }
 
 export function parseFrameHeader(value: unknown): FrameHeader {
@@ -297,7 +393,7 @@ export function parseOperatorCommandManifest(value: unknown): OperatorCommandMan
   return manifest as unknown as OperatorCommandManifest;
 }
 
-function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
+export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
   const input = record(value, "$snapshot.snapshot");
   exactKeys(
     input,
@@ -306,6 +402,8 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
       "runtimeEpoch",
       "stateVersion",
       "sessionId",
+      "sessionTitle",
+      "sessionTitleSource",
       "isStreaming",
       "isCompacting",
       "activeMode",
@@ -327,6 +425,8 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
       "agents",
       "jobs",
       "telemetry",
+      "runtimeSettings",
+      "compactionSpeculation",
     ],
     "$snapshot.snapshot",
   );
@@ -334,6 +434,10 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
   positiveInteger(input.runtimeEpoch, "$snapshot.snapshot.runtimeEpoch");
   nonNegativeInteger(input.stateVersion, "$snapshot.snapshot.stateVersion");
   nonEmptyString(input.sessionId, "$snapshot.snapshot.sessionId");
+  if (input.sessionTitle !== undefined) nonEmptyString(input.sessionTitle, "$snapshot.snapshot.sessionTitle");
+  if (input.sessionTitleSource !== undefined && input.sessionTitleSource !== "user" && input.sessionTitleSource !== "auto") {
+    throw new ContractValidationError("unsupported session title source", "$snapshot.snapshot.sessionTitleSource");
+  }
   booleanValue(input.isStreaming, "$snapshot.snapshot.isStreaming");
   booleanValue(input.isCompacting, "$snapshot.snapshot.isCompacting");
   if (!["normal", "plan", "goal", "vibe"].includes(input.activeMode as string)) {
@@ -452,6 +556,12 @@ function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapshot {
     );
   }
   if (input.telemetry !== undefined) parseSessionTelemetrySnapshot(input.telemetry, "$snapshot.snapshot.telemetry");
+  if (input.runtimeSettings !== undefined) {
+    validateRuntimeSettingsSnapshot(input.runtimeSettings, "$snapshot.snapshot.runtimeSettings");
+  }
+  if (input.compactionSpeculation !== undefined) {
+    oneOf(input.compactionSpeculation, ["idle", "running", "armed"], "$snapshot.snapshot.compactionSpeculation");
+  }
   return input as unknown as OperatorStateSnapshot;
 }
 
@@ -775,6 +885,22 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
       nonNegativeInteger(operation.expectedPauseEpoch, "$request.operation.expectedPauseEpoch");
     },
   },
+  "runtime.settings.get": {
+    keys: ["kind", "keys"],
+    validate: (operation) => {
+      if (operation.keys !== undefined) validateRuntimeSettingsSelection(operation.keys, "$request.operation.keys");
+    },
+  },
+  "runtime.settings.set": {
+    keys: ["kind", "key", "value", "persist"],
+    validate: (operation) => {
+      if (!STUDIO_RUNTIME_SETTING_KEYS.includes(operation.key as StudioRuntimeSettingKey)) {
+        throw new ContractValidationError("unsupported Runtime setting key", "$request.operation.key");
+      }
+      validateRuntimeSettingValue(operation.key as StudioRuntimeSettingKey, operation.value, "$request.operation.value");
+      booleanValue(operation.persist, "$request.operation.persist");
+    },
+  },
   "runtime.shutdown": {
     keys: ["kind", "drain"],
     validate: (operation) => {
@@ -946,6 +1072,10 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
       }
       if (operation.feedback !== undefined) nonEmptyString(operation.feedback, "$request.operation.feedback");
     },
+  },
+  "mode.plan.review.saveAndQuit": {
+    keys: ["kind", "path"],
+    validate: (operation) => validatePlanSavePath(operation.path, "$request.operation.path"),
   },
   "mode.vibe.enter": {
     keys: ["kind", "initialPrompt"],

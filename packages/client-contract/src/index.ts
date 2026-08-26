@@ -28,6 +28,7 @@ import type {
 } from "./ids.js";
 import type {
   PublicAuthorityIdentity,
+  ResidentsReadModel,
   RuntimeConnection,
   SurfaceCapabilities,
 } from "./read-models.js";
@@ -92,6 +93,8 @@ export interface ClientBootstrap {
    * TUI-owned interactions are never exposed as submittable cards.
    */
   readonly pendingInteraction?: ClientInteraction;
+  /** Authority-level resident Runtime broker overview, when available. */
+  readonly residents?: ResidentsReadModel;
 }
 
 /** Shared bootstrap fields before an optional Runtime snapshot is attached. */
@@ -143,6 +146,31 @@ export type {
   SessionModelState,
   SessionThinkingLevel,
   SessionThinkingSelector,
+} from "@omp-studio/studio-protocol";
+
+// Runtime settings are a closed public whitelist; re-export the protocol
+// facts so transports and Host adapters cannot fall back to arbitrary keys.
+export {
+  STUDIO_RUNTIME_CODE_MODES,
+  STUDIO_RUNTIME_COMPACTION_METHODS,
+  STUDIO_RUNTIME_SETTING_KEYS,
+  STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS,
+  STUDIO_RUNTIME_UNEXPECTED_STOP_MODES,
+} from "@omp-studio/studio-protocol";
+export type {
+  StudioCompactionSpeculation,
+  StudioPlanSaveAndQuitResult,
+  StudioRuntimeCodeMode,
+  StudioRuntimeCompactionMethod,
+  StudioRuntimeSettingKey,
+  StudioRuntimeSettingSetInput,
+  StudioRuntimeSettingSetOperation,
+  StudioRuntimeSettingValue,
+  StudioRuntimeSettingsGetResult,
+  StudioRuntimeSettingsSetResult,
+  StudioRuntimeSettingsSnapshot,
+  StudioRuntimeUnexpectedStopMode,
+  StudioRuntimeUnexpectedStopModel,
 } from "@omp-studio/studio-protocol";
 
 // BTW snapshot facts are protocol-owned; re-exported so surfaces and transport

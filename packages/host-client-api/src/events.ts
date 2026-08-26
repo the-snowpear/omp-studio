@@ -20,6 +20,7 @@ import type {
   EventCursor,
   RuntimeConnection,
   RuntimeEpoch,
+  ResidentsReadModel,
   SessionId,
   StateVersion,
   SubscriptionScope,
@@ -43,8 +44,10 @@ export interface HostEventContext {
 
 export interface HostEventSeedBase {
   /** Overrides the bus context for this event (e.g. the lost Runtime epoch of a receipt). */
-  readonly runtimeEpoch?: RuntimeEpoch;
-  readonly stateVersion?: StateVersion;
+  /** `null` explicitly marks an authority-level event with no Runtime epoch. */
+  readonly runtimeEpoch?: RuntimeEpoch | null;
+  /** `null` explicitly uses the authority baseline version (0). */
+  readonly stateVersion?: StateVersion | null;
   /** Bridge `StudioEventEnvelope.occurredAt` for conversation events; otherwise the facade clock. */
   readonly occurredAt?: string;
 }
@@ -65,6 +68,7 @@ export type HostEventSeed =
   | (HostEventSeedBase & { readonly kind: "runtime.changed"; readonly connection: RuntimeConnection })
   | (HostEventSeedBase & { readonly kind: "resync.required"; readonly reason: string })
   | (HostEventSeedBase & { readonly kind: "diagnostics.changed" })
+  | (HostEventSeedBase & { readonly kind: "residents.changed"; readonly residents: ResidentsReadModel })
   | (HostEventSeedBase & { readonly kind: "operation.progress"; readonly progress: OperationProgress })
   | (HostEventSeedBase & { readonly kind: "git.repository.changed"; readonly repository: GitRepositoryChanged })
   | (HostEventSeedBase & {
@@ -284,10 +288,14 @@ export class HostEventBus {
   /** Emit an event: fills the envelope, stamps a fresh cursor, delivers. */
   emit(seed: HostEventSeed): ClientEvent {
     const context = this.#context();
-    const runtimeEpoch = seed.runtimeEpoch ?? context.runtimeEpoch;
-    const stateVersion = seed.stateVersion ?? context.stateVersion ?? (0 as StateVersion);
+    const runtimeEpoch = seed.runtimeEpoch === null ? undefined : seed.runtimeEpoch ?? context.runtimeEpoch;
+    const stateVersion = seed.stateVersion === null ? (0 as StateVersion) : seed.stateVersion ?? context.stateVersion ?? (0 as StateVersion);
+    // Strip the internal null sentinels before crossing the ClientEvent
+    // boundary. They only mean "inherit nothing" inside this Host bus and
+    // must never become a public `runtimeEpoch: null` / `stateVersion: null`.
+    const { runtimeEpoch: _seedRuntimeEpoch, stateVersion: _seedStateVersion, ...body } = seed;
     const event = {
-      ...seed,
+      ...body,
       authorityEpoch: this.#authorityEpoch,
       ...(runtimeEpoch === undefined ? {} : { runtimeEpoch }),
       stateVersion,

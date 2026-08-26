@@ -193,8 +193,7 @@ export interface StudioTranscriptReaderPort {
 	read(args: { agentId: string; offset: number; limit: number }): Promise<{ messages: StudioMessage[]; eof: boolean }>;
 }
 
-export type StudioDestructiveAction =
-	{ kind: "release"; agentId: string; generation: number; risk: "destructive" };
+export type StudioDestructiveAction = { kind: "release"; agentId: string; generation: number; risk: "destructive" };
 
 export type StudioConfirmationGate = (action: StudioDestructiveAction) => boolean | Promise<boolean>;
 

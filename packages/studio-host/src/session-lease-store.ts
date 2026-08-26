@@ -103,6 +103,18 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
     return join(this.#directory, `${digest}.lease`);
   }
 
+  /**
+   * Drop every durable trace of one session's lease: the `<sha256>.lease` and
+   * `<sha256>.lease.epoch` files. Missing files are tolerated. Used when a
+   * session is permanently deleted so a stale/crashed lease cannot linger.
+   */
+  async removeForSession(sessionId: string): Promise<void> {
+    if (sessionId.length === 0) return;
+    const path = this.#pathFor(sessionId);
+    await rm(path, { force: true }).catch(() => {});
+    await rm(`${path}.epoch`, { force: true }).catch(() => {});
+  }
+
   async #readEpoch(path: string): Promise<number> {
     try {
       const value = Number.parseInt(await readFile(`${path}.epoch`, "utf8"), 10);

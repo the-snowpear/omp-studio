@@ -10,13 +10,19 @@ export function publicConversationRole(role: unknown): ConversationRole | undefi
 }
 
 /**
- * Agent-injected user rows: plan-approval leftovers that kept `synthetic`,
- * and mid-turn steering. Live already drops these; persist/archive must too.
+ * Agent-injected user rows that must stay off the operator conversation
+ * surface: plan-approval leftovers that kept `synthetic`, and steers injected
+ * by agents (peer IRC). A steer attributed to the user is the operator's own
+ * 插入纠偏 input — hiding it strands the optimistic composer bubble at the
+ * bottom of the timeline, so it must render at its chronological position.
  */
 export function isHarnessInjectedUserMessage(message: {
 	readonly role?: unknown;
 	readonly synthetic?: unknown;
 	readonly steering?: unknown;
+	readonly attribution?: unknown;
 }): boolean {
-	return message.role === "user" && (message.synthetic === true || message.steering === true);
+	if (message.role !== "user") return false;
+	if (message.synthetic === true) return true;
+	return message.steering === true && message.attribution !== "user";
 }

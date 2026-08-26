@@ -68,6 +68,8 @@ type Props = {
   workspaceId?: string;
   describedBy?: string;
   loadMentions?: (trigger: "@" | "/", query: string) => Promise<readonly MentionCandidate[]>;
+  /** Explicit slash catalog. Omitted callers keep the static builtin fallback. */
+  slashCatalog?: readonly StudioSlashCommand[];
   onRunCommand?: (command: StudioSlashCommand, args: string) => void;
   onChange?: (snapshot: ComposerSnapshot) => void;
   onSubmit?: () => void;
@@ -123,6 +125,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     workspaceId,
     describedBy,
     loadMentions,
+    slashCatalog,
     onRunCommand,
     onChange,
     onSubmit,
@@ -401,9 +404,9 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
 
   const slashDraft = parseSlashDraft(slashSource);
   const commandItems = detachedCommand
-    ? filterSlashCommands("")
+    ? filterSlashCommands("", slashCatalog)
     : slashDraft
-      ? filterSlashCommands(slashDraft.name)
+      ? filterSlashCommands(slashDraft.name, slashCatalog)
       : [];
   const commandOpen = (detachedCommand || slashDraft !== null) && mention === null && !commandDismissed;
 
@@ -503,7 +506,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           event.preventDefault();
           return;
         }
-        const exact = slashDraft ? lookupSlashCommand(slashDraft.name) : undefined;
+        const exact = slashDraft ? lookupSlashCommand(slashDraft.name, slashCatalog) : undefined;
         if (detachedCommand || exact === undefined) {
           const item = commandItems[commandIndex];
           if (item) {
@@ -580,7 +583,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       return;
     }
     const editor = editorRef.current;
-    const slash = editor === null ? undefined : composerSlashExecute(snapshotOf(editor, imagesRef.current));
+    const slash = editor === null ? undefined : composerSlashExecute(snapshotOf(editor, imagesRef.current), slashCatalog);
     if (slash !== undefined) {
       onSubmit?.();
       return;

@@ -15,12 +15,12 @@ import {
 	parseSessionTranscriptReadLimit,
 } from "../conversation-protocol";
 import {
+	publicToolCallId,
 	sanitizeJsonValue,
 	sanitizePublicText,
 	sanitizeToolArguments,
 	truncateUtf8,
 	utf8ByteLength,
-	publicToolCallId,
 } from "./conversation-sanitizer";
 import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
 
@@ -314,28 +314,66 @@ export function projectConversationBranch(entries: readonly SessionEntry[]): Con
 	return items;
 }
 
-function shrinkItem(item: ConversationItem): ConversationItem {
+const PAGE_PAYLOAD_BYTE_STEPS = [64 * 1024, 16 * 1024, 4 * 1024, 1024, 256] as const;
+
+function compactJson(value: JsonValue, maxBytes: number): JsonValue {
+	try {
+		if (utf8ByteLength(JSON.stringify(value)) <= maxBytes) return value;
+	} catch {
+		// Projected JSON should already be serializable; fail closed if it is not.
+	}
+	return { truncated: true };
+}
+
+/** Reduce large payloads while preserving item and tool association shells. */
+function shrinkItem(item: ConversationItem, maxPayloadBytes: number): ConversationItem {
 	if (item.kind === "message") {
+		let changed = false;
+		const content = item.content.map(block => {
+			if (block.type === "text" || block.type === "thinking") {
+				const text = truncateUtf8(block.text, Math.min(maxPayloadBytes, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES));
+				if (!text.truncated) return block;
+				changed = true;
+				return { ...block, text: text.text, truncated: true };
+			}
+			if (block.type === "toolCall") {
+				if (block.arguments === undefined) return block;
+				const args = compactJson(block.arguments, maxPayloadBytes);
+				if (args === block.arguments) return block;
+				changed = true;
+				return { ...block, arguments: args, truncated: true };
+			}
+			const output =
+				block.output === undefined
+					? undefined
+					: truncateUtf8(block.output, Math.min(maxPayloadBytes, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES));
+			const data = block.data === undefined ? undefined : compactJson(block.data, maxPayloadBytes);
+			if (output?.truncated !== true && data === block.data) return block;
+			changed = true;
+			return {
+				...block,
+				...(output === undefined ? {} : { output: output.text }),
+				...(data === undefined ? {} : { data }),
+				truncated: true,
+			};
+		});
+		if (!changed) return item;
 		return {
 			...item,
-			content: item.content.map(block => {
-				if (block.type === "text" || block.type === "thinking") {
-					const text = truncateUtf8(block.text, Math.min(256, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES));
-					return { ...block, text: text.text, truncated: true };
-				}
-				if (block.type === "toolCall") return { ...block, arguments: { truncated: true }, truncated: true };
-				return { ...block, output: undefined, data: { truncated: true }, truncated: true };
-			}),
+			content,
 		};
 	}
 	if (item.kind === "compaction") {
-		const summary = truncateUtf8(item.summary, 256);
+		const summary = truncateUtf8(item.summary, maxPayloadBytes);
+		const shortSummary =
+			item.shortSummary === undefined ? undefined : truncateUtf8(item.shortSummary, maxPayloadBytes);
+		const warning = item.warning === undefined ? undefined : truncateUtf8(item.warning, maxPayloadBytes);
+		if (!summary.truncated && shortSummary?.truncated !== true && warning?.truncated !== true) return item;
 		return {
-			kind: "compaction",
-			itemId: item.itemId,
-			parentId: item.parentId,
-			createdAt: item.createdAt,
-			summary: summary.text,
+			...item,
+			summary: summary.text.length > 0 ? summary.text : " ",
+			...(shortSummary === undefined ? {} : { shortSummary: shortSummary.text }),
+			...(warning === undefined ? {} : { warning: warning.text }),
 		};
 	}
 	return item;
@@ -501,13 +539,20 @@ export function readConversationTranscriptPage(
 		};
 	};
 	let page = pageFields();
+	if (utf8ByteLength(JSON.stringify(page)) > CONVERSATION_LIMITS.PAGE_MAX_BYTES) {
+		for (const maxPayloadBytes of PAGE_PAYLOAD_BYTE_STEPS) {
+			items = items.map(item => shrinkItem(item, maxPayloadBytes));
+			page = pageFields();
+			if (utf8ByteLength(JSON.stringify(page)) <= CONVERSATION_LIMITS.PAGE_MAX_BYTES) break;
+		}
+	}
 	while (utf8ByteLength(JSON.stringify(page)) > CONVERSATION_LIMITS.PAGE_MAX_BYTES && items.length > 1) {
 		items = items.slice(1);
 		hasMoreBefore = true;
 		page = pageFields();
 	}
 	if (utf8ByteLength(JSON.stringify(page)) > CONVERSATION_LIMITS.PAGE_MAX_BYTES && items.length === 1) {
-		items = [shrinkItem(items[0]!)];
+		items = [shrinkItem(items[0]!, PAGE_PAYLOAD_BYTE_STEPS.at(-1)!)];
 		page = pageFields();
 	}
 	return parseConversationTranscriptPage(page);

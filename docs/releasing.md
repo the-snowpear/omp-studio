@@ -24,7 +24,15 @@ the first public snapshot). Workspace packages share that version today.
 5. **Commit** on `main` with a message such as `release: vX.Y.Z`.
 6. **Tag** annotated: `git tag -a vX.Y.Z -m "OMP Studio vX.Y.Z"`.
 7. **Push** `main` and the tag: `git push origin main --tags`.
-8. **GitHub Release.** `gh release create vX.Y.Z --notes-file ...` (or paste
+8. **Installer + readiness.** Build the Windows artifact, then run the
+   readiness gate — see [Windows installer](#windows-installer) below:
+
+   ```powershell
+   npm run pack:win
+   npm run p5:gate
+   ```
+
+9. **GitHub Release.** `gh release create vX.Y.Z --notes-file ...` (or paste
    the changelog section). Mark pre-1.0 tags as pre-release when the product
    is still a preview.
 
@@ -51,10 +59,29 @@ $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
 npm run pack:win
 ```
 
-Attach the installer to the GitHub Release only after you have confirmed it
-boots, verifies the Runtime signature, and does not embed the private key.
-0.1.0 is unsigned; do not publish the Setup exe until Authenticode signing is
-configured.
+### Readiness gate
+
+Once the installer exists, run the release readiness verifier:
+
+```powershell
+npm run p5:gate
+```
+
+`pack:win` audits `outputs/installer/` only. `p5:gate` re-runs the PTY /
+installer / Host security tests and then scans **all** candidate publish
+surfaces for private material — `apps/desktop/dist`, `apps/renderer/dist`,
+`packages/runtime-installer/dist/artifacts` and `outputs/` — before writing
+`outputs/p5-readiness.json`. It exits non-zero when a test fails or a key
+marker is found. Run it after `pack:win`, not before: it skips directories
+that do not exist yet, so an early run silently scans less.
+
+`productionWindowsCleanRun` in the report stays `manual-required` — a clean
+Windows boot is still a human check.
+
+Attach the installer to the GitHub Release only after `p5:gate` passes and you
+have confirmed the build boots, verifies the Runtime signature, and does not
+embed the private key. 0.1.0 is unsigned; do not publish the Setup exe until
+Authenticode signing is configured.
 
 Details: [`packaging/README.md`](../packaging/README.md).
 

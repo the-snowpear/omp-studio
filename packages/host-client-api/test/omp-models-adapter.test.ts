@@ -801,6 +801,38 @@ describe("upsertProvider enabled / disabledProviders", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("disabled provider's models are dropped from availableModels", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omp-models-disabled-available-"));
+    try {
+      await writeFile(join(dir, "models.yml"), "providers:\n  acme:\n    api: openai-completions\n    apiKey: sk-test\n", "utf8");
+      await writeFile(join(dir, "config.yml"), "modelRoles: {}\n", "utf8");
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(join(dir, "models.db"));
+      db.exec("CREATE TABLE model_cache (provider_id TEXT, models TEXT, authoritative INTEGER)");
+      db.prepare("INSERT INTO model_cache (provider_id, models, authoritative) VALUES (?, ?, 1)").run(
+        "acme",
+        JSON.stringify([{ id: "fast", name: "Acme Fast", provider: "acme", reasoning: false, input: ["text"], output: ["text"] }]),
+      );
+      db.close();
+      const service = createOmpModelsService({ agentDir: dir });
+      const before = await service.get();
+      assert.equal(before.availableModels.some((item) => item.provider === "acme"), true);
+      await service.upsertProvider({
+        id: "acme",
+        name: "Acme",
+        api: "openai-completions",
+        enabled: false,
+        auth: { type: "api-key" },
+        ...(before.contentHash ? { expectedHash: before.contentHash } : {}),
+      });
+      const after = await service.get();
+      assert.equal(after.providers.find((item) => item.id === "acme")?.enabled, false);
+      assert.equal(after.availableModels.some((item) => item.provider === "acme"), false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("models.get availableModels thinking", () => {

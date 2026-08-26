@@ -577,6 +577,15 @@ export function SubagentsPanel({
     addModelValue(role.alias);
   };
 
+  const moveModel = (index: number, delta: -1 | 1) => {
+    if (!draftState) return;
+    const target = index + delta;
+    if (target < 0 || target >= draftState.models.length) return;
+    const next = [...draftState.models];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    setDraft({ ...draftState, models: next });
+  };
+
   const addCustomTool = () => {
     if (!draft) return;
     const value = draft.customTool.trim();
@@ -632,19 +641,39 @@ export function SubagentsPanel({
               {draft.models.length === 0 ? (
                 <span className="sa-model-inherit">{t("subagents.inheritModel")}</span>
               ) : (
-                draft.models.map((item) => (
+                draft.models.map((item, index) => (
                   <span className="sa-model-pill" key={item} data-tip={item}>
                     <Icon name="cpu" extra="sm" />
                     <span>{modelChipLabel(item, catalog)}</span>
                     {definitionLocked ? null : (
-                      <button
-                        type="button"
-                        className="sa-chip-x"
-                        onClick={() => setDraft({ ...draft, models: draft.models.filter((value) => value !== item) })}
-                        aria-label={`${t("common.remove")} ${item}`}
-                      >
-                        <Icon name="x" extra="sm" />
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="sa-chip-x sa-chip-move"
+                          disabled={index === 0}
+                          onClick={() => moveModel(index, -1)}
+                          aria-label={t("subagents.moveModelUp", { name: item })}
+                        >
+                          <Icon name="arrow-u" extra="sm" />
+                        </button>
+                        <button
+                          type="button"
+                          className="sa-chip-x sa-chip-move"
+                          disabled={index === draft.models.length - 1}
+                          onClick={() => moveModel(index, 1)}
+                          aria-label={t("subagents.moveModelDown", { name: item })}
+                        >
+                          <Icon name="arrow-d" extra="sm" />
+                        </button>
+                        <button
+                          type="button"
+                          className="sa-chip-x"
+                          onClick={() => setDraft({ ...draft, models: draft.models.filter((value) => value !== item) })}
+                          aria-label={`${t("common.remove")} ${item}`}
+                        >
+                          <Icon name="x" extra="sm" />
+                        </button>
+                      </>
                     )}
                   </span>
                 ))
@@ -757,6 +786,11 @@ export function SubagentsPanel({
         <div className="mp-sec">
           <h3>{t("subagents.behaviorSectionTitle")}</h3>
           <div className="f-grid">
+            <div className="field span2">
+              <label htmlFor="sa-enabled">{t("subagents.enableAgent")}</label>
+              <button type="button" id="sa-enabled" className={`switch${!draft.disabled ? " on" : ""}`} role="switch" aria-checked={!draft.disabled} aria-label={t("subagents.enableAgent")} onClick={() => setDraft({ ...draft, disabled: !draft.disabled })} />
+              <span className="desc">{t("subagents.enableAgentDesc")}</span>
+            </div>
             <div className="field">
               <label>{t("subagents.blockParent")}</label>
               <button type="button" className={`switch${draft.blocking ? " on" : ""}`} role="switch" aria-checked={draft.blocking} disabled={definitionLocked} onClick={() => setDraft({ ...draft, blocking: !draft.blocking })} />
@@ -828,10 +862,6 @@ export function SubagentsPanel({
           <h3>{t("subagents.sessionOverrideTitle")}</h3>
           <p className="sec-desc">{t("subagents.sessionOverrideDesc")}</p>
           <div className="f-grid">
-            <div className="field">
-              <label>{t("subagents.overrideEnable")}</label>
-              <button type="button" className={`switch${!draft.disabled ? " on" : ""}`} role="switch" aria-checked={!draft.disabled} onClick={() => setDraft({ ...draft, disabled: !draft.disabled })} />
-            </div>
             <div className="field">
               <label htmlFor="sa-override">{t("subagents.overrideModel")}</label>
               <input className="input mono" id="sa-override" list="sa-model-suggest" placeholder={t("subagents.overrideModelPlaceholder")} value={draft.overrideModel} onChange={(event) => setDraft({ ...draft, overrideModel: event.target.value })} />

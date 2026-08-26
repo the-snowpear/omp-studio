@@ -6,6 +6,7 @@ import {
   type AuthorityEpoch,
   type ClientError,
   type ClientEvent,
+  type ConversationMessageError,
   type ConversationTranscriptReadPage,
   type ConversationTranscriptPage,
   type EventCursor,
@@ -20,6 +21,7 @@ import {
   type ConversationAction,
 } from "../src/conversation-reducer.js";
 import {
+  CONVERSATION_STATE_ITEM_CAP,
   CONVERSATION_STATE_LIVE_TOOLS_CAP,
   createInitialConversationState,
   selectConversationHydrate,
@@ -553,7 +555,7 @@ const PROVIDER_ERROR = {
 function assistantCompleted(
   messageId: string,
   extra: {
-    readonly error?: typeof PROVIDER_ERROR;
+    readonly error?: ConversationMessageError;
     readonly text?: string;
     readonly seq?: number;
   } = {},
@@ -687,6 +689,61 @@ test("aborted provider error keeps the 502 copy instead of dropping it", () => {
   assert.equal(state.liveMessages["msg-1"]?.aborted, true);
   assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
   assert.deepEqual(state.stickyProviderErrors[SESSION]?.error, PROVIDER_ERROR);
+});
+
+test("next assistant stream start clears the latched provider error", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: assistantCompleted("msg-1", { error: PROVIDER_ERROR }),
+  });
+  assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
+
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "t2",
+        messageId: "u9",
+        role: "user",
+        createdAt: "2026-08-15T12:01:00.000Z",
+      },
+      2,
+    ),
+  });
+  assert.deepEqual(state.itemErrors["msg-1"], PROVIDER_ERROR);
+  assert.deepEqual(state.stickyProviderErrors[SESSION]?.error, PROVIDER_ERROR);
+
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "t3",
+        messageId: "msg-3",
+        role: "assistant",
+        createdAt: "2026-08-15T12:02:00.000Z",
+      },
+      3,
+    ),
+  });
+  assert.deepEqual(state.itemErrors, {});
+  assert.equal(state.stickyProviderErrors[SESSION], undefined);
+
+  const REPEAT_402 = {
+    message: "402 Insufficient Balance",
+    status: 402,
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+  } as const;
+  state = apply(state, {
+    type: "live",
+    event: assistantCompleted("msg-3", { error: REPEAT_402, seq: 4 }),
+  });
+  assert.deepEqual(state.itemErrors["msg-3"], REPEAT_402);
+  assert.equal(state.stickyProviderErrors[SESSION]?.itemId, "msg-3");
 });
 
 test("session/epoch live events for a different identity are dropped", () => {
@@ -1093,6 +1150,136 @@ test("live block accumulation is capped and later deltas for the block are dropp
   assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.truncated, true);
   state = apply(state, delta(4));
   assert.equal(state.liveMessages["msg-1"]?.blocks.b1?.text.length, cap);
+});
+
+test("live block byte accounting appends only multibyte delta sizes", () => {
+  let state = apply(undefined, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "t-bytes",
+        messageId: "msg-bytes",
+        role: "assistant",
+        createdAt: "2026-08-15T12:00:00.000Z",
+      },
+      1,
+    ),
+  });
+  for (const [eventSeq, delta] of [[2, "你"], [3, "🙂"], [4, "a"]] as const) {
+    state = apply(state, {
+      type: "live",
+      event: liveEvent(
+        {
+          kind: "conversation.message.delta",
+          sessionId: SESSION,
+          turnId: "t-bytes",
+          messageId: "msg-bytes",
+          blockId: "b1",
+          blockType: "text",
+          delta,
+        },
+        eventSeq,
+      ),
+    });
+  }
+  const block = state.liveMessages["msg-bytes"]?.blocks.b1;
+  assert.equal(block?.text, "你🙂a");
+  assert.equal(block?.textBytes, 8);
+});
+
+test("active rows are capped only after turn completion and force a fresh latest-page hydrate", () => {
+  const initialItems = Array.from({ length: CONVERSATION_STATE_ITEM_CAP }, (_, index) =>
+    message(`m-${index}`, `row ${index}`, `2026-08-15T00:${String(index % 60).padStart(2, "0")}:00.000Z`));
+  let state = apply(undefined, { type: "hydrate", generation: 0, page: page(initialItems) });
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.completed",
+        sessionId: SESSION,
+        turnId: "t-overflow",
+        messageId: "m-overflow",
+        item: {
+          kind: "message",
+          itemId: "m-overflow",
+          parentId: null,
+          createdAt: "2026-08-15T13:00:00.000Z",
+          role: "assistant",
+          content: [{ type: "text", text: "latest" }],
+        },
+      },
+      1,
+    ),
+  });
+  assert.equal(state.order.length, CONVERSATION_STATE_ITEM_CAP + 1);
+  assert.equal(state.resyncRequired, false);
+  assert.equal(state.olderCursor, "older-1");
+
+  state = apply(state, {
+    type: "live",
+    event: liveEvent({ kind: "conversation.turn.completed", sessionId: SESSION, turnId: "t-overflow" }, 2),
+  });
+  assert.equal(state.order.length, CONVERSATION_STATE_ITEM_CAP);
+  assert.equal(state.order[0], "m-1");
+  assert.equal(state.order.at(-1), "m-overflow");
+  assert.equal(state.itemsById["m-0"], undefined);
+  assert.equal(state.olderCursor, undefined);
+  assert.equal(state.hasMoreBefore, true);
+  assert.equal(state.resyncRequired, true);
+});
+
+test("aborted turn capping removes evicted live rows and their tools", () => {
+  const ids = Array.from({ length: CONVERSATION_STATE_ITEM_CAP }, (_, index) => `aborted-${index}`);
+  const liveMessages = Object.fromEntries(ids.map((messageId, index) => [messageId, {
+    messageId,
+    turnId: `old-turn-${index}`,
+    role: "assistant" as const,
+    createdAt: "2026-08-15T12:00:00.000Z",
+    blocks: {},
+    completed: true,
+    aborted: true,
+  }]));
+  let state: ReturnType<typeof createInitialConversationState> = {
+    ...createInitialConversationState(),
+    identity: { runtimeEpoch: EPOCH, sessionId: SESSION },
+    order: ids,
+    liveMessages,
+    liveTools: {
+      "old-tool": {
+        toolCallId: "old-tool",
+        turnId: "old-turn-0",
+        messageId: "aborted-0",
+        status: "aborted" as const,
+      },
+    },
+    olderCursor: "older-1" as OpaqueCursor,
+  };
+  state = apply(state, {
+    type: "live",
+    event: liveEvent(
+      {
+        kind: "conversation.message.started",
+        sessionId: SESSION,
+        turnId: "current-turn",
+        messageId: "current",
+        role: "assistant",
+        createdAt: "2026-08-15T13:00:00.000Z",
+      },
+      1,
+    ),
+  });
+  assert.equal(state.order.length, CONVERSATION_STATE_ITEM_CAP + 1);
+  state = apply(state, {
+    type: "live",
+    event: liveEvent({ kind: "conversation.turn.aborted", sessionId: SESSION, turnId: "current-turn" }, 2),
+  });
+  assert.equal(state.order.length, CONVERSATION_STATE_ITEM_CAP);
+  assert.equal(state.liveMessages["aborted-0"], undefined);
+  assert.equal(state.liveTools["old-tool"], undefined);
+  assert.equal(state.liveMessages.current?.aborted, true);
+  assert.equal(state.resyncRequired, true);
 });
 
 test("appended live tool output is capped so a broken append stream cannot grow past the text block budget", () => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { MarkdownText } from "../conversation/markdown";
+import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { PlanAnnotatedBody, type PlanAnnotatedBodyHandle } from "./PlanAnnotatedBody";
 import { formatPlanRefineFeedback, type PlanNotesBySection } from "./planFeedback";
@@ -12,18 +13,24 @@ function PlanHeadActions({
   expanded,
   disabled,
   collapseRef,
+  onSaveAndQuit,
   onToggle,
   onDismiss,
 }: {
   expanded: boolean;
   disabled?: boolean;
   collapseRef?: RefObject<HTMLButtonElement | null>;
+  onSaveAndQuit?: () => void;
   onToggle: () => void;
   onDismiss: () => void;
 }) {
   if (expanded) {
     return (
       <span className="plan-head-actions">
+        <PlanSaveAndQuitButton
+          {...(onSaveAndQuit === undefined ? {} : { onSaveAndQuit })}
+          {...(disabled === true ? { disabled: true } : {})}
+        />
         <button
           {...(collapseRef ? { ref: collapseRef } : {})}
           type="button"
@@ -39,6 +46,10 @@ function PlanHeadActions({
   }
   return (
     <span className="plan-head-actions">
+      <PlanSaveAndQuitButton
+        {...(onSaveAndQuit === undefined ? {} : { onSaveAndQuit })}
+        {...(disabled === true ? { disabled: true } : {})}
+      />
       <button
         type="button"
         className="icon-btn small"
@@ -58,6 +69,29 @@ function PlanHeadActions({
         <Icon name="x" extra="sm" />
       </button>
     </span>
+  );
+}
+
+function PlanSaveAndQuitButton({
+  onSaveAndQuit,
+  disabled,
+}: {
+  onSaveAndQuit?: () => void;
+  disabled?: boolean;
+}) {
+  const { t } = useI18n();
+  if (!onSaveAndQuit) return null;
+  /* 路径获取在 App 侧（桌面原生另存为对话框 / 浏览器 prompt 回退），
+     按钮只负责触发——Electron 渲染进程不支持 window.prompt，不能在这里收集输入。 */
+  return (
+    <button
+      type="button"
+      className="btn small outline plan-save-and-quit"
+      disabled={disabled}
+      onClick={() => onSaveAndQuit()}
+    >
+      {t("deck.saveAndQuit")}
+    </button>
   );
 }
 
@@ -142,6 +176,7 @@ function PlanReviewDialog({
   disabled,
   onClose,
   onAction,
+  onSaveAndQuit,
   onPrepareAction,
   onNotesChange,
   onOverallNoteChange,
@@ -157,6 +192,7 @@ function PlanReviewDialog({
   disabled?: boolean;
   onClose: () => void;
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
+  onSaveAndQuit?: () => void;
   onPrepareAction?: (id: PlanActionId) => void;
   onNotesChange: (notes: Record<number, string[]>) => void;
   onOverallNoteChange: (note: string) => void;
@@ -249,6 +285,7 @@ function PlanReviewDialog({
           <PlanHeadActions
             expanded
             collapseRef={closeRef}
+            {...(onSaveAndQuit === undefined ? {} : { onSaveAndQuit })}
             onToggle={() => requestClose()}
             onDismiss={() => requestClose()}
             {...(disabled === true ? { disabled: true } : {})}
@@ -314,6 +351,7 @@ export function PlanCard({
   onExpandedChange,
   originRef,
   onAction,
+  onSaveAndQuit,
 }: {
   title: string;
   body: string;
@@ -324,6 +362,7 @@ export function PlanCard({
   onExpandedChange?: (open: boolean) => void;
   originRef?: RefObject<HTMLElement | null>;
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
+  onSaveAndQuit?: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const controlled = expandedProp !== undefined;
@@ -374,6 +413,7 @@ export function PlanCard({
         end={(
           <PlanHeadActions
             expanded={false}
+            {...(onSaveAndQuit === undefined ? {} : { onSaveAndQuit })}
             onToggle={revealFromCard}
             onDismiss={() => emitAction("dismiss")}
             {...(disabled === true ? { disabled: true } : {})}
@@ -403,7 +443,10 @@ export function PlanCard({
           <MarkdownText text={body} />
         </div>
       </div>
-      <PlanActions onPick={emitAction} {...(disabled === true ? { disabled: true } : {})} />
+      <PlanActions
+        onPick={emitAction}
+        {...(disabled === true ? { disabled: true } : {})}
+      />
       {expanded ? (
         <PlanReviewDialog
           title={title}
@@ -415,6 +458,7 @@ export function PlanCard({
           annotateRef={annotateRef}
           onClose={closeDialog}
           onAction={emitAction}
+          {...(onSaveAndQuit === undefined ? {} : { onSaveAndQuit })}
           onPrepareAction={(id) => {
             if (id === "refine") captureRefineNotes();
           }}
@@ -464,6 +508,7 @@ export function PlanReviewDeck({
   onExpandedChange,
   originRef,
   onAction,
+  onSaveAndQuit,
 }: {
   title: string;
   body: string;
@@ -473,6 +518,7 @@ export function PlanReviewDeck({
   onExpandedChange?: (open: boolean) => void;
   originRef?: RefObject<HTMLElement | null>;
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
+  onSaveAndQuit?: () => void;
 }) {
   return (
     <div className="deck active preview-queue" role="region" aria-label="待审核的计划" aria-live="polite">
@@ -481,6 +527,7 @@ export function PlanReviewDeck({
           title={title}
           body={body}
           onAction={onAction}
+          {...(onSaveAndQuit === undefined ? {} : { onSaveAndQuit })}
           {...(meta ? { meta } : {})}
           {...(disabled === true ? { disabled: true } : {})}
           {...(expanded === undefined ? {} : { expanded })}

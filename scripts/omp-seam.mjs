@@ -57,6 +57,7 @@ export const SEAM_GROUPS = Object.freeze([
     paths: [
       "packages/coding-agent/src/plan-mode/approved-plan.ts",
       "packages/coding-agent/src/registry/agent-registry.ts",
+      "packages/coding-agent/src/session/agent-session-events.ts",
       "packages/coding-agent/src/session/agent-session-types.ts",
       "packages/coding-agent/src/session/agent-session.ts",
       "packages/coding-agent/src/session/prewalk.ts",
@@ -71,6 +72,7 @@ export const SEAM_GROUPS = Object.freeze([
     paths: [
       "packages/coding-agent/src/async/job-manager.ts",
       "packages/coding-agent/src/modes/components/pause-screen.ts",
+      "packages/coding-agent/src/modes/controllers/event-controller.ts",
       "packages/coding-agent/src/modes/interactive-mode.ts",
       "packages/coding-agent/src/modes/rpc/rpc-mode.ts",
       "packages/coding-agent/src/modes/types.ts",

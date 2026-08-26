@@ -2035,6 +2035,8 @@ details.mp-advanced .adv-body { padding: 0 var(--sp-16) var(--sp-14); }
   color: var(--text-faint);
 }
 .sa-chip-x:hover { background: var(--red-soft); color: var(--red); }
+.sa-chip-x:disabled { opacity: 0.35; pointer-events: none; }
+.sa-chip-x.sa-chip-move:hover { background: var(--accent-softer); color: var(--accent); }
 .sa-chip-x svg { width: 10px; height: 10px; }
 .sa-add-row {
   display: flex;

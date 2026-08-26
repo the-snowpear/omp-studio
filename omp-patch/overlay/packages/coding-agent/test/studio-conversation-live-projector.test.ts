@@ -399,6 +399,60 @@ describe("ConversationLiveProjector", () => {
 		expect(deltas(events)).toBe("Hi");
 	});
 
+	test("terminal agent_end rejects late message, tool, and compaction events until the next agent_start", () => {
+		const { projector, events } = createProjector();
+		const completed = assistant([{ type: "text", text: "done" }]);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: completed });
+		projector.project({ type: "message_end", message: completed });
+		projector.project({ type: "agent_end", messages: [completed] });
+		const terminalEvents = [...events];
+
+		const late = assistant([{ type: "text", text: "late" }], { timestamp: TS + 1 });
+		projector.project({ type: "message_start", message: late });
+		projector.project(update(late, { type: "text_delta", contentIndex: 0, delta: "late", partial: late }));
+		projector.project({ type: "message_end", message: late });
+		projector.project({ type: "tool_execution_start", toolCallId: "late-tool", toolName: "Read", args: {} });
+		projector.project({
+			type: "tool_execution_update",
+			toolCallId: "late-tool",
+			toolName: "Read",
+			args: {},
+			partialResult: { content: [{ type: "text", text: "late" }] },
+		});
+		projector.project({
+			type: "tool_execution_end",
+			toolCallId: "late-tool",
+			toolName: "Read",
+			result: { content: [{ type: "text", text: "late" }], isError: false },
+			isError: false,
+		});
+		projector.project({ type: "auto_compaction_start", reason: "idle", action: "shake" });
+		projector.project({
+			type: "auto_compaction_end",
+			action: "shake",
+			result: undefined,
+			aborted: false,
+			willRetry: false,
+			skipped: true,
+		});
+		expect(events).toEqual(terminalEvents);
+
+		const next = assistant([{ type: "text", text: "next" }], { timestamp: TS + 2 });
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: next });
+		projector.project({ type: "message_end", message: next });
+		projector.project({ type: "agent_end", messages: [next] });
+		expect(events.filter(event => event.kind === "conversation.turn.completed")).toHaveLength(2);
+		expect(
+			events.find(
+				(event): event is Extract<ConversationRuntimeEvent, { kind: "conversation.message.completed" }> =>
+					event.kind === "conversation.message.completed" &&
+					event.item.content.some(block => block.type === "text" && block.text === "next"),
+			)?.turnId,
+		).toBe("turn-2");
+	});
+
 	test("abort keeps received content and drops later deltas for that turn", () => {
 		const { projector, events } = createProjector();
 		const streaming = assistant([{ type: "text", text: "Hel" }], { stopReason: "aborted" });
@@ -562,6 +616,32 @@ describe("ConversationLiveProjector", () => {
 		expect(events.length).toBeLessThan(deltaEvents.length + 8);
 	});
 
+	test("caps cumulative live deltas and the active fallback buffer, then marks it truncated", () => {
+		const { projector, events } = createProjector();
+		const message = assistant([]);
+		const oversized = "界".repeat(100_000);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message });
+		projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: oversized, partial: message }));
+		projector.project({ type: "message_end", message: { ...message, content: undefined as never } });
+		const completed = events.find(
+			(event): event is Extract<ConversationRuntimeEvent, { kind: "conversation.message.completed" }> =>
+				event.kind === "conversation.message.completed",
+		);
+		const block = completed?.item.content.find(item => item.type === "text");
+		expect(block?.type).toBe("text");
+		if (block?.type !== "text") throw new Error("expected a text block");
+		const liveText = deltas(events, "text");
+		expect(new TextEncoder().encode(liveText).byteLength).toBeLessThanOrEqual(
+			CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES,
+		);
+		expect(liveText).toBe(block.text);
+		expect(new TextEncoder().encode(block.text).byteLength).toBeLessThanOrEqual(
+			CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES,
+		);
+		expect(block.truncated).toBe(true);
+	});
+
 	test("omits providerPayload and secret keys from serialized live frames", () => {
 		const { projector, events } = createProjector();
 		const message = assistant([{ type: "text", text: "ok" }], {
@@ -631,7 +711,7 @@ describe("ConversationLiveProjector", () => {
 		expect(diagnostics.some(item => item.includes("custom"))).toBe(true);
 	});
 
-	test("developer, synthetic user, and steering user harness messages never become public rows", () => {
+	test("developer/synthetic/agent-steer rows stay hidden; user-attributed steers become public rows", () => {
 		const { projector, events, diagnostics } = createProjector();
 		projector.project({ type: "agent_start" });
 		const developer = {
@@ -641,9 +721,10 @@ describe("ConversationLiveProjector", () => {
 			timestamp: TS,
 		} as AgentMessage;
 		const synthetic = user("<instruction>MUST read local://plan.md</instruction>", { synthetic: true });
-		const steering = user("steer the turn", { steering: true });
+		const agentSteer = user("peer asks the run to pivot", { steering: true, attribution: "agent" });
+		const userSteer = user("steer the turn", { steering: true, attribution: "user" });
 		const visible = user("hello");
-		for (const message of [developer, synthetic, steering, visible]) {
+		for (const message of [developer, synthetic, agentSteer, userSteer, visible]) {
 			projector.project({ type: "message_start", message });
 			projector.project({ type: "message_end", message });
 		}
@@ -656,10 +737,19 @@ describe("ConversationLiveProjector", () => {
 				role: "user",
 				createdAt: new Date(TS).toISOString(),
 			},
+			{
+				kind: "conversation.message.started",
+				sessionId: "session-1",
+				turnId: "turn-1",
+				messageId: "msg-2",
+				role: "user",
+				createdAt: new Date(TS).toISOString(),
+			},
 		]);
 		expect(JSON.stringify(events)).not.toContain("system-reminder");
 		expect(JSON.stringify(events)).not.toContain("<instruction>");
-		expect(JSON.stringify(events)).not.toContain("steer the turn");
+		expect(JSON.stringify(events)).not.toContain("peer asks the run to pivot");
+		expect(JSON.stringify(events)).toContain("steer the turn");
 		expect(diagnostics.some(item => item.includes("developer"))).toBe(true);
 	});
 
@@ -680,6 +770,41 @@ describe("ConversationLiveProjector", () => {
 				source: "retry-end",
 			},
 		]);
+	});
+
+	test("non-terminal agent_end keeps the turn open and unexpected-stop recovery is structured", () => {
+		const session = new AgentSessionEventDouble();
+		const { projector, events } = createProjector();
+		projector.bind(session);
+		const first = assistant([{ type: "text", text: "partial" }]);
+		const continuation = assistant([{ type: "text", text: "recovered" }], { timestamp: TS + 1 });
+		session.emit({ type: "agent_start" });
+		session.emit({ type: "message_start", message: first });
+		session.emit({ type: "message_end", message: first });
+		session.emit({ type: "agent_end", messages: [], isTerminal: false });
+		expect(events.some(event => event.kind === "conversation.turn.completed")).toBe(false);
+		session.emit({ type: "unexpected_stop_retry", attempt: 1, maxAttempts: 3 });
+		const notice = events.find(event => event.kind === "conversation.notice");
+		expect(notice).toMatchObject({
+			kind: "conversation.notice",
+			level: "warning",
+			message: "Assistant stop recovered automatically (1/3)",
+			source: "unexpected-stop",
+		});
+		session.emit({ type: "agent_start" });
+		session.emit({ type: "message_start", message: continuation });
+		session.emit({ type: "message_end", message: continuation });
+		session.emit({ type: "agent_end", messages: [] });
+		const messageTurnIds = events
+			.filter(
+				(event): event is Extract<ConversationRuntimeEvent, { kind: "conversation.message.completed" }> =>
+					event.kind === "conversation.message.completed",
+			)
+			.map(event => event.turnId);
+		const completedTurn = events.find(event => event.kind === "conversation.turn.completed");
+		expect(messageTurnIds).toEqual(["turn-1", "turn-1"]);
+		expect(completedTurn?.kind === "conversation.turn.completed" && completedTurn.turnId).toBe("turn-1");
+		expect(events.filter(event => event.kind === "conversation.turn.completed")).toHaveLength(1);
 	});
 
 	test("AgentSession subscribe double replays a native event fixture into contract events", () => {

@@ -304,7 +304,7 @@ export function BatchChain({
   const summary = batchSummary(thinking, visible);
   return (
     <div
-      className={`${standalone ? "ev " : ""}ev-batch${open ? " open" : ""}${running ? " is-running" : ""}${expandAll || askOnly ? " is-pinned-open" : ""}`}
+      className={`${standalone ? "ev " : ""}ev-batch${open ? " open" : ""}${running ? " is-running" : ""}`}
       data-batch-key={batchKey}
     >
       <SubagentStrip

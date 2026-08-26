@@ -1,8 +1,8 @@
 diff --git a/packages/coding-agent/src/extensibility/extensions/types.ts b/packages/coding-agent/src/extensibility/extensions/types.ts
-index da80737..e3ed6fa 100644
+index 5b804a4526..be24f282cc 100644
 --- a/packages/coding-agent/src/extensibility/extensions/types.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/types.ts
-@@ -267,6 +267,26 @@ export interface ExtensionUIContext {
+@@ -269,6 +269,26 @@ export interface ExtensionUIContext {
  	/** Show a text input dialog. */
  	input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
  
@@ -30,7 +30,7 @@ index da80737..e3ed6fa 100644
  	askDialog?(
  		questions: ExtensionAskDialogQuestion[],
 diff --git a/packages/coding-agent/src/extensibility/extensions/wrapper.ts b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
-index a4aa75d..1a6edbf 100644
+index a4aa75dc8b..1a6edbfb24 100644
 --- a/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 @@ -7,6 +7,7 @@ import type {
@@ -175,10 +175,10 @@ index a4aa75d..1a6edbf 100644
  
  		// Execute the actual tool
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index 6dcd832..6b394a0 100644
+index 91a6a5b7af..9290009d3b 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
-@@ -212,7 +212,7 @@ import {
+@@ -225,7 +225,7 @@ import {
  	xdevEntries,
  } from "./tools";
  import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
@@ -187,7 +187,7 @@ index 6dcd832..6b394a0 100644
  import { isIrcEnabled } from "./tools/hub";
  import { getImageGenTools } from "./tools/image-gen";
  import { wrapToolWithMetaNotice } from "./tools/output-meta";
-@@ -598,8 +598,8 @@ export interface CreateAgentSessionResult {
+@@ -617,8 +617,8 @@ export interface CreateAgentSessionResult {
  	session: AgentSession;
  	/** Extensions result (loaded extensions + runtime) */
  	extensionsResult: LoadExtensionsResult;
@@ -198,7 +198,7 @@ index 6dcd832..6b394a0 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -3164,7 +3164,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -3265,7 +3265,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model);
  		};
  
@@ -208,7 +208,7 @@ index 6dcd832..6b394a0 100644
  		};
  
 diff --git a/packages/coding-agent/src/tools/context.ts b/packages/coding-agent/src/tools/context.ts
-index 69b25bb..6340b70 100644
+index 69b25bb4d3..6340b70220 100644
 --- a/packages/coding-agent/src/tools/context.ts
 +++ b/packages/coding-agent/src/tools/context.ts
 @@ -21,25 +21,45 @@ declare module "@oh-my-pi/pi-agent-core" {
@@ -262,10 +262,10 @@ index 69b25bb..6340b70 100644
  	}
  
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
-index 6de740a..d515d74 100644
+index f72b8e126c..51c3e7b896 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
 +++ b/packages/coding-agent/test/extensions-runner.test.ts
-@@ -2293,6 +2293,76 @@ describe("ExtensionRunner", () => {
+@@ -2407,6 +2407,76 @@ describe("ExtensionRunner", () => {
  			}
  		});
  

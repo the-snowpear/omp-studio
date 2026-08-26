@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadModel, WorkspaceId } from "@omp-studio/client-contract";
+import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { setHubIntent } from "../AgentHub";
 import { GitCommitGraph } from "../git/GitCommitGraph";
@@ -47,6 +48,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
   onFile: (path: string) => void;
   onAction: (path: string, action: "context" | "context-dir" | "more") => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
       {nodes.map((node) => {
@@ -78,8 +80,8 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
                 <span className="fname ellipsis">{node.name}</span>
                 <FileStat status={node.status} />
                 <span className="fop">
-                  <button type="button" className="icon-btn" data-tip="@" aria-label={`加入上下文 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context-dir"); }}><Icon name="at" /></button>
-                  <button type="button" className="icon-btn" data-tip="更多" aria-label={`更多操作 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
+                  <button type="button" className="icon-btn" data-tip={t("shell.addContext")} aria-label={`${t("shell.addContext")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context-dir"); }}><Icon name="at" /></button>
+                  <button type="button" className="icon-btn" data-tip={t("common.more")} aria-label={`${t("common.moreActions")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
                 </span>
               </div>
               <div className="tree-children" role="group">
@@ -103,8 +105,8 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
             {node.diagnostic ? <span className={`diag ${node.diagnostic === "error" ? "err" : "warn"}`} role="img" aria-label={node.diagnostic === "error" ? "存在诊断错误" : "存在诊断警告"} /> : null}
             <FileStat status={node.status} />
             <span className="fop">
-              <button type="button" className="icon-btn" data-tip="@" aria-label={`加入上下文 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context"); }}><Icon name="at" /></button>
-              <button type="button" className="icon-btn" data-tip="更多" aria-label={`更多操作 ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
+              <button type="button" className="icon-btn" data-tip={t("shell.addContext")} aria-label={`${t("shell.addContext")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context"); }}><Icon name="at" /></button>
+              <button type="button" className="icon-btn" data-tip={t("common.more")} aria-label={`${t("common.moreActions")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
             </span>
           </div>
         );
@@ -119,7 +121,6 @@ export function PreviewFileTree({ label, search, onContext }: { label: string; s
     collectOpen(PREVIEW_FILE_TREE, "", next);
     return next;
   });
-  const [message, setMessage] = useState<string | undefined>(undefined);
   const onToggle = (path: string) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -132,17 +133,13 @@ export function PreviewFileTree({ label, search, onContext }: { label: string; s
     ? filterPreviewNodes(PREVIEW_FILE_TREE, search)
     : PREVIEW_FILE_TREE;
   return (
-    <>
-      {message ? <div className="muted tiny" role="status" style={{ padding: "2px 12px 6px" }}>{message}</div> : null}
-      <div className="tree" role="tree" aria-label={`${label} 文件树`}>
-        <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={(path) => setMessage(`打开 ${path}`)} onAction={(path, action) => {
-          if (action === "context" || action === "context-dir") {
-            onContext?.(path, action === "context-dir" ? "dir" : "file");
-            setMessage(`已加入上下文：${path}`);
-          }
-        }} />
-      </div>
-    </>
+    <div className="tree" role="tree" aria-label={`${label} 文件树`}>
+      <TreeNodes nodes={visible} depth={0} prefix="" expanded={expanded} onToggle={onToggle} onFile={() => {}} onAction={(path, action) => {
+        if (action === "context" || action === "context-dir") {
+          onContext?.(path, action === "context-dir" ? "dir" : "file");
+        }
+      }} />
+    </div>
   );
 }
 

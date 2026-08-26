@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The managed Runtime pin is `can1357/oh-my-pi` `v17.3.7` at commit `8500092296621a6826b7136e840f8a59ea338958`. The initial audited baseline was `45e12e5bb758198a920c6070e7e64cb33b21beac`.
+The managed Runtime pin is `can1357/oh-my-pi` `v18.0.3` at commit `160ed439ac0df594347e7d7018b813a7ffdb5e81`. The initial audited baseline was `45e12e5bb758198a920c6070e7e64cb33b21beac`.
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -63,9 +63,9 @@ Never run `git submodule update` while the fork is applied, and never use root-w
 
 ## Versioning
 
-`patches/series.json` records `patchsetVersion` explicitly and pairs it with `patchsetDigest`, a content hash over the overlay bytes and the seam patch bytes. The regen script advances the version only when that digest changes.
+`patches/series.json` records `patchsetVersion` explicitly and pairs it with `patchsetDigest`, a content hash over the overlay bytes and the seam patch bytes. Within one upstream release line, the regen script advances the version only when that digest changes. A newly pinned upstream release may intentionally start a fresh `studio.1` patchset because the complete Runtime version also includes the upstream version (for example, `18.0.3-studio.1`).
 
-The version is recorded rather than counted for a reason: it used to be derived from the number of patch files, so consolidating the series made the runtime version move *backwards* onto a directory name a user might already have installed. `derivePatchsetVersion` prefers the recorded field; the count remains only as a fallback for series files that predate it.
+The version is recorded rather than counted for a reason: it used to be derived from the number of patch files, so consolidating the series could reuse a Runtime directory name within the same upstream version. `derivePatchsetVersion` prefers the recorded field; the count remains only as a fallback for series files that predate it. Resetting to `studio.1` is allowed only when the upstream version component changes, so the complete installation directory remains unique.
 
 Artifact provenance covers both layers — `patchHashes` for the seam, `overlayHash` for the overlay. A digest over paths *and* contents means a rename changes provenance even when no byte of code did.
 

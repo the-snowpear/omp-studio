@@ -5,8 +5,8 @@
  * 角色 / Fallback 在模型配置页，能力启停在能力中心，子代理定义在模型配置
  * · 子代理，会话管理在历史页，Runtime / Bridge / 日志在诊断页。
  *
- * 数据面：真实模式读 appSettings 本地存储 + 审批模式（Host 快照）；
- * 预览模式读 preview/settingsPreview 演示值，演示控件只改本地 UI 状态。
+ * 数据面：真实模式读 appSettings 本地存储 + 审批模式（Host 快照），并可选接收
+ * Runtime settings snapshot；预览模式读 preview/settingsPreview 演示值，演示控件只改本地 UI 状态。
  */
 
 import { useEffect, useState } from "react";
@@ -16,13 +16,40 @@ import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_APP_SETTINGS, PREVIEW_APPROVAL_MODE, usePreviewAppSettings, useRuntimeDemo } from "./preview/settingsPreview";
 import { type AppSettings, useAppSettings } from "./settings/appSettings";
 import { SlidingTabs } from "./SlidingTabs";
-import { AdvancedTab, ContextTab, FilesTab, GeneralTab, InteractionTab, PermissionsTab, TasksTab, type ApprovalModeId, type RuntimeDemoApi, type SettingsCtl } from "./settings/tabs";
+import {
+  AdvancedTab,
+  ContextTab,
+  FilesTab,
+  GeneralTab,
+  InteractionTab,
+  PermissionsTab,
+  TasksTab,
+  type ApprovalModeId,
+  type RuntimeDemoApi,
+  type RuntimeSettingsCtl,
+  type SettingsCtl,
+} from "./settings/tabs";
+import type {
+  RuntimeSettingsReadModel,
+  StudioCompactionSpeculation,
+  StudioRuntimeSettingKey,
+  StudioRuntimeSettingValue,
+} from "@omp-studio/client-contract";
 
 export const SETTINGS_INTENT_KEY = "omp.settingsIntent";
 
 export type SettingsGroupId = "general" | "interaction" | "permissions" | "context" | "files" | "tasks" | "advanced";
 
 type GroupId = SettingsGroupId;
+
+/** Optional Runtime settings seam; App decides whether/how to persist writes. */
+export interface RuntimeSettingsApi {
+  readonly snapshot?: RuntimeSettingsReadModel;
+  readonly compactionSpeculation?: StudioCompactionSpeculation;
+  readonly pendingKey?: StudioRuntimeSettingKey;
+  readonly error?: string;
+  readonly onSet?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue) => void | Promise<void>;
+}
 
 const GROUP_IDS: ReadonlyArray<SettingsGroupId> = ["general", "interaction", "permissions", "context", "files", "tasks", "advanced"];
 
@@ -49,10 +76,13 @@ function takeSettingsIntent(): SettingsGroupId | null {
 export function SettingsPage({
   approvalMode,
   onSetApprovalMode,
+  runtimeSettings,
 }: {
   /** 当前 Runtime 审批模式；undefined = 无 Runtime 快照。 */
   approvalMode?: ApprovalModeId;
   onSetApprovalMode: (mode: ApprovalModeId) => void;
+  /** Optional Runtime settings read/write surface; omitted on older Runtime versions. */
+  runtimeSettings?: RuntimeSettingsApi;
 }) {
   const { t } = useI18n();
   const groups: ReadonlyArray<readonly [GroupId, string, string]> = [
@@ -74,6 +104,8 @@ export function SettingsPage({
   const previewApp = usePreviewAppSettings();
   const rawRuntimeDemo = useRuntimeDemo();
   const [flash, setFlash] = useState<string | null>(null);
+  const [runtimePendingKey, setRuntimePendingKey] = useState<StudioRuntimeSettingKey | undefined>(undefined);
+  const [runtimeWriteError, setRuntimeWriteError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (flash === null) return;
@@ -97,6 +129,30 @@ export function SettingsPage({
       },
     }
     : undefined;
+
+  const setDemoRuntimeSetting = (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue): void => {
+    if (!demoRuntime) return;
+    if (typeof value === "boolean") {
+      if (demoRuntime.flag(key) !== value) demoRuntime.toggle(key);
+      else flashDemo();
+      return;
+    }
+    demoRuntime.setValue(key, Array.isArray(value) ? value.join(",") : String(value));
+  };
+
+  const setRealRuntimeSetting = async (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue): Promise<void> => {
+    const onSet = runtimeSettings?.onSet;
+    if (!onSet) return;
+    setRuntimeWriteError(undefined);
+    setRuntimePendingKey(key);
+    try {
+      await onSet(key, value);
+    } catch (error) {
+      setRuntimeWriteError(error instanceof Error && error.message.length > 0 ? error.message : t("settings.runtime.writeError"));
+    } finally {
+      setRuntimePendingKey((current) => current === key ? undefined : current);
+    }
+  };
 
   const ctl: SettingsCtl = preview
     ? {
@@ -125,6 +181,25 @@ export function SettingsPage({
       approvalMode,
       setApprovalMode: onSetApprovalMode,
     };
+
+  let runtime: RuntimeSettingsCtl = { preview: false };
+  if (preview) {
+    runtime = {
+      preview: true,
+      compactionSpeculation: "armed",
+      set: setDemoRuntimeSetting,
+    };
+  } else {
+    if (runtimeSettings?.snapshot !== undefined) runtime = { ...runtime, snapshot: runtimeSettings.snapshot };
+    if (runtimeSettings?.compactionSpeculation !== undefined) runtime = { ...runtime, compactionSpeculation: runtimeSettings.compactionSpeculation };
+    const pendingKey = runtimeSettings?.pendingKey ?? runtimePendingKey;
+    if (pendingKey !== undefined) runtime = { ...runtime, pendingKey };
+    const error = runtimeSettings?.error ?? runtimeWriteError;
+    if (error !== undefined) runtime = { ...runtime, error };
+    if (runtimeSettings?.onSet !== undefined) {
+      runtime = { ...runtime, set: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue) => { void setRealRuntimeSetting(key, value); } };
+    }
+  }
 
   const pane = (id: GroupId) => ({
     className: `set-group ${tabPaneClass(tabPaneRole(id, incoming, outgoing, live), dir)}`,
@@ -162,16 +237,16 @@ export function SettingsPage({
             <PermissionsTab ctl={ctl} demo={demoRuntime} />
           </div>
           <div {...pane("context")} id="set-context" role="tabpanel" aria-labelledby="setTab-context" tabIndex={0}>
-            <ContextTab demo={demoRuntime} />
+            <ContextTab demo={demoRuntime} runtime={runtime} />
           </div>
           <div {...pane("files")} id="set-files" role="tabpanel" aria-labelledby="setTab-files" tabIndex={0}>
-            <FilesTab demo={demoRuntime} />
+            <FilesTab demo={demoRuntime} runtime={runtime} />
           </div>
           <div {...pane("tasks")} id="set-tasks" role="tabpanel" aria-labelledby="setTab-tasks" tabIndex={0}>
-            <TasksTab demo={demoRuntime} />
+            <TasksTab demo={demoRuntime} runtime={runtime} />
           </div>
           <div {...pane("advanced")} id="set-advanced" role="tabpanel" aria-labelledby="setTab-advanced" tabIndex={0}>
-            <AdvancedTab demo={demoRuntime} />
+            <AdvancedTab demo={demoRuntime} runtime={runtime} />
           </div>
         </div>
       </div>

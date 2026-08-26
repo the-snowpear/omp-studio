@@ -11,6 +11,7 @@ import {
   WORKSPACE_SHELL_IPC_CHANNELS,
   parseResolveDroppedPathsInput,
   parseWorkspaceShellInput,
+  type PlanSavePathPickResult,
   type ResolvedDroppedPath,
   type WorkspaceShellEditorResult,
 } from "./workspace-shell-shared.js";
@@ -34,6 +35,8 @@ export interface WorkspaceShellActions {
   openInExternalEditor(cwd: string): Promise<WorkspaceShellEditorResult>;
   revealInFileManager(cwd: string): Promise<void>;
   resolveDroppedPaths(cwd: string, paths: readonly string[]): Promise<ReadonlyArray<ResolvedDroppedPath>>;
+  /** Native save-as picker for plans; Main owns the dialog and the cwd. */
+  pickPlanSavePath(cwd: string): Promise<PlanSavePathPickResult>;
 }
 
 export interface WorkspaceShellIpcOptions {
@@ -63,6 +66,7 @@ export function registerWorkspaceShellIpc(options: WorkspaceShellIpcOptions): Wo
   ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor);
   ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.revealInFileManager);
   ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.resolveDroppedPaths);
+  ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.pickPlanSavePath);
 
   ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor, async (event, payload) => {
     assertTrusted(event.sender);
@@ -83,11 +87,18 @@ export function registerWorkspaceShellIpc(options: WorkspaceShellIpcOptions): Wo
     return await options.actions.resolveDroppedPaths(cwd, input.paths);
   });
 
+  ipc.handle(WORKSPACE_SHELL_IPC_CHANNELS.pickPlanSavePath, async (event, payload) => {
+    assertTrusted(event.sender);
+    const cwd = await resolveCwd(payload);
+    return await options.actions.pickPlanSavePath(cwd);
+  });
+
   return Object.freeze({
     dispose(): void {
       ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.openInEditor);
       ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.revealInFileManager);
       ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.resolveDroppedPaths);
+      ipc.removeHandler(WORKSPACE_SHELL_IPC_CHANNELS.pickPlanSavePath);
     },
   });
 }

@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { constants as fsConstants } from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { CompactionCancelledError } from "@oh-my-pi/pi-agent-core/compaction";
@@ -10,9 +12,11 @@ import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import { parseStudioRequest } from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
 import {
+	resolveStudioPlanSavePath,
 	StudioModeControlService,
 	StudioModeError,
 } from "@oh-my-pi/pi-coding-agent/studio/services/mode-control-service";
+import { StudioRuntimeSettingsService } from "@oh-my-pi/pi-coding-agent/studio/services/runtime-settings-service";
 import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-coding-agent/tools/resolve";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -204,6 +208,89 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		await expect(service.openPlanReview()).rejects.toMatchObject({
 			code: "COMMAND_BLOCKED",
 			message: "Plan mode is not active",
+		});
+	});
+
+	test("saveAndQuit writes the complete pending plan and starts a new session", async () => {
+		const { body } = await armPlanReview();
+		const previousSessionId = session.sessionManager.getSessionId();
+		const result = await service.savePlanAndQuit("saved-plan.md");
+		expect(result).toMatchObject({ saved: true, path: "saved-plan.md", exitedPlan: true, newSession: "started" });
+		expect(result.sessionId).not.toBe(previousSessionId);
+		expect(await Bun.file(path.join(tempDir.path(), "saved-plan.md")).text()).toBe(body);
+		expect(session.getPlanModeState()).toBeUndefined();
+	});
+
+	test("saveAndQuit reports a hook-cancelled new session after saving and exiting Plan", async () => {
+		const { body } = await armPlanReview();
+		session.newSession = mock(async () => false);
+		const result = await service.savePlanAndQuit("cancelled-plan.md");
+		expect(result).toMatchObject({
+			saved: true,
+			path: "cancelled-plan.md",
+			exitedPlan: true,
+			newSession: "cancelled",
+		});
+		expect(await Bun.file(path.join(tempDir.path(), "cancelled-plan.md")).text()).toBe(body);
+		expect(session.getPlanModeState()).toBeUndefined();
+	});
+
+	test("saveAndQuit reports a partial result when new session creation throws", async () => {
+		const { body } = await armPlanReview();
+		session.newSession = mock(async () => {
+			throw new Error("synthetic new-session failure");
+		});
+		const result = await service.savePlanAndQuit("failed-plan.md");
+		expect(result).toMatchObject({ saved: true, path: "failed-plan.md", exitedPlan: true, newSession: "failed" });
+		expect(await Bun.file(path.join(tempDir.path(), "failed-plan.md")).text()).toBe(body);
+		expect(session.getPlanModeState()).toBeUndefined();
+	});
+
+	test("saveAndQuit refuses a final symlink when the platform provides O_NOFOLLOW", async () => {
+		if (!fsConstants.O_NOFOLLOW) return;
+		await armPlanReview();
+		const outside = path.join(tempDir.path(), "outside");
+		await fs.mkdir(outside, { recursive: true });
+		const target = path.join(outside, "target.md");
+		await Bun.write(target, "outside content");
+		const link = path.join(tempDir.path(), "linked-plan.md");
+		try {
+			await fs.symlink(target, link);
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "EACCES" || code === "EPERM" || code === "ENOTSUP") return;
+			throw error;
+		}
+		await expect(service.savePlanAndQuit("linked-plan.md")).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+		expect(await Bun.file(target).text()).toBe("outside content");
+	});
+
+	test("saveAndQuit path validation rejects absolute and traversal inputs", () => {
+		expect(() => resolveStudioPlanSavePath("../escape.md", tempDir.path())).toThrow(StudioModeError);
+		expect(() => resolveStudioPlanSavePath("C:\\escape.md", tempDir.path())).toThrow(StudioModeError);
+		expect(() => resolveStudioPlanSavePath("/escape.md", tempDir.path())).toThrow(StudioModeError);
+		expect(() => resolveStudioPlanSavePath(".", tempDir.path())).toThrow(StudioModeError);
+		expect(() => resolveStudioPlanSavePath(" plans/plan.md ", tempDir.path())).toThrow(StudioModeError);
+		expect(() => resolveStudioPlanSavePath('"plans/plan.md"', tempDir.path())).toThrow(StudioModeError);
+		expect(() => resolveStudioPlanSavePath("'plans/plan.md'", tempDir.path())).toThrow(StudioModeError);
+		expect(resolveStudioPlanSavePath("./notes/plan.md", tempDir.path()).relativePath).toBe("notes/plan.md");
+	});
+
+	test("Runtime settings expose only the typed allowlist and use Settings persistence", async () => {
+		const runtimeSettings = new StudioRuntimeSettingsService(session);
+		expect(runtimeSettings.get(["edit.autoRepair.enabled", "extendedContext"]).values).toEqual({
+			"edit.autoRepair.enabled": false,
+			extendedContext: true,
+		});
+		await runtimeSettings.set("edit.autoRepair.enabled", true, false);
+		expect(session.settings.get("edit.autoRepair.enabled")).toBe(true);
+		await runtimeSettings.set("edit.autoRepair.enabled", false, true);
+		expect(session.settings.get("edit.autoRepair.enabled")).toBe(false);
+		await expect(runtimeSettings.set("edit.autoRepair.enabled", "yes", false)).rejects.toMatchObject({
+			code: "INVALID_ARGUMENT",
+		});
+		await expect(runtimeSettings.set("not-exposed", true, false)).rejects.toMatchObject({
+			code: "INVALID_ARGUMENT",
 		});
 	});
 

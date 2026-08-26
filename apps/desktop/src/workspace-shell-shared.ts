@@ -11,6 +11,7 @@ export const WORKSPACE_SHELL_IPC_CHANNELS = {
   openInEditor: "omp-studio:desktop:workspace-open-in-editor",
   revealInFileManager: "omp-studio:desktop:workspace-reveal-in-file-manager",
   resolveDroppedPaths: "omp-studio:desktop:workspace-resolve-dropped-paths",
+  pickPlanSavePath: "omp-studio:desktop:workspace-pick-plan-save-path",
 } as const;
 
 /** Opaque workspace ids are Host-generated base64url tokens (or test ids). */
@@ -27,6 +28,17 @@ export interface WorkspaceShellInput {
 export type WorkspaceShellEditorResult =
   | { readonly status: "opened"; readonly editorName?: string }
   | { readonly status: "cancelled" };
+
+/**
+ * Result of the plan save-as picker (native dialog in Main). `picked`
+ * carries a workspace-relative path with forward slashes, ready for the
+ * Studio Bridge `mode.plan.review.saveAndQuit` command; `outside-workspace`
+ * means the operator chose a location outside the Host workspace root.
+ */
+export type PlanSavePathPickResult =
+  | { readonly status: "picked"; readonly relativePath: string }
+  | { readonly status: "cancelled" }
+  | { readonly status: "outside-workspace"; readonly fileName: string };
 
 export class WorkspaceShellIpcError extends Error {
   constructor(message: string) {

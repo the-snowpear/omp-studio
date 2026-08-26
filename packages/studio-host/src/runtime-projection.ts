@@ -8,7 +8,7 @@ import type {
   SessionTelemetryEvent,
 } from "@omp-studio/studio-protocol";
 
-export type RuntimeEventApplyResult = "applied" | "stale" | "gap" | "snapshot-required";
+export type RuntimeEventApplyResult = "applied" | "applied-unprojected" | "stale" | "gap" | "snapshot-required";
 
 type StateChangedEvent = { kind: "state.changed"; snapshot: OperatorStateSnapshot };
 type TelemetryChangedEvent = SessionTelemetryEvent;
@@ -69,6 +69,7 @@ export class RuntimeProjection {
       return "gap";
     }
     if (Number(envelope.stateVersion) < Number(snapshot.stateVersion)) return "stale";
+    let projectionChanged = false;
     if (isStateChangedEvent(envelope.event)) {
       if (
         envelope.event.snapshot.runtimeId !== snapshot.runtimeId ||
@@ -79,6 +80,7 @@ export class RuntimeProjection {
         return "gap";
       }
       this.#snapshot = structuredClone(envelope.event.snapshot);
+      projectionChanged = true;
     } else if (isTelemetryChangedEvent(envelope.event)) {
       if (envelope.event.sessionId !== snapshot.sessionId || envelope.event.telemetry.sessionId !== snapshot.sessionId) {
         // Event sequence is runtime-wide. A late telemetry event from the
@@ -88,9 +90,10 @@ export class RuntimeProjection {
         return "stale";
       }
       this.#snapshot = { ...snapshot, telemetry: structuredClone(envelope.event.telemetry) };
+      projectionChanged = true;
     }
     this.#lastEventSeq = envelope.eventSeq;
-    return "applied";
+    return projectionChanged ? "applied" : "applied-unprojected";
   }
 
   snapshot(): OperatorStateSnapshot | undefined {

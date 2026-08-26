@@ -11,9 +11,15 @@ import type {
   HostSessionCatalogProvider,
 } from "@omp-studio/host-client-api";
 import { threadIdFor, formatRuntimeMissingMessage, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
-import { scanSessionCatalog, StudioHostError, type StudioSessionArchiveService } from "@omp-studio/studio-host";
+import { scanSessionCatalog, StudioHostError, removeSessionPin, type StudioSessionArchiveService, type StudioSessionDeleteService } from "@omp-studio/studio-host";
 import type { ApprovalMode, RequestId, StudioOperation, ThreadId } from "@omp-studio/studio-protocol";
-import type { ConfigWriteResult } from "@omp-studio/client-contract";
+import type {
+  ConfigWriteResult,
+  StudioPlanSaveAndQuitResult,
+  StudioRuntimeSettingsGetResult,
+  StudioRuntimeSettingsSetResult,
+  WorkspaceId,
+} from "@omp-studio/client-contract";
 
 import type { DesktopRuntimeSession, DesktopRuntimeSessionPort } from "./host-composition.js";
 import type { DesktopInteractionHost } from "./interaction-host.js";
@@ -73,10 +79,24 @@ export function fencesOnStateVersion(kind: StudioOperation["kind"]): boolean {
   return !LIVE_TURN_OPERATION_KINDS.has(kind);
 }
 
-export function createWorkspaceSessionCatalog(getCwd: () => string | undefined): HostSessionCatalogProvider {
+export function createWorkspaceSessionCatalog(
+  getCwd: () => string | undefined,
+  resolveWorkspaceCwd?: (workspaceId: WorkspaceId) => string | undefined | Promise<string | undefined>,
+): HostSessionCatalogProvider {
   return {
-    async list(): Promise<HostCatalogEntry[]> {
-      const cwd = getCwd();
+    async list(input?: { readonly workspaceId?: WorkspaceId }): Promise<HostCatalogEntry[]> {
+      let cwd: string | undefined;
+      if (input?.workspaceId !== undefined) {
+        if (resolveWorkspaceCwd === undefined) {
+          throw new StudioHostError("INVALID_ARGUMENT", "History workspace is not available on this Host");
+        }
+        cwd = await resolveWorkspaceCwd(input.workspaceId);
+        if (cwd === undefined) {
+          throw new StudioHostError("INVALID_ARGUMENT", "Unknown workspace id");
+        }
+      } else {
+        cwd = getCwd();
+      }
       if (cwd === undefined) return [];
       const result = await scanSessionCatalog({ includeCliSessions: true, allowedCwd: cwd });
       return result.sessions.map((entry) => ({
@@ -84,6 +104,7 @@ export function createWorkspaceSessionCatalog(getCwd: () => string | undefined):
         modifiedAt: entry.modifiedAt,
         messageCount: 0,
         status: (entry.archived ? "archived" : "active") as HostCatalogEntry["status"],
+        pinned: entry.pinned,
         ...(entry.title === undefined ? {} : { title: entry.title }),
         ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
       }));
@@ -96,6 +117,16 @@ export function createDesktopSemanticCommands(options: {
   readonly catalog: HostSessionCatalogProvider;
   /** Lazy factory: the archive service is rebuilt when the workspace changes. */
   readonly archive?: () => StudioSessionArchiveService;
+  /** Lazy factory: the delete service is rebuilt when the workspace changes. */
+  readonly deleteService?: () => StudioSessionDeleteService;
+  /** Lazy telemetry store so deleted sessions leave no telemetry record. */
+  readonly telemetryStore?: () => { readonly remove?: (sessionId: string) => Promise<void> | void };
+  /** Thread -> Runtime binding registry; the deleted thread's entry is removed. */
+  readonly bindings?: { readonly unbind: (threadId: ThreadId) => Promise<void> | void };
+  /** Durable session-lease store; stale lease files are removed with the session. */
+  readonly leaseStore?: { readonly removeForSession: (sessionId: string) => Promise<void> | void };
+  /** Resolves the OMP agent dir holding the global pin file. */
+  readonly agentDir?: () => string;
   readonly switchSession?: DesktopRuntimeSessionPort["switchSession"];
   readonly applyApprovalMode?: DesktopRuntimeSessionPort["applyApprovalMode"];
   readonly evacuateResident?: DesktopRuntimeSessionPort["evacuateResident"];
@@ -136,6 +167,25 @@ export function createDesktopSemanticCommands(options: {
             return { applied: true, runtimeEffect: "immediate", message: "Session restored from the archive" };
           },
         }),
+    delete: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
+      if (options.deleteService === undefined) {
+        throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Session deletion is not available on this Host");
+      }
+      const sessionId = await resolveCatalogSessionId(options.catalog, threadId);
+      // Abort a streaming turn and switch the Runtime off this file so the
+      // transcript can be removed while no Worker holds it.
+      await releaseResidentSession(options, sessionId);
+      await options.deleteService().delete(sessionId);
+      // Best-effort residue cleanup: the transcript/artifacts are the primary
+      // object; a failing related-record removal must not fail the delete.
+      await Promise.resolve(options.telemetryStore?.().remove?.(sessionId)).catch(() => undefined);
+      await Promise.resolve(options.bindings?.unbind(threadId)).catch(() => undefined);
+      await Promise.resolve(options.leaseStore?.removeForSession(sessionId)).catch(() => undefined);
+      if (options.agentDir !== undefined) {
+        await Promise.resolve(removeSessionPin(sessionId, options.agentDir())).catch(() => undefined);
+      }
+      return { applied: true, runtimeEffect: "immediate", message: "Session deleted" };
+    },
     create: async () => {
       if (options.switchSession === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Fresh Runtime sessions are not available");
@@ -312,6 +362,24 @@ export function createDesktopSemanticCommands(options: {
           ...(typeof carried.newLeafId === "string" ? { newLeafId: carried.newLeafId } : {}),
           ...(typeof carried.reason === "string" ? { reason: carried.reason } : {}),
         };
+      }
+      if (operation.kind === "runtime.settings.get") {
+        if (receipt.result === undefined || receipt.result === null || typeof receipt.result !== "object" || Array.isArray(receipt.result)) {
+          throw new StudioHostError("INTERNAL_ERROR", "Runtime did not return runtime settings");
+        }
+        return receipt.result as StudioRuntimeSettingsGetResult;
+      }
+      if (operation.kind === "runtime.settings.set") {
+        if (receipt.result === undefined || receipt.result === null || typeof receipt.result !== "object" || Array.isArray(receipt.result)) {
+          throw new StudioHostError("INTERNAL_ERROR", "Runtime did not return the updated runtime setting");
+        }
+        return receipt.result as StudioRuntimeSettingsSetResult;
+      }
+      if (operation.kind === "mode.plan.review.saveAndQuit") {
+        if (receipt.result === undefined || receipt.result === null || typeof receipt.result !== "object" || Array.isArray(receipt.result)) {
+          throw new StudioHostError("INTERNAL_ERROR", "Runtime did not return the plan save result");
+        }
+        return receipt.result as StudioPlanSaveAndQuitResult;
       }
       return latest;
     },

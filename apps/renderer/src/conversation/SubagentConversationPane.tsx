@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { SessionId } from "@omp-studio/client-contract";
 import { ChipComposer } from "../composer/ChipComposer";
 import type { MentionCandidate } from "../composer/types";
@@ -60,6 +60,11 @@ export function SubagentConversationPane({
   const composerDomId = composerId ?? `subagentComposer${generatedId}`;
   const hintId = `${composerDomId}Hint`;
   const scrollerRef = useRef<HTMLElement | null>(null);
+  const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
+  const bindScroller = useCallback((node: HTMLElement | null) => {
+    scrollerRef.current = node;
+    setScrollParent((current) => current === node ? current : node);
+  }, []);
   const snapshot = useSubagentConversation({
     preview,
     client,
@@ -100,6 +105,12 @@ export function SubagentConversationPane({
     prevLoading.current = snapshot.loadingOlder;
   }, [snapshot.loadingOlder, scroll]);
 
+  /* Anchor on the click, before the prepended page can reach the DOM. */
+  function loadOlder(): void {
+    scroll.preparePrepend();
+    snapshot.loadOlder();
+  }
+
   useEffect(() => {
     if (autoFocusComposer !== true || !composerAllowed) return;
     composer.composerRef.current?.focus({ preventScroll: true });
@@ -110,7 +121,7 @@ export function SubagentConversationPane({
     <div className={`subagent-convo${composerAllowed ? " has-composer" : ""}`}>
       <section
         className="sa-inspect-scroll"
-        ref={scrollerRef}
+        ref={bindScroller}
         tabIndex={-1}
         aria-label="子 Agent 对话"
         onScroll={scroll.onScroll}
@@ -126,7 +137,7 @@ export function SubagentConversationPane({
           ) : null}
           {state.hasMoreBefore && state.hydrateStatus === "ready" ? (
             <div className="convo-load-earlier">
-              <button type="button" className="btn small outline" disabled={snapshot.loadingOlder} onClick={snapshot.loadOlder}>
+              <button type="button" className="btn small outline" disabled={snapshot.loadingOlder} onClick={loadOlder}>
                 {snapshot.loadingOlder ? "正在加载更早消息…" : "加载更早消息"}
               </button>
             </div>
@@ -137,7 +148,7 @@ export function SubagentConversationPane({
               <p>正在读取子 Agent 对话…</p>
             </div>
           ) : (
-            <ConvoTranscript rows={snapshot.rows} {...(snapshot.demo ? { demo: true } : {})} />
+            <ConvoTranscript rows={snapshot.rows} scrollParent={scrollParent} {...(snapshot.demo ? { demo: true } : {})} />
           )}
           {state.hydrateStatus === "resyncing" ? (
             <div className="convo-notice info" role="status">正在同步</div>

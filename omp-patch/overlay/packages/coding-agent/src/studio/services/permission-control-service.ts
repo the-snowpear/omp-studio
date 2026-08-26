@@ -43,7 +43,10 @@ export class StudioPermissionControlService {
 		return this.#pending?.mode ?? readApprovalMode(this.session.settings);
 	}
 
-	async setMode(mode: StudioApprovalMode, persist: boolean): Promise<{ mode: StudioApprovalMode; persisted: boolean }> {
+	async setMode(
+		mode: StudioApprovalMode,
+		persist: boolean,
+	): Promise<{ mode: StudioApprovalMode; persisted: boolean }> {
 		if (mode !== "always-ask" && mode !== "write" && mode !== "yolo") {
 			throw new StudioPermissionControlError("INVALID_ARGUMENT", `Unsupported approval mode: ${mode}`);
 		}

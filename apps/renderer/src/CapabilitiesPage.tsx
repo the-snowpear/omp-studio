@@ -7,6 +7,7 @@ import type {
   McpTestResult,
   StudioClient,
 } from "@omp-studio/client-contract";
+import type { OperatorCommandManifest } from "@omp-studio/studio-protocol";
 import { Icon } from "./icons";
 import { ToastHost } from "./ToastHost";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
@@ -19,9 +20,9 @@ import {
   type PreviewSlash,
 } from "./capabilitiesPreview";
 import {
+  mergeSlashCatalogWithManifest,
   lookupSlashCommand,
   slashNeedsArgs,
-  visibleSlashCatalog,
   type StudioSlashCommand,
 } from "./composer/commands";
 import { pluginToPreview, skillToPreview } from "./extensibilityMap";
@@ -67,7 +68,7 @@ function slashToPreview(t: TFunc, command: StudioSlashCommand): PreviewSlash {
   return {
     name: `/${command.name}`,
     desc: command.description,
-    src: t("capabilities.scopeBuiltin"),
+    src: command.source === undefined || command.source === "builtin" ? t("capabilities.scopeBuiltin") : command.source,
     args: command.hint ?? "",
     ok: command.availability === "available",
   };
@@ -208,9 +209,12 @@ function formatMcpSourceLabel(label: string | undefined, t: (k: string) => strin
 export function CapabilitiesPage({
   client,
   onRunSlash,
+  onPinCompleted,
 }: {
   client: StudioClient;
   onRunSlash?: (command: StudioSlashCommand, args: string) => Promise<boolean>;
+  /** Called after App has received the authoritative `/pin` receipt. */
+  onPinCompleted?: () => Promise<void>;
 }) {
   const { t } = useI18n();
   const { preview } = usePreviewMode();
@@ -219,6 +223,7 @@ export function CapabilitiesPage({
   const [plugins, setPlugins] = useState<PluginPreview[]>(() => preview ? previewPlugins() : []);
   const [mcp, setMcp] = useState<PreviewMcp[]>(() => preview ? createPreviewMcp() : []);
   const [mcpServers, setMcpServers] = useState<McpServerRecord[]>([]);
+  const [commandManifest, setCommandManifest] = useState<OperatorCommandManifest | undefined>();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -242,9 +247,13 @@ export function CapabilitiesPage({
     slashComposer: t("composer.paramPlaceholder"),
   };
 
+  const slashCatalog = useMemo(
+    () => (preview ? [] : mergeSlashCatalogWithManifest(commandManifest)),
+    [commandManifest, preview],
+  );
   const slash = useMemo(
-    () => (preview ? createPreviewSlashCommands() : visibleSlashCatalog().map((command) => slashToPreview(t, command))),
-    [preview, t],
+    () => (preview ? createPreviewSlashCommands() : slashCatalog.map((command) => slashToPreview(t, command))),
+    [preview, slashCatalog, t],
   );
 
   const refresh = useCallback(async () => {
@@ -253,27 +262,36 @@ export function CapabilitiesPage({
       setPlugins(previewPlugins());
       setMcp(createPreviewMcp());
       setMcpServers([]);
+      setCommandManifest(undefined);
       setLoadError(null);
       return;
     }
-    try {
-      const [skillsNext, mcpNext] = await Promise.all([
-        client.query("skills.get", {}),
-        client.query("mcp.get", {}),
-      ]);
-      setSkills(skillsNext.skills.map(skillToPreview));
-      setPlugins(skillsNext.plugins.map(pluginToPreview));
-      setMcp([]);
-      setMcpServers([...mcpNext.servers]);
-      setLoadError(skillsNext.unavailableReason ?? mcpNext.unavailableReason ?? null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "skills.get / mcp.get failed";
+    const [skillsResult, mcpResult, manifestResult] = await Promise.allSettled([
+      client.query("skills.get", {}),
+      client.query("mcp.get", {}),
+      client.query("commands.getManifest", {}),
+    ]);
+    if (skillsResult.status === "fulfilled") {
+      setSkills(skillsResult.value.skills.map(skillToPreview));
+      setPlugins(skillsResult.value.plugins.map(pluginToPreview));
+    } else {
       setSkills([]);
       setPlugins([]);
+    }
+    if (mcpResult.status === "fulfilled") {
+      setMcp([]);
+      setMcpServers([...mcpResult.value.servers]);
+    } else {
       setMcp([]);
       setMcpServers([]);
-      setLoadError(message);
     }
+    setCommandManifest(manifestResult.status === "fulfilled" ? manifestResult.value : undefined);
+    const loadError = skillsResult.status === "rejected"
+      ? (skillsResult.reason instanceof Error ? skillsResult.reason.message : "skills.get failed")
+      : mcpResult.status === "rejected"
+        ? (mcpResult.reason instanceof Error ? mcpResult.reason.message : "mcp.get failed")
+        : skillsResult.value.unavailableReason ?? mcpResult.value.unavailableReason ?? null;
+    setLoadError(loadError);
   }, [client, preview]);
 
   useEffect(() => {
@@ -422,11 +440,12 @@ export function CapabilitiesPage({
       toast(t("capabilities.demoRanSlash", { name: row.name }));
       return;
     }
-    const command = lookupSlashCommand(slashBareName(row.name));
+    const command = lookupSlashCommand(slashBareName(row.name), slashCatalog);
     if (command === undefined || onRunSlash === undefined) return;
     if (slashNeedsArgs(command, "")) return;
     try {
-      await onRunSlash(command, "");
+      const ok = await onRunSlash(command, "");
+      if (ok && command.name === "pin") await onPinCompleted?.();
     } catch (error) {
       toast(hostErrorMessage(error, t("capabilities.runSlashFailed", { name: row.name })));
     }
@@ -863,7 +882,7 @@ export function CapabilitiesPage({
         />
         <div className="cap-slash-list">
           {slash.map((command) => {
-            const catalog = preview ? undefined : lookupSlashCommand(slashBareName(command.name));
+            const catalog = preview ? undefined : lookupSlashCommand(slashBareName(command.name), slashCatalog);
             const needsArgs = catalog !== undefined && slashNeedsArgs(catalog, "");
             const canRun = preview
               ? command.ok

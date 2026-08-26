@@ -55,6 +55,7 @@ import {
 import { registerWorkspaceShellIpc } from "./workspace-shell-ipc.js";
 import type { WorkspaceShellEditorResult } from "./workspace-shell-shared.js";
 import { resolveDroppedPaths } from "./dropped-paths.js";
+import { planSaveRelativeTarget } from "./plan-save-path.js";
 import { registerTerminalIpc } from "./terminal-ipc.js";
 import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js";
 
@@ -292,6 +293,17 @@ export async function main(): Promise<void> {
           if (error.length > 0) throw new Error(error);
         },
         resolveDroppedPaths: (cwd, paths) => resolveDroppedPaths(cwd, paths),
+        async pickPlanSavePath(cwd) {
+          const picked = await dialog.showSaveDialog({
+            title: "保存计划",
+            defaultPath: join(cwd, "PLAN.md"),
+            filters: [{ name: "Markdown", extensions: ["md"] }],
+          });
+          if (picked.canceled || picked.filePath === undefined || picked.filePath.length === 0) {
+            return { status: "cancelled" };
+          }
+          return planSaveRelativeTarget(cwd, picked.filePath);
+        },
       },
     });
     const disposeAppUpdate = registerChromeAppUpdateIpc({

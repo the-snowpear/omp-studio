@@ -46,10 +46,11 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 |---|---|---|
 | 挂载 / 无 Host 空态 | `apps/renderer/src/main.tsx` | `StudioClientImpl` + `createDesktopTransport`；缺桥则 `Unavailable` |
 | 壳布局、侧栏、底栏、路由 | `apps/renderer/src/App.tsx` | 工作台主文件；Explorer 真树 `RealFileTree` 也在这里 |
+| 会话行 ⋯ 菜单 / 行右键 | `apps/renderer/src/App.tsx`（`ThreadRowMenu` / `ThreadActionMenuItems` / `runThreadRowAction`） | 顶栏「对话选项」同款七项（弹层 208px 稍窄）；⋯ 点击锚按钮、行右键贴光标，同一弹层；作用于所在行会话：非当前会话先 `openHistoryEntry`（`resumeForAction`，必要时切工作区并 resume）再执行；预览演示行会话动作禁用（写表面不伪造目标）；临时行仅当为当前活动会话时可用，草稿行保留原生右键 |
 | 悬停 tip | `apps/renderer/src/TipHost.tsx` | `[data-tip]` 门户气泡；不用原生 `title`；文案短词，未实现加「（暂未实现）」 |
 | 首页 | `apps/renderer/src/HomePage.tsx` | `home.get` / `usage.get` / 历史入口 |
 | 首页身份 / 头像 | `apps/renderer/src/settings/operatorProfile.ts`、`avatarCrop.ts`、`AvatarCropDialog.tsx`、`HomePage.tsx`；桌面 `chrome-profile.ts` | 显示名本地记忆；选图后圆形裁切；头像写入 `%APPDATA%\omp-studio\profile\`（覆盖，无历史）；NSIS 卸载删除 |
-| 历史 | `apps/renderer/src/HistoryPage.tsx` | `history.list`、resume / archive / drop |
+| 历史 / 项目会话缓存 | `apps/renderer/src/HistoryPage.tsx`、`sidebar/useProjectHistories.ts`、`sidebar/provisionalThread.ts`、`studio-host/src/session-catalog.ts` | `history.list`；侧栏按 `workspaceId` 独立加载 / 分页 / 刷新；只有 title/session/model/thinking 元数据、尚无 `message` 的空白 JSONL 不进入历史；草稿非空或提示词已发送时显示 Renderer 临时行，正式 LLM 标题到达后按 `sessionId` 接管；归档成功的 `sessionId` 会阻止迟到的 Workbench 状态复活临时行；resume / archive / drop / delete（历史页「⋮ → 删除会话」走 `session.delete`，Host 清 transcript/artifacts/遥测/绑定/租约/pin 残留） |
 | 命令面板 | `apps/renderer/src/CommandPalette.tsx`、`commandPaletteCatalog.ts` | 动作目录与路由 |
 | 主题 / 密度 / 上次路由 / 浮窗几何 | `apps/renderer/src/settings/appSettings.ts` | 本地 UI 记忆，不进 Host；BTW 几何在 `LayoutMemory` |
 | 进入应用提示（尚未完成） | `apps/renderer/src/StartupNotice.tsx`、`settings/startupNotice.ts` | 中文全局弹窗：项目 GitHub、关闭 / 不再提醒；「不再提醒」只写 localStorage，不进 Host；GitHub 卡点开走 `ompStudioChrome.openUrl` |
@@ -64,10 +65,13 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 对话 hook | `conversation/useConversation.ts` | 连 `StudioClient` |
 | 用户消息 Restore / 新会话 | `conversation/ConversationItemView.tsx`、`UserMessageBody.tsx`、`userMessageThumbs.ts`、`userMessageRestore.ts`、`UserMessageTreeConfirm.tsx`、`conversationEngine.ts`、`composer/serialize.ts` | 已发送用户气泡「恢复」（`undo` 图标）→ `session.tree.navigate`（leaf=该条 parent）；「新会话」（`branch` 图标）→ `session.tree.branch`（新 session 文件，切过去）。确认用应用内模态（归档同风格），不用 `window.confirm`。气泡仍画文件/技能/图片胶囊，配色与 Composer 同类胶囊一致（不刷成气泡白霜）。复制按钮与划选复制走序列化 `@` / `/skill:` / `[图N]`。图缩略图贴在气泡上方，点击预览；公开 transcript 仍剥图。预览字节落本机 IndexedDB（`omp-studio-ui` / `user-message-thumbs`），按 sessionId+itemId 重开会话仍能挂回缩略图，不进 Host。预览本地裁剪，不调 Host。busy 时 overlay 拒绝。`/branch` 提示点气泡，不打开 Changes。 |
 | 客户端对话状态 | `packages/client/src/conversation-reducer.ts`、`conversation-state.ts` | 不把 mock 写进 reducer |
+| 正文 markdown / 流式渲染 | `conversation/markdown.tsx`、`incrementalMarkdown.ts`、`magicKeywordMarkdown.tsx` | 非流式：整篇一次解析。流式：`IncrementalMarkdownBlocks` 冻结除尾部两块以外的顶层块，冻结块只解析 / 高亮一次并缓存元素，块之间补 `\n` 与整篇解析对齐 DOM；出现脚注 / 链接引用定义时退回整篇渲染。`MarkdownText` 与 `MessageBody` 都是 `memo` |
+| 快照行复用 / 渲染节流 | `conversation/rowReuse.ts`、`conversationEngine.ts`、`useConversation.ts`、`useStableCallback.ts` | 新旧快照结构比较后复用未变行（整条没变则连数组一起复用），memo 才生效；engine 通知按动画帧合并（首次同步 + 帧尾一次）；传进对话子树的回调用 `useStableCallback` 保持恒定引用 |
+| 会话切换加载 / 显示 | `conversation/sessionRowsCache.ts`、`progressiveRows.ts`、`useConversation.ts`、`conversationEngine.ts`、`App.tsx`（`selectedIsResident`） | 切回最近 5 条会话时先画上次的行（LRU，每条最多 60 行）并作为 `reuseTimelineRows` 基线，顶部照常「正在加载对话」；驻留会话在 `session.resume` 期间不读归档页（`activating` → `deferHydrate`，600ms 兜底回落），一次切换只读一遍 transcript；缩略图与 hydrate 同一次提交；首次挂载超过 16 行时按帧从尾部铺开 |
 | 活动行 / 暂停恢复 | `conversation/ActivityLine.tsx`、`activityStatus.ts` | `runtime.pause` / `resume` / `core.abort` |
-| 工具卡片 | `conversation/ToolBody.tsx`、`toolMeta.ts`、`bashDisplay.ts`、`useToolCardFollowScroll.tsx` | 工具展示元数据；bash 直播剥 ANSI / `\\r`；展开卡内流式输出跟底 |
+| 工具卡片 | `conversation/ToolBody.tsx`、`toolMeta.ts`、`bashDisplay.ts`、`useToolCardFollowScroll.tsx` | 工具展示元数据；bash 直播剥 ANSI / `\\r`；展开卡内流式输出跟底，卡内上滚同样按手势脱离（与对话区共用 `bindTailGestures`） |
 | 会话变更 | `conversation/SessionChanges.tsx`、`ChangesPanel.tsx`、`TurnDiffCard.tsx` | 本轮文件改动；对话 diff 卡「审核」跳到对应轮次 |
-| 滚动 / 小地图 | `useConversationScroll.ts`、`ConversationMinimap.tsx` | 贴底时跟 `contentKey` / 新行沉底；手动上滚后停住，点「回到最新」再跟 |
+| 滚动 / 小地图 | `useConversationScroll.ts`、`ConversationMinimap.tsx` | 贴底时跟 `contentKey` / 新行沉底；上滚**按手势**（wheel / ArrowUp·PageUp·Home / 触摸）立刻脱离，不等 scroll 事件——流式 tick 会先把视图写回底部；被工具卡内层滚动条吃掉的滚轮不算脱离。回到底部（≤1px）或滚回 72px 内自动重挂，也可点「回到最新」。「加载更早消息」在点击时抓锚点并主动脱离，页面前插后按首行 id 变化确认并还原阅读位置 |
 | 空态 / 最近会话 | `ConversationEmpty.tsx`、`emptyRecents.ts`、`welcomeGate.ts` | |
 | 瞬时状态 toast | `transientStatusNotice.ts` | 与持久诊断分开 |
 | 子代理对话 | `subagentConversationEngine.ts`、`useSubagentConversation.ts`、`SubagentConversationPane.tsx` | live `agent.conversation.read` 仅当 viewed session === live session 且 Runtime 已连接；否则 `session.transcript.readPage`（parent `sessionId` + `agentId`）。live 缺失（`AGENT_NOT_FOUND` / was not found）也回退归档。Hub/Inspect 底部 ChipComposer 走 `agent.send`（text + 可选 images）；左下附件按钮插入文件/图片胶囊 |
@@ -80,11 +84,11 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 模型 / 模式选择 | `ComposerModelPicker.tsx`、`ComposerModePicker.tsx` | `session.model.set`、`session.thinking.set`、plan/vibe |
 | 消息队列条 | `MessageQueueBar.tsx`、`composer/queueEdit.ts` | 流式 Enter 本地排队（按 session 隔离），idle 后 `core.prompt`；「插入纠偏」`core.steer`；`/queue` 为 `queue.enqueue`，带图片时改 `core.followUp`。编辑在 Composer 内进行，条目留队；编辑队首时暂停 flush |
 | 审批 / Ask 卡片 | `InteractionDeck.tsx`、`deck/ApprovalCard.tsx`、`deck/AskCard.tsx`、`deck/QueuedDeck.tsx`、`deck/askGenie.ts`、`deck/interactionGate.ts` | `interaction.respond`；Ask 紧凑卡/Ask 卡加载与退出为底边变形浮入（不改 Plan 放大缩小）。可见提问卡不复用 Composer `gated` |
-| Plan 评审 | `deck/PlanCard.tsx`、`deck/PlanCreatedCard.tsx`、`planSections.ts`、`planFeedback.ts`、`conversation/toolMeta.ts`（`xd://propose`） | 出现时保持紧凑卡，点放大或对话入口才展开大卡；大卡章节批注；大卡底栏常驻全文批注（整份计划）；大卡右上角仅叉号，点叉号收成紧凑卡；有意见 `mode.plan.review.respond` refine，空 Refine 走 dismiss 回 Composer；批准 `execute` 清上下文、`compact` 先压缩再执行、`keep` 保留上下文（`approve` 是 keep 别名）；钉在 `xd://propose` 所在 assistant 行（批准后不跟到最新轮）；执行后入口卡打开只读大卡回看正文，不再打 `mode.plan.review.open` |
+| Plan 评审 | `deck/PlanCard.tsx`、`deck/PlanCreatedCard.tsx`、`planSections.ts`、`planFeedback.ts`、`conversation/toolMeta.ts`（`xd://propose`） | 出现时保持紧凑卡，点放大或对话入口才展开大卡；紧凑卡与展开卡右上角均放「保存并退出」（能力存在时显示），不再占用底部评审操作区；大卡章节批注；大卡底栏常驻全文批注（整份计划）；大卡右上角叉号收成紧凑卡；有意见 `mode.plan.review.respond` refine，空 Refine 走 dismiss 回 Composer；批准 `execute` 清上下文、`compact` 先压缩再执行、`keep` 保留上下文（`approve` 是 keep 别名）；钉在 `xd://propose` 所在 assistant 行（批准后不跟到最新轮）；执行后入口卡打开只读大卡回看正文，不再打 `mode.plan.review.open` |
 | 权限档位 | `ComposerApprovalPicker.tsx`（`App.tsx` 接入） | `permissions.mode.set`；预览本地切换；历史会话先 `session.resume` 再 set；流式 / 压缩中可改，下一轮对话才写入 `tools.approvalMode` |
 | BTW 旁路问答 | `apps/renderer/src/btw/`（`BtwHost.tsx`、`useBtwWindow.ts`、`useBtwSession.ts`） | `/btw` → `btw.ask`；中止 / 分支 `btw.abort` / `btw.branch`；事件 `btw.changed` |
 | 会话生命周期 UI | `apps/renderer/src/sessionLifecycle.ts` | `session.create` / `resume` |
-| 侧栏运行态 | `sidebar/threadRunning.ts`、`ThreadSpin.tsx`、`ThreadWaitChip.tsx` | 从 live snapshot 推导，不另造状态源 |
+| 侧栏运行态 / 等待态 | `sidebar/threadRunning.ts`、`threadWait.ts`、`ThreadSpin.tsx`、`ThreadWaitChip.tsx` | 当前会话从 live snapshot、后台会话从 `residents.list` / `residents.changed` 摘要推导；不把后台 snapshot 注入当前会话 |
 
 Host 侧对话事件：`packages/studio-host/src/conversation-events.ts`。  
 Runtime 投影：overlay `services/conversation-live-projector.ts`、`conversation-projector-hub.ts`。  
@@ -97,8 +101,9 @@ Runtime 投影：overlay `services/conversation-live-projector.ts`、`conversati
 | 创建 / 恢复 / 删除 | `apps/desktop/src/session-commands.ts` | `services/session-control-service.ts` |
 | 目录扫描 | `studio-host/src/session-catalog.ts` | — |
 | 归档 / 解档 | `studio-host/src/session-archive-service.ts` | 切走 live 文件后再 gzip |
+| 永久删除 / 残留清理 | `studio-host/src/session-delete-service.ts`；历史页 `HistoryPage.tsx`「⋮ → 删除会话」 | — |
 | 线程绑定 | `studio-host/src/thread-binding-store.ts` | — |
-| 多会话经纪 | `studio-host/src/session-broker.ts`、`session-registry.ts` | — |
+| 多会话经纪 / 居民摘要 | `studio-host/src/session-broker.ts`、`session-registry.ts`；桌面 `runtime-session.ts`、`host-composition.ts`；facade `residents.list` | — |
 | 租约 / 代次 | `studio-host/src/session-lease-store.ts` | overlay `services/interaction-port.ts` |
 | 命令账本 / 收据 | `command-ledger.ts`、`receipt-registry.ts` | overlay `command-arbiter.ts` |
 | live telemetry | `session-telemetry-store.ts`、`telemetry-probe.ts` | `session-telemetry.ts`、`session-telemetry-probe.ts` |
@@ -152,6 +157,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 外部 https 链接 | 启动提示 GitHub 卡；`ompStudioChrome.openUrl` | `chrome-open-url.ts` → `shell.openExternal`（系统默认浏览器，不是 Electron 窗）；只接受 https |
 | 操作者头像文件 | 首页弹窗 | `chrome-profile.ts` → `%APPDATA%\omp-studio\profile\`；升级从安装目录 `userdata\profile` 迁入；卸载 `customUnInstall` 删除 |
 | 应用更新（GitHub Release） | `AppUpdateDialog.tsx`、`settings/appUpdate.ts`、`App.tsx`（左下角头像徽标与静默检测）；预览 `PREVIEW_APP_UPDATE` | `chrome-app-update.ts`、`chrome-app-update-shared.ts` → GitHub API 版本比对与全量安装包下载调起 |
+| Plan 另存为对话框 | `App.tsx` `pickPlanSaveTarget` / `savePlanAndQuit`；`deck/PlanCard.tsx` 按钮 | `workspace-shell-shared.ts`、`workspace-shell-ipc.ts`、`plan-save-path.ts`（原生另存为，默认 `<工作区>/PLAN.md`，回传工作区相对路径；越界拒绝）→ Bridge `mode.plan.review.saveAndQuit` |
 | 设置页 | `SettingsPage.tsx`、`settings/tabs.tsx` | 本地设置 + 少量 Host query |
 | 诊断页 | `DiagnosticsPage.tsx`、`diagnosticsModel.ts`、`runtimeEnsure.ts`、`RuntimeLossBanner.tsx`、`ActionProgressBar.tsx`、`updateCheck.ts`；预览 `preview/fixtures.ts` `PREVIEW_DIAGNOSTICS`；桌面 `chrome-logs.ts` | `diagnostics.get` / `environment.get` / `capabilities.get`；启动与进页静默检查更新（超时不报错）；手动检查更新超时才提示；本地制品对比 `runtime-install.ts` `probeManagedRuntimeInstall`；安装/更新/重装 `runtime.install`；断开或启动失败时「重新连接 Runtime」走 `runtime.ensure`；已连接时「重启 Runtime」走 `runtime.ensure` `{ force: true }`，收据未连上时自动再 `ensure` 并等到 `runtime.changed` connected；Host 日志打开/导出走 chrome IPC `chrome-logs.ts`（路径不回传 Renderer）。工作台 / Hub / 空对话复用 `RuntimeLossBanner`。长操作显示分步进度条。 |
 | 安全窗 / CSP | — | `apps/desktop/src/security.ts` |
@@ -202,6 +208,7 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | `queue.enqueue` | `MessageQueueBar.tsx` → 同上 |
 | `runtime.pause` / `resume` | `ActivityLine` → overlay `pause-service.ts` |
 | `session.create` / `resume` / `drop` | `session-commands.ts` + catalog |
+| `session.delete` | `session-commands.ts` + `session-delete-service.ts`（清 transcript/artifacts/遥测/绑定/租约/pin） |
 | `session.archive` / `unarchive` | `session-archive-service.ts` |
 | `session.model.set` / `thinking.set` | Composer 选择器 → overlay `model-control-service.ts` |
 | `interaction.respond` | `InteractionDeck` → Host adapter → overlay `interaction-port.ts` |

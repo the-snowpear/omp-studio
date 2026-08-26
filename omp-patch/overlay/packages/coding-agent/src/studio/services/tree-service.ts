@@ -12,7 +12,9 @@ export type StudioEditorImage = {
 	data: string;
 };
 
-function editorImagesFrom(images: ReadonlyArray<{ type?: string; mimeType?: string; data?: string }> | undefined): StudioEditorImage[] {
+function editorImagesFrom(
+	images: ReadonlyArray<{ type?: string; mimeType?: string; data?: string }> | undefined,
+): StudioEditorImage[] {
 	if (images === undefined || images.length === 0) return [];
 	const out: StudioEditorImage[] = [];
 	for (const image of images) {

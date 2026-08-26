@@ -176,6 +176,9 @@
      -soft 直接用主色的低透明度版本，色相干净不发脏。 */
   --danger-orange: #c2410c;
   --danger-orange-soft: color-mix(in srgb, var(--danger-orange) 14%, transparent);
+  /* 呼吸外发光的淡橙黄色（Full Access 光晕专用）：比主色浅很多，
+     光晕只做氛围点缀，文字警示色仍用 --danger-orange。 */
+  --danger-glow: #ffc46b;
   --blue: #1f6ba3;
   --blue-soft: rgba(31, 107, 163, 0.12);
   --purple: var(--accent);
@@ -291,6 +294,8 @@
      -soft 直接用主色的低透明度版本，色相干净不发脏。 */
   --danger-orange: #ff7a45;
   --danger-orange-soft: color-mix(in srgb, var(--danger-orange) 14%, transparent);
+  /* 呼吸外发光的淡橙黄色（暗色主题）：比亮色主题更浅，暗底上仍清晰可见。 */
+  --danger-glow: #ffd9a8;
   --blue: #5da9e0;
   --blue-soft: rgba(93, 169, 224, 0.15);
 

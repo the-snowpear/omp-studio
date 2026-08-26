@@ -29,6 +29,7 @@ export type {
   HostManifestProvider,
   HostModelsService,
   HostRuntimeAccess,
+  HostResidentsService,
   HostRuntimeDisconnect,
   HostRuntimeHelloView,
   HostRuntimeUnavailable,

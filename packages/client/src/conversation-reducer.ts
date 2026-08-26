@@ -1,6 +1,7 @@
 import {
   CONVERSATION_LIMITS,
   truncateUtf8,
+  utf8ByteLength,
   type ClientError,
   type ClientEvent,
   type ConversationItem,
@@ -276,10 +277,14 @@ function startMessage(
     completed: false,
     aborted: false,
   };
+  const clearsLatchedErrors =
+    update.role === "assistant" &&
+    (Object.keys(state.itemErrors).length > 0 || state.stickyProviderErrors[update.sessionId] !== undefined);
   return {
     ...state,
     liveMessages: { ...state.liveMessages, [update.messageId]: live },
     order: state.order.includes(update.messageId) ? state.order : [...state.order, update.messageId],
+    ...(clearsLatchedErrors ? clearSessionProviderErrors(state, update.sessionId) : {}),
   };
 }
 
@@ -293,11 +298,12 @@ function deltaMessage(
   if (current === undefined || current.completed || current.aborted) return state;
   const existing = current.blocks[update.blockId];
   if (existing?.truncated === true) return state;
-  const appended = appendBoundedText(existing?.text ?? "", update.delta);
+  const appended = appendBoundedText(existing?.text ?? "", existing?.textBytes ?? 0, update.delta);
   const block: ConversationLiveBlock = {
     blockId: update.blockId,
     blockType: update.blockType,
     text: appended.text,
+    textBytes: appended.bytes,
     ...(appended.truncated ? { truncated: true } : {}),
   };
   return {
@@ -314,8 +320,19 @@ function deltaMessage(
  * validation, but the accumulated block was not. The cap matches the persisted
  * sanitizer: UTF-8 bytes, never splitting a codepoint.
  */
-function appendBoundedText(existing: string, delta: string): { readonly text: string; readonly truncated: boolean } {
-  return truncateUtf8(existing + delta, LIVE_BLOCK_TEXT_CAP);
+function appendBoundedText(
+  existing: string,
+  existingBytes: number,
+  delta: string,
+): { readonly text: string; readonly bytes: number; readonly truncated: boolean } {
+  const remaining = LIVE_BLOCK_TEXT_CAP - existingBytes;
+  if (remaining <= 0) return { text: existing, bytes: existingBytes, truncated: delta.length > 0 };
+  const deltaBytes = utf8ByteLength(delta);
+  if (deltaBytes <= remaining) {
+    return { text: existing + delta, bytes: existingBytes + deltaBytes, truncated: false };
+  }
+  const accepted = truncateUtf8(delta, remaining).text;
+  return { text: existing + accepted, bytes: existingBytes + utf8ByteLength(accepted), truncated: true };
 }
 
 function completeMessage(
@@ -365,7 +382,7 @@ function blocksFromMessageItem(item: ConversationMessageItem): Record<string, Co
     if (block.type !== "text" && block.type !== "thinking") continue;
     const blockId = `${block.type}-${index}`;
     index += 1;
-    blocks[blockId] = { blockId, blockType: block.type, text: block.text };
+    blocks[blockId] = { blockId, blockType: block.type, text: block.text, textBytes: utf8ByteLength(block.text) };
   }
   return blocks;
 }
@@ -387,6 +404,7 @@ function startTool(
     startedAt: update.startedAt,
     ...(update.arguments === undefined ? {} : { arguments: update.arguments }),
     ...(keepStream && existing?.output !== undefined ? { output: existing.output } : {}),
+    ...(keepStream && existing?.outputBytes !== undefined ? { outputBytes: existing.outputBytes } : {}),
     ...(keepStream && existing?.truncated === true ? { truncated: true } : {}),
   };
   return { ...state, liveTools: capSettledLiveTools({ ...state.liveTools, [update.toolCallId]: tool }) };
@@ -415,11 +433,12 @@ function updateTool(
 ): ConversationState {
   const existing = state.liveTools[update.toolCallId];
   if (existing?.status === "completed" || existing?.status === "aborted") return state;
-  const previous = existing?.output ?? "";
-  const raw = update.updateMode === "replace" ? (update.output ?? "") : previous + (update.output ?? "");
-  const bounded = truncateUtf8(raw, LIVE_BLOCK_TEXT_CAP);
-  const output = bounded.text;
-  const truncated = existing?.truncated === true || update.truncated === true || bounded.truncated;
+  const incoming = update.output ?? "";
+  const accumulated = update.updateMode === "replace"
+    ? appendBoundedText("", 0, incoming)
+    : appendBoundedText(existing?.output ?? "", existing?.outputBytes ?? 0, incoming);
+  const output = accumulated.text;
+  const truncated = existing?.truncated === true || update.truncated === true || accumulated.truncated;
   const messageId = existing?.messageId ?? ownerMessageId(state, update.toolCallId);
   const tool: ConversationLiveTool = {
     toolCallId: update.toolCallId,
@@ -430,6 +449,7 @@ function updateTool(
     ...(existing?.arguments === undefined ? {} : { arguments: existing.arguments }),
     ...(existing?.startedAt === undefined ? {} : { startedAt: existing.startedAt }),
     ...(output.length === 0 ? {} : { output }),
+    ...(output.length === 0 ? {} : { outputBytes: accumulated.bytes }),
     ...(truncated ? { truncated: true } : {}),
   };
   return { ...state, liveTools: capSettledLiveTools({ ...state.liveTools, [update.toolCallId]: tool }) };
@@ -454,6 +474,7 @@ function completeTool(
     ...(existing?.startedAt === undefined ? {} : { startedAt: existing.startedAt }),
     result: update.result,
     ...(update.result.output === undefined ? existing?.output === undefined ? {} : { output: existing.output } : { output: update.result.output }),
+    ...(update.result.output === undefined && existing?.outputBytes !== undefined ? { outputBytes: existing.outputBytes } : {}),
     ...(update.result.truncated === undefined ? {} : { truncated: update.result.truncated }),
   };
   return { ...state, liveTools: capSettledLiveTools({ ...state.liveTools, [update.toolCallId]: tool }) };
@@ -478,12 +499,12 @@ function abortTurn(
     if (tool.status === "completed" || tool.status === "aborted") continue;
     liveTools[id] = { ...tool, status: "aborted" };
   }
-  return {
-    ...closeTurn(state, update.turnId),
+  return closeTurn({
+    ...state,
     liveMessages,
     liveTools: capSettledLiveTools(liveTools),
     abortedTurns: { ...state.abortedTurns, [update.turnId]: true },
-  };
+  }, update.turnId);
 }
 
 /** Drops the turn's items from `openTurnItems`; their tools can no longer start. */
@@ -492,8 +513,50 @@ function closeTurn(state: ConversationState, turnId: string): ConversationState 
   for (const [itemId, owner] of Object.entries(state.openTurnItems)) {
     if (owner !== turnId) openTurnItems[itemId] = owner;
   }
-  if (Object.keys(openTurnItems).length === Object.keys(state.openTurnItems).length) return state;
-  return { ...state, openTurnItems };
+  const closed = Object.keys(openTurnItems).length === Object.keys(state.openTurnItems).length
+    ? state
+    : { ...state, openTurnItems };
+  return capClosedHistory(closed);
+}
+
+/**
+ * Keep the active transcript bounded. Once rows are evicted the old cursor is
+ * no longer contiguous, so request one authoritative latest-page hydrate after
+ * the turn closes instead of exposing a cursor that would skip the evicted gap.
+ */
+function capClosedHistory(state: ConversationState): ConversationState {
+  if (state.order.length <= CONVERSATION_STATE_ITEM_CAP) return state;
+  const order = [...state.order];
+  const itemsById = { ...state.itemsById };
+  const liveMessages = { ...state.liveMessages };
+  const dropped = new Set<string>();
+  while (order.length > CONVERSATION_STATE_ITEM_CAP) {
+    const id = order.shift();
+    if (id === undefined) break;
+    dropped.add(id);
+    delete itemsById[id];
+    delete liveMessages[id];
+  }
+  const liveTools: Record<string, ConversationLiveTool> = {};
+  for (const [id, tool] of Object.entries(state.liveTools)) {
+    if (tool !== undefined && (tool.messageId === undefined || !dropped.has(tool.messageId))) liveTools[id] = tool;
+  }
+  const openTurnItems: Record<string, string> = {};
+  for (const [id, owner] of Object.entries(state.openTurnItems)) {
+    if (!dropped.has(id)) openTurnItems[id] = owner;
+  }
+  /* `exactOptionalPropertyTypes`：游标要的是「这一项不存在」，不是 undefined 值。 */
+  const { olderCursor: _evicted, ...rest } = state;
+  return {
+    ...rest,
+    itemsById,
+    order,
+    liveMessages,
+    liveTools,
+    openTurnItems,
+    hasMoreBefore: true,
+    resyncRequired: true,
+  };
 }
 
 function completeCompaction(
@@ -604,6 +667,16 @@ function providerErrorState(
   if (!clearOnSuccess) {
     return { itemErrors: state.itemErrors, stickyProviderErrors: state.stickyProviderErrors };
   }
+  const stickyProviderErrors = { ...state.stickyProviderErrors };
+  delete stickyProviderErrors[sessionId];
+  return { itemErrors: {}, stickyProviderErrors };
+}
+
+/** A new assistant stream supersedes any latched provider failure for this session. */
+function clearSessionProviderErrors(
+  state: ConversationState,
+  sessionId: SessionId,
+): Pick<ConversationState, "itemErrors" | "stickyProviderErrors"> {
   const stickyProviderErrors = { ...state.stickyProviderErrors };
   delete stickyProviderErrors[sessionId];
   return { itemErrors: {}, stickyProviderErrors };

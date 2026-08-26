@@ -260,8 +260,8 @@ export type ConversationRuntimeEvent =
       /**
        * Present when the assistant message ended with a provider error. The
        * persisted item has no error field; the client latches the last live
-       * payload until that session's next assistant message completes without
-       * an error.
+       * payload until that session's next assistant message starts streaming,
+       * or a later one completes without an error.
        */
       error?: ConversationMessageError;
     }

@@ -28,6 +28,11 @@ import {
   CONVERSATION_LIMITS,
   MODEL_CONFIG_THINKING_EFFORTS,
   SESSION_THINKING_SELECTORS,
+  STUDIO_RUNTIME_CODE_MODES,
+  STUDIO_RUNTIME_COMPACTION_METHODS,
+  STUDIO_RUNTIME_SETTING_KEYS,
+  STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS,
+  STUDIO_RUNTIME_UNEXPECTED_STOP_MODES,
 } from "@omp-studio/client-contract";
 
 /** Thrown when an IPC payload fails strict P1 boundary validation. */
@@ -304,7 +309,7 @@ function validateJobCancelInput(input: unknown): void {
 
 function validateHistoryListInput(input: unknown): void {
   assertPlainObject(input, "history.list input");
-  assertNoUnknownKeys(input, ["limit", "status"], "history.list input");
+  assertNoUnknownKeys(input, ["limit", "status", "workspaceId"], "history.list input");
   if ("limit" in input) {
     const limit = input.limit;
     if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit <= 0) {
@@ -321,6 +326,9 @@ function validateHistoryListInput(input: unknown): void {
     if (status !== "active" && status !== "archived" && status !== "closed") {
       throw new ValidationError("history.list input: status must be active, archived or closed");
     }
+  }
+  if (input.workspaceId !== undefined) {
+    assertOpaqueToken(input.workspaceId, "history.list input: workspaceId");
   }
 }
 
@@ -679,15 +687,77 @@ function validateNamedTextInput(input: unknown, what: string, field: string): vo
 }
 
 const PROMPT_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-const MAX_PROMPT_IMAGES = 16;
-/** Base64 length cap (~64 MiB binary). IPC safety, not a composer ingest limit. */
-const MAX_PROMPT_IMAGE_DATA = 96_000_000;
 
-function validatePromptImages(value: unknown, what: string): void {
+/** Maximum number of image attachments accepted in one prompt command. */
+export const MAX_PROMPT_IMAGES = 16;
+
+/**
+ * Maximum decoded bytes for one image. 16 MiB keeps one IPC attachment from
+ * dominating the Main process while remaining above ordinary screenshots.
+ */
+export const MAX_PROMPT_IMAGE_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Maximum decoded bytes across all images in one prompt command. 64 MiB
+ * bounds the aggregate memory amplification from the 16-image allowance.
+ */
+export const MAX_PROMPT_IMAGES_TOTAL_BYTES = 64 * 1024 * 1024;
+
+/** Reject oversized encoded payloads before scanning/decoding their contents. */
+const MAX_PROMPT_IMAGE_BASE64_LENGTH = Math.ceil((MAX_PROMPT_IMAGE_BYTES + 2) / 3) * 4;
+
+function base64CharacterValue(code: number): number {
+  if (code >= 0x41 && code <= 0x5a) return code - 0x41;
+  if (code >= 0x61 && code <= 0x7a) return code - 0x61 + 26;
+  if (code >= 0x30 && code <= 0x39) return code - 0x30 + 52;
+  if (code === 0x2b) return 62;
+  if (code === 0x2f) return 63;
+  return -1;
+}
+
+/**
+ * Return the exact decoded byte count for canonical Base64 without calling
+ * `atob`/`Buffer`, which would allocate a second large copy at the boundary.
+ */
+function decodedBase64Bytes(value: string, field: string): number {
+  if (value.length === 0) {
+    throw new ValidationError(`${field}: data must be a non-empty Base64 string`);
+  }
+  if (value.length > MAX_PROMPT_IMAGE_BASE64_LENGTH) {
+    throw new ValidationError(`${field}: data exceeds the max decoded image size of ${MAX_PROMPT_IMAGE_BYTES} bytes`);
+  }
+  if (value.length % 4 !== 0) {
+    throw new ValidationError(`${field}: data must be canonical Base64 with valid padding`);
+  }
+  let padding = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0x3d) {
+      if (index < value.length - 2 || padding === 2) {
+        throw new ValidationError(`${field}: data must be canonical Base64 with valid padding`);
+      }
+      padding += 1;
+      continue;
+    }
+    if (padding > 0 || base64CharacterValue(code) < 0) {
+      throw new ValidationError(`${field}: data must be canonical Base64 with valid padding`);
+    }
+  }
+  if (padding === 2 && (base64CharacterValue(value.charCodeAt(value.length - 3)) & 0x0f) !== 0) {
+    throw new ValidationError(`${field}: data must be canonical Base64 with valid padding`);
+  }
+  if (padding === 1 && (base64CharacterValue(value.charCodeAt(value.length - 2)) & 0x03) !== 0) {
+    throw new ValidationError(`${field}: data must be canonical Base64 with valid padding`);
+  }
+  return (value.length / 4) * 3 - padding;
+}
+
+export function validatePromptImages(value: unknown, what: string): void {
   if (!Array.isArray(value)) throw new ValidationError(`${what}: images must be an array`);
   if (value.length > MAX_PROMPT_IMAGES) {
     throw new ValidationError(`${what}: images exceeds the max count of ${MAX_PROMPT_IMAGES}`);
   }
+  let totalBytes = 0;
   for (const [index, image] of value.entries()) {
     const field = `${what}: images[${index}]`;
     assertPlainObject(image, field);
@@ -696,11 +766,18 @@ function validatePromptImages(value: unknown, what: string): void {
     if (typeof image.mimeType !== "string" || !PROMPT_IMAGE_MIME.has(image.mimeType)) {
       throw new ValidationError(`${field}: unsupported mimeType`);
     }
-    if (typeof image.data !== "string" || image.data.length === 0) {
-      throw new ValidationError(`${field}: data must be a non-empty string`);
+    if (typeof image.data !== "string") {
+      throw new ValidationError(`${field}: data must be a non-empty Base64 string`);
     }
-    if (image.data.length > MAX_PROMPT_IMAGE_DATA) {
-      throw new ValidationError(`${field}: data exceeds the max length of ${MAX_PROMPT_IMAGE_DATA}`);
+    const decodedBytes = decodedBase64Bytes(image.data, field);
+    if (decodedBytes > MAX_PROMPT_IMAGE_BYTES) {
+      throw new ValidationError(`${field}: decoded data exceeds the max image size of ${MAX_PROMPT_IMAGE_BYTES} bytes`);
+    }
+    totalBytes += decodedBytes;
+    if (totalBytes > MAX_PROMPT_IMAGES_TOTAL_BYTES) {
+      throw new ValidationError(
+        `${what}: decoded images exceed the max total size of ${MAX_PROMPT_IMAGES_TOTAL_BYTES} bytes`,
+      );
     }
   }
 }
@@ -785,6 +862,96 @@ function validatePauseResumeInput(input: unknown): void {
   assertNoUnknownKeys(input, ["expectedPauseEpoch"], "runtime.resume input");
   if (typeof input.expectedPauseEpoch !== "number" || !Number.isSafeInteger(input.expectedPauseEpoch) || input.expectedPauseEpoch < 0) {
     throw new ValidationError("runtime.resume input: expectedPauseEpoch must be a non-negative safe integer");
+  }
+}
+
+function validateRuntimeSettingValue(key: unknown, value: unknown, what: string): void {
+  if (typeof key !== "string" || !STUDIO_RUNTIME_SETTING_KEYS.includes(key as (typeof STUDIO_RUNTIME_SETTING_KEYS)[number])) {
+    throw new ValidationError(`${what}: unsupported setting key`);
+  }
+  switch (key) {
+    case "edit.autoRepair.enabled":
+    case "extendedContext":
+    case "compaction.asyncEnabled":
+      if (typeof value !== "boolean") throw new ValidationError(`${what}: value must be boolean`);
+      return;
+    case "features.unexpectedStopDetection":
+      if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODES.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODES)[number])) {
+        throw new ValidationError(`${what}: invalid unexpected-stop detection mode`);
+      }
+      return;
+    case "providers.unexpectedStopModel":
+      if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS)[number])) {
+        throw new ValidationError(`${what}: invalid unexpected-stop model`);
+      }
+      return;
+    case "providers.openai-codex.codeMode":
+      if (!STUDIO_RUNTIME_CODE_MODES.includes(value as (typeof STUDIO_RUNTIME_CODE_MODES)[number])) {
+        throw new ValidationError(`${what}: invalid code mode`);
+      }
+      return;
+    case "compaction.methodOrder":
+      if (
+        !Array.isArray(value) ||
+        value.length === 0 ||
+        value.some((method) => !STUDIO_RUNTIME_COMPACTION_METHODS.includes(method as (typeof STUDIO_RUNTIME_COMPACTION_METHODS)[number])) ||
+        new Set(value).size !== value.length
+      ) {
+        throw new ValidationError(`${what}: value must be a non-empty unique compaction method list`);
+      }
+      return;
+  }
+}
+
+function validateRuntimeSettingsGetInput(input: unknown): void {
+  assertPlainObject(input, "runtime.settings.get input");
+  assertNoUnknownKeys(input, ["keys"], "runtime.settings.get input");
+  if (input.keys === undefined) return;
+  if (
+    !Array.isArray(input.keys) ||
+    input.keys.length === 0 ||
+    input.keys.length > STUDIO_RUNTIME_SETTING_KEYS.length ||
+    input.keys.some((key) => !STUDIO_RUNTIME_SETTING_KEYS.includes(key as (typeof STUDIO_RUNTIME_SETTING_KEYS)[number])) ||
+    new Set(input.keys).size !== input.keys.length
+  ) {
+    throw new ValidationError("runtime.settings.get input: keys must be a non-empty unique supported setting list");
+  }
+}
+
+function validateRuntimeSettingsSetInput(input: unknown): void {
+  assertPlainObject(input, "runtime.settings.set input");
+  assertNoUnknownKeys(input, ["key", "value", "persist"], "runtime.settings.set input");
+  validateRuntimeSettingValue(input.key, input.value, "runtime.settings.set input");
+  if (typeof input.persist !== "boolean") throw new ValidationError("runtime.settings.set input: persist must be boolean");
+}
+
+function validatePlanSaveAndQuitInput(input: unknown): void {
+  assertPlainObject(input, "mode.plan.review.saveAndQuit input");
+  assertNoUnknownKeys(input, ["path"], "mode.plan.review.saveAndQuit input");
+  assertNonEmptyText(input.path, "mode.plan.review.saveAndQuit input: path");
+  if (
+    input.path.length > 1024 ||
+    input.path.includes("\0") ||
+    input.path !== input.path.trim() ||
+    ((input.path.startsWith('"') && input.path.endsWith('"')) || (input.path.startsWith("'") && input.path.endsWith("'")))
+  ) {
+    throw new ValidationError("mode.plan.review.saveAndQuit input: invalid path length or NUL");
+  }
+  const normalized = input.path.replaceAll("\\", "/");
+  if (
+    normalized.startsWith("/") ||
+    normalized.startsWith("~") ||
+    /^[A-Za-z]:/.test(input.path) ||
+    normalized.endsWith("/")
+  ) {
+    throw new ValidationError("mode.plan.review.saveAndQuit input: path must be workspace-relative");
+  }
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === ".." || segment.includes(":"))) {
+    throw new ValidationError("mode.plan.review.saveAndQuit input: path escapes the workspace");
+  }
+  if (segments.every((segment) => segment.length === 0 || segment === ".")) {
+    throw new ValidationError("mode.plan.review.saveAndQuit input: path must name a file");
   }
 }
 
@@ -1430,6 +1597,7 @@ const QUERY_INPUT_VALIDATORS: {
   "commands.getManifest": (input) => validateEmptyInput(input, "commands.getManifest input"),
   "diagnostics.get": (input) => validateEmptyInput(input, "diagnostics.get input"),
   "history.list": validateHistoryListInput,
+  "residents.list": (input) => validateEmptyInput(input, "residents.list input"),
   "session.state": (input) => validateEmptyInput(input, "session.state input"),
   "home.get": (input) => validateEmptyInput(input, "home.get input"),
   "models.get": (input) => validateEmptyInput(input, "models.get input"),
@@ -1472,11 +1640,14 @@ const COMMAND_INPUT_VALIDATORS: {
   "queue.enqueue": (input) => validateTextInput(input, "queue.enqueue input"),
   "runtime.pause": (input) => validateEmptyCommandInput(input, "runtime.pause input"),
   "runtime.resume": validatePauseResumeInput,
+  "runtime.settings.get": validateRuntimeSettingsGetInput,
+  "runtime.settings.set": validateRuntimeSettingsSetInput,
   "turn.retry": (input) => validateEmptyCommandInput(input, "turn.retry input"),
   "mode.plan.enter": (input) => validateOptionalTextFields(input, "mode.plan.enter input", ["initialPrompt"]),
   "mode.plan.exit": (input) => { assertPlainObject(input, "mode.plan.exit input"); assertNoUnknownKeys(input, ["discardDraft"], "mode.plan.exit input"); if (input.discardDraft !== undefined && typeof input.discardDraft !== "boolean") throw new ValidationError("mode.plan.exit input: discardDraft must be boolean"); },
   "mode.plan.review.open": (input) => validateEmptyCommandInput(input, "mode.plan.review.open input"),
   "mode.plan.review.respond": validatePlanReviewInput,
+  "mode.plan.review.saveAndQuit": validatePlanSaveAndQuitInput,
   "mode.vibe.enter": (input) => validateOptionalTextFields(input, "mode.vibe.enter input", ["initialPrompt"]),
   "mode.vibe.exit": (input) => validateEmptyCommandInput(input, "mode.vibe.exit input"),
   "goal.create": (input) => validateGoalInput(input, "goal.create input", true),
@@ -1536,6 +1707,7 @@ const COMMAND_INPUT_VALIDATORS: {
   "session.drop": (input) => validateThreadInput(input, "session.drop input"),
   "session.archive": (input) => validateThreadInput(input, "session.archive input"),
   "session.unarchive": (input) => validateThreadInput(input, "session.unarchive input"),
+  "session.delete": (input) => validateThreadInput(input, "session.delete input"),
   "interaction.respond": validateInteractionRespondInput,
   "permissions.mode.set": (input) => {
     assertPlainObject(input, "permissions.mode.set input");

@@ -6,9 +6,9 @@ import {
 	parseConversationTranscriptPage,
 } from "@oh-my-pi/pi-coding-agent/studio/conversation-protocol";
 import {
+	projectConversationBranch,
 	StudioSessionTranscriptError,
 	StudioSessionTranscriptService,
-	projectConversationBranch,
 } from "@oh-my-pi/pi-coding-agent/studio/services/session-transcript-service";
 import { StudioStateProjector } from "@oh-my-pi/pi-coding-agent/studio/state-projector";
 import type { StudioHostRuntime } from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
@@ -112,7 +112,7 @@ describe("StudioSessionTranscriptService", () => {
 		});
 	});
 
-	test("omits developer and synthetic/steering user harness messages from the public page", () => {
+	test("omits developer/synthetic/agent-steer rows; keeps user-attributed steers on the public page", () => {
 		using tempDir = TempDir.createSync("@omp-studio-transcript-harness-");
 		const manager = SessionManager.create(tempDir.path(), tempDir.path());
 		const userId = manager.appendMessage(userMessage("hello"));
@@ -135,18 +135,31 @@ describe("StudioSessionTranscriptService", () => {
 		});
 		manager.appendMessage({
 			role: "user",
+			content: "peer asks the run to pivot",
+			steering: true,
+			attribution: "agent",
+			timestamp: Date.now(),
+		});
+		const steerId = manager.appendMessage({
+			role: "user",
 			content: "steer the turn",
 			steering: true,
+			attribution: "user",
 			timestamp: Date.now(),
 		});
 		const assistantId = manager.appendMessage(assistantMessage([{ type: "text", text: "done" }]));
 		const page = serviceFor(manager).read();
-		expect(page.items.map(item => item.itemId)).toEqual([userId, assistantId]);
-		expect(page.items.map(item => (item.kind === "message" ? item.role : item.kind))).toEqual(["user", "assistant"]);
+		expect(page.items.map(item => item.itemId)).toEqual([userId, steerId, assistantId]);
+		expect(page.items.map(item => (item.kind === "message" ? item.role : item.kind))).toEqual([
+			"user",
+			"user",
+			"assistant",
+		]);
 		const serialized = JSON.stringify(page);
 		expect(serialized).not.toContain("system-reminder");
 		expect(serialized).not.toContain("<instruction>");
-		expect(serialized).not.toContain("steer the turn");
+		expect(serialized).not.toContain("peer asks the run to pivot");
+		expect(serialized).toContain("steer the turn");
 	});
 
 	test("maps successful and failed tool results without leaking providerPayload", () => {
@@ -200,8 +213,12 @@ describe("StudioSessionTranscriptService", () => {
 		using tempDir = TempDir.createSync("@omp-studio-transcript-markers-");
 		const manager = SessionManager.create(tempDir.path(), tempDir.path());
 		const userId = manager.appendMessage(userMessage("before"));
-		const compactId = manager.appendCompaction("long summary", "short", userId, 12, { preserve: true }, false, {
-			secret: "nope",
+		const compactId = manager.appendCompaction("long summary", "short", userId, 12, {
+			preserveData: { preserve: true },
+			fromExtension: false,
+			details: {
+				secret: "nope",
+			},
 		});
 		const resetId = manager.appendResetBoundary();
 		manager.branchWithSummary(resetId, "abandoned sibling summary");
@@ -326,6 +343,43 @@ describe("StudioSessionTranscriptService", () => {
 			CONVERSATION_LIMITS.PAGE_MAX_BYTES,
 		);
 		expect(parseConversationTranscriptPage(page).items).toHaveLength(1);
+	});
+
+	test("page byte fitting preserves assistant and tool shells before truncating payloads", () => {
+		using tempDir = TempDir.createSync("@omp-studio-transcript-page-fit-");
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		const payload = "x".repeat(20 * 1024);
+		const expectedIds = [manager.appendMessage(userMessage("run tools"))];
+		for (let index = 1; index <= 49; index++) {
+			const toolCallId = `call-${index}`;
+			expectedIds.push(
+				manager.appendMessage(
+					assistantMessage([{ type: "toolCall", id: toolCallId, name: "Read", arguments: { argument: payload } }]),
+				),
+			);
+			manager.appendMessage(toolResult(toolCallId, "Read", payload));
+		}
+		const page = serviceFor(manager).read({ limit: 50 });
+
+		expect(page.hasMoreBefore).toBe(false);
+		expect(page.items.map(item => item.itemId)).toEqual(expectedIds);
+		for (const item of page.items.slice(1)) {
+			expect(item.kind).toBe("message");
+			if (item.kind !== "message") continue;
+			const call = item.content.find(block => block.type === "toolCall");
+			const result = item.content.find(block => block.type === "toolResult");
+			expect(call?.type).toBe("toolCall");
+			expect(result?.type).toBe("toolResult");
+			if (call?.type !== "toolCall" || result?.type !== "toolResult") continue;
+			expect(call.toolCallId).toBe(result.toolCallId);
+			expect(call.truncated).toBe(true);
+			expect(result.truncated).toBe(true);
+			expect(result.output?.length ?? 0).toBeLessThan(payload.length);
+		}
+		expect(new TextEncoder().encode(JSON.stringify(page)).byteLength).toBeLessThanOrEqual(
+			CONVERSATION_LIMITS.PAGE_MAX_BYTES,
+		);
+		expect(parseConversationTranscriptPage(page).items).toHaveLength(expectedIds.length);
 	});
 
 	test("illegal custom entries do not crash the reader", () => {
@@ -478,8 +532,16 @@ describe("projectConversationBranch", () => {
 		const secondCall = second.content.find(block => block.type === "toolCall");
 		expect(firstCall?.type === "toolCall" && firstCall.toolCallId !== "tool-call").toBe(true);
 		expect(firstResult?.type === "toolResult" && firstResult.output).toBe("one");
-		expect(firstCall?.type === "toolCall" && firstResult?.type === "toolResult" && firstCall.toolCallId === firstResult.toolCallId).toBe(true);
-		expect(secondCall?.type === "toolCall" && firstCall?.type === "toolCall" && secondCall.toolCallId !== firstCall.toolCallId).toBe(true);
+		expect(
+			firstCall?.type === "toolCall" &&
+				firstResult?.type === "toolResult" &&
+				firstCall.toolCallId === firstResult.toolCallId,
+		).toBe(true);
+		expect(
+			secondCall?.type === "toolCall" &&
+				firstCall?.type === "toolCall" &&
+				secondCall.toolCallId !== firstCall.toolCallId,
+		).toBe(true);
 	});
 
 	test("over-long toolCallIds stay unique after bounding", () => {

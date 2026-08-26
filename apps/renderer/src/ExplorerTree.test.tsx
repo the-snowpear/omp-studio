@@ -308,4 +308,35 @@ describe("RealFileTree", () => {
     await screen.findByText("README.md");
     expect(document.querySelector(".tree-row .live")).toBeNull();
   });
+
+  it("does not render open file message banner when clicking a file", async () => {
+    const query = vi.fn(async () => tree([{ type: "file", name: "package.json", path: "package.json" }]));
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+    const fileRow = await screen.findByText("package.json");
+    fireEvent.click(fileRow);
+
+    expect(screen.queryByText(/打开 package\.json/)).toBeNull();
+  });
+
+  it("provides 加入上下文 tooltip and aria-label on @ buttons", async () => {
+    const query = vi.fn(async () => tree([
+      { type: "dir", name: "src", path: "src" },
+      { type: "file", name: "package.json", path: "package.json" },
+    ]));
+    const client = { query } as unknown as StudioClient;
+    const addContext = vi.fn();
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} onAddContext={addContext} />);
+    await screen.findByText("package.json");
+
+    const atButtons = screen.getAllByRole("button", { name: /加入上下文/ });
+    expect(atButtons.length).toBe(2);
+    expect(atButtons[0]?.getAttribute("data-tip")).toBe("加入上下文");
+    expect(atButtons[1]?.getAttribute("data-tip")).toBe("加入上下文");
+
+    fireEvent.click(atButtons[1]!);
+    expect(addContext).toHaveBeenCalledWith("package.json", "file");
+  });
 });

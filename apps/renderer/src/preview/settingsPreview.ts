@@ -37,6 +37,13 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
  * FutureRowDef.key 一一对应；缺省回落到行定义里的静态 value/on。
  */
 export const PREVIEW_RUNTIME_SETTINGS: Readonly<Record<string, string | boolean>> = {
+  "edit.autoRepair.enabled": false,
+  "features.unexpectedStopDetection": "mechanical",
+  "providers.unexpectedStopModel": "online",
+  extendedContext: true,
+  "compaction.asyncEnabled": true,
+  "compaction.methodOrder": "remote,snapcompact,handoff,shake,soft",
+  "providers.openai-codex.codeMode": "off",
   "input.steering": "一次处理一条",
   "input.followup": "一次处理全部",
   "input.interrupt": "立即中断",

@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual, type Hash } from "node:crypto";
 import { open, readdir, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -25,6 +25,13 @@ const AGENT_TOMBSTONE_SUFFIX = ".tombstone";
 const MAX_AGENT_ID_LENGTH = 512;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
 const MAX_CHILD_WALK_FILES = 2_000;
+/** 解析 / 投影时的让出节奏：每 8ms 让一次，主进程不被整档解析堵住。 */
+const PARSE_YIELD_MS = 8;
+/** 只在每 256 条记录检查一次时钟，`Date.now()` 本身不该成为热点。 */
+const PARSE_YIELD_MASK = 0xff;
+/** 追加续读时比对的前缀尾部字节数。 */
+const TAIL_SAMPLE_BYTES = 256;
+const EMPTY_BUFFER = Buffer.alloc(0);
 
 export interface SessionArchiveReadInput {
   readonly sessionId: string;
@@ -120,6 +127,11 @@ type ArchiveSnapshot = {
   transcriptRevision: string;
   branchLeafId: string | null;
   entries: ArchiveEntry[];
+  /**
+   * id → entry。分支解析每次都要按 id 找父节点，重建这张表就是一次 O(全部记录) 的
+   * 扫描；跟着快照一起活着，追加续读只需要补上新记录。
+   */
+  byId: Map<string, ArchiveEntry>;
 };
 
 type FileVersion = string;
@@ -130,9 +142,39 @@ type IndexedHeader = {
   readonly cwd?: string;
 };
 
+/**
+ * 已经解析进快照的完整前缀。会话日志是追加式 JSONL：下一次读取只需要读走新增的字节，
+ * 把新行折进同一个 entries 数组，再用同一个内容哈希算出新的 revision。
+ */
+type ConsumedPrefix = {
+  /** 已消费的完整字节数（总是落在换行边界上）。 */
+  readonly bytes: number;
+  /** namespace + sessionId + 已消费字节的滚动哈希；`copy()` 后补上身份/长度才是 revision。 */
+  readonly hash: Hash;
+  /** 已消费前缀的末尾若干字节：续读时比对一次，确认文件是被追加而不是被重写。 */
+  readonly tail: Buffer;
+  readonly dev: bigint | number;
+  readonly ino: bigint | number;
+};
+
 type CachedSnapshot = {
   readonly version: FileVersion;
   readonly snapshot: ArchiveSnapshot;
+  /** 仅明文 `.jsonl` 有：压缩档没有可续读的字节边界。 */
+  readonly consumed?: ConsumedPrefix;
+};
+
+/** 投影的可续算状态：`projectBranch` 是一次前向折叠，state 就是它的中间结果。 */
+type ProjectionState = {
+  readonly items: ConversationItem[];
+  readonly toolOwners: Map<string, number>;
+};
+
+type CachedProjection = {
+  readonly leafId: string | null;
+  /** 折叠过的分支（按引用），用来判断新分支是否只是它的追加。 */
+  readonly branch: readonly ArchiveEntry[];
+  readonly state: ProjectionState;
 };
 
 type CursorPayload = {
@@ -165,6 +207,12 @@ export class StudioSessionArchiveReader {
   /** Parsed snapshots are shared by paging and repeated session switches. */
   #snapshotCache = new Map<string, CachedSnapshot>();
   #snapshotInFlight = new Map<string, { version: FileVersion | undefined; promise: Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> }>();
+  /**
+   * 投影（entries → ConversationItem）结果。一次切换里 `readPage` / `readRevision` /
+   * `listPersistedAgents` 会读同一份快照，翻页还会再读一次：投影是这条路径上最贵的一步
+   * （每个字符串都要 sanitize、每个工具参数都要 JSON 序列化），不能每次重算。
+   */
+  #projectionCache = new Map<string, CachedProjection>();
 
   constructor(options: SessionArchiveReaderOptions) {
     if (options.allowedCwd.length === 0) throw new TypeError("allowedCwd is required");
@@ -202,8 +250,7 @@ export class StudioSessionArchiveReader {
     const snapshot = await this.#readSnapshot(located.path, located.sessionId, {
       requireCwd: input.agentId === undefined,
     });
-    const branch = activeBranch(snapshot.entries, snapshot.branchLeafId);
-    const items = projectBranch(branch);
+    const items = await this.#projectedItems(located.path, snapshot);
     let endExclusive = items.length;
     if (input.cursor !== undefined) {
       const cursor = this.#decodeCursor(input.cursor);
@@ -247,17 +294,25 @@ export class StudioSessionArchiveReader {
       headCursor,
       hasMoreBefore,
     });
-    // The transport rejects pages above PAGE_MAX_BYTES, so an over-budget page
-    // must be shrunk here or large archived sessions become unreadable. Mirrors
-    // the online StudioSessionTranscriptService shrink behaviour.
+    // The transport rejects pages above PAGE_MAX_BYTES. Compact oversized
+    // payloads across the selected window before dropping a leading item: an
+    // assistant/tool shell is more useful than a page that starts midway
+    // through the tool chain. Mirrors the online transcript service.
     let page = pageOf();
+    if (Buffer.byteLength(JSON.stringify(page), "utf8") > CONVERSATION_LIMITS.PAGE_MAX_BYTES) {
+      for (const maxPayloadBytes of PAGE_PAYLOAD_BYTE_STEPS) {
+        pageItems = pageItems.map((item) => shrinkItem(item, maxPayloadBytes));
+        page = pageOf();
+        if (Buffer.byteLength(JSON.stringify(page), "utf8") <= CONVERSATION_LIMITS.PAGE_MAX_BYTES) break;
+      }
+    }
     while (Buffer.byteLength(JSON.stringify(page), "utf8") > CONVERSATION_LIMITS.PAGE_MAX_BYTES && pageItems.length > 1) {
       pageItems = pageItems.slice(1);
       hasMoreBefore = true;
       page = pageOf();
     }
     if (Buffer.byteLength(JSON.stringify(page), "utf8") > CONVERSATION_LIMITS.PAGE_MAX_BYTES && pageItems.length === 1) {
-      pageItems = [shrinkItem(pageItems[0]!)];
+      pageItems = [shrinkItem(pageItems[0]!, PAGE_PAYLOAD_BYTE_STEPS.at(-1)!)];
       page = pageOf();
     }
     return page;
@@ -489,17 +544,29 @@ export class StudioSessionArchiveReader {
   ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
     const cached = this.#snapshotCache.get(path);
     const indexedVersion = this.#indexedVersions.get(path);
-    if (cached !== undefined && indexedVersion === cached.version) return { snapshot: cached.snapshot, version: cached.version };
+    if (cached !== undefined && indexedVersion === cached.version) {
+      // 命中也要刷新 LRU 顺序：否则热会话会被读过一遍的冷会话挤出缓存。
+      this.#snapshotCache.delete(path);
+      this.#snapshotCache.set(path, cached);
+      return { snapshot: cached.snapshot, version: cached.version };
+    }
     const pending = this.#snapshotInFlight.get(path);
     if (pending !== undefined && pending.version === indexedVersion) return pending.promise;
-    const read = this.#readSnapshotUncached(path, expectedSessionId, options)
-      .then(({ snapshot, version }) => {
+    /* 文件变过：优先按追加续读（只解析新增字节），失败再整档重读。 */
+    const load = cached?.consumed === undefined
+      ? this.#readSnapshotUncached(path, expectedSessionId, options)
+      : this.#appendSnapshot(path, expectedSessionId, cached).then(
+          (appended) => appended ?? this.#readSnapshotUncached(path, expectedSessionId, options),
+        );
+    const read = load
+      .then(({ snapshot, version, consumed }) => {
         this.#snapshotCache.delete(path);
-        this.#snapshotCache.set(path, { snapshot, version });
+        this.#snapshotCache.set(path, { snapshot, version, ...(consumed === undefined ? {} : { consumed }) });
         while (this.#snapshotCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE) {
           const oldest = this.#snapshotCache.keys().next().value as string | undefined;
           if (oldest === undefined) break;
           this.#snapshotCache.delete(oldest);
+          this.#projectionCache.delete(oldest);
         }
         this.#indexedVersions.set(path, version);
         return { snapshot, version };
@@ -509,6 +576,100 @@ export class StudioSessionArchiveReader {
       });
     this.#snapshotInFlight.set(path, { version: indexedVersion, promise: read });
     return read;
+  }
+
+  /**
+   * 追加式续读：只读走 `consumed.bytes` 之后的字节。文件被换掉、被截断或前缀改写时返回
+   * undefined，由调用方回落到整档读取。
+   */
+  async #appendSnapshot(
+    path: string,
+    expectedSessionId: string,
+    cached: CachedSnapshot,
+  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion; consumed: ConsumedPrefix } | undefined> {
+    const consumed = cached.consumed;
+    if (consumed === undefined || isCompressedSessionPath(path)) return undefined;
+    if (cached.snapshot.sessionId !== expectedSessionId) return undefined;
+    const handle = await open(path, "r").catch(() => undefined);
+    if (handle === undefined) return undefined;
+    try {
+      const before = await handle.stat({ bigint: true });
+      if (!before.isFile()) return undefined;
+      if (before.dev !== BigInt(consumed.dev) || before.ino !== BigInt(consumed.ino)) return undefined;
+      if (before.size > BigInt(this.#maxSessionBytes)) {
+        throw new SessionArchiveError("SESSION_TOO_LARGE", "Session exceeds the configured read limit");
+      }
+      const size = Number(before.size);
+      if (size < consumed.bytes) return undefined;
+      const overlap = Math.min(consumed.tail.length, consumed.bytes);
+      const start = consumed.bytes - overlap;
+      const buffer = Buffer.alloc(size - start);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const chunk = await handle.read(buffer, offset, buffer.length - offset, start + offset);
+        if (chunk.bytesRead === 0) break;
+        offset += chunk.bytesRead;
+      }
+      const after = await handle.stat({ bigint: true });
+      if (after.dev !== before.dev || after.ino !== before.ino || after.size < before.size) return undefined;
+      const seen = buffer.subarray(0, Math.min(overlap, offset));
+      if (!seen.equals(consumed.tail.subarray(consumed.tail.length - seen.length))) return undefined;
+      const appended = completeJsonlPrefix(buffer.subarray(overlap, offset));
+      const entries = cached.snapshot.entries;
+      const byId = cached.snapshot.byId;
+      if (appended.byteLength > 0) {
+        const values = await parseCompleteJsonlYielding(appended.bytes);
+        for (const value of values) {
+          const entry = parseEntry(value);
+          if (entry === undefined) continue;
+          entries.push(entry);
+          byId.set(entry.id, entry);
+        }
+      }
+      const hash = consumed.hash;
+      if (appended.byteLength > 0) await updateHashYielding(hash, appended.bytes);
+      const nextConsumed: ConsumedPrefix = {
+        bytes: consumed.bytes + appended.byteLength,
+        hash,
+        tail: tailSample(consumed.tail, appended.bytes),
+        dev: consumed.dev,
+        ino: consumed.ino,
+      };
+      return {
+        snapshot: {
+          sessionId: cached.snapshot.sessionId,
+          transcriptRevision: revisionOf(hash, consumed.dev, consumed.ino, nextConsumed.bytes),
+          branchLeafId: resolveBranchLeaf(entries),
+          entries,
+          byId,
+        },
+        version: fileVersion(after),
+        consumed: nextConsumed,
+      };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /**
+   * 分支投影，带可续算缓存。新分支只是旧分支的追加时接着折叠，其余情况整条重折。
+   */
+  async #projectedItems(path: string, snapshot: ArchiveSnapshot): Promise<readonly ConversationItem[]> {
+    const branch = activeBranch(snapshot.byId, snapshot.branchLeafId);
+    const cached = this.#projectionCache.get(path);
+    const reusable =
+      cached !== undefined && cached.leafId === snapshot.branchLeafId && isBranchPrefix(cached.branch, branch);
+    const state = reusable ? cached.state : createProjectionState();
+    const from = reusable ? cached.branch.length : 0;
+    if (!reusable || from < branch.length) await foldBranch(state, branch, from);
+    this.#projectionCache.delete(path);
+    this.#projectionCache.set(path, { leafId: snapshot.branchLeafId, branch, state });
+    while (this.#projectionCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE) {
+      const oldest = this.#projectionCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.#projectionCache.delete(oldest);
+    }
+    return state.items;
   }
 
   /** Second, identity-checked read used only by the probe-copy path. */
@@ -593,10 +754,10 @@ export class StudioSessionArchiveReader {
     path: string,
     expectedSessionId: string,
     options: { requireCwd?: boolean } = {},
-  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> {
+  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion; consumed?: ConsumedPrefix }> {
     const { bytes, identity, version } = await this.#readWholeFile(path);
     const complete = completeJsonlPrefix(bytes);
-    const values = parseCompleteJsonl(complete.text);
+    const values = await parseCompleteJsonlYielding(complete.bytes);
     const header = values.find((value) => isRecord(value) && value.type === "session");
     const requireCwd = options.requireCwd !== false;
     if (!isRecord(header) || typeof header.id !== "string" || (requireCwd && typeof header.cwd !== "string")) {
@@ -608,32 +769,42 @@ export class StudioSessionArchiveReader {
     if (typeof header.cwd === "string" && !sameWorkspace(header.cwd, this.#allowedCwd)) {
       throw new SessionArchiveError("WORKSPACE_MISMATCH", "Session does not belong to the selected workspace");
     }
-    const entries = values.flatMap((value) => {
+    const entries: ArchiveEntry[] = [];
+    const byId = new Map<string, ArchiveEntry>();
+    for (const value of values) {
       const entry = parseEntry(value);
-      return entry === undefined ? [] : [entry];
-    });
-    const branchLeafId = resolveBranchLeaf(entries);
-    const revision = createHash("sha256")
+      if (entry === undefined) continue;
+      entries.push(entry);
+      byId.set(entry.id, entry);
+    }
+    /* 滚动哈希：内容先入，身份与长度在算 revision 时补上，追加续读才能接着更新。 */
+    const hash = createHash("sha256")
       .update(CURSOR_NAMESPACE)
       .update("\0")
       .update(header.id)
-      .update("\0")
-      .update(String(identity.dev))
-      .update(":")
-      .update(String(identity.ino))
-      .update(":")
-      .update(String(complete.byteLength))
-      .update("\0")
-      .update(complete.bytes)
-      .digest("base64url");
+      .update("\0");
+    await updateHashYielding(hash, complete.bytes);
     return {
       snapshot: {
         sessionId: header.id,
-        transcriptRevision: `sha256:${revision}`,
-        branchLeafId,
+        transcriptRevision: revisionOf(hash, identity.dev, identity.ino, complete.byteLength),
+        branchLeafId: resolveBranchLeaf(entries),
         entries,
+        byId,
       },
       version,
+      /* 压缩档没有可续读的字节边界：不给 consumed，下次仍然整档解压。 */
+      ...(isCompressedSessionPath(path)
+        ? {}
+        : {
+            consumed: {
+              bytes: complete.byteLength,
+              hash,
+              tail: tailSample(EMPTY_BUFFER, complete.bytes),
+              dev: identity.dev,
+              ino: identity.ino,
+            },
+          }),
     };
   }
 
@@ -901,25 +1072,92 @@ function samePaths(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((path, index) => path === right[index]);
 }
 
-function completeJsonlPrefix(bytes: Buffer): { bytes: Buffer; text: string; byteLength: number } {
-  if (bytes.length === 0) return { bytes, text: "", byteLength: 0 };
+/**
+ * 完整前缀：最后一个换行为止的字节。不再一次性 `toString`——十几 MB 的整档解码本身就是
+ * 几十毫秒的同步停顿，解析时按行解码更划算。
+ */
+function completeJsonlPrefix(bytes: Buffer): { bytes: Buffer; byteLength: number } {
+  if (bytes.length === 0) return { bytes, byteLength: 0 };
   const newline = bytes.lastIndexOf(0x0a);
-  if (newline < 0) return { bytes: Buffer.alloc(0), text: "", byteLength: 0 };
+  if (newline < 0) return { bytes: EMPTY_BUFFER, byteLength: 0 };
   const complete = bytes.subarray(0, newline + 1);
-  return { bytes: complete, text: complete.toString("utf8"), byteLength: complete.length };
+  return { bytes: complete, byteLength: complete.length };
 }
 
-function parseCompleteJsonl(text: string): unknown[] {
+/**
+ * 逐行 JSON 解析，按时间片让出事件循环。
+ *
+ * 这一步在 Electron 主进程上跑：一个十几 MB 的会话整档解析要几百毫秒，同步做会把 Bridge
+ * 事件、command 回执和别的 IPC 一起堵住。每 8ms 让一次，总 CPU 不变，但主进程不再假死。
+ */
+async function parseCompleteJsonlYielding(bytes: Buffer): Promise<unknown[]> {
   const values: unknown[] = [];
-  for (const [index, raw] of text.split(/\r?\n/u).entries()) {
-    if (raw.trim().length === 0) continue;
-    try {
-      values.push(JSON.parse(raw));
-    } catch (error) {
-      throw new SessionArchiveError("SESSION_CORRUPT", `Session contains malformed JSON at complete line ${index + 1}: ${(error as Error).message}`);
+  let checkpoint = Date.now();
+  let start = 0;
+  let line = 0;
+  while (start < bytes.length) {
+    const newline = bytes.indexOf(0x0a, start);
+    const end = newline < 0 ? bytes.length : newline;
+    line += 1;
+    const raw = bytes.toString("utf8", start, end).trim();
+    start = end + 1;
+    if (raw.length > 0) {
+      try {
+        values.push(JSON.parse(raw));
+      } catch (error) {
+        throw new SessionArchiveError("SESSION_CORRUPT", `Session contains malformed JSON at complete line ${line}: ${(error as Error).message}`);
+      }
+    }
+    if ((line & PARSE_YIELD_MASK) === 0 && Date.now() - checkpoint >= PARSE_YIELD_MS) {
+      await yieldToEventLoop();
+      checkpoint = Date.now();
     }
   }
   return values;
+}
+
+/** 分片喂哈希：sha256 十几 MB 是一次几十毫秒的同步调用，切开让出。 */
+async function updateHashYielding(hash: Hash, bytes: Buffer): Promise<void> {
+  const chunk = 1 << 20;
+  let checkpoint = Date.now();
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    hash.update(bytes.subarray(offset, Math.min(bytes.length, offset + chunk)));
+    if (Date.now() - checkpoint >= PARSE_YIELD_MS) {
+      await yieldToEventLoop();
+      checkpoint = Date.now();
+    }
+  }
+}
+
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+}
+
+/** 已消费前缀的末尾采样：续读时用它确认文件是被追加，而不是被改写。 */
+function tailSample(previous: Buffer, appended: Buffer): Buffer {
+  if (appended.length >= TAIL_SAMPLE_BYTES) {
+    return Buffer.from(appended.subarray(appended.length - TAIL_SAMPLE_BYTES));
+  }
+  const combined = Buffer.concat([previous, appended]);
+  return combined.length <= TAIL_SAMPLE_BYTES
+    ? combined
+    : Buffer.from(combined.subarray(combined.length - TAIL_SAMPLE_BYTES));
+}
+
+/**
+ * `transcriptRevision`：内容滚动哈希 + 文件身份 + 已消费长度。
+ * 哈希对象只 `copy()` 后再补尾料，原对象继续给下一次追加用。
+ */
+function revisionOf(content: Hash, dev: number | bigint, ino: number | bigint, byteLength: number): string {
+  const digest = content
+    .copy()
+    .update("\0")
+    .update(`${String(dev)}:${String(ino)}:${String(byteLength)}`)
+    .digest("base64url");
+  return `sha256:${digest}`;
 }
 
 function parseEntry(value: unknown): ArchiveEntry | undefined {
@@ -929,9 +1167,8 @@ function parseEntry(value: unknown): ArchiveEntry | undefined {
   return value as ArchiveEntry;
 }
 
-function activeBranch(entries: readonly ArchiveEntry[], leafId: string | null): ArchiveEntry[] {
+function activeBranch(byId: ReadonlyMap<string, ArchiveEntry>, leafId: string | null): ArchiveEntry[] {
   if (leafId === null) return [];
-  const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const branch: ArchiveEntry[] = [];
   const visited = new Set<string>();
   let current = byId.get(leafId);
@@ -993,11 +1230,32 @@ function attachToolResult(
   return { index: parentIndex, result: { ...result, toolCallId: call.toolCallId } };
 }
 
-function projectBranch(entries: readonly ArchiveEntry[]): ConversationItem[] {
-  const items: ConversationItem[] = [];
-  const toolOwners = new Map<string, number>();
+/** 新分支是否只是旧分支的追加（逐个引用比对，指针级开销）。 */
+function isBranchPrefix(previous: readonly ArchiveEntry[], next: readonly ArchiveEntry[]): boolean {
+  if (previous.length > next.length) return false;
+  for (let index = 0; index < previous.length; index += 1) {
+    if (previous[index] !== next[index]) return false;
+  }
+  return true;
+}
 
-  for (const entry of entries) {
+function createProjectionState(): ProjectionState {
+  return { items: [], toolOwners: new Map<string, number>() };
+}
+
+/**
+ * 把 `branch[from..]` 折进投影状态。这是一次纯前向折叠：中间结果只有 items 与
+ * toolOwners，所以追加的分支可以接着上次的状态往下折，结果和整条重折一致。
+ */
+async function foldBranch(state: ProjectionState, branch: readonly ArchiveEntry[], from: number): Promise<void> {
+  const { items, toolOwners } = state;
+  let checkpoint = Date.now();
+  for (let cursor = from; cursor < branch.length; cursor += 1) {
+    const entry = branch[cursor]!;
+    if ((cursor & PARSE_YIELD_MASK) === 0 && Date.now() - checkpoint >= PARSE_YIELD_MS) {
+      await yieldToEventLoop();
+      checkpoint = Date.now();
+    }
     if (entry.type === "message") {
       const message = isRecord(entry.message) ? entry.message : {};
       if (message.role === "toolResult") {
@@ -1042,7 +1300,6 @@ function projectBranch(entries: readonly ArchiveEntry[]): ConversationItem[] {
       if (block.type === "toolCall") toolOwners.set(block.toolCallId, index);
     }
   }
-  return items;
 }
 
 function projectEntry(entry: ArchiveEntry): ConversationItem | undefined {
@@ -1228,30 +1485,64 @@ function sanitizeText(value: string, maxBytes: number): { text: string; truncate
   return truncateText(shortenHomePath(value), maxBytes);
 }
 
-/** Last-resort reduction when a single item alone exceeds the page budget. */
-function shrinkItem(item: ConversationItem): ConversationItem {
+const PAGE_PAYLOAD_BYTE_STEPS = [64 * 1024, 16 * 1024, 4 * 1024, 1024, 256] as const;
+
+function compactJson(value: JsonValue, maxBytes: number): JsonValue {
+  try {
+    if (Buffer.byteLength(JSON.stringify(value), "utf8") <= maxBytes) return value;
+  } catch {
+    // Projected JSON should already be serializable; fail closed if it is not.
+  }
+  return { truncated: true };
+}
+
+/** Reduce large payloads while preserving item and tool association shells. */
+function shrinkItem(item: ConversationItem, maxPayloadBytes: number): ConversationItem {
   if (item.kind === "message") {
+    let changed = false;
+    const content = item.content.map((block) => {
+      if (block.type === "text" || block.type === "thinking") {
+        const text = truncateText(block.text, Math.min(maxPayloadBytes, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES));
+        if (!text.truncated) return block;
+        changed = true;
+        return { ...block, text: text.text, truncated: true };
+      }
+      if (block.type === "toolCall") {
+        if (block.arguments === undefined) return block;
+        const args = compactJson(block.arguments, maxPayloadBytes);
+        if (args === block.arguments) return block;
+        changed = true;
+        return { ...block, arguments: args, truncated: true };
+      }
+      const output = block.output === undefined
+        ? undefined
+        : truncateText(block.output, Math.min(maxPayloadBytes, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES));
+      const data = block.data === undefined ? undefined : compactJson(block.data, maxPayloadBytes);
+      if (output?.truncated !== true && data === block.data) return block;
+      changed = true;
+      return {
+        ...block,
+        ...(output === undefined ? {} : { output: output.text }),
+        ...(data === undefined ? {} : { data }),
+        truncated: true,
+      };
+    });
+    if (!changed) return item;
     return {
       ...item,
-      content: item.content.map((block) => {
-        if (block.type === "text" || block.type === "thinking") {
-          const text = truncateText(block.text, Math.min(256, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES));
-          return { ...block, text: text.text, truncated: true };
-        }
-        if (block.type === "toolCall") return { ...block, arguments: { truncated: true }, truncated: true };
-        const { output: _output, ...rest } = block;
-        return { ...rest, data: { truncated: true }, truncated: true };
-      }),
+      content,
     };
   }
   if (item.kind === "compaction") {
-    const summary = truncateText(item.summary, 256);
+    const summary = truncateText(item.summary, maxPayloadBytes);
+    const shortSummary = item.shortSummary === undefined ? undefined : truncateText(item.shortSummary, maxPayloadBytes);
+    const warning = item.warning === undefined ? undefined : truncateText(item.warning, maxPayloadBytes);
+    if (!summary.truncated && shortSummary?.truncated !== true && warning?.truncated !== true) return item;
     return {
-      kind: "compaction",
-      itemId: item.itemId,
-      parentId: item.parentId,
-      createdAt: item.createdAt,
+      ...item,
       summary: summary.text.length > 0 ? summary.text : " ",
+      ...(shortSummary === undefined ? {} : { shortSummary: shortSummary.text }),
+      ...(warning === undefined ? {} : { warning: warning.text }),
     };
   }
   return item;
@@ -1267,7 +1558,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Matches overlay `conversation-visibility.ts`: drop developer/custom and synthetic/steering user rows. */
+/** Matches overlay `conversation-visibility.ts`: drop developer/custom, synthetic,
+ * and agent-attributed steering user rows. A user-attributed steer is the
+ * operator's own 插入纠偏 input and must render at its chronological position. */
 function isHarnessInjectedUserMessage(message: Record<string, unknown>): boolean {
-  return message.role === "user" && (message.synthetic === true || message.steering === true);
+  if (message.role !== "user") return false;
+  if (message.synthetic === true) return true;
+  return message.steering === true && message.attribution !== "user";
 }

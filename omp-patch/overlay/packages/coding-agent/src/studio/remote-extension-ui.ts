@@ -2,10 +2,10 @@ import * as crypto from "node:crypto";
 import type { ToolCallContext } from "@oh-my-pi/pi-agent-core";
 import type {
 	AutocompleteProviderFactory,
-	ExtensionUIContext,
 	ExtensionAskDialogQuestion,
 	ExtensionAskDialogResult,
 	ExtensionAskDialogResultItem,
+	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionUISelectItem,
 	ExtensionUiComponentFactory,

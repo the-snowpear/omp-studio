@@ -559,6 +559,11 @@
   list-style: none;
   border-top: 1px solid var(--border);
 }
+/* 限高态：最多可见 --turn-diff-cap-rows 行（行高恒 36px），其余在卡内滚动 */
+.turn-diff.capped .turn-diff-files {
+  max-height: calc(var(--turn-diff-cap-rows, 6) * 36px);
+  overflow-y: auto;
+}
 .turn-diff-row {
   display: flex;
   align-items: center;
@@ -1896,12 +1901,18 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 
 /* 新内容提示 — a real <button> now (it was a click-handled div), so the button
-   defaults have to be reset back to the original appearance. */
+   defaults have to be reset back to the original appearance.
+   用 sticky 而不是 absolute：胶囊是 .convo-scroll 滚动容器的直接子节点，
+   absolute 会锚到容器在内容顶部的 padding box，随 transcript 一起滚走（卡在对话中部）；
+   sticky 把它钉在滚动视口底部，任意滚动态下都悬浮在 composer 上方。
+   居中走 width:max-content + 自动外边距，避免依赖 transform（omp-toast-in 动画
+   的 transform:none 会覆盖 translateX(-50%) 造成水平跳动）。 */
 .new-content-pill {
-  position: absolute;
+  position: sticky;
   bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  width: max-content;
+  margin-left: auto;
+  margin-right: auto;
   display: flex; align-items: center; gap: var(--sp-6);
   background: var(--accent);
   color: var(--text-on-accent);
@@ -3614,12 +3625,12 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 }
 @keyframes omp-text-breath {
   0%, 100% {
-    text-shadow: 0 0 1px color-mix(in srgb, var(--danger-orange) 45%, transparent),
-                 0 0 5px color-mix(in srgb, var(--danger-orange) 18%, transparent);
+    text-shadow: 0 0 1px color-mix(in srgb, var(--danger-glow) 45%, transparent),
+                 0 0 5px color-mix(in srgb, var(--danger-glow) 18%, transparent);
   }
   50% {
-    text-shadow: 0 0 2px color-mix(in srgb, var(--danger-orange) 70%, transparent),
-                 0 0 9px color-mix(in srgb, var(--danger-orange) 32%, transparent);
+    text-shadow: 0 0 2px color-mix(in srgb, var(--danger-glow) 70%, transparent),
+                 0 0 9px color-mix(in srgb, var(--danger-glow) 32%, transparent);
   }
 }
 /* 权限模式 pill（plan §5.5）：菜单浮于 composer 上方，不挤占布局 */
@@ -4452,7 +4463,8 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .bottom-panel.resizing { transition: none; }
 .bp-reveal {
   position: absolute;
-  right: var(--sp-10);
+  /* 让位 minimap 竖条：偏移惯例同 .mm-preview（--minimap-w + 8px） */
+  right: calc(var(--sp-10) + var(--minimap-w) + 8px);
   bottom: var(--sp-8);
   z-index: var(--z-fab);
   background: var(--surface);
@@ -5819,6 +5831,26 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   margin: 0 var(--sp-14) var(--sp-6);
   color: var(--red);
   font-size: var(--fs-12);
+}
+.composer-error .composer-error-x {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--r-4, 4px);
+}
+.composer-error .composer-error-x:hover {
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+.composer-error .composer-error-x:focus-visible {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
 }
 .composer-hint { margin: 0 var(--sp-14) var(--sp-6); }
 .ev-user .err-actions {

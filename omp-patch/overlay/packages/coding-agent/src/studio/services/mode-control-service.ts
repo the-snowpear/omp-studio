@@ -1,3 +1,6 @@
+import { constants as fsConstants } from "node:fs";
+import { mkdir, open } from "node:fs/promises";
+import { dirname } from "node:path";
 import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import { CompactionCancelledError } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model } from "@oh-my-pi/pi-ai";
@@ -8,9 +11,12 @@ import type { PlanApprovalDetails } from "../../plan-mode/approved-plan";
 import { resolvePlanModelTransition } from "../../plan-mode/model-transition";
 import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planModeApprovedPrompt from "../../prompts/system/plan-mode-approved.md" with { type: "text" };
-import planModeCompactInstructionsPrompt from "../../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
+import planModeCompactInstructionsPrompt from "../../prompts/system/plan-mode-compact-instructions.md" with {
+	type: "text",
+};
 import type { AgentSession } from "../../session/agent-session";
 import type { ConfiguredThinkingLevel } from "../../thinking";
+import { confineToWorkspace, formatPathRelativeToCwd, normalizePathLikeInput } from "../../tools/path-utils";
 import { PROPOSE_DEVICE_NAME, writeDeviceDispatch } from "../../tools/resolve";
 import { type VibeOwnerScope, type VibeParentSession, VibeSessionRegistry } from "../../vibe/runtime";
 
@@ -49,6 +55,63 @@ type PendingSessionMode =
 	| { kind: "vibe"; initialPrompt?: string };
 
 const DEFAULT_PLAN_FILE = "local://PLAN.md";
+
+// O_NOFOLLOW protects the final path component on platforms that expose it.
+// Parent-directory swaps remain a cross-platform limitation: closing that race
+// needs an openat/dirfd walk, which Node/Bun do not provide consistently.
+const PLAN_WRITE_OPEN_FLAGS =
+	fsConstants.O_WRONLY | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0);
+
+async function writePlanFileSafely(absolutePath: string, body: string): Promise<void> {
+	await mkdir(dirname(absolutePath), { recursive: true });
+	const handle = await open(absolutePath, PLAN_WRITE_OPEN_FLAGS, 0o600);
+	try {
+		const stat = await handle.stat();
+		if (!stat.isFile()) throw new Error("Plan save target is not a regular file");
+		if (stat.nlink > 1) throw new Error("Plan save target has multiple hard links");
+		await handle.truncate(0);
+		await handle.writeFile(body);
+	} finally {
+		await handle.close();
+	}
+}
+
+export function resolveStudioPlanSavePath(input: string, cwd: string): { absolutePath: string; relativePath: string } {
+	if (
+		typeof input !== "string" ||
+		input !== input.trim() ||
+		(input.startsWith('"') && input.endsWith('"')) ||
+		(input.startsWith("'") && input.endsWith("'"))
+	) {
+		throw new StudioModeError("INVALID_ARGUMENT", "Plan save path must be a workspace-relative file path");
+	}
+	const normalized = normalizePathLikeInput(input).replaceAll("\\", "/");
+	const segments = normalized.split("/");
+	if (
+		!normalized ||
+		normalized.includes("\0") ||
+		normalized.length > 1024 ||
+		normalized.startsWith("/") ||
+		/^[A-Za-z]:/.test(normalized) ||
+		normalized.endsWith("/") ||
+		segments.some(segment => segment === ".." || segment.includes(":"))
+	) {
+		throw new StudioModeError("INVALID_ARGUMENT", "Plan save path must be a workspace-relative file path");
+	}
+	const relativeInput = segments.filter(segment => segment.length > 0 && segment !== ".").join("/");
+	if (!relativeInput) {
+		throw new StudioModeError("INVALID_ARGUMENT", "Plan save path must name a file");
+	}
+	const absolutePath = confineToWorkspace(relativeInput, cwd);
+	if (!absolutePath) {
+		throw new StudioModeError("INVALID_ARGUMENT", "Plan save path must stay inside the workspace");
+	}
+	const relativePath = formatPathRelativeToCwd(absolutePath, cwd).replaceAll("\\", "/");
+	if (!relativePath || relativePath === "." || relativePath.startsWith("../") || relativePath.includes("/../")) {
+		throw new StudioModeError("INVALID_ARGUMENT", "Plan save path must stay inside the workspace");
+	}
+	return { absolutePath, relativePath };
+}
 
 /** Runtime-owned Plan/Goal/Vibe transitions shared by Bridge and presentation adapters. */
 export class StudioModeControlService {
@@ -111,9 +174,7 @@ export class StudioModeControlService {
 			throw new StudioModeError("COMMAND_BLOCKED", "Plan mode is disabled in settings");
 		}
 		if (this.#shouldDefer()) {
-			return this.#queuePending(
-				initialPrompt === undefined ? { kind: "plan" } : { kind: "plan", initialPrompt },
-			);
+			return this.#queuePending(initialPrompt === undefined ? { kind: "plan" } : { kind: "plan", initialPrompt });
 		}
 		this.#pendingSession = undefined;
 		this.#assertNoOtherMode("plan");
@@ -206,6 +267,46 @@ export class StudioModeControlService {
 		return { planFilePath: details.planFilePath, title: details.title, planExists: details.planExists };
 	}
 
+	async savePlanAndQuit(rawPath: string): Promise<{
+		saved: true;
+		path: string;
+		exitedPlan: true;
+		newSession: "started" | "cancelled" | "failed";
+		sessionId?: string;
+	}> {
+		const pending = this.#pendingPlan;
+		if (!pending) throw new StudioModeError("COMMAND_BLOCKED", "No plan review is open");
+		if (this.session.isStreaming || this.session.isCompacting) {
+			throw new StudioModeError("COMMAND_BLOCKED", "Cannot save a plan while the Runtime is busy");
+		}
+		const { absolutePath, relativePath } = resolveStudioPlanSavePath(rawPath, this.session.sessionManager.getCwd());
+		try {
+			await writePlanFileSafely(absolutePath, pending.body);
+		} catch (error) {
+			throw new StudioModeError(
+				"COMMAND_BLOCKED",
+				`Failed to save the plan: ${error instanceof Error ? error.message : "unknown error"}`,
+			);
+		}
+		await this.exitPlan(true);
+		let started: boolean;
+		try {
+			started = await this.session.newSession();
+		} catch {
+			// The file write and Plan exit are already committed. Do not pretend the
+			// operation failed atomically or retry it; report the partial outcome.
+			return { saved: true, path: relativePath, exitedPlan: true, newSession: "failed" };
+		}
+		if (!started) return { saved: true, path: relativePath, exitedPlan: true, newSession: "cancelled" };
+		return {
+			saved: true,
+			path: relativePath,
+			exitedPlan: true,
+			newSession: "started",
+			sessionId: this.session.sessionManager.getSessionId(),
+		};
+	}
+
 	async respondPlanReview(decision: StudioPlanReviewDecision, feedback?: string): Promise<unknown> {
 		const pending = this.#pendingPlan;
 		if (!pending) throw new StudioModeError("COMMAND_BLOCKED", "No plan review is open");
@@ -268,9 +369,7 @@ export class StudioModeControlService {
 	async createGoal(objective: string, tokenBudget?: number): Promise<StudioModeState> {
 		if (this.#shouldDefer()) {
 			return this.#queuePending(
-				tokenBudget === undefined
-					? { kind: "goal", objective }
-					: { kind: "goal", objective, tokenBudget },
+				tokenBudget === undefined ? { kind: "goal", objective } : { kind: "goal", objective, tokenBudget },
 			);
 		}
 		this.#pendingSession = undefined;
@@ -334,9 +433,7 @@ export class StudioModeControlService {
 
 	async enterVibe(initialPrompt?: string): Promise<StudioModeState> {
 		if (this.#shouldDefer()) {
-			return this.#queuePending(
-				initialPrompt === undefined ? { kind: "vibe" } : { kind: "vibe", initialPrompt },
-			);
+			return this.#queuePending(initialPrompt === undefined ? { kind: "vibe" } : { kind: "vibe", initialPrompt });
 		}
 		this.#pendingSession = undefined;
 		this.#assertNoOtherMode("vibe");

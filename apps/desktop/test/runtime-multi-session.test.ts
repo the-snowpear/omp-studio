@@ -45,6 +45,7 @@ function fakeWorkerFactory(state: {
   readonly failInvoke: Set<string>;
   readonly dead: Set<string>;
   readonly invokes: Array<{ sessionId: string; operation: StudioOperation }>;
+  readonly launchedIn: Array<{ sessionId: string; workspaceId: string; cwd: string }>;
 }): NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]> {
   let fresh = 0;
   return ({ resumeSessionId, nextRuntimeEpoch }) => {
@@ -81,7 +82,16 @@ function fakeWorkerFactory(state: {
       onPublication: () => () => undefined,
     } as unknown as DesktopRuntimeSession;
     return {
-      async start() {
+      async start(launchContext) {
+        // A Runtime binds its cwd at spawn; record what this Worker was
+        // actually launched under so tests can prove no Session migrates.
+        if (launchContext.workspace !== undefined) {
+          state.launchedIn.push({
+            sessionId,
+            workspaceId: launchContext.workspace.workspaceId,
+            cwd: launchContext.workspace.cwd,
+          });
+        }
         return session;
       },
       async stop() {
@@ -101,6 +111,8 @@ function createHarness(maxResidentSessions?: number, idleWorkerTtlMs = 10 * 60_0
     failInvoke: new Set<string>(),
     dead: new Set<string>(),
     invokes: [] as Array<{ sessionId: string; operation: StudioOperation }>,
+    launchedIn: [] as Array<{ sessionId: string; workspaceId: string; cwd: string }>,
+    adopted: [] as Array<{ workspaceId: string; cwd: string }>,
   };
   const port = createDesktopRuntimeSessionPort({
     ...(maxResidentSessions === undefined ? {} : { maxResidentSessions }),
@@ -108,6 +120,9 @@ function createHarness(maxResidentSessions?: number, idleWorkerTtlMs = 10 * 60_0
     ownerId: "broker-test",
     sessionLeaseStore: new InMemorySessionLeaseStore(),
     workerPortFactory: fakeWorkerFactory(state),
+  });
+  port.attachWorkspaceSink?.((workspace) => {
+    state.adopted.push({ ...workspace });
   });
   return { port, state };
 }
@@ -127,6 +142,156 @@ const context = {
   runtimeInstallDirectory: "C:/runtime",
   workspace: { workspaceId: "workspace-a", cwd: "C:/workspace" },
 };
+
+const WORKSPACE_A = { workspaceId: "workspace-a", cwd: "C:/workspace" };
+const WORKSPACE_B = { workspaceId: "workspace-b", cwd: "C:/other" };
+
+test("rebind to another workspace keeps the previous project's Workers resident", async () => {
+  const { port, state } = createHarness();
+  const inA = await port.start(context);
+  assert.equal(inA?.controller.publication()?.snapshot.sessionId, "fresh-1");
+  const inB = await port.rebind?.(WORKSPACE_B);
+  assert.equal(inB?.controller.publication()?.snapshot.sessionId, "fresh-2");
+  // The whole point: opening B does not stop A's Worker.
+  assert.deepEqual(state.stopped, []);
+  assert.equal(port.isResident?.("fresh-1"), true);
+  assert.equal(port.isResident?.("fresh-2"), true);
+  assert.deepEqual(state.launchedIn, [
+    { sessionId: "fresh-1", workspaceId: "workspace-a", cwd: "C:/workspace" },
+    { sessionId: "fresh-2", workspaceId: "workspace-b", cwd: "C:/other" },
+  ]);
+  await port.stop();
+});
+
+test("rebind back to a resident workspace selects its Worker without spawning", async () => {
+  const { port, state } = createHarness();
+  const inA = await port.start(context);
+  await port.rebind?.(WORKSPACE_B);
+  const backInA = await port.rebind?.(WORKSPACE_A);
+  assert.equal(backInA, inA);
+  assert.equal(state.created.length, 2);
+  assert.deepEqual(state.stopped, []);
+  await port.stop();
+});
+
+test("hasResidentForWorkspace reports live Workers per workspace", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  assert.equal(port.hasResidentForWorkspace?.("workspace-a"), true);
+  assert.equal(port.hasResidentForWorkspace?.("workspace-b"), false);
+  await port.rebind?.(WORKSPACE_B);
+  assert.equal(port.hasResidentForWorkspace?.("workspace-b"), true);
+  // A Worker whose hello is gone no longer counts as resident, so the
+  // composition treats the next rebind as a restart rather than a switch.
+  state.dead.add("fresh-1");
+  assert.equal(port.hasResidentForWorkspace?.("workspace-a"), false);
+  await port.stop();
+});
+
+test("rebind replaces a dead Worker of the target workspace only", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  await port.rebind?.(WORKSPACE_B);
+  state.dead.add("fresh-1");
+  const relaunched = await port.rebind?.(WORKSPACE_A);
+  assert.equal(relaunched?.controller.publication()?.snapshot.sessionId, "fresh-3");
+  assert.deepEqual(state.stopped, ["fresh-1"]);
+  assert.equal(port.isResident?.("fresh-2"), true);
+  assert.deepEqual(
+    state.launchedIn.filter((entry) => entry.sessionId === "fresh-3"),
+    [{ sessionId: "fresh-3", workspaceId: "workspace-a", cwd: "C:/workspace" }],
+  );
+  await port.stop();
+});
+
+test("a fresh Session lands in the workspace currently bound to the view", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  await port.rebind?.(WORKSPACE_B);
+  await port.switchSession?.({ kind: "fresh" });
+  assert.deepEqual(
+    state.launchedIn.filter((entry) => entry.sessionId === "fresh-3"),
+    [{ sessionId: "fresh-3", workspaceId: "workspace-b", cwd: "C:/other" }],
+  );
+  await port.stop();
+});
+
+test("resuming a Session of another project moves the active workspace with it", async () => {
+  const { port, state } = createHarness();
+  await port.start(context); // fresh-1 in A
+  await port.rebind?.(WORKSPACE_B); // fresh-2 in B
+  state.adopted.length = 0;
+  await port.switchSession?.({ kind: "resume", sessionId: "fresh-1" });
+  assert.deepEqual(state.adopted, [WORKSPACE_A]);
+  // A subsequent fresh Session must follow the adopted workspace, not B.
+  await port.switchSession?.({ kind: "fresh" });
+  assert.deepEqual(
+    state.launchedIn.filter((entry) => entry.sessionId === "fresh-3"),
+    [{ sessionId: "fresh-3", workspaceId: "workspace-a", cwd: "C:/workspace" }],
+  );
+  await port.stop();
+});
+
+test("relaunching a dead resident keeps it in its own workspace", async () => {
+  const { port, state } = createHarness();
+  await port.start(context); // fresh-1 in A
+  await port.rebind?.(WORKSPACE_B); // fresh-2 in B, active workspace is B
+  state.dead.add("fresh-1");
+  await port.switchSession?.({ kind: "resume", sessionId: "fresh-1" });
+  assert.deepEqual(state.stopped, ["fresh-1"]);
+  assert.deepEqual(
+    state.launchedIn.filter((entry) => entry.sessionId === "fresh-1"),
+    [
+      { sessionId: "fresh-1", workspaceId: "workspace-a", cwd: "C:/workspace" },
+      { sessionId: "fresh-1", workspaceId: "workspace-a", cwd: "C:/workspace" },
+    ],
+  );
+  await port.stop();
+});
+
+test("evacuating the active Session relaunches inside its own workspace", async () => {
+  const { port, state } = createHarness();
+  await port.start(context); // fresh-1 in A
+  await port.rebind?.(WORKSPACE_B); // fresh-2 in B is active
+  const result = await port.evacuateResident?.("fresh-2");
+  assert.equal(result?.found, true);
+  assert.equal(result?.active?.controller.publication()?.snapshot.sessionId, "fresh-3");
+  assert.deepEqual(
+    state.launchedIn.filter((entry) => entry.sessionId === "fresh-3"),
+    [{ sessionId: "fresh-3", workspaceId: "workspace-b", cwd: "C:/other" }],
+  );
+  assert.equal(port.isResident?.("fresh-1"), true);
+  await port.stop();
+});
+
+test("force ensure relaunches the active Session in its own workspace", async () => {
+  const { port, state } = createHarness();
+  await port.start(context); // fresh-1 in A
+  await port.rebind?.(WORKSPACE_B); // fresh-2 in B is active
+  await port.ensure?.({ force: true });
+  assert.deepEqual(state.stopped, ["fresh-2"]);
+  assert.deepEqual(
+    state.launchedIn.filter((entry) => entry.sessionId === "fresh-2"),
+    [
+      { sessionId: "fresh-2", workspaceId: "workspace-b", cwd: "C:/other" },
+      { sessionId: "fresh-2", workspaceId: "workspace-b", cwd: "C:/other" },
+    ],
+  );
+  assert.equal(port.isResident?.("fresh-1"), true);
+  await port.stop();
+});
+
+test("capacity hibernates a background project before an idle sibling of the active one", async () => {
+  const { port, state } = createHarness(3);
+  await port.start(context); // fresh-1 in A
+  await port.switchSession?.({ kind: "fresh" }); // fresh-2 in A
+  await port.rebind?.(WORKSPACE_B); // fresh-3 in B, B is active
+  // Capacity is full. fresh-1 is the least-recently-selected overall, and it
+  // belongs to the now-background project A, so it hibernates first.
+  await port.switchSession?.({ kind: "fresh" }); // fresh-4 in B
+  assert.deepEqual(state.stopped, ["fresh-1"]);
+  await port.stop();
+});
 
 test("desktop multi-session port keeps A and B resident when selecting A again", async () => {
   const { port, state } = createHarness();

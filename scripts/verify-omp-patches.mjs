@@ -94,6 +94,7 @@ try {
       "packages/coding-agent/test/studio-model-control-service.test.ts",
       "packages/coding-agent/test/studio-session-control-dispatcher.test.ts",
       "packages/coding-agent/test/studio-session-control-service.test.ts",
+      "packages/coding-agent/test/studio-agent-session-compatibility.test.ts",
       "packages/coding-agent/test/studio-skill-prompt-expansion.test.ts",
       "packages/coding-agent/test/studio-command-manifest-service.test.ts",
       "packages/coding-agent/test/studio-interaction-port.test.ts",

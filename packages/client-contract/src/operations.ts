@@ -21,6 +21,11 @@ import type {
   SessionTelemetryReadResult,
   SessionThinkingSelector,
   StudioAgentSnapshot,
+  StudioPlanSaveAndQuitResult,
+  StudioRuntimeSettingKey,
+  StudioRuntimeSettingSetInput,
+  StudioRuntimeSettingsGetResult,
+  StudioRuntimeSettingsSetResult,
 } from "@omp-studio/studio-protocol";
 
 import type { ConversationTranscriptReadPage } from "./conversation.js";
@@ -64,6 +69,7 @@ import type {
   ModelProviderTestResult,
   RuntimeConnection,
   RuntimeInstallState,
+  ResidentsReadModel,
   SessionHistoryReadModel,
   SessionHistoryStatus,
   TokenUsageReadModel,
@@ -80,7 +86,12 @@ export interface QueryInputMap {
   "capabilities.get": EmptyInput;
   "commands.getManifest": EmptyInput;
   "diagnostics.get": EmptyInput;
-  "history.list": { readonly limit?: number; readonly status?: SessionHistoryStatus };
+  "history.list": {
+    readonly limit?: number;
+    readonly status?: SessionHistoryStatus;
+    readonly workspaceId?: WorkspaceId;
+  };
+  "residents.list": EmptyInput;
   "session.state": EmptyInput;
   "home.get": EmptyInput;
   "models.get": EmptyInput;
@@ -135,6 +146,7 @@ export interface QueryResultMap {
   "commands.getManifest": OperatorCommandManifest;
   "diagnostics.get": DiagnosticReadModel;
   "history.list": SessionHistoryReadModel;
+  "residents.list": ResidentsReadModel;
   /** Reused from the protocol as a public shape. */
   "session.state": OperatorStateSnapshot;
   "home.get": HomeReadModel;
@@ -339,6 +351,8 @@ export interface RuntimeCommandInputMap {
   "queue.enqueue": { readonly text: string };
   "runtime.pause": EmptyInput;
   "runtime.resume": { readonly expectedPauseEpoch: number };
+  "runtime.settings.get": { readonly keys?: ReadonlyArray<StudioRuntimeSettingKey> };
+  "runtime.settings.set": StudioRuntimeSettingSetInput;
   "turn.retry": EmptyInput;
   "mode.plan.enter": { readonly initialPrompt?: string };
   "mode.plan.exit": { readonly discardDraft?: boolean };
@@ -347,6 +361,7 @@ export interface RuntimeCommandInputMap {
     readonly decision: "execute" | "compact" | "keep" | "approve" | "refine" | "dismiss";
     readonly feedback?: string;
   };
+  "mode.plan.review.saveAndQuit": { readonly path: string };
   "mode.vibe.enter": { readonly initialPrompt?: string };
   "mode.vibe.exit": EmptyInput;
   "goal.create": { readonly objective: string; readonly tokenBudget?: number };
@@ -464,6 +479,13 @@ interface CoreCommandInputMap {
   "session.archive": { readonly threadId: ThreadId };
   /** Restore an archived thread back into the active sessions tree. */
   "session.unarchive": { readonly threadId: ThreadId };
+  /**
+   * Permanently delete a thread's session files and every related local
+   * artifact (transcript, artifacts dir, telemetry record, thread binding,
+   * session lease, pin entry). The Host evacuates a resident Runtime off the
+   * file first. Destructive and irreversible; the Renderer confirms first.
+   */
+  "session.delete": { readonly threadId: ThreadId };
   /** Answer an `interaction_required` prompt issued by the Host. */
   "interaction.respond": {
     readonly interactionId: InteractionId;
@@ -617,6 +639,7 @@ interface CoreCommandResultMap {
   "session.drop": OperatorStateSnapshot;
   "session.archive": ConfigWriteResult;
   "session.unarchive": ConfigWriteResult;
+  "session.delete": ConfigWriteResult;
   "interaction.respond": OperatorStateSnapshot;
   "permissions.mode.set": {
     readonly mode: ApprovalMode;
@@ -716,7 +739,14 @@ export interface BtwBranchOutcome {
 export type CommandResultMap = CoreCommandResultMap & {
   [K in Exclude<
     keyof RuntimeCommandInputMap,
-    "operator.invoke" | "session.tree.navigate" | "session.tree.branch" | "btw.ask" | "btw.branch"
+    | "operator.invoke"
+    | "session.tree.navigate"
+    | "session.tree.branch"
+    | "btw.ask"
+    | "btw.branch"
+    | "runtime.settings.get"
+    | "runtime.settings.set"
+    | "mode.plan.review.saveAndQuit"
   >]: OperatorStateSnapshot;
 } & {
   "operator.invoke": OperatorInvokeOutcome;
@@ -724,6 +754,9 @@ export type CommandResultMap = CoreCommandResultMap & {
   "session.tree.branch": SessionTreeCommandOutcome;
   "btw.ask": BtwAskOutcome;
   "btw.branch": BtwBranchOutcome;
+  "runtime.settings.get": StudioRuntimeSettingsGetResult;
+  "runtime.settings.set": StudioRuntimeSettingsSetResult;
+  "mode.plan.review.saveAndQuit": StudioPlanSaveAndQuitResult;
 };
 
 export type CommandName = keyof CommandInputMap & keyof CommandResultMap;

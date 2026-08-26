@@ -6,6 +6,7 @@ import type {
   OpaqueCursor,
   RuntimeEpoch,
   RuntimeId,
+  SessionId,
   StudioPendingInteraction,
   StudioReceipt,
   StudioRequest,
@@ -85,8 +86,10 @@ export class StudioRuntimeSessionController {
     try {
       return await this.bridge.invoke(request, (receipt) => {
         this.ledger.reconcileReceipt(receipt);
-        const current = this.bridge.projectionSnapshot();
-        if (current !== undefined) this.#publish(current);
+        if (TERMINAL.has(receipt.status)) {
+          const current = this.bridge.projectionSnapshot();
+          if (current !== undefined) this.#publish(current);
+        }
       });
     } catch (error) {
       const entry = this.ledger.getByRequestId(request.requestId);
@@ -185,6 +188,10 @@ export class StudioRuntimeSessionController {
 
   onConversationEvent(listener: (event: StudioConversationForward) => void): () => void {
     return this.#conversation.onEvent(listener);
+  }
+
+  replayConversationEvents(sessionId: SessionId, listener: (event: StudioConversationForward) => void): void {
+    this.#conversation.replay(sessionId, listener);
   }
 
   onConversationResync(listener: (reason: string) => void): () => void {

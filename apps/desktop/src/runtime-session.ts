@@ -52,8 +52,10 @@ import {
 } from "@omp-studio/studio-host";
 import type {
   ApprovalMode,
+  CommandLedgerEntry,
   EnvironmentId,
   OperatorCommandManifest,
+  OperatorStateSnapshot,
   RequestId,
   RuntimeEpoch,
   RuntimeId,
@@ -62,9 +64,16 @@ import type {
   ThreadId,
   WorkspaceId,
 } from "@omp-studio/studio-protocol";
-import type { RuntimeUnavailableCode } from "@omp-studio/client-contract";
+import type {
+  ResidentSessionPhase,
+  ResidentSessionRow,
+  ResidentWaitKind,
+  ResidentsReadModel,
+  RuntimeUnavailableCode,
+} from "@omp-studio/client-contract";
 
 import type {
+  DesktopResidentsChange,
   DesktopRuntimeSession,
   DesktopRuntimeSessionContext,
   DesktopRuntimeSessionPort,
@@ -158,11 +167,20 @@ export function selectVerifiedCommandManifest(
 
 interface ResidentRuntime {
   readonly sessionId: string;
+  /**
+   * The workspace this Worker was spawned under. A Runtime process binds its
+   * cwd at spawn time (`--cwd`), so this never changes for a resident: opening
+   * another project selects (or launches) a different Worker instead.
+   */
+  readonly workspace: { workspaceId: string; cwd: string };
   port: DesktopRuntimeSessionPort;
   session: DesktopRuntimeSession;
   readonly lease: SessionLease;
   lastSelected: number;
   idleSince: number | undefined;
+  lastActivityAt: string;
+  lastCommitSeq: number;
+  unsubscribePublication: (() => void) | undefined;
   heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
 }
@@ -186,6 +204,11 @@ export function createDesktopRuntimeSessionPort(
   const ownerId = options.ownerId ?? `desktop-${process.pid}-${randomUUID()}`;
   const residents = new Map<string, ResidentRuntime>();
   let context: DesktopRuntimeSessionContext | undefined;
+  /**
+   * The workspace new Workers are launched under, i.e. the active project.
+   * Residents of other workspaces stay alive and keep streaming; switching
+   * projects only moves this pointer and the active session binding.
+   */
   let workspace: { workspaceId: string; cwd: string } | undefined;
   let activeSessionId: string | undefined;
   let leaseStore: SessionLeaseStore | undefined = options.sessionLeaseStore;
@@ -195,6 +218,104 @@ export function createDesktopRuntimeSessionPort(
   let lastUnavailable: HostRuntimeUnavailable | undefined;
   let lastDisconnect: HostRuntimeDisconnect | undefined;
   let sessionSink: ((session: DesktopRuntimeSession | undefined) => void) | undefined;
+  const residentSinks = new Set<(change: DesktopResidentsChange) => void>();
+  /**
+   * Several owners follow the active project (the composition's facade context
+   * and the Main-process workspace cwd used by chrome), so this is a set
+   * rather than the single-listener shape `attachSessionSink` uses.
+   */
+  const workspaceSinks = new Set<(workspace: { workspaceId: string; cwd: string }) => void>();
+
+  const residentWaitKind = (snapshot: OperatorStateSnapshot | undefined): ResidentWaitKind | undefined => {
+    // The GUI-owned interaction is the strongest waiting signal. A plan
+    // review remains visible as waiting even after the Runtime has stopped
+    // streaming, and therefore must win over the idle fallback.
+    if (snapshot !== undefined && snapshot.pendingInteraction?.owner === "gui") {
+      const kind = snapshot.pendingInteraction.request.kind;
+      return kind === "approval" || kind === "confirm" ? "approval" : "ask";
+    }
+    if (snapshot?.plan?.status === "review") return "plan";
+    return undefined;
+  };
+
+  const residentRow = (resident: ResidentRuntime): ResidentSessionRow => {
+    const snapshot = resident.session.controller.publication()?.snapshot;
+    const waitKind = residentWaitKind(snapshot);
+    const phase: ResidentSessionPhase = waitKind !== undefined
+      ? "waiting"
+      : snapshot?.isCompacting === true
+        ? "compacting"
+        : snapshot?.isStreaming === true
+          ? "running"
+          : "idle";
+    return {
+      sessionId: (snapshot?.sessionId ?? resident.sessionId) as ResidentSessionRow["sessionId"],
+      workspaceId: resident.workspace.workspaceId as ResidentSessionRow["workspaceId"],
+      phase,
+      pendingMessages: snapshot?.pendingMessages ?? 0,
+      ...(waitKind === undefined ? {} : { waitKind }),
+      lastActivityAt: resident.lastActivityAt,
+    };
+  };
+
+  const listResidents = (): ResidentsReadModel => ({
+    residents: [...residents.values()]
+      .sort((left, right) => right.lastSelected - left.lastSelected || left.sessionId.localeCompare(right.sessionId))
+      .map(residentRow),
+    ...(activeSessionId === undefined
+      ? {}
+      : { activeSessionId: activeSessionId as NonNullable<ResidentsReadModel["activeSessionId"]> }),
+    generatedAt: new Date().toISOString(),
+  });
+
+  const emitResidents = (terminalOutcomes: readonly CommandLedgerEntry[] = []): void => {
+    const change = {
+      ...listResidents(),
+      ...(terminalOutcomes.length === 0
+        ? {}
+        : { terminalOutcomes: terminalOutcomes.map((entry) => structuredClone(entry)) }),
+    } as DesktopResidentsChange;
+    for (const sink of [...residentSinks]) {
+      try {
+        sink(change);
+      } catch {
+        // A read-model consumer must never interfere with Runtime I/O.
+      }
+    }
+  };
+
+  const trackResidentPublication = (resident: ResidentRuntime, session: DesktopRuntimeSession): void => {
+    resident.unsubscribePublication?.();
+    resident.unsubscribePublication = undefined;
+    resident.session = session;
+    const current = session.controller.publication();
+    resident.lastCommitSeq = current?.commitSeq ?? resident.lastCommitSeq;
+    resident.lastActivityAt = current?.publishedAt ?? new Date().toISOString();
+    resident.unsubscribePublication = session.onPublication((publication) => {
+      if (publication.commitSeq <= resident.lastCommitSeq) return;
+      resident.lastCommitSeq = publication.commitSeq;
+      resident.lastActivityAt = publication.publishedAt;
+      emitResidents(publication.terminalOutcomes);
+      armIdleTimer(resident);
+    });
+  };
+
+  /**
+   * Move the active-project pointer and tell every follower, so cwd-derived
+   * reads (session catalog, archive, models/mcp scope) follow the selected
+   * Worker. A no-op when the pointer already names this workspace.
+   */
+  const adoptWorkspace = (next: { workspaceId: string; cwd: string }): void => {
+    if (workspace?.workspaceId === next.workspaceId && workspace.cwd === next.cwd) return;
+    workspace = next;
+    for (const sink of [...workspaceSinks]) {
+      try {
+        sink(next);
+      } catch {
+        // Isolate followers from the selection path.
+      }
+    }
+  };
 
   const rememberUnavailable = (facts: HostRuntimeUnavailable | undefined): void => {
     lastUnavailable = facts;
@@ -239,8 +360,9 @@ export function createDesktopRuntimeSessionPort(
         const snapshot = session.controller.publication()?.snapshot;
         const resident = snapshot === undefined ? undefined : residents.get(snapshot.sessionId);
         if (resident !== undefined) {
-          resident.session = session;
           resident.port = port;
+          trackResidentPublication(resident, session);
+          emitResidents();
         }
         rememberDisconnect(undefined);
         rememberUnavailable(undefined);
@@ -252,6 +374,8 @@ export function createDesktopRuntimeSessionPort(
 
   const stopResident = async (resident: ResidentRuntime): Promise<void> => {
     await resident.port.stop();
+    resident.unsubscribePublication?.();
+    resident.unsubscribePublication = undefined;
     if (resident.heartbeatTimer !== undefined) clearInterval(resident.heartbeatTimer);
     resident.heartbeatTimer = undefined;
     if (resident.idleTimer !== undefined) clearTimeout(resident.idleTimer);
@@ -259,6 +383,7 @@ export function createDesktopRuntimeSessionPort(
     await resident.lease.release();
     residents.delete(resident.sessionId);
     if (activeSessionId === resident.sessionId) activeSessionId = undefined;
+    emitResidents();
   };
 
   const stopAll = async (): Promise<void> => {
@@ -266,22 +391,49 @@ export function createDesktopRuntimeSessionPort(
     for (const resident of current) await stopResident(resident);
   };
 
+  /** Residents spawned under one workspace, most recently selected first. */
+  const residentsOfWorkspace = (workspaceId: string): ResidentRuntime[] =>
+    [...residents.values()]
+      .filter((resident) => resident.workspace.workspaceId === workspaceId)
+      .sort((left, right) => right.lastSelected - left.lastSelected);
+
   const ensureCapacity = async (): Promise<void> => {
     if (maxResidentSessions === Number.POSITIVE_INFINITY) return;
     if (residents.size < maxResidentSessions) return;
+    const activeWorkspaceId = workspace?.workspaceId;
     const candidate = [...residents.values()]
       .filter((resident) => resident.sessionId !== activeSessionId && sessionIsIdle(resident.session))
-      .sort((left, right) => left.lastSelected - right.lastSelected)[0];
+      // Hibernate background projects before the project being worked in: an
+      // idle sibling of the active workspace is far likelier to be selected
+      // next than a Worker of a project the user has navigated away from.
+      .sort((left, right) => {
+        const leftActive = left.workspace.workspaceId === activeWorkspaceId ? 1 : 0;
+        const rightActive = right.workspace.workspaceId === activeWorkspaceId ? 1 : 0;
+        return leftActive - rightActive || left.lastSelected - right.lastSelected;
+      })[0];
     if (candidate === undefined) {
       throw new Error("Runtime worker capacity is exhausted; no idle background Session can hibernate");
     }
-    options.log?.write("info", "runtime.hibernate", `session=${candidate.sessionId}`);
+    options.log?.write(
+      "info",
+      "runtime.hibernate",
+      `session=${candidate.sessionId} workspace=${candidate.workspace.workspaceId}`,
+    );
     await stopResident(candidate);
   };
 
-  const launchWorker = async (resumeSessionId?: string): Promise<DesktopRuntimeSession | undefined> => {
+  /**
+   * Spawn one Worker. `launchWorkspace` overrides the active project for
+   * relaunches that must land back in the workspace the previous Worker was
+   * bound to (lease loss, evacuation) — a Runtime cwd is fixed at spawn, so
+   * reusing the active pointer there would silently migrate a Session.
+   */
+  const launchWorker = async (
+    resumeSessionId?: string,
+    launchWorkspace?: { workspaceId: string; cwd: string },
+  ): Promise<DesktopRuntimeSession | undefined> => {
     const launchContext = context;
-    const selected = workspace;
+    const selected = launchWorkspace ?? workspace;
     if (launchContext === undefined || selected === undefined) {
       options.log?.write(
         "warn",
@@ -324,15 +476,21 @@ export function createDesktopRuntimeSessionPort(
       }
       const resident: ResidentRuntime = {
         sessionId: snapshot.sessionId,
+        workspace: selected,
         port,
         session,
         lease,
         lastSelected: 0,
         idleSince: undefined,
+        lastActivityAt: new Date().toISOString(),
+        lastCommitSeq: 0,
+        unsubscribePublication: undefined,
         heartbeatTimer: undefined,
         idleTimer: undefined,
       };
       residents.set(snapshot.sessionId, resident);
+      trackResidentPublication(resident, session);
+      emitResidents();
       if (lease.heartbeat !== undefined) {
         resident.heartbeatTimer = setInterval(() => {
           void Promise.resolve(lease!.heartbeat!()).catch((error) => {
@@ -343,7 +501,7 @@ export function createDesktopRuntimeSessionPort(
               const wasActive = activeSessionId === sessionId;
               await stopResident(resident);
               if (!wasActive) return;
-              const next = await launchWorker(sessionId);
+              const next = await launchWorker(sessionId, resident.workspace);
               sessionSink?.(next);
             }).catch((error) => {
               options.log?.write("error", "runtime.worker.relaunch-failed", errorDetail(error));
@@ -384,14 +542,26 @@ export function createDesktopRuntimeSessionPort(
     const existing = residents.get(sessionId);
     if (existing !== undefined) {
       if (existing.session.hello() !== undefined && existing.session.controller.publication()?.snapshot?.sessionId === sessionId) {
+        // Resuming a Session of another project follows its Worker: the active
+        // workspace moves with the selection so later `fresh` launches and
+        // cwd-derived Host reads (catalog, archive) agree with the view.
+        adoptWorkspace(existing.workspace);
         setActiveSession(sessionId);
         if (pendingApprovalMode !== undefined) {
           await synchronizeApprovalMode(pendingApprovalMode);
         }
-        options.log?.write("info", "runtime.worker.select", `session=${sessionId} resident=true`);
+        options.log?.write(
+          "info",
+          "runtime.worker.select",
+          `session=${sessionId} resident=true workspace=${existing.workspace.workspaceId}`,
+        );
         return existing.session;
       }
+      // A dead resident is replaced in its own workspace, not the active one.
+      const previousWorkspace = existing.workspace;
       await stopResident(existing);
+      adoptWorkspace(previousWorkspace);
+      return await launchWorker(sessionId, previousWorkspace);
     }
     return await launchWorker(sessionId);
   };
@@ -445,8 +615,10 @@ export function createDesktopRuntimeSessionPort(
     const current = residents.get(sessionId);
     if (current !== undefined) {
       current.lastSelected = ++selection;
+      current.lastActivityAt = new Date().toISOString();
       armIdleTimer(current);
     }
+    emitResidents();
   }
 
   /**
@@ -558,10 +730,59 @@ export function createDesktopRuntimeSessionPort(
     stop(): Promise<void> {
       return serialized(stopAll);
     },
+    hasResidentForWorkspace(workspaceId: string): boolean {
+      return residentsOfWorkspace(workspaceId).some(
+        (resident) => resident.session.hello() !== undefined,
+      );
+    },
+    listResidents(): ResidentsReadModel {
+      return structuredClone(listResidents());
+    },
+    attachResidentsSink(listener) {
+      residentSinks.add(listener);
+      try {
+        listener(listResidents());
+      } catch {
+        // Isolate the initial projection delivery from the Runtime port.
+      }
+      return () => {
+        residentSinks.delete(listener);
+      };
+    },
     rebind(next): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
-        await stopAll();
-        workspace = next;
+        // Opening another project must not disturb the Workers of the project
+        // being left: they keep their Bridge, their lease and any running
+        // turn. Switching back later re-selects a live Worker instead of
+        // paying a cold start.
+        adoptWorkspace(next);
+        const resident = residentsOfWorkspace(next.workspaceId).find(
+          (candidate) => candidate.session.hello() !== undefined,
+        );
+        if (resident !== undefined) {
+          setActiveSession(resident.sessionId);
+          rememberUnavailable(undefined);
+          rememberDisconnect(undefined);
+          if (pendingApprovalMode !== undefined) {
+            await synchronizeApprovalMode(pendingApprovalMode);
+          }
+          options.log?.write(
+            "info",
+            "runtime.rebind.resident",
+            `workspace=${next.workspaceId} session=${resident.sessionId} residents=${residents.size}`,
+          );
+          return resident.session;
+        }
+        // Drop a dead Worker of the target workspace before spawning, so a
+        // stale entry cannot block the fresh identity.
+        for (const stale of residentsOfWorkspace(next.workspaceId)) {
+          await stopResident(stale);
+        }
+        options.log?.write(
+          "info",
+          "runtime.rebind.launch",
+          `workspace=${next.workspaceId} residents=${residents.size}`,
+        );
         return await launchWorker();
       });
     },
@@ -599,9 +820,11 @@ export function createDesktopRuntimeSessionPort(
           }
         }
         const wasActive = activeSessionId === sessionId;
+        const evacuatedWorkspace = resident.workspace;
         await stopResident(resident);
         if (!wasActive) return { found: true };
-        const active = await launchWorker();
+        adoptWorkspace(evacuatedWorkspace);
+        const active = await launchWorker(undefined, evacuatedWorkspace);
         sessionSink?.(active);
         return active === undefined ? { found: true } : { found: true, active };
       });
@@ -623,14 +846,21 @@ export function createDesktopRuntimeSessionPort(
           return active.session;
         }
         const resumeId = active?.sessionId;
+        const activeWorkspace = active?.workspace;
         if (active !== undefined) await stopResident(active);
-        const next = await launchWorker(resumeId);
+        const next = await launchWorker(resumeId, activeWorkspace);
         sessionSink?.(next);
         return next;
       });
     },
     attachSessionSink(listener) {
       sessionSink = listener;
+    },
+    attachWorkspaceSink(listener) {
+      workspaceSinks.add(listener);
+      return () => {
+        workspaceSinks.delete(listener);
+      };
     },
   };
 }
@@ -1162,7 +1392,9 @@ function sessionIsIdle(session: DesktopRuntimeSession): boolean {
     !snapshot.isStreaming &&
     !snapshot.isCompacting &&
     snapshot.pendingMessages === 0 &&
-    snapshot.activeCommandIds.length === 0
+    snapshot.activeCommandIds.length === 0 &&
+    snapshot.pendingInteraction === undefined &&
+    snapshot.plan?.status !== "review"
   );
 }
 

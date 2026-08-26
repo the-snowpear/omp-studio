@@ -6,8 +6,14 @@ import { basename, dirname, join, resolve } from "node:path";
 import { readGunzipPrefix } from "./gzip-file.js";
 
 const STUDIO_SESSION_ORIGIN = "studio-host";
+const SESSION_PINS_FILENAME = "session-pins.json";
 const DEFAULT_PREFIX_BYTES = 64 * 1024;
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
+
+/** Optional pin metadata must never be able to make history discovery unbounded. */
+export const SESSION_PINS_MAX_BYTES = 64 * 1024;
+export const SESSION_PINS_MAX_ENTRIES = 1_024;
+export const SESSION_PIN_ID_MAX_CHARS = 256;
 
 export type CatalogSessionOrigin = "studio" | "cli" | "unknown";
 
@@ -16,6 +22,8 @@ export interface SessionCatalogEntry {
   origin: CatalogSessionOrigin;
   /** True when the entry comes from the OMP cold-archive tree (`.jsonl.gz`). */
   archived: boolean;
+  /** True when OMP's global session pin set contains this session id. */
+  pinned: boolean;
   title?: string;
   createdAt?: string;
   modifiedAt: string;
@@ -42,6 +50,8 @@ export interface SessionCatalogResult {
 export interface SessionCatalogOptions {
   /** OMP's sessions root or one project-specific session directory. */
   sessionsRoot?: string;
+  /** Agent root containing `session-pins.json`; defaults beside `sessionsRoot`. */
+  agentDir?: string;
   /** Cold-archive root scanned for `.jsonl.gz`; defaults to the omp gc layout. */
   archiveRoot?: string;
   /**
@@ -57,6 +67,8 @@ export interface SessionCatalogOptions {
 
 interface ParsedHeader {
   id: string;
+  /** Runtime metadata alone is not a conversation; at least one message must exist. */
+  hasConversationMessage: boolean;
   timestamp?: string;
   title?: string;
   studioOrigin?: string;
@@ -64,8 +76,13 @@ interface ParsedHeader {
 }
 
 export function defaultOmpSessionsRoot(environment: NodeJS.ProcessEnv = process.env): string {
+  return resolve(defaultOmpAgentDir(environment), "sessions");
+}
+
+/** OMP's agent root, shared by sessions and the global session pin file. */
+export function defaultOmpAgentDir(environment: NodeJS.ProcessEnv = process.env): string {
   const agentDirectory = environment.OMP_AGENT_DIR;
-  return resolve(agentDirectory === undefined || agentDirectory.length === 0 ? join(homedir(), ".omp", "agent") : agentDirectory, "sessions");
+  return resolve(agentDirectory === undefined || agentDirectory.length === 0 ? join(homedir(), ".omp", "agent") : agentDirectory);
 }
 
 /** Mirrors `omp gc`: the cold archive is a sibling of the sessions root. */
@@ -79,6 +96,7 @@ export function defaultOmpArchiveRoot(sessionsRoot: string): string {
  */
 export async function scanSessionCatalog(options: SessionCatalogOptions = {}): Promise<SessionCatalogResult> {
   const root = resolve(options.sessionsRoot ?? defaultOmpSessionsRoot());
+  const agentDir = resolve(options.agentDir ?? (options.sessionsRoot === undefined ? defaultOmpAgentDir() : dirname(root)));
   const archiveRoot = resolve(options.archiveRoot ?? defaultOmpArchiveRoot(root));
   const includeCliSessions = options.includeCliSessions ?? false;
   const allowedCwd = options.allowedCwd;
@@ -86,6 +104,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
   const prefixBytes = options.prefixBytes ?? DEFAULT_PREFIX_BYTES;
   if (!Number.isSafeInteger(maxSessionBytes) || maxSessionBytes <= 0) throw new TypeError("maxSessionBytes must be positive");
   if (!Number.isSafeInteger(prefixBytes) || prefixBytes <= 0) throw new TypeError("prefixBytes must be positive");
+  const pinnedSessionIds = await loadPinnedSessionIds(agentDir);
 
   const counts = new Map<SessionCatalogDiagnosticCode, number>();
   const note = (code: SessionCatalogDiagnosticCode): void => {
@@ -117,6 +136,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
       note("CORRUPT_SKIPPED");
       return;
     }
+    if (!header.hasConversationMessage) return;
     if (allowedCwd !== undefined && (header.cwd === undefined || !sameWorkspaceCwd(header.cwd, allowedCwd))) {
       return;
     }
@@ -128,6 +148,7 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
       sessionId: header.id,
       origin,
       archived,
+      pinned: pinnedSessionIds.has(header.id),
       modifiedAt: metadata.mtime.toISOString(),
       sizeBytes: metadata.size,
       ...(title === undefined ? {} : { title }),
@@ -156,6 +177,54 @@ export async function scanSessionCatalog(options: SessionCatalogOptions = {}): P
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([code, count]) => ({ code, count })),
   };
+}
+
+/**
+ * Read OMP's global session pin set. Missing, malformed, or unreadable pin
+ * files are intentionally treated as an empty set so history discovery never
+ * becomes unavailable because of optional metadata.
+ */
+async function loadPinnedSessionIds(agentDir: string): Promise<ReadonlySet<string>> {
+  const pinPath = join(agentDir, SESSION_PINS_FILENAME);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    const link = await lstat(pinPath);
+    if (!link.isFile() || link.size > SESSION_PINS_MAX_BYTES) return new Set();
+
+    // Read through one handle after checking its size, and reject growth while
+    // reading. This keeps a racing/oversized file from reintroducing an
+    // unbounded read through readFile().
+    handle = await open(pinPath, "r");
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.size > SESSION_PINS_MAX_BYTES) return new Set();
+    const bytes = Buffer.alloc(metadata.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (bytesRead === 0) return new Set();
+      offset += bytesRead;
+    }
+    const { bytesRead: extraBytes } = await handle.read(Buffer.alloc(1), 0, 1, metadata.size);
+    if (extraBytes !== 0) return new Set();
+
+    const parsed: unknown = JSON.parse(bytes.toString("utf8"));
+    if (!Array.isArray(parsed) || parsed.length > SESSION_PINS_MAX_ENTRIES) return new Set();
+    if (
+      parsed.some(
+        (value) =>
+          typeof value !== "string" ||
+          value.length === 0 ||
+          value.length > SESSION_PIN_ID_MAX_CHARS,
+      )
+    ) {
+      return new Set();
+    }
+    return new Set(parsed);
+  } catch {
+    return new Set();
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
 }
 
 function sameWorkspaceCwd(left: string, right: string): boolean {
@@ -267,13 +336,26 @@ async function readSessionHeader(
     }
   }
   let titleSlot: string | undefined;
-  for (const rawLine of text.split(/\r?\n/u).slice(0, 8)) {
+  let header: Omit<ParsedHeader, "hasConversationMessage"> | undefined;
+  let hasConversationMessage = false;
+  for (const rawLine of text.split(/\r?\n/u)) {
     const line = rawLine.trim();
     if (line.length === 0) continue;
     let value: unknown;
     try {
       value = JSON.parse(line);
     } catch {
+      // A large first message may extend beyond the bounded prefix. Its
+      // discriminator is still complete at the start of OMP's JSONL record.
+      if (/^\{\s*"type"\s*:\s*"message"\s*[,}]/u.test(line)) {
+        hasConversationMessage = true;
+        if (header !== undefined) return { ...header, hasConversationMessage };
+      }
+      continue;
+    }
+    if (isRecord(value) && value.type === "message") {
+      hasConversationMessage = true;
+      if (header !== undefined) return { ...header, hasConversationMessage };
       continue;
     }
     if (isRecord(value) && value.type === "title" && typeof value.title === "string") {
@@ -281,15 +363,16 @@ async function readSessionHeader(
       continue;
     }
     if (!isRecord(value) || value.type !== "session" || typeof value.id !== "string" || value.id.length === 0) continue;
-    return {
+    header = {
       id: value.id,
       ...(typeof value.timestamp === "string" ? { timestamp: value.timestamp } : {}),
       ...(typeof value.title === "string" ? { title: value.title } : titleSlot === undefined ? {} : { title: titleSlot }),
       ...(typeof value.studioOrigin === "string" ? { studioOrigin: value.studioOrigin } : {}),
       ...(typeof value.cwd === "string" && value.cwd.length > 0 ? { cwd: value.cwd } : {}),
     };
+    if (hasConversationMessage) return { ...header, hasConversationMessage };
   }
-  return undefined;
+  return header === undefined ? undefined : { ...header, hasConversationMessage };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

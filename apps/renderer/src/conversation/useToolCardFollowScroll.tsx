@@ -7,7 +7,7 @@ import {
   type RefObject,
   type UIEvent,
 } from "react";
-import { distanceFromBottom, shouldFollow } from "./useConversationScroll";
+import { AT_TAIL_PX, bindTailGestures, distanceFromBottom, shouldFollow } from "./useConversationScroll";
 
 export const TOOL_CARD_FOLLOW_THRESHOLD_PX = 24;
 
@@ -15,6 +15,11 @@ export const TOOL_CARD_FOLLOW_THRESHOLD_PX = 24;
  * Inner scroller for an expanded tool / think card. While `follow` is on, stay
  * pinned to the latest line; a user scroll away from the bottom unpins until
  * they return or follow turns back on.
+ *
+ * Unpinning is driven by the gesture (wheel / key / touch), not by the resulting
+ * scroll event: at streaming speed the next chunk re-pins before a scroll event
+ * is delivered, so a scroll-event-only rule reads the pin's own write as "user
+ * is at the bottom" and the card snaps back mid-gesture.
  *
  * Collapsed cards report clientHeight 0 — ignore those scroll events so a
  * 0fr expand animation cannot kill the pin.
@@ -25,7 +30,7 @@ export function useToolCardFollowScroll(follow: boolean): {
 } {
   const ref = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
-  const skipRef = useRef(false);
+  const lastTopRef = useRef(0);
   const followRef = useRef(follow);
   followRef.current = follow;
 
@@ -33,9 +38,8 @@ export function useToolCardFollowScroll(follow: boolean): {
     const el = ref.current;
     if (!el || !followRef.current || !pinnedRef.current || el.clientHeight <= 0) return;
     const jump = (node: HTMLDivElement) => {
-      skipRef.current = true;
       node.scrollTop = node.scrollHeight;
-      skipRef.current = false;
+      lastTopRef.current = node.scrollTop;
     };
     jump(el);
     requestAnimationFrame(() => {
@@ -62,11 +66,33 @@ export function useToolCardFollowScroll(follow: boolean): {
     return () => observer.disconnect();
   }, [stick]);
 
+  /* Detach on intent. Bound once per mounted card; the pin state is read live. */
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    return bindTailGestures(
+      el,
+      () => pinnedRef.current && el.clientHeight > 0,
+      () => { pinnedRef.current = false; },
+    );
+  }, []);
+
   const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
-    if (skipRef.current) return;
     const el = event.currentTarget;
     if (el.clientHeight <= 0) return;
-    pinnedRef.current = shouldFollow(distanceFromBottom(el), TOOL_CARD_FOLLOW_THRESHOLD_PX);
+    const top = el.scrollTop;
+    const moved = top - lastTopRef.current;
+    lastTopRef.current = top;
+    const distance = distanceFromBottom(el);
+    if (distance <= AT_TAIL_PX) {
+      pinnedRef.current = true;
+      return;
+    }
+    if (moved < 0) {
+      pinnedRef.current = false;
+      return;
+    }
+    if (moved > 0 && shouldFollow(distance, TOOL_CARD_FOLLOW_THRESHOLD_PX)) pinnedRef.current = true;
   }, []);
 
   return { ref, onScroll };

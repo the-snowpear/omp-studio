@@ -65,7 +65,7 @@ export function run(command, args, options = {}) {
     cwd: options.cwd ?? repositoryRoot,
     env: options.env ?? toolingEnvironment(),
     encoding: options.capture ? "utf8" : undefined,
-    stdio: options.capture ? "pipe" : "inherit",
+    stdio: options.capture ? "pipe" : (options.stdio ?? ["ignore", "inherit", "inherit"]),
     windowsHide: true,
   });
 

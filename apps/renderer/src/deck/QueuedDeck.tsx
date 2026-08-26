@@ -88,6 +88,7 @@ export function QueuedDeck({
   onAskSubmit,
   onAskCancel,
   onPlanAction,
+  onPlanSaveAndQuit,
   leaving,
 }: {
   readonly items: readonly QueuedDeckItem[];
@@ -104,6 +105,7 @@ export function QueuedDeck({
   readonly onAskSubmit?: (item: QueuedAskItem, answer: DeckAskAnswer) => boolean | Promise<boolean>;
   readonly onAskCancel?: (item: QueuedAskItem) => boolean | Promise<boolean>;
   readonly onPlanAction?: (item: Extract<QueuedDeckItem, { kind: "plan" }>) => void;
+  readonly onPlanSaveAndQuit?: (item: Extract<QueuedDeckItem, { kind: "plan" }>) => void;
 }) {
   const [remaining, setRemaining] = useState<readonly QueuedDeckItem[]>(() => items);
   const [pos, setPos] = useState(0);
@@ -318,6 +320,7 @@ export function QueuedDeck({
                 onPlanAction?.(current);
                 drop(current.id);
               }}
+              {...(onPlanSaveAndQuit === undefined ? {} : { onSaveAndQuit: () => onPlanSaveAndQuit(current) })}
             />
           ) : (
             <div className="ask-card">

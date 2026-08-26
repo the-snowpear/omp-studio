@@ -149,6 +149,7 @@ interface LiveHandle {
   snapshot: OperatorStateSnapshot;
   invokes: StudioRequest[];
   conversationListeners: Array<(event: StudioConversationForward) => void>;
+  conversationReplay: StudioConversationForward[];
   session: DesktopRuntimeSession;
   setSnapshot(next: OperatorStateSnapshot): void;
 }
@@ -158,6 +159,7 @@ function liveSession(initial: OperatorStateSnapshot = SNAPSHOT): LiveHandle {
     snapshot: { ...initial },
     invokes: [],
     conversationListeners: [],
+    conversationReplay: [],
     session: undefined as unknown as DesktopRuntimeSession,
     setSnapshot(next) {
       handle.snapshot = { ...next };
@@ -183,7 +185,7 @@ function liveSession(initial: OperatorStateSnapshot = SNAPSHOT): LiveHandle {
           receipt.result = {
             cancelled: false,
             editorText: "from-runtime",
-            editorImages: [{ type: "image", mimeType: "image/png", data: "aaa" }],
+            editorImages: [{ type: "image", mimeType: "image/png", data: "YWFh" }],
             ...(operation.kind === "session.tree.branch"
               ? { sessionId: "branched-session" }
               : { leafId: "leaf-1", aborted: false, askReanswerCommitted: false }),
@@ -195,6 +197,21 @@ function liveSession(initial: OperatorStateSnapshot = SNAPSHOT): LiveHandle {
         if (operation !== undefined && operation.kind === "btw.branch") {
           receipt.result = { branched: true, newSessionId: "session-btw-branch", newLeafId: "leaf-btw" };
         }
+        if (operation !== undefined && operation.kind === "runtime.settings.get") {
+          receipt.result = { values: { extendedContext: true } };
+        }
+        if (operation !== undefined && operation.kind === "runtime.settings.set") {
+          receipt.result = { key: operation.key, value: operation.value, persisted: operation.persist };
+        }
+        if (operation !== undefined && operation.kind === "mode.plan.review.saveAndQuit") {
+          receipt.result = {
+            saved: true,
+            path: operation.path,
+            exitedPlan: true,
+            newSession: "started",
+            sessionId: "session-new",
+          };
+        }
         return receipt;
       },
       runtimeLost: () => [],
@@ -205,6 +222,9 @@ function liveSession(initial: OperatorStateSnapshot = SNAPSHOT): LiveHandle {
         return () => {
           handle.conversationListeners = handle.conversationListeners.filter((item) => item !== listener);
         };
+      },
+      replayConversationEvents: (_sessionId: SessionId, listener: (event: StudioConversationForward) => void) => {
+        for (const event of handle.conversationReplay) listener(event);
       },
       onConversationResync: () => () => {},
       onInteractionEvent: () => () => {},
@@ -324,6 +344,58 @@ test("P4 invoke forwards the client requestId instead of minting gui-* ids", asy
     await waitUntil(() => live.invokes.length === 1);
     assert.equal(live.invokes[0]?.requestId, requestId);
     assert.equal(String(live.invokes[0]?.requestId).startsWith("gui-"), false);
+  });
+});
+
+test("Runtime mirror commands map through Desktop Host and preserve typed receipts", async () => {
+  await withReady(async ({ composition, live }) => {
+    const events: ClientEvent[] = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    await composition.facade.command({
+      commandName: "runtime.settings.get",
+      input: { keys: ["extendedContext"] },
+      idempotencyKey: "idem-runtime-settings-get" as IdempotencyKey,
+      requestId: "client-req-runtime-settings-get" as CommandRequestId,
+    });
+    await composition.facade.command({
+      commandName: "runtime.settings.set",
+      input: { key: "extendedContext", value: false, persist: true },
+      idempotencyKey: "idem-runtime-settings-set" as IdempotencyKey,
+      requestId: "client-req-runtime-settings-set" as CommandRequestId,
+    });
+    await composition.facade.command({
+      commandName: "mode.plan.review.saveAndQuit",
+      input: { path: "plans/plan.md" },
+      idempotencyKey: "idem-runtime-plan-save" as IdempotencyKey,
+      requestId: "client-req-runtime-plan-save" as CommandRequestId,
+    });
+    await waitUntil(() => live.invokes.length === 3);
+    assert.deepEqual(live.invokes.map((request) => request.operation), [
+      { kind: "runtime.settings.get", keys: ["extendedContext"] },
+      { kind: "runtime.settings.set", key: "extendedContext", value: false, persist: true },
+      { kind: "mode.plan.review.saveAndQuit", path: "plans/plan.md" },
+    ]);
+    await waitUntil(
+      () =>
+        events.filter(
+          (event) =>
+            event.kind === "command.receipt" &&
+            event.receipt.requestId.startsWith("client-req-runtime-"),
+        ).length === 3,
+    );
+    const receipts = events.filter(
+      (event): event is Extract<ClientEvent, { kind: "command.receipt" }> =>
+        event.kind === "command.receipt" && event.receipt.requestId.startsWith("client-req-runtime-"),
+    );
+    assert.equal(receipts.every((event) => event.receipt.status === "completed"), true);
+    const saveReceipt = receipts.find((event) => event.receipt.commandName === "mode.plan.review.saveAndQuit");
+    assert.deepEqual((saveReceipt?.receipt as { readonly result?: unknown } | undefined)?.result, {
+      saved: true,
+      path: "plans/plan.md",
+      exitedPlan: true,
+      newSession: "started",
+      sessionId: "session-new",
+    });
   });
 });
 
@@ -531,7 +603,7 @@ test("session.tree.navigate completion keeps editor fill-back beside the snapsho
     assert.deepEqual(receiptEvent.receipt.result, {
       cancelled: false,
       editorText: "from-runtime",
-      editorImages: [{ type: "image", mimeType: "image/png", data: "aaa" }],
+      editorImages: [{ type: "image", mimeType: "image/png", data: "YWFh" }],
       leafId: "leaf-1",
       aborted: false,
       askReanswerCommitted: false,
@@ -559,7 +631,7 @@ test("session.tree.branch completion keeps sessionId and editor fill-back beside
     assert.deepEqual(receiptEvent.receipt.result, {
       cancelled: false,
       editorText: "from-runtime",
-      editorImages: [{ type: "image", mimeType: "image/png", data: "aaa" }],
+      editorImages: [{ type: "image", mimeType: "image/png", data: "YWFh" }],
       sessionId: "branched-session",
       snapshot: live.snapshot,
     });
@@ -763,4 +835,66 @@ test("reload does not replay conversation deltas buffered on the old facade", as
     });
     assert.deepEqual(second, []);
   });
+});
+
+test("resident resume replays an open thinking message after the selected Runtime publication", async () => {
+  await withReady(async ({ composition, live }) => {
+    live.conversationReplay = [
+      {
+        envelope: {
+          type: "studio.event",
+          runtimeEpoch: 2 as RuntimeEpoch,
+          eventSeq: 2 as never,
+          stateVersion: 1 as StateVersion,
+          occurredAt: T0,
+          event: {
+            kind: "conversation.message.started",
+            sessionId: SESSION_B,
+            turnId: "turn-live",
+            messageId: "message-live",
+            role: "assistant",
+            createdAt: T0,
+          },
+        },
+      },
+      {
+        envelope: {
+          type: "studio.event",
+          runtimeEpoch: 2 as RuntimeEpoch,
+          eventSeq: 3 as never,
+          stateVersion: 1 as StateVersion,
+          occurredAt: T0,
+          event: {
+            kind: "conversation.message.delta",
+            sessionId: SESSION_B,
+            turnId: "turn-live",
+            messageId: "message-live",
+            blockId: "thinking-0",
+            blockType: "thinking",
+            delta: "切回后仍可见",
+          },
+        },
+      },
+    ];
+    const events: ClientEvent[] = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+
+    await composition.facade.command({
+      commandName: "session.resume",
+      input: { threadId: threadIdFor(SESSION_B) },
+      idempotencyKey: "idem-resume-live-replay" as IdempotencyKey,
+      requestId: "req-resume-live-replay" as CommandRequestId,
+    });
+    await waitUntil(() => events.some((event) => event.kind === "conversation.changed" && event.update.kind === "conversation.message.delta"));
+
+    const runtimeIndex = events.findIndex((event) => event.kind === "snapshot" && event.snapshot.sessionId === SESSION_B);
+    const thinkingIndex = events.findIndex((event) => event.kind === "conversation.changed" && event.update.kind === "conversation.message.delta");
+    assert.notEqual(runtimeIndex, -1);
+    assert.equal(thinkingIndex > runtimeIndex, true);
+    const thinking = events[thinkingIndex];
+    assert.equal(thinking?.kind, "conversation.changed");
+    if (thinking?.kind === "conversation.changed" && thinking.update.kind === "conversation.message.delta") {
+      assert.equal(thinking.update.delta, "切回后仍可见");
+    }
+  }, { concurrentSessions: true });
 });

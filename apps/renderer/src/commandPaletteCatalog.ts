@@ -50,6 +50,7 @@ export type PaletteGroup = {
 
 export type PaletteCatalogInput = {
   preview: boolean;
+  untitledTitle: string;
   historyEntries: ReadonlyArray<SessionHistoryEntry>;
   workspaces: ReadonlyArray<{ workspaceId: string; name: string }>;
   activeProjectName?: string;
@@ -95,7 +96,7 @@ function recents(input: PaletteCatalogInput): PaletteItem[] {
     return {
       id: `recent-${entry.historyId}`,
       icon: "message",
-      label: entry.title,
+      label: entry.title ?? input.untitledTitle,
       ...(input.activeProjectName ? { meta: input.activeProjectName } : {}),
       hint: `Ctrl+${recentIndex}`,
       keywords: entry.summary ?? "",

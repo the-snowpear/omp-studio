@@ -7,7 +7,13 @@
  * private endpoints, tokens or secrets may ever appear in these shapes.
  */
 
-import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
+import type {
+  OperatorStateSnapshot,
+  StudioRuntimeSettingsSnapshot,
+} from "@omp-studio/studio-protocol";
+
+/** Runtime settings projection carried by an optional snapshot field. */
+export type RuntimeSettingsReadModel = StudioRuntimeSettingsSnapshot;
 
 import type {
   AuthorityEpoch,
@@ -207,14 +213,16 @@ export interface SessionHistoryEntry {
   readonly threadId: ThreadId;
   readonly environmentId: EnvironmentId;
   readonly sessionId?: SessionId;
-  /** Safe display title; never a path. */
-  readonly title: string;
+  /** Safe persisted title; absent while native OMP still considers the session untitled. */
+  readonly title?: string;
   /** Safe summary snippet; never a path. */
   readonly summary?: string;
   readonly startedAt: string;
   readonly lastActiveAt: string;
   readonly messageCount: number;
   readonly status: SessionHistoryStatus;
+  /** OMP v18 global session pin state; optional for older Hosts. */
+  readonly pinned?: boolean;
 }
 
 export interface SessionHistoryReadModel {
@@ -222,10 +230,34 @@ export interface SessionHistoryReadModel {
   readonly total: number;
 }
 
+/** Why a resident session is waiting for the operator, when it is waiting. */
+export type ResidentWaitKind = "approval" | "ask" | "plan";
+
+/** Lifecycle phase of a Runtime session resident in the Host broker. */
+export type ResidentSessionPhase = "idle" | "running" | "compacting" | "waiting";
+
+/** Public broker row for one resident Runtime session. */
+export interface ResidentSessionRow {
+  readonly sessionId: SessionId;
+  readonly workspaceId: WorkspaceId;
+  readonly phase: ResidentSessionPhase;
+  readonly pendingMessages: number;
+  readonly waitKind?: ResidentWaitKind;
+  readonly lastActivityAt: string;
+}
+
+/** Authority-level overview of Runtime sessions resident in the Host broker. */
+export interface ResidentsReadModel {
+  readonly residents: ReadonlyArray<ResidentSessionRow>;
+  readonly activeSessionId?: SessionId;
+  readonly generatedAt: string;
+}
+
 /** Recent thread row for the home page: opaque id plus a safe title. */
 export interface RecentThread {
   readonly threadId: ThreadId;
-  readonly title: string;
+  /** Absent until native OMP persists a session title. */
+  readonly title?: string;
   readonly lastActiveAt: string;
 }
 

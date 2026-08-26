@@ -6,6 +6,12 @@ import {
 } from "./conversation-protocol";
 import type { StudioBtwSnapshot } from "./services/btw-service";
 import type { StudioModelState } from "./services/model-control-service";
+import {
+	isStudioRuntimeSettingKey,
+	isStudioRuntimeSettingValue,
+	STUDIO_RUNTIME_SETTING_KEYS,
+	type StudioRuntimeSettingKey,
+} from "./services/runtime-settings-service";
 
 export * from "./conversation-protocol";
 
@@ -50,6 +56,8 @@ export interface StudioHelloResponse {
 
 export type StudioOperation =
 	| { kind: "runtime.snapshot" }
+	| { kind: "runtime.settings.get"; keys?: StudioRuntimeSettingKey[] }
+	| { kind: "runtime.settings.set"; key: StudioRuntimeSettingKey; value: unknown; persist: boolean }
 	| { kind: "runtime.pause" }
 	| { kind: "runtime.resume"; expectedPauseEpoch: number }
 	| { kind: "runtime.shutdown"; drain: true }
@@ -94,6 +102,7 @@ export type StudioOperation =
 	| { kind: "mode.plan.enter"; initialPrompt?: string }
 	| { kind: "mode.plan.exit"; discardDraft?: boolean }
 	| { kind: "mode.plan.review.open" }
+	| { kind: "mode.plan.review.saveAndQuit"; path: string }
 	| {
 			kind: "mode.plan.review.respond";
 			decision: "execute" | "compact" | "keep" | "approve" | "refine" | "dismiss";
@@ -351,6 +360,9 @@ export interface StudioOperatorStateSnapshot {
 	runtimeEpoch: number;
 	stateVersion: number;
 	sessionId: string;
+	/** Optional semantic projection of the native SessionManager title state. */
+	sessionTitle?: string;
+	sessionTitleSource?: "user" | "auto";
 	isStreaming: boolean;
 	isCompacting: boolean;
 	activeMode: "normal" | "plan" | "goal" | "vibe";
@@ -378,6 +390,8 @@ export interface StudioOperatorStateSnapshot {
 	agents: unknown[];
 	jobs: unknown[];
 	telemetry?: StudioSessionTelemetry;
+	runtimeSettings?: Record<StudioRuntimeSettingKey, unknown>;
+	compactionSpeculation?: "idle" | "running" | "armed";
 }
 
 export interface StudioSnapshotResponse {
@@ -497,6 +511,30 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		case "runtime.pause":
 			exactKeys(operation, ["kind"]);
 			break;
+		case "runtime.settings.get":
+			exactKeys(operation, ["kind", "keys"]);
+			if (operation.keys !== undefined) {
+				if (
+					!Array.isArray(operation.keys) ||
+					operation.keys.length === 0 ||
+					operation.keys.length > STUDIO_RUNTIME_SETTING_KEYS.length ||
+					operation.keys.some(key => !isStudioRuntimeSettingKey(key)) ||
+					new Set(operation.keys).size !== operation.keys.length
+				) {
+					throw new StudioFrameError("Invalid Runtime settings selection");
+				}
+			}
+			break;
+		case "runtime.settings.set":
+			exactKeys(operation, ["kind", "key", "value", "persist"]);
+			if (
+				!isStudioRuntimeSettingKey(operation.key) ||
+				!isStudioRuntimeSettingValue(operation.key, operation.value) ||
+				typeof operation.persist !== "boolean"
+			) {
+				throw new StudioFrameError("Invalid Runtime setting");
+			}
+			break;
 		case "runtime.resume":
 			exactKeys(operation, ["kind", "expectedPauseEpoch"]);
 			if (!Number.isSafeInteger(operation.expectedPauseEpoch) || (operation.expectedPauseEpoch as number) < 0) {
@@ -536,6 +574,31 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		case "goal.drop":
 		case "operator.manifest.get":
 			exactKeys(operation, ["kind"]);
+			break;
+		case "mode.plan.review.saveAndQuit":
+			exactKeys(operation, ["kind", "path"]);
+			if (
+				!nonEmptyString(operation.path) ||
+				operation.path !== operation.path.trim() ||
+				operation.path.length > 1024 ||
+				operation.path.includes("\0") ||
+				(operation.path.startsWith('"') && operation.path.endsWith('"')) ||
+				(operation.path.startsWith("'") && operation.path.endsWith("'")) ||
+				operation.path.replaceAll("\\", "/").startsWith("/") ||
+				operation.path.replaceAll("\\", "/").startsWith("~") ||
+				/^[A-Za-z]:/.test(operation.path) ||
+				operation.path.replaceAll("\\", "/").endsWith("/") ||
+				operation.path
+					.replaceAll("\\", "/")
+					.split("/")
+					.some(segment => segment === ".." || segment.includes(":")) ||
+				operation.path
+					.replaceAll("\\", "/")
+					.split("/")
+					.every(segment => segment.length === 0 || segment === ".")
+			) {
+				throw new StudioFrameError("Invalid Plan save path");
+			}
 			break;
 		case "session.handoff":
 			exactKeys(operation, ["kind", "customInstructions"]);
@@ -585,9 +648,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		case "mode.plan.review.respond":
 			exactKeys(operation, ["kind", "decision", "feedback"]);
 			if (
-				!new Set(["execute", "compact", "keep", "approve", "refine", "dismiss"]).has(
-					operation.decision as string,
-				)
+				!new Set(["execute", "compact", "keep", "approve", "refine", "dismiss"]).has(operation.decision as string)
 			) {
 				throw new StudioFrameError("Invalid plan review decision");
 			}
@@ -907,6 +968,8 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"runtime.pause",
 	"runtime.resume",
 	"runtime.snapshot",
+	"runtime.settings.get",
+	"runtime.settings.set",
 	"runtime.shutdown",
 	"live.start",
 	"live.stop",
@@ -927,6 +990,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"mode.plan.enter",
 	"mode.plan.exit",
 	"mode.plan.review.open",
+	"mode.plan.review.saveAndQuit",
 	"mode.plan.review.respond",
 	"mode.vibe.enter",
 	"mode.vibe.exit",

@@ -84,23 +84,48 @@ test("locateManagedRuntimeArtifact picks the newest matching channel", async () 
     await writeArtifact(root, "1.0.0-studio.1", "stable");
     await writeArtifact(root, "1.0.1-studio.1", "canary");
     await writeArtifact(root, "1.0.2-studio.1", "stable");
+    await writeArtifact(root, "1.0.9-studio.1", "stable");
+    await writeArtifact(root, "1.0.10-studio.1", "stable");
+    await writeArtifact(root, "9.0.0-studio.1", "canary");
+    const defaultStable = await locateManagedRuntimeArtifact({
+      platform: "win32-x64",
+      roots: [root],
+    });
+    assert.equal(defaultStable, join(root, "1.0.10-studio.1"));
     const stable = await locateManagedRuntimeArtifact({
       platform: "win32-x64",
       channel: "stable",
       roots: [root],
     });
-    assert.equal(stable, join(root, "1.0.2-studio.1"));
+    assert.equal(stable, join(root, "1.0.10-studio.1"));
     const canary = await locateManagedRuntimeArtifact({
       platform: "win32-x64",
       channel: "canary",
       roots: [root],
     });
-    assert.equal(canary, join(root, "1.0.1-studio.1"));
+    assert.equal(canary, join(root, "9.0.0-studio.1"));
     const missing = await locateManagedRuntimeArtifact({
       platform: "darwin-arm64",
       roots: [root],
     });
     assert.equal(missing, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("locateManagedRuntimeArtifact keeps safe legacy runtime versions discoverable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-art-invalid-"));
+  try {
+    await writeArtifact(root, "v1", "stable");
+    assert.equal(
+      await locateManagedRuntimeArtifact({ platform: "win32-x64", roots: [root] }),
+      join(root, "v1"),
+    );
+    assert.deepEqual(
+      resolveManagedRuntimeInstallState({ availableVersion: "v1" }),
+      { status: "not-installed", signature: "unknown", availableVersion: "v1" },
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -227,11 +252,45 @@ test("resolveManagedRuntimeInstallState reports local artifact updates", () => {
     { status: "installed", version: "1.0.1-studio.1", signature: "unknown" },
   );
   assert.deepEqual(
+    resolveManagedRuntimeInstallState({ installedVersion: "v1", availableVersion: "v2" }),
+    { status: "installed", version: "v1", availableVersion: "v2", signature: "unknown" },
+  );
+  assert.deepEqual(
+    resolveManagedRuntimeInstallState({ installedVersion: "v1", availableVersion: "1.0.2-studio.1" }),
+    { status: "installed", version: "v1", availableVersion: "1.0.2-studio.1", signature: "unknown" },
+  );
+  assert.deepEqual(
+    resolveManagedRuntimeInstallState({ installedVersion: "1.0.2-studio.1", availableVersion: "v1" }),
+    { status: "installed", version: "1.0.2-studio.1", availableVersion: "v1", signature: "unknown" },
+  );
+  assert.deepEqual(
     resolveManagedRuntimeInstallState({ installedVersion: "1.0.0-studio.1", availableVersion: "1.0.2-studio.1" }),
     {
       status: "update-available",
       version: "1.0.0-studio.1",
       availableVersion: "1.0.2-studio.1",
+      signature: "unknown",
+    },
+  );
+  assert.deepEqual(
+    resolveManagedRuntimeInstallState({ installedVersion: "1.0.9-studio.1", availableVersion: "1.0.10-studio.1" }),
+    {
+      status: "update-available",
+      version: "1.0.9-studio.1",
+      availableVersion: "1.0.10-studio.1",
+      signature: "unknown",
+    },
+  );
+  assert.deepEqual(
+    resolveManagedRuntimeInstallState({ installedVersion: "1.0.10-studio.1", availableVersion: "1.0.9-studio.1" }),
+    { status: "installed", version: "1.0.10-studio.1", signature: "unknown" },
+  );
+  assert.deepEqual(
+    resolveManagedRuntimeInstallState({ installedVersion: "1.0.0-studio.2", availableVersion: "1.0.0-studio.10" }),
+    {
+      status: "update-available",
+      version: "1.0.0-studio.2",
+      availableVersion: "1.0.0-studio.10",
       signature: "unknown",
     },
   );
@@ -249,10 +308,19 @@ test("probeManagedRuntimeInstall compares the newest local artifact to the insta
   try {
     await writeArtifact(root, "1.0.0-studio.1", "stable");
     await writeArtifact(root, "1.0.2-studio.1", "stable");
+    const requestedChannels: Array<string | undefined> = [];
+    const locate = async (input: { readonly platform: string; readonly channel?: "stable" | "canary" }) => {
+      requestedChannels.push(input.channel);
+      return locateManagedRuntimeArtifact({
+        platform: input.platform,
+        roots: [root],
+        ...(input.channel === undefined ? {} : { channel: input.channel }),
+      });
+    };
     const update = await probeManagedRuntimeInstall({
       platform: "win32-x64",
       currentVersion: "1.0.0-studio.1",
-      locateArtifact: async () => locateManagedRuntimeArtifact({ platform: "win32-x64", roots: [root] }),
+      locateArtifact: locate,
     });
     assert.equal(update.status, "update-available");
     assert.equal(update.version, "1.0.0-studio.1");
@@ -261,17 +329,18 @@ test("probeManagedRuntimeInstall compares the newest local artifact to the insta
     const current = await probeManagedRuntimeInstall({
       platform: "win32-x64",
       currentVersion: "1.0.2-studio.1",
-      locateArtifact: async () => locateManagedRuntimeArtifact({ platform: "win32-x64", roots: [root] }),
+      locateArtifact: locate,
     });
     assert.equal(current.status, "installed");
     assert.equal(current.availableVersion, undefined);
 
     const missing = await probeManagedRuntimeInstall({
       platform: "win32-x64",
-      locateArtifact: async () => locateManagedRuntimeArtifact({ platform: "win32-x64", roots: [root] }),
+      locateArtifact: locate,
     });
     assert.equal(missing.status, "not-installed");
     assert.equal(missing.availableVersion, "1.0.2-studio.1");
+    assert.deepEqual(requestedChannels, ["stable", "stable", "stable"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -460,6 +529,7 @@ test("seedManagedRuntimeFromArtifact installs and activates a located artifact",
     const installer = new RuntimeInstaller(join(root, "runtimes"), {
       trustedKeys: { "test-key": trustedPublicKey },
     });
+    let requestedChannel: "stable" | "canary" | undefined;
     const result = await seedManagedRuntimeFromArtifact({
       backend: {
         installer,
@@ -469,10 +539,14 @@ test("seedManagedRuntimeFromArtifact installs and activates a located artifact",
       },
       platform: "win32-x64",
       hasTrustedKey: true,
-      locateArtifact: async () => artifact,
+      locateArtifact: async (input) => {
+        requestedChannel = input.channel;
+        return artifact;
+      },
       activateOptions: { selfCheck: passingSelfCheck },
     });
     assert.equal(result, "seeded");
+    assert.equal(requestedChannel, "stable");
     const current = await installer.currentManifest();
     assert.equal(current?.manifest.runtimeVersion, "5.0.0-studio.1");
   } finally {

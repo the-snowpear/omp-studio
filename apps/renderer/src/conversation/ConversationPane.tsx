@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { ActivityLine } from "./ActivityLine";
@@ -10,6 +10,7 @@ import { isRetryTranscriptNotice } from "./activityStatus";
 import { isTransientStatusNotice } from "./transientStatusNotice";
 import type { SubagentHubTarget } from "./toolMeta";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
+import type { ConversationViewportController } from "./conversationViewportController";
 
 export function ConversationPane({
   snapshot,
@@ -29,6 +30,7 @@ export function ConversationPane({
   forceWelcome,
   planLink,
   compacting,
+  viewportController,
 }: {
   snapshot?: ConversationSnapshot;
   onLoadOlder: () => void;
@@ -54,6 +56,7 @@ export function ConversationPane({
   planLink?: PlanCreatedLink;
   /** Live snapshot / user-triggered compact: show the in-progress divider. */
   compacting?: boolean;
+  viewportController?: ConversationViewportController;
 }) {
   const localScrollerRef = useRef<HTMLElement | null>(null);
   const scrollerRef = externalScrollerRef ?? localScrollerRef;
@@ -67,113 +70,147 @@ export function ConversationPane({
         identityKey: "",
       };
   const showWelcome = Boolean(welcome && (forceWelcome || rows.length === 0) && compacting !== true);
-  const displayRows = withCompactingRow(rows, compacting === true, snapshot?.state.compacting?.action);
+  const compactingAction = snapshot?.state.compacting?.action;
+  // rows 没变时保持同一个数组：ConvoTranscript 的 memo 表都按 rows identity 缓存。
+  const displayRows = useMemo(
+    () => withCompactingRow(rows, compacting === true, compactingAction),
+    [rows, compacting, compactingAction],
+  );
+  const viewIdentity = state.identity?.sessionId ?? identityKey;
   const scroll = useConversationScroll({
     scrollerRef,
-    identityKey,
+    identityKey: viewIdentity,
     itemCount: displayRows.length + (activity === undefined ? 0 : 1),
     loadingOlder,
     pin: showWelcome ? "top" : "bottom",
     contentKey: conversationFollowKey(state),
   });
   const prevLoading = useRef(loadingOlder);
+  const [scrollParent, setScrollParent] = useState<HTMLElement | null>(null);
+  const bindScroller = useCallback((node: HTMLElement | null) => {
+    scrollerRef.current = node;
+    setScrollParent((current) => current === node ? current : node);
+  }, [scrollerRef]);
 
   useEffect(() => {
     if (!prevLoading.current && loadingOlder) scroll.preparePrepend();
     prevLoading.current = loadingOlder;
   }, [loadingOlder, scroll]);
 
-  return (
-    <main
-      className="convo-scroll"
-      id="convoScroll"
-      ref={scrollerRef}
-      tabIndex={-1}
-      aria-label="对话内容"
-      onScroll={scroll.onScroll}
-    >
-      <div className="convo-doc" id="convoDoc" role="log" aria-live="off" aria-relevant="additions">
-        {standby ? (
-          <div className="empty" style={{ paddingTop: 72 }}>
-            <span className="spinner" aria-hidden="true" />
-            <p>{standby.title}</p>
-            <p className="muted small">{standby.detail}</p>
-          </div>
-        ) : showWelcome ? (
-          <>
-            {welcome}
-            {activity === undefined ? null : <ActivityLine {...activity} />}
-          </>
-        ) : (
-          <>
-            {demo ? null : <StatusBanner state={state} />}
-            {state.hasMoreBefore && state.hydrateStatus === "ready" ? (
-              <div className="convo-load-earlier">
-                <button
-                  type="button"
-                  className="btn small outline"
-                  disabled={loadingOlder}
-                  onClick={onLoadOlder}
-                >
-                  {loadingOlder ? "正在加载更早消息…" : "加载更早消息"}
-                </button>
-              </div>
-            ) : null}
-            {state.notices.map((notice) => {
-              if (isTransientStatusNotice(notice.message, notice.source)) return null;
-              if (isRetryTranscriptNotice(notice.message, notice.source)) return null;
-              const xdevGroups = parseXdevMountNotice(notice.message);
-              if (xdevGroups !== null) {
-                return <XdevMountNotice key={notice.id} level={notice.level} groups={xdevGroups} />;
-              }
-              return (
-                <div key={notice.id} className={`convo-notice ${notice.level}`} role={notice.level === "error" ? "alert" : "status"}>
-                  {notice.message}
-                </div>
-              );
-            })}
-            {displayRows.length === 0 ? (
-              <>
-                {welcome ?? <EmptyConversation state={state} demo={demo} />}
-                {planLink === undefined || planLink.attachEvenWithoutPropose !== true ? null : (
-                  <PlanCreatedCard
-                    title={planLink.title ?? "Plan"}
-                    onOpen={planLink.onOpen}
-                    {...(planLink.demo === true || demo === true ? { demo: true } : {})}
-                  />
-                )}
-              </>
-            ) : (
-              <ConvoTranscript
-                rows={displayRows}
-                demo={demo}
-                {...(onRestore === undefined ? {} : { onRestore })}
-                {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
-                {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
-                {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
-                {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
-                {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
-                {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
-                {...(liveAgents === undefined ? {} : { liveAgents })}
-                {...(planLink === undefined ? {} : { planLink })}
-              />
-            )}
-            {state.hydrateStatus === "resyncing" ? (
-              <div className="convo-notice info" role="status">正在同步</div>
-            ) : null}
-            {activity === undefined ? null : <ActivityLine {...activity} />}
-          </>
-        )}
-      </div>
-      {scroll.hasNewContent ? (
-        <button type="button" className="new-content-pill" onClick={scroll.jumpToLatest}>
-          有新内容 · 回到最新
-        </button>
+  /* Capture the anchor in the click itself: the earliest point that is still
+     guaranteed to be before the prepended page reaches the DOM. */
+  const preparePrepend = scroll.preparePrepend;
+  const loadOlder = useCallback((): void => {
+    preparePrepend();
+    onLoadOlder();
+  }, [onLoadOlder, preparePrepend]);
+
+  const transcriptHeader = useMemo(() => (
+    <>
+      {demo ? null : <StatusBanner state={state} />}
+      {state.hasMoreBefore && state.hydrateStatus === "ready" ? (
+        <div className="convo-load-earlier">
+          <button
+            type="button"
+            className="btn small outline"
+            disabled={loadingOlder}
+            onClick={loadOlder}
+          >
+            {loadingOlder ? "正在加载更早消息…" : "加载更早消息"}
+          </button>
+        </div>
       ) : null}
+      {state.notices.map((notice) => {
+        if (isTransientStatusNotice(notice.message, notice.source)) return null;
+        if (isRetryTranscriptNotice(notice.message, notice.source)) return null;
+        const xdevGroups = parseXdevMountNotice(notice.message);
+        if (xdevGroups !== null) {
+          return <XdevMountNotice key={notice.id} level={notice.level} groups={xdevGroups} />;
+        }
+        return (
+          <div key={notice.id} className={`convo-notice ${notice.level}`} role={notice.level === "error" ? "alert" : "status"}>
+            {notice.message}
+          </div>
+        );
+      })}
+      {state.hydrateStatus === "resyncing" ? (
+        <div className="convo-notice info" role="status">正在同步</div>
+      ) : null}
+    </>
+  ), [demo, loadOlder, loadingOlder, state.error, state.hasMoreBefore, state.hydrateStatus, state.notices]);
+
+  const transcriptFooter = useMemo(
+    () => activity === undefined ? null : <ActivityLine {...activity} />,
+    [activity],
+  );
+
+  return (
+    <>
+      <main
+        className="convo-scroll"
+        id="convoScroll"
+        ref={bindScroller}
+        tabIndex={-1}
+        aria-label="对话内容"
+        onScroll={scroll.onScroll}
+      >
+        <div className="convo-doc" id="convoDoc" role="log" aria-live="off" aria-relevant="additions">
+          {standby ? (
+            <div className="empty" style={{ paddingTop: 72 }}>
+              <span className="spinner" aria-hidden="true" />
+              <p>{standby.title}</p>
+              <p className="muted small">{standby.detail}</p>
+            </div>
+          ) : showWelcome ? (
+            <>
+              {welcome}
+              {transcriptFooter}
+            </>
+          ) : displayRows.length === 0 ? (
+            <>
+              {transcriptHeader}
+              {welcome ?? <EmptyConversation state={state} demo={demo} />}
+              {planLink === undefined || planLink.attachEvenWithoutPropose !== true ? null : (
+                <PlanCreatedCard
+                  title={planLink.title ?? "Plan"}
+                  onOpen={planLink.onOpen}
+                  {...(planLink.demo === true || demo === true ? { demo: true } : {})}
+                />
+              )}
+              {transcriptFooter}
+            </>
+          ) : (
+            <ConvoTranscript
+              key={viewIdentity}
+              rows={displayRows}
+              scrollParent={scrollParent}
+              viewIdentity={viewIdentity}
+              header={transcriptHeader}
+              footer={transcriptFooter}
+              {...(viewportController === undefined ? {} : { viewportController })}
+              demo={demo}
+              {...(onRestore === undefined ? {} : { onRestore })}
+              {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
+              {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
+              {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
+              {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
+              {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
+              {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+              {...(liveAgents === undefined ? {} : { liveAgents })}
+              {...(planLink === undefined ? {} : { planLink })}
+            />
+          )}
+        </div>
+        {scroll.hasNewContent ? (
+          <button type="button" className="new-content-pill" onClick={scroll.jumpToLatest}>
+            有新内容 · 回到最新
+          </button>
+        ) : null}
+      </main>
       <div className="sr-only" aria-live="polite">
         {latestAnnouncement(state, displayRows.length)}
       </div>
-    </main>
+    </>
   );
 }
 

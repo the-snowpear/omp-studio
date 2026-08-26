@@ -48,6 +48,7 @@ import type {
   RuntimeInstallState,
   RuntimeDisconnectCode,
   RuntimeUnavailableCode,
+  ResidentsReadModel,
   SessionHistoryStatus,
   ThreadId,
   WorkspaceId,
@@ -72,10 +73,14 @@ import type {
   GitHubChecksReadModel,
   GitHubExecuteInput,
   GitHubOperationResult,
+  StudioPlanSaveAndQuitResult,
+  StudioRuntimeSettingsGetResult,
+  StudioRuntimeSettingsSetResult,
   OperationProgress,
 } from "@omp-studio/client-contract";
 import type {
   ApprovalMode,
+  CommandLedgerEntry,
   CapabilityManifest,
   ConversationTranscriptPage,
   AgentTranscriptPage,
@@ -284,6 +289,15 @@ export interface HostRuntimeAccess {
   readonly onBtwEvent?: (listener: (event: StudioBtwForward) => void) => () => void;
 }
 
+/** Authority-level resident Runtime projection supplied by the Host broker. */
+export interface HostResidentsService {
+  list(): ResidentsReadModel | Promise<ResidentsReadModel>;
+  /** Live broker summary updates; the disposer is optional for read-only seams. */
+  onChanged?(listener: (residents: ResidentsReadModel) => void): () => void;
+  /** Background Worker ledger outcomes; snapshots stay scoped to the active Worker. */
+  onTerminalOutcomes?(listener: (outcomes: readonly CommandLedgerEntry[]) => void): () => void;
+}
+
 /**
  * Every shape a Host `invoke` may return. Most operations resolve to the
  * post-command snapshot; the exceptions carry extra facts that only exist on
@@ -294,7 +308,10 @@ export type HostInvokeOutcome =
   | OperatorInvokeOutcome
   | SessionTreeCommandOutcome
   | BtwAskOutcome
-  | BtwBranchOutcome;
+  | BtwBranchOutcome
+  | StudioRuntimeSettingsGetResult
+  | StudioRuntimeSettingsSetResult
+  | StudioPlanSaveAndQuitResult;
 
 /** One session-history row as supplied by the Host-side catalog provider. */
 export interface HostCatalogEntry {
@@ -308,6 +325,8 @@ export interface HostCatalogEntry {
   readonly modifiedAt: string;
   readonly messageCount: number;
   readonly status: SessionHistoryStatus;
+  /** OMP v18 global session pin state; absent is treated as unpinned for old providers. */
+  readonly pinned?: boolean;
 }
 
 /**
@@ -316,7 +335,8 @@ export interface HostCatalogEntry {
  * entry to opaque branded ids and bounded safe text.
  */
 export interface HostSessionCatalogProvider {
-  list(): HostCatalogEntry[] | Promise<HostCatalogEntry[]>;
+  /** Omit workspaceId to retain the active-workspace compatibility path. */
+  list(input?: { readonly workspaceId?: WorkspaceId }): HostCatalogEntry[] | Promise<HostCatalogEntry[]>;
 }
 
 /** Runtime-independent persistent transcript reader owned by the Host/Broker. */
@@ -350,6 +370,8 @@ export interface HostSessionTelemetryStorePort {
   read(sessionId: string, revision: string): Promise<{ telemetry: SessionTelemetrySnapshot } | undefined>;
   flush(): Promise<void>;
   dispose(): void;
+  /** Drop every trace of one session; used by `session.delete` residue cleanup. */
+  remove?(sessionId: string): Promise<void>;
 }
 
 /** One-shot archived-session telemetry probe owned by the Host. */
@@ -625,6 +647,12 @@ export interface HostSemanticCommandService {
   archive?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
   /** Restore an archived thread back into the active sessions tree. */
   unarchive?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  /**
+   * Permanently delete a thread: the Host evacuates a resident Runtime off the
+   * file, then removes the transcript, artifacts dir, and every related local
+   * record (telemetry, thread binding, session lease, pin entry).
+   */
+  delete?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /** Default diagnostics factory: real timestamps and random opaque entry ids. */

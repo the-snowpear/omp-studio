@@ -8,6 +8,7 @@ export * from "./contracts/interactions.js";
 export * from "./contracts/manifests.js";
 export * from "./contracts/protocol.js";
 export * from "./contracts/runtime.js";
+export * from "./contracts/runtime-settings.js";
 export * from "./contracts/state.js";
 export * from "./contracts/telemetry.js";
 export * from "./canonical-json.js";

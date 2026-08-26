@@ -17,6 +17,29 @@ function fixture(): { service: StudioCommandManifestService; forcedTools: string
 	return { service: new StudioCommandManifestService(session), forcedTools };
 }
 
+function titleFixture(initialTitle?: string, initialSource?: "auto" | "user") {
+	let title = initialTitle;
+	let source = initialSource;
+	const setCalls: Array<{ title: string; source: "auto" | "user"; trigger?: string }> = [];
+	const sessionManager = {
+		getCwd: () => "C:/workspace",
+		getSessionName: () => title,
+		get titleSource() {
+			return source;
+		},
+		setSessionName: async (nextTitle: string, nextSource: "auto" | "user", trigger?: string) => {
+			setCalls.push({ title: nextTitle, source: nextSource, ...(trigger === undefined ? {} : { trigger }) });
+			title = nextTitle;
+			source = nextSource;
+			return true;
+		},
+	};
+	const session = { sessionManager, settings: {} } as unknown as AgentSession;
+	return { service: new StudioCommandManifestService(session), setCalls, sessionManager };
+}
+
+const STUDIO_SESSION_TITLE_ENSURE_ID = "studio.session-title.ensure";
+
 describe("WP-044 Studio command manifest", () => {
 	test("classifies every builtin with a stable content hash", () => {
 		const { service } = fixture();
@@ -25,9 +48,16 @@ describe("WP-044 Studio command manifest", () => {
 		expect(first).toEqual(second);
 		expect(first.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
 		expect(first.hash).toBe(service.manifestHash());
-		expect(first.commands).toHaveLength(BUILTIN_SLASH_COMMANDS_INTERNAL.length);
+		expect(first.commands).toHaveLength(BUILTIN_SLASH_COMMANDS_INTERNAL.length + 1);
 		expect(new Set(first.commands.map(command => command.id)).size).toBe(first.commands.length);
 		expect(first.unclassifiedBuiltins).toEqual([]);
+		expect(first.commands.find(command => command.id === STUDIO_SESSION_TITLE_ENSURE_ID)).toMatchObject({
+		implementation: "shared-service",
+		presentation: "native",
+		risk: "normal",
+		effect: "session",
+		contractTestId: "CMD-STUDIO-SESSION-TITLE-ENSURE",
+	});
 		expect(first.commands.find(command => command.id === "builtin.pause")).toMatchObject({
 			implementation: "tui-compatibility",
 			presentation: "terminal",
@@ -49,6 +79,37 @@ describe("WP-044 Studio command manifest", () => {
 		});
 		await expect(service.invoke("builtin.missing", undefined)).rejects.toBeInstanceOf(StudioCommandManifestError);
 		await expect(service.invoke("builtin.force", [])).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+	});
+
+	test("ensures a missing session title with an awaited auto persistence call", async () => {
+		const { service, setCalls } = titleFixture();
+		expect(await service.invoke(STUDIO_SESSION_TITLE_ENSURE_ID, "  Studio fallback  ")).toEqual({
+			applied: true,
+			title: "Studio fallback",
+			source: "auto",
+		});
+		expect(setCalls).toEqual([
+			{ title: "Studio fallback", source: "auto", trigger: "studio-provisional-fallback" },
+		]);
+	});
+
+	test("does not overwrite an existing auto or user session title", async () => {
+		for (const source of ["auto", "user"] as const) {
+			const { service, setCalls } = titleFixture("Existing title", source);
+			expect(await service.invoke(STUDIO_SESSION_TITLE_ENSURE_ID, "Replacement")).toEqual({
+				applied: false,
+				title: "Existing title",
+				source,
+			});
+			expect(setCalls).toEqual([]);
+		}
+	});
+
+	test("rejects an empty provisional session title", async () => {
+		const { service } = titleFixture();
+		await expect(service.invoke(STUDIO_SESSION_TITLE_ENSURE_ID, "   ")).rejects.toMatchObject({
+			code: "INVALID_ARGUMENT",
+		});
 	});
 
 	test("refreshes and invokes extension and custom command routes from native registries", async () => {

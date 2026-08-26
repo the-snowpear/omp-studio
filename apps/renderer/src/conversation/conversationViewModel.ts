@@ -19,6 +19,7 @@ import {
   type JsonValue,
   type OpaqueCursor,
 } from "@omp-studio/client-contract";
+import { reuseTimelineRows } from "./rowReuse";
 import type { ComposerDoc } from "../composer/types";
 import type { ConversationIdentity } from "./conversationHost";
 import { sameIdentity } from "./conversationHost";
@@ -151,7 +152,7 @@ export type TimelineRow =
        * the transcript diff card waits until this flag clears.
        */
       readonly turnOpen?: boolean;
-      /** Provider failure from `conversation.message.completed`, latched until the next successful assistant return. */
+      /** Provider failure from `conversation.message.completed`, latched until the next assistant stream starts or a later return succeeds. */
       readonly error?: ConversationMessageError;
     }
   | { readonly type: "compaction"; readonly item: ConversationCompactionItem }
@@ -1200,49 +1201,115 @@ export function rowsFromConversationViews(
   userDisplays: { readonly [itemId: string]: ComposerDoc } = {},
   userThumbs: UserThumbMap = {},
 ): TimelineRow[] {
-  const rows: TimelineRow[] = [];
-  let compactingAction: string | undefined;
-  for (const view of views) {
-    if (view.kind === "compacting") {
-      compactingAction = view.action;
-      continue;
-    }
-    if (view.kind === "item") {
-      const row = rowFromItem(
-        view.item,
-        liveToolMap(view.tools.map(liveToolFromClient)),
-        view.turnOpen,
-        itemErrors[view.item.itemId],
-      );
-      if (row.type === "assistant" && row.segments.length === 0 && row.error === undefined) continue;
-      rows.push(row.type === "user" ? withUserDisplay(row, userDisplays, userThumbs) : row);
-      continue;
-    }
-    const live = liveMessageFromClient(view.message);
-    const tools = view.tools.map(liveToolFromClient);
-    if (live.role === "user") {
-      rows.push(withUserDisplay({
-        type: "user",
-        itemId: live.messageId,
-        createdAt: live.createdAt,
-        text: live.blocks.map((block) => block.text).join("\n"),
-      }, userDisplays, userThumbs));
-      continue;
-    }
-    const error = itemErrors[live.messageId];
-    rows.push({
-      type: "assistant",
-      itemId: live.messageId,
-      createdAt: live.createdAt,
-      segments: segmentsFromLive(live, tools),
-      status: error !== undefined ? "error" : view.message.aborted ? "aborted" : view.message.completed ? "completed" : "streaming",
-      ...(!view.message.aborted && error === undefined ? { turnOpen: true } : {}),
-      ...(error === undefined ? {} : { error }),
-    });
+  return [...new ConversationRowsProjector().project(views, pendingUsers, itemErrors, userDisplays, userThumbs)];
+}
+
+type RowProjectionCacheEntry = {
+  readonly source: ConversationView;
+  readonly tools: readonly ConversationLiveTool[];
+  readonly error: ConversationMessageError | undefined;
+  readonly display: ComposerDoc | undefined;
+  readonly thumbs: readonly UserMessageThumb[] | undefined;
+  readonly row: TimelineRow | null;
+};
+
+function sameReferences<T>(left: readonly T[], right: readonly T[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
   }
-  for (const pending of pendingUsers) rows.push(pendingRow(pending));
-  appendOrphanProviderErrors(rows, itemErrors);
-  const presented = presentAssistantTurns(rows);
-  if (compactingAction === undefined) return presented;
-  return withCompactingRow(presented, true, compactingAction);
+  return true;
+}
+
+function conversationViewKey(view: ConversationView): string {
+  if (view.kind === "compacting") return "compacting";
+  return `${view.kind}:${view.kind === "item" ? view.item.itemId : view.message.messageId}`;
+}
+
+/** Incremental item/message -> TimelineRow projection for the hot streaming path. */
+export class ConversationRowsProjector {
+  #cache = new Map<string, RowProjectionCacheEntry>();
+  #rows: readonly TimelineRow[] = [];
+
+  project(
+    views: readonly ConversationView[],
+    pendingUsers: readonly PendingUser[] = [],
+    itemErrors: Readonly<Record<string, ConversationMessageError>> = {},
+    userDisplays: { readonly [itemId: string]: ComposerDoc } = {},
+    userThumbs: UserThumbMap = {},
+  ): readonly TimelineRow[] {
+    const rows: TimelineRow[] = [];
+    const nextCache = new Map<string, RowProjectionCacheEntry>();
+    let compactingAction: string | undefined;
+    for (const view of views) {
+      if (view.kind === "compacting") {
+        compactingAction = view.action;
+        continue;
+      }
+      const itemId = view.kind === "item" ? view.item.itemId : view.message.messageId;
+      const error = itemErrors[itemId];
+      const display = userDisplays[itemId];
+      const thumbs = userThumbs[itemId];
+      const key = conversationViewKey(view);
+      const cached = this.#cache.get(key);
+      let row: TimelineRow | null;
+      if (
+        cached !== undefined &&
+        cached.source.kind === view.kind &&
+        (view.kind === "item"
+          ? cached.source.kind === "item" && cached.source.item === view.item && cached.source.turnOpen === view.turnOpen
+          : cached.source.kind === "live" && cached.source.message === view.message) &&
+        sameReferences(cached.tools, view.tools) &&
+        cached.error === error &&
+        cached.display === display &&
+        cached.thumbs === thumbs
+      ) {
+        row = cached.row;
+      } else if (view.kind === "item") {
+        const projected = rowFromItem(
+          view.item,
+          liveToolMap(view.tools.map(liveToolFromClient)),
+          view.turnOpen,
+          error,
+        );
+        row = projected.type === "assistant" && projected.segments.length === 0 && projected.error === undefined
+          ? null
+          : projected.type === "user"
+            ? withUserDisplay(projected, userDisplays, userThumbs)
+            : projected;
+      } else {
+        const live = liveMessageFromClient(view.message);
+        const tools = view.tools.map(liveToolFromClient);
+        if (live.role === "user") {
+          row = withUserDisplay({
+            type: "user",
+            itemId: live.messageId,
+            createdAt: live.createdAt,
+            text: live.blocks.map((block) => block.text).join("\n"),
+          }, userDisplays, userThumbs);
+        } else {
+          row = {
+            type: "assistant",
+            itemId: live.messageId,
+            createdAt: live.createdAt,
+            segments: segmentsFromLive(live, tools),
+            status: error !== undefined ? "error" : view.message.aborted ? "aborted" : view.message.completed ? "completed" : "streaming",
+            ...(!view.message.aborted && error === undefined ? { turnOpen: true } : {}),
+            ...(error === undefined ? {} : { error }),
+          };
+        }
+      }
+      nextCache.set(key, { source: view, tools: view.tools.slice(), error, display, thumbs, row });
+      if (row !== null) rows.push(row);
+    }
+    this.#cache = nextCache;
+    for (const pending of pendingUsers) rows.push(pendingRow(pending));
+    appendOrphanProviderErrors(rows, itemErrors);
+    const presented = presentAssistantTurns(rows);
+    const next = compactingAction === undefined
+      ? presented
+      : withCompactingRow(presented, true, compactingAction);
+    this.#rows = reuseTimelineRows(this.#rows, next);
+    return this.#rows;
+  }
 }

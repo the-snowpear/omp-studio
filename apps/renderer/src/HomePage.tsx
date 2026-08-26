@@ -1174,7 +1174,7 @@ export function HomePage({
         )) : activities.length ? activities.map((entry) => (
           <button key={entry.historyId} className="activity-row" type="button" onClick={() => onRoute("workbench")}>
             <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
-            <span className="ellipsis">{t("home.sessionEntry", { title: entry.title })}</span>
+            <span className="ellipsis">{t("home.sessionEntry", { title: entry.title ?? t("conversation.untitledSession") })}</span>
             <span className="spacer" />
             <span className="tiny muted">{relativeTime(entry.lastActiveAt, resolvedLanguage, t)}</span>
           </button>

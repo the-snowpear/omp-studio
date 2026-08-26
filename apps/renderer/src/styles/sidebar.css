@@ -126,6 +126,9 @@
   color: inherit;
   margin: 0;
 }
+#sbFilesTitle {
+  letter-spacing: 0.1em;
+}
 .sb-section-head .icon-btn { width: 20px; height: 20px; margin-left: auto; }
 .sb-section-head .icon-btn + .icon-btn { margin-left: 0; }
 /* Explorer 操作组：默认隐藏，悬停标题栏显示（对齐 ver2 交互）
@@ -286,6 +289,9 @@
    悬停/聚焦时把整行提到 z-index:1，气泡恢复盖在相邻行之上。 */
 .thread-row:hover,
 .thread-row:focus-within { z-index: 1; }
+/* 会话行 ⋯ 菜单弹层（ThreadRowMenu portal 到 body）：比顶栏 crumb 弹层
+   （.menu 基础 min-width 240px）稍窄；定位与视口钳制由 JS 计算。 */
+.thread-row-popover { position: fixed; min-width: 208px; }
 .t-actions .icon-btn { width: 20px; height: 20px; }
 /* 悬停态坐标推导（相对【行】右缘，再换算到【标题盒】右缘）：
    .t-actions 距行右缘 4px（--sp-4），宽 42px（20 + 2 + 20），

@@ -169,3 +169,16 @@ export function createIndexedDbThumbStore(): UserThumbStore {
 export function createDefaultThumbStore(): UserThumbStore {
   return typeof indexedDB === "undefined" ? createMemoryThumbStore() : createIndexedDbThumbStore();
 }
+
+let sharedThumbStore: UserThumbStore | undefined;
+
+/**
+ * Module-level shared thumbnail store. Conversation engines use this by
+ * default so a deleted session's preview bytes can be dropped from IndexedDB
+ * from anywhere (e.g. App after a successful session.delete). Tests inject
+ * their own store through `input.thumbStore` and never touch this singleton.
+ */
+export function getDefaultThumbStore(): UserThumbStore {
+  if (sharedThumbStore === undefined) sharedThumbStore = createDefaultThumbStore();
+  return sharedThumbStore;
+}

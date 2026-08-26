@@ -62,6 +62,39 @@ describe("M4 Runtime protocol mirror", () => {
 		}
 	});
 
+	test("parses Plan save-and-quit and only the closed Runtime settings allowlist", () => {
+		expect(
+			parseStudioRequest({
+				...base,
+				operation: { kind: "mode.plan.review.saveAndQuit", path: "notes/plan.md" },
+			}).operation,
+		).toEqual({ kind: "mode.plan.review.saveAndQuit", path: "notes/plan.md" });
+		expect(
+			parseStudioRequest({
+				...base,
+				operation: { kind: "runtime.settings.get", keys: ["edit.autoRepair.enabled", "extendedContext"] },
+			}).operation,
+		).toMatchObject({ kind: "runtime.settings.get" });
+		expect(
+			parseStudioRequest({
+				...base,
+				operation: { kind: "runtime.settings.set", key: "edit.autoRepair.enabled", value: true, persist: false },
+			}).operation,
+		).toMatchObject({ kind: "runtime.settings.set", key: "edit.autoRepair.enabled" });
+		for (const operation of [
+			{ kind: "mode.plan.review.saveAndQuit", path: "../escape.md" },
+			{ kind: "mode.plan.review.saveAndQuit", path: "." },
+			{ kind: "mode.plan.review.saveAndQuit", path: " notes/plan.md " },
+			{ kind: "mode.plan.review.saveAndQuit", path: '"notes/plan.md"' },
+			{ kind: "mode.plan.review.saveAndQuit", path: "'notes/plan.md'" },
+			{ kind: "runtime.settings.get", keys: ["unknown.setting"] },
+			{ kind: "runtime.settings.set", key: "unknown.setting", value: true, persist: false },
+			{ kind: "runtime.settings.set", key: "compaction.asyncEnabled", value: "yes", persist: false },
+		]) {
+			expect(() => parseStudioRequest({ ...base, operation })).toThrow(StudioFrameError);
+		}
+	});
+
 	test("rejects unknown fields and non-JSON argument values", () => {
 		for (const operation of [
 			{ kind: "interaction.respond", interactionId: "i", commandId: "c", decision: "maybe" },
@@ -119,7 +152,14 @@ describe("M4 Runtime protocol mirror", () => {
 			{ kind: "agent.spawn", definition: "researcher", assignment: "audit", isolation: "none" },
 			{ kind: "agent.spawn", definition: "researcher", assignment: "audit", effort: "high" },
 			{ kind: "agent.send", agentId: "Child-1", expectedGeneration: 0, text: "continue", mode: "prompt" },
-			{ kind: "agent.send", agentId: "Child-1", expectedGeneration: 1, text: "continue", mode: "prompt", images: [null] },
+			{
+				kind: "agent.send",
+				agentId: "Child-1",
+				expectedGeneration: 1,
+				text: "continue",
+				mode: "prompt",
+				images: [null],
+			},
 			{ kind: "agent.kill", agentId: "Child-1", expectedGeneration: 1, force: true },
 			{ kind: "agent.subscribe", level: "all" },
 			{ kind: "job.cancel", jobId: "job-1", expectedGeneration: 0 },

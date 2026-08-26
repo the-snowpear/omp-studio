@@ -50,6 +50,7 @@ import type {
   EnvironmentReadModel,
   HomeReadModel,
   PublicAuthorityIdentity,
+  ResidentsReadModel,
   RuntimeConnection,
   RuntimeInstallState,
   SessionHistoryReadModel,
@@ -223,6 +224,20 @@ const HISTORY: SessionHistoryReadModel = {
   ],
 };
 
+const RESIDENTS: ResidentsReadModel = {
+  generatedAt: T0,
+  activeSessionId: SESSION_ID,
+  residents: [
+    {
+      sessionId: SESSION_ID,
+      workspaceId: WORKSPACE_ID,
+      phase: "running",
+      pendingMessages: 1,
+      lastActivityAt: T0,
+    },
+  ],
+};
+
 const HOME: HomeReadModel = {
   authority: AUTHORITY,
   runtime: RUNTIME_CONNECTION,
@@ -245,6 +260,7 @@ const BOOTSTRAP: ClientBootstrap = {
   snapshot: SNAPSHOT,
   stateVersion: STATE_VERSION,
   cursor: "c-41" as EventCursor,
+  residents: RESIDENTS,
 };
 
 const QUERY_INPUTS = {
@@ -252,7 +268,8 @@ const QUERY_INPUTS = {
   "capabilities.get": {},
   "commands.getManifest": {},
   "diagnostics.get": {},
-  "history.list": { limit: 5 },
+  "history.list": { limit: 5, workspaceId: WORKSPACE_ID },
+  "residents.list": {},
   "session.state": {},
   "home.get": {},
   "models.get": {},
@@ -294,6 +311,7 @@ const QUERY_RESPONSES = {
   },
   "diagnostics.get": { ok: true, queryName: "diagnostics.get", result: DIAGNOSTICS },
   "history.list": { ok: true, queryName: "history.list", result: HISTORY },
+  "residents.list": { ok: true, queryName: "residents.list", result: RESIDENTS },
   "session.state": { ok: true, queryName: "session.state", result: SNAPSHOT },
   "home.get": { ok: true, queryName: "home.get", result: HOME },
   "models.get": {
@@ -633,6 +651,15 @@ const DIAGNOSTICS_EVENT: ClientEvent = {
   kind: "diagnostics.changed",
 };
 
+const RESIDENTS_EVENT: ClientEvent = {
+  authorityEpoch: AUTHORITY_EPOCH,
+  stateVersion: 43 as StateVersion,
+  cursor: "c-46" as EventCursor,
+  occurredAt: "2026-08-12T00:00:06.000Z",
+  kind: "residents.changed",
+  residents: RESIDENTS,
+};
+
 const CONVERSATION_EVENT: ClientEvent = conversationChangedEvent(conversationLiveSequence[0]!, 12);
 
 const EVENTS: ReadonlyArray<ClientEvent> = [
@@ -640,6 +667,7 @@ const EVENTS: ReadonlyArray<ClientEvent> = [
   ACCEPTED_EVENT,
   RECEIPT_EVENT,
   DIAGNOSTICS_EVENT,
+  RESIDENTS_EVENT,
   CONVERSATION_EVENT,
 ];
 

@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
-import { isValidElement } from "react";
-import { useMemo } from "react";
+import { isValidElement, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import type { Components } from "react-markdown";
+import type { Components, Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
 import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
+import { IncrementalMarkdownBlocks } from "./incrementalMarkdown";
+
+/** 插件表在模块级固定：每次渲染新建数组只会让 react-markdown 白跑一遍等价管道。 */
+const REMARK_PLUGINS: Options["remarkPlugins"] = [remarkGfm];
+const REHYPE_PLUGINS: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
 
 function isSafeHref(href: string): boolean {
   return /^(https?:|mailto:)/i.test(href.trim());
@@ -227,7 +230,7 @@ function createComponents(streaming: boolean, magicKeywords: boolean): Component
 export function MarkdownInline({ text }: { text: string; k?: string }) {
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={REMARK_PLUGINS}
       components={{
         p: ({ children }) => <>{children}</>,
         a({ href, children }) {
@@ -251,7 +254,80 @@ export function MarkdownInline({ text }: { text: string; k?: string }) {
   );
 }
 
-export function MarkdownText({
+type CachedBlock = { readonly source: string; readonly node: ReactNode };
+
+type StreamingState = {
+  readonly blocks: IncrementalMarkdownBlocks;
+  readonly cache: Map<number, CachedBlock>;
+  readonly components: Components;
+};
+
+/**
+ * 流式正文：已冻结的顶层块只解析、只高亮一次，元素随后被缓存（React 见到同一个元素
+ * 对象直接 bailout），每个 chunk 只重新解析尾部那点源码。
+ *
+ * react-markdown 的根是 Fragment，不额外套元素；mdast-util-to-hast 又只在顶层块
+ * *之间* 插一个 `\n` 文本节点，所以这里按同样规则在块之间补上分隔符，逐块渲染的
+ * DOM 与整篇一次性渲染逐字节一致，`.ev-body p:first-child` 这类选择器不受影响。
+ */
+function StreamingMarkdownBody({ text, components }: { text: string; components: Components }) {
+  const stateRef = useRef<StreamingState | undefined>(undefined);
+  let state = stateRef.current;
+  if (state === undefined || state.components !== components) {
+    state = { blocks: new IncrementalMarkdownBlocks(), cache: new Map(), components };
+    stateRef.current = state;
+  }
+  const { frozen, tail, crossBlockReference } = state.blocks.update(text);
+  if (crossBlockReference) {
+    // 脚注与链接引用要跨块对齐，逐块渲染会把它们拆散：这一条回复整篇渲染。
+    state.cache.clear();
+    return (
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+        {text}
+      </ReactMarkdown>
+    );
+  }
+  const parts: ReactNode[] = [];
+  for (const block of frozen) {
+    const cached = state.cache.get(block.key);
+    if (cached !== undefined && cached.source === block.source) {
+      parts.push(cached.node);
+      continue;
+    }
+    const node = (
+      <ReactMarkdown
+        key={block.key}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={components}
+      >
+        {block.source}
+      </ReactMarkdown>
+    );
+    state.cache.set(block.key, { source: block.source, node });
+    parts.push(node);
+  }
+  // 只有空白的尾部渲染不出任何节点，也就不该占一个分隔符。
+  if (tail.trim().length > 0) {
+    parts.push(
+      <ReactMarkdown
+        key="tail"
+        remarkPlugins={REMARK_PLUGINS}
+        components={components}
+      >
+        {tail}
+      </ReactMarkdown>,
+    );
+  }
+  const nodes: ReactNode[] = [];
+  for (const part of parts) {
+    if (nodes.length > 0) nodes.push("\n");
+    nodes.push(part);
+  }
+  return <>{nodes}</>;
+}
+
+export const MarkdownText = memo(function MarkdownText({
   text,
   streaming,
   truncated,
@@ -271,14 +347,14 @@ export function MarkdownText({
   );
   return (
     <div className="ev-body">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]]}
-        components={components}
-      >
-        {text}
-      </ReactMarkdown>
+      {streaming === true ? (
+        <StreamingMarkdownBody text={text} components={components} />
+      ) : (
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
+          {text}
+        </ReactMarkdown>
+      )}
       {truncated === true ? mark : null}
     </div>
   );
-}
+});

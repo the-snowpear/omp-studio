@@ -245,9 +245,9 @@ describe("studio-host runtime", () => {
 			session,
 			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 7 },
 			async runtime => {
-				expect(runtime.services.agents.list({ includePersisted: true }).some(agent => agent.agentId === "ToolTestA")).toBe(
-					true,
-				);
+				expect(
+					runtime.services.agents.list({ includePersisted: true }).some(agent => agent.agentId === "ToolTestA"),
+				).toBe(true);
 				sessionFile = secondParent;
 				for (const listener of sessionChangeListeners) listener();
 				const row = await waitForListedAgent(runtime, "ToolTestB");

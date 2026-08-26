@@ -121,11 +121,15 @@ describe("WP-041 StudioBtwService", () => {
 		const cancelledStarted = cancelled.service.ask("question");
 		cancelled.run.resolve({ replyText: "answer", assistantMessage: assistant("answer") });
 		await Bun.sleep(0);
-		await expect(cancelled.service.branch(cancelledStarted.ephemeralId, cancelledStarted.branchToken)).resolves.toEqual({
+		await expect(
+			cancelled.service.branch(cancelledStarted.ephemeralId, cancelledStarted.branchToken),
+		).resolves.toEqual({
 			branched: false,
 			reason: "cancelled",
 		});
-		await expect(cancelled.service.branch(cancelledStarted.ephemeralId, cancelledStarted.branchToken)).resolves.toEqual({
+		await expect(
+			cancelled.service.branch(cancelledStarted.ephemeralId, cancelledStarted.branchToken),
+		).resolves.toEqual({
 			branched: false,
 			reason: "cancelled",
 		});
@@ -140,7 +144,9 @@ describe("WP-041 StudioBtwService", () => {
 		const failingStarted = failing.service.ask("question");
 		failing.run.resolve({ replyText: "answer", assistantMessage: assistant("answer") });
 		await Bun.sleep(0);
-		await expect(failing.service.branch(failingStarted.ephemeralId, failingStarted.branchToken)).rejects.toMatchObject({
+		await expect(
+			failing.service.branch(failingStarted.ephemeralId, failingStarted.branchToken),
+		).rejects.toMatchObject({
 			code: "COMMAND_BLOCKED",
 		});
 		await expect(failing.service.branch(failingStarted.ephemeralId, failingStarted.branchToken)).resolves.toEqual({

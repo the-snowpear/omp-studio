@@ -32,6 +32,8 @@ import type {
   SessionId,
   StateVersion,
   ThreadId,
+  WorkspaceId,
+  ResidentsReadModel,
 } from "@omp-studio/client-contract";
 import type { CommandId, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
 
@@ -71,6 +73,22 @@ function snapshot(stateVersion: number, runtimeEpoch: number): OperatorStateSnap
   };
 }
 
+function residents(): ResidentsReadModel {
+  return {
+    generatedAt: TS,
+    activeSessionId: "sess-1" as SessionId,
+    residents: [
+      {
+        sessionId: "sess-1" as SessionId,
+        workspaceId: "ws-1" as WorkspaceId,
+        phase: "running",
+        pendingMessages: 1,
+        lastActivityAt: TS,
+      },
+    ],
+  };
+}
+
 function bootstrap(stateVersion = 1, cursor = "10", runtimeEpoch = 1): ClientBootstrap {
   return {
     contractVersion: 2,
@@ -90,6 +108,7 @@ function bootstrap(stateVersion = 1, cursor = "10", runtimeEpoch = 1): ClientBoo
     snapshot: snapshot(stateVersion, runtimeEpoch),
     stateVersion: stateVersion as StateVersion,
     cursor: cursor as EventCursor,
+    residents: residents(),
   };
 }
 
@@ -253,6 +272,76 @@ test("bootstrap establishes authority/runtime epoch, stateVersion, cursor and sn
   assert.equal(state.connection.resyncRequired, false);
   assert.equal(state.entities.snapshot?.stateVersion, 1);
   assert.equal(state.connection.surface?.openExternal, false);
+});
+
+test("snapshot reducer carries optional Runtime settings and speculation projections", () => {
+  const projected = {
+    ...snapshot(2, 1),
+    runtimeSettings: {
+      "edit.autoRepair.enabled": true,
+      "features.unexpectedStopDetection": "mechanical" as const,
+      "providers.unexpectedStopModel": "online" as const,
+      extendedContext: true,
+      "compaction.asyncEnabled": false,
+      "compaction.methodOrder": ["remote", "soft"],
+      "providers.openai-codex.codeMode": "off" as const,
+    } satisfies NonNullable<OperatorStateSnapshot["runtimeSettings"]>,
+    compactionSpeculation: "running" as const,
+  };
+  const state = reduceClientState(bootedState(), {
+    type: "event",
+    event: snapshotEvent(11, projected),
+  });
+  assert.equal(state.entities.snapshot?.runtimeSettings?.extendedContext, true);
+  assert.deepEqual(state.entities.snapshot?.runtimeSettings?.["compaction.methodOrder"], ["remote", "soft"]);
+  assert.equal(state.entities.snapshot?.compactionSpeculation, "running");
+});
+
+test("bootstrap restores the authority-level resident broker overview", () => {
+  const model = residents();
+  const state = bootedState({ ...bootstrap(), residents: model });
+  assert.deepEqual(state.entities.residents, model);
+});
+
+test("residents.changed accepts a broker update despite a stale runtime epoch and consumes its cursor", () => {
+  const model = residents();
+  const { residents: _initialResidents, ...bootstrapWithoutResidents } = bootstrap();
+  let state = bootedState(bootstrapWithoutResidents);
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...base("11", { runtimeEpoch: 0 as RuntimeEpoch }),
+      kind: "residents.changed",
+      residents: model,
+    },
+  });
+  assert.deepEqual(state.entities.residents, model);
+  assert.equal(state.connection.cursor, "11");
+  state = reduceClientState(state, { type: "event", event: changed(12) });
+  assert.equal(state.connection.cursor, "12");
+  assert.equal(state.connection.resyncRequired, false);
+});
+
+test("runtime epoch switches retain the resident broker overview", () => {
+  const model = residents();
+  let state = bootedState({ ...bootstrap(), residents: model });
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(11, snapshot(1, 2)) });
+  assert.deepEqual(state.entities.residents, model);
+});
+
+test("a terminal receipt from an older resident epoch is applied without clearing the active slice", () => {
+  const model = residents();
+  let state = bootedState({ ...bootstrap(), residents: model });
+  state = issue(state, "session.resume", REQ_1);
+  const activeSnapshot = state.entities.snapshot;
+  state = reduceClientState(state, {
+    type: "event",
+    event: completedReceipt(REQ_1, 11, { runtimeEpoch: 0 as RuntimeEpoch }),
+  });
+  assert.equal(state.commands[REQ_1]?.status, "completed");
+  assert.equal(state.entities.snapshot, activeSnapshot);
+  assert.deepEqual(state.entities.residents, model);
+  assert.equal(state.connection.cursor, "11");
 });
 
 test("an unavailable bootstrap establishes authority, surface and manifests without a snapshot", () => {
@@ -796,6 +885,9 @@ test("sensitive mutations are blocked with RESYNC_REQUIRED while resync is requi
   assert.equal(isSensitiveCommand("btw.ask"), true);
   assert.equal(isSensitiveCommand("btw.branch"), true);
   assert.equal(isSensitiveCommand("btw.abort"), false);
+  assert.equal(isSensitiveCommand("runtime.settings.get"), false);
+  assert.equal(isSensitiveCommand("runtime.settings.set"), true);
+  assert.equal(isSensitiveCommand("mode.plan.review.saveAndQuit"), true);
   // workspace mutations change Host-side selection, so they are sensitive too
   assert.equal(isSensitiveCommand("workspace.open"), true);
   assert.equal(isSensitiveCommand("workspace.pick"), true);

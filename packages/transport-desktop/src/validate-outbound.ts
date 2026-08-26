@@ -29,8 +29,16 @@ import type {
   RuntimeDisconnectCode,
   RuntimeUnavailableCode,
 } from "@omp-studio/client-contract";
-import { parseConversationRuntimeEvent, parseConversationTranscriptPage } from "@omp-studio/client-contract";
-import { parseSessionTelemetryReadResult } from "@omp-studio/studio-protocol";
+import {
+  parseConversationRuntimeEvent,
+  parseConversationTranscriptPage,
+  STUDIO_RUNTIME_CODE_MODES,
+  STUDIO_RUNTIME_COMPACTION_METHODS,
+  STUDIO_RUNTIME_SETTING_KEYS,
+  STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS,
+  STUDIO_RUNTIME_UNEXPECTED_STOP_MODES,
+} from "@omp-studio/client-contract";
+import { parseOperatorStateSnapshot, parseSessionTelemetryReadResult } from "@omp-studio/studio-protocol";
 
 import {
   ValidationError,
@@ -40,6 +48,7 @@ import {
   assertPlainObject,
   isOpaqueToken,
   isPlainObject,
+  validatePromptImages,
 } from "./validate-inbound.js";
 import { COMMAND_NAMES, QUERY_NAMES } from "./validate-inbound.js";
 
@@ -87,6 +96,150 @@ function assertSessionTelemetryReadResult(value: unknown): void {
     throw new ValidationError(
       `session.telemetry.read result: invalid telemetry read result (${error instanceof Error ? error.message : "invalid"})`,
     );
+  }
+}
+
+function assertRuntimeSettingValue(key: unknown, value: unknown, what: string): void {
+  if (typeof key !== "string" || !STUDIO_RUNTIME_SETTING_KEYS.includes(key as (typeof STUDIO_RUNTIME_SETTING_KEYS)[number])) {
+    throw new ValidationError(`${what}: unsupported setting key`);
+  }
+  switch (key) {
+    case "edit.autoRepair.enabled":
+    case "extendedContext":
+    case "compaction.asyncEnabled":
+      if (typeof value !== "boolean") throw new ValidationError(`${what}: value must be boolean`);
+      return;
+    case "features.unexpectedStopDetection":
+      if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODES.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODES)[number])) {
+        throw new ValidationError(`${what}: invalid unexpected-stop detection mode`);
+      }
+      return;
+    case "providers.unexpectedStopModel":
+      if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS)[number])) {
+        throw new ValidationError(`${what}: invalid unexpected-stop model`);
+      }
+      return;
+    case "providers.openai-codex.codeMode":
+      if (!STUDIO_RUNTIME_CODE_MODES.includes(value as (typeof STUDIO_RUNTIME_CODE_MODES)[number])) {
+        throw new ValidationError(`${what}: invalid code mode`);
+      }
+      return;
+    case "compaction.methodOrder":
+      if (
+        !Array.isArray(value) ||
+        value.length === 0 ||
+        value.some((method) => !STUDIO_RUNTIME_COMPACTION_METHODS.includes(method as (typeof STUDIO_RUNTIME_COMPACTION_METHODS)[number])) ||
+        new Set(value).size !== value.length
+      ) {
+        throw new ValidationError(`${what}: value must be a non-empty unique compaction method list`);
+      }
+      return;
+  }
+}
+
+function assertRuntimeSettingsSnapshot(value: unknown, what: string): void {
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, [...STUDIO_RUNTIME_SETTING_KEYS], what);
+  for (const key of STUDIO_RUNTIME_SETTING_KEYS) assertRuntimeSettingValue(key, value[key], `${what}: ${key}`);
+}
+
+function assertRuntimeSettingsGetResult(value: unknown): void {
+  const what = "event: runtime.settings.get result";
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["values"], what);
+  assertPlainObject(value.values, `${what}: values`);
+  for (const key of Object.keys(value.values)) {
+    if (!STUDIO_RUNTIME_SETTING_KEYS.includes(key as (typeof STUDIO_RUNTIME_SETTING_KEYS)[number])) {
+      throw new ValidationError(`${what}: values contains an unsupported setting key`);
+    }
+    assertRuntimeSettingValue(key, value.values[key], `${what}: values.${key}`);
+  }
+}
+
+function assertRuntimeSettingsSetResult(value: unknown): void {
+  const what = "event: runtime.settings.set result";
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["key", "value", "persisted"], what);
+  assertRuntimeSettingValue(value.key, value.value, `${what}: value`);
+  if (typeof value.persisted !== "boolean") throw new ValidationError(`${what}: persisted must be boolean`);
+}
+
+function assertPlanSaveAndQuitResult(value: unknown): void {
+  const what = "event: mode.plan.review.saveAndQuit result";
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["saved", "path", "exitedPlan", "newSession", "sessionId"], what);
+  if (value.saved !== true || value.exitedPlan !== true) throw new ValidationError(`${what}: save did not complete`);
+  assertNonEmptyText(value.path, `${what}: path`);
+  const normalized = value.path.replaceAll("\\", "/");
+  if (
+    value.path.length > 1024 ||
+    value.path.includes("\0") ||
+    value.path !== value.path.trim() ||
+    ((value.path.startsWith('"') && value.path.endsWith('"')) || (value.path.startsWith("'") && value.path.endsWith("'"))) ||
+    normalized.startsWith("/") ||
+    normalized.startsWith("~") ||
+    /^[A-Za-z]:/.test(value.path) ||
+    normalized.endsWith("/") ||
+    normalized.split("/").some((segment) => segment === ".." || segment.includes(":")) ||
+    normalized.split("/").every((segment) => segment.length === 0 || segment === ".")
+  ) {
+    throw new ValidationError(`${what}: path must be workspace-relative`);
+  }
+  if (value.newSession !== "started" && value.newSession !== "cancelled" && value.newSession !== "failed") {
+    throw new ValidationError(`${what}: invalid newSession status`);
+  }
+  if (value.sessionId !== undefined) assertOpaqueToken(value.sessionId, `${what}: sessionId`);
+  if (value.newSession === "started" && value.sessionId === undefined) {
+    throw new ValidationError(`${what}: started session is missing sessionId`);
+  }
+}
+
+function assertOperatorStateSnapshot(value: unknown, what: string): void {
+  try {
+    parseOperatorStateSnapshot(value);
+  } catch (error) {
+    throw new ValidationError(`${what}: invalid operator snapshot (${error instanceof Error ? error.message : "invalid"})`);
+  }
+}
+
+function assertResidentsReadModel(value: unknown, what = "residents read model"): void {
+  assertPlainObject(value, what);
+  assertNoUnknownKeys(value, ["residents", "activeSessionId", "generatedAt"], what);
+  assertNonEmptyText(value.generatedAt, `${what}: generatedAt`);
+  if (value.activeSessionId !== undefined) {
+    assertOpaqueToken(value.activeSessionId, `${what}: activeSessionId`);
+  }
+  if (!Array.isArray(value.residents) || value.residents.length > 10_000) {
+    throw new ValidationError(`${what}: residents must be a bounded array`);
+  }
+  for (const [index, resident] of value.residents.entries()) {
+    const rowWhat = `${what}: residents[${index}]`;
+    assertPlainObject(resident, rowWhat);
+    assertNoUnknownKeys(
+      resident,
+      ["sessionId", "workspaceId", "phase", "pendingMessages", "waitKind", "lastActivityAt"],
+      rowWhat,
+    );
+    assertOpaqueToken(resident.sessionId, `${rowWhat}: sessionId`);
+    assertOpaqueToken(resident.workspaceId, `${rowWhat}: workspaceId`);
+    if (
+      resident.phase !== "idle" &&
+      resident.phase !== "running" &&
+      resident.phase !== "compacting" &&
+      resident.phase !== "waiting"
+    ) {
+      throw new ValidationError(`${rowWhat}: phase is invalid`);
+    }
+    assertCounter(resident.pendingMessages, `${rowWhat}: pendingMessages`);
+    if (
+      resident.waitKind !== undefined &&
+      resident.waitKind !== "approval" &&
+      resident.waitKind !== "ask" &&
+      resident.waitKind !== "plan"
+    ) {
+      throw new ValidationError(`${rowWhat}: waitKind is invalid`);
+    }
+    assertNonEmptyText(resident.lastActivityAt, `${rowWhat}: lastActivityAt`);
   }
 }
 
@@ -513,6 +666,9 @@ export function assertClientQueryResponse(value: unknown): asserts value is Clie
     if (queryName === "session.telemetry.read") {
       assertSessionTelemetryReadResult(value.result);
     }
+    if (queryName === "residents.list") {
+      assertResidentsReadModel(value.result, "residents.list result");
+    }
     if (queryName === "workspace.fileTree") {
       assertWorkspaceFileTree(value.result);
     }
@@ -569,6 +725,7 @@ const EVENT_KINDS = [
   "runtime.changed",
   "resync.required",
   "diagnostics.changed",
+  "residents.changed",
   "telemetry.changed",
   "operation.progress",
   "git.repository.changed",
@@ -819,6 +976,9 @@ function assertCommandReceipt(value: unknown): void {
       if (commandName === "btw.ask") assertBtwAskOutcome(value.result);
       if (commandName === "btw.branch") assertBtwBranchOutcome(value.result);
       if (commandName === "runtime.ensure") assertRuntimeConnection(value.result);
+      if (commandName === "runtime.settings.get") assertRuntimeSettingsGetResult(value.result);
+      if (commandName === "runtime.settings.set") assertRuntimeSettingsSetResult(value.result);
+      if (commandName === "mode.plan.review.saveAndQuit") assertPlanSaveAndQuitResult(value.result);
       return;
     case "failed":
       assertNoUnknownKeys(
@@ -846,7 +1006,7 @@ function assertCommandReceipt(value: unknown): void {
 function assertOperatorInvokeOutcome(value: unknown): void {
   assertPlainObject(value, "event: operator.invoke result");
   assertNoUnknownKeys(value, ["snapshot", "output", "result"], "event: operator.invoke result");
-  assertPlainObject(value.snapshot, "event: operator.invoke result snapshot");
+  assertOperatorStateSnapshot(value.snapshot, "event: operator.invoke result snapshot");
   if (!Array.isArray(value.output)) {
     throw new ValidationError("event: operator.invoke result output must be an array");
   }
@@ -871,13 +1031,11 @@ const SESSION_TREE_RESULT_KEYS = [
   "askReanswerCommitted",
 ] as const;
 
-const EDITOR_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-
 /** Assert tree navigate/branch completion: snapshot plus optional editor fill-back. */
 function assertSessionTreeCommandOutcome(value: unknown): void {
   assertPlainObject(value, "event: session.tree result");
   assertNoUnknownKeys(value, [...SESSION_TREE_RESULT_KEYS], "event: session.tree result");
-  assertPlainObject(value.snapshot, "event: session.tree result snapshot");
+  assertOperatorStateSnapshot(value.snapshot, "event: session.tree result snapshot");
   if (value.cancelled !== undefined && typeof value.cancelled !== "boolean") {
     throw new ValidationError("event: session.tree result cancelled must be boolean");
   }
@@ -897,22 +1055,7 @@ function assertSessionTreeCommandOutcome(value: unknown): void {
     throw new ValidationError("event: session.tree result leafId must be a non-empty string or null");
   }
   if (value.editorImages !== undefined) {
-    if (!Array.isArray(value.editorImages)) {
-      throw new ValidationError("event: session.tree result editorImages must be an array");
-    }
-    for (const image of value.editorImages) {
-      assertPlainObject(image, "event: session.tree result editorImages item");
-      assertNoUnknownKeys(image, ["type", "mimeType", "data"], "event: session.tree result editorImages item");
-      if (image.type !== "image") {
-        throw new ValidationError("event: session.tree result editorImages item type must be image");
-      }
-      if (typeof image.mimeType !== "string" || !EDITOR_IMAGE_MIME_TYPES.has(image.mimeType)) {
-        throw new ValidationError("event: session.tree result editorImages item mimeType is unsupported");
-      }
-      if (typeof image.data !== "string" || image.data.length === 0) {
-        throw new ValidationError("event: session.tree result editorImages item data must be non-empty base64");
-      }
-    }
+    validatePromptImages(value.editorImages, "event: session.tree result editorImages");
   }
 }
 
@@ -950,7 +1093,7 @@ function assertBtwSnapshot(value: unknown, field: string): void {
 function assertBtwAskOutcome(value: unknown): void {
   assertPlainObject(value, "event: btw.ask result");
   assertNoUnknownKeys(value, ["snapshot", "ephemeralId", "branchToken", "status"], "event: btw.ask result");
-  assertPlainObject(value.snapshot, "event: btw.ask result snapshot");
+  assertOperatorStateSnapshot(value.snapshot, "event: btw.ask result snapshot");
   assertOpaqueToken(value.ephemeralId, "event: btw.ask result ephemeralId");
   assertOpaqueToken(value.branchToken, "event: btw.ask result branchToken");
   if (value.status !== "running") {
@@ -962,7 +1105,7 @@ function assertBtwAskOutcome(value: unknown): void {
 function assertBtwBranchOutcome(value: unknown): void {
   assertPlainObject(value, "event: btw.branch result");
   assertNoUnknownKeys(value, ["snapshot", "branched", "newSessionId", "newLeafId", "reason"], "event: btw.branch result");
-  assertPlainObject(value.snapshot, "event: btw.branch result snapshot");
+  assertOperatorStateSnapshot(value.snapshot, "event: btw.branch result snapshot");
   if (typeof value.branched !== "boolean") {
     throw new ValidationError("event: btw.branch result branched must be boolean");
   }
@@ -1116,12 +1259,17 @@ export function assertClientEvent(value: unknown): asserts value is ClientEvent 
     case "snapshot":
       assertEventKeys(value, "event", ["snapshot"]);
       assertEventBase(value);
-      assertPlainObject(value.snapshot, "event: snapshot");
+      assertOperatorStateSnapshot(value.snapshot, "event: snapshot");
       return;
     case "state.changed":
     case "diagnostics.changed":
       assertEventKeys(value, "event", []);
       assertEventBase(value);
+      return;
+    case "residents.changed":
+      assertEventKeys(value, "event", ["residents"]);
+      assertEventBase(value);
+      assertResidentsReadModel(value.residents, "event: residents");
       return;
     case "operation.progress":
       assertEventKeys(value, "event", ["progress"]);

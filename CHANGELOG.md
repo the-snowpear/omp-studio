@@ -5,6 +5,17 @@ All notable changes to OMP Studio are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **侧栏会话行「更多」菜单**：左侧对话列表每行的 ⋯ 按钮与行右键均可打开与顶栏「对话选项」同款的菜单（重命名 / Fork / Handoff / Compact / 导出 / 会话历史 / 归档），弹层稍窄；右键时菜单贴光标弹出。动作作用于所在行会话：非当前会话先打开（必要时切换工作区并 resume）再执行；预览演示行的会话动作保持禁用，归档仍为本地演示行为。
+
+### Changed
+
+- **流式渲染性能重构**：对话正文改为增量渲染。已完成的顶层 markdown 块在流式过程中只解析、只高亮一次并缓存元素，每个 chunk 仅重新解析尾部两块（脚注 / 链接引用定义出现时自动退回整篇渲染，保证结果一致）；快照之间复用未变化的时间线行，`MarkdownText` / `MessageBody` / 变更卡与 Plan 绑定表补上 memo 与稳定回调；engine 通知按动画帧合并（首次同步 + 帧尾补一次）。渲染结果的 DOM 与样式与改造前逐字节一致（测试断言 innerHTML 相等）。实测：单条 12.8KB 回复的流式渲染 2142ms → 448ms（120 tick），31 行 transcript 带流式尾行 389ms/帧 → 3.3ms/帧。
+- **会话切换加载与显示性能**：切回最近看过的会话时先画上次渲染的行（按 sessionId 的 LRU，5 条会话 / 每条 60 行）并作为行复用基线，新页落地后未变化的行沿用旧对象，正文不再整页重新解析；驻留会话在 `session.resume` 期间不再先读一次归档页（600ms 兜底回落），一次切换只读一遍 transcript；用户气泡缩略图与 hydrate 合并成同一次提交；恢复超过 16 行时按动画帧从尾部铺开；一次提交里的多次贴底合并为一条链。Host 侧 `session-archive-reader` 改为追加式续读（只解析新增字节、滚动哈希算 revision）、投影结果可续算缓存、快照缓存命中刷新 LRU 顺序，整档解析 / 哈希按 8ms 时间片让出事件循环。实测 3 万条消息（12.5MB）的会话：追加后重读 260ms → 60ms，缓存命中 12ms，冷读期间主进程最长停顿 173ms → 16ms；续读得到的 revision 与 items 与整档重读逐字节一致（测试断言）。
+
+
 ## [0.1.1] - 2026-08-16
 
 ### Added

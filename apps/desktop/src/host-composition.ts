@@ -37,7 +37,16 @@
  * renderer contract.
  */
 
-import type { ClientTransport, PublicAuthorityIdentity, ArchId, PlatformId, AuthorityId, AuthorityEpoch, ConversationTranscriptReadPage } from "@omp-studio/client-contract";
+import type {
+  ArchId,
+  AuthorityEpoch,
+  AuthorityId,
+  ClientTransport,
+  ConversationTranscriptReadPage,
+  PublicAuthorityIdentity,
+  ResidentsReadModel,
+  PlatformId,
+} from "@omp-studio/client-contract";
 import {
   createDefaultHostDiagnosticsFactory,
   StudioHostClientFacade,
@@ -56,6 +65,7 @@ import {
   type HostRuntimeUnavailable,
   type HostRuntimeInstallProbe,
   type HostRuntimeInstallService,
+  type HostResidentsService,
   type HostSemanticCommandService,
   type HostSessionCatalogProvider,
   type HostSessionArchiveProvider,
@@ -87,13 +97,23 @@ import {
   type StudioRuntimeSessionController,
   StudioSessionArchiveReader,
   StudioSessionArchiveService,
+  StudioSessionDeleteService,
+  FileSessionLeaseStore,
+  defaultOmpAgentDir,
   type SessionArchiveReadInput,
   type SessionPersistedAgentRecord,
 } from "@omp-studio/studio-host";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ApprovalMode, CapabilityManifest, OperatorCommandManifest, RuntimePreference, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
+import type {
+  ApprovalMode,
+  CapabilityManifest,
+  CommandLedgerEntry,
+  OperatorCommandManifest,
+  RuntimePreference,
+  StudioAgentSnapshot,
+} from "@omp-studio/studio-protocol";
 
 import { DesktopInteractionHost, IsolatedForwarder } from "./interaction-host.js";
 import {
@@ -148,6 +168,13 @@ export interface DesktopRuntimeSession {
   commandManifest(): OperatorCommandManifest | undefined;
 }
 
+/** Internal Main-process change payload for the residents read model. */
+export interface DesktopResidentsChange extends ResidentsReadModel {
+  /** Background terminal outcomes use a Main-only side channel. Never attach
+   * a background snapshot/publication to the current client projection. */
+  readonly terminalOutcomes?: ReadonlyArray<CommandLedgerEntry>;
+}
+
 /** Context handed to the runtime session port after a trusted resolution. */
 export interface DesktopRuntimeSessionContext {
   readonly resolution: RuntimeResolution;
@@ -180,13 +207,27 @@ export interface DesktopRuntimeSessionPort {
   /** Gracefully stops the Runtime if this port started one; no-op otherwise. */
   stop(): Promise<void>;
   /**
-   * Optional workspace rebind: stop the current Runtime (if any), spawn it
-   * again under the given workspace cwd and return the new session bundle
-   * (`undefined` when the Runtime is not available). The composition
-   * rebuilds the facade's runtime access from the returned bundle. Never
-   * changes the `start` contract: startup still happens at most once.
+   * Optional workspace rebind: select (or spawn) a Worker for the given
+   * workspace and return its session bundle (`undefined` when the Runtime is
+   * not available). Workers of other workspaces stay resident, so switching
+   * projects never stops a running turn elsewhere. The composition rebuilds
+   * the facade's runtime access from the returned bundle. Never changes the
+   * `start` contract: startup still happens at most once.
    */
   rebind?(workspace: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined>;
+  /**
+   * True when a live Worker already holds this workspace, i.e. a rebind to it
+   * is a binding switch rather than a Runtime restart. Ports without a
+   * resident pool omit this and every rebind counts as a restart.
+   */
+  hasResidentForWorkspace?(workspaceId: string): boolean;
+  /** Current authority-level resident projection (safe, path-free facts). */
+  listResidents?(): ResidentsReadModel;
+  /**
+   * Subscribe to resident projection changes. The returned disposer is
+   * required so a composition reload/close cannot retain Host listeners.
+   */
+  attachResidentsSink?(listener: (change: DesktopResidentsChange) => void): () => void;
   /**
    * Stop the current Runtime and launch it against another session file
    * (`resume`) or a fresh process (`fresh`). Increments the Runtime epoch.
@@ -237,6 +278,12 @@ export interface DesktopRuntimeSessionPort {
    * session holder without a user command.
    */
   attachSessionSink?(listener: (session: DesktopRuntimeSession | undefined) => void): void;
+  /**
+   * Composition binds here so selecting a Worker of another project moves the
+   * Host's active workspace with it: cwd-derived reads (session catalog,
+   * archive, models / MCP scope) must agree with the bound Session.
+   */
+  attachWorkspaceSink?(listener: (workspace: { workspaceId: string; cwd: string }) => void): () => void;
 }
 
 /** Facade seam providers; every optional slot fails closed when absent. */
@@ -244,6 +291,8 @@ export interface DesktopFacadeSeams {
   readonly capabilityManifest?: HostManifestProvider<CapabilityManifest>;
   readonly commandManifest?: HostManifestProvider<OperatorCommandManifest>;
   readonly catalog?: HostSessionCatalogProvider;
+  /** Optional authority-level resident Runtime projection. */
+  readonly residents?: HostResidentsService;
   readonly archive?: HostSessionArchiveProvider;
   /** Overrides the persisted "last observed" telemetry store (tests). */
   readonly telemetryStore?: HostSessionTelemetryStorePort;
@@ -386,6 +435,10 @@ interface FacadeContext {
   readonly lastDisconnect: { current: HostRuntimeDisconnect | undefined };
   /** Single publication channel; Facade subscribe and session attach share it. */
   readonly publications: DesktopPublicationForwarder;
+  /** Authority-level resident projection and change fan-out. */
+  readonly residents: IsolatedForwarder<DesktopResidentsChange>;
+  /** Background terminal ledger outcomes; never publishes snapshots. */
+  readonly residentTerminalOutcomes: IsolatedForwarder<ReadonlyArray<CommandLedgerEntry>>;
   readonly conversationEvents: IsolatedForwarder<StudioConversationForward>;
   readonly telemetryEvents: IsolatedForwarder<StudioTelemetryForward>;
   readonly btwEvents: IsolatedForwarder<StudioBtwForward>;
@@ -547,6 +600,15 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const seams = context.seams;
   const sessionRef = context.sessionRef;
   const catalog = seams.catalog ?? createWorkspaceSessionCatalog(() => context.workspaceCwd.current);
+  const residents: HostResidentsService = seams.residents ?? {
+    list: () =>
+      context.runtimeSession?.listResidents?.() ?? {
+        residents: [],
+        generatedAt: new Date().toISOString(),
+      },
+    onChanged: (listener) => context.residents.subscribe(listener),
+    onTerminalOutcomes: (listener) => context.residentTerminalOutcomes.subscribe(listener),
+  };
   let archiveCwd: string | undefined;
   let archiveReader: StudioSessionArchiveReader | undefined;
   const currentArchiveReader = (): StudioSessionArchiveReader => {
@@ -574,6 +636,26 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     }
     return archiveService;
   };
+  let deleteServiceCwd: string | undefined;
+  let deleteService: StudioSessionDeleteService | undefined;
+  const currentDeleteService = (): StudioSessionDeleteService => {
+    const cwd = context.workspaceCwd.current;
+    if (cwd === undefined) throw new Error("Session deletion requires an active workspace");
+    if (deleteService === undefined || deleteServiceCwd !== cwd) {
+      deleteServiceCwd = cwd;
+      deleteService = new StudioSessionDeleteService({
+        allowedCwd: cwd,
+        isResident: (sessionId) =>
+          context.runtimeSession?.isResident?.(sessionId) === true
+          || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
+      });
+    }
+    return deleteService;
+  };
+  // Durable single-writer lease store mirrors the one created in runtime-session.ts.
+  const sessionLeaseCleanup = new FileSessionLeaseStore({
+    directory: join(context.profileDirectory, "broker", "session-leases"),
+  });
   const archive = seams.archive ?? {
     readPage: async (input: {
       readonly sessionId: string;
@@ -641,6 +723,11 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       sessionRef,
       catalog,
       archive: currentArchiveService,
+      deleteService: currentDeleteService,
+      telemetryStore: () => telemetryStore,
+      bindings: context.backend.bindings,
+      leaseStore: sessionLeaseCleanup,
+      agentDir: () => defaultOmpAgentDir(),
       ...(context.runtimeSession?.switchSession === undefined
         ? {}
         : { switchSession: (intent) => context.runtimeSession!.switchSession!(intent) }),
@@ -671,6 +758,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     capabilityManifest: seams.capabilityManifest ?? (() => sessionRef.current?.capabilityManifest()),
     commandManifest: seams.commandManifest ?? (() => sessionRef.current?.commandManifest()),
     catalog,
+    residents,
     archive,
     telemetryStore,
     telemetryProbe,
@@ -797,6 +885,8 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
   readonly #lease: DesktopAuthorityLease;
   readonly #endpointLease: DesktopEndpointLease;
   readonly #runtimeSession: DesktopRuntimeSessionPort | undefined;
+  readonly #unsubscribeResidents: (() => void) | undefined;
+  readonly #unsubscribeWorkspace: (() => void) | undefined;
   #sessionStarted: boolean;
   readonly #sessionRef: { current: DesktopRuntimeSession | undefined };
   #unsubscribeCurrentPublication: (() => void) | undefined;
@@ -822,6 +912,13 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#lease = options.lease;
     this.#endpointLease = options.endpointLease;
     this.#runtimeSession = options.runtimeSession;
+    this.#unsubscribeResidents = this.#runtimeSession?.attachResidentsSink?.((change) => {
+      const { terminalOutcomes, ...residents } = change;
+      this.#facadeContext.residents.publish(residents);
+      if (terminalOutcomes !== undefined && terminalOutcomes.length > 0) {
+        this.#facadeContext.residentTerminalOutcomes.publish(terminalOutcomes);
+      }
+    });
     this.#sessionStarted = options.sessionStarted;
     this.#sessionRef = options.facadeContext.sessionRef;
     this.#facadeContext.bindSession.current = (session) => {
@@ -834,11 +931,18 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
       } else {
         rememberDisconnect(this.#facadeContext.lastDisconnect, this.#runtimeSession);
       }
-      this.#attachSession(session);
+      this.#attachSession(session, true);
     };
     this.#runtimeSession?.attachSessionSink?.((session) => {
       this.#facadeContext.bindSession.current(session);
     });
+    this.#unsubscribeWorkspace = this.#runtimeSession?.attachWorkspaceSink?.((workspace) => {
+      this.#facadeContext.workspaceCwd.current = workspace.cwd;
+    });
+    const residents = this.#runtimeSession?.listResidents?.();
+    if (residents !== undefined) {
+      this.#facadeContext.residents.publish(residents);
+    }
     this.#attachSession(this.#sessionRef.current);
   }
 
@@ -859,7 +963,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
    * its latest publication so the facade's runtime-changed sync fires
    * promptly. Old session listeners are cancelled first.
    */
-  #attachSession(session: DesktopRuntimeSession | undefined): void {
+  #attachSession(session: DesktopRuntimeSession | undefined, replayConversation = false): void {
     this.#unsubscribeCurrentPublication?.();
     this.#unsubscribeCurrentPublication = undefined;
     this.#unsubscribeConversation?.();
@@ -899,6 +1003,12 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
       });
     }
     this.#replayCurrentPublication();
+    const selectedSessionId = controller.publication()?.snapshot.sessionId;
+    if (replayConversation && selectedSessionId !== undefined) {
+      controller.replayConversationEvents(selectedSessionId, (event) => {
+        this.#facadeContext.conversationEvents.publish(event);
+      });
+    }
   }
 
   #replayCurrentPublication(): void {
@@ -925,14 +1035,19 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
   }
 
   /**
-   * Restart the Runtime under a new workspace cwd: delegates to the port's
-   * optional `rebind` (stop current Runtime, spawn with the new cwd) and
-   * re-points the facade's runtime access (hello / snapshot / onPublication)
-   * at the returned bundle through the live holder — the facade object the
-   * renderer transport is bound to stays the same, so in-flight receipts
-   * keep flowing. An `undefined` bundle (Runtime not available) still
-   * re-points the holder so the facade never keeps serving a dead
-   * controller. Without a rebind-capable port this is a no-op.
+   * Bind the view to another workspace: delegates to the port's optional
+   * `rebind`, which selects a Worker already resident for that workspace or
+   * spawns one, and re-points the facade's runtime access (hello / snapshot /
+   * onPublication) at the returned bundle through the live holder — the facade
+   * object the renderer transport is bound to stays the same, so in-flight
+   * receipts keep flowing. Workers of other workspaces are left running.
+   *
+   * When the port reports a live resident for the target workspace this is a
+   * binding switch, not a Runtime restart: the fallback cold start is skipped
+   * so a transient selection failure cannot silently respawn the process.
+   * An `undefined` bundle (Runtime not available) still re-points the holder so
+   * the facade never keeps serving a dead controller. Without a
+   * rebind-capable port this is a no-op.
    */
   async rebindWorkspace(workspace: { workspaceId: string; cwd: string }): Promise<void> {
     if (this.#closed || this.#shutdownStarted) {
@@ -943,8 +1058,9 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     if (port?.rebind === undefined) {
       return;
     }
+    const hadResident = port.hasResidentForWorkspace?.(workspace.workspaceId) === true;
     let next = await port.rebind(workspace);
-    if (next === undefined) {
+    if (next === undefined && !hadResident) {
       next = await startInstalledRuntime(this.#facadeContext);
     }
     rememberUnavailable(
@@ -961,7 +1077,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#sessionStarted = this.#sessionStarted || next !== undefined;
     this.#sessionRef.current = next;
     this.#status = next === undefined ? "read-only" : "ready";
-    this.#attachSession(next);
+    this.#attachSession(next, true);
   }
 
   /**
@@ -977,6 +1093,10 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     }
     this.#shutdownStarted = true;
     await this.#facade.close();
+    // Unlike reload(), shutdown is terminal: detach the Runtime-facing sinks
+    // so the composition cannot retain listeners after its facade is gone.
+    this.#unsubscribeResidents?.();
+    this.#unsubscribeWorkspace?.();
     this.#facadeContext.seams.disposeHostOperations?.();
     if (this.#sessionStarted && this.#runtimeSession !== undefined) {
       await this.#runtimeSession.stop();
@@ -1123,6 +1243,8 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
       const status: DesktopRuntimeStatus = session === undefined ? "read-only" : "ready";
       const sessionRef = { current: session };
       const publications = new DesktopPublicationForwarder();
+      const residents = new IsolatedForwarder<DesktopResidentsChange>();
+      const residentTerminalOutcomes = new IsolatedForwarder<ReadonlyArray<CommandLedgerEntry>>();
       const interaction = new DesktopInteractionHost(sessionRef);
       const facadeContext: FacadeContext = {
         authority: authorityIdentityFromLease(lease),
@@ -1134,6 +1256,8 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         lastUnavailable: { current: lastUnavailable },
         lastDisconnect: { current: runtimeSession?.lastDisconnect?.() },
         publications,
+        residents,
+        residentTerminalOutcomes,
         conversationEvents: new IsolatedForwarder<StudioConversationForward>(),
         telemetryEvents: new IsolatedForwarder<StudioTelemetryForward>(),
         btwEvents: new IsolatedForwarder<StudioBtwForward>(),

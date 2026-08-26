@@ -99,6 +99,29 @@ test("WP-012 parses the canonical initial snapshot and fences nested epochs", as
   );
 });
 
+test("WP-012 accepts semantic session titles and rejects invalid title sources", async () => {
+  const value: unknown = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8"));
+  const snapshotValue = value as { snapshot: Record<string, unknown> };
+  const parsed = parseStudioSnapshotResponse({
+    ...snapshotValue,
+    snapshot: {
+      ...snapshotValue.snapshot,
+      sessionTitle: "Inspect runtime title projection",
+      sessionTitleSource: "auto",
+    },
+  });
+  assert.equal(parsed.snapshot.sessionTitle, "Inspect runtime title projection");
+  assert.equal(parsed.snapshot.sessionTitleSource, "auto");
+  assert.equal(parseStudioSnapshotResponse({
+    ...snapshotValue,
+    snapshot: { ...snapshotValue.snapshot, sessionTitle: "Legacy title" },
+  }).snapshot.sessionTitle, "Legacy title");
+  assert.throws(() => parseStudioSnapshotResponse({
+    ...snapshotValue,
+    snapshot: { ...snapshotValue.snapshot, sessionTitle: "Bad source", sessionTitleSource: "host" },
+  }), ContractValidationError);
+});
+
 test("snapshot accepts optional fast and prewalk projections", async () => {
   const value = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8")) as {
     snapshot: Record<string, unknown>;
@@ -159,6 +182,87 @@ test("snapshot accepts optional session model projection", async () => {
           },
         },
       }),
+    ContractValidationError,
+  );
+});
+
+test("Runtime settings and compaction projections mirror the closed Runtime seam", async () => {
+  const value = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8")) as {
+    snapshot: Record<string, unknown>;
+  };
+  const runtimeSettings = {
+    "edit.autoRepair.enabled": true,
+    "features.unexpectedStopDetection": "smart",
+    "providers.unexpectedStopModel": "online",
+    extendedContext: false,
+    "compaction.asyncEnabled": true,
+    "compaction.methodOrder": ["remote", "snapcompact", "handoff", "shake", "soft"],
+    "providers.openai-codex.codeMode": "auto",
+  };
+  const parsed = parseStudioSnapshotResponse({
+    ...value,
+    snapshot: { ...value.snapshot, runtimeSettings, compactionSpeculation: "armed" },
+  });
+  assert.equal(parsed.snapshot.runtimeSettings?.["features.unexpectedStopDetection"], "smart");
+  assert.equal(parsed.snapshot.compactionSpeculation, "armed");
+
+  const base = { type: "studio.request", requestId: "req-runtime-settings", runtimeEpoch: 1 };
+  assert.equal(
+    parseFoundationStudioRequest({ ...base, operation: { kind: "runtime.settings.get" } }).operation.kind,
+    "runtime.settings.get",
+  );
+  assert.equal(
+    parseFoundationStudioRequest({
+      ...base,
+      operation: {
+        kind: "runtime.settings.get",
+        keys: ["extendedContext", "compaction.methodOrder"],
+      },
+    }).operation.kind,
+    "runtime.settings.get",
+  );
+  assert.equal(
+    parseFoundationStudioRequest({
+      ...base,
+      operation: {
+        kind: "runtime.settings.set",
+        key: "compaction.methodOrder",
+        value: ["remote", "soft"],
+        persist: false,
+      },
+    }).operation.kind,
+    "runtime.settings.set",
+  );
+  assert.equal(
+    parseFoundationStudioRequest({
+      ...base,
+      operation: { kind: "mode.plan.review.saveAndQuit", path: ".\\plans\\plan.md" },
+    }).operation.kind,
+    "mode.plan.review.saveAndQuit",
+  );
+
+  const invalid = [
+    { kind: "runtime.settings.get", keys: ["extendedContext", "extendedContext"] },
+    { kind: "runtime.settings.get", keys: ["not-a-setting"] },
+    { kind: "runtime.settings.set", key: "extendedContext", value: "yes", persist: false },
+    { kind: "runtime.settings.set", key: "compaction.methodOrder", value: ["soft", "soft"], persist: true },
+    { kind: "runtime.settings.set", key: "not-a-setting", value: true, persist: true },
+    { kind: "mode.plan.review.saveAndQuit", path: "C:\\plans\\plan.md" },
+    { kind: "mode.plan.review.saveAndQuit", path: "../plans/plan.md" },
+    { kind: "mode.plan.review.saveAndQuit", path: "/plans/plan.md" },
+    { kind: "mode.plan.review.saveAndQuit", path: "plans/plan.md/" },
+    { kind: "mode.plan.review.saveAndQuit", path: " ../plans/plan.md" },
+    { kind: "mode.plan.review.saveAndQuit", path: '"../plans/plan.md"' },
+  ];
+  for (const operation of invalid) {
+    assert.throws(() => parseFoundationStudioRequest({ ...base, operation }), ContractValidationError);
+  }
+  assert.throws(
+    () => parseStudioSnapshotResponse({ ...value, snapshot: { ...value.snapshot, runtimeSettings: { ...runtimeSettings, surprise: true } } }),
+    ContractValidationError,
+  );
+  assert.throws(
+    () => parseStudioSnapshotResponse({ ...value, snapshot: { ...value.snapshot, compactionSpeculation: "paused" } }),
     ContractValidationError,
   );
 });

@@ -31,7 +31,7 @@ import type {
   ThreadId,
 } from "./ids.js";
 import type { GitRepositoryChanged, OperationProgress } from "./git.js";
-import type { RuntimeConnection } from "./read-models.js";
+import type { ResidentsReadModel, RuntimeConnection } from "./read-models.js";
 import type {
   ClientCommandAccepted,
   ClientError,
@@ -209,6 +209,7 @@ export type ClientEvent =
   | (ClientEventBase & { readonly kind: "runtime.changed"; readonly connection: RuntimeConnection })
   | (ClientEventBase & { readonly kind: "resync.required"; readonly reason: string })
   | (ClientEventBase & { readonly kind: "diagnostics.changed" })
+  | (ClientEventBase & { readonly kind: "residents.changed"; readonly residents: ResidentsReadModel })
   | (ClientEventBase & { readonly kind: "operation.progress"; readonly progress: OperationProgress })
   | (ClientEventBase & { readonly kind: "git.repository.changed"; readonly repository: GitRepositoryChanged })
   | (ClientEventBase & {

@@ -400,11 +400,7 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 			callerAgentId: "Main",
 			images: [image],
 		});
-		expect(live.calls).toEqual([
-			"prompt:[图1]:images=1",
-			"steer:[图1]:images=1",
-			"followUp:[图1]:images=1",
-		]);
+		expect(live.calls).toEqual(["prompt:[图1]:images=1", "steer:[图1]:images=1", "followUp:[图1]:images=1"]);
 	});
 
 	test("send to a parked agent revives through the lifecycle port and reports revived", async () => {
@@ -544,7 +540,9 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 		siblingRegistry.register(
 			makeRef("ChildA", { status: "idle", parentId: "Main", session: makeLiveAgent() as unknown as AgentSession }),
 		);
-		siblingRegistry.register(makeRef("Parked-B", { status: "parked", parentId: "Main", sessionFile: SECRET_SESSION }));
+		siblingRegistry.register(
+			makeRef("Parked-B", { status: "parked", parentId: "Main", sessionFile: SECRET_SESSION }),
+		);
 		await siblingHub.release({ agentId: "Parked-B", expectedGeneration: 1, callerAgentId: "Main" });
 		await expect(
 			siblingHub.release({ agentId: "Parked-B", expectedGeneration: 1, callerAgentId: "ChildA" }),

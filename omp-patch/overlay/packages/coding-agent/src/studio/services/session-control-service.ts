@@ -115,8 +115,12 @@ export class SessionControlService {
 	}
 
 	/**
-	 * WP-025 core.prompt: send a fresh prompt. Fails closed with BUSY_STREAMING
-	 * while streaming; use core.followUp/core.steer to queue.
+	 * WP-025 core.prompt: send a fresh prompt. While streaming — or when a
+	 * background turn flips the agent busy between the isStreaming check and
+	 * prompt() (queued-message drain, idle compaction, goal/loop timers) — the
+	 * prompt degrades to a queued followUp instead of failing, so a
+	 * queued-message flush can never lose the message; use core.steer to
+	 * interrupt instead.
 	 */
 	async prompt(
 		text: string,
@@ -125,10 +129,8 @@ export class SessionControlService {
 	): Promise<{ started: boolean }> {
 		this.#assertNotCompacting("send a prompt");
 		if (this.#session.isStreaming) {
-			throw new SessionControlError(
-				"BUSY_STREAMING",
-				"Cannot prompt while a response is streaming; use core.followUp or core.steer to queue",
-			);
+			await this.followUp(text, images, preludes);
+			return { started: false };
 		}
 		this.#maybeStartTitleGeneration(text);
 		try {
@@ -138,6 +140,10 @@ export class SessionControlService {
 			});
 			return { started };
 		} catch (error) {
+			if (error instanceof AgentBusyError) {
+				await this.followUp(text, images, preludes);
+				return { started: false };
+			}
 			throw this.#mapBusy(error);
 		}
 	}
@@ -178,9 +184,11 @@ export class SessionControlService {
 		return { queued: true, pendingMessages: this.#session.queuedMessageCount };
 	}
 
-	/** WP-025 core.abort: abort the current operation and wait until idle. */
+	/** WP-025 core.abort: abort the current operation and wait until idle.
+	 *  During a manual compaction this cancels the compaction instead of being
+	 *  refused — the GUI cancel button and native Esc share the semantics:
+	 *  `session.abort` → `abortCompaction`, then waits for its cleanup barrier. */
 	async abort(): Promise<{ aborted: true }> {
-		this.#assertNotCompacting("abort the session");
 		try {
 			await this.#session.abort({ reason: USER_INTERRUPT_LABEL });
 		} catch (error) {

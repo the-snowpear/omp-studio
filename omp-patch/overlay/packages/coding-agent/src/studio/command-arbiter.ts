@@ -26,6 +26,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
 	"permissions.mode.set",
+	"operator.invoke",
 	"agent.list",
 	"agent.get",
 	"agent.spawn",
@@ -41,9 +42,13 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 	"job.subscribe",
 ]);
 
-/** Queue-compatible interrupts. Host classifies these the same way; they must
- *  run while `core.prompt` still holds the exclusive lease (streaming, 503
- *  backoff, auto-retry). Pause/resume stay exclusive. */
+/** Queue-compatible interrupts that must run while `core.prompt` still holds
+ *  the exclusive lease (streaming, 503 backoff, auto-retry). Pause/resume stay
+ *  exclusive. `operator.invoke` is user-initiated and routes to the slash
+ *  handler, which owns mid-stream semantics (builtin.compact aborts the live
+ *  turn first, skills steer, extension commands run immediately); a plain
+ *  prompt still fails closed. The Host's interaction arbiter keeps classifying
+ *  it session-exclusive, but this Runtime arbiter is authoritative for it. */
 const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	"core.abort",
 	"core.steer",
@@ -63,6 +68,7 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
 	"permissions.mode.set",
+	"operator.invoke",
 	"agent.list",
 	"agent.get",
 	"agent.spawn",
@@ -94,6 +100,13 @@ const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
 	"session.prewalk.disarm",
 	"permissions.mode.set",
 ]);
+
+/** Operations that actively cancel an in-flight compaction rather than being
+ *  deferred past it. The GUI cancel button and native Esc both let `core.abort`
+ *  overtake a manual compaction (`session.abort` → `abortCompaction`, then
+ *  waits for its cleanup barrier), so it must not trip the BUSY_COMPACTING gate
+ *  while still staying out of the deferred-preference set. */
+const COMPACTION_CANCEL_KINDS = new Set<string>(["core.abort"]);
 
 export class StudioRuntimeCommandError extends Error {
 	constructor(
@@ -199,7 +212,11 @@ export class StudioRuntimeCommandArbiter {
 		) {
 			throw new StudioRuntimeCommandError("STATE_VERSION_CONFLICT", "State version does not match");
 		}
-		if (state.isCompacting && !DEFERRED_SESSION_PREFERENCE_KINDS.has(request.operation.kind)) {
+		if (
+			state.isCompacting &&
+			!DEFERRED_SESSION_PREFERENCE_KINDS.has(request.operation.kind) &&
+			!COMPACTION_CANCEL_KINDS.has(request.operation.kind)
+		) {
 			throw new StudioRuntimeCommandError("BUSY_COMPACTING", "Runtime is compacting");
 		}
 		if (!this.#registeredOperations.has(request.operation.kind)) {

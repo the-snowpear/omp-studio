@@ -220,10 +220,7 @@ describe("WP-041 Studio Remote Extension UI", () => {
 				id: "inertia",
 				question: "Need inertia?",
 				header: "惯性",
-				options: [
-					{ label: "Yes", description: "coast", preview: "v *= 0.92" },
-					{ label: "No" },
-				],
+				options: [{ label: "Yes", description: "coast", preview: "v *= 0.92" }, { label: "No" }],
 				recommended: 0,
 			},
 			{
@@ -253,7 +250,10 @@ describe("WP-041 Studio Remote Extension UI", () => {
 					id: "default",
 					question: "Default?",
 					header: "默认",
-					options: [{ id: "option:0", label: "On" }, { id: "option:1", label: "Off" }],
+					options: [
+						{ id: "option:0", label: "On" },
+						{ id: "option:1", label: "Off" },
+					],
 				},
 			],
 		});

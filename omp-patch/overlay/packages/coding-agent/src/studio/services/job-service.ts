@@ -14,7 +14,7 @@
  * renderer input.
  */
 
-import type { AsyncJob, AsyncJobFilter } from "../../async/job-manager";
+import type { AsyncJob, AsyncJobFilter, AsyncJobType } from "../../async/job-manager";
 
 const MAX_ID_LENGTH = 512;
 const DEFAULT_LIST_LIMIT = 100;
@@ -31,7 +31,7 @@ export interface StudioJobSnapshot {
 	generation: number;
 	ownerAgentId?: string;
 	agentId?: string;
-	type: "bash" | "task";
+	type: AsyncJobType;
 	label: string;
 	status: StudioJobStatus;
 	startedAt: string;

@@ -22,6 +22,7 @@ export * from "./telemetry-events.js";
 export * from "./session-catalog.js";
 export * from "./session-archive-reader.js";
 export * from "./session-archive-service.js";
+export * from "./session-delete-service.js";
 export * from "./session-telemetry-store.js";
 export * from "./telemetry-probe.js";
 export * from "./session-broker.js";

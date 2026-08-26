@@ -1,5 +1,6 @@
-import type { ClientInteraction } from "@omp-studio/client-contract";
+import type { ClientInteraction, ResidentSessionRow } from "@omp-studio/client-contract";
 import type { PlanState } from "@omp-studio/studio-protocol";
+import { residentForSession, type ResidentRows } from "./threadRunning";
 
 /** Sidebar capsule when a thread is blocked on the operator. */
 export type ThreadWaitKind = "approval" | "plan" | "ask";
@@ -21,6 +22,11 @@ export function waitKindFromInteraction(kind: ClientInteraction["kind"]): Thread
   return "ask";
 }
 
+export function waitKindFromResident(resident: ResidentSessionRow | undefined): ThreadWaitKind | undefined {
+  if (resident?.phase !== "waiting") return undefined;
+  return resident.waitKind;
+}
+
 /**
  * Live session only: the Host snapshot carries at most one pending
  * interaction, plus an optional plan-review state. History rows without a
@@ -31,9 +37,14 @@ export function waitKindFromLive(input: {
   readonly pending?: Pick<ClientInteraction, "sessionId" | "kind"> | null;
   readonly snapshotSessionId?: string;
   readonly planStatus?: PlanState["status"];
+  readonly resident?: ResidentSessionRow;
+  readonly residents?: ResidentRows;
 }): ThreadWaitKind | undefined {
-  const { sessionId, pending, snapshotSessionId, planStatus } = input;
+  const { sessionId, pending, snapshotSessionId, planStatus, resident, residents } = input;
   if (sessionId === undefined) return undefined;
+  if (resident !== undefined || residents !== undefined) {
+    return waitKindFromResident(resident ?? residentForSession(residents, sessionId));
+  }
   if (pending !== null && pending !== undefined && pending.sessionId === sessionId) {
     return waitKindFromInteraction(pending.kind);
   }

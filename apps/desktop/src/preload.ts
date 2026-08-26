@@ -52,6 +52,7 @@ import {
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
 import {
   WORKSPACE_SHELL_IPC_CHANNELS,
+  type PlanSavePathPickResult,
   type ResolvedDroppedPath,
   type WorkspaceShellEditorResult,
 } from "./workspace-shell-shared.js";
@@ -141,6 +142,9 @@ contextBridge.exposeInMainWorld(
         workspaceId,
         paths,
       }) as Promise<ReadonlyArray<ResolvedDroppedPath>>;
+    },
+    pickPlanSavePath(input: { workspaceId: string }): Promise<PlanSavePathPickResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.pickPlanSavePath, input) as Promise<PlanSavePathPickResult>;
     },
     copyImage(input: Pick<ChromeImageInput, "mime" | "bytes">): Promise<ChromeImageResult> {
       return ipcRenderer.invoke(CHROME_IMAGE_CHANNELS.copyImage, input) as Promise<ChromeImageResult>;

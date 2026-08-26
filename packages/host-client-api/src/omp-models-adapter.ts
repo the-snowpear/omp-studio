@@ -1674,9 +1674,15 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           return cached?.thinking?.length ? { ...record, thinking: cached.thinking } : record;
         }),
       );
-      const allowedProviders = new Set(providers.map((provider) => provider.id));
+      // Disabled providers stay in `providers` (cards keep the off state) but their
+      // models must not be selectable — mirrors runtime disabledProviders filtering
+      // in model-hub / executor.
+      const selectableProviders = new Set(
+        providers.filter((provider) => !disabled.has(provider.id)).map((provider) => provider.id),
+      );
       const availableBySelector = new Map<string, AvailableModelRecord>();
-      for (const model of [...yamlAvailable, ...available.filter((model) => allowedProviders.has(model.provider))]) {
+      for (const model of [...yamlAvailable, ...available]) {
+        if (!selectableProviders.has(model.provider)) continue;
         availableBySelector.set(model.selector, model);
       }
       const mergedAvailable = [...availableBySelector.values()];

@@ -95,6 +95,7 @@ function register(actions: Partial<{
           name: "x",
         }));
       }),
+      pickPlanSavePath: async () => ({ status: "cancelled" } as const),
     },
   });
   return {

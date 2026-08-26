@@ -5,6 +5,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AgentPauseGate } from "@oh-my-pi/pi-agent-core";
+import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session-events";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 import {
@@ -21,6 +22,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/studio/conversation-protocol";
 import { StudioCommandManifestService } from "@oh-my-pi/pi-coding-agent/studio/services/command-manifest-service";
 import { ConversationLiveProjector } from "@oh-my-pi/pi-coding-agent/studio/services/conversation-live-projector";
+import { ConversationProjectorHub } from "@oh-my-pi/pi-coding-agent/studio/services/conversation-projector-hub";
 import { StudioInteractionGateway } from "@oh-my-pi/pi-coding-agent/studio/services/interaction-port";
 import { StudioLiveService } from "@oh-my-pi/pi-coding-agent/studio/services/live-service";
 import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loop-service";
@@ -442,6 +444,91 @@ describe("conversation live projector Bridge wiring", () => {
 		runtime.dispose();
 		expect(bus.listenerCount).toBe(0);
 	});
+});
+
+test("multiple child projectors release terminal-turn buffers and detach on removal", () => {
+	const registry = new AgentRegistry();
+	const mainBus = new SessionEventBus();
+	const main = new ConversationLiveProjector({
+		sessionId: "session-main",
+		runtimeEpoch: 9,
+		reserveMessageId: () => "main-message",
+		coalesceIntervalMs: 60_000,
+	});
+	main.bind(mainBus);
+	const childBuses = new Map([
+		["child-a", new SessionEventBus()],
+		["child-b", new SessionEventBus()],
+	]);
+	for (const [agentId, bus] of childBuses) {
+		registry.register({
+			id: agentId,
+			displayName: agentId,
+			kind: "sub",
+			status: "running",
+			session: {
+				sessionManager: { getSessionId: () => `session-${agentId}` },
+				subscribe: (listener: (event: AgentSessionEvent) => void) => bus.subscribe(listener),
+			} as never,
+		});
+	}
+	const hub = new ConversationProjectorHub({
+		main,
+		registry,
+		runtimeEpoch: () => 9,
+		createChild: ref => {
+			if (ref.session === null) return undefined;
+			const projector = new ConversationLiveProjector({
+				sessionId: ref.session.sessionManager.getSessionId(),
+				runtimeEpoch: 9,
+				reserveMessageId: () => `message-${ref.id}`,
+				coalesceIntervalMs: 60_000,
+			});
+			projector.bind(ref.session);
+			return projector;
+		},
+	});
+	const received: ConversationRuntimeEvent[] = [];
+	hub.onEvent(event => received.push(event));
+	const first = assistantMessage("");
+	for (const bus of childBuses.values()) {
+		bus.emit({ type: "agent_start" });
+		bus.emit({ type: "message_start", message: first });
+		bus.emit({
+			type: "message_update",
+			message: first,
+			assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "first", partial: first },
+		});
+	}
+	for (const bus of childBuses.values()) {
+		bus.emit({ type: "message_end", message: assistantMessage("first") });
+		bus.emit({ type: "agent_end", messages: [] });
+	}
+	const second = assistantMessage("");
+	for (const bus of childBuses.values()) {
+		bus.emit({ type: "agent_start" });
+		bus.emit({ type: "message_start", message: second });
+		bus.emit({ type: "message_end", message: assistantMessage("second") });
+		bus.emit({ type: "agent_end", messages: [] });
+	}
+	for (const agentId of childBuses.keys()) {
+		expect(
+			received.filter(
+				event => event.kind === "conversation.message.completed" && event.sessionId === `session-${agentId}`,
+			),
+		).toHaveLength(2);
+	}
+
+	expect(childBuses.get("child-a")?.listenerCount).toBe(1);
+	registry.setStatus("child-a", "idle");
+	expect(childBuses.get("child-a")?.listenerCount).toBe(0);
+	registry.setStatus("child-a", "running");
+	expect(childBuses.get("child-a")?.listenerCount).toBe(1);
+	registry.unregister("child-a");
+	expect(childBuses.get("child-a")?.listenerCount).toBe(0);
+	expect(childBuses.get("child-b")?.listenerCount).toBe(1);
+	hub.dispose();
+	expect(childBuses.get("child-b")?.listenerCount).toBe(0);
 });
 
 const servers: StudioBridgeServer[] = [];

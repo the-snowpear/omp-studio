@@ -3,6 +3,10 @@ import type { SessionTranscriptRead } from "./conversation";
 import type { CommandId, InteractionId } from "./ids";
 import type { RemoteInteractionResponse } from "./interactions";
 import type { SessionThinkingSelector } from "./state";
+import type {
+  StudioRuntimeSettingSetOperation,
+  StudioRuntimeSettingKey,
+} from "./runtime-settings";
 
 export interface LoopLimit {
   turns?: number;
@@ -18,6 +22,8 @@ export type CoreOperation =
   | { kind: "runtime.snapshot" }
   | { kind: "runtime.pause" }
   | { kind: "runtime.resume"; expectedPauseEpoch: number }
+  | { kind: "runtime.settings.get"; keys?: readonly StudioRuntimeSettingKey[] }
+  | StudioRuntimeSettingSetOperation
   | { kind: "runtime.shutdown"; drain: true };
 
 export type SessionOperation =
@@ -61,6 +67,7 @@ export type ModeOperation =
       decision: "execute" | "compact" | "keep" | "approve" | "refine" | "dismiss";
       feedback?: string;
     }
+  | { kind: "mode.plan.review.saveAndQuit"; path: string }
   | { kind: "mode.vibe.enter"; initialPrompt?: string }
   | { kind: "mode.vibe.exit" }
   | { kind: "goal.create"; objective: string; tokenBudget?: number }

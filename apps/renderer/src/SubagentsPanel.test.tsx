@@ -4,6 +4,7 @@ import type { AgentDefinitionRecord, StudioClient } from "@omp-studio/client-con
 
 import { SubagentsPanel } from "./SubagentsPanel";
 import { createPreviewAgentDefinitions } from "./preview/subagentsPreview";
+import { createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { I18nProvider } from "./i18n";
 
 beforeAll(() => {
@@ -283,5 +284,113 @@ describe("SubagentsPanel editor model picker", () => {
 
     expect(screen.queryByRole("menu", { name: "选择模型" })).toBeNull();
     expect(document.querySelector("[data-tip='@default']")?.textContent).toContain("Default");
+  });
+
+  it("reorders model pills with the move buttons", async () => {
+    render(<I18nProvider forcedLanguage="zh"><SubagentsPanel client={stubClient()} preview models={null} /></I18nProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "打开 notes 详情" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "添加模型" })).toBeTruthy());
+    const pillTips = () =>
+      [...document.querySelectorAll(".sa-model-pill")].map((el) => el.getAttribute("data-tip"));
+
+    fireEvent.click(screen.getByRole("button", { name: "添加模型" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "选择模型" })).getByRole("menuitemradio", { name: /Default/ }));
+
+    expect(pillTips()).toEqual(["@smol", "@default"]);
+    expect(screen.getByRole("button", { name: "上移 @smol" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "下移 @default" })).toHaveProperty("disabled", true);
+
+    fireEvent.click(screen.getByRole("button", { name: "上移 @default" }));
+    expect(pillTips()).toEqual(["@default", "@smol"]);
+    expect(screen.getByRole("button", { name: "上移 @default" })).toHaveProperty("disabled", true);
+
+    fireEvent.click(screen.getByRole("button", { name: "下移 @default" }));
+    expect(pillTips()).toEqual(["@smol", "@default"]);
+    expect(screen.getByRole("button", { name: "下移 @default" })).toHaveProperty("disabled", true);
+  });
+
+  it("persists reordered models through agents.definition.upsert", async () => {
+    const query = vi.fn(async () => createPreviewAgentDefinitions());
+    const command = vi.fn(async () => ({ requestId: "req-reorder" }));
+    const client = stubClient({
+      query,
+      command,
+      getState: () => ({
+        commands: {
+          "req-reorder": {
+            requestId: "req-reorder",
+            commandName: "agents.definition.upsert",
+            status: "completed",
+            result: { applied: true, runtimeEffect: "new-session", message: "已写入子代理定义。" },
+            observedAt: "2026-08-18T00:00:00.000Z",
+          },
+        },
+      }),
+    });
+
+    render(<I18nProvider forcedLanguage="zh"><SubagentsPanel client={client} preview={false} models={createPreviewModelConfig()} /></I18nProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "打开 notes 详情" }));
+    await screen.findByRole("button", { name: "添加模型" });
+
+    fireEvent.click(screen.getByRole("button", { name: "添加模型" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "选择模型" })).getByRole("menuitemradio", { name: /Default/ }));
+    fireEvent.click(screen.getByRole("button", { name: "上移 @default" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith(
+        "agents.definition.upsert",
+        expect.objectContaining({
+          name: "notes",
+          model: ["@default", "@smol"],
+        }),
+      );
+    });
+  });
+
+  it("offers enable switch in behavior section, not session overrides", async () => {
+    render(<I18nProvider forcedLanguage="zh"><SubagentsPanel client={stubClient()} preview models={null} /></I18nProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "打开 notes 详情" }));
+    const enable = await screen.findByRole("switch", { name: "启用子代理" });
+    const behavior = enable.closest(".mp-sec");
+    expect(behavior?.querySelector("h3")?.textContent).toContain("行为");
+    const overrides = [...document.querySelectorAll(".mp-sec")].find((sec) =>
+      sec.querySelector("h3")?.textContent?.includes("会话覆盖"),
+    );
+    expect(overrides?.querySelector(".switch")).toBeNull();
+  });
+
+  it("persists the disabled state through agents.definition.configure", async () => {
+    const query = vi.fn(async () => createPreviewAgentDefinitions());
+    const command = vi.fn(async () => ({ requestId: "req-disable" }));
+    const client = stubClient({
+      query,
+      command,
+      getState: () => ({
+        commands: {
+          "req-disable": {
+            requestId: "req-disable",
+            commandName: "agents.definition.configure",
+            status: "completed",
+            result: { applied: true, runtimeEffect: "new-session", message: "已更新子代理会话覆盖。" },
+            observedAt: "2026-08-18T00:00:00.000Z",
+          },
+        },
+      }),
+    });
+
+    render(<I18nProvider forcedLanguage="zh"><SubagentsPanel client={client} preview={false} models={createPreviewModelConfig()} /></I18nProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "打开 notes 详情" }));
+    await screen.findByRole("button", { name: "保存" });
+
+    fireEvent.click(screen.getByRole("switch", { name: "启用子代理" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(command).toHaveBeenCalledWith(
+        "agents.definition.configure",
+        expect.objectContaining({ name: "notes", disabled: true }),
+      );
+    });
   });
 });

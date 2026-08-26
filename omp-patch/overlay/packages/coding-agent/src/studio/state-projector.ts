@@ -52,6 +52,12 @@ function cloneSnapshot(snapshot: StudioOperatorStateSnapshot): StudioOperatorSta
 
 const PLAN_BODY_MAX_CHARS = 32 * 1024;
 
+interface SessionTitlePort {
+	getSessionName?: () => string | undefined;
+	readonly titleSource?: "user" | "auto";
+	onSessionNameChanged?: (listener: () => void) => () => void;
+}
+
 function truncatePlanBody(body: string): string {
 	return body.length <= PLAN_BODY_MAX_CHARS ? body : body.slice(0, PLAN_BODY_MAX_CHARS);
 }
@@ -71,6 +77,7 @@ export class StudioStateProjector {
 	readonly #unsubscribeModel: () => void;
 	readonly #unsubscribeAgents: () => void;
 	readonly #unsubscribeJobs: () => void;
+	readonly #unsubscribeSessionTitle: () => void;
 	readonly #unsubscribeConversation: () => void;
 	#committedSnapshot: StudioOperatorStateSnapshot | undefined;
 	#stateVersion = 0;
@@ -111,6 +118,12 @@ export class StudioStateProjector {
 				this.#jobsRevision += 1;
 				this.commitStateChange();
 			}) ?? (() => {});
+		const sessionManager = runtime.sessionManager as SessionTitlePort | undefined;
+		const onSessionNameChanged = sessionManager?.onSessionNameChanged;
+		this.#unsubscribeSessionTitle =
+			typeof onSessionNameChanged === "function" && sessionManager !== undefined
+				? onSessionNameChanged.call(sessionManager, () => this.commitStateChange())
+				: () => {};
 		this.#unsubscribeConversation =
 			runtime.services.conversation?.onEvent(event => this.#emitConversation(event)) ?? (() => {});
 	}
@@ -124,6 +137,8 @@ export class StudioStateProjector {
 	}
 
 	snapshot(): StudioOperatorStateSnapshot {
+		const sessionManager = this.#runtime.sessionManager as SessionTitlePort | undefined;
+		const sessionTitle = sessionManager?.getSessionName?.();
 		const modes = this.#modeService.state();
 		const plan = modes.plan;
 		const goal = modes.goal;
@@ -144,6 +159,8 @@ export class StudioStateProjector {
 			runtimeEpoch: this.#runtime.runtimeEpoch,
 			stateVersion: this.stateVersion,
 			sessionId: this.#runtime.sessionId,
+			...(sessionTitle === undefined ? {} : { sessionTitle }),
+			...(sessionManager?.titleSource === undefined ? {} : { sessionTitleSource: sessionManager.titleSource }),
 			isStreaming: this.#runtime.session.isStreaming,
 			isCompacting: this.#runtime.session.isCompacting,
 			activeMode,
@@ -165,6 +182,12 @@ export class StudioStateProjector {
 				includeRecent: true,
 			}),
 			telemetry: structuredClone(this.#telemetrySnapshot),
+			...(this.#runtime.services.settings === undefined
+				? {}
+				: { runtimeSettings: this.#runtime.services.settings.snapshot() }),
+			...(this.#runtime.session.compactionSpeculation === undefined
+				? {}
+				: { compactionSpeculation: this.#runtime.session.compactionSpeculation }),
 		};
 		if (plan !== undefined) {
 			snapshot.plan = {
@@ -368,6 +391,7 @@ export class StudioStateProjector {
 		this.#unsubscribeModel();
 		this.#unsubscribeAgents();
 		this.#unsubscribeJobs();
+		this.#unsubscribeSessionTitle();
 		this.#unsubscribeConversation();
 		this.#listeners.clear();
 	}

@@ -6,17 +6,22 @@
  * 定义归模型配置 · 子代理；会话列表 / 归档 / 导出归历史页；Runtime /
  * Bridge / 日志归诊断页。
  *
- * 真实可写的只有 App 级设置（appSettings）与审批模式（permissions.mode.set）。
- * 其余 Runtime 设置以「尚未接入」的禁用枚举呈现，枚举文案取自 OMP
- * settings-schema（compaction.strategy / memory.backend / edit.mode /
- * task.* 等），等 settings contract 接入后逐行换成真实控件。
- * 预览模式下这些行改绑演示状态（见 preview/settingsPreview.ts）。
+ * App 级设置与审批模式沿用现有控制器；Runtime 白名单设置通过可选的
+ * RuntimeSettingsCtl 接入，缺少 snapshot 时保持诚实禁用。未纳入白名单的
+ * settings-schema 行仍以禁用枚举呈现，预览模式下这些行改绑演示状态。
  */
 
 import type { AppSettings } from "./appSettings";
 import { DEFAULT_APP_SETTINGS } from "./appSettings";
 import { SettingRow, SettingSection, StaticSelect, Switch, type SettingSource } from "./SettingRow";
 import { useI18n } from "../i18n";
+import type {
+  RuntimeSettingsReadModel,
+  StudioCompactionSpeculation,
+  StudioRuntimeCompactionMethod,
+  StudioRuntimeSettingKey,
+  StudioRuntimeSettingValue,
+} from "@omp-studio/client-contract";
 
 
 export type ApprovalModeId = "always-ask" | "write" | "yolo";
@@ -38,6 +43,26 @@ export interface RuntimeDemoApi {
   flag(key: string): boolean;
   toggle(key: string): void;
 }
+
+/** Runtime settings seam supplied by SettingsPage; absent values stay disabled. */
+export interface RuntimeSettingsCtl {
+  readonly preview: boolean;
+  readonly snapshot?: RuntimeSettingsReadModel;
+  readonly compactionSpeculation?: StudioCompactionSpeculation;
+  readonly pendingKey?: StudioRuntimeSettingKey;
+  readonly error?: string;
+  readonly set?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue) => void;
+}
+
+const RUNTIME_DEFAULTS: RuntimeSettingsReadModel = {
+  "edit.autoRepair.enabled": false,
+  "features.unexpectedStopDetection": "mechanical",
+  "providers.unexpectedStopModel": "online",
+  extendedContext: true,
+  "compaction.asyncEnabled": true,
+  "compaction.methodOrder": ["remote", "snapcompact", "handoff", "shake", "soft"],
+  "providers.openai-codex.codeMode": "off",
+};
 
 function appSource<K extends keyof AppSettings>(app: AppSettings, key: K): SettingSource {
   return app[key] === DEFAULT_APP_SETTINGS[key] ? "default" : "user";
@@ -63,18 +88,21 @@ function AppSelect<T extends string>({
   );
 }
 
-function TabHeader({ title, desc, ctl, resetKeys, resetTitle }: {
+function TabHeader({ title, desc, ctl, runtime, resetKeys, resetTitle }: {
   title: string;
   desc: string;
   ctl?: SettingsCtl;
+  runtime?: RuntimeSettingsCtl;
   resetKeys?: readonly (keyof AppSettings)[];
   resetTitle?: string;
 }) {
   const { t } = useI18n();
+  const preview = ctl?.preview === true || runtime?.preview === true;
   return (
     <>
-      <h3>{title}{ctl?.preview ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}</h3>
+      <h3>{title}{preview ? <span className="chip amber xs demo-chip">{t("common.demo")}</span> : null}</h3>
       <p className="desc">{desc}</p>
+      {runtime?.error ? <p className="small muted" role="alert">{runtime.error}</p> : null}
       {resetKeys ? (
         <div className="set-toolbar">
           <button
@@ -137,6 +165,193 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
       )}
     </SettingRow>
   ));
+}
+
+type RuntimeBooleanKey = "edit.autoRepair.enabled" | "extendedContext" | "compaction.asyncEnabled";
+type RuntimeScalarKey =
+  | "features.unexpectedStopDetection"
+  | "providers.unexpectedStopModel"
+  | "providers.openai-codex.codeMode";
+
+function runtimeHasValue<K extends StudioRuntimeSettingKey>(runtime: RuntimeSettingsCtl | undefined, demo: RuntimeDemoApi | undefined, key: K): boolean {
+  if (runtime?.preview === true) return demo !== undefined;
+  return runtime?.snapshot?.[key] !== undefined;
+}
+
+function runtimeSource(available: boolean): SettingSource {
+  return available ? "runtime" : "unavailable";
+}
+
+function RuntimePending({ runtime }: { runtime?: RuntimeSettingsCtl | undefined }) {
+  const { t } = useI18n();
+  return runtime?.pendingKey === undefined ? null : (
+    <span className="small muted" role="status" aria-live="polite" aria-atomic="true">
+      {t("settings.runtime.pending")}
+    </span>
+  );
+}
+
+function RuntimeBooleanRow({
+  runtime,
+  demo,
+  keyName,
+  label,
+  desc,
+}: {
+  runtime?: RuntimeSettingsCtl | undefined;
+  demo?: RuntimeDemoApi | undefined;
+  keyName: RuntimeBooleanKey;
+  label: string;
+  desc: string;
+}) {
+  const { t } = useI18n();
+  const available = runtimeHasValue(runtime, demo, keyName);
+  const preview = runtime?.preview === true && demo !== undefined;
+  const snapshotValue = runtime?.snapshot?.[keyName];
+  const checked = preview ? demo.flag(keyName) : (snapshotValue ?? RUNTIME_DEFAULTS[keyName]) === true;
+  const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
+  return (
+    <SettingRow
+      label={label}
+      desc={desc}
+      source={runtimeSource(available)}
+      {...(available ? {} : { reason: t("settings.runtime.unavailable") })}
+    >
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onChange={(next) => {
+          runtime?.set?.(keyName, next);
+        }}
+        label={label}
+      />
+      <RuntimePending runtime={runtime} />
+    </SettingRow>
+  );
+}
+
+function RuntimeScalarRow({
+  runtime,
+  demo,
+  keyName,
+  label,
+  desc,
+  fallback,
+  options,
+}: {
+  runtime?: RuntimeSettingsCtl | undefined;
+  demo?: RuntimeDemoApi | undefined;
+  keyName: RuntimeScalarKey;
+  label: string;
+  desc: string;
+  fallback: string;
+  options: ReadonlyArray<readonly [string, string]>;
+}) {
+  const { t } = useI18n();
+  const available = runtimeHasValue(runtime, demo, keyName);
+  const preview = runtime?.preview === true && demo !== undefined;
+  const snapshotValue = runtime?.snapshot?.[keyName];
+  const demoValue = preview ? demo.value(keyName) : "";
+  const defaultValue = RUNTIME_DEFAULTS[keyName];
+  const schemaFallback = typeof defaultValue === "string" ? defaultValue : fallback;
+  const value = preview ? (demoValue || schemaFallback) : (typeof snapshotValue === "string" ? snapshotValue : schemaFallback);
+  const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
+  return (
+    <SettingRow
+      label={label}
+      desc={desc}
+      source={runtimeSource(available)}
+      {...(available ? {} : { reason: t("settings.runtime.unavailable") })}
+    >
+      <select
+        className="select"
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => runtime?.set?.(keyName, event.target.value as StudioRuntimeSettingValue)}
+      >
+        {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
+      </select>
+      <RuntimePending runtime={runtime} />
+    </SettingRow>
+  );
+}
+
+function RuntimeMethodOrderRow({ runtime, demo, label, desc }: {
+  runtime?: RuntimeSettingsCtl | undefined;
+  demo?: RuntimeDemoApi | undefined;
+  label: string;
+  desc: string;
+}) {
+  const { t } = useI18n();
+  const keyName = "compaction.methodOrder" as const;
+  const available = runtimeHasValue(runtime, demo, keyName);
+  const preview = runtime?.preview === true && demo !== undefined;
+  const snapshotValue = runtime?.snapshot?.[keyName];
+  const defaultOrder: readonly StudioRuntimeCompactionMethod[] = RUNTIME_DEFAULTS["compaction.methodOrder"];
+  const snapshotOrder = Array.isArray(snapshotValue) ? snapshotValue : undefined;
+  const demoOrder = preview ? demo.value(keyName).split(",").filter(Boolean) as StudioRuntimeCompactionMethod[] : undefined;
+  const selected = (preview ? (demoOrder?.length ? demoOrder : defaultOrder) : (snapshotOrder?.length ? snapshotOrder : defaultOrder)).join(",");
+  const options: ReadonlyArray<readonly [string, string]> = [
+    ["remote,snapcompact,handoff,shake,soft", t("settings.runtime.methodOrderRemoteFirst")],
+    ["snapcompact,remote,handoff,shake,soft", t("settings.runtime.methodOrderSnapcompactFirst")],
+    ["handoff,remote,snapcompact,shake,soft", t("settings.runtime.methodOrderHandoffFirst")],
+    ["soft,remote,snapcompact,handoff,shake", t("settings.runtime.methodOrderSoftFirst")],
+    ["shake,remote,snapcompact,handoff,soft", t("settings.runtime.methodOrderShakeFirst")],
+  ];
+  const displayOptions = options.some(([value]) => value === selected)
+    ? options
+    : [[selected, selected.split(",").join(" → ")], ...options] as ReadonlyArray<readonly [string, string]>;
+  const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
+  return (
+    <SettingRow
+      label={label}
+      desc={desc}
+      source={runtimeSource(available)}
+      {...(available ? {} : { reason: t("settings.runtime.unavailable") })}
+    >
+      <select
+        className="select"
+        aria-label={label}
+        value={selected}
+        disabled={disabled}
+        onChange={(event) => runtime?.set?.(keyName, event.target.value.split(",") as StudioRuntimeSettingValue)}
+      >
+        {displayOptions.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
+      </select>
+      <RuntimePending runtime={runtime} />
+    </SettingRow>
+  );
+}
+
+function RuntimeSpeculationRow({ runtime, demo, label, desc }: {
+  runtime?: RuntimeSettingsCtl | undefined;
+  demo?: RuntimeDemoApi | undefined;
+  label: string;
+  desc: string;
+}) {
+  const { t } = useI18n();
+  const speculationLabels: Record<StudioCompactionSpeculation, string> = {
+    idle: t("settings.runtime.speculationIdle"),
+    running: t("settings.runtime.speculationRunning"),
+    armed: t("settings.runtime.speculationArmed"),
+  };
+  const demoState = runtime?.preview === true ? demo?.value("compaction.speculation") : undefined;
+  const state = runtime?.compactionSpeculation ?? (
+    demoState === "idle" || demoState === "running" || demoState === "armed" ? demoState : undefined
+  );
+  const available = state !== undefined;
+  const value = state === undefined ? t("settings.runtime.unavailable") : speculationLabels[state];
+  return (
+    <SettingRow
+      label={label}
+      desc={desc}
+      source={runtimeSource(available)}
+      {...(available ? {} : { reason: t("settings.runtime.unavailable") })}
+    >
+      <span className="small muted">{value}</span>
+    </SettingRow>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -430,12 +645,38 @@ export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
 /* 4. 上下文与记忆                                                      */
 /* ------------------------------------------------------------------ */
 
-export function ContextTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
+export function ContextTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined; runtime?: RuntimeSettingsCtl | undefined }) {
   const { t } = useI18n();
   return (
     <>
-      <TabHeader title={t("settings.context.title")} desc={t("settings.context.desc")} />
+      <TabHeader title={t("settings.context.title")} desc={t("settings.context.desc")} {...(runtime === undefined ? {} : { runtime })} />
       <SettingSection title={t("settings.context.sectionCompaction")}>
+        <RuntimeBooleanRow
+          runtime={runtime}
+          demo={demo}
+          keyName="extendedContext"
+          label={t("settings.runtime.extendedContext")}
+          desc={t("settings.runtime.extendedContextDesc")}
+        />
+        <RuntimeBooleanRow
+          runtime={runtime}
+          demo={demo}
+          keyName="compaction.asyncEnabled"
+          label={t("settings.runtime.asyncCompaction")}
+          desc={t("settings.runtime.asyncCompactionDesc")}
+        />
+        <RuntimeMethodOrderRow
+          runtime={runtime}
+          demo={demo}
+          label={t("settings.runtime.methodOrder")}
+          desc={t("settings.runtime.methodOrderDesc")}
+        />
+        <RuntimeSpeculationRow
+          runtime={runtime}
+          demo={demo}
+          label={t("settings.runtime.speculation")}
+          desc={t("settings.runtime.speculationDesc")}
+        />
         <FutureRows
           demo={demo}
           rows={[
@@ -479,12 +720,19 @@ export function ContextTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
 /* 5. 文件与终端                                                        */
 /* ------------------------------------------------------------------ */
 
-export function FilesTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
+export function FilesTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined; runtime?: RuntimeSettingsCtl | undefined }) {
   const { t } = useI18n();
   return (
     <>
-      <TabHeader title={t("settings.files.title")} desc={t("settings.files.desc")} />
+      <TabHeader title={t("settings.files.title")} desc={t("settings.files.desc")} {...(runtime === undefined ? {} : { runtime })} />
       <SettingSection title={t("settings.files.sectionEdit")}>
+        <RuntimeBooleanRow
+          runtime={runtime}
+          demo={demo}
+          keyName="edit.autoRepair.enabled"
+          label={t("settings.runtime.autoRepair")}
+          desc={t("settings.runtime.autoRepairDesc")}
+        />
         <FutureRows
           demo={demo}
           rows={[
@@ -541,11 +789,11 @@ export function FilesTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
 /* 6. 任务与执行                                                        */
 /* ------------------------------------------------------------------ */
 
-export function TasksTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
+export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined; runtime?: RuntimeSettingsCtl | undefined }) {
   const { t } = useI18n();
   return (
     <>
-      <TabHeader title={t("settings.tasks.title")} desc={t("settings.tasks.desc")} />
+      <TabHeader title={t("settings.tasks.title")} desc={t("settings.tasks.desc")} {...(runtime === undefined ? {} : { runtime })} />
       <SettingSection title={t("settings.tasks.sectionWorkMode")}>
         <FutureRows
           demo={demo}
@@ -559,6 +807,35 @@ export function TasksTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
         />
       </SettingSection>
       <SettingSection title={t("settings.tasks.sectionExecution")}>
+        <RuntimeScalarRow
+          runtime={runtime}
+          demo={demo}
+          keyName="features.unexpectedStopDetection"
+          label={t("settings.runtime.unexpectedStopMode")}
+          desc={t("settings.runtime.unexpectedStopModeDesc")}
+          fallback="mechanical"
+          options={[
+            ["none", t("settings.runtime.modeNone")],
+            ["mechanical", t("settings.runtime.modeMechanical")],
+            ["smart", t("settings.runtime.modeSmart")],
+          ]}
+        />
+        <RuntimeScalarRow
+          runtime={runtime}
+          demo={demo}
+          keyName="providers.unexpectedStopModel"
+          label={t("settings.runtime.unexpectedStopModel")}
+          desc={t("settings.runtime.unexpectedStopModelDesc")}
+          fallback="online"
+          options={[
+            ["online", t("settings.runtime.modelOnline")],
+            ["qwen3-1.7b", "qwen3-1.7b"],
+            ["llama3.2:3b", "llama3.2:3b"],
+            ["gemma-3-1b", "gemma-3-1b"],
+            ["qwen2.5-1.5b", "qwen2.5-1.5b"],
+            ["lfm2-1.2b", "lfm2-1.2b"],
+          ]}
+        />
         <FutureRows
           demo={demo}
           rows={[
@@ -592,7 +869,7 @@ export function TasksTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
 /* 7. 高级                                                              */
 /* ------------------------------------------------------------------ */
 
-export function AdvancedTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
+export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined; runtime?: RuntimeSettingsCtl | undefined }) {
   const { t } = useI18n();
 
   const configLayers: ReadonlyArray<readonly [string, string]> = [
@@ -605,7 +882,22 @@ export function AdvancedTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
 
   return (
     <>
-      <TabHeader title={t("settings.advanced.title")} desc={t("settings.advanced.desc")} />
+      <TabHeader title={t("settings.advanced.title")} desc={t("settings.advanced.desc")} {...(runtime === undefined ? {} : { runtime })} />
+      <SettingSection title={t("settings.runtime.section")}>
+        <RuntimeScalarRow
+          runtime={runtime}
+          demo={demo}
+          keyName="providers.openai-codex.codeMode"
+          label={t("settings.runtime.codeMode")}
+          desc={t("settings.runtime.codeModeDesc")}
+          fallback="off"
+          options={[
+            ["off", t("settings.runtime.codeModeOff")],
+            ["on", t("settings.runtime.codeModeOn")],
+            ["auto", t("settings.runtime.codeModeAuto")],
+          ]}
+        />
+      </SettingSection>
       <SettingSection title={t("settings.advanced.sectionConfigLayers")} desc={t("settings.advanced.sectionConfigLayersDesc")}>
         <div className="config-layer-list">
           {configLayers.map(([key, label]) => (
@@ -697,4 +989,3 @@ export function AdvancedTab({ demo }: { demo?: RuntimeDemoApi | undefined }) {
     </>
   );
 }
-

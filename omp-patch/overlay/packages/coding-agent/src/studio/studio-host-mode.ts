@@ -23,7 +23,7 @@ import type { ToolSession } from "../tools";
 import type { ToolUiFactory } from "../tools/context";
 import { StudioBridgeServer } from "./bridge-server";
 import { createStudioRemoteUiFactory } from "./remote-extension-ui";
-import { StudioAgentConversationService, reconstructSessionBranch } from "./services/agent-conversation-service";
+import { reconstructSessionBranch, StudioAgentConversationService } from "./services/agent-conversation-service";
 import {
 	StudioAgentHubService,
 	type StudioAgentTelemetryPort,
@@ -42,9 +42,10 @@ import { StudioLiveService, type StudioLiveSessionFactory } from "./services/liv
 import { StudioLoopService } from "./services/loop-service";
 import { StudioModeControlService } from "./services/mode-control-service";
 import { StudioModelControlService } from "./services/model-control-service";
-import { StudioPermissionControlService } from "./services/permission-control-service";
 import { StudioOmfgService } from "./services/omfg-service";
 import { type StudioPauseService, studioPauseService } from "./services/pause-service";
+import { StudioPermissionControlService } from "./services/permission-control-service";
+import { StudioRuntimeSettingsService } from "./services/runtime-settings-service";
 import { StudioSessionTranscriptService } from "./services/session-transcript-service";
 import { StudioTanError, StudioTanService } from "./services/tan-service";
 import { StudioTreeService } from "./services/tree-service";
@@ -68,6 +69,7 @@ export interface StudioHostRuntime {
 		modes: StudioModeControlService;
 		models: StudioModelControlService;
 		permissions?: StudioPermissionControlService;
+		settings: StudioRuntimeSettingsService;
 		tree: StudioTreeService;
 		fork: StudioForkService;
 		handoff: StudioHandoffService;
@@ -128,11 +130,7 @@ async function hydratePersistedStudioAgents(
 	shouldContinue?: () => boolean,
 ): Promise<void> {
 	try {
-		await registerPersistedSubagents(
-			registry,
-			sessionFile,
-			shouldContinue === undefined ? {} : { shouldContinue },
-		);
+		await registerPersistedSubagents(registry, sessionFile, shouldContinue === undefined ? {} : { shouldContinue });
 	} catch (error) {
 		logger.warn("Failed to register persisted subagents", { error });
 	}
@@ -338,6 +336,7 @@ export function createStudioHostRuntime(
 	const modes = new StudioModeControlService(session);
 	const models = new StudioModelControlService(session);
 	const permissions = new StudioPermissionControlService(session);
+	const settings = new StudioRuntimeSettingsService(session);
 	session.setBeforeNextUserTurn(async () => {
 		await models.applyPending();
 		await modes.applyPending();
@@ -548,7 +547,7 @@ export function createStudioHostRuntime(
 			}),
 		abortAgent: {
 			abortAgent: async agentId => {
-				let snapshot;
+				let snapshot: ReturnType<typeof agents.get>;
 				try {
 					snapshot = agents.get(agentId);
 				} catch {
@@ -716,6 +715,7 @@ export function createStudioHostRuntime(
 			modes,
 			models,
 			permissions,
+			settings,
 			tree,
 			fork,
 			handoff,

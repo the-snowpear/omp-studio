@@ -13,6 +13,10 @@ import type {
 } from "./ids";
 import type { StudioPendingInteraction } from "./interactions";
 import type { SessionTelemetrySnapshot } from "./telemetry";
+import type {
+  StudioCompactionSpeculation,
+  StudioRuntimeSettingsSnapshot,
+} from "./runtime-settings";
 
 export interface PlanState {
   status: "off" | "active" | "paused" | "review";
@@ -91,6 +95,9 @@ export interface PauseState {
   pausedAt?: string;
 }
 
+/** Source of the Runtime's persisted session title. */
+export type SessionTitleSource = "user" | "auto";
+
 export interface LiveState {
   status: "off" | "connecting" | "active" | "stopping" | "failed";
   deviceId?: string;
@@ -101,6 +108,10 @@ export interface OperatorStateSnapshot {
   runtimeEpoch: RuntimeEpoch;
   stateVersion: StateVersion;
   sessionId: SessionId;
+  /** Native OMP SessionManager title; absent while the session is untitled. */
+  sessionTitle?: string;
+  /** Native source metadata when known; legacy titled sessions may omit it. */
+  sessionTitleSource?: SessionTitleSource;
   isStreaming: boolean;
   isCompacting: boolean;
   activeMode: "normal" | "plan" | "goal" | "vibe";
@@ -124,6 +135,10 @@ export interface OperatorStateSnapshot {
   agents: StudioAgentSnapshot[];
   jobs: StudioJobSnapshot[];
   telemetry?: SessionTelemetrySnapshot;
+  /** Optional on older Runtime versions; present when the settings seam is available. */
+  runtimeSettings?: StudioRuntimeSettingsSnapshot;
+  /** Optional Runtime compaction speculation state. */
+  compactionSpeculation?: StudioCompactionSpeculation;
 }
 
 export interface RuntimeControlLease {

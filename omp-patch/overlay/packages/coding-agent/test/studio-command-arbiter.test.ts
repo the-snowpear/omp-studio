@@ -126,6 +126,82 @@ describe("WP-014 Runtime command arbiter", () => {
 		await prompt;
 	});
 
+	test("lets operator.invoke (builtin.compact) interrupt a prompt that holds the exclusive lease", async () => {
+		const arbiter = new StudioRuntimeCommandArbiter(
+			() => ({
+				runtimeEpoch: 7,
+				stateVersion: 4,
+				isStreaming: true,
+				isCompacting: false,
+			}),
+			["core.prompt", "operator.invoke", "runtime.pause"],
+		);
+		const held = Promise.withResolvers<void>();
+		let compactRan = false;
+		const prompt = arbiter.run(
+			request({ kind: "core.prompt", text: "hi" }, "prompt-1"),
+			"command-prompt",
+			"gui",
+			async () => {
+				await held.promise;
+			},
+		);
+		expect(arbiter.currentLease()).toMatchObject({ holder: "gui", commandId: "command-prompt" });
+		await arbiter.run(
+			request({ kind: "operator.invoke", commandId: "builtin.compact" }, "compact-1"),
+			"command-compact",
+			"gui",
+			() => {
+				compactRan = true;
+			},
+		);
+		expect(compactRan).toBe(true);
+		expect(arbiter.currentLease()).toMatchObject({ commandId: "command-prompt" });
+		// A genuinely exclusive command is still refused while the prompt lease is held.
+		await expect(
+			arbiter.run(request({ kind: "runtime.pause" }, "pause-1"), "command-pause", "gui", () => {}),
+		).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+		held.resolve();
+		await prompt;
+		expect(arbiter.currentLease()).toBeUndefined();
+	});
+
+	test("still refuses operator.invoke while compacting", async () => {
+		const arbiter = new StudioRuntimeCommandArbiter(
+			() => ({
+				runtimeEpoch: 7,
+				stateVersion: 0,
+				isStreaming: false,
+				isCompacting: true,
+			}),
+			["operator.invoke", "runtime.pause"],
+		);
+		await expect(
+			arbiter.run(request({ kind: "operator.invoke", commandId: "builtin.compact" }, "compact-1"), "command-compact", "gui", () => {}),
+		).rejects.toMatchObject({ code: "BUSY_COMPACTING" });
+	});
+
+	test("lets core.abort cancel an in-flight compaction", async () => {
+		const arbiter = new StudioRuntimeCommandArbiter(
+			() => ({
+				runtimeEpoch: 7,
+				stateVersion: 0,
+				isStreaming: false,
+				isCompacting: true,
+			}),
+			["core.abort", "operator.invoke", "runtime.pause"],
+		);
+		let abortRan = false;
+		await arbiter.run(request({ kind: "core.abort" }, "abort-1"), "command-abort", "gui", () => {
+			abortRan = true;
+		});
+		expect(abortRan).toBe(true);
+		// A genuinely exclusive command is still refused while compacting.
+		await expect(
+			arbiter.run(request({ kind: "runtime.pause" }, "pause-1"), "command-pause", "gui", () => {}),
+		).rejects.toMatchObject({ code: "BUSY_COMPACTING" });
+	});
+
 	test("lets session.model.set run while prompt holds the exclusive lease and while compacting", async () => {
 		const arbiter = new StudioRuntimeCommandArbiter(
 			() => ({
