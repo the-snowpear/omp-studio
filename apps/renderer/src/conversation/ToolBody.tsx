@@ -1,7 +1,7 @@
-import { createContext, useContext, type ComponentProps } from "react";
+import { createContext, memo, useContext, useMemo, type ComponentProps } from "react";
 import type { JsonValue } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
-import { bashDisplayRows } from "./bashDisplay";
+import { bashDisplay } from "./bashDisplay";
 import { jsonRecord, jsonString, type ToolView } from "./conversationViewModel";
 import {
   askAnswer,
@@ -314,13 +314,15 @@ function BashBody({ tool }: { tool: ToolView }) {
   const exit = jsonNumber(fields.exit) ?? jsonNumber(fields.exitCode);
   const running = tool.status === "running";
   const failed = tool.status === "failed" || (!running && exit !== undefined && exit !== 0);
-  const rows = bashDisplayRows(fields.output);
+  /* 流式 bash 每 chunk 都会走到这里；ANSI 剥离与行切分只在输出真的变了时重跑。 */
+  const display = useMemo(() => bashDisplay(fields.output), [fields.output]);
   return (
     <>
       <Kv pairs={[["cwd", fields.cwd]]} />
       <ScrollPane className="codeblock">
         {cmd ? <div className="c-cmd">$ {cmd}</div> : null}
-        {rows.map((row, index) => (
+        {display.truncated ? <div className="muted small">仅显示末尾 {display.rows.length} 行</div> : null}
+        {display.rows.map((row, index) => (
           <div key={index} className={row.cls || undefined}>{row.text || "\u00a0"}</div>
         ))}
       </ScrollPane>
@@ -744,18 +746,44 @@ function WebSearchBody({ tool }: { tool: ToolView }) {
     <>
       <Kv pairs={[["provider", fields.provider ?? response.provider], ["sources", Array.isArray(response.sources) ? response.sources.length : fields.sources]]} />
       {answer ? <div className="tc-answer">{answer}</div> : null}
-      <div className="tc-cites">
-        {cites.map((entry, index) => {
-          const cite = jsonRecord(entry) ?? {};
-          return (
-            <span key={index} className="tc-cite">
-              <Icon name="link" extra="sm" />
-              {jsonString(cite.title)}
-              <span className="c-dim"> · {jsonString(cite.url)}</span>
-            </span>
-          );
-        })}
-      </div>
+      {cites.length > 0 ? (
+        <div className="tc-cites">
+          {cites.map((entry, index) => {
+            const cite = typeof entry === "string" ? { url: entry } : (jsonRecord(entry) ?? {});
+            const title = jsonString(cite.title) ?? jsonString(cite.name) ?? "";
+            const url = jsonString(cite.url) ?? jsonString(cite.link) ?? jsonString(cite.href) ?? (typeof entry === "string" ? entry : "");
+            const label = title || url || `Source ${index + 1}`;
+            const targetUrl = url ? (url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`) : undefined;
+            const tooltip = title && url && title !== url ? `${title} · ${url}` : label;
+            return (
+              <a
+                key={index}
+                className="tc-cite"
+                href={targetUrl}
+                title={tooltip}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(event) => {
+                  if (!targetUrl) return;
+                  event.preventDefault();
+                  const openUrl = globalThis.ompStudioChrome?.openUrl;
+                  if (openUrl !== undefined) {
+                    void openUrl({ url: targetUrl });
+                  } else {
+                    window.open(targetUrl, "_blank", "noopener,noreferrer");
+                  }
+                }}
+              >
+                <Icon name="link" extra="sm" />
+                <span className="tc-cite-text">
+                  <span className="tc-cite-title">{label}</span>
+                  {url && title && title !== url ? <span className="c-dim tc-cite-url"> · {url}</span> : null}
+                </span>
+              </a>
+            );
+          })}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -876,7 +904,11 @@ function McpBody({ tool }: { tool: ToolView }) {
   );
 }
 
-export function ToolBody({ tool, follow }: { tool: ToolView; follow?: boolean }) {
+/**
+ * 工具卡片正文按 `tool` 身份 memo。行派生层会为未变化的工具复用同一个 ToolView
+ * 对象，因此流式期间只有真正在跑的那张卡会重渲染。
+ */
+export const ToolBody = memo(function ToolBody({ tool, follow }: { tool: ToolView; follow?: boolean }) {
   const kind = toolKind(tool);
   const fields = toolFields(tool);
   const live = follow ?? tool.status === "running";
@@ -923,4 +955,4 @@ export function ToolBody({ tool, follow }: { tool: ToolView; follow?: boolean })
       {inner}
     </ToolCardLive.Provider>
   );
-}
+});

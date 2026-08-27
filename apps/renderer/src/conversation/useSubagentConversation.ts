@@ -41,6 +41,9 @@ export function useSubagentConversation(input: {
     engineRef.current = null;
     keyRef.current = key;
   }
+  const loadOlderRef = useRef(() => {
+    void engineRef.current?.loadOlder();
+  });
 
   useEffect(() => {
     const engine = createSubagentConversationEngine({
@@ -71,8 +74,6 @@ export function useSubagentConversation(input: {
   }
   return {
     ...snapshot,
-    loadOlder: () => {
-      void engineRef.current?.loadOlder();
-    },
+    loadOlder: loadOlderRef.current,
   };
 }

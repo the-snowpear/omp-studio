@@ -17,6 +17,7 @@ import {
   type ConversationState,
   type TimelineRow,
 } from "./conversationViewModel";
+import { reuseTimelineRows } from "./rowReuse";
 import type { SubagentHubTarget } from "./toolMeta";
 
 const LIVE_BUFFER_LIMIT = 128;
@@ -26,7 +27,7 @@ export type SubagentConversationClient = Pick<StudioClient, "query" | "subscribe
 
 export type SubagentConversationSnapshot = {
   readonly state: ConversationState;
-  readonly rows: TimelineRow[];
+  readonly rows: readonly TimelineRow[];
   readonly demo: boolean;
   readonly loadingOlder: boolean;
   readonly identityKey: string;
@@ -119,9 +120,34 @@ export function createSubagentConversationEngine(input: {
   let unsub: (() => void) | undefined;
   const listeners = new Set<() => void>();
   const liveRead = shouldReadLiveAgentConversation(input);
+  let snapshotCache: SubagentConversationSnapshot | null = null;
+  let snapshotCacheState: ConversationState | null = null;
+  let snapshotCacheLoadingOlder = loadingOlder;
+  let emitScheduled: number | undefined;
+  let emitDirty = false;
+
+  const notifyListeners = () => {
+    for (const listener of listeners) listener();
+  };
 
   const emit = () => {
-    for (const listener of listeners) listener();
+    if (disposed) return;
+    if (typeof requestAnimationFrame !== "function") {
+      notifyListeners();
+      return;
+    }
+    if (emitScheduled === undefined) {
+      notifyListeners();
+      emitScheduled = requestAnimationFrame(() => {
+        emitScheduled = undefined;
+        if (emitDirty && !disposed) {
+          emitDirty = false;
+          notifyListeners();
+        }
+      });
+      return;
+    }
+    emitDirty = true;
   };
 
   const setState = (next: ConversationState) => {
@@ -228,13 +254,21 @@ export function createSubagentConversationEngine(input: {
 
   return {
     getSnapshot() {
-      return {
+      if (snapshotCache !== null && snapshotCacheState === state && snapshotCacheLoadingOlder === loadingOlder) {
+        return snapshotCache;
+      }
+      const rawRows = buildTimeline(state);
+      const rows = reuseTimelineRows(snapshotCache?.rows, rawRows);
+      snapshotCache = {
         state,
-        rows: buildTimeline(state),
+        rows,
         demo: input.preview,
         loadingOlder,
         identityKey: identityKey(state.identity),
       };
+      snapshotCacheState = state;
+      snapshotCacheLoadingOlder = loadingOlder;
+      return snapshotCache;
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -285,6 +319,15 @@ export function createSubagentConversationEngine(input: {
       unsub = undefined;
       liveBuffer = [];
       listeners.clear();
+      if (emitScheduled !== undefined) {
+        if (typeof cancelAnimationFrame === "function") {
+          cancelAnimationFrame(emitScheduled);
+        }
+        emitScheduled = undefined;
+      }
+      emitDirty = false;
+      snapshotCache = null;
+      snapshotCacheState = null;
     },
     async loadOlder() {
       if (input.preview || loadingOlder || disposed || input.client === null || input.target === null) return;

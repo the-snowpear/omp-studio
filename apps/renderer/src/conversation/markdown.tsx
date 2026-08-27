@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { isValidElement } from "react";
 import { useMemo } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import type { Components } from "react-markdown";
+import type { Components, Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
@@ -37,25 +37,42 @@ function currentThemeIsDark(): boolean {
   return typeof document === "object" && document.documentElement.getAttribute("data-theme") === "dark";
 }
 
+const MERMAID_CACHE_MAX = 32;
+const mermaidSvgCache = new Map<string, string>();
+
 function MermaidBlock({ code }: { code: string }) {
   const [svg, setSvg] = useState<string | undefined>(undefined);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
     setFailed(false);
+    const dark = currentThemeIsDark();
+    const cacheKey = `${dark ? "dark" : "light"}\u0000${code}`;
+    const cached = mermaidSvgCache.get(cacheKey);
+    if (cached !== undefined) {
+      setSvg(cached);
+      return;
+    }
     setSvg(undefined);
     loadMermaid()
       .then((mermaid) => {
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
-          theme: currentThemeIsDark() ? "dark" : "default",
+          theme: dark ? "dark" : "default",
         });
         const id = `mmd-${Math.random().toString(36).slice(2, 10)}`;
         return mermaid.render(id, code);
       })
       .then((result) => {
-        if (alive) setSvg(result.svg);
+        if (alive) {
+          if (mermaidSvgCache.size >= MERMAID_CACHE_MAX) {
+            const oldestKey = mermaidSvgCache.keys().next().value;
+            if (oldestKey !== undefined) mermaidSvgCache.delete(oldestKey);
+          }
+          mermaidSvgCache.set(cacheKey, result.svg);
+          setSvg(result.svg);
+        }
       })
       .catch(() => {
         if (alive) setFailed(true);
@@ -224,7 +241,30 @@ function createComponents(streaming: boolean, magicKeywords: boolean): Component
   };
 }
 
-export function MarkdownInline({ text }: { text: string; k?: string }) {
+/* 插件表提到模块级：每次 render 新建字面量只会让 unified 处理器多做无用功。 */
+const REMARK_PLUGINS: Options["remarkPlugins"] = [remarkGfm];
+const REHYPE_PLUGINS: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
+
+/**
+ * 一个已闭合的 Markdown 块。`react-markdown` 每次 render 都会重建处理器并整段
+ * 重新解析，所以这里按内容 memo：流式期间只有尾块会真的重新解析。
+ */
+const MarkdownBlock = memo(function MarkdownBlock({
+  text,
+  components,
+}: {
+  text: string;
+  components: Components;
+}) {
+  return (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
+      {text}
+    </ReactMarkdown>
+  );
+});
+
+// 使用 memo 避免流式输出时历史内联消息重复解析
+export const MarkdownInline = memo(function MarkdownInline({ text }: { text: string; k?: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -249,9 +289,10 @@ export function MarkdownInline({ text }: { text: string; k?: string }) {
       {text}
     </ReactMarkdown>
   );
-}
+});
 
-export function MarkdownText({
+// 使用 memo 避免流式输出时历史消息整篇 Markdown 重解析与高亮
+export const MarkdownText = memo(function MarkdownText({
   text,
   streaming,
   truncated,
@@ -269,16 +310,11 @@ export function MarkdownText({
     () => createComponents(streaming === true, magicKeywords === true),
     [streaming, magicKeywords],
   );
+  // TODO: streaming incremental parse removed — full-text fallback
   return (
     <div className="ev-body">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]]}
-        components={components}
-      >
-        {text}
-      </ReactMarkdown>
+      <MarkdownBlock text={text} components={components} />
       {truncated === true ? mark : null}
     </div>
   );
-}
+});

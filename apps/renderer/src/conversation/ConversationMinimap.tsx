@@ -106,48 +106,93 @@ function assistantPreview(segments: readonly AssistantSegment[]): string {
   return "";
 }
 
+/**
+ * 行 → 圆点缓存。`rowReuse` 让未变化的行保持对象身份，因此每行只在首次出现时
+ * 计算一次 preview（`trim()` / `batchSummary` 都会复制整段正文）。流式期间只有
+ * 尾行是新对象，其余行直接命中缓存，派生代价从 O(全文字符) 降到 O(行数) 次查找。
+ */
+const markCache = new WeakMap<TimelineRow, MinimapMark>();
+
+function buildMark(row: TimelineRow, turn: number): MinimapMark {
+  if (row.type === "user") {
+    return {
+      itemId: row.itemId,
+      type: "user",
+      label: MARK_LABEL.user,
+      preview: row.error ? `发送失败：${row.error}` : row.text.trim(),
+      turn,
+    };
+  }
+  if (row.type === "assistant") {
+    const type = assistantMarkType(row);
+    return { itemId: row.itemId, type, label: MARK_LABEL[type], preview: assistantPreview(row.segments), turn };
+  }
+  if (row.type === "compaction") {
+    return {
+      itemId: row.item.itemId,
+      type: "compact",
+      label: MARK_LABEL.compact,
+      preview: compactMinimapPreview(row.item),
+      turn,
+    };
+  }
+  if (row.type === "compacting") {
+    return { itemId: "compacting", type: "compact", label: "压缩中", preview: "正在压缩当前上下文", turn };
+  }
+  return {
+    itemId: row.item.itemId,
+    type: "checkpoint",
+    label: MARK_LABEL.checkpoint,
+    preview: "会话在此处重置，更早的消息仍可通过会话归档查看。",
+    turn,
+  };
+}
+
+function markForRow(row: TimelineRow, turn: number): MinimapMark {
+  const cached = markCache.get(row);
+  if (cached !== undefined) {
+    if (cached.turn === turn) return cached;
+    /* 前插一页后所有 turn 都会平移；改写缓存，避免此后每帧都复制一次。 */
+    const shifted = { ...cached, turn };
+    markCache.set(row, shifted);
+    return shifted;
+  }
+  const mark = buildMark(row, turn);
+  markCache.set(row, mark);
+  return mark;
+}
+
 /** 从时间线行派生 minimap 圆点：一行一点，类型决定着色与标签。 */
 export function deriveMinimapMarks(rows: readonly TimelineRow[]): MinimapMark[] {
   const marks: MinimapMark[] = [];
-  for (const row of rows) {
-    if (row.type === "user") {
-      marks.push({
-        itemId: row.itemId,
-        type: "user",
-        label: MARK_LABEL.user,
-        preview: row.error ? `发送失败：${row.error}` : row.text.trim(),
-        turn: 0,
-      });
-    } else if (row.type === "assistant") {
-      const type = assistantMarkType(row);
-      marks.push({ itemId: row.itemId, type, label: MARK_LABEL[type], preview: assistantPreview(row.segments), turn: 0 });
-    } else if (row.type === "compaction") {
-      marks.push({
-        itemId: row.item.itemId,
-        type: "compact",
-        label: MARK_LABEL.compact,
-        preview: compactMinimapPreview(row.item),
-        turn: 0,
-      });
-    } else if (row.type === "compacting") {
-      marks.push({
-        itemId: "compacting",
-        type: "compact",
-        label: "压缩中",
-        preview: "正在压缩当前上下文",
-        turn: 0,
-      });
-    } else {
-      marks.push({
-        itemId: row.item.itemId,
-        type: "checkpoint",
-        label: MARK_LABEL.checkpoint,
-        preview: "会话在此处重置，更早的消息仍可通过会话归档查看。",
-        turn: 0,
-      });
-    }
+  for (let index = 0; index < rows.length; index += 1) {
+    marks.push(markForRow(rows[index]!, index + 1));
   }
-  return marks.map((mark, index) => ({ ...mark, turn: index + 1 }));
+  return marks;
+}
+
+/** 全部圆点都沿用旧对象时返回旧数组，让下游 useMemo 一起短路。 */
+function reuseMarks(previous: readonly MinimapMark[], next: readonly MinimapMark[]): readonly MinimapMark[] {
+  if (previous.length !== next.length) return next;
+  for (let index = 0; index < next.length; index += 1) {
+    if (previous[index] !== next[index]) return next;
+  }
+  return previous;
+}
+
+/** 圆点位置变化小于这个比例就不重渲染轨道（约等于 500px 轨道上的 1px）。 */
+const FRACTION_EPSILON = 0.002;
+
+function fractionsShifted(previous: MarkFractions, next: MarkFractions): boolean {
+  const previousKeys = Object.keys(previous);
+  const nextKeys = Object.keys(next);
+  if (previousKeys.length !== nextKeys.length) return true;
+  for (const key of nextKeys) {
+    const before = previous[key];
+    if (before === undefined) return true;
+    if (Math.abs(before - next[key]!) > FRACTION_EPSILON) return true;
+  }
+  return false;
 }
 
 export type MarkFractions = Readonly<Record<string, number>>;
@@ -275,10 +320,18 @@ export function ConversationMinimap({
   const [filterOpen, setFilterOpen] = useState(false);
   const [keyOnly, setKeyOnly] = useState(false);
 
-  const marks = useMemo(() => deriveMinimapMarks(rows), [rows]);
+  const prevMarksRef = useRef<readonly MinimapMark[]>([]);
+  const marks = useMemo(() => reuseMarks(prevMarksRef.current, deriveMinimapMarks(rows)), [rows]);
+  prevMarksRef.current = marks;
   const marksRef = useRef(marks);
   marksRef.current = marks;
 
+  const fractionsRef = useRef(fractions);
+  fractionsRef.current = fractions;
+  /** DOM 里真实存在的圆点（折叠 + 筛选之后）；活跃点判定只看这些。 */
+  const visibleRef = useRef<readonly MinimapMark[]>([]);
+
+  /** 视口指示条：两次读 + 两次写，滚动事件里直接跑。 */
   const syncViewport = useCallback(() => {
     const scroller = scrollerRef.current;
     const viewport = viewportRef.current;
@@ -295,59 +348,121 @@ export function ConversationMinimap({
     const progress = scroller.scrollTop / maxScroll;
     viewport.style.height = `${viewportH}px`;
     viewport.style.top = `${progress * (range - viewportH)}px`;
-    syncActiveMark(scroller, track, activeIdRef);
   }, [scrollerRef]);
 
+  /**
+   * 圆点位置。原实现对每个圆点做一次 `scroller.querySelector`（每次全子树遍历，
+   * 总体 O(行数²)）再读一次 rect；这里改为一次 querySelectorAll + 单批 rect 读，
+   * 并在「圆点集合未变且 scrollHeight 未变」时整体跳过：流式的多数 chunk 不改变
+   * 文档高度，此时完全不碰布局。
+   */
+  const measuredRef = useRef<{ readonly marks: readonly MinimapMark[]; readonly scrollHeight: number } | null>(null);
   const measure = useCallback(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     const scrollHeight = scroller.scrollHeight;
     if (scrollHeight <= 0) return;
-    const base = scroller.getBoundingClientRect().top;
-    const next: Record<string, number> = {};
-    let changed = false;
-    for (const mark of marksRef.current) {
-      const node = scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(mark.itemId)}"]`);
-      if (!node) continue;
-      const rect = node.getBoundingClientRect();
-      const center = rect.top - base + scroller.scrollTop + rect.height / 2;
-      const fraction = Math.min(0.985, Math.max(0.015, center / scrollHeight));
-      const rounded = Math.round(fraction * 10000) / 10000;
-      next[mark.itemId] = rounded;
-      if (fractionsRef.current[mark.itemId] !== rounded) changed = true;
+    const current = marksRef.current;
+    const measured = measuredRef.current;
+    if (measured !== null && measured.marks === current && measured.scrollHeight === scrollHeight) return;
+    measuredRef.current = { marks: current, scrollHeight };
+    if (current.length === 0) {
+      if (Object.keys(fractionsRef.current).length > 0) setFractions({});
+      return;
     }
-    if (changed) setFractions(next);
+    const wanted = new Set<string>();
+    for (const mark of current) wanted.add(mark.itemId);
+    const base = scroller.getBoundingClientRect().top;
+    const scrollTop = scroller.scrollTop;
+    const next: Record<string, number> = {};
+    for (const node of scroller.querySelectorAll<HTMLElement>("[data-item-id]")) {
+      const key = node.dataset.itemId;
+      /* 第一个匹配节点胜出，与原来的 querySelector 语义一致。 */
+      if (key === undefined || !wanted.has(key) || next[key] !== undefined) continue;
+      const rect = node.getBoundingClientRect();
+      const center = rect.top - base + scrollTop + rect.height / 2;
+      const fraction = Math.min(0.985, Math.max(0.015, center / scrollHeight));
+      next[key] = Math.round(fraction * 10000) / 10000;
+    }
+    if (!fractionsShifted(fractionsRef.current, next)) return;
+    setFractions(next);
   }, [scrollerRef]);
 
-  const fractionsRef = useRef(fractions);
-  fractionsRef.current = fractions;
+  /**
+   * 活跃圆点。圆点在轨道里的位置就是 fraction 的线性映射（CSS `calc`），与
+   * scrollTop 无关，所以既不必逐点读 rect，也不必挂在滚动事件上。
+   */
+  const syncActiveMark = useCallback(() => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+    const next = activeMarkId(visibleRef.current, fractionsRef.current, {
+      trackHeight: track.clientHeight,
+      trackTop: track.getBoundingClientRect().top,
+      scrollerTop: scroller.getBoundingClientRect().top,
+      scrollerHeight: scroller.clientHeight,
+    });
+    applyActiveMark(track, next);
+    activeIdRef.current = next;
+  }, [scrollerRef]);
 
-  /* 测量圆点位置：行变化 + 内容高度变化（流式增长、工具展开、窗口缩放）。 */
-  useLayoutEffect(() => {
+  /** 一帧里的三件布局事合成一次。 */
+  const syncAll = useCallback(() => {
     measure();
     syncViewport();
+    syncActiveMark();
+  }, [measure, syncViewport, syncActiveMark]);
+
+  const frameRef = useRef<number | null>(null);
+  const scheduleSync = useCallback(() => {
+    if (typeof requestAnimationFrame !== "function") {
+      syncAll();
+      return;
+    }
+    if (frameRef.current !== null) return;
+    frameRef.current = requestAnimationFrame(() => {
+      frameRef.current = null;
+      syncAll();
+    });
+  }, [syncAll]);
+
+  useEffect(
+    () => () => {
+      if (frameRef.current !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(frameRef.current);
+      }
+    },
+    [],
+  );
+
+  /* 行变化：同步测一次（measure 内部自带「高度未变则跳过」的闸门）。 */
+  useLayoutEffect(() => {
+    syncAll();
+  }, [rows, syncAll]);
+
+  /* 内容高度变化（流式增长、工具展开、窗口缩放）：RO 只建一次，回调按帧合并。 */
+  useLayoutEffect(() => {
     if (typeof ResizeObserver !== "function") return;
     const scroller = scrollerRef.current;
-    const doc = scroller?.querySelector(".convo-doc") ?? null;
+    const doc = scroller?.querySelector(".convo-doc") ?? scroller?.firstElementChild ?? null;
     const observer = new ResizeObserver(() => {
-      measure();
-      syncViewport();
+      scheduleSync();
     });
     if (scroller) observer.observe(scroller);
     if (doc) observer.observe(doc);
     if (trackRef.current) observer.observe(trackRef.current);
     return () => observer.disconnect();
-  }, [measure, syncViewport, scrollerRef, rows]);
+  }, [scheduleSync, scrollerRef]);
 
-  /* 滚动同步视口条（passive，高频，全部走命令式更新）。 */
+  /* 滚动：只更新视口条。圆点是内容绝对位置，滚动不改变它们。 */
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
     scroller.addEventListener("scroll", syncViewport, { passive: true });
-    const frame = requestAnimationFrame(syncViewport);
+    const frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame(syncViewport) : null;
     return () => {
       scroller.removeEventListener("scroll", syncViewport);
-      cancelAnimationFrame(frame);
+      if (frame !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
     };
   }, [syncViewport, scrollerRef]);
 
@@ -356,6 +471,7 @@ export function ConversationMinimap({
     () => (keyOnly ? placed.filter((mark) => KEY_TYPES.includes(mark.type)) : placed),
     [placed, keyOnly],
   );
+  visibleRef.current = visible;
   const hoveredMark = hoveredItemId === null ? null : visible.find((mark) => mark.itemId === hoveredItemId) ?? null;
 
   const jumpTo = useCallback(
@@ -587,30 +703,45 @@ export function ConversationMinimap({
   );
 }
 
-/** 活跃圆点 = 离 scroller 视口中线最近的圆点（命令式 class 切换）。 */
-function syncActiveMark(
-  scroller: HTMLElement,
-  track: HTMLElement,
-  activeIdRef: { current: string | null },
-): void {
-  const scrollerTop = scroller.getBoundingClientRect().top;
-  const mid = scroller.clientHeight * 0.5;
+type TrackGeometry = {
+  readonly trackHeight: number;
+  readonly trackTop: number;
+  readonly scrollerTop: number;
+  readonly scrollerHeight: number;
+};
+
+/**
+ * 活跃圆点 = 离 scroller 视口中线最近的圆点。圆点 top 由 CSS
+ * `calc(f*100% - f*TOOLS_RESERVE_PX)` 给出，即 `f * (trackHeight - TOOLS_RESERVE_PX)`，
+ * 所以直接用 fraction 反解即可，不必逐点读 rect。圆点尺寸对所有候选相同，
+ * 省掉 `height / 2` 不改变最近点。
+ */
+export function activeMarkId(
+  marks: readonly MinimapMark[],
+  fractions: MarkFractions,
+  geometry: TrackGeometry,
+): string | null {
+  const range = geometry.trackHeight - TOOLS_RESERVE_PX;
+  const target = geometry.scrollerTop + geometry.scrollerHeight * 0.5 - geometry.trackTop;
   let bestId: string | null = null;
   let bestDistance = Infinity;
-  for (const el of Array.from(track.querySelectorAll<HTMLElement>(".mm-mark"))) {
-    const rect = el.getBoundingClientRect();
-    const center = rect.top + rect.height / 2 - scrollerTop;
-    const distance = Math.abs(center - mid);
+  for (const mark of marks) {
+    const fraction = fractions[mark.itemId];
+    if (fraction === undefined) continue;
+    const distance = Math.abs(fraction * range - target);
     if (distance < bestDistance) {
       bestDistance = distance;
-      bestId = el.dataset.markId ?? null;
+      bestId = mark.itemId;
     }
   }
-  for (const el of Array.from(track.querySelectorAll<HTMLElement>(".mm-mark.active"))) {
-    if (el.dataset.markId !== bestId) el.classList.remove("active");
+  return bestId;
+}
+
+function applyActiveMark(track: HTMLElement, activeId: string | null): void {
+  for (const el of track.querySelectorAll<HTMLElement>(".mm-mark.active")) {
+    if (el.dataset.markId !== activeId) el.classList.remove("active");
   }
-  if (bestId !== null) {
-    track.querySelector<HTMLElement>(`.mm-mark[data-mark-id="${cssEscape(bestId)}"]`)?.classList.add("active");
+  if (activeId !== null) {
+    track.querySelector<HTMLElement>(`.mm-mark[data-mark-id="${cssEscape(activeId)}"]`)?.classList.add("active");
   }
-  activeIdRef.current = bestId;
 }

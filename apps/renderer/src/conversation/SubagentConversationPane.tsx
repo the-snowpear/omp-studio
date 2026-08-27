@@ -143,7 +143,7 @@ export function SubagentConversationPane({
               <p>正在读取子 Agent 对话…</p>
             </div>
           ) : (
-            <ConvoTranscript rows={snapshot.rows} {...(snapshot.demo ? { demo: true } : {})} />
+            <ConvoTranscript scrollerRef={scrollerRef} rows={snapshot.rows} {...(snapshot.demo ? { demo: true } : {})} />
           )}
           {state.hydrateStatus === "resyncing" ? (
             <div className="convo-notice info" role="status">正在同步</div>

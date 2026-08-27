@@ -21,7 +21,7 @@ function formatTime(iso: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function MessageBody({
+const MessageBody = memo(function MessageBody({
   text,
   streaming,
   truncated,
@@ -73,7 +73,7 @@ function MessageBody({
       <MessageCopyActions text={copyText} />
     </div>
   );
-}
+});
 
 function AssistantStatus({ status }: { status: Extract<TimelineRow, { type: "assistant" }>["status"] }) {
   if (status === "aborted") return <span className="chip gray xs">已中止</span>;
@@ -307,12 +307,14 @@ function TurnChanges({
   files,
   defaultOpen,
   demo,
+  turnId,
   onReview,
 }: {
   files?: readonly TurnFileChange[];
   defaultOpen?: boolean;
   demo?: boolean;
-  onReview?: () => void;
+  turnId?: string;
+  onReview?: (turnId: string) => void;
 }) {
   if (files === undefined || files.length === 0) return null;
   return (
@@ -320,7 +322,7 @@ function TurnChanges({
       files={files}
       {...(defaultOpen === true ? { defaultOpen: true } : {})}
       {...(demo === true ? { demo: true } : {})}
-      {...(onReview === undefined ? {} : { onReview })}
+      {...(onReview === undefined || turnId === undefined ? {} : { onReview: () => onReview(turnId) })}
     />
   );
 }
@@ -373,6 +375,7 @@ export const ConversationItemView = memo(function ConversationItemView({
   tail = true,
   changesDefaultOpen,
   demo,
+  changesTurnId,
   onReviewChanges,
   onInspectSubagent,
   liveAgents,
@@ -390,7 +393,8 @@ export const ConversationItemView = memo(function ConversationItemView({
   fileChanges?: readonly TurnFileChange[];
   changesDefaultOpen?: boolean;
   demo?: boolean;
-  onReviewChanges?: () => void;
+  changesTurnId?: string;
+  onReviewChanges?: (turnId: string) => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
   liveAgents?: readonly StudioAgentSnapshot[];
   planLink?: PlanCreatedLink;
@@ -460,7 +464,10 @@ export const ConversationItemView = memo(function ConversationItemView({
         {...(fileChanges === undefined ? {} : { files: fileChanges })}
         {...(changesDefaultOpen === true ? { defaultOpen: true } : {})}
         {...(demo === true ? { demo: true } : {})}
-        {...(onReviewChanges === undefined ? {} : { onReview: onReviewChanges })}
+        {...(changesTurnId === undefined ? {} : { turnId: changesTurnId })}
+        {...(onReviewChanges === undefined || changesTurnId === undefined
+          ? {}
+          : { onReview: onReviewChanges })}
       />
     );
     const createdPlan = planLink === undefined ? null : (

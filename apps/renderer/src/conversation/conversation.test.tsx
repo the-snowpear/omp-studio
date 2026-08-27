@@ -2929,6 +2929,46 @@ describe("real OMP tool-card bindings", () => {
     expect(container.textContent).toContain("Official result");
     expect(container.textContent).toContain("https://example.com");
   });
+
+  it("web_search tool card renders structured citations with tooltips and links", () => {
+    const web = {
+      toolCallId: "web-rich",
+      toolName: "web_search",
+      status: "succeeded" as const,
+      arguments: { query: "DeepSeek最新动态" },
+      output: "[1] 更新日志 https://api-docs.deepseek.com/zh-cn/updates/",
+      result: {
+        type: "toolResult" as const,
+        toolCallId: "web-rich",
+        toolName: "web_search",
+        isError: false,
+        data: {
+          provider: "firecrawl",
+          response: {
+            provider: "firecrawl",
+            sources: [
+              { title: "更新日志", url: "https://api-docs.deepseek.com/zh-cn/updates/" },
+              { title: "DeepSeek V4 Pro", url: "https://example.com/v4" },
+              "https://example.com/raw-url",
+            ],
+          },
+        },
+      },
+    };
+    const { container } = render(<ToolBody tool={web} />);
+    expect(container.textContent).toContain("provider");
+    expect(container.textContent).toContain("firecrawl");
+    expect(container.textContent).toContain("sources");
+    expect(container.textContent).toContain("3");
+    expect(container.textContent).toContain("更新日志");
+    expect(container.textContent).toContain("https://api-docs.deepseek.com/zh-cn/updates/");
+
+    const cites = container.querySelectorAll(".tc-cite");
+    expect(cites.length).toBe(3);
+    expect(cites[0]?.getAttribute("href")).toBe("https://api-docs.deepseek.com/zh-cn/updates/");
+    expect(cites[0]?.getAttribute("title")).toBe("更新日志 · https://api-docs.deepseek.com/zh-cn/updates/");
+    expect(cites[2]?.getAttribute("href")).toBe("https://example.com/raw-url");
+  });
 });
 
 describe("turn file-change card", () => {
@@ -3054,6 +3094,65 @@ describe("turn file-change card", () => {
     fireEvent.click(reviews[0]!);
     fireEvent.click(reviews[1]!);
     expect(reviewed).toEqual(["turn-1", SESSION_CHANGE_LAST_ID]);
+  });
+
+  it("caps lists over six files and cycles collapsed → capped → full → collapsed", () => {
+    const tools = Array.from({ length: 8 }, (_, index) => ({
+      ...write,
+      toolCallId: `write-cap-${index}`,
+      arguments: { path: `apps/renderer/src/mod-${index}.ts`, content: "a\nb" },
+    }));
+    const { container } = render(
+      <ConvoTranscript
+        rows={[
+          {
+            type: "assistant" as const,
+            itemId: "cap-turn",
+            createdAt: "2026-08-15T00:00:02.000Z",
+            status: "completed" as const,
+            presentation: "reply" as const,
+            segments: [{ type: "batch" as const, key: "b", tools }],
+          },
+        ]}
+      />,
+    );
+    expect(container.querySelector(".turn-diff")?.className).toContain("open");
+    expect(container.querySelector(".turn-diff")?.className).toContain("capped");
+    const toggle = screen.getAllByRole("button", { name: /个文件已更改/ })[0]!;
+    fireEvent.click(toggle);
+    expect(container.querySelector(".turn-diff")?.className).not.toContain("capped");
+    expect(container.querySelector(".turn-diff")?.className).toContain("open");
+    fireEvent.click(toggle);
+    expect(container.querySelector(".turn-diff")?.className).not.toContain("open");
+    fireEvent.click(toggle);
+    expect(container.querySelector(".turn-diff")?.className).toContain("open");
+    expect(container.querySelector(".turn-diff")?.className).toContain("capped");
+  });
+
+  it("skips the capped stage when files fit within the limit", () => {
+    const { container } = render(
+      <ConvoTranscript
+        rows={[
+          {
+            type: "assistant" as const,
+            itemId: "small-turn",
+            createdAt: "2026-08-15T00:00:02.000Z",
+            status: "completed" as const,
+            presentation: "reply" as const,
+            segments: [{ type: "batch" as const, key: "b", tools: [write, edit] }],
+          },
+        ]}
+      />,
+    );
+    const toggle = screen.getByRole("button", { name: /2 个文件已更改/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector(".turn-diff")?.className).not.toContain("capped");
+    fireEvent.click(toggle);
+    expect(container.querySelector(".turn-diff")?.className).not.toContain("open");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(container.querySelector(".turn-diff")?.className).not.toContain("capped");
+    expect(container.querySelector(".turn-diff")?.className).toContain("open");
   });
 
   it("holds the latest card until the Runtime turn closes, even after file tools succeed", () => {

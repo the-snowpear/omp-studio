@@ -93,8 +93,15 @@ export function useConversation(input: UseConversationInput): UseConversationRes
   }
   snapshot = retainConversationWhileRemounting(snapshot, heldRef.current, input.identity?.sessionId);
   if (snapshot.rows.length > 0) heldRef.current = snapshot;
-  return {
-    ...snapshot,
+  const actionsRef = useRef<{
+    loadOlder: () => void;
+    reload: () => Promise<void>;
+    restoreFromUser: (itemId: string) => boolean;
+    trackPending: (pending: PendingUser) => void;
+    failPending: (requestId: string, error: string) => void;
+    dropPending: (requestId: string) => void;
+  } | null>(null);
+  actionsRef.current ??= {
     loadOlder: () => {
       void engineRef.current?.loadOlder();
     },
@@ -103,5 +110,9 @@ export function useConversation(input: UseConversationInput): UseConversationRes
     trackPending: (pending) => engineRef.current?.trackPending(pending),
     failPending: (requestId, error) => engineRef.current?.failPending(requestId, error),
     dropPending: (requestId) => engineRef.current?.dropPending(requestId),
+  };
+  return {
+    ...snapshot,
+    ...actionsRef.current,
   };
 }

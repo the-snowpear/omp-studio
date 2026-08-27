@@ -37,12 +37,21 @@ export function thumbsFromDoc(doc: ComposerDoc): UserMessageThumb[] {
   return thumbs;
 }
 
+/**
+ * 按 displays 对象身份缓存。派生链每帧都会调用它，而 displays 只在用户消息落地时
+ * 变化；缓存之后缩略图数组身份也稳定，行缓存与 memo 才不会因为它每帧失效。
+ */
+const displayThumbsCache = new WeakMap<object, UserThumbMap>();
+
 export function thumbsFromDisplays(displays: { readonly [itemId: string]: ComposerDoc }): UserThumbMap {
+  const cached = displayThumbsCache.get(displays);
+  if (cached !== undefined) return cached;
   const next: { [itemId: string]: readonly UserMessageThumb[] } = {};
   for (const [itemId, doc] of Object.entries(displays)) {
     const thumbs = thumbsFromDoc(doc);
     if (thumbs.length > 0) next[itemId] = thumbs;
   }
+  displayThumbsCache.set(displays, next);
   return next;
 }
 

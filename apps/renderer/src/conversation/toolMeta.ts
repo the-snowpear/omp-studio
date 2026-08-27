@@ -67,7 +67,7 @@ export function subagentCardKey(agent: SubagentView): string {
   return `${agent.toolCallId}:${agent.agentId ?? agent.name}`;
 }
 
-const KIND_ICON: Record<string, string> = {
+export const KIND_ICON: Record<string, string> = {
   think: "brain",
   read: "file",
   write: "file-plus",
@@ -110,7 +110,7 @@ const KIND_ICON: Record<string, string> = {
   resolve: "check",
 };
 
-const KIND_LABEL: Record<string, string> = {
+export const KIND_LABEL: Record<string, string> = {
   think: "Think",
   read: "Read",
   write: "Write",
@@ -152,7 +152,7 @@ const KIND_LABEL: Record<string, string> = {
   resolve: "Resolve",
 };
 
-const NAME_TO_KIND: Record<string, string> = {
+export const NAME_TO_KIND: Record<string, string> = {
   inspect: "inspect_image",
   generateimage: "generate_image",
   "speech generation": "tts",
@@ -162,7 +162,7 @@ const NAME_TO_KIND: Record<string, string> = {
 
 const PATH_KINDS = new Set(["read", "write", "edit", "inspect_image", "glob", "generate_image", "tts"]);
 
-const STATUS_LABEL: Record<ToolStatus, string> = {
+export const STATUS_LABEL: Record<ToolStatus, string> = {
   queued: "等待",
   running: "运行中",
   succeeded: "完成",
@@ -392,7 +392,7 @@ function askResultAnswers(fields: { readonly [key: string]: JsonValue }): string
 }
 
 /** Ask args are `questions[]`; there is no flat `prompt`/`question`. */
-function askQuestionText(args: { readonly [key: string]: JsonValue } | undefined): string | undefined {
+export function askQuestionText(args: { readonly [key: string]: JsonValue } | undefined): string | undefined {
   const questions = args?.questions;
   if (!Array.isArray(questions)) return undefined;
   for (const entry of questions) {
@@ -562,7 +562,7 @@ export type TurnFileChange = {
   readonly note?: string;
 };
 
-const CHANGE_NOTE: Readonly<Record<FileEditKind, string>> = {
+export const CHANGE_NOTE: Readonly<Record<FileEditKind, string>> = {
   write: "Write",
   edit: "Edit",
   ast_edit: "AST Edit",
@@ -664,197 +664,11 @@ export function collectTurnFileChanges(segments: readonly AssistantSegment[]): T
   return changes;
 }
 
+export function hasAssistantText(segments: readonly AssistantSegment[]): boolean {
+  return segments.some((segment) => segment.type === "text" && segment.text.trim().length > 0);
+}
+
 /* ---------- 会话级变更（右侧 Changes 页签） ---------- */
-
-export type SessionPatchMark = "+" | "-" | " ";
-
-/** 单文件的一段 patch：保留旧/新行号，供 Changes Diff 双栏 gutter 使用。 */
-export type SessionPatchLine = {
-  readonly mark: SessionPatchMark;
-  readonly oldLn: string;
-  readonly newLn: string;
-  readonly text: string;
-};
-
-export type SessionPatchBlock = {
-  readonly kind: FileEditKind;
-  readonly lines: readonly SessionPatchLine[];
-  readonly truncated?: boolean;
-};
-
-/** write 全量内容按 + 行渲染的截断上限，超出部分丢弃并打 truncated 标记。 */
-const PATCH_LINE_CAP = 500;
-
-function normalizedPatchPath(path: string | undefined): string | undefined {
-  if (path === undefined) return undefined;
-  const normalized = path.replaceAll("\\", "/").trim();
-  return normalized !== "" && !normalized.includes(" → ") ? normalized : undefined;
-}
-
-function patchMark(value: unknown): SessionPatchMark {
-  return value === "+" || value === "-" ? value : " ";
-}
-
-function numberedPatchLine(mark: SessionPatchMark, ln: string, text: string): SessionPatchLine {
-  return {
-    mark,
-    oldLn: mark === "+" ? "" : ln,
-    newLn: mark === "-" ? "" : ln,
-    text,
-  };
-}
-
-/** edit 工具 diff 字段 → 统一 patch 行。解析口径与 ToolBody 的 EditBody 完全一致：
-    数组行 [mark, 旧行号, 新行号, 文本]、字符串行 `mark 行号|文本`（不匹配视为上下文行）。 */
-function editPatchLines(diff: JsonValue | undefined): SessionPatchLine[] {
-  const lines: SessionPatchLine[] = [];
-  if (Array.isArray(diff)) {
-    for (const row of diff) {
-      if (!Array.isArray(row)) continue;
-      lines.push({
-        mark: patchMark(row[0]),
-        oldLn: String(row[1] ?? ""),
-        newLn: String(row[2] ?? ""),
-        text: String(row[3] ?? ""),
-      });
-    }
-  } else if (typeof diff === "string" && diff.length > 0) {
-    for (const line of diff.split("\n")) {
-      const match = /^([ +\-])(\d*)\|(.*)$/.exec(line);
-      if (match === null) {
-        lines.push({ mark: " ", oldLn: "", newLn: "", text: line });
-        continue;
-      }
-      lines.push(numberedPatchLine(patchMark(match[1]), match[2] ?? "", match[3] ?? ""));
-    }
-  }
-  return lines;
-}
-
-const GROUPED_HEADER_RE = /^(#+)\s+(.*)$/;
-const GROUPED_HEADER_SUFFIX_RE = /\s+\([^)]*\)\s*$/;
-const GROUPED_HEADER_HASH_TAG_RE = /#[0-9a-f]+$/i;
-const GROUPED_BODY_RE = /^([ +\-])(\d*)│(.*)$/;
-
-/**
- * ast_edit only reports per-file replacement counts as data; the changed line
- * text lives in its grouped `displayContent` tree — `# dir/` headers one `#` per
- * level, `## file.ts (2 replacements)` file headers, then `-468│text` body
- * lines. Rebuild cwd-relative paths from the header stack the same way upstream
- * `classifyGroupedLines` does, so the Changes tab can show a real patch body.
- */
-function astEditDisplayPatches(display: string): Map<string, SessionPatchLine[]> {
-  const byFile = new Map<string, SessionPatchLine[]>();
-  const dirAtDepth = new Map<number, string>();
-  let current: SessionPatchLine[] | undefined;
-  for (const line of display.split("\n")) {
-    const header = GROUPED_HEADER_RE.exec(line);
-    if (header === null) {
-      const body = GROUPED_BODY_RE.exec(line);
-      if (body !== null && current !== undefined) {
-        current.push(numberedPatchLine(patchMark(body[1]), body[2] ?? "", body[3] ?? ""));
-      }
-      continue;
-    }
-    const depth = header[1]!.length;
-    const rest = header[2]!.trimEnd().replace(GROUPED_HEADER_SUFFIX_RE, "");
-    for (const level of [...dirAtDepth.keys()]) {
-      if (level >= depth) dirAtDepth.delete(level);
-    }
-    const parent = depth > 1 ? dirAtDepth.get(depth - 1) : undefined;
-    const joined = (name: string) => (parent === undefined ? name : `${parent}/${name}`);
-    current = undefined;
-    if (rest.endsWith("/")) {
-      const name = rest.slice(0, -1);
-      if (name !== "") dirAtDepth.set(depth, joined(name));
-      continue;
-    }
-    const name = rest.replace(GROUPED_HEADER_HASH_TAG_RE, "");
-    if (name === "") continue;
-    const file = normalizedPatchPath(joined(name));
-    if (file === undefined) continue;
-    current = byFile.get(file) ?? [];
-    byFile.set(file, current);
-  }
-  return byFile;
-}
-
-/** 从 assistant 段按时间序聚出每个文件的 patch 块（edit 的 diff / write 的内容 / ast_edit 的 before-after）。
-    与 collectToolFileChanges 同口径：只收 succeeded 工具、跳过重命名展示串。 */
-export function sessionFilePatches(segments: readonly AssistantSegment[]): Map<string, SessionPatchBlock[]> {
-  const patches = new Map<string, SessionPatchBlock[]>();
-  const push = (path: string, block: SessionPatchBlock) => {
-    const blocks = patches.get(path);
-    if (blocks === undefined) patches.set(path, [block]);
-    else blocks.push(block);
-  };
-  for (const segment of segments) {
-    if (segment.type !== "batch") continue;
-    for (const tool of segment.tools) {
-      if (tool.status !== "succeeded") continue;
-      const kind = asFileEditKind(toolKind(tool));
-      if (kind === undefined) continue;
-      const fields = toolFields(tool);
-      if (kind === "ast_edit") {
-        if (Array.isArray(fields.changes)) {
-          // 一个 ast_edit 可改多文件：按 file 归组，before → - 行、after → + 行。
-          const byFile = new Map<string, SessionPatchLine[]>();
-          for (const entry of fields.changes) {
-            const record = jsonRecord(entry);
-            const file = normalizedPatchPath(jsonString(record?.file));
-            if (file === undefined) continue;
-            const before = jsonString(record?.before);
-            const after = jsonString(record?.after);
-            const lines = byFile.get(file) ?? [];
-            if (before !== undefined) lines.push({ mark: "-", oldLn: "", newLn: "", text: before });
-            if (after !== undefined) lines.push({ mark: "+", oldLn: "", newLn: "", text: after });
-            byFile.set(file, lines);
-          }
-          for (const [file, lines] of byFile) push(file, { kind: "ast_edit", lines });
-          continue;
-        }
-        const display = jsonString(fields.displayContent);
-        if (display !== undefined) {
-          for (const [file, lines] of astEditDisplayPatches(display)) {
-            if (lines.length > 0) push(file, { kind: "ast_edit", lines });
-          }
-        }
-        continue;
-      }
-      const path = normalizedPatchPath(toolFilePath(tool));
-      if (path === undefined) continue;
-      if (kind === "write") {
-        const content = fields.content;
-        let raw: string[] | undefined;
-        if (typeof content === "string") raw = content.length === 0 ? [] : content.split("\n");
-        else if (Array.isArray(content)) raw = content.map((entry) => String(entry));
-        if (raw === undefined) continue;
-        const truncated = raw.length > PATCH_LINE_CAP;
-        push(path, {
-          kind: "write",
-          lines: raw.slice(0, PATCH_LINE_CAP).map((line, index) => ({
-            mark: "+",
-            oldLn: "",
-            newLn: String(index + 1),
-            text: line,
-          })),
-          ...(truncated ? { truncated: true } : {}),
-        });
-        continue;
-      }
-      const lines = editPatchLines(fields.diff);
-      if (lines.length > 0) push(path, { kind: "edit", lines });
-    }
-  }
-  return patches;
-}
-
-export type SessionFileChanges = {
-  /** 当前 Turn：最后一段连续 assistant 行（含流式中），与 TaskProgressDock 口径一致。 */
-  readonly turn: readonly TurnFileChange[];
-  /** 本会话累积：全部 assistant 段。 */
-  readonly session: readonly TurnFileChange[];
-};
 
 /** 连续 assistant 行的闭区间；非 assistant 行切开一轮。 */
 export type AssistantRunRange = {
@@ -882,14 +696,6 @@ export type SessionChangeScope = {
   readonly segments: readonly AssistantSegment[];
 };
 
-function assistantSegmentsOf(rows: readonly TimelineRow[]): AssistantSegment[] {
-  const segments: AssistantSegment[] = [];
-  for (const row of rows) {
-    if (row.type === "assistant") segments.push(...row.segments);
-  }
-  return segments;
-}
-
 /** 非 assistant 行切开的连续 assistant 段。与对话 TurnDiffCard 的 turn 口径一致。 */
 export function assistantRunRanges(rows: readonly TimelineRow[]): readonly AssistantRunRange[] {
   const ranges: AssistantRunRange[] = [];
@@ -907,11 +713,6 @@ export function assistantRunRanges(rows: readonly TimelineRow[]): readonly Assis
   }
   flush(rows.length);
   return ranges;
-}
-
-function lastAssistantRunRange(rows: readonly TimelineRow[]): AssistantRunRange | undefined {
-  const ranges = assistantRunRanges(rows);
-  return ranges[ranges.length - 1];
 }
 
 function rangeTurnId(rows: readonly TimelineRow[], range: AssistantRunRange): string {
@@ -933,11 +734,29 @@ export function sessionChangeTurnIdForRange(
 }
 
 function filesInRange(rows: readonly TimelineRow[], range: AssistantRunRange): TurnFileChange[] {
-  return collectTurnFileChanges(assistantSegmentsOf(rows.slice(range.start, range.end + 1)));
+  const segments: AssistantSegment[] = [];
+  for (let i = range.start; i <= range.end; i += 1) {
+    const row = rows[i];
+    if (row?.type === "assistant") segments.push(...row.segments);
+  }
+  return collectTurnFileChanges(segments);
 }
 
-function segmentsInRange(rows: readonly TimelineRow[], range: AssistantRunRange): AssistantSegment[] {
-  return assistantSegmentsOf(rows.slice(range.start, range.end + 1));
+function segmentsInRange(rows: readonly TimelineRow[], range: AssistantRunRange): readonly AssistantSegment[] {
+  const segments: AssistantSegment[] = [];
+  for (let i = range.start; i <= range.end; i += 1) {
+    const row = rows[i];
+    if (row?.type === "assistant") segments.push(...row.segments);
+  }
+  return segments;
+}
+
+function allAssistantSegments(rows: readonly TimelineRow[]): readonly AssistantSegment[] {
+  const segments: AssistantSegment[] = [];
+  for (const row of rows) {
+    if (row.type === "assistant") segments.push(...row.segments);
+  }
+  return segments;
 }
 
 function changePathMatches(path: string, focus: string): boolean {
@@ -973,7 +792,7 @@ export function listSessionChangeTurns(rows: readonly TimelineRow[]): SessionCha
     id: SESSION_CHANGE_SESSION_ID,
     kind: "session",
     label: "本会话",
-    files: collectTurnFileChanges(assistantSegmentsOf(rows)),
+    files: collectTurnFileChanges(allAssistantSegments(rows)),
   });
   return items;
 }
@@ -981,12 +800,13 @@ export function listSessionChangeTurns(rows: readonly TimelineRow[]): SessionCha
 /** 选中轮次的文件清单与 patch 段。未知 id 回退到最近一轮。 */
 export function sessionChangeScope(rows: readonly TimelineRow[], turnId: string): SessionChangeScope {
   if (turnId === SESSION_CHANGE_SESSION_ID) {
+    const segments = allAssistantSegments(rows);
     return {
       id: SESSION_CHANGE_SESSION_ID,
       kind: "session",
       label: "本会话",
-      files: collectTurnFileChanges(assistantSegmentsOf(rows)),
-      segments: assistantSegmentsOf(rows),
+      files: collectTurnFileChanges(segments),
+      segments,
     };
   }
   const ranges = assistantRunRanges(rows);
@@ -1028,178 +848,7 @@ export function sessionChangeTurnIdForPath(rows: readonly TimelineRow[], path: s
   return undefined;
 }
 
-/** 会话变更视图：当前 Turn 与本会话累积两组文件清单。 */
-export function sessionFileChanges(rows: readonly TimelineRow[]): SessionFileChanges {
-  const run = lastAssistantRunRange(rows);
-  return {
-    turn: run === undefined ? [] : filesInRange(rows, run),
-    session: collectTurnFileChanges(assistantSegmentsOf(rows)),
-  };
-}
-
-export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
-
-export type TodoTask = {
-  readonly id: string;
-  readonly content: string;
-  readonly status: TodoStatus;
-  readonly phase?: string;
-};
-
-export type TaskProgress = {
-  readonly todos: readonly TodoTask[];
-  readonly files: readonly TurnFileChange[];
-};
-
-export type TodoPhaseGroup = {
-  readonly phase: string | undefined;
-  readonly tasks: readonly TodoTask[];
-};
-
-/** Native flattened `init { items }` uses this phase name. */
-const DEFAULT_TODO_PHASE = "Tasks";
-
-export function groupTodosByPhase(todos: readonly TodoTask[]): TodoPhaseGroup[] {
-  const groups: Array<{ phase: string | undefined; tasks: TodoTask[] }> = [];
-  const indexByPhase = new Map<string | undefined, number>();
-  for (const todo of todos) {
-    const key = todo.phase;
-    let index = indexByPhase.get(key);
-    if (index === undefined) {
-      index = groups.length;
-      indexByPhase.set(key, index);
-      groups.push({ phase: key, tasks: [] });
-    }
-    groups[index]!.tasks.push(todo);
-  }
-  return groups;
-}
-
-export function todoPhaseHeadersVisible(groups: readonly TodoPhaseGroup[]): boolean {
-  if (groups.length > 1) return groups.some((group) => group.phase !== undefined);
-  const name = groups[0]?.phase;
-  return name !== undefined && name !== DEFAULT_TODO_PHASE;
-}
-
-export function isTodoPhaseComplete(group: TodoPhaseGroup): boolean {
-  return group.tasks.length > 0 && group.tasks.every((task) => task.status === "completed" || task.status === "abandoned");
-}
-
-export function todoPhaseOpenByDefault(groups: readonly TodoPhaseGroup[]): boolean[] {
-  if (groups.length === 0) return [];
-  if (groups.every(isTodoPhaseComplete)) return groups.map(() => true);
-  return groups.map((group) => !isTodoPhaseComplete(group));
-}
-
-const TODO_STATUS: Record<string, TodoStatus> = {
-  pending: "pending",
-  todo: "pending",
-  in_progress: "in_progress",
-  "in-progress": "in_progress",
-  doing: "in_progress",
-  completed: "completed",
-  done: "completed",
-  abandoned: "abandoned",
-  blocked: "blocked",
-};
-
-function todoStatusOf(raw: string | undefined): TodoStatus {
-  return TODO_STATUS[raw?.trim().toLowerCase() ?? ""] ?? "pending";
-}
-
-function todoContentOf(task: { readonly [key: string]: JsonValue }): string | undefined {
-  return jsonString(task.content) ?? jsonString(task.text) ?? jsonString(task.label);
-}
-
-function tasksFromTodoFields(fields: { readonly [key: string]: JsonValue }): TodoTask[] {
-  const out: TodoTask[] = [];
-  const pushTask = (entry: JsonValue, phase: string | undefined, index: number) => {
-    const record = jsonRecord(entry);
-    if (record === undefined) return;
-    const content = todoContentOf(record);
-    if (content === undefined || content.trim().length === 0) return;
-    const id = jsonString(record.id) ?? `${phase ?? "todo"}-${index}`;
-    out.push({
-      id,
-      content,
-      status: todoStatusOf(jsonString(record.status)),
-      ...(phase === undefined ? {} : { phase }),
-    });
-  };
-  if (Array.isArray(fields.phases)) {
-    for (const [phaseIndex, entry] of fields.phases.entries()) {
-      const phase = jsonRecord(entry) ?? {};
-      const name = jsonString(phase.name) ?? `phase-${phaseIndex}`;
-      const tasks = Array.isArray(phase.tasks) ? phase.tasks : Array.isArray(phase.items) ? phase.items : [];
-      for (const [taskIndex, task] of tasks.entries()) pushTask(task, name, out.length + taskIndex);
-    }
-  }
-  if (out.length > 0) return out;
-  const items = Array.isArray(fields.items) ? fields.items : Array.isArray(fields.list) ? fields.list : [];
-  for (const [index, item] of items.entries()) pushTask(item, undefined, index);
-  return out;
-}
-
-function extractTodoSnapshot(tool: ToolView): TodoTask[] | undefined {
-  if (toolKind(tool) !== "todo") return undefined;
-  const fields = toolFields(tool);
-  const tasks = tasksFromTodoFields(fields);
-  if (tasks.length > 0) return tasks;
-  const op = jsonString(fields.op)?.toLowerCase();
-  if (op === "clear" || op === "rm" || op === "reset") return [];
-  return undefined;
-}
-
-export function collectLatestTodos(segments: readonly AssistantSegment[]): TodoTask[] {
-  let latest: TodoTask[] = [];
-  for (const segment of segments) {
-    if (segment.type !== "batch") continue;
-    for (const tool of segment.tools) {
-      const snapshot = extractTodoSnapshot(tool);
-      if (snapshot !== undefined) latest = snapshot;
-    }
-  }
-  return latest;
-}
-
-export function todoStepProgress(todos: readonly TodoTask[]): { current: number; total: number; completed: number } {
-  const active = todos.filter((task) => task.status !== "abandoned");
-  const total = active.length;
-  const completed = active.filter((task) => task.status === "completed").length;
-  const inProgress = active.findIndex((task) => task.status === "in_progress");
-  if (total === 0) return { current: 0, total: 0, completed: 0 };
-  if (inProgress >= 0) return { current: inProgress + 1, total, completed };
-  if (completed >= total) return { current: total, total, completed };
-  return { current: Math.min(total, completed + 1), total, completed };
-}
-
-/** OMP HUD keeps a list that still has open work; completed-only snapshots auto-clear. */
-export function todoHudVisible(todos: readonly TodoTask[]): boolean {
-  return todos.some((task) => task.status === "pending" || task.status === "in_progress" || task.status === "blocked");
-}
-
-function lastUserRowIndex(rows: readonly TimelineRow[]): number {
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    if (rows[index]?.type === "user") return index;
-  }
-  return -1;
-}
-
-/**
- * Session HUD: latest session todo snapshot (OMP live HUD) plus files from the
- * current turn. A new user message starts a turn — previous-turn files drop;
- * completed-only todos stay hidden, matching OMP after auto-clear / `/new`.
- */
-export function sessionTaskProgress(rows: readonly TimelineRow[]): TaskProgress {
-  const latest = collectLatestTodos(assistantSegmentsOf(rows));
-  const todos = todoHudVisible(latest) ? latest : [];
-  const run = lastAssistantRunRange(rows);
-  const user = lastUserRowIndex(rows);
-  if (run === undefined || (user >= 0 && run.end < user)) {
-    return { todos, files: [] };
-  }
-  return { todos, files: collectTurnFileChanges(assistantSegmentsOf(rows.slice(run.start, run.end + 1))) };
-}
+// --- Deleted: WeakMap segment caches, session patch tree builder, todo state machine, progress aggregation ---
 
 export function batchSummary(thinking: readonly ThinkView[], tools: readonly ToolView[]): BatchSummary {
   const files = new Set<string>();

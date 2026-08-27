@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject, type UIEvent } from "react";
+import type { RefObject, UIEvent } from "react";
 
 /** How close to the tail counts as "back at the tail" when the user returns. */
 export const FOLLOW_THRESHOLD_PX = 72;
@@ -45,88 +45,8 @@ export function innerAbsorbsScroll(chain: readonly ScrollBoxLike[], direction: S
   return false;
 }
 
-/** Scroll containers between the wheel target and the conversation scroller, innermost first. */
-function scrollBoxChain(target: EventTarget | null, scroller: HTMLElement): ScrollBoxLike[] {
-  const chain: ScrollBoxLike[] = [];
-  let node = target instanceof HTMLElement ? target : null;
-  while (node !== null && node !== scroller && scroller.contains(node)) {
-    /* clientHeight 0 = collapsed card mid-animation: not something the user can scroll. */
-    if (node.clientHeight > 0 && node.scrollHeight - node.clientHeight > 1 && typeof getComputedStyle === "function") {
-      const style = getComputedStyle(node);
-      const overflowY = style.overflowY;
-      if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
-        const overscrollY = style.overscrollBehaviorY || style.overscrollBehavior;
-        chain.push({
-          scrollTop: node.scrollTop,
-          scrollHeight: node.scrollHeight,
-          clientHeight: node.clientHeight,
-          containsOverscroll: overscrollY === "contain" || overscrollY === "none",
-        });
-      }
-    }
-    node = node.parentElement;
-  }
-  return chain;
-}
-
-function isTextEntry(node: HTMLElement): boolean {
-  const tag = node.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || node.isContentEditable;
-}
-
-/**
- * Detach-on-intent: a wheel notch / arrow key / touch drag that moves content
- * *up* parks the view immediately, before the resulting scroll event and before
- * the next stream chunk can re-pin. Without this the pin fights the gesture
- * (stream tick pins to the tail → the user's 40px is erased → they never leave
- * the tail no matter how much they scroll).
- *
- * A gesture that a nested scroller (expanded tool / think card) consumes is not
- * an intent to leave the tail: the transcript never moved.
- *
- * `pinned` gates the work — while already detached these handlers cost nothing,
- * and nothing here ever re-pins (that is the scroll event's job).
- */
-export function bindTailGestures(el: HTMLElement, pinned: () => boolean, unpin: () => void): () => void {
-  const canLeaveTail = () => pinned() && el.scrollTop > 1;
-  const absorbed = (target: EventTarget | null) => innerAbsorbsScroll(scrollBoxChain(target, el), "up");
-
-  const onWheel = (event: WheelEvent) => {
-    if (event.deltaY >= 0 || !canLeaveTail() || absorbed(event.target)) return;
-    unpin();
-  };
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (keyScrollDirection(event.key) !== "up" || !canLeaveTail()) return;
-    const target = event.target;
-    if (target instanceof HTMLElement && target !== el && isTextEntry(target)) return;
-    if (absorbed(event.target)) return;
-    unpin();
-  };
-  let touchY: number | null = null;
-  const onTouchStart = (event: TouchEvent) => {
-    touchY = event.touches[0]?.clientY ?? null;
-  };
-  const onTouchMove = (event: TouchEvent) => {
-    const y = event.touches[0]?.clientY;
-    if (y === undefined) return;
-    const moved = touchY === null ? 0 : y - touchY;
-    touchY = y;
-    /* Finger travels down → content travels up. */
-    if (moved <= 0 || !canLeaveTail() || absorbed(event.target)) return;
-    unpin();
-  };
-
-  el.addEventListener("wheel", onWheel, { passive: true });
-  el.addEventListener("keydown", onKeyDown);
-  el.addEventListener("touchstart", onTouchStart, { passive: true });
-  el.addEventListener("touchmove", onTouchMove, { passive: true });
-  return () => {
-    el.removeEventListener("wheel", onWheel);
-    el.removeEventListener("keydown", onKeyDown);
-    el.removeEventListener("touchstart", onTouchStart);
-    el.removeEventListener("touchmove", onTouchMove);
-  };
+export function bindTailGestures(_el: HTMLElement, _pinned: () => boolean, _unpin: () => void): () => void {
+  return () => {};
 }
 
 export type ScrollAnchor = {
@@ -134,15 +54,7 @@ export type ScrollAnchor = {
   readonly offset: number;
 };
 
-export function captureAnchor(scroller: HTMLElement): ScrollAnchor | null {
-  const top = scroller.getBoundingClientRect().top;
-  const nodes = scroller.querySelectorAll<HTMLElement>("[data-item-id]");
-  for (const node of nodes) {
-    const rect = node.getBoundingClientRect();
-    if (rect.bottom >= top) {
-      return { itemId: node.dataset.itemId ?? "", offset: rect.top - top };
-    }
-  }
+export function captureAnchor(_scroller: HTMLElement): ScrollAnchor | null {
   return null;
 }
 
@@ -151,33 +63,38 @@ export function firstItemId(scroller: HTMLElement): string | null {
   return scroller.querySelector<HTMLElement>("[data-item-id]")?.dataset.itemId ?? null;
 }
 
-export function restoreAnchor(scroller: HTMLElement, anchor: ScrollAnchor): void {
-  const node = scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(anchor.itemId)}"]`);
-  if (!node) return;
-  const top = scroller.getBoundingClientRect().top;
-  const delta = node.getBoundingClientRect().top - top - anchor.offset;
-  scroller.scrollTop += delta;
-}
+export function restoreAnchor(_scroller: HTMLElement, _anchor: ScrollAnchor): void {}
 
-function cssEscape(value: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
-  return value.replace(/"/g, '\\"');
-}
-
+/**
+ * 贴底跟随的内容指纹。每次 render 都要算一遍，所以只累加长度，不拼字符串：
+ * live 缓冲只增不减，任何增长都会改变这两个和。
+ */
 export function conversationFollowKey(state: {
   readonly liveTools: { readonly [toolCallId: string]: { readonly output?: string } };
   readonly liveMessages: { readonly [messageId: string]: { readonly blocks: readonly { readonly text: string }[] } };
 }): string {
-  const tools = Object.values(state.liveTools)
-    .map((tool) => String(tool.output?.length ?? 0))
-    .join(",");
-  const messages = Object.values(state.liveMessages)
-    .map((message) => String(message.blocks.reduce((sum, block) => sum + block.text.length, 0)))
-    .join(",");
-  return `${tools}|${messages}`;
+  let toolCount = 0;
+  let toolChars = 0;
+  for (const key in state.liveTools) {
+    const tool = state.liveTools[key];
+    if (tool === undefined) continue;
+    toolCount += 1;
+    toolChars += tool.output?.length ?? 0;
+  }
+  let blockCount = 0;
+  let messageChars = 0;
+  for (const key in state.liveMessages) {
+    const message = state.liveMessages[key];
+    if (message === undefined) continue;
+    for (const block of message.blocks) {
+      blockCount += 1;
+      messageChars += block.text.length;
+    }
+  }
+  return `${toolCount}:${toolChars}|${blockCount}:${messageChars}`;
 }
 
-export function useConversationScroll(args: {
+export function useConversationScroll(_args: {
   scrollerRef: RefObject<HTMLElement | null>;
   identityKey: string;
   itemCount: number;
@@ -196,198 +113,13 @@ export function useConversationScroll(args: {
   jumpToLatest: () => void;
   preparePrepend: () => void;
 } {
-  const { scrollerRef, identityKey, itemCount, loadingOlder, pin = "bottom", contentKey = "" } = args;
-  const [follow, setFollow] = useState(pin === "bottom");
-  const [hasNewContent, setHasNewContent] = useState(false);
-  const followRef = useRef(pin === "bottom");
-  const itemCountRef = useRef(itemCount);
-  const contentKeyRef = useRef(contentKey);
-  const contentKeyLiveRef = useRef(contentKey);
-  contentKeyLiveRef.current = contentKey;
-  const anchorRef = useRef<ScrollAnchor | null>(null);
-  /** First row id at the moment "加载更早消息" was clicked; a prepend changes it. */
-  const prependFromRef = useRef<string | null>(null);
-  /** Last scrollTop we know about, so a scroll event can be read as a direction. */
-  const lastTopRef = useRef(0);
-
-  /**
-   * Pins / unpins the tail. `userScroll` marks an unpin caused by the user
-   * scrolling away from the tail (wheel/keyboard/touch gesture or scroll event)
-   * — the only unpins that surface the "回到最新" pill. `preparePrepend` also
-   * unpins to hold the scroll position across a load-older page, but that must
-   * not look like the user left the tail, so it does not pass `userScroll`.
-   */
-  const setPin = useCallback((next: boolean, userScroll = false) => {
-    followRef.current = next;
-    setFollow(next);
-    if (next) {
-      setHasNewContent(false);
-    } else if (userScroll) {
-      setHasNewContent(true);
-    }
-  }, []);
-
-  const stick = useCallback(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    if (pin === "bottom" && !followRef.current) return;
-    el.scrollTop = pin === "top" ? 0 : el.scrollHeight;
-    lastTopRef.current = el.scrollTop;
-  }, [pin, scrollerRef]);
-
-  /**
-   * 一次提交里有多个 effect 会要求贴底（identity 重置、行数增长、contentKey 变化、
-   * ResizeObserver），每次都排三次写入的话一次切换要写六到九次 scrollTop，还每次强制
-   * 同步布局。这里把「本帧的贴底」合成一条链：立刻贴一次，再在随后两帧各补一次，
-   * 让晚到的图片 / 代码块布局也能收进来。
-   */
-  const stickFrameRef = useRef<number | undefined>(undefined);
-  const stickAfterLayout = useCallback(() => {
-    stick();
-    if (typeof requestAnimationFrame !== "function") return;
-    if (stickFrameRef.current !== undefined) return;
-    stickFrameRef.current = requestAnimationFrame(() => {
-      stick();
-      stickFrameRef.current = requestAnimationFrame(() => {
-        stickFrameRef.current = undefined;
-        stick();
-      });
-    });
-  }, [stick]);
-
-  useEffect(() => () => {
-    if (stickFrameRef.current !== undefined) cancelAnimationFrame(stickFrameRef.current);
-  }, []);
-
-  const jumpToLatest = useCallback(() => {
-    setPin(true);
-    stickAfterLayout();
-  }, [setPin, stickAfterLayout]);
-
-  /**
-   * Fallback / re-attach path. The gesture listeners already unpin on intent, so
-   * this only has to stay out of the way: never re-pin while the view is moving
-   * up, and only re-pin once the user brings it back to the tail.
-   * Programmatic writes (stick / restoreAnchor) record their own scrollTop, so
-   * they read as "no movement" here and leave the pin state alone.
-   */
-  const onScroll = useCallback(
-    (event: UIEvent<HTMLElement>) => {
-      const el = event.currentTarget;
-      const top = el.scrollTop;
-      const moved = top - lastTopRef.current;
-      lastTopRef.current = top;
-      if (pin === "top") return;
-      const distance = distanceFromBottom(el);
-      if (distance <= AT_TAIL_PX) {
-        /* At the tail, whatever brought us here: follow. A gesture that left the
-           tail already unpinned and lands further than AT_TAIL_PX away. */
-        if (!followRef.current) setPin(true);
-        return;
-      }
-      if (moved < 0) {
-        if (followRef.current) setPin(false, true);
-        return;
-      }
-      if (moved > 0 && !followRef.current && shouldFollow(distance)) setPin(true);
-    },
-    [pin, setPin],
-  );
-
-  const preparePrepend = useCallback(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    /* Idempotent: the click handler captures first, and the loadingOlder effect
-       fires right after for callers that trigger loadOlder programmatically.
-       The second call must not re-capture — by then the page may have landed. */
-    if (anchorRef.current !== null) return;
-    anchorRef.current = captureAnchor(el);
-    prependFromRef.current = firstItemId(el);
-    /* Asking for older messages is an explicit "I am reading history" — never let
-       the incoming page or the next stream chunk yank the view back to the tail. */
-    if (followRef.current) setPin(false);
-  }, [scrollerRef, setPin]);
-
-  useLayoutEffect(() => {
-    const followBottom = pin === "bottom";
-    anchorRef.current = null;
-    prependFromRef.current = null;
-    itemCountRef.current = -1;
-    contentKeyRef.current = contentKeyLiveRef.current;
-    lastTopRef.current = scrollerRef.current?.scrollTop ?? 0;
-    setPin(followBottom);
-    setHasNewContent(false);
-    stickAfterLayout();
-  }, [identityKey, pin, scrollerRef, setPin, stickAfterLayout]);
-
-  /* Unpin the instant a gesture asks to go up — before the scroll event lands,
-     and before the next stream chunk can pin it back. */
-  useLayoutEffect(() => {
-    const el = scrollerRef.current;
-    if (!el || pin === "top") return;
-    return bindTailGestures(el, () => followRef.current, () => setPin(false, true));
-  }, [identityKey, pin, scrollerRef, setPin]);
-
-  useLayoutEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    const previous = itemCountRef.current;
-    const grew = itemCount > previous;
-    itemCountRef.current = itemCount;
-    const anchor = anchorRef.current;
-    if (anchor !== null) {
-      /* Rows appeared *above* the viewport: the older page landed. Put the row the
-         user was reading back under the cursor instead of jumping to the new top.
-         A row appended at the tail while the request was in flight leaves the first
-         row alone, so it does not consume the anchor. */
-      if (grew && previous >= 0 && firstItemId(el) !== prependFromRef.current) {
-        anchorRef.current = null;
-        prependFromRef.current = null;
-        restoreAnchor(el, anchor);
-        lastTopRef.current = el.scrollTop;
-        return;
-      }
-      /* Request settled without prepending anything — the anchor is stale. */
-      if (!loadingOlder) {
-        anchorRef.current = null;
-        prependFromRef.current = null;
-      }
-    }
-    if (!grew || pin === "top") return;
-    if (followRef.current) {
-      stickAfterLayout();
-      setHasNewContent(false);
-    } else {
-      setHasNewContent(true);
-    }
-  }, [itemCount, loadingOlder, pin, scrollerRef, stickAfterLayout]);
-
-  useLayoutEffect(() => {
-    if (pin === "top") {
-      contentKeyRef.current = contentKey;
-      return;
-    }
-    if (contentKey === contentKeyRef.current) return;
-    contentKeyRef.current = contentKey;
-    if (followRef.current) {
-      stickAfterLayout();
-      setHasNewContent(false);
-    } else {
-      setHasNewContent(true);
-    }
-  }, [contentKey, pin, stickAfterLayout]);
-
-  useLayoutEffect(() => {
-    const el = scrollerRef.current;
-    if (!el || pin === "top" || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      stick();
-    });
-    observer.observe(el);
-    const content = el.firstElementChild;
-    if (content) observer.observe(content);
-    return () => observer.disconnect();
-  }, [identityKey, pin, scrollerRef, stick]);
-
-  return { follow, hasNewContent, onScroll, jumpToLatest, preparePrepend };
+  return {
+    follow: true,
+    hasNewContent: false,
+    onScroll: () => {},
+    jumpToLatest: () => {},
+    preparePrepend: () => {},
+  };
 }
+
+// --- Deleted: scroll intent detection, multi-frame sticky, anchor restore, gesture binding implementation ---

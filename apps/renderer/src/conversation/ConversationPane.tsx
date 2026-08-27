@@ -152,6 +152,7 @@ export function ConversationPane({
               </>
             ) : (
               <ConvoTranscript
+                scrollerRef={scrollerRef}
                 rows={displayRows}
                 demo={demo}
                 {...(onRestore === undefined ? {} : { onRestore })}
