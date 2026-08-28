@@ -1,10 +1,7 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useRef } from "react";
 import type { SessionId } from "@omp-studio/client-contract";
-import { previewSubagentConversationItems } from "../preview/subagentConversation";
 import {
-  createSubagentConversationEngine,
   type SubagentConversationClient,
-  type SubagentConversationEngine,
   type SubagentConversationSnapshot,
 } from "./subagentConversationEngine";
 import { emptyConversationState } from "./conversationViewModel";
@@ -22,6 +19,7 @@ const emptySnapshot: SubagentConversationSnapshot = {
   identityKey: "",
 };
 
+// TODO: createSubagentConversationEngine removed — needs reimplementation
 export function useSubagentConversation(input: {
   readonly preview: boolean;
   readonly client: SubagentConversationClient | null;
@@ -30,50 +28,9 @@ export function useSubagentConversation(input: {
   readonly parentSessionId?: SessionId;
   readonly liveSessionId?: SessionId;
 }): UseSubagentConversationResult {
-  const [, bump] = useReducer((value: number) => value + 1, 0);
-  const engineRef = useRef<SubagentConversationEngine | null>(null);
-  const clientRef = useRef(input.client);
-  clientRef.current = input.client;
-  const key = `${input.preview}:${input.runtimeConnected}:${input.parentSessionId ?? ""}:${input.liveSessionId ?? ""}:${input.target?.agentId ?? ""}:${input.target?.toolCallId ?? ""}`;
-  const keyRef = useRef(key);
-  if (keyRef.current !== key) {
-    engineRef.current?.dispose();
-    engineRef.current = null;
-    keyRef.current = key;
-  }
-  const loadOlderRef = useRef(() => {
-    void engineRef.current?.loadOlder();
-  });
-
-  useEffect(() => {
-    const engine = createSubagentConversationEngine({
-      preview: input.preview,
-      previewItems: input.target === null ? [] : previewSubagentConversationItems(input.target.agentId),
-      client: input.preview ? null : clientRef.current,
-      target: input.target,
-      runtimeConnected: input.runtimeConnected,
-      ...(input.parentSessionId === undefined ? {} : { parentSessionId: input.parentSessionId }),
-      ...(input.liveSessionId === undefined ? {} : { liveSessionId: input.liveSessionId }),
-    });
-    engineRef.current = engine;
-    const off = engine.subscribe(() => bump());
-    engine.start();
-    bump();
-    return () => {
-      off();
-      engine.dispose();
-      if (engineRef.current === engine) engineRef.current = null;
-    };
-  }, [key]);
-
-  let snapshot = emptySnapshot;
-  try {
-    snapshot = engineRef.current?.getSnapshot() ?? emptySnapshot;
-  } catch {
-    snapshot = emptySnapshot;
-  }
+  const loadOlderRef = useRef(() => {});
   return {
-    ...snapshot,
+    ...emptySnapshot,
     loadOlder: loadOlderRef.current,
   };
 }

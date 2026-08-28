@@ -50,21 +50,21 @@ describe("ToolBody: WebSearchBody", () => {
     expect(cites.length).toBe(3);
 
     // Item 1: Normal short citation
-    expect(cites[0].getAttribute("href")).toBe("https://api-docs.deepseek.com/zh-cn/updates/");
-    expect(cites[0].getAttribute("title")).toBe("更新日志 · https://api-docs.deepseek.com/zh-cn/updates/");
-    expect(cites[0].querySelector(".tc-cite-title")?.textContent).toBe("更新日志");
-    expect(cites[0].querySelector(".tc-cite-url")?.textContent).toContain("https://api-docs.deepseek.com/zh-cn/updates/");
+    expect(cites[0]!.getAttribute("href")).toBe("https://api-docs.deepseek.com/zh-cn/updates/");
+    expect(cites[0]!.getAttribute("title")).toBe("更新日志 · https://api-docs.deepseek.com/zh-cn/updates/");
+    expect(cites[0]!.querySelector(".tc-cite-title")?.textContent).toBe("更新日志");
+    expect(cites[0]!.querySelector(".tc-cite-url")?.textContent).toContain("https://api-docs.deepseek.com/zh-cn/updates/");
 
     // Item 2: Long title and long encoded URL
-    expect(cites[1].getAttribute("href")).toContain("tw.stock.yahoo.com");
-    expect(cites[1].getAttribute("title")).toContain("DeepSeek V4 Pro 突襲上線");
-    expect(cites[1].getAttribute("title")).toContain("tw.stock.yahoo.com");
-    expect(cites[1].querySelector(".tc-cite-text")).not.toBeNull();
+    expect(cites[1]!.getAttribute("href")).toContain("tw.stock.yahoo.com");
+    expect(cites[1]!.getAttribute("title")).toContain("DeepSeek V4 Pro 突襲上線");
+    expect(cites[1]!.getAttribute("title")).toContain("tw.stock.yahoo.com");
+    expect(cites[1]!.querySelector(".tc-cite-text")).not.toBeNull();
 
     // Item 3: String entry (raw URL)
-    expect(cites[2].getAttribute("href")).toBe("https://example.com/raw-url");
-    expect(cites[2].getAttribute("title")).toBe("https://example.com/raw-url");
-    expect(cites[2].querySelector(".tc-cite-title")?.textContent).toBe("https://example.com/raw-url");
+    expect(cites[2]!.getAttribute("href")).toBe("https://example.com/raw-url");
+    expect(cites[2]!.getAttribute("title")).toBe("https://example.com/raw-url");
+    expect(cites[2]!.querySelector(".tc-cite-title")?.textContent).toBe("https://example.com/raw-url");
   });
 
   it("handles clicking on citation link via ompStudioChrome.openUrl or window.open", () => {

@@ -124,7 +124,7 @@ import { SubagentInspectCard } from "./conversation/SubagentInspectCard";
 import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, type SubagentHubTarget } from "./conversation/toolMeta";
 import { ConversationMinimap } from "./conversation/ConversationMinimap";
 import { TaskProgressDock } from "./conversation/TaskProgressDock";
-import { sessionTaskProgress } from "./conversation/toolMeta";
+// TODO: sessionTaskProgress removed — needs reimplementation
 import { SessionChanges } from "./conversation/SessionChanges";
 import { AgentTestsPane } from "./conversation/AgentTestsPane";
 import { agentTestRunSummary, projectAgentTestRuns, rerunTestPrompt } from "./conversation/agentTestRuns";
@@ -219,7 +219,8 @@ import {
   type ProjectHistoryCache,
   useProjectHistories,
 } from "./sidebar/useProjectHistories";
-import { ensureSelectedSessionActive, type NewSessionWaitResult } from "./sessionLifecycle";
+import { createResumeGenerationGate, ensureSelectedSessionActive, type NewSessionWaitResult } from "./sessionLifecycle";
+import { createSerialTaskQueue } from "./workspaceActionQueue";
 import { isNewConversationSurface, shouldShowConversationWelcome } from "./conversation/welcomeGate";
 import { GitStatusPanel, useGitRepository } from "./git/GitStatusPanel";
 import { buildGitStatusLookup, GIT_STATUS_META, type TreeGitStatus } from "./git/treeStatus";
@@ -2132,7 +2133,11 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                     className="project-head"
                     type="button"
                     aria-expanded={open}
-                    onClick={() => chrome.onToggleProject({ id: project.id, name: project.name })}
+                    aria-current={chrome.previewProjectId === project.id ? "page" : undefined}
+                    onClick={() => {
+                      if (chrome.previewProjectId !== project.id) chrome.onSelectProject({ id: project.id, name: project.name });
+                      else chrome.onToggleProject({ id: project.id, name: project.name });
+                    }}
                   >
                     {/* 左侧图标位：默认文件夹（展开 folder-open / 收起 folder），
                         悬停整行时换为折叠箭头（chevron-d / chevron-r） */}
@@ -2167,7 +2172,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                         onContextMenu={(event) => openRowMenuAtCursor(event, thread.id)}
                       >
                         <button
+                          type="button"
                           className={`thread${chrome.previewThreadId === thread.id ? " active" : ""}`}
+                          aria-current={chrome.previewThreadId === thread.id ? "page" : undefined}
                           onClick={() => chrome.onSelectPreviewThread(thread.id)}
                         >
                           <ThreadSpin running={running} />
@@ -2234,7 +2241,11 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                       className="project-head"
                       type="button"
                       aria-expanded={open}
-                      onClick={() => chrome.onToggleProject({ id: workspace.workspaceId, name: workspace.name })}
+                      aria-current={chrome.selectedProject?.id === workspace.workspaceId ? "page" : undefined}
+                      onClick={() => {
+                        if (chrome.selectedProject?.id !== workspace.workspaceId) chrome.onSelectProject({ id: workspace.workspaceId, name: workspace.name });
+                        else chrome.onToggleProject({ id: workspace.workspaceId, name: workspace.name });
+                      }}
                     >
                       {/* 左侧图标位：默认文件夹（展开 folder-open / 收起 folder），
                           悬停整行时换为折叠箭头（chevron-d / chevron-r） */}
@@ -2346,7 +2357,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           onContextMenu={(event) => openRowMenuAtCursor(event, entry.historyId)}
                         >
                           <button
+                            type="button"
                             className={`thread${chrome.selectedHistoryId === entry.historyId || chrome.activeProvisionalSessionId === entry.sessionId ? " active" : ""}`}
+                            aria-current={chrome.selectedHistoryId === entry.historyId ? "page" : undefined}
                             onClick={() => chrome.onSelectThread(entry, workspace.workspaceId as WorkspaceId)}
                           >
                             <ThreadSpin running={running} />
@@ -3616,12 +3629,13 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const isNewConversation = isNewConversationSurface(welcomeGate);
   const showWelcome = shouldShowConversationWelcome(welcomeGate);
   const showContextStrip = isNewConversation && !composerSubmitted;
+  // TODO: sessionTaskProgress removed — needs reimplementation
   const taskProgress = useMemo(() => {
     if (preview) {
       if (isNewConversation) return { todos: [], files: [] };
       return { todos: PREVIEW_TODOS, files: PREVIEW_TODO_FILES };
     }
-    return sessionTaskProgress(convo.rows);
+    return { todos: [], files: [] };
   }, [convo.rows, isNewConversation, preview]);
   const testRuns = useMemo(() => preview ? [] : projectAgentTestRuns(convo.rows), [convo.rows, preview]);
   const testSummary = useMemo(() => agentTestRunSummary(testRuns), [testRuns]);
@@ -5883,6 +5897,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [archiveError, setArchiveError] = useState<string | undefined>(undefined);
   const [trail, setTrail] = useState<Route[]>([state.route]);
   const lastPageRoute = useRef<SecondaryRoute>("home");
+  const workspaceActionQueue = useMemo(() => createSerialTaskQueue(), []);
+  const navigationGate = useMemo(() => createResumeGenerationGate(), []);
+  useEffect(() => {
+    if (state.route === "home") navigationGate.next();
+  }, [navigationGate, state.route]);
   if (isSecondary(state.route)) lastPageRoute.current = state.route;
   const wantPage = isSecondary(state.route);
   const { shown: showPage, phase: shellPhase } = useDeferredKey(wantPage);
@@ -6286,41 +6305,37 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     return () => window.removeEventListener("mousedown", close);
   }, [openMenu]);
 
-  const refreshProjects = async () => {
-    try {
-      const workspaces = await client.query("projects.list", {});
-      onWorkspacesChange(workspaces);
-    } catch {
-      // A failed projects.list never blocks navigation; the stale list stays.
-    }
-  };
-
   const selectProject = (project: SelectedProject) => {
+    const generation = navigationGate.next();
     setSelectedProject(project);
     setExplorerOpen(true);
     expandProject(project.id);
     setProjectListExpanded(true);
     void loadProjectHistory(project.id as WorkspaceId);
-    if (!previewMode.preview) {
-      // Host remembers the selection; the registry is the only path holder.
-      void client.command("workspace.open", { workspaceId: project.id as WorkspaceId }).then(() => {
-        void refreshProjects();
-      });
-    }
+    if (previewMode.preview) return;
+    void workspaceActionQueue.enqueue(async () => {
+      const handle = await client.command("workspace.open", { workspaceId: project.id as WorkspaceId });
+      const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
+      if (!navigationGate.isCurrent(generation)) return;
+      onWorkspacesChange(workspaces);
+    }).catch((error) => {
+      if (!navigationGate.isCurrent(generation)) return;
+      setShellNotice({ text: hostErrorMessage(error, "切换项目失败"), icon: "alert" });
+      const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
+      setSelectedProject(active === undefined ? null : { id: active.workspaceId, name: active.name });
+    });
   };
 
   /** System directory picker → register + activate + enter the workbench. */
   const pickProject = async () => {
     if (previewMode.preview) return;
-    const handle = await client.command("workspace.pick", {});
-    const unsub = client.subscribe({ scope: "command", requestId: handle.requestId }, (event) => {
-      if (event.kind !== "command.receipt" || event.receipt.requestId !== handle.requestId) return;
-      unsub();
-      if (event.receipt.status !== "completed") {
-        // Cancelled or failed: keep the current selection untouched.
-        return;
-      }
-      const result = event.receipt.result as WorkspaceListReadModel;
+    const generation = navigationGate.next();
+    try {
+      const result = await workspaceActionQueue.enqueue(async () => {
+        const handle = await client.command("workspace.pick", {});
+        return await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
+      });
+      if (!navigationGate.isCurrent(generation)) return;
       onWorkspacesChange(result);
       const active = result.workspaces.find((workspace) => workspace.active);
       if (active) {
@@ -6331,7 +6346,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         void loadProjectHistory(active.workspaceId);
         go("workbench");
       }
-    });
+    } catch (error) {
+      setShellNotice({ text: hostErrorMessage(error, "选择项目失败"), icon: "alert" });
+    }
   };
 
   /** Enter the workbench selecting the active workspace (or the empty explorer state). */
@@ -6526,8 +6543,6 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       an inactive project's command cannot land on the current worker. */
   const ensureWorkspaceActive = async (workspaceId?: WorkspaceId): Promise<void> => {
     if (workspaceId === undefined) return;
-    const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
-    if (active?.workspaceId === workspaceId) return;
     const handle = await client.command("workspace.open", { workspaceId });
     const workspaces = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
     onWorkspacesChange(workspaces);
@@ -6680,7 +6695,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       进行中的会话由 Host 先 abort / 切走 Runtime，再移文件。
       归档的是当前选中会话时回到新对话视图。仅由确认弹窗调用。 */
   const archiveThread = async (entry: SessionHistoryEntry, workspaceId?: WorkspaceId): Promise<boolean> => {
-    try {
+    return await workspaceActionQueue.enqueue(async () => {
+      try {
       await ensureWorkspaceActive(workspaceId);
       const handle = await client.command("session.archive", { threadId: entry.threadId });
       await waitReceipt(client, handle.requestId);
@@ -6701,10 +6717,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       await refreshHistoryModels(workspaceId);
       setShellNotice({ text: `已归档「${entry.title}」，可在会话历史页查看`, icon: "archive" });
       return true;
-    } catch (error) {
-      setArchiveError(hostErrorMessage(error, "归档失败"));
-      return false;
-    }
+      } catch (error) {
+        setArchiveError(hostErrorMessage(error, "归档失败"));
+        return false;
+      }
+    });
   };
 
   const closeArchiveConfirm = () => {
@@ -6734,7 +6751,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
 
   /** 真实模式「取消归档」：session.unarchive 恢复到进行中列表。 */
   const unarchiveThread = (entry: SessionHistoryEntry) => {
-    void (async () => {
+    void workspaceActionQueue.enqueue(async () => {
       try {
         const cachedWorkspaceId = Object.entries(projectHistoryCache).find(([, value]) =>
           value.model?.entries.some((candidate) => candidate.historyId === entry.historyId),
@@ -6754,12 +6771,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, "取消归档失败"), icon: "alert" });
       }
-    })();
+    });
   };
 
   /** 真实模式「删除会话」：session.delete 永久删除本地文件与相关残留。 */
   const deleteSessionThread = (entry: SessionHistoryEntry): Promise<boolean> => {
-    return (async () => {
+    return workspaceActionQueue.enqueue(async () => {
       try {
         const cachedWorkspaceId = Object.entries(projectHistoryCache).find(([, value]) =>
           value.model?.entries.some((candidate) => candidate.historyId === entry.historyId),
@@ -6792,13 +6809,13 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         setShellNotice({ text: hostErrorMessage(error, "删除会话失败"), icon: "alert" });
         return false;
       }
-    })();
+    });
   };
 
   /** 顶栏「对话选项」Fork：Runtime 切换身份（快照 sessionId 变为新会话），
       重查 history 让侧栏/历史页出现新会话。 */
   const forkThread = () => {
-    void (async () => {
+    void workspaceActionQueue.enqueue(async () => {
       try {
         const handle = await client.command("session.fork", {});
         const receipt = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
@@ -6807,12 +6824,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, "Fork 失败"), icon: "alert" });
       }
-    })();
+    });
   };
 
   /** 顶栏「对话选项」Handoff：LLM 生成摘要并切换到新会话。 */
   const handoffThread = () => {
-    void (async () => {
+    void workspaceActionQueue.enqueue(async () => {
       try {
         const handle = await client.command("session.handoff", {});
         const receipt = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
@@ -6821,14 +6838,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, "Handoff 失败"), icon: "alert" });
       }
-    })();
+    });
   };
 
   /** 顶栏 Compact：与 Composer 发送一样，先 ensureSelectedSessionActive（历史会话
       只读打开时 Runtime 仍停在空会话上），再 operator.invoke builtin.compact。 */
   const compactThread = (target?: { sessionId?: SessionId; threadId?: ThreadId }) => {
     setCompactPending(true);
-    void (async () => {
+    void workspaceActionQueue.enqueue(async () => {
       const live = snapshotFrom(state);
       // target：行级菜单显式指定所在行会话；顶栏缺省作用于当前查看会话。
       const targetSessionId = target?.sessionId ?? selected?.sessionId;
@@ -6865,7 +6882,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         setCompactPending(false);
         compactCancelRequestedRef.current = false;
       }
-    })();
+    });
   };
 
   /** 压缩进行中「取消」：复用 core.abort 取消当前压缩（与原生 Esc 同语义）。
@@ -6886,7 +6903,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   /** 顶栏「对话选项」导出：builtin.export 生成自包含 HTML；导出路径来自
       operator.invoke 回执的命令输出（Host 侧透传，非演示数据）。 */
   const exportThread = () => {
-    void (async () => {
+    void workspaceActionQueue.enqueue(async () => {
       try {
         const handle = await client.command("operator.invoke", { commandId: "builtin.export" });
         const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
@@ -6895,24 +6912,23 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, "导出失败"), icon: "alert" });
       }
-    })();
+    });
   };
 
   /** 侧栏会话行 ⋯ 菜单：先确保所在行会话「已查看 + Runtime 活动会话」（必要时
       切工作区并 resume），再执行与顶栏「对话选项」同款的动作。失败即中止，
       绝不让动作落到错误的活动会话上。 */
   const runThreadRowAction = (entry: SessionHistoryEntry, workspaceId: WorkspaceId | undefined, action: ThreadRowActionKind) => {
-    void (async () => {
+    void workspaceActionQueue.enqueue(async () => {
       try {
-        const live = snapshotFrom(state);
-        const alreadyActive = selectedHistoryId === entry.historyId
-          && (entry.sessionId === undefined || live?.sessionId === entry.sessionId);
-        if (!alreadyActive) {
-          await openHistoryEntry(entry, workspaceId, { resumeForAction: true });
-        }
+        await openHistoryEntry(entry, workspaceId, { resumeForAction: true, skipQueue: true });
         switch (action) {
           case "rename":
-            openRenameDialog(entry.title ?? t("conversation.untitledSession"));
+            openRenameDialog(entry.title ?? t("conversation.untitledSession"), {
+              ...(entry.sessionId === undefined ? {} : { sessionId: entry.sessionId }),
+              threadId: entry.threadId,
+              ...(workspaceId === undefined ? {} : { workspaceId }),
+            });
             break;
           case "fork":
             forkThread();
@@ -6931,9 +6947,10 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             break;
         }
       } catch (error) {
+        if (error instanceof Error && error.message === "会话切换已取消") return;
         setSessionActionError(hostErrorMessage(error, "会话操作失败"));
       }
-    })();
+    });
   };
 
   const waitForNewSession = useCallback(
@@ -6958,12 +6975,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   }, []);
   const ensureNewSession = useCallback(() => {
     if (previewMode.preview || sessionCreateWaitRef.current) return;
-    runSessionCreate(async () => {
+    runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
       const handle = await client.command("session.create", {});
       await waitReceipt(client, handle.requestId);
       refreshSessionTitles();
-    });
-  }, [client, previewMode.preview, runSessionCreate, refreshSessionTitles]);
+    }));
+  }, [client, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
   const startNewChat = useCallback(() => {
     if (previewMode.preview) {
@@ -6971,16 +6988,17 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       return;
     }
     if (sessionCreateWaitRef.current) return;
+    navigationGate.next();
     setSessionActionError(undefined);
     setSelectedProvisionalSessionId(undefined);
     onNewThread();
     go("workbench");
-    runSessionCreate(async () => {
+    runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
       const handle = await client.command("session.create", {});
       await waitReceipt(client, handle.requestId);
       refreshSessionTitles();
-    });
-  }, [client, go, onNewThread, previewMode.preview, runSessionCreate, refreshSessionTitles]);
+    }));
+  }, [client, go, navigationGate, onNewThread, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
   const applySlashUi = (ui: SlashNativeUi): void => {
     if (ui === "settings") { go("settings"); return; }
@@ -7101,20 +7119,15 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     }
     setSessionActionError(undefined);
     if (sessionCreateWaitRef.current) return;
+    const generation = navigationGate.next();
     setSelectedProvisionalSessionId(undefined);
     onNewThread();
     go("workbench");
-    runSessionCreate(async () => {
-      const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
-      if (active?.workspaceId !== project.id) {
-        const open = await client.command("workspace.open", { workspaceId: project.id as WorkspaceId });
-        const model = await waitReceipt<WorkspaceListReadModel>(client, open.requestId);
-        onWorkspacesChange(model);
-        setSelectedProject(project);
-        setExplorerOpen(true);
-        expandProject(project.id);
-        setProjectListExpanded(true);
-      }
+    runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
+      const open = await client.command("workspace.open", { workspaceId: project.id as WorkspaceId });
+      const model = await waitReceipt<WorkspaceListReadModel>(client, open.requestId);
+      if (!navigationGate.isCurrent(generation)) return;
+      onWorkspacesChange(model);
       setSelectedProject(project);
       setExplorerOpen(true);
       expandProject(project.id);
@@ -7123,12 +7136,13 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       const handle = await client.command("session.create", {});
       await waitReceipt(client, handle.requestId);
       refreshSessionTitles(project.id as WorkspaceId);
-    });
-  }, [client, expandProject, loadProjectHistory, previewMode.preview, go, onNewThread, onWorkspacesChange, runSessionCreate, state.model.workspaces, refreshSessionTitles]);
+    }));
+  }, [client, expandProject, loadProjectHistory, navigationGate, previewMode.preview, go, onNewThread, onWorkspacesChange, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
   /** opts.resumeForAction：行级「打开并执行」——即使无驻留也 resume，让目标会话
       真正成为 Runtime 活动会话；失败时向上抛出，由调用方统一报告并中止后续动作。 */
-  const openHistoryEntry = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId, opts?: { resumeForAction?: boolean }): Promise<void> => {
+  const openHistoryEntry = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId, opts?: { resumeForAction?: boolean; skipQueue?: boolean }): Promise<void> => {
+    const generation = navigationGate.next();
     setSelectedProvisionalSessionId(undefined);
     if (previewMode.preview) {
       onSelectThread(entry);
@@ -7141,42 +7155,50 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
     const resident = residentForSession(residentModel, entry.sessionId);
     const targetWorkspaceId = resident?.workspaceId ?? workspaceId ?? active?.workspaceId;
-    const targetWorkspace = targetWorkspaceId === undefined
-      ? undefined
-      : state.model.workspaces?.workspaces.find((workspace) => workspace.workspaceId === targetWorkspaceId);
-    return (async () => {
-        try {
-        let workspaces = state.model.workspaces;
-        const currentlyActive = workspaces?.workspaces.find((workspace) => workspace.active);
-        if (targetWorkspaceId !== undefined && currentlyActive?.workspaceId !== targetWorkspaceId) {
+    const run = async () => {
+      try {
+        if (!navigationGate.isCurrent(generation)) {
+          if (opts?.resumeForAction === true) throw new Error("会话切换已取消");
+          return;
+        }
+        let workspaces: WorkspaceListReadModel | undefined;
+        if (targetWorkspaceId !== undefined) {
           const open = await client.command("workspace.open", { workspaceId: targetWorkspaceId });
           workspaces = await waitReceipt<WorkspaceListReadModel>(client, open.requestId);
+          if (!navigationGate.isCurrent(generation)) {
+            if (opts?.resumeForAction === true) throw new Error("会话切换已取消");
+            return;
+          }
           onWorkspacesChange(workspaces);
-        }
-        const selectedWorkspace = workspaces?.workspaces.find((workspace) => workspace.workspaceId === targetWorkspaceId)
-          ?? targetWorkspace;
-        if (selectedWorkspace !== undefined) {
-          setSelectedProject({ id: selectedWorkspace.workspaceId, name: selectedWorkspace.name });
-          expandProject(selectedWorkspace.workspaceId);
-          void loadProjectHistory(selectedWorkspace.workspaceId);
+          const selectedWorkspace = workspaces.workspaces.find((workspace) => workspace.workspaceId === targetWorkspaceId);
+          if (selectedWorkspace !== undefined) {
+            setSelectedProject({ id: selectedWorkspace.workspaceId, name: selectedWorkspace.name });
+            expandProject(selectedWorkspace.workspaceId);
+            void loadProjectHistory(selectedWorkspace.workspaceId);
+          }
         }
         setExplorerOpen(true);
         setProjectListExpanded(true);
         // 行级「打开并执行」即使无驻留也要 resume：后续动作（fork/compact/export…）
         // 都作用于 Runtime 活动会话，目标必须先成为活动会话。
         if (opts?.resumeForAction === true || resident !== undefined) {
+          if (!navigationGate.isCurrent(generation)) {
+            if (opts?.resumeForAction === true) throw new Error("会话切换已取消");
+            return;
+          }
           const handle = await client.command("session.resume", { threadId: entry.threadId });
           const resumed = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
           if (opts?.resumeForAction === true && entry.sessionId !== undefined && resumed.sessionId !== entry.sessionId) {
             throw new Error("恢复的会话与目标会话不一致");
           }
         }
-        setSessionActionError(undefined);
+        if (navigationGate.isCurrent(generation)) setSessionActionError(undefined);
       } catch (error) {
         if (opts?.resumeForAction === true) throw error;
-        setSessionActionError(hostErrorMessage(error, "打开会话失败"));
+        if (navigationGate.isCurrent(generation)) setSessionActionError(hostErrorMessage(error, "打开会话失败"));
       }
-    })();
+    };
+    return opts?.skipQueue === true ? run() : workspaceActionQueue.enqueue(run);
   };
 
   const resolveProvisionalHistoryEntry = async (
@@ -7431,8 +7453,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | undefined>(undefined);
+  const renameContextRef = useRef<{ sessionId?: SessionId; threadId?: ThreadId; workspaceId?: WorkspaceId } | undefined>(undefined);
   /** initialTitle：行级菜单显式传入所在行标题；顶栏缺省用当前查看会话标题。 */
-  const openRenameDialog = (initialTitle?: string) => {
+  const openRenameDialog = (initialTitle?: string, context?: { sessionId?: SessionId; threadId?: ThreadId; workspaceId?: WorkspaceId }) => {
+    renameContextRef.current = context ?? {
+      ...(renameTargetSessionId === undefined ? {} : { sessionId: renameTargetSessionId }),
+      ...(selected?.threadId === undefined ? {} : { threadId: selected.threadId }),
+      ...(renameTargetWorkspaceId === undefined ? {} : { workspaceId: renameTargetWorkspaceId }),
+    };
     setRenameValue(initialTitle ?? threadTitle);
     setRenameError(undefined);
     setRenameOpen(true);
@@ -7442,16 +7470,21 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (!next || renameBusy) return;
     setRenameError(undefined);
     setRenameBusy(true);
-    void (async () => {
+    void workspaceActionQueue.enqueue(async () => {
       try {
-        let renamedSessionId = renameTargetSessionId;
+        const context = renameContextRef.current;
+        const targetSessionId = context?.sessionId ?? renameTargetSessionId;
+        const targetThreadId = context?.threadId ?? selected?.threadId;
+        const targetWorkspaceId = context?.workspaceId ?? renameTargetWorkspaceId;
+        let renamedSessionId = targetSessionId;
         if (renameNeedsSessionResume({
-          hasViewedHistory: selected !== undefined,
-          ...(selected?.sessionId === undefined ? {} : { viewedSessionId: selected.sessionId }),
+          hasViewedHistory: context !== undefined || selected !== undefined,
+          ...(targetSessionId === undefined ? {} : { viewedSessionId: targetSessionId }),
           ...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId }),
         })) {
-          await ensureWorkspaceActive(renameTargetWorkspaceId);
-          const resume = await client.command("session.resume", { threadId: selected!.threadId });
+          if (targetThreadId === undefined) throw new Error("当前查看会话缺少 threadId，无法重命名");
+          await ensureWorkspaceActive(targetWorkspaceId);
+          const resume = await client.command("session.resume", { threadId: targetThreadId });
           const resumed = await waitReceipt<OperatorStateSnapshot>(client, resume.requestId);
           if (selected?.sessionId !== undefined && resumed.sessionId !== selected.sessionId) {
             throw new Error("恢复的会话与当前查看会话不一致");
@@ -7465,7 +7498,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         }
         renamedSessionId ??= outcome.snapshot.sessionId;
         const receiptTitle = outcome.snapshot.sessionTitle?.trim();
-        const refreshed = await refreshHistoryAfterTitle(renameTargetWorkspaceId);
+        const refreshed = await refreshHistoryAfterTitle(targetWorkspaceId);
         const historyTitle = refreshed?.entries.find((entry) => entry.sessionId === renamedSessionId)?.title?.trim();
         const confirmedTitle = receiptTitle === next
           ? receiptTitle
@@ -7490,7 +7523,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       } finally {
         setRenameBusy(false);
       }
-    })();
+    });
   };
   const realActiveWorkspace = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
   // 预览模式只是显示层：桌面 shell 操作仍走真实 API。若已注册过真实

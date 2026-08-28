@@ -6,13 +6,7 @@ import type {
   SessionId,
 } from "@omp-studio/studio-protocol";
 import type { JsonValue } from "@omp-studio/client-contract";
-import {
-  applyLiveEvent,
-  buildTimeline,
-  emptyConversationState,
-  type ConversationState,
-  type TimelineRow,
-} from "../conversation/conversationViewModel";
+import type { TimelineRow } from "../conversation/conversationViewModel";
 import { NATIVE_TOOL_GALLERY } from "./nativeToolGallery";
 
 const epoch = 1 as RuntimeEpoch;
@@ -325,15 +319,7 @@ export const PREVIEW_CONVO_LIVE: readonly ConversationRuntimeEvent[] = [
 
 export const PREVIEW_CONVO_IDENTITY = { runtimeEpoch: epoch, sessionId: session };
 
+// TODO: applyLiveEvent / buildTimeline removed — fixture generation needs reimplementation
 export function previewConversationRows(): TimelineRow[] {
-  let state: ConversationState = {
-    ...emptyConversationState(1),
-    identity: PREVIEW_CONVO_IDENTITY,
-    items: PREVIEW_CONVO_ITEMS,
-    hydrateStatus: "ready",
-  };
-  for (const event of PREVIEW_CONVO_LIVE) {
-    state = applyLiveEvent(state, event, PREVIEW_CONVO_IDENTITY);
-  }
-  return buildTimeline(state);
+  return [];
 }

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   SessionId,
   SessionHistoryReadModel,
@@ -74,7 +74,16 @@ export function useProjectHistories({
   const [cache, setCache] = useState<ProjectHistoryCache>({});
   const cacheRef = useRef<ProjectHistoryCache>({});
   const requestRef = useRef<Record<string, number>>({});
+  const previousPreviewRef = useRef(preview);
   cacheRef.current = cache;
+
+  useEffect(() => {
+    if (previousPreviewRef.current === preview) return;
+    previousPreviewRef.current = preview;
+    cacheRef.current = {};
+    requestRef.current = {};
+    setCache({});
+  }, [preview]);
 
   const load = useCallback(async (
     workspaceId: WorkspaceId,
@@ -104,7 +113,7 @@ export function useProjectHistories({
         limit,
         status: "active",
       });
-      if (requestRef.current[key] !== requestId) return model;
+      if (requestRef.current[key] !== requestId) return undefined;
       setCache((previous) => ({
         ...previous,
         [key]: { status: "ready", requestedLimit: limit, model },

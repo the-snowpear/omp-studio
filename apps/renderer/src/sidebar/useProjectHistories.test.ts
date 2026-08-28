@@ -98,6 +98,27 @@ describe("useProjectHistories", () => {
     await waitFor(() => expect(result.current.cache["workspace-b"]?.model?.entries[0]?.title).toBe("B refreshed"));
   });
 
+  it("does not return an older same-project response to its caller", async () => {
+    const resolvers: Array<(value: SessionHistoryReadModel) => void> = [];
+    const query = vi.fn(() => new Promise<SessionHistoryReadModel>((resolve) => {
+      resolvers.push(resolve);
+    }));
+    const client = { query } as unknown as Pick<StudioClient, "query">;
+    const { result } = renderHook(() => useProjectHistories({ client, preview: false }));
+    let first: Promise<SessionHistoryReadModel | undefined> | undefined;
+    let second: Promise<SessionHistoryReadModel | undefined> | undefined;
+    await act(async () => {
+      first = result.current.refresh(workspace("workspace-a"));
+      second = result.current.refresh(workspace("workspace-a"));
+      await Promise.resolve();
+    });
+    resolvers[1]?.(model("new"));
+    expect(await second).toEqual(model("new"));
+    resolvers[0]?.(model("old"));
+    expect(await first).toBeUndefined();
+    await waitFor(() => expect(result.current.cache["workspace-a"]?.model?.entries[0]?.title).toBe("new"));
+  });
+
   it("does not query Host in preview mode", async () => {
     const query = vi.fn();
     const client = { query } as unknown as Pick<StudioClient, "query">;
@@ -108,6 +129,18 @@ describe("useProjectHistories", () => {
     });
     expect(query).not.toHaveBeenCalled();
     expect(result.current.cache).toEqual({});
+  });
+
+  it("clears real cache when preview mode changes", async () => {
+    const query = vi.fn().mockResolvedValue(model("real"));
+    const client = { query } as unknown as Pick<StudioClient, "query">;
+    const { result, rerender } = renderHook(({ preview }) => useProjectHistories({ client, preview }), {
+      initialProps: { preview: false },
+    });
+    await act(async () => { await result.current.load(workspace("workspace-a")); });
+    expect(result.current.cache["workspace-a"]?.model?.entries[0]?.title).toBe("real");
+    rerender({ preview: true });
+    await waitFor(() => expect(result.current.cache).toEqual({}));
   });
 
   it("replaces a cached empty project when it is refreshed after session creation", async () => {
