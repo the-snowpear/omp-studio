@@ -3241,14 +3241,22 @@ function useComposerCollisionCollapse() {
     };
     const measure = () => {
       frame = undefined;
+      // Menus and flyouts are absolutely positioned descendants and may enlarge
+      // bar.scrollWidth while open. Only the in-flow capsule cluster represents
+      // real pressure against the model picker.
       // Resetting collapse to "full" then back reflows the bar. Do not do that
       // while a composer menu is open: capsule toggles would make the popup jump.
       if (bar.querySelector("[aria-expanded='true']")) return;
-      bar.dataset.collapse = "full";
+      // 无变化不写：本 hook 自己观察着这个 bar（ResizeObserver），无条件改写
+      // data-collapse 会触发布局变化又把观察者唤醒，形成 rAF 级自持循环。
+      const setCollapse = (value: string) => {
+        if (bar.dataset.collapse !== value) bar.dataset.collapse = value;
+      };
+      setCollapse("full");
       if (!hasPressure()) return;
-      bar.dataset.collapse = "model";
+      setCollapse("model");
       if (!hasPressure()) return;
-      bar.dataset.collapse = "modes";
+      setCollapse("modes");
     };
     const schedule = () => {
       if (frame !== undefined) window.cancelAnimationFrame(frame);

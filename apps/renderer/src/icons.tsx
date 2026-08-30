@@ -151,13 +151,33 @@ export function iconSvg(name: string, extra?: string): string {
   return `<svg class="${className}" viewBox="0 0 16 16" aria-hidden="true">${PATHS[name] ?? PATHS.box ?? ""}</svg>`;
 }
 
+/**
+ * `dangerouslySetInnerHTML` 的值对象必须按内容缓存。
+ *
+ * React 19 的 `setProp` 对该属性按**对象引用**比较：每次渲染内联新建
+ * `{{ __html }}` 会让所有 `Icon` 在每次提交时整段重写 innerHTML（实测整棵应用
+ * ~550 个图标 × 每次提交 = 每秒上万次 SVG 子树重建，且喂给 composer 碰撞测量
+ * 的 MutationObserver 形成自持循环）。按 name（或 box 兜底）缓存后引用稳定，
+ * React 直接跳过。
+ */
+const INNER_HTML = new Map<string, { __html: string }>();
+function iconInnerHtml(name: string): { __html: string } {
+  const key = PATHS[name] !== undefined ? name : "box";
+  let cached = INNER_HTML.get(key);
+  if (cached === undefined) {
+    cached = { __html: PATHS[name] ?? PATHS.box ?? "" };
+    INNER_HTML.set(key, cached);
+  }
+  return cached;
+}
+
 export function Icon({ name, extra }: { name: string; extra?: string }) {
   return (
     <svg
       className={extra ? `icon ${extra}` : "icon"}
       viewBox="0 0 16 16"
       aria-hidden="true"
-      dangerouslySetInnerHTML={{ __html: PATHS[name] ?? PATHS.box ?? "" }}
+      dangerouslySetInnerHTML={iconInnerHtml(name)}
     />
   );
 }
