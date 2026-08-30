@@ -54,13 +54,28 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     scrollMargin,
     useAnimationFrameWithResizeObserver: true,
   });
-  /** Row mount 是记录行高的唯一时机：不挂第二个 ResizeObserver（悬挂观察在长滚动
-   *  会话里积累 detached 节点的风险不值得），展开/收起导致的高度漂移留给下次挂载
-   *  修正——估算只影响初值，测量永远是权威。 */
+  /**
+   * Row mount 是记录行高的唯一时机：不挂第二个 ResizeObserver（悬挂观察在长滚动
+   * 会话里积累 detached 节点的风险不值得），展开/收起导致的高度漂移留给下次挂载
+   * 修正——估算只影响初值，测量永远是权威。
+   *
+   * 同一提交里还把真实高度同步喂回 virtualizer（`resizeItem`）：新行不再经历
+   * 「按估高挂载 → 下一帧实测修正」的两段式。发送消息瞬间连续出现的新行（乐观
+   * 用户行、落盘正式行、assistant 流式行）若各自先估后测，贴底跟随会呈现出
+   * 「上下跳两三下」；挂载帧即真实高度后，跟随只剩一次平滑位移。ref 回调处于
+   * React 提交阶段，此处触发的 virtualizer 更新会在本帧 paint 前落地。
+   */
   const measureRow = useCallback((el: HTMLElement | null) => {
     if (el !== null && el.isConnected) {
-      const key = keysRef.current[Number(el.dataset.index)];
-      if (key !== undefined) rememberRowHeight(key, el.getBoundingClientRect().height);
+      const index = Number(el.dataset.index);
+      const key = keysRef.current[index];
+      if (key !== undefined) {
+        const height = el.getBoundingClientRect().height;
+        if (height > 0) {
+          rememberRowHeight(key, height);
+          virtualizer.resizeItem(index, height);
+        }
+      }
     }
     virtualizer.measureElement(el);
   }, [virtualizer]);
