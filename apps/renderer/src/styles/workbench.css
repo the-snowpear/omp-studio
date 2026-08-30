@@ -334,6 +334,14 @@
    一两帧后才被推下去——快速输出时反复可见。在这里裁掉越界部分：新行改为随测量
    落地、滚动同步上移的那一帧一起出现，而不是先盖在别的内容上。 */
 .convo-virtual-list { overflow: clip; }
+/* 高度动画在播（ConversationVirtualList 监听 transitionrun 加/撤 .is-height-animating）：
+   卡片 0fr→1fr 每帧改行高，virtualizer 的 RO→commit 链晚 1-3 帧且会并帧，下游行的
+   translateY 以几十像素一格的步进落下——展开/收起一张卡，无关消息行上下连跳。动画
+   期间给行开一段短线性 transform 过渡把步进补成连续位移；纯滚动不触发，滚动本来就
+   不改行的 translateY。 */
+.convo-virtual-list.is-height-animating .convo-virtual-row {
+  transition: transform 100ms linear;
+}
 
 /* ============================================================
    会话切换过场：正文淡出 → 骨架兜住空窗 → 交叉溶解淡入
@@ -1185,10 +1193,12 @@
 .sa-inspect .sa-inspect-scroll {
   flex: 1 1 0;
 }
-.sa-inspect .new-content-pill,
-.subagent-convo .new-content-pill { position: absolute; right: 16px; left: auto; margin: 0; bottom: 16px; }
-.sa-inspect.has-composer .new-content-pill,
-.subagent-convo.has-composer .new-content-pill { bottom: 112px; }
+/* 直接子选择器：面板根的直接子按钮才是悬浮位；排队栏头行里的同名按钮
+   （qs-head-slot）不能被钉到面板右下角。 */
+.sa-inspect > .new-content-pill,
+.subagent-convo > .new-content-pill { position: absolute; right: 16px; left: auto; margin: 0; bottom: 16px; }
+.sa-inspect.has-composer > .new-content-pill,
+.subagent-convo.has-composer > .new-content-pill { bottom: 112px; }
 .sa-inspect-composer {
   flex: none;
   border-top: 1px solid var(--border);
@@ -2139,7 +2149,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 /* 挂在 .composer（position:relative）右上角的「回到最新」：恒定不随对话滚动。
    整枚悬在输入框上缘之外（36px 高 + 6px 间隙 → top:-44px），不遮输入内容；
    与 sticky 时代的按钮共用外观与入场动画。 */
-.new-content-pill.composer-jump-latest {
+/* 只对 composer 内的直接子元素生效：同名按钮在排队栏头行（qs-head-slot）里是
+   常规流式布局，不能继承这里的绝对定位。 */
+.composer > .new-content-pill.composer-jump-latest {
   position: absolute;
   top: -44px;
   right: 10px;
@@ -4517,13 +4529,21 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   padding: var(--sp-8) var(--sp-12);
   font-size: var(--fs-12);
 }
-.qs-head {
-  display: flex; align-items: center; gap: var(--sp-6);
+/* 头行外套一层 row：右侧可以放宿主动作位（「回到最新」按钮），按钮不再是
+   composer 上方的悬浮层压在栏身上。无动作位时布局与旧版头行逐像素一致。 */
+.qs-head-row {
+  display: flex;
+  align-items: flex-start;
   width: calc(100% + 2 * var(--sp-12));
   margin: calc(-1 * var(--sp-8)) calc(-1 * var(--sp-12)) 0;
-  padding: var(--sp-8) var(--sp-12) 0;
+}
+.qs-head {
+  display: flex; align-items: center; gap: var(--sp-6);
+  flex: 1 1 auto; min-width: 0;
+  margin: 0;
+  padding: var(--sp-8) 0 0 var(--sp-12);
   border: none;
-  border-radius: var(--r-8) var(--r-8) 0 0;
+  border-radius: var(--r-8) 0 0 0;
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -4541,6 +4561,13 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; flex: none;
 }
+/* 动作位（回到最新）：缩一号，免得 36px 的悬浮按钮把头行撑高。 */
+.qs-head-slot {
+  display: flex; align-items: center;
+  flex: none;
+  padding: var(--sp-4) var(--sp-10) 0 var(--sp-6);
+}
+.qs-head-slot .new-content-pill { width: 28px; height: 28px; }
 .qs-collapse {
   display: grid;
   grid-template-rows: 1fr;

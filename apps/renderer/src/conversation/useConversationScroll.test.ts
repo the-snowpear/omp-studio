@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import type { UIEvent } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { bindTailGestures, captureAnchor, restoreAnchor, useConversationScroll } from "./useConversationScroll";
 
@@ -69,5 +70,79 @@ describe("conversation scroll primitives", () => {
     hook.rerender({ itemCount: 2, contentKey: "second" });
     expect(scroller.scrollTop).toBe(300);
     expect(hook.result.current.hasNewContent).toBe(true);
+  });
+
+  it("does not re-pin while the reader scrolls up, even within the follow threshold", () => {
+    const scroller = document.createElement("div");
+    const metrics = { scrollHeight: 1000, clientHeight: 200 };
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => metrics.scrollHeight });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => metrics.clientHeight });
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, writable: true, value: 0 });
+    const scrollerRef = { current: scroller };
+    const hook = renderHook(() => useConversationScroll({ scrollerRef, identityKey: "s", itemCount: 1, loadingOlder: false }));
+    // jsdom 无 ResizeObserver：布局副作用走直写回退，初始贴底把 scrollTop 写到 scrollHeight。
+    expect(hook.result.current.follow).toBe(true);
+    act(() => hook.result.current.detachFromLatest());
+    expect(hook.result.current.follow).toBe(false);
+    // 向上滚一格：平滑滚动的中间位置离底部只有 60px（旧阈值 72px 以内）。
+    scroller.scrollTop = 740;
+    act(() => hook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+    expect(hook.result.current.follow).toBe(false);
+    // 继续向上（更远离底部）同样不回钉。
+    scroller.scrollTop = 600;
+    act(() => hook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+    expect(hook.result.current.follow).toBe(false);
+  });
+
+  it("resumes following on a deliberate downward scroll into the threshold after the gesture settles", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const scroller = document.createElement("div");
+      const metrics = { scrollHeight: 1200, clientHeight: 200 };
+      Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => metrics.scrollHeight });
+      Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => metrics.clientHeight });
+      Object.defineProperty(scroller, "scrollTop", { configurable: true, writable: true, value: 0 });
+      const scrollerRef = { current: scroller };
+      const hook = renderHook(() => useConversationScroll({ scrollerRef, identityKey: "s", itemCount: 1, loadingOlder: false }));
+      act(() => hook.result.current.detachFromLatest());
+      // 底部 scrollTop 上限 = 1200 - 200 = 1000。脱离后向上滚到 900（离底 100px）。
+      scroller.scrollTop = 900;
+      act(() => hook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+      expect(hook.result.current.follow).toBe(false);
+      // 手势冷却窗口内向下滚进阈值（离底 50px）：还不回钉。
+      scroller.scrollTop = 950;
+      act(() => hook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+      expect(hook.result.current.follow).toBe(false);
+      vi.advanceTimersByTime(600);
+      // 冷却结束后继续向下（离底 30px）：回钉恢复跟随。
+      scroller.scrollTop = 970;
+      act(() => hook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+      expect(hook.result.current.follow).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("detaches when the native scrollbar or minimap drags up past the follow range", () => {
+    const scroller = document.createElement("div");
+    const metrics = { scrollHeight: 1000, clientHeight: 200 };
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => metrics.scrollHeight });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => metrics.clientHeight });
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, writable: true, value: 0 });
+    const scrollerRef = { current: scroller };
+    const hook = renderHook(() => useConversationScroll({ scrollerRef, identityKey: "s", itemCount: 1, loadingOlder: false }));
+    expect(hook.result.current.follow).toBe(true);
+    // 贴底位置 800；向上拖到 650：距离 150px 超出跟随阈值 → 脱离。
+    scroller.scrollTop = 650;
+    act(() => hook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+    expect(hook.result.current.follow).toBe(false);
+    // 内容增长那一拍（scrollTop 未动，只有 scrollHeight 变大）不视为拖动。
+    metrics.scrollHeight = 1400;
+    scroller.scrollTop = 650;
+    const pinnedHook = renderHook(() => useConversationScroll({ scrollerRef: { current: scroller }, identityKey: "s2", itemCount: 1, loadingOlder: false }));
+    expect(pinnedHook.result.current.follow).toBe(true);
+    metrics.scrollHeight = 1500;
+    act(() => pinnedHook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+    expect(pinnedHook.result.current.follow).toBe(true);
   });
 });

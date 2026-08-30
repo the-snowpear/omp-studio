@@ -4658,6 +4658,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   });
   const snapshotOfEntry = (entry: QueuedMessage): ComposerSnapshot => snapshotOfQueued(entry);
   const activeQueue = (): QueuedMessage[] => (preview ? previewQueue : queuedMessages);
+  /** 排队栏当前要显示的条目。「回到最新」按钮在排队栏可见时移入其头行
+   *  （qs-head-slot），否则浮在输入框右上角——两个位置互斥，避免按钮压在栏身上。 */
+  const sessionQueue = preview ? previewQueue : visibleQueuedMessages(queuedMessages, selectedSessionId);
   const applyQueueEditResult = (result: {
     readonly queue: readonly QueuedMessage[];
     readonly editing: QueueEditState | undefined;
@@ -5419,17 +5422,30 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               </div>
             ) : null}
             <MessageQueueBar
-              messages={preview ? previewQueue : visibleQueuedMessages(queuedMessages, selectedSessionId)}
+              messages={sessionQueue}
               running={preview ? previewThreadId === "t1" : running}
               sendEnabled={preview || (running ? steerNowEnabled : promptChannelReady)}
               {...(preview ? { demo: true } : {})}
               {...(queueEdit === undefined ? {} : { editingId: queueEdit.entryId })}
+              {...(jumpPill?.visible && sessionQueue.length > 0 ? {
+                headerSlot: (
+                  <button
+                    type="button"
+                    className="new-content-pill queue-jump-latest"
+                    onClick={jumpPill.jumpToLatest}
+                    aria-label="回到最新"
+                    data-tip="回到最新"
+                  >
+                    <Icon name="chevron-d" />
+                  </button>
+                ),
+              } : {})}
               onEdit={editQueuedMessage}
               onSendNow={(entry) => void sendQueuedNow(entry)}
               onRemove={removeQueuedMessage}
             />
             <div className={`composer${running ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
-              {jumpPill?.visible ? (
+              {jumpPill?.visible && sessionQueue.length === 0 ? (
                 <button
                   type="button"
                   className="new-content-pill composer-jump-latest"

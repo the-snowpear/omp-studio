@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Icon } from "./icons";
 import type { ComposerDoc } from "./composer/types";
 import type { PromptImage } from "./composer/types";
@@ -14,7 +14,7 @@ export interface QueuedMessage {
   sessionId?: string;
 }
 
-export function MessageQueueBar({ messages, running, sendEnabled, demo, editingId, onEdit, onSendNow, onRemove }: {
+export function MessageQueueBar({ messages, running, sendEnabled, demo, editingId, headerSlot, onEdit, onSendNow, onRemove }: {
   messages: readonly QueuedMessage[];
   running: boolean;
   sendEnabled: boolean;
@@ -22,6 +22,8 @@ export function MessageQueueBar({ messages, running, sendEnabled, demo, editingI
   demo?: boolean;
   /** Row currently loaded into Composer; stays in the list with an 编辑中 mark. */
   editingId?: number;
+  /** 头行右侧的动作位（宿主放「回到最新」等悬浮按钮，避免压在栏身上）。 */
+  headerSlot?: ReactNode;
   onEdit: (entry: QueuedMessage) => void;
   onSendNow: (entry: QueuedMessage) => void;
   onRemove: (entry: QueuedMessage) => void;
@@ -30,21 +32,24 @@ export function MessageQueueBar({ messages, running, sendEnabled, demo, editingI
   if (messages.length === 0) return null;
   return (
     <div className={`queue-strip${open ? "" : " collapsed"}`} role="group" aria-label="排队消息">
-      <button
-        type="button"
-        className="qs-head"
-        aria-expanded={open}
-        aria-label={open ? "收起排队消息" : "展开排队消息"}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Icon name="queue" extra="sm" />
-        <span className="qs-title">排队消息 ×{messages.length}</span>
-        <span className="qs-note">{running ? "本轮结束后自动按序发送" : "空闲后自动发送"}</span>
-        {demo === true ? <span className="chip gray xs">演示</span> : null}
-        <span className="qs-toggle" aria-hidden="true">
-          <Icon name={open ? "chevron-d" : "chevron-u"} extra="sm" />
-        </span>
-      </button>
+      <div className="qs-head-row">
+        <button
+          type="button"
+          className="qs-head"
+          aria-expanded={open}
+          aria-label={open ? "收起排队消息" : "展开排队消息"}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <Icon name="queue" extra="sm" />
+          <span className="qs-title">排队消息 ×{messages.length}</span>
+          <span className="qs-note">{running ? "本轮结束后自动按序发送" : "空闲后自动发送"}</span>
+          {demo === true ? <span className="chip gray xs">演示</span> : null}
+          <span className="qs-toggle" aria-hidden="true">
+            <Icon name={open ? "chevron-d" : "chevron-u"} extra="sm" />
+          </span>
+        </button>
+        {headerSlot !== undefined && headerSlot !== null ? <div className="qs-head-slot">{headerSlot}</div> : null}
+      </div>
       <div className="qs-collapse" aria-hidden={!open} inert={open ? undefined : true}>
         <div className="qs-collapse-inner">
           <div className="qs-list" role="list">

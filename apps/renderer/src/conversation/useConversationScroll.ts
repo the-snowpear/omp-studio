@@ -2,6 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 
 export const FOLLOW_THRESHOLD_PX = 72;
 export const AT_TAIL_PX = 1;
+/** 主动脱离后的回钉冷却窗口。向上滚轮/拖动的头几拍，平滑滚动的中间位置还在
+ *  FOLLOW_THRESHOLD_PX 以内，此刻按「接近底部」回钉，贴底 writer 会在下一帧
+ *  内容增长时把页面拽回底部——观感是滚一格被弹回去，滚很多下才挣脱。 */
+export const UNPIN_REPIN_GRACE_MS = 500;
 export type ScrollDirection = "up" | "down";
 export function distanceFromBottom(el: { scrollHeight: number; scrollTop: number; clientHeight: number }): number { return Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight); }
 export function shouldFollow(distance: number, threshold = FOLLOW_THRESHOLD_PX): boolean { return distance <= threshold; }
@@ -85,6 +89,14 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
   const metricsRef = useRef<{ scrollHeight: number; clientHeight: number }>({ scrollHeight: 0, clientHeight: 0 });
   const anchor = useRef<ScrollAnchor | null>(null);
   const previousFirst = useRef<string | null>(null);
+  /** 上一拍 scrollTop：onScroll 判方向用。回钉只认「向下运动」，向上滚动期间
+   *  一律不回钉，滚轮回弹的根因就是旧逻辑在向上平滑滚动的第一拍就抢回了钉。 */
+  const lastScrollTop = useRef(0);
+  /** 上次贴底写入的 scrollTop。原生滚动条 / minimap 拖动没有滚轮手势可脱离，
+   *  只有确实离开该位置向上拖时才视为主动脱离；内容增长那一拍 scrollTop 未动
+   *  （distance 只因 scrollHeight 变大），不会被误判。 */
+  const lastStickTop = useRef(0);
+  const unpinnedAt = useRef(0);
   const [follow, setFollow] = useState(pin === "bottom");
   const [hasNewContent, setHasNewContent] = useState(false);
   /**
@@ -99,33 +111,53 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     const el = scrollerRef.current;
     if (el === null || !pinned.current) return;
     el.scrollTop = el.scrollHeight;
+    lastStickTop.current = el.scrollTop;
+    lastScrollTop.current = el.scrollTop;
     metricsRef.current = { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
   }, [scrollerRef]);
   const resizeFollow = useRef(false);
   /* 脱离即亮「回到最新」：读者主动离开尾部（手势/锚定/加载更早），不管之后有没有
      新内容到达，按钮都要出现——它此刻的功能是「回去的入口」，不只是「新内容提示」。
      （按钮已外发为宿主 slot，固定在输入框右上角；此处状态与 sticky 时代一致。） */
-  const setPinned = useCallback((value: boolean) => { pinned.current = value; setFollow(value); if (value) setHasNewContent(false); else if (pin === "bottom") setHasNewContent(true); }, [pin]);
+  const setPinned = useCallback((value: boolean) => {
+    pinned.current = value;
+    setFollow(value);
+    if (value) setHasNewContent(false);
+    else {
+      if (pin === "bottom") setHasNewContent(true);
+      unpinnedAt.current = Date.now();
+    }
+  }, [pin]);
   const detachFromLatest = useCallback(() => setPinned(false), [setPinned]);
   const jumpToLatest = useCallback(() => { const el = scrollerRef.current; if (el === null) return; setPinned(true); el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); }, [scrollerRef, setPinned]);
   const preparePrepend = useCallback(() => { const el = scrollerRef.current; if (el === null) return; anchor.current = captureAnchor(el); previousFirst.current = firstItemId(el); setPinned(false); }, [scrollerRef, setPinned]);
   const onScroll = useCallback((event: UIEvent<HTMLElement>) => {
     const el = event.currentTarget;
-    if (metricsRef.current.clientHeight > 0) {
-      // 缓存命中：距离计算不读布局属性。缓存偏旧只会让该帧判不出"在底部"，
-      // 不会误钉（onScroll 只负责钉住，脱离由手势负责），下一帧缓存即刷新。
-      const distance = Math.max(0, metricsRef.current.scrollHeight - el.scrollTop - metricsRef.current.clientHeight);
-      if (distance <= AT_TAIL_PX || (!pinned.current && shouldFollow(distance))) setPinned(true);
+    const cache = metricsRef.current;
+    const distance = cache.clientHeight > 0
+      ? Math.max(0, cache.scrollHeight - el.scrollTop - cache.clientHeight)
+      : distanceFromBottom(el);
+    const movingDown = el.scrollTop > lastScrollTop.current + 0.5;
+    lastScrollTop.current = el.scrollTop;
+    // 原生滚动条 / minimap 向上拖动没有滚轮手势，在此脱离跟随。
+    if (pinned.current && !movingDown && el.scrollTop < lastStickTop.current - 24 && distance > FOLLOW_THRESHOLD_PX) {
+      setPinned(false);
       return;
     }
-    const distance = distanceFromBottom(el);
-    if (distance <= AT_TAIL_PX || (!pinned.current && shouldFollow(distance))) setPinned(true);
+    if (pinned.current) {
+      if (distance <= AT_TAIL_PX) setPinned(true);
+      return;
+    }
+    // 回钉只认「向下运动」；主动脱离后的冷却窗口内，也只有真正贴到 1px 以内
+    // （向下滚回底部）才回钉。向上平滑滚动的中间距离无论多小都不再抢回钉。
+    const cooling = Date.now() - unpinnedAt.current < UNPIN_REPIN_GRACE_MS;
+    if (movingDown && (distance <= AT_TAIL_PX || (!cooling && shouldFollow(distance)))) setPinned(true);
   }, [setPinned]);
   useEffect(() => { const el = scrollerRef.current; return el ? bindTailGestures(el, () => pinned.current, () => setPinned(false)) : undefined; }, [identityKey, scrollerRef, setPinned]);
   /* Identity reset must run before the initial ResizeObserver stick. A reader
      may have left the previous session halfway up; the new session still opens
      at its own tail before it becomes visible. */
-  useLayoutEffect(() => { pinned.current = pin === "bottom"; setFollow(pin === "bottom"); setHasNewContent(false); anchor.current = null; }, [identityKey, pin]);
+  useLayoutEffect(() => { pinned.current = pin === "bottom"; setFollow(pin === "bottom"); setHasNewContent(false); anchor.current = null; lastScrollTop.current = 0; lastStickTop.current = 0; unpinnedAt.current = 0; }, [identityKey, pin]);
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     const doc = el?.querySelector<HTMLElement>(".convo-doc") ?? null;

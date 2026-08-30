@@ -96,6 +96,48 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     const parent = host.parentElement; if (parent !== null) observer.observe(parent);
     return () => observer.disconnect();
   }, [enabled, measureMargin, scrollerRef]);
+  /**
+   * 卡片 0fr→1fr 的高度过渡每帧都在改行高，而 virtualizer 的
+   * RO→setState→commit 链比 CSS 过渡晚 1-3 帧且会并帧，下游行的 translateY
+   * 就以「几十像素一格」的步进落下——展开/收起一张卡，无关的消息行上下连跳。
+   * 高度动画在播期间给行开一段短 transform 过渡把步进补成连续位移；动画结束
+   * 即撤，纯滚动时行上没有任何过渡（滚动不改变行的 translateY）。
+   *
+   * 监听走 transitionrun/end/cancel 冒泡，只认行高来源的属性；卡片自己的
+   * opacity/transform、chevron 旋转都不触发。
+   */
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (host === null) return;
+    const tracked = (name: string) => name === "grid-template-rows" || name === "margin-top";
+    let removeTimer = 0;
+    let hardCap = 0;
+    const deactivate = () => { host.classList.remove("is-height-animating"); removeTimer = 0; };
+    const onRun = (event: TransitionEvent) => {
+      if (!tracked(event.propertyName)) return;
+      host.classList.add("is-height-animating");
+      window.clearTimeout(removeTimer);
+      window.clearTimeout(hardCap);
+      // 兜底：动画元素在过渡中途卸载时可能收不到 end/cancel，硬上限后必定撤类。
+      hardCap = window.setTimeout(deactivate, 900);
+    };
+    const onFinish = (event: TransitionEvent) => {
+      if (!tracked(event.propertyName)) return;
+      window.clearTimeout(removeTimer);
+      removeTimer = window.setTimeout(deactivate, 80);
+    };
+    host.addEventListener("transitionrun", onRun);
+    host.addEventListener("transitionend", onFinish);
+    host.addEventListener("transitioncancel", onFinish);
+    return () => {
+      host.removeEventListener("transitionrun", onRun);
+      host.removeEventListener("transitionend", onFinish);
+      host.removeEventListener("transitioncancel", onFinish);
+      window.clearTimeout(removeTimer);
+      window.clearTimeout(hardCap);
+      deactivate();
+    };
+  }, []);
   const visible = capVirtualItems(virtualizer.getVirtualItems());
   if (!enabled) return <>{itemKeys.map((key, index) => <div key={key}>{renderItem(index)}</div>)}</>;
   // A newly opened/animated panel can be mounted before it has a non-zero

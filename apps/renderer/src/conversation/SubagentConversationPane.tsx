@@ -150,7 +150,7 @@ export function SubagentConversationPane({
           ) : null}
         </div>
       </section>
-      {scroll.hasNewContent ? (
+      {scroll.hasNewContent && (composerAllowed !== true || composer.queued.length === 0) ? (
         <button
           type="button"
           className="new-content-pill"
@@ -168,6 +168,19 @@ export function SubagentConversationPane({
             running={running}
             sendEnabled={running ? composer.steerEnabled : true}
             {...(composer.queueEdit === undefined ? {} : { editingId: composer.queueEdit.entryId })}
+            {...(scroll.hasNewContent && composer.queued.length > 0 ? {
+              headerSlot: (
+                <button
+                  type="button"
+                  className="new-content-pill queue-jump-latest"
+                  onClick={scroll.jumpToLatest}
+                  aria-label="回到最新"
+                  data-tip="回到最新"
+                >
+                  <Icon name="chevron-d" />
+                </button>
+              ),
+            } : {})}
             onEdit={composer.editQueued}
             onSendNow={composer.sendQueuedNow}
             onRemove={composer.removeQueued}
