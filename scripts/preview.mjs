@@ -275,24 +275,35 @@ async function main() {
 
   const electronExecutable = await preparePreviewElectron();
 
-  console.log(`[preview] Starting Renderer at ${previewUrl}...`);
-  const renderer = start(process.execPath, [npmCli,
-    "run",
-    "dev",
-    "-w",
-    "@omp-studio/renderer",
-    "--",
-    "--host",
-    previewHost,
-    "--port",
-    previewPort,
-    "--strictPort",
-  ]);
-  await waitForRenderer(renderer);
+  /**
+   * 生产模式（OMP_PREVIEW_MODE=production）：跳过 vite dev server。改名后的
+   * exe 报告 app.isPackaged === true，桌面端会忽略 OMP_RENDERER_DEV_URL、
+   * 直接加载刚构建的 apps/renderer/dist——dev server 从未被它使用，白占一个
+   * node 进程（内存 + 文件监听 CPU）和启动等待。保留 dev 模式默认值不变，
+   * 供需要 HMR 调试 renderer 的场景使用。
+   */
+  const production = process.env.OMP_PREVIEW_MODE === "production";
+  let renderer = null;
+  if (!production) {
+    console.log(`[preview] Starting Renderer dev server at ${previewUrl}...`);
+    renderer = start(process.execPath, [npmCli,
+      "run",
+      "dev",
+      "-w",
+      "@omp-studio/renderer",
+      "--",
+      "--host",
+      previewHost,
+      "--port",
+      previewPort,
+      "--strictPort",
+    ]);
+    await waitForRenderer(renderer);
+  }
 
-  console.log("[preview] Opening OMP Studio Desktop...");
+  console.log(`[preview] Opening OMP Studio Desktop (${production ? "production bundle" : "dev server"})...`);
   const desktop = start(electronExecutable, [join(root, "apps", "desktop")], {
-    env: { ...process.env, OMP_RENDERER_DEV_URL: previewUrl },
+    env: { ...process.env, ...(production ? {} : { OMP_RENDERER_DEV_URL: previewUrl }) },
   });
 
   const exitCode = await new Promise((resolve, reject) => {
