@@ -79,10 +79,14 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     }
     virtualizer.measureElement(el);
   }, [virtualizer]);
-  // Runs on every render: `scrollMargin` depends on the height of every sibling
-  // above the list (banners, notices, the "load earlier" button), none of which
-  // is observable from the list element itself.
-  useLayoutEffect(() => { if (enabled) measureMargin(); });
+  // `scrollMargin` 取决于列表上方每个兄弟（banner、notice、「加载更早」按钮）的高度。
+  // 原实现无依赖、每次渲染都重测（两次 rect + 一次 scrollTop = 三次强制同步布局读）：
+  // 流式期间每帧渲染 → 每秒上百次布局读 → RecalcStyle/Layout 风暴（实测 ~200 次/秒），
+  // 既把主线程压死在原生布局上（点击迟滞、minimap 卡顿），又让原生分配高水位持续上涨
+  // （长审查会话吃到 GB 级内存）。下方 ResizeObserver 已观察 host / scroller / parent，
+  // 任何上方兄弟高度变化都会触发回调重测 margin；此处只需挂载时定初值、并在行集
+  // 变化（结构重挂）时补一次。
+  useLayoutEffect(() => { if (enabled) measureMargin(); }, [enabled, measureMargin, itemKeys.length]);
   useLayoutEffect(() => {
     const host = hostRef.current; const scroller = scrollerRef?.current;
     if (!enabled || host === null || scroller === null || scroller === undefined) return;
