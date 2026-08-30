@@ -377,7 +377,9 @@ function AssistantRunViewInner({
       )}
       {renderAssistantSegments(segments, {
         ...(expandAll === true && !process ? { expandAll: true } : {}),
-        ...(last.row.status === "streaming" && tail ? { liveTail: true } : {}),
+        /* liveTail 语义：轮次还在进行（streaming，或 item 已落盘但 turnOpen——
+           两次模型请求之间的间隔）时尾链保持展开，直到下一条正文出现或轮次结束。 */
+        ...((last.row.status === "streaming" || last.row.turnOpen === true) && tail ? { liveTail: true } : {}),
         ...displayOptions,
         ...(!process && last.row.status !== "streaming" ? { allowCopy: true } : {}),
       })}
@@ -604,7 +606,7 @@ export const ConversationItemView = memo(function ConversationItemView({
         )}
         {renderAssistantSegments(row.segments, {
           ...(expandAll === true && !process ? { expandAll: true } : {}),
-          ...(row.status === "streaming" && tail ? { liveTail: true } : {}),
+          ...((row.status === "streaming" || row.turnOpen === true) && tail ? { liveTail: true } : {}),
           ...displayOptions,
           ...(!process && row.status !== "streaming" ? { allowCopy: true } : {}),
         })}

@@ -1086,3 +1086,186 @@ export function saPill(agent: SubagentView | string): { cls: string; label: stri
   if (status === "pending") return { cls: "parked", label: "Pending" };
   return { cls: "parked", label: status };
 }
+
+/* ============================================================
+   Todo 任务清单状态机 + 会话任务进度（输入框上方的 Task Dock 数据源）。
+   2026-08-30 自 4788173 恢复：streaming-ver1 重写时被整体移除，导致
+   TaskProgressDock（todolist / 本轮 diff 胶囊）空转。
+   ============================================================ */
+
+function assistantSegmentsOf(rows: readonly TimelineRow[]): AssistantSegment[] {
+  const segments: AssistantSegment[] = [];
+  for (const row of rows) {
+    if (row.type === "assistant") segments.push(...row.segments);
+  }
+  return segments;
+}
+
+function lastAssistantRunRange(rows: readonly TimelineRow[]): AssistantRunRange | undefined {
+  const ranges = assistantRunRanges(rows);
+  return ranges[ranges.length - 1];
+}
+
+export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
+
+export type TodoTask = {
+  readonly id: string;
+  readonly content: string;
+  readonly status: TodoStatus;
+  readonly phase?: string;
+};
+
+export type TaskProgress = {
+  readonly todos: readonly TodoTask[];
+  readonly files: readonly TurnFileChange[];
+};
+
+export type TodoPhaseGroup = {
+  readonly phase: string | undefined;
+  readonly tasks: readonly TodoTask[];
+};
+
+/** Native flattened `init { items }` uses this phase name. */
+const DEFAULT_TODO_PHASE = "Tasks";
+
+export function groupTodosByPhase(todos: readonly TodoTask[]): TodoPhaseGroup[] {
+  const groups: Array<{ phase: string | undefined; tasks: TodoTask[] }> = [];
+  const indexByPhase = new Map<string | undefined, number>();
+  for (const todo of todos) {
+    const key = todo.phase;
+    let index = indexByPhase.get(key);
+    if (index === undefined) {
+      index = groups.length;
+      indexByPhase.set(key, index);
+      groups.push({ phase: key, tasks: [] });
+    }
+    groups[index]!.tasks.push(todo);
+  }
+  return groups;
+}
+
+export function todoPhaseHeadersVisible(groups: readonly TodoPhaseGroup[]): boolean {
+  if (groups.length > 1) return groups.some((group) => group.phase !== undefined);
+  const name = groups[0]?.phase;
+  return name !== undefined && name !== DEFAULT_TODO_PHASE;
+}
+
+export function isTodoPhaseComplete(group: TodoPhaseGroup): boolean {
+  return group.tasks.length > 0 && group.tasks.every((task) => task.status === "completed" || task.status === "abandoned");
+}
+
+export function todoPhaseOpenByDefault(groups: readonly TodoPhaseGroup[]): boolean[] {
+  if (groups.length === 0) return [];
+  if (groups.every(isTodoPhaseComplete)) return groups.map(() => true);
+  return groups.map((group) => !isTodoPhaseComplete(group));
+}
+
+const TODO_STATUS: Record<string, TodoStatus> = {
+  pending: "pending",
+  todo: "pending",
+  in_progress: "in_progress",
+  "in-progress": "in_progress",
+  doing: "in_progress",
+  completed: "completed",
+  done: "completed",
+  abandoned: "abandoned",
+  blocked: "blocked",
+};
+
+function todoStatusOf(raw: string | undefined): TodoStatus {
+  return TODO_STATUS[raw?.trim().toLowerCase() ?? ""] ?? "pending";
+}
+
+function todoContentOf(task: { readonly [key: string]: JsonValue }): string | undefined {
+  return jsonString(task.content) ?? jsonString(task.text) ?? jsonString(task.label);
+}
+
+function tasksFromTodoFields(fields: { readonly [key: string]: JsonValue }): TodoTask[] {
+  const out: TodoTask[] = [];
+  const pushTask = (entry: JsonValue, phase: string | undefined, index: number) => {
+    const record = jsonRecord(entry);
+    if (record === undefined) return;
+    const content = todoContentOf(record);
+    if (content === undefined || content.trim().length === 0) return;
+    const id = jsonString(record.id) ?? `${phase ?? "todo"}-${index}`;
+    out.push({
+      id,
+      content,
+      status: todoStatusOf(jsonString(record.status)),
+      ...(phase === undefined ? {} : { phase }),
+    });
+  };
+  if (Array.isArray(fields.phases)) {
+    for (const [phaseIndex, entry] of fields.phases.entries()) {
+      const phase = jsonRecord(entry) ?? {};
+      const name = jsonString(phase.name) ?? `phase-${phaseIndex}`;
+      const tasks = Array.isArray(phase.tasks) ? phase.tasks : Array.isArray(phase.items) ? phase.items : [];
+      for (const [taskIndex, task] of tasks.entries()) pushTask(task, name, out.length + taskIndex);
+    }
+  }
+  if (out.length > 0) return out;
+  const items = Array.isArray(fields.items) ? fields.items : Array.isArray(fields.list) ? fields.list : [];
+  for (const [index, item] of items.entries()) pushTask(item, undefined, index);
+  return out;
+}
+
+function extractTodoSnapshot(tool: ToolView): TodoTask[] | undefined {
+  if (toolKind(tool) !== "todo") return undefined;
+  const fields = toolFields(tool);
+  const tasks = tasksFromTodoFields(fields);
+  if (tasks.length > 0) return tasks;
+  const op = jsonString(fields.op)?.toLowerCase();
+  if (op === "clear" || op === "rm" || op === "reset") return [];
+  return undefined;
+}
+
+export function collectLatestTodos(segments: readonly AssistantSegment[]): TodoTask[] {
+  let latest: TodoTask[] = [];
+  for (const segment of segments) {
+    if (segment.type !== "batch") continue;
+    for (const tool of segment.tools) {
+      const snapshot = extractTodoSnapshot(tool);
+      if (snapshot !== undefined) latest = snapshot;
+    }
+  }
+  return latest;
+}
+
+export function todoStepProgress(todos: readonly TodoTask[]): { current: number; total: number; completed: number } {
+  const active = todos.filter((task) => task.status !== "abandoned");
+  const total = active.length;
+  const completed = active.filter((task) => task.status === "completed").length;
+  const inProgress = active.findIndex((task) => task.status === "in_progress");
+  if (total === 0) return { current: 0, total: 0, completed: 0 };
+  if (inProgress >= 0) return { current: inProgress + 1, total, completed };
+  if (completed >= total) return { current: total, total, completed };
+  return { current: Math.min(total, completed + 1), total, completed };
+}
+
+/** OMP HUD keeps a list that still has open work; completed-only snapshots auto-clear. */
+export function todoHudVisible(todos: readonly TodoTask[]): boolean {
+  return todos.some((task) => task.status === "pending" || task.status === "in_progress" || task.status === "blocked");
+}
+
+function lastUserRowIndex(rows: readonly TimelineRow[]): number {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (rows[index]?.type === "user") return index;
+  }
+  return -1;
+}
+
+/**
+ * Session HUD: latest session todo snapshot (OMP live HUD) plus files from the
+ * current turn. A new user message starts a turn — previous-turn files drop;
+ * completed-only todos stay hidden, matching OMP after auto-clear / `/new`.
+ */
+export function sessionTaskProgress(rows: readonly TimelineRow[]): TaskProgress {
+  const latest = collectLatestTodos(assistantSegmentsOf(rows));
+  const todos = todoHudVisible(latest) ? latest : [];
+  const run = lastAssistantRunRange(rows);
+  const user = lastUserRowIndex(rows);
+  if (run === undefined || (user >= 0 && run.end < user)) {
+    return { todos, files: [] };
+  }
+  return { todos, files: collectTurnFileChanges(assistantSegmentsOf(rows.slice(run.start, run.end + 1))) };
+}

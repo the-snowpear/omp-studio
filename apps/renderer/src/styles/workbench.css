@@ -2136,6 +2136,15 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   cursor: pointer;
   animation: omp-toast-in var(--dur) var(--ease-out);
 }
+/* 挂在 .composer（position:relative）右上角的「回到最新」：恒定不随对话滚动。
+   整枚悬在输入框上缘之外（36px 高 + 6px 间隙 → top:-44px），不遮输入内容；
+   与 sticky 时代的按钮共用外观与入场动画。 */
+.new-content-pill.composer-jump-latest {
+  position: absolute;
+  top: -44px;
+  right: 10px;
+  z-index: calc(var(--z-scroll-aid) + 1);
+}
 .new-content-pill:hover {
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent-hover);
@@ -3197,6 +3206,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .composer {
   max-width: var(--doc-max-w);
   margin: 0 auto;
+  position: relative; /* 「回到最新」按钮的定位上下文（右上角悬浮） */
   border: 1px solid var(--border-strong);
   border-radius: var(--r-10);
   background: var(--surface);

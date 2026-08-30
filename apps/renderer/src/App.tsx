@@ -122,9 +122,8 @@ import { deriveActivityStatus, isAbortEligible } from "./conversation/activitySt
 import { ConversationEmpty } from "./conversation/ConversationEmpty";
 import { ConversationPane } from "./conversation/ConversationPane";
 import { SubagentInspectCard } from "./conversation/SubagentInspectCard";
-import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, type SubagentHubTarget } from "./conversation/toolMeta";
+import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, sessionTaskProgress, type SubagentHubTarget } from "./conversation/toolMeta";
 import { TaskProgressDock } from "./conversation/TaskProgressDock";
-// TODO: sessionTaskProgress removed — needs reimplementation
 import { SessionChanges } from "./conversation/SessionChanges";
 import { AgentTestsPane } from "./conversation/AgentTestsPane";
 import { agentTestRunSummary, projectAgentTestRuns, rerunTestPrompt } from "./conversation/agentTestRuns";
@@ -3741,14 +3740,24 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   };
   const isNewConversation = isNewConversationSurface(welcomeGate);
   const showWelcome = shouldShowConversationWelcome(welcomeGate);
+  /* 在屏面的欢迎态：由 ConversationPane 上报（leaving 期间保留旧屏）。壳层布局类
+     跟它走，避免切换瞬间 minimap 占宽把还在淡出的欢迎页向左顶。 */
+  const [surfaceWelcome, setSurfaceWelcome] = useState(showWelcome);
+  const [jumpPill, setJumpPill] = useState<{ visible: boolean; jumpToLatest: () => void } | undefined>(undefined);
+  const jumpPillRef = useRef<{ visible: boolean; jumpToLatest: () => void } | undefined>(undefined);
+  const jumpToLatestSlot = useCallback((slot: { visible: boolean; jumpToLatest: () => void }) => {
+    const previous = jumpPillRef.current;
+    if (previous !== undefined && previous.visible === slot.visible && previous.jumpToLatest === slot.jumpToLatest) return;
+    jumpPillRef.current = slot;
+    setJumpPill(slot);
+  }, []);
   const showContextStrip = isNewConversation && !composerSubmitted;
-  // TODO: sessionTaskProgress removed — needs reimplementation
   const taskProgress = useMemo(() => {
     if (preview) {
       if (isNewConversation) return { todos: [], files: [] };
       return { todos: PREVIEW_TODOS, files: PREVIEW_TODO_FILES };
     }
-    return { todos: [], files: [] };
+    return sessionTaskProgress(convo.rows);
   }, [convo.rows, isNewConversation, preview]);
   const testRuns = useMemo(() => preview ? [] : projectAgentTestRuns(convo.rows), [convo.rows, preview]);
   const testSummary = useMemo(() => agentTestRunSummary(testRuns), [testRuns]);
@@ -4975,10 +4984,11 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   return (
     <>
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
-        <div className={`convo-wrap${showWelcome ? " is-empty" : ""}`}>
+        <div className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
           <ConversationPane
             snapshot={convo}
             liveEngine={convo.engine}
+            {...(jumpToLatestSlot === undefined ? {} : { jumpToLatestSlot })}
             onLoadOlder={convo.loadOlder}
             onRestore={restorePending}
             onRestoreUserMessage={restoreUserMessage}
@@ -4986,6 +4996,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
             {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
             {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
             scrollerRef={convoScrollerRef}
+            onSurfaceWelcomeChange={setSurfaceWelcome}
             onReviewChanges={(turnId) => openChanges({ turnId })}
             planLink={planLink}
             compacting={compactingNow}
@@ -5418,6 +5429,17 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               onRemove={removeQueuedMessage}
             />
             <div className={`composer${running ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
+              {jumpPill?.visible ? (
+                <button
+                  type="button"
+                  className="new-content-pill composer-jump-latest"
+                  onClick={jumpPill.jumpToLatest}
+                  aria-label="回到最新"
+                  data-tip="回到最新"
+                >
+                  <Icon name="chevron-d" />
+                </button>
+              ) : null}
               <div className="composer-ctx" aria-label="已引用的上下文" role="group" />
               <label className="sr-only" htmlFor="composerInput">消息输入框。发送给 Runtime 的文本。</label>
               <ChipComposer

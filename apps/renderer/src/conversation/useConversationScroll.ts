@@ -97,7 +97,10 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     el.scrollTop = el.scrollHeight;
   }, [scrollerRef]);
   const resizeFollow = useRef(false);
-  const setPinned = useCallback((value: boolean) => { pinned.current = value; setFollow(value); if (value) setHasNewContent(false); }, []);
+  /* 脱离即亮「回到最新」：读者主动离开尾部（手势/锚定/加载更早），不管之后有没有
+     新内容到达，按钮都要出现——它此刻的功能是「回去的入口」，不只是「新内容提示」。
+     （按钮已外发为宿主 slot，固定在输入框右上角；此处状态与 sticky 时代一致。） */
+  const setPinned = useCallback((value: boolean) => { pinned.current = value; setFollow(value); if (value) setHasNewContent(false); else if (pin === "bottom") setHasNewContent(true); }, [pin]);
   const detachFromLatest = useCallback(() => setPinned(false), [setPinned]);
   const jumpToLatest = useCallback(() => { const el = scrollerRef.current; if (el === null) return; setPinned(true); el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); }, [scrollerRef, setPinned]);
   const preparePrepend = useCallback(() => { const el = scrollerRef.current; if (el === null) return; anchor.current = captureAnchor(el); previousFirst.current = firstItemId(el); setPinned(false); }, [scrollerRef, setPinned]);
@@ -110,7 +113,14 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     const doc = el?.querySelector<HTMLElement>(".convo-doc") ?? null;
-    if (el === null || doc === null || typeof ResizeObserver !== "function") {
+    if (el === null) return;
+    // Establish the initial position in the same pre-paint layout pass. Later
+    // content/virtualizer growth is owned exclusively by the observer.
+    // Top-pinned surfaces (welcome) open at 0 — nothing else ever writes this
+    // position, so a switch away from a bottom-pinned transcript lands the
+    // welcome at its top instead of wherever the transcript was scrolled.
+    if (pin === "top") el.scrollTop = 0;
+    if (doc === null || typeof ResizeObserver !== "function") {
       resizeFollow.current = false;
       return;
     }
@@ -118,14 +128,12 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     const observer = new ResizeObserver(stickToTail);
     observer.observe(doc);
     observer.observe(el);
-    // Establish the initial position in the same pre-paint layout pass. Later
-    // content/virtualizer growth is owned exclusively by the observer.
     stickToTail();
     return () => {
       resizeFollow.current = false;
       observer.disconnect();
     };
-  }, [identityKey, scrollerRef, stickToTail]);
+  }, [identityKey, pin, scrollerRef, stickToTail]);
   useLayoutEffect(() => {
     const el = scrollerRef.current; if (el === null) return;
     const pending = anchor.current;

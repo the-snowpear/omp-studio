@@ -43,6 +43,9 @@ type PaintedBody = {
   readonly rows: readonly TimelineRow[];
   /** 画的是欢迎面（而非 transcript）；identity 在欢迎面之间变化时无需过场。 */
   readonly welcome: boolean;
+  /** 画这一屏时滚动编排用的输入；leaving 期间照它冻结，旧屏停在当前滚动位置淡出。 */
+  readonly identityKey: string;
+  readonly pin: "top" | "bottom";
 };
 
 function prefersReducedMotion(): boolean {
@@ -66,8 +69,10 @@ export function ConversationPane({
   activity,
   welcome,
   forceWelcome,
+  onSurfaceWelcomeChange,
   planLink,
   compacting,
+  jumpToLatestSlot,
 }: {
   snapshot?: ConversationSnapshot;
   /** Hot token/tool stream. Kept here so animation-frame updates do not
@@ -92,10 +97,16 @@ export function ConversationPane({
   welcome?: ReactNode;
   /** 后台新建会话时强制欢迎区，避免旧 transcript 在替换前闪一下。 */
   forceWelcome?: boolean;
+  /** 实际在屏的面是否为欢迎区（leaving 期间是正在淡出的那一屏）。壳层布局类
+   *  （.convo-wrap.is-empty）跟它走而不是跟目标态走，minimap / 居中样式才不会
+   *  在旧屏还挂在屏上时把它挤变形。 */
+  onSurfaceWelcomeChange?: (welcome: boolean) => void;
   /** 计划评审入口卡；点开 Composer 上方那套 Plan Review 弹窗。 */
   planLink?: PlanCreatedLink;
   /** Live snapshot / user-triggered compact: show the in-progress divider. */
   compacting?: boolean;
+  /** 「回到最新」按钮外发给宿主（默认在对话流内 sticky 展示）。 */
+  jumpToLatestSlot?: (slot: { readonly visible: boolean; readonly jumpToLatest: () => void }) => void;
 }) {
   const localScrollerRef = useRef<HTMLElement | null>(null);
   const scrollerRef = externalScrollerRef ?? localScrollerRef;
@@ -173,15 +184,21 @@ export function ConversationPane({
   /** 淡出期间滚动编排看的是「还在屏上那一屏」，否则它会按新会话的空内容重排，
    *  把正在淡出的旧 transcript 抽走高度。 */
   const held = switchState.phase === "leaving" ? painted.current : null;
+  /* 在屏的面：leaving 期间是正在淡出的旧屏（可能是欢迎区），之后是目标面。
+     壳层据此切 .convo-wrap.is-empty——跟目标态走会让 minimap 在旧屏还挂在屏上
+     时就占宽，把它向左顶出一次可见跳变。 */
+  const surfaceWelcome = switchState.phase === "leaving" ? painted.current?.welcome === true : showWelcome;
+  useEffect(() => { onSurfaceWelcomeChange?.(surfaceWelcome); }, [onSurfaceWelcomeChange, surfaceWelcome]);
+  const livePin = showWelcome ? "top" as const : "bottom" as const;
   const scroll = useConversationScroll({
     scrollerRef,
-    // identityKey 始终用进来的那个：它触发的复位（pinned/follow/hasNewContent）必须
-    // 在淡入那一帧之前跑完，否则新 transcript 会带着上一个会话的 pinned 状态开场，
-    // 上一个会话若停在半途，新会话就不贴底了。
-    identityKey,
+    // identityKey / pin 在 leaving 期间随旧屏冻结：此刻滚动编排若按新 pin 归位，
+    // stickToTail 会把还在屏上的旧欢迎页拖到底部。冻结在 leaving 结束的同一提交里
+    // 解开（早于 settling / 淡入），新 transcript 的 pinned 复位仍然先于可见帧。
+    identityKey: held?.identityKey ?? identityKey,
     itemCount: held?.itemCount ?? liveItemCount,
     loadingOlder,
-    pin: showWelcome ? "top" : "bottom",
+    pin: held?.pin ?? livePin,
     contentKey: held?.contentKey ?? liveContentKey,
   });
   const prevLoading = useRef(loadingOlder);
@@ -316,7 +333,7 @@ export function ConversationPane({
   // 前就把 painted 换成自己，旧 transcript 再也留不住，切换时整块硬切加一次淡出淡入。
   const keysChanging = switchKey !== switchState.key;
   if (paintable && switchState.phase !== "leaving" && !keysChanging) {
-    painted.current = { node: liveBody, itemCount: liveItemCount, contentKey: liveContentKey, rows: displayRows, welcome: showWelcome };
+    painted.current = { node: liveBody, itemCount: liveItemCount, contentKey: liveContentKey, rows: displayRows, welcome: showWelcome, identityKey, pin: livePin };
   }
   const body = switchState.phase === "leaving" ? heldBody?.node ?? null : paintable ? liveBody : null;
   const minimapRows = standby !== undefined || showWelcome
@@ -330,6 +347,7 @@ export function ConversationPane({
     ? tailStreaming(heldBody?.rows ?? [])
     : streaming;
 
+  jumpToLatestSlot?.({ visible: scroll.hasNewContent, jumpToLatest: scroll.jumpToLatest });
   return (
     <>
       <main
@@ -352,19 +370,6 @@ export function ConversationPane({
           {switchState.veil ? <ConversationSkeleton {...(switchVeilLeaving(switchState) ? { leaving: true } : {})} /> : null}
           <div className="convo-body" data-phase={switchState.phase}>{body}</div>
         </div>
-        {scroll.hasNewContent ? (
-          <div className="new-content-pill-row">
-            <button
-              type="button"
-              className="new-content-pill"
-              onClick={scroll.jumpToLatest}
-              aria-label="回到最新"
-              data-tip="回到最新"
-            >
-              <Icon name="chevron-d" />
-            </button>
-          </div>
-        ) : null}
         <div className="sr-only" aria-live="polite">
           {latestAnnouncement(state, displayRows.length, switchState.phase)}
         </div>
