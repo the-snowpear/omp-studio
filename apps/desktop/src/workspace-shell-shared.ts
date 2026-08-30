@@ -12,6 +12,11 @@ export const WORKSPACE_SHELL_IPC_CHANNELS = {
   revealInFileManager: "omp-studio:desktop:workspace-reveal-in-file-manager",
   resolveDroppedPaths: "omp-studio:desktop:workspace-resolve-dropped-paths",
   pickPlanSavePath: "omp-studio:desktop:workspace-pick-plan-save-path",
+  fileOpen: "omp-studio:desktop:file-open",
+  fileOpenWith: "omp-studio:desktop:file-open-with",
+  fileReveal: "omp-studio:desktop:file-reveal",
+  fileAbsolutePath: "omp-studio:desktop:file-absolute-path",
+  fileOpeners: "omp-studio:desktop:file-openers",
 } as const;
 
 /** Opaque workspace ids are Host-generated base64url tokens (or test ids). */
@@ -120,4 +125,83 @@ export function parseResolveDroppedPathsInput(value: unknown): ResolveDroppedPat
     paths.push(path);
   }
   return { workspaceId: input.workspaceId, paths };
+}
+
+const MAX_FILE_PATH_CHARS = 1_024;
+
+export type WorkspaceFileKind = "file" | "dir";
+
+/**
+ * A single Explorer node addressed by its opaque workspaceId plus the same
+ * normalized workspace-relative path the file tree read model exposes. Main
+ * resolves the absolute path and enforces containment inside the workspace
+ * root; absolute paths never cross the IPC boundary inbound.
+ */
+export interface WorkspaceFileTargetInput {
+  readonly workspaceId: string;
+  readonly path: string;
+  readonly kind: WorkspaceFileKind;
+}
+
+/**
+ * Available opener for the Explorer「打开方式」submenu. Machine-level probe,
+ * independent of any workspace.
+ */
+export interface FileOpener {
+  readonly id: string;
+  readonly name: string;
+}
+
+export type FileOpenerChoice = "vscode" | "cursor" | "windsurf" | "choose";
+
+export interface FileOpenWithInput extends WorkspaceFileTargetInput {
+  readonly openerId: FileOpenerChoice;
+}
+
+/**
+ * Result of a file-level shell action. `cancelled` means the user closed the
+ * system picker without choosing an app; it is not an error.
+ */
+export type WorkspaceFileActionResult =
+  | { readonly status: "opened" }
+  | { readonly status: "cancelled" }
+  | { readonly status: "failed"; readonly message: string };
+
+function parseWorkspaceFileTarget(value: unknown, what: string, extraKeys: readonly string[] = []): WorkspaceFileTargetInput {
+  assertPlainObject(value, what);
+  const input = value as Record<string, unknown>;
+  const allowedKeys = ["workspaceId", "path", "kind", ...extraKeys];
+  for (const key of Object.keys(input)) {
+    if (!allowedKeys.includes(key)) {
+      throw new WorkspaceShellIpcError(`${what}: unexpected field ${key}`);
+    }
+  }
+  if (typeof input.workspaceId !== "string" || !WORKSPACE_ID_PATTERN.test(input.workspaceId)) {
+    throw new WorkspaceShellIpcError(`${what}: workspaceId must be an opaque 1–128 character token`);
+  }
+  if (typeof input.path !== "string"
+    || input.path.length === 0
+    || input.path.length > MAX_FILE_PATH_CHARS
+    || input.path.startsWith("/")
+    || input.path.includes("\\")
+    || input.path.split("/").includes("..")) {
+    throw new WorkspaceShellIpcError(`${what}: path must be a workspace-relative forward-slash path without .. segments`);
+  }
+  if (input.kind !== "file" && input.kind !== "dir") {
+    throw new WorkspaceShellIpcError(`${what}: kind must be "file" or "dir"`);
+  }
+  return { workspaceId: input.workspaceId, path: input.path, kind: input.kind };
+}
+
+export function parseWorkspaceFileTargetInput(value: unknown): WorkspaceFileTargetInput {
+  return parseWorkspaceFileTarget(value, "workspace file target");
+}
+
+export function parseFileOpenWithInput(value: unknown): FileOpenWithInput {
+  const target = parseWorkspaceFileTarget(value, "workspace file open-with", ["openerId"]);
+  const input = value as Record<string, unknown>;
+  if (input.openerId !== "vscode" && input.openerId !== "cursor" && input.openerId !== "windsurf" && input.openerId !== "choose") {
+    throw new WorkspaceShellIpcError("workspace file open-with: openerId must be one of vscode | cursor | windsurf | choose");
+  }
+  return { ...target, openerId: input.openerId };
 }

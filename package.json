@@ -32,6 +32,7 @@
     "typecheck": "npm run build && npm run typecheck -w @omp-studio/renderer && npm run typecheck -w @omp-studio/desktop",
     "test": "npm run test -w @omp-studio/studio-protocol && npm run test -w @omp-studio/runtime-installer && npm run test -w @omp-studio/studio-host && npm run test -w @omp-studio/host-client-api && npm run test -w @omp-studio/client && npm run test -w @omp-studio/platform-win32 && npm run test -w @omp-studio/platform-darwin && npm run test -w @omp-studio/transport-desktop && npm run test -w @omp-studio/transport-web && npm run test -w @omp-studio/testkit && npm run test -w @omp-studio/renderer && npm run test -w @omp-studio/desktop",
     "conversation:e2e:manual": "node scripts/real-conversation-e2e.mjs",
+    "perf:streaming": "node scripts/streaming-perf-gate.mjs",
     "check": "npm run typecheck && npm test",
     "runtime:verify-source": "node scripts/verify-omp-source.mjs",
     "omp:install-deps": "node scripts/install-omp-deps.mjs",

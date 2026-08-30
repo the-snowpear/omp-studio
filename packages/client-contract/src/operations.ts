@@ -15,6 +15,8 @@ import type {
   BtwSnapshot,
   CapabilityManifest,
   ConversationTranscriptPage,
+  ConversationOpenResult,
+  ConversationTarget,
   OpaqueCursor,
   OperatorCommandManifest,
   OperatorStateSnapshot,
@@ -105,6 +107,8 @@ export interface QueryInputMap {
   /** Lists one directory level. Omit path for the workspace root. */
   "workspace.fileTree": { readonly workspaceId: WorkspaceId; readonly path?: string };
   "usage.get": EmptyInput;
+  /** Latest page plus bounded live recovery state for a main or child conversation. */
+  "conversation.open": { readonly target: ConversationTarget; readonly limit?: number };
   "session.transcript.read": { readonly cursor?: OpaqueCursor; readonly limit?: number };
   "agent.transcript.read": { readonly agentId: AgentId; readonly cursor?: OpaqueCursor; readonly limit?: number };
   "agent.conversation.read": { readonly agentId: AgentId; readonly cursor?: OpaqueCursor; readonly limit?: number };
@@ -165,6 +169,7 @@ export interface QueryResultMap {
   "workspace.fileTree": WorkspaceFileTreeReadModel;
   /** Homepage token heatmap / curve. Aggregates from omp stats.db only. */
   "usage.get": TokenUsageReadModel;
+  "conversation.open": ConversationOpenResult;
   /** Active-branch transcript page. Protocol public shape; never `unknown[]`. */
   "session.transcript.read": ConversationTranscriptPage;
   /** Per-agent transcript page from the Runtime Agent Hub. */

@@ -292,6 +292,19 @@
 /* 会话行 ⋯ 菜单弹层（ThreadRowMenu portal 到 body）：比顶栏 crumb 弹层
    （.menu 基础 min-width 240px）稍窄；定位与视口钳制由 JS 计算。 */
 .thread-row-popover { position: fixed; min-width: 208px; }
+/* Explorer 文件/目录行 ⋯ 菜单弹层（FileRowMenu portal 到 body）：
+   宽度、钳制与翻叠同会话行弹层；「打开方式」子菜单在弹层内绝对定位。 */
+.explorer-file-popover { position: fixed; min-width: 216px; }
+.explorer-openwith-zone { position: relative; }
+.explorer-openwith-zone > .menu-item .icon:last-child { margin-left: auto; }
+.explorer-openwith-flyout {
+  position: absolute;
+  top: 0;
+  min-width: 200px;
+  z-index: 1;
+}
+.explorer-openwith-flyout.side-right { left: calc(100% + 8px); }
+.explorer-openwith-flyout.side-left { right: calc(100% + 8px); }
 .t-actions .icon-btn { width: 20px; height: 20px; }
 /* 悬停态坐标推导（相对【行】右缘，再换算到【标题盒】右缘）：
    .t-actions 距行右缘 4px（--sp-4），宽 42px（20 + 2 + 20），
@@ -618,7 +631,7 @@
    （18 + 2 + 18），左按钮左缘 = 4 + 38 = 42px；+2px 余量 → 完全透明点
    在行右缘 44px。徽章收 0 后文件名右缘距行右缘 = 6px 右内边距
    （--sp-6）+ 5px 行内 gap = 11px，换算文件名坐标：clear = 44 - 11
-   = 33px，带宽 18px → fade = 51px。文件行与文件夹行都是「加入上下文 +
+   = 33px，带宽 18px → fade = 51px。文件行与文件夹行都是「添加上下文 +
    更多」两枚按钮，悬停渐隐同一套坐标。 */
 .tree-row .fname {
   --fname-fade: 18px;

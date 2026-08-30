@@ -1,4 +1,4 @@
-import type { OpaqueCursor, RuntimeEpoch, SessionId } from "./ids.js";
+import type { AgentId, OpaqueCursor, RuntimeEpoch, SessionId } from "./ids.js";
 
 /**
  * Strict JSON value. Classes, functions, symbols, `undefined`, `NaN`,
@@ -110,6 +110,59 @@ export interface ConversationTranscriptPage {
   hasMoreBefore: boolean;
 }
 
+/** A live conversation surface selected by the product client. */
+export type ConversationTarget =
+  | { readonly kind: "session"; readonly sessionId: SessionId }
+  | { readonly kind: "agent"; readonly parentSessionId: SessionId; readonly agentId: AgentId };
+
+/**
+ * Resolved target identity returned by `conversation.open`.
+ *
+ * Child Runtime events carry their own session id but the legacy Runtime
+ * projector does not carry the Agent Hub id. Returning both identities makes
+ * the association explicit and lets a subscribe-before-open client reconcile
+ * already-buffered child events without guessing from text or ordering.
+ */
+export type ConversationResolvedTarget =
+  | { readonly kind: "session"; readonly sessionId: SessionId; readonly conversationSessionId: SessionId }
+  | {
+      readonly kind: "agent";
+      readonly parentSessionId: SessionId;
+      readonly agentId: AgentId;
+      readonly conversationSessionId: SessionId;
+    };
+
+export interface ConversationStreamEvent {
+  /** Monotonic only within `target.conversationSessionId` and this Runtime epoch. */
+  readonly streamSeq: number;
+  /** Original Runtime Bridge sequence; it is global and may be sparse per target. */
+  readonly eventSeq: number;
+  readonly stateVersion: number;
+  readonly occurredAt: string;
+  readonly update: ConversationRuntimeEvent;
+}
+
+export type ConversationLiveReplay =
+  | {
+      readonly status: "complete";
+      /** All buffered live events at or below this target-level sequence are represented. */
+      readonly watermark: number;
+      readonly events: readonly ConversationStreamEvent[];
+    }
+  | {
+      readonly status: "resyncRequired";
+      readonly watermark: number;
+      readonly events: readonly [];
+      readonly reason: string;
+    };
+
+export interface ConversationOpenResult {
+  readonly target: ConversationResolvedTarget;
+  readonly page: ConversationTranscriptPage;
+  /** Bounded recovery state captured atomically after `page` was read. */
+  readonly live: ConversationLiveReplay;
+}
+
 /**
  * `session.transcript.read` is gated by the existing capability `session.history`.
  * The operation exists in the contract now; Runtime hello must not advertise
@@ -171,6 +224,8 @@ export const CONVERSATION_LIMITS = {
   NOTICE_MESSAGE_MAX_CHARS: 16 * 1024,
   DELTA_MAX_BYTES: 32 * 1024,
   COMPACTION_SUMMARY_MAX_BYTES: 256 * 1024,
+  LIVE_REPLAY_MAX_EVENTS: 512,
+  LIVE_REPLAY_MAX_BYTES: 2 * 1024 * 1024,
 } as const;
 
 /**

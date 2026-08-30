@@ -28,8 +28,9 @@ import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
 import { registerChromeLogsIpc } from "./chrome-logs.js";
 import { registerChromeProfileIpc } from "./chrome-profile.js";
 import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, join } from "node:path";
+import { spawn } from "node:child_process";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 
 import { createDesktopApplication } from "./composition.js";
 import { registerDesktopIpc } from "./ipc.js";
@@ -50,10 +51,16 @@ import { defaultHostLogsDirectory } from "./host-log.js";
 import {
   externalEditorCommandForPath,
   launchExternalEditor,
+  listExternalEditorCommands,
   resolveExternalEditorCommand,
 } from "./external-editor.js";
 import { registerWorkspaceShellIpc } from "./workspace-shell-ipc.js";
-import type { WorkspaceShellEditorResult } from "./workspace-shell-shared.js";
+import type {
+  FileOpener,
+  WorkspaceFileActionResult,
+  WorkspaceFileTargetInput,
+  WorkspaceShellEditorResult,
+} from "./workspace-shell-shared.js";
 import { resolveDroppedPaths } from "./dropped-paths.js";
 import { planSaveRelativeTarget } from "./plan-save-path.js";
 import { registerTerminalIpc } from "./terminal-ipc.js";
@@ -114,11 +121,11 @@ export async function main(): Promise<void> {
     return [{ name: "所有文件", extensions: ["*"] }];
   };
 
-  const openInExternalEditor = async (cwd: string): Promise<WorkspaceShellEditorResult> => {
+  const showOpenWithPicker = async (title: string): Promise<string | undefined> => {
     const detected = resolveExternalEditorCommand();
     const defaultPath = detected !== undefined && isAbsolute(detected.file) ? detected.file : undefined;
     const pickerOptions: Electron.OpenDialogOptions = {
-      title: "选择用于打开项目的编辑器",
+      title,
       buttonLabel: "用所选程序打开",
       properties: ["openFile"],
       ...(defaultPath === undefined ? {} : { defaultPath }),
@@ -128,13 +135,104 @@ export async function main(): Promise<void> {
     const picked = owner === null
       ? await dialog.showOpenDialog(pickerOptions)
       : await dialog.showOpenDialog(owner, pickerOptions);
-    const file = picked.filePaths[0];
-    if (picked.canceled || file === undefined) {
+    return picked.canceled ? undefined : picked.filePaths[0];
+  };
+
+  const openInExternalEditor = async (cwd: string): Promise<WorkspaceShellEditorResult> => {
+    const file = await showOpenWithPicker("选择用于打开项目的编辑器");
+    if (file === undefined) {
       return { status: "cancelled" };
     }
     await launchExternalEditor(externalEditorCommandForPath(file), cwd);
     return { status: "opened", editorName: basename(file) };
   };
+
+  /**
+   * Resolve a Renderer-supplied workspace-relative tree path to its absolute
+   * form, enforcing containment inside the workspace root plus existence and
+   * kind checks. Absolute paths never travel inbound from the Renderer.
+   */
+  const resolveWorkspaceFileTarget = async (cwd: string, target: WorkspaceFileTargetInput): Promise<string> => {
+    const root = resolve(cwd);
+    const absolute = resolve(root, target.path);
+    if (absolute !== root && !absolute.startsWith(root + sep)) {
+      throw new Error("目标路径超出工作区范围");
+    }
+    let info: Awaited<ReturnType<typeof stat>>;
+    try {
+      info = await stat(absolute);
+    } catch {
+      throw new Error(`未找到${target.kind === "dir" ? "目录" : "文件"} ${target.path}`);
+    }
+    if ((target.kind === "dir") !== info.isDirectory()) {
+      throw new Error(`${target.path} 不是${target.kind === "dir" ? "目录" : "文件"}`);
+    }
+    return absolute;
+  };
+
+  const openFile = async (cwd: string, target: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> => {
+    const absolute = await resolveWorkspaceFileTarget(cwd, target);
+    const error = await shell.openPath(absolute);
+    return error.length > 0 ? { status: "failed", message: error } : { status: "opened" };
+  };
+
+  const openFileWith = async (
+    cwd: string,
+    target: WorkspaceFileTargetInput,
+    openerId: string,
+  ): Promise<WorkspaceFileActionResult> => {
+    const absolute = await resolveWorkspaceFileTarget(cwd, target);
+    if (openerId === "choose") {
+      if (process.platform === "win32" && target.kind === "file") {
+        // Native Windows "How do you want to open this file?" dialog.
+        const child = spawn("rundll32.exe", ["shell32.dll,OpenAs_RunDLL", absolute], {
+          detached: true,
+          stdio: "ignore",
+        });
+        await new Promise<void>((resolveSpawn, rejectSpawn) => {
+          let settled = false;
+          const fail = (error: Error): void => {
+            if (settled) return;
+            settled = true;
+            rejectSpawn(error);
+          };
+          child.once("error", fail);
+          child.once("spawn", () => {
+            if (settled) return;
+            settled = true;
+            child.unref();
+            resolveSpawn();
+          });
+        });
+        return { status: "opened" };
+      }
+      const picked = await showOpenWithPicker(
+        target.kind === "dir" ? "选择用于打开目录的程序" : "选择用于打开文件的程序",
+      );
+      if (picked === undefined) return { status: "cancelled" };
+      await launchExternalEditor(externalEditorCommandForPath(picked), absolute);
+      return { status: "opened" };
+    }
+    const command = listExternalEditorCommands().find((candidate) => candidate.id === openerId);
+    if (command === undefined) {
+      return { status: "failed", message: "未找到所选编辑器，请确认其已安装" };
+    }
+    await launchExternalEditor(command, absolute);
+    return { status: "opened" };
+  };
+
+  const revealFileInFileManager = async (cwd: string, target: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> => {
+    const absolute = await resolveWorkspaceFileTarget(cwd, target);
+    if (target.kind === "dir") {
+      const error = await shell.openPath(absolute);
+      return error.length > 0 ? { status: "failed", message: error } : { status: "opened" };
+    }
+    shell.showItemInFolder(absolute);
+    return { status: "opened" };
+  };
+
+  const listFileOpeners = async (): Promise<ReadonlyArray<FileOpener>> =>
+    listExternalEditorCommands().map((command): FileOpener => ({ id: command.id ?? command.label, name: command.label }));
 
   const createWindow: DesktopWindowFactory = async (context) => {
     const window = createSecureWindow({
@@ -293,6 +391,11 @@ export async function main(): Promise<void> {
           if (error.length > 0) throw new Error(error);
         },
         resolveDroppedPaths: (cwd, paths) => resolveDroppedPaths(cwd, paths),
+        openFile,
+        openFileWith,
+        revealFileInFileManager,
+        resolveFileAbsolutePath: (cwd, target) => resolveWorkspaceFileTarget(cwd, target),
+        listFileOpeners,
         async pickPlanSavePath(cwd) {
           const picked = await dialog.showSaveDialog({
             title: "保存计划",

@@ -41,6 +41,21 @@ function fakeSession(
 	} as unknown as AgentSession;
 }
 
+function statsSession(
+	sessionId: string,
+	stats: { tokens: number; requests: number; tools: number; cost: number },
+): AgentSession {
+	return {
+		...fakeSession(sessionId),
+		getSessionStats: () => ({
+			tokens: { total: stats.tokens },
+			assistantMessages: stats.requests,
+			toolCalls: stats.tools,
+			cost: stats.cost,
+		}),
+	} as unknown as AgentSession;
+}
+
 function silentBridge(): StudioBridgeLifecycle {
 	return {
 		async start() {},
@@ -257,5 +272,50 @@ describe("studio-host runtime", () => {
 			},
 			{ createBridge: silentBridge, createRuntimeId: () => "runtime-switch" },
 		);
+	});
+
+	test("keeps the last measured usage of a parked agent as a frozen span", async () => {
+		const registry = AgentRegistry.global();
+		const createdAt = Date.now() - 600_000;
+		const lastActivity = createdAt + 480_000;
+		registry.register({
+			id: "ToolTestA",
+			displayName: "ToolTestA",
+			kind: "sub",
+			session: statsSession("child-sess", { tokens: 12_600, requests: 9, tools: 14, cost: 0.51 }),
+			status: "running",
+			createdAt,
+			lastActivity,
+		});
+		const runtime = createStudioHostRuntime(fakeSession(), { runtimeEpoch: 1 }, () => "runtime-usage");
+		const running = runtime.services.agents.list({}).find(agent => agent.agentId === "ToolTestA");
+		expect(running?.usage).toMatchObject({
+			tokens: 12_600,
+			requests: 9,
+			tools: 14,
+			durationMs: 480_000,
+			durationKind: "active",
+		});
+
+		// Parking disposes the session, so live stats vanish; the roster must still
+		// report what the agent actually spent instead of dropping to `usage —`.
+		// `setStatus` stamps `lastActivity`, so the span ends at park time and then
+		// stops moving — the clock must not keep climbing on later reads.
+		expect(registry.detachSession("ToolTestA")).toBe(true);
+		expect(registry.setStatus("ToolTestA", "parked")).toBe(true);
+		const parked = runtime.services.agents.list({}).find(agent => agent.agentId === "ToolTestA");
+		expect(parked?.hasLiveSession).toBe(false);
+		expect(parked?.usage).toMatchObject({
+			tokens: 12_600,
+			requests: 9,
+			tools: 14,
+			cost: 0.51,
+			durationKind: "span",
+		});
+		expect(parked?.usage?.durationMs).toBeGreaterThanOrEqual(480_000);
+		await Bun.sleep(25);
+		const later = runtime.services.agents.list({}).find(agent => agent.agentId === "ToolTestA");
+		expect(later?.usage?.durationMs).toBe(parked?.usage?.durationMs);
+		expect(later?.updatedAt).toBe(parked?.updatedAt);
 	});
 });

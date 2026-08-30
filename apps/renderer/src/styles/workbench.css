@@ -328,6 +328,115 @@
   padding: var(--sp-24) var(--sp-32) var(--sp-32);
   padding-right: calc(var(--sp-32) + var(--minimap-w) + 8px);
 }
+/* 虚拟行是绝对定位叠放的：流式文本换行长高的那一帧，虚拟列表容器高度仍是上一次
+   测量的旧值（react-virtual 的 resize 处理按 rAF 延后一帧，React 再一帧才提交新
+   totalSize），长出来的最后一行会越过容器底边画到下方 ActivityLine 等流内内容上，
+   一两帧后才被推下去——快速输出时反复可见。在这里裁掉越界部分：新行改为随测量
+   落地、滚动同步上移的那一帧一起出现，而不是先盖在别的内容上。 */
+.convo-virtual-list { overflow: clip; }
+
+/* ============================================================
+   会话切换过场：正文淡出 → 骨架兜住空窗 → 交叉溶解淡入
+   时长必须与 conversationSwitchPhase.ts 的 SWITCH_LEAVE_MS(140) /
+   SWITCH_REVEAL_MS(320) 对齐：阶段一结束就会摘掉这里的类，动画没跑完就是硬切。
+   全程只动 opacity。任何 transform 都会进 ConversationVirtualList 的 scrollMargin
+   量算（getBoundingClientRect 相对滚动容器），虚拟行被反向补偿，整段 transcript
+   在动画期间抖动 —— 位移只允许骨架自己做（它对布局零贡献）。
+   ============================================================ */
+.convo-body { opacity: 1; }
+/* 上一段 transcript 原地淡出：ConversationPane 把同一个 ReactNode 引用再交给
+   React，整棵子树按引用相等跳过重渲染，DOM／滚动位置／虚拟列表状态全部原样留在
+   屏上，只有透明度在走。 */
+.convo-body[data-phase="leaving"] {
+  opacity: 0;
+  transition: opacity 140ms var(--ease-in);
+  pointer-events: none;
+}
+.convo-body[data-phase="waiting"] { opacity: 0; transition: none; }
+/* 新 transcript 已挂载但还在完成虚拟行测高与贴底；保持不可见，稳定后才进入 revealing。 */
+.convo-body[data-phase="settling"] { opacity: 0; transition: none; pointer-events: none; }
+/* 淡入用 animation 而不是 transition：起点必须是 0，而正文这一帧才刚挂上，
+   没有可插值的前值。transition:none 挡掉同一帧 opacity 0→1 顺带触发的过渡，
+   否则动画收尾后还有一条过渡在跑，尾巴会二次变亮。 */
+.convo-body[data-phase="revealing"] {
+  transition: none;
+  animation: convo-body-in 320ms var(--ease-out);
+}
+@keyframes convo-body-in { from { opacity: 0; } }
+
+/* 骨架屏容器：sticky + height:0 + 绝对定位内层，对文档高度零贡献。
+   sticky 让它在任意滚动位置都停在滚动视口顶部；内层高度压在视口高度以下，
+   绝对定位的溢出就不会把 scrollHeight 撑大——否则骨架卸载时高度回缩，
+   贴底位置会被浏览器 clamp 一下，正好在淡入收尾时跳一帧。 */
+.convo-veil {
+  --cv-h: min(420px, 46vh);
+  position: sticky;
+  top: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+/* 入场延迟 60ms 是"快加载不闪"的闸门：读取在这之前落地，骨架一帧都不会亮；
+   稍慢一点也只亮到半途就被下面的淡出接走（transition 从当前值反向插值），
+   于是短加载看到的是一次呼吸，只有长加载才看到完整骨架。 */
+.convo-veil[data-in="true"] {
+  opacity: 1;
+  transition: opacity 260ms var(--ease-out) 60ms;
+}
+/* 必须排在 [data-in] 之后：同特异度，靠源序压过入场。 */
+.convo-veil[data-leaving="true"] {
+  opacity: 0;
+  transition: opacity 200ms var(--ease);
+}
+.cv-groups {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: var(--cv-h);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-20);
+  /* 下缘渐隐：骨架不假装知道这段对话有多长。 */
+  mask-image: linear-gradient(to bottom, black 52%, transparent 96%);
+}
+.cv-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  transform: translateY(14px);
+  transition: transform 320ms var(--ease-out);
+  transition-delay: calc(60ms + var(--i) * 45ms);
+}
+.convo-veil[data-in="true"] .cv-group { transform: none; }
+.cv-head { display: flex; align-items: center; gap: var(--sp-8); }
+.cv-avatar { width: 18px; height: 18px; flex: none; }
+.cv-name { width: 72px; height: 9px; }
+.cv-line { height: 11px; }
+.cv-card { height: 34px; border-radius: var(--r-6); }
+.cv-group.cv-user { align-items: flex-end; }
+/* 用户消息是实底 accent 气泡；骨架跟着走 accent 色阶，淡入时右侧不会从灰块
+   突变成紫块。放在 base.css 的 .skeleton 之后覆盖它的灰色渐变与圆角。 */
+.cv-bubble {
+  height: 34px;
+  border-radius: var(--r-10) var(--r-10) var(--r-4) var(--r-10);
+  background: linear-gradient(90deg, var(--accent-soft) 25%, var(--accent-softer) 50%, var(--accent-soft) 75%);
+  background-size: 200% 100%;
+}
+/* shimmer 逐组错相：同相位扫过五组像一整块在闪，错开才像内容在陆续到位。 */
+.cv-group .skeleton { animation-delay: calc(var(--i) * -170ms); }
+/* 只有慢到 SWITCH_SLOW_MS 才浮出的一行说明，落在骨架已经渐隐的下缘外。 */
+.cv-note {
+  position: absolute;
+  top: calc(var(--cv-h) - 6px);
+  left: 0;
+  margin: 0;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease-out);
+}
+.cv-note[data-on="true"] { opacity: 1; }
 
 /* ---------- 文档式对话流 ---------- */
 .ev { margin-bottom: var(--sp-20); }
@@ -390,6 +499,22 @@
 .ev-user .ev-body .chip-code {
   background: color-mix(in srgb, var(--text-on-accent) 16%, transparent);
   color: var(--text-on-accent);
+}
+/* Light theme keeps the main accent language but uses a pale lilac bubble so
+   user content remains readable without the dark filled treatment. Dark theme
+   intentionally keeps the original high-contrast accent bubble unchanged. */
+:root[data-theme="light"] .ev-user .ev-body {
+  background: #eee9ff;
+  color: var(--text);
+}
+:root[data-theme="light"] .ev-user .ev-body::selection,
+:root[data-theme="light"] .ev-user .ev-body *::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--text);
+}
+:root[data-theme="light"] .ev-user .ev-body .chip-code {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
 }
 .ev-user .ev-refs { justify-content: flex-end; }
 .ev-refs { display: flex; flex-wrap: wrap; gap: var(--sp-6); margin-top: var(--sp-8); }
@@ -1122,8 +1247,10 @@
   opacity: 0;
   visibility: hidden;
   transform: translateY(-3px);
+  /* margin-top 与轨道一起过渡：链展开时 4px 间距若瞬时落下，会在 0fr 起跳帧先跳一下。 */
   transition:
     grid-template-rows var(--dur-slow) var(--ease-out),
+    margin-top var(--dur-slow) var(--ease-out),
     opacity var(--dur) var(--ease-out),
     transform var(--dur) var(--ease-out),
     visibility 0s linear var(--dur-slow);
@@ -1255,6 +1382,18 @@
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+  /* 这些面板已经是自带裁剪的滚动盒，声明 contain 只是把「内部布局与外部无关」这件
+     事告诉浏览器：正文追加一行不必再验证祖先链，工具卡 0fr→1fr 的每一帧也不必把
+     整段代码重新排一遍。收起动画掉帧的主因之一就是这里的重复布局。 */
+  contain: layout paint;
+}
+/* 长流式文本的布局分块（textChunks.tsx）：视口外的块跳过内容布局与绘制，用
+   行数 × 1.65em（这些面板的 line-height）占位。渲染过的块经 `auto` 记住实际
+   宽度，横向滚动条不随可见块漂移；think-scroll 与 codeblock 同为 1.65 行高。 */
+.cv-chunk {
+  content-visibility: auto;
+  contain-intrinsic-width: auto 0px;
+  contain-intrinsic-height: auto calc(var(--cv-lines, 64) * 1.65em);
 }
 .tl-card .codeblock,
 .tl-card .tc-code,
@@ -1361,6 +1500,17 @@
 .tc-code .lx { min-width: max-content; white-space: pre; word-break: normal; color: var(--text-2); }
 .tc-diff .dl { width: max-content; min-width: 100%; }
 .tc-diff .dl .lc { flex: none; min-width: max-content; }
+
+/* 流式期间的折叠动画与静止态共用同一套 `0fr → 1fr` 高度过渡。
+   曾经在这里把流式态的高度过渡整体剥成瞬时（只留 opacity/transform），代价是轮次推进
+   时工具卡与工具链全部硬切。现在改由渲染层控制代价来源：BatchChain 只对「仍在运行」
+   的卡片保持瞬时切换（其正文每帧都在变），已完成的卡片正文已冻结，走完整过渡也只是
+   每帧重排卡壳与重光栅被揭开的区域（滚动面板声明了 contain: layout paint，max-height
+   封顶 320px），与静止态展开历史卡片同价。`[data-live-stream]` 仍由 ConversationPane
+   按尾行是否在流式产出写在 scroller 上，供小地图降频等非动画用途。 */
+.convo-scroll[data-live-stream="1"] .turn-diff-panel {
+  transition: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .batch-chain,

@@ -76,6 +76,13 @@ function textOf(item: { readonly kind: string } & Record<string, unknown>): stri
   return content.filter((block) => block.type === "text").map((block) => block.text ?? "").join("");
 }
 
+test("rejects a non-positive parsed snapshot cache budget", () => {
+  assert.throws(
+    () => new StudioSessionArchiveReader({ allowedCwd: "C:/workspace", snapshotCacheMaxBytes: 0 }),
+    /snapshotCacheMaxBytes must be positive/u,
+  );
+});
+
 test("reads the persisted tail page without a Runtime", async () => {
   const { reader } = await fixture();
   const page = await reader.readPage({ sessionId: "session-a", limit: 50 });

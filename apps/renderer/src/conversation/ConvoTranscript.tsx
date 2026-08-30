@@ -1,28 +1,57 @@
-import {
-  memo,
-  useMemo,
-  type RefObject,
-} from "react";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
-import { ConversationItemView } from "./ConversationItemView";
+import { AssistantRunView, ConversationItemView, type AssistantRunEntry } from "./ConversationItemView";
 import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
-import { timelineRowKey } from "./conversationViewModel";
+import { timelineRowKey, timelineStructureToken } from "./conversationViewModel";
 import {
   assistantRunRanges,
   collectPlanProposal,
   collectTurnFileChanges,
   sessionChangeTurnIdForRange,
-  type PlanProposal,
   type SubagentHubTarget,
   type TurnFileChange,
 } from "./toolMeta";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
+import { useCallback, useMemo, useRef, type ReactNode, type RefObject } from "react";
+import { ConversationVirtualList } from "./ConversationVirtualList";
+
+/** One rendered transcript item plus the inputs it was built from. */
+type RenderedItem = { readonly deps: readonly unknown[]; readonly element: ReactNode };
+
+function sameDeps(previous: readonly unknown[], next: readonly unknown[]): boolean {
+  if (previous.length !== next.length) return false;
+  for (let index = 0; index < next.length; index += 1) {
+    if (previous[index] !== next[index]) return false;
+  }
+  return true;
+}
 
 type TurnChangeBind = {
   readonly files: readonly TurnFileChange[];
   readonly defaultOpen: boolean;
   readonly turnId: string;
 };
+
+type TranscriptRenderItem =
+  | { readonly kind: "row"; readonly index: number; readonly key: string }
+  | { readonly kind: "assistantRun"; readonly start: number; readonly end: number; readonly key: string };
+
+function renderItems(rows: readonly TimelineRow[]): readonly TranscriptRenderItem[] {
+  const items: TranscriptRenderItem[] = [];
+  let index = 0;
+  while (index < rows.length) {
+    if (rows[index]?.type !== "assistant") {
+      items.push({ kind: "row", index, key: timelineRowKey(rows[index]!) });
+      index += 1;
+      continue;
+    }
+    const start = index;
+    while (index + 1 < rows.length && rows[index + 1]?.type === "assistant") index += 1;
+    const end = index;
+    items.push({ kind: "assistantRun", start, end, key: `assistant-run:${timelineRowKey(rows[start]!)}:${timelineRowKey(rows[end]!)}` });
+    index += 1;
+  }
+  return items;
+}
 
 function lastAssistantIndex(rows: readonly TimelineRow[]): number {
   for (let index = rows.length - 1; index >= 0; index -= 1) {
@@ -45,32 +74,6 @@ function turnSliceClosed(slice: readonly TimelineRow[]): boolean {
   return !slice.some((row) => row.type === "assistant" && row.turnOpen === true);
 }
 
-function sameRowSlice(left: readonly TimelineRow[], right: readonly TimelineRow[]): boolean {
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-}
-
-/**
- * 每轮文件改动的缓存，键为该轮最后一行。`rowReuse` 保证已完成轮次的行对象身份不变，
- * 于是流式期间这里只是指针比对。没有它的话，每个 chunk 都要把整条时间线的 segment
- * 摊平重新收集一遍，而且新数组身份会顶掉 `ConversationItemView` 的 memo。
- */
-const turnFilesCache = new WeakMap<
-  TimelineRow,
-  { readonly rows: readonly TimelineRow[]; readonly files: readonly TurnFileChange[] }
->();
-
-function turnFilesOf(endRow: TimelineRow, slice: readonly TimelineRow[]): readonly TurnFileChange[] {
-  const cached = turnFilesCache.get(endRow);
-  if (cached !== undefined && sameRowSlice(cached.rows, slice)) return cached.files;
-  const files = collectTurnFileChanges(collectAssistantSegments(slice));
-  turnFilesCache.set(endRow, { rows: slice, files });
-  return files;
-}
-
 /** Attach one change card to the last assistant row of each completed turn. */
 export function turnChangeBinds(rows: readonly TimelineRow[]): ReadonlyArray<TurnChangeBind | undefined> {
   const binds: Array<TurnChangeBind | undefined> = rows.map(() => undefined);
@@ -78,11 +81,9 @@ export function turnChangeBinds(rows: readonly TimelineRow[]): ReadonlyArray<Tur
   const latest = lastAssistantIndex(rows);
 
   for (const range of ranges) {
-    const endRow = rows[range.end];
-    if (endRow === undefined) continue;
     const slice = rows.slice(range.start, range.end + 1);
     if (!turnSliceClosed(slice)) continue;
-    const files = turnFilesOf(endRow, slice);
+    const files = collectTurnFileChanges(collectAssistantSegments(slice));
     if (files.length === 0) continue;
     binds[range.end] = {
       files,
@@ -101,17 +102,6 @@ function resolvedPlanLink(planLink: PlanCreatedLink, title: string): PlanCreated
   };
 }
 
-/** 计划提案只在行对象变化时重算。 */
-const planProposalCache = new WeakMap<TimelineRow, { readonly value: PlanProposal | undefined }>();
-
-function planProposalOf(row: Extract<TimelineRow, { type: "assistant" }>): PlanProposal | undefined {
-  const cached = planProposalCache.get(row);
-  if (cached !== undefined) return cached.value;
-  const value = collectPlanProposal(row.segments);
-  planProposalCache.set(row, { value });
-  return value;
-}
-
 /**
  * Pin the Created Plan card on the assistant row that actually ran `xd://propose`.
  * After approval the execution turn may continue in the same assistant run;
@@ -127,7 +117,7 @@ export function planCreatedBinds(
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     if (row?.type !== "assistant") continue;
-    const proposal = planProposalOf(row);
+    const proposal = collectPlanProposal(row.segments);
     if (proposal === undefined) continue;
     binds[index] = resolvedPlanLink(planLink, planLink.title?.trim() || proposal.title);
     attached = true;
@@ -139,7 +129,7 @@ export function planCreatedBinds(
   return binds;
 }
 
-export const ConvoTranscript = memo(function ConvoTranscript({
+export function ConvoTranscript({
   scrollerRef,
   rows,
   demo,
@@ -166,13 +156,143 @@ export const ConvoTranscript = memo(function ConvoTranscript({
   liveAgents?: readonly StudioAgentSnapshot[];
   planLink?: PlanCreatedLink;
 }) {
-  const binds = useMemo(() => turnChangeBinds(rows), [rows]);
-  const createdBinds = useMemo(() => planCreatedBinds(rows, planLink), [rows, planLink]);
+  const structureToken = timelineStructureToken(rows);
+  const binds = useMemo(() => turnChangeBinds(rows), [structureToken]);
+  const createdBinds = useMemo(() => planCreatedBinds(rows, planLink), [planLink, structureToken]);
+  const visualItems = useMemo(() => renderItems(rows), [structureToken]);
+  /**
+   * Element identity per transcript item.
+   *
+   * The virtualizer re-renders once per measurement it takes: once per animation
+   * frame while a tool card's height transitions, and once per published frame
+   * while streaming — and each of those calls `renderItem` for every mounted
+   * row. Building the elements inside `renderItem` therefore re-created and
+   * re-compared the entire mounted window every frame, and rows whose props
+   * carry a freshly allocated callback (`onReviewChanges`) re-rendered outright
+   * however deep their tool cards went. Reusing the element makes React skip the
+   * subtree on reference equality alone, so a frame that only moved one row's
+   * height costs one row.
+   */
+  const itemCache = useRef<Map<string, RenderedItem>>(new Map());
+  const itemKeys = useMemo(() => {
+    const keys = visualItems.map((item) => item.key);
+    const live = new Set(keys);
+    for (const key of itemCache.current.keys()) {
+      if (!live.has(key)) itemCache.current.delete(key);
+    }
+    return keys;
+  }, [visualItems]);
   // 只有尾行的链尾能跟随流式，上一轮的链在正文行出现后自动折叠。
-  const latestAssistant = useMemo(() => lastAssistantIndex(rows), [rows]);
-  const keys = useMemo(() => rows.map(timelineRowKey), [rows]);
-
-  // TODO: row virtualization removed — renders all rows
+  const latestAssistant = useMemo(() => lastAssistantIndex(rows), [structureToken]);
+  const buildItem = useCallback(
+    (visualItem: TranscriptRenderItem): ReactNode => {
+      if (visualItem.kind === "assistantRun") {
+        const entries: AssistantRunEntry[] = [];
+        for (let rowIndex = visualItem.start; rowIndex <= visualItem.end; rowIndex += 1) {
+          const candidate = rows[rowIndex];
+          if (candidate?.type !== "assistant") continue;
+          const bind = binds[rowIndex];
+          const rowPlanLink = createdBinds[rowIndex];
+          entries.push({
+            row: candidate,
+            ...(bind === undefined ? {} : { fileChanges: bind.files, changesDefaultOpen: bind.defaultOpen, turnId: bind.turnId }),
+            ...(rowPlanLink === undefined ? {} : { planLink: rowPlanLink }),
+          });
+        }
+        return (
+          <AssistantRunView
+            entries={entries}
+            {...(visualItem.end === latestAssistant ? {} : { tail: false })}
+            {...(demo === true ? { expandAll: true, demo: true } : {})}
+            {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
+            {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+            {...(liveAgents === undefined ? {} : { liveAgents })}
+          />
+        );
+      }
+      const row = rows[visualItem.index]!;
+      const bind = binds[visualItem.index];
+      const rowPlanLink = createdBinds[visualItem.index];
+      return (
+        <ConversationItemView
+          row={row}
+          {...(visualItem.index === latestAssistant ? {} : { tail: false })}
+          {...(demo === true ? { expandAll: true, demo: true } : {})}
+          {...(onRestore === undefined ? {} : { onRestore })}
+          {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
+          {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
+          {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
+          {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
+          {...(bind === undefined ? {} : { fileChanges: bind.files, changesDefaultOpen: bind.defaultOpen })}
+          {...(onReviewChanges === undefined || bind === undefined ? {} : { onReviewChanges: () => onReviewChanges(bind.turnId) })}
+          {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+          {...(liveAgents === undefined ? {} : { liveAgents })}
+          {...(rowPlanLink === undefined ? {} : { planLink: rowPlanLink })}
+        />
+      );
+    },
+    [
+      binds,
+      createdBinds,
+      demo,
+      latestAssistant,
+      liveAgents,
+      onBranchUserMessage,
+      onInspectSubagent,
+      onRestore,
+      onRestoreUserMessage,
+      onReviewChanges,
+      rows,
+      userBranchDisabledReason,
+      userRestoreDisabledReason,
+    ],
+  );
+  const renderItem = useCallback(
+    (index: number): ReactNode => {
+      const visualItem = visualItems[index]!;
+      const deps: unknown[] = [demo, onInspectSubagent, liveAgents, onReviewChanges];
+      if (visualItem.kind === "assistantRun") {
+        deps.push(visualItem.end === latestAssistant);
+        for (let rowIndex = visualItem.start; rowIndex <= visualItem.end; rowIndex += 1) {
+          deps.push(rows[rowIndex], binds[rowIndex], createdBinds[rowIndex]);
+        }
+      } else {
+        deps.push(
+          visualItem.index === latestAssistant,
+          rows[visualItem.index],
+          binds[visualItem.index],
+          createdBinds[visualItem.index],
+          onRestore,
+          onRestoreUserMessage,
+          onBranchUserMessage,
+          userRestoreDisabledReason,
+          userBranchDisabledReason,
+        );
+      }
+      const cached = itemCache.current.get(visualItem.key);
+      if (cached !== undefined && sameDeps(cached.deps, deps)) return cached.element;
+      const element = buildItem(visualItem);
+      itemCache.current.set(visualItem.key, { deps, element });
+      return element;
+    },
+    [
+      binds,
+      buildItem,
+      createdBinds,
+      demo,
+      latestAssistant,
+      liveAgents,
+      onBranchUserMessage,
+      onInspectSubagent,
+      onRestore,
+      onRestoreUserMessage,
+      onReviewChanges,
+      rows,
+      userBranchDisabledReason,
+      userRestoreDisabledReason,
+      visualItems,
+    ],
+  );
   return (
     <>
       {demo ? (
@@ -180,31 +300,11 @@ export const ConvoTranscript = memo(function ConvoTranscript({
           <span className="chip gray xs">演示</span>
         </div>
       ) : null}
-      {rows.map((row, index) => {
-        const key = keys[index]!;
-        const bind = binds[index];
-        const rowPlanLink = createdBinds[index];
-        return (
-          <ConversationItemView
-            key={key}
-            row={row}
-            {...(index === latestAssistant ? {} : { tail: false })}
-            {...(demo === true ? { expandAll: true, demo: true } : {})}
-            {...(onRestore === undefined ? {} : { onRestore })}
-            {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
-            {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
-            {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
-            {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
-            {...(bind === undefined ? {} : { fileChanges: bind.files, changesDefaultOpen: bind.defaultOpen })}
-            {...(onReviewChanges === undefined || bind === undefined
-              ? {}
-              : { onReviewChanges, changesTurnId: bind.turnId })}
-            {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
-            {...(liveAgents === undefined ? {} : { liveAgents })}
-            {...(rowPlanLink === undefined ? {} : { planLink: rowPlanLink })}
-          />
-        );
-      })}
+      <ConversationVirtualList
+        {...(scrollerRef === undefined || demo ? {} : { scrollerRef })}
+        itemKeys={itemKeys}
+        renderItem={renderItem}
+      />
       {planLink !== undefined && planLink.attachEvenWithoutPropose === true && latestAssistant < 0 ? (
         <PlanCreatedCard
           title={planLink.title ?? "Plan"}
@@ -214,4 +314,4 @@ export const ConvoTranscript = memo(function ConvoTranscript({
       ) : null}
     </>
   );
-});
+}

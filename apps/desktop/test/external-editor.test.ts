@@ -10,6 +10,7 @@ import { test } from "node:test";
 
 import {
   externalEditorCommandForPath,
+  listExternalEditorCommands,
   resolveExternalEditorCommand,
   type ExternalEditorCommand,
 } from "../src/external-editor.js";
@@ -84,4 +85,39 @@ test("command shape is stable for launching", () => {
   assert.equal(command.label, "Test Editor");
   assert.equal(command.file, "editor");
   assert.deepEqual([...command.argsFor("/tmp/repo")], ["/tmp/repo"]);
+});
+
+test("listExternalEditorCommands returns one entry per installed family on win32", () => {
+  const local = "C:/Users/dev/AppData/Local";
+  const code = join(local, "Programs", "Microsoft VS Code", "Code.exe");
+  const cursor = join(local, "Programs", "Cursor", "Cursor.exe");
+  const windsurf = join(local, "Programs", "Windsurf", "Windsurf.exe");
+  const commands = listExternalEditorCommands({
+    platform: "win32",
+    env: { LOCALAPPDATA: local },
+    exists: (path) => path === code || path === cursor || path === windsurf,
+  });
+  assert.deepEqual(commands.map((command) => command.id), ["vscode", "cursor", "windsurf"]);
+  assert.deepEqual(commands.map((command) => command.label), ["Visual Studio Code", "Cursor", "Windsurf"]);
+  assert.equal(commands[0]?.file, code);
+});
+
+test("listExternalEditorCommands deduplicates the first hit per family", () => {
+  const local = "C:/Users/dev/AppData/Local";
+  const insiders = join(local, "Programs", "Microsoft VS Code Insiders", "Code - Insiders.exe");
+  const commands = listExternalEditorCommands({
+    platform: "win32",
+    env: { LOCALAPPDATA: local },
+    exists: (path) => path === insiders,
+  });
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0]?.id, "vscode");
+  assert.equal(commands[0]?.label, "Visual Studio Code - Insiders");
+});
+
+test("listExternalEditorCommands returns PATH families on linux", () => {
+  const commands = listExternalEditorCommands({ platform: "linux", env: {}, exists: () => false });
+  assert.deepEqual(commands.map((command) => command.id), ["vscode", "cursor", "windsurf"]);
+  assert.equal(commands[0]?.file, "code");
+  assert.equal(resolveExternalEditorCommand({ platform: "linux", env: {} })?.file, "code");
 });

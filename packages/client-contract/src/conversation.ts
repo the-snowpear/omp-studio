@@ -28,6 +28,7 @@ export {
   parseConversationRuntimeEvent,
   parseConversationTranscriptPage,
   publicConversationToolCallId,
+  tailUtf8,
   truncateUtf8,
   utf8ByteLength,
 } from "@omp-studio/studio-protocol";

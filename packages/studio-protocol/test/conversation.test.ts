@@ -19,6 +19,7 @@ import {
   SESSION_TRANSCRIPT_READ_CONCURRENCY,
   SESSION_TRANSCRIPT_READ_KIND,
   parseConversationRuntimeEvent,
+  parseConversationOpenResult,
   parseConversationTranscriptPage,
   parseFoundationStudioRequest,
   parseStudioEventEnvelope,
@@ -129,6 +130,68 @@ test("transcript page fixture accepts every public item and block kind", async (
   );
   assert.equal(page.hasMoreBefore, true);
   assert.equal(page.headCursor, "opaque-head-cursor");
+});
+
+test("conversation.open validates explicit child identity, watermark, and target-local sequence", () => {
+  const page = {
+    runtimeEpoch: 1,
+    sessionId: "child-session-1",
+    branchLeafId: null,
+    items: [],
+    headCursor: "head",
+    hasMoreBefore: false,
+  };
+  const result = parseConversationOpenResult({
+    target: {
+      kind: "agent",
+      parentSessionId: "parent-session-1",
+      agentId: "agent-1",
+      conversationSessionId: "child-session-1",
+    },
+    page,
+    live: {
+      status: "complete",
+      watermark: 2,
+      events: [
+        {
+          streamSeq: 2,
+          eventSeq: 91,
+          stateVersion: 0,
+          occurredAt: "2026-08-15T12:00:00.000Z",
+          update: {
+            kind: "conversation.message.started",
+            sessionId: "child-session-1",
+            turnId: "turn-1",
+            messageId: "message-1",
+            role: "assistant",
+            createdAt: "2026-08-15T12:00:00.000Z",
+          },
+        },
+      ],
+    },
+  });
+  assert.equal(result.target.kind, "agent");
+  assert.equal(result.live.watermark, 2);
+  assert.equal(result.live.events[0]?.streamSeq, 2);
+
+  assert.throws(
+    () => parseConversationOpenResult({ ...result, page: { ...page, sessionId: "other-child" } }),
+    ContractValidationError,
+  );
+  assert.throws(
+    () => parseConversationOpenResult({
+      ...result,
+      live: { ...result.live, watermark: 1 },
+    }),
+    ContractValidationError,
+  );
+  assert.throws(
+    () => parseConversationOpenResult({
+      ...result,
+      live: { status: "resyncRequired", watermark: 2, events: result.live.events, reason: "overflow" },
+    }),
+    ContractValidationError,
+  );
 });
 
 test("transcript page rejects missing fields, extra keys, non-JSON, and over-limit payloads", async () => {
@@ -456,4 +519,19 @@ test("truncateUtf8 does not split a multibyte codepoint", () => {
   assert.equal(cut.text, "");
   const ascii = truncateUtf8("ab", 1);
   assert.equal(ascii.text, "a");
+});
+
+test("truncateUtf8 keeps text whole under the 3-bytes-per-unit bound and still cuts by bytes above it", () => {
+  // "字" 是 3 字节 1 个 UTF-16 单元：length*3 === maxBytes，走 O(1) 快路径，不做编码。
+  const text = "字".repeat(1000);
+  const kept = truncateUtf8(text, 3000);
+  assert.equal(kept.truncated, false);
+  assert.equal(kept.text, text);
+  // 差一个字节就要真正按字节截断，且不能切断码点。
+  const cut = truncateUtf8(text, 2999);
+  assert.equal(cut.truncated, true);
+  assert.equal(cut.text.length, 999);
+  // 纯 ASCII 时长度界过不了，仍然要靠编码判断，结果必须与原来一致。
+  const ascii = "a".repeat(1000);
+  assert.deepEqual(truncateUtf8(ascii, 1000), { text: ascii, truncated: false });
 });

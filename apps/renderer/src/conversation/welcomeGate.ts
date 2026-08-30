@@ -1,6 +1,8 @@
 import type { HydrateStatus } from "./conversationViewModel";
 
-const NEW_CONVERSATION_HYDRATE: ReadonlySet<HydrateStatus> = new Set(["ready", "unavailable", "idle"]);
+// "loading" 也是其中一员：session.create 回执落地后 engine 按新 identity 重建，
+// hydrate 空窗内若不算新会话面，欢迎页会被骨架屏顶替一遍再重挂（入场动画重播）。
+const NEW_CONVERSATION_HYDRATE: ReadonlySet<HydrateStatus> = new Set(["ready", "unavailable", "idle", "loading"]);
 
 export type ConversationWelcomeInput = {
   readonly preview: boolean;

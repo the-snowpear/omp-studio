@@ -1,320 +1,158 @@
-import { memo, useEffect, useState } from "react";
-import { isValidElement } from "react";
-import { useMemo } from "react";
-import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
-import type { Components, Options } from "react-markdown";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-
+import { scanStreamingMarkdown, type StreamingCodeFence, type StreamingMarkdownScan } from "./markdownBlocks";
 import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
 
-function isSafeHref(href: string): boolean {
-  return /^(https?:|mailto:)/i.test(href.trim());
+const REMARK: Options["remarkPlugins"] = [remarkGfm];
+const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
+const MAX_HIGHLIGHT_CHARS = 96 * 1024;
+
+export function isSafeMarkdownUrl(value: string, image = false): boolean {
+  const url = value.trim();
+  if (image) return /^https?:\/\//i.test(url);
+  return /^(?:https?:|mailto:)/i.test(url) || /^(?:[/.#?]|[^:\s]+$)/.test(url);
 }
 
-function reactNodeText(node: ReactNode): string {
-  if (node === null || node === undefined || typeof node === "boolean") return "";
+function nodeText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map((child) => reactNodeText(child)).join("");
-  if (isValidElement(node)) {
-    const props = node.props as { children?: ReactNode };
-    return reactNodeText(props.children);
-  }
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (node && typeof node === "object" && "props" in node) return nodeText((node as { props: { children?: ReactNode } }).props.children);
   return "";
 }
 
-type Mermaid = typeof import("mermaid")["default"];
-
-let mermaidModule: Promise<Mermaid> | undefined;
-
-function loadMermaid(): Promise<Mermaid> {
-  mermaidModule ??= import("mermaid").then((mod) => mod.default);
-  return mermaidModule;
+const mermaidCache = new Map<string, string>();
+function cacheMermaid(key: string, svg: string): void {
+  if (mermaidCache.size >= 32) mermaidCache.delete(mermaidCache.keys().next().value as string);
+  mermaidCache.set(key, svg);
 }
-
-function currentThemeIsDark(): boolean {
-  return typeof document === "object" && document.documentElement.getAttribute("data-theme") === "dark";
-}
-
-const MERMAID_CACHE_MAX = 32;
-const mermaidSvgCache = new Map<string, string>();
-
-function MermaidBlock({ code }: { code: string }) {
-  const [svg, setSvg] = useState<string | undefined>(undefined);
-  const [failed, setFailed] = useState(false);
+function LazyMermaid({ code }: { code: string }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState<string | null>(() => mermaidCache.get(code) ?? null);
   useEffect(() => {
-    let alive = true;
-    setFailed(false);
-    const dark = currentThemeIsDark();
-    const cacheKey = `${dark ? "dark" : "light"}\u0000${code}`;
-    const cached = mermaidSvgCache.get(cacheKey);
-    if (cached !== undefined) {
-      setSvg(cached);
-      return;
+    if (svg !== null || host.current === null) return;
+    let active = true;
+    const render = () => { void import("mermaid").then(async ({ default: mermaid }) => {
+      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "default" });
+      const result = await mermaid.render(`omp-mermaid-${Math.random().toString(36).slice(2)}`, code);
+      if (active) { cacheMermaid(code, result.svg); setSvg(result.svg); }
+    }).catch(() => { if (active) setSvg(""); }); };
+    if (typeof IntersectionObserver === "undefined") render();
+    else {
+      const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) { observer.disconnect(); render(); } }, { rootMargin: "240px" });
+      observer.observe(host.current);
+      return () => { active = false; observer.disconnect(); };
     }
-    setSvg(undefined);
-    loadMermaid()
-      .then((mermaid) => {
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          theme: dark ? "dark" : "default",
-        });
-        const id = `mmd-${Math.random().toString(36).slice(2, 10)}`;
-        return mermaid.render(id, code);
-      })
-      .then((result) => {
-        if (alive) {
-          if (mermaidSvgCache.size >= MERMAID_CACHE_MAX) {
-            const oldestKey = mermaidSvgCache.keys().next().value;
-            if (oldestKey !== undefined) mermaidSvgCache.delete(oldestKey);
-          }
-          mermaidSvgCache.set(cacheKey, result.svg);
-          setSvg(result.svg);
-        }
-      })
-      .catch(() => {
-        if (alive) setFailed(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [code]);
-  if (failed) {
-    return (
-      <div className="md-code">
-        <div className="md-code-head">
-          <span className="md-code-lang">mermaid</span>
-          <span className="md-code-err">图渲染失败</span>
-        </div>
-        <pre className="codeblock md-code-pre">
-          <code>{code}</code>
-        </pre>
-      </div>
-    );
-  }
-  return (
-    <div className="mermaid-box" {...(svg === undefined ? {} : { dangerouslySetInnerHTML: { __html: svg } })}>
-      {svg === undefined ? <span className="mermaid-pending">图表生成中…</span> : null}
-    </div>
-  );
+    return () => { active = false; };
+  }, [code, svg]);
+  return <div ref={host} className="mermaid-box" {...(svg ? { dangerouslySetInnerHTML: { __html: svg } } : {})}>{svg === null ? <span className="mermaid-pending">图表等待渲染…</span> : svg === "" ? <pre className="codeblock md-code-pre"><code>{code}</code></pre> : null}</div>;
 }
 
-function CodeCopyButton({ text }: { text: string }) {
+function CodeFrame({ language, text, children, streaming }: { language: string; text: string; children: ReactNode; streaming: boolean }) {
   const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      className="md-code-copy"
-      onClick={() => {
-        const clipboard = typeof navigator === "object" ? navigator.clipboard : undefined;
-        if (!clipboard) return;
-        clipboard
-          .writeText(text)
-          .then(() => {
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1500);
-          })
-          .catch(() => {});
-      }}
-    >
-      {copied ? "已复制" : "复制"}
-    </button>
-  );
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current); }, []);
+  return <div className="md-code">
+    <div className="md-code-head">
+      <span className="md-code-lang">{language || "text"}</span>
+      {streaming ? <span className="md-code-hint">流式输出中</span> : <button type="button" className="md-code-copy" onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          if (timer.current !== null) clearTimeout(timer.current);
+          timer.current = setTimeout(() => setCopied(false), 1500);
+        }).catch(() => {});
+      }}>{copied ? "已复制" : "复制"}</button>}
+    </div>
+    <pre className="codeblock md-code-pre">{children}</pre>
+  </div>;
 }
 
-type PreChildProps = { className?: unknown; children?: ReactNode };
-
-function firstElementChild(children: ReactNode): PreChildProps | undefined {
-  const list = Array.isArray(children) ? children : [children];
-  for (const child of list) {
-    if (isValidElement(child)) return child.props as PreChildProps;
-  }
-  return undefined;
-}
-
-function createComponents(streaming: boolean, magicKeywords: boolean): Components {
-  const prose = (children: ReactNode): ReactNode =>
-    magicKeywords ? withMagicKeywordChildren(children) : children;
-
-  return {
-    p({ children }) {
-      return <p>{prose(children)}</p>;
-    },
-    li({ children }) {
-      return <li>{prose(children)}</li>;
-    },
-    h1({ children }) {
-      return <h1>{prose(children)}</h1>;
-    },
-    h2({ children }) {
-      return <h2>{prose(children)}</h2>;
-    },
-    h3({ children }) {
-      return <h3>{prose(children)}</h3>;
-    },
-    h4({ children }) {
-      return <h4>{prose(children)}</h4>;
-    },
-    h5({ children }) {
-      return <h5>{prose(children)}</h5>;
-    },
-    h6({ children }) {
-      return <h6>{prose(children)}</h6>;
-    },
-    blockquote({ children }) {
-      return <blockquote>{prose(children)}</blockquote>;
-    },
-    td({ children }) {
-      return <td>{prose(children)}</td>;
-    },
-    th({ children }) {
-      return <th>{prose(children)}</th>;
-    },
-    strong({ children }) {
-      return <strong>{prose(children)}</strong>;
-    },
-    em({ children }) {
-      return <em>{prose(children)}</em>;
-    },
-    del({ children }) {
-      return <del>{prose(children)}</del>;
-    },
-    a({ href, children }) {
+const componentCache = new Map<string, Components>();
+function componentsFor(streaming: boolean, magic: boolean): Components {
+  const key = `${streaming}:${magic}`;
+  const cached = componentCache.get(key);
+  if (cached !== undefined) return cached;
+  const prose = (children: ReactNode) => magic ? withMagicKeywordChildren(children) : children;
+  const components: Components = {
+    p: ({ children }) => <p>{prose(children)}</p>,
+    li: ({ children }) => <li>{prose(children)}</li>,
+    a: ({ href, children }) => {
       const url = typeof href === "string" ? href.trim() : "";
-      if (!isSafeHref(url)) return <span>{prose(children)}</span>;
-      return (
-        <a href={url} target="_blank" rel="noreferrer noopener">
-          {prose(children)}
-        </a>
-      );
+      return isSafeMarkdownUrl(url) ? <a href={url} target="_blank" rel="noreferrer noopener">{prose(children)}</a> : <span>{prose(children)}</span>;
     },
-    img({ src, alt }) {
+    img: ({ src, alt }) => {
       const url = typeof src === "string" ? src.trim() : "";
-      if (!/^https?:\/\//i.test(url)) return null;
-      return <img src={url} alt={alt ?? ""} loading="lazy" referrerPolicy="no-referrer" />;
+      return isSafeMarkdownUrl(url, true) ? <img src={url} alt={alt ?? ""} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : null;
     },
-    table({ children }) {
-      return (
-        <div className="md-table-wrap">
-          <table>{children}</table>
-        </div>
-      );
-    },
-    code({ className, children }) {
-      const cls = typeof className === "string" ? className : "";
-      if (cls.length > 0) return <code className={cls}>{children}</code>;
-      return <code className="chip-code">{children}</code>;
-    },
-    pre({ children }) {
-      const child = firstElementChild(children);
-      const cls = typeof child?.className === "string" ? child.className : "";
-      const lang = /language-([\w+#.-]+)/.exec(cls)?.[1] ?? "";
-      const text = reactNodeText(child?.children).replace(/\n$/, "");
-      if (lang === "mermaid") {
-        if (streaming) {
-          return (
-            <div className="md-code">
-              <div className="md-code-head">
-                <span className="md-code-lang">mermaid</span>
-                <span className="md-code-hint">流式输出中</span>
-              </div>
-              <pre className="codeblock md-code-pre">
-                <code>{text}</code>
-              </pre>
-            </div>
-          );
-        }
-        return <MermaidBlock code={text} />;
-      }
-      return (
-        <div className="md-code">
-          <div className="md-code-head">
-            <span className="md-code-lang">{lang || "text"}</span>
-            <CodeCopyButton text={text} />
-          </div>
-          <pre className="codeblock md-code-pre">{children}</pre>
-        </div>
-      );
+    table: ({ children }) => <div className="md-table-wrap"><table>{children}</table></div>,
+    code: ({ className, children }) => className ? <code className={className}>{children}</code> : <code className="chip-code">{children}</code>,
+    pre: ({ children }) => {
+      const child = Array.isArray(children) ? children[0] : children;
+      const props = child && typeof child === "object" && "props" in child ? (child as { props: { className?: string; children?: ReactNode } }).props : {};
+      const language = /language-([\w+#.-]+)/.exec(props.className ?? "")?.[1] ?? "";
+      const text = nodeText(props.children).replace(/\n$/, "");
+      if (language === "mermaid" && !streaming) return <LazyMermaid code={text} />;
+      return <CodeFrame language={language} text={text} streaming={streaming}>{children}</CodeFrame>;
     },
   };
+  componentCache.set(key, components);
+  return components;
 }
 
-/* 插件表提到模块级：每次 render 新建字面量只会让 unified 处理器多做无用功。 */
-const REMARK_PLUGINS: Options["remarkPlugins"] = [remarkGfm];
-const REHYPE_PLUGINS: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
-
-/**
- * 一个已闭合的 Markdown 块。`react-markdown` 每次 render 都会重建处理器并整段
- * 重新解析，所以这里按内容 memo：流式期间只有尾块会真的重新解析。
- */
-const MarkdownBlock = memo(function MarkdownBlock({
-  text,
-  components,
-}: {
-  text: string;
-  components: Components;
-}) {
-  return (
-    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={components}>
-      {text}
-    </ReactMarkdown>
-  );
+const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, magic }: { text: string; streaming: boolean; magic: boolean }) {
+  const plugins = !streaming && text.length <= MAX_HIGHLIGHT_CHARS ? HIGHLIGHT : undefined;
+  return <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={plugins} components={componentsFor(streaming, magic)}>{text}</ReactMarkdown>;
 });
 
-// 使用 memo 避免流式输出时历史内联消息重复解析
-export const MarkdownInline = memo(function MarkdownInline({ text }: { text: string; k?: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        p: ({ children }) => <>{children}</>,
-        a({ href, children }) {
-          const url = typeof href === "string" ? href.trim() : "";
-          if (!isSafeHref(url)) return <span>{children}</span>;
-          return (
-            <a href={url} target="_blank" rel="noreferrer noopener">
-              {children}
-            </a>
-          );
-        },
-        img({ src, alt }) {
-          const url = typeof src === "string" ? src.trim() : "";
-          if (!/^https?:\/\//i.test(url)) return null;
-          return <img src={url} alt={alt ?? ""} loading="lazy" referrerPolicy="no-referrer" />;
-        },
-      }}
-    >
-      {text}
-    </ReactMarkdown>
-  );
+const NO_CLOSED_BLOCKS: readonly string[] = [];
+const MarkdownBlockList = memo(function MarkdownBlockList({ blocks, magic, scope }: {
+  blocks: readonly string[];
+  magic: boolean;
+  scope: "frozen" | "pending";
+}) {
+  return <>{blocks.map((block, index) => (
+    <MarkdownBlock key={`${scope}:${index}:${block.length}`} text={block} streaming={false} magic={magic} />
+  ))}</>;
 });
 
-// 使用 memo 避免流式输出时历史消息整篇 Markdown 重解析与高亮
-export const MarkdownText = memo(function MarkdownText({
-  text,
-  streaming,
-  truncated,
-  mark,
-  magicKeywords,
-}: {
-  text: string;
-  streaming?: boolean;
-  truncated?: boolean;
-  mark?: ReactNode;
-  /** Paint OMP magic keywords (static gradient) in prose text nodes. */
-  magicKeywords?: boolean;
+type MarkdownRenderParts = {
+  readonly frozen: readonly string[];
+  readonly pending: readonly string[];
+  readonly tail: string;
+  readonly openFence?: StreamingCodeFence;
+};
+
+export const MarkdownText = memo(function MarkdownText({ text, streaming = false, truncated = false, mark, magicKeywords = false }: {
+  text: string; streaming?: boolean; truncated?: boolean; mark?: ReactNode; magicKeywords?: boolean;
 }) {
-  const components = useMemo(
-    () => createComponents(streaming === true, magicKeywords === true),
-    [streaming, magicKeywords],
-  );
-  // TODO: streaming incremental parse removed — full-text fallback
-  return (
-    <div className="ev-body">
-      <MarkdownBlock text={text} components={components} />
-      {truncated === true ? mark : null}
+  /* 续扫状态。流式期间正文只在尾部追加，把上一帧的扫描结果传回去，分块代价就只跟
+     「这一帧新增的字符」有关，而不是跟已经产出的全文有关。 */
+  const scan = useRef<StreamingMarkdownScan | null>(null);
+  const parts = useMemo<MarkdownRenderParts>(() => {
+    if (!streaming) {
+      scan.current = null;
+      return { frozen: NO_CLOSED_BLOCKS, pending: NO_CLOSED_BLOCKS, tail: text };
+    }
+    const next = scanStreamingMarkdown(text, scan.current ?? undefined);
+    scan.current = next;
+    return next;
+  }, [streaming, text]);
+  return <div className="ev-body">
+    <div className={`convo-md${streaming ? " is-streaming" : ""}`}>
+      <MarkdownBlockList blocks={parts.frozen} magic={magicKeywords} scope="frozen" />
+      <MarkdownBlockList blocks={parts.pending} magic={magicKeywords} scope="pending" />
+      {parts.tail.length > 0 ? <MarkdownBlock text={parts.tail} streaming={streaming} magic={magicKeywords} /> : null}
+      {parts.openFence !== undefined ? (
+        <CodeFrame language={parts.openFence.language} text={parts.openFence.code} streaming>
+          <code className={parts.openFence.language ? `language-${parts.openFence.language}` : undefined}>{parts.openFence.code}</code>
+        </CodeFrame>
+      ) : null}
     </div>
-  );
+    {truncated ? mark : null}
+  </div>;
+});
+
+export const MarkdownInline = memo(function MarkdownInline({ text, magicKeywords = false }: { text: string; magicKeywords?: boolean; k?: string }) {
+  return <span className="md-inline"><ReactMarkdown remarkPlugins={REMARK} components={componentsFor(false, magicKeywords)} unwrapDisallowed>{text}</ReactMarkdown></span>;
 });

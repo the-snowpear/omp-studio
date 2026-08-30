@@ -34,7 +34,7 @@ import type {
   WorkspaceFileTreeReadModel,
   PromptImageInput,
 } from "@omp-studio/client-contract";
-import { selectComposerReceipt, type ClientState, type ConversationHydrateClient } from "@omp-studio/client";
+import { selectComposerReceipt, type ClientState } from "@omp-studio/client";
 import {
   clientShellChanged,
   layoutRestoreNeeded,
@@ -45,6 +45,7 @@ import {
 import type { ApprovalMode, OperatorStateSnapshot, SessionTelemetrySnapshot, StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import type { OperatorCommandManifest } from "@omp-studio/studio-protocol";
 import { AppIcon, Icon } from "./icons";
+import { FileRowMenu, MenuItem, type FileMenuAction, type FileMenuController, type FileMenuTarget, type FileOpenerOption } from "./menus";
 import { I18nProvider, useI18n, type TranslationParams } from "./i18n";
 import { HomePage, SecondaryPage } from "./HomePage";
 import { HistoryPage } from "./HistoryPage";
@@ -122,7 +123,6 @@ import { ConversationEmpty } from "./conversation/ConversationEmpty";
 import { ConversationPane } from "./conversation/ConversationPane";
 import { SubagentInspectCard } from "./conversation/SubagentInspectCard";
 import { collectLatestPlanDocument, SESSION_CHANGE_LAST_ID, type SubagentHubTarget } from "./conversation/toolMeta";
-import { ConversationMinimap } from "./conversation/ConversationMinimap";
 import { TaskProgressDock } from "./conversation/TaskProgressDock";
 // TODO: sessionTaskProgress removed — needs reimplementation
 import { SessionChanges } from "./conversation/SessionChanges";
@@ -131,7 +131,7 @@ import { agentTestRunSummary, projectAgentTestRuns, rerunTestPrompt } from "./co
 import { revealConversationTool } from "./conversation/conversationReveal";
 import { useConversation } from "./conversation/useConversation";
 import { usePersistedSessionAgents } from "./conversation/persistedSessionAgents";
-import { deriveExplorerFileActivity, explorerRowActivity, EMPTY_EXPLORER_FILE_ACTIVITY, type ExplorerFileActivity } from "./conversation/explorerFileActivity";
+import { explorerRowActivity, EMPTY_EXPLORER_FILE_ACTIVITY, type ExplorerFileActivity } from "./conversation/explorerFileActivity";
 import {
   executeUserMessageBranch,
   executeUserMessageRestore,
@@ -198,6 +198,7 @@ import { ThreadSpin } from "./sidebar/ThreadSpin";
 import { ThreadWaitChip } from "./sidebar/ThreadWaitChip";
 import { residentForSession, residentRowsOf, threadRunningFromLive } from "./sidebar/threadRunning";
 import { sidebarProjectOrder } from "./sidebar/projectOrder";
+import { readExplorerExpansion, readExpandedProjects, writeExplorerExpansion, writeExpandedProjects } from "./sidebar/expandMemory";
 import {
   projectHasSession,
   provisionalSessionTitleEnsureKey,
@@ -271,7 +272,7 @@ type Model = {
   workspaces?: WorkspaceListReadModel;
 };
 
-type ClientStateSource = StudioClient & ConversationHydrateClient & {
+type ClientStateSource = StudioClient & {
   getState?: () => ClientState;
   onState?: (listener: (state: ClientState) => void) => Unsubscribe;
 };
@@ -579,35 +580,6 @@ function TitleMenu({ id, label, openId, onToggle, children }: {
           )
         : null}
     </div>
-  );
-}
-
-function MenuItem({ icon, children, hint, kbd, disabled, title, current, onClick }: {
-  icon?: string;
-  children: ReactNode;
-  hint?: string;
-  /** 右侧快捷键徽标；只标注当前真实存在的快捷键（aria-hidden 避免读屏重复播报）。 */
-  kbd?: string;
-  disabled?: boolean;
-  title?: string;
-  current?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="menu-item"
-      role="menuitem"
-      disabled={disabled}
-      data-tip={title}
-      aria-current={current ? "true" : undefined}
-      onClick={onClick}
-    >
-      {icon ? <Icon name={icon} extra="sm" /> : null}
-      <span>{children}</span>
-      {hint ? <span className="hint">{hint}</span> : null}
-      {kbd ? <span className="kbd" aria-hidden="true">{kbd}</span> : null}
-    </button>
   );
 }
 
@@ -1241,6 +1213,12 @@ type ShellChrome = {
   /** 进行中的 shell 动作类型；null = 空闲。 */
   projectShellAction: "editor" | "directory" | null;
   onAddComposerContext: (chip: { kind: "file" | "dir"; path: string; label: string }) => void;
+  /** Explorer 文件「更多」菜单：本机已安装编辑器（「打开方式」子菜单数据）。 */
+  fileOpeners: ReadonlyArray<FileOpenerOption>;
+  /** undefined = 可用；否则为文件级桌面动作的禁用原因（非桌面端）。 */
+  fileShellUnavailable: string | undefined;
+  /** Explorer 文件「更多」菜单动作分发（打开 / 打开方式 / 资源管理器 / 复制路径）。 */
+  onFileShellAction: (workspaceId: string, action: FileMenuAction, target: FileMenuTarget) => void;
   onInsertSkill: (skill: { name: string; desc?: string }) => void;
   onRemoveComposerSkill: (name: string) => void;
   draftSkills: ReadonlySet<string>;
@@ -1343,6 +1321,9 @@ function TreeLiveDots({ reading, writing }: { reading: boolean; writing: boolean
   );
 }
 
+/** Explorer 行「⋯ 更多」菜单的下发束见 menus.tsx 的 FileMenuController。 */
+type TreeFileMenu = FileMenuController;
+
 function WorkspaceTreeNodes({
   nodes,
   depth,
@@ -1365,7 +1346,7 @@ function WorkspaceTreeNodes({
   onToggle,
   onFile,
   onContext,
-  onMore,
+  fileMenu,
   gitStatus,
   fileActivity = EMPTY_EXPLORER_FILE_ACTIVITY,
 }: {
@@ -1390,7 +1371,7 @@ function WorkspaceTreeNodes({
   onToggle: (path: string) => void;
   onFile: (path: string) => void;
   onContext: (path: string, kind: "file" | "dir") => void;
-  onMore: (path: string) => void;
+  fileMenu: TreeFileMenu;
   gitStatus?: ReadonlyMap<string, TreeGitStatus> | undefined;
   fileActivity?: ExplorerFileActivity;
 }) {
@@ -1429,6 +1410,7 @@ function WorkspaceTreeNodes({
             style={pad}
             onFocus={() => onSelect(node.path)}
             onClick={() => { onSelect(node.path); onToggle(node.path); }}
+            onContextMenu={(event) => fileMenu.onContext(event, node.path)}
             onKeyDown={(event) => onKeyDown(event, node, parentPath)}
           >
             <span className="tw"><Icon name="chevron-r" extra="sm" /></span>
@@ -1438,7 +1420,16 @@ function WorkspaceTreeNodes({
             <GitTreeBadge status={gitStat} />
             <span className="fop">
               <button type="button" className="icon-btn" data-tip={t("shell.addContext")} aria-label={`${t("shell.addContext")} ${node.path}`} onClick={(event) => { event.stopPropagation(); onContext(node.path, "dir"); }}><Icon name="at" /></button>
-              <button type="button" className="icon-btn" data-tip={t("common.more")} aria-label={`${t("common.moreActions")} ${node.path}`} onClick={(event) => { event.stopPropagation(); onMore(node.path); }}><Icon name="more" /></button>
+              <FileRowMenu
+                id={node.path}
+                openId={fileMenu.openId}
+                onToggle={fileMenu.onToggle}
+                contextPoint={fileMenu.openId === node.path ? fileMenu.point : null}
+                target={{ path: node.path, name: node.name, kind: "dir" }}
+                openers={fileMenu.openers}
+                desktopActionsReason={fileMenu.desktopReason}
+                onAction={fileMenu.onAction}
+              />
             </span>
           </div>
           <div className="tree-children" role="group">
@@ -1448,7 +1439,7 @@ function WorkspaceTreeNodes({
                 <span className="fi"><span className="spinner" aria-hidden="true" /></span>
                 <span className="fname ellipsis">{t("common.reading")}</span>
               </div>
-            ) : node.children ? <WorkspaceTreeNodes nodes={node.children} depth={depth + 1} parentPath={node.path} expanded={expanded} loadingPaths={loadingPaths} activePath={activePath} registerNode={registerNode} createKind={createKind} createParentPath={createParentPath} createName={createName} createBusy={createBusy} createError={createError} createInputRef={createInputRef} onCreateNameChange={onCreateNameChange} onCreateSubmit={onCreateSubmit} onCreateCancel={onCreateCancel} onSelect={onSelect} onKeyDown={onKeyDown} onToggle={onToggle} onFile={onFile} onContext={onContext} onMore={onMore} fileActivity={fileActivity} {...(gitStatus !== undefined ? { gitStatus } : {})} /> : null}
+            ) : node.children ? <WorkspaceTreeNodes nodes={node.children} depth={depth + 1} parentPath={node.path} expanded={expanded} loadingPaths={loadingPaths} activePath={activePath} registerNode={registerNode} createKind={createKind} createParentPath={createParentPath} createName={createName} createBusy={createBusy} createError={createError} createInputRef={createInputRef} onCreateNameChange={onCreateNameChange} onCreateSubmit={onCreateSubmit} onCreateCancel={onCreateCancel} onSelect={onSelect} onKeyDown={onKeyDown} onToggle={onToggle} onFile={onFile} onContext={onContext} fileMenu={fileMenu} fileActivity={fileActivity} {...(gitStatus !== undefined ? { gitStatus } : {})} /> : null}
           </div>
         </div>;
       }
@@ -1468,6 +1459,7 @@ function WorkspaceTreeNodes({
         style={pad}
         onFocus={() => onSelect(node.path)}
         onClick={() => { onSelect(node.path); onFile(node.path); }}
+        onContextMenu={(event) => fileMenu.onContext(event, node.path)}
         onKeyDown={(event) => onKeyDown(event, node, parentPath)}
       >
         <span className="tw" />
@@ -1477,7 +1469,16 @@ function WorkspaceTreeNodes({
         <GitTreeBadge status={gitStat} />
         <span className="fop">
           <button type="button" className="icon-btn" data-tip={t("shell.addContext")} aria-label={`${t("shell.addContext")} ${node.path}`} onClick={(event) => { event.stopPropagation(); onContext(node.path, "file"); }}><Icon name="at" /></button>
-          <button type="button" className="icon-btn" data-tip={t("common.more")} aria-label={`${t("common.moreActions")} ${node.path}`} onClick={(event) => { event.stopPropagation(); onMore(node.path); }}><Icon name="more" /></button>
+          <FileRowMenu
+            id={node.path}
+            openId={fileMenu.openId}
+            onToggle={fileMenu.onToggle}
+            contextPoint={fileMenu.openId === node.path ? fileMenu.point : null}
+            target={{ path: node.path, name: node.name, kind: "file" }}
+            openers={fileMenu.openers}
+            desktopActionsReason={fileMenu.desktopReason}
+            onAction={fileMenu.onAction}
+          />
         </span>
       </div>;
     })}
@@ -1507,7 +1508,9 @@ function WorkspaceTreeNodes({
   </>;
 }
 
-export function RealFileTree({ client, workspaceId, label, refreshToken, search, gitStatus, fileActivity = EMPTY_EXPLORER_FILE_ACTIVITY, createKind, createParentPath, createName, createBusy, createError, createInputRef, onCreateNameChange, onCreateSubmit, onCreateCancel, onSelectionChange, onAddContext }: {
+const EMPTY_FILE_OPENERS: ReadonlyArray<FileOpenerOption> = [];
+
+export function RealFileTree({ client, workspaceId, label, refreshToken, search, gitStatus, fileActivity = EMPTY_EXPLORER_FILE_ACTIVITY, createKind, createParentPath, createName, createBusy, createError, createInputRef, onCreateNameChange, onCreateSubmit, onCreateCancel, onSelectionChange, onAddContext, fileOpeners = EMPTY_FILE_OPENERS, fileShellUnavailable, onFileAction }: {
   client: StudioClient;
   workspaceId: WorkspaceId;
   label: string;
@@ -1526,6 +1529,12 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   onCreateCancel: () => void;
   onSelectionChange?: (node: WorkspaceFileNode | undefined) => void;
   onAddContext?: (path: string, kind: "file" | "dir") => void;
+  /** 「打开方式」子菜单的已安装编辑器清单（App 侧拉取）。 */
+  fileOpeners?: ReadonlyArray<FileOpenerOption>;
+  /** undefined = 文件级桌面动作可用；否则为禁用原因（非桌面端）。 */
+  fileShellUnavailable?: string | undefined;
+  /** 除「目录展开 / 添加上下文」外的菜单动作分发（App 侧统一 toast 与桌面调用）。 */
+  onFileAction?: (action: FileMenuAction, target: FileMenuTarget) => void;
 }) {
   const [model, setModel] = useState<WorkspaceFileTreeReadModel | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -1534,6 +1543,8 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
   const [loading, setLoading] = useState(false);
   const [activePath, setActivePath] = useState<string | null>(null);
   const expandedRef = useRef(new Set<string>());
+  /* 待恢复的记忆展开路径（相对 workspaceId）；null = 无恢复在进行。 */
+  const pendingRestoreRef = useRef<ReadonlySet<string> | null>(null);
   const loadingPathsRef = useRef(new Set<string>());
   const nodeRefs = useRef(new Map<string, HTMLDivElement>());
   const typeaheadRef = useRef<{ value: string; timeout?: ReturnType<typeof setTimeout> }>({ value: "" });
@@ -1547,6 +1558,8 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
       setModel(next);
       expandedRef.current = new Set();
       setExpanded(expandedRef.current);
+      const remembered = readExplorerExpansion(String(workspaceId));
+      pendingRestoreRef.current = remembered.size > 0 ? remembered : null;
       setActivePath(next.nodes[0]?.path ?? null);
       onSelectionChange?.(undefined);
       loadingPathsRef.current.clear();
@@ -1594,6 +1607,34 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
       if (generation === generationRef.current) setLoadingPaths(new Set(loadingPathsRef.current));
     }
   }, [client, workspaceId]);
+  /* 启动 / 刷新后恢复记忆的目录展开：目录 children 懒加载，路径逐级可见，
+     每次模型更新推进一层，直到全部落地或没有更多可加载的目录。 */
+  useEffect(() => {
+    if (model === null) return;
+    const pending = pendingRestoreRef.current;
+    if (pending === null) return;
+    let next: Set<string> | undefined;
+    for (const path of pending) {
+      if (findWorkspaceNode(model.nodes, path)?.type !== "dir") continue;
+      if (!expandedRef.current.has(path)) {
+        next ??= new Set(expandedRef.current);
+        next.add(path);
+      }
+    }
+    if (next) {
+      expandedRef.current = next;
+      setExpanded(next);
+    }
+    let loading = false;
+    for (const path of pending) {
+      const node = findWorkspaceNode(model.nodes, path);
+      if (node?.type === "dir" && node.children === undefined) {
+        void loadDirectory(path);
+        loading = true;
+      }
+    }
+    if (!loading) pendingRestoreRef.current = null;
+  }, [loadDirectory, model]);
   useEffect(() => {
     if (createKind === null || createParentPath === undefined || model === null) return;
     const target = findWorkspaceNode(model.nodes, createParentPath);
@@ -1607,13 +1648,16 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     if (target.children === undefined) void loadDirectory(createParentPath);
   }, [createKind, createParentPath, loadDirectory, model]);
   const toggle = useCallback((path: string) => {
+    /* 用户手动切换后剩余恢复让位于当前操作，并按现状更新记忆。 */
+    pendingRestoreRef.current = null;
     const open = expandedRef.current.has(path);
     const next = new Set(expandedRef.current);
     if (open) next.delete(path); else next.add(path);
     expandedRef.current = next;
     setExpanded(next);
+    writeExplorerExpansion(String(workspaceId), next);
     if (!open && model && findWorkspaceNode(model.nodes, path)?.children === undefined) void loadDirectory(path);
-  }, [loadDirectory, model]);
+  }, [loadDirectory, model, workspaceId]);
   const registerNode = useCallback((path: string, element: HTMLDivElement | null) => {
     if (element) nodeRefs.current.set(path, element);
     else nodeRefs.current.delete(path);
@@ -1705,6 +1749,54 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
     focusNode(match.node.path);
   }, [displayExpanded, focusNode, openFile, search, toggle, visibleItems]);
   const { t } = useI18n();
+  // 行「⋯ 更多」菜单：同一时刻至多一个弹层；Escape / 点外部关闭（会话行菜单同款）。
+  const [fileMenuOpenId, setFileMenuOpenId] = useState<string | null>(null);
+  /** 非 null = 当前弹层由行右键打开，贴该光标点；null = 由 ⋯ 按钮打开。 */
+  const [fileMenuPoint, setFileMenuPoint] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (fileMenuOpenId === null) return;
+    const close = () => setFileMenuOpenId(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [fileMenuOpenId]);
+  const toggleFileMenu = useCallback((id: string | null) => {
+    // 按钮打开一律锚定按钮，清掉旧右键点。
+    setFileMenuPoint(null);
+    setFileMenuOpenId(id);
+  }, []);
+  const openFileMenuAtCursor = useCallback((event: { clientX: number; clientY: number; preventDefault(): void }, path: string) => {
+    event.preventDefault();
+    setFileMenuPoint({ x: event.clientX, y: event.clientY });
+    setFileMenuOpenId(path);
+  }, []);
+  const handleMenuAction = useCallback((action: FileMenuAction, target: FileMenuTarget) => {
+    if (action.type === "addContext") {
+      onAddContext?.(target.path, target.kind);
+      return;
+    }
+    // 目录的「打开」= 树内展开/收起（与点击目录行同一条 toggle 链）。
+    if (action.type === "open" && target.kind === "dir") {
+      toggle(target.path);
+      return;
+    }
+    onFileAction?.(action, target);
+  }, [onAddContext, onFileAction, toggle]);
+  const fileMenu = useMemo<TreeFileMenu>(() => ({
+    openId: fileMenuOpenId,
+    point: fileMenuPoint,
+    openers: fileOpeners,
+    desktopReason: fileShellUnavailable ?? (onFileAction === undefined ? t("shell.fileDesktopOnly") : undefined),
+    onToggle: toggleFileMenu,
+    onContext: openFileMenuAtCursor,
+    onAction: handleMenuAction,
+  }), [fileMenuOpenId, fileMenuPoint, fileOpeners, fileShellUnavailable, handleMenuAction, onFileAction, openFileMenuAtCursor, t, toggleFileMenu]);
   if (loading && model === null) return <div className="empty"><p className="muted small">{t("common.reading")}</p></div>;
   if (model === null) return <div className="empty"><p className="muted small">{message ?? t("common.unavailable")}</p></div>;
   return <>
@@ -1733,7 +1825,7 @@ export function RealFileTree({ client, workspaceId, label, refreshToken, search,
         onContext={(path, kind) => {
           onAddContext?.(path, kind);
         }}
-        onMore={() => {}}
+        fileMenu={fileMenu}
         gitStatus={gitStatus}
         fileActivity={fileActivity}
       />
@@ -1887,10 +1979,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   const gitWorkspaceId = preview || !chrome.selectedProject ? undefined : (chrome.selectedProject.id as WorkspaceId);
   const { repository: gitRepository, refresh: refreshGitRepository } = useGitRepository(client, gitWorkspaceId);
   const gitStatusLookup = useMemo(() => buildGitStatusLookup(gitRepository?.changes ?? []), [gitRepository]);
-  const fileActivity = useMemo(
-    () => deriveExplorerFileActivity(state.clientState?.conversation.liveTools ?? {}),
-    [state.clientState?.conversation.liveTools],
-  );
+  // Conversation-owned tool activity is published by the target-scoped store.
+  // Until the workbench target is mounted, the explorer has no live activity.
+  const fileActivity = EMPTY_EXPLORER_FILE_ACTIVITY;
   const gitTokenFirstRun = useRef(false);
   useEffect(() => {
     if (!gitTokenFirstRun.current) { gitTokenFirstRun.current = true; return; }
@@ -2478,6 +2569,13 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
               label={findPreviewProject(chrome.previewProjectId)?.name ?? t("shell.project")}
               search={fileSearch.trim()}
               onContext={(path, kind) => chrome.onAddComposerContext({ kind, path, label: fileLabel(path) })}
+              onFileAction={(action, target) => {
+                if (action.type !== "copyRelative") return;
+                void navigator.clipboard
+                  .writeText(target.path)
+                  .then(() => setPreviewFileMessage("已复制相对路径"))
+                  .catch(() => setPreviewFileMessage("复制相对路径失败"));
+              }}
             />
           ) : chrome.selectedProject ? (
             <RealFileTree
@@ -2500,6 +2598,13 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
               onCreateCancel={cancelWorkspaceEntry}
               onSelectionChange={handleFileTreeSelection}
               onAddContext={(path, kind) => chrome.onAddComposerContext({ kind, path, label: fileLabel(path) })}
+              fileOpeners={chrome.fileOpeners}
+              fileShellUnavailable={chrome.fileShellUnavailable}
+              onFileAction={(action, target) => {
+                const projectWorkspaceId = chrome.selectedProject?.id;
+                if (projectWorkspaceId === undefined) return;
+                chrome.onFileShellAction(String(projectWorkspaceId), action, target);
+              }}
             />
           ) : (
             <div className="empty">{t("conversation.noProjectSelected")}</div>
@@ -3614,7 +3719,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       if (claimed.show) setStatusToast(notice.message);
     }
   }, [convo.state.notices]);
-  /* ConversationPane 与 ConversationMinimap 共享同一 scroller（滚动同步/跳转不走 DOM id 查询）。 */
+  /* ConversationPane 内的 minimap 与 transcript 共享同一 scroller。 */
   const convoScrollerRef = useRef<HTMLElement | null>(null);
   const welcomeGate = {
     preview,
@@ -4257,8 +4362,34 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     targetId: string,
   ): Promise<SessionTreeCommandOutcome | undefined> => {
     if (busy) return undefined;
+    const targetSessionId = selectedSessionId as SessionId | undefined;
+    const targetThreadId = selectedThreadId;
+    const viewingHistory = viewIdentity?.startsWith("history:") === true;
+    if (viewingHistory && targetSessionId === undefined) {
+      setComposerError("当前历史会话缺少 sessionId，无法安全执行会话树操作。");
+      return undefined;
+    }
+    const needsResume =
+      viewingHistory
+      && targetSessionId !== undefined
+      && snapshot?.sessionId !== targetSessionId;
     setBusy(true);
     try {
+      await ensureSelectedSessionActive(client, {
+        ...(snapshot?.sessionId === undefined ? {} : { activeSessionId: snapshot.sessionId }),
+        ...(targetSessionId === undefined ? {} : { selectedSessionId: targetSessionId }),
+        ...(targetThreadId === undefined ? {} : { selectedThreadId: targetThreadId }),
+      });
+      const currentTarget = selectedTargetRef.current;
+      if (
+        currentTarget.selectedSessionId !== targetSessionId
+        || currentTarget.selectedThreadId !== targetThreadId
+      ) {
+        throw { code: "STATE_VERSION_CONFLICT", message: "操作期间已切换会话，本次操作已取消。" };
+      }
+      if (needsResume) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
       const handle = await client.command(name, { targetId });
       const outcome = await waitReceipt<SessionTreeCommandOutcome>(client, handle.requestId);
       setComposerError(undefined);
@@ -4277,23 +4408,38 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       setBusy(false);
     }
   };
+  const viewingHistory = viewIdentity?.startsWith("history:") === true;
+  const treeTargetMatches =
+    !viewingHistory
+    || (selectedSessionId !== undefined && snapshot?.sessionId === selectedSessionId);
+  const canResumeViewedHistory =
+    !preview
+    && viewingHistory
+    && !treeTargetMatches
+    && selectedSessionId !== undefined
+    && selectedThreadId !== undefined
+    && runtime?.classification !== "limited-system";
+  const treeActionGated =
+    busy
+    || (!treeTargetMatches && !canResumeViewedHistory)
+    || (treeTargetMatches && (!runtimeConnected || !snapshotReady));
   const userRestoreDisabledReason = userMessageRestoreDisabledReason({
     preview,
     running,
-    compacting: snapshot?.isCompacting === true,
+    compacting: treeTargetMatches && snapshot?.isCompacting === true,
     resyncRequired: Boolean(connection?.resyncRequired) || convo.state.resyncRequired,
     sessionCreating: sessionCreating === true,
-    gated: !preview && gated,
-    canNavigateTree: can("session.tree.navigate") || can("session.tree"),
+    gated: !preview && treeActionGated,
+    canNavigateTree: can("session.tree.navigate") || can("session.tree") || canResumeViewedHistory,
   });
   const userBranchDisabledReason = userMessageRestoreDisabledReason({
     preview,
     running,
-    compacting: snapshot?.isCompacting === true,
+    compacting: treeTargetMatches && snapshot?.isCompacting === true,
     resyncRequired: Boolean(connection?.resyncRequired) || convo.state.resyncRequired,
     sessionCreating: sessionCreating === true,
-    gated: !preview && gated,
-    canNavigateTree: can("session.tree.branch") || can("session.tree"),
+    gated: !preview && treeActionGated,
+    canNavigateTree: can("session.tree.branch") || can("session.tree") || canResumeViewedHistory,
   });
   const restoreUserMessage = (itemId: string, text: string) => {
     if (userRestoreDisabledReason !== undefined) return;
@@ -4824,6 +4970,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
         <div className={`convo-wrap${showWelcome ? " is-empty" : ""}`}>
           <ConversationPane
             snapshot={convo}
+            liveEngine={convo.engine}
             onLoadOlder={convo.loadOlder}
             onRestore={restorePending}
             onRestoreUserMessage={restoreUserMessage}
@@ -4857,11 +5004,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 />
               ),
             } : {})}
-          />
-          <ConversationMinimap
-            rows={sessionCreating === true ? [] : convo.rows}
-            scrollerRef={convoScrollerRef}
-            preview={preview}
           />
           <div className="composer-region">
             {/* 真实 pending Interaction 永远优先；预览关时 Plan Review 走 snapshot；预览开才用演示 Deck。 */}
@@ -5779,8 +5921,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [skillsEnabledCount, setSkillsEnabledCount] = useState(() => previewOn() ? countEnabledDrawerItems(createPreviewDrawerItems()) : 0);
   const [explorerOpen, setExplorerOpen] = useState(() => previewOn());
-  /** Real projects may be expanded together; preview keeps its fixture selection below. */
-  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  /** Real projects may be expanded together; preview keeps its fixture selection below.
+      启动时按本地记忆恢复各项目展开状态；从未写过记忆时保持旧行为（首启展开活动项目）。 */
+  const [expandedProjectsMemory] = useState(readExpandedProjects);
+  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(
+    () => (expandedProjectsMemory.restored ? expandedProjectsMemory.ids : new Set<string>()),
+  );
   const [projectListExpanded, setProjectListExpanded] = useState(true);
   const [selectedProject, setSelectedProject] = useState<SelectedProject | null>(() => previewOn() ? CURRENT_PROJECT : null);
   const composerRef = useRef<ChipComposerHandle | null>(null);
@@ -5840,6 +5986,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       return next;
     });
   }, []);
+  /* 项目展开状态本地记忆：真实模式随变更写入；预览模式不写（见 expandMemory）。 */
+  useEffect(() => {
+    if (previewMode.preview) return;
+    writeExpandedProjects(expandedProjects);
+  }, [expandedProjects, previewMode.preview]);
   /** 预览模式「归档」演示隐藏的会话 id（仅本地，不碰 Host）。 */
   const [hiddenPreviewThreads, setHiddenPreviewThreads] = useState<ReadonlySet<string>>(() => new Set());
   /** 历史页的全量会话模型（含已归档）；进入历史页时懒加载，归档动作后刷新。 */
@@ -6115,14 +6266,24 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     }
     const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
     if (active) {
-      setSelectedProject({ id: active.workspaceId, name: active.name });
+      setSelectedProject((current) =>
+        current?.id === active.workspaceId && current?.name === active.name
+          ? current
+          : { id: active.workspaceId, name: active.name });
       setExplorerOpen(true);
-      expandProject(active.workspaceId);
-      void loadProjectHistory(active.workspaceId);
+      if (expandedProjectsMemory.restored) {
+        /* 有本地记忆：按恢复的展开集加载各项目会话历史，不再强制展开活动项目。 */
+        for (const workspaceId of expandedProjects) {
+          void loadProjectHistory(workspaceId as WorkspaceId);
+        }
+      } else {
+        expandProject(active.workspaceId);
+        void loadProjectHistory(active.workspaceId);
+      }
     } else {
       setSelectedProject(null);
     }
-  }, [expandProject, loadProjectHistory, previewMode.preview, previewProjectId, state.model.workspaces]);
+  }, [expandProject, expandedProjects, expandedProjectsMemory, loadProjectHistory, previewMode.preview, previewProjectId, state.model.workspaces]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", appSettings.theme);
@@ -7572,6 +7733,86 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     });
   };
 
+  // Explorer 文件「更多」菜单：本机编辑器清单只在真实 workspace 且桌面 chrome 可用时拉取一次。
+  const [fileOpeners, setFileOpeners] = useState<ReadonlyArray<FileOpenerOption>>([]);
+  useEffect(() => {
+    const workspace = realActiveWorkspace;
+    const list = globalThis.ompStudioChrome?.listFileOpeners;
+    if (workspace === undefined || list === undefined) {
+      setFileOpeners([]);
+      return;
+    }
+    let cancelled = false;
+    void list({ workspaceId: workspace.workspaceId })
+      .then((openers) => {
+        if (!cancelled) setFileOpeners([...openers]);
+      })
+      .catch(() => {
+        if (!cancelled) setFileOpeners([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [realActiveWorkspace]);
+  const fileShellUnavailable = globalThis.ompStudioChrome?.openFile === undefined ? "仅桌面端可用" : undefined;
+
+  const runFileShellAction = (workspaceId: string, action: FileMenuAction, target: FileMenuTarget) => {
+    const desktop = globalThis.ompStudioChrome;
+    const messageOf = (cause: unknown): string => (cause instanceof Error && cause.message ? cause.message : String(cause));
+    const notice = (text: string, icon: string): void => {
+      setShellNotice({ text, icon });
+    };
+    if (action.type === "copyRelative") {
+      void navigator.clipboard
+        .writeText(target.path)
+        .then(() => notice("已复制相对路径", "check"))
+        .catch(() => notice("复制相对路径失败", "alert"));
+      return;
+    }
+    const input = { workspaceId, path: target.path, kind: target.kind };
+    if (action.type === "copyAbsolute") {
+      const resolve = desktop?.resolveFileAbsolutePath;
+      if (resolve === undefined) return;
+      void resolve(input)
+        .then((absolute) => navigator.clipboard.writeText(absolute))
+        .then(() => notice("已复制绝对路径", "check"))
+        .catch((cause) => notice(`操作失败：${messageOf(cause)}`, "alert"));
+      return;
+    }
+    const run = (invoke: () => Promise<WorkspaceFileActionResult>, openedText: string): void => {
+      void invoke()
+        .then((result) => {
+          if (result.status === "cancelled") {
+            notice("已取消选择打开器", "info");
+            return;
+          }
+          if (result.status === "failed") {
+            notice(`操作失败：${result.message}`, "alert");
+            return;
+          }
+          notice(openedText, "check");
+        })
+        .catch((cause) => notice(`操作失败：${messageOf(cause)}`, "alert"));
+    };
+    if (action.type === "open") {
+      const open = desktop?.openFile;
+      if (open === undefined) return;
+      run(() => open(input), `已用默认程序打开 ${target.name}`);
+      return;
+    }
+    if (action.type === "openWith") {
+      const openWith = desktop?.openFileWith;
+      if (openWith === undefined) return;
+      run(() => openWith({ ...input, openerId: action.openerId as "vscode" | "cursor" | "windsurf" | "choose" }), `已用所选程序打开 ${target.name}`);
+      return;
+    }
+    if (action.type === "reveal") {
+      const reveal = desktop?.revealFileInFileManager;
+      if (reveal === undefined) return;
+      run(() => reveal(input), target.kind === "dir" ? `已在资源管理器中打开 ${target.name}` : `已在资源管理器中定位 ${target.name}`);
+    }
+  };
+
   const chrome: ShellChrome = {
     collapsed,
     skillsOpen,
@@ -7713,6 +7954,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     onOpenProjectDirectory: openProjectDirectory,
     projectShellUnavailable,
     projectShellAction: shellAction,
+    fileOpeners,
+    fileShellUnavailable,
+    onFileShellAction: runFileShellAction,
     onAddComposerContext: (chip) => {
       const image = /\.(png|jpe?g|gif|webp)$/iu.test(chip.path);
       composerRef.current?.insertChip({

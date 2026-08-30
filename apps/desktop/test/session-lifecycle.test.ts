@@ -810,6 +810,7 @@ test("reload does not replay conversation deltas buffered on the old facade", as
       if (event.kind === "conversation.changed") first.push(event.update.kind);
     });
     const started: StudioConversationForward = {
+      streamSeq: 1,
       envelope: {
         type: "studio.event",
         runtimeEpoch: 1 as RuntimeEpoch,
@@ -841,6 +842,7 @@ test("resident resume replays an open thinking message after the selected Runtim
   await withReady(async ({ composition, live }) => {
     live.conversationReplay = [
       {
+        streamSeq: 1,
         envelope: {
           type: "studio.event",
           runtimeEpoch: 2 as RuntimeEpoch,
@@ -858,6 +860,7 @@ test("resident resume replays an open thinking message after the selected Runtim
         },
       },
       {
+        streamSeq: 2,
         envelope: {
           type: "studio.event",
           runtimeEpoch: 2 as RuntimeEpoch,
@@ -897,4 +900,22 @@ test("resident resume replays an open thinking message after the selected Runtim
       assert.equal(thinking.update.delta, "切回后仍可见");
     }
   }, { concurrentSessions: true });
+});
+
+test("session.archive on a streaming resident session resolves in memory, aborts stream and switches off", async () => {
+  await withReady(async ({ composition, live, switches }) => {
+    // Session is streaming and not present in catalog.list()
+    const result = await composition.facade.command({
+      commandName: "session.archive",
+      input: { threadId: threadIdFor(SESSION_A) },
+      idempotencyKey: "idem-archive-streaming" as IdempotencyKey,
+      requestId: "req-archive-streaming" as CommandRequestId,
+    });
+    assert.equal(result.status, "accepted");
+    // Verified abort invoke was dispatched
+    const abortInvoke = live.invokes.find((req) => req.operation.kind === "core.abort");
+    assert.notEqual(abortInvoke, undefined);
+    // Verified session was switched off
+    assert.equal(switches.some((sw) => sw.kind === "fresh"), true);
+  }, { catalog: [], streaming: true });
 });

@@ -52,8 +52,12 @@ import {
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
 import {
   WORKSPACE_SHELL_IPC_CHANNELS,
+  type FileOpener,
+  type FileOpenWithInput,
   type PlanSavePathPickResult,
   type ResolvedDroppedPath,
+  type WorkspaceFileActionResult,
+  type WorkspaceFileTargetInput,
   type WorkspaceShellEditorResult,
 } from "./workspace-shell-shared.js";
 import {
@@ -145,6 +149,21 @@ contextBridge.exposeInMainWorld(
     },
     pickPlanSavePath(input: { workspaceId: string }): Promise<PlanSavePathPickResult> {
       return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.pickPlanSavePath, input) as Promise<PlanSavePathPickResult>;
+    },
+    openFile(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpen, input) as Promise<WorkspaceFileActionResult>;
+    },
+    openFileWith(input: FileOpenWithInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpenWith, input) as Promise<WorkspaceFileActionResult>;
+    },
+    revealFileInFileManager(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileReveal, input) as Promise<WorkspaceFileActionResult>;
+    },
+    resolveFileAbsolutePath(input: WorkspaceFileTargetInput): Promise<string> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileAbsolutePath, input) as Promise<string>;
+    },
+    listFileOpeners(input: { workspaceId: string }): Promise<ReadonlyArray<FileOpener>> {
+      return ipcRenderer.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpeners, input) as Promise<ReadonlyArray<FileOpener>>;
     },
     copyImage(input: Pick<ChromeImageInput, "mime" | "bytes">): Promise<ChromeImageResult> {
       return ipcRenderer.invoke(CHROME_IMAGE_CHANNELS.copyImage, input) as Promise<ChromeImageResult>;

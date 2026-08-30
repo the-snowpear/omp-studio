@@ -97,6 +97,7 @@ import type {
   AgentTranscriptPage,
   CapabilityManifest,
   CommandLedgerEntry,
+  ConversationOpenResult,
   ConversationTranscriptPage,
   OperatorCommandManifest,
   OperatorStateSnapshot,
@@ -108,6 +109,7 @@ import type {
 import type { StudioOperation } from "@omp-studio/studio-protocol";
 import {
   canonicalJson,
+  parseConversationOpenResult,
   parseConversationRuntimeEvent,
   parseConversationTranscriptPage,
   parseFoundationStudioRequest,
@@ -851,6 +853,11 @@ export class StudioHostClientFacade implements ClientTransport {
       }
       case "usage.get": {
         const result = await this.#queryUsage();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
+      case "conversation.open": {
+        const openRequest = request as ClientQueryRequest<"conversation.open">;
+        const result = await this.#queryConversationOpen(openRequest.input);
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
       case "session.transcript.read": {
@@ -1648,6 +1655,7 @@ export class StudioHostClientFacade implements ClientTransport {
       stateVersion: envelope.stateVersion,
       occurredAt: envelope.occurredAt,
       sessionId: update.sessionId as SessionId,
+      streamSeq: forward.streamSeq,
       eventSeq: Number(envelope.eventSeq),
       update,
     });
@@ -1979,6 +1987,20 @@ export class StudioHostClientFacade implements ClientTransport {
       throw clientError("CURSOR_STALE", "transcript page session does not match the current session");
     }
     return page;
+  }
+
+  async #queryConversationOpen(
+    input: ClientQueryRequest<"conversation.open">["input"],
+  ): Promise<ConversationOpenResult> {
+    const session = this.#runtimeSession();
+    if (session === undefined) {
+      throw unavailableError("conversation.open requires a connected Runtime session");
+    }
+    try {
+      return parseConversationOpenResult(await session.openConversation(input));
+    } catch (error) {
+      throw toClientError(error);
+    }
   }
 
   async #queryArchiveTranscript(input: {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import type { GitCommitChangesReadModel, GitCommitDiffReadModel, GitLogListReadModel, WorkspaceId } from "@omp-studio/client-contract";
 import { useI18n } from "../i18n";
 import { Icon } from "../icons";
+import { FileRowMenu, type FileMenuAction, type FileMenuController, type FileMenuTarget } from "../menus";
 import { setHubIntent } from "../AgentHub";
 import { GitCommitGraph } from "../git/GitCommitGraph";
 import { GitDiffResizer, useGitDiffHeight } from "../git/GitDiffResizer";
@@ -39,14 +40,15 @@ function collectOpen(nodes: PreviewFileNode[], prefix: string, into: Set<string>
   }
 }
 
-function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction }: {
+function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction, fileMenu }: {
   nodes: PreviewFileNode[];
   depth: number;
   prefix: string;
   expanded: Set<string>;
   onToggle: (path: string) => void;
   onFile: (path: string) => void;
-  onAction: (path: string, action: "context" | "context-dir" | "more") => void;
+  onAction: (path: string, action: "context" | "context-dir") => void;
+  fileMenu: FileMenuController;
 }) {
   const { t } = useI18n();
   return (
@@ -68,6 +70,7 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
                 aria-label={`${node.name} 文件夹`}
                 style={pad}
                 onClick={() => onToggle(path)}
+                onContextMenu={(event) => fileMenu.onContext(event, path)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -81,18 +84,27 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
                 <FileStat status={node.status} />
                 <span className="fop">
                   <button type="button" className="icon-btn" data-tip={t("shell.addContext")} aria-label={`${t("shell.addContext")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context-dir"); }}><Icon name="at" /></button>
-                  <button type="button" className="icon-btn" data-tip={t("common.more")} aria-label={`${t("common.moreActions")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
+                  <FileRowMenu
+                    id={path}
+                    openId={fileMenu.openId}
+                    onToggle={fileMenu.onToggle}
+                    contextPoint={fileMenu.openId === path ? fileMenu.point : null}
+                    target={{ path, name: node.name, kind: "dir" }}
+                    openers={fileMenu.openers}
+                    desktopActionsReason={fileMenu.desktopReason}
+                    onAction={fileMenu.onAction}
+                  />
                 </span>
               </div>
               <div className="tree-children" role="group">
-                {node.children ? <TreeNodes nodes={node.children} depth={depth + 1} prefix={path} expanded={expanded} onToggle={onToggle} onFile={onFile} onAction={onAction} /> : null}
+                {node.children ? <TreeNodes nodes={node.children} depth={depth + 1} prefix={path} expanded={expanded} onToggle={onToggle} onFile={onFile} onAction={onAction} fileMenu={fileMenu} /> : null}
               </div>
             </div>
           );
         }
         const code = node.name.endsWith(".tsx") || node.name.endsWith(".ts");
         return (
-          <div key={path} className={`tree-row${node.turn ? " turn-file" : ""}`} data-file={path} data-git={node.status ? GIT_STATUS_META[node.status].className : undefined} role="treeitem" tabIndex={0} style={pad} onClick={() => onFile(path)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onFile(path); } }}>
+          <div key={path} className={`tree-row${node.turn ? " turn-file" : ""}`} data-file={path} data-git={node.status ? GIT_STATUS_META[node.status].className : undefined} role="treeitem" tabIndex={0} style={pad} onClick={() => onFile(path)} onContextMenu={(event) => fileMenu.onContext(event, path)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onFile(path); } }}>
             <span className="tw" />
             <span className="fi"><Icon name={code ? "file-code" : "file"} /></span>
             <span className="fname ellipsis">{node.name}</span>
@@ -106,7 +118,16 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
             <FileStat status={node.status} />
             <span className="fop">
               <button type="button" className="icon-btn" data-tip={t("shell.addContext")} aria-label={`${t("shell.addContext")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "context"); }}><Icon name="at" /></button>
-              <button type="button" className="icon-btn" data-tip={t("common.more")} aria-label={`${t("common.moreActions")} ${path}`} onClick={(event) => { event.stopPropagation(); onAction(path, "more"); }}><Icon name="more" /></button>
+              <FileRowMenu
+                id={path}
+                openId={fileMenu.openId}
+                onToggle={fileMenu.onToggle}
+                contextPoint={fileMenu.openId === path ? fileMenu.point : null}
+                target={{ path, name: node.name, kind: "file" }}
+                openers={fileMenu.openers}
+                desktopActionsReason={fileMenu.desktopReason}
+                onAction={fileMenu.onAction}
+              />
             </span>
           </div>
         );
@@ -115,12 +136,30 @@ function TreeNodes({ nodes, depth, prefix, expanded, onToggle, onFile, onAction 
   );
 }
 
-export function PreviewFileTree({ label, search, onContext }: { label: string; search?: string; onContext?: (path: string, kind: "file" | "dir") => void }) {
+export function PreviewFileTree({ label, search, onContext, onFileAction }: { label: string; search?: string; onContext?: (path: string, kind: "file" | "dir") => void; onFileAction?: (action: FileMenuAction, target: FileMenuTarget) => void }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const next = new Set<string>();
     collectOpen(PREVIEW_FILE_TREE, "", next);
     return next;
   });
+  // 行「⋯ 更多」菜单：与真实树同一 FileRowMenu；演示路径不执行桌面动作
+  // （打开/打开方式/资源管理器/绝对路径禁用），仅保留复制相对路径与添加上下文。
+  const [fileMenuOpenId, setFileMenuOpenId] = useState<string | null>(null);
+  const [fileMenuPoint, setFileMenuPoint] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (fileMenuOpenId === null) return;
+    const close = () => setFileMenuOpenId(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [fileMenuOpenId]);
   const onToggle = (path: string) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -128,6 +167,32 @@ export function PreviewFileTree({ label, search, onContext }: { label: string; s
       else next.add(path);
       return next;
     });
+  };
+  const fileMenu: FileMenuController = {
+    openId: fileMenuOpenId,
+    point: fileMenuPoint,
+    openers: [],
+    desktopReason: t("shell.fileDesktopOnly"),
+    onToggle: (id) => {
+      setFileMenuPoint(null);
+      setFileMenuOpenId(id);
+    },
+    onContext: (event, path) => {
+      event.preventDefault();
+      setFileMenuPoint({ x: event.clientX, y: event.clientY });
+      setFileMenuOpenId(path);
+    },
+    onAction: (action, target) => {
+      if (action.type === "addContext") {
+        onContext?.(target.path, target.kind);
+        return;
+      }
+      if (action.type === "open" && target.kind === "dir") {
+        onToggle(target.path);
+        return;
+      }
+      onFileAction?.(action, target);
+    },
   };
   const visible = search?.trim()
     ? filterPreviewNodes(PREVIEW_FILE_TREE, search)
@@ -138,7 +203,7 @@ export function PreviewFileTree({ label, search, onContext }: { label: string; s
         if (action === "context" || action === "context-dir") {
           onContext?.(path, action === "context-dir" ? "dir" : "file");
         }
-      }} />
+      }} fileMenu={fileMenu} />
     </div>
   );
 }

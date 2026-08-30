@@ -2,6 +2,8 @@ import type {
   AgentTranscriptPage,
   CommandId,
   CommandLedgerEntry,
+  ConversationOpenResult,
+  ConversationTarget,
   ConversationTranscriptPage,
   OpaqueCursor,
   RuntimeEpoch,
@@ -182,6 +184,63 @@ export class StudioRuntimeSessionController {
       throw new StudioHostError("CURSOR_STALE", "Agent conversation page belongs to the parent session");
     }
     return page;
+  }
+
+  /**
+   * Read the latest page and then atomically capture the bounded live recovery
+   * state. Callers subscribe before invoking this method and discard buffered
+   * events through `live.watermark` to close the query/subscription race.
+   */
+  async openConversation(input: {
+    readonly target: ConversationTarget;
+    readonly limit?: number;
+  }): Promise<ConversationOpenResult> {
+    const snapshot = this.bridge.projectionSnapshot();
+    if (snapshot === undefined) {
+      throw new StudioHostError("OUTCOME_UNKNOWN", "Runtime snapshot is required before conversation open");
+    }
+    let page: ConversationTranscriptPage;
+    let target: ConversationOpenResult["target"];
+    if (input.target.kind === "session") {
+      if (input.target.sessionId !== snapshot.sessionId) {
+        throw new StudioHostError("CURSOR_STALE", "Conversation target is not the active Runtime session");
+      }
+      page = await this.readTranscript(input.limit === undefined ? {} : { limit: input.limit });
+      target = {
+        kind: "session",
+        sessionId: input.target.sessionId,
+        conversationSessionId: page.sessionId,
+      };
+    } else {
+      if (input.target.parentSessionId !== snapshot.sessionId) {
+        throw new StudioHostError("CURSOR_STALE", "Agent conversation parent is not the active Runtime session");
+      }
+      page = await this.readAgentConversation({
+        agentId: input.target.agentId,
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      });
+      target = {
+        kind: "agent",
+        parentSessionId: input.target.parentSessionId,
+        agentId: input.target.agentId,
+        conversationSessionId: page.sessionId,
+      };
+    }
+    const replay = this.#conversation.snapshot(page.sessionId);
+    const live = replay.status === "resyncRequired"
+      ? replay
+      : {
+          status: "complete" as const,
+          watermark: replay.watermark,
+          events: replay.events.map(({ streamSeq, envelope }) => ({
+            streamSeq,
+            eventSeq: Number(envelope.eventSeq),
+            stateVersion: Number(envelope.stateVersion),
+            occurredAt: envelope.occurredAt,
+            update: envelope.event,
+          })),
+        };
+    return { target, page, live };
   }
 
   onConversationEvent(listener: (event: StudioConversationForward) => void): () => void {

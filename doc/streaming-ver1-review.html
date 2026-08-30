@@ -1,0 +1,425 @@
+<title>streaming-ver1 渲染审查</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@600;700&display=swap">
+<style>
+  :root {
+    --ground: #EFF1F6; --surface: #FFFFFF; --surface-2: #F6F7FB;
+    --line: #D8DCE7; --line-soft: #E6E9F1;
+    --ink: #161A24; --ink-2: #4B5265; --ink-3: #737B8E;
+    --accent: #2B45C4; --accent-soft: #E7EAFA;
+    --data: #0C6F6B; --data-soft: #E2F1F0;
+    --p0: #AF2118; --p0-soft: #FBE8E6;
+    --p1: #8F5608; --p1-soft: #F9EFDC;
+    --p2: #5A6070; --p2-soft: #EBEEF4;
+    --display: "Noto Serif SC", "Songti SC", Georgia, serif;
+    --body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #11131A; --surface: #181B23; --surface-2: #1E2230;
+      --line: #2C3140; --line-soft: #242835;
+      --ink: #E3E6EF; --ink-2: #A8B0C2; --ink-3: #7D8598;
+      --accent: #8FA5FF; --accent-soft: #1E2542;
+      --data: #4FC2BC; --data-soft: #16302F;
+      --p0: #FF8175; --p0-soft: #3A1D1A;
+      --p1: #E0A44A; --p1-soft: #33260F;
+      --p2: #A8B0C2; --p2-soft: #232838;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #11131A; --surface: #181B23; --surface-2: #1E2230;
+    --line: #2C3140; --line-soft: #242835;
+    --ink: #E3E6EF; --ink-2: #A8B0C2; --ink-3: #7D8598;
+    --accent: #8FA5FF; --accent-soft: #1E2542;
+    --data: #4FC2BC; --data-soft: #16302F;
+    --p0: #FF8175; --p0-soft: #3A1D1A;
+    --p1: #E0A44A; --p1-soft: #33260F;
+    --p2: #A8B0C2; --p2-soft: #232838;
+  }
+  body {
+    background: var(--ground); color: var(--ink);
+    font-family: var(--body); font-size: 16px; line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 50rem; margin: 0 auto; padding: 4rem 1.5rem 6rem; display: flex; flex-direction: column; gap: 3.25rem; }
+  .masthead { display: flex; flex-direction: column; gap: 0.9rem; padding-bottom: 2rem; border-bottom: 2px solid var(--ink); }
+  .eyebrow { font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
+  h1 { font-family: var(--display); font-weight: 700; font-size: clamp(1.9rem, 5vw, 2.7rem); line-height: 1.25; letter-spacing: -0.01em; text-wrap: balance; }
+  .subtitle { font-size: 1.05rem; color: var(--ink-2); max-width: 40ch; }
+  .factbar { display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem; font-family: var(--mono); font-size: 0.78rem; color: var(--ink-3); }
+  .factbar b { color: var(--ink-2); font-weight: 400; }
+  section { display: flex; flex-direction: column; gap: 1.1rem; }
+  h2 { font-family: var(--display); font-weight: 600; font-size: 1.45rem; letter-spacing: -0.005em; display: flex; align-items: baseline; gap: 0.7rem; }
+  h2::before { content: ""; flex: none; width: 1.5rem; height: 1px; background: var(--accent); transform: translateY(-0.4em); }
+  h3 { font-family: var(--body); font-weight: 500; font-size: 1.02rem; line-height: 1.5; }
+  p { max-width: 66ch; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+  code { font-family: var(--mono); font-size: 0.855em; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 3px; padding: 0.08em 0.34em; word-break: break-word; }
+  pre { font-family: var(--mono); font-size: 0.8rem; line-height: 1.6; background: var(--surface-2); border: 1px solid var(--line-soft); border-left: 2px solid var(--data); border-radius: 4px; padding: 0.9rem 1.1rem; overflow-x: auto; }
+  pre code { background: none; border: 0; padding: 0; font-size: 1em; }
+  ul, ol { display: flex; flex-direction: column; gap: 0.5rem; padding-left: 1.35rem; max-width: 66ch; }
+  li::marker { color: var(--ink-3); }
+  .verdict { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--p0); border-radius: 5px; padding: 1.5rem 1.65rem; display: flex; flex-direction: column; gap: 0.85rem; }
+  .verdict .lede { font-family: var(--display); font-size: 1.18rem; font-weight: 600; line-height: 1.55; max-width: none; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-width: 34rem; }
+  th, td { text-align: left; padding: 0.62rem 1rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); background: var(--surface-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  td.loc { font-family: var(--mono); font-size: 0.78rem; color: var(--ink-2); }
+  .chip { display: inline-block; font-family: var(--mono); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.06em; padding: 0.12rem 0.42rem; border-radius: 3px; white-space: nowrap; }
+  .chip.p0 { color: var(--p0); background: var(--p0-soft); }
+  .chip.p1 { color: var(--p1); background: var(--p1-soft); }
+  .chip.p2 { color: var(--p2); background: var(--p2-soft); }
+  .chip.done { color: var(--data); background: var(--data-soft); }
+  .chip.open { color: var(--ink-3); background: var(--surface-2); }
+  .finding { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--p2); border-radius: 5px; padding: 1.25rem 1.45rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  .finding.sev-p0 { border-left-color: var(--p0); }
+  .finding.sev-p1 { border-left-color: var(--p1); }
+  .finding .fhead { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+  .finding .loc { font-family: var(--mono); font-size: 0.76rem; color: var(--ink-3); word-break: break-all; }
+  .finding p, .finding ul, .finding ol { font-size: 0.945rem; }
+  .bench { font-variant-numeric: tabular-nums; }
+  .bench td.num { color: var(--data); font-weight: 600; }
+  .revision { display: flex; flex-direction: column; gap: 0.55rem; padding: 1.1rem 1.3rem; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; }
+  .revision .rtag { font-family: var(--mono); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--data); }
+  .note { font-size: 0.9rem; color: var(--ink-2); }
+  footer { border-top: 1px solid var(--line); padding-top: 1.5rem; font-size: 0.85rem; color: var(--ink-3); display: flex; flex-direction: column; gap: 0.5rem; }
+  @media (max-width: 34rem) { .wrap { padding: 2.5rem 1.1rem 4rem; gap: 2.5rem; } .verdict, .finding { padding: 1.1rem 1.15rem; } }
+</style>
+<div class="wrap">
+
+<header class="masthead">
+  <span class="eyebrow">流式渲染器审查 · 第四修订 · 含修复状态</span>
+  <h1>streaming-ver1 分支的性能、内存与缺陷审查</h1>
+  <p class="subtitle">管线四层通读结果：一个实测可复现的主线程阻塞，其余为定位与滚动锚定的正确性问题。</p>
+  <div class="factbar">
+    <span><b>分支</b> streaming-ver1</span>
+    <span><b>审查对象</b> 未提交工作树</span>
+    <span><b>工作树 HEAD</b> a26e715</span>
+    <span><b>剥离提交</b> 957b339（HEAD 前三个）</span>
+    <span><b>日期</b> 2026-08-29</span>
+  </div>
+</header>
+
+<section>
+  <h2>结论</h2>
+  <div class="verdict">
+    <p class="lede">只有一个问题需要立即处理：<code>tailUtf8</code> 在多字节文本上退化为 O(n²)，实测单个事件可阻塞渲染主线程 14 秒。</p>
+    <p>其余问题都不会冻结界面。它们集中在两处：虚拟化引入后未同步改造的滚动锚定与坐标计算，以及一批「按条数而非按字节」的缓冲上限。</p>
+  </div>
+  <p>管线分四层：Runtime <code>ConversationLiveProjector</code> → 主进程 <code>ConversationEventFanout</code> → 渲染进程 <code>ConversationEngine</code> / <code>ConversationStore</code> → React 虚拟化渲染 + minimap。分层方向与「热订阅 / 元数据订阅」双通道是对的（App 不再每帧重渲染），持久前缀与瞬态尾部拆分投影也对。问题都出在落地细节。</p>
+  <p class="note">注意审查对象：<code>957b339</code> 是「剥离流式渲染器」的提交，实现在其后未提交的工作树改动里。以下全部结论取自工作树，不取自任何单个提交的 diff。</p>
+</section>
+
+<section>
+  <h2>修订记录</h2>
+  <p>本报告经过三轮交叉核对。以下三条相对初版有实质变化，其中第一条是我判断错误。</p>
+
+  <div class="revision">
+    <span class="rtag">已撤回</span>
+    <h3><code>scrollMargin</code> 并不存在「固定少算一个 padding」的偏差</h3>
+    <p>初版称 <code>offsetTop</code> 不含 <code>.convo-doc</code> 的 <code>padding-top</code>，因此常态下恒偏小。这是我对 CSSOM 语义的误读：<code>offsetTop</code> 的参照是 offsetParent 的 <em>padding edge</em>，而 padding edge 是 padding box 的<strong>外</strong>边缘（border 的内边缘）。<code>.convo-doc</code> 没有 border，其 padding edge 与 border-box 顶部重合，因此 <code>offsetTop</code> <strong>包含</strong> padding-top。该断言撤回，不要按它去找 24px。</p>
+  </div>
+
+  <div class="revision">
+    <span class="rtag">已收窄</span>
+    <h3>主进程并非「每个转发事件都必然」序列化</h3>
+    <p>正常且能记入 replay 的流式事件基本都会付 <code>JSON.stringify</code> + 新建 <code>TextEncoder</code> + <code>structuredClone</code>；但存在三处例外，详见下文。原措辞过于绝对。</p>
+  </div>
+
+  <div class="revision">
+    <span class="rtag">已作废</span>
+    <h3><code>onReviewChanges</code> 破坏 memo 的具体路径已不存在</h3>
+    <p>工作树在初版审查后引入了 <code>AssistantRunView</code>。该结论已按当前代码重写并降级，详见下文。</p>
+  </div>
+
+  <div class="revision">
+    <span class="rtag">已收紧措辞</span>
+    <h3>第三轮：估算值、条件性后果与元数据</h3>
+    <p>390 MB/s 拆成「未超上限 / 已超上限」两段并标为估算值；<code>scrollMargin</code> 的后果改为条件性表述；主进程的三处例外按性质分类（限流 vs 降级），<code>structuredClone</code> 的范围限定到具体事件种类；minimap 与 assistant 行合并的因果降为「加剧因素之一，待 profiler 验证」；工作树 HEAD 更正为 <code>a26e715</code>（<code>957b339</code> 是其前三个提交）。</p>
+  </div>
+</section>
+<section>
+  <h2>修复状态</h2>
+  <p>下表是按本报告的「修复顺序」执行后的处置结果。下文各条发现原样保留，作为问题的记录；此处只记状态。全仓 <code>npm run typecheck</code> 与 <code>npm test</code> 在修复后均通过（renderer 45 文件 / 344 测试，<code>src/conversation</code> 11 文件 / 64 测试）。</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>状态</th><th>问题</th><th>做法</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chip done">已修</span></td><td><code>tailUtf8</code> O(n²)</td><td>新增 <code>tailUtf8</code> 到 <code>conversation-text.ts</code>（单趟、带 O(1) 长度快路径、返回 <code>{ text, truncated }</code>），删掉渲染进程的本地实现，去掉 <code>output !== candidate</code> 全量比较。120k CJK 从 <strong>14,238 ms 降到 1.3 ms</strong>。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td><code>capVirtualItems</code> 截错一端</td><td>改为 <code>slice(items.length - max)</code>，保留尾部。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td><code>scrollMargin</code></td><td>改用 scroller 与 host 的 <code>getBoundingClientRect</code> 差值加 <code>scrollTop</code>，不再依赖 <code>offsetTop</code> 的参照物；每次渲染重测（0.5px 收敛守卫）；ResizeObserver 同时观察 scroller、host 与 host 的父节点；未测量兜底分支补上 <code>ref={hostRef}</code>。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td><code>onChange</code> 的 rAF 不取消</td><td>句柄存 ref，排新帧前先 cancel，卸载时清理。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td>prepend 锚点静默失效</td><td><code>ScrollAnchor</code> 增记 <code>scrollTop</code> / <code>scrollHeight</code>；锚点行未挂载时按内容增高补偿；无挂载行时也返回锚点而非 <code>null</code>；恢复条件加入「scrollHeight 已增长」。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td>加载历史误报「有新内容」</td><td><code>loadingOlder</code> 或仍有待恢复锚点时不再置位。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td>工具卡跟随失效</td><td>stick 改为每次渲染执行 + rAF 二次校正 + ResizeObserver（容器与其子节点），恢复 <code>clientHeight &lt;= 0</code> 守卫；并在 <code>follow</code> 的 false→true 边沿重置卡内 <code>pinned</code>（在同一次 commit 里、<code>stick()</code> 之前），否则一次卡内向上滚动会永久生效，之后「回到最新」也唤不回跟随。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td>minimap 混用两套坐标系</td><td>只测量已挂载行，未挂载行在<strong>已测量锚点之间线性插值</strong>：单一坐标系，序列保持单调。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td><code>spaceMinimapMarks</code> 全表扫描</td><td>两个 <code>findIndex</code> 换成簇内 <code>for</code> 循环，降到 O(n)。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td><code>jumpTo</code> 分母不一致</td><td>改为 <code>fraction * scrollHeight - clientHeight / 2</code> 并夹取到可滚动范围。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td><code>itemBytes</code> 无缓存</td><td><code>WeakMap&lt;ConversationItem, number&gt;</code> 记忆化；item 不可变，缓存永久有效。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td>主进程重复分配编码器</td><td><code>#store</code> / <code>#rememberDelta</code> 改用模块级 <code>utf8ByteLength</code>，不再每事件 <code>new TextEncoder()</code>。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td><code>closeTurn</code> 不清理 <code>liveOrder</code></td><td>丢弃 live 消息后按 <code>liveMessages</code> 重新过滤 <code>liveOrder</code>。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td>每帧 <code>Object.fromEntries(liveTools)</code></td><td>所有写入走 <code>setLiveTool</code> / <code>deleteLiveTool</code> / <code>clearLiveTools</code>，投影对象只在变更时重建。</td></tr>
+        <tr><td><span class="chip done">已修</span></td><td><code>dispose()</code> 释放不彻底</td><td>补清 <code>items</code> / <code>persistedRows</code> / <code>notices</code> / <code>pendingUsers</code> / <code>userDisplays</code> / <code>userThumbs</code> / <code>liveOrder</code> / <code>openTurnItems</code> / <code>messageErrors</code> / 索引，并把 <code>snapshot</code> 与 <code>metadataSnapshot</code> 重置为空快照（保留 identity 与 generation，让卸载竞态下的读取仍是「本会话，空」）—— 只清工作字段是不够的，两个已发布快照会各自吊住一整份转录窗口。</td></tr>
+        <tr><td><span class="chip done">部分</span></td><td><code>publishNow</code> 每帧 concat</td><td>无瞬态尾部时按引用复用持久前缀（空闲期零分配）。流式期间仍需复制 —— <code>rows</code> 必须是单个数组，尾行每帧换新。彻底解决要改下游消费方式。</td></tr>
+        <tr><td><span class="chip open">未修</span></td><td><code>renderItem</code> 引用每帧变化</td><td><strong>不能用 <code>useCallback</code> 修</strong>：它必须闭包 <code>rows</code>，而 <code>rows</code> 按设计每帧换新引用，加了依赖数组照样每帧失效。要修得换结构（rows 走 ref，或把行数据下推给虚拟列表）。代价有界（约十几个已挂载项），保持 P2。</td></tr>
+        <tr><td><span class="chip open">未修</span></td><td>Runtime <code>#onToolUpdate</code> O(n²)</td><td>不在本报告的修复顺序内。要修需按增量重构 sanitize（对新增后缀加重叠窗口），会触及脱敏语义，风险不匹配本次改动范围。</td></tr>
+        <tr><td><span class="chip open">未修</span></td><td>Runtime 队列背压未激活</td><td>这是设计取舍（改异步 drain 真正启用背压，还是删掉这批分支），不是机械修复，应先定方向。</td></tr>
+        <tr><td><span class="chip open">未修</span></td><td><code>#streamSeq</code> 单调增长</td><td>需要 fanout 收到会话关闭事件才能按会话清理，当前没有这个入口。</td></tr>
+        <tr><td><span class="chip open">未修</span></td><td>内存上限按条数计</td><td>要加跨条目字节记账，会改动协议层常量与语义，不在本次范围。</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">新增测试：<code>packages/studio-protocol/test/conversation-text-tail.test.ts</code>（<code>tailUtf8</code> 正确性、与 <code>truncateUtf8</code> 的镜像关系、120k CJK 耗时上限 250ms）、<code>useToolCardFollowScroll.test.tsx</code>（7 条，覆盖持续跟随 / 零高守卫 / 手势解锁 / 回到尾部重挂 / follow 边沿恢复 / 恒真时不误重挂 / 不跟随时不动）、<code>ConversationVirtualList.test.ts</code>（截取方向与显式上限）、<code>useConversationScroll.test.ts</code>（未挂载锚点的增高补偿）、<code>conversationStore.test.ts</code>（大段 CJK 工具输出耗时上限、<code>liveOrder</code> 清理、<code>dispose</code> 释放已发布快照、行数变化必换 <code>structureToken</code> 的不变量）、<code>ConversationMinimap.test.tsx</code>（簇内选取语义、2000 圆点线性开销）。</p>
+</section>
+
+<section>
+  <h2>级别总览</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>级别</th><th>问题</th><th>位置</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chip p0">P0</span></td><td><code>tailUtf8</code> 在多字节文本上 O(n²)，实测阻塞主线程</td><td class="loc">conversationStore.ts:45</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td>prepend 锚点在虚拟化下静默失效</td><td class="loc">useConversationScroll.ts:50</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td>加载更早历史时误报「有新内容」</td><td class="loc">useConversationScroll.ts:79</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td>工具卡跟随失效（effect 仅依赖 <code>follow</code>）</td><td class="loc">useToolCardFollowScroll.tsx:7</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td><code>scrollMargin</code> 无法感知上方内容高度变化</td><td class="loc">ConversationVirtualList.tsx:50</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td>minimap 混用两套坐标系 + 每帧测量 + 全表扫描</td><td class="loc">ConversationMinimap.tsx:381</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td>Runtime <code>#onToolUpdate</code> 对累积输出 O(n²)</td><td class="loc">conversation-live-projector.ts:516</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td><code>itemBytes</code> 无缓存，完成 / 分页路径反复全窗序列化</td><td class="loc">conversationStore.ts:44</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td><code>capVirtualItems</code> 截取头部而非尾部（退化路径）</td><td class="loc">ConversationVirtualList.tsx:8</td></tr>
+        <tr><td><span class="chip p1">P1</span></td><td>主进程每事件序列化 + 深拷贝 + 编码</td><td class="loc">conversation-events.ts:243</td></tr>
+        <tr><td><span class="chip p2">P2</span></td><td><code>publishNow</code> 每帧复制全部持久行</td><td class="loc">conversationStore.ts:337</td></tr>
+        <tr><td><span class="chip p2">P2</span></td><td><code>renderItem</code> 引用每帧变化，虚拟列表 memo 失效</td><td class="loc">ConvoTranscript.tsx:167</td></tr>
+        <tr><td><span class="chip p2">P2</span></td><td><code>onChange</code> 的 rAF 不取消，构成第二个滚动写入权威</td><td class="loc">ConversationVirtualList.tsx:42</td></tr>
+        <tr><td><span class="chip p2">P2</span></td><td><code>closeTurn</code> 删除 <code>liveMessages</code> 后不清理 <code>liveOrder</code></td><td class="loc">conversationStore.ts:240</td></tr>
+        <tr><td><span class="chip p2">P2</span></td><td>minimap <code>jumpTo</code> 兜底路径分母与中心偏移不一致</td><td class="loc">ConversationMinimap.tsx:498</td></tr>
+        <tr><td><span class="chip p2">P2</span></td><td>Runtime 队列合并与背压在当前同步路径下不可激活</td><td class="loc">conversation-live-projector.ts:995</td></tr>
+        <tr><td><span class="chip p2">P2</span></td><td><code>structureToken</code> 是隐含不变量，缺断言与测试</td><td class="loc">conversationStore.ts:337</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">级别读法：只有 P0 一项有实测支撑，是确定的主线程阻塞。其余标 P1 的性能项 —— 主进程序列化、<code>itemBytes</code> 全窗重算、minimap 每帧测量 —— 都是从代码路径与调用频率推导出的<strong>性能风险</strong>，需要 profiler 或压测确认真实占比，不要读成与 P0 同等的冻结。标 P1 的正确性项（锚点、跟随、误报）性质不同，它们是可推理复现的行为缺陷。</p>
+</section>
+
+<section>
+  <h2>P0 · <code>tailUtf8</code> 的二次退化</h2>
+  <article class="finding sev-p0">
+    <div class="fhead"><span class="chip p0">P0</span><h3>每次循环都做一次完整 UTF-8 编码</h3></div>
+    <p class="loc">apps/renderer/src/conversation/conversationStore.ts:45-50 · 调用点 :210 · 重放路径 :134</p>
+<pre><code>function tailUtf8(value: string, maxBytes: number): string {
+  if (utf8ByteLength(value) &lt;= maxBytes) return value;
+  let low = Math.max(0, value.length - maxBytes); let result = value.slice(low);
+  while (utf8ByteLength(result) &gt; maxBytes &amp;&amp; low &lt; value.length) result = value.slice(++low);
+  return result;
+}</code></pre>
+    <p>每次循环都是一次 <code>String.slice</code> <strong>加一次完整的 <code>TextEncoder.encode</code></strong>。<code>low</code> 的初值 <code>length - maxBytes</code> 只在纯 ASCII 下正确；CJK 每字符 3 字节，初值会差出三分之二的距离，于是逐字符收敛。</p>
+    <p>实测数据（把该函数原样抠出在 Node 中运行，非理论推导）：</p>
+    <div class="tablewrap">
+      <table class="bench">
+        <thead><tr><th>输入</th><th>迭代次数</th><th>耗时</th></tr></thead>
+        <tbody>
+          <tr><td>30,000 个中文字符</td><td class="num">8,155</td><td class="num">765 ms</td></tr>
+          <tr><td>60,000 个中文字符</td><td class="num">38,155</td><td class="num">9,120 ms</td></tr>
+          <tr><td>120,000 个中文字符</td><td class="num">43,691</td><td class="num">14,238 ms</td></tr>
+          <tr><td>200,000 个 ASCII 字符</td><td class="num">1</td><td class="num">1 ms</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </article>
+  <article class="finding sev-p0">
+    <div class="fhead"><span class="chip p0">P0</span><h3>触发路径由两个缺陷叠加而成</h3></div>
+    <ol>
+      <li>投影器 <code>#onToolUpdate</code>（<code>conversation-live-projector.ts:526</code>）只在 <code>sanitized.text.startsWith(previous)</code> 成立时发 <code>append</code>。任何<strong>重绘型</strong>的部分结果 —— 进度条、重排的表格、带 spinner 的输出 —— 前缀检测都会失败，于是 <code>updateMode</code> 保持 <code>"replace"</code>，<code>output</code> 是整份累积文本，上限 <code>TEXT_BLOCK_MAX_BYTES</code> = 256KB。</li>
+      <li>256KB 中文约 87,000 字符，进入 <code>conversationStore.ts:210</code> 的 <code>tailUtf8(candidate, 64KB)</code>，约 43,691 次迭代 → <strong>每个 update 事件冻结 14 秒</strong>。</li>
+    </ol>
+    <p>更糟的是 <code>hydrate()</code> 在 <code>:134</code> 同步重放 replay 事件，所以<strong>打开</strong>一个尾轮带大段中文工具输出的会话就会直接卡住。</p>
+    <p><code>append</code> 路径也不便宜，而且分两段。<code>tailUtf8</code> 没有 <code>truncateUtf8</code> 那样的长度快路径，所以<strong>任何</strong>一次调用都至少做一次完整的 <code>utf8ByteLength</code> 编码：候选文本仍在 64KiB 以内时，是每事件一次约 64KB 编码（60 事件 / 秒约 4 MB/s）。而一旦某个工具的输出越过 64KiB，<code>tool.output</code> 就永久停在上限附近，此后<strong>每一次</strong> append 的 <code>candidate</code> 都会超限并进入循环 —— 迭代数约等于新增字符数，每次迭代再编码约 64KB。按 100 个 CJK 字 / 事件、60 事件 / 秒估算约 <strong>390 MB/s</strong>；这是估算值，实际取决于 delta 速率与字符宽度。</p>
+  </article>
+  <article class="finding sev-p0">
+    <div class="fhead"><span class="chip p0">P0</span><h3>修法</h3></div>
+    <p>正确的原语已在同一文件第 8 行 import 进来。<code>truncateUtf8</code>（<code>packages/studio-protocol/src/conversation-text.ts:22</code>）的镜像写法是单趟的：编码一次，从 <code>bytes.length - maxBytes</code> 这个起点<strong>向文本末尾方向</strong>推进，直到落在码点起始字节上（<code>(byte &amp; 0b1100_0000) !== 0b1000_0000</code>），再 <code>decoder.decode(subarray)</code>。约 5 行，复用现成的模块级 <code>encoder</code> / <code>decoder</code>，并返回 <code>{ text, truncated }</code>。</p>
+    <p><strong>方向不能照抄 <code>truncateUtf8</code></strong>：它保留头部，所以从 <code>maxBytes</code> 处<em>向前回退</em>找边界；<code>tailUtf8</code> 保留尾部，起点是 <code>bytes.length - maxBytes</code> 且必须<em>向后推进</em> —— 向前回退会让保留的字节数超过 <code>maxBytes</code>。</p>
+    <p>顺带去掉 <code>:210</code> 那句 <code>output !== candidate</code>：它是两个最多 256KB 字符串的全量比较，只为推导一个截断标记，而单趟实现自己就知道有没有截断。</p>
+  </article>
+</section>
+
+<section>
+  <h2>虚拟化的定位问题</h2>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3><code>scrollMargin</code> 感知不到上方内容的高度变化</h3></div>
+    <p class="loc">apps/renderer/src/conversation/ConversationVirtualList.tsx:50-56 · 兜底分支 :62-65</p>
+    <p><strong>主要问题（恒成立）</strong>：<code>ResizeObserver</code> 观察的是 host 自身（<code>:55</code>），而 <code>scrollMargin</code> 取决于 host <strong>上方</strong>兄弟节点的高度总和 —— StatusBanner、notices、<code>xd://</code> 挂载通知、「加载更早」按钮。这些出现或改变高度时，host 的 <code>offsetTop</code> 变了但自身尺寸没变，<code>update()</code> 不触发。</p>
+    <p><strong>次要问题（条件性）</strong>：<code>:62-65</code> 的「未测量」兜底分支返回的 div 没有绑定 <code>ref={hostRef}</code>，走这条分支时 effect 因 <code>hostRef.current === null</code> 提前返回，而依赖只有 <code>[enabled]</code>，之后不会重跑。由于 <code>initialRect: { height: 800 }</code>（<code>:39</code>）在首帧就能给出非空区间，这条分支只在<strong>测量到零高视口</strong>时才走（折叠面板、隐藏页签、入场动画）。</p>
+    <p><strong>参照物的脆弱性（当前不是 bug）</strong>：<code>offsetTop</code> 相对 <code>.convo-doc</code> 计算，所以 <code>.convo-scroll</code> 的滚动原点到 <code>.convo-doc</code> border-box 顶部之间的一切它都看不见。当前恰好为 0（<code>.convo-doc</code> 是 <code>margin: 0 auto</code>，<code>.convo-scroll</code> 无 padding），一旦有人给滚动容器加 padding 或给 doc 加 margin-top 就会静默偏移。修的时候直接用两个 <code>getBoundingClientRect().top</code> 相减加 <code>scrollTop</code> 更稳。</p>
+    <p>后果是 <code>translateY(item.start - scrollMargin)</code>（<code>:74</code>）与虚拟化器的可视区间计算同时偏移，偏移量取决于上方布局变化的幅度：行<strong>可能</strong>画到 banner 区域，挂载的索引区间也<strong>可能</strong>与实际滚动位置不符。另外 <code>scrollMargin</code> 是 <code>useState</code> 又被读进 <code>useVirtualizer</code> 的 options（<code>:40</code>），在 layout effect 里 set 它等于挂载时必定多一次「渲染 + 全量区间重算 + 布局」。</p>
+  </article>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3><code>capVirtualItems</code> 截错了一端</h3></div>
+    <p class="loc">apps/renderer/src/conversation/ConversationVirtualList.tsx:8-11</p>
+<pre><code>if (items.length &lt;= max) return items;
+return items.slice(0, max);   // 保留前 120 个</code></pre>
+    <p><code>getVirtualItems()</code> 返回的是当前区间内按索引升序的项，<code>slice(0, 120)</code> 保留的是视口<strong>最上面</strong>那 120 行。对一个 pin 在底部的对话流，一旦区间超过 120，被丢掉的正是用户正在看的底部 —— 视口下半截空白。</p>
+    <p>这是个只在「区间已经算错」时才激活的兜底（行被测成零高、或上一条的偏移把区间算大），激活时把情况变得更糟。属退化路径隐患，不是常发 bug；但底部锚定的列表要截也该截头留尾。</p>
+  </article>
+  <article class="finding sev-p2">
+    <div class="fhead"><span class="chip p2">P2</span><h3><code>onChange</code> 的 rAF 不取消</h3></div>
+    <p class="loc">apps/renderer/src/conversation/ConversationVirtualList.tsx:42-48</p>
+    <p>每次非 sync 变更都排一个新的 <code>requestAnimationFrame</code>，从不 <code>cancel</code>。一批测量回调会排出多个 rAF，各自写一次 <code>scrollTop</code>。它确实读了 <code>followRef</code>，所以尊重手势解锁；但这构成了<strong>第二个滚动写入权威</strong> —— <code>useConversationScroll.ts:78</code> 的 layout effect 是第一个。「跟随底部的脱离必须由手势驱动」这条约束在两个独立权威并存时很容易被下一次改动破坏。</p>
+  </article>
+</section>
+<section>
+  <h2>滚动与跟随</h2>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3>「加载更早」的滚动锚点在虚拟化下静默失效</h3></div>
+    <p class="loc">apps/renderer/src/conversation/useConversationScroll.ts:50-54 · 触发点 :77</p>
+    <p><code>restoreAnchor</code> 用 <code>querySelectorAll</code> 在<strong>已挂载</strong>节点里找 <code>anchor.itemId</code>，找不到就静默 <code>return</code>，不做任何补偿。prepend 50 条后总高度在顶部增长约 50 × 132px，虚拟化器按未变的 <code>scrollTop</code> 重算区间，锚点行很可能已被卸载 → 阅读位置直接跳走。</p>
+    <p>虚拟化下的锚定应该走 <code>virtualizer.scrollToIndex</code>，或按新增行的估算高度直接补 <code>scrollTop</code>，不能靠 DOM 查询。</p>
+  </article>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3>加载历史时误报「有新内容」</h3></div>
+    <p class="loc">apps/renderer/src/conversation/useConversationScroll.ts:75-80</p>
+    <p><code>preparePrepend</code> 把 <code>pinned.current</code> 置 false；prepend 使 <code>itemCount</code> 变化触发 effect；此时 <code>loadingOlder</code> 为 true 使第一分支不成立，<code>pinned.current</code> 为 false 使第二分支不成立 → 落到 <code>:79</code> 的 <code>setHasNewContent(true)</code>。用户只是往上翻历史，却弹出「回到最新」提示。</p>
+  </article>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3>工具卡片跟随失效</h3></div>
+    <p class="loc">apps/renderer/src/conversation/useToolCardFollowScroll.tsx:7</p>
+<pre><code>useLayoutEffect(() =&gt; {
+  if (follow &amp;&amp; pinned.current &amp;&amp; ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+}, [follow]);</code></pre>
+    <p>依赖只有 <code>[follow]</code>。流式期间 <code>follow</code> 恒为 <code>true</code>，effect 不重跑，工具卡片内部滚动区<strong>不会随输出增长而滚动</strong>。HEAD 删掉的原实现有无依赖 effect + ResizeObserver + rAF 二次校正 + <code>clientHeight &lt;= 0</code> 守卫，这些都没了；对应的 116 行测试也一并删了。修法是让 effect 依赖输出版本或内容高度，而不是只依赖 <code>follow</code>。</p>
+  </article>
+</section>
+
+<section>
+  <h2>minimap</h2>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3>混用逻辑索引与实际像素两套坐标系</h3></div>
+    <p class="loc">apps/renderer/src/conversation/ConversationMinimap.tsx:381-394</p>
+    <p>先用 <code>index / (n-1)</code> 给<strong>全部</strong> mark 播种（行索引空间的均匀分布），再用 <code>center / scrollHeight</code> 覆盖<strong>已挂载</strong>的那十几行（真实像素空间）。两者只在所有行等高时一致。真实转录行高差十倍，于是已挂载圆点相对邻居跳位，滚动时圆点随挂载窗口进出而反复跳动。</p>
+    <p>更实质的后果：<code>spaceMinimapMarks</code>（<code>:212-215</code>）假定 <code>entries</code> 按 <code>f</code> 升序（它是向前单调游走的），而混合坐标系下 <code>f</code> <strong>不单调</strong>，聚类判断因此出错，可能产出重叠的圆点。建议统一坐标来源 —— 虚拟化器的 <code>item.start</code> 已经持有全表位置信息，正是为此而生。</p>
+  </article>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3>每帧重新测量与全表扫描</h3></div>
+    <p class="loc">apps/renderer/src/conversation/ConversationMinimap.tsx:367 · :381-393 · :217/:220</p>
+    <p><code>measure()</code> 的跳过条件是「marks 未变 <em>且</em> scrollHeight 未变」。虚拟化下 <code>scrollHeight</code> 随虚拟化器持续测量行高而一直在变，这个 gate 在流式期间基本不成立。于是每帧执行：分配一个最多 2000 键的 <code>next</code> 对象；<code>querySelectorAll</code> 后对每个挂载节点读一次 <code>getBoundingClientRect()</code>（强制同步布局）；<code>setFractions</code> 触发 <code>spaceMinimapMarks</code> 重算。</p>
+    <p><code>spaceMinimapMarks</code> 里两个 <code>findIndex</code>（<code>:217</code> / <code>:220</code>）<strong>每次都从索引 0 开始扫</strong>，谓词对 <code>idx &lt; i</code> 只是返回 false 而不是跳过。在 2000 个 mark、约 55 个均匀簇（<code>MIN_MARK_GAP = 0.018</code>）的典型情形下，扫描量可达数万到十万级；最坏情况 O(n²)。改成 <code>for (let k = i; k &lt;= j; k++)</code> 即降到 O(n)。</p>
+    <p class="note">好消息：渲染出的圆点被 <code>MIN_MARK_GAP</code> 收敛过，DOM 节点数是有界的 —— 这一层没问题。成本全在测量与布局阶段。</p>
+  </article>
+  <article class="finding sev-p2">
+    <div class="fhead"><span class="chip p2">P2</span><h3><code>jumpTo</code> 兜底路径的分母不一致</h3></div>
+    <p class="loc">apps/renderer/src/conversation/ConversationMinimap.tsx:498</p>
+    <p>兜底用 <code>fraction * (scrollHeight - clientHeight)</code> 作为 <code>scrollTop</code>，但 <code>measure()</code> 算出的 fraction 是 <code>center / scrollHeight</code>。分母不同、且一个是中心一个是顶部，即使 fraction 测得准，跳转也会偏 <code>fraction × clientHeight</code> 加半个行高。</p>
+  </article>
+</section>
+<section>
+  <h2>持续性成本</h2>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3><code>itemBytes</code> 无缓存，完成与分页路径反复全窗序列化</h3></div>
+    <p class="loc">apps/renderer/src/conversation/conversationStore.ts:44 · :51-59 · 调用点 :128 / :142 / :232</p>
+    <p><code>pageItems</code> 从末尾往前走，对每个 item 调 <code>itemBytes</code>（<code>JSON.stringify</code> + 完整 <code>TextEncoder</code> 编码），直到累计 <code>maxRows</code> = 2000 条或 <code>maxBytes</code> = 24MB。它<strong>不是每帧执行</strong>，但会在 <code>hydrate</code>、<code>prepend</code>、以及每次 <code>upsertItem</code>（即每条消息完成）时重跑整窗。满窗时是一次约 24MB 的 stringify 加 24MB 编码。</p>
+    <p><code>prepend</code>（加载更早）也走同一条路，而且正好发生在用户等待的时刻。<code>ConversationItem</code> 是不可变的，用 <code>WeakMap&lt;ConversationItem, number&gt;</code> 缓存字节数即可让这条路径变成 O(新增)。</p>
+  </article>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3>Runtime <code>#onToolUpdate</code> 对累积输出的 O(n²) 处理</h3></div>
+    <p class="loc">omp-patch/overlay/.../conversation-live-projector.ts:516-543</p>
+    <p>每个 update 都对<strong>整份累积</strong> partial result 做 <code>toolText</code> + <code>sanitizePublicText</code>（<code>shortenHomePath</code> 全量正则替换 + <code>truncateUtf8</code>）+ <code>startsWith(previous)</code> 全量比较，再把整份文本存回 <code>#toolOutput</code>。单个工具生命周期内累计 O(总长²)。进度条、重排表格、spinner 类输出尤其容易触发高成本的 <code>replace</code> 路径 —— 也就是上面 P0 的输入源。</p>
+  </article>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3>主进程每事件序列化 + 深拷贝 + 编码</h3></div>
+    <p class="loc">packages/studio-host/src/conversation-events.ts:243 · :304 · :312</p>
+    <p><code>#store</code> 每次用 <code>new TextEncoder().encode(JSON.stringify(event))</code> 计算事件字节数（编码器实例也是每次新建）。<code>#rememberDelta</code> 另做一次编码（<code>:304</code>），并在 <code>:312</code> 把 <code>previousEvent.delta + addition</code> 送进 <code>truncateUtf8(..., DELTA_MAX_BYTES)</code> —— 其 O(1) 快路径条件是 <code>length * 3 &lt;= maxBytes</code>（约 10922 字符），累积 delta 一旦超过这个长度，每个 delta 都要对最多 32KB 做一次完整编码。按 16ms 合并约 60 次 / 秒 / 会话，乘以并发会话数，全在主进程 —— 会拖累所有 IPC。</p>
+    <p><strong>准确的范围</strong>：正常且能记入 replay 的流式事件基本都会付这份成本，例外有三处 —— 块已达 <code>TEXT_BLOCK_MAX_BYTES</code> 后 <code>addition</code> 为空的提前返回（<code>:305-308</code>）、会话已 <code>overflowed</code>（<code>:241</code> / <code>:295</code>）、replay 已淘汰且事件属同一被淘汰轮次（<code>:157-160</code>）。三者性质不同：第一条是<strong>预期内的限流行为</strong>（文本块达到上限本身正常），后两条才是 replay 的降级路径。</p>
+    <p>另外两点：<code>structuredClone(forward)</code> 是在<strong>调用点</strong>求值的，所以「空 delta 提前返回」省掉的是 stringify 而非编码器分配。对那些在调用点就包了 <code>structuredClone</code> 的事件种类（<code>:179</code> / <code>:192</code> / <code>:195</code> / <code>:219</code> / <code>:223</code> / <code>:226</code> / <code>:230</code> / <code>:233</code>），即使会话已 <code>overflowed</code>，深拷贝仍会在进入 <code>#store</code> 的 overflow 判断之前发生；<code>message.delta</code> 在 <code>:295</code> 提前返回，<code>tool.updated</code> 在调用点本就不做深拷贝，这两类不受影响。<code>#streamSeq</code>（<code>:62</code>）没有按会话删除路径，进程生命周期内每见过一个会话就多一个常驻条目 —— 单条很小，但确实单调增长。</p>
+  </article>
+  <article class="finding sev-p2">
+    <div class="fhead"><span class="chip p2">P2</span><h3><code>publishNow</code> 每帧复制全部持久行</h3></div>
+    <p class="loc">apps/renderer/src/conversation/conversationStore.ts:337 · :313-315</p>
+    <p><code>[...this.persistedRows, ...transientRows]</code> 每帧复制最多 2000 个持久行；持久 / 瞬态拆分投影的一半收益被这个 concat 吃掉。同一帧里还有三个 <code>Object.fromEntries</code>（<code>liveTools</code> 最多 256 项、<code>openTurnItems</code>、<code>messageErrors</code>）、<code>liveToolsByMessage</code> 对全部 256 个 live tool 建 Map（<code>conversationViewModel.ts:97-101</code>），以及 batch 段 key 的 <code>tools-${ids.join("-")}</code> 字符串拼接。<code>ConversationPane.tsx:97</code> 的 <code>conversationFollowKey(state)</code> 也是每帧一次 <code>Object.values</code> 分配。</p>
+  </article>
+  <article class="finding sev-p2">
+    <div class="fhead"><span class="chip p2">P2</span><h3><code>renderItem</code> 引用每帧变化</h3></div>
+    <p class="loc">apps/renderer/src/conversation/ConvoTranscript.tsx:167</p>
+    <p><code>renderItem</code> 是内联箭头，每次 <code>ConvoTranscript</code> 渲染都是新引用，使 <code>ConversationVirtualList</code> 的外层 <code>memo</code>（<code>ConversationVirtualList.tsx:13</code>）每帧失效，虚拟化器随之对已挂载项（约十几个）重跑 <code>renderItem</code> 与比较器。有界且便宜。</p>
+    <p class="note">初版报告称「所有带 bind 的已完成轮次每帧通过 <code>onReviewChanges: () =&gt; ...</code> 逃过 memo」，该路径已不存在：<code>renderItems</code>（<code>:27-43</code>）把连续 assistant 行合成 <code>assistantRun</code>，<code>:187</code> 按引用传 <code>onReviewChanges</code>，per-turn 箭头下移到 <code>ConversationItemView.tsx:353</code> 只在真正重渲染时创建，而 <code>AssistantRunView</code> 的自定义比较器（<code>ConversationItemView.tsx:391-401</code>）对 <code>entries</code> 逐元素比同一性，新数组不破坏 memo。<code>:207</code> 残留的箭头只存在于非 assistant 分支，而 <code>binds</code> 只在 assistant 行被赋值，该分支上 <code>bind</code> 结构性恒为 undefined，箭头不会被构造。</p>
+    <p>一个相关观察：<code>renderItems</code> 把整段连续 assistant 行合成<strong>一个</strong>虚拟项，流式尾部那个虚拟项高度持续增长，而 <code>estimateSize: () =&gt; 132</code>（<code>ConversationVirtualList.tsx:33</code>）对它差得很远（初始估算会被挂载后的实测修正，但差距越大，<code>getTotalSize()</code> 的抖动幅度也越大）。minimap 的 <code>scrollHeight</code> 跳过条件在流式期间频繁失效，根本原因是尾行本身在长高；合并放大了估算与实测的差距，<strong>可能</strong>是加剧因素之一。两者值得用 profiler 一起验证，不宜写成同一个已证明的根因。</p>
+  </article>
+  <article class="finding sev-p2">
+    <div class="fhead"><span class="chip p2">P2</span><h3><code>closeTurn</code> 不清理 <code>liveOrder</code></h3></div>
+    <p class="loc">apps/renderer/src/conversation/conversationStore.ts:240 · 对照 :193</p>
+    <p><code>conversation.message.completed</code> 会过滤 <code>liveOrder</code>（<code>:193</code>），但 <code>closeTurn(turnId, false)</code> 只从 <code>liveMessages</code> 删（<code>:240</code>），不同步过滤 <code>liveOrder</code>。投影侧有 <code>message === undefined</code> 的跳过（<code>conversationViewModel.ts:133</code>）所以没有视觉 bug，但数组每轮多一个死 id 且每帧被遍历，只有下一次 <code>message.started</code>（<code>:166</code>）才顺手清掉。边界清理问题。</p>
+  </article>
+</section>
+<section>
+  <h2>内存上限</h2>
+  <p>下表是<strong>理论 payload 上限</strong>（各常量允许的最坏组合），不是实际堆占用，也不是实测数据。</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>缓冲</th><th>条数上限</th><th>单条字节上限</th><th>组合后理论上限</th></tr></thead>
+      <tbody>
+        <tr><td><code>liveMessages</code> × blocks</td><td class="num">16 × 64</td><td class="num">256 KiB</td><td class="num">256 MiB</td></tr>
+        <tr><td><code>liveTools.output</code></td><td class="num">256</td><td class="num">64 KiB</td><td class="num">16 MiB</td></tr>
+        <tr><td><code>liveTools.result</code></td><td class="num">256</td><td class="num">256 KiB</td><td class="num">64 MiB</td></tr>
+        <tr><td><code>#toolOutput</code>（Runtime）</td><td class="num">256</td><td class="num">256 KiB</td><td class="num">64 MiB</td></tr>
+        <tr><td><code>items</code></td><td class="num">2000</td><td>—</td><td class="num">24 MiB JSON</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">常量位置：<code>conversationStore.ts:14-21</code>、<code>conversation-live-projector.ts:26</code> / <code>:898-906</code>。</p>
+  <ul>
+    <li><strong>没有跨条目的字节记账。</strong> 单条 assistant 消息就能合法持有 64 × 256KB = 16MB 文本。<code>message.started</code> 会清掉非本轮的消息（<code>:163-165</code>），所以常态好得多，但没有机制阻止最坏情况。</li>
+    <li><strong>24MB 量的是 <code>JSON.stringify</code> 的 UTF-8 长度</strong>（<code>itemBytes</code>），不是 JS 堆占用。UTF-16 字符串、对象头、<code>pending</code> 数组、<code>materialized</code> 副本与派生的 row 结构都不在其中，所以实际驻留会高于表中数字 —— 但表中数字本身不是堆测量结果。<code>rowCache</code>（<code>:70</code>）几乎等于第二份转录表示。</li>
+    <li><strong>Runtime 侧的边界要说清</strong>：completed tombstone 与若干辅助 Map 有 256 条上限（<code>:879</code> / <code>:891</code> / <code>:901</code>），未完成消息主要依靠 turn 生命周期清理，并非所有状态都严格受 256 条限制。</li>
+    <li><strong><code>dispose()</code> 释放不彻底但不构成泄漏。</strong> <code>:344</code> 清了 maps 与 <code>rowCache</code>，未清 <code>items</code> / <code>persistedRows</code> / <code>snapshot</code>。只要 Store 不再被外部引用，这不是独立的长期泄漏；<code>useConversation</code> 的 <code>previous.current</code> 会暂时保留一个旧 snapshot，属有限保留策略。</li>
+  </ul>
+</section>
+
+<section>
+  <h2>架构风险</h2>
+  <article class="finding sev-p2">
+    <div class="fhead"><span class="chip p2">P2</span><h3><code>structureToken</code> 是隐含不变量</h3></div>
+    <p class="loc">apps/renderer/src/conversation/conversationStore.ts:337 · ConvoTranscript.tsx:149-156</p>
+    <p>纯文本 delta 时 <code>rows</code> 是新数组但 <code>structureToken</code> 不变，因此 <code>binds</code> / <code>createdBinds</code> / <code>visualItems</code> / <code>itemKeys</code> / <code>latestAssistant</code> 都不重算，算的是<strong>上一帧的</strong> <code>rows</code>。这依赖一个隐含约定：token 不变时行数与行结构不得改变，只能改已有行的内容对象。</p>
+    <p>当前路径基本遵守（文本 delta 与工具输出更新不改行数；消息完成、工具开始、turn 完成等结构事件会换 token），所以这是架构风险而非已复现崩溃。但一旦出现「行数变化而 token 未变」的路径，<code>itemKeys.length</code> 与 <code>visualItems.length</code> 就会不一致，<code>renderItem</code> 里的下标访问直接崩。建议加开发期断言或专门测试。</p>
+  </article>
+  <article class="finding sev-p2">
+    <div class="fhead"><span class="chip p2">P2</span><h3>Runtime 队列的合并与背压在当前同步路径下不可激活</h3></div>
+    <p class="loc">omp-patch/overlay/.../conversation-live-projector.ts:995-996</p>
+<pre><code>this.#enqueue(parsed);
+this.#drain();</code></pre>
+    <p>同步入队后立即 drain，队列长度恒为 0 或 1（我核过重入场景：外层 <code>#drain</code> shift 后队列已空，listener 重入 <code>#emitParsed</code> 时内层 drain 会清空，外层 while 随即退出）。因此 <code>#enqueue</code> 的 delta 合并（<code>:1001-1030</code>）、<code>#compactQueue()</code>（<code>:1047-1081</code>）、<code>CONVERSATION_LIVE_QUEUE_LIMIT</code> 丢弃策略（<code>:1032-1043</code>）在<strong>当前调用路径</strong>下都不会激活。实际只剩上游 16ms / 64 字符的定时合并在起作用。</p>
+    <p>未来若改成异步 listener 或新增调用路径，队列可能真正增长。所以准确的说法是「当前正常路径未激活这套背压设计」，而不是死代码 —— 但它会误导后来的人以为背压已经存在。</p>
+  </article>
+  <article class="finding sev-p1">
+    <div class="fhead"><span class="chip p1">P1</span><h3>测试覆盖相对 main 大幅回退</h3></div>
+    <p>当前分支下 <code>src/conversation</code> 共 <strong>10 个测试文件 / 46 个测试，全部通过，1.84s</strong>（<code>apps/renderer</code> 内 <code>npx vitest run src/conversation</code>）。</p>
+    <p>与 <code>main</code> 的差异来自 <code>git diff --stat main...HEAD</code>（本次审查中执行，属工作树之外的证据）：<code>conversation.test.tsx</code> 少了约 3959 行，<code>useToolCardFollowScroll.test.tsx</code>（116 行）、<code>packages/client/test/conversation-reducer.test.ts</code>、<code>packages/testkit/test/conversation-perf.test.ts</code> 被删除，而新增的 <code>ConversationVirtualList.test.ts</code> 只有一条平凡断言。</p>
+    <p>上面的滚动与跟随类缺陷几乎全部落在被删掉的覆盖范围里 —— 尤其那个性能回归测试，正是能拦住 P0 的东西。</p>
+  </article>
+</section>
+
+<section>
+  <h2>修复顺序</h2>
+  <ol>
+    <li><strong>立即</strong>：<code>tailUtf8</code> 改单趟 UTF-8 截断，返回 <code>{ text, truncated }</code>，去掉 <code>output !== candidate</code> 的全量比较，并补一条 CJK 大文本耗时回归测试。</li>
+    <li>修虚拟列表：首帧 <code>ref</code>、<code>scrollMargin</code> 的参照物与更新时机、<code>capVirtualItems</code> 的截取方向。</li>
+    <li>修 prepend 锚点与「加载历史误报新内容」。</li>
+    <li>修工具卡跟随，让 effect 依赖输出版本或内容高度，而不是只依赖 <code>follow</code>。</li>
+    <li>统一 minimap 的 fraction 坐标模型，同时把 <code>spaceMinimapMarks</code> 的簇内扫描改成从 <code>i</code> 起的普通循环。</li>
+    <li>低风险优化：<code>itemBytes</code> 加 <code>WeakMap</code> 缓存、主进程复用模块级 encoder、<code>closeTurn</code> 补 <code>liveOrder</code> 清理、<code>publishNow</code> 避免每帧 concat。</li>
+    <li>给 <code>structureToken</code> 加不变量测试，并补齐工具卡跟随与虚拟滚动的回归测试。</li>
+  </ol>
+</section>
+
+<footer>
+  <p><strong>审查边界</strong>：本报告的性能结论中，只有 <code>tailUtf8</code> 一项是实测（把函数原样抠出在 Node 中运行）；其余基于代码路径与调用频率推导，标注为「每帧 / 每事件」的部分均已核对实际触发点。审查阶段我<strong>没有</strong>运行完整 <code>typecheck</code>、全量测试或启动应用。</p>
+  <p><strong>修复后的验证</strong>：全仓 <code>npm run typecheck</code>（含全部包构建与 renderer / desktop 类型检查）与 <code>npm test</code> 均通过 —— renderer 45 文件 / 344 测试，<code>src/conversation</code> 11 文件 / 64 测试，其余包 fail 0。<code>tailUtf8</code> 的 120k CJK 用例从 14,238 ms 降到 1.3 ms。应用本身仍未启动运行，滚动与 minimap 类改动的实机表现需要手动过一遍。</p>
+  <p>核查方另行报告：修复前的工作树在其环境中已通过 renderer 全量测试、类型检查与 production build。该结论属核查方的验证范围。</p>
+</footer>
+
+</div>
+
+

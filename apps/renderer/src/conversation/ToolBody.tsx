@@ -1,7 +1,8 @@
-import { createContext, memo, useContext, useMemo, type ComponentProps } from "react";
+import { createContext, memo, useContext, useMemo, type ComponentProps, type MouseEvent } from "react";
 import type { JsonValue } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { bashDisplay } from "./bashDisplay";
+import { ChunkedText } from "./textChunks";
 import { jsonRecord, jsonString, type ToolView } from "./conversationViewModel";
 import {
   askAnswer,
@@ -148,7 +149,7 @@ function DefaultBody({ tool }: { tool: ToolView }) {
       {output !== undefined ? (
         <>
           <div className="tc-label">Output</div>
-          <ScrollPane className="codeblock">{outputText(output)}</ScrollPane>
+          <ScrollPane className="codeblock"><ChunkedText text={outputText(output) ?? ""} /></ScrollPane>
         </>
       ) : null}
       {args === undefined && output === undefined && summary ? <div className="tc-summary">{summary}</div> : null}
@@ -314,16 +315,19 @@ function BashBody({ tool }: { tool: ToolView }) {
   const exit = jsonNumber(fields.exit) ?? jsonNumber(fields.exitCode);
   const running = tool.status === "running";
   const failed = tool.status === "failed" || (!running && exit !== undefined && exit !== 0);
-  /* 流式 bash 每 chunk 都会走到这里；ANSI 剥离与行切分只在输出真的变了时重跑。 */
-  const display = useMemo(() => bashDisplay(fields.output), [fields.output]);
+  // Streaming output re-renders this card on every published frame. `bashDisplay`
+  // strips ANSI, slices the retained tail and merges same-class line runs, so it
+  // must not rerun while the output itself is unchanged.
+  const blocks = useMemo(() => bashDisplay(fields.output).blocks, [fields.output]);
   return (
     <>
       <Kv pairs={[["cwd", fields.cwd]]} />
       <ScrollPane className="codeblock">
         {cmd ? <div className="c-cmd">$ {cmd}</div> : null}
-        {display.truncated ? <div className="muted small">仅显示末尾 {display.rows.length} 行</div> : null}
-        {display.rows.map((row, index) => (
-          <div key={index} className={row.cls || undefined}>{row.text || "\u00a0"}</div>
+        {blocks.map((block, index) => (
+          <div key={index} className={block.cls || undefined}>
+            <ChunkedText text={block.text || "\u00a0"} />
+          </div>
         ))}
       </ScrollPane>
       <div className="tc-foot">
@@ -739,51 +743,39 @@ function TodoBody({ tool }: { tool: ToolView }) {
 
 function WebSearchBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
-  const response = jsonRecord(fields.response) ?? {};
-  const cites = Array.isArray(fields.cites) ? fields.cites : Array.isArray(response.sources) ? response.sources : [];
-  const answer = jsonString(fields.answer) ?? jsonString(fields.output);
+  const data = jsonRecord(tool.result?.data);
+  const response = jsonRecord(data?.response) ?? jsonRecord(fields.response) ?? {};
+  const raw = response.sources ?? fields.cites ?? data?.sources;
+  const cites = Array.isArray(raw) ? raw : [];
+  const answer = jsonString(data?.answer) ?? jsonString(response.answer) ?? jsonString(fields.answer) ?? jsonString(fields.output);
+  const provider = jsonString(data?.provider) ?? jsonString(response.provider) ?? jsonString(fields.provider);
+  const openExternal = (event: MouseEvent<HTMLAnchorElement>, url: string) => {
+    const chrome = (globalThis as { ompStudioChrome?: { openUrl?: (args: { url: string }) => unknown } }).ompStudioChrome;
+    if (chrome?.openUrl === undefined) return;
+    event.preventDefault(); chrome.openUrl({ url });
+  };
+  const normalizeUrl = (value: string): string | undefined => {
+    const candidate = /^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`;
+    try { const url = new URL(candidate); return /^https?:$/.test(url.protocol) ? url.href : undefined; } catch { return undefined; }
+  };
   return (
     <>
-      <Kv pairs={[["provider", fields.provider ?? response.provider], ["sources", Array.isArray(response.sources) ? response.sources.length : fields.sources]]} />
+      <Kv pairs={[["provider", provider], ["sources", cites.length]]} />
       {answer ? <div className="tc-answer">{answer}</div> : null}
-      {cites.length > 0 ? (
-        <div className="tc-cites">
-          {cites.map((entry, index) => {
-            const cite = typeof entry === "string" ? { url: entry } : (jsonRecord(entry) ?? {});
-            const title = jsonString(cite.title) ?? jsonString(cite.name) ?? "";
-            const url = jsonString(cite.url) ?? jsonString(cite.link) ?? jsonString(cite.href) ?? (typeof entry === "string" ? entry : "");
-            const label = title || url || `Source ${index + 1}`;
-            const targetUrl = url ? (url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`) : undefined;
-            const tooltip = title && url && title !== url ? `${title} · ${url}` : label;
-            return (
-              <a
-                key={index}
-                className="tc-cite"
-                href={targetUrl}
-                title={tooltip}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(event) => {
-                  if (!targetUrl) return;
-                  event.preventDefault();
-                  const openUrl = globalThis.ompStudioChrome?.openUrl;
-                  if (openUrl !== undefined) {
-                    void openUrl({ url: targetUrl });
-                  } else {
-                    window.open(targetUrl, "_blank", "noopener,noreferrer");
-                  }
-                }}
-              >
-                <Icon name="link" extra="sm" />
-                <span className="tc-cite-text">
-                  <span className="tc-cite-title">{label}</span>
-                  {url && title && title !== url ? <span className="c-dim tc-cite-url"> · {url}</span> : null}
-                </span>
-              </a>
-            );
-          })}
-        </div>
-      ) : null}
+      {cites.length > 0 ? <div className="tc-cites">
+        {cites.map((entry, index) => {
+          const cite = jsonRecord(entry) ?? {};
+          const rawUrl = jsonString(cite.url) ?? (typeof entry === "string" ? entry : undefined);
+          const url = rawUrl === undefined ? undefined : normalizeUrl(rawUrl);
+          if (url === undefined) return null;
+          const title = jsonString(cite.title) ?? rawUrl;
+          return (
+            <a key={index} className="tc-cite" href={url} title={title === url ? url : `${title} · ${url}`} target="_blank" rel="noreferrer noopener" onClick={(event) => openExternal(event, url)}>
+              <Icon name="link" extra="sm" /><span className="tc-cite-text"><span className="tc-cite-title">{title}</span><span className="tc-cite-url">{url}</span></span>
+            </a>
+          );
+        })}
+      </div> : null}
     </>
   );
 }
@@ -905,8 +897,10 @@ function McpBody({ tool }: { tool: ToolView }) {
 }
 
 /**
- * 工具卡片正文按 `tool` 身份 memo。行派生层会为未变化的工具复用同一个 ToolView
- * 对象，因此流式期间只有真正在跑的那张卡会重渲染。
+ * Memoised on the frozen `tool` view. A streaming chain republishes only the
+ * tool that changed and reuses the identity of every sibling, so without this
+ * every card in the chain — including collapsed ones — re-rendered its whole
+ * payload on each published frame.
  */
 export const ToolBody = memo(function ToolBody({ tool, follow }: { tool: ToolView; follow?: boolean }) {
   const kind = toolKind(tool);

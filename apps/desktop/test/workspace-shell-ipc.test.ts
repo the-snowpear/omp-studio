@@ -9,9 +9,13 @@ import { describe, test } from "node:test";
 
 import {
   WORKSPACE_SHELL_IPC_CHANNELS,
+  parseFileOpenWithInput,
   parseResolveDroppedPathsInput,
+  parseWorkspaceFileTargetInput,
   parseWorkspaceShellInput,
   WorkspaceShellIpcError,
+  type WorkspaceFileActionResult,
+  type WorkspaceFileTargetInput,
   type WorkspaceShellEditorResult,
 } from "../src/workspace-shell-shared.js";
 import {
@@ -60,6 +64,9 @@ interface Actions {
   readonly editorCalls: string[];
   readonly revealCalls: string[];
   readonly droppedCalls: Array<{ cwd: string; paths: readonly string[] }>;
+  readonly fileCalls: Array<{ cwd: string; target: WorkspaceFileTargetInput; openerId?: string }>;
+  readonly absolutePathCalls: Array<{ cwd: string; target: WorkspaceFileTargetInput }>;
+  readonly openerListCalls: number[];
 }
 
 function register(actions: Partial<{
@@ -67,9 +74,22 @@ function register(actions: Partial<{
   openInExternalEditor(cwd: string): Promise<WorkspaceShellEditorResult>;
   revealInFileManager(cwd: string): Promise<void>;
   resolveDroppedPaths(cwd: string, paths: readonly string[]): Promise<Array<{ ok: true; kind: "file"; scope: "workspace"; path: string; name: string }>>;
+  openFile(cwd: string, target: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult>;
+  openFileWith(cwd: string, target: WorkspaceFileTargetInput, openerId: string): Promise<WorkspaceFileActionResult>;
+  revealFileInFileManager(cwd: string, target: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult>;
+  resolveFileAbsolutePath(cwd: string, target: WorkspaceFileTargetInput): Promise<string>;
+  listFileOpeners(): Promise<ReadonlyArray<{ id: string; name: string }>>;
 }> = {}) {
   const ipc = makeIpc();
-  const calls: Actions = { resolveCalls: [], editorCalls: [], revealCalls: [], droppedCalls: [] };
+  const calls: Actions = {
+    resolveCalls: [],
+    editorCalls: [],
+    revealCalls: [],
+    droppedCalls: [],
+    fileCalls: [],
+    absolutePathCalls: [],
+    openerListCalls: [],
+  };
   const handle = registerWorkspaceShellIpc({
     ipcMain: ipc,
     isTrustedSender: (sender) => !sender.isDestroyed(),
@@ -96,6 +116,26 @@ function register(actions: Partial<{
         }));
       }),
       pickPlanSavePath: async () => ({ status: "cancelled" } as const),
+      openFile: actions.openFile ?? (async (cwd, target) => {
+        calls.fileCalls.push({ cwd, target });
+        return { status: "opened" };
+      }),
+      openFileWith: actions.openFileWith ?? (async (cwd, target, openerId) => {
+        calls.fileCalls.push({ cwd, target, openerId });
+        return { status: "opened" };
+      }),
+      revealFileInFileManager: actions.revealFileInFileManager ?? (async (cwd, target) => {
+        calls.fileCalls.push({ cwd, target });
+        return { status: "opened" };
+      }),
+      resolveFileAbsolutePath: actions.resolveFileAbsolutePath ?? (async (cwd, target) => {
+        calls.absolutePathCalls.push({ cwd, target });
+        return `C:/work/project/${target.path}`;
+      }),
+      listFileOpeners: actions.listFileOpeners ?? (async () => {
+        calls.openerListCalls.push(1);
+        return [{ id: "vscode", name: "Visual Studio Code" }];
+      }),
     },
   });
   return {
@@ -131,6 +171,39 @@ describe("workspace shell payload validation", () => {
     );
     assert.throws(() => parseResolveDroppedPathsInput({ workspaceId: "ws-1" }), /paths/u);
     assert.throws(() => parseResolveDroppedPathsInput({ workspaceId: "ws-1", paths: [], extra: 1 }), /unexpected field/u);
+  });
+
+  test("file target payload accepts a workspace-relative path with a kind", () => {
+    assert.deepEqual(
+      parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "src/main.ts", kind: "file" }),
+      { workspaceId: "ws-1", path: "src/main.ts", kind: "file" },
+    );
+    assert.deepEqual(
+      parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "src", kind: "dir" }),
+      { workspaceId: "ws-1", path: "src", kind: "dir" },
+    );
+  });
+
+  test("file target payload rejects traversal, absolute and malformed paths", () => {
+    assert.throws(() => parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "../outside.ts", kind: "file" }), WorkspaceShellIpcError);
+    assert.throws(() => parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "a/../b.ts", kind: "file" }), WorkspaceShellIpcError);
+    assert.throws(() => parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "/abs.ts", kind: "file" }), WorkspaceShellIpcError);
+    assert.throws(() => parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "src\\main.ts", kind: "file" }), WorkspaceShellIpcError);
+    assert.throws(() => parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "", kind: "file" }), WorkspaceShellIpcError);
+    assert.throws(() => parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "a.ts", kind: "symlink" }), /kind/u);
+    assert.throws(() => parseWorkspaceFileTargetInput({ workspaceId: "ws-1", path: "a.ts", kind: "file", extra: 1 }), /unexpected field/u);
+    assert.throws(() => parseWorkspaceFileTargetInput({ workspaceId: "bad id", path: "a.ts", kind: "file" }), /workspaceId/u);
+  });
+
+  test("open-with payload whitelists opener ids", () => {
+    for (const openerId of ["vscode", "cursor", "windsurf", "choose"] as const) {
+      assert.deepEqual(
+        parseFileOpenWithInput({ workspaceId: "ws-1", path: "a.ts", kind: "file", openerId }),
+        { workspaceId: "ws-1", path: "a.ts", kind: "file", openerId },
+      );
+    }
+    assert.throws(() => parseFileOpenWithInput({ workspaceId: "ws-1", path: "a.ts", kind: "file", openerId: "notepad" }), /openerId/u);
+    assert.throws(() => parseFileOpenWithInput({ workspaceId: "ws-1", path: "a.ts", kind: "file" }), /openerId/u);
   });
 });
 
@@ -202,5 +275,40 @@ describe("registerWorkspaceShellIpc", () => {
     assert.ok(shell.ipc.removed.includes(WORKSPACE_SHELL_IPC_CHANNELS.revealInFileManager));
     assert.ok(shell.ipc.removed.includes(WORKSPACE_SHELL_IPC_CHANNELS.resolveDroppedPaths));
     assert.equal(shell.ipc.handlers.size, 0);
+  });
+
+  test("file actions resolve the id and forward the validated target", async () => {
+    const shell = register();
+    const target = { workspaceId: "ws-file", path: "src/main.ts", kind: "file" } as const;
+    await shell.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpen, makeSender(), target);
+    await shell.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileReveal, makeSender(), target);
+    await shell.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileAbsolutePath, makeSender(), target);
+    await shell.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpenWith, makeSender(), { ...target, openerId: "vscode" });
+    assert.deepEqual(shell.calls.resolveCalls, ["ws-file", "ws-file", "ws-file", "ws-file"]);
+    const forwarded = { cwd: "C:/work/project", target: { workspaceId: "ws-file", path: "src/main.ts", kind: "file" } };
+    assert.deepEqual(shell.calls.fileCalls, [forwarded, forwarded, { ...forwarded, openerId: "vscode" }]);
+    assert.deepEqual(shell.calls.absolutePathCalls, [forwarded]);
+  });
+
+  test("file actions reject malformed payloads before touching the workspace", async () => {
+    const shell = register();
+    await assert.rejects(
+      () => shell.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpen, makeSender(), { workspaceId: "ws-x", path: "../escape.ts", kind: "file" }),
+      WorkspaceShellIpcError,
+    );
+    assert.deepEqual(shell.calls.resolveCalls, []);
+    assert.deepEqual(shell.calls.fileCalls, []);
+  });
+
+  test("fileOpeners requires the workspace payload and returns the opener list", async () => {
+    const shell = register();
+    const openers = await shell.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpeners, makeSender(), { workspaceId: "ws-x" });
+    assert.deepEqual(openers, [{ id: "vscode", name: "Visual Studio Code" }]);
+    assert.deepEqual(shell.calls.openerListCalls, [1]);
+    assert.deepEqual(shell.calls.resolveCalls, []);
+    await assert.rejects(
+      () => shell.invoke(WORKSPACE_SHELL_IPC_CHANNELS.fileOpeners, makeSender(), { workspaceId: "ws-x", extra: true }),
+      /unexpected field/u,
+    );
   });
 });

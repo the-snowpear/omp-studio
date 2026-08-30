@@ -48,8 +48,7 @@ import {
   type ClientState,
 } from "../src/reducer.js";
 import type { ClientClockAndIds } from "../src/clock.js";
-import { StudioClientImpl, type ConversationHydrateClient } from "../src/studio-client.js";
-import { selectConversationHydrate } from "../src/conversation-state.js";
+import { StudioClientImpl } from "../src/studio-client.js";
 
 const TS = "2026-08-12T00:00:00.000Z";
 const REQ_1 = "req-1" as CommandRequestId;
@@ -236,7 +235,7 @@ function bootedState(b: ClientBootstrap = bootstrap()): ClientState {
   return reduceClientState(createInitialClientState(), { type: "bootstrap.set", bootstrap: b, occurredAt: TS });
 }
 
-function issue(state: ClientState, name: "session.create" | "session.resume" | "runtime.install", requestId: CommandRequestId): ClientState {
+function issue(state: ClientState, name: "session.create" | "session.resume" | "runtime.install" | "workspace.open" | "workspace.pick", requestId: CommandRequestId): ClientState {
   return reduceClientState(state, {
     type: "command.issue",
     requestId,
@@ -685,6 +684,14 @@ test("a runtime epoch change via snapshot marks in-flight commands outcome_unkno
   if (state.commands[REQ_2]?.status === "outcome_unknown") {
     assert.equal(state.commands[REQ_2]?.reason, "runtime epoch changed; outcome unknown");
   }
+});
+
+test("workspace commands survive the Runtime epoch change they trigger", () => {
+  let state = bootedState();
+  state = issue(state, "workspace.open", REQ_1);
+  state = reduceClientState(state, { type: "event", event: accepted(REQ_1, 11) });
+  state = reduceClientState(state, { type: "event", event: snapshotEvent(12, snapshot(2, 2)) });
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
 });
 
 test("terminal receipts cannot regress or duplicate", () => {
@@ -1165,41 +1172,13 @@ test("MemoryClientTransport enforces closed behavior", async () => {
   assert.equal(delivered.length, 0);
 });
 
-test("StudioClientImpl records transcript hydrate failure on conversation state", () => {
-  const transport: ClientTransport = {
-    async bootstrap() {
-      return bootstrap();
-    },
-    async query() {
-      return { ok: true, queryName: "session.state", result: snapshot(1, 1) } as never;
-    },
-    async command(request) {
-      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: TS };
-    },
-    subscribe() {
-      return () => undefined;
-    },
-    async close() {
-      return;
-    },
-  };
-  const client = new StudioClientImpl(transport, fixedIds());
-  const hydrate: ConversationHydrateClient = client;
-  const gen = hydrate.beginTranscriptHydrate({ runtimeEpoch: 1 as RuntimeEpoch, sessionId: "s-1" as SessionId });
-  hydrate.failTranscriptHydrate({ code: "UNAVAILABLE", message: "runtime down" }, gen);
-  const view = selectConversationHydrate(client.getState().conversation);
-  assert.equal(view.status, "error");
-  assert.equal(view.error?.code, "UNAVAILABLE");
-  assert.equal(view.error?.message, "runtime down");
-});
-
-test("child conversation.changed advances the cursor without stealing or polluting main conversation", () => {
+test("conversation.changed advances transport state without retaining transcript payload", () => {
   let state = bootedState();
-  const conversationBefore = state.conversation;
   const child: ClientEvent = {
     ...base("11", { runtimeEpoch: 1 as RuntimeEpoch, stateVersion: 1 as StateVersion }),
     kind: "conversation.changed",
     sessionId: "child-sess" as SessionId,
+    streamSeq: 1,
     eventSeq: 7,
     update: {
       kind: "conversation.message.started",
@@ -1212,13 +1191,13 @@ test("child conversation.changed advances the cursor without stealing or polluti
   };
   state = reduceClientState(state, { type: "event", event: child });
   assert.equal(state.connection.cursor, "11");
-  assert.equal(state.conversation, conversationBefore);
-  assert.equal(state.conversation.identity, undefined);
+  assert.equal("conversation" in state, false);
 
   const main: ClientEvent = {
     ...base("12", { runtimeEpoch: 1 as RuntimeEpoch, stateVersion: 1 as StateVersion }),
     kind: "conversation.changed",
     sessionId: "sess-1" as SessionId,
+    streamSeq: 1,
     eventSeq: 9,
     update: {
       kind: "conversation.message.started",
@@ -1231,8 +1210,7 @@ test("child conversation.changed advances the cursor without stealing or polluti
   };
   state = reduceClientState(state, { type: "event", event: main });
   assert.equal(state.connection.cursor, "12");
-  assert.equal(state.conversation.identity?.sessionId, "sess-1");
-  assert.equal(state.conversation.lastEventSeq, 9);
+  assert.equal("conversation" in state, false);
 });
 
 test("terminal command receipts are capped so a long session cannot retain unbounded command state", () => {

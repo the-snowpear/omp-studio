@@ -2010,7 +2010,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
   const providers = data?.providers ?? [];
   const roles = data?.roles ?? [];
-  const webSearchOrderCount = data?.webSearch.order.length ?? 0;
+  const webSearchReadyCount = data?.webSearch.providers.filter((provider) => provider.credentialFree || provider.hasCredential).length ?? 0;
   const presets = data?.presets ?? [];
   const modelEditListProvider = modelEditView?.providerId
     ? providers.find((item) => item.id === modelEditView.providerId)
@@ -3143,14 +3143,14 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
           </button>
           <button role="tab" id="mcTabWebSearch" aria-controls="mcPanelWebSearch" aria-selected={tab === "websearch"} tabIndex={tab === "websearch" ? 0 : -1} className={tab === "websearch" ? "active" : undefined} onClick={() => activate("websearch")}>
             <Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span>
-            <span className="chip gray xs">{webSearchOrderCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchOrderCount })}</span></span>
+            <span className={`chip ${webSearchReadyCount === 0 ? "amber" : "gray"} xs`}>{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span>
           </button>
           <span className="mc-tab-window" ref={tabWinRef} aria-hidden="true">
             <span className="mc-tab-mirror" ref={tabMirrorRef}>
               <button type="button" tabIndex={-1}><Icon name="server" extra="sm" /><span>{t("modelConfig.providersTab")}</span><span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> {t("modelConfig.providersCountAria", { count: providers.length })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="steering" extra="sm" /><span>{t("modelConfig.rolesTab")}</span><span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span><span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span></button>
-              <button type="button" tabIndex={-1}><Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span><span className="chip gray xs">{webSearchOrderCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchOrderCount })}</span></span></button>
+              <button type="button" tabIndex={-1}><Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span><span className="chip gray xs">{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span></button>
             </span>
           </span>
         </div>
@@ -3411,6 +3411,31 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                         <span className="mono">{fetchDetail?.text ?? ""}</span>
                       </div>
                     </div>
+                    {candidates.length > 0 ? (
+                      <div className="mc-fetch-select" role="toolbar" aria-label={t("modelConfig.selectModelsToAdd")}>
+                        <span className="sec-desc">{t("modelConfig.importModelsCount", { count: pickedCount(candidates) })}</span>
+                        <button
+                          type="button"
+                          className="icon-btn small"
+                          aria-label={t("modelConfig.selectAll")}
+                          data-tip={t("modelConfig.selectAll")}
+                          disabled={pickedCount(candidates) === candidates.length}
+                          onClick={() => setCandidates(setAllPicked(candidates, true))}
+                        >
+                          <Icon name="check" extra="sm" />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn small"
+                          aria-label={t("modelConfig.deselectAll")}
+                          data-tip={t("modelConfig.deselectAll")}
+                          disabled={pickedCount(candidates) === 0}
+                          onClick={() => setCandidates(setAllPicked(candidates, false))}
+                        >
+                          <Icon name="x" extra="sm" />
+                        </button>
+                      </div>
+                    ) : null}
                     {candidates.length === 0 ? (
                       <div className="pm-empty"><Icon name="box" extra="sm" />{t("modelConfig.endpointNoModels")}</div>
                     ) : candidates.map((item) => (
@@ -3429,11 +3454,6 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       </label>
                     ))}
                     <div className="mc-fetch-foot">
-                      {candidates.length > 0 ? (
-                        <button type="button" className="btn small outline" onClick={() => setCandidates(setAllPicked(candidates, pickedCount(candidates) !== candidates.length))}>
-                          {pickedCount(candidates) === candidates.length ? t("modelConfig.deselectAll") : t("modelConfig.selectAll")}
-                        </button>
-                      ) : null}
                       <span className="spacer" />
                       <button type="button" className="btn small outline" onClick={() => { setCandidates(null); setFetchDetail(null); }}>{t("common.close")}</button>
                       <button
@@ -4366,9 +4386,21 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
               webSearch={data.webSearch}
               onSaved={() => void refresh()}
               onPreviewSave={(next) => mutateLocal((current) => ({ ...current, webSearch: next }))}
+              onEditProvider={(providerId) => {
+                const existing = providers.find((item) => item.id === providerId);
+                const catalog = data.webSearch.providers.find((item) => item.id === providerId);
+                setModelEdit(null);
+                setEditor(existing ? draftFromProvider(existing) : { ...blankDraft(), id: providerId, name: catalog?.name ?? providerId });
+                setEditExisting(Boolean(existing));
+                setPresetOpen(false);
+                setPresetSel(null);
+                setConfirmDelete(false);
+                setTestResult(null);
+                setTab("providers");
+              }}
             />
           ) : (
-            <div className="ws-empty ws-empty-page">{t("modelConfig.loadErrorTitle")}</div>
+            <div className="wsx-empty wsx-empty-page">{t("modelConfig.loadErrorTitle")}</div>
           )}
         </section>
       </div>

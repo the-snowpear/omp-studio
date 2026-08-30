@@ -62,15 +62,40 @@ export function resolveSubagentMetrics(
 
 export function formatSubagentDuration(durationMs: number): string {
   if (!Number.isFinite(durationMs) || durationMs < 0) return "";
-  return `${(durationMs / 1000).toFixed(1)}s`;
+  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)}s`;
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const restMinutes = minutes % 60;
+  return restMinutes === 0 ? `${hours}h` : `${hours}h ${restMinutes}m`;
 }
 
-function elapsedSince(iso: string | undefined, nowMs: number): string | undefined {
-  if (iso === undefined) return undefined;
-  const started = Date.parse(iso);
+/** 只有这三种状态还在真正跑，时长才应该跟着现在时间走。 */
+const TICKING_STATUS: readonly StudioAgentSnapshot["status"][] = ["starting", "running", "reviving"];
+
+export function isTickingAgentStatus(status: StudioAgentSnapshot["status"]): boolean {
+  return TICKING_STATUS.includes(status);
+}
+
+/**
+ * 一行 roster 该显示的时长：已测量的 usage → 运行中按当前时间走 → 已停止冻结在
+ * `updatedAt − startedAt`。停止（parked/aborted/failed/released）后 runtime 不再推
+ * 新的 `updatedAt`，冻结值就是这个 Agent 真实跑过的跨度，不会再继续爬。
+ */
+export function subagentDurationMs(
+  agent: Pick<StudioAgentSnapshot, "status" | "startedAt" | "updatedAt" | "usage">,
+  nowMs: number = Date.now(),
+): number | undefined {
+  const measured = agent.usage?.durationMs;
+  if (measured !== undefined && Number.isFinite(measured)) return Math.max(0, measured);
+  if (agent.startedAt === undefined) return undefined;
+  const started = Date.parse(agent.startedAt);
   if (!Number.isFinite(started)) return undefined;
-  const formatted = formatSubagentDuration(Math.max(0, nowMs - started));
-  return formatted === "" ? undefined : formatted;
+  const ended = isTickingAgentStatus(agent.status) ? nowMs : Date.parse(agent.updatedAt);
+  if (!Number.isFinite(ended)) return undefined;
+  return Math.max(0, ended - started);
 }
 
 export function findLiveSubagent(
@@ -113,10 +138,9 @@ export function applyLiveSubagentRoster(
     };
   }
   const metrics = resolveSubagentMetrics(live.usage, agent);
-  const liveDur = live.usage === undefined ? undefined : formatSubagentDuration(live.usage.durationMs);
-  const dur = (liveDur !== undefined && liveDur !== "" ? liveDur : undefined)
-    ?? elapsedSince(live.startedAt, nowMs)
-    ?? agent.dur;
+  const durationMs = subagentDurationMs(live, nowMs);
+  const liveDur = durationMs === undefined ? undefined : formatSubagentDuration(durationMs);
+  const dur = (liveDur !== undefined && liveDur !== "" ? liveDur : undefined) ?? agent.dur;
   const agentId = agent.agentId ?? (isRealSubagentId(live.agentId) ? live.agentId : undefined);
   const task = live.assignment ?? agent.task;
   return {

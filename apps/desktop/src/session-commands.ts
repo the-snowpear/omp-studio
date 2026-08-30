@@ -115,6 +115,7 @@ export function createWorkspaceSessionCatalog(
 export function createDesktopSemanticCommands(options: {
   readonly sessionRef: { current: DesktopRuntimeSession | undefined };
   readonly catalog: HostSessionCatalogProvider;
+  readonly resolveResidentSessionId?: (threadId: ThreadId) => string | undefined;
   /** Lazy factory: the archive service is rebuilt when the workspace changes. */
   readonly archive?: () => StudioSessionArchiveService;
   /** Lazy factory: the delete service is rebuilt when the workspace changes. */
@@ -156,13 +157,13 @@ export function createDesktopSemanticCommands(options: {
       ? {}
       : {
           archive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
-            const sessionId = await resolveCatalogSessionId(options.catalog, threadId);
-            const skipWriteGrace = await releaseResidentSession(options, sessionId);
-            await archiveFactory().archive(sessionId, skipWriteGrace ? { skipWriteGrace: true } : {});
+            const sessionId = await resolveCatalogSessionId(options, threadId);
+            await releaseResidentSession(options, sessionId);
+            await archiveFactory().archive(sessionId, { skipWriteGrace: true });
             return { applied: true, runtimeEffect: "immediate", message: "Session archived to the OMP cold archive" };
           },
           unarchive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
-            const sessionId = await resolveCatalogSessionId(options.catalog, threadId);
+            const sessionId = await resolveCatalogSessionId(options, threadId);
             await archiveFactory().unarchive(sessionId);
             return { applied: true, runtimeEffect: "immediate", message: "Session restored from the archive" };
           },
@@ -171,7 +172,7 @@ export function createDesktopSemanticCommands(options: {
       if (options.deleteService === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Session deletion is not available on this Host");
       }
-      const sessionId = await resolveCatalogSessionId(options.catalog, threadId);
+      const sessionId = await resolveCatalogSessionId(options, threadId);
       // Abort a streaming turn and switch the Runtime off this file so the
       // transcript can be removed while no Worker holds it.
       await releaseResidentSession(options, sessionId);
@@ -202,7 +203,7 @@ export function createDesktopSemanticCommands(options: {
       return created;
     },
     resume: async ({ threadId }) => {
-      const target = await resolveCatalogSessionId(options.catalog, threadId);
+      const target = await resolveCatalogSessionId(options, threadId);
       const snapshot = options.sessionRef.current?.controller.publication()?.snapshot;
       if (snapshot !== undefined) {
         if (snapshot.isStreaming && options.supportsConcurrentSessions !== true) {
@@ -241,7 +242,7 @@ export function createDesktopSemanticCommands(options: {
       if (snapshot === undefined || hello === undefined) {
         throw missingRuntime("Runtime snapshot is unavailable");
       }
-      const target = await resolveCatalogSessionId(options.catalog, threadId);
+      const target = await resolveCatalogSessionId(options, threadId);
       if (snapshot.sessionId !== target) {
         throw new StudioHostError("INVALID_ARGUMENT", "session.drop only applies to the current session");
       }
@@ -430,8 +431,23 @@ async function releaseResidentSession(
   return true;
 }
 
-async function resolveCatalogSessionId(catalog: HostSessionCatalogProvider, threadId: ThreadId): Promise<string> {
-  const entries = await catalog.list();
+async function resolveCatalogSessionId(
+  options: {
+    readonly catalog: HostSessionCatalogProvider;
+    readonly sessionRef?: { current: DesktopRuntimeSession | undefined };
+    readonly resolveResidentSessionId?: (threadId: ThreadId) => string | undefined;
+  },
+  threadId: ThreadId,
+): Promise<string> {
+  const activeSessionId = options.sessionRef?.current?.controller.publication()?.snapshot?.sessionId;
+  if (activeSessionId !== undefined && threadIdFor(activeSessionId) === threadId) {
+    return activeSessionId;
+  }
+  const residentSessionId = options.resolveResidentSessionId?.(threadId);
+  if (residentSessionId !== undefined) {
+    return residentSessionId;
+  }
+  const entries = await options.catalog.list();
   const match = entries.find((entry) => threadIdFor(entry.sessionId) === threadId);
   if (match === undefined) {
     throw new StudioHostError("INVALID_ARGUMENT", "Session is not available in this workspace");

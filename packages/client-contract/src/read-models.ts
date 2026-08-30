@@ -563,13 +563,15 @@ export interface ModelLoginProviderRecord {
 }
 
 /**
- * One web_search provider surfaced to the model-config page. Names are
- * display labels; `hasCredential` is a Host-side approximation (env var or
- * stored auth), never a secret value.
+ * One web_search provider surfaced to the model-config page. `description`
+ * carries the upstream credential-requirement note; `hasCredential` is a
+ * Host-side approximation (env var or stored auth), never a secret value.
  */
 export interface WebSearchProviderRecord {
   readonly id: string;
   readonly name: string;
+  /** Upstream `SEARCH_PROVIDER_OPTIONS` description: which credential this provider needs. */
+  readonly description: string;
   /** True when the provider works with no credential at all (scraper engines, public). */
   readonly credentialFree: boolean;
   /** True when the Host detects an env var or stored/OAuth credential. */
@@ -585,6 +587,14 @@ export interface WebSearchAdvancedConfig {
     readonly basicUsername?: string;
     /** True when a basic-auth password is configured; the value never leaves the Host. */
     readonly passwordSet?: boolean;
+    /** Comma-separated SearXNG category filter (`searxng.categories`). */
+    readonly categories?: string;
+    /** Comma-separated engine names or shortcuts (`searxng.engines`). */
+    readonly engines?: string;
+    /** Language code such as `en` / `zh-CN` (`searxng.language`). */
+    readonly language?: string;
+    /** SearXNG safe-search level 0/1/2 (`searxng.safesearch`). */
+    readonly safesearch?: number;
   };
   readonly exa?: {
     readonly enabled?: boolean;
@@ -614,6 +624,7 @@ export interface WebSearchConfigReadModel {
  * written to `config.yml`; everything else is left untouched. Empty strings
  * clear scalar values except `searxng.token` / `searxng.basicPassword`, where
  * an empty string keeps the existing secret (values are never read back).
+ * `searxng.safesearch` uses `null` to delete the key; omitting it keeps it.
  */
 export interface ModelWebSearchSetInput {
   readonly enabled?: boolean;
@@ -626,6 +637,11 @@ export interface ModelWebSearchSetInput {
     readonly token?: string;
     readonly basicUsername?: string;
     readonly basicPassword?: string;
+    readonly categories?: string;
+    readonly engines?: string;
+    readonly language?: string;
+    /** 0/1/2, or null to delete the key back to the instance default. */
+    readonly safesearch?: number | null;
   };
   readonly exa?: {
     readonly enabled?: boolean;

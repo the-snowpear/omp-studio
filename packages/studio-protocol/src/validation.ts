@@ -46,6 +46,7 @@ export { isBtwErrorCode, isBtwStatus, parseBtwSnapshot } from "./btw-validation.
 export {
   parseConversationContentBlock,
   parseConversationItem,
+  parseConversationOpenResult,
   parseConversationRuntimeEvent,
   parseConversationTranscriptPage,
   parseOpaqueConversationCursor,

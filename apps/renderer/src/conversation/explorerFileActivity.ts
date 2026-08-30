@@ -1,4 +1,3 @@
-import type { ConversationLiveTool } from "@omp-studio/client";
 import type { JsonValue } from "@omp-studio/client-contract";
 import { jsonRecord, jsonString, type ToolView } from "./conversationViewModel";
 import { toolKind } from "./toolMeta";
@@ -10,14 +9,21 @@ export type ExplorerFileActivity = {
 
 export const EMPTY_EXPLORER_FILE_ACTIVITY: ExplorerFileActivity = { reading: [], writing: [] };
 
+export type ExplorerLiveTool = {
+  readonly toolCallId: string;
+  readonly toolName?: string;
+  readonly status: "started" | "updated" | "completed" | "failed";
+  readonly arguments?: JsonValue;
+};
+
 const READ_KINDS = new Set(["read", "inspect_image"]);
 const WRITE_KINDS = new Set(["write", "edit", "ast_edit"]);
 
-function isInFlight(status: ConversationLiveTool["status"]): boolean {
+function isInFlight(status: ExplorerLiveTool["status"]): boolean {
   return status === "started" || status === "updated";
 }
 
-function asToolView(tool: ConversationLiveTool): ToolView {
+function asToolView(tool: ExplorerLiveTool): ToolView {
   return {
     toolCallId: tool.toolCallId,
     toolName: tool.toolName ?? "tool",
@@ -54,7 +60,7 @@ function collectToolPaths(args: { readonly [key: string]: JsonValue } | undefine
 
 /** In-flight Read/Write paths from the main session live tool map. */
 export function deriveExplorerFileActivity(
-  liveTools: Readonly<Record<string, ConversationLiveTool>>,
+  liveTools: Readonly<Record<string, ExplorerLiveTool>>,
 ): ExplorerFileActivity {
   const reading: string[] = [];
   const writing: string[] = [];

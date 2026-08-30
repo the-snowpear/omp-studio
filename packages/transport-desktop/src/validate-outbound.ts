@@ -38,7 +38,11 @@ import {
   STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS,
   STUDIO_RUNTIME_UNEXPECTED_STOP_MODES,
 } from "@omp-studio/client-contract";
-import { parseOperatorStateSnapshot, parseSessionTelemetryReadResult } from "@omp-studio/studio-protocol";
+import {
+  parseConversationOpenResult,
+  parseOperatorStateSnapshot,
+  parseSessionTelemetryReadResult,
+} from "@omp-studio/studio-protocol";
 
 import {
   ValidationError,
@@ -642,6 +646,15 @@ export function assertClientQueryResponse(value: unknown): asserts value is Clie
       } catch (error) {
         throw new ValidationError(
           `query response: invalid transcript page (${error instanceof Error ? error.message : "invalid"})`,
+        );
+      }
+    }
+    if (queryName === "conversation.open") {
+      try {
+        parseConversationOpenResult(value.result);
+      } catch (error) {
+        throw new ValidationError(
+          `query response: invalid conversation open result (${error instanceof Error ? error.message : "invalid"})`,
         );
       }
     }
@@ -1338,9 +1351,10 @@ export function assertClientEvent(value: unknown): asserts value is ClientEvent 
       assertNonEmptyText(value.reason, "event: reason");
       return;
     case "conversation.changed":
-      assertEventKeys(value, "event", ["sessionId", "eventSeq", "update"]);
+      assertEventKeys(value, "event", ["sessionId", "streamSeq", "eventSeq", "update"]);
       assertEventBase(value);
       assertOpaqueToken(value.sessionId, "event: sessionId");
+      assertCounter(value.streamSeq, "event: streamSeq");
       assertCounter(value.eventSeq, "event: eventSeq");
       if (!isPlainObject(value.update)) {
         throw new ValidationError("event: conversation update must be a plain object");

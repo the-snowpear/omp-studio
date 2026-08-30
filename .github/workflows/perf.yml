@@ -1,0 +1,41 @@
+name: Streaming perf
+
+# 独立 job，不进主 CI 的三条门禁（check / omp:test:metadata / omp:verify:patches）：
+# 它要下 ~100MB 的 Chromium，没必要让每次 `npm ci` 都背上；playwright 也因此按需装、
+# 不写进 package.json（与 scripts/capture-readme-shots.mjs 一致）。
+on:
+  pull_request:
+    paths:
+      - "apps/renderer/**"
+      - "scripts/streaming-perf-gate.mjs"
+      - ".github/workflows/perf.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  streaming:
+    name: Streaming frame budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # 性能基线必须固定浏览器版本；latest 漂移会把 Chromium 自身变化误报成产品回归。
+      - run: npm i --no-save --package-lock=false playwright@1.62.1
+      - run: npx playwright install --with-deps chromium
+      - run: npm run perf:streaming
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: streaming-perf-report
+          path: outputs/streaming-perf.json

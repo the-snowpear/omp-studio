@@ -231,6 +231,8 @@ export type ClientEvent =
   | (ClientEventBase & {
       readonly kind: "conversation.changed";
       readonly sessionId: SessionId;
+      /** Target-local sequence used with `conversation.open.live.watermark`. */
+      readonly streamSeq: number;
       readonly eventSeq: number;
       readonly update: ConversationRuntimeEvent;
     })

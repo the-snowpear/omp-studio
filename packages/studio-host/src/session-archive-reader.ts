@@ -21,6 +21,9 @@ const CURSOR_NAMESPACE = "session.archive.v1";
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
 const DEFAULT_MAX_SCAN_FILES = 20_000;
 const DEFAULT_SNAPSHOT_CACHE_SIZE = 8;
+/** Raw transcript bytes represented by cached parsed snapshots. Parsed objects
+ * are larger than this number, so keep the raw-byte budget deliberately small. */
+const DEFAULT_SNAPSHOT_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 const AGENT_TOMBSTONE_SUFFIX = ".tombstone";
 const MAX_AGENT_ID_LENGTH = 512;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/u;
@@ -113,6 +116,7 @@ export interface SessionArchiveReaderOptions {
   readonly allowedCwd: string;
   readonly maxSessionBytes?: number;
   readonly maxScanFiles?: number;
+  readonly snapshotCacheMaxBytes?: number;
   readonly cursorSecret?: Buffer;
 }
 
@@ -160,6 +164,7 @@ type ConsumedPrefix = {
 type CachedSnapshot = {
   readonly version: FileVersion;
   readonly snapshot: ArchiveSnapshot;
+  readonly weight: number;
   /** 仅明文 `.jsonl` 有：压缩档没有可续读的字节边界。 */
   readonly consumed?: ConsumedPrefix;
 };
@@ -198,6 +203,7 @@ export class StudioSessionArchiveReader {
   readonly #allowedCwd: string;
   readonly #maxSessionBytes: number;
   readonly #maxScanFiles: number;
+  readonly #snapshotCacheMaxBytes: number;
   readonly #cursorSecret: Buffer;
   /** Directory enumeration is cheap; header reads are not. Keep the index while paths are stable. */
   #indexedPaths: readonly string[] | undefined;
@@ -206,6 +212,7 @@ export class StudioSessionArchiveReader {
   #indexBuildInFlight: Promise<void> | undefined;
   /** Parsed snapshots are shared by paging and repeated session switches. */
   #snapshotCache = new Map<string, CachedSnapshot>();
+  #snapshotCacheBytes = 0;
   #snapshotInFlight = new Map<string, { version: FileVersion | undefined; promise: Promise<{ snapshot: ArchiveSnapshot; version: FileVersion }> }>();
   /**
    * 投影（entries → ConversationItem）结果。一次切换里 `readPage` / `readRevision` /
@@ -221,12 +228,16 @@ export class StudioSessionArchiveReader {
     this.#allowedCwd = resolve(options.allowedCwd);
     this.#maxSessionBytes = options.maxSessionBytes ?? DEFAULT_MAX_SESSION_BYTES;
     this.#maxScanFiles = options.maxScanFiles ?? DEFAULT_MAX_SCAN_FILES;
+    this.#snapshotCacheMaxBytes = options.snapshotCacheMaxBytes ?? DEFAULT_SNAPSHOT_CACHE_MAX_BYTES;
     this.#cursorSecret = options.cursorSecret ?? randomBytes(32);
     if (!Number.isSafeInteger(this.#maxSessionBytes) || this.#maxSessionBytes <= 0) {
       throw new TypeError("maxSessionBytes must be positive");
     }
     if (!Number.isSafeInteger(this.#maxScanFiles) || this.#maxScanFiles <= 0) {
       throw new TypeError("maxScanFiles must be positive");
+    }
+    if (!Number.isSafeInteger(this.#snapshotCacheMaxBytes) || this.#snapshotCacheMaxBytes <= 0) {
+      throw new TypeError("snapshotCacheMaxBytes must be positive");
     }
   }
 
@@ -559,14 +570,19 @@ export class StudioSessionArchiveReader {
           (appended) => appended ?? this.#readSnapshotUncached(path, expectedSessionId, options),
         );
     const read = load
-      .then(({ snapshot, version, consumed }) => {
-        this.#snapshotCache.delete(path);
-        this.#snapshotCache.set(path, { snapshot, version, ...(consumed === undefined ? {} : { consumed }) });
-        while (this.#snapshotCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE) {
+      .then(({ snapshot, version, consumed, weight }) => {
+        this.#dropCachedSnapshot(path);
+        if (weight <= this.#snapshotCacheMaxBytes) {
+          this.#snapshotCache.set(path, { snapshot, version, weight, ...(consumed === undefined ? {} : { consumed }) });
+          this.#snapshotCacheBytes += weight;
+        }
+        while (
+          this.#snapshotCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE
+          || this.#snapshotCacheBytes > this.#snapshotCacheMaxBytes
+        ) {
           const oldest = this.#snapshotCache.keys().next().value as string | undefined;
           if (oldest === undefined) break;
-          this.#snapshotCache.delete(oldest);
-          this.#projectionCache.delete(oldest);
+          this.#dropCachedSnapshot(oldest);
         }
         this.#indexedVersions.set(path, version);
         return { snapshot, version };
@@ -578,6 +594,13 @@ export class StudioSessionArchiveReader {
     return read;
   }
 
+  #dropCachedSnapshot(path: string): void {
+    const cached = this.#snapshotCache.get(path);
+    if (cached !== undefined) this.#snapshotCacheBytes = Math.max(0, this.#snapshotCacheBytes - cached.weight);
+    this.#snapshotCache.delete(path);
+    this.#projectionCache.delete(path);
+  }
+
   /**
    * 追加式续读：只读走 `consumed.bytes` 之后的字节。文件被换掉、被截断或前缀改写时返回
    * undefined，由调用方回落到整档读取。
@@ -586,7 +609,7 @@ export class StudioSessionArchiveReader {
     path: string,
     expectedSessionId: string,
     cached: CachedSnapshot,
-  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion; consumed: ConsumedPrefix } | undefined> {
+  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion; consumed: ConsumedPrefix; weight: number } | undefined> {
     const consumed = cached.consumed;
     if (consumed === undefined || isCompressedSessionPath(path)) return undefined;
     if (cached.snapshot.sessionId !== expectedSessionId) return undefined;
@@ -645,6 +668,7 @@ export class StudioSessionArchiveReader {
         },
         version: fileVersion(after),
         consumed: nextConsumed,
+        weight: nextConsumed.bytes,
       };
     } finally {
       await handle.close();
@@ -663,7 +687,11 @@ export class StudioSessionArchiveReader {
     const from = reusable ? cached.branch.length : 0;
     if (!reusable || from < branch.length) await foldBranch(state, branch, from);
     this.#projectionCache.delete(path);
-    this.#projectionCache.set(path, { leafId: snapshot.branchLeafId, branch, state });
+    // A projection retains the parsed branch. Do not let it smuggle an
+    // oversized, deliberately uncached snapshot back into long-lived memory.
+    if (this.#snapshotCache.get(path)?.snapshot === snapshot) {
+      this.#projectionCache.set(path, { leafId: snapshot.branchLeafId, branch, state });
+    }
     while (this.#projectionCache.size > DEFAULT_SNAPSHOT_CACHE_SIZE) {
       const oldest = this.#projectionCache.keys().next().value as string | undefined;
       if (oldest === undefined) break;
@@ -754,7 +782,7 @@ export class StudioSessionArchiveReader {
     path: string,
     expectedSessionId: string,
     options: { requireCwd?: boolean } = {},
-  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion; consumed?: ConsumedPrefix }> {
+  ): Promise<{ snapshot: ArchiveSnapshot; version: FileVersion; consumed?: ConsumedPrefix; weight: number }> {
     const { bytes, identity, version } = await this.#readWholeFile(path);
     const complete = completeJsonlPrefix(bytes);
     const values = await parseCompleteJsonlYielding(complete.bytes);
@@ -793,6 +821,7 @@ export class StudioSessionArchiveReader {
         byId,
       },
       version,
+      weight: complete.byteLength,
       /* 压缩档没有可续读的字节边界：不给 consumed，下次仍然整档解压。 */
       ...(isCompressedSessionPath(path)
         ? {}

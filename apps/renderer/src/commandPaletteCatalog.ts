@@ -174,6 +174,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "mc-providers", icon: "server", label: "palette.modelProviders", keywords: "model config providers 模型配置 供应商", action: { kind: "openModelConfig", tab: "providers" } },
         { id: "mc-roles", icon: "steering", label: "palette.modelRoles", keywords: "model config roles 模型配置 角色", action: { kind: "openModelConfig", tab: "roles" } },
         { id: "mc-subagents", icon: "bot", label: "palette.modelSubagents", keywords: "model config subagents 模型配置 子代理", action: { kind: "openModelConfig", tab: "subagents" } },
+        { id: "mc-websearch", icon: "globe", label: "palette.modelWebSearch", keywords: "model config web search 模型配置 网络搜索 搜索引擎 websearch", action: { kind: "openModelConfig", tab: "websearch" } },
         { id: "cap-skills", icon: "book", label: "palette.capSkills", keywords: "capabilities skills 能力中心 Skills 技能", action: { kind: "openCapabilities", tab: "skills" } },
         { id: "cap-plugins", icon: "package", label: "palette.capPlugins", keywords: "capabilities plugins 能力中心 Plugins 插件", action: { kind: "openCapabilities", tab: "plugins" } },
         { id: "cap-mcp", icon: "plug", label: "palette.capMcp", keywords: "capabilities mcp 能力中心 MCP", action: { kind: "openCapabilities", tab: "mcp" } },

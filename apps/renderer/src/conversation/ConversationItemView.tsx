@@ -21,7 +21,7 @@ function formatTime(iso: string): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-const MessageBody = memo(function MessageBody({
+function MessageBody({
   text,
   streaming,
   truncated,
@@ -73,7 +73,7 @@ const MessageBody = memo(function MessageBody({
       <MessageCopyActions text={copyText} />
     </div>
   );
-});
+}
 
 function AssistantStatus({ status }: { status: Extract<TimelineRow, { type: "assistant" }>["status"] }) {
   if (status === "aborted") return <span className="chip gray xs">已中止</span>;
@@ -303,18 +303,113 @@ function renderAssistantSegments(
   return nodes;
 }
 
+export type AssistantRunEntry = {
+  readonly row: Extract<TimelineRow, { type: "assistant" }>;
+  readonly fileChanges?: readonly TurnFileChange[];
+  readonly changesDefaultOpen?: boolean;
+  readonly turnId?: string;
+  readonly planLink?: PlanCreatedLink;
+};
+
+/** Render one visual assistant response for all assistant rows in a turn. */
+function AssistantRunViewInner({
+  entries,
+  expandAll = false,
+  tail = true,
+  demo,
+  onReviewChanges,
+  onInspectSubagent,
+  liveAgents,
+}: {
+  entries: readonly AssistantRunEntry[];
+  expandAll?: boolean;
+  tail?: boolean;
+  demo?: boolean;
+  onReviewChanges?: (turnId: string) => void;
+  onInspectSubagent?: (target: SubagentHubTarget) => void;
+  liveAgents?: readonly StudioAgentSnapshot[];
+}) {
+  const { settings: appSettings } = useAppSettings();
+  const first = entries[0];
+  const last = entries.at(-1);
+  if (first === undefined || last === undefined) return null;
+  const segments = entries.flatMap((entry) => entry.row.segments);
+  const displayOptions = {
+    showThinking: appSettings.showThinkingSummary,
+    toolActivity: appSettings.toolActivity,
+    showToolIntent: appSettings.showToolIntent,
+    showStreaming: appSettings.streaming,
+    ...(onInspectSubagent === undefined ? {} : { onInspectSubagent }),
+    ...(liveAgents === undefined ? {} : { liveAgents }),
+  } as const;
+  const process = entries.every((entry) => entry.row.presentation === "process");
+  const gallery = entries.length === 1 && expandAll && !hasAssistantText(segments);
+  const changes = entries.map((entry) => entry.fileChanges === undefined || entry.fileChanges.length === 0 ? null : (
+    <TurnChanges
+      key={`changes-${entry.row.itemId}`}
+      files={entry.fileChanges}
+      {...(entry.changesDefaultOpen === true ? { defaultOpen: true } : {})}
+      {...(demo === true ? { demo: true } : {})}
+      {...(onReviewChanges === undefined || entry.turnId === undefined ? {} : { onReview: () => onReviewChanges(entry.turnId as string) })}
+    />
+  ));
+  const plans = entries.map((entry) => entry.planLink === undefined ? null : (
+    <PlanCreatedCard
+      key={`plan-${entry.row.itemId}`}
+      title={entry.planLink.title ?? "Plan"}
+      onOpen={entry.planLink.onOpen}
+      {...(entry.planLink.demo === true || demo === true ? { demo: true } : {})}
+    />
+  ));
+  const errors = entries.map((entry) => entry.row.error === undefined ? null : <ProviderErrorDetail key={`error-${entry.row.itemId}`} error={entry.row.error} />);
+  if (gallery) {
+    return <div data-item-id={first.row.itemId}>{renderAssistantSegments(segments, { expandAll: true, standalone: true, ...displayOptions })}{errors}{plans}{changes}</div>;
+  }
+  if (process && segments.length === 0 && errors.every((entry) => entry === null) && changes.every((entry) => entry === null) && plans.every((entry) => entry === null)) return null;
+  return (
+    <div className={`ev ev-assistant${process ? " ev-process" : ""}`} data-item-id={first.row.itemId}>
+      {process ? null : (
+        <div className="ev-head">
+          <span className="who"><span className="role-badge a">π</span>OMP</span>
+          <span className="muted">{formatTime(first.row.createdAt)}</span>
+          <AssistantStatus status={last.row.status} />
+        </div>
+      )}
+      {renderAssistantSegments(segments, {
+        ...(expandAll === true && !process ? { expandAll: true } : {}),
+        ...(last.row.status === "streaming" && tail ? { liveTail: true } : {}),
+        ...displayOptions,
+        ...(!process && last.row.status !== "streaming" ? { allowCopy: true } : {}),
+      })}
+      {errors}
+      {plans}
+      {changes}
+    </div>
+  );
+}
+
+export const AssistantRunView = memo(AssistantRunViewInner, (previous, next) => {
+  if (previous.expandAll !== next.expandAll || previous.tail !== next.tail || previous.demo !== next.demo) return false;
+  if (previous.onReviewChanges !== next.onReviewChanges || previous.onInspectSubagent !== next.onInspectSubagent || previous.liveAgents !== next.liveAgents) return false;
+  if (previous.entries.length !== next.entries.length) return false;
+  for (let index = 0; index < previous.entries.length; index += 1) {
+    const left = previous.entries[index]!;
+    const right = next.entries[index]!;
+    if (left.row !== right.row || left.fileChanges !== right.fileChanges || left.changesDefaultOpen !== right.changesDefaultOpen || left.turnId !== right.turnId || left.planLink !== right.planLink) return false;
+  }
+  return true;
+});
+
 function TurnChanges({
   files,
   defaultOpen,
   demo,
-  turnId,
   onReview,
 }: {
   files?: readonly TurnFileChange[];
   defaultOpen?: boolean;
   demo?: boolean;
-  turnId?: string;
-  onReview?: (turnId: string) => void;
+  onReview?: () => void;
 }) {
   if (files === undefined || files.length === 0) return null;
   return (
@@ -322,7 +417,7 @@ function TurnChanges({
       files={files}
       {...(defaultOpen === true ? { defaultOpen: true } : {})}
       {...(demo === true ? { demo: true } : {})}
-      {...(onReview === undefined || turnId === undefined ? {} : { onReview: () => onReview(turnId) })}
+      {...(onReview === undefined ? {} : { onReview })}
     />
   );
 }
@@ -375,7 +470,6 @@ export const ConversationItemView = memo(function ConversationItemView({
   tail = true,
   changesDefaultOpen,
   demo,
-  changesTurnId,
   onReviewChanges,
   onInspectSubagent,
   liveAgents,
@@ -393,8 +487,7 @@ export const ConversationItemView = memo(function ConversationItemView({
   fileChanges?: readonly TurnFileChange[];
   changesDefaultOpen?: boolean;
   demo?: boolean;
-  changesTurnId?: string;
-  onReviewChanges?: (turnId: string) => void;
+  onReviewChanges?: () => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
   liveAgents?: readonly StudioAgentSnapshot[];
   planLink?: PlanCreatedLink;
@@ -464,10 +557,7 @@ export const ConversationItemView = memo(function ConversationItemView({
         {...(fileChanges === undefined ? {} : { files: fileChanges })}
         {...(changesDefaultOpen === true ? { defaultOpen: true } : {})}
         {...(demo === true ? { demo: true } : {})}
-        {...(changesTurnId === undefined ? {} : { turnId: changesTurnId })}
-        {...(onReviewChanges === undefined || changesTurnId === undefined
-          ? {}
-          : { onReview: onReviewChanges })}
+        {...(onReviewChanges === undefined ? {} : { onReview: onReviewChanges })}
       />
     );
     const createdPlan = planLink === undefined ? null : (

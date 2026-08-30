@@ -1,18 +1,57 @@
-import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ComponentProps, type ReactNode, type RefObject } from "react";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { ActivityLine } from "./ActivityLine";
 import { ConvoTranscript } from "./ConvoTranscript";
+import { ConversationSkeleton } from "./ConversationSkeleton";
+import { ConversationMinimap } from "./ConversationMinimap";
+import {
+  IDLE_CONVERSATION_SWITCH,
+  nextConversationSwitch,
+  SWITCH_SETTLE_FRAMES,
+  switchPhaseMs,
+  switchVeilLeaving,
+  type ConversationSwitchPhase,
+} from "./conversationSwitchPhase";
 import { conversationFollowKey, useConversationScroll } from "./useConversationScroll";
-import type { ConversationSnapshot } from "./conversationEngine";
-import { resetConversation, type ConversationState, withCompactingRow } from "./conversationViewModel";
+import { retainConversationWhileRemounting } from "./useConversation";
+import type { ConversationEngine, ConversationSnapshot } from "./conversationEngine";
+import { resetConversation, tailStreaming, type ConversationState, type TimelineRow, withCompactingRow } from "./conversationViewModel";
 import { isRetryTranscriptNotice } from "./activityStatus";
 import { isTransientStatusNotice } from "./transientStatusNotice";
 import type { SubagentHubTarget } from "./toolMeta";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
 
+const FALLBACK_SNAPSHOT: ConversationSnapshot = {
+  state: resetConversation(0, null, "unavailable", "当前没有活动会话。"),
+  rows: [],
+  demo: false,
+  loadingOlder: false,
+  identityKey: "",
+};
+const EMPTY_SNAPSHOT = (): ConversationSnapshot => FALLBACK_SNAPSHOT;
+const NOOP_SUBSCRIBE = (): (() => void) => () => undefined;
+
+/** 上一屏已经画出来的正文，连同它当时的滚动编排输入。
+ *  `node` 存的是 ReactNode 引用本身：切换会话的空窗期把同一个元素对象再交给
+ *  React，它按引用相等直接跳过整棵子树，DOM（含虚拟列表状态与滚动位置）原样留在
+ *  屏上淡出，代价为零。 */
+type PaintedBody = {
+  readonly node: ReactNode;
+  readonly itemCount: number;
+  readonly contentKey: string;
+  readonly rows: readonly TimelineRow[];
+  /** 画的是欢迎面（而非 transcript）；identity 在欢迎面之间变化时无需过场。 */
+  readonly welcome: boolean;
+};
+
+function prefersReducedMotion(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function ConversationPane({
   snapshot,
+  liveEngine,
   onLoadOlder,
   onRestore,
   onRestoreUserMessage,
@@ -31,6 +70,9 @@ export function ConversationPane({
   compacting,
 }: {
   snapshot?: ConversationSnapshot;
+  /** Hot token/tool stream. Kept here so animation-frame updates do not
+   * re-render the surrounding workbench and composer. */
+  liveEngine?: Pick<ConversationEngine, "subscribe" | "getSnapshot">;
   onLoadOlder: () => void;
   onRestore?: (requestId: string) => void;
   onRestoreUserMessage?: (itemId: string, text: string) => void;
@@ -57,8 +99,23 @@ export function ConversationPane({
 }) {
   const localScrollerRef = useRef<HTMLElement | null>(null);
   const scrollerRef = externalScrollerRef ?? localScrollerRef;
-  const { state, rows, demo, loadingOlder, identityKey } = snapshot?.state
-    ? snapshot
+  const liveSnapshot = useSyncExternalStore(
+    liveEngine?.subscribe ?? NOOP_SUBSCRIBE,
+    liveEngine?.getSnapshot ?? EMPTY_SNAPSHOT,
+    liveEngine?.getSnapshot ?? EMPTY_SNAPSHOT,
+  );
+  // The live engine is rebuilt whenever the conversation identity changes
+  // (transcript revision, runtime epoch, client swap), and its first snapshot is
+  // empty. Reading it unconditionally re-blanks the transcript on every remount
+  // of the *same* session, which is exactly what `snapshot` — the retained
+  // metadata view from `useConversation` — exists to prevent. The retain only
+  // applies while the identities agree, so switching sessions still clears.
+  const effectiveSnapshot =
+    liveEngine === undefined
+      ? snapshot
+      : retainConversationWhileRemounting(liveSnapshot, snapshot, liveSnapshot.state.identity?.sessionId);
+  const { state, rows, demo, loadingOlder, identityKey } = effectiveSnapshot?.state
+    ? effectiveSnapshot
     : {
         state: resetConversation(0, null, "unavailable", "当前没有活动会话。"),
         rows: [] as ConversationSnapshot["rows"],
@@ -67,16 +124,105 @@ export function ConversationPane({
         identityKey: "",
       };
   const showWelcome = Boolean(welcome && (forceWelcome || rows.length === 0) && compacting !== true);
-  const displayRows = withCompactingRow(rows, compacting === true, snapshot?.state.compacting?.action);
+  const displayRows = withCompactingRow(rows, compacting === true, effectiveSnapshot?.state.compacting?.action);
+  /**
+   * 这一帧有没有属于「当前会话」的东西可画。
+   *
+   * 切换会话时 engine 按新 identity 重建，第一份快照必然是零行的 `idle/loading`，
+   * 真实内容要等 IPC 读完。那一刻画什么都是硬切——之前画的是居中的"正在准备对话"
+   * 占位，于是一次切换闪两次版式。宁可先不画，交给下面的过场机接管。
+   */
+  const pending =
+    standby === undefined &&
+    !showWelcome &&
+    displayRows.length === 0 &&
+    (state.hydrateStatus === "idle" || state.hydrateStatus === "loading");
+  const paintable = !pending;
+  /** 过场只认会话本身：transcript revision / runtime epoch 变化（回溯、分支、重连）
+   *  同样会重建 engine，但内容照旧，跟着走过场只会白闪一下。 */
+  const switchKey = state.identity?.sessionId ?? (demo ? "demo" : "");
+  const reducedMotion = useMemo(prefersReducedMotion, []);
+  const painted = useRef<PaintedBody | null>(null);
+  const [switchState, dispatchSwitch] = useReducer(nextConversationSwitch, IDLE_CONVERSATION_SWITCH);
+  const canFade = painted.current !== null && !reducedMotion;
+  // 派生自 props 的状态：在 render 内 dispatch（React 官方许可的模式），让新阶段与
+  // 新快照落进同一次提交——否则总有一帧画着「上一阶段该画的东西」，那一帧就是硬切。
+  if (switchKey !== switchState.key) {
+    // 欢迎面 → 欢迎面（新建会话回执把 identity 从 null 换成新会话）：屏上的面没变，
+    // 走 identity 过场会把同一块欢迎页淡出再淡入，看起来就是闪一下重载。
+    if (showWelcome && painted.current?.welcome === true) {
+      dispatchSwitch({ type: "adopt", key: switchKey });
+    } else {
+      dispatchSwitch({ type: "identity", key: switchKey, paintable, canFade });
+    }
+  } else if (pending && (switchState.phase === "idle" || switchState.phase === "revealing")) {
+    dispatchSwitch({ type: "pending", canFade });
+  } else if (switchState.phase === "waiting" && paintable) {
+    dispatchSwitch({ type: "paintable" });
+  }
+  const liveItemCount = displayRows.length + (activity === undefined ? 0 : 1);
+  const liveContentKey = conversationFollowKey(state);
+  /**
+   * 这一屏是否正在流式产出。
+   *
+   * 挂在 scroller 上，供非动画用途消费：小地图据此降低测量频率。工具卡的收起/展开
+   * 过渡不再按它区分——流式期间已完成的卡片正文已冻结，走完整 0fr→1fr 过渡与静止
+   * 态同价；仍逐帧变化的运行中卡片由 BatchChain 自己判 `tool.status` 保持瞬时切换。
+   */
+  const streaming = tailStreaming(displayRows);
+  /** 淡出期间滚动编排看的是「还在屏上那一屏」，否则它会按新会话的空内容重排，
+   *  把正在淡出的旧 transcript 抽走高度。 */
+  const held = switchState.phase === "leaving" ? painted.current : null;
   const scroll = useConversationScroll({
     scrollerRef,
+    // identityKey 始终用进来的那个：它触发的复位（pinned/follow/hasNewContent）必须
+    // 在淡入那一帧之前跑完，否则新 transcript 会带着上一个会话的 pinned 状态开场，
+    // 上一个会话若停在半途，新会话就不贴底了。
     identityKey,
-    itemCount: displayRows.length + (activity === undefined ? 0 : 1),
+    itemCount: held?.itemCount ?? liveItemCount,
     loadingOlder,
     pin: showWelcome ? "top" : "bottom",
-    contentKey: conversationFollowKey(state),
+    contentKey: held?.contentKey ?? liveContentKey,
   });
   const prevLoading = useRef(loadingOlder);
+  const paintableRef = useRef(paintable);
+  paintableRef.current = paintable;
+
+  // 阶段计时。`waiting` 没有时限——这是同一套过场能同时适配"归档会话瞬读完"和
+  // "冷 Runtime 开半天"的原因。leaving 期间又切一次会话不会重置 seq，所以这里的
+  // 定时器继续跑，旧 transcript 不会因为反复点侧边栏而迟迟淡不完。
+  useEffect(() => {
+    const ms = switchPhaseMs(switchState.phase, reducedMotion);
+    if (ms === null) return;
+    const seq = switchState.seq;
+    const timer = window.setTimeout(() => dispatchSwitch({ type: "elapsed", seq, paintable: paintableRef.current }), ms);
+    return () => window.clearTimeout(timer);
+  }, [reducedMotion, switchState.phase, switchState.seq]);
+
+  /* 新 transcript 先隐身挂载两帧：第一帧让虚拟列表量真实行高，第二帧让统一的
+     `.convo-doc` ResizeObserver 把 scroller 贴到底。两者完成后才淡入，用户不会看到
+     初始估高 → 真实高度 → scrollTop 修正造成的一两次整屏跳动。 */
+  useEffect(() => {
+    if (switchState.phase !== "settling") return;
+    const seq = switchState.seq;
+    if (typeof requestAnimationFrame !== "function") {
+      dispatchSwitch({ type: "settled", seq });
+      return;
+    }
+    let frameId: number | null = null;
+    let remaining = SWITCH_SETTLE_FRAMES;
+    const next = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        frameId = null;
+        dispatchSwitch({ type: "settled", seq });
+        return;
+      }
+      frameId = requestAnimationFrame(next);
+    };
+    frameId = requestAnimationFrame(next);
+    return () => { if (frameId !== null) cancelAnimationFrame(frameId); };
+  }, [switchState.phase, switchState.seq]);
 
   useEffect(() => {
     if (!prevLoading.current && loadingOlder) scroll.preparePrepend();
@@ -90,106 +236,148 @@ export function ConversationPane({
     onLoadOlder();
   }
 
-  return (
-    <main
-      className="convo-scroll"
-      id="convoScroll"
-      ref={scrollerRef}
-      tabIndex={-1}
-      aria-label="对话内容"
-      onScroll={scroll.onScroll}
-    >
-      <div className="convo-doc" id="convoDoc" role="log" aria-live="off" aria-relevant="additions">
-        {standby ? (
-          <div className="empty" style={{ paddingTop: 72 }}>
-            <span className="spinner" aria-hidden="true" />
-            <p>{standby.title}</p>
-            <p className="muted small">{standby.detail}</p>
-          </div>
-        ) : showWelcome ? (
-          <>
-            {welcome}
-            {activity === undefined ? null : <ActivityLine {...activity} />}
-          </>
-        ) : (
-          <>
-            {demo ? null : <StatusBanner state={state} />}
-            {state.hasMoreBefore && state.hydrateStatus === "ready" ? (
-              <div className="convo-load-earlier">
-                <button
-                  type="button"
-                  className="btn small outline"
-                  disabled={loadingOlder}
-                  onClick={loadOlder}
-                >
-                  {loadingOlder ? "正在加载更早消息…" : "加载更早消息"}
-                </button>
-              </div>
-            ) : null}
-            {state.notices.map((notice) => {
-              if (isTransientStatusNotice(notice.message, notice.source)) return null;
-              if (isRetryTranscriptNotice(notice.message, notice.source)) return null;
-              const xdevGroups = parseXdevMountNotice(notice.message);
-              if (xdevGroups !== null) {
-                return <XdevMountNotice key={notice.id} level={notice.level} groups={xdevGroups} />;
-              }
-              return (
-                <div key={notice.id} className={`convo-notice ${notice.level}`} role={notice.level === "error" ? "alert" : "status"}>
-                  {notice.message}
-                </div>
-              );
-            })}
-            {displayRows.length === 0 ? (
-              <>
-                {welcome ?? <EmptyConversation state={state} demo={demo} />}
-                {planLink === undefined || planLink.attachEvenWithoutPropose !== true ? null : (
-                  <PlanCreatedCard
-                    title={planLink.title ?? "Plan"}
-                    onOpen={planLink.onOpen}
-                    {...(planLink.demo === true || demo === true ? { demo: true } : {})}
-                  />
-                )}
-              </>
-            ) : (
-              <ConvoTranscript
-                scrollerRef={scrollerRef}
-                rows={displayRows}
-                demo={demo}
-                {...(onRestore === undefined ? {} : { onRestore })}
-                {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
-                {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
-                {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
-                {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
-                {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
-                {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
-                {...(liveAgents === undefined ? {} : { liveAgents })}
-                {...(planLink === undefined ? {} : { planLink })}
-              />
-            )}
-            {state.hydrateStatus === "resyncing" ? (
-              <div className="convo-notice info" role="status">正在同步</div>
-            ) : null}
-            {activity === undefined ? null : <ActivityLine {...activity} />}
-          </>
-        )}
-      </div>
-      {scroll.hasNewContent ? (
-        <div className="new-content-pill-row">
+  const liveBody: ReactNode = standby ? (
+    <div className="empty" style={{ paddingTop: 72 }}>
+      <span className="spinner" aria-hidden="true" />
+      <p>{standby.title}</p>
+      <p className="muted small">{standby.detail}</p>
+    </div>
+  ) : showWelcome ? (
+    <>
+      {welcome}
+      {activity === undefined ? null : <ActivityLine {...activity} />}
+    </>
+  ) : (
+    <>
+      {demo ? null : <StatusBanner state={state} />}
+      {state.hasMoreBefore && state.hydrateStatus === "ready" ? (
+        <div className="convo-load-earlier">
           <button
             type="button"
-            className="new-content-pill"
-            onClick={scroll.jumpToLatest}
-            aria-label="回到最新"
-            data-tip="回到最新"
+            className="btn small outline"
+            disabled={loadingOlder}
+            onClick={loadOlder}
           >
-            <Icon name="chevron-d" />
+            {loadingOlder ? "正在加载更早消息…" : "加载更早消息"}
           </button>
         </div>
       ) : null}
-      <div className="sr-only" aria-live="polite">
-        {latestAnnouncement(state, displayRows.length)}
-      </div>
-    </main>
+      {state.notices.map((notice) => {
+        if (isTransientStatusNotice(notice.message, notice.source)) return null;
+        if (isRetryTranscriptNotice(notice.message, notice.source)) return null;
+        const xdevGroups = parseXdevMountNotice(notice.message);
+        if (xdevGroups !== null) {
+          return <XdevMountNotice key={notice.id} level={notice.level} groups={xdevGroups} />;
+        }
+        return (
+          <div key={notice.id} className={`convo-notice ${notice.level}`} role={notice.level === "error" ? "alert" : "status"}>
+            {notice.message}
+          </div>
+        );
+      })}
+      {displayRows.length === 0 ? (
+        <>
+          {welcome ?? <EmptyConversation state={state} demo={demo} />}
+          {planLink === undefined || planLink.attachEvenWithoutPropose !== true ? null : (
+            <PlanCreatedCard
+              title={planLink.title ?? "Plan"}
+              onOpen={planLink.onOpen}
+              {...(planLink.demo === true || demo === true ? { demo: true } : {})}
+            />
+          )}
+        </>
+      ) : (
+        <ConvoTranscript
+          scrollerRef={scrollerRef}
+          rows={displayRows}
+          demo={demo}
+          {...(onRestore === undefined ? {} : { onRestore })}
+          {...(onRestoreUserMessage === undefined ? {} : { onRestoreUserMessage })}
+          {...(onBranchUserMessage === undefined ? {} : { onBranchUserMessage })}
+          {...(userRestoreDisabledReason === undefined ? {} : { userRestoreDisabledReason })}
+          {...(userBranchDisabledReason === undefined ? {} : { userBranchDisabledReason })}
+          {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
+          {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
+          {...(liveAgents === undefined ? {} : { liveAgents })}
+          {...(planLink === undefined ? {} : { planLink })}
+        />
+      )}
+      {state.hydrateStatus === "resyncing" ? (
+        <div className="convo-notice info" role="status">正在同步</div>
+      ) : null}
+      {activity === undefined ? null : <ActivityLine {...activity} />}
+    </>
+  );
+  // leaving 期间即使新会话已经读到，也必须继续画进入过场前捕获的旧节点；此前这里会在
+  // 140ms 淡出中途把 DOM 换成新 transcript，正是切换时第一次整屏跳动的来源。
+  const heldBody = switchState.phase === "leaving" ? painted.current : null;
+  // key 变化的那趟 render 末尾会排队 identity/adopt dispatch，React 随即丢弃该趟 JSX
+  // 重渲——但 ref 写入不会回滚。不在这里拦下，「永远可画」的欢迎页会在 leaving 开始
+  // 前就把 painted 换成自己，旧 transcript 再也留不住，切换时整块硬切加一次淡出淡入。
+  const keysChanging = switchKey !== switchState.key;
+  if (paintable && switchState.phase !== "leaving" && !keysChanging) {
+    painted.current = { node: liveBody, itemCount: liveItemCount, contentKey: liveContentKey, rows: displayRows, welcome: showWelcome };
+  }
+  const body = switchState.phase === "leaving" ? heldBody?.node ?? null : paintable ? liveBody : null;
+  const minimapRows = standby !== undefined || showWelcome
+    ? []
+    : switchState.phase === "leaving"
+      ? heldBody?.rows ?? []
+      : paintable
+        ? displayRows
+        : [];
+  const visualStreaming = switchState.phase === "leaving"
+    ? tailStreaming(heldBody?.rows ?? [])
+    : streaming;
+
+  return (
+    <>
+      <main
+        className="convo-scroll"
+        id="convoScroll"
+        ref={scrollerRef}
+        tabIndex={-1}
+        aria-label="对话内容"
+        {...(visualStreaming ? { "data-live-stream": "1" } : {})}
+        onScroll={scroll.onScroll}
+      >
+        <div
+          className="convo-doc"
+          id="convoDoc"
+          role="log"
+          aria-live="off"
+          aria-relevant="additions"
+          {...(switchState.phase === "waiting" || switchState.phase === "settling" ? { "aria-busy": true } : {})}
+        >
+          {switchState.veil ? <ConversationSkeleton {...(switchVeilLeaving(switchState) ? { leaving: true } : {})} /> : null}
+          <div className="convo-body" data-phase={switchState.phase}>{body}</div>
+        </div>
+        {scroll.hasNewContent ? (
+          <div className="new-content-pill-row">
+            <button
+              type="button"
+              className="new-content-pill"
+              onClick={scroll.jumpToLatest}
+              aria-label="回到最新"
+              data-tip="回到最新"
+            >
+              <Icon name="chevron-d" />
+            </button>
+          </div>
+        ) : null}
+        <div className="sr-only" aria-live="polite">
+          {latestAnnouncement(state, displayRows.length, switchState.phase)}
+        </div>
+      </main>
+      <ConversationMinimap
+        rows={minimapRows}
+        scrollerRef={scrollerRef}
+        preview={demo}
+        busy={visualStreaming}
+        onNavigateStart={scroll.detachFromLatest}
+        onJumpToLatest={scroll.jumpToLatest}
+      />
+    </>
   );
 }
 
@@ -264,9 +452,8 @@ function XdevMountNotice({ level, groups }: { level: string; groups: XdevMountGr
 }
 
 function StatusBanner({ state }: { state: ConversationState }) {
-  if (state.hydrateStatus === "loading") {
-    return <div className="convo-notice info" role="status">正在加载对话</div>;
-  }
+  // 加载态不在这里出声：切换会话的空窗由骨架屏（.convo-veil）兜住，
+  // 再加一条"正在加载对话"横幅等于把同一件事说两遍，且横幅会撑高文档。
   if (state.hydrateStatus === "error" && state.error) {
     return (
       <div className="convo-notice error" role="alert">
@@ -298,12 +485,8 @@ function EmptyConversation({ state, demo }: { state: ConversationState; demo: bo
     );
   }
   if (state.hydrateStatus === "loading" || state.hydrateStatus === "idle") {
-    return (
-      <div className="empty" style={{ paddingTop: 72 }}>
-        <Icon name="message" extra="lg" />
-        <p>正在准备对话</p>
-      </div>
-    );
+    // 空窗期由骨架屏接管；这里再画一个"正在准备对话"占位就是之前那次硬切。
+    return null;
   }
   return (
     <div className="empty" style={{ paddingTop: 72 }}>
@@ -314,7 +497,8 @@ function EmptyConversation({ state, demo }: { state: ConversationState; demo: bo
   );
 }
 
-function latestAnnouncement(state: ConversationState, rowCount: number): string {
+function latestAnnouncement(state: ConversationState, rowCount: number, phase: ConversationSwitchPhase): string {
+  if (phase === "waiting" || phase === "settling") return "正在加载对话";
   if (state.hydrateStatus === "unavailable") return state.unavailableReason ?? "";
   if (state.hydrateStatus === "error") return state.error?.message ?? "";
   const last = Object.values(state.liveMessages).at(-1);

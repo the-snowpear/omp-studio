@@ -2,6 +2,7 @@ import {
   CONVERSATION_LIMITS,
   parseConversationRuntimeEvent,
   truncateUtf8,
+  utf8ByteLength,
   type ConversationRuntimeEvent,
   type StudioEventEnvelope,
 } from "@omp-studio/studio-protocol";
@@ -20,7 +21,11 @@ export const CONVERSATION_RUNTIME_EVENT_KINDS = [
   "conversation.notice",
 ] as const satisfies readonly ConversationRuntimeEvent["kind"][];
 
-export const CONVERSATION_REPLAY_EVENT_LIMIT = 512;
+export const CONVERSATION_REPLAY_EVENT_LIMIT = CONVERSATION_LIMITS.LIVE_REPLAY_MAX_EVENTS;
+/** Includes event envelopes and retained coalesced text, measured as UTF-8 JSON. */
+export const CONVERSATION_REPLAY_MAX_BYTES = CONVERSATION_LIMITS.LIVE_REPLAY_MAX_BYTES;
+export const CONVERSATION_REPLAY_GLOBAL_MAX_BYTES = 16 * 1024 * 1024;
+export const CONVERSATION_REPLAY_SESSION_LIMIT = 32;
 
 export function isAllowListedConversationKind(kind: unknown): kind is ConversationRuntimeEvent["kind"] {
   return typeof kind === "string" && (CONVERSATION_RUNTIME_EVENT_KINDS as readonly string[]).includes(kind);
@@ -28,21 +33,21 @@ export function isAllowListedConversationKind(kind: unknown): kind is Conversati
 
 export interface StudioConversationForward {
   readonly envelope: StudioEventEnvelope<ConversationRuntimeEvent>;
+  /** Monotonic within one conversation session and Runtime controller lifetime. */
+  readonly streamSeq: number;
 }
 
 type ReplaySession = {
   turnId?: string;
   overflowed?: boolean;
+  byteSize: number;
   readonly events: Map<string, StudioConversationForward>;
-  readonly deltaChunks: Map<string, { total: string; lastKey: string; nextIndex: number }>;
+  readonly eventBytes: Map<string, number>;
+  readonly deltaChunks: Map<string, { totalBytes: number; lastKey: string; nextIndex: number }>;
 };
 
 function turnIdOf(event: ConversationRuntimeEvent): string | undefined {
   return "turnId" in event ? event.turnId : undefined;
-}
-
-function eventSeqOf(event: StudioConversationForward): number {
-  return Number(event.envelope.eventSeq);
 }
 
 /**
@@ -55,6 +60,9 @@ export class ConversationEventFanout {
   readonly #listeners = new Set<(event: StudioConversationForward) => void>();
   readonly #resyncListeners = new Set<(reason: string) => void>();
   readonly #replay = new Map<string, ReplaySession>();
+  readonly #streamSeq = new Map<string, number>();
+  readonly #evictedTurns = new Map<string, string | undefined>();
+  #replayBytes = 0;
 
   onEvent(listener: (event: StudioConversationForward) => void): () => void {
     this.#listeners.add(listener);
@@ -70,17 +78,34 @@ export class ConversationEventFanout {
     };
   }
 
-  replay(sessionId: ConversationRuntimeEvent["sessionId"], listener: (event: StudioConversationForward) => void): void {
+  snapshot(sessionId: ConversationRuntimeEvent["sessionId"]):
+    | { readonly status: "complete"; readonly watermark: number; readonly events: readonly StudioConversationForward[] }
+    | { readonly status: "resyncRequired"; readonly watermark: number; readonly events: readonly []; readonly reason: string } {
     const session = this.#replay.get(sessionId);
-    if (session?.overflowed === true) {
-      this.emitResync("live conversation replay exceeded the Host limit; re-read the open transcript");
-      return;
+    const watermark = this.#streamSeq.get(sessionId) ?? 0;
+    if (session?.overflowed === true || this.#evictedTurns.has(sessionId)) {
+      return {
+        status: "resyncRequired",
+        watermark,
+        events: [],
+        reason: "live conversation replay exceeded the Host byte or event limit; reopen the conversation",
+      };
     }
     const events = [...(session?.events.values() ?? [])]
-      .sort((left, right) => eventSeqOf(left) - eventSeqOf(right));
-    for (const event of events) {
+      .sort((left, right) => left.streamSeq - right.streamSeq)
+      .map((event) => structuredClone(event));
+    return { status: "complete", watermark, events };
+  }
+
+  replay(sessionId: ConversationRuntimeEvent["sessionId"], listener: (event: StudioConversationForward) => void): void {
+    const snapshot = this.snapshot(sessionId);
+    if (snapshot.status === "resyncRequired") {
+      this.emitResync(snapshot.reason);
+      return;
+    }
+    for (const event of snapshot.events) {
       try {
-        listener(structuredClone(event));
+        listener(event);
       } catch {
         // Replay consumers are isolated just like live subscribers.
       }
@@ -106,10 +131,15 @@ export class ConversationEventFanout {
       this.emitResync("conversation mapping failed; re-read open transcripts");
       return false;
     }
+    const sessionId = parsed.sessionId;
+    const streamSeq = (this.#streamSeq.get(sessionId) ?? 0) + 1;
+    this.#streamSeq.set(sessionId, streamSeq);
     const event: StudioConversationForward = {
       envelope: { ...envelope, event: parsed },
+      streamSeq,
     };
     this.#remember(event);
+    this.#enforceGlobalBudget(sessionId);
     for (const listener of [...this.#listeners]) {
       try {
         listener(event);
@@ -123,26 +153,27 @@ export class ConversationEventFanout {
   #remember(forward: StudioConversationForward): void {
     const event = forward.envelope.event;
     const sessionId = event.sessionId;
-    if (event.kind === "conversation.turn.completed" || event.kind === "conversation.turn.aborted") {
-      this.#replay.delete(sessionId);
-      return;
-    }
-    if (event.kind === "conversation.notice") return;
-    if (event.kind === "conversation.compaction.completed") {
-      this.#replay.get(sessionId)?.events.delete("compaction");
-      return;
-    }
     let session = this.#replay.get(sessionId);
+    const turnId = turnIdOf(event);
+    if (session === undefined && this.#evictedTurns.has(sessionId)) {
+      const evictedTurn = this.#evictedTurns.get(sessionId);
+      if (turnId === undefined || turnId === evictedTurn) return;
+      this.#evictedTurns.delete(sessionId);
+    }
     if (session === undefined) {
-      session = { events: new Map(), deltaChunks: new Map() };
+      session = {
+        events: new Map(),
+        eventBytes: new Map(),
+        deltaChunks: new Map(),
+        byteSize: 0,
+      };
       this.#replay.set(sessionId, session);
     }
-    const turnId = turnIdOf(event);
     if (turnId !== undefined && session.turnId !== turnId) {
-      session.events.clear();
-      session.deltaChunks.clear();
+      this.#clear(session);
       session.turnId = turnId;
       session.overflowed = false;
+      this.#evictedTurns.delete(sessionId);
     }
     switch (event.kind) {
       case "conversation.message.started":
@@ -152,9 +183,9 @@ export class ConversationEventFanout {
         this.#rememberDelta(session, forward, event);
         return;
       case "conversation.message.completed":
-        session.events.delete(`message-started:${event.messageId}`);
+        this.#delete(session, `message-started:${event.messageId}`);
         for (const key of [...session.events.keys()]) {
-          if (key.startsWith(`message-delta:${event.messageId}:`)) session.events.delete(key);
+          if (key.startsWith(`message-delta:${event.messageId}:`)) this.#delete(session, key);
         }
         for (const key of [...session.deltaChunks.keys()]) {
           if (key.startsWith(`${event.messageId}:`)) session.deltaChunks.delete(key);
@@ -171,6 +202,7 @@ export class ConversationEventFanout {
         const raw = event.updateMode === "replace" ? (event.output ?? "") : previousOutput + (event.output ?? "");
         const bounded = truncateUtf8(raw, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
         this.#store(session, key, {
+          streamSeq: forward.streamSeq,
           envelope: {
             ...forward.envelope,
             event: {
@@ -184,11 +216,22 @@ export class ConversationEventFanout {
         return;
       }
       case "conversation.tool.completed":
-        session.events.delete(`tool-updated:${event.toolCallId}`);
+        this.#delete(session, `tool-updated:${event.toolCallId}`);
         this.#store(session, `tool-completed:${event.toolCallId}`, structuredClone(forward));
+        return;
+      case "conversation.turn.completed":
+      case "conversation.turn.aborted":
+        this.#store(session, "turn-terminal", structuredClone(forward));
         return;
       case "conversation.compaction.started":
         this.#store(session, "compaction", structuredClone(forward));
+        return;
+      case "conversation.compaction.completed":
+        this.#delete(session, "compaction");
+        this.#store(session, "compaction-completed", structuredClone(forward));
+        return;
+      case "conversation.notice":
+        this.#store(session, `notice:${forward.streamSeq}`, structuredClone(forward));
         return;
       default:
         return;
@@ -197,11 +240,52 @@ export class ConversationEventFanout {
 
   #store(session: ReplaySession, key: string, event: StudioConversationForward): void {
     if (session.overflowed === true) return;
+    const previousBytes = session.eventBytes.get(key) ?? 0;
+    const bytes = utf8ByteLength(JSON.stringify(event));
     session.events.set(key, event);
-    if (session.events.size <= CONVERSATION_REPLAY_EVENT_LIMIT) return;
-    session.events.clear();
-    session.deltaChunks.clear();
+    session.eventBytes.set(key, bytes);
+    session.byteSize += bytes - previousBytes;
+    this.#replayBytes += bytes - previousBytes;
+    if (session.events.size <= CONVERSATION_REPLAY_EVENT_LIMIT && session.byteSize <= CONVERSATION_REPLAY_MAX_BYTES) return;
+    this.#clear(session);
     session.overflowed = true;
+  }
+
+  #delete(session: ReplaySession, key: string): void {
+    const bytes = session.eventBytes.get(key);
+    if (bytes !== undefined) {
+      session.byteSize -= bytes;
+      this.#replayBytes -= bytes;
+    }
+    session.eventBytes.delete(key);
+    session.events.delete(key);
+  }
+
+  #clear(session: ReplaySession): void {
+    this.#replayBytes -= session.byteSize;
+    session.events.clear();
+    session.eventBytes.clear();
+    session.deltaChunks.clear();
+    session.byteSize = 0;
+  }
+
+  #enforceGlobalBudget(recentSessionId: string): void {
+    const recent = this.#replay.get(recentSessionId);
+    if (recent !== undefined) {
+      this.#replay.delete(recentSessionId);
+      this.#replay.set(recentSessionId, recent);
+    }
+    while (
+      this.#replay.size > CONVERSATION_REPLAY_SESSION_LIMIT ||
+      this.#replayBytes > CONVERSATION_REPLAY_GLOBAL_MAX_BYTES
+    ) {
+      const oldest = this.#replay.entries().next().value as [string, ReplaySession] | undefined;
+      if (oldest === undefined) return;
+      const [sessionId, session] = oldest;
+      this.#evictedTurns.set(sessionId, session.turnId);
+      this.#clear(session);
+      this.#replay.delete(sessionId);
+    }
   }
 
   #rememberDelta(
@@ -212,13 +296,13 @@ export class ConversationEventFanout {
     if (session.overflowed === true) return;
     const blockKey = `${event.messageId}:${event.blockId}`;
     const meta = session.deltaChunks.get(blockKey) ?? {
-      total: "",
+      totalBytes: 0,
       lastKey: `message-delta:${blockKey}:0`,
       nextIndex: 1,
     };
-    const boundedTotal = truncateUtf8(meta.total + event.delta, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-    const addition = boundedTotal.text.slice(meta.total.length);
-    meta.total = boundedTotal.text;
+    const remaining = Math.max(0, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES - meta.totalBytes);
+    const addition = truncateUtf8(event.delta, remaining).text;
+    meta.totalBytes += utf8ByteLength(addition);
     if (addition.length === 0) {
       session.deltaChunks.set(blockKey, meta);
       return;
@@ -228,6 +312,7 @@ export class ConversationEventFanout {
     if (previous !== undefined && previousEvent?.kind === "conversation.message.delta") {
       const combined = truncateUtf8(previousEvent.delta + addition, CONVERSATION_LIMITS.DELTA_MAX_BYTES);
       this.#store(session, meta.lastKey, {
+        streamSeq: forward.streamSeq,
         envelope: {
           ...(combined.truncated ? previous.envelope : forward.envelope),
           event: { ...event, delta: combined.text },
@@ -239,6 +324,7 @@ export class ConversationEventFanout {
           meta.lastKey = `message-delta:${blockKey}:${meta.nextIndex}`;
           meta.nextIndex += 1;
           this.#store(session, meta.lastKey, {
+            streamSeq: forward.streamSeq,
             envelope: { ...forward.envelope, event: { ...event, delta: remainder } },
           });
         }
@@ -263,5 +349,8 @@ export class ConversationEventFanout {
     this.#listeners.clear();
     this.#resyncListeners.clear();
     this.#replay.clear();
+    this.#streamSeq.clear();
+    this.#evictedTurns.clear();
+    this.#replayBytes = 0;
   }
 }

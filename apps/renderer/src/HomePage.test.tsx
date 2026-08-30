@@ -25,10 +25,25 @@ beforeAll(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
   __resetOperatorProfileForTests(null);
 });
+
+function domRect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    bottom: top + height,
+    height,
+    left,
+    right: left + width,
+    top,
+    width,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  };
+}
 
 import { I18nProvider } from "./i18n";
 
@@ -86,6 +101,44 @@ describe("HomePage identity", () => {
     expect((photo as HTMLImageElement).getAttribute("src")).toBe("data:image/png;base64,QQ==");
     expect(screen.getByRole("heading", { level: 1, name: /，Ada$/ })).toBeTruthy();
     expect(document.querySelectorAll(".home-avatar").length).toBe(1);
+  });
+});
+
+describe("HomePage Token usage chart", () => {
+  it("places the hover card beside the active day instead of over its curve", () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }) as unknown as MediaQueryList);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("tk-card")) return domRect(100, 50, 600, 560);
+      if (this.classList.contains("tk-tip")) return domRect(0, 0, 168, 64);
+      return domRect(0, 0, 0, 0);
+    });
+    vi.spyOn(SVGSVGElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(114, 180, 572, 210));
+
+    renderHome({ preview: true, runtime: { status: "connected", classification: "managed" } });
+    const chart = document.querySelector<SVGSVGElement>("svg.tk-chart");
+    expect(chart).toBeTruthy();
+
+    fireEvent(chart!, new MouseEvent("pointermove", { bubbles: true, clientX: 180, clientY: 220 }));
+
+    const cursor = chart!.querySelector<SVGLineElement>(".tk-cursor");
+    const tip = document.querySelector<HTMLElement>(".tk-tip.show");
+    expect(cursor).toBeTruthy();
+    expect(tip).toBeTruthy();
+    const pointXInCard = 14 + Number(cursor!.getAttribute("x1"));
+    expect(Number.parseFloat(tip!.style.left)).toBeGreaterThanOrEqual(pointXInCard + 12);
+
+    fireEvent(chart!, new MouseEvent("pointermove", { bubbles: true, clientX: 660, clientY: 220 }));
+
+    const rightCursor = chart!.querySelector<SVGLineElement>(".tk-cursor");
+    const flippedTip = document.querySelector<HTMLElement>(".tk-tip.show");
+    const rightPointXInCard = 14 + Number(rightCursor!.getAttribute("x1"));
+    expect(Number.parseFloat(flippedTip!.style.left) + 168).toBeLessThanOrEqual(rightPointXInCard - 12);
+    expect(flippedTip!.style.top).toBe(tip!.style.top);
   });
 });
 

@@ -19,6 +19,7 @@ import { hostErrorMessage, waitReceipt } from "./hostError";
 import { SubagentConversationPane } from "./conversation/SubagentConversationPane";
 import type { SubagentComposerAgent } from "./conversation/subagentComposerGate";
 import { isRealSubagentId, type SubagentHubTarget } from "./conversation/toolMeta";
+import { isTickingAgentStatus } from "./conversation/SubagentMetrics";
 import { pageMotionReduced, TAB_PANE_MS, tabPaneRole, useOverlappingTabs, type SlideDir, type TabPaneRole } from "./pageTransition";
 
 export const HUB_INTENT_KEY = "omp.hubIntent";
@@ -108,8 +109,6 @@ const STATUS_DOT: Record<HubStatus, string> = {
   parked: "gray",
   aborted: "red",
 };
-
-const STATUS_ORDER: Record<HubStatus, number> = { running: 0, idle: 1, parked: 2, aborted: 3 };
 
 const TABS: ReadonlyArray<readonly [HubTab, string]> = [
   ["overview", "Overview"],
@@ -302,6 +301,19 @@ function hubStatus(status: StudioAgentSnapshot["status"]): HubStatus {
   if (status === "idle") return "idle";
   if (status === "parked") return "parked";
   return "aborted";
+}
+
+/**
+ * 卡片/详情页显示的运行时长：已测量的 usage → 仍在跑时按当前时间走 → 已停止冻结在
+ * 最后活动时间。停靠或中止后 `lastActivity` 不再前进，计数就此停住。
+ */
+function hubDurationMs(agent: HubAgent, now: number): number | undefined {
+  const measured = agent.metrics?.durationMs;
+  if (measured !== undefined && Number.isFinite(measured)) return Math.max(0, measured);
+  if (agent.startedAt === undefined || !Number.isFinite(agent.startedAt)) return undefined;
+  const ended = isTickingAgentStatus(agent.rawStatus) ? now : agent.lastActivity;
+  if (!Number.isFinite(ended)) return undefined;
+  return Math.max(0, ended - agent.startedAt);
 }
 
 function isAdvisor(agent: HubAgent): boolean {
@@ -544,33 +556,42 @@ function fromPreviewJob(job: PreviewJob): HubJob {
   };
 }
 
-function sortFlat(rows: HubAgent[]): HubAgent[] {
-  return rows.slice().sort((a, b) =>
-    (STATUS_ORDER[a.status] - STATUS_ORDER[b.status])
-    || (b.lastActivity - a.lastActivity)
-    || (a.id < b.id ? -1 : 1));
+const UNKNOWN_CREATION = Number.MAX_SAFE_INTEGER;
+
+/**
+ * 列表顺序固定为「创建顺序」：注册时间升序，只按这个排。
+ * 状态与最后活动时间都会在运行期变化，任何一项进排序键，卡片就会在每次
+ * 状态翻转或 usage 更新时跳位（以前是「谁刚动过谁在最上面」）。缺少
+ * `startedAt` 的行（归档快照没这个字段）落到末尾，用 id 保证顺序稳定。
+ */
+function creationKey(agent: HubAgent): number {
+  return agent.startedAt !== undefined && Number.isFinite(agent.startedAt) ? agent.startedAt : UNKNOWN_CREATION;
 }
 
-function sortTree(rows: HubAgent[]): HubAgent[] {
-  return rows.slice().sort((a, b) => (b.lastActivity - a.lastActivity) || (a.id < b.id ? -1 : 1));
+function byCreation(a: HubAgent, b: HubAgent): number {
+  return (creationKey(a) - creationKey(b)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+function sortByCreation(rows: HubAgent[]): HubAgent[] {
+  return rows.slice().sort(byCreation);
 }
 
 function treeGroups(rows: HubAgent[]): { groups: Array<{ head: HubAgent; kids: HubAgent[] }>; orphans: HubAgent[] } {
   const byId = new Map(rows.map((agent) => [agent.id, agent]));
   const hasVisParent = (agent: HubAgent) => Boolean(agent.parentId && agent.parentId !== "main" && byId.has(agent.parentId));
   const isGroupHead = (agent: HubAgent) => !hasVisParent(agent) && rows.some((row) => row.parentId === agent.id);
-  const heads = sortTree(rows.filter(isGroupHead));
+  const heads = sortByCreation(rows.filter(isGroupHead));
   const used = new Set(heads.map((head) => head.id));
   const groups = heads.map((head) => {
-    const kids = sortTree(rows.filter((row) => row.parentId === head.id));
+    const kids = sortByCreation(rows.filter((row) => row.parentId === head.id));
     kids.forEach((kid) => used.add(kid.id));
     return { head, kids };
   });
-  return { groups, orphans: sortTree(rows.filter((agent) => !used.has(agent.id))) };
+  return { groups, orphans: sortByCreation(rows.filter((agent) => !used.has(agent.id))) };
 }
 
 function linearSeq(rows: HubAgent[], view: HubView): HubAgent[] {
-  if (view !== "tree") return sortFlat(rows);
+  if (view !== "tree") return sortByCreation(rows);
   const tree = treeGroups(rows);
   return [...tree.groups.flatMap((group) => [group.head, ...group.kids]), ...tree.orphans];
 }
@@ -689,9 +710,10 @@ function ModelLine({ agent }: { agent: HubAgent }) {
   return null;
 }
 
-function AgentCard({ agent, selected, kids, onSelect }: { agent: HubAgent; selected: boolean; kids: number; onSelect: (id: string) => void }) {
+function AgentCard({ agent, selected, kids, now, onSelect }: { agent: HubAgent; selected: boolean; kids: number; now: number; onSelect: (id: string) => void }) {
   const pill = activityPill(agent);
   const metrics = agent.metrics;
+  const durationMs = hubDurationMs(agent, now);
   return (
     <button className={`hub-card${selected ? " sel" : ""}`} type="button" role="option" aria-selected={selected} data-hub-id={agent.id} onClick={() => onSelect(agent.id)}>
       <span className="hc-main">
@@ -708,7 +730,7 @@ function AgentCard({ agent, selected, kids, onSelect }: { agent: HubAgent; selec
         </span>
       </span>
       <span className="hc-side">
-        {agent.startedAt ? <span className="hc-start" data-tip={`已运行 ${fmtDur(metrics?.durationMs ?? (Date.now() - agent.startedAt))}`}><Icon name="clock" extra="sm" />{fmtHM(agent.startedAt)}</span> : null}
+        {agent.startedAt ? <span className="hc-start" data-tip={`已运行 ${durationMs === undefined ? "—" : fmtDur(durationMs)}`}><Icon name="clock" extra="sm" />{fmtHM(agent.startedAt)}</span> : null}
         {metrics ? <span className="hc-tokens"><b>{fmtNum(metrics.tokens)}</b><i>tok</i><Spark tokens={metrics.tokens} /></span> : null}
         {metrics ? <span className="hc-pace"><span className="hub-num"><i>req</i><b>{metrics.requests}</b></span><span className="hub-num"><i>tools</i><b>{metrics.tools}</b></span></span> : null}
         <span className="hc-cost">{metrics ? fmtCost(metrics.cost) : "usage —"}</span>
@@ -1281,7 +1303,7 @@ export function AgentHubPage({
             <TreeGroup key={group.head.id} head={group.head} kids={group.kids} selected={selected} now={now} onSelect={select} />
           ))}
           {tree.orphans.map((agent) => (
-            <AgentCard key={agent.id} agent={agent} selected={selected === agent.id} kids={agent.children.filter((id) => !childIds.has(id)).length} onSelect={select} />
+            <AgentCard key={agent.id} agent={agent} selected={selected === agent.id} kids={agent.children.filter((id) => !childIds.has(id)).length} now={now} onSelect={select} />
           ))}
           <KbdHint />
         </>
@@ -1289,8 +1311,8 @@ export function AgentHubPage({
     }
     return (
       <>
-        {sortFlat(filtered).map((agent) => (
-          <AgentCard key={agent.id} agent={agent} selected={selected === agent.id} kids={agent.children.length} onSelect={select} />
+        {sortByCreation(filtered).map((agent) => (
+          <AgentCard key={agent.id} agent={agent} selected={selected === agent.id} kids={agent.children.length} now={now} onSelect={select} />
         ))}
         <KbdHint />
       </>
@@ -1650,7 +1672,10 @@ export function AgentHubPage({
               <div className="hd-sub">
                 <span className="hub-status-line">
                   <span className={`dot ${STATUS_DOT[selectedAgent.status]}`} />
-                  {STATUS_LABEL[selectedAgent.status]} · {selectedAgent.metrics ? fmtDur(selectedAgent.metrics.durationMs) : selectedAgent.startedAt ? fmtDur(now - selectedAgent.startedAt) : "—"} · active {fmtAge(selectedAgent.lastActivity, now)}
+                  {STATUS_LABEL[selectedAgent.status]} · {(() => {
+                    const durationMs = hubDurationMs(selectedAgent, now);
+                    return durationMs === undefined ? "—" : fmtDur(durationMs);
+                  })()} · active {fmtAge(selectedAgent.lastActivity, now)}
                 </span>
                 {selectedAgent.modelRole ? <span className="hub-role">{selectedAgent.modelRole}</span> : null}
                 {selectedAgent.fallback ? <span className="hub-model hub-fallback">fallback → {selectedAgent.fallback}</span> : selectedAgent.resolvedModel ? <span className="hub-model">{selectedAgent.resolvedModel}</span> : null}

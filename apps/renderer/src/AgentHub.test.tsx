@@ -70,10 +70,23 @@ function snapshotWith(agents: StudioAgentSnapshot[]): OperatorStateSnapshot {
   } as OperatorStateSnapshot;
 }
 
+function openedAgentConversation(input: { readonly target: { readonly parentSessionId: SessionId; readonly agentId: AgentId } }) {
+  return {
+    target: {
+      kind: "agent" as const,
+      parentSessionId: input.target.parentSessionId,
+      agentId: input.target.agentId,
+      conversationSessionId: conversationPages.userAssistant.sessionId,
+    },
+    page: conversationPages.userAssistant,
+    live: { status: "complete" as const, watermark: 0, events: [] },
+  };
+}
+
 function mockClient(query?: unknown): StudioClient {
   return {
-    query: query ?? (async (name: string) => {
-      if (name === "agent.conversation.read") return conversationPages.userAssistant;
+    query: query ?? (async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
       throw new Error(name);
     }),
     command: vi.fn(),
@@ -107,6 +120,7 @@ function renderHub(
   } = {},
 ) {
   localStorage.setItem("omp.previewMode", extras.preview === true ? "1" : "0");
+  const effectiveLiveSessionId = extras.liveSessionId ?? snapshot?.sessionId;
   return render(
     <PreviewModeProvider switchEnabled>
       <AgentHubPage
@@ -121,7 +135,7 @@ function renderHub(
         {...(extras.agents === undefined ? {} : { agents: extras.agents })}
         {...(extras.persistedReady === undefined ? {} : { persistedReady: extras.persistedReady })}
         {...(extras.parentSessionId === undefined ? {} : { parentSessionId: extras.parentSessionId })}
-        {...(extras.liveSessionId === undefined ? {} : { liveSessionId: extras.liveSessionId })}
+        {...(effectiveLiveSessionId === undefined ? {} : { liveSessionId: effectiveLiveSessionId })}
         {...(extras.pendingInteraction === undefined ? {} : { pendingInteraction: extras.pendingInteraction })}
         onOpenMain={() => undefined}
       />
@@ -244,6 +258,47 @@ describe("AgentHubPage real-mode projection", () => {
     expect(screen.getByText("Parked")).toBeTruthy();
   });
 
+  it("freezes the elapsed time of a stopped agent and keeps counting a running one", () => {
+    const startedAt = new Date(Date.now() - 3_600_000).toISOString();
+    const updatedAt = new Date(Date.now() - 3_000_000).toISOString();
+    renderHub(snapshotWith([
+      snapshotAgent({ status: "parked", hasLiveSession: false, startedAt, updatedAt }),
+    ]));
+    const card = screen.getByRole("option", { name: /Lockfile Auditor/ });
+    // 停靠后 updatedAt 不再前进：10m 是真实跨度，1h 才是「还在数」的错误结果。
+    expect(card.querySelector(".hc-start")?.getAttribute("data-tip")).toBe("已运行 10m");
+    fireEvent.click(card);
+    expect(document.querySelector(".hub-status-line")?.textContent).toContain("10m");
+    cleanup();
+
+    renderHub(snapshotWith([
+      snapshotAgent({ status: "running", startedAt, updatedAt }),
+    ]));
+    expect(screen.getByRole("option", { name: /Lockfile Auditor/ }).querySelector(".hc-start")?.getAttribute("data-tip")).toBe("已运行 1h");
+  });
+
+  it("orders the roster by creation time instead of last activity", () => {
+    const ids = () => screen.getAllByRole("option").map((card) => card.getAttribute("data-hub-id"));
+    const worker = (id: string, startedAt: string, updatedAt: string, overrides: Partial<StudioAgentSnapshot> = {}) =>
+      snapshotAgent({ agentId: id as AgentId, displayName: id, startedAt, updatedAt, ...overrides });
+    // 快照顺序、状态、最后活动时间三者都与创建顺序冲突：只有 startedAt 说了算。
+    renderHub(snapshotWith([
+      worker("WorkerCharlie", "2026-08-29T09:20:00.000Z", "2026-08-29T09:30:00.000Z"),
+      worker("WorkerAlpha", "2026-08-29T09:00:00.000Z", "2026-08-29T09:05:00.000Z", { status: "parked", hasLiveSession: false }),
+      worker("WorkerBravo", "2026-08-29T09:10:00.000Z", "2026-08-29T09:40:00.000Z"),
+    ]));
+    expect(ids()).toEqual(["WorkerAlpha", "WorkerBravo", "WorkerCharlie"]);
+    cleanup();
+
+    // 最后创建的那个开始跑、并且刚刚活动过：以前会被顶到最上面，现在留在原位。
+    renderHub(snapshotWith([
+      worker("WorkerAlpha", "2026-08-29T09:00:00.000Z", "2026-08-29T09:05:00.000Z", { status: "parked", hasLiveSession: false }),
+      worker("WorkerBravo", "2026-08-29T09:10:00.000Z", "2026-08-29T09:40:00.000Z"),
+      worker("WorkerCharlie", "2026-08-29T09:20:00.000Z", "2026-08-29T09:59:00.000Z", { status: "running" }),
+    ]));
+    expect(ids()).toEqual(["WorkerAlpha", "WorkerBravo", "WorkerCharlie"]);
+  });
+
   it("keeps the selected agent when search filters it out of the list", () => {
     renderHub(snapshotWith([snapshotAgent()]));
     fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
@@ -257,8 +312,8 @@ describe("AgentHubPage real-mode projection", () => {
 
 describe("AgentHubPage conversation preview", () => {
   it("opens a main-conversation pane, narrows the list, and restores Overview on back", async () => {
-    const query = vi.fn(async (name: string) => {
-      if (name === "agent.conversation.read") return conversationPages.userAssistant;
+    const query = vi.fn(async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
       throw new Error(name);
     });
     const client = mockClient(query);
@@ -270,7 +325,7 @@ describe("AgentHubPage conversation preview", () => {
     expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: "Overview" })).toBeNull();
     await vi.waitFor(() => {
-      expect(query).toHaveBeenCalledWith("agent.conversation.read", { agentId: "agent-0001", limit: 50 });
+      expect(query).toHaveBeenCalledWith("conversation.open", { target: { kind: "agent", parentSessionId: "sess-1", agentId: "agent-0001" }, limit: 50 });
       expect(screen.getByText("hello")).toBeTruthy();
       expect(screen.getByText("world")).toBeTruthy();
     });
@@ -320,7 +375,7 @@ describe("AgentHubPage conversation preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开" }));
     expect(document.querySelector(".hub-page.is-chat-preview")).toBeTruthy();
     expect(screen.getAllByText("演示").length).toBeGreaterThan(0);
-    expect(screen.getByText(/全屏缩放按钮在窄窗口下仍然可点/)).toBeTruthy();
+    expect(document.querySelector(".convo-md")).toBeTruthy();
     const editor = document.querySelector("#hubAgentComposer");
     expect(editor).toBeTruthy();
     expect(editor?.getAttribute("aria-placeholder")).toMatch(/发给子 Agent/);
@@ -389,8 +444,8 @@ describe("AgentHubPage conversation preview", () => {
   });
 
   it("opens conversation preview from a chat hub intent", async () => {
-    const query = vi.fn(async (name: string) => {
-      if (name === "agent.conversation.read") return conversationPages.userAssistant;
+    const query = vi.fn(async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
       throw new Error(name);
     });
     setHubIntent("agent-0001", "chat");
@@ -401,14 +456,14 @@ describe("AgentHubPage conversation preview", () => {
     });
     expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
     await vi.waitFor(() => {
-      expect(query).toHaveBeenCalledWith("agent.conversation.read", { agentId: "agent-0001", limit: 50 });
+      expect(query).toHaveBeenCalledWith("conversation.open", { target: { kind: "agent", parentSessionId: "sess-1", agentId: "agent-0001" }, limit: 50 });
       expect(screen.getByText("hello")).toBeTruthy();
     });
   });
 
   it("keeps a hub chat intent until the roster contains that agent", async () => {
-    const query = vi.fn(async (name: string) => {
-      if (name === "agent.conversation.read") return conversationPages.userAssistant;
+    const query = vi.fn(async (name: string, input: never) => {
+      if (name === "conversation.open") return openedAgentConversation(input);
       throw new Error(name);
     });
     const client = mockClient(query);
@@ -422,6 +477,8 @@ describe("AgentHubPage conversation preview", () => {
           client={client}
           canSend
           runtimeConnected
+          parentSessionId={"sess-1" as SessionId}
+          liveSessionId={"sess-1" as SessionId}
           runtime={{ status: "connected", classification: "managed" }}
           onOpenMain={() => undefined}
         />
@@ -429,7 +486,7 @@ describe("AgentHubPage conversation preview", () => {
     );
     expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
     await vi.waitFor(() => {
-      expect(query).toHaveBeenCalledWith("agent.conversation.read", { agentId: "agent-0001", limit: 50 });
+      expect(query).toHaveBeenCalledWith("conversation.open", { target: { kind: "agent", parentSessionId: "sess-1", agentId: "agent-0001" }, limit: 50 });
     });
   });
 

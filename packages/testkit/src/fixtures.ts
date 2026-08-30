@@ -280,6 +280,7 @@ const QUERY_INPUTS = {
   "projects.list": {},
   "workspace.fileTree": { workspaceId: WORKSPACE_ID },
   "usage.get": {},
+  "conversation.open": { target: { kind: "session", sessionId: SESSION_ID }, limit: 50 },
   "session.transcript.read": { limit: 50 },
   "agent.transcript.read": { agentId: AGENT_ID, limit: 50 },
   "agent.conversation.read": { agentId: AGENT_ID, limit: 50 },
@@ -405,6 +406,15 @@ const QUERY_RESPONSES = {
       models: [],
       byModel: [],
       hours: [],
+    },
+  },
+  "conversation.open": {
+    ok: true,
+    queryName: "conversation.open",
+    result: {
+      target: { kind: "session", sessionId: SESSION_ID, conversationSessionId: SESSION_ID },
+      page: conversationPages.userAssistant,
+      live: { status: "complete", watermark: 0, events: [] },
     },
   },
   "session.transcript.read": {

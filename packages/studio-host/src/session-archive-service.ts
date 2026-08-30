@@ -272,7 +272,7 @@ export class StudioSessionArchiveService {
       await rm(temp, { force: true });
       throw error;
     }
-    await unlink(from);
+    await unlinkWithRetry(from);
     if (source !== undefined) await this.#restoreSessionMtime(to, source);
   }
 
@@ -296,7 +296,7 @@ export class StudioSessionArchiveService {
       await rm(temp, { force: true });
       throw error;
     }
-    await unlink(from);
+    await unlinkWithRetry(from);
     await this.#restoreSessionMtime(to, decompressed);
   }
 
@@ -481,6 +481,27 @@ async function pathExists(target: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function unlinkWithRetry(target: string, maxAttempts = 5, delayMs = 50): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      await unlink(target);
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
+        if (attempt < maxAttempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+          continue;
+        }
+      }
+      throw error;
+    }
+  }
+  if (lastError !== undefined) throw lastError;
 }
 
 async function movePath(source: string, destination: string): Promise<void> {

@@ -942,7 +942,28 @@ export function collectAgents(tools: readonly ToolView[]): SubagentView[] {
       : Array.isArray(fields.results)
         ? fields.results
         : fields.agents;
-    if (!Array.isArray(agents)) continue;
+    if (!Array.isArray(agents)) {
+      const args = jsonRecord(tool.arguments);
+      const spawn = jsonRecord(args?.spawn) ?? args;
+      if (spawn === undefined) continue;
+      const pending = Array.isArray(spawn.tasks) ? spawn.tasks : [spawn];
+      for (let index = 0; index < pending.length; index += 1) {
+        const record = jsonRecord(pending[index]);
+        if (record === undefined) continue;
+        const task = jsonString(record.task);
+        const agent = jsonString(record.agent) ?? jsonString(spawn.agent);
+        const explicitName = jsonString(record.name);
+        const baseName = explicitName ?? agent ?? "Agent";
+        const name = explicitName === undefined && pending.length > 1 ? `${baseName} ${index + 1}` : baseName;
+        out.push({
+          name,
+          status: tool.status === "failed" || tool.status === "aborted" ? tool.status : tool.status === "succeeded" ? "done" : "starting",
+          toolCallId: tool.toolCallId,
+          ...(task === undefined ? {} : { task }),
+        });
+      }
+      continue;
+    }
     for (const entry of agents) {
       const record = jsonRecord(entry);
       const rawId = jsonString(record?.agentId) ?? jsonString(record?.id);
@@ -951,16 +972,22 @@ export function collectAgents(tools: readonly ToolView[]): SubagentView[] {
       const agentId = rawId !== undefined && isRealSubagentId(rawId) ? rawId : undefined;
       const task = jsonString(record?.task) ?? jsonString(record?.assignment) ?? taskTextForName(jsonRecord(tool.arguments), name);
       const status = jsonString(record?.status) ?? "done";
-      const durationMs = jsonNumber(record?.durationMs);
-      const dur = jsonString(record?.dur) ?? (durationMs === undefined ? undefined : `${(durationMs / 1000).toFixed(1)}s`);
-      const rawTokens = jsonString(record?.tokens);
+      // 异步派发时 runtime 立刻把一份 progress 快照写进工具结果，那时每个 Agent 都还是
+      // `pending`，token/请求/时长全是占位 0。把它们当统计渲染出来就成了「0 tok  req 0」，
+      // 所以未起跑的行一律不带度量。
+      const measured = status !== "pending";
+      const durationMs = measured ? jsonNumber(record?.durationMs) : undefined;
+      const dur = (measured ? jsonString(record?.dur) : undefined)
+        ?? (durationMs === undefined ? undefined : `${(durationMs / 1000).toFixed(1)}s`);
+      const rawTokens = measured ? jsonString(record?.tokens) : undefined;
       const tokens = rawTokens === "[redacted]"
         ? undefined
-        : rawTokens ?? (jsonNumber(record?.tokens) === undefined ? undefined : String(jsonNumber(record?.tokens)));
-      const toolsCount = metricValue(record?.tools);
-      const requests = metricValue(record?.requests);
-      const files = metricValue(record?.files);
-      const rawCost = jsonString(record?.cost);
+        : rawTokens ?? (!measured || jsonNumber(record?.tokens) === undefined ? undefined : String(jsonNumber(record?.tokens)));
+      // 运行中的 progress 行用 `toolCount`，落盘的 results 行用 `tools`。
+      const toolsCount = measured ? metricValue(record?.tools) ?? metricValue(record?.toolCount) : undefined;
+      const requests = measured ? metricValue(record?.requests) : undefined;
+      const files = measured ? metricValue(record?.files) : undefined;
+      const rawCost = measured ? jsonString(record?.cost) : undefined;
       const cost = rawCost === "[redacted]" ? undefined : rawCost;
       const activity = jsonString(record?.activity);
       const currentTool = jsonString(jsonRecord(record?.currentTool)?.name);

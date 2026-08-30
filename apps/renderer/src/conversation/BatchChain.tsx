@@ -1,8 +1,9 @@
-import { useId, useState, type ReactNode } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { Icon } from "../icons";
 import { ToolBody, TruncationMark } from "./ToolBody";
 import { ToolCardScroll } from "./useToolCardFollowScroll";
+import { ChunkedText } from "./textChunks";
 import { jsonString, type ToolView } from "./conversationViewModel";
 import { applyLiveSubagentRoster, resolveSubagentMetrics, SubagentMetrics } from "./SubagentMetrics";
 import {
@@ -85,25 +86,94 @@ function SubagentStrip({
   );
 }
 
-function ThinkCard({ preview, full, truncated, open, follow = false, onToggle, itemKey }: {
-  preview: string;
+/** 收起过渡跑完之后再卸载正文的等待时间（略大于 `--dur-slow` 250ms）。 */
+const COLLAPSE_UNMOUNT_MS = 320;
+
+/**
+ * 卡片展开/收起的三件事：正文按需挂载、首次展开推迟一帧起跳、收起过渡结束后卸载。
+ *
+ * 折叠的卡片是 CSS 隐藏而不是卸载的，所以「一挂就挂全部正文」意味着视口里每张卡都
+ * 要构建自己的完整载荷；更糟的是流式期间它们每帧都要重建一遍——一张在跑的 bash 卡
+ * 被收起后仍在按帧重渲染上千行输出，屏幕上什么都看不见。
+ *
+ * `open` 类还要再等一帧。一张工具卡的正文可以是 1500 行代码，把它和一个基于时间的
+ * CSS 过渡放在同一帧提交，挂载就吃掉 250ms 过渡里的头 100ms——观感是卡片先瞬间跳到
+ * 大半开，再慢慢补完剩下的。等布局落定后再起跳，整段过渡才跑得完整。
+ *
+ * `instant` 只留给「仍在运行」的卡片：它的正文每个发布帧都在变，跟着过渡再多重渲染
+ * 320ms 才是真正的帧预算杀手；已完成的卡片正文已冻结，走完整过渡没有这笔开销。
+ *
+ * 代价是收起后再展开会丢掉卡内滚动位置，与从没打开过的卡一致。
+ */
+function useLazyExpand(open: boolean, instant = false): { readonly mounted: boolean; readonly expanded: boolean } {
+  const [state, setState] = useState<{ readonly mounted: boolean; readonly expanded: boolean }>(() => ({ mounted: open, expanded: open }));
+  useLayoutEffect(() => {
+    // 运行中的卡片同步挂载/卸载：它没有动画可看（正文刚开始输出时高度本来就接近 0），
+    // 而收起后若为过渡多挂 320ms，这个还在每帧发布的正文就要在看不见的卡里多重渲染
+    // 二十来帧。
+    if (instant) {
+      if (state.mounted !== open || state.expanded !== open) setState({ mounted: open, expanded: open });
+      return;
+    }
+    if (open) {
+      if (state.expanded) return;
+      // 这一帧只把正文挂进去；下一帧才加 `open` 类，过渡因此从已排好的布局起跳。
+      if (!state.mounted) {
+        setState({ mounted: true, expanded: false });
+        return;
+      }
+      if (typeof requestAnimationFrame !== "function") {
+        setState({ mounted: true, expanded: true });
+        return;
+      }
+      const frame = requestAnimationFrame(() => setState({ mounted: true, expanded: true }));
+      return () => cancelAnimationFrame(frame);
+    }
+    if (state.expanded) {
+      setState({ mounted: true, expanded: false });
+      return;
+    }
+    if (!state.mounted) return;
+    const timer = window.setTimeout(() => setState({ mounted: false, expanded: false }), COLLAPSE_UNMOUNT_MS);
+    return () => window.clearTimeout(timer);
+  }, [instant, open, state]);
+  return state;
+}
+
+/**
+ * 一张思考卡。`memo` 是必需的而不是优化：流式期间链尾那条 assistant 行每帧换对
+ * 象，整条链会跟着重渲染，而卡片自己的 `think` 在绝大多数帧里没变。
+ */
+const ThinkCard = memo(function ThinkCard({ preview, full, truncated, open, follow = false, instant = false, onToggle, slot, itemKey }: {
+  preview?: string;
   full: string;
   truncated?: boolean;
   open: boolean;
   follow?: boolean;
-  onToggle: () => void;
+  instant?: boolean;
+  onToggle: (slot: string) => void;
+  slot: string;
   itemKey: string;
 }) {
-  const aria = `Think${preview ? ` · ${preview.slice(0, 48)}` : ""}，${open ? "收起" : "展开"}详情`;
+  const { mounted, expanded } = useLazyExpand(open, instant);
+  // 摘要行是整段思考压成的一行。`trim().replace(/\s+/g, " ")` 要扫一遍全文，放在父
+  // 组件里算意味着每次链重渲染都对每张卡重扫一次。
+  const summary = useMemo(() => preview ?? full.trim().replace(/\s+/g, " "), [full, preview]);
+  const aria = `Think${summary ? ` · ${summary.slice(0, 48)}` : ""}，${open ? "收起" : "展开"}详情`;
+  // `.think-scroll.convo-plain` 是 `white-space: pre-wrap`：短正文仍是单个文本节点
+  // （此前那套 `split("\n")` + `<span><br/>` 只是同样换行铺成几千个 DOM 节点）；长正文
+  // 经 `ChunkedText` 按 64 行分块、块上 `content-visibility: auto`，流式期间每帧只为
+  // 尾部一两个块付布局，而不是整段思考。
+  const body = mounted ? <ChunkedText text={full} /> : null;
   return (
-    <div className={`tl-item${open ? " open" : ""}`} data-kind="think" data-item-key={itemKey}>
-      <button type="button" className="tl-row" aria-expanded={open} aria-label={aria} onClick={onToggle}>
+    <div className={`tl-item${expanded ? " open" : ""}`} data-kind="think" data-item-key={itemKey}>
+      <button type="button" className="tl-row" aria-expanded={open} aria-label={aria} onClick={() => onToggle(slot)}>
         <span className="tl-icon"><Icon name="brain" extra="sm" /></span>
         <span className="tl-name">Think</span>
-        {preview ? (
+        {summary ? (
           <>
             <span className="tl-sep">·</span>
-            <span className="tl-detail">{preview}</span>
+            <span className="tl-detail">{summary}</span>
           </>
         ) : null}
         <Icon name="chevron-d" extra="sm tl-chev" />
@@ -112,30 +182,38 @@ function ThinkCard({ preview, full, truncated, open, follow = false, onToggle, i
         <div className="tl-card-motion-inner">
           <ToolCardScroll follow={follow} className="think-scroll convo-plain">
             {truncated === true ? <TruncationMark /> : null}
-            {full.split("\n").map((line, index) => (
-              <span key={index}>{index > 0 ? <br /> : null}{line}</span>
-            ))}
+            {body}
           </ToolCardScroll>
         </div>
       </div>
     </div>
   );
-}
+});
 
-function ToolItem({ tool, open, onToggle, showDetail = true }: { tool: ToolView; open: boolean; onToggle: () => void; showDetail?: boolean }) {
+/**
+ * 一张工具卡。同样 `memo`：`toolLabel` / `chainItemDetail` / `toolDiffStats` 都要走
+ * 一遍参数与 diff（编辑卡是逐行正则），没有它，链里每张卡每帧都要重算一次。
+ */
+const ToolItem = memo(function ToolItem({ tool, open, onToggle, slot, showDetail = true }: { tool: ToolView; open: boolean; onToggle: (slot: string) => void; slot: string; showDetail?: boolean }) {
+  // 只有「仍在运行」的卡片放弃动画：正文还在逐帧变化，收起过渡期间的重渲染才是开销
+  // 大头。流式期间已完成的卡照样走 250ms 过渡，不再像链级 instant 那样整链硬切。
+  const instant = tool.status === "running";
+  const { mounted, expanded } = useLazyExpand(open, instant);
   const kind = toolKind(tool);
   if (kind === "think") {
     const fields = toolFields(tool);
     const full = jsonString(fields.full) ?? tool.output ?? "";
-    const preview = jsonString(fields.preview) ?? full.trim().replace(/\s+/g, " ");
+    const preview = jsonString(fields.preview);
     return (
       <ThinkCard
         itemKey={tool.toolCallId}
-        preview={preview}
+        slot={slot}
+        {...(preview === undefined ? {} : { preview })}
         full={full}
         {...(tool.truncated === true ? { truncated: true } : {})}
         open={open}
         follow={open && tool.status === "running"}
+        instant={instant}
         onToggle={onToggle}
       />
     );
@@ -149,13 +227,13 @@ function ToolItem({ tool, open, onToggle, showDetail = true }: { tool: ToolView;
   const diffLabel = [diff.add ? `新增 ${diff.add} 行` : "", diff.del ? `删除 ${diff.del} 行` : ""].filter(Boolean).join("，");
   const aria = `${label}${detail ? ` · ${detail}` : ""}${diffLabel ? `，${diffLabel}` : ""}，${statusLabel(tool.status)}，${open ? "收起" : "展开"}详情`;
   return (
-    <div className={`tl-item${open ? " open" : ""}${running ? " is-running" : ""}`} data-kind={kind} data-status={tool.status} data-tool-call-id={tool.toolCallId}>
+    <div className={`tl-item${expanded ? " open" : ""}${running ? " is-running" : ""}`} data-kind={kind} data-status={tool.status} data-tool-call-id={tool.toolCallId}>
       <button
         type="button"
         className={`tl-row${failed ? " is-error" : ""}${running ? " is-running" : ""}`}
         aria-expanded={open}
         aria-label={aria}
-        onClick={onToggle}
+        onClick={() => onToggle(slot)}
       >
         <span className="tl-icon">
           {running ? <span className="spinner" /> : <Icon name={queued ? "clock" : toolIcon(kind)} extra="sm" />}
@@ -178,13 +256,13 @@ function ToolItem({ tool, open, onToggle, showDetail = true }: { tool: ToolView;
       <div className="tl-card">
         <div className="tl-card-motion-inner">
           <div className="tc-body">
-            <ToolBody tool={tool} follow={open && running} />
+            {mounted ? <ToolBody tool={tool} follow={open && running} /> : null}
           </div>
         </div>
       </div>
     </div>
   );
-}
+});
 
 /** 一条工具链里的单个条目，顺序即模型产出顺序。 */
 export type ChainItem =
@@ -257,29 +335,38 @@ export function BatchChain({
   const open = manualOpen ?? (running || liveTail || askOnly || expandAll);
   const itemOpen = (slot: string) => overrides[slot] ?? (slot === activeKey || expandAll || askOnly);
   const bodyId = useId();
-  const toggleItem = (slot: string) => {
-    setOverrides((previous) => ({ ...previous, [slot]: !(previous[slot] ?? (slot === activeKey || expandAll || askOnly)) }));
-  };
+  // 默认展开态取决于「点击那一刻」的 activeKey/expandAll/askOnly，但 handler 必须保
+  // 持同一身份，否则每帧新建的 `() => toggleItem(slot)` 会让每张卡的 memo 全部失效。
+  const itemDefaults = useRef({ activeKey, expandAll, askOnly });
+  itemDefaults.current = { activeKey, expandAll, askOnly };
+  const toggleItem = useCallback((slot: string) => {
+    const defaults = itemDefaults.current;
+    setOverrides((previous) => ({
+      ...previous,
+      [slot]: !(previous[slot] ?? (slot === defaults.activeKey || defaults.expandAll || defaults.askOnly)),
+    }));
+  }, []);
   const toggleOpen = () => setManualOpen(!open);
   if (chain.length === 0) return null;
   const cards: ReactNode[] = chain.map(({ slot, item }) =>
     item.kind === "think" ? (
       <ThinkCard
         key={slot}
+        slot={slot}
         itemKey={item.think.key}
-        preview={item.think.text.trim().replace(/\s+/g, " ")}
         full={item.think.text}
         {...(item.think.truncated === true ? { truncated: true } : {})}
         open={itemOpen(slot)}
         follow={itemOpen(slot) && liveTail && slot === activeKey}
-        onToggle={() => toggleItem(slot)}
+        onToggle={toggleItem}
       />
     ) : (
       <ToolItem
         key={slot}
+        slot={slot}
         tool={item.tool}
         open={itemOpen(slot)}
-        onToggle={() => toggleItem(slot)}
+        onToggle={toggleItem}
         showDetail={showDetail}
       />
     ),
@@ -328,7 +415,10 @@ export function BatchChain({
         ) : null}
       </button>
       <div className="batch-chain" id={bodyId}>
-        <div className="batch-chain-inner">{cards}</div>
+        {/* 仍在跑的链被手动收起时同步卸载全部卡片：链里的运行卡每帧都在发布，动画
+            320ms 只是让看不见的重渲染多烧一段时间。轮次结束的整链折叠不在此列——那时
+            所有工具已完成，正文冻结，链条与卡片都走完整的收起过渡。 */}
+        <div className="batch-chain-inner">{running && !open ? null : cards}</div>
       </div>
     </div>
   );

@@ -8,11 +8,14 @@ import {
   type ConversationMessageItem,
   type ConversationResetBoundaryItem,
   type ConversationRole,
+  type ConversationOpenResult,
+  type ConversationResolvedTarget,
   type ConversationRuntimeEvent,
+  type ConversationStreamEvent,
   type ConversationTranscriptPage,
   type JsonValue,
 } from "./contracts/conversation.js";
-import type { OpaqueCursor } from "./contracts/ids.js";
+import type { AgentId, OpaqueCursor, SessionId } from "./contracts/ids.js";
 
 const utf8Bytes = (text: string): number => new TextEncoder().encode(text).byteLength;
 
@@ -87,6 +90,13 @@ function parseMessageError(value: unknown, path: string): ConversationMessageErr
 function positiveInteger(value: unknown, path: string): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) {
     throw new ContractValidationError("expected a positive safe integer", path);
+  }
+  return value as number;
+}
+
+function nonNegativeInteger(value: unknown, path: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new ContractValidationError("expected a non-negative safe integer", path);
   }
   return value as number;
 }
@@ -315,6 +325,108 @@ export function parseConversationTranscriptPage(value: unknown, path = "$page"):
     page.olderCursor = parseOpaqueConversationCursor(input.olderCursor, `${path}.olderCursor`);
   }
   return page;
+}
+
+function parseConversationResolvedTarget(value: unknown, path: string): ConversationResolvedTarget {
+  const input = record(value, path);
+  const kind = nonEmptyString(input.kind, `${path}.kind`);
+  if (kind === "session") {
+    exactKeys(input, ["kind", "sessionId", "conversationSessionId"], path);
+    const sessionId = boundedId(input.sessionId, `${path}.sessionId`);
+    const conversationSessionId = boundedId(input.conversationSessionId, `${path}.conversationSessionId`);
+    if (conversationSessionId !== sessionId) {
+      throw new ContractValidationError("conversationSessionId must equal sessionId", `${path}.conversationSessionId`);
+    }
+    return {
+      kind,
+      sessionId: sessionId as SessionId,
+      conversationSessionId: conversationSessionId as SessionId,
+    };
+  }
+  if (kind === "agent") {
+    exactKeys(input, ["kind", "parentSessionId", "agentId", "conversationSessionId"], path);
+    return {
+      kind,
+      parentSessionId: boundedId(input.parentSessionId, `${path}.parentSessionId`) as SessionId,
+      agentId: boundedId(input.agentId, `${path}.agentId`) as AgentId,
+      conversationSessionId: boundedId(input.conversationSessionId, `${path}.conversationSessionId`) as SessionId,
+    };
+  }
+  throw new ContractValidationError("unsupported conversation target kind", `${path}.kind`);
+}
+
+function parseConversationStreamEvent(value: unknown, path: string): ConversationStreamEvent {
+  const input = record(value, path);
+  exactKeys(input, ["streamSeq", "eventSeq", "stateVersion", "occurredAt", "update"], path);
+  return {
+    streamSeq: positiveInteger(input.streamSeq, `${path}.streamSeq`),
+    eventSeq: positiveInteger(input.eventSeq, `${path}.eventSeq`),
+    stateVersion: nonNegativeInteger(input.stateVersion, `${path}.stateVersion`),
+    occurredAt: nonEmptyString(input.occurredAt, `${path}.occurredAt`),
+    update: parseConversationRuntimeEvent(input.update, `${path}.update`),
+  };
+}
+
+export function parseConversationOpenResult(value: unknown, path = "$result"): ConversationOpenResult {
+  const input = record(value, path);
+  exactKeys(input, ["target", "page", "live"], path);
+  const target = parseConversationResolvedTarget(input.target, `${path}.target`);
+  const page = parseConversationTranscriptPage(input.page, `${path}.page`);
+  if (page.sessionId !== target.conversationSessionId) {
+    throw new ContractValidationError("page session does not match resolved target", `${path}.page.sessionId`);
+  }
+  const liveInput = record(input.live, `${path}.live`);
+  const status = nonEmptyString(liveInput.status, `${path}.live.status`);
+  const watermark = nonNegativeInteger(liveInput.watermark, `${path}.live.watermark`);
+  if (!Array.isArray(liveInput.events)) {
+    throw new ContractValidationError("expected an array", `${path}.live.events`);
+  }
+  if (status === "complete") {
+    exactKeys(liveInput, ["status", "watermark", "events"], `${path}.live`);
+    const events = liveInput.events.map((event, index) =>
+      parseConversationStreamEvent(event, `${path}.live.events[${index}]`),
+    );
+    if (events.length > CONVERSATION_LIMITS.LIVE_REPLAY_MAX_EVENTS) {
+      throw new ContractValidationError(
+        `live replay must contain at most ${CONVERSATION_LIMITS.LIVE_REPLAY_MAX_EVENTS} events`,
+        `${path}.live.events`,
+      );
+    }
+    if (utf8Bytes(JSON.stringify(liveInput)) > CONVERSATION_LIMITS.LIVE_REPLAY_MAX_BYTES) {
+      throw new ContractValidationError(
+        `live replay exceeds ${CONVERSATION_LIMITS.LIVE_REPLAY_MAX_BYTES} UTF-8 bytes`,
+        `${path}.live`,
+      );
+    }
+    let previous = 0;
+    for (const event of events) {
+      if (event.streamSeq <= previous || event.streamSeq > watermark) {
+        throw new ContractValidationError("stream sequences must increase and not exceed watermark", `${path}.live.events`);
+      }
+      if (event.update.sessionId !== target.conversationSessionId) {
+        throw new ContractValidationError("live event session does not match resolved target", `${path}.live.events`);
+      }
+      previous = event.streamSeq;
+    }
+    return { target, page, live: { status, watermark, events } };
+  }
+  if (status === "resyncRequired") {
+    exactKeys(liveInput, ["status", "watermark", "events", "reason"], `${path}.live`);
+    if (liveInput.events.length !== 0) {
+      throw new ContractValidationError("resyncRequired replay must not contain partial events", `${path}.live.events`);
+    }
+    return {
+      target,
+      page,
+      live: {
+        status,
+        watermark,
+        events: [],
+        reason: nonEmptyString(liveInput.reason, `${path}.live.reason`),
+      },
+    };
+  }
+  throw new ContractValidationError("unsupported live replay status", `${path}.live.status`);
 }
 
 export function parseSessionTranscriptReadLimit(value: unknown, path: string): number {

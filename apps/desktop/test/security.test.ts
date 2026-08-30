@@ -235,6 +235,25 @@ function validEvent(): ClientEvent {
   return { kind: "state.changed", ...EVENT_BASE } as ClientEvent;
 }
 
+function validConversationEvent(): ClientEvent {
+  return {
+    kind: "conversation.changed",
+    ...EVENT_BASE,
+    runtimeEpoch: 1,
+    sessionId: "session-1",
+    streamSeq: 1,
+    eventSeq: 1,
+    update: {
+      kind: "conversation.message.started",
+      sessionId: "session-1",
+      turnId: "turn-1",
+      messageId: "message-1",
+      role: "assistant",
+      createdAt: "2026-08-29T00:00:00.000Z",
+    },
+  } as ClientEvent;
+}
+
 // ---- Main IPC surface ----------------------------------------------------
 
 describe("registerDesktopIpc: fixed channel surface", () => {
@@ -432,6 +451,18 @@ describe("registerDesktopIpc: window-bound event forwarding and teardown", () =>
     assert.ok(registered);
     registered.listener(validEvent());
     assert.deepEqual(sender.sent, [{ channel: DESKTOP_IPC_CHANNELS.event, payload: validEvent() }]);
+    handle.dispose();
+  });
+
+  test("conversation.changed preserves streamSeq across Desktop IPC", async () => {
+    const { invoke, facade, handle } = registerIpc();
+    const sender = makeSender(1);
+    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
+    const registered = facade.subscribeListeners[0];
+    assert.ok(registered);
+    const event = validConversationEvent();
+    assert.doesNotThrow(() => registered.listener(event));
+    assert.deepEqual(sender.sent, [{ channel: DESKTOP_IPC_CHANNELS.event, payload: event }]);
     handle.dispose();
   });
 

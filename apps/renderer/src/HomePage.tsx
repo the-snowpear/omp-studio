@@ -469,12 +469,14 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
   ], [t]);
   const modelLabel = (id: string) => (id === OTHER_MODEL_ID ? t("home.other") : id);
   const [hover, setHover] = useState<{ index: number; x: number; y: number; source: "chart" | "cell" } | null>(null);
+  const [chartTipPos, setChartTipPos] = useState({ left: 0, top: 0 });
   const [cellTip, setCellTip] = useState<{ ts: number } | null>(null);
   const [cellTipPos, setCellTipPos] = useState({ left: 0, top: 0 });
   const [dash, setDash] = useState<{ phase: "idle" | "opening" | "opened" | "error"; message?: string }>({ phase: "idle" });
   const dashTimer = useRef(0);
   const cardRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const chartTipRef = useRef<HTMLDivElement>(null);
   const calRef = useRef<HTMLDivElement>(null);
   const cellTipRef = useRef<HTMLDivElement>(null);
   const today = startOfDay(Date.now());
@@ -776,6 +778,28 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
   }, [cellTip, cellTipPos.left, cellTipPos.top]);
 
   const hoverPoint = hover ? series[hover.index] : undefined;
+  useLayoutEffect(() => {
+    if (hover?.source !== "chart" || !hoverPoint || !chartTipRef.current || !cardRef.current || !svgRef.current) return;
+    const card = cardRef.current;
+    const svgRect = svgRef.current.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const tip = chartTipRef.current;
+    const tipWidth = tip.offsetWidth || 168;
+    const tipHeight = tip.offsetHeight || 64;
+    const cardWidth = card.clientWidth || cardRect.width;
+    const cardHeight = card.clientHeight || cardRect.height;
+    const edge = 8;
+    const gap = 12;
+    const fixedTop = 180;
+    const pointX = svgRect.left - cardRect.left + hover.x * (svgRect.width / Math.max(chartWidth, 1));
+    const roomRight = cardWidth - edge - pointX;
+    const roomLeft = pointX - edge;
+    const placeRight = roomRight >= tipWidth + gap || roomRight >= roomLeft;
+    const desiredLeft = placeRight ? pointX + gap : pointX - gap - tipWidth;
+    const left = Math.max(edge, Math.min(cardWidth - tipWidth - edge, desiredLeft));
+    const top = Math.max(edge, Math.min(cardHeight - tipHeight - edge, fixedTop));
+    if (chartTipPos.left !== left || chartTipPos.top !== top) setChartTipPos({ left, top });
+  }, [chartTipPos.left, chartTipPos.top, chartWidth, hover, hoverPoint, modelIds, resolvedLanguage]);
   const chartHighlightDays = hover?.source === "chart" && hoverPoint
     ? new Set(daysFromChartPoint(hoverPoint))
     : null;
@@ -925,7 +949,7 @@ function TokenUsageCard({ client }: { client?: StudioClient }) {
         <rect className="tk-hit" x={0} y={0} width={Math.max(chartWidth, 1)} height={vbH} />
       </svg>
       {!morphing && hover?.source === "chart" && hoverPoint ? (
-        <div className="tk-tip show" style={{ left: Math.max(8, Math.min((cardRef.current?.clientWidth ?? 320) - 168, (hover?.x ?? 0) - 60)), top: 180 }}>
+        <div ref={chartTipRef} className="tk-tip show" style={{ left: chartTipPos.left, top: chartTipPos.top }}>
           <b>{hoverLabel}</b>
           {modelIds.map((id) => (
             <span key={id} className="tk-tip-row">

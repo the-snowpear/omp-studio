@@ -47,8 +47,6 @@ import type {
   CommandName,
   CommandRequestId,
   CommandState,
-  ConversationTranscriptPage,
-  ConversationTranscriptReadPage,
   EventCursor,
   IdempotencyKey,
   RuntimeConnection,
@@ -58,14 +56,6 @@ import type {
   SurfaceCapabilities,
 } from "@omp-studio/client-contract";
 import type { CapabilityManifest, OperatorStateSnapshot } from "@omp-studio/studio-protocol";
-
-import {
-  conversationHintFromCursor,
-  createInitialConversationState,
-  type ConversationIdentity,
-  type ConversationState,
-} from "./conversation-state.js";
-import { reduceConversationState } from "./conversation-reducer.js";
 
 /** Renderer-owned area; the client reducer never reads or writes it. */
 export type ClientUiState = Readonly<Record<string, unknown>>;
@@ -118,7 +108,6 @@ export interface ClientState {
   readonly connection: ClientConnectionState;
   readonly entities: ClientEntitiesState;
   readonly interaction: ClientInteractionState;
-  readonly conversation: ConversationState;
   readonly commands: Readonly<Record<CommandRequestId, CommandState>>;
   readonly ui: ClientUiState;
 }
@@ -144,36 +133,7 @@ export type ClientAction =
       readonly error: ClientError;
       readonly occurredAt: string;
     }
-  | { readonly type: "close" }
-  | {
-      readonly type: "conversation.beginHydrate";
-      readonly identity: ConversationIdentity;
-    }
-  | {
-      readonly type: "conversation.hydrate";
-      readonly page: ConversationTranscriptPage;
-      readonly generation: number;
-    }
-  | {
-      readonly type: "conversation.prepend";
-      readonly page: ConversationTranscriptPage;
-      readonly generation: number;
-    }
-  | {
-      readonly type: "conversation.hydrateArchive";
-      readonly page: ConversationTranscriptReadPage;
-      readonly generation: number;
-    }
-  | {
-      readonly type: "conversation.prependArchive";
-      readonly page: ConversationTranscriptReadPage;
-      readonly generation: number;
-    }
-  | {
-      readonly type: "conversation.error";
-      readonly error: ClientError;
-      readonly generation: number;
-    };
+  | { readonly type: "close" };
 
 const EMPTY_UI: ClientUiState = Object.freeze({});
 
@@ -197,7 +157,6 @@ export function createInitialClientState(ui: ClientUiState = EMPTY_UI): ClientSt
     },
     entities: { snapshot: null, telemetry: null, btw: null, residents: null },
     interaction: { pending: null },
-    conversation: createInitialConversationState(),
     commands: {},
     ui,
   };
@@ -439,6 +398,13 @@ function markPendingOutcomeUnknown(
   return changed ? next : commands;
 }
 
+/** Workspace commands are handled by the Host workspace adapter, not by the
+ * Runtime session. A workspace switch can therefore change the Runtime epoch
+ * while `workspace.open`/`workspace.pick` is still completing. */
+function preserveWorkspaceCommand(command: CommandState): boolean {
+  return command.commandName === "workspace.open" || command.commandName === "workspace.pick";
+}
+
 export function reduceClientState(state: ClientState, action: ClientAction): ClientState {
   const next = reduceClientStateCore(state, action);
   if (next.commands === state.commands) return next;
@@ -460,59 +426,6 @@ function reduceClientStateCore(state: ClientState, action: ClientAction): Client
       return state.connection.phase === "closed"
         ? state
         : { ...state, connection: { ...state.connection, phase: "closed" } };
-    case "conversation.beginHydrate":
-      return {
-        ...state,
-        conversation: reduceConversationState(state.conversation, {
-          type: "beginHydrate",
-          identity: action.identity,
-        }),
-      };
-    case "conversation.hydrate":
-      return {
-        ...state,
-        conversation: reduceConversationState(state.conversation, {
-          type: "hydrate",
-          page: action.page,
-          generation: action.generation,
-        }),
-      };
-    case "conversation.prepend":
-      return {
-        ...state,
-        conversation: reduceConversationState(state.conversation, {
-          type: "prepend",
-          page: action.page,
-          generation: action.generation,
-        }),
-      };
-    case "conversation.hydrateArchive":
-      return {
-        ...state,
-        conversation: reduceConversationState(state.conversation, {
-          type: "hydrateArchive",
-          page: action.page,
-          generation: action.generation,
-        }),
-      };
-    case "conversation.prependArchive":
-      return {
-        ...state,
-        conversation: reduceConversationState(state.conversation, {
-          type: "prependArchive",
-          page: action.page,
-          generation: action.generation,
-        }),
-      };
-    case "conversation.error":
-      return {
-        ...state,
-        conversation: reduceConversationState(state.conversation, {
-          type: "error",
-          error: action.error,
-          generation: action.generation,
-        }),
-      };
     default: {
       const _exhaustive: never = action;
       return state;
@@ -547,21 +460,6 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
   // (rule 1.4.5); when the Runtime has no pending, the old Client pending is
   // cleared (rule 1.4.6).
   const interaction = { pending: bootstrap.pendingInteraction ?? null };
-  const previousSession = state.entities.snapshot?.sessionId;
-  const nextSession = bootstrap.snapshot?.sessionId;
-  const sessionChanged = previousSession !== undefined && nextSession !== undefined && previousSession !== nextSession;
-  const epochChanged =
-    state.connection.runtimeEpoch !== null &&
-    bootstrap.runtime.runtimeEpoch !== undefined &&
-    state.connection.runtimeEpoch !== bootstrap.runtime.runtimeEpoch;
-  const conversation =
-    sessionChanged || epochChanged
-      ? conversationHintFromCursor(bootstrap.messagesCursor)
-      : state.conversation.headCursor === undefined && bootstrap.messagesCursor !== undefined
-        ? { ...state.conversation, headCursor: bootstrap.messagesCursor }
-        : state.conversation.identity === undefined
-          ? conversationHintFromCursor(bootstrap.messagesCursor)
-          : state.conversation;
   return {
     ...state,
     connection,
@@ -572,7 +470,6 @@ function reduceBootstrap(state: ClientState, bootstrap: ClientBootstrap, occurre
       residents: bootstrap.residents ?? null,
     },
     interaction,
-    conversation,
     commands,
   };
 }
@@ -612,9 +509,10 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
             state.commands,
             "runtime epoch changed; outcome unknown",
             event.occurredAt,
-            (command) => command.commandName === "session.resume" || command.commandName === "session.create",
+            (command) => preserveWorkspaceCommand(command)
+              || command.commandName === "session.resume"
+              || command.commandName === "session.create",
           ),
-          conversation: reduceConversationState(state.conversation, { type: "clear" }),
         };
       }
     } else {
@@ -644,7 +542,6 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
           resyncRequired: true,
           resyncReason: `cursor gap at ${event.cursor}`,
         },
-        conversation: reduceConversationState(state.conversation, { type: "resync" }),
       };
     }
   }
@@ -700,19 +597,13 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
           resyncReason: event.reason,
         },
         entities: { ...state.entities, telemetry: null, btw: null },
-        conversation: reduceConversationState(state.conversation, { type: "resync" }),
       };
-    case "conversation.changed": {
-      const snapshot = state.entities.snapshot;
-      const applyToMain = snapshot !== null && event.sessionId === snapshot.sessionId;
-      return {
-        ...state,
-        connection: advanceConnection(state.connection, event),
-        conversation: applyToMain
-          ? reduceConversationState(state.conversation, { type: "live", event })
-          : state.conversation,
-      };
-    }
+    case "conversation.changed":
+      // Conversation payloads are consumed by the bounded, target-scoped
+      // renderer store. The global client reducer advances transport identity
+      // only; retaining full transcripts here duplicated memory and woke every
+      // shell listener for each token.
+      return { ...state, connection: advanceConnection(state.connection, event) };
     case "btw.changed": {
       if (state.entities.snapshot?.sessionId !== event.sessionId) {
         // Same global-cursor caveat as telemetry: consume the cursor so the
@@ -836,9 +727,6 @@ function reduceSnapshot(state: ClientState, event: Extract<ClientEvent, { readon
     interaction: {
       pending: pendingAfterSnapshot(state.interaction.pending, snapshot, sessionChanged),
     },
-    conversation: sessionChanged
-      ? reduceConversationState(state.conversation, { type: "clear" })
-      : state.conversation,
   };
 }
 
@@ -1003,13 +891,11 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
       commands,
       "runtime changed; outcome unknown",
       event.occurredAt,
-      identityChanged && !lost && connection.status === "connected"
-        ? (command) => command.commandName === "session.resume" || command.commandName === "session.create"
-        : undefined,
+      (command) => preserveWorkspaceCommand(command)
+        || (identityChanged && !lost && connection.status === "connected"
+          && (command.commandName === "session.resume" || command.commandName === "session.create")),
     );
   }
-  const conversation =
-    identityChanged || lost ? reduceConversationState(state.conversation, { type: "clear" }) : state.conversation;
   const interaction = identityChanged || lost ? { pending: null } : state.interaction;
   const advanced = advanceConnection(state.connection, event);
   return {
@@ -1025,7 +911,6 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
       : {}),
     interaction,
     commands,
-    conversation,
   };
 }
 

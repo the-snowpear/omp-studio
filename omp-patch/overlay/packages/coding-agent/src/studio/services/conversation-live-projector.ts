@@ -22,7 +22,14 @@ import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversa
 
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
 export const CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD = 64;
-export const CONVERSATION_LIVE_QUEUE_LIMIT = 128;
+/**
+ * Unsent tool-output characters that force a flush ahead of the coalesce timer.
+ * Larger than the text-delta threshold on purpose: tool output is the bulk
+ * producer (build logs, test runs), so the buffer earns its keep by batching,
+ * while this bound still keeps one event well under `TEXT_BLOCK_MAX_BYTES`.
+ */
+export const CONVERSATION_LIVE_TOOL_FLUSH_CHARS = 4 * 1024;
+export const CONVERSATION_LIVE_STATE_LIMIT = 256;
 
 export interface ConversationLiveClock {
 	nowMs(): number;
@@ -47,7 +54,7 @@ export interface ConversationLiveProjectorOptions {
 	clock?: ConversationLiveClock;
 	coalesceIntervalMs?: number;
 	coalesceCharThreshold?: number;
-	queueLimit?: number;
+	toolFlushCharThreshold?: number;
 	onDiagnostic?: (message: string) => void;
 }
 
@@ -62,13 +69,25 @@ type PendingDelta = {
 	delta: string;
 };
 
+/** Buffered tool output: the full text lives in `#toolOutput`, so a pending
+ *  entry only records which tool is dirty and whether it hit its cap. */
+type PendingToolOutput = {
+	turnId: string;
+	truncated: boolean;
+};
+
+type SentToolOutput = {
+	text: string;
+	truncated: boolean;
+};
+
 type OpenMessage = {
 	messageId: string;
 	turnId: string;
 	role: ConversationRole;
 	createdAt: string;
 	parentId: string | null;
-	blocks: Map<string, { blockType: "text" | "thinking"; text: string }>;
+	blocks: Map<string, { blockType: "text" | "thinking"; text: string; bytes: number; truncated: boolean }>;
 	toolCalls: Map<string, Extract<ConversationContentBlock, { type: "toolCall" }>>;
 	completed: boolean;
 };
@@ -147,10 +166,6 @@ function userText(message: AgentMessage): string {
 		.join("");
 }
 
-function isControlEvent(kind: ConversationRuntimeEvent["kind"]): boolean {
-	return kind !== "conversation.message.delta" && kind !== "conversation.tool.updated";
-}
-
 function toolText(result: unknown): {
 	text: string;
 	isError: boolean;
@@ -189,33 +204,32 @@ function toolText(result: unknown): {
 	return { text: "", isError, ...extra, ...truncated };
 }
 
-function sameDeltaIdentity(
-	left: Extract<ConversationRuntimeEvent, { kind: "conversation.message.delta" }>,
-	right: Extract<ConversationRuntimeEvent, { kind: "conversation.message.delta" }>,
-): boolean {
-	return (
-		left.sessionId === right.sessionId &&
-		left.turnId === right.turnId &&
-		left.messageId === right.messageId &&
-		left.blockId === right.blockId &&
-		left.blockType === right.blockType
-	);
-}
-
 /**
  * Projects `AgentSession.subscribe()` events into contract live events.
  * Does not wrap StudioEventEnvelope; StateProjector owns eventSeq/stateVersion.
+ *
+ * Flow control is deliberately synchronous: a parsed event is handed straight to
+ * the listeners, so a slow carrier back-pressures the Runtime instead of letting
+ * an unbounded queue grow (and instead of a queue that would have to choose
+ * which events to drop). The only batching is the coalesce buffer — per text
+ * block in `#pending`, per tool in `#toolPending` — which is lossless: the
+ * accumulated text lives in `#openMessages` / `#toolOutput` and a flush emits
+ * exactly what the client has not been told yet.
  */
 export class ConversationLiveProjector {
 	readonly #options: ConversationLiveProjectorOptions;
 	readonly #clock: ConversationLiveClock;
 	readonly #listeners = new Set<LiveListener>();
-	readonly #queue: ConversationRuntimeEvent[] = [];
 	readonly #pending = new Map<string, PendingDelta>();
+	readonly #toolPending = new Map<string, PendingToolOutput>();
 	readonly #openMessages = new Map<string, OpenMessage>();
 	readonly #completedMessageIds = new Set<string>();
 	readonly #completedToolIds = new Set<string>();
 	readonly #toolOutput = new Map<string, string>();
+	/** Full tool state the client has actually been sent. `append` is decided
+	 *  against this, never against `#toolOutput`, so a coalesced run of partials
+	 *  can never assume a prefix the client never received. */
+	readonly #toolSent = new Map<string, SentToolOutput>();
 	readonly #toolOwners = new Map<string, string>();
 	#sessionId: string;
 	#runtimeEpoch: number;
@@ -269,8 +283,7 @@ export class ConversationLiveProjector {
 	}
 
 	flush(): void {
-		this.#flushPendingDeltas();
-		this.#drain();
+		this.#flushPending();
 	}
 
 	dispose(): void {
@@ -278,7 +291,7 @@ export class ConversationLiveProjector {
 		this.#unsubscribe = undefined;
 		this.#clearCoalesceTimer();
 		this.#pending.clear();
-		this.#queue.length = 0;
+		this.#toolPending.clear();
 		this.#clearLiveState();
 		this.#listeners.clear();
 		this.#disposed = true;
@@ -359,15 +372,17 @@ export class ConversationLiveProjector {
 			this.#openAssistantId = undefined;
 			return;
 		}
+		this.#clearTerminalTurnState();
 		this.#turnSeq += 1;
 		this.#turnId = `turn-${this.#turnSeq}`;
 		this.#turnAborted = false;
 		this.#turnCompleted = false;
+		this.#lastAssistantId = undefined;
 		this.#openAssistantId = undefined;
 	}
 
 	#onAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
-		this.#flushPendingDeltas();
+		this.#flushPending();
 		const turnId = this.#ensureTurnId();
 		if (event.isTerminal === false) {
 			// The Runtime has already scheduled another continuation. Keep the
@@ -384,6 +399,7 @@ export class ConversationLiveProjector {
 		}
 		this.#turnCompleted = true;
 		this.#openAssistantId = undefined;
+		this.#clearTerminalTurnState();
 	}
 
 	#onMessageStart(message: AgentMessage): void {
@@ -407,7 +423,7 @@ export class ConversationLiveProjector {
 			toolCalls: new Map(),
 			completed: false,
 		};
-		this.#openMessages.set(messageId, open);
+		this.#rememberBoundedMap(this.#openMessages, messageId, open);
 		if (role === "assistant") this.#openAssistantId = messageId;
 		this.#emitParsed({
 			kind: "conversation.message.started",
@@ -513,40 +529,41 @@ export class ConversationLiveProjector {
 		if (this.#turnAborted) return;
 		const toolCallId = publicToolCallId(event.toolCallId, "").id;
 		if (toolCallId.length === 0 || this.#completedToolIds.has(toolCallId)) return;
-		this.#flushPendingDeltas();
 		const extracted = toolText(event.partialResult);
 		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-		const previous = this.#toolOutput.get(toolCallId);
-		let updateMode: "append" | "replace" = "replace";
-		let output = sanitized.text;
-		if (previous !== undefined && sanitized.text.startsWith(previous) && sanitized.text.length > previous.length) {
-			updateMode = "append";
-			output = sanitized.text.slice(previous.length);
-		}
-		this.#toolOutput.set(toolCallId, sanitized.text);
 		const truncated = sanitized.truncated || extracted.truncated === true;
-		if (output.length === 0 && !truncated) return;
-		const updated: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> = {
-			kind: "conversation.tool.updated",
-			sessionId: this.#sessionId,
-			turnId: this.#ensureTurnId(),
-			toolCallId,
-			updateMode,
-		};
-		if (output.length > 0) updated.output = output;
-		if (truncated) updated.truncated = true;
-		this.#emitParsed(updated);
+		if (sanitized.text.length === 0 && !truncated) return;
+		const previous = this.#toolOutput.get(toolCallId);
+		const pending = this.#toolPending.get(toolCallId);
+		const sent = this.#toolSent.get(toolCallId);
+		if (previous === sanitized.text && (!truncated || pending?.truncated === true || sent?.truncated === true)) return;
+		this.#rememberBoundedMap(this.#toolOutput, toolCallId, sanitized.text);
+		// Buffer rather than emit. A streaming tool (build log, test run) produces
+		// far more updates than a frame can show, and a partial result that is not
+		// a prefix extension of the last one has to ship the whole retained text —
+		// up to TEXT_BLOCK_MAX_BYTES — on every single update. Buffering is
+		// lossless because the full text stays in `#toolOutput`; the flush sends
+		// whatever the client is still missing.
+		this.#rememberBoundedMap(this.#toolPending, toolCallId, {
+			turnId: pending?.turnId ?? this.#ensureTurnId(),
+			truncated: truncated || pending?.truncated === true,
+		});
+		const sentText = sent?.text ?? "";
+		const unsent = sanitized.text.startsWith(sentText) ? sanitized.text.length - sentText.length : sanitized.text.length;
+		const threshold = this.#options.toolFlushCharThreshold ?? CONVERSATION_LIVE_TOOL_FLUSH_CHARS;
+		if (unsent >= threshold) this.#flushPendingTool(toolCallId);
+		else this.#scheduleCoalesce();
 	}
 
 	#onToolEnd(event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>): void {
-		this.#flushPendingDeltas();
+		this.#flushPending();
 		const toolCallId = publicToolCallId(event.toolCallId, "").id;
 		if (toolCallId.length === 0) {
 			this.#diagnostic("dropped tool end with empty toolCallId");
 			return;
 		}
 		if (this.#completedToolIds.has(toolCallId)) return;
-		this.#completedToolIds.add(toolCallId);
+		this.#rememberCompletedTool(toolCallId);
 		const extracted = toolText(event.result);
 		const isError = event.isError === true || extracted.isError || event.result instanceof Error;
 		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
@@ -561,6 +578,10 @@ export class ConversationLiveProjector {
 		if (sanitized.truncated) result.truncated = true;
 		if (extracted.data !== undefined) result.data = extracted.data;
 		if (extracted.truncated === true) result.truncated = true;
+		this.#toolOutput.delete(toolCallId);
+		this.#toolSent.delete(toolCallId);
+		this.#toolPending.delete(toolCallId);
+		this.#toolOwners.delete(toolCallId);
 		this.#emitParsed({
 			kind: "conversation.tool.completed",
 			sessionId: this.#sessionId,
@@ -582,7 +603,7 @@ export class ConversationLiveProjector {
 	}
 
 	#onCompactionEnd(event: Extract<AgentSessionEvent, { type: "auto_compaction_end" }>): void {
-		this.#flushPendingDeltas();
+		this.#flushPending();
 		const aborted = event.aborted === true;
 		const hasPersistedAuthority =
 			!aborted && !event.skipped && event.result !== undefined && event.result.summary.length > 0;
@@ -665,12 +686,18 @@ export class ConversationLiveProjector {
 	#appendDelta(open: OpenMessage, contentIndex: number, blockType: "text" | "thinking", delta: string): void {
 		if (delta.length === 0) return;
 		const blockId = this.#blockId(open.messageId, contentIndex, blockType);
-		const existing = open.blocks.get(blockId) ?? { blockType, text: "" };
-		existing.text += delta;
+		const existing = open.blocks.get(blockId) ?? { blockType, text: "", bytes: 0, truncated: false };
+		if (existing.truncated) return;
+		const remaining = CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES - existing.bytes;
+		const accepted = sanitizePublicText(delta, remaining, "");
+		existing.text += accepted.text;
+		existing.bytes += utf8ByteLength(accepted.text);
+		existing.truncated = accepted.truncated;
 		open.blocks.set(blockId, existing);
+		if (accepted.text.length === 0) return;
 		const pendingKey = `${open.messageId}:${blockId}`;
 		const pending = this.#pending.get(pendingKey);
-		if (pending !== undefined) pending.delta += delta;
+		if (pending !== undefined) pending.delta += accepted.text;
 		else {
 			this.#pending.set(pendingKey, {
 				sessionId: this.#sessionId,
@@ -678,7 +705,7 @@ export class ConversationLiveProjector {
 				messageId: open.messageId,
 				blockId,
 				blockType,
-				delta,
+				delta: accepted.text,
 			});
 		}
 		const threshold = this.#options.coalesceCharThreshold ?? CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD;
@@ -693,7 +720,12 @@ export class ConversationLiveProjector {
 			if (text.length > 0) {
 				const blockId = this.#blockId(open.messageId, 0, "text");
 				const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, { blockType: "text", text: sanitized.text });
+				open.blocks.set(blockId, {
+					blockType: "text",
+					text: sanitized.text,
+					bytes: utf8ByteLength(sanitized.text),
+					truncated: sanitized.truncated,
+				});
 			}
 			return;
 		}
@@ -702,13 +734,23 @@ export class ConversationLiveProjector {
 			if (block.type === "text") {
 				const blockId = this.#blockId(open.messageId, index, "text");
 				const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, { blockType: "text", text: sanitized.text });
+				open.blocks.set(blockId, {
+					blockType: "text",
+					text: sanitized.text,
+					bytes: utf8ByteLength(sanitized.text),
+					truncated: sanitized.truncated,
+				});
 				return;
 			}
 			if (block.type === "thinking") {
 				const blockId = this.#blockId(open.messageId, index, "thinking");
 				const sanitized = sanitizePublicText(block.thinking, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-				open.blocks.set(blockId, { blockType: "thinking", text: sanitized.text });
+				open.blocks.set(blockId, {
+					blockType: "thinking",
+					text: sanitized.text,
+					bytes: utf8ByteLength(sanitized.text),
+					truncated: sanitized.truncated,
+				});
 				return;
 			}
 			if (block.type === "toolCall") this.#recordToolCall(open, block);
@@ -721,7 +763,7 @@ export class ConversationLiveProjector {
 			const sanitized = sanitizePublicText(block.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 			if (sanitized.text.length === 0 && !sanitized.truncated) continue;
 			const item: ConversationContentBlock = { type: block.blockType, text: sanitized.text };
-			if (sanitized.truncated) item.truncated = true;
+			if (block.truncated || sanitized.truncated) item.truncated = true;
 			content.push(item);
 		}
 		for (const toolCall of open.toolCalls.values()) content.push(toolCall);
@@ -777,7 +819,7 @@ export class ConversationLiveProjector {
 		if (args.arguments !== undefined) block.arguments = args.arguments;
 		if (args.truncated || publicId.truncated) block.truncated = true;
 		open.toolCalls.set(publicId.id, block);
-		this.#toolOwners.set(publicId.id, open.messageId);
+		this.#rememberBoundedMap(this.#toolOwners, publicId.id, open.messageId);
 		if (open.role === "assistant") this.#lastAssistantId = open.messageId;
 	}
 
@@ -788,7 +830,7 @@ export class ConversationLiveProjector {
 		toolName: string;
 		args: unknown;
 	}): boolean {
-		this.#flushPendingDeltas();
+		this.#flushPending();
 		const publicId = publicToolCallId(input.toolCallId, "");
 		if (publicId.id.length === 0) {
 			this.#diagnostic("dropped tool start with empty toolCallId");
@@ -811,17 +853,16 @@ export class ConversationLiveProjector {
 			startedAt: this.#clock.nowIso(),
 		};
 		if (args.arguments !== undefined) started.arguments = args.arguments;
-		this.#toolOwners.set(publicId.id, input.messageId);
+		this.#rememberBoundedMap(this.#toolOwners, publicId.id, input.messageId);
 		this.#lastAssistantId = input.messageId;
 		this.#emitParsed(started);
 		return true;
 	}
 
 	#completeMessage(open: OpenMessage, message?: AgentMessage, error?: ConversationMessageError): void {
-		this.#flushPendingDeltas();
+		this.#flushPending();
 		if (open.completed || this.#completedMessageIds.has(open.messageId)) return;
 		open.completed = true;
-		this.#completedMessageIds.add(open.messageId);
 		const content =
 			message !== undefined ? this.#contentFromMessage(open, message) : this.#contentFromLiveBuffers(open);
 		const item: ConversationMessageItem = {
@@ -834,6 +875,9 @@ export class ConversationLiveProjector {
 		};
 		this.#lastItemId = open.messageId;
 		if (open.role === "assistant") this.#lastAssistantId = open.messageId;
+		open.blocks.clear();
+		open.toolCalls.clear();
+		this.#rememberCompletedMessage(open);
 		this.#emitParsed({
 			kind: "conversation.message.completed",
 			sessionId: this.#sessionId,
@@ -842,6 +886,52 @@ export class ConversationLiveProjector {
 			item,
 			...(error === undefined ? {} : { error }),
 		});
+	}
+
+	#rememberCompletedMessage(open: OpenMessage): void {
+		this.#completedMessageIds.delete(open.messageId);
+		this.#completedMessageIds.add(open.messageId);
+		while (this.#completedMessageIds.size > CONVERSATION_LIVE_STATE_LIMIT) {
+			const oldest = this.#completedMessageIds.values().next().value as string | undefined;
+			if (oldest === undefined) break;
+			this.#completedMessageIds.delete(oldest);
+			const stale = this.#openMessages.get(oldest);
+			if (stale?.completed) this.#openMessages.delete(oldest);
+		}
+	}
+
+	#rememberCompletedTool(toolCallId: string): void {
+		this.#completedToolIds.delete(toolCallId);
+		this.#completedToolIds.add(toolCallId);
+		while (this.#completedToolIds.size > CONVERSATION_LIVE_STATE_LIMIT) {
+			const oldest = this.#completedToolIds.values().next().value as string | undefined;
+			if (oldest === undefined) break;
+			this.#completedToolIds.delete(oldest);
+		}
+	}
+
+	#rememberBoundedMap<K, V>(map: Map<K, V>, key: K, value: V): void {
+		map.delete(key);
+		map.set(key, value);
+		while (map.size > CONVERSATION_LIVE_STATE_LIMIT) {
+			const oldest = map.keys().next().value as K | undefined;
+			if (oldest === undefined) break;
+			map.delete(oldest);
+		}
+	}
+
+	#clearTerminalTurnState(): void {
+		this.#clearCoalesceTimer();
+		if (this.#turnId !== undefined) {
+			for (const [messageId, message] of this.#openMessages) {
+				if (message.turnId === this.#turnId && !message.completed) this.#openMessages.delete(messageId);
+			}
+		}
+		this.#pending.clear();
+		this.#toolPending.clear();
+		this.#toolOutput.clear();
+		this.#toolSent.clear();
+		this.#toolOwners.clear();
 	}
 
 	#blockId(messageId: string, contentIndex: number, blockType: "text" | "thinking"): string {
@@ -866,8 +956,7 @@ export class ConversationLiveProjector {
 		this.#coalesceTimer = this.#clock.setTimer(() => {
 			this.#coalesceTimer = undefined;
 			if (this.#disposed || generation !== this.#generation) return;
-			this.#flushPendingDeltas();
-			this.#drain();
+			this.#flushPending();
 		}, delay);
 	}
 
@@ -877,9 +966,54 @@ export class ConversationLiveProjector {
 		this.#coalesceTimer = undefined;
 	}
 
+	/** Everything buffered, in wire order: text deltas first, then tool output. */
+	#flushPending(): void {
+		this.#flushPendingDeltas();
+		this.#flushPendingTools();
+	}
+
 	#flushPendingDeltas(): void {
 		this.#clearCoalesceTimer();
 		for (const key of [...this.#pending.keys()]) this.#flushPendingKey(key);
+	}
+
+	#flushPendingTools(): void {
+		for (const toolCallId of [...this.#toolPending.keys()]) this.#flushPendingTool(toolCallId);
+	}
+
+	/**
+	 * Emit the part of one tool's retained output the client has not been sent.
+	 *
+	 * `append` is decided against `#toolSent` (what was emitted), not against the
+	 * previous host-side snapshot, so a coalesced run of partials — or one that
+	 * rewrote its text — always resolves to a payload the client can apply.
+	 */
+	#flushPendingTool(toolCallId: string): void {
+		const pending = this.#toolPending.get(toolCallId);
+		if (pending === undefined) return;
+		this.#toolPending.delete(toolCallId);
+		if (this.#completedToolIds.has(toolCallId) || this.#turnAborted) return;
+		const full = this.#toolOutput.get(toolCallId) ?? "";
+		const sent = this.#toolSent.get(toolCallId);
+		const textChanged = sent === undefined || full !== sent.text;
+		const append = textChanged && sent !== undefined && full.startsWith(sent.text) && full.length > sent.text.length;
+		const output = !textChanged ? "" : append ? full.slice(sent.text.length) : full;
+		const truncatedChanged = pending.truncated && sent?.truncated !== true;
+		if (output.length === 0 && !truncatedChanged) return;
+		const updated: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> = {
+			kind: "conversation.tool.updated",
+			sessionId: this.#sessionId,
+			turnId: pending.turnId,
+			toolCallId,
+			updateMode: append ? "append" : "replace",
+		};
+		if (output.length > 0) updated.output = output;
+		if (truncatedChanged) updated.truncated = true;
+		this.#rememberBoundedMap(this.#toolSent, toolCallId, {
+			text: full,
+			truncated: sent?.truncated === true || pending.truncated,
+		});
+		this.#emitParsed(updated);
 	}
 
 	#flushPendingKey(key: string): void {
@@ -919,107 +1053,19 @@ export class ConversationLiveProjector {
 			this.#diagnostic(error instanceof Error ? error.message : "invalid conversation live event");
 			return;
 		}
-		this.#enqueue(parsed);
-		this.#drain();
+		this.#deliver(parsed);
 	}
 
-	#enqueue(event: ConversationRuntimeEvent): void {
-		const limit = this.#options.queueLimit ?? CONVERSATION_LIVE_QUEUE_LIMIT;
-		if (!isControlEvent(event.kind) && this.#queue.length > 0) {
-			const last = this.#queue[this.#queue.length - 1];
-			if (
-				event.kind === "conversation.message.delta" &&
-				last?.kind === "conversation.message.delta" &&
-				sameDeltaIdentity(last, event) &&
-				utf8ByteLength(last.delta) + utf8ByteLength(event.delta) <= CONVERSATION_LIMITS.DELTA_MAX_BYTES
-			) {
-				this.#queue[this.#queue.length - 1] = { ...last, delta: last.delta + event.delta };
-				return;
-			}
-			if (
-				event.kind === "conversation.tool.updated" &&
-				last?.kind === "conversation.tool.updated" &&
-				last.toolCallId === event.toolCallId &&
-				last.turnId === event.turnId
-			) {
-				if (event.updateMode === "replace") {
-					this.#queue[this.#queue.length - 1] = event;
-					return;
-				}
-				if (last.updateMode === "append" && event.updateMode === "append") {
-					this.#queue[this.#queue.length - 1] = {
-						...last,
-						output: `${last.output ?? ""}${event.output ?? ""}`,
-						truncated: last.truncated === true || event.truncated === true ? true : undefined,
-					};
-					return;
-				}
-			}
-		}
-		if (this.#queue.length >= limit) this.#compactQueue();
-		if (this.#queue.length >= limit && event.kind === "conversation.tool.updated") {
-			const dropDelta = this.#queue.findIndex(item => item.kind === "conversation.message.delta");
-			if (dropDelta >= 0) this.#queue.splice(dropDelta, 1);
-		}
-		if (this.#queue.length >= limit && !isControlEvent(event.kind)) return;
-		if (this.#queue.length >= limit && isControlEvent(event.kind)) {
-			const dropDelta = this.#queue.findIndex(item => item.kind === "conversation.message.delta");
-			const dropAt = dropDelta >= 0 ? dropDelta : this.#queue.findIndex(item => !isControlEvent(item.kind));
-			if (dropAt >= 0) this.#queue.splice(dropAt, 1);
-			else return;
-		}
-		this.#queue.push(event);
-	}
-
-	#compactQueue(): void {
-		if (this.#queue.length < 2) return;
-		const lastUpdateAt = new Map<string, number>();
-		this.#queue.forEach((event, index) => {
-			if (event.kind === "conversation.tool.updated") lastUpdateAt.set(event.toolCallId, index);
-		});
-		const compacted: ConversationRuntimeEvent[] = [];
-		for (let index = 0; index < this.#queue.length; index++) {
-			const event = this.#queue[index];
-			if (event === undefined) continue;
-			if (event.kind === "conversation.tool.updated") {
-				if (lastUpdateAt.get(event.toolCallId) !== index) continue;
-				const full = this.#toolOutput.get(event.toolCallId);
-				const coalesced: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> = {
-					...event,
-					updateMode: "replace",
-				};
-				if (full !== undefined && full.length > 0) coalesced.output = full;
-				else if (event.output !== undefined) coalesced.output = event.output;
-				compacted.push(coalesced);
-				continue;
-			}
-			const last = compacted[compacted.length - 1];
-			if (
-				event.kind === "conversation.message.delta" &&
-				last?.kind === "conversation.message.delta" &&
-				sameDeltaIdentity(last, event) &&
-				utf8ByteLength(last.delta) + utf8ByteLength(event.delta) <= CONVERSATION_LIMITS.DELTA_MAX_BYTES
-			) {
-				compacted[compacted.length - 1] = { ...last, delta: last.delta + event.delta };
-			} else compacted.push(event);
-		}
-		this.#queue.length = 0;
-		this.#queue.push(...compacted);
-	}
-
-	#drain(): void {
-		while (this.#queue.length > 0 && !this.#disposed) {
-			const event = this.#queue.shift();
-			if (event === undefined) break;
-			for (const listener of [...this.#listeners]) {
-				try {
-					listener(event);
-				} catch (error) {
-					this.#diagnostic(error instanceof Error ? error.message : "conversation live listener failed");
-					logger.warn("Conversation live projector listener threw", {
-						error: error instanceof Error ? error.message : String(error),
-					});
-				}
+	#deliver(event: ConversationRuntimeEvent): void {
+		if (this.#disposed) return;
+		for (const listener of [...this.#listeners]) {
+			try {
+				listener(event);
+			} catch (error) {
+				this.#diagnostic(error instanceof Error ? error.message : "conversation live listener failed");
+				logger.warn("Conversation live projector listener threw", {
+					error: error instanceof Error ? error.message : String(error),
+				});
 			}
 		}
 	}
@@ -1027,11 +1073,12 @@ export class ConversationLiveProjector {
 	#clearLiveState(): void {
 		this.#clearCoalesceTimer();
 		this.#pending.clear();
-		this.#queue.length = 0;
+		this.#toolPending.clear();
 		this.#openMessages.clear();
 		this.#completedMessageIds.clear();
 		this.#completedToolIds.clear();
 		this.#toolOutput.clear();
+		this.#toolSent.clear();
 		this.#toolOwners.clear();
 		this.#turnId = undefined;
 		this.#continuationPending = false;

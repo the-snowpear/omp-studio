@@ -117,8 +117,8 @@ describe("AppSidebar thread row more menu", () => {
     // 行级会话动作与顶栏同语义：需要真实 Runtime 快照才可用。
     const state = {
       ...baseState(),
-      clientState: { connection: {}, interaction: {}, conversation: {}, entities: { snapshot: { sessionId: "session-other" } } },
-    } as ComponentProps<typeof AppSidebar>["state"];
+      clientState: { connection: {}, interaction: {}, entities: { snapshot: { sessionId: "session-other" } } },
+    } as unknown as ComponentProps<typeof AppSidebar>["state"];
     renderSidebar({ preview: false, chrome, state });
 
     // 行按钮可访问名 = 标题 + 相对时间，用正则匹配标题；项目头也有同名 ⋯，必须先锁定行。
@@ -174,8 +174,8 @@ describe("AppSidebar thread row more menu", () => {
     } as unknown as ComponentProps<typeof AppSidebar>["chrome"];
     const state = {
       ...baseState(),
-      clientState: { connection: {}, interaction: {}, conversation: {}, entities: { snapshot: { sessionId: "session-other" } } },
-    } as ComponentProps<typeof AppSidebar>["state"];
+      clientState: { connection: {}, interaction: {}, entities: { snapshot: { sessionId: "session-other" } } },
+    } as unknown as ComponentProps<typeof AppSidebar>["state"];
     renderSidebar({ preview: false, chrome, state });
 
     const row = screen.getByRole("button", { name: new RegExp(historyEntry.title as string) }).closest(".thread-row");

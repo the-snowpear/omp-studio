@@ -1,4 +1,3 @@
-import type { ClientState, ConversationHydrateClient, StudioClientImpl } from "@omp-studio/client";
 import type {
   ClientError,
   ConversationTranscriptPage,
@@ -7,7 +6,6 @@ import type {
   RuntimeEpoch,
   SessionId,
   StudioClient,
-  Unsubscribe,
 } from "@omp-studio/client-contract";
 import { CONVERSATION_LIMITS, SESSION_TRANSCRIPT_READ_KIND } from "@omp-studio/client-contract";
 
@@ -21,29 +19,11 @@ export type ConversationIdentity = {
   readonly transcriptRevision?: string;
 };
 
-/**
- * Official hydrate surface plus Impl-only state. Do not duck-type hydrate
- * methods; import `ConversationHydrateClient` from `@omp-studio/client`.
- */
-export type ConversationClient = ConversationHydrateClient & {
-  query: StudioClientImpl["query"];
-  subscribe: StudioClientImpl["subscribe"];
-  getState: () => Pick<ClientState, "conversation" | "commands">;
-  onState: (listener: (state: Pick<ClientState, "conversation" | "commands">) => void) => Unsubscribe;
-};
+/** Narrow data-plane surface used by the target-scoped conversation store. */
+export type ConversationClient = Pick<StudioClient, "query" | "subscribe">;
 
-/** Typed view of StudioClientImpl. `getState` / `onState` stay Impl-only. */
-export function asConversationClient(
-  client: ConversationHydrateClient & {
-    query: StudioClient["query"];
-    subscribe: StudioClient["subscribe"];
-    getState?: ConversationClient["getState"];
-    onState?: ConversationClient["onState"];
-  },
-): ConversationClient | null {
-  const { getState, onState } = client;
-  if (getState === undefined || onState === undefined) return null;
-  return client as ConversationClient;
+export function asConversationClient(client: StudioClient): ConversationClient {
+  return client;
 }
 
 export function asClientError(cause: unknown): ClientError {

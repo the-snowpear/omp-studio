@@ -59,7 +59,7 @@ export function userMessageRestoreDisabledReason(input: UserMessageRestoreDisabl
   if (input.compacting) return "压缩中";
   if (input.preview) return undefined;
   if (input.gated) return "无法操作";
-  if (!input.canNavigateTree) return "会话树（暂未实现）";
+  if (!input.canNavigateTree) return "当前 Runtime 不支持会话树操作";
   return undefined;
 }
 

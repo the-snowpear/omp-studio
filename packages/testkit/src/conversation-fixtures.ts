@@ -437,6 +437,7 @@ export function conversationChangedEvent(
     cursor: `c-convo-${eventSeq}` as EventCursor,
     occurredAt: CONVERSATION_FIXTURE_T1,
     sessionId: update.sessionId,
+    streamSeq: eventSeq,
     eventSeq,
     update,
   };

@@ -9,6 +9,8 @@ import {
 } from "@oh-my-pi/pi-coding-agent/studio/conversation-protocol";
 import {
 	CONVERSATION_LIVE_COALESCE_CHAR_THRESHOLD,
+	CONVERSATION_LIVE_STATE_LIMIT,
+	CONVERSATION_LIVE_TOOL_FLUSH_CHARS,
 	type ConversationLiveBindTarget,
 	ConversationLiveProjector,
 } from "@oh-my-pi/pi-coding-agent/studio/services/conversation-live-projector";
@@ -185,6 +187,28 @@ describe("ConversationLiveProjector", () => {
 		);
 	});
 
+	test("caps a growing live block before publishing or retaining more than the item limit", () => {
+		const { projector, events } = createProjector();
+		const huge = "x".repeat(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES + 32);
+		const message = assistant([{ type: "text", text: huge }]);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message });
+		projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: huge, partial: message }));
+		projector.project(update(message, { type: "text_delta", contentIndex: 0, delta: "LATE", partial: message }));
+		projector.project({ type: "message_end", message });
+
+		expect(new TextEncoder().encode(deltas(events)).byteLength).toBe(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+		expect(deltas(events)).not.toContain("LATE");
+		const completed = events.find(event => event.kind === "conversation.message.completed");
+		expect(completed?.kind === "conversation.message.completed" && completed.item.content).toEqual([
+			{
+				type: "text",
+				text: "x".repeat(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES),
+				truncated: true,
+			},
+		]);
+	});
+
 	test("associates two tool calls independently", () => {
 		const { projector, events } = createProjector();
 		const message = assistant([
@@ -233,41 +257,41 @@ describe("ConversationLiveProjector", () => {
 		expect(started[1]?.kind === "conversation.tool.started" && started[1].messageId).toBe("msg-1");
 	});
 
-	test("uses append when partial output extends the previous snapshot and replace otherwise", () => {
+	test("coalesces buffered tool output and appends only what the client already has", () => {
 		const { projector, events } = createProjector();
 		projector.project({ type: "agent_start" });
 		projector.project({ type: "message_start", message: assistant([]) });
 		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
-		projector.project({
-			type: "tool_execution_update",
-			toolCallId: "call-1",
-			toolName: "Bash",
-			args: {},
-			partialResult: { content: [{ type: "text", text: "abc" }] },
-		});
-		projector.project({
-			type: "tool_execution_update",
-			toolCallId: "call-1",
-			toolName: "Bash",
-			args: {},
-			partialResult: { content: [{ type: "text", text: "abcdef" }] },
-		});
-		projector.project({
-			type: "tool_execution_update",
-			toolCallId: "call-1",
-			toolName: "Bash",
-			args: {},
-			partialResult: { content: [{ type: "text", text: "xyz" }] },
-		});
-		const updates = events.filter(event => event.kind === "conversation.tool.updated");
-		expect(updates).toEqual([
+		const partial = (text: string): void => {
+			projector.project({
+				type: "tool_execution_update",
+				toolCallId: "call-1",
+				toolName: "Bash",
+				args: {},
+				partialResult: { content: [{ type: "text", text }] },
+			});
+		};
+		const updates = (): ConversationRuntimeEvent[] =>
+			events.filter(event => event.kind === "conversation.tool.updated");
+		partial("abc");
+		partial("abcd");
+		// Two partials inside one coalesce window are one wire event, carrying the
+		// newest retained text rather than each intermediate snapshot.
+		expect(updates()).toEqual([]);
+		projector.flush();
+		partial("abcdef");
+		projector.flush();
+		// A rewritten (non prefix-extending) partial falls back to replace.
+		partial("xyz");
+		projector.flush();
+		expect(updates()).toEqual([
 			{
 				kind: "conversation.tool.updated",
 				sessionId: "session-1",
 				turnId: "turn-1",
 				toolCallId: "call-1",
 				updateMode: "replace",
-				output: "abc",
+				output: "abcd",
 			},
 			{
 				kind: "conversation.tool.updated",
@@ -275,7 +299,7 @@ describe("ConversationLiveProjector", () => {
 				turnId: "turn-1",
 				toolCallId: "call-1",
 				updateMode: "append",
-				output: "def",
+				output: "ef",
 			},
 			{
 				kind: "conversation.tool.updated",
@@ -286,6 +310,53 @@ describe("ConversationLiveProjector", () => {
 				output: "xyz",
 			},
 		]);
+	});
+
+	test("flushes tool output ahead of the timer once the unsent tail crosses the threshold", () => {
+		const { projector, events } = createProjector();
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: assistant([]) });
+		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
+		const burst = "y".repeat(CONVERSATION_LIVE_TOOL_FLUSH_CHARS + 1);
+		projector.project({
+			type: "tool_execution_update",
+			toolCallId: "call-1",
+			toolName: "Bash",
+			args: {},
+			partialResult: { content: [{ type: "text", text: burst }] },
+		});
+		const updates = events.filter(event => event.kind === "conversation.tool.updated");
+		expect(updates).toHaveLength(1);
+		expect(updates[0]?.kind === "conversation.tool.updated" && updates[0].output).toBe(burst);
+	});
+
+	test("does not resend the retained 256 KiB prefix after truncated tool output stops changing", () => {
+		const { projector, events } = createProjector();
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: assistant([]) });
+		projector.project({ type: "tool_execution_start", toolCallId: "call-huge", toolName: "Bash", args: {} });
+		const capped = "x".repeat(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES + 1);
+		const partial = (text: string): void => projector.project({
+			type: "tool_execution_update",
+			toolCallId: "call-huge",
+			toolName: "Bash",
+			args: {},
+			partialResult: { content: [{ type: "text", text }] },
+		});
+		partial(capped);
+		partial(`${capped}more output that is beyond the retained prefix`);
+		projector.flush();
+		const updates = events.filter(event => event.kind === "conversation.tool.updated");
+		expect(updates).toHaveLength(1);
+		expect(updates[0]).toMatchObject({
+			kind: "conversation.tool.updated",
+			toolCallId: "call-huge",
+			updateMode: "replace",
+			truncated: true,
+		});
+		expect(updates[0]?.kind === "conversation.tool.updated" && updates[0].output?.length).toBe(
+			CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES,
+		);
 	});
 
 	test("marks tool errors, truncates huge stdout, and survives cyclic or binary arguments", () => {
@@ -858,5 +929,55 @@ describe("ConversationLiveProjector", () => {
 		projector.project({ type: "tool_execution_start", toolCallId: "call-1", toolName: "Bash", args: {} });
 		const started = events.filter(event => event.kind === "conversation.tool.started");
 		expect(started).toHaveLength(2);
+	});
+
+	test("keeps completed tool tombstones bounded while suppressing recent duplicate ends", () => {
+		const { projector, events } = createProjector();
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: assistant([]) });
+		for (let index = 0; index <= CONVERSATION_LIVE_STATE_LIMIT; index += 1) {
+			projector.project({
+				type: "tool_execution_end",
+				toolCallId: `call-${index}`,
+				toolName: "Read",
+				result: "done",
+				isError: false,
+			});
+		}
+		projector.project({
+			type: "tool_execution_end",
+			toolCallId: `call-${CONVERSATION_LIVE_STATE_LIMIT}`,
+			toolName: "Read",
+			result: "duplicate",
+			isError: false,
+		});
+		projector.project({
+			type: "tool_execution_update",
+			toolCallId: `call-${CONVERSATION_LIVE_STATE_LIMIT}`,
+			toolName: "Read",
+			args: {},
+			partialResult: "late update",
+		});
+		projector.project({
+			type: "tool_execution_end",
+			toolCallId: "call-0",
+			toolName: "Read",
+			result: "old duplicate after eviction",
+			isError: false,
+		});
+
+		const completed = events.filter(event => event.kind === "conversation.tool.completed");
+		expect(completed).toHaveLength(CONVERSATION_LIVE_STATE_LIMIT + 2);
+		expect(
+			completed.filter(
+				event =>
+					event.kind === "conversation.tool.completed" &&
+					event.toolCallId === `call-${CONVERSATION_LIVE_STATE_LIMIT}`,
+			),
+		).toHaveLength(1);
+		expect(
+			completed.filter(event => event.kind === "conversation.tool.completed" && event.toolCallId === "call-0"),
+		).toHaveLength(2);
+		expect(events.some(event => event.kind === "conversation.tool.updated")).toBe(false);
 	});
 });

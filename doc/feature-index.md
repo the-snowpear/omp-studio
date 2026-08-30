@@ -52,7 +52,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 首页身份 / 头像 | `apps/renderer/src/settings/operatorProfile.ts`、`avatarCrop.ts`、`AvatarCropDialog.tsx`、`HomePage.tsx`；桌面 `chrome-profile.ts` | 显示名本地记忆；选图后圆形裁切；头像写入 `%APPDATA%\omp-studio\profile\`（覆盖，无历史）；NSIS 卸载删除 |
 | 历史 / 项目会话缓存 | `apps/renderer/src/HistoryPage.tsx`、`sidebar/useProjectHistories.ts`、`sidebar/provisionalThread.ts`、`studio-host/src/session-catalog.ts` | `history.list`；侧栏按 `workspaceId` 独立加载 / 分页 / 刷新；只有 title/session/model/thinking 元数据、尚无 `message` 的空白 JSONL 不进入历史；草稿非空或提示词已发送时显示 Renderer 临时行，正式 LLM 标题到达后按 `sessionId` 接管；归档成功的 `sessionId` 会阻止迟到的 Workbench 状态复活临时行；resume / archive / drop / delete（历史页「⋮ → 删除会话」走 `session.delete`，Host 清 transcript/artifacts/遥测/绑定/租约/pin 残留） |
 | 命令面板 | `apps/renderer/src/CommandPalette.tsx`、`commandPaletteCatalog.ts` | 动作目录与路由 |
-| 主题 / 密度 / 上次路由 / 浮窗几何 | `apps/renderer/src/settings/appSettings.ts` | 本地 UI 记忆，不进 Host；BTW 几何在 `LayoutMemory` |
+| 主题 / 密度 / 上次路由 / 浮窗几何 | `apps/renderer/src/settings/appSettings.ts` | 本地 UI 记忆，不进 Host；BTW 几何在 `LayoutMemory`；侧栏项目展开与 Explorer 目录展开记忆在 `sidebar/expandMemory.ts` |
 | 进入应用提示（尚未完成） | `apps/renderer/src/StartupNotice.tsx`、`settings/startupNotice.ts` | 中文全局弹窗：项目 GitHub、关闭 / 不再提醒；「不再提醒」只写 localStorage，不进 Host；GitHub 卡点开走 `ompStudioChrome.openUrl` |
 | 预览开关 | `apps/renderer/src/preview/mode.ts`、`PreviewContext.tsx` | 显示层开关；`PREVIEW_MODE_SWITCH_ENABLED` |
 | 预览 fixture / 壳 | `apps/renderer/src/preview/fixtures.ts`、`surfaces.tsx`、`btwPreview.ts` | 新读表面必须同时接预览与真实 |
@@ -62,19 +62,20 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 功能 | 入口 | 命令 / query |
 |---|---|---|
 | 对话窗 | `apps/renderer/src/conversation/ConversationPane.tsx` | 订阅 conversation 事件 |
-| 对话 hook | `conversation/useConversation.ts` | 连 `StudioClient` |
+| 对话加载 / Store | `conversation/conversationSource.ts`、`conversationStore.ts`、`conversationEngine.ts`、`useConversation.ts` | `conversation.open` 先订阅后打开；目标级 watermark 去重；首屏 / replay / 实时增量统一进入有界 Store；App 只订阅低频 metadata，token 热流只更新 `ConversationPane` |
 | 用户消息 Restore / 新会话 | `conversation/ConversationItemView.tsx`、`UserMessageBody.tsx`、`userMessageThumbs.ts`、`userMessageRestore.ts`、`UserMessageTreeConfirm.tsx`、`conversationEngine.ts`、`composer/serialize.ts` | 已发送用户气泡「恢复」（`undo` 图标）→ `session.tree.navigate`（leaf=该条 parent）；「新会话」（`branch` 图标）→ `session.tree.branch`（新 session 文件，切过去）。确认用应用内模态（归档同风格），不用 `window.confirm`。气泡仍画文件/技能/图片胶囊，配色与 Composer 同类胶囊一致（不刷成气泡白霜）。复制按钮与划选复制走序列化 `@` / `/skill:` / `[图N]`。图缩略图贴在气泡上方，点击预览；公开 transcript 仍剥图。预览字节落本机 IndexedDB（`omp-studio-ui` / `user-message-thumbs`），按 sessionId+itemId 重开会话仍能挂回缩略图，不进 Host。预览本地裁剪，不调 Host。busy 时 overlay 拒绝。`/branch` 提示点气泡，不打开 Changes。 |
-| 客户端对话状态 | `packages/client/src/conversation-reducer.ts`、`conversation-state.ts` | 不把 mock 写进 reducer |
-| 正文 markdown / 流式渲染 | `conversation/markdown.tsx`、`incrementalMarkdown.ts`、`magicKeywordMarkdown.tsx` | 非流式：整篇一次解析。流式：`IncrementalMarkdownBlocks` 冻结除尾部两块以外的顶层块，冻结块只解析 / 高亮一次并缓存元素，块之间补 `\n` 与整篇解析对齐 DOM；出现脚注 / 链接引用定义时退回整篇渲染。`MarkdownText` 与 `MessageBody` 都是 `memo` |
-| 快照行复用 / 渲染节流 | `conversation/rowReuse.ts`、`conversationEngine.ts`、`useConversation.ts`、`useStableCallback.ts` | 新旧快照结构比较后复用未变行（整条没变则连数组一起复用），memo 才生效；engine 通知按动画帧合并（首次同步 + 帧尾一次）；传进对话子树的回调用 `useStableCallback` 保持恒定引用 |
-| 会话切换加载 / 显示 | `conversation/sessionRowsCache.ts`、`progressiveRows.ts`、`useConversation.ts`、`conversationEngine.ts`、`App.tsx`（`selectedIsResident`） | 切回最近 5 条会话时先画上次的行（LRU，每条最多 60 行）并作为 `reuseTimelineRows` 基线，顶部照常「正在加载对话」；驻留会话在 `session.resume` 期间不读归档页（`activating` → `deferHydrate`，600ms 兜底回落），一次切换只读一遍 transcript；缩略图与 hydrate 同一次提交；首次挂载超过 16 行时按帧从尾部铺开 |
+| Client 全局状态 | `packages/client/src/reducer.ts` | 不保存 transcript / live message / tool output；`conversation.changed` 只推进 transport cursor，对话真值由 Renderer 目标级 Store 持有 |
+| 正文 markdown / 流式渲染 | `conversation/markdown.tsx`、`markdownBlocks.ts`、`magicKeywordMarkdown.tsx` | 非流式整篇 `react-markdown`（remark-gfm + rehype-highlight）解析；流式扫描结果拆成引用稳定的 `frozen` 前缀与有界 `pending` 尾部，检查点只续扫新增文本和少量上下文，渲染层分别 memo 两段，不再每帧重建全部历史切点。未闭合代码围栏不进入 `react-markdown`，直接复用 `CodeFrame` 的安全 `<pre><code>` 样式，闭合后恢复完整 Markdown 与高亮。普通切点只落在空行处且要求下一行确实开启新块；围栏内部、松散列表、缩进续行、setext 下划线都不切。链接引用定义从上一条未完整行增量检测，命中后整段保持同一 Markdown 解析域。mermaid 在流式中降级为 `<pre>`，收尾后渲染并按「主题 + 源码」缓存 SVG（上限 32） |
+| 快照行复用 / 渲染节流 | `conversation/conversationStore.ts`、`conversationViewModel.ts`、`conversationEngine.ts`、`subagentConversationEngine.ts` | Store 限 2,000 items / 24 MiB，live block 256 KiB、tool output 64 KiB，pending / notice / live message / live tool 均有硬上限；增量按 RAF 合并，流式 chunk 在帧边界压成文本。持久历史前缀只在结构变化时重投影，token 热流只投影有界 transient 尾部；工具事件（`tool.started` / `tool.completed` / `tool.updated`）只标脏所属行而不整窗重投影；Transcript 的 binds / keys 按结构 token 缓存。`rowCache` 在 trim / hydrate / restore 等结构路径按活跃 key 剪枝，不保留被窗口淘汰的正文。主会话和当前可见子代理各持有一个 hot Store，切换即释放 |
+| 时间线虚拟化 | `conversation/ConversationVirtualList.tsx`、`ConvoTranscript.tsx`、`rowHeightCache.ts` | 基于 `@tanstack/react-virtual` 动态测高与 overscan；挂载行硬上限 120；未测量的新面板只临时渲染末尾 20 行，禁止回退为全量 DOM；预览 fixture 可全量渲染。行高按行键跨挂载记忆（`rowHeightCache.ts` 模块级、上限 8192），重挂时估高直接取上次实测值，测量仍是权威。`ConvoTranscript` 的行元素按「行对象 + bind + 回调」缓存身份：虚拟列表每取一次测量就重渲染一次（工具卡高度过渡时每帧一次，流式时每帧一次），未变的行靠引用相等整棵子树跳过，`onReviewChanges` 也不再每帧新建闭包穿透 memo |
+| 会话切换加载 / 显示 | `conversation/useConversation.ts`（`retainConversationWhileRemounting`）、`ConversationPane.tsx`、`conversationSwitchPhase.ts` | 同一 sessionId 的 engine 重挂期间保留上一份 transcript；跨会话时旧 ReactNode 在 `leaving` 全程保持，即使新快照提前到达也不换 DOM。新 transcript 在 `settling` 中以 `opacity: 0` 挂载两帧，等虚拟列表实测高度与唯一跟底写入完成后再淡入，避免首屏估高、实测和贴底造成一两次可见跳位 |
 | 活动行 / 暂停恢复 | `conversation/ActivityLine.tsx`、`activityStatus.ts` | `runtime.pause` / `resume` / `core.abort` |
-| 工具卡片 | `conversation/ToolBody.tsx`、`toolMeta.ts`、`bashDisplay.ts`、`useToolCardFollowScroll.tsx` | 工具展示元数据；bash 直播剥 ANSI / `\\r`；展开卡内流式输出跟底，卡内上滚同样按手势脱离（与对话区共用 `bindTailGestures`） |
+| 工具卡片 | `conversation/ToolBody.tsx`、`BatchChain.tsx`、`toolMeta.ts`、`bashDisplay.ts`、`useToolCardFollowScroll.tsx`、`textChunks.tsx` | 工具展示元数据；`ToolBody` 按 `tool` 身份 memo（派生层复用 ToolView 对象，流式期间只有在跑的那张卡重渲染）；`ToolItem` / `ThinkCard` 同样 memo，链内 toggle handler 保持稳定身份。正文首次展开才挂载、收起过渡结束后卸载；收起/展开的 `0fr → 1fr` 高度过渡在流式与静止两态共用，只有「仍在运行」的卡片（正文逐帧在变）按 `tool.status` 逐卡瞬时挂载/卸载，手动收起仍有工具在跑的链才同步卸载整链卡片。`bashDisplay` 按「同类别的连续行」合段（`.codeblock` 是 `white-space: pre`，纯字符串输出因此是单个文本节点），`streamingFrameCost.test.tsx` 用「长日志提交时间 ≤ 短日志 2.5 倍」钉住；长输出（Bash 块 / Think 正文 / 默认 Output）再经 `textChunks` 按 64 行分块、块上 `content-visibility: auto`，视口外跳过布局与绘制（短文本仍是单文本节点）；卡内滚动面板声明 `contain: layout paint`；bash 直播剥 ANSI / `\\r`，先裁尾（末尾 1500 行 / 64 KiB）再处理并 `useMemo`；展开卡内流式输出跟底，卡内上滚同样按手势脱离（与对话区共用 `bindTailGestures`）；`ToolCardScroll` 只在 live 尾卡上装 ResizeObserver，跟随写入按帧合并 |
 | 会话变更 | `conversation/SessionChanges.tsx`、`ChangesPanel.tsx`、`TurnDiffCard.tsx` | 本轮文件改动；对话 diff 卡「审核」跳到对应轮次 |
-| 滚动 / 小地图 | `useConversationScroll.ts`、`ConversationMinimap.tsx` | 贴底时跟 `contentKey` / 新行沉底；上滚**按手势**（wheel / ArrowUp·PageUp·Home / 触摸）立刻脱离，不等 scroll 事件——流式 tick 会先把视图写回底部；被工具卡内层滚动条吃掉的滚轮不算脱离。回到底部（≤1px）或滚回 72px 内自动重挂，也可点「回到最新」。「加载更早消息」在点击时抓锚点并主动脱离，页面前插后按首行 id 变化确认并还原阅读位置 |
+| 滚动 / 小地图 | `useConversationScroll.ts`、`ConversationMinimap.tsx` | 贴底时由一个观察最终 `.convo-doc` 与滚动盒的 ResizeObserver 写 `scrollTop`；虚拟列表不再有第二条 rAF 写入路径，无 ResizeObserver 环境才由 `contentKey` layout effect 回退。上滚**按手势**（wheel / ArrowUp·PageUp·Home / 触摸）立刻脱离，不等 scroll 事件；被工具卡内层滚动条吃掉的滚轮不算脱离。回到底部（≤1px）或滚回 72px 内自动重挂，也可点「回到最新」。「加载更早消息」在点击时抓锚点并主动脱离，页面前插后按首行 id 变化确认并还原阅读位置。minimap 圆点按行对象缓存派生（`markCache`），`measure()` 一次 `querySelectorAll` 批量读 rect 并在「圆点集合与 scrollHeight 都未变」时整体跳过，全量重测限频到 700ms；活跃圆点布局读取只在真的重测时同行，滚动事件只更新视口条；位置变化小于 0.002 不重渲染轨道；`ResizeObserver` 只装一次、回调按帧合并。视口条 / 轨道拖动按 rAF 合并（每帧至多一次 `scrollTop` 写入、读全部前置于写），拖动期间强制重测降级、pointerup 后补一次 |
 | 空态 / 最近会话 | `ConversationEmpty.tsx`、`emptyRecents.ts`、`welcomeGate.ts` | |
 | 瞬时状态 toast | `transientStatusNotice.ts` | 与持久诊断分开 |
-| 子代理对话 | `subagentConversationEngine.ts`、`useSubagentConversation.ts`、`SubagentConversationPane.tsx` | live `agent.conversation.read` 仅当 viewed session === live session 且 Runtime 已连接；否则 `session.transcript.readPage`（parent `sessionId` + `agentId`）。live 缺失（`AGENT_NOT_FOUND` / was not found）也回退归档。Hub/Inspect 底部 ChipComposer 走 `agent.send`（text + 可选 images）；左下附件按钮插入文件/图片胶囊 |
+| 子代理对话 | `subagentConversationEngine.ts`、`useSubagentConversation.ts`、`SubagentConversationPane.tsx` | 当前 live session 走 `conversation.open` 的显式 `{parentSessionId, agentId}` target，返回 child `conversationSessionId` 后再接增量；历史 / parked 走 `session.transcript.readPage`。仅打开的子代理保持 hot Store。Hub/Inspect 底部 ChipComposer 走 `agent.send`（text + 可选 images）；左下附件按钮插入文件/图片胶囊 |
 | 子代理检查卡 | `SubagentInspectCard.tsx`、`subagentComposerGate.ts`、`SubagentMetrics.tsx` | 挂在 `.convo-wrap` 的 ask 式弹窗；打开/收起从底边中点变形；固定约 82% 工作区高（视口 − 标题栏 − 顶栏）；对话条卡片叠 Hub roster 用量/状态；允许输入时底部 ChipComposer 走 `agent.send`（与 Hub 流式页共用附件胶囊） |
 | Agent 测试面板 | `AgentTestsPane.tsx`、`agentTestRuns.ts` | |
 | Chip Composer | `apps/renderer/src/composer/ChipComposer.tsx` | Enter：`core.prompt` / 本地排队；Ctrl+Enter：`core.followUp`（带图）；插入纠偏：`core.steer` |
@@ -91,7 +92,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 侧栏运行态 / 等待态 | `sidebar/threadRunning.ts`、`threadWait.ts`、`ThreadSpin.tsx`、`ThreadWaitChip.tsx` | 当前会话从 live snapshot、后台会话从 `residents.list` / `residents.changed` 摘要推导；不把后台 snapshot 注入当前会话 |
 
 Host 侧对话事件：`packages/studio-host/src/conversation-events.ts`。  
-Runtime 投影：overlay `services/conversation-live-projector.ts`、`conversation-projector-hub.ts`。  
+Runtime 投影：overlay `services/conversation-live-projector.ts`、`conversation-projector-hub.ts`；流式 block 实时限制 256 KiB，完成后释放正文/工具输出，只保留固定容量的幂等 tombstone。合流缓冲有两份且都是无损的：文本按 block（16ms 或 64 字符），工具输出按 tool call（16ms 或 4 KiB 未发送尾部），append / replace 按「客户端已收到的前缀」决定；控制事件与工具结束先 flush，顺序不变。投递是同步的（无队列）：慢 listener 反压 Runtime，不丢事件。
 持久 transcript：overlay `services/session-transcript-service.ts`；Host `session-archive-reader.ts`（`session.transcript.readPage`）。
 
 ## 会话、归档、Telemetry
@@ -121,7 +122,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 | Skills 抽屉 | `SkillsDrawer.tsx`、`skills/skillUsage.ts` | `omp-extensibility-adapter.ts`、`skills.get` / `skills.setEnabled` | overlay `skill-prompt-expansion.ts` |
 | MCP | `CapabilitiesPage.tsx` | `omp-mcp-adapter.ts`、`omp-mcp-probe.ts`、`mcp.get` / `mcp.setEnabled` / `mcp.refresh` / `mcp.test` / `mcp.logs.get` | 配置扫描 + Host 一次性探测；不是 Runtime MCPManager 连接态 |
 | 能力中心 | `CapabilitiesPage.tsx` | Skills 开目录 `skills.reveal` / `skills.revealRoot`（Desktop `shell.openPath`）；Slash 页 `visibleSlashCatalog()` + `App.runSlashCommand`，不是 `commands.getManifest` | overlay `command-manifest-service.ts` 仍只服务协议 manifest |
-| 模型配置页 | `ModelConfigPage.tsx`、`models/fetchedModels.ts`、`models/WebSearchPanel.tsx`（网络搜索 tab） | `omp-models-adapter.ts`、`models-yml.ts`；「自动获取模型」走 `models.provider.probe`（不传 `discoveryType`，Host 按 api 类型选模型列表地址与认证头），候选清单只进表单草稿，保存才写 `models.yml`；网络搜索配置（`web_search.*` / `providers.webSearch*` / `searxng.*` / `exa.*`）走 `models.webSearch.set`，写 `config.yml` | overlay `model-control-service.ts`（会话内切模型） |
+| 模型配置页 | `ModelConfigPage.tsx`、`models/fetchedModels.ts`、`models/WebSearchPanel.tsx`（网络搜索 tab） | `omp-models-adapter.ts`、`models-yml.ts`；「自动获取模型」走 `models.provider.probe`（不传 `discoveryType`，Host 按 api 类型选模型列表地址与认证头），候选清单只进表单草稿，保存才写 `models.yml`；网络搜索 tab 为「生效链路 + 优先链/供应商库」双分区面板（含供应商描述与凭证状态、searxng 全量字段）；配置（`web_search.*` / `providers.webSearch*` / `searxng.*` / `exa.*`）走 `models.webSearch.set`，写 `config.yml` | overlay `model-control-service.ts`（会话内切模型） |
 | 发现 / 插件根 | — | `host-client-api/src/omp-discovery/**` | — |
 | Token 用量 | Home / `usage/tokenUsage.ts` | `omp-usage-adapter.ts`、`usage.get` | 聚合 `omp stats.db`，不是演示数字 |
 
@@ -141,8 +142,9 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | GitHub PR | Git 面板 | `apps/desktop/src/github-service.ts` → `github.execute` |
 | 工作区注册 | 首页 / 设置 | `studio-host/src/workspace-registry.ts`、`workspace.open` / `pick` |
 | 文件树 query | `App.tsx` `RealFileTree` | facade `workspace.fileTree`；磁盘 `apps/desktop/src/workspace-files.ts` |
+| Explorer 文件 ⋯ / 右键菜单 | `apps/renderer/src/menus.tsx`（`MenuItem` / `FileRowMenu`）、`App.tsx` `RealFileTree`；预览 `preview/surfaces.tsx` 同款 | 打开 / 打开方式（已装编辑器子菜单 + 系统「打开方式」）/ 资源管理器定位 / 复制绝对路径 = workspace-shell 文件级通道（`workspace-shell-shared.ts` `fileOpen` / `fileOpenWith` / `fileReveal` / `fileAbsolutePath` / `fileOpeners`，Main 强制包含性校验）；复制相对路径 = Renderer 剪贴板；「添加上下文」复用 @ 按钮的 Composer 胶囊链路；目录「打开」= 树内展开；预览态桌面项禁用 |
 | 拖放路径 | Composer / Explorer | `apps/desktop/src/dropped-paths.ts` |
-| 外部编辑器 | 工作区壳 | `external-editor.ts`、`workspace-shell-ipc.ts` |
+| 外部编辑器 | 工作区壳 | `external-editor.ts`（`listExternalEditorCommands` 同时供「打开方式」子菜单）、`workspace-shell-ipc.ts` |
 
 ## 终端、窗口铬、设置、诊断
 

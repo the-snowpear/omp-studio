@@ -79,6 +79,7 @@ export type HostEventSeed =
   | (HostEventSeedBase & {
       readonly kind: "conversation.changed";
       readonly sessionId: SessionId;
+      readonly streamSeq: number;
       readonly eventSeq: number;
       readonly update: ConversationRuntimeEvent;
     })

@@ -30,6 +30,18 @@ declare global {
     | { readonly status: "opened"; readonly editorName?: string }
     | { readonly status: "cancelled" };
 
+  /** Explorer 文件树单个节点的桌面定位（工作区相对路径 + 节点类型）。 */
+  type WorkspaceFileTargetInput = {
+    readonly workspaceId: string;
+    readonly path: string;
+    readonly kind: "file" | "dir";
+  };
+
+  type WorkspaceFileActionResult =
+    | { readonly status: "opened" }
+    | { readonly status: "cancelled" }
+    | { readonly status: "failed"; readonly message: string };
+
   var ompStudioChrome:
     | {
         setTheme(theme: "light" | "dark"): Promise<void>;
@@ -82,6 +94,20 @@ declare global {
           | { readonly status: "picked"; readonly relativePath: string }
           | { readonly status: "cancelled" }
           | { readonly status: "outside-workspace"; readonly fileName: string }
+        >;
+        /** 用系统默认关联程序打开工作区文件（Main 解析绝对路径并校验）。 */
+        openFile(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult>;
+        /** 用所选编辑器 / 系统「打开方式」打开文件或目录。 */
+        openFileWith(
+          input: WorkspaceFileTargetInput & { readonly openerId: "vscode" | "cursor" | "windsurf" | "choose" },
+        ): Promise<WorkspaceFileActionResult>;
+        /** 文件在资源管理器中选中 / 目录在资源管理器中打开。 */
+        revealFileInFileManager(input: WorkspaceFileTargetInput): Promise<WorkspaceFileActionResult>;
+        /** 解析工作区相对路径为绝对路径（Main 校验存在性与包含性后回传）。 */
+        resolveFileAbsolutePath(input: WorkspaceFileTargetInput): Promise<string>;
+        /** 本机已安装编辑器清单（「打开方式」子菜单数据）。 */
+        listFileOpeners(input: { workspaceId: string }): Promise<
+          ReadonlyArray<{ readonly id: string; readonly name: string }>
         >;
         copyImage(input: {
           mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp";

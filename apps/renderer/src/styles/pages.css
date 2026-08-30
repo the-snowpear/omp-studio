@@ -594,9 +594,6 @@ img.profile-edit-avatar-img { display: block; }
 .hist-toolbar { display: flex; gap: var(--sp-8); margin-bottom: var(--sp-14); }
 .hist-search { flex: 1; }
 .hist-tabs { display: flex; gap: var(--sp-6); flex-shrink: 0; }
-/* 删除会话确认弹窗：共享 .modal-backdrop 默认贴顶（12vh），这里下移到
-   页面中部偏上一点，避免确认框悬在视口上部。 */
-.modal-backdrop.hist-delete-backdrop { padding-top: 26vh; }
 .tt-heading { font-size: var(--fs-14); font-weight: var(--fw-semibold); margin-bottom: var(--sp-4); }
 .tt-desc { margin-bottom: var(--sp-14); }
 

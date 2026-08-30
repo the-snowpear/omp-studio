@@ -64,34 +64,40 @@ const BUILTIN_ROLES: ReadonlyArray<{ id: string; alias: string; name: string; de
 
 /**
  * Web-search providers in the runtime's built-in chain order
- * (`SEARCH_PROVIDER_ORDER`). `credentialFree` mirrors the runtime: scraper
- * engines and the public aggregate need no credential. Kept in sync with
+ * (`SEARCH_PROVIDER_ORDER`), each with the upstream credential-requirement
+ * description. `credentialFree` mirrors the runtime: scraper engines and the
+ * public aggregate need no credential. Kept in sync with
  * `packages/coding-agent/src/web/search/types.ts` upstream.
  */
-const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{ id: string; name: string; credentialFree: boolean }> = [
-  { id: "perplexity", name: "Perplexity", credentialFree: false },
-  { id: "gemini", name: "Gemini", credentialFree: false },
-  { id: "anthropic", name: "Anthropic", credentialFree: false },
-  { id: "codex", name: "OpenAI Codex", credentialFree: false },
-  { id: "xai", name: "xAI", credentialFree: false },
-  { id: "zai", name: "Z.AI", credentialFree: false },
-  { id: "exa", name: "Exa", credentialFree: false },
-  { id: "tinyfish", name: "TinyFish", credentialFree: false },
-  { id: "jina", name: "Jina", credentialFree: false },
-  { id: "kagi", name: "Kagi", credentialFree: false },
-  { id: "tavily", name: "Tavily", credentialFree: false },
-  { id: "firecrawl", name: "Firecrawl", credentialFree: false },
-  { id: "brave", name: "Brave", credentialFree: false },
-  { id: "kimi", name: "Kimi", credentialFree: false },
-  { id: "parallel", name: "Parallel", credentialFree: false },
-  { id: "synthetic", name: "Synthetic", credentialFree: false },
-  { id: "searxng", name: "SearXNG", credentialFree: true },
-  { id: "startpage", name: "Startpage", credentialFree: true },
-  { id: "duckduckgo", name: "DuckDuckGo", credentialFree: true },
-  { id: "ecosia", name: "Ecosia", credentialFree: true },
-  { id: "google", name: "Google", credentialFree: true },
-  { id: "mojeek", name: "Mojeek", credentialFree: true },
-  { id: "public", name: "Public Web", credentialFree: true },
+const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
+  id: string;
+  name: string;
+  description: string;
+  credentialFree: boolean;
+}> = [
+  { id: "perplexity", name: "Perplexity", description: "Uses auth when configured; explicit selection falls back to anonymous search", credentialFree: false },
+  { id: "gemini", name: "Gemini", description: "Google Search grounding via Gemini (uses google-gemini-cli or google-antigravity OAuth)", credentialFree: false },
+  { id: "anthropic", name: "Anthropic", description: "Claude's native web_search tool (uses Anthropic OAuth or ANTHROPIC_API_KEY)", credentialFree: false },
+  { id: "codex", name: "OpenAI", description: "OpenAI's native web_search (uses ChatGPT OAuth via /login openai-codex)", credentialFree: false },
+  { id: "xai", name: "xAI", description: "Grok web search via xAI Responses API (uses SuperGrok/X Premium+ OAuth via /login xai-oauth, or XAI_API_KEY)", credentialFree: false },
+  { id: "zai", name: "Z.AI", description: "Calls Z.AI webSearchPrime MCP", credentialFree: false },
+  { id: "exa", name: "Exa", description: "API via /login exa or EXA_API_KEY; explicit keyless fallback via MCP", credentialFree: false },
+  { id: "tinyfish", name: "TinyFish", description: "Requires TINYFISH_API_KEY", credentialFree: false },
+  { id: "jina", name: "Jina", description: "Requires JINA_API_KEY", credentialFree: false },
+  { id: "kagi", name: "Kagi", description: "Requires KAGI_API_KEY and Kagi Search API beta access", credentialFree: false },
+  { id: "tavily", name: "Tavily", description: "Requires TAVILY_API_KEY", credentialFree: false },
+  { id: "firecrawl", name: "Firecrawl", description: "Uses Firecrawl API when FIRECRAWL_API_KEY is set; falls back to keyless mode", credentialFree: false },
+  { id: "brave", name: "Brave", description: "Requires BRAVE_API_KEY", credentialFree: false },
+  { id: "kimi", name: "Kimi", description: "Kimi Code search (requires a Kimi Code Console key via KIMI_SEARCH_API_KEY/MOONSHOT_SEARCH_API_KEY or /login kimi-code; not MOONSHOT_API_KEY)", credentialFree: false },
+  { id: "parallel", name: "Parallel", description: "Requires PARALLEL_API_KEY", credentialFree: false },
+  { id: "synthetic", name: "Synthetic", description: "Requires SYNTHETIC_API_KEY", credentialFree: false },
+  { id: "searxng", name: "SearXNG", description: "Requires SEARXNG_ENDPOINT or searxng.endpoint", credentialFree: true },
+  { id: "startpage", name: "Startpage", description: "Credential-free scrape of Startpage (Google-backed) results; may be bot-challenged", credentialFree: true },
+  { id: "duckduckgo", name: "DuckDuckGo", description: "Credential-free best-effort fallback; may be bot-challenged on datacenter/shared-egress IPs", credentialFree: true },
+  { id: "ecosia", name: "Ecosia", description: "Credential-free browser-backed scrape of Ecosia (Google-backed) results", credentialFree: true },
+  { id: "google", name: "Google", description: "Credential-free browser-backed fallback; slower and may be bot-challenged", credentialFree: true },
+  { id: "mojeek", name: "Mojeek", description: "Credential-free browser-backed scrape of Mojeek's independent index", credentialFree: true },
+  { id: "public", name: "Public Web", description: "Queries every credential-free engine in parallel and consolidates deduplicated results", credentialFree: true },
 ];
 
 /** Search-specific env vars per provider id (mirrors upstream credential lookup). */
@@ -505,6 +511,7 @@ function emptyWebSearch(): WebSearchConfigReadModel {
     providers: WEB_SEARCH_PROVIDER_CATALOG.map((provider) => ({
       id: provider.id,
       name: provider.name,
+      description: provider.description,
       credentialFree: provider.credentialFree,
       hasCredential: provider.credentialFree,
     })),
@@ -1751,6 +1758,13 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     const searxngTokenSet = Boolean(await readNestedString(configPath, ["searxng", "token"]));
     const searxngBasicUsername = await readNestedString(configPath, ["searxng", "basicUsername"]);
     const searxngPasswordSet = Boolean(await readNestedString(configPath, ["searxng", "basicPassword"]));
+    const searxngCategories = await readNestedString(configPath, ["searxng", "categories"]);
+    const searxngEngines = await readNestedString(configPath, ["searxng", "engines"]);
+    const searxngLanguage = await readNestedString(configPath, ["searxng", "language"]);
+    // safesearch 0 is a valid level; only absent/invalid values fall back to undefined.
+    const safesearchRaw = await readNested(configPath, ["searxng", "safesearch"]);
+    const searxngSafesearch =
+      (safesearchRaw === 0 || safesearchRaw === 1 || safesearchRaw === 2) ? safesearchRaw : undefined;
     const exaEnabled = await readNestedBool(configPath, ["exa", "enabled"], true);
     const exaSearchDelayMs = await readNestedNumber(configPath, ["exa", "searchDelayMs"], 1000);
     return {
@@ -1762,6 +1776,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       providers: WEB_SEARCH_PROVIDER_CATALOG.map((provider) => ({
         id: provider.id,
         name: provider.name,
+        description: provider.description,
         credentialFree: provider.credentialFree,
         hasCredential: hasWebSearchCredential(provider.id, provider, authenticated),
       })),
@@ -1771,6 +1786,10 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           tokenSet: searxngTokenSet,
           basicUsername: searxngBasicUsername,
           passwordSet: searxngPasswordSet,
+          categories: searxngCategories,
+          engines: searxngEngines,
+          language: searxngLanguage,
+          ...(searxngSafesearch !== undefined ? { safesearch: searxngSafesearch } : {}),
         },
         exa: { enabled: exaEnabled, searchDelayMs: exaSearchDelayMs },
       },
@@ -2607,8 +2626,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           ? upsertYamlRecordEntry(next, "providers", "webSearchGeminiModel", quoteInline(input.geminiModel.trim()))
           : deleteYamlRecordEntry(next, "providers", "webSearchGeminiModel");
       }
-      // SearXNG advanced: endpoint / basic username are clearable; token and
-      // basic password only ever set (blank keeps the existing secret).
+      // SearXNG advanced: plain-text fields are clearable with an empty string;
+      // token and basic password only ever set (blank keeps the existing
+      // secret); safesearch null deletes the key back to the instance default.
       if (input.searxng !== undefined) {
         if (input.searxng.endpoint !== undefined) {
           next = input.searxng.endpoint.length > 0
@@ -2625,6 +2645,18 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         }
         if (input.searxng.basicPassword !== undefined && input.searxng.basicPassword.length > 0) {
           next = upsertYamlRecordEntry(next, "searxng", "basicPassword", quoteInline(input.searxng.basicPassword.trim()));
+        }
+        for (const key of ["categories", "engines", "language"] as const) {
+          const value = input.searxng[key];
+          if (value === undefined) continue;
+          next = value.length > 0
+            ? upsertYamlRecordEntry(next, "searxng", key, quoteInline(value.trim()))
+            : deleteYamlRecordEntry(next, "searxng", key);
+        }
+        if (input.searxng.safesearch !== undefined) {
+          next = input.searxng.safesearch === null
+            ? deleteYamlRecordEntry(next, "searxng", "safesearch")
+            : upsertYamlRecordEntry(next, "searxng", "safesearch", String(Math.min(2, Math.max(0, Math.round(input.searxng.safesearch)))));
         }
       }
       // Exa advanced.

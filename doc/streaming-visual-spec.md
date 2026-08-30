@@ -631,6 +631,23 @@
 | 用户 | `S` | 18×18px，灰底（`--surface-3`），深色字 |
 | Assistant | `π` | 18×18px，强调色柔底（`--accent-soft`），强调色字 |
 
+### 10.4 会话切换过场
+
+切换会话必然有一段空窗（engine 按新 identity 重建，首份快照零行 `loading`）。空窗不允许出现占位文案或空白，只允许淡出 → 骨架 → 淡入：
+
+| 阶段 | 时长 | 画面 |
+|---|---|---|
+| `leaving` | 140ms（`--ease-in`） | 上一段 transcript 原地淡出，位置与滚动位不动 |
+| `waiting` | **无时限** | 骨架屏；读取多久就停多久 |
+| `revealing` | 320ms（`--ease-out`） | 新 transcript 淡入，与骨架淡出（200ms）交叠 |
+| `idle` | — | 不挂任何 transition / animation |
+
+- 骨架形状：assistant 组（18px 头像 + 72×9 名条 + 11px 正文行，可含 34px 工具卡）与右对齐用户气泡（34px，`--accent-soft` 渐变，圆角同 `.ev-user .ev-body`）交替共 5 组，组间距 `--sp-20`，下缘线性遮罩渐隐（52%→96%）。
+- 骨架容器 `.convo-veil`：`position: sticky; top: 0; height: 0` + 绝对定位内层（高度 `min(420px, 46vh)`），对文档高度零贡献。**硬约束**：`ConversationVirtualList` 的 `scrollMargin` 相对滚动容器量算，骨架占真实高度会把虚拟行反向补偿；正文层同理只允许动 `opacity`，位移只由骨架做。
+- 入场闸门：骨架挂载后下一拍才置 `data-in`，transition 带 60ms 延迟。读取落在淡出窗口内则完全跳过骨架；稍慢的读取只亮到半途就被淡出反向接走（可逆 transition，不用 `animation`）；`SWITCH_SLOW_MS`（2.4s）后在骨架下缘补一行"正在读取会话记录…"。
+- 连续切换：骨架不重建，`waiting` 一直兜到最后那个会话读完。
+- `prefers-reduced-motion`：跳过淡出，骨架保留但为静态（`.skeleton` 退化为 `--surface-3` 平铺）。
+
 ---
 
 ## 11. 子代理条与检查卡
@@ -702,21 +719,21 @@
 
 | 文件 | 与对话相关的行范围 | 说明 |
 |---|---|---|
-| `styles/workbench.css` | L294–L331 | 对话容器 `.convo-*` |
-| | L333–L478 | 消息事件 `.ev-*`、气泡、头部 |
-| | L480–L661 | 轮次变更卡 `.turn-diff-*`、计划入口 |
-| | L680–L828 | Markdown 排版、代码块、Mermaid |
-| | L829–L1083 | 子代理条 `.subagent-strip`、`.sa-*` |
-| | L1084–L1240 | 工具链 `.tl-*`、`.batch-*` |
-| | L1241–L1547 | 工具卡正文 `.tc-*`、`.think-*` |
-| | L1548–L1654 | 审批/Ask/错误卡 |
-| | L1656–L1735 | 压缩规则 `.compact-rule`、重置边界 |
-| | L1736–L1942 | Minimap、回到最新按钮 |
-| | L1948–L2009 | 活动状态线 `.activity-line` |
-| | L5729–L5872 | 补充样式 |
-| | L5880–L6213 | 空态欢迎页 |
+| `styles/workbench.css` | L294–L431 | 对话容器 `.convo-*`，含切换过场 `.convo-body` / 骨架 `.convo-veil` / `.cv-*` |
+| | L434–L579 | 消息事件 `.ev-*`、气泡、头部 |
+| | L581–L762 | 轮次变更卡 `.turn-diff-*`、计划入口 |
+| | L781–L929 | Markdown 排版、代码块、Mermaid |
+| | L930–L1184 | 子代理条 `.subagent-strip`、`.sa-*` |
+| | L1185–L1341 | 工具链 `.tl-*`、`.batch-*` |
+| | L1342–L1648 | 工具卡正文 `.tc-*`、`.think-*` |
+| | L1649–L1755 | 审批/Ask/错误卡 |
+| | L1757–L1836 | 压缩规则 `.compact-rule`、重置边界 |
+| | L1837–L2043 | Minimap、回到最新按钮 |
+| | L2049–L2110 | 活动状态线 `.activity-line` |
+| | L5830–L5973 | 补充样式 |
+| | L5981–L6314 | 空态欢迎页 |
 | `styles/tokens.css` | 全文 359 行 | 设计变量（颜色、字号、间距、动效） |
-| `styles/base.css` | 全文 300 行 | 重置、chip、spinner、dot、滚动条 |
+| `styles/base.css` | 全文 300 行 | 重置、chip、spinner、dot、`.skeleton`、滚动条 |
 | `styles/components.css` | 部分 | 按钮、chip、popover（被卡片引用） |
 
 ### 13.2 不属于流式渲染的 workbench.css 区段
@@ -725,15 +742,15 @@
 |---|---|
 | L1–L88 | 顶栏 |
 | L89–L286 | 遥测弹窗 |
-| L2010–L2421 | Composer 区域、Task Dock |
-| L2422–L2804 | Deck 浮层（审批/Ask） |
-| L2805–L2987 | Plan Review 模态 |
-| L2988–L3970 | Composer 编辑器 |
-| L3971–L4293 | 上下文条、项目创建 |
-| L4294–L4451 | 输入队列、自动完成 |
-| L4452–L4691 | 底部面板、终端 |
-| L4692–L5563 | 右侧面板（Git、Diff、Preview、Hub） |
-| L5564–L5706 | 命令面板 |
+| L2111–L2522 | Composer 区域、Task Dock |
+| L2523–L2905 | Deck 浮层（审批/Ask） |
+| L2906–L3088 | Plan Review 模态 |
+| L3089–L4071 | Composer 编辑器 |
+| L4072–L4394 | 上下文条、项目创建 |
+| L4395–L4552 | 输入队列、自动完成 |
+| L4553–L4792 | 底部面板、终端 |
+| L4793–L5664 | 右侧面板（Git、Diff、Preview、Hub） |
+| L5665–L5807 | 命令面板 |
 
 ### 13.3 关键 CSS Grid 展开/折叠模式
 

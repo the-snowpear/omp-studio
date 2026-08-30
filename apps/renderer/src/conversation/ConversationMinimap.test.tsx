@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TimelineRow } from "./conversationViewModel";
 import { timelineRowKey } from "./conversationViewModel";
 import {
+  activeMarkId,
   ConversationMinimap,
   deriveMinimapMarks,
   pickNextMark,
@@ -47,10 +48,39 @@ function mark(itemId: string, type: MinimapMark["type"]): MinimapMark {
 }
 
 describe("deriveMinimapMarks", () => {
-  it("按行类型派生圆点并编号", () => {
+  it("连续 assistant rows 只派生一个与真实 assistant run 对应的圆点", () => {
     const marks = deriveMinimapMarks(ROWS);
-    expect(marks.map((entry) => entry.type)).toEqual(["user", "assistant", "bash", "error", "compact"]);
-    expect(marks.map((entry) => entry.turn)).toEqual([1, 2, 3, 4, 5]);
+    expect(marks.map((entry) => entry.itemId)).toEqual(["u1", "a1", "cp1"]);
+    expect(marks.map((entry) => entry.type)).toEqual(["user", "error", "compact"]);
+    expect(marks.map((entry) => entry.turn)).toEqual([1, 2, 3]);
+  });
+
+  it("把发送失败的用户行和工具失败的 assistant run 分类为错误", () => {
+    const rows: TimelineRow[] = [
+      {
+        type: "user",
+        itemId: "failed-user",
+        createdAt: "t1",
+        text: "请重试",
+        pending: "failed",
+        error: "network unavailable",
+      },
+      {
+        type: "assistant",
+        itemId: "failed-tool-run",
+        createdAt: "t2",
+        status: "completed",
+        segments: [{
+          type: "batch",
+          key: "failed-batch",
+          tools: [{ toolCallId: "failed-call", toolName: "Bash", status: "failed" }],
+        }],
+      },
+    ];
+
+    const marks = deriveMinimapMarks(rows);
+    expect(marks.map((entry) => entry.type)).toEqual(["error", "error"]);
+    expect(marks[0]!.preview).toContain("network unavailable");
   });
 
   it("marks an in-progress compact divider as compact", () => {
@@ -61,10 +91,16 @@ describe("deriveMinimapMarks", () => {
   });
 
   it("预览文本取用户原文 / 工具摘要 / 压缩摘要", () => {
-    const marks = deriveMinimapMarks(ROWS);
+    const marks = deriveMinimapMarks([
+      ROWS[0]!,
+      ROWS[1]!,
+      { type: "user", itemId: "separator", createdAt: "t2.5", text: "继续" },
+      ROWS[2]!,
+      ROWS[4]!,
+    ]);
     expect(marks[0]!.preview).toBe("帮我修一下登录页");
     expect(marks[1]!.preview).toContain("相关文件");
-    expect(marks[2]!.preview).toContain("运行 1 条命令");
+    expect(marks[3]!.preview).toContain("运行 1 条命令");
     expect(marks[4]!.preview).toBe("早期对话压缩");
   });
 
@@ -90,6 +126,26 @@ describe("deriveMinimapMarks", () => {
   });
 });
 
+describe("activeMarkId", () => {
+  const marks = [mark("early", "user"), mark("late", "error")];
+  const fractions = { early: 0.1, late: 0.8 };
+
+  it("滚动后根据内容视口中线更新活跃圆点", () => {
+    expect(activeMarkId(marks, fractions, {
+      scrollTop: 0,
+      scrollHeight: 1000,
+      scrollerHeight: 200,
+      trackHeight: 500,
+    })).toBe("early");
+    expect(activeMarkId(marks, fractions, {
+      scrollTop: 700,
+      scrollHeight: 1000,
+      scrollerHeight: 200,
+      trackHeight: 500,
+    })).toBe("late");
+  });
+});
+
 describe("spaceMinimapMarks", () => {
   it("间隔足够的圆点全部保留", () => {
     const marks = [mark("m1", "user"), mark("m2", "assistant"), mark("m3", "user")];
@@ -107,6 +163,24 @@ describe("spaceMinimapMarks", () => {
     const marks = [mark("m1", "assistant"), mark("m2", "assistant"), mark("m3", "user")];
     const placed = spaceMinimapMarks(marks, { m1: 0.2, m2: 0.205, m3: 0.6 });
     expect(placed.map((entry) => entry.itemId)).toEqual(["m1", "m3"]);
+  });
+
+  it("代表点只从当前簇内挑选，不会跨簇取用更早的错误点", () => {
+    /* 簇内扫描曾用 entries.findIndex 从数组头部起扫，既是 O(n²)，也会在谓词
+       写错时把前一个簇的点当成本簇代表。这里锁定「只看本簇」的语义。 */
+    const marks = [mark("e1", "error"), mark("a1", "assistant"), mark("a2", "assistant")];
+    const placed = spaceMinimapMarks(marks, { e1: 0.1, a1: 0.7, a2: 0.705 });
+    expect(placed.map((entry) => entry.itemId)).toEqual(["e1", "a1"]);
+  });
+
+  it("在 2,000 个圆点上保持线性开销", () => {
+    const marks = Array.from({ length: 2000 }, (_, index) => mark(`m${index}`, index % 97 === 0 ? "error" : "assistant"));
+    const fractions: Record<string, number> = {};
+    for (let index = 0; index < marks.length; index += 1) fractions[`m${index}`] = index / (marks.length - 1);
+    const begun = performance.now();
+    const placed = spaceMinimapMarks(marks, fractions);
+    expect(performance.now() - begun).toBeLessThan(120);
+    expect(placed.length).toBeLessThanOrEqual(Math.ceil(1 / 0.018) + 1);
   });
 });
 
@@ -190,8 +264,8 @@ describe("ConversationMinimap 组件", () => {
     view.rerender(<Harness rows={[...ROWS]} />);
 
     const userMark = screen.getByRole("button", { name: "#1 用户消息" });
-    const bashMark = screen.getByRole("button", { name: "#3 命令执行" });
-    expect(bashMark.className).toContain("bash");
+    const assistantRunMark = screen.getByRole("button", { name: "#2 错误" });
+    expect(assistantRunMark.className).toContain("error");
 
     const row = view.container.querySelector<HTMLElement>('[data-item-id="u1"]');
     expect(row).not.toBeNull();
@@ -229,16 +303,16 @@ describe("ConversationMinimap 组件", () => {
 
     expect(screen.queryByRole("button", { name: "#1 用户消息" })).toBeNull();
     expect(screen.queryByRole("button", { name: "#2 助手回复" })).toBeNull();
-    expect(screen.getByRole("button", { name: "#4 错误" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "#5 历史压缩" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "#2 错误" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "#3 历史压缩" })).toBeDefined();
 
-    const errorRow = view.container.querySelector<HTMLElement>('[data-item-id="a3"]');
+    const errorRow = view.container.querySelector<HTMLElement>('[data-item-id="a1"]');
     errorRow!.scrollIntoView = vi.fn();
     const scrollTo = stubScrollerScroll();
     // keyOnly 切换后菜单保持打开，直接跳转即可
     fireEvent.click(screen.getByRole("menuitem", { name: "跳到下一个错误" }));
     expect(errorRow!.scrollIntoView).not.toHaveBeenCalled();
-    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 225 });
+    expect(scrollTo).toHaveBeenCalledWith({ behavior: "smooth", top: 25 });
   });
 
   it("悬浮圆点显示简化预览", () => {
@@ -249,6 +323,76 @@ describe("ConversationMinimap 组件", () => {
     fireEvent.mouseEnter(screen.getByRole("button", { name: "#1 用户消息" }));
     expect(screen.getByText("#01 · 用户消息")).toBeDefined();
     expect(screen.getByText("帮我修一下登录页")).toBeDefined();
+  });
+
+  it("视口条拖动按帧合并写入：rAF 前不写，一帧只写一次", async () => {
+    // pointermove 以输入频率到达，曾按事件逐个「读 rect → 写 scrollTop → 读回」，
+    // 流式期间等于按事件次数重复全量布局。这里钉住合并语义：两次 move 只落一次写，
+    // 且写发生在 rAF；滑块位置由拖动几何直接写出。
+    const view = render(<Harness rows={ROWS} />);
+    injectGeometry(view.container, { scrollHeight: 1000, clientHeight: 200, rowHeight: 100 });
+    view.rerender(<Harness rows={[...ROWS]} />);
+    const scroller = screen.getByTestId("scroller");
+    const track = view.container.querySelector<HTMLElement>("#mmTrack")!;
+    const viewport = view.container.querySelector<HTMLElement>("#mmViewport")!;
+    Object.defineProperty(track, "clientHeight", { configurable: true, get: () => 600 });
+    track.getBoundingClientRect = () => ({ top: 100, bottom: 700, left: 0, right: 0, height: 600, width: 8, x: 0, y: 100, toJSON: () => ({}) }) as DOMRect;
+    Object.defineProperty(viewport, "offsetHeight", { configurable: true, get: () => 50 });
+    viewport.getBoundingClientRect = () => ({ top: 200, bottom: 250, left: 0, right: 0, height: 50, width: 8, x: 0, y: 200, toJSON: () => ({}) }) as DOMRect;
+    viewport.setPointerCapture = vi.fn();
+    let writes = 0;
+    let currentTop = 0;
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      get: () => currentTop,
+      set: (value: number) => { writes += 1; currentTop = value; },
+    });
+
+    // 抓取偏移 25（clientY 225 − 视口条 top 200）。jsdom 的 fireEvent.pointer* 不携带
+    // clientY，改派发带坐标的 MouseEvent（浏览器里 pointer 事件必有 clientY）。
+    const pointer = (target: Element, type: string, clientY: number) => {
+      target.dispatchEvent(new MouseEvent(type, { clientY, bubbles: true, cancelable: true }));
+    };
+    pointer(viewport, "pointerdown", 225);
+    pointer(viewport, "pointermove", 325);
+    pointer(viewport, "pointermove", 425);
+    expect(writes).toBe(0);
+
+    await act(async () => {
+      await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()); });
+    });
+    expect(writes).toBe(1);
+    // top = 425 − 25 − 100 = 300；sliderSpan = 600 − 52 − 50 = 498；maxScroll = 800
+    expect(viewport.style.top).toBe("300px");
+    expect(currentTop).toBeCloseTo((300 / 498) * 800, 0);
+
+    pointer(viewport, "pointerup", 425);
+    expect(viewport.style.display).not.toBe("none");
+  });
+
+  it("连续高度变化只合成一次尾随重测", async () => {
+    // 工具卡展开/收起的每一帧都在改 scrollHeight，跳过闸门因此每帧都失效：那意味
+    // 着每帧一次全子树 querySelectorAll + 逐节点 rect + 圆点全量重渲染。
+    vi.useFakeTimers();
+    try {
+      const view = render(<Harness rows={ROWS} />);
+      injectGeometry(view.container, { scrollHeight: 500, clientHeight: 250, rowHeight: 100 });
+      view.rerender(<Harness rows={[...ROWS]} />);
+      const mark = () => screen.getByRole("button", { name: "#1 用户消息" }).style.top;
+      const measured = mark();
+      expect(measured).not.toBe("");
+
+      injectGeometry(view.container, { scrollHeight: 1000, clientHeight: 250, rowHeight: 100 });
+      view.rerender(<Harness rows={[...ROWS]} />);
+      expect(mark()).toBe(measured);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(mark()).not.toBe(measured);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -206,9 +206,17 @@ interface StudioAgentTelemetryCache {
  * Live per-agent telemetry port over AgentSession. Results are cached per
  * agent and invalidated by that agent's own session events, so roster
  * projections never rescan long transcripts on every state push.
+ *
+ * Parking disposes the AgentSession, so the live stats source disappears while
+ * the registry ref survives. The last measured usage is therefore retained per
+ * agent (keyed by `createdAt`, so a re-registered id cannot inherit another
+ * run's numbers) and served frozen — `lastActivity - createdAt` as a `span` —
+ * once the session is gone. Without it a parked agent reports no usage at all
+ * and the Hub can only show `usage —`.
  */
 function createStudioAgentTelemetry(registry: AgentRegistry): StudioAgentTelemetryPort {
 	const cache = new Map<string, StudioAgentTelemetryCache>();
+	const retained = new Map<string, { createdAt: number; usage: StudioAgentUsage }>();
 	const listeners = new Map<string, Set<() => void>>();
 	const attachedSessions = new Map<string, { session: AgentSession; unsubscribe: () => void }>();
 
@@ -229,6 +237,9 @@ function createStudioAgentTelemetry(registry: AgentRegistry): StudioAgentTelemet
 		if (attached && attached.session === session) return;
 		attached?.unsubscribe();
 		attachedSessions.delete(agentId);
+		// The session identity changed (first attach, park, revive): whatever was
+		// cached was computed against the previous one.
+		if (attached !== undefined || session !== null) cache.delete(agentId);
 		if (!session) return;
 		const unsubscribe = session.subscribe(() => notify(agentId));
 		attachedSessions.set(agentId, { session, unsubscribe });
@@ -240,6 +251,7 @@ function createStudioAgentTelemetry(registry: AgentRegistry): StudioAgentTelemet
 		const result: StudioAgentTelemetryCache = {};
 		const ref = registry.get(agentId);
 		const session = ref?.session ?? null;
+		if (!ref) retained.delete(agentId);
 		if (ref && session) {
 			try {
 				const stats = session.getSessionStats();
@@ -254,6 +266,7 @@ function createStudioAgentTelemetry(registry: AgentRegistry): StudioAgentTelemet
 						? { contextTokens: stats.contextUsage.tokens, contextWindow: stats.contextUsage.contextWindow }
 						: {}),
 				};
+				retained.set(agentId, { createdAt: ref.createdAt, usage: result.usage });
 			} catch {
 				// live usage stays unavailable
 			}
@@ -270,6 +283,15 @@ function createStudioAgentTelemetry(registry: AgentRegistry): StudioAgentTelemet
 				}
 			} catch {
 				// latest assistant gist stays unavailable
+			}
+		} else if (ref) {
+			const last = retained.get(agentId);
+			if (last && last.createdAt === ref.createdAt) {
+				result.usage = {
+					...last.usage,
+					durationMs: Math.max(0, ref.lastActivity - ref.createdAt),
+					durationKind: "span",
+				};
 			}
 		}
 		cache.set(agentId, result);

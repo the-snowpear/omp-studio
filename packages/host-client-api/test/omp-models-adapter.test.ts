@@ -1541,7 +1541,7 @@ describe("web search config", () => {
   });
 
   test("setWebSearch filters unknown ids and dedupes the order", async () => {
-    await withDir(async (dir, service) => {
+    await withDir(async (_dir, service) => {
       await service.setWebSearch({ order: ["perplexity", "not-a-provider", "perplexity"] });
       const ws = (await service.get()).webSearch;
       assert.deepEqual(ws.order, ["perplexity"]);
@@ -1549,7 +1549,7 @@ describe("web search config", () => {
   });
 
   test("setWebSearch clamps timeout to the runtime ceiling", async () => {
-    await withDir(async (dir, service) => {
+    await withDir(async (_dir, service) => {
       await service.setWebSearch({ timeoutSeconds: 9999 });
       const ws = (await service.get()).webSearch;
       assert.equal(ws.timeoutSeconds, 300);
@@ -1557,7 +1557,7 @@ describe("web search config", () => {
   });
 
   test("empty geminiModel clears the key back to the default", async () => {
-    await withDir(async (dir, service) => {
+    await withDir(async (_dir, service) => {
       await service.setWebSearch({ geminiModel: "gemini-2.5-flash" });
       await service.setWebSearch({ geminiModel: "" });
       const ws = (await service.get()).webSearch;
@@ -1581,8 +1581,46 @@ describe("web search config", () => {
     });
   });
 
-  test("exa advanced options round-trip", async () => {
+  test("searxng categories / engines / language round-trip and empty clears", async () => {
     await withDir(async (dir, service) => {
+      await service.setWebSearch({
+        searxng: { categories: "general,it", engines: "bing,duckduckgo", language: "zh-CN" },
+      });
+      const ws = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(ws?.categories, "general,it");
+      assert.equal(ws?.engines, "bing,duckduckgo");
+      assert.equal(ws?.language, "zh-CN");
+      const raw = await readFile(join(dir, "config.yml"), "utf8");
+      // Commas force the YAML writer to quote these values; both forms read back identically.
+      assert.match(raw, /categories: "?general,it"?/);
+      assert.match(raw, /engines: "?bing,duckduckgo"?/);
+      assert.match(raw, /language: zh-CN/);
+      // Empty strings delete the keys again.
+      await service.setWebSearch({ searxng: { categories: "", engines: "", language: "" } });
+      const cleared = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(cleared?.categories, "");
+      assert.equal(cleared?.engines, "");
+      assert.equal(cleared?.language, "");
+    });
+  });
+
+  test("searxng safesearch accepts 0, null deletes the key", async () => {
+    await withDir(async (dir, service) => {
+      await service.setWebSearch({ searxng: { safesearch: 0 } });
+      let ws = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(ws?.safesearch, 0);
+      assert.match(await readFile(join(dir, "config.yml"), "utf8"), /safesearch: 0/);
+      await service.setWebSearch({ searxng: { safesearch: 2 } });
+      ws = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(ws?.safesearch, 2);
+      await service.setWebSearch({ searxng: { safesearch: null } });
+      ws = (await service.get()).webSearch.advanced.searxng;
+      assert.equal(ws?.safesearch, undefined);
+    });
+  });
+
+  test("exa advanced options round-trip", async () => {
+    await withDir(async (_dir, service) => {
       await service.setWebSearch({ exa: { enabled: false, searchDelayMs: 250 } });
       const ws = (await service.get()).webSearch.advanced.exa;
       assert.equal(ws?.enabled, false);
@@ -1590,13 +1628,15 @@ describe("web search config", () => {
     });
   });
 
-  test("web search provider catalog carries credential-free flags", async () => {
+  test("web search provider catalog carries credential-free flags and descriptions", async () => {
     await withDir(async (_dir, service) => {
       const ws = (await service.get()).webSearch;
       assert.ok(ws.providers.length >= 23);
       const byId = new Map(ws.providers.map((p) => [p.id, p]));
       assert.equal(byId.get("duckduckgo")?.credentialFree, true);
       assert.equal(byId.get("perplexity")?.credentialFree, false);
+      assert.match(byId.get("brave")?.description ?? "", /BRAVE_API_KEY/);
+      assert.ok(ws.providers.every((p) => p.description.length > 0));
     });
   });
 });

@@ -51,6 +51,7 @@ import {
   createDefaultHostDiagnosticsFactory,
   StudioHostClientFacade,
   redactText,
+  threadIdFor,
   type HostAgentDefinitionsService,
   type HostDiagnosticsFactory,
   type HostExtensibilityService,
@@ -629,6 +630,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       archiveServiceCwd = cwd;
       archiveService = new StudioSessionArchiveService({
         allowedCwd: cwd,
+        writeGraceMs: 0,
         isResident: (sessionId) =>
           context.runtimeSession?.isResident?.(sessionId) === true
           || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
@@ -722,6 +724,14 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     createDesktopSemanticCommands({
       sessionRef,
       catalog,
+      resolveResidentSessionId: (threadId) => {
+        const residents = context.runtimeSession?.listResidents?.().residents;
+        if (residents !== undefined) {
+          const match = residents.find((r) => threadIdFor(r.sessionId) === threadId);
+          if (match !== undefined) return match.sessionId;
+        }
+        return undefined;
+      },
       archive: currentArchiveService,
       deleteService: currentDeleteService,
       telemetryStore: () => telemetryStore,

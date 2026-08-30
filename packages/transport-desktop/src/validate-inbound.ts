@@ -191,6 +191,24 @@ function validateTranscriptReadInput(input: unknown): void {
   validateTranscriptPaginationFields(input, what);
 }
 
+function validateConversationOpenInput(input: unknown): void {
+  const what = "conversation.open input";
+  assertPlainObject(input, what);
+  assertNoUnknownKeys(input, ["target", "limit"], what);
+  assertPlainObject(input.target, `${what}: target`);
+  if (input.target.kind === "session") {
+    assertNoUnknownKeys(input.target, ["kind", "sessionId"], `${what}: target`);
+    assertOpaqueToken(input.target.sessionId, `${what}: target.sessionId`);
+  } else if (input.target.kind === "agent") {
+    assertNoUnknownKeys(input.target, ["kind", "parentSessionId", "agentId"], `${what}: target`);
+    assertOpaqueToken(input.target.parentSessionId, `${what}: target.parentSessionId`);
+    assertOpaqueToken(input.target.agentId, `${what}: target.agentId`);
+  } else {
+    throw new ValidationError(`${what}: target.kind must be session or agent`);
+  }
+  validateTranscriptPaginationFields(input, what);
+}
+
 function validateTranscriptReadPageInput(input: unknown): void {
   const what = "session.transcript.readPage input";
   assertPlainObject(input, what);
@@ -1392,10 +1410,20 @@ function validateModelsWebSearchSetInput(input: unknown): void {
   }
   if (input.searxng !== undefined) {
     assertPlainObject(input.searxng, "models.webSearch.set input: searxng");
-    assertNoUnknownKeys(input.searxng, ["endpoint", "token", "basicUsername", "basicPassword"], "models.webSearch.set input: searxng");
-    for (const key of ["endpoint", "token", "basicUsername", "basicPassword"] as const) {
+    assertNoUnknownKeys(
+      input.searxng,
+      ["endpoint", "token", "basicUsername", "basicPassword", "categories", "engines", "language", "safesearch"],
+      "models.webSearch.set input: searxng",
+    );
+    for (const key of ["endpoint", "token", "basicUsername", "basicPassword", "categories", "engines", "language"] as const) {
       if (input.searxng[key] !== undefined && typeof input.searxng[key] !== "string") {
         throw new ValidationError(`models.webSearch.set input: searxng.${key} must be a string`);
+      }
+    }
+    // null deletes the key; otherwise only the 0/1/2 levels are accepted.
+    if (input.searxng.safesearch !== undefined && input.searxng.safesearch !== null) {
+      if (typeof input.searxng.safesearch !== "number" || ![0, 1, 2].includes(input.searxng.safesearch)) {
+        throw new ValidationError("models.webSearch.set input: searxng.safesearch must be 0, 1, 2 or null");
       }
     }
   }
@@ -1655,6 +1683,7 @@ const QUERY_INPUT_VALIDATORS: {
   "projects.list": (input) => validateEmptyInput(input, "projects.list input"),
   "workspace.fileTree": validateWorkspaceFileTreeInput,
   "usage.get": (input) => validateEmptyInput(input, "usage.get input"),
+  "conversation.open": validateConversationOpenInput,
   "session.transcript.read": validateTranscriptReadInput,
   "agent.transcript.read": validateAgentTranscriptReadInput,
   "agent.conversation.read": validateAgentConversationReadInput,

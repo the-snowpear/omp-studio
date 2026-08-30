@@ -5,6 +5,7 @@ import type { StudioClient, WorkspaceFileTreeReadModel, WorkspaceId } from "@omp
 
 import { buildGitStatusLookup } from "./git/treeStatus";
 import { I18nProvider } from "./i18n";
+import { __resetExpandMemoryForTests, readExplorerExpansion, writeExplorerExpansion } from "./sidebar/expandMemory";
 
 vi.mock("@xterm/xterm", () => ({ Terminal: class Terminal {} }));
 vi.mock("@xterm/addon-fit", () => ({ FitAddon: class FitAddon {} }));
@@ -28,7 +29,11 @@ const noCreation = {
   onCreateCancel: () => {},
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // 展开记忆落在 localStorage，用例间复位避免互相泄漏。
+  __resetExpandMemoryForTests();
+});
 
 function tree(nodes: WorkspaceFileTreeReadModel["nodes"]): WorkspaceFileTreeReadModel {
   return { workspaceId, nodes };
@@ -320,7 +325,77 @@ describe("RealFileTree", () => {
     expect(screen.queryByText(/打开 package\.json/)).toBeNull();
   });
 
-  it("provides 加入上下文 tooltip and aria-label on @ buttons", async () => {
+  it("restores remembered folder expansion on mount without user interaction", async () => {
+    writeExplorerExpansion(String(workspaceId), new Set(["src"]));
+    const query = vi.fn(async (_name: string, input: { path?: string }) => input.path === "src"
+      ? tree([{ type: "file", name: "main.ts", path: "src/main.ts" }])
+      : tree([{ type: "dir", name: "src", path: "src" }]));
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+
+    const src = await screen.findByRole("treeitem", { name: "src 文件夹" });
+    await waitFor(() => expect(src.getAttribute("aria-expanded")).toBe("true"));
+    expect(query).toHaveBeenCalledWith("workspace.fileTree", { workspaceId, path: "src" });
+    await screen.findByText("main.ts");
+  });
+
+  it("restores nested remembered paths level by level as children load", async () => {
+    writeExplorerExpansion(String(workspaceId), new Set(["src", "src/conversation"]));
+    const query = vi.fn(async (_name: string, input: { path?: string }) => {
+      if (input.path === "src") return tree([{ type: "dir", name: "conversation", path: "src/conversation" }]);
+      if (input.path === "src/conversation") return tree([{ type: "file", name: "App.tsx", path: "src/conversation/App.tsx" }]);
+      return tree([{ type: "dir", name: "src", path: "src" }]);
+    });
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+
+    await screen.findByText("App.tsx");
+    expect(screen.getByRole("treeitem", { name: "conversation 文件夹" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("persists manual toggles and restores them after a file-tree refresh", async () => {
+    const query = vi.fn(async (_name: string, input: { path?: string }) => input.path === "src"
+      ? tree([{ type: "file", name: "main.ts", path: "src/main.ts" }])
+      : tree([{ type: "dir", name: "src", path: "src" }]));
+    const client = { query } as unknown as StudioClient;
+
+    const { rerender } = render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+    const src = await screen.findByRole("treeitem", { name: "src 文件夹" });
+    fireEvent.click(src);
+    await waitFor(() => expect(src.getAttribute("aria-expanded")).toBe("true"));
+    expect(readExplorerExpansion(String(workspaceId)).has("src")).toBe(true);
+
+    rerender(
+      <I18nProvider forcedLanguage="zh">
+        <RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={1} search="" {...noCreation} />
+      </I18nProvider>,
+    );
+    const srcAfterRefresh = await screen.findByRole("treeitem", { name: "src 文件夹" });
+    await waitFor(() => expect(srcAfterRefresh.getAttribute("aria-expanded")).toBe("true"));
+    await screen.findByText("main.ts");
+  });
+
+  it("drops a folder from remembered expansion when the user collapses it", async () => {
+    writeExplorerExpansion(String(workspaceId), new Set(["src"]));
+    const query = vi.fn(async (_name: string, input: { path?: string }) => input.path === "src"
+      ? tree([{ type: "file", name: "main.ts", path: "src/main.ts" }])
+      : tree([
+          { type: "dir", name: "src", path: "src", children: [{ type: "file", name: "main.ts", path: "src/main.ts" }] },
+          { type: "file", name: "README.md", path: "README.md" },
+        ]));
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+    const src = await screen.findByRole("treeitem", { name: "src 文件夹" });
+    await waitFor(() => expect(src.getAttribute("aria-expanded")).toBe("true"));
+    fireEvent.click(src);
+    await waitFor(() => expect(src.getAttribute("aria-expanded")).toBe("false"));
+    expect(readExplorerExpansion(String(workspaceId)).has("src")).toBe(false);
+  });
+
+  it("provides 添加上下文 tooltip and aria-label on @ buttons", async () => {
     const query = vi.fn(async () => tree([
       { type: "dir", name: "src", path: "src" },
       { type: "file", name: "package.json", path: "package.json" },
@@ -331,12 +406,78 @@ describe("RealFileTree", () => {
     render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} onAddContext={addContext} />);
     await screen.findByText("package.json");
 
-    const atButtons = screen.getAllByRole("button", { name: /加入上下文/ });
+    const atButtons = screen.getAllByRole("button", { name: /添加上下文/ });
     expect(atButtons.length).toBe(2);
-    expect(atButtons[0]?.getAttribute("data-tip")).toBe("加入上下文");
-    expect(atButtons[1]?.getAttribute("data-tip")).toBe("加入上下文");
+    expect(atButtons[0]?.getAttribute("data-tip")).toBe("添加上下文");
+    expect(atButtons[1]?.getAttribute("data-tip")).toBe("添加上下文");
 
     fireEvent.click(atButtons[1]!);
     expect(addContext).toHaveBeenCalledWith("package.json", "file");
+  });
+
+  it("opens the file ⋯ menu with the standard items and dispatches actions", async () => {
+    const query = vi.fn(async () => tree([
+      { type: "dir", name: "src", path: "src" },
+      { type: "file", name: "package.json", path: "package.json" },
+    ]));
+    const client = { query } as unknown as StudioClient;
+    const fileAction = vi.fn();
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} onFileAction={fileAction} />);
+    await screen.findByText("package.json");
+
+    const moreButtons = screen.getAllByRole("button", { name: /更多操作/ });
+    expect(moreButtons.length).toBe(2);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.click(moreButtons[1]!);
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("explorer-file-popover");
+    for (const label of ["打开", "打开方式", "在资源管理器中打开", "复制绝对路径", "复制相对路径", "添加上下文"]) {
+      expect(screen.getByRole("menuitem", { name: label })).toBeTruthy();
+    }
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "复制相对路径" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(fileAction).toHaveBeenCalledWith({ type: "copyRelative" }, { path: "package.json", name: "package.json", kind: "file" });
+  });
+
+  it("maps the dir ⋯ menu 打开 to tree expand/collapse and 添加上下文 to the context chain", async () => {
+    const query = vi.fn(async (_name: string, input: { path?: string }) => input.path === "src"
+      ? tree([{ type: "file", name: "main.ts", path: "src/main.ts" }])
+      : tree([{ type: "dir", name: "src", path: "src" }]));
+    const client = { query } as unknown as StudioClient;
+    const fileAction = vi.fn();
+    const addContext = vi.fn();
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} onFileAction={fileAction} onAddContext={addContext} />);
+    const src = await screen.findByRole("treeitem", { name: "src 文件夹" });
+    expect(src.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: /更多操作 src/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "打开" }));
+    expect(src.getAttribute("aria-expanded")).toBe("true");
+    expect(fileAction).not.toHaveBeenCalled();
+
+    fireEvent.contextMenu(src, { clientX: 120, clientY: 40 });
+    expect(screen.getByRole("menu")).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "添加上下文" }));
+    expect(addContext).toHaveBeenCalledWith("src", "dir");
+  });
+
+  it("disables desktop-dependent ⋯ items with a reason when the handler is unavailable", async () => {
+    const query = vi.fn(async () => tree([{ type: "file", name: "package.json", path: "package.json" }]));
+    const client = { query } as unknown as StudioClient;
+
+    render(<RealFileTree client={client} workspaceId={workspaceId} label="OMP Studio" refreshToken={0} search="" {...noCreation} />);
+    await screen.findByText("package.json");
+
+    fireEvent.click(screen.getByRole("button", { name: /更多操作/ }));
+    expect((screen.getByRole("menuitem", { name: "打开" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "在资源管理器中打开" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "复制绝对路径" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "打开方式" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("menuitem", { name: "复制相对路径" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("menuitem", { name: "添加上下文" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

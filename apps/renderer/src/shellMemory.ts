@@ -37,31 +37,13 @@ export function layoutRestoreNeeded(input: {
 }
 
 /**
- * Explorer dots only need which tools are running, not their stdout.
- * Output growth must not look like a shell change.
- */
-export function liveToolActivitySignature(liveTools: ClientState["conversation"]["liveTools"]): string {
-  let signature = "";
-  for (const toolCallId of Object.keys(liveTools)) {
-    const tool = liveTools[toolCallId];
-    if (tool === undefined) continue;
-    signature += `${toolCallId}\0${tool.toolName ?? ""}\0${tool.status}\0`;
-  }
-  return signature;
-}
-
-/**
- * Conversation deltas always mint a new `connection` (cursor tick) and a new
- * `conversation` object. The workbench shell does not display those, so they
- * must not re-render App / sidebar / topbar.
+ * Conversation deltas only advance transport identity in ClientState. The
+ * target-scoped conversation store owns their payload and rendering cadence.
  */
 export function clientShellChanged(previous: ClientState, next: ClientState): boolean {
   if (previous.entities !== next.entities) return true;
   if (previous.interaction !== next.interaction) return true;
   if (previous.commands !== next.commands) return true;
-  if (liveToolActivitySignature(previous.conversation.liveTools) !== liveToolActivitySignature(next.conversation.liveTools)) {
-    return true;
-  }
   const before = previous.connection;
   const after = next.connection;
   return (

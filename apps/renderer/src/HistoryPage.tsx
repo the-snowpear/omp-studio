@@ -164,34 +164,48 @@ function DeleteSessionDialog({
   onCancel: () => void;
 }) {
   const { t } = useI18n();
+  useEffect(() => {
+    if (busy) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
   return createPortal(
-    <div className="modal-backdrop hist-delete-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
-      <div
-        className="modal"
+    <div className="modal-backdrop create-project-backdrop" role="presentation" onMouseDown={busy ? undefined : onCancel}>
+      <section
+        className="modal create-project-modal create-branch-modal"
         role="dialog"
         aria-modal="true"
         aria-labelledby="histDeleteTitle"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <div className="modal-head" id="histDeleteTitle">
-          <span>{t("history.deleteConfirmTitle")}</span>
-          <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={busy} onClick={onCancel}><Icon name="x" extra="sm" /></button>
+        <div className="create-project-head">
+          <div>
+            <span className="create-project-kicker">SESSION</span>
+            <h2 id="histDeleteTitle">{t("history.deleteConfirmTitle")}</h2>
+            <p className="create-branch-sub">{t("history.deleteConfirmDesc", { title })}</p>
+          </div>
+          <button type="button" className="icon-btn" aria-label={t("common.close")} disabled={busy} onClick={onCancel}><Icon name="x" /></button>
         </div>
-        <div className="modal-body">
-          <p>{t("history.deleteConfirmDesc", { title })}</p>
-          <p className="desc">
+        <div className="create-project-body">
+          <p className="create-branch-hint">
             {preview ? t("history.deleteConfirmDemo") : t("history.deleteConfirmReal")}
           </p>
-          {error !== undefined ? <p className="hist-delete-error" role="alert">{error}</p> : null}
+          {error !== undefined ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{error}</div> : null}
         </div>
-        <div className="modal-foot">
+        <div className="create-project-foot">
           <button type="button" className="btn outline" autoFocus disabled={busy} onClick={onCancel}>{t("common.cancel")}</button>
           <button type="button" className="btn danger" disabled={busy} onClick={onConfirm}>
-            {busy ? <><span className="spinner" aria-hidden="true" />{t("history.deleting")}</> : <Icon name="trash" extra="sm" />}
-            <span>{busy ? t("history.deleting") : t("history.deleteSession")}</span>
+            {busy
+              ? <><span className="spinner" aria-hidden="true" />{t("history.deleting")}</>
+              : <><Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span></>}
           </button>
         </div>
-      </div>
+      </section>
     </div>,
     document.body,
   );

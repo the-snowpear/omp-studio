@@ -5,12 +5,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import { Icon } from "../icons";
 import { compactMinimapPreview } from "./compactSummary";
 import { batchSummary, toolKind, type ThinkView } from "./toolMeta";
+import { tailStreaming } from "./conversationViewModel";
 import type { AssistantSegment, TimelineRow, ToolView } from "./conversationViewModel";
 
 /** 底部工具按钮区预留高度（与 ver1 syncViewport 的 52px 一致）。 */
@@ -23,6 +25,21 @@ const MIN_VIEWPORT_H = 18;
 const PREVIEW_HIDE_DELAY_MS = 250;
 /** 跳转目标行的高亮时长（ms）。 */
 const FLASH_MS = 900;
+/** 圆点位置全量重测的最小间隔（ms）；见 `requestMeasure`。 */
+export const MEASURE_INTERVAL_MS = 200;
+/**
+ * 流式期间的重测间隔（ms）。
+ *
+ * 流式的每一帧都在换尾行圆点、改 scrollHeight，两道跳过条件都失效，于是 200ms 一次的
+ * 全量重测（全子树 `querySelectorAll` + 逐节点 rect + `setFractions` 带出的整条轨道重
+ * 渲染）正好压在最忙的那段主线程上。圆点位置是导航用的近似量，流式期间落后半秒看不
+ * 出来，产出结束后必然还有最后一次收敛。
+ */
+export const MEASURE_INTERVAL_STREAMING_MS = 700;
+
+function now(): number {
+  return typeof performance === "object" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
 
 export type MinimapMarkType =
   | "user"
@@ -37,6 +54,8 @@ export type MinimapMarkType =
 export type MinimapMark = {
   readonly itemId: string;
   readonly type: MinimapMarkType;
+  /** A failed user row is rendered as an error, but remains a user-navigation target. */
+  readonly navigationTypes?: readonly MinimapMarkType[];
   readonly label: string;
   readonly preview: string;
   readonly turn: number;
@@ -63,18 +82,21 @@ function cssEscape(value: string): string {
   return value.replace(/"/g, '\\"');
 }
 
-function assistantMarkType(row: Extract<TimelineRow, { type: "assistant" }>): MinimapMarkType {
-  if (row.status === "error") return "error";
+function assistantMarkType(rows: readonly Extract<TimelineRow, { type: "assistant" }>[]): MinimapMarkType {
   let hasBash = false;
   let hasFile = false;
   let hasThinking = false;
-  for (const segment of row.segments) {
-    if (segment.type === "thinking") hasThinking = true;
-    else if (segment.type === "batch") {
-      for (const tool of segment.tools) {
-        const kind = toolKind(tool);
-        if (kind === "bash") hasBash = true;
-        else if (kind === "read" || kind === "write" || kind === "edit" || kind === "ast_edit") hasFile = true;
+  for (const row of rows) {
+    if (row.status === "error") return "error";
+    for (const segment of row.segments) {
+      if (segment.type === "thinking") hasThinking = true;
+      else if (segment.type === "batch") {
+        for (const tool of segment.tools) {
+          if (tool.status === "failed" || tool.status === "aborted" || tool.status === "missing") return "error";
+          const kind = toolKind(tool);
+          if (kind === "bash") hasBash = true;
+          else if (kind === "read" || kind === "write" || kind === "edit" || kind === "ast_edit") hasFile = true;
+        }
       }
     }
   }
@@ -115,16 +137,18 @@ const markCache = new WeakMap<TimelineRow, MinimapMark>();
 
 function buildMark(row: TimelineRow, turn: number): MinimapMark {
   if (row.type === "user") {
+    const failed = row.pending === "failed" || row.error !== undefined;
     return {
       itemId: row.itemId,
-      type: "user",
-      label: MARK_LABEL.user,
+      type: failed ? "error" : "user",
+      ...(failed ? { navigationTypes: ["user", "error"] as const } : {}),
+      label: failed ? MARK_LABEL.error : MARK_LABEL.user,
       preview: row.error ? `发送失败：${row.error}` : row.text.trim(),
       turn,
     };
   }
   if (row.type === "assistant") {
-    const type = assistantMarkType(row);
+    const type = assistantMarkType([row]);
     return { itemId: row.itemId, type, label: MARK_LABEL[type], preview: assistantPreview(row.segments), turn };
   }
   if (row.type === "compaction") {
@@ -148,6 +172,39 @@ function buildMark(row: TimelineRow, turn: number): MinimapMark {
   };
 }
 
+const assistantRunCache = new WeakMap<
+  Extract<TimelineRow, { type: "assistant" }>,
+  { readonly members: readonly Extract<TimelineRow, { type: "assistant" }>[]; readonly mark: MinimapMark }
+>();
+
+function markForAssistantRun(
+  members: readonly Extract<TimelineRow, { type: "assistant" }>[],
+  turn: number,
+): MinimapMark {
+  if (members.length === 1) return markForRow(members[0]!, turn);
+  const first = members[0]!;
+  const cached = assistantRunCache.get(first);
+  if (
+    cached !== undefined
+    && cached.mark.turn === turn
+    && cached.members.length === members.length
+    && cached.members.every((member, index) => member === members[index])
+  ) {
+    return cached.mark;
+  }
+  const type = assistantMarkType(members);
+  const segments = members.flatMap((row) => row.segments);
+  const mark: MinimapMark = {
+    itemId: first.itemId,
+    type,
+    label: MARK_LABEL[type],
+    preview: assistantPreview(segments),
+    turn,
+  };
+  assistantRunCache.set(first, { members, mark });
+  return mark;
+}
+
 function markForRow(row: TimelineRow, turn: number): MinimapMark {
   const cached = markCache.get(row);
   if (cached !== undefined) {
@@ -162,11 +219,24 @@ function markForRow(row: TimelineRow, turn: number): MinimapMark {
   return mark;
 }
 
-/** 从时间线行派生 minimap 圆点：一行一点，类型决定着色与标签。 */
+/** 与 transcript DOM 对齐：连续 assistant 行由 AssistantRunView 合成一个导航点。 */
 export function deriveMinimapMarks(rows: readonly TimelineRow[]): MinimapMark[] {
   const marks: MinimapMark[] = [];
-  for (let index = 0; index < rows.length; index += 1) {
-    marks.push(markForRow(rows[index]!, index + 1));
+  let index = 0;
+  while (index < rows.length) {
+    const row = rows[index]!;
+    const turn = marks.length + 1;
+    if (row.type !== "assistant") {
+      marks.push(markForRow(row, turn));
+      index += 1;
+      continue;
+    }
+    const members: Array<Extract<TimelineRow, { type: "assistant" }>> = [];
+    while (index < rows.length && rows[index]!.type === "assistant") {
+      members.push(rows[index] as Extract<TimelineRow, { type: "assistant" }>);
+      index += 1;
+    }
+    marks.push(markForAssistantRun(members, turn));
   }
   return marks;
 }
@@ -214,12 +284,13 @@ export function spaceMinimapMarks(marks: readonly MinimapMark[], fractions: Mark
     let j = i;
     while (j + 1 < entries.length && entries[j + 1]!.f - anchor < MIN_MARK_GAP) j++;
     let pick = i;
-    const errorIdx = entries.findIndex((entry, idx) => idx >= i && idx <= j && entry.mark.type === "error");
-    if (errorIdx >= 0) pick = errorIdx;
-    else {
-      const priorityIdx = entries.findIndex((entry, idx) => idx >= i && idx <= j && PRIORITY_TYPES.has(entry.mark.type));
-      if (priorityIdx >= 0) pick = priorityIdx;
-    }
+    /* Scan only the cluster. `entries.findIndex` restarts at 0 every time, so
+       on a full 2,000-mark window the two lookups together walk tens of
+       thousands of entries per call. */
+    let chosen = -1;
+    for (let k = i; k <= j; k++) { if (entries[k]!.mark.type === "error") { chosen = k; break; } }
+    if (chosen < 0) { for (let k = i; k <= j; k++) { if (PRIORITY_TYPES.has(entries[k]!.mark.type)) { chosen = k; break; } } }
+    if (chosen >= 0) pick = chosen;
     placed.push(entries[pick]!.mark);
     i = j + 1;
   }
@@ -237,7 +308,10 @@ export function pickNextMark(
   const start = activeIdx + 1;
   for (let step = 0; step < marks.length; step++) {
     const candidate = marks[(start + step) % marks.length]!;
-    if (types.includes(candidate.type)) return candidate;
+    if (
+      types.includes(candidate.type)
+      || candidate.navigationTypes?.some((type) => types.includes(type)) === true
+    ) return candidate;
   }
   return null;
 }
@@ -302,18 +376,31 @@ export function ConversationMinimap({
   rows,
   scrollerRef,
   preview = false,
+  busy,
+  onNavigateStart,
+  onJumpToLatest,
 }: {
   rows: readonly TimelineRow[];
   scrollerRef: RefObject<HTMLElement | null>;
   preview?: boolean;
+  /** 主线程正忙（默认按尾行是否在流式产出判定）：降低重测频率。 */
+  busy?: boolean;
+  /** Any minimap navigation detaches transcript tail-follow before scrolling. */
+  onNavigateStart?: () => void;
+  /** Re-enter the transcript's canonical tail-follow path. */
+  onJumpToLatest?: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const popupRef = useRef<HTMLDivElement | null>(null);
   const filterWrapRef = useRef<HTMLSpanElement | null>(null);
+  const filterButtonRef = useRef<HTMLButtonElement | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const hideTimerRef = useRef<number | null>(null);
+  const jumpFrameRef = useRef<number | null>(null);
+  /** 拖动进行中：滚动事件里的强制重测被降级（见 onScroll），拖动结束补一次。 */
+  const draggingRef = useRef(false);
 
   const [fractions, setFractions] = useState<MarkFractions>({});
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
@@ -325,11 +412,12 @@ export function ConversationMinimap({
   prevMarksRef.current = marks;
   const marksRef = useRef(marks);
   marksRef.current = marks;
+  /** 回调要保持同一身份（RO / scroll 监听都按它建），所以忙碌标记走 ref 而不是闭包。 */
+  const busyRef = useRef(false);
+  busyRef.current = busy ?? tailStreaming(rows);
 
   const fractionsRef = useRef(fractions);
   fractionsRef.current = fractions;
-  /** DOM 里真实存在的圆点（折叠 + 筛选之后）；活跃点判定只看这些。 */
-  const visibleRef = useRef<readonly MinimapMark[]>([]);
 
   /** 视口指示条：两次读 + 两次写，滚动事件里直接跑。 */
   const syncViewport = useCallback(() => {
@@ -337,17 +425,21 @@ export function ConversationMinimap({
     const viewport = viewportRef.current;
     const track = trackRef.current;
     if (!scroller || !viewport || !track) return;
-    const maxScroll = scroller.scrollHeight - scroller.clientHeight;
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const range = Math.max(0, track.clientHeight - TOOLS_RESERVE_PX);
+    viewport.setAttribute("aria-valuemax", String(Math.round(maxScroll)));
+    viewport.setAttribute("aria-valuenow", String(Math.round(Math.min(maxScroll, Math.max(0, scroller.scrollTop)))));
     if (maxScroll <= 0) {
       viewport.style.display = "none";
       return;
     }
     viewport.style.display = "";
-    const range = track.clientHeight - TOOLS_RESERVE_PX;
-    const viewportH = Math.max(MIN_VIEWPORT_H, (scroller.clientHeight / scroller.scrollHeight) * range);
-    const progress = scroller.scrollTop / maxScroll;
+    const viewportH = range > 0
+      ? Math.min(range, Math.max(MIN_VIEWPORT_H, (scroller.clientHeight / scroller.scrollHeight) * range))
+      : MIN_VIEWPORT_H;
+    const progress = Math.min(1, Math.max(0, scroller.scrollTop / maxScroll));
     viewport.style.height = `${viewportH}px`;
-    viewport.style.top = `${progress * (range - viewportH)}px`;
+    viewport.style.top = `${range > viewportH ? progress * (range - viewportH) : 0}px`;
   }, [scrollerRef]);
 
   /**
@@ -357,61 +449,142 @@ export function ConversationMinimap({
    * 文档高度，此时完全不碰布局。
    */
   const measuredRef = useRef<{ readonly marks: readonly MinimapMark[]; readonly scrollHeight: number } | null>(null);
-  const measure = useCallback(() => {
+  const lastMeasureAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const measureTimerRef = useRef<number | null>(null);
+  const forceMeasureRef = useRef(false);
+  /** 返回 true 表示完成了测量但没有触发 fractions state；调用方应就地同步活跃点。
+   *  返回 false 时要么跳过，要么新的 fractions 会在下面的 effect 中同步活跃点。 */
+  const measureNow = useCallback((force = false): boolean => {
     const scroller = scrollerRef.current;
-    if (!scroller) return;
+    if (!scroller) return false;
     const scrollHeight = scroller.scrollHeight;
-    if (scrollHeight <= 0) return;
+    if (scrollHeight <= 0) return false;
     const current = marksRef.current;
     const measured = measuredRef.current;
-    if (measured !== null && measured.marks === current && measured.scrollHeight === scrollHeight) return;
+    if (!force && measured !== null && measured.marks === current && measured.scrollHeight === scrollHeight) return false;
     measuredRef.current = { marks: current, scrollHeight };
+    lastMeasureAtRef.current = now();
     if (current.length === 0) {
-      if (Object.keys(fractionsRef.current).length > 0) setFractions({});
-      return;
+      if (Object.keys(fractionsRef.current).length > 0) {
+        setFractions({});
+        return false;
+      }
+      return true;
     }
     const wanted = new Set<string>();
     for (const mark of current) wanted.add(mark.itemId);
     const base = scroller.getBoundingClientRect().top;
     const scrollTop = scroller.scrollTop;
-    const next: Record<string, number> = {};
+    /* Virtualized transcripts only mount a small viewport window, so most marks
+       have no DOM node to measure. Measure the mounted ones, then interpolate
+       the rest *between those measurements* — one coordinate system, and the
+       sequence stays monotonic. Seeding unmounted marks with `index / count`
+       instead mixes row-index space into pixel space: dots jump as the mounted
+       window moves, and `spaceMinimapMarks` (which walks forward assuming
+       ascending order) starts clustering the wrong neighbours. */
+    const anchors: Array<{ index: number; fraction: number }> = [];
+    const mountedFractions = new Map<string, number>();
     for (const node of scroller.querySelectorAll<HTMLElement>("[data-item-id]")) {
       const key = node.dataset.itemId;
       /* 第一个匹配节点胜出，与原来的 querySelector 语义一致。 */
-      if (key === undefined || !wanted.has(key) || next[key] !== undefined) continue;
+      if (key === undefined || !wanted.has(key) || mountedFractions.has(key)) continue;
       const rect = node.getBoundingClientRect();
       const center = rect.top - base + scrollTop + rect.height / 2;
-      const fraction = Math.min(0.985, Math.max(0.015, center / scrollHeight));
-      next[key] = Math.round(fraction * 10000) / 10000;
+      mountedFractions.set(key, center / scrollHeight);
     }
-    if (!fractionsShifted(fractionsRef.current, next)) return;
+    for (let index = 0; index < current.length; index += 1) {
+      const fraction = mountedFractions.get(current[index]!.itemId);
+      if (fraction !== undefined) anchors.push({ index, fraction });
+    }
+    const next: Record<string, number> = {};
+    const clamp = (value: number): number => Math.round(Math.min(0.985, Math.max(0.015, value)) * 10000) / 10000;
+    if (anchors.length === 0) {
+      const denominator = Math.max(1, current.length - 1);
+      for (let index = 0; index < current.length; index += 1) next[current[index]!.itemId] = clamp(index / denominator);
+    } else {
+      let cursor = 0;
+      for (let index = 0; index < current.length; index += 1) {
+        while (cursor + 1 < anchors.length && anchors[cursor + 1]!.index <= index) cursor += 1;
+        const low = anchors[cursor]!;
+        const high = anchors[cursor + 1];
+        let fraction: number;
+        if (index === low.index) fraction = low.fraction;
+        else if (index < low.index) fraction = low.fraction * (index + 1) / (low.index + 1);
+        else if (high !== undefined) fraction = low.fraction + (high.fraction - low.fraction) * ((index - low.index) / (high.index - low.index));
+        else fraction = low.fraction + (1 - low.fraction) * ((index - low.index) / Math.max(1, current.length - low.index));
+        next[current[index]!.itemId] = clamp(fraction);
+      }
+    }
+    if (!fractionsShifted(fractionsRef.current, next)) return true;
     setFractions(next);
+    return false;
   }, [scrollerRef]);
 
   /**
-   * 活跃圆点。圆点在轨道里的位置就是 fraction 的线性映射（CSS `calc`），与
-   * scrollTop 无关，所以既不必逐点读 rect，也不必挂在滚动事件上。
+   * 活跃圆点由内容视口中线决定；只使用 scroll metrics，不逐点读正文 rect。
    */
   const syncActiveMark = useCallback(() => {
     const scroller = scrollerRef.current;
     const track = trackRef.current;
     if (!scroller || !track) return;
-    const next = activeMarkId(visibleRef.current, fractionsRef.current, {
+    const next = activeMarkId(marksRef.current, fractionsRef.current, {
       trackHeight: track.clientHeight,
-      trackTop: track.getBoundingClientRect().top,
-      scrollerTop: scroller.getBoundingClientRect().top,
+      scrollTop: scroller.scrollTop,
+      scrollHeight: scroller.scrollHeight,
       scrollerHeight: scroller.clientHeight,
     });
     applyActiveMark(track, next);
     activeIdRef.current = next;
   }, [scrollerRef]);
 
-  /** 一帧里的三件布局事合成一次。 */
+  const measureAndSyncActive = useCallback((force = false): boolean => {
+    const syncNow = measureNow(force);
+    if (syncNow) syncActiveMark();
+    return syncNow;
+  }, [measureNow, syncActiveMark]);
+
+  /**
+   * 全量重测的节流闸门。`measureNow` 的跳过条件是「圆点集合与 scrollHeight 都没
+   * 变」，而工具卡展开/收起的每一帧都在改 scrollHeight，流式的每一帧都在换尾行
+   * 圆点——两者都会让闸门失效，于是每帧都要做一次全子树 `querySelectorAll` + 逐
+   * 节点 rect + 最多 2000 个圆点的 `setFractions`（再带出一次 minimap 全量重渲染
+   * 与 `spaceMinimapMarks`）。圆点位置是导航用的近似量，落后一帧看不出来，所以限
+   * 频到 `MEASURE_INTERVAL_MS`（流式期间进一步放宽到
+   * `MEASURE_INTERVAL_STREAMING_MS`）：第一次变化立刻测，随后的变化合并成一次尾随
+   * 重测，动画/流式结束后必然还有最后一次收敛。
+   *
+   * 返回值表示「这次调用是否真的测了」，让调用方据此决定要不要顺带跑活跃点判定。
+   */
+  const requestMeasure = useCallback((force = false): boolean => {
+    if (force) forceMeasureRef.current = true;
+    const interval = busyRef.current ? MEASURE_INTERVAL_STREAMING_MS : MEASURE_INTERVAL_MS;
+    const elapsed = now() - lastMeasureAtRef.current;
+    if (elapsed >= interval) {
+      const forced = forceMeasureRef.current;
+      forceMeasureRef.current = false;
+      return measureAndSyncActive(forced);
+    }
+    if (measureTimerRef.current !== null) return false;
+    measureTimerRef.current = window.setTimeout(() => {
+      measureTimerRef.current = null;
+      const forced = forceMeasureRef.current;
+      forceMeasureRef.current = false;
+      measureAndSyncActive(forced);
+    }, interval - elapsed);
+    return false;
+  }, [measureAndSyncActive]);
+  useEffect(
+    () => () => {
+      if (measureTimerRef.current !== null) window.clearTimeout(measureTimerRef.current);
+    },
+    [],
+  );
+
+  /** 内容变化只更新视口条并申请受闸门控制的测量/活跃点同步。 */
   const syncAll = useCallback(() => {
-    measure();
+    requestMeasure();
     syncViewport();
-    syncActiveMark();
-  }, [measure, syncViewport, syncActiveMark]);
+  }, [requestMeasure, syncViewport]);
 
   const frameRef = useRef<number | null>(null);
   const scheduleSync = useCallback(() => {
@@ -435,7 +608,7 @@ export function ConversationMinimap({
     [],
   );
 
-  /* 行变化：同步测一次（measure 内部自带「高度未变则跳过」的闸门）。 */
+  /* 行变化：同步测一次（`requestMeasure` 自带「未变则跳过」与限频两道闸门）。 */
   useLayoutEffect(() => {
     syncAll();
   }, [rows, syncAll]);
@@ -454,44 +627,94 @@ export function ConversationMinimap({
     return () => observer.disconnect();
   }, [scheduleSync, scrollerRef]);
 
-  /* 滚动：只更新视口条。圆点是内容绝对位置，滚动不改变它们。 */
+  /* 虚拟列表在滚动时会换挂载窗口：同步视口/活跃点，并节流重建位置锚点。
+     拖动期间把强制重测降级为普通档：拖动的每一帧都在改 scrollTop，force 会旁路
+     measureNow 的「未变则跳过」闸门，等于每过一个间隔就做一次全子树
+     querySelectorAll + 逐行 rect + setFractions 重渲染，正压在流式最忙的主线程上；
+     拖动结束后（pointerup）再补一次强制重测收敛圆点。 */
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    scroller.addEventListener("scroll", syncViewport, { passive: true });
-    const frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame(syncViewport) : null;
+    const onScroll = () => {
+      syncViewport();
+      syncActiveMark();
+      requestMeasure(!draggingRef.current);
+    };
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    const frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame(onScroll) : null;
     return () => {
-      scroller.removeEventListener("scroll", syncViewport);
+      scroller.removeEventListener("scroll", onScroll);
       if (frame !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
     };
-  }, [syncViewport, scrollerRef]);
+  }, [requestMeasure, syncActiveMark, syncViewport, scrollerRef]);
 
-  const placed = useMemo(() => spaceMinimapMarks(marks, fractions), [marks, fractions]);
-  const visible = useMemo(
-    () => (keyOnly ? placed.filter((mark) => KEY_TYPES.includes(mark.type)) : placed),
-    [placed, keyOnly],
+  useLayoutEffect(() => {
+    syncActiveMark();
+  }, [fractions, syncActiveMark]);
+
+  const filtered = useMemo(
+    () => (keyOnly ? marks.filter((mark) => KEY_TYPES.includes(mark.type)) : marks),
+    [marks, keyOnly],
   );
-  visibleRef.current = visible;
+  const visible = useMemo(() => spaceMinimapMarks(filtered, fractions), [filtered, fractions]);
   const hoveredMark = hoveredItemId === null ? null : visible.find((mark) => mark.itemId === hoveredItemId) ?? null;
 
   const jumpTo = useCallback(
     (itemId: string) => {
       const scroller = scrollerRef.current;
       if (!scroller) return;
+      onNavigateStart?.();
       const node = scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(itemId)}"]`);
-      if (!node) return;
-      scrollRowInScroller(scroller, node);
-      flashRow(node);
+      if (node) {
+        scrollRowInScroller(scroller, node);
+        flashRow(node);
+        return;
+      }
+      const fraction = fractionsRef.current[itemId];
+      if (fraction === undefined) return;
+      /* `fraction` is the row's centre over the full content height, so convert
+         through `scrollHeight` and then centre it — treating it as a fraction of
+         the scrollable range instead overshoots by up to a viewport. */
+      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const top = Math.max(0, Math.min(maxScroll, fraction * scroller.scrollHeight - scroller.clientHeight / 2));
+      scroller.scrollTo({ behavior: "smooth", top });
+      const deadline = now() + 1_000;
+      const flashWhenMounted = () => {
+        const mounted = scroller.querySelector<HTMLElement>(`[data-item-id="${cssEscape(itemId)}"]`);
+        if (mounted) {
+          jumpFrameRef.current = null;
+          flashRow(mounted);
+          return;
+        }
+        if (now() < deadline && typeof requestAnimationFrame === "function") {
+          jumpFrameRef.current = requestAnimationFrame(flashWhenMounted);
+        } else {
+          jumpFrameRef.current = null;
+        }
+      };
+      if (jumpFrameRef.current !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(jumpFrameRef.current);
+      }
+      if (typeof requestAnimationFrame === "function") jumpFrameRef.current = requestAnimationFrame(flashWhenMounted);
     },
-    [scrollerRef],
+    [onNavigateStart, scrollerRef],
+  );
+
+  useEffect(
+    () => () => {
+      if (jumpFrameRef.current !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(jumpFrameRef.current);
+      }
+    },
+    [],
   );
 
   const jumpToNext = useCallback(
     (types: readonly MinimapMarkType[]) => {
-      const target = pickNextMark(visible, activeIdRef.current, types);
+      const target = pickNextMark(marks, activeIdRef.current, types);
       if (target) jumpTo(target.itemId);
     },
-    [visible, jumpTo],
+    [marks, jumpTo],
   );
 
   /* 悬浮预览：250ms 延迟隐藏，可移入弹层取消。 */
@@ -521,41 +744,78 @@ export function ConversationMinimap({
     popup.style.top = `${top}px`;
   }, [hoveredItemId]);
 
-  /* 轨道空白处：拖动 = 按比例即时滚动；原处松开 = 平滑滚到点击比例。 */
+  /* 轨道空白处：拖动 = 按比例即时滚动；原处松开 = 平滑滚到点击比例。
+     pointermove 以输入设备频率到达（高回报鼠标远高于帧率），此前每个事件都做
+     「读 rect → 写 scrollTop → syncViewport 读回」，写在读后，流式期间布局每帧
+     都是脏的，等于把一帧的全量布局按事件次数重复付费。现在合并到 rAF、每帧至多
+     一次，且把全部读放在写之前；视口条与活跃点交给滚动事件路径每帧同步一次。 */
   const onTrackPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest(".mm-mark")) return;
     const scroller = scrollerRef.current;
     const track = trackRef.current;
     if (!scroller || !track) return;
     event.preventDefault();
+    onNavigateStart?.();
     track.setPointerCapture?.(event.pointerId);
     const startY = event.clientY;
     let moved = false;
-    const maxScroll = () => scroller.scrollHeight - scroller.clientHeight;
+    let pendingY = startY;
+    let frame: number | null = null;
+    draggingRef.current = true;
     const apply = (clientY: number, smooth: boolean) => {
       const rect = track.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
-      const target = ratio * maxScroll();
+      const range = Math.max(1, track.clientHeight - TOOLS_RESERVE_PX);
+      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const ratio = Math.min(1, Math.max(0, (clientY - rect.top) / range));
+      const target = ratio * maxScroll;
       if (smooth) scroller.scrollTo({ top: target, behavior: "smooth" });
       else scroller.scrollTop = target;
+    };
+    const flush = () => {
+      frame = null;
+      if (moved) apply(pendingY, false);
+    };
+    const schedule = () => {
+      if (frame !== null) return;
+      if (typeof requestAnimationFrame !== "function") {
+        flush();
+        return;
+      }
+      frame = requestAnimationFrame(flush);
+    };
+    const settle = () => {
+      track.removeEventListener("pointermove", onMove);
+      track.removeEventListener("pointerup", finish);
+      track.removeEventListener("pointercancel", cancel);
+      if (frame !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+      frame = null;
+      draggingRef.current = false;
       syncViewport();
+      syncActiveMark();
+      requestMeasure(true);
     };
     const onMove = (moveEvent: PointerEvent) => {
       if (Math.abs(moveEvent.clientY - startY) > 3) moved = true;
-      if (moved) apply(moveEvent.clientY, false);
+      if (!moved) return;
+      pendingY = moveEvent.clientY;
+      schedule();
     };
     const finish = (upEvent: PointerEvent) => {
-      track.removeEventListener("pointermove", onMove);
-      track.removeEventListener("pointerup", finish);
-      track.removeEventListener("pointercancel", finish);
       if (!moved) apply(upEvent.clientY, true);
+      settle();
+    };
+    const cancel = () => {
+      if (moved && frame !== null) flush();
+      settle();
     };
     track.addEventListener("pointermove", onMove);
     track.addEventListener("pointerup", finish);
-    track.addEventListener("pointercancel", finish);
+    track.addEventListener("pointercancel", cancel);
   };
 
-  /* 视口条：滑块语义，拖动保持抓取偏移。 */
+  /* 视口条：滑块语义，拖动保持抓取偏移；同样按帧合并、读前置。
+     滑块位置在拖动期间直接由拖动几何写出（不读回 scroller），scroll 事件里的
+     syncViewport 每帧会用真实 metrics 再对齐一次。 */
   const onViewportPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const scroller = scrollerRef.current;
     const track = trackRef.current;
@@ -563,26 +823,48 @@ export function ConversationMinimap({
     if (!scroller || !track || !viewport) return;
     event.preventDefault();
     event.stopPropagation();
+    onNavigateStart?.();
     viewport.setPointerCapture?.(event.pointerId);
     const grab = event.clientY - viewport.getBoundingClientRect().top;
-    const maxScroll = scroller.scrollHeight - scroller.clientHeight;
-    const range = track.clientHeight - TOOLS_RESERVE_PX;
-    const sliderSpan = range - viewport.offsetHeight;
-    const onMove = (moveEvent: PointerEvent) => {
-      if (sliderSpan <= 0) return;
+    let pendingY = event.clientY;
+    let frame: number | null = null;
+    draggingRef.current = true;
+    const flush = () => {
+      frame = null;
       const trackTop = track.getBoundingClientRect().top;
-      const top = Math.min(Math.max(0, moveEvent.clientY - grab - trackTop), sliderSpan);
+      const sliderSpan = track.clientHeight - TOOLS_RESERVE_PX - viewport.offsetHeight;
+      if (sliderSpan <= 0) return;
+      const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const top = Math.min(Math.max(0, pendingY - grab - trackTop), sliderSpan);
       scroller.scrollTop = (top / sliderSpan) * maxScroll;
-      syncViewport();
+      viewport.style.top = `${top}px`;
     };
-    const finish = () => {
+    const schedule = () => {
+      if (frame !== null) return;
+      if (typeof requestAnimationFrame !== "function") {
+        flush();
+        return;
+      }
+      frame = requestAnimationFrame(flush);
+    };
+    const settle = () => {
       viewport.removeEventListener("pointermove", onMove);
-      viewport.removeEventListener("pointerup", finish);
-      viewport.removeEventListener("pointercancel", finish);
+      viewport.removeEventListener("pointerup", settle);
+      viewport.removeEventListener("pointercancel", settle);
+      if (frame !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+      frame = null;
+      draggingRef.current = false;
+      syncViewport();
+      syncActiveMark();
+      requestMeasure(true);
+    };
+    const onMove = (moveEvent: PointerEvent) => {
+      pendingY = moveEvent.clientY;
+      schedule();
     };
     viewport.addEventListener("pointermove", onMove);
-    viewport.addEventListener("pointerup", finish);
-    viewport.addEventListener("pointercancel", finish);
+    viewport.addEventListener("pointerup", settle);
+    viewport.addEventListener("pointercancel", settle);
   };
 
   /* 筛选菜单：点击外部关闭。 */
@@ -595,8 +877,30 @@ export function ConversationMinimap({
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [filterOpen]);
 
-  const hasError = visible.some((mark) => mark.type === "error");
-  const hasUser = visible.some((mark) => mark.type === "user");
+  const onViewportKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    let top: number | null = null;
+    if (event.key === "ArrowUp") top = scroller.scrollTop - 40;
+    else if (event.key === "ArrowDown") top = scroller.scrollTop + 40;
+    else if (event.key === "PageUp") top = scroller.scrollTop - scroller.clientHeight * 0.9;
+    else if (event.key === "PageDown") top = scroller.scrollTop + scroller.clientHeight * 0.9;
+    else if (event.key === "Home") top = 0;
+    else if (event.key === "End") top = maxScroll;
+    if (top === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onNavigateStart?.();
+    scroller.scrollTop = Math.min(maxScroll, Math.max(0, top));
+    syncViewport();
+    syncActiveMark();
+  };
+
+  const hasError = marks.some((mark) => mark.type === "error");
+  const hasUser = marks.some(
+    (mark) => mark.type === "user" || mark.navigationTypes?.includes("user") === true,
+  );
 
   return (
     <div className="minimap" id="minimap" ref={rootRef}>
@@ -614,6 +918,7 @@ export function ConversationMinimap({
                 : { top: `calc(${(fractions[mark.itemId]! * 100).toFixed(2)}% - ${(fractions[mark.itemId]! * TOOLS_RESERVE_PX).toFixed(1)}px)` }
             }
             aria-label={`#${mark.turn} ${mark.label}`}
+            aria-current={activeIdRef.current === mark.itemId ? "true" : undefined}
             onClick={() => jumpTo(mark.itemId)}
             onMouseEnter={() => {
               cancelHide();
@@ -622,10 +927,27 @@ export function ConversationMinimap({
             onMouseLeave={scheduleHide}
             onFocus={() => setHoveredItemId(mark.itemId)}
             onBlur={scheduleHide}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setHoveredItemId(null);
+            }}
           />
         ))}
       </div>
-      <div className="mm-viewport" id="mmViewport" aria-hidden="true" ref={viewportRef} onPointerDown={onViewportPointerDown} />
+      <div
+        className="mm-viewport"
+        id="mmViewport"
+        ref={viewportRef}
+        role="scrollbar"
+        tabIndex={0}
+        aria-label="对话滚动位置"
+        aria-controls="convoScroll"
+        aria-orientation="vertical"
+        aria-valuemin={0}
+        aria-valuemax={0}
+        aria-valuenow={0}
+        onPointerDown={onViewportPointerDown}
+        onKeyDown={onViewportKeyDown}
+      />
       {hoveredMark ? (
         <div
           className="mm-preview"
@@ -646,6 +968,7 @@ export function ConversationMinimap({
       <div className="minimap-tools">
         <span ref={filterWrapRef}>
           <button
+            ref={filterButtonRef}
             type="button"
             className="icon-btn"
             data-tip={keyOnly ? "仅关键" : "筛选"}
@@ -653,12 +976,18 @@ export function ConversationMinimap({
             aria-haspopup="menu"
             aria-expanded={filterOpen}
             onClick={() => setFilterOpen((open) => !open)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setFilterOpen(false);
+            }}
           >
             <Icon name="filter" extra="sm" />
           </button>
           {filterOpen ? (
             <div className="menu mm-menu" role="menu" aria-label="筛选与跳转" onKeyDown={(event) => {
-              if (event.key === "Escape") setFilterOpen(false);
+              if (event.key === "Escape") {
+                setFilterOpen(false);
+                filterButtonRef.current?.focus();
+              }
             }}>
               <div className="menu-label">筛选与跳转</div>
               <button type="button" className="menu-item" role="menuitem" disabled={!hasError} onClick={() => {
@@ -694,7 +1023,10 @@ export function ConversationMinimap({
           className="icon-btn"
           data-tip="回到最新"
           aria-label="回到最新"
-          onClick={() => scrollerRef.current?.scrollTo({ top: 9e6, behavior: "smooth" })}
+          onClick={() => {
+            if (onJumpToLatest) onJumpToLatest();
+            else scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: "smooth" });
+          }}
         >
           <Icon name="arrow-d" extra="sm" />
         </button>
@@ -705,24 +1037,28 @@ export function ConversationMinimap({
 
 type TrackGeometry = {
   readonly trackHeight: number;
-  readonly trackTop: number;
-  readonly scrollerTop: number;
+  readonly scrollTop: number;
+  readonly scrollHeight: number;
   readonly scrollerHeight: number;
 };
 
 /**
- * 活跃圆点 = 离 scroller 视口中线最近的圆点。圆点 top 由 CSS
+ * 活跃圆点 = 离内容视口中线最近的圆点。圆点 top 由 CSS
  * `calc(f*100% - f*TOOLS_RESERVE_PX)` 给出，即 `f * (trackHeight - TOOLS_RESERVE_PX)`，
- * 所以直接用 fraction 反解即可，不必逐点读 rect。圆点尺寸对所有候选相同，
- * 省掉 `height / 2` 不改变最近点。
+ * 内容视口中线也先换算成内容 fraction，再映射到同一轨道坐标系。
  */
 export function activeMarkId(
   marks: readonly MinimapMark[],
   fractions: MarkFractions,
   geometry: TrackGeometry,
 ): string | null {
-  const range = geometry.trackHeight - TOOLS_RESERVE_PX;
-  const target = geometry.scrollerTop + geometry.scrollerHeight * 0.5 - geometry.trackTop;
+  if (geometry.scrollHeight <= 0) return null;
+  const range = Math.max(0, geometry.trackHeight - TOOLS_RESERVE_PX);
+  const centerFraction = Math.min(
+    1,
+    Math.max(0, (geometry.scrollTop + geometry.scrollerHeight * 0.5) / geometry.scrollHeight),
+  );
+  const target = centerFraction * range;
   let bestId: string | null = null;
   let bestDistance = Infinity;
   for (const mark of marks) {
@@ -738,10 +1074,10 @@ export function activeMarkId(
 }
 
 function applyActiveMark(track: HTMLElement, activeId: string | null): void {
-  for (const el of track.querySelectorAll<HTMLElement>(".mm-mark.active")) {
-    if (el.dataset.markId !== activeId) el.classList.remove("active");
-  }
-  if (activeId !== null) {
-    track.querySelector<HTMLElement>(`.mm-mark[data-mark-id="${cssEscape(activeId)}"]`)?.classList.add("active");
+  for (const el of track.querySelectorAll<HTMLElement>(".mm-mark")) {
+    const active = el.dataset.markId === activeId;
+    el.classList.toggle("active", active);
+    if (active) el.setAttribute("aria-current", "true");
+    else el.removeAttribute("aria-current");
   }
 }

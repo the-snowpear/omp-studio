@@ -30,6 +30,9 @@ export type BashDisplayRow = {
   readonly cls: string;
 };
 
+/** 同一类别的连续行合成的一段；`text` 内部保留原来的换行。 */
+export type BashDisplayBlock = BashDisplayRow;
+
 /**
  * 展示上限，只保留尾部。流式期间每个 chunk 都要重跑一次 ANSI 剥离与行切分；
  * 不设上限时一份 256 KiB 的构建日志每帧都要全量正则扫描并铺出上万个 DOM 节点。
@@ -39,7 +42,7 @@ export const BASH_DISPLAY_MAX_ROWS = 1500;
 export const BASH_DISPLAY_MAX_CHARS = 64 * 1024;
 
 export type BashDisplay = {
-  readonly rows: readonly BashDisplayRow[];
+  readonly blocks: readonly BashDisplayBlock[];
   /** 前面还有内容被省略，只显示了尾部。 */
   readonly truncated: boolean;
 };
@@ -72,28 +75,29 @@ export function bashTailSlice(
   return { text: text.slice(start), truncated: true };
 }
 
+/**
+ * 输出分段。要点只有一条：把「同类别的连续行」合成一段。`.codeblock` 是
+ * `white-space: pre`，段内的换行本来就照原样渲染，一行一个 `<div>` 只是把同一份文
+ * 本铺成上千个 DOM 节点——而流式期间每帧都要重建并 diff 这上千个节点（实测 1200 行
+ * 的构建日志每帧约 16ms 的 React 时间，一帧的预算就这么没了）。纯字符串输出（最常
+ * 见的情况）因此收敛成单个文本节点，每帧只写一次 nodeValue。
+ */
 export function bashDisplay(raw: unknown, maxRows = BASH_DISPLAY_MAX_ROWS): BashDisplay {
   if (Array.isArray(raw)) {
     const truncated = raw.length > maxRows;
     const lines = truncated ? raw.slice(raw.length - maxRows) : raw;
-    const rows: BashDisplayRow[] = [];
+    const runs: { readonly cls: string; readonly lines: string[] }[] = [];
     for (const line of lines) {
-      if (Array.isArray(line)) {
-        rows.push({
-          text: displayBashOutput(String(line[0] ?? "")),
-          cls: typeof line[1] === "string" && line[1] ? `c-${line[1]}` : "",
-        });
-      } else {
-        rows.push({ text: displayBashOutput(String(line)), cls: "" });
-      }
+      const listed = Array.isArray(line);
+      const text = displayBashOutput(String((listed ? line[0] : line) ?? ""));
+      const cls = listed && typeof line[1] === "string" && line[1] ? `c-${line[1]}` : "";
+      const last = runs[runs.length - 1];
+      if (last !== undefined && last.cls === cls) last.lines.push(text);
+      else runs.push({ cls, lines: [text] });
     }
-    return { rows, truncated };
+    return { blocks: runs.map((run) => ({ cls: run.cls, text: run.lines.join("\n") })), truncated };
   }
-  if (typeof raw !== "string" || raw.length === 0) return { rows: [], truncated: false };
+  if (typeof raw !== "string" || raw.length === 0) return { blocks: [], truncated: false };
   const tail = bashTailSlice(raw, maxRows);
-  const rows: BashDisplayRow[] = [];
-  for (const line of displayBashOutput(tail.text).split("\n")) {
-    rows.push({ text: line, cls: "" });
-  }
-  return { rows, truncated: tail.truncated };
+  return { blocks: [{ cls: "", text: displayBashOutput(tail.text) }], truncated: tail.truncated };
 }
