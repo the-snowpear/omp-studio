@@ -79,6 +79,10 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
   scrollerRef: RefObject<HTMLElement | null>; identityKey: string; itemCount: number; loadingOlder: boolean; pin?: "top" | "bottom"; contentKey?: string;
 }) {
   const pinned = useRef(pin === "bottom");
+  /** scroller 几何缓存：scroll 事件里读 scrollHeight/clientHeight 是强制同步布局
+   *  （事件通常紧跟贴底写 scrollTop 之后），流式期间每帧一次。缓存由 stickToTail
+   *  （doc RO 触发，本就要读）刷新；onScroll 只读 scrollTop（不触发布局）。 */
+  const metricsRef = useRef<{ scrollHeight: number; clientHeight: number }>({ scrollHeight: 0, clientHeight: 0 });
   const anchor = useRef<ScrollAnchor | null>(null);
   const previousFirst = useRef<string | null>(null);
   const [follow, setFollow] = useState(pin === "bottom");
@@ -95,6 +99,7 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     const el = scrollerRef.current;
     if (el === null || !pinned.current) return;
     el.scrollTop = el.scrollHeight;
+    metricsRef.current = { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
   }, [scrollerRef]);
   const resizeFollow = useRef(false);
   /* 脱离即亮「回到最新」：读者主动离开尾部（手势/锚定/加载更早），不管之后有没有
@@ -104,7 +109,18 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
   const detachFromLatest = useCallback(() => setPinned(false), [setPinned]);
   const jumpToLatest = useCallback(() => { const el = scrollerRef.current; if (el === null) return; setPinned(true); el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); }, [scrollerRef, setPinned]);
   const preparePrepend = useCallback(() => { const el = scrollerRef.current; if (el === null) return; anchor.current = captureAnchor(el); previousFirst.current = firstItemId(el); setPinned(false); }, [scrollerRef, setPinned]);
-  const onScroll = useCallback((event: UIEvent<HTMLElement>) => { const distance = distanceFromBottom(event.currentTarget); if (distance <= AT_TAIL_PX || (!pinned.current && shouldFollow(distance))) setPinned(true); }, [setPinned]);
+  const onScroll = useCallback((event: UIEvent<HTMLElement>) => {
+    const el = event.currentTarget;
+    if (metricsRef.current.clientHeight > 0) {
+      // 缓存命中：距离计算不读布局属性。缓存偏旧只会让该帧判不出"在底部"，
+      // 不会误钉（onScroll 只负责钉住，脱离由手势负责），下一帧缓存即刷新。
+      const distance = Math.max(0, metricsRef.current.scrollHeight - el.scrollTop - metricsRef.current.clientHeight);
+      if (distance <= AT_TAIL_PX || (!pinned.current && shouldFollow(distance))) setPinned(true);
+      return;
+    }
+    const distance = distanceFromBottom(el);
+    if (distance <= AT_TAIL_PX || (!pinned.current && shouldFollow(distance))) setPinned(true);
+  }, [setPinned]);
   useEffect(() => { const el = scrollerRef.current; return el ? bindTailGestures(el, () => pinned.current, () => setPinned(false)) : undefined; }, [identityKey, scrollerRef, setPinned]);
   /* Identity reset must run before the initial ResizeObserver stick. A reader
      may have left the previous session halfway up; the new session still opens

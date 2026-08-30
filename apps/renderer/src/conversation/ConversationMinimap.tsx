@@ -419,27 +419,38 @@ export function ConversationMinimap({
   const fractionsRef = useRef(fractions);
   fractionsRef.current = fractions;
 
-  /** 视口指示条：两次读 + 两次写，滚动事件里直接跑。 */
+  /**
+   * 视口指示条：两次读 + 两次写。写之前先比对缓存值，相同则跳过——每个 setAttribute
+   * / style 写入都是一轮样式失效，流式跟随期间 60Hz 全量写会让每帧凭空多出 2-3 轮
+   * RecalcStyle（实测峰值 310 次/秒的主因之一）。
+   */
+  const viewportWriteRef = useRef({ max: "", now: "", display: "", height: "", top: "" });
   const syncViewport = useCallback(() => {
     const scroller = scrollerRef.current;
     const viewport = viewportRef.current;
     const track = trackRef.current;
     if (!scroller || !viewport || !track) return;
+    const cache = viewportWriteRef.current;
+    const write = (key: "max" | "now" | "display" | "height" | "top", apply: () => void, value: string) => {
+      if (cache[key] === value) return;
+      cache[key] = value;
+      apply();
+    };
     const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
     const range = Math.max(0, track.clientHeight - TOOLS_RESERVE_PX);
-    viewport.setAttribute("aria-valuemax", String(Math.round(maxScroll)));
-    viewport.setAttribute("aria-valuenow", String(Math.round(Math.min(maxScroll, Math.max(0, scroller.scrollTop)))));
+    write("max", () => viewport.setAttribute("aria-valuemax", cache.max), String(Math.round(maxScroll)));
+    write("now", () => viewport.setAttribute("aria-valuenow", cache.now), String(Math.round(Math.min(maxScroll, Math.max(0, scroller.scrollTop)))));
     if (maxScroll <= 0) {
-      viewport.style.display = "none";
+      write("display", () => { viewport.style.display = "none"; }, "none");
       return;
     }
-    viewport.style.display = "";
+    write("display", () => { viewport.style.display = ""; }, "");
     const viewportH = range > 0
       ? Math.min(range, Math.max(MIN_VIEWPORT_H, (scroller.clientHeight / scroller.scrollHeight) * range))
       : MIN_VIEWPORT_H;
     const progress = Math.min(1, Math.max(0, scroller.scrollTop / maxScroll));
-    viewport.style.height = `${viewportH}px`;
-    viewport.style.top = `${range > viewportH ? progress * (range - viewportH) : 0}px`;
+    write("height", () => { viewport.style.height = cache.height; }, `${viewportH}px`);
+    write("top", () => { viewport.style.top = cache.top; }, `${range > viewportH ? progress * (range - viewportH) : 0}px`);
   }, [scrollerRef]);
 
   /**
@@ -655,15 +666,41 @@ export function ConversationMinimap({
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) return;
-    const onScroll = () => {
+    /* 流式跟随期间滚动事件≈每帧一条（贴底跟随每帧写 scrollTop）。视口条/活跃点的
+       DOM 更新降到 ~10Hz：60Hz 的滑块位移肉眼无感，但每帧的写入都会在 React 提交
+       之后又触发一轮样式重算（每帧多轮 RecalcStyle 的主因之一）；非流式时保持逐事件
+       即时同步。尾随定时器保证最后一次滚动位置总会落地。 */
+    const STREAM_SYNC_INTERVAL_MS = 100;
+    let lastSyncAt = 0;
+    let trailing: number | null = null;
+    const run = () => {
+      lastSyncAt = Date.now();
       syncViewport();
       syncActiveMark();
       requestMeasure(!draggingRef.current);
+    };
+    const onScroll = () => {
+      if (!busyRef.current) {
+        run();
+        return;
+      }
+      const elapsed = Date.now() - lastSyncAt;
+      if (elapsed >= STREAM_SYNC_INTERVAL_MS) {
+        if (trailing !== null) { window.clearTimeout(trailing); trailing = null; }
+        run();
+        return;
+      }
+      if (trailing !== null) return;
+      trailing = window.setTimeout(() => {
+        trailing = null;
+        run();
+      }, STREAM_SYNC_INTERVAL_MS - elapsed);
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
     const frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame(onScroll) : null;
     return () => {
       scroller.removeEventListener("scroll", onScroll);
+      if (trailing !== null) window.clearTimeout(trailing);
       if (frame !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
     };
   }, [requestMeasure, syncActiveMark, syncViewport, scrollerRef]);
