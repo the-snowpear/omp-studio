@@ -447,8 +447,21 @@ export function ConversationMinimap({
    * 总体 O(行数²)）再读一次 rect；这里改为一次 querySelectorAll + 单批 rect 读，
    * 并在「圆点集合未变且 scrollHeight 未变」时整体跳过：流式的多数 chunk 不改变
    * 文档高度，此时完全不碰布局。
+   *
+   * 插值锚点持久化：虚拟列表只挂载窗口内的行，窗口外的圆点要在锚点之间插值。
+   * 若锚点只取「当前挂载」的行，窗口随滚动移动时锚点集跟着变，同一个圆点的插值
+   * 结果每次重测都不同——表现为滚动期间圆点上下漂移，且每次重测都触发整条轨道
+   * 重渲染（滚动中周期性卡一下）。这里把实测过的行中心（绝对像素偏移）累积在
+   * 缓存里，插值永远在「最近两个已实测锚点」之间进行：窗口怎么移，已定分数不
+   * 变，重复重测被 `fractionsShifted` 整体短路。圆点集合增删（新行、翻页）或
+   * 文档高度变化（流式增长、卡片展开）时缓存失效，回到逐窗重建。
    */
   const measuredRef = useRef<{ readonly marks: readonly MinimapMark[]; readonly scrollHeight: number } | null>(null);
+  const anchorCacheRef = useRef<{ centers: Map<string, number>; marksKey: string; scrollHeight: number }>({
+    centers: new Map(),
+    marksKey: "",
+    scrollHeight: -1,
+  });
   const lastMeasureAtRef = useRef(Number.NEGATIVE_INFINITY);
   const measureTimerRef = useRef<number | null>(null);
   const forceMeasureRef = useRef(false);
@@ -471,30 +484,37 @@ export function ConversationMinimap({
       }
       return true;
     }
+    const marksKey = `${current.length}:${current[0]!.itemId}:${current[current.length - 1]!.itemId}`;
+    const anchorCache = anchorCacheRef.current;
+    if (anchorCache.marksKey !== marksKey || Math.abs(anchorCache.scrollHeight - scrollHeight) > 2) {
+      anchorCache.centers.clear();
+      anchorCache.marksKey = marksKey;
+    }
+    anchorCache.scrollHeight = scrollHeight;
     const wanted = new Set<string>();
     for (const mark of current) wanted.add(mark.itemId);
     const base = scroller.getBoundingClientRect().top;
     const scrollTop = scroller.scrollTop;
     /* Virtualized transcripts only mount a small viewport window, so most marks
-       have no DOM node to measure. Measure the mounted ones, then interpolate
-       the rest *between those measurements* — one coordinate system, and the
-       sequence stays monotonic. Seeding unmounted marks with `index / count`
-       instead mixes row-index space into pixel space: dots jump as the mounted
-       window moves, and `spaceMinimapMarks` (which walks forward assuming
-       ascending order) starts clustering the wrong neighbours. */
-    const anchors: Array<{ index: number; fraction: number }> = [];
-    const mountedFractions = new Map<string, number>();
+       have no DOM node to measure. Measure the mounted ones into the persistent
+       anchor cache, then interpolate the rest between cached measurements — one
+       coordinate system, and the sequence stays monotonic. Seeding unmounted
+       marks with `index / count` instead mixes row-index space into pixel space:
+       dots jump as the mounted window moves, and `spaceMinimapMarks` (which
+       walks forward assuming ascending order) starts clustering the wrong
+       neighbours. */
     for (const node of scroller.querySelectorAll<HTMLElement>("[data-item-id]")) {
       const key = node.dataset.itemId;
       /* 第一个匹配节点胜出，与原来的 querySelector 语义一致。 */
-      if (key === undefined || !wanted.has(key) || mountedFractions.has(key)) continue;
+      if (key === undefined || !wanted.has(key) || anchorCache.centers.has(key)) continue;
       const rect = node.getBoundingClientRect();
       const center = rect.top - base + scrollTop + rect.height / 2;
-      mountedFractions.set(key, center / scrollHeight);
+      anchorCache.centers.set(key, center);
     }
+    const anchors: Array<{ index: number; fraction: number }> = [];
     for (let index = 0; index < current.length; index += 1) {
-      const fraction = mountedFractions.get(current[index]!.itemId);
-      if (fraction !== undefined) anchors.push({ index, fraction });
+      const center = anchorCache.centers.get(current[index]!.itemId);
+      if (center !== undefined) anchors.push({ index, fraction: center / scrollHeight });
     }
     const next: Record<string, number> = {};
     const clamp = (value: number): number => Math.round(Math.min(0.985, Math.max(0.015, value)) * 10000) / 10000;
