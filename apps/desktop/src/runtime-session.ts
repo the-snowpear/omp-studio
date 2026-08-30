@@ -197,7 +197,9 @@ export function createDesktopRuntimeSessionPort(
   if (maxResidentSessions !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(maxResidentSessions) || maxResidentSessions < 1)) {
     throw new TypeError("maxResidentSessions must be a positive integer when provided");
   }
-  const idleWorkerTtlMs = options.idleWorkerTtlMs ?? 10 * 60_000;
+  // 空闲 Worker 的驻留时长：每个 Worker 常驻 ~290MB，TTL 越长多会话切换越顺、
+  // 内存峰值越高。5 分钟在「切回免冷启」与「空闲内存可回收」之间取中。
+  const idleWorkerTtlMs = options.idleWorkerTtlMs ?? 5 * 60_000;
   if (!Number.isSafeInteger(idleWorkerTtlMs) || idleWorkerTtlMs <= 0) {
     throw new TypeError("idleWorkerTtlMs must be a positive integer");
   }
