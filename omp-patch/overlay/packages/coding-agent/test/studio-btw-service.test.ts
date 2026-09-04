@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { StudioBtwService, type StudioBtwSessionPort } from "@oh-my-pi/pi-coding-agent/studio/services/btw-service";
+import {
+	StudioBtwService,
+	type StudioBtwSessionPort,
+	type StudioBtwSnapshot,
+} from "@oh-my-pi/pi-coding-agent/studio/services/btw-service";
 
 function assistant(text: string): AssistantMessage {
 	return {
@@ -155,5 +159,42 @@ describe("WP-041 StudioBtwService", () => {
 			newLeafId: "leaf-1",
 		});
 		expect(attempts).toBe(2);
+	});
+
+	test("coalesces streaming emits and never swallows the terminal snapshot", async () => {
+		const { session, run, runArgs } = fixture();
+		const service = new StudioBtwService(session, {
+			idGenerator: () => "coalesced",
+			tokenGenerator: () => "token",
+			coalesceIntervalMs: 5,
+		});
+		const snapshots: StudioBtwSnapshot[] = [];
+		service.onChange(snapshot => snapshots.push(snapshot));
+		const started = service.ask("why did this fail?");
+		expect(started.ephemeralId).toBe("coalesced");
+		expect(snapshots.map(snapshot => snapshot.status)).toEqual(["running"]);
+
+		for (const delta of ["a", "b", "c", "d"]) runArgs()?.onTextDelta?.(delta);
+		// Every delta is accumulated on the record; only one frame is emitted.
+		expect(snapshots).toHaveLength(1);
+		expect(service.get(started.ephemeralId).text).toBe("abcd");
+		await Bun.sleep(20);
+		expect(snapshots).toHaveLength(2);
+		expect(snapshots[1]).toEqual({ ephemeralId: "coalesced", status: "running", text: "abcd" });
+
+		runArgs()?.onTextDelta?.("e");
+		run.resolve({ replyText: "abcde", assistantMessage: assistant("abcde") });
+		await Bun.sleep(0);
+		expect(snapshots).toHaveLength(3);
+		expect(snapshots[2]).toEqual({
+			ephemeralId: "coalesced",
+			status: "completed",
+			text: "abcde",
+			copy: "abcde",
+		});
+		// The terminal emit cancels the frame the last delta had scheduled, so
+		// `running` can never land after `completed`.
+		await Bun.sleep(20);
+		expect(snapshots).toHaveLength(3);
 	});
 });

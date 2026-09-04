@@ -34,6 +34,10 @@ import {
   type ChromeLogsResult,
 } from "./chrome-logs-shared.js";
 import {
+  CHROME_METRICS_CHANNELS,
+  type ProcessMemorySample,
+} from "./chrome-metrics-shared.js";
+import {
   CHROME_IMAGE_CHANNELS,
   type ChromeImageInput,
   type ChromeImageResult,
@@ -115,6 +119,9 @@ contextBridge.exposeInMainWorld(
     },
     exportLogs(): Promise<ChromeLogsResult> {
       return ipcRenderer.invoke(CHROME_LOGS_CHANNELS.exportLogs, {}) as Promise<ChromeLogsResult>;
+    },
+    sampleProcessMemory(): Promise<ProcessMemorySample | null> {
+      return ipcRenderer.invoke(CHROME_METRICS_CHANNELS.sample, {}) as Promise<ProcessMemorySample | null>;
     },
     saveAvatar(input: ChromeAvatarBytes): Promise<ChromeAvatarSaveResult | { ok: false; message: string }> {
       return ipcRenderer.invoke(CHROME_PROFILE_CHANNELS.saveAvatar, input) as Promise<

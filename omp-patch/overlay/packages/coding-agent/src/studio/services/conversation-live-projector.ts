@@ -536,7 +536,8 @@ export class ConversationLiveProjector {
 		const previous = this.#toolOutput.get(toolCallId);
 		const pending = this.#toolPending.get(toolCallId);
 		const sent = this.#toolSent.get(toolCallId);
-		if (previous === sanitized.text && (!truncated || pending?.truncated === true || sent?.truncated === true)) return;
+		if (previous === sanitized.text && (!truncated || pending?.truncated === true || sent?.truncated === true))
+			return;
 		this.#rememberBoundedMap(this.#toolOutput, toolCallId, sanitized.text);
 		// Buffer rather than emit. A streaming tool (build log, test run) produces
 		// far more updates than a frame can show, and a partial result that is not
@@ -549,7 +550,9 @@ export class ConversationLiveProjector {
 			truncated: truncated || pending?.truncated === true,
 		});
 		const sentText = sent?.text ?? "";
-		const unsent = sanitized.text.startsWith(sentText) ? sanitized.text.length - sentText.length : sanitized.text.length;
+		const unsent = sanitized.text.startsWith(sentText)
+			? sanitized.text.length - sentText.length
+			: sanitized.text.length;
 		const threshold = this.#options.toolFlushCharThreshold ?? CONVERSATION_LIVE_TOOL_FLUSH_CHARS;
 		if (unsent >= threshold) this.#flushPendingTool(toolCallId);
 		else this.#scheduleCoalesce();

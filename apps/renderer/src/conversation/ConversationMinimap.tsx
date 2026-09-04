@@ -12,7 +12,7 @@ import {
 import { Icon } from "../icons";
 import { compactMinimapPreview } from "./compactSummary";
 import { batchSummary, toolKind, type ThinkView } from "./toolMeta";
-import { tailStreaming } from "./conversationViewModel";
+import { tailStreaming, timelineStructureToken } from "./conversationViewModel";
 import type { AssistantSegment, TimelineRow, ToolView } from "./conversationViewModel";
 
 /** 底部工具按钮区预留高度（与 ver1 syncViewport 的 52px 一致）。 */
@@ -408,7 +408,31 @@ export function ConversationMinimap({
   const [keyOnly, setKeyOnly] = useState(false);
 
   const prevMarksRef = useRef<readonly MinimapMark[]>([]);
-  const marks = useMemo(() => reuseMarks(prevMarksRef.current, deriveMinimapMarks(rows)), [rows]);
+  /**
+   * 依赖结构令牌而不是 `rows` 身份。
+   *
+   * 流式期间 store 每帧都要把持久化前缀和活跃尾部拼成一个新数组（`rows` 身份必然变），
+   * 而圆点只由行的类型/导航元数据决定，纯文本增量改不动任何一个 mark。挂在 `rows` 上
+   * 等于每个发布帧都对全量 rows 走一遍 `deriveMinimapMarks` 并分配一个满长度数组，
+   * 长会话下就是每秒几十万次操作压在主线程上。`ConvoTranscript` 的几个 memo 早就
+   * 是这么做的。
+   *
+   * `hasError` / `hasUser` 顺便在同一次遍历里算出来，省掉两次全量 `some`。
+   */
+  const structureToken = timelineStructureToken(rows);
+  const derived = useMemo(() => {
+    const next = reuseMarks(prevMarksRef.current, deriveMinimapMarks(rows));
+    let hasError = false;
+    let hasUser = false;
+    for (const mark of next) {
+      if (mark.type === "error") hasError = true;
+      if (mark.type === "user" || mark.navigationTypes?.includes("user") === true) hasUser = true;
+      if (hasError && hasUser) break;
+    }
+    return { marks: next, hasError, hasUser };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 结构令牌代表 rows 的内容版本
+  }, [structureToken]);
+  const marks = derived.marks;
   prevMarksRef.current = marks;
   const marksRef = useRef(marks);
   marksRef.current = marks;
@@ -954,10 +978,8 @@ export function ConversationMinimap({
     syncActiveMark();
   };
 
-  const hasError = marks.some((mark) => mark.type === "error");
-  const hasUser = marks.some(
-    (mark) => mark.type === "user" || mark.navigationTypes?.includes("user") === true,
-  );
+  const hasError = derived.hasError;
+  const hasUser = derived.hasUser;
 
   return (
     <div className="minimap" id="minimap" ref={rootRef}>

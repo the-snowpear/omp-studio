@@ -280,7 +280,7 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		const runtimeSettings = new StudioRuntimeSettingsService(session);
 		expect(runtimeSettings.get(["edit.autoRepair.enabled", "extendedContext"]).values).toEqual({
 			"edit.autoRepair.enabled": false,
-			extendedContext: true,
+			extendedContext: false,
 		});
 		await runtimeSettings.set("edit.autoRepair.enabled", true, false);
 		expect(session.settings.get("edit.autoRepair.enabled")).toBe(true);

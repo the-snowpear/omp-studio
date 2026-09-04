@@ -52,12 +52,12 @@ describe("WP-044 Studio command manifest", () => {
 		expect(new Set(first.commands.map(command => command.id)).size).toBe(first.commands.length);
 		expect(first.unclassifiedBuiltins).toEqual([]);
 		expect(first.commands.find(command => command.id === STUDIO_SESSION_TITLE_ENSURE_ID)).toMatchObject({
-		implementation: "shared-service",
-		presentation: "native",
-		risk: "normal",
-		effect: "session",
-		contractTestId: "CMD-STUDIO-SESSION-TITLE-ENSURE",
-	});
+			implementation: "shared-service",
+			presentation: "native",
+			risk: "normal",
+			effect: "session",
+			contractTestId: "CMD-STUDIO-SESSION-TITLE-ENSURE",
+		});
 		expect(first.commands.find(command => command.id === "builtin.pause")).toMatchObject({
 			implementation: "tui-compatibility",
 			presentation: "terminal",
@@ -88,9 +88,7 @@ describe("WP-044 Studio command manifest", () => {
 			title: "Studio fallback",
 			source: "auto",
 		});
-		expect(setCalls).toEqual([
-			{ title: "Studio fallback", source: "auto", trigger: "studio-provisional-fallback" },
-		]);
+		expect(setCalls).toEqual([{ title: "Studio fallback", source: "auto", trigger: "studio-provisional-fallback" }]);
 	});
 
 	test("does not overwrite an existing auto or user session title", async () => {

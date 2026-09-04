@@ -22,7 +22,7 @@ function mockStreamFn() {
 	};
 }
 
-describe("AgentSession v18.0.3 Studio compatibility and seam invariants", () => {
+describe("AgentSession v18.0.11 Studio compatibility and seam invariants", () => {
 	test("prompt returns boolean true on normal dispatch and executes beforeNextUserTurn hook exactly once", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		try {

@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from "node:fs";
-import { cp, lstat, mkdir, open, readdir, rename, rm, unlink, utimes, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, open, readdir, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
@@ -8,13 +8,17 @@ import { GzipFileError, readGunzipCapped, readGunzipPrefix } from "./gzip-file.j
 import { defaultOmpArchiveRoot, defaultOmpSessionsRoot } from "./session-catalog.js";
 
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
-const DEFAULT_MAX_SCAN_FILES = 20_000;
+const DEFAULT_SCAN_FILES = 20_000;
 const DEFAULT_WRITE_GRACE_MS = 60_000;
 const DEFAULT_GC_LOCK_STALE_MS = 60 * 60 * 1000;
 const SESSION_SUFFIX = ".jsonl";
 const COMPRESSED_SESSION_SUFFIX = ".jsonl.gz";
 const GC_LOCK_NAME = "gc.lock";
 const HEADER_PREFIX_BYTES = 64 * 1024;
+/** Tail bytes read to recover the transcript's last-active timestamp. */
+const TAIL_SCAN_BYTES = 1024 * 1024;
+/** Suffix for a source renamed out of discovery while its destination lands. */
+const STAGING_SUFFIX = ".staging";
 
 export type SessionArchiveServiceErrorCode =
   | "SESSION_NOT_FOUND"
@@ -50,6 +54,10 @@ export interface SessionArchiveServiceOptions {
   /** A gc.lock younger than this refuses the move; older locks are stale. */
   readonly gcLockStaleMs?: number;
   readonly now?: () => Date;
+  /** Injectable filesystem rename used by the Windows contention regression tests. */
+  readonly renameFile?: typeof rename;
+  /** Injectable filesystem removal used by the Windows contention regression tests. */
+  readonly removeFile?: typeof rm;
 }
 
 export interface SessionArchiveMoveResult {
@@ -66,7 +74,9 @@ interface LocatedSession {
  * Host-owned single-session archive aligned with `omp gc`'s cold archive:
  * `.jsonl` becomes `.jsonl.gz` (level 9) under `<agentDir>/archive/sessions`
  * with the sessions-relative layout and the artifacts directory preserved.
- * Every move is rolled back on failure; the OMP Runtime is never involved.
+ * Moves stage the source under an undiscoverable name before the destination
+ * lands, so no failure leaves one session visible in both trees; every move
+ * is otherwise rolled back on failure. The OMP Runtime is never involved.
  */
 export class StudioSessionArchiveService {
   readonly #sessionsRoot: string;
@@ -78,6 +88,8 @@ export class StudioSessionArchiveService {
   readonly #writeGraceMs: number;
   readonly #gcLockStaleMs: number;
   readonly #now: () => Date;
+  readonly #renameFile: typeof rename;
+  readonly #removeFile: typeof rm;
 
   constructor(options: SessionArchiveServiceOptions) {
     if (options.allowedCwd.length === 0) throw new TypeError("allowedCwd is required");
@@ -85,11 +97,13 @@ export class StudioSessionArchiveService {
     this.#archiveRoot = resolve(options.archiveRoot ?? defaultOmpArchiveRoot(this.#sessionsRoot));
     this.#allowedCwd = resolve(options.allowedCwd);
     this.#maxSessionBytes = options.maxSessionBytes ?? DEFAULT_MAX_SESSION_BYTES;
-    this.#maxScanFiles = options.maxScanFiles ?? DEFAULT_MAX_SCAN_FILES;
+    this.#maxScanFiles = options.maxScanFiles ?? DEFAULT_SCAN_FILES;
     this.#isResident = options.isResident;
     this.#writeGraceMs = options.writeGraceMs ?? DEFAULT_WRITE_GRACE_MS;
     this.#gcLockStaleMs = options.gcLockStaleMs ?? DEFAULT_GC_LOCK_STALE_MS;
     this.#now = options.now ?? (() => new Date());
+    this.#renameFile = options.renameFile ?? rename;
+    this.#removeFile = options.removeFile ?? rm;
     if (!Number.isSafeInteger(this.#maxSessionBytes) || this.#maxSessionBytes <= 0) {
       throw new TypeError("maxSessionBytes must be positive");
     }
@@ -102,15 +116,15 @@ export class StudioSessionArchiveService {
     if (sessionId.length === 0) throw new SessionArchiveServiceError("SESSION_NOT_FOUND", "Session id is required");
     await this.#assertGcLockIdle();
     await this.#assertNotResident(sessionId);
+    if ((await this.#findInArchive(sessionId)) !== undefined) {
+      throw new SessionArchiveServiceError("SESSION_ALREADY_ARCHIVED", "Session is already archived");
+    }
     const source = await this.#locateUnique(
       await this.#listSessionsTree(),
       (file) => readPlainSessionHeader(file),
       sessionId,
       "Session is not available in the sessions tree",
     );
-    if ((await this.#findInArchive(sessionId)) !== undefined) {
-      throw new SessionArchiveServiceError("SESSION_ALREADY_ARCHIVED", "Session is already archived");
-    }
     this.#assertWorkspace(source);
 
     const metadata = await lstat(source.path).catch(() => undefined);
@@ -261,19 +275,18 @@ export class StudioSessionArchiveService {
 
   async #gzipMove(from: string, to: string): Promise<void> {
     await mkdir(dirname(to), { recursive: true });
-    // Snapshot the source bytes before the move so the fresh gz can carry
+    // Snapshot the source tail before the move so the fresh gz can carry
     // the transcript's last-active mtime (see #restoreSessionMtime).
-    const source = await readPlainSessionBytes(from, this.#maxSessionBytes);
+    const tail = await readPlainSessionTail(from, TAIL_SCAN_BYTES);
     const temp = `${to}.${process.pid}.${Date.now()}.tmp`;
     try {
       await pipeline(createReadStream(from), createGzip({ level: 9 }), createWriteStream(temp, { mode: 0o600 }));
-      await rename(temp, to);
     } catch (error) {
       await rm(temp, { force: true });
       throw error;
     }
-    await unlinkWithRetry(from);
-    if (source !== undefined) await this.#restoreSessionMtime(to, source);
+    await this.#commitStagedMove(from, to, temp);
+    if (tail !== undefined) await this.#restoreSessionMtime(to, tail);
   }
 
   async #gunzipMove(from: string, to: string): Promise<void> {
@@ -291,13 +304,59 @@ export class StudioSessionArchiveService {
     const temp = `${to}.${process.pid}.${Date.now()}.tmp`;
     try {
       await writeFile(temp, decompressed, { flag: "wx", mode: 0o600 });
-      await rename(temp, to);
     } catch (error) {
       await rm(temp, { force: true });
       throw error;
     }
-    await unlinkWithRetry(from);
+    await this.#commitStagedMove(from, to, temp);
     await this.#restoreSessionMtime(to, decompressed);
+  }
+
+  /**
+   * Commit a prepared move: rename the source to an undiscoverable staging
+   * name, land the prepared destination, then discard the staging copy. A
+   * locked source fails before anything is written; a staging copy that
+   * cannot be deleted is inert (no scan suffix match) and never leaves the
+   * session visible in both trees at once.
+   */
+  async #commitStagedMove(from: string, to: string, temp: string): Promise<void> {
+    const staged = `${from}.${process.pid}.${Date.now()}${STAGING_SUFFIX}`;
+    try {
+      await this.#renameWithRetry(from, staged);
+      await this.#renameFile(temp, to);
+    } catch (error) {
+      await rm(temp, { force: true });
+      await this.#renameFile(staged, from).catch(() => undefined);
+      throw error;
+    }
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await this.#removeFile(staged, { force: true });
+        return;
+      } catch {
+        if (attempt === 4) return;
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
+  }
+
+  /** rename() can hit transient EPERM/EACCES on Windows while scanners hold files. */
+  async #renameWithRetry(from: string, to: string): Promise<void> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await this.#renameFile(from, to);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
+          if (attempt < 4) {
+            await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+            continue;
+          }
+        }
+        throw error;
+      }
+    }
   }
 
   /**
@@ -379,15 +438,16 @@ async function listFilesWithSuffix(root: string, suffix: string, limit: number):
   return files.sort();
 }
 
-/** Read a plain session file's bytes, bounded by the archive limit. */
-async function readPlainSessionBytes(file: string, maxBytes: number): Promise<Buffer | undefined> {
+/** Read the tail of a plain session file, bounded, for mtime restoration. */
+async function readPlainSessionTail(file: string, tailBytes: number): Promise<Buffer | undefined> {
   try {
     const metadata = await lstat(file);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > maxBytes) return undefined;
+    if (!metadata.isFile() || metadata.isSymbolicLink()) return undefined;
+    const length = Math.min(tailBytes, metadata.size);
     const handle = await open(file, "r");
     try {
-      const buffer = Buffer.alloc(metadata.size);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, metadata.size - length);
       return buffer.subarray(0, bytesRead);
     } finally {
       await handle.close();
@@ -481,27 +541,6 @@ async function pathExists(target: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function unlinkWithRetry(target: string, maxAttempts = 5, delayMs = 50): Promise<void> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    try {
-      await unlink(target);
-      return;
-    } catch (error) {
-      lastError = error;
-      const code = (error as NodeJS.ErrnoException)?.code;
-      if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
-        if (attempt < maxAttempts - 1) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
-          continue;
-        }
-      }
-      throw error;
-    }
-  }
-  if (lastError !== undefined) throw lastError;
 }
 
 async function movePath(source: string, destination: string): Promise<void> {

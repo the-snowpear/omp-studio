@@ -13,7 +13,13 @@ const wait = (milliseconds: number): Promise<void> =>
 		setTimeout(resolve, milliseconds);
 	});
 
-function runtimeFixture(options: { readonly contextAvailable?: boolean; readonly negativeUsage?: boolean } = {}): {
+function runtimeFixture(
+	options: {
+		readonly contextAvailable?: boolean;
+		readonly negativeUsage?: boolean;
+		readonly usedTokens?: () => number;
+	} = {},
+): {
 	readonly runtime: StudioHostRuntime;
 	emitConversation(event: ConversationRuntimeEvent): void;
 } {
@@ -44,7 +50,7 @@ function runtimeFixture(options: { readonly contextAvailable?: boolean; readonly
 				options.contextAvailable === true
 					? {
 							contextWindow: 100,
-							usedTokens: 25,
+							usedTokens: options.usedTokens === undefined ? 25 : options.usedTokens(),
 							anchored: true,
 							systemPromptTokens: 4,
 							systemContextTokens: 3,
@@ -117,11 +123,12 @@ describe("studio session telemetry", () => {
 		projector.dispose();
 	});
 
-	test("burst events coalesce, completion emits immediately, and dispose clears a timer", async () => {
+	test("delta bursts schedule nothing, other bursts coalesce, completion emits immediately, and dispose clears a timer", async () => {
 		const fixture = runtimeFixture({ contextAvailable: true });
 		const projector = new StudioStateProjector(fixture.runtime);
 		const events: StudioEventEnvelope[] = [];
 		projector.onEvent(event => events.push(event));
+		const telemetryEvents = () => events.filter(event => event.event.kind === "session.telemetry.changed");
 		// Telemetry only tracks the main session, so these must carry its id.
 		const delta = {
 			kind: "conversation.message.delta",
@@ -130,21 +137,53 @@ describe("studio session telemetry", () => {
 		fixture.emitConversation(delta);
 		fixture.emitConversation(delta);
 		fixture.emitConversation(delta);
-		expect(events.filter(event => event.event.kind === "session.telemetry.changed")).toHaveLength(0);
+		// A pure text delta cannot move any telemetry number, so it must not even
+		// schedule a rebuild: the whole debounce window passes with nothing emitted.
 		await wait(320);
-		expect(events.filter(event => event.event.kind === "session.telemetry.changed")).toHaveLength(1);
+		expect(telemetryEvents()).toHaveLength(0);
+		const toolCompleted = {
+			kind: "conversation.tool.completed",
+			sessionId: "session-telemetry",
+		} as ConversationRuntimeEvent;
+		fixture.emitConversation(toolCompleted);
+		fixture.emitConversation(toolCompleted);
+		fixture.emitConversation(toolCompleted);
+		expect(telemetryEvents()).toHaveLength(0);
+		await wait(320);
+		expect(telemetryEvents()).toHaveLength(1);
 		fixture.emitConversation({
 			kind: "conversation.turn.completed",
 			sessionId: "session-telemetry",
 		} as ConversationRuntimeEvent);
-		const telemetryEvents = events.filter(event => event.event.kind === "session.telemetry.changed");
-		expect(telemetryEvents).toHaveLength(2);
-		const latest = telemetryEvents.at(-1)?.event;
+		expect(telemetryEvents()).toHaveLength(2);
+		const latest = telemetryEvents().at(-1)?.event;
 		expect(latest?.kind === "session.telemetry.changed" ? latest.telemetry.context?.percent : undefined).toBe(25);
-		fixture.emitConversation(delta);
+		fixture.emitConversation(toolCompleted);
 		projector.dispose();
 		await wait(320);
-		expect(events.filter(event => event.event.kind === "session.telemetry.changed")).toHaveLength(2);
+		expect(telemetryEvents()).toHaveLength(2);
+	});
+
+	test("refreshTelemetry recomputes immediately after an out-of-band context mutation", () => {
+		let usedTokens = 80;
+		const fixture = runtimeFixture({ contextAvailable: true, usedTokens: () => usedTokens });
+		const projector = new StudioStateProjector(fixture.runtime);
+		expect(projector.snapshot().telemetry?.context?.percent).toBe(80);
+		// A manual compact commits without any AgentSessionEvent, so no
+		// conversation event recomputes the cached snapshot.
+		usedTokens = 20;
+		expect(projector.snapshot().telemetry?.context?.percent).toBe(80);
+		const events: StudioEventEnvelope[] = [];
+		projector.onEvent(event => events.push(event));
+		projector.refreshTelemetry();
+		const emitted = events.filter(event => event.event.kind === "session.telemetry.changed");
+		expect(emitted).toHaveLength(1);
+		const telemetry = emitted[0]!.event;
+		expect(telemetry.kind === "session.telemetry.changed" ? telemetry.telemetry.context?.percent : undefined).toBe(
+			20,
+		);
+		expect(projector.snapshot().telemetry?.context?.percent).toBe(20);
+		projector.dispose();
 	});
 
 	test("live projector and the shared builder produce identical telemetry for the same session port", () => {

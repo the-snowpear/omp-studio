@@ -109,12 +109,25 @@ declare global {
         listFileOpeners(input: { workspaceId: string }): Promise<
           ReadonlyArray<{ readonly id: string; readonly name: string }>
         >;
-        copyImage(input: {
-          mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+        /**
+         * 一次进程内存采样（Main 投影自 `app.getAppMetrics()`）。
+         * 不含 pid 与可执行路径；不可用时返回 null。
+         */
+        sampleProcessMemory(): Promise<{
+          readonly capturedAt: string;
+          readonly totalWorkingSetKb: number;
+          readonly rows: ReadonlyArray<{
+            readonly kind: string;
+            readonly ordinal: number;
+            readonly workingSetKb: number;
+            readonly peakWorkingSetKb?: number;
+          }>;
+        } | null>;
+        copyImage(input: {          mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml";
           bytes: Uint8Array;
         }): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }>;
         saveImage(input: {
-          mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+          mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml";
           bytes: Uint8Array;
           suggestedName: string;
         }): Promise<

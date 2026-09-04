@@ -30,6 +30,15 @@ import { RuntimePublicationStore, type RuntimePublication } from "./runtime-publ
 
 const TERMINAL = new Set<CommandLedgerEntry["status"]>(["completed", "failed", "rejected", "outcome_unknown"]);
 
+/**
+ * Delay between snapshot-recovery attempts after an event-sequence gap. The
+ * first attempt is immediate; a retry only happens when the Bridge refuses a
+ * snapshot because commands are still in flight, so the interval only has to be
+ * long enough not to spin — 250 ms matches the Runtime's telemetry debounce, the
+ * coarsest cadence the Host already waits on.
+ */
+const RESYNC_SNAPSHOT_RETRY_MS = 250;
+
 export class StudioRuntimeSessionController {
   readonly #unsubscribeProjection: () => void;
   readonly #unsubscribeEvent: () => void;
@@ -39,6 +48,10 @@ export class StudioRuntimeSessionController {
   readonly #telemetry = new TelemetryEventFanout();
   readonly #btw = new BtwEventFanout();
   readonly #publicationListeners = new Set<(publication: RuntimePublication) => void>();
+  #resyncTimer: ReturnType<typeof setTimeout> | undefined;
+  #resyncInFlight = false;
+  #publishedTerminalRevision = -1;
+  #publishedTerminalOutcomes: CommandLedgerEntry[] = [];
 
   constructor(
     private readonly bridge: StudioBridgeClient,
@@ -56,11 +69,49 @@ export class StudioRuntimeSessionController {
     });
     this.#unsubscribeResync = bridge.onResyncRequired(() => {
       this.#conversation.emitResync("conversation gap; re-read open transcripts");
+      this.#recoverFromGap();
     });
   }
 
+  /**
+   * Telling the Renderer to re-read transcripts is only half of gap recovery. A
+   * gap also leaves the Bridge in `snapshot-required` with its event listener
+   * detached, and nothing else ever re-requests a snapshot — `refresh()` is
+   * called once at startup — so without this the connection stays wedged and no
+   * further Runtime event is processed at all.
+   */
+  #recoverFromGap(): void {
+    if (this.#resyncInFlight || this.#resyncTimer !== undefined) return;
+    if (this.bridge.state !== "snapshot-required") return;
+    this.#resyncInFlight = true;
+    // Deferred by one microtask: the resync fires from inside the Bridge's socket
+    // data handler, and `requestSnapshot` swaps that very handler out.
+    void Promise.resolve()
+      .then(async () => {
+        if (this.bridge.state !== "snapshot-required") return;
+        await this.refresh();
+      })
+      .catch(() => {
+        // A snapshot is refused while commands are pending. Keep asking for as
+        // long as the Bridge still needs one: giving up would leave it wedged.
+        if (this.bridge.state !== "snapshot-required") return;
+        this.#resyncTimer = setTimeout(() => {
+          this.#resyncTimer = undefined;
+          this.#recoverFromGap();
+        }, RESYNC_SNAPSHOT_RETRY_MS);
+      })
+      .finally(() => {
+        this.#resyncInFlight = false;
+      });
+  }
+
   #publish(snapshot: Parameters<RuntimePublicationStore["publish"]>[0]): RuntimePublication {
-    const publication = this.publications.publish(snapshot, this.ledger.snapshot());
+    if (this.#publishedTerminalRevision !== this.ledger.terminalRevision) {
+      this.#publishedTerminalRevision = this.ledger.terminalRevision;
+      this.#publishedTerminalOutcomes = this.ledger.terminalSnapshot();
+    }
+    const publication = this.publications.publish(snapshot, this.#publishedTerminalOutcomes);
+
     for (const listener of [...this.#publicationListeners]) {
       try {
         listener(publication);
@@ -76,7 +127,9 @@ export class StudioRuntimeSessionController {
     for (const receipt of response.terminalReceipts) {
       if (this.ledger.getByRequestId(receipt.requestId) !== undefined) this.ledger.reconcileReceipt(receipt);
     }
-    return this.#publish(response.snapshot);
+    // `response` is also handed back to `requestSnapshot`'s caller, so the store
+    // cannot take ownership of its snapshot — see `RuntimePublicationStore.publish`.
+    return this.#publish(structuredClone(response.snapshot));
   }
 
   async invoke(request: StudioRequest): Promise<StudioReceipt> {
@@ -300,6 +353,8 @@ export class StudioRuntimeSessionController {
   }
 
   dispose(): void {
+    if (this.#resyncTimer !== undefined) clearTimeout(this.#resyncTimer);
+    this.#resyncTimer = undefined;
     this.#unsubscribeProjection();
     this.#unsubscribeEvent();
     this.#unsubscribeResync();

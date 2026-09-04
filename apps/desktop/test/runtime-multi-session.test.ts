@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { HostRuntimeHelloView } from "@omp-studio/host-client-api";
-import { InMemorySessionLeaseStore } from "@omp-studio/studio-host";
+import { InMemorySessionLeaseStore, type SessionLeaseStore } from "@omp-studio/studio-host";
 import type {
   OperatorStateSnapshot,
   RuntimeEpoch,
@@ -44,6 +44,7 @@ function fakeWorkerFactory(state: {
   readonly streaming: Set<string>;
   readonly failInvoke: Set<string>;
   readonly dead: Set<string>;
+  readonly failStartEpoch?: Set<number>;
   readonly invokes: Array<{ sessionId: string; operation: StudioOperation }>;
   readonly launchedIn: Array<{ sessionId: string; workspaceId: string; cwd: string }>;
 }): NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]> {
@@ -83,6 +84,9 @@ function fakeWorkerFactory(state: {
     } as unknown as DesktopRuntimeSession;
     return {
       async start(launchContext) {
+        if (state.failStartEpoch?.has(epoch)) {
+          throw new Error(`start failed for ${sessionId} epoch ${epoch}`);
+        }
         // A Runtime binds its cwd at spawn; record what this Worker was
         // actually launched under so tests can prove no Session migrates.
         if (launchContext.workspace !== undefined) {
@@ -103,13 +107,17 @@ function fakeWorkerFactory(state: {
   };
 }
 
-function createHarness(maxResidentSessions?: number, idleWorkerTtlMs = 10 * 60_000) {
+function createHarness(
+  maxResidentSessions?: number,
+  idleWorkerTtlMs = 10 * 60_000,
+) {
   const state = {
     created: [] as Array<{ sessionId: string; epoch: number }>,
     stopped: [] as string[],
     streaming: new Set<string>(),
     failInvoke: new Set<string>(),
     dead: new Set<string>(),
+    failStartEpoch: new Set<number>(),
     invokes: [] as Array<{ sessionId: string; operation: StudioOperation }>,
     launchedIn: [] as Array<{ sessionId: string; workspaceId: string; cwd: string }>,
     adopted: [] as Array<{ workspaceId: string; cwd: string }>,
@@ -174,6 +182,26 @@ test("rebind back to a resident workspace selects its Worker without spawning", 
   await port.stop();
 });
 
+test("read-only workspace rebind adopts cwd without cold-starting a Worker", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  const inB = await port.rebind?.(WORKSPACE_B, { launchIfMissing: false });
+  assert.equal(inB, undefined);
+  assert.equal(state.created.length, 1);
+  assert.deepEqual(state.adopted.at(-1), WORKSPACE_B);
+  assert.equal(port.listResidents?.().activeSessionId, undefined);
+  assert.equal(port.lastDisconnect?.(), undefined);
+  assert.equal(port.lastUnavailable?.(), undefined);
+  const fresh = await port.switchSession?.({ kind: "fresh" });
+  assert.equal(fresh?.controller.publication()?.snapshot.sessionId, "fresh-2");
+  assert.deepEqual(state.launchedIn.at(-1), {
+    sessionId: "fresh-2",
+    workspaceId: "workspace-b",
+    cwd: "C:/other",
+  });
+  await port.stop();
+});
+
 test("hasResidentForWorkspace reports live Workers per workspace", async () => {
   const { port, state } = createHarness();
   await port.start(context);
@@ -185,6 +213,57 @@ test("hasResidentForWorkspace reports live Workers per workspace", async () => {
   // composition treats the next rebind as a restart rather than a switch.
   state.dead.add("fresh-1");
   assert.equal(port.hasResidentForWorkspace?.("workspace-a"), false);
+  await port.stop();
+});
+
+test("active lease loss clears the facade Session when Worker relaunch fails", async () => {
+  let failNextHeartbeat = true;
+  let leaseEpoch = 0;
+  const leaseStore: SessionLeaseStore = {
+    acquire({ sessionId, ownerId }) {
+      leaseEpoch += 1;
+      return {
+        sessionId,
+        ownerId,
+        leaseEpoch,
+        heartbeat: async () => {
+          if (!failNextHeartbeat) return;
+          failNextHeartbeat = false;
+          throw new Error("lease heartbeat failed");
+        },
+        release: () => undefined,
+      };
+    },
+  };
+  const state = {
+    created: [] as Array<{ sessionId: string; epoch: number }>,
+    stopped: [] as string[],
+    streaming: new Set<string>(),
+    failInvoke: new Set<string>(),
+    dead: new Set<string>(),
+    failStartEpoch: new Set([2]),
+    invokes: [] as Array<{ sessionId: string; operation: StudioOperation }>,
+    launchedIn: [] as Array<{ sessionId: string; workspaceId: string; cwd: string }>,
+  };
+  const port = createDesktopRuntimeSessionPort({
+    ownerId: "broker-lease-loss-test",
+    sessionLeaseStore: leaseStore,
+    leaseHeartbeatIntervalMs: 5,
+    workerPortFactory: fakeWorkerFactory(state),
+  });
+  const sink: Array<DesktopRuntimeSession | undefined> = [];
+  port.attachSessionSink?.((session) => sink.push(session));
+  await port.start(context);
+  await waitFor(() => state.created.length >= 2);
+
+  assert.deepEqual(sink, [undefined]);
+  assert.equal(port.isResident?.("fresh-1"), false);
+  assert.equal(port.listResidents?.().activeSessionId, undefined);
+  assert.deepEqual(state.stopped, ["fresh-1", "fresh-1"]);
+  assert.deepEqual(state.created, [
+    { sessionId: "fresh-1", epoch: 1 },
+    { sessionId: "fresh-1", epoch: 2 },
+  ]);
   await port.stop();
 });
 
@@ -264,6 +343,56 @@ test("evacuating the active Session relaunches inside its own workspace", async 
   await port.stop();
 });
 
+test("evacuating the active Session publishes one atomic replacement handoff", async () => {
+  const { port } = createHarness();
+  await port.start(context); // fresh-1
+  const sessionTransitions: Array<string | undefined> = [];
+  const residentTransitions: Array<{ active?: string; sessions: string[] }> = [];
+  port.attachSessionSink?.((session) => {
+    sessionTransitions.push(session?.controller.publication()?.snapshot.sessionId);
+  });
+  const unsubscribe = port.attachResidentsSink?.((model) => {
+    residentTransitions.push({
+      ...(model.activeSessionId === undefined ? {} : { active: String(model.activeSessionId) }),
+      sessions: model.residents.map((resident) => String(resident.sessionId)),
+    });
+  });
+  residentTransitions.length = 0; // discard the sink's initial snapshot
+
+  const result = await port.evacuateResident?.("fresh-1");
+
+  assert.equal(result?.active?.controller.publication()?.snapshot.sessionId, "fresh-2");
+  assert.deepEqual(sessionTransitions, [undefined, "fresh-2"]);
+  assert.deepEqual(residentTransitions, [{ active: "fresh-2", sessions: ["fresh-2"] }]);
+  unsubscribe?.();
+  await port.stop();
+});
+
+test("a failed active Session replacement still publishes the real empty state", async () => {
+  const { port, state } = createHarness();
+  await port.start(context); // fresh-1, epoch 1
+  state.failStartEpoch.add(2);
+  const sessionTransitions: Array<string | undefined> = [];
+  const residentTransitions: Array<{ active?: string; sessions: string[] }> = [];
+  port.attachSessionSink?.((session) => {
+    sessionTransitions.push(session?.controller.publication()?.snapshot.sessionId);
+  });
+  const unsubscribe = port.attachResidentsSink?.((model) => {
+    residentTransitions.push({
+      ...(model.activeSessionId === undefined ? {} : { active: String(model.activeSessionId) }),
+      sessions: model.residents.map((resident) => String(resident.sessionId)),
+    });
+  });
+  residentTransitions.length = 0;
+
+  await assert.rejects(() => port.evacuateResident!("fresh-1"), /start failed/u);
+
+  assert.deepEqual(sessionTransitions, [undefined]);
+  assert.deepEqual(residentTransitions, [{ sessions: [] }]);
+  unsubscribe?.();
+  await port.stop();
+});
+
 test("force ensure relaunches the active Session in its own workspace", async () => {
   const { port, state } = createHarness();
   await port.start(context); // fresh-1 in A
@@ -281,15 +410,13 @@ test("force ensure relaunches the active Session in its own workspace", async ()
   await port.stop();
 });
 
-test("capacity hibernates a background project before an idle sibling of the active one", async () => {
+test("capacity never evicts a background Runtime Worker", async () => {
   const { port, state } = createHarness(3);
   await port.start(context); // fresh-1 in A
   await port.switchSession?.({ kind: "fresh" }); // fresh-2 in A
   await port.rebind?.(WORKSPACE_B); // fresh-3 in B, B is active
-  // Capacity is full. fresh-1 is the least-recently-selected overall, and it
-  // belongs to the now-background project A, so it hibernates first.
-  await port.switchSession?.({ kind: "fresh" }); // fresh-4 in B
-  assert.deepEqual(state.stopped, ["fresh-1"]);
+  await assert.rejects(() => port.switchSession!({ kind: "fresh" }), /no Runtime Worker may be evicted/);
+  assert.deepEqual(state.stopped, []);
   await port.stop();
 });
 
@@ -310,13 +437,13 @@ test("desktop multi-session port keeps A and B resident when selecting A again",
   assert.deepEqual(new Set(state.stopped), new Set(["fresh-1", "session-b"]));
 });
 
-test("capacity hibernates only the least-recently-selected idle background Session", async () => {
+test("capacity rejects without stopping the least-recently-selected idle background Session", async () => {
   const { port, state } = createHarness(2);
   await port.start(context);
   await port.switchSession?.({ kind: "resume", sessionId: "session-b" });
-  await port.switchSession?.({ kind: "resume", sessionId: "session-c" });
-  assert.deepEqual(state.stopped, ["fresh-1"]);
-  assert.deepEqual(state.created.map((entry) => entry.sessionId), ["fresh-1", "session-b", "session-c"]);
+  await assert.rejects(() => port.switchSession!({ kind: "resume", sessionId: "session-c" }), /no Runtime Worker may be evicted/);
+  assert.deepEqual(state.stopped, []);
+  assert.deepEqual(state.created.map((entry) => entry.sessionId), ["fresh-1", "session-b"]);
   await port.stop();
 });
 
@@ -345,16 +472,28 @@ test("default Worker residency has no application-level count cap", async () => 
   await port.stop();
 });
 
-test("completed idle background Workers hibernate after the configured TTL", async () => {
+test("completed idle background Workers remain attached while Runtime owns parking", async () => {
   const { port, state } = createHarness(undefined, 20);
   await port.start(context);
   await port.switchSession?.({ kind: "resume", sessionId: "session-b" });
-  await waitFor(() => state.stopped.includes("fresh-1"));
-  assert.deepEqual(state.stopped, ["fresh-1"]);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(state.stopped, []);
+  assert.equal(port.isResident?.("fresh-1"), true);
   await port.stop();
 });
 
-test("idle hibernation never stops a background Worker while it is streaming", async () => {
+test("the active idle Runtime stays resident while OMP workers own memory parking", async () => {
+  const { port, state } = createHarness(undefined, 20);
+  await port.start(context);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(state.stopped, []);
+  assert.equal(port.listResidents?.().activeSessionId, "fresh-1");
+  assert.deepEqual(port.listResidents?.().residents.map((resident) => resident.sessionId), ["fresh-1"]);
+  assert.deepEqual(state.created.map((entry) => entry.sessionId), ["fresh-1"]);
+  await port.stop();
+});
+
+test("background Runtime stays resident while its Worker is streaming or idle", async () => {
   const { port, state } = createHarness(undefined, 20);
   state.streaming.add("fresh-1");
   await port.start(context);
@@ -362,12 +501,12 @@ test("idle hibernation never stops a background Worker while it is streaming", a
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.deepEqual(state.stopped, []);
   state.streaming.delete("fresh-1");
-  await waitFor(() => state.stopped.includes("fresh-1"));
-  assert.deepEqual(state.stopped, ["fresh-1"]);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(state.stopped, []);
   await port.stop();
 });
 
-test("idle TTL restarts after a streaming background Worker becomes idle", async () => {
+test("desktop idle TTL does not stop a Runtime after its Worker becomes idle", async () => {
   const ttl = 80;
   const { port, state } = createHarness(undefined, ttl);
   state.streaming.add("fresh-1");
@@ -377,7 +516,6 @@ test("idle TTL restarts after a streaming background Worker becomes idle", async
   state.streaming.delete("fresh-1");
   await new Promise((resolve) => setTimeout(resolve, ttl + 20));
   assert.equal(state.stopped.includes("fresh-1"), false);
-  await waitFor(() => state.stopped.includes("fresh-1"));
   await port.stop();
 });
 
@@ -468,6 +606,69 @@ test("evacuateResident stops a background Worker without switching the active se
   assert.equal(port.isResident?.("fresh-1"), false);
   assert.equal(port.isResident?.("session-b"), true);
   assert.deepEqual(state.stopped, ["fresh-1"]);
+  await port.stop();
+});
+
+test("evacuateResident still removes the resident when the lease release fails", async () => {
+  const state = {
+    created: [] as Array<{ sessionId: string; epoch: number }>,
+    stopped: [] as string[],
+    streaming: new Set<string>(),
+    failInvoke: new Set<string>(),
+    dead: new Set<string>(),
+    invokes: [] as Array<{ sessionId: string; operation: StudioOperation }>,
+    launchedIn: [] as Array<{ sessionId: string; workspaceId: string; cwd: string }>,
+  };
+  const failingLeaseStore: SessionLeaseStore = {
+    acquire: () => ({
+      sessionId: "lease",
+      ownerId: "broker-test",
+      leaseEpoch: 1,
+      release: () => {
+        throw new Error("lease file corrupted");
+      },
+    }),
+  };
+  const port = createDesktopRuntimeSessionPort({
+    ownerId: "broker-test",
+    sessionLeaseStore: failingLeaseStore,
+    workerPortFactory: fakeWorkerFactory(state),
+  });
+  await port.start(context);
+  assert.equal(port.isResident?.("fresh-1"), true);
+  const result = await port.evacuateResident?.("fresh-1");
+  assert.equal(result?.found, true);
+  assert.equal(port.isResident?.("fresh-1"), false, "the resident must leave the map despite the lease error");
+  assert.ok(state.stopped.includes("fresh-1"));
+  await port.stop();
+});
+
+test("evacuateResident force-stops a crashed Worker whose stale snapshot still claims streaming", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  state.streaming.add("fresh-1");
+  state.dead.add("fresh-1");
+  const result = await port.evacuateResident?.("fresh-1");
+  assert.equal(result?.found, true);
+  assert.equal(port.isResident?.("fresh-1"), false);
+  assert.deepEqual(
+    state.invokes.filter((entry) => entry.operation.kind === "core.abort"),
+    [],
+    "no abort is attempted on a Worker without a live hello",
+  );
+  assert.ok(state.stopped.includes("fresh-1"));
+  await port.stop();
+});
+
+test("evacuateResident still stops the Worker when the abort invoke fails", async () => {
+  const { port, state } = createHarness();
+  await port.start(context);
+  state.streaming.add("fresh-1");
+  state.failInvoke.add("fresh-1");
+  const result = await port.evacuateResident?.("fresh-1");
+  assert.equal(result?.found, true);
+  assert.equal(port.isResident?.("fresh-1"), false);
+  assert.ok(state.stopped.includes("fresh-1"));
   await port.stop();
 });
 

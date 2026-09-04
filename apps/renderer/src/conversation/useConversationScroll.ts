@@ -33,13 +33,30 @@ function nestedScrollChain(target: EventTarget | null, root: HTMLElement): Scrol
   return boxes;
 }
 export function bindTailGestures(el: HTMLElement, pinned: () => boolean, unpin: () => void): () => void {
-  const wheel = (event: WheelEvent) => { if (pinned() && event.deltaY < 0 && !innerAbsorbsScroll(nestedScrollChain(event.target, el), "up")) unpin(); };
-  const key = (event: KeyboardEvent) => { if (pinned() && keyScrollDirection(event.key) === "up") unpin(); };
+  const canScroll = () => el.scrollHeight > el.clientHeight + 1;
+  const wheel = (event: WheelEvent) => {
+    if (pinned() && canScroll() && event.deltaY < 0 && !innerAbsorbsScroll(nestedScrollChain(event.target, el), "up")) unpin();
+  };
+  const key = (event: KeyboardEvent) => {
+    if (pinned() && canScroll() && keyScrollDirection(event.key) === "up") unpin();
+  };
   let touchY: number | null = null;
   const touchStart = (event: TouchEvent) => { touchY = event.touches[0]?.clientY ?? null; };
-  const touchMove = (event: TouchEvent) => { const y = event.touches[0]?.clientY; if (pinned() && touchY !== null && y !== undefined && y > touchY + 2) unpin(); if (y !== undefined) touchY = y; };
-  el.addEventListener("wheel", wheel, { passive: true }); el.addEventListener("keydown", key); el.addEventListener("touchstart", touchStart, { passive: true }); el.addEventListener("touchmove", touchMove, { passive: true });
-  return () => { el.removeEventListener("wheel", wheel); el.removeEventListener("keydown", key); el.removeEventListener("touchstart", touchStart); el.removeEventListener("touchmove", touchMove); };
+  const touchMove = (event: TouchEvent) => {
+    const y = event.touches[0]?.clientY;
+    if (pinned() && canScroll() && touchY !== null && y !== undefined && y > touchY + 2) unpin();
+    if (y !== undefined) touchY = y;
+  };
+  el.addEventListener("wheel", wheel, { passive: true });
+  el.addEventListener("keydown", key);
+  el.addEventListener("touchstart", touchStart, { passive: true });
+  el.addEventListener("touchmove", touchMove, { passive: true });
+  return () => {
+    el.removeEventListener("wheel", wheel);
+    el.removeEventListener("keydown", key);
+    el.removeEventListener("touchstart", touchStart);
+    el.removeEventListener("touchmove", touchMove);
+  };
 }
 export type ScrollAnchor = { readonly itemId: string; readonly offset: number; readonly scrollTop: number; readonly scrollHeight: number };
 export function captureAnchor(scroller: HTMLElement): ScrollAnchor | null {
@@ -103,9 +120,12 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
    * The transcript's single tail writer.
    *
    * Nothing else may assign `scroller.scrollTop` to follow the tail. One
-   * ResizeObserver watches the final `.convo-doc` box after the virtualizer has
-   * committed its measured height, so a content commit and the subsequent
-   * virtualizer measurement cannot each schedule their own writer.
+   * ResizeObserver watches the `.convo-doc` box, and that is enough because
+   * every growth inside the transcript is in normal flow — a streaming line, an
+   * expanding tool card, a mounted virtual row (see ConversationVirtualList):
+   * the document grows in the same layout pass, so this writer runs in that
+   * frame's pre-paint ResizeObserver window and the reader sees no intermediate
+   * position.
    */
   const stickToTail = useCallback(() => {
     const el = scrollerRef.current;
@@ -118,25 +138,52 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
   const resizeFollow = useRef(false);
   /* 脱离即亮「回到最新」：读者主动离开尾部（手势/锚定/加载更早），不管之后有没有
      新内容到达，按钮都要出现——它此刻的功能是「回去的入口」，不只是「新内容提示」。
-     （按钮已外发为宿主 slot，固定在输入框右上角；此处状态与 sticky 时代一致。） */
+     （按钮已外发为宿主 slot，固定在输入框右上角；此处状态与 sticky 时代一致。）
+     注意：若内容未溢出一屏（scrollHeight <= clientHeight + 1），整篇内容已全可见，
+     不存在离底状态，此时严禁点亮按钮。 */
   const setPinned = useCallback((value: boolean) => {
     pinned.current = value;
     setFollow(value);
-    if (value) setHasNewContent(false);
-    else {
-      if (pin === "bottom") setHasNewContent(true);
+    if (value) {
+      setHasNewContent(false);
+    } else {
+      const el = scrollerRef.current;
+      const canScroll = el !== null && el.scrollHeight > el.clientHeight + 1;
+      if (pin === "bottom" && canScroll) {
+        setHasNewContent(true);
+      } else {
+        setHasNewContent(false);
+      }
       unpinnedAt.current = Date.now();
     }
-  }, [pin]);
+  }, [pin, scrollerRef]);
   const detachFromLatest = useCallback(() => setPinned(false), [setPinned]);
-  const jumpToLatest = useCallback(() => { const el = scrollerRef.current; if (el === null) return; setPinned(true); el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); }, [scrollerRef, setPinned]);
-  const preparePrepend = useCallback(() => { const el = scrollerRef.current; if (el === null) return; anchor.current = captureAnchor(el); previousFirst.current = firstItemId(el); setPinned(false); }, [scrollerRef, setPinned]);
+  const jumpToLatest = useCallback(() => {
+    const el = scrollerRef.current;
+    if (el === null) return;
+    setPinned(true);
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [scrollerRef, setPinned]);
+  const preparePrepend = useCallback(() => {
+    const el = scrollerRef.current;
+    if (el === null) return;
+    anchor.current = captureAnchor(el);
+    previousFirst.current = firstItemId(el);
+    setPinned(false);
+  }, [scrollerRef, setPinned]);
   const onScroll = useCallback((event: UIEvent<HTMLElement>) => {
     const el = event.currentTarget;
-    const cache = metricsRef.current;
-    const distance = cache.clientHeight > 0
-      ? Math.max(0, cache.scrollHeight - el.scrollTop - cache.clientHeight)
-      : distanceFromBottom(el);
+    const canScroll = el.scrollHeight > el.clientHeight + 1;
+    if (!canScroll) {
+      if (pin === "bottom" && !pinned.current) {
+        pinned.current = true;
+        setFollow(true);
+      }
+      setHasNewContent(false);
+      return;
+    }
+    const distance = distanceFromBottom(el);
+    metricsRef.current = { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
     const movingDown = el.scrollTop > lastScrollTop.current + 0.5;
     lastScrollTop.current = el.scrollTop;
     // 原生滚动条 / minimap 向上拖动没有滚轮手势，在此脱离跟随。
@@ -145,14 +192,18 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
       return;
     }
     if (pinned.current) {
-      if (distance <= AT_TAIL_PX) setPinned(true);
+      if (distance <= AT_TAIL_PX) setHasNewContent(false);
       return;
     }
     // 回钉只认「向下运动」；主动脱离后的冷却窗口内，也只有真正贴到 1px 以内
     // （向下滚回底部）才回钉。向上平滑滚动的中间距离无论多小都不再抢回钉。
     const cooling = Date.now() - unpinnedAt.current < UNPIN_REPIN_GRACE_MS;
-    if (movingDown && (distance <= AT_TAIL_PX || (!cooling && shouldFollow(distance)))) setPinned(true);
-  }, [setPinned]);
+    if (distance <= AT_TAIL_PX) {
+      setPinned(true);
+    } else if (movingDown && (!cooling && shouldFollow(distance))) {
+      setPinned(true);
+    }
+  }, [pin, setPinned]);
   useEffect(() => { const el = scrollerRef.current; return el ? bindTailGestures(el, () => pinned.current, () => setPinned(false)) : undefined; }, [identityKey, scrollerRef, setPinned]);
   /* Identity reset must run before the initial ResizeObserver stick. A reader
      may have left the previous session halfway up; the new session still opens
@@ -173,7 +224,19 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
       return;
     }
     resizeFollow.current = true;
-    const observer = new ResizeObserver(stickToTail);
+    const handleResize = () => {
+      if (el.scrollHeight <= el.clientHeight + 1) {
+        if (pin === "bottom") {
+          pinned.current = true;
+          setFollow(true);
+        }
+        setHasNewContent(false);
+      }
+      if (pinned.current) {
+        stickToTail();
+      }
+    };
+    const observer = new ResizeObserver(handleResize);
     observer.observe(doc);
     observer.observe(el);
     stickToTail();
@@ -190,15 +253,21 @@ export function useConversationScroll({ scrollerRef, identityKey, itemCount, loa
     if (pending !== null && !loadingOlder && (firstItemId(el) !== previousFirst.current || el.scrollHeight > pending.scrollHeight + 0.5)) {
       restoreAnchor(el, pending); anchor.current = null; return;
     }
+    const canScroll = el.scrollHeight > el.clientHeight + 1;
     if (pin === "bottom" && pinned.current) {
-      // jsdom/older embedded engines without ResizeObserver retain the direct
-      // fallback; Chromium uses the single final-size observer above.
-      if (!resizeFollow.current) stickToTail();
+      stickToTail();
+      setHasNewContent(false);
       return;
     }
     // Prepending older pages is not new content: flagging it pops "back to
     // latest" while the reader is deliberately moving away from the tail.
-    if (pin === "bottom" && !loadingOlder && anchor.current === null) setHasNewContent(true);
+    if (pin === "bottom" && !loadingOlder && anchor.current === null) {
+      if (canScroll && !pinned.current && distanceFromBottom(el) > AT_TAIL_PX) {
+        setHasNewContent(true);
+      } else {
+        setHasNewContent(false);
+      }
+    }
   }, [contentKey, itemCount, loadingOlder, pin, scrollerRef, stickToTail]);
   return { follow, hasNewContent, onScroll, jumpToLatest, preparePrepend, detachFromLatest };
 }

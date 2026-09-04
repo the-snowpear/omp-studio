@@ -19,6 +19,7 @@ function fixture(
 		available?: Model[];
 		setModelError?: Error;
 		onRefresh?: (strategy?: string) => void | Promise<void>;
+		taskOverrides?: Record<string, string | string[]>;
 	} = {},
 ) {
 	const sonnet = model("claude-sonnet-4-5");
@@ -27,6 +28,15 @@ function fixture(
 	let thinking: string | undefined = "medium";
 	let configured: string | undefined = "medium";
 	let available = overrides.available ?? [sonnet, opus, model("gpt-5-mini", "openai")];
+	const taskOverrides: Record<string, string | string[]> = { ...(overrides.taskOverrides ?? {}) };
+	const settings = {
+		get: (path: string) => (path === "task.agentModelOverrides" ? { ...taskOverrides } : undefined),
+		override: (path: string, value: Record<string, string | string[]>) => {
+			if (path !== "task.agentModelOverrides") throw new Error(`unexpected override path: ${path}`);
+			for (const key of Object.keys(taskOverrides)) delete taskOverrides[key];
+			Object.assign(taskOverrides, value);
+		},
+	};
 	const session = {
 		get model() {
 			return current;
@@ -57,6 +67,7 @@ function fixture(
 			configured = level;
 			thinking = level === "auto" ? "medium" : level === "off" ? undefined : level;
 		},
+		settings,
 	} as unknown as AgentSession;
 	return {
 		service: new StudioModelControlService(session),
@@ -65,6 +76,7 @@ function fixture(
 		setAvailable: (next: Model[]) => {
 			available = next;
 		},
+		taskOverrides,
 	};
 }
 
@@ -226,5 +238,64 @@ describe("StudioModelControlService", () => {
 			},
 		});
 		await expect(service.setModel("deepseek/deepseek-chat")).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+	});
+});
+
+describe("StudioModelControlService task subagent model", () => {
+	test("taskState is absent without an override and projects the pinned model when present", () => {
+		const inheriting = fixture();
+		expect(inheriting.service.taskState()).toBeUndefined();
+
+		const pinned = fixture({ taskOverrides: { task: "anthropic/claude-opus-4-6" } });
+		expect(pinned.service.taskState()).toEqual({
+			selector: "anthropic/claude-opus-4-6",
+			provider: "anthropic",
+			id: "claude-opus-4-6",
+		});
+
+		// Pattern arrays project their first member, like the TUI picker.
+		const pattern = fixture({ taskOverrides: { task: ["openai/gpt-5-mini"] } });
+		expect(pattern.service.taskState()).toMatchObject({ selector: "openai/gpt-5-mini" });
+	});
+
+	test("taskState stays absent when the override no longer resolves", () => {
+		const { service } = fixture({ taskOverrides: { task: "missing/removed-model" } });
+		expect(service.taskState()).toBeUndefined();
+	});
+
+	test("setTaskModel pins the canonical selector without touching other agent overrides", async () => {
+		const { service, taskOverrides } = fixture({ taskOverrides: { reviewer: "openai/gpt-5-mini" } });
+		expect(await service.setTaskModel("claude-opus-4-6")).toMatchObject({
+			selector: "anthropic/claude-opus-4-6",
+		});
+		expect(taskOverrides.task).toBe("anthropic/claude-opus-4-6");
+		expect(taskOverrides.reviewer).toBe("openai/gpt-5-mini");
+	});
+
+	test("setTaskModel(null) clears only the task entry and returns to inheritance", async () => {
+		const { service, taskOverrides } = fixture({
+			taskOverrides: { task: "anthropic/claude-opus-4-6", reviewer: "openai/gpt-5-mini" },
+		});
+		expect(await service.setTaskModel(null)).toBeUndefined();
+		expect("task" in taskOverrides).toBe(false);
+		expect(taskOverrides.reviewer).toBe("openai/gpt-5-mini");
+	});
+
+	test("setTaskModel rejects unknown selectors", async () => {
+		const { service } = fixture();
+		await expect(service.setTaskModel("missing/model")).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+	});
+
+	test("onChange fires on pin and clear", async () => {
+		const { service } = fixture();
+		let changes = 0;
+		const unsubscribe = service.onChange(() => {
+			changes += 1;
+		});
+		await service.setTaskModel("claude-opus-4-6");
+		await service.setTaskModel(null);
+		unsubscribe();
+		await service.setTaskModel("claude-opus-4-6");
+		expect(changes).toBe(2);
 	});
 });

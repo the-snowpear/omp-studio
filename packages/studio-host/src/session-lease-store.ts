@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { SessionBrokerError, type SessionLease, type SessionLeaseStore } from "./session-broker.js";
 
@@ -8,6 +9,8 @@ export interface FileSessionLeaseStoreOptions {
   readonly directory: string;
   readonly staleAfterMs?: number;
   readonly now?: () => number;
+  /** Injectable filesystem rename used by the Windows contention regression test. */
+  readonly renameFile?: typeof rename;
 }
 
 interface StoredLease {
@@ -26,6 +29,7 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
   readonly #directory: string;
   readonly #staleAfterMs: number;
   readonly #now: () => number;
+  readonly #renameFile: typeof rename;
 
   constructor(options: FileSessionLeaseStoreOptions) {
     if (options.directory.length === 0) throw new TypeError("Lease directory is required");
@@ -35,6 +39,7 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
     this.#directory = options.directory;
     this.#staleAfterMs = options.staleAfterMs ?? 30_000;
     this.#now = options.now ?? Date.now;
+    this.#renameFile = options.renameFile ?? rename;
   }
 
   async acquire(input: { readonly sessionId: string; readonly ownerId: string }): Promise<SessionLease> {
@@ -129,7 +134,7 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
     const epochPath = `${path}.epoch`;
     const temporary = `${epochPath}.${process.pid}.${this.#now()}.tmp`;
     await writeFile(temporary, `${epoch}\n`, { encoding: "utf8", flag: "wx" });
-    await rename(temporary, epochPath);
+    await this.#replaceFile(temporary, epochPath);
   }
 
   async #read(path: string): Promise<StoredLease | undefined> {
@@ -154,6 +159,25 @@ export class FileSessionLeaseStore implements SessionLeaseStore {
   async #replace(path: string, record: StoredLease): Promise<void> {
     const temporary = `${path}.${process.pid}.${this.#now()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(record)}\n`, { encoding: "utf8", flag: "wx" });
-    await rename(temporary, path);
+    await this.#replaceFile(temporary, path);
+  }
+
+  /** Windows scanners can hold the destination briefly and make rename return EPERM. */
+  async #replaceFile(temporary: string, destination: string): Promise<void> {
+    const attempts = 5;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        await this.#renameFile(temporary, destination);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        const retryable = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+        if (!retryable || attempt + 1 === attempts) {
+          await rm(temporary, { force: true }).catch(() => {});
+          throw error;
+        }
+        await delay(10 * (2 ** attempt));
+      }
+    }
   }
 }

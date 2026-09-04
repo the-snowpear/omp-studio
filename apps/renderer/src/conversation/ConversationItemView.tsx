@@ -97,14 +97,14 @@ function hasAssistantText(segments: readonly AssistantSegment[]): boolean {
   return segments.some((segment) => segment.type === "text" && segment.text.length > 0);
 }
 
-function concludingReplyText(segments: readonly AssistantSegment[]): { key: string; text: string } | undefined {
-  let last: { key: string; text: string } | undefined;
+function concludingReplyText(segments: readonly AssistantSegment[]): Extract<AssistantSegment, { type: "text" }> | undefined {
+  let last: Extract<AssistantSegment, { type: "text" }> | undefined;
   for (const segment of segments) {
     if (segment.type === "batch") {
       last = undefined;
       continue;
     }
-    if (segment.type === "text" && segment.text.length > 0) last = { key: segment.key, text: segment.text };
+    if (segment.type === "text" && segment.text.length > 0) last = segment;
   }
   return last;
 }
@@ -242,7 +242,7 @@ function renderAssistantSegments(
           text={segment.text}
           {...(showStreaming && segment.streaming === true ? { streaming: true } : {})}
           {...(segment.truncated === true ? { truncated: true } : {})}
-          {...(lastText?.key === segment.key ? { copyText: lastText.text } : {})}
+          {...(lastText === segment ? { copyText: lastText.text } : {})}
         />,
       );
       bodyCount += 1;
@@ -320,6 +320,7 @@ function AssistantRunViewInner({
   onReviewChanges,
   onInspectSubagent,
   liveAgents,
+  retryTurn,
 }: {
   entries: readonly AssistantRunEntry[];
   expandAll?: boolean;
@@ -328,7 +329,14 @@ function AssistantRunViewInner({
   onReviewChanges?: (turnId: string) => void;
   onInspectSubagent?: (target: SubagentHubTarget) => void;
   liveAgents?: readonly StudioAgentSnapshot[];
+  /** 链尾失败/中止时的「重试上一轮」操作；父级只在最后一个 run 上提供。 */
+  retryTurn?: {
+    disabled?: boolean;
+    reason?: string;
+    onRetry: () => void;
+  };
 }) {
+  const { t } = useI18n();
   const { settings: appSettings } = useAppSettings();
   const first = entries[0];
   const last = entries.at(-1);
@@ -363,7 +371,24 @@ function AssistantRunViewInner({
   ));
   const errors = entries.map((entry) => entry.row.error === undefined ? null : <ProviderErrorDetail key={`error-${entry.row.itemId}`} error={entry.row.error} />);
   if (gallery) {
-    return <div data-item-id={first.row.itemId}>{renderAssistantSegments(segments, { expandAll: true, standalone: true, ...displayOptions })}{errors}{plans}{changes}</div>;
+    return <div data-item-id={first.row.itemId}>{renderAssistantSegments(segments, { expandAll: true, standalone: true, ...displayOptions })}{errors}{plans}{changes}{retryTurn === undefined ? null : (
+      <div className="ev-msg-actions ev-retry-actions">
+        <button
+          type="button"
+          className="ev-msg-copy"
+          aria-label={t("conversation.retryTurn")}
+          data-tip={
+            retryTurn.disabled === true
+              ? (retryTurn.reason ?? t("conversation.retryTurnUnavailable"))
+              : t("conversation.retryTurn")
+          }
+          disabled={retryTurn.disabled === true}
+          onClick={retryTurn.onRetry}
+        >
+          <Icon name="undo" extra="sm" />
+        </button>
+      </div>
+    )}</div>;
   }
   if (process && segments.length === 0 && errors.every((entry) => entry === null) && changes.every((entry) => entry === null) && plans.every((entry) => entry === null)) return null;
   return (
@@ -386,6 +411,24 @@ function AssistantRunViewInner({
       {errors}
       {plans}
       {changes}
+      {retryTurn === undefined ? null : (
+        <div className="ev-msg-actions ev-retry-actions">
+          <button
+            type="button"
+            className="ev-msg-copy"
+            aria-label={t("conversation.retryTurn")}
+            data-tip={
+              retryTurn.disabled === true
+                ? (retryTurn.reason ?? t("conversation.retryTurnUnavailable"))
+                : t("conversation.retryTurn")
+            }
+            disabled={retryTurn.disabled === true}
+            onClick={retryTurn.onRetry}
+          >
+            <Icon name="undo" extra="sm" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -393,6 +436,8 @@ function AssistantRunViewInner({
 export const AssistantRunView = memo(AssistantRunViewInner, (previous, next) => {
   if (previous.expandAll !== next.expandAll || previous.tail !== next.tail || previous.demo !== next.demo) return false;
   if (previous.onReviewChanges !== next.onReviewChanges || previous.onInspectSubagent !== next.onInspectSubagent || previous.liveAgents !== next.liveAgents) return false;
+  if (previous.retryTurn?.disabled !== next.retryTurn?.disabled || previous.retryTurn?.reason !== next.retryTurn?.reason) return false;
+  if (previous.retryTurn?.onRetry !== next.retryTurn?.onRetry) return false;
   if (previous.entries.length !== next.entries.length) return false;
   for (let index = 0; index < previous.entries.length; index += 1) {
     const left = previous.entries[index]!;

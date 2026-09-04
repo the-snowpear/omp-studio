@@ -1,6 +1,6 @@
 {
   "name": "@omp-studio/studio-host",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -17,7 +17,7 @@
     "test": "npm run build && node --test \"dist/test/*.test.js\""
   },
   "dependencies": {
-    "@omp-studio/runtime-installer": "0.1.1",
-    "@omp-studio/studio-protocol": "0.1.1"
+    "@omp-studio/runtime-installer": "0.1.3",
+    "@omp-studio/studio-protocol": "0.1.3"
   }
 }

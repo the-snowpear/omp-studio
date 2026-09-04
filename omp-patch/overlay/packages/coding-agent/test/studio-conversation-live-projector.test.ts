@@ -336,13 +336,14 @@ describe("ConversationLiveProjector", () => {
 		projector.project({ type: "message_start", message: assistant([]) });
 		projector.project({ type: "tool_execution_start", toolCallId: "call-huge", toolName: "Bash", args: {} });
 		const capped = "x".repeat(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES + 1);
-		const partial = (text: string): void => projector.project({
-			type: "tool_execution_update",
-			toolCallId: "call-huge",
-			toolName: "Bash",
-			args: {},
-			partialResult: { content: [{ type: "text", text }] },
-		});
+		const partial = (text: string): void =>
+			projector.project({
+				type: "tool_execution_update",
+				toolCallId: "call-huge",
+				toolName: "Bash",
+				args: {},
+				partialResult: { content: [{ type: "text", text }] },
+			});
 		partial(capped);
 		partial(`${capped}more output that is beyond the retained prefix`);
 		projector.flush();

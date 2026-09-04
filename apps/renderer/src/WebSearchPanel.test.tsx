@@ -43,9 +43,9 @@ function readModel(overrides: Partial<WebSearchConfigReadModel> = {}): WebSearch
     timeoutSeconds: 60,
     geminiModel: "",
     providers: [
-      { id: "perplexity", name: "Perplexity", description: DESC.perplexity!, credentialFree: false, hasCredential: true },
-      { id: "brave", name: "Brave", description: DESC.brave!, credentialFree: false, hasCredential: false },
-      { id: "tavily", name: "Tavily", description: DESC.tavily!, credentialFree: false, hasCredential: false },
+      { id: "perplexity", name: "Perplexity", description: DESC.perplexity!, credentialFree: false, hasCredential: true, envKeys: ["PERPLEXITY_API_KEY"], loginId: "perplexity", apiKeyId: "perplexity" },
+      { id: "brave", name: "Brave", description: DESC.brave!, credentialFree: false, hasCredential: false, envKeys: ["BRAVE_API_KEY"], apiKeyId: "brave" },
+      { id: "tavily", name: "Tavily", description: DESC.tavily!, credentialFree: false, hasCredential: false, envKeys: ["TAVILY_API_KEY"], loginId: "tavily", apiKeyId: "tavily" },
       { id: "duckduckgo", name: "DuckDuckGo", description: DESC.duckduckgo!, credentialFree: true, hasCredential: true },
       { id: "google", name: "Google", description: DESC.google!, credentialFree: true, hasCredential: true },
     ],
@@ -92,18 +92,17 @@ function fakeClient(): StudioClient & {
 function mount(webSearch = readModel(), client = fakeClient(), preview = false) {
   const onSaved = vi.fn();
   const onPreviewSave = vi.fn();
-  const onEditProvider = vi.fn();
   render(
     <WebSearchPanel
       client={client}
       preview={preview}
       webSearch={webSearch}
+      loginAvailable
       onSaved={onSaved}
       onPreviewSave={onPreviewSave}
-      onEditProvider={onEditProvider}
     />,
   );
-  return { onSaved, onPreviewSave, onEditProvider, client };
+  return { onSaved, onPreviewSave, client };
 }
 
 describe("WebSearchPanel", () => {
@@ -163,6 +162,55 @@ describe("WebSearchPanel", () => {
     expect(screen.getByText(DESC.tavily!)).toBeTruthy();
   });
 
+  it("renders real brand marks for known engines and a globe for the public aggregate", () => {
+    mount();
+    expect(document.querySelector('.wsx-pmark img[src*="perplexity"]')).toBeTruthy();
+    expect(document.querySelector('.wsx-pmark img[src*="brave"]')).toBeTruthy();
+  });
+
+  it("opens the credential modal and saves a direct API key (preview mutates the demo read model)", () => {
+    const { client, onPreviewSave } = mount(readModel(), fakeClient(), true);
+    // Open Brave's modal from its library row.
+    fireEvent.click(credButtonInRow(".wsx-pool-row", DESC.brave!));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain(DESC.brave!);
+    // Direct key entry is the primary path; OAuth/env are demoted to "other ways".
+    expect(dialog.textContent).toContain("BRAVE_API_KEY");
+    expect(dialog.querySelector(".wsx-modal-alt")).toBeTruthy();
+    // Type a key and save: preview flips the credential locally, no Host call.
+    const keyInput = dialog.querySelector<HTMLInputElement>(".wsx-modal-keyrow input");
+    expect(keyInput).toBeTruthy();
+    fireEvent.change(keyInput!, { target: { value: "bsk-test" } });
+    fireEvent.click(withinText(dialog, /保存密钥|Save key/));
+    expect(onPreviewSave).toHaveBeenCalledTimes(1);
+    const next = onPreviewSave.mock.calls[0]![0] as WebSearchConfigReadModel;
+    const brave = next.providers.find((p) => p.id === "brave");
+    expect(brave?.hasCredential).toBe(true);
+    expect(brave?.credentialKind).toBe("api-key");
+    expect(client.command).not.toHaveBeenCalled();
+  });
+
+  it("saves a direct API key through models.webSearch.credential.set in real mode", async () => {
+    const { client, onSaved } = mount();
+    fireEvent.click(credButtonInRow(".wsx-pool-row", DESC.brave!));
+    const dialog = screen.getByRole("dialog");
+    const keyInput = dialog.querySelector<HTMLInputElement>(".wsx-modal-keyrow input");
+    fireEvent.change(keyInput!, { target: { value: "bsk-live" } });
+    fireEvent.click(withinText(dialog, /保存密钥|Save key/));
+    await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.webSearch.credential.set", { providerId: "brave", apiKey: "bsk-live" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  });
+
+  it("logs out through models.login.logout in real mode", async () => {
+    const { client, onSaved } = mount();
+    // Perplexity sits in the priority chain and already has a credential → modal offers 登出.
+    fireEvent.click(credButtonInRow(".wsx-chain-row", "perplexity"));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(withinText(dialog, /登出|Log out/));
+    await waitFor(() => expect(client.command).toHaveBeenCalledWith("models.login.logout", { providerId: "perplexity" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  });
+
   it("saves through models.webSearch.set with the full payload (real mode)", async () => {
     const { client, onSaved } = mount();
     fireEvent.click(screen.getAllByRole("button", { name: /设为优先/ })[0]!);
@@ -187,3 +235,20 @@ describe("WebSearchPanel", () => {
     expect(client.command).not.toHaveBeenCalled();
   });
 });
+
+/** Find a button inside a container by regex text (scoped query helper). */
+function withinText(container: HTMLElement, pattern: RegExp): HTMLElement {
+  const button = [...container.querySelectorAll("button")].find((el) => pattern.test(el.textContent ?? ""));
+  if (!button) throw new Error(`No button matching ${pattern} in container`);
+  return button;
+}
+
+/** Find the credential (凭证) button inside the row that contains `text`. */
+function credButtonInRow(rowSelector: string, text: string): HTMLElement {
+  const rows = [...document.querySelectorAll(rowSelector)];
+  const row = rows.find((el) => (el.textContent ?? "").includes(text));
+  if (!row) throw new Error(`No ${rowSelector} row containing "${text}"`);
+  const button = [...row.querySelectorAll("button")].find((el) => /凭证|Credentials/.test(el.getAttribute("aria-label") ?? "") || /凭证/.test(el.textContent ?? ""));
+  if (!button) throw new Error(`No credential button in row containing "${text}"`);
+  return button;
+}

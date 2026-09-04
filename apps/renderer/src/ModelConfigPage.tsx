@@ -4384,20 +4384,9 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
               client={client}
               preview={preview}
               webSearch={data.webSearch}
+              loginAvailable={data.loginAvailable}
               onSaved={() => void refresh()}
               onPreviewSave={(next) => mutateLocal((current) => ({ ...current, webSearch: next }))}
-              onEditProvider={(providerId) => {
-                const existing = providers.find((item) => item.id === providerId);
-                const catalog = data.webSearch.providers.find((item) => item.id === providerId);
-                setModelEdit(null);
-                setEditor(existing ? draftFromProvider(existing) : { ...blankDraft(), id: providerId, name: catalog?.name ?? providerId });
-                setEditExisting(Boolean(existing));
-                setPresetOpen(false);
-                setPresetSel(null);
-                setConfirmDelete(false);
-                setTestResult(null);
-                setTab("providers");
-              }}
             />
           ) : (
             <div className="wsx-empty wsx-empty-page">{t("modelConfig.loadErrorTitle")}</div>

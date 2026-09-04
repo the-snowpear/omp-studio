@@ -6,8 +6,10 @@ import type {
   CommandRequestId,
   IdempotencyKey,
   PublicAuthorityIdentity,
+  ResidentsReadModel,
   RuntimeInstallState,
   StudioRuntimeSettingsGetResult,
+  WorkspaceId,
 } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot, StudioOperation, RuntimeEpoch, RuntimeId, SessionId, StateVersion } from "@omp-studio/studio-protocol";
 import { StudioHostClientFacade, createDefaultHostDiagnosticsFactory } from "../src/index.js";
@@ -155,3 +157,116 @@ test("Host rejects Runtime mirror extra fields and unsafe Plan paths before invo
     await facade.close();
   }
 });
+
+test("resident lifecycle loss publishes runtime.changed before the broker summary", async () => {
+  let live = true;
+  let publishResidents: ((residents: ResidentsReadModel) => void) | undefined;
+  const facade = new StudioHostClientFacade({
+    authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
+    platform: "win32",
+    arch: "x64",
+    backend: {} as HostBackend,
+    capabilityManifest: () => undefined,
+    commandManifest: () => undefined,
+    runtime: {
+      hello: () => live ? ({ runtimeId: "runtime-1", runtimeEpoch: 1, classification: "managed" }) : undefined,
+      // Preserve the stale controller publication to match the lease-loss
+      // incident: hello is gone before the old snapshot holder is replaced.
+      snapshot: () => snapshot,
+      disconnect: () => live ? undefined : ({ code: "pipe-closed", reason: "Bridge pipe closed" }),
+    },
+    residents: {
+      list: () => ({ residents: [], generatedAt: "2026-08-30T12:00:00.000Z" }),
+      onChanged(listener) {
+        publishResidents = listener;
+        return () => { publishResidents = undefined; };
+      },
+    },
+    catalog: { list: () => [] },
+    diagnostics: createDefaultHostDiagnosticsFactory(),
+    install: async (): Promise<RuntimeInstallState> => ({ status: "installed", signature: "unknown" }),
+  });
+  const events: ClientEvent[] = [];
+  const unsubscribe = facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  try {
+    live = false;
+    publishResidents?.({ residents: [], generatedAt: "2026-08-30T12:00:01.000Z" });
+
+    const runtimeChangedIndex = events.findIndex((event) => event.kind === "runtime.changed");
+    const residentsChangedIndex = events.findIndex((event) => event.kind === "residents.changed");
+    assert.equal(runtimeChangedIndex, 0);
+    assert.ok(residentsChangedIndex > runtimeChangedIndex);
+    const runtimeChanged = events[runtimeChangedIndex];
+    if (runtimeChanged?.kind === "runtime.changed") {
+      assert.equal(runtimeChanged.connection.status, "disconnected");
+      assert.equal(runtimeChanged.connection.disconnectCode, "pipe-closed");
+    }
+  } finally {
+    unsubscribe();
+    await facade.close();
+  }
+});
+
+test("dormant workspace unbinding keeps connected state without emitting false disconnect", async () => {
+  let bound = true;
+  let publishResidents: ((residents: ResidentsReadModel) => void) | undefined;
+  const facade = new StudioHostClientFacade({
+    authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
+    platform: "win32",
+    arch: "x64",
+    backend: {} as HostBackend,
+    capabilityManifest: () => undefined,
+    commandManifest: () => undefined,
+    runtime: {
+      hello: () => bound ? ({ runtimeId: "runtime-1", runtimeEpoch: 1, classification: "managed" }) : undefined,
+      snapshot: () => bound ? snapshot : undefined,
+      disconnect: () => undefined,
+      unavailable: () => undefined,
+    },
+    residents: {
+      list: () => ({
+        residents: [{
+          sessionId: "session-1" as SessionId,
+          workspaceId: "workspace-a" as WorkspaceId,
+          phase: "running",
+          pendingMessages: 0,
+          lastActivityAt: "2026-08-30T12:00:00.000Z",
+        }],
+        generatedAt: "2026-08-30T12:00:00.000Z",
+      }),
+      onChanged(listener) {
+        publishResidents = listener;
+        return () => { publishResidents = undefined; };
+      },
+    },
+    catalog: { list: () => [] },
+    diagnostics: createDefaultHostDiagnosticsFactory(),
+    install: async (): Promise<RuntimeInstallState> => ({ status: "installed", signature: "unknown" }),
+  });
+  const events: ClientEvent[] = [];
+  const unsubscribe = facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  try {
+    // Unbind the active session (e.g. workspace switch to a dormant project without resident).
+    bound = false;
+    publishResidents?.({
+      residents: [{
+        sessionId: "session-1" as SessionId,
+        workspaceId: "workspace-a" as WorkspaceId,
+        phase: "running",
+        pendingMessages: 0,
+        lastActivityAt: "2026-08-30T12:00:00.000Z",
+      }],
+      generatedAt: "2026-08-30T12:00:01.000Z",
+    });
+
+    const runtimeChangedEvents = events.filter((event) => event.kind === "runtime.changed");
+    // No false disconnect event should be emitted.
+    assert.deepEqual(runtimeChangedEvents, []);
+    const bootstrap = await facade.bootstrap();
+    assert.equal(bootstrap.runtime.status, "connected");
+  } finally {
+    unsubscribe();
+    await facade.close();
+  }
+});
+

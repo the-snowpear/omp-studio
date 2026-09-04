@@ -2,13 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { HistoryEntryId, SessionHistoryEntry, SessionId, ThreadId, WorkspaceId } from "@omp-studio/client-contract";
 import {
   buildProvisionalProjectThread,
+  isPlaceholderSessionTitle,
   projectHasSession,
   provisionalThreadForHistoryEntry,
   provisionalThreadTitle,
-  provisionalSessionTitleEnsureKey,
   reconcileProvisionalProjectThread,
   resolveProvisionalHistoryTitle,
-  shouldEnsureProvisionalSessionTitle,
   sidebarThreadTitle,
   type ProvisionalProjectThread,
 } from "./provisionalThread";
@@ -51,8 +50,17 @@ describe("provisional project thread", () => {
 
   it("uses explicit missing-title state instead of a localized catalog value", () => {
     expect(sidebarThreadTitle(missingTitleEntry(), provisional, "未命名会话")).toBe(provisional.title);
+    expect(sidebarThreadTitle(historyEntry("未命名会话"), provisional, "未命名会话")).toBe(provisional.title);
+    expect(sidebarThreadTitle(historyEntry("Untitled session"), provisional, "Untitled session")).toBe(provisional.title);
     expect(sidebarThreadTitle(historyEntry("修复多项目会话同步"), provisional)).toBe("修复多项目会话同步");
     expect(sidebarThreadTitle(missingTitleEntry(), resolveProvisionalHistoryTitle(provisional, "手动标题"), "未命名会话")).toBe("手动标题");
+  });
+
+  it("recognizes only built-in empty title placeholders", () => {
+    expect(isPlaceholderSessionTitle(undefined)).toBe(true);
+    expect(isPlaceholderSessionTitle("未命名会话")).toBe(true);
+    expect(isPlaceholderSessionTitle(" Untitled   session ")).toBe(true);
+    expect(isPlaceholderSessionTitle("用户写的未命名会话修复")).toBe(false);
   });
 
   it("detects when persisted history has taken over the transient row", () => {
@@ -173,67 +181,50 @@ describe("provisional project thread", () => {
     expect(next).toBe(current);
   });
 
-  it("only ensures an idle, untitled submitted session", () => {
-    const input = {
+  it("freezes the first prompt title through send and identity-reset reports", () => {
+    const context = {
       preview: false,
-      runtimeConnected: true,
-      provisional: { ...provisional, running: false },
-      snapshot: {
-        sessionId,
-        isStreaming: false,
-        isCompacting: false,
-      },
+      sessionCreating: false,
+      selectedHistoryId: null,
+      untitledTitle: "未命名会话",
     } as const;
+    const drafted = reconcileProvisionalProjectThread({}, {
+      sessionId,
+      workspaceId: provisional.workspaceId,
+      visible: true,
+      title: "hi",
+      running: false,
+      submitted: false,
+    }, context);
+    const sending = reconcileProvisionalProjectThread(drafted, {
+      sessionId,
+      workspaceId: provisional.workspaceId,
+      visible: true,
+      running: true,
+      submitted: true,
+    }, context);
+    const identityReset = reconcileProvisionalProjectThread(sending, {
+      sessionId,
+      workspaceId: provisional.workspaceId,
+      visible: true,
+      running: true,
+      submitted: false,
+    }, context);
+    const laterDraft = reconcileProvisionalProjectThread(identityReset, {
+      sessionId,
+      workspaceId: provisional.workspaceId,
+      visible: true,
+      title: "第二条消息不能改标题",
+      running: false,
+      submitted: false,
+    }, context);
 
-    expect(shouldEnsureProvisionalSessionTitle(input)).toBe(true);
-    expect(shouldEnsureProvisionalSessionTitle({ ...input, preview: true })).toBe(false);
-    expect(shouldEnsureProvisionalSessionTitle({ ...input, runtimeConnected: false })).toBe(false);
-    expect(shouldEnsureProvisionalSessionTitle({
-      ...input,
-      provisional: { ...input.provisional, titleState: "stable" },
-    })).toBe(false);
-  });
-
-  it("does not replace a manual/native title or race an active turn", () => {
-    const input = {
-      preview: false,
-      runtimeConnected: true,
-      provisional: { ...provisional, running: false },
-      snapshot: { sessionId, isStreaming: false, isCompacting: false },
-    } as const;
-
-    expect(shouldEnsureProvisionalSessionTitle({
-      ...input,
-      snapshot: { ...input.snapshot, sessionTitle: "手动标题", sessionTitleSource: "user" },
-    })).toBe(false);
-    expect(shouldEnsureProvisionalSessionTitle({
-      ...input,
-      snapshot: { ...input.snapshot, sessionTitle: "Native title", sessionTitleSource: "auto" },
-    })).toBe(false);
-    expect(shouldEnsureProvisionalSessionTitle({
-      ...input,
-      snapshot: { ...input.snapshot, isStreaming: true },
-    })).toBe(false);
-    expect(shouldEnsureProvisionalSessionTitle({
-      ...input,
-      snapshot: { ...input.snapshot, isCompacting: true },
-    })).toBe(false);
-  });
-
-  it("allows only one in-flight attempt per session", () => {
-    const key = provisionalSessionTitleEnsureKey(sessionId);
-    const input = {
-      preview: false,
-      runtimeConnected: true,
-      provisional: { ...provisional, running: false },
-      snapshot: { sessionId, isStreaming: false, isCompacting: false },
-      inFlightSessionIds: new Set([key]),
-    } as const;
-
-    expect(shouldEnsureProvisionalSessionTitle(input)).toBe(false);
-    expect(shouldEnsureProvisionalSessionTitle({
-      ...input,
-      inFlightSessionIds: new Set<string>(),
-    })).toBe(true);
+    expect(sending[String(sessionId)]).toMatchObject({ title: "hi", submitted: true });
+    expect(identityReset[String(sessionId)]).toMatchObject({ title: "hi", submitted: true });
+    expect(laterDraft[String(sessionId)]).toMatchObject({ title: "hi", submitted: true });
+    expect(resolveProvisionalHistoryTitle(laterDraft[String(sessionId)]!, "LLM 生成标题")).toMatchObject({
+      title: "LLM 生成标题",
+      titleState: "stable",
+    });
   });
 });

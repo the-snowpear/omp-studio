@@ -66,6 +66,19 @@ export type SwitchPerfResult = {
   readonly visiblePositionJumps: number;
   readonly maxVisibleShiftPx: number;
 };
+export type ExpandPerfResult = {
+  /** 被点开的卡（工具类型 + 链内序号），null = 没找到可点的中段卡，探针没生效。 */
+  readonly clicked: string | null;
+  /** 展开后那张卡的正文高度：探针必须真的把一段高度撑出来，否则测的是空动作。 */
+  readonly grewPx: number;
+  /** 同一行内、展开点下方那张卡的表头，逐帧最大位移（px）。 */
+  readonly maxShiftPx: number;
+  /** 文档底边相对滚动容器底边的逐帧最大位移（px）：跟随尾部时它必须一直贴着。 */
+  readonly maxDocBottomShiftPx: number;
+  readonly samples: number;
+  /** 收场时距尾部的距离：动画跑完仍应贴底。 */
+  readonly tailDistancePx: number;
+};
 
 const PROSE = [
   "这一段是模型正文，用来让 Markdown 分块与高亮走真实路径。",
@@ -115,6 +128,12 @@ function historyItems(seed: PerfSeed, prefix = ""): readonly ConversationMessage
 
 function frame(): Promise<number> {
   return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+/** 绘制之后的一个任务：此刻布局里已经含上本帧 ResizeObserver 里做的贴底补偿，
+ *  读到的就是真正画出来的那一帧。在 rAF 里读会强制布局，读到的是补偿之前的中间态。 */
+function afterPaint(): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, 0); });
 }
 
 function quantile(sorted: readonly number[], fraction: number): number {
@@ -315,6 +334,106 @@ async function sessionSwitchContract(): Promise<SwitchPerfResult> {
 
 const harness = new PerfHarness();
 
+/**
+ * 一张「中段」工具卡：折叠着、不在运行、表头在视口内，且同一虚拟行里它后面还有一张卡
+ * 当探针。展开的是同一行内的流内内容，下方那张卡当帧就会被推下去——这正是被测的那条链。
+ */
+function pickExpandTarget(): { readonly row: HTMLElement; readonly header: HTMLElement; readonly probe: HTMLElement; readonly label: string } | null {
+  const scroller = document.querySelector<HTMLElement>(".convo-scroll");
+  if (scroller === null) return null;
+  const view = scroller.getBoundingClientRect();
+  const rows = Array.from(document.querySelectorAll<HTMLElement>(".convo-virtual-row")).reverse();
+  for (const row of rows) {
+    const items = Array.from(row.querySelectorAll<HTMLElement>(".tl-item"));
+    for (let index = 0; index < items.length - 1; index += 1) {
+      const item = items[index]!;
+      if (item.classList.contains("open") || item.dataset.status === "running") continue;
+      const header = item.querySelector<HTMLElement>("button.tl-row");
+      const probe = items[index + 1]!.querySelector<HTMLElement>("button.tl-row");
+      if (header === null || probe === null || !onScreen(header)) continue;
+      const rect = header.getBoundingClientRect();
+      if (rect.top < view.top || rect.bottom > view.bottom) continue;
+      return { row, header, probe, label: `${item.dataset.kind ?? "?"}#${index}` };
+    }
+  }
+  return null;
+}
+
+/**
+ * 真的画在屏上：折叠的工具链是 `visibility: hidden` + 0fr 网格，里面的卡片仍然有几何
+ * （getBoundingClientRect 照样给尺寸），点它等于什么都没发生——探针必须排除这种目标。
+ */
+function onScreen(el: HTMLElement): boolean {
+  const check = (el as { checkVisibility?: (options: Record<string, boolean>) => boolean }).checkVisibility;
+  if (typeof check === "function") {
+    return check.call(el, { checkOpacity: true, checkVisibilityCSS: true, contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true });
+  }
+  return el.getClientRects().length > 0;
+}
+
+/**
+ * 真 Chromium 下验证：跟随尾部时展开一张中段工具卡，它下方的内容一帧都不许动。
+ *
+ * jsdom 测不到这条——它没有布局、没有 CSS 过渡、没有 ResizeObserver 时序。绝对定位的
+ * 虚拟行模型下这里量到几十像素的「先往下再归位」（同款 Chromium 里的最小复现是 61px）。
+ *
+ * `toolsPerTurn: 1` 是刻意的：单卡批次不套可折叠的工具链，卡片一直可见，点开只动它自己，
+ * 不会和「上一轮的链自动折叠」那条策略抢状态。链尾那一轮的卡片在视口里，它下方同一虚拟
+ * 行内还有正在运行的那张卡当探针。
+ */
+async function expandJitterContract(): Promise<ExpandPerfResult> {
+  await harness.reset({ turns: 24, toolsPerTurn: 1, outputLines: 400 });
+  const scroller = document.querySelector<HTMLElement>(".convo-scroll");
+  const doc = document.querySelector<HTMLElement>(".convo-doc");
+  if (scroller === null || doc === null) throw new Error("展开探针没有找到 transcript");
+  const settle = async (ms: number) => {
+    const until = performance.now() + ms;
+    while (performance.now() < until) { await frame(); }
+    await afterPaint();
+  };
+  // 会话切换过场（淡出 → 骨架 → 淡入）期间正文的 opacity 是 0，此时挑目标会因为
+  // 「不可见」全被排除。等到 idle 且完全不透明再开始——探针要量的是静止态的展开。
+  const body = document.querySelector<HTMLElement>(".convo-body");
+  const deadlineIdle = performance.now() + 3000;
+  while (performance.now() < deadlineIdle) {
+    if (body !== null && body.dataset.phase === "idle" && Number.parseFloat(getComputedStyle(body).opacity || "0") > 0.99) break;
+    await frame();
+  }
+  await afterPaint();
+  scroller.scrollTop = scroller.scrollHeight;
+  await settle(80);
+  const target = pickExpandTarget();
+  if (target === null) {
+    return { clicked: null, grewPx: 0, maxShiftPx: 0, maxDocBottomShiftPx: 0, samples: 0, tailDistancePx: 0 };
+  }
+  const probeTop = () => target.probe.getBoundingClientRect().top;
+  const docGap = () => doc.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom;
+  const baseTop = probeTop();
+  const baseGap = docGap();
+  let maxShiftPx = 0;
+  let maxDocBottomShiftPx = 0;
+  let samples = 0;
+  target.header.click();
+  // 按时间收口而不是按帧数：--dur-slow 是 250ms，而刷新率从 60Hz 到 240Hz 都可能。
+  const deadline = performance.now() + 600;
+  while (performance.now() < deadline && samples < 240) {
+    await frame();
+    await afterPaint();
+    samples += 1;
+    maxShiftPx = Math.max(maxShiftPx, Math.abs(probeTop() - baseTop));
+    maxDocBottomShiftPx = Math.max(maxDocBottomShiftPx, Math.abs(docGap() - baseGap));
+  }
+  const card = target.header.parentElement?.querySelector<HTMLElement>(".tl-card") ?? null;
+  return {
+    clicked: target.label,
+    grewPx: Math.round(card?.getBoundingClientRect().height ?? 0),
+    maxShiftPx: Math.round(maxShiftPx * 10) / 10,
+    maxDocBottomShiftPx: Math.round(maxDocBottomShiftPx * 10) / 10,
+    samples,
+    tailDistancePx: Math.max(0, scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop),
+  };
+}
+
 function HarnessView() {
   const scrollerRef = useRef<HTMLElement | null>(null);
   const store = useSyncExternalStore(harness.subscribe, harness.getStore.bind(harness));
@@ -354,6 +473,7 @@ declare global {
       run(options: PerfRunOptions): Promise<PerfResult>;
       cardTransition(): { readonly streaming: string; readonly idle: string };
       sessionSwitch(): Promise<SwitchPerfResult>;
+      expandJitter(): Promise<ExpandPerfResult>;
     };
   }
 }
@@ -363,4 +483,5 @@ window.ompPerf = {
   run: (options) => harness.run(options),
   cardTransition: cardTransitionContract,
   sessionSwitch: sessionSwitchContract,
+  expandJitter: expandJitterContract,
 };

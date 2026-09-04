@@ -121,6 +121,11 @@ type MutableRecord = {
 /**
  * In-process Broker core. It owns per-session queues and Worker bindings while
  * keeping the single-Worker Bridge contract below the factory boundary.
+ *
+ * Not wired into the desktop Host: production residency lives in
+ * `apps/desktop/src/runtime-session.ts` (the residents map). This class and
+ * `InMemorySessionLeaseStore` are the tested phase-2 core kept for that
+ * integration; do not grow a second live state machine here.
  */
 export class StudioSessionBroker {
   readonly #ownerId: string;

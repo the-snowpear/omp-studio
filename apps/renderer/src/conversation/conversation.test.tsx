@@ -36,6 +36,23 @@ describe("createConversationEngine", () => {
     expect(notifications).toBe(before);
   });
 
+  it("defers archive/live I/O while a resident session is being activated", async () => {
+    const query = vi.fn(async () => opened) as unknown as ConversationClient["query"];
+    const engine = createConversationEngine({
+      preview: false,
+      client: client(query),
+      identity: { sessionId },
+      canRead: true,
+      runtimeConnected: true,
+      deferHydrate: true,
+      previewItems: [],
+    });
+    engine.start();
+    await Promise.resolve();
+    expect(query).not.toHaveBeenCalled();
+    engine.dispose();
+  });
+
   it("reopens the target when the target-local stream sequence has a gap", async () => {
     let listener: ((event: never) => void) | undefined;
     const query = vi.fn(async () => ({ ...opened, live: { status: "complete" as const, watermark: 1, events: [] } })) as unknown as ConversationClient["query"];

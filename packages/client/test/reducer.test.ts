@@ -235,7 +235,7 @@ function bootedState(b: ClientBootstrap = bootstrap()): ClientState {
   return reduceClientState(createInitialClientState(), { type: "bootstrap.set", bootstrap: b, occurredAt: TS });
 }
 
-function issue(state: ClientState, name: "session.create" | "session.resume" | "runtime.install" | "workspace.open" | "workspace.pick", requestId: CommandRequestId): ClientState {
+function issue(state: ClientState, name: "session.create" | "session.resume" | "session.archive" | "runtime.install" | "workspace.open" | "workspace.pick", requestId: CommandRequestId): ClientState {
   return reduceClientState(state, {
     type: "command.issue",
     requestId,
@@ -619,6 +619,35 @@ test("session.create survives the fresh Runtime epoch change until completion", 
     event: {
       ...createCompleted,
       receipt: { ...createCompleted.receipt, commandName: "session.create" },
+    },
+  });
+  assert.equal(state.commands[REQ_1]?.status, "completed");
+});
+
+test("session.archive survives the Runtime loss it causes until the Host receipt", () => {
+  let state = bootedState();
+  state = issue(state, "session.archive", REQ_1);
+  const archiveAccepted = accepted(REQ_1, 11);
+  assert.equal(archiveAccepted.kind, "command.accepted");
+  if (archiveAccepted.kind !== "command.accepted") return;
+  state = reduceClientState(state, {
+    type: "event",
+    event: { ...archiveAccepted, accepted: { ...archiveAccepted.accepted, commandName: "session.archive" } },
+  });
+  state = reduceClientState(state, {
+    type: "event",
+    event: runtimeChanged(12, { status: "disconnected", classification: "managed", runtimeId: "rt-1" as RuntimeId }),
+  });
+  assert.equal(state.commands[REQ_1]?.status, "accepted");
+
+  const archiveCompleted = completedReceipt(REQ_1, 13);
+  assert.equal(archiveCompleted.kind, "command.receipt");
+  if (archiveCompleted.kind !== "command.receipt" || archiveCompleted.receipt.status !== "completed") return;
+  state = reduceClientState(state, {
+    type: "event",
+    event: {
+      ...archiveCompleted,
+      receipt: { ...archiveCompleted.receipt, commandName: "session.archive" },
     },
   });
   assert.equal(state.commands[REQ_1]?.status, "completed");

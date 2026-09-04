@@ -6,10 +6,12 @@ import {
   isLiveActivityPhase,
   reduceActivityRetry,
   reduceAwaitingTurn,
+  reduceRunStreaming,
   syncRunWindow,
   WORKING_LABEL,
   type ActivityRetry,
   type ActivityStatus,
+  type RunTrust,
 } from "./activityStatus";
 
 /** Survives WorkbenchCanvas unmount when the operator leaves for Home. */
@@ -28,6 +30,7 @@ export function useRunWindow(active: boolean, identityKey: string): { readonly s
 /**
  * True from the moment a prompt is in flight until the run ends. Survives the
  * gap after the optimistic user row is reconciled and before `isStreaming`.
+ * `cancelGeneration` rises on an accepted user abort.
  */
 export function useAwaitingTurn(input: {
   sending: boolean;
@@ -35,23 +38,46 @@ export function useAwaitingTurn(input: {
   streaming: boolean;
   failed: boolean;
   identityKey: string;
+  cancelGeneration?: number;
 }): boolean {
-  const ref = useRef({ identityKey: input.identityKey, latched: false, wasStreaming: false });
+  const ref = useRef({ identityKey: input.identityKey, latched: false, wasStreaming: false, cancelGeneration: 0 });
   if (ref.current.identityKey !== input.identityKey) {
-    ref.current = { identityKey: input.identityKey, latched: false, wasStreaming: false };
+    ref.current = { identityKey: input.identityKey, latched: false, wasStreaming: false, cancelGeneration: 0 };
   }
   const next = reduceAwaitingTurn(
-    { latched: ref.current.latched, wasStreaming: ref.current.wasStreaming },
+    { latched: ref.current.latched, wasStreaming: ref.current.wasStreaming, cancelGeneration: ref.current.cancelGeneration },
     {
       sending: input.sending,
       pending: input.pending,
       streaming: input.streaming,
       failed: input.failed,
+      ...(input.cancelGeneration === undefined ? {} : { cancelGeneration: input.cancelGeneration }),
     },
   );
   ref.current.latched = next.latched;
   ref.current.wasStreaming = next.wasStreaming;
+  ref.current.cancelGeneration = next.cancelGeneration;
   return next.latched;
+}
+
+/**
+ * The run signal every write surface (activity line, stop button, queue flush)
+ * reads. `settled` is the Runtime's own "this run is over" verdict — the moment
+ * to reconcile client-side live state the Runtime will never close itself.
+ */
+export function useRunStreaming(input: {
+  identityKey: string;
+  runtimeStreaming: boolean;
+  conversationLive: boolean;
+}): { readonly streaming: boolean; readonly settled: boolean } {
+  const ref = useRef<{ identityKey: string; trust: RunTrust; conversationLive: boolean }>({
+    identityKey: input.identityKey,
+    trust: "early",
+    conversationLive: false,
+  });
+  const next = reduceRunStreaming(ref.current, input);
+  ref.current = { identityKey: next.identityKey, trust: next.trust, conversationLive: next.conversationLive };
+  return { streaming: next.streaming, settled: next.settled };
 }
 
 /**
@@ -133,6 +159,7 @@ export function ActivityLine({
 }) {
   const elapsed = useElapsed(startedAt);
   const live = isLiveActivityPhase(status.phase);
+  const showOperation = live || status.phase === "queued" || (status.phase === "waiting" && status.label !== WORKING_LABEL);
 
   return (
     <div className="activity-line" data-phase={status.phase}>
@@ -153,7 +180,7 @@ export function ActivityLine({
             <span className="al-elapsed">{formatElapsed(elapsed)}</span>
           </>
         ) : null}
-        {live || status.phase === "queued" ? (
+        {showOperation ? (
           <>
             <span className="al-sep">·</span>
             <span className="al-op">{status.label}</span>

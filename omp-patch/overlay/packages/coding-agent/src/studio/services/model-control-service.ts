@@ -42,8 +42,27 @@ type PendingSessionPreference = {
  */
 export class StudioModelControlService {
 	#pending: PendingSessionPreference | undefined;
+	#changeListeners = new Set<() => void>();
 
 	constructor(private readonly session: AgentSession) {}
+
+	/** Bridge/TUI task-model switches call this so snapshots stay fresh. */
+	onChange(listener: () => void): () => void {
+		this.#changeListeners.add(listener);
+		return () => {
+			this.#changeListeners.delete(listener);
+		};
+	}
+
+	#notifyChanged(): void {
+		for (const listener of [...this.#changeListeners]) {
+			try {
+				listener();
+			} catch {
+				// A throwing listener must not break the switch itself.
+			}
+		}
+	}
 
 	state(): StudioModelState | undefined {
 		const model = this.#pending?.model ?? this.session.model;
@@ -101,6 +120,52 @@ export class StudioModelControlService {
 			this.#pending = pending;
 			throw error;
 		}
+	}
+
+	/**
+	 * Effective Task subagent model for this session: the `task` entry of the
+	 * merged `task.agentModelOverrides` layer (runtime override first, then the
+	 * persisted configuration). `undefined` means the subagent inherits the
+	 * session model — including when the entry is a pattern or no longer
+	 * resolves, because the resolver falls back the same way.
+	 */
+	taskState(): StudioModelState | undefined {
+		const selector = this.#taskSelector();
+		if (selector === undefined) return undefined;
+		const model = this.session
+			.getAvailableModels()
+			.find(candidate => `${candidate.provider}/${candidate.id}` === selector || candidate.id === selector);
+		return model === undefined ? undefined : this.#identity(model);
+	}
+
+	/**
+	 * Pin or clear the session-scoped Task subagent model. Mirrors the TUI
+	 * picker's alt+p Task mode: a runtime-only settings override that never
+	 * touches disk, takes effect at the next subagent spawn, and keeps every
+	 * other agent's override intact. `null` returns the subagent to whatever
+	 * the persisted configuration (or inheritance) resolves to.
+	 */
+	async setTaskModel(selector: string | null): Promise<StudioModelState | undefined> {
+		const current = this.session.settings.get("task.agentModelOverrides");
+		if (selector === null) {
+			const { task: _cleared, ...rest } = current;
+			this.session.settings.override("task.agentModelOverrides", rest);
+			this.#notifyChanged();
+			return this.taskState();
+		}
+		const model = await this.#resolve(selector);
+		const canonical = `${model.provider}/${model.id}`;
+		this.session.settings.override("task.agentModelOverrides", { ...current, task: canonical });
+		this.#notifyChanged();
+		return this.taskState();
+	}
+
+	/** Merged `task` override entry; a pattern array projects its first member, like the TUI. */
+	#taskSelector(): string | undefined {
+		const entry = this.session.settings.get("task.agentModelOverrides").task;
+		if (entry === undefined || entry === null) return undefined;
+		const value = Array.isArray(entry) ? entry[0] : entry;
+		return typeof value === "string" && value.length > 0 ? value : undefined;
 	}
 
 	#shouldDefer(): boolean {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -40,6 +40,35 @@ test("FileSessionLeaseStore heartbeats and recovers an expired owner", async () 
     assert.equal(replacement.leaseEpoch, 2);
     await lease.release();
     await replacement.release();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("FileSessionLeaseStore retries transient Windows rename contention during heartbeat", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-session-lease-"));
+  try {
+    let transientFailures = 0;
+    const store = new FileSessionLeaseStore({
+      directory,
+      renameFile: async (oldPath, newPath) => {
+        if (String(newPath).endsWith(".lease") && transientFailures < 2) {
+          transientFailures += 1;
+          const error = new Error("destination is temporarily locked") as NodeJS.ErrnoException;
+          error.code = "EPERM";
+          throw error;
+        }
+        await rename(oldPath, newPath);
+      },
+    });
+    const lease = await store.acquire({ sessionId: "session-a", ownerId: "broker-a" });
+    await lease.heartbeat?.();
+    assert.equal(transientFailures, 2);
+    await assert.rejects(
+      () => store.acquire({ sessionId: "session-a", ownerId: "broker-b" }),
+      (error: unknown) => error instanceof SessionBrokerError && error.code === "SESSION_LEASE_BUSY",
+    );
+    await lease.release();
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

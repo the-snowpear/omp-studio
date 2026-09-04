@@ -399,7 +399,7 @@ test("Runtime mirror commands map through Desktop Host and preserve typed receip
   });
 });
 
-test("core.abort omits expectedStateVersion so a live turn can be interrupted", async () => {
+test("core.abort and core.prompt omit expectedStateVersion across live state changes", async () => {
   await withReady(async ({ composition, live }) => {
     live.setSnapshot({ ...live.snapshot, isStreaming: true, stateVersion: 4 as StateVersion });
     await composition.facade.command({
@@ -416,12 +416,12 @@ test("core.abort omits expectedStateVersion so a live turn can be interrupted", 
     await composition.facade.command({
       commandName: "core.prompt",
       input: { text: "after" },
-      idempotencyKey: "idem-prompt-fenced" as IdempotencyKey,
-      requestId: "client-req-prompt-fenced" as CommandRequestId,
+      idempotencyKey: "idem-prompt-unfenced" as IdempotencyKey,
+      requestId: "client-req-prompt-unfenced" as CommandRequestId,
     });
     await waitUntil(() => live.invokes.length === 2);
     assert.equal(live.invokes[1]?.operation.kind, "core.prompt");
-    assert.equal(live.invokes[1]?.expectedStateVersion, live.snapshot.stateVersion);
+    assert.equal("expectedStateVersion" in (live.invokes[1] ?? {}), false);
   });
 });
 

@@ -41,6 +41,12 @@ export type TimelineRow =
   | { readonly type: "resetBoundary"; readonly item: ConversationResetBoundaryItem };
 
 export const COMPACTING_ROW_ID = "compacting";
+const EMPTY_MESSAGE_PROTOCOL_PLACEHOLDER = "[System: Empty message content sanitised to satisfy protocol]";
+
+function isEmptyMessageProtocolPlaceholder(text: string): boolean {
+  return text.trim() === EMPTY_MESSAGE_PROTOCOL_PLACEHOLDER;
+}
+
 export function timelineRowKey(row: TimelineRow): string { return row.type === "compacting" ? COMPACTING_ROW_ID : row.type === "compaction" || row.type === "resetBoundary" ? row.item.itemId : row.itemId; }
 export function withCompactingRow(rows: readonly TimelineRow[], compacting: boolean, action?: string): readonly TimelineRow[] {
   if (!compacting || rows[rows.length - 1]?.type === "compacting") return rows;
@@ -67,12 +73,25 @@ export function tailStreaming(rows: readonly TimelineRow[]): boolean {
   return false;
 }
 
-const timelineStructureTokens = new WeakMap<readonly TimelineRow[], object>();export function tagTimelineStructure<T extends readonly TimelineRow[]>(rows: T, token: object): T {
-  timelineStructureTokens.set(rows, token);
+/**
+ * 时间线的两级内容版本。
+ *
+ * `structure` 在**任何**行内容变化时前进（含工具启停 —— 见 store 的 `markRowChanged`），
+ * `shape` 只在行序列/行类型变化时前进。区分两者的原因：`renderItems` 这类只按行 type
+ * 分组的派生结果不该因为某张工具卡开始跑就对全对话重算，而 `turnChangeBinds` /
+ * `planCreatedBinds` 确实要读工具内容，必须跟着 `structure`。
+ */
+type TimelineTokens = { readonly structure: object; readonly shape: object };
+const timelineStructureTokens = new WeakMap<readonly TimelineRow[], TimelineTokens>();
+export function tagTimelineStructure<T extends readonly TimelineRow[]>(rows: T, token: object, shape: object = token): T {
+  timelineStructureTokens.set(rows, { structure: token, shape });
   return rows;
 }
 export function timelineStructureToken(rows: readonly TimelineRow[]): object {
-  return timelineStructureTokens.get(rows) ?? rows;
+  return timelineStructureTokens.get(rows)?.structure ?? rows;
+}
+export function timelineShapeToken(rows: readonly TimelineRow[]): object {
+  return timelineStructureTokens.get(rows)?.shape ?? rows;
 }
 export function emptyConversationState(generation = 0): ConversationState {
   return { generation, identity: null, items: [], liveMessages: {}, liveTools: {}, liveOrder: [], hasMoreBefore: false, hydrateStatus: "idle", notices: [], pendingUsers: [], resyncRequired: false, userDisplays: {}, userThumbs: {}, openTurnItems: {} };
@@ -119,7 +138,7 @@ function assistantSegments(content: readonly ConversationContentBlock[], liveToo
   const segments: AssistantSegment[] = [];
   for (let index = 0; index < content.length; index += 1) {
     const block = content[index]!;
-    if (block.type === "text") segments.push({ type: "text", key: `text-${index}`, text: block.text, ...(block.truncated ? { truncated: true } : {}), ...(streaming ? { streaming: true } : {}) });
+    if (block.type === "text" && !isEmptyMessageProtocolPlaceholder(block.text)) segments.push({ type: "text", key: `text-${index}`, text: block.text, ...(block.truncated ? { truncated: true } : {}), ...(streaming ? { streaming: true } : {}) });
     else if (block.type === "thinking") segments.push({ type: "thinking", key: `thinking-${index}`, text: block.text, ...(block.truncated ? { truncated: true } : {}) });
   }
   const tools = toolViews(content, liveTools, turnOpen);

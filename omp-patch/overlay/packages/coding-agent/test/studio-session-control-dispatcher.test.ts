@@ -131,6 +131,10 @@ function fixture() {
 	};
 	const models = {
 		state: () => undefined,
+		// The projector reads the Task subagent pill and subscribes to switches:
+		// a partial `models` fake would throw while building any snapshot.
+		taskState: () => undefined,
+		onChange: () => () => {},
 		applyPending: async () => {
 			serviceCalls.push("session.model.applyPending");
 		},
@@ -537,6 +541,50 @@ describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
 			commandId: "builtin.force",
 			args: "tool prompt",
 		});
+	});
+
+	test("context-rewriting commands push refreshed telemetry without a conversation turn", async () => {
+		const { session, dispatcher, frames, allEvents, request } = fixture();
+		let usedTokens = 20;
+		Object.assign(session, {
+			getSessionStats: () => ({
+				tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				cost: 0,
+			}),
+			getContextBreakdown: () => ({
+				contextWindow: 100,
+				anchored: false,
+				usedTokens,
+				systemPromptTokens: 0,
+				systemContextTokens: 0,
+				systemToolsTokens: 0,
+				skillsTokens: 0,
+				messagesTokens: usedTokens,
+			}),
+		});
+		const telemetryEvents = () =>
+			allEvents
+				.filter(event => event.event.kind === "session.telemetry.changed")
+				.map(event =>
+					event.event.kind === "session.telemetry.changed" ? event.event.telemetry.context?.percent : undefined,
+				);
+
+		// Manual compact finishes without AgentSessionEvents, so the dispatcher
+		// must refresh the projector's cached telemetry itself.
+		await dispatcher.dispatch(request("compact-one", { kind: "operator.invoke", commandId: "builtin.compact" }));
+		expect((frames.at(-1)!.body as StudioReceipt).status).toBe("completed");
+		expect(telemetryEvents()).toEqual([20]);
+
+		// /clear rewrites the context in place too.
+		usedTokens = 0;
+		await dispatcher.dispatch(request("clear-one", { kind: "session.clearContext" }));
+		expect((frames.at(-1)!.body as StudioReceipt).status).toBe("completed");
+		expect(telemetryEvents()).toEqual([20, 0]);
+
+		// Ordinary operator commands must not spam extra telemetry pushes.
+		await dispatcher.dispatch(request("force-one", { kind: "operator.invoke", commandId: "builtin.force" }));
+		expect((frames.at(-1)!.body as StudioReceipt).status).toBe("completed");
+		expect(telemetryEvents()).toEqual([20, 0]);
 	});
 
 	test("BTW operations route through the Runtime-owned side-channel service", async () => {

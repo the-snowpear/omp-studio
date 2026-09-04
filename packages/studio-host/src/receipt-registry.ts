@@ -1,8 +1,20 @@
+import { createHash } from "node:crypto";
+
 import { canonicalJson, type IdempotencyKey, type StudioOperation, type StudioReceipt } from "@omp-studio/studio-protocol";
 
 interface RegistryEntry {
-  operation: string;
+  /**
+   * sha256 of the canonical operation JSON, never the JSON itself: it is only
+   * ever compared for equality, and prompt operations carry base64 images, so
+   * retaining them across the whole capacity window would pin hundreds of MB.
+   */
+  operationHash: string;
   receipt: StudioReceipt;
+}
+
+/** Same digest shape as `host-confirmation.ts`. */
+function operationFingerprint(operation: StudioOperation): string {
+  return createHash("sha256").update(canonicalJson(operation)).digest("hex");
 }
 
 export type ReceiptLookup =
@@ -24,14 +36,14 @@ export class ReceiptRegistry {
     if (entry === undefined) {
       return { kind: "miss" };
     }
-    return entry.operation === canonicalJson(operation)
+    return entry.operationHash === operationFingerprint(operation)
       ? { kind: "replay", receipt: structuredClone(entry.receipt) }
       : { kind: "conflict" };
   }
 
   remember(key: IdempotencyKey, operation: StudioOperation, receipt: StudioReceipt): void {
     this.#entries.delete(key);
-    this.#entries.set(key, { operation: canonicalJson(operation), receipt: structuredClone(receipt) });
+    this.#entries.set(key, { operationHash: operationFingerprint(operation), receipt: structuredClone(receipt) });
     while (this.#entries.size > this.capacity) {
       const oldest = this.#entries.keys().next().value as IdempotencyKey | undefined;
       if (oldest === undefined) break;

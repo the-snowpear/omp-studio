@@ -50,6 +50,18 @@ function cloneSnapshot(snapshot: StudioOperatorStateSnapshot): StudioOperatorSta
 	return structuredClone(snapshot);
 }
 
+/**
+ * Equality key for `commitStateChange`. `stateVersion` is normalized out
+ * because the commit is what bumps it: keeping it would make every key differ
+ * from the previously committed one and turn the equality check into a no-op.
+ * One serialization per call, cached next to `#committedSnapshot`, replaces the
+ * two `JSON.stringify` passes this comparison used to cost — the path runs
+ * several times a second while subagents stream.
+ */
+function stateComparisonKey(snapshot: StudioOperatorStateSnapshot): string {
+	return JSON.stringify({ ...snapshot, stateVersion: 0 });
+}
+
 const PLAN_BODY_MAX_CHARS = 32 * 1024;
 
 interface SessionTitlePort {
@@ -75,11 +87,19 @@ export class StudioStateProjector {
 	readonly #unsubscribeLive: () => void;
 	readonly #unsubscribeModes: () => void;
 	readonly #unsubscribeModel: () => void;
+	readonly #unsubscribeTaskModel: () => void;
 	readonly #unsubscribeAgents: () => void;
-	readonly #unsubscribeJobs: () => void;
+	#unsubscribeJobs: () => void = () => {};
 	readonly #unsubscribeSessionTitle: () => void;
 	readonly #unsubscribeConversation: () => void;
+	readonly #unsubscribeWorker: () => void;
 	#committedSnapshot: StudioOperatorStateSnapshot | undefined;
+	/**
+	 * Change-detection key for `#committedSnapshot`, computed lazily so a commit
+	 * driven by a conversation event never pays for a serialization no
+	 * `commitStateChange` will read. `undefined` means "recompute on demand".
+	 */
+	#committedKey: string | undefined;
 	#stateVersion = 0;
 	#eventSeq = 0;
 	#pendingInteraction: StudioPendingInteraction | undefined;
@@ -109,15 +129,25 @@ export class StudioStateProjector {
 			runtime.session.subscribe?.(event => {
 				if (event.type === "model_changed" || event.type === "thinking_level_changed") this.commitStateChange();
 			}) ?? (() => {});
+		// Bridge-side Task subagent model switches carry their own signal; TUI
+		// alt+p writes go through the settings override layer with no event and
+		// surface on the next unrelated state commit instead.
+		this.#unsubscribeTaskModel = runtime.services.models?.onChange(() => this.commitStateChange()) ?? (() => {});
 		this.#unsubscribeAgents = runtime.services.agents.onChange(() => {
 			this.#agentsRevision += 1;
 			this.commitStateChange();
 		});
-		this.#unsubscribeJobs =
-			runtime.session.asyncJobManager?.onChange(() => {
-				this.#jobsRevision += 1;
-				this.commitStateChange();
-			}) ?? (() => {});
+		let unsubscribeJobManager = () => {};
+		const bindJobManager = (): void => {
+			unsubscribeJobManager();
+			unsubscribeJobManager =
+				runtime.session.asyncJobManager?.onChange(() => {
+					this.#jobsRevision += 1;
+					this.commitStateChange();
+				}) ?? (() => {});
+		};
+		bindJobManager();
+		this.#unsubscribeJobs = () => unsubscribeJobManager();
 		const sessionManager = runtime.sessionManager as SessionTitlePort | undefined;
 		const onSessionNameChanged = sessionManager?.onSessionNameChanged;
 		this.#unsubscribeSessionTitle =
@@ -126,6 +156,11 @@ export class StudioStateProjector {
 				: () => {};
 		this.#unsubscribeConversation =
 			runtime.services.conversation?.onEvent(event => this.#emitConversation(event)) ?? (() => {});
+		this.#unsubscribeWorker =
+			runtime.onWorkerStateChange?.(() => {
+				bindJobManager();
+				this.commitStateChange();
+			}) ?? (() => {});
 	}
 
 	get stateVersion(): number {
@@ -137,6 +172,28 @@ export class StudioStateProjector {
 	}
 
 	snapshot(): StudioOperatorStateSnapshot {
+		const workerResidency = this.#runtime.workerResidency?.() ?? "active";
+		const workerGeneration = this.#runtime.workerGeneration?.() ?? 0;
+		// A recycled Worker releases its in-memory transcript and closes its
+		// SessionManager. Keep serving the last committed read model while the
+		// old Worker is being torn down or revived (or after a failed recycle)
+		// instead of dereferencing that terminal object.
+		// The next state change still goes through commitStateChange and updates the
+		// residency/generation fields monotonically.
+		if (
+			(workerResidency === "recycling" ||
+				workerResidency === "reviving" ||
+				workerResidency === "dormant" ||
+				workerResidency === "failed") &&
+			this.#committedSnapshot !== undefined
+		) {
+			return cloneSnapshot({
+				...this.#committedSnapshot,
+				workerResidency,
+				workerGeneration,
+				stateVersion: this.stateVersion,
+			});
+		}
 		const sessionManager = this.#runtime.sessionManager as SessionTitlePort | undefined;
 		const sessionTitle = sessionManager?.getSessionName?.();
 		const modes = this.#modeService.state();
@@ -146,6 +203,7 @@ export class StudioStateProjector {
 		const loop = this.#loopService.state();
 		const live = this.#liveService.state();
 		const model = this.#runtime.services.models?.state();
+		const taskModel = this.#runtime.services.models?.taskState();
 		const activeMode =
 			goal?.status === "active"
 				? "goal"
@@ -159,6 +217,8 @@ export class StudioStateProjector {
 			runtimeEpoch: this.#runtime.runtimeEpoch,
 			stateVersion: this.stateVersion,
 			sessionId: this.#runtime.sessionId,
+			workerResidency,
+			workerGeneration,
 			...(sessionTitle === undefined ? {} : { sessionTitle }),
 			...(sessionManager?.titleSource === undefined ? {} : { sessionTitleSource: sessionManager.titleSource }),
 			isStreaming: this.#runtime.session.isStreaming,
@@ -166,11 +226,13 @@ export class StudioStateProjector {
 			activeMode,
 			approvalMode: this.#runtime.services.permissions?.state() ?? this.#approvalMode(),
 			pause: this.#pauseService.state(),
-			...(this.#pendingInteraction === undefined
-				? {}
-				: { pendingInteraction: structuredClone(this.#pendingInteraction) }),
+			// Service- and projector-owned members go in by reference: the literal
+			// is local and `cloneSnapshot` below deep-copies it before it escapes,
+			// so cloning them here only copied the same bytes twice per snapshot.
+			...(this.#pendingInteraction === undefined ? {} : { pendingInteraction: this.#pendingInteraction }),
 			...(loop === undefined ? {} : { loop }),
 			...(model === undefined ? {} : { model }),
+			...(taskModel === undefined ? {} : { taskModel }),
 			live,
 			pendingMessages: this.#runtime.session.queuedMessageCount,
 			activeCommandIds: [],
@@ -181,7 +243,7 @@ export class StudioStateProjector {
 				callerAgentId: this.#runtime.session.getAgentId() ?? "Main",
 				includeRecent: true,
 			}),
-			telemetry: structuredClone(this.#telemetrySnapshot),
+			telemetry: this.#telemetrySnapshot,
 			...(this.#runtime.services.settings === undefined
 				? {}
 				: { runtimeSettings: this.#runtime.services.settings.snapshot() }),
@@ -297,6 +359,7 @@ export class StudioStateProjector {
 		if (advances) {
 			this.#stateVersion += 1;
 			this.#committedSnapshot = this.snapshot();
+			this.#committedKey = undefined;
 		}
 		this.#emitEvent(event);
 		if (!isMain) return;
@@ -307,18 +370,38 @@ export class StudioStateProjector {
 			event.kind === "conversation.compaction.completed"
 		)
 			this.#scheduleTelemetry(true);
-		else this.#scheduleTelemetry(false);
+		// A pure text delta cannot move any telemetry number a user can observe —
+		// usage is accounted at message/turn/compaction terminals — so it must not
+		// schedule a rebuild. Every other kind still does: tool boundaries and
+		// notices can follow a context mutation.
+		else if (event.kind !== "conversation.message.delta") this.#scheduleTelemetry(false);
 		if (advances && this.#committedSnapshot !== undefined) {
-			this.#emitEvent({ kind: "state.changed", snapshot: structuredClone(this.#committedSnapshot) });
+			// No clone here: `#emitEvent` copies the body into the envelope and
+			// `#notify` copies again per listener, so neither a listener nor the
+			// envelope can reach `#committedSnapshot`.
+			this.#emitEvent({ kind: "state.changed", snapshot: this.#committedSnapshot });
 		}
 	}
 
 	#telemetry(): StudioSessionTelemetry {
-		return buildStudioSessionTelemetry({
-			sessionId: this.#runtime.sessionId,
-			session: this.#runtime.session,
-			capturedAt: new Date().toISOString(),
-		});
+		try {
+			return buildStudioSessionTelemetry({
+				sessionId: this.#runtime.sessionId,
+				session: this.#runtime.session,
+				capturedAt: new Date().toISOString(),
+			});
+		} catch (error) {
+			logger.debug("Studio telemetry unavailable while Worker is not live", { error: String(error) });
+			return (
+				this.#telemetrySnapshot ?? {
+					sessionId: this.#runtime.sessionId,
+					capturedAt: new Date().toISOString(),
+					tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 },
+					context: null,
+					unavailableReason: "model_context_unknown",
+				}
+			);
+		}
 	}
 
 	#scheduleTelemetry(immediate: boolean): void {
@@ -335,6 +418,17 @@ export class StudioStateProjector {
 		}, 250);
 	}
 
+	/**
+	 * Recompute telemetry now and push `session.telemetry.changed`. Context
+	 * mutations that finish without a following conversation turn (manual
+	 * /compact, /clear, handoff) emit no AgentSessionEvent on the vendor side,
+	 * so the cached snapshot would keep serving pre-mutation numbers until the
+	 * next turn's conversation event recomputes it.
+	 */
+	refreshTelemetry(): void {
+		this.#scheduleTelemetry(true);
+	}
+
 	async #emitTelemetry(): Promise<void> {
 		if (this.#telemetryInFlight) {
 			this.#telemetryQueued = true;
@@ -344,8 +438,10 @@ export class StudioStateProjector {
 		try {
 			const telemetry = this.#telemetry();
 			this.#telemetrySnapshot = structuredClone(telemetry);
-			if (this.#committedSnapshot !== undefined)
+			if (this.#committedSnapshot !== undefined) {
 				this.#committedSnapshot = { ...this.#committedSnapshot, telemetry: structuredClone(telemetry) };
+				this.#committedKey = undefined;
+			}
 			this.#emitEvent({ kind: "session.telemetry.changed", sessionId: this.#runtime.sessionId, telemetry });
 		} finally {
 			this.#telemetryInFlight = false;
@@ -389,10 +485,12 @@ export class StudioStateProjector {
 		this.#unsubscribeLive();
 		this.#unsubscribeModes();
 		this.#unsubscribeModel();
+		this.#unsubscribeTaskModel();
 		this.#unsubscribeAgents();
 		this.#unsubscribeJobs();
 		this.#unsubscribeSessionTitle();
 		this.#unsubscribeConversation();
+		this.#unsubscribeWorker();
 		this.#listeners.clear();
 	}
 
@@ -403,25 +501,18 @@ export class StudioStateProjector {
 	 */
 	commitStateChange(): boolean {
 		const snapshot = this.snapshot();
-		if (
-			this.#committedSnapshot !== undefined &&
-			JSON.stringify(snapshot) === JSON.stringify(this.#committedSnapshot)
-		) {
-			return false;
+		const key = stateComparisonKey(snapshot);
+		if (this.#committedSnapshot !== undefined) {
+			this.#committedKey ??= stateComparisonKey(this.#committedSnapshot);
+			if (key === this.#committedKey) return false;
 		}
 		this.#stateVersion += 1;
-		this.#eventSeq += 1;
 		snapshot.stateVersion = this.#stateVersion;
 		this.#committedSnapshot = snapshot;
-		const event: StudioEventEnvelope = {
-			type: "studio.event",
-			runtimeEpoch: this.#runtime.runtimeEpoch,
-			eventSeq: this.#eventSeq,
-			stateVersion: this.#stateVersion,
-			occurredAt: new Date().toISOString(),
-			event: { kind: "state.changed", snapshot: structuredClone(snapshot) },
-		};
-		this.#notify(event);
+		this.#committedKey = key;
+		// `#emitEvent` bumps eventSeq, stamps the envelope, and copies the body,
+		// so the committed snapshot is never aliased into an emitted event.
+		this.#emitEvent({ kind: "state.changed", snapshot });
 		return true;
 	}
 }

@@ -31,7 +31,7 @@ import {
 } from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "160ed439ac0df594347e7d7018b813a7ffdb5e81";
+const REAL_UPSTREAM_COMMIT = "b8ce33a58911c26bed1d84f0db9a5e2e727c49a2";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 async function fixtureInputs() {
@@ -208,6 +208,7 @@ test("artifact manifest carries the contract fields derived from real pin/series
     "session.handoff",
     "session.model.set",
     "session.thinking.set",
+    "session.taskModel.set",
     "session.history",
     "session.transcript.read",
     "operator.manifest.get",
@@ -314,11 +315,11 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.commit, REAL_UPSTREAM_COMMIT);
   assert.equal(series.upstreamCommit, upstream.commit);
   assert.equal(upstream.entrypoint, "omp.exe");
-  assert.equal(upstreamVersion, "18.0.3");
+  assert.equal(upstreamVersion, "18.0.11");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.0.3-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.0.11-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }

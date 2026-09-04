@@ -90,10 +90,8 @@ function ScrollHarness({ scrollerRef, contentKey, onHandle }: {
   return null;
 }
 
-describe("对话跟底的唯一写入者", () => {
-  it("内容提交不直接写，等最终文档尺寸回调后只写一次", () => {
-    // 虚拟列表测量会在 React 提交之后再改一次容器高度。跟底只订阅最终 `.convo-doc`
-    // 尺寸，不能在 contentKey effect 与虚拟列表 onChange 各写一次。
+describe("对话跟底的写入机制", () => {
+  it("内容提交时同步贴底，文档尺寸回调亦维持贴底", () => {
     let resize: (() => void) | null = null;
     const observed: Element[] = [];
     class StubResizeObserver {
@@ -116,9 +114,9 @@ describe("对话跟底的唯一写入者", () => {
     expect(observed).toEqual([doc, el]);
     writes = 0;
     act(() => { view.rerender(<ScrollHarness scrollerRef={ref} contentKey="b" onHandle={(value) => { handle = value; }} />); });
-    expect(writes).toBe(0);
-    act(() => { resize?.(); });
     expect(writes).toBe(1);
+    act(() => { resize?.(); });
+    expect(writes).toBe(2);
   });
 
   it("读者已经离开尾部时不写", () => {

@@ -52,6 +52,11 @@ tmp/
 output/
 outputs/
 
+# Local launch scripts
+/启动生产版.cmd
+/一键启动生产版.cmd
+/启动预览.cmd
+
 # Architecture review packs / extracted archives (local working notes, not product code)
 architecture_review_v2_work/
 

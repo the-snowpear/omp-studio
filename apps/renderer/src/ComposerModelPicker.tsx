@@ -88,6 +88,8 @@ export function ComposerModelMenu({
   disabled,
   placement = "up",
   note,
+  header,
+  inheritOption,
   isRoleSelected,
   isModelSelected,
   onChooseRole,
@@ -101,6 +103,14 @@ export function ComposerModelMenu({
   disabled?: boolean;
   placement?: "up" | "down";
   note?: ReactNode;
+  /** 渲染在角色列表上方的模式切换行（如 Task 子代理模式）；不传则不渲染。 */
+  header?: ReactNode;
+  /** 列表首位的「继承」选项；不传则不渲染（SubagentsPanel 等复用方不受影响）。 */
+  inheritOption?: {
+    label: string;
+    selected: boolean;
+    onChoose: () => void;
+  };
   isRoleSelected: (role: ModelRoleRecord) => boolean;
   isModelSelected: (selector: string) => boolean;
   onChooseRole: (role: ModelRoleRecord) => void;
@@ -165,7 +175,26 @@ export function ComposerModelMenu({
         aria-label={t("composer.selectModel")}
         ref={menuRef}
       >
+        {header ? <div className="cmp-menu-header">{header}</div> : null}
         <div className="cmp-roles">
+          {inheritOption ? (
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={inheritOption.selected}
+              className={`cmp-role cmp-role-inherit${inheritOption.selected ? " selected" : ""}`}
+              disabled={disabled}
+              onClick={() => inheritOption.onChoose()}
+            >
+              <span className="cmp-role-ic" data-tint="gray" aria-hidden="true">
+                <Icon name="link" extra="sm" />
+              </span>
+              <span className="cmp-role-copy">
+                <b>{inheritOption.label}</b>
+              </span>
+              {inheritOption.selected ? <Icon name="check" extra="sm" /> : null}
+            </button>
+          ) : null}
           {loading && !data ? (
             <div className="cmp-empty">{t("composer.loadingModels")}</div>
           ) : loadError && rolesWithModel.length === 0 ? (
@@ -312,6 +341,9 @@ export function ComposerModelPicker({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [previewPick, setPreviewPick] = useState<ComposerPick | null>(null);
+  // Task 子代理模式：菜单内切换，激活后列表选择的是会话级 Task 模型而非会话模型。
+  const [taskPicking, setTaskPicking] = useState(false);
+  const [previewTaskPick, setPreviewTaskPick] = useState<ComposerPick | null>(null);
 
   useEffect(() => {
     if (openNonce > 0) setMenu("model");
@@ -371,6 +403,10 @@ export function ComposerModelPicker({
     if (!preview) setPreviewPick(null);
   }, [preview]);
 
+  useEffect(() => {
+    if (!preview) setPreviewTaskPick(null);
+  }, [preview]);
+
   const bySelector = useMemo(
     () => new Map((data?.availableModels ?? []).map((model) => [model.selector, model])),
     [data],
@@ -383,7 +419,14 @@ export function ComposerModelPicker({
   );
   const modelReady = preview || can("session.model.set");
   const thinkingReady = preview || can("session.thinking.set");
+  const taskReady = preview || can("session.taskModel.set");
   const nextTurnOnly = !preview && (snapshot?.isStreaming === true || snapshot?.isCompacting === true);
+
+  // Task 模型只认 Runtime 投影（或预览本地选择）；显示名同样走目录反查。
+  const taskModel = preview ? previewTaskPick : snapshot?.taskModel ?? null;
+  const taskLabel = taskModel
+    ? bySelector.get(taskModel.selector)?.name ?? modelShortName(taskModel.selector)
+    : null;
 
   const selectedModel = pick ? bySelector.get(pick.selector) : undefined;
   const thinking = useMemo(() => {
@@ -402,6 +445,7 @@ export function ComposerModelPicker({
 
   const closeAll = () => {
     setMenu("none");
+    setTaskPicking(false);
   };
 
   useEffect(() => {
@@ -458,6 +502,28 @@ export function ComposerModelPicker({
     apply("session.thinking.set", { level });
   };
 
+  /** Task 模式下选模型：会话级 override，选完退出 Task 模式并收起菜单。 */
+  const chooseTaskModel = (selector: string) => {
+    closeAll();
+    if (!taskReady) return;
+    if (preview) {
+      setPreviewTaskPick(pickWith(null, selector, undefined));
+      return;
+    }
+    apply("session.taskModel.set", { selector });
+  };
+
+  /** Task 模式恢复继承：清掉会话级 override（持久化配置仍在则回落到它）。 */
+  const chooseTaskInherit = () => {
+    closeAll();
+    if (!taskReady) return;
+    if (preview) {
+      setPreviewTaskPick(null);
+      return;
+    }
+    apply("session.taskModel.set", { selector: null });
+  };
+
   const { t } = useI18n();
 
   return (
@@ -480,6 +546,13 @@ export function ComposerModelPicker({
         >
           <span className="cmp-model-label-full">{modelLabel}</span>
           <span className="cmp-model-label-initial" aria-hidden="true">{labelInitial(modelLabel)}</span>
+          {taskModel ? (
+            <span
+              className="cmp-task-dot"
+              data-tip={`${t("composer.taskModelActive")}${taskLabel ? `：${taskLabel}` : ""}`}
+              aria-label={t("composer.taskModelActive")}
+            />
+          ) : null}
           <Icon name="chevron-d" extra="sm cmp-pill-caret" />
         </button>
         {menu === "model" ? (
@@ -488,18 +561,48 @@ export function ComposerModelPicker({
             loading={loading}
             loadError={loadError}
             preview={preview}
-            disabled={!modelReady}
-            isRoleSelected={(role) => pick?.roleId === role.id}
-            isModelSelected={(selector) => pick?.selector === selector}
-            {...(preview || (modelReady && !nextTurnOnly)
+            disabled={taskPicking ? !taskReady : !modelReady}
+            header={
+              <button
+                type="button"
+                className={`cmp-task-toggle${taskPicking ? " is-on" : ""}`}
+                aria-pressed={taskPicking}
+                disabled={!taskReady}
+                data-tip={!taskReady ? t("common.notImplemented") : taskLabel ?? t("composer.taskModelInheritTip")}
+                onClick={() => setTaskPicking((on) => !on)}
+              >
+                <Icon name="bot" extra="sm" />
+                <span>{t("composer.taskModelToggle")}</span>
+                <span className="spacer" />
+                {taskLabel ? <span className="cmp-task-current">{taskLabel}</span> : null}
+              </button>
+            }
+            {...(taskPicking
+              ? {
+                  inheritOption: {
+                    label: t("composer.taskModelInherit"),
+                    selected: taskModel === null,
+                    onChoose: chooseTaskInherit,
+                  },
+                  isRoleSelected: (role: ModelRoleRecord) => taskModel?.selector === role.primary,
+                  isModelSelected: (selector: string) => taskModel?.selector === selector,
+                  onChooseRole: (role: ModelRoleRecord) => chooseTaskModel(role.primary),
+                  onChooseModel: chooseTaskModel,
+                  note: t("composer.taskModelNote"),
+                }
+              : {
+                  isRoleSelected: (role: ModelRoleRecord) => pick?.roleId === role.id,
+                  isModelSelected: (selector: string) => pick?.selector === selector,
+                  onChooseRole: chooseRole,
+                  onChooseModel: chooseModel,
+                })}
+            {...(preview || (modelReady && !nextTurnOnly) || taskPicking
               ? {}
               : {
                   note: !modelReady
                     ? t("composer.runtimeNotExposedModelSet")
                     : t("composer.modelNoteNextTurn"),
                 })}
-            onChooseRole={chooseRole}
-            onChooseModel={chooseModel}
             onClose={closeAll}
           />
         ) : null}

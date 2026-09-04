@@ -5,6 +5,7 @@
  */
 
 import type { ComposerDoc, PromptImage } from "../composer/types";
+import { toThumbnail } from "./thumbnailImage";
 
 export type UserMessageThumb = {
   readonly label: string;
@@ -22,7 +23,94 @@ export type UserThumbStore = {
 
 const DB_NAME = "omp-studio-ui";
 const STORE_NAME = "user-message-thumbs";
-const DB_VERSION = 1;
+/**
+ * v2 起存的是降采样后的缩略图（`toThumbnail`），v1 存的是原图 base64。
+ * 升级时直接删表重建：这是纯本地预览缓存，历史消息的缩略图退回附件占位而已，
+ * 不值得为它写迁移，更不值得把一堆原图继续读进内存。
+ */
+const DB_VERSION = 2;
+
+/** 落盘前把每张图压成缩略图；压不动的条目丢掉图片字节，只留标签。 */
+async function thumbnailsForStorage(
+  thumbs: readonly UserMessageThumb[],
+): Promise<readonly UserMessageThumb[]> {
+  return Promise.all(
+    thumbs.map(async (thumb) => {
+      const image = await toThumbnail(thumb.image);
+      return image === undefined
+        ? { label: thumb.label, ...(thumb.path === undefined ? {} : { path: thumb.path }) }
+        : { ...thumb, image };
+    }),
+  ).then((rows) => rows.filter((row): row is UserMessageThumb => "image" in row && row.image !== undefined));
+}
+
+/**
+ * 用户消息里图片字节的保留预算。
+ *
+ * `userDisplays` / `userThumbs` 原来只有 `slice(-maxRows)` 的**条数**上限（2000 条），
+ * 没有字节上限，而每个 chip 携带的是**原图** base64（composer 侧允许单张 16 MiB、
+ * 单次 64 MiB）。一张 4K 截图 base64 就是 6~7 MB，几十张就是 GB 级，而且
+ * `trimAncillary` 只会在条目数超过 2000 时才开始丢。
+ *
+ * 8 MiB 与对话窗口本身的 `DEFAULT_MAX_BYTES`（24 MiB）同量级：图片是装饰，
+ * 不该比转写正文更能占内存。超出预算时从最旧的消息开始丢，历史消息的行内缩略图
+ * 退回附件占位，正文与附件名不受影响。
+ */
+export const USER_IMAGE_BUDGET_BYTES = 8 * 1024 * 1024;
+
+/** base64 是 ASCII，一字符一字节，所以直接用长度即可，不必再编码一遍。 */
+function imageBytes(image: PromptImage | undefined): number {
+  return image === undefined ? 0 : image.data.length;
+}
+
+const docImageBytesCache = new WeakMap<object, number>();
+
+/** 一个展示用 doc 携带的图片字节数。doc 不可变，所以按对象身份记忆。 */
+export function docImageBytes(doc: ComposerDoc): number {
+  const cached = docImageBytesCache.get(doc);
+  if (cached !== undefined) return cached;
+  let bytes = 0;
+  for (const node of doc.nodes) {
+    if (node.type === "chip" && node.chip.kind === "image") bytes += imageBytes(node.chip.image);
+  }
+  docImageBytesCache.set(doc, bytes);
+  return bytes;
+}
+
+const thumbsImageBytesCache = new WeakMap<object, number>();
+
+export function thumbsImageBytes(thumbs: readonly UserMessageThumb[]): number {
+  const cached = thumbsImageBytesCache.get(thumbs);
+  if (cached !== undefined) return cached;
+  let bytes = 0;
+  for (const thumb of thumbs) bytes += imageBytes(thumb.image);
+  thumbsImageBytesCache.set(thumbs, bytes);
+  return bytes;
+}
+
+/**
+ * 从最新往回保留，直到图片字节超过预算为止。零字节的条目（纯文本消息）永不因为
+ * 预算被丢弃 —— 它们不占图片预算，丢掉只会白白损失正文的展示副本。
+ */
+export function capByImageBytes<T>(
+  entries: readonly (readonly [string, T])[],
+  bytesOf: (value: T) => number,
+  budget = USER_IMAGE_BUDGET_BYTES,
+): Array<readonly [string, T]> {
+  let spent = 0;
+  const kept: Array<readonly [string, T]> = [];
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    const bytes = bytesOf(entry[1]);
+    if (bytes > 0) {
+      if (spent + bytes > budget) continue;
+      spent += bytes;
+    }
+    kept.push(entry);
+  }
+  kept.reverse();
+  return kept;
+}
 
 export function thumbsFromDoc(doc: ComposerDoc): UserMessageThumb[] {
   const thumbs: UserMessageThumb[] = [];
@@ -105,8 +193,10 @@ export function createMemoryThumbStore(): UserThumbStore {
     },
     async save(sessionId, itemId, thumbs) {
       if (thumbs.length === 0) return;
+      const stored = await thumbnailsForStorage(thumbs);
+      if (stored.length === 0) return;
       const rows = sessions.get(sessionId) ?? new Map();
-      rows.set(itemId, thumbs);
+      rows.set(itemId, stored);
       sessions.set(sessionId, rows);
     },
     async dropSession(sessionId) {
@@ -127,7 +217,8 @@ function openThumbDb(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (db.objectStoreNames.contains(STORE_NAME)) return;
+      // v1 的行是原图；删表重建，别把它们带进 v2。
+      if (db.objectStoreNames.contains(STORE_NAME)) db.deleteObjectStore(STORE_NAME);
       const store = db.createObjectStore(STORE_NAME, { keyPath: "id" });
       store.createIndex("sessionId", "sessionId", { unique: false });
     };
@@ -160,8 +251,12 @@ export function createIndexedDbThumbStore(): UserThumbStore {
     },
     async save(sessionId, itemId, thumbs) {
       if (thumbs.length === 0) return;
+      // 降采样在事务之外做：`convertToBlob` 是异步的，IndexedDB 事务会在
+      // 第一个 await 之后自动提交。
+      const stored = await thumbnailsForStorage(thumbs);
+      if (stored.length === 0) return;
       await withStore("readwrite", async (store) => {
-        const row: StoredRow = { id: recordId(sessionId, itemId), sessionId, itemId, images: thumbs };
+        const row: StoredRow = { id: recordId(sessionId, itemId), sessionId, itemId, images: stored };
         await requestValue(store.put(row));
       });
     },

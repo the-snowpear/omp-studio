@@ -98,6 +98,7 @@ const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"session.prewalk.disarm",
 	"session.model.set",
 	"session.thinking.set",
+	"session.taskModel.set",
 	"operator.manifest.get",
 	"operator.invoke",
 	"permissions.mode.set",
@@ -283,6 +284,25 @@ export class StudioBridgeDispatcher {
 
 	async dispatch(request: StudioRequest, send: StudioBridgeSend = this.send): Promise<void> {
 		const operation = request.operation;
+		if (operation.kind !== "runtime.shutdown") {
+			try {
+				await this.runtime.ensureWorkerLive?.();
+			} catch (error) {
+				const workerState = this.runtime.workerResidency?.() ?? "active";
+				this.#reject(
+					request,
+					{
+						code: "COMMAND_BLOCKED",
+						message: error instanceof Error ? error.message : "Main Worker revival failed",
+						retryable: true,
+						details: { workerState, workerGeneration: this.runtime.workerGeneration?.() ?? 0 },
+					},
+					send,
+					false,
+				);
+				return;
+			}
+		}
 		if (operation.kind === "runtime.snapshot") {
 			send(`snapshot-result:${request.requestId}`, this.projector.response(request.requestId));
 			return;
@@ -400,6 +420,11 @@ export class StudioBridgeDispatcher {
 																			? await this.#executePermissionOperation(operation)
 																			: await this.#executeSessionOperation(operation, commandId);
 				if (!isPauseOperation) this.projector.commitStateChange();
+				// Manual /compact, /clear, and handoff rewrite the context without
+				// a following conversation turn, so no conversation event will
+				// recompute telemetry. Refresh it now or the GUI context meter
+				// keeps showing pre-mutation numbers until the next turn.
+				if (this.#mutatesContextInPlace(operation)) this.projector.refreshTelemetry();
 				const completed: StudioReceipt = {
 					type: "studio.receipt",
 					requestId: request.requestId,
@@ -605,6 +630,8 @@ export class StudioBridgeDispatcher {
 				return await this.runtime.services.models.setModel(operation.selector, operation.thinking);
 			case "session.thinking.set":
 				return this.runtime.services.models.setThinking(operation.level);
+			case "session.taskModel.set":
+				return await this.runtime.services.models.setTaskModel(operation.selector);
 			case "session.fast.set":
 				return this.runtime.services.fastPrewalk.setFast(operation.enabled);
 			case "session.prewalk.arm":
@@ -733,6 +760,16 @@ export class StudioBridgeDispatcher {
 			default:
 				throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Operator operation is not registered");
 		}
+	}
+
+	/** Operations that rewrite the conversation context in place and finish
+	 *  without a conversation turn whose events would refresh telemetry. */
+	#mutatesContextInPlace(operation: StudioRequest["operation"]): boolean {
+		if (operation.kind === "session.clearContext" || operation.kind === "session.handoff") return true;
+		return (
+			operation.kind === "operator.invoke" &&
+			(operation.commandId === "builtin.compact" || operation.commandId === "builtin.handoff")
+		);
 	}
 
 	async #executeBtwOperation(operation: StudioRequest["operation"]): Promise<unknown> {

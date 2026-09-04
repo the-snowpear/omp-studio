@@ -40,6 +40,7 @@ import {
   parseSessionTelemetryReadResult,
   parseSessionTelemetrySnapshot,
 } from "./telemetry-validation.js";
+import { utf8ByteLength } from "./conversation-text.js";
 
 export { ContractValidationError } from "./contract-error.js";
 export { isBtwErrorCode, isBtwStatus, parseBtwSnapshot } from "./btw-validation.js";
@@ -113,7 +114,7 @@ function boundedOptionalInteractionString(value: unknown, path: string, maxChars
 function boundedInteractionJson(value: unknown, path: string, maxBytes: number): void {
   jsonValue(value, path);
   const encoded = JSON.stringify(value);
-  if (encoded === undefined || new TextEncoder().encode(encoded).length > maxBytes) {
+  if (encoded === undefined || utf8ByteLength(encoded) > maxBytes) {
     throw new ContractValidationError(`JSON value exceeds ${maxBytes} bytes`, path);
   }
 }
@@ -403,6 +404,8 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
       "runtimeEpoch",
       "stateVersion",
       "sessionId",
+      "workerResidency",
+      "workerGeneration",
       "sessionTitle",
       "sessionTitleSource",
       "isStreaming",
@@ -414,6 +417,7 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
       "vibe",
       "loop",
       "model",
+      "taskModel",
       "fast",
       "prewalk",
       "pause",
@@ -435,6 +439,10 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
   positiveInteger(input.runtimeEpoch, "$snapshot.snapshot.runtimeEpoch");
   nonNegativeInteger(input.stateVersion, "$snapshot.snapshot.stateVersion");
   nonEmptyString(input.sessionId, "$snapshot.snapshot.sessionId");
+  if (input.workerResidency !== undefined && !["active", "sleeping", "recycling", "reviving", "dormant", "failed"].includes(input.workerResidency as string)) {
+    throw new ContractValidationError("unsupported worker residency", "$snapshot.snapshot.workerResidency");
+  }
+  if (input.workerGeneration !== undefined) nonNegativeInteger(input.workerGeneration, "$snapshot.snapshot.workerGeneration");
   if (input.sessionTitle !== undefined) nonEmptyString(input.sessionTitle, "$snapshot.snapshot.sessionTitle");
   if (input.sessionTitleSource !== undefined && input.sessionTitleSource !== "user" && input.sessionTitleSource !== "auto") {
     throw new ContractValidationError("unsupported session title source", "$snapshot.snapshot.sessionTitleSource");
@@ -509,6 +517,19 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
     }
     if (model.configuredThinking !== undefined) {
       assertThinkingSelector(model.configuredThinking, "$snapshot.snapshot.model.configuredThinking");
+    }
+  }
+  if (input.taskModel !== undefined) {
+    const taskModel = record(input.taskModel, "$snapshot.snapshot.taskModel");
+    exactKeys(taskModel, ["selector", "provider", "id", "thinking", "configuredThinking"], "$snapshot.snapshot.taskModel");
+    nonEmptyString(taskModel.selector, "$snapshot.snapshot.taskModel.selector");
+    nonEmptyString(taskModel.provider, "$snapshot.snapshot.taskModel.provider");
+    nonEmptyString(taskModel.id, "$snapshot.snapshot.taskModel.id");
+    if (taskModel.thinking !== undefined && !THINKING_LEVEL_SET.has(taskModel.thinking as string)) {
+      throw new ContractValidationError("unsupported thinking level", "$snapshot.snapshot.taskModel.thinking");
+    }
+    if (taskModel.configuredThinking !== undefined) {
+      assertThinkingSelector(taskModel.configuredThinking, "$snapshot.snapshot.taskModel.configuredThinking");
     }
   }
   if (input.fast !== undefined) {
@@ -1015,6 +1036,19 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   "session.thinking.set": {
     keys: ["kind", "level"],
     validate: (operation) => assertThinkingSelector(operation.level, "$request.operation.level"),
+  },
+  "session.taskModel.set": {
+    keys: ["kind", "selector"],
+    validate: (operation) => {
+      if (operation.selector === null) return;
+      const selector = nonEmptyString(operation.selector, "$request.operation.selector");
+      if (selector.length > MAX_MODEL_SELECTOR_LENGTH) {
+        throw new ContractValidationError(
+          `selector must be at most ${MAX_MODEL_SELECTOR_LENGTH} characters`,
+          "$request.operation.selector",
+        );
+      }
+    },
   },
   "session.tree.get": { keys: ["kind"] },
   [SESSION_TRANSCRIPT_READ_KIND]: {

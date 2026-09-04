@@ -17,6 +17,7 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
   theme: "dark",
   density: "compact",
   streaming: true,
+  streamingCadenceHz: 60,
   toolActivity: "full",
   restoreLastProject: true,
   restoreLastSession: true,

@@ -77,7 +77,14 @@ export class StudioAgentConversationService {
 	readonly #registry: AgentRegistry;
 	readonly #runtimeEpoch: () => number;
 	readonly #loadEntries: StudioAgentConversationLoadEntries;
+	/**
+	 * Per-agent cursor signing key. Dropped when the registry drops the agent: a
+	 * cursor issued for a removed agent is already stale — `#assertUnchanged`
+	 * rejects any read whose ref changed — so the key has nothing left to verify,
+	 * and keeping one per agent id for the process lifetime is a slow leak.
+	 */
 	readonly #secrets = new Map<string, Buffer>();
+	#unsubscribeRegistry: (() => void) | undefined;
 
 	constructor(options: {
 		registry: AgentRegistry;
@@ -87,6 +94,15 @@ export class StudioAgentConversationService {
 		this.#registry = options.registry;
 		this.#runtimeEpoch = options.runtimeEpoch;
 		this.#loadEntries = options.loadEntries ?? loadEntriesFromFile;
+		this.#unsubscribeRegistry = this.#registry.onChange(event => {
+			if (event.type === "removed") this.#secrets.delete(event.ref.id);
+		});
+	}
+
+	dispose(): void {
+		this.#unsubscribeRegistry?.();
+		this.#unsubscribeRegistry = undefined;
+		this.#secrets.clear();
 	}
 
 	async read(args: { agentId: string; cursor?: string; limit?: number }): Promise<ConversationTranscriptPage> {

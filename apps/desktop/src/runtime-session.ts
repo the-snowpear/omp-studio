@@ -101,12 +101,14 @@ export interface DesktopRuntimeSessionPortOptions {
   readonly autoRespawnLimit?: number;
   /** Delay before an automatic relaunch; default 500ms. */
   readonly autoRespawnDelayMs?: number;
-  /** Maximum concurrently resident Runtime Workers; omitted means no application-level cap. */
+  /** Maximum concurrently resident Runtime Workers. Omitted means no application-level cap. */
   readonly maxResidentSessions?: number;
-  /** Idle lifetime for a non-active, completed Worker before automatic hibernation. */
+  /** @deprecated Worker parking is owned by the Runtime; this option is retained for test/API compatibility. */
   readonly idleWorkerTtlMs?: number;
   /** Cross-process Session writer lease store; production defaults under the profile directory. */
   readonly sessionLeaseStore?: SessionLeaseStore;
+  /** Session writer lease heartbeat interval; injectable for lifecycle tests. */
+  readonly leaseHeartbeatIntervalMs?: number;
   /** Opaque Broker owner identity; production creates one per Host process. */
   readonly ownerId?: string;
   /** Injectable Worker port factory used by desktop multi-session tests. */
@@ -197,11 +199,12 @@ export function createDesktopRuntimeSessionPort(
   if (maxResidentSessions !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(maxResidentSessions) || maxResidentSessions < 1)) {
     throw new TypeError("maxResidentSessions must be a positive integer when provided");
   }
-  // 空闲 Worker 的驻留时长：每个 Worker 常驻 ~290MB，TTL 越长多会话切换越顺、
-  // 内存峰值越高。5 分钟在「切回免冷启」与「空闲内存可回收」之间取中。
-  const idleWorkerTtlMs = options.idleWorkerTtlMs ?? 5 * 60_000;
-  if (!Number.isSafeInteger(idleWorkerTtlMs) || idleWorkerTtlMs <= 0) {
-    throw new TypeError("idleWorkerTtlMs must be a positive integer");
+  // Runtime 进程不由桌面空闲计时器回收。Runtime 内部的 Worker 由 OMP
+  // AgentLifecycleManager 负责停驻/唤醒，避免把 Worker 的内存维护误变成
+  // Bridge/Runtime 断开。`idleWorkerTtlMs` 仅保留为兼容字段，不再驱动进程。
+  const leaseHeartbeatIntervalMs = options.leaseHeartbeatIntervalMs ?? 10_000;
+  if (!Number.isSafeInteger(leaseHeartbeatIntervalMs) || leaseHeartbeatIntervalMs <= 0) {
+    throw new TypeError("leaseHeartbeatIntervalMs must be a positive integer");
   }
   const ownerId = options.ownerId ?? `desktop-${process.pid}-${randomUUID()}`;
   const residents = new Map<string, ResidentRuntime>();
@@ -270,12 +273,26 @@ export function createDesktopRuntimeSessionPort(
     generatedAt: new Date().toISOString(),
   });
 
+  let lastResidentsFingerprint: string | undefined;
+  let residentPublicationDepth = 0;
+  let deferredResidentTerminalOutcomes: CommandLedgerEntry[] = [];
   const emitResidents = (terminalOutcomes: readonly CommandLedgerEntry[] = []): void => {
+    if (residentPublicationDepth > 0) {
+      deferredResidentTerminalOutcomes.push(...terminalOutcomes);
+      return;
+    }
+    const model = listResidents();
+    const fingerprint = JSON.stringify({
+      residents: model.residents,
+      activeSessionId: model.activeSessionId,
+    });
+    if (terminalOutcomes.length === 0 && fingerprint === lastResidentsFingerprint) return;
+    lastResidentsFingerprint = fingerprint;
     const change = {
-      ...listResidents(),
+      ...model,
       ...(terminalOutcomes.length === 0
         ? {}
-        : { terminalOutcomes: terminalOutcomes.map((entry) => structuredClone(entry)) }),
+        : { terminalOutcomes }),
     } as DesktopResidentsChange;
     for (const sink of [...residentSinks]) {
       try {
@@ -284,6 +301,23 @@ export function createDesktopRuntimeSessionPort(
         // A read-model consumer must never interfere with Runtime I/O.
       }
     }
+  };
+
+  /** Hold intermediate broker states until a planned active-Worker handoff
+   * has either committed to its replacement or failed. Runtime loss remains
+   * observable on failure; successful handoffs publish only the stable model. */
+  const batchResidentPublications = (): (() => void) => {
+    residentPublicationDepth += 1;
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      residentPublicationDepth -= 1;
+      if (residentPublicationDepth > 0) return;
+      const terminalOutcomes = deferredResidentTerminalOutcomes;
+      deferredResidentTerminalOutcomes = [];
+      emitResidents(terminalOutcomes);
+    };
   };
 
   const trackResidentPublication = (resident: ResidentRuntime, session: DesktopRuntimeSession): void => {
@@ -298,6 +332,10 @@ export function createDesktopRuntimeSessionPort(
       resident.lastCommitSeq = publication.commitSeq;
       resident.lastActivityAt = publication.publishedAt;
       emitResidents(publication.terminalOutcomes);
+      // A publication is Runtime activity even when its resulting snapshot is
+      // idle (for example a completed setting command). Start the idle window
+      // from this publication rather than an older selection timestamp.
+      resident.idleSince = sessionIsIdle(resident.session) ? Date.now() : undefined;
       armIdleTimer(resident);
     });
   };
@@ -382,7 +420,14 @@ export function createDesktopRuntimeSessionPort(
     resident.heartbeatTimer = undefined;
     if (resident.idleTimer !== undefined) clearTimeout(resident.idleTimer);
     resident.idleTimer = undefined;
-    await resident.lease.release();
+    // The Worker is already gone; a leftover lease file only delays a future
+    // takeover (stale after 30s) and must not wedge this resident in the map.
+    // try/catch (not .catch): release() may throw synchronously.
+    try {
+      await resident.lease.release();
+    } catch (error) {
+      options.log?.write("warn", "runtime.worker.lease-release-failed", errorDetail(error));
+    }
     residents.delete(resident.sessionId);
     if (activeSessionId === resident.sessionId) activeSessionId = undefined;
     emitResidents();
@@ -402,26 +447,10 @@ export function createDesktopRuntimeSessionPort(
   const ensureCapacity = async (): Promise<void> => {
     if (maxResidentSessions === Number.POSITIVE_INFINITY) return;
     if (residents.size < maxResidentSessions) return;
-    const activeWorkspaceId = workspace?.workspaceId;
-    const candidate = [...residents.values()]
-      .filter((resident) => resident.sessionId !== activeSessionId && sessionIsIdle(resident.session))
-      // Hibernate background projects before the project being worked in: an
-      // idle sibling of the active workspace is far likelier to be selected
-      // next than a Worker of a project the user has navigated away from.
-      .sort((left, right) => {
-        const leftActive = left.workspace.workspaceId === activeWorkspaceId ? 1 : 0;
-        const rightActive = right.workspace.workspaceId === activeWorkspaceId ? 1 : 0;
-        return leftActive - rightActive || left.lastSelected - right.lastSelected;
-      })[0];
-    if (candidate === undefined) {
-      throw new Error("Runtime worker capacity is exhausted; no idle background Session can hibernate");
-    }
-    options.log?.write(
-      "info",
-      "runtime.hibernate",
-      `session=${candidate.sessionId} workspace=${candidate.workspace.workspaceId}`,
-    );
-    await stopResident(candidate);
+    // Capacity admission must never stop an existing Runtime. A Runtime owns
+    // the Bridge and its in-process Worker lifecycle; desktop-side eviction
+    // would turn memory maintenance into a visible Runtime disconnect.
+    throw new Error("Runtime worker capacity is exhausted; no Runtime Worker may be evicted");
   };
 
   /**
@@ -501,6 +530,15 @@ export function createDesktopRuntimeSessionPort(
             void serialized(async () => {
               const sessionId = resident.sessionId;
               const wasActive = activeSessionId === sessionId;
+              // Fence the dead writer before process shutdown/relaunch. Otherwise
+              // the facade retains a stale Session whose hello/snapshot already
+              // vanished, and Composer core.abort races into UNAVAILABLE.
+              if (wasActive) {
+                sessionSink?.(undefined);
+                // Wake facade lifecycle observers immediately; process stop can
+                // take seconds and must not leave a clickable stale snapshot.
+                emitResidents();
+              }
               await stopResident(resident);
               if (!wasActive) return;
               const next = await launchWorker(sessionId, resident.workspace);
@@ -509,7 +547,7 @@ export function createDesktopRuntimeSessionPort(
               options.log?.write("error", "runtime.worker.relaunch-failed", errorDetail(error));
             });
           });
-        }, 10_000);
+        }, leaseHeartbeatIntervalMs);
         resident.heartbeatTimer.unref?.();
       }
       setActiveSession(snapshot.sessionId);
@@ -571,43 +609,7 @@ export function createDesktopRuntimeSessionPort(
   function armIdleTimer(resident: ResidentRuntime): void {
     if (resident.idleTimer !== undefined) clearTimeout(resident.idleTimer);
     resident.idleTimer = undefined;
-    if (resident.sessionId === activeSessionId) {
-      resident.idleSince = undefined;
-      return;
-    }
-    const now = Date.now();
-    if (sessionIsIdle(resident.session)) {
-      resident.idleSince ??= now;
-    } else {
-      resident.idleSince = undefined;
-    }
-    const delay = resident.idleSince === undefined
-      ? idleWorkerTtlMs
-      : Math.max(1, idleWorkerTtlMs - (now - resident.idleSince));
-    resident.idleTimer = setTimeout(() => {
-      void serialized(async () => {
-        if (!residents.has(resident.sessionId)) return;
-        if (resident.sessionId === activeSessionId) {
-          resident.idleSince = undefined;
-          return;
-        }
-        if (!sessionIsIdle(resident.session)) {
-          resident.idleSince = undefined;
-          armIdleTimer(resident);
-          return;
-        }
-        resident.idleSince ??= Date.now();
-        if (Date.now() - resident.idleSince < idleWorkerTtlMs) {
-          armIdleTimer(resident);
-          return;
-        }
-        options.log?.write("info", "runtime.hibernate.idle", `session=${resident.sessionId}`);
-        await stopResident(resident);
-      }).catch((error) => {
-        options.log?.write("warn", "runtime.hibernate.idle-failed", errorDetail(error));
-      });
-    }, delay);
-    resident.idleTimer.unref?.();
+    resident.idleSince = undefined;
   }
 
   function setActiveSession(sessionId: string): void {
@@ -751,7 +753,7 @@ export function createDesktopRuntimeSessionPort(
         residentSinks.delete(listener);
       };
     },
-    rebind(next): Promise<DesktopRuntimeSession | undefined> {
+    rebind(next, input): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         // Opening another project must not disturb the Workers of the project
         // being left: they keep their Bridge, their lease and any running
@@ -779,6 +781,23 @@ export function createDesktopRuntimeSessionPort(
         // stale entry cannot block the fresh identity.
         for (const stale of residentsOfWorkspace(next.workspaceId)) {
           await stopResident(stale);
+        }
+        if (input?.launchIfMissing === false) {
+          const previous = activeSessionId === undefined ? undefined : residents.get(activeSessionId);
+          activeSessionId = undefined;
+          if (previous !== undefined) {
+            previous.idleSince = sessionIsIdle(previous.session) ? Date.now() : undefined;
+            armIdleTimer(previous);
+          }
+          rememberUnavailable(undefined);
+          rememberDisconnect(undefined);
+          emitResidents();
+          options.log?.write(
+            "info",
+            "runtime.rebind.dormant",
+            `workspace=${next.workspaceId} residents=${residents.size}`,
+          );
+          return undefined;
         }
         options.log?.write(
           "info",
@@ -810,25 +829,47 @@ export function createDesktopRuntimeSessionPort(
         const resident = residents.get(sessionId);
         if (resident === undefined) return { found: false };
         const snapshot = resident.session.controller.publication()?.snapshot;
-        if (snapshot?.isStreaming === true) {
+        // A crashed Worker keeps its last snapshot; only a live hello makes the
+        // abort step meaningful. The stop below is the real fence either way.
+        if (resident.session.hello() !== undefined && snapshot?.isStreaming === true) {
           const receipt = await resident.session.controller.invoke({
             type: "studio.request",
             requestId: randomUUID() as RequestId,
             runtimeEpoch: snapshot.runtimeEpoch,
             operation: { kind: "core.abort" },
+          }).catch((error: unknown) => {
+            options.log?.write("warn", "runtime.evacuate.abort-failed", `session=${sessionId} ${errorDetail(error)}`);
+            return undefined;
           });
-          if (receipt.status !== "completed" && receipt.status !== "accepted") {
-            throw new Error(receipt.error?.message ?? `Runtime rejected abort (${receipt.status})`);
+          if (receipt !== undefined && receipt.status !== "completed" && receipt.status !== "accepted") {
+            options.log?.write(
+              "warn",
+              "runtime.evacuate.abort-rejected",
+              `session=${sessionId} status=${receipt.status}`,
+            );
           }
         }
         const wasActive = activeSessionId === sessionId;
         const evacuatedWorkspace = resident.workspace;
-        await stopResident(resident);
-        if (!wasActive) return { found: true };
-        adoptWorkspace(evacuatedWorkspace);
-        const active = await launchWorker(undefined, evacuatedWorkspace);
-        sessionSink?.(active);
-        return active === undefined ? { found: true } : { found: true, active };
+        if (!wasActive) {
+          await stopResident(resident);
+          return { found: true };
+        }
+        const endBatch = batchResidentPublications();
+        // Detach the Facade from the retiring controller before its orderly
+        // Bridge close publishes runtimeLost. The final resident publication
+        // is held until the replacement is already bound, so Clients observe
+        // connected(old) -> connected(new), never a false disconnected gap.
+        sessionSink?.(undefined);
+        try {
+          await stopResident(resident);
+          adoptWorkspace(evacuatedWorkspace);
+          const active = await launchWorker(undefined, evacuatedWorkspace);
+          sessionSink?.(active);
+          return active === undefined ? { found: true } : { found: true, active };
+        } finally {
+          endBatch();
+        }
       });
     },
     lastUnavailable() {
@@ -942,6 +983,32 @@ function createSingleDesktopRuntimeSessionPort(
       void serialized(async () => {
         if (stopping || fromGeneration !== generation) return;
         if (alive && bundle?.hello() !== undefined) return;
+
+        // A backgrounded Windows window can lose the named-pipe connection
+        // while the Runtime process is still alive. Reattach the existing
+        // Bridge first; restarting the process would tear down its in-process
+        // workers and incorrectly turn a transport hiccup into a Runtime
+        // restart. Only fall back to a cold launch when the Runtime itself is
+        // no longer reachable.
+        const currentBridge = bridge;
+        const currentBundle = bundle;
+        if (currentBridge !== undefined && currentBundle !== undefined && currentBridge.state === "disconnected") {
+          try {
+            await currentBridge.reconnect();
+            alive = true;
+            await currentBundle.controller.refresh();
+            rememberUnavailable(undefined);
+            rememberDisconnect(undefined);
+            autoRespawns = 0;
+            log?.write("info", "runtime.reconnect.ok", `generation=${generation}`);
+            sessionSink?.(currentBundle);
+            return;
+          } catch (error) {
+            alive = false;
+            log?.write("warn", "runtime.reconnect.fail", errorDetail(error));
+          }
+        }
+
         await stopCurrent("replace");
         const next = await launch();
         if (next !== undefined) {
@@ -1327,15 +1394,20 @@ function createSingleDesktopRuntimeSessionPort(
         if (snapshot === undefined || snapshot.sessionId !== sessionId || bundle === undefined) {
           return { found: false };
         }
-        if (snapshot.isStreaming) {
+        // Only a live hello makes the abort step meaningful; the stop below is
+        // the real fence either way, so a failed abort must not block it.
+        if (bundle.hello() !== undefined && snapshot.isStreaming) {
           const receipt = await bundle.controller.invoke({
             type: "studio.request",
             requestId: randomUUID() as RequestId,
             runtimeEpoch: snapshot.runtimeEpoch,
             operation: { kind: "core.abort" },
+          }).catch((error: unknown) => {
+            log?.write("warn", "runtime.evacuate.abort-failed", `session=${sessionId} ${errorDetail(error)}`);
+            return undefined;
           });
-          if (receipt.status !== "completed" && receipt.status !== "accepted") {
-            throw new Error(receipt.error?.message ?? `Runtime rejected abort (${receipt.status})`);
+          if (receipt !== undefined && receipt.status !== "completed" && receipt.status !== "accepted") {
+            log?.write("warn", "runtime.evacuate.abort-rejected", `session=${sessionId} status=${receipt.status}`);
           }
         }
         stopping = false;
@@ -1369,6 +1441,10 @@ function createSingleDesktopRuntimeSessionPort(
 
 function attachRuntimeOutput(child: ChildProcess, log: HostLog | undefined): void {
   if (log === undefined) {
+    // stderr is spawned as a pipe, so an unread stream buffers inside Node
+    // without bound. Nothing to log it into means it still has to be drained.
+    child.stdout?.resume();
+    child.stderr?.resume();
     return;
   }
   const pipe = (stream: NodeJS.ReadableStream | null | undefined, event: "runtime.stdout" | "runtime.stderr"): void => {

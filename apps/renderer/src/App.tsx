@@ -117,8 +117,8 @@ import { revealBottomBar, toggleBottomBarOpen, toggleBottomBarVisible } from "./
 import { useViewedSessionTelemetry, type ViewedSessionTelemetryState } from "./telemetry/useViewedSessionTelemetry";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { asConversationClient } from "./conversation/conversationHost";
-import { useActivityRetry, useAwaitingTurn, useRunWindow } from "./conversation/ActivityLine";
-import { deriveActivityStatus, isAbortEligible } from "./conversation/activityStatus";
+import { useActivityRetry, useAwaitingTurn, useRunStreaming, useRunWindow } from "./conversation/ActivityLine";
+import { deriveActivityStatus, hasLiveActivityProgress, isAbortEligible } from "./conversation/activityStatus";
 import { ConversationEmpty } from "./conversation/ConversationEmpty";
 import { ConversationPane } from "./conversation/ConversationPane";
 import { SubagentInspectCard } from "./conversation/SubagentInspectCard";
@@ -129,6 +129,7 @@ import { AgentTestsPane } from "./conversation/AgentTestsPane";
 import { agentTestRunSummary, projectAgentTestRuns, rerunTestPrompt } from "./conversation/agentTestRuns";
 import { revealConversationTool } from "./conversation/conversationReveal";
 import { useConversation } from "./conversation/useConversation";
+import type { PendingUser } from "./conversation/conversationViewModel";
 import { usePersistedSessionAgents } from "./conversation/persistedSessionAgents";
 import { explorerRowActivity, EMPTY_EXPLORER_FILE_ACTIVITY, type ExplorerFileActivity } from "./conversation/explorerFileActivity";
 import {
@@ -199,13 +200,12 @@ import { residentForSession, residentRowsOf, threadRunningFromLive } from "./sid
 import { sidebarProjectOrder } from "./sidebar/projectOrder";
 import { readExplorerExpansion, readExpandedProjects, writeExplorerExpansion, writeExpandedProjects } from "./sidebar/expandMemory";
 import {
+  isPlaceholderSessionTitle,
   projectHasSession,
-  provisionalSessionTitleEnsureKey,
   provisionalThreadForHistoryEntry,
   provisionalThreadTitle,
   reconcileProvisionalProjectThread,
   resolveProvisionalHistoryTitle,
-  shouldEnsureProvisionalSessionTitle,
   sidebarThreadTitle,
   type ProvisionalProjectThread,
 } from "./sidebar/provisionalThread";
@@ -356,6 +356,7 @@ function asError(cause: unknown): ClientError {
 const LIVE_SESSION_PREFERENCE_COMMANDS = new Set<CommandName>([
   "session.model.set",
   "session.thinking.set",
+  "session.taskModel.set",
   "mode.plan.enter",
   "mode.plan.exit",
   "mode.vibe.enter",
@@ -412,6 +413,12 @@ export function canStartPlanSaveAndQuit(canSave: boolean, pending: boolean): boo
 }
 
 const SLASH_UI_INTENT_KEY = "omp.slashUiIntent";
+/** 稳定的空 residents 列表：`?? []` 会让依赖它的 effect 每帧重跑。 */
+const NO_RESIDENT_ROWS: readonly never[] = [];
+/** 已弹过 toast 的通知 id 记忆量。通知本身封顶 100 条，留 4 倍余量。 */
+const TOASTED_NOTICE_MEMORY = 400;
+/** 导航面包屑保留的最大深度：只增不减的数组，路由对象虽小也不该无界。 */
+const TRAIL_MAX = 100;
 
 function setSlashUiIntent(ui: SlashNativeUi): void {
   try {
@@ -2967,6 +2974,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
   const viewedTelemetry = useViewedSessionTelemetry({
     client: preview ? null : client,
     preview,
+    enabled: openMenu === "tokens" || openMenu === "context",
     viewedSessionId,
     liveSessionId: preview ? undefined : snapshotFrom(state)?.sessionId,
     liveTelemetry: preview ? undefined : (state.clientState?.entities.telemetry ?? undefined),
@@ -3282,6 +3290,16 @@ function useComposerCollisionCollapse() {
   return barRef;
 }
 
+type PromptSendPhase = "starting" | "sending" | "initiating";
+type OptimisticPrompt = { readonly pending: PendingUser; readonly phase: PromptSendPhase };
+let nextOptimisticPromptId = 1;
+
+const PROMPT_SEND_PHASE_LABEL: Record<PromptSendPhase, string> = {
+  starting: "Starting OMP",
+  sending: "Sending",
+  initiating: "Initiating",
+};
+
 function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwWindow, btwSession, btwSideHeadRect, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh, composerDraft, onComposerDraftChange }: {
   state: ViewState;
   client: ClientStateSource;
@@ -3367,6 +3385,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const [planSaveBusy, setPlanSaveBusy] = useState(false);
   const planSaveBusyRef = useRef(false);
   const [sending, setSending] = useState(false);
+  const [optimisticPrompt, setOptimisticPrompt] = useState<OptimisticPrompt | undefined>(undefined);
+  const optimisticPromptRef = useRef(optimisticPrompt);
+  optimisticPromptRef.current = optimisticPrompt;
   const composerBarRef = useComposerCollisionCollapse();
   // 右侧面板收起是 250ms 滑出动画：Changes 内容跟随 sideOpen 立即卸载会先闪一帧空面板，
   // 这里延迟到滑动结束后再卸载。时长须与 tokens.css 的 --dur-slow 保持一致。
@@ -3481,6 +3502,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const [composerError, setComposerError] = useState<string | undefined>(undefined);
   const [statusToast, setStatusToast] = useState<string | null>(null);
   const toastedStatusIds = useRef(new Set<string>());
+  /** 已扫过技能名的 user 行 itemId（按会话重置，跟着可见窗口裁剪）。 */
+  const usedSkillScanRef = useRef<{ identityKey: string; itemIds: Set<string> }>({ identityKey: "", itemIds: new Set() });
   const lastStatusToast = useRef<{ family: "fast-tier" | "prewalk-noop"; at: number } | undefined>(undefined);
   const [composerSubmitted, setComposerSubmitted] = useState(false);
   const [composerExpanded, setComposerExpanded] = useState(true);
@@ -3595,7 +3618,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     setDraft(restored);
     if (!snapshotIsEmpty(restored)) composerInputRef.current?.setSnapshot(restored);
     setComposerError(undefined);
-    setSubmittedPrompt(undefined);
     setQueueEdit(undefined);
   }, [selectedSessionId, selectedThreadId, viewIdentity]);
   const pendingComposerFillRef = useRef<{ sessionId: string; fill: UserMessageEditorFill } | undefined>(undefined);
@@ -3669,6 +3691,13 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   };
   const conversationClient = useMemo(() => asConversationClient(client), [client]);
   const runtimeConnected = runtime?.status === "connected";
+  // A resident session is activated asynchronously after history selection.
+  // Do not start an archive read for it only to throw that work away when the
+  // live epoch arrives a moment later.
+  const selectedResident = selectedSessionId === undefined
+    ? undefined
+    : residentForSession(state.clientState?.entities.residents, selectedSessionId);
+  const deferResidentHydrate = selectedResident !== undefined && snapshot?.sessionId !== selectedSessionId;
   const conversationIdentity = selectedSessionId === undefined
     ? sessionCreating === true || snapshot === undefined
       ? null
@@ -3685,6 +3714,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     // currently connected Runtime capability manifest.
     canRead: true,
     runtimeConnected,
+    deferHydrate: deferResidentHydrate,
     ...(previewThreadId === undefined ? {} : { previewThreadId }),
   });
   const [compactReloadHold, setCompactReloadHold] = useState(false);
@@ -3703,12 +3733,26 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     onDraftSkillsChange?.(skillNamesInDoc(draft.doc));
   }, [draft.doc, onDraftSkillsChange]);
   useEffect(() => {
+    // 增量扫描：`mergeUsedSkills` 做并集，所以只需要交出「这次新看到的」技能名。
+    // 原实现每次 rows 换身份就对全部 user 行重跑一遍正则，长会话下是 O(全对话)。
+    // 记住已扫过的 itemId 而不是行数：`loadOlder` 会往前插，窗口也会从头裁。
+    const scanned = usedSkillScanRef.current;
+    if (scanned.identityKey !== convo.identityKey) {
+      scanned.identityKey = convo.identityKey;
+      scanned.itemIds = new Set();
+    }
     const names = new Set<string>();
+    const present = new Set<string>();
     for (const row of convo.rows) {
       if (row.type !== "user") continue;
+      present.add(row.itemId);
+      if (scanned.itemIds.has(row.itemId)) continue;
+      scanned.itemIds.add(row.itemId);
       for (const name of skillNamesInText(row.text)) names.add(name);
     }
-    onUsedSkillsChange?.(convo.identityKey, names);
+    // 跟着窗口裁，别让它随会话长度无界增长。
+    for (const itemId of scanned.itemIds) if (!present.has(itemId)) scanned.itemIds.delete(itemId);
+    if (names.size > 0) onUsedSkillsChange?.(convo.identityKey, names);
   }, [convo.rows, convo.identityKey, onUsedSkillsChange]);
   useEffect(() => {
     toastedStatusIds.current = new Set();
@@ -3718,6 +3762,12 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       if (!isTransientStatusNotice(notice.message, notice.source)) continue;
       if (toastedStatusIds.current.has(notice.id)) continue;
       toastedStatusIds.current.add(notice.id);
+      // 只在切会话时清（见上方），所以单个长会话里它会随通知条数单调增长。
+      // 通知本身封顶 100 条（`NOTICE_LIMIT`），去重集合留 4 倍余量足够。
+      if (toastedStatusIds.current.size > TOASTED_NOTICE_MEMORY) {
+        const oldest = toastedStatusIds.current.values().next().value;
+        if (oldest !== undefined) toastedStatusIds.current.delete(oldest);
+      }
       const claimed = claimTransientToast(
         transientStatusFamily(notice.message, notice.source),
         lastStatusToast.current,
@@ -3847,6 +3897,14 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   }, [previewThreadId, selectedSessionId, selectedThreadId]);
   const convoRef = useRef(convo);
   convoRef.current = convo;
+  // A cold start/new session remounts the conversation engine while the prompt
+  // is in flight. Re-attach the same local row to the new engine; the store
+  // reconciles it immediately if the authoritative user item already arrived.
+  useEffect(() => {
+    const optimistic = optimisticPromptRef.current;
+    if (optimistic === undefined) return;
+    convoRef.current.trackPending(optimistic.pending);
+  }, [convo.engine, optimisticPrompt?.pending.requestId]);
   const selectedTargetRef = useRef({ selectedSessionId, selectedThreadId });
   selectedTargetRef.current = { selectedSessionId, selectedThreadId };
   const run = useCallback(async <T extends CommandName>(name: T, input: CommandInput<T>): Promise<boolean> => {
@@ -3997,13 +4055,20 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     ? ""
     : `${planReview.planReference ?? ""}:${planReview.title ?? ""}:${planReview.body ?? ""}`;
   const previewPlanActive = preview === true && previewThreadId === "t3" && previewDeckKind === "plan";
+  // `planReview` 是 `snapshot.plan`，每次 operator 状态更新都是新对象，所以直接
+  // 依赖它会在整个评审期间每帧往 state 写一个全新对象，React 永远无法 bail out。
+  // 按内容签名依赖，值真的变了才写；对象本身从 ref 读，不参与依赖比较。
+  const planReviewRef = useRef(planReview);
+  planReviewRef.current = planReview;
+  const planReviewContentKey = planReview === undefined
+    ? ""
+    : `${planReview.title ?? "Plan"}|${planReview.body ?? ""}`;
   useEffect(() => {
-    if (planReview === undefined) return;
-    setRememberedPlan({
-      title: planReview.title ?? "Plan",
-      body: planReview.body ?? "",
-    });
-  }, [planReview]);
+    if (planReviewContentKey === "") return;
+    const current = planReviewRef.current;
+    if (current === undefined) return;
+    setRememberedPlan({ title: current.title ?? "Plan", body: current.body ?? "" });
+  }, [planReviewContentKey]);
   const transcriptPlan = useMemo(() => collectLatestPlanDocument(convo.rows), [convo.rows]);
   const planView = planReview === undefined
     ? (rememberedPlan ?? transcriptPlan)
@@ -4042,12 +4107,44 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     [openPlanFromConversation, planReview, previewPlanActive],
   );
   const textReady = !snapshotIsEmpty(draft);
-  const sessionStreaming = executionMatches && Boolean(snapshot?.isStreaming);
+  const conversationLive = executionMatches && (
+    hasLiveActivityProgress(convo.state) ||
+    Object.keys(convo.state.liveMessages).length > 0 ||
+    Object.keys(convo.state.liveTools).length > 0 ||
+    Object.keys(convo.state.openTurnItems).length > 0
+  );
+  // Live conversation state leads the snapshot at the start of a run, but it is
+  // NOT allowed to outlive the Runtime's own idle verdict: a turn whose close
+  // event never arrives would otherwise pin `working` forever. See
+  // `reduceRunStreaming`. Queued messages count as Runtime work in flight — a
+  // follow-up drain briefly reports `isStreaming: false` between the two turns,
+  // and every other surface here already reads a non-empty queue as "not idle".
+  const runStreaming = useRunStreaming({
+    identityKey: convo.identityKey,
+    runtimeStreaming: executionMatches && (Boolean(snapshot?.isStreaming) || (snapshot?.pendingMessages ?? 0) > 0),
+    conversationLive,
+  });
+  const sessionStreaming = runStreaming.streaming;
+  useEffect(() => {
+    if (optimisticPrompt?.phase !== "initiating") return;
+    const pendingStillVisible = convo.state.pendingUsers.some(
+      (entry) => entry.requestId === optimisticPrompt.pending.requestId,
+    );
+    if (pendingStillVisible) return;
+    // `isStreaming` flips before the first authoritative conversation item,
+    // so it is too early to drop the transport phase there. Keep Initiating
+    // until the optimistic user row is actually reconciled by the store.
+    setOptimisticPrompt((current) => current?.pending.requestId === optimisticPrompt.pending.requestId
+      ? undefined
+      : current);
+  }, [convo.state.pendingUsers, optimisticPrompt]);
   const pendingPrompt = convo.state.pendingUsers.some((entry) => entry.status === "pending");
   const promptFailed = convo.state.pendingUsers.some((entry) => entry.status === "failed") && !pendingPrompt;
-  const [retryCancelGeneration, setRetryCancelGeneration] = useState(0);
+  // Bumped on an accepted `core.abort`. Both run latches need it: neither can
+  // rely on a streaming falling edge that a Runtime already idle will never emit.
+  const [abortGeneration, setAbortGeneration] = useState(0);
   useEffect(() => {
-    setRetryCancelGeneration(0);
+    setAbortGeneration(0);
   }, [convo.identityKey]);
   const awaitingTurn = useAwaitingTurn({
     sending,
@@ -4055,19 +4152,33 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     streaming: sessionStreaming,
     failed: promptFailed,
     identityKey: convo.identityKey,
+    cancelGeneration: abortGeneration,
   });
   const activityRetry = useActivityRetry({
     notices: convo.state.notices,
     streaming: sessionStreaming,
     failed: promptFailed,
     identityKey: convo.identityKey,
-    cancelGeneration: retryCancelGeneration,
+    cancelGeneration: abortGeneration,
   });
+  // Reconcile a turn the client still holds open once the Runtime reports idle —
+  // either because it just settled this run, or because the operator pressed stop
+  // (which on an already-idle Runtime is a no-op that emits nothing). The
+  // `turn.completed` / `turn.aborted` that would have closed it is never coming.
+  // Only inert residue is settled: a still-running tool or an open live block
+  // means events are in flight, and a mid-run idle snapshot must not abort them.
+  // Idempotent: a no-op as soon as the store has nothing open.
+  useEffect(() => {
+    if (!executionMatches || snapshot?.isStreaming !== false) return;
+    if (!runStreaming.settled && abortGeneration === 0) return;
+    if (hasLiveActivityProgress(convoRef.current.state)) return;
+    convoRef.current.settleOpenTurns();
+  }, [abortGeneration, executionMatches, runStreaming.settled, snapshot?.isStreaming]);
   // Composer / abort / queue flush are write surfaces: follow the live Runtime,
   // including the send → isStreaming snapshot gap. Preview must not replace this
   // with the t1 demo story or the stop button appears while core.abort stays gated.
   const retrying = executionMatches && activityRetry !== undefined;
-  const running = sessionStreaming || (executionMatches && awaitingTurn) || retrying;
+  const running = sessionStreaming || optimisticPrompt !== undefined || (executionMatches && awaitingTurn) || retrying;
   // Title freezes on the first accepted prompt; later drafts never override it.
   const provisionalTitle = submittedPromptTitle ?? provisionalThreadTitle(draft.text);
   useEffect(() => {
@@ -4094,18 +4205,20 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const activityStatus = useMemo(
     () => (preview
       ? (previewThreadId === "t1" ? PREVIEW_RUN_ACTIVITY.status : null)
-      : deriveActivityStatus({
+      : optimisticPrompt !== undefined
+        ? { phase: "waiting" as const, label: PROMPT_SEND_PHASE_LABEL[optimisticPrompt.phase] }
+        : deriveActivityStatus({
           state: convo.state,
           streaming: sessionStreaming,
           pendingMessages: snapshot?.pendingMessages ?? 0,
           awaiting: executionMatches && awaitingTurn,
           ...(activityRetry === undefined ? {} : { retry: activityRetry }),
         })),
-    [activityRetry, awaitingTurn, convo.state, executionMatches, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages],
+    [activityRetry, awaitingTurn, convo.state, executionMatches, optimisticPrompt, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages],
   );
   const runWindowKey = preview ? `preview:${previewThreadId ?? ""}` : convo.identityKey;
   const runWindow = useRunWindow(activityStatus !== null, runWindowKey);
-  const activity = activityStatus === null || sessionCreating === true
+  const activity = activityStatus === null
     ? undefined
     : {
         status: activityStatus,
@@ -4476,6 +4589,39 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       clearQueued: clearTreeQueued,
     });
   };
+  // 「重试上一轮」：与 restore/branch 同一套门控习惯；busy 置位让按钮在回执
+  // 落地前立即禁用（Runtime 的 retry() 是排程即返回，isStreaming 翻转有间隙）。
+  const retryTurnDisabledReason = (() => {
+    if (sessionCreating === true) return "创建中";
+    if (Boolean(connection?.resyncRequired) || convo.state.resyncRequired) return "同步中";
+    if (busy) return "进行中";
+    if (running) return "进行中";
+    if (snapshot?.isCompacting === true) return "压缩中";
+    if (!preview && (!runtimeConnected || !snapshotReady)) return "未连接";
+    if (!executionMatches) return "无法操作";
+    if (!preview && !can("turn.retry")) return "当前 Runtime 不支持重试";
+    return undefined;
+  })();
+  const retryLastTurn = () => {
+    if (preview || retryTurnDisabledReason !== undefined) return;
+    setBusy(true);
+    client
+      .command("turn.retry", {})
+      .then((handle) =>
+        waitReceipt<{ readonly retried: boolean; readonly reason?: "nothing_to_retry" }>(client, handle.requestId),
+      )
+      .then((result) => {
+        if (result.retried === true) {
+          setComposerError(undefined);
+          return;
+        }
+        setStatusToast(result.reason === "nothing_to_retry" ? "没有可重试的上一轮" : "未重试");
+      })
+      .catch((error: unknown) => {
+        setComposerError(hostErrorMessage(error, "重试上一轮失败"));
+      })
+      .finally(() => setBusy(false));
+  };
   const branchUserMessage = (itemId: string, text: string) => {
     if (userBranchDisabledReason !== undefined) return;
     void executeUserMessageBranch({
@@ -4508,13 +4654,14 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   };
   // sendPrompt 与排队 flush 共用的发送路径。失败时置 composerError 并返回 false，
   // 草稿恢复方式由调用方决定（输入框草稿回填 vs 排队条目回队）。
-  const dispatchPrompt = async (payload: ComposerSnapshot, options?: { readonly asFollowUp?: boolean }): Promise<boolean> => {
+  const dispatchPrompt = async (payload: ComposerSnapshot, options?: { readonly asFollowUp?: boolean; readonly waitForReady?: boolean }): Promise<boolean> => {
     const plan = planComposerSend(payload, slashCatalog);
     let outboundPayload = payload;
+    let optimisticRequestId: string | undefined;
+    let readySessionId: SessionId | undefined;
     const targetSessionId = selectedSessionId as SessionId | undefined;
     const targetThreadId = selectedThreadId;
     setComposerSubmitted(true);
-    setSending(true);
     try {
       if (plan.kind === "execute") {
         if (options?.asFollowUp === true && running) {
@@ -4536,9 +4683,47 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       }
       const trimmed = outboundPayload.text.trim();
       if (!trimmed && outboundPayload.images.length === 0) return false;
+      const acceptedPromptTitle = provisionalThreadTitle(outboundPayload.text);
+      const rememberSubmittedPrompt = (sessionId: SessionId | undefined) => {
+        if (acceptedPromptTitle === undefined) return;
+        setSubmittedPrompt((current) =>
+          current?.sessionId === sessionId
+            ? current
+            : {
+                ...(sessionId === undefined ? {} : { sessionId }),
+                title: acceptedPromptTitle,
+              },
+        );
+      };
+      // Freeze the first prompt before the first await. Clearing the composer
+      // and entering the transport phases must never expose an Untitled row.
+      rememberSubmittedPrompt(targetSessionId ?? snapshot?.sessionId);
       const resumed = targetSessionId !== undefined && snapshot?.sessionId !== targetSessionId;
+      const outbound = promptInputOf(outboundPayload);
+      optimisticRequestId = `optimistic:${Date.now()}:${nextOptimisticPromptId++}`;
+      const pending: PendingUser = {
+        requestId: optimisticRequestId,
+        text: outbound.text,
+        draft: payload.text,
+        status: "pending",
+        knownItemIds: convoRef.current.state.items.map((item) => item.itemId),
+        doc: outboundPayload.doc,
+      };
+      const initialPhase: PromptSendPhase = sessionCreating === true || (targetSessionId === undefined && snapshot === undefined) || resumed
+        ? "starting"
+        : "sending";
+      convoRef.current.trackPending(pending);
+      setOptimisticPrompt({ pending, phase: initialPhase });
+      setSending(true);
+      if (options?.waitForReady === true && waitForNewSession !== undefined) {
+        const ready = await waitForNewSession();
+        if (!ready.ok) throw { code: "SESSION_CREATE_FAILED", message: ready.error };
+        readySessionId = ready.sessionId;
+        rememberSubmittedPrompt(readySessionId);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
       await ensureSelectedSessionActive(client, {
-        ...(snapshot?.sessionId === undefined ? {} : { activeSessionId: snapshot.sessionId }),
+        ...((readySessionId ?? snapshot?.sessionId) === undefined ? {} : { activeSessionId: readySessionId ?? snapshot!.sessionId }),
         ...(targetSessionId === undefined ? {} : { selectedSessionId: targetSessionId }),
         ...(targetThreadId === undefined ? {} : { selectedThreadId: targetThreadId }),
       });
@@ -4552,30 +4737,14 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       if (resumed) {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
-      const outbound = promptInputOf(outboundPayload);
+      setOptimisticPrompt((current) => current !== undefined && current.pending.requestId === optimisticRequestId
+        ? { pending: current.pending, phase: "sending" }
+        : current);
       const commandName = options?.asFollowUp === true || plan.kind === "follow-up" ? "core.followUp" : "core.prompt";
       const handle = await client.command(commandName, outbound);
-      const acceptedPromptTitle = provisionalThreadTitle(outboundPayload.text);
-      if (acceptedPromptTitle !== undefined) {
-        const acceptedSessionId = snapshot?.sessionId;
-        setSubmittedPrompt((current) =>
-          current?.sessionId === acceptedSessionId
-            ? current
-            : {
-                ...(acceptedSessionId === undefined ? {} : { sessionId: acceptedSessionId }),
-                title: acceptedPromptTitle,
-              },
-        );
-      }
-      const pendingConvo = convoRef.current;
-      pendingConvo.trackPending({
-        requestId: handle.requestId,
-        text: outbound.text,
-        draft: payload.text,
-        status: "pending",
-        knownItemIds: pendingConvo.state.items.map((item) => item.itemId),
-        doc: outboundPayload.doc,
-      });
+      setOptimisticPrompt((current) => current !== undefined && current.pending.requestId === optimisticRequestId
+        ? { pending: current.pending, phase: "initiating" }
+        : current);
       promptUnsub.current?.();
       const watchReceipt = () => {
         const commands = client.getState?.()?.commands;
@@ -4593,10 +4762,12 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
         promptUnsub.current = undefined;
         if (receipt.phase === "completed") return;
         if (receipt.phase === "failed") {
-          pendingConvo.failPending(handle.requestId, receipt.error.message);
+          convoRef.current.failPending(optimisticRequestId!, receipt.error.message);
+          setOptimisticPrompt(undefined);
           return;
         }
-        pendingConvo.failPending(handle.requestId, receipt.reason);
+        convoRef.current.failPending(optimisticRequestId!, receipt.reason);
+        setOptimisticPrompt(undefined);
       };
       promptUnsub.current = client.onState
         ? client.onState(() => watchReceipt())
@@ -4605,7 +4776,10 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       if (!preview) onSessionTitleMaybeChanged?.();
       return true;
     } catch (error) {
-      setComposerError(hostErrorMessage(error, "发送失败"));
+      const message = hostErrorMessage(error, "发送失败");
+      setComposerError(message);
+      if (optimisticRequestId !== undefined) convoRef.current.failPending(optimisticRequestId, message);
+      setOptimisticPrompt(undefined);
       return false;
     } finally {
       setSending(false);
@@ -4613,6 +4787,10 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   };
   const sendPrompt = async () => {
     const payload = composerInputRef.current?.getSnapshot() ?? draft;
+    if (running && composerSlashExecute(payload, slashCatalog) === undefined) {
+      enqueueDraft();
+      return;
+    }
     if (!promptEnabled && composerSlashExecute(payload, slashCatalog) === undefined) return;
     setComposerError(undefined);
     composerInputRef.current?.clear();
@@ -4620,19 +4798,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     if (!preview && selectedSessionId === undefined && snapshot === undefined) {
       ensureNewSession?.();
     }
-    if (waitForNewSession !== undefined) {
-      const ready = await waitForNewSession();
-      if (!ready.ok) {
-        setDraft(payload);
-        composerInputRef.current?.setSnapshot(payload);
-        setComposerError(ready.error);
-        return;
-      }
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => resolve());
-      });
-    }
-    if (!(await dispatchPrompt(payload))) {
+    if (!(await dispatchPrompt(payload, { waitForReady: waitForNewSession !== undefined }))) {
       setDraft(payload);
       composerInputRef.current?.setSnapshot(payload);
     }
@@ -4649,18 +4815,21 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     }
   };
   const takeComposerSnapshot = (): ComposerSnapshot => composerInputRef.current?.getSnapshot() ?? draft;
-  const queueEntryOf = (payload: ComposerSnapshot, id: number): QueuedMessage => ({
-    id,
-    text: payload.text,
-    ...(payload.images.length > 0 ? { images: payload.images } : {}),
-    doc: payload.doc,
-    ...(selectedSessionId === undefined ? {} : { sessionId: selectedSessionId }),
-  });
+  const queueEntryOf = (payload: ComposerSnapshot, id: number): QueuedMessage => {
+    const ownerSessionId = selectedSessionId ?? snapshot?.sessionId;
+    return {
+      id,
+      text: payload.text,
+      ...(payload.images.length > 0 ? { images: payload.images } : {}),
+      doc: payload.doc,
+      ...(ownerSessionId === undefined ? {} : { sessionId: ownerSessionId }),
+    };
+  };
   const snapshotOfEntry = (entry: QueuedMessage): ComposerSnapshot => snapshotOfQueued(entry);
   const activeQueue = (): QueuedMessage[] => (preview ? previewQueue : queuedMessages);
   /** 排队栏当前要显示的条目。「回到最新」按钮在排队栏可见时移入其头行
    *  （qs-head-slot），否则浮在输入框右上角——两个位置互斥，避免按钮压在栏身上。 */
-  const sessionQueue = preview ? previewQueue : visibleQueuedMessages(queuedMessages, selectedSessionId);
+  const sessionQueue = preview ? previewQueue : visibleQueuedMessages(queuedMessages, selectedSessionId ?? snapshot?.sessionId);
   const applyQueueEditResult = (result: {
     readonly queue: readonly QueuedMessage[];
     readonly editing: QueueEditState | undefined;
@@ -4702,7 +4871,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       setComposerError(undefined);
       return;
     }
-    if (!queueEnabled) return;
+    if (!running) return;
     queuedSeqRef.current += 1;
     setQueuedMessages((queue) => [...queue, queueEntryOf(payload, queuedSeqRef.current)]);
     composerInputRef.current?.clear();
@@ -4801,7 +4970,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   //（running 仍为 false）时靠 tick 继续排水；失败回队后设冷却窗口，防止快速持续失败
   // （如会话切换冲突）被重新入队的依赖变化立刻重触发而形成热重试循环。
   useEffect(() => {
-    const head = queuedMessages.find((entry) => entry.sessionId === selectedSessionId);
+    const targetSession = selectedSessionId ?? snapshot?.sessionId;
+    const head = queuedMessages.find((entry) => entry.sessionId === targetSession || entry.sessionId === undefined);
     if (
       head === undefined ||
       queueFlushBusyRef.current ||
@@ -5003,12 +5173,14 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
             onReviewChanges={(turnId) => openChanges({ turnId })}
             planLink={planLink}
             compacting={compactingNow}
+            {...(preview ? {} : { onRetryTurn: retryLastTurn })}
+            {...(preview || retryTurnDisabledReason === undefined ? {} : { retryTurnDisabledReason })}
             onInspectSubagent={(target) => {
               setInspectTarget(target);
             }}
             {...(preview || rosterAgents === undefined ? {} : { liveAgents: rosterAgents })}
             {...(activity === undefined ? {} : { activity })}
-            {...(showWelcome ? { forceWelcome: true } : {})}
+            {...(showWelcome && optimisticPrompt === undefined && convo.state.pendingUsers.length === 0 ? { forceWelcome: true } : {})}
             {...(showWelcome ? {
               welcome: (
                 <ConversationEmpty
@@ -5478,6 +5650,10 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                     commitQueuedEdit();
                     return;
                   }
+                  if (running) {
+                    enqueueDraft();
+                    return;
+                  }
                   void sendPrompt();
                 }}
                 onQueue={enqueueDraft}
@@ -5624,7 +5800,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                     onClick={() => {
                       if (preview) return;
                       void run("core.abort", {}).then((ok) => {
-                        if (ok) setRetryCancelGeneration((generation) => generation + 1);
+                        if (ok) setAbortGeneration((generation) => generation + 1);
                       });
                     }}
                     data-tip={t("composer.stop")}
@@ -5635,7 +5811,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 ) : (
                   <button
                     className="send-btn"
-                    disabled={queueEdit === undefined && !(promptEnabled || queueEnabled || slashExecuteReady || (preview && running))}
+                    disabled={queueEdit === undefined && !(promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (running && textReady))}
                     onClick={() => {
                       setComposerExpanded(true);
                       if (queueEdit !== undefined) {
@@ -6072,6 +6248,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   >({});
   /** Prevent a late Workbench effect from resurrecting a successfully archived row. */
   const archivedProvisionalSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
+  /** In-flight unarchive commands; a second click on the same row is a no-op. */
+  const unarchiveBusyThreadIdsRef = useRef<ReadonlySet<string>>(new Set());
   /** 左上菜单「新建项目」：递增后 WorkbenchCanvas 打开已有创建项目对话框。 */
   const [createProjectNonce, setCreateProjectNonce] = useState(0);
   const sessionCreateWaitRef = useRef<Promise<NewSessionWaitResult> | null>(null);
@@ -6091,6 +6269,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   /** 归档确认弹窗：点「归档」只打开此窗，确认后才执行预览隐藏或 session.archive。 */
   const [archivePending, setArchivePending] = useState<ArchivePending | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  const archiveBusyRef = useRef(false);
   const [archiveError, setArchiveError] = useState<string | undefined>(undefined);
   const [trail, setTrail] = useState<Route[]>([state.route]);
   const lastPageRoute = useRef<SecondaryRoute>("home");
@@ -6112,7 +6291,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const snapshot = snapshotFrom(state);
   const pendingInteraction = state.clientState?.interaction.pending ?? null;
   const residentModel = state.clientState?.entities.residents;
-  const residentRows = residentModel?.residents ?? [];
+  // `?? []` 每次渲染都是新数组身份，而下面两个通知 effect 都依赖它 ——
+  // 流式期间没有 resident 模型时会每帧重建一次 setTimeout。用模块级常量。
+  const residentRows = residentModel?.residents ?? NO_RESIDENT_ROWS;
   const runtime = state.clientState?.connection.runtime ?? state.bootstrap?.runtime;
   const capabilities = usableCapabilityManifest(
     state.model.capabilities,
@@ -6254,14 +6435,18 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const archiveTarget = archiveTargetReason === undefined ? archiveTargetBase : undefined;
   const snapshotTitleIsCurrent = snapshot?.sessionId !== undefined
     && snapshot.sessionTitle !== undefined
+    && (snapshot.sessionTitleSource === "user" || !isPlaceholderSessionTitle(snapshot.sessionTitle))
     && (selectedHistoryId === null || selected?.sessionId === snapshot.sessionId);
   const provisionalCurrentTitle = snapshot?.sessionId !== undefined
     && (selectedHistoryId === null || selected?.sessionId === snapshot.sessionId)
     ? provisionalThreadsBySession[String(snapshot.sessionId)]?.title
     : undefined;
+  const selectedOrProvisionalTitle = isPlaceholderSessionTitle(selected?.title)
+    ? provisionalCurrentTitle ?? selected?.title
+    : selected?.title;
   const currentThreadTitle = snapshotTitleIsCurrent
     ? snapshot?.sessionTitle
-    : selected?.title ?? provisionalCurrentTitle;
+    : selectedOrProvisionalTitle ?? provisionalCurrentTitle;
   const untitledThreadTitle = selectedHistoryId === null
     ? t("conversation.newChat")
     : t("conversation.untitledSession");
@@ -6294,7 +6479,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         const persisted = projectHistoryCache[String(thread.workspaceId)]?.model?.entries.find(
           (entry) => entry.sessionId === thread.sessionId,
         );
-        if (persisted === undefined || persisted.title === undefined) continue;
+        if (persisted === undefined || isPlaceholderSessionTitle(persisted.title)) continue;
         next ??= { ...current };
         delete next[key];
       }
@@ -6595,8 +6780,13 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       onRoute(next);
       return;
     }
-    setTrail((current) => [...current.slice(0, trailAt + 1), next]);
-    setTrailAt((value) => value + 1);
+    // `trailAt` 只增不减，所以这个数组只会变长。路由对象很小，但形式上无界，
+    // 超过 `TRAIL_MAX` 就丢掉最早的一段（并把游标一起左移，保持指向同一项）。
+    setTrail((current) => {
+      const next$ = [...current.slice(0, trailAt + 1), next];
+      return next$.length > TRAIL_MAX ? next$.slice(next$.length - TRAIL_MAX) : next$;
+    });
+    setTrailAt((value) => Math.min(value + 1, TRAIL_MAX - 1));
     onRoute(next);
   }, [onRoute, trail, trailAt, state.model.workspaces]);
 
@@ -6669,8 +6859,16 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     }
   };
 
+  /** 归档进行中时再次点击归档入口：给出提示而不是静默吞掉。 */
+  const notifyArchiveBusy = () => {
+    setShellNotice({ text: "正在归档中，请稍候", icon: "archive" });
+  };
+
   const requestArchivePreview = (threadId: string) => {
-    if (archiveBusy) return;
+    if (archiveBusyRef.current) {
+      notifyArchiveBusy();
+      return;
+    }
     const hit = findPreviewThread(threadId);
     setArchiveError(undefined);
     setArchivePending({
@@ -6682,7 +6880,10 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   };
 
   const requestArchiveThread = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId) => {
-    if (archiveBusy) return;
+    if (archiveBusyRef.current) {
+      notifyArchiveBusy();
+      return;
+    }
     setArchiveError(undefined);
     const cachedWorkspaceId = Object.entries(projectHistoryCache).find(([, value]) =>
       value.model?.entries.some((candidate) => candidate.historyId === entry.historyId),
@@ -6788,7 +6989,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   useEffect(() => {
     if (semanticTitleKey === undefined || snapshot?.sessionId === undefined || snapshot.sessionTitle === undefined) return;
     const title = snapshot.sessionTitle.trim();
-    if (title.length === 0) return;
+    if (title.length === 0 || (snapshot.sessionTitleSource !== "user" && isPlaceholderSessionTitle(title))) return;
     const key = String(snapshot.sessionId);
     setProvisionalThreadsBySession((current) => {
       const thread = current[key];
@@ -6797,72 +6998,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       return next === thread ? current : { ...current, [key]: next };
     });
     void refreshHistoryAfterTitle(currentSessionWorkspaceId);
-  }, [currentSessionWorkspaceId, refreshHistoryAfterTitle, semanticTitleKey, snapshot?.sessionId, snapshot?.sessionTitle]);
-
-  /**
-   * OMP's native title generator is normally triggered by the Runtime. A
-   * submitted idle session can still be left untitled when that path is
-   * unavailable, so ask the Runtime to persist the prompt fallback exactly
-   * once at a time. The receipt snapshot remains the authority; the history
-   * refresh lets a newer Runtime/Host projection take over the row as well.
-   */
-  const provisionalTitleEnsureThread = snapshot?.sessionId === undefined
-    ? undefined
-    : provisionalThreadsBySession[String(snapshot.sessionId)];
-  const provisionalTitleEnsureInFlightRef = useRef<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    const thread = provisionalTitleEnsureThread;
-    if (!shouldEnsureProvisionalSessionTitle({
-      preview: previewMode.preview,
-      runtimeConnected: runtime?.status === "connected",
-      provisional: thread,
-      snapshot: snapshot === undefined
-        ? undefined
-        : {
-          sessionId: snapshot.sessionId,
-          ...(snapshot.sessionTitle === undefined ? {} : { sessionTitle: snapshot.sessionTitle }),
-          ...(snapshot.sessionTitleSource === undefined ? {} : { sessionTitleSource: snapshot.sessionTitleSource }),
-          isStreaming: snapshot.isStreaming,
-          isCompacting: snapshot.isCompacting,
-      },
-      inFlightSessionIds: provisionalTitleEnsureInFlightRef.current,
-    })) {
-      return;
-    }
-    if (thread === undefined) return;
-    const key = provisionalSessionTitleEnsureKey(thread.sessionId);
-    const inFlight = new Set(provisionalTitleEnsureInFlightRef.current);
-    inFlight.add(key);
-    provisionalTitleEnsureInFlightRef.current = inFlight;
-    void (async () => {
-      try {
-        const handle = await client.command("operator.invoke", {
-          commandId: "studio.session-title.ensure",
-          arguments: thread.title,
-        });
-        const outcome = await waitReceipt<OperatorInvokeOutcome>(client, handle.requestId);
-        if (outcome.snapshot.sessionId !== thread.sessionId) {
-          throw new Error("自动标题回执与当前会话不一致");
-        }
-        const title = outcome.snapshot.sessionTitle?.trim();
-        if (title !== undefined && title.length > 0) {
-          setProvisionalThreadsBySession((current) => {
-            const currentThread = current[key];
-            if (currentThread === undefined) return current;
-            return { ...current, [key]: resolveProvisionalHistoryTitle(currentThread, title) };
-          });
-        }
-        await refreshHistoryAfterTitle(thread.workspaceId);
-      } catch {
-        // A later authoritative Runtime state change may retry. Ref-only
-        // cleanup below cannot itself create a render/effect hot loop.
-      } finally {
-        const next = new Set(provisionalTitleEnsureInFlightRef.current);
-        next.delete(key);
-        provisionalTitleEnsureInFlightRef.current = next;
-      }
-    })();
-  }, [client, previewMode.preview, provisionalTitleEnsureThread, refreshHistoryAfterTitle, runtime?.status, snapshot?.isCompacting, snapshot?.isStreaming, snapshot?.sessionId, snapshot?.sessionTitle, snapshot?.sessionTitleSource, snapshot?.stateVersion]);
+  }, [currentSessionWorkspaceId, refreshHistoryAfterTitle, semanticTitleKey, snapshot?.sessionId, snapshot?.sessionTitle, snapshot?.sessionTitleSource]);
 
   const sessionTitleRefreshTimers = useRef<number[]>([]);
   const refreshSessionTitles = useCallback((workspaceId?: WorkspaceId) => {
@@ -6932,13 +7068,13 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   };
 
   const closeArchiveConfirm = () => {
-    if (archiveBusy) return;
+    if (archiveBusyRef.current) return;
     setArchivePending(null);
     setArchiveError(undefined);
   };
 
   const confirmArchive = () => {
-    if (archivePending === null || archiveBusy) return;
+    if (archivePending === null || archiveBusyRef.current) return;
     if (archivePending.kind === "preview") {
       archivePreviewThread(archivePending.threadId);
       setArchivePending(null);
@@ -6946,18 +7082,24 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       return;
     }
     const entry = archivePending.entry;
+    archiveBusyRef.current = true;
     setArchiveBusy(true);
     void archiveThread(entry, archivePending.workspaceId).then((ok) => {
       if (ok) {
         setArchivePending(null);
         setArchiveError(undefined);
       }
+      archiveBusyRef.current = false;
       setArchiveBusy(false);
     });
   };
 
   /** 真实模式「取消归档」：session.unarchive 恢复到进行中列表。 */
   const unarchiveThread = (entry: SessionHistoryEntry) => {
+    if (unarchiveBusyThreadIdsRef.current.has(entry.threadId)) return;
+    const busy = new Set(unarchiveBusyThreadIdsRef.current);
+    busy.add(entry.threadId);
+    unarchiveBusyThreadIdsRef.current = busy;
     void workspaceActionQueue.enqueue(async () => {
       try {
         const cachedWorkspaceId = Object.entries(projectHistoryCache).find(([, value]) =>
@@ -6977,6 +7119,10 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         setShellNotice({ text: `已恢复「${entry.title}」`, icon: "check" });
       } catch (error) {
         setShellNotice({ text: hostErrorMessage(error, "取消归档失败"), icon: "alert" });
+      } finally {
+        const done = new Set(unarchiveBusyThreadIdsRef.current);
+        done.delete(entry.threadId);
+        unarchiveBusyThreadIdsRef.current = done;
       }
     });
   };
@@ -7164,11 +7310,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     () => sessionCreateWaitRef.current ?? Promise.resolve({ ok: true } as const),
     [],
   );
-  const runSessionCreate = useCallback((work: () => Promise<void>) => {
+  const runSessionCreate = useCallback((work: () => Promise<OperatorStateSnapshot | void>) => {
     if (sessionCreateWaitRef.current) return;
     setCreatingSession(true);
     const pending = work()
-      .then((): NewSessionWaitResult => ({ ok: true }))
+      .then((created): NewSessionWaitResult => ({
+        ok: true,
+        ...(created?.sessionId === undefined ? {} : { sessionId: created.sessionId as SessionId }),
+      }))
       .catch((error): NewSessionWaitResult => {
         const message = hostErrorMessage(error, "新建对话失败");
         setShellNotice({ text: message, icon: "alert" });
@@ -7184,8 +7333,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (previewMode.preview || sessionCreateWaitRef.current) return;
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
       const handle = await client.command("session.create", {});
-      await waitReceipt(client, handle.requestId);
+      const created = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
       refreshSessionTitles();
+      return created;
     }));
   }, [client, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
@@ -7202,8 +7352,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     go("workbench");
     runSessionCreate(() => workspaceActionQueue.enqueue(async () => {
       const handle = await client.command("session.create", {});
-      await waitReceipt(client, handle.requestId);
+      const created = await waitReceipt<OperatorStateSnapshot>(client, handle.requestId);
       refreshSessionTitles();
+      return created;
     }));
   }, [client, go, navigationGate, onNewThread, previewMode.preview, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
@@ -7355,13 +7506,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       onSelectThread(entry);
       return Promise.resolve();
     }
-    // Navigation is a renderer concern and should react immediately. Runtime
-    // activation may take longer and can reset transcript hydrate state; keep
-    // it in the background after the selected history identity is visible.
-    onSelectThread(entry);
     const active = state.model.workspaces?.workspaces.find((workspace) => workspace.active);
     const resident = residentForSession(residentModel, entry.sessionId);
     const targetWorkspaceId = resident?.workspaceId ?? workspaceId ?? active?.workspaceId;
+    const workspaceSwitchPending = targetWorkspaceId !== undefined && active?.workspaceId !== targetWorkspaceId && resident === undefined;
+    // Same-workspace navigation and resident activation can update the identity
+    // immediately. For a cold cross-workspace archive row, wait for workspace.open
+    // so the Host archive reader is never asked to scan the old cwd first.
+    if (!workspaceSwitchPending) onSelectThread(entry);
     const run = async () => {
       try {
         if (!navigationGate.isCurrent(generation)) {
@@ -7377,6 +7529,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             return;
           }
           onWorkspacesChange(workspaces);
+          if (workspaceSwitchPending && navigationGate.isCurrent(generation)) onSelectThread(entry);
           const selectedWorkspace = workspaces.workspaces.find((workspace) => workspace.workspaceId === targetWorkspaceId);
           if (selectedWorkspace !== undefined) {
             setSelectedProject({ id: selectedWorkspace.workspaceId, name: selectedWorkspace.name });
@@ -7450,7 +7603,10 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   };
 
   const requestArchiveProvisionalThread = (thread: ProvisionalProjectThread) => {
-    if (archiveBusy) return;
+    if (archiveBusyRef.current) {
+      notifyArchiveBusy();
+      return;
+    }
     void (async () => {
       const entry = await resolveProvisionalHistoryEntry(thread);
       if (entry === undefined) {

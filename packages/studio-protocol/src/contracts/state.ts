@@ -108,6 +108,9 @@ export interface OperatorStateSnapshot {
   runtimeEpoch: RuntimeEpoch;
   stateVersion: StateVersion;
   sessionId: SessionId;
+  /** Runtime stays connected while the main AgentSession Worker sleeps/revives. */
+  workerResidency?: "active" | "sleeping" | "recycling" | "reviving" | "dormant" | "failed";
+  workerGeneration?: number;
   /** Native OMP SessionManager title; absent while the session is untitled. */
   sessionTitle?: string;
   /** Native source metadata when known; legacy titled sessions may omit it. */
@@ -123,6 +126,11 @@ export interface OperatorStateSnapshot {
   loop?: LoopState;
   /** Active session model; absent before the first model resolves. */
   model?: SessionModelState;
+  /**
+   * Session-scoped Task subagent model override; absent while the subagent
+   * inherits the session model.
+   */
+  taskModel?: SessionModelState;
   fast?: FastState;
   prewalk?: PrewalkState;
   pause?: PauseState;

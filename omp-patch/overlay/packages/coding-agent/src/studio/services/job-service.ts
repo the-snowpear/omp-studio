@@ -23,6 +23,14 @@ const DEFAULT_SETTLED_LIMIT = 50;
 const RECENT_SETTLED_LIMIT = 100;
 const DEFAULT_SUMMARY_LIMIT = 500;
 const MAX_HIERARCHY_HOPS = 64;
+/**
+ * Retained generation records. The widest window this service can project is
+ * `MAX_LIST_LIMIT` running jobs plus `RECENT_SETTLED_LIMIT` settled ones, so
+ * four such windows of least-recently-observed history is far more than any
+ * fence a renderer can still be holding, and the map stops growing with the
+ * process.
+ */
+const MAX_TRACKED_GENERATIONS = 4 * (MAX_LIST_LIMIT + RECENT_SETTLED_LIMIT);
 
 export type StudioJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -246,15 +254,35 @@ export class StudioJobService {
 	#observe(job: AsyncJob): number {
 		const recorded = this.#generations.get(job.id);
 		if (recorded === undefined) {
-			this.#generations.set(job.id, { generation: 1, startTime: job.startTime });
+			this.#remember(job.id, { generation: 1, startTime: job.startTime });
 			return 1;
 		}
 		if (recorded.startTime !== job.startTime) {
 			const generation = recorded.generation + 1;
-			this.#generations.set(job.id, { generation, startTime: job.startTime });
+			this.#remember(job.id, { generation, startTime: job.startTime });
 			return generation;
 		}
+		// Re-record unchanged sightings too: eviction drops the least recently
+		// observed ids, so every job the native manager still lists stays fenced.
+		this.#remember(job.id, recorded);
 		return recorded.generation;
+	}
+
+	/**
+	 * Record a generation and bound the map. `#observe` can only compare an id
+	 * the native manager still returns, so evicting the least recently observed
+	 * entries costs nothing: a job outside the retention window re-derives as
+	 * generation 1 exactly like a first sighting, and a stale renderer fence
+	 * fails closed with `JOB_GENERATION_CONFLICT`.
+	 */
+	#remember(jobId: string, record: { generation: number; startTime: number }): void {
+		this.#generations.delete(jobId);
+		this.#generations.set(jobId, record);
+		while (this.#generations.size > MAX_TRACKED_GENERATIONS) {
+			const oldest = this.#generations.keys().next().value;
+			if (oldest === undefined) break;
+			this.#generations.delete(oldest);
+		}
 	}
 
 	#canSee(callerAgentId: string | undefined, ownerFilter: string | undefined, job: AsyncJob): boolean {

@@ -19,6 +19,13 @@ type Props = {
 
 type MenuPos = { readonly x: number; readonly y: number };
 
+/**
+ * desktop chrome 的复制/另存为契约只接受这四种（见 `chrome-image-shared.ts`）。
+ * 渲染端的 `ImageMimeType` 还多一个 `image/svg+xml`：那是纯展示用的，
+ * 送到剪贴板与另存为之前必须先光栅化。
+ */
+type ChromeImageMime = Exclude<ImageMimeType, "image/svg+xml">;
+
 function bytesFromBase64(data: string): Uint8Array {
   const binary = atob(data);
   const bytes = new Uint8Array(binary.length);
@@ -55,10 +62,49 @@ function bytesAsBlob(bytes: Uint8Array, mime: ImageMimeType): Blob {
   return new Blob([copy], { type: mime });
 }
 
-async function bytesForClipboard(image: ImagePreviewSubject): Promise<{ mime: ImageMimeType; bytes: Uint8Array }> {
+/**
+ * SVG → PNG：先让 <img> 解码（Chromium 对 SVG 的 createImageBitmap 不可靠，
+ * 尤其是无固有尺寸的矢量图），再画到 canvas 导出 PNG 用于剪贴板。
+ */
+function svgUrlToPngBytes(url: string): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth || 1024;
+      canvas.height = img.naturalHeight || 1024;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("无法处理这张图片。"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((next) => {
+        if (!next) {
+          reject(new Error("无法编码图片。"));
+          return;
+        }
+        next
+          .arrayBuffer()
+          .then((buffer) => resolve(new Uint8Array(buffer)), () => reject(new Error("无法编码图片。")));
+      }, "image/png");
+    };
+    img.onerror = () => reject(new Error("无法栅格化这张 SVG。"));
+    img.src = url;
+  });
+}
+
+/**
+ * 剪贴板只吃 PNG/JPEG（desktop chrome 的 `ChromeImageMime` 不含 SVG），所以返回类型
+ * 必须窄到那份契约上：下面每条分支都已经把非 PNG/JPEG 光栅化过了。
+ */
+async function bytesForClipboard(image: ImagePreviewSubject): Promise<{ mime: ChromeImageMime; bytes: Uint8Array }> {
   const bytes = bytesFromBase64(image.data);
   if (image.mimeType === "image/png" || image.mimeType === "image/jpeg") {
     return { mime: image.mimeType, bytes };
+  }
+  if (image.mimeType === "image/svg+xml") {
+    return { mime: "image/png", bytes: await svgUrlToPngBytes(image.url) };
   }
   return { mime: "image/png", bytes: await blobToPngBytes(bytesAsBlob(bytes, image.mimeType)) };
 }
@@ -123,9 +169,13 @@ export function ImagePreview({ image, onClose, onError }: Props) {
     }
     setBusy(true);
     try {
+      // SVG 走与复制一致的光栅化路径；其余四种保持原样另存，字节与扩展名都不变。
+      const payload = image.mimeType === "image/svg+xml"
+        ? { mime: "image/png" as const, bytes: await svgUrlToPngBytes(image.url) }
+        : { mime: image.mimeType, bytes: bytesFromBase64(image.data) };
       const result = await chrome.saveImage({
-        mime: image.mimeType,
-        bytes: bytesFromBase64(image.data),
+        mime: payload.mime,
+        bytes: payload.bytes,
         suggestedName: image.label,
       });
       if (result.ok) return;

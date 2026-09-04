@@ -653,6 +653,7 @@ export class StudioBridgeClient {
     }
     const event = parseStudioEventEnvelope(frame.body);
     if (frame.header.runtimeEpoch !== event.runtimeEpoch) throw new Error("Event epoch mismatch");
+    const revisionBefore = this.#projection.snapshotRevision();
     const result = this.#projection.applyEvent(event);
     if (result === "gap") {
       this.#state = "snapshot-required";
@@ -673,15 +674,31 @@ export class StudioBridgeClient {
       } catch {
         // Isolate the constructor event hook from the socket handler.
       }
-      for (const listener of [...this.#eventListeners]) {
-        try {
-          listener(structuredClone(event));
-        } catch {
-          // Isolate sibling event listeners from the socket handler.
+      // One clone per dispatch, not one per listener: the envelope is read-only
+      // downstream (each fanout re-parses it into fresh objects), and a
+      // `conversation.tool.updated` carries up to 256 KiB of accumulated output.
+      // The listener set is still copied so a listener that unsubscribes mid
+      // dispatch cannot skip its siblings.
+      const listeners = [...this.#eventListeners];
+      if (listeners.length > 0) {
+        const delivered = structuredClone(event);
+        for (const listener of listeners) {
+          try {
+            listener(delivered);
+          } catch {
+            // Isolate sibling event listeners from the socket handler.
+          }
         }
       }
-      const snapshot = this.#projection.snapshot();
-      if (snapshot !== undefined) this.#publishProjection(snapshot);
+      // A pure `conversation.message.delta` advances `eventSeq` without touching
+      // the operator snapshot, so republishing here would deep-clone an unchanged
+      // read model — and the whole command ledger with it — once per streamed
+      // token. Every real state change still arrives as its own `state.changed` /
+      // `session.telemetry.changed` envelope and publishes exactly once.
+      if (this.#projection.snapshotRevision() !== revisionBefore) {
+        const snapshot = this.#projection.snapshot();
+        if (snapshot !== undefined) this.#publishProjection(snapshot);
+      }
     }
   }
 
@@ -707,9 +724,17 @@ export class StudioBridgeClient {
     this.#pendingRequests.clear();
   }
 
+  /**
+   * One copy, shared by every subscriber. The copy stays because
+   * `requestSnapshot` publishes the parsed response's snapshot, which the caller
+   * also receives — the published object must not alias anything a caller holds.
+   * Cloning again *per listener* was pure waste: the projection read model is
+   * read-only and, in production, `onProjectionChanged` is unset and
+   * `#projectionListeners` has exactly one member.
+   */
   #publishProjection(snapshot: StudioSnapshotResponse["snapshot"]): void {
-    const cloned = structuredClone(snapshot);
-    this.options.onProjectionChanged?.(cloned);
-    for (const listener of this.#projectionListeners) listener(structuredClone(cloned));
+    const published = structuredClone(snapshot);
+    this.options.onProjectionChanged?.(published);
+    for (const listener of this.#projectionListeners) listener(published);
   }
 }

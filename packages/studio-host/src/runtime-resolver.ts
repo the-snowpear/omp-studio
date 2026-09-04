@@ -636,6 +636,10 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
           cwd: workspace,
           env: {
             ...process.env,
+            // A compatibility probe must not leave empty/project-keyed
+            // session directories in the user's real OMP profile. Keep every
+            // probe artifact under the scratch workspace removed below.
+            OMP_AGENT_DIR: join(workspace, ".omp-agent"),
             ...options.env,
           },
           stdio: "ignore",

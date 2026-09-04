@@ -40,6 +40,8 @@ import type {
   ModelRoleCreateInput,
   ModelRolesWriteInput,
   ModelWebSearchSetInput,
+  ModelWebSearchCredentialSetInput,
+  ModelWebSearchCredentialRemoveInput,
   BtwAskOutcome,
   BtwBranchOutcome,
   OperatorInvokeOutcome,
@@ -326,6 +328,8 @@ export interface HostCatalogEntry {
   readonly modifiedAt: string;
   readonly messageCount: number;
   readonly status: SessionHistoryStatus;
+  /** Internal discovery provenance; omitted from the public history model. */
+  readonly origin?: "studio" | "cli" | "unknown";
   /** OMP v18 global session pin state; absent is treated as unpinned for old providers. */
   readonly pinned?: boolean;
 }
@@ -444,6 +448,8 @@ export interface HostModelsService {
   refreshDiscovery(): ConfigWriteResult | Promise<ConfigWriteResult>;
   setCycleOrder(input: { readonly order: ReadonlyArray<string> }): ConfigWriteResult | Promise<ConfigWriteResult>;
   setWebSearch(input: ModelWebSearchSetInput): ConfigWriteResult | Promise<ConfigWriteResult>;
+  setWebSearchApiKey(input: ModelWebSearchCredentialSetInput): ConfigWriteResult | Promise<ConfigWriteResult>;
+  removeWebSearchApiKey(input: ModelWebSearchCredentialRemoveInput): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /**

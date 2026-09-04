@@ -47,7 +47,7 @@ export type UserMessageEditorFill = {
   readonly text?: string;
   readonly images?: ReadonlyArray<{
     readonly type: "image";
-    readonly mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+    readonly mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml";
     readonly data: string;
   }>;
 };

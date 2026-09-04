@@ -543,6 +543,19 @@ img.profile-edit-avatar-img { display: block; }
 .tk-cell-tip .mono { color: var(--text-2); }
 
 /* ---------- 环境检查 ---------- */
+/* 进程内存面板（Diagnostics）：只有 Electron 环境渲染，见 ProcessMemoryPanel。 */
+.diag-card {
+  border: 1px solid var(--border); border-radius: var(--r-10);
+  padding: var(--sp-16) var(--sp-20); margin-bottom: var(--sp-20);
+  background: var(--surface-1);
+}
+.diag-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-12); margin-bottom: var(--sp-12); }
+.diag-mem-rows { display: flex; flex-direction: column; gap: 6px; }
+.diag-mem-row { display: flex; align-items: baseline; gap: var(--sp-8); font-size: var(--fs-12); }
+.diag-mem-label { min-width: 96px; color: var(--text-2); }
+.diag-mem-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text); }
+.diag-mem-peak { margin-left: auto; }
+
 .env-summary {
   display: flex; align-items: center; gap: var(--sp-12);
   padding: var(--sp-16) var(--sp-20);

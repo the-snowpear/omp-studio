@@ -39,6 +39,13 @@ export type SessionOperation =
    */
   | { kind: "session.model.set"; selector: string; thinking?: SessionThinkingSelector }
   | { kind: "session.thinking.set"; level: SessionThinkingSelector }
+  /**
+   * Pin the session-scoped Task subagent model (the `task` entry of the
+   * runtime-only `task.agentModelOverrides` layer — same semantics as the TUI
+   * picker's alt+p Task mode, never written to disk). `null` clears the
+   * override so the subagent inherits the session model again.
+   */
+  | { kind: "session.taskModel.set"; selector: string | null }
   | { kind: "session.tree.get" }
   | {
       kind: "session.tree.navigate";

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createConnection, createServer, Socket, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -229,6 +229,81 @@ test("WP-012 applies an event coalesced after the initial snapshot before READY 
     assert.equal(observedEvents.length, 1);
     assert.equal(observedEvents[0]?.eventSeq, 1);
   } finally {
+    client.close();
+    await bridge.close();
+  }
+});
+
+test("流式 delta 不再触发 projection 发布：N 个 delta → 0 次发布", async () => {
+  const token = "bridge-token-delta-budget";
+  const DELTAS = 32;
+  const observedEvents: StudioEventEnvelope[] = [];
+  const bridge = await listenForHello((hello) => helloResponse(hello, token), {
+    afterSnapshot: (response) => {
+      const epoch = response.snapshot.runtimeEpoch;
+      const frames = [
+        // 一次真实状态变化，用来建立基线并证明真变化仍然会发布。
+        encodeFrame("event:1", epoch, {
+          type: "studio.event",
+          runtimeEpoch: epoch,
+          eventSeq: 1,
+          stateVersion: 1,
+          occurredAt: "2026-08-31T00:00:01.000Z",
+          event: { kind: "state.changed", snapshot: { ...response.snapshot, stateVersion: 1 } },
+        }),
+      ];
+      // 纯文本增量：推进 eventSeq，但按契约不推进 stateVersion，也不带快照。
+      for (let index = 0; index < DELTAS; index += 1) {
+        frames.push(
+          encodeFrame(`event:${index + 2}`, epoch, {
+            type: "studio.event",
+            runtimeEpoch: epoch,
+            eventSeq: index + 2,
+            stateVersion: 1,
+            occurredAt: "2026-08-31T00:00:02.000Z",
+            event: {
+              kind: "conversation.message.delta",
+              sessionId: response.snapshot.sessionId,
+              turnId: "turn-1",
+              messageId: "message-1",
+              blockId: "block-1",
+              blockType: "text",
+              delta: "字",
+            },
+          }),
+        );
+      }
+      return frames;
+    },
+  });
+  const client = new StudioBridgeClient({
+    endpoint: bridge.endpoint,
+    token,
+    onEvent: (event) => observedEvents.push(event),
+  });
+  const controller = new StudioRuntimeSessionController(
+    client,
+    new CommandLedger(() => "2026-08-31T00:00:00.000Z"),
+    new RuntimePublicationStore(() => "2026-08-31T00:00:02.000Z"),
+  );
+  let publications = 0;
+  const unsubscribe = controller.onPublication(() => {
+    publications += 1;
+  });
+  try {
+    await client.connect();
+    await client.requestSnapshot();
+    assert.equal(client.state, "ready");
+    // 每一条都送达了订阅者：门控只影响发布，不影响事件分发。
+    assert.equal(observedEvents.length, DELTAS + 1);
+    // 两次发布：初始快照一次，那条 state.changed 一次。32 个 delta 贡献 0 次。
+    // 旧实现在这里是 2 + DELTAS。
+    assert.equal(publications, 2);
+    assert.equal(controller.publication()?.commitSeq, 2);
+    assert.equal(Number(controller.publication()?.snapshot.stateVersion), 1);
+  } finally {
+    unsubscribe();
+    controller.dispose();
     client.close();
     await bridge.close();
   }
@@ -717,11 +792,24 @@ test("PR-002 bridge token is one-time and challenge proof is bound to runtime id
 
 test("SEC-007 concurrent Bridge token consumers cannot both claim the secret", async () => {
   const directory = await mkdtemp(join(tmpdir(), "omp-studio-token-race-"));
+  for (let index = 0; index < 500; index += 1) {
+    const tokenFile = join(directory, `bridge-${index}.token`);
+    await writeFile(tokenFile, "one-time-token", { encoding: "utf8", flag: "wx" });
+    const results = await Promise.allSettled([consumeBridgeToken(tokenFile), consumeBridgeToken(tokenFile)]);
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 1, `iteration ${index}`);
+    assert.equal(results.filter((result) => result.status === "rejected").length, 1, `iteration ${index}`);
+    await assert.rejects(() => access(tokenFile));
+    await assert.rejects(() => access(`${tokenFile}.claimed`));
+  }
+});
+
+test("SEC-007 an existing Bridge token claim fails closed without deleting the token", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-studio-token-claimed-"));
   const tokenFile = join(directory, "bridge.token");
   await writeFile(tokenFile, "one-time-token", { encoding: "utf8", flag: "wx" });
-  const results = await Promise.allSettled([consumeBridgeToken(tokenFile), consumeBridgeToken(tokenFile)]);
-  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
-  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  await writeFile(`${tokenFile}.claimed`, "", { encoding: "utf8", flag: "wx" });
+  await assert.rejects(() => consumeBridgeToken(tokenFile));
+  assert.equal(await readFile(tokenFile, "utf8"), "one-time-token");
 });
 
 test("SEC-002 Windows bootstrap fails closed without an ACL provider", async () => {

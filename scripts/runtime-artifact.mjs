@@ -112,6 +112,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "session.handoff",
   "session.model.set",
   "session.thinking.set",
+  "session.taskModel.set",
   "session.history",
   "session.transcript.read",
   "operator.manifest.get",

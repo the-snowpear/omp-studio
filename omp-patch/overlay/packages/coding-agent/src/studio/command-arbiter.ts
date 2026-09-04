@@ -14,6 +14,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 	"runtime.resume",
 	"session.model.set",
 	"session.thinking.set",
+	"session.taskModel.set",
 	"mode.plan.enter",
 	"mode.plan.exit",
 	"mode.vibe.enter",
@@ -56,6 +57,7 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	"queue.enqueue",
 	"session.model.set",
 	"session.thinking.set",
+	"session.taskModel.set",
 	"mode.plan.enter",
 	"mode.plan.exit",
 	"mode.vibe.enter",
@@ -87,6 +89,7 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
 	"session.model.set",
 	"session.thinking.set",
+	"session.taskModel.set",
 	"mode.plan.enter",
 	"mode.plan.exit",
 	"mode.vibe.enter",

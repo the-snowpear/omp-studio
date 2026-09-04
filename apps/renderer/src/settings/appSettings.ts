@@ -16,6 +16,7 @@ export type AppTheme = "light" | "dark";
 export type InfoDensity = "compact" | "standard" | "cozy";
 export type ToolActivityDetail = "full" | "concise" | "hidden";
 export type StartupPage = "home" | "workbench" | "last";
+export type StreamingCadenceHz = 30 | 60 | 90 | 120;
 
 export interface AppSettings {
   readonly language: AppLanguage;
@@ -23,6 +24,8 @@ export interface AppSettings {
   readonly density: InfoDensity;
   /** 关闭后助手消息不带流式光标（显示层行为）。运行状态仍在对话底部。 */
   readonly streaming: boolean;
+  /** 流式快照发布上限；实际频率仍受浏览器/显示器 RAF 限制。 */
+  readonly streamingCadenceHz: StreamingCadenceHz;
   readonly toolActivity: ToolActivityDetail;
   readonly restoreLastProject: boolean;
   readonly restoreLastSession: boolean;
@@ -44,6 +47,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: "light",
   density: "standard",
   streaming: true,
+  streamingCadenceHz: 60,
   toolActivity: "concise",
   restoreLastProject: true,
   restoreLastSession: true,
@@ -66,6 +70,7 @@ const THEMES: ReadonlyArray<AppTheme> = ["light", "dark"];
 const DENSITIES: ReadonlyArray<InfoDensity> = ["compact", "standard", "cozy"];
 const TOOL_ACTIVITY: ReadonlyArray<ToolActivityDetail> = ["full", "concise", "hidden"];
 const STARTUP_PAGES: ReadonlyArray<StartupPage> = ["home", "workbench", "last"];
+const STREAMING_CADENCE_HZ: ReadonlyArray<StreamingCadenceHz> = [30, 60, 90, 120];
 
 function pick<T extends string>(value: unknown, allowed: ReadonlyArray<T>): T | undefined {
   return typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : undefined;
@@ -73,6 +78,10 @@ function pick<T extends string>(value: unknown, allowed: ReadonlyArray<T>): T | 
 
 function pickBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function pickNumber<T extends number>(value: unknown, allowed: ReadonlyArray<T>): T | undefined {
+  return typeof value === "number" && (allowed as readonly number[]).includes(value) ? value as T : undefined;
 }
 
 function parseStoredSettings(raw: string | null): AppSettings {
@@ -84,6 +93,7 @@ function parseStoredSettings(raw: string | null): AppSettings {
       theme: pick(value.theme, THEMES) ?? DEFAULT_APP_SETTINGS.theme,
       density: pick(value.density, DENSITIES) ?? DEFAULT_APP_SETTINGS.density,
       streaming: pickBoolean(value.streaming) ?? DEFAULT_APP_SETTINGS.streaming,
+      streamingCadenceHz: pickNumber(value.streamingCadenceHz, STREAMING_CADENCE_HZ) ?? DEFAULT_APP_SETTINGS.streamingCadenceHz,
       toolActivity: pick(value.toolActivity, TOOL_ACTIVITY) ?? DEFAULT_APP_SETTINGS.toolActivity,
       restoreLastProject: pickBoolean(value.restoreLastProject) ?? DEFAULT_APP_SETTINGS.restoreLastProject,
       restoreLastSession: pickBoolean(value.restoreLastSession) ?? DEFAULT_APP_SETTINGS.restoreLastSession,

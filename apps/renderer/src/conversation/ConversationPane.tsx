@@ -73,6 +73,8 @@ export function ConversationPane({
   planLink,
   compacting,
   jumpToLatestSlot,
+  onRetryTurn,
+  retryTurnDisabledReason,
 }: {
   snapshot?: ConversationSnapshot;
   /** Hot token/tool stream. Kept here so animation-frame updates do not
@@ -107,6 +109,9 @@ export function ConversationPane({
   compacting?: boolean;
   /** 「回到最新」按钮外发给宿主（默认在对话流内 sticky 展示）。 */
   jumpToLatestSlot?: (slot: { readonly visible: boolean; readonly jumpToLatest: () => void }) => void;
+  /** 链尾失败/中止轮的「重试上一轮」；预览模式不传即不渲染。 */
+  onRetryTurn?: () => void;
+  retryTurnDisabledReason?: string;
 }) {
   const localScrollerRef = useRef<HTMLElement | null>(null);
   const scrollerRef = externalScrollerRef ?? localScrollerRef;
@@ -317,6 +322,8 @@ export function ConversationPane({
           {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
           {...(liveAgents === undefined ? {} : { liveAgents })}
           {...(planLink === undefined ? {} : { planLink })}
+          {...(onRetryTurn === undefined ? {} : { onRetryTurn })}
+          {...(retryTurnDisabledReason === undefined ? {} : { retryTurnDisabledReason })}
         />
       )}
       {state.hydrateStatus === "resyncing" ? (
@@ -347,7 +354,10 @@ export function ConversationPane({
     ? tailStreaming(heldBody?.rows ?? [])
     : streaming;
 
-  jumpToLatestSlot?.({ visible: scroll.hasNewContent, jumpToLatest: scroll.jumpToLatest });
+  useEffect(() => {
+    jumpToLatestSlot?.({ visible: scroll.hasNewContent, jumpToLatest: scroll.jumpToLatest });
+  }, [jumpToLatestSlot, scroll.hasNewContent, scroll.jumpToLatest]);
+
   return (
     <>
       <main

@@ -31,6 +31,11 @@ import type { DesktopInteractionHost } from "./interaction-host.js";
  * STATE_VERSION_CONFLICT.
  */
 const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
+  // A prompt starts a turn from the Runtime's current state. Session creation
+  // and the first state projection can advance the version between the Host
+  // snapshot read and dispatch, so fencing it creates a false first-send
+  // conflict. Runtime epoch and its own busy/lease guards remain authoritative.
+  "core.prompt",
   "core.abort",
   "core.steer",
   "core.followUp",
@@ -39,6 +44,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   "runtime.resume",
   "session.model.set",
   "session.thinking.set",
+  "session.taskModel.set",
   "mode.plan.enter",
   "mode.plan.exit",
   "mode.vibe.enter",
@@ -83,6 +89,31 @@ export function createWorkspaceSessionCatalog(
   getCwd: () => string | undefined,
   resolveWorkspaceCwd?: (workspaceId: WorkspaceId) => string | undefined | Promise<string | undefined>,
 ): HostSessionCatalogProvider {
+  // Bootstrap, the expanded sidebar project and title reconciliation can ask
+  // for the same workspace simultaneously. One scan already walks the global
+  // OMP sessions tree, so duplicate scans only add Main-process/FS pressure.
+  const scans = new Map<string, Promise<HostCatalogEntry[]>>();
+  const scan = (cwd: string): Promise<HostCatalogEntry[]> => {
+    const key = process.platform === "win32" ? cwd.toLowerCase() : cwd;
+    const existing = scans.get(key);
+    if (existing !== undefined) return existing;
+    const pending = scanSessionCatalog({ includeCliSessions: true, allowedCwd: cwd })
+      .then((result) => result.sessions.map((entry) => ({
+        sessionId: entry.sessionId,
+        modifiedAt: entry.modifiedAt,
+        messageCount: 0,
+        status: (entry.archived ? "archived" : "active") as HostCatalogEntry["status"],
+        origin: entry.origin,
+        pinned: entry.pinned,
+        ...(entry.title === undefined ? {} : { title: entry.title }),
+        ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
+      })))
+      .finally(() => {
+        scans.delete(key);
+      });
+    scans.set(key, pending);
+    return pending;
+  };
   return {
     async list(input?: { readonly workspaceId?: WorkspaceId }): Promise<HostCatalogEntry[]> {
       let cwd: string | undefined;
@@ -98,16 +129,7 @@ export function createWorkspaceSessionCatalog(
         cwd = getCwd();
       }
       if (cwd === undefined) return [];
-      const result = await scanSessionCatalog({ includeCliSessions: true, allowedCwd: cwd });
-      return result.sessions.map((entry) => ({
-        sessionId: entry.sessionId,
-        modifiedAt: entry.modifiedAt,
-        messageCount: 0,
-        status: (entry.archived ? "archived" : "active") as HostCatalogEntry["status"],
-        pinned: entry.pinned,
-        ...(entry.title === undefined ? {} : { title: entry.title }),
-        ...(entry.createdAt === undefined ? {} : { createdAt: entry.createdAt }),
-      }));
+      return (await scan(cwd)).map((entry) => ({ ...entry }));
     },
   };
 }
@@ -158,8 +180,20 @@ export function createDesktopSemanticCommands(options: {
       : {
           archive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
             const sessionId = await resolveCatalogSessionId(options, threadId);
-            await releaseResidentSession(options, sessionId);
-            await archiveFactory().archive(sessionId, { skipWriteGrace: true });
+            const releasedWriter = await releaseResidentSession(options, sessionId);
+            // Studio-origin sessions are written only by the managed Runtime
+            // broker. If that broker has no resident writer (or just evacuated
+            // one), a recent mtime is a completed/title flush rather than an
+            // unknown crash tail. CLI/unknown sessions keep the full grace.
+            const discovered = (await options.catalog.list()).find((entry) => entry.sessionId === sessionId);
+            const skipWriteGrace = releasedWriter || discovered?.origin === "studio";
+            try {
+              await archiveFactory().archive(sessionId, { skipWriteGrace });
+            } catch (error) {
+              // A duplicate/stale UI request after a successful move is
+              // idempotent at the product command boundary.
+              if ((error as { readonly code?: string })?.code !== "SESSION_ALREADY_ARCHIVED") throw error;
+            }
             return { applied: true, runtimeEffect: "immediate", message: "Session archived to the OMP cold archive" };
           },
           unarchive: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {

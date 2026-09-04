@@ -50,7 +50,10 @@ type FakePublication = {
   terminalOutcomes: readonly CommandLedgerEntry[];
 };
 
-function createHarness(options: { maxResidentSessions?: number; idleWorkerTtlMs?: number } = {}) {
+function createHarness(options: {
+  maxResidentSessions?: number;
+  idleWorkerTtlMs?: number;
+} = {}) {
   let nextFresh = 0;
   let commitSeq = 0;
   const stopped: string[] = [];

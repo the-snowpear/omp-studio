@@ -47,6 +47,7 @@ export const SEAM_GROUPS = Object.freeze([
       "packages/coding-agent/src/cli/args.ts",
       "packages/coding-agent/src/cli/flag-tables.ts",
       "packages/coding-agent/src/commands/launch-help.ts",
+      "packages/coding-agent/src/config/settings-schema.ts",
       "packages/coding-agent/src/main.ts",
       "packages/coding-agent/test/main-host-classification.test.ts",
     ],
@@ -64,6 +65,7 @@ export const SEAM_GROUPS = Object.freeze([
       "packages/coding-agent/src/session/session-entries.ts",
       "packages/coding-agent/src/session/session-manager.ts",
       "packages/coding-agent/src/session/turn-recovery.ts",
+      "packages/coding-agent/src/task/executor.ts",
     ],
   },
   {

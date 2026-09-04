@@ -29,6 +29,21 @@ const DEFAULT_TRANSCRIPT_MESSAGE_TEXT = 64 * 1024;
 const CURSOR_VERSION = "1";
 const MAX_HIERARCHY_HOPS = 64;
 const TELEMETRY_EMIT_DEBOUNCE_MS = 250;
+/**
+ * Retained terminal records. `list()` sorts every candidate by `updatedAt` and
+ * slices to at most `MAX_LIST_LIMIT`, so a record older than the newest
+ * `MAX_LIST_LIMIT` ones can no longer reach a roster page — keeping it only
+ * lengthened the full `#terminals` scan every snapshot pays for.
+ */
+const MAX_TERMINAL_RECORDS = MAX_LIST_LIMIT;
+/**
+ * Retained generation counters. Only ids the hub can no longer reach at all —
+ * no registry ref, no pending spawn, no terminal record — are ever evicted, so
+ * every generation a roster page can still show stays comparable. Twice
+ * `MAX_LIST_LIMIT` always clears one full page of live refs plus a full
+ * `#terminals` window, which is the largest reachable set that can exist.
+ */
+const MAX_TRACKED_GENERATIONS = 2 * MAX_LIST_LIMIT;
 
 export type StudioAgentStatus =
 	| "starting"
@@ -573,7 +588,7 @@ export class StudioAgentHubService {
 				this.#resolveEntry(args.agentId)?.snapshot,
 			);
 		}
-		this.#terminals.set(args.agentId, this.#terminalRecord(ref, "aborted", entry.snapshot.generation));
+		this.#rememberTerminal(args.agentId, this.#terminalRecord(ref, "aborted", entry.snapshot.generation));
 		this.#emit(args.agentId);
 		const snapshot = this.#resolveEntry(args.agentId)?.snapshot ?? this.#fallbackSnapshot(args.agentId);
 		return { killed: true, snapshot };
@@ -685,7 +700,7 @@ export class StudioAgentHubService {
 				this.#resolveEntry(args.agentId)?.snapshot,
 			);
 		}
-		this.#terminals.set(args.agentId, this.#terminalRecord(ref, "released", entry.snapshot.generation));
+		this.#rememberTerminal(args.agentId, this.#terminalRecord(ref, "released", entry.snapshot.generation));
 		this.#emit(args.agentId);
 		return {
 			released: true,
@@ -911,7 +926,7 @@ export class StudioAgentHubService {
 		}
 		// Revive is an authoritative generation transition driven by the native
 		// lifecycle port - never by the renderer's expectedGeneration.
-		this.#generations.set(agentId, (this.#generations.get(agentId) ?? 1) + 1);
+		this.#rememberGeneration(agentId, (this.#generations.get(agentId) ?? 1) + 1);
 		this.#emit(agentId);
 		return live;
 	}
@@ -966,11 +981,11 @@ export class StudioAgentHubService {
 			const current = this.#generations.get(id);
 			// Re-registration after release/removal is a new native era: stale
 			// page buttons must never re-match by name.
-			this.#generations.set(id, current === undefined ? 1 : wasPending ? current : current + 1);
+			this.#rememberGeneration(id, current === undefined ? 1 : wasPending ? current : current + 1);
 		} else if (event.type === "removed") {
 			const current = this.#generations.get(id);
 			if (current !== undefined && !this.#terminals.has(id)) {
-				this.#terminals.set(id, this.#terminalRecord(event.ref, "released", current));
+				this.#rememberTerminal(id, this.#terminalRecord(event.ref, "released", current));
 			}
 			this.#telemetrySubs.get(id)?.();
 			this.#telemetrySubs.delete(id);
@@ -1021,7 +1036,37 @@ export class StudioAgentHubService {
 	}
 
 	#ensureGeneration(agentId: string): void {
-		if (!this.#generations.has(agentId)) this.#generations.set(agentId, 1);
+		if (!this.#generations.has(agentId)) this.#rememberGeneration(agentId, 1);
+	}
+
+	/**
+	 * Record a generation and bound the map. `list()` and the registry keep
+	 * touching the ids that are still reachable, so eviction walks in insertion
+	 * order and skips anything the hub can still project — the sweep only runs
+	 * while the map is over capacity, which is the only state that can leak.
+	 */
+	#rememberGeneration(agentId: string, generation: number): void {
+		this.#generations.delete(agentId);
+		this.#generations.set(agentId, generation);
+		if (this.#generations.size <= MAX_TRACKED_GENERATIONS) return;
+		for (const candidate of [...this.#generations.keys()]) {
+			if (this.#generations.size <= MAX_TRACKED_GENERATIONS) return;
+			if (candidate === agentId) continue;
+			if (this.#registry.get(candidate) !== undefined) continue;
+			if (this.#terminals.has(candidate) || this.#pendingSpawns.has(candidate)) continue;
+			this.#generations.delete(candidate);
+		}
+	}
+
+	/** Record a terminal snapshot and drop the oldest beyond {@link MAX_TERMINAL_RECORDS}. */
+	#rememberTerminal(agentId: string, record: StudioTerminalRecord): void {
+		this.#terminals.delete(agentId);
+		this.#terminals.set(agentId, record);
+		while (this.#terminals.size > MAX_TERMINAL_RECORDS) {
+			const oldest = this.#terminals.keys().next().value;
+			if (oldest === undefined) break;
+			this.#terminals.delete(oldest);
+		}
 	}
 
 	#emit(agentId: string): void {

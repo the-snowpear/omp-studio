@@ -1,5 +1,6 @@
 import type {
   ConversationItem,
+  ConversationMessageItem,
   ConversationMessageError,
   ConversationRuntimeEvent,
   ConversationTranscriptPage,
@@ -10,6 +11,8 @@ import type { ComposerDoc } from "../composer/types";
 import type { ConversationIdentity } from "./conversationHost";
 import { buildPersistedTimeline, buildPersistedTimelineRow, buildTransientTimeline, emptyConversationState, tagTimelineStructure, type ConversationNotice, type ConversationState, type LiveMessage, type LiveTool, type PendingUser, type TimelineRow, type TimelineRowCache } from "./conversationViewModel";
 import type { UserThumbMap } from "./userMessageThumbs";
+import { capByImageBytes, docImageBytes, thumbsImageBytes } from "./userMessageThumbs";
+import { getAppSettings, type StreamingCadenceHz } from "../settings/appSettings";
 
 const DEFAULT_MAX_ROWS = 2_000;
 const DEFAULT_MAX_BYTES = 24 * 1024 * 1024;
@@ -19,12 +22,13 @@ const NOTICE_LIMIT = 100;
 const LIVE_MESSAGE_LIMIT = 16;
 const LIVE_BLOCK_LIMIT = 64;
 const LIVE_TOOL_LIMIT = 256;
+const CADENCE_EPSILON_MS = 0.5;
 
 type FrameHandle = number | ReturnType<typeof setTimeout>;
-type FrameScheduler = { request(callback: () => void): FrameHandle; cancel(handle: FrameHandle): void };
+type FrameScheduler = { request(callback: () => void): FrameHandle; cancel(handle: FrameHandle): void; now?: () => number };
 const defaultScheduler: FrameScheduler = typeof requestAnimationFrame === "function"
-  ? { request: (callback) => requestAnimationFrame(callback), cancel: (handle) => cancelAnimationFrame(handle as number) }
-  : { request: (callback) => setTimeout(callback, 0), cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) };
+  ? { request: (callback) => requestAnimationFrame(callback), cancel: (handle) => cancelAnimationFrame(handle as number), now: () => performance.now() }
+  : { request: (callback) => setTimeout(callback, 0), cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>), now: () => Date.now() };
 
 type MutableBlock = { readonly blockId: string; readonly blockType: "text" | "thinking"; text: string; pending: string[]; bytes: number; truncated: boolean };
 type MutableMessage = { readonly messageId: string; readonly turnId: string; readonly role: "user" | "assistant" | "system"; readonly createdAt: string; readonly blocks: Map<string, MutableBlock>; aborted: boolean; dirty: boolean; materialized?: LiveMessage };
@@ -39,6 +43,7 @@ export type ConversationStoreOptions = {
   readonly maxRows?: number;
   readonly maxBytes?: number;
   readonly scheduler?: FrameScheduler;
+  readonly streamingCadenceHz?: () => StreamingCadenceHz;
 };
 
 /** `ConversationItem` is immutable, so its byte size can be memoised per object.
@@ -70,6 +75,7 @@ export class ConversationStore {
   private readonly generation: number;
   private readonly maxRows: number;
   private readonly maxBytes: number;
+  private readonly streamingCadenceHz: () => StreamingCadenceHz;
   private readonly rowCache: TimelineRowCache = new Map();
   private persistedRows: readonly TimelineRow[] = [];
   private persistedIds = new Set<string>();
@@ -84,6 +90,7 @@ export class ConversationStore {
   private readonly dirtyPersistedRows = new Set<string>();
   private rowCachePruneRequired = false;
   private structureToken: object = {};
+  private shapeToken: object = {};
   private items: ConversationItem[] = [];
   private liveMessages = new Map<string, MutableMessage>();
   private liveTools = new Map<string, LiveTool>();
@@ -106,6 +113,9 @@ export class ConversationStore {
   private resyncRequired = false;
   private disposed = false;
   private frame: FrameHandle | undefined;
+  private queuedStreaming = false;
+  private queuedImmediate = false;
+  private lastPublishedAt: number | undefined;
   private snapshot: ConversationStoreSnapshot;
   private metadataSnapshot: ConversationStoreSnapshot;
   private metadataDependencies: readonly unknown[] = [];
@@ -113,6 +123,7 @@ export class ConversationStore {
   constructor(options: ConversationStoreOptions) {
     this.target = options.target; this.identity = options.identity; this.generation = options.generation;
     this.maxRows = options.maxRows ?? DEFAULT_MAX_ROWS; this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES; this.scheduler = options.scheduler ?? defaultScheduler;
+    this.streamingCadenceHz = options.streamingCadenceHz ?? (() => getAppSettings().streamingCadenceHz);
     const state = { ...emptyConversationState(this.generation), identity: this.identity };
     this.snapshot = { state, rows: [] };
     this.metadataSnapshot = this.snapshot;
@@ -152,6 +163,7 @@ export class ConversationStore {
     this.markStructureChanged();
     this.trimAncillary();
     for (const event of replay) this.applyEventInternal(event.update, event.streamSeq);
+    this.settlePendingFromItems();
     if (watermark !== undefined) this.lastStreamSeq = Math.max(this.lastStreamSeq ?? 0, watermark);
     this.publishNow();
   }
@@ -171,7 +183,9 @@ export class ConversationStore {
     const eventAgentId = (update as ConversationRuntimeEvent & { readonly agentId?: string }).agentId;
     if (eventAgentId !== undefined && eventAgentId !== this.target.agentId) return false;
     if (streamSeq !== undefined && this.lastStreamSeq !== undefined && streamSeq <= this.lastStreamSeq) return false;
-    this.applyEventInternal(update, streamSeq); this.queuePublish(); return true;
+    this.applyEventInternal(update, streamSeq);
+    this.queuePublish(update.kind === "conversation.message.delta" || update.kind === "conversation.tool.updated");
+    return true;
   }
 
   private applyEventInternal(update: ConversationRuntimeEvent, streamSeq?: number): void {
@@ -296,6 +310,27 @@ export class ConversationStore {
     this.markStructureChanged();
     this.trimAncillary();
   }
+  /**
+   * Settle every turn the client still holds open, with `turn.aborted` semantics.
+   *
+   * The Runtime parks a logical turn on `agent_end{isTerminal: false}` (a
+   * retryable provider error schedules a continuation) and closes it only from
+   * the terminal `agent_end` that continuation produces. A user abort supersedes
+   * the continuation, so that close event never arrives: `openTurnItems` and the
+   * folded tools would keep the tail reading as live — `working` pinned on the
+   * activity line, the stop button armed, `subagentTurnRunning` true — until the
+   * store is rebuilt by a session switch. Called when the Runtime reports idle.
+   */
+  settleOpenTurns(): boolean {
+    const turnIds = new Set<string>();
+    for (const message of this.liveMessages.values()) turnIds.add(message.turnId);
+    for (const tool of this.liveTools.values()) turnIds.add(tool.turnId);
+    for (const turnId of this.openTurnItems.values()) turnIds.add(turnId);
+    if (turnIds.size === 0) return false;
+    for (const turnId of turnIds) this.closeTurn(turnId, true);
+    this.publishNow();
+    return true;
+  }
   private settlePending(itemId: string): void {
     const index = this.pendingUsers.findIndex((pending) => !pending.knownItemIds.includes(itemId));
     const settled = index >= 0 ? index : this.pendingUsers.findIndex((pending) => pending.status === "pending"); if (settled < 0) return;
@@ -304,17 +339,63 @@ export class ConversationStore {
     this.markStructureChanged();
   }
 
+  /** Reconcile an optimistic row when hydrate or command acceptance won the
+   * race and the authoritative user item is already present in the store. */
+  private settlePendingFromItems(): void {
+    if (this.pendingUsers.length === 0) return;
+    const available = this.items.filter((item): item is ConversationMessageItem => item.kind === "message" && item.role === "user");
+    const remaining: PendingUser[] = [];
+    let changed = false;
+    for (const pending of this.pendingUsers) {
+      const index = available.findIndex((item) => !pending.knownItemIds.includes(item.itemId));
+      if (index < 0) {
+        remaining.push(pending);
+        continue;
+      }
+      const [item] = available.splice(index, 1);
+      if (pending.doc !== undefined && item !== undefined) this.userDisplays = { ...this.userDisplays, [item.itemId]: pending.doc };
+      changed = true;
+    }
+    if (!changed) return;
+    this.pendingUsers = remaining;
+    this.markStructureChanged();
+  }
+
   private trimAncillary(): void {
     const visible = new Set(this.items.map((item) => item.itemId));
     this.pendingUsers = this.pendingUsers.slice(-100);
-    this.userDisplays = Object.fromEntries(Object.entries(this.userDisplays).filter(([itemId]) => visible.has(itemId)).slice(-this.maxRows));
-    this.userThumbs = Object.fromEntries(Object.entries(this.userThumbs).filter(([itemId]) => visible.has(itemId)).slice(-this.maxRows));
+    // 条数上限之外还要有字节上限：这两张表携带的是原图 base64，光靠 2000 条的条数
+    // 上限，几十张 4K 截图就能吃掉 GB 级内存。见 `USER_IMAGE_BUDGET_BYTES`。
+    this.userDisplays = Object.fromEntries(
+      capByImageBytes(
+        Object.entries(this.userDisplays)
+          // `PendingUser["doc"]` 是可选的，所以这张表的值类型带 undefined；
+          // 记账函数只认真实的 doc。
+          .filter((entry): entry is [string, ComposerDoc] => entry[1] !== undefined && visible.has(entry[0]))
+          .slice(-this.maxRows),
+        docImageBytes,
+      ),
+    );
+    this.userThumbs = Object.fromEntries(
+      capByImageBytes(
+        Object.entries(this.userThumbs).filter(([itemId]) => visible.has(itemId)).slice(-this.maxRows),
+        thumbsImageBytes,
+      ),
+    );
     this.rowCachePruneRequired = true;
+    // `openTurnItems` 只在精确 turnId 匹配时删（见 `closeTurn`），abort / resync /
+    // runtime 丢失漏掉的那些会永久留存，而 `state()` 每帧对它做 `Object.fromEntries`。
+    // 跟着可见窗口一起裁。
+    for (const itemId of this.openTurnItems.keys()) {
+      if (!visible.has(itemId) && !this.liveMessages.has(itemId)) this.openTurnItems.delete(itemId);
+    }
   }
   private markStructureChanged(persisted = true): void {
     if (persisted) { this.persistedRowsDirty = true; this.dirtyPersistedRows.clear(); }
     this.rowCachePruneRequired = true;
     this.structureToken = {};
+    // 行序列真的变了才动 shape：只按行 type 分组的派生结果（`renderItems`）依赖它。
+    this.shapeToken = {};
   }
   private hasItem(itemId: string): boolean {
     if (this.itemIdCache === undefined || this.itemIdCache.items !== this.items) {
@@ -346,7 +427,7 @@ export class ConversationStore {
     for (const key of this.rowCache.keys()) if (!active.has(key)) this.rowCache.delete(key);
     this.rowCachePruneRequired = false;
   }
-  trackPending(pending: PendingUser): void { this.pendingUsers = [...this.pendingUsers.filter((item) => item.requestId !== pending.requestId), pending].slice(-100); this.markStructureChanged(false); this.publishNow(); }
+  trackPending(pending: PendingUser): void { this.pendingUsers = [...this.pendingUsers.filter((item) => item.requestId !== pending.requestId), pending].slice(-100); this.settlePendingFromItems(); this.markStructureChanged(false); this.publishNow(); }
   failPending(requestId: string, error: string): void { this.pendingUsers = this.pendingUsers.map((item) => item.requestId === requestId ? { ...item, status: "failed", error } : item); this.publishNow(); }
   dropPending(requestId: string): void { this.pendingUsers = this.pendingUsers.filter((item) => item.requestId !== requestId); this.markStructureChanged(false); this.publishNow(); }
   restoreFromUser(itemId: string): boolean {
@@ -376,9 +457,33 @@ export class ConversationStore {
   private state(): ConversationState {
     return { generation: this.generation, identity: this.identity, items: this.items, liveMessages: this.materializeMessages(), liveTools: this.liveToolsRecord(), liveOrder: this.liveOrder, ...(this.olderCursor === undefined ? {} : { olderCursor: this.olderCursor }), ...(this.headCursor === undefined ? {} : { headCursor: this.headCursor }), hasMoreBefore: this.hasMoreBefore, hydrateStatus: this.status, ...(this.unavailableReason === undefined ? {} : { unavailableReason: this.unavailableReason }), ...(this.error === undefined ? {} : { error: this.error }), notices: this.notices, pendingUsers: this.pendingUsers, ...(this.lastStreamSeq === undefined ? {} : { lastEventSeq: this.lastStreamSeq }), resyncRequired: this.resyncRequired, userDisplays: this.userDisplays as Record<string, ComposerDoc>, userThumbs: this.userThumbs, openTurnItems: Object.fromEntries(this.openTurnItems), ...(this.compacting === undefined ? {} : { compacting: this.compacting }), messageErrors: Object.fromEntries(this.messageErrors) };
   }
-  private queuePublish(): void { if (this.frame !== undefined || this.disposed) return; this.frame = this.scheduler.request(() => { this.frame = undefined; this.publishNow(); }); }
+  private queuePublish(streaming = false): void {
+    if (this.disposed) return;
+    this.queuedStreaming ||= streaming;
+    this.queuedImmediate ||= !streaming;
+    if (this.frame !== undefined) return;
+    this.frame = this.scheduler.request(() => {
+      this.frame = undefined;
+      const immediate = this.queuedImmediate;
+      const streamingOnly = this.queuedStreaming && !immediate;
+      this.queuedStreaming = false;
+      this.queuedImmediate = false;
+      if (streamingOnly) {
+        const now = this.scheduler.now?.() ?? Date.now();
+        const minInterval = 1000 / this.streamingCadenceHz();
+        if (this.lastPublishedAt !== undefined && now - this.lastPublishedAt + CADENCE_EPSILON_MS < minInterval) {
+          this.queuedStreaming = true;
+          this.queuePublish(true);
+          return;
+        }
+      }
+      this.publishNow();
+    });
+  }
   private publishNow(): void {
     if (this.disposed) return; if (this.frame !== undefined) { this.scheduler.cancel(this.frame); this.frame = undefined; }
+    this.queuedStreaming = false; this.queuedImmediate = false;
+    this.lastPublishedAt = this.scheduler.now?.() ?? Date.now();
     const state = this.state();
     this.pruneRowCache();
     if (this.persistedRowsDirty) {
@@ -399,7 +504,7 @@ export class ConversationStore {
     const transientRows = buildTransientTimeline(state, this.persistedIds, this.rowCache);
     // Idle transcripts publish the persisted prefix by reference. Only a live
     // tail forces a copy, and then only because `rows` must stay one array.
-    const rows = tagTimelineStructure(transientRows.length === 0 ? this.persistedRows : [...this.persistedRows, ...transientRows], this.structureToken);
+    const rows = tagTimelineStructure(transientRows.length === 0 ? this.persistedRows : [...this.persistedRows, ...transientRows], this.structureToken, this.shapeToken);
     this.snapshot = { state, rows };
     const metadataDependencies: readonly unknown[] = [state.identity, state.items, state.olderCursor, state.headCursor, state.hasMoreBefore, state.hydrateStatus, state.unavailableReason, state.error, state.notices, state.pendingUsers, state.resyncRequired, state.userDisplays, state.userThumbs, state.compacting];
     const metadataChanged = metadataDependencies.length !== this.metadataDependencies.length || metadataDependencies.some((value, index) => value !== this.metadataDependencies[index]);
@@ -429,6 +534,7 @@ export class ConversationStore {
     this.persistedIds = new Set(); this.persistedIndexes.clear(); this.dirtyPersistedRows.clear();
     this.itemIdCache = undefined;
     this.compacting = undefined;
+    this.queuedStreaming = false; this.queuedImmediate = false; this.lastPublishedAt = undefined;
     const empty: ConversationStoreSnapshot = { state: { ...emptyConversationState(this.generation), identity: this.identity }, rows: [] };
     this.snapshot = empty; this.metadataSnapshot = empty; this.metadataDependencies = [];
   }

@@ -62,7 +62,13 @@ export class SessionRegistryError extends Error {
   }
 }
 
-/** Durable metadata registry. Runtime snapshot/event data remains Worker-owned. */
+/**
+ * Durable metadata registry. Runtime snapshot/event data remains Worker-owned.
+ *
+ * Not wired into the desktop Host: production leases use `FileSessionLeaseStore`
+ * and residency lives in `apps/desktop/src/runtime-session.ts`. Kept as the
+ * tested phase-2 registry for a future durable-broker integration.
+ */
 export class JsonSessionRegistry {
   readonly #records = new Map<string, SessionRegistryRecord>();
   #loaded = false;

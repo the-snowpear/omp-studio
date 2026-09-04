@@ -22,7 +22,7 @@
 <p align="center">
   <a href="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml"><img src="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0-informational.svg" alt="0.1.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.3-informational.svg" alt="0.1.3"></a>
   <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows-0078D4.svg" alt="Windows"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
 </p>
@@ -83,8 +83,8 @@ The right-hand Git panel stages, diffs, and commits next to the conversation. Fe
   <img src="docs/images/git.png" alt="Workbench Git panel: diff, commit, and graph" width="920">
 </p>
 
-> [!IMPORTANT]
-> **0.1.0 is a development preview.** The workbench runs on Windows from source or from a locally built **unsigned** NSIS installer. Some panels are honest empty shells. There is no Authenticode-signed installer on GitHub Releases yet. Please file bugs and ideas as [Issues](https://github.com/the-snowpear/omp-studio/issues).
+> [!TIP]
+> **Installation & Getting Started:** Windows users can download the latest installer (`OMP-Studio-Setup-0.1.3-win-x64.exe`) directly from [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases), or run from source following the instructions below. Please file any bugs or suggestions as [Issues](https://github.com/the-snowpear/omp-studio/issues).
 
 ## What it does
 
@@ -105,7 +105,7 @@ npm install
 npm run preview
 ```
 
-Or double-click `preview.cmd` / `启动预览.cmd` at the repo root.
+Or double-click `preview.cmd` at the repo root.
 
 Attach a real Runtime (slow the first time):
 

@@ -208,14 +208,17 @@ export interface DesktopRuntimeSessionPort {
   /** Gracefully stops the Runtime if this port started one; no-op otherwise. */
   stop(): Promise<void>;
   /**
-   * Optional workspace rebind: select (or spawn) a Worker for the given
-   * workspace and return its session bundle (`undefined` when the Runtime is
-   * not available). Workers of other workspaces stay resident, so switching
-   * projects never stops a running turn elsewhere. The composition rebuilds
-   * the facade's runtime access from the returned bundle. Never changes the
-   * `start` contract: startup still happens at most once.
+   * Optional workspace rebind: select a Worker for the given workspace and,
+   * unless `launchIfMissing` is false, spawn one when absent. Returns its
+   * session bundle (`undefined` for a deliberate read-only bind or when the
+   * Runtime is unavailable). Workers of other workspaces stay resident. The
+   * composition rebuilds the facade's runtime access from the returned bundle.
+   * Never changes the `start` contract: startup still happens at most once.
    */
-  rebind?(workspace: { workspaceId: string; cwd: string }): Promise<DesktopRuntimeSession | undefined>;
+  rebind?(
+    workspace: { workspaceId: string; cwd: string },
+    options?: { readonly launchIfMissing?: boolean },
+  ): Promise<DesktopRuntimeSession | undefined>;
   /**
    * True when a live Worker already holds this workspace, i.e. a rebind to it
    * is a binding switch rather than a Runtime restart. Ports without a
@@ -628,9 +631,12 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     if (cwd === undefined) throw new Error("Session archive requires an active workspace");
     if (archiveService === undefined || archiveServiceCwd !== cwd) {
       archiveServiceCwd = cwd;
+      // The default crash-writer grace stays on: a dormant session written
+      // moments ago may come from a crashed writer whose tail must not be
+      // frozen into the cold archive. Sessions the desktop itself just
+      // evacuated skip it explicitly via skipWriteGrace.
       archiveService = new StudioSessionArchiveService({
         allowedCwd: cwd,
-        writeGraceMs: 0,
         isResident: (sessionId) =>
           context.runtimeSession?.isResident?.(sessionId) === true
           || sessionRef.current?.controller.publication()?.snapshot?.sessionId === sessionId,
@@ -969,6 +975,20 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
   }
 
   /**
+   * Residents read model is authoritative when available (same convention
+   * as the renderer thread badges); fall back to the current session
+   * snapshot when the port has no broker view.
+   */
+  isBusy(): boolean {
+    const residents = this.#runtimeSession?.listResidents?.().residents;
+    if (residents !== undefined) {
+      return residents.some((row) => row.phase === "running" || row.phase === "compacting");
+    }
+    const snapshot = this.#sessionRef.current?.controller.publication()?.snapshot;
+    return snapshot?.isStreaming === true || snapshot?.isCompacting === true;
+  }
+
+  /**
    * Point the single publication channel at the current bundle and replay
    * its latest publication so the facade's runtime-changed sync fires
    * promptly. Old session listeners are cancelled first.
@@ -1046,8 +1066,8 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
 
   /**
    * Bind the view to another workspace: delegates to the port's optional
-   * `rebind`, which selects a Worker already resident for that workspace or
-   * spawns one, and re-points the facade's runtime access (hello / snapshot /
+   * `rebind`, which selects a Worker already resident for that workspace and,
+   * when requested, spawns one. It then re-points the facade's runtime access (hello / snapshot /
    * onPublication) at the returned bundle through the live holder — the facade
    * object the renderer transport is bound to stays the same, so in-flight
    * receipts keep flowing. Workers of other workspaces are left running.
@@ -1055,11 +1075,15 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
    * When the port reports a live resident for the target workspace this is a
    * binding switch, not a Runtime restart: the fallback cold start is skipped
    * so a transient selection failure cannot silently respawn the process.
-   * An `undefined` bundle (Runtime not available) still re-points the holder so
-   * the facade never keeps serving a dead controller. Without a
+   * An `undefined` bundle (Runtime unavailable or a deliberate read-only
+   * workspace selection) still re-points the holder so the facade never keeps
+   * serving a controller from another workspace. Without a
    * rebind-capable port this is a no-op.
    */
-  async rebindWorkspace(workspace: { workspaceId: string; cwd: string }): Promise<void> {
+  async rebindWorkspace(
+    workspace: { workspaceId: string; cwd: string },
+    options?: { readonly launchIfMissing?: boolean },
+  ): Promise<void> {
     if (this.#closed || this.#shutdownStarted) {
       throw new Error("desktop host composition is closed");
     }
@@ -1068,16 +1092,17 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     if (port?.rebind === undefined) {
       return;
     }
+    const launchIfMissing = options?.launchIfMissing !== false;
     const hadResident = port.hasResidentForWorkspace?.(workspace.workspaceId) === true;
-    let next = await port.rebind(workspace);
-    if (next === undefined && !hadResident) {
+    let next = await port.rebind(workspace, { launchIfMissing });
+    if (next === undefined && !hadResident && launchIfMissing) {
       next = await startInstalledRuntime(this.#facadeContext);
     }
     rememberUnavailable(
       this.#facadeContext.lastUnavailable,
       next,
       port,
-      unavailableFromError(new Error("Runtime did not become ready")),
+      launchIfMissing ? unavailableFromError(new Error("Runtime did not become ready")) : undefined,
     );
     if (next !== undefined) {
       clearDisconnect(this.#facadeContext.lastDisconnect);

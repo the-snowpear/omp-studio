@@ -10,7 +10,7 @@ export type ViewedTelemetryClient = {
   query(name: "session.telemetry.read", input: { readonly sessionId: SessionId }): Promise<SessionTelemetryReadResult>;
 };
 
-export type ViewedSessionTelemetryStatus = "preview" | "live" | "loading" | "ready" | "unavailable";
+export type ViewedSessionTelemetryStatus = "preview" | "live" | "idle" | "loading" | "ready" | "unavailable";
 
 export interface ViewedSessionTelemetryState {
   readonly status: ViewedSessionTelemetryStatus;
@@ -22,6 +22,12 @@ export interface ViewedSessionTelemetryState {
 interface CachedResult {
   readonly source: SessionTelemetrySource;
   readonly telemetry: SessionTelemetrySnapshot;
+  readonly refreshToken: number;
+}
+
+interface InFlightRead {
+  readonly refreshToken: number;
+  readonly promise: Promise<CachedResult>;
 }
 
 const IDENTITY = { status: "preview" } as const;
@@ -39,11 +45,19 @@ export function preferFresherTelemetry(
   return read;
 }
 
+/** 按会话缓存的 telemetry 快照上限。只有当前在看的那个需要命中，留少量余量给来回切换。 */
+const VIEWED_TELEMETRY_CACHE_MAX = 8;
+
 export function useViewedSessionTelemetry(options: {
   /** Real client; `null` in preview mode so no query is ever issued. */
   readonly client: ViewedTelemetryClient | null;
   /** Preview switch: fixtures only, no real reads. */
   readonly preview: boolean;
+  /**
+   * Expensive archive reads are demand-driven. Keep this false until the user
+   * opens a Token/Context surface; live telemetry remains available regardless.
+   */
+  readonly enabled: boolean;
   /** Session being viewed; `undefined` means the live/current thread. */
   readonly viewedSessionId: SessionId | undefined;
   readonly liveSessionId: SessionId | undefined;
@@ -54,36 +68,62 @@ export function useViewedSessionTelemetry(options: {
    */
   readonly refreshToken?: number;
 }): ViewedSessionTelemetryState {
-  const { client, preview, viewedSessionId, liveSessionId, liveTelemetry } = options;
+  const { client, preview, enabled, viewedSessionId, liveSessionId, liveTelemetry } = options;
   const refreshToken = options.refreshToken ?? 0;
   const generationRef = useRef(0);
-  /** Completed results cached per sessionId for this page lifecycle. */
+  /** Completed results cached per sessionId for this page lifecycle, LRU-capped. */
   const cacheRef = useRef(new Map<string, CachedResult>());
+  /** Closing/reopening a panel joins the existing Host read instead of probing twice. */
+  const inFlightRef = useRef(new Map<string, InFlightRead>());
   const [offline, setOffline] = useState<{ sessionId: string; result: CachedResult } | { sessionId: string; failed: true } | undefined>();
 
   const viewingLive = viewedSessionId === undefined || viewedSessionId === liveSessionId;
   const targetSessionId = viewedSessionId ?? (viewingLive ? liveSessionId : undefined);
 
   useEffect(() => {
-    if (preview || client === null || targetSessionId === undefined) return;
+    if (!enabled || preview || client === null || targetSessionId === undefined) return;
     const shouldQuery = !viewingLive || refreshToken > 0;
     if (!shouldQuery) return;
     const generation = ++generationRef.current;
-    const cached = refreshToken === 0 ? cacheRef.current.get(targetSessionId) : undefined;
+    const cachedEntry = cacheRef.current.get(targetSessionId);
+    const cached = cachedEntry?.refreshToken === refreshToken ? cachedEntry : undefined;
     if (cached !== undefined) {
+      // Touch the entry so the cap is a real LRU rather than insertion order.
+      cacheRef.current.delete(targetSessionId);
+      cacheRef.current.set(targetSessionId, cached);
       setOffline({ sessionId: targetSessionId, result: cached });
       return;
     }
-    if (refreshToken > 0) cacheRef.current.delete(targetSessionId);
+    cacheRef.current.delete(targetSessionId);
     if (!viewingLive) setOffline(undefined);
     let cancelled = false;
     void (async () => {
       try {
-        const result = await client.query("session.telemetry.read", { sessionId: targetSessionId });
-        // A completed result is valid for its sessionId even if the user
-        // navigated away; only applying it to the view is generation-gated.
-        const entry: CachedResult = { source: result.source, telemetry: result.telemetry };
-        cacheRef.current.set(targetSessionId, entry);
+        const existing = inFlightRef.current.get(targetSessionId);
+        let request = existing?.refreshToken === refreshToken ? existing : undefined;
+        if (request === undefined) {
+          const promise = client.query("session.telemetry.read", { sessionId: targetSessionId }).then((result) => {
+            const entry: CachedResult = { source: result.source, telemetry: result.telemetry, refreshToken };
+            // A superseded refresh must not overwrite its newer result. A read
+            // completed after navigation is still useful in the bounded cache.
+            if (inFlightRef.current.get(targetSessionId)?.promise === promise) {
+              cacheRef.current.set(targetSessionId, entry);
+              while (cacheRef.current.size > VIEWED_TELEMETRY_CACHE_MAX) {
+                const oldest = cacheRef.current.keys().next().value;
+                if (oldest === undefined) break;
+                cacheRef.current.delete(oldest);
+              }
+            }
+            return entry;
+          }).finally(() => {
+            if (inFlightRef.current.get(targetSessionId)?.promise === promise) {
+              inFlightRef.current.delete(targetSessionId);
+            }
+          });
+          request = { refreshToken, promise };
+          inFlightRef.current.set(targetSessionId, request);
+        }
+        const entry = await request.promise;
         if (cancelled || generation !== generationRef.current) return;
         setOffline({ sessionId: targetSessionId, result: entry });
       } catch {
@@ -94,7 +134,7 @@ export function useViewedSessionTelemetry(options: {
     return () => {
       cancelled = true;
     };
-  }, [client, preview, viewingLive, targetSessionId, refreshToken]);
+  }, [client, enabled, preview, viewingLive, targetSessionId, refreshToken]);
 
   if (preview) return IDENTITY;
   const read = offline !== undefined && offline.sessionId === targetSessionId && !("failed" in offline)
@@ -106,7 +146,9 @@ export function useViewedSessionTelemetry(options: {
     const fromRead = read !== undefined && telemetry === read.telemetry;
     return { status: "live", source: fromRead ? read.source : "live", telemetry };
   }
-  if (offline === undefined || offline.sessionId !== viewedSessionId) return { status: "loading" };
+  if (offline === undefined || offline.sessionId !== viewedSessionId) {
+    return { status: enabled ? "loading" : "idle" };
+  }
   if ("failed" in offline) return { status: "unavailable" };
   return { status: "ready", source: offline.result.source, telemetry: offline.result.telemetry };
 }

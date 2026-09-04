@@ -37,6 +37,8 @@ import type {
   ModelRoleStorage,
   ModelRolesWriteInput,
   ModelWebSearchSetInput,
+  ModelWebSearchCredentialSetInput,
+  ModelWebSearchCredentialRemoveInput,
   WebSearchConfigReadModel,
 } from "@omp-studio/client-contract";
 import { isModelEnvConfigName, parseCacheThinkingEfforts, parseModelThinkingEfforts } from "@omp-studio/client-contract";
@@ -124,7 +126,7 @@ const WEB_SEARCH_ENV_CREDENTIALS: Readonly<Record<string, readonly string[]>> = 
 /** agent.db auth ids that satisfy a search provider's credential (OAuth/登录). */
 const WEB_SEARCH_AUTH_IDS: Readonly<Record<string, readonly string[]>> = {
   anthropic: ["anthropic"],
-  gemini: ["google-gemini-cli", "google-antigravity", "google-gemini", "gemini"],
+  gemini: ["google-gemini-cli", "google-antigravity", "google-gemini", "gemini", "google"],
   codex: ["openai-codex"],
   xai: ["xai"],
   zai: ["zai"],
@@ -139,6 +141,52 @@ const WEB_SEARCH_AUTH_IDS: Readonly<Record<string, readonly string[]>> = {
   brave: ["brave"],
   perplexity: ["perplexity"],
 };
+
+/**
+ * agent.db provider id each engine reads an `api_key` credential from
+ * (mirrors the upstream `authStorage.getApiKey(<id>)` calls). Engines absent
+ * here (codex = ChatGPT OAuth only; searxng = endpoint settings; scraper
+ * engines) have no direct api-key path.
+ */
+const WEB_SEARCH_APIKEY_IDS: Readonly<Record<string, string>> = {
+  perplexity: "perplexity",
+  gemini: "google",
+  anthropic: "anthropic",
+  xai: "xai",
+  zai: "zai",
+  exa: "exa",
+  tinyfish: "tinyfish",
+  jina: "jina",
+  kagi: "kagi",
+  tavily: "tavily",
+  firecrawl: "firecrawl",
+  brave: "brave",
+  kimi: "kimi-code",
+  parallel: "parallel",
+  synthetic: "synthetic",
+};
+
+/**
+ * `omp login` ids actually offered in the modal. Restricted to ids that exist
+ * in the runtime's OAuth registry (`packages/ai/src/registry/*` with a
+ * `login`) AND whose flow emits the browser URL before any terminal prompt —
+ * RPC-mode login rejects prompt-first providers (google-gemini-cli) and
+ * unknown ids (brave/firecrawl/jina/tinyfish) outright. Keyless or env-only
+ * engines keep working through the API-key / env paths.
+ */
+const WEB_SEARCH_OAUTH_LOGIN_IDS: ReadonlySet<string> = new Set([
+  "perplexity",
+  "anthropic",
+  "openai-codex",
+  "xai",
+  "zai",
+  "exa",
+  "kagi",
+  "tavily",
+  "kimi-code",
+  "parallel",
+  "synthetic",
+]);
 
 function hasWebSearchCredential(
   providerId: string,
@@ -501,6 +549,42 @@ interface ProviderYaml {
   transport?: string;
 }
 
+function webSearchProviderRecord(
+  provider: { id: string; name: string; description: string; credentialFree: boolean },
+  authenticated: ReadonlySet<string>,
+  authKinds: ReadonlyMap<string, ReadonlySet<string>>,
+) {
+  const envKeys = WEB_SEARCH_ENV_CREDENTIALS[provider.id] ?? [];
+  const authIds = WEB_SEARCH_AUTH_IDS[provider.id] ?? [];
+  const firstAuthId = authIds[0];
+  const loginId = firstAuthId !== undefined && WEB_SEARCH_OAUTH_LOGIN_IDS.has(firstAuthId) ? firstAuthId : undefined;
+  const apiKeyId = WEB_SEARCH_APIKEY_IDS[provider.id];
+  const hasEnv = envKeys.some((name) => (process.env[name] ?? "").length > 0);
+  const hasApiKeyRow = Boolean(apiKeyId && authKinds.get(apiKeyId)?.has("api_key"))
+    || authIds.some((id) => authKinds.get(id)?.has("api_key"));
+  const hasOAuthRow = authIds.some((id) => authKinds.get(id)?.has("oauth"));
+  const credentialKind = provider.credentialFree
+    ? undefined
+    : hasEnv
+      ? "env" as const
+      : hasApiKeyRow
+        ? "api-key" as const
+        : hasOAuthRow
+          ? "oauth" as const
+          : undefined;
+  return {
+    id: provider.id,
+    name: provider.name,
+    description: provider.description,
+    credentialFree: provider.credentialFree,
+    hasCredential: hasWebSearchCredential(provider.id, provider, authenticated),
+    envKeys,
+    ...(loginId !== undefined ? { loginId } : {}),
+    ...(apiKeyId !== undefined ? { apiKeyId } : {}),
+    ...(credentialKind !== undefined ? { credentialKind } : {}),
+  };
+}
+
 function emptyWebSearch(): WebSearchConfigReadModel {
   return {
     enabled: true,
@@ -508,13 +592,7 @@ function emptyWebSearch(): WebSearchConfigReadModel {
     exclude: [],
     timeoutSeconds: 60,
     geminiModel: "",
-    providers: WEB_SEARCH_PROVIDER_CATALOG.map((provider) => ({
-      id: provider.id,
-      name: provider.name,
-      description: provider.description,
-      credentialFree: provider.credentialFree,
-      hasCredential: provider.credentialFree,
-    })),
+    providers: WEB_SEARCH_PROVIDER_CATALOG.map((provider) => webSearchProviderRecord(provider, new Set(), new Map())),
     advanced: {
       searxng: { endpoint: "", tokenSet: false, basicUsername: "", passwordSet: false },
       exa: { enabled: true, searchDelayMs: 1000 },
@@ -1594,10 +1672,12 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     return { text, hash: hashText(text), root };
   }
 
-  async function readRolesFromConfigFile(configPath: string): Promise<Record<string, string>> {
+  type ParsedConfig = Record<string, unknown>;
+
+  async function readRolesFromConfigFile(configPath: string, parsedOverride?: ParsedConfig): Promise<Record<string, string>> {
     try {
-      const file = await readYamlFile(configPath);
-      const roles = asRecord(file.root.modelRoles);
+      const parsed = parsedOverride ?? (await readYamlFile(configPath)).root;
+      const roles = asRecord(parsed.modelRoles as YamlValue | undefined);
       if (!roles) return {};
       const mapped: Record<string, string> = {};
       for (const [key, value] of Object.entries(roles)) {
@@ -1609,12 +1689,11 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     }
   }
 
-  async function readStringList(configPath: string, key: string): Promise<string[]> {
+  async function readStringList(configPath: string, key: string, parsedOverride?: ParsedConfig): Promise<string[]> {
     try {
-      const text = await readFile(configPath, "utf8");
-      const parsed = parseYaml(text) as unknown;
+      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-      const value = (parsed as Record<string, unknown>)[key];
+      const value = (parsed as ParsedConfig)[key];
       if (!Array.isArray(value)) return [];
       return value.filter((item): item is string => typeof item === "string");
     } catch {
@@ -1642,8 +1721,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     await writeConfigStringList(configPath, "disabledProviders", next);
   }
 
-  async function readCycleOrder(configPath: string): Promise<string[]> {
-    return readStringList(configPath, "cycleOrder");
+  async function readCycleOrder(configPath: string, parsedOverride?: ParsedConfig): Promise<string[]> {
+    return readStringList(configPath, "cycleOrder", parsedOverride);
   }
 
   async function readModelsFile(modelsPath: string): Promise<{ text: string; hash: string; root: Record<string, YamlValue> }> {
@@ -1697,9 +1776,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     await writeFile(configPath, text, "utf8");
   }
 
-  async function readScalar(configPath: string, key: string): Promise<string | undefined> {
+  async function readScalar(configPath: string, key: string, parsedOverride?: ParsedConfig): Promise<string | undefined> {
     try {
-      const parsed = parseYaml(await readConfigText(configPath)) as unknown;
+      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
       const value = (parsed as Record<string, unknown>)[key];
       return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -1709,9 +1788,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
   }
 
   /** Walk a dotted path into parsed config.yml (e.g. ["providers", "webSearchOrder"]). */
-  async function readNested(configPath: string, path: readonly string[]): Promise<unknown> {
+  async function readNested(configPath: string, path: readonly string[], parsedOverride?: ParsedConfig): Promise<unknown> {
     try {
-      const parsed = parseYaml(await readConfigText(configPath)) as unknown;
+      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
       let current: unknown = parsed;
       for (const key of path) {
@@ -1724,62 +1803,58 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     }
   }
 
-  async function readNestedStringList(configPath: string, path: readonly string[]): Promise<string[]> {
-    const value = await readNested(configPath, path);
+  async function readNestedStringList(configPath: string, path: readonly string[], parsedOverride?: ParsedConfig): Promise<string[]> {
+    const value = await readNested(configPath, path, parsedOverride);
     if (!Array.isArray(value)) return [];
     return value.filter((item): item is string => typeof item === "string" && item.length > 0);
   }
 
-  async function readNestedBool(configPath: string, path: readonly string[], fallback: boolean): Promise<boolean> {
-    const value = await readNested(configPath, path);
+  async function readNestedBool(configPath: string, path: readonly string[], fallback: boolean, parsedOverride?: ParsedConfig): Promise<boolean> {
+    const value = await readNested(configPath, path, parsedOverride);
     return typeof value === "boolean" ? value : fallback;
   }
 
-  async function readNestedNumber(configPath: string, path: readonly string[], fallback: number): Promise<number> {
-    const value = await readNested(configPath, path);
+  async function readNestedNumber(configPath: string, path: readonly string[], fallback: number, parsedOverride?: ParsedConfig): Promise<number> {
+    const value = await readNested(configPath, path, parsedOverride);
     return typeof value === "number" && Number.isFinite(value) ? value : fallback;
   }
 
-  async function readNestedString(configPath: string, path: readonly string[]): Promise<string> {
-    const value = await readNested(configPath, path);
+  async function readNestedString(configPath: string, path: readonly string[], parsedOverride?: ParsedConfig): Promise<string> {
+    const value = await readNested(configPath, path, parsedOverride);
     return typeof value === "string" ? value : "";
   }
 
   async function readWebSearch(
     configPath: string,
     authenticated: ReadonlySet<string>,
+    authKinds: ReadonlyMap<string, ReadonlySet<string>>,
+    parsedOverride?: ParsedConfig,
   ): Promise<WebSearchConfigReadModel> {
-    const enabled = await readNestedBool(configPath, ["web_search", "enabled"], true);
-    const order = await readNestedStringList(configPath, ["providers", "webSearchOrder"]);
-    const exclude = await readNestedStringList(configPath, ["providers", "webSearchExclude"]);
-    const timeoutSeconds = await readNestedNumber(configPath, ["providers", "webSearchTimeoutSeconds"], 60);
-    const geminiModel = await readNestedString(configPath, ["providers", "webSearchGeminiModel"]);
-    const searxngEndpoint = await readNestedString(configPath, ["searxng", "endpoint"]);
-    const searxngTokenSet = Boolean(await readNestedString(configPath, ["searxng", "token"]));
-    const searxngBasicUsername = await readNestedString(configPath, ["searxng", "basicUsername"]);
-    const searxngPasswordSet = Boolean(await readNestedString(configPath, ["searxng", "basicPassword"]));
-    const searxngCategories = await readNestedString(configPath, ["searxng", "categories"]);
-    const searxngEngines = await readNestedString(configPath, ["searxng", "engines"]);
-    const searxngLanguage = await readNestedString(configPath, ["searxng", "language"]);
+    const enabled = await readNestedBool(configPath, ["web_search", "enabled"], true, parsedOverride);
+    const order = await readNestedStringList(configPath, ["providers", "webSearchOrder"], parsedOverride);
+    const exclude = await readNestedStringList(configPath, ["providers", "webSearchExclude"], parsedOverride);
+    const timeoutSeconds = await readNestedNumber(configPath, ["providers", "webSearchTimeoutSeconds"], 60, parsedOverride);
+    const geminiModel = await readNestedString(configPath, ["providers", "webSearchGeminiModel"], parsedOverride);
+    const searxngEndpoint = await readNestedString(configPath, ["searxng", "endpoint"], parsedOverride);
+    const searxngTokenSet = Boolean(await readNestedString(configPath, ["searxng", "token"], parsedOverride));
+    const searxngBasicUsername = await readNestedString(configPath, ["searxng", "basicUsername"], parsedOverride);
+    const searxngPasswordSet = Boolean(await readNestedString(configPath, ["searxng", "basicPassword"], parsedOverride));
+    const searxngCategories = await readNestedString(configPath, ["searxng", "categories"], parsedOverride);
+    const searxngEngines = await readNestedString(configPath, ["searxng", "engines"], parsedOverride);
+    const searxngLanguage = await readNestedString(configPath, ["searxng", "language"], parsedOverride);
     // safesearch 0 is a valid level; only absent/invalid values fall back to undefined.
-    const safesearchRaw = await readNested(configPath, ["searxng", "safesearch"]);
+    const safesearchRaw = await readNested(configPath, ["searxng", "safesearch"], parsedOverride);
     const searxngSafesearch =
       (safesearchRaw === 0 || safesearchRaw === 1 || safesearchRaw === 2) ? safesearchRaw : undefined;
-    const exaEnabled = await readNestedBool(configPath, ["exa", "enabled"], true);
-    const exaSearchDelayMs = await readNestedNumber(configPath, ["exa", "searchDelayMs"], 1000);
+    const exaEnabled = await readNestedBool(configPath, ["exa", "enabled"], true, parsedOverride);
+    const exaSearchDelayMs = await readNestedNumber(configPath, ["exa", "searchDelayMs"], 1000, parsedOverride);
     return {
       enabled,
       order,
       exclude,
       timeoutSeconds,
       geminiModel,
-      providers: WEB_SEARCH_PROVIDER_CATALOG.map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        description: provider.description,
-        credentialFree: provider.credentialFree,
-        hasCredential: hasWebSearchCredential(provider.id, provider, authenticated),
-      })),
+      providers: WEB_SEARCH_PROVIDER_CATALOG.map((provider) => webSearchProviderRecord(provider, authenticated, authKinds)),
       advanced: {
         searxng: {
           endpoint: searxngEndpoint,
@@ -1796,9 +1871,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     };
   }
 
-  async function readFallback(configPath: string): Promise<{ chains: Record<string, string[]>; revertPolicy: ModelFallbackRevertPolicy }> {
+  async function readFallback(configPath: string, parsedOverride?: ParsedConfig): Promise<{ chains: Record<string, string[]>; revertPolicy: ModelFallbackRevertPolicy }> {
     try {
-      const parsed = parseYaml(await readConfigText(configPath)) as unknown;
+      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
         return { chains: {}, revertPolicy: "cooldown-expiry" };
       }
@@ -1818,9 +1893,9 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     }
   }
 
-  async function readModelTags(configPath: string): Promise<Record<string, { name: string; desc?: string; color?: string }>> {
+  async function readModelTags(configPath: string, parsedOverride?: ParsedConfig): Promise<Record<string, { name: string; desc?: string; color?: string }>> {
     try {
-      const parsed = parseYaml(await readConfigText(configPath)) as unknown;
+      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
       const tags = (parsed as Record<string, unknown>).modelTags;
       if (!tags || typeof tags !== "object" || Array.isArray(tags)) return {};
@@ -1878,6 +1953,132 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     }
   }
 
+  /** provider → enabled credential types ({"api_key","oauth"}) in agent.db. */
+  async function readAuthCredentialKinds(agentDir: string): Promise<Map<string, Set<string>>> {
+    const db = await openAuthDb(agentDir, true);
+    if (!db) return new Map();
+    try {
+      const rows = db
+        .prepare("SELECT DISTINCT provider, credential_type FROM auth_credentials WHERE disabled_cause IS NULL")
+        .all() as unknown as Array<{ provider: string; credential_type: string }>;
+      const kinds = new Map<string, Set<string>>();
+      for (const row of rows) {
+        if (typeof row.provider !== "string" || row.provider.length === 0) continue;
+        const set = kinds.get(row.provider) ?? new Set<string>();
+        set.add(row.credential_type);
+        kinds.set(row.provider, set);
+      }
+      return kinds;
+    } catch {
+      return new Map();
+    } finally {
+      try {
+        db.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async function readAuthData(agentDir: string): Promise<{
+    authenticated: Set<string>;
+    authKinds: Map<string, Set<string>>;
+  }> {
+    const authenticated = new Set<string>();
+    const authKinds = new Map<string, Set<string>>();
+    const db = await openAuthDb(agentDir, true);
+    if (!db) return { authenticated, authKinds };
+    try {
+      const providers = db
+        .prepare("SELECT DISTINCT provider FROM auth_credentials WHERE disabled_cause IS NULL")
+        .all() as unknown as Array<{ provider: string }>;
+      for (const row of providers) {
+        if (typeof row.provider !== "string" || row.provider.length === 0) continue;
+        authenticated.add(row.provider);
+      }
+      try {
+        const rows = db
+          .prepare("SELECT DISTINCT provider, credential_type FROM auth_credentials WHERE disabled_cause IS NULL")
+          .all() as unknown as Array<{ provider: string; credential_type: string }>;
+        for (const row of rows) {
+          if (typeof row.provider !== "string" || row.provider.length === 0) continue;
+          authenticated.add(row.provider);
+          if (typeof row.credential_type !== "string" || row.credential_type.length === 0) continue;
+          const kinds = authKinds.get(row.provider) ?? new Set<string>();
+          kinds.add(row.credential_type);
+          authKinds.set(row.provider, kinds);
+        }
+      } catch {
+        // Older auth databases may not have credential_type; provider auth is
+        // still valid and is already populated by the first query.
+      }
+    } catch {
+      // Keep empty auth state, matching the forgiving individual readers.
+    } finally {
+      try {
+        db.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    return { authenticated, authKinds };
+  }
+
+  /**
+   * Store an api_key credential for a search engine in agent.db, mirroring the
+   * upstream `upsertAuthCredentialForProvider` row shape (identity_key NULL,
+   * data = JSON credential). Reviving a disabled row keeps one key per engine.
+   */
+  async function upsertSearchApiKey(agentDir: string, authId: string, apiKey: string): Promise<void> {
+    const db = await openAuthDb(agentDir, false);
+    if (!db) throw { code: "UNAVAILABLE", message: "未找到本机 auth 存储（agent.db），无法保存密钥。" };
+    try {
+      const data = JSON.stringify({ type: "api_key", key: apiKey });
+      const existing = db
+        .prepare("SELECT id FROM auth_credentials WHERE provider = ? AND credential_type = 'api_key' ORDER BY id LIMIT 1")
+        .get(authId) as { id: number } | undefined;
+      if (existing) {
+        db.prepare(
+          "UPDATE auth_credentials SET data = ?, disabled_cause = NULL, updated_at = strftime('%s','now') WHERE id = ?",
+        ).run(data, existing.id);
+      } else {
+        db.prepare(
+          "INSERT INTO auth_credentials (provider, credential_type, data, identity_key, created_at, updated_at) VALUES (?, 'api_key', ?, NULL, strftime('%s','now'), strftime('%s','now'))",
+        ).run(authId, data);
+      }
+    } catch {
+      throw { code: "UNAVAILABLE", message: "无法写入 auth 存储（agent.db）。请确认磁盘可写且没有其他 omp 进程占用。" };
+    } finally {
+      try {
+        db.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  /** Soft-delete the api_key credential of a search engine (same tombstone style as logout). */
+  async function removeSearchApiKey(agentDir: string, authId: string): Promise<number> {
+    const db = await openAuthDb(agentDir, false);
+    if (!db) throw { code: "UNAVAILABLE", message: "未找到本机 auth 存储（agent.db）。" };
+    try {
+      const result = db
+        .prepare(
+          "UPDATE auth_credentials SET disabled_cause = ?, updated_at = strftime('%s','now') WHERE provider = ? AND credential_type = 'api_key' AND disabled_cause IS NULL",
+        )
+        .run("removed by omp-studio", authId) as { changes?: number };
+      return typeof result.changes === "number" ? result.changes : 0;
+    } catch {
+      throw { code: "UNAVAILABLE", message: "无法更新 auth 存储（agent.db）。" };
+    } finally {
+      try {
+        db.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   async function logoutAuth(agentDir: string, providerId: string): Promise<number> {
     const db = await openAuthDb(agentDir, false);
     if (!db) throw { code: "UNAVAILABLE", message: "未找到本机 auth 存储（agent.db）。请在终端运行 /logout。" };
@@ -1924,8 +2125,15 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         const fallback = emptyModel(`models.yml 校验失败：${reason}`, false);
         return { ...fallback, generatedModelsYml: "# models.yml could not be parsed\n" };
       }
-      const modelRolesGlobal = await readRolesFromConfigFile(paths.configPath);
-      const storage = ((await readScalar(paths.configPath, "modelRoleStorage")) === "project" ? "project" : "global") as ModelRoleStorage;
+      let configRoot: ParsedConfig = {};
+      try {
+        const parsed = parseYaml(await readConfigText(paths.configPath)) as unknown;
+        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) configRoot = parsed as ParsedConfig;
+      } catch {
+        // Keep the same forgiving behavior as the individual config readers.
+      }
+      const modelRolesGlobal = await readRolesFromConfigFile(paths.configPath, configRoot);
+      const storage = ((await readScalar(paths.configPath, "modelRoleStorage", configRoot)) === "project" ? "project" : "global") as ModelRoleStorage;
       const cwd = cwdOf();
       let modelRoles = { ...modelRolesGlobal };
       const projectKeys = new Set<string>();
@@ -1936,13 +2144,16 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
           projectKeys.add(key);
         }
       }
-      const cycleOrder = await readCycleOrder(paths.configPath);
-      const modelProviderOrder = await readStringList(paths.configPath, "modelProviderOrder");
-      const fallback = await readFallback(paths.configPath);
-      const tags = await readModelTags(paths.configPath);
-      const disabled = new Set(await readStringList(paths.configPath, "disabledProviders"));
-      const authenticated = await readAuthenticatedProviders(paths.agentDir);
-      const available = await getAvailable(join(paths.agentDir, "models.db"));
+      const cycleOrder = await readCycleOrder(paths.configPath, configRoot);
+      const modelProviderOrder = await readStringList(paths.configPath, "modelProviderOrder", configRoot);
+      const fallback = await readFallback(paths.configPath, configRoot);
+      const tags = await readModelTags(paths.configPath, configRoot);
+      const disabled = new Set(await readStringList(paths.configPath, "disabledProviders", configRoot));
+      const [auth, available] = await Promise.all([
+        readAuthData(paths.agentDir),
+        getAvailable(join(paths.agentDir, "models.db")),
+      ]);
+      const { authenticated, authKinds } = auth;
       const providersMap = asRecord(file.root.providers) ?? {};
       const fromFile = Object.keys(providersMap).map((id) => providerFromYaml(id, asRecord(providersMap[id]) ?? {}, available, disabled, authenticated));
       const existing = new Set(fromFile.map((provider) => provider.id));
@@ -2006,7 +2217,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         ...roles.filter((role) => role.primary).map((role) => `  ${role.id}: ${role.primary}${role.thinking ? `:${role.thinking}` : ""}`),
         modelProviderOrder.length > 0 ? `modelProviderOrder:\n${modelProviderOrder.map((id) => `  - ${id}`).join("\n")}` : "",
       ].filter((line) => line.length > 0).join("\n") + "\n";
-      const webSearch: WebSearchConfigReadModel = await readWebSearch(paths.configPath, authenticated);
+      const webSearch: WebSearchConfigReadModel = await readWebSearch(paths.configPath, authenticated, authKinds, configRoot);
       return {
         providers,
         presets: PRESET_GROUPS,
@@ -2671,6 +2882,30 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       }
       await writeConfigText(paths.configPath, next);
       return { ...WRITE_OK, message: "已保存网络搜索配置" };
+    },
+
+    async setWebSearchApiKey(input: ModelWebSearchCredentialSetInput): Promise<ConfigWriteResult> {
+      const apiKey = input.apiKey.trim();
+      if (apiKey.length === 0) throw { code: "INVALID_INPUT", message: "API 密钥不能为空。" };
+      const apiKeyId = WEB_SEARCH_APIKEY_IDS[input.providerId];
+      if (apiKeyId === undefined) {
+        throw { code: "UNAVAILABLE", message: `${input.providerId} 不支持直接配置 API 密钥（仅 OAuth 或免凭证）。` };
+      }
+      const paths = await resolvePaths();
+      if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
+      await upsertSearchApiKey(paths.agentDir, apiKeyId, apiKey);
+      return { ...WRITE_OK, message: `已保存 ${input.providerId} 的 API 密钥` };
+    },
+
+    async removeWebSearchApiKey(input: ModelWebSearchCredentialRemoveInput): Promise<ConfigWriteResult> {
+      const apiKeyId = WEB_SEARCH_APIKEY_IDS[input.providerId];
+      if (apiKeyId === undefined) {
+        throw { code: "UNAVAILABLE", message: `${input.providerId} 没有可直接移除的 API 密钥。` };
+      }
+      const paths = await resolvePaths();
+      if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
+      const changes = await removeSearchApiKey(paths.agentDir, apiKeyId);
+      return { ...WRITE_OK, message: changes > 0 ? `已删除 ${input.providerId} 的 API 密钥` : `${input.providerId} 没有已保存的 API 密钥` };
     },
   };
 }

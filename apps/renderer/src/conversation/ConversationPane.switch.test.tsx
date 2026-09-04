@@ -254,4 +254,131 @@ describe("ConversationPane session switch", () => {
     expect(phase(view)).toBe("idle");
     expect(view.container.textContent).toContain("会话B消息");
   });
+
+  /** 给 pane 内部的 `.convo-scroll` 装上可控滚动度量（jsdom 不实现布局）。 */
+  function armScroller(view: ReturnType<typeof render>, initialTop = 0): { scrollTop: number } {
+    const el = view.container.querySelector<HTMLElement>(".convo-scroll");
+    if (!(el instanceof HTMLElement)) throw new Error("scroller not mounted");
+    const state = { scrollTop: initialTop };
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 600 });
+    Object.defineProperty(el, "scrollTop", { configurable: true, get: () => state.scrollTop, set: (v: number) => { state.scrollTop = v; } });
+    return state;
+  }
+
+  it("fades the welcome at its scroll position and lands the transcript at the bottom", () => {
+    vi.useFakeTimers();
+    const welcome = <div className="ce-stub">下午好，Studio</div>;
+    const nullSnapshot = (): ConversationSnapshot => ({
+      state: resetConversation(0, null, "unavailable"),
+      rows: [], demo: false, loadingOlder: false, identityKey: ":",
+    });
+    const phase = (view: ReturnType<typeof render>) =>
+      view.container.querySelector(".convo-body")?.getAttribute("data-phase");
+
+    const view = render(<ConversationPane snapshot={nullSnapshot()} welcome={welcome} forceWelcome onLoadOlder={() => {}} />);
+    settleLayout();
+    act(() => { vi.advanceTimersByTime(SWITCH_REVEAL_MS); });
+    expect(phase(view)).toBe("idle");
+    const scroll = armScroller(view);
+    // 用户把欢迎页滚到中间。
+    scroll.scrollTop = 500;
+
+    // 切到普通对话：淡出期间欢迎页停在 500，不被 stickToTail 拖到底部。
+    act(() => { view.rerender(pane(snapshot("b", "loading", []))); });
+    expect(phase(view)).toBe("leaving");
+    expect(scroll.scrollTop).toBe(500);
+    act(() => { vi.advanceTimersByTime(SWITCH_LEAVE_MS); });
+    expect(phase(view)).toBe("waiting");
+    act(() => { view.rerender(pane(snapshot("b", "ready", [userRow("会话B消息")]))); });
+    settleLayout();
+    act(() => { vi.advanceTimersByTime(SWITCH_REVEAL_MS); });
+    expect(phase(view)).toBe("idle");
+    // 新 transcript 在自己该在的位置：底部。
+    expect(scroll.scrollTop).toBe(2000);
+  });
+
+  it("reveals the welcome at its top when leaving a bottom-pinned transcript", () => {
+    vi.useFakeTimers();
+    const welcome = <div className="ce-stub">下午好，Studio</div>;
+    const nullSnapshot = (): ConversationSnapshot => ({
+      state: resetConversation(0, null, "unavailable"),
+      rows: [], demo: false, loadingOlder: false, identityKey: ":",
+    });
+    const phase = (view: ReturnType<typeof render>) =>
+      view.container.querySelector(".convo-body")?.getAttribute("data-phase");
+
+    const view = render(pane(snapshot("a", "ready", [userRow("会话A消息")])));
+    settleLayout();
+    act(() => { vi.advanceTimersByTime(SWITCH_REVEAL_MS); });
+    expect(phase(view)).toBe("idle");
+    // transcript 开场贴底（jsdom 不跑布局，贴底发生在 arm 之前，这里直接给定底部）。
+    const scroll = armScroller(view, 2000);
+    expect(scroll.scrollTop).toBe(2000);
+
+    // 切到新建对话：旧 transcript 停在底部原地淡出，滚动位置不动。
+    act(() => { view.rerender(<ConversationPane snapshot={nullSnapshot()} welcome={welcome} forceWelcome onLoadOlder={() => {}} />); });
+    expect(phase(view)).toBe("leaving");
+    expect(scroll.scrollTop).toBe(2000);
+    act(() => { vi.advanceTimersByTime(SWITCH_LEAVE_MS); });
+    // leaving 结束的那次提交里 pin 翻成 top：滚动归零，欢迎页在自己的顶部淡入。
+    // 欢迎页可画，不经过骨架，直接 settling。
+    expect(phase(view)).toBe("settling");
+    expect(scroll.scrollTop).toBe(0);
+    settleLayout();
+    act(() => { vi.advanceTimersByTime(SWITCH_REVEAL_MS); });
+    expect(phase(view)).toBe("idle");
+    expect(view.container.querySelector(".ce-stub")).not.toBeNull();
+    expect(scroll.scrollTop).toBe(0);
+  });
+
+  it("reports the on-screen welcome surface so the shell layout class never flips early", () => {
+    vi.useFakeTimers();
+    const welcome = <div className="ce-stub">下午好，Studio</div>;
+    const nullSnapshot = (): ConversationSnapshot => ({
+      state: resetConversation(0, null, "unavailable"),
+      rows: [], demo: false, loadingOlder: false, identityKey: ":",
+    });
+    const phase = (view: ReturnType<typeof render>) =>
+      view.container.querySelector(".convo-body")?.getAttribute("data-phase");
+    const onSurfaceWelcomeChange = vi.fn();
+
+    const view = render(
+      <ConversationPane snapshot={nullSnapshot()} welcome={welcome} forceWelcome onSurfaceWelcomeChange={onSurfaceWelcomeChange} onLoadOlder={() => {}} />,
+    );
+    settleLayout();
+    act(() => { vi.advanceTimersByTime(SWITCH_REVEAL_MS); });
+    expect(phase(view)).toBe("idle");
+    expect(onSurfaceWelcomeChange).toHaveBeenLastCalledWith(true);
+
+    // 切到普通对话：淡出期间仍是在屏的欢迎面——壳层不许提前撤下 is-empty。
+    let calls = onSurfaceWelcomeChange.mock.calls.length;
+    act(() => {
+      view.rerender(<ConversationPane snapshot={snapshot("b", "loading", [])} onSurfaceWelcomeChange={onSurfaceWelcomeChange} onLoadOlder={() => {}} />);
+    });
+    expect(phase(view)).toBe("leaving");
+    expect(onSurfaceWelcomeChange.mock.calls.length).toBe(calls);
+    act(() => { vi.advanceTimersByTime(SWITCH_LEAVE_MS); });
+    // leaving 结束、新面隐身挂载后才翻 false。
+    expect(phase(view)).toBe("waiting");
+    expect(onSurfaceWelcomeChange).toHaveBeenLastCalledWith(false);
+    // 让 B 真正画出来，才有下一方向可淡出的内容。
+    act(() => { view.rerender(<ConversationPane snapshot={snapshot("b", "ready", [userRow("会话B消息")])} onSurfaceWelcomeChange={onSurfaceWelcomeChange} onLoadOlder={() => {}} />); });
+    settleLayout();
+    act(() => { vi.advanceTimersByTime(SWITCH_REVEAL_MS); });
+    expect(phase(view)).toBe("idle");
+
+    // 反向：对话 → 欢迎页，淡出期间不上报 true，settling 才翻。
+    calls = onSurfaceWelcomeChange.mock.calls.length;
+    act(() => {
+      view.rerender(
+        <ConversationPane snapshot={nullSnapshot()} welcome={welcome} forceWelcome onSurfaceWelcomeChange={onSurfaceWelcomeChange} onLoadOlder={() => {}} />,
+      );
+    });
+    expect(phase(view)).toBe("leaving");
+    expect(onSurfaceWelcomeChange.mock.calls.length).toBe(calls);
+    act(() => { vi.advanceTimersByTime(SWITCH_LEAVE_MS); });
+    expect(phase(view)).toBe("settling");
+    expect(onSurfaceWelcomeChange).toHaveBeenLastCalledWith(true);
+  });
 });

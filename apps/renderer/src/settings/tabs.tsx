@@ -359,7 +359,7 @@ function RuntimeSpeculationRow({ runtime, demo, label, desc }: {
 /* ------------------------------------------------------------------ */
 
 const GENERAL_RESET_KEYS: readonly (keyof AppSettings)[] = [
-  "language", "theme", "density", "streaming", "toolActivity",
+  "language", "theme", "density", "streaming", "streamingCadenceHz", "toolActivity",
   "restoreLastProject", "restoreLastSession", "startupPage",
   "rememberLayout", "perProjectLayout",
   "notifyTaskDone", "notifyErrors", "notifyConfirmations", "notifyLongTasks",
@@ -414,6 +414,19 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
         </SettingRow>
         <SettingRow label={t("settings.general.streaming")} desc={t("settings.general.streamingDesc")} source={appSource(app, "streaming")}>
           <Switch checked={app.streaming} onChange={(streaming) => updateApp({ streaming })} label={t("settings.general.streaming")} />
+        </SettingRow>
+        <SettingRow label={t("settings.general.streamingCadence")} desc={t("settings.general.streamingCadenceDesc")} source={appSource(app, "streamingCadenceHz")}>
+          <AppSelect
+            label={t("settings.general.streamingCadence")}
+            value={String(app.streamingCadenceHz)}
+            options={[
+              ["30", t("settings.general.streamingCadence30")],
+              ["60", t("settings.general.streamingCadence60")],
+              ["90", t("settings.general.streamingCadence90")],
+              ["120", t("settings.general.streamingCadence120")],
+            ]}
+            onChange={(value) => updateApp({ streamingCadenceHz: Number(value) as AppSettings["streamingCadenceHz"] })}
+          />
         </SettingRow>
         <SettingRow label={t("settings.general.toolActivity")} desc={t("settings.general.toolActivityDesc")} source={appSource(app, "toolActivity")}>
           <AppSelect

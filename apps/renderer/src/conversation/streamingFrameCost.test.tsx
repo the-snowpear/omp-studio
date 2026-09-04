@@ -25,13 +25,15 @@ function assistantItem(id: string, tools: number): ConversationMessageItem {
 
 function scheduler() {
   let next = 1;
+  let time = 0;
   const callbacks = new Map<number, () => void>();
   return {
     frame: {
       request(callback: () => void) { const id = next++; callbacks.set(id, callback); return id; },
       cancel(id: number | ReturnType<typeof setTimeout>) { callbacks.delete(id as number); },
+      now: () => time,
     },
-    flush() { const queued = [...callbacks.values()]; callbacks.clear(); for (const callback of queued) callback(); },
+    flush(step = 1000 / 60) { time += step; const queued = [...callbacks.values()]; callbacks.clear(); for (const callback of queued) callback(); },
   };
 }
 

@@ -3,7 +3,8 @@
  * File/skill/agent serialize to Runtime tokens; mode capsules are omitted from prompt text.
  */
 
-export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+/** SVG 走视觉：Runtime 侧栅格化为 PNG 后再送模型（对齐上游 `:img` 选择器）。 */
+export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"] as const;
 
 export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number];
 

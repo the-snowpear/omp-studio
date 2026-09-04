@@ -2,16 +2,17 @@ import type { SessionHistoryEntry, SessionId, WorkspaceId } from "@omp-studio/cl
 
 export const PROVISIONAL_THREAD_TITLE_CODE_POINTS = 20;
 
+const DEFAULT_SESSION_TITLES = new Set(["未命名会话", "untitled session"]);
+
+/** Runtime/catalog placeholders are not authoritative auto-generated titles. */
+export function isPlaceholderSessionTitle(title: string | undefined): boolean {
+  const normalized = title?.replace(/\s+/gu, " ").trim();
+  if (normalized === undefined || normalized.length === 0) return true;
+  return DEFAULT_SESSION_TITLES.has(normalized.toLocaleLowerCase());
+}
+
 /** Renderer-owned title lifecycle; the history contract supplies the value. */
 export type SessionTitleState = "missing" | "stable";
-
-export type ProvisionalSessionTitleEnsureSnapshot = {
-  readonly sessionId: SessionId;
-  readonly sessionTitle?: string;
-  readonly sessionTitleSource?: "user" | "auto";
-  readonly isStreaming: boolean;
-  readonly isCompacting: boolean;
-};
 
 export type ProvisionalProjectThread = {
   readonly workspaceId: WorkspaceId;
@@ -24,37 +25,6 @@ export type ProvisionalProjectThread = {
 };
 
 export type ProvisionalProjectThreadCache = Readonly<Record<string, ProvisionalProjectThread>>;
-
-export function provisionalSessionTitleEnsureKey(sessionId: SessionId): string {
-  return String(sessionId);
-}
-
-/**
- * The Runtime may only be asked to synthesize a title once the accepted prompt
- * is idle and the live snapshot still represents the same session.  The
- * in-flight input is renderer-only bookkeeping; it prevents concurrent
- * duplicate commands while later authoritative Runtime state may retry.
- */
-export function shouldEnsureProvisionalSessionTitle(input: {
-  readonly preview: boolean;
-  readonly runtimeConnected: boolean;
-  readonly provisional: ProvisionalProjectThread | undefined;
-  readonly snapshot: ProvisionalSessionTitleEnsureSnapshot | undefined;
-  readonly inFlightSessionIds?: ReadonlySet<string>;
-}): boolean {
-  const thread = input.provisional;
-  const snapshot = input.snapshot;
-  if (input.preview || !input.runtimeConnected || thread === undefined || snapshot === undefined) return false;
-  if (!thread.submitted || thread.titleState !== "missing") return false;
-  if (thread.sessionId !== snapshot.sessionId) return false;
-  // A title source without the value can be a legacy/native snapshot in the
-  // middle of projection; do not race it with an automatic title command.
-  if (snapshot.sessionTitle !== undefined || snapshot.sessionTitleSource !== undefined) return false;
-  if (snapshot.isStreaming || snapshot.isCompacting) return false;
-  const key = provisionalSessionTitleEnsureKey(thread.sessionId);
-  if (input.inFlightSessionIds?.has(key) === true) return false;
-  return true;
-}
 
 export type ProvisionalProjectThreadChange = {
   readonly sessionId?: SessionId;
@@ -136,13 +106,19 @@ export function reconcileProvisionalProjectThread(
   });
   if (nextThread === undefined) return current;
   const previous = current[key];
-  const nextWithTitleState = previous !== undefined
+  const sameSession = previous !== undefined
     && previous.workspaceId === nextThread.workspaceId
-    && previous.sessionId === nextThread.sessionId
+    && previous.sessionId === nextThread.sessionId;
+  const freezePreviousPromptTitle = sameSession
+    && previous.titleState === "missing"
+    && !isPlaceholderSessionTitle(previous.title)
+    && (previous.submitted || nextThread.submitted);
+  const nextWithTitleState = sameSession
     ? {
       ...nextThread,
-      ...(previous.titleState === "stable" ? { title: previous.title } : {}),
+      ...(previous.titleState === "stable" || freezePreviousPromptTitle ? { title: previous.title } : {}),
       titleState: previous.titleState,
+      submitted: previous.submitted || nextThread.submitted,
     }
     : nextThread;
   if (
@@ -199,7 +175,7 @@ export function sidebarThreadTitle(
   if (
     provisional !== undefined
     && entry.sessionId === provisional.sessionId
-    && entry.title === undefined
+    && isPlaceholderSessionTitle(entry.title)
   ) {
     return provisional.title;
   }

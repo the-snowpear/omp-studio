@@ -97,6 +97,13 @@ export function buildStudioSessionTelemetry(input: BuildStudioSessionTelemetryIn
 					tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 					cost: 0,
 				};
+	// Both calls walk the context: `getSessionStats` ends in `getContextUsage()`,
+	// which is `getContextBreakdown()` again (session/session-stats.ts). The
+	// breakdown cannot be hoisted out of the duplication from here — the upstream
+	// `getSessionStats()` takes no arguments and its `contextUsage` carries only
+	// tokens/window/percent, not the per-category fields this telemetry reports.
+	// Removing the second walk means changing an upstream signature, which is a
+	// seam change, not an overlay one.
 	const context = typeof session.getContextBreakdown === "function" ? session.getContextBreakdown() : undefined;
 	const tokens = stats.tokens;
 	const contextKnown = context !== undefined && Number.isFinite(context.contextWindow) && context.contextWindow > 0;
@@ -130,15 +137,23 @@ export function buildStudioSessionTelemetry(input: BuildStudioSessionTelemetryIn
 	};
 	const rawMessages = session.messages;
 	const messages = (Array.isArray(rawMessages) ? rawMessages : []) as TelemetryUsageShape[];
-	const assistant = [...messages]
-		.reverse()
-		.find(
-			message =>
-				message.role === "assistant" &&
-				message.stopReason !== "aborted" &&
-				message.stopReason !== "error" &&
-				message.usage?.cost?.total !== undefined,
-		);
+	// Scan backwards in place. Copying and reversing the whole message array to
+	// find one message costs an allocation proportional to the session on every
+	// rebuild, and rebuilds run on every message/turn/compaction terminal.
+	let assistant: TelemetryUsageShape | undefined;
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (
+			message !== undefined &&
+			message.role === "assistant" &&
+			message.stopReason !== "aborted" &&
+			message.stopReason !== "error" &&
+			message.usage?.cost?.total !== undefined
+		) {
+			assistant = message;
+			break;
+		}
+	}
 	if (assistant?.usage) {
 		const usage = assistant.usage;
 		const completedAt =

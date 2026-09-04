@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { ClientBootstrap, ClientError, CommandRequestId, EventCursor, IdempotencyKey } from "@omp-studio/client-contract";
+import type { ClientBootstrap, ClientError, CommandRequestId, EventCursor, IdempotencyKey, ResidentsReadModel, WorkspaceId } from "@omp-studio/client-contract";
 import { privateEndpoint, type PlatformPort } from "@omp-studio/platform";
 import { AuthorityAlreadyOwnedError } from "@omp-studio/platform-win32";
 import {
@@ -198,7 +198,13 @@ function fakePrivateEndpoint(options: { fail?: boolean; releaseError?: Error } =
   };
 }
 
-function fakeSessionPort(options: { ready?: boolean; startError?: Error; stopError?: Error } = {}): {
+function fakeSessionPort(options: {
+  ready?: boolean;
+  startError?: Error;
+  stopError?: Error;
+  snapshot?: OperatorStateSnapshot;
+  listResidents?: () => ResidentsReadModel;
+} = {}): {
   port: DesktopRuntimeSessionPort;
   calls: string[];
   contexts: DesktopRuntimeSessionContext[];
@@ -210,7 +216,7 @@ function fakeSessionPort(options: { ready?: boolean; startError?: Error; stopErr
   return {
     calls,
     contexts,
-    beforeStop(hook: () => void) {
+    beforeStop(hook) {
       beforeStop = hook;
     },
     port: {
@@ -223,14 +229,15 @@ function fakeSessionPort(options: { ready?: boolean; startError?: Error; stopErr
         if (!options.ready) {
           return undefined;
         }
+        const snapshot = options.snapshot ?? SNAPSHOT;
         const session: DesktopRuntimeSession = {
           controller: {
-            refresh: async () => ({ commitSeq: 1, publishedAt: T0, snapshot: SNAPSHOT, terminalOutcomes: [] }),
+            refresh: async () => ({ commitSeq: 1, publishedAt: T0, snapshot, terminalOutcomes: [] }),
             invoke: async () => {
               throw new Error("unused in composition tests");
             },
             runtimeLost: () => [],
-            publication: () => ({ commitSeq: 1, publishedAt: T0, snapshot: SNAPSHOT, terminalOutcomes: [] }),
+            publication: () => ({ commitSeq: 1, publishedAt: T0, snapshot, terminalOutcomes: [] }),
             dispose: () => {},
           } as unknown as StudioRuntimeSessionController,
           hello: () => HELLO_VIEW,
@@ -249,6 +256,7 @@ function fakeSessionPort(options: { ready?: boolean; startError?: Error; stopErr
           throw options.stopError;
         }
       },
+      ...(options.listResidents === undefined ? {} : { listResidents: options.listResidents }),
     },
   };
 }
@@ -377,6 +385,56 @@ test("a trusted resolution creates the runtime session and bootstraps ready", as
       assert.equal(bootstrap.stateVersion, 1);
       assert.equal(lock.released, false);
       assert.deepEqual(endpoint.calls, ["endpoint.create"]);
+    });
+  });
+});
+
+test("isBusy reports streaming residents first and falls back to the current snapshot", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    await withTempExecutable(async (executablePath) => {
+      const baseOptions = () => ({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint().port,
+        resolver: { probe: fullParityProbe() },
+        preference: { kind: "system" as const, executable: executablePath, allowLimited: false },
+      });
+
+      const residentsWith = (phase: "running" | "compacting" | "waiting" | "idle"): ResidentsReadModel => ({
+        residents: [
+          {
+            sessionId: "sess-0002" as SessionId,
+            workspaceId: "ws-0001" as WorkspaceId,
+            phase,
+            pendingMessages: 0,
+            lastActivityAt: T0,
+          },
+        ],
+        activeSessionId: "sess-0002" as SessionId,
+        generatedAt: T0,
+      });
+
+      const withResidents = async (phase: "running" | "compacting" | "waiting" | "idle"): Promise<DesktopHostComposition> =>
+        createDesktopHostComposition({
+          ...baseOptions(),
+          runtimeSession: fakeSessionPort({ ready: true, listResidents: () => residentsWith(phase) }).port,
+        });
+
+      // Residents read model is authoritative when the port exposes one.
+      assert.equal((await withResidents("running")).isBusy(), true);
+      assert.equal((await withResidents("compacting")).isBusy(), true);
+      assert.equal((await withResidents("waiting")).isBusy(), false);
+      assert.equal((await withResidents("idle")).isBusy(), false);
+
+      // Without a broker view the current session snapshot decides.
+      const withSnapshot = async (snapshot: OperatorStateSnapshot): Promise<DesktopHostComposition> =>
+        createDesktopHostComposition({
+          ...baseOptions(),
+          runtimeSession: fakeSessionPort({ ready: true, snapshot }).port,
+        });
+      assert.equal((await withSnapshot({ ...SNAPSHOT, isStreaming: true })).isBusy(), true);
+      assert.equal((await withSnapshot({ ...SNAPSHOT, isCompacting: true })).isBusy(), true);
+      assert.equal((await withSnapshot(SNAPSHOT)).isBusy(), false);
     });
   });
 });

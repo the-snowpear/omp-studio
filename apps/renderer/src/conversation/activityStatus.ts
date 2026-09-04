@@ -101,26 +101,87 @@ export function hasLiveActivityProgress(state: ConversationState): boolean {
  * Latch from send until the run ends. Covers the receipt → isStreaming gap
  * after the optimistic user row is reconciled and before the first assistant
  * event: the line stays on `working` instead of disappearing.
+ *
+ * `cancelGeneration` is the same escape hatch `reduceActivityRetry` has, for the
+ * same reason: a latch armed while `streaming` was false has no falling edge to
+ * clear it, so a user abort has to be ground truth on its own.
  */
 export function reduceAwaitingTurn(
-  prev: { readonly latched: boolean; readonly wasStreaming: boolean },
+  prev: { readonly latched: boolean; readonly wasStreaming: boolean; readonly cancelGeneration?: number },
   input: {
     readonly sending: boolean;
     readonly pending: boolean;
     readonly streaming: boolean;
     readonly failed: boolean;
+    readonly cancelGeneration?: number;
   },
-): { readonly latched: boolean; readonly wasStreaming: boolean } {
+): { readonly latched: boolean; readonly wasStreaming: boolean; readonly cancelGeneration: number } {
+  const cancelGeneration = input.cancelGeneration ?? 0;
+  if (cancelGeneration > (prev.cancelGeneration ?? 0)) {
+    // Abort accepted mid-stream still re-latches from `streaming` on the next
+    // pass — the run is genuinely winding down — and clears on its falling edge.
+    return { latched: false, wasStreaming: input.streaming, cancelGeneration };
+  }
   if (input.failed && !input.sending && !input.streaming) {
-    return { latched: false, wasStreaming: input.streaming };
+    return { latched: false, wasStreaming: input.streaming, cancelGeneration };
   }
   if (prev.wasStreaming && !input.streaming && !input.sending && !input.pending) {
-    return { latched: false, wasStreaming: false };
+    return { latched: false, wasStreaming: false, cancelGeneration };
   }
   return {
     latched: prev.latched || input.sending || input.pending || input.streaming,
     wasStreaming: input.streaming,
+    cancelGeneration,
   };
+}
+
+/** Who the run signal is currently believed from. See {@link reduceRunStreaming}. */
+export type RunTrust = "early" | "runtime-live" | "runtime-settled";
+
+/**
+ * Whether a run is live, and whether the Runtime has affirmatively settled it.
+ *
+ * Residual live-projection state (`openTurnItems`, folded tools) is an EARLY
+ * signal only: it exists to cover the send → `isStreaming` snapshot gap. A turn
+ * whose close event never arrives leaves that state behind forever — a
+ * retryable provider error parks the logical turn on `agent_end{isTerminal:
+ * false}` and it is closed only by the terminal `agent_end` of the scheduled
+ * continuation, which a user abort supersedes — so trusting it *after* the
+ * Runtime reports idle pins `working` and the stop button up until the
+ * conversation store is rebuilt (leave the session and come back). Once the
+ * Runtime has reported streaming for this run and then reported idle, its
+ * verdict wins.
+ *
+ * A later rising edge of the conversation signal is new information (an
+ * agent-initiated turn whose events beat the snapshot), not residue, so it
+ * re-arms the early path.
+ */
+export function reduceRunStreaming(
+  prev: { readonly identityKey: string; readonly trust: RunTrust; readonly conversationLive: boolean },
+  input: { readonly identityKey: string; readonly runtimeStreaming: boolean; readonly conversationLive: boolean },
+): {
+  readonly identityKey: string;
+  readonly trust: RunTrust;
+  readonly conversationLive: boolean;
+  readonly streaming: boolean;
+  readonly settled: boolean;
+} {
+  const hold: { readonly trust: RunTrust; readonly conversationLive: boolean } = prev.identityKey === input.identityKey
+    ? prev
+    : { trust: "early", conversationLive: false };
+  const next = (trust: RunTrust, streaming: boolean) => ({
+    identityKey: input.identityKey,
+    trust,
+    conversationLive: input.conversationLive,
+    streaming,
+    settled: trust === "runtime-settled",
+  });
+  if (input.runtimeStreaming) return next("runtime-live", true);
+  if (hold.trust === "runtime-live") return next("runtime-settled", false);
+  if (hold.trust === "runtime-settled") {
+    return input.conversationLive && !hold.conversationLive ? next("early", true) : next("runtime-settled", false);
+  }
+  return next("early", input.conversationLive);
 }
 
 /**

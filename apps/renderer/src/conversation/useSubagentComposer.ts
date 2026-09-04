@@ -160,9 +160,9 @@ export function useSubagentComposer(input: {
       setDraft(result.composer);
       return;
     }
-    if (!queueEnabled || queueKey === undefined) return;
     const payload = takeSnapshot();
     if (snapshotIsEmpty(payload) || subagentComposerText(payload).kind === "empty") return;
+    if (!input.running || queueKey === undefined) return;
     seqRef.current += 1;
     setQueued((queue) => [...queue, queueEntryOf(payload, seqRef.current, queueKey)]);
     clearDraft();

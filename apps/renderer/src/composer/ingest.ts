@@ -20,7 +20,7 @@ export function chipIconName(kind: ComposerChipKind): string {
 
 export function isImageFile(file: File): boolean {
   if (isImageMimeType(file.type)) return true;
-  return /\.(png|jpe?g|gif|webp)$/iu.test(file.name);
+  return /\.(png|jpe?g|gif|webp|svg|svgz)$/iu.test(file.name);
 }
 
 function mimeFromFile(file: File): PromptImage["mimeType"] | null {
@@ -30,6 +30,8 @@ function mimeFromFile(file: File): PromptImage["mimeType"] | null {
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
   if (lower.endsWith(".gif")) return "image/gif";
   if (lower.endsWith(".webp")) return "image/webp";
+  // SVG 一律走 bytes + Runtime 栅格化，磁盘路径 @mention 的文本引用不受影响。
+  if (lower.endsWith(".svg") || lower.endsWith(".svgz")) return "image/svg+xml";
   return null;
 }
 

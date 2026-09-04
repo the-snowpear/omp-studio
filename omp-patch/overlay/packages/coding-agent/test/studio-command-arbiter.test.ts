@@ -177,7 +177,12 @@ describe("WP-014 Runtime command arbiter", () => {
 			["operator.invoke", "runtime.pause"],
 		);
 		await expect(
-			arbiter.run(request({ kind: "operator.invoke", commandId: "builtin.compact" }, "compact-1"), "command-compact", "gui", () => {}),
+			arbiter.run(
+				request({ kind: "operator.invoke", commandId: "builtin.compact" }, "compact-1"),
+				"command-compact",
+				"gui",
+				() => {},
+			),
 		).rejects.toMatchObject({ code: "BUSY_COMPACTING" });
 	});
 

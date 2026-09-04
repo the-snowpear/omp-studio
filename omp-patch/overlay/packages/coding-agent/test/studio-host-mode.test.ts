@@ -20,6 +20,8 @@ function fakeSession(
 			getSessionId: () => sessionId,
 			getCwd: () => process.cwd(),
 			getSessionFile: options.getSessionFile ?? (() => null),
+			ensureOnDisk: async () => {},
+			flush: async () => {},
 		},
 		settings: { get: (key: string) => (key === "loop.mode" ? "prompt" : undefined) },
 		isStreaming: false,
@@ -29,6 +31,9 @@ function fakeSession(
 		prompt: async () => {},
 		compact: async () => {},
 		resetSessionContext: async () => {},
+		ensureOnDisk: async () => {},
+		flush: async () => {},
+		dispose: async () => {},
 		subscribe: () => () => {},
 		setBeforeNextUserTurn: () => {},
 		registerSessionChangeCallback: (callback: () => void) => {
@@ -317,5 +322,49 @@ describe("studio-host runtime", () => {
 		const later = runtime.services.agents.list({}).find(agent => agent.agentId === "ToolTestA");
 		expect(later?.usage?.durationMs).toBe(parked?.usage?.durationMs);
 		expect(later?.updatedAt).toBe(parked?.updatedAt);
+	});
+
+	test("recycles the main Worker without replacing the Runtime identity", async () => {
+		using tempDir = TempDir.createSync("@omp-studio-main-worker-");
+		const sessionFile = path.join(tempDir.path(), "main.jsonl");
+		let disposed = 0;
+		let revived = 0;
+		const initial = {
+			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
+			dispose: async () => {
+				disposed += 1;
+			},
+		} as unknown as AgentSession;
+		const next = {
+			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
+			dispose: async () => {
+				disposed += 1;
+			},
+		} as unknown as AgentSession;
+		let observed: StudioHostRuntime | undefined;
+		await runStudioHostMode(
+			initial,
+			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 17 },
+			async runtime => {
+				observed = runtime;
+				await Bun.sleep(30);
+				expect(runtime.workerResidency?.()).toBe("dormant");
+				expect(disposed).toBe(1);
+				await runtime.ensureWorkerLive?.();
+				revived += 1;
+				expect(runtime.workerResidency?.()).toBe("active");
+				expect(runtime.workerGeneration?.()).toBe(2);
+			},
+			{
+				createBridge: silentBridge,
+				recreateSession: async () => next,
+				workerIdleSleepMs: 10,
+				workerIdleRecycleMs: 20,
+			},
+		);
+		expect(observed?.runtimeId).toBeDefined();
+		expect(observed?.runtimeEpoch).toBe(17);
+		expect(revived).toBe(1);
+		expect(disposed).toBe(2);
 	});
 });

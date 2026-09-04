@@ -53,6 +53,7 @@ function saveFilters(mime: ChromeImageMime): ChromeImageSaveDialogOptions["filte
   if (mime === "image/jpeg") return [{ name: "JPEG 图片", extensions: ["jpg", "jpeg"] }];
   if (mime === "image/gif") return [{ name: "GIF 图片", extensions: ["gif"] }];
   if (mime === "image/webp") return [{ name: "WebP 图片", extensions: ["webp"] }];
+  if (mime === "image/svg+xml") return [{ name: "SVG 图片", extensions: ["svg"] }];
   return [{ name: "PNG 图片", extensions: ["png"] }];
 }
 

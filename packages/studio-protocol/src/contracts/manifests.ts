@@ -70,6 +70,7 @@ export const FULL_PARITY_REQUIRED_CAPABILITIES = [
   "session.handoff",
   "session.model.set",
   "session.thinking.set",
+  "session.taskModel.set",
   "session.clearContext",
   "session.drop",
   "turn.retry",

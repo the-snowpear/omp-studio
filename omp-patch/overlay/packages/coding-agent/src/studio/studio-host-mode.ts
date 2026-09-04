@@ -22,6 +22,7 @@ import type { TaskEffort } from "../thinking";
 import type { ToolSession } from "../tools";
 import type { ToolUiFactory } from "../tools/context";
 import { StudioBridgeServer } from "./bridge-server";
+import { StudioRuntimeCommandError } from "./command-arbiter";
 import { createStudioRemoteUiFactory } from "./remote-extension-ui";
 import { reconstructSessionBranch, StudioAgentConversationService } from "./services/agent-conversation-service";
 import {
@@ -56,12 +57,87 @@ export interface StudioBridgeConfiguration {
 	runtimeEpoch?: number;
 }
 
+export type StudioWorkerResidency = "active" | "sleeping" | "recycling" | "reviving" | "dormant" | "failed";
+
+interface StudioSessionSlot extends AgentSession {
+	replace(next: AgentSession): void;
+	current(): AgentSession;
+	disposeCurrent(): Promise<void>;
+}
+
+function createSessionSlot(initial: AgentSession): StudioSessionSlot {
+	let current = initial;
+	let beforeNextUserTurn: ((...args: never[]) => unknown) | undefined;
+	const subscriptions = new Map<(...args: never[]) => unknown, () => void>();
+	const sessionChangeCallbacks = new Map<(...args: never[]) => unknown, () => void>();
+	const attach = (next: AgentSession): void => {
+		for (const [listener, unsubscribe] of subscriptions) {
+			unsubscribe();
+			const nextUnsubscribe = next.subscribe?.(listener as never) ?? (() => {});
+			subscriptions.set(listener, nextUnsubscribe);
+		}
+		for (const [listener, unsubscribe] of sessionChangeCallbacks) {
+			unsubscribe();
+			const nextUnsubscribe = next.registerSessionChangeCallback?.(listener as never) ?? (() => {});
+			sessionChangeCallbacks.set(listener, nextUnsubscribe);
+		}
+		if (next.setBeforeNextUserTurn) next.setBeforeNextUserTurn(beforeNextUserTurn as never);
+	};
+	const slot = new Proxy(initial as StudioSessionSlot, {
+		get(_target, property) {
+			if (property === "replace")
+				return (next: AgentSession) => {
+					current = next;
+					attach(next);
+				};
+			if (property === "current") return () => current;
+			if (property === "disposeCurrent")
+				return async () => {
+					await current.dispose?.();
+				};
+			if (property === "subscribe") {
+				return (listener: (...args: never[]) => unknown) => {
+					const unsubscribe = current.subscribe?.(listener as never) ?? (() => {});
+					subscriptions.set(listener, unsubscribe);
+					return () => {
+						unsubscribe();
+						subscriptions.delete(listener);
+					};
+				};
+			}
+			if (property === "registerSessionChangeCallback") {
+				return (listener: (...args: never[]) => unknown) => {
+					const unsubscribe = current.registerSessionChangeCallback?.(listener as never) ?? (() => {});
+					sessionChangeCallbacks.set(listener, unsubscribe);
+					return () => {
+						unsubscribe();
+						sessionChangeCallbacks.delete(listener);
+					};
+				};
+			}
+			if (property === "setBeforeNextUserTurn") {
+				return (callback: ((...args: never[]) => unknown) | undefined) => {
+					beforeNextUserTurn = callback;
+					current.setBeforeNextUserTurn?.(callback as never);
+				};
+			}
+			const value = Reflect.get(current, property, current);
+			return typeof value === "function" ? value.bind(current) : value;
+		},
+	});
+	return slot;
+}
+
 export interface StudioHostRuntime {
 	readonly runtimeId: string;
 	readonly runtimeEpoch: number;
 	readonly sessionId: string;
 	readonly session: AgentSession;
 	readonly sessionManager: SessionManager;
+	readonly workerResidency?: () => StudioWorkerResidency;
+	readonly workerGeneration?: () => number;
+	readonly ensureWorkerLive?: () => Promise<void>;
+	onWorkerStateChange?(listener: () => void): () => void;
 	readonly services: Readonly<{
 		pause: StudioPauseService;
 		loop: StudioLoopService;
@@ -116,6 +192,11 @@ export interface StudioHostModeDependencies {
 	 * through it (plan §2.5) and invalidates it on dispose.
 	 */
 	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
+	/** Recreate the main AgentSession from its persisted session file. */
+	recreateSession?: (sessionFile: string) => Promise<AgentSession>;
+	workerIdleSleepMs?: number;
+	workerIdleRecycleMs?: number;
+	nowMs?: () => number;
 }
 
 function sessionFileOf(session: AgentSession): string | null {
@@ -333,6 +414,17 @@ export function createStudioHostRuntime(
 	createRuntimeId: () => string = crypto.randomUUID,
 	tanCustomTools?: (CustomTool | ToolDefinition)[],
 	liveSessionFactory?: StudioLiveSessionFactory,
+	workerLifecycle: {
+		residency: () => StudioWorkerResidency;
+		generation: () => number;
+		ensureLive: () => Promise<void>;
+		onChange: (listener: () => void) => () => void;
+	} = {
+		residency: () => "active",
+		generation: () => 0,
+		ensureLive: async () => {},
+		onChange: () => () => {},
+	},
 ): StudioHostRuntime {
 	if (!Number.isSafeInteger(bridgeConfig.runtimeEpoch) || (bridgeConfig.runtimeEpoch as number) <= 0) {
 		throw new Error("Studio Host Runtime epoch must be a positive safe integer");
@@ -549,14 +641,17 @@ export function createStudioHostRuntime(
 			},
 		},
 	});
-	const jobManager = session.asyncJobManager;
 	const toolSession = studioToolSession(session);
-	const jobsPort: StudioJobsPort = jobManager ?? {
-		getJob: () => undefined,
-		getRunningJobs: () => [],
-		getRecentJobs: () => [],
-		getAllJobs: () => [],
-		cancel: () => false,
+	// The main Worker can be disposed and recreated while Runtime services stay
+	// resident. Resolve the manager through the SessionSlot on every call so
+	// jobs created after revival do not remain attached to the terminal manager
+	// owned by the previous AgentSession.
+	const jobsPort: StudioJobsPort = {
+		getJob: id => session.asyncJobManager?.getJob(id),
+		getRunningJobs: filter => session.asyncJobManager?.getRunningJobs(filter) ?? [],
+		getRecentJobs: (limit, filter) => session.asyncJobManager?.getRecentJobs(limit, filter) ?? [],
+		getAllJobs: filter => session.asyncJobManager?.getAllJobs(filter) ?? [],
+		cancel: (id, filter) => session.asyncJobManager?.cancel(id, filter) ?? false,
 	};
 	let agents!: StudioAgentHubService;
 	const jobs = new StudioJobService(jobsPort, registry, {
@@ -729,7 +824,13 @@ export function createStudioHostRuntime(
 			return session.sessionManager.getSessionId();
 		},
 		session,
-		sessionManager: session.sessionManager,
+		get sessionManager() {
+			return session.sessionManager;
+		},
+		workerResidency: workerLifecycle.residency,
+		workerGeneration: workerLifecycle.generation,
+		ensureWorkerLive: workerLifecycle.ensureLive,
+		onWorkerStateChange: workerLifecycle.onChange,
 		services: Object.freeze({
 			pause: studioPauseService,
 			loop,
@@ -775,8 +876,200 @@ export function createStudioHostRuntime(
 			modes.dispose();
 			btw.dispose();
 			agents.dispose();
+			agentConversation.dispose();
 		},
 	});
+}
+
+interface StudioMainWorkerSupervisor {
+	readonly residency: () => StudioWorkerResidency;
+	readonly generation: () => number;
+	readonly ensureLive: () => Promise<void>;
+	readonly onChange: (listener: () => void) => () => void;
+	dispose(): Promise<void>;
+}
+
+function createStudioMainWorkerSupervisor(
+	slot: StudioSessionSlot,
+	runtime: StudioHostRuntime,
+	options: Pick<StudioHostModeDependencies, "recreateSession" | "workerIdleSleepMs" | "workerIdleRecycleMs" | "nowMs">,
+): StudioMainWorkerSupervisor {
+	const sleepMs = options.workerIdleSleepMs ?? 3 * 60_000;
+	const recycleMs = options.workerIdleRecycleMs ?? 5 * 60_000;
+	const now = options.nowMs ?? Date.now;
+	if (!Number.isSafeInteger(sleepMs) || sleepMs <= 0)
+		throw new TypeError("workerIdleSleepMs must be a positive integer");
+	if (!Number.isSafeInteger(recycleMs) || recycleMs <= sleepMs) {
+		throw new TypeError("workerIdleRecycleMs must be greater than workerIdleSleepMs");
+	}
+	let state: StudioWorkerResidency = "active";
+	let generation = 0;
+	let idleSince = now();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let disposed = false;
+	let queue: Promise<unknown> = Promise.resolve();
+	let revival: Promise<void> | undefined;
+	const listeners = new Set<() => void>();
+
+	const emit = (next: StudioWorkerResidency): void => {
+		if (state === next) return;
+		state = next;
+		for (const listener of [...listeners]) {
+			try {
+				listener();
+			} catch {
+				// Worker lifecycle observers must never affect Runtime control flow.
+			}
+		}
+	};
+
+	const blocked = (): boolean => {
+		if (slot.isStreaming || slot.isCompacting || slot.hasPostPromptWork || slot.queuedMessageCount > 0) return true;
+		if (runtime.services.interaction.pending() !== undefined) return true;
+		return runtime.services.jobs
+			.list({
+				callerAgentId: slot.getAgentId?.() ?? MAIN_AGENT_ID,
+				includeRecent: false,
+			})
+			.some(job => (job as { status?: string }).status === "running");
+	};
+
+	const arm = (): void => {
+		if (disposed) return;
+		if (timer !== undefined) clearTimeout(timer);
+		const elapsed = now() - idleSince;
+		const delay = state === "sleeping" ? Math.max(1, recycleMs - elapsed) : Math.max(1, sleepMs - elapsed);
+		timer = setTimeout(() => {
+			timer = undefined;
+			void serialized(async () => {
+				if (disposed || blocked()) {
+					idleSince = now();
+					if (state !== "active") emit("active");
+					arm();
+					return;
+				}
+				const elapsedNow = now() - idleSince;
+				if (state === "active" && elapsedNow < sleepMs) {
+					arm();
+					return;
+				}
+				if (state === "active") {
+					emit("sleeping");
+					arm();
+					return;
+				}
+				if (elapsedNow < recycleMs) {
+					arm();
+					return;
+				}
+				await recycle();
+			}).catch(error => {
+				emit("failed");
+				logger.warn("Studio main Worker recycle failed", { error: String(error) });
+			});
+		}, delay);
+		timer.unref?.();
+	};
+
+	const touch = (): void => {
+		idleSince = now();
+		if (state === "sleeping") emit("active");
+		arm();
+	};
+
+	const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
+		const run = queue.then(operation, operation);
+		queue = run.then(
+			() => undefined,
+			() => undefined,
+		);
+		return run;
+	};
+
+	const recycle = async (): Promise<void> => {
+		if (blocked()) {
+			touch();
+			return;
+		}
+		emit("recycling");
+		try {
+			await slot.sessionManager.ensureOnDisk();
+			await slot.sessionManager.flush();
+			await slot.disposeCurrent();
+			generation += 1;
+			emit("dormant");
+		} catch (error) {
+			emit("failed");
+			throw error;
+		}
+	};
+
+	const revive = async (): Promise<void> => {
+		if (state === "active") {
+			touch();
+			return;
+		}
+		if (revival !== undefined) return await revival;
+		const recreateSession = options.recreateSession;
+		if (recreateSession === undefined) {
+			emit("failed");
+			throw new StudioRuntimeCommandError(
+				"COMMAND_BLOCKED",
+				"Main Worker cannot be revived without a session factory",
+			);
+		}
+		const sessionFile = slot.sessionManager.getSessionFile();
+		if (sessionFile === undefined || sessionFile.length === 0) {
+			emit("failed");
+			throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Main Worker has no persisted session file to revive");
+		}
+		revival = serialized(async () => {
+			emit("reviving");
+			try {
+				const next = await recreateSession(sessionFile);
+				slot.replace(next);
+				generation += 1;
+				idleSince = now();
+				emit("active");
+				arm();
+			} catch (error) {
+				emit("failed");
+				throw error;
+			} finally {
+				revival = undefined;
+			}
+		});
+		return await revival;
+	};
+
+	const unsubscribe = slot.subscribe(() => touch());
+	arm();
+	return {
+		residency: () => state,
+		generation: () => generation,
+		ensureLive: async () => {
+			if (disposed) throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Runtime Worker is disposed");
+			if (state === "active") {
+				touch();
+				return;
+			}
+			await revive();
+		},
+		onChange: listener => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+		dispose: async () => {
+			if (disposed) return;
+			disposed = true;
+			if (timer !== undefined) clearTimeout(timer);
+			timer = undefined;
+			unsubscribe();
+			await queue.catch(() => undefined);
+			await slot.disposeCurrent();
+			listeners.clear();
+		},
+	};
 }
 
 export async function runStudioHostMode(
@@ -786,17 +1079,36 @@ export async function runStudioHostMode(
 	dependencies: StudioHostModeDependencies = {},
 ): Promise<void> {
 	const bridge = dependencies.createBridge?.() ?? createConfiguredBridge(bridgeConfig);
+	const slot =
+		dependencies.recreateSession === undefined ? (session as StudioSessionSlot) : createSessionSlot(session);
+	let supervisor!: StudioMainWorkerSupervisor;
 	const runtime = createStudioHostRuntime(
-		session,
+		slot,
 		bridgeConfig,
 		dependencies.createRuntimeId,
 		dependencies.tanCustomTools,
 		dependencies.liveSessionFactory,
+		{
+			residency: () => supervisor?.residency() ?? "active",
+			generation: () => supervisor?.generation() ?? 0,
+			ensureLive: async () => await supervisor?.ensureLive(),
+			onChange: listener => supervisor?.onChange(listener) ?? (() => {}),
+		},
 	);
+	supervisor =
+		dependencies.recreateSession === undefined
+			? {
+					residency: () => "active",
+					generation: () => 0,
+					ensureLive: async () => {},
+					onChange: () => () => {},
+					dispose: async () => {},
+				}
+			: createStudioMainWorkerSupervisor(slot, runtime, dependencies);
 	const unregisterCleanup = postmortem.register(`studio-host-bridge:${runtime.runtimeId}`, () => bridge.stop());
 
 	try {
-		await hydratePersistedStudioAgents(AgentRegistry.global(), sessionFileOf(session));
+		await hydratePersistedStudioAgents(AgentRegistry.global(), sessionFileOf(slot));
 		await runtime.services.commands.refresh();
 		await bridge.start(runtime);
 		// Install the Remote UI factory so Ask / tool dialogs surface as
@@ -812,6 +1124,7 @@ export async function runStudioHostMode(
 			// Invalidate the factory so late tool contexts fail closed instead
 			// of opening interactions on a dead bridge.
 			dependencies.setToolUIContext?.(undefined, false);
+			await supervisor.dispose();
 			runtime.dispose();
 		}
 	}

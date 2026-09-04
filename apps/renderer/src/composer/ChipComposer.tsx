@@ -237,12 +237,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       if (meta ? meta.kind === "image" : isImageFile(file)) {
         const image = await fileToPromptImage(file).catch(() => null);
         // Disk-backed images travel as @path. Preview bytes are optional: a
-        // read failure must not drop the capsule.
+        // read failure must not drop the capsule. SVG is the exception: @path
+        // would make the Runtime read it as text, so it always travels as
+        // wire bytes ([图N]) and the Runtime rasterizes it for vision.
         if (image) {
+          const svg = image.mimeType === "image/svg+xml";
           insertChip({
             kind: "image",
             label: "图",
-            ...(meta ? { path: meta.path } : {}),
+            ...(meta && !svg ? { path: meta.path } : {}),
             image,
           });
           continue;

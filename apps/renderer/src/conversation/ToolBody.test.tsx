@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ToolBody } from "./ToolBody";
+import { ToolBody, TOOL_ROWS_MAX } from "./ToolBody";
+import { CHUNK_LINES } from "./textChunks";
 
 describe("ToolBody: WebSearchBody", () => {
   afterEach(() => {
@@ -122,5 +123,59 @@ describe("ToolBody: WebSearchBody", () => {
     const { container } = render(<ToolBody tool={web} />);
     expect(container.querySelector(".tc-answer")?.textContent).toBe("No results found.");
     expect(container.querySelector(".tc-cites")).toBeNull();
+  });
+});
+
+/**
+ * 按行渲染的工具卡不得随载荷长度无界铺 DOM。虚拟列表只限制挂载**行数**（120），
+ * 不限制单行内的节点数，所以一次 Read 两万行的文件曾经在一张 220px 高的卡里
+ * 挂出六万个元素。
+ */
+describe("ToolBody: 按行渲染的 DOM 上限", () => {
+  afterEach(cleanup);
+
+  function readTool(lineCount: number) {
+    return {
+      toolCallId: "read-1",
+      toolName: "read",
+      status: "succeeded" as const,
+      arguments: { path: "big.txt" },
+      result: {
+        type: "toolResult" as const,
+        toolCallId: "read-1",
+        toolName: "read",
+        isError: false,
+        data: { preview: Array.from({ length: lineCount }, (_, index) => `line ${index + 1}`) },
+      },
+    };
+  }
+
+  it("Read 预览超过上限时只铺 TOOL_ROWS_MAX 行，并说明省略了多少", () => {
+    const { container } = render(<ToolBody tool={readTool(TOOL_ROWS_MAX + 500)} />);
+    expect(container.querySelectorAll(".tc-code .cl").length).toBe(TOOL_ROWS_MAX);
+    expect(container.querySelector(".tc-code .tc-note")?.textContent).toContain("500");
+  });
+
+  it("超过一块的行列表包进 cv 块，块数按 CHUNK_LINES 走", () => {
+    const { container } = render(<ToolBody tool={readTool(CHUNK_LINES * 3)} />);
+    const chunks = container.querySelectorAll(".tc-code .cv-chunk-rows");
+    expect(chunks.length).toBe(3);
+    // 占位高度要按块内真实行数声明，否则视口外的块会用错的高度占位。
+    expect((chunks[0] as HTMLElement).style.getPropertyValue("--cv-lines")).toBe(String(CHUNK_LINES));
+    expect(container.querySelectorAll(".tc-code .cl").length).toBe(CHUNK_LINES * 3);
+  });
+
+  it("不超过一块时不加包裹层，常见的小输出不多一层 DOM", () => {
+    const { container } = render(<ToolBody tool={readTool(8)} />);
+    expect(container.querySelectorAll(".tc-code .cv-chunk-rows").length).toBe(0);
+    expect(container.querySelectorAll(".tc-code .cl").length).toBe(8);
+    expect(container.querySelector(".tc-code .tc-note")).toBeNull();
+  });
+
+  it("行号仍然从 offset 起算", () => {
+    const tool = { ...readTool(3), result: { ...readTool(3).result, data: { preview: ["a", "b", "c"], offset: 41 } } };
+    const { container } = render(<ToolBody tool={tool} />);
+    const numbers = [...container.querySelectorAll(".tc-code .ln")].map((node) => node.textContent);
+    expect(numbers).toEqual(["41", "42", "43"]);
   });
 });

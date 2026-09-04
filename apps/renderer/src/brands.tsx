@@ -7,7 +7,13 @@ const IMG = new Set([
   "google", "gemini", "mistral", "deepseek", "minimax", "cloudflare", "azure",
   "alibaba", "qwen", "zhipu", "nvidia", "siliconflow", "huggingface", "groq",
   "litellm", "cerebras", "fireworks", "together",
+  // Web-search engines (Simple Icons SVGs, official brand colors).
+  "perplexity", "kagi", "brave", "kimi", "searxng", "startpage", "duckduckgo",
+  "ecosia", "mojeek",
 ]);
+
+/** Brand marks only available as PNG favicons (no official SVG exists). */
+const IMG_PNG = new Set(["exa", "zai", "jina", "tavily", "firecrawl", "parallel", "synthetic", "tinyfish"]);
 
 const INLINE: Record<string, string> = {
   anthropic: '<path d="M13.827 3.52h3.603L24 20h-3.603l-6.57-16.48zm-7.258 0h3.767L16.906 20h-3.674l-1.343-3.461H5.017l-1.344 3.46H0L6.57 3.522zm4.132 9.959L8.453 7.687 6.205 13.48H10.7z"></path>',
@@ -69,6 +75,25 @@ const KEY: Record<string, string> = {
   siliconflow: "siliconflow",
   huggingface: "huggingface",
   gemini: "gemini",
+  // Web-search engines.
+  codex: "openai",
+  perplexity: "perplexity",
+  kagi: "kagi",
+  brave: "brave",
+  kimi: "kimi",
+  searxng: "searxng",
+  startpage: "startpage",
+  duckduckgo: "duckduckgo",
+  ecosia: "ecosia",
+  mojeek: "mojeek",
+  exa: "exa",
+  zai: "zai",
+  jina: "jina",
+  tavily: "tavily",
+  firecrawl: "firecrawl",
+  parallel: "parallel",
+  synthetic: "synthetic",
+  tinyfish: "tinyfish",
 };
 
 const VB512 = new Set(["llamacpp"]);
@@ -88,6 +113,9 @@ export function Brand({ id, extra }: { id: string; extra?: string }) {
   const className = extra ? `brand ${extra}` : "brand";
   if (IMG.has(key)) {
     return <img className={className} src={`${import.meta.env.BASE_URL}brands/${key}.svg`} alt="" />;
+  }
+  if (IMG_PNG.has(key)) {
+    return <img className={className} src={`${import.meta.env.BASE_URL}brands/${key}.png`} alt="" />;
   }
   const path = INLINE[key];
   if (!path) return null;

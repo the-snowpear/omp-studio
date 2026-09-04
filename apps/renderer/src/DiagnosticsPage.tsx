@@ -8,6 +8,7 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import { Icon } from "./icons";
+import { ProcessMemoryPanel } from "./ProcessMemoryPanel";
 import { ToastHost } from "./ToastHost";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { PREVIEW_DIAGNOSTICS, type PreviewDiagScenario } from "./preview/fixtures";
@@ -592,6 +593,8 @@ export function DiagnosticsPage({
           ) : null}
         </div>
       </section>
+
+      <ProcessMemoryPanel enabled={!preview} />
       {busy !== null ? (
         <ActionProgressBar label={busy.label} step={busy.step} steps={busy.steps} />
       ) : null}

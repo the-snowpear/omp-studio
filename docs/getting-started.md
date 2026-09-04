@@ -34,7 +34,7 @@ npm install
 npm run preview
 ```
 
-Or double-click `preview.cmd` / `启动预览.cmd` at the repository root. This builds the
+Or double-click `preview.cmd` at the repository root. This builds the
 Electron main process and renderer, then opens the desktop window.
 
 The first start may take several minutes. This snapshot hides the in-app

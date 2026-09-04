@@ -9,6 +9,7 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { containsPrivateMaterial } from "./p5-secret-scan.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const reportPath = process.env.OMP_P5_REPORT ?? join(root, "outputs", "p5-readiness.json");
@@ -46,7 +47,6 @@ try {
   checks.push({ name: "pty-and-runtime-security-tests", status: "failed", message: error instanceof Error ? error.message : String(error) });
 }
 
-const privatePatterns = [/BEGIN (?:OPENSSH|RSA|EC|PRIVATE) KEY/u, /"privateKey"\s*:/u, /-----BEGIN/u];
 const scanRoots = [join(root, "apps", "desktop", "dist"), join(root, "apps", "renderer", "dist"), join(root, "packages", "runtime-installer", "dist", "artifacts"), join(root, "outputs")];
 const leaks = [];
 for (const directory of scanRoots) {
@@ -54,7 +54,7 @@ for (const directory of scanRoots) {
     if (!/\.(?:js|mjs|ts|json|pem|key|log)$/u.test(path)) continue;
     let content;
     try { content = await readFile(path, "utf8"); } catch { continue; }
-    if (privatePatterns.some((pattern) => pattern.test(content))) leaks.push(relative(root, path));
+    if (containsPrivateMaterial(content)) leaks.push(relative(root, path));
   }
 }
 checks.push({ name: "repository-secret-scan", status: leaks.length === 0 ? "passed" : "failed", ...(leaks.length ? { files: leaks } : {}) });

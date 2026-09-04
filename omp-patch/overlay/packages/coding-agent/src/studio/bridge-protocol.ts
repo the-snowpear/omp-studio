@@ -73,6 +73,7 @@ export type StudioOperation =
 	| { kind: "session.prewalk.disarm" }
 	| { kind: "session.model.set"; selector: string; thinking?: string }
 	| { kind: "session.thinking.set"; level: string }
+	| { kind: "session.taskModel.set"; selector: string | null }
 	| { kind: "session.tree.get" }
 	| {
 			kind: "session.transcript.read";
@@ -360,6 +361,9 @@ export interface StudioOperatorStateSnapshot {
 	runtimeEpoch: number;
 	stateVersion: number;
 	sessionId: string;
+	/** Runtime stays connected while the main AgentSession Worker sleeps/revives. */
+	workerResidency?: "active" | "sleeping" | "recycling" | "reviving" | "dormant" | "failed";
+	workerGeneration?: number;
 	/** Optional semantic projection of the native SessionManager title state. */
 	sessionTitle?: string;
 	sessionTitleSource?: "user" | "auto";
@@ -380,6 +384,8 @@ export interface StudioOperatorStateSnapshot {
 	prewalk?: { status: "off" | "armed" | "active"; target?: string };
 	/** Active session model; absent before the first model resolves. */
 	model?: StudioModelState;
+	/** Session-scoped Task subagent model override; absent while inheriting. */
+	taskModel?: StudioModelState;
 	pause?: { paused: boolean; pauseEpoch?: number; pausedAt?: string };
 	live?: { status: "off" | "connecting" | "active" | "stopping" | "failed"; deviceId?: string };
 	pendingInteraction?: StudioPendingInteraction;
@@ -630,6 +636,12 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			exactKeys(operation, ["kind", "level"]);
 			if (!STUDIO_THINKING_LEVELS.has(operation.level as string)) {
 				throw new StudioFrameError("Invalid thinking level");
+			}
+			break;
+		case "session.taskModel.set":
+			exactKeys(operation, ["kind", "selector"]);
+			if (operation.selector !== null && !nonEmptyString(operation.selector)) {
+				throw new StudioFrameError("Invalid task model selector");
 			}
 			break;
 		case "mode.plan.enter":
@@ -1030,6 +1042,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"session.handoff",
 	"session.model.set",
 	"session.thinking.set",
+	"session.taskModel.set",
 	"session.history",
 	"session.transcript.read",
 	"operator.manifest.get",

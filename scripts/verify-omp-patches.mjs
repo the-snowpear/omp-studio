@@ -68,10 +68,15 @@ try {
   run("git", ["-C", ompSourceDirectory, "diff", "--check"]);
   run(process.execPath, [npmCli, "run", "check"], { cwd: repositoryRoot, env });
   run(bun, ["run", "check:ts"], { cwd: ompSourceDirectory, env });
+  run(bun, ["test", "packages/coding-agent/test/studio-bridge-server.test.ts"], {
+    cwd: ompSourceDirectory,
+    env,
+  });
   run(
     bun,
     [
       "test",
+      "--parallel=4",
       "packages/agent/test/pause-gate.test.ts",
       "packages/coding-agent/test/modes/components/pause-screen.test.ts",
       "packages/coding-agent/test/cli-argv-routing.test.ts",
@@ -79,7 +84,6 @@ try {
       "packages/coding-agent/test/main-host-classification.test.ts",
       "packages/coding-agent/test/session-manager/studio-origin.test.ts",
       "packages/coding-agent/test/studio-host-args.test.ts",
-      "packages/coding-agent/test/studio-bridge-server.test.ts",
       "packages/coding-agent/test/studio-command-arbiter.test.ts",
       "packages/coding-agent/test/studio-host-mode.test.ts",
       "packages/coding-agent/test/studio-loop-service.test.ts",

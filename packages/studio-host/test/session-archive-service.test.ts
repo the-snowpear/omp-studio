@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -183,6 +183,17 @@ test("a double archive is reported instead of silently overwriting", async () =>
   }
 });
 
+test("a repeated archive after a successful move reports already archived", async () => {
+  const seed = await fixture();
+  try {
+    const svc = service(seed);
+    await svc.archive("session-a");
+    assert.equal(errorCode(await svc.archive("session-a").catch((error) => error)), "SESSION_ALREADY_ARCHIVED");
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
 test("archive and unarchive refuse when the destination path is occupied by unidentifiable data", async () => {
   const seed = await fixture();
   try {
@@ -253,6 +264,101 @@ test("unarchive restores the session mtime from the transcript instead of the re
     assert.ok(
       Math.abs(metadata.mtimeMs - contentLast) < 2_000,
       `expected mtime near ${contentLast}, got ${metadata.mtimeMs}`,
+    );
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("a locked session file fails the archive up front instead of stranding both copies", async () => {
+  const seed = await fixture();
+  try {
+    const svc = new StudioSessionArchiveService({
+      allowedCwd: seed.workspace,
+      sessionsRoot: seed.sessionsRoot,
+      archiveRoot: seed.archiveRoot,
+      writeGraceMs: 0,
+      renameFile: async (from, to) => {
+        if (from === seed.sessionFile) {
+          const error = new Error("file is locked by another process") as NodeJS.ErrnoException;
+          error.code = "EBUSY";
+          throw error;
+        }
+        return await rename(from, to);
+      },
+    });
+    await assert.rejects(() => svc.archive("session-a"));
+    assert.ok(await exists(seed.sessionFile), "source survives untouched");
+    const gz = join(seed.archiveRoot, "--project--", "2026-08-16T10-00-00-000Z_session-a.jsonl.gz");
+    assert.ok(!(await exists(gz)), "no destination was written");
+    const projectFiles = await readdir(join(seed.sessionsRoot, "--project--"));
+    assert.deepEqual(
+      projectFiles.filter((name) => name.endsWith(".staging")),
+      [],
+      "no staging leftover: the move failed before committing",
+    );
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("a staged source that cannot be deleted still completes the archive with no dual presence", async () => {
+  const seed = await fixture();
+  try {
+    const svc = new StudioSessionArchiveService({
+      allowedCwd: seed.workspace,
+      sessionsRoot: seed.sessionsRoot,
+      archiveRoot: seed.archiveRoot,
+      writeGraceMs: 0,
+      removeFile: async () => {
+        const error = new Error("access denied") as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
+      },
+    });
+    const result = await svc.archive("session-a");
+    assert.equal(result.archived, true);
+    assert.ok(!(await exists(seed.sessionFile)), "the source path is gone");
+    const gz = join(seed.archiveRoot, "--project--", "2026-08-16T10-00-00-000Z_session-a.jsonl.gz");
+    assert.ok(await exists(gz), "the gz landed");
+    const projectFiles = await readdir(join(seed.sessionsRoot, "--project--"));
+    assert.deepEqual(
+      projectFiles.filter((name) => name.endsWith(".jsonl")),
+      [],
+      "no discoverable plain copy remains next to the inert staging leftover",
+    );
+    // The session reads as already archived, never as duplicated across trees.
+    assert.equal(errorCode(await svc.archive("session-a").catch((error) => error)), "SESSION_ALREADY_ARCHIVED");
+  } finally {
+    await rm(seed.root, { recursive: true, force: true });
+  }
+});
+
+test("a staged gz that cannot be deleted still completes the unarchive", async () => {
+  const seed = await fixture();
+  try {
+    const svc = new StudioSessionArchiveService({
+      allowedCwd: seed.workspace,
+      sessionsRoot: seed.sessionsRoot,
+      archiveRoot: seed.archiveRoot,
+      writeGraceMs: 0,
+      removeFile: async () => {
+        const error = new Error("access denied") as NodeJS.ErrnoException;
+        error.code = "EACCES";
+        throw error;
+      },
+    });
+    await svc.archive("session-a");
+    const restored = await svc.unarchive("session-a");
+    assert.equal(restored.archived, false);
+    assert.ok(await exists(seed.sessionFile), "the plain session is restored");
+    const gz = join(seed.archiveRoot, "--project--", "2026-08-16T10-00-00-000Z_session-a.jsonl.gz");
+    assert.ok(!(await exists(gz)), "the gz path is gone");
+    const archiveFiles = await readdir(join(seed.archiveRoot, "--project--"));
+    assert.deepEqual(
+      archiveFiles.filter((name) => name.endsWith(".jsonl.gz")),
+      [],
+      "no discoverable gz copy remains next to the inert staging leftover",
     );
   } finally {
     await rm(seed.root, { recursive: true, force: true });

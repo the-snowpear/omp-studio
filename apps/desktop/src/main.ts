@@ -14,7 +14,7 @@
  * context is just a transport plus a coarse availability status.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, session, shell, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, session, shell, Tray, type NativeImage, type WebContents } from "electron";
 import {
   TITLEBAR_OVERLAY,
   TITLEBAR_OVERLAY_HEIGHT,
@@ -26,8 +26,11 @@ import { registerChromeImageIpc } from "./chrome-image.js";
 import { registerChromeNotifyIpc } from "./chrome-notify.js";
 import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
 import { registerChromeLogsIpc } from "./chrome-logs.js";
+import { registerChromeMetricsIpc } from "./chrome-metrics.js";
 import { registerChromeProfileIpc } from "./chrome-profile.js";
+import { resolveProfilePersistRoot } from "./chrome-profile-store.js";
 import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
+import { createAppTray, quitBusyDialogStrings, quitBusyMessageBoxOptions } from "./tray.js";
 import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
@@ -45,7 +48,7 @@ import {
   rendererCspFor,
   rendererDevServerUrl,
 } from "./security.js";
-import type { DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
+import type { DesktopTray, DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
 import { createProductionHostFactory } from "./host-factory.js";
 import { defaultHostLogsDirectory } from "./host-log.js";
 import {
@@ -234,6 +237,12 @@ export async function main(): Promise<void> {
   const listFileOpeners = async (): Promise<ReadonlyArray<FileOpener>> =>
     listExternalEditorCommands().map((command): FileOpener => ({ id: command.id ?? command.label, name: command.label }));
 
+  // Close-to-tray: closing the window only hides it once the tray exists;
+  // without a tray the close keeps the legacy destroy-and-quit behavior.
+  let trayRef: DesktopTray | null = null;
+  let closeToTrayEnabled = false;
+  let rendererWindow: BrowserWindow | null = null;
+
   const createWindow: DesktopWindowFactory = async (context) => {
     const window = createSecureWindow({
       BrowserWindow,
@@ -282,6 +291,18 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       openExternal: (url) => shell.openExternal(url),
+    });
+    const disposeMetrics = registerChromeMetricsIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      actions: { appMetrics: () => app.getAppMetrics(), now: () => new Date() },
     });
     const logsDirectory = defaultHostLogsDirectory();
     const disposeLogs = registerChromeLogsIpc({
@@ -425,6 +446,15 @@ export async function main(): Promise<void> {
       quitApp: () => app.quit(),
     });
     applyTitleBarOverlay(window, "light");
+    rendererWindow = window;
+    // Close hides to the tray (streaming keeps running in background); the
+    // real quit path releases this through `isQuitting`.
+    window.on("close", (event) => {
+      if (context.isQuitting() || !closeToTrayEnabled) return;
+      event.preventDefault();
+      window.hide();
+      trayRef?.notifyHiddenToTray?.();
+    });
     window.webContents?.on?.("did-fail-load", (_event: unknown, errorCode: number, errorDescription: string, validatedURL: string) => {
       console.error(`[omp-studio] renderer failed to load (${errorCode}): ${errorDescription} ${validatedURL}`);
     });
@@ -434,6 +464,11 @@ export async function main(): Promise<void> {
     });
     loadRendererTarget(window, target);
     return {
+      show: () => {
+        if (windowSurface.isMinimized()) windowSurface.restore();
+        if (!windowSurface.isVisible()) windowSurface.show();
+        windowSurface.focus();
+      },
       focus: () => {
         if (windowSurface.isMinimized()) windowSurface.restore();
         windowSurface.focus();
@@ -447,6 +482,7 @@ export async function main(): Promise<void> {
         disposeTerminal.dispose();
         disposeImage.dispose();
         disposeLogs.dispose();
+        disposeMetrics.dispose();
         disposeProfile();
         disposeOpenUrl.dispose();
         disposeNotify();
@@ -470,6 +506,46 @@ export async function main(): Promise<void> {
     },
     onAllWindowsClosed: (listener) => {
       app.on("window-all-closed", listener);
+    },
+    createTray: ({ openWindow, requestQuit }) => {
+      const tray = createAppTray({
+        electron: {
+          createImageFromPath: (iconPath) => nativeImage.createFromPath(iconPath),
+          buildMenu: (template) => Menu.buildFromTemplate([...template]),
+          createTrayFromImage: (image) => {
+            const electronTray = new Tray(image as NativeImage);
+            return {
+              setToolTip: (toolTip: string) => electronTray.setToolTip(toolTip),
+              setContextMenu: (menu: object) => electronTray.setContextMenu(menu as Menu),
+              on: (event: "click", listener: () => void) => electronTray.on(event, listener),
+              displayBalloon: (options: { icon?: object; title: string; content: string }) =>
+                electronTray.displayBalloon({ ...options, icon: image as NativeImage }),
+              isDestroyed: () => electronTray.isDestroyed(),
+              destroy: () => electronTray.destroy(),
+            };
+          },
+        },
+        iconPath: appIcon,
+        persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
+        locale: app.getLocale(),
+        onOpen: openWindow,
+        onQuit: requestQuit,
+      });
+      if (tray === undefined) {
+        console.log("[omp-studio] tray unavailable; window close keeps quit behavior");
+        return undefined;
+      }
+      closeToTrayEnabled = true;
+      trayRef = tray;
+      return tray;
+    },
+    confirmQuitWhileBusy: async () => {
+      const options = quitBusyMessageBoxOptions(quitBusyDialogStrings(app.getLocale()));
+      const owner = rendererWindow !== null && !rendererWindow.isDestroyed() ? rendererWindow : undefined;
+      const picked = owner !== undefined
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      return picked.response === 1;
     },
     quit: () => {
       app.quit();

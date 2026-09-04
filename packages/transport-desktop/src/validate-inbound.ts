@@ -704,7 +704,8 @@ function validateNamedTextInput(input: unknown, what: string, field: string): vo
   }
 }
 
-const PROMPT_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+/** SVG bytes are accepted and rasterized to PNG by the Runtime (mirrors `:img`). */
+const PROMPT_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"]);
 
 /** Maximum number of image attachments accepted in one prompt command. */
 export const MAX_PROMPT_IMAGES = 16;
@@ -1439,6 +1440,25 @@ function validateModelsWebSearchSetInput(input: unknown): void {
   }
 }
 
+function validateModelsWebSearchCredentialSetInput(input: unknown): void {
+  assertPlainObject(input, "models.webSearch.credential.set input");
+  assertNoUnknownKeys(input, ["providerId", "apiKey"], "models.webSearch.credential.set input");
+  if (typeof input.providerId !== "string" || input.providerId.length === 0) {
+    throw new ValidationError("models.webSearch.credential.set input: providerId must be a non-empty string");
+  }
+  if (typeof input.apiKey !== "string" || input.apiKey.trim().length === 0) {
+    throw new ValidationError("models.webSearch.credential.set input: apiKey must be a non-empty string");
+  }
+}
+
+function validateModelsWebSearchCredentialRemoveInput(input: unknown): void {
+  assertPlainObject(input, "models.webSearch.credential.remove input");
+  assertNoUnknownKeys(input, ["providerId"], "models.webSearch.credential.remove input");
+  if (typeof input.providerId !== "string" || input.providerId.length === 0) {
+    throw new ValidationError("models.webSearch.credential.remove input: providerId must be a non-empty string");
+  }
+}
+
 function validateModelsLoginStartInput(input: unknown): void {
   assertPlainObject(input, "models.login.start input");
   assertNoUnknownKeys(input, ["providerId"], "models.login.start input");
@@ -1761,6 +1781,15 @@ const COMMAND_INPUT_VALIDATORS: {
     assertNoUnknownKeys(input, ["level"], "session.thinking.set input");
     assertThinkingSelector(input.level, "session.thinking.set input: level");
   },
+  "session.taskModel.set": (input) => {
+    assertPlainObject(input, "session.taskModel.set input");
+    assertNoUnknownKeys(input, ["selector"], "session.taskModel.set input");
+    if (input.selector === null) return;
+    assertNonEmptyText(input.selector, "session.taskModel.set input: selector");
+    if (input.selector.length > MAX_MODEL_SELECTOR_CHARS) {
+      throw new ValidationError(`session.taskModel.set input: selector exceeds ${MAX_MODEL_SELECTOR_CHARS} characters`);
+    }
+  },
   "session.tree.get": (input) => validateEmptyCommandInput(input, "session.tree.get input"),
   "session.tree.navigate": validateTreeNavigateInput,
   "session.tree.branch": validateTreeBranchInput,
@@ -1810,6 +1839,8 @@ const COMMAND_INPUT_VALIDATORS: {
   "models.discovery.refresh": (input) => validateEmptyCommandInput(input, "models.discovery.refresh input"),
   "models.cycleOrder.set": validateModelsCycleOrderSetInput,
   "models.webSearch.set": validateModelsWebSearchSetInput,
+  "models.webSearch.credential.set": validateModelsWebSearchCredentialSetInput,
+  "models.webSearch.credential.remove": validateModelsWebSearchCredentialRemoveInput,
   "plugins.setEnabled": validatePluginsSetEnabledInput,
   "skills.setEnabled": validateSkillsSetEnabledInput,
   "skills.reveal": validateSkillsRevealInput,

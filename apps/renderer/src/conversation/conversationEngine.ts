@@ -11,6 +11,8 @@ import { getDefaultThumbStore, type UserThumbStore } from "./userMessageThumbs";
 export type ConversationEngineInput = {
   readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null;
   readonly canRead: boolean; readonly runtimeConnected: boolean; readonly previewItems: readonly ConversationItem[];
+  /** Hold archive/live I/O while a selected resident session is being activated. */
+  readonly deferHydrate?: boolean;
   readonly previewLive?: readonly ConversationRuntimeEvent[]; readonly thumbStore?: UserThumbStore;
 };
 export type ConversationSnapshot = { readonly state: ConversationState; readonly rows: readonly TimelineRow[]; readonly demo: boolean; readonly loadingOlder: boolean; readonly identityKey: string };
@@ -19,6 +21,7 @@ export type ConversationEngine = {
   getMetadataSnapshot(): ConversationSnapshot; subscribeMetadata(listener: () => void): () => void;
   start(): void; dispose(): void; loadOlder(): Promise<void>; reload(): Promise<void>;
   restoreFromUser(itemId: string): boolean; trackPending(pending: PendingUser): void; failPending(requestId: string, error: string): void; dropPending(requestId: string): void;
+  settleOpenTurns(): boolean;
 };
 
 let nextGeneration = 1;
@@ -82,6 +85,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
   async function hydrate(resyncing = false): Promise<void> {
     const token = ++run; buffer = []; bufferBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
     if (identity === null) { store.setUnavailable("当前没有活动会话。"); return; }
+    if (input.deferHydrate) { store.setLoading(false); return; }
     if (input.preview) {
       store.setLoading(resyncing); store.hydrate({ items: input.previewItems, headCursor: "preview" as never, hasMoreBefore: false }, (input.previewLive ?? []).map((update, index) => ({ streamSeq: index + 1, update })), input.previewLive?.length ?? 0); return;
     }
@@ -140,6 +144,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     trackPending: (pending) => store.trackPending(pending),
     failPending: (requestId, error) => store.failPending(requestId, error),
     dropPending: (requestId) => store.dropPending(requestId),
+    settleOpenTurns: () => store.settleOpenTurns(),
   };
 }
 

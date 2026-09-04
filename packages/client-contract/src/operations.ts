@@ -70,6 +70,8 @@ import type {
   ModelOverridePatch,
   ModelProviderTestResult,
   ModelWebSearchSetInput,
+  ModelWebSearchCredentialSetInput,
+  ModelWebSearchCredentialRemoveInput,
   RuntimeConnection,
   RuntimeInstallState,
   ResidentsReadModel,
@@ -335,11 +337,12 @@ export interface AgentDefinitionConfigureInput {
 
 /**
  * Image attachment on prompt / steer / follow-up. Matches the Runtime
- * `ImageContent` wire shape (`type` + base64 `data` + `mimeType`).
+ * `ImageContent` wire shape (`type` + base64 `data` + `mimeType`). SVG bytes
+ * are accepted and rasterized to PNG by the Runtime before the model call.
  */
 export type PromptImageInput = {
   readonly type: "image";
-  readonly mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+  readonly mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/svg+xml";
   readonly data: string;
 };
 
@@ -392,6 +395,12 @@ export interface RuntimeCommandInputMap {
   "session.model.set": { readonly selector: string; readonly thinking?: SessionThinkingSelector };
   /** Set the session thinking level without changing the active model. */
   "session.thinking.set": { readonly level: SessionThinkingSelector };
+  /**
+   * Pin the session-scoped Task subagent model (runtime-only override, same as
+   * the TUI picker's alt+p Task mode; never persisted). `null` clears the
+   * override so the subagent inherits the session model again.
+   */
+  "session.taskModel.set": { readonly selector: string | null };
   /**
    * In-place conversation reset. Keeps the same session identity and history
    * tree; not a new session (`session.create` / `/new`).
@@ -549,6 +558,10 @@ interface CoreCommandInputMap {
   "models.cycleOrder.set": { readonly order: ReadonlyArray<string> };
   /** Targeted web-search config write (web_search.* / providers.webSearch* / searxng.* / exa.*). */
   "models.webSearch.set": ModelWebSearchSetInput;
+  /** Store a search engine api_key in the local credential store (agent.db). */
+  "models.webSearch.credential.set": ModelWebSearchCredentialSetInput;
+  /** Soft-delete a search engine's Studio-managed api_key credential. */
+  "models.webSearch.credential.remove": ModelWebSearchCredentialRemoveInput;
   /** Activate a known workspace (Host-owned registry; never a path). */
   "workspace.open": { readonly workspaceId: WorkspaceId };
   /** Open the system directory picker and register the chosen folder. */
@@ -673,6 +686,8 @@ interface CoreCommandResultMap {
   "models.discovery.refresh": ConfigWriteResult;
   "models.cycleOrder.set": ConfigWriteResult;
   "models.webSearch.set": ConfigWriteResult;
+  "models.webSearch.credential.set": ConfigWriteResult;
+  "models.webSearch.credential.remove": ConfigWriteResult;
   "workspace.open": WorkspaceListReadModel;
   "workspace.pick": WorkspaceListReadModel;
   "workspace.file.create": WorkspaceFileMutationResult;

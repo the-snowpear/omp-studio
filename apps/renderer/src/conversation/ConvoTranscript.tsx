@@ -1,7 +1,7 @@
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 import { AssistantRunView, ConversationItemView, type AssistantRunEntry } from "./ConversationItemView";
 import type { AssistantSegment, TimelineRow } from "./conversationViewModel";
-import { timelineRowKey, timelineStructureToken } from "./conversationViewModel";
+import { timelineRowKey, timelineShapeToken, timelineStructureToken } from "./conversationViewModel";
 import {
   assistantRunRanges,
   collectPlanProposal,
@@ -47,7 +47,13 @@ function renderItems(rows: readonly TimelineRow[]): readonly TranscriptRenderIte
     const start = index;
     while (index + 1 < rows.length && rows[index + 1]?.type === "assistant") index += 1;
     const end = index;
-    items.push({ kind: "assistantRun", start, end, key: `assistant-run:${timelineRowKey(rows[start]!)}:${timelineRowKey(rows[end]!)}` });
+    // Key on the run's FIRST row only. Embedding the last row made the key change
+    // every time another assistant message completed inside the same turn, and
+    // React unmounted and remounted the whole run — every BatchChain, ToolBody and
+    // MarkdownBlock (with its rehypeHighlight output) plus all `useLazyExpand`
+    // state. `renderItem`'s dependency array already covers content changes, and
+    // `ConversationItemView` deliberately uses positional keys for the same reason.
+    items.push({ kind: "assistantRun", start, end, key: `assistant-run:${timelineRowKey(rows[start]!)}` });
     index += 1;
   }
   return items;
@@ -142,6 +148,8 @@ export function ConvoTranscript({
   onInspectSubagent,
   liveAgents,
   planLink,
+  onRetryTurn,
+  retryTurnDisabledReason,
 }: {
   scrollerRef?: RefObject<HTMLElement | null>;
   rows: readonly TimelineRow[];
@@ -155,11 +163,17 @@ export function ConvoTranscript({
   onInspectSubagent?: (target: SubagentHubTarget) => void;
   liveAgents?: readonly StudioAgentSnapshot[];
   planLink?: PlanCreatedLink;
+  /** 链尾 assistant 轮失败/中止时出现的「重试上一轮」；预览模式由父级不传。 */
+  onRetryTurn?: () => void;
+  retryTurnDisabledReason?: string;
 }) {
   const structureToken = timelineStructureToken(rows);
+  // `renderItems` 只按行 type 把行分成 row / assistantRun，与工具集无关，所以挂在
+  // shape 令牌上：否则每次工具启停都要对全对话重算一遍分组。
+  const shapeToken = timelineShapeToken(rows);
   const binds = useMemo(() => turnChangeBinds(rows), [structureToken]);
   const createdBinds = useMemo(() => planCreatedBinds(rows, planLink), [planLink, structureToken]);
-  const visualItems = useMemo(() => renderItems(rows), [structureToken]);
+  const visualItems = useMemo(() => renderItems(rows), [shapeToken]);
   /**
    * Element identity per transcript item.
    *
@@ -199,6 +213,23 @@ export function ConvoTranscript({
             ...(rowPlanLink === undefined ? {} : { planLink: rowPlanLink }),
           });
         }
+        // 「重试上一轮」只挂在链尾 run 上，且仅当其最后一个 assistant 行以
+        // 出错/中止收场；可见性近似，Runtime 侧 turn.retry 仍做权威判定。
+        const lastRow = rows[visualItem.end];
+        const retryEligible =
+          onRetryTurn !== undefined
+          && visualItem.end === latestAssistant
+          && lastRow?.type === "assistant"
+          && (lastRow.status === "error" || lastRow.status === "aborted");
+        const retryTurnHere =
+          retryEligible && onRetryTurn !== undefined
+            ? {
+                ...(retryTurnDisabledReason === undefined
+                  ? {}
+                  : { disabled: true as const, reason: retryTurnDisabledReason }),
+                onRetry: onRetryTurn,
+              }
+            : undefined;
         return (
           <AssistantRunView
             entries={entries}
@@ -207,6 +238,7 @@ export function ConvoTranscript({
             {...(onReviewChanges === undefined ? {} : { onReviewChanges })}
             {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
             {...(liveAgents === undefined ? {} : { liveAgents })}
+            {...(retryTurnHere === undefined ? {} : { retryTurn: retryTurnHere })}
           />
         );
       }
@@ -242,6 +274,8 @@ export function ConvoTranscript({
       onRestore,
       onRestoreUserMessage,
       onReviewChanges,
+      onRetryTurn,
+      retryTurnDisabledReason,
       rows,
       userBranchDisabledReason,
       userRestoreDisabledReason,
@@ -252,7 +286,7 @@ export function ConvoTranscript({
       const visualItem = visualItems[index]!;
       const deps: unknown[] = [demo, onInspectSubagent, liveAgents, onReviewChanges];
       if (visualItem.kind === "assistantRun") {
-        deps.push(visualItem.end === latestAssistant);
+        deps.push(visualItem.end === latestAssistant, onRetryTurn, retryTurnDisabledReason);
         for (let rowIndex = visualItem.start; rowIndex <= visualItem.end; rowIndex += 1) {
           deps.push(rows[rowIndex], binds[rowIndex], createdBinds[rowIndex]);
         }
@@ -287,6 +321,8 @@ export function ConvoTranscript({
       onRestore,
       onRestoreUserMessage,
       onReviewChanges,
+      onRetryTurn,
+      retryTurnDisabledReason,
       rows,
       userBranchDisabledReason,
       userRestoreDisabledReason,

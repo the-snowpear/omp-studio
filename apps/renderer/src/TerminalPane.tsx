@@ -11,6 +11,14 @@ import "@xterm/xterm/css/xterm.css";
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
 
+/** 每个终端的回滚行数。乘以同时存在的终端数就是本面板的内存底数。 */
+const TERMINAL_SCROLLBACK_LINES = 1_000;
+/**
+ * 屏幕还没挂载时暂存的 PTY 字节上限。只保留尾部：宿主通常在 `create` 之后立刻
+ * 挂上，真正需要这个缓冲的情况都是异常路径，而异常路径不该无界增长。
+ */
+const PENDING_MAX_CHARS = 64 * 1024;
+
 export type TerminalPaneHandle = {
   create: () => void;
   available: boolean;
@@ -118,9 +126,26 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
         host.term.write(event.data);
         return;
       }
-      pending.current.set(event.id, (pending.current.get(event.id) ?? "") + event.data);
+      // A screen normally mounts right after `create`, but until it does the
+      // bytes have to go somewhere. Keep only the tail: an unbounded string
+      // concat here is a PTY-rate leak if the host never arrives.
+      const buffered = (pending.current.get(event.id) ?? "") + event.data;
+      pending.current.set(
+        event.id,
+        buffered.length > PENDING_MAX_CHARS ? buffered.slice(buffered.length - PENDING_MAX_CHARS) : buffered,
+      );
     });
     const offExit = api.onExit((event) => {
+      // Release the xterm instance as soon as the shell is gone: each one keeps
+      // its own scrollback plus rendered DOM, and previously they all stayed
+      // mounted until the whole pane unmounted. The row stays in `sessions` so
+      // the user still sees it as "ended".
+      const host = hosts.current.get(event.id);
+      if (host !== undefined) {
+        host.term.dispose();
+        hosts.current.delete(event.id);
+      }
+      pending.current.delete(event.id);
       setSessions((current) =>
         current.map((session) => (session.id === event.id ? { ...session, status: "ended" } : session)),
       );
@@ -253,6 +278,9 @@ function XtermScreen({
         fontFamily: readCssVar("--font-mono", "Consolas, monospace"),
         theme: readXtermTheme(),
         allowProposedApi: false,
+        // xterm 的默认值也是 1000，写出来是为了让这条上限有据可查：回滚缓冲乘以
+        // 同时存在的终端数就是这个面板的内存底数。
+        scrollback: TERMINAL_SCROLLBACK_LINES,
       });
       const fit = new FitAddon();
       term.loadAddon(fit);

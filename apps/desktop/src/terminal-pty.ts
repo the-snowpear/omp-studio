@@ -286,14 +286,17 @@ export class TerminalSessionManager {
   }
 
   write(windowId: number, id: string, data: string): void {
-    const session = this.#require(windowId, id);
-    if (session.ended) return;
+    // A session that has exited is deleted from the registry (see `#markEnded`),
+    // so a late write must be a no-op rather than "unknown session": the
+    // Renderer cannot have observed the exit before it sent this.
+    const session = this.#windows.get(windowId)?.get(id);
+    if (session === undefined || session.ended) return;
     session.proc.write(data);
   }
 
   resize(windowId: number, id: string, cols: number, rows: number): void {
-    const session = this.#require(windowId, id);
-    if (session.ended) return;
+    const session = this.#windows.get(windowId)?.get(id);
+    if (session === undefined || session.ended) return;
     session.proc.resize(cols, rows);
   }
 
@@ -335,10 +338,18 @@ export class TerminalSessionManager {
     return session;
   }
 
+  /**
+   * A shell that exits on its own must free its registry slot, not just flip a
+   * flag: the bucket is capped at `TERMINAL_MAX_SESSIONS`, so leaving dead rows
+   * behind made `create` throw after that many natural exits. `#kill` already
+   * deletes; this is the same cleanup for the path where the process is already
+   * gone.
+   */
   #markEnded(windowId: number, id: string, listeners: TerminalSessionListeners): void {
     const session = this.#windows.get(windowId)?.get(id);
     if (session === undefined || session.ended) return;
     session.ended = true;
+    this.#windows.get(windowId)?.delete(id);
     listeners.onExit({ id });
   }
 

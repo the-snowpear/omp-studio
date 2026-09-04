@@ -22,7 +22,7 @@
 <p align="center">
   <a href="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml"><img src="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0-informational.svg" alt="0.1.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.3-informational.svg" alt="0.1.3"></a>
   <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows-0078D4.svg" alt="Windows"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
 </p>
@@ -83,8 +83,8 @@ Skills、Plugins、MCP、Slash Commands 同一页开关、探测和打开目录�
   <img src="docs/images/git.png" alt="工作台右侧 Git 面板：diff、commit 与提交图" width="920">
 </p>
 
-> [!IMPORTANT]
-> **0.1.0 是开发预览。** 工作台可从源码或本地打出的 **未签名** NSIS 安装包在 Windows 上运行；部分面板仍是诚实空壳；GitHub Releases 上还没有 Authenticode 签名安装包。请把 bug 和改进想法开成 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
+> [!TIP]
+> **安装与运行：** Windows 用户可直接前往 [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases) 下载最新的安装包（`OMP-Studio-Setup-0.1.3-win-x64.exe`），或参考下方说明从源码构建运行。如遇问题欢迎提交 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
 
 ## 能做什么
 
@@ -105,7 +105,7 @@ npm install
 npm run preview
 ```
 
-或双击仓库根目录的 `preview.cmd` / `启动预览.cmd`。
+或双击仓库根目录的 `preview.cmd`。
 
 接上真实 Runtime（首次较慢）：
 

@@ -576,6 +576,14 @@ export interface WebSearchProviderRecord {
   readonly credentialFree: boolean;
   /** True when the Host detects an env var or stored/OAuth credential. */
   readonly hasCredential: boolean;
+  /** Env vars the runtime accepts for this provider's credential (empty for keyless engines). */
+  readonly envKeys?: ReadonlyArray<string>;
+  /** `omp login` provider id when an in-app OAuth login exists; absent otherwise. */
+  readonly loginId?: string;
+  /** agent.db provider id the engine reads an api_key from; absent when there is no direct key path. */
+  readonly apiKeyId?: string;
+  /** How the currently detected credential is satisfied (env takes precedence, like the runtime). */
+  readonly credentialKind?: "api-key" | "oauth" | "env";
 }
 
 /** Per-provider web search options edited in the advanced section. */
@@ -647,6 +655,23 @@ export interface ModelWebSearchSetInput {
     readonly enabled?: boolean;
     readonly searchDelayMs?: number;
   };
+}
+
+/**
+ * Studio-managed web-search credential write: stores an `api_key` credential
+ * for the engine in the local OMP credential store (agent.db) so the runtime
+ * picks it up natively — no `omp login` and no environment variables needed.
+ */
+export interface ModelWebSearchCredentialSetInput {
+  /** Search engine id (catalog id, e.g. `tavily`). */
+  readonly providerId: string;
+  /** Non-empty API key; the value never leaves the Host after the write. */
+  readonly apiKey: string;
+}
+
+/** Soft-deletes the Studio-managed api_key credential of a search engine. */
+export interface ModelWebSearchCredentialRemoveInput {
+  readonly providerId: string;
 }
 
 /**

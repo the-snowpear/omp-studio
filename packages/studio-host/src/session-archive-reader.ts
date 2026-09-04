@@ -516,9 +516,15 @@ export class StudioSessionArchiveReader {
   }
 
   async #locate(sessionId: string): Promise<string> {
-    const candidates = await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
-    await this.#ensureIndex(candidates);
+    // Hot reads should use the already-built identity index. Directory walking is
+    // reserved for a cache miss (new session) or an in-place replacement.
     let matches = this.#sessionIndex.get(sessionId) ?? [];
+    let candidates: string[] | undefined;
+    if (matches.length === 0 || this.#indexedPaths === undefined) {
+      candidates = await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
+      await this.#ensureIndex(candidates);
+      matches = this.#sessionIndex.get(sessionId) ?? [];
+    }
     if (matches.length === 1) {
       const path = matches[0]!;
       const currentVersion = await readFileVersion(path, this.#maxSessionBytes);
@@ -529,6 +535,7 @@ export class StudioSessionArchiveReader {
         return path;
       }
       // A file was replaced in place. Rebuild once so the new identity is visible.
+      candidates ??= await listSessionFiles({ sessions: this.#sessionsRoot, archive: this.#archiveRoot }, this.#maxScanFiles);
       await this.#ensureIndex(candidates, true);
       matches = this.#sessionIndex.get(sessionId) ?? [];
     }

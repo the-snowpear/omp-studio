@@ -4,12 +4,61 @@ import { describe, expect, it, vi } from "vitest";
 import { bindTailGestures, captureAnchor, restoreAnchor, useConversationScroll } from "./useConversationScroll";
 
 describe("conversation scroll primitives", () => {
-  it("detaches synchronously on an upward wheel gesture and disposes listeners", () => {
-    const el = document.createElement("div"); const unpin = vi.fn();
+  it("detaches synchronously on an upward wheel gesture when scrollable and disposes listeners", () => {
+    const el = document.createElement("div");
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 200 });
+    const unpin = vi.fn();
     const dispose = bindTailGestures(el, () => true, unpin);
-    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 })); expect(unpin).toHaveBeenCalledOnce();
-    dispose(); el.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 })); expect(unpin).toHaveBeenCalledOnce();
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+    expect(unpin).toHaveBeenCalledOnce();
+    dispose();
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+    expect(unpin).toHaveBeenCalledOnce();
   });
+
+  it("does not detach on upward wheel gesture when content does not overflow (not scrollable)", () => {
+    const el = document.createElement("div");
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 200 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 200 });
+    const unpin = vi.fn();
+    const dispose = bindTailGestures(el, () => true, unpin);
+    el.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+    expect(unpin).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it("does not show jump-to-latest button when content is less than one screen", () => {
+    const scroller = document.createElement("div");
+    const metrics = { scrollHeight: 200, clientHeight: 200 };
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => metrics.scrollHeight });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => metrics.clientHeight });
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, writable: true, value: 0 });
+    const scrollerRef = { current: scroller };
+    const hook = renderHook(
+      ({ contentKey }) => useConversationScroll({
+        scrollerRef,
+        identityKey: "session-1",
+        itemCount: 1,
+        loadingOlder: false,
+        contentKey,
+      }),
+      { initialProps: { contentKey: "first" } },
+    );
+
+    expect(hook.result.current.follow).toBe(true);
+    expect(hook.result.current.hasNewContent).toBe(false);
+
+    // 即使被外部调用了 detachFromLatest，未满一屏时 hasNewContent 也必须为 false
+    act(() => hook.result.current.detachFromLatest());
+    expect(hook.result.current.hasNewContent).toBe(false);
+
+    // 新内容到来但依然未满一屏时，按钮依然不显示
+    metrics.scrollHeight = 210;
+    hook.rerender({ contentKey: "second" });
+    expect(hook.result.current.hasNewContent).toBe(false);
+  });
+
   it("restores a prepended-page anchor by identity", () => {
     const scroller = document.createElement("div"); const row = document.createElement("div"); row.dataset.itemId = "visible"; scroller.append(row);
     Object.defineProperty(scroller, "scrollTop", { writable: true, value: 10 });
@@ -141,8 +190,25 @@ describe("conversation scroll primitives", () => {
     scroller.scrollTop = 650;
     const pinnedHook = renderHook(() => useConversationScroll({ scrollerRef: { current: scroller }, identityKey: "s2", itemCount: 1, loadingOlder: false }));
     expect(pinnedHook.result.current.follow).toBe(true);
-    metrics.scrollHeight = 1500;
     act(() => pinnedHook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
     expect(pinnedHook.result.current.follow).toBe(true);
+  });
+
+  it("re-pins unconditionally when distance reaches the exact bottom (<= AT_TAIL_PX)", () => {
+    const scroller = document.createElement("div");
+    const metrics = { scrollHeight: 1200, clientHeight: 200 };
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, get: () => metrics.scrollHeight });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, get: () => metrics.clientHeight });
+    Object.defineProperty(scroller, "scrollTop", { configurable: true, writable: true, value: 0 });
+    const scrollerRef = { current: scroller };
+    const hook = renderHook(() => useConversationScroll({ scrollerRef, identityKey: "s", itemCount: 1, loadingOlder: false }));
+    act(() => hook.result.current.detachFromLatest());
+    expect(hook.result.current.follow).toBe(false);
+
+    // 滚到底部（scrollTop = 1000，distance = 0）
+    scroller.scrollTop = 1000;
+    act(() => hook.result.current.onScroll({ currentTarget: scroller } as unknown as UIEvent<HTMLElement>));
+    expect(hook.result.current.follow).toBe(true);
+    expect(hook.result.current.hasNewContent).toBe(false);
   });
 });

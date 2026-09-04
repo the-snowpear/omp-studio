@@ -2,7 +2,7 @@ import { createContext, memo, useContext, useMemo, type ComponentProps, type Mou
 import type { JsonValue } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
 import { bashDisplay } from "./bashDisplay";
-import { ChunkedText } from "./textChunks";
+import { ChunkedRows, ChunkedText } from "./textChunks";
 import { jsonRecord, jsonString, type ToolView } from "./conversationViewModel";
 import {
   askAnswer,
@@ -51,15 +51,43 @@ function Kv({ pairs }: { pairs: ReadonlyArray<readonly [string, JsonValue | stri
   );
 }
 
+/**
+ * \u6309\u884c\u6e32\u67d3\u7684\u5de5\u5177\u5361\u7684\u884c\u6570\u4e0a\u9650\uff0c\u4e0e `BASH_DISPLAY_MAX_ROWS` \u5bf9\u9f50\u3002
+ *
+ * bash \u5361\u65e9\u5c31\u6709\u8fd9\u6761\u4e0a\u9650\uff0c\u6309\u884c\u6e32\u67d3\u7684 Read / Write / Edit / Grep / Glob / Lsp \u4e00\u76f4\u6ca1\u6709\uff1a
+ * \u4e00\u6b21 Read \u4e24\u4e07\u884c\u7684\u6587\u4ef6\u4f1a\u5728\u4e00\u5f20 220px \u9ad8\u7684\u5361\u91cc\u6302\u51fa\u516d\u4e07\u4e2a\u5143\u7d20\uff0c\u800c\u865a\u62df\u5217\u8868\u53ea\u9650\u5236\u6302\u8f7d
+ * \u884c\u6570\u3001\u4e0d\u9650\u5236\u5355\u884c\u5185\u7684\u8282\u70b9\u6570\uff0c\u4e8e\u662f\u539f\u751f\u5185\u5b58\u968f\u56de\u770b\u6df1\u5ea6\u5355\u8c03\u4e0a\u6da8\u3002
+ *
+ * \u4e0e bash \u76f8\u53cd\uff0c\u8fd9\u91cc\u4fdd\u7559**\u5f00\u5934**\uff1abash \u662f\u4e00\u6761\u5728\u8dd1\u7684\u65e5\u5fd7\uff0c\u6709\u4ef7\u503c\u7684\u662f\u5c3e\u90e8\uff1b\u800c Read \u9884\u89c8\u3001
+ * diff\u3001grep/glob \u7ed3\u679c\u90fd\u662f\u4ece\u5934\u8bfb\u7684\u5217\u8868\u3002
+ */
+export const TOOL_ROWS_MAX = 1500;
+
+/** \u4fdd\u7559\u5f00\u5934\u81f3\u591a `TOOL_ROWS_MAX` \u884c\uff1b`omitted` \u662f\u88ab\u4e22\u6389\u7684\u5c3e\u90e8\u884c\u6570\u3002 */
+function capRows<T>(rows: readonly T[], max = TOOL_ROWS_MAX): { rows: readonly T[]; omitted: number } {
+  if (rows.length <= max) return { rows, omitted: 0 };
+  return { rows: rows.slice(0, max), omitted: rows.length - max };
+}
+
+function OmittedRows({ count }: { count: number }) {
+  return <div className="tc-note">\u53e6\u6709 {count} \u884c\u672a\u663e\u793a</div>;
+}
+
 function CodeLines({ lines, start = 1 }: { lines: readonly string[]; start?: number }) {
+  const capped = capRows(lines);
   return (
     <ScrollPane className="tc-code tool-card-scroll" data-tool-scroll="both">
-      {lines.map((line, index) => (
-        <div key={index} className="cl">
-          <span className="ln">{start + index}</span>
-          <span className="lx">{line || "\u00a0"}</span>
-        </div>
-      ))}
+      <ChunkedRows
+        count={capped.rows.length}
+        chunkClassName="cv-chunk-rows"
+        renderRow={(index) => (
+          <div key={index} className="cl">
+            <span className="ln">{start + index}</span>
+            <span className="lx">{capped.rows[index] || "\u00a0"}</span>
+          </div>
+        )}
+      />
+      {capped.omitted > 0 ? <OmittedRows count={capped.omitted} /> : null}
     </ScrollPane>
   );
 }
@@ -176,21 +204,47 @@ function MatchTree({ matches, count }: { matches: JsonValue | undefined; count?:
     }
     for (const [file, group] of grouped) files.push({ file, ...group });
   }
+  // 命中总数是无界维度：一次 grep 命中上万行时，按文件分组的结构照样会铺出上万个
+  // `.tt-hit`。先按总命中数截断，再把每个文件的命中行分块。
+  let budget = TOOL_ROWS_MAX;
+  const shown: typeof files = [];
+  let omitted = 0;
+  for (const file of files) {
+    if (budget <= 0) {
+      omitted += file.rows.length;
+      continue;
+    }
+    if (file.rows.length <= budget) {
+      shown.push(file);
+      budget -= file.rows.length;
+      continue;
+    }
+    shown.push({ ...file, rows: file.rows.slice(0, budget) });
+    omitted += file.rows.length - budget;
+    budget = 0;
+  }
   return (
     <>
       {count ? <div className="tc-summary">{count}</div> : null}
       <ScrollPane className="tc-tree">
-        {files.map((file) => (
+        {shown.map((file) => (
           <div key={file.file}>
             <div className="tt-file">{file.file}{file.count === undefined ? null : ` · ${file.count}`}</div>
-            {file.rows.map((row, index) => (
-              <div key={`${row.line}-${index}`} className="tt-hit">
-                <span className="m-line">{row.line}</span>
-                <span className="m-text">{row.text}</span>
-              </div>
-            ))}
+            <ChunkedRows
+              count={file.rows.length}
+              renderRow={(index) => {
+                const row = file.rows[index]!;
+                return (
+                  <div key={`${row.line}-${index}`} className="tt-hit">
+                    <span className="m-line">{row.line}</span>
+                    <span className="m-text">{row.text}</span>
+                  </div>
+                );
+              }}
+            />
           </div>
         ))}
+        {omitted > 0 ? <OmittedRows count={omitted} /> : null}
       </ScrollPane>
     </>
   );
@@ -258,23 +312,29 @@ function EditBody({ tool }: { tool: ToolView }) {
   const summary = jsonString(fields.summary) ?? jsonString(fields.i);
   const summaryNode = summary ? <div className="tc-edit-summary">{summary}</div> : null;
   if (typeof diff === "string" && diff.length > 0) {
-    const rows = diff.split("\n");
+    const capped = capRows(diff.split("\n"));
     return (
       <>
         {summaryNode}
         <ScrollPane className="tc-diff tool-card-scroll" data-tool-scroll="both">
-          {rows.map((line, index) => {
-            const match = /^([ +\-])(\d*)\|(.*)$/.exec(line);
-            const marker = match?.[1] ?? " ";
-            const cls = marker === "+" ? "add" : marker === "-" ? "del" : "";
-            return (
-              <div key={index} className={`dl ${cls}`}>
-                <span className="ln">{match?.[2] ?? ""}</span>
-                <span className="dm" aria-hidden="true">{marker === "-" ? "−" : marker}</span>
-                <span className="lc">{match?.[3] ?? line}</span>
-              </div>
-            );
-          })}
+          <ChunkedRows
+            count={capped.rows.length}
+            chunkClassName="cv-chunk-rows"
+            renderRow={(index) => {
+              const line = capped.rows[index]!;
+              const match = /^([ +\-])(\d*)\|(.*)$/.exec(line);
+              const marker = match?.[1] ?? " ";
+              const cls = marker === "+" ? "add" : marker === "-" ? "del" : "";
+              return (
+                <div key={index} className={`dl ${cls}`}>
+                  <span className="ln">{match?.[2] ?? ""}</span>
+                  <span className="dm" aria-hidden="true">{marker === "-" ? "−" : marker}</span>
+                  <span className="lc">{match?.[3] ?? line}</span>
+                </div>
+              );
+            }}
+          />
+          {capped.omitted > 0 ? <OmittedRows count={capped.omitted} /> : null}
         </ScrollPane>
       </>
     );
@@ -287,23 +347,30 @@ function EditBody({ tool }: { tool: ToolView }) {
       </>
     );
   }
+  const cappedDiff = capRows(diff);
   return (
     <>
       {summaryNode}
       <ScrollPane className="tc-diff tool-card-scroll" data-tool-scroll="both">
-        {diff.map((row, index) => {
-          if (!Array.isArray(row)) return null;
-          const mark = row[0] === "+" ? "+" : row[0] === "-" ? "−" : " ";
-          const cls = row[0] === "+" ? "add" : row[0] === "-" ? "del" : "";
-          return (
-            <div key={index} className={`dl ${cls}`}>
-              <span className="ln">{String(row[1] ?? "")}</span>
-              <span className="ln">{String(row[2] ?? "")}</span>
-              <span className="dm" aria-hidden="true">{mark}</span>
-              <span className="lc">{String(row[3] ?? "")}</span>
-            </div>
-          );
-        })}
+        <ChunkedRows
+          count={cappedDiff.rows.length}
+          chunkClassName="cv-chunk-rows"
+          renderRow={(index) => {
+            const row = cappedDiff.rows[index];
+            if (!Array.isArray(row)) return null;
+            const mark = row[0] === "+" ? "+" : row[0] === "-" ? "−" : " ";
+            const cls = row[0] === "+" ? "add" : row[0] === "-" ? "del" : "";
+            return (
+              <div key={index} className={`dl ${cls}`}>
+                <span className="ln">{String(row[1] ?? "")}</span>
+                <span className="ln">{String(row[2] ?? "")}</span>
+                <span className="dm" aria-hidden="true">{mark}</span>
+                <span className="lc">{String(row[3] ?? "")}</span>
+              </div>
+            );
+          }}
+        />
+        {cappedDiff.omitted > 0 ? <OmittedRows count={cappedDiff.omitted} /> : null}
       </ScrollPane>
     </>
   );
@@ -489,6 +556,7 @@ function GlobBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
   const listed = jsonStringArray(fields.files);
   const files = listed ?? (tool.output ? tool.output.split("\n").filter(Boolean) : []);
+  const cappedFiles = capRows(files);
   return (
     <>
       <Kv pairs={[
@@ -496,7 +564,15 @@ function GlobBody({ tool }: { tool: ToolView }) {
         ["files", files.length],
       ]} />
       <ScrollPane className="tc-tree">
-        {files.length ? files.map((file) => <div key={file} className="tt-file">{file}</div>) : <div className="tc-note">No files found</div>}
+        {files.length ? (
+          <>
+            <ChunkedRows
+              count={cappedFiles.rows.length}
+              renderRow={(index) => <div key={cappedFiles.rows[index]} className="tt-file">{cappedFiles.rows[index]}</div>}
+            />
+            {cappedFiles.omitted > 0 ? <OmittedRows count={cappedFiles.omitted} /> : null}
+          </>
+        ) : <div className="tc-note">No files found</div>}
       </ScrollPane>
     </>
   );
@@ -589,22 +665,27 @@ function GithubBody({ tool }: { tool: ToolView }) {
 function LspBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
   const rows = Array.isArray(fields.diagnostics) ? fields.diagnostics : Array.isArray(fields.refs) ? fields.refs : [];
+  const cappedRows = capRows(rows);
   return (
     <>
       <Kv pairs={[["action", fields.action]]} />
       <div className="tc-lsp">
-        {rows.map((entry, index) => {
-          const row = jsonRecord(entry) ?? {};
-          const sev = jsonString(row.sev) ?? "info";
-          return (
-            <div key={index} className={`lsp-row ${sev}`}>
-              <span className="lsp-sev">{jsonString(row.sev) ?? "ref"}</span>
-              <span className="m-file">{jsonString(row.file)}</span>
-              <span className="m-line">{String(jsonNumber(row.line) ?? jsonString(row.line) ?? "")}</span>
-              <span className="m-text">{jsonString(row.msg) ?? jsonString(row.text) ?? ""}</span>
-            </div>
-          );
-        })}
+        <ChunkedRows
+          count={cappedRows.rows.length}
+          renderRow={(index) => {
+            const row = jsonRecord(cappedRows.rows[index]) ?? {};
+            const sev = jsonString(row.sev) ?? "info";
+            return (
+              <div key={index} className={`lsp-row ${sev}`}>
+                <span className="lsp-sev">{jsonString(row.sev) ?? "ref"}</span>
+                <span className="m-file">{jsonString(row.file)}</span>
+                <span className="m-line">{String(jsonNumber(row.line) ?? jsonString(row.line) ?? "")}</span>
+                <span className="m-text">{jsonString(row.msg) ?? jsonString(row.text) ?? ""}</span>
+              </div>
+            );
+          }}
+        />
+        {cappedRows.omitted > 0 ? <OmittedRows count={cappedRows.omitted} /> : null}
       </div>
       {rows.length === 0 && jsonString(fields.output) ? <ScrollPane className="codeblock">{jsonString(fields.output)}</ScrollPane> : null}
     </>

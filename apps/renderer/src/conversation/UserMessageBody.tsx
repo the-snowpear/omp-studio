@@ -186,7 +186,9 @@ export function UserMessageBody({
     [text, doc, thumbs],
   );
     const chips = docHasDisplayChips(display);
-    const subjects = imageSubjectsFromDoc(display);
+    // 每个 subject 都带一份等长的 data URL（`imagePreviewUrl` 是字符串拼接），
+    // 不 memo 的话流式期间挂载中的每条用户消息每帧都要重新拼出几 MB 的字符串。
+    const subjects = useMemo(() => imageSubjectsFromDoc(display), [display]);
     const paintKeywords = magicKeywords === true;
 
   useLayoutEffect(() => {
@@ -232,7 +234,7 @@ export function UserMessageBody({
             aria-label={`预览${thumb.label}`}
             onClick={() => setPreview(thumb)}
           >
-            <img src={thumb.url} alt="" />
+            <img src={thumb.url} alt="" loading="lazy" decoding="async" />
           </button>
         </figure>
       ))}

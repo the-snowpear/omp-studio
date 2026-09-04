@@ -40,13 +40,22 @@ export interface DesktopHostComposition {
   /** Re-bind to the same Host session without stopping the Runtime. */
   reload(): Promise<DesktopHostComposition>;
   /**
-   * Restart the Runtime under a new workspace cwd and rebuild the facade's
-   * runtime access from the returned session bundle. No-op when the
-   * runtime session port has no `rebind` seam.
+   * Rebind the Host to a new workspace cwd and rebuild the facade's runtime
+   * access from the returned session bundle. Callers may keep a workspace
+   * read-only when no resident Worker exists. No-op when the runtime session
+   * port has no `rebind` seam.
    */
-  rebindWorkspace(workspace: { workspaceId: string; cwd: string }): Promise<void>;
+  rebindWorkspace(
+    workspace: { workspaceId: string; cwd: string },
+    options?: { readonly launchIfMissing?: boolean },
+  ): Promise<void>;
   /** Graceful close: client-session close, Host shutdown, authority release. */
   shutdown(): Promise<void>;
+  /**
+   * True while any resident session is streaming/compacting. Main-only
+   * gate for the tray quit confirmation; never surfaced to the renderer.
+   */
+  isBusy(): boolean;
 }
 
 /** Injectable factory that brings the Host composition up (or fails closed). */
@@ -63,10 +72,18 @@ export interface DesktopWindowContext {
    */
   readonly transport: ClientTransport | null;
   readonly runtimeStatus: DesktopRuntimeStatus;
+  /**
+   * True once a real quit started. The window factory uses it to let close
+   * events pass during shutdown while intercepting them otherwise
+   * (close-to-tray).
+   */
+  readonly isQuitting: () => boolean;
 }
 
-/** Window handle the application tracks for focus/second-instance handling. */
+/** Window handle the application tracks for show/focus/second-instance handling. */
 export interface DesktopWindow {
+  /** Bring the window to the front: show if hidden, restore if minimized, focus. */
+  show(): void;
   focus(): void;
   close(): void;
   /**
@@ -79,15 +96,28 @@ export interface DesktopWindow {
 
 export type DesktopWindowFactory = (context: DesktopWindowContext) => Promise<DesktopWindow>;
 
+/** Tray handle the application owns alongside the main window. */
+export interface DesktopTray {
+  /**
+   * Best-effort one-time notification for the first close-to-tray hide.
+   * Optional because non-Windows trays cannot show a balloon.
+   */
+  notifyHiddenToTray?(): void;
+  /** Release the tray icon; safe to call when already released. */
+  dispose?(): void;
+}
+
 /**
  * Electron window surface the `DesktopWindowFactory` implementation
- * consumes beyond the secure-window base: the minimize/restore/focus/close
- * handle methods used for second-instance handling. Structural (no
- * Electron import) so the factory stays testable with fakes.
+ * consumes beyond the secure-window base: the minimize/restore/show/
+ * focus/close handle methods used for second-instance and tray handling.
+ * Structural (no Electron import) so the factory stays testable with fakes.
  */
 export interface DesktopWindowSurface {
   isMinimized(): boolean;
+  isVisible(): boolean;
   restore(): void;
+  show(): void;
   focus(): void;
   close(): void;
 }
@@ -119,6 +149,18 @@ export interface DesktopApplicationDeps {
   readonly onBeforeQuit: (listener: (event: { preventDefault(): void }) => void) => void;
   /** Fired when every window closed (Windows: quit the app). */
   readonly onAllWindowsClosed: (listener: () => void) => void;
+  /**
+   * Optional OS tray seam. Returns undefined when the tray is unavailable —
+   * closing the window then keeps the legacy behavior (quit the app).
+   */
+  readonly createTray?: (actions: {
+    /** Show and focus the existing window (tray left click / menu open). */
+    openWindow(): void;
+    /** Tray menu quit; routes through the busy-quit confirmation gate. */
+    requestQuit(): void;
+  }) => DesktopTray | undefined;
+  /** Native confirmation before a tray-initiated quit while sessions are busy. */
+  readonly confirmQuitWhileBusy?: () => Promise<boolean>;
   /** Actually quit the app (Electron `app.quit()` in production). */
   readonly quit: () => void;
   readonly log?: (message: string) => void;

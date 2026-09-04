@@ -33,6 +33,24 @@ export class RuntimeProjection {
   #messagesCursor: OpaqueCursor | undefined;
   #lastEventSeq = 0 as EventSeq;
   #snapshotRequired = true;
+  #snapshotRevision = 0;
+
+  /**
+   * Advances only where `#snapshot` is reassigned. Callers compare it across
+   * `applyEvent` to decide whether a publication is warranted: a
+   * `conversation.message.delta` is `"applied"` (it advances `#lastEventSeq`)
+   * without touching the operator snapshot, and republishing an unchanged
+   * snapshot deep-clones the whole read model — plus the command ledger — once
+   * per streamed token. The contract already says a delta must not advance
+   * `stateVersion` (`CONVERSATION_MESSAGE_DELTA_INCREMENTS_STATE_VERSION`); this
+   * is the missing guard on the Host side.
+   *
+   * `beginConnection` deliberately does not advance it: it clears `#hello` and
+   * the cursor, not the snapshot.
+   */
+  snapshotRevision(): number {
+    return this.#snapshotRevision;
+  }
 
   beginConnection(hello: StudioHelloResponse): void {
     this.#hello = structuredClone(hello);
@@ -53,6 +71,7 @@ export class RuntimeProjection {
       throw new Error("Runtime snapshot identity does not match hello");
     }
     this.#snapshot = structuredClone(response.snapshot);
+    this.#snapshotRevision += 1;
     this.#messagesCursor = response.messagesCursor;
     this.#lastEventSeq = response.lastEventSeq;
     this.#snapshotRequired = false;
@@ -79,6 +98,7 @@ export class RuntimeProjection {
         return "gap";
       }
       this.#snapshot = structuredClone(envelope.event.snapshot);
+      this.#snapshotRevision += 1;
     } else if (isTelemetryChangedEvent(envelope.event)) {
       if (envelope.event.sessionId !== snapshot.sessionId || envelope.event.telemetry.sessionId !== snapshot.sessionId) {
         // Event sequence is runtime-wide. A late telemetry event from the
@@ -88,6 +108,7 @@ export class RuntimeProjection {
         return "stale";
       }
       this.#snapshot = { ...snapshot, telemetry: structuredClone(envelope.event.telemetry) };
+      this.#snapshotRevision += 1;
     }
     this.#lastEventSeq = envelope.eventSeq;
     return "applied";

@@ -1,5 +1,6 @@
 import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
+import { rasterizeSvg } from "@oh-my-pi/pi-natives";
 import type { CustomMessage } from "../../session/messages";
 import { USER_INTERRUPT_LABEL } from "../../session/messages";
 
@@ -35,7 +36,12 @@ export interface SessionControlSession {
 
 export class SessionControlError extends Error {
 	constructor(
-		readonly code: "BUSY_STREAMING" | "BUSY_COMPACTING" | "COMMAND_BLOCKED" | "INTERACTION_REQUIRED",
+		readonly code:
+			| "BUSY_STREAMING"
+			| "BUSY_COMPACTING"
+			| "COMMAND_BLOCKED"
+			| "INTERACTION_REQUIRED"
+			| "INVALID_ARGUMENT",
 		message: string,
 		readonly retryable = false,
 		readonly details?: Record<string, unknown>,
@@ -50,6 +56,9 @@ export interface SessionControlHooks {
 	beforeQueuedUserTurn?: () => Promise<void>;
 }
 
+/** Pixel bound the upstream `:img` read selector applies to SVG rasterization. */
+const SVG_IMAGE_MAX_EDGE_PX = 2048;
+
 /** Shared session control service. One instance per AgentSession. */
 export class SessionControlService {
 	readonly #session: SessionControlSession;
@@ -58,6 +67,41 @@ export class SessionControlService {
 	constructor(session: SessionControlSession, hooks: SessionControlHooks = {}) {
 		this.#session = session;
 		this.#beforeQueuedUserTurn = hooks.beforeQueuedUserTurn;
+	}
+
+	/**
+	 * SVG attachments rasterize to PNG before the model call: Bun.Image cannot
+	 * decode SVG, so an untouched `image/svg+xml` block would be forwarded as-is
+	 * and rejected by the provider. Mirrors the upstream `:img` read selector,
+	 * including its pixel bound.
+	 */
+	async #prepareImages(images: readonly unknown[] | undefined): Promise<ImageContent[] | undefined> {
+		if (images === undefined || images.length === 0) return undefined;
+		const prepared: ImageContent[] = [];
+		for (const entry of images) {
+			const image = entry as { mimeType?: unknown };
+			prepared.push(image?.mimeType === "image/svg+xml" ? await this.#rasterizeSvg(entry) : (entry as ImageContent));
+		}
+		return prepared;
+	}
+
+	async #rasterizeSvg(entry: unknown): Promise<ImageContent> {
+		const image = entry as { type?: unknown; mimeType?: unknown; data?: unknown };
+		if (typeof image.data !== "string" || image.data.length === 0) {
+			throw new SessionControlError("INVALID_ARGUMENT", "SVG attachment is missing image data");
+		}
+		let png: Uint8Array;
+		try {
+			png = await rasterizeSvg(Buffer.from(image.data, "base64"), SVG_IMAGE_MAX_EDGE_PX, SVG_IMAGE_MAX_EDGE_PX);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new SessionControlError("INVALID_ARGUMENT", `Could not rasterize the SVG attachment: ${message}`);
+		}
+		return {
+			type: "image",
+			data: Buffer.from(png.buffer, png.byteOffset, png.byteLength).toString("base64"),
+			mimeType: "image/png",
+		};
 	}
 
 	/**
@@ -135,7 +179,7 @@ export class SessionControlService {
 		this.#maybeStartTitleGeneration(text);
 		try {
 			const started = await this.#session.prompt(text, {
-				images: images as ImageContent[] | undefined,
+				images: await this.#prepareImages(images),
 				...(preludes !== undefined && preludes.length > 0 ? { prependMessages: [...preludes] } : {}),
 			});
 			return { started };
@@ -159,7 +203,7 @@ export class SessionControlService {
 		try {
 			await this.#beforeQueuedUserTurn?.();
 			await this.#queuePreludes(preludes, "steer");
-			await this.#session.steer(text, images as ImageContent[] | undefined);
+			await this.#session.steer(text, await this.#prepareImages(images));
 		} catch (error) {
 			throw this.#mapBusy(error);
 		}
@@ -177,7 +221,7 @@ export class SessionControlService {
 		try {
 			if (!this.#session.isStreaming) await this.#beforeQueuedUserTurn?.();
 			await this.#queuePreludes(preludes, "followUp");
-			await this.#session.followUp(text, images as ImageContent[] | undefined);
+			await this.#session.followUp(text, await this.#prepareImages(images));
 		} catch (error) {
 			throw this.#mapBusy(error);
 		}

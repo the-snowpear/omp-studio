@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  CONVERSATION_LIMITS,
   type ConversationRuntimeEvent,
   type RuntimeEpoch,
   type SessionId,
   type StateVersion,
   type StudioEventEnvelope,
+  utf8ByteLength,
 } from "@omp-studio/studio-protocol";
 
 import {
@@ -165,6 +167,61 @@ test("byte overflow fails closed with an explicit resync result", () => {
   assert.equal(snapshot.status, "resyncRequired");
   assert.deepEqual(snapshot.events, []);
   assert.ok(snapshot.watermark > 0);
+});
+
+/**
+ * Streaming appends account bytes incrementally (previously recorded size plus
+ * the appended UTF-8 bytes) instead of re-serializing the coalesced block per
+ * token, so the accounted budget undercounts exact serialization by the JSON
+ * escaping of the blocks still being appended to. A truncated block is
+ * re-measured exactly, which stops that drift from accumulating across the
+ * whole turn: two delta blocks bound it (measured ~33KiB on this fixture, whose
+ * chunks are ~10% escaped — far more than real prose).
+ */
+const ACCOUNTING_TOLERANCE_BYTES = 2 * CONVERSATION_LIMITS.DELTA_MAX_BYTES;
+
+test("incremental delta accounting stays within a bounded tolerance of full serialization", () => {
+  // ~10% of the chunk is JSON-escaped, which is what the increment cannot see.
+  const chunk = `${'"\n\t'.repeat(128)}${"a".repeat(4096 - 384)}`;
+  const streamDeltas = (deltas: number): ConversationEventFanout => {
+    const fanout = new ConversationEventFanout();
+    for (let index = 0; index < deltas; index += 1) {
+      fanout.forward(envelope(index + 1, {
+        kind: "conversation.message.delta",
+        sessionId: SESSION_ID,
+        turnId: "turn-accounting",
+        messageId: "message-1",
+        // One block caps at TEXT_BLOCK_MAX_BYTES, so the stream has to move on.
+        blockId: `block-${Math.floor(index / 32)}`,
+        blockType: "text",
+        delta: chunk,
+      }));
+    }
+    return fanout;
+  };
+  const overflows = (deltas: number): boolean =>
+    streamDeltas(deltas).snapshot(SESSION_ID).status === "resyncRequired";
+
+  let retained = 1;
+  let overflowed = 2048;
+  assert.ok(overflows(overflowed), "2048 4KiB deltas must exceed the replay byte cap");
+  while (retained + 1 < overflowed) {
+    const mid = Math.floor((retained + overflowed) / 2);
+    if (overflows(mid)) overflowed = mid;
+    else retained = mid;
+  }
+
+  const snapshot = streamDeltas(retained).snapshot(SESSION_ID);
+  assert.equal(snapshot.status, "complete");
+  const exactBytes = snapshot.events.reduce((total, event) => total + utf8ByteLength(JSON.stringify(event)), 0);
+  assert.ok(
+    exactBytes <= CONVERSATION_REPLAY_MAX_BYTES + ACCOUNTING_TOLERANCE_BYTES,
+    `retained ${exactBytes} bytes exceeds the cap by more than the tolerance`,
+  );
+  assert.ok(
+    exactBytes >= CONVERSATION_REPLAY_MAX_BYTES - ACCOUNTING_TOLERANCE_BYTES,
+    `retained ${exactBytes} bytes overflows far below the cap; accounting overcounts`,
+  );
 });
 
 test("global LRU eviction bounds many child sessions and never returns a false empty replay", () => {

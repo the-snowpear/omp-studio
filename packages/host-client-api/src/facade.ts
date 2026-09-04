@@ -28,6 +28,8 @@
  * module never imports Electron.
  */
 
+import { createHash } from "node:crypto";
+
 import type {
   ArchId,
   ClientBootstrap,
@@ -179,6 +181,24 @@ const HISTORY_MAX_LIMIT = 200;
 const HOME_RECENT_THREADS = 5;
 const HOME_RECENT_WORKSPACES = 8;
 const DEFAULT_REGISTRY_CAPACITY = 512;
+/**
+ * Retained "already emitted" fingerprints per facade. Two entries per command
+ * (`#terminalEmitted` + `#ledgerReceiptKeys`) would otherwise grow for the
+ * whole process lifetime. Sized well above the Renderer's
+ * `COMMAND_STATE_TERMINAL_CAP` (100) and equal to `DEFAULT_REGISTRY_CAPACITY`,
+ * so a receipt can never be de-duplicated away while a client still shows —
+ * or could still replay — the command it belongs to.
+ */
+const DEDUPE_KEY_CAPACITY = 512;
+
+/** FIFO trim for insertion-ordered dedupe sets; mirrors `CommandRegistry#evictOldest`. */
+function evictOldestKeys<T>(keys: Set<T>, capacity: number): void {
+  while (keys.size > capacity) {
+    const oldest = keys.keys().next().value as T | undefined;
+    if (oldest === undefined) break;
+    keys.delete(oldest);
+  }
+}
 
 function guiInteractionKey(interactionId: string, leaseGeneration: number): string {
   return `${interactionId}:${leaseGeneration}`;
@@ -203,7 +223,9 @@ type ModelsCommandName =
   | "models.provider.probe"
   | "models.discovery.refresh"
   | "models.cycleOrder.set"
-  | "models.webSearch.set";
+  | "models.webSearch.set"
+  | "models.webSearch.credential.set"
+  | "models.webSearch.credential.remove";
 
 type AgentDefinitionsCommandName =
   | "agents.definition.upsert"
@@ -269,9 +291,20 @@ interface RegistryEntry {
   readonly key: IdempotencyKey;
   readonly requestId: CommandRequestId;
   readonly commandName: CommandName;
-  readonly inputJson: string;
+  /**
+   * sha256 of the canonical input JSON, never the JSON itself: the value is
+   * only ever compared for equality, and `core.prompt` inputs carry base64
+   * images (up to 64MiB per prompt), so retaining them for the whole
+   * `DEFAULT_REGISTRY_CAPACITY` window would pin hundreds of MB in Main.
+   */
+  readonly inputHash: string;
   readonly acceptedAt: string;
   terminal: CommandReceipt | undefined;
+}
+
+/** Same digest shape as the Host confirmation registry (`host-confirmation.ts`). */
+function inputFingerprint(input: unknown): string {
+  return createHash("sha256").update(canonicalJson(input)).digest("hex");
 }
 
 /**
@@ -304,10 +337,10 @@ class CommandRegistry {
     },
     acceptedAt: string,
   ): RegistryEntry | undefined {
-    const inputJson = canonicalJson(request.input);
+    const inputHash = inputFingerprint(request.input);
     const existing = this.#byKey.get(request.idempotencyKey);
     if (existing !== undefined) {
-      if (existing.commandName !== request.commandName || existing.inputJson !== inputJson) {
+      if (existing.commandName !== request.commandName || existing.inputHash !== inputHash) {
         throw clientError("INVALID_ARGUMENT", "idempotency key reused with different semantic input");
       }
       return existing;
@@ -320,7 +353,7 @@ class CommandRegistry {
       key: request.idempotencyKey,
       requestId: request.requestId,
       commandName: request.commandName,
-      inputJson,
+      inputHash,
       acceptedAt,
       terminal: undefined,
     };
@@ -642,6 +675,7 @@ export class StudioHostClientFacade implements ClientTransport {
   readonly #options: StudioHostClientFacadeOptions;
   readonly #registry: CommandRegistry;
   readonly #bus: HostEventBus;
+  /** Bounded (`DEDUPE_KEY_CAPACITY`) FIFO of requestIds whose terminal receipt was already published. */
   readonly #terminalEmitted = new Set<CommandRequestId>();
   #unsubscribePublication: Unsubscribe | undefined;
   #unsubscribeConversation: Unsubscribe | undefined;
@@ -669,8 +703,9 @@ export class StudioHostClientFacade implements ClientTransport {
   #lastResidents: ResidentsReadModel | undefined;
   /** Ledger entries repeat on every resident publication until its commit is
    * replaced; keep a request/status fingerprint so background receipts emit
-   * once even after the active Worker changes. */
-  #ledgerReceiptKeys = new Set<string>();
+   * once even after the active Worker changes. Bounded FIFO
+   * (`DEDUPE_KEY_CAPACITY`). */
+  readonly #ledgerReceiptKeys = new Set<string>();
   readonly #conversationDiagnostics: DiagnosticEntry[] = [];
   readonly #runtimeLossDiagnostics: DiagnosticEntry[] = [];
 
@@ -1005,7 +1040,9 @@ export class StudioHostClientFacade implements ClientTransport {
       case "models.provider.probe":
       case "models.discovery.refresh":
       case "models.cycleOrder.set":
-      case "models.webSearch.set": {
+      case "models.webSearch.set":
+      case "models.webSearch.credential.set":
+      case "models.webSearch.credential.remove": {
         return this.#commandModels(request as ClientCommandRequest<ModelsCommandName>);
       }
       case "workspace.open":
@@ -1169,6 +1206,8 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#unsubscribeGithubProgress?.();
     this.#unsubscribeGithubProgress = undefined;
     this.#bus.close();
+    this.#terminalEmitted.clear();
+    this.#ledgerReceiptKeys.clear();
     const store = this.#options.telemetryStore;
     if (store !== undefined) {
       void store.flush().catch(() => {});
@@ -1227,6 +1266,11 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   #onResidentsChanged(residents: ResidentsReadModel): void {
+    // Broker lifecycle changes are also the reliable wake-up when the active
+    // Worker disappears before it can publish a final snapshot (for example,
+    // lease loss followed by a failed relaunch). Publish runtime.changed first
+    // so Clients fence the stale snapshot before rendering resident summaries.
+    this.#syncRuntimeEvents();
     if (residentsEqual(this.#lastResidents, residents)) return;
     this.#lastResidents = residents;
     // Resident summaries are authority/broker facts, not a projection of the
@@ -1284,28 +1328,47 @@ export class StudioHostClientFacade implements ClientTransport {
       if (last === undefined) {
         return this.#unavailableConnection();
       }
-      // Runtime lost: keep the last known identity so clients can isolate
-      // its epoch; nothing else is claimed.
-      const runtimeId = last.runtimeId as RuntimeId;
-      const runtimeEpoch = last.runtimeEpoch as RuntimeEpoch;
       const lost = readDisconnect(runtime);
+      if (lost !== undefined) {
+        // Runtime lost: keep the last known identity so clients can isolate
+        // its epoch; nothing else is claimed.
+        const runtimeId = last.runtimeId as RuntimeId;
+        const runtimeEpoch = last.runtimeEpoch as RuntimeEpoch;
+        return {
+          status: "disconnected",
+          classification: last.classification,
+          runtimeId,
+          runtimeEpoch,
+          ...(last.backend === undefined ? {} : { backend: last.backend }),
+          ...(last.runtimeVersion === undefined ? {} : { runtimeVersion: last.runtimeVersion }),
+          ...(last.upstreamVersion === undefined ? {} : { upstreamVersion: last.upstreamVersion }),
+          ...(last.upstreamCommit === undefined ? {} : { upstreamCommit: last.upstreamCommit }),
+          disconnectCode: lost.code,
+          disconnectReason: lost.reason,
+          ...(lost.occurredAt === undefined ? {} : { disconnectedAt: lost.occurredAt }),
+          ...(lost.autoRespawn === undefined ? {} : { autoRespawn: lost.autoRespawn }),
+        };
+      }
+      const unavailable = readUnavailable(runtime);
+      if (unavailable !== undefined) {
+        return {
+          status: "unavailable",
+          classification: "unavailable",
+          unavailableCode: unavailable.code,
+          unavailableReason: unavailable.reason,
+        };
+      }
+      // No disconnect and no unavailable facts: the Host runtime environment is ready
+      // and managed (e.g. read-only dormant workspace or between session attaches).
       return {
-        status: "disconnected",
+        status: "connected",
         classification: last.classification,
-        runtimeId,
-        runtimeEpoch,
+        runtimeId: last.runtimeId as RuntimeId,
+        runtimeEpoch: last.runtimeEpoch as RuntimeEpoch,
         ...(last.backend === undefined ? {} : { backend: last.backend }),
         ...(last.runtimeVersion === undefined ? {} : { runtimeVersion: last.runtimeVersion }),
         ...(last.upstreamVersion === undefined ? {} : { upstreamVersion: last.upstreamVersion }),
         ...(last.upstreamCommit === undefined ? {} : { upstreamCommit: last.upstreamCommit }),
-        ...(lost === undefined
-          ? {}
-          : {
-              disconnectCode: lost.code,
-              disconnectReason: lost.reason,
-              ...(lost.occurredAt === undefined ? {} : { disconnectedAt: lost.occurredAt }),
-              ...(lost.autoRespawn === undefined ? {} : { autoRespawn: lost.autoRespawn }),
-            }),
       };
     }
     const snapshot = this.#currentSnapshot();
@@ -1699,7 +1762,9 @@ export class StudioHostClientFacade implements ClientTransport {
       return;
     }
     this.#ledgerReceiptKeys.add(ledgerKey);
+    evictOldestKeys(this.#ledgerReceiptKeys, DEDUPE_KEY_CAPACITY);
     this.#terminalEmitted.add(requestId);
+    evictOldestKeys(this.#terminalEmitted, DEDUPE_KEY_CAPACITY);
     this.#registry.recordTerminal(requestId, receipt);
     this.#bus.emit({ kind: "command.receipt", receipt, runtimeEpoch: entry.runtimeEpoch });
   }
@@ -2680,6 +2745,12 @@ export class StudioHostClientFacade implements ClientTransport {
         case "models.webSearch.set":
           result = await service.setWebSearch(request.input as never);
           break;
+        case "models.webSearch.credential.set":
+          result = await service.setWebSearchApiKey(request.input as never);
+          break;
+        case "models.webSearch.credential.remove":
+          result = await service.removeWebSearchApiKey(request.input as never);
+          break;
       }
       this.#emitTerminal(request.requestId, {
         requestId: request.requestId,
@@ -3226,6 +3297,7 @@ export class StudioHostClientFacade implements ClientTransport {
       return;
     }
     this.#terminalEmitted.add(requestId);
+    evictOldestKeys(this.#terminalEmitted, DEDUPE_KEY_CAPACITY);
     this.#registry.recordTerminal(requestId, receipt);
     this.#bus.emit({ kind: "command.receipt", receipt });
   }

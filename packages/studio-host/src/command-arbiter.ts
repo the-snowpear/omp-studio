@@ -72,6 +72,7 @@ export function classifyOperation(operation: StudioOperation): CommandConcurrenc
     operation.kind === "queue.enqueue" ||
     operation.kind === "session.model.set" ||
     operation.kind === "session.thinking.set" ||
+    operation.kind === "session.taskModel.set" ||
     operation.kind === "mode.plan.enter" ||
     operation.kind === "mode.plan.exit" ||
     operation.kind === "mode.vibe.enter" ||

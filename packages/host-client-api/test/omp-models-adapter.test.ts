@@ -1628,6 +1628,47 @@ describe("web search config", () => {
     });
   });
 
+  test("search engine api key round-trips through agent.db", async () => {
+    await withDir(async (dir, service) => {
+      const sqlite = await import("node:sqlite");
+      const DatabaseSync = sqlite.DatabaseSync;
+      if (DatabaseSync === undefined) return;
+      const db = new DatabaseSync(join(dir, "agent.db"));
+      db.exec("CREATE TABLE IF NOT EXISTS auth_credentials (id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, credential_type TEXT NOT NULL, data TEXT NOT NULL, disabled_cause TEXT DEFAULT NULL, identity_key TEXT DEFAULT NULL, created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0)");
+      db.close();
+
+      await service.setWebSearchApiKey({ providerId: "brave", apiKey: "bsk-123" });
+      const ws = (await service.get()).webSearch;
+      const brave = ws.providers.find((p) => p.id === "brave");
+      assert.equal(brave?.hasCredential, true);
+      assert.equal(brave?.credentialKind, "api-key");
+      // Row shape matches the upstream credential store (api_key JSON, identity NULL).
+      const raw = new DatabaseSync(join(dir, "agent.db"));
+      const row = raw.prepare("SELECT provider, credential_type, data, identity_key FROM auth_credentials WHERE disabled_cause IS NULL").get() as Record<string, unknown>;
+      raw.close();
+      assert.equal(row.provider, "brave");
+      assert.equal(row.credential_type, "api_key");
+      assert.deepEqual(JSON.parse(row.data as string), { type: "api_key", key: "bsk-123" });
+      assert.equal(row.identity_key, null);
+
+      // Re-save updates the same row; remove tombstones it so the engine loses its credential.
+      await service.setWebSearchApiKey({ providerId: "brave", apiKey: "bsk-456" });
+      await service.removeWebSearchApiKey({ providerId: "brave" });
+      const after = (await service.get()).webSearch.providers.find((p) => p.id === "brave");
+      assert.equal(after?.hasCredential, false);
+      assert.equal(after?.credentialKind, undefined);
+    });
+  });
+
+  test("engines without a direct api-key path are rejected", async () => {
+    await withDir(async (_dir, service) => {
+      const messageOf = (error: unknown): string => (typeof error === "object" && error !== null && "message" in error ? String((error as { message?: unknown }).message) : String(error));
+      await assert.rejects(() => Promise.resolve(service.setWebSearchApiKey({ providerId: "codex", apiKey: "x" })), (error: unknown) => messageOf(error).includes("不支持"));
+      await assert.rejects(() => Promise.resolve(service.setWebSearchApiKey({ providerId: "duckduckgo", apiKey: "x" })), (error: unknown) => messageOf(error).includes("不支持"));
+      await assert.rejects(() => Promise.resolve(service.removeWebSearchApiKey({ providerId: "searxng" })), (error: unknown) => messageOf(error).includes("没有"));
+    });
+  });
+
   test("web search provider catalog carries credential-free flags and descriptions", async () => {
     await withDir(async (_dir, service) => {
       const ws = (await service.get()).webSearch;
@@ -1637,6 +1678,21 @@ describe("web search config", () => {
       assert.equal(byId.get("perplexity")?.credentialFree, false);
       assert.match(byId.get("brave")?.description ?? "", /BRAVE_API_KEY/);
       assert.ok(ws.providers.every((p) => p.description.length > 0));
+      // Credential hints for the modal: env keys + omp login id where OAuth exists.
+      assert.deepEqual(byId.get("brave")?.envKeys, ["BRAVE_API_KEY"]);
+      assert.equal(byId.get("brave")?.loginId, undefined);
+      assert.equal(byId.get("brave")?.apiKeyId, "brave");
+      assert.equal(byId.get("codex")?.loginId, "openai-codex");
+      assert.equal(byId.get("gemini")?.loginId, undefined);
+      // Login is only offered for ids in the runtime's OAuth registry and
+      // headless-capable flows: prompt-first (google-gemini-cli) and unknown
+      // ids (firecrawl) are excluded so RPC login can never hard-fail.
+      assert.equal(byId.get("firecrawl")?.loginId, undefined);
+      assert.equal(byId.get("firecrawl")?.apiKeyId, "firecrawl");
+      assert.equal(byId.get("tavily")?.loginId, "tavily");
+      assert.equal(byId.get("gemini")?.apiKeyId, "google");
+      assert.deepEqual(byId.get("duckduckgo")?.envKeys ?? [], []);
+      assert.equal(byId.get("duckduckgo")?.loginId, undefined);
     });
   });
 });

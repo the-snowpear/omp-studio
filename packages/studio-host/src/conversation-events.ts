@@ -238,14 +238,23 @@ export class ConversationEventFanout {
     }
   }
 
-  #store(session: ReplaySession, key: string, event: StudioConversationForward): void {
+  /**
+   * `bytes` lets the streaming delta path skip a full `JSON.stringify` per
+   * token: it passes the previously recorded size plus the appended UTF-8
+   * bytes. This is budget accounting, not a contract field, so an
+   * approximation is fine — JSON escaping (`\n`, `\"`) and the streamSeq
+   * digits make the increment a slight undercount, always within a few bytes
+   * per event against `CONVERSATION_REPLAY_MAX_BYTES`. Omit it and the exact
+   * serialized size is measured.
+   */
+  #store(session: ReplaySession, key: string, event: StudioConversationForward, bytes?: number): void {
     if (session.overflowed === true) return;
     const previousBytes = session.eventBytes.get(key) ?? 0;
-    const bytes = utf8ByteLength(JSON.stringify(event));
+    const measured = bytes ?? utf8ByteLength(JSON.stringify(event));
     session.events.set(key, event);
-    session.eventBytes.set(key, bytes);
-    session.byteSize += bytes - previousBytes;
-    this.#replayBytes += bytes - previousBytes;
+    session.eventBytes.set(key, measured);
+    session.byteSize += measured - previousBytes;
+    this.#replayBytes += measured - previousBytes;
     if (session.events.size <= CONVERSATION_REPLAY_EVENT_LIMIT && session.byteSize <= CONVERSATION_REPLAY_MAX_BYTES) return;
     this.#clear(session);
     session.overflowed = true;
@@ -302,7 +311,8 @@ export class ConversationEventFanout {
     };
     const remaining = Math.max(0, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES - meta.totalBytes);
     const addition = truncateUtf8(event.delta, remaining).text;
-    meta.totalBytes += utf8ByteLength(addition);
+    const additionBytes = utf8ByteLength(addition);
+    meta.totalBytes += additionBytes;
     if (addition.length === 0) {
       session.deltaChunks.set(blockKey, meta);
       return;
@@ -311,13 +321,22 @@ export class ConversationEventFanout {
     const previousEvent = previous?.envelope.event;
     if (previous !== undefined && previousEvent?.kind === "conversation.message.delta") {
       const combined = truncateUtf8(previousEvent.delta + addition, CONVERSATION_LIMITS.DELTA_MAX_BYTES);
-      this.#store(session, meta.lastKey, {
-        streamSeq: forward.streamSeq,
-        envelope: {
-          ...(combined.truncated ? previous.envelope : forward.envelope),
-          event: { ...event, delta: combined.text },
+      // Coalescing only appends, so the retained size grows by the appended
+      // bytes; re-serializing the whole block per token is what we are avoiding
+      // here. A truncated combine is not an append and must be measured.
+      const storedBytes = session.eventBytes.get(meta.lastKey);
+      this.#store(
+        session,
+        meta.lastKey,
+        {
+          streamSeq: forward.streamSeq,
+          envelope: {
+            ...(combined.truncated ? previous.envelope : forward.envelope),
+            event: { ...event, delta: combined.text },
+          },
         },
-      });
+        combined.truncated || storedBytes === undefined ? undefined : storedBytes + additionBytes,
+      );
       if (combined.truncated) {
         const remainder = (previousEvent.delta + addition).slice(combined.text.length);
         if (remainder.length > 0) {

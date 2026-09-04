@@ -20,6 +20,7 @@ import { StudioLiveService } from "@oh-my-pi/pi-coding-agent/studio/services/liv
 import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loop-service";
 import { StudioPauseService } from "@oh-my-pi/pi-coding-agent/studio/services/pause-service";
 import type { StudioHostRuntime } from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
+import { VERSION } from "@oh-my-pi/pi-utils";
 
 const servers: StudioBridgeServer[] = [];
 const sockets: net.Socket[] = [];
@@ -241,6 +242,36 @@ async function collectFramesFor(socket: net.Socket, durationMs: number): Promise
 	return frames;
 }
 
+/**
+ * Collect with one decoder until the predicate holds or the deadline passes.
+ * A second `collectFramesFor` cannot be chained after the first: its decoder
+ * dies with any partially buffered frame and the next chunk starts mid-frame.
+ */
+async function collectFramesUntil(
+	socket: net.Socket,
+	satisfied: (frames: DecodedStudioFrame[]) => boolean,
+	timeoutMs: number,
+): Promise<DecodedStudioFrame[]> {
+	const decoder = new StudioFrameDecoder();
+	const frames: DecodedStudioFrame[] = [];
+	const onData = (chunk: Buffer) => {
+		frames.push(...decoder.push(chunk));
+	};
+	socket.on("data", onData);
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline && !satisfied(frames)) await Bun.sleep(5);
+	socket.off("data", onData);
+	return frames;
+}
+
+function frameStatus(frame: DecodedStudioFrame): string | undefined {
+	return (frame.body as { status?: string }).status;
+}
+
+function isStudioEvent(frame: DecodedStudioFrame): boolean {
+	return (frame.body as { type?: string }).type === "studio.event";
+}
+
 async function exchangeSnapshot(
 	socket: net.Socket,
 	requestId: string,
@@ -288,13 +319,13 @@ describe("WP-011 Studio Bridge runtime server", () => {
 		await started;
 		expect(response.runtimeInstanceId).toBe("runtime-instance-test");
 		expect(response.runtimeEpoch).toBe(7);
-		expect(response.upstreamVersion).toBe("18.0.3");
+		expect(response.upstreamVersion).toBe(VERSION);
 		// The `studio.<n>` suffix is derived from `omp-patch/patches/series.json` and
 		// bumps whenever fork content changes, so assert the composition rather than
 		// the number. The exact value is pinned outside this tree:
 		// `scripts/build-omp-host.mjs` refuses to package unless the constant, the
 		// series, and the probed binary all agree.
-		expect(response.runtimeVersion).toMatch(/^18\.0\.3-studio\.\d+$/u);
+		expect(response.runtimeVersion).toMatch(new RegExp(`^${VERSION.replace(/\./gu, "\\.")}-studio\\.\\d+$`, "u"));
 		expect(responseFrame.header.runtimeEpoch).toBe(response.runtimeEpoch);
 		expect(response.capabilityManifest.profile).toBe("limited");
 		const capabilityIds = response.capabilityManifest.capabilities.map(entry => entry.id);
@@ -322,6 +353,8 @@ describe("WP-011 Studio Bridge runtime server", () => {
 				runtimeEpoch: 7,
 				stateVersion: 0,
 				sessionId: "session-test",
+				workerResidency: "active",
+				workerGeneration: 0,
 				isStreaming: false,
 				isCompacting: false,
 				activeMode: "normal",
@@ -840,5 +873,128 @@ describe("WP-011 Studio Bridge runtime server", () => {
 					(frame.body as { status?: string }).status === "completed",
 			),
 		).toBe(true);
+	});
+
+	test("a peer that never drains stops the outbound event backlog from growing", async () => {
+		const fixture = await bridgeFixture();
+		const { runtime } = sessionControlRuntime();
+		// Pad the roster so one state.changed frame is worth measuring against the
+		// budget; the bare fixture snapshot is well under a kilobyte.
+		const padding = "y".repeat(64 * 1024);
+		const agents = runtime.services.agents as unknown as { list: () => unknown[] };
+		agents.list = () => [
+			{
+				agentId: "agent-padded",
+				generation: 1,
+				kind: "task",
+				displayName: padding,
+				status: "idle",
+				updatedAt: "2026-08-11T00:00:00.000Z",
+				hasTranscript: false,
+			},
+		];
+		const budget = 128 * 1024;
+		const requests = 40;
+		let baseline: number | undefined;
+		let peakPending = 0;
+		const server = new StudioBridgeServer(fixture.endpoint, fixture.tokenFile, {
+			maxOutboundEventBytes: budget,
+			// Model a peer that reads nothing: every byte written after the initial
+			// snapshot is still outstanding. A real socket only reports a backlog
+			// once its kernel buffer fills, which no fast test can arrange.
+			pendingOutboundBytes: socket => {
+				baseline ??= socket.bytesWritten;
+				const pending = socket.bytesWritten - baseline;
+				peakPending = Math.max(peakPending, pending);
+				return pending;
+			},
+		});
+		servers.push(server);
+		const started = server.start(runtime);
+		await waitForTokenConsumption(fixture.tokenFile);
+		const socket = await connect(fixture.endpoint);
+		const hello = receiveFrame(socket);
+		sendHello(socket, "challenge-backlog");
+		await hello;
+		await exchangeSnapshot(socket, "snapshot-backlog");
+		await started;
+
+		const collected = collectFramesUntil(
+			socket,
+			frames => frames.filter(frame => frameStatus(frame) === "completed").length >= requests,
+			5_000,
+		);
+		for (let index = 0; index < requests; index++) {
+			socket.write(
+				encodeStudioFrame(`enqueue-backlog-${index}`, 7, {
+					type: "studio.request",
+					requestId: `enqueue-backlog-${index}`,
+					runtimeEpoch: 7,
+					operation: { kind: "queue.enqueue", text: `queued ${index}` },
+				}),
+			);
+		}
+		const frames = await collected;
+		// Unbudgeted, 40 padded snapshots leave >2.5 MiB pending on the socket.
+		expect(peakPending).toBeLessThan(budget + 3 * padding.length);
+		expect(frames.filter(isStudioEvent).length).toBeLessThan(requests);
+		expect(frames.filter(frame => frameStatus(frame) === "completed")).toHaveLength(requests);
+	});
+
+	test("serves snapshots and receipts while congested events are dropped, leaving an eventSeq gap", async () => {
+		const fixture = await bridgeFixture();
+		const { runtime } = sessionControlRuntime();
+		let congested = true;
+		const server = new StudioBridgeServer(fixture.endpoint, fixture.tokenFile, {
+			maxOutboundEventBytes: 4096,
+			pendingOutboundBytes: () => (congested ? 1024 * 1024 : 0),
+		});
+		servers.push(server);
+		const started = server.start(runtime);
+		await waitForTokenConsumption(fixture.tokenFile);
+		const socket = await connect(fixture.endpoint);
+		const hello = receiveFrame(socket);
+		sendHello(socket, "challenge-congested");
+		await hello;
+		// Hello and snapshot writes are never budgeted: a dropped receipt has no
+		// resync remedy and would hang its request until the timeout.
+		const snapshot = await exchangeSnapshot(socket, "snapshot-congested");
+		expect(snapshot.snapshot.stateVersion).toBe(0);
+		await started;
+
+		const droppedRun = collectFramesUntil(
+			socket,
+			frames => frames.filter(frame => frameStatus(frame) === "completed").length >= 1,
+			2_000,
+		);
+		socket.write(
+			encodeStudioFrame("enqueue-congested", 7, {
+				type: "studio.request",
+				requestId: "enqueue-congested",
+				runtimeEpoch: 7,
+				operation: { kind: "queue.enqueue", text: "queued while congested" },
+			}),
+		);
+		const droppedFrames = await droppedRun;
+		expect(droppedFrames.map(frameStatus)).toEqual(["accepted", "completed"]);
+		expect(droppedFrames.filter(isStudioEvent)).toHaveLength(0);
+
+		congested = false;
+		const recoveredRun = collectFramesUntil(socket, frames => frames.some(isStudioEvent), 2_000);
+		socket.write(
+			encodeStudioFrame("enqueue-recovered", 7, {
+				type: "studio.request",
+				requestId: "enqueue-recovered",
+				runtimeEpoch: 7,
+				operation: { kind: "queue.enqueue", text: "queued after recovery" },
+			}),
+		);
+		const recovered = (await recoveredRun).filter(isStudioEvent);
+		expect(recovered).toHaveLength(1);
+		// eventSeq 1 was dropped: the Host sees the gap and re-requests a snapshot.
+		expect(recovered[0]!.body as { eventSeq: number; event: { kind: string } }).toMatchObject({
+			eventSeq: 2,
+			event: { kind: "state.changed" },
+		});
 	});
 });

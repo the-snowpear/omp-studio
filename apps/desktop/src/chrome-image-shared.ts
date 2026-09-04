@@ -11,7 +11,7 @@ export const CHROME_IMAGE_CHANNELS = {
   saveImage: "omp-studio:desktop:image-save",
 } as const;
 
-export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"] as const;
 
 export type ChromeImageMime = (typeof IMAGE_MIME_TYPES)[number];
 
@@ -41,6 +41,7 @@ export function extensionForImageMime(mime: ChromeImageMime): string {
   if (mime === "image/jpeg") return ".jpg";
   if (mime === "image/gif") return ".gif";
   if (mime === "image/webp") return ".webp";
+  if (mime === "image/svg+xml") return ".svg";
   return ".png";
 }
 
@@ -71,6 +72,10 @@ export function imageMagicOk(mime: ChromeImageMime, bytes: Uint8Array): boolean 
   if (mime === "image/gif") {
     return bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38
       && (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61;
+  }
+  if (mime === "image/svg+xml") {
+    // 明文 SVG 以 `<` 开头；SVGZ（gzip）以 0x1F 0x8B 开头。
+    return bytes[0] === 0x3c || (bytes[0] === 0x1f && bytes[1] === 0x8b);
   }
   return bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
     && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;

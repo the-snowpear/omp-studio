@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ConversationMessageItem, ConversationRuntimeEvent, SessionId } from "@omp-studio/client-contract";
 import { ConversationStore } from "./conversationStore";
+import { subagentTurnRunning } from "./subagentComposerGate";
 import { timelineStructureToken } from "./conversationViewModel";
 
 function item(id: string, role: "user" | "assistant", text: string): ConversationMessageItem {
@@ -13,10 +14,10 @@ function delta(sessionId: SessionId, messageId: string, value: string, turnId = 
   return { kind: "conversation.message.delta", sessionId, turnId, messageId, blockId: "text", blockType: "text", delta: value };
 }
 function scheduler() {
-  let next = 1; const callbacks = new Map<number, () => void>();
+  let next = 1; let time = 0; const callbacks = new Map<number, () => void>();
   return {
-    frame: { request(callback: () => void) { const id = next++; callbacks.set(id, callback); return id; }, cancel(id: number | ReturnType<typeof setTimeout>) { callbacks.delete(id as number); } },
-    flush() { const queued = [...callbacks.values()]; callbacks.clear(); for (const callback of queued) callback(); },
+    frame: { request(callback: () => void) { const id = next++; callbacks.set(id, callback); return id; }, cancel(id: number | ReturnType<typeof setTimeout>) { callbacks.delete(id as number); }, now: () => time },
+    flush(step = 1000 / 60) { time += step; const queued = [...callbacks.values()]; callbacks.clear(); for (const callback of queued) callback(); },
     get size() { return callbacks.size; },
   };
 }
@@ -68,6 +69,33 @@ describe("ConversationStore", () => {
     expect(store.getSnapshot().state.liveTools).toEqual({});
   });
 
+  it("settles turns the Runtime never closed, so an errored run stops reading as live", () => {
+    // A retryable provider error parks the logical turn (`agent_end{isTerminal:
+    // false}`) and a user abort supersedes the continuation that would have closed
+    // it: no `turn.completed` / `turn.aborted` ever arrives, and the leftover
+    // `openTurnItems` / folded tools keep every run surface believing the session
+    // is still streaming until the store is rebuilt by a session switch.
+    const { store, sessionId, frames } = create(); store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+    store.applyEvent(started(sessionId, "live"), 1);
+    store.applyEvent({ kind: "conversation.tool.started", sessionId, turnId: "turn", messageId: "live", toolCallId: "tool", toolName: "bash", startedAt: "now" }, 2);
+    store.applyEvent({ kind: "conversation.tool.completed", sessionId, turnId: "turn", toolCallId: "tool", result: { type: "toolResult", toolCallId: "tool", isError: false, output: "ok" }, completedAt: "now" }, 3);
+    store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "live", item: { kind: "message", itemId: "live", parentId: null, createdAt: "live", role: "assistant", content: [{ type: "toolCall", toolCallId: "tool", toolName: "bash" }] }, error: { message: "400 provider exploded" } }, 4);
+    frames.flush();
+    const stuck = store.getSnapshot().state;
+    expect(stuck.liveMessages).toEqual({});
+    expect(Object.keys(stuck.openTurnItems)).toEqual(["live"]);
+    expect(subagentTurnRunning(stuck)).toBe(true);
+    expect(store.settleOpenTurns()).toBe(true);
+    const settled = store.getSnapshot().state;
+    expect(settled.openTurnItems).toEqual({});
+    expect(settled.liveTools).toEqual({});
+    expect(subagentTurnRunning(settled)).toBe(false);
+    // The tool result still has to survive as history on its persisted owner.
+    const persisted = settled.items.at(-1);
+    expect(persisted?.kind === "message" && persisted.content.some((block) => block.type === "toolResult" && block.toolCallId === "tool")).toBe(true);
+    expect(store.settleOpenTurns()).toBe(false);
+  });
+
   it("exposes resync state immediately", () => {
     const { store } = create(); store.requireResync("gap");
     expect(store.getSnapshot().state).toMatchObject({ hydrateStatus: "resyncing", resyncRequired: true });
@@ -79,6 +107,64 @@ describe("ConversationStore", () => {
     let full = 0; let metadata = 0; store.subscribe(() => { full += 1; }); store.subscribeMetadata(() => { metadata += 1; });
     for (let index = 0; index < 1_000; index += 1) store.applyEvent(delta(sessionId, "live", "x"), index + 2);
     expect(frames.size).toBe(1); frames.flush(); expect(full).toBe(1); expect(metadata).toBe(0);
+  });
+
+  it("caps high-frequency streaming publishes at the configured cadence without rebuilding the store", () => {
+    const { store, sessionId, frames } = create();
+    store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+    store.applyEvent(started(sessionId, "live"), 1); frames.flush();
+    let publishes = 0; store.subscribe(() => { publishes += 1; });
+    for (let index = 0; index < 8; index += 1) {
+      store.applyEvent(delta(sessionId, "live", "x"), index + 2);
+      frames.flush(1000 / 120);
+    }
+    expect(publishes).toBeLessThanOrEqual(4);
+    store.applyEvent({ kind: "conversation.message.completed", sessionId, turnId: "turn", messageId: "live", item: item("live", "assistant", "done") }, 10);
+    frames.flush(1000 / 120);
+    expect(store.getSnapshot().state.items.at(-1)?.itemId).toBe("live");
+  });
+
+  it("enforces every supported streaming cadence", () => {
+    for (const cadence of [30, 60, 90, 120] as const) {
+      const frames = scheduler();
+      const sessionId = `cadence-${cadence}` as SessionId;
+      const store = new ConversationStore({
+        target: { sessionId },
+        identity: { sessionId },
+        generation: cadence,
+        scheduler: frames.frame,
+        streamingCadenceHz: () => cadence,
+      });
+      store.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+      store.applyEvent(started(sessionId, "live"), 1);
+      frames.flush();
+      const publishedAt: number[] = [];
+      store.subscribe(() => { publishedAt.push(frames.frame.now!()); });
+      for (let index = 0; index < 120; index += 1) {
+        store.applyEvent(delta(sessionId, "live", "x"), index + 2);
+        frames.flush(1);
+      }
+      expect(publishedAt.length).toBeGreaterThan(0);
+      for (let index = 1; index < publishedAt.length; index += 1) {
+        expect(publishedAt[index]! - publishedAt[index - 1]! + 0.5).toBeGreaterThanOrEqual(1000 / cadence);
+      }
+      store.dispose();
+    }
+  });
+
+  it("uses a changed cadence on the next queued stream publish", () => {
+    const { store, sessionId, frames } = create();
+    let cadence: 30 | 60 | 90 | 120 = 30;
+    const dynamic = new ConversationStore({ target: { sessionId: "dynamic" as SessionId }, identity: { sessionId: "dynamic" as SessionId }, generation: 2, scheduler: frames.frame, streamingCadenceHz: () => cadence });
+    dynamic.hydrate({ items: [], headCursor: "h" as never, hasMoreBefore: false });
+    dynamic.applyEvent(started("dynamic" as SessionId, "live"), 1); frames.flush();
+    let publishes = 0; dynamic.subscribe(() => { publishes += 1; });
+    dynamic.applyEvent(delta("dynamic" as SessionId, "live", "x"), 2); frames.flush(1000 / 120);
+    expect(publishes).toBe(0);
+    cadence = 120;
+    frames.flush(1000 / 120);
+    expect(publishes).toBe(1);
+    dynamic.dispose(); store.dispose();
   });
 
   it("keeps the persisted prefix and transcript structure token stable across token frames", () => {
@@ -214,5 +300,20 @@ describe("ConversationStore", () => {
       }
       previous = snapshot;
     }
+  });
+
+  it("reconciles an optimistic user row across hydrate and command-acceptance races", () => {
+    const beforeHydrate = create();
+    beforeHydrate.store.trackPending({ requestId: "early", text: "next", draft: "next", status: "pending", knownItemIds: [] });
+    expect(beforeHydrate.store.getSnapshot().state.pendingUsers).toHaveLength(1);
+    beforeHydrate.store.hydrate({ items: [item("user-next", "user", "next")], headCursor: "head" as never, hasMoreBefore: false });
+    expect(beforeHydrate.store.getSnapshot().state.pendingUsers).toEqual([]);
+    expect(beforeHydrate.store.getSnapshot().rows).toHaveLength(1);
+
+    const afterHydrate = create();
+    afterHydrate.store.hydrate({ items: [item("known", "user", "old"), item("user-next", "user", "next")], headCursor: "head" as never, hasMoreBefore: false });
+    afterHydrate.store.trackPending({ requestId: "late", text: "next", draft: "next", status: "pending", knownItemIds: ["known"] });
+    expect(afterHydrate.store.getSnapshot().state.pendingUsers).toEqual([]);
+    expect(afterHydrate.store.getSnapshot().rows).toHaveLength(2);
   });
 });

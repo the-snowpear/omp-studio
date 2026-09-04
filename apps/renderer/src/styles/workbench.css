@@ -328,20 +328,15 @@
   padding: var(--sp-24) var(--sp-32) var(--sp-32);
   padding-right: calc(var(--sp-32) + var(--minimap-w) + 8px);
 }
-/* 虚拟行是绝对定位叠放的：流式文本换行长高的那一帧，虚拟列表容器高度仍是上一次
-   测量的旧值（react-virtual 的 resize 处理按 rAF 延后一帧，React 再一帧才提交新
-   totalSize），长出来的最后一行会越过容器底边画到下方 ActivityLine 等流内内容上，
-   一两帧后才被推下去——快速输出时反复可见。在这里裁掉越界部分：新行改为随测量
-   落地、滚动同步上移的那一帧一起出现，而不是先盖在别的内容上。 */
+/* 虚拟列表的已挂载行走普通流（见 ConversationVirtualList）：行长高当帧就把文档一起撑高，
+   `.convo-doc` 的 ResizeObserver 得以在同一个绘制前窗口贴底，展开工具卡时下方内容不再
+   「先往下再归位」。`overflow: clip` 保留：横向溢出（长代码行）仍按老规矩裁掉，未挂载
+   头尾由容器 padding 占位、不会溢出。 */
 .convo-virtual-list { overflow: clip; }
-/* 高度动画在播（ConversationVirtualList 监听 transitionrun 加/撤 .is-height-animating）：
-   卡片 0fr→1fr 每帧改行高，virtualizer 的 RO→commit 链晚 1-3 帧且会并帧，下游行的
-   translateY 以几十像素一格的步进落下——展开/收起一张卡，无关消息行上下连跳。动画
-   期间给行开一段短线性 transform 过渡把步进补成连续位移；纯滚动不触发，滚动本来就
-   不改行的 translateY。 */
-.convo-virtual-list.is-height-animating .convo-virtual-row {
-  transition: transform 100ms linear;
-}
+/* 每行自成一个 BFC：`.ev` 带 margin-bottom，若允许它穿出行盒与相邻行合并，行的实测高度
+   就比它在流里实际占的位置少一段（虚拟化据此算未挂载区域的 padding，几百行累积起来就是
+   几千像素的滚动量误差）。绝对定位时代行盒本身是 BFC，这里显式补回同一语义。 */
+.convo-virtual-row { display: flow-root; }
 
 /* ============================================================
    会话切换过场：正文淡出 → 骨架兜住空窗 → 交叉溶解淡入
@@ -1400,11 +1395,16 @@
 /* 长流式文本的布局分块（textChunks.tsx）：视口外的块跳过内容布局与绘制，用
    行数 × 1.65em（这些面板的 line-height）占位。渲染过的块经 `auto` 记住实际
    宽度，横向滚动条不随可见块漂移；think-scroll 与 codeblock 同为 1.65 行高。 */
-.cv-chunk {
+.cv-chunk,
+.cv-chunk-rows {
   content-visibility: auto;
   contain-intrinsic-width: auto 0px;
   contain-intrinsic-height: auto calc(var(--cv-lines, 64) * 1.65em);
 }
+/* 横向可滚容器（.tc-code / .tc-diff）里的行块：行本身是 width: max-content 配
+   min-width: 100%，包一层普通块会把 100% 的参照系从滚动容器换成包裹层，横向滚动宽度
+   随之塌掉。块自己也取 max-content 就还原了原来的几何。 */
+.cv-chunk-rows { width: max-content; min-width: 100%; }
 .tl-card .codeblock,
 .tl-card .tc-code,
 .tl-card .tc-tree { max-height: 220px; }
@@ -4109,6 +4109,41 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .cmp-menu-sep { height: 1px; background: var(--border); margin: 4px 2px; flex: none; }
+/* Task 子代理模式切换行（对齐上游 alt+p 红色 Task 模式） */
+.cmp-menu-header { display: flex; flex-direction: column; margin: -2px 0 2px; }
+.cmp-task-toggle {
+  display: flex; align-items: center; gap: var(--sp-8);
+  width: 100%;
+  padding: 5px var(--sp-8);
+  border-radius: var(--r-8);
+  font-size: var(--fs-12);
+  color: var(--text-2);
+  text-align: left;
+}
+.cmp-task-toggle .spacer { flex: 1; }
+.cmp-task-toggle:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.cmp-task-toggle.is-on {
+  color: var(--red);
+  background: var(--red-soft);
+}
+.cmp-task-toggle:disabled { opacity: 0.55; cursor: not-allowed; }
+.cmp-task-current {
+  max-width: 110px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.cmp-task-toggle.is-on .cmp-task-current { color: inherit; }
+/* 会话模型 pill 上的 Task override 红点 */
+.cmp-task-dot {
+  width: 7px; height: 7px; flex: none;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.cmp-role-ic[data-tint="gray"] { --role-c: var(--text-2); --role-soft: var(--surface-3); }
+/* 链尾失败/中止轮的「重试上一轮」操作行：常驻可见（不跟随 hover 显隐） */
+.ev-retry-actions { opacity: 1; }
 .cmp-more-zone { position: relative; display: block; }
 .cmp-more {
   display: flex; align-items: center; gap: var(--sp-8);

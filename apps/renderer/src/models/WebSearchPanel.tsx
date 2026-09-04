@@ -4,21 +4,97 @@
  * Dual-zone layout mirroring the runtime's chain semantics: a hero card that
  * previews the *effective* chain (explicit `providers.webSearchOrder` first,
  * then the auto chain of credential-ready engines in built-in order), a
- * draggable priority-chain list, and a searchable provider library with
- * credential filters. Edits the OMP-native web search settings
- * (`web_search.enabled`, `providers.webSearch*`, `searxng.*`, `exa.*`);
- * all writes go through the single `models.webSearch.set` command, while
- * preview mode only mutates the demo read model.
+ * priority-chain list re-ordered with the same pointer-drag mechanics as the
+ * provider cards, and a searchable provider library with credential filters
+ * and real brand marks. Credentials are edited in an in-place modal (OAuth
+ * login/logout via `models.login.*` plus env-var hints) instead of jumping
+ * to the providers tab. All writes go through the single
+ * `models.webSearch.set` command; preview mode only mutates the demo read
+ * model.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import type { ModelWebSearchSetInput, StudioClient, WebSearchConfigReadModel, WebSearchProviderRecord } from "@omp-studio/client-contract";
+import { Brand, hasBrand } from "../brands";
 import { Icon } from "../icons";
 import { useI18n } from "../i18n";
 import { ToastHost } from "../ToastHost";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 
 const TIMEOUT_OPTIONS = [30, 60, 120, 180, 300];
+
+/* ── Pointer-drag re-ordering (same mechanics as the provider cards). ── */
+
+const CHAIN_ROW_GAP = 2;
+const CHAIN_DRAG_SETTLE_MS = 250;
+
+type DragRow = {
+  id: string;
+  el: HTMLElement;
+  relTop: number;
+  height: number;
+};
+
+function siblingShift(index: number, origin: number, over: number, slot: number): number {
+  if (origin < over && index > origin && index <= over) return -slot;
+  if (origin > over && index >= over && index < origin) return slot;
+  return 0;
+}
+
+function insertionIndex(items: ReadonlyArray<DragRow>, visualCenterRel: number): number {
+  if (items.length === 0) return 0;
+  for (let index = 0; index < items.length - 1; index++) {
+    const current = items[index];
+    const next = items[index + 1];
+    if (!current || !next) continue;
+    const boundary = (current.relTop + current.height / 2 + next.relTop + next.height / 2) / 2;
+    if (visualCenterRel < boundary) return index;
+  }
+  return items.length - 1;
+}
+
+function destinationTranslateY(items: ReadonlyArray<DragRow>, originIndex: number, overIndex: number): number {
+  const dragged = items[originIndex];
+  if (!dragged) return 0;
+  const visible = items.map((item) => item.id);
+  const nextVisible = visible.slice();
+  const [moved] = nextVisible.splice(originIndex, 1);
+  if (!moved) return 0;
+  nextVisible.splice(overIndex, 0, moved);
+  const heightById = new Map(items.map((item) => [item.id, item.height]));
+  let top = items[0]?.relTop ?? 0;
+  for (const id of nextVisible) {
+    if (id === dragged.id) break;
+    top += (heightById.get(id) ?? 0) + CHAIN_ROW_GAP;
+  }
+  return top - dragged.relTop;
+}
+
+/* ── Provider brand mark: real logo, globe for the aggregate, letter fallback. ── */
+
+function letterHue(id: string): number {
+  let hash = 0;
+  for (let index = 0; index < id.length; index++) hash = (hash * 31 + id.charCodeAt(index)) % 360;
+  return hash;
+}
+
+function ProviderMark({ id }: { id: string }) {
+  if (id === "public") {
+    return <span className="wsx-pmark is-globe"><Icon name="globe" extra="sm" /></span>;
+  }
+  if (hasBrand(id)) {
+    return <span className="wsx-pmark"><Brand id={id} /></span>;
+  }
+  return (
+    <span className="wsx-pmark is-letter" style={{ background: `hsl(${letterHue(id)} 42% 38%)` }}>
+      {id.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+/* ── Draft ── */
 
 interface Draft {
   enabled: boolean;
@@ -67,12 +143,12 @@ interface WebSearchPanelProps {
   readonly client: StudioClient;
   readonly preview: boolean;
   readonly webSearch: WebSearchConfigReadModel;
+  /** Real mode: whether in-app OAuth login is available on this Host. */
+  readonly loginAvailable: boolean;
   /** Real mode: re-query the read model after a successful write. */
   readonly onSaved: () => void;
   /** Preview mode: update the demo read model in place. */
   readonly onPreviewSave: (next: WebSearchConfigReadModel) => void;
-  /** Open the shared provider editor so search credentials use the same config surface. */
-  readonly onEditProvider: (providerId: string) => void;
 }
 
 type CredState = "ready" | "missing" | "free";
@@ -84,7 +160,7 @@ function credStateOf(provider: WebSearchProviderRecord | undefined): CredState {
   return provider.hasCredential ? "ready" : "missing";
 }
 
-export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewSave, onEditProvider }: WebSearchPanelProps) {
+export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onSaved, onPreviewSave }: WebSearchPanelProps) {
   const { t } = useI18n();
   const [draft, setDraft] = useState<Draft>(() => draftFromReadModel(webSearch));
   const [busy, setBusy] = useState(false);
@@ -92,13 +168,41 @@ export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewS
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [poolQuery, setPoolQuery] = useState("");
   const [poolFilter, setPoolFilter] = useState<PoolFilter>("all");
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [credModalId, setCredModalId] = useState<string | null>(null);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
 
   // Re-sync the draft when the read model changes (real save refresh).
   useEffect(() => {
     setDraft(draftFromReadModel(webSearch));
   }, [webSearch]);
+
+  /* ── Priority-chain pointer drag state. ── */
+  const chainListRef = useRef<HTMLDivElement | null>(null);
+  const dragLockRef = useRef(false);
+  const settleGenRef = useRef(0);
+  const clearDragStylesRef = useRef(false);
+  const orderRef = useRef(draft.order);
+  orderRef.current = draft.order;
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragPhase, setDragPhase] = useState<"dragging" | "settling">("dragging");
+
+  useLayoutEffect(() => {
+    if (!clearDragStylesRef.current) return;
+    clearDragStylesRef.current = false;
+    const root = chainListRef.current;
+    if (!root) return;
+    const rows = root.querySelectorAll<HTMLElement>(".wsx-chain-row");
+    for (const el of rows) {
+      el.style.transition = "transform 0s";
+      el.style.transform = "";
+    }
+    void root.offsetHeight;
+    for (const el of rows) {
+      el.style.removeProperty("transition");
+      el.style.removeProperty("transform");
+    }
+  }, [draggingId, draft.order]);
 
   const byId = useMemo(() => new Map(webSearch.providers.map((provider) => [provider.id, provider])), [webSearch.providers]);
 
@@ -135,7 +239,6 @@ export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewS
     (provider) => !inOrder.has(provider.id) && !inExclude.has(provider.id) && (provider.credentialFree || provider.hasCredential),
   );
 
-  // Library rows keep the catalog order; excluded rows sink below the rest.
   const credCounts = useMemo(() => {
     let ready = 0;
     let missing = 0;
@@ -191,34 +294,211 @@ export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewS
     setDraft((d) => ({ ...d, exclude: [...d.exclude, id] }));
   };
   const restore = (id: string) => setDraft((d) => ({ ...d, exclude: d.exclude.filter((item) => item !== id) }));
-  const reorder = (sourceId: string, targetId: string) => {
-    const source = draft.order.indexOf(sourceId);
-    const target = draft.order.indexOf(targetId);
-    if (source < 0 || target < 0 || source === target) return;
-    const next = [...draft.order];
-    const [moved] = next.splice(source, 1);
-    if (moved) next.splice(target, 0, moved);
-    setDraft((d) => ({ ...d, order: next }));
+
+  /** Pointer-drag a chain row to a new position (mirrors the provider cards). */
+  const onChainDragPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
+    if (event.button !== 0) return;
+    if (dragLockRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const root = chainListRef.current;
+    if (!root) return;
+    const listRect = root.getBoundingClientRect();
+    const items: DragRow[] = [...root.querySelectorAll<HTMLElement>(".wsx-chain-row")].flatMap((el) => {
+      const rowId = el.dataset.id;
+      if (!rowId) return [];
+      const rect = el.getBoundingClientRect();
+      return [{ id: rowId, el, relTop: rect.top - listRect.top, height: rect.height }];
+    });
+    const originIndex = items.findIndex((item) => item.id === id);
+    const dragged = items[originIndex];
+    if (originIndex < 0 || !dragged) return;
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    handle.setPointerCapture(pointerId);
+    dragLockRef.current = true;
+    settleGenRef.current += 1;
+    setDragPhase("dragging");
+    setDraggingId(id);
+    document.body.classList.add("is-wsx-sorting");
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    const startY = event.clientY;
+    const slot = dragged.height + CHAIN_ROW_GAP;
+    let overIndex = originIndex;
+
+    const applyShifts = (over: number) => {
+      for (let index = 0; index < items.length; index++) {
+        const item = items[index];
+        if (!item || index === originIndex) continue;
+        const shift = siblingShift(index, originIndex, over, slot);
+        item.el.style.transform = shift ? `translate3d(0, ${shift}px, 0)` : "";
+      }
+    };
+
+    const stopCursor = () => {
+      document.body.classList.remove("is-wsx-sorting");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      try {
+        handle.releasePointerCapture(pointerId);
+      } catch {
+        /* already released */
+      }
+    };
+
+    const movePointer = (next: PointerEvent) => {
+      next.preventDefault();
+      const dy = next.clientY - startY;
+      dragged.el.style.transform = `translate3d(0, ${dy}px, 0)`;
+      const nextOver = insertionIndex(items, dragged.relTop + dragged.height / 2 + dy);
+      if (nextOver === overIndex) return;
+      overIndex = nextOver;
+      applyShifts(overIndex);
+    };
+
+    const up = () => {
+      handle.removeEventListener("pointermove", movePointer);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      stopCursor();
+      const destY = destinationTranslateY(items, originIndex, overIndex);
+      const gen = ++settleGenRef.current;
+      setDragPhase("settling");
+      dragged.el.style.transition = "transform var(--dur-slow) var(--ease-ios), scale var(--dur-slow) var(--ease-ios)";
+      requestAnimationFrame(() => {
+        if (gen !== settleGenRef.current) return;
+        dragged.el.style.transform = `translate3d(0, ${destY}px, 0)`;
+      });
+
+      const finish = () => {
+        if (gen !== settleGenRef.current) return;
+        dragLockRef.current = false;
+        clearDragStylesRef.current = true;
+        setDraggingId(null);
+        setDragPhase("dragging");
+        if (overIndex === originIndex) return;
+        const next = orderRef.current.slice();
+        const [moved] = next.splice(originIndex, 1);
+        if (!moved) return;
+        next.splice(overIndex, 0, moved);
+        setDraft((d) => ({ ...d, order: next }));
+      };
+
+      window.setTimeout(finish, CHAIN_DRAG_SETTLE_MS);
+    };
+
+    handle.addEventListener("pointermove", movePointer);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
   };
-  const dropProvider = (sourceId: string, targetId: string) => {
-    if (!sourceId || sourceId === targetId) return;
-    const sourceIndex = draft.order.indexOf(sourceId);
-    const targetIndex = draft.order.indexOf(targetId);
-    if (sourceIndex >= 0 && targetIndex >= 0) {
-      reorder(sourceId, targetId);
+
+  /* ── Credential modal actions. ── */
+
+  const credModalProvider = credModalId !== null ? byId.get(credModalId) : undefined;
+
+  const openCredModal = (id: string) => {
+    setApiKeyDraft("");
+    setCredModalId(id);
+  };
+
+  const setProviderCredential = (id: string, hasCredential: boolean, kind?: "api-key" | "oauth") => {
+    onPreviewSave({
+      ...webSearch,
+      providers: webSearch.providers.map((provider) => {
+        if (provider.id !== id) return provider;
+        const { credentialKind: _previous, ...rest } = provider;
+        return { ...rest, hasCredential, ...(kind !== undefined ? { credentialKind: kind } : {}) };
+      }),
+    });
+  };
+
+  const runApiKeySave = async (providerId: string) => {
+    const apiKey = apiKeyDraft.trim();
+    if (apiKey.length === 0) return;
+    if (preview) {
+      setProviderCredential(providerId, true, "api-key");
+      setApiKeyDraft("");
+      setFlash(t("modelConfig.webSearchApiKeySaved"));
       return;
     }
-    if (sourceIndex >= 0) {
-      setDraft((d) => ({ ...d, order: [...d.order.filter((item) => item !== sourceId), sourceId] }));
+    setLoginBusy(true);
+    try {
+      const handle = await client.command("models.webSearch.credential.set", { providerId, apiKey } as never);
+      await waitReceipt(client, handle.requestId);
+      setApiKeyDraft("");
+      setFlash(t("modelConfig.webSearchApiKeySaved"));
+      onSaved();
+    } catch (error) {
+      setFlash(hostErrorMessage(error, t("modelConfig.saveFailed")));
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const runApiKeyRemove = async (providerId: string) => {
+    if (preview) {
+      setProviderCredential(providerId, false);
+      setFlash(t("modelConfig.webSearchApiKeyRemoved"));
       return;
     }
-    const insertAt = targetIndex >= 0 ? targetIndex : draft.order.length;
-    setDraft((d) => ({
-      ...d,
-      order: [...d.order.slice(0, insertAt), sourceId, ...d.order.slice(insertAt)],
-      exclude: d.exclude.filter((item) => item !== sourceId),
-    }));
+    setLoginBusy(true);
+    try {
+      const handle = await client.command("models.webSearch.credential.remove", { providerId } as never);
+      await waitReceipt(client, handle.requestId);
+      setFlash(t("modelConfig.webSearchApiKeyRemoved"));
+      onSaved();
+    } catch (error) {
+      setFlash(hostErrorMessage(error, t("modelConfig.saveFailed")));
+    } finally {
+      setLoginBusy(false);
+    }
   };
+
+  const runLogin = async (loginId: string, id: string) => {
+    if (preview) {
+      setProviderCredential(id, true, "oauth");
+      setFlash(t("modelConfig.toastDemoLogin"));
+      return;
+    }
+    setLoginBusy(true);
+    try {
+      const handle = await client.command("models.login.start", { providerId: loginId } as never);
+      await waitReceipt(client, handle.requestId);
+      setFlash(t("modelConfig.webSearchLoginDone"));
+      onSaved();
+    } catch (error) {
+      setFlash(hostErrorMessage(error, t("modelConfig.toastLoginFailed", { providerId: loginId })));
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const runLogout = async (loginId: string, id: string) => {
+    if (preview) {
+      setProviderCredential(id, false);
+      setFlash(t("modelConfig.toastDemoLogout"));
+      return;
+    }
+    setLoginBusy(true);
+    try {
+      const handle = await client.command("models.login.logout", { providerId: loginId } as never);
+      await waitReceipt(client, handle.requestId);
+      setFlash(t("modelConfig.webSearchLogoutDone"));
+      onSaved();
+    } catch (error) {
+      setFlash(hostErrorMessage(error, t("modelConfig.toastLogoutFailed", { providerId: loginId })));
+    } finally {
+      setLoginBusy(false);
+    }
+  };
+
+  const copyEnvKeys = (keys: ReadonlyArray<string>) => {
+    void navigator.clipboard.writeText(keys.join(", "));
+    setFlash(t("modelConfig.webSearchEnvCopied"));
+  };
+
+  /* ── Save ── */
 
   const save = async () => {
     if (preview) {
@@ -303,21 +583,143 @@ export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewS
     </div>
   );
 
+  const credModal = credModalProvider ? (() => {
+    const provider = credModalProvider;
+    const cred = credStateOf(provider);
+    const envKeys = provider.envKeys ?? [];
+    const loginId = provider.loginId;
+    const apiKeyId = provider.apiKeyId;
+    const kindLabel = provider.credentialKind === "api-key"
+      ? t("modelConfig.webSearchCredKindApiKey")
+      : provider.credentialKind === "oauth"
+        ? t("modelConfig.webSearchCredKindOauth")
+        : provider.credentialKind === "env"
+          ? t("modelConfig.webSearchCredKindEnv")
+          : null;
+    return (
+      <div className="wsx-modal-backdrop" onClick={() => setCredModalId(null)}>
+        <div
+          className="wsx-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("modelConfig.webSearchCredModalTitle", { name: provider.name })}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="wsx-modal-head">
+            <ProviderMark id={provider.id} />
+            <div className="wsx-modal-title">
+              <b>{t("modelConfig.webSearchCredModalTitle", { name: provider.name })}</b>
+              <span className="wsx-provider-id">{provider.id}</span>
+            </div>
+            <button type="button" className="icon-btn small" aria-label={t("common.close")} onClick={() => setCredModalId(null)}><Icon name="x" extra="sm" /></button>
+          </div>
+          <div className="wsx-modal-body">
+            <p className="wsx-modal-desc">{provider.description}</p>
+            <div className="wsx-modal-status">
+              <span>{t("modelConfig.webSearchCredStatus")}</span>
+              <span className="wsx-modal-status-right">
+                {kindLabel ? <span className="wsx-modal-kind">{kindLabel}</span> : null}
+                <span className={`wsx-cred-chip is-${cred}`}>
+                  {cred === "ready" ? t("modelConfig.webSearchCredReady") : cred === "free" ? t("modelConfig.webSearchCredFree") : t("modelConfig.webSearchCredMissing")}
+                </span>
+              </span>
+            </div>
+            {provider.credentialFree ? (
+              <p className="wsx-modal-hint">{t("modelConfig.webSearchFreeNoCred")}</p>
+            ) : (
+              <>
+                {apiKeyId !== undefined ? (
+                  <div className="wsx-modal-keysec">
+                    <span className="wsx-modal-keylabel">{t("modelConfig.webSearchApiKeyLabel")}</span>
+                    <div className="wsx-modal-keyrow">
+                      <input
+                        type="password"
+                        value={apiKeyDraft}
+                        placeholder={t("modelConfig.webSearchApiKeyPlaceholder", { name: provider.name })}
+                        autoComplete="off"
+                        onChange={(event) => setApiKeyDraft(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="btn small primary"
+                        disabled={loginBusy || apiKeyDraft.trim().length === 0}
+                        onClick={() => void runApiKeySave(provider.id)}
+                      >
+                        {t("modelConfig.webSearchApiKeySave")}
+                      </button>
+                      {provider.credentialKind === "api-key" ? (
+                        <button type="button" className="btn small outline" disabled={loginBusy} onClick={() => void runApiKeyRemove(provider.id)}>
+                          {t("modelConfig.webSearchApiKeyRemove")}
+                        </button>
+                      ) : null}
+                    </div>
+                    <p className="wsx-modal-hint">{t("modelConfig.webSearchApiKeyHint")}</p>
+                  </div>
+                ) : provider.id === "searxng" ? (
+                  <p className="wsx-modal-hint">{t("modelConfig.webSearchSearxngHint")}</p>
+                ) : null}
+                {loginId !== undefined || envKeys.length > 0 ? (
+                  <div className="wsx-modal-alt">
+                    <span className="wsx-modal-alt-label">{t("modelConfig.webSearchOtherWays")}</span>
+                    {loginId !== undefined ? (
+                      <div className="wsx-modal-actions">
+                        {cred === "ready" && provider.credentialKind !== "api-key" ? (
+                          <button type="button" className="btn small outline" disabled={loginBusy} onClick={() => void runLogout(loginId, provider.id)}>
+                            <Icon name="x" extra="sm" />{t("modelConfig.webSearchLogout")}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn small outline"
+                            disabled={loginBusy || (!preview && !loginAvailable)}
+                            title={!preview && !loginAvailable ? t("modelConfig.webSearchLoginUnavailable", { id: loginId }) : undefined}
+                            onClick={() => void runLogin(loginId, provider.id)}
+                          >
+                            {t("modelConfig.webSearchLogin")}
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+                    {!preview && !loginAvailable && loginId !== undefined ? (
+                      <p className="wsx-modal-hint">{t("modelConfig.webSearchLoginUnavailable", { id: loginId })}</p>
+                    ) : null}
+                    {envKeys.length > 0 ? (
+                      <div className="wsx-modal-env">
+                        <span>{t("modelConfig.webSearchEnvHint")}</span>
+                        <code>{envKeys.join(" · ")}</code>
+                        <button type="button" className="btn small outline" onClick={() => copyEnvKeys(envKeys)}>
+                          <Icon name="copy" extra="sm" />{t("modelConfig.webSearchCopyEnv")}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  })() : null;
+
   return (
     <div className="wsx-panel">
       <section className={`wsx-hero${draft.enabled ? "" : " is-off"}`}>
         <div className="wsx-hero-head">
           <div className="wsx-hero-title">
-            <Icon name="globe" extra="sm" />
             <div>
               <b>{t("modelConfig.webSearchHeroTitle")}</b>
               <span>{t("modelConfig.webSearchHeroSubtitle")}</span>
             </div>
           </div>
-          <label className="wsx-enabled-control">
-            <span>{draft.enabled ? "ON" : "OFF"}</span>
-            <button type="button" className={`switch${draft.enabled ? " on" : ""}`} role="switch" aria-checked={draft.enabled} aria-label={t("modelConfig.webSearchEnabledLabel")} onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))} />
-          </label>
+          <button
+            type="button"
+            className={`switch${draft.enabled ? " on" : ""}`}
+            role="switch"
+            aria-checked={draft.enabled}
+            aria-label={t("modelConfig.webSearchEnabledLabel")}
+            onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))}
+          />
         </div>
         <div className="wsx-chain">
           <span className="wsx-chain-label">{t("modelConfig.webSearchChainTitle")}</span>
@@ -332,38 +734,40 @@ export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewS
             <span className="wsx-sub">{t("modelConfig.webSearchPrioritySubtitle")}</span>
           </div>
         </div>
-        <div className="wsx-chain-list">
-          {priorityChain.map((provider, index) => (
-            <div
-              className={`wsx-chain-row${draggingId === provider.id ? " is-dragging" : ""}${dragOverId === provider.id ? " is-drag-over" : ""}`}
-              key={provider.id}
-              draggable
-              onDragStart={(event) => {
-                if (!(event.target as HTMLElement).closest(".wsx-drag-handle")) { event.preventDefault(); return; }
-                setDraggingId(provider.id);
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", provider.id);
-              }}
-              onDragOver={(event) => { if (draggingId && draggingId !== provider.id) { event.preventDefault(); setDragOverId(provider.id); } }}
-              onDrop={(event) => { event.preventDefault(); const source = draggingId ?? event.dataTransfer.getData("text/plain"); if (source) dropProvider(source, provider.id); setDraggingId(null); setDragOverId(null); }}
-              onDragEnd={() => { setDraggingId(null); setDragOverId(null); }}
-            >
-              <button type="button" className="wsx-drag-handle" aria-label={t("modelConfig.dragAdjustOrder", { name: provider.name })} data-tip={t("modelConfig.drag")}><Icon name="grip" extra="sm" /></button>
-              <span className="wsx-rank">{index + 1}</span>
-              <span className="wsx-provider-main">
-                <span className="wsx-provider-name">{provider.name}</span>
-                <span className="wsx-provider-id">{provider.id}</span>
-              </span>
-              <span className={`wsx-cred-chip is-${credStateOf(provider)}`}>
-                {credStateOf(provider) === "ready" ? t("modelConfig.webSearchCredReady") : credStateOf(provider) === "free" ? t("modelConfig.webSearchCredFree") : t("modelConfig.webSearchCredMissing")}
-              </span>
-              <span className="wsx-row-actions">
-                <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveUp")} disabled={index === 0} onClick={() => move(index, -1)}><Icon name="chevron-u" extra="sm" /></button>
-                <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveDown")} disabled={index === draft.order.length - 1} onClick={() => move(index, 1)}><Icon name="chevron-d" extra="sm" /></button>
-                <button type="button" className="icon-btn small" aria-label={t("modelConfig.webSearchRemoveFromChain", { name: provider.name })} onClick={() => removeOrder(provider.id)}><Icon name="x" extra="sm" /></button>
-              </span>
-            </div>
-          ))}
+        <div
+          className={`wsx-chain-list${draggingId && dragPhase === "dragging" ? " is-sorting" : ""}`}
+          ref={chainListRef}
+        >
+          {priorityChain.map((provider, index) => {
+            const dragging = draggingId === provider.id;
+            const dragClass = dragging ? (dragPhase === "settling" ? " is-settling" : " is-dragging") : "";
+            return (
+              <div className={`wsx-chain-row${dragClass}`} data-id={provider.id} key={provider.id}>
+                <button
+                  type="button"
+                  className="wsx-drag-handle"
+                  aria-label={t("modelConfig.dragAdjustOrder", { name: provider.name })}
+                  data-tip={t("modelConfig.drag")}
+                  onPointerDown={(event) => onChainDragPointerDown(event, provider.id)}
+                ><Icon name="grip" extra="sm" /></button>
+                <span className="wsx-rank">{index + 1}</span>
+                <ProviderMark id={provider.id} />
+                <span className="wsx-provider-main">
+                  <span className="wsx-provider-name">{provider.name}</span>
+                  <span className="wsx-provider-id">{provider.id}</span>
+                </span>
+                <span className={`wsx-cred-chip is-${credStateOf(provider)}`}>
+                  {credStateOf(provider) === "ready" ? t("modelConfig.webSearchCredReady") : credStateOf(provider) === "free" ? t("modelConfig.webSearchCredFree") : t("modelConfig.webSearchCredMissing")}
+                </span>
+                <span className="wsx-row-actions">
+                  <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveUp")} disabled={index === 0} onClick={() => move(index, -1)}><Icon name="chevron-u" extra="sm" /></button>
+                  <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveDown")} disabled={index === draft.order.length - 1} onClick={() => move(index, 1)}><Icon name="chevron-d" extra="sm" /></button>
+                  <button type="button" className="icon-btn small" aria-label={t("modelConfig.webSearchConfigure")} data-tip={t("modelConfig.webSearchConfigure")} onClick={() => openCredModal(provider.id)}><Icon name="pencil" extra="sm" /></button>
+                  <button type="button" className="icon-btn small" aria-label={t("modelConfig.webSearchRemoveFromChain", { name: provider.name })} onClick={() => removeOrder(provider.id)}><Icon name="x" extra="sm" /></button>
+                </span>
+              </div>
+            );
+          })}
         </div>
         {draft.order.length === 0 ? <div className="wsx-empty">{t("modelConfig.webSearchPriorityEmpty")}</div> : null}
       </section>
@@ -399,14 +803,13 @@ export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewS
             const cred = credStateOf(provider);
             const excluded = inExclude.has(provider.id);
             return (
-              <div className={`wsx-pool-row${excluded ? " is-excluded" : ""}`} key={provider.id}
-                onDragOver={(event) => { if (draggingId && draggingId !== provider.id) { event.preventDefault(); setDragOverId(provider.id); } }}
-                onDrop={(event) => { event.preventDefault(); const source = draggingId ?? event.dataTransfer.getData("text/plain"); if (source) dropProvider(source, provider.id); setDraggingId(null); setDragOverId(null); }}
-              >
-                <span className="wsx-pool-main">
-                  <span className="wsx-provider-name">{provider.name} <span className="wsx-provider-id">{provider.id}</span></span>
-                  <span className="wsx-provider-desc" title={provider.description}>{provider.description}</span>
+              <div className={`wsx-pool-row${excluded ? " is-excluded" : ""}`} key={provider.id}>
+                <ProviderMark id={provider.id} />
+                <span className="wsx-pool-id">
+                  <span className="wsx-provider-name">{provider.name}</span>
+                  <span className="wsx-provider-id">{provider.id}</span>
                 </span>
+                <span className="wsx-provider-desc" title={provider.description}>{provider.description}</span>
                 <span className={`wsx-cred-chip is-${cred}`}>
                   {cred === "ready" ? t("modelConfig.webSearchCredReady") : cred === "free" ? t("modelConfig.webSearchCredFree") : t("modelConfig.webSearchCredMissing")}
                 </span>
@@ -422,7 +825,7 @@ export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewS
                       <button type="button" className="icon-btn small" aria-label={t("modelConfig.webSearchExclude", { name: provider.name })} data-tip={t("modelConfig.webSearchExclude", { name: provider.name })} onClick={() => addExclude(provider.id)}><Icon name="x" extra="sm" /></button>
                     </>
                   )}
-                  <button type="button" className="btn small outline" data-tip={t("modelConfig.editProvider")} aria-label={t("modelConfig.editProvider")} onClick={() => onEditProvider(provider.id)}><Icon name="pencil" extra="sm" />{t("modelConfig.webSearchConfigure")}</button>
+                  <button type="button" className="btn small outline" onClick={() => openCredModal(provider.id)}><Icon name="pencil" extra="sm" />{t("modelConfig.webSearchConfigure")}</button>
                 </span>
               </div>
             );
@@ -580,6 +983,10 @@ export function WebSearchPanel({ client, preview, webSearch, onSaved, onPreviewS
           {t("modelConfig.discard")}
         </button>
       </div>
+
+      {/* Portaled to <body>: page-transition ancestors carry transforms that
+          would otherwise turn `position: fixed` into scroll-area positioning. */}
+      {credModal ? createPortal(credModal, document.body) : null}
 
       <ToastHost message={flash} onDismiss={() => setFlash(null)} />
     </div>

@@ -15,7 +15,7 @@ import type { DroppedPathKind, DroppedPathScope, ResolvedDroppedPath } from "./w
 
 export type { DroppedPathKind, DroppedPathScope, ResolvedDroppedPath } from "./workspace-shell-shared.js";
 
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".svgz"]);
 
 function extnameLower(name: string): string {
   const dot = name.lastIndexOf(".");

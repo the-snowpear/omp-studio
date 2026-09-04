@@ -97,6 +97,7 @@ describe("SettingsPage · 结构", () => {
     expect(screen.getByRole("combobox", { name: "Interface Language" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Information Density" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Streaming Refresh Rate" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reset to Defaults" })).toBeTruthy();
 
     // Interaction tab English checks
@@ -156,6 +157,12 @@ describe("SettingsPage · 真实模式", () => {
     expect(getAppSettings().density).toBe("compact");
     expect(window.localStorage.getItem("omp.appSettings")).toContain('"density":"compact"');
 
+    const cadenceSelect = screen.getByRole("combobox", { name: "流式刷新率" });
+    expect((cadenceSelect as HTMLSelectElement).value).toBe("60");
+    fireEvent.change(cadenceSelect, { target: { value: "90" } });
+    expect(getAppSettings().streamingCadenceHz).toBe(90);
+    expect(window.localStorage.getItem("omp.appSettings")).toContain('"streamingCadenceHz":90');
+
     const languageSelect = screen.getByRole("combobox", { name: "界面语言" });
     expect((languageSelect as HTMLSelectElement).value).toBe("system");
     fireEvent.change(languageSelect, { target: { value: "en" } });
@@ -170,8 +177,16 @@ describe("SettingsPage · 真实模式", () => {
     expect(getAppSettings().language).toBe("system");
     expect(getAppSettings().theme).toBe("light");
     expect(getAppSettings().density).toBe("standard");
+    expect(getAppSettings().streamingCadenceHz).toBe(60);
     expect((screen.getByRole("combobox", { name: "主题" }) as HTMLSelectElement).value).toBe("light");
     expect((screen.getByRole("combobox", { name: "界面语言" }) as HTMLSelectElement).value).toBe("system");
+  });
+
+  it("非法的流式刷新率会回退到默认 60 Hz", () => {
+    __resetAppSettingsForTests(JSON.stringify({ streamingCadenceHz: 75 }));
+    expect(getAppSettings().streamingCadenceHz).toBe(60);
+    __resetAppSettingsForTests(JSON.stringify({ streamingCadenceHz: "60" }));
+    expect(getAppSettings().streamingCadenceHz).toBe(60);
   });
 
   it("无 Runtime 时审批模式禁用并提示，有 Runtime 时写真实命令", () => {
@@ -216,6 +231,11 @@ describe("SettingsPage · 预览模式", () => {
     renderSettings({ preview: true });
     const themeSelect = screen.getByRole("combobox", { name: "主题" });
     expect((themeSelect as HTMLSelectElement).value).toBe("dark");
+    const cadenceSelect = screen.getByRole("combobox", { name: "流式刷新率" });
+    expect((cadenceSelect as HTMLSelectElement).value).toBe("60");
+    fireEvent.change(cadenceSelect, { target: { value: "120" } });
+    expect(getAppSettings().streamingCadenceHz).toBe(60);
+    expect(window.localStorage.getItem("omp.appSettings")).toBeNull();
     fireEvent.change(themeSelect, { target: { value: "light" } });
     // 演示改动不落盘：真实存储仍是默认 light。
     expect(getAppSettings().theme).toBe("light");

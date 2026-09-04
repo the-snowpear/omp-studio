@@ -27,9 +27,9 @@ export function composerPromptEnabled(input: {
 export function composerQueueEnabled(input: {
   readonly textReady: boolean;
   readonly running: boolean;
-  readonly promptChannelReady: boolean;
+  readonly promptChannelReady?: boolean;
 }): boolean {
-  return input.textReady && input.running && input.promptChannelReady;
+  return input.textReady && input.running;
 }
 
 /**
@@ -65,10 +65,11 @@ export function canFlushQueuedMessage(input: {
   if (input.running || input.pendingInteraction || !input.promptChannelReady) return false;
   if (input.pausedEntryId !== undefined && input.entryId === input.pausedEntryId) return false;
   const { selectedSessionId, liveSessionId, entrySessionId } = input;
-  if (selectedSessionId === undefined || liveSessionId === undefined || entrySessionId === undefined) {
+  if (selectedSessionId === undefined || liveSessionId === undefined) {
     return false;
   }
-  return entrySessionId === selectedSessionId && selectedSessionId === liveSessionId;
+  const effectiveEntrySessionId = entrySessionId ?? selectedSessionId;
+  return effectiveEntrySessionId === selectedSessionId && selectedSessionId === liveSessionId;
 }
 
 export function visibleQueuedMessages<T extends { readonly sessionId?: string }>(
@@ -76,5 +77,5 @@ export function visibleQueuedMessages<T extends { readonly sessionId?: string }>
   selectedSessionId: string | undefined,
 ): T[] {
   if (selectedSessionId === undefined) return [];
-  return messages.filter((entry) => entry.sessionId === selectedSessionId);
+  return messages.filter((entry) => entry.sessionId === selectedSessionId || entry.sessionId === undefined);
 }

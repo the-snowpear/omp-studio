@@ -608,6 +608,9 @@ export function createProductionHostFactory(options?: {
   const hostLog = createHostFileLog({
     directory: defaultHostLogsDirectory(),
   });
+  // Runtime 进程由 Host 生命周期管理；Worker 的停驻/唤醒由 OMP Runtime
+  // 内部 AgentLifecycleManager 负责。桌面层不因空闲或容量淘汰 Runtime，
+  // 避免后台切换时把 Worker 内存维护表现成 Bridge 断开。
   const runtimeSession = createDesktopRuntimeSessionPort({ log: hostLog });
   const gitProcessRunner = new HostProcessRunner();
   const gitWriteQueue = new GitWriteQueue();
@@ -637,7 +640,7 @@ export function createProductionHostFactory(options?: {
       await activeComposition?.rebindWorkspace({
         workspaceId: stored.workspaceId,
         cwd: stored.canonicalPath,
-      });
+      }, { launchIfMissing: false });
     },
   });
   const workspaces = {
@@ -654,7 +657,7 @@ export function createProductionHostFactory(options?: {
           await activeComposition?.rebindWorkspace({
             workspaceId: stored.workspaceId,
             cwd: stored.canonicalPath,
-          });
+          }, { launchIfMissing: false });
         }
       }
       return model;

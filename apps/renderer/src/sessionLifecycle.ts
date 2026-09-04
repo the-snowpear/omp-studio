@@ -15,7 +15,7 @@ export const NEW_CONVERSATION_UNAVAILABLE_REASON =
   "Host 未提供 session.create，无法创建新的 Runtime 会话。";
 
 export type NewSessionWaitResult =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly sessionId?: SessionId }
   | { readonly ok: false; readonly error: string };
 
 export function isNewConversationAvailable(): true {

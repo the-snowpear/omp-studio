@@ -54,7 +54,7 @@ index 15e395bf35..8f02e8e47f 100644
  	}
  
 diff --git a/packages/coding-agent/src/session/agent-session-events.ts b/packages/coding-agent/src/session/agent-session-events.ts
-index a0ede954c4..2e5ac25a3d 100644
+index d16abf9a70..c881768979 100644
 --- a/packages/coding-agent/src/session/agent-session-events.ts
 +++ b/packages/coding-agent/src/session/agent-session-events.ts
 @@ -45,6 +45,11 @@ export type AgentSessionEvent =
@@ -70,10 +70,10 @@ index a0ede954c4..2e5ac25a3d 100644
  	| { type: "retry_fallback_succeeded"; model: string; role: string }
  	| { type: "model_changed" }
 diff --git a/packages/coding-agent/src/session/agent-session-types.ts b/packages/coding-agent/src/session/agent-session-types.ts
-index 014b8123cb..fde30ae854 100644
+index 38d96a8f5a..4fb0931dcd 100644
 --- a/packages/coding-agent/src/session/agent-session-types.ts
 +++ b/packages/coding-agent/src/session/agent-session-types.ts
-@@ -36,6 +36,7 @@ import type { SecretObfuscator } from "../secrets/obfuscator";
+@@ -37,6 +37,7 @@ import type { SecretObfuscator } from "../secrets/obfuscator";
  import type { ConfiguredThinkingLevel } from "../thinking";
  import type { XdevState } from "../tools/xdev";
  import type { CodexAutoRedeemCoordinator } from "./codex-auto-reset";
@@ -81,7 +81,7 @@ index 014b8123cb..fde30ae854 100644
  import type { SessionManager } from "./session-manager";
  
  /** Maximum time the interactive shutdown path waits for Mnemopi consolidation. */
-@@ -308,6 +309,8 @@ export interface PromptOptions {
+@@ -323,6 +324,8 @@ export interface PromptOptions {
  	attribution?: MessageAttribution;
  	/** Skip pre-send compaction checks for this prompt. */
  	skipCompactionCheck?: boolean;
@@ -91,10 +91,10 @@ index 014b8123cb..fde30ae854 100644
  
  /** Payload for {@link AgentSession.setPromptDropped}: a user prompt cancelled
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index c66ab2c937..d273a81abc 100644
+index cac051ac4e..e572767ca9 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
-@@ -424,6 +424,8 @@ type ScheduledAgentContinueOptions = {
+@@ -429,6 +429,8 @@ type ScheduledAgentContinueOptions = {
  	shouldContinue?: () => boolean;
  	onSkip?: (reason: AgentContinueSkipReason) => void;
  	onError?: (error: unknown) => void;
@@ -102,8 +102,8 @@ index c66ab2c937..d273a81abc 100644
 +	applyBeforeNextUserTurn?: boolean;
  };
  
- type SessionTitleSource = "auto" | "user";
-@@ -660,6 +662,7 @@ export class AgentSession {
+ type ScheduledAgentContinueRequest = {
+@@ -700,6 +702,7 @@ export class AgentSession {
  	readonly #loopGuards: LoopGuards;
  	#promptInFlightCount = 0;
  	#abortInProgress = false;
@@ -111,7 +111,7 @@ index c66ab2c937..d273a81abc 100644
  	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
  	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
  	// checks in #handleAgentEvent) still fire on the original schedule — only the
-@@ -954,13 +957,22 @@ export class AgentSession {
+@@ -1014,13 +1017,22 @@ export class AgentSession {
  		return this.#prewalk.arm(target, thinkingLevel);
  	}
  
@@ -135,7 +135,7 @@ index c66ab2c937..d273a81abc 100644
  			suppliedTitle: title,
  			statePlanFilePath: state.planFilePath,
  			readPlan: url => this.#readPlanFile(url),
-@@ -968,7 +980,7 @@ export class AgentSession {
+@@ -1028,7 +1040,7 @@ export class AgentSession {
  		});
  		return {
  			content: [{ type: "text", text: "Plan ready for review." }],
@@ -144,7 +144,7 @@ index c66ab2c937..d273a81abc 100644
  		};
  	}
  
-@@ -3223,7 +3235,7 @@ export class AgentSession {
+@@ -3388,7 +3400,7 @@ export class AgentSession {
  					return;
  				}
  			}
@@ -153,7 +153,7 @@ index c66ab2c937..d273a81abc 100644
  				options?.onSkip?.("aborted");
  				return;
  			}
-@@ -3249,7 +3261,13 @@ export class AgentSession {
+@@ -3474,7 +3486,13 @@ export class AgentSession {
  				// streaming turn — agent.continue() here would race the handoff's session
  				// reset. The first-class fix is in #checkCompaction/the agent_end handler,
  				// but this guard catches anything that bypasses that path.
@@ -165,11 +165,11 @@ index c66ab2c937..d273a81abc 100644
 +					this.isCompacting ||
 +					this.isGeneratingHandoff
 +				) {
- 					this.#skipAgentContinue("session-unavailable", options);
+ 					this.#skipAgentContinue("session-unavailable", request);
  					return;
  				}
-@@ -3257,6 +3275,14 @@ export class AgentSession {
- 					this.#skipAgentContinue("should-continue-false", options);
+@@ -3482,6 +3500,14 @@ export class AgentSession {
+ 					this.#skipAgentContinue("should-continue-false", request);
  					return;
  				}
 +				if (options?.applyBeforeNextUserTurn) {
@@ -180,10 +180,10 @@ index c66ab2c937..d273a81abc 100644
 +						return;
 +					}
 +				}
- 				this.#beginInFlight();
- 				try {
- 					const reverted = await this.#recovery.maybeRestoreRetryFallbackPrimary();
-@@ -3314,6 +3340,7 @@ export class AgentSession {
+ 
+ 				const active = this.#activeAgentContinue;
+ 				if (active) {
+@@ -3541,6 +3567,7 @@ export class AgentSession {
  				delayMs: 100,
  				generation: options.generation,
  				shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -191,15 +191,15 @@ index c66ab2c937..d273a81abc 100644
  			});
  			return true;
  		}
-@@ -3352,6 +3379,7 @@ export class AgentSession {
- 					this.#scheduleAgentContinue({
+@@ -3584,6 +3611,7 @@ export class AgentSession {
+ 						source: "auto-continue-queued-message",
  						generation,
  						shouldContinue: () => this.agent.hasQueuedMessages(),
 +						applyBeforeNextUserTurn: true,
  					});
  					return;
  				}
-@@ -3737,6 +3765,19 @@ export class AgentSession {
+@@ -3970,6 +3998,19 @@ export class AgentSession {
  		}
  	}
  
@@ -219,7 +219,7 @@ index c66ab2c937..d273a81abc 100644
  	/**
  	 * Subscribe to agent events.
  	 * Session persistence is handled internally (saves messages on message_end).
-@@ -5526,6 +5567,9 @@ export class AgentSession {
+@@ -5773,6 +5814,9 @@ export class AgentSession {
  			const streamingBehavior = options?.streamingBehavior;
  			if (!streamingBehavior) throw new AgentBusyError();
  
@@ -229,7 +229,7 @@ index c66ab2c937..d273a81abc 100644
  			// Steer/follow-up the keyword notices BEFORE the queued user message so the
  			// model reads the steering notice ahead of the prompt it modifies.
  			for (const notice of keywordNotices) {
-@@ -5592,13 +5636,16 @@ export class AgentSession {
+@@ -5846,13 +5890,16 @@ export class AgentSession {
  
  		let dispatched = false;
  		try {
@@ -250,7 +250,7 @@ index c66ab2c937..d273a81abc 100644
  			});
  		} finally {
  			// Clean up residual eager-todo directive if the prompt never consumed it
-@@ -5696,6 +5743,9 @@ export class AgentSession {
+@@ -5950,6 +5997,9 @@ export class AgentSession {
  			acceptTerminalEmptyStop?: boolean;
  		},
  	): Promise<boolean> {
@@ -260,15 +260,15 @@ index c66ab2c937..d273a81abc 100644
  		// Returns false when the prompt was dropped before reaching the agent —
  		// every pre-dispatch bail (generation bump from abort, disposal, usage
  		// preflight denial) exits silently, and prompt() uses the outcome to hand
-@@ -6221,6 +6271,7 @@ export class AgentSession {
- 		}
+@@ -6488,6 +6538,7 @@ export class AgentSession {
  		this.#queuedMessageDrainScheduled = true;
  		this.#scheduleAgentContinue({
+ 			source: "queued-message-drain",
 +			applyBeforeNextUserTurn: true,
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
  				return (
-@@ -7692,7 +7743,10 @@ export class AgentSession {
+@@ -7968,7 +8019,10 @@ export class AgentSession {
  	}
  
  	/** Retry the last failed assistant turn when the session is idle. */
@@ -281,7 +281,7 @@ index c66ab2c937..d273a81abc 100644
  	}
  
 diff --git a/packages/coding-agent/src/session/prewalk.ts b/packages/coding-agent/src/session/prewalk.ts
-index 097c5440c8..e02ae906ce 100644
+index bccad8b263..af340df28b 100644
 --- a/packages/coding-agent/src/session/prewalk.ts
 +++ b/packages/coding-agent/src/session/prewalk.ts
 @@ -208,6 +208,13 @@ export class PrewalkCoordinator {
@@ -332,7 +332,7 @@ index eb4dd21edb..2147a216d2 100644
  
  export interface SessionEntryBase {
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
-index 476e0903da..dc6bfbe189 100644
+index 7a9f9c35de..485814d26d 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
 @@ -53,6 +53,7 @@ import {
@@ -343,7 +343,7 @@ index 476e0903da..dc6bfbe189 100644
  	type ThinkingLevelChangeEntry,
  	TITLE_CHANGE_ENTRY_TYPE,
  	type TitleChangeEntry,
-@@ -475,6 +476,9 @@ export class SessionManager {
+@@ -478,6 +479,9 @@ export class SessionManager {
  	#hasTitleSlot = true;
  	#entries: SessionEntry[] = [];
  	#index = new SessionEntryIndex();
@@ -353,7 +353,7 @@ index 476e0903da..dc6bfbe189 100644
  
  	/** File reflects all current entries; appends can go incrementally. */
  	#fileIsCurrent = false;
-@@ -549,6 +553,8 @@ export class SessionManager {
+@@ -552,6 +556,8 @@ export class SessionManager {
  	 * back to the most-recent session instead of being treated as a fresh crumb.
  	 */
  	#breadcrumbFresh = false;
@@ -362,7 +362,7 @@ index 476e0903da..dc6bfbe189 100644
  	#sessionNameChangedCallbacks = new Set<() => void>();
  	#persistenceErrorCallbacks = new Set<(error: Error) => void>();
  
-@@ -1106,6 +1112,8 @@ export class SessionManager {
+@@ -1110,6 +1116,8 @@ export class SessionManager {
  			parentSession: options?.parentSession,
  			providerPromptCacheKey: options?.providerPromptCacheKey,
  		};
@@ -371,7 +371,7 @@ index 476e0903da..dc6bfbe189 100644
  		const workspace = normalizeSessionWorkspace({
  			cwd: this.#cwd,
  			directories: options?.additionalDirectories ?? [],
-@@ -1118,6 +1126,7 @@ export class SessionManager {
+@@ -1122,6 +1130,7 @@ export class SessionManager {
  
  		this.#entries = [];
  		this.#index.clear();
@@ -379,7 +379,7 @@ index 476e0903da..dc6bfbe189 100644
  		this.#fileIsCurrent = false;
  		this.#rewriteRequired = false;
  		this.#forceFileCreation = false;
-@@ -1152,16 +1161,80 @@ export class SessionManager {
+@@ -1156,16 +1165,80 @@ export class SessionManager {
  		this.#titleSource = header.titleSource;
  		this.#titleUpdatedAt = header.timestamp;
  		this.#index.rebuild(entries);
@@ -461,7 +461,7 @@ index 476e0903da..dc6bfbe189 100644
  	#setLeaf(id: string | null): void {
  		this.#index.setLeaf(id);
  		const batch = this.#atomicEntryBatch;
-@@ -1949,6 +2022,10 @@ export class SessionManager {
+@@ -2066,6 +2139,10 @@ export class SessionManager {
  		return this.#sessionId;
  	}
  
@@ -472,7 +472,7 @@ index 476e0903da..dc6bfbe189 100644
  	getSessionFile(): string | undefined {
  		return this.#sessionFile;
  	}
-@@ -2148,7 +2225,15 @@ export class SessionManager {
+@@ -2265,7 +2342,15 @@ export class SessionManager {
  			| PythonExecutionMessage
  			| FileMentionMessage,
  	): string {
@@ -489,7 +489,7 @@ index 476e0903da..dc6bfbe189 100644
  		this.#recordEntry(entry);
  		return entry.id;
  	}
-@@ -2257,9 +2342,12 @@ export class SessionManager {
+@@ -2374,9 +2459,12 @@ export class SessionManager {
  			tokensAfter?: number;
  		} = {},
  	): string {
@@ -503,7 +503,7 @@ index 476e0903da..dc6bfbe189 100644
  			summary,
  			shortSummary,
  			firstKeptEntryId,
-@@ -2632,10 +2720,16 @@ export class SessionManager {
+@@ -2756,10 +2844,16 @@ export class SessionManager {
  	 * @param cwd Working directory (stored in the session header)
  	 * @param sessionDir Optional session directory; defaults to the cwd-derived dir.
  	 */
@@ -522,7 +522,7 @@ index 476e0903da..dc6bfbe189 100644
  		return manager;
  	}
  
-@@ -2675,11 +2769,17 @@ export class SessionManager {
+@@ -2799,11 +2893,17 @@ export class SessionManager {
  		cwd: string,
  		sessionDir?: string,
  		storage: SessionStorage = new FileSessionStorage(),
@@ -541,7 +541,7 @@ index 476e0903da..dc6bfbe189 100644
  
  		const sourceEntries = structuredClone(await loadEntriesFromFile(sourcePath, storage)) as FileEntry[];
  		migrateToCurrentVersion(sourceEntries);
-@@ -2691,6 +2791,7 @@ export class SessionManager {
+@@ -2815,6 +2915,7 @@ export class SessionManager {
  			{
  				parentSession: sourceHeader?.id,
  				providerPromptCacheKey: sourceHeader?.providerPromptCacheKey ?? sourceHeader?.id,
@@ -549,7 +549,7 @@ index 476e0903da..dc6bfbe189 100644
  			},
  			options?.sessionFile,
  		);
-@@ -2827,6 +2928,7 @@ export class SessionManager {
+@@ -2955,6 +3056,7 @@ export class SessionManager {
  		cwd: string,
  		sessionDir?: string,
  		storage: SessionStorage = new FileSessionStorage(),
@@ -557,7 +557,7 @@ index 476e0903da..dc6bfbe189 100644
  	): Promise<SessionManager> {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const resolvedCwd = path.resolve(cwd);
-@@ -2842,7 +2944,8 @@ export class SessionManager {
+@@ -2970,7 +3072,8 @@ export class SessionManager {
  			// exists=false only when fresh, so this never masks a real stale crumb.
  			if (breadcrumb.fresh && !breadcrumb.exists) {
  				const manager = new SessionManager(cwd, dir, true, storage);
@@ -567,7 +567,7 @@ index 476e0903da..dc6bfbe189 100644
  				return manager;
  			}
  
-@@ -2899,8 +3002,9 @@ export class SessionManager {
+@@ -3027,8 +3130,9 @@ export class SessionManager {
  		if (chosenSession === undefined) chosenSession = await findMostRecentSession(dir, storage);
  
  		const manager = new SessionManager(cwd, dir, true, storage);
@@ -579,10 +579,10 @@ index 476e0903da..dc6bfbe189 100644
  	}
  
 diff --git a/packages/coding-agent/src/session/turn-recovery.ts b/packages/coding-agent/src/session/turn-recovery.ts
-index ef77ea94c1..79751c60db 100644
+index f061c76153..335a02b726 100644
 --- a/packages/coding-agent/src/session/turn-recovery.ts
 +++ b/packages/coding-agent/src/session/turn-recovery.ts
-@@ -196,6 +196,8 @@ type UsageLimitOutcome = {
+@@ -252,6 +252,8 @@ type UsageLimitOutcome = {
  export class TurnRecovery {
  	readonly #host: TurnRecoveryHost;
  	#retryAbortController: AbortController | undefined;
@@ -591,7 +591,7 @@ index ef77ea94c1..79751c60db 100644
  	#retryAttempt = 0;
  	#retryPromise: Promise<void> | undefined;
  	#retryResolve: (() => void) | undefined;
-@@ -328,6 +330,7 @@ export class TurnRecovery {
+@@ -392,6 +394,7 @@ export class TurnRecovery {
  		this.#emptyStopRetryCount = 0;
  		this.#unexpectedStopRetryCount = 0;
  		this.#acceptTerminalEmptyStopForPrompt = false;
@@ -599,7 +599,7 @@ index ef77ea94c1..79751c60db 100644
  	}
  
  	/** Sets whether one terminal empty stop is accepted for the current prompt. */
-@@ -818,6 +821,11 @@ export class TurnRecovery {
+@@ -886,6 +889,11 @@ export class TurnRecovery {
  			attribution: "agent",
  			timestamp: Date.now(),
  		});
@@ -608,10 +608,10 @@ index ef77ea94c1..79751c60db 100644
 +			attempt: this.#unexpectedStopRetryCount,
 +			maxAttempts: UNEXPECTED_STOP_MAX_RETRIES,
 +		});
- 		this.#host.scheduleAgentContinue({ generation: this.#host.promptGeneration() });
- 		return true;
- 	}
-@@ -1921,6 +1929,7 @@ export class TurnRecovery {
+ 		this.#host.scheduleAgentContinue({
+ 			source: "unexpected-stop-retry",
+ 			generation: this.#host.promptGeneration(),
+@@ -2063,6 +2071,7 @@ export class TurnRecovery {
  		// not a retry loop, so it runs even when the user disabled retries: it switches
  		// the model once and lets the base turn proceed.
  		if (!retrySettings.enabled && !options?.fireworksFastFallback) return false;
@@ -619,7 +619,7 @@ index ef77ea94c1..79751c60db 100644
  		const classifierRefusal = this.isClassifierRefusal(message);
  
  		const generation = this.#host.promptGeneration();
-@@ -2165,6 +2174,10 @@ export class TurnRecovery {
+@@ -2308,6 +2317,10 @@ export class TurnRecovery {
  
  		await this.#recordPendingRetryError(message, id, { switchedCredential, switchedModel, delayMs });
  
@@ -630,7 +630,7 @@ index ef77ea94c1..79751c60db 100644
  		await this.#host.emitSessionEvent({
  			type: "auto_retry_start",
  			attempt: this.#retryAttempt,
-@@ -2186,6 +2199,10 @@ export class TurnRecovery {
+@@ -2329,6 +2342,10 @@ export class TurnRecovery {
  		// pattern instead of re-sampling the same stalled reasoning.
  		this.#maybeInjectThinkingLoopRedirect(id);
  
@@ -641,7 +641,7 @@ index ef77ea94c1..79751c60db 100644
  		// Wait with exponential backoff (abortable).
  		const retryAbortController = new AbortController();
  		this.#retryAbortController?.abort();
-@@ -2196,24 +2213,16 @@ export class TurnRecovery {
+@@ -2339,24 +2356,16 @@ export class TurnRecovery {
  			if (this.#retryAbortController !== retryAbortController) {
  				return false;
  			}
@@ -671,7 +671,7 @@ index ef77ea94c1..79751c60db 100644
  		// The identity-keyed removal above can miss when a context rebuild
  		// recreated the failed turn's message object between settle and retry
  		// (fresh identity, same failed tail — issue #5382). Agent.continue()
-@@ -2227,6 +2236,10 @@ export class TurnRecovery {
+@@ -2370,6 +2379,10 @@ export class TurnRecovery {
  			this.#stripFailedAssistantTail();
  		}
  
@@ -682,7 +682,7 @@ index ef77ea94c1..79751c60db 100644
  		// Retry via continue() outside the agent_end event callback chain. A
  		// continuation that still fails locally must close the retry saga —
  		// otherwise auto_retry_end never fires, retryPromise stays pending, and
-@@ -2315,11 +2328,37 @@ export class TurnRecovery {
+@@ -2459,11 +2472,37 @@ export class TurnRecovery {
  	 * Cancel in-progress retry.
  	 */
  	abortRetry(): void {
@@ -721,7 +721,7 @@ index ef77ea94c1..79751c60db 100644
  	async #promptAgentWithIdleRetry(messages: AgentMessage[], options?: { toolChoice?: ToolChoice }): Promise<void> {
  		const deadline = Date.now() + 30_000;
  		for (;;) {
-@@ -2392,6 +2431,7 @@ export class TurnRecovery {
+@@ -2571,6 +2610,7 @@ export class TurnRecovery {
  		}
  
  		// Reset retry budget for a fresh attempt
@@ -729,3 +729,16 @@ index ef77ea94c1..79751c60db 100644
  		this.#retryAttempt = 0;
  
  		// Re-attempt the turn
+diff --git a/packages/coding-agent/src/task/executor.ts b/packages/coding-agent/src/task/executor.ts
+index b75cc3d3db..0ae9d375f0 100644
+--- a/packages/coding-agent/src/task/executor.ts
++++ b/packages/coding-agent/src/task/executor.ts
+@@ -2823,7 +2823,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
+ 	);
+ 	// TTL before an adopted idle subagent is parked by the lifecycle manager.
+ 	// <= 0 disables parking (the session stays live until process teardown).
+-	const agentIdleTtlMs = Math.trunc(Number(settings.get("task.agentIdleTtlMs") ?? 420_000) || 0);
++	const agentIdleTtlMs = Math.trunc(Number(settings.get("task.agentIdleTtlMs") ?? 300_000) || 0);
+ 	const configuredDefaultBudget = Math.max(
+ 		0,
+ 		Math.trunc(Number(settings.get("task.softRequestBudget") ?? SOFT_REQUEST_BUDGET.default) || 0),

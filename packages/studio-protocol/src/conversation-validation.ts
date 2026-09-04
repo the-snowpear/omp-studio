@@ -16,8 +16,10 @@ import {
   type JsonValue,
 } from "./contracts/conversation.js";
 import type { AgentId, OpaqueCursor, SessionId } from "./contracts/ids.js";
+import { utf8ByteLength } from "./conversation-text.js";
 
-const utf8Bytes = (text: string): number => new TextEncoder().encode(text).byteLength;
+/** Shares the module-scope encoder: a per-call `new TextEncoder()` shows up on the streaming validation path. */
+const utf8Bytes = (text: string): number => utf8ByteLength(text);
 
 function record(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {

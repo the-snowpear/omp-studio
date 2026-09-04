@@ -52,6 +52,9 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     // not flash empty; real measurements replace it immediately.
     initialRect: { width: 0, height: 800 },
     scrollMargin,
+    // 行高测量按 rAF 延后一帧（库默认行为）在这里是安全的：可见行走普通流，行的位置
+    // 与容器高度都由浏览器的布局给出，测量只影响未挂载区域的 padding（见下方 render），
+    // 而 padding 的两端在同一次提交里等量增减、净变化为零。
     useAnimationFrameWithResizeObserver: true,
   });
   /**
@@ -96,48 +99,6 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     const parent = host.parentElement; if (parent !== null) observer.observe(parent);
     return () => observer.disconnect();
   }, [enabled, measureMargin, scrollerRef]);
-  /**
-   * 卡片 0fr→1fr 的高度过渡每帧都在改行高，而 virtualizer 的
-   * RO→setState→commit 链比 CSS 过渡晚 1-3 帧且会并帧，下游行的 translateY
-   * 就以「几十像素一格」的步进落下——展开/收起一张卡，无关的消息行上下连跳。
-   * 高度动画在播期间给行开一段短 transform 过渡把步进补成连续位移；动画结束
-   * 即撤，纯滚动时行上没有任何过渡（滚动不改变行的 translateY）。
-   *
-   * 监听走 transitionrun/end/cancel 冒泡，只认行高来源的属性；卡片自己的
-   * opacity/transform、chevron 旋转都不触发。
-   */
-  useLayoutEffect(() => {
-    const host = hostRef.current;
-    if (host === null) return;
-    const tracked = (name: string) => name === "grid-template-rows" || name === "margin-top";
-    let removeTimer = 0;
-    let hardCap = 0;
-    const deactivate = () => { host.classList.remove("is-height-animating"); removeTimer = 0; };
-    const onRun = (event: TransitionEvent) => {
-      if (!tracked(event.propertyName)) return;
-      host.classList.add("is-height-animating");
-      window.clearTimeout(removeTimer);
-      window.clearTimeout(hardCap);
-      // 兜底：动画元素在过渡中途卸载时可能收不到 end/cancel，硬上限后必定撤类。
-      hardCap = window.setTimeout(deactivate, 900);
-    };
-    const onFinish = (event: TransitionEvent) => {
-      if (!tracked(event.propertyName)) return;
-      window.clearTimeout(removeTimer);
-      removeTimer = window.setTimeout(deactivate, 80);
-    };
-    host.addEventListener("transitionrun", onRun);
-    host.addEventListener("transitionend", onFinish);
-    host.addEventListener("transitioncancel", onFinish);
-    return () => {
-      host.removeEventListener("transitionrun", onRun);
-      host.removeEventListener("transitionend", onFinish);
-      host.removeEventListener("transitioncancel", onFinish);
-      window.clearTimeout(removeTimer);
-      window.clearTimeout(hardCap);
-      deactivate();
-    };
-  }, []);
   const visible = capVirtualItems(virtualizer.getVirtualItems());
   if (!enabled) return <>{itemKeys.map((key, index) => <div key={key}>{renderItem(index)}</div>)}</>;
   // A newly opened/animated panel can be mounted before it has a non-zero
@@ -148,15 +109,37 @@ export const ConversationVirtualList = memo(function ConversationVirtualList({
     const start = Math.max(0, itemKeys.length - UNMEASURED_TAIL_ROWS);
     return <div ref={hostRef} className="convo-virtual-list">{itemKeys.slice(start).map((key, offset) => <div key={key}>{renderItem(start + offset)}</div>)}</div>;
   }
+  /**
+   * 挂载的行走**普通流**，未挂载的头尾由容器 padding 占位——不是绝对定位 + 容器高度。
+   *
+   * 这是「贴底时展开中段工具卡，下方内容先往下再归位」的根治。绝对定位下：行内长高的那
+   * 一帧，容器高度还是 virtualizer 上一次提交的旧值（行 RO → rAF → React 异步提交，晚
+   * 2~3 帧），scrollHeight 不变，唯一的贴底写手无从补偿；而同一行内展开点下方的内容是
+   * 流内的、当帧就被推下去。真 Chromium 实测（`npm run perf:streaming` 的
+   * expand-below-card-hold-position-px）：绝对定位 35.8px、走流 0.5px。
+   *
+   * 走流以后：长高当帧就把下方内容连同整篇文档一起推下去 → `.convo-doc` 的 ResizeObserver
+   * 在同一帧的绘制前窗口触发 `stickToTail` → scrollTop 补上同样的量，净位移为零。虚拟化的
+   * 职责退回到「挂多少行」和两端 padding：
+   *   - `paddingTop`    = 首个已挂载行的 start（`capVirtualItems` 砍掉的头也算在里面）
+   *   - `paddingBottom` = 总高 − 末个已挂载行的 end
+   * 行长高时这两个值都不变（start 在它之前，end 与总高等量增长），所以 virtualizer 迟到的
+   * 提交在几何上是空操作，不会二次补偿。行盒必须自成 BFC（CSS 里的 `display: flow-root`），
+   * 否则 `.ev` 的 margin 会穿出行盒，实测高度与它在流里真正占的位置就差一段。
+   */
+  // 空列表（例如 Agent Hub 里还没有任何行的预览面）没有已挂载行可推算，两端 padding 归零。
+  const first = visible[0];
+  const last = visible[visible.length - 1];
+  const paddingTop = first === undefined ? 0 : Math.max(0, first.start - virtualizer.options.scrollMargin);
+  const paddingBottom = last === undefined ? 0 : Math.max(0, virtualizer.getTotalSize() - last.end);
   return (
-    <div ref={hostRef} className="convo-virtual-list" style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
+    <div ref={hostRef} className="convo-virtual-list" style={{ paddingBottom, paddingTop, position: "relative" }}>
       {visible.map((item) => (
         <div
           key={item.key}
           ref={measureRow}
           data-index={item.index}
           className="convo-virtual-row"
-          style={{ left: 0, position: "absolute", top: 0, transform: `translateY(${item.start - virtualizer.options.scrollMargin}px)`, width: "100%" }}
         >
           {renderItem(item.index)}
         </div>

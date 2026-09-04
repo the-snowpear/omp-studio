@@ -208,6 +208,8 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "models.discovery.refresh": true,
   "models.cycleOrder.set": true,
   "models.webSearch.set": true,
+  "models.webSearch.credential.set": true,
+  "models.webSearch.credential.remove": true,
   "plugins.setEnabled": true,
   "skills.setEnabled": true,
   "skills.reveal": true,
@@ -251,6 +253,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "session.handoff": true,
   "session.model.set": true,
   "session.thinking.set": true,
+  "session.taskModel.set": true,
   "session.tree.get": true,
   "session.tree.navigate": true,
   "session.tree.branch": true,
@@ -398,11 +401,15 @@ function markPendingOutcomeUnknown(
   return changed ? next : commands;
 }
 
-/** Workspace commands are handled by the Host workspace adapter, not by the
- * Runtime session. A workspace switch can therefore change the Runtime epoch
- * while `workspace.open`/`workspace.pick` is still completing. */
-function preserveWorkspaceCommand(command: CommandState): boolean {
-  return command.commandName === "workspace.open" || command.commandName === "workspace.pick";
+/** These commands complete in Host-owned services rather than in the Runtime.
+ * Some of them intentionally stop or replace a Runtime while still in flight,
+ * so a Runtime identity change cannot make their outcome ambiguous. */
+function preserveHostOwnedCommand(command: CommandState): boolean {
+  return command.commandName === "workspace.open"
+    || command.commandName === "workspace.pick"
+    || command.commandName === "session.archive"
+    || command.commandName === "session.unarchive"
+    || command.commandName === "session.delete";
 }
 
 export function reduceClientState(state: ClientState, action: ClientAction): ClientState {
@@ -509,7 +516,7 @@ function reduceEvent(state: ClientState, event: ClientEvent): ClientState {
             state.commands,
             "runtime epoch changed; outcome unknown",
             event.occurredAt,
-            (command) => preserveWorkspaceCommand(command)
+            (command) => preserveHostOwnedCommand(command)
               || command.commandName === "session.resume"
               || command.commandName === "session.create",
           ),
@@ -891,7 +898,7 @@ function reduceRuntimeChanged(state: ClientState, event: Extract<ClientEvent, { 
       commands,
       "runtime changed; outcome unknown",
       event.occurredAt,
-      (command) => preserveWorkspaceCommand(command)
+      (command) => preserveHostOwnedCommand(command)
         || (identityChanged && !lost && connection.status === "connected"
           && (command.commandName === "session.resume" || command.commandName === "session.create")),
     );

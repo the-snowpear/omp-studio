@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import btwUserPrompt from "../../prompts/system/btw-user.md" with { type: "text" };
+import { CONVERSATION_LIVE_COALESCE_INTERVAL_MS } from "./conversation-live-projector";
 
 const DEFAULT_MAX_TEXT_BYTES = 1024 * 1024;
 
@@ -63,14 +64,28 @@ export interface StudioBtwServiceOptions {
 	idGenerator?: () => string;
 	tokenGenerator?: () => string;
 	maxTextBytes?: number;
+	/** Streaming-emit coalesce window; tests shorten it. */
+	coalesceIntervalMs?: number;
 }
 
-/** Presentation-neutral one-slot BTW side-channel service. */
+/**
+ * Presentation-neutral one-slot BTW side-channel service.
+ *
+ * The snapshot carries the whole answer so far, and every hop downstream
+ * (projector envelope, per-listener copy, Bridge frame) copies it again. Emitting
+ * one snapshot per text delta therefore costs O(answer²) per answer, so streaming
+ * emits are coalesced onto the same frame budget the conversation stream uses.
+ * Coalescing is lossless — the accumulated answer lives on the record — and only
+ * ever delays a `running` snapshot: every terminal transition emits immediately
+ * and cancels the pending frame.
+ */
 export class StudioBtwService {
 	readonly #listeners = new Set<(snapshot: StudioBtwSnapshot) => void>();
 	readonly #idGenerator: () => string;
 	readonly #tokenGenerator: () => string;
 	readonly #maxTextBytes: number;
+	readonly #coalesceIntervalMs: number;
+	#emitTimer: ReturnType<typeof setTimeout> | undefined;
 	#current: StudioBtwRecord | undefined;
 
 	constructor(
@@ -80,8 +95,12 @@ export class StudioBtwService {
 		this.#idGenerator = options.idGenerator ?? randomUUID;
 		this.#tokenGenerator = options.tokenGenerator ?? randomUUID;
 		this.#maxTextBytes = options.maxTextBytes ?? DEFAULT_MAX_TEXT_BYTES;
+		this.#coalesceIntervalMs = options.coalesceIntervalMs ?? CONVERSATION_LIVE_COALESCE_INTERVAL_MS;
 		if (!Number.isSafeInteger(this.#maxTextBytes) || this.#maxTextBytes < 1) {
 			throw new RangeError("BTW text limit must be a positive integer");
+		}
+		if (!Number.isSafeInteger(this.#coalesceIntervalMs) || this.#coalesceIntervalMs < 0) {
+			throw new RangeError("BTW coalesce interval must be a non-negative integer");
 		}
 	}
 
@@ -184,6 +203,7 @@ export class StudioBtwService {
 
 	dispose(): void {
 		if (this.#current?.status === "running") this.abort(this.#current.ephemeralId);
+		this.#clearEmitTimer();
 		this.#listeners.clear();
 	}
 
@@ -221,7 +241,7 @@ export class StudioBtwService {
 		}
 		record.text += delta;
 		record.textBytes += bytes;
-		this.#emit(record);
+		this.#scheduleEmit(record);
 	}
 
 	#failLimit(record: StudioBtwRecord): void {
@@ -241,16 +261,43 @@ export class StudioBtwService {
 
 	#snapshot(record: StudioBtwRecord): StudioBtwSnapshot {
 		const copy = record.status === "completed" ? record.text.trim() : "";
-		return structuredClone({
+		return {
 			ephemeralId: record.ephemeralId,
 			status: record.status,
 			text: record.text,
 			...(copy.length === 0 ? {} : { copy }),
-			...(record.error === undefined ? {} : { error: record.error }),
-		});
+			// A shallow error copy is enough to keep the record unreachable through
+			// a snapshot: the payload is a flat code/message pair and `text` is a
+			// string. Deep-cloning here duplicated the whole answer a second time.
+			...(record.error === undefined ? {} : { error: { ...record.error } }),
+		};
 	}
 
+	/** Terminal and lifecycle transitions: emit now, dropping any pending frame. */
 	#emit(record: StudioBtwRecord): void {
+		this.#clearEmitTimer();
+		this.#deliver(record);
+	}
+
+	/** Streaming transitions: at most one snapshot per coalesce window. */
+	#scheduleEmit(record: StudioBtwRecord): void {
+		if (this.#emitTimer !== undefined) return;
+		this.#emitTimer = setTimeout(() => {
+			this.#emitTimer = undefined;
+			// A terminal transition that landed inside the window already emitted a
+			// newer snapshot; re-emitting the running one would move status backwards.
+			if (this.#current !== record || record.status !== "running") return;
+			this.#deliver(record);
+		}, this.#coalesceIntervalMs);
+	}
+
+	#clearEmitTimer(): void {
+		if (this.#emitTimer === undefined) return;
+		clearTimeout(this.#emitTimer);
+		this.#emitTimer = undefined;
+	}
+
+	#deliver(record: StudioBtwRecord): void {
 		const snapshot = this.#snapshot(record);
 		for (const listener of this.#listeners) listener(structuredClone(snapshot));
 	}

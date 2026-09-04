@@ -184,8 +184,31 @@ describe("composer send path (simulated vs OMP)", () => {
     const queue = [
       { id: 1, text: "for A", sessionId: "sess-a" },
       { id: 2, text: "for B", sessionId: "sess-b" },
+      { id: 3, text: "unstamped" },
     ];
-    expect(visibleQueuedMessages(queue, "sess-b").map((entry) => entry.text)).toEqual(["for B"]);
+    expect(visibleQueuedMessages(queue, "sess-b").map((entry) => entry.text)).toEqual(["for B", "unstamped"]);
     expect(visibleQueuedMessages(queue, undefined)).toEqual([]);
+  });
+
+  it("enables local queueing while running even if promptChannel is in transit (sending/busy)", () => {
+    expect(
+      composerQueueEnabled({
+        textReady: true,
+        running: true,
+        promptChannelReady: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("canFlushQueuedMessage falls back to selectedSessionId if entrySessionId is undefined", () => {
+    expect(
+      canFlushQueuedMessage({
+        running: false,
+        pendingInteraction: false,
+        promptChannelReady: true,
+        selectedSessionId: "sess-a",
+        liveSessionId: "sess-a",
+      }),
+    ).toBe(true);
   });
 });

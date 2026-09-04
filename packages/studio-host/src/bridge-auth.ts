@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RuntimeInstanceId } from "@omp-studio/studio-protocol";
 
@@ -92,10 +92,12 @@ export async function createBridgeBootstrap(
 }
 
 export async function consumeBridgeToken(tokenFile: string): Promise<string> {
-  const claimed = `${tokenFile}.claimed-${process.pid}-${randomBytes(8).toString("hex")}`;
-  await rename(tokenFile, claimed);
+  const claimed = `${tokenFile}.claimed`;
+  await writeFile(claimed, "", { encoding: "utf8", flag: "wx", mode: 0o600 });
   try {
-    return await readFile(claimed, "utf8");
+    const token = await readFile(tokenFile, "utf8");
+    await rm(tokenFile);
+    return token;
   } finally {
     await rm(claimed, { force: true });
   }

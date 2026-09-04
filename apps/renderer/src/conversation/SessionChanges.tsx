@@ -9,6 +9,7 @@ import {
   SESSION_CHANGE_LAST_ID,
   SESSION_CHANGE_SESSION_ID,
 } from "./toolMeta";
+import { sessionFileDiffs, type SessionFileDiff } from "./sessionDiff";
 
 function deltaOf(files: readonly { add: number; del: number }[]): { add: number; del: number } {
   return files.reduce((sum, file) => ({ add: sum.add + file.add, del: sum.del + file.del }), { add: 0, del: 0 });
@@ -19,13 +20,13 @@ function toTurnOption(turn: { id: string; label: string; files: readonly { add: 
   return { id: turn.id, label: turn.label, add: delta.add, del: delta.del };
 }
 
-// TODO: sessionFilePatches removed — needs reimplementation
-function fileDiff(path: string, add: number, del: number): ChangesDiffFile {
+function fileDiff(path: string, add: number, del: number, diff: SessionFileDiff | undefined): ChangesDiffFile {
   return {
     file: path,
     add,
     del,
-    hunks: [],
+    hunks: diff?.hunks ?? [],
+    ...(diff?.truncated === true ? { truncated: true } : {}),
   };
 }
 
@@ -58,7 +59,7 @@ export function SessionChanges({
   const known = turns.some((turn) => turn.id === turnId);
   const activeId = known ? turnId : SESSION_CHANGE_LAST_ID;
   const scope = useMemo(() => sessionChangeScope(rows, activeId), [rows, activeId]);
-  // TODO: sessionFilePatches removed — needs reimplementation
+  const diffs = useMemo(() => sessionFileDiffs(scope.segments), [scope.segments]);
 
   useEffect(() => {
     if (known) return;
@@ -80,7 +81,7 @@ export function SessionChanges({
     setExpanded(hit === undefined ? new Set() : new Set([hit.path]));
   }, [focusPath, focusTurnId, rows]);
 
-  const files: readonly ChangesDiffFile[] = scope.files.map((file) => fileDiff(file.path, file.add, file.del));
+  const files: readonly ChangesDiffFile[] = scope.files.map((file) => fileDiff(file.path, file.add, file.del, diffs.get(file.path)));
   const sessionHasFiles = turns.some((turn) => turn.id === SESSION_CHANGE_SESSION_ID && (turn.add > 0 || turn.del > 0));
 
   return (

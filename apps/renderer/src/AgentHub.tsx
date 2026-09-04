@@ -1546,12 +1546,6 @@ export function AgentHubPage({
           <span className="hc-detail">正在恢复最新 Runtime 状态，敏感操作已暂停。</span>
         </div>
       ) : null}
-      {!preview && !viewingLive ? (
-        <div className="hub-conn blue">
-          <Icon name="clock" extra="sm" /><b>历史会话</b>
-          <span className="hc-detail">名册来自归档；kill / revive / 发送 / 取消 job 仅对当前 live 会话可用。对话请用「打开」。</span>
-        </div>
-      ) : null}
 
       <div className="hub-main">
         <span className="hm-ic"><Icon name="message" /></span>
