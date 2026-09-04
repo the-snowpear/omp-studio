@@ -1095,6 +1095,7 @@ function createSingleDesktopRuntimeSessionPort(
       stateDirectory: launchContext.profileDirectory,
       runtimeInstallDirectory:
         launchContext.runtimeInstallDirectory ?? join(launchContext.profileDirectory, "runtimes"),
+      ...(launchContext.installer === undefined ? {} : { installer: launchContext.installer }),
     });
     await backend.initialize();
     const installed = await backend.installer.currentManifest();

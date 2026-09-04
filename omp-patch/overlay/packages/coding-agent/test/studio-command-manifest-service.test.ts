@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import { BUILTIN_SLASH_COMMANDS_INTERNAL } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
 import {
@@ -137,7 +138,11 @@ describe("WP-044 Studio command manifest", () => {
 		const service = new StudioCommandManifestService(session);
 		const before = service.manifestHash();
 		const manifest = await service.refresh();
-		expect(manifest.hash).not.toBe(before);
+		// The hash attests to the build's builtin surface, so environment-derived
+		// commands must never move it: managed resolution compares it against a
+		// value frozen and signed at packaging time.
+		expect(manifest.hash).toBe(before);
+		expect(service.manifestHash()).toBe(before);
 		expect(manifest.commands.find(command => command.id === "extension.ext:hello")).toMatchObject({
 			implementation: "extension-command",
 		});
@@ -154,5 +159,38 @@ describe("WP-044 Studio command manifest", () => {
 			source: "prompt-template",
 		});
 		expect(prompts).toEqual(["/ext:hello world", "/custom:hello team"]);
+	});
+
+	test("hashes only the builtin baseline, never environment-derived commands", async () => {
+		const session = {
+			sessionManager: { getCwd: () => process.cwd() },
+			settings: {},
+			extensionRunner: {
+				getRegisteredCommands: () => [{ name: "ext:drift", description: "Extension drift" }],
+			},
+			customCommands: [
+				{
+					path: "drift.md",
+					resolvedPath: "drift.md",
+					source: "project",
+					command: { name: "custom:drift", description: "Custom drift" },
+				},
+			],
+			mcpPromptCommands: [],
+			skills: [],
+			setSlashCommands: () => {},
+			prompt: async () => true,
+		} as unknown as AgentSession;
+		const manifest = await new StudioCommandManifestService(session).refresh();
+		expect(manifest.commands.some(command => command.source !== "builtin")).toBe(true);
+		// Packaging re-derives the pinned `commandManifestHash` exactly this way,
+		// from the builtin subset of a probed manifest, so this serialization is a
+		// contract: `scripts/runtime-artifact.mjs` fails the build when it drifts.
+		const baseline = {
+			upstreamCommit: manifest.upstreamCommit,
+			commands: manifest.commands.filter(command => command.source === "builtin"),
+			unclassifiedBuiltins: manifest.unclassifiedBuiltins,
+		};
+		expect(manifest.hash).toBe(`sha256:${createHash("sha256").update(JSON.stringify(baseline)).digest("hex")}`);
 	});
 });

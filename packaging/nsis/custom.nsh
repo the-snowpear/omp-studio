@@ -44,7 +44,8 @@
 ;   - $INSTDIR\runtime 是正在跑的 Runtime（extraFiles → versions\<ver>\omp.exe）。
 ;     升级时删掉旧树再写入新版本；真卸载随 $INSTDIR 一起删。
 ;     AppData 会话/日志保留；旧版若在 AppData 留下过 runtimes 也不主动删。
-;     Users 对 $INSTDIR\runtime 有修改权，以便首次写入 current.json 和诊断页更新。
+;     不给 Users 额外授权：应用是 requireAdministrator，首次写 current.json 走的是提权进程；
+;     放开 Modify 会让任何标准用户改掉已签名的 runtime-manifest.json，而解析端只比对哈希。
 
 !ifndef BUILD_UNINSTALLER
   !include "WordFunc.nsh"
@@ -648,7 +649,4 @@ FunctionEnd
   ${EndIf}
   WriteINIStr "$PLUGINSDIR\done.ini" "Install" "Done" "1"
   WriteINIStr "$PLUGINSDIR\done.ini" "Install" "InstDir" "$INSTDIR"
-  IfFileExists "$INSTDIR\runtime" 0 customInstall_runtime_acl_done
-    nsExec::ExecToLog 'icacls "$INSTDIR\runtime" /grant *S-1-5-32-545:(OI)(CI)M /T /C /Q'
-  customInstall_runtime_acl_done:
 !macroend

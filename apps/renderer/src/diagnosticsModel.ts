@@ -147,6 +147,38 @@ const UNAVAILABLE_CODES: ReadonlySet<string> = new Set([
   "not-wired",
 ]);
 
+/**
+ * Localized copy for the resolver rejections an operator can actually act on.
+ *
+ * `rejectionReason` is an internal English sentence produced by
+ * `packages/studio-host/src/runtime-resolver.ts` and it reaches this model
+ * verbatim, so without a mapping it prints untranslated into a localized UI.
+ * Keys must match those literals exactly. An unmapped reason still falls back
+ * to the raw text — losing evidence is worse than losing the translation.
+ */
+const RESOLUTION_REJECTED_COPY: Readonly<Record<string, { detail: string; problem: string }>> = {
+  "managed runtime command manifest hash drift": {
+    detail: "diagnostics.rejectedCommandManifestDriftDetail",
+    problem: "diagnostics.rejectedCommandManifestDriftProblem",
+  },
+  "managed runtime capability hash drift": {
+    detail: "diagnostics.rejectedCapabilityDriftDetail",
+    problem: "diagnostics.rejectedCapabilityDriftProblem",
+  },
+  "managed runtime command manifest could not be verified": {
+    detail: "diagnostics.rejectedCommandManifestUnverifiedDetail",
+    problem: "diagnostics.rejectedCommandManifestUnverifiedProblem",
+  },
+  "runtime command manifest contains unclassified builtins": {
+    detail: "diagnostics.rejectedUnclassifiedBuiltinsDetail",
+    problem: "diagnostics.rejectedUnclassifiedBuiltinsProblem",
+  },
+  "installation manifest claims full parity but the runtime evidence does not support it": {
+    detail: "diagnostics.rejectedOverclaimedParityDetail",
+    problem: "diagnostics.rejectedOverclaimedParityProblem",
+  },
+};
+
 const DISCONNECT_CODES: ReadonlySet<string> = new Set([
   "pipe-closed",
   "process-exit",
@@ -230,7 +262,15 @@ export function formatRuntimeUnavailableCopy(
           ? t("diagnostics.unavailableNotInstalledProblemWithReason", { extra })
           : t("diagnostics.unavailableNotInstalledProblem"),
       };
-    case "resolution-rejected":
+    case "resolution-rejected": {
+      const localized = extra === undefined ? undefined : RESOLUTION_REJECTED_COPY[extra];
+      if (localized !== undefined) {
+        return {
+          title: t("diagnostics.unavailableNotAcceptedTitle"),
+          detail: t(localized.detail),
+          problem: t(localized.problem),
+        };
+      }
       return {
         title: t("diagnostics.unavailableNotAcceptedTitle"),
         detail: extra ?? t("diagnostics.unavailableResolutionRejectedDetail"),
@@ -238,6 +278,7 @@ export function formatRuntimeUnavailableCopy(
           ? t("diagnostics.unavailableResolutionRejectedProblemWithReason", { extra })
           : t("diagnostics.unavailableResolutionRejectedProblem"),
       };
+    }
     case "resolution-limited":
       return {
         title: t("diagnostics.unavailableNotAcceptedTitle"),
@@ -453,7 +494,7 @@ function deriveHero(
     ? t("diagnostics.heroCurrentVersion", { version: input.runtimeVersion })
     : t("diagnostics.versionUnknown");
   const signature = input.installer
-    ? t("diagnostics.heroSignature", { signature: t(SIGNATURE_LABEL[input.installer.signature]) })
+    ? t("diagnostics.heroSignature", { sig: t(SIGNATURE_LABEL[input.installer.signature]) })
     : t("diagnostics.heroSignatureUnknown");
   const baseDetail = `${version} · ${signature} · ${checked}`;
 

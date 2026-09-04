@@ -278,6 +278,24 @@ test("managed capability hash drift is rejected", async () => {
   assert.match(resolution.rejectionReason ?? "", /capability hash drift/u);
 });
 
+// The Runtime hashes only its builtin baseline so this value stays comparable
+// with the one packaging signed into runtime-manifest.json. If anything
+// environment-derived ever reaches the hash again, every operator whose profile
+// differs from the build machine's lands here and cannot install their way out.
+test("managed command manifest hash drift is rejected", async () => {
+  const { path } = await executableFile();
+  const resolution = await resolveRuntime(
+    { kind: "managed" },
+    environment({
+      managedLookup: {
+        current: async () => ({ manifest: managedManifest({ commandManifestHash: "sha256:commands-drifted" }), entrypointPath: path }),
+      },
+    }),
+  );
+  assert.equal(resolution.classification, "rejected");
+  assert.match(resolution.rejectionReason ?? "", /command manifest hash drift/u);
+});
+
 test("managed installation platform mismatch is rejected", async () => {
   const { path } = await executableFile();
   const resolution = await resolveRuntime(

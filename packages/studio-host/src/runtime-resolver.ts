@@ -640,6 +640,27 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
             // session directories in the user's real OMP profile. Keep every
             // probe artifact under the scratch workspace removed below.
             OMP_AGENT_DIR: join(workspace, ".omp-agent"),
+            // ...and it must not *read* the operator's profile either. The
+            // Runtime folds every command it can discover into the manifest it
+            // reports, and `classifyManaged` compares that manifest's hash with
+            // a value frozen and signed at packaging time; a probe that sees
+            // one machine's skills, plugins, MCP prompts or user-level slash
+            // commands therefore produces evidence that cannot match any other
+            // machine's. `OMP_AGENT_DIR` alone does not do this: it is this
+            // repo's own convention (see `defaultOmpAgentDir`), while the
+            // vendored Runtime resolves its profile from `PI_CODING_AGENT_DIR`,
+            // `PI_CONFIG_DIR` and `OMP_PROFILE`/`PI_PROFILE` — and everything
+            // under `~/.claude`, `~/.codex` and `~/.gemini` is reached through
+            // `os.homedir()`, which only HOME/USERPROFILE can move.
+            PI_CODING_AGENT_DIR: join(workspace, ".omp-agent"),
+            OMP_PROFILE: "",
+            PI_PROFILE: "",
+            HOME: workspace,
+            USERPROFILE: workspace,
+            XDG_CONFIG_HOME: join(workspace, ".config"),
+            XDG_DATA_HOME: join(workspace, ".local", "share"),
+            XDG_STATE_HOME: join(workspace, ".local", "state"),
+            XDG_CACHE_HOME: join(workspace, ".cache"),
             ...options.env,
           },
           stdio: "ignore",

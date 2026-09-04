@@ -51,7 +51,7 @@ export class StudioCommandManifestService {
 	#commandsById = new Map<string, StudioOperatorCommand>();
 
 	constructor(private readonly session: AgentSession) {
-		this.#current = this.#replace([...builtinCommands(), studioCommandDescriptor()]);
+		this.#current = this.#replace(baselineCommands());
 	}
 
 	manifest(): StudioOperatorCommandManifest {
@@ -64,7 +64,7 @@ export class StudioCommandManifestService {
 
 	async refresh(): Promise<StudioOperatorCommandManifest> {
 		const { buildAvailableSlashCommands } = await import("../../slash-commands/available-commands");
-		const commands = [...builtinCommands(), studioCommandDescriptor()];
+		const commands = baselineCommands();
 		const availableSession = {
 			extensionRunner: this.session.extensionRunner,
 			customCommands: this.session.customCommands ?? [],
@@ -168,7 +168,23 @@ export class StudioCommandManifestService {
 
 	#replace(commands: StudioOperatorCommand[]): StudioOperatorCommandManifest {
 		const unclassifiedBuiltins: string[] = [];
-		const hash = stableCommandManifestHash({ upstreamCommit: UPSTREAM_COMMIT, commands, unclassifiedBuiltins });
+		// The hash attests to the command surface of this Runtime *build*, so it
+		// covers only the baseline — builtins plus the Studio descriptor — and
+		// never the commands discovered from the operator's environment.
+		//
+		// Managed resolution compares this value against a hash that packaging
+		// froze and Ed25519-signed into `runtime-manifest.json`
+		// (studio-host `classifyManaged`). Skills, extension commands, MCP
+		// prompt templates and file commands are resolved from the user's home
+		// and workspace, so letting any of them reach the hash rejects the
+		// managed Runtime on every machine whose profile differs from the build
+		// machine's. They stay in `commands` and stay invocable; they are simply
+		// not evidence of Runtime identity.
+		const hash = stableCommandBaselineHash({
+			upstreamCommit: UPSTREAM_COMMIT,
+			commands: commands.filter(command => command.source === "builtin"),
+			unclassifiedBuiltins,
+		});
 		this.#commandsById = new Map(commands.map(command => [command.id, command]));
 		return {
 			generatedAt: "1970-01-01T00:00:00.000Z",
@@ -224,6 +240,16 @@ function builtinCommands(): StudioOperatorCommand[] {
 	return BUILTIN_SLASH_COMMANDS_INTERNAL.map(command => builtinDescriptor(command));
 }
 
+/**
+ * The environment-independent command surface of this build: every builtin plus
+ * the Studio descriptor, all of which carry `source: "builtin"`. This is the
+ * only input to the manifest hash, and packaging re-derives the same value from
+ * a probe to keep `runtime-manifest.json` honest.
+ */
+function baselineCommands(): StudioOperatorCommand[] {
+	return [...builtinCommands(), studioCommandDescriptor()];
+}
+
 function studioCommandDescriptor(): StudioOperatorCommand {
 	return {
 		id: STUDIO_SESSION_TITLE_ENSURE_ID,
@@ -262,7 +288,7 @@ function builtinDescriptor(command: (typeof BUILTIN_SLASH_COMMANDS_INTERNAL)[num
 	};
 }
 
-function stableCommandManifestHash(value: {
+function stableCommandBaselineHash(value: {
 	upstreamCommit: string;
 	commands: StudioOperatorCommand[];
 	unclassifiedBuiltins: string[];

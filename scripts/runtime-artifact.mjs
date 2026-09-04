@@ -22,8 +22,10 @@
 // ----------------
 // The managed Runtime currently exposes a verified backend capability subset.
 // The capability hash is mirrored here so a stale package definition fails
-// closed. The command manifest hash is never reconstructed here: packaging
-// probes the just-built Runtime and records its authenticated live value.
+// closed. The command manifest hash is recorded from a probe of the just-built
+// Runtime, and then re-derived from that probe's own manifest payload
+// (`commandBaselineHash`) so a hash that moved with the build machine's profile
+// fails the build instead of shipping an installer that rejects itself.
 //
 // Entrypoint naming
 // -----------------
@@ -169,7 +171,10 @@ export function sha256Hex(input) {
 
 export function implementedManifestHash(kind) {
   if (kind !== "capabilities") {
-    throw new Error(`Only the capability manifest is statically reproducible; found ${kind}`);
+    throw new Error(
+      `Only the capability manifest is reproducible from this package definition; found ${kind}. ` +
+        "The command baseline is re-derived from a probed manifest instead; see commandBaselineHash.",
+    );
   }
   const content = IMPLEMENTED_CAPABILITIES.map((id) => ({
     id,
@@ -177,6 +182,28 @@ export function implementedManifestHash(kind) {
     limitations: LIMITED_CAPABILITIES[id] ?? [],
   }));
   return `sha256:${sha256Hex(`${kind}:${JSON.stringify(content)}`)}`;
+}
+
+/**
+ * Re-derive a Runtime's command manifest hash from the manifest it just served.
+ *
+ * The Runtime hashes only its builtin baseline — every descriptor it ships,
+ * which all carry `source: "builtin"` — precisely so the value can be frozen
+ * and signed into `runtime-manifest.json` and still match on an operator
+ * machine whose skills, extensions, MCP prompt templates and file commands
+ * differ from this build machine's. Duplicating the builtin table here would
+ * rot, so the check instead re-serializes the probe's own payload: it fails the
+ * build the moment the Runtime lets anything environment-derived back into the
+ * hash, rather than shipping an installer whose managed Runtime rejects itself
+ * with "managed runtime command manifest hash drift".
+ */
+export function commandBaselineHash(manifest) {
+  const baseline = {
+    upstreamCommit: manifest.upstreamCommit,
+    commands: manifest.commands.filter((command) => command.source === "builtin"),
+    unclassifiedBuiltins: manifest.unclassifiedBuiltins,
+  };
+  return `sha256:${sha256Hex(JSON.stringify(baseline))}`;
 }
 
 export async function probeRuntimeIdentity({
@@ -217,6 +244,16 @@ export async function probeRuntimeIdentity({
   }
   if (outcome.commandManifest.unclassifiedBuiltins.length > 0) {
     throw new Error("Runtime operator command manifest contains unclassified builtins");
+  }
+  const baselineHash = commandBaselineHash(outcome.commandManifest);
+  if (outcome.commandManifest.hash !== baselineHash) {
+    const dynamic = outcome.commandManifest.commands.filter((command) => command.source !== "builtin");
+    throw new Error(
+      `Runtime command manifest hash covers more than the builtin baseline: expected ${baselineHash}, found ${outcome.commandManifest.hash}. ` +
+        `The probe observed ${dynamic.length} environment-derived command(s)` +
+        `${dynamic.length === 0 ? "" : ` (${dynamic.map((command) => command.id).join(", ")})`}. ` +
+        "A hash that moves with a machine's profile cannot be pinned into runtime-manifest.json.",
+    );
   }
   return {
     runtimeVersion: outcome.hello.runtimeVersion,

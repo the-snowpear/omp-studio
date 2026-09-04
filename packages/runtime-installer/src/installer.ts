@@ -3,6 +3,7 @@ import { access, cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } fr
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RuntimeInstallationManifest } from "@omp-studio/studio-protocol";
 import {
+  type ChecksumManifest,
   parseChecksumManifest,
   parseRuntimeInstallationManifest,
   parseRuntimeSignatureManifest,
@@ -77,30 +78,7 @@ export class RuntimeInstaller {
   }
 
   async install(artifactDirectory: string): Promise<RuntimeInstallationManifest> {
-    const manifest = parseRuntimeInstallationManifest(
-      JSON.parse(await readFile(join(artifactDirectory, "runtime-manifest.json"), "utf8")) as unknown,
-    );
-    safeVersion(manifest.runtimeVersion);
-    const checksums = parseChecksumManifest(
-      JSON.parse(await readFile(join(artifactDirectory, "checksums.json"), "utf8")) as unknown,
-    );
-    const signature = parseRuntimeSignatureManifest(
-      JSON.parse(await readFile(join(artifactDirectory, "runtime-signature.json"), "utf8")) as unknown,
-    );
-    const manifestBytes = Buffer.from(await readFile(join(artifactDirectory, "runtime-manifest.json")));
-    const checksumsBytes = Buffer.from(await readFile(join(artifactDirectory, "checksums.json")));
-    const signedPayload = Buffer.concat([manifestBytes, Buffer.from("\0"), checksumsBytes]);
-    if (signature.payloadSha256 !== createHash("sha256").update(signedPayload).digest("hex")) {
-      throw new Error("Runtime signature does not match the artifact metadata");
-    }
-    const verifier = this.#signatureVerifier ?? createTrustedKeyVerifier(this.#trustedKeys);
-    if (!verifier.verify(signature, signedPayload)) throw new Error("Runtime signature verification failed");
-    if (checksums.files["runtime-manifest.json"] === undefined) {
-      throw new Error("checksums.json must cover runtime-manifest.json");
-    }
-    if (checksums.files[manifest.entrypoint] === undefined) {
-      throw new Error("checksums.json must cover the Runtime entrypoint");
-    }
+    const { manifest, checksums } = await this.#verifySignedMetadata(artifactDirectory);
     await this.#verifyArtifactCoverage(artifactDirectory, checksums.files);
     await this.#verifyFiles(artifactDirectory, checksums.files);
 
@@ -288,15 +266,14 @@ export class RuntimeInstaller {
   /**
    * Read-only query for the active installation: its runtime manifest and the
    * absolute entrypoint path. Never mutates `current.json` or activation
-   * state; used by the Runtime Resolver's managed lookup.
+   * state; used by the Runtime Resolver's managed lookup. Re-verifies the
+   * signed metadata on every call — see {@link RuntimeInstaller.#verifySignedMetadata}.
    */
   async currentManifest(): Promise<InstalledRuntimeManifest | undefined> {
     const record = await this.current();
     if (record === undefined) return undefined;
     const versionDirectory = join(this.#versionsDirectory, record.runtimeVersion);
-    const manifest = parseRuntimeInstallationManifest(
-      JSON.parse(await readFile(join(versionDirectory, "runtime-manifest.json"), "utf8")) as unknown,
-    );
+    const { manifest } = await this.#verifySignedMetadata(versionDirectory);
     if (manifest.runtimeVersion !== record.runtimeVersion) {
       throw new Error("Runtime manifest version does not match the active installation");
     }
@@ -305,6 +282,49 @@ export class RuntimeInstaller {
       throw new Error("Active runtime entrypoint escapes the version directory");
     }
     return { record, manifest, entrypointPath };
+  }
+
+  /**
+   * Verify the Ed25519 signature over `runtime-manifest.json ‖ NUL ‖
+   * checksums.json` and return both parsed documents.
+   *
+   * Deliberately cheap: it reads three small JSON files and never hashes the
+   * entrypoint, so it is safe to run on every resolve and not just at install
+   * time. That matters because the installed tree is an ordinary directory on
+   * disk — a manifest verified once during install proves nothing about the
+   * bytes a later launch reads, and an edited `commandManifestHash` surfaces
+   * only as an opaque "managed runtime command manifest hash drift" rejection.
+   * Full per-file checksum verification stays on the install path, where the
+   * cost of hashing the entrypoint is paid once.
+   */
+  async #verifySignedMetadata(
+    directory: string,
+  ): Promise<{ manifest: RuntimeInstallationManifest; checksums: ChecksumManifest }> {
+    const manifest = parseRuntimeInstallationManifest(
+      JSON.parse(await readFile(join(directory, "runtime-manifest.json"), "utf8")) as unknown,
+    );
+    safeVersion(manifest.runtimeVersion);
+    const checksums = parseChecksumManifest(
+      JSON.parse(await readFile(join(directory, "checksums.json"), "utf8")) as unknown,
+    );
+    const signature = parseRuntimeSignatureManifest(
+      JSON.parse(await readFile(join(directory, "runtime-signature.json"), "utf8")) as unknown,
+    );
+    const manifestBytes = Buffer.from(await readFile(join(directory, "runtime-manifest.json")));
+    const checksumsBytes = Buffer.from(await readFile(join(directory, "checksums.json")));
+    const signedPayload = Buffer.concat([manifestBytes, Buffer.from("\0"), checksumsBytes]);
+    if (signature.payloadSha256 !== createHash("sha256").update(signedPayload).digest("hex")) {
+      throw new Error("Runtime signature does not match the artifact metadata");
+    }
+    const verifier = this.#signatureVerifier ?? createTrustedKeyVerifier(this.#trustedKeys);
+    if (!verifier.verify(signature, signedPayload)) throw new Error("Runtime signature verification failed");
+    if (checksums.files["runtime-manifest.json"] === undefined) {
+      throw new Error("checksums.json must cover runtime-manifest.json");
+    }
+    if (checksums.files[manifest.entrypoint] === undefined) {
+      throw new Error("checksums.json must cover the Runtime entrypoint");
+    }
+    return { manifest, checksums };
   }
 
   async #verifyFiles(artifactDirectory: string, files: Record<string, string>): Promise<void> {

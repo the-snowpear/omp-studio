@@ -125,6 +125,22 @@ test("WP-062 currentManifest reports the active installation read-only", async (
   assert.equal((await installer.current())?.runtimeVersion, "v1");
 });
 
+// The installed tree is an ordinary directory, so verifying once at install
+// time proves nothing about what a later launch reads. Without this the only
+// symptom of an edited manifest is the Runtime Resolver reporting an opaque
+// "managed runtime command manifest hash drift".
+test("SEC-006 currentManifest rejects an installed manifest edited after install", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-studio-installer-posttamper-"));
+  const installer = runtimeInstaller(join(temporary, "installed"));
+  await installer.install(await artifact(temporary, "v1"));
+  await installer.activate("v1", { selfCheck: passingSelfCheck });
+  const manifestPath = join(temporary, "installed", "versions", "v1", "runtime-manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { commandManifestHash: string };
+  manifest.commandManifestHash = "sha256:planted-by-a-standard-user";
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await assert.rejects(() => installer.currentManifest(), /signature does not match/u);
+});
+
 test("WP-003 activation self-check runs on the installed entrypoint before current.json is switched", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "omp-studio-installer-selfcheck-"));
   const installer = runtimeInstaller(join(temporary, "installed"));

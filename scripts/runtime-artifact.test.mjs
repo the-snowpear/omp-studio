@@ -10,6 +10,7 @@ import {
   MANAGED_ENTRYPOINT,
   PATCHES_DIRECTORY,
   canonicalJson,
+  commandBaselineHash,
   derivePatchsetVersion,
   deriveRuntimeVersion,
   generateRuntimeArtifact,
@@ -306,6 +307,43 @@ test("packaging requires authenticated Runtime identity and rejects drift", asyn
     }),
     /capability hash does not match/u,
   );
+});
+
+// `probeRuntimeIdentity` re-derives the probed hash this way before packaging
+// pins it, so a Runtime that folds skills / extensions / MCP prompts / file
+// commands back into the hash fails the build instead of shipping an installer
+// that rejects its own managed Runtime on every differently-configured machine.
+test("command baseline hash covers only builtin-sourced commands", () => {
+  const builtin = [
+    { id: "builtin.help", name: "help", source: "builtin" },
+    { id: "studio.session-title.ensure", name: "session-title.ensure", source: "builtin" },
+  ];
+  const baselineOnly = { upstreamCommit: REAL_UPSTREAM_COMMIT, commands: builtin, unclassifiedBuiltins: [] };
+  const expected = `sha256:${sha256Hex(JSON.stringify(baselineOnly))}`;
+
+  assert.equal(commandBaselineHash({ ...baselineOnly, hash: "ignored" }), expected);
+  assert.equal(
+    commandBaselineHash({
+      upstreamCommit: REAL_UPSTREAM_COMMIT,
+      commands: [
+        ...builtin,
+        { id: "skill.review", name: "review", source: "skill" },
+        { id: "file-command.deploy", name: "deploy", source: "file-command" },
+      ],
+      unclassifiedBuiltins: [],
+    }),
+    expected,
+    "environment-derived commands must not move the baseline hash",
+  );
+  assert.notEqual(
+    commandBaselineHash({ ...baselineOnly, unclassifiedBuiltins: ["mystery"] }),
+    expected,
+    "unclassified builtins are part of the attested surface",
+  );
+});
+
+test("only the capability manifest is reproducible from the package definition", () => {
+  assert.throws(() => implementedManifestHash("commands"), /commandBaselineHash/u);
 });
 
 test("real repository pin and series resolve to the pinned runtime identity", async () => {

@@ -8,6 +8,7 @@
 
 import { spawn } from "node:child_process";
 import assert from "node:assert/strict";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +28,15 @@ import {
 
 const UPSTREAM = "0123456789abcdef0123456789abcdef01234567";
 
+// A managed installation is only resolvable when its metadata still verifies
+// against a trusted key, so the fixtures below sign what they write and the
+// launch context carries the matching public key.
+const RUNTIME_KEY_ID = "runtime-session-test";
+const RUNTIME_KEYS = generateKeyPairSync("ed25519");
+const TRUSTED_KEYS = {
+  [RUNTIME_KEY_ID]: RUNTIME_KEYS.publicKey.export({ type: "spki", format: "pem" }) as string,
+};
+
 function trappingSpawn(onSpawn: (cwd: string | undefined) => void): typeof spawn {
   return ((...args: unknown[]) => {
     const options = args[2] as { cwd?: string } | undefined;
@@ -41,6 +51,7 @@ function context(profileDirectory: string, runtimeInstallDirectory = join(profil
     endpoint: privateEndpoint("in-memory", "authority-test"),
     profileDirectory,
     runtimeInstallDirectory,
+    installer: { trustedKeys: TRUSTED_KEYS },
   };
 }
 
@@ -157,20 +168,40 @@ async function writeLiveRuntime(root: string, version: string): Promise<string> 
   await mkdir(versionDirectory, { recursive: true });
   const entrypoint = join(versionDirectory, "omp.exe");
   await writeFile(entrypoint, "omp");
+  const manifestText = `${JSON.stringify({
+    runtimeVersion: version,
+    upstreamVersion: "0.0.0",
+    upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
+    patchsetVersion: "0.1.0",
+    studioProtocol: { min: 1, max: 1 },
+    profile: "limited",
+    capabilityHash: "capability-fixture",
+    commandManifestHash: "command-fixture",
+    platform: "win32-x64",
+    entrypoint: "omp.exe",
+    channel: "stable",
+  })}\n`;
+  const checksumsText = `${JSON.stringify({
+    algorithm: "sha256",
+    files: {
+      "omp.exe": createHash("sha256").update("omp").digest("hex"),
+      "runtime-manifest.json": createHash("sha256").update(manifestText).digest("hex"),
+    },
+  })}\n`;
+  const signedPayload = Buffer.concat([
+    Buffer.from(manifestText),
+    Buffer.from("\0"),
+    Buffer.from(checksumsText),
+  ]);
+  await writeFile(join(versionDirectory, "runtime-manifest.json"), manifestText);
+  await writeFile(join(versionDirectory, "checksums.json"), checksumsText);
   await writeFile(
-    join(versionDirectory, "runtime-manifest.json"),
+    join(versionDirectory, "runtime-signature.json"),
     `${JSON.stringify({
-      runtimeVersion: version,
-      upstreamVersion: "0.0.0",
-      upstreamCommit: "45e12e5bb758198a920c6070e7e64cb33b21beac",
-      patchsetVersion: "0.1.0",
-      studioProtocol: { min: 1, max: 1 },
-      profile: "limited",
-      capabilityHash: "capability-fixture",
-      commandManifestHash: "command-fixture",
-      platform: "win32-x64",
-      entrypoint: "omp.exe",
-      channel: "stable",
+      algorithm: "ed25519",
+      keyId: RUNTIME_KEY_ID,
+      payloadSha256: createHash("sha256").update(signedPayload).digest("hex"),
+      signature: sign(null, signedPayload, RUNTIME_KEYS.privateKey).toString("base64url"),
     })}\n`,
   );
   await writeFile(

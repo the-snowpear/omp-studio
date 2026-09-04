@@ -186,6 +186,8 @@ export interface DesktopRuntimeSessionContext {
    * Unpackaged / tests: `%APPDATA%\omp-studio\runtimes` (or the temp profile).
    */
   readonly runtimeInstallDirectory: string;
+  /** Installer trust material, so the launch path can verify what it resolves. */
+  readonly installer?: HostBackendOptions["installer"];
   /** Persisted or newly selected workspace; absent means honest read-only. */
   readonly workspace?: { workspaceId: string; cwd: string };
 }
@@ -457,6 +459,13 @@ interface FacadeContext {
   readonly endpoint: PrivateEndpoint;
   readonly managedInstall?: DesktopManagedInstallOptions;
   readonly hasTrustedKey: boolean;
+  /**
+   * Trust material for the managed installer, forwarded to the launch path so
+   * the `HostBackend` it builds verifies the installed manifest with the same
+   * keys the composition installer uses. Without it that backend would resolve
+   * an unverifiable installation.
+   */
+  readonly installerOptions?: HostBackendOptions["installer"];
 }
 
 /** Fan-out for the current Runtime bundle's publication stream. */
@@ -561,6 +570,7 @@ async function startInstalledRuntime(context: FacadeContext): Promise<DesktopRun
     endpoint: context.endpoint,
     profileDirectory: context.profileDirectory,
     runtimeInstallDirectory: context.runtimeInstallDirectory,
+    ...(context.installerOptions === undefined ? {} : { installer: context.installerOptions }),
     ...(workspace === undefined ? {} : { workspace }),
   });
   rememberUnavailable(
@@ -1307,6 +1317,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
         runtimeInstallDirectory,
         endpoint: endpointLease.endpoint,
         hasTrustedKey: installerOptions?.trustedKeys !== undefined && Object.keys(installerOptions.trustedKeys).length > 0,
+        ...(installerOptions === undefined ? {} : { installerOptions }),
         ...(options.managedInstall === undefined ? {} : { managedInstall: options.managedInstall }),
       };
       return new DesktopHostCompositionImpl({
