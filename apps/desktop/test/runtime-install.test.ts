@@ -17,6 +17,7 @@ import {
   collectManagedRuntimeArtifactRoots,
   createDesktopRuntimeInstallService,
   createManagedArtifactLocator,
+  createPendingArtifactRegistry,
   loadInstallerTrustedKeys,
   locateManagedRuntimeArtifact,
   packagedRuntimeInstallLayout,
@@ -165,6 +166,108 @@ test("loadInstallerTrustedKeys reads a local keys directory", async () => {
     assert.deepEqual([...Object.keys(loaded.trustedKeys)], ["omp-studio-local"]);
     assert.equal(loaded.trustedKeys["omp-studio-local"]?.equals(Buffer.from(trustedPublicKey)), true);
   } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("loadInstallerTrustedKeys loads multi-key trusted-keys.json", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-keys-multi-"));
+  try {
+    const { publicKey: pk2 } = generateKeyPairSync("ed25519");
+    const pem2 = pk2.export({ type: "spki", format: "pem" });
+    await writeFile(join(directory, "key-1.pem"), trustedPublicKey);
+    await writeFile(join(directory, "key-2.pem"), pem2);
+    await writeFile(
+      join(directory, "trusted-keys.json"),
+      JSON.stringify({
+        schema: 1,
+        activeKeyId: "key-1",
+        keys: {
+          "key-1": "key-1.pem",
+          "key-2": "key-2.pem",
+        },
+      }),
+    );
+
+    const loaded = await loadInstallerTrustedKeys(directory);
+    assert.ok(loaded);
+    assert.deepEqual(Object.keys(loaded.trustedKeys).sort(), ["key-1", "key-2"]);
+    assert.equal(loaded.trustedKeys["key-1"]?.equals(Buffer.from(trustedPublicKey)), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("loadInstallerTrustedKeys skips bad entries in trusted-keys.json without failing the table", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-keys-bad-entry-"));
+  try {
+    await writeFile(join(directory, "key-good.pem"), trustedPublicKey);
+    await writeFile(
+      join(directory, "trusted-keys.json"),
+      JSON.stringify({
+        schema: 1,
+        activeKeyId: "key-good",
+        keys: {
+          "key-good": "key-good.pem",
+          "key-missing": "non-existent.pem",
+        },
+      }),
+    );
+
+    const loaded = await loadInstallerTrustedKeys(directory);
+    assert.ok(loaded);
+    assert.deepEqual(Object.keys(loaded.trustedKeys), ["key-good"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("loadInstallerTrustedKeys rejects escaping filenames in trusted-keys.json", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-keys-escape-"));
+  try {
+    await writeFile(join(directory, "key-good.pem"), trustedPublicKey);
+    await writeFile(
+      join(directory, "trusted-keys.json"),
+      JSON.stringify({
+        schema: 1,
+        activeKeyId: "key-good",
+        keys: {
+          "key-good": "key-good.pem",
+          "key-escaped": "../escaped.pem",
+        },
+      }),
+    );
+
+    const loaded = await loadInstallerTrustedKeys(directory);
+    assert.ok(loaded);
+    assert.deepEqual(Object.keys(loaded.trustedKeys), ["key-good"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("loadInstallerTrustedKeys honors environment override over directory files", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "omp-keys-env-"));
+  const envKeyFile = join(directory, "env-key.pem");
+  await writeFile(envKeyFile, trustedPublicKey);
+  await writeFile(join(directory, "key-id.txt"), "dir-key\n");
+  await writeFile(join(directory, "trusted-public.pem"), "dir-content");
+
+  const originalPath = process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY;
+  const originalId = process.env.OMP_RUNTIME_SIGNING_KEY_ID;
+  try {
+    process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY = envKeyFile;
+    process.env.OMP_RUNTIME_SIGNING_KEY_ID = "env-id";
+
+    const loaded = await loadInstallerTrustedKeys(directory);
+    assert.ok(loaded);
+    assert.deepEqual(Object.keys(loaded.trustedKeys), ["env-id"]);
+    assert.equal(loaded.trustedKeys["env-id"]?.equals(Buffer.from(trustedPublicKey)), true);
+  } finally {
+    if (originalPath === undefined) delete process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY;
+    else process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY = originalPath;
+    if (originalId === undefined) delete process.env.OMP_RUNTIME_SIGNING_KEY_ID;
+    else process.env.OMP_RUNTIME_SIGNING_KEY_ID = originalId;
     await rm(directory, { recursive: true, force: true });
   }
 });
@@ -578,6 +681,97 @@ test("seedManagedRuntimeFromArtifact activates a versions tree already in the in
     const current = await installer.currentManifest();
     assert.equal(current?.manifest.runtimeVersion, "6.0.0-studio.1");
     assert.equal(current?.entrypointPath, join(installerRoot, "versions", "6.0.0-studio.1", "omp.exe"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createManagedArtifactLocator prefers matching pendingArtifact over artifactRoot", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-locator-pending-"));
+  try {
+    const diskArtifact = await writeArtifact(join(root, "roots"), "1.0.0");
+    const pendingDir = await writeArtifact(join(root, "pending"), "2.0.0");
+    const pending = createPendingArtifactRegistry();
+    pending.set(pendingDir);
+
+    const locator = createManagedArtifactLocator({
+      artifactRoot: join(root, "roots"),
+      pendingArtifact: pending,
+    });
+
+    const located = await locator({ platform: "win32-x64", channel: "stable" });
+    assert.equal(located, pendingDir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createManagedArtifactLocator falls back to artifactRoot when pendingArtifact platform/channel mismatches", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-locator-fallback-"));
+  try {
+    const diskArtifact = await writeArtifact(join(root, "roots"), "1.0.0", "stable");
+    const pendingDir = await writeArtifact(join(root, "pending"), "2.0.0", "canary");
+    const pending = createPendingArtifactRegistry();
+    pending.set(pendingDir);
+
+    const locator = createManagedArtifactLocator({
+      artifactRoot: join(root, "roots"),
+      pendingArtifact: pending,
+    });
+
+    const located = await locator({ platform: "win32-x64", channel: "stable" });
+    assert.equal(located, diskArtifact);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("createManagedArtifactLocator ignores pendingArtifact when explicit locateArtifact is injected", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-locator-override-"));
+  try {
+    const customArtifact = await writeArtifact(join(root, "custom"), "9.9.9");
+    const pendingDir = await writeArtifact(join(root, "pending"), "2.0.0");
+    const pending = createPendingArtifactRegistry();
+    pending.set(pendingDir);
+
+    const locator = createManagedArtifactLocator({
+      locateArtifact: async () => customArtifact,
+      pendingArtifact: pending,
+    });
+
+    const located = await locator({ platform: "win32-x64", channel: "stable" });
+    assert.equal(located, customArtifact);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Runtime install clears only the pending artifact consumed by that invocation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-install-pending-"));
+  try {
+    const artifact = await writeArtifact(root, "3.0.0");
+    const pending = createPendingArtifactRegistry();
+    pending.set(artifact);
+    let replacePending = false;
+    const service = createDesktopRuntimeInstallService({
+      backend: {
+        install: async () => ({ runtimeVersion: "3.0.0", channel: "stable" } as RuntimeInstallationManifest),
+        activate: async () => {
+          if (replacePending) pending.set(join(root, "next-artifact"));
+          return { runtimeVersion: "3.0.0", activatedAt: new Date().toISOString() };
+        },
+      },
+      platform: "win32-x64",
+      hasTrustedKey: true,
+      pendingArtifact: pending,
+    });
+    assert.equal((await service()).status, "installed");
+    assert.equal(pending.peek(), undefined);
+
+    pending.set(artifact);
+    replacePending = true;
+    assert.equal((await service()).status, "installed");
+    assert.equal(pending.peek(), join(root, "next-artifact"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -592,3 +592,25 @@ export const PREVIEW_APP_UPDATE: PreviewAppUpdate = {
   assetSize: 89452000,
 };
 
+
+export const PREVIEW_UPDATES = {
+  awaitingApply: {
+    jobId: "prev-job-1",
+    kind: "runtime" as const,
+    phase: "awaiting-apply" as const,
+    step: 2,
+    steps: 3,
+    message: "工件已验签，准备安装",
+  },
+  downloading: {
+    jobId: "prev-job-2",
+    kind: "runtime" as const,
+    phase: "downloading" as const,
+    step: 1,
+    steps: 3,
+    receivedBytes: 71_303_168,
+    totalBytes: 165_821_320,
+    bytesPerSecond: 4_194_304,
+    message: "正在下载 Runtime (43%)...",
+  },
+} as const;

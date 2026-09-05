@@ -11,9 +11,11 @@
  * settings-schema 行仍以禁用枚举呈现，预览模式下这些行改绑演示状态。
  */
 
+import { useCallback, useEffect, useState } from "react";
 import type { AppSettings } from "./appSettings";
 import { DEFAULT_APP_SETTINGS } from "./appSettings";
 import { SettingRow, SettingSection, StaticSelect, Switch, type SettingSource } from "./SettingRow";
+import { useUpdates, type UpdatePrefs } from "./updates";
 import { useI18n } from "../i18n";
 import type {
   RuntimeSettingsReadModel,
@@ -882,8 +884,60 @@ export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
 /* 7. 高级                                                              */
 /* ------------------------------------------------------------------ */
 
+const DEFAULT_UPDATE_PREFS: UpdatePrefs = {
+  mirrorPrefix: "",
+  autoCheck: true,
+  skippedAppVersion: "",
+  runtimeChannel: "stable",
+  preferHotUpdate: true,
+  lastIndexSequence: 0,
+};
+
 export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined; runtime?: RuntimeSettingsCtl | undefined }) {
   const { t } = useI18n();
+  const preview = runtime?.preview === true || demo !== undefined;
+  const updates = useUpdates();
+  const [previewPrefs, setPreviewPrefs] = useState<UpdatePrefs>(DEFAULT_UPDATE_PREFS);
+  const prefs = preview ? previewPrefs : updates.state.prefs;
+  const available = preview || prefs !== null;
+  const disabled = !available;
+  const [mirrorInput, setMirrorInput] = useState(prefs?.mirrorPrefix ?? "");
+  const [mirrorError, setMirrorError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!preview) {
+      void updates.fetchPrefs();
+    }
+  }, [preview, updates.fetchPrefs]);
+
+  useEffect(() => {
+    if (prefs) {
+      setMirrorInput(prefs.mirrorPrefix);
+    }
+  }, [prefs?.mirrorPrefix]);
+
+  const handleMirrorBlur = useCallback(async () => {
+    if (disabled) return;
+    const trimmed = mirrorInput.trim();
+    if (trimmed.length > 0) {
+      try {
+        const u = new URL(trimmed.includes("{url}") ? trimmed.replace("{url}", "https://github.com") : trimmed);
+        if (u.protocol !== "https:") {
+          setMirrorError(t("updates.mirrorInvalid"));
+          return;
+        }
+      } catch {
+        setMirrorError(t("updates.mirrorInvalid"));
+        return;
+      }
+    }
+    setMirrorError(null);
+    if (preview) {
+      setPreviewPrefs((prev) => ({ ...prev, mirrorPrefix: trimmed }));
+    } else {
+      await updates.savePrefs({ mirrorPrefix: trimmed });
+    }
+  }, [disabled, mirrorInput, preview, updates, t]);
 
   const configLayers: ReadonlyArray<readonly [string, string]> = [
     ["user", t("settings.advanced.layerUser")],
@@ -896,6 +950,114 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
   return (
     <>
       <TabHeader title={t("settings.advanced.title")} desc={t("settings.advanced.desc")} {...(runtime === undefined ? {} : { runtime })} />
+      <SettingSection title={t("updates.section")}>
+        <SettingRow
+          label={t("updates.mirrorLabel")}
+          desc={t("updates.mirrorHint")}
+          source={!available ? "unavailable" : (prefs?.mirrorPrefix ? "user" : "default")}
+          {...(!available ? { reason: t("common.unavailable") } : {})}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", maxWidth: 360 }}>
+            <input
+              type="text"
+              className="input"
+              value={mirrorInput}
+              placeholder="https://mirror.example.com/"
+              disabled={disabled}
+              onChange={(e) => {
+                setMirrorInput(e.target.value);
+                setMirrorError(null);
+              }}
+              onBlur={() => void handleMirrorBlur()}
+            />
+            {mirrorError ? (
+              <span style={{ color: "var(--red)", fontSize: "0.8rem" }}>{mirrorError}</span>
+            ) : null}
+          </div>
+        </SettingRow>
+        <SettingRow
+          label={t("updates.autoCheck")}
+          source={!available ? "unavailable" : (prefs?.autoCheck === false ? "user" : "default")}
+          {...(!available ? { reason: t("common.unavailable") } : {})}
+        >
+          <Switch
+            label={t("updates.autoCheck")}
+            checked={prefs?.autoCheck ?? true}
+            disabled={disabled}
+            onChange={(next) => {
+              if (preview) {
+                setPreviewPrefs((prev) => ({ ...prev, autoCheck: next }));
+              } else {
+                void updates.savePrefs({ autoCheck: next });
+              }
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label={t("updates.channel")}
+          source={!available ? "unavailable" : (prefs?.runtimeChannel === "canary" ? "user" : "default")}
+          {...(!available ? { reason: t("common.unavailable") } : {})}
+        >
+          <select
+            className="select"
+            value={prefs?.runtimeChannel ?? "stable"}
+            disabled={disabled}
+            onChange={(e) => {
+              const channel = e.target.value as "stable" | "canary";
+              if (preview) {
+                setPreviewPrefs((prev) => ({ ...prev, runtimeChannel: channel }));
+              } else {
+                void updates.savePrefs({ runtimeChannel: channel });
+              }
+            }}
+          >
+            <option value="stable">Stable</option>
+            <option value="canary">Canary</option>
+          </select>
+        </SettingRow>
+        <SettingRow
+          label={t("updates.preferHot")}
+          desc={t("updates.preferHotHint")}
+          source={!available ? "unavailable" : (prefs?.preferHotUpdate === false ? "user" : "default")}
+          {...(!available ? { reason: t("common.unavailable") } : {})}
+        >
+          <Switch
+            label={t("updates.preferHot")}
+            checked={prefs?.preferHotUpdate ?? true}
+            disabled={disabled}
+            onChange={(next) => {
+              if (preview) {
+                setPreviewPrefs((prev) => ({ ...prev, preferHotUpdate: next }));
+              } else {
+                void updates.savePrefs({ preferHotUpdate: next });
+              }
+            }}
+          />
+        </SettingRow>
+        {prefs?.skippedAppVersion ? (
+          <SettingRow
+            label={t("updates.skipVersion")}
+            desc={`${t("updates.skipped")}: ${prefs.skippedAppVersion}`}
+            source={!available ? "unavailable" : "user"}
+            {...(!available ? { reason: t("common.unavailable") } : {})}
+          >
+            <button
+              type="button"
+              className="btn small outline"
+              disabled={disabled}
+              onClick={() => {
+                if (preview) {
+                  setPreviewPrefs((prev) => ({ ...prev, skippedAppVersion: "" }));
+                } else {
+                  void updates.savePrefs({ skippedAppVersion: "" });
+                }
+              }}
+            >
+              {t("common.clear")}
+            </button>
+          </SettingRow>
+        ) : null}
+      </SettingSection>
       <SettingSection title={t("settings.runtime.section")}>
         <RuntimeScalarRow
           runtime={runtime}

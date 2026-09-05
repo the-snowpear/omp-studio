@@ -69,6 +69,8 @@ extraFiles:
     filter:
       - key-id.txt
       - trusted-public.pem
+      - trusted-keys.json
+      - "*.pem"
       - "!signing-private.pem"
       - "!**/*.pem.bak"
 

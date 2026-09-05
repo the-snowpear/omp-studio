@@ -135,29 +135,97 @@ declare global {
           | { readonly ok: false; readonly cancelled: true }
           | { readonly ok: false; readonly message: string }
         >;
-        /** 检查 GitHub Releases 应用全量安装包更新。 */
-        checkAppUpdate(): Promise<{
-          readonly available: boolean;
-          readonly currentVersion: string;
-          readonly version?: string;
-          readonly name?: string;
-          readonly releaseNotes?: string;
-          readonly publishedAt?: string;
-          readonly htmlUrl?: string;
-          readonly downloadUrl?: string;
-          readonly assetName?: string;
-          readonly assetSize?: number;
+        /** 检查更新索引（应用热更新/全量更新与 Runtime 更新）。 */
+        checkUpdates(): Promise<{
+          readonly checkedAt: string;
+          readonly app: {
+            readonly currentVersion?: string;
+            readonly plan: "none" | "hot" | "full";
+            readonly version?: string;
+            readonly reason?: string;
+            readonly sizeBytes?: number;
+            readonly releaseNotesUrl?: string;
+          };
+          readonly runtime: {
+            readonly plan: "none" | "available" | "blocked";
+            readonly runtimeVersion?: string;
+            readonly reason?: string;
+            readonly sizeBytes?: number;
+          };
+          readonly error?: string;
         } | null>;
-        /** 下载应用全量安装包。 */
-        downloadAppUpdate(url: string): Promise<
-          | { readonly ok: true; readonly filePath: string }
-          | { readonly ok: false; readonly message: string }
-        >;
-        /** 调起下载好的安装程序并退出当前应用。 */
-        quitAndInstallUpdate(filePath: string): Promise<
-          | { readonly ok: true }
-          | { readonly ok: false; readonly message: string }
-        >;
+        /** 从本地文件/目录导入已签名的更新工件。 */
+        importLocalUpdate(input: {
+          readonly kind: "app" | "runtime";
+          readonly source: "file" | "directory";
+        }): Promise<{
+          readonly ok: boolean;
+          readonly jobId?: string;
+          readonly cancelled?: boolean;
+          readonly runtimeVersion?: string;
+          readonly message?: string;
+        }>;
+        /** 取消正在进行中的更新下载或任务。 */
+        cancelUpdate(jobId: string): Promise<void>;
+        /** 读取更新偏好设置。 */
+        getUpdatePrefs(): Promise<{
+          readonly mirrorPrefix: string;
+          readonly autoCheck: boolean;
+          readonly skippedAppVersion: string;
+          readonly runtimeChannel: "stable" | "canary";
+          readonly preferHotUpdate: boolean;
+          readonly lastIndexSequence: number;
+        } | null>;
+        /** 写入更新偏好设置。 */
+        setUpdatePrefs(patch: {
+          readonly mirrorPrefix?: string;
+          readonly autoCheck?: boolean;
+          readonly skippedAppVersion?: string;
+          readonly runtimeChannel?: "stable" | "canary";
+          readonly preferHotUpdate?: boolean;
+        }): Promise<{
+          readonly mirrorPrefix: string;
+          readonly autoCheck: boolean;
+          readonly skippedAppVersion: string;
+          readonly runtimeChannel: "stable" | "canary";
+          readonly preferHotUpdate: boolean;
+          readonly lastIndexSequence: number;
+        } | null>;
+        /** 启动在线应用热更新下载。 */
+        startApp(): Promise<{ readonly ok: boolean; readonly jobId?: string; readonly message?: string }>;
+        /** 启动在线 Runtime 下载与验签。 */
+        startRuntime(): Promise<{ readonly ok: boolean; readonly jobId?: string; readonly message?: string }>;
+        /** 应用已就绪的热更新。 */
+        applyUpdate(): Promise<{ readonly ok: boolean; readonly deferred?: boolean; readonly message?: string }>;
+        getAppVersion(): Promise<{ readonly version: string; readonly bundledVersion: string; readonly payloadVersion?: string }>;
+        rollbackRuntimeUpdate(): Promise<{ readonly ok: boolean; readonly deferred?: boolean; readonly message?: string }>;
+        pruneRuntimeUpdates(): Promise<{ readonly ok: boolean; readonly deferred?: boolean; readonly message?: string }>;
+        /** 回滚当前应用热更新负载。 */
+        rollbackUpdate(): Promise<{ readonly ok: boolean; readonly deferred?: boolean; readonly message?: string }>;
+        /** 订阅更新进度事件。 */
+        subscribeUpdateProgress(
+          listener: (event: {
+            readonly jobId: string;
+            readonly kind: "app" | "runtime";
+            readonly phase:
+              | "resolving"
+              | "downloading"
+              | "verifying"
+              | "extracting"
+              | "installing"
+              | "activating"
+              | "awaiting-apply"
+              | "done"
+              | "failed"
+              | "cancelled";
+            readonly step: number;
+            readonly steps: number;
+            readonly receivedBytes?: number;
+            readonly totalBytes?: number;
+            readonly bytesPerSecond?: number;
+            readonly message?: string;
+          }) => void,
+        ): () => void;
       }
     | undefined;
 

@@ -56,6 +56,9 @@ export interface DesktopHostComposition {
    * gate for the tray quit confirmation; never surfaced to the renderer.
    */
   isBusy(): boolean;
+  /** Main-only maintenance; absent when managed installation is unavailable. */
+  rollbackRuntime?(): Promise<void>;
+  pruneRuntimes?(): Promise<void>;
 }
 
 /** Injectable factory that brings the Host composition up (or fails closed). */
@@ -143,6 +146,10 @@ export interface DesktopApplicationDeps {
   readonly createWindow: DesktopWindowFactory;
   /** true when this instance holds the single-instance lock. */
   readonly requestSingleInstanceLock: () => boolean;
+  /** Retry configuration when restarting (e.g. on --omp-restarted) */
+  readonly singleInstanceRetry?: { readonly attempts: number; readonly delayMs: number } | undefined;
+  /** Optional argv override for testing single-instance restart flags. */
+  readonly argv?: readonly string[] | undefined;
   /** Fired when a second instance tried to start; focus the existing window. */
   readonly onSecondInstance: (listener: () => void) => void;
   /** Fired before quit; `preventDefault` defers the quit. */

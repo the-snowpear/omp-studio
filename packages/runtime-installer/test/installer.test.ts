@@ -72,6 +72,32 @@ test("WP-003 installs two versions, activates, and rolls back atomically", async
   assert.equal(JSON.parse(await readFile(join(temporary, "installed", "current.json"), "utf8")).runtimeVersion, "v1");
 });
 
+test("activation verifies installed bytes before running any executable", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-activate-tampered-"));
+  const root = join(temporary, "installed");
+  const installer = runtimeInstaller(root);
+  await installer.install(await artifact(temporary, "v1"));
+  await writeFile(join(root, "versions", "v1", "omp.exe"), "tampered-after-install");
+  let executed = false;
+  await assert.rejects(() => installer.activate("v1", { selfCheck: { run: async () => { executed = true; } } }), /Checksum mismatch/u);
+  assert.equal(executed, false);
+  assert.equal(await installer.current(), undefined);
+});
+
+test("prune preserves broken current, previous and externally referenced versions", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-prune-broken-"));
+  const root = join(temporary, "installed");
+  const installer = runtimeInstaller(root, { isRuntimeReferenced: (version) => version === "bound" });
+  assert.deepEqual(await installer.prune(), []);
+  for (const version of ["current", "previous", "bound", "orphan"]) {
+    await mkdir(join(root, "versions", version), { recursive: true });
+    await writeFile(join(root, "versions", version, "runtime-manifest.json"), "corrupt");
+  }
+  await writeFile(join(root, "current.json"), JSON.stringify({ runtimeVersion: "current", previousRuntimeVersion: "previous", activatedAt: "now" }));
+  assert.deepEqual(await installer.prune(), ["orphan"]);
+  assert.deepEqual((await readdir(join(root, "versions"))).sort(), ["bound", "current", "previous"]);
+});
+
 test("WP-003 rejects a checksum mismatch", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "omp-studio-installer-bad-"));
   const source = await artifact(temporary, "bad");

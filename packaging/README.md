@@ -165,7 +165,7 @@ NSIS 落地在 `packaging/nsis/custom.nsh`：
 
 安装目录里的 `runtime\versions\<ver>\omp.exe` 就是**正在跑的 Runtime**（electron-builder `extraFiles` 直接铺成 `RuntimeInstaller` 布局）。首次启动核验签名并写 `runtime\current.json`；诊断页的安装/更新也写这个目录。公钥在 `runtime-keys\`（不含私钥）。卸载随程序文件删掉这份 `omp.exe`；AppData 里的会话和日志仍保留。
 
-NSIS `customInstall` 会给 `$INSTDIR\runtime` 开 Users 修改权，这样完成页拉起的未提权进程也能写 `current.json`、诊断页也能更新版本。
+NSIS 保持 Program Files 的默认安全 ACL，`custom.nsh` 故意不向标准 Users 开放 `$INSTDIR\runtime` 的修改权限以防提权漏洞；安装包通过管理员权限部署，更新操作在提权桌面主进程中安全执行并完成验签自检。
 
 打包前：
 

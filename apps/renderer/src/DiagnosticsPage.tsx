@@ -28,9 +28,10 @@ import { ActionProgressBar } from "./ActionProgressBar";
 import { useI18n } from "./i18n";
 import { ensureRuntimeConnection } from "./runtimeEnsure";
 import { isUpdateCheckTimeout, queryWithTimeout } from "./updateCheck";
+import { checkForUpdates, downloadUpdateToReady, fetchUpdatePrefs, useUpdates } from "./settings/updates";
 
 type DiagAction = {
-  readonly kind: "reconnect" | "restart" | "install" | "update" | "reinstall" | "recheck" | "check-update";
+  readonly kind: "reconnect" | "restart" | "install" | "update" | "reinstall" | "recheck" | "check-update" | "import" | "rollback" | "prune";
   readonly label: string;
   readonly step: number;
   readonly steps: number;
@@ -235,6 +236,7 @@ export function DiagnosticsPage({
   environment?: EnvironmentReadModel;
 }) {
   const { preview } = usePreviewMode();
+  const updates = useUpdates();
   const { t } = useI18n();
   const mock = PREVIEW_DIAGNOSTICS;
   const [scenario, setScenario] = useState<PreviewDiagScenario>("update");
@@ -338,10 +340,27 @@ export function DiagnosticsPage({
     }
     if (notify) beginAction({ kind: "check-update", label: t("diagnostics.comparingLocalArtifact"), step: 1, steps: 1 });
     try {
+      const chrome = globalThis.ompStudioChrome;
+      let remoteCheckResult: Awaited<ReturnType<NonNullable<typeof chrome>["checkUpdates"]>> = null;
+      if (chrome && typeof chrome.checkUpdates === "function") {
+        try {
+          if (notify || (await fetchUpdatePrefs())?.autoCheck) remoteCheckResult = await checkForUpdates();
+        } catch {
+          // ignore
+        }
+      }
+
       const next = await queryWithTimeout(() => client.query("environment.get", {}));
       setEnv(next);
       if (!notify) return;
-      if (next.installer.status === "update-available") {
+      if (remoteCheckResult?.error) {
+        show(`${t("diagnostics.updateCheckFailed")}: ${remoteCheckResult.error}`, "alert-c");
+      } else if (remoteCheckResult?.runtime.plan === "available") {
+        show(
+          t("diagnostics.foundLocalUpdateWith", { version: remoteCheckResult.runtime.runtimeVersion ?? "" }),
+          "update",
+        );
+      } else if (next.installer.status === "update-available") {
         show(
           next.installer.availableVersion
             ? t("diagnostics.foundLocalUpdateWith", { version: next.installer.availableVersion })
@@ -383,12 +402,124 @@ export function DiagnosticsPage({
     void checkUpdateRef.current(false);
   }, []);
 
-  const installRuntime = useCallback(async (kind: "install" | "update" | "reinstall") => {
+  const installRuntime = useCallback(async (kind: "install" | "update" | "reinstall" | "import") => {
     setConfirmReinstall(false);
     if (preview) {
+      if (kind === "import") {
+        show(t("updates.importDemo"), "check");
+        return;
+      }
       const labels = { install: t("diagnostics.installedRuntimeDemo"), update: t("diagnostics.updatedRuntimeDemo"), reinstall: t("diagnostics.reinstalledRuntimeDemo") };
       show(labels[kind], "check");
       return;
+    }
+    if (kind === "import") {
+      const chrome = globalThis.ompStudioChrome;
+      if (!chrome || typeof chrome.importLocalUpdate !== "function") {
+        show(t("diagnostics.cannotRead"), "alert-c");
+        return;
+      }
+      beginAction({
+        kind,
+        label: t("updates.verifying"),
+        step: 1,
+        steps: 3,
+      });
+      try {
+        const importRes = await chrome.importLocalUpdate({ kind: "runtime", source: "directory" });
+        if (importRes.cancelled) {
+          show(t("updates.importCancelled"), "info");
+          return;
+        }
+        if (!importRes.ok) {
+          show(importRes.message ?? t("updates.signatureFailed"), "alert-c");
+          return;
+        }
+        beginAction({
+          kind,
+          label: t("updates.installing"),
+          step: 2,
+          steps: 3,
+        });
+        const handle = await client.command("runtime.install", {});
+        const receipt = await waitForCommandReceipt(client, handle.requestId);
+        beginAction({
+          kind,
+          label: t("updates.activating"),
+          step: 3,
+          steps: 3,
+        });
+        const [d, e] = await Promise.allSettled([
+          client.query("diagnostics.get", {}),
+          client.query("environment.get", {}),
+        ]);
+        if (d.status === "fulfilled") setDiag(d.value);
+        if (e.status === "fulfilled") setEnv(e.value);
+        if (receipt.status === "completed") {
+          show(t("diagnostics.runtimeInstalled"), "check");
+        } else {
+          const message = receipt.status === "failed" ? receipt.error.message : t("diagnostics.installIncomplete");
+          show(message, "alert-c");
+        }
+      } catch (error) {
+        show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c");
+      } finally {
+        setBusy(null);
+      }
+      return;
+    }
+    if (kind === "update" && updates.state.check?.runtime.plan === "available") {
+      const chrome = globalThis.ompStudioChrome;
+      if (chrome && typeof chrome.startRuntime === "function") {
+        beginAction({
+          kind,
+          label: t("updates.downloading"),
+          step: 1,
+          steps: 3,
+        });
+        try {
+          await downloadUpdateToReady("runtime", (evt) => {
+            beginAction({
+              kind,
+              label: evt.message ?? t("diagnostics.updatingRuntime"),
+              step: evt.step,
+              steps: evt.steps,
+            });
+          });
+
+          beginAction({
+            kind,
+            label: t("updates.installing"),
+            step: 2,
+            steps: 3,
+          });
+          const handle = await client.command("runtime.install", {});
+          const receipt = await waitForCommandReceipt(client, handle.requestId);
+          beginAction({
+            kind,
+            label: t("updates.activating"),
+            step: 3,
+            steps: 3,
+          });
+          const [d, e] = await Promise.allSettled([
+            client.query("diagnostics.get", {}),
+            client.query("environment.get", {}),
+          ]);
+          if (d.status === "fulfilled") setDiag(d.value);
+          if (e.status === "fulfilled") setEnv(e.value);
+          if (receipt.status === "completed") {
+            show(t("diagnostics.runtimeUpdated"), "check");
+          } else {
+            const message = receipt.status === "failed" ? receipt.error.message : t("diagnostics.installIncomplete");
+            show(message, "alert-c");
+          }
+        } catch (error) {
+          show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c");
+        } finally {
+          setBusy(null);
+        }
+        return;
+      }
     }
     beginAction({
       kind,
@@ -422,7 +553,7 @@ export function DiagnosticsPage({
     } finally {
       setBusy(null);
     }
-  }, [beginAction, client, preview, show]);
+  }, [beginAction, client, preview, show, t, updates.state.check?.runtime.plan]);
 
   const restartRuntime = useCallback(async () => {
     setConfirmRestart(false);
@@ -445,6 +576,29 @@ export function DiagnosticsPage({
       setBusy(null);
     }
   }, [beginAction, client, preview, show, refreshQueries]);
+
+  const maintainRuntime = useCallback(async (kind: "rollback" | "prune") => {
+    if (busy !== null) return;
+    const label = t(kind === "rollback" ? "updates.rollbackRuntime" : "updates.pruneOld");
+    if (preview) {
+      show(`${label} · ${t("appUpdate.demoUpdate")}`, "check");
+      return;
+    }
+    const chrome = globalThis.ompStudioChrome;
+    const action = kind === "rollback" ? chrome?.rollbackRuntimeUpdate : chrome?.pruneRuntimeUpdates;
+    if (!action) { show(t("common.unavailable"), "alert-c"); return; }
+    beginAction({ kind, label, step: 1, steps: 1 });
+    try {
+      const result = await action();
+      if (!result.ok || result.deferred) show(result.message ?? t("diagnostics.installFailed"), "alert-c");
+      else {
+        await refreshQueries();
+        show(t(kind === "rollback" ? "updates.runtimeRolledBack" : "updates.pruned"), "check");
+      }
+    } catch (error) {
+      show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c");
+    } finally { setBusy(null); }
+  }, [busy, preview, t, show, beginAction, refreshQueries]);
 
   const openLogDir = useCallback(async () => {
     if (preview) {
@@ -664,6 +818,20 @@ export function DiagnosticsPage({
         <h3>{t("diagnostics.maintenanceTitle")}</h3>
         <div className="set-section">
           <div className="set-row">
+            <div className="sr-label">{t("updates.rollbackRuntime")}</div>
+            <button type="button" className="btn outline" disabled={busy !== null || (!preview && !globalThis.ompStudioChrome?.rollbackRuntimeUpdate)} onClick={() => void maintainRuntime("rollback")}>{t("updates.rollbackRuntime")}</button>
+          </div>
+          <div className="set-row">
+            <div className="sr-label">{t("updates.pruneOld")}</div>
+            <button type="button" className="btn outline" disabled={busy !== null || (!preview && !globalThis.ompStudioChrome?.pruneRuntimeUpdates)} onClick={() => void maintainRuntime("prune")}>{t("updates.pruneOld")}</button>
+          </div>
+          {!preview && updates.state.check?.runtime.plan === "available" ? (
+            <div className="set-row">
+              <div className="sr-label">{t("diagnostics.updateRuntime")} · {updates.state.check.runtime.runtimeVersion}</div>
+              <button type="button" className="btn outline" disabled={busy !== null} onClick={() => void installRuntime("update")}>{t("common.update")}</button>
+            </div>
+          ) : null}
+          <div className="set-row">
             <div>
               <div className="sr-label">{t("diagnostics.checkUpdateLabel")}</div>
               <div className="sr-desc">{t("diagnostics.checkUpdateDesc")}</div>
@@ -682,6 +850,17 @@ export function DiagnosticsPage({
             <div className="sr-control">
               <button type="button" className="btn outline" disabled={busy !== null || !canReinstall} onClick={() => setConfirmReinstall(true)}>
                 <Icon name="refresh" extra="sm" />{t("common.reinstall")}
+              </button>
+            </div>
+          </div>
+          <div className="set-row">
+            <div>
+              <div className="sr-label">{t("updates.importLocalDir")}</div>
+              <div className="sr-desc">{t("updates.importLocalHint")}</div>
+            </div>
+            <div className="sr-control">
+              <button type="button" className="btn outline" disabled={busy !== null} onClick={() => void installRuntime("import")}>
+                <Icon name="folder" extra="sm" />{t("updates.importLocalFile")}
               </button>
             </div>
           </div>

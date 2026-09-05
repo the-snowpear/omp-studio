@@ -801,6 +801,9 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
             backend: context.backend,
             platform: `${context.platform}-${context.arch}`,
             hasTrustedKey: context.hasTrustedKey,
+            ...(context.managedInstall.pendingArtifact === undefined
+              ? {}
+              : { pendingArtifact: context.managedInstall.pendingArtifact }),
             locateArtifact: createManagedArtifactLocator(context.managedInstall),
             ...(context.managedInstall.activateOptions === undefined
               ? {}
@@ -996,6 +999,21 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     }
     const snapshot = this.#sessionRef.current?.controller.publication()?.snapshot;
     return snapshot?.isStreaming === true || snapshot?.isCompacting === true;
+  }
+
+  async rollbackRuntime(): Promise<void> {
+    if (this.#closed || this.isBusy()) throw new Error("Finish active sessions before rolling back Runtime");
+    const context = this.#facadeContext;
+    const current = await context.backend.installer.current();
+    if (current?.previousRuntimeVersion === undefined) throw new Error("No previous Runtime is available for rollback");
+    // Activation re-verifies the signed tree and runs the smoke test before
+    // changing the pointer. Main then restarts the app to release old workers.
+    await context.backend.activate(current.previousRuntimeVersion, context.managedInstall?.activateOptions);
+  }
+
+  async pruneRuntimes(): Promise<void> {
+    if (this.#closed || this.isBusy()) throw new Error("Finish active sessions before cleaning Runtime versions");
+    await this.#facadeContext.backend.installer.prune({ retainStable: 2 });
   }
 
   /**

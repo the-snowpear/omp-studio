@@ -22,6 +22,7 @@ import {
   type DesktopIpcBridge,
 } from "../src/ipc-validation.js";
 import type { OmpStudioDesktopApi } from "@omp-studio/transport-desktop";
+import { createOmpStudioChromeApi } from "../src/chrome-api.js";
 
 interface RecordedInvoke {
   readonly channel: string;
@@ -289,5 +290,59 @@ describe("createDesktopIpcBridge: per-listener scope filtering", () => {
     assert.equal(received.length, 1);
     assert.equal(received[0]?.cursor, "e1");
     assert.equal("sender" in (received[0] as object), false);
+  });
+});
+
+describe("createOmpStudioChromeApi: fixed named surface, frozen object", () => {
+  test("exposes exactly the expected named methods and is frozen", () => {
+    const fakeIpc = {
+      invoke: async () => undefined,
+      on: () => {},
+      removeListener: () => {},
+    };
+    const chromeApi = createOmpStudioChromeApi(fakeIpc);
+    assert.ok(Object.isFrozen(chromeApi));
+
+    const expectedMethods = [
+      "applyUpdate",
+      "cancelUpdate",
+      "checkAppUpdate",
+      "checkUpdates",
+      "clearAvatar",
+      "copyImage",
+      "downloadAppUpdate",
+      "exportLogs",
+      "getAppVersion",
+      "getPathForFile",
+      "getUpdatePrefs",
+      "importLocalUpdate",
+      "listFileOpeners",
+      "loadAvatar",
+      "notify",
+      "openFile",
+      "openFileWith",
+      "openLogDir",
+      "openProjectDirectory",
+      "openProjectInEditor",
+      "openUrl",
+      "pickPlanSavePath",
+      "quitAndInstallUpdate",
+      "rollbackUpdate",
+      "rollbackRuntimeUpdate",
+      "pruneRuntimeUpdates",
+      "resolveDroppedPaths",
+      "resolveFileAbsolutePath",
+      "revealFileInFileManager",
+      "sampleProcessMemory",
+      "saveAvatar",
+      "saveImage",
+      "setTheme",
+      "setUpdatePrefs",
+      "startApp",
+      "startRuntime",
+      "subscribeUpdateProgress",
+    ].sort();
+
+    assert.deepEqual(Object.keys(chromeApi).sort(), expectedMethods);
   });
 });

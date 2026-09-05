@@ -116,7 +116,20 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
       if (started) return;
       started = true;
 
-      if (!deps.requestSingleInstanceLock()) {
+      let hasLock = deps.requestSingleInstanceLock();
+      const isRestarted = (deps.argv ?? process.argv).includes("--omp-restarted");
+      if (!hasLock && (isRestarted || deps.singleInstanceRetry !== undefined)) {
+        const attempts = deps.singleInstanceRetry?.attempts ?? 10;
+        const delayMs = deps.singleInstanceRetry?.delayMs ?? 200;
+        for (let i = 0; i < attempts && !hasLock; i++) {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+          hasLock = deps.requestSingleInstanceLock();
+        }
+      }
+
+      if (!hasLock) {
         log("another instance holds the single-instance lock; quitting");
         deps.quit();
         return;

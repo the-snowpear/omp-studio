@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import type { HostRuntimeInstallProbe, HostRuntimeInstallService } from "@omp-studio/host-client-api";
 import type { RuntimeChannel, RuntimeInstallState, SignatureStatus } from "@omp-studio/client-contract";
 import {
+  isInside,
   parseRuntimeInstallationManifest,
   type ActivateOptions,
 } from "@omp-studio/runtime-installer";
@@ -75,7 +76,7 @@ function parseRuntimeVersion(value: string): ParsedRuntimeVersion | undefined {
   };
 }
 
-function compareRuntimeVersions(left: string, right: string): number | undefined {
+export function compareRuntimeVersions(left: string, right: string): number | undefined {
   const leftParsed = parseRuntimeVersion(left);
   const rightParsed = parseRuntimeVersion(right);
   if (leftParsed === undefined || rightParsed === undefined) return undefined;
@@ -107,6 +108,24 @@ function effectiveRuntimeChannel(channel: RuntimeChannel | undefined): RuntimeCh
   return channel ?? DEFAULT_RUNTIME_CHANNEL;
 }
 
+export interface PendingArtifactRegistry {
+  /** 已验签、可直接交给 RuntimeInstaller.install() 的目录；无则 undefined。 */
+  peek(): string | undefined;
+  set(directory: string | undefined): void;
+}
+
+export function createPendingArtifactRegistry(): PendingArtifactRegistry {
+  let pending: string | undefined;
+  return {
+    peek() {
+      return pending;
+    },
+    set(directory) {
+      pending = directory;
+    },
+  };
+}
+
 export interface DesktopManagedInstallOptions {
   readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
   readonly activateOptions?: ActivateOptions;
@@ -132,6 +151,7 @@ export interface DesktopManagedInstallOptions {
    * `current.json`. Failures stay read-only.
    */
   readonly seedOnStart?: boolean;
+  readonly pendingArtifact?: PendingArtifactRegistry;
 }
 
 export const PACKAGED_RUNTIME_ARTIFACT_DIR = "runtime";
@@ -163,6 +183,7 @@ export function resolveManagedRuntimeInstallDirectory(input: {
   return join(input.stateDirectory, "runtimes");
 }
 
+const TRUSTED_KEYS_FILE = "trusted-keys.json";
 const KEY_ID_FILE = "key-id.txt";
 const PUBLIC_KEY_FILE = "trusted-public.pem";
 
@@ -177,6 +198,34 @@ export function defaultRuntimeKeysDirectory(): string {
 async function readTrustedKeysDirectory(
   keysDirectory: string,
 ): Promise<{ trustedKeys: Record<string, Buffer> } | undefined> {
+  // First, try trusted-keys.json (multi-key table)
+  try {
+    const raw = JSON.parse(await readFile(join(keysDirectory, TRUSTED_KEYS_FILE), "utf8")) as unknown;
+    if (raw && typeof raw === "object" && "keys" in raw && raw.keys && typeof raw.keys === "object") {
+      const keysObj = raw.keys as Record<string, unknown>;
+      const trustedKeys: Record<string, Buffer> = {};
+      for (const [keyId, fileName] of Object.entries(keysObj)) {
+        if (typeof fileName !== "string" || fileName.trim().length === 0) continue;
+        const resolvedPath = join(keysDirectory, fileName);
+        if (!isInside(keysDirectory, resolvedPath)) continue;
+        try {
+          const buf = await readFile(resolvedPath);
+          if (buf.length > 0) {
+            trustedKeys[keyId] = buf;
+          }
+        } catch {
+          // Skip invalid/unreadable key file without breaking the table
+        }
+      }
+      if (Object.keys(trustedKeys).length > 0) {
+        return { trustedKeys };
+      }
+    }
+  } catch {
+    // If trusted-keys.json does not exist or fails to parse, fall back to legacy format
+  }
+
+  // Fallback: legacy key-id.txt + trusted-public.pem
   try {
     const keyId = (await readFile(join(keysDirectory, KEY_ID_FILE), "utf8")).trim();
     const publicKey = await readFile(join(keysDirectory, PUBLIC_KEY_FILE));
@@ -262,14 +311,29 @@ function defaultArtifactRoots(platform: string, extra?: string): string[] {
 export function createManagedArtifactLocator(options: {
   readonly artifactRoot?: string;
   readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
+  readonly pendingArtifact?: PendingArtifactRegistry;
 }): (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined> {
   if (options.locateArtifact !== undefined) return options.locateArtifact;
-  if (options.artifactRoot === undefined) return locateManagedRuntimeArtifact;
-  return (input) =>
-    locateManagedRuntimeArtifact({
-      ...input,
-      roots: defaultArtifactRoots(input.platform, options.artifactRoot),
-    });
+
+  const fallback =
+    options.artifactRoot === undefined
+      ? locateManagedRuntimeArtifact
+      : (input: LocateManagedRuntimeArtifactOptions) =>
+          locateManagedRuntimeArtifact({
+            ...input,
+            roots: defaultArtifactRoots(input.platform, options.artifactRoot),
+          });
+
+  return async (input) => {
+    const pendingDir = options.pendingArtifact?.peek();
+    if (pendingDir !== undefined) {
+      const manifest = await readArtifactManifest(pendingDir);
+      if (manifest !== undefined && matchesArtifact(manifest, input)) {
+        return pendingDir;
+      }
+    }
+    return fallback(input);
+  };
 }
 
 async function readArtifactManifest(directory: string): Promise<RuntimeInstallationManifest | undefined> {
@@ -466,6 +530,7 @@ export function createDesktopRuntimeInstallProbe(options: {
   readonly channel?: RuntimeChannel;
   readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
   readonly artifactRoot?: string;
+  readonly pendingArtifact?: PendingArtifactRegistry;
 }): HostRuntimeInstallProbe {
   const locate = createManagedArtifactLocator(options);
   return async (): Promise<RuntimeInstallState> => {
@@ -492,62 +557,70 @@ export function createDesktopRuntimeInstallService(options: {
   readonly artifactRoot?: string;
   readonly activateOptions?: ActivateOptions;
   readonly afterActivate?: (manifest: RuntimeInstallationManifest) => Promise<void>;
+  readonly pendingArtifact?: PendingArtifactRegistry;
 }): HostRuntimeInstallService {
   const locate = createManagedArtifactLocator(options);
   return async (channel?: RuntimeChannel): Promise<RuntimeInstallState> => {
-    if (!options.hasTrustedKey) {
-      throw new Error(
-        "Managed Runtime install requires OMP_RUNTIME_TRUSTED_PUBLIC_KEY and OMP_RUNTIME_SIGNING_KEY_ID. Run npm run omp:keys to create a local signing key.",
-      );
-    }
-    const selectedChannel = effectiveRuntimeChannel(channel);
-    const artifactDirectory = await locate({
-      platform: options.platform,
-      channel: selectedChannel,
-    });
-    if (artifactDirectory === undefined) {
-      throw new Error(
-        channel === undefined
-          ? "No managed Runtime artifact was found. Run npm run omp:build:host or set OMP_ARTIFACT_DIR."
-          : `No managed Runtime artifact was found for the ${selectedChannel} channel.`,
-      );
-    }
-    const locatedManifest = await readArtifactManifest(artifactDirectory);
-    if (locatedManifest !== undefined && locatedManifest.channel !== selectedChannel) {
-      throw new Error(`Managed Runtime artifact channel mismatch: expected ${selectedChannel}`);
-    }
-    let manifest: RuntimeInstallationManifest;
+    const pendingAtStart = options.pendingArtifact?.peek();
     try {
-      manifest = await options.backend.install(artifactDirectory);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/already installed/u.test(message)) {
-        throw error;
+      if (!options.hasTrustedKey) {
+        throw new Error(
+          "Managed Runtime install requires OMP_RUNTIME_TRUSTED_PUBLIC_KEY and OMP_RUNTIME_SIGNING_KEY_ID. Run npm run omp:keys to create a local signing key.",
+        );
       }
-      const parsed = await readArtifactManifest(artifactDirectory);
-      if (parsed === undefined) {
-        throw error;
+      const selectedChannel = effectiveRuntimeChannel(channel);
+      const artifactDirectory = await locate({
+        platform: options.platform,
+        channel: selectedChannel,
+      });
+      if (artifactDirectory === undefined) {
+        throw new Error(
+          channel === undefined
+            ? "No managed Runtime artifact was found. Run npm run omp:build:host or set OMP_ARTIFACT_DIR."
+            : `No managed Runtime artifact was found for the ${selectedChannel} channel.`,
+        );
       }
-      manifest = parsed;
-    }
-    if (manifest.channel !== selectedChannel) {
-      throw new Error(`Managed Runtime artifact channel mismatch: expected ${selectedChannel}`);
-    }
-    await options.backend.activate(manifest.runtimeVersion, options.activateOptions);
-    try {
-      await options.afterActivate?.(manifest);
-    } catch (error) {
+      const locatedManifest = await readArtifactManifest(artifactDirectory);
+      if (locatedManifest !== undefined && locatedManifest.channel !== selectedChannel) {
+        throw new Error(`Managed Runtime artifact channel mismatch: expected ${selectedChannel}`);
+      }
+      let manifest: RuntimeInstallationManifest;
+      try {
+        manifest = await options.backend.install(artifactDirectory);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/already installed/u.test(message)) {
+          throw error;
+        }
+        const parsed = await readArtifactManifest(artifactDirectory);
+        if (parsed === undefined) {
+          throw error;
+        }
+        manifest = parsed;
+      }
+      if (manifest.channel !== selectedChannel) {
+        throw new Error(`Managed Runtime artifact channel mismatch: expected ${selectedChannel}`);
+      }
+      await options.backend.activate(manifest.runtimeVersion, options.activateOptions);
+      try {
+        await options.afterActivate?.(manifest);
+      } catch (error) {
+        return {
+          status: "failed",
+          version: manifest.runtimeVersion,
+          signature: "verified",
+          message: error instanceof Error ? error.message : "Runtime did not start",
+        };
+      }
       return {
-        status: "failed",
+        status: "installed",
         version: manifest.runtimeVersion,
         signature: "verified",
-        message: error instanceof Error ? error.message : "Runtime did not start",
       };
+    } finally {
+      if (options.pendingArtifact?.peek() === pendingAtStart) {
+        options.pendingArtifact?.set(undefined);
+      }
     }
-    return {
-      status: "installed",
-      version: manifest.runtimeVersion,
-      signature: "verified",
-    };
   };
 }

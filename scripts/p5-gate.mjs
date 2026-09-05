@@ -59,6 +59,39 @@ for (const directory of scanRoots) {
 }
 checks.push({ name: "repository-secret-scan", status: leaks.length === 0 ? "passed" : "failed", ...(leaks.length ? { files: leaks } : {}) });
 
+let updateIndexSigned = false;
+const updateIndexPath = join(root, "outputs", "release", "update-index.json");
+const updateIndexSigPath = join(root, "outputs", "release", "update-index.sig.json");
+if (existsSync(updateIndexPath)) {
+  try {
+    const { createTrustedKeyVerifier, parseRuntimeSignatureManifest } = await import("@omp-studio/runtime-installer");
+    const { createHash } = await import("node:crypto");
+    const payloadBytes = await readFile(updateIndexPath);
+    const sigText = await readFile(updateIndexSigPath, "utf8");
+    const signature = parseRuntimeSignatureManifest(JSON.parse(sigText));
+    const trustedKeysPath = join(root, "packaging", "keys", "trusted-keys.json");
+    const trustedData = JSON.parse(await readFile(trustedKeysPath, "utf8"));
+    const keys = {};
+    for (const [k, relPath] of Object.entries(trustedData.keys)) {
+      keys[k] = await readFile(join(root, "packaging", "keys", relPath));
+    }
+    if (signature.payloadSha256 !== createHash("sha256").update(payloadBytes).digest("hex")) {
+      throw new Error("update-index.sig.json sha256 mismatch");
+    }
+    const verifier = createTrustedKeyVerifier(keys);
+    if (!verifier.verify(signature, payloadBytes)) {
+      throw new Error("update-index signature verification failed");
+    }
+    updateIndexSigned = true;
+    checks.push({ name: "update-index-signature", status: "passed" });
+  } catch (error) {
+    updateIndexSigned = false;
+    checks.push({ name: "update-index-signature", status: "failed", message: error instanceof Error ? error.message : String(error) });
+  }
+} else {
+  checks.push({ name: "update-index-signature", status: "failed", message: "Build update assets before running the release gate" });
+}
+
 const readiness = {
   generatedAt: new Date().toISOString(),
   platform: `${process.platform}-${process.arch}`,
@@ -68,6 +101,7 @@ const readiness = {
     signedRuntimeArtifact: checks[0]?.status === "passed",
     installUpgradeRollbackProtection: checks[0]?.status === "passed",
     noPrivateMaterialInScannedOutputs: leaks.length === 0,
+    updateIndexSigned,
     productionWindowsCleanRun: "manual-required",
   },
   macosReadiness: {

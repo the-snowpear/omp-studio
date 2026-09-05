@@ -744,3 +744,31 @@ test("the authority identity is stable across reloads for one lease", async () =
     assert.ok(first.authority.authorityEpoch >= 1);
   });
 });
+
+test("Runtime maintenance rejects missing rollback targets and active residents", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    let busy = false;
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      runtimeSession: fakeSessionPort({
+        listResidents: () => ({
+          residents: busy ? [{ phase: "running", sessionId: "session-test" as ResidentsReadModel["residents"][number]["sessionId"], workspaceId: "workspace-test" as WorkspaceId, pendingMessages: 0, lastActivityAt: T0 }] : [],
+          generatedAt: T0,
+        } as ResidentsReadModel),
+      }).port,
+    });
+    try {
+      assert.ok(composition.rollbackRuntime);
+      assert.ok(composition.pruneRuntimes);
+      await assert.rejects(() => composition.rollbackRuntime!(), /No previous Runtime/);
+      await composition.pruneRuntimes();
+      busy = true;
+      await assert.rejects(() => composition.rollbackRuntime!(), /Finish active sessions/);
+      await assert.rejects(() => composition.pruneRuntimes!(), /Finish active sessions/);
+    } finally {
+      await composition.shutdown();
+    }
+  });
+});

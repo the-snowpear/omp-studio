@@ -61,7 +61,8 @@ export interface DesktopIpcOptions {
   readonly facade: ClientTransport | null;
   /** Window allow-list: true only for the app's own Studio WebContents. */
   readonly isTrustedSender: (sender: DesktopSender) => boolean;
-  readonly ipcMain?: IpcMain;
+  readonly ipcMain?: IpcMain | undefined;
+  readonly onBootstrapSuccess?: (() => void) | undefined;
 }
 
 /** Live handle returned by {@link registerDesktopIpc}. */
@@ -160,6 +161,7 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
       if (!isPlainObject(bootstrap)) {
         throw new Error("desktop ipc: invalid bootstrap response");
       }
+      options.onBootstrapSuccess?.();
       return bootstrap;
     } catch (error) {
       throwIpcError(error);

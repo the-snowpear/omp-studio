@@ -43,7 +43,7 @@
     "pack:win:prepare": "node scripts/prepare-installer-resources.mjs",
     "pack:win:ui": "node scripts/build-installer-host.mjs",
     "pack:win:audit": "node scripts/audit-installer.mjs",
-    "omp:test:metadata": "npm run build -w @omp-studio/runtime-installer && node --test scripts/runtime-artifact.test.mjs scripts/audit-installer.test.mjs scripts/installer-dir.test.mjs scripts/p5-secret-scan.test.mjs",
+    "omp:test:metadata": "npm run build -w @omp-studio/runtime-installer && node --test scripts/runtime-artifact.test.mjs scripts/audit-installer.test.mjs scripts/installer-dir.test.mjs scripts/p5-secret-scan.test.mjs scripts/build-update-assets.test.mjs",
     "p5:gate": "node scripts/p5-gate.mjs",
     "omp:e2e:install": "node scripts/runtime-install-e2e.mjs",
     "omp:verify:prepatch": "node scripts/verify-omp-prepatch.mjs",
@@ -55,6 +55,7 @@
     "node": ">=22"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@types/node": "^24.0.0",
     "electron-builder": "^26.0.0",
     "typescript": "^5.9.0"

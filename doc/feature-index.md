@@ -159,12 +159,12 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 系统托盘 / 关闭到托盘 | —（纯 Main 行为，无 Renderer 面，不进 preload/client-contract） | `tray.ts`（Electron-free，Main 注入 Tray/Menu/nativeImage：菜单文案 zh/en、左键打开、首隐气泡与 `%APPDATA%\omp-studio\tray-hint-shown` 标记、退出确认框文案）+ `main.ts`（close 事件拦截为 hide，托盘不可用时保持关窗即退出；`DesktopWindow.show()`）+ `composition.ts`（`requestQuit` 确认门：`host-composition.ts` `isBusy()` 以 residents 流式/压缩为准，回退当前会话 snapshot；`isQuitting` 注入窗口工厂放行真实退出） |
 | 外部 https 链接 | 启动提示 GitHub 卡；`ompStudioChrome.openUrl` | `chrome-open-url.ts` → `shell.openExternal`（系统默认浏览器，不是 Electron 窗）；只接受 https |
 | 操作者头像文件 | 首页弹窗 | `chrome-profile.ts` → `%APPDATA%\omp-studio\profile\`；升级从安装目录 `userdata\profile` 迁入；卸载 `customUnInstall` 删除 |
-| 应用更新（GitHub Release） | `AppUpdateDialog.tsx`、`settings/appUpdate.ts`、`App.tsx`（左下角头像徽标与静默检测）；预览 `PREVIEW_APP_UPDATE` | `chrome-app-update.ts`、`chrome-app-update-shared.ts` → GitHub API 版本比对与全量安装包下载调起 |
+| 应用更新（GitHub Release） | `AppUpdateDialog.tsx`、`settings/appUpdate.ts`、`settings/updates.ts`、`App.tsx`（徽标、遵循 autoCheck 的静默检测、本地版本信息）；预览 `PREVIEW_APP_UPDATE` | `chrome-app-update.ts`、`chrome-app-update-shared.ts`、`chrome-updates.ts`、`chrome-updates-shared.ts`、`update-index.ts`、`update-prefs-store.ts`、`artifact-download.ts`、`tar-gz.ts` → 签名索引版本/兼容性决策；Runtime / App / Setup 下载、验签、进度、取消与应用；旧 `chrome-app-update` 保留兼容 |
 | Plan 另存为对话框 | `App.tsx` `pickPlanSaveTarget` / `savePlanAndQuit`；`deck/PlanCard.tsx` 按钮 | `workspace-shell-shared.ts`、`workspace-shell-ipc.ts`、`plan-save-path.ts`（原生另存为，默认 `<工作区>/PLAN.md`，回传工作区相对路径；越界拒绝）→ Bridge `mode.plan.review.saveAndQuit` |
 | 设置页 | `SettingsPage.tsx`、`settings/tabs.tsx` | 本地设置 + 少量 Host query |
-| 诊断页 | `DiagnosticsPage.tsx`、`diagnosticsModel.ts`、`runtimeEnsure.ts`、`RuntimeLossBanner.tsx`、`ActionProgressBar.tsx`、`updateCheck.ts`；预览 `preview/fixtures.ts` `PREVIEW_DIAGNOSTICS`；桌面 `chrome-logs.ts` | `diagnostics.get` / `environment.get` / `capabilities.get`；启动与进页静默检查更新（超时不报错）；手动检查更新超时才提示；本地制品对比 `runtime-install.ts` `probeManagedRuntimeInstall`；安装/更新/重装 `runtime.install`；断开或启动失败时「重新连接 Runtime」走 `runtime.ensure`；已连接时「重启 Runtime」走 `runtime.ensure` `{ force: true }`，收据未连上时自动再 `ensure` 并等到 `runtime.changed` connected；Host 日志打开/导出走 chrome IPC `chrome-logs.ts`（路径不回传 Renderer）。工作台 / Hub / 空对话复用 `RuntimeLossBanner`。长操作显示分步进度条。 |
+| 诊断页 | `DiagnosticsPage.tsx`、`diagnosticsModel.ts`、`runtimeEnsure.ts`、`RuntimeLossBanner.tsx`、`ActionProgressBar.tsx`、`updateCheck.ts`；预览 `preview/fixtures.ts` `PREVIEW_DIAGNOSTICS`；桌面 `chrome-logs.ts` | `diagnostics.get` / `environment.get` / `capabilities.get`；`chrome-updates.ts` 提供网络下载、本地导入、回滚并重启、清理旧 Runtime，`settings/updates.ts` 按 jobId 等待终态；启动与进页静默检查更新（超时不报错）；手动检查更新超时才提示；本地制品对比 `runtime-install.ts` `probeManagedRuntimeInstall`；安装/更新/重装 `runtime.install`；断开或启动失败时「重新连接 Runtime」走 `runtime.ensure`；已连接时「重启 Runtime」走 `runtime.ensure` `{ force: true }`，收据未连上时自动再 `ensure` 并等到 `runtime.changed` connected；Host 日志打开/导出走 chrome IPC `chrome-logs.ts`（路径不回传 Renderer）。工作台 / Hub / 空对话复用 `RuntimeLossBanner`。长操作显示分步进度条。 |
 | 安全窗 / CSP | — | `apps/desktop/src/security.ts` |
-| Windows 安装包 | `packaging/ui/index.html` 即 Setup 可见向导 | `packaging/installer-host`（WebView2：ProgramData 暂存 + `https://omp-installer/` 虚拟主机，不用 `$PLUGINSDIR` 的 `file://`）；`packaging/nsis/custom.nsh`（隐藏 MUI、options.ini、占用/目录规则）；`scripts/installer-dir.mjs`；`scripts/build-installer-host.mjs`。卸载仍是 MUI2。活 Runtime 在 `$INSTDIR\runtime\versions\` |
+| Windows 安装包 | `packaging/ui/index.html` 即 Setup 可见向导 | `packaging/installer-host`（WebView2：ProgramData 暂存 + `https://omp-installer/` 虚拟主机，不用 `$PLUGINSDIR` 的 `file://`）；`packaging/nsis/custom.nsh`（隐藏 MUI、options.ini、占用/目录规则）；`scripts/installer-dir.mjs`；`scripts/build-installer-host.mjs`；`scripts/build-update-assets.mjs`、`.github/workflows/release.yml`（签名工件与发布）。卸载仍是 MUI2。活 Runtime 在 `$INSTDIR\runtime\versions\` |
 | 组装顺序 | — | `host-factory.ts` → `host-composition.ts` → `composition.ts`；入口 `main.ts` |
 
 Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `event` / `close`（`packages/transport-desktop/src/channels.ts`）。不要再加通用 `invoke(channel, payload)`。
@@ -181,7 +181,7 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | BTW 旁路转发 | `packages/studio-host/src/btw-events.ts`；facade `#bindBtw`；client `entities.btw` |
 | 破坏性确认 | `host-confirmation.ts` |
 | Windows Job Object | `windows-job-object.ts` |
-| 安装态 | `packages/runtime-installer`；桌面 `apps/desktop/src/runtime-install.ts`；安装包 extraFiles `$INSTDIR\runtime\versions\`，打包后直接跑这份 `omp.exe` |
+| 安装态 | `packages/runtime-installer/src/installer.ts`、`signed-artifact.ts`（Runtime）；`packages/runtime-installer/src/app-payload.ts`（应用负载）；桌面 `apps/desktop/src/runtime-install.ts`、`payload-root.ts`（启动验签/回退）；安装包 extraFiles `$INSTDIR\runtime\versions\`，打包后直接跑这份 `omp.exe` |
 
 ## Runtime overlay（改 omp `--mode studio-host` 时）
 
@@ -225,7 +225,7 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | `session.telemetry.read` | `useViewedSessionTelemetry.ts` → Host store / archive probe |
 | `btw.ask` / `abort` / `branch` | Composer `/btw` → `useBtwSession` → facade → overlay `btw-service.ts` |
 | `usage.get` | Home → `omp-usage-adapter.ts` |
-| `runtime.install` | 诊断中心 → `runtime-installer` + `runtime-install.ts` |
+| `runtime.install` | 诊断中心 → Host `runtime.install` → `runtime-install.ts` + `packages/runtime-installer/src/installer.ts`；下载/导入工件通过 Main 私有 `pendingArtifact` 交接 |
 | `runtime.ensure` | 诊断中心重新连接 / 重启、工作台与 Hub 横幅、空对话 CTA、会话恢复 → `runtime-session.ts` `ensure`（可选 `force`）+ `host-composition.ts` `ensureInstalledRuntime` |
 
 ## 不要当作产品代码

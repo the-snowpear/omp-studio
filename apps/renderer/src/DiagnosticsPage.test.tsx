@@ -5,9 +5,11 @@ import { DiagnosticsPage, DIAGNOSTICS_INTENT_KEY, setDiagnosticsIntent } from ".
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 import { UPDATE_CHECK_TIMEOUT_MS } from "./updateCheck";
+import { __resetUpdatesForTests } from "./settings/updates";
 
 afterEach(() => {
   cleanup();
+  __resetUpdatesForTests();
   vi.useRealTimers();
   window.localStorage.removeItem(PREVIEW_MODE_STORAGE_KEY);
   window.sessionStorage.removeItem(DIAGNOSTICS_INTENT_KEY);
@@ -48,6 +50,28 @@ function renderPage(options: {
 }
 
 describe("DiagnosticsPage", () => {
+  it("keeps Runtime maintenance local in preview", () => {
+    const rollback = vi.fn();
+    const prune = vi.fn();
+    window.ompStudioChrome = { rollbackRuntimeUpdate: rollback, pruneRuntimeUpdates: prune } as never;
+    renderPage({ preview: true });
+    fireEvent.click(screen.getByRole("button", { name: "回滚 Runtime 并重启应用" }));
+    fireEvent.click(screen.getByRole("button", { name: "清理旧版工件缓存" }));
+    expect(rollback).not.toHaveBeenCalled();
+    expect(prune).not.toHaveBeenCalled();
+  });
+
+  it("reports rollback errors and blocks other maintenance while rollback is running", async () => {
+    let finish!: (value: { ok: boolean; message: string }) => void;
+    const rollback = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    window.ompStudioChrome = { rollbackRuntimeUpdate: rollback, pruneRuntimeUpdates: vi.fn() } as never;
+    renderPage({ preview: false });
+    fireEvent.click(screen.getByRole("button", { name: "回滚 Runtime 并重启应用" }));
+    expect((screen.getByRole("button", { name: "清理旧版工件缓存" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => finish({ ok: false, message: "Previous runtime is unavailable" }));
+    expect(screen.getByText("Previous runtime is unavailable")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "回滚 Runtime 并重启应用" }) as HTMLButtonElement).disabled).toBe(false);
+  });
   it("shows the update hero and version tiles in preview", () => {
     renderPage({ preview: true });
     expect(screen.getByRole("heading", { level: 1, name: "诊断中心" })).toBeTruthy();

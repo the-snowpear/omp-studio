@@ -6138,6 +6138,16 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   const appUpdate = useAppUpdate();
   const effectiveUpdate = previewMode.preview ? PREVIEW_APP_UPDATE : (appUpdate.state.updateInfo?.available ? appUpdate.state.updateInfo : null);
   const [showAppUpdateDialog, setShowAppUpdateDialog] = useState(false);
+  const [localAppVersion, setLocalAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    if (previewMode.preview) return;
+    let disposed = false;
+    void globalThis.ompStudioChrome?.getAppVersion?.().then((info) => {
+      if (!disposed) setLocalAppVersion(info.version);
+    }).catch(() => {});
+    void appUpdate.check(true);
+    return () => { disposed = true; };
+  }, [previewMode.preview, appUpdate.check]);
   const previewOn = () => previewMode.preview;
   const [collapsed, setCollapsed] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -8556,6 +8566,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
                 <div className="modal-body">
                   <dl className="about-list">
                     <div className="about-row"><dt>{t("common.product")}</dt><dd>OMP Studio</dd></div>
+                    <div className="about-row"><dt>{t("appUpdate.currentVersion")}</dt><dd>{(previewMode.preview ? PREVIEW_APP_UPDATE.currentVersion : localAppVersion ?? appUpdate.state.updateInfo?.currentVersion) || "—"}</dd></div>
                     <div className="about-row"><dt>Client contract</dt><dd>v{CLIENT_CONTRACT_VERSION}</dd></div>
                     <div className="about-row"><dt>Runtime</dt><dd>{runtime?.status ?? t("common.unavailable")}{runtime?.classification ? ` · ${runtime.classification}` : ""}</dd></div>
                     {runtime?.runtimeVersion ? <div className="about-row"><dt>{t("common.runtimeVersion")}</dt><dd>{runtime.runtimeVersion}</dd></div> : null}
@@ -8599,8 +8610,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         <AppUpdateDialog
           update={effectiveUpdate}
           preview={previewMode.preview}
-          isDownloading={appUpdate.state.downloading}
-          downloadError={appUpdate.state.downloadError}
+          isDownloading={!previewMode.preview && appUpdate.state.downloading}
+          downloadError={previewMode.preview ? null : appUpdate.state.downloadError}
+          receivedBytes={previewMode.preview ? undefined : appUpdate.state.receivedBytes}
+          totalBytes={previewMode.preview ? undefined : appUpdate.state.totalBytes}
+          readyToApply={!previewMode.preview && appUpdate.state.readyToApply === true}
+          onApply={() => appUpdate.apply()}
+          {...(!previewMode.preview ? { onCancel: () => appUpdate.cancel() } : {})}
+          {...(!previewMode.preview ? { onSkip: async () => { await appUpdate.skip(); setShowAppUpdateDialog(false); } } : {})}
           onClose={() => setShowAppUpdateDialog(false)}
           onDownloadAndInstall={() => appUpdate.downloadAndInstall()}
         />
@@ -8615,11 +8632,6 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
   const [state, dispatch] = useReducer(reduce, { loading: true, model: {}, events: [], route: "workbench" });
   const [route, setRoute] = useState<Route>(initialRouteFromSettings);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
-  const { check: checkAppUpdate } = useAppUpdate();
-
-  useEffect(() => {
-    void checkAppUpdate(true);
-  }, [checkAppUpdate]);
 
   useEffect(() => {
     let cancelled = false;

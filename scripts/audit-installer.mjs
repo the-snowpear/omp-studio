@@ -9,8 +9,11 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
 
 import { REPOSITORY_ROOT, SERIES_JSON_PATH, VENDOR_CODING_AGENT_PACKAGE_JSON, deriveRuntimeVersion } from "./runtime-artifact.mjs";
 import { RUNTIME_PRIVATE_KEY_FILE, RUNTIME_PUBLIC_KEY_FILE } from "./runtime-signing-keys.mjs";
@@ -128,12 +131,31 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
   const preloadUnpacked = join(unpackedDir, "resources", "app.asar.unpacked", "dist", "preload.cjs");
   let preloadOk = existsSync(preloadUnpacked) || existsSync(join(unpackedApp, "dist", "preload.cjs"));
   if (!preloadOk && existsSync(asarPath)) {
-    preloadOk = readFileSync(asarPath).includes(Buffer.from("preload.cjs"));
+    preloadOk = require("@electron/asar").extractFile(asarPath, "dist/preload.cjs").length > 0;
   }
   if (!preloadOk) {
     throw new Error("Sandboxed preload dist/preload.cjs is not in the packaged app.");
   }
   notes.push("preload.cjs present");
+
+  let mainOk = false;
+  const appPkgPath = join(unpackedApp, "package.json");
+  if (existsSync(appPkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(appPkgPath, "utf8"));
+      mainOk = pkg.main === "./dist/src/main.js";
+    } catch {
+      mainOk = false;
+    }
+  } else if (existsSync(asarPath)) {
+    const content = require("@electron/asar").extractFile(asarPath, "package.json");
+    const pkg = JSON.parse(content.toString("utf8"));
+    mainOk = pkg.main === "./dist/src/main.js";
+  }
+  if (!mainOk) {
+    throw new Error("Packaged app package.json main entrypoint must be './dist/src/main.js'.");
+  }
+  notes.push("package.json main is ./dist/src/main.js");
 
   const versionsRoot = join(unpackedDir, "runtime", "versions");
   if (!existsSync(versionsRoot)) {
@@ -180,6 +202,42 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
   if (containsPrivateKeyMarker(publicKey)) {
     throw new Error("Packaged trusted-public.pem contains a private key marker");
   }
+
+  const trustedKeysPath = join(keysDir, "trusted-keys.json");
+  if (!existsSync(trustedKeysPath)) {
+    throw new Error(`Packaged Runtime trusted-keys.json missing under ${keysDir}`);
+  }
+  let trustedKeysData;
+  try {
+    trustedKeysData = JSON.parse(readFileSync(trustedKeysPath, "utf8"));
+  } catch (err) {
+    throw new Error(`Packaged trusted-keys.json is not valid JSON: ${String(err)}`);
+  }
+  if (
+    trustedKeysData.schema !== 1 ||
+    typeof trustedKeysData.activeKeyId !== "string" ||
+    typeof trustedKeysData.keys !== "object" ||
+    trustedKeysData.keys === null
+  ) {
+    throw new Error("Packaged trusted-keys.json structure is invalid");
+  }
+  if (!trustedKeysData.keys[trustedKeysData.activeKeyId]) {
+    throw new Error(`activeKeyId ${trustedKeysData.activeKeyId} missing in packaged trusted-keys.json`);
+  }
+  for (const [kId, fileName] of Object.entries(trustedKeysData.keys)) {
+    const pemPath = join(keysDir, fileName);
+    if (!existsSync(pemPath)) {
+      throw new Error(`Referenced key file ${fileName} for key ${kId} missing under ${keysDir}`);
+    }
+    const pemContent = readFileSync(pemPath, "utf8");
+    if (!pemContent.includes("BEGIN PUBLIC KEY")) {
+      throw new Error(`Referenced key file ${fileName} is not an SPKI public key`);
+    }
+    if (containsPrivateKeyMarker(pemContent)) {
+      throw new Error(`Referenced key file ${fileName} contains a private key marker`);
+    }
+  }
+
   notes.push("runtime public key only");
 
   const leakedArtifacts = join(

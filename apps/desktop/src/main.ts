@@ -30,9 +30,19 @@ import { registerChromeMetricsIpc } from "./chrome-metrics.js";
 import { registerChromeProfileIpc } from "./chrome-profile.js";
 import { resolveProfilePersistRoot } from "./chrome-profile-store.js";
 import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
+import { registerChromeUpdatesIpc } from "./chrome-updates.js";
+import { createUpdatePrefsStore } from "./update-prefs-store.js";
+import {
+  defaultRuntimeKeysDirectory,
+  loadInstallerTrustedKeys,
+  packagedRuntimeInstallLayout,
+} from "./runtime-install.js";
+import { pendingRuntimeArtifact } from "./host-factory.js";
 import { createAppTray, quitBusyDialogStrings, quitBusyMessageBoxOptions } from "./tray.js";
 import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { createRequire } from "node:module";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 
 import { createDesktopApplication } from "./composition.js";
@@ -65,33 +75,57 @@ import type {
   WorkspaceShellEditorResult,
 } from "./workspace-shell-shared.js";
 import { resolveDroppedPaths } from "./dropped-paths.js";
+import { PAYLOAD_DIR, resolveAppResourceLayout } from "./payload-root.js";
+import { resolveRendererEntryFrom } from "./security.js";
+import { AppPayloadInstaller } from "@omp-studio/runtime-installer";
 import { planSaveRelativeTarget } from "./plan-save-path.js";
 import { registerTerminalIpc } from "./terminal-ipc.js";
 import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js";
 
-/**
- * Compiled sandboxed preload bundle, relative to the app root. The preload
- * is authored as ESM TypeScript (src/preload.ts) but the sandbox requires
- * a single CJS bundle; emitting it is a packaging-phase build step.
- */
-const PRELOAD_OUTPUT = "dist/preload.cjs";
-
 /** Developer-only override for the renderer entry (Vite dev server). */
 const RENDERER_DEV_URL = rendererDevServerUrl(app.isPackaged, process.env.OMP_RENDERER_DEV_URL);
+const NODE_PTY_VERSION = (createRequire(import.meta.url)("node-pty/package.json") as { version: string }).version;
 
 export async function main(): Promise<void> {
+  if (process.argv.includes("--omp-print-abi")) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          electron: process.versions.electron,
+          modules: process.versions.modules,
+          nodePty: NODE_PTY_VERSION,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    app.exit(0);
+    return;
+  }
   if (process.platform === "win32") {
     app.setAppUserModelId(APP_USER_MODEL_ID);
   }
   await app.whenReady();
 
-  const target = resolveRendererEntry(app.getAppPath(), RENDERER_DEV_URL);
-  const allowedOrigin = rendererOriginFor(target);
-  const preloadPath = join(app.getAppPath(), PRELOAD_OUTPUT);
+  const runtimeInstallLayout = packagedRuntimeInstallLayout({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+  });
+  const keysDirs = [
+    ...(runtimeInstallLayout !== undefined ? [runtimeInstallLayout.keysDirectory] : []),
+    defaultRuntimeKeysDirectory(),
+    join(app.getAppPath(), "packaging", "keys"),
+    join(app.getAppPath(), "..", "packaging", "keys"),
+  ];
+  const loadedKeys = await loadInstallerTrustedKeys(keysDirs);
+  const trustedKeys = loadedKeys?.trustedKeys ?? {};
+
+  const payloadRoot = resolve(app.getAppPath(), "..", PAYLOAD_DIR);
+  const appPayloadInstaller = new AppPayloadInstaller(payloadRoot, { trustedKeys });
+
   const appIcon = resolveAppIconPath({ appPath: app.getAppPath(), platform: process.platform });
   const appNativeIcon = appIcon !== undefined ? nativeImage.createFromPath(appIcon) : undefined;
   const validAppIcon = appNativeIcon !== undefined && !appNativeIcon.isEmpty() ? appNativeIcon : undefined;
-  installCspHeaders(session.defaultSession, rendererCspFor(target));
 
   const hostFactory = createProductionHostFactory({
     openUrl: async (url) => {
@@ -244,6 +278,27 @@ export async function main(): Promise<void> {
   let rendererWindow: BrowserWindow | null = null;
 
   const createWindow: DesktopWindowFactory = async (context) => {
+    // Payload boot accounting belongs to the instance that acquired the lock.
+    const layout = await resolveAppResourceLayout({
+      appPath: app.getAppPath(),
+      isPackaged: app.isPackaged,
+      bundledVersion: app.getVersion(),
+      forceBaseline: process.argv.includes("--omp-baseline"),
+      runtime: {
+        electron: process.versions.electron,
+        modules: process.versions.modules,
+        nodePty: NODE_PTY_VERSION,
+      },
+      platform: `${process.platform}-${process.arch}`,
+      trustedKeys,
+      payloadRoot,
+    });
+
+    const target = resolveRendererEntryFrom(layout.rendererDist, RENDERER_DEV_URL);
+    const allowedOrigin = rendererOriginFor(target);
+    const preloadPath = layout.preloadPath;
+    installCspHeaders(session.defaultSession, rendererCspFor(target));
+
     const window = createSecureWindow({
       BrowserWindow,
       windowOptions: {
@@ -271,10 +326,27 @@ export async function main(): Promise<void> {
     }
     // Fixed named channels only; every payload validated at this boundary.
     // `dispose` removes handlers before Host shutdown on app quit.
-    const isTrustedSender = (sender: { getURL(): string }) => isTrustedRendererUrl(sender.getURL(), allowedOrigin);
+    const isTrustedSender = (sender: { getURL(): string }) => sender === window.webContents && isTrustedRendererUrl(sender.getURL(), allowedOrigin);
+    let didFinishLoad = false;
+    let hadBootstrapSuccess = false;
+    let bootSuccessNoted = false;
+    const checkBootSuccess = (): void => {
+      if (didFinishLoad && hadBootstrapSuccess && !bootSuccessNoted && layout.payloadVersion !== undefined) {
+        bootSuccessNoted = true;
+        void appPayloadInstaller.noteBootSuccess(layout.payloadVersion).catch(() => {});
+      }
+    };
+    window.webContents.once("did-finish-load", () => {
+      didFinishLoad = true;
+      checkBootSuccess();
+    });
     const ipc = registerDesktopIpc({
       facade: context.transport,
       isTrustedSender,
+      onBootstrapSuccess: () => {
+        hadBootstrapSuccess = true;
+        checkBootSuccess();
+      },
     });
     const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
     const disposeNotify = registerChromeNotifyIpc({
@@ -430,6 +502,54 @@ export async function main(): Promise<void> {
         },
       },
     });
+    const disposeUpdates = registerChromeUpdatesIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, payload: unknown) => listener({ sender: event.sender }, payload));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      send: (channel, payload) => {
+        if (!window.webContents.isDestroyed()) {
+          window.webContents.send(channel, payload);
+        }
+      },
+      prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
+      stagingRoot: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "updates"),
+      trustedKeys,
+      platform: `${process.platform}-${process.arch}`,
+      runtime: { electron: process.versions.electron, modules: process.versions.modules, nodePty: NODE_PTY_VERSION },
+      pendingArtifact: pendingRuntimeArtifact,
+      showOpenDialog: (options) => dialog.showOpenDialog(window, options),
+      appVersion: layout.effectiveVersion,
+      bundledAppVersion: app.getVersion(),
+      ...(layout.payloadVersion === undefined ? {} : { payloadVersion: layout.payloadVersion }),
+      appPayloadInstaller,
+      isBusy: () => hostFactory.isBusy(),
+      relaunch: (options) => app.relaunch(options),
+      openPath: (path) => shell.openPath(path),
+      rollbackRuntime: async () => {
+        await hostFactory.rollbackRuntime();
+        app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== "--omp-restarted").concat("--omp-restarted") });
+        app.quit();
+      },
+      pruneRuntimes: () => hostFactory.pruneRuntimes(),
+      quit: () => app.quit(),
+      getInstalledRuntimeVersion: async () => {
+        const installDir =
+          runtimeInstallLayout?.installDirectory ?? join(app.getPath("appData"), "omp-studio", "runtimes");
+        try {
+          const raw = await readFile(join(installDir, "current.json"), "utf8");
+          const parsed = JSON.parse(raw) as { runtimeVersion?: string };
+          return typeof parsed.runtimeVersion === "string" ? parsed.runtimeVersion : undefined;
+        } catch {
+          return undefined;
+        }
+      },
+    });
     const disposeAppUpdate = registerChromeAppUpdateIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -440,7 +560,7 @@ export async function main(): Promise<void> {
         },
       },
       isTrustedSender,
-      currentVersion: app.getVersion(),
+      currentVersion: layout.effectiveVersion,
       updatesDirectory: join(app.getPath("temp"), "omp-studio-updates"),
       openPath: (filePath) => shell.openPath(filePath),
       quitApp: () => app.quit(),
@@ -477,6 +597,7 @@ export async function main(): Promise<void> {
         windowSurface.close();
       },
       dispose: () => {
+        disposeUpdates.dispose();
         disposeAppUpdate.dispose();
         disposeWorkspaceShell.dispose();
         disposeTerminal.dispose();

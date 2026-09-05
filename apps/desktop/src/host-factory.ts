@@ -42,13 +42,14 @@ import { promisify } from "node:util";
 import { app, dialog } from "electron";
 
 import type { ArchId, WorkspaceId } from "@omp-studio/client-contract";
+import type { RuntimePreference } from "@omp-studio/studio-protocol";
 import { createOmpWorkspaceService } from "@omp-studio/host-client-api/workspaces";
 import type { Win32PlatformServices, Win32AuthorityLockServices, Win32EndpointProviders } from "@omp-studio/platform-win32";
 import { Win32PlatformPort, Win32AuthorityLock, Win32PrivateEndpoint } from "@omp-studio/platform-win32";
 import type { DarwinPlatformServices, DarwinEndpointProviders } from "@omp-studio/platform-darwin";
 import { DarwinPlatformPort, DarwinPrivateEndpoint } from "@omp-studio/platform-darwin";
 import { WorkspaceRegistry, createProcessProbe, parseWindowsUserSid, type RuntimeResolverEnvironment } from "@omp-studio/studio-host";
-import type { RuntimePreference } from "@omp-studio/studio-protocol";
+import { createSmokeTestRunner } from "@omp-studio/runtime-installer";
 import type { PlatformPort } from "@omp-studio/platform";
 
 import {
@@ -63,7 +64,11 @@ import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
 import { createDesktopRuntimeSessionPort } from "./runtime-session.js";
 import { createWorkspaceFileService } from "./workspace-files.js";
 import { createWorkspaceSessionCatalog } from "./session-commands.js";
-import { packagedRuntimeInstallLayout, type DesktopManagedInstallOptions } from "./runtime-install.js";
+import {
+  createPendingArtifactRegistry,
+  packagedRuntimeInstallLayout,
+  type DesktopManagedInstallOptions,
+} from "./runtime-install.js";
 import type { DesktopHostComposition, DesktopHostFactory } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -563,6 +568,8 @@ function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
   };
 }
 
+export const pendingRuntimeArtifact = createPendingArtifactRegistry();
+
 /** Packaged extraFiles layout; unpackaged keeps AppData runtimes + repo artifact discovery. */
 function productionManagedInstall(): DesktopManagedInstallOptions {
   const layout = packagedRuntimeInstallLayout({
@@ -571,6 +578,8 @@ function productionManagedInstall(): DesktopManagedInstallOptions {
   });
   return {
     seedOnStart: true,
+    pendingArtifact: pendingRuntimeArtifact,
+    activateOptions: { selfCheck: createSmokeTestRunner({ timeoutMs: 240_000 }) },
     ...(layout === undefined
       ? {}
       : {
@@ -586,6 +595,9 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
   resolveWorkspaceCwd(workspaceId: string): Promise<string>;
   /** Current active workspace cwd, used by the local PTY manager. */
   activeWorkspaceCwd(): string | undefined;
+  isBusy(): boolean;
+  rollbackRuntime(): Promise<void>;
+  pruneRuntimes(): Promise<void>;
 }
 
 /**
@@ -742,6 +754,17 @@ export function createProductionHostFactory(options?: {
     },
     activeWorkspaceCwd(): string | undefined {
       return workspaceCwd.current;
+    },
+    isBusy(): boolean {
+      return activeComposition?.isBusy() ?? false;
+    },
+    async rollbackRuntime(): Promise<void> {
+      if (!activeComposition?.rollbackRuntime) throw new Error("Managed Runtime maintenance is unavailable");
+      await activeComposition.rollbackRuntime();
+    },
+    async pruneRuntimes(): Promise<void> {
+      if (!activeComposition?.pruneRuntimes) throw new Error("Managed Runtime maintenance is unavailable");
+      await activeComposition.pruneRuntimes();
     },
   };
 }

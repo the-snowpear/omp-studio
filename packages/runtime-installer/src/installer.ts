@@ -1,16 +1,22 @@
-import { createHash, randomBytes, verify as verifySignature, createPublicKey } from "node:crypto";
-import { access, cp, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { randomBytes } from "node:crypto";
+import { access, lstat, mkdir, readFile, readdir, rename, rm } from "node:fs/promises";
+import { basename, join } from "node:path";
 import type { RuntimeInstallationManifest } from "@omp-studio/studio-protocol";
-import {
-  type ChecksumManifest,
-  parseChecksumManifest,
-  parseRuntimeInstallationManifest,
-  parseRuntimeSignatureManifest,
-  type RuntimeSignatureManifest,
-} from "./manifest.js";
+import { parseRuntimeInstallationManifest } from "./manifest.js";
 import { createSmokeTestRunner } from "./self-check.js";
 import type { SelfCheckRunner } from "./self-check.js";
+import {
+  assertSafeVersion,
+  isInside,
+  installVerifiedArtifact,
+  verifySignedArtifact,
+  verifySignedMetadata,
+  writeJsonAtomic,
+  RUNTIME_ARTIFACT_LAYOUT,
+  type RuntimeSignatureVerifier,
+} from "./signed-artifact.js";
+
+export type { RuntimeSignatureVerifier } from "./signed-artifact.js";
 
 export interface ActiveRuntimeRecord {
   runtimeVersion: string;
@@ -29,36 +35,10 @@ export interface ActivateOptions {
   selfCheck?: SelfCheckRunner;
 }
 
-export interface RuntimeSignatureVerifier {
-  verify(signature: RuntimeSignatureManifest, signedPayload: Buffer): boolean;
-}
-
 export interface RuntimeInstallerOptions {
   signatureVerifier?: RuntimeSignatureVerifier;
   trustedKeys?: Readonly<Record<string, string | Buffer>>;
   isRuntimeReferenced?: (runtimeVersion: string) => boolean | Promise<boolean>;
-}
-
-function safeVersion(version: string): void {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(version)) {
-    throw new TypeError("Runtime version is not safe for a directory name");
-  }
-}
-
-function inside(root: string, candidate: string): boolean {
-  const path = relative(resolve(root), resolve(candidate));
-  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
-}
-
-async function sha256(path: string): Promise<string> {
-  return createHash("sha256").update(await readFile(path)).digest("hex");
-}
-
-async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-  await rename(temporary, path);
 }
 
 export class RuntimeInstaller {
@@ -77,47 +57,70 @@ export class RuntimeInstaller {
     this.#isRuntimeReferenced = options.isRuntimeReferenced;
   }
 
-  async install(artifactDirectory: string): Promise<RuntimeInstallationManifest> {
-    const { manifest, checksums } = await this.#verifySignedMetadata(artifactDirectory);
-    await this.#verifyArtifactCoverage(artifactDirectory, checksums.files);
-    await this.#verifyFiles(artifactDirectory, checksums.files);
-
-    const finalDirectory = join(this.#versionsDirectory, manifest.runtimeVersion);
-    if (!inside(this.#versionsDirectory, finalDirectory)) throw new Error("Runtime target escaped the versions directory");
+  async #refuseIfInstalled(version: string): Promise<void> {
+    assertSafeVersion(version);
+    const finalDirectory = join(this.#versionsDirectory, version);
+    if (!isInside(this.#versionsDirectory, finalDirectory)) {
+      throw new Error("Runtime target escaped the versions directory");
+    }
     try {
       await access(finalDirectory);
-      throw new Error(`Runtime ${manifest.runtimeVersion} is already installed`);
+      throw new Error(`Runtime ${version} is already installed`);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+  }
 
-    await mkdir(this.#versionsDirectory, { recursive: true });
-    const staging = join(this.#versionsDirectory, `.staging-${manifest.runtimeVersion}-${randomBytes(6).toString("hex")}`);
-    try {
-      await cp(artifactDirectory, staging, { recursive: true, errorOnExist: true, force: false });
-      const entrypoint = join(staging, manifest.entrypoint);
-      if (!inside(staging, entrypoint) || !(await lstat(entrypoint)).isFile()) {
-        throw new Error("Runtime entrypoint is missing or escapes the artifact");
-      }
-      await rename(staging, finalDirectory);
-    } catch (error) {
-      await rm(staging, { recursive: true, force: true });
-      throw error;
-    }
+  async install(artifactDirectory: string): Promise<RuntimeInstallationManifest> {
+    const { manifest } = await verifySignedArtifact({
+      directory: artifactDirectory,
+      layout: RUNTIME_ARTIFACT_LAYOUT,
+      parseManifest: parseRuntimeInstallationManifest,
+      requireCovered: (m) => ["runtime-manifest.json", m.entrypoint],
+      trustedKeys: this.#trustedKeys,
+      ...(this.#signatureVerifier ? { signatureVerifier: this.#signatureVerifier } : {}),
+      coverageMessage: (file) =>
+        file === "runtime-manifest.json"
+          ? "checksums.json must cover runtime-manifest.json"
+          : "checksums.json must cover the Runtime entrypoint",
+    });
+    await this.#refuseIfInstalled(manifest.runtimeVersion);
+    await installVerifiedArtifact({
+      sourceDirectory: artifactDirectory,
+      versionsDirectory: this.#versionsDirectory,
+      version: manifest.runtimeVersion,
+      requireFile: manifest.entrypoint,
+      verifyStaging: async (directory) => {
+        const verified = await verifySignedArtifact({
+          directory,
+          layout: RUNTIME_ARTIFACT_LAYOUT,
+          parseManifest: parseRuntimeInstallationManifest,
+          requireCovered: (m) => ["runtime-manifest.json", m.entrypoint],
+          trustedKeys: this.#trustedKeys,
+          ...(this.#signatureVerifier ? { signatureVerifier: this.#signatureVerifier } : {}),
+        });
+        if (verified.manifest.runtimeVersion !== manifest.runtimeVersion) throw new Error("Artifact version changed during installation");
+      },
+    });
     return manifest;
   }
 
   async activate(runtimeVersion: string, options: ActivateOptions = {}): Promise<ActiveRuntimeRecord> {
-    safeVersion(runtimeVersion);
+    assertSafeVersion(runtimeVersion);
     const versionDirectory = join(this.#versionsDirectory, runtimeVersion);
-    const manifest = parseRuntimeInstallationManifest(
-      JSON.parse(await readFile(join(versionDirectory, "runtime-manifest.json"), "utf8")) as unknown,
-    );
+    const { manifest } = await verifySignedArtifact({
+      directory: versionDirectory,
+      layout: RUNTIME_ARTIFACT_LAYOUT,
+      parseManifest: parseRuntimeInstallationManifest,
+      requireCovered: (m) => ["runtime-manifest.json", m.entrypoint],
+      trustedKeys: this.#trustedKeys,
+      ...(this.#signatureVerifier ? { signatureVerifier: this.#signatureVerifier } : {}),
+    });
     if (manifest.runtimeVersion !== runtimeVersion) {
       throw new Error("Runtime manifest version does not match its installation directory");
     }
     const entrypointPath = join(versionDirectory, manifest.entrypoint);
-    if (!inside(versionDirectory, entrypointPath) || !(await lstat(entrypointPath)).isFile()) {
+    if (!isInside(versionDirectory, entrypointPath) || !(await lstat(entrypointPath)).isFile()) {
       throw new Error("Runtime entrypoint escapes the version directory");
     }
     const current = await this.current();
@@ -186,7 +189,7 @@ export class RuntimeInstaller {
   }
 
   async uninstall(runtimeVersion: string): Promise<void> {
-    safeVersion(runtimeVersion);
+    assertSafeVersion(runtimeVersion);
     const current = await this.current();
     if (current?.runtimeVersion === runtimeVersion || current?.previousRuntimeVersion === runtimeVersion) {
       throw new Error(`Runtime ${runtimeVersion} is referenced by current.json`);
@@ -195,7 +198,7 @@ export class RuntimeInstaller {
       throw new Error(`Runtime ${runtimeVersion} is referenced by an active Thread binding`);
     }
     const target = join(this.#versionsDirectory, runtimeVersion);
-    if (!inside(this.#versionsDirectory, target)) throw new Error("Runtime uninstall target escaped the versions directory");
+    if (!isInside(this.#versionsDirectory, target)) throw new Error("Runtime uninstall target escaped the versions directory");
     await rm(target, { recursive: true, force: false });
   }
 
@@ -209,16 +212,17 @@ export class RuntimeInstaller {
       throw error;
     }
     const installed: Array<{ version: string; channel: "stable" | "canary"; mtimeMs: number }> = [];
+    const broken: string[] = [];
     for (const version of names.filter(name => !name.startsWith("."))) {
       try {
-        safeVersion(version);
+        assertSafeVersion(version);
         const directory = join(this.#versionsDirectory, version);
         const manifest = parseRuntimeInstallationManifest(
           JSON.parse(await readFile(join(directory, "runtime-manifest.json"), "utf8")) as unknown,
         );
         installed.push({ version, channel: manifest.channel, mtimeMs: (await lstat(directory)).mtimeMs });
       } catch {
-        // Invalid/non-version entries are not touched by retention.
+        broken.push(version);
       }
     }
     const keep = new Set(
@@ -236,8 +240,24 @@ export class RuntimeInstaller {
     const removed: string[] = [];
     for (const entry of installed) {
       if (keep.has(entry.version) || (await this.#isRuntimeReferenced?.(entry.version))) continue;
-      await this.uninstall(entry.version);
-      removed.push(entry.version);
+      try {
+        await this.uninstall(entry.version);
+        removed.push(entry.version);
+      } catch {
+        // Skip on failure
+      }
+    }
+    for (const version of broken) {
+      if (keep.has(version) || (await this.#isRuntimeReferenced?.(version))) continue;
+      try {
+        const target = join(this.#versionsDirectory, version);
+        if (isInside(this.#versionsDirectory, target)) {
+          await rm(target, { recursive: true, force: true });
+          removed.push(version);
+        }
+      } catch {
+        // Skip on failure
+      }
     }
     return removed;
   }
@@ -249,6 +269,11 @@ export class RuntimeInstaller {
       const record = value as Record<string, unknown>;
       if (typeof record.runtimeVersion !== "string" || typeof record.activatedAt !== "string") {
         throw new TypeError("current.json is invalid");
+      }
+      assertSafeVersion(record.runtimeVersion);
+      if (record.previousRuntimeVersion !== undefined) {
+        if (typeof record.previousRuntimeVersion !== "string") throw new TypeError("current.json is invalid");
+        assertSafeVersion(record.previousRuntimeVersion);
       }
       return {
         runtimeVersion: record.runtimeVersion,
@@ -273,106 +298,25 @@ export class RuntimeInstaller {
     const record = await this.current();
     if (record === undefined) return undefined;
     const versionDirectory = join(this.#versionsDirectory, record.runtimeVersion);
-    const { manifest } = await this.#verifySignedMetadata(versionDirectory);
+    const { manifest } = await verifySignedMetadata({
+      directory: versionDirectory,
+      layout: RUNTIME_ARTIFACT_LAYOUT,
+      parseManifest: parseRuntimeInstallationManifest,
+      requireCovered: (m) => ["runtime-manifest.json", m.entrypoint],
+      trustedKeys: this.#trustedKeys,
+      ...(this.#signatureVerifier ? { signatureVerifier: this.#signatureVerifier } : {}),
+      coverageMessage: (file) =>
+        file === "runtime-manifest.json"
+          ? "checksums.json must cover runtime-manifest.json"
+          : "checksums.json must cover the Runtime entrypoint",
+    });
     if (manifest.runtimeVersion !== record.runtimeVersion) {
       throw new Error("Runtime manifest version does not match the active installation");
     }
     const entrypointPath = join(versionDirectory, manifest.entrypoint);
-    if (!inside(versionDirectory, entrypointPath) || !(await lstat(entrypointPath)).isFile()) {
-      throw new Error("Active runtime entrypoint escapes the version directory");
+    if (!isInside(versionDirectory, entrypointPath) || !(await lstat(entrypointPath)).isFile()) {
+      throw new Error("Runtime entrypoint escapes the version directory");
     }
     return { record, manifest, entrypointPath };
   }
-
-  /**
-   * Verify the Ed25519 signature over `runtime-manifest.json ‖ NUL ‖
-   * checksums.json` and return both parsed documents.
-   *
-   * Deliberately cheap: it reads three small JSON files and never hashes the
-   * entrypoint, so it is safe to run on every resolve and not just at install
-   * time. That matters because the installed tree is an ordinary directory on
-   * disk — a manifest verified once during install proves nothing about the
-   * bytes a later launch reads, and an edited `commandManifestHash` surfaces
-   * only as an opaque "managed runtime command manifest hash drift" rejection.
-   * Full per-file checksum verification stays on the install path, where the
-   * cost of hashing the entrypoint is paid once.
-   */
-  async #verifySignedMetadata(
-    directory: string,
-  ): Promise<{ manifest: RuntimeInstallationManifest; checksums: ChecksumManifest }> {
-    const manifest = parseRuntimeInstallationManifest(
-      JSON.parse(await readFile(join(directory, "runtime-manifest.json"), "utf8")) as unknown,
-    );
-    safeVersion(manifest.runtimeVersion);
-    const checksums = parseChecksumManifest(
-      JSON.parse(await readFile(join(directory, "checksums.json"), "utf8")) as unknown,
-    );
-    const signature = parseRuntimeSignatureManifest(
-      JSON.parse(await readFile(join(directory, "runtime-signature.json"), "utf8")) as unknown,
-    );
-    const manifestBytes = Buffer.from(await readFile(join(directory, "runtime-manifest.json")));
-    const checksumsBytes = Buffer.from(await readFile(join(directory, "checksums.json")));
-    const signedPayload = Buffer.concat([manifestBytes, Buffer.from("\0"), checksumsBytes]);
-    if (signature.payloadSha256 !== createHash("sha256").update(signedPayload).digest("hex")) {
-      throw new Error("Runtime signature does not match the artifact metadata");
-    }
-    const verifier = this.#signatureVerifier ?? createTrustedKeyVerifier(this.#trustedKeys);
-    if (!verifier.verify(signature, signedPayload)) throw new Error("Runtime signature verification failed");
-    if (checksums.files["runtime-manifest.json"] === undefined) {
-      throw new Error("checksums.json must cover runtime-manifest.json");
-    }
-    if (checksums.files[manifest.entrypoint] === undefined) {
-      throw new Error("checksums.json must cover the Runtime entrypoint");
-    }
-    return { manifest, checksums };
-  }
-
-  async #verifyFiles(artifactDirectory: string, files: Record<string, string>): Promise<void> {
-    for (const [file, expected] of Object.entries(files)) {
-      const path = join(artifactDirectory, file);
-      if (!inside(artifactDirectory, path)) throw new Error(`Checksum path escapes artifact: ${file}`);
-      const metadata = await lstat(path);
-      if (!metadata.isFile()) throw new Error(`Runtime artifact file must be a regular file: ${file}`);
-      const actual = await sha256(path);
-      if (actual !== expected) throw new Error(`Checksum mismatch for ${file}`);
-    }
-  }
-
-  async #verifyArtifactCoverage(artifactDirectory: string, files: Record<string, string>): Promise<void> {
-    const walk = async (directory: string): Promise<void> => {
-      for (const entry of await readdir(directory, { withFileTypes: true })) {
-        const path = join(directory, entry.name);
-        const artifactPath = relative(artifactDirectory, path).split(sep).join("/");
-        if (entry.isSymbolicLink()) {
-          throw new Error(`Runtime artifact cannot contain symbolic links: ${artifactPath}`);
-        }
-        if (entry.isDirectory()) {
-          await walk(path);
-        } else if (!entry.isFile()) {
-          throw new Error(`Runtime artifact contains an unsupported file type: ${artifactPath}`);
-        } else if (
-          artifactPath !== "checksums.json" &&
-          artifactPath !== "runtime-signature.json" &&
-          files[artifactPath] === undefined
-        ) {
-          throw new Error(`Runtime artifact file is not covered by checksums: ${artifactPath}`);
-        }
-      }
-    };
-    await walk(artifactDirectory);
-  }
-}
-
-function createTrustedKeyVerifier(keys: Readonly<Record<string, string | Buffer>>): RuntimeSignatureVerifier {
-  return {
-    verify(signature, signedPayload) {
-      const key = keys[signature.keyId];
-      if (key === undefined) return false;
-      try {
-        return verifySignature(null, signedPayload, createPublicKey(key), Buffer.from(signature.signature, "base64url"));
-      } catch {
-        return false;
-      }
-    },
-  };
 }

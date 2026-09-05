@@ -15,6 +15,7 @@
  */
 
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * Content-Security-Policy for the renderer. No `unsafe-eval` anywhere.
@@ -85,10 +86,15 @@ export type RendererTarget =
  * `app.asar` → `resources/renderer/dist/index.html`.
  */
 export function resolveRendererEntry(appPath: string, devServerUrl?: string): RendererTarget {
+  return resolveRendererEntryFrom(join(appPath, "..", "renderer", "dist"), devServerUrl);
+}
+
+/** 与 resolveRendererEntry 同语义，但直接给 renderer/dist 目录。 */
+export function resolveRendererEntryFrom(rendererDist: string, devServerUrl?: string): RendererTarget {
   if (devServerUrl !== undefined && devServerUrl !== "") {
     return { kind: "url", url: devServerUrl };
   }
-  return { kind: "file", path: join(appPath, "..", "renderer", "dist", "index.html") };
+  return { kind: "file", path: join(rendererDist, "index.html") };
 }
 
 /** Packaged builds ignore the developer Vite override. */
@@ -98,9 +104,9 @@ export function rendererDevServerUrl(isPackaged: boolean, envUrl?: string): stri
   return envUrl;
 }
 
-/** Origin that may drive the renderer: `file://` for packaged, dev-server origin otherwise. */
+/** Trusted entry URL for file bundles, or the dev-server origin. */
 export function rendererOriginFor(target: RendererTarget): string {
-  if (target.kind === "file") return "file://";
+  if (target.kind === "file") return pathToFileURL(target.path).href;
   try {
     return new URL(target.url).origin;
   } catch {
@@ -111,7 +117,7 @@ export function rendererOriginFor(target: RendererTarget): string {
 
 /**
  * A navigation target is trusted only when it stays on the packaged
- * renderer origin: any `file:` URL when the bundle is packaged, or an
+ * renderer entry: the exact `file:` document when the bundle is packaged, or an
  * exact scheme+host+port origin match for the dev server.
  */
 export function isTrustedRendererUrl(url: string, allowedOrigin: string): boolean {
@@ -122,7 +128,15 @@ export function isTrustedRendererUrl(url: string, allowedOrigin: string): boolea
   } catch {
     return false;
   }
-  if (allowedOrigin === "file://") return parsed.protocol === "file:";
+  if (allowedOrigin.startsWith("file:")) {
+    try {
+      const entry = new URL(allowedOrigin);
+      return parsed.protocol === "file:" && parsed.host === entry.host && parsed.pathname === entry.pathname;
+    } catch {
+      return false;
+    }
+  }
+  if (allowedOrigin === "null") return false;
   return parsed.origin === allowedOrigin;
 }
 

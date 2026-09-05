@@ -240,4 +240,84 @@ describe("desktop lifecycle", () => {
     await h.app.quit();
     assert.equal(h.quitCalls(), 1);
   });
+
+  test("without --omp-restarted, lock failure quits immediately without retrying", async () => {
+    let lockAttempts = 0;
+    let quitCalls = 0;
+    const deps: DesktopApplicationDeps = {
+      hostFactory: { create: async () => ({} as any) },
+      createWindow: async () => ({} as any),
+      requestSingleInstanceLock: () => {
+        lockAttempts += 1;
+        return false;
+      },
+      onSecondInstance: () => {},
+      onBeforeQuit: () => {},
+      onAllWindowsClosed: () => {},
+      quit: () => { quitCalls += 1; },
+      argv: ["node", "main.js"],
+    };
+    const app = createDesktopApplication(deps);
+    await app.start();
+    assert.equal(lockAttempts, 1);
+    assert.equal(quitCalls, 1);
+  });
+
+  test("with --omp-restarted, lock failure retries and succeeds when lock is freed", async () => {
+    let lockAttempts = 0;
+    let quitCalls = 0;
+    let windowCreated = false;
+    const deps: DesktopApplicationDeps = {
+      hostFactory: { create: async () => ({ status: "ready" } as any) },
+      createWindow: async () => {
+        windowCreated = true;
+        return { show: () => {}, focus: () => {}, close: () => {} } as any;
+      },
+      requestSingleInstanceLock: () => {
+        lockAttempts += 1;
+        // Succeed on 3rd attempt
+        return lockAttempts >= 3;
+      },
+      onSecondInstance: () => {},
+      onBeforeQuit: () => {},
+      onAllWindowsClosed: () => {},
+      quit: () => { quitCalls += 1; },
+      singleInstanceRetry: { attempts: 5, delayMs: 1 },
+      argv: ["node", "main.js", "--omp-restarted"],
+    };
+    const app = createDesktopApplication(deps);
+    await app.start();
+    assert.equal(lockAttempts, 3);
+    assert.equal(quitCalls, 0);
+    assert.equal(windowCreated, true);
+  });
+
+  test("with --omp-restarted, lock failure exhausts all retries and quits", async () => {
+    let lockAttempts = 0;
+    let quitCalls = 0;
+    let windowCreated = false;
+    const deps: DesktopApplicationDeps = {
+      hostFactory: { create: async () => ({} as any) },
+      createWindow: async () => {
+        windowCreated = true;
+        return {} as any;
+      },
+      requestSingleInstanceLock: () => {
+        lockAttempts += 1;
+        return false;
+      },
+      onSecondInstance: () => {},
+      onBeforeQuit: () => {},
+      onAllWindowsClosed: () => {},
+      quit: () => { quitCalls += 1; },
+      singleInstanceRetry: { attempts: 4, delayMs: 1 },
+      argv: ["node", "main.js", "--omp-restarted"],
+    };
+    const app = createDesktopApplication(deps);
+    await app.start();
+    // 1 initial + 4 retries = 5 attempts
+    assert.equal(lockAttempts, 5);
+    assert.equal(quitCalls, 1);
+    assert.equal(windowCreated, false);
+  });
 });

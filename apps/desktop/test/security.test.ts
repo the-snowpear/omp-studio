@@ -24,6 +24,7 @@
  */
 
 import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
 import { register } from "node:module";
 import { describe, test } from "node:test";
 
@@ -73,6 +74,7 @@ import {
   rendererCspFor,
   rendererDevServerUrl,
   resolveRendererEntry,
+  resolveRendererEntryFrom,
   secureWebPreferences,
   type CreateSecureWindowDeps,
   type NavigationGuardedWindow,
@@ -599,13 +601,17 @@ test("rendererDevServerUrl ignores the developer Vite override when packaged", (
 });
 
 describe("navigation and new-window policy", () => {
-  test("isTrustedRendererUrl allows only the packaged file origin for file bundles", () => {
-    assert.equal(isTrustedRendererUrl("file:///C:/app/index.html", "file://"), true);
-    assert.equal(isTrustedRendererUrl("file:///C:/app/other.html", "file://"), true);
-    assert.equal(isTrustedRendererUrl("https://evil.example/phish", "file://"), false);
-    assert.equal(isTrustedRendererUrl("javascript:alert(1)", "file://"), false);
-    assert.equal(isTrustedRendererUrl("", "file://"), false);
-    assert.equal(isTrustedRendererUrl("not a url", "file://"), false);
+  test("isTrustedRendererUrl allows only the selected packaged renderer document", () => {
+    assert.equal(isTrustedRendererUrl("file:///C:/app/index.html", "file:///C:/app/index.html"), true);
+    assert.equal(isTrustedRendererUrl("file:///C:/app/other.html", "file:///C:/app/index.html"), false);
+    assert.equal(isTrustedRendererUrl("file:///C:/app/index.html#settings", "file:///C:/app/index.html"), true);
+    assert.equal(isTrustedRendererUrl("file:///C:/app/../evil/index.html", "file:///C:/app/index.html"), false);
+    assert.equal(isTrustedRendererUrl("file://attacker/C:/app/index.html", "file:///C:/app/index.html"), false);
+    assert.equal(isTrustedRendererUrl("data:text/html,untrusted", "null"), false);
+    assert.equal(isTrustedRendererUrl("https://evil.example/phish", "file:///C:/app/index.html"), false);
+    assert.equal(isTrustedRendererUrl("javascript:alert(1)", "file:///C:/app/index.html"), false);
+    assert.equal(isTrustedRendererUrl("", "file:///C:/app/index.html"), false);
+    assert.equal(isTrustedRendererUrl("not a url", "file:///C:/app/index.html"), false);
   });
 
   test("isTrustedRendererUrl requires an exact origin match for the dev server", () => {
@@ -632,7 +638,7 @@ describe("navigation and new-window policy", () => {
         return undefined;
       },
     };
-    installNavigationGuards(fakeWindow, "file://");
+    installNavigationGuards(fakeWindow, "file:///C:/app/index.html");
 
     const willNavigate = events.get("will-navigate");
     const openHandler = events.get("setWindowOpenHandler");
@@ -718,7 +724,7 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
       },
       preloadPath: "C:\\app\\preload.cjs",
       target: { kind: "file", path: "C:\\app\\index.html" },
-      allowedOrigin: "file://",
+      allowedOrigin: "file:///C:/app/index.html",
     }) as unknown as FakeBrowserWindow;
     const received = window.options.webPreferences as Record<string, unknown>;
     assert.equal(received.contextIsolation, true);
@@ -739,7 +745,7 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
       windowOptions: {},
       preloadPath: "C:\\app\\preload.cjs",
       target: { kind: "file", path: "C:\\app\\renderer\\index.html" },
-      allowedOrigin: "file://",
+      allowedOrigin: "file:///C:/app/index.html",
       deferLoad: true,
     }) as unknown as FakeBrowserWindow;
     finishWindow.fireRenderer("did-finish-load");
@@ -750,7 +756,7 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
       windowOptions: {},
       preloadPath: "C:\\app\\preload.cjs",
       target: { kind: "file", path: "C:\\app\\renderer\\index.html" },
-      allowedOrigin: "file://",
+      allowedOrigin: "file:///C:/app/index.html",
       deferLoad: true,
     }) as unknown as FakeBrowserWindow;
     failedWindow.fireRenderer("did-fail-load");
@@ -763,7 +769,7 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
       windowOptions: {},
       preloadPath: "C:\\app\\preload.cjs",
       target: { kind: "file", path: "C:\\app\\renderer\\index.html" },
-      allowedOrigin: "file://",
+      allowedOrigin: "file:///C:/app/index.html",
     }) as unknown as FakeBrowserWindow;
     assert.equal(window.loaded, "file:C:\\app\\renderer\\index.html");
     assert.ok(window.listeners.has("will-navigate"));
@@ -786,7 +792,7 @@ describe("renderer entry resolution", () => {
     const target = resolveRendererEntry("C:\\app\\desktop\\dist", undefined);
     assert.equal(target.kind, "file");
     assert.ok((target as { path: string }).path.endsWith("renderer\\dist\\index.html"));
-    assert.equal(rendererOriginFor(target), "file://");
+    assert.equal(rendererOriginFor(target), pathToFileURL((target as { path: string }).path).href);
   });
 
   test("resolveRendererEntry maps the packaged asar onto extraResources renderer", () => {
@@ -796,6 +802,17 @@ describe("renderer entry resolution", () => {
       (target as { path: string }).path,
       "C:\\Program Files\\OMP Studio\\resources\\renderer\\dist\\index.html",
     );
+  });
+
+  test("resolveRendererEntryFrom maps payload directory to file target with file:// origin", () => {
+    const payloadDist = "C:\\Users\\alice\\AppData\\Local\\omp-studio\\payload\\versions\\0.1.4\\renderer";
+    const target = resolveRendererEntryFrom(payloadDist, undefined);
+    assert.equal(target.kind, "file");
+    assert.equal(target.path, "C:\\Users\\alice\\AppData\\Local\\omp-studio\\payload\\versions\\0.1.4\\renderer\\index.html");
+    const origin = rendererOriginFor(target);
+    assert.equal(origin, pathToFileURL(target.path).href);
+    const fileUrl = new URL(`file:///${target.path.replace(/\\/g, "/")}`).toString();
+    assert.equal(isTrustedRendererUrl(fileUrl, origin), true);
   });
 
   test("rendererOriginFor derives the exact dev origin and fails closed on junk", () => {

@@ -57,18 +57,35 @@ async function resolveCurrentArtifact() {
   );
 }
 
+const PACKAGING_KEYS_DIR = join(REPOSITORY_ROOT, "packaging", "keys");
+
 async function stagePublicKey() {
   let keyId;
   let publicKey;
+  let trustedKeysJson;
+  let keyPems = new Map(); // fileName -> buffer
+
   const envPath = process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY?.trim();
   const envId = process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
   if (envPath !== undefined && envPath.length > 0 && envId !== undefined && envId.length > 0) {
     keyId = envId;
     publicKey = await readFile(envPath);
+    trustedKeysJson = { schema: 1, activeKeyId: keyId, keys: { [keyId]: "trusted-public.pem" } };
+  } else if (await exists(join(PACKAGING_KEYS_DIR, "trusted-keys.json"))) {
+    const raw = JSON.parse(await readFile(join(PACKAGING_KEYS_DIR, "trusted-keys.json"), "utf8"));
+    keyId = raw.activeKeyId;
+    const activeFile = raw.keys[keyId];
+    if (!activeFile) throw new Error(`Active key ${keyId} not found in packaging/keys/trusted-keys.json`);
+    publicKey = await readFile(join(PACKAGING_KEYS_DIR, activeFile));
+    trustedKeysJson = raw;
+    for (const [kId, fileName] of Object.entries(raw.keys)) {
+      keyPems.set(fileName, await readFile(join(PACKAGING_KEYS_DIR, fileName)));
+    }
   } else {
     const local = await readRuntimeSigningKeys(defaultRuntimeKeysDirectory());
     keyId = local.keyId;
     publicKey = local.publicKey;
+    trustedKeysJson = { schema: 1, activeKeyId: keyId, keys: { [keyId]: "trusted-public.pem" } };
   }
   if (keyId.trim().length === 0 || publicKey.length === 0) {
     throw new Error("Runtime public verification key is empty");
@@ -78,6 +95,15 @@ async function stagePublicKey() {
   await mkdir(KEYS_OUT_DIR, { recursive: true });
   await writeFile(join(KEYS_OUT_DIR, RUNTIME_KEY_ID_FILE), `${keyId.trim()}\n`, { encoding: "utf8" });
   await writeFile(join(KEYS_OUT_DIR, RUNTIME_PUBLIC_KEY_FILE), publicKey);
+  await writeFile(
+    join(KEYS_OUT_DIR, "trusted-keys.json"),
+    `${JSON.stringify(trustedKeysJson, null, 2)}\n`,
+    { encoding: "utf8" },
+  );
+  for (const [fileName, buf] of keyPems.entries()) {
+    await writeFile(join(KEYS_OUT_DIR, fileName), buf);
+  }
+
   if (await exists(join(KEYS_OUT_DIR, RUNTIME_PRIVATE_KEY_FILE))) {
     throw new Error("refusing to pack Runtime private signing key");
   }

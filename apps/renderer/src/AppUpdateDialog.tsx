@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Brand } from "./brands";
 import { Icon } from "./icons";
@@ -15,12 +15,20 @@ export interface AppUpdateDialogProps {
     readonly downloadUrl?: string | undefined;
     readonly assetName?: string | undefined;
     readonly assetSize?: number | undefined;
+    readonly plan?: "none" | "hot" | "full";
+    readonly reason?: string | undefined;
   };
   readonly preview?: boolean;
   readonly isDownloading?: boolean;
   readonly downloadError?: string | null;
+  readonly receivedBytes?: number | undefined;
+  readonly totalBytes?: number | undefined;
+  readonly readyToApply?: boolean;
   readonly onClose: () => void;
   readonly onDownloadAndInstall?: () => Promise<boolean | void>;
+  readonly onApply?: () => Promise<boolean>;
+  readonly onSkip?: () => Promise<void>;
+  readonly onCancel?: () => Promise<void>;
 }
 
 function formatBytes(bytes?: number): string {
@@ -46,13 +54,25 @@ export function AppUpdateDialog({
   preview = false,
   isDownloading = false,
   downloadError = null,
+  receivedBytes,
+  totalBytes,
+  readyToApply = false,
   onClose,
   onDownloadAndInstall,
+  onApply,
+  onSkip,
+  onCancel,
 }: AppUpdateDialogProps): ReactNode {
   const { t } = useI18n();
   const [downloading, setDownloading] = useState(isDownloading);
   const [simulatedProgress, setSimulatedProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const progressPct = preview
+    ? simulatedProgress
+    : totalBytes && totalBytes > 0 && receivedBytes !== undefined
+      ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100))
+      : null;
 
   useEffect(() => {
     setDownloading(isDownloading);
@@ -68,24 +88,36 @@ export function AppUpdateDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, downloading]);
 
+  const previewTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  useEffect(() => {
+    return () => {
+      for (const id of previewTimersRef.current) clearTimeout(id);
+      previewTimersRef.current = [];
+    };
+  }, []);
+
   const handleDownload = useCallback(async () => {
     if (downloading) return;
     if (preview) {
       setDownloading(true);
       setSimulatedProgress(20);
-      setTimeout(() => setSimulatedProgress(60), 600);
-      setTimeout(() => setSimulatedProgress(100), 1200);
-      setTimeout(() => {
+      const timers = previewTimersRef.current;
+      timers.length = 0;
+      timers.push(setTimeout(() => setSimulatedProgress(60), 600));
+      timers.push(setTimeout(() => setSimulatedProgress(100), 1200));
+      timers.push(setTimeout(() => {
         setDownloading(false);
         setStatusMessage(t("appUpdate.downloadSuccess") + " " + t("appUpdate.demoUpdate"));
-      }, 1600);
+      }, 1600));
       return;
     }
-    if (onDownloadAndInstall) {
+    const action = readyToApply ? onApply : onDownloadAndInstall;
+    if (action) {
       setDownloading(true);
       setStatusMessage(null);
       try {
-        const ok = await onDownloadAndInstall();
+        const ok = await action();
         if (ok) {
           setStatusMessage(t("appUpdate.downloadSuccess"));
         }
@@ -93,7 +125,7 @@ export function AppUpdateDialog({
         setDownloading(false);
       }
     }
-  }, [downloading, preview, onDownloadAndInstall, t]);
+  }, [downloading, preview, readyToApply, onApply, onDownloadAndInstall, t]);
 
   const openGithub = useCallback((event: ReactMouseEvent<HTMLAnchorElement>) => {
     event.preventDefault();
@@ -122,15 +154,15 @@ export function AppUpdateDialog({
               {t("appUpdate.dialogTitle")} {preview ? t("appUpdate.demoUpdate") : ""}
             </span>
             <h2 id="appUpdateTitle">
-              {update.name || `OMP Studio v${update.version}`}
+              {update.name || (update.version ? `OMP Studio v${update.version}` : "OMP Studio")}
             </h2>
             <p className="create-branch-sub" style={{ marginTop: 4, display: "flex", gap: 12, alignItems: "center" }}>
               <span>
-                <b>{t("appUpdate.currentVersion")}</b>: <span className="mono">v{update.currentVersion}</span>
+                <b>{t("appUpdate.currentVersion")}</b>: <span className="mono">{update.currentVersion ? `v${update.currentVersion}` : "—"}</span>
               </span>
               <span>→</span>
               <span>
-                <b>{t("appUpdate.latestVersion")}</b>: <span className="mono" style={{ color: "var(--accent)" }}>v{update.version}</span>
+                <b>{t("appUpdate.latestVersion")}</b>: <span className="mono" style={{ color: "var(--accent)" }}>{update.version ? `v${update.version}` : "—"}</span>
               </span>
             </p>
           </div>
@@ -142,6 +174,8 @@ export function AppUpdateDialog({
         </div>
 
         <div className="create-project-body app-update-body" style={{ maxHeight: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+          {update.plan === "full" ? <p>{t("updates.fullInstallerRequired")}{update.reason ? ` · ${update.reason}` : ""}</p> : null}
+          {readyToApply ? <p>{t("updates.readyToApply")}</p> : null}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", opacity: 0.8 }}>
             <span>{t("appUpdate.releaseDate")}: {formatDate(update.publishedAt)}</span>
             {update.assetSize ? <span>{t("appUpdate.packageSize")}: {formatBytes(update.assetSize)}</span> : null}
@@ -185,14 +219,14 @@ export function AppUpdateDialog({
             <div style={{ marginTop: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: 4 }}>
                 <span>{t("appUpdate.downloading")}</span>
-                {preview ? <span>{simulatedProgress}%</span> : null}
+                {progressPct !== null ? <span>{progressPct}%</span> : null}
               </div>
               <div style={{ height: 6, borderRadius: 3, background: "var(--bg-subtle, rgba(0,0,0,0.1))", overflow: "hidden" }}>
                 <div
                   style={{
                     height: "100%",
                     background: "var(--accent)",
-                    width: preview ? `${simulatedProgress}%` : "100%",
+                    width: progressPct !== null ? `${progressPct}%` : "100%",
                     transition: "width 0.3s ease",
                   }}
                 />
@@ -219,17 +253,19 @@ export function AppUpdateDialog({
           </div>
 
           <div className="app-update-actions" style={{ display: "flex", gap: 8 }}>
+            {downloading && onCancel ? <button type="button" className="btn outline" onClick={() => void onCancel()}>{t("common.cancel")}</button> : null}
+            {onSkip && !readyToApply ? <button type="button" className="btn outline" disabled={downloading} onClick={() => void onSkip()}>{t("updates.skipVersion")}</button> : null}
             <button type="button" className="btn outline" disabled={downloading} onClick={onClose}>
               {t("appUpdate.remindLater")}
             </button>
             <button
               type="button"
               className="btn primary"
-              disabled={downloading || (!update.downloadUrl && !preview)}
+              disabled={downloading || (!onDownloadAndInstall && !preview)}
               autoFocus
               onClick={handleDownload}
             >
-              {downloading ? t("appUpdate.downloading") : t("appUpdate.downloadAndInstall")}
+              {downloading ? t("appUpdate.downloading") : readyToApply ? t("updates.applyAndRestart") : t("appUpdate.downloadAndInstall")}
             </button>
           </div>
         </div>
