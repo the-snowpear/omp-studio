@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, rm, rename, symlink } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, rename, symlink } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import process from "node:process";
 
@@ -24,6 +24,8 @@ const electronDist = join(root, "node_modules", "electron", "dist");
 const staleRuntimeDir = join(electronDist, "runtime");
 const previewElectronDir = join(root, "outputs", "preview-electron");
 const previewElectronExe = join(previewElectronDir, "OMP Studio.exe");
+const previewRuntimePayload = join(root, "packaging", "runtime-payload");
+const previewRuntimeKeys = join(root, "packaging", "runtime-keys");
 const appIcon = join(root, "apps", "desktop", "resources", "icon.ico");
 const rceditExe = join(root, "node_modules", "electron-winstaller", "vendor", "rcedit.exe");
 
@@ -200,6 +202,42 @@ Add-Type -TypeDefinition $code -Language CSharp
   }
 }
 
+async function stagePreviewRuntime() {
+  if (!existsSync(previewRuntimePayload)) {
+    throw new Error(
+      "Signed Runtime payload is missing. Run `npm run pack:win:prepare`, then retry.",
+    );
+  }
+  if (
+    !existsSync(join(previewRuntimeKeys, "key-id.txt")) ||
+    !existsSync(join(previewRuntimeKeys, "trusted-public.pem"))
+  ) {
+    throw new Error(
+      "Runtime verification keys are missing. Run `npm run pack:win:prepare`, then retry.",
+    );
+  }
+
+  const versions = (await readdir(previewRuntimePayload, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."));
+  if (versions.length === 0) {
+    throw new Error("Signed Runtime payload contains no version directory.");
+  }
+  for (const version of versions) {
+    const directory = join(previewRuntimePayload, version.name);
+    for (const required of ["omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json"]) {
+      if (!existsSync(join(directory, required))) {
+        throw new Error(`Signed Runtime payload ${version.name} is missing ${required}.`);
+      }
+    }
+  }
+
+  // The renamed executable reports app.isPackaged=true. Mirror electron-builder's
+  // extraFiles layout so production preview exercises the same managed Runtime
+  // discovery, verification and activation path as an installed build.
+  await cp(previewRuntimePayload, join(previewElectronDir, "runtime", "versions"), { recursive: true });
+  await cp(previewRuntimeKeys, join(previewElectronDir, "runtime-keys"), { recursive: true });
+}
+
 async function preparePreviewElectron() {
   if (!existsSync(electronDist)) {
     throw new Error("Electron distribution is missing. Run `npm install` once, then retry.");
@@ -229,6 +267,7 @@ async function preparePreviewElectron() {
     console.log(`[preview] Removed a stale Runtime tree from the Electron distribution: ${staleRuntimeDir}`);
   }
   await rename(join(previewElectronDir, "electron.exe"), previewElectronExe);
+  await stagePreviewRuntime();
 
   await run(rceditExe, [
     previewElectronExe,

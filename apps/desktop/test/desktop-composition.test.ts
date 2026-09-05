@@ -439,12 +439,13 @@ test("isBusy reports streaming residents first and falls back to the current sna
   });
 });
 
-test("managedInstall.installDirectory is handed to the runtime session as the live tree", async () => {
+test("managed install directory and trust are handed to the initial runtime session", async () => {
   await withTempProfile(async (profileDirectory) => {
     await withTempExecutable(async (executablePath) => {
       const installDirectory = await mkdtemp(join(tmpdir(), "omp-live-runtime-"));
       try {
         const session = fakeSessionPort({ ready: true });
+        const trustedKeys = { "test-key": "test-public-key" };
         const composition = await createDesktopHostComposition({
           platform: fakePlatform(profileDirectory).port,
           authorityLock: fakeAuthorityLock().port,
@@ -453,8 +454,10 @@ test("managedInstall.installDirectory is handed to the runtime session as the li
           resolver: { probe: fullParityProbe() },
           preference: { kind: "system", executable: executablePath, allowLimited: false },
           managedInstall: { installDirectory },
+          installer: { trustedKeys },
         });
         assert.equal(session.contexts[0]?.runtimeInstallDirectory, installDirectory);
+        assert.deepEqual(session.contexts[0]?.installer?.trustedKeys, trustedKeys);
         await composition.shutdown();
       } finally {
         await rm(installDirectory, { recursive: true, force: true });

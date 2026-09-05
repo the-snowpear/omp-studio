@@ -1265,6 +1265,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
             endpoint: endpointLease.endpoint,
             profileDirectory,
             runtimeInstallDirectory,
+            ...(installerOptions === undefined ? {} : { installer: installerOptions }),
             ...(activeWorkspace === undefined ? {} : { workspace: activeWorkspace }),
           });
           // A cold preview can race the first Runtime process with Windows
