@@ -72,3 +72,34 @@ public key while still signing the update with the current private key.
 Only switch signing identities after clients have acquired that Setup.
 If the active private key is lost, existing clients cannot automatically
 trust a replacement: a manually installed full Setup is required again.
+
+## Verified Publication
+
+Published on 2026-09-06:
+
+- Release: https://github.com/the-snowpear/omp-studio/releases/tag/v0.1.4
+- Successful workflow: https://github.com/the-snowpear/omp-studio/actions/runs/34030531515
+- Release source/tag: `d068e47d9f0275f8b386b5f6a11aa869fa6ef3d5`.
+- Windows x64 application: `0.1.4`; Runtime: `18.1.10-studio.2`.
+- Index sequence: `1`; signing key: `omp-studio-release-2026b`.
+- Eight public assets are present and the release is stable/latest.
+- CI application/Runtime gates, installer audit and P5 readiness gate passed.
+- Production download code verified the index signature and every asset digest.
+- Downloaded Runtime passed real installation, activation and smoke test.
+- Downloaded payload passed installation, repeated installation and startup
+  compatibility selection against the 0.1.4 baseline.
+- A 0.1.3 installed Main correctly receives a full-Setup plan; Runtime-only
+  upgrade is blocked until the 0.1.4 Main baseline is installed.
+
+Local evidence and downloaded files are in `outputs/published-v0.1.4/`,
+including `verification.json`; these generated outputs are not committed.
+The local network intermittently timed out on GitHub direct downloads. All
+assets were successfully verified through `https://gh-proxy.com/`, which was
+saved to the newly created `%APPDATA%\omp-studio\update-prefs.json`. No prior
+preference file existed. The shipped default remains direct GitHub access;
+the local mirror can be cleared from update settings. Mirrors do not replace
+the Ed25519 trust check.
+
+The Setup has no Windows Authenticode signature. The update index authenticates
+its SHA-256 digest. A clean Windows GUI install/upgrade remains a separate
+manual check; the automated Runtime install test does not claim to cover it.
