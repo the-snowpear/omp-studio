@@ -316,13 +316,14 @@ export function createManagedArtifactLocator(options: {
 }): (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined> {
   if (options.locateArtifact !== undefined) return options.locateArtifact;
 
+  const artifactRoot = options.artifactRoot;
   const fallback =
-    options.artifactRoot === undefined
+    artifactRoot === undefined
       ? locateManagedRuntimeArtifact
       : (input: LocateManagedRuntimeArtifactOptions) =>
           locateManagedRuntimeArtifact({
             ...input,
-            roots: defaultArtifactRoots(input.platform, options.artifactRoot),
+            roots: [resolve(artifactRoot)],
           });
 
   return async (input) => {

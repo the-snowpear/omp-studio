@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime 候选版本激活后若无法恢复会话，自动尝试恢复上一版本与原会话。
 - 修复更新取消测试在异步文件操作结束前清理目录造成的竞态。
 - 修复 Windows 短路径或目录别名导致工作区内拖入文件被误判为外部文件的问题。
+- 修复显式指定 Runtime 工件目录后仍混入其他扫描目录、导致安装版本选错的问题。
 
 ## [0.1.3] - 2026-09-04
 
