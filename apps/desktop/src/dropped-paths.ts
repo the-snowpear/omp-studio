@@ -43,7 +43,7 @@ export async function resolveDroppedPath(cwd: string, absolutePath: string): Pro
   if (typeof absolutePath !== "string" || absolutePath.length === 0 || absolutePath.length > 4_096) {
     return { ok: false, reason: "invalid" };
   }
-  const root = resolve(cwd);
+  const root = await realpath(resolve(cwd)).catch(() => resolve(cwd));
   const resolved = resolve(absolutePath);
   let metadata;
   try {

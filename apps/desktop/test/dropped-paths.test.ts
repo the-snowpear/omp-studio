@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -15,6 +15,20 @@ async function makeWorkspace(): Promise<string> {
 }
 
 describe("resolveDroppedPath", () => {
+  test("canonicalizes the workspace root before classifying a path through an alias", async () => {
+    const root = await makeWorkspace();
+    const holder = await mkdtemp(join(tmpdir(), "omp-drop-alias-"));
+    const alias = join(holder, "workspace");
+    try {
+      await symlink(root, alias, process.platform === "win32" ? "junction" : "dir");
+      assert.deepEqual(await resolveDroppedPath(alias, join(root, "src", "a.ts")),
+        { ok: true, kind: "file", scope: "workspace", path: "src/a.ts", name: "a.ts" });
+    } finally {
+      await rm(holder, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("maps files and folders inside the workspace to relative paths", async () => {
     const root = await makeWorkspace();
     const file = await resolveDroppedPath(root, join(root, "src", "a.ts"));
