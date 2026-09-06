@@ -129,7 +129,12 @@ try {
       "packages/coding-agent/test/studio-session-telemetry.test.ts",
       "packages/coding-agent/test/studio-archived-session-telemetry.test.ts",
   ];
-  for (const suite of suites) run(bun, ["test", suite], { cwd: ompSourceDirectory, env, timeoutMs: 120_000 });
+  for (const suite of suites) {
+    const coldSession = suite.endsWith("studio-approval-ask-e2e.test.ts");
+    run(bun, ["test", ...(coldSession ? ["--timeout=30000"] : []), suite], {
+      cwd: ompSourceDirectory, env, timeoutMs: 120_000,
+    });
+  }
   run(bun, ["run", "ci:test:smoke"], { cwd: ompSourceDirectory, env, timeoutMs: 120_000 });
 } catch (error) {
   verificationError = error;

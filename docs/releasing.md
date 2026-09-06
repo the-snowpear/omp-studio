@@ -28,6 +28,8 @@ After `npm run check` passes for the current source, patch verification may
 use `--skip-workspace-check` to avoid repeating that same workspace gate.
 Runtime type checks, every Runtime suite, and smoke tests still run. Native
 Runtime suites use separate processes with bounded execution time on Windows.
+CI pins Bun 1.3.14 to match the validated Runtime toolchain. The real approval
+E2E suite allows 30 seconds for cold AgentSession initialization.
 
 Before the first run, configure the `release` GitHub Environment and its
 `OMP_RUNTIME_SIGNING_KEY` secret with the Ed25519 private key matching the
