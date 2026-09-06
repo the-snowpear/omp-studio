@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/src/extensibility/extensions/types.ts b/packages/coding-agent/src/extensibility/extensions/types.ts
-index d7a0e396c5..07988ff7bc 100644
+index e79897301e..bb669a7158 100644
 --- a/packages/coding-agent/src/extensibility/extensions/types.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/types.ts
 @@ -269,6 +269,26 @@ export interface ExtensionUIContext {
@@ -30,7 +30,7 @@ index d7a0e396c5..07988ff7bc 100644
  	askDialog?(
  		questions: ExtensionAskDialogQuestion[],
 diff --git a/packages/coding-agent/src/extensibility/extensions/wrapper.ts b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
-index bd4689dbed..6a17de94a2 100644
+index a2aa29d867..a4011e4fa4 100644
 --- a/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 @@ -7,6 +7,7 @@ import type {
@@ -60,7 +60,7 @@ index bd4689dbed..6a17de94a2 100644
  /**
   * Adapts a RegisteredTool into an AgentTool.
   */
-@@ -302,9 +315,80 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+@@ -303,9 +316,80 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  				});
  			};
  
@@ -144,7 +144,7 @@ index bd4689dbed..6a17de94a2 100644
  				const reason = "no interactive UI available";
  				await emitApprovalResolved(false, reason);
  				if (pendingSafetyChecks.length > 0) {
-@@ -320,29 +404,6 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+@@ -321,29 +405,6 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  						`  3. Use an interactive UI to approve the tool call`,
  				);
  			}
@@ -175,19 +175,22 @@ index bd4689dbed..6a17de94a2 100644
  
  		// Execute the actual tool
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index 4f073becaa..a640e9b3d0 100644
+index d647c7908f..38dcac7252 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
-@@ -227,7 +227,7 @@ import {
+@@ -236,9 +236,9 @@ import {
  	xdevEntries,
  } from "./tools";
- import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
+ import { createBrowserPrelude } from "./tools/browser";
+-import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
+ import { createComputerPrelude } from "./tools/computer";
 -import { ToolContextStore } from "./tools/context";
++import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
 +import { ToolContextStore, type ToolUiFactory } from "./tools/context";
  import { isIrcEnabled } from "./tools/hub";
  import { getImageGenTools } from "./tools/image-gen";
  import { wrapToolWithMetaNotice } from "./tools/output-meta";
-@@ -641,8 +641,8 @@ export interface CreateAgentSessionResult {
+@@ -664,8 +664,8 @@ export interface CreateAgentSessionResult {
  	session: AgentSession;
  	/** Extensions result (loaded extensions + runtime) */
  	extensionsResult: LoadExtensionsResult;
@@ -198,7 +201,7 @@ index 4f073becaa..a640e9b3d0 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -3389,7 +3389,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -3474,7 +3474,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model);
  		};
  
@@ -262,7 +265,7 @@ index 69b25bb4d3..6340b70220 100644
  	}
  
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
-index edc4848145..31364684a7 100644
+index d4132c16f5..09ba035021 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
 +++ b/packages/coding-agent/test/extensions-runner.test.ts
 @@ -2459,6 +2459,76 @@ describe("ExtensionRunner", () => {

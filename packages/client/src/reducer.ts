@@ -271,6 +271,21 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "agent.revive": true,
   "agent.release": true,
   "job.cancel": true,
+  "browser.evaluate": true,
+  "computer.evaluate": true,
+  "image.read": true,
+  "terminal.image": true,
+  "video.metadata": false,
+  "video.frame": true,
+  "eval.agent.start": true,
+  "eval.agent.status": false,
+  "eval.agent.wait": false,
+  "eval.agent.cancel": true,
+  "eval.completion.start": true,
+  "eval.completion.status": false,
+  "eval.completion.wait": false,
+  "eval.completion.cancel": true,
+  "eval.workpool.status": false,
 };
 
 export function isSensitiveCommand(name: CommandName): boolean {

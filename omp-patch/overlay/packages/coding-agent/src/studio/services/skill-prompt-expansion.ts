@@ -84,5 +84,5 @@ function startsWithLocalExecutionPrefix(trimmedStart: string): boolean {
 	const sigilLength = trimmedStart.charCodeAt(1) === 36 /* $ */ ? 2 : 1;
 	const next = trimmedStart.charCodeAt(sigilLength);
 	if (Number.isNaN(next)) return true;
-	return next === 32 /* space */ || next === 9 /* tab */ || next === 10 /* LF */ || next === 13 /* CR */;
+	return next === 32 /* space */ || next === 9 /* tab */ || next === 10 /* LF */ || next === 13; /* CR */
 }

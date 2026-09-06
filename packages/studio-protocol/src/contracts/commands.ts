@@ -1,4 +1,5 @@
 import type { AgentOperation, JobOperation } from "./agents-jobs";
+import type { EvaluationOperation } from "./evaluation";
 import type { SessionTranscriptRead } from "./conversation";
 import type { CommandId, InteractionId } from "./ids";
 import type { RemoteInteractionResponse } from "./interactions";
@@ -134,6 +135,7 @@ export type StudioOperation =
   | TransferOperation
   | AgentOperation
   | JobOperation
+  | EvaluationOperation
   | RemoteInteractionResponse;
 
 export type CommandConcurrency =

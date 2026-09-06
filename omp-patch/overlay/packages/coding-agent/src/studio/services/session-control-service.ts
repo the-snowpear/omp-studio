@@ -26,7 +26,7 @@ export interface SessionControlSession {
 	promptCustomMessage?(
 		message: SessionControlPrelude,
 		options?: { streamingBehavior?: "steer" | "followUp"; queueOnly?: boolean },
-	): Promise<void>;
+	): Promise<void | boolean>;
 	maybeStartTitleGeneration?(text: string): void;
 	resetSessionContext(): Promise<{ droppedCount: number } | undefined>;
 	retry(): Promise<boolean>;

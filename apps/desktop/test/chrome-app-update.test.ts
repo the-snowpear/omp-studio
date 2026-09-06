@@ -1,18 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, test } from "node:test";
-import { Readable } from "node:stream";
 
 import {
   CHROME_APP_UPDATE_CHANNELS,
+  RETIRED_APP_UPDATE_CHANNELS,
   type AppUpdateInfo,
 } from "../src/chrome-app-update-shared.js";
 import {
   checkGitHubReleaseUpdate,
   compareSemver,
-  downloadInstallerFile,
   findWindowsInstallerAsset,
   parseSemver,
   registerChromeAppUpdateIpc,
@@ -146,138 +142,19 @@ describe("chrome-app-update", () => {
     });
   });
 
-  describe("downloadInstallerFile", () => {
-    test("downloads stream to destination and returns file path", async () => {
-      const tempDir = await mkdtemp(join(tmpdir(), "omp-installer-dl-"));
-      try {
-        const chunk1 = Buffer.from("Hello ");
-        const chunk2 = Buffer.from("World!");
-
-        const mockFetcher = async () => {
-          const stream = Readable.toWeb(Readable.from([chunk1, chunk2]));
-          return {
-            ok: true,
-            status: 200,
-            body: stream,
-          } as any;
-        };
-
-        const downloadedPath = await downloadInstallerFile({
-          url: "https://example.com/OMP-Setup.exe",
-          targetDirectory: tempDir,
-          fetcher: mockFetcher as any,
-        });
-
-        assert.ok(downloadedPath.endsWith("OMP-Setup.exe"));
-        const downloaded = await readFile(downloadedPath, "utf8");
-        assert.equal(downloaded, "Hello World!");
-      } finally {
-        await rm(tempDir, { recursive: true, force: true });
-      }
-    });
+  test("legacy registration exposes only read-only check and retires executable channels", async () => {
+    const ipc = new FakeIpcMain();
+    for (const channel of RETIRED_APP_UPDATE_CHANNELS) ipc.handle(channel, async () => { throw new Error("retired handler called"); });
+    const handle = registerChromeAppUpdateIpc({ ipcMain: ipc, isTrustedSender: () => true, currentVersion: "0.1.3" });
+    assert.deepEqual([...ipc.handlers.keys()], [CHROME_APP_UPDATE_CHANNELS.check]);
+    for (const channel of RETIRED_APP_UPDATE_CHANNELS) await assert.rejects(ipc.invoke(channel, {}, { filePath: "C:/unsafe.exe", url: "https://example.com/unsafe.exe" }), /No handler registered/);
+    handle.dispose();
+    assert.equal(ipc.handlers.size, 0);
   });
-
-  describe("registerChromeAppUpdateIpc", () => {
-    test("wires check, download, and install handlers", async () => {
-      const tempDir = await mkdtemp(join(tmpdir(), "omp-app-update-ipc-"));
-      try {
-        const ipc = new FakeIpcMain();
-        let openPathCalledWith = "";
-        let quitCalled = false;
-
-        const release: GitHubReleaseResponse = {
-          tag_name: "v0.1.4",
-          body: "notes",
-          assets: [
-            { name: "Setup.exe", browser_download_url: "https://example.com/Setup.exe", size: 12 },
-          ],
-        };
-
-        const mockFetcher = async (url: string) => {
-          if (url.endsWith("Setup.exe")) {
-            return {
-              ok: true,
-              status: 200,
-              body: Readable.toWeb(Readable.from([Buffer.from("dummy-binary")])),
-            } as any;
-          }
-          return {
-            ok: true,
-            status: 200,
-            json: async () => release,
-          } as any;
-        };
-
-        const handle = registerChromeAppUpdateIpc({
-          ipcMain: ipc as any,
-          isTrustedSender: () => true,
-          currentVersion: "0.1.3",
-          updatesDirectory: tempDir,
-          openPath: async (p) => {
-            openPathCalledWith = p;
-            return "";
-          },
-          quitApp: () => {
-            quitCalled = true;
-          },
-          fetcher: mockFetcher as any,
-        });
-
-        // 1. check
-        const checkRes = (await ipc.invoke(CHROME_APP_UPDATE_CHANNELS.check, {
-          isDestroyed: () => false,
-        })) as AppUpdateInfo;
-        assert.equal(checkRes.available, true);
-        assert.equal(checkRes.version, "0.1.4");
-
-        // 2. download
-        const dlRes = await ipc.invoke(
-          CHROME_APP_UPDATE_CHANNELS.download,
-          { isDestroyed: () => false, send: () => {} },
-          { url: "https://example.com/Setup.exe" },
-        );
-        assert.equal(dlRes.ok, true);
-        assert.ok(dlRes.filePath.endsWith("Setup.exe"));
-
-        // 3. install (openPath + quit)
-        const instRes = await ipc.invoke(
-          CHROME_APP_UPDATE_CHANNELS.install,
-          { isDestroyed: () => false },
-          { filePath: dlRes.filePath },
-        );
-        assert.equal(instRes.ok, true);
-        assert.equal(openPathCalledWith, dlRes.filePath);
-
-        handle.dispose();
-      } finally {
-        await rm(tempDir, { recursive: true, force: true });
-      }
-    });
-
-    test("rejects untrusted sender", async () => {
-      const ipc = new FakeIpcMain();
-      const handle = registerChromeAppUpdateIpc({
-        ipcMain: ipc as any,
-        isTrustedSender: () => false,
-        currentVersion: "0.1.3",
-        updatesDirectory: "dummy",
-        openPath: () => "",
-      });
-
-      const checkRes = await ipc.invoke(CHROME_APP_UPDATE_CHANNELS.check, {
-        isDestroyed: () => false,
-      });
-      assert.equal(checkRes, null);
-
-      const dlRes = await ipc.invoke(
-        CHROME_APP_UPDATE_CHANNELS.download,
-        { isDestroyed: () => false },
-        { url: "https://example.com/Setup.exe" },
-      );
-      assert.equal(dlRes.ok, false);
-      assert.equal(dlRes.message, "Untrusted sender");
-
-      handle.dispose();
-    });
+  test("read-only check rejects untrusted sender", async () => {
+    const ipc = new FakeIpcMain();
+    const handle = registerChromeAppUpdateIpc({ ipcMain: ipc, isTrustedSender: () => false, currentVersion: "0.1.3" });
+    assert.equal(await ipc.invoke(CHROME_APP_UPDATE_CHANNELS.check, { isDestroyed: () => false }), null);
+    handle.dispose();
   });
 });

@@ -60,7 +60,13 @@ export function classifyOperation(operation: StudioOperation): CommandConcurrenc
     operation.kind === "agent.conversation.read" ||
     operation.kind === SESSION_TRANSCRIPT_READ_KIND ||
     operation.kind === "job.list" ||
-    operation.kind === "job.get"
+    operation.kind === "job.get" ||
+    operation.kind === "video.metadata" ||
+    operation.kind === "eval.agent.status" ||
+    operation.kind === "eval.agent.wait" ||
+    operation.kind === "eval.completion.status" ||
+    operation.kind === "eval.completion.wait" ||
+    operation.kind === "eval.workpool.status"
   ) {
     return "read-concurrent";
   }
@@ -89,8 +95,13 @@ export function classifyOperation(operation: StudioOperation): CommandConcurrenc
     operation.kind === "agent.kill" ||
     operation.kind === "agent.revive" ||
     operation.kind === "agent.release" ||
-    operation.kind === "job.cancel"
+    operation.kind === "job.cancel" ||
+    operation.kind === "eval.agent.cancel" ||
+    operation.kind === "eval.completion.cancel"
   ) {
+    return "queue-compatible";
+  }
+  if (operation.kind === "browser.evaluate" || operation.kind === "computer.evaluate" || operation.kind === "image.read" || operation.kind === "terminal.image" || operation.kind === "video.frame" || operation.kind === "eval.agent.start" || operation.kind === "eval.completion.start") {
     return "queue-compatible";
   }
   if (

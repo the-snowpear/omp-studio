@@ -54,7 +54,11 @@ export interface StudioHelloResponse {
 	challengeProof: string;
 }
 
+import type { EvaluationOperation } from "./evaluation-protocol";
+import { isEvaluationOperationKind, validateEvaluationOperation } from "./evaluation-validation";
+
 export type StudioOperation =
+	| EvaluationOperation
 	| { kind: "runtime.snapshot" }
 	| { kind: "runtime.settings.get"; keys?: StudioRuntimeSettingKey[] }
 	| { kind: "runtime.settings.set"; key: StudioRuntimeSettingKey; value: unknown; persist: boolean }
@@ -511,6 +515,10 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		!nonEmptyString(operation.kind)
 	) {
 		throw new StudioFrameError("Invalid Studio request");
+	}
+	if (isEvaluationOperationKind(operation.kind)) {
+		validateEvaluationOperation(operation);
+		return input as unknown as StudioRequest;
 	}
 	switch (operation.kind) {
 		case "runtime.snapshot":

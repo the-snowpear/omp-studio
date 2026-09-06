@@ -44,6 +44,8 @@ declare global {
 
   var ompStudioChrome:
     | {
+        /** Initial workbench health; absent on older installed main/preload versions. */
+        reportPayloadHealth?(status: "ready" | "failed"): Promise<boolean>;
         setTheme(theme: "light" | "dark"): Promise<void>;
         /** App 级系统通知（固定文案；非 Host / Studio Bridge 面）。 */
         notify(payload: { title: string; body?: string }): Promise<void>;
@@ -163,6 +165,7 @@ declare global {
           readonly jobId?: string;
           readonly cancelled?: boolean;
           readonly runtimeVersion?: string;
+          readonly runtimeChannel?: "stable" | "canary";
           readonly message?: string;
         }>;
         /** 取消正在进行中的更新下载或任务。 */

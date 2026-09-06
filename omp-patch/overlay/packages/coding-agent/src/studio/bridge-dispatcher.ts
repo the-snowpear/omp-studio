@@ -1,3 +1,6 @@
+import { isEvaluationOperationKind } from "./evaluation-validation";
+import type { EvaluationOperation } from "./evaluation-protocol";
+import { StudioEvaluationError } from "./services/evaluation-service";
 import * as crypto from "node:crypto";
 import type { StudioEventEnvelope, StudioProtocolError, StudioReceipt, StudioRequest } from "./bridge-protocol";
 import { StudioRuntimeCommandArbiter, StudioRuntimeCommandError } from "./command-arbiter";
@@ -109,6 +112,7 @@ function operationSignature(request: StudioRequest): string {
 }
 
 function protocolError(error: unknown): StudioProtocolError {
+	if (error instanceof StudioEvaluationError) return { code: error.code, message: error.message, retryable: false };
 	if (error instanceof StudioRuntimeCommandError) {
 		return { code: error.code, message: error.message, retryable: false };
 	}
@@ -244,7 +248,26 @@ export class StudioBridgeDispatcher {
 				isStreaming: runtime.session.isStreaming,
 				isCompacting: runtime.session.isCompacting,
 			}),
-			[...SESSION_CONTROL_OPERATION_KINDS, "runtime.pause", "runtime.resume"],
+			[
+				...SESSION_CONTROL_OPERATION_KINDS,
+				"runtime.pause",
+				"runtime.resume",
+				"browser.evaluate",
+				"computer.evaluate",
+				"image.read",
+				"terminal.image",
+				"video.metadata",
+				"video.frame",
+				"eval.agent.start",
+				"eval.agent.status",
+				"eval.agent.wait",
+				"eval.agent.cancel",
+				"eval.completion.start",
+				"eval.completion.status",
+				"eval.completion.wait",
+				"eval.completion.cancel",
+				"eval.workpool.status",
+			],
 		);
 		this.#permissions = runtime.services.permissions ?? new StudioPermissionControlService(runtime.session);
 		this.#sessionControl = new SessionControlService(runtime.session, {
@@ -347,7 +370,8 @@ export class StudioBridgeDispatcher {
 		if (
 			operation.kind !== "runtime.pause" &&
 			operation.kind !== "runtime.resume" &&
-			!SESSION_CONTROL_OPERATION_KINDS.has(operation.kind)
+			!SESSION_CONTROL_OPERATION_KINDS.has(operation.kind) &&
+			!isEvaluationOperationKind(operation.kind)
 		) {
 			this.#reject(
 				request,
@@ -388,37 +412,39 @@ export class StudioBridgeDispatcher {
 					stateVersion: this.projector.stateVersion,
 					status: "accepted",
 				});
-				const result = isShutdownOperation
-					? await this.#executeShutdownOperation(operation)
-					: isLiveOperation
-						? await this.#executeLiveOperation(operation)
-						: isPauseOperation
-							? await this.#executePauseOperation(operation)
-							: isLoopOperation
-								? await this.#executeLoopOperation(operation)
-								: isModeOperation
-									? await this.#executeModeOperation(operation)
-									: isTreeOperation
-										? await this.#executeTreeOperation(operation, commandId)
-										: operation.kind === "session.fork"
-											? await this.runtime.services.fork.fork()
-											: operation.kind === "session.handoff"
-												? await this.runtime.services.handoff.handoff(operation.customInstructions)
-												: isOperatorOperation
-													? await this.#executeOperatorOperation(operation)
-													: isBtwOperation
-														? await this.#executeBtwOperation(operation)
-														: isOmfgOperation
-															? await this.#executeOmfgOperation(operation, commandId)
-															: isTanOperation
-																? await this.#executeTanOperation(operation)
-																: isAgentOperation
-																	? await this.#executeAgentOperation(operation)
-																	: isJobOperation
-																		? await this.#executeJobOperation(operation)
-																		: isPermissionOperation
-																			? await this.#executePermissionOperation(operation)
-																			: await this.#executeSessionOperation(operation, commandId);
+				const result = isEvaluationOperationKind(operation.kind)
+					? await this.runtime.services.evaluation.execute(operation as EvaluationOperation)
+					: isShutdownOperation
+						? await this.#executeShutdownOperation(operation)
+						: isLiveOperation
+							? await this.#executeLiveOperation(operation)
+							: isPauseOperation
+								? await this.#executePauseOperation(operation)
+								: isLoopOperation
+									? await this.#executeLoopOperation(operation)
+									: isModeOperation
+										? await this.#executeModeOperation(operation)
+										: isTreeOperation
+											? await this.#executeTreeOperation(operation, commandId)
+											: operation.kind === "session.fork"
+												? await this.runtime.services.fork.fork()
+												: operation.kind === "session.handoff"
+													? await this.runtime.services.handoff.handoff(operation.customInstructions)
+													: isOperatorOperation
+														? await this.#executeOperatorOperation(operation)
+														: isBtwOperation
+															? await this.#executeBtwOperation(operation)
+															: isOmfgOperation
+																? await this.#executeOmfgOperation(operation, commandId)
+																: isTanOperation
+																	? await this.#executeTanOperation(operation)
+																	: isAgentOperation
+																		? await this.#executeAgentOperation(operation)
+																		: isJobOperation
+																			? await this.#executeJobOperation(operation)
+																			: isPermissionOperation
+																				? await this.#executePermissionOperation(operation)
+																				: await this.#executeSessionOperation(operation, commandId);
 				if (!isPauseOperation) this.projector.commitStateChange();
 				// Manual /compact, /clear, and handoff rewrite the context without
 				// a following conversation turn, so no conversation event will

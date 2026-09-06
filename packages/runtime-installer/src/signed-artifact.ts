@@ -31,6 +31,14 @@ export interface RuntimeSignatureVerifier {
   verify(signature: RuntimeSignatureManifest, signedPayload: Buffer): boolean;
 }
 
+export class ArtifactAlreadyInstalledError extends Error {
+  readonly code = "ARTIFACT_ALREADY_INSTALLED";
+  constructor(readonly version: string) {
+    super(`Runtime ${version} is already installed`);
+    this.name = "ArtifactAlreadyInstalledError";
+  }
+}
+
 export function assertSafeVersion(version: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(version)) {
     throw new TypeError("Runtime version is not safe for a directory name");
@@ -189,8 +197,13 @@ export async function installVerifiedArtifact(input: {
   readonly version: string;
   readonly requireFile?: string;
   readonly verifyStaging?: (directory: string) => Promise<unknown>;
+  /** Repair only: called after staging verification, immediately before replacing the old directory. */
+  readonly replaceExisting?: { readonly beforeReplace: () => Promise<void> };
 }): Promise<void> {
   assertSafeVersion(input.version);
+  if (input.replaceExisting !== undefined && input.verifyStaging === undefined) {
+    throw new TypeError("Artifact repair requires staging verification");
+  }
   const finalDirectory = join(input.versionsDirectory, input.version);
   if (!isInside(input.versionsDirectory, finalDirectory)) {
     throw new Error("Runtime target escaped the versions directory");
@@ -198,7 +211,7 @@ export async function installVerifiedArtifact(input: {
 
   try {
     await access(finalDirectory);
-    throw new Error(`Runtime ${input.version} is already installed`);
+    if (input.replaceExisting === undefined) throw new ArtifactAlreadyInstalledError(input.version);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
@@ -208,6 +221,8 @@ export async function installVerifiedArtifact(input: {
     input.versionsDirectory,
     `.staging-${input.version}-${randomBytes(6).toString("hex")}`,
   );
+  const recovery = join(input.versionsDirectory, `.recovery-${input.version}-${randomBytes(6).toString("hex")}`);
+  let movedOriginal = false;
 
   try {
     await cp(input.sourceDirectory, staging, { recursive: true, errorOnExist: true, force: false });
@@ -226,9 +241,24 @@ export async function installVerifiedArtifact(input: {
     }
     // The source may change during cp; only publish the verified copy.
     await input.verifyStaging?.(staging);
+    if (input.replaceExisting !== undefined) {
+      await input.replaceExisting.beforeReplace();
+      await rename(finalDirectory, recovery);
+      movedOriginal = true;
+    }
     await rename(staging, finalDirectory);
   } catch (error) {
+    if (movedOriginal) {
+      try {
+        await rename(recovery, finalDirectory);
+      } catch (restoreError) {
+        throw new AggregateError([error, restoreError], `Artifact replacement failed; original installation is preserved at ${recovery}`);
+      }
+    }
     await rm(staging, { recursive: true, force: true });
     throw error;
   }
+  // A locked old file must not turn a successfully published repair into a failure.
+  // If cleanup fails, the hidden recovery directory remains available for inspection.
+  if (movedOriginal) await rm(recovery, { recursive: true, force: true }).catch(() => undefined);
 }

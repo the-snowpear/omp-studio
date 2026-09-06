@@ -734,6 +734,96 @@ export function createDesktopRuntimeSessionPort(
     stop(): Promise<void> {
       return serialized(stopAll);
     },
+    withRuntimeMaintenance<T>(operation: () => Promise<T>, expectedVersion?: () => string | undefined,
+      refreshContext?: () => Promise<DesktopRuntimeSessionContext>,
+      recoverPrevious?: () => Promise<string | undefined>): Promise<T> {
+      return serialized(async () => {
+        const previous = [...residents.values()];
+        if (previous.some((resident) => resident.session.hello() !== undefined && !sessionCanUpdate(resident.session))) {
+          throw new Error("Finish active sessions and pending interactions before updating Runtime");
+        }
+        const selectedId = activeSessionId;
+        let selectedWorkspace = workspace;
+        const endBatch = batchResidentPublications();
+        sessionSink?.(undefined);
+        try {
+          let result: T | undefined;
+          let operationError: unknown;
+          let operationFailed = false;
+          let stopped = false;
+          try {
+            await stopAll();
+            stopped = true;
+            result = await operation();
+          } catch (error) {
+            operationFailed = true;
+            operationError = error;
+          }
+          // Activation may have committed even when a post-activation hook
+          // failed. Resolve the actual pointer before any recovery launch.
+          if (stopped && refreshContext !== undefined) {
+            try {
+              context = await refreshContext();
+              selectedWorkspace ??= context.workspace;
+            } catch (error) {
+              if (!operationFailed) operationError = error;
+              operationFailed = true;
+            }
+          }
+          const targets: Array<{ sessionId: string | undefined; workspace: { workspaceId: string; cwd: string } }> =
+            previous.map((resident) => ({ sessionId: resident.sessionId, workspace: resident.workspace }));
+          if (targets.length === 0 && selectedWorkspace !== undefined) {
+            targets.push({ sessionId: undefined, workspace: selectedWorkspace });
+          }
+          const restore = async (version?: string): Promise<unknown[]> => {
+            const errors: unknown[] = [];
+            for (const target of targets) {
+              try {
+                const existing = target.sessionId === undefined ? undefined : residents.get(target.sessionId);
+                if (existing?.session.hello() !== undefined) continue;
+                if (existing !== undefined) await stopResident(existing);
+                const next = await launchWorker(target.sessionId, target.workspace);
+                if (next === undefined) throw new Error("Runtime did not become ready after updating");
+                if (version !== undefined && next.hello()?.runtimeVersion !== version) {
+                  const resident = residents.get(next.controller.publication()!.snapshot.sessionId);
+                  if (resident !== undefined) await stopResident(resident);
+                  throw new Error(`Runtime started with an unexpected version; expected ${version}`);
+                }
+              } catch (error) {
+                errors.push(error);
+              }
+            }
+            return errors;
+          };
+          const restoreErrors = await restore(operationFailed ? undefined : expectedVersion?.());
+          if (!operationFailed && restoreErrors.length > 0 && recoverPrevious !== undefined) {
+            // Activation succeeded, but real session startup failed. Release
+            // candidate workers before switching back and retry restoration.
+            try {
+              await stopAll();
+              const previousVersion = await recoverPrevious();
+              if (refreshContext !== undefined) context = await refreshContext();
+              const recoveryErrors = await restore(previousVersion);
+              operationError = new AggregateError([...restoreErrors, ...recoveryErrors], recoveryErrors.length === 0
+                ? "Runtime update failed; previous Runtime and sessions were restored"
+                : "Runtime update failed; previous Runtime could not restore all sessions");
+            } catch (error) {
+              operationError = new AggregateError([...restoreErrors, error], "Runtime update and recovery failed");
+            }
+            operationFailed = true;
+          }
+          if (selectedWorkspace !== undefined) adoptWorkspace(selectedWorkspace);
+          if (selectedId !== undefined && residents.has(selectedId)) setActiveSession(selectedId);
+          else if (previous.length > 0) activeSessionId = undefined;
+          sessionSink?.(activeSessionId === undefined ? undefined : residents.get(activeSessionId)?.session);
+          if (operationFailed) throw operationError;
+          if (restoreErrors.length > 0) throw new AggregateError(restoreErrors, "Runtime update could not restore all sessions");
+          return result as T;
+        } finally {
+          endBatch();
+        }
+      });
+    },
     hasResidentForWorkspace(workspaceId: string): boolean {
       return residentsOfWorkspace(workspaceId).some(
         (resident) => resident.session.hello() !== undefined,
@@ -1475,6 +1565,14 @@ function sessionIsIdle(session: DesktopRuntimeSession): boolean {
     snapshot.pendingInteraction === undefined &&
     snapshot.plan?.status !== "review"
   );
+}
+
+function sessionCanUpdate(session: DesktopRuntimeSession): boolean {
+  if (!sessionIsIdle(session)) return false;
+  const snapshot = session.controller.publication()!.snapshot;
+  return !snapshot.agents.some((agent) =>
+    agent.status === "starting" || agent.status === "running" || agent.status === "reviving" || agent.activeJobIds.length > 0,
+  ) && !snapshot.jobs.some((job) => job.status === "queued" || job.status === "running");
 }
 
 function errorDetail(error: unknown): string {

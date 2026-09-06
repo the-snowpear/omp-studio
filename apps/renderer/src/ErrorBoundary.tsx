@@ -1,3 +1,4 @@
+import { reportWorkbenchFailure } from "./WorkbenchHealth";
 import { Component } from "react";
 import type { ReactNode } from "react";
 
@@ -18,6 +19,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
   static getDerivedStateFromError(): State {
     return { failed: true };
+  }
+
+  componentDidCatch(): void {
+    reportWorkbenchFailure();
   }
 
   render(): ReactNode {

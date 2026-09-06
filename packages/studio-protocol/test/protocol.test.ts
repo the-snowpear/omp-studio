@@ -27,6 +27,19 @@ test("PR-001 parses the canonical hello fixture", async () => {
   assert.equal(parseStudioHelloRequest(value).requiredProfile, "full-parity-v1");
 });
 
+test("evaluation operations validate nested targets and bounded media", () => {
+  const base = { type: "studio.request", requestId: "eval", runtimeEpoch: 1 } as const;
+  assert.throws(
+    () => parseFoundationStudioRequest({ ...base, operation: { kind: "browser.evaluate", expression: "1", target: 42 } }),
+    ContractValidationError,
+  );
+  assert.throws(
+    () => parseFoundationStudioRequest({ ...base, operation: { kind: "terminal.image", result: { data: "bad!", mimeType: "image/png", encoding: "base64", source: "kitty" } } }),
+    ContractValidationError,
+  );
+  assert.doesNotThrow(() => parseFoundationStudioRequest({ ...base, operation: { kind: "video.frame", attachmentId: "attachment://clip", timestampMs: 0 } }));
+});
+
 test("WP-011 parses the canonical hello response without inventing full parity", async () => {
   const value: unknown = JSON.parse(await readFile(fixture("hello.response.json"), "utf8"));
   const response = parseStudioHelloResponse(value);

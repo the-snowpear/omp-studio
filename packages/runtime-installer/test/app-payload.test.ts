@@ -173,11 +173,13 @@ test("AppPayloadInstaller install verifies signed artifact and atomizes install"
     );
     assert.equal(installedManifest.payloadVersion, "0.1.4");
 
-    // Re-installing throws already installed error
-    await assert.rejects(
-      () => installer.install(artifact),
-      /already installed/,
-    );
+    // A download completed before restart can be retried without activation.
+    assert.deepEqual(await installer.install(artifact), manifest);
+    assert.equal(await installer.current(), undefined);
+    await installer.activate(manifest.payloadVersion);
+    assert.deepEqual(await installer.install(artifact), manifest);
+    await createValidAppArtifact(temp, "0.1.4", "changed signed preload");
+    await assert.rejects(() => installer.install(artifact), /different signed content/);
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -276,6 +278,24 @@ test("AppPayloadInstaller rollback deletes current pointer when no previous vers
       () => installer.rollback(),
       /No active payload to rollback/,
     );
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("same-version payload activation preserves the last distinct rollback version", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "payload-reactivate-"));
+  try {
+    const installer = new AppPayloadInstaller(join(temp, "installer"), { trustedKeys });
+    await installer.install(await createValidAppArtifact(temp, "0.1.4"));
+    await installer.install(await createValidAppArtifact(temp, "0.1.5"));
+    await installer.activate("0.1.4");
+    await installer.activate("0.1.4");
+    assert.equal((await installer.current())?.previousPayloadVersion, undefined);
+    await installer.activate("0.1.5");
+    await installer.activate("0.1.5");
+    assert.equal((await installer.current())?.previousPayloadVersion, "0.1.4");
+    assert.equal((await installer.rollback())?.payloadVersion, "0.1.4");
   } finally {
     await rm(temp, { recursive: true, force: true });
   }

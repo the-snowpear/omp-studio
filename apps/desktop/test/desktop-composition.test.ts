@@ -9,7 +9,8 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -41,6 +42,8 @@ import {
   type DesktopRuntimeSessionPort,
 } from "../src/host-composition.js";
 import type { DesktopHostComposition } from "../src/types.js";
+import { createDesktopRuntimeSessionPort } from "../src/runtime-session.js";
+import { InMemorySessionLeaseStore } from "@omp-studio/studio-host";
 
 const UPSTREAM_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const T0 = "2026-08-12T00:00:00.000Z";
@@ -237,6 +240,7 @@ function fakeSessionPort(options: {
               throw new Error("unused in composition tests");
             },
             runtimeLost: () => [],
+            replayConversationEvents: () => [],
             publication: () => ({ commitSeq: 1, publishedAt: T0, snapshot, terminalOutcomes: [] }),
             dispose: () => {},
           } as unknown as StudioRuntimeSessionController,
@@ -533,6 +537,77 @@ test("managedInstall without trusted keys fails closed instead of reporting inst
     await composition.shutdown();
   });
 });
+
+for (const rejectedContext of [false, true]) {
+  test(`managed install initializes and refreshes the coordinator launch context (stale rejected context=${rejectedContext})`, async () => {
+    await withTempProfile(async (profileDirectory) => {
+      const artifact = join(profileDirectory, "artifact");
+      await mkdir(artifact);
+      const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+      const payload = "test executable; never executed";
+      const manifest = JSON.stringify({
+        runtimeVersion: HELLO.runtimeVersion, upstreamVersion: HELLO.upstreamVersion,
+        upstreamCommit: UPSTREAM_COMMIT, patchsetVersion: "0.1.0", studioProtocol: { min: 1, max: 1 },
+        profile: "full-parity-v1", capabilityHash: HELLO.capabilityManifest.hash,
+        commandManifestHash: HELLO.commandManifestHash, platform: "win32-x64", entrypoint: "omp.exe", channel: "stable",
+      });
+      const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+      const checksums = JSON.stringify({ algorithm: "sha256", files: { "omp.exe": digest(payload), "runtime-manifest.json": digest(manifest) } });
+      const signed = Buffer.concat([Buffer.from(manifest), Buffer.from("\0"), Buffer.from(checksums)]);
+      await Promise.all([
+        writeFile(join(artifact, "omp.exe"), payload),
+        writeFile(join(artifact, "runtime-manifest.json"), manifest),
+        writeFile(join(artifact, "checksums.json"), checksums),
+        writeFile(join(artifact, "runtime-signature.json"), JSON.stringify({ algorithm: "ed25519", keyId: "test-key", payloadSha256: digest(signed), signature: sign(null, signed, privateKey).toString("base64url") })),
+      ]);
+      const launches: DesktopRuntimeSessionContext[] = [];
+      const port = createDesktopRuntimeSessionPort({
+        sessionLeaseStore: new InMemorySessionLeaseStore(),
+        workerPortFactory: () => {
+          const worker = fakeSessionPort({ ready: true }).port;
+          return { ...worker, start: async (context) => {
+            assert.equal(context.resolution.classification, "managed");
+            launches.push(context);
+            return worker.start(context);
+          } };
+        },
+      });
+      if (rejectedContext) {
+        await port.start({ resolution: { classification: "rejected" } as never, profileDirectory,
+          runtimeInstallDirectory: join(profileDirectory, "runtime"), endpoint: privateEndpoint("in-memory", "authority-0001") });
+      }
+      const composition = await createDesktopHostComposition({
+        platform: fakePlatform(profileDirectory).port,
+        authorityLock: fakeAuthorityLock().port,
+        privateEndpoint: fakePrivateEndpoint().port,
+        runtimeSession: port,
+        installer: { trustedKeys: { "test-key": publicKey.export({ type: "spki", format: "pem" }) } },
+        resolver: { probe: fullParityProbe() },
+        managedInstall: { installDirectory: join(profileDirectory, "runtime"), locateArtifact: async () => artifact, activateOptions: { selfCheck: { run: async () => undefined } } },
+        facade: { getActiveWorkspace: () => ({ workspaceId: "ws-0001", cwd: profileDirectory }) },
+      });
+      const events: Array<{ kind: string; receipt?: { status: string; error?: { message: string } } }> = [];
+      composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+      try {
+        await composition.facade.command({ commandName: "runtime.install", input: {}, requestId: "install" as CommandRequestId, idempotencyKey: "install" as IdempotencyKey });
+        assert.equal(composition.isBusy(), true);
+        const installingFacade = composition.facade;
+        await composition.reload();
+        assert.equal(composition.facade, installingFacade);
+        assert.equal(composition.isBusy(), true);
+        const deadline = Date.now() + 5000;
+        while (!events.some((event) => event.kind === "command.receipt") && Date.now() < deadline) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        const receipt = events.find((event) => event.kind === "command.receipt")?.receipt;
+        assert.equal(receipt?.status, "completed", receipt?.error?.message);
+        assert.equal(launches.length, 1);
+        assert.equal((await composition.facade.bootstrap()).runtime.status, "connected");
+        assert.equal(composition.isBusy(), false);
+      } finally { await composition.shutdown(); }
+    });
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Second owner fails closed

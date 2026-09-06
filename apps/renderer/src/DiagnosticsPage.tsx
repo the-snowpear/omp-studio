@@ -4,6 +4,7 @@ import type {
   DiagnosticReadModel,
   EnvironmentReadModel,
   RuntimeConnection,
+  RuntimeChannel,
   RuntimeInstallState,
   StudioClient,
 } from "@omp-studio/client-contract";
@@ -43,6 +44,18 @@ export const DIAGNOSTICS_INTENT_KEY = "omp.diagnosticsIntent";
 export type DiagnosticsIntent = "check-update" | "reconnect" | "restart";
 
 const DIAGNOSTICS_INTENTS: ReadonlySet<string> = new Set(["check-update", "reconnect", "restart"]);
+
+async function applyRuntimeArtifact(client: StudioClient, channel: RuntimeChannel | undefined, incompleteMessage: string): Promise<void> {
+  if (channel === undefined) throw new Error("无法确认 Runtime 工件通道，请重新检查更新");
+  const handle = await client.command("runtime.install", { channel });
+  const receipt = await waitForCommandReceipt(client, handle.requestId);
+  if (receipt.status === "failed") throw new Error(receipt.error.message);
+  if (receipt.status !== "completed") throw new Error(incompleteMessage);
+  const result = receipt.result as RuntimeInstallState | undefined;
+  if (result?.status !== "installed") {
+    throw new Error(result?.message ?? incompleteMessage);
+  }
+}
 
 export function setDiagnosticsIntent(intent: DiagnosticsIntent): void {
   try {
@@ -441,8 +454,7 @@ export function DiagnosticsPage({
           step: 2,
           steps: 3,
         });
-        const handle = await client.command("runtime.install", {});
-        const receipt = await waitForCommandReceipt(client, handle.requestId);
+        await applyRuntimeArtifact(client, importRes.runtimeChannel, t("diagnostics.installIncomplete"));
         beginAction({
           kind,
           label: t("updates.activating"),
@@ -455,12 +467,7 @@ export function DiagnosticsPage({
         ]);
         if (d.status === "fulfilled") setDiag(d.value);
         if (e.status === "fulfilled") setEnv(e.value);
-        if (receipt.status === "completed") {
-          show(t("diagnostics.runtimeInstalled"), "check");
-        } else {
-          const message = receipt.status === "failed" ? receipt.error.message : t("diagnostics.installIncomplete");
-          show(message, "alert-c");
-        }
+        show(t("diagnostics.runtimeInstalled"), "check");
       } catch (error) {
         show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c");
       } finally {
@@ -478,7 +485,7 @@ export function DiagnosticsPage({
           steps: 3,
         });
         try {
-          await downloadUpdateToReady("runtime", (evt) => {
+          const ready = await downloadUpdateToReady("runtime", (evt) => {
             beginAction({
               kind,
               label: evt.message ?? t("diagnostics.updatingRuntime"),
@@ -493,8 +500,7 @@ export function DiagnosticsPage({
             step: 2,
             steps: 3,
           });
-          const handle = await client.command("runtime.install", {});
-          const receipt = await waitForCommandReceipt(client, handle.requestId);
+          await applyRuntimeArtifact(client, ready.runtimeChannel, t("diagnostics.installIncomplete"));
           beginAction({
             kind,
             label: t("updates.activating"),
@@ -507,12 +513,7 @@ export function DiagnosticsPage({
           ]);
           if (d.status === "fulfilled") setDiag(d.value);
           if (e.status === "fulfilled") setEnv(e.value);
-          if (receipt.status === "completed") {
-            show(t("diagnostics.runtimeUpdated"), "check");
-          } else {
-            const message = receipt.status === "failed" ? receipt.error.message : t("diagnostics.installIncomplete");
-            show(message, "alert-c");
-          }
+          show(t("diagnostics.runtimeUpdated"), "check");
         } catch (error) {
           show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c");
         } finally {
@@ -528,8 +529,8 @@ export function DiagnosticsPage({
       steps: 2,
     });
     try {
-      const handle = await client.command("runtime.install", {});
-      const receipt = await waitForCommandReceipt(client, handle.requestId);
+      const prefs = await fetchUpdatePrefs();
+      await applyRuntimeArtifact(client, prefs?.runtimeChannel, t("diagnostics.installIncomplete"));
       beginAction({
         kind,
         label: t("diagnostics.refreshingEnv"),
@@ -542,12 +543,7 @@ export function DiagnosticsPage({
       ]);
       if (d.status === "fulfilled") setDiag(d.value);
       if (e.status === "fulfilled") setEnv(e.value);
-      if (receipt.status === "completed") {
-        show(kind === "update" ? t("diagnostics.runtimeUpdated") : kind === "reinstall" ? t("diagnostics.runtimeReinstalled") : t("diagnostics.runtimeInstalled"), "check");
-      } else {
-        const message = receipt.status === "failed" ? receipt.error.message : t("diagnostics.installIncomplete");
-        show(message, "alert-c");
-      }
+      show(kind === "update" ? t("diagnostics.runtimeUpdated") : kind === "reinstall" ? t("diagnostics.runtimeReinstalled") : t("diagnostics.runtimeInstalled"), "check");
     } catch (error) {
       show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c");
     } finally {

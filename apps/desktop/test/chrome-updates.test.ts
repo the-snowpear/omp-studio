@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, test } from "node:test";
 import { gzipSync } from "node:zlib";
 import { AppPayloadInstaller } from "@omp-studio/runtime-installer";
+import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
 
 import { UPDATE_INDEX_SCHEMA, type UpdateIndex } from "../src/update-index.js";
 
@@ -159,7 +160,7 @@ function createValidAppTarGz(version = "0.1.4"): { tarGz: Buffer; sha256: string
     payloadFormat: 1,
     platform: "win32-x64",
     abi: { electron: "43.4.0", modules: "143", nodePty: "1.1.0" },
-    clientContractVersion: 1,
+    clientContractVersion: CLIENT_CONTRACT_VERSION,
     studioProtocol: { min: 1, max: 1 },
     entries: ["preload.cjs", "renderer"],
   };
@@ -270,7 +271,7 @@ async function createAppUpdateHarness(extra: Partial<ChromeUpdatesIpcOptions> = 
     app: {
       version: "0.1.4",
       setup: { asset: "setup.exe", url: "https://example.com/setup.exe", size: setupBytes.length, sha256: createHash("sha256").update(setupBytes).digest("hex") },
-      ...(!full ? { payload: { asset: "payload.tar.gz", url: "https://example.com/payload.tar.gz", size: asset.size, sha256: asset.sha256, payloadFormat: 1, minAppVersion: "0.1.3", platform: "win32-x64", abi: { electron: "43.4.0", modules: "143", nodePty: "1.1.0" }, clientContractVersion: 1, studioProtocol: { min: 1, max: 1 } } } : {}),
+      ...(!full ? { payload: { asset: "payload.tar.gz", url: "https://example.com/payload.tar.gz", size: asset.size, sha256: asset.sha256, payloadFormat: 1, minAppVersion: "0.1.3", platform: "win32-x64", abi: { electron: "43.4.0", modules: "143", nodePty: "1.1.0" }, clientContractVersion: CLIENT_CONTRACT_VERSION, studioProtocol: { min: 1, max: 1 } } } : {}),
     },
     runtime: { runtimeVersion: "2.0.0", channel: "stable", platform: "win32-x64", entrypoint: "omp.exe", minAppVersion: "0.1.3", studioProtocol: { min: 1, max: 1 }, files: [{ name: "omp.exe", url: "https://example.com/omp.exe", size: 1, sha256: "a".repeat(64) }] },
   };
@@ -318,6 +319,40 @@ test("checking the same release twice still permits starting the advertised hot 
     assert.equal(start.ok, true);
     assert.equal((await h.terminal).phase, "awaiting-apply");
     assert.equal((await h.prefs.read()).lastIndexSequence, 100);
+  } finally { await h.cleanup(); }
+});
+
+test("unavailable canary metadata does not suppress the stable application update", async () => {
+  const h = await createAppUpdateHarness();
+  try {
+    await h.prefs.write({ runtimeChannel: "canary", lastCanaryIndexSequence: 200 });
+    const result = await h.ipc.invoke(CHROME_UPDATES_CHANNELS.check, h.sender) as {
+      app: { plan: string }; runtime: { plan: string }; error?: string;
+    };
+    assert.equal(result.error, undefined);
+    assert.equal(result.app.plan, "hot");
+    assert.equal(result.runtime.plan, "blocked");
+    assert.equal((await h.prefs.read()).lastIndexSequence, 100);
+    assert.equal((await h.prefs.read()).lastCanaryIndexSequence, 200);
+  } finally { await h.cleanup(); }
+});
+
+test("a staged payload can be downloaded again after cancellation before activation", { timeout: 5000 }, async () => {
+  const h = await createAppUpdateHarness();
+  try {
+    const first = await h.ipc.invoke(CHROME_UPDATES_CHANNELS.startApp, h.sender) as { jobId: string };
+    assert.equal((await h.terminal).phase, "awaiting-apply");
+    await h.ipc.invoke(CHROME_UPDATES_CHANNELS.cancel, h.sender, { jobId: first.jobId });
+    const second = await h.ipc.invoke(CHROME_UPDATES_CHANNELS.startApp, h.sender) as { ok: boolean; jobId: string };
+    assert.equal(second.ok, true);
+    const deadline = Date.now() + 3000;
+    while (!h.progress.some((event) => event.jobId === second.jobId && ["failed", "awaiting-apply"].includes(event.phase))) {
+      assert.ok(Date.now() < deadline, "retry must settle");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(h.progress.find((event) => event.jobId === second.jobId && event.phase === "failed"), undefined);
+    assert.equal((await h.ipc.invoke(CHROME_UPDATES_CHANNELS.apply, h.sender) as { ok: boolean }).ok, true);
+    assert.equal((await h.installer.current())?.payloadVersion, "0.1.4");
   } finally { await h.cleanup(); }
 });
 
@@ -533,19 +568,19 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  test("importLocal succeeds, registers pendingArtifact and emits awaiting-apply", async () => {
+  test("importLocal preserves the verified canary channel through the install handoff", async () => {
     const ipc = new FakeIpcMain();
     const pending = createPendingArtifactRegistry();
     const progress: UpdateProgressEvent[] = [];
     const tempDir = await mkdtemp(join(tmpdir(), "omp-chrome-updates-test-"));
     const prefs = createUpdatePrefsStore({ appDataDirectory: tempDir });
-    await prefs.write({ runtimeChannel: "stable" });
+    await prefs.write({ runtimeChannel: "canary" });
 
     const artifactDir = await createSignedArtifact({
       parent: tempDir,
       version: "2.5.0",
       platform: "win32-x64",
-      channel: "stable",
+      channel: "canary",
     });
 
     const handle = registerChromeUpdatesIpc({
@@ -568,15 +603,16 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     const res = (await ipc.invoke(CHROME_UPDATES_CHANNELS.importLocal, trustedSender, {
       kind: "runtime",
       source: "directory",
-    })) as { ok: boolean; jobId?: string; runtimeVersion?: string };
+    })) as { ok: boolean; jobId?: string; runtimeVersion?: string; runtimeChannel?: string };
 
     assert.equal(res.ok, true);
     assert.equal(res.runtimeVersion, "2.5.0");
+    assert.equal(res.runtimeChannel, "canary");
     assert.ok(typeof res.jobId === "string");
     assert.equal(pending.peek(), artifactDir);
 
     assert.ok(progress.some((p) => p.phase === "verifying"));
-    assert.ok(progress.some((p) => p.phase === "awaiting-apply"));
+    assert.equal(progress.find((p) => p.phase === "awaiting-apply")?.runtimeChannel, "canary");
 
     // Cancel cleans up pendingArtifact
     await ipc.invoke(CHROME_UPDATES_CHANNELS.cancel, trustedSender, {
@@ -904,6 +940,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     }
 
     assert.ok(progress.some((p) => p.phase === "awaiting-apply"), "Should reach awaiting-apply");
+    assert.equal(progress.find((p) => p.phase === "awaiting-apply")?.runtimeChannel, "stable");
     assert.ok(pending.peek() !== undefined, "pendingArtifact should be set");
 
     const exeIndex = fetchedUrls.findIndex((u) => u.endsWith("omp.exe"));
@@ -1096,7 +1133,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
           abi: { electron: "43.4.0", modules: "143", nodePty: "1.1.0" },
           platform: "win32-x64",
           payloadFormat: 1,
-          clientContractVersion: 1,
+          clientContractVersion: CLIENT_CONTRACT_VERSION,
           studioProtocol: { min: 1, max: 1 },
         },
       },
@@ -1253,7 +1290,7 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
           abi: { electron: "43.4.0", modules: "143", nodePty: "1.1.0" },
           platform: "win32-x64",
           payloadFormat: 1,
-          clientContractVersion: 1,
+          clientContractVersion: CLIENT_CONTRACT_VERSION,
           studioProtocol: { min: 1, max: 1 },
         },
       },
@@ -1323,7 +1360,12 @@ describe("registerChromeUpdatesIpc: importLocal runtime", () => {
     }, { jobId: startRes.jobId });
 
     assert.ok(progress.some((p) => p.phase === "cancelled" && p.kind === "app"));
-
+    // The IPC acknowledgement precedes cooperative cancellation of file work.
+    const deadline = Date.now() + 3000;
+    while (progress.filter((event) => event.phase === "cancelled").length < 2) {
+      assert.ok(Date.now() < deadline, "cancelled file work must settle before cleanup");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     handle.dispose();
     await rm(tempDir, { recursive: true, force: true });
   });

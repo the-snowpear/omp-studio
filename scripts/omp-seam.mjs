@@ -57,6 +57,7 @@ export const SEAM_GROUPS = Object.freeze([
     title: "Session runtime hooks: origin, prewalk, model control, retry abort",
     paths: [
       "packages/coding-agent/src/plan-mode/approved-plan.ts",
+      "packages/coding-agent/src/modes/utils/context-usage.ts",
       "packages/coding-agent/src/registry/agent-registry.ts",
       "packages/coding-agent/src/session/agent-session-events.ts",
       "packages/coding-agent/src/session/agent-session-types.ts",

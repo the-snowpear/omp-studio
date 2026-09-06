@@ -4,6 +4,7 @@
 ; this file in the shared header *before* MUI2.nsh (which normally provides
 ; LogicLib), so we must include it explicitly here.
 !include LogicLib.nsh
+!include x64.nsh
 ;
 ; 可见向导是 `packaging/ui`（WebView2 宿主 OmpInstallerUi.exe）。
 ; NSIS 只做提权拷贝引擎：隐藏 MUI 页、读 options.ini、写文件。
@@ -146,6 +147,23 @@ FunctionEnd
 !macroend
 
 !macro customInit
+  ; A single-target package must never install an emulated payload for another
+  ; architecture (the small x86 bootstrap UI on ARM64 is intentional).
+  !if "${OMP_TARGET_ARCH}" == "arm64"
+    ${IfNot} ${IsNativeARM64}
+      MessageBox MB_OK|MB_ICONSTOP "This installer requires Windows ARM64."
+      Quit
+    ${EndIf}
+  !else
+    ${If} ${IsNativeARM64}
+      MessageBox MB_OK|MB_ICONSTOP "Please use the Windows ARM64 installer."
+      Quit
+    ${EndIf}
+    ${IfNot} ${RunningX64}
+      MessageBox MB_OK|MB_ICONSTOP "This installer requires Windows x64."
+      Quit
+    ${EndIf}
+  !endif
   ; Hide the MUI parent before the first custom page is created. The GUI-init
   ; hook below repeats this because NSIS may create the dialog after .onInit.
   Call ompHideNsisUi

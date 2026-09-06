@@ -1,3 +1,4 @@
+import { WorkbenchHealth } from "./WorkbenchHealth";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
@@ -8629,6 +8630,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
 export function App({ client: inputClient }: { readonly client: StudioClient }) {
   const { t } = useI18n();
   const client = inputClient as ClientStateSource;
+  const [initialModelCommitted, setInitialModelCommitted] = useState(false);
   const [state, dispatch] = useReducer(reduce, { loading: true, model: {}, events: [], route: "workbench" });
   const [route, setRoute] = useState<Route>(initialRouteFromSettings);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
@@ -8648,6 +8650,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
       dispatch({ type: "state", clientState });
     });
     const load = async () => {
+      setInitialModelCommitted(false);
       try {
         const bootstrap = await client.bootstrap();
         if (cancelled) return;
@@ -8673,6 +8676,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
           ...(home.status === "fulfilled" ? { home: home.value } : {}),
           ...(workspaces.status === "fulfilled" ? { workspaces: workspaces.value } : {}),
         } });
+        setInitialModelCommitted(true);
       } catch (error) {
         if (!cancelled) dispatch({ type: "ready", bootstrap: unavailableBootstrap(), hostError: asError(error) });
       }
@@ -8758,6 +8762,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
     <PreviewModeProvider>
       <I18nProvider>
         {body}
+        {initialModelCommitted && !state.loading ? <WorkbenchHealth /> : null}
         <StartupNotice />
         <TipHost />
       </I18nProvider>

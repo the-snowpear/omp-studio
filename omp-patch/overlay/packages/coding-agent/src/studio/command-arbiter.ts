@@ -41,6 +41,21 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 	"job.get",
 	"job.cancel",
 	"job.subscribe",
+	"browser.evaluate",
+	"computer.evaluate",
+	"image.read",
+	"terminal.image",
+	"video.metadata",
+	"video.frame",
+	"eval.agent.start",
+	"eval.agent.status",
+	"eval.agent.wait",
+	"eval.agent.cancel",
+	"eval.completion.start",
+	"eval.completion.status",
+	"eval.completion.wait",
+	"eval.completion.cancel",
+	"eval.workpool.status",
 ]);
 
 /** Queue-compatible interrupts that must run while `core.prompt` still holds
@@ -84,6 +99,21 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	"job.get",
 	"job.cancel",
 	"job.subscribe",
+	"browser.evaluate",
+	"computer.evaluate",
+	"image.read",
+	"terminal.image",
+	"video.metadata",
+	"video.frame",
+	"eval.agent.start",
+	"eval.agent.status",
+	"eval.agent.wait",
+	"eval.agent.cancel",
+	"eval.completion.start",
+	"eval.completion.status",
+	"eval.completion.wait",
+	"eval.completion.cancel",
+	"eval.workpool.status",
 ]);
 
 const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([

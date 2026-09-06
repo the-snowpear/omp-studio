@@ -175,22 +175,36 @@ export class AppPayloadInstaller {
     return this.#rootDirectory;
   }
 
-  async #refuseIfInstalled(version: string): Promise<void> {
+  async #reuseInstalled(version: string, files: Readonly<Record<string, string>>): Promise<boolean> {
     assertSafeVersion(version);
     const finalDirectory = join(this.#versionsDirectory, version);
     if (!isInside(this.#versionsDirectory, finalDirectory)) {
       throw new Error("Payload target escaped the versions directory");
     }
     try {
-      await access(finalDirectory);
-      throw new Error(`Payload ${version} is already installed`);
+      const metadata = await lstat(finalDirectory);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Payload installation must be a regular directory");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
     }
+    const installed = await verifySignedArtifact({
+      directory: finalDirectory,
+      layout: APP_PAYLOAD_ARTIFACT_LAYOUT,
+      parseManifest: parseAppPayloadManifest,
+      requireCovered: () => ["app-payload-manifest.json", "preload.cjs", "renderer/index.html"],
+      trustedKeys: this.#trustedKeys,
+      ...(this.#signatureVerifier ? { signatureVerifier: this.#signatureVerifier } : {}),
+    });
+    if (installed.manifest.payloadVersion !== version || Object.keys(installed.checksums.files).length !== Object.keys(files).length ||
+      Object.entries(files).some(([name, digest]) => installed.checksums.files[name] !== digest)) {
+      throw new Error(`Payload ${version} is already installed with different signed content`);
+    }
+    return true;
   }
 
   async install(artifactDirectory: string): Promise<AppPayloadManifest> {
-    const { manifest } = await verifySignedArtifact({
+    const { manifest, checksums } = await verifySignedArtifact({
       directory: artifactDirectory,
       layout: APP_PAYLOAD_ARTIFACT_LAYOUT,
       parseManifest: parseAppPayloadManifest,
@@ -200,7 +214,7 @@ export class AppPayloadInstaller {
       coverageMessage: (file) => `checksums.json must cover ${file}`,
     });
 
-    await this.#refuseIfInstalled(manifest.payloadVersion);
+    if (await this.#reuseInstalled(manifest.payloadVersion, checksums.files)) return manifest;
     await installVerifiedArtifact({
       sourceDirectory: artifactDirectory,
       versionsDirectory: this.#versionsDirectory,
@@ -241,9 +255,12 @@ export class AppPayloadInstaller {
     }
 
     const current = await this.current();
+    const previousPayloadVersion = current?.payloadVersion === version
+      ? current.previousPayloadVersion
+      : current?.payloadVersion;
     const record: ActiveAppPayloadRecord = {
       payloadVersion: version,
-      ...(current ? { previousPayloadVersion: current.payloadVersion } : {}),
+      ...(previousPayloadVersion === undefined ? {} : { previousPayloadVersion }),
       activatedAt: new Date().toISOString(),
       bootAttempts: 0,
     };

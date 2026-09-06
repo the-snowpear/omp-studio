@@ -25,6 +25,7 @@ import {
   isInside,
   parseRuntimeInstallationManifest,
   type ActivateOptions,
+  type RuntimeInstallOptions,
 } from "@omp-studio/runtime-installer";
 import type { HostBackend } from "@omp-studio/studio-host";
 import type { RuntimeInstallationManifest } from "@omp-studio/studio-protocol";
@@ -478,20 +479,7 @@ export async function seedManagedRuntimeFromArtifact(options: {
   if (locatedManifest !== undefined && locatedManifest.channel !== channel) {
     throw new Error(`Managed Runtime artifact channel mismatch: expected ${channel}`);
   }
-  let manifest: RuntimeInstallationManifest;
-  try {
-    manifest = await options.backend.install(artifactDirectory);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/already installed/u.test(message)) {
-      throw error;
-    }
-    const parsed = await readArtifactManifest(artifactDirectory);
-    if (parsed === undefined) {
-      throw error;
-    }
-    manifest = parsed;
-  }
+  const manifest = await options.backend.install(artifactDirectory);
   if (manifest.channel !== channel) {
     throw new Error(`Managed Runtime artifact channel mismatch: expected ${channel}`);
   }
@@ -556,6 +544,7 @@ export function createDesktopRuntimeInstallService(options: {
   readonly locateArtifact?: (input: LocateManagedRuntimeArtifactOptions) => Promise<string | undefined>;
   readonly artifactRoot?: string;
   readonly activateOptions?: ActivateOptions;
+  readonly installOptions?: RuntimeInstallOptions;
   readonly afterActivate?: (manifest: RuntimeInstallationManifest) => Promise<void>;
   readonly pendingArtifact?: PendingArtifactRegistry;
 }): HostRuntimeInstallService {
@@ -584,20 +573,7 @@ export function createDesktopRuntimeInstallService(options: {
       if (locatedManifest !== undefined && locatedManifest.channel !== selectedChannel) {
         throw new Error(`Managed Runtime artifact channel mismatch: expected ${selectedChannel}`);
       }
-      let manifest: RuntimeInstallationManifest;
-      try {
-        manifest = await options.backend.install(artifactDirectory);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (!/already installed/u.test(message)) {
-          throw error;
-        }
-        const parsed = await readArtifactManifest(artifactDirectory);
-        if (parsed === undefined) {
-          throw error;
-        }
-        manifest = parsed;
-      }
+      const manifest = await options.backend.install(artifactDirectory, options.installOptions);
       if (manifest.channel !== selectedChannel) {
         throw new Error(`Managed Runtime artifact channel mismatch: expected ${selectedChannel}`);
       }

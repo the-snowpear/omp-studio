@@ -11,9 +11,7 @@ import type { PlanApprovalDetails } from "../../plan-mode/approved-plan";
 import { resolvePlanModelTransition } from "../../plan-mode/model-transition";
 import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planModeApprovedPrompt from "../../prompts/system/plan-mode-approved.md" with { type: "text" };
-import planModeCompactInstructionsPrompt from "../../prompts/system/plan-mode-compact-instructions.md" with {
-	type: "text",
-};
+import planModeCompactInstructionsPrompt from "../../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
 import type { AgentSession } from "../../session/agent-session";
 import type { ConfiguredThinkingLevel } from "../../thinking";
 import { confineToWorkspace, formatPathRelativeToCwd, normalizePathLikeInput } from "../../tools/path-utils";

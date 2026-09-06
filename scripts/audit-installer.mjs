@@ -12,6 +12,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertPeArchitecture, assertRuntimeManifestTarget, resolveTargetArch } from "./windows-architecture.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -97,13 +98,13 @@ function formatSize(path) {
  * @param {string} outputDir
  * @returns {{ installerExe: string, unpackedDir: string, notes: string[] }}
  */
-export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory()) {
+export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory(), targetArch) {
   const notes = [];
   if (!existsSync(outputDir)) {
     throw new Error(`Installer output directory is missing: ${outputDir}`);
   }
 
-  const unpackedDir = join(outputDir, "win-unpacked");
+  const unpackedDir = join(outputDir, targetArch === "arm64" ? "win-arm64-unpacked" : "win-unpacked");
   if (!existsSync(unpackedDir)) {
     throw new Error(`win-unpacked is missing under ${outputDir}. electron-builder did not finish.`);
   }
@@ -113,6 +114,7 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
     throw new Error(`Packaged executable missing: ${appExe}`);
   }
   notes.push(`app exe ${formatSize(appExe)}`);
+  if (targetArch) assertPeArchitecture(appExe, targetArch);
 
   const rendererIndex = join(unpackedDir, "resources", "renderer", "dist", "index.html");
   if (!existsSync(rendererIndex)) {
@@ -182,6 +184,10 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
     throw new Error("No signed Runtime folder with omp.exe + runtime-manifest.json");
   }
   const packedManifest = JSON.parse(readFileSync(manifest, "utf8"));
+  if (targetArch) {
+    assertRuntimeManifestTarget(packedManifest, targetArch, expectedVersion);
+    assertPeArchitecture(omp, targetArch);
+  }
   if (packedManifest.runtimeVersion !== packedVersion) {
     throw new Error(
       `Packed Runtime folder ${packedVersion} does not match manifest ${packedManifest.runtimeVersion}`,
@@ -263,6 +269,7 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
 
   const setupExes = readdirSync(outputDir)
     .filter((name) => name.toLowerCase().endsWith(".exe") && /setup/i.test(name))
+    .filter((name) => !targetArch || name.endsWith(`-${targetArch}.exe`))
     .map((name) => join(outputDir, name));
   if (setupExes.length === 0) {
     throw new Error(`NSIS Setup exe missing under ${outputDir}`);
@@ -286,7 +293,7 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
 const invoked = process.argv[1];
 if (invoked !== undefined && fileURLToPath(import.meta.url).toLowerCase() === invoked.toLowerCase()) {
   try {
-    const report = auditInstallerOutput();
+    const report = auditInstallerOutput(defaultInstallerOutputDirectory(), resolveTargetArch());
     console.log(`Installer audit passed: ${report.installerExe}`);
     for (const line of report.notes) console.log(`  ${line}`);
   } catch (error) {

@@ -1,5 +1,6 @@
-# OMP Studio — electron-builder NSIS installer (Windows x64).
-# Run from the repository root: npm run pack:win
+# OMP Studio — electron-builder NSIS installer (Windows x64 / ARM64).
+# Run one architecture at a time: OMP_TARGET_ARCH=x64|arm64 npm run pack:win.
+# pack-win explicitly selects one arch after staging its matching Runtime.
 
 appId: com.ompstudio.desktop
 productName: OMP Studio

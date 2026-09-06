@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-06
+
+### Added
+
+- 签名更新资源发布：应用负载、完整 Setup、Runtime 四件套与更新索引统一通过 Ed25519 验签和 SHA-256 校验。
+- Runtime canary 独立发现签名预发布资源，与稳定版分别记录更新序号；应用仍跟随稳定版。
+- 建立正式发行签名身份，配置 GitHub release 环境，并记录密钥保管、发布与恢复流程。
+
+### Changed
+
+- Runtime 更新至 18.1.10 系列，并同步 Studio Bridge 扩展。
+- tag 发布自动重建 Runtime；手动发布支持经过验证的应用负载和 Runtime 最低 Main 版本配置。
+- 本版要求完整 Setup 升级，建立新的更新和恢复基线；已试用旧签名索引的安装请手动运行 Setup。
+
+### Fixed
+
+- 修复应用负载下载完成后取消或退出导致同版本无法重试的问题。
+- 下载前检查客户端契约和 Studio 协议兼容性，不兼容时转为完整安装包。
+- Runtime 候选版本激活后若无法恢复会话，自动尝试恢复上一版本与原会话。
+- 修复更新取消测试在异步文件操作结束前清理目录造成的竞态。
+
 ## [0.1.3] - 2026-09-04
 
 ### Added
@@ -63,7 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/the-snowpear/omp-studio/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/the-snowpear/omp-studio/compare/v0.1.1...v0.1.3
 [0.1.1]: https://github.com/the-snowpear/omp-studio/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/the-snowpear/omp-studio/releases/tag/v0.1.0

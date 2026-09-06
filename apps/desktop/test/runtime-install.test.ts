@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -503,6 +503,60 @@ test("install service reactivates an already-installed version", async () => {
     const state = await service();
     assert.equal(state.status, "installed");
     assert.equal(state.version, "2.0.0-studio.1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("install service repairs a corrupt referenced version inside maintenance and preserves rollback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-service-repair-"));
+  try {
+    const artifact = await writeArtifact(root, "2.0.0-studio.1");
+    const installerRoot = join(root, "runtimes");
+    const installer = new RuntimeInstaller(installerRoot, {
+      trustedKeys: { "test-key": trustedPublicKey },
+      isRuntimeReferenced: () => true,
+    });
+    await installer.install(await writeArtifact(root, "1.0.0-studio.1"));
+    await installer.activate("1.0.0-studio.1", { selfCheck: passingSelfCheck });
+    await installer.install(artifact);
+    await installer.activate("2.0.0-studio.1", { selfCheck: passingSelfCheck });
+    const entrypoint = join(installerRoot, "versions", "2.0.0-studio.1", "omp.exe");
+    await writeFile(entrypoint, "broken-installed-runtime");
+    const service = createDesktopRuntimeInstallService({
+      backend: {
+        install: (directory, installOptions) => installer.install(directory, installOptions),
+        activate: (version, activateOptions) => installer.activate(version, activateOptions),
+      },
+      platform: "win32-x64",
+      hasTrustedKey: true,
+      locateArtifact: async () => artifact,
+      activateOptions: { selfCheck: passingSelfCheck },
+      installOptions: { allowReferencedRepair: true },
+    });
+    assert.equal((await service()).status, "installed");
+    assert.equal(await readFile(entrypoint, "utf8"), await readFile(join(artifact, "omp.exe"), "utf8"));
+    assert.equal((await installer.current())?.previousRuntimeVersion, "1.0.0-studio.1");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("install service does not interpret an arbitrary already-installed error as trusted metadata", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-service-error-"));
+  try {
+    const artifact = await writeArtifact(root, "2.0.0-studio.1");
+    let activated = false;
+    const failure = new Error("already installed, but validation failed");
+    const service = createDesktopRuntimeInstallService({
+      backend: {
+        install: async () => { throw failure; },
+        activate: async () => { activated = true; throw new Error("must not activate"); },
+      },
+      platform: "win32-x64", hasTrustedKey: true, locateArtifact: async () => artifact,
+    });
+    await assert.rejects(async () => await service(), (error: unknown) => error === failure);
+    assert.equal(activated, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

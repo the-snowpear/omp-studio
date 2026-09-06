@@ -50,7 +50,7 @@ async function createMockEnvironment(parentDir) {
   await mkdir(runtimeDir, { recursive: true });
   await writeFile(join(runtimeDir, "runtime-manifest.json"), JSON.stringify({ runtimeVersion: "18.0.11-studio.14", platform: "win32-x64" }));
   for (const name of ["omp.exe", "checksums.json", "runtime-signature.json"]) await writeFile(join(runtimeDir, name), `fixture-${name}`);
-  await writeFile(join(rootDir, "outputs", "installer", "OMP-Studio-Setup-0.1.4.exe"), "setup-fixture");
+  await writeFile(join(rootDir, "outputs", "installer", "OMP-Studio-Setup-0.1.4-win-x64.exe"), "setup-fixture");
   return { rootDir, unpackedDir, rendererDir, preloadPath };
 
 }
@@ -112,6 +112,18 @@ test("buildUpdateAssets produces byte-for-byte identical output for identical in
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
+});
+
+test("release baselines can be explicitly reviewed for payload and Runtime separately", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "omp-build-assets-baseline-"));
+  try {
+    const env = await createMockEnvironment(temp);
+    const res = await buildUpdateAssets({ ...env, outDir: join(temp, "out"), appVersion: "0.1.4",
+      minAppVersion: "0.1.2", runtimeMinAppVersion: "0.1.3", signingKey, keyId: testKeyId,
+      abi: { electron: "43.4.0", modules: "143", nodePty: "1.1.0" } });
+    assert.equal(res.updateIndex.app.payload.minAppVersion, "0.1.2");
+    assert.equal(res.updateIndex.runtime.minAppVersion, "0.1.3");
+  } finally { await rm(temp, { recursive: true, force: true }); }
 });
 
 test("buildUpdateAssets increments sequence from previous update index", async () => {
@@ -237,6 +249,7 @@ test("buildUpdateAssets produces signatures verifiable by createTrustedKeyVerifi
     assert.equal(verifiedPayload.manifest.clientContractVersion, CLIENT_CONTRACT_VERSION);
     assert.equal(res.updateIndex.app.payload.clientContractVersion, CLIENT_CONTRACT_VERSION);
     assert.equal(res.updateIndex.app.payload.minAppVersion, "0.1.4");
+    assert.equal(res.updateIndex.runtime.minAppVersion, "0.1.4");
 
     // 2. Verify update-index.sig.json using createTrustedKeyVerifier
     const indexJsonText = await readFile(res.indexJsonPath, "utf8");
@@ -278,7 +291,7 @@ test("release builder rejects missing artifacts and invalid previous sequence", 
     const built = await buildUpdateAssets({ ...options, previousIndexPath, minAppVersion: "0.1.3" });
     assert.equal(built.updateIndex.sequence, 43);
     assert.equal(built.updateIndex.app.payload.minAppVersion, "0.1.3");
-    await rm(join(env.rootDir, "outputs", "installer", "OMP-Studio-Setup-0.1.4.exe"));
+    await rm(join(env.rootDir, "outputs", "installer", "OMP-Studio-Setup-0.1.4-win-x64.exe"));
     await assert.rejects(() => buildUpdateAssets(options), /real Setup installer/u);
     await rm(join(env.unpackedDir, "runtime"), { recursive: true, force: true });
     await assert.rejects(() => buildUpdateAssets(options), /real signed Runtime artifact/u);

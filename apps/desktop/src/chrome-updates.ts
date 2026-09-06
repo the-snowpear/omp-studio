@@ -159,6 +159,7 @@ async function runStartupGc(
 export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): ChromeUpdatesIpcHandle {
   const ipc = options.ipcMain;
   let cachedIndex: UpdateIndex | undefined;
+  let cachedCanaryIndex: UpdateIndex | undefined;
   let activeJob: { jobId: string; kind: "app" | "runtime"; abortController: AbortController } | null = null;
   let pendingAppPayloadVersion: string | undefined = undefined;
   let pendingInstaller: { path: string; size: number; sha256: string } | undefined;
@@ -168,19 +169,23 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
 
   const startupGc = runStartupGc(options.stagingRoot, options.getInstalledRuntimeVersion);
 
-  const loadIndex = async (prefs: UpdatePrefs, signal?: AbortSignal): Promise<UpdateIndex> => {
+  const loadIndex = async (prefs: UpdatePrefs, signal?: AbortSignal, channel: "stable" | "canary" = "stable"): Promise<UpdateIndex> => {
     const index = await fetchUpdateIndex({
       repo: options.repo ?? DEFAULT_GITHUB_REPO,
       mirrorPrefix: prefs.mirrorPrefix,
       trustedKeys: options.trustedKeys,
-      lastSequence: prefs.lastIndexSequence,
+      lastSequence: channel === "canary" ? prefs.lastCanaryIndexSequence ?? 0 : prefs.lastIndexSequence,
+      channel,
+      arch: options.platform.endsWith("-arm64") ? "arm64" : "x64",
       fetcher: options.fetcher,
       signal,
     });
     signal?.throwIfAborted();
-    const saved = await options.prefs.write({ lastIndexSequence: index.sequence });
-    if (index.sequence < saved.lastIndexSequence) throw new Error("Update index is older than local watermark");
-    cachedIndex = index;
+    const saved = await options.prefs.write(channel === "canary"
+      ? { lastCanaryIndexSequence: index.sequence } : { lastIndexSequence: index.sequence });
+    if (index.sequence < (channel === "canary" ? saved.lastCanaryIndexSequence ?? 0 : saved.lastIndexSequence)) throw new Error("Update index is older than local watermark");
+    if (channel === "canary") cachedCanaryIndex = index;
+    else cachedIndex = index;
     return index;
   };
 
@@ -233,12 +238,18 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
         preferHot: prefs.preferHotUpdate,
       });
 
+      let runtimeIndex = index;
+      let runtimeError: string | undefined;
+      if (prefs.runtimeChannel === "canary") {
+        try { runtimeIndex = await loadIndex(prefs, undefined, "canary"); }
+        catch (error) { runtimeError = sanitizeErrorMessage(error); }
+      }
       const runtimePlan = planRuntimeUpdate({
-        index,
+        index: runtimeIndex,
         installedRuntimeVersion,
         channel: prefs.runtimeChannel,
         platform: options.platform,
-        appVersion: currentAppVersion,
+        appVersion: options.bundledAppVersion ?? currentAppVersion,
         studioProtocol,
       });
 
@@ -261,7 +272,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
               };
 
       const runtimeResult: UpdateCheckResult["runtime"] =
-        runtimePlan.kind === "none"
+        runtimeError !== undefined ? { plan: "blocked", reason: runtimeError } : runtimePlan.kind === "none"
           ? { plan: "none" }
           : runtimePlan.kind === "available"
             ? {
@@ -455,9 +466,10 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
         await startupGc;
         abortController.signal.throwIfAborted();
         const prefs = await options.prefs.read();
-        let index = cachedIndex;
-        if (index === undefined || index.sequence < prefs.lastIndexSequence || index.runtime.channel !== prefs.runtimeChannel) {
-          index = await loadIndex(prefs, abortController.signal);
+        let index = prefs.runtimeChannel === "canary" ? cachedCanaryIndex : cachedIndex;
+        const watermark = prefs.runtimeChannel === "canary" ? prefs.lastCanaryIndexSequence ?? 0 : prefs.lastIndexSequence;
+        if (index === undefined || index.sequence < watermark || index.runtime.channel !== prefs.runtimeChannel) {
+          index = await loadIndex(prefs, abortController.signal, prefs.runtimeChannel);
         }
 
         const currentAppVersion = options.appVersion ?? "0.1.3";
@@ -469,7 +481,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
           installedRuntimeVersion,
           channel: prefs.runtimeChannel,
           platform: options.platform,
-          appVersion: currentAppVersion,
+          appVersion: options.bundledAppVersion ?? currentAppVersion,
           studioProtocol,
         });
 
@@ -590,6 +602,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
           step: 3,
           steps: 3,
           message: "工件已验签，准备安装",
+          runtimeChannel: verified.manifest.channel,
         });
       } catch (err) {
         if (abortController.signal.aborted) {
@@ -735,12 +748,14 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
       step: 2,
       steps: 3,
       message: "工件已验签，准备安装",
+      runtimeChannel: verified.manifest.channel,
     });
 
     return {
       ok: true,
       jobId,
       runtimeVersion: verified.manifest.runtimeVersion,
+      runtimeChannel: verified.manifest.channel,
     };
     } catch (error) {
       return { ok: false, message: sanitizeErrorMessage(error) };

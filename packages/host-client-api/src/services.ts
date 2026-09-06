@@ -307,6 +307,7 @@ export interface HostResidentsService {
  * the receipt (operator output lines, editor fill-back, BTW branch token).
  */
 export type HostInvokeOutcome =
+  | { readonly snapshot: OperatorStateSnapshot; readonly result: unknown }
   | OperatorStateSnapshot
   | OperatorInvokeOutcome
   | SessionTreeCommandOutcome

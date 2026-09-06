@@ -1,3 +1,5 @@
+import { RasterPreview, TerminalGraphicView } from "../TerminalGraphicView";
+import { TerminalGraphicsDecoder } from "../terminalGraphics";
 import { createContext, memo, useContext, useMemo, type ComponentProps, type MouseEvent } from "react";
 import type { JsonValue } from "@omp-studio/client-contract";
 import { Icon } from "../icons";
@@ -49,6 +51,22 @@ function Kv({ pairs }: { pairs: ReadonlyArray<readonly [string, JsonValue | stri
       ))}
     </div>
   );
+}
+
+function MediaList({ value, alt = "Image / 图片" }: { value: unknown; alt?: string }) {
+  const items = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return items.length === 0 ? null : <div className="tool-media-list">{items.slice(0, 8).map((item, i) => <RasterPreview key={i} value={item} alt={alt} />)}</div>;
+}
+
+function ToolMedia({ tool }: { tool: ToolView }) {
+  const data = jsonRecord(tool.result?.data);
+  const graphics = useMemo(() => new TerminalGraphicsDecoder().push(tool.result?.output ?? tool.output ?? ""), [tool.result?.output, tool.output]);
+  return <>
+    <MediaList value={data?.media} />
+    {graphics.images.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
+    {graphics.errors.map((error, index) => <p role="status" key={index}>{error}</p>)}
+    {typeof data?.mediaOmitted === "number" ? <p role="status">{data.mediaOmitted} image(s) omitted: unsupported format or size limit / 图片超限或格式不受支持</p> : null}
+  </>;
 }
 
 /**
@@ -282,8 +300,9 @@ function ReadBody({ tool }: { tool: ToolView }) {
   const summary = jsonString(fields.summary);
   return (
     <>
-      <Kv pairs={[["行", fields.lines ?? fields.totalLines], ["编码", fields.encoding], ["大小", fields.size ?? fields.fileSize]]} />
+      <Kv pairs={[["行", fields.lines ?? fields.totalLines], ["编码", fields.encoding], ["大小", fields.size ?? fields.fileSize], ["问题", fields.q ?? fields.question]]} />
       {preview ? <CodeLines lines={preview} start={offset ?? 1} /> : summary ? <div className="tc-summary">{summary}</div> : tool.output ? <CodeLines lines={tool.output.split("\n")} start={offset ?? 1} /> : null}
+      <MediaList value={fields.media ?? fields.image ?? fields.images} alt="读取结果" />
     </>
   );
 }
@@ -629,6 +648,8 @@ function EvalBody({ tool }: { tool: ToolView }) {
   const cells = Array.isArray(fields.cells) ? fields.cells : [];
   return (
     <div className="tc-eval">
+      <Kv pairs={[["status", fields.status], ["id", fields.id], ["duration", fields.durationMs]]} />
+      <MediaList value={fields.media ?? fields.image ?? fields.images ?? fields.screenshot ?? (fields.screenshotData !== undefined ? { data: fields.screenshotData, mimeType: fields.mimeType } : undefined)} alt="评估结果" />
       {cells.map((entry, index) => {
         const cell = jsonRecord(entry) ?? {};
         const code = jsonString(cell.code) ?? "";
@@ -700,6 +721,7 @@ function InspectBody({ tool }: { tool: ToolView }) {
       <Kv pairs={[["mime", fields.mime], ["model", fields.model]]} />
       {jsonString(fields.question) ? <div className="tc-summary">{jsonString(fields.question)}</div> : null}
       {answer ? <div className="tc-answer">{answer}</div> : null}
+      <MediaList value={fields.media ?? fields.image ?? fields.images} alt="图片问题结果" />
     </>
   );
 }
@@ -710,7 +732,7 @@ function BrowserBody({ tool }: { tool: ToolView }) {
   const output = fields.output;
   return (
     <>
-      <Kv pairs={[["action", fields.action], ["tab", fields.tab], ["url", fields.url ?? fields.target]]} />
+      <Kv pairs={[["action", fields.action], ["tab", fields.tab], ["url", fields.url ?? fields.target], ["element", fields.elementHandle ?? fields.handle]]} />
       {code ? (
         <>
           <div className="tc-label">script</div>
@@ -718,6 +740,8 @@ function BrowserBody({ tool }: { tool: ToolView }) {
         </>
       ) : null}
       {output !== undefined ? <ScrollPane className="codeblock">{typeof output === "string" ? output : JSON.stringify(output)}</ScrollPane> : null}
+      {fields.result !== undefined ? <JsonBlock value={fields.result} /> : null}
+      <MediaList value={fields.media ?? fields.screenshot ?? fields.image ?? fields.images ?? (fields.screenshotData !== undefined ? { data: fields.screenshotData, mimeType: fields.mimeType } : undefined)} alt="Browser evaluation" />
     </>
   );
 }
@@ -727,7 +751,7 @@ function ComputerBody({ tool }: { tool: ToolView }) {
   const code = jsonString(fields.code);
   return (
     <>
-      <Kv pairs={[["screenshots", fields.shots]]} />
+      <Kv pairs={[["screenshots", fields.shots ?? fields.screenshot], ["status", fields.status], ["action", fields.action]]} />
       {code ? (
         <>
           <div className="tc-label">script</div>
@@ -735,6 +759,7 @@ function ComputerBody({ tool }: { tool: ToolView }) {
         </>
       ) : null}
       {jsonString(fields.output) ? <ScrollPane className="codeblock">{jsonString(fields.output)}</ScrollPane> : null}
+      <MediaList value={fields.media ?? fields.images ?? fields.screenshot ?? fields.shots} alt="Computer evaluation" />
     </>
   );
 }
@@ -745,7 +770,7 @@ function HubBody({ tool }: { tool: ToolView }) {
   if (jobs.length > 0) {
     return (
       <>
-        <Kv pairs={[["op", fields.op], ["jobs", jobs.length]]} />
+        <Kv pairs={[["op", fields.op], ["jobs", jobs.length], ["queue", fields.queue], ["concurrency", fields.concurrency]]} />
         <div className="tc-task">
           <div className="task-agents">
             {jobs.map((entry, index) => {
@@ -764,6 +789,12 @@ function HubBody({ tool }: { tool: ToolView }) {
         </div>
       </>
     );
+  }
+  if (fields.status !== undefined || fields.jobId !== undefined || fields.result !== undefined) {
+    return <>
+      <Kv pairs={[["status", fields.status], ["job", fields.jobId ?? fields.id], ["op", fields.op]]} />
+      {fields.result !== undefined ? <JsonBlock value={fields.result} /> : null}
+    </>;
   }
   if (jsonString(fields.hubKind) === "irc") {
     return (
@@ -1028,6 +1059,7 @@ export const ToolBody = memo(function ToolBody({ tool, follow }: { tool: ToolVie
     <ToolCardLive.Provider value={live}>
       {tool.truncated === true ? <TruncationMark /> : null}
       {inner}
+      <ToolMedia tool={tool} />
     </ToolCardLive.Provider>
   );
 });

@@ -72,16 +72,22 @@ try {
     cwd: ompSourceDirectory,
     env,
   });
+  run(bun, ["test", "packages/coding-agent/test/main-host-classification.test.ts"], {
+    cwd: ompSourceDirectory,
+    env,
+  });
   run(
     bun,
     [
       "test",
-      "--parallel=4",
+      // Bun's Windows worker pool can crash in native modules when this large
+      // mixed fixture batch includes the host-classification process test. That
+      // test runs above in its own process; keep the remaining batch bounded.
+      "--parallel=2",
       "packages/agent/test/pause-gate.test.ts",
       "packages/coding-agent/test/modes/components/pause-screen.test.ts",
       "packages/coding-agent/test/cli-argv-routing.test.ts",
       "packages/coding-agent/test/cli-unknown-flag.test.ts",
-      "packages/coding-agent/test/main-host-classification.test.ts",
       "packages/coding-agent/test/session-manager/studio-origin.test.ts",
       "packages/coding-agent/test/studio-host-args.test.ts",
       "packages/coding-agent/test/studio-command-arbiter.test.ts",

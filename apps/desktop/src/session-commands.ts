@@ -1,3 +1,4 @@
+import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
  * Desktop semantic commands: session.create / session.resume / session.drop / interaction.respond
  * and P4 invoke that forwards the client requestId.
@@ -79,6 +80,21 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   "job.get",
   "job.cancel",
   "job.subscribe",
+  "browser.evaluate",
+  "computer.evaluate",
+  "image.read",
+  "terminal.image",
+  "video.metadata",
+  "video.frame",
+  "eval.agent.start",
+  "eval.agent.status",
+  "eval.agent.wait",
+  "eval.agent.cancel",
+  "eval.completion.start",
+  "eval.completion.status",
+  "eval.completion.wait",
+  "eval.completion.cancel",
+  "eval.workpool.status",
 ]);
 
 export function fencesOnStateVersion(kind: StudioOperation["kind"]): boolean {
@@ -345,6 +361,7 @@ export function createDesktopSemanticCommands(options: {
       });
       throwIfNotCompleted(receipt);
       const latest = session.controller.publication()?.snapshot ?? snapshot;
+      if (isEvaluationOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (operation.kind === "operator.invoke") {
         // The Runtime returns { output, result } for operator commands; carry
         // it beside the post-command snapshot so the Renderer can surface

@@ -1,3 +1,4 @@
+import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
  * StudioHostClientFacade — the P1 presentation-neutral product API.
  *
@@ -367,6 +368,10 @@ class CommandRegistry {
     return this.#byRequestId.get(requestId);
   }
 
+  hasPending(): boolean {
+    return [...this.#byKey.values()].some((entry) => entry.terminal === undefined);
+  }
+
   recordTerminal(requestId: CommandRequestId, receipt: CommandReceipt): void {
     const entry = this.#byRequestId.get(requestId);
     if (entry !== undefined) {
@@ -410,6 +415,7 @@ function validateEnvelope(request: {
 /** Re-validate the three Runtime mirror commands at the in-process Host seam. */
 function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unknown): void {
   if (
+    !isEvaluationOperationKind(commandName) &&
     commandName !== "runtime.settings.get" &&
     commandName !== "runtime.settings.set" &&
     commandName !== "mode.plan.review.saveAndQuit"
@@ -697,6 +703,11 @@ export class StudioHostClientFacade implements ClientTransport {
   /** Last GUI `interaction.required` published as `id:generation`. Snapshot recovery must not re-emit the same card. */
   #lastGuiInteractionKey: string | undefined;
   #installInFlight = false;
+  #dispatchesInFlight = 0;
+
+  get runtimeInstallInProgress(): boolean {
+    return this.#installInFlight;
+  }
   #lastInstallResult: RuntimeInstallState | undefined;
   /** Last workspace list seen; feeds the bootstrap selection (`projects.list` wins in the Renderer). */
   #lastWorkspaceModel: WorkspaceListReadModel | undefined;
@@ -979,7 +990,21 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async command<TName extends CommandName>(request: ClientCommandRequest<TName>): Promise<ClientCommandAccepted<TName>> {
     this.#assertOpen();
-    const accepted = await this.#dispatchCommand(request);
+    const replay = this.#registry.getByRequestId(request.requestId);
+    if (this.#installInFlight && !(request.commandName === "runtime.install" && replay !== undefined)) {
+      throw unavailableError("Runtime update is in progress; retry after it completes");
+    }
+    if (request.commandName === "runtime.install" && replay === undefined &&
+        (this.#dispatchesInFlight > 0 || this.#registry.hasPending())) {
+      throw unavailableError("Finish pending commands before updating Runtime");
+    }
+    this.#dispatchesInFlight += 1;
+    let accepted: ClientCommandAccepted;
+    try {
+      accepted = await this.#dispatchCommand(request);
+    } finally {
+      this.#dispatchesInFlight -= 1;
+    }
     // The dispatch switch verified the commandName discriminant; TS cannot
     // narrow the generic type parameter itself, so the ack is cast.
     return accepted as ClientCommandAccepted<TName>;
@@ -2395,6 +2420,7 @@ export class StudioHostClientFacade implements ClientTransport {
       status: "accepted",
       acceptedAt,
     };
+    this.#installInFlight = true;
     this.#bus.emit({ kind: "command.accepted", accepted });
     void this.#runInstall(channel, request.requestId);
     return accepted;
@@ -3244,6 +3270,16 @@ export class StudioHostClientFacade implements ClientTransport {
       const state = await this.#options.install(channel);
       const result = { ...state };
       this.#lastInstallResult = result;
+      if (state.status === "failed") {
+        this.#emitTerminal(requestId, {
+          requestId,
+          commandName: "runtime.install",
+          status: "failed",
+          error: clientError("INTERNAL_ERROR", state.message ?? "Runtime installation failed"),
+          observedAt: this.#options.diagnostics.now(),
+        });
+        return;
+      }
       this.#emitTerminal(requestId, {
         requestId,
         commandName: "runtime.install",

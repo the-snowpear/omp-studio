@@ -1,3 +1,4 @@
+import { isEvaluationOperationKind, parseEvaluationOperation } from "./evaluation-validation.js";
 import { ContractValidationError } from "./contract-error.js";
 import type { AgentTranscriptMessage, AgentTranscriptPage } from "./contracts/agents-jobs.js";
 import { parseBtwSnapshot } from "./btw-validation.js";
@@ -1407,6 +1408,14 @@ export function parseFoundationStudioRequest(value: unknown): StudioRequest {
 
   const operation = record(input.operation, "$request.operation");
   const kind = nonEmptyString(operation.kind, "$request.operation.kind");
+  if (isEvaluationOperationKind(kind)) {
+    try {
+      parseEvaluationOperation(operation);
+    } catch (error) {
+      throw new ContractValidationError(error instanceof Error ? error.message : "invalid evaluation operation", "$request.operation");
+    }
+    return input as unknown as StudioRequest;
+  }
   const shape = FOUNDATION_OPERATIONS[kind];
   if (shape === undefined) {
     throw new ContractValidationError(`unsupported foundation operation ${JSON.stringify(kind)}`, "$request.operation.kind");

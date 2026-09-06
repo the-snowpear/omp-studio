@@ -1,7 +1,8 @@
 {
   "schema": 1,
-  "activeKeyId": "omp-studio-release-2026a",
+  "activeKeyId": "omp-studio-release-2026b",
   "keys": {
-    "omp-studio-release-2026a": "omp-studio-release-2026a.pem"
+    "omp-studio-release-2026a": "omp-studio-release-2026a.pem",
+    "omp-studio-release-2026b": "omp-studio-release-2026b.pem"
   }
 }

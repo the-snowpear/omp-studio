@@ -1,6 +1,6 @@
 {
   "name": "@omp-studio/client-contract",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -19,6 +19,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@omp-studio/studio-protocol": "0.1.3"
+    "@omp-studio/studio-protocol": "0.1.4"
   }
 }

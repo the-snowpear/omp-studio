@@ -432,3 +432,4 @@ button.project-head {
     grid-template-columns: 1fr;
   }
 }
+.tool-media-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.tool-media-preview{display:block;max-width:280px;max-height:180px;border:1px solid var(--border,#ddd);border-radius:6px;object-fit:contain;background:var(--surface-muted,#f6f6f6)}

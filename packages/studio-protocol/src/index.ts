@@ -1,6 +1,7 @@
 export * from "./contracts/agents-jobs.js";
 export * from "./contracts/btw.js";
 export * from "./contracts/commands.js";
+export * from "./contracts/evaluation.js";
 export * from "./contracts/conversation.js";
 export * from "./conversation-text.js";
 export * from "./contracts/ids.js";
@@ -14,3 +15,4 @@ export * from "./contracts/telemetry.js";
 export * from "./canonical-json.js";
 export * from "./frame-codec.js";
 export * from "./validation.js";
+export * from "./evaluation-validation.js";

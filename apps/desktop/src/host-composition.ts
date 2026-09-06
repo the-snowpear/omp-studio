@@ -209,6 +209,11 @@ export interface DesktopRuntimeSessionPort {
   start(context: DesktopRuntimeSessionContext): Promise<DesktopRuntimeSession | undefined>;
   /** Gracefully stops the Runtime if this port started one; no-op otherwise. */
   stop(): Promise<void>;
+  /** Stop idle workers for an installation, then restore their sessions using
+   * the activated executable. Serialized with all other lifecycle changes. */
+  withRuntimeMaintenance?<T>(operation: () => Promise<T>, expectedVersion?: () => string | undefined,
+    refreshContext?: () => Promise<DesktopRuntimeSessionContext>,
+    recoverPrevious?: () => Promise<string | undefined>): Promise<T>;
   /**
    * Optional workspace rebind: select a Worker for the given workspace and,
    * unless `launchIfMissing` is false, spawn one when absent. Returns its
@@ -532,7 +537,7 @@ async function ensureInstalledRuntime(
   return startInstalledRuntime(context);
 }
 
-async function startInstalledRuntime(context: FacadeContext): Promise<DesktopRuntimeSession | undefined> {
+async function installedRuntimeContext(context: FacadeContext): Promise<DesktopRuntimeSessionContext> {
   const resolution: RuntimeResolution = await context.backend.resolve({ kind: "managed" });
   context.seams.hostLog?.write(
     resolution.classification === "managed" ? "info" : "warn",
@@ -543,6 +548,19 @@ async function startInstalledRuntime(context: FacadeContext): Promise<DesktopRun
     rememberUnavailable(context.lastUnavailable, undefined, undefined, classificationUnavailable(resolution));
     throw new Error(resolution.rejectionReason ?? "Installed Runtime was not accepted as managed");
   }
+  const workspace = context.seams.getActiveWorkspace?.();
+  return {
+    resolution,
+    endpoint: context.endpoint,
+    profileDirectory: context.profileDirectory,
+    runtimeInstallDirectory: context.runtimeInstallDirectory,
+    ...(context.installerOptions === undefined ? {} : { installer: context.installerOptions }),
+    ...(workspace === undefined ? {} : { workspace }),
+  };
+}
+
+async function startInstalledRuntime(context: FacadeContext): Promise<DesktopRuntimeSession | undefined> {
+  const launchContext = await installedRuntimeContext(context);
   const port = context.runtimeSession;
   if (port === undefined) {
     rememberUnavailable(context.lastUnavailable, undefined, undefined, {
@@ -565,14 +583,7 @@ async function startInstalledRuntime(context: FacadeContext): Promise<DesktopRun
       return rebound;
     }
   }
-  const next = await port.start({
-    resolution,
-    endpoint: context.endpoint,
-    profileDirectory: context.profileDirectory,
-    runtimeInstallDirectory: context.runtimeInstallDirectory,
-    ...(context.installerOptions === undefined ? {} : { installer: context.installerOptions }),
-    ...(workspace === undefined ? {} : { workspace }),
-  });
+  const next = await port.start(launchContext);
   rememberUnavailable(
     context.lastUnavailable,
     next,
@@ -607,6 +618,54 @@ function toPersistedStudioAgent(record: SessionPersistedAgentRecord): StudioAgen
     ...(record.usage === undefined ? {} : { usage: { ...record.usage } }),
     ...(record.modelRole === undefined ? {} : { modelRole: record.modelRole }),
     ...(record.resolvedModel === undefined ? {} : { resolvedModel: record.resolvedModel }),
+  };
+}
+
+function managedRuntimeInstallService(context: FacadeContext): HostRuntimeInstallService {
+  if (context.managedInstall === undefined) {
+    return async () => { throw new Error("no runtime install service is wired; runtime.install is not available"); };
+  }
+  const managed = context.managedInstall;
+  const maintenance = context.runtimeSession?.withRuntimeMaintenance;
+  const install = createDesktopRuntimeInstallService({
+    backend: context.backend,
+    platform: `${context.platform}-${context.arch}`,
+    hasTrustedKey: context.hasTrustedKey,
+    ...(managed.pendingArtifact === undefined ? {} : { pendingArtifact: managed.pendingArtifact }),
+    locateArtifact: createManagedArtifactLocator(managed),
+    ...(managed.activateOptions === undefined ? {} : { activateOptions: managed.activateOptions }),
+    ...(maintenance === undefined ? {} : { installOptions: { allowReferencedRepair: true } }),
+    afterActivate: managed.afterActivate ?? (maintenance === undefined
+      ? async () => {
+          const next = await startInstalledRuntime(context);
+          if (next === undefined && context.seams.getActiveWorkspace?.() !== undefined) {
+            throw new Error("Runtime did not become ready after installation");
+          }
+        }
+      : async () => undefined),
+  });
+  if (maintenance === undefined) return install;
+  return async (channel) => {
+    let version: string | undefined;
+    let previousVersion: string | undefined;
+    const result = await maintenance(async () => {
+      previousVersion = (await context.backend.installer.current())?.runtimeVersion;
+      const result = await install(channel);
+      if (result.status === "failed") throw new Error(result.message ?? "Runtime installation failed");
+      version = result.version;
+      return result;
+    }, () => version, () => installedRuntimeContext(context), async () => {
+      if (previousVersion === undefined || previousVersion === version) throw new Error("No distinct previous Runtime is available for recovery");
+      await context.backend.activate(previousVersion, managed.activateOptions);
+      return previousVersion;
+    });
+    // A first installation may start from a port that never received its
+    // launch context because no managed executable existed at bootstrap.
+    if (context.sessionRef.current?.hello() === undefined && context.seams.getActiveWorkspace?.() !== undefined) {
+      const next = await startInstalledRuntime(context);
+      if (next?.hello()?.runtimeVersion !== version) throw new Error("Installed Runtime did not become ready with the expected version");
+    }
+    return result;
   };
 }
 
@@ -791,29 +850,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     telemetryProbeWorkspace,
     workspaceCwd: () => context.workspaceCwd.current,
     diagnostics: seams.diagnostics ?? createDefaultHostDiagnosticsFactory(),
-    install:
-      seams.install ??
-      (context.managedInstall === undefined
-        ? async () => {
-            throw new Error("no runtime install service is wired; runtime.install is not available");
-          }
-        : createDesktopRuntimeInstallService({
-            backend: context.backend,
-            platform: `${context.platform}-${context.arch}`,
-            hasTrustedKey: context.hasTrustedKey,
-            ...(context.managedInstall.pendingArtifact === undefined
-              ? {}
-              : { pendingArtifact: context.managedInstall.pendingArtifact }),
-            locateArtifact: createManagedArtifactLocator(context.managedInstall),
-            ...(context.managedInstall.activateOptions === undefined
-              ? {}
-              : { activateOptions: context.managedInstall.activateOptions }),
-            afterActivate:
-              context.managedInstall.afterActivate ??
-              (async () => {
-                await startInstalledRuntime(context);
-              }),
-          })),
+    install: seams.install ?? managedRuntimeInstallService(context),
     ...(seams.installProbe !== undefined
       ? { installProbe: seams.installProbe }
       : context.managedInstall === undefined
@@ -993,6 +1030,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
    * snapshot when the port has no broker view.
    */
   isBusy(): boolean {
+    if (this.#facade.runtimeInstallInProgress) return true;
     const residents = this.#runtimeSession?.listResidents?.().residents;
     if (residents !== undefined) {
       return residents.some((row) => row.phase === "running" || row.phase === "compacting");
@@ -1086,6 +1124,9 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     if (this.#closed || this.#shutdownStarted) {
       throw new Error("desktop host composition is closed");
     }
+    // Keep the installation gate and its receipt registry alive while the
+    // Renderer reboots. Replacing the facade here would reopen write access.
+    if (this.#facade.runtimeInstallInProgress) return this;
     await this.#facade.close();
     this.#facade = buildFacade(this.#facadeContext);
     this.#replayCurrentPublication();

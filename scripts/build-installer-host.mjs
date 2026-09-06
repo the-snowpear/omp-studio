@@ -21,6 +21,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { repositoryRoot, run } from "./omp-tooling.mjs";
+import { resolveTargetArch, installerHostArch, assertPeArchitecture } from "./windows-architecture.mjs";
+export { resolveTargetArch } from "./windows-architecture.mjs";
 import {
   SERIES_JSON_PATH,
   VENDOR_CODING_AGENT_PACKAGE_JSON,
@@ -28,6 +30,8 @@ import {
 } from "./runtime-artifact.mjs";
 
 export const WEBVIEW2_VERSION = "1.0.2903.40";
+
+/** Resolve the target Windows architecture used for all installer resources. */
 
 const HOST_SRC = join(repositoryRoot, "packaging", "installer-host");
 const HOST_CS = join(HOST_SRC, "InstallerHost.cs");
@@ -100,11 +104,14 @@ function writeHostDefaults() {
   const vendor = JSON.parse(readFileSync(VENDOR_CODING_AGENT_PACKAGE_JSON, "utf8"));
   const runtimeVersion = deriveRuntimeVersion(vendor.version, series);
   const product = JSON.parse(readFileSync(join(repositoryRoot, "package.json"), "utf8"));
+  const arch = resolveTargetArch();
   const ini = `[Setup]
 Version=${product.version}
 RuntimeVersion=${runtimeVersion}
 ProductName=OMP Studio
-Arch=x64
+Arch=${arch}
+InstallerHostArch=${installerHostArch(arch)}
+RuntimeArch=${arch}
 SpaceRequiredMB=350
 AppExe=OMP Studio.exe
 UninstallExe=Uninstall OMP Studio.exe
@@ -112,7 +119,7 @@ UninstallExe=Uninstall OMP Studio.exe
   writeFileSync(join(DIST_DIR, "host-defaults.ini"), ini, "utf8");
   writeFileSync(
     join(DIST_DIR, "runtime-version.nsh"),
-    `!define OMP_RUNTIME_VERSION "${runtimeVersion}"\n`,
+    `!define OMP_RUNTIME_VERSION "${runtimeVersion}"\n!define OMP_TARGET_ARCH "${arch}"\n`,
     "utf8",
   );
 }
@@ -178,10 +185,13 @@ export async function buildInstallerHost() {
     formsCandidates.find((path) => existsSync(path)) ?? formsCandidates[0],
     "WebView2.WinForms",
   );
+  const targetArch = resolveTargetArch();
+  const hostArch = installerHostArch(targetArch);
   const loaderDll = requireFile(
-    join(extractDir, "runtimes", "win-x64", "native", "WebView2Loader.dll"),
-    "WebView2Loader",
+    join(extractDir, "runtimes", `win-${hostArch}`, "native", "WebView2Loader.dll"),
+    `WebView2Loader (${hostArch})`,
   );
+  assertPeArchitecture(loaderDll, hostArch);
 
   rmSync(DIST_DIR, { recursive: true, force: true });
   mkdirSync(DIST_DIR, { recursive: true });
@@ -198,7 +208,7 @@ export async function buildInstallerHost() {
     "/nologo",
     "/warn:0",
     "/target:winexe",
-    "/platform:x64",
+    `/platform:${hostArch}`,
     "/optimize+",
     `/out:${outExe}`,
     `/reference:${coreDll}`,
@@ -216,6 +226,7 @@ export async function buildInstallerHost() {
   if (!existsSync(outExe)) {
     throw new Error("csc did not emit OmpInstallerUi.exe");
   }
+  assertPeArchitecture(outExe, hostArch);
 
   stageResources();
   console.log(`[installer-host] Staged ${RESOURCES_HOST} and ${RESOURCES_UI}`);

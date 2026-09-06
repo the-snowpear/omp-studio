@@ -11,6 +11,7 @@ import {
   installVerifiedArtifact,
   verifySignedArtifact,
   verifySignedMetadata,
+  verifyFileChecksums,
   writeJsonAtomic,
   RUNTIME_ARTIFACT_LAYOUT,
   type RuntimeSignatureVerifier,
@@ -41,6 +42,19 @@ export interface RuntimeInstallerOptions {
   isRuntimeReferenced?: (runtimeVersion: string) => boolean | Promise<boolean>;
 }
 
+export interface RuntimeInstallOptions {
+  /** Only set inside a maintenance transaction that has stopped all Runtime processes. */
+  allowReferencedRepair?: boolean;
+}
+
+export class RuntimeInstallationReferencedError extends Error {
+  readonly code = "RUNTIME_INSTALLATION_REFERENCED";
+  constructor(readonly runtimeVersion: string) {
+    super(`Runtime ${runtimeVersion} is referenced by a Thread binding; stop its Runtime processes before repairing it`);
+    this.name = "RuntimeInstallationReferencedError";
+  }
+}
+
 export class RuntimeInstaller {
   readonly #versionsDirectory: string;
   readonly #currentPath: string;
@@ -57,21 +71,7 @@ export class RuntimeInstaller {
     this.#isRuntimeReferenced = options.isRuntimeReferenced;
   }
 
-  async #refuseIfInstalled(version: string): Promise<void> {
-    assertSafeVersion(version);
-    const finalDirectory = join(this.#versionsDirectory, version);
-    if (!isInside(this.#versionsDirectory, finalDirectory)) {
-      throw new Error("Runtime target escaped the versions directory");
-    }
-    try {
-      await access(finalDirectory);
-      throw new Error(`Runtime ${version} is already installed`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
-
-  async install(artifactDirectory: string): Promise<RuntimeInstallationManifest> {
+  async install(artifactDirectory: string, options: RuntimeInstallOptions = {}): Promise<RuntimeInstallationManifest> {
     const { manifest } = await verifySignedArtifact({
       directory: artifactDirectory,
       layout: RUNTIME_ARTIFACT_LAYOUT,
@@ -84,12 +84,43 @@ export class RuntimeInstaller {
           ? "checksums.json must cover runtime-manifest.json"
           : "checksums.json must cover the Runtime entrypoint",
     });
-    await this.#refuseIfInstalled(manifest.runtimeVersion);
+    assertSafeVersion(manifest.runtimeVersion);
+    const installedDirectory = join(this.#versionsDirectory, manifest.runtimeVersion);
+    let existing = false;
+    try {
+      const metadata = await lstat(installedDirectory);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error("Runtime installation must be a regular directory");
+      existing = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (existing) {
+      try {
+        const installed = await verifySignedArtifact({
+          directory: installedDirectory,
+          layout: RUNTIME_ARTIFACT_LAYOUT,
+          parseManifest: parseRuntimeInstallationManifest,
+          requireCovered: (m) => ["runtime-manifest.json", m.entrypoint],
+          trustedKeys: this.#trustedKeys,
+          ...(this.#signatureVerifier ? { signatureVerifier: this.#signatureVerifier } : {}),
+        });
+        if (installed.manifest.runtimeVersion === manifest.runtimeVersion) return installed.manifest;
+      } catch {
+        // The replacement source is already verified; repair a corrupt installed copy.
+      }
+    }
+    const beforeReplace = async (): Promise<void> => {
+      if (!options.allowReferencedRepair && await this.#isRuntimeReferenced?.(manifest.runtimeVersion)) {
+        throw new RuntimeInstallationReferencedError(manifest.runtimeVersion);
+      }
+    };
+    if (existing) await beforeReplace();
     await installVerifiedArtifact({
       sourceDirectory: artifactDirectory,
       versionsDirectory: this.#versionsDirectory,
       version: manifest.runtimeVersion,
       requireFile: manifest.entrypoint,
+      ...(existing ? { replaceExisting: { beforeReplace } } : {}),
       verifyStaging: async (directory) => {
         const verified = await verifySignedArtifact({
           directory,
@@ -138,9 +169,12 @@ export class RuntimeInstaller {
       }
       await this.#quarantineFailedCandidate(versionDirectory, runtimeVersion, error);
     }
+    const previousRuntimeVersion = current?.runtimeVersion === runtimeVersion
+      ? current.previousRuntimeVersion
+      : current?.runtimeVersion;
     const record: ActiveRuntimeRecord = {
       runtimeVersion,
-      ...(current === undefined ? {} : { previousRuntimeVersion: current.runtimeVersion }),
+      ...(previousRuntimeVersion === undefined ? {} : { previousRuntimeVersion }),
       activatedAt: new Date().toISOString(),
     };
     await writeJsonAtomic(this.#currentPath, record);
@@ -291,14 +325,14 @@ export class RuntimeInstaller {
   /**
    * Read-only query for the active installation: its runtime manifest and the
    * absolute entrypoint path. Never mutates `current.json` or activation
-   * state; used by the Runtime Resolver's managed lookup. Re-verifies the
-   * signed metadata on every call — see {@link RuntimeInstaller.#verifySignedMetadata}.
+   * state; used by the Runtime Resolver's managed lookup. Re-verifies signed
+   * metadata and the actual executable bytes before they reach the process probe.
    */
   async currentManifest(): Promise<InstalledRuntimeManifest | undefined> {
     const record = await this.current();
     if (record === undefined) return undefined;
     const versionDirectory = join(this.#versionsDirectory, record.runtimeVersion);
-    const { manifest } = await verifySignedMetadata({
+    const { manifest, checksums } = await verifySignedMetadata({
       directory: versionDirectory,
       layout: RUNTIME_ARTIFACT_LAYOUT,
       parseManifest: parseRuntimeInstallationManifest,
@@ -317,6 +351,7 @@ export class RuntimeInstaller {
     if (!isInside(versionDirectory, entrypointPath) || !(await lstat(entrypointPath)).isFile()) {
       throw new Error("Runtime entrypoint escapes the version directory");
     }
+    await verifyFileChecksums(versionDirectory, { [manifest.entrypoint]: checksums.files[manifest.entrypoint]! });
     return { record, manifest, entrypointPath };
   }
 }

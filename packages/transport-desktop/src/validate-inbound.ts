@@ -1,3 +1,9 @@
+import { validateEvaluationOperation } from "@omp-studio/studio-protocol";
+
+function record(value: unknown, field: string): Record<string, unknown> {
+  assertPlainObject(value, field);
+  return value as Record<string, unknown>;
+}
 /**
  * Strict P1 inbound validators for the Desktop IPC boundary
  * (FRONTEND_INTEGRATION.md §9).
@@ -1805,6 +1811,21 @@ const COMMAND_INPUT_VALIDATORS: {
   "agent.revive": validateAgentLifecycleInput,
   "agent.release": validateAgentLifecycleInput,
   "job.cancel": validateJobCancelInput,
+  "browser.evaluate": (input) => { try { validateEvaluationOperation({kind:"browser.evaluate", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "computer.evaluate": (input) => { try { validateEvaluationOperation({kind:"computer.evaluate", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "image.read": (input) => { try { validateEvaluationOperation({kind:"image.read", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "terminal.image": (input) => { try { validateEvaluationOperation({kind:"terminal.image", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "video.metadata": (input) => { try { validateEvaluationOperation({kind:"video.metadata", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "video.frame": (input) => { try { validateEvaluationOperation({kind:"video.frame", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.agent.start": (input) => { try { validateEvaluationOperation({kind:"eval.agent.start", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.agent.status": (input) => { try { validateEvaluationOperation({kind:"eval.agent.status", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.agent.wait": (input) => { try { validateEvaluationOperation({kind:"eval.agent.wait", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.agent.cancel": (input) => { try { validateEvaluationOperation({kind:"eval.agent.cancel", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.completion.start": (input) => { try { validateEvaluationOperation({kind:"eval.completion.start", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.completion.status": (input) => { try { validateEvaluationOperation({kind:"eval.completion.status", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.completion.wait": (input) => { try { validateEvaluationOperation({kind:"eval.completion.wait", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.completion.cancel": (input) => { try { validateEvaluationOperation({kind:"eval.completion.cancel", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
+  "eval.workpool.status": (input) => { try { validateEvaluationOperation({kind:"eval.workpool.status", ...record(input, "evaluation input")}); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid evaluation input"); } },
   "runtime.install": validateRuntimeInstallInput,
   "runtime.ensure": validateRuntimeEnsureInput,
   "session.create": (input) => validateEmptyCommandInput(input, "session.create input"),

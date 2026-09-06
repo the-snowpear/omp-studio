@@ -23,6 +23,7 @@ import process from "node:process";
 import { npmInvocation, repositoryRoot, run, toolingEnvironment } from "./omp-tooling.mjs";
 import { auditInstallerOutput } from "./audit-installer.mjs";
 import { buildInstallerHost } from "./build-installer-host.mjs";
+import { resolveTargetArch, assertNativeRuntimeBuild } from "./windows-architecture.mjs";
 
 const esbuildCli = join(repositoryRoot, "node_modules", "esbuild", "bin", "esbuild");
 const electronBuilderCli = join(repositoryRoot, "node_modules", "electron-builder", "cli.js");
@@ -86,7 +87,11 @@ async function main() {
   const skipHost = hasFlag("--skip-host") || process.env.OMP_PACK_SKIP_HOST === "1";
   const skipBuild = hasFlag("--skip-build") || process.env.OMP_PACK_SKIP_BUILD === "1";
   const npm = npmInvocation();
+  const targetArch = resolveTargetArch();
+  if (!skipHost) assertNativeRuntimeBuild(targetArch);
   const env = toolingEnvironment({
+    OMP_TARGET_ARCH: targetArch,
+    OMP_INSTALLER_ARTIFACT_PLATFORM: `win32-${targetArch}`,
     CSC_IDENTITY_AUTO_DISCOVERY: "false",
     CSC_LINK: "",
     WIN_CSC_LINK: "",
@@ -128,11 +133,11 @@ async function main() {
   console.log("[pack:win] electron-builder NSIS...");
   run(
     process.execPath,
-    [electronBuilderCli, "--config", "packaging/electron-builder.yml", "--win", "nsis", "--publish", "never"],
+    [electronBuilderCli, "--config", "packaging/electron-builder.yml", "--win", "nsis", `--${targetArch}`, "--publish", "never"],
     { env },
   );
 
-  const report = auditInstallerOutput(join(repositoryRoot, "outputs", "installer"));
+  const report = auditInstallerOutput(join(repositoryRoot, "outputs", "installer"), targetArch);
   console.log(`[pack:win] Audit passed: ${report.installerExe}`);
   for (const line of report.notes) {
     console.log(`[pack:win]   ${line}`);

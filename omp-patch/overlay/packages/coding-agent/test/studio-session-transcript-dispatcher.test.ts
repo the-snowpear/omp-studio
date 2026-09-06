@@ -198,9 +198,8 @@ describe("agent.conversation.read dispatcher", () => {
 	test("maps missing agents to COMMAND_BLOCKED without accepting a command", async () => {
 		using tempDir = TempDir.createSync("@omp-studio-agent-convo-missing-");
 		const manager = SessionManager.create(tempDir.path(), tempDir.path());
-		const { StudioAgentConversationError } = await import(
-			"@oh-my-pi/pi-coding-agent/studio/services/agent-conversation-service"
-		);
+		const { StudioAgentConversationError } =
+			await import("@oh-my-pi/pi-coding-agent/studio/services/agent-conversation-service");
 		const { projector, frames, dispatcher, request } = transcriptFixture(manager, {
 			read: async () => {
 				throw new StudioAgentConversationError("AGENT_NOT_FOUND", "missing");

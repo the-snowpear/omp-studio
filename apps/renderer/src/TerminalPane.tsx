@@ -1,3 +1,5 @@
+import { TerminalGraphicsDecoder, type TerminalGraphic } from "./terminalGraphics";
+import { TerminalGraphicView } from "./TerminalGraphicView";
 /**
  * Desktop-chrome integrated shell. Uses `window.ompStudioTerminal` when the
  * Electron preload is present; otherwise shows an honest unavailable state.
@@ -76,6 +78,9 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [graphics, setGraphics] = useState<Record<string, TerminalGraphic[]>>({});
+  const [graphicsErrors, setGraphicsErrors] = useState<Record<string, string>>({});
+  const decoders = useRef(new Map<string, TerminalGraphicsDecoder>());
   const hosts = useRef(new Map<string, Host>());
   const pending = useRef(new Map<string, string>());
   const sessionsRef = useRef<Session[]>([]);
@@ -121,15 +126,20 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
   useEffect(() => {
     if (!api) return;
     const offData = api.onData((event) => {
+      let decoder = decoders.current.get(event.id);
+      if (!decoder) { decoder = new TerminalGraphicsDecoder(); decoders.current.set(event.id, decoder); }
+      const decoded = decoder.push(event.data);
+      if (decoded.images.length) setGraphics(current => ({ ...current, [event.id]: [...(current[event.id] ?? []), ...decoded.images].slice(-4) }));
+      if (decoded.errors.length) setGraphicsErrors(current => ({ ...current, [event.id]: decoded.errors.join("; ") }));
       const host = hosts.current.get(event.id);
       if (host) {
-        host.term.write(event.data);
+        host.term.write(decoded.text);
         return;
       }
       // A screen normally mounts right after `create`, but until it does the
       // bytes have to go somewhere. Keep only the tail: an unbounded string
       // concat here is a PTY-rate leak if the host never arrives.
-      const buffered = (pending.current.get(event.id) ?? "") + event.data;
+      const buffered = (pending.current.get(event.id) ?? "") + decoded.text;
       pending.current.set(
         event.id,
         buffered.length > PENDING_MAX_CHARS ? buffered.slice(buffered.length - PENDING_MAX_CHARS) : buffered,
@@ -146,6 +156,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
         hosts.current.delete(event.id);
       }
       pending.current.delete(event.id);
+      decoders.current.delete(event.id);
       setSessions((current) =>
         current.map((session) => (session.id === event.id ? { ...session, status: "ended" } : session)),
       );
@@ -161,6 +172,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
     return () => {
       for (const host of hosts.current.values()) host.term.dispose();
       hosts.current.clear();
+      decoders.current.clear();
       for (const session of sessionsRef.current) void api.dispose(session.id);
     };
   }, [api]);
@@ -225,6 +237,10 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
                 </span>
               )}
             </div>
+            {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label="Terminal images / 终端图片">
+              {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
+              {graphicsErrors[active.id] ? <p role="status">{graphicsErrors[active.id]}</p> : null}
+            </div> : null}
             <div className="term-screens">
               {sessions.map((session) => (
                 <XtermScreen

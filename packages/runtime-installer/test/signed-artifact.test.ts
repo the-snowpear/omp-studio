@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -358,4 +358,21 @@ test("installVerifiedArtifact verifies the copied staging tree before publishing
     },
   }), /Checksum mismatch/u);
   assert.deepEqual(await readdir(versions), []);
+});
+
+test("failed repair publication restores the original directory", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-repair-restore-"));
+  const source = await createValidArtifact(temporary);
+  const versions = join(temporary, "versions");
+  const installed = join(versions, "v1");
+  await mkdir(installed, { recursive: true });
+  await writeFile(join(installed, "original.txt"), "preserve me");
+  await assert.rejects(() => installVerifiedArtifact({
+    sourceDirectory: source, versionsDirectory: versions, version: "v1", requireFile: "omp.exe",
+    replaceExisting: { beforeReplace: async () => undefined },
+    // Model staging disappearing between verification and the final rename.
+    verifyStaging: async (directory) => { await rm(directory, { recursive: true }); },
+  }), { code: "ENOENT" });
+  assert.equal(await readFile(join(installed, "original.txt"), "utf8"), "preserve me");
+  assert.deepEqual(await readdir(versions), ["v1"]);
 });

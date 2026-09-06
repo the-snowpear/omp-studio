@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
+import { STUDIO_PROTOCOL_VERSION } from "@omp-studio/studio-protocol";
 import {
   assertSafeVersion,
   createTrustedKeyVerifier,
@@ -355,30 +357,14 @@ export async function fetchUpdateIndex(input: {
   readonly fetcher?: typeof fetch | undefined;
   readonly timeoutMs?: number | undefined;
   readonly signal?: AbortSignal | undefined;
+  readonly arch?: "x64" | "arm64" | undefined;
+  readonly channel?: "stable" | "canary" | undefined;
 }): Promise<UpdateIndex> {
   const fetchFn = input.fetcher ?? fetch;
   const timeoutMs = input.timeoutMs ?? 10_000;
 
-  const rawIndexUrl = `https://github.com/${input.repo}/releases/latest/download/update-index.json`;
-  const rawSigUrl = `https://github.com/${input.repo}/releases/latest/download/update-index.sig.json`;
-
-  const indexUrl = applyMirror(input.mirrorPrefix, rawIndexUrl);
-  const sigUrl = applyMirror(input.mirrorPrefix, rawSigUrl);
-
+  const indexName = (input.arch ?? process.arch) === "arm64" ? "update-index-win32-arm64" : "update-index";
   const signal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(input.signal ? [input.signal] : [])]);
-
-  const [indexRes, sigRes] = await Promise.all([
-    fetchFn(indexUrl, { signal }),
-    fetchFn(sigUrl, { signal }),
-  ]);
-
-  if (!indexRes.ok) {
-    throw new Error(`Failed to fetch update index: HTTP ${indexRes.status}`);
-  }
-  if (!sigRes.ok) {
-    throw new Error(`Failed to fetch update index signature: HTTP ${sigRes.status}`);
-  }
-
   const readBounded = async (response: Response, maxBytes: number): Promise<Buffer> => {
     if (!response.body) throw new Error("Empty update metadata response");
     const reader = response.body.getReader();
@@ -399,6 +385,29 @@ export async function fetchUpdateIndex(input: {
       reader.releaseLock();
     }
   };
+  let releasePath = "latest/download";
+  if (input.channel === "canary") {
+    const response = await fetchFn(applyMirror(input.mirrorPrefix,
+      `https://api.github.com/repos/${input.repo}/releases?per_page=30`), { signal });
+    if (!response.ok) throw new Error(`Failed to discover canary releases: HTTP ${response.status}`);
+    const releases: unknown = JSON.parse((await readBounded(response, 2 * 1024 * 1024)).toString("utf8"));
+    if (!Array.isArray(releases)) throw new Error("Invalid canary release listing");
+    const release = releases.filter(isRecord).filter((candidate) =>
+      candidate.draft === false && candidate.prerelease === true &&
+      typeof candidate.tag_name === "string" && /-canary(?:[.-]|$)/u.test(candidate.tag_name) &&
+      Array.isArray(candidate.assets) && [indexName + ".json", indexName + ".sig.json"].every((name) =>
+        (candidate.assets as unknown[]).some((asset: unknown) => isRecord(asset) && asset.name === name)))
+      .sort((a, b) => String(b.published_at).localeCompare(String(a.published_at)))[0];
+    if (!release) throw new Error("No signed canary release is available for this architecture");
+    releasePath = `download/${encodeURIComponent(release.tag_name as string)}`;
+  }
+  const baseUrl = `https://github.com/${input.repo}/releases/${releasePath}/${indexName}`;
+  const [indexRes, sigRes] = await Promise.all([
+    fetchFn(applyMirror(input.mirrorPrefix, `${baseUrl}.json`), { signal }),
+    fetchFn(applyMirror(input.mirrorPrefix, `${baseUrl}.sig.json`), { signal }),
+  ]);
+  if (!indexRes.ok) throw new Error(`Failed to fetch update index: HTTP ${indexRes.status}`);
+  if (!sigRes.ok) throw new Error(`Failed to fetch update index signature: HTTP ${sigRes.status}`);
   const [signedPayload, signatureBytes] = await Promise.all([readBounded(indexRes, 1024 * 1024), readBounded(sigRes, 16 * 1024)]);
   const indexText = signedPayload.toString("utf8");
   const sigText = signatureBytes.toString("utf8");
@@ -411,6 +420,7 @@ export async function fetchUpdateIndex(input: {
   }
 
   const index = parseUpdateIndex(JSON.parse(indexText) as unknown);
+  if (input.channel !== undefined && index.runtime.channel !== input.channel) throw new Error("Update index channel mismatch");
   if (index.repo !== input.repo) throw new Error("Update index repository mismatch");
   // Re-checking or downloading the same signed release must remain possible.
   if (index.sequence < input.lastSequence) {
@@ -436,6 +446,8 @@ export type AppUpdatePlan =
         | "node-pty"
         | "payload-format"
         | "min-app-version"
+        | "client-contract"
+        | "studio-protocol"
         | "platform";
     };
 
@@ -477,6 +489,12 @@ export function planAppUpdate(input: {
   }
   if (payload.abi.nodePty !== input.runtime.nodePty) {
     return { kind: "full", version, setup: input.index.app.setup, reason: "node-pty" };
+  }
+  if (payload.clientContractVersion !== CLIENT_CONTRACT_VERSION) {
+    return { kind: "full", version, setup: input.index.app.setup, reason: "client-contract" };
+  }
+  if (payload.studioProtocol.min > STUDIO_PROTOCOL_VERSION || payload.studioProtocol.max < STUDIO_PROTOCOL_VERSION) {
+    return { kind: "full", version, setup: input.index.app.setup, reason: "studio-protocol" };
   }
 
   return { kind: "hot", version, payload };

@@ -16,12 +16,12 @@ import {
 } from "../conversation-protocol";
 import {
 	publicToolCallId,
-	sanitizeJsonValue,
 	sanitizePublicText,
 	sanitizeToolArguments,
 	truncateUtf8,
 	utf8ByteLength,
 } from "./conversation-sanitizer";
+import { projectToolMedia } from "./conversation-media";
 import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
 
 export type StudioSessionTranscriptSessionManager = {
@@ -110,20 +110,19 @@ function mapToolResultMessage(
 	const toolName =
 		nameSource === undefined ? undefined : sanitizePublicText(nameSource, CONVERSATION_LIMITS.TOOL_NAME_MAX_CHARS);
 	const texts: string[] = [];
-	let omittedBinary = false;
+
 	let truncated = toolName?.truncated === true || publicId.truncated;
 	if (Array.isArray(message.content)) {
 		for (const block of message.content) {
 			const record = asRecord(block);
 			if (record === undefined) continue;
 			if (record.type === "text" && typeof record.text === "string") texts.push(record.text);
-			else if (record.type === "image") omittedBinary = true;
 		}
 	} else if (typeof message.content === "string") {
 		texts.push(message.content);
 	}
 	const output = sanitizePublicText(texts.join("\n"), CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
-	truncated ||= output.truncated || omittedBinary;
+	truncated ||= output.truncated;
 	const mapped: Extract<ConversationContentBlock, { type: "toolResult" }> = {
 		type: "toolResult",
 		toolCallId,
@@ -131,28 +130,9 @@ function mapToolResultMessage(
 	};
 	if (toolName !== undefined && toolName.text.length > 0) mapped.toolName = toolName.text;
 	if (output.text.length > 0) mapped.output = output.text;
-	if (omittedBinary) {
-		mapped.data = { omitted: "image" };
-		truncated = true;
-	}
-	if ("details" in message && message.details !== undefined) {
-		const details = sanitizeJsonValue(message.details);
-		if (details.value !== undefined) {
-			if (
-				omittedBinary &&
-				details.value !== null &&
-				typeof details.value === "object" &&
-				!Array.isArray(details.value)
-			) {
-				mapped.data = { ...(details.value as { readonly [key: string]: JsonValue }), omitted: "image" };
-			} else if (omittedBinary) {
-				mapped.data = { omitted: "image", details: details.value };
-			} else {
-				mapped.data = details.value;
-			}
-		}
-		truncated ||= details.truncated;
-	}
+	const media = projectToolMedia(message.content, message.details);
+	if (media.data !== undefined) mapped.data = media.data;
+	truncated ||= media.truncated;
 	if (truncated) mapped.truncated = true;
 	return mapped;
 }

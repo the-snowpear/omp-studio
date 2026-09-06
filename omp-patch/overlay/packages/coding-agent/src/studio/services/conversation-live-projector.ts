@@ -1,3 +1,4 @@
+import { projectToolMedia } from "./conversation-media";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -11,13 +12,7 @@ import {
 	type ConversationRuntimeEvent,
 	parseConversationRuntimeEvent,
 } from "../conversation-protocol";
-import {
-	publicToolCallId,
-	sanitizeJsonValue,
-	sanitizePublicText,
-	sanitizeToolArguments,
-	utf8ByteLength,
-} from "./conversation-sanitizer";
+import { publicToolCallId, sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
 import { isHarnessInjectedUserMessage, publicConversationRole } from "./conversation-visibility";
 
 export const CONVERSATION_LIVE_COALESCE_INTERVAL_MS = 16;
@@ -178,12 +173,12 @@ function toolText(result: unknown): {
 	if (typeof result !== "object") return { text: String(result), isError: false };
 	const record = result as Record<string, unknown>;
 	const isError = record.isError === true;
-	const details = record.details === undefined ? undefined : sanitizeJsonValue(record.details);
-	const extra = details?.value === undefined ? {} : { data: details.value };
+	const details = projectToolMedia(record.content, record.details);
+	const extra = details.data === undefined ? {} : { data: details.data };
 	const truncated = details?.truncated === true ? { truncated: true } : {};
 	if (Array.isArray(record.content)) {
 		const texts: string[] = [];
-		let omittedBinary = false;
+
 		for (const block of record.content) {
 			if (
 				block !== null &&
@@ -192,12 +187,9 @@ function toolText(result: unknown): {
 				typeof (block as { text?: unknown }).text === "string"
 			) {
 				texts.push((block as { text: string }).text);
-			} else if (block !== null && typeof block === "object" && (block as { type?: unknown }).type === "image") {
-				omittedBinary = true;
 			}
 		}
-		const binary = omittedBinary ? { truncated: true as const } : truncated;
-		return { text: texts.join("\n"), isError, ...extra, ...binary };
+		return { text: texts.join("\n"), isError, ...extra, ...truncated };
 	}
 	if (typeof record.output === "string") return { text: record.output, isError, ...extra, ...truncated };
 	if (typeof record.message === "string") return { text: record.message, isError, ...extra, ...truncated };

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { RuntimeInstaller, type RuntimeInstallerOptions } from "../src/index.js";
+import { RuntimeInstaller, RuntimeInstallationReferencedError, type RuntimeInstallerOptions } from "../src/index.js";
 
 const passingSelfCheck = { run: async () => undefined };
 const { privateKey: signingKey, publicKey } = generateKeyPairSync("ed25519");
@@ -82,6 +82,69 @@ test("activation verifies installed bytes before running any executable", async 
   await assert.rejects(() => installer.activate("v1", { selfCheck: { run: async () => { executed = true; } } }), /Checksum mismatch/u);
   assert.equal(executed, false);
   assert.equal(await installer.current(), undefined);
+});
+
+test("managed launch lookup rejects an executable changed after activation", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-launch-integrity-"));
+  const root = join(temporary, "installed");
+  const installer = runtimeInstaller(root);
+  await installer.install(await artifact(temporary, "v1"));
+  await installer.activate("v1", { selfCheck: passingSelfCheck });
+  await writeFile(join(root, "versions", "v1", "omp.exe"), "replaced executable");
+  await assert.rejects(() => installer.currentManifest(), /Checksum mismatch for omp\.exe/u);
+});
+
+test("same-version reinstall repairs corrupt bytes without losing the rollback pointer", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-repair-runtime-"));
+  const root = join(temporary, "installed");
+  const installer = runtimeInstaller(root);
+  await installer.install(await artifact(temporary, "v1"));
+  const source = await artifact(temporary, "v2");
+  await installer.install(source);
+  await installer.activate("v1", { selfCheck: passingSelfCheck });
+  await installer.activate("v2", { selfCheck: passingSelfCheck });
+  const pointer = await readFile(join(root, "current.json"), "utf8");
+  await installer.install(source); // A healthy duplicate is idempotent.
+  assert.equal(await readFile(join(root, "current.json"), "utf8"), pointer);
+  await writeFile(join(root, "versions", "v2", "omp.exe"), "broken");
+  await installer.install(source);
+  assert.equal(await readFile(join(root, "versions", "v2", "omp.exe"), "utf8"), "omp-v2");
+  assert.equal(await readFile(join(root, "current.json"), "utf8"), pointer);
+  await installer.activate("v2", { selfCheck: passingSelfCheck });
+  assert.equal((await installer.current())?.previousRuntimeVersion, "v1");
+  assert.equal((await installer.rollback()).runtimeVersion, "v1");
+  assert.deepEqual((await readdir(join(root, "versions"))).sort(), ["v1", "v2"]);
+});
+
+test("repair preserves referenced installations unless maintenance has stopped their processes", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-repair-referenced-"));
+  const root = join(temporary, "installed");
+  const installer = runtimeInstaller(root, { isRuntimeReferenced: () => true });
+  const source = await artifact(temporary, "v1");
+  await installer.install(source);
+  await installer.install(source); // Healthy referenced copies need no replacement.
+  const entrypoint = join(root, "versions", "v1", "omp.exe");
+  await writeFile(entrypoint, "broken");
+  await assert.rejects(() => installer.install(source), RuntimeInstallationReferencedError);
+  assert.equal(await readFile(entrypoint, "utf8"), "broken");
+  assert.deepEqual(await readdir(join(root, "versions")), ["v1"]);
+  await installer.install(source, { allowReferencedRepair: true });
+  assert.equal(await readFile(entrypoint, "utf8"), "omp-v1");
+});
+
+test("a corrupt repair source never changes the installed bytes or active pointer", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-repair-source-"));
+  const root = join(temporary, "installed");
+  const installer = runtimeInstaller(root);
+  const source = await artifact(temporary, "v1");
+  await installer.install(source);
+  await installer.activate("v1", { selfCheck: passingSelfCheck });
+  const pointer = await readFile(join(root, "current.json"), "utf8");
+  await writeFile(join(root, "versions", "v1", "omp.exe"), "installed-broken");
+  await writeFile(join(source, "omp.exe"), "source-broken");
+  await assert.rejects(() => installer.install(source), /Checksum mismatch/u);
+  assert.equal(await readFile(join(root, "versions", "v1", "omp.exe"), "utf8"), "installed-broken");
+  assert.equal(await readFile(join(root, "current.json"), "utf8"), pointer);
 });
 
 test("prune preserves broken current, previous and externally referenced versions", async () => {

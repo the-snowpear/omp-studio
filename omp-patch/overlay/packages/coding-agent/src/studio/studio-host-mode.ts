@@ -2,6 +2,13 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { CONFIG_DIR_NAME, logger, postmortem, prompt } from "@oh-my-pi/pi-utils";
+import { StudioEvaluationService } from "./services/evaluation-service";
+import { invokeEvalPrelude } from "../eval/preludes";
+import { callSessionTool } from "../eval/js/tool-bridge";
+import { runEvalAgent } from "../eval/agent-bridge";
+import { runEvalCompletion, getCompletionHandle } from "../eval/completion-bridge";
+import { runEvalStatus, runEvalWait, runEvalCancel } from "../eval/handle-bridge";
+import { runEvalWorkpool } from "../eval/workpool-bridge";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import type { ExtensionUIContext, ToolDefinition } from "../extensibility/extensions";
 import { IrcBus } from "../irc/bus";
@@ -157,6 +164,7 @@ export interface StudioHostRuntime {
 		tan: StudioTanService;
 		agents: StudioAgentHubService;
 		jobs: StudioJobService;
+		evaluation: StudioEvaluationService;
 		transcript: StudioSessionTranscriptService;
 		agentConversation: StudioAgentConversationService;
 		conversation?: ConversationProjectorHub;
@@ -653,7 +661,7 @@ export function createStudioHostRuntime(
 		getAllJobs: filter => session.asyncJobManager?.getAllJobs(filter) ?? [],
 		cancel: (id, filter) => session.asyncJobManager?.cancel(id, filter) ?? false,
 	};
-	let agents!: StudioAgentHubService;
+	const agentsRef = { current: undefined as StudioAgentHubService | undefined };
 	const jobs = new StudioJobService(jobsPort, registry, {
 		confirmationGate: async action =>
 			await interaction.confirm({
@@ -664,13 +672,15 @@ export function createStudioHostRuntime(
 			}),
 		abortAgent: {
 			abortAgent: async agentId => {
-				let snapshot: ReturnType<typeof agents.get>;
+				const currentAgents = agentsRef.current;
+				if (currentAgents === undefined) return;
+				let snapshot: ReturnType<StudioAgentHubService["get"]>;
 				try {
-					snapshot = agents.get(agentId);
+					snapshot = currentAgents.get(agentId);
 				} catch {
 					return;
 				}
-				await agents.kill({
+				await currentAgents.kill({
 					agentId,
 					expectedGeneration: snapshot.generation,
 					callerAgentId: session.getAgentId() ?? MAIN_AGENT_ID,
@@ -678,7 +688,7 @@ export function createStudioHostRuntime(
 			},
 		},
 	});
-	agents = new StudioAgentHubService(
+	const agents = new StudioAgentHubService(
 		registry,
 		lifecycle,
 		irc,
@@ -750,6 +760,7 @@ export function createStudioHostRuntime(
 			telemetry: createStudioAgentTelemetry(registry),
 		},
 	);
+	agentsRef.current = agents;
 	const transcript = new StudioSessionTranscriptService(() => ({
 		runtimeEpoch: bridgeConfig.runtimeEpoch as number,
 		sessionId: session.sessionManager.getSessionId(),
@@ -850,6 +861,40 @@ export function createStudioHostRuntime(
 			tan,
 			agents,
 			jobs,
+			evaluation: new StudioEvaluationService({
+				owner: () => session.getAgentId() ?? MAIN_AGENT_ID,
+				jobs,
+				prelude: (name, parameters, signal) =>
+					invokeEvalPrelude(name, parameters, {
+						session: toolSession,
+						toolCallId: crypto.randomUUID(),
+						signal,
+						context: toolSession.getToolContext?.(),
+					}),
+				read: async (path, signal) => {
+					const result = await callSessionTool("read", { path }, { session: toolSession, signal });
+					if (typeof result !== "object" || result === null || !("text" in result)) return result;
+					return {
+						content: [
+							{ type: "text", text: result.text },
+							...("images" in result ? (result.images ?? []) : []).map(image => ({ type: "image", ...image })),
+						],
+						...("details" in result ? { details: result.details } : {}),
+					};
+				},
+				agent: (args, signal) => runEvalAgent(args, { session: toolSession, signal }),
+				completion: (args, signal) => runEvalCompletion(args, { session: toolSession, signal }),
+				completionIdentity: id => {
+					const handle = getCompletionHandle(id);
+					return handle?.ownerId === (session.getAgentId() ?? MAIN_AGENT_ID) ? handle : undefined;
+				},
+				status: async (kind, id, signal) => runEvalStatus({ item: { kind, id } }, { session: toolSession, signal }),
+				wait: (kind, id, timeoutMs, signal) =>
+					runEvalWait({ items: [{ kind, id }], timeoutMs }, { session: toolSession, signal }),
+				cancelCompletion: async (id, signal) =>
+					runEvalCancel({ item: { kind: "completion", id } }, { session: toolSession, signal }),
+				pool: (name, signal) => runEvalWorkpool({ op: "status", name }, { session: toolSession, signal }),
+			}),
 			transcript,
 			agentConversation,
 			conversation,
@@ -1081,7 +1126,7 @@ export async function runStudioHostMode(
 	const bridge = dependencies.createBridge?.() ?? createConfiguredBridge(bridgeConfig);
 	const slot =
 		dependencies.recreateSession === undefined ? (session as StudioSessionSlot) : createSessionSlot(session);
-	let supervisor!: StudioMainWorkerSupervisor;
+	const supervisorRef = { current: undefined as StudioMainWorkerSupervisor | undefined };
 	const runtime = createStudioHostRuntime(
 		slot,
 		bridgeConfig,
@@ -1089,13 +1134,13 @@ export async function runStudioHostMode(
 		dependencies.tanCustomTools,
 		dependencies.liveSessionFactory,
 		{
-			residency: () => supervisor?.residency() ?? "active",
-			generation: () => supervisor?.generation() ?? 0,
-			ensureLive: async () => await supervisor?.ensureLive(),
-			onChange: listener => supervisor?.onChange(listener) ?? (() => {}),
+			residency: () => supervisorRef.current?.residency() ?? "active",
+			generation: () => supervisorRef.current?.generation() ?? 0,
+			ensureLive: async () => await supervisorRef.current?.ensureLive(),
+			onChange: listener => supervisorRef.current?.onChange(listener) ?? (() => {}),
 		},
 	);
-	supervisor =
+	const supervisor: StudioMainWorkerSupervisor =
 		dependencies.recreateSession === undefined
 			? {
 					residency: () => "active",
@@ -1105,6 +1150,7 @@ export async function runStudioHostMode(
 					dispose: async () => {},
 				}
 			: createStudioMainWorkerSupervisor(slot, runtime, dependencies);
+	supervisorRef.current = supervisor;
 	const unregisterCleanup = postmortem.register(`studio-host-bridge:${runtime.runtimeId}`, () => bridge.stop());
 
 	try {

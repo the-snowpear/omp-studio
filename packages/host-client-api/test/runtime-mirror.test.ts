@@ -33,7 +33,8 @@ const snapshot: OperatorStateSnapshot = {
   jobs: [],
 };
 
-function makeFacade(invocations: StudioOperation[]): StudioHostClientFacade {
+function makeFacade(invocations: StudioOperation[], install: () => Promise<RuntimeInstallState> = async () => ({ status: "installed", signature: "unknown" }),
+  invokeOverride?: (operation: StudioOperation) => Promise<HostInvokeOutcome>): StudioHostClientFacade {
   return new StudioHostClientFacade({
     authority: { authorityId: "authority-1" as PublicAuthorityIdentity["authorityId"], authorityEpoch: 1 as PublicAuthorityIdentity["authorityEpoch"] },
     platform: "win32",
@@ -47,12 +48,13 @@ function makeFacade(invocations: StudioOperation[]): StudioHostClientFacade {
     },
     catalog: { list: () => [] },
     diagnostics: createDefaultHostDiagnosticsFactory(),
-    install: async (): Promise<RuntimeInstallState> => ({ status: "installed", signature: "unknown" }),
+    install,
     commands: {
       resume: () => snapshot,
       drop: () => snapshot,
       respond: () => snapshot,
-      invoke: (operation): HostInvokeOutcome => {
+      invoke: (operation): HostInvokeOutcome | Promise<HostInvokeOutcome> => {
+        if (invokeOverride !== undefined) return invokeOverride(operation);
         invocations.push(operation);
         switch (operation.kind) {
           case "runtime.settings.get":
@@ -88,6 +90,59 @@ async function waitForReceipt(events: ClientEvent[], requestId: CommandRequestId
   }
   throw new Error(`receipt ${requestId} was not emitted`);
 }
+
+test("Runtime install business failure emits a failed terminal receipt", async () => {
+  const facade = makeFacade([], async () => ({ status: "failed", signature: "verified", message: "Runtime did not start" }));
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  const requestId = "install-failed" as CommandRequestId;
+  try {
+    await facade.command({ commandName: "runtime.install", input: {}, requestId, idempotencyKey: "install-failed" as IdempotencyKey });
+    const { receipt } = await waitForReceipt(events, requestId);
+    assert.equal(receipt.status, "failed");
+    if (receipt.status === "failed") assert.match(receipt.error.message, /did not start/);
+  } finally { await facade.close(); }
+});
+
+test("Runtime install fences concurrent installs and commands until the terminal receipt", async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  let installs = 0;
+  const invokes: StudioOperation[] = [];
+  const facade = makeFacade(invokes, async () => { installs += 1; await gate; return { status: "installed", signature: "verified" }; });
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  const request = { commandName: "runtime.install" as const, input: {}, requestId: "install-one" as CommandRequestId, idempotencyKey: "install-one" as IdempotencyKey };
+  try {
+    await facade.command(request);
+    await facade.command(request);
+    await assert.rejects(facade.command({ ...request, requestId: "install-two" as CommandRequestId, idempotencyKey: "install-two" as IdempotencyKey }), { code: "UNAVAILABLE" });
+    await assert.rejects(facade.command({ commandName: "runtime.settings.set", input: { key: "extendedContext", value: false, persist: true }, requestId: "settings-during-update" as CommandRequestId, idempotencyKey: "settings-during-update" as IdempotencyKey }), { code: "UNAVAILABLE" });
+    assert.equal(installs, 1);
+    assert.deepEqual(invokes, []);
+    finish();
+    assert.equal((await waitForReceipt(events, request.requestId)).receipt.status, "completed");
+    await facade.command({ commandName: "runtime.settings.set", input: { key: "extendedContext", value: false, persist: true }, requestId: "settings-after-update" as CommandRequestId, idempotencyKey: "settings-after-update" as IdempotencyKey });
+    assert.equal(invokes.length, 1);
+  } finally { finish(); await facade.close(); }
+});
+
+test("Runtime install refuses an earlier command whose result has not reached the snapshot", async () => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const facade = makeFacade([], undefined, async () => { await gate; return snapshot; });
+  const events: ClientEvent[] = [];
+  facade.subscribe({ scope: "all" }, (event) => events.push(event));
+  try {
+    await facade.command({ commandName: "runtime.settings.get", input: {}, requestId: "pending" as CommandRequestId, idempotencyKey: "pending" as IdempotencyKey });
+    const install = { commandName: "runtime.install" as const, input: {}, requestId: "install-after-pending" as CommandRequestId, idempotencyKey: "install-after-pending" as IdempotencyKey };
+    await assert.rejects(facade.command(install), { code: "UNAVAILABLE" });
+    finish();
+    await waitForReceipt(events, "pending" as CommandRequestId);
+    await facade.command(install);
+    assert.equal((await waitForReceipt(events, install.requestId)).receipt.status, "completed");
+  } finally { finish(); await facade.close(); }
+});
 
 test("Host maps Runtime mirror commands to StudioOperation and forwards typed receipts", async () => {
   const invocations: StudioOperation[] = [];
@@ -269,4 +324,3 @@ test("dormant workspace unbinding keeps connected state without emitting false d
     await facade.close();
   }
 });
-

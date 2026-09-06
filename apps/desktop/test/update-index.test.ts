@@ -4,6 +4,8 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
+import { STUDIO_PROTOCOL_VERSION } from "@omp-studio/studio-protocol";
 import {
   applyMirror,
   fetchUpdateIndex,
@@ -236,6 +238,57 @@ test("fetchUpdateIndex verifies Ed25519 signature, checks sequence watermark, an
       }),
     /signature verification failed/u,
   );
+});
+
+test("canary discovery uses signed prerelease assets and an independent watermark", async () => {
+  const index = createSampleIndex({ sequence: 3 });
+  const canary = { ...index, runtime: { ...index.runtime, channel: "canary" as const } };
+  const bytes = Buffer.from(JSON.stringify(canary));
+  const signature = JSON.stringify({ algorithm: "ed25519", keyId: "test-key",
+    payloadSha256: createHash("sha256").update(bytes).digest("hex"),
+    signature: sign(null, bytes, signingKey).toString("base64url") });
+  const urls: string[] = [];
+  const fetcher: typeof fetch = async (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (url.includes("api.github.com")) return Response.json([
+      { draft: false, prerelease: false, tag_name: "v9.0.0", assets: [] },
+      { draft: false, prerelease: true, tag_name: "v0.1.5-canary.1", published_at: "2026-09-06T00:00:00Z",
+        assets: [{ name: "update-index.json" }, { name: "update-index.sig.json" }] },
+    ]);
+    assert.ok(url.includes("/download/v0.1.5-canary.1/"));
+    return new Response(url.endsWith(".sig.json") ? signature : bytes);
+  };
+  const input = { repo: index.repo, trustedKeys, mirrorPrefix: "", channel: "canary" as const, arch: "x64" as const, fetcher };
+  assert.deepEqual(await fetchUpdateIndex({ ...input, lastSequence: 2 }), canary);
+  await assert.rejects(fetchUpdateIndex({ ...input, lastSequence: 4 }), /watermark/);
+  await assert.rejects(fetchUpdateIndex({ ...input, lastSequence: 0, fetcher: async () => Response.json([]) }), /No signed canary/);
+  assert.equal(urls.some((url) => url.includes("latest/download")), false);
+  const temp = await mkdtemp(join(tmpdir(), "channel-watermarks-"));
+  try {
+    const store = createUpdatePrefsStore({ appDataDirectory: temp });
+    await store.write({ lastIndexSequence: 100 });
+    await store.write({ lastCanaryIndexSequence: 3 });
+    await store.write({ lastCanaryIndexSequence: 1 });
+    const prefs = await store.read();
+    assert.equal(prefs.lastIndexSequence, 100);
+    assert.equal(prefs.lastCanaryIndexSequence, 3);
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});
+
+test("incompatible contracts and protocols require Setup before downloading", () => {
+  for (const [patch, reason] of [
+    [{ clientContractVersion: CLIENT_CONTRACT_VERSION + 1 }, "client-contract"],
+    [{ studioProtocol: { min: STUDIO_PROTOCOL_VERSION + 1, max: STUDIO_PROTOCOL_VERSION + 1 } }, "studio-protocol"],
+  ] as const) {
+    const index = createSampleIndex();
+    const payload = { ...index.app.payload!, ...patch };
+    const plan = planAppUpdate({ index: { ...index, app: { ...index.app, payload } },
+      currentAppVersion: "0.1.3", bundledAppVersion: "0.1.3", runtime: payload.abi,
+      platform: payload.platform, skippedVersion: "", preferHot: true });
+    assert.equal(plan.kind, "full");
+    if (plan.kind === "full") assert.equal(plan.reason, reason);
+  }
 });
 
 test("planAppUpdate evaluates all conditions in decision table", () => {

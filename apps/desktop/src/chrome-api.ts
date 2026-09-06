@@ -1,3 +1,4 @@
+import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
 import { CHROME_NOTIFY_CHANNEL } from "./chrome-notify-shared.js";
 import { CHROME_OPEN_URL_CHANNEL } from "./chrome-open-url-shared.js";
@@ -22,8 +23,6 @@ import {
 import {
   CHROME_APP_UPDATE_CHANNELS,
   type AppUpdateInfo,
-  type ChromeAppUpdateDownloadResult,
-  type ChromeAppUpdateInstallResult,
 } from "./chrome-app-update-shared.js";
 import {
   WORKSPACE_SHELL_IPC_CHANNELS,
@@ -147,14 +146,11 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     saveImage(input: ChromeImageInput): Promise<ChromeImageResult> {
       return ipcRenderer.invoke(CHROME_IMAGE_CHANNELS.saveImage, input) as Promise<ChromeImageResult>;
     },
+    reportPayloadHealth(status: PayloadHealthStatus): Promise<boolean> {
+      return ipcRenderer.invoke(PAYLOAD_HEALTH_CHANNEL, status) as Promise<boolean>;
+    },
     checkAppUpdate(): Promise<AppUpdateInfo | null> {
       return ipcRenderer.invoke(CHROME_APP_UPDATE_CHANNELS.check) as Promise<AppUpdateInfo | null>;
-    },
-    downloadAppUpdate(url: string): Promise<ChromeAppUpdateDownloadResult> {
-      return ipcRenderer.invoke(CHROME_APP_UPDATE_CHANNELS.download, { url }) as Promise<ChromeAppUpdateDownloadResult>;
-    },
-    quitAndInstallUpdate(filePath: string): Promise<ChromeAppUpdateInstallResult> {
-      return ipcRenderer.invoke(CHROME_APP_UPDATE_CHANNELS.install, { filePath }) as Promise<ChromeAppUpdateInstallResult>;
     },
     checkUpdates(): Promise<UpdateCheckResult | null> {
       return ipcRenderer.invoke(CHROME_UPDATES_CHANNELS.check) as Promise<UpdateCheckResult | null>;

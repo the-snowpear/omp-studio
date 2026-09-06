@@ -29,6 +29,7 @@ export interface UpdateProgressEvent {
   readonly totalBytes?: number;
   readonly bytesPerSecond?: number;
   readonly message?: string;
+  readonly runtimeChannel?: "stable" | "canary";
 }
 
 export interface UpdateCheckResult {
@@ -77,6 +78,7 @@ export interface UpdateImportResult {
   readonly jobId?: string;
   readonly cancelled?: boolean;
   readonly runtimeVersion?: string;
+  readonly runtimeChannel?: "stable" | "canary";
   readonly message?: string;
 }
 

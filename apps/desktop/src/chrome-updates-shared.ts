@@ -37,6 +37,8 @@ export interface UpdateProgressEvent {
   readonly totalBytes?: number | undefined;
   readonly bytesPerSecond?: number | undefined;
   readonly message?: string | undefined;
+  /** Channel of the verified Runtime artifact, fixed for this job. */
+  readonly runtimeChannel?: "stable" | "canary";
 }
 
 export interface UpdateCheckResult {
@@ -70,6 +72,7 @@ export interface UpdateImportResult {
   readonly jobId?: string | undefined;
   readonly cancelled?: boolean | undefined;
   readonly runtimeVersion?: string | undefined;
+  readonly runtimeChannel?: "stable" | "canary";
   readonly message?: string | undefined;
 }
 

@@ -13,6 +13,15 @@ export interface DownloadOneInput {
   readonly fetcher?: typeof fetch | undefined;
 }
 
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("Download aborted"));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new Error("Download aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 export function createProgressThrottle(
   emit: (r: number, t: number) => void,
   intervalMs = 250,
@@ -162,10 +171,10 @@ export async function downloadOne(input: DownloadOneInput): Promise<void> {
     }
   }
 
-  const response = await fetchFn(input.url, {
+  const response = await abortable(fetchFn(input.url, {
     headers,
     signal: input.signal,
-  });
+  }), input.signal);
 
   if (!response.ok && response.status !== 206) {
     throw new Error(`HTTP ${response.status} ${response.statusText}`);

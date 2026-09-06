@@ -59,8 +59,7 @@ export class StudioLiveService {
 		}
 		if (this.#startPromise !== undefined) return this.#startPromise;
 		this.#setState({ status: "connecting", ...(deviceId === undefined ? {} : { deviceId }) });
-		let session: StudioLiveSessionPort;
-		session = this.factory.create({
+		const session = this.factory.create({
 			...(deviceId === undefined ? {} : { deviceId }),
 			onActive: () => {
 				if (this.#session === session && this.#state.status === "connecting") {

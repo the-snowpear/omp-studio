@@ -19,6 +19,12 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { resolveTargetArch } from "./windows-architecture.mjs";
+
+export function runtimeAssetName(version, platform, name) {
+  if (!/^[\w.-]+$/.test(version) || !/^win32-(x64|arm64)$/.test(platform) || !["omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json"].includes(name)) throw new Error("Invalid Runtime release asset identity");
+  return `omp-runtime-${version.replace(/-studio\.(\d+)$/, "-studio$1")}-${platform}-${name}`;
+}
 
 import {
   canonicalJson,
@@ -103,7 +109,10 @@ export function resolveAppAbi(opts = {}, unpackedDir, probe = execFileSync) {
 
 export async function buildUpdateAssets(options = {}) {
   const rootDir = options.rootDir ?? REPOSITORY_ROOT;
-  const unpackedDir = options.unpackedDir ?? join(rootDir, "outputs", "installer", "win-unpacked");
+  const platform = options.platform ?? `win32-${resolveTargetArch()}`;
+  if (!/^win32-(x64|arm64)$/.test(platform)) throw new Error(`Unsupported update platform ${platform}`);
+  const targetArch = platform.slice(6);
+  const unpackedDir = options.unpackedDir ?? join(rootDir, "outputs", "installer", targetArch === "arm64" ? "win-arm64-unpacked" : "win-unpacked");
   const rendererDir = options.rendererDir ?? join(unpackedDir, "resources", "renderer", "dist");
   const preloadPath = options.preloadPath ?? join(rootDir, "apps", "desktop", "dist", "preload.cjs");
   const outDir = options.outDir ?? join(rootDir, "outputs", "release");
@@ -112,7 +121,6 @@ export async function buildUpdateAssets(options = {}) {
     options.appVersion ??
     JSON.parse(readFileSync(join(rootDir, "package.json"), "utf8")).version;
   const abi = resolveAppAbi(options.abi, unpackedDir);
-  const platform = options.platform ?? "win32-x64";
 
   await mkdir(outDir, { recursive: true });
 
@@ -268,7 +276,7 @@ export async function buildUpdateAssets(options = {}) {
       options.runtimeDir,
       join(unpackedDir, "runtime", "versions"),
       join(rootDir, "packaging", "runtime-payload"),
-      join(rootDir, "packages", "runtime-installer", "dist", "artifacts", "win32-x64"),
+      join(rootDir, "packages", "runtime-installer", "dist", "artifacts", platform),
     ].filter(Boolean);
 
     let foundRuntimeDir;
@@ -290,15 +298,18 @@ export async function buildUpdateAssets(options = {}) {
 
     if (foundRuntimeDir && existsSync(join(foundRuntimeDir, "runtime-manifest.json"))) {
       const rtManifest = JSON.parse(await readFile(join(foundRuntimeDir, "runtime-manifest.json"), "utf8"));
+      if (rtManifest.platform !== platform) throw new Error(`Runtime platform ${rtManifest.platform} does not match update platform ${platform}`);
       const rtFiles = [];
       const requiredNames = ["omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json"];
       for (const name of requiredNames) {
         const filePath = join(foundRuntimeDir, name);
         if (!existsSync(filePath)) throw new Error(`Missing runtime file ${name} in ${foundRuntimeDir}`);
         const data = await readFile(filePath);
+        const asset = runtimeAssetName(rtManifest.runtimeVersion, platform, name);
+        await writeFile(join(outDir, asset), data);
         rtFiles.push({
           name,
-          url: `https://github.com/${repo}/releases/download/v${appVersion}/${name}`,
+          url: `https://github.com/${repo}/releases/download/v${appVersion}/${asset}`,
           size: data.length,
           sha256: createHash("sha256").update(data).digest("hex"),
         });
@@ -308,7 +319,7 @@ export async function buildUpdateAssets(options = {}) {
         channel: rtManifest.channel ?? "stable",
         platform,
         entrypoint: rtManifest.entrypoint ?? "omp.exe",
-        minAppVersion: rtManifest.minAppVersion ?? "0.1.0",
+        minAppVersion: options.runtimeMinAppVersion ?? (process.env.OMP_RUNTIME_MIN_APP_VERSION?.trim() || appVersion),
         studioProtocol: rtManifest.studioProtocol ?? { min: 1, max: 1 },
         files: rtFiles,
       };
@@ -316,6 +327,7 @@ export async function buildUpdateAssets(options = {}) {
       throw new Error("A real signed Runtime artifact is required; refusing placeholder metadata");
     }
   }
+  if (runtimeSection.platform !== platform) throw new Error(`Runtime platform ${runtimeSection.platform} does not match update platform ${platform}`);
 
   // 5. Setup Asset
   let setupAsset = options.setupAsset;
@@ -324,7 +336,7 @@ export async function buildUpdateAssets(options = {}) {
     let foundSetup;
     if (existsSync(installerDir)) {
       const files = readdirSync(installerDir).filter(
-        (f) => f.startsWith("OMP-Studio-Setup") && f.endsWith(".exe"),
+        (f) => f.startsWith("OMP-Studio-Setup") && f.endsWith(`-${targetArch}.exe`),
       );
       if (files.length > 1) throw new Error(`Ambiguous Setup artifacts in ${installerDir}`);
       if (files.length === 1) {
@@ -353,7 +365,10 @@ export async function buildUpdateAssets(options = {}) {
   if (!Number.isSafeInteger(sequence) || sequence < 1 || (previousIndex && sequence <= previousIndex.sequence)) {
     throw new Error("Update sequence must increase and be a positive safe integer");
   }
-  const minAppVersion = options.minAppVersion ?? process.env.OMP_PAYLOAD_MIN_APP_VERSION ?? appVersion;
+  const minAppVersion = options.minAppVersion ?? (process.env.OMP_PAYLOAD_MIN_APP_VERSION?.trim() || appVersion);
+  for (const version of [minAppVersion, runtimeSection.minAppVersion]) {
+    if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(version)) throw new Error("Invalid minimum application version");
+  }
 
   // 7. Assemble Update Index
   const updateIndex = {
@@ -384,6 +399,7 @@ export async function buildUpdateAssets(options = {}) {
   const indexJsonText = canonicalJson(updateIndex);
   const indexJsonPath = join(outDir, "update-index.json");
   await writeFile(indexJsonPath, indexJsonText, "utf8");
+  if (targetArch === "arm64") await writeFile(join(outDir, "update-index-win32-arm64.json"), indexJsonText, "utf8");
 
   let indexSigJsonPath;
   if (signingKey) {
@@ -399,6 +415,7 @@ export async function buildUpdateAssets(options = {}) {
     const indexSigText = canonicalJson(sigObj);
     indexSigJsonPath = join(outDir, "update-index.sig.json");
     await writeFile(indexSigJsonPath, indexSigText, "utf8");
+    if (targetArch === "arm64") await writeFile(join(outDir, "update-index-win32-arm64.sig.json"), indexSigText, "utf8");
   }
 
   return {

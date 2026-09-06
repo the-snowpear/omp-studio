@@ -32,7 +32,7 @@ import {
 } from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "b8ce33a58911c26bed1d84f0db9a5e2e727c49a2";
+const REAL_UPSTREAM_COMMIT = "f241301c83726afe75a847e919b89977a54dafbe";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 async function fixtureInputs() {
@@ -353,11 +353,11 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.commit, REAL_UPSTREAM_COMMIT);
   assert.equal(series.upstreamCommit, upstream.commit);
   assert.equal(upstream.entrypoint, "omp.exe");
-  assert.equal(upstreamVersion, "18.0.11");
+  assert.equal(upstreamVersion, "18.1.10");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.0.11-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.1.10-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }
@@ -418,6 +418,7 @@ test("series digest changes with overlay content and with seam patch content", (
 test("real overlay is non-empty and its digest lands in artifact provenance", async () => {
   const upstream = await readUpstreamPin();
   const series = await readPatchSeries();
+  const upstreamVersion = await readUpstreamVersion();
   const files = await assertOverlayPresent();
   assert.ok(files.length > 0);
   const digest = await overlayHash();
@@ -427,7 +428,7 @@ test("real overlay is non-empty and its digest lands in artifact provenance", as
   const { provenance } = await generateRuntimeArtifact({
     upstream,
     series,
-    upstreamVersion: "17.2.12",
+    upstreamVersion,
     binaryPath: inputs.binaryPath,
     patchesDirectory: PATCHES_DIRECTORY,
     platform: "win32-x64",
@@ -437,7 +438,9 @@ test("real overlay is non-empty and its digest lands in artifact provenance", as
     keyId: inputs.keyId,
     runtimeIdentity: {
       ...inputs.runtimeIdentity,
-      runtimeVersion: deriveRuntimeVersion("17.2.12", series),
+      runtimeVersion: deriveRuntimeVersion(upstreamVersion, series),
+      upstreamVersion,
+      upstreamCommit: upstream.commit,
     },
   });
   assert.equal(provenance.overlayHash, digest);
@@ -446,11 +449,12 @@ test("real overlay is non-empty and its digest lands in artifact provenance", as
 test("real patch series contributes real patch content hashes", async () => {
   const upstream = await readUpstreamPin();
   const series = await readPatchSeries();
+  const upstreamVersion = await readUpstreamVersion();
   const inputs = await fixtureInputs();
   const { provenance } = await generateRuntimeArtifact({
     upstream,
     series,
-    upstreamVersion: "17.2.12",
+    upstreamVersion,
     binaryPath: inputs.binaryPath,
     patchesDirectory: PATCHES_DIRECTORY,
     platform: "win32-x64",
@@ -460,7 +464,9 @@ test("real patch series contributes real patch content hashes", async () => {
     keyId: inputs.keyId,
     runtimeIdentity: {
       ...inputs.runtimeIdentity,
-      runtimeVersion: deriveRuntimeVersion("17.2.12", series),
+      runtimeVersion: deriveRuntimeVersion(upstreamVersion, series),
+      upstreamVersion,
+      upstreamCommit: upstream.commit,
     },
   });
   assert.deepEqual(Object.keys(provenance.patchHashes), series.patches);

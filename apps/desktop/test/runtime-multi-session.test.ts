@@ -39,6 +39,8 @@ function snapshot(sessionId: string, runtimeEpoch: number, streaming = false): O
 }
 
 function fakeWorkerFactory(state: {
+  runtimeVersion?: string;
+  snapshotPatch?: Partial<OperatorStateSnapshot>;
   readonly created: Array<{ sessionId: string; epoch: number }>;
   readonly stopped: string[];
   readonly streaming: Set<string>;
@@ -52,10 +54,11 @@ function fakeWorkerFactory(state: {
   return ({ resumeSessionId, nextRuntimeEpoch }) => {
     const sessionId = resumeSessionId ?? `fresh-${++fresh}`;
     const epoch = nextRuntimeEpoch();
+    const runtimeVersion = state.runtimeVersion;
     state.created.push({ sessionId, epoch });
     state.dead.delete(sessionId);
     let alive = true;
-    const current = () => snapshot(sessionId, epoch, state.streaming.has(sessionId));
+    const current = () => ({ ...snapshot(sessionId, epoch, state.streaming.has(sessionId)), ...state.snapshotPatch });
     const session = {
       controller: {
         publication: () => ({ commitSeq: 1, publishedAt: T0, snapshot: current(), terminalOutcomes: [] }),
@@ -76,7 +79,7 @@ function fakeWorkerFactory(state: {
       },
       hello: () =>
         alive && !state.dead.has(sessionId)
-          ? ({ runtimeId: `runtime-${sessionId}`, runtimeEpoch: epoch, classification: "managed" } satisfies HostRuntimeHelloView)
+          ? ({ runtimeId: `runtime-${sessionId}`, runtimeEpoch: epoch, classification: "managed", ...(runtimeVersion === undefined ? {} : { runtimeVersion }) } satisfies HostRuntimeHelloView)
           : undefined,
       capabilityManifest: () => undefined,
       commandManifest: () => undefined,
@@ -112,6 +115,8 @@ function createHarness(
   idleWorkerTtlMs = 10 * 60_000,
 ) {
   const state = {
+    runtimeVersion: "1.0.0",
+    snapshotPatch: {} as Partial<OperatorStateSnapshot>,
     created: [] as Array<{ sessionId: string; epoch: number }>,
     stopped: [] as string[],
     streaming: new Set<string>(),
@@ -153,6 +158,117 @@ const context = {
 
 const WORKSPACE_A = { workspaceId: "workspace-a", cwd: "C:/workspace" };
 const WORKSPACE_B = { workspaceId: "workspace-b", cwd: "C:/other" };
+
+test("maintenance stops every idle worker, restores session cwd and selects the original view on the new version", async () => {
+  const { port, state } = createHarness();
+  try {
+    await port.start(context);
+    await port.rebind?.(WORKSPACE_B);
+    await port.rebind?.(WORKSPACE_A);
+    const result = await port.withRuntimeMaintenance?.(async () => {
+      assert.deepEqual(state.stopped.sort(), ["fresh-1", "fresh-2"]);
+      assert.equal(port.listResidents?.().residents.length, 0);
+      state.runtimeVersion = "2.0.0";
+      return "installed";
+    }, () => "2.0.0");
+    assert.equal(result, "installed");
+    assert.equal(state.created.length, 4);
+    assert.deepEqual(state.launchedIn.slice(2), state.launchedIn.slice(0, 2));
+    assert.equal(port.listResidents?.().activeSessionId, "fresh-1");
+    assert.equal((await port.ensure?.())?.hello()?.runtimeVersion, "2.0.0");
+  } finally { await port.stop(); }
+});
+
+test("maintenance rejects a busy background worker before invoking installation", async () => {
+  const { port, state } = createHarness();
+  try {
+    await port.start(context);
+    await port.rebind?.(WORKSPACE_B);
+    state.streaming.add("fresh-1");
+    let installed = false;
+    await assert.rejects(port.withRuntimeMaintenance!(async () => { installed = true; }), /Finish active sessions/);
+    assert.equal(installed, false);
+    assert.deepEqual(state.stopped, []);
+  } finally { await port.stop(); }
+});
+
+test("failed installation restores the previous sessions and reports failure", async () => {
+  const { port, state } = createHarness();
+  try {
+    await port.start(context);
+    await assert.rejects(port.withRuntimeMaintenance!(async () => { throw new Error("activation failed"); }), /activation failed/);
+    assert.equal(state.created.length, 2);
+    assert.equal(port.listResidents?.().activeSessionId, "fresh-1");
+    assert.equal((await port.ensure?.())?.hello()?.runtimeVersion, "1.0.0");
+  } finally { await port.stop(); }
+});
+
+test("failed candidate session startup restores the previous Runtime and original sessions", async () => {
+  const { port, state } = createHarness();
+  try {
+    await port.start(context);
+    await port.rebind?.(WORKSPACE_B);
+    await port.rebind?.(WORKSPACE_A);
+    await assert.rejects(port.withRuntimeMaintenance!(async () => {
+      state.runtimeVersion = "unexpected-candidate";
+    }, () => "2.0.0", undefined, async () => {
+      assert.equal(port.listResidents?.().residents.length, 0);
+      state.runtimeVersion = "1.0.0";
+      return "1.0.0";
+    }), /previous Runtime and sessions were restored/);
+    assert.equal(port.listResidents?.().residents.length, 2);
+    assert.equal(port.listResidents?.().activeSessionId, "fresh-1");
+    assert.deepEqual(state.launchedIn.slice(-2), state.launchedIn.slice(0, 2));
+    assert.equal((await port.ensure?.())?.hello()?.runtimeVersion, "1.0.0");
+  } finally { await port.stop(); }
+});
+
+test("maintenance rejects pending interactions, queued messages and background agent work", async () => {
+  const patches: Array<Partial<OperatorStateSnapshot>> = [
+    { pendingMessages: 1 }, { activeCommandIds: ["command" as never] },
+    { plan: { status: "review" } as never },
+    ...["starting", "running", "reviving"].map((status) => ({ agents: [{ status, activeJobIds: [] }] as never })),
+    { agents: [{ status: "idle", activeJobIds: ["job"] }] as never },
+    ...["queued", "running"].map((status) => ({ jobs: [{ status }] as never })),
+  ];
+  for (const patch of patches) {
+    const { port, state } = createHarness();
+    try {
+      await port.start(context);
+      state.snapshotPatch = patch;
+      await assert.rejects(port.withRuntimeMaintenance!(async () => { assert.fail("must not install while work is active"); }), /Finish active sessions/);
+      assert.deepEqual(state.stopped, []);
+    } finally { await port.stop(); }
+  }
+});
+
+test("maintenance rejects a restored worker reporting the wrong Runtime version", async () => {
+  const { port } = createHarness();
+  try {
+    await port.start(context);
+    await assert.rejects(port.withRuntimeMaintenance!(async () => undefined, () => "2.0.0"), /could not restore all sessions/);
+    assert.equal(port.listResidents?.().residents.length, 0);
+  } finally { await port.stop(); }
+});
+
+test("workspace and session changes wait until Runtime maintenance finishes", async () => {
+  const { port, state } = createHarness();
+  try {
+    await port.start(context);
+    let finish!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    const update = port.withRuntimeMaintenance!(async () => { entered(); await gate; state.runtimeVersion = "2.0.0"; }, () => "2.0.0");
+    await started;
+    const change = port.rebind!(WORKSPACE_B);
+    assert.equal(state.created.length, 1);
+    finish();
+    await update;
+    assert.equal((await change)?.hello()?.runtimeVersion, "2.0.0");
+    assert.deepEqual(state.created.map((row) => row.sessionId), ["fresh-1", "fresh-1", "fresh-2"]);
+  } finally { await port.stop(); }
+});
 
 test("rebind to another workspace keeps the previous project's Workers resident", async () => {
   const { port, state } = createHarness();

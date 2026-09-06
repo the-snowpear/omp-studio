@@ -3,10 +3,28 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      target_arch:
+        description: "Windows payload architecture (Runtime must build on the matching native runner)"
+        type: choice
+        options: [x64, arm64]
+        default: x64
       build_runtime:
         description: "Rebuild OMP Runtime from source"
         type: boolean
-        default: false
+        default: true
+      runtime_channel:
+        description: "Runtime update channel (canary requires a -canary package version)"
+        type: choice
+        options: [stable, canary]
+        default: stable
+      payload_min_app_version:
+        description: "Reviewed compatible installed Main version; blank requires full Setup"
+        type: string
+        default: ""
+      runtime_min_app_version:
+        description: "Reviewed Runtime-compatible installed Main version; blank uses release version"
+        type: string
+        default: ""
       reuse_runtime_tag:
         description: "Tag to reuse runtime assets from (e.g. v0.1.3)"
         type: string
@@ -23,8 +41,11 @@ concurrency:
 
 jobs:
   runtime:
-    if: inputs.build_runtime
-    runs-on: windows-latest
+    if: github.event_name == 'push' || inputs.build_runtime
+    runs-on: ${{ inputs.target_arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
+    env:
+      OMP_TARGET_ARCH: ${{ inputs.target_arch || 'x64' }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || (contains(github.ref_name, '-canary') && 'canary') || 'stable' }}
     timeout-minutes: 120
     environment: release
     steps:
@@ -58,6 +79,7 @@ jobs:
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
           [IO.File]::WriteAllText($tempKey, $env:OMP_SIGNING_SECRET, $utf8NoBom)
           $env:OMP_RUNTIME_SIGNING_KEY = $tempKey
+          npm run omp:overlay:apply
           npm run omp:build:host
           Remove-Item -Force $tempKey
 
@@ -70,20 +92,22 @@ jobs:
       - name: Upload Runtime artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: runtime-artifact
-          path: packages/runtime-installer/dist/artifacts/win32-x64/
+          name: runtime-artifact-${{ env.OMP_TARGET_ARCH }}
+          path: packages/runtime-installer/dist/artifacts/win32-${{ env.OMP_TARGET_ARCH }}/
           if-no-files-found: error
 
   app:
     needs: [runtime]
     if: ${{ !cancelled() && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') }}
-    runs-on: windows-latest
+    runs-on: ${{ inputs.target_arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
     timeout-minutes: 90
     environment: release
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_ARCH: ${{ inputs.target_arch || 'x64' }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || (contains(github.ref_name, '-canary') && 'canary') || 'stable' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -103,6 +127,7 @@ jobs:
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") { throw "Tag does not match package version" }
+          if (($env:OMP_RUNTIME_CHANNEL -eq "canary") -ne ($version -match '-canary(?:[.-]|$)')) { throw "Canary releases require a -canary package version; stable releases must not use one" }
           "OMP_RELEASE_TAG=v$version" >> $env:GITHUB_ENV
 
       - name: Install dependencies
@@ -119,26 +144,33 @@ jobs:
           npm run omp:verify:patches
 
       - name: Retrieve Runtime artifacts
-        if: ${{ !inputs.build_runtime }}
+        if: needs.runtime.result == 'skipped'
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          $destDir = "packages/runtime-installer/dist/artifacts/win32-x64"
+          $destDir = "packages/runtime-installer/dist/artifacts/win32-$env:OMP_TARGET_ARCH"
           New-Item -ItemType Directory -Force -Path $destDir
+          $downloadDir = Join-Path $env:RUNNER_TEMP "runtime-download"
+          New-Item -ItemType Directory -Force -Path $downloadDir
           if ($env:REUSE_RUNTIME_TAG) {
-            gh release download $env:REUSE_RUNTIME_TAG --pattern "omp.exe" --pattern "runtime-manifest.json" --pattern "checksums.json" --pattern "runtime-signature.json" --dir $destDir
+            gh release download $env:REUSE_RUNTIME_TAG --pattern "omp-runtime-*-win32-$env:OMP_TARGET_ARCH-*" --dir $downloadDir
           } else {
             Write-Host "Downloading runtime from latest release..."
-            gh release download --pattern "omp.exe" --pattern "runtime-manifest.json" --pattern "checksums.json" --pattern "runtime-signature.json" --dir $destDir
+            gh release download --pattern "omp-runtime-*-win32-$env:OMP_TARGET_ARCH-*" --dir $downloadDir
+          }
+          foreach ($name in @("omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json")) {
+            $matches = @(Get-ChildItem $downloadDir -Filter "omp-runtime-*-win32-$env:OMP_TARGET_ARCH-$name")
+            if ($matches.Count -ne 1) { throw "Expected exactly one $name for $env:OMP_TARGET_ARCH; build Runtime if the previous release lacks it" }
+            Copy-Item -LiteralPath $matches[0].FullName -Destination (Join-Path $destDir $name)
           }
         env:
           REUSE_RUNTIME_TAG: ${{ inputs.reuse_runtime_tag }}
 
       - name: Download built runtime artifact
-        if: inputs.build_runtime
+        if: needs.runtime.result == 'success'
         uses: actions/download-artifact@v4
         with:
-          name: runtime-artifact
-          path: packages/runtime-installer/dist/artifacts/win32-x64/
+          name: runtime-artifact-${{ env.OMP_TARGET_ARCH }}
+          path: packages/runtime-installer/dist/artifacts/win32-${{ env.OMP_TARGET_ARCH }}/
 
       - name: Build Windows installer
         run: npm run pack:win -- --skip-host
@@ -146,19 +178,29 @@ jobs:
       - name: Retrieve previous update sequence
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          $releases = @(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName | ConvertFrom-Json)
+          $releases = @(gh release list --exclude-drafts --limit 100 --json tagName,isPrerelease | ConvertFrom-Json) | Where-Object { if ($env:OMP_RUNTIME_CHANNEL -eq "canary") { $_.isPrerelease -and $_.tagName -match '-canary(?:[.-]|$)' } else { !$_.isPrerelease } } | Select-Object -First 1
+          $releases = @($releases)
           if ($releases.Count -gt 0) {
             $previous = gh release view $releases[0].tagName --json assets | ConvertFrom-Json
-            if ($previous.assets.name -contains "update-index.json") {
+            $indexName = if ($env:OMP_TARGET_ARCH -eq "arm64") { "update-index-win32-arm64" } else { "update-index" }
+            if ($previous.assets.name -contains "$indexName.json") {
               $dest = Join-Path $env:RUNNER_TEMP "previous-update"
-              gh release download $releases[0].tagName --pattern "update-index.json" --dir $dest
-              "OMP_PREVIOUS_UPDATE_INDEX=$(Join-Path $dest 'update-index.json')" >> $env:GITHUB_ENV
+              gh release download $releases[0].tagName --pattern "$indexName.json" --dir $dest
+              "OMP_PREVIOUS_UPDATE_INDEX=$(Join-Path $dest "$indexName.json")" >> $env:GITHUB_ENV
+            }
+            # Retain the other architecture's signed index unchanged. Its URLs
+            # still address the release containing those signed payload bytes.
+            $otherIndex = if ($env:OMP_TARGET_ARCH -eq "arm64") { "update-index" } else { "update-index-win32-arm64" }
+            if ($previous.assets.name -contains "$otherIndex.json") {
+              gh release download $releases[0].tagName --pattern "$otherIndex.json" --pattern "$otherIndex.sig.json" --dir outputs/retained-update
             }
           }
 
       - name: Build update assets
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+          OMP_PAYLOAD_MIN_APP_VERSION: ${{ inputs.payload_min_app_version }}
+          OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $env:OMP_RUNTIME_SIGNING_KEY_ID = (Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json).activeKeyId
@@ -189,15 +231,18 @@ jobs:
           if (!$existing) { gh release create $tag --target $env:GITHUB_SHA --draft --title $tag --generate-notes }
           $files = @(
             (Get-Item outputs/installer/OMP-Studio-Setup-*.exe).FullName,
-            (Get-Item outputs/release/omp-studio-app-*.tar.gz).FullName,
-            (Get-Item outputs/release/update-index.json).FullName,
-            (Get-Item outputs/release/update-index.sig.json).FullName
+            (Get-Item outputs/release/omp-studio-app-*.tar.gz).FullName
           )
-          # Runtime URLs name this release even when its Runtime bytes are reused.
-          $runtime = @(Get-ChildItem packaging/runtime-payload -Directory)
-          if ($runtime.Count -ne 1) { throw "Expected exactly one staged Runtime" }
-          foreach ($name in @("omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json")) {
-            $files += (Get-Item (Join-Path $runtime[0].FullName $name)).FullName
+          $indexName = if ($env:OMP_TARGET_ARCH -eq "arm64") { "update-index-win32-arm64" } else { "update-index" }
+          $files += (Get-Item "outputs/release/$indexName.json").FullName
+          $files += (Get-Item "outputs/release/$indexName.sig.json").FullName
+          $files += (Get-Item outputs/release/omp-runtime-*).FullName
+          if (Test-Path outputs/retained-update) {
+            $files += (Get-ChildItem outputs/retained-update -File).FullName
           }
           gh release upload $tag @files --clobber
-          gh release edit $tag --draft=false --latest
+          if ($env:OMP_RUNTIME_CHANNEL -eq "canary") {
+            gh release edit $tag --draft=false --prerelease --latest=false
+          } else {
+            gh release edit $tag --draft=false --prerelease=false --latest
+          }

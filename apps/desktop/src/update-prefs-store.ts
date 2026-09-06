@@ -10,6 +10,7 @@ export interface UpdatePrefs {
   readonly runtimeChannel: "stable" | "canary";
   readonly preferHotUpdate: boolean;
   readonly lastIndexSequence: number;
+  readonly lastCanaryIndexSequence?: number;
 }
 
 export const DEFAULT_UPDATE_PREFS: UpdatePrefs = {
@@ -19,6 +20,7 @@ export const DEFAULT_UPDATE_PREFS: UpdatePrefs = {
   runtimeChannel: "stable",
   preferHotUpdate: true,
   lastIndexSequence: 0,
+  lastCanaryIndexSequence: 0,
 };
 
 const CONTROL_CHARS_REGEX = /[\x00-\x1F\x7F]/u;
@@ -108,6 +110,9 @@ export function parseUpdatePrefs(value: unknown): UpdatePrefs {
     runtimeChannel,
     preferHotUpdate,
     lastIndexSequence,
+    lastCanaryIndexSequence: typeof raw.lastCanaryIndexSequence === "number" &&
+      Number.isSafeInteger(raw.lastCanaryIndexSequence) && raw.lastCanaryIndexSequence >= 0
+      ? raw.lastCanaryIndexSequence : 0,
   };
 }
 
@@ -167,6 +172,10 @@ export function createUpdatePrefsStore(input: { readonly appDataDirectory: strin
         runtimeChannel: nextChannel,
         preferHotUpdate: nextPreferHot,
         lastIndexSequence: nextSequence,
+        lastCanaryIndexSequence: typeof patch.lastCanaryIndexSequence === "number" &&
+          Number.isSafeInteger(patch.lastCanaryIndexSequence) && patch.lastCanaryIndexSequence >= 0
+          ? Math.max(current.lastCanaryIndexSequence ?? 0, patch.lastCanaryIndexSequence)
+          : current.lastCanaryIndexSequence ?? 0,
       };
 
       await mkdir(input.appDataDirectory, { recursive: true });

@@ -47,8 +47,8 @@ export class HostBackend {
     });
   }
 
-  async install(artifactDirectory: string) {
-    return await this.installer.install(artifactDirectory);
+  async install(artifactDirectory: string, options?: Parameters<RuntimeInstaller["install"]>[1]) {
+    return await this.installer.install(artifactDirectory, options);
   }
 
   async activate(runtimeVersion: string, options?: ActivateOptions) {

@@ -29,6 +29,7 @@ import { registerChromeLogsIpc } from "./chrome-logs.js";
 import { registerChromeMetricsIpc } from "./chrome-metrics.js";
 import { registerChromeProfileIpc } from "./chrome-profile.js";
 import { resolveProfilePersistRoot } from "./chrome-profile-store.js";
+import { registerPayloadHealthIpc } from "./payload-health.js";
 import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
 import { registerChromeUpdatesIpc } from "./chrome-updates.js";
 import { createUpdatePrefsStore } from "./update-prefs-store.js";
@@ -327,27 +328,23 @@ export async function main(): Promise<void> {
     // Fixed named channels only; every payload validated at this boundary.
     // `dispose` removes handlers before Host shutdown on app quit.
     const isTrustedSender = (sender: { getURL(): string }) => sender === window.webContents && isTrustedRendererUrl(sender.getURL(), allowedOrigin);
-    let didFinishLoad = false;
-    let hadBootstrapSuccess = false;
-    let bootSuccessNoted = false;
-    const checkBootSuccess = (): void => {
-      if (didFinishLoad && hadBootstrapSuccess && !bootSuccessNoted && layout.payloadVersion !== undefined) {
-        bootSuccessNoted = true;
-        void appPayloadInstaller.noteBootSuccess(layout.payloadVersion).catch(() => {});
-      }
-    };
-    window.webContents.once("did-finish-load", () => {
-      didFinishLoad = true;
-      checkBootSuccess();
-    });
-    const ipc = registerDesktopIpc({
-      facade: context.transport,
+    const payloadHealth = registerPayloadHealthIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event, status: unknown) => listener({ sender: event.sender }, status));
+        },
+        removeHandler: (channel) => ipcMain.removeHandler(channel),
+      },
       isTrustedSender,
-      onBootstrapSuccess: () => {
-        hadBootstrapSuccess = true;
-        checkBootSuccess();
+      noteBootSuccess: async () => {
+        if (layout.payloadVersion !== undefined) await appPayloadInstaller.noteBootSuccess(layout.payloadVersion);
       },
     });
+    window.webContents.once("did-finish-load", () => {
+      void payloadHealth.didFinishLoad().catch((error) => console.error("[omp-studio] payload health persistence failed", error));
+    });
+    window.webContents.once("render-process-gone", () => payloadHealth.failed());
+    const ipc = registerDesktopIpc({ facade: context.transport, isTrustedSender });
     const disposeChrome = registerTitleBarOverlayIpc({ isTrustedSender });
     const disposeNotify = registerChromeNotifyIpc({
       isTrustedSender,
@@ -561,9 +558,6 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       currentVersion: layout.effectiveVersion,
-      updatesDirectory: join(app.getPath("temp"), "omp-studio-updates"),
-      openPath: (filePath) => shell.openPath(filePath),
-      quitApp: () => app.quit(),
     });
     applyTitleBarOverlay(window, "light");
     rendererWindow = window;
@@ -599,6 +593,7 @@ export async function main(): Promise<void> {
       dispose: () => {
         disposeUpdates.dispose();
         disposeAppUpdate.dispose();
+        payloadHealth.dispose();
         disposeWorkspaceShell.dispose();
         disposeTerminal.dispose();
         disposeImage.dispose();

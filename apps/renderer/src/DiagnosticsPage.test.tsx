@@ -5,7 +5,7 @@ import { DiagnosticsPage, DIAGNOSTICS_INTENT_KEY, setDiagnosticsIntent } from ".
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { PREVIEW_MODE_STORAGE_KEY } from "./preview/mode";
 import { UPDATE_CHECK_TIMEOUT_MS } from "./updateCheck";
-import { __resetUpdatesForTests } from "./settings/updates";
+import { __resetUpdatesForTests, type UpdateProgressEvent } from "./settings/updates";
 
 afterEach(() => {
   cleanup();
@@ -48,6 +48,91 @@ function renderPage(options: {
   );
   return client;
 }
+
+function installHarness(result: { status: "installed" | "failed"; message?: string } = { status: "installed" }) {
+  const requestId = "runtime-install-review" as CommandRequestId;
+  const environment: EnvironmentReadModel = {
+    platform: "win32", arch: "x64",
+    authority: { authorityId: "auth-review" as never, authorityEpoch: 1 as never },
+    runtime: { status: "connected", classification: "managed", runtimeVersion: "1.0.0" },
+    installer: { status: "installed", version: "1.0.0", signature: "verified" },
+  };
+  const command = vi.fn(async () => ({ requestId }));
+  const client = {
+    command,
+    query: vi.fn(async (name: string) => name === "environment.get" ? environment : { entries: [] }),
+    subscribe: (_scope: unknown, listener: (event: unknown) => void) => {
+      queueMicrotask(() => listener({ kind: "command.receipt", receipt: {
+        commandName: "runtime.install", requestId, status: "completed",
+        result: { ...result, version: "2.0.0", signature: "verified" }, observedAt: new Date().toISOString(),
+      } }));
+      return () => {};
+    },
+    bootstrap: vi.fn(), close: vi.fn(),
+  } as unknown as StudioClient;
+  return { client, command, environment };
+}
+
+const installPrefs = { mirrorPrefix: "", autoCheck: false, skippedAppVersion: "", runtimeChannel: "stable" as const, preferHotUpdate: true, lastIndexSequence: 0 };
+
+describe("Runtime installation handoff", () => {
+  it.each(["stable", "canary"] as const)("installs an imported %s artifact using its verified channel", async (runtimeChannel) => {
+    const { client, command, environment } = installHarness();
+    window.ompStudioChrome = {
+      getUpdatePrefs: async () => installPrefs,
+      importLocalUpdate: async () => ({ ok: true, runtimeChannel, runtimeVersion: "2.0.0" }),
+    } as never;
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getByRole("button", { name: "从本地文件安装…" }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith("runtime.install", { channel: runtimeChannel }));
+    await waitFor(() => expect(screen.getByText("托管 Runtime 已安装")).toBeTruthy());
+  });
+
+  it("keeps the downloaded artifact channel even when preferences now select stable", async () => {
+    const { client, command, environment } = installHarness();
+    let listener!: (event: UpdateProgressEvent) => void;
+    window.ompStudioChrome = {
+      getUpdatePrefs: async () => installPrefs,
+      subscribeUpdateProgress: (next: typeof listener) => { listener = next; return () => {}; },
+      startRuntime: async () => {
+        queueMicrotask(() => listener({ jobId: "download-canary", kind: "runtime", phase: "awaiting-apply", runtimeChannel: "canary", step: 3, steps: 3 }));
+        return { ok: true, jobId: "download-canary" };
+      },
+    } as never;
+    __resetUpdatesForTests({ check: { checkedAt: new Date().toISOString(), app: { plan: "none" }, runtime: { plan: "available", runtimeVersion: "2.0.0" } } });
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getByRole("button", { name: "更新" }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith("runtime.install", { channel: "canary" }));
+    await waitFor(() => expect(screen.getByText("托管 Runtime 已更新")).toBeTruthy());
+  });
+
+  it("uses the selected channel for a local reinstall", async () => {
+    const { client, command, environment } = installHarness();
+    window.ompStudioChrome = { getUpdatePrefs: async () => ({ ...installPrefs, runtimeChannel: "canary" }) } as never;
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getByRole("button", { name: "重装" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认重装" }));
+    await waitFor(() => expect(command).toHaveBeenCalledWith("runtime.install", { channel: "canary" }));
+  });
+
+  it("reports a failed install result even when its command receipt is completed", async () => {
+    const { client, environment } = installHarness({ status: "failed", message: "Runtime handshake failed" });
+    window.ompStudioChrome = { importLocalUpdate: async () => ({ ok: true, runtimeChannel: "stable" }) } as never;
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getByRole("button", { name: "从本地文件安装…" }));
+    await waitFor(() => expect(screen.getByText("Runtime handshake failed")).toBeTruthy());
+    expect(screen.queryByText("托管 Runtime 已安装")).toBeNull();
+  });
+
+  it("does not silently install stable when an imported artifact has no channel", async () => {
+    const { client, command, environment } = installHarness();
+    window.ompStudioChrome = { importLocalUpdate: async () => ({ ok: true }) } as never;
+    renderPage({ preview: false, client, environment });
+    fireEvent.click(screen.getByRole("button", { name: "从本地文件安装…" }));
+    await waitFor(() => expect(screen.getByText("无法确认 Runtime 工件通道，请重新检查更新")).toBeTruthy());
+    expect(command).not.toHaveBeenCalled();
+  });
+});
 
 describe("DiagnosticsPage", () => {
   it("keeps Runtime maintenance local in preview", () => {

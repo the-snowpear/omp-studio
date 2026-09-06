@@ -1,3 +1,4 @@
+import type { EvaluationOperation } from "@omp-studio/studio-protocol";
 /**
  * Semantic request/response maps and envelopes for the product client.
  *
@@ -352,7 +353,8 @@ export type PromptTextInput = {
 };
 
 /** Public semantic command inputs exposed by the Runtime control surface. */
-export interface RuntimeCommandInputMap {
+export type EvaluationCommandInputMap = { [K in EvaluationOperation["kind"]]: Omit<Extract<EvaluationOperation, {kind:K}>, "kind"> };
+export interface RuntimeCommandInputMap extends EvaluationCommandInputMap {
   "core.prompt": PromptTextInput;
   "core.steer": PromptTextInput;
   "core.followUp": PromptTextInput;
@@ -763,6 +765,7 @@ export interface BtwBranchOutcome {
 export type CommandResultMap = CoreCommandResultMap & {
   [K in Exclude<
     keyof RuntimeCommandInputMap,
+    | EvaluationOperation["kind"]
     | "operator.invoke"
     | "session.tree.navigate"
     | "session.tree.branch"
@@ -773,7 +776,10 @@ export type CommandResultMap = CoreCommandResultMap & {
     | "mode.plan.review.saveAndQuit"
   >]: OperatorStateSnapshot;
 } & {
+  [K in EvaluationOperation["kind"]]: EvaluationCommandOutcome;
+} & {
   "operator.invoke": OperatorInvokeOutcome;
+
   "session.tree.navigate": SessionTreeCommandOutcome;
   "session.tree.branch": SessionTreeCommandOutcome;
   "btw.ask": BtwAskOutcome;
@@ -782,6 +788,8 @@ export type CommandResultMap = CoreCommandResultMap & {
   "runtime.settings.set": StudioRuntimeSettingsSetResult;
   "mode.plan.review.saveAndQuit": StudioPlanSaveAndQuitResult;
 };
+
+export type EvaluationCommandOutcome = { readonly snapshot: OperatorStateSnapshot; readonly result: unknown };
 
 export type CommandName = keyof CommandInputMap & keyof CommandResultMap;
 export type CommandInput<TName extends CommandName> = CommandInputMap[TName];

@@ -1,23 +1,13 @@
 /**
- * Desktop-chrome 应用更新实现（GitHub Releases 全量安装包）。
+ * Desktop-chrome 应用更新实现（GitHub Releases 只读兼容检查）。
  *
- * Electron-free 设计：`shell.openPath` / `app.quit` / `fetch` 等由调用方注入，
- * 纯业务逻辑与网络协议在 headless 测试中全覆盖。
+ * Electron-free 设计，保留旧只读检查；下载和执行统一使用签名更新通道。
  */
-
-import { createWriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
-import { basename, join } from "node:path";
-import { pipeline } from "node:stream/promises";
-import { Readable } from "node:stream";
 
 import {
   CHROME_APP_UPDATE_CHANNELS,
-  parseChromeAppUpdateDownloadInput,
-  parseChromeAppUpdateInstallInput,
+  RETIRED_APP_UPDATE_CHANNELS,
   type AppUpdateInfo,
-  type ChromeAppUpdateDownloadResult,
-  type ChromeAppUpdateInstallResult,
 } from "./chrome-app-update-shared.js";
 
 export const DEFAULT_GITHUB_REPO = "the-snowpear/omp-studio";
@@ -162,35 +152,6 @@ export async function checkGitHubReleaseUpdate(options: {
   }
 }
 
-export async function downloadInstallerFile(options: {
-  readonly url: string;
-  readonly targetDirectory: string;
-  readonly fetcher?: ((url: string, init?: RequestInit) => Promise<Response>) | undefined;
-}): Promise<string> {
-  const fetchFn = options.fetcher ?? globalThis.fetch;
-  await mkdir(options.targetDirectory, { recursive: true });
-
-  const urlObj = new URL(options.url);
-  const rawFilename = basename(urlObj.pathname);
-  const filename = rawFilename.length > 0 && rawFilename.endsWith(".exe") ? rawFilename : "OMP-Studio-Update-Setup.exe";
-  const destinationPath = join(options.targetDirectory, filename);
-
-  const res = await fetchFn(options.url, {
-    headers: {
-      "User-Agent": "OMP-Studio-Updater",
-    },
-  });
-  if (!res.ok || !res.body) {
-    throw new Error(`下载失败: HTTP ${res.status} ${res.statusText}`);
-  }
-
-  const nodeStream = Readable.fromWeb(res.body as import("node:stream/web").ReadableStream);
-  const fileStream = createWriteStream(destinationPath);
-  await pipeline(nodeStream, fileStream);
-
-  return destinationPath;
-}
-
 export interface ChromeAppUpdateSender {
   isDestroyed(): boolean;
   getURL(): string;
@@ -209,10 +170,7 @@ export interface ChromeAppUpdateIpcOptions {
   readonly isTrustedSender: (sender: ChromeAppUpdateSender) => boolean;
   readonly currentVersion: string;
   readonly repo?: string | undefined;
-  readonly updatesDirectory: string;
   readonly fetcher?: ((url: string, init?: RequestInit) => Promise<Response>) | undefined;
-  readonly openPath: (filePath: string) => Promise<string> | string;
-  readonly quitApp?: (() => void) | undefined;
 }
 
 export interface ChromeAppUpdateIpcHandle {
@@ -222,8 +180,7 @@ export interface ChromeAppUpdateIpcHandle {
 export function registerChromeAppUpdateIpc(options: ChromeAppUpdateIpcOptions): ChromeAppUpdateIpcHandle {
   const ipc = options.ipcMain;
   ipc.removeHandler(CHROME_APP_UPDATE_CHANNELS.check);
-  ipc.removeHandler(CHROME_APP_UPDATE_CHANNELS.download);
-  ipc.removeHandler(CHROME_APP_UPDATE_CHANNELS.install);
+  for (const channel of RETIRED_APP_UPDATE_CHANNELS) ipc.removeHandler(channel);
 
   ipc.handle(CHROME_APP_UPDATE_CHANNELS.check, async (event): Promise<AppUpdateInfo | null> => {
     if (event.sender.isDestroyed() || !options.isTrustedSender(event.sender)) return null;
@@ -241,65 +198,9 @@ export function registerChromeAppUpdateIpc(options: ChromeAppUpdateIpcOptions): 
     }
   });
 
-  ipc.handle(
-    CHROME_APP_UPDATE_CHANNELS.download,
-    async (event, payload): Promise<ChromeAppUpdateDownloadResult> => {
-      if (event.sender.isDestroyed() || !options.isTrustedSender(event.sender)) {
-        return { ok: false, message: "Untrusted sender" };
-      }
-      const input = parseChromeAppUpdateDownloadInput(payload);
-      if (input === undefined) {
-        return { ok: false, message: "无效的下载地址" };
-      }
-      try {
-        const filePath = await downloadInstallerFile({
-          url: input.url,
-          targetDirectory: options.updatesDirectory,
-          ...(options.fetcher !== undefined ? { fetcher: options.fetcher } : {}),
-        });
-        return { ok: true, filePath };
-      } catch (err) {
-        return {
-          ok: false,
-          message: err instanceof Error ? err.message : String(err),
-        };
-      }
-    },
-  );
-
-  ipc.handle(
-    CHROME_APP_UPDATE_CHANNELS.install,
-    async (event, payload): Promise<ChromeAppUpdateInstallResult> => {
-      if (event.sender.isDestroyed() || !options.isTrustedSender(event.sender)) {
-        return { ok: false, message: "Untrusted sender" };
-      }
-      const input = parseChromeAppUpdateInstallInput(payload);
-      if (input === undefined) {
-        return { ok: false, message: "无效的安装包路径" };
-      }
-      try {
-        const openErr = await options.openPath(input.filePath);
-        if (openErr && openErr.length > 0) {
-          return { ok: false, message: openErr };
-        }
-        if (options.quitApp) {
-          setTimeout(() => options.quitApp?.(), 1000);
-        }
-        return { ok: true };
-      } catch (err) {
-        return {
-          ok: false,
-          message: err instanceof Error ? err.message : String(err),
-        };
-      }
-    },
-  );
-
   return Object.freeze({
     dispose(): void {
       ipc.removeHandler(CHROME_APP_UPDATE_CHANNELS.check);
-      ipc.removeHandler(CHROME_APP_UPDATE_CHANNELS.download);
-      ipc.removeHandler(CHROME_APP_UPDATE_CHANNELS.install);
     },
   });
 }

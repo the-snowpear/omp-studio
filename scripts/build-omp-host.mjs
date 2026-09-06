@@ -5,6 +5,7 @@ import { assertForkApplied, overlayRoot } from "./omp-overlay.mjs";
 import { PATCHSET_VERSION_FILE, readPatchsetVersionConstant } from "./omp-seam.mjs";
 import { findBun, npmInvocation, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
+import { resolveTargetArch, assertNativeRuntimeBuild, assertPeArchitecture } from "./windows-architecture.mjs";
 import {
   MANAGED_ENTRYPOINT,
   PATCHES_DIRECTORY,
@@ -32,6 +33,7 @@ async function assertPatchsetVersionInSync() {
 }
 
 
+if (process.platform === "win32") assertNativeRuntimeBuild(resolveTargetArch());
 const bun = findBun();
 const env = toolingEnvironment({
   CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
@@ -62,6 +64,7 @@ if (!existsSync(executable) || !statSync(executable).isFile()) {
 }
 
 run(executable, ["--version"], { cwd: ompSourceDirectory, env });
+if (process.platform === "win32") assertPeArchitecture(executable, resolveTargetArch());
 run(executable, ["--smoke-test"], { cwd: ompSourceDirectory, env });
 console.log(`Built and verified ${executable}`);
 
