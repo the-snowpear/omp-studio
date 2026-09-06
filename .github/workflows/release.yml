@@ -148,13 +148,6 @@ jobs:
           npm ci
           npm run omp:install-deps
 
-      - name: Verify gates
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          npm run check
-          npm run omp:test:metadata
-          npm run omp:verify:patches -- --skip-workspace-check
-
       - name: Retrieve Runtime artifacts
         if: needs.runtime.result == 'skipped' && !inputs.reuse_runtime_run_id
         run: |
@@ -185,6 +178,20 @@ jobs:
           path: packages/runtime-installer/dist/artifacts/win32-${{ env.OMP_TARGET_ARCH }}/
           run-id: ${{ inputs.reuse_runtime_run_id || github.run_id }}
           github-token: ${{ github.token }}
+
+      - name: Prepare native dependencies from signed Runtime
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm run build -w @omp-studio/studio-protocol
+          npm run build -w @omp-studio/runtime-installer
+          node scripts/prepare-runtime-test-native.mjs
+
+      - name: Verify gates
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm run check
+          npm run omp:test:metadata
+          npm run omp:verify:patches -- --skip-workspace-check
 
       - name: Build Windows installer
         run: npm run pack:win -- --skip-host

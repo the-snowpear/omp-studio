@@ -49,6 +49,12 @@ set `build_runtime=false` and `reuse_runtime_run_id` to that run's ID. This
 downloads its signed architecture-specific artifact directly; source-version,
 architecture and signature validation still apply during packaging.
 
+The application job verifies the Runtime before executing its smoke test in
+an isolated native cache. `scripts/prepare-runtime-test-native.mjs` copies the
+embedded native addon into the source-test workspace. This gives source tests
+the exact native dependency shipped in the signed Runtime, including on reuse
+runs, without requiring a second native compilation.
+
 ### Stable and Canary
 
 Application updates always read the stable `releases/latest/download`
