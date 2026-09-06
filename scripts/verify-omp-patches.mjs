@@ -80,14 +80,9 @@ try {
     cwd: ompSourceDirectory,
     env,
   });
-  run(
-    bun,
-    [
-      "test",
-      // Bun's Windows worker pool can crash in native modules when this large
-      // mixed fixture batch includes host-classification or pause-screen. Those
-      // tests run above in separate processes; keep the remaining batch bounded.
-      "--parallel=2",
+  // Native module teardown is unstable in Bun's Windows test workers.
+  // Keep suite isolation with OS processes instead of the worker pool.
+  const suites = [
       "packages/agent/test/pause-gate.test.ts",
       "packages/coding-agent/test/cli-argv-routing.test.ts",
       "packages/coding-agent/test/cli-unknown-flag.test.ts",
@@ -128,9 +123,8 @@ try {
       "packages/coding-agent/test/studio-conversation-projector-hub.test.ts",
       "packages/coding-agent/test/studio-session-telemetry.test.ts",
       "packages/coding-agent/test/studio-archived-session-telemetry.test.ts",
-    ],
-    { cwd: ompSourceDirectory, env },
-  );
+  ];
+  for (const suite of suites) run(bun, ["test", suite], { cwd: ompSourceDirectory, env });
   run(bun, ["run", "ci:test:smoke"], { cwd: ompSourceDirectory, env });
 } catch (error) {
   verificationError = error;

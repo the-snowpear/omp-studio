@@ -39,6 +39,11 @@ Lower them only after validating the new payload or Runtime against that
 specific older installed Main. A hot payload's displayed application
 version does not upgrade the Main process.
 
+If a run successfully uploaded Runtime but failed later, a manual retry can
+set `build_runtime=false` and `reuse_runtime_run_id` to that run's ID. This
+downloads its signed architecture-specific artifact directly; source-version,
+architecture and signature validation still apply during packaging.
+
 ### Stable and Canary
 
 Application updates always read the stable `releases/latest/download`

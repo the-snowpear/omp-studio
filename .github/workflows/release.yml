@@ -29,6 +29,10 @@ on:
         description: "Tag to reuse runtime assets from (e.g. v0.1.3)"
         type: string
         default: ""
+      reuse_runtime_run_id:
+        description: "Optional successful Runtime artifact run ID (set build_runtime=false)"
+        type: string
+        default: ""
   push:
     tags: ["v*"]
 
@@ -104,6 +108,7 @@ jobs:
     environment: release
     permissions:
       contents: write
+      actions: read
     env:
       GH_TOKEN: ${{ github.token }}
       OMP_TARGET_ARCH: ${{ inputs.target_arch || 'x64' }}
@@ -144,7 +149,7 @@ jobs:
           npm run omp:verify:patches
 
       - name: Retrieve Runtime artifacts
-        if: needs.runtime.result == 'skipped'
+        if: needs.runtime.result == 'skipped' && !inputs.reuse_runtime_run_id
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $destDir = "packages/runtime-installer/dist/artifacts/win32-$env:OMP_TARGET_ARCH"
@@ -166,11 +171,13 @@ jobs:
           REUSE_RUNTIME_TAG: ${{ inputs.reuse_runtime_tag }}
 
       - name: Download built runtime artifact
-        if: needs.runtime.result == 'success'
+        if: needs.runtime.result == 'success' || inputs.reuse_runtime_run_id
         uses: actions/download-artifact@v4
         with:
           name: runtime-artifact-${{ env.OMP_TARGET_ARCH }}
           path: packages/runtime-installer/dist/artifacts/win32-${{ env.OMP_TARGET_ARCH }}/
+          run-id: ${{ inputs.reuse_runtime_run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Build Windows installer
         run: npm run pack:win -- --skip-host
