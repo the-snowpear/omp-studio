@@ -67,6 +67,13 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Cache native Runtime dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          key: ${{ env.OMP_TARGET_ARCH }}
+          cache-on-failure: true
+
       - name: Install dependencies
         run: |
           $PSNativeCommandUseErrorActionPreference = $true

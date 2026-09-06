@@ -26,6 +26,8 @@ import {
 import { assertOverlayPresent, overlayHash, overlayRoot } from "./omp-overlay.mjs";
 import {
   PATCHSET_VERSION_FILE,
+  UPSTREAM_COMMIT_FILES,
+  readUpstreamCommitConstant,
   digestibleOverlaySource,
   readPatchsetVersionConstant,
   withPatchsetVersionConstant,
@@ -375,6 +377,14 @@ test("the Runtime's reported patchset version matches series.json", async () => 
   const series = await readPatchSeries();
   const source = await readFile(join(overlayRoot, ...PATCHSET_VERSION_FILE.split("/")), "utf8");
   assert.equal(readPatchsetVersionConstant(source), series.patchsetVersion);
+});
+
+test("all Runtime upstream identity constants match the source pin before compilation", async () => {
+  const upstream = await readUpstreamPin();
+  for (const relativePath of UPSTREAM_COMMIT_FILES) {
+    assert.equal(readUpstreamCommitConstant(await readFile(join(overlayRoot, relativePath), "utf8")), upstream.commit, relativePath);
+  }
+  assert.throws(() => readUpstreamCommitConstant('const UPSTREAM_COMMIT = "stale";'), /UPSTREAM_COMMIT/);
 });
 
 test("the overlay digest ignores the derived patchset version literal", () => {

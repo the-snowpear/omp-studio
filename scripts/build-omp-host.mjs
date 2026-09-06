@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { assertForkApplied, overlayRoot } from "./omp-overlay.mjs";
-import { PATCHSET_VERSION_FILE, readPatchsetVersionConstant } from "./omp-seam.mjs";
+import { PATCHSET_VERSION_FILE, UPSTREAM_COMMIT_FILES, readPatchsetVersionConstant, readUpstreamCommitConstant } from "./omp-seam.mjs";
 import { findBun, npmInvocation, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 import { resolveTargetArch, assertNativeRuntimeBuild, assertPeArchitecture } from "./windows-architecture.mjs";
@@ -19,9 +19,16 @@ import {
 } from "./runtime-artifact.mjs";
 
 /** Fail fast when the Runtime would report a version the series does not expect. */
-async function assertPatchsetVersionInSync() {
+async function assertRuntimeIdentityInSync() {
   const expected = (await readPatchSeries()).patchsetVersion;
+  const expectedCommit = (await readUpstreamPin()).commit;
   for (const root of [overlayRoot, ompSourceDirectory]) {
+    for (const relativePath of UPSTREAM_COMMIT_FILES) {
+      const file = join(root, ...relativePath.split("/"));
+      if (readUpstreamCommitConstant(await readFile(file, "utf8")) !== expectedCommit) {
+        throw new Error(`UPSTREAM_COMMIT in ${file} does not match ${expectedCommit}; update Runtime identity before building`);
+      }
+    }
     const path = join(root, ...PATCHSET_VERSION_FILE.split("/"));
     const found = readPatchsetVersionConstant(await readFile(path, "utf8"));
     if (found !== expected) {
@@ -47,7 +54,7 @@ await assertForkApplied();
 // sign an artifact whose probed identity disagrees with series.json, and that
 // check lands only after the native build. `npm run omp:patches:regen` keeps the
 // two in sync; this catches a hand-edited constant before the build starts.
-await assertPatchsetVersionInSync();
+await assertRuntimeIdentityInSync();
 
 run(bun, ["--cwd=packages/natives", "run", "build"], { cwd: ompSourceDirectory, env });
 run(bun, ["--cwd=packages/coding-agent", "run", "build"], { cwd: ompSourceDirectory, env });

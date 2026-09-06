@@ -29,6 +29,14 @@ export const PATCHES_SUBDIRECTORY = "omp-patch/patches";
  * full native build.
  */
 export const PATCHSET_VERSION_FILE = "packages/coding-agent/src/studio/bridge-server.ts";
+export const UPSTREAM_COMMIT_FILES = [PATCHSET_VERSION_FILE,
+  "packages/coding-agent/src/studio/services/command-manifest-service.ts"];
+
+export function readUpstreamCommitConstant(source) {
+  const match = /^const UPSTREAM_COMMIT = "([a-f0-9]{40})";/mu.exec(source);
+  if (!match) throw new Error("Runtime source does not declare a valid UPSTREAM_COMMIT");
+  return match[1];
+}
 
 /** Upstream paths intentionally left unpatched even when the vendor tree changes them. */
 export const SEAM_EXCLUDED = Object.freeze([
