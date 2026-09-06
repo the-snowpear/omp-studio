@@ -146,7 +146,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           npm run check
           npm run omp:test:metadata
-          npm run omp:verify:patches
+          npm run omp:verify:patches -- --skip-workspace-check
 
       - name: Retrieve Runtime artifacts
         if: needs.runtime.result == 'skipped' && !inputs.reuse_runtime_run_id

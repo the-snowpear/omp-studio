@@ -67,6 +67,7 @@ export function run(command, args, options = {}) {
     encoding: options.capture ? "utf8" : undefined,
     stdio: options.capture ? "pipe" : (options.stdio ?? ["ignore", "inherit", "inherit"]),
     windowsHide: true,
+    timeout: options.timeoutMs,
   });
 
   if (result.error) throw result.error;

@@ -24,6 +24,11 @@ The repository provides a release workflow in `.github/workflows/release.yml` wi
 
 The workflow serializes releases and reads the previous published index before allocating its next sequence. For a local release, download the previous `update-index.json` and set `OMP_PREVIOUS_UPDATE_INDEX` to that file's path; omit it only for the first indexed release. A missing or invalid configured file fails the builder. The ABI is probed from the packaged `OMP Studio.exe --omp-print-abi`; the Node process running the builder is not an Electron ABI source. Both jobs install Bun and Runtime dependencies, and native command failures stop their steps.
 
+After `npm run check` passes for the current source, patch verification may
+use `--skip-workspace-check` to avoid repeating that same workspace gate.
+Runtime type checks, every Runtime suite, and smoke tests still run. Native
+Runtime suites use separate processes with bounded execution time on Windows.
+
 Before the first run, configure the `release` GitHub Environment and its
 `OMP_RUNTIME_SIGNING_KEY` secret with the Ed25519 private key matching the
 active public key in `packaging/keys/trusted-keys.json`. A fresh key created

@@ -66,19 +66,24 @@ try {
   if (!npmCli) throw new Error("Run patch verification through npm run omp:verify:patches");
 
   run("git", ["-C", ompSourceDirectory, "diff", "--check"]);
-  run(process.execPath, [npmCli, "run", "check"], { cwd: repositoryRoot, env });
+  if (!process.argv.includes("--skip-workspace-check")) {
+    run(process.execPath, [npmCli, "run", "check"], { cwd: repositoryRoot, env });
+  }
   run(bun, ["run", "check:ts"], { cwd: ompSourceDirectory, env });
   run(bun, ["test", "packages/coding-agent/test/studio-bridge-server.test.ts"], {
     cwd: ompSourceDirectory,
     env,
+    timeoutMs: 120_000,
   });
   run(bun, ["test", "packages/coding-agent/test/main-host-classification.test.ts"], {
     cwd: ompSourceDirectory,
     env,
+    timeoutMs: 120_000,
   });
   run(bun, ["test", "packages/coding-agent/test/modes/components/pause-screen.test.ts"], {
     cwd: ompSourceDirectory,
     env,
+    timeoutMs: 120_000,
   });
   // Native module teardown is unstable in Bun's Windows test workers.
   // Keep suite isolation with OS processes instead of the worker pool.
@@ -124,8 +129,8 @@ try {
       "packages/coding-agent/test/studio-session-telemetry.test.ts",
       "packages/coding-agent/test/studio-archived-session-telemetry.test.ts",
   ];
-  for (const suite of suites) run(bun, ["test", suite], { cwd: ompSourceDirectory, env });
-  run(bun, ["run", "ci:test:smoke"], { cwd: ompSourceDirectory, env });
+  for (const suite of suites) run(bun, ["test", suite], { cwd: ompSourceDirectory, env, timeoutMs: 120_000 });
+  run(bun, ["run", "ci:test:smoke"], { cwd: ompSourceDirectory, env, timeoutMs: 120_000 });
 } catch (error) {
   verificationError = error;
 } finally {
