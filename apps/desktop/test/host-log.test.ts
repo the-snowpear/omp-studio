@@ -25,24 +25,13 @@ function controlledAppend() {
       });
     });
   };
-  /**
-   * Release every queued append, then wait for the drain chain to go quiet.
-   * Microtask ticks are not enough: the chain awaits `ensureDirectory()`, which
-   * is real fs I/O, so each step needs macrotask turns — and under a loaded test
-   * runner it can need a good many of them, hence the generous idle threshold.
-   */
-  const releaseAll = async (): Promise<void> => {
-    let idle = 0;
-    for (let guard = 0; guard < 200_000 && idle < 200; guard += 1) {
+  // No append may exist yet while the real mkdir is still awaiting disk I/O.
+  const releaseAll = async (done: () => boolean): Promise<void> => {
+    const deadline = Date.now() + 10_000;
+    while (!done() || waiting.length > 0 || inFlight > 0) {
+      assert.ok(Date.now() < deadline, "expected log writes must finish");
+      waiting.shift()?.();
       await new Promise((resolve) => setImmediate(resolve));
-      if (waiting.length > 0) {
-        waiting.shift()?.();
-        idle = 0;
-        continue;
-      }
-      // Nothing to release and nothing in flight: the chain may still be between
-      // awaits, so only treat a long run of idle turns as "done".
-      idle = inFlight === 0 ? idle + 1 : 0;
     }
   };
   return { append, lines, releaseAll, maxInFlight: () => maxInFlight };
@@ -54,7 +43,7 @@ test("host log appends are serialized: one write is in flight at a time", async 
   for (let index = 0; index < 50; index += 1) {
     log.write("info", "runtime.stderr", `line-${index}`);
   }
-  await appender.releaseAll();
+  await appender.releaseAll(() => appender.lines.length === 50);
 
   assert.equal(appender.maxInFlight(), 1);
   assert.equal(appender.lines.length, 50);
@@ -69,7 +58,7 @@ test("a chatty runtime is dropped at the backlog cap and accounted in one line",
   for (let index = 0; index < total; index += 1) {
     log.write("info", "runtime.stderr", `line-${index}`);
   }
-  await appender.releaseAll();
+  await appender.releaseAll(() => appender.lines.some((line) => line.includes("host.log_dropped")));
 
   assert.ok(appender.lines.length < total, "the backlog must be bounded, not queued in full");
   const dropped = appender.lines.filter((line) => line.includes("host.log_dropped"));
