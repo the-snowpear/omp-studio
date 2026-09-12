@@ -103,3 +103,15 @@ the Ed25519 trust check.
 The Setup has no Windows Authenticode signature. The update index authenticates
 its SHA-256 digest. A clean Windows GUI install/upgrade remains a separate
 manual check; the automated Runtime install test does not claim to cover it.
+
+Published on 2026-09-13:
+
+- Release: https://github.com/the-snowpear/omp-studio/releases/tag/v0.1.5
+- Successful workflow: https://github.com/the-snowpear/omp-studio/actions/runs/34705770704
+- Release source/tag: `b60accb2a7b51ac5147fe7b3706747aadd6ecd54` (tag `v0.1.5`).
+- Windows x64 application: `0.1.5`; Runtime: `18.1.18-studio.5` (upstream pin `00085d4e7dfdcfbf302c122fa2682b410a0f43d1`).
+- Index sequence: `2`; signing key: `omp-studio-release-2026b`.
+- Eight public assets are present and the release is stable/latest.
+- CI application/Runtime gates, installer audit and P5 readiness gate passed.
+- Minimum app version baseline: `minAppVersion` defaults to `0.1.5` for payload and Runtime, requiring full Setup upgrades for older Main baselines.
+
