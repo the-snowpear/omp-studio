@@ -48,6 +48,12 @@ async function findNewestVersion(artifactDirectory) {
 }
 
 const requestedArtifact = resolveArtifactDirectory();
+const rollbackFlagIndex = process.argv.indexOf("--rollback-artifact");
+const rollbackArtifact = rollbackFlagIndex === -1 ? undefined : process.argv[rollbackFlagIndex + 1];
+if (rollbackFlagIndex !== -1 && !rollbackArtifact) throw new Error("--rollback-artifact requires a directory path");
+const rollbackKeyIndex = process.argv.indexOf("--rollback-public-key");
+const rollbackPublicKey = rollbackKeyIndex === -1 ? undefined : process.argv[rollbackKeyIndex + 1];
+if (rollbackKeyIndex !== -1 && (!rollbackPublicKey || !rollbackArtifact)) throw new Error("--rollback-public-key requires a public key file and --rollback-artifact");
 const artifactDirectory =
   (await findNewestVersion(requestedArtifact)) ?? requestedArtifact;
 if (!existsSync(join(artifactDirectory, "runtime-manifest.json"))) {
@@ -63,9 +69,22 @@ try {
   if (!trustedKeyPath || !trustedKeyId) {
     throw new Error("OMP_RUNTIME_TRUSTED_PUBLIC_KEY and OMP_RUNTIME_SIGNING_KEY_ID are required for install E2E");
   }
-  const installer = new RuntimeInstaller(join(root, "installed"), {
-    trustedKeys: { [trustedKeyId]: await readFile(trustedKeyPath) },
-  });
+  const trustedKeys = Object.create(null);
+  trustedKeys[trustedKeyId] = await readFile(trustedKeyPath);
+  if (rollbackPublicKey) {
+    const signature = JSON.parse(await readFile(join(resolve(rollbackArtifact), "runtime-signature.json"), "utf8"));
+    if (typeof signature.keyId !== "string" || signature.keyId.length === 0) throw new Error("Rollback artifact has no signing key id");
+    const publicKey = await readFile(resolve(rollbackPublicKey));
+    if (trustedKeys[signature.keyId] && !trustedKeys[signature.keyId].equals(publicKey)) throw new Error("Different public keys cannot share a signing key id");
+    trustedKeys[signature.keyId] = publicKey;
+  }
+  const installer = new RuntimeInstaller(join(root, "installed"), { trustedKeys });
+  let baselineVersion;
+  if (rollbackArtifact) {
+    const baseline = await installer.install(resolve(rollbackArtifact));
+    await installer.activate(baseline.runtimeVersion);
+    baselineVersion = baseline.runtimeVersion;
+  }
   const manifest = await installer.install(artifactDirectory);
   const record = await installer.activate(manifest.runtimeVersion);
   const current = await installer.current();
@@ -75,6 +94,13 @@ try {
   console.log(
     `E2E ok: installed and activated ${record.runtimeVersion} (entrypoint=${manifest.entrypoint}, platform=${manifest.platform})`,
   );
+  if (baselineVersion) {
+    await installer.rollback();
+    if ((await installer.current())?.runtimeVersion !== baselineVersion) throw new Error("Rollback did not restore the baseline Runtime");
+    await installer.activate(manifest.runtimeVersion);
+    if ((await installer.current())?.runtimeVersion !== manifest.runtimeVersion) throw new Error("Reactivation after rollback failed");
+    console.log("E2E rollback ok: " + baselineVersion + " -> " + manifest.runtimeVersion + " -> " + baselineVersion + " -> " + manifest.runtimeVersion);
+  }
 } finally {
   await rm(root, { recursive: true, force: true });
 }

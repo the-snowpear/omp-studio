@@ -842,7 +842,13 @@ function validateGoalInput(input: unknown, what: string, required: boolean): voi
 }
 
 function validateLoopEnableInput(input: unknown): void {
-  assertPlainObject(input, "loop.enable input"); assertNoUnknownKeys(input, ["prompt", "limit"], "loop.enable input");
+  assertPlainObject(input, "loop.enable input"); assertNoUnknownKeys(input, ["prompt", "limit", "condition"], "loop.enable input");
+  if (input.condition !== undefined) {
+    assertPlainObject(input.condition, "loop.enable input: condition");
+    assertNoUnknownKeys(input.condition, ["command", "until"], "loop.enable input: condition");
+    assertNonEmptyText(input.condition.command, "loop.enable input: condition command");
+    if (typeof input.condition.until !== "boolean") throw new ValidationError("loop.enable input: until must be boolean");
+  }
   if (input.prompt !== undefined) assertNonEmptyText(input.prompt, "loop.enable input: prompt");
   if (input.limit !== undefined) {
     assertPlainObject(input.limit, "loop.enable input: limit"); assertNoUnknownKeys(input.limit, ["turns", "minutes", "tokens"], "loop.enable input: limit");
@@ -898,7 +904,13 @@ function validateRuntimeSettingValue(key: unknown, value: unknown, what: string)
     case "edit.autoRepair.enabled":
     case "extendedContext":
     case "compaction.asyncEnabled":
+    case "plan.autosave":
+    case "retry.waitForUsageReset":
+    case "compaction.experimentalContextManagement":
       if (typeof value !== "boolean") throw new ValidationError(`${what}: value must be boolean`);
+      return;
+    case "plan.autosaveDir":
+      if (typeof value !== "string" || value.length > 4096 || value.includes("\0")) throw new ValidationError(`${what}: invalid autosave directory`);
       return;
     case "features.unexpectedStopDetection":
       if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODES.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODES)[number])) {
@@ -1770,6 +1782,7 @@ const COMMAND_INPUT_VALIDATORS: {
   },
   "session.prewalk.arm": (input) => validateOptionalTextFields(input, "session.prewalk.arm input", ["target"]),
   "session.prewalk.disarm": (input) => validateEmptyCommandInput(input, "session.prewalk.disarm input"),
+  "session.prewalk.restart": (input) => validateEmptyCommandInput(input, "session.prewalk.restart input"),
   "session.clearContext": (input) => validateEmptyCommandInput(input, "session.clearContext input"),
   "session.fork": (input) => validateEmptyCommandInput(input, "session.fork input"),
   "session.handoff": (input) => validateOptionalTextFields(input, "session.handoff input", ["customInstructions"]),

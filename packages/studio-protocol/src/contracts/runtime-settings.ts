@@ -9,6 +9,10 @@ export const STUDIO_RUNTIME_SETTING_KEYS = [
   "compaction.asyncEnabled",
   "compaction.methodOrder",
   "providers.openai-codex.codeMode",
+  "plan.autosave",
+  "plan.autosaveDir",
+  "retry.waitForUsageReset",
+  "compaction.experimentalContextManagement",
 ] as const;
 
 export type StudioRuntimeSettingKey = (typeof STUDIO_RUNTIME_SETTING_KEYS)[number];
@@ -47,13 +51,22 @@ export interface StudioRuntimeSettingsSnapshot {
   "compaction.asyncEnabled": boolean;
   "compaction.methodOrder": StudioRuntimeCompactionMethod[];
   "providers.openai-codex.codeMode": StudioRuntimeCodeMode;
+  "plan.autosave"?: boolean;
+  "plan.autosaveDir"?: string;
+  "retry.waitForUsageReset"?: boolean;
+  "compaction.experimentalContextManagement"?: boolean;
 }
 
-export type StudioRuntimeSettingValue = StudioRuntimeSettingsSnapshot[StudioRuntimeSettingKey];
+export type StudioRuntimeSettingValue = Exclude<StudioRuntimeSettingsSnapshot[StudioRuntimeSettingKey], undefined>;
+
+export interface StudioRuntimeSettingsActivation {
+  configured: Partial<StudioRuntimeSettingsSnapshot>;
+  restartRequired: StudioRuntimeSettingKey[];
+}
 
 type StudioRuntimeSettingSetInputFor<K extends StudioRuntimeSettingKey> = {
   key: K;
-  value: StudioRuntimeSettingsSnapshot[K];
+  value: Exclude<StudioRuntimeSettingsSnapshot[K], undefined>;
   persist: boolean;
 };
 
@@ -71,12 +84,15 @@ export type StudioRuntimeSettingSetOperation = {
 
 export interface StudioRuntimeSettingsGetResult {
   values: Partial<StudioRuntimeSettingsSnapshot>;
+  activation?: StudioRuntimeSettingsActivation;
 }
 
 export interface StudioRuntimeSettingsSetResult {
   key: StudioRuntimeSettingKey;
   value: StudioRuntimeSettingValue;
   persisted: boolean;
+  effectiveValue?: StudioRuntimeSettingValue;
+  restartRequired?: boolean;
 }
 
 export interface StudioPlanSaveAndQuitResult {

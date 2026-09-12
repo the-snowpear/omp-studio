@@ -118,6 +118,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 |---|---|---|---|
 | Agent Hub 页 | `apps/renderer/src/AgentHub.tsx`、`conversation/SubagentConversationPane.tsx`、`conversation/persistedSessionAgents.ts` | 名册：`session.agents.list` 与 live `snapshot.agents` 合并（仅 viewed session === live session 时叠 live）；写操作（spawn/send/kill/revive/release/`job.cancel`）仅 live 会话；历史 Transcript 不读 live `agent.transcript.read`，用「打开」走归档对话；详情「打开」走 `agent.conversation.read`，缺失或非 live 则 `session.transcript.readPage` + `agentId`；聊天附件胶囊经 `agent.send` | overlay `services/agent-hub-service.ts`、`job-service.ts` |
 | 子代理面板 | `SubagentsPanel.tsx` | `agent.spawn/send/kill/revive/release` | 同上 + `agent-conversation-service.ts` |
+| 隔离子任务 / 多补丁 | `AgentHub.tsx`、`conversation/persistedSessionAgents.ts` | archive 的 `session_init.isolated` 经 Desktop 投影；历史只读 | `AgentHistorySummary.isolated/nestedPatchPaths` → overlay Hub 的 `canRevive`；send/revive 均在 Runtime 拒绝不可恢复的隔离任务 |
 | 任务代理定义 | `AgentHub` / Capabilities | `omp-agent-definitions-adapter.ts` | 磁盘 `.omp/agents/*.md`，不是 Hub live 态 |
 | Skills 抽屉 | `SkillsDrawer.tsx`、`skills/skillUsage.ts` | `omp-extensibility-adapter.ts`、`skills.get` / `skills.setEnabled` | overlay `skill-prompt-expansion.ts` |
 | MCP | `CapabilitiesPage.tsx` | `omp-mcp-adapter.ts`、`omp-mcp-probe.ts`、`mcp.get` / `mcp.setEnabled` / `mcp.refresh` / `mcp.test` / `mcp.logs.get` | 配置扫描 + Host 一次性探测；不是 Runtime MCPManager 连接态 |
@@ -125,6 +126,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 | 模型配置页 | `ModelConfigPage.tsx`、`models/fetchedModels.ts`、`models/WebSearchPanel.tsx`（网络搜索 tab） | `omp-models-adapter.ts`、`models-yml.ts`；「自动获取模型」走 `models.provider.probe`（不传 `discoveryType`，Host 按 api 类型选模型列表地址与认证头），候选清单只进表单草稿，保存才写 `models.yml`；网络搜索 tab 为「生效链路 + 优先链/供应商库」双分区面板（含供应商描述与凭证状态、searxng 全量字段）；配置（`web_search.*` / `providers.webSearch*` / `searxng.*` / `exa.*`）走 `models.webSearch.set`，写 `config.yml` | overlay `model-control-service.ts`（会话内切模型） |
 | 发现 / 插件根 | — | `host-client-api/src/omp-discovery/**` | — |
 | Token 用量 | Home / `usage/tokenUsage.ts` | `omp-usage-adapter.ts`、`usage.get` | 聚合 `omp stats.db`，不是演示数字 |
+| 动态价格 / 图片能力 | `ModelConfigPage.tsx` | `omp-models-adapter.ts`；`client-contract/src/model-pricing.ts` 解析只读分时价/长上下文价；固定覆盖与价格元数据分开 | 保留上游 catalog policy，历史费用只读已记录 usage |
 
 预览 fixture：`hubPreview.ts`、`skillsPreview.ts`、`capabilitiesPreview.ts`、`preview/modelConfigFixtures.ts`（含 `createPreviewFetchedModels()`）。不要把这些写进 Host。
 
@@ -195,6 +197,8 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | Plan / Vibe / Loop / Goal | `mode-control-service.ts`、`loop-service.ts` |
 | 会话树 / fork / handoff | `tree-service.ts`、`fork-service.ts`、`handoff-service.ts` |
 | Fast / prewalk | `fast-prewalk-service.ts` |
+| 条件 Loop / Prewalk 重启 | `services/loop-service.ts`、`fast-prewalk-service.ts`；Renderer `ComposerModePicker.tsx` |
+| 实验上下文 / Plan 自动保存 / 配额等待 | `services/runtime-settings-service.ts`、`mode-control-service.ts`、`state-projector.ts`；Renderer `settings/tabs.tsx`、`conversation/ActivityLine.tsx` |
 | Live（无桌面音频则 fail closed） | `live-service.ts` |
 | BTW / TAN / OMFG | overlay `btw-service.ts`、`tan-service.ts`、`omfg-service.ts`；Host `btw-events.ts`、facade `#bindBtw`、client `reducer.ts` `entities.btw`；Renderer `apps/renderer/src/btw/` |
 | 会话来源标记 | `session-origin.ts` |

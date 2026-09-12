@@ -3,6 +3,7 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import type { StudioEventEnvelope } from "@oh-my-pi/pi-coding-agent/studio/bridge-protocol";
 import { StudioStateProjector } from "@oh-my-pi/pi-coding-agent/studio/state-projector";
 import type { StudioHostRuntime } from "@oh-my-pi/pi-coding-agent/studio/studio-host-mode";
+import type { AgentSessionEvent } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 
 function runtimeFixture(): { runtime: StudioHostRuntime; manager: SessionManager } {
 	const manager = SessionManager.inMemory();
@@ -36,6 +37,31 @@ function runtimeFixture(): { runtime: StudioHostRuntime; manager: SessionManager
 }
 
 describe("Studio session title projection", () => {
+	test("retry deadlines survive repeated snapshots and disappear when recovery ends", () => {
+		const { runtime } = runtimeFixture();
+		const listeners = new Set<(event: AgentSessionEvent) => void>();
+		runtime.session.subscribe = listener => {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		};
+		const projector = new StudioStateProjector(runtime);
+		const before = Date.now();
+		for (const listener of listeners)
+			listener({
+				type: "auto_retry_start",
+				attempt: 1,
+				maxAttempts: 3,
+				delayMs: 3600000,
+				errorMessage: "quota unavailable",
+			});
+		const first = projector.snapshot();
+		expect(first.retry?.nextRetryAt).toBeGreaterThanOrEqual(before + 3600000);
+		expect(projector.snapshot().retry).toEqual(first.retry);
+		for (const listener of listeners) listener({ type: "auto_retry_end", success: false, attempt: 1 });
+		expect(projector.snapshot().retry).toBeUndefined();
+		projector.dispose();
+		expect(listeners.size).toBe(0);
+	});
 	test("projects native auto and manual title changes through state.changed", async () => {
 		const { runtime, manager } = runtimeFixture();
 		const projector = new StudioStateProjector(runtime);

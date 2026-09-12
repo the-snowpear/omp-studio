@@ -8,6 +8,7 @@ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
 import { onModelRolesChanged } from "../../config/settings";
 import type { PlanApprovalDetails } from "../../plan-mode/approved-plan";
+import { autosaveApprovedPlan } from "../../plan-mode/plan-autosave";
 import { resolvePlanModelTransition } from "../../plan-mode/model-transition";
 import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planModeApprovedPrompt from "../../prompts/system/plan-mode-approved.md" with { type: "text" };
@@ -351,8 +352,26 @@ export class StudioModeControlService {
 			return { decision: approval, dispatched: false, reason: "compaction_cancelled" };
 		}
 		this.session.markPlanReferenceSent();
+		try {
+			const saved = await autosaveApprovedPlan({
+				settings: this.session.settings,
+				cwd: this.session.sessionManager.getCwd(),
+				title: pending.title,
+				planContent: pending.body,
+			});
+			if (saved)
+				this.session.emitNotice(
+					"info",
+					"Plan saved: " + formatPathRelativeToCwd(saved, this.session.sessionManager.getCwd()),
+					"plan-autosave",
+				);
+		} catch (error) {
+			logger.warn("Failed to autosave approved plan", { error: String(error) });
+			this.session.emitNotice("warning", "Plan autosave failed; execution can continue", "plan-autosave");
+		}
 		const executionPrompt = prompt.render(planModeApprovedPrompt, {
 			planFilePath: pending.planFilePath,
+			planContent: pending.body,
 			contextPreserved: preserveContext,
 		});
 		await this.#submit(executionPrompt, true);
@@ -430,6 +449,7 @@ export class StudioModeControlService {
 	}
 
 	async enterVibe(initialPrompt?: string): Promise<StudioModeState> {
+		if (this.#vibeEntering) throw new StudioModeError("COMMAND_BLOCKED", "Vibe mode is still activating");
 		if (this.#shouldDefer()) {
 			return this.#queuePending(initialPrompt === undefined ? { kind: "vibe" } : { kind: "vibe", initialPrompt });
 		}
@@ -445,7 +465,12 @@ export class StudioModeControlService {
 		const previousTools = this.session.getEnabledToolNames();
 		const baseTools = ["read"];
 		if (this.session.hasBuiltInTool("todo")) baseTools.push("todo");
-		await this.session.activateVibeTools(baseTools);
+		this.#vibeEntering = true;
+		try {
+			await this.session.activateVibeTools(baseTools);
+		} finally {
+			this.#vibeEntering = false;
+		}
 		this.#vibePreviousTools = previousTools;
 		this.#vibeOwnerScope = scope;
 		this.session.setVibeModeState({ enabled: true });
@@ -454,6 +479,12 @@ export class StudioModeControlService {
 		this.#notify();
 		if (initialPrompt !== undefined) await this.#submit(initialPrompt);
 		return this.state();
+	}
+
+	#vibeEntering = false;
+
+	get vibeTransitionPending(): boolean {
+		return this.#vibeEntering || this.#pendingSession?.kind === "vibe";
 	}
 
 	async exitVibe(): Promise<{ killed: number; state: StudioModeState }> {

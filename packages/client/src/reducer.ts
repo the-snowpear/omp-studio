@@ -248,6 +248,7 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "session.fast.set": true,
   "session.prewalk.arm": true,
   "session.prewalk.disarm": true,
+  "session.prewalk.restart": true,
   "session.clearContext": true,
   "session.fork": true,
   "session.handoff": true,

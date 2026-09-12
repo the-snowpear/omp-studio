@@ -58,6 +58,31 @@ function fixture(
 }
 
 describe("StudioFastPrewalkService", () => {
+	test("restart restores @default and preserves the native rejection of a competing arm", async () => {
+		let result: "armed" | "rejected" = "armed";
+		const calls: string[][] = [];
+		const session = {
+			isStreaming: false,
+			isCompacting: false,
+			restartPrewalk: async (source: Model, _sourceThinking: unknown, target: Model) => {
+				calls.push([source.id, target.id]);
+				return result;
+			},
+		} as unknown as AgentSession;
+		const service = new StudioFastPrewalkService(session, selector => ({ selector, model: model(selector) }));
+		expect(await service.restart()).toEqual({ restarted: true, armed: true });
+		expect(calls).toEqual([["@default", "@smol"]]);
+		result = "rejected";
+		await expect(service.restart()).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+	});
+
+	test("restart refuses a busy session before resolving or changing models", async () => {
+		const session = { isStreaming: true } as AgentSession;
+		const service = new StudioFastPrewalkService(session, () => {
+			throw new Error("must not resolve");
+		});
+		await expect(service.restart()).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+	});
 	test("sets fast mode and reports whether priority is active", () => {
 		const { service } = fixture();
 		expect(service.setFast(true)).toEqual({ enabled: true, active: true });

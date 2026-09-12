@@ -26,6 +26,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
 	"session.fast.set",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
+	"session.prewalk.restart",
 	"permissions.mode.set",
 	"operator.invoke",
 	"agent.list",
@@ -84,6 +85,7 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 	"session.fast.set",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
+	"session.prewalk.restart",
 	"permissions.mode.set",
 	"operator.invoke",
 	"agent.list",
@@ -131,6 +133,7 @@ const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
 	"session.fast.set",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
+	"session.prewalk.restart",
 	"permissions.mode.set",
 ]);
 

@@ -99,6 +99,7 @@ const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"session.fast.set",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
+	"session.prewalk.restart",
 	"session.model.set",
 	"session.thinking.set",
 	"session.taskModel.set",
@@ -664,14 +665,20 @@ export class StudioBridgeDispatcher {
 				return this.runtime.services.fastPrewalk.arm(operation.target);
 			case "session.prewalk.disarm":
 				return this.runtime.services.fastPrewalk.disarm();
+			case "session.prewalk.restart":
+				return await this.runtime.services.fastPrewalk.restart();
 			case "core.prompt": {
-				const { preludes } = await expandSkillPrompts(this.runtime.session, operation.text);
-				return await this.#sessionControl.prompt(operation.text, operation.images, preludes).then(result => {
-					if (this.runtime.services.loop.state()?.status === "waiting") {
-						this.runtime.services.loop.capturePrompt(operation.text);
-					}
+				const loop = this.runtime.services.loop;
+				const held =
+					!this.runtime.session.isStreaming && loop.state() !== undefined ? loop.holdPrompt() : undefined;
+				try {
+					const { preludes } = await expandSkillPrompts(this.runtime.session, operation.text);
+					const result = await this.#sessionControl.prompt(operation.text, operation.images, preludes);
+					if (result.started) held?.capture(operation.text);
 					return result;
-				});
+				} finally {
+					held?.release();
+				}
 			}
 			case "core.steer": {
 				const { preludes } = await expandSkillPrompts(this.runtime.session, operation.text);
@@ -682,6 +689,7 @@ export class StudioBridgeDispatcher {
 				return await this.#sessionControl.followUp(operation.text, operation.images, preludes);
 			}
 			case "core.abort":
+				if (this.runtime.services.loop.state() !== undefined) this.runtime.services.loop.pause();
 				return await this.#sessionControl.abort();
 			default:
 				throw new StudioRuntimeCommandError(
@@ -705,9 +713,15 @@ export class StudioBridgeDispatcher {
 					throw new StudioRuntimeCommandError("BUSY_STREAMING", "Runtime is streaming");
 				}
 				if (this.runtime.services.loop.state()) {
+					if (operation.condition !== undefined || operation.prompt !== undefined) {
+						throw new StudioRuntimeCommandError(
+							"COMMAND_BLOCKED",
+							"Disable the loop before replacing its prompt or condition",
+						);
+					}
 					return this.runtime.services.loop.setLimit(operation.limit);
 				}
-				const result = this.runtime.services.loop.enable(operation.prompt, operation.limit);
+				const result = this.runtime.services.loop.enable(operation.prompt, operation.limit, operation.condition);
 				if (result.initialPrompt !== undefined) {
 					try {
 						await this.runtime.session.prompt(result.initialPrompt);

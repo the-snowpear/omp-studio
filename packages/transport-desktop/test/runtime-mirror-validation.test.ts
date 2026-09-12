@@ -48,6 +48,16 @@ function assertInvalid(commandName: string, input: unknown): void {
   );
 }
 
+test("IPC validates condition loops, Prewalk restart and experimental settings", () => {
+  assert.equal(parseClientCommandRequest(command("session.prewalk.restart", {})).commandName, "session.prewalk.restart");
+  const input = { condition: { command: "test -f done", until: true } };
+  assert.deepEqual(parseClientCommandRequest(command("loop.enable", input)).input, input);
+  assertInvalid("loop.enable", { condition: { command: "check", until: 1 } });
+  assertInvalid("loop.enable", { condition: { command: "check", until: true, cwd: "outside" } });
+  assertInvalid("runtime.settings.set", { key: "plan.autosave", value: "true", persist: true });
+  assertInvalid("runtime.settings.set", { key: "compaction.experimentalContextManagement", value: {}, persist: true });
+});
+
 test("Desktop inbound validator mirrors Runtime settings and strict Plan paths", () => {
   assert.equal(
     parseClientCommandRequest(command("runtime.settings.get", { keys: ["extendedContext"] })).commandName,

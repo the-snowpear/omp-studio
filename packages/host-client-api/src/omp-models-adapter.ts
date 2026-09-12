@@ -41,7 +41,7 @@ import type {
   ModelWebSearchCredentialRemoveInput,
   WebSearchConfigReadModel,
 } from "@omp-studio/client-contract";
-import { isModelEnvConfigName, parseCacheThinkingEfforts, parseModelThinkingEfforts } from "@omp-studio/client-contract";
+import { isModelEnvConfigName, parseCacheThinkingEfforts, parseModelThinkingEfforts, parseModelPricing } from "@omp-studio/client-contract";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseModelsYml, redactModelsYmlText, restoreRedactedApiKeys, serializeModelsYml, type YamlValue } from "./models-yml.js";
@@ -204,6 +204,7 @@ const PRESET_GROUPS: ReadonlyArray<ModelPresetGroup> = [
   {
     group: "官方 / 主流",
     items: [
+      { id: "muse-code", name: "Muse Code", desc: "Muse Spark 订阅、账号模型发现与额度", api: "openai-responses", auth: ["oauth"], oauth: true },
       { id: "anthropic", name: "Anthropic", desc: "Claude 系列模型官方 API", api: "anthropic-messages", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.anthropic.com/v1" },
       { id: "openai", name: "OpenAI", desc: "GPT 系列模型官方 API", api: "openai-responses", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.openai.com/v1" },
       { id: "openai-codex", name: "OpenAI Codex", desc: "Codex 订阅额度（ChatGPT 账号）", api: "openai-codex-responses", auth: ["oauth"], oauth: true, endpoint: "https://api.openai.com/v1" },
@@ -218,6 +219,7 @@ const PRESET_GROUPS: ReadonlyArray<ModelPresetGroup> = [
   {
     group: "Gateway / 聚合",
     items: [
+      { id: "commandcode", name: "Command Code", desc: "原生 OpenAI / Anthropic 路由、模型发现与价格", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
       { id: "openrouter", name: "OpenRouter", desc: "一个 Key 访问多家模型", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
       { id: "github-copilot", name: "GitHub Copilot", desc: "Copilot 订阅额度", api: "openai-responses", auth: ["oauth"], oauth: true },
       { id: "litellm", name: "LiteLLM", desc: "自托管统一模型代理", api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },
@@ -715,17 +717,17 @@ function parseThinking(selector: string): { primary: string; thinking?: string }
   return { primary: match[1] ?? selector, thinking: level };
 }
 
-function cacheNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+function cacheNumber(value: unknown, allowZero = false): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && (value > 0 || (allowZero && value === 0)) ? value : undefined;
 }
 
 function cacheCost(value: unknown): ModelCostMeta | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
-  const input = cacheNumber(record.input);
-  const output = cacheNumber(record.output);
-  const cacheRead = cacheNumber(record.cacheRead);
-  const cacheWrite = cacheNumber(record.cacheWrite);
+  const input = cacheNumber(record.input, true);
+  const output = cacheNumber(record.output, true);
+  const cacheRead = cacheNumber(record.cacheRead, true);
+  const cacheWrite = cacheNumber(record.cacheWrite, true);
   if (input === undefined && output === undefined && cacheRead === undefined && cacheWrite === undefined) return undefined;
   return {
     ...(input === undefined ? {} : { input }),
@@ -745,11 +747,14 @@ export function availableFromCacheModel(
   const providerOf = typeof model.provider === "string" && model.provider.length > 0 ? model.provider : providerFallback;
   if (!providerOf) return undefined;
   const input = model.input;
-  const image = Array.isArray(input) ? input.includes("image") : false;
+  const compat = model.compat !== null && typeof model.compat === "object" ? model.compat as Record<string, unknown> : undefined;
+  const image = Array.isArray(input) && input.includes("image") && compat?.stripImageInput !== true;
   const thinking = parseCacheThinkingEfforts(model.thinking);
   const contextWindow = cacheNumber(model.contextWindow);
   const maxTokens = cacheNumber(model.maxTokens);
   const cost = cacheCost(model.cost);
+  const pricing = parseModelPricing(model.cost);
+  const maxContextWindow = cacheNumber(model.maxContextWindow);
   return {
     provider: providerOf,
     id,
@@ -762,6 +767,9 @@ export function availableFromCacheModel(
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(thinking.length > 0 ? { thinking } : {}),
     ...(cost ? { cost } : {}),
+    ...(pricing ? { pricing } : {}),
+    ...(maxContextWindow === undefined ? {} : { maxContextWindow }),
+    ...(typeof model.api === "string" ? { api: model.api } : {}),
   };
 }
 
@@ -778,6 +786,9 @@ export function catalogEntryFromAvailable(model: AvailableModelRecord): ModelCat
     ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
     ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
     ...(model.cost ? { cost: model.cost } : {}),
+    ...(model.pricing ? { pricing: model.pricing } : {}),
+    ...(model.maxContextWindow === undefined ? {} : { maxContextWindow: model.maxContextWindow }),
+    ...(model.api === undefined ? {} : { api: model.api }),
     ...(model.thinking && model.thinking.length > 0 ? { thinking: model.thinking } : {}),
   };
 }
@@ -794,6 +805,9 @@ export function availableFromCatalogEntry(providerId: string, model: ModelCatalo
     ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
     ...(model.maxTokens === undefined ? {} : { maxTokens: model.maxTokens }),
     ...(model.cost ? { cost: model.cost } : {}),
+    ...(model.pricing ? { pricing: model.pricing } : {}),
+    ...(model.maxContextWindow === undefined ? {} : { maxContextWindow: model.maxContextWindow }),
+    ...(model.api === undefined ? {} : { api: model.api }),
     ...(model.thinking && model.thinking.length > 0 ? { thinking: model.thinking } : {}),
   };
 }
@@ -997,8 +1011,10 @@ function applyOverrideToCatalog(
   override: NonNullable<ModelProviderRecord["modelOverrides"]>[string] | undefined,
 ): ModelCatalogEntry {
   if (!override) return model;
+  const base = { ...model };
+  if (override.cost !== undefined) delete base.pricing;
   return {
-    ...model,
+    ...base,
     ...(override.name === undefined ? {} : { name: override.name }),
     ...(override.contextWindow === undefined ? {} : { contextWindow: override.contextWindow }),
     ...(override.maxTokens === undefined ? {} : { maxTokens: override.maxTokens }),

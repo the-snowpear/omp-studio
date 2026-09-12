@@ -30,7 +30,7 @@ export interface StudioOperatorCommandManifest {
 	unclassifiedBuiltins: string[];
 }
 
-const UPSTREAM_COMMIT = "f241301c83726afe75a847e919b89977a54dafbe";
+const UPSTREAM_COMMIT = "00085d4e7dfdcfbf302c122fa2682b410a0f43d1";
 const STUDIO_SESSION_TITLE_ENSURE_ID = "studio.session-title.ensure";
 const DESTRUCTIVE = new Set(["drop", "clear", "fork"]);
 const READ_ONLY = new Set(["help", "version", "stats", "models", "tree", "branch", "goal"]);

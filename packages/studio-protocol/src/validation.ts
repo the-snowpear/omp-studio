@@ -146,6 +146,13 @@ function oneOf(value: unknown, values: readonly string[], path: string): string 
   return value;
 }
 
+function validateLoopCondition(value: unknown, path: string): void {
+  const condition = record(value, path);
+  exactKeys(condition, ["command", "until"], path);
+  nonEmptyString(condition.command, path + ".command");
+  booleanValue(condition.until, path + ".until");
+}
+
 function validateRuntimeSettingValue(
   key: StudioRuntimeSettingKey,
   value: unknown,
@@ -155,7 +162,15 @@ function validateRuntimeSettingValue(
     case "edit.autoRepair.enabled":
     case "extendedContext":
     case "compaction.asyncEnabled":
+    case "plan.autosave":
+    case "retry.waitForUsageReset":
+    case "compaction.experimentalContextManagement":
       booleanValue(value, path);
+      return;
+    case "plan.autosaveDir":
+      if (typeof value !== "string" || value.length > 4096 || value.includes("\0")) {
+        throw new ContractValidationError("expected a plan autosave directory", path);
+      }
       return;
     case "features.unexpectedStopDetection":
       oneOf(value, STUDIO_RUNTIME_UNEXPECTED_STOP_MODES, path);
@@ -183,6 +198,7 @@ function validateRuntimeSettingsSnapshot(value: unknown, path: string): void {
   const settings = record(value, path);
   exactKeys(settings, STUDIO_RUNTIME_SETTING_KEYS, path);
   for (const key of STUDIO_RUNTIME_SETTING_KEYS) {
+    if (settings[key] === undefined && ["plan.autosave", "plan.autosaveDir", "retry.waitForUsageReset", "compaction.experimentalContextManagement"].includes(key)) continue;
     validateRuntimeSettingValue(key, settings[key], `${path}.${key}`);
   }
 }
@@ -432,6 +448,8 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
       "jobs",
       "telemetry",
       "runtimeSettings",
+      "runtimeSettingsActivation",
+      "retry",
       "compactionSpeculation",
     ],
     "$snapshot.snapshot",
@@ -500,7 +518,9 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
   }
   if (input.loop !== undefined) {
     const loop = record(input.loop, "$snapshot.snapshot.loop");
-    exactKeys(loop, ["status", "prompt", "iterations"], "$snapshot.snapshot.loop");
+    exactKeys(loop, ["status", "prompt", "iterations", "condition", "evaluatingCondition"], "$snapshot.snapshot.loop");
+    if (loop.condition !== undefined) validateLoopCondition(loop.condition, "$snapshot.snapshot.loop.condition");
+    if (loop.evaluatingCondition !== undefined) booleanValue(loop.evaluatingCondition, "$snapshot.snapshot.loop.evaluatingCondition");
     if (!["waiting", "running", "paused"].includes(loop.status as string)) {
       throw new ContractValidationError("unsupported loop status", "$snapshot.snapshot.loop.status");
     }
@@ -581,6 +601,26 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
   if (input.telemetry !== undefined) parseSessionTelemetrySnapshot(input.telemetry, "$snapshot.snapshot.telemetry");
   if (input.runtimeSettings !== undefined) {
     validateRuntimeSettingsSnapshot(input.runtimeSettings, "$snapshot.snapshot.runtimeSettings");
+  }
+  if (input.runtimeSettingsActivation !== undefined) {
+    const activation = record(input.runtimeSettingsActivation, "$snapshot.snapshot.runtimeSettingsActivation");
+    exactKeys(activation, ["configured", "restartRequired"], "$snapshot.snapshot.runtimeSettingsActivation");
+    const configured = record(activation.configured, "$snapshot.snapshot.runtimeSettingsActivation.configured");
+    exactKeys(configured, STUDIO_RUNTIME_SETTING_KEYS, "$snapshot.snapshot.runtimeSettingsActivation.configured");
+    for (const [key, value] of Object.entries(configured)) {
+      validateRuntimeSettingValue(key as StudioRuntimeSettingKey, value, "$snapshot.snapshot.runtimeSettingsActivation.configured." + key);
+    }
+    if (!Array.isArray(activation.restartRequired) || activation.restartRequired.some(key => key !== "compaction.experimentalContextManagement") || activation.restartRequired.length > 1) {
+      throw new ContractValidationError("invalid restart-required settings", "$snapshot.snapshot.runtimeSettingsActivation.restartRequired");
+    }
+  }
+  if (input.retry !== undefined) {
+    const retry = record(input.retry, "$snapshot.snapshot.retry");
+    exactKeys(retry, ["attempt", "maxAttempts", "nextRetryAt", "reason"], "$snapshot.snapshot.retry");
+    positiveInteger(retry.attempt, "$snapshot.snapshot.retry.attempt");
+    positiveInteger(retry.maxAttempts, "$snapshot.snapshot.retry.maxAttempts");
+    nonNegativeInteger(retry.nextRetryAt, "$snapshot.snapshot.retry.nextRetryAt");
+    oneOf(retry.reason, ["usage-limit", "retry"], "$snapshot.snapshot.retry.reason");
   }
   if (input.compactionSpeculation !== undefined) {
     oneOf(input.compactionSpeculation, ["idle", "running", "armed"], "$snapshot.snapshot.compactionSpeculation");
@@ -977,11 +1017,12 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   },
   "core.abort": { keys: ["kind"] },
   "loop.enable": {
-    keys: ["kind", "prompt", "limit"],
+    keys: ["kind", "prompt", "limit", "condition"],
     validate: (operation) => {
       if (operation.prompt !== undefined) {
         nonEmptyString(operation.prompt, "$request.operation.prompt");
       }
+      if (operation.condition !== undefined) validateLoopCondition(operation.condition, "$request.operation.condition");
       if (operation.limit !== undefined) {
         const limit = record(operation.limit, "$request.operation.limit");
         exactKeys(limit, ["turns", "minutes", "tokens"], "$request.operation.limit");
@@ -1010,6 +1051,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "session.prewalk.disarm": { keys: ["kind"] },
+  "session.prewalk.restart": { keys: ["kind"] },
   "session.fork": { keys: ["kind"] },
   "session.handoff": {
     keys: ["kind", "customInstructions"],

@@ -16,6 +16,7 @@ import type { SessionTelemetrySnapshot } from "./telemetry";
 import type {
   StudioCompactionSpeculation,
   StudioRuntimeSettingsSnapshot,
+  StudioRuntimeSettingsActivation,
 } from "./runtime-settings";
 
 export interface PlanState {
@@ -37,10 +38,24 @@ export interface VibeState {
   workerAgentIds: AgentId[];
 }
 
+export interface LoopCondition {
+  command: string;
+  until: boolean;
+}
+
 export interface LoopState {
   status: "waiting" | "running" | "paused";
   prompt?: string;
   iterations?: number;
+  condition?: LoopCondition;
+  evaluatingCondition?: boolean;
+}
+
+export interface RetryState {
+  attempt: number;
+  maxAttempts: number;
+  nextRetryAt: number;
+  reason: "usage-limit" | "retry";
 }
 
 export interface FastState {
@@ -124,6 +139,7 @@ export interface OperatorStateSnapshot {
   goal?: GoalState;
   vibe?: VibeState;
   loop?: LoopState;
+  retry?: RetryState;
   /** Active session model; absent before the first model resolves. */
   model?: SessionModelState;
   /**
@@ -145,6 +161,7 @@ export interface OperatorStateSnapshot {
   telemetry?: SessionTelemetrySnapshot;
   /** Optional on older Runtime versions; present when the settings seam is available. */
   runtimeSettings?: StudioRuntimeSettingsSnapshot;
+  runtimeSettingsActivation?: StudioRuntimeSettingsActivation;
   /** Optional Runtime compaction speculation state. */
   compactionSpeculation?: StudioCompactionSpeculation;
 }

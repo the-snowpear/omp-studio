@@ -17,6 +17,7 @@ import {
 	StudioModeError,
 } from "@oh-my-pi/pi-coding-agent/studio/services/mode-control-service";
 import { StudioRuntimeSettingsService } from "@oh-my-pi/pi-coding-agent/studio/services/runtime-settings-service";
+import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loop-service";
 import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-coding-agent/tools/resolve";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
@@ -81,6 +82,51 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		await service.exitPlan(true);
 		expect(service.state().plan).toBeUndefined();
 		expect(states.length).toBeGreaterThanOrEqual(2);
+	});
+
+	test("shared reset loops cannot race an unfinished Vibe tool activation", async () => {
+		const condition = Promise.withResolvers<{ kind: "continue" }>();
+		const activation = Promise.withResolvers<void>();
+		let timer: (() => void) | undefined;
+		let resets = 0;
+		let submissions = 0;
+		const loop = new StudioLoopService({
+			action: () => "reset",
+			isBlocked: () => false,
+			isVibeActive: () => service.vibeTransitionPending || session.getVibeModeState()?.enabled === true,
+			evaluateCondition: () => condition.promise,
+			submitPrompt: () => {
+				submissions += 1;
+			},
+			reset: () => {
+				resets += 1;
+			},
+			compact: () => {},
+			nowMs: Date.now,
+			setTimer: callback => {
+				timer = callback;
+				return callback;
+			},
+			clearTimer: () => {
+				timer = undefined;
+			},
+		});
+		session.activateVibeTools = mock(() => activation.promise);
+		loop.enable("repeat", undefined, { command: "check", until: true });
+		loop.scheduleNext();
+		timer?.();
+		const entering = service.enterVibe();
+		try {
+			condition.resolve({ kind: "continue" });
+			await Bun.sleep(0);
+			expect(resets).toBe(0);
+			expect(submissions).toBe(0);
+			expect(loop.state()).toBeUndefined();
+		} finally {
+			activation.resolve();
+			await entering;
+			loop.dispose();
+		}
 	});
 
 	test("Plan switches to the configured role model and restores the pre-Plan model", async () => {
@@ -292,6 +338,65 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		await expect(runtimeSettings.set("not-exposed", true, false)).rejects.toMatchObject({
 			code: "INVALID_ARGUMENT",
 		});
+	});
+
+	test("notes settings persist without enabling an unprepared live tool surface", async () => {
+		const runtimeSettings = new StudioRuntimeSettingsService(session);
+		await expect(runtimeSettings.set("compaction.experimentalContextManagement", true, false)).rejects.toMatchObject({
+			code: "COMMAND_BLOCKED",
+		});
+		expect(await runtimeSettings.set("compaction.experimentalContextManagement", true, true)).toMatchObject({
+			effectiveValue: false,
+			restartRequired: true,
+		});
+		expect(session.settings.get("compaction.experimentalContextManagement")).toBe(false);
+		expect(runtimeSettings.activation()).toEqual({
+			configured: { "compaction.experimentalContextManagement": true },
+			restartRequired: ["compaction.experimentalContextManagement"],
+		});
+		session.settings.clearOverride("compaction.experimentalContextManagement");
+		const restarted = new StudioRuntimeSettingsService(session);
+		expect(restarted.snapshot()["compaction.experimentalContextManagement"]).toBe(true);
+		expect(restarted.activation().restartRequired).toEqual([]);
+		await expect(restarted.set("plan.autosaveDir", "\0bad", true)).rejects.toMatchObject({
+			code: "INVALID_ARGUMENT",
+		});
+	});
+
+	test("approved plans autosave once and execution receives the approved body", async () => {
+		session.settings.override("plan.autosave", true);
+		const directory = path.join(tempDir.path(), "saved-plans");
+		session.settings.override("plan.autosaveDir", directory);
+		const { body } = await armPlanReview();
+		const prompted: string[] = [];
+		session.prompt = mock(async (text: string) => {
+			prompted.push(text);
+			return true;
+		});
+		expect(await service.respondPlanReview("keep")).toMatchObject({ dispatched: true });
+		expect(await fs.readdir(directory)).toEqual(["DEMO_PLAN.md"]);
+		expect(await Bun.file(path.join(directory, "DEMO_PLAN.md")).text()).toBe(body);
+		expect(prompted[0]).toContain(body);
+		await expect(service.respondPlanReview("keep")).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+	});
+
+	test("autosave failure warns without rolling a committed approval back", async () => {
+		const blockedDirectory = path.join(tempDir.path(), "not-a-directory");
+		await Bun.write(blockedDirectory, "occupied");
+		session.settings.override("plan.autosave", true);
+		session.settings.override("plan.autosaveDir", blockedDirectory);
+		await armPlanReview();
+		const notices: string[] = [];
+		const unsubscribe = session.subscribe(event => {
+			if (event.type === "notice") notices.push(event.message);
+		});
+		session.prompt = mock(async () => true);
+		try {
+			expect(await service.respondPlanReview("keep")).toMatchObject({ dispatched: true });
+			expect(notices).toContain("Plan autosave failed; execution can continue");
+		} finally {
+			unsubscribe();
+		}
 	});
 
 	test("Approve and keep context preserves history and does not compact", async () => {

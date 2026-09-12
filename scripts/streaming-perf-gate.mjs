@@ -18,6 +18,7 @@
  * 门禁用不到它，没必要让每次 `npm ci` 都下 100MB 的 Chromium。
  */
 import { mkdir, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -84,6 +85,7 @@ const LONG_SEED = { turns: 24, toolsPerTurn: 3, outputLines: 1200 };
 
 async function loadPlaywright() {
   try {
+    if (process.env.PLAYWRIGHT_MODULE) return createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE);
     return await import("playwright");
   } catch {
     throw new Error(
@@ -210,6 +212,7 @@ const started = await startServer();
 const { chromium } = await loadPlaywright();
 const browser = await chromium.launch({
   headless: process.env.PERF_HEADED !== "1",
+  ...(process.env.PERF_BROWSER_EXECUTABLE ? { executablePath: process.env.PERF_BROWSER_EXECUTABLE } : {}),
   args: ["--disable-lcd-text", "--force-device-scale-factor=1"],
 });
 let scenarios = [];

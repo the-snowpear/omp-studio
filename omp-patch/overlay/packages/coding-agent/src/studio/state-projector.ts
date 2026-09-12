@@ -1,4 +1,5 @@
 import { logger } from "@oh-my-pi/pi-utils";
+import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
 	type StudioEventEnvelope,
 	type StudioInteractionRequiredEvent,
@@ -6,6 +7,7 @@ import {
 	type StudioOperatorStateSnapshot,
 	type StudioPendingInteraction,
 	type StudioReceipt,
+	type StudioRetryState,
 	type StudioSessionTelemetry,
 	type StudioSnapshotResponse,
 	stableImplementedManifestHash,
@@ -110,6 +112,8 @@ export class StudioStateProjector {
 	#telemetryInFlight = false;
 	#telemetryQueued = false;
 	#telemetrySnapshot: StudioSessionTelemetry;
+	#retry: StudioRetryState | undefined;
+	#retrySessionId: string | undefined;
 
 	constructor(runtime: StudioHostRuntime) {
 		this.#runtime = runtime;
@@ -127,6 +131,24 @@ export class StudioStateProjector {
 		// `studio-host` TUI, a Plan-role transition, or a retry fallback.
 		this.#unsubscribeModel =
 			runtime.session.subscribe?.(event => {
+				if (event.type === "auto_retry_start") {
+					this.#retrySessionId = runtime.sessionManager.getSessionId();
+					this.#retry = {
+						attempt: event.attempt,
+						maxAttempts: event.maxAttempts,
+						nextRetryAt: Date.now() + Math.max(0, Math.ceil(event.delayMs)),
+						reason: AIError.is(event.errorId ?? 0, AIError.Flag.UsageLimit) ? "usage-limit" : "retry",
+					};
+					this.commitStateChange();
+				} else if (
+					event.type === "auto_retry_end" ||
+					(event.type === "message_start" && event.message.role === "assistant")
+				) {
+					if (this.#retry !== undefined) {
+						this.#retry = undefined;
+						this.commitStateChange();
+					}
+				}
 				if (event.type === "model_changed" || event.type === "thinking_level_changed") this.commitStateChange();
 			}) ?? (() => {});
 		// Bridge-side Task subagent model switches carry their own signal; TUI
@@ -244,9 +266,15 @@ export class StudioStateProjector {
 				includeRecent: true,
 			}),
 			telemetry: this.#telemetrySnapshot,
+			...(this.#retry === undefined || this.#retrySessionId !== this.#runtime.sessionManager.getSessionId()
+				? {}
+				: { retry: { ...this.#retry } }),
 			...(this.#runtime.services.settings === undefined
 				? {}
-				: { runtimeSettings: this.#runtime.services.settings.snapshot() }),
+				: {
+						runtimeSettings: this.#runtime.services.settings.snapshot(),
+						runtimeSettingsActivation: this.#runtime.services.settings.activation(),
+					}),
 			...(this.#runtime.session.compactionSpeculation === undefined
 				? {}
 				: { compactionSpeculation: this.#runtime.session.compactionSpeculation }),

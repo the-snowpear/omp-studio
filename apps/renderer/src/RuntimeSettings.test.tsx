@@ -52,6 +52,31 @@ function openTab(label: string) {
 }
 
 describe("Runtime settings seam", () => {
+  it("shows configured notes separately from effective state and never restarts a Runtime implicitly", async () => {
+    const onSet = vi.fn();
+    renderSettings({ runtimeSettings: {
+      snapshot: { ...snapshot, "compaction.experimentalContextManagement": false },
+      activation: { configured: { "compaction.experimentalContextManagement": true }, restartRequired: ["compaction.experimentalContextManagement"] },
+      onSet,
+    } });
+    openTab("上下文与记忆");
+    const toggle = screen.getByRole("switch", { name: "笔记式上下文（实验）" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText(/当前未启用/)).toBeTruthy();
+    expect(screen.getByText(/已保存，需重启 Runtime/)).toBeTruthy();
+    expect(onSet).not.toHaveBeenCalled();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(onSet).toHaveBeenCalledWith("compaction.experimentalContextManagement", false));
+  });
+
+  it("keeps autosave and quota-wait preview controls local", () => {
+    const onSet = vi.fn();
+    renderSettings({ preview: true, runtimeSettings: { snapshot, onSet } });
+    openTab("任务与执行");
+    fireEvent.click(screen.getByRole("switch", { name: "自动保存已批准计划" }));
+    fireEvent.click(screen.getByRole("switch", { name: "等待模型额度恢复" }));
+    expect(onSet).not.toHaveBeenCalled();
+  });
   it("keeps the seven settings disabled without a Runtime snapshot", () => {
     renderSettings();
 

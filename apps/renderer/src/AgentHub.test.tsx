@@ -144,6 +144,21 @@ function renderHub(
 }
 
 describe("AgentHubPage real-mode projection", () => {
+  it("keeps isolated parked agents transcript-only even when revive capability is granted", () => {
+    const client = mockClient();
+    renderHub(snapshotWith([snapshotAgent({
+      status: "parked", hasLiveSession: false, isolated: true, canRevive: false,
+      patchPath: "main.patch", nestedPatchPaths: ["nested-0.patch", "nested-1.patch"],
+    })]), { client, runtimeConnected: true, canSend: true, capabilities: hubCapabilities("agent.revive", "agent.send") });
+    fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
+    const revive = screen.getByRole("button", { name: /Revive/ }) as HTMLButtonElement;
+    expect(revive.disabled).toBe(true);
+    expect(revive.getAttribute("data-tip")).toContain("不可恢复");
+    expect(screen.getByText("nested-0.patch")).toBeTruthy();
+    expect(screen.getByText("nested-1.patch")).toBeTruthy();
+    fireEvent.click(revive);
+    expect(client.command).not.toHaveBeenCalled();
+  });
   it("maps per-agent usage, model, and artifact fields from the runtime snapshot", () => {
     renderHub(snapshotWith([
       snapshotAgent({

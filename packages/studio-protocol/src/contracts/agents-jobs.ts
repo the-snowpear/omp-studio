@@ -46,6 +46,9 @@ export interface StudioAgentSnapshot {
   outputPath?: string;
   patchPath?: string;
   branchName?: string;
+  nestedPatchPaths?: string[];
+  isolated?: boolean;
+  canRevive?: boolean;
 }
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -111,4 +114,3 @@ export interface AgentTranscriptPage<TMessage = AgentTranscriptMessage> {
   messages: TMessage[];
   eof: boolean;
 }
-

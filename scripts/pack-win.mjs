@@ -21,7 +21,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import { npmInvocation, repositoryRoot, run, toolingEnvironment } from "./omp-tooling.mjs";
-import { auditInstallerOutput } from "./audit-installer.mjs";
+import { auditInstallerOutput, defaultInstallerOutputDirectory } from "./audit-installer.mjs";
 import { buildInstallerHost } from "./build-installer-host.mjs";
 import { resolveTargetArch, assertNativeRuntimeBuild } from "./windows-architecture.mjs";
 
@@ -88,6 +88,7 @@ async function main() {
   const skipBuild = hasFlag("--skip-build") || process.env.OMP_PACK_SKIP_BUILD === "1";
   const npm = npmInvocation();
   const targetArch = resolveTargetArch();
+  const outputDirectory = defaultInstallerOutputDirectory();
   if (!skipHost) assertNativeRuntimeBuild(targetArch);
   const env = toolingEnvironment({
     OMP_TARGET_ARCH: targetArch,
@@ -133,11 +134,11 @@ async function main() {
   console.log("[pack:win] electron-builder NSIS...");
   run(
     process.execPath,
-    [electronBuilderCli, "--config", "packaging/electron-builder.yml", "--win", "nsis", `--${targetArch}`, "--publish", "never"],
+    [electronBuilderCli, "--config", "packaging/electron-builder.yml", `--config.directories.output=${outputDirectory}`, "--win", "nsis", `--${targetArch}`, "--publish", "never"],
     { env },
   );
 
-  const report = auditInstallerOutput(join(repositoryRoot, "outputs", "installer"), targetArch);
+  const report = auditInstallerOutput(outputDirectory, targetArch);
   console.log(`[pack:win] Audit passed: ${report.installerExe}`);
   for (const line of report.notes) {
     console.log(`[pack:win]   ${line}`);

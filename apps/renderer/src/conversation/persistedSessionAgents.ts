@@ -11,11 +11,15 @@ import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
 function fillFromPersisted(live: StudioAgentSnapshot, persisted: StudioAgentSnapshot): StudioAgentSnapshot {
   const needsUsage = live.usage === undefined && persisted.usage !== undefined;
   const needsStartedAt = live.startedAt === undefined && persisted.startedAt !== undefined;
-  if (!needsUsage && !needsStartedAt) return live;
+  const needsIsolation = live.isolated === undefined && persisted.isolated !== undefined;
+  const needsPatches = live.nestedPatchPaths === undefined && persisted.nestedPatchPaths !== undefined;
+  if (!needsUsage && !needsStartedAt && !needsIsolation && !needsPatches) return live;
   return {
     ...live,
     ...(needsUsage ? { usage: persisted.usage } : {}),
     ...(needsStartedAt ? { startedAt: persisted.startedAt } : {}),
+    ...(needsIsolation ? { isolated: persisted.isolated, ...(persisted.isolated === true ? { canRevive: false } : {}) } : {}),
+    ...(needsPatches ? { nestedPatchPaths: persisted.nestedPatchPaths } : {}),
   };
 }
 

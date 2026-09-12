@@ -27,6 +27,7 @@ import {
   isModelEnvConfigName,
   MODEL_CONFIG_THINKING_EFFORTS,
   roleThinkingControl,
+  resolveModelPrice,
 } from "@omp-studio/client-contract";
 import { Brand, hasBrand } from "./brands";
 import { Icon } from "./icons";
@@ -763,10 +764,10 @@ function blankCustomForm(from?: ModelCatalogEntry): CustomModelForm {
     reasoning: from?.reasoning ?? false,
     tools: from?.tools ?? true,
     image: from?.image ?? false,
-    costIn: from?.cost?.input !== undefined ? String(from.cost.input) : "",
-    costOut: from?.cost?.output !== undefined ? String(from.cost.output) : "",
-    costCacheR: from?.cost?.cacheRead !== undefined ? String(from.cost.cacheRead) : "",
-    costCacheW: from?.cost?.cacheWrite !== undefined ? String(from.cost.cacheWrite) : "",
+    costIn: !from?.pricing && from?.cost?.input !== undefined ? String(from.cost.input) : "",
+    costOut: !from?.pricing && from?.cost?.output !== undefined ? String(from.cost.output) : "",
+    costCacheR: !from?.pricing && from?.cost?.cacheRead !== undefined ? String(from.cost.cacheRead) : "",
+    costCacheW: !from?.pricing && from?.cost?.cacheWrite !== undefined ? String(from.cost.cacheWrite) : "",
     omitMaxOutputTokens: from?.omitMaxOutputTokens ?? false,
     premiumMultiplier: from?.premiumMultiplier !== undefined ? String(from.premiumMultiplier) : "",
     headersText: headersTextFrom(from?.headers),
@@ -824,8 +825,10 @@ function applyOverrideToDraft(host: Draft, modelId: string, form: DraftOverrideF
   const models = host.models.map((model) => {
     if (model.id !== modelId || (model.source !== "catalog" && model.source !== "extension")) return model;
     if (!parsed) return model;
+    const base = { ...model };
+    if (parsed.cost !== undefined) delete base.pricing;
     return {
-      ...model,
+      ...base,
       ...(parsed.name === undefined ? {} : { name: parsed.name }),
       ...(parsed.contextWindow === undefined ? {} : { contextWindow: parsed.contextWindow }),
       ...(parsed.maxTokens === undefined ? {} : { maxTokens: parsed.maxTokens }),
@@ -874,16 +877,21 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
 
 function ModelCaps({ model }: { model: ModelCatalogEntry }) {
   const { t } = useI18n();
+  const current = resolveModelPrice(model.cost, model.pricing);
+  const rate = (value: number | undefined) => value === undefined ? "—" : Number(value.toFixed(6));
   return (
     <span className="pm-meta">
       <span className="chip gray xs">{fmtK(model.contextWindow)} ctx</span>
       {model.maxTokens ? <span className="chip gray xs">{fmtK(model.maxTokens)} out</span> : null}
+      {model.maxContextWindow ? <span className="chip gray xs" data-tip={t("modelConfig.extendedWindow")}>{fmtK(model.maxContextWindow)} ext</span> : null}
       {model.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.tipImage")}><Icon name="image" extra="sm" /></span> : null}
       {model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.tipThinking")}><Icon name="brain" extra="sm" /></span> : null}
       {model.tools ? <span className="chip gray xs chip-icon" data-tip={t("modelConfig.tipTools")}><Icon name="wrench" extra="sm" /></span> : null}
-      {model.cost?.input !== undefined || model.cost?.output !== undefined
-        ? <span className="chip gray xs">${model.cost.input ?? "—"}/${model.cost.output ?? "—"}</span>
+      {current.cost?.input !== undefined || current.cost?.output !== undefined
+        ? <span className="chip gray xs">${rate(current.cost?.input)}/${rate(current.cost?.output)}</span>
         : null}
+      {current.period ? <span className="chip gray xs" data-tip={t("modelConfig.scheduledPrice")}>{current.period === "peak" ? "↑ " + t("modelConfig.peakPrice") : "↓ " + t("modelConfig.offPeakPrice")}</span> : null}
+      {model.pricing?.longContext ? <span className="chip gray xs" data-tip={t("modelConfig.longContextPrice")}>{model.pricing.longContext.inputThresholdInclusive ? "≥" : ">"}{fmtK(model.pricing.longContext.inputThreshold)}</span> : null}
     </span>
   );
 }
@@ -1815,6 +1823,11 @@ function formatProviderStatusDetail(detail: string | undefined, t: (k: string) =
 }
 
 export function ModelConfigPage({ client }: { client: StudioClient }) {
+  const [, updatePricingClock] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => updatePricingClock(tick => tick + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const { t } = useI18n();
   const { preview } = usePreviewMode();
   const [tab, setTab] = useState<McTab>("providers");

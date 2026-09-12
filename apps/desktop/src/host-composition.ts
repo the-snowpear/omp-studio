@@ -618,6 +618,8 @@ function toPersistedStudioAgent(record: SessionPersistedAgentRecord): StudioAgen
     ...(record.usage === undefined ? {} : { usage: { ...record.usage } }),
     ...(record.modelRole === undefined ? {} : { modelRole: record.modelRole }),
     ...(record.resolvedModel === undefined ? {} : { resolvedModel: record.resolvedModel }),
+    ...(record.isolated === undefined ? {} : { isolated: record.isolated }),
+    ...(record.canRevive === undefined ? {} : { canRevive: record.canRevive }),
   };
 }
 

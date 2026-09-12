@@ -34,6 +34,7 @@ import type {
   StudioCompactionSpeculation,
   StudioRuntimeSettingKey,
   StudioRuntimeSettingValue,
+  StudioRuntimeSettingsActivation,
 } from "@omp-studio/client-contract";
 
 export const SETTINGS_INTENT_KEY = "omp.settingsIntent";
@@ -45,6 +46,7 @@ type GroupId = SettingsGroupId;
 /** Optional Runtime settings seam; App decides whether/how to persist writes. */
 export interface RuntimeSettingsApi {
   readonly snapshot?: RuntimeSettingsReadModel;
+  readonly activation?: StudioRuntimeSettingsActivation;
   readonly compactionSpeculation?: StudioCompactionSpeculation;
   readonly pendingKey?: StudioRuntimeSettingKey;
   readonly error?: string;
@@ -191,6 +193,7 @@ export function SettingsPage({
     };
   } else {
     if (runtimeSettings?.snapshot !== undefined) runtime = { ...runtime, snapshot: runtimeSettings.snapshot };
+    if (runtimeSettings?.activation !== undefined) runtime = { ...runtime, activation: runtimeSettings.activation };
     if (runtimeSettings?.compactionSpeculation !== undefined) runtime = { ...runtime, compactionSpeculation: runtimeSettings.compactionSpeculation };
     const pendingKey = runtimeSettings?.pendingKey ?? runtimePendingKey;
     if (pendingKey !== undefined) runtime = { ...runtime, pendingKey };

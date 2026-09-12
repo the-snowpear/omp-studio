@@ -383,12 +383,13 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap {
   "goal.resume": EmptyInput;
   "goal.drop": EmptyInput;
   "goal.guided.start": { readonly initial?: string };
-  "loop.enable": { readonly prompt?: string; readonly limit?: { readonly turns?: number; readonly minutes?: number; readonly tokens?: number } };
+  "loop.enable": { readonly prompt?: string; readonly limit?: { readonly turns?: number; readonly minutes?: number; readonly tokens?: number }; readonly condition?: { readonly command: string; readonly until: boolean } };
   "loop.pause": EmptyInput;
   "loop.disable": EmptyInput;
   "session.fast.set": { readonly enabled: boolean };
   "session.prewalk.arm": { readonly target?: string };
   "session.prewalk.disarm": EmptyInput;
+  "session.prewalk.restart": EmptyInput;
   /**
    * Switch the model of the live Runtime session. Same semantics as `/model`:
    * the session changes, `modelRoles` on disk does not. Rejected while the

@@ -3,7 +3,7 @@ import type { EvaluationOperation } from "./evaluation";
 import type { SessionTranscriptRead } from "./conversation";
 import type { CommandId, InteractionId } from "./ids";
 import type { RemoteInteractionResponse } from "./interactions";
-import type { SessionThinkingSelector } from "./state";
+import type { LoopCondition, SessionThinkingSelector } from "./state";
 import type {
   StudioRuntimeSettingSetOperation,
   StudioRuntimeSettingKey,
@@ -60,6 +60,7 @@ export type SessionOperation =
   | { kind: "session.fast.set"; enabled: boolean }
   | { kind: "session.prewalk.arm"; target?: string }
   | { kind: "session.prewalk.disarm" }
+  | { kind: "session.prewalk.restart" }
   | SessionTranscriptRead;
 
 export type ModeOperation =
@@ -86,7 +87,7 @@ export type ModeOperation =
   | { kind: "goal.resume" }
   | { kind: "goal.drop" }
   | { kind: "goal.guided.start"; initial?: string }
-  | { kind: "loop.enable"; prompt?: string; limit?: LoopLimit }
+  | { kind: "loop.enable"; prompt?: string; limit?: LoopLimit; condition?: LoopCondition }
   | { kind: "loop.pause" }
   | { kind: "loop.disable" };
 

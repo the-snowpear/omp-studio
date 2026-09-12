@@ -417,6 +417,20 @@ export interface ModelCostMeta {
   readonly cacheWrite?: number;
 }
 
+export interface ModelLongContextPrice extends ModelCostMeta {
+  readonly inputThreshold: number;
+  readonly inputThresholdInclusive?: boolean;
+}
+
+export interface ModelPricingMeta {
+  readonly longContext?: ModelLongContextPrice;
+  readonly timeBased?: {
+    readonly offPeakMultiplier: number;
+    readonly peakWindows: ReadonlyArray<{ readonly weekdays: readonly number[]; readonly startMinute: number; readonly endMinute: number }>;
+    readonly effectiveRates?: ReadonlyArray<ModelCostMeta & { readonly effectiveFrom: number; readonly longContext?: ModelLongContextPrice }>;
+  };
+}
+
 /** Safe subset of OMP `remoteCompaction` exposed for display/edit. */
 export interface ModelProviderRemoteCompaction {
   readonly enabled?: boolean;
@@ -454,6 +468,8 @@ export interface ModelCatalogEntry {
   readonly reasoning: boolean;
   readonly tools: boolean;
   readonly cost?: ModelCostMeta;
+  readonly pricing?: ModelPricingMeta;
+  readonly maxContextWindow?: number;
   readonly status: ModelEntryStatus;
   readonly source: ModelEntrySource;
   readonly api?: string;
@@ -553,6 +569,9 @@ export interface AvailableModelRecord {
   readonly maxTokens?: number;
   readonly thinking?: ReadonlyArray<string>;
   readonly cost?: ModelCostMeta;
+  readonly pricing?: ModelPricingMeta;
+  readonly maxContextWindow?: number;
+  readonly api?: string;
 }
 
 export interface ModelLoginProviderRecord {

@@ -90,6 +90,7 @@ export function classifyOperation(operation: StudioOperation): CommandConcurrenc
     operation.kind === "session.fast.set" ||
     operation.kind === "session.prewalk.arm" ||
     operation.kind === "session.prewalk.disarm" ||
+    operation.kind === "session.prewalk.restart" ||
     operation.kind === "agent.spawn" ||
     operation.kind === "agent.send" ||
     operation.kind === "agent.kill" ||

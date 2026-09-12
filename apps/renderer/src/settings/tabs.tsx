@@ -23,6 +23,7 @@ import type {
   StudioRuntimeCompactionMethod,
   StudioRuntimeSettingKey,
   StudioRuntimeSettingValue,
+  StudioRuntimeSettingsActivation,
 } from "@omp-studio/client-contract";
 
 
@@ -50,6 +51,7 @@ export interface RuntimeDemoApi {
 export interface RuntimeSettingsCtl {
   readonly preview: boolean;
   readonly snapshot?: RuntimeSettingsReadModel;
+  readonly activation?: StudioRuntimeSettingsActivation;
   readonly compactionSpeculation?: StudioCompactionSpeculation;
   readonly pendingKey?: StudioRuntimeSettingKey;
   readonly error?: string;
@@ -64,6 +66,10 @@ const RUNTIME_DEFAULTS: RuntimeSettingsReadModel = {
   "compaction.asyncEnabled": true,
   "compaction.methodOrder": ["remote", "snapcompact", "handoff", "shake", "soft"],
   "providers.openai-codex.codeMode": "off",
+  "plan.autosave": false,
+  "plan.autosaveDir": "",
+  "retry.waitForUsageReset": false,
+  "compaction.experimentalContextManagement": false,
 };
 
 function appSource<K extends keyof AppSettings>(app: AppSettings, key: K): SettingSource {
@@ -169,7 +175,7 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
   ));
 }
 
-type RuntimeBooleanKey = "edit.autoRepair.enabled" | "extendedContext" | "compaction.asyncEnabled";
+type RuntimeBooleanKey = "edit.autoRepair.enabled" | "extendedContext" | "compaction.asyncEnabled" | "plan.autosave" | "retry.waitForUsageReset" | "compaction.experimentalContextManagement";
 type RuntimeScalarKey =
   | "features.unexpectedStopDetection"
   | "providers.unexpectedStopModel"
@@ -209,7 +215,7 @@ function RuntimeBooleanRow({
   const { t } = useI18n();
   const available = runtimeHasValue(runtime, demo, keyName);
   const preview = runtime?.preview === true && demo !== undefined;
-  const snapshotValue = runtime?.snapshot?.[keyName];
+  const snapshotValue = runtime?.activation?.configured[keyName] ?? runtime?.snapshot?.[keyName];
   const checked = preview ? demo.flag(keyName) : (snapshotValue ?? RUNTIME_DEFAULTS[keyName]) === true;
   const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
   return (
@@ -227,6 +233,28 @@ function RuntimeBooleanRow({
         }}
         label={label}
       />
+      <RuntimePending runtime={runtime} />
+      {keyName === "compaction.experimentalContextManagement" && !preview && available ? (
+        <span className="small muted" role="status">
+          {runtime?.snapshot?.[keyName] ? t("settings.runtime.notesActive") : t("settings.runtime.notesInactive")}
+          {runtime?.activation?.restartRequired.includes(keyName) ? " · " + t("settings.runtime.restartRequired") : ""}
+        </span>
+      ) : null}
+    </SettingRow>
+  );
+}
+
+function RuntimePlanDirectoryRow({ runtime, demo }: { runtime?: RuntimeSettingsCtl | undefined; demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
+  const available = runtimeHasValue(runtime, demo, "plan.autosaveDir");
+  const value = runtime?.preview ? demo?.value("plan.autosaveDir") ?? "" : runtime?.snapshot?.["plan.autosaveDir"] ?? "";
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
+  return (
+    <SettingRow label={t("settings.runtime.planAutosaveDir")} desc={t("settings.runtime.planAutosaveDirDesc")} source={runtimeSource(available)}>
+      <input className="input" aria-label={t("settings.runtime.planAutosaveDir")} value={draft} disabled={disabled} maxLength={4096} placeholder=".omp/plans/" onChange={event => setDraft(event.target.value)} />
+      <button type="button" className="btn small outline" disabled={disabled || draft === value} onClick={() => runtime?.set?.("plan.autosaveDir", draft.trim())}>{t("settings.runtime.saveDirectory")}</button>
       <RuntimePending runtime={runtime} />
     </SettingRow>
   );
@@ -666,6 +694,7 @@ export function ContextTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefine
     <>
       <TabHeader title={t("settings.context.title")} desc={t("settings.context.desc")} {...(runtime === undefined ? {} : { runtime })} />
       <SettingSection title={t("settings.context.sectionCompaction")}>
+        <RuntimeBooleanRow runtime={runtime} demo={demo} keyName="compaction.experimentalContextManagement" label={t("settings.runtime.notesContext")} desc={t("settings.runtime.notesContextDesc")} />
         <RuntimeBooleanRow
           runtime={runtime}
           demo={demo}
@@ -810,6 +839,8 @@ export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
     <>
       <TabHeader title={t("settings.tasks.title")} desc={t("settings.tasks.desc")} {...(runtime === undefined ? {} : { runtime })} />
       <SettingSection title={t("settings.tasks.sectionWorkMode")}>
+        <RuntimeBooleanRow runtime={runtime} demo={demo} keyName="plan.autosave" label={t("settings.runtime.planAutosave")} desc={t("settings.runtime.planAutosaveDesc")} />
+        <RuntimePlanDirectoryRow runtime={runtime} demo={demo} />
         <FutureRows
           demo={demo}
           rows={[
@@ -822,6 +853,7 @@ export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
         />
       </SettingSection>
       <SettingSection title={t("settings.tasks.sectionExecution")}>
+        <RuntimeBooleanRow runtime={runtime} demo={demo} keyName="retry.waitForUsageReset" label={t("settings.runtime.waitForUsageReset")} desc={t("settings.runtime.waitForUsageResetDesc")} />
         <RuntimeScalarRow
           runtime={runtime}
           demo={demo}

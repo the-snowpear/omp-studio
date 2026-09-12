@@ -22,6 +22,25 @@ import type { RuntimeEpoch } from "../src/contracts/ids.js";
 
 const fixture = (name: string) => fileURLToPath(new URL(`../../fixtures/${name}`, import.meta.url));
 
+test("condition loops reject malformed commands and retain typed continuation semantics", () => {
+  const base = { type: "studio.request", requestId: "loop", runtimeEpoch: 1 };
+  const operation = { kind: "loop.enable", condition: { command: "test -f done", until: true } };
+  assert.deepEqual(parseFoundationStudioRequest({ ...base, operation }).operation, operation);
+  assert.throws(() => parseFoundationStudioRequest({ ...base, operation: { ...operation, condition: { command: "check", until: "true" } } }), ContractValidationError);
+  assert.throws(() => parseFoundationStudioRequest({ ...base, operation: { ...operation, condition: { command: "", until: true } } }), ContractValidationError);
+  assert.throws(() => parseFoundationStudioRequest({ ...base, operation: { ...operation, condition: { command: "check", until: true, cwd: "/escape" } } }), ContractValidationError);
+});
+
+test("snapshots preserve restart-required settings and retry deadlines through reconnect", async () => {
+  const baseline = JSON.parse(await readFile(fixture("snapshot.initial.json"), "utf8"));
+  const retry = { attempt: 2, maxAttempts: 5, nextRetryAt: 1800000000000, reason: "usage-limit" };
+  const activation = { configured: { "compaction.experimentalContextManagement": true }, restartRequired: ["compaction.experimentalContextManagement"] };
+  const response = parseStudioSnapshotResponse({ ...baseline, snapshot: { ...baseline.snapshot, retry, runtimeSettingsActivation: activation } });
+  assert.deepEqual(response.snapshot.retry, retry);
+  assert.deepEqual(response.snapshot.runtimeSettingsActivation, activation);
+  assert.throws(() => parseStudioSnapshotResponse({ ...baseline, snapshot: { ...baseline.snapshot, retry: { ...retry, nextRetryAt: -1 } } }), ContractValidationError);
+});
+
 test("PR-001 parses the canonical hello fixture", async () => {
   const value: unknown = JSON.parse(await readFile(fixture("hello.request.json"), "utf8"));
   assert.equal(parseStudioHelloRequest(value).requiredProfile, "full-parity-v1");

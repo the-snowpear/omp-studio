@@ -82,6 +82,24 @@ export class StudioFastPrewalkService {
 	disarm(): { disarmed: boolean } {
 		return { disarmed: this.session.disarmPrewalk() };
 	}
+
+	async restart(): Promise<{ restarted: true; armed: boolean }> {
+		if (this.session.isStreaming || this.session.isCompacting) {
+			throw new StudioFastPrewalkError("COMMAND_BLOCKED", "Wait for the current turn before restarting prewalk");
+		}
+		const source = this.resolveTarget("@default");
+		const target = this.resolveTarget(DEFAULT_PREWALK_TARGET);
+		const result = await this.session.restartPrewalk(
+			source.model,
+			source.thinkingLevel,
+			target.model,
+			target.thinkingLevel,
+		);
+		if (result === "rejected") {
+			throw new StudioFastPrewalkError("COMMAND_BLOCKED", "A different prewalk target is already armed");
+		}
+		return { restarted: true, armed: result === "armed" };
+	}
 }
 
 export function resolvePrewalkTarget(session: AgentSession, selector: string): ResolvedPrewalkTarget {

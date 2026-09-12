@@ -66,6 +66,23 @@ function serviceFor(manager: SessionManager, runtimeEpoch = 3) {
 }
 
 describe("StudioSessionTranscriptService", () => {
+	test("notes and native compaction payloads stay persisted but outside the public transcript", () => {
+		using tempDir = TempDir.createSync("@omp-studio-native-payload-");
+		const manager = SessionManager.create(tempDir.path(), tempDir.path());
+		const userId = manager.appendMessage(userMessage("retain this request"));
+		manager.appendCustomEntry("experimental_context_notes", { version: 1, text: "private-notebook-content" });
+		manager.appendCompaction("public summary", "summary", userId, 60000, {
+			preserveData: { anthropicCompaction: { encryptedContent: "opaque-native-replay" } },
+			details: { kind: "experimental-context-rollover", version: 1 },
+		});
+		const before = JSON.stringify(manager.getBranch());
+		const page = serviceFor(manager).read();
+		const publicText = JSON.stringify(page);
+		expect(publicText).toContain("public summary");
+		expect(publicText).not.toContain("private-notebook-content");
+		expect(publicText).not.toContain("opaque-native-replay");
+		expect(JSON.stringify(manager.getBranch())).toBe(before);
+	});
 	test("empty branch returns no items and a usable head cursor", () => {
 		using tempDir = TempDir.createSync("@omp-studio-transcript-empty-");
 		const manager = SessionManager.create(tempDir.path(), tempDir.path());

@@ -1,13 +1,13 @@
 # Managed OMP patch boundary
 
-The managed Runtime pin is `can1357/oh-my-pi` `v18.0.11` at commit `b8ce33a58911c26bed1d84f0db9a5e2e727c49a2`. The initial audited baseline was `45e12e5bb758198a920c6070e7e64cb33b21beac`.
+The managed Runtime pin is `can1357/oh-my-pi` `v18.1.18` at commit `00085d4e7dfdcfbf302c122fa2682b410a0f43d1`. The previous functional baseline was `18.1.10-studio.2` at `f241301c83726afe75a847e919b89977a54dafbe`. See the [migration and verification report](../docs/migrations/omp-18.1.18.md).
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
 Executable names have separate responsibilities:
 
 - `omp.exe` is the patched OMP CLI/runtime and is launched as `omp --mode studio-host`;
-- `omp-studio.exe` is reserved for the future desktop Studio application and is not built by this backend-only phase.
+- `OMP Studio.exe` is the Electron desktop application; it launches the versioned, signed Runtime artifact rather than replacing the upstream CLI.
 
 ## Two layers: overlay and seam
 

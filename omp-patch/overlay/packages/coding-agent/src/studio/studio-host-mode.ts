@@ -12,6 +12,7 @@ import { runEvalWorkpool } from "../eval/workpool-bridge";
 import type { CustomTool } from "../extensibility/custom-tools/types";
 import type { ExtensionUIContext, ToolDefinition } from "../extensibility/extensions";
 import { IrcBus } from "../irc/bus";
+import { evaluateLoopCondition } from "../modes/loop-condition";
 import backgroundTanDispatchPrompt from "../prompts/system/background-tan-dispatch.md" with { type: "text" };
 import { AgentLifecycleManager } from "../registry/agent-lifecycle";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
@@ -439,8 +440,9 @@ export function createStudioHostRuntime(
 	}
 	const loop = new StudioLoopService({
 		action: () => session.settings.get("loop.mode"),
-		isBlocked: () => session.isStreaming || session.isCompacting || session.hasPostPromptWork,
-		isVibeActive: () => session.getVibeModeState()?.enabled === true,
+		isBlocked: () =>
+			studioPauseService.state().paused || session.isStreaming || session.isCompacting || session.hasPostPromptWork,
+		isVibeActive: () => session.getVibeModeState()?.enabled === true || modes.vibeTransitionPending,
 		submitPrompt: async prompt => {
 			await session.prompt(prompt);
 		},
@@ -453,7 +455,17 @@ export function createStudioHostRuntime(
 		nowMs: Date.now,
 		setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
 		clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+		evaluateCondition: (condition, signal) =>
+			evaluateLoopCondition(condition, {
+				cwd: session.sessionManager.getCwd(),
+				sessionId: session.sessionManager.getSessionId(),
+				timeoutMs: session.settings.get("loop.conditionTimeoutMs"),
+				signal,
+			}),
+		onStatus: message => session.emitNotice("info", message, "loop"),
+		onError: error => session.emitNotice("error", error instanceof Error ? error.message : String(error), "loop"),
 	});
+	const unsubscribeLoopPause = studioPauseService.onChange(() => loop.interruptPending());
 	const live = new StudioLiveService(liveSessionFactory);
 	const modes = new StudioModeControlService(session);
 	const models = new StudioModelControlService(session);
@@ -812,9 +824,15 @@ export function createStudioHostRuntime(
 	const shutdownSignal = Promise.withResolvers<void>();
 	let shutdownRequested = false;
 	let disposed = false;
+	let loopSessionId = session.sessionManager.getSessionId();
 	const unsubscribeSessionChange =
 		typeof session.registerSessionChangeCallback === "function"
 			? session.registerSessionChangeCallback(() => {
+					const nextSessionId = session.sessionManager.getSessionId();
+					if (nextSessionId !== loopSessionId) {
+						loopSessionId = nextSessionId;
+						if (loop.state() !== undefined) loop.disable();
+					}
 					if (typeof session.sessionManager.clearReservedMessageIds === "function") {
 						session.sessionManager.clearReservedMessageIds();
 					}
@@ -912,6 +930,7 @@ export function createStudioHostRuntime(
 			session.setBeforeNextUserTurn(undefined);
 			unsubscribe();
 			unsubscribeSessionChange();
+			unsubscribeLoopPause();
 			conversation.dispose();
 			if (typeof session.sessionManager.clearReservedMessageIds === "function") {
 				session.sessionManager.clearReservedMessageIds();

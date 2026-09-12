@@ -56,6 +56,9 @@ type HubAgent = {
   outputPath?: string | null;
   patchPath?: string | null;
   branchName?: string | null;
+  nestedPatchPaths?: readonly string[];
+  isolated?: boolean;
+  canRevive?: boolean;
   children: string[];
   activeJobIds: string[];
   startedAt?: number;
@@ -468,6 +471,9 @@ function toHubAgent(agent: StudioAgentSnapshot, children: string[]): HubAgent {
     ...(agent.outputPath !== undefined ? { outputPath: agent.outputPath } : {}),
     ...(agent.patchPath !== undefined ? { patchPath: agent.patchPath } : {}),
     ...(agent.branchName !== undefined ? { branchName: agent.branchName } : {}),
+    ...(agent.nestedPatchPaths === undefined ? {} : { nestedPatchPaths: agent.nestedPatchPaths }),
+    ...(agent.isolated === undefined ? {} : { isolated: agent.isolated }),
+    ...(agent.canRevive === undefined ? {} : { canRevive: agent.canRevive }),
     children,
     activeJobIds: agent.activeJobIds,
     ...(Number.isFinite(parseTs(agent.startedAt)) ? { startedAt: parseTs(agent.startedAt) } : {}),
@@ -531,6 +537,8 @@ function fromPreviewAgent(agent: PreviewAgent): HubAgent {
     unread: agent.ircUnread ?? 0,
     outputPath: agent.outputPath ?? null,
     patchPath: agent.patchPath ?? null,
+    ...(agent.isolated === undefined ? {} : { isolated: agent.isolated, canRevive: !agent.isolated }),
+    ...(agent.nestedPatchPaths === undefined ? {} : { nestedPatchPaths: agent.nestedPatchPaths }),
     branchName: agent.branchName ?? null,
     children: agent.children,
     activeJobIds: [],
@@ -621,6 +629,7 @@ function capsFor(
     };
   }
   const dead = agent.status === "aborted";
+  const cannotRevive = agent.status === "parked" && (agent.isolated === true || agent.canRevive === false);
   const locked = isAdvisor(agent) || agent.readOnly;
   const chatMissing = missingCap(capabilities, "agent.send");
   const reviveMissing = missingCap(capabilities, "agent.revive");
@@ -630,8 +639,9 @@ function capsFor(
   return {
     open: !dead,
     openWhy: dead ? "已结束" : null,
-    chat: !locked && !dead && !preview && hostReady && !chatMissing,
+    chat: !locked && !dead && !cannotRevive && !preview && hostReady && !chatMissing,
     chatWhy: locked ? lockedWhy(agent)
+      : cannotRevive ? "隔离或不可恢复的 agent 仅能查看记录"
       : dead ? "已结束"
       : preview ? CONTRACT.previewWrite
       : !viewingLive ? CONTRACT.historicalWrite
@@ -639,10 +649,11 @@ function capsFor(
       : !connOnline ? "未连接"
       : chatMissing ? CONTRACT.chat
       : null,
-    revive: !preview && !locked && agent.status === "parked" && hostReady && !reviveMissing,
+    revive: !preview && !locked && !cannotRevive && agent.status === "parked" && hostReady && !reviveMissing,
     reviveWhy: preview ? CONTRACT.previewWrite
       : !viewingLive ? CONTRACT.historicalWrite
       : locked ? lockedWhy(agent)
+      : cannotRevive ? "隔离或不可恢复的 agent 仅能查看记录"
       : agent.status !== "parked" ? "仅 parked"
       : !hasClient ? "无 Studio client"
       : !connOnline ? "未连接"
@@ -1379,6 +1390,8 @@ export function AgentHubPage({
           <Kv label="Mode">{isAdvisor(agent) || agent.readOnly ? "Read-only · 0 LoC" : "Shared workspace · per-agent LoC not attributable"}</Kv>
           {agent.outputPath ? <Kv label="Output" mono>{agent.outputPath} <span className="tiny muted">agent://{agent.id}</span></Kv> : null}
           {agent.patchPath ? <Kv label="Patch" mono>{agent.patchPath}</Kv> : null}
+          {agent.nestedPatchPaths?.map(patch => <Kv key={patch} label="Nested patch" mono>{patch}</Kv>)}
+          {agent.isolated ? <Kv label="Isolation">Isolated · {agent.hasLiveSession ? "live" : "transcript only"}</Kv> : null}
           {agent.branchName ? <Kv label="Worktree branch" mono>{agent.branchName}</Kv> : null}
         </div>
       </>
@@ -1499,7 +1512,7 @@ export function AgentHubPage({
               <Icon name="message" extra="sm" />发送
             </button>
           </div>
-          {agent.status === "parked" ? <div className="hub-cap-note"><Icon name="clock" extra="sm" />parked agent：发送将自动 revive（outcome=revived）</div> : null}
+          {agent.status === "parked" ? <div className="hub-cap-note"><Icon name="clock" extra="sm" />{agent.isolated || agent.canRevive === false ? "仅保留记录和产物，不可自动 revive" : "parked agent：发送将自动 revive（outcome=revived）"}</div> : null}
         </>
       );
     }

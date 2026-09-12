@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { assertForkApplied, overlayRoot } from "./omp-overlay.mjs";
 import { PATCHSET_VERSION_FILE, UPSTREAM_COMMIT_FILES, readPatchsetVersionConstant, readUpstreamCommitConstant } from "./omp-seam.mjs";
 import { findBun, npmInvocation, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
@@ -55,6 +56,8 @@ await assertForkApplied();
 // check lands only after the native build. `npm run omp:patches:regen` keeps the
 // two in sync; this catches a hand-edited constant before the build starts.
 await assertRuntimeIdentityInSync();
+run(process.execPath, [fileURLToPath(new URL("./verify-omp-source.mjs", import.meta.url))], { env });
+run(process.execPath, [fileURLToPath(new URL("./install-omp-deps.mjs", import.meta.url))], { env });
 
 run(bun, ["--cwd=packages/natives", "run", "build"], { cwd: ompSourceDirectory, env });
 run(bun, ["--cwd=packages/coding-agent", "run", "build"], { cwd: ompSourceDirectory, env });

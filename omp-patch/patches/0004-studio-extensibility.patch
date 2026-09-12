@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/src/extensibility/extensions/types.ts b/packages/coding-agent/src/extensibility/extensions/types.ts
-index e79897301e..bb669a7158 100644
+index a4f7e75fd8..5f3fe655fe 100644
 --- a/packages/coding-agent/src/extensibility/extensions/types.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/types.ts
 @@ -269,6 +269,26 @@ export interface ExtensionUIContext {
@@ -175,7 +175,7 @@ index a2aa29d867..a4011e4fa4 100644
  
  		// Execute the actual tool
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index d647c7908f..38dcac7252 100644
+index 4353d352df..957119cd63 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
 @@ -236,9 +236,9 @@ import {
@@ -201,7 +201,7 @@ index d647c7908f..38dcac7252 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -3474,7 +3474,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -3470,7 +3470,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model);
  		};
  

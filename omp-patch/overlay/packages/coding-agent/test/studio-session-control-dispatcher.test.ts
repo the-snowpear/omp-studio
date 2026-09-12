@@ -58,9 +58,10 @@ class FakeSession {
 		this.queuedMessageCount += 1;
 	}
 
-	async prompt(): Promise<void> {
+	async prompt(): Promise<boolean> {
 		this.promptCalls += 1;
 		if (this.promptError !== undefined) throw this.promptError;
+		return true;
 	}
 
 	async resetSessionContext(): Promise<{ droppedCount: number }> {
@@ -292,6 +293,7 @@ function fixture() {
 	});
 	return {
 		session,
+		loop: runtime.services.loop,
 		projector,
 		frames,
 		events,
@@ -304,6 +306,35 @@ function fixture() {
 }
 
 describe("WP-021/022/023/024/025 Studio Bridge dispatcher", () => {
+	test("abort keeps the loop paused when an earlier prompt finishes late", async () => {
+		const { session, loop, dispatcher, projector, request } = fixture();
+		const entered = Promise.withResolvers<void>();
+		const pending = Promise.withResolvers<boolean>();
+		loop.enable("previous prompt");
+		session.prompt = async () => {
+			session.isStreaming = true;
+			entered.resolve();
+			return pending.promise;
+		};
+		const submission = dispatcher.dispatch(
+			request("slow-prompt", { kind: "core.prompt", text: "replacement prompt" }),
+		);
+		try {
+			await entered.promise;
+			await dispatcher.dispatch(request("abort-prompt", { kind: "core.abort" }));
+			expect(loop.state()?.status).toBe("paused");
+			pending.resolve(true);
+			await submission;
+			expect(loop.state()?.status).toBe("paused");
+			expect(loop.state()?.prompt).toBeUndefined();
+		} finally {
+			pending.resolve(true);
+			await submission;
+			loop.dispose();
+			dispatcher.dispose();
+			projector.dispose();
+		}
+	});
 	test("queue.enqueue produces accepted+completed receipts, commits truthful state, and replays idempotently", async () => {
 		const { session, projector, frames, events, dispatcher, request } = fixture();
 		await dispatcher.dispatch(

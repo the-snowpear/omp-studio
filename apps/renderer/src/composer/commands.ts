@@ -242,6 +242,10 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
     typed: { name: "session.prewalk.arm" },
     invokeId: "builtin.prewalk",
   }),
+  cmd("prewalk-restart", "返回默认模型并重新准备 Prewalk", "mode", {
+    select: "run-now",
+    typed: { name: "session.prewalk.restart" },
+  }),
   cmd("plan", "切换 Plan 模式", "mode", {
     allowArgs: true,
     hint: "[prompt]",

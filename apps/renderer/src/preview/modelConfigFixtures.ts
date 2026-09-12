@@ -37,13 +37,20 @@ function m(
 }
 
 function withSelector(providerId: string, models: ModelCatalogEntry[]): ModelCatalogEntry[] {
-  return models.map((model) => ({ ...model, selector: `${providerId}/${model.id}` }));
+  return models.map((model) => ({
+    ...model,
+    selector: `${providerId}/${model.id}`,
+    ...(providerId === "deepseek" ? {
+      pricing: { timeBased: { offPeakMultiplier: 0.5, peakWindows: [{ weekdays: [1, 2, 3, 4, 5], startMinute: 480, endMinute: 1080 }] } },
+    } : {}),
+  }));
 }
 
 export const MODEL_PRESETS: ReadonlyArray<ModelPresetGroup> = [
   {
     group: "官方 / 主流",
     items: [
+      { id: "muse-code", name: "Muse Code", desc: "Muse Spark 订阅与账号模型发现", api: "openai-responses", auth: ["oauth"], oauth: true },
       { id: "anthropic", name: "Anthropic", desc: "Claude 系列模型官方 API", api: "anthropic-messages", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.anthropic.com/v1" },
       { id: "openai", name: "OpenAI", desc: "GPT 系列模型官方 API", api: "openai-responses", auth: ["oauth", "api-key"], popular: true, oauth: true, endpoint: "https://api.openai.com/v1" },
       { id: "openai-codex", name: "OpenAI Codex", desc: "Codex 订阅额度（ChatGPT 账号）", api: "openai-codex-responses", auth: ["oauth"], oauth: true, endpoint: "https://api.openai.com/v1" },
@@ -58,6 +65,7 @@ export const MODEL_PRESETS: ReadonlyArray<ModelPresetGroup> = [
   {
     group: "Gateway / 聚合",
     items: [
+      { id: "commandcode", name: "Command Code", desc: "原生 OpenAI / Anthropic 路由", api: "openai-completions", auth: ["api-key", "env"], endpoint: "https://api.commandcode.ai/provider/v1" },
       { id: "openrouter", name: "OpenRouter", desc: "一个 Key 访问多家模型", api: "openai-completions", auth: ["api-key"], popular: true, endpoint: "https://openrouter.ai/api/v1" },
       { id: "github-copilot", name: "GitHub Copilot", desc: "Copilot 订阅额度", api: "openai-responses", auth: ["oauth"], oauth: true },
       { id: "litellm", name: "LiteLLM", desc: "自托管统一模型代理", api: "openai-completions", auth: ["api-key", "env"], endpoint: "http://localhost:4000/v1", discovery: "litellm" },

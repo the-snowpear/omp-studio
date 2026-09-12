@@ -86,6 +86,7 @@ export function useRunStreaming(input: {
  */
 export function useActivityRetry(input: {
   notices: readonly { message: string; source?: string }[];
+  runtimeRetry?: ActivityRetry;
   streaming: boolean;
   failed: boolean;
   identityKey: string;
@@ -123,18 +124,18 @@ export function useActivityRetry(input: {
     wasStreaming: next.wasStreaming,
     ...(next.retry === undefined ? {} : { retry: next.retry }),
   };
-  return next.retry;
+  return input.runtimeRetry ?? next.retry;
 }
 
 /** Wall-clock ms since `startedAt`, re-rendered once per second. */
-function useElapsed(startedAt: number | undefined): number {
+function useElapsed(startedAt: number | undefined, ticking = false): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (startedAt === undefined) return;
+    if (startedAt === undefined && !ticking) return;
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [startedAt]);
+  }, [startedAt, ticking]);
   if (startedAt === undefined) return 0;
   return Math.max(0, now - startedAt);
 }
@@ -157,12 +158,12 @@ export function ActivityLine({
   /** Preview mode: data comes from fixtures. */
   demo?: boolean;
 }) {
-  const elapsed = useElapsed(startedAt);
-  const live = isLiveActivityPhase(status.phase);
+  const elapsed = useElapsed(startedAt, status.retry?.nextRetryAt !== undefined);
+  const live = isLiveActivityPhase(status.phase) && status.retry?.nextRetryAt === undefined;
   const showOperation = live || status.phase === "queued" || (status.phase === "waiting" && status.label !== WORKING_LABEL);
 
   return (
-    <div className="activity-line" data-phase={status.phase}>
+    <div className="activity-line" data-phase={status.retry?.nextRetryAt === undefined ? status.phase : "waiting"}>
       <span className="al-glyph" aria-hidden="true">
         <Icon name="asterisk" extra="sm" />
       </span>

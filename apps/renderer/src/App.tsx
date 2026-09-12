@@ -369,6 +369,7 @@ const LIVE_SESSION_PREFERENCE_COMMANDS = new Set<CommandName>([
   "session.fast.set",
   "session.prewalk.arm",
   "session.prewalk.disarm",
+  "session.prewalk.restart",
   "permissions.mode.set",
 ]);
 
@@ -394,6 +395,7 @@ export function runtimeSettingsPropsOf(
   if (!hasSnapshot && !hasSpeculation && !(canSet && onSet !== undefined)) return undefined;
   return {
     ...(hasSnapshot ? { snapshot: snapshot.runtimeSettings } : {}),
+    ...(snapshot?.runtimeSettingsActivation === undefined ? {} : { activation: snapshot.runtimeSettingsActivation }),
     ...(hasSpeculation ? { compactionSpeculation: snapshot.compactionSpeculation } : {}),
     ...(canSet && onSet !== undefined ? { onSet } : {}),
   };
@@ -4157,6 +4159,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   });
   const activityRetry = useActivityRetry({
     notices: convo.state.notices,
+    ...(!preview && executionMatches && snapshot?.retry !== undefined ? { runtimeRetry: snapshot.retry } : {}),
     streaming: sessionStreaming,
     failed: promptFailed,
     identityKey: convo.identityKey,
@@ -7839,9 +7842,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     setRenameError(undefined);
     setRenameOpen(true);
   };
-  const submitRename = () => {
-    const next = renameValue.trim();
-    if (!next || renameBusy) return;
+  const submitRename = (generate = false) => {
+    const next = generate ? "" : renameValue.trim();
+    if ((!generate && !next) || renameBusy) return;
     setRenameError(undefined);
     setRenameBusy(true);
     void workspaceActionQueue.enqueue(async () => {
@@ -7874,7 +7877,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         const receiptTitle = outcome.snapshot.sessionTitle?.trim();
         const refreshed = await refreshHistoryAfterTitle(targetWorkspaceId);
         const historyTitle = refreshed?.entries.find((entry) => entry.sessionId === renamedSessionId)?.title?.trim();
-        const confirmedTitle = receiptTitle === next
+        const confirmedTitle = generate
+          ? receiptTitle
+          : receiptTitle === next
           ? receiptTitle
           : historyTitle === next
             ? historyTitle
@@ -7890,7 +7895,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             return { ...current, [key]: resolveProvisionalHistoryTitle(thread, confirmedTitle) };
           });
         }
-        setShellNotice({ text: `已重命名为「${next}」`, icon: "check" });
+        setShellNotice({ text: `已重命名为「${confirmedTitle}」`, icon: "check" });
         setRenameOpen(false);
       } catch (error) {
         setRenameError(hostErrorMessage(error, "重命名失败"));
@@ -8505,7 +8510,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             </div>
             <div className="create-project-foot">
               <button type="button" className="btn outline" disabled={renameBusy} onClick={() => setRenameOpen(false)}>{t("common.cancel")}</button>
-              <button type="button" className="btn primary" disabled={!renameValue.trim() || renameBusy} onClick={submitRename}>
+              <button type="button" className="btn outline" disabled={renameBusy} onClick={() => submitRename(true)}>{t("conversation.renameGenerate")}</button>
+              <button type="button" className="btn primary" disabled={!renameValue.trim() || renameBusy} onClick={() => submitRename()}>
                 {renameBusy ? <><span className="spinner" aria-hidden="true" />{t("conversation.renaming")}</> : t("conversation.renameAction")}
               </button>
             </div>

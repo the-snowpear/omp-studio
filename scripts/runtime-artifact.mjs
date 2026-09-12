@@ -71,6 +71,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "session.fast.set",
   "session.prewalk.arm",
   "session.prewalk.disarm",
+  "session.prewalk.restart",
   "mode.plan.enter",
   "mode.plan.exit",
   "mode.plan.review.open",

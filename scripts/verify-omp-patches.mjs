@@ -33,7 +33,7 @@ if (head !== upstream.commit || series.upstreamCommit !== upstream.commit) {
 if (!Array.isArray(series.patches)) {
   throw new Error("Patch verification requires a patches array in series.json");
 }
-await assertOverlayPresent();
+const managedOverlayFiles = await assertOverlayPresent();
 
 const initialStatus = run("git", ["-C", ompSourceDirectory, "status", "--porcelain"], { capture: true });
 if (initialStatus !== "") throw new Error(`OMP source must be clean before patch verification:\n${initialStatus}`);
@@ -129,7 +129,16 @@ try {
       "packages/coding-agent/test/studio-session-telemetry.test.ts",
       "packages/coding-agent/test/studio-archived-session-telemetry.test.ts",
   ];
-  for (const suite of suites) {
+  const allSuites = new Set([
+    ...suites,
+    ...managedOverlayFiles.filter(file => file.includes("/test/") && file.endsWith(".test.ts") && !file.endsWith("/studio-bridge-server.test.ts")),
+    "packages/coding-agent/test/context-notes.test.ts",
+    "packages/coding-agent/test/plan-autosave.test.ts",
+    "packages/coding-agent/test/loop-condition.test.ts",
+    "packages/coding-agent/test/agent-session-prewalk.test.ts",
+    "packages/agent/test/anthropic-native-compaction.test.ts",
+  ]);
+  for (const suite of allSuites) {
     const coldSession = suite.endsWith("studio-approval-ask-e2e.test.ts");
     run(bun, ["test", ...(coldSession ? ["--timeout=30000"] : []), suite], {
       cwd: ompSourceDirectory, env, timeoutMs: 120_000,

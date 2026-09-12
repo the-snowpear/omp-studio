@@ -235,6 +235,40 @@ const acceptingGate: StudioConfirmationGate = () => true;
 const denyingGate: StudioConfirmationGate = () => false;
 
 describe("WP-050/051/053 StudioAgentHubService", () => {
+	test("isolated parked agents expose all patches and reject revive and send before lifecycle calls", async () => {
+		const { service, registry, lifecycle } = makeHub();
+		registry.register(
+			makeRef("Isolated", {
+				status: "parked",
+				parentId: "Main",
+				sessionFile: SECRET_SESSION,
+				history: {
+					isolated: true,
+					patchPath: "main.patch",
+					nestedPatchPaths: ["nested-0.patch", "nested-1.patch"],
+				},
+			}),
+		);
+		const snapshot = service.get("Isolated");
+		expect(snapshot).toMatchObject({
+			isolated: true,
+			canRevive: false,
+			nestedPatchPaths: ["nested-0.patch", "nested-1.patch"],
+		});
+		await expect(
+			service.revive({ agentId: "Isolated", expectedGeneration: snapshot.generation, callerAgentId: "Main" }),
+		).rejects.toMatchObject({ code: "NOT_REVIVABLE" });
+		await expect(
+			service.send({
+				agentId: "Isolated",
+				expectedGeneration: snapshot.generation,
+				text: "continue",
+				mode: "prompt",
+				callerAgentId: "Main",
+			}),
+		).rejects.toMatchObject({ code: "NOT_REVIVABLE" });
+		expect(lifecycle.calls()).toEqual([]);
+	});
 	test("list/get return bounded path-free DTOs", async () => {
 		const { service, registry, irc } = makeHub({
 			activeJobIdsFor: id => (id === "Worker" ? ["job-1"] : []),

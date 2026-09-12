@@ -169,6 +169,7 @@ export type {
   StudioRuntimeSettingsGetResult,
   StudioRuntimeSettingsSetResult,
   StudioRuntimeSettingsSnapshot,
+  StudioRuntimeSettingsActivation,
   StudioRuntimeUnexpectedStopMode,
   StudioRuntimeUnexpectedStopModel,
 } from "@omp-studio/studio-protocol";
@@ -182,5 +183,6 @@ export * from "./read-models.js";
 export * from "./operations.js";
 export * from "./lifecycle.js";
 export * from "./model-thinking.js";
+export * from "./model-pricing.js";
 export * from "./conversation.js";
 export * from "./git.js";

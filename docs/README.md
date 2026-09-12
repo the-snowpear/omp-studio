@@ -10,6 +10,7 @@ Public documentation for OMP Studio.
 | [development.md](development.md) | Inner loop, tests, overlay |
 | [architecture.md](architecture.md) | Packages, Bridge, data rules |
 | [releasing.md](releasing.md) | Version, changelog, tag, installer |
+| [migrations/omp-18.1.18.md](migrations/omp-18.1.18.md) | OMP v18.1.18 changes, adaptation, verification and rollback |
 | [../CHANGELOG.md](../CHANGELOG.md) | User-facing history |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | How to send a change |
 | [../SECURITY.md](../SECURITY.md) | Vulnerability reports |

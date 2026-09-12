@@ -95,6 +95,9 @@ export interface StudioAgentSnapshot {
 	outputPath?: string;
 	patchPath?: string;
 	branchName?: string;
+	nestedPatchPaths?: string[];
+	isolated?: boolean;
+	canRevive?: boolean;
 }
 
 /**
@@ -819,6 +822,12 @@ export class StudioAgentHubService {
 			...(history?.outputPath !== undefined ? { outputPath: history.outputPath } : {}),
 			...(history?.patchPath !== undefined ? { patchPath: history.patchPath } : {}),
 			...(history?.branchName !== undefined ? { branchName: history.branchName } : {}),
+			...(history?.nestedPatchPaths === undefined ? {} : { nestedPatchPaths: [...history.nestedPatchPaths] }),
+			isolated: history?.isolated === true,
+			canRevive:
+				ref.status === "parked" &&
+				history?.isolated !== true &&
+				(ref.sessionFile !== null || this.#lifecycle.has(agentId, ref)),
 		};
 	}
 
@@ -904,6 +913,13 @@ export class StudioAgentHubService {
 	}
 
 	async #revive(agentId: string, ref: AgentRef): Promise<StudioLiveAgentPort> {
+		if (ref.history?.isolated === true) {
+			throw new StudioAgentHubError(
+				"NOT_REVIVABLE",
+				"Isolated agents are transcript-only after their worktree is closed",
+				this.#liveSnapshot(agentId, ref),
+			);
+		}
 		if (ref.status !== "parked") {
 			throw new StudioAgentHubError(
 				"NOT_REVIVABLE",

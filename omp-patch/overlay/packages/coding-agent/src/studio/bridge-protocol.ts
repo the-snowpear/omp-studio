@@ -11,6 +11,7 @@ import {
 	isStudioRuntimeSettingValue,
 	STUDIO_RUNTIME_SETTING_KEYS,
 	type StudioRuntimeSettingKey,
+	type StudioRuntimeSettingsActivation,
 } from "./services/runtime-settings-service";
 
 export * from "./conversation-protocol";
@@ -19,6 +20,13 @@ export const STUDIO_PROTOCOL_NAME = "omp-studio" as const;
 export const STUDIO_PROTOCOL_VERSION = 1 as const;
 export const DEFAULT_MAX_CONTROL_FRAME_BYTES = 1024 * 1024;
 const LENGTH_PREFIX_BYTES = 4;
+
+export interface StudioRetryState {
+	attempt: number;
+	maxAttempts: number;
+	nextRetryAt: number;
+	reason: "usage-limit" | "retry";
+}
 
 export interface StudioHelloRequest {
 	type: "studio.hello";
@@ -75,6 +83,7 @@ export type StudioOperation =
 	| { kind: "session.fast.set"; enabled: boolean }
 	| { kind: "session.prewalk.arm"; target?: string }
 	| { kind: "session.prewalk.disarm" }
+	| { kind: "session.prewalk.restart" }
 	| { kind: "session.model.set"; selector: string; thinking?: string }
 	| { kind: "session.thinking.set"; level: string }
 	| { kind: "session.taskModel.set"; selector: string | null }
@@ -101,6 +110,7 @@ export type StudioOperation =
 			kind: "loop.enable";
 			prompt?: string;
 			limit?: { turns?: number; minutes?: number; tokens?: number };
+			condition?: { command: string; until: boolean };
 	  }
 	| { kind: "loop.pause" }
 	| { kind: "loop.disable" }
@@ -383,7 +393,13 @@ export interface StudioOperatorStateSnapshot {
 		tokensUsed?: number;
 	};
 	vibe?: { enabled: boolean; workerAgentIds: string[] };
-	loop?: { status: "waiting" | "running" | "paused"; prompt?: string; iterations?: number };
+	loop?: {
+		status: "waiting" | "running" | "paused";
+		prompt?: string;
+		iterations?: number;
+		condition?: { command: string; until: boolean };
+		evaluatingCondition?: boolean;
+	};
 	fast?: { enabled: boolean; active?: boolean };
 	prewalk?: { status: "off" | "armed" | "active"; target?: string };
 	/** Active session model; absent before the first model resolves. */
@@ -401,6 +417,8 @@ export interface StudioOperatorStateSnapshot {
 	jobs: unknown[];
 	telemetry?: StudioSessionTelemetry;
 	runtimeSettings?: Record<StudioRuntimeSettingKey, unknown>;
+	runtimeSettingsActivation?: StudioRuntimeSettingsActivation;
+	retry?: StudioRetryState;
 	compactionSpeculation?: "idle" | "running" | "armed";
 }
 
@@ -631,6 +649,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			}
 			break;
 		case "session.prewalk.disarm":
+		case "session.prewalk.restart":
 			exactKeys(operation, ["kind"]);
 			break;
 		case "session.model.set":
@@ -934,7 +953,14 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			}
 			break;
 		case "loop.enable": {
-			exactKeys(operation, ["kind", "prompt", "limit"]);
+			exactKeys(operation, ["kind", "prompt", "limit", "condition"]);
+			if (operation.condition !== undefined) {
+				const condition = record(operation.condition);
+				exactKeys(condition, ["command", "until"]);
+				if (!nonEmptyString(condition.command) || typeof condition.until !== "boolean") {
+					throw new StudioFrameError("Invalid loop condition");
+				}
+			}
 			if (operation.prompt !== undefined && !nonEmptyString(operation.prompt)) {
 				throw new StudioFrameError("Invalid loop prompt");
 			}
@@ -1007,6 +1033,7 @@ export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"session.fast.set",
 	"session.prewalk.arm",
 	"session.prewalk.disarm",
+	"session.prewalk.restart",
 	"mode.plan.enter",
 	"mode.plan.exit",
 	"mode.plan.review.open",

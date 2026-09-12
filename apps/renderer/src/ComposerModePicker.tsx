@@ -28,6 +28,8 @@ type PreviewLayer3 = {
   loop: boolean;
   loopKind: LoopLimitKind;
   loopValue: string;
+  loopConditionMode: "none" | "while" | "until";
+  loopConditionCommand: string;
   fast: boolean;
   prewalk: boolean;
   prewalkTarget: string;
@@ -38,6 +40,8 @@ const PREVIEW_OFF: PreviewLayer3 = {
   loop: false,
   loopKind: "none",
   loopValue: "10",
+  loopConditionMode: "none",
+  loopConditionCommand: "",
   fast: false,
   prewalk: false,
   prewalkTarget: "",
@@ -151,6 +155,15 @@ export function ComposerModePicker({
     if (preview || !target) return;
     setLocal((current) => (current.prewalkTarget.trim() ? current : { ...current, prewalkTarget: target }));
   }, [preview, snapshot?.prewalk?.target]);
+  useEffect(() => {
+    if (preview) return;
+    const condition = snapshot?.loop?.condition;
+    setLocal(current => ({
+      ...current,
+      loopConditionMode: condition === undefined ? "none" : condition.until ? "until" : "while",
+      loopConditionCommand: condition?.command ?? "",
+    }));
+  }, [preview, snapshot?.sessionId, snapshot?.loop?.condition?.command, snapshot?.loop?.condition?.until]);
   useLayoutEffect(() => {
     if (!togglesOpen) return;
     const rect = menuRef.current?.getBoundingClientRect();
@@ -167,6 +180,8 @@ export function ComposerModePicker({
     : snapshot?.prewalk?.status === "armed" || snapshot?.prewalk?.status === "active";
   const loopKind = local.loopKind;
   const loopValue = local.loopValue;
+  const loopConditionInvalid = local.loopConditionMode !== "none" && !local.loopConditionCommand.trim();
+  const loopLimitInvalid = loopKind !== "none" && loopLimitOf(loopKind, loopValue) === undefined;
   const prewalkTarget = local.prewalkTarget || (!preview ? (snapshot?.prewalk?.target ?? "") : "");
 
   const nextTurnOnly = !preview && (snapshot?.isStreaming === true || snapshot?.isCompacting === true);
@@ -271,6 +286,7 @@ export function ComposerModePicker({
 
   const toggleLoop = () => {
     if (!loopReady) return;
+    if (!loopOn && (loopConditionInvalid || loopLimitInvalid)) return;
     onInteract?.();
     if (preview) {
       setLocal((current) => ({ ...current, loop: !current.loop }));
@@ -281,7 +297,11 @@ export function ComposerModePicker({
       return;
     }
     const limit = loopLimitOf(loopKind, loopValue);
-    void onRun("loop.enable", limit === undefined ? {} : { limit });
+    const condition = local.loopConditionMode === "none" ? undefined : {
+      command: local.loopConditionCommand.trim(),
+      until: local.loopConditionMode === "until",
+    };
+    void onRun("loop.enable", { ...(limit === undefined ? {} : { limit }), ...(condition === undefined ? {} : { condition }) });
   };
 
   const toggleFast = () => {
@@ -499,7 +519,7 @@ export function ComposerModePicker({
                 >
                   <p className="menu-label">{t("composer.multipleSelectable")}</p>
                   <label className={`cmp-mode-check${loopOn ? " selected" : ""}`}>
-                    <input type="checkbox" checked={loopOn} disabled={!loopReady} onChange={toggleLoop} />
+                    <input type="checkbox" checked={loopOn} disabled={!loopReady || (!loopOn && (loopConditionInvalid || loopLimitInvalid))} onChange={toggleLoop} />
                     <span>
                       <span className="am-label">Loop</span>
                       <span className="am-desc">{t("composer.loopDesc")}</span>
@@ -531,6 +551,19 @@ export function ComposerModePicker({
                       />
                     ) : null}
                   </div>
+                  <div className="cmp-mode-params">
+                    <select aria-label={t("composer.loopCondition")} value={local.loopConditionMode} disabled={!loopReady || loopOn} onChange={event => setLocal(current => ({ ...current, loopConditionMode: event.target.value as PreviewLayer3["loopConditionMode"] }))}>
+                      <option value="none">{t("composer.loopNoCondition")}</option>
+                      <option value="while">while</option>
+                      <option value="until">until</option>
+                    </select>
+                  </div>
+                  {local.loopConditionMode !== "none" ? (
+                    <div className="cmp-mode-params">
+                      <input type="text" aria-label={t("composer.loopConditionCommand")} placeholder="test -f done" value={local.loopConditionCommand} disabled={!loopReady || loopOn} onChange={event => setLocal(current => ({ ...current, loopConditionCommand: event.target.value }))} />
+                    </div>
+                  ) : null}
+                  <p className="am-desc">{!preview && snapshot?.loop?.evaluatingCondition ? t("composer.loopChecking") : t("composer.loopConditionHint")}</p>
                   <label className={`cmp-mode-check${fastOn ? " selected" : ""}`} data-tip={fastReady ? undefined : t("common.notImplemented")}>
                     <input type="checkbox" checked={fastOn} disabled={!fastReady} onChange={toggleFast} />
                     <span>
@@ -558,6 +591,11 @@ export function ComposerModePicker({
                         if (event.key === "Enter") applyPrewalkTarget((event.target as HTMLInputElement).value);
                       }}
                     />
+                    <button type="button" className="btn small outline" disabled={!preview && (!can("session.prewalk.restart") || nextTurnOnly)} onClick={() => {
+                      onInteract?.();
+                      if (preview) setLocal(current => ({ ...current, prewalk: true, prewalkTarget: "@smol" }));
+                      else void onRun("session.prewalk.restart", {});
+                    }}>{t("composer.prewalkRestart")}</button>
                   </div>
                 </div>
               ) : null}

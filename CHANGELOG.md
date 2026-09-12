@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-13
+
+### Added
+
+- 支持按 Shell 退出码控制的 while/until 循环、类型化 Prewalk 重启及基于对话内容的自动命名。
+- 增加 Plan 自动保存、配额重置等待与实验笔记式上下文设置（均默认关闭；实验上下文需重启 Runtime 生效，状态区明确区分配置值、生效值与待重启状态）。
+- 模型配置页接入 Muse Code / Command Code，支持只读分时价格、长上下文定价区间与扩展上下文窗口展示。
+
+### Changed
+
+- OMP Runtime 固定迁移至 v18.1.18（`18.1.18-studio.5`），全面同步 overlay、接缝补丁与运行时身份校验。
+- Windows 打包支持 `OMP_PACK_OUTPUT_DIR` 独立目录输出，保障发布工件审计隔离。
+
+### Fixed
+
+- 隔离 Agent 停靠后禁止复活与隐式发送唤醒，并正确展示嵌套仓库补丁。
+- 优化重试等待期限及断流恢复重连状态；修复循环条件在暂停、取消、切换会话及 Vibe 激活竞态下的迟到提交问题。
+- 模型能力适配真实图片发送策略，修复零价格被丢弃及固定价格覆盖继承动态费率的缺陷。
+
 ## [0.1.4] - 2026-09-06
 
 ### Added
@@ -86,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/the-snowpear/omp-studio/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/the-snowpear/omp-studio/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/the-snowpear/omp-studio/compare/v0.1.1...v0.1.3
 [0.1.1]: https://github.com/the-snowpear/omp-studio/compare/v0.1.0...v0.1.1

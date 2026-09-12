@@ -44,12 +44,12 @@ function fixture(action: "prompt" | "compact" | "reset" = "prompt") {
 		if (!entry) return false;
 		timers.delete(entry[0]);
 		entry[1]();
-		await Promise.resolve();
-		await Promise.resolve();
+		await Bun.sleep(0);
 		return true;
 	};
 	return {
 		service: new StudioLoopService(port, 0),
+		port,
 		submitted,
 		errors,
 		timers,
@@ -68,6 +68,122 @@ function fixture(action: "prompt" | "compact" | "reset" = "prompt") {
 }
 
 describe("WP-033 StudioLoopService", () => {
+	test("manual prompt preparation holds automatic submission and can resume a previously paused loop", async () => {
+		const harness = fixture();
+		harness.service.enable("previous");
+		harness.service.pause();
+		const held = harness.service.holdPrompt();
+		held.capture("replacement");
+		expect(harness.service.scheduleNext()).toBe(false);
+		expect(harness.timers.size).toBe(0);
+		held.release();
+		await harness.runNext();
+		expect(harness.submitted).toEqual(["replacement"]);
+	});
+
+	test("pausing during a held prompt invalidates its late capture", async () => {
+		const harness = fixture();
+		harness.service.enable("previous");
+		const held = harness.service.holdPrompt();
+		harness.service.pause();
+		held.capture("must not revive");
+		held.release();
+		expect(harness.service.state()?.status).toBe("paused");
+		expect(harness.timers.size).toBe(0);
+		expect(harness.submitted).toEqual([]);
+	});
+
+	test("duration expiry disables a blocked loop without evaluating its condition", async () => {
+		const harness = fixture();
+		harness.service.enable("repeat", { minutes: 1 });
+		harness.setBlocked(true);
+		harness.advance(60000);
+		harness.service.scheduleNext();
+		await harness.runNext();
+		expect(harness.service.state()).toBeUndefined();
+		expect(harness.timers.size).toBe(0);
+	});
+	test("checks continuation conditions only after enable and stops on a halt verdict", async () => {
+		const harness = fixture();
+		let checks = 0;
+		harness.port.evaluateCondition = async () => {
+			checks += 1;
+			return checks === 1 ? { kind: "continue" } : { kind: "halt", message: "done" };
+		};
+		harness.service.enable("repeat", { turns: 3 }, { command: "test -f done", until: true });
+		expect(checks).toBe(0);
+		harness.service.scheduleNext();
+		await harness.runNext();
+		expect(harness.submitted).toEqual(["repeat"]);
+		harness.service.scheduleNext();
+		await harness.runNext();
+		expect(harness.submitted).toEqual(["repeat"]);
+		expect(harness.service.state()).toBeUndefined();
+	});
+
+	test("pause cancels an in-flight condition and rejects its late continuation", async () => {
+		const harness = fixture();
+		const pending = Promise.withResolvers<{ kind: "continue" }>();
+		let signal: AbortSignal | undefined;
+		harness.port.evaluateCondition = async (_condition, currentSignal) => {
+			signal = currentSignal;
+			return pending.promise;
+		};
+		harness.service.enable("repeat", undefined, { command: "check", until: false });
+		harness.service.scheduleNext();
+		await harness.runNext();
+		expect(harness.service.state()?.evaluatingCondition).toBe(true);
+		harness.service.pause();
+		expect(signal?.aborted).toBe(true);
+		pending.resolve({ kind: "continue" });
+		await Bun.sleep(0);
+		expect(harness.submitted).toEqual([]);
+		expect(harness.service.state()?.status).toBe("paused");
+	});
+
+	test("vibe activation during condition evaluation prevents reset and submission", async () => {
+		const harness = fixture("reset");
+		const pending = Promise.withResolvers<{ kind: "continue" }>();
+		harness.port.evaluateCondition = () => pending.promise;
+		harness.service.enable("repeat", undefined, { command: "check", until: true });
+		harness.service.scheduleNext();
+		await harness.runNext();
+		harness.setVibe(true);
+		pending.resolve({ kind: "continue" });
+		await Bun.sleep(0);
+		expect(harness.counts().reset).toBe(0);
+		expect(harness.submitted).toEqual([]);
+		expect(harness.service.state()).toBeUndefined();
+		expect(harness.errors[0]).toBeInstanceOf(StudioLoopError);
+	});
+
+	test("condition failures stop the loop without consuming a submission", async () => {
+		const harness = fixture();
+		harness.port.evaluateCondition = async () => ({ kind: "error", message: "condition timed out" });
+		harness.service.enable("repeat", undefined, { command: "sleep 60", until: false });
+		harness.service.scheduleNext();
+		await harness.runNext();
+		expect(harness.submitted).toEqual([]);
+		expect(harness.errors[0]).toMatchObject({ message: "condition timed out" });
+		expect(harness.service.state()).toBeUndefined();
+	});
+
+	test("a blocked session does not launch condition commands", async () => {
+		const harness = fixture();
+		let checks = 0;
+		harness.port.evaluateCondition = async () => {
+			checks += 1;
+			return { kind: "continue" };
+		};
+		harness.setBlocked(true);
+		harness.service.enable("repeat", undefined, { command: "check", until: false });
+		harness.service.scheduleNext();
+		await harness.runNext();
+		expect(checks).toBe(0);
+		harness.setBlocked(false);
+		await harness.runNext();
+		expect(harness.submitted).toEqual(["repeat"]);
+	});
 	test("enables, captures a prompt, pauses, resumes, and disables", () => {
 		const { service } = fixture();
 		expect(service.enable().state).toEqual({ status: "waiting" });

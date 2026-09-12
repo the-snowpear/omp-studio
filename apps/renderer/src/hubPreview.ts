@@ -36,6 +36,8 @@ export type PreviewAgent = {
   outputPath?: string | null;
   patchPath?: string | null;
   branchName?: string | null;
+  isolated?: boolean;
+  nestedPatchPaths?: string[];
   children: string[];
   ircUnread?: number;
   createdAt: number;
@@ -141,6 +143,7 @@ export function buildPreviewHub(now = Date.now()): PreviewHub {
         modelRole: "@audit", resolvedModel: "gpt-5.2-codex",
         metrics: { cost: 1.23, durationMs: 412000, durationKind: "active", requests: 15, tools: 21, tokens: 40300, contextTokens: 88200, contextWindow: 200000 },
         outputPath: "agent-019fc8a0.md", patchPath: "agent-019fc8a0.patch",
+        isolated: true, nestedPatchPaths: ["agent-019fc8a0.nested-0-library.patch"],
         children: [], createdAt: ago(5200), lastActivity: ago(3612), hasTranscript: true,
       },
       {

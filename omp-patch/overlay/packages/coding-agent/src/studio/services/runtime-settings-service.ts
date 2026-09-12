@@ -11,6 +11,10 @@ export const STUDIO_RUNTIME_SETTING_KEYS = [
 	"compaction.asyncEnabled",
 	"compaction.methodOrder",
 	"providers.openai-codex.codeMode",
+	"plan.autosave",
+	"plan.autosaveDir",
+	"retry.waitForUsageReset",
+	"compaction.experimentalContextManagement",
 ] as const;
 
 export type StudioRuntimeSettingKey = (typeof STUDIO_RUNTIME_SETTING_KEYS)[number];
@@ -23,6 +27,15 @@ export interface StudioRuntimeSettingsSnapshot {
 	"compaction.asyncEnabled": boolean;
 	"compaction.methodOrder": CompactionMethod[];
 	"providers.openai-codex.codeMode": "off" | "on" | "auto";
+	"plan.autosave": boolean;
+	"plan.autosaveDir": string;
+	"retry.waitForUsageReset": boolean;
+	"compaction.experimentalContextManagement": boolean;
+}
+
+export interface StudioRuntimeSettingsActivation {
+	configured: Partial<StudioRuntimeSettingsSnapshot>;
+	restartRequired: StudioRuntimeSettingKey[];
 }
 
 export type StudioRuntimeSettingValue = StudioRuntimeSettingsSnapshot[StudioRuntimeSettingKey];
@@ -50,7 +63,12 @@ export function isStudioRuntimeSettingValue(
 		case "edit.autoRepair.enabled":
 		case "extendedContext":
 		case "compaction.asyncEnabled":
+		case "plan.autosave":
+		case "retry.waitForUsageReset":
+		case "compaction.experimentalContextManagement":
 			return typeof value === "boolean";
+		case "plan.autosaveDir":
+			return typeof value === "string" && value.length <= 4096 && !value.includes("\0");
 		case "features.unexpectedStopDetection":
 		case "providers.unexpectedStopModel":
 		case "providers.openai-codex.codeMode":
@@ -82,9 +100,35 @@ function cloneValue(value: StudioRuntimeSettingValue): StudioRuntimeSettingValue
 
 /** Narrow bridge-facing access to the public Settings get/set/override API. */
 export class StudioRuntimeSettingsService {
-	constructor(readonly session: AgentSession) {}
+	#settings: AgentSession["settings"];
+	#notesEffective: boolean;
+	#notesConfigured: boolean;
+
+	constructor(readonly session: AgentSession) {
+		this.#settings = session.settings;
+		this.#notesEffective = session.settings.get("compaction.experimentalContextManagement") === true;
+		this.#notesConfigured = this.#notesEffective;
+	}
+
+	#syncSession(): void {
+		if (this.#settings === this.session.settings) return;
+		const pending = this.#notesConfigured !== this.#notesEffective;
+		this.#settings = this.session.settings;
+		this.#notesEffective = this.#settings.get("compaction.experimentalContextManagement") === true;
+		if (!pending) this.#notesConfigured = this.#notesEffective;
+	}
+
+	activation(): StudioRuntimeSettingsActivation {
+		this.#syncSession();
+		return {
+			configured: { "compaction.experimentalContextManagement": this.#notesConfigured },
+			restartRequired:
+				this.#notesConfigured === this.#notesEffective ? [] : ["compaction.experimentalContextManagement"],
+		};
+	}
 
 	snapshot(): StudioRuntimeSettingsSnapshot {
+		this.#syncSession();
 		return {
 			"edit.autoRepair.enabled": this.session.settings.get("edit.autoRepair.enabled"),
 			"features.unexpectedStopDetection": this.session.settings.get("features.unexpectedStopDetection"),
@@ -93,10 +137,17 @@ export class StudioRuntimeSettingsService {
 			"compaction.asyncEnabled": this.session.settings.get("compaction.asyncEnabled"),
 			"compaction.methodOrder": [...this.session.settings.get("compaction.methodOrder")],
 			"providers.openai-codex.codeMode": this.session.settings.get("providers.openai-codex.codeMode"),
+			"plan.autosave": this.session.settings.get("plan.autosave"),
+			"plan.autosaveDir": this.session.settings.get("plan.autosaveDir") ?? "",
+			"retry.waitForUsageReset": this.session.settings.get("retry.waitForUsageReset"),
+			"compaction.experimentalContextManagement": this.#notesEffective,
 		};
 	}
 
-	get(keys?: readonly string[]): { values: Partial<StudioRuntimeSettingsSnapshot> } {
+	get(keys?: readonly string[]): {
+		values: Partial<StudioRuntimeSettingsSnapshot>;
+		activation?: StudioRuntimeSettingsActivation;
+	} {
 		const selected = keys === undefined ? STUDIO_RUNTIME_SETTING_KEYS : keys;
 		const values: Partial<StudioRuntimeSettingsSnapshot> = {};
 		const snapshot = this.snapshot();
@@ -104,7 +155,10 @@ export class StudioRuntimeSettingsService {
 			assertKey(key);
 			(values as Record<string, StudioRuntimeSettingValue>)[key] = cloneValue(snapshot[key]);
 		}
-		return { values };
+		return {
+			values,
+			...(selected.includes("compaction.experimentalContextManagement") ? { activation: this.activation() } : {}),
+		};
 	}
 
 	async set(
@@ -115,12 +169,39 @@ export class StudioRuntimeSettingsService {
 		key: StudioRuntimeSettingKey;
 		value: StudioRuntimeSettingValue;
 		persisted: boolean;
+		effectiveValue?: StudioRuntimeSettingValue;
+		restartRequired?: boolean;
 	}> {
 		assertKey(key);
 		if (typeof persist !== "boolean") {
 			throw new StudioRuntimeSettingsError("INVALID_ARGUMENT", "Runtime setting persistence flag must be boolean");
 		}
 		assertValue(key, value);
+		if (key === "compaction.experimentalContextManagement") {
+			if (!persist)
+				throw new StudioRuntimeSettingsError(
+					"COMMAND_BLOCKED",
+					"This experimental setting must be saved and requires a Runtime restart",
+				);
+			this.#syncSession();
+			const previous = this.#notesConfigured;
+			this.#settings.override(key, this.#notesEffective);
+			this.#settings.set(key, value as boolean);
+			try {
+				await this.#settings.flush();
+			} catch (error) {
+				this.#settings.set(key, previous);
+				throw error;
+			}
+			this.#notesConfigured = value as boolean;
+			return {
+				key,
+				value,
+				persisted: true,
+				effectiveValue: this.#notesEffective,
+				restartRequired: this.#notesConfigured !== this.#notesEffective,
+			};
+		}
 		this.#apply(key, value, persist);
 		if (persist) await this.session.settings.flush();
 		return { key, value: cloneValue(value), persisted: persist };
@@ -130,6 +211,11 @@ export class StudioRuntimeSettingsService {
 		const settings = this.session.settings;
 		if (persist) settings.clearOverride(key as SettingPath);
 		switch (key) {
+			case "plan.autosave":
+			case "retry.waitForUsageReset":
+				return persist ? settings.set(key, value as boolean) : settings.override(key, value as boolean);
+			case "plan.autosaveDir":
+				return persist ? settings.set(key, value as string) : settings.override(key, value as string);
 			case "edit.autoRepair.enabled":
 				return persist
 					? settings.set(key, value as SettingValue<"edit.autoRepair.enabled">)

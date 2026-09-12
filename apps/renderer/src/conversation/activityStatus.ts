@@ -9,6 +9,8 @@ export const WORKING_LABEL = "working";
 export interface ActivityRetry {
   readonly attempt: number;
   readonly maxAttempts: number;
+  readonly nextRetryAt?: number;
+  readonly reason?: "usage-limit" | "retry";
 }
 
 export interface ActivityStatus {
@@ -263,8 +265,14 @@ export function isRetryTranscriptNotice(message: string, source?: string): boole
   return isRetryActivityNotice(message, source) || isRetryEndNotice(message, source);
 }
 
-export function formatRetry(retry: ActivityRetry): string {
-  return `Retry ${retry.attempt}/${retry.maxAttempts}`;
+export function formatRetry(retry: ActivityRetry, now = Date.now()): string {
+  const label = `Retry ${retry.attempt}/${retry.maxAttempts}`;
+  if (retry.nextRetryAt === undefined) return label;
+  const seconds = Math.max(0, Math.ceil((retry.nextRetryAt - now) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const clock = (hours ? hours + "h " : "") + minutes + "m " + (seconds % 60) + "s";
+  return label + " · " + (retry.reason === "usage-limit" ? "quota reset " : "retry in ") + clock;
 }
 
 export function latestActivityRetry(

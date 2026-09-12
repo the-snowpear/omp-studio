@@ -47,6 +47,8 @@ export interface SessionArchiveReadInput {
 /** Disk-backed child agent row. Paths never leave the Host. */
 export interface SessionPersistedAgentRecord {
   readonly agentId: string;
+  readonly isolated?: boolean;
+  readonly canRevive?: boolean;
   readonly displayName: string;
   readonly status: "parked" | "aborted";
   readonly parentAgentId?: string;
@@ -495,10 +497,12 @@ export class StudioSessionArchiveReader {
     const startedAt = timestampFromEntries(snapshot.entries, "first");
     const updatedAt = timestampFromEntries(snapshot.entries, "last") ?? new Date(0).toISOString();
     const model = modelFromEntries(snapshot.entries);
+    const isolated = snapshot.entries.some(entry => entry.type === "session_init" && entry.isolated === true);
     return {
       agentId: child.agentId,
       displayName: child.agentId,
       status: tombstoned ? "aborted" : "parked",
+      ...(isolated ? { isolated: true, canRevive: false } : {}),
       ...(child.parentAgentId.length > 0 ? { parentAgentId: child.parentAgentId } : {}),
       ...(assignment === undefined ? {} : { assignment }),
       ...(startedAt === undefined ? {} : { startedAt }),

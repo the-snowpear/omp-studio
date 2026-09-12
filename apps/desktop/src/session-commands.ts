@@ -57,6 +57,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   "session.fast.set",
   "session.prewalk.arm",
   "session.prewalk.disarm",
+  "session.prewalk.restart",
   "permissions.mode.set",
   // BTW runs beside the main turn by design, so a snapshot-derived
   // `expectedStateVersion` would collide with every streaming delta. The

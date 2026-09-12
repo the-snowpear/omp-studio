@@ -10,7 +10,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, assertRuntimeManifestTarget, resolveTargetArch } from "./windows-architecture.mjs";
 
@@ -29,7 +29,9 @@ export const PRIVATE_KEY_MARKERS = Object.freeze([
 const TEXT_SUFFIXES = new Set([".pem", ".txt", ".json", ".yml", ".yaml", ".md", ".html", ".js", ".cjs", ".mjs", ".css"]);
 
 export function defaultInstallerOutputDirectory() {
-  return join(REPOSITORY_ROOT, "outputs", "installer");
+  return process.env.OMP_PACK_OUTPUT_DIR
+    ? resolve(REPOSITORY_ROOT, process.env.OMP_PACK_OUTPUT_DIR)
+    : join(REPOSITORY_ROOT, "outputs", "installer");
 }
 
 function walkFiles(root) {
