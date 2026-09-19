@@ -7,23 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-20
+
 ### Added
 
 - 应用内增量更新：桌面与 Runtime 共用 Ed25519 签名清单、防回退序号、HTTP Range 差分下载与持久化事务，后台准备后手动「重启更新」；Runtime 可独立更新并保留 Stable／Canary 通道；设置 → 高级提供上一桌面版本的准备与重启恢复；旧全机安装经一次性迁移安装转入当前用户目录。[设计与验收边界](docs/updates.md)。
 - 接入 BTW 持久话题与追问、`^模型` 委派标签、Claude／Codex 会话导入，以及任务 effort／服务档位、视觉问答、TypeSafe 和默认关闭的推测读取设置；新增界面同时支持真实与预览模式。
 - 展示 Advisor 独立费用、实际服务模型和生成速率，补齐结构化任务结果与 Parallel／Ollama Cloud 搜索配置。
-
 - 模型配置页的 `models.yml` / `config.yml` 结构化预览改为随图形化表单实时变化：供应商名称、Base URL、API 类型、鉴权方式、自定义模型、模型 Override 与高级项改动都会立刻反映在卡片里，角色换主模型或 Thinking 也立刻更新 `modelRoles.<id>`，不再需要保存后重进。表单有未保存改动时卡片显示为只读并由表单驱动，未接管的字段（含未来新增键与注释）仍原样保留，保存路径与 host 写入语义一致。
 
 ### Changed
 
 - Runtime 升级至 `18.2.5-studio.6`，迁移 pi-tui 拆包接缝、异步凭据及会话接口；`/delete` 保留 `/drop` 别名。[更新和验收报告](docs/migrations/omp-18.2.5.md)。
+- 本版是首个以 v2 增量更新目录发布的桌面版本：0.1.5 及更早的安装经签名迁移索引引导运行一次完整 Setup（旧全机安装同时迁移到当前用户目录），此后进入应用内增量更新流程。
 
 ### Fixed
 
 - 流式输出的工具链里，自动展开的尾部工具卡改为动画展开，不再直接跳变出现；模型连续产出多个工具、链条从一张卡增长到多张卡时，前一张卡在原地动画收起、新卡动画进场，不再因子树重挂载瞬间消失。运行中的卡片收起时仍同步卸载正文，不为看不见的过渡白渲染。
 - 主会话流式运行时 `/btw` 直接打开旁路历史；模型标签在回退、分支与消息恢复后保持可编辑。
-
 - 会话流式期间点「新建会话」（同项目「＋」、顶栏新建或归档后新建）后发送的提示词不再被记入上一个会话的本地排队消息：`session.create` 回执落地前，输入框与排队条目的会话归属按新会话判定，提示词改为等待新会话创建后发出；该窗口内的草稿、侧栏当前行标记与临时标题也不再归到旧会话。
 
 ## [0.1.5] - 2026-09-13
@@ -124,7 +125,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/the-snowpear/omp-studio/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/the-snowpear/omp-studio/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/the-snowpear/omp-studio/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/the-snowpear/omp-studio/compare/v0.1.1...v0.1.3

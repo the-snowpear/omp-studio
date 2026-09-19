@@ -1,7 +1,7 @@
 {
   "name": "@omp-studio/desktop",
   "productName": "OMP Studio",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "type": "module",
   "main": "./dist/src/main.js",
@@ -14,22 +14,22 @@
     "test": "npm run build && node --test dist/test/*.test.js"
   },
   "dependencies": {
-    "@omp-studio/client": "0.1.5",
-    "@omp-studio/client-contract": "0.1.5",
-    "@omp-studio/host-client-api": "0.1.5",
-    "@omp-studio/platform": "0.1.5",
-    "@omp-studio/platform-darwin": "0.1.5",
-    "@omp-studio/platform-win32": "0.1.5",
-    "@omp-studio/runtime-installer": "0.1.5",
-    "@omp-studio/studio-host": "0.1.5",
-    "@omp-studio/transport-desktop": "0.1.5",
+    "@omp-studio/client": "0.1.6",
+    "@omp-studio/client-contract": "0.1.6",
+    "@omp-studio/host-client-api": "0.1.6",
+    "@omp-studio/platform": "0.1.6",
+    "@omp-studio/platform-darwin": "0.1.6",
+    "@omp-studio/platform-win32": "0.1.6",
+    "@omp-studio/runtime-installer": "0.1.6",
+    "@omp-studio/studio-host": "0.1.6",
+    "@omp-studio/transport-desktop": "0.1.6",
     "builder-util-runtime": "9.7.0",
     "electron-updater": "6.8.9",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
-    "@omp-studio/testkit": "0.1.5",
+    "@omp-studio/testkit": "0.1.6",
     "@types/node": "^24.0.0",
     "electron": "^43.4.0",
     "typescript": "^5.9.0"
