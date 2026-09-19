@@ -372,26 +372,15 @@ export function BatchChain({
     ),
   );
   // 单卡（只有一段思考，或只用了一个工具）没有可归纳的批次：摘要行只会把「Read ·
-  // a.ts」重述成「阅读 1 个文件」，还多要一次点击才看得到内容。直接把那张卡摆出来。
-  if (cards.length === 1) {
-    return (
-      <div
-        className={`${standalone ? "ev " : ""}ev-batch is-single${running ? " is-running" : ""}`}
-        data-batch-key={batchKey}
-      >
-        <SubagentStrip
-          tools={visible}
-          {...(liveAgents === undefined ? {} : { liveAgents })}
-          {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
-        />
-        {cards}
-      </div>
-    );
-  }
+  // a.ts」重述成「阅读 1 个文件」，还多要一次点击才看得到内容。单卡不渲染摘要行，
+  // 但链条容器与多卡保持同一结构——模型随后再产出工具时，首张卡原地收起、新卡进场，
+  // 不触发整棵子树重挂载（重挂载会把首张卡的展开状态和过渡动画一起吞掉）。
+  const single = cards.length === 1;
+  const batchOpen = open || single;
   const summary = batchSummary(thinking, visible);
   return (
     <div
-      className={`${standalone ? "ev " : ""}ev-batch${open ? " open" : ""}${running ? " is-running" : ""}`}
+      className={`${standalone ? "ev " : ""}ev-batch${single ? " is-single" : ""}${batchOpen ? " open" : ""}${running ? " is-running" : ""}`}
       data-batch-key={batchKey}
     >
       <SubagentStrip
@@ -399,26 +388,29 @@ export function BatchChain({
         {...(liveAgents === undefined ? {} : { liveAgents })}
         {...(onInspectSubagent === undefined ? {} : { onInspectSubagent })}
       />
-      <button
-        type="button"
-        className="batch-sum"
-        aria-expanded={open}
-        aria-controls={bodyId}
-        onClick={toggleOpen}
-      >
-        <span className="batch-text">{summary.text}</span>
-        {summary.add || summary.del ? (
-          <span className="batch-diff">
-            {summary.add ? <span className="add">+{summary.add}</span> : null}
-            {summary.del ? <span className="del">−{summary.del}</span> : null}
-          </span>
-        ) : null}
-      </button>
+      {single ? null : (
+        <button
+          type="button"
+          className="batch-sum"
+          aria-expanded={open}
+          aria-controls={bodyId}
+          onClick={toggleOpen}
+        >
+          <span className="batch-text">{summary.text}</span>
+          {summary.add || summary.del ? (
+            <span className="batch-diff">
+              {summary.add ? <span className="add">+{summary.add}</span> : null}
+              {summary.del ? <span className="del">−{summary.del}</span> : null}
+            </span>
+          ) : null}
+        </button>
+      )}
       <div className="batch-chain" id={bodyId}>
         {/* 仍在跑的链被手动收起时同步卸载全部卡片：链里的运行卡每帧都在发布，动画
             320ms 只是让看不见的重渲染多烧一段时间。轮次结束的整链折叠不在此列——那时
-            所有工具已完成，正文冻结，链条与卡片都走完整的收起过渡。 */}
-        <div className="batch-chain-inner">{running && !open ? null : cards}</div>
+            所有工具已完成，正文冻结，链条与卡片都走完整的收起过渡。单卡没有摘要行
+            （batchOpen 恒为 true），不经过这条门。 */}
+        <div className="batch-chain-inner">{running && !batchOpen ? null : cards}</div>
       </div>
     </div>
   );

@@ -136,6 +136,38 @@ describe("BatchChain expand", () => {
     }
   });
 
+  it("keeps the first card mounted through the handoff when a second tool arrives", async () => {
+    const first = bash("b1", "first output");
+    const live: ToolView = {
+      toolCallId: "live",
+      toolName: "bash",
+      arguments: { command: "npm test" },
+      status: "running",
+      output: "live output",
+    };
+    const { container, rerender } = render(<BatchChain items={[{ kind: "tool", tool: first }]} batchKey="chain" liveTail />);
+    const single = container.querySelector<HTMLElement>('[data-tool-call-id="b1"]')!;
+    expect(single.className).toContain("open");
+    expect(container.querySelector(".batch-sum")).toBeNull();
+
+    rerender(<BatchChain items={[{ kind: "tool", tool: first }, { kind: "tool", tool: live }]} batchKey="chain" liveTail />);
+
+    // 链条从一张卡长到两张卡时不再重挂载首张卡：元素身份保持、展开状态保留，
+    // 收起走完整过渡，过渡与延迟卸载期间正文仍挂着（不是瞬间消失）。
+    const handoff = container.querySelector<HTMLElement>('[data-tool-call-id="b1"]')!;
+    expect(handoff).toBe(single);
+    expect(handoff.className).not.toContain("open");
+    expect(handoff.querySelector(".tc-body")!.textContent).toContain("first output");
+    expect(container.querySelector(".batch-sum")).not.toBeNull();
+
+    // 新卡按两帧节奏进场：先挂正文，下一帧才加 open 类，过渡从已排好的布局起跳。
+    const next = container.querySelector<HTMLElement>('[data-tool-call-id="live"]')!;
+    expect(next.querySelector(".tc-body")?.textContent).toContain("live output");
+    expect(next.className).not.toContain("open");
+    await nextFrame();
+    expect(next.className).toContain("open");
+  });
+
   it("keeps completed cards mounted when a live tail chain without running tools collapses", () => {
     // 尾链只剩思考/正文在流式、工具都已结束时，整链收起同样走过渡：卡片留在 DOM 里，
     // 由链条自己的 0fr 收起；不再像链级 instant 那样同步卸载整链卡片。

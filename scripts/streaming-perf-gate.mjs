@@ -219,6 +219,7 @@ let scenarios = [];
 let contract = null;
 let switchContract = null;
 let expandContract = null;
+let relayContract = null;
 let heap = null;
 let dom = null;
 let error = null;
@@ -249,6 +250,14 @@ try {
       + `below-shift=${expandContract.maxShiftPx.toFixed(1)}px  doc-bottom-shift=${expandContract.maxDocBottomShiftPx.toFixed(1)}px  `
       + `samples=${expandContract.samples}  tail-distance=${expandContract.tailDistancePx.toFixed(1)}px`,
   );
+  relayContract = await page.evaluate(() => window.ompPerf.toolRelay());
+  console.log(
+    `tool handoff               remounts=${relayContract.remounts}  `
+      + relayContract.transitions
+        .map((item) => `${item.outId}→${item.inId} ${item.exitAnimated ? "exit-anim" : "exit-JUMP"}/${item.entranceAnimated ? "entrance-anim" : "entrance-JUMP"}`)
+        .join("  ")
+      + `  scroll-gap-shift=${relayContract.maxScrollGapShift}px  frames=${relayContract.frames.length}`,
+  );
   // 内存两项放在最后：它们会 reset 场景并强制 GC，不该影响上面的帧测量。
   // HeapProfiler 域也在这里才打开 —— 提前打开会给 V8 带上分配追踪开销，
   // 把上面的 script/layout 时间一起抬高，帧预算就白测了。
@@ -267,7 +276,7 @@ const short = byName["short-history"];
 const long = byName["long-history"];
 const busy = byName["long+expanding-card"];
 const checks = [];
-if (error === null && short !== undefined && long !== undefined && busy !== undefined && contract !== null && switchContract !== null && expandContract !== null && heap !== null && dom !== null) {
+if (error === null && short !== undefined && long !== undefined && busy !== undefined && contract !== null && switchContract !== null && expandContract !== null && relayContract !== null && heap !== null && dom !== null) {
   /* 布局时间是连续量，不像帧间隔那样被 vsync 台阶饱和，所以历史无关性拿它来判。 */
   checks.push(check(
     "layout-cost-independent-of-history",
@@ -344,6 +353,29 @@ if (error === null && short !== undefined && long !== undefined && busy !== unde
     1.5,
     `展开动画期间文档底边相对视口底边的最大位移；收场距尾部 ${expandContract.tailDistancePx.toFixed(1)}px`,
   ));
+  /* 模型连续产出多个工具的交替：链条从一张卡长到多张卡时，首张卡必须原地收起、
+     新卡动画进场。React 重挂载会把首张卡的展开状态连同过渡一起吞掉（实测 258px
+     正文一帧消失），所以元素身份与两侧是否经过中间高度都要判。 */
+  checks.push(check(
+    "tool-handoff-no-remount",
+    relayContract.remounts,
+    0,
+    "逐帧元素身份翻转次数；卡片被重挂载会让收起退化成跳变",
+  ));
+  const jumps = relayContract.transitions.filter((item) => !item.exitAnimated || !item.entranceAnimated);
+  checks.push(assert(
+    "tool-handoff-animates-both-sides",
+    jumps.length === 0,
+    jumps.length === 0
+      ? `${relayContract.transitions.map((item) => `${item.outId}→${item.inId}`).join("、")} 两侧都经过中间高度`
+      : `${jumps.map((item) => `${item.outId}→${item.inId} exit=${item.exitAnimated} entrance=${item.entranceAnimated}`).join("、")} 存在跳变`,
+  ));
+  checks.push(check(
+    "tool-handoff-scroll-stays-pinned-px",
+    relayContract.maxScrollGapShift,
+    1.5,
+    "交替期间视口底与文档底的最大偏差",
+  ));
 }
 
 const failed = error !== null || checks.length === 0 || checks.some((entry) => entry.status === "failed");
@@ -364,6 +396,7 @@ await writeFile(
     ...(contract === null ? {} : { toolCardTransition: contract }),
     ...(switchContract === null ? {} : { sessionSwitch: switchContract }),
     ...(expandContract === null ? {} : { expandJitter: expandContract }),
+    ...(relayContract === null ? {} : { toolHandoff: relayContract }),
     checks,
     ...(error === null ? {} : { error }),
     status: failed ? "failed" : "passed",

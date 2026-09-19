@@ -1269,6 +1269,11 @@
   transform: translateY(0);
   transition-delay: 0s;
 }
+/* 单卡链没有摘要行，链条容器直上直下：4px 的批次间距只留给有摘要行的多卡链。
+   结构本身与多卡一致，模型再产出工具时首张卡原地收起而不是被重挂载吞掉。 */
+.ev-batch.is-single .batch-chain {
+  margin-top: 0;
+}
 .tl-item {
   margin: 1px 0;
   --tl-pad-x: 4px;

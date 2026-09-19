@@ -80,6 +80,42 @@ export type ExpandPerfResult = {
   readonly tailDistancePx: number;
 };
 
+/** 工具交替探针的逐帧样本：元素身份、开合类名、卡片高度与纵向位置。 */
+export type ToolRelayCardSample = {
+  readonly id: string;
+  readonly present: boolean;
+  /** 元素身份相对上一帧翻转 = React 重挂载：状态丢失，展开/收起退化成跳变。 */
+  readonly remounted: boolean;
+  readonly open: boolean;
+  readonly running: boolean;
+  readonly height: number;
+  readonly top: number;
+};
+export type ToolRelayFrame = {
+  readonly at: number;
+  /** 视口底与文档底的距离：跟随尾部时应一直贴近 0。 */
+  readonly scrollGap: number;
+  readonly summaries: number;
+  readonly cards: readonly ToolRelayCardSample[];
+};
+export type ToolRelayTransition = {
+  readonly outId: string;
+  readonly inId: string;
+  readonly at: number;
+  /** 退场卡在交接窗口内经过中间高度 = 收起过渡；直接满高→消失 = 跳变。 */
+  readonly exitAnimated: boolean;
+  /** 进场卡在交接窗口内经过中间高度 = 展开过渡；直接满高出现 = 跳变。 */
+  readonly entranceAnimated: boolean;
+  readonly preHeight: number;
+  readonly finalHeight: number;
+};
+export type ToolRelayResult = {
+  readonly frames: readonly ToolRelayFrame[];
+  readonly transitions: readonly ToolRelayTransition[];
+  readonly remounts: number;
+  readonly maxScrollGapShift: number;
+};
+
 const PROSE = [
   "这一段是模型正文，用来让 Markdown 分块与高亮走真实路径。",
   "它需要足够长，才能让「每帧从头扫描」和「只扫新增尾部」的差别显现出来。",
@@ -243,6 +279,124 @@ class PerfHarness {
       longTaskMs,
       toggles,
       rows: store.getSnapshot().rows.length,
+    };
+  }
+
+  /**
+   * 「模型连续产出多个工具」的交替回放：完成当前工具并启动下一个，逐帧记录每张卡的
+   * 元素身份与几何。元素身份翻转 = React 重挂载（展开状态丢失、视觉跳变）；高度曲线
+   * 经过中间值 = 真实过渡；满高直接消失/出现 = 跳变。
+   */
+  async toolRelay(): Promise<ToolRelayResult> {
+    const store = this.store;
+    if (store === null) throw new Error("call reset() first");
+    const scroller = document.querySelector<HTMLElement>(".convo-scroll");
+    if (scroller === null) throw new Error("工具交替探针没有找到 transcript");
+    const body = document.querySelector<HTMLElement>(".convo-body");
+    const idleDeadline = performance.now() + 3000;
+    while (performance.now() < idleDeadline) {
+      if (body !== null && body.dataset.phase === "idle" && Number.parseFloat(getComputedStyle(body).opacity || "0") > 0.99) break;
+      await frame();
+    }
+    scroller.scrollTop = scroller.scrollHeight;
+    await afterPaint();
+
+    const ids = [LIVE_TOOL, "relay-b", "relay-c", "relay-d"];
+    const complete = (toolCallId: string, at: number): ConversationRuntimeEvent => ({
+      kind: "conversation.tool.completed",
+      sessionId: this.sessionId,
+      turnId: TURN,
+      toolCallId,
+      result: { type: "toolResult", toolCallId, toolName: "bash", isError: false, output: `done at ${at}` },
+      completedAt: new Date(Date.parse("2026-08-30T00:02:02.000Z") + at).toISOString(),
+    });
+    const start = (toolCallId: string, at: number): ConversationRuntimeEvent => ({
+      kind: "conversation.tool.started",
+      sessionId: this.sessionId,
+      turnId: TURN,
+      messageId: LIVE_MESSAGE,
+      toolCallId,
+      toolName: "bash",
+      arguments: { command: `npm run build -- ${toolCallId}` },
+      startedAt: new Date(Date.parse("2026-08-30T00:02:02.000Z") + at).toISOString(),
+    });
+    const timeline: ReadonlyArray<{ readonly at: number; readonly events: readonly ConversationRuntimeEvent[] }> = [
+      { at: 0, events: [complete(LIVE_TOOL, 0), start("relay-b", 0)] },
+      { at: 900, events: [complete("relay-b", 900), start("relay-c", 900)] },
+      // 第三次接续故意压在上一组收起的过渡中段：验证动画反转而不是状态撕裂。
+      { at: 1250, events: [complete("relay-c", 1250), start("relay-d", 1250)] },
+    ];
+    const known = new Map<string, HTMLElement>();
+    let remounts = 0;
+    const measure = (at: number): ToolRelayFrame => {
+      const gap = Math.max(0, scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
+      const cards = ids.map((id): ToolRelayCardSample => {
+        const el = document.querySelector<HTMLElement>(`[data-tool-call-id="${id}"]`);
+        if (el === null) return { id, present: false, remounted: false, open: false, running: false, height: 0, top: 0 };
+        const previous = known.get(id);
+        if (previous !== undefined && previous !== el) remounts += 1;
+        known.set(id, el);
+        const card = el.querySelector<HTMLElement>(".tl-card");
+        return {
+          id,
+          present: true,
+          remounted: previous !== undefined && previous !== el,
+          open: el.classList.contains("open"),
+          running: el.classList.contains("is-running"),
+          height: Math.round((card?.getBoundingClientRect().height ?? 0) * 10) / 10,
+          top: Math.round(el.getBoundingClientRect().top * 10) / 10,
+        };
+      });
+      return { at: Math.round(at), scrollGap: Math.round(gap * 10) / 10, summaries: document.querySelectorAll(".batch-sum").length, cards };
+    };
+    // 先记录事件落地前的元素身份与几何：1→2 张卡的重构重挂载发生在事件那一帧，
+    // 从事后第一帧才开始追踪会把这次身份翻转和它吞掉的展开状态漏掉。
+    const baseline = measure(0);
+
+    const frames: ToolRelayFrame[] = [];
+    const baseGap = baseline.scrollGap;
+    let maxScrollGapShift = 0;
+    const t0 = performance.now();
+    let step = 0;
+    while (performance.now() - t0 < 2400) {
+      const now = performance.now() - t0;
+      while (step < timeline.length && (timeline[step]?.at ?? Number.POSITIVE_INFINITY) <= now) {
+        for (const event of timeline[step]?.events ?? []) this.push(store, event);
+        step += 1;
+      }
+      await frame();
+      await afterPaint();
+      const item = measure(now);
+      maxScrollGapShift = Math.max(maxScrollGapShift, Math.abs(item.scrollGap - baseGap));
+      frames.push(item);
+    }
+
+    const transitions = timeline.map(({ at }, index): ToolRelayTransition => {
+      const outId = ids[index]!;
+      const inId = ids[index + 1]!;
+      const inWindow = frames.filter((item) => item.at >= at && item.at <= at + 450);
+      const heightOf = (item: ToolRelayFrame, id: string) => item.cards.find((card) => card.id === id);
+      // 事件前一刻的高度：基线帧之外只数严格早于交接时刻的帧；at=0 时只有基线帧。
+      const before = [baseline, ...frames].reverse().find((item) => item.at < at) ?? baseline;
+      const preHeight = heightOf(before, outId)?.height ?? 0;
+      // 收场高度取窗口内的最大值：进场卡可能在窗口末尾已经被下一次接续收起。
+      const finalHeight = Math.max(0, ...inWindow.map((item) => heightOf(item, inId)?.height ?? 0));
+      // 经过中间高度才算过渡：直接 0 → 满高是跳变（或重挂载后无动画终态）。
+      const entranceAnimated = inWindow.some((item) => {
+        const card = heightOf(item, inId);
+        return card !== undefined && card.height > 0 && card.height < finalHeight * 0.9;
+      });
+      const exitAnimated = inWindow.some((item) => {
+        const card = heightOf(item, outId);
+        return card !== undefined && card.present && card.height > 0 && card.height < preHeight * 0.9;
+      });
+      return { outId, inId, at, exitAnimated, entranceAnimated, preHeight, finalHeight };
+    });
+    return {
+      frames,
+      transitions,
+      remounts,
+      maxScrollGapShift: Math.round(maxScrollGapShift * 10) / 10,
     };
   }
 }
@@ -474,6 +628,7 @@ declare global {
       cardTransition(): { readonly streaming: string; readonly idle: string };
       sessionSwitch(): Promise<SwitchPerfResult>;
       expandJitter(): Promise<ExpandPerfResult>;
+      toolRelay(): Promise<ToolRelayResult>;
     };
   }
 }
@@ -484,4 +639,5 @@ window.ompPerf = {
   cardTransition: cardTransitionContract,
   sessionSwitch: sessionSwitchContract,
   expandJitter: expandJitterContract,
+  toolRelay: () => harness.toolRelay(),
 };
