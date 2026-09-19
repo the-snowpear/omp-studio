@@ -38,6 +38,7 @@ export interface ConversationLiveBindTarget {
 }
 
 export interface ConversationLiveProjectorOptions {
+	restoreModelMentions?: (text: string) => string;
 	sessionId: string;
 	runtimeEpoch: number;
 	reserveMessageId: (input: { role: ConversationRole; createdAt: string }) => string;
@@ -711,7 +712,8 @@ export class ConversationLiveProjector {
 
 	#hydrateFromMessage(open: OpenMessage, message: AgentMessage): void {
 		if (message.role === "user") {
-			const text = userText(message);
+			const raw = userText(message);
+			const text = this.#options.restoreModelMentions?.(raw) ?? raw;
 			if (text.length > 0) {
 				const blockId = this.#blockId(open.messageId, 0, "text");
 				const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
@@ -767,7 +769,8 @@ export class ConversationLiveProjector {
 
 	#contentFromMessage(open: OpenMessage, message: AgentMessage): ConversationContentBlock[] {
 		if (message.role === "user") {
-			const text = userText(message);
+			const raw = userText(message);
+			const text = this.#options.restoreModelMentions?.(raw) ?? raw;
 			const sanitized = sanitizePublicText(text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 			if (sanitized.text.length === 0 && !sanitized.truncated) return [];
 			const block: ConversationContentBlock = { type: "text", text: sanitized.text };

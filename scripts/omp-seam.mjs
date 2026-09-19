@@ -65,7 +65,7 @@ export const SEAM_GROUPS = Object.freeze([
     title: "Session runtime hooks: origin, prewalk, model control, retry abort",
     paths: [
       "packages/coding-agent/src/plan-mode/approved-plan.ts",
-      "packages/coding-agent/src/modes/utils/context-usage.ts",
+      "packages/tui/src/status-line/context-usage.ts",
       "packages/coding-agent/src/registry/agent-registry.ts",
       "packages/coding-agent/src/registry/persisted-agents.ts",
       "packages/coding-agent/src/session/agent-session-events.ts",
@@ -74,6 +74,8 @@ export const SEAM_GROUPS = Object.freeze([
       "packages/coding-agent/src/session/prewalk.ts",
       "packages/coding-agent/src/session/session-entries.ts",
       "packages/coding-agent/src/session/session-manager.ts",
+      "packages/coding-agent/src/session/claude-session-store.ts",
+      "packages/coding-agent/test/foreign-session-stores.test.ts",
       "packages/coding-agent/src/session/turn-recovery.ts",
       "packages/coding-agent/src/task/executor.ts",
       "packages/coding-agent/src/task/isolation-runner.ts",
@@ -84,7 +86,7 @@ export const SEAM_GROUPS = Object.freeze([
     title: "Interactive mode, pause screen, mode slash commands, job manager",
     paths: [
       "packages/coding-agent/src/async/job-manager.ts",
-      "packages/coding-agent/src/modes/components/pause-screen.ts",
+      "packages/tui/src/overlays/pause-screen.ts",
       "packages/coding-agent/src/modes/controllers/event-controller.ts",
       "packages/coding-agent/src/modes/interactive-mode.ts",
       "packages/coding-agent/src/modes/rpc/rpc-mode.ts",

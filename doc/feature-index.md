@@ -83,7 +83,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | slash 命令菜单 | `composer/commands.ts`、`CommandMenu.tsx` | 解析后走语义 command；typed 名必须在 `operations.ts` / IPC `COMMAND_NAMES`。`/clear` → `session.clearContext` → facade `#commandP4` → overlay `clearContext`；`/drop` 补当前 `threadId` 后走 Host `session.drop` |
 | @ 提及 | `composer/mentions.ts` | `workspace.fileTree`、`agents.definitions.get`、查询非空时 `skills.get` |
 | 模型 / 模式选择 | `ComposerModelPicker.tsx`、`ComposerModePicker.tsx` | `session.model.set`、`session.thinking.set`、plan/vibe |
-| 消息队列条 | `MessageQueueBar.tsx`、`composer/queueEdit.ts` | 流式 Enter 本地排队（按 session 隔离），idle 后 `core.prompt`；「插入纠偏」`core.steer`；`/queue` 为 `queue.enqueue`，带图片时改 `core.followUp`。编辑在 Composer 内进行，条目留队；编辑队首时暂停 flush |
+| 消息队列条 | `MessageQueueBar.tsx`、`composer/queueEdit.ts`、`composer/dispatch.ts`（`composerOwnerSessionId` / `composerRunningForTarget`） | 流式 Enter 本地排队（按 session 隔离），idle 后 `core.prompt`；会话归属由 `composer/dispatch.ts` 判定：新建会话 `session.create` 回执落地前快照仍指向旧会话，此时 Enter 不进排队，而是等新会话创建后发送；第一条等待创建期间再次 Enter 保留输入框草稿，同步 dispatch 锁阻止同帧重复发送。草稿与侧栏当前行也不归到旧会话；「插入纠偏」`core.steer`；`/queue` 为 `queue.enqueue`，带图片时改 `core.followUp`。编辑在 Composer 内进行，条目留队；编辑队首时暂停 flush |
 | 审批 / Ask 卡片 | `InteractionDeck.tsx`、`deck/ApprovalCard.tsx`、`deck/AskCard.tsx`、`deck/QueuedDeck.tsx`、`deck/askGenie.ts`、`deck/interactionGate.ts` | `interaction.respond`；Ask 紧凑卡/Ask 卡加载与退出为底边变形浮入（不改 Plan 放大缩小）。可见提问卡不复用 Composer `gated` |
 | Plan 评审 | `deck/PlanCard.tsx`、`deck/PlanCreatedCard.tsx`、`planSections.ts`、`planFeedback.ts`、`conversation/toolMeta.ts`（`xd://propose`） | 出现时保持紧凑卡，点放大或对话入口才展开大卡；紧凑卡与展开卡右上角均放「保存并退出」（能力存在时显示），不再占用底部评审操作区；大卡章节批注；大卡底栏常驻全文批注（整份计划）；大卡右上角叉号收成紧凑卡；有意见 `mode.plan.review.respond` refine，空 Refine 走 dismiss 回 Composer；批准 `execute` 清上下文、`compact` 先压缩再执行、`keep` 保留上下文（`approve` 是 keep 别名）；钉在 `xd://propose` 所在 assistant 行（批准后不跟到最新轮）；执行后入口卡打开只读大卡回看正文，不再打 `mode.plan.review.open` |
 | 权限档位 | `ComposerApprovalPicker.tsx`（`App.tsx` 接入） | `permissions.mode.set`；预览本地切换；历史会话先 `session.resume` 再 set；流式 / 压缩中可改，下一轮对话才写入 `tools.approvalMode` |
@@ -123,7 +123,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 | Skills 抽屉 | `SkillsDrawer.tsx`、`skills/skillUsage.ts` | `omp-extensibility-adapter.ts`、`skills.get` / `skills.setEnabled` | overlay `skill-prompt-expansion.ts` |
 | MCP | `CapabilitiesPage.tsx` | `omp-mcp-adapter.ts`、`omp-mcp-probe.ts`、`mcp.get` / `mcp.setEnabled` / `mcp.refresh` / `mcp.test` / `mcp.logs.get` | 配置扫描 + Host 一次性探测；不是 Runtime MCPManager 连接态 |
 | 能力中心 | `CapabilitiesPage.tsx` | Skills 开目录 `skills.reveal` / `skills.revealRoot`（Desktop `shell.openPath`）；Slash 页 `visibleSlashCatalog()` + `App.runSlashCommand`，不是 `commands.getManifest` | overlay `command-manifest-service.ts` 仍只服务协议 manifest |
-| 模型配置页 | `ModelConfigPage.tsx`、`models/fetchedModels.ts`、`models/WebSearchPanel.tsx`（网络搜索 tab） | `omp-models-adapter.ts`、`models-yml.ts`；「自动获取模型」走 `models.provider.probe`（不传 `discoveryType`，Host 按 api 类型选模型列表地址与认证头），候选清单只进表单草稿，保存才写 `models.yml`；网络搜索 tab 为「生效链路 + 优先链/供应商库」双分区面板（含供应商描述与凭证状态、searxng 全量字段）；配置（`web_search.*` / `providers.webSearch*` / `searxng.*` / `exa.*`）走 `models.webSearch.set`，写 `config.yml` | overlay `model-control-service.ts`（会话内切模型） |
+| 模型配置页 | `ModelConfigPage.tsx`、`models/fetchedModels.ts`、`models/providerYaml.ts`（卡片 YAML 文本产出）；表单→models.yml 节点映射在 `packages/client-contract/src/provider-yaml-draft.ts`，与 Host 的 `toYamlProvider` 由 `packages/host-client-api/test/provider-yaml-draft-parity.test.ts` 钉齐、`models/WebSearchPanel.tsx`（网络搜索 tab） | `omp-models-adapter.ts`、`models-yml.ts`；「自动获取模型」走 `models.provider.probe`（不传 `discoveryType`，Host 按 api 类型选模型列表地址与认证头），候选清单只进表单草稿，保存才写 `models.yml`；编辑器下方的 `models.yml` / `config.yml` 结构化卡片由当前表单草稿派生（`deriveProviderSlice` / `deriveRoleSlice`），表单有未保存改动时即时刷新并转为只读，未接管字段与源文件一致；网络搜索 tab 为「生效链路 + 优先链/供应商库」双分区面板（含供应商描述与凭证状态、searxng 全量字段）；配置（`web_search.*` / `providers.webSearch*` / `searxng.*` / `exa.*`）走 `models.webSearch.set`，写 `config.yml` | overlay `model-control-service.ts`（会话内切模型） |
 | 发现 / 插件根 | — | `host-client-api/src/omp-discovery/**` | — |
 | Token 用量 | Home / `usage/tokenUsage.ts` | `omp-usage-adapter.ts`、`usage.get` | 聚合 `omp stats.db`，不是演示数字 |
 | 动态价格 / 图片能力 | `ModelConfigPage.tsx` | `omp-models-adapter.ts`；`client-contract/src/model-pricing.ts` 解析只读分时价/长上下文价；固定覆盖与价格元数据分开 | 保留上游 catalog policy，历史费用只读已记录 usage |
@@ -161,12 +161,12 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 系统托盘 / 关闭到托盘 | —（纯 Main 行为，无 Renderer 面，不进 preload/client-contract） | `tray.ts`（Electron-free，Main 注入 Tray/Menu/nativeImage：菜单文案 zh/en、左键打开、首隐气泡与 `%APPDATA%\omp-studio\tray-hint-shown` 标记、退出确认框文案）+ `main.ts`（close 事件拦截为 hide，托盘不可用时保持关窗即退出；`DesktopWindow.show()`）+ `composition.ts`（`requestQuit` 确认门：`host-composition.ts` `isBusy()` 以 residents 流式/压缩为准，回退当前会话 snapshot；`isQuitting` 注入窗口工厂放行真实退出） |
 | 外部 https 链接 | 启动提示 GitHub 卡；`ompStudioChrome.openUrl` | `chrome-open-url.ts` → `shell.openExternal`（系统默认浏览器，不是 Electron 窗）；只接受 https |
 | 操作者头像文件 | 首页弹窗 | `chrome-profile.ts` → `%APPDATA%\omp-studio\profile\`；升级从安装目录 `userdata\profile` 迁入；卸载 `customUnInstall` 删除 |
-| 应用更新（GitHub Release） | `AppUpdateDialog.tsx`、`settings/appUpdate.ts`、`settings/updates.ts`、`App.tsx`（徽标、遵循 autoCheck 的静默检测、本地版本信息）；预览 `PREVIEW_APP_UPDATE` | `chrome-updates.ts`、`chrome-updates-shared.ts`、`update-index.ts`、`update-prefs-store.ts`、`artifact-download.ts`、`tar-gz.ts` → 签名索引版本/兼容性决策；应用固定 stable，Runtime canary 查找带签名索引的预发布，分通道序号防回退；下载前检查 Main 基线、契约和协议；Runtime / App / Setup 下载、验签、进度、取消与应用；旧 `chrome-app-update.ts` 仅保留只读检查，下载/执行通道已移除。`payload-health.ts` / `payload-health-shared.ts` + Renderer `WorkbenchHealth.tsx` / `ErrorBoundary.tsx`：初始工作台成功提交后确认健康，首屏错误阻止清零启动失败计数 |
+| 应用更新（GitHub Release） | AppUpdateDialog、settings/appUpdate、settings/updates、settings/DesktopUpdateRecovery；预览 PREVIEW_APP_UPDATE / PREVIEW_DESKTOP_RECOVERY | Main update-coordinator / unified-updates-ipc 管理后台准备、持久化事务、统一重启；update-discovery 验签按组件/通道/架构发现；differential-artifact + electron-update-adapter 分块下载/全量回退及静默 NSIS；共享 v2 清单和 ZIP 在 runtime-installer。旧 chrome-updates 保留本地导入与诊断维护；新打包应用禁用旧在线 startApp/startRuntime。 |
 | Plan 另存为对话框 | `App.tsx` `pickPlanSaveTarget` / `savePlanAndQuit`；`deck/PlanCard.tsx` 按钮 | `workspace-shell-shared.ts`、`workspace-shell-ipc.ts`、`plan-save-path.ts`（原生另存为，默认 `<工作区>/PLAN.md`，回传工作区相对路径；越界拒绝）→ Bridge `mode.plan.review.saveAndQuit` |
 | 设置页 | `SettingsPage.tsx`、`settings/tabs.tsx` | 本地设置 + 少量 Host query |
 | 诊断页 | `DiagnosticsPage.tsx`、`diagnosticsModel.ts`、`runtimeEnsure.ts`、`RuntimeLossBanner.tsx`、`ActionProgressBar.tsx`、`updateCheck.ts`；预览 `preview/fixtures.ts` `PREVIEW_DIAGNOSTICS`；桌面 `chrome-logs.ts` | `diagnostics.get` / `environment.get` / `capabilities.get`；`chrome-updates.ts` 提供网络下载、本地导入、回滚并重启、清理旧 Runtime，`settings/updates.ts` 按 jobId 等待终态；启动与进页静默检查更新（超时不报错）；手动检查更新超时才提示；本地制品对比 `runtime-install.ts` `probeManagedRuntimeInstall`；安装/更新/重装 `runtime.install`；断开或启动失败时「重新连接 Runtime」走 `runtime.ensure`；已连接时「重启 Runtime」走 `runtime.ensure` `{ force: true }`，收据未连上时自动再 `ensure` 并等到 `runtime.changed` connected；Host 日志打开/导出走 chrome IPC `chrome-logs.ts`（路径不回传 Renderer）。工作台 / Hub / 空对话复用 `RuntimeLossBanner`。长操作显示分步进度条。 |
 | 安全窗 / CSP | — | `apps/desktop/src/security.ts` |
-| Windows 安装包 | `packaging/ui/index.html` 即 Setup 可见向导 | `packaging/installer-host`（WebView2：ProgramData 暂存 + `https://omp-installer/` 虚拟主机，不用 `$PLUGINSDIR` 的 `file://`）；`packaging/nsis/custom.nsh`（隐藏 MUI、options.ini、占用/目录规则）；`scripts/installer-dir.mjs`；`scripts/build-installer-host.mjs`；`scripts/build-update-assets.mjs`、`.github/workflows/release.yml`（签名工件与发布）。卸载仍是 MUI2。活 Runtime 在 `$INSTDIR\runtime\versions\` |
+| Windows 安装包 | packaging/ui、installer-host | packaging/electron-builder.yml / nsis/custom.nsh：当前用户安装、旧全机迁移、静默升级；scripts/build-update-assets-v2.mjs、verify-update-assets-v2.mjs、publish-update-release.mjs + .github/workflows/release.yml：多架构签名差分工件与独立 Runtime 发版；详见 docs/updates.md。 |
 | 组装顺序 | — | `host-factory.ts` → `host-composition.ts` → `composition.ts`；入口 `main.ts` |
 
 Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `event` / `close`（`packages/transport-desktop/src/channels.ts`）。不要再加通用 `invoke(channel, payload)`。
@@ -249,3 +249,15 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 - 文件重命名：改这一份，不要让 `AGENTS.md` 再列路径。
 - 新 query/command：先改 `client-contract` `operations.ts`，再改 facade `switch`，最后改 UI。
 - 预览面：同一功能在 `preview/` 有 fixture 的，索引行里提一句，避免只改真实路径。
+
+## OMP 18.2.5 新能力
+
+| 功能 | 入口 | Runtime / Host |
+|---|---|---|
+| BTW 话题与追问 | `btw/BtwPanel.tsx`、`btw/useBtwSession.ts`；预览 `preview/btwPreview.ts` | `btw.history.list/read`、`btw.followUp` → overlay `btw-service.ts`、原生 BtwHistoryStore |
+| 模型委派标签 | `composer/mentions.ts`、`composer/editorDom.ts`、`ModelDelegationList.tsx` | `session.models.mentions` → overlay `upgrade-service.ts`；原生 ModelMentionRegistry |
+| 调度、视觉、判断与推测设置 | `settings/tabs.tsx`、`models/RuntimeCredentials.tsx`、`ModelConfigPage.tsx` | `runtime.settings`、`runtime.auth.*`；capability 与严格白名单 |
+| 外部会话导入 | `SessionImportPanel.tsx`，历史页；预览 `preview/runtimeUpgradeFixtures.ts` | `session.import.*` → 原生 importer，Desktop 私有解析路径、登记工作区且不激活 |
+| Advisor 费用／实际模型／生成速率 | `App.tsx` token 面板、`conversation/SubagentMetrics.tsx` | overlay `session-telemetry.ts`、`state-projector.ts`、`agent-hub-service.ts` |
+
+迁移明细与验证：[OMP 18.2.5](../docs/migrations/omp-18.2.5.md)。

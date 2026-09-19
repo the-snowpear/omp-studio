@@ -3654,7 +3654,7 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .cm-chip-dir { color: var(--blue); background: var(--blue-soft); }
 .cm-chip-image { color: var(--purple); background: var(--purple-soft); }
 .cm-chip-skill { color: var(--amber); background: var(--amber-soft); }
-.cm-chip-agent { color: var(--green); background: var(--green-soft); }
+.cm-chip-model, .cm-chip-agent { color: var(--green); background: var(--green-soft); }
 .cm-chip-mode {
   color: var(--accent);
   background: var(--accent-soft);
@@ -6485,3 +6485,18 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   .ce-hc, .ce-heat-months, .ce-heat-days { animation: none; }
   .ce-heat-cells::after { display: none; }
 }
+
+.btw-history-toolbar { display:flex; gap:6px; padding:8px; flex-wrap:wrap; }
+.btw-history-toolbar .select { flex:1; min-width:120px; }
+.btw-history-turn { border-bottom:1px solid var(--border); padding-bottom:12px; margin-bottom:12px; }
+
+.session-import { margin-bottom:12px; }
+.session-import-panel { margin-top:12px; padding:16px; border:1px solid var(--border); border-radius:12px; }
+.session-import-sources { display:flex; flex-direction:column; gap:6px; max-height:220px; overflow:auto; margin:12px 0; }
+.session-import-preview { max-height:320px; overflow:auto; margin:12px 0; }
+
+.runtime-credentials { padding:16px; border-bottom:1px solid var(--border); }
+.runtime-credential-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0; }
+.runtime-credential-row input { max-width:240px; }
+
+.model-delegation-list { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 16px; }

@@ -61,6 +61,7 @@ export type StudioAgentDeliveryOutcome = "injected" | "queued" | "woken" | "revi
 
 /** Cumulative per-agent usage totals; shape-compatible with AgentMetricsSummary. */
 export interface StudioAgentUsage {
+	generationTps?: number;
 	tokens: number;
 	requests: number;
 	tools: number;
@@ -794,6 +795,7 @@ export class StudioAgentHubService {
 		const history = ref.history;
 		const liveUsage = this.#telemetry?.liveUsage(agentId);
 		const usage = liveUsage ?? history?.metrics;
+		const rate = ref.session?.tokenRate?.rate();
 		const liveModel = this.#telemetry?.liveModel(agentId);
 		const resolvedModel = liveModel ?? history?.resolvedModel;
 		const summary = ref.activity === undefined ? this.#telemetry?.liveSummary(agentId) : undefined;
@@ -812,7 +814,14 @@ export class StudioAgentHubService {
 			hasTranscript: ref.session !== null || ref.sessionFile !== null,
 			unreadCount: this.#irc.unreadCount(agentId),
 			activeJobIds: this.#activeJobIdsFor(agentId),
-			...(usage !== undefined ? { usage: { ...usage } } : {}),
+			...(usage !== undefined
+				? {
+						usage: {
+							...usage,
+							...(typeof rate === "number" && Number.isFinite(rate) && rate >= 0 ? { generationTps: rate } : {}),
+						},
+					}
+				: {}),
 			...(history?.modelRole !== undefined ? { modelRole: history.modelRole } : {}),
 			...(resolvedModel !== undefined && resolvedModel.length > 0 ? { resolvedModel } : {}),
 			// The fallback marker describes the persisted resolution; a live

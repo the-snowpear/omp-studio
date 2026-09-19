@@ -477,6 +477,15 @@ export function DiagnosticsPage({
     }
     if (kind === "update" && updates.state.check?.runtime.plan === "available") {
       const chrome = globalThis.ompStudioChrome;
+      if (chrome?.prepareUpdates && await chrome.getUpdateSnapshot?.().catch(() => null)) {
+        try {
+          beginAction({ kind, label: t("updates.downloading"), step: 1, steps: 2 });
+          await chrome.prepareUpdates("runtime");
+          show(t("updates.readyToApply"), "check");
+        } catch (error) { show(error instanceof Error ? error.message : t("diagnostics.installFailed"), "alert-c"); }
+        finally { setBusy(null); }
+        return;
+      }
       if (chrome && typeof chrome.startRuntime === "function") {
         beginAction({
           kind,

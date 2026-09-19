@@ -104,9 +104,11 @@ function parseContext(value: unknown, path: string): NonNullable<SessionTelemetr
 
 export function parseSessionTelemetrySnapshot(value: unknown, path = "$telemetry"): SessionTelemetrySnapshot {
   const input = record(value, path);
-  exactKeys(input, ["sessionId", "capturedAt", "tokens", "lastCompletedTurn", "context", "unavailableReason"], path);
+  exactKeys(input, ["sessionId", "capturedAt", "tokens", "lastCompletedTurn", "context", "unavailableReason", "advisorCost", "generationTps", "requestedModel", "servedModel"], path);
   nonEmptyString(input.sessionId, `${path}.sessionId`);
   nonEmptyString(input.capturedAt, `${path}.capturedAt`);
+  for (const key of ["advisorCost", "generationTps"]) if (input[key] !== undefined) finiteNonNegative(input[key], path + "." + key);
+  for (const key of ["requestedModel", "servedModel"]) if (input[key] !== undefined) { nonEmptyString(input[key], path + "." + key); if ((input[key] as string).length > 256) throw new ContractValidationError("model name too long", path); }
   parseTokenSet(input.tokens, `${path}.tokens`);
   if (input.lastCompletedTurn !== undefined) parseTurn(input.lastCompletedTurn, `${path}.lastCompletedTurn`);
   if (input.context !== null) parseContext(input.context, `${path}.context`);

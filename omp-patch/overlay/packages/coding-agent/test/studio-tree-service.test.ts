@@ -240,3 +240,21 @@ describe("WP-034 StudioTreeService", () => {
 		});
 	});
 });
+
+test("restoring and branching a tagged prompt returns editable model selectors, even after registry rewind", async () => {
+	const modelMentions = [{ agent: "m1", selector: "provider/model", name: "Model" }];
+	const session = {
+		modelMentions,
+		sessionManager: { getLeafId: () => "leaf", getSessionId: () => "session" },
+		navigateTree: async () => ({ cancelled: false, editorText: 'ask <model agent="m1" name="Model"/>' }),
+		branch: async () => {
+			session.modelMentions = [];
+			return { cancelled: false, selectedText: 'ask <model agent="m1" name="Model"/>' };
+		},
+	};
+	const service = new StudioTreeService(session as unknown as AgentSession);
+	expect(await service.navigate("navigate", { targetId: "user" })).toMatchObject({
+		editorText: "ask ^provider/model",
+	});
+	expect(await service.branch("branch", { targetId: "user" })).toMatchObject({ editorText: "ask ^provider/model" });
+});

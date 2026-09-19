@@ -12,6 +12,7 @@ export type AgentStatus =
 
 /** Cumulative per-agent usage totals; mirrors the runtime hub projection. */
 export interface StudioAgentUsage {
+  generationTps?: number;
   tokens: number;
   requests: number;
   tools: number;

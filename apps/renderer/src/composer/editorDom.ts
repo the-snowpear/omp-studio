@@ -302,14 +302,14 @@ export function insertPlainText(editor: HTMLElement, text: string): void {
 }
 
 export type MentionQuery = {
-  trigger: "@";
+  trigger: "@" | "^";
   query: string;
   textNode: Text;
   start: number;
   end: number;
 };
 
-const MENTION_TOKEN = /(?:^|[\s([{<"'])(@)([^\s]*)$/u;
+const MENTION_TOKEN = /(?:^|[\s([{<"'])([@^])([^\s]*)$/u;
 
 function inChip(node: Node): boolean {
   const el = node instanceof Element ? node : node.parentElement;
@@ -321,9 +321,9 @@ function mentionInText(textNode: Text, end: number): MentionQuery | null {
   const before = textNode.data.slice(0, end);
   const match = MENTION_TOKEN.exec(before);
   if (!match || match.index === undefined) return null;
-  const start = match[0].startsWith("@") ? match.index : match.index + 1;
+  const start = /^[@^]/u.test(match[0]) ? match.index : match.index + 1;
   return {
-    trigger: "@",
+    trigger: match[1] === "^" ? "^" : "@",
     query: match[2] ?? "",
     textNode,
     start,
@@ -363,8 +363,8 @@ export function mentionAtCaret(editor: HTMLElement): MentionQuery | null {
  * Last `@query` mention in the editor. Used when the caret is not inside the
  * token (toolbar `@` button, then pick from the menu).
  */
-export function findMentionToken(editor: HTMLElement, query: string): MentionQuery | null {
-  const needle = `@${query}`;
+export function findMentionToken(editor: HTMLElement, query: string, trigger: "@" | "^" = "@"): MentionQuery | null {
+  const needle = `${trigger}${query}`;
   const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
   let found: MentionQuery | null = null;
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {

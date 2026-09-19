@@ -27,7 +27,8 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat } from "node:fs/promises";
+import { lstat, readFile, rm } from "node:fs/promises";
+import { writeJsonAtomic } from "@omp-studio/runtime-installer";
 import type { Socket } from "node:net";
 import { join } from "node:path";
 
@@ -370,8 +371,13 @@ export function createDesktopRuntimeSessionPort(
     };
   };
 
-  const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
-    const run = queue.then(operation, operation);
+  let restartPrepared = false;
+  const serialized = <T>(operation: () => Promise<T>, allowDuringRestart = false): Promise<T> => {
+    const guarded = () => {
+      if (restartPrepared && !allowDuringRestart) throw new Error("Runtime is restarting for an update");
+      return operation();
+    };
+    const run = queue.then(guarded, guarded);
     queue = run.then(() => undefined, () => undefined);
     return run;
   };
@@ -728,11 +734,63 @@ export function createDesktopRuntimeSessionPort(
           rememberUnavailable(undefined);
           return active.session;
         }
+        const restorePath = join(launchContext.profileDirectory, "update-session-restore.json");
+        let restore: { activeSessionId?: string; residents: Array<{ sessionId: string; workspace: { workspaceId: string; cwd: string } }> } | undefined;
+        try {
+          const value = JSON.parse(await readFile(restorePath, "utf8"));
+          if (!value || !Array.isArray(value.residents) || value.residents.length > 128 || value.residents.some((r: { sessionId?: unknown; workspace?: { workspaceId?: unknown; cwd?: unknown } }) => typeof r.sessionId !== "string" || typeof r.workspace?.workspaceId !== "string" || typeof r.workspace?.cwd !== "string")) throw new Error("Invalid update session restore state");
+          restore = value;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") options.log?.write("warn", "runtime.update.restore", "Invalid session restore state; kept for diagnostics");
+        }
+        if (restore?.residents.length) {
+          const failed: typeof restore.residents = [];
+          try {
+            for (const resident of restore.residents) {
+              try {
+                const restored = await launchWorker(resident.sessionId, resident.workspace);
+                if (!restored) throw new Error("Unable to resume session after update");
+              } catch (error) {
+                failed.push(resident);
+                options.log?.write("warn", "runtime.update.restore", errorDetail(error));
+              }
+            }
+            const selected = restore.activeSessionId && residents.has(restore.activeSessionId)
+              ? restore.activeSessionId : activeSessionId;
+            const session = selected ? await selectResident(selected) : await launchWorker();
+            if (!session) throw new Error("Runtime did not become ready after update");
+            if (failed.length > 0) {
+              await writeJsonAtomic(join(launchContext.profileDirectory, `update-session-restore.failed-${randomUUID()}.json`), {
+                activeSessionId: restore.activeSessionId, residents: failed,
+              });
+            }
+            await rm(restorePath, { force: true });
+            rememberUnavailable(undefined);
+            return session;
+          } catch (error) {
+            // Retain the restore intent if even a fresh Worker fails, so a
+            // Runtime rollback can retry the original sessions.
+            await stopAll();
+            throw error;
+          }
+        }
         return await launchWorker();
       });
     },
     stop(): Promise<void> {
-      return serialized(stopAll);
+      return serialized(stopAll, true);
+    },
+    prepareRestart(): Promise<void> {
+      return serialized(async () => {
+        if (!context) return;
+        const current = [...residents.values()];
+        if (current.some(r => r.session.hello() !== undefined && !sessionCanUpdate(r.session))) throw new Error("Finish active sessions and pending interactions before restarting");
+        await writeJsonAtomic(join(context.profileDirectory, "update-session-restore.json"), {
+          activeSessionId, residents: current.map(r => ({ sessionId: r.sessionId, workspace: r.workspace })),
+        });
+        restartPrepared = true;
+        await stopAll();
+      });
     },
     withRuntimeMaintenance<T>(operation: () => Promise<T>, expectedVersion?: () => string | undefined,
       refreshContext?: () => Promise<DesktopRuntimeSessionContext>,

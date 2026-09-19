@@ -1,5 +1,11 @@
 # Release Operations
 
+## Update-system migration
+
+The `codex/incremental-updates` branch introduces the v2 updater described in [updates.md](updates.md) and the current section of [releasing.md](releasing.md). This branch does not itself publish a new application version. The v0.1.4/v0.1.5 publication records below remain historical facts; their old payload format is not the new release format.
+
+On 2026-09-17, titles and descriptions of the five existing desktop releases were normalized with explicit installer links and attachment explanations. Asset names, bytes, tags and download links were retained. Original remote metadata and proposed descriptions were saved under `backup/2026-09-17/release-descriptions-2026-09-17T09-36-58-387Z/` before applying the edits.
+
 ## Signing Identity Established on 2026-09-06
 
 - Repository: `the-snowpear/omp-studio`.
@@ -114,4 +120,3 @@ Published on 2026-09-13:
 - Eight public assets are present and the release is stable/latest.
 - CI application/Runtime gates, installer audit and P5 readiness gate passed.
 - Minimum app version baseline: `minAppVersion` defaults to `0.1.5` for payload and Runtime, requiring full Setup upgrades for older Main baselines.
-

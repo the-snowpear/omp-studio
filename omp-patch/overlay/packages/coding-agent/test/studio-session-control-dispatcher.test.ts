@@ -200,6 +200,7 @@ function fixture() {
 				},
 			},
 			btw: {
+				settle: async () => {},
 				onChange: () => () => {},
 				ask: (question: string) => {
 					serviceCalls.push("btw.ask");

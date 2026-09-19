@@ -152,6 +152,15 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     checkAppUpdate(): Promise<AppUpdateInfo | null> {
       return ipcRenderer.invoke(CHROME_APP_UPDATE_CHANNELS.check) as Promise<AppUpdateInfo | null>;
     },
+    getUpdateSnapshot(): Promise<import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot | null> {
+      return ipcRenderer.invoke(CHROME_UPDATES_CHANNELS.snapshot) as Promise<import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot | null>;
+    },
+    prepareUpdates(target: "all" | "app" | "runtime"): Promise<import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot> {
+      return ipcRenderer.invoke(CHROME_UPDATES_CHANNELS.prepare, target) as Promise<import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot>;
+    },
+    subscribeUpdates(listener: (snapshot: import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot) => void): () => void {
+      return subscribeChannel(ipcRenderer, CHROME_UPDATES_CHANNELS.changed, listener);
+    },
     checkUpdates(): Promise<UpdateCheckResult | null> {
       return ipcRenderer.invoke(CHROME_UPDATES_CHANNELS.check) as Promise<UpdateCheckResult | null>;
     },

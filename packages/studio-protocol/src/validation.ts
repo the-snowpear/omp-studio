@@ -1,3 +1,4 @@
+import { isUpgradeOperationKind, validateUpgradeOperation } from "./contracts/runtime-upgrade.js";
 import { isEvaluationOperationKind, parseEvaluationOperation } from "./evaluation-validation.js";
 import { ContractValidationError } from "./contract-error.js";
 import type { AgentTranscriptMessage, AgentTranscriptPage } from "./contracts/agents-jobs.js";
@@ -153,7 +154,7 @@ function validateLoopCondition(value: unknown, path: string): void {
   booleanValue(condition.until, path + ".until");
 }
 
-function validateRuntimeSettingValue(
+export function validateRuntimeSettingValue(
   key: StudioRuntimeSettingKey,
   value: unknown,
   path: string,
@@ -164,9 +165,35 @@ function validateRuntimeSettingValue(
     case "compaction.asyncEnabled":
     case "plan.autosave":
     case "retry.waitForUsageReset":
+    case "task.enableEffort":
+    case "images.describeForTextModels":
+    case "tools.speculativeExecution.enabled":
     case "compaction.experimentalContextManagement":
       booleanValue(value, path);
       return;
+    case "task.maxEffort":
+      oneOf(value, ["minimal", "low", "medium", "high", "xhigh", "max"], path);
+      return;
+    case "providers.autoThinkingMaxEffort":
+      oneOf(value, ["xhigh", "max"], path);
+      return;
+    case "providers.judgmentProvider":
+      oneOf(value, ["auto", "typesafe", "llm"], path);
+      return;
+    case "images.questionTimeoutMs":
+      if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 2147483647)
+        throw new ContractValidationError("expected a nonnegative timeout in milliseconds", path);
+      return;
+    case "task.agentServiceTierOverrides": {
+      const overrides = record(value, path);
+      if (Object.keys(overrides).length > 256) throw new ContractValidationError("too many agent overrides", path);
+      for (const [name, tier] of Object.entries(overrides)) {
+        if (!name.trim() || name.length > 256 || /[\u0000-\u001f]/u.test(name) || ["__proto__", "constructor", "prototype"].includes(name))
+          throw new ContractValidationError("invalid agent name", path);
+        oneOf(tier, ["inherit", "none", "auto", "default", "flex", "scale", "priority"], path + "." + name);
+      }
+      return;
+    }
     case "plan.autosaveDir":
       if (typeof value !== "string" || value.length > 4096 || value.includes("\0")) {
         throw new ContractValidationError("expected a plan autosave directory", path);
@@ -194,11 +221,26 @@ function validateRuntimeSettingValue(
   }
 }
 
+/** Settings an older snapshot may legitimately omit (added after the shape shipped). */
+const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
+  "plan.autosave",
+  "plan.autosaveDir",
+  "retry.waitForUsageReset",
+  "compaction.experimentalContextManagement",
+  "task.enableEffort",
+  "task.maxEffort",
+  "task.agentServiceTierOverrides",
+  "providers.autoThinkingMaxEffort",
+  "providers.judgmentProvider",
+  "images.describeForTextModels",
+  "images.questionTimeoutMs",
+  "tools.speculativeExecution.enabled",
+]);
 function validateRuntimeSettingsSnapshot(value: unknown, path: string): void {
   const settings = record(value, path);
   exactKeys(settings, STUDIO_RUNTIME_SETTING_KEYS, path);
   for (const key of STUDIO_RUNTIME_SETTING_KEYS) {
-    if (settings[key] === undefined && ["plan.autosave", "plan.autosaveDir", "retry.waitForUsageReset", "compaction.experimentalContextManagement"].includes(key)) continue;
+    if (settings[key] === undefined && OPTIONAL_RUNTIME_SETTING_KEYS.has(key)) continue;
     validateRuntimeSettingValue(key, settings[key], `${path}.${key}`);
   }
 }
@@ -1450,6 +1492,10 @@ export function parseFoundationStudioRequest(value: unknown): StudioRequest {
 
   const operation = record(input.operation, "$request.operation");
   const kind = nonEmptyString(operation.kind, "$request.operation.kind");
+  if (isUpgradeOperationKind(kind)) {
+    try { validateUpgradeOperation(operation); } catch (error) { throw new ContractValidationError(error instanceof Error ? error.message : "invalid operation", "$request.operation"); }
+    return input as unknown as StudioRequest;
+  }
   if (isEvaluationOperationKind(kind)) {
     try {
       parseEvaluationOperation(operation);

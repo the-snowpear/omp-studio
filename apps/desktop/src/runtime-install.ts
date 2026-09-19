@@ -163,13 +163,14 @@ export const PACKAGED_RUNTIME_KEYS_DIR = "runtime-keys";
 export function packagedRuntimeInstallLayout(input: {
   readonly isPackaged: boolean;
   readonly execPath: string;
+  readonly localAppData?: string;
 }): { readonly installDirectory: string; readonly artifactRoot: string; readonly keysDirectory: string } | undefined {
   if (!input.isPackaged) return undefined;
   const installDir = dirname(input.execPath);
-  const installDirectory = join(installDir, PACKAGED_RUNTIME_ARTIFACT_DIR);
+  const installDirectory = join(input.localAppData ?? process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "runtimes");
   return {
     installDirectory,
-    artifactRoot: join(installDirectory, PACKAGED_RUNTIME_VERSIONS_DIR),
+    artifactRoot: join(installDir, PACKAGED_RUNTIME_ARTIFACT_DIR, PACKAGED_RUNTIME_VERSIONS_DIR),
     keysDirectory: join(installDir, PACKAGED_RUNTIME_KEYS_DIR),
   };
 }

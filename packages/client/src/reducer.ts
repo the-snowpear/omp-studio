@@ -260,6 +260,16 @@ const SENSITIVE_COMMANDS: Readonly<Record<CommandName, boolean>> = {
   "session.tree.branch": true,
   "operator.invoke": true,
   "btw.ask": true,
+  "btw.history.list": false,
+  "btw.history.read": false,
+  "btw.followUp": true,
+  "session.models.mentions": false,
+  "session.import.list": false,
+  "session.import.preview": false,
+  "session.import.execute": true,
+  "runtime.auth.get": false,
+  "runtime.auth.set": true,
+  "runtime.auth.remove": true,
   // Cancelling an in-flight side question is a safety valve, not a mutation
   // that can drift from a stale snapshot: it must work during resync too.
   "btw.abort": false,

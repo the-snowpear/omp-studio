@@ -57,13 +57,12 @@
   !endif
   Var ompExistingVersion
   Var ompExistingDir
+  Var ompLegacyMachineDir
   Var ompDirLocked
   Var ompHtmlUi
   Var ompHtmlResolved
   !define MUI_CUSTOMFUNCTION_GUIINIT ompHideNsisUi
 !endif
-!include "getProcessInfo.nsh"
-Var pid
 
 !define OMP_PRODUCT_DIR "OMP Studio"
 
@@ -118,18 +117,13 @@ FunctionEnd
   StrCpy $ompExistingVersion ""
   StrCpy $ompExistingDir ""
 
-  ReadRegStr $ompExistingDir HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation
-  ${if} $ompExistingDir == ""
-    ReadRegStr $ompExistingDir HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
-  ${endIf}
+  ReadRegStr $ompLegacyMachineDir HKLM "${INSTALL_REGISTRY_KEY}" InstallLocation
+  ReadRegStr $ompExistingDir HKCU "${INSTALL_REGISTRY_KEY}" InstallLocation
 
-  ReadRegStr $ompExistingVersion HKLM "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
-  ${if} $ompExistingVersion == ""
-    ReadRegStr $ompExistingVersion HKCU "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
-  ${endIf}
+  ReadRegStr $ompExistingVersion HKCU "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
   !ifdef UNINSTALL_REGISTRY_KEY_2
     ${if} $ompExistingVersion == ""
-      ReadRegStr $ompExistingVersion HKLM "${UNINSTALL_REGISTRY_KEY_2}" DisplayVersion
+      ReadRegStr $ompExistingVersion HKCU "${UNINSTALL_REGISTRY_KEY_2}" DisplayVersion
     ${endIf}
     ${if} $ompExistingVersion == ""
       ReadRegStr $ompExistingVersion HKCU "${UNINSTALL_REGISTRY_KEY_2}" DisplayVersion
@@ -168,6 +162,7 @@ FunctionEnd
   ; hook below repeats this because NSIS may create the dialog after .onInit.
   Call ompHideNsisUi
   !insertmacro ompReadExistingInstall
+  !insertmacro setInstallModePerUser
 
   ${If} ${Silent}
   ${AndIfNot} ${UAC_IsInnerInstance}
@@ -529,79 +524,14 @@ FunctionEnd
 !macroend
 
 !macro customCheckAppRunning
-  !insertmacro IS_POWERSHELL_AVAILABLE
-  ${GetProcessInfo} 0 $pid $1 $2 $3 $4
-  ${if} $3 == "${APP_EXECUTABLE_FILENAME}"
-    Goto omp_app_not_running
-  ${endIf}
-
-  !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
-  ${if} $R0 != 0
-    !insertmacro FIND_PROCESS "omp.exe" $R0
-  ${endIf}
-  ${if} $R0 != 0
-    Goto omp_app_not_running
-  ${endIf}
-
-  ${if} ${isUpdated}
-    Sleep 300
-    !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
-    ${if} $R0 != 0
-      !insertmacro FIND_PROCESS "omp.exe" $R0
-    ${endIf}
-    ${if} $R0 != 0
-      Goto omp_app_not_running
-    ${endIf}
-    Sleep 1000
-    Goto omp_stop_process
-  ${endIf}
-
-  ReadINIStr $R8 "$PLUGINSDIR\options.ini" "Install" "Kill"
-  ${If} $R8 == "1"
-    Goto omp_stop_process
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR\omp-maintenance"
+  File /r "${BUILD_RESOURCES_DIR}\installer-host\*.*"
+  ExecWait '"$PLUGINSDIR\omp-maintenance\OmpInstallerUi.exe" --wait-install-root "$INSTDIR"' $R0
+  ${If} $R0 != 0
+    MessageBox MB_OK|MB_ICONEXCLAMATION "请先退出此安装的 OMP Studio，再重试更新。" /SD IDOK
+    Abort
   ${EndIf}
-
-  !ifdef BUILD_UNINSTALLER
-    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "OMP Studio 正在运行$\r$\n$\r$\n卸载前需要先结束 OMP Studio。未保存的对话请先在应用内处理，然后继续。" /SD IDOK IDOK omp_stop_process
-  !else
-    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "OMP Studio 正在运行$\r$\n$\r$\n安装前需要先结束 OMP Studio。未保存的对话请先在应用内处理，然后继续。" /SD IDOK IDOK omp_stop_process
-  !endif
-  Quit
-
-  omp_stop_process:
-  DetailPrint "正在结束 OMP Studio..."
-  !insertmacro KILL_PROCESS "${APP_EXECUTABLE_FILENAME}" 0
-  !insertmacro KILL_PROCESS "omp.exe" 0
-  Sleep 300
-  StrCpy $R1 0
-
-  omp_stop_loop:
-    IntOp $R1 $R1 + 1
-    !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
-    ${if} $R0 != 0
-      !insertmacro FIND_PROCESS "omp.exe" $R0
-    ${endIf}
-    ${if} $R0 != 0
-      Goto omp_app_not_running
-    ${endIf}
-    Sleep 1000
-    !insertmacro KILL_PROCESS "${APP_EXECUTABLE_FILENAME}" 1
-    !insertmacro KILL_PROCESS "omp.exe" 1
-    !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
-    ${if} $R0 != 0
-      !insertmacro FIND_PROCESS "omp.exe" $R0
-    ${endIf}
-    ${if} $R0 != 0
-      Goto omp_app_not_running
-    ${endIf}
-    ${if} $R1 > 1
-      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "无法结束 OMP Studio。请手动退出后再重试。" /SD IDCANCEL IDRETRY omp_stop_loop
-      Quit
-    ${else}
-      Goto omp_stop_loop
-    ${endIf}
-
-  omp_app_not_running:
 !macroend
 
 !macro customRemoveFiles
@@ -639,7 +569,19 @@ FunctionEnd
   ${endIf}
 !macroend
 
+!macro customInstallMode
+  StrCpy $isForceCurrentInstall "1"
+!macroend
+
 !macro customInstall
+  ${If} $ompLegacyMachineDir != ""
+    ExecWait '"$PLUGINSDIR\omp-maintenance\OmpInstallerUi.exe" --migrate-machine "$ompLegacyMachineDir" "$INSTDIR"' $R0
+    ${If} $R0 != 0
+      MessageBox MB_OK|MB_ICONEXCLAMATION "当前用户版本已安装，但旧全机版本尚未移除。请关闭所有 OMP 任务后重新运行安装包完成迁移。" /SD IDOK
+      SetErrorLevel 20
+      Quit
+    ${EndIf}
+  ${EndIf}
   StrCmp $ompHtmlUi "1" 0 omp_custom_install_ui
     Call ompHideNsisUi
   omp_custom_install_ui:
@@ -647,7 +589,7 @@ FunctionEnd
   ; deterministic all-users copy as a final guard: custom UI directory choices
   ; must never make the Start menu shortcut disappear.
   StrCpy $R7 $installMode
-  SetShellVarContext all
+  SetShellVarContext current
   CreateDirectory "$SMPROGRAMS"
   CreateShortCut "$SMPROGRAMS\${SHORTCUT_NAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 "" "" "${APP_DESCRIPTION}"
   ClearErrors

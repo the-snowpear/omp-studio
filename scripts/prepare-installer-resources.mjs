@@ -4,6 +4,7 @@
 
 import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { verifySignedArtifact, RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest } from "@omp-studio/runtime-installer";
 import { resolveTargetArch, assertRuntimeManifestTarget, assertPeArchitecture } from "./windows-architecture.mjs";
 
 import {
@@ -124,6 +125,10 @@ async function main() {
   }
 
   const publicKeyPath = await stagePublicKey();
+  const keyTable = JSON.parse(await readFile(join(KEYS_OUT_DIR, "trusted-keys.json"), "utf8"));
+  const trustedKeys = {};
+  for (const [id, name] of Object.entries(keyTable.keys)) trustedKeys[id] = await readFile(join(KEYS_OUT_DIR, name));
+  await verifySignedArtifact({ directory: destination, layout: RUNTIME_ARTIFACT_LAYOUT, parseManifest: parseRuntimeInstallationManifest, requireCovered: m => ["runtime-manifest.json", m.entrypoint], trustedKeys });
   console.log(`Installer live Runtime artifact: ${source}`);
   console.log(`Installer staged Runtime: ${destination}`);
   console.log(`Installer public key: ${publicKeyPath}`);

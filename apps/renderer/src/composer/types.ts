@@ -15,7 +15,7 @@ export type PromptImage = {
   readonly data: string;
 };
 
-export type ComposerChipKind = "file" | "dir" | "image" | "skill" | "agent" | "mode";
+export type ComposerChipKind = "file" | "dir" | "image" | "skill" | "agent" | "model" | "mode";
 
 export type ComposerChip = {
   readonly id: string;
@@ -45,7 +45,7 @@ export type ComposerSnapshot = {
 };
 
 export type MentionCandidate = {
-  readonly kind: "skill" | "agent" | "file" | "dir";
+  readonly kind: "skill" | "agent" | "model" | "file" | "dir";
   readonly id: string;
   readonly label: string;
   readonly detail?: string;

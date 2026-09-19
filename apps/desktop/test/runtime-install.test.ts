@@ -562,14 +562,15 @@ test("install service does not interpret an arbitrary already-installed error as
   }
 });
 
-test("packagedRuntimeInstallLayout is the live RuntimeInstaller tree next to the exe", () => {
+test("packagedRuntimeInstallLayout separates writable user Runtime from bundled seed", () => {
   assert.equal(packagedRuntimeInstallLayout({ isPackaged: false, execPath: join("C:", "dev", "OMP Studio.exe") }), undefined);
   const layout = packagedRuntimeInstallLayout({
     isPackaged: true,
     execPath: join("C:", "Program Files", "OMP Studio", "OMP Studio.exe"),
+    localAppData: join("C:", "Users", "fixture", "AppData", "Local"),
   });
   assert.deepEqual(layout, {
-    installDirectory: join("C:", "Program Files", "OMP Studio", "runtime"),
+    installDirectory: join("C:", "Users", "fixture", "AppData", "Local", "omp-studio", "runtimes"),
     artifactRoot: join("C:", "Program Files", "OMP Studio", "runtime", "versions"),
     keysDirectory: join("C:", "Program Files", "OMP Studio", "runtime-keys"),
   });

@@ -23,13 +23,15 @@
     "@omp-studio/runtime-installer": "0.1.5",
     "@omp-studio/studio-host": "0.1.5",
     "@omp-studio/transport-desktop": "0.1.5",
+    "builder-util-runtime": "9.7.0",
+    "electron-updater": "6.8.9",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
+    "@omp-studio/testkit": "0.1.5",
     "@types/node": "^24.0.0",
     "electron": "^43.4.0",
-    "typescript": "^5.9.0",
-    "@omp-studio/testkit": "0.1.5"
+    "typescript": "^5.9.0"
   }
 }

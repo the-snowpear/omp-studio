@@ -30,9 +30,9 @@ export interface StudioOperatorCommandManifest {
 	unclassifiedBuiltins: string[];
 }
 
-const UPSTREAM_COMMIT = "00085d4e7dfdcfbf302c122fa2682b410a0f43d1";
+const UPSTREAM_COMMIT = "37273117021129e96bd05d8277b140ec3fd61990";
 const STUDIO_SESSION_TITLE_ENSURE_ID = "studio.session-title.ensure";
-const DESTRUCTIVE = new Set(["drop", "clear", "fork"]);
+const DESTRUCTIVE = new Set(["delete", "drop", "clear", "fork"]);
 const READ_ONLY = new Set(["help", "version", "stats", "models", "tree", "branch", "goal"]);
 
 export class StudioCommandManifestError extends Error {
@@ -204,7 +204,7 @@ export class StudioCommandManifestService {
 			if (parsed === undefined || skill === undefined) {
 				throw new StudioCommandManifestError("COMMAND_UNKNOWN", "Skill command is no longer available");
 			}
-			const built = await buildSkillPromptMessage(skill, parsed.args, "user");
+			const built = await buildSkillPromptMessage(skill, parsed, "user");
 			await this.session.promptCustomMessage(
 				{
 					customType: SKILL_PROMPT_MESSAGE_TYPE,

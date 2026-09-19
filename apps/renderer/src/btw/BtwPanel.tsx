@@ -50,19 +50,29 @@ export function BtwPanel({
 
   return (
     <div className="btw-panel">
-      {session.question === "" ? null : (
+      {session.historyAvailable ? <div className="btw-history-toolbar">
+        <select disabled={session.snapshot?.status === "running"} className="select" aria-label={t("runtimeUpgrade.btwHistory")} value={session.selectedTopicId ?? ""} onChange={event => { if (event.target.value) void session.selectTopic?.(event.target.value); else session.newTopic?.(); }}>
+          <option value="">{t("runtimeUpgrade.btwNew")}</option>
+          {session.topics?.map(topic => <option key={topic.topicId} value={topic.topicId}>{topic.question} ({topic.turnCount})</option>)}
+        </select>
+        <button className="btn small" disabled={session.snapshot?.status === "running"} onClick={() => session.newTopic?.()}>{t("runtimeUpgrade.btwNew")}</button>
+        <button className="btn small" onClick={() => void session.refreshHistory?.()}>{t("common.refresh")}</button>
+      </div> : null}
+      {session.question === "" || (session.turns?.length ?? 0) > 0 ? null : (
         <div className="btw-question" data-tip={session.question}>
           <Icon name="asterisk" extra="sm" />
           <span className="btw-question-text">{session.question}</span>
         </div>
       )}
       <div className="btw-body" ref={bodyRef} onScroll={onScroll}>
+        {session.turns?.filter((turn, index, turns) => index !== turns.length - 1 || turn.answer !== snapshot?.text).map((turn, index) => <div key={index} className="btw-history-turn"><p className="btw-question">{turn.question}</p><MarkdownText text={turn.answer} /></div>)}
+        {(session.turns?.length ?? 0) > 0 && session.question ? <p className="btw-question">{session.question}</p> : null}
         {snapshot === null ? (
           <div className="empty">
             <Icon name="sparkles" extra="lg" />
             <p>还没有 BTW 问答</p>
             <p className="muted small">
-              在下面问一句，或在主输入框用 <code>/btw &lt;question&gt;</code>。旁路提问不进主对话，也不打断当前回合。再问会覆盖这一轮。
+              {t("runtimeUpgrade.btwEmpty")}
             </p>
           </div>
         ) : text === "" && snapshot.status === "running" ? (
@@ -127,7 +137,7 @@ function BtwComposer({ session }: { session: BtwSessionApi }) {
   const inputId = useId();
   const sending = session.pending;
   const draft = session.draft;
-  const ready = draft.trim().length > 0 && !sending;
+  const ready = draft.trim().length > 0 && !sending && session.snapshot?.status !== "running";
   const running = session.snapshot?.status === "running";
 
   const submit = async (): Promise<void> => {
@@ -155,7 +165,7 @@ function BtwComposer({ session }: { session: BtwSessionApi }) {
         id={inputId}
         className="btw-compose-input"
         rows={2}
-        placeholder={running ? t("btw.overwritePlaceholder") : t("btw.placeholder")}
+        placeholder={running ? t("runtimeUpgrade.btwWait") : session.selectedTopicId ? t("runtimeUpgrade.btwFollow") : t("btw.placeholder")}
         value={draft}
         disabled={sending}
         onChange={(event) => session.setDraft(event.target.value)}
@@ -165,8 +175,8 @@ function BtwComposer({ session }: { session: BtwSessionApi }) {
         type="submit"
         className="icon-btn small btw-compose-send"
         disabled={!ready}
-        data-tip={running ? t("btw.overwrite") : t("common.send")}
-        aria-label={running ? t("btw.overwriteAndAsk") : t("common.send")}
+        data-tip={running ? t("runtimeUpgrade.btwWait") : t("common.send")}
+        aria-label={t("common.send")}
       >
         <Icon name="send" extra="sm" />
       </button>

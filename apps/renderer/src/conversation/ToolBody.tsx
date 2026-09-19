@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 import { RasterPreview, TerminalGraphicView } from "../TerminalGraphicView";
 import { TerminalGraphicsDecoder } from "../terminalGraphics";
 import { createContext, memo, useContext, useMemo, type ComponentProps, type MouseEvent } from "react";
@@ -480,6 +481,7 @@ function AskBody({ tool }: { tool: ToolView }) {
 }
 
 function TaskBody({ tool }: { tool: ToolView }) {
+  const { t } = useI18n();
   const fields = toolFields(tool);
   const brief = parseTaskBrief(fields);
   const jobs = taskJobs(fields);
@@ -487,6 +489,9 @@ function TaskBody({ tool }: { tool: ToolView }) {
   const spawnAgent = jsonString(jsonRecord(fields.spawn)?.agent);
   return (
     <div className="tc-task">
+      {Array.isArray(fields.results) ? fields.results.map((result, index) => { const row = jsonRecord(result); const output = row?.structuredOutput; return output === undefined ? null : <details key={index}><summary>{jsonString(row?.agent) ?? t("runtimeUpgrade.structuredResult")}{jsonString(jsonRecord(output)?.summary) ? " · " + jsonString(jsonRecord(output)?.summary) : ""}</summary><JsonBlock value={output} /></details>; }) : null}
+      {fields.output !== undefined && typeof fields.output === "object" ? <details><summary>{t("runtimeUpgrade.structuredResult")}</summary><JsonBlock value={fields.output} /></details> : null}
+      {fields.result !== undefined && typeof fields.result === "object" ? <details><summary>{t("runtimeUpgrade.structuredResult")}</summary><JsonBlock value={fields.result} /></details> : null}
       {brief.goal ? (
         <div className="task-sec">
           <div className="task-h">Goal</div>

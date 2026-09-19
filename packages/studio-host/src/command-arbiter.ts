@@ -51,6 +51,8 @@ export class StudioHostError extends Error {
 }
 
 export function classifyOperation(operation: StudioOperation): CommandConcurrency {
+  if (["btw.history.list", "btw.history.read", "session.models.mentions", "session.import.list", "session.import.preview", "runtime.auth.get"].includes(operation.kind)) return "read-concurrent";
+  if (["btw.ask", "btw.followUp", "btw.abort", "session.import.execute", "runtime.auth.set", "runtime.auth.remove"].includes(operation.kind)) return "queue-compatible";
   if (
     operation.kind === "runtime.snapshot" ||
     operation.kind === "operator.manifest.get" ||

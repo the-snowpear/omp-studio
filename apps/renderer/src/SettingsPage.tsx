@@ -139,7 +139,7 @@ export function SettingsPage({
       else flashDemo();
       return;
     }
-    demoRuntime.setValue(key, Array.isArray(value) ? value.join(",") : String(value));
+    demoRuntime.setValue(key, Array.isArray(value) ? value.join(",") : typeof value === "object" ? JSON.stringify(value) : String(value));
   };
 
   const setRealRuntimeSetting = async (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue): Promise<void> => {

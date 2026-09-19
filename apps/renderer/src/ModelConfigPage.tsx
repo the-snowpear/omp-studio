@@ -1,3 +1,4 @@
+import { RuntimeCredentials, VisionModelStatus } from "./models/RuntimeCredentials";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, CSSProperties } from "react";
@@ -35,7 +36,7 @@ import { useI18n } from "./i18n";
 import { ToastHost } from "./ToastHost";
 import { hostErrorMessage, waitReceipt } from "./hostError";
 import { pagePhaseClass, useDeferredKey, useDeferredPresence, useOverlayPresence } from "./pageTransition";
-import { extractYamlMapEntry, mergeYamlMapEntry, parseStructured, StructuredEditor } from "./structured-editor";
+import { extractYamlMapEntry, mergeYamlMapEntry, parseStructured, readYamlMapEntryNode, StructuredEditor } from "./structured-editor";
 import { usePreviewMode } from "./preview/PreviewContext";
 import {
   MODEL_API_TYPES,
@@ -53,6 +54,7 @@ import {
   toCandidates,
   togglePicked,
 } from "./models/fetchedModels";
+import { draftProviderYamlNode, nestedProviderYamlNode, serializeModelsYmlNode } from "./models/providerYaml";
 import { SubagentsPanel } from "./SubagentsPanel";
 import { WebSearchPanel } from "./models/WebSearchPanel";
 import { createPreviewAgentDefinitions } from "./preview/subagentsPreview";
@@ -1125,9 +1127,12 @@ function providerUpsertFromDraft(editor: Draft, contentHash?: string): ModelProv
     id: editor.id.trim(),
     name: editor.name.trim(),
     api: editor.api,
-    ...(editor.endpointUrl ? { endpointUrl: editor.endpointUrl } : {}),
-    ...(editor.website ? { website: editor.website } : {}),
-    ...(editor.note ? { note: editor.note } : {}),
+    // Explicit (possibly empty) values: the Host writer deletes the YAML key
+    // when the string is blank, so clearing a field really removes it — sparse
+    // omission would silently keep the old value behind the card’s back.
+    endpointUrl: editor.endpointUrl,
+    website: editor.website,
+    note: editor.note,
     local: editor.local,
     enabled: editor.enabled,
     auth: {
@@ -2140,29 +2145,69 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   const configYmlSliceSource = roleYamlId
     ? extractYamlMapEntry(configYmlSource, ["modelRoles", roleYamlId], "")
     : "";
-  const modelsYmlValue = modelsYmlDraft ?? modelsYmlSliceSource;
-  const configYmlValue = configYmlDraft ?? configYmlSliceSource;
-  const modelsYmlDirty = modelsYmlDraft !== null && modelsYmlDraft !== modelsYmlSliceSource;
-  const configYmlDirty = configYmlDraft !== null && configYmlDraft !== configYmlSliceSource;
+  const providerYamlNodeValue = useMemo(
+    () => (providerYamlId
+      ? nestedProviderYamlNode(readYamlMapEntryNode(modelsYmlSource, ["providers", providerYamlId]))
+      : undefined),
+    [modelsYmlSource, providerYamlId],
+  );
   const providerFormDirty = Boolean(
     editorState && providerBaseline && !draftsEqual(editorState, providerBaseline),
   );
   const roleFormDirty = Boolean(
     roleDraftState && roleBaseline && !rolesEqual(roleDraftState, roleBaseline),
   );
+  // The auth type the provider was loaded with resolves what a redacted
+  // "********" apiKey hides; the read model reflects the file as last saved.
+  const storedAuthType = providers.find((item) => item.id === providerYamlId)?.auth.type;
+  // The card shows what the save would write: while the form carries unsaved
+  // edits, the slice is derived from the form instead of from the file. The card
+  // is read-only in that state, so the form and a hand edit never fight over the
+  // same slice.
+  const modelsYmlFormSlice = useMemo(
+    () => providerFormDirty && editorState && providerYamlId
+      ? serializeModelsYmlNode({ [providerYamlId]: draftProviderYamlNode(editorState, providerYamlNodeValue, storedAuthType) })
+      : null,
+    [providerFormDirty, editorState, providerYamlId, providerYamlNodeValue, storedAuthType],
+  );
+  const configYmlFormSlice = useMemo(
+    () => roleFormDirty && roleDraftState?.primary && roleYamlId
+      ? serializeModelsYmlNode({ [roleYamlId]: roleSelector(roleDraftState) })
+      : null,
+    [roleFormDirty, roleDraftState, roleYamlId],
+  );
+  // The card is driven by the form while the form carries unsaved edits: it is
+  // read-only by construction, not merely reported as such.
+  const providerCardLocked = providerFormDirty;
+  const roleCardLocked = roleFormDirty;
+  const modelsYmlSlice = modelsYmlFormSlice ?? modelsYmlSliceSource;
+  const configYmlSlice = configYmlFormSlice ?? configYmlSliceSource;
+  // A hand draft entered before the form went dirty is parked, not applied:
+  // the form owns the slice, so display and save follow the same value. The
+  // parked draft resurfaces only if the form returns to its baseline.
+  const modelsYmlHandDraft = providerCardLocked ? null : modelsYmlDraft;
+  const configYmlHandDraft = roleCardLocked ? null : configYmlDraft;
+  const modelsYmlValue = modelsYmlHandDraft ?? modelsYmlSlice;
+  const configYmlValue = configYmlHandDraft ?? configYmlSlice;
+  /** A live hand edit of the card: a draft that actually differs from the slice. */
+  const modelsYmlEdited = modelsYmlHandDraft !== null && modelsYmlHandDraft !== modelsYmlSlice;
+  const configYmlEdited = configYmlHandDraft !== null && configYmlHandDraft !== configYmlSlice;
+  const modelsYmlDirty = modelsYmlEdited;
+  const configYmlDirty = configYmlEdited;
   const fallbackDirty = Boolean(
     roleDraftState && (
       (fallbackDraft !== null && !sameStringList(fallbackDraft, data?.fallbackChains[roleDraftState.primary] ?? []))
       || (revertPolicyDraft !== null && revertPolicyDraft !== (data?.fallbackRevertPolicy ?? "cooldown-expiry"))
     ),
   );
+  const ymlCardsDirty = providerFormDirty || roleFormDirty || modelsYmlEdited || configYmlEdited || fallbackDirty;
 
   useEffect(() => {
-    modelConfigDirty = providerFormDirty || roleFormDirty || modelsYmlDirty || configYmlDirty || fallbackDirty;
+    modelConfigDirty = ymlCardsDirty;
     return () => {
       modelConfigDirty = false;
     };
-  }, [providerFormDirty, roleFormDirty, modelsYmlDirty, configYmlDirty, fallbackDirty]);
+  }, [ymlCardsDirty]);
 
   const onProviderDragPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
     if (event.button !== 0) return;
@@ -2420,7 +2465,10 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       return;
     }
     const roleUpdates = rolePrimaryUpdates(roles, roleAssignDraft);
-    if (modelsYmlDirty) {
+    // A hand-edited card or an unsaved form both go through the YAML write: the
+    // form's model list, overrides and advanced fields only reach models.yml
+    // when the overlay rides along with the text.
+    if (modelsYmlDirty || providerFormDirty) {
       const saved = await persistModelsYml(modelsYmlValue, true, true);
       if (saved) {
         await applyRolePrimaryUpdates(roleUpdates);
@@ -3621,14 +3669,16 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 value={modelsYmlValue}
                 onChange={setModelsYmlDraft}
                 allowEmpty={false}
+                readOnly={providerCardLocked}
+                disabled={providerCardLocked}
                 title={providerYamlId || t("modelConfig.providerYamlTitle")}
                 path={providerYamlId ? `models.yml · providers.${providerYamlId}` : "models.yml"}
                 minHeight={320}
                 maxHeight={420}
-                dirty={modelsYmlDirty}
+                dirty={modelsYmlEdited}
                 saving={busy}
-                saveDisabled={!providerYamlId || (!modelsYmlDirty && !providerFormDirty)}
-                saveHint={!providerYamlId ? t("modelConfig.fillProviderIdSaveHint") : providerFormDirty ? t("modelConfig.syncFormSaveHint") : ""}
+                saveDisabled={!providerYamlId || (!modelsYmlDirty && !providerFormDirty) || providerCardLocked}
+                saveHint={!providerYamlId ? t("modelConfig.fillProviderIdSaveHint") : ""}
                 onSave={(text) => void persistModelsYml(text, providerFormDirty, false)}
               />
 
@@ -4096,6 +4146,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         </section>
 
         <section id="mcPanelRoles" role="tabpanel" aria-labelledby="mcTabRoles" hidden={shownTab !== "roles"} className={tabPanelClass("roles")}>
+          <RuntimeCredentials client={client} preview={preview} />
+          <VisionModelStatus client={client} preview={preview} />
           <div className={roleLive ? `mc-view ${pagePhaseClass(rolePhase)}` : "mc-view"}>
           {roleDraft ? (
             <>
@@ -4197,7 +4249,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 </div>
                 <div className="cycle-pool">
                   <span className="cycle-pool-label">{t("modelConfig.addToFallback")}</span>
-                  {usable.filter((model) => model.selector !== roleDraft.primary && !(fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? []).includes(model.selector)).slice(0, 12).map((model) => (
+                  {usable.filter((model) => model.selector !== roleDraft.primary && !(fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? []).some(selector => selector.replace(/:(off|minimal|low|medium|high|xhigh|max)$/u, "") === model.selector)).slice(0, 12).map((model) => (
                     <button type="button" key={model.selector} className="btn small outline" onClick={() => {
                       const current = fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? [];
                       setFallbackDraft([...current, model.selector]);
@@ -4213,14 +4265,15 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 value={configYmlValue}
                 onChange={setConfigYmlDraft}
                 allowEmpty={false}
+                readOnly={roleCardLocked}
+                disabled={roleCardLocked}
                 title={roleDraft.id}
                 path={`config.yml · modelRoles.${roleDraft.id}`}
                 minHeight={280}
                 maxHeight={400}
-                dirty={configYmlDirty}
+                dirty={configYmlEdited}
                 saving={busy}
-                saveDisabled={!configYmlDirty && !roleFormDirty}
-                saveHint={roleFormDirty ? t("modelConfig.syncFormHint") : ""}
+                saveDisabled={(!configYmlDirty && !roleFormDirty) || roleCardLocked}
                 onSave={(text) => void persistConfigYml(text, roleFormDirty, false)}
               />
               <div className="mp-foot">
@@ -4392,6 +4445,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
           />
         </section>
         <section id="mcPanelWebSearch" role="tabpanel" aria-labelledby="mcTabWebSearch" hidden={shownTab !== "websearch"} className={tabPanelClass("websearch")}>
+          <RuntimeCredentials client={client} preview={preview} providers={["exa", "ollama-cloud"]} />
           {data?.webSearch ? (
             <WebSearchPanel
               client={client}

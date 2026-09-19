@@ -55,7 +55,7 @@ export type ChipComposerHandle = {
   insertChip(chip: Omit<ComposerChip, "id"> & { id?: string }): void;
   removeSkillChip(name: string): void;
   openFilePicker(): void;
-  openMention(trigger: "@"): void;
+  openMention(trigger: "@" | "^"): void;
   openCommandMenu(): void;
   isEmpty(): boolean;
 };
@@ -67,7 +67,7 @@ type Props = {
   compact?: boolean;
   workspaceId?: string;
   describedBy?: string;
-  loadMentions?: (trigger: "@" | "/", query: string) => Promise<readonly MentionCandidate[]>;
+  loadMentions?: (trigger: "@" | "/" | "^", query: string) => Promise<readonly MentionCandidate[]>;
   /** Explicit slash catalog. Omitted callers keep the static builtin fallback. */
   slashCatalog?: readonly StudioSlashCommand[];
   onRunCommand?: (command: StudioSlashCommand, args: string) => void;
@@ -147,7 +147,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const [empty, setEmpty] = useState(true);
   const [thumbs, setThumbs] = useState<Array<ImagePreviewSubject & { id: string }>>([]);
   const [preview, setPreview] = useState<(ImagePreviewSubject & { id: string }) | null>(null);
-  const [mention, setMention] = useState<{ trigger: "@"; query: string } | null>(null);
+  const [mention, setMention] = useState<{ trigger: "@" | "^"; query: string } | null>(null);
   const [candidates, setCandidates] = useState<MentionCandidate[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [slashSource, setSlashSource] = useState("");
@@ -319,7 +319,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     openFilePicker() {
       fileRef.current?.click();
     },
-    openMention(trigger: "@") {
+    openMention(trigger: "@" | "^") {
       const editor = editorRef.current;
       if (!editor) return;
       editor.focus();
@@ -358,7 +358,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   }));
 
   useEffect(() => {
-    if (!mention || mention.trigger !== "@" || loadMentions === undefined) {
+    if (!mention || loadMentions === undefined) {
       setCandidates([]);
       return;
     }
@@ -377,7 +377,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const editor = editorRef.current;
     if (!editor) return;
     // Toolbar `@` often leaves the caret outside the token; still fold `@` into the capsule.
-    const at = mentionAtCaret(editor) ?? (mention ? findMentionToken(editor, mention.query) : null);
+    const at = mentionAtCaret(editor) ?? (mention ? findMentionToken(editor, mention.query, mention.trigger) : null);
     const chip: ComposerChip = {
       id: newChipId(),
       kind: item.kind,
@@ -457,7 +457,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     const editor = editorRef.current;
     if (!editor || composingRef.current) return;
     const at = mentionAtCaret(editor);
-    setMention(at ? { trigger: "@", query: at.query } : null);
+    setMention(at ? { trigger: at.trigger, query: at.query } : null);
   };
 
   const onInput = (_event: FormEvent<HTMLDivElement>): void => {

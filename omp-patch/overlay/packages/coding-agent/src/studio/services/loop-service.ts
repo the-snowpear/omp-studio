@@ -1,10 +1,10 @@
-import type { LoopConditionConfig, LoopConditionVerdict } from "../../modes/loop-condition";
+import type { LoopConditionConfig, LoopLimitRuntime } from "@oh-my-pi/pi-tui/status-line/loop";
+import type { LoopConditionVerdict } from "../../modes/loop-condition";
 import {
 	consumeLoopLimitIteration,
 	createLoopLimitRuntime,
 	isLoopDurationExpired,
 	type LoopLimitConfig,
-	type LoopLimitRuntime,
 } from "../../modes/loop-limit";
 
 export interface StudioLoopLimit {

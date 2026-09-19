@@ -612,7 +612,7 @@ describe("conversation events enter Studio Bridge", () => {
 				agents: { list: () => [], onChange: () => () => {} },
 				jobs: { list: () => [] },
 				interaction: new StudioInteractionGateway(),
-				btw: { onChange: () => () => {} },
+				btw: { onChange: () => () => {}, settle: async () => {} },
 			},
 		} as unknown as StudioHostRuntime;
 

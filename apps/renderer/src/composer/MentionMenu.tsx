@@ -1,3 +1,4 @@
+import { useI18n } from "../i18n";
 import { Icon } from "../icons";
 import { chipIconName } from "./ingest";
 import type { MentionCandidate } from "./types";
@@ -10,14 +11,15 @@ export function MentionMenu({
   onSelect,
   onHover,
 }: {
-  trigger: "@" | "/";
+  trigger: "@" | "/" | "^";
   query: string;
   items: readonly MentionCandidate[];
   activeIndex: number;
   onSelect: (item: MentionCandidate) => void;
   onHover: (index: number) => void;
 }) {
-  const title = trigger === "@" ? "引用文件 / 文件夹 / Agent" : "指令已改到输入开头的 /";
+  const { t } = useI18n();
+  const title = trigger === "^" ? t("runtimeUpgrade.modelMention") : trigger === "@" ? "引用文件 / 文件夹 / Agent" : "指令已改到输入开头的 /";
   return (
     <div className="cm-mention" role="listbox" aria-label={title}>
       <div className="cm-mention-head">

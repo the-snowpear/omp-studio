@@ -7,4 +7,6 @@ export {
   mergeYamlMapEntry,
   parseJsonOrYaml,
   parseStructured,
+  readYamlMapEntryNode,
+  serializeYamlValue,
 } from "./parse";

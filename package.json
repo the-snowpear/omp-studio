@@ -43,13 +43,15 @@
     "pack:win:prepare": "node scripts/prepare-installer-resources.mjs",
     "pack:win:ui": "node scripts/build-installer-host.mjs",
     "pack:win:audit": "node scripts/audit-installer.mjs",
-    "omp:test:metadata": "npm run build -w @omp-studio/runtime-installer && node --test scripts/runtime-artifact.test.mjs scripts/audit-installer.test.mjs scripts/installer-dir.test.mjs scripts/p5-secret-scan.test.mjs scripts/build-update-assets.test.mjs",
+    "omp:test:metadata": "npm run build -w @omp-studio/runtime-installer && node --test scripts/runtime-artifact.test.mjs scripts/audit-installer.test.mjs scripts/installer-dir.test.mjs scripts/installer-maintenance.test.mjs scripts/p5-secret-scan.test.mjs scripts/build-update-assets.test.mjs scripts/build-update-assets-v2.test.mjs",
     "p5:gate": "node scripts/p5-gate.mjs",
     "omp:e2e:install": "node scripts/runtime-install-e2e.mjs",
     "omp:verify:prepatch": "node scripts/verify-omp-prepatch.mjs",
     "omp:verify:patches": "node scripts/verify-omp-patches.mjs",
     "omp:overlay:apply": "node scripts/apply-omp-overlay.mjs",
-    "omp:patches:regen": "node scripts/regen-omp-patches.mjs"
+    "omp:patches:regen": "node scripts/regen-omp-patches.mjs",
+    "updates:build": "node scripts/build-update-assets-v2.mjs",
+    "updates:verify": "node scripts/verify-update-assets-v2.mjs"
   },
   "engines": {
     "node": ">=22"

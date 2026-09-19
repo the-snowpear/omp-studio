@@ -14,7 +14,7 @@ directories:
 
 # Keep the executable name stable for NSIS process checks and shortcuts.
 executableName: OMP Studio
-artifactName: OMP-Studio-Setup-${version}-${os}-${arch}.${ext}
+artifactName: OMP-Studio-Setup-${version}-windows-${arch}.${ext}
 
 files:
   - dist/**/*
@@ -81,14 +81,16 @@ win:
       arch:
         - x64
   icon: apps/desktop/resources/icon.ico
-  requestedExecutionLevel: requireAdministrator
+  requestedExecutionLevel: asInvoker
   # Keep rcedit (icon / version resources). Skip Authenticode only.
   signExecutable: false
 
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: false
-  perMachine: true
+  perMachine: false
+  selectPerMachineByDefault: false
+  differentialPackage: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: OMP Studio
@@ -101,6 +103,11 @@ nsis:
     - en_US
   language: 2052
   uninstallDisplayName: OMP Studio
-  artifactName: OMP-Studio-Setup-${version}-${os}-${arch}.${ext}
+  artifactName: OMP-Studio-Setup-${version}-windows-${arch}.${ext}
   # Unsigned 0.1.0 preview. Replace with a real Authenticode cert before GitHub Releases.
   # signingHashAlgorithms: [sha256]
+
+# Seeds installer.exe in the updater cache. Discovery uses signed v2 catalogs.
+publish:
+  provider: generic
+  url: https://github.com/the-snowpear/omp-studio/releases/latest/download

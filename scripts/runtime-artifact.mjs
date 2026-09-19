@@ -49,6 +49,16 @@ export const MANAGED_ENTRYPOINT = "omp.exe";
 export const STUDIO_PROTOCOL_RANGE = Object.freeze({ min: 1, max: 1 });
 
 export const IMPLEMENTED_CAPABILITIES = Object.freeze([
+  "btw.history.list",
+  "btw.history.read",
+  "btw.followUp",
+  "session.models.mentions",
+  "session.import.list",
+  "session.import.preview",
+  "session.import.execute",
+  "runtime.auth.get",
+  "runtime.auth.set",
+  "runtime.auth.remove",
   "runtime.pause",
   "runtime.resume",
   "runtime.snapshot",

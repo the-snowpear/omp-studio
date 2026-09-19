@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { __resetAppUpdateForTests, applyAppUpdate, checkForAppUpdates, downloadAndInstallAppUpdate, getAppUpdateState, skipAppUpdate } from "./appUpdate";
+import { __resetAppUpdateForTests, applyAppUpdate, checkForAppUpdates, downloadAndInstallAppUpdate, getAppUpdateState, skipAppUpdate, prepareDesktopRollback } from "./appUpdate";
 import { __resetUpdatesForTests, checkForUpdates, handleProgressEvent, type UpdateProgressEvent } from "./updates";
 
 const prefs = { autoCheck: true, skippedAppVersion: "", mirrorPrefix: "", runtimeChannel: "stable", preferHotUpdate: true, lastIndexSequence: 1 };
@@ -60,4 +60,30 @@ it("keeps deferred application retryable and reports its reason", async () => {
   vi.stubGlobal("ompStudioChrome", { applyUpdate: async () => ({ ok: true, deferred: true, message: "Sessions are running" }) });
   await expect(applyAppUpdate()).resolves.toBe(false);
   expect(getAppUpdateState()).toMatchObject({ readyToApply: true, downloading: false, downloadError: "Sessions are running" });
+});
+
+it("prepares desktop rollback from the unified snapshot without installing until requested", async () => {
+  const applyUpdate = vi.fn().mockResolvedValue({ ok: true });
+  vi.stubGlobal("ompStudioChrome", {
+    rollbackUpdate: vi.fn().mockResolvedValue({ ok: true }), applyUpdate,
+    getUpdateSnapshot: async () => ({ schema: 2, checking: false, rollbackAppVersion: "0.1.4", rollbackAppPending: true, app: { component: "app", currentVersion: "0.1.5", version: "0.1.4", phase: "ready" }, runtime: { component: "runtime", phase: "idle" } }),
+  });
+  expect(await prepareDesktopRollback()).toBe(true);
+  expect(getAppUpdateState()).toMatchObject({ rollbackVersion: "0.1.4", rollbackReady: true, readyToApply: true, downloading: false });
+  expect(applyUpdate).not.toHaveBeenCalled();
+  expect(await applyAppUpdate()).toBe(true);
+  expect(applyUpdate).toHaveBeenCalledOnce();
+});
+
+it("does not save a Runtime-only version as a skipped desktop version", async () => {
+  const setUpdatePrefs = vi.fn();
+  vi.stubGlobal("ompStudioChrome", {
+    setUpdatePrefs, checkUpdates: vi.fn(), getUpdatePrefs: async () => prefs,
+    getUpdateSnapshot: async () => ({ schema: 2, checking: false, app: { component: "app", currentVersion: "0.1.5", phase: "idle" }, runtime: { component: "runtime", currentVersion: "18.0.0-studio.1", version: "18.0.0-studio.2", phase: "idle" } }),
+  });
+  await checkForAppUpdates({ silent: true });
+  expect(getAppUpdateState().updateInfo?.component).toBe("runtime");
+  await skipAppUpdate();
+  expect(setUpdatePrefs).not.toHaveBeenCalled();
+  expect(getAppUpdateState().updateInfo?.available).toBe(true);
 });

@@ -1,3 +1,5 @@
+import { validateRuntimeSettingValue as validateProtocolSettingValue, type StudioRuntimeSettingKey } from "@omp-studio/studio-protocol";
+import { isUpgradeOperationKind, validateUpgradeResult } from "@omp-studio/studio-protocol";
 /**
  * Safe outbound assertions for the Desktop IPC boundary
  * (FRONTEND_INTEGRATION.md §9).
@@ -107,50 +109,26 @@ function assertRuntimeSettingValue(key: unknown, value: unknown, what: string): 
   if (typeof key !== "string" || !STUDIO_RUNTIME_SETTING_KEYS.includes(key as (typeof STUDIO_RUNTIME_SETTING_KEYS)[number])) {
     throw new ValidationError(`${what}: unsupported setting key`);
   }
-  switch (key) {
-    case "edit.autoRepair.enabled":
-    case "extendedContext":
-    case "compaction.asyncEnabled":
-      if (typeof value !== "boolean") throw new ValidationError(`${what}: value must be boolean`);
-      return;
-    case "features.unexpectedStopDetection":
-      if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODES.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODES)[number])) {
-        throw new ValidationError(`${what}: invalid unexpected-stop detection mode`);
-      }
-      return;
-    case "providers.unexpectedStopModel":
-      if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS)[number])) {
-        throw new ValidationError(`${what}: invalid unexpected-stop model`);
-      }
-      return;
-    case "providers.openai-codex.codeMode":
-      if (!STUDIO_RUNTIME_CODE_MODES.includes(value as (typeof STUDIO_RUNTIME_CODE_MODES)[number])) {
-        throw new ValidationError(`${what}: invalid code mode`);
-      }
-      return;
-    case "compaction.methodOrder":
-      if (
-        !Array.isArray(value) ||
-        value.length === 0 ||
-        value.some((method) => !STUDIO_RUNTIME_COMPACTION_METHODS.includes(method as (typeof STUDIO_RUNTIME_COMPACTION_METHODS)[number])) ||
-        new Set(value).size !== value.length
-      ) {
-        throw new ValidationError(`${what}: value must be a non-empty unique compaction method list`);
-      }
-      return;
-  }
+  try { validateProtocolSettingValue(key as StudioRuntimeSettingKey, value, what); }
+  catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid Runtime setting"); }
 }
 
 function assertRuntimeSettingsSnapshot(value: unknown, what: string): void {
   assertPlainObject(value, what);
   assertNoUnknownKeys(value, [...STUDIO_RUNTIME_SETTING_KEYS], what);
-  for (const key of STUDIO_RUNTIME_SETTING_KEYS) assertRuntimeSettingValue(key, value[key], `${what}: ${key}`);
+  for (const key of STUDIO_RUNTIME_SETTING_KEYS) if (value[key] !== undefined) assertRuntimeSettingValue(key, value[key], `${what}: ${key}`);
 }
 
 function assertRuntimeSettingsGetResult(value: unknown): void {
   const what = "event: runtime.settings.get result";
   assertPlainObject(value, what);
-  assertNoUnknownKeys(value, ["values"], what);
+  assertNoUnknownKeys(value, ["values", "activation"], what);
+  if (value.activation !== undefined) {
+    assertPlainObject(value.activation, what); assertNoUnknownKeys(value.activation, ["configured", "restartRequired"], what);
+    assertPlainObject(value.activation.configured, what);
+    for (const [key, setting] of Object.entries(value.activation.configured)) assertRuntimeSettingValue(key, setting, what);
+    if (!Array.isArray(value.activation.restartRequired) || value.activation.restartRequired.some(key => typeof key !== "string" || !(STUDIO_RUNTIME_SETTING_KEYS as readonly string[]).includes(key))) throw new ValidationError("invalid settings activation");
+  }
   assertPlainObject(value.values, `${what}: values`);
   for (const key of Object.keys(value.values)) {
     if (!STUDIO_RUNTIME_SETTING_KEYS.includes(key as (typeof STUDIO_RUNTIME_SETTING_KEYS)[number])) {
@@ -163,7 +141,9 @@ function assertRuntimeSettingsGetResult(value: unknown): void {
 function assertRuntimeSettingsSetResult(value: unknown): void {
   const what = "event: runtime.settings.set result";
   assertPlainObject(value, what);
-  assertNoUnknownKeys(value, ["key", "value", "persisted"], what);
+  assertNoUnknownKeys(value, ["key", "value", "persisted", "effectiveValue", "restartRequired"], what);
+  if (value.effectiveValue !== undefined) assertRuntimeSettingValue(value.key, value.effectiveValue, what);
+  if (value.restartRequired !== undefined && typeof value.restartRequired !== "boolean") throw new ValidationError("invalid restart flag");
   assertRuntimeSettingValue(value.key, value.value, `${what}: value`);
   if (typeof value.persisted !== "boolean") throw new ValidationError(`${what}: persisted must be boolean`);
 }
@@ -979,6 +959,12 @@ function assertCommandReceipt(value: unknown): void {
       if (!("result" in value)) {
         throw new ValidationError("event: completed receipt is missing the result");
       }
+      if (isUpgradeOperationKind(commandName)) {
+        assertPlainObject(value.result, "Runtime result");
+        assertNoUnknownKeys(value.result, ["snapshot", "result"], "Runtime result");
+        assertOperatorStateSnapshot(value.result.snapshot, "Runtime result snapshot");
+        try { validateUpgradeResult(commandName, value.result.result); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid Runtime result"); }
+      }
       if (commandName === "git.execute") assertGitOperationResult(value.result);
       if (commandName === "github.execute") assertGithubOperationResult(value.result);
       if (commandName === "workspace.file.create" || commandName === "workspace.directory.create") assertWorkspaceFileMutationResult(value.result);
@@ -1079,8 +1065,17 @@ const BTW_ERROR_CODE_VALUES = ["INTERNAL_ERROR", "OUTPUT_LIMIT"] as const satisf
 /** Assert the BTW side-channel snapshot carried by `btw.changed` and receipts. */
 function assertBtwSnapshot(value: unknown, field: string): void {
   assertPlainObject(value, field);
-  assertNoUnknownKeys(value, ["ephemeralId", "status", "text", "copy", "error"], field);
+  assertNoUnknownKeys(value, ["ephemeralId", "status", "text", "copy", "error", "sessionId", "topicId", "question"], field);
   assertOpaqueToken(value.ephemeralId, `${field} ephemeralId`);
+  if (value.sessionId !== undefined) {
+    assertOpaqueToken(value.sessionId, `${field} sessionId`);
+  }
+  if (value.topicId !== undefined) {
+    assertOpaqueToken(value.topicId, `${field} topicId`);
+  }
+  if (value.question !== undefined && typeof value.question !== "string") {
+    throw new ValidationError(`${field} question must be a string`);
+  }
   if (typeof value.status !== "string" || !(BTW_STATUS_VALUES as readonly string[]).includes(value.status)) {
     throw new ValidationError(`${field} has unsupported status ${describe(value.status)}`);
   }

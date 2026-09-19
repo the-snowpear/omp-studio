@@ -3,8 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   canFlushQueuedMessage,
   composerFollowUpEnabled,
+  composerOwnerSessionId,
+  composerOwnsLiveSnapshot,
   composerPromptEnabled,
   composerQueueEnabled,
+  composerRunningForTarget,
+  createComposerDispatchGate,
   visibleQueuedMessages,
 } from "./dispatch";
 
@@ -211,4 +215,110 @@ describe("composer send path (simulated vs OMP)", () => {
       }),
     ).toBe(true);
   });
+});
+
+/**
+ * Regression: session A streaming, the operator clicks "new conversation" in
+ * the same project and sends while `session.create` is still in flight. The
+ * Runtime snapshot still names A, so the composer must not adopt A's session,
+ * its streaming verdict, or its local queue for the new conversation's prompt.
+ */
+describe("composer ownership across a pending session.create", () => {
+  const pendingDraft = { sessionCreating: true, liveSessionId: "sess-a" } as const;
+  const ownedLive = { selectedSessionId: "sess-a", liveSessionId: "sess-a" } as const;
+
+  it("gives a fresh-draft surface no owner while its session is being created", () => {
+    expect(composerOwnerSessionId(pendingDraft)).toBeUndefined();
+    expect(composerOwnerSessionId({ liveSessionId: "sess-b" })).toBe("sess-b");
+    expect(composerOwnerSessionId(ownedLive)).toBe("sess-a");
+    expect(composerOwnerSessionId({})).toBeUndefined();
+  });
+
+  it("does not let a pending draft own the previous session's live snapshot", () => {
+    expect(composerOwnsLiveSnapshot(pendingDraft)).toBe(false);
+    expect(composerOwnsLiveSnapshot(ownedLive)).toBe(true);
+    expect(composerOwnsLiveSnapshot({ selectedSessionId: "sess-a", liveSessionId: "sess-b" })).toBe(false);
+    expect(composerOwnsLiveSnapshot({})).toBe(false);
+  });
+
+  it("routes Enter to the new conversation instead of queueing it onto the streaming session", () => {
+    // The bug: `running` came from A's snapshot and the entry was stamped sess-a.
+    const composerRunning = composerRunningForTarget({ ...pendingDraft, running: true });
+    expect(composerRunning).toBe(false);
+    expect(composerQueueEnabled({ textReady: true, running: composerRunning, promptChannelReady: false })).toBe(false);
+    // The new conversation may still send: it waits for its own session.
+    expect(
+      composerPromptEnabled({
+        textReady: true,
+        running: composerRunning,
+        pendingInteraction: false,
+        promptChannelReady: false,
+        sessionCreating: true,
+        newConversation: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps queueing for the conversation that is actually streaming", () => {
+    expect(composerRunningForTarget({ ...ownedLive, running: true })).toBe(true);
+    // Draft surface whose own `session.create` has landed: the live session IS it.
+    expect(composerRunningForTarget({ running: true, liveSessionId: "sess-b" })).toBe(true);
+    // Viewing a history thread while another session streams: no local queue.
+    expect(
+      composerRunningForTarget({ running: true, selectedSessionId: "sess-a", liveSessionId: "sess-b" }),
+    ).toBe(false);
+  });
+
+  it("leaves a pending-draft queue invisible and never flushed into the left session", () => {
+    const queue = [{ id: 1, text: "for the new chat", sessionId: "sess-a" }];
+    const owner = composerOwnerSessionId(pendingDraft);
+    // The draft surface owns no session, so sess-a's rows must not show there.
+    expect(owner).toBeUndefined();
+    expect(visibleQueuedMessages(queue, owner)).toEqual([]);
+    // And a row stamped with the left session can only ever flush back into it,
+    // which the draft surface (no selected session) refuses.
+    expect(
+      canFlushQueuedMessage({
+        running: false,
+        pendingInteraction: false,
+        promptChannelReady: true,
+        ...(owner === undefined ? {} : { selectedSessionId: owner }),
+        liveSessionId: "sess-a",
+        entrySessionId: "sess-a",
+      }),
+    ).toBe(false);
+  });
+});
+
+it("keeps the second draft unsent while the first prompt waits for session creation", async () => {
+  const gate = createComposerDispatchGate();
+  let completeCreate!: () => void;
+  const creation = new Promise<void>(resolve => { completeCreate = resolve; });
+  const sent: string[] = [];
+  const send = async (message: string) => {
+    if (!gate.tryEnter()) return false;
+    try { await creation; sent.push(message); return true; }
+    finally { gate.leave(); }
+  };
+  const first = send("first");
+  // Same-frame submission is blocked before React can publish sending=true.
+  expect(await send("second")).toBe(false);
+  expect(composerPromptEnabled({ textReady: true, running: false, sending: true, pendingInteraction: false, promptChannelReady: false, sessionCreating: true, newConversation: true })).toBe(false);
+  expect(sent).toEqual([]);
+  completeCreate();
+  expect(await first).toBe(true);
+  expect(await send("second")).toBe(true);
+  expect(sent).toEqual(["first", "second"]);
+});
+
+it("releases dispatch ownership after a failed creation so the draft can be retried", async () => {
+  const gate = createComposerDispatchGate();
+  expect(gate.tryEnter()).toBe(true);
+  const failed = async () => {
+    try { await Promise.reject(new Error("session.create failed")); }
+    finally { gate.leave(); }
+  };
+  await expect(failed()).rejects.toThrow("session.create failed");
+  expect(gate.tryEnter()).toBe(true);
+  gate.leave();
 });

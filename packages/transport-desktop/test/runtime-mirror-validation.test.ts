@@ -184,6 +184,34 @@ function image(data: string) {
   return { type: "image" as const, mimeType: "image/png" as const, data };
 }
 
+test("Desktop outbound accepts btw.changed snapshots carrying session/topic/question", () => {
+  const base = {
+    authorityEpoch: 1,
+    runtimeEpoch: 1,
+    stateVersion: 1,
+    cursor: "1",
+    occurredAt: "2026-08-23T00:00:00.000Z",
+    kind: "btw.changed" as const,
+    sessionId: "session-1",
+    eventSeq: 1,
+  };
+  const eventWith = (snapshot: unknown) => ({ ...base, snapshot });
+  const snapshot = {
+    ephemeralId: "btw-1",
+    status: "running" as const,
+    text: "answer",
+    sessionId: "session-1",
+    topicId: "topic-1",
+    question: "why",
+  };
+  assert.doesNotThrow(() => assertClientEvent(eventWith(snapshot)));
+  const { sessionId: _sessionId, topicId: _topicId, question: _question, ...legacy } = snapshot;
+  assert.doesNotThrow(() => assertClientEvent(eventWith(legacy)));
+  assert.throws(() => assertClientEvent(eventWith({ ...snapshot, topicId: 42 })), ValidationError);
+  assert.throws(() => assertClientEvent(eventWith({ ...snapshot, question: 42 })), ValidationError);
+  assert.throws(() => assertClientEvent(eventWith({ ...snapshot, mystery: true })), ValidationError);
+});
+
 test("Desktop outbound applies canonical Base64 and image byte/count caps to editorImages", () => {
   const base = {
     authorityEpoch: 1,

@@ -32,6 +32,9 @@ import { resolveProfilePersistRoot } from "./chrome-profile-store.js";
 import { registerPayloadHealthIpc } from "./payload-health.js";
 import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
 import { registerChromeUpdatesIpc } from "./chrome-updates.js";
+import { UpdateCoordinator } from "./update-coordinator.js";
+import { registerUnifiedUpdatesIpc } from "./unified-updates-ipc.js";
+import { CHROME_UPDATES_CHANNELS } from "./chrome-updates-shared.js";
 import { createUpdatePrefsStore } from "./update-prefs-store.js";
 import {
   defaultRuntimeKeysDirectory,
@@ -88,6 +91,16 @@ const RENDERER_DEV_URL = rendererDevServerUrl(app.isPackaged, process.env.OMP_RE
 const NODE_PTY_VERSION = (createRequire(import.meta.url)("node-pty/package.json") as { version: string }).version;
 
 export async function main(): Promise<void> {
+  const migrationIndex = process.argv.indexOf("--omp-migrate-runtime");
+  if (migrationIndex !== -1) {
+    const legacyInstallRoot = process.argv[migrationIndex + 1];
+    if (!app.isPackaged || !legacyInstallRoot || !isAbsolute(legacyInstallRoot)) throw new Error("Invalid Runtime migration request");
+    const keys = await loadInstallerTrustedKeys([join(process.execPath, "..", "runtime-keys")]);
+    if (!keys) throw new Error("Missing migration trust root");
+    const { migrateLegacyRuntime } = await import("./migrate-runtime.js");
+    await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "runtimes"), trustedKeys: keys.trustedKeys });
+    app.exit(0); return;
+  }
   if (process.argv.includes("--omp-print-abi")) {
     process.stdout.write(
       JSON.stringify(
@@ -128,7 +141,16 @@ export async function main(): Promise<void> {
   const appNativeIcon = appIcon !== undefined ? nativeImage.createFromPath(appIcon) : undefined;
   const validAppIcon = appNativeIcon !== undefined && !appNativeIcon.isEmpty() ? appNativeIcon : undefined;
 
+  let updateCoordinator: UpdateCoordinator | undefined;
   const hostFactory = createProductionHostFactory({
+    beforeCreate: async () => { await updateCoordinator?.initialize(); },
+    afterCreate: async (composition, workspaceSelected) => {
+      if (!updateCoordinator?.hasRuntimeTrial || !workspaceSelected) return false;
+      const ready = composition.status === "ready";
+      if (!ready) await composition.shutdown();
+      await updateCoordinator.completeStartup(ready, workspaceSelected);
+      return !ready;
+    },
     openUrl: async (url) => {
       if (!/^https?:\/\//i.test(url)) throw new Error("refusing to open a non-http login url");
       await shell.openExternal(url);
@@ -138,6 +160,22 @@ export async function main(): Promise<void> {
       if (error.length > 0) throw new Error(error);
     },
   });
+  if (app.isPackaged && process.platform === "win32" && runtimeInstallLayout) {
+    const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
+    const updater = new PreparedNsisUpdater();
+    updateCoordinator = new UpdateCoordinator({
+      root: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "updates-v2"),
+      runtimeRoot: runtimeInstallLayout.installDirectory,
+      bundledRuntimeRoot: runtimeInstallLayout.artifactRoot,
+      initialInstallerPath: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "@omp-studiodesktop-updater", "installer.exe"),
+      repo: "the-snowpear/omp-studio", platform: `${process.platform}-${process.arch}`, appVersion: app.getVersion(), keys: trustedKeys,
+      prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
+      snapshotChanged: (snapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
+      isBusy: () => hostFactory.isBusy(), beforeQuit: () => hostFactory.shutdownForUpdate(),
+      installDesktop: (path) => updater.installPrepared(path),
+      restart: () => { app.relaunch({ args: process.argv.slice(1).filter(a => a !== "--omp-restarted").concat("--omp-restarted") }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
+    });
+  }
   const terminalManager = new TerminalSessionManager({
     spawner: createNodePtySpawner(),
     resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? process.cwd(),
@@ -547,6 +585,7 @@ export async function main(): Promise<void> {
         }
       },
     });
+    const disposeUnifiedUpdates = updateCoordinator ? registerUnifiedUpdatesIpc({ ipcMain, isTrustedSender }, updateCoordinator) : undefined;
     const disposeAppUpdate = registerChromeAppUpdateIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -592,6 +631,8 @@ export async function main(): Promise<void> {
       },
       dispose: () => {
         disposeUpdates.dispose();
+        disposeUnifiedUpdates?.();
+        updateCoordinator?.dispose();
         disposeAppUpdate.dispose();
         payloadHealth.dispose();
         disposeWorkspaceShell.dispose();
@@ -672,6 +713,7 @@ export async function main(): Promise<void> {
   });
 
   await application.start();
+  updateCoordinator?.startBackground();
 }
 
 main().catch((error: unknown) => {

@@ -1,3 +1,4 @@
+import { isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
  * Desktop semantic commands: session.create / session.resume / session.drop / interaction.respond
@@ -63,6 +64,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   // `expectedStateVersion` would collide with every streaming delta. The
   // Runtime's own single-slot guards (BUSY_STREAMING / INTERACTION_STALE)
   // already express the real preconditions and give better error text.
+  ...UPGRADE_OPERATION_KINDS,
   "btw.ask",
   "btw.abort",
   "btw.branch",
@@ -152,6 +154,9 @@ export function createWorkspaceSessionCatalog(
 }
 
 export function createDesktopSemanticCommands(options: {
+  readonly resolveImportWorkspace?: (workspaceId: string) => Promise<string | undefined>;
+  readonly registerImportedWorkspace?: (cwd: string) => Promise<string>;
+
   readonly sessionRef: { current: DesktopRuntimeSession | undefined };
   readonly catalog: HostSessionCatalogProvider;
   readonly resolveResidentSessionId?: (threadId: ThreadId) => string | undefined;
@@ -353,6 +358,13 @@ export function createDesktopSemanticCommands(options: {
       if (snapshot === undefined || hello === undefined) {
         throw missingRuntime("Runtime snapshot is unavailable");
       }
+      if (operation.kind === "session.import.execute") {
+        if (!options.registerImportedWorkspace) throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Workspace import registration is unavailable");
+        const { fallbackWorkspaceId, fallbackCwd: _privatePath, ...rest } = operation;
+        const cwd = fallbackWorkspaceId ? await options.resolveImportWorkspace?.(fallbackWorkspaceId) : undefined;
+        if (fallbackWorkspaceId && !cwd) throw new StudioHostError("INVALID_ARGUMENT", "Unknown import workspace");
+        operation = { ...rest, ...(cwd ? { fallbackCwd: cwd } : {}) };
+      }
       const receipt = await session.controller.invoke({
         type: "studio.request",
         requestId: requestId as unknown as RequestId,
@@ -362,6 +374,14 @@ export function createDesktopSemanticCommands(options: {
       });
       throwIfNotCompleted(receipt);
       const latest = session.controller.publication()?.snapshot ?? snapshot;
+      if (operation.kind === "session.import.execute") {
+        const imported = receipt.result as { imported?: unknown; sessionId?: unknown; cwd?: unknown };
+        if (imported?.imported !== true || typeof imported.sessionId !== "string" || typeof imported.cwd !== "string")
+          throw new StudioHostError("INTERNAL_ERROR", "Invalid import result");
+        const workspaceId = await options.registerImportedWorkspace!(imported.cwd);
+        return { snapshot: latest, result: { imported: true, sessionId: imported.sessionId, workspaceId } };
+      }
+      if (isUpgradeOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (isEvaluationOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (operation.kind === "operator.invoke") {
         // The Runtime returns { output, result } for operator commands; carry

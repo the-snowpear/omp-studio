@@ -1,3 +1,6 @@
+import { invokeUpgrade, useUpgradeAvailable } from "../runtimeUpgrade";
+import { PREVIEW_BTW_TOPICS, PREVIEW_BTW_TURNS } from "../preview/btwPreview";
+import type { BtwTopicSummary, BtwHistoryTurn } from "@omp-studio/client-contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   BtwAskOutcome,
@@ -17,6 +20,7 @@ export interface BtwSessionInput {
   readonly client: StudioClient | null;
   /** Preview mode drives fixtures and must never reach the Host. */
   readonly preview: boolean;
+  readonly sessionId?: string;
   /** Fixture question shown while previewing; ignored outside preview mode. */
   readonly previewQuestion?: string;
   readonly canCommand: boolean;
@@ -25,6 +29,13 @@ export interface BtwSessionInput {
 }
 
 export interface BtwSessionApi {
+  readonly historyAvailable?: boolean;
+  readonly topics?: readonly BtwTopicSummary[];
+  readonly turns?: readonly BtwHistoryTurn[];
+  readonly selectedTopicId?: string | null;
+  selectTopic?(topicId: string): Promise<void>;
+  newTopic?(): void;
+  refreshHistory?(): Promise<void>;
   readonly snapshot: BtwSnapshot | null;
   /** Question text of the current round, kept locally: snapshots omit it. */
   readonly question: string;
@@ -40,7 +51,7 @@ export interface BtwSessionApi {
   readonly pending: boolean;
   readonly error: string | undefined;
   readonly notice: string | undefined;
-  ask(question: string): Promise<boolean>;
+  ask(question: string, newTopic?: boolean): Promise<boolean>;
   abort(): Promise<void>;
   branch(): Promise<void>;
   copy(): Promise<void>;
@@ -75,17 +86,63 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   onBranchedRef.current = input.onBranched;
   const pendingRef = useRef(false);
 
-  const snapshot = input.snapshot;
-  const roundId = snapshot?.ephemeralId ?? null;
+  const historyAvailable = useUpgradeAvailable(input.client, input.preview, "btw.history.list");
+  const [topics, setTopics] = useState<readonly BtwTopicSummary[]>([]);
+  const [turns, setTurns] = useState<readonly BtwHistoryTurn[]>([]);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
+  const [historySnapshot, setHistorySnapshot] = useState<BtwSnapshot | null>(null);
+  const [newTopicDraft, setNewTopicDraft] = useState(false);
+  const selectionGeneration = useRef(0);
   const seenRoundRef = useRef<string | null>(null);
   const expectedRoundRef = useRef<string | null>(null);
+  const refreshHistory = useCallback(async () => {
+    if (input.preview) { setTopics(PREVIEW_BTW_TOPICS); return; }
+    if (!input.client || !historyAvailable) return;
+    const generation = selectionGeneration.current;
+    try {
+      const result = await invokeUpgrade(input.client, "btw.history.list", {});
+      if (generation === selectionGeneration.current && (!input.sessionId || result.sessionId === input.sessionId)) setTopics(result.topics);
+    } catch (cause) { if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, "BTW history unavailable")); }
+  }, [input.client, input.preview, input.sessionId, historyAvailable]);
+  const selectTopic = useCallback(async (topicId: string) => {
+    const generation = ++selectionGeneration.current;
+    expectedRoundRef.current = null;
+    setSelectedTopicId(topicId); setNewTopicDraft(false); setDraft(""); setBranchToken(null); setTurns([]); setHistorySnapshot(null);
+    try {
+      const result = input.preview ? { turns: PREVIEW_BTW_TURNS } : input.client ? await invokeUpgrade(input.client, "btw.history.read", { topicId }) : null;
+      if (generation !== selectionGeneration.current || !result) return;
+      setTurns(result.turns);
+      const last = result.turns[result.turns.length - 1];
+      if (last) {
+        setQuestion(last.question);
+        setHistorySnapshot({ ephemeralId: "history:" + topicId, topicId, question: last.question, text: last.answer,
+          status: last.status === "complete" ? "completed" : last.status === "running" ? "running" : last.status === "error" ? "failed" : "aborted" });
+      }
+    } catch (cause) { if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, "BTW history unavailable")); }
+  }, [input.client, input.preview]);
+  const newTopic = useCallback(() => {
+    selectionGeneration.current++;
+    expectedRoundRef.current = null;
+    seenRoundRef.current = null;
+    setSelectedTopicId(null); setHistorySnapshot(null); setTurns([]); setNewTopicDraft(true);
+    setQuestion(""); setDraft(""); setBranchToken(null); setTokenEphemeralId(null);
+    setStartedAt(null); setBranchedId(null); setError(undefined); setNotice(undefined);
+  }, []);
+  useEffect(() => {
+    newTopic(); setTopics([]); setNewTopicDraft(false); void refreshHistory();
+    return () => { selectionGeneration.current++; };
+  }, [input.client, input.sessionId, input.preview]);
+  useEffect(() => { void refreshHistory(); }, [refreshHistory, input.snapshot?.status]);
+  const live = input.snapshot && (!input.sessionId || !input.snapshot.sessionId || input.snapshot.sessionId === input.sessionId) ? input.snapshot : null;
+  const snapshot = newTopicDraft ? null : historyAvailable && selectedTopicId && live?.topicId !== selectedTopicId ? historySnapshot : live ?? historySnapshot;
+  const roundId = snapshot?.ephemeralId ?? null;
 
   // A new ephemeralId is a new round: drop the previous token, restart the
   // clock, and clear the stale branch/error banners from the old answer.
   // The ask receipt can land before the first `btw.changed`; do not let that
   // lagging snapshot rewind the clock or drop the freshly minted token.
   useEffect(() => {
-    if (expectedRoundRef.current !== null && roundId !== null && roundId !== expectedRoundRef.current) {
+    if (expectedRoundRef.current !== null && roundId !== expectedRoundRef.current) {
       return;
     }
     if (seenRoundRef.current === roundId) return;
@@ -107,7 +164,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   // The token belongs to the round it was minted for.
   const activeToken = tokenEphemeralId !== null && tokenEphemeralId === roundId ? branchToken : null;
 
-  const canAbort = snapshot !== null && snapshot.status === "running" && !pending;
+  const canAbort = snapshot !== null && snapshot.ephemeralId === live?.ephemeralId && snapshot.status === "running" && !pending;
   const canBranch = snapshot !== null && snapshot.status === "completed" && activeToken !== null && branchedId === null;
   const branchBlockedReason = useMemo(() => {
     if (canBranch) return undefined;
@@ -115,8 +172,9 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
     if (branchedId !== null) return "本轮已分支";
     if (snapshot.status === "running") return "等答案写完再分支";
     if (snapshot.status !== "completed") return "只有已完成的答案可以分支";
+    if (turns.length > 1) return "多轮话题保留在 BTW 历史中";
     return "分支凭据已失效，重新问一次";
-  }, [branchedId, canBranch, snapshot]);
+  }, [branchedId, canBranch, snapshot, turns.length]);
 
   const dispatch = useCallback(
     async <TResult>(name: CommandName, payload: unknown): Promise<TResult> => {
@@ -129,7 +187,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   );
 
   const ask = useCallback(
-    async (text: string): Promise<boolean> => {
+    async (text: string, forceNewTopic = false): Promise<boolean> => {
       const trimmed = text.trim();
       if (trimmed.length === 0) {
         setError("先写下要问的问题");
@@ -143,6 +201,9 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
       if (input.preview) {
         setError(undefined);
         setNotice("演示：未发往 Host");
+        setNewTopicDraft(false);
+        setHistorySnapshot({ ephemeralId: "demo-local", status: "completed", text: PREVIEW_BTW_TURNS[1]!.answer });
+        setTurns(rows => [...rows, { question: trimmed, answer: PREVIEW_BTW_TURNS[1]!.answer, status: "complete", createdAt: Date.now(), updatedAt: Date.now() }]);
         return true;
       }
       if (!input.canCommand) {
@@ -150,18 +211,28 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
         return false;
       }
       if (pendingRef.current) return false;
+      const generation = selectionGeneration.current;
       pendingRef.current = true;
       setPending(true);
       setError(undefined);
       setNotice(undefined);
       try {
-        // Studio Runtime rejects a second ask while one is streaming. The TUI
-        // aborts-and-replaces; do the same so the window field can send again.
-        const live = snapshotRef.current;
-        if (live?.status === "running") {
-          await dispatch("btw.abort", { ephemeralId: live.ephemeralId });
+        if (snapshotRef.current?.status === "running") throw new Error("请先等待当前答案完成，或中止回答");
+        setNewTopicDraft(false);
+        if (!forceNewTopic && selectedTopicId && historyAvailable && input.client) {
+          const previous = snapshot;
+          if (previous?.status !== "completed") throw new Error("只有已完成的话题可以追问");
+          const outcome = await invokeUpgrade(input.client, "btw.followUp", { topicId: selectedTopicId, question: trimmed });
+          if (generation !== selectionGeneration.current) return false;
+          if (previous && turns[turns.length - 1]?.answer !== previous.text) setTurns(rows => [...rows, { question: previous.question ?? question, answer: previous.text, status: "complete", createdAt: Date.now(), updatedAt: Date.now() }]);
+          setBranchToken(null); setHistorySnapshot(null); expectedRoundRef.current = outcome.ephemeralId; setStartedAt(Date.now());
+          return true;
         }
         const outcome = await dispatch<BtwAskOutcome>("btw.ask", { question: trimmed });
+        if (generation !== selectionGeneration.current) return false;
+        if (forceNewTopic) setTurns([]);
+        setSelectedTopicId(historyAvailable ? outcome.ephemeralId : null);
+        setHistorySnapshot(null);
         setBranchToken(outcome.branchToken);
         setTokenEphemeralId(outcome.ephemeralId);
         // The receipt can land before the first btw.changed; start the clock
@@ -172,14 +243,14 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
         setBranchedId(null);
         return true;
       } catch (cause) {
-        setError(hostErrorMessage(cause, "BTW 提问失败"));
+        if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, "BTW 提问失败"));
         return false;
       } finally {
         pendingRef.current = false;
         setPending(false);
       }
     },
-    [dispatch, input.canCommand, input.preview],
+    [dispatch, input.canCommand, input.preview, input.client, selectedTopicId, historyAvailable, snapshot, turns, question],
   );
 
   const abort = useCallback(async () => {
@@ -245,8 +316,9 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   const dismissNotice = useCallback(() => setNotice(undefined), []);
 
   return {
+    historyAvailable, topics, turns, selectedTopicId, selectTopic, newTopic, refreshHistory,
     snapshot,
-    question: question !== "" ? question : (input.preview ? (input.previewQuestion ?? "") : ""),
+    question: snapshot?.question ?? (question !== "" ? question : (input.preview ? (input.previewQuestion ?? "") : "")),
     draft,
     setDraft,
     startedAt,

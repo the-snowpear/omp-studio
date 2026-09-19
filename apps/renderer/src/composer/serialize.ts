@@ -23,6 +23,8 @@ export function serializeChip(chip: ComposerChip, imageIndex?: number): string {
     }
     case "skill":
       return `/skill:${chip.name ?? chip.label}`;
+    case "model":
+      return `^${chip.name ?? chip.label}`;
     case "agent":
       return `@${chip.name ?? chip.label}`;
     case "mode":
@@ -61,6 +63,7 @@ export function snapshotFromDoc(doc: ComposerDoc): ComposerSnapshot {
 
 export function snapshotFromText(text: string): ComposerSnapshot {
   if (text.length === 0) return emptySnapshot();
+  if (/(^|\s)\^[^\s^]+\/[^\s^]+/u.test(text)) return snapshotFromDoc(displayDocFromSerializedText(text));
   return { text, images: [], doc: { nodes: [{ type: "text", value: text }] } };
 }
 
@@ -71,7 +74,7 @@ export function snapshotFromTextAndImages(
 ): ComposerSnapshot {
   if (images === undefined || images.length === 0) return snapshotFromText(text);
   const nodes: ComposerDoc["nodes"][number][] = [];
-  if (text.length > 0) nodes.push({ type: "text", value: text });
+  if (text.length > 0) nodes.push(...snapshotFromText(text).doc.nodes);
   for (const image of images) {
     nodes.push({
       type: "chip",
@@ -147,6 +150,8 @@ function nextSerializedToken(
   const consider = (start: number, end: number, chip: ComposerChip): void => {
     if (best === null || start < best.start) best = { start, end, chip };
   };
+  const model = firstMatch(/\^([^\s^]+\/[^\s^]+)/gu.source, "gu", text, from, match => isSkillBoundary(text, match.index));
+  if (model?.[1]) consider(model.index, model.index + model[0].length, { id: newChipId(), kind: "model", name: model[1], label: model[1].slice(model[1].indexOf("/") + 1) });
   const image = firstMatch(IMAGE_TOKEN_RE.source, "gu", text, from);
   if (image?.index !== undefined && image[1] !== undefined) {
     consider(image.index, image.index + image[0].length, {

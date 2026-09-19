@@ -51,7 +51,7 @@ export function SubagentConversationPane({
   readonly liveSessionId?: SessionId;
   readonly pendingInteraction?: boolean;
   readonly workspaceId?: string;
-  readonly loadMentions?: (trigger: "@" | "/", query: string) => Promise<readonly MentionCandidate[]>;
+  readonly loadMentions?: (trigger: "@" | "/" | "^", query: string) => Promise<readonly MentionCandidate[]>;
   readonly composerId?: string;
   readonly autoFocusComposer?: boolean;
   readonly previewComposer?: boolean;

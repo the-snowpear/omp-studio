@@ -29,7 +29,7 @@ import type { AgentSession } from "../../session/agent-session";
 import type { AuthStorage } from "../../session/auth-storage";
 import type { SessionManager } from "../../session/session-manager";
 import { createSubagentSettings } from "../../task/executor";
-import type { ConfiguredThinkingLevel } from "../../thinking";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 
 const TAN_LABEL_PREVIEW_LENGTH = 80;
 

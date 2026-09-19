@@ -111,6 +111,7 @@ export class StudioStateProjector {
 	#telemetryTimer: ReturnType<typeof setTimeout> | undefined;
 	#telemetryInFlight = false;
 	#telemetryQueued = false;
+	#lastRateAt = 0;
 	#telemetrySnapshot: StudioSessionTelemetry;
 	#retry: StudioRetryState | undefined;
 	#retrySessionId: string | undefined;
@@ -149,6 +150,7 @@ export class StudioStateProjector {
 						this.commitStateChange();
 					}
 				}
+				if (event.type === "advisor_cost_changed") this.#scheduleTelemetry(false);
 				if (event.type === "model_changed" || event.type === "thinking_level_changed") this.commitStateChange();
 			}) ?? (() => {});
 		// Bridge-side Task subagent model switches carry their own signal; TUI
@@ -403,6 +405,22 @@ export class StudioStateProjector {
 		// schedule a rebuild. Every other kind still does: tool boundaries and
 		// notices can follow a context mutation.
 		else if (event.kind !== "conversation.message.delta") this.#scheduleTelemetry(false);
+		else if (Date.now() - this.#lastRateAt >= 500) {
+			this.#lastRateAt = Date.now();
+			const rate = this.#runtime.session.tokenRate?.rate();
+			if (typeof rate === "number" && Number.isFinite(rate) && rate >= 0) {
+				this.#telemetrySnapshot = {
+					...this.#telemetrySnapshot,
+					capturedAt: new Date().toISOString(),
+					generationTps: rate,
+				};
+				this.#emitEvent({
+					kind: "session.telemetry.changed",
+					sessionId: this.#runtime.sessionId,
+					telemetry: this.#telemetrySnapshot,
+				});
+			}
+		}
 		if (advances && this.#committedSnapshot !== undefined) {
 			// No clone here: `#emitEvent` copies the body into the envelope and
 			// `#notify` copies again per listener, so neither a listener nor the

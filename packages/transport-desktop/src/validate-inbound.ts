@@ -1,3 +1,5 @@
+import { validateRuntimeSettingValue as validateProtocolSettingValue, type StudioRuntimeSettingKey } from "@omp-studio/studio-protocol";
+import { UPGRADE_OPERATION_KINDS, validateUpgradeOperation } from "@omp-studio/studio-protocol";
 import { validateEvaluationOperation } from "@omp-studio/studio-protocol";
 
 function record(value: unknown, field: string): Record<string, unknown> {
@@ -900,44 +902,8 @@ function validateRuntimeSettingValue(key: unknown, value: unknown, what: string)
   if (typeof key !== "string" || !STUDIO_RUNTIME_SETTING_KEYS.includes(key as (typeof STUDIO_RUNTIME_SETTING_KEYS)[number])) {
     throw new ValidationError(`${what}: unsupported setting key`);
   }
-  switch (key) {
-    case "edit.autoRepair.enabled":
-    case "extendedContext":
-    case "compaction.asyncEnabled":
-    case "plan.autosave":
-    case "retry.waitForUsageReset":
-    case "compaction.experimentalContextManagement":
-      if (typeof value !== "boolean") throw new ValidationError(`${what}: value must be boolean`);
-      return;
-    case "plan.autosaveDir":
-      if (typeof value !== "string" || value.length > 4096 || value.includes("\0")) throw new ValidationError(`${what}: invalid autosave directory`);
-      return;
-    case "features.unexpectedStopDetection":
-      if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODES.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODES)[number])) {
-        throw new ValidationError(`${what}: invalid unexpected-stop detection mode`);
-      }
-      return;
-    case "providers.unexpectedStopModel":
-      if (!STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS.includes(value as (typeof STUDIO_RUNTIME_UNEXPECTED_STOP_MODELS)[number])) {
-        throw new ValidationError(`${what}: invalid unexpected-stop model`);
-      }
-      return;
-    case "providers.openai-codex.codeMode":
-      if (!STUDIO_RUNTIME_CODE_MODES.includes(value as (typeof STUDIO_RUNTIME_CODE_MODES)[number])) {
-        throw new ValidationError(`${what}: invalid code mode`);
-      }
-      return;
-    case "compaction.methodOrder":
-      if (
-        !Array.isArray(value) ||
-        value.length === 0 ||
-        value.some((method) => !STUDIO_RUNTIME_COMPACTION_METHODS.includes(method as (typeof STUDIO_RUNTIME_COMPACTION_METHODS)[number])) ||
-        new Set(value).size !== value.length
-      ) {
-        throw new ValidationError(`${what}: value must be a non-empty unique compaction method list`);
-      }
-      return;
-  }
+  try { validateProtocolSettingValue(key as StudioRuntimeSettingKey, value, what); }
+  catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid Runtime setting"); }
 }
 
 function validateRuntimeSettingsGetInput(input: unknown): void {
@@ -1234,7 +1200,11 @@ function validateModelsProviderUpsertInput(input: unknown): void {
   assertNonEmptyText(input.id, "models.provider.upsert input: id");
   assertNonEmptyText(input.name, "models.provider.upsert input: name");
   assertNonEmptyText(input.api, "models.provider.upsert input: api");
-  if (input.website !== undefined) assertNonEmptyText(input.website, "models.provider.upsert input: website");
+  // An empty website is meaningful: the Host writer deletes the YAML key for it.
+  if (input.website !== undefined) {
+    if (typeof input.website !== "string") throw new ValidationError("models.provider.upsert input: website must be a string");
+    if (input.website.length > MAX_TEXT_LENGTH) throw new ValidationError("models.provider.upsert input: website exceeds max length");
+  }
   if (input.note !== undefined && typeof input.note !== "string") throw new ValidationError("models.provider.upsert input: note must be a string");
   if (input.endpointUrl !== undefined) {
     if (typeof input.endpointUrl !== "string") throw new ValidationError("models.provider.upsert input: endpointUrl must be a string");
@@ -1813,6 +1783,9 @@ const COMMAND_INPUT_VALIDATORS: {
   "session.tree.navigate": validateTreeNavigateInput,
   "session.tree.branch": validateTreeBranchInput,
   "operator.invoke": validateOperatorInvokeInput,
+  ...Object.fromEntries(UPGRADE_OPERATION_KINDS.map(kind => [kind, (input: unknown) => {
+    try { const body = record(input, "Runtime input"); if ("kind" in body) throw new Error("Operation identity is not an input field"); if ("fallbackCwd" in body) throw new Error("Use a registered workspace identity"); validateUpgradeOperation({ ...body, kind }); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid Runtime input"); }
+  }])) as Record<(typeof UPGRADE_OPERATION_KINDS)[number], (input: unknown) => void>,
   "btw.ask": (input) => validateNamedTextInput(input, "btw.ask input", "question"),
   "btw.abort": (input) => validateOpaqueIdInput(input, "btw.abort input", "ephemeralId"),
   "btw.branch": (input) => validateOpaqueIdInput(input, "btw.branch input", "branchToken"),

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { HostRuntimeHelloView } from "@omp-studio/host-client-api";
 import { InMemorySessionLeaseStore, type SessionLeaseStore } from "@omp-studio/studio-host";
@@ -158,6 +161,70 @@ const context = {
 
 const WORKSPACE_A = { workspaceId: "workspace-a", cwd: "C:/workspace" };
 const WORKSPACE_B = { workspaceId: "workspace-b", cwd: "C:/other" };
+
+test("update restart persists and restores resident sessions with their original workspaces", async () => {
+  const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-residents-"));
+  const first = createHarness(), second = createHarness();
+  const launch = { ...context, profileDirectory };
+  try {
+    await first.port.start(launch);
+    await first.port.rebind?.(WORKSPACE_B);
+    const before = first.port.listResidents!().residents.map(r => r.sessionId).sort();
+    await first.port.prepareRestart?.();
+    const stored = JSON.parse(await readFile(join(profileDirectory, "update-session-restore.json"), "utf8"));
+    assert.deepEqual(stored.residents.map((r: { sessionId: string }) => r.sessionId).sort(), before);
+    await assert.rejects(() => first.port.switchSession!({ kind: "fresh" }), /restarting/);
+    await first.port.stop();
+    await second.port.start(launch);
+    assert.deepEqual(second.port.listResidents!().residents.map(r => r.sessionId).sort(), before);
+    assert.deepEqual(second.state.launchedIn.map(r => r.workspaceId).sort(), ["workspace-a", "workspace-b"]);
+    await assert.rejects(readFile(join(profileDirectory, "update-session-restore.json")), /ENOENT/);
+  } finally { await first.port.stop(); await second.port.stop(); await rm(profileDirectory, { recursive: true, force: true }); }
+});
+
+test("update restoration isolates missing sessions and keeps healthy residents usable", async () => {
+  const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-partial-"));
+  const { port, state } = createHarness();
+  const restorePath = join(profileDirectory, "update-session-restore.json");
+  const unavailable = { sessionId: "missing", workspace: WORKSPACE_B };
+  try {
+    await writeFile(restorePath, JSON.stringify({ activeSessionId: "healthy", residents: [
+      unavailable, { sessionId: "healthy", workspace: WORKSPACE_A },
+    ] }));
+    state.failStartEpoch.add(1);
+    const session = await port.start({ ...context, profileDirectory });
+    assert.equal(session?.controller.publication()?.snapshot.sessionId, "healthy");
+    assert.deepEqual(port.listResidents!().residents.map(r => r.sessionId), ["healthy"]);
+    assert.equal(port.lastUnavailable?.(), undefined);
+    await assert.rejects(readFile(restorePath), /ENOENT/);
+    const diagnostics = (await readdir(profileDirectory)).find(name => name.startsWith("update-session-restore.failed-"))!;
+    assert.deepEqual(JSON.parse(await readFile(join(profileDirectory, diagnostics), "utf8")).residents, [unavailable]);
+    await port.stop();
+    await port.start({ ...context, profileDirectory });
+    assert.equal(state.created.filter(row => row.sessionId === "missing").length, 1);
+  } finally { await port.stop(); await rm(profileDirectory, { recursive: true, force: true }); }
+});
+
+for (const freshFails of [false, true]) {
+  test(`update restoration ${freshFails ? "retains intent for Runtime rollback" : "opens a fresh session when every saved session is stale"}`, async () => {
+    const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-stale-"));
+    const { port, state } = createHarness();
+    const restorePath = join(profileDirectory, "update-session-restore.json");
+    const restore = { activeSessionId: "missing", residents: [{ sessionId: "missing", workspace: WORKSPACE_A }] };
+    try {
+      await writeFile(restorePath, JSON.stringify(restore));
+      state.failStartEpoch.add(1);
+      if (freshFails) state.failStartEpoch.add(2);
+      if (freshFails) {
+        await assert.rejects(port.start({ ...context, profileDirectory }), /start failed/);
+        assert.deepEqual(JSON.parse(await readFile(restorePath, "utf8")), restore);
+      } else {
+        assert.ok(await port.start({ ...context, profileDirectory }));
+        await assert.rejects(readFile(restorePath), /ENOENT/);
+      }
+    } finally { await port.stop(); await rm(profileDirectory, { recursive: true, force: true }); }
+  });
+}
 
 test("maintenance stops every idle worker, restores session cwd and selects the original view on the new version", async () => {
   const { port, state } = createHarness();

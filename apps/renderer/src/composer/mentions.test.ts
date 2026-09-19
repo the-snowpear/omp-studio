@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { StudioClient } from "@omp-studio/client-contract";
+
 import {
   createWorkspaceFileIndex,
   filterMentions,
+  loadMentions,
   previewMentions,
   type WorkspaceEntry,
 } from "./mentions";
@@ -105,5 +108,70 @@ describe("createWorkspaceFileIndex", () => {
 
     const roots = list.mock.calls.filter(([path]) => path === undefined);
     expect(roots).toHaveLength(1);
+  });
+});
+
+function fakeModelMentionClient(
+  available: Array<{ selector: string; name: string }> | Error,
+): { client: StudioClient; calls: () => number } {
+  const commands: Record<string, unknown> = {};
+  let calls = 0;
+  const client = {
+    async command(commandName: string, _input: unknown) {
+      calls += 1;
+      if (available instanceof Error) throw available;
+      const requestId = `req-${calls}`;
+      commands[requestId] = {
+        requestId,
+        commandName,
+        status: "completed",
+        observedAt: "2026-09-19T00:00:00.000Z",
+        result: { snapshot: {}, result: { available } },
+      };
+      return { requestId };
+    },
+    getState: () => ({ commands }),
+    subscribe() {
+      return () => {};
+    },
+    async query() {
+      throw new Error("unused");
+    },
+    async bootstrap() {
+      throw new Error("unused");
+    },
+    async close() {
+      throw new Error("unused");
+    },
+  };
+  return { client: client as unknown as StudioClient, calls: () => calls };
+}
+
+describe("loadMentions model triggers", () => {
+  const available = [
+    { selector: "openai/gpt-5", name: "GPT-5" },
+    { selector: "anthropic/claude-opus", name: "Claude Opus" },
+  ];
+
+  it("fetches ^ candidates once per client and filters locally per keystroke", async () => {
+    const { client, calls } = fakeModelMentionClient(available);
+
+    const all = await loadMentions(client, "^", "");
+    const narrowed = await loadMentions(client, "^", "claude");
+
+    expect(calls()).toBe(1);
+    expect(all.map((item) => item.name)).toEqual(["openai/gpt-5", "anthropic/claude-opus"]);
+    expect(all[0]?.label).toBe("GPT-5");
+    expect(narrowed.map((item) => item.name)).toEqual(["anthropic/claude-opus"]);
+    expect(narrowed[0]?.kind).toBe("model");
+  });
+
+  it("caches a failing ^ fetch briefly instead of firing one command per keystroke", async () => {
+    const { client, calls } = fakeModelMentionClient(new Error("unknown operation"));
+
+    await expect(loadMentions(client, "^", "g")).rejects.toThrow("unknown operation");
+    await expect(loadMentions(client, "^", "gp")).rejects.toThrow("unknown operation");
+
+    expect(calls()).toBe(1);
   });
 });

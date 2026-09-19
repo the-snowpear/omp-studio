@@ -14,6 +14,104 @@ using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
+internal static class UpdateMaintenance
+{
+  public static int WaitForExit(string root)
+  {
+    string prefix = Path.GetFullPath(root).TrimEnd('\\') + "\\";
+    for (int attempt = 0; attempt < 60; attempt++)
+    {
+      bool busy = false;
+      foreach (string name in new string[] { "OMP Studio", "omp" })
+      foreach (Process process in Process.GetProcessesByName(name))
+      {
+        using (process)
+        {
+          try
+          {
+            string path = process.MainModule.FileName;
+            if (path != null && path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) busy = true;
+          }
+          catch { }
+        }
+      }
+      if (!busy) return 0;
+      System.Threading.Thread.Sleep(500);
+    }
+    return 10;
+  }
+
+  public static int Migrate(string oldRoot, string newRoot)
+  {
+    oldRoot = Path.GetFullPath(oldRoot).TrimEnd('\\');
+    string localRoot = Path.GetFullPath(newRoot).TrimEnd('\\');
+    if (string.Equals(oldRoot, localRoot, StringComparison.OrdinalIgnoreCase)) return 0;
+    string uninstaller = Path.Combine(oldRoot, "Uninstall OMP Studio.exe");
+    if (!File.Exists(uninstaller) || !File.Exists(Path.Combine(oldRoot, "OMP Studio.exe"))) return 11;
+    // The old uninstaller kills by name. Never invoke it while unrelated OMP work exists.
+    foreach (string name in new string[] { "OMP Studio", "omp" })
+    {
+      Process[] processes = Process.GetProcessesByName(name);
+      bool busy = processes.Length != 0;
+      foreach (Process process in processes) process.Dispose();
+      if (busy) return 12;
+    }
+    ProcessStartInfo migration = new ProcessStartInfo(Path.Combine(localRoot, "OMP Studio.exe"), "--omp-migrate-runtime \"" + oldRoot + "\"");
+    migration.UseShellExecute = false;
+    migration.CreateNoWindow = true;
+    using (Process process = Process.Start(migration))
+    {
+      if (!process.WaitForExit(120000)) return 14;
+      if (process.ExitCode != 0) return 15;
+    }
+    string oldProfile = Path.Combine(oldRoot, "userdata", "profile");
+    string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "omp-studio", "profile");
+    if (Directory.Exists(oldProfile) && !Directory.Exists(profile)) CopyTree(oldProfile, profile);
+    return UninstallLegacy(oldRoot, delegate(ProcessStartInfo start) {
+      using (Process process = Process.Start(start)) { process.WaitForExit(); return process.ExitCode; }
+    });
+  }
+
+  internal static int UninstallLegacy(string oldRoot, Func<ProcessStartInfo, int> run)
+  {
+    // Without _?= NSIS spawns a temporary child and the process we wait for
+    // exits before uninstalling. Copy it ourselves and disable that handoff.
+    string temporary = Path.Combine(Path.GetTempPath(), "omp-migration-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(temporary);
+    string uninstaller = Path.Combine(temporary, "old-uninstaller.exe");
+    try
+    {
+      File.Copy(Path.Combine(oldRoot, "Uninstall OMP Studio.exe"), uninstaller, false);
+      // NSIS requires _?= last, without quotes around the directory (including spaces).
+      ProcessStartInfo start = new ProcessStartInfo(uninstaller, "/S /KEEP_APP_DATA --updated /allusers _?=" + oldRoot);
+      start.UseShellExecute = true;
+      start.Verb = "runas";
+      start.WindowStyle = ProcessWindowStyle.Hidden;
+      int code = run(start);
+      if (code != 0) return code;
+      return File.Exists(Path.Combine(oldRoot, "OMP Studio.exe")) || File.Exists(Path.Combine(oldRoot, "Uninstall OMP Studio.exe")) ? 16 : 0;
+    }
+    catch (System.ComponentModel.Win32Exception) { return 13; }
+    finally
+    {
+      try { File.Delete(uninstaller); Directory.Delete(temporary); } catch { }
+    }
+  }
+
+  static void CopyTree(string source, string destination)
+  {
+    if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0) throw new IOException("Refusing linked migration directory");
+    Directory.CreateDirectory(destination);
+    foreach (string file in Directory.GetFiles(source))
+    {
+      if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) throw new IOException("Refusing linked migration file");
+      string target = Path.Combine(destination, Path.GetFileName(file));
+      if (!File.Exists(target)) File.Copy(file, target, false);
+    }
+    foreach (string dir in Directory.GetDirectories(source)) CopyTree(dir, Path.Combine(destination, Path.GetFileName(dir)));
+  }
+}
+
 internal static class Program
 {
   [STAThread]
@@ -21,6 +119,8 @@ internal static class Program
   {
     try
     {
+      if (args.Length == 2 && args[0] == "--wait-install-root") return UpdateMaintenance.WaitForExit(args[1]);
+      if (args.Length == 3 && args[0] == "--migrate-machine") return UpdateMaintenance.Migrate(args[1], args[2]);
       Native.EnablePerMonitorV2();
       Application.EnableVisualStyles();
       Application.SetCompatibleTextRenderingDefault(false);
@@ -502,17 +602,19 @@ public class Bridge
   {
     string ini = Path.Combine(form.Dir, "host.ini");
     string existingDir = Ini.Read(ini, "ExistingDir", "");
-    KillByName("OMP Studio");
+    KillByName("OMP Studio", existingDir);
     KillOmpUnder(existingDir);
     return !AppIsRunning(existingDir);
   }
 
-  static void KillByName(string name)
+  static void KillByName(string name, string root)
   {
+    if (string.IsNullOrEmpty(root)) return;
+    string prefix = Path.GetFullPath(root).TrimEnd('\\') + "\\";
     Process[] list = Process.GetProcessesByName(name);
     for (int i = 0; i < list.Length; i++)
     {
-      try { list[i].Kill(); }
+      try { if (list[i].MainModule.FileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) list[i].Kill(); }
       catch { }
       try { list[i].Dispose(); }
       catch { }
@@ -589,7 +691,7 @@ public class Bridge
 
   static string DefaultInstallDir()
   {
-    return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "OMP Studio");
+    return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "OMP Studio");
   }
 
   static string[] SpecialFolders()

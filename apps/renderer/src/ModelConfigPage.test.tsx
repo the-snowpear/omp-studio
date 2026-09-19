@@ -20,6 +20,8 @@ beforeAll(() => {
     disconnect(): void {}
   }
   (globalThis as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
+  // The role model picker scrolls its active option into view; jsdom has no layout.
+  Element.prototype.scrollIntoView = () => undefined;
   window.matchMedia = (query: string) =>
     ({
       matches: query.includes("prefers-reduced-motion"),
@@ -79,7 +81,7 @@ function readModel(): ModelConfigReadModel {
       { provider: "other", id: "glm-5", selector: "other/glm-5", name: "GLM-5", reasoning: true, contextWindow: 131_072 },
     ],
     loginProviders: [],
-    generatedModelsYml: "providers:\n  gateway:\n    api: openai-completions\n",
+    generatedModelsYml: "providers:\n  gateway:\n    name: Company Gateway\n    api: openai-completions\n    baseUrl: https://gw.example.com/v1\n",
     generatedConfigYml: "modelRoles: {}\n",
     runtimeEffectHint: "新会话生效",
     loginAvailable: false,
@@ -114,12 +116,12 @@ const PROBE_OK: ModelDiscoveryResult = {
   detail: "探测成功 · 发现 3 个模型 · HTTP 200",
 };
 
-function fakeClient(probe: ModelDiscoveryResult | Error = PROBE_OK): StudioClient & {
+function fakeClient(probe: ModelDiscoveryResult | Error = PROBE_OK, modelConfig?: ModelConfigReadModel): StudioClient & {
   readonly query: ReturnType<typeof vi.fn>;
   readonly command: ReturnType<typeof vi.fn>;
 } {
   const query = vi.fn(async (name: string) => {
-    if (name === "models.get") return readModel();
+    if (name === "models.get") return modelConfig ?? readModel();
     if (name === "agents.definitions.get") {
       return {
         agents: [],
@@ -162,10 +164,10 @@ function fakeClient(probe: ModelDiscoveryResult | Error = PROBE_OK): StudioClien
   };
 }
 
-async function openEditor(options: { preview?: boolean; client?: StudioClient } = {}) {
+async function openEditor(options: { preview?: boolean; client?: StudioClient; modelConfig?: ModelConfigReadModel } = {}) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview ? "1" : "0");
-  const client = options.client ?? fakeClient();
-  render(
+  const client = options.client ?? fakeClient(PROBE_OK, options.modelConfig);
+  const view = render(
     <PreviewModeProvider switchEnabled>
       <ModelConfigPage client={client} />
     </PreviewModeProvider>,
@@ -173,12 +175,39 @@ async function openEditor(options: { preview?: boolean; client?: StudioClient } 
   const edit = await screen.findAllByRole("button", { name: "编辑供应商" });
   fireEvent.click(edit[0] as HTMLElement);
   await screen.findByRole("button", { name: /自动获取模型/ });
-  return client as ReturnType<typeof fakeClient>;
+  return {
+    client: client as ReturnType<typeof fakeClient>,
+    container: view.container,
+  };
+}
+
+/**
+ * The card renders CodeMirror into a portal, so read the visible document from
+ * the in-flow holder (the editor host inside it carries the aria-label) instead
+ * of from the React tree.
+ */
+async function yamlCard(container: HTMLElement, title: string): Promise<HTMLElement> {
+  return await waitFor(() => {
+    const holder = Array.from(container.querySelectorAll<HTMLElement>(".st-holder"))
+      .find((node) => node.querySelector(`.st-editor[aria-label="${title}"]`));
+    const card = holder?.querySelector<HTMLElement>(".yml-card");
+    if (!card) throw new Error(`YAML card ${title} is not mounted yet`);
+    return card;
+  });
+}
+
+async function yamlCardText(container: HTMLElement, title: string): Promise<string> {
+  const card = await yamlCard(container, title);
+  return card.querySelector(".cm-content")?.textContent ?? "";
+}
+
+function plainText(value: string): string {
+  return value.replace(/\s+/g, " ");
 }
 
 describe("ModelConfigPage 自动获取模型", () => {
   it("probes the wire API without a discovery type and imports picked models into the draft", async () => {
-    const client = await openEditor();
+    const { client } = await openEditor();
 
     fireEvent.click(screen.getByRole("button", { name: /自动获取模型/ }));
 
@@ -208,8 +237,10 @@ describe("ModelConfigPage 自动获取模型", () => {
     // Import only touches the draft; models.yml is written by the form's submit.
     expect(client.command).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: /导入/ })).toBeNull();
-    expect(screen.getByText("Fresh One")).toBeTruthy();
-    expect(screen.getByText("GLM-5")).toBeTruthy();
+    // The card is derived from the draft, so an imported model shows up twice:
+    // once in the model list and once inside the models.yml slice.
+    expect(screen.getAllByText("Fresh One").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("GLM-5").length).toBeGreaterThan(0);
   });
 
   it("select-all can include models that already exist", async () => {
@@ -223,7 +254,7 @@ describe("ModelConfigPage 自动获取模型", () => {
   });
 
   it("surfaces a Host failure without opening the checklist", async () => {
-    const client = await openEditor({ client: fakeClient(new Error("连接失败：连接被拒绝")) });
+    const { client } = await openEditor({ client: fakeClient(new Error("连接失败：连接被拒绝")) });
     fireEvent.click(screen.getByRole("button", { name: /自动获取模型/ }));
     expect(await screen.findByText("获取失败")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /导入/ })).toBeNull();
@@ -252,11 +283,94 @@ describe("ModelConfigPage 自动获取模型", () => {
   });
 
   it("uses fixtures and never calls the Host in preview mode", async () => {
-    const client = await openEditor({ preview: true });
+    const { client } = await openEditor({ preview: true });
     fireEvent.click(screen.getByRole("button", { name: /自动获取模型/ }));
     expect(await screen.findByText("演示：自动获取模型未调用 Host")).toBeTruthy();
     expect(screen.getByText("GLM-5")).toBeTruthy();
     expect(await screen.findByRole("button", { name: /导入 4 个模型/ })).toBeTruthy();
     expect(client.command).not.toHaveBeenCalled();
+  });
+});
+
+describe("ModelConfigPage YAML 卡片随表单实时更新", () => {
+  it("表单改动不保存就出现在 models.yml 切片里，且卡片转为只读", async () => {
+    const { container } = await openEditor();
+    const clean = await yamlCard(container, "gateway");
+    expect(plainText(await yamlCardText(container, "gateway"))).toContain("https://gw.example.com/v1");
+    // Clean form: the card mirrors the file, so it stays editable.
+    expect(clean.querySelector(".st-editor.is-disabled")).toBeNull();
+    expect(clean.textContent).not.toContain("只读");
+
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://edited.test/v1" } });
+    fireEvent.change(screen.getByLabelText("供应商名称"), { target: { value: "Edited Gateway" } });
+
+    await waitFor(async () => {
+      const text = plainText(await yamlCardText(container, "gateway"));
+      expect(text).toContain("https://edited.test/v1");
+      expect(text).toContain("Edited Gateway");
+    });
+    // The form owns the slice now, so the card reports read-only.
+    const card = await yamlCard(container, "gateway");
+    expect(card.querySelector(".st-editor.is-disabled")).toBeTruthy();
+    expect(card.textContent).toContain("只读");
+    // Editing the form alone never talks to the Host.
+    expect(screen.queryByText("已写入 models.yml")).toBeNull();
+  });
+
+  it("表单改动后保存会带上完整切片，而不是空文档", async () => {
+    const { client } = await openEditor();
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://edited.test/v1" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /保存修改/ }));
+    await waitFor(() => expect(client.command).toHaveBeenCalled());
+    const [name, input] = client.command.mock.calls[0] as [string, Record<string, unknown>];
+    expect(name).toBe("models.yml.write");
+    expect(String(input.text)).toContain("https://edited.test/v1");
+    expect(String(input.text)).toContain("providers:");
+    expect(input.overlay).toMatchObject({ id: "gateway", endpointUrl: "https://edited.test/v1" });
+  });
+
+  it("角色编辑器换主模型时 config.yml 卡片同步变化", async () => {
+    const config = {
+      ...readModel(),
+      roles: [{ id: "smol", alias: "@smol", name: "Fast", desc: "", builtin: true, primary: "gateway/kept", scope: "global" as const }],
+      availableModels: [
+        { provider: "gateway", id: "kept", selector: "gateway/kept", name: "Kept", reasoning: true },
+        { provider: "gateway", id: "fresh", selector: "gateway/fresh", name: "Fresh One", reasoning: true },
+      ],
+      generatedConfigYml: "modelRoles:\n  smol: gateway/kept\n",
+    };
+    const { container } = await openEditor({ modelConfig: config });
+
+    fireEvent.click(document.getElementById("mcTabRoles") as HTMLElement);
+    fireEvent.click(await screen.findByRole("button", { name: "编辑 Fast" }));
+    await waitFor(async () => expect(plainText(await yamlCardText(container, "smol"))).toContain("gateway/kept"));
+
+    fireEvent.click(screen.getByRole("button", { name: "主模型" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Fresh One/ }));
+
+    await waitFor(async () => expect(plainText(await yamlCardText(container, "smol"))).toContain("gateway/fresh"));
+    const card = await yamlCard(container, "smol");
+    expect(card.querySelector(".st-editor.is-disabled")).toBeTruthy();
+    expect(card.textContent).toContain("只读");
+  });
+
+  it("清空 Base URL 后切片与保存都不再携带 baseUrl", async () => {
+    const { client, container } = await openEditor();
+    expect(plainText(await yamlCardText(container, "gateway"))).toContain("https://gw.example.com/v1");
+
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "" } });
+
+    await waitFor(async () => {
+      expect(plainText(await yamlCardText(container, "gateway"))).not.toContain("baseUrl");
+    });
+    fireEvent.click(screen.getByRole("button", { name: /保存修改/ }));
+    await waitFor(() => expect(client.command).toHaveBeenCalled());
+    const [name, input] = client.command.mock.calls[0] as [string, Record<string, unknown>];
+    expect(name).toBe("models.yml.write");
+    // The cleared field reaches the wire as an explicit empty string so the
+    // Host deletes the key — the same shape the card already showed.
+    expect(String(input.text)).not.toContain("baseUrl");
+    expect(input.overlay).toMatchObject({ id: "gateway", endpointUrl: "" });
   });
 });

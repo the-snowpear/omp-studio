@@ -50,7 +50,7 @@ export function SubagentInspectCard({
   readonly liveSessionId?: SessionId;
   readonly pendingInteraction?: boolean;
   readonly workspaceId?: string;
-  readonly loadMentions?: (trigger: "@" | "/", query: string) => Promise<readonly MentionCandidate[]>;
+  readonly loadMentions?: (trigger: "@" | "/" | "^", query: string) => Promise<readonly MentionCandidate[]>;
   readonly onClose: () => void;
   readonly onOpenHub: (agentId: string) => void;
 }) {

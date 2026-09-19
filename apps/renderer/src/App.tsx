@@ -70,8 +70,12 @@ import {
 import {
   canFlushQueuedMessage,
   composerFollowUpEnabled,
+  composerOwnerSessionId,
+  composerOwnsLiveSnapshot,
   composerPromptEnabled,
   composerQueueEnabled,
+  composerRunningForTarget,
+  createComposerDispatchGate,
   visibleQueuedMessages,
 } from "./composer/dispatch";
 import {
@@ -2894,7 +2898,9 @@ function RealTokenPanel({ telemetry, view }: { telemetry: SessionTelemetrySnapsh
     <div className="tok-rows">
       <div className="tr-row">{tr("shell.turnInputOutput")}<span className="tr-v">{turn ? `${formatTelemetryTokens(turn.input)} / ${formatTelemetryTokens(turn.output)}` : "—"}</span></div>
       <div className="tr-row">{tr("shell.turnDuration")}<span className="tr-v">{turn?.durationMs !== undefined ? formatTelemetryDuration(turn.durationMs) : "—"}</span></div>
-      <div className="tr-row">TPS<span className="tr-v">{turn?.tps !== undefined ? turn.tps.toFixed(1) : "—"}</span></div>
+      <div className="tr-row">TPS<span className="tr-v">{telemetry.generationTps !== undefined ? telemetry.generationTps.toFixed(1) : turn?.tps !== undefined ? turn.tps.toFixed(1) : "—"}</span></div>
+      {telemetry.advisorCost !== undefined ? <div className="tr-row">Advisor<span className="tr-v">{formatTelemetryCost(telemetry.advisorCost)}</span></div> : null}
+      {telemetry.servedModel && telemetry.servedModel !== telemetry.requestedModel ? <div role="status" className="tr-row">{tr("runtimeUpgrade.servedModel")}<span className="tr-v">{telemetry.servedModel} · {tr("runtimeUpgrade.requestedModel")} {telemetry.requestedModel}</span></div> : null}
       <div className="tr-row">Reasoning<span className="tr-v">{formatTelemetryTokens(t.reasoning)}</span></div>
       <div className="tr-row">Cache read<span className="tr-v">{formatTelemetryTokens(t.cacheRead)}</span></div>
       <div className="tr-row">Cache write<span className="tr-v">{formatTelemetryTokens(t.cacheWrite)}</span></div>
@@ -3548,6 +3554,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const [modeOpenToggles, setModeOpenToggles] = useState(false);
   const [changesFocus, setChangesFocus] = useState<{ key: number; path?: string; turnId?: string }>({ key: 0 });
   const promptUnsub = useRef<Unsubscribe | undefined>(undefined);
+  const promptDispatchGate = useMemo(createComposerDispatchGate, []);
   useEffect(() => () => promptUnsub.current?.(), []);
   const terminalRef = useRef<TerminalPaneHandle>(null);
   const terminalAvailable = typeof globalThis.ompStudioTerminal !== "undefined";
@@ -4038,7 +4045,18 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   }, [can, client, onBranchedSession, onSessionTitleMaybeChanged, pickPlanSaveTarget]);
   const commandRows = useMemo(() => Object.values(commands).slice(-20).reverse(), [commands]);
   const snapshotReady = snapshot !== undefined;
-  const executionMatches = selectedSessionId === undefined || snapshot?.sessionId === selectedSessionId;
+  // A fresh-draft surface (`selectedSessionId === undefined`) does not own the
+  // Runtime snapshot until its own `session.create` lands: until then the
+  // snapshot still describes the session the operator just left, so it must not
+  // lend that session's streaming state, queue, approval mode, or prompt target
+  // to this surface. `composerOwner` is the same truth in session-id form and is
+  // the only fallback drafts/queue rows/active-row marks may use.
+  // Preview is a display-layer story (its t1 run has no real session.create) and
+  // keeps the old verdict; its queue is a local fixture, never a Host write.
+  const composerTarget = { selectedSessionId, sessionCreating, liveSessionId: snapshot?.sessionId };
+  const composerOwner = composerOwnerSessionId(composerTarget) as SessionId | undefined;
+  const snapshotIsViewedSession = preview || composerOwnsLiveSnapshot(composerTarget);
+  const executionMatches = snapshotIsViewedSession;
   const gated = busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady || !executionMatches;
   // Composer `gated` / can() flicker while snapshot, capabilities, or the
   // selected session catch up. The ask is already on screen — lock only when
@@ -4183,21 +4201,26 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   // with the t1 demo story or the stop button appears while core.abort stays gated.
   const retrying = executionMatches && activityRetry !== undefined;
   const running = sessionStreaming || optimisticPrompt !== undefined || (executionMatches && awaitingTurn) || retrying;
+  // Enter / the send button only queue locally while the conversation on screen
+  // is the one streaming. On a fresh-draft surface whose `session.create` is
+  // still in flight this is false even though the live session streams, so the
+  // draft goes through dispatchPrompt and waits for its own session instead of
+  // being filed against the session the operator just left. Preview keeps its
+  // fixture story (the local demo queue is not a Host target).
+  const composerRunning = preview ? running : composerRunningForTarget({ ...composerTarget, running });
   // Title freezes on the first accepted prompt; later drafts never override it.
   const provisionalTitle = submittedPromptTitle ?? provisionalThreadTitle(draft.text);
   useEffect(() => {
     const visible = textReady || provisionalTitle !== undefined || running;
     onProvisionalSessionChange?.({
-      ...((selectedSessionId ?? snapshot?.sessionId) === undefined
-        ? {}
-        : { sessionId: (selectedSessionId ?? snapshot?.sessionId) as SessionId }),
+      ...(composerOwner === undefined ? {} : { sessionId: composerOwner }),
       ...(workspaceId === undefined ? {} : { workspaceId: workspaceId as WorkspaceId }),
       visible,
       ...(provisionalTitle === undefined ? {} : { title: provisionalTitle }),
       running,
       submitted: submittedPromptTitle !== undefined || running,
     });
-  }, [onProvisionalSessionChange, provisionalTitle, running, selectedSessionId, snapshot?.sessionId, submittedPromptTitle, textReady, workspaceId]);
+  }, [onProvisionalSessionChange, provisionalTitle, running, composerOwner, submittedPromptTitle, textReady, workspaceId]);
   const abortEligible = isAbortEligible({
     executionMatches,
     streaming: sessionStreaming,
@@ -4241,24 +4264,24 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     queueEdit !== undefined;
   const hasDraftContent = draft.text.trim().length > 0 || !snapshotIsEmpty(draft) || hasStatusCapsules;
   useEffect(() => {
-    if (running) {
+    if (composerRunning) {
       if (hasStatusCapsules || hasDraftContent) {
         setComposerExpanded(true);
       } else {
         setComposerExpanded(false);
       }
     }
-  }, [running]);
+  }, [composerRunning]);
   useEffect(() => {
     if (hasStatusCapsules) {
       setComposerExpanded(true);
     }
   }, [hasStatusCapsules]);
   useLayoutEffect(() => {
-    if (running && !composerExpanded) {
+    if (composerRunning && !composerExpanded) {
       document.getElementById("composerInput")?.scrollTo({ top: 0 });
     }
-  }, [composerExpanded, running]);
+  }, [composerExpanded, composerRunning]);
   // ---- 分支动作：run 进行中或有 pending interaction 时排队，本轮结束再执行 ----
   const branchActionDeferred = running || pendingInteraction !== null;
   const performBranchSwitch = useCallback(async (name: string) => {
@@ -4425,7 +4448,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     can("core.prompt");
   const promptEnabled = composerPromptEnabled({
     textReady,
-    running,
+    sending,
+    running: composerRunning,
     pendingInteraction: pendingInteraction !== null,
     promptChannelReady,
     sessionCreating,
@@ -4442,7 +4466,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
         : "未就绪";
   // 流式期间 Enter 不再禁用：消息进本地排队栏，本轮结束后自动发送。
   // 想纠偏就在排队栏里点「插入纠偏」，走 core.steer 打断当前回合。
-  const queueEnabled = composerQueueEnabled({ textReady, running, promptChannelReady });
+  const queueEnabled = composerQueueEnabled({ textReady, running: composerRunning, promptChannelReady });
   const followUpChannelReady =
     !busy &&
     !connection?.resyncRequired &&
@@ -4452,7 +4476,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     can("core.followUp");
   const followUpEnabled = composerFollowUpEnabled({
     textReady,
-    running,
+    running: composerRunning,
     pendingInteraction: pendingInteraction !== null,
     followUpChannelReady,
   });
@@ -4659,6 +4683,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   // sendPrompt 与排队 flush 共用的发送路径。失败时置 composerError 并返回 false，
   // 草稿恢复方式由调用方决定（输入框草稿回填 vs 排队条目回队）。
   const dispatchPrompt = async (payload: ComposerSnapshot, options?: { readonly asFollowUp?: boolean; readonly waitForReady?: boolean }): Promise<boolean> => {
+    if (!promptDispatchGate.tryEnter()) return false;
     const plan = planComposerSend(payload, slashCatalog);
     let outboundPayload = payload;
     let optimisticRequestId: string | undefined;
@@ -4668,7 +4693,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     setComposerSubmitted(true);
     try {
       if (plan.kind === "execute") {
-        if (options?.asFollowUp === true && running) {
+        if (options?.asFollowUp === true && composerRunning) {
           setComposerError("当前回合进行中，斜杠指令请等结束后再发。");
           return false;
         }
@@ -4701,7 +4726,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       };
       // Freeze the first prompt before the first await. Clearing the composer
       // and entering the transport phases must never expose an Untitled row.
-      rememberSubmittedPrompt(targetSessionId ?? snapshot?.sessionId);
+      // The fallback is the composer's own session, never a stale snapshot: on a
+      // fresh-draft surface the new prompt belongs to the session being created.
+      rememberSubmittedPrompt(targetSessionId ?? composerOwner);
       const resumed = targetSessionId !== undefined && snapshot?.sessionId !== targetSessionId;
       const outbound = promptInputOf(outboundPayload);
       optimisticRequestId = `optimistic:${Date.now()}:${nextOptimisticPromptId++}`;
@@ -4786,12 +4813,16 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       setOptimisticPrompt(undefined);
       return false;
     } finally {
+      promptDispatchGate.leave();
       setSending(false);
     }
   };
   const sendPrompt = async () => {
+    // A pending create has no queue owner yet. Keep the second draft in the
+    // editor until the first dispatch completes, including same-frame Enter.
+    if (promptDispatchGate.busy && !composerRunning) return;
     const payload = composerInputRef.current?.getSnapshot() ?? draft;
-    if (running && composerSlashExecute(payload, slashCatalog) === undefined) {
+    if (composerRunning && composerSlashExecute(payload, slashCatalog) === undefined) {
       enqueueDraft();
       return;
     }
@@ -4808,7 +4839,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     }
   };
   const sendFollowUp = async () => {
-    if (!followUpEnabled) return;
+    if (!followUpEnabled || promptDispatchGate.busy) return;
     setComposerError(undefined);
     const payload = composerInputRef.current?.getSnapshot() ?? draft;
     composerInputRef.current?.clear();
@@ -4820,7 +4851,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   };
   const takeComposerSnapshot = (): ComposerSnapshot => composerInputRef.current?.getSnapshot() ?? draft;
   const queueEntryOf = (payload: ComposerSnapshot, id: number): QueuedMessage => {
-    const ownerSessionId = selectedSessionId ?? snapshot?.sessionId;
+    const ownerSessionId = composerOwner;
     return {
       id,
       text: payload.text,
@@ -4833,7 +4864,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const activeQueue = (): QueuedMessage[] => (preview ? previewQueue : queuedMessages);
   /** 排队栏当前要显示的条目。「回到最新」按钮在排队栏可见时移入其头行
    *  （qs-head-slot），否则浮在输入框右上角——两个位置互斥，避免按钮压在栏身上。 */
-  const sessionQueue = preview ? previewQueue : visibleQueuedMessages(queuedMessages, selectedSessionId ?? snapshot?.sessionId);
+  const sessionQueue = preview ? previewQueue : visibleQueuedMessages(queuedMessages, composerOwner);
   const applyQueueEditResult = (result: {
     readonly queue: readonly QueuedMessage[];
     readonly editing: QueueEditState | undefined;
@@ -4875,7 +4906,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       setComposerError(undefined);
       return;
     }
-    if (!running) return;
+    if (!composerRunning) return;
     queuedSeqRef.current += 1;
     setQueuedMessages((queue) => [...queue, queueEntryOf(payload, queuedSeqRef.current)]);
     composerInputRef.current?.clear();
@@ -4974,7 +5005,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   //（running 仍为 false）时靠 tick 继续排水；失败回队后设冷却窗口，防止快速持续失败
   // （如会话切换冲突）被重新入队的依赖变化立刻重触发而形成热重试循环。
   useEffect(() => {
-    const targetSession = selectedSessionId ?? snapshot?.sessionId;
+    const targetSession = composerOwner;
     const head = queuedMessages.find((entry) => entry.sessionId === targetSession || entry.sessionId === undefined);
     if (
       head === undefined ||
@@ -5014,7 +5045,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     })();
     // dispatchPrompt 每渲染重建（与 sendPrompt 同风格），effect 触发时同步快照队列头，
     // 不进依赖以免每次渲染都重启 flush。
-  }, [running, pendingInteraction, promptChannelReady, queuedMessages, queueFlushTick, selectedSessionId, snapshot?.sessionId, queueEdit]);
+  }, [running, pendingInteraction, promptChannelReady, queuedMessages, queueFlushTick, composerOwner, selectedSessionId, snapshot?.sessionId, queueEdit]);
   // 一次有界遍历后本地过滤，`@` 的每次击键不再回打 Host；换项目才重建索引。
   const fileIndex = useMemo(
     () => (preview || workspaceId === undefined
@@ -5022,7 +5053,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       : createWorkspaceFileIndex(workspaceDirectoryLister(client, workspaceId as WorkspaceId))),
     [preview, client, workspaceId],
   );
-  const fetchMentions = useCallback(async (trigger: "@" | "/", query: string) => {
+  const fetchMentions = useCallback(async (trigger: "@" | "/" | "^", query: string) => {
     if (trigger === "/") return [];
     if (preview) return previewMentions(trigger, query);
     try {
@@ -5111,7 +5142,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
         onBtwPreviewAsk();
         if (question.length === 0) return true;
       }
-      return await btwSession.ask(question);
+      if (question.length === 0) { await btwSession.refreshHistory?.(); return true; }
+      return await btwSession.ask(question, true);
     }
     if (preview) {
       setStatusToast(`演示：/${command.name}${args ? ` ${args}` : ""}`);
@@ -5620,7 +5652,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               onSendNow={(entry) => void sendQueuedNow(entry)}
               onRemove={removeQueuedMessage}
             />
-            <div className={`composer${running ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
+            <div className={`composer${composerRunning ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
               {jumpPill?.visible && sessionQueue.length === 0 ? (
                 <button
                   type="button"
@@ -5637,7 +5669,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               <ChipComposer
                 ref={composerInputRef}
                 id="composerInput"
-                compact={running && !composerExpanded}
+                compact={composerRunning && !composerExpanded}
                 placeholder={queueEdit === undefined ? t("conversation.composerPlaceholder") : t("conversation.editingQueuedMessage")}
                 describedBy="composerHint"
                 {...(workspaceId === undefined ? {} : { workspaceId })}
@@ -5646,16 +5678,15 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 onRunCommand={runSlashCommand}
                 onChange={(next) => {
                   setDraft(next);
-                  const owner = selectedSessionId ?? snapshot?.sessionId;
+                  // Draft ownership follows the same truth as the queue: on a
+                  // fresh-draft surface whose session is still being created the
+                  // snapshot's session must not receive this draft.
+                  const owner = composerOwner;
                   if (owner !== undefined) onComposerDraftChange?.(owner, next);
                 }}
                 onSubmit={() => {
                   if (queueEdit !== undefined) {
                     commitQueuedEdit();
-                    return;
-                  }
-                  if (running) {
-                    enqueueDraft();
                     return;
                   }
                   void sendPrompt();
@@ -5669,10 +5700,10 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                   if (followUpEnabled) void sendFollowUp();
                 }}
                 {...(queueEdit === undefined ? {} : { onEscape: cancelQueuedEdit })}
-                running={running}
+                running={composerRunning}
                 onFocus={() => setComposerExpanded(true)}
                 onPointerDown={(event) => {
-                  if (!running || composerExpanded) return;
+                  if (!composerRunning || composerExpanded) return;
                   event.preventDefault();
                   setComposerExpanded(true);
                   window.requestAnimationFrame(() => {
@@ -5680,14 +5711,14 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                   });
                 }}
                 onBlur={() => {
-                  if (running && !hasStatusCapsules && !hasDraftContent) setComposerExpanded(false);
+                  if (composerRunning && !hasStatusCapsules && !hasDraftContent) setComposerExpanded(false);
                 }}
                 onError={setComposerError}
               />
               <p className="sr-only" id="composerHint">{
                 queueEdit !== undefined
                   ? t("composer.editingQueuedMessageHint")
-                  : running
+                  : composerRunning
                     ? t("composer.runningHint")
                     : pendingInteraction
                       ? t("composer.pendingInteractionHint")
@@ -5797,7 +5828,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 />
                 {/* 运行中且没有草稿时，发送位变停止；有草稿时保持"加入排队栏"，
                     否则会吃掉流式期间唯一的点击排队入口。编辑排队时始终是写回。 */}
-                {running && !textReady && queueEdit === undefined ? (
+                {composerRunning && !textReady && queueEdit === undefined ? (
                   <button
                     className="send-btn abort"
                     disabled={!abortAllowed}
@@ -5815,7 +5846,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 ) : (
                   <button
                     className="send-btn"
-                    disabled={queueEdit === undefined && !(promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (running && textReady))}
+                    disabled={queueEdit === undefined && !(promptEnabled || queueEnabled || slashExecuteReady || (preview && running) || (composerRunning && textReady))}
                     onClick={() => {
                       setComposerExpanded(true);
                       if (queueEdit !== undefined) {
@@ -5827,13 +5858,13 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                         void sendPrompt();
                         return;
                       }
-                      if (running) enqueueDraft();
+                      if (composerRunning) enqueueDraft();
                       else void sendPrompt();
                     }}
                     data-tip={
                       queueEdit !== undefined
                         ? t("composer.commitQueue")
-                        : running
+                        : composerRunning
                           ? t("composer.enqueue")
                           : pendingInteraction
                             ? t("composer.resolvePendingFirst")
@@ -6322,7 +6353,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       : createWorkspaceFileIndex(workspaceDirectoryLister(client, hubWorkspaceId as WorkspaceId))),
     [previewMode.preview, client, hubWorkspaceId],
   );
-  const fetchHubMentions = useCallback(async (trigger: "@" | "/", query: string) => {
+  const fetchHubMentions = useCallback(async (trigger: "@" | "/" | "^", query: string) => {
     if (trigger === "/") return [];
     if (previewMode.preview) return previewMentions(trigger, query);
     try {
@@ -6349,6 +6380,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   });
   const btwOnBranchedRef = useRef<(sessionId: string) => Promise<boolean>>(async () => false);
   const btwSession = useBtwSession({
+    ...(snapshot?.sessionId ? { sessionId: snapshot.sessionId } : {}),
     snapshot: previewMode.preview
       ? previewBtwSnapshot(btwDemoRound)
       : (state.clientState?.entities.btw ?? null),
@@ -6447,13 +6479,22 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       ? t("shell.archiveAlreadyArchived")
       : undefined;
   const archiveTarget = archiveTargetReason === undefined ? archiveTargetBase : undefined;
+  // Same owner truth the workbench composer uses (`composer/dispatch.ts`): while
+  // a new conversation's `session.create` is in flight the live snapshot still
+  // describes the session just left, so its title, stored drafts, and sidebar
+  // row must not be presented as this surface's own.
+  const activeComposerOwner = composerOwnerSessionId({
+    selectedSessionId: selectedProvisionalSessionId ?? selected?.sessionId,
+    sessionCreating: creatingSession,
+    liveSessionId: snapshot?.sessionId,
+  });
+  const activeComposerOwnsSnapshot = snapshot?.sessionId !== undefined && activeComposerOwner === snapshot.sessionId;
   const snapshotTitleIsCurrent = snapshot?.sessionId !== undefined
     && snapshot.sessionTitle !== undefined
     && (snapshot.sessionTitleSource === "user" || !isPlaceholderSessionTitle(snapshot.sessionTitle))
-    && (selectedHistoryId === null || selected?.sessionId === snapshot.sessionId);
-  const provisionalCurrentTitle = snapshot?.sessionId !== undefined
-    && (selectedHistoryId === null || selected?.sessionId === snapshot.sessionId)
-    ? provisionalThreadsBySession[String(snapshot.sessionId)]?.title
+    && activeComposerOwnsSnapshot;
+  const provisionalCurrentTitle = activeComposerOwnsSnapshot
+    ? provisionalThreadsBySession[String(snapshot?.sessionId)]?.title
     : undefined;
   const selectedOrProvisionalTitle = isPlaceholderSessionTitle(selected?.title)
     ? provisionalCurrentTitle ?? selected?.title
@@ -8039,8 +8080,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     expandedProjects,
     projectHistories: projectHistoryCache,
     provisionalThreads: Object.values(provisionalThreadsBySession),
-    ...(selectedHistoryId === null && (selectedProvisionalSessionId ?? snapshot?.sessionId) !== undefined
-      ? { activeProvisionalSessionId: (selectedProvisionalSessionId ?? snapshot?.sessionId) as SessionId }
+    ...(selectedHistoryId === null && activeComposerOwner !== undefined
+      ? { activeProvisionalSessionId: activeComposerOwner as SessionId }
       : {}),
     theme,
     sidebarWidth,
@@ -8330,6 +8371,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               const historyModel = historyAll ?? state.model.history;
               return (
                 <HistoryPage
+                  client={client}
+                  onImported={() => void refreshHistoryModels()}
+                  onImportedOpen={(sessionId, workspaceId) => { void client.query("history.list", { workspaceId, limit: PROJECT_THREADS_QUERY_MAX }).then(history => { const entry = history.entries.find(item => item.sessionId === sessionId); if (entry) void openHistoryEntry(entry, workspaceId); else setSessionActionError("Imported session is not yet available; refresh history"); }); }}
                   {...(historyModel ? { history: historyModel } : {})}
                   onRoute={go}
                   onSelectThread={chrome.onSelectThread}
@@ -8451,9 +8495,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             onOpenChanges={() => { setSideTab("changes"); setSideOpen(true); }}
             onOpenGit={() => { setSideTab("git"); setSideOpen(true); }}
              composerRef={composerRef}
-             {...(composerDraftsBySession[selectedProvisionalSessionId ?? selected?.sessionId ?? ""] === undefined
+             {...(composerDraftsBySession[activeComposerOwner ?? ""] === undefined
                ? {}
-               : { composerDraft: composerDraftsBySession[selectedProvisionalSessionId ?? selected?.sessionId ?? ""] })}
+               : { composerDraft: composerDraftsBySession[activeComposerOwner ?? ""] })}
              onComposerDraftChange={onComposerDraftChange}
             onDraftSkillsChange={onDraftSkillsChange}
             onUsedSkillsChange={onUsedSkillsChange}

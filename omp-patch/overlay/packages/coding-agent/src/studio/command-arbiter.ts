@@ -1,3 +1,4 @@
+import { UPGRADE_OPERATION_KINDS } from "./runtime-upgrade-protocol";
 import * as crypto from "node:crypto";
 import type { StudioRequest } from "./bridge-protocol";
 
@@ -6,6 +7,9 @@ export type StudioCommandSurface = "gui" | "tui" | "system";
 /** Abort/steer/pause run against a live turn. Conversation events bump
  *  `stateVersion` continuously, so a snapshot fence races the stream. */
 const LIVE_TURN_OPERATION_KINDS = new Set<string>([
+	...UPGRADE_OPERATION_KINDS,
+	"btw.ask",
+	"btw.abort",
 	"core.abort",
 	"core.steer",
 	"core.followUp",
@@ -67,6 +71,9 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
  *  prompt still fails closed. The Host's interaction arbiter keeps classifying
  *  it session-exclusive, but this Runtime arbiter is authoritative for it. */
 const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
+	...UPGRADE_OPERATION_KINDS,
+	"btw.ask",
+	"btw.abort",
 	"core.abort",
 	"core.steer",
 	"core.followUp",
@@ -119,6 +126,9 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 ]);
 
 const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
+	...UPGRADE_OPERATION_KINDS,
+	"btw.ask",
+	"btw.abort",
 	"session.model.set",
 	"session.thinking.set",
 	"session.taskModel.set",
@@ -142,7 +152,7 @@ const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
  *  overtake a manual compaction (`session.abort` → `abortCompaction`, then
  *  waits for its cleanup barrier), so it must not trip the BUSY_COMPACTING gate
  *  while still staying out of the deferred-preference set. */
-const COMPACTION_CANCEL_KINDS = new Set<string>(["core.abort"]);
+const COMPACTION_CANCEL_KINDS = new Set<string>([...UPGRADE_OPERATION_KINDS, "btw.ask", "btw.abort", "core.abort"]);
 
 export class StudioRuntimeCommandError extends Error {
 	constructor(

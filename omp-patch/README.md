@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The managed Runtime pin is `can1357/oh-my-pi` `v18.1.18` at commit `00085d4e7dfdcfbf302c122fa2682b410a0f43d1`. The previous functional baseline was `18.1.10-studio.2` at `f241301c83726afe75a847e919b89977a54dafbe`. See the [migration and verification report](../docs/migrations/omp-18.1.18.md).
+The managed Runtime pin is `can1357/oh-my-pi` `v18.2.5` at commit `37273117021129e96bd05d8277b140ec3fd61990`. The previous functional baseline was `18.1.18-studio.5` at `00085d4e7dfdcfbf302c122fa2682b410a0f43d1`. See the [migration and verification report](../docs/migrations/omp-18.2.5.md).
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -30,6 +30,10 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 `scripts/omp-seam.mjs` holds the authoritative path list for each group. Adding a seam file means adding it to a group there and rerunning the regen script — an upstream file that no group claims makes regeneration fail rather than silently dropping the edit.
 
 `packages/coding-agent/CHANGELOG.md` is deliberately excluded (`SEAM_EXCLUDED`). Fork-local changelog prose conflicts on every upstream release and carries no runtime behaviour; Studio's history lives in this repository.
+
+## Windows build toolchain
+
+The v18.2.5 Windows bytecode bundle is validated with Bun 1.4.2. Set `BUN_EXE` to a separately installed 1.4.2 executable before building; the global Bun installation need not change. Bun 1.3.14 passes source checks but hits an internal compile assertion for this bundle. Keep the upstream-pinned Rust nightly toolchain. See the migration report for the verified download digest and local signing-key setup.
 
 ## Working loop
 

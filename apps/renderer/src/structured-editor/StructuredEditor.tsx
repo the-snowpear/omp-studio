@@ -75,6 +75,7 @@ export function StructuredEditor({
   const validityRef = useRef(onValidityChange);
   const emittedRef = useRef<string | null>(null);
   const foldedRef = useRef(false);
+  const lockedRef = useRef(false);
   onChangeRef.current = onChange;
   validityRef.current = onValidityChange;
 
@@ -90,6 +91,7 @@ export function StructuredEditor({
   const cardRef = useRef<HTMLDivElement>(null);
 
   const locked = readOnly || disabled;
+  lockedRef.current = locked;
   const canRevert = Boolean(onChange) && !locked && value !== baseline;
   const modes = languages && languages.length > 1 ? languages : null;
   const label = title ?? (mode === "json" ? "JSON" : "YAML");
@@ -122,6 +124,10 @@ export function StructuredEditor({
             setAllFolded(folded);
           }
           if (!update.docChanged) return;
+          // A locked (read-only) card is driven by the form: the external value
+          // effect below writes into the document, and reporting that write back
+          // would freeze a stale draft over every later form edit.
+          if (lockedRef.current) return;
           const next = update.state.doc.toString();
           emittedRef.current = next;
           onChangeRef.current?.(next);

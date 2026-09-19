@@ -106,7 +106,7 @@
               <div class="group">
                 <span class="g-label">目标文件夹</span>
                 <div class="path-row">
-                  <input class="input" id="pathInput" value="C:\Program Files\OMP Studio" spellcheck="false" aria-label="安装路径"/>
+                  <input class="input" id="pathInput" value="C:\Users\Demo\AppData\Local\Programs\OMP Studio" spellcheck="false" aria-label="安装路径"/>
                   <button class="btn small" id="browseBtn"><svg viewBox="0 0 24 24"><use href="#i-folder"/></svg> 浏览(R)…</button>
                 </div>
                 <p class="path-hint" id="pathHint"><svg viewBox="0 0 24 24"><use href="#i-info"/></svg> <span id="pathHintText">将安装到所选文件夹（已是 OMP Studio 目录）。</span></p>
@@ -179,7 +179,7 @@
             <h1 class="finish-item" id="finishTitle" style="animation-delay:240ms">安装完成</h1>
             <p class="lede finish-item" id="finishLede" style="animation-delay:320ms">OMP Studio 已成功安装，运行时与扩展组件均已就绪。</p>
             <div class="summary finish-item" style="animation-delay:420ms">
-              <div class="row"><span class="k" id="sumK0">安装位置</span><span class="v" id="sumPath">C:\Program Files\OMP Studio</span></div>
+              <div class="row"><span class="k" id="sumK0">安装位置</span><span class="v" id="sumPath">C:\Users\Demo\AppData\Local\Programs\OMP Studio</span></div>
               <div class="row"><span class="k" id="sumK1">产品版本</span><span class="v ui-font" id="sumV1">OMP Studio 1.4.2 (x64)</span></div>
               <div class="row"><span class="k" id="sumK2">内置运行时</span><span class="v ui-font" id="sumV2">OMP Runtime 1.4.2 · PTY · MCP</span></div>
             </div>
@@ -288,7 +288,7 @@
   };
   var PACKAGE_VERSION = "1.4.2";
   var RUNTIME_VERSION = "1.4.2";
-  var DEFAULT_PATH = "C:\\Program Files\\OMP Studio";
+  var DEFAULT_PATH = "C:\\Users\\Demo\\AppData\\Local\\Programs\\OMP Studio";
   var scenario = "fresh";
   var repairAccepted = false;
   var occupyKind = null;
@@ -592,7 +592,7 @@
       installBtn.textContent = "安装(I)";
       dirTitle.textContent = "选择安装位置";
       dirLede.textContent = "选择要安装 OMP Studio 的文件夹。系统目录或非空文件夹会自动新建 OMP Studio 子目录；空目录或已是产品目录则原样使用。";
-      dirFoot.textContent = "需要管理员权限，将安装给本机所有用户。完成后可在「设置 → 应用」卸载。";
+      dirFoot.textContent = "仅为当前用户安装，请选择当前用户可写的目录。旧全机版本迁移时会请求一次管理员授权。";
       finishTitle.textContent = "安装完成";
       finishLede.textContent = "OMP Studio 已成功安装，运行时与扩展组件均已就绪。";
     }
@@ -756,7 +756,7 @@
     items.push({ t: .52, time: "10:24:05", msg: "部署 OMP 运行时 v1.4.2 → runtime\\", kind: "hl", phase: "正在部署 OMP 运行时…", file: "runtime\\bin\\ompd.exe" });
     items.push({ t: .6,  time: "10:24:05", msg: "部署内置扩展: agent-core, mcp-bridge", kind: "ok", file: "extensions\\mcp-bridge\\index.js" });
     items.push({ t: .66, time: "10:24:06", msg: "注册 PTY 组件: winpty-agent.exe", kind: "ok", phase: "正在配置系统组件…", file: "pty\\winpty-agent.exe" });
-    items.push({ t: .72, time: "10:24:06", msg: "创建快捷方式: 开始菜单\\OMP Studio.lnk（所有用户）", kind: "ok", file: "" });
+    items.push({ t: .72, time: "10:24:06", msg: "创建快捷方式: 开始菜单\\OMP Studio.lnk（当前用户）", kind: "ok", file: "" });
     if (desktop) {
       items.push({ t: .76, time: "10:24:07", msg: "创建快捷方式: 公共桌面\\OMP Studio.lnk", kind: "ok", file: "" });
     } else if (sc.occupancy) {

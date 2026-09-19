@@ -1540,6 +1540,17 @@ describe("web search config", () => {
     });
   });
 
+  test("search auto-order starts with keyless Parallel and accepts Ollama Cloud", async () => {
+    await withDir(async (_dir, service) => {
+      const before = (await service.get()).webSearch;
+      assert.equal(before.providers[0]?.id, "parallel");
+      assert.equal(before.providers[0]?.credentialFree, true);
+      assert.equal(before.providers.find(provider => provider.id === "ollama")?.apiKeyId, "ollama-cloud");
+      await service.setWebSearch({ order: ["ollama", "parallel"] });
+      assert.deepEqual((await service.get()).webSearch.order, ["ollama", "parallel"]);
+    });
+  });
+
   test("setWebSearch filters unknown ids and dedupes the order", async () => {
     await withDir(async (_dir, service) => {
       await service.setWebSearch({ order: ["perplexity", "not-a-provider", "perplexity"] });

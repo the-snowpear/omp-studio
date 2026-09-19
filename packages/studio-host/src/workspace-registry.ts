@@ -101,7 +101,7 @@ export class WorkspaceRegistry {
    * same canonical path (case-insensitive on win32) reuses its id, updates
    * `lastOpenedAt` and makes it active; a new path gets a fresh opaque id.
    */
-  async upsertByPath(dir: string, nowIso: string = new Date().toISOString(), displayName?: string): Promise<StoredWorkspace> {
+  async upsertByPath(dir: string, nowIso: string = new Date().toISOString(), displayName?: string, activate = true): Promise<StoredWorkspace> {
     let metadata;
     try {
       metadata = await lstat(dir);
@@ -127,7 +127,7 @@ export class WorkspaceRegistry {
         lastOpenedAt: nowIso,
       };
       this.#workspaces.set(refreshed.workspaceId, refreshed);
-      this.#activeWorkspaceId = refreshed.workspaceId;
+      if (activate) this.#activeWorkspaceId = refreshed.workspaceId;
       await this.#flush();
       return structuredClone(refreshed);
     }
@@ -138,7 +138,7 @@ export class WorkspaceRegistry {
       lastOpenedAt: nowIso,
     };
     this.#workspaces.set(created.workspaceId, created);
-    this.#activeWorkspaceId = created.workspaceId;
+    if (activate) this.#activeWorkspaceId = created.workspaceId;
     await this.#flush();
     return structuredClone(created);
   }

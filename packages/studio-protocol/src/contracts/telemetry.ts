@@ -2,6 +2,10 @@ import type { SessionId } from "./ids.js";
 
 /** Sanitized, numeric-only Runtime telemetry for the active session. */
 export interface SessionTelemetrySnapshot {
+  readonly advisorCost?: number;
+  readonly generationTps?: number;
+  readonly requestedModel?: string;
+  readonly servedModel?: string;
   readonly sessionId: SessionId;
   readonly capturedAt: string;
   readonly tokens: {

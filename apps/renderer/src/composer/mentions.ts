@@ -1,3 +1,5 @@
+import { invokeUpgrade } from "../runtimeUpgrade";
+import { createPreviewModelConfig } from "../preview/modelConfigFixtures";
 import type {
   AgentDefinitionRecord,
   SkillRecord,
@@ -245,7 +247,8 @@ const PREVIEW_ENTRIES: ReadonlyArray<WorkspaceEntry> = [
   { type: "file", name: "AGENTS.md", path: "AGENTS.md" },
 ];
 
-export function previewMentions(trigger: "@" | "/", query: string): MentionCandidate[] {
+export function previewMentions(trigger: "@" | "/" | "^", query: string): MentionCandidate[] {
+  if (trigger === "^") return filterMentions(createPreviewModelConfig().availableModels.map(model => ({ kind: "model", id: model.selector, name: model.selector, label: model.name, detail: model.selector })), query);
   if (trigger === "/") return [];
   const agents = filterMentions(PREVIEW_AGENTS, query);
   const skills = query.trim().length === 0 ? [] : filterMentions(PREVIEW_SKILLS, query);
@@ -253,12 +256,42 @@ export function previewMentions(trigger: "@" | "/", query: string): MentionCandi
   return dedupeById([...agents, ...skills, ...entries]).slice(0, MENTION_LIMIT);
 }
 
+/**
+ * The `^` candidate set does not depend on the query, so it is fetched once per
+ * client and filtered locally per keystroke — mirroring the workspace file
+ * index. Failures are cached for the same TTL: on a Runtime too old for
+ * `session.models.mentions` every keystroke would otherwise fire a command that
+ * can never succeed.
+ */
+const MODEL_MENTION_CACHE_TTL_MS = 60_000;
+
+type ModelMentionCacheEntry = { readonly at: number; readonly value: Promise<MentionCandidate[]> };
+
+const modelMentionCache = new WeakMap<StudioClient, ModelMentionCacheEntry>();
+
+function loadModelMentionCandidates(client: StudioClient): Promise<MentionCandidate[]> {
+  const cached = modelMentionCache.get(client);
+  if (cached !== undefined && Date.now() - cached.at < MODEL_MENTION_CACHE_TTL_MS) return cached.value;
+  const value = invokeUpgrade(client, "session.models.mentions", {}).then((result) =>
+    result.available.map(
+      (model): MentionCandidate => ({ kind: "model", id: model.selector, name: model.selector, label: model.name, detail: model.selector }),
+    ),
+  );
+  // The cached promise is shared by later keystrokes; never leave it unhandled.
+  value.catch(() => {});
+  modelMentionCache.set(client, { at: Date.now(), value });
+  return value;
+}
+
 export async function loadMentions(
   client: StudioClient,
-  trigger: "@" | "/",
+  trigger: "@" | "/" | "^",
   query: string,
   files?: WorkspaceFileIndex,
 ): Promise<MentionCandidate[]> {
+  if (trigger === "^") {
+    return filterMentions(await loadModelMentionCandidates(client), query);
+  }
   if (trigger === "/") return [];
   const needle = query.trim();
   const [agents, skills, entries] = await Promise.all([

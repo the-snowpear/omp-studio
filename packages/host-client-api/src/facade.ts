@@ -1,3 +1,4 @@
+import { isUpgradeOperationKind } from "@omp-studio/studio-protocol";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
  * StudioHostClientFacade — the P1 presentation-neutral product API.
@@ -415,6 +416,7 @@ function validateEnvelope(request: {
 /** Re-validate the three Runtime mirror commands at the in-process Host seam. */
 function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unknown): void {
   if (
+    !isUpgradeOperationKind(commandName) &&
     !isEvaluationOperationKind(commandName) &&
     commandName !== "runtime.settings.get" &&
     commandName !== "runtime.settings.set" &&
@@ -1176,7 +1178,7 @@ export class StudioHostClientFacade implements ClientTransport {
     const service = this.#options.commands;
     if (service?.invoke === undefined) throw clientError("CAPABILITY_UNAVAILABLE", `${request.commandName} is not available on this Host`);
     if (this.#currentSnapshot() === undefined) throw unavailableError(`${request.commandName} requires a Runtime snapshot`);
-    const operation = { kind: request.commandName, ...request.input } as unknown as StudioOperation;
+    const operation = { ...request.input, kind: request.commandName } as unknown as StudioOperation;
     const acceptedAt = this.#options.diagnostics.now();
     const replay = this.#registry.accept(request, acceptedAt);
     if (replay !== undefined) { this.#replayTerminal(replay, request.requestId); return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt } as ClientCommandAccepted; }

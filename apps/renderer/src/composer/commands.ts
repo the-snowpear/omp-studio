@@ -324,7 +324,8 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
     risk: "destructive",
     typed: { name: "session.clearContext" },
   }),
-  cmd("drop", "删除当前会话并开新会话", "session", {
+  cmd("delete", "删除当前会话并开新会话", "session", {
+    aliases: ["drop"],
     select: "run-now",
     risk: "destructive",
     typed: { name: "session.drop" },
@@ -353,7 +354,7 @@ export const BUILTIN_SLASH_CATALOG: readonly StudioSlashCommand[] = [
     risk: "sensitive",
   }),
   cmd("pause", "暂停 Runtime", "session", { select: "run-now", typed: { name: "runtime.pause" } }),
-  cmd("btw", "旁路问一句", "session", { allowArgs: true, hint: "<question>", select: "complete-args", typed: { name: "btw.ask", fromArgs: (args) => ({ question: args }) } }),
+  cmd("btw", "旁路问答与历史", "session", { allowArgs: true, hint: "[question]", select: "run-now", typed: { name: "btw.ask", fromArgs: (args) => ({ question: args }) } }),
   cmd("tan", "后台旁路代理", "session", { allowArgs: true, hint: "<work>", select: "complete-args", typed: { name: "tan.start", fromArgs: (args) => ({ work: args }) } }),
   cmd("omfg", "生成 TTSR 规则", "session", { allowArgs: true, hint: "<complaint>", select: "complete-args", typed: { name: "omfg.generate", fromArgs: (args) => ({ complaint: args }) } }),
   cmd("computer", "本会话 computer-use", "mode", {
@@ -578,7 +579,9 @@ export function resolveSlashExecute(command: StudioSlashCommand, args: string): 
   if (!trimmed && command.ui && command.select !== "run-now" && command.select !== "chip") {
     return { kind: "native-ui", ui: command.ui };
   }
-  if (command.typed && (trimmed || command.typed.fromArgs === undefined)) {
+  // Bare `run-now` commands with an args mapper still execute: /btw with no
+  // question opens history, which `fromArgs("")` encodes.
+  if (command.typed && (trimmed || command.typed.fromArgs === undefined || command.select === "run-now")) {
     return { kind: "typed", name: command.typed.name, input: command.typed.fromArgs?.(trimmed) ?? {} };
   }
   if (command.invokeId) {
@@ -600,7 +603,7 @@ export function bindSlashTypedCommand(
   if (execute.name === "session.drop") {
     const threadId = context.threadId;
     if (threadId === undefined || threadId.length === 0) {
-      return { ok: false, error: "没有当前会话，无法执行 /drop" };
+      return { ok: false, error: "没有当前会话，无法执行 /delete" };
     }
     return { ok: true, name: "session.drop", input: { threadId } };
   }
@@ -720,6 +723,7 @@ export function planComposerSend(snapshot: ComposerSnapshot, catalog?: readonly 
   const chipApplies = appliesOf(peeled.names, catalog);
 
   if (command !== undefined && draft !== null) {
+    if (command.name === "btw") return { kind: "execute", command, args: draft.args };
     if (command.select === "chip") {
       if (isModeControlArgs(command, draft.args)) {
         return { kind: "execute", command, args: draft.args };

@@ -184,5 +184,8 @@ export * from "./operations.js";
 export * from "./lifecycle.js";
 export * from "./model-thinking.js";
 export * from "./model-pricing.js";
+export * from "./provider-yaml-draft.js";
 export * from "./conversation.js";
 export * from "./git.js";
+
+export type { UpgradeOperation, UpgradeResultMap, BtwTopicSummary, BtwHistoryTurn, ForeignSessionSummary, ForeignSource, RuntimeAuthProvider, ModelMentionInfo } from "@omp-studio/studio-protocol";

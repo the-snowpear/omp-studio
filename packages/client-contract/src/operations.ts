@@ -1,3 +1,4 @@
+import type { UpgradeOperation, UpgradeResultMap } from "@omp-studio/studio-protocol";
 import type { EvaluationOperation } from "@omp-studio/studio-protocol";
 /**
  * Semantic request/response maps and envelopes for the product client.
@@ -354,7 +355,8 @@ export type PromptTextInput = {
 
 /** Public semantic command inputs exposed by the Runtime control surface. */
 export type EvaluationCommandInputMap = { [K in EvaluationOperation["kind"]]: Omit<Extract<EvaluationOperation, {kind:K}>, "kind"> };
-export interface RuntimeCommandInputMap extends EvaluationCommandInputMap {
+type UpgradeInputMap = { [K in UpgradeOperation["kind"]]: Omit<Extract<UpgradeOperation, { kind: K }>, "kind" | "fallbackCwd"> };
+export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, UpgradeInputMap {
   "core.prompt": PromptTextInput;
   "core.steer": PromptTextInput;
   "core.followUp": PromptTextInput;
@@ -770,6 +772,7 @@ export type CommandResultMap = CoreCommandResultMap & {
     | "operator.invoke"
     | "session.tree.navigate"
     | "session.tree.branch"
+    | UpgradeOperation["kind"]
     | "btw.ask"
     | "btw.branch"
     | "runtime.settings.get"
@@ -778,6 +781,8 @@ export type CommandResultMap = CoreCommandResultMap & {
   >]: OperatorStateSnapshot;
 } & {
   [K in EvaluationOperation["kind"]]: EvaluationCommandOutcome;
+} & {
+  [K in UpgradeOperation["kind"]]: { readonly snapshot: OperatorStateSnapshot; readonly result: UpgradeResultMap[K] };
 } & {
   "operator.invoke": OperatorInvokeOutcome;
 

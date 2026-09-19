@@ -1,3 +1,9 @@
+import {
+	isUpgradeOperationKind,
+	validateUpgradeOperation,
+	UPGRADE_OPERATION_KINDS,
+	type UpgradeOperation,
+} from "./runtime-upgrade-protocol";
 import * as crypto from "node:crypto";
 import {
 	CONVERSATION_LIMITS,
@@ -66,6 +72,7 @@ import type { EvaluationOperation } from "./evaluation-protocol";
 import { isEvaluationOperationKind, validateEvaluationOperation } from "./evaluation-validation";
 
 export type StudioOperation =
+	| UpgradeOperation
 	| EvaluationOperation
 	| { kind: "runtime.snapshot" }
 	| { kind: "runtime.settings.get"; keys?: StudioRuntimeSettingKey[] }
@@ -324,6 +331,10 @@ export interface StudioEventEnvelope {
 }
 
 export interface StudioSessionTelemetry {
+	advisorCost?: number;
+	generationTps?: number;
+	requestedModel?: string;
+	servedModel?: string;
 	sessionId: string;
 	capturedAt: string;
 	tokens: {
@@ -536,6 +547,14 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 	}
 	if (isEvaluationOperationKind(operation.kind)) {
 		validateEvaluationOperation(operation);
+		return input as unknown as StudioRequest;
+	}
+	if (typeof operation.kind === "string" && isUpgradeOperationKind(operation.kind)) {
+		try {
+			validateUpgradeOperation(operation);
+		} catch (error) {
+			throw new StudioFrameError(error instanceof Error ? error.message : "Invalid Runtime operation");
+		}
 		return input as unknown as StudioRequest;
 	}
 	switch (operation.kind) {
@@ -1011,6 +1030,7 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 }
 
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+	...UPGRADE_OPERATION_KINDS,
 	"runtime.pause",
 	"runtime.resume",
 	"runtime.snapshot",

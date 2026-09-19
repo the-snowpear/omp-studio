@@ -598,6 +598,7 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
   isBusy(): boolean;
   rollbackRuntime(): Promise<void>;
   pruneRuntimes(): Promise<void>;
+  shutdownForUpdate(): Promise<void>;
 }
 
 /**
@@ -607,6 +608,8 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
  * Packaged builds keep the live `omp.exe` under `$INSTDIR\runtime`.
  */
 export function createProductionHostFactory(options?: {
+  readonly beforeCreate?: () => Promise<void>;
+  readonly afterCreate?: (composition: DesktopHostComposition, workspaceSelected: boolean) => Promise<boolean>;
   readonly openUrl?: (url: string) => Promise<void>;
   readonly revealDirectory?: (absDir: string) => Promise<void>;
 }): ProductionDesktopHostFactory {
@@ -676,6 +679,8 @@ export function createProductionHostFactory(options?: {
     },
   };
   const facade: DesktopFacadeSeams = {
+    resolveImportWorkspace: async (workspaceId) => { await ensureRegistry(); return registry.get(workspaceId)?.canonicalPath; },
+    registerImportedWorkspace: async (cwd) => { await ensureRegistry(); return (await registry.upsertByPath(cwd, new Date().toISOString(), undefined, false)).workspaceId; },
     hostLog,
     catalog: createWorkspaceSessionCatalog(
       () => workspaceCwd.current,
@@ -732,6 +737,7 @@ export function createProductionHostFactory(options?: {
   });
   return {
     async create(): Promise<DesktopHostComposition> {
+      await options?.beforeCreate?.();
       // The registry file is loaded once, before the first composition can
       // serve any renderer query.
       await ensureRegistry();
@@ -740,7 +746,8 @@ export function createProductionHostFactory(options?: {
         const stored = registry.list().find((entry) => entry.workspaceId === activeId);
         if (stored !== undefined) workspaceCwd.current = stored.canonicalPath;
       }
-      const composition = await factory.create();
+      let composition = await factory.create();
+      if (await options?.afterCreate?.(composition, workspaceCwd.current !== undefined)) composition = await factory.create();
       activeComposition = composition;
       return composition;
     },
@@ -765,6 +772,11 @@ export function createProductionHostFactory(options?: {
     async pruneRuntimes(): Promise<void> {
       if (!activeComposition?.pruneRuntimes) throw new Error("Managed Runtime maintenance is unavailable");
       await activeComposition.pruneRuntimes();
+    },
+    async shutdownForUpdate(): Promise<void> {
+      if (activeComposition?.isBusy()) throw new Error("Runtime is busy");
+      await activeComposition?.prepareUpdateRestart?.();
+      await activeComposition?.shutdown();
     },
   };
 }

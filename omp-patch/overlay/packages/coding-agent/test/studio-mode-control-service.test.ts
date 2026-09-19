@@ -18,7 +18,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent/studio/services/mode-control-service";
 import { StudioRuntimeSettingsService } from "@oh-my-pi/pi-coding-agent/studio/services/runtime-settings-service";
 import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loop-service";
-import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-coding-agent/tools/resolve";
+import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 describe("WP-030/031/032 StudioModeControlService", () => {

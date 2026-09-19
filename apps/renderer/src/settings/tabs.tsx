@@ -16,6 +16,7 @@ import type { AppSettings } from "./appSettings";
 import { DEFAULT_APP_SETTINGS } from "./appSettings";
 import { SettingRow, SettingSection, StaticSelect, Switch, type SettingSource } from "./SettingRow";
 import { useUpdates, type UpdatePrefs } from "./updates";
+import { DesktopUpdateRecovery } from "./DesktopUpdateRecovery";
 import { useI18n } from "../i18n";
 import type {
   RuntimeSettingsReadModel,
@@ -70,6 +71,14 @@ const RUNTIME_DEFAULTS: RuntimeSettingsReadModel = {
   "plan.autosaveDir": "",
   "retry.waitForUsageReset": false,
   "compaction.experimentalContextManagement": false,
+  "task.enableEffort": false,
+  "task.maxEffort": "max",
+  "task.agentServiceTierOverrides": {},
+  "providers.autoThinkingMaxEffort": "xhigh",
+  "providers.judgmentProvider": "auto",
+  "images.describeForTextModels": true,
+  "images.questionTimeoutMs": 300000,
+  "tools.speculativeExecution.enabled": false,
 };
 
 function appSource<K extends keyof AppSettings>(app: AppSettings, key: K): SettingSource {
@@ -175,8 +184,11 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
   ));
 }
 
-type RuntimeBooleanKey = "edit.autoRepair.enabled" | "extendedContext" | "compaction.asyncEnabled" | "plan.autosave" | "retry.waitForUsageReset" | "compaction.experimentalContextManagement";
+type RuntimeBooleanKey = "task.enableEffort" | "images.describeForTextModels" | "tools.speculativeExecution.enabled" | "edit.autoRepair.enabled" | "extendedContext" | "compaction.asyncEnabled" | "plan.autosave" | "retry.waitForUsageReset" | "compaction.experimentalContextManagement";
 type RuntimeScalarKey =
+  | "task.maxEffort"
+  | "providers.autoThinkingMaxEffort"
+  | "providers.judgmentProvider"
   | "features.unexpectedStopDetection"
   | "providers.unexpectedStopModel"
   | "providers.openai-codex.codeMode";
@@ -789,6 +801,7 @@ export function FilesTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
         />
       </SettingSection>
       <SettingSection title={t("settings.files.sectionRead")}>
+        <RuntimeBooleanRow runtime={runtime} demo={demo} keyName="tools.speculativeExecution.enabled" label={t("runtimeUpgrade.speculative")} desc={t("runtimeUpgrade.speculativeDesc")} />
         <FutureRows
           demo={demo}
           rows={[
@@ -894,6 +907,7 @@ export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
           ]}
         />
       </SettingSection>
+      <RuntimeUpgradeRows runtime={runtime} demo={demo} />
       <SettingSection title={t("settings.tasks.sectionSubtaskLimits")} desc={t("settings.tasks.sectionSubtaskLimitsDesc")}>
         <FutureRows
           demo={demo}
@@ -921,6 +935,7 @@ const DEFAULT_UPDATE_PREFS: UpdatePrefs = {
   autoCheck: true,
   skippedAppVersion: "",
   runtimeChannel: "stable",
+  autoDownload: true,
   preferHotUpdate: true,
   lastIndexSequence: 0,
 };
@@ -1048,20 +1063,20 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
           </select>
         </SettingRow>
         <SettingRow
-          label={t("updates.preferHot")}
-          desc={t("updates.preferHotHint")}
-          source={!available ? "unavailable" : (prefs?.preferHotUpdate === false ? "user" : "default")}
+          label={t("updates.autoDownload")}
+          desc={t("updates.autoDownloadHint")}
+          source={!available ? "unavailable" : (prefs?.autoDownload === false ? "user" : "default")}
           {...(!available ? { reason: t("common.unavailable") } : {})}
         >
           <Switch
-            label={t("updates.preferHot")}
-            checked={prefs?.preferHotUpdate ?? true}
+            label={t("updates.autoDownload")}
+            checked={prefs?.autoDownload ?? true}
             disabled={disabled}
             onChange={(next) => {
               if (preview) {
-                setPreviewPrefs((prev) => ({ ...prev, preferHotUpdate: next }));
+                setPreviewPrefs((prev) => ({ ...prev, autoDownload: next }));
               } else {
-                void updates.savePrefs({ preferHotUpdate: next });
+                void updates.savePrefs({ autoDownload: next });
               }
             }}
           />
@@ -1089,6 +1104,9 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
             </button>
           </SettingRow>
         ) : null}
+      </SettingSection>
+      <SettingSection title={t("updates.rollbackApp")}>
+        <DesktopUpdateRecovery preview={preview} />
       </SettingSection>
       <SettingSection title={t("settings.runtime.section")}>
         <RuntimeScalarRow
@@ -1195,4 +1213,57 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
       </SettingSection>
     </>
   );
+}
+
+/** Schema-backed controls; preview writes are handled by the existing local controller. */
+function RuntimeUpgradeRows({ runtime, demo }: { runtime?: RuntimeSettingsCtl | undefined; demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
+  const tiersKey = "task.agentServiceTierOverrides";
+  const preview = runtime?.preview === true;
+  const available = runtimeHasValue(runtime, demo, tiersKey);
+  const current = runtime?.snapshot?.[tiersKey] ?? {};
+  const demoText = demo?.value(tiersKey);
+  const serialized = preview ? demoText || "{}" : JSON.stringify(current);
+  const [tiers, setTiers] = useState<Array<[string, string]>>([]);
+  const [invalid, setInvalid] = useState(false);
+  useEffect(() => {
+    try { setTiers(Object.entries(JSON.parse(serialized) as Record<string, string>)); } catch { setTiers([]); }
+    setInvalid(false);
+  }, [serialized]);
+  const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
+  const timeoutKey = "images.questionTimeoutMs";
+  const timeout = preview ? demo?.value(timeoutKey) || "300000" : String(runtime?.snapshot?.[timeoutKey] ?? 300000);
+  const [timeoutDraft, setTimeoutDraft] = useState(timeout);
+  useEffect(() => setTimeoutDraft(timeout), [timeout]);
+  const saveTiers = () => {
+    const names = tiers.map(([name]) => name.trim());
+    if (names.some(name => !name || name.length > 256 || /[\u0000-\u001f]/u.test(name) || ["__proto__", "constructor", "prototype"].includes(name)) || new Set(names).size !== names.length || names.length > 256) { setInvalid(true); return; }
+    setInvalid(false);
+    runtime?.set?.(tiersKey, Object.fromEntries(tiers.map(([, tier], i) => [names[i], tier])) as NonNullable<RuntimeSettingsReadModel[typeof tiersKey]>);
+  };
+  return <SettingSection title={t("runtimeUpgrade.section") + (runtime?.preview ? " · " + t("common.demo") : "")}>
+    <RuntimeBooleanRow runtime={runtime} demo={demo} keyName="task.enableEffort" label={t("runtimeUpgrade.effort")} desc={t("runtimeUpgrade.effortDesc")} />
+    <RuntimeScalarRow runtime={runtime} demo={demo} keyName="task.maxEffort" label={t("runtimeUpgrade.maxEffort")} desc={t("runtimeUpgrade.maxEffortDesc")} fallback="max" options={["minimal","low","medium","high","xhigh","max"].map(value => [value, value] as const)} />
+    <RuntimeScalarRow runtime={runtime} demo={demo} keyName="providers.autoThinkingMaxEffort" label={t("runtimeUpgrade.autoEffort")} desc={t("runtimeUpgrade.autoEffortDesc")} fallback="xhigh" options={[["xhigh","xhigh"],["max","max"]]} />
+    <RuntimeScalarRow runtime={runtime} demo={demo} keyName="providers.judgmentProvider" label={t("runtimeUpgrade.judgment")} desc={t("runtimeUpgrade.judgmentDesc")} fallback="auto" options={[["auto","auto"],["typesafe","TypeSafe"],["llm","LLM"]]} />
+    <RuntimeBooleanRow runtime={runtime} demo={demo} keyName="images.describeForTextModels" label={t("runtimeUpgrade.describe")} desc={t("runtimeUpgrade.describeDesc")} />
+    <SettingRow label={t("runtimeUpgrade.timeout")} desc={t("runtimeUpgrade.timeoutDesc")} source={runtimeSource(runtimeHasValue(runtime, demo, timeoutKey))}>
+      <input className="input" type="number" min={0} max={2147483647} aria-label={t("runtimeUpgrade.timeout")} value={timeoutDraft} disabled={disabled} onChange={event => setTimeoutDraft(event.target.value)} />
+      <button className="btn small" disabled={disabled || timeoutDraft === "" || !Number.isSafeInteger(Number(timeoutDraft)) || Number(timeoutDraft) < 0 || Number(timeoutDraft) > 2147483647} onClick={() => runtime?.set?.(timeoutKey, Number(timeoutDraft))}>{t("common.save")}</button>
+    </SettingRow>
+    <SettingRow label={t("runtimeUpgrade.tiers")} desc={t("runtimeUpgrade.tiersDesc")} source={runtimeSource(available)} {...(available ? {} : { reason: t("settings.runtime.unavailable") })}>
+      <div>
+        {tiers.map(([name, tier], index) => <div key={index} className="row">
+          <input className="input" aria-label={t("runtimeUpgrade.agent")} value={name} disabled={disabled} onChange={event => setTiers(rows => rows.map((row, i) => i === index ? [event.target.value, row[1]] : row))} />
+          <select className="select" aria-label={t("runtimeUpgrade.tiers")} value={tier} disabled={disabled} onChange={event => setTiers(rows => rows.map((row, i) => i === index ? [row[0], event.target.value] : row))}>
+            {["inherit","none","auto","default","flex","scale","priority"].map(value => <option key={value}>{value}</option>)}
+          </select>
+          <button className="btn small" disabled={disabled} onClick={() => setTiers(rows => rows.filter((_, i) => i !== index))}>{t("common.delete")}</button>
+        </div>)}
+        <button className="btn small" disabled={disabled || tiers.length >= 256} onClick={() => setTiers(rows => [...rows, ["", "inherit"]])}>{t("runtimeUpgrade.add")}</button>
+        <button className="btn small" disabled={disabled} onClick={saveTiers}>{t("common.save")}</button>
+        {invalid ? <p role="alert">{t("runtimeUpgrade.invalid")}</p> : null}
+      </div>
+    </SettingRow>
+  </SettingSection>;
 }

@@ -5,6 +5,8 @@
 
 import type { TreeGitStatus } from "../git/treeStatus";
 
+export const PREVIEW_DESKTOP_RECOVERY = { version: "0.1.4" } as const;
+
 export type PreviewThreadWait = "approval" | "plan" | "ask";
 
 export type PreviewThread = {
@@ -581,14 +583,14 @@ export const PREVIEW_APP_UPDATE: PreviewAppUpdate = {
   name: "OMP Studio 0.2.0",
   releaseNotes: `### 新增功能与改进
 
-- **GitHub Release 自动更新**：支持静默检测与一键全量安装包升级。
+- **增量更新**：后台准备桌面与 Runtime 更新，完成后点击「重启更新」。
 - **左下角状态提示**：发现新版本时在侧栏底部清晰展示更新提示徽标。
 - **双语国际化支持**：新增完整的中文与英文更新引导。
 - **性能与稳定性优化**：优化 Runtime Bridge 握手与 IPC 通信效率。`,
   publishedAt: "2026-08-20T00:00:00Z",
   htmlUrl: "https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.0",
-  downloadUrl: "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.0/OMP-Studio-Setup-0.2.0-win-x64.exe",
-  assetName: "OMP-Studio-Setup-0.2.0-win-x64.exe",
+  downloadUrl: "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.0/OMP-Studio-Setup-0.2.0-windows-x64.exe",
+  assetName: "OMP-Studio-Setup-0.2.0-windows-x64.exe",
   assetSize: 89452000,
 };
 

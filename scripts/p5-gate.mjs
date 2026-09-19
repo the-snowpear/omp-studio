@@ -62,7 +62,16 @@ checks.push({ name: "repository-secret-scan", status: leaks.length === 0 ? "pass
 let updateIndexSigned = false;
 const updateIndexPath = join(root, "outputs", "release", "update-index.json");
 const updateIndexSigPath = join(root, "outputs", "release", "update-index.sig.json");
-if (existsSync(updateIndexPath)) {
+const v2Directory = join(root, "outputs", "release", process.env.OMP_TARGET_ARCH ?? "x64");
+if (existsSync(join(v2Directory, `updates-win32-${process.env.OMP_TARGET_ARCH ?? "x64"}.json`))) {
+  try {
+    const { verifyUpdateAssets } = await import("./verify-update-assets-v2.mjs");
+    const { releaseKeys } = await import("./build-update-assets-v2.mjs");
+    await verifyUpdateAssets(v2Directory, await releaseKeys(root), process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio", `win32-${process.env.OMP_TARGET_ARCH ?? "x64"}`);
+    updateIndexSigned = true;
+    checks.push({ name: "update-v2-signature-and-assets", status: "passed" });
+  } catch (error) { checks.push({ name: "update-v2-signature-and-assets", status: "failed", message: String(error) }); }
+} else if (existsSync(updateIndexPath)) {
   try {
     const { createTrustedKeyVerifier, parseRuntimeSignatureManifest } = await import("@omp-studio/runtime-installer");
     const { createHash } = await import("node:crypto");

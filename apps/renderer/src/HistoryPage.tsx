@@ -1,3 +1,5 @@
+import { SessionImportPanel } from "./SessionImportPanel";
+import type { StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SessionHistoryEntry, SessionHistoryReadModel, SessionHistoryStatus } from "@omp-studio/client-contract";
@@ -340,12 +342,16 @@ function TimeTravelRail({ onRestore }: { onRestore: (kind: keyof typeof TT_RESTO
 }
 
 export function HistoryPage({
+  client, onImportedOpen, onImported,
   history,
   onRoute,
   onSelectThread,
   onUnarchive,
   onDeleteSession,
 }: {
+  client?: StudioClient;
+  onImportedOpen?: (sessionId: string, workspaceId: WorkspaceId) => void;
+  onImported?: () => void;
   history?: SessionHistoryReadModel;
   onRoute: (route: PageRoute) => void;
   onSelectThread: (entry: SessionHistoryEntry) => void;
@@ -427,6 +433,7 @@ export function HistoryPage({
     <div className="page-wide hist-layout">
       <section aria-labelledby="histHeading">
         <h2 className="sr-only" id="histHeading">{t("history.listHeading")}</h2>
+        <SessionImportPanel client={client ?? null} onOpen={onImportedOpen ?? (() => {})} {...(onImported ? { onImported } : {})} />
         <div className="hist-toolbar">
           <label className="sr-only" htmlFor="histSearch">{t("history.searchLabel")}</label>
           <input

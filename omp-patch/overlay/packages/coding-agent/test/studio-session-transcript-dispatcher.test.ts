@@ -70,7 +70,7 @@ function transcriptFixture(
 				manifest: () => ({ hash: "sha256:test-commands", commands: [] }),
 				manifestHash: () => "sha256:test-commands",
 			},
-			btw: { onChange: () => () => {} },
+			btw: { onChange: () => () => {}, settle: async () => {} },
 			interaction: new StudioInteractionGateway(),
 			tan: { start: async () => ({}) },
 			omfg: { generate: async () => ({}) },

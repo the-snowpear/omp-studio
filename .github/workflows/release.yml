@@ -3,271 +3,177 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      release_kind:
+        description: Desktop release or independently versioned Runtime
+        type: choice
+        options: [desktop, runtime]
+        default: desktop
       target_arch:
-        description: "Windows payload architecture (Runtime must build on the matching native runner)"
+        description: Build only on matching native Windows runners
         type: choice
-        options: [x64, arm64]
-        default: x64
-      build_runtime:
-        description: "Rebuild OMP Runtime from source"
-        type: boolean
-        default: true
+        options: [both, x64, arm64]
+        default: both
       runtime_channel:
-        description: "Runtime update channel (canary requires a -canary package version)"
         type: choice
+        description: Desktop releases must bundle stable Runtime
         options: [stable, canary]
         default: stable
-      payload_min_app_version:
-        description: "Reviewed compatible installed Main version; blank requires full Setup"
-        type: string
-        default: ""
       runtime_min_app_version:
-        description: "Reviewed Runtime-compatible installed Main version; blank uses release version"
         type: string
-        default: ""
-      reuse_runtime_tag:
-        description: "Tag to reuse runtime assets from (e.g. v0.1.3)"
-        type: string
+        description: Tested minimum desktop version (blank uses workspace version)
         default: ""
       reuse_runtime_run_id:
-        description: "Optional successful Runtime artifact run ID (set build_runtime=false)"
         type: string
+        description: Optional previous workflow run with matching signed Runtime artifacts
         default: ""
   push:
-    tags: ["v*"]
+    tags: ["v*", "runtime-v*"]
 
 permissions:
   contents: read
-
 concurrency:
   group: omp-studio-release
   cancel-in-progress: false
 
 jobs:
-  runtime:
-    if: github.event_name == 'push' || inputs.build_runtime
-    runs-on: ${{ inputs.target_arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
-    env:
-      OMP_TARGET_ARCH: ${{ inputs.target_arch || 'x64' }}
-      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || (contains(github.ref_name, '-canary') && 'canary') || 'stable' }}
-    timeout-minutes: 120
-    environment: release
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.config.outputs.matrix }}
+      kind: ${{ steps.config.outputs.kind }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.3.14"
-
-      - name: Cache native Runtime dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: omp-patch/vendor/oh-my-pi -> target
-          key: ${{ env.OMP_TARGET_ARCH }}
-          cache-on-failure: true
-
-      - name: Install dependencies
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          npm ci
-          npm run omp:install-deps
-
-      - name: Build and sign Runtime
+      - id: config
         env:
-          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+          TARGET_ARCH: ${{ inputs.target_arch || 'both' }}
+          REQUEST_KIND: ${{ inputs.release_kind || (startsWith(github.ref_name, 'runtime-v') && 'runtime') || 'desktop' }}
         run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          $env:OMP_RUNTIME_SIGNING_KEY_ID = (Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json).activeKeyId
-          $tempKey = Join-Path $env:RUNNER_TEMP "omp-signing.pem"
-          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-          [IO.File]::WriteAllText($tempKey, $env:OMP_SIGNING_SECRET, $utf8NoBom)
-          $env:OMP_RUNTIME_SIGNING_KEY = $tempKey
-          npm run omp:overlay:apply
-          npm run omp:build:host
-          Remove-Item -Force $tempKey
+          if [ "$TARGET_ARCH" = both ]; then
+            echo 'matrix={"include":[{"arch":"x64","os":"windows-latest"},{"arch":"arm64","os":"windows-11-arm"}]}' >> "$GITHUB_OUTPUT"
+          elif [ "$TARGET_ARCH" = arm64 ]; then
+            echo 'matrix={"include":[{"arch":"arm64","os":"windows-11-arm"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"arch":"x64","os":"windows-latest"}]}' >> "$GITHUB_OUTPUT"
+          fi
+          echo "kind=$REQUEST_KIND" >> "$GITHUB_OUTPUT"
 
-      - name: Cleanup signing key on failure
-        if: always()
-        run: |
-          $tempKey = Join-Path $env:RUNNER_TEMP "omp-signing.pem"
-          if (Test-Path $tempKey) { Remove-Item -Force $tempKey }
-
-      - name: Upload Runtime artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: runtime-artifact-${{ env.OMP_TARGET_ARCH }}
-          path: packages/runtime-installer/dist/artifacts/win32-${{ env.OMP_TARGET_ARCH }}/
-          if-no-files-found: error
-
-  app:
-    needs: [runtime]
-    if: ${{ !cancelled() && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') }}
-    runs-on: ${{ inputs.target_arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
-    timeout-minutes: 90
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
     environment: release
+    timeout-minutes: 180
     permissions:
-      contents: write
+      contents: read
       actions: read
     env:
       GH_TOKEN: ${{ github.token }}
-      OMP_TARGET_ARCH: ${{ inputs.target_arch || 'x64' }}
-      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || (contains(github.ref_name, '-canary') && 'canary') || 'stable' }}
+      OMP_TARGET_ARCH: ${{ matrix.arch }}
+      OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+      OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.3.14"
-
-      - name: Validate release version
-        run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") { throw "Tag does not match package version" }
-          if (($env:OMP_RUNTIME_CHANNEL -eq "canary") -ne ($version -match '-canary(?:[.-]|$)')) { throw "Canary releases require a -canary package version; stable releases must not use one" }
-          "OMP_RELEASE_TAG=v$version" >> $env:GITHUB_ENV
-
+          bun-version: "1.4.2"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          key: ${{ matrix.arch }}
       - name: Install dependencies
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           npm ci
           npm run omp:install-deps
-
-      - name: Retrieve Runtime artifacts
-        if: needs.runtime.result == 'skipped' && !inputs.reuse_runtime_run_id
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          $destDir = "packages/runtime-installer/dist/artifacts/win32-$env:OMP_TARGET_ARCH"
-          New-Item -ItemType Directory -Force -Path $destDir
-          $downloadDir = Join-Path $env:RUNNER_TEMP "runtime-download"
-          New-Item -ItemType Directory -Force -Path $downloadDir
-          if ($env:REUSE_RUNTIME_TAG) {
-            gh release download $env:REUSE_RUNTIME_TAG --pattern "omp-runtime-*-win32-$env:OMP_TARGET_ARCH-*" --dir $downloadDir
-          } else {
-            Write-Host "Downloading runtime from latest release..."
-            gh release download --pattern "omp-runtime-*-win32-$env:OMP_TARGET_ARCH-*" --dir $downloadDir
-          }
-          foreach ($name in @("omp.exe", "runtime-manifest.json", "checksums.json", "runtime-signature.json")) {
-            $matches = @(Get-ChildItem $downloadDir -Filter "omp-runtime-*-win32-$env:OMP_TARGET_ARCH-$name")
-            if ($matches.Count -ne 1) { throw "Expected exactly one $name for $env:OMP_TARGET_ARCH; build Runtime if the previous release lacks it" }
-            Copy-Item -LiteralPath $matches[0].FullName -Destination (Join-Path $destDir $name)
-          }
-        env:
-          REUSE_RUNTIME_TAG: ${{ inputs.reuse_runtime_tag }}
-
-      - name: Download built runtime artifact
-        if: needs.runtime.result == 'success' || inputs.reuse_runtime_run_id
+      - name: Reuse signed Runtime
+        if: inputs.reuse_runtime_run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: runtime-artifact-${{ env.OMP_TARGET_ARCH }}
-          path: packages/runtime-installer/dist/artifacts/win32-${{ env.OMP_TARGET_ARCH }}/
-          run-id: ${{ inputs.reuse_runtime_run_id || github.run_id }}
+          name: runtime-artifact-${{ matrix.arch }}
+          path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
+          run-id: ${{ inputs.reuse_runtime_run_id }}
           github-token: ${{ github.token }}
-
-      - name: Prepare native dependencies from signed Runtime
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          npm run build -w @omp-studio/studio-protocol
-          npm run build -w @omp-studio/runtime-installer
-          node scripts/prepare-runtime-test-native.mjs
-
-      - name: Verify gates
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          npm run check
-          npm run omp:test:metadata
-          npm run omp:verify:patches -- --skip-workspace-check
-
-      - name: Build Windows installer
-        run: npm run pack:win -- --skip-host
-
-      - name: Retrieve previous update sequence
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          $releases = @(gh release list --exclude-drafts --limit 100 --json tagName,isPrerelease | ConvertFrom-Json) | Where-Object { if ($env:OMP_RUNTIME_CHANNEL -eq "canary") { $_.isPrerelease -and $_.tagName -match '-canary(?:[.-]|$)' } else { !$_.isPrerelease } } | Select-Object -First 1
-          $releases = @($releases)
-          if ($releases.Count -gt 0) {
-            $previous = gh release view $releases[0].tagName --json assets | ConvertFrom-Json
-            $indexName = if ($env:OMP_TARGET_ARCH -eq "arm64") { "update-index-win32-arm64" } else { "update-index" }
-            if ($previous.assets.name -contains "$indexName.json") {
-              $dest = Join-Path $env:RUNNER_TEMP "previous-update"
-              gh release download $releases[0].tagName --pattern "$indexName.json" --dir $dest
-              "OMP_PREVIOUS_UPDATE_INDEX=$(Join-Path $dest "$indexName.json")" >> $env:GITHUB_ENV
-            }
-            # Retain the other architecture's signed index unchanged. Its URLs
-            # still address the release containing those signed payload bytes.
-            $otherIndex = if ($env:OMP_TARGET_ARCH -eq "arm64") { "update-index" } else { "update-index-win32-arm64" }
-            if ($previous.assets.name -contains "$otherIndex.json") {
-              gh release download $releases[0].tagName --pattern "$otherIndex.json" --pattern "$otherIndex.sig.json" --dir outputs/retained-update
-            }
-          }
-
-      - name: Build update assets
+      - name: Build Runtime, verify, package and sign release
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
-          OMP_PAYLOAD_MIN_APP_VERSION: ${{ inputs.payload_min_app_version }}
-          OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
+          REUSE_RUNTIME_RUN_ID: ${{ inputs.reuse_runtime_run_id }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
-          $env:OMP_RUNTIME_SIGNING_KEY_ID = (Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json).activeKeyId
-          $tempKey = Join-Path $env:RUNNER_TEMP "omp-signing.pem"
-          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-          [IO.File]::WriteAllText($tempKey, $env:OMP_SIGNING_SECRET, $utf8NoBom)
-          $env:OMP_RUNTIME_SIGNING_KEY = $tempKey
-          node scripts/build-update-assets.mjs
-          Remove-Item -Force $tempKey
+          $keyPath = Join-Path $env:RUNNER_TEMP "omp-release-signing.pem"
+          try {
+            [IO.File]::WriteAllText($keyPath, $env:OMP_SIGNING_SECRET, [Text.UTF8Encoding]::new($false))
+            $env:OMP_RUNTIME_SIGNING_KEY = $keyPath
+            $env:OMP_RUNTIME_SIGNING_KEY_ID = (Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json).activeKeyId
+            if (!$env:REUSE_RUNTIME_RUN_ID) {
+              npm run omp:overlay:apply
+              npm run omp:build:host
+            } else {
+              npm run build
+              node scripts/prepare-runtime-test-native.mjs
+            }
+            npm run check
+            npm run omp:test:metadata
+            if (!$env:REUSE_RUNTIME_RUN_ID) { node scripts/unapply-release-overlay.mjs }
+            npm run omp:verify:patches -- --skip-workspace-check
+            npm run pack:win:prepare
+            $runtime = Get-ChildItem packaging/runtime-payload -Recurse -Filter runtime-manifest.json | ForEach-Object { Get-Content $_.FullName | ConvertFrom-Json }
+            if (@($runtime).Count -ne 1 -or $runtime.channel -ne $env:OMP_RUNTIME_CHANNEL) { throw "Runtime identity/channel mismatch" }
+            $appVersion = (Get-Content package.json | ConvertFrom-Json).version
+            $tag = if ($env:OMP_RELEASE_KIND -eq "runtime") { "runtime-v$($runtime.runtimeVersion)" } else { "v$appVersion" }
+            if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne $tag) { throw "Release tag mismatch" }
+            if ($env:OMP_RELEASE_KIND -eq "desktop" -and ($runtime.channel -ne "stable" -or $appVersion -match '-')) { throw "Desktop releases must be stable" }
+            $env:OMP_RELEASE_TAG = $tag
+            node scripts/collect-update-history.mjs
+            Get-Content $env:GITHUB_ENV | Where-Object { $_ -match '^OMP_PREVIOUS_(CATALOG_DIR|UPDATE_INDEX)=' } | ForEach-Object {
+              $pair = $_ -split '=', 2
+              [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process')
+            }
+            if ($env:OMP_RELEASE_KIND -eq "desktop") { npm run pack:win -- --skip-host --skip-build }
+            npm run updates:build
+            npm run updates:verify
+            npm run p5:gate
+          } finally {
+            if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath -Force }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-artifact-${{ matrix.arch }}
+          path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ matrix.arch }}
+          path: outputs/release/${{ matrix.arch }}/
+          if-no-files-found: error
 
-      - name: Cleanup signing key on failure
-        if: always()
-        run: |
-          $tempKey = Join-Path $env:RUNNER_TEMP "omp-signing.pem"
-          if (Test-Path $tempKey) { Remove-Item -Force $tempKey }
-
-      - name: Run P5 readiness gate after assets exist
-        run: npm run p5:gate
-
-      - name: Publish GitHub Release
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-candidate-*
+          path: outputs/publish
+      - name: Publish complete immutable release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          $tag = $env:OMP_RELEASE_TAG
-          $existing = @(gh release list --limit 100 --json tagName,isDraft | ConvertFrom-Json) | Where-Object tagName -eq $tag
-          if ($existing -and !$existing.isDraft) { throw "Refusing to overwrite a published release" }
-          if (!$existing) { gh release create $tag --target $env:GITHUB_SHA --draft --title $tag --generate-notes }
-          $files = @(
-            (Get-Item outputs/installer/OMP-Studio-Setup-*.exe).FullName,
-            (Get-Item outputs/release/omp-studio-app-*.tar.gz).FullName
-          )
-          $indexName = if ($env:OMP_TARGET_ARCH -eq "arm64") { "update-index-win32-arm64" } else { "update-index" }
-          $files += (Get-Item "outputs/release/$indexName.json").FullName
-          $files += (Get-Item "outputs/release/$indexName.sig.json").FullName
-          $files += (Get-Item outputs/release/omp-runtime-*).FullName
-          if (Test-Path outputs/retained-update) {
-            $files += (Get-ChildItem outputs/retained-update -File).FullName
-          }
-          gh release upload $tag @files --clobber
-          if ($env:OMP_RUNTIME_CHANNEL -eq "canary") {
-            gh release edit $tag --draft=false --prerelease --latest=false
-          } else {
-            gh release edit $tag --draft=false --prerelease=false --latest
-          }
+          OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+        run: node scripts/publish-update-release.mjs

@@ -54,6 +54,7 @@ export interface UpdateCheckResult {
 export interface UpdatePrefs {
   readonly mirrorPrefix: string;
   readonly autoCheck: boolean;
+  readonly autoDownload?: boolean;
   readonly skippedAppVersion: string;
   readonly runtimeChannel: "stable" | "canary";
   readonly preferHotUpdate: boolean;
@@ -68,6 +69,7 @@ export interface ChromeUpdatesImportInput {
 export interface ChromeUpdatesPrefsSetInput {
   readonly mirrorPrefix?: string;
   readonly autoCheck?: boolean;
+  readonly autoDownload?: boolean;
   readonly skippedAppVersion?: string;
   readonly runtimeChannel?: "stable" | "canary";
   readonly preferHotUpdate?: boolean;

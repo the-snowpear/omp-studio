@@ -24,6 +24,8 @@ export const STUDIO_SESSION_TELEMETRY_PROBE_ARG = "--studio-session-telemetry-pr
  * available port degrades to zeros instead of throwing.
  */
 export interface StudioTelemetrySessionPort {
+	getAdvisorCost?(): number;
+	readonly tokenRate?: { rate(): number | null };
 	getSessionStats(): {
 		tokens: {
 			input: number;
@@ -57,6 +59,8 @@ export interface BuildStudioSessionTelemetryInput {
 }
 
 interface TelemetryUsageShape {
+	model?: string;
+	upstreamModel?: string;
 	role?: string;
 	stopReason?: string;
 	timestamp?: number | string;
@@ -187,5 +191,12 @@ export function buildStudioSessionTelemetry(input: BuildStudioSessionTelemetryIn
 			...(tps === undefined || !Number.isFinite(tps) ? {} : { tps }),
 		};
 	}
+	const rate = session.tokenRate?.rate();
+	if (typeof rate === "number" && Number.isFinite(rate) && rate >= 0) telemetry.generationTps = rate;
+	const advisorCost = session.getAdvisorCost?.();
+	if (typeof advisorCost === "number" && Number.isFinite(advisorCost) && advisorCost >= 0)
+		telemetry.advisorCost = advisorCost;
+	if (typeof assistant?.model === "string") telemetry.requestedModel = assistant.model.slice(0, 256);
+	if (typeof assistant?.upstreamModel === "string") telemetry.servedModel = assistant.upstreamModel.slice(0, 256);
 	return telemetry;
 }

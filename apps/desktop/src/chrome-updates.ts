@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   type RuntimeInstallationManifest,
@@ -11,6 +11,7 @@ import {
   parseRuntimeInstallationManifest,
   sha256File,
   verifySignedArtifact,
+  extractRuntimeArchive,
 } from "@omp-studio/runtime-installer";
 
 import {
@@ -667,7 +668,7 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
       dialogOpts = {
         title: "选择 OMP Runtime 清单",
         properties: ["openFile"],
-        filters: [{ name: "OMP Runtime 工件", extensions: ["json"] }],
+        filters: [{ name: "OMP Runtime 工件", extensions: ["zip", "json"] }],
       };
     }
 
@@ -677,7 +678,13 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
     }
 
     const chosen = picked.filePaths[0]!;
-    const directory = input.source === "directory" ? chosen : dirname(chosen);
+    let directory = input.source === "directory" ? chosen : dirname(chosen);
+    if (input.source === "file" && chosen.toLowerCase().endsWith(".zip")) {
+      await mkdir(options.stagingRoot, { recursive: true });
+      directory = await mkdtemp(join(options.stagingRoot, "runtime-import-"));
+      try { await extractRuntimeArchive(chosen, directory); }
+      catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
+    }
     abortController.signal.throwIfAborted();
 
     options.send(CHROME_UPDATES_CHANNELS.progress, {

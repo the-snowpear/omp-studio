@@ -14,9 +14,10 @@ import guidedGoalInterviewPrompt from "../../prompts/goals/guided-goal-interview
 import planModeApprovedPrompt from "../../prompts/system/plan-mode-approved.md" with { type: "text" };
 import planModeCompactInstructionsPrompt from "../../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
 import type { AgentSession } from "../../session/agent-session";
-import type { ConfiguredThinkingLevel } from "../../thinking";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 import { confineToWorkspace, formatPathRelativeToCwd, normalizePathLikeInput } from "../../tools/path-utils";
-import { PROPOSE_DEVICE_NAME, writeDeviceDispatch } from "../../tools/resolve";
+import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
+import { writeDeviceDispatch } from "../../tools/resolve";
 import { type VibeOwnerScope, type VibeParentSession, VibeSessionRegistry } from "../../vibe/runtime";
 
 export class StudioModeError extends Error {

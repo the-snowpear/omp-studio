@@ -209,6 +209,7 @@ export interface DesktopRuntimeSessionPort {
   start(context: DesktopRuntimeSessionContext): Promise<DesktopRuntimeSession | undefined>;
   /** Gracefully stops the Runtime if this port started one; no-op otherwise. */
   stop(): Promise<void>;
+  prepareRestart?(): Promise<void>;
   /** Stop idle workers for an installation, then restore their sessions using
    * the activated executable. Serialized with all other lifecycle changes. */
   withRuntimeMaintenance?<T>(operation: () => Promise<T>, expectedVersion?: () => string | undefined,
@@ -321,6 +322,9 @@ export interface DesktopFacadeSeams {
   readonly agentDefinitions?: HostAgentDefinitionsService;
   readonly getWorkspaceCwd?: () => string | undefined;
   readonly workspaces?: HostWorkspaceService;
+  readonly resolveImportWorkspace?: (workspaceId: string) => Promise<string | undefined>;
+  readonly registerImportedWorkspace?: (cwd: string) => Promise<string>;
+
   readonly workspaceFiles?: HostWorkspaceFileService;
   readonly git?: HostGitService;
   readonly github?: HostGitHubService;
@@ -799,6 +803,8 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const runtimeCommandService =
     seams.commands ??
     createDesktopSemanticCommands({
+      ...(seams.resolveImportWorkspace ? { resolveImportWorkspace: seams.resolveImportWorkspace } : {}),
+      ...(seams.registerImportedWorkspace ? { registerImportedWorkspace: seams.registerImportedWorkspace } : {}),
       sessionRef,
       catalog,
       resolveResidentSessionId: (threadId) => {
@@ -1054,6 +1060,10 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
   async pruneRuntimes(): Promise<void> {
     if (this.#closed || this.isBusy()) throw new Error("Finish active sessions before cleaning Runtime versions");
     await this.#facadeContext.backend.installer.prune({ retainStable: 2 });
+  }
+  async prepareUpdateRestart(): Promise<void> {
+    if (this.#closed || this.isBusy()) throw new Error("Finish active sessions before restarting");
+    await this.#runtimeSession?.prepareRestart?.();
   }
 
   /**

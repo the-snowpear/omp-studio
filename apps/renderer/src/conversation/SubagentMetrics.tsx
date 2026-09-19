@@ -9,6 +9,7 @@ function publicMetricString(value: string | undefined): string | undefined {
 }
 
 export type SubagentMetricValues = {
+  readonly generationTps?: number;
   readonly tokens?: string;
   readonly tools?: string | number;
   readonly requests?: string | number;
@@ -34,6 +35,7 @@ export function formatAgentCost(cost: number): string {
 export function metricsFromUsage(usage: StudioAgentUsage): SubagentMetricValues {
   const cost = formatAgentCost(usage.cost);
   return {
+    ...(usage.generationTps === undefined ? {} : { generationTps: usage.generationTps }),
     tokens: formatMetricTokens(usage.tokens),
     tools: usage.tools,
     requests: usage.requests,
@@ -157,7 +159,7 @@ export function applyLiveSubagentRoster(
   };
 }
 
-export function SubagentMetrics({ tokens, tools, requests, files, cost }: SubagentMetricValues) {
+export function SubagentMetrics({ tokens, tools, requests, files, cost, generationTps }: SubagentMetricValues) {
   if (tokens === undefined && tools === undefined && requests === undefined && files === undefined && !cost) {
     return null;
   }
@@ -167,6 +169,7 @@ export function SubagentMetrics({ tokens, tools, requests, files, cost }: Subage
     requests !== undefined ? `${requests} req` : "",
     files !== undefined ? `${files} files` : "",
     cost ?? "",
+    generationTps === undefined ? "" : generationTps.toFixed(1) + " tok/s",
   ].filter(Boolean).join("，");
   return (
     <div className="sa-metrics" aria-label={aria}>
@@ -174,6 +177,7 @@ export function SubagentMetrics({ tokens, tools, requests, files, cost }: Subage
       {tools !== undefined ? <span className="hub-num"><i>tools</i><b>{tools}</b></span> : null}
       {requests !== undefined ? <span className="hub-num"><i>req</i><b>{requests}</b></span> : null}
       {files !== undefined ? <span className="hub-num"><i>files</i><b>{files}</b></span> : null}
+      {generationTps === undefined ? null : <span className="sa-tok">{generationTps.toFixed(1)} tok/s</span>}
       {cost ? <span className="sa-cost">{cost}</span> : null}
     </div>
   );

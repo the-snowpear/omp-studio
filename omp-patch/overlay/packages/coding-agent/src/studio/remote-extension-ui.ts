@@ -14,10 +14,10 @@ import type {
 	TerminalInputHandler,
 } from "../extensibility/extensions/types";
 import { getExtensionUISelectOptionLabel } from "../extensibility/extensions/types";
-import { defaultThemes } from "../modes/theme/defaults";
-import { createTheme } from "../modes/theme/loader";
-import type { ThemeJson } from "../modes/theme/schema";
-import type { Theme } from "../modes/theme/theme";
+import { defaultThemes } from "@oh-my-pi/pi-tui/theme/defaults";
+import { createTheme } from "@oh-my-pi/pi-tui/theme/loader";
+import type { ThemeJson } from "@oh-my-pi/pi-tui/theme/schema";
+import type { Theme } from "@oh-my-pi/pi-tui/theme/theme";
 import type { ToolUiFactory } from "../tools/context";
 import { StudioInteractionError, type StudioInteractionGateway } from "./services/interaction-port";
 

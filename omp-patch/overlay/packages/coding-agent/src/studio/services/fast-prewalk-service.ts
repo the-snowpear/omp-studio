@@ -6,7 +6,7 @@ import {
 	resolveCliModel,
 } from "../../config/model-resolver";
 import type { AgentSession } from "../../session/agent-session";
-import type { ConfiguredThinkingLevel } from "../../thinking";
+import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
 
 export class StudioFastPrewalkError extends Error {
 	constructor(

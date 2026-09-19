@@ -175,6 +175,7 @@ type CachedSnapshot = {
 type ProjectionState = {
   readonly items: ConversationItem[];
   readonly toolOwners: Map<string, number>;
+  readonly modelMentions: Map<string, string>;
 };
 
 type CachedProjection = {
@@ -1280,7 +1281,7 @@ function isBranchPrefix(previous: readonly ArchiveEntry[], next: readonly Archiv
 }
 
 function createProjectionState(): ProjectionState {
-  return { items: [], toolOwners: new Map<string, number>() };
+  return { items: [], toolOwners: new Map<string, number>(), modelMentions: new Map<string, string>() };
 }
 
 /**
@@ -1292,6 +1293,9 @@ async function foldBranch(state: ProjectionState, branch: readonly ArchiveEntry[
   let checkpoint = Date.now();
   for (let cursor = from; cursor < branch.length; cursor += 1) {
     const entry = branch[cursor]!;
+    if (entry.type === "custom" && entry.customType === "model_mention" && isRecord(entry.data) && typeof entry.data.agent === "string" && /^m\d+$/u.test(entry.data.agent) && typeof entry.data.selector === "string") {
+      if (!state.modelMentions.has(entry.data.agent)) state.modelMentions.set(entry.data.agent, entry.data.selector);
+    }
     if ((cursor & PARSE_YIELD_MASK) === 0 && Date.now() - checkpoint >= PARSE_YIELD_MS) {
       await yieldToEventLoop();
       checkpoint = Date.now();
@@ -1334,7 +1338,11 @@ async function foldBranch(state: ProjectionState, branch: readonly ArchiveEntry[
     if (projected === undefined) continue;
     if (projected.kind === "message" && projected.content.length === 0) continue;
     const index = items.length;
-    items.push(projected);
+    items.push(projected.kind === "message" && projected.role === "user" ? {
+      ...projected, content: projected.content.map(block => block.type === "text" ? {
+        ...block, text: block.text.replace(/<model agent="(m\d+)" name="[^"]*"\/>/gu, (tag, agent: string) => { const selector = state.modelMentions.get(agent); return selector ? "^" + selector : tag; }),
+      } : block),
+    } : projected);
     if (projected.kind !== "message") continue;
     for (const block of projected.content) {
       if (block.type === "toolCall") toolOwners.set(block.toolCallId, index);

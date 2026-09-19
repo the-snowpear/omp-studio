@@ -6,6 +6,7 @@ import { parseSemver } from "./chrome-app-update.js";
 export interface UpdatePrefs {
   readonly mirrorPrefix: string;
   readonly autoCheck: boolean;
+  readonly autoDownload?: boolean;
   readonly skippedAppVersion: string;
   readonly runtimeChannel: "stable" | "canary";
   readonly preferHotUpdate: boolean;
@@ -16,6 +17,7 @@ export interface UpdatePrefs {
 export const DEFAULT_UPDATE_PREFS: UpdatePrefs = {
   mirrorPrefix: "",
   autoCheck: true,
+  autoDownload: true,
   skippedAppVersion: "",
   runtimeChannel: "stable",
   preferHotUpdate: true,
@@ -106,6 +108,7 @@ export function parseUpdatePrefs(value: unknown): UpdatePrefs {
   return {
     mirrorPrefix,
     autoCheck,
+    autoDownload: typeof raw.autoDownload === "boolean" ? raw.autoDownload : true,
     skippedAppVersion,
     runtimeChannel,
     preferHotUpdate,
@@ -168,6 +171,7 @@ export function createUpdatePrefsStore(input: { readonly appDataDirectory: strin
       const updated: UpdatePrefs = {
         mirrorPrefix: nextMirrorPrefix,
         autoCheck: nextAutoCheck,
+        autoDownload: patch.autoDownload ?? current.autoDownload ?? true,
         skippedAppVersion: nextSkippedVersion,
         runtimeChannel: nextChannel,
         preferHotUpdate: nextPreferHot,

@@ -1,5 +1,28 @@
 # Releasing
 
+## Current release system (v2 updater branch)
+
+The release workflow now produces complete desktop updates and independent Runtime updates. See [updates.md](updates.md) for installation migration, storage, security and recovery.
+
+- Desktop tags: `v<workspace version>`; Runtime-only tags: `runtime-v<Runtime version>`. Runtime-only releases never become Latest. Canary is selected explicitly on manual Runtime releases and is published as a prerelease. Runtime versions must be unique across channels.
+- Tag builds target both x64 and ARM64 on native Windows runners. Manual builds can select one architecture. Failed required architectures prevent publication; previous architecture files are not presented as a new build.
+- Desktop releases include Setup EXE, its blockmap, Runtime ZIP, its blockmap, and a signed `updates-win32-<arch>.json`. Runtime-only releases omit Setup. Each architecture's public files are staged in `outputs/release/<arch>`.
+- Runtime ZIP uses fixed order/timestamps and STORE compression, preserving unchanged binary chunks. Its four internal files retain the existing Runtime signature format. The Runtime source executable is not modified to append metadata.
+- `collect-update-history.mjs` verifies all earlier v2 catalogs and retrieves the signed v1 migration feed. The builder allocates component/channel/architecture sequence numbers. Missing/invalid configured history fails the build.
+- `npm run updates:build` signs the new catalog; `npm run updates:verify` verifies every public artifact and rejects unrelated files. `p5:gate` recognizes v2 artifacts.
+- `publish-update-release.mjs` checks candidate signatures and local/uploaded digests, uploads to a draft, and publishes only after all files are present. Published releases are immutable. It uses explicit notes with installation links and technical attachment descriptions.
+- The first v2 desktop release emits a v1-compatible migration index pointing to its Setup. Subsequent desktop releases carry that signed migration index unchanged, so long-offline v1 clients can migrate. The original Runtime URLs referenced by it remain valid.
+- Reuse is supported through a previous workflow run's signed `runtime-artifact-<arch>` artifact. It must match source version, architecture and selected channel. Release-tag reuse of four loose files is retired.
+- A desktop release may reuse the latest Runtime, but cannot publish an older Runtime than one already released for the same channel/architecture. The asset builder rejects this before assigning a new sequence, so a desktop seed cannot hide an independent Runtime update. Update the desktop release branch's Runtime pin/artifact before retrying.
+
+Before publishing: use a new workspace version, validate migration and silent restart on Windows, run `npm run check`, `npm run omp:test:metadata`, `npm run omp:verify:patches -- --skip-workspace-check`, `npm run updates:verify`, and `npm run p5:gate`. Signing credentials remain in the existing GitHub Environment; no new trust root is introduced.
+
+`normalize-release-notes.mjs` prepares a backed-up text-only edit of historical releases. Review the generated plan, then pass its path with `--apply`; any changed remote title/body/assets causes the edit to stop. It does not rename or delete assets.
+
+## Historical workflow: v0.1.0–v0.1.5
+
+The remainder records the old renderer/preload-only updater. Its asset names and minimum-Main controls are retained here for understanding existing published releases, not for producing new releases.
+
 OMP Studio is versioned from the workspace root `package.json` (`0.1.0` at
 the first public snapshot). Workspace packages share that version today.
 

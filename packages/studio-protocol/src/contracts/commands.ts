@@ -1,3 +1,4 @@
+import type { UpgradeOperation } from "./runtime-upgrade";
 import type { AgentOperation, JobOperation } from "./agents-jobs";
 import type { EvaluationOperation } from "./evaluation";
 import type { SessionTranscriptRead } from "./conversation";
@@ -127,6 +128,7 @@ export type TransferOperation = {
 };
 
 export type StudioOperation =
+  | UpgradeOperation
   | CoreOperation
   | SessionOperation
   | ModeOperation

@@ -243,6 +243,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
       timeoutSeconds: 60,
       geminiModel: "gemini-2.5-flash",
       providers: [
+        { id: "parallel", name: "Parallel", description: "Keyless search with optional API key", credentialFree: true, hasCredential: true },
         { id: "perplexity", name: "Perplexity", description: "Uses auth when configured; explicit selection falls back to anonymous search", credentialFree: false, hasCredential: true, envKeys: ["PERPLEXITY_API_KEY", "PERPLEXITY_COOKIES"], loginId: "perplexity", apiKeyId: "perplexity", credentialKind: "api-key" },
         { id: "gemini", name: "Gemini", description: "Google Search grounding via Gemini (uses google-gemini-cli or google-antigravity OAuth)", credentialFree: false, hasCredential: true, envKeys: ["GEMINI_API_KEY", "GOOGLE_API_KEY"], apiKeyId: "google" },
         { id: "anthropic", name: "Anthropic", description: "Claude's native web_search tool (uses Anthropic OAuth or ANTHROPIC_API_KEY)", credentialFree: false, hasCredential: true },
@@ -257,8 +258,8 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
         { id: "firecrawl", name: "Firecrawl", description: "Uses Firecrawl API when FIRECRAWL_API_KEY is set; falls back to keyless mode", credentialFree: false, hasCredential: false },
         { id: "brave", name: "Brave", description: "Requires BRAVE_API_KEY", credentialFree: false, hasCredential: false, envKeys: ["BRAVE_API_KEY"], apiKeyId: "brave" },
         { id: "kimi", name: "Kimi", description: "Kimi Code search (requires a Kimi Code Console key via KIMI_SEARCH_API_KEY/MOONSHOT_SEARCH_API_KEY or /login kimi-code; not MOONSHOT_API_KEY)", credentialFree: false, hasCredential: false, envKeys: ["KIMI_SEARCH_API_KEY", "MOONSHOT_SEARCH_API_KEY"], loginId: "kimi-code", apiKeyId: "kimi-code" },
-        { id: "parallel", name: "Parallel", description: "Requires PARALLEL_API_KEY", credentialFree: false, hasCredential: false },
         { id: "synthetic", name: "Synthetic", description: "Requires SYNTHETIC_API_KEY", credentialFree: false, hasCredential: false },
+        { id: "ollama", name: "Ollama Cloud", description: "Hosted web search", credentialFree: false, hasCredential: false, envKeys: ["OLLAMA_CLOUD_API_KEY"], apiKeyId: "ollama-cloud" },
         { id: "searxng", name: "SearXNG", description: "Requires SEARXNG_ENDPOINT or searxng.endpoint", credentialFree: true, hasCredential: true },
         { id: "startpage", name: "Startpage", description: "Credential-free scrape of Startpage (Google-backed) results; may be bot-challenged", credentialFree: true, hasCredential: true },
         { id: "duckduckgo", name: "DuckDuckGo", description: "Credential-free best-effort fallback; may be bot-challenged on datacenter/shared-egress IPs", credentialFree: true, hasCredential: true },

@@ -77,6 +77,7 @@ const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
   description: string;
   credentialFree: boolean;
 }> = [
+  { id: "parallel", name: "Parallel", description: "Keyless search with optional PARALLEL_API_KEY authentication", credentialFree: true },
   { id: "perplexity", name: "Perplexity", description: "Uses auth when configured; explicit selection falls back to anonymous search", credentialFree: false },
   { id: "gemini", name: "Gemini", description: "Google Search grounding via Gemini (uses google-gemini-cli or google-antigravity OAuth)", credentialFree: false },
   { id: "anthropic", name: "Anthropic", description: "Claude's native web_search tool (uses Anthropic OAuth or ANTHROPIC_API_KEY)", credentialFree: false },
@@ -91,8 +92,8 @@ const WEB_SEARCH_PROVIDER_CATALOG: ReadonlyArray<{
   { id: "firecrawl", name: "Firecrawl", description: "Uses Firecrawl API when FIRECRAWL_API_KEY is set; falls back to keyless mode", credentialFree: false },
   { id: "brave", name: "Brave", description: "Requires BRAVE_API_KEY", credentialFree: false },
   { id: "kimi", name: "Kimi", description: "Kimi Code search (requires a Kimi Code Console key via KIMI_SEARCH_API_KEY/MOONSHOT_SEARCH_API_KEY or /login kimi-code; not MOONSHOT_API_KEY)", credentialFree: false },
-  { id: "parallel", name: "Parallel", description: "Requires PARALLEL_API_KEY", credentialFree: false },
   { id: "synthetic", name: "Synthetic", description: "Requires SYNTHETIC_API_KEY", credentialFree: false },
+  { id: "ollama", name: "Ollama Cloud", description: "Hosted web search using OLLAMA_CLOUD_API_KEY or Ollama Cloud credentials", credentialFree: false },
   { id: "searxng", name: "SearXNG", description: "Requires SEARXNG_ENDPOINT or searxng.endpoint", credentialFree: true },
   { id: "startpage", name: "Startpage", description: "Credential-free scrape of Startpage (Google-backed) results; may be bot-challenged", credentialFree: true },
   { id: "duckduckgo", name: "DuckDuckGo", description: "Credential-free best-effort fallback; may be bot-challenged on datacenter/shared-egress IPs", credentialFree: true },
@@ -118,6 +119,7 @@ const WEB_SEARCH_ENV_CREDENTIALS: Readonly<Record<string, readonly string[]>> = 
   brave: ["BRAVE_API_KEY"],
   kimi: ["MOONSHOT_SEARCH_API_KEY", "KIMI_SEARCH_API_KEY"],
   parallel: ["PARALLEL_API_KEY"],
+  ollama: ["OLLAMA_CLOUD_API_KEY"],
   synthetic: ["SYNTHETIC_API_KEY"],
   searxng: ["SEARXNG_ENDPOINT"],
   perplexity: ["PERPLEXITY_API_KEY", "PERPLEXITY_COOKIES"],
@@ -135,6 +137,7 @@ const WEB_SEARCH_AUTH_IDS: Readonly<Record<string, readonly string[]>> = {
   kimi: ["kimi-code", "moonshot"],
   kagi: ["kagi"],
   parallel: ["parallel"],
+  ollama: ["ollama-cloud"],
   synthetic: ["synthetic"],
   tavily: ["tavily"],
   firecrawl: ["firecrawl"],
@@ -163,6 +166,7 @@ const WEB_SEARCH_APIKEY_IDS: Readonly<Record<string, string>> = {
   brave: "brave",
   kimi: "kimi-code",
   parallel: "parallel",
+  ollama: "ollama-cloud",
   synthetic: "synthetic",
 };
 

@@ -131,3 +131,9 @@ describe("mergeSlashCatalogWithManifest", () => {
     expect(composerSlashExecute(removedBuiltin, previewCatalog)?.command.name).toBe("compact");
   });
 });
+
+it("bare /btw is executable so it opens history without a model prompt", () => {
+  const command = visibleSlashCatalog().find(item => item.name === "btw")!;
+  expect(command.select).toBe("run-now");
+  expect(resolveSlashExecute(command, "")).toEqual({ kind: "typed", name: "btw.ask", input: { question: "" } });
+});

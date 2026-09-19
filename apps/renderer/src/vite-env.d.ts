@@ -138,6 +138,9 @@ declare global {
           | { readonly ok: false; readonly message: string }
         >;
         /** 检查更新索引（应用热更新/全量更新与 Runtime 更新）。 */
+        getUpdateSnapshot?(): Promise<import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot | null>;
+        prepareUpdates?(target: "all" | "app" | "runtime"): Promise<import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot>;
+        subscribeUpdates?(listener: (snapshot: import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot) => void): () => void;
         checkUpdates(): Promise<{
           readonly checkedAt: string;
           readonly app: {
@@ -174,6 +177,7 @@ declare global {
         getUpdatePrefs(): Promise<{
           readonly mirrorPrefix: string;
           readonly autoCheck: boolean;
+  readonly autoDownload?: boolean;
           readonly skippedAppVersion: string;
           readonly runtimeChannel: "stable" | "canary";
           readonly preferHotUpdate: boolean;
@@ -183,12 +187,14 @@ declare global {
         setUpdatePrefs(patch: {
           readonly mirrorPrefix?: string;
           readonly autoCheck?: boolean;
+  readonly autoDownload?: boolean;
           readonly skippedAppVersion?: string;
           readonly runtimeChannel?: "stable" | "canary";
           readonly preferHotUpdate?: boolean;
         }): Promise<{
           readonly mirrorPrefix: string;
           readonly autoCheck: boolean;
+  readonly autoDownload?: boolean;
           readonly skippedAppVersion: string;
           readonly runtimeChannel: "stable" | "canary";
           readonly preferHotUpdate: boolean;

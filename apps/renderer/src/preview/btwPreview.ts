@@ -44,3 +44,9 @@ export function previewBtwSnapshot(index: number): BtwSnapshot {
   const safe = ((index % list.length) + list.length) % list.length;
   return list[safe] as BtwSnapshot;
 }
+
+export const PREVIEW_BTW_TOPICS = [{ topicId: "demo-topic", question: PREVIEW_BTW_QUESTION, status: "complete" as const, updatedAt: 1789171200000, turnCount: 2 }];
+export const PREVIEW_BTW_TURNS = [
+ { question: PREVIEW_BTW_QUESTION, answer: PREVIEW_BTW_SNAPSHOTS[1]!.text, status: "complete" as const, createdAt: 1789171200000, updatedAt: 1789171201000 },
+ { question: "应该怎样验证？", answer: "覆盖重命名、增删文件与会话恢复后的 diff 展示。", status: "complete" as const, createdAt: 1789171202000, updatedAt: 1789171203000 },
+];

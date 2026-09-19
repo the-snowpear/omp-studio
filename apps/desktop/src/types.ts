@@ -59,6 +59,7 @@ export interface DesktopHostComposition {
   /** Main-only maintenance; absent when managed installation is unavailable. */
   rollbackRuntime?(): Promise<void>;
   pruneRuntimes?(): Promise<void>;
+  prepareUpdateRestart?(): Promise<void>;
 }
 
 /** Injectable factory that brings the Host composition up (or fails closed). */

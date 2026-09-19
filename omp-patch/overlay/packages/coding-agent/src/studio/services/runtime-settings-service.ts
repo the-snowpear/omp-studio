@@ -1,3 +1,5 @@
+import { isServiceTierInheritSettingValue } from "../../config/service-tier";
+import { isRecord } from "@oh-my-pi/pi-utils";
 import { getEnumValues, type SettingPath, type SettingValue } from "../../config/settings-schema";
 import type { AgentSession } from "../../session/agent-session";
 import { type CompactionMethod, isCompactionMethod } from "../../session/compaction-methods";
@@ -15,6 +17,14 @@ export const STUDIO_RUNTIME_SETTING_KEYS = [
 	"plan.autosaveDir",
 	"retry.waitForUsageReset",
 	"compaction.experimentalContextManagement",
+	"task.enableEffort",
+	"task.maxEffort",
+	"task.agentServiceTierOverrides",
+	"providers.autoThinkingMaxEffort",
+	"providers.judgmentProvider",
+	"images.describeForTextModels",
+	"images.questionTimeoutMs",
+	"tools.speculativeExecution.enabled",
 ] as const;
 
 export type StudioRuntimeSettingKey = (typeof STUDIO_RUNTIME_SETTING_KEYS)[number];
@@ -31,6 +41,14 @@ export interface StudioRuntimeSettingsSnapshot {
 	"plan.autosaveDir": string;
 	"retry.waitForUsageReset": boolean;
 	"compaction.experimentalContextManagement": boolean;
+	"task.enableEffort": boolean;
+	"task.maxEffort": SettingValue<"task.maxEffort">;
+	"task.agentServiceTierOverrides": SettingValue<"task.agentServiceTierOverrides">;
+	"providers.autoThinkingMaxEffort": SettingValue<"providers.autoThinkingMaxEffort">;
+	"providers.judgmentProvider": SettingValue<"providers.judgmentProvider">;
+	"images.describeForTextModels": boolean;
+	"images.questionTimeoutMs": number;
+	"tools.speculativeExecution.enabled": boolean;
 }
 
 export interface StudioRuntimeSettingsActivation {
@@ -65,10 +83,31 @@ export function isStudioRuntimeSettingValue(
 		case "compaction.asyncEnabled":
 		case "plan.autosave":
 		case "retry.waitForUsageReset":
+		case "task.enableEffort":
+		case "images.describeForTextModels":
+		case "tools.speculativeExecution.enabled":
 		case "compaction.experimentalContextManagement":
 			return typeof value === "boolean";
+		case "images.questionTimeoutMs":
+			return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 2147483647;
+		case "task.agentServiceTierOverrides":
+			return (
+				isRecord(value) &&
+				Object.keys(value).length <= 256 &&
+				Object.entries(value).every(
+					([name, tier]) =>
+						name.trim().length > 0 &&
+						name.length <= 256 &&
+						!/[\u0000-\u001f]/u.test(name) &&
+						!["__proto__", "constructor", "prototype"].includes(name) &&
+						isServiceTierInheritSettingValue(tier),
+				)
+			);
 		case "plan.autosaveDir":
 			return typeof value === "string" && value.length <= 4096 && !value.includes("\0");
+		case "task.maxEffort":
+		case "providers.autoThinkingMaxEffort":
+		case "providers.judgmentProvider":
 		case "features.unexpectedStopDetection":
 		case "providers.unexpectedStopModel":
 		case "providers.openai-codex.codeMode":
@@ -95,7 +134,7 @@ function assertValue(key: StudioRuntimeSettingKey, value: unknown): asserts valu
 }
 
 function cloneValue(value: StudioRuntimeSettingValue): StudioRuntimeSettingValue {
-	return Array.isArray(value) ? [...value] : value;
+	return structuredClone(value);
 }
 
 /** Narrow bridge-facing access to the public Settings get/set/override API. */
@@ -141,6 +180,18 @@ export class StudioRuntimeSettingsService {
 			"plan.autosaveDir": this.session.settings.get("plan.autosaveDir") ?? "",
 			"retry.waitForUsageReset": this.session.settings.get("retry.waitForUsageReset"),
 			"compaction.experimentalContextManagement": this.#notesEffective,
+			"task.enableEffort": structuredClone(this.session.settings.get("task.enableEffort")),
+			"task.maxEffort": structuredClone(this.session.settings.get("task.maxEffort")),
+			"task.agentServiceTierOverrides": structuredClone(this.session.settings.get("task.agentServiceTierOverrides")),
+			"providers.autoThinkingMaxEffort": structuredClone(
+				this.session.settings.get("providers.autoThinkingMaxEffort"),
+			),
+			"providers.judgmentProvider": structuredClone(this.session.settings.get("providers.judgmentProvider")),
+			"images.describeForTextModels": structuredClone(this.session.settings.get("images.describeForTextModels")),
+			"images.questionTimeoutMs": structuredClone(this.session.settings.get("images.questionTimeoutMs")),
+			"tools.speculativeExecution.enabled": structuredClone(
+				this.session.settings.get("tools.speculativeExecution.enabled"),
+			),
 		};
 	}
 
@@ -211,6 +262,38 @@ export class StudioRuntimeSettingsService {
 		const settings = this.session.settings;
 		if (persist) settings.clearOverride(key as SettingPath);
 		switch (key) {
+			case "task.enableEffort":
+				return persist
+					? settings.set(key, value as SettingValue<"task.enableEffort">)
+					: settings.override(key, value as SettingValue<"task.enableEffort">);
+			case "task.maxEffort":
+				return persist
+					? settings.set(key, value as SettingValue<"task.maxEffort">)
+					: settings.override(key, value as SettingValue<"task.maxEffort">);
+			case "task.agentServiceTierOverrides":
+				return persist
+					? settings.set(key, value as SettingValue<"task.agentServiceTierOverrides">)
+					: settings.override(key, value as SettingValue<"task.agentServiceTierOverrides">);
+			case "providers.autoThinkingMaxEffort":
+				return persist
+					? settings.set(key, value as SettingValue<"providers.autoThinkingMaxEffort">)
+					: settings.override(key, value as SettingValue<"providers.autoThinkingMaxEffort">);
+			case "providers.judgmentProvider":
+				return persist
+					? settings.set(key, value as SettingValue<"providers.judgmentProvider">)
+					: settings.override(key, value as SettingValue<"providers.judgmentProvider">);
+			case "images.describeForTextModels":
+				return persist
+					? settings.set(key, value as SettingValue<"images.describeForTextModels">)
+					: settings.override(key, value as SettingValue<"images.describeForTextModels">);
+			case "images.questionTimeoutMs":
+				return persist
+					? settings.set(key, value as SettingValue<"images.questionTimeoutMs">)
+					: settings.override(key, value as SettingValue<"images.questionTimeoutMs">);
+			case "tools.speculativeExecution.enabled":
+				return persist
+					? settings.set(key, value as SettingValue<"tools.speculativeExecution.enabled">)
+					: settings.override(key, value as SettingValue<"tools.speculativeExecution.enabled">);
 			case "plan.autosave":
 			case "retry.waitForUsageReset":
 				return persist ? settings.set(key, value as boolean) : settings.override(key, value as boolean);

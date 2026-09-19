@@ -1,3 +1,5 @@
+import { readModelMentions } from "../../session/model-mentions";
+import { expandModelMentionTags } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { SessionEntry } from "../../session/session-entries";
 import {
@@ -244,6 +246,7 @@ function attachToolResult(
 export function projectConversationBranch(entries: readonly SessionEntry[]): ConversationItem[] {
 	const items: ConversationItem[] = [];
 	const toolOwners = new Map<string, number>();
+	const mentions = new Map(readModelMentions(entries).map(mention => [mention.agent, mention.selector]));
 	for (const entry of entries) {
 		if (entry.type === "message") {
 			const message = asRecord(entry.message) ?? {};
@@ -281,7 +284,18 @@ export function projectConversationBranch(entries: readonly SessionEntry[]): Con
 			const item = projectEntry(entry);
 			if (item === undefined || (item.kind === "message" && item.content.length === 0)) continue;
 			const index = items.length;
-			items.push(item);
+			items.push(
+				item.kind === "message" && item.role === "user"
+					? {
+							...item,
+							content: item.content.map(block =>
+								block.type === "text"
+									? { ...block, text: expandModelMentionTags(block.text, agent => mentions.get(agent)) }
+									: block,
+							),
+						}
+					: item,
+			);
 			if (item.kind === "message") {
 				for (const block of item.content) {
 					if (block.type === "toolCall") toolOwners.set(block.toolCallId, index);

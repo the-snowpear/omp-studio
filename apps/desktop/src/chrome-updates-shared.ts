@@ -12,6 +12,9 @@ export const CHROME_UPDATES_CHANNELS = {
   prefsGet: "omp-studio:desktop:chrome-updates-prefs-get",
   prefsSet: "omp-studio:desktop:chrome-updates-prefs-set",
   progress: "omp-studio:desktop:chrome-updates-progress",
+  snapshot: "omp-studio:desktop:chrome-updates-snapshot",
+  prepare: "omp-studio:desktop:chrome-updates-prepare",
+  changed: "omp-studio:desktop:chrome-updates-changed",
 } as const;
 
 export type UpdateJobKind = "app" | "runtime";
@@ -94,6 +97,7 @@ export interface ChromeUpdatesImportInput {
 export interface ChromeUpdatesPrefsSetInput {
   readonly mirrorPrefix?: string;
   readonly autoCheck?: boolean;
+  readonly autoDownload?: boolean;
   readonly skippedAppVersion?: string;
   readonly runtimeChannel?: "stable" | "canary";
   readonly preferHotUpdate?: boolean;
@@ -122,6 +126,7 @@ export function parseChromeUpdatesPrefsSetInput(value: unknown): ChromeUpdatesPr
   const result: {
     mirrorPrefix?: string;
     autoCheck?: boolean;
+    autoDownload?: boolean;
     skippedAppVersion?: string;
     runtimeChannel?: "stable" | "canary";
     preferHotUpdate?: boolean;
@@ -134,6 +139,10 @@ export function parseChromeUpdatesPrefsSetInput(value: unknown): ChromeUpdatesPr
   if (value.autoCheck !== undefined) {
     if (typeof value.autoCheck !== "boolean") return undefined;
     result.autoCheck = value.autoCheck;
+  }
+  if (value.autoDownload !== undefined) {
+    if (typeof value.autoDownload !== "boolean") return undefined;
+    result.autoDownload = value.autoDownload;
   }
   if (value.skippedAppVersion !== undefined) {
     if (typeof value.skippedAppVersion !== "string") return undefined;

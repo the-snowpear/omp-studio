@@ -1,7 +1,9 @@
+import { expandModelMentionTags, type ModelMention } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import type { AgentSession } from "../../session/agent-session";
 import type { SessionTreeNode } from "../../session/session-entries";
-import type { AskToolDetails, AskToolInput, QuestionResult } from "../../tools/ask";
+import type { AskToolInput } from "../../tools/ask";
+import type { AskToolDetails, QuestionResult } from "@oh-my-pi/pi-tui/tools/ask";
 import type { StudioInteractionPort } from "./interaction-port";
 
 const EDITOR_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -73,6 +75,13 @@ export class StudioTreeService {
 		private readonly interaction?: StudioInteractionPort,
 	) {}
 
+	#restoreModelTags(text: string, previous: readonly ModelMention[]): string {
+		const selectors = new Map(
+			[...previous, ...(this.session.modelMentions ?? [])].map(mention => [mention.agent, mention.selector]),
+		);
+		return expandModelMentionTags(text, agent => selectors.get(agent));
+	}
+
 	getTree(): { leafId: string | null; roots: StudioTreeNode[] } {
 		return {
 			leafId: this.session.sessionManager.getLeafId(),
@@ -86,6 +95,7 @@ export class StudioTreeService {
 	): Promise<unknown> {
 		if (this.session.isStreaming) throw new StudioTreeError("BUSY_STREAMING", "Runtime is streaming");
 		if (this.session.isCompacting) throw new StudioTreeError("BUSY_COMPACTING", "Runtime is compacting");
+		const mentions = [...(this.session.modelMentions ?? [])];
 		let result = await this.session.navigateTree(input.targetId, {
 			summarize: input.summarize,
 			customInstructions: input.customInstructions,
@@ -121,7 +131,9 @@ export class StudioTreeService {
 			aborted: result.aborted === true,
 			askReanswerCommitted: result.askReanswerCommitted === true,
 			leafId: this.session.sessionManager.getLeafId(),
-			...(result.editorText === undefined ? {} : { editorText: result.editorText }),
+			...(result.editorText === undefined
+				? {}
+				: { editorText: this.#restoreModelTags(result.editorText, mentions) }),
 			...(editorImages.length === 0 ? {} : { editorImages }),
 		};
 	}
@@ -129,12 +141,13 @@ export class StudioTreeService {
 	async branch(_commandId: string, input: { targetId: string }): Promise<unknown> {
 		if (this.session.isStreaming) throw new StudioTreeError("BUSY_STREAMING", "Runtime is streaming");
 		if (this.session.isCompacting) throw new StudioTreeError("BUSY_COMPACTING", "Runtime is compacting");
+		const mentions = [...(this.session.modelMentions ?? [])];
 		const result = await this.session.branch(input.targetId);
 		const editorImages = editorImagesFrom(result.selectedImages);
 		return {
 			cancelled: result.cancelled,
 			sessionId: this.session.sessionManager.getSessionId(),
-			editorText: result.selectedText,
+			editorText: this.#restoreModelTags(result.selectedText, mentions),
 			...(editorImages.length === 0 ? {} : { editorImages }),
 		};
 	}

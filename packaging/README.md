@@ -1,5 +1,7 @@
 # OMP Studio Windows Installer — packaging 骨架
 
+> 当前更新重构：默认采用当前用户安装（`%LOCALAPPDATA%\Programs\OMP Studio`），应用使用 `asInvoker`。新安装器不全局结束同名进程，自动更新走 NSIS 静默模式。活跃 Runtime 已移出安装目录，详见 [更新系统](../docs/updates.md)。以下涉及全机安装、Program Files、requireAdministrator 和旧 Runtime 路径的段落是 v0.1.5 及以前的历史说明；发布新版本以更新文档和当前配置为准。
+
 安装器骨架：可见向导是 `packaging/ui` 那套 720×480 HTML，由 WebView2
 小宿主显示；NSIS 只负责提权和解包。浏览器里仍可直接打开原型预览。
 

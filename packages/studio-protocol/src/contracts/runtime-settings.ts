@@ -13,6 +13,14 @@ export const STUDIO_RUNTIME_SETTING_KEYS = [
   "plan.autosaveDir",
   "retry.waitForUsageReset",
   "compaction.experimentalContextManagement",
+  "task.enableEffort",
+  "task.maxEffort",
+  "task.agentServiceTierOverrides",
+  "providers.autoThinkingMaxEffort",
+  "providers.judgmentProvider",
+  "images.describeForTextModels",
+  "images.questionTimeoutMs",
+  "tools.speculativeExecution.enabled",
 ] as const;
 
 export type StudioRuntimeSettingKey = (typeof STUDIO_RUNTIME_SETTING_KEYS)[number];
@@ -55,6 +63,14 @@ export interface StudioRuntimeSettingsSnapshot {
   "plan.autosaveDir"?: string;
   "retry.waitForUsageReset"?: boolean;
   "compaction.experimentalContextManagement"?: boolean;
+  "task.enableEffort"?: boolean;
+  "task.maxEffort"?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  "task.agentServiceTierOverrides"?: Record<string, "inherit" | "none" | "auto" | "default" | "flex" | "scale" | "priority">;
+  "providers.autoThinkingMaxEffort"?: "xhigh" | "max";
+  "providers.judgmentProvider"?: "auto" | "typesafe" | "llm";
+  "images.describeForTextModels"?: boolean;
+  "images.questionTimeoutMs"?: number;
+  "tools.speculativeExecution.enabled"?: boolean;
 }
 
 export type StudioRuntimeSettingValue = Exclude<StudioRuntimeSettingsSnapshot[StudioRuntimeSettingKey], undefined>;

@@ -1,3 +1,4 @@
+import { isUpgradeOperationKind, UPGRADE_OPERATION_KINDS, type UpgradeOperation } from "./runtime-upgrade-protocol";
 import { isEvaluationOperationKind } from "./evaluation-validation";
 import type { EvaluationOperation } from "./evaluation-protocol";
 import { StudioEvaluationError } from "./services/evaluation-service";
@@ -41,6 +42,7 @@ interface RememberedReceipt {
 
 const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"runtime.shutdown",
+	...UPGRADE_OPERATION_KINDS,
 	"runtime.settings.get",
 	"runtime.settings.set",
 	"live.start",
@@ -413,40 +415,66 @@ export class StudioBridgeDispatcher {
 					stateVersion: this.projector.stateVersion,
 					status: "accepted",
 				});
-				const result = isEvaluationOperationKind(operation.kind)
-					? await this.runtime.services.evaluation.execute(operation as EvaluationOperation)
-					: isShutdownOperation
-						? await this.#executeShutdownOperation(operation)
-						: isLiveOperation
-							? await this.#executeLiveOperation(operation)
-							: isPauseOperation
-								? await this.#executePauseOperation(operation)
-								: isLoopOperation
-									? await this.#executeLoopOperation(operation)
-									: isModeOperation
-										? await this.#executeModeOperation(operation)
-										: isTreeOperation
-											? await this.#executeTreeOperation(operation, commandId)
-											: operation.kind === "session.fork"
-												? await this.runtime.services.fork.fork()
-												: operation.kind === "session.handoff"
-													? await this.runtime.services.handoff.handoff(operation.customInstructions)
-													: isOperatorOperation
-														? await this.#executeOperatorOperation(operation)
-														: isBtwOperation
-															? await this.#executeBtwOperation(operation)
-															: isOmfgOperation
-																? await this.#executeOmfgOperation(operation, commandId)
-																: isTanOperation
-																	? await this.#executeTanOperation(operation)
-																	: isAgentOperation
-																		? await this.#executeAgentOperation(operation)
-																		: isJobOperation
-																			? await this.#executeJobOperation(operation)
-																			: isPermissionOperation
-																				? await this.#executePermissionOperation(operation)
-																				: await this.#executeSessionOperation(operation, commandId);
-				if (!isPauseOperation) this.projector.commitStateChange();
+				if (
+					[
+						"session.clearContext",
+						"session.fork",
+						"session.handoff",
+						"session.tree.navigate",
+						"session.tree.branch",
+					].includes(operation.kind)
+				)
+					await this.runtime.services.btw.settle();
+				const result = isUpgradeOperationKind(operation.kind)
+					? await this.runtime.services.upgrade.execute(operation as UpgradeOperation, commandId)
+					: isEvaluationOperationKind(operation.kind)
+						? await this.runtime.services.evaluation.execute(operation as EvaluationOperation)
+						: isShutdownOperation
+							? await this.#executeShutdownOperation(operation)
+							: isLiveOperation
+								? await this.#executeLiveOperation(operation)
+								: isPauseOperation
+									? await this.#executePauseOperation(operation)
+									: isLoopOperation
+										? await this.#executeLoopOperation(operation)
+										: isModeOperation
+											? await this.#executeModeOperation(operation)
+											: isTreeOperation
+												? await this.#executeTreeOperation(operation, commandId)
+												: operation.kind === "session.fork"
+													? await this.runtime.services.fork.fork()
+													: operation.kind === "session.handoff"
+														? await this.runtime.services.handoff.handoff(operation.customInstructions)
+														: isOperatorOperation
+															? await this.#executeOperatorOperation(operation)
+															: isBtwOperation
+																? await this.#executeBtwOperation(operation)
+																: isOmfgOperation
+																	? await this.#executeOmfgOperation(operation, commandId)
+																	: isTanOperation
+																		? await this.#executeTanOperation(operation)
+																		: isAgentOperation
+																			? await this.#executeAgentOperation(operation)
+																			: isJobOperation
+																				? await this.#executeJobOperation(operation)
+																				: isPermissionOperation
+																					? await this.#executePermissionOperation(operation)
+																					: await this.#executeSessionOperation(
+																							operation,
+																							commandId,
+																						);
+				if (
+					!isPauseOperation &&
+					![
+						"btw.history.list",
+						"btw.history.read",
+						"session.models.mentions",
+						"session.import.list",
+						"session.import.preview",
+						"runtime.auth.get",
+					].includes(operation.kind)
+				)
+					this.projector.commitStateChange();
 				// Manual /compact, /clear, and handoff rewrite the context without
 				// a following conversation turn, so no conversation event will
 				// recompute telemetry. Refresh it now or the GUI context meter
@@ -609,6 +637,7 @@ export class StudioBridgeDispatcher {
 		if (operation.kind !== "runtime.shutdown" || operation.drain !== true) {
 			throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Invalid Runtime shutdown request");
 		}
+		await this.runtime.services.btw.settle();
 		this.#quiescing = true;
 		this.runtime.services.loop.disable();
 		await this.runtime.services.live.stop();
@@ -649,6 +678,7 @@ export class StudioBridgeDispatcher {
 					message: "Permanently delete the current session transcript and start a new session?",
 					destructive: true,
 				});
+				if (approved) await this.runtime.services.btw.settle();
 				return await this.#sessionControl.drop(approved);
 			}
 			case "turn.retry":

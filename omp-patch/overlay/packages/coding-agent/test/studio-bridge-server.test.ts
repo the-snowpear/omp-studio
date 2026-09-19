@@ -59,7 +59,7 @@ function fakeExtendedServices(session: Record<string, unknown>) {
 		},
 		jobs: { list: () => [] },
 		interaction: new StudioInteractionGateway(),
-		btw: { onChange: () => () => {} },
+		btw: { onChange: () => () => {}, settle: async () => {} },
 	};
 }
 

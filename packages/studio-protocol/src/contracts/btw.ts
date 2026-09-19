@@ -23,6 +23,9 @@ export interface BtwError {
 }
 
 export interface BtwSnapshot {
+  readonly sessionId?: string;
+  readonly topicId?: string;
+  readonly question?: string;
   readonly ephemeralId: string;
   readonly status: BtwStatus;
   /** Answer text accumulated so far; grows while `status` is `running`. */

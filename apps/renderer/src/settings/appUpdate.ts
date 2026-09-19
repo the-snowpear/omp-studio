@@ -13,10 +13,13 @@ export interface AppUpdateState {
   readonly downloading: boolean;
   readonly downloadError: string | null;
   readonly readyToApply?: boolean;
+  readonly rollbackVersion?: string | undefined;
+  readonly rollbackReady?: boolean;
   readonly receivedBytes?: number | undefined;
   readonly totalBytes?: number | undefined;
   readonly updateInfo: {
     readonly available: boolean;
+    readonly component?: "app" | "runtime";
     readonly currentVersion: string;
     readonly plan?: "none" | "hot" | "full";
     readonly reason?: string | undefined;
@@ -51,7 +54,9 @@ function updateState(patch: Partial<AppUpdateState>): void {
   notifyListeners();
 }
 
+let unifiedSnapshot: import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot | undefined;
 const unsubscribeUpdates = subscribeUpdates(() => {
+  if (unifiedSnapshot) return;
   const { check, checking, job, prefs } = getUpdatesState();
   updateState({
     checking,
@@ -71,6 +76,31 @@ const unsubscribeUpdates = subscribeUpdates(() => {
     } : {}),
   });
 });
+function receiveUnifiedUpdate(snapshot: import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot): void {
+  unifiedSnapshot = snapshot;
+  const parts = [snapshot.app, snapshot.runtime];
+  const downloading = parts.some(p => p.phase === "downloading" || p.phase === "verifying");
+  const ready = !downloading && parts.some(p => p.phase === "ready");
+  const current = snapshot.app.version ? snapshot.app : snapshot.runtime;
+  updateState({
+    checking: snapshot.checking, downloading, readyToApply: ready,
+    rollbackVersion: snapshot.rollbackAppVersion,
+    rollbackReady: snapshot.rollbackAppPending === true && snapshot.app.phase === "ready",
+    downloadError: snapshot.error ?? parts.find(p => p.phase === "failed")?.message ?? null,
+    receivedBytes: parts.reduce((n, p) => n + (p.receivedBytes ?? 0), 0),
+    totalBytes: parts.reduce((n, p) => n + (p.totalBytes ?? 0), 0),
+    updateInfo: {
+      component: current.component,
+      available: Boolean(current.version), currentVersion: current.currentVersion ?? "",
+      version: current.version, name: current.component === "runtime" ? `OMP Runtime ${current.version ?? ""}` : `OMP Studio ${current.version ?? ""}`,
+      reason: "restart-update", htmlUrl: snapshot.releaseNotesUrl,
+      releaseNotes: parts.filter(p => p.version).map(p => `${p.component === "app" ? "OMP Studio" : "Runtime"}: ${p.currentVersion ?? "—"} → ${p.version}${p.method === "differential" ? " · 增量下载" : p.method === "reuse" ? " · 复用已下载工件" : p.method === "full" ? " · 完整下载" : ""}${p.message ? `\n${p.message}` : ""}`).join("\n\n"),
+    },
+  });
+}
+const unsubscribeUnified = globalThis.ompStudioChrome?.subscribeUpdates?.(receiveUnifiedUpdate);
+void globalThis.ompStudioChrome?.getUpdateSnapshot?.().then(s => { if (s) receiveUnifiedUpdate(s); }).catch(() => {});
+if (import.meta.hot) import.meta.hot.dispose(() => unsubscribeUnified?.());
 if (import.meta.hot) import.meta.hot.dispose(unsubscribeUpdates);
 
 export function getAppUpdateState(): AppUpdateState {
@@ -97,6 +127,8 @@ export async function checkForAppUpdates(options?: {
     if (silent) {
       const prefs = await fetchUpdatePrefs();
       if (!prefs || !prefs.autoCheck) return null;
+      const snapshot = await chrome.getUpdateSnapshot?.().catch(() => null);
+      if (snapshot) { receiveUnifiedUpdate(snapshot); return currentState.updateInfo; }
     }
     const result = await checkForUpdates({ silent });
     if (result?.error && !silent) throw new Error(result.error);
@@ -122,6 +154,10 @@ export async function downloadAndInstallAppUpdate(): Promise<boolean> {
 
   updateState({ downloading: true, downloadError: null, readyToApply: false });
   try {
+    if (chrome.prepareUpdates && await chrome.getUpdateSnapshot?.().catch(() => null)) {
+      receiveUnifiedUpdate(await chrome.prepareUpdates("all"));
+      return false;
+    }
     await downloadUpdateToReady("app");
     updateState({ readyToApply: true });
     return false;
@@ -153,11 +189,31 @@ export async function applyAppUpdate(): Promise<boolean> {
 }
 
 export async function skipAppUpdate(): Promise<void> {
+  // Runtime skipping has no persisted policy yet; its dialog omits this action.
+  if (currentState.updateInfo?.component === "runtime") return;
   const version = currentState.updateInfo?.version;
   if (version && await saveUpdatePrefs({ skippedAppVersion: version })) dismissAppUpdate();
 }
 
+export async function prepareDesktopRollback(): Promise<boolean> {
+  const chrome = globalThis.ompStudioChrome;
+  if (!chrome?.rollbackUpdate || !chrome.getUpdateSnapshot) return false;
+  updateState({ downloading: true, downloadError: null });
+  try {
+    const result = await chrome.rollbackUpdate();
+    if (!result.ok || result.deferred) throw new Error(result.message ?? "Desktop rollback could not be prepared");
+    const snapshot = await chrome.getUpdateSnapshot();
+    if (!snapshot) throw new Error("Update state unavailable");
+    receiveUnifiedUpdate(snapshot);
+    return currentState.rollbackReady === true;
+  } catch (error) {
+    updateState({ downloadError: error instanceof Error ? error.message : String(error) });
+    return false;
+  } finally { updateState({ downloading: false }); }
+}
+
 export async function cancelAppUpdate(): Promise<void> {
+  if (unifiedSnapshot) { await globalThis.ompStudioChrome?.cancelUpdate("unified"); return; }
   const job = getUpdatesState().job;
   if (job?.kind !== "app") return;
   try {
@@ -173,6 +229,7 @@ export function dismissAppUpdate(): void {
 }
 
 export function __resetAppUpdateForTests(initial?: Partial<AppUpdateState>): void {
+  unifiedSnapshot = undefined;
   currentState = {
     checking: false,
     downloading: false,
@@ -191,6 +248,7 @@ export function useAppUpdate(): {
   readonly apply: () => Promise<boolean>;
   readonly skip: () => Promise<void>;
   readonly cancel: () => Promise<void>;
+  readonly prepareRollback: () => Promise<boolean>;
 } {
   const state = useSyncExternalStore(subscribeAppUpdate, getAppUpdateState, getAppUpdateState);
 
@@ -206,5 +264,6 @@ export function useAppUpdate(): {
     apply: applyAppUpdate,
     skip: skipAppUpdate,
     cancel: cancelAppUpdate,
+    prepareRollback: prepareDesktopRollback,
   }), [state, check, downloadAndInstall, dismiss]);
 }

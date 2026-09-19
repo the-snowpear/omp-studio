@@ -9,6 +9,7 @@ export function chipIconName(kind: ComposerChipKind): string {
       return "image";
     case "skill":
       return "sparkles";
+    case "model":
     case "agent":
       return "bot";
     case "mode":
@@ -68,7 +69,7 @@ export function parseChipPayload(value: string): Omit<ComposerChip, "image"> | n
     if (typeof parsed.id !== "string" || typeof parsed.kind !== "string" || typeof parsed.label !== "string") {
       return null;
     }
-    if (parsed.kind !== "file" && parsed.kind !== "dir" && parsed.kind !== "image" && parsed.kind !== "skill" && parsed.kind !== "agent" && parsed.kind !== "mode") {
+    if (parsed.kind !== "file" && parsed.kind !== "dir" && parsed.kind !== "image" && parsed.kind !== "skill" && parsed.kind !== "agent" && parsed.kind !== "model" && parsed.kind !== "mode") {
       return null;
     }
     return {

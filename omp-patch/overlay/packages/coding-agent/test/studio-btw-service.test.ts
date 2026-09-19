@@ -30,6 +30,7 @@ function fixture() {
 	let sessionId = "session-1";
 	let leafId: string | null = "leaf-1";
 	let runArgs: Parameters<StudioBtwSessionPort["runEphemeralTurn"]>[0] | undefined;
+	const modelStarted = Promise.withResolvers<void>();
 	const run = Promise.withResolvers<{ replyText: string; assistantMessage: AssistantMessage }>();
 	const branchCalls: unknown[][] = [];
 	const session: StudioBtwSessionPort = {
@@ -37,6 +38,7 @@ function fixture() {
 		sessionManager: { getSessionId: () => sessionId, getLeafId: () => leafId },
 		runEphemeralTurn: args => {
 			runArgs = args;
+			modelStarted.resolve();
 			return run.promise;
 		},
 		branchFromBtw: async (...args) => {
@@ -50,23 +52,32 @@ function fixture() {
 		idGenerator: () => "ephemeral-1",
 		tokenGenerator: () => "opaque-branch-token",
 	});
-	return { service, session, run, branchCalls, runArgs: () => runArgs, setLeaf: (value: string) => (leafId = value) };
+	return {
+		service,
+		session,
+		run,
+		modelStarted: modelStarted.promise,
+		branchCalls,
+		runArgs: () => runArgs,
+		setLeaf: (value: string) => (leafId = value),
+	};
 }
 
 describe("WP-041 StudioBtwService", () => {
 	test("streams path-free state, completes, copies, and branches once", async () => {
-		const { service, run, runArgs, branchCalls } = fixture();
+		const { service, run, runArgs, branchCalls, modelStarted } = fixture();
 		const started = service.ask("Why did this fail?");
+		await modelStarted;
 		expect(started).toEqual({ ephemeralId: "ephemeral-1", branchToken: "opaque-branch-token", status: "running" });
 		runArgs()?.onTextDelta?.("partial ");
-		expect(service.get(started.ephemeralId)).toEqual({
+		expect(service.get(started.ephemeralId)).toMatchObject({
 			ephemeralId: "ephemeral-1",
 			status: "running",
 			text: "partial ",
 		});
 		run.resolve({ replyText: "final answer", assistantMessage: assistant("provider answer") });
 		await Bun.sleep(0);
-		expect(service.get(started.ephemeralId)).toEqual({
+		expect(service.get(started.ephemeralId)).toMatchObject({
 			ephemeralId: "ephemeral-1",
 			status: "completed",
 			text: "final answer",
@@ -85,8 +96,9 @@ describe("WP-041 StudioBtwService", () => {
 	});
 
 	test("wrong token, changed session, overlap, abort, failure, and output limits fail closed", async () => {
-		const { service, run, runArgs } = fixture();
+		const { service, run, runArgs, modelStarted } = fixture();
 		const started = service.ask("question");
+		await modelStarted;
 		expect(() => service.ask("overlap")).toThrow("already running");
 		await expect(service.branch(started.ephemeralId, "wrong")).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
 		service.abort(started.ephemeralId);
@@ -112,6 +124,7 @@ describe("WP-041 StudioBtwService", () => {
 			maxTextBytes: 3,
 		});
 		const limitedStarted = limitedService.ask("question");
+		await limited.modelStarted;
 		limited.runArgs()?.onTextDelta?.("four");
 		expect(limitedService.get(limitedStarted.ephemeralId)).toMatchObject({
 			status: "failed",
@@ -162,7 +175,7 @@ describe("WP-041 StudioBtwService", () => {
 	});
 
 	test("coalesces streaming emits and never swallows the terminal snapshot", async () => {
-		const { session, run, runArgs } = fixture();
+		const { session, run, runArgs, modelStarted } = fixture();
 		const service = new StudioBtwService(session, {
 			idGenerator: () => "coalesced",
 			tokenGenerator: () => "token",
@@ -171,6 +184,7 @@ describe("WP-041 StudioBtwService", () => {
 		const snapshots: StudioBtwSnapshot[] = [];
 		service.onChange(snapshot => snapshots.push(snapshot));
 		const started = service.ask("why did this fail?");
+		await modelStarted;
 		expect(started.ephemeralId).toBe("coalesced");
 		expect(snapshots.map(snapshot => snapshot.status)).toEqual(["running"]);
 
@@ -180,13 +194,13 @@ describe("WP-041 StudioBtwService", () => {
 		expect(service.get(started.ephemeralId).text).toBe("abcd");
 		await Bun.sleep(20);
 		expect(snapshots).toHaveLength(2);
-		expect(snapshots[1]).toEqual({ ephemeralId: "coalesced", status: "running", text: "abcd" });
+		expect(snapshots[1]).toMatchObject({ ephemeralId: "coalesced", status: "running", text: "abcd" });
 
 		runArgs()?.onTextDelta?.("e");
 		run.resolve({ replyText: "abcde", assistantMessage: assistant("abcde") });
 		await Bun.sleep(0);
 		expect(snapshots).toHaveLength(3);
-		expect(snapshots[2]).toEqual({
+		expect(snapshots[2]).toMatchObject({
 			ephemeralId: "coalesced",
 			status: "completed",
 			text: "abcde",

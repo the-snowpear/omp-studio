@@ -55,7 +55,7 @@ export async function expandSkillPrompts(
 	for (const name of names) {
 		const skill = skills.find(candidate => candidate.name === name);
 		if (skill === undefined) continue;
-		const built = await build(skill, "", "user");
+		const built = await build(skill, { args: "" }, "user");
 		preludes.push({
 			role: "custom",
 			customType: SKILL_PROMPT_MESSAGE_TYPE,

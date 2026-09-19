@@ -5,7 +5,7 @@ import {
 	listSkillInvocationNames,
 } from "@oh-my-pi/pi-coding-agent/studio/services/skill-prompt-expansion";
 
-const build = async (skill: { name: string }, args: string) => ({
+const build = async (skill: { name: string }, { args }: { args: string }) => ({
 	message: `SKILL:${skill.name}`,
 	details: { name: skill.name, path: `/skills/${skill.name}/SKILL.md`, args: args || undefined, lineCount: 1 },
 });
@@ -62,7 +62,7 @@ describe("expandSkillPrompts", () => {
 	test("passes empty args so the user body is not copied into each sheet", async () => {
 		const args: string[] = [];
 		await expandSkillPrompts(sessionOf(["alpha"]), "/skill:alpha do the thing", async (skill, skillArgs) => {
-			args.push(skillArgs);
+			args.push(skillArgs.args);
 			return build(skill, skillArgs);
 		});
 		expect(args).toEqual([""]);

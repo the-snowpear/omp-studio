@@ -61,6 +61,55 @@ function dumpYaml(value: unknown): string {
   return stringifyYaml(value, { indent: 2, lineWidth: 0 });
 }
 
+/** Serialize any JSON-shaped value as YAML, matching `formatStructured`. */
+export function serializeYamlValue(value: unknown): string {
+  return dumpYaml(value);
+}
+
+function nodeAtPath(root: unknown, path: ReadonlyArray<string>): { found: boolean; node: unknown } {
+  let node: unknown = root;
+  for (const key of path) {
+    if (!isPlainRecord(node) || !Object.prototype.hasOwnProperty.call(node, key)) {
+      return { found: false, node: undefined };
+    }
+    node = node[key];
+  }
+  return { found: true, node };
+}
+
+/**
+ * Full-document YAML parses are the hot path once form edits re-derive the
+ * preview on every keystroke, and `models.yml` has a handful of long-lived
+ * callers. Keyed by exact text + path; identical text always parses identically.
+ */
+const YAML_NODE_CACHE_LIMIT = 8;
+const yamlNodeCache = new Map<string, { found: boolean; node: unknown }>();
+
+function readNodeAtPath(fullText: string, path: ReadonlyArray<string>): { found: boolean; node: unknown } {
+  const key = `${path.join("\u0000")}\u0001${fullText}`;
+  const cached = yamlNodeCache.get(key);
+  if (cached) return cached;
+  const parsed = parseStructured("yaml", fullText, true);
+  const hit = nodeAtPath(parsed.ok ? parsed.value : undefined, path);
+  if (yamlNodeCache.size >= YAML_NODE_CACHE_LIMIT) {
+    const oldest = yamlNodeCache.keys().next();
+    if (!oldest.done) yamlNodeCache.delete(oldest.value);
+  }
+  yamlNodeCache.set(key, hit);
+  return hit;
+}
+
+/**
+ * The raw value at `path`, or `undefined` when the document or path is missing.
+ *
+ * The node is a live reference into a shared cached parse, so treat it as
+ * immutable: callers that change it must copy first (as
+ * `draftProviderYamlNode` does).
+ */
+export function readYamlMapEntryNode(fullText: string, path: ReadonlyArray<string>): unknown {
+  return readNodeAtPath(fullText, path).node;
+}
+
 /**
  * Show one map entry as its own YAML document, e.g. `providers.openai` →
  * `openai:\n  api: ...`. Missing paths synthesize `{ key: emptyValue }`.
@@ -72,15 +121,9 @@ export function extractYamlMapEntry(
 ): string {
   const last = path[path.length - 1];
   if (!last) return "";
-  const parsed = parseStructured("yaml", fullText, true);
-  let node: unknown = parsed.ok ? parsed.value : undefined;
-  for (const key of path) {
-    if (!isPlainRecord(node) || !Object.prototype.hasOwnProperty.call(node, key)) {
-      return dumpYaml({ [last]: emptyValue });
-    }
-    node = node[key];
-  }
-  return dumpYaml({ [last]: node });
+  const hit = readNodeAtPath(fullText, path);
+  if (!hit.found) return dumpYaml({ [last]: emptyValue });
+  return dumpYaml({ [last]: hit.node });
 }
 
 function unwrapYamlSlice(value: unknown, expectedKey: string): unknown {
