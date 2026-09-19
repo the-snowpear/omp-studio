@@ -425,9 +425,11 @@ function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unkn
     return;
   }
   try {
+    // Same spread order as the dispatch seam (#commandP4): commandName wins,
+    // so validation and dispatch always see the same operation kind.
     const operation = {
-      kind: commandName,
       ...(input !== null && typeof input === "object" ? input : {}),
+      kind: commandName,
     };
     parseFoundationStudioRequest({
       type: "studio.request",

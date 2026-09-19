@@ -20,7 +20,7 @@ interface Journal {
   watermarks: Record<string, number>;
   rollbackApp?: SignedUpdateManifest;
   rollbackRequested?: boolean;
-  runtimeTrial?: { version: string; previousVersion?: string; attempts: number };
+  runtimeTrial?: { version: string; previousVersion?: string };
   lastError?: string;
 }
 export interface UpdateCoordinatorOptions {
@@ -91,7 +91,9 @@ export class UpdateCoordinator {
       if (raw.runtimeTrial) {
         assertSafeVersion(raw.runtimeTrial.version);
         if (raw.runtimeTrial.previousVersion) assertSafeVersion(raw.runtimeTrial.previousVersion);
-        if (!Number.isSafeInteger(raw.runtimeTrial.attempts) || raw.runtimeTrial.attempts < 0) throw new Error("Invalid Runtime trial");
+        // Older builds persisted a trial `attempts` counter; it is no longer
+        // part of the schema but must not invalidate a still-valid journal.
+        delete (raw.runtimeTrial as Record<string, unknown>).attempts;
       }
       for (const sequence of Object.values(raw.watermarks)) if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error("Invalid update watermark");
       this.journal = raw;
@@ -108,7 +110,7 @@ export class UpdateCoordinator {
     // A failed desktop installation leaves authorization pending; never activate
     // a Runtime requiring that desktop until the new executable actually starts.
     const runtimeEnvelope = this.journal.pending.runtime;
-    if (this.journal.authorized && this.journal.pending.app && !app) {
+    if (this.journal.authorized && this.journal.pending.app && runtimeEnvelope?.manifest.runtime) {
       this.snapshot.error = "桌面更新事务不完整，请使用历史 Setup 恢复";
       this.journal.authorized = false;
     }
@@ -133,7 +135,7 @@ export class UpdateCoordinator {
           if (this.journal.runtimeTrial?.version !== release.version) {
             const previousVersion = previous?.runtimeVersion === release.version
               ? previous.previousRuntimeVersion : previous?.runtimeVersion;
-            this.journal.runtimeTrial = { version: release.version, attempts: 0, ...(previousVersion ? { previousVersion } : {}) };
+            this.journal.runtimeTrial = { version: release.version, ...(previousVersion ? { previousVersion } : {}) };
           }
           await this.save();
           await this.installer.install(temp);
@@ -287,8 +289,13 @@ export class UpdateCoordinator {
       await this.options.beforeQuit();
       stopped = true;
       const app = this.journal.pending.app?.manifest.app;
-      if (app) { await this.options.installDesktop(cachedUpdatePath(this.cache, app.file)); this.options.quit(); }
-      else this.options.restart();
+      if (app) {
+        // Shutdown takes seconds; re-verify the exact bytes about to be
+        // executed so a cache swap in that window cannot launch them.
+        if (!await isVerifiedFile(cachedUpdatePath(this.cache, app.file), app.file)) throw new Error("Update checksum mismatch after shutdown");
+        await this.options.installDesktop(cachedUpdatePath(this.cache, app.file));
+        this.options.quit();
+      } else this.options.restart();
       return { ok: true };
     } catch (error) {
       this.journal.authorized = false;

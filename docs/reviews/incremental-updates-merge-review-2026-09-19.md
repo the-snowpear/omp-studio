@@ -32,4 +32,26 @@
 ## 遗留边界（不阻断合并，发布前必须验收）
 
 - 新 release.yml 发布链路未在 Actions 端到端实跑；全机→当前用户迁移的真实 UAC/静默更新/ARM64 实机验收仍未做（`docs/updates-verification.md` 已如实标注）。
-- P2 跟进项：InstallerHost 卸载等待无超时；R3 防护只覆盖 Runtime 组件不覆盖 app 组件回退；统一更新 releaseNotes 增量标记硬编码中文；BTW hook 内新增文案未走 i18n；`update-coordinator` 死分支与 `attempts` 死字段；桌面 exe 校验/执行间的 TOCTOU 窗口（每用户安装，风险低）。
+
+## 2026-09-19 跟进修复（合并后）
+
+当日 P2 跟进项已在 main 上修复，另应用户反馈修复流式尾部工具卡的跳变展开：
+
+| 跟进项 | 状态 | 落点 |
+| --- | --- | --- |
+| 流式渲染区自动展开的尾部工具卡跳变（用户反馈） | 已修复：运行卡展开也走两帧 0fr→1fr 过渡，初次挂载先闭后开；收起仍同步卸载 | `apps/renderer/src/conversation/BatchChain.tsx` `useLazyExpand`；测试 `BatchChain.expand.test.tsx` |
+| InstallerHost 卸载等待无超时 | 已修复：`RunUninstaller` 有界等待（10 分钟），超时杀进程返回新退出码 17 | `packaging/installer-host/InstallerHost.cs`；测试 `scripts/installer-maintenance.test.mjs` |
+| 旧安装半删除死循环 | 已修复：退出码 11 单独提示人工清理残留注册表项，不再引导重跑安装包 | `packaging/nsis/custom.nsh` |
+| 发布遮蔽防护只覆盖 Runtime | 已修复：app 组件对称防护，旧桌面 tag 不能遮蔽已发布新版 | `scripts/build-update-assets-v2.mjs`；测试含同版本不同字节/不同通道拒绝 |
+| 更新弹窗增量标记硬编码中文 | 已修复：走 `translate`，新增 `appUpdate.download*` 三个 key（en/zh） | `apps/renderer/src/settings/appUpdate.ts` |
+| BTW hook 内新文案未走 i18n | 已修复：`tRef` 模式避免渲染循环，新增 `runtimeUpgrade.btw*` key | `apps/renderer/src/btw/useBtwSession.ts` |
+| update-coordinator 死分支与 `attempts` 死字段 | 已修复：死分支改为真实可达的「桌面安装失败但随附 Runtime 待激活」诊断；`attempts` 删除且容忍旧 journal | `apps/desktop/src/update-coordinator.ts` |
+| 单个损坏 manifest 中止整个发现 | 已修复：单条 release 失败跳过续扫，sequence 冲突与回退水位仍硬失败 | `apps/desktop/src/update-discovery.ts` |
+| `prepareRestart` 半途失败永久拒绝服务 | 已修复：停机全部成功后才置位 `restartPrepared` | `apps/desktop/src/runtime-session.ts` |
+| 桌面 exe 校验/执行 TOCTOU | 已修复：`beforeQuit()` 后、启动安装器前复验缓存摘要 | `apps/desktop/src/update-coordinator.ts` |
+| facade 校验/分发展开顺序不一致 | 已修复：两侧统一 commandName 胜出 | `packages/host-client-api/src/facade.ts`；测试 `runtime-mirror.test.ts` |
+| overlay：`#imports` 死表、shutdown 静默窗口、仲裁器冗余成员、import 结果类型注释 | 已修复（清理，无行为重设计） | `omp-patch/overlay/.../upgrade-service.ts`、`bridge-dispatcher.ts`、`command-arbiter.ts`、`runtime-upgrade-protocol.ts` |
+
+验证：`npm run check` 与 `npm run omp:test:metadata` 全绿；overlay 经 `omp:overlay:apply` + `omp:verify:patches` 复核通过（agent-8 记录）。各修复修改前快照见 `backup/2026-09-19/p2-*` 与 `backup/2026-09-19/toolcard-animation-*`。
+
+仍为后续排期：`build-update-assets-v2.mjs` 直接 import `apps/desktop/dist`（全新检出先跑 `npm run omp:test:metadata` 会因缺 dist 失败）；提权运行的应用会被安装器误判为未运行；设置快照的「新 runtime 连旧 Host」方向依赖协议协商兜底；`useBtwSession.ts` 里更早引入的存量硬编码中文未在本轮处理。

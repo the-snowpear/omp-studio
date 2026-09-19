@@ -788,8 +788,12 @@ export function createDesktopRuntimeSessionPort(
         await writeJsonAtomic(join(context.profileDirectory, "update-session-restore.json"), {
           activeSessionId, residents: current.map(r => ({ sessionId: r.sessionId, workspace: r.workspace })),
         });
-        restartPrepared = true;
+        // Latch only after every Worker stopped: a partial failure keeps the
+        // desktop running and must not reject later lifecycle calls. The
+        // restore file stays either way so already-stopped Sessions still
+        // resume on the next start.
         await stopAll();
+        restartPrepared = true;
       });
     },
     withRuntimeMaintenance<T>(operation: () => Promise<T>, expectedVersion?: () => string | undefined,

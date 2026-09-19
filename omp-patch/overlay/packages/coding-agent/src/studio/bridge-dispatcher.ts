@@ -426,7 +426,7 @@ export class StudioBridgeDispatcher {
 				)
 					await this.runtime.services.btw.settle();
 				const result = isUpgradeOperationKind(operation.kind)
-					? await this.runtime.services.upgrade.execute(operation as UpgradeOperation, commandId)
+					? await this.runtime.services.upgrade.execute(operation as UpgradeOperation)
 					: isEvaluationOperationKind(operation.kind)
 						? await this.runtime.services.evaluation.execute(operation as EvaluationOperation)
 						: isShutdownOperation
@@ -637,8 +637,10 @@ export class StudioBridgeDispatcher {
 		if (operation.kind !== "runtime.shutdown" || operation.drain !== true) {
 			throw new StudioRuntimeCommandError("COMMAND_BLOCKED", "Invalid Runtime shutdown request");
 		}
-		await this.runtime.services.btw.settle();
+		// Quiesce before the settle wait (worst case ~10s) so no new command is
+		// accepted into the drain window.
 		this.#quiescing = true;
+		await this.runtime.services.btw.settle();
 		this.runtime.services.loop.disable();
 		await this.runtime.services.live.stop();
 		this.projector.emitRuntimeQuiescing();

@@ -6,6 +6,8 @@
  */
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { resolveLanguage, translate } from "../i18n";
+import { getAppSettings } from "./appSettings";
 import { cancelUpdate, checkForUpdates, downloadUpdateToReady, fetchUpdatePrefs, getUpdatesState, saveUpdatePrefs, subscribeUpdates } from "./updates";
 
 export interface AppUpdateState {
@@ -54,6 +56,11 @@ function updateState(patch: Partial<AppUpdateState>): void {
   notifyListeners();
 }
 
+/** 模块级取词：store 拼装的用户可见文案按当前界面语言翻译。 */
+function updateCopy(key: string): string {
+  return translate(resolveLanguage(getAppSettings().language), key);
+}
+
 let unifiedSnapshot: import("@omp-studio/runtime-installer").UnifiedUpdateSnapshot | undefined;
 const unsubscribeUpdates = subscribeUpdates(() => {
   if (unifiedSnapshot) return;
@@ -94,7 +101,7 @@ function receiveUnifiedUpdate(snapshot: import("@omp-studio/runtime-installer").
       available: Boolean(current.version), currentVersion: current.currentVersion ?? "",
       version: current.version, name: current.component === "runtime" ? `OMP Runtime ${current.version ?? ""}` : `OMP Studio ${current.version ?? ""}`,
       reason: "restart-update", htmlUrl: snapshot.releaseNotesUrl,
-      releaseNotes: parts.filter(p => p.version).map(p => `${p.component === "app" ? "OMP Studio" : "Runtime"}: ${p.currentVersion ?? "—"} → ${p.version}${p.method === "differential" ? " · 增量下载" : p.method === "reuse" ? " · 复用已下载工件" : p.method === "full" ? " · 完整下载" : ""}${p.message ? `\n${p.message}` : ""}`).join("\n\n"),
+      releaseNotes: parts.filter(p => p.version).map(p => `${p.component === "app" ? "OMP Studio" : "Runtime"}: ${p.currentVersion ?? "—"} → ${p.version}${p.method === "differential" ? ` · ${updateCopy("appUpdate.downloadDifferential")}` : p.method === "reuse" ? ` · ${updateCopy("appUpdate.downloadReuse")}` : p.method === "full" ? ` · ${updateCopy("appUpdate.downloadFull")}` : ""}${p.message ? `\n${p.message}` : ""}`).join("\n\n"),
     },
   });
 }
@@ -201,9 +208,9 @@ export async function prepareDesktopRollback(): Promise<boolean> {
   updateState({ downloading: true, downloadError: null });
   try {
     const result = await chrome.rollbackUpdate();
-    if (!result.ok || result.deferred) throw new Error(result.message ?? "Desktop rollback could not be prepared");
+    if (!result.ok || result.deferred) throw new Error(result.message ?? updateCopy("updates.rollbackAppPrepareFailed"));
     const snapshot = await chrome.getUpdateSnapshot();
-    if (!snapshot) throw new Error("Update state unavailable");
+    if (!snapshot) throw new Error(updateCopy("updates.stateUnavailable"));
     receiveUnifiedUpdate(snapshot);
     return currentState.rollbackReady === true;
   } catch (error) {

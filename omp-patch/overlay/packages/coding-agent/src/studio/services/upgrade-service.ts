@@ -9,12 +9,11 @@ import { SessionControlError } from "./session-control-service";
 
 /** Native Runtime facilities shared with GUI; no CLI/TUI automation. */
 export class StudioUpgradeService {
-	readonly #imports = new Map<string, Promise<{ imported: true; sessionId: string; cwd: string }>>();
 	constructor(
 		readonly session: AgentSession,
 		readonly btw: StudioBtwService,
 	) {}
-	async execute(operation: UpgradeOperation, commandId: string): Promise<unknown> {
+	async execute(operation: UpgradeOperation): Promise<unknown> {
 		switch (operation.kind) {
 			case "btw.history.list":
 				return this.btw.historyList();
@@ -102,8 +101,6 @@ export class StudioUpgradeService {
 						.slice(0, 32768);
 					return { session: await this.#summary(info), preview: text };
 				}
-				const prior = this.#imports.get(commandId);
-				if (prior) return prior;
 				if (
 					!(await directoryExists(info.cwd)) &&
 					(!operation.fallbackCwd || !(await directoryExists(operation.fallbackCwd)))
@@ -112,23 +109,18 @@ export class StudioUpgradeService {
 						"INVALID_ARGUMENT",
 						"The source working directory is missing; select an existing workspace",
 					);
-				const pending = persistForeignSession(store, info, {
+				// Retry dedupe lives in the dispatcher's receipt cache (keyed by
+				// requestId / idempotencyKey); each dispatch gets a fresh
+				// commandId, so a per-command table here could never hit.
+				const imported = await persistForeignSession(store, info, {
 					...(operation.fallbackCwd ? { fallbackCwd: operation.fallbackCwd } : {}),
 					suppressBreadcrumb: true,
-				}).then(imported => ({
+				});
+				return {
 					imported: true as const,
 					sessionId: imported.getSessionId(),
 					cwd: imported.getCwd(),
-				}));
-				this.#imports.set(commandId, pending);
-				try {
-					return await pending;
-				} catch (error) {
-					this.#imports.delete(commandId);
-					throw error;
-				} finally {
-					if (this.#imports.size > 256) this.#imports.delete(this.#imports.keys().next().value!);
-				}
+				};
 			}
 		}
 	}

@@ -37,11 +37,19 @@ export async function discoverUpdates(input: {
       if (row.prerelease && input.channel !== "canary") continue;
       const asset = row.assets?.find(a => a.name === assetName);
       if (!asset) continue;
-      if (!asset.browser_download_url.startsWith(`https://github.com/${input.repo}/releases/download/`)) throw new Error("Invalid manifest source");
-      const res = await fetcher(applyMirror(input.mirror, asset.browser_download_url), { signal: input.signal });
-      if (!res.ok) throw new Error(`Update manifest HTTP ${res.status}`);
-      const text = await boundedText(res, 1024 * 1024);
-      const envelope = verifyUpdateManifest(JSON.parse(text), input.keys, input.repo, input.platform);
+      let envelope: SignedUpdateManifest;
+      try {
+        if (!asset.browser_download_url.startsWith(`https://github.com/${input.repo}/releases/download/`)) throw new Error("Invalid manifest source");
+        const res = await fetcher(applyMirror(input.mirror, asset.browser_download_url), { signal: input.signal });
+        if (!res.ok) throw new Error(`Update manifest HTTP ${res.status}`);
+        const text = await boundedText(res, 1024 * 1024);
+        envelope = verifyUpdateManifest(JSON.parse(text), input.keys, input.repo, input.platform);
+      } catch {
+        input.signal.throwIfAborted();
+        // One corrupt release must not hide every later update: skip it and
+        // keep scanning. Sequence conflicts and catalog rollback still throw.
+        continue;
+      }
       for (const kind of ["app", "runtime"] as UpdateComponent[]) {
         const candidate = envelope.manifest[kind];
         const wanted = kind === "app" ? "stable" : input.channel;

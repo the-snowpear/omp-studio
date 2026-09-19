@@ -91,6 +91,24 @@ describe("BatchChain expand", () => {
     expect(item.querySelector(".tc-body")?.childElementCount).toBe(0);
   });
 
+  it("animates the auto-expanded running tail card instead of jumping open", async () => {
+    const running: ToolView = {
+      toolCallId: "live",
+      toolName: "bash",
+      arguments: { command: "npm test" },
+      status: "running",
+      output: "live output",
+    };
+    const items: ChainItem[] = [{ kind: "tool", tool: bash("done", "done") }, { kind: "tool", tool: running }];
+    const { container } = render(<BatchChain items={items} batchKey="live-chain" liveTail />);
+    const item = container.querySelector<HTMLElement>('[data-tool-call-id="live"]')!;
+    // 正文同步挂载，但 `open` 类等下一帧：流式尾部的自动展开走 0fr→1fr 过渡而不是跳变。
+    expect(item.querySelector(".tc-body")?.textContent).toContain("live output");
+    expect(item.className).not.toContain("open");
+    await nextFrame();
+    expect(item.className).toContain("open");
+  });
+
   it("keeps a completed card mounted through its collapse inside a live chain", async () => {
     // 流式期间已完成的卡片正文已冻结：收起走完整过渡，不再随链级 instant 硬切卸载。
     vi.useFakeTimers();

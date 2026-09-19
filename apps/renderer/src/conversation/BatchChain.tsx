@@ -100,21 +100,17 @@ const COLLAPSE_UNMOUNT_MS = 320;
  * CSS 过渡放在同一帧提交，挂载就吃掉 250ms 过渡里的头 100ms——观感是卡片先瞬间跳到
  * 大半开，再慢慢补完剩下的。等布局落定后再起跳，整段过渡才跑得完整。
  *
- * `instant` 只留给「仍在运行」的卡片：它的正文每个发布帧都在变，跟着过渡再多重渲染
- * 320ms 才是真正的帧预算杀手；已完成的卡片正文已冻结，走完整过渡没有这笔开销。
+ * `instant` 只收起一侧：仍在运行的卡片被收起时同步卸载正文，不为看不见的过渡多挂
+ * 320ms 白渲染二十来帧。展开一律走两帧过渡——运行卡往往是输入驱动（编辑卡一开始就
+ * 带着完整 diff），「刚开始高度接近 0 没动画可看」并不成立，跳变在流式尾部非常显眼。
+ * 运行卡初次挂载也不直接给终态，先闭后开让自动展开同样播放过渡；已完成的卡保持挂载
+ * 即终态，翻历史或 expandAll 时不会每张卡都播一次动画。
  *
  * 代价是收起后再展开会丢掉卡内滚动位置，与从没打开过的卡一致。
  */
 function useLazyExpand(open: boolean, instant = false): { readonly mounted: boolean; readonly expanded: boolean } {
-  const [state, setState] = useState<{ readonly mounted: boolean; readonly expanded: boolean }>(() => ({ mounted: open, expanded: open }));
+  const [state, setState] = useState<{ readonly mounted: boolean; readonly expanded: boolean }>(() => ({ mounted: open, expanded: open && !instant }));
   useLayoutEffect(() => {
-    // 运行中的卡片同步挂载/卸载：它没有动画可看（正文刚开始输出时高度本来就接近 0），
-    // 而收起后若为过渡多挂 320ms，这个还在每帧发布的正文就要在看不见的卡里多重渲染
-    // 二十来帧。
-    if (instant) {
-      if (state.mounted !== open || state.expanded !== open) setState({ mounted: open, expanded: open });
-      return;
-    }
     if (open) {
       if (state.expanded) return;
       // 这一帧只把正文挂进去；下一帧才加 `open` 类，过渡因此从已排好的布局起跳。
@@ -128,6 +124,10 @@ function useLazyExpand(open: boolean, instant = false): { readonly mounted: bool
       }
       const frame = requestAnimationFrame(() => setState({ mounted: true, expanded: true }));
       return () => cancelAnimationFrame(frame);
+    }
+    if (instant) {
+      if (state.mounted || state.expanded) setState({ mounted: false, expanded: false });
+      return;
     }
     if (state.expanded) {
       setState({ mounted: true, expanded: false });
@@ -195,8 +195,8 @@ const ThinkCard = memo(function ThinkCard({ preview, full, truncated, open, foll
  * 一遍参数与 diff（编辑卡是逐行正则），没有它，链里每张卡每帧都要重算一次。
  */
 const ToolItem = memo(function ToolItem({ tool, open, onToggle, slot, showDetail = true }: { tool: ToolView; open: boolean; onToggle: (slot: string) => void; slot: string; showDetail?: boolean }) {
-  // 只有「仍在运行」的卡片放弃动画：正文还在逐帧变化，收起过渡期间的重渲染才是开销
-  // 大头。流式期间已完成的卡照样走 250ms 过渡，不再像链级 instant 那样整链硬切。
+  // 「仍在运行」的卡片只在收起时放弃动画：它的正文每个发布帧都在变，收起过渡期间
+  // 多挂 320ms 是看不见的白渲染。展开与已完成的卡一样走 250ms 过渡，不再整链硬切。
   const instant = tool.status === "running";
   const { mounted, expanded } = useLazyExpand(open, instant);
   const kind = toolKind(tool);

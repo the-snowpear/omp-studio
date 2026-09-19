@@ -57,6 +57,17 @@ export async function buildUpdateAssetsV2(options = {}) {
     if (order === undefined) throw new Error("Cannot order Runtime release versions");
     if (order < 0) throw new Error(`Runtime ${rt.runtimeVersion} would hide newer published Runtime ${published.version}; use the newer signed Runtime`);
   }
+  // An old desktop tag must never shadow a newer published desktop: consumers
+  // only follow the highest app sequence, which this build is about to mint.
+  if (!runtimeOnly) {
+    for (const envelope of previous) {
+      const published = envelope.manifest.app;
+      if (!published || published.channel !== "stable") continue;
+      const order = compareRuntimeVersions(appVersion, published.version);
+      if (order === undefined) throw new Error("Cannot order app release versions");
+      if (order < 0) throw new Error(`App ${appVersion} would hide newer published app ${published.version}; use the newer desktop tag`);
+    }
+  }
   const nextSequence = (kind, channel) => 1 + Math.max(0, ...previous.map(e => e.manifest[kind]?.channel === channel ? e.manifest[kind].sequence : 0));
   const archivePath = join(out, `OMP-Studio-Runtime-${rt.runtimeVersion}-windows-${arch}.zip`);
   await createRuntimeArchive(runtimeDir, archivePath);

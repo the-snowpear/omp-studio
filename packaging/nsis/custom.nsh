@@ -576,7 +576,12 @@ FunctionEnd
 !macro customInstall
   ${If} $ompLegacyMachineDir != ""
     ExecWait '"$PLUGINSDIR\omp-maintenance\OmpInstallerUi.exe" --migrate-machine "$ompLegacyMachineDir" "$INSTDIR"' $R0
-    ${If} $R0 != 0
+    ${If} $R0 == 11
+      ; 注册表残留但卸载程序已缺失：重新运行安装包必然同样失败，只能引导人工清理。
+      MessageBox MB_OK|MB_ICONEXCLAMATION "检测到旧全机版本的安装记录残留，但其卸载程序已缺失，无法自动迁移。$\r$\n$\r$\n请打开「设置 → 应用 → 安装的应用」移除残留的 OMP Studio 条目；若无法移除，请删除注册表项 HKLM\${INSTALL_REGISTRY_KEY} 和 HKLM\${UNINSTALL_REGISTRY_KEY}，然后重新运行安装包。" /SD IDOK
+      SetErrorLevel 20
+      Quit
+    ${ElseIf} $R0 != 0
       MessageBox MB_OK|MB_ICONEXCLAMATION "当前用户版本已安装，但旧全机版本尚未移除。请关闭所有 OMP 任务后重新运行安装包完成迁移。" /SD IDOK
       SetErrorLevel 20
       Quit

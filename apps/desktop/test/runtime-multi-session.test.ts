@@ -50,6 +50,7 @@ function fakeWorkerFactory(state: {
   readonly failInvoke: Set<string>;
   readonly dead: Set<string>;
   readonly failStartEpoch?: Set<number>;
+  readonly failStop?: Set<string>;
   readonly invokes: Array<{ sessionId: string; operation: StudioOperation }>;
   readonly launchedIn: Array<{ sessionId: string; workspaceId: string; cwd: string }>;
 }): NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]> {
@@ -105,6 +106,7 @@ function fakeWorkerFactory(state: {
         return session;
       },
       async stop() {
+        if (state.failStop?.has(sessionId)) throw new Error(`stop failed for ${sessionId}`);
         if (!alive) return;
         alive = false;
         state.stopped.push(sessionId);
@@ -126,6 +128,7 @@ function createHarness(
     failInvoke: new Set<string>(),
     dead: new Set<string>(),
     failStartEpoch: new Set<number>(),
+    failStop: new Set<string>(),
     invokes: [] as Array<{ sessionId: string; operation: StudioOperation }>,
     launchedIn: [] as Array<{ sessionId: string; workspaceId: string; cwd: string }>,
     adopted: [] as Array<{ workspaceId: string; cwd: string }>,
@@ -180,6 +183,23 @@ test("update restart persists and restores resident sessions with their original
     assert.deepEqual(second.state.launchedIn.map(r => r.workspaceId).sort(), ["workspace-a", "workspace-b"]);
     await assert.rejects(readFile(join(profileDirectory, "update-session-restore.json")), /ENOENT/);
   } finally { await first.port.stop(); await second.port.stop(); await rm(profileDirectory, { recursive: true, force: true }); }
+});
+
+test("a failed restart preparation keeps the Runtime usable and retains the restore intent", async () => {
+  const profileDirectory = await mkdtemp(join(tmpdir(), "omp-restart-failed-"));
+  const { port, state } = createHarness();
+  try {
+    await port.start({ ...context, profileDirectory });
+    const resident = port.listResidents!().residents[0]!;
+    state.failStop.add(resident.sessionId);
+    await assert.rejects(port.prepareRestart!(), /stop failed/);
+    // The restart guard must not latch: the Runtime keeps serving lifecycle calls.
+    const resumed = await port.switchSession!({ kind: "resume", sessionId: resident.sessionId });
+    assert.equal(resumed?.controller.publication()?.snapshot.sessionId, resident.sessionId);
+    assert.deepEqual(port.listResidents!().residents.map(r => r.sessionId), [resident.sessionId]);
+    const stored = JSON.parse(await readFile(join(profileDirectory, "update-session-restore.json"), "utf8"));
+    assert.deepEqual(stored.residents.map((r: { sessionId: string }) => r.sessionId), [resident.sessionId]);
+  } finally { state.failStop.clear(); await port.stop(); await rm(profileDirectory, { recursive: true, force: true }); }
 });
 
 test("update restoration isolates missing sessions and keeps healthy residents usable", async () => {

@@ -1,4 +1,5 @@
 import { invokeUpgrade, useUpgradeAvailable } from "../runtimeUpgrade";
+import { useI18n } from "../i18n";
 import { PREVIEW_BTW_TOPICS, PREVIEW_BTW_TURNS } from "../preview/btwPreview";
 import type { BtwTopicSummary, BtwHistoryTurn } from "@omp-studio/client-contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -68,6 +69,7 @@ export interface BtwSessionApi {
  * for the old round must not be reused against the new one.
  */
 export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
+  const { t } = useI18n();
   const [question, setQuestion] = useState("");
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
@@ -84,6 +86,8 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
   snapshotRef.current = input.snapshot;
   const onBranchedRef = useRef(input.onBranched);
   onBranchedRef.current = input.onBranched;
+  const tRef = useRef(t);
+  tRef.current = t;
   const pendingRef = useRef(false);
 
   const historyAvailable = useUpgradeAvailable(input.client, input.preview, "btw.history.list");
@@ -102,7 +106,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
     try {
       const result = await invokeUpgrade(input.client, "btw.history.list", {});
       if (generation === selectionGeneration.current && (!input.sessionId || result.sessionId === input.sessionId)) setTopics(result.topics);
-    } catch (cause) { if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, "BTW history unavailable")); }
+    } catch (cause) { if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, tRef.current("runtimeUpgrade.btwHistoryUnavailable"))); }
   }, [input.client, input.preview, input.sessionId, historyAvailable]);
   const selectTopic = useCallback(async (topicId: string) => {
     const generation = ++selectionGeneration.current;
@@ -118,7 +122,7 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
         setHistorySnapshot({ ephemeralId: "history:" + topicId, topicId, question: last.question, text: last.answer,
           status: last.status === "complete" ? "completed" : last.status === "running" ? "running" : last.status === "error" ? "failed" : "aborted" });
       }
-    } catch (cause) { if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, "BTW history unavailable")); }
+    } catch (cause) { if (generation === selectionGeneration.current) setError(hostErrorMessage(cause, tRef.current("runtimeUpgrade.btwHistoryUnavailable"))); }
   }, [input.client, input.preview]);
   const newTopic = useCallback(() => {
     selectionGeneration.current++;
@@ -172,9 +176,9 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
     if (branchedId !== null) return "本轮已分支";
     if (snapshot.status === "running") return "等答案写完再分支";
     if (snapshot.status !== "completed") return "只有已完成的答案可以分支";
-    if (turns.length > 1) return "多轮话题保留在 BTW 历史中";
+    if (turns.length > 1) return t("runtimeUpgrade.btwBranchBlockedHistory");
     return "分支凭据已失效，重新问一次";
-  }, [branchedId, canBranch, snapshot, turns.length]);
+  }, [branchedId, canBranch, snapshot, turns.length, t]);
 
   const dispatch = useCallback(
     async <TResult>(name: CommandName, payload: unknown): Promise<TResult> => {
@@ -217,11 +221,11 @@ export function useBtwSession(input: BtwSessionInput): BtwSessionApi {
       setError(undefined);
       setNotice(undefined);
       try {
-        if (snapshotRef.current?.status === "running") throw new Error("请先等待当前答案完成，或中止回答");
+        if (snapshotRef.current?.status === "running") throw new Error(tRef.current("runtimeUpgrade.btwWait"));
         setNewTopicDraft(false);
         if (!forceNewTopic && selectedTopicId && historyAvailable && input.client) {
           const previous = snapshot;
-          if (previous?.status !== "completed") throw new Error("只有已完成的话题可以追问");
+          if (previous?.status !== "completed") throw new Error(tRef.current("runtimeUpgrade.btwFollowNeedsCompleted"));
           const outcome = await invokeUpgrade(input.client, "btw.followUp", { topicId: selectedTopicId, question: trimmed });
           if (generation !== selectionGeneration.current) return false;
           if (previous && turns[turns.length - 1]?.answer !== previous.text) setTurns(rows => [...rows, { question: previous.question ?? question, answer: previous.text, status: "complete", createdAt: Date.now(), updatedAt: Date.now() }]);

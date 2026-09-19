@@ -64,6 +64,19 @@ test("discovery routes both the release catalog and manifests through the mirror
   assert.ok(requests.length > 0);
   assert.ok(requests.every(u => u.startsWith(mirror)), `unmirrored request: ${requests.find(u => !u.startsWith(mirror))}`);
 });
+test("discovery skips a release whose manifest fails verification and still finds a later valid one", async () => {
+  const broken = signed({ app: { ...component("old.exe", "1.5.0"), sequence: 1 } });
+  broken.manifest.app!.version = "9.9.9"; // Mutating after signing breaks the signature.
+  const valid = signed({ app: { ...component(), sequence: 3 } });
+  const found = await discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([broken, valid]), watermarks: {} });
+  assert.equal(found.app?.manifest.app?.version, "2.0.0");
+  assert.equal(found.app?.manifest.app?.sequence, 3);
+});
+test("discovery still rejects conflicting signed sequences for one component", async () => {
+  const first = signed({ app: { ...component(), sequence: 2 } });
+  const conflicting = signed({ app: { ...component(), version: "2.1.0", sequence: 2 } });
+  await assert.rejects(() => discoverUpdates({ repo: "owner/repo", platform: "win32-x64", channel: "stable", mirror: "", keys, signal: new AbortController().signal, fetcher: fetcher([first, conflicting]), watermarks: {} }), /Conflicting signed update sequence/);
+});
 test("prepared updates survive restart; busy sessions and tampered cache prevent apply", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-update-journal-"));
   let busy = false, shutdowns = 0, installs = 0;
@@ -76,12 +89,41 @@ test("prepared updates survive restart; busy sessions and tampered cache prevent
   await writeFile(cachedUpdatePath(join(root, "cache"), component().file), "bad");
   assert.equal((await second.apply()).ok, false); assert.equal(installs, 0); assert.equal(shutdowns, 0);
 });
+test("apply re-verifies the desktop artifact after shutdown and never launches a tampered installer", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-update-tampered-quit-"));
+  let installs = 0, quits = 0, restarts = 0;
+  const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false,
+    beforeQuit: async () => { await writeFile(cachedUpdatePath(join(root, "cache"), component().file), "tampered"); },
+    installDesktop: async () => { installs++; }, restart: () => { restarts++; }, quit: () => { quits++; }, fetcher: fetcher([signed({ app: component() })]) };
+  const coordinator = new UpdateCoordinator(options);
+  await coordinator.initialize(); await coordinator.check(); await coordinator.prepare("app");
+  assert.equal(coordinator.state.app.phase, "ready");
+  assert.equal((await coordinator.apply()).ok, false);
+  assert.equal(installs, 0); assert.equal(quits, 0);
+  assert.equal(restarts, 1); // The stopped Host is brought back instead of quitting.
+  assert.equal(JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8")).authorized, false);
+});
 test("downloading and ordinary startup never authorize applying an update", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-no-auto-apply-")); let installs = 0;
   const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => { installs++; }, restart: () => {}, quit: () => {}, fetcher: fetcher([signed({ app: component() })]) };
   const first = new UpdateCoordinator(options); await first.initialize(); await first.prepare("all");
   const second = new UpdateCoordinator(options); await second.initialize(); assert.equal(installs, 0);
   assert.equal((await second.apply()).ok, true); assert.equal(installs, 1);
+});
+test("a failed desktop installation surfaces the incomplete transaction and keeps the pending Runtime prepared", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-incomplete-transaction-"));
+  const journal = { schema: 2, authorized: true,
+    pending: { app: signed({ app: component() }), runtime: signed({ runtime: component("runtime.zip", "18.0.0-studio.2") }) },
+    previous: {}, watermarks: {} };
+  await writeFile(join(root, "transaction-v2.json"), JSON.stringify(journal));
+  const options = { root, runtimeRoot: join(root, "runtimes"), repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]) };
+  const coordinator = new UpdateCoordinator(options);
+  await coordinator.initialize();
+  assert.match(coordinator.state.error ?? "", /事务不完整/);
+  const saved = JSON.parse(await readFile(join(root, "transaction-v2.json"), "utf8"));
+  assert.equal(saved.authorized, false);
+  assert.equal(saved.pending.runtime.manifest.runtime.version, "18.0.0-studio.2");
+  assert.equal(coordinator.state.runtime.phase, "ready");
 });
 
 async function runtimeFixture(root: string, version: string): Promise<string> {
@@ -150,7 +192,7 @@ for (const checkpoint of ["before-activate", "after-activate", "after-journal-sa
       await new UpdateCoordinator(options).initialize();
     } else {
       const journal = JSON.parse(await readFile(path, "utf8"));
-      journal.runtimeTrial = { version, previousVersion: oldVersion, attempts: 0 };
+      journal.runtimeTrial = { version, previousVersion: oldVersion };
       await writeFile(path, JSON.stringify(journal));
       await installer.install(next);
       if (checkpoint === "after-activate") await installer.activate(version, { selfCheck });
@@ -161,6 +203,28 @@ for (const checkpoint of ["before-activate", "after-activate", "after-journal-sa
     assert.equal((await installer.current())?.runtimeVersion, oldVersion);
   });
 }
+
+test("a legacy journal carrying the removed trial attempts counter still rolls back", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omp-legacy-trial-")), runtimeRoot = join(root, "installed");
+  const installer = new RuntimeInstaller(runtimeRoot, { trustedKeys: keys });
+  const selfCheck = { run: async () => {} };
+  const oldVersion = "18.0.0-studio.1", version = "18.0.0-studio.2";
+  await installer.install(await runtimeFixture(root, oldVersion)); await installer.activate(oldVersion, { selfCheck });
+  const updates = join(root, "updates"); await mkdir(updates, { recursive: true });
+  const path = join(updates, "transaction-v2.json");
+  await writeFile(path, JSON.stringify({
+    schema: 2, authorized: false, pending: {}, previous: {}, watermarks: {},
+    runtimeTrial: { version, previousVersion: oldVersion, attempts: 0 },
+  }));
+  const options = { root: updates, runtimeRoot, repo: "owner/repo", platform: "win32-x64", appVersion: "1.0.0", keys, prefs: { read: async () => DEFAULT_UPDATE_PREFS }, snapshotChanged: () => {}, isBusy: () => false, beforeQuit: async () => {}, installDesktop: async () => {}, restart: () => {}, quit: () => {}, fetcher: fetcher([]), activateOptions: { selfCheck } };
+  const coordinator = new UpdateCoordinator(options); await coordinator.initialize();
+  assert.equal(coordinator.hasRuntimeTrial, true);
+  assert.equal(coordinator.state.error, undefined);
+  assert.equal(JSON.parse(await readFile(path, "utf8")).runtimeTrial.attempts, undefined);
+  await installer.install(await runtimeFixture(root, version)); await installer.activate(version, { selfCheck });
+  assert.equal(await coordinator.completeStartup(false, true), true);
+  assert.equal((await installer.current())?.runtimeVersion, oldVersion);
+});
 
 for (const target of ["app", "all"] as const) {
   test(`apply rejects an incompatible pair after preparing ${target} over a pending Runtime`, async () => {

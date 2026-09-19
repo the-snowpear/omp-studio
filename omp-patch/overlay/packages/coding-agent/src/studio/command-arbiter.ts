@@ -151,8 +151,10 @@ const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
  *  deferred past it. The GUI cancel button and native Esc both let `core.abort`
  *  overtake a manual compaction (`session.abort` → `abortCompaction`, then
  *  waits for its cleanup barrier), so it must not trip the BUSY_COMPACTING gate
- *  while still staying out of the deferred-preference set. */
-const COMPACTION_CANCEL_KINDS = new Set<string>([...UPGRADE_OPERATION_KINDS, "btw.ask", "btw.abort", "core.abort"]);
+ *  while still staying out of the deferred-preference set. Deferred-preference
+ *  kinds (upgrades, `btw.ask`, `btw.abort`) bypass the same gate at the
+ *  DEFERRED check above, so membership here would be unreachable. */
+const COMPACTION_CANCEL_KINDS = new Set<string>(["core.abort"]);
 
 export class StudioRuntimeCommandError extends Error {
 	constructor(

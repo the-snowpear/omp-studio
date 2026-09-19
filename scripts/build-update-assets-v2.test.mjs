@@ -11,10 +11,10 @@ import { parseUpdateIndex } from "../apps/desktop/dist/src/update-index.js";
 const { privateKey: signingKey, publicKey } = generateKeyPairSync("ed25519");
 const keyId = "test", keys = { test: publicKey.export({ type: "spki", format: "pem" }) };
 const hash = b => createHash("sha256").update(b).digest("hex");
-async function fixture(channel = "stable", runtimeVersion = "18.0.0-studio.1") {
+async function fixture(channel = "stable", runtimeVersion = "18.0.0-studio.1", exeBytes = "signed-runtime") {
   const root = await mkdtemp(join(tmpdir(), "omp-v2-release-")), runtimeDir = join(root, "runtime");
   await mkdir(runtimeDir);
-  const exe = Buffer.from("signed-runtime"), manifest = Buffer.from(JSON.stringify({ runtimeVersion, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "studio.1", studioProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "win32-x64", entrypoint: "omp.exe", channel }));
+  const exe = Buffer.from(exeBytes), manifest = Buffer.from(JSON.stringify({ runtimeVersion, upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "studio.1", studioProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "win32-x64", entrypoint: "omp.exe", channel }));
   const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { "omp.exe": hash(exe), "runtime-manifest.json": hash(manifest) } }));
   const payload = Buffer.concat([manifest, Buffer.from("\0"), sums]);
   for (const [name, bytes] of [["omp.exe", exe], ["runtime-manifest.json", manifest], ["checksums.json", sums], ["runtime-signature.json", JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(payload), signature: sign(null, payload, signingKey).toString("base64url") })]]) await writeFile(join(runtimeDir, name), bytes);
@@ -65,4 +65,26 @@ test("a desktop cannot promote an older seed over an independent Runtime release
   const canaryRelease = await buildUpdateAssetsV2({ ...canary, runtimeOnly: true });
   const canaryEnvelope = JSON.parse(await readFile(join(canaryRelease.out, "updates-win32-x64.json"), "utf8"));
   await buildUpdateAssetsV2({ ...older, previous: [canaryEnvelope] });
+});
+
+test("an old desktop tag cannot shadow a newer published desktop", async () => {
+  const options = await fixture();
+  const published = await buildUpdateAssetsV2(options);
+  const previous = JSON.parse(await readFile(join(published.out, "updates-win32-x64.json"), "utf8"));
+  const older = await fixture();
+  // Consumers only follow the highest app sequence, so re-tagging an old desktop would hide 1.0.0.
+  await assert.rejects(() => buildUpdateAssetsV2({ ...older, previous: [previous], appVersion: "0.9.0" }), /would hide newer published app 1\.0\.0/);
+  await assert.rejects(() => buildUpdateAssetsV2({ ...older, previous: [previous], appVersion: "not-semver" }), /Cannot order app release versions/);
+  // Republishing the same desktop version stays allowed and just mints a new sequence.
+  const republished = await buildUpdateAssetsV2({ ...older, previous: [previous], out: join(older.root, "republish") });
+  assert.equal(republished.manifest.app.sequence, 2);
+});
+
+test("a desktop republish rejects a reused Runtime version with different bytes or channel", async () => {
+  const published = await buildUpdateAssetsV2(await fixture());
+  const previous = JSON.parse(await readFile(join(published.out, "updates-win32-x64.json"), "utf8"));
+  const altered = await fixture("stable", "18.0.0-studio.1", "tampered-runtime");
+  await assert.rejects(() => buildUpdateAssetsV2({ ...altered, previous: [previous] }), /different bytes or channel/);
+  const otherChannel = await fixture("canary", "18.0.0-studio.1");
+  await assert.rejects(() => buildUpdateAssetsV2({ ...otherChannel, previous: [previous] }), /different bytes or channel/);
 });

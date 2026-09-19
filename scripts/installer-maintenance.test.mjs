@@ -41,7 +41,15 @@ internal static class Harness {
       File.Delete(app); File.Delete(original); return 0;
     });
     Check(code == 0 && !File.Exists(app));
-    Console.WriteLine("NSIS arguments, failure, incomplete removal, cancellation and success passed");
+    ProcessStartInfo finished = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/c exit 27");
+    finished.UseShellExecute = false;
+    finished.CreateNoWindow = true;
+    Check(UpdateMaintenance.RunUninstaller(finished, 60000) == 27); // Bounded wait still passes exit codes through.
+    ProcessStartInfo hung = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "ping.exe"), "-n 30 127.0.0.1");
+    hung.UseShellExecute = false;
+    hung.CreateNoWindow = true;
+    Check(UpdateMaintenance.RunUninstaller(hung, 1000) == 17); // A hung uninstaller is killed and reported as a timeout.
+    Console.WriteLine("NSIS arguments, failure, incomplete removal, cancellation, bounded wait and success passed");
     return 0;
   }
 }`;

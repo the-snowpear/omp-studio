@@ -68,7 +68,7 @@ internal static class UpdateMaintenance
     string profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "omp-studio", "profile");
     if (Directory.Exists(oldProfile) && !Directory.Exists(profile)) CopyTree(oldProfile, profile);
     return UninstallLegacy(oldRoot, delegate(ProcessStartInfo start) {
-      using (Process process = Process.Start(start)) { process.WaitForExit(); return process.ExitCode; }
+      return RunUninstaller(start, 600000);
     });
   }
 
@@ -95,6 +95,21 @@ internal static class UpdateMaintenance
     finally
     {
       try { File.Delete(uninstaller); Directory.Delete(temporary); } catch { }
+    }
+  }
+
+  internal static int RunUninstaller(ProcessStartInfo start, int milliseconds)
+  {
+    using (Process process = Process.Start(start))
+    {
+      // A hung silent uninstaller must fail migration (17, retryable) instead of
+      // blocking setup forever with no visible UI and no timeout.
+      if (!process.WaitForExit(milliseconds))
+      {
+        try { process.Kill(); } catch { }
+        return 17;
+      }
+      return process.ExitCode;
     }
   }
 

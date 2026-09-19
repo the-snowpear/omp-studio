@@ -75,6 +75,13 @@ export interface UpgradeResultMap {
 	};
 	"session.import.list": { sessions: ForeignSessionSummary[] };
 	"session.import.preview": { session: ForeignSessionSummary; preview: string };
+	/**
+	 * Public shape after the desktop Host rewrite: the Runtime returns
+	 * `{ imported, sessionId, cwd }` and the Host maps `cwd` onto a registered
+	 * `workspaceId` (apps/desktop/src/session-commands.ts). Do not validate the
+	 * Runtime dispatch path with `validateUpgradeResult` for this kind — it
+	 * would reject the Runtime's own pre-rewrite output.
+	 */
 	"session.import.execute": { imported: true; sessionId: string; workspaceId: string };
 	"runtime.auth.get": {
 		provider: RuntimeAuthProvider;
