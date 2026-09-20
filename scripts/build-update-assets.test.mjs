@@ -48,9 +48,9 @@ async function createMockEnvironment(parentDir) {
 
   const runtimeDir = join(unpackedDir, "runtime", "versions", "18.0.11-studio.14");
   await mkdir(runtimeDir, { recursive: true });
-  await writeFile(join(runtimeDir, "runtime-manifest.json"), JSON.stringify({ runtimeVersion: "18.0.11-studio.14", platform: "win32-x64" }));
+  await writeFile(join(runtimeDir, "runtime-manifest.json"), JSON.stringify({ runtimeVersion: "18.0.11-studio.14", platform: `win32-${process.arch}` }));
   for (const name of ["omp.exe", "checksums.json", "runtime-signature.json"]) await writeFile(join(runtimeDir, name), `fixture-${name}`);
-  await writeFile(join(rootDir, "outputs", "installer", "OMP-Studio-Setup-0.1.4-win-x64.exe"), "setup-fixture");
+  await writeFile(join(rootDir, "outputs", "installer", `OMP-Studio-Setup-0.1.4-win-${process.arch}.exe`), "setup-fixture");
   return { rootDir, unpackedDir, rendererDir, preloadPath };
 
 }
@@ -291,7 +291,7 @@ test("release builder rejects missing artifacts and invalid previous sequence", 
     const built = await buildUpdateAssets({ ...options, previousIndexPath, minAppVersion: "0.1.3" });
     assert.equal(built.updateIndex.sequence, 43);
     assert.equal(built.updateIndex.app.payload.minAppVersion, "0.1.3");
-    await rm(join(env.rootDir, "outputs", "installer", "OMP-Studio-Setup-0.1.4-win-x64.exe"));
+    await rm(join(env.rootDir, "outputs", "installer", `OMP-Studio-Setup-0.1.4-win-${process.arch}.exe`));
     await assert.rejects(() => buildUpdateAssets(options), /real Setup installer/u);
     await rm(join(env.unpackedDir, "runtime"), { recursive: true, force: true });
     await assert.rejects(() => buildUpdateAssets(options), /real signed Runtime artifact/u);
