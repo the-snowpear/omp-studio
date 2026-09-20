@@ -120,3 +120,17 @@ Published on 2026-09-13:
 - Eight public assets are present and the release is stable/latest.
 - CI application/Runtime gates, installer audit and P5 readiness gate passed.
 - Minimum app version baseline: `minAppVersion` defaults to `0.1.5` for payload and Runtime, requiring full Setup upgrades for older Main baselines.
+
+Published on 2026-09-20:
+
+- Release: https://github.com/the-snowpear/omp-studio/releases/tag/v0.1.6
+- Successful workflow: https://github.com/the-snowpear/omp-studio/actions/runs/35494692656
+- Release source/tag: `2de617d77d83c6c91a39cbea157a5eb81d7b962b` (tag `v0.1.6`).
+- Windows x64 + ARM64 application: `0.1.6`; Runtime: `18.2.5-studio.6` (upstream pin `37273117021129e96bd05d8277b140ec3fd61990`).
+- First v2 desktop release: app sequence `1` and Runtime sequence `1` per channel/architecture; signing key `omp-studio-release-2026b`.
+- Twelve public assets are present (both architectures' Setup, Runtime ZIP, blockmaps, `updates-win32-*.json`, plus the x64 v1 migration `update-index.json`/`.sig.json`) and the release is stable/latest.
+- CI application/Runtime gates, installer audit and P5 readiness gate passed on both native Windows runners.
+- The x64 migration index points long-offline v1 clients at this release's Setup; no v1 ARM64 feed ever existed, so ARM64 carries v2 catalogs only.
+- Post-publication verification (`outputs/published-v0.1.6/verification.json`, not committed): 52 checks passed — both catalog Ed25519 signatures, every asset's size/SHA-256 against GitHub's stored digests, the migration feed signature and its Setup pointer, and a real end-to-end download of the x64 Setup matching the signed digest. Direct GitHub downloads were intermittently reset locally; verification completed through the documented `gh-proxy.com` mirror fallback. Mirrors do not replace the Ed25519 trust check.
+- Release notes were curated after publication to include the full changelog section; the workflow-generated install/Runtime text was saved to `outputs/published-v0.1.6/release-notes-generated.md` first.
+- Four earlier tag runs (35460227446, 35489322937, 35491181436, 35493227835) failed in test stages before any publication; the fixes (renderer animation-frame cleanup, host-arch-pinned update tests, Bun's 30s per-test timeout for all Runtime suites) are commits `a540c21`, `8f5a8d7`, `1194c12`, `8514c5d`, `2de617d`.
