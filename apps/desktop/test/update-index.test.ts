@@ -171,6 +171,7 @@ test("fetchUpdateIndex verifies Ed25519 signature, checks sequence watermark, an
     repo: "the-snowpear/omp-studio",
     mirrorPrefix: "",
     trustedKeys,
+    arch: "x64",
     lastSequence: 4,
     fetcher: mockFetcher,
   });
@@ -183,6 +184,7 @@ test("fetchUpdateIndex verifies Ed25519 signature, checks sequence watermark, an
         repo: "the-snowpear/omp-studio",
         mirrorPrefix: "",
         trustedKeys,
+        arch: "x64",
         lastSequence: 5,
         fetcher: mockFetcher,
       }),
@@ -194,6 +196,7 @@ test("fetchUpdateIndex verifies Ed25519 signature, checks sequence watermark, an
         repo: "the-snowpear/omp-studio",
         mirrorPrefix: "",
         trustedKeys,
+        arch: "x64",
         lastSequence: 6,
         fetcher: mockFetcher,
       }),
@@ -214,6 +217,7 @@ test("fetchUpdateIndex verifies Ed25519 signature, checks sequence watermark, an
         repo: "the-snowpear/omp-studio",
         mirrorPrefix: "",
         trustedKeys,
+        arch: "x64",
         lastSequence: 0,
         fetcher: tamperedFetcher,
       }),
@@ -233,11 +237,34 @@ test("fetchUpdateIndex verifies Ed25519 signature, checks sequence watermark, an
         repo: "the-snowpear/omp-studio",
         mirrorPrefix: "",
         trustedKeys,
+        arch: "x64",
         lastSequence: 0,
         fetcher: unknownKeyFetcher,
       }),
     /signature verification failed/u,
   );
+});
+
+test("fetchUpdateIndex selects the per-architecture index asset names", async () => {
+  const requested: string[] = [];
+  const fetcher: typeof fetch = async (url) => {
+    requested.push(String(url));
+    return new Response("Not found", { status: 404 });
+  };
+  await assert.rejects(
+    () =>
+      fetchUpdateIndex({
+        repo: "the-snowpear/omp-studio",
+        mirrorPrefix: "",
+        trustedKeys,
+        arch: "arm64",
+        lastSequence: 0,
+        fetcher,
+      }),
+    /Failed to fetch update index: HTTP 404/u,
+  );
+  assert.ok(requested.some((url) => url.endsWith("/update-index-win32-arm64.json")));
+  assert.ok(requested.some((url) => url.endsWith("/update-index-win32-arm64.sig.json")));
 });
 
 test("canary discovery uses signed prerelease assets and an independent watermark", async () => {
