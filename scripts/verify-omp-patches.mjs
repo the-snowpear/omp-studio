@@ -143,9 +143,10 @@ try {
     "packages/coding-agent/test/agent-session-prewalk.test.ts",
     "packages/agent/test/anthropic-native-compaction.test.ts",
   ]);
+  // Bun's 5s default per-test timeout is not enough on loaded CI runners
+  // (SVG rasterization in read-image-question exceeded it on windows-latest).
   for (const suite of allSuites) {
-    const coldSession = suite.endsWith("studio-approval-ask-e2e.test.ts");
-    run(bun, ["test", ...(coldSession ? ["--timeout=30000"] : []), suite], {
+    run(bun, ["test", "--timeout=30000", suite], {
       cwd: ompSourceDirectory, env, timeoutMs: 120_000,
     });
   }
