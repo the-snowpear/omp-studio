@@ -549,7 +549,7 @@ for (const rejectedContext of [false, true]) {
         runtimeVersion: HELLO.runtimeVersion, upstreamVersion: HELLO.upstreamVersion,
         upstreamCommit: UPSTREAM_COMMIT, patchsetVersion: "0.1.0", studioProtocol: { min: 1, max: 1 },
         profile: "full-parity-v1", capabilityHash: HELLO.capabilityManifest.hash,
-        commandManifestHash: HELLO.commandManifestHash, platform: "win32-x64", entrypoint: "omp.exe", channel: "stable",
+        commandManifestHash: HELLO.commandManifestHash, platform: `win32-${process.arch}`, entrypoint: "omp.exe", channel: "stable",
       });
       const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
       const checksums = JSON.stringify({ algorithm: "sha256", files: { "omp.exe": digest(payload), "runtime-manifest.json": digest(manifest) } });
