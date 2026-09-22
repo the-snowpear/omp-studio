@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   CONVERSATION_LIMITS,
+  isParsedConversationRuntimeEvent,
+  parseConversationRuntimeEvent,
   type ConversationRuntimeEvent,
   type RuntimeEpoch,
   type SessionId,
@@ -267,4 +269,41 @@ test("replay is session-scoped and fails closed when the bounded cache overflows
   fanout.replay(SESSION_ID, (event) => replayed.push(event));
   assert.equal(replayed.length, 0);
   assert.equal(resync.length, 1);
+});
+
+test("W05 the forwarded event is a parser-owned object, so the facade and IPC re-check reuse it", () => {
+  const fanout = new ConversationEventFanout();
+  const forwarded: StudioConversationForward[] = [];
+  fanout.onEvent((event) => forwarded.push(event));
+  const raw: ConversationRuntimeEvent = {
+    kind: "conversation.tool.updated",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    toolCallId: "call-1",
+    updateMode: "append",
+    output: "line\n",
+  };
+  fanout.forward(envelope(1, raw));
+
+  const update = forwarded[0]?.envelope.event;
+  assert.ok(update !== undefined);
+  // The fan-out never forwards the Bridge's own object: it forwards what the
+  // parser built and registered.
+  assert.notEqual(update, raw);
+  assert.equal(isParsedConversationRuntimeEvent(update), true);
+  assert.equal(isParsedConversationRuntimeEvent(raw), false);
+  // Facade (#onConversationForward) and the outbound IPC check both call the
+  // parser again on this same object; both must get it back without a walk.
+  assert.equal(parseConversationRuntimeEvent(update), update);
+  assert.equal(parseConversationRuntimeEvent(update), update);
+  // The Bridge's input object is untouched and still caller-owned.
+  assert.equal(Object.isFrozen(raw), false);
+
+  // Replay events are structured clones, so they lose that identity on purpose
+  // and are validated in full again.
+  const replayed = fanout.snapshot(SESSION_ID);
+  assert.equal(replayed.status, "complete");
+  const replayedUpdate = replayed.events[0]?.envelope.event;
+  assert.ok(replayedUpdate !== undefined);
+  assert.equal(isParsedConversationRuntimeEvent(replayedUpdate), false);
 });

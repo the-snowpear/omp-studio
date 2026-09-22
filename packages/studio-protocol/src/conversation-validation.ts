@@ -473,7 +473,39 @@ export function isConversationRuntimeEventKind(kind: unknown): kind is string {
   return typeof kind === "string" && kind.startsWith("conversation.");
 }
 
+/**
+ * Parsed events this module produced itself. One Runtime event is validated
+ * three times on the way out (Host fan-out, facade, IPC outbound check); the
+ * second and third calls receive the exact object the first call returned, so
+ * they can skip the walk. Membership is by identity only — a caller's own
+ * object, a frozen look-alike, or a structured clone is never in here — and
+ * the set is weak, so it retains nothing the caller has let go of.
+ */
+const parsedEvents = new WeakSet<ConversationRuntimeEvent>();
+
+/** Recursively freeze a value the parser built. Never applied to caller input. */
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
+  Object.freeze(value);
+  for (const item of Object.values(value as Record<string, unknown>)) deepFreeze(item);
+  return value;
+}
+
+/** True when `value` is an object this parser returned; exposed for tests and counters only. */
+export function isParsedConversationRuntimeEvent(value: unknown): boolean {
+  return typeof value === "object" && value !== null && parsedEvents.has(value as ConversationRuntimeEvent);
+}
+
 export function parseConversationRuntimeEvent(value: unknown, path = "$event.event"): ConversationRuntimeEvent {
+  if (typeof value === "object" && value !== null && parsedEvents.has(value as ConversationRuntimeEvent)) {
+    return value as ConversationRuntimeEvent;
+  }
+  const parsed = deepFreeze(parseConversationRuntimeEventFully(value, path));
+  parsedEvents.add(parsed);
+  return parsed;
+}
+
+function parseConversationRuntimeEventFully(value: unknown, path: string): ConversationRuntimeEvent {
   const input = record(value, path);
   const kind = nonEmptyString(input.kind, `${path}.kind`);
   const sessionId = nonEmptyString(input.sessionId, `${path}.sessionId`);

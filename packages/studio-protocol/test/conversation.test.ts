@@ -18,6 +18,7 @@ import {
   SESSION_TRANSCRIPT_READ_CAPABILITY,
   SESSION_TRANSCRIPT_READ_CONCURRENCY,
   SESSION_TRANSCRIPT_READ_KIND,
+  isParsedConversationRuntimeEvent,
   parseConversationRuntimeEvent,
   parseConversationOpenResult,
   parseConversationTranscriptPage,
@@ -500,6 +501,83 @@ test("live conversation events parse every kind and reject inner occurredAt", ()
     () => parseStudioEventEnvelope(envelope({ kind: "conversation.unknown", sessionId: "session-1" })),
     ContractValidationError,
   );
+});
+
+test("W05 parser output is frozen, registered, and reused by identity only", () => {
+  const raw = {
+    kind: "conversation.tool.completed",
+    sessionId: "session-1",
+    turnId: "turn-1",
+    toolCallId: "call-1",
+    result: { type: "toolResult", toolCallId: "call-1", isError: false, output: "ok", data: { rows: [1, 2] } },
+    completedAt: "2026-08-15T12:00:02.000Z",
+  };
+  const first = parseConversationRuntimeEvent(raw);
+  assert.notEqual(first, raw, "the parser must build its own object, never hand back caller input");
+  assert.equal(isParsedConversationRuntimeEvent(first), true);
+  assert.equal(isParsedConversationRuntimeEvent(raw), false);
+
+  // Same returned object → returned as-is, no second walk.
+  assert.equal(parseConversationRuntimeEvent(first), first);
+
+  // Deeply immutable: nested data cannot be edited after validation.
+  assert.ok(Object.isFrozen(first));
+  assert.ok(Object.isFrozen((first as unknown as { result: unknown }).result));
+  assert.ok(Object.isFrozen((first as unknown as { result: { data: { rows: unknown } } }).result.data.rows));
+  assert.throws(() => {
+    (first as unknown as { result: { output: string } }).result.output = "tampered";
+  }, TypeError);
+
+  // The caller's raw input stays theirs to modify, and is still re-validated in full.
+  raw.result.output = "changed";
+  const second = parseConversationRuntimeEvent(raw);
+  assert.notEqual(second, first);
+  assert.equal((second as unknown as { result: { output: string } }).result.output, "changed");
+  assert.equal((first as unknown as { result: { output: string } }).result.output, "ok");
+
+  // Losing identity (structured clone, JSON round-trip, or IPC) means a full parse again.
+  const cloned = structuredClone(first);
+  assert.equal(isParsedConversationRuntimeEvent(cloned), false);
+  const reparsed = parseConversationRuntimeEvent(cloned);
+  assert.notEqual(reparsed, cloned);
+  assert.equal(isParsedConversationRuntimeEvent(reparsed), true);
+  assert.deepEqual(reparsed, first);
+  assert.equal(isParsedConversationRuntimeEvent(JSON.parse(JSON.stringify(first))), false);
+});
+
+test("W05 an externally frozen look-alike is not trusted and invalid input is never cached", () => {
+  const forged = Object.freeze({
+    kind: "conversation.tool.updated",
+    sessionId: "session-1",
+    turnId: "turn-1",
+    toolCallId: "call-1",
+    updateMode: "append",
+    output: "x",
+    extra: "unknown field",
+  });
+  assert.throws(() => parseConversationRuntimeEvent(forged), ContractValidationError);
+  assert.equal(isParsedConversationRuntimeEvent(forged), false);
+  // A deeply frozen but valid object built by someone else still goes through the full parse.
+  const validFrozen = Object.freeze({
+    kind: "conversation.turn.completed",
+    sessionId: "session-1",
+    turnId: Object.freeze("turn-1") as string,
+  });
+  const parsed = parseConversationRuntimeEvent(validFrozen);
+  assert.notEqual(parsed, validFrozen);
+  assert.equal(isParsedConversationRuntimeEvent(validFrozen), false);
+  // Oversized payloads are still rejected on every call, including for a cached-looking shape.
+  const big = {
+    kind: "conversation.message.delta",
+    sessionId: "session-1",
+    turnId: "turn-1",
+    messageId: "msg-1",
+    blockId: "b-1",
+    blockType: "text",
+    delta: "a".repeat(CONVERSATION_LIMITS.DELTA_MAX_BYTES + 1),
+  };
+  assert.throws(() => parseConversationRuntimeEvent(big), ContractValidationError);
+  assert.throws(() => parseConversationRuntimeEvent(big), ContractValidationError);
 });
 
 test("publicConversationToolCallId keeps distinct long ids unique", () => {
