@@ -16,5 +16,6 @@ export * from "./canonical-json.js";
 export * from "./frame-codec.js";
 export * from "./validation.js";
 export * from "./evaluation-validation.js";
+export * from "./performance-diagnostics.js";
 
 export * from "./contracts/runtime-upgrade.js";
