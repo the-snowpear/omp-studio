@@ -18,10 +18,16 @@ export function useConversation(input: UseConversationInput): UseConversationRes
   // The workbench consumes only low-frequency metadata. Token/tool deltas are
   // subscribed inside ConversationPane so they cannot wake the whole canvas.
   const current = useSyncExternalStore(engine.subscribeMetadata, engine.getMetadataSnapshot, engine.getMetadataSnapshot);
+  /* The hold exists only for a same-session engine remount (transcript
+     revision / epoch / client swap). It is dropped as soon as the remount has
+     settled, when the target is a different session, and on unmount — a
+     component that is gone must not be the last owner of a transcript window. */
   const previous = useRef<ConversationSnapshot | undefined>(undefined);
   const retained = retainConversationWhileRemounting(current, previous.current, input.identity?.sessionId);
   if (retained.rows.length > 0) previous.current = retained;
   else if (current.state.hydrateStatus === "ready" || current.state.hydrateStatus === "error" || current.state.hydrateStatus === "unavailable") previous.current = undefined;
+  if (previous.current !== undefined && previous.current.state.identity?.sessionId !== input.identity?.sessionId) previous.current = undefined;
+  useEffect(() => () => { previous.current = undefined; }, []);
   const callbacks = useRef({
     loadOlder: () => engine.loadOlder(), reload: () => engine.reload(), restoreFromUser: (itemId: string) => engine.restoreFromUser(itemId),
     trackPending: (pending: PendingUser) => engine.trackPending(pending), failPending: (requestId: string, error: string) => engine.failPending(requestId, error), dropPending: (requestId: string) => engine.dropPending(requestId),
