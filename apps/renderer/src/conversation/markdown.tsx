@@ -4,6 +4,8 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { scanStreamingMarkdown, type StreamingCodeFence, type StreamingMarkdownScan } from "./markdownBlocks";
 import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
+import { LazyMermaid } from "./LazyMermaid";
+import { performanceOptions } from "../performanceOptions";
 
 const REMARK: Options["remarkPlugins"] = [remarkGfm];
 const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
@@ -27,7 +29,7 @@ function cacheMermaid(key: string, svg: string): void {
   if (mermaidCache.size >= 32) mermaidCache.delete(mermaidCache.keys().next().value as string);
   mermaidCache.set(key, svg);
 }
-function LazyMermaid({ code }: { code: string }) {
+function LegacyMermaid({ code }: { code: string }) {
   const host = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(() => mermaidCache.get(code) ?? null);
   useEffect(() => {
@@ -92,7 +94,7 @@ function componentsFor(streaming: boolean, magic: boolean): Components {
       const props = child && typeof child === "object" && "props" in child ? (child as { props: { className?: string; children?: ReactNode } }).props : {};
       const language = /language-([\w+#.-]+)/.exec(props.className ?? "")?.[1] ?? "";
       const text = nodeText(props.children).replace(/\n$/, "");
-      if (language === "mermaid" && !streaming) return <LazyMermaid code={text} />;
+      if (language === "mermaid" && !streaming) return performanceOptions.boundedMermaid ? <LazyMermaid code={text} /> : <LegacyMermaid code={text} />;
       return <CodeFrame language={language} text={text} streaming={streaming}>{children}</CodeFrame>;
     },
   };
