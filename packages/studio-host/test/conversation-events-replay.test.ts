@@ -24,6 +24,36 @@ import {
 const SESSION_ID = "session-live-replay" as SessionId;
 const CREATED_AT = "2026-08-24T00:00:00.000Z";
 
+test("W04 incremental replay matches the legacy path for mixed updates and lifecycle events", () => {
+  const legacy = new ConversationEventFanout({ incrementalToolReplay: false });
+  const incremental = new ConversationEventFanout({ incrementalToolReplay: true });
+  let seed = 42;
+  const pieces = ['a\n"\\', '中文', '\ud83d', '\ude80', '\ud800', '', 'x'.repeat(32 * 1024)];
+  for (let seq = 1; seq <= 1500; seq++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const sessionId = `session-${seq % 3}` as SessionId;
+    const turnId = `turn-${Math.floor(seq / 200)}`;
+    const base = { sessionId, turnId };
+    let event: ConversationRuntimeEvent;
+    if (seq % 101 === 0) event = { ...base, kind: "conversation.turn.aborted" };
+    else if (seq % 103 === 0) event = { ...base, kind: "conversation.turn.completed" };
+    else if (seq % 53 === 0) event = { ...base, kind: "conversation.tool.completed", toolCallId: "tool", completedAt: CREATED_AT,
+      result: { type: "toolResult", toolCallId: "tool", toolName: "bash", isError: true } };
+    else event = { ...base, kind: "conversation.tool.updated", toolCallId: "tool", updateMode: seed % 13 === 0 ? "replace" : "append",
+      ...(seed % 7 === 0 ? {} : { output: pieces[seed % pieces.length]! }), ...(seed % 11 === 0 ? { truncated: true } : {}) };
+    const input = envelope(seq, event);
+    assert.equal(incremental.forward(input), legacy.forward(input));
+    const actual = incremental.snapshot(sessionId);
+    assert.deepEqual(actual, legacy.snapshot(sessionId), `seq=${seq}`);
+    assert.equal(incremental.getDiagnostics().replayBytes, legacy.getDiagnostics().replayBytes);
+    // A replay consumer cannot mutate later snapshots.
+    (actual.events as StudioConversationForward[]).splice(0, 1);
+    assert.deepEqual(incremental.snapshot(sessionId), legacy.snapshot(sessionId));
+  }
+  incremental.dispose();
+  assert.deepEqual(incremental.getDiagnostics(), { listeners: 0, replaySessions: 0, replayEvents: 0, replayBytes: 0, toolChunks: 0 });
+});
+
 function envelope(eventSeq: number, event: ConversationRuntimeEvent): StudioEventEnvelope {
   return {
     type: "studio.event",

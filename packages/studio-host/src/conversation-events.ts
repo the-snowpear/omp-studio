@@ -6,6 +6,7 @@ import {
   type ConversationRuntimeEvent,
   type StudioEventEnvelope,
 } from "@omp-studio/studio-protocol";
+import { ReplayTextBuffer } from "./replay-text-buffer.js";
 
 export const CONVERSATION_RUNTIME_EVENT_KINDS = [
   "conversation.message.started",
@@ -44,6 +45,7 @@ type ReplaySession = {
   readonly events: Map<string, StudioConversationForward>;
   readonly eventBytes: Map<string, number>;
   readonly deltaChunks: Map<string, { totalBytes: number; lastKey: string; nextIndex: number }>;
+  readonly toolBuffers: Map<string, ReplayTextBuffer>;
 };
 
 function turnIdOf(event: ConversationRuntimeEvent): string | undefined {
@@ -63,6 +65,35 @@ export class ConversationEventFanout {
   readonly #streamSeq = new Map<string, number>();
   readonly #evictedTurns = new Map<string, string | undefined>();
   #replayBytes = 0;
+
+  constructor(readonly options: { readonly incrementalToolReplay?: boolean } = {}) {}
+
+  getDiagnostics(): Readonly<Record<string, number>> {
+    let events = 0;
+    let chunks = 0;
+    for (const session of this.#replay.values()) {
+      events += session.events.size;
+      for (const buffer of session.toolBuffers.values()) chunks += buffer.chunkCount;
+    }
+    return { listeners: this.#listeners.size + this.#resyncListeners.size, replaySessions: this.#replay.size,
+      replayEvents: events, replayBytes: this.#replayBytes, toolChunks: chunks };
+  }
+
+  #materialize(session: ReplaySession, key: string, forward: StudioConversationForward): StudioConversationForward {
+    const buffer = session.toolBuffers.get(key);
+    const event = forward.envelope.event;
+    if (buffer === undefined || event.kind !== "conversation.tool.updated" || !("output" in event)) return forward;
+    return { ...forward, envelope: { ...forward.envelope, event: { ...event, output: buffer.materialize() } } };
+  }
+
+  #releaseToolBuffers(session: ReplaySession): void {
+    for (const [key, buffer] of session.toolBuffers) {
+      const event = session.events.get(key);
+      if (event !== undefined) session.events.set(key, this.#materialize(session, key, event));
+      buffer.clear();
+    }
+    session.toolBuffers.clear();
+  }
 
   onEvent(listener: (event: StudioConversationForward) => void): () => void {
     this.#listeners.add(listener);
@@ -91,7 +122,8 @@ export class ConversationEventFanout {
         reason: "live conversation replay exceeded the Host byte or event limit; reopen the conversation",
       };
     }
-    const events = [...(session?.events.values() ?? [])]
+    const events = [...(session?.events.entries() ?? [])]
+      .map(([key, event]) => this.#materialize(session!, key, event))
       .sort((left, right) => left.streamSeq - right.streamSeq)
       .map((event) => structuredClone(event));
     return { status: "complete", watermark, events };
@@ -165,6 +197,7 @@ export class ConversationEventFanout {
         events: new Map(),
         eventBytes: new Map(),
         deltaChunks: new Map(),
+        toolBuffers: new Map(),
         byteSize: 0,
       };
       this.#replay.set(sessionId, session);
@@ -197,6 +230,26 @@ export class ConversationEventFanout {
         return;
       case "conversation.tool.updated": {
         const key = `tool-updated:${event.toolCallId}`;
+        if (this.options.incrementalToolReplay === true) {
+          if (session.overflowed === true) return;
+          let buffer = session.toolBuffers.get(key);
+          if (buffer === undefined) {
+            buffer = new ReplayTextBuffer(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+            const previous = session.events.get(key)?.envelope.event;
+            if (previous?.kind === "conversation.tool.updated") buffer.replace(previous.output ?? "");
+            session.toolBuffers.set(key, buffer);
+          }
+          const truncated = event.updateMode === "replace" ? buffer.replace(event.output ?? "") : buffer.append(event.output ?? "");
+          const metadata: StudioConversationForward = {
+            streamSeq: forward.streamSeq,
+            envelope: { ...forward.envelope, event: { ...event, updateMode: "replace",
+              ...(event.output !== undefined || buffer.byteLength > 0 ? { output: "" } : {}),
+              ...(event.truncated === true || truncated ? { truncated: true } : {}),
+            } },
+          };
+          this.#store(session, key, metadata, utf8ByteLength(JSON.stringify(metadata)) + buffer.jsonBytes);
+          return;
+        }
         const previous = session.events.get(key)?.envelope.event;
         const previousOutput = previous?.kind === "conversation.tool.updated" ? (previous.output ?? "") : "";
         const raw = event.updateMode === "replace" ? (event.output ?? "") : previousOutput + (event.output ?? "");
@@ -221,6 +274,7 @@ export class ConversationEventFanout {
         return;
       case "conversation.turn.completed":
       case "conversation.turn.aborted":
+        this.#releaseToolBuffers(session);
         this.#store(session, "turn-terminal", structuredClone(forward));
         return;
       case "conversation.compaction.started":
@@ -268,6 +322,8 @@ export class ConversationEventFanout {
     }
     session.eventBytes.delete(key);
     session.events.delete(key);
+    session.toolBuffers.get(key)?.clear();
+    session.toolBuffers.delete(key);
   }
 
   #clear(session: ReplaySession): void {
@@ -275,6 +331,8 @@ export class ConversationEventFanout {
     session.events.clear();
     session.eventBytes.clear();
     session.deltaChunks.clear();
+    for (const buffer of session.toolBuffers.values()) buffer.clear();
+    session.toolBuffers.clear();
     session.byteSize = 0;
   }
 

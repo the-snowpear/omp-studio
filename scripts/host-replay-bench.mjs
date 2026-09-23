@@ -33,6 +33,8 @@ const reportPath = process.env.PERF_BENCH_REPORT ?? join(root, "outputs", "perf"
 
 const SESSION = "bench-session";
 const TURN = "bench-turn";
+const incrementalToolReplay = process.env.PERF_INCREMENTAL_REPLAY === "1";
+const fanoutForBench = () => new ConversationEventFanout({ incrementalToolReplay });
 
 function git(...args) {
   try {
@@ -57,6 +59,7 @@ function identity() {
     cpuCount: cpus().length,
     totalMemBytes: totalmem(),
     runs: RUNS,
+    optimizations: { incrementalToolReplay, parserReuse: true },
   };
 }
 
@@ -130,7 +133,7 @@ const SCENARIOS = [
     detail: "10,000 次文本 delta 经 forward()（解析 + streamSeq + 有界 replay + 投递）",
     run: () => measure(
       () => {
-        const fanout = new ConversationEventFanout();
+        const fanout = fanoutForBench();
         fanout.onEvent(() => {});
         return fanout;
       },
@@ -146,7 +149,7 @@ const SCENARIOS = [
     detail: "10,000 次文本 delta 后取一次 snapshot()",
     run: () => measure(
       () => {
-        const fanout = new ConversationEventFanout();
+        const fanout = fanoutForBench();
         for (let index = 0; index < 10_000; index += 1) {
           fanout.forward(envelope(index + 1, textDelta("token ")));
         }
@@ -160,7 +163,7 @@ const SCENARIOS = [
     detail: "5,000 次小块工具输出追加（每次 41B）——W04 的主目标路径",
     run: () => measure(
       () => {
-        const fanout = new ConversationEventFanout();
+        const fanout = fanoutForBench();
         fanout.onEvent(() => {});
         startTool(fanout, 1);
         return fanout;
@@ -178,7 +181,7 @@ const SCENARIOS = [
     detail: "5,000 次小块追加后取一次 snapshot()（物化 + 结构化克隆）",
     run: () => measure(
       () => {
-        const fanout = new ConversationEventFanout();
+        const fanout = fanoutForBench();
         startTool(fanout, 1);
         const chunk = `${"x".repeat(40)}\n`;
         for (let index = 0; index < 5_000; index += 1) {
@@ -194,7 +197,7 @@ const SCENARIOS = [
     detail: "5,000 次追加，每 50 次取一次 snapshot()——高频 snapshot 不得恶化超过 10%",
     run: () => measure(
       () => {
-        const fanout = new ConversationEventFanout();
+        const fanout = fanoutForBench();
         startTool(fanout, 1);
         return fanout;
       },
@@ -212,7 +215,7 @@ const SCENARIOS = [
     detail: "500 次 64KiB 整串 replace——单独报告，不承诺同等收益",
     run: () => measure(
       () => {
-        const fanout = new ConversationEventFanout();
+        const fanout = fanoutForBench();
         startTool(fanout, 1);
         return fanout;
       },
@@ -229,7 +232,7 @@ const SCENARIOS = [
     detail: "5,000 次中文 + emoji 小块追加（跨分片代理对）",
     run: () => measure(
       () => {
-        const fanout = new ConversationEventFanout();
+        const fanout = fanoutForBench();
         startTool(fanout, 1);
         return fanout;
       },
