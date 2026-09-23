@@ -51,7 +51,7 @@ test("W04 incremental replay matches the legacy path for mixed updates and lifec
     assert.deepEqual(incremental.snapshot(sessionId), legacy.snapshot(sessionId));
   }
   incremental.dispose();
-  assert.deepEqual(incremental.getDiagnostics(), { listeners: 0, replaySessions: 0, replayEvents: 0, replayBytes: 0, toolChunks: 0 });
+  assert.deepEqual(incremental.getDiagnostics(), { listeners: 0, replaySessions: 0, replayEvents: 0, replayBytes: 0, toolChunks: 0, pendingItems: 0, pendingBytes: 0 });
 });
 
 function envelope(eventSeq: number, event: ConversationRuntimeEvent): StudioEventEnvelope {

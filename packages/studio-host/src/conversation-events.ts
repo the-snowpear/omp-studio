@@ -7,6 +7,7 @@ import {
   type StudioEventEnvelope,
 } from "@omp-studio/studio-protocol";
 import { ReplayTextBuffer } from "./replay-text-buffer.js";
+import { ConversationCoalescer, type ConversationCoalescerOptions } from "./conversation-coalescer.js";
 
 export const CONVERSATION_RUNTIME_EVENT_KINDS = [
   "conversation.message.started",
@@ -65,8 +66,27 @@ export class ConversationEventFanout {
   readonly #streamSeq = new Map<string, number>();
   readonly #evictedTurns = new Map<string, string | undefined>();
   #replayBytes = 0;
+  #epoch: number | undefined;
+  readonly #coalescer: ConversationCoalescer;
 
-  constructor(readonly options: { readonly incrementalToolReplay?: boolean } = {}) {}
+  constructor(readonly options: { readonly incrementalToolReplay?: boolean; readonly backgroundCoalescing?: boolean;
+    readonly timers?: Pick<ConversationCoalescerOptions, "setTimer" | "clearTimer"> } = {}) {
+    this.#coalescer = new ConversationCoalescer({ ...options.timers, emit: (envelope) => this.#deliver(envelope) });
+  }
+
+  setVisibleSessions(ids: ReadonlySet<string> | undefined): void {
+    this.#coalescer.setVisibleSessions(this.options.backgroundCoalescing === true ? ids : undefined);
+  }
+
+  flush(): void { this.#coalescer.flush(); }
+
+  resetEpoch(epoch: number): void {
+    if (this.#epoch !== undefined && this.#epoch !== epoch) {
+      this.#coalescer.reset();
+      this.#replay.clear(); this.#streamSeq.clear(); this.#evictedTurns.clear(); this.#replayBytes = 0;
+    }
+    this.#epoch = epoch;
+  }
 
   getDiagnostics(): Readonly<Record<string, number>> {
     let events = 0;
@@ -76,7 +96,7 @@ export class ConversationEventFanout {
       for (const buffer of session.toolBuffers.values()) chunks += buffer.chunkCount;
     }
     return { listeners: this.#listeners.size + this.#resyncListeners.size, replaySessions: this.#replay.size,
-      replayEvents: events, replayBytes: this.#replayBytes, toolChunks: chunks };
+      replayEvents: events, replayBytes: this.#replayBytes, toolChunks: chunks, ...this.#coalescer.getDiagnostics() };
   }
 
   #materialize(session: ReplaySession, key: string, forward: StudioConversationForward): StudioConversationForward {
@@ -112,6 +132,7 @@ export class ConversationEventFanout {
   snapshot(sessionId: ConversationRuntimeEvent["sessionId"]):
     | { readonly status: "complete"; readonly watermark: number; readonly events: readonly StudioConversationForward[] }
     | { readonly status: "resyncRequired"; readonly watermark: number; readonly events: readonly []; readonly reason: string } {
+    this.flush();
     const session = this.#replay.get(sessionId);
     const watermark = this.#streamSeq.get(sessionId) ?? 0;
     if (session?.overflowed === true || this.#evictedTurns.has(sessionId)) {
@@ -154,6 +175,7 @@ export class ConversationEventFanout {
         ? (envelope.event as { readonly kind?: unknown }).kind
         : undefined;
     if (!isAllowListedConversationKind(kind)) {
+      this.flush();
       return false;
     }
     let parsed: ConversationRuntimeEvent;
@@ -163,6 +185,13 @@ export class ConversationEventFanout {
       this.emitResync("conversation mapping failed; re-read open transcripts");
       return false;
     }
+    this.resetEpoch(Number(envelope.runtimeEpoch));
+    this.#coalescer.push({ ...envelope, event: parsed });
+    return true;
+  }
+
+  #deliver(envelope: StudioEventEnvelope<ConversationRuntimeEvent>): void {
+    const parsed = parseConversationRuntimeEvent(envelope.event);
     const sessionId = parsed.sessionId;
     const streamSeq = (this.#streamSeq.get(sessionId) ?? 0) + 1;
     this.#streamSeq.set(sessionId, streamSeq);
@@ -179,7 +208,6 @@ export class ConversationEventFanout {
         // Sibling listener isolation: one throw must not skip the rest.
       }
     }
-    return true;
   }
 
   #remember(forward: StudioConversationForward): void {
@@ -423,6 +451,7 @@ export class ConversationEventFanout {
   }
 
   dispose(): void {
+    this.#coalescer.dispose();
     this.#listeners.clear();
     this.#resyncListeners.clear();
     this.#replay.clear();
