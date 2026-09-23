@@ -27,6 +27,8 @@ import { registerChromeNotifyIpc } from "./chrome-notify.js";
 import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
 import { registerChromeLogsIpc } from "./chrome-logs.js";
 import { registerChromeMetricsIpc } from "./chrome-metrics.js";
+import { registerChromePerformanceIpc } from "./chrome-performance.js";
+import { logRendererPerformance } from "./desktop-performance.js";
 import { registerChromeProfileIpc } from "./chrome-profile.js";
 import { resolveProfilePersistRoot } from "./chrome-profile-store.js";
 import { registerPayloadHealthIpc } from "./payload-health.js";
@@ -411,6 +413,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
       actions: { appMetrics: () => app.getAppMetrics(), now: () => new Date() },
     });
+    const disposePerformance = registerChromePerformanceIpc({ ipcMain, isTrustedSender, emit: logRendererPerformance });
     const logsDirectory = defaultHostLogsDirectory();
     const disposeLogs = registerChromeLogsIpc({
       ipcMain: {
@@ -640,6 +643,7 @@ export async function main(): Promise<void> {
         disposeImage.dispose();
         disposeLogs.dispose();
         disposeMetrics.dispose();
+        disposePerformance.dispose();
         disposeProfile();
         disposeOpenUrl.dispose();
         disposeNotify();

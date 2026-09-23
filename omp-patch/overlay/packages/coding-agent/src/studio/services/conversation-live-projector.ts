@@ -251,6 +251,13 @@ export class ConversationLiveProjector {
 		return this.#sessionId;
 	}
 
+	getDiagnostics(): Readonly<Record<string, number>> {
+		let blockBytes = 0;
+		for (const message of this.#openMessages.values()) for (const block of message.blocks.values()) blockBytes += block.bytes;
+		return { messages: this.#openMessages.size, tools: this.#toolOutput.size,
+			pending: this.#pending.size + this.#toolPending.size, blockBytes, listeners: this.#listeners.size };
+	}
+
 	get runtimeEpoch(): number {
 		return this.#runtimeEpoch;
 	}

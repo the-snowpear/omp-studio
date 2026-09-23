@@ -23,6 +23,11 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { getAppSettings } from "./settings/appSettings";
 import { resolveLanguage } from "./i18n";
 import { initPerformanceTimelineCleanup } from "./performanceTimelineCleanup";
+import { createRendererPerformanceReporter } from "./rendererPerformance";
+
+const stopPerformanceReporter = createRendererPerformanceReporter(globalThis.ompStudioChrome);
+window.addEventListener("pagehide", stopPerformanceReporter, { once: true });
+import.meta.hot?.dispose(() => { window.removeEventListener("pagehide", stopPerformanceReporter); stopPerformanceReporter(); });
 
 /* 首屏预应用主题 / 密度 / 语言：打包 CSP 是 script-src 'self'，不能靠 index.html
    内联脚本；这里在 React 挂载前同步 DOM 属性，避免首帧闪回默认主题。 */

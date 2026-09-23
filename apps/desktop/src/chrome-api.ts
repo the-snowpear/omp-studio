@@ -1,5 +1,7 @@
 import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
+import { CHROME_PERFORMANCE_CHANNEL } from "./chrome-performance-shared.js";
+import type { MemorySample } from "@omp-studio/studio-protocol";
 import { CHROME_NOTIFY_CHANNEL } from "./chrome-notify-shared.js";
 import { CHROME_OPEN_URL_CHANNEL } from "./chrome-open-url-shared.js";
 import {
@@ -72,6 +74,9 @@ export function subscribeChannel<T>(
 
 export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike) {
   return Object.freeze({
+    reportPerformanceSample(sample: MemorySample): Promise<boolean> {
+      return ipcRenderer.invoke(CHROME_PERFORMANCE_CHANNEL, sample) as Promise<boolean>;
+    },
     setTheme(theme: "light" | "dark"): Promise<void> {
       if (theme !== "light" && theme !== "dark") return Promise.resolve();
       return ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, { theme }) as Promise<void>;

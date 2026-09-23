@@ -58,6 +58,7 @@ import {
   type DesktopRuntimeSessionPort,
 } from "./host-composition.js";
 import { createHostFileLog, defaultHostLogsDirectory } from "./host-log.js";
+import { startHostPerformance } from "./desktop-performance.js";
 import { createDesktopGitService } from "./git-service.js";
 import { createDesktopGithubService } from "./github-service.js";
 import { GitWriteQueue, HostProcessRunner } from "./git-process.js";
@@ -623,6 +624,7 @@ export function createProductionHostFactory(options?: {
   const hostLog = createHostFileLog({
     directory: defaultHostLogsDirectory(),
   });
+  let stopPerformance: (() => void) | undefined;
   // Runtime 进程由 Host 生命周期管理；Worker 的停驻/唤醒由 OMP Runtime
   // 内部 AgentLifecycleManager 负责。桌面层不因空闲或容量淘汰 Runtime，
   // 避免后台切换时把 Worker 内存维护表现成 Bridge 断开。
@@ -696,6 +698,7 @@ export function createProductionHostFactory(options?: {
     git,
     github,
     disposeHostOperations: () => {
+      stopPerformance?.(); stopPerformance = undefined;
       detachWorkspaceSink?.();
       detachWorkspaceSink = undefined;
       gitProcessRunner.cancelAll();
@@ -749,6 +752,7 @@ export function createProductionHostFactory(options?: {
       let composition = await factory.create();
       if (await options?.afterCreate?.(composition, workspaceCwd.current !== undefined)) composition = await factory.create();
       activeComposition = composition;
+      stopPerformance ??= startHostPerformance(hostLog);
       return composition;
     },
     async resolveWorkspaceCwd(workspaceId: string): Promise<string> {

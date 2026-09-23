@@ -7,6 +7,7 @@ import { createConversationSource } from "./conversationSource";
 import { ConversationStore } from "./conversationStore";
 import type { ConversationState, TimelineRow } from "./conversationViewModel";
 import type { SubagentHubTarget } from "./toolMeta";
+import { registerRendererResource } from "../rendererResources";
 
 export type SubagentConversationClient = Pick<StudioClient, "query" | "subscribe">;
 export type SubagentConversationEngineInput = { readonly preview: boolean; readonly previewItems: readonly ConversationItem[]; readonly client: SubagentConversationClient | null; readonly target: SubagentHubTarget | null; readonly runtimeConnected: boolean; readonly parentSessionId?: SessionId; readonly liveSessionId?: SessionId };
@@ -30,6 +31,8 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
   let liveTarget: ConversationTarget | undefined;
   let snapshot: SubagentConversationSnapshot = { ...store.getSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getSnapshot().state.identity) };
   const offStore = store.subscribe(() => publish());
+  const unregisterDiagnostics = registerRendererResource("engines", () => ({ rows: snapshot.rows.length, listeners: listeners.size,
+    openBufferEvents: buffered.length, openBufferBytes: bufferedBytes }));
   function publish(): void { if (disposed) return; const value = store.getSnapshot(); snapshot = { ...value, demo: input.preview, loadingOlder, identityKey: identityKey(value.state.identity) }; for (const listener of listeners) listener(); }
   function applyLiveEvent(event: Extract<ClientEvent, { kind: "conversation.changed" }>): void {
     if (event.streamSeq <= watermark) return;
@@ -105,6 +108,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
     // the store's empty one so a retained engine cannot hold the child transcript.
     dispose() {
       if (disposed) return; disposed = true; token += 1;
+      unregisterDiagnostics();
       unsubscribe?.(); unsubscribe = undefined; offStore(); listeners.clear();
       store.dispose();
       const value = store.getSnapshot();

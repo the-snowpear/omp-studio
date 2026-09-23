@@ -51,6 +51,7 @@ import {
   type SessionLeaseStore,
   type WindowsBridgeAclPort,
 } from "@omp-studio/studio-host";
+import { registerPerformanceController } from "./desktop-performance.js";
 import type {
   ApprovalMode,
   CommandLedgerEntry,
@@ -1075,6 +1076,7 @@ function createSingleDesktopRuntimeSessionPort(
   let bridge: StudioBridgeClient | undefined;
   let bundle: DesktopRuntimeSession | undefined;
   let sessionController: StudioRuntimeSessionController | undefined;
+  let unregisterPerformance: (() => void) | undefined;
   let unsubscribeProjection: (() => void) | undefined;
   let alive = false;
   let resumeSessionId: string | undefined = initialResumeSessionId;
@@ -1209,6 +1211,7 @@ function createSingleDesktopRuntimeSessionPort(
     bundle = undefined;
     const controller = sessionController ?? current?.controller;
     sessionController = undefined;
+    unregisterPerformance?.(); unregisterPerformance = undefined;
     controller?.dispose();
     const port = processPort;
     processPort = undefined;
@@ -1402,6 +1405,7 @@ function createSingleDesktopRuntimeSessionPort(
       await port.start(binding);
 
       controller = new StudioRuntimeSessionController(client, new CommandLedger());
+      unregisterPerformance = registerPerformanceController(controller);
       sessionController = controller;
       await controller.refresh();
       if (hello === undefined) {

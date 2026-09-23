@@ -13,6 +13,7 @@ import { buildPersistedTimeline, buildPersistedTimelineRow, buildTransientTimeli
 import type { UserThumbMap } from "./userMessageThumbs";
 import { capByImageBytes, docImageBytes, thumbsImageBytes } from "./userMessageThumbs";
 import { getAppSettings, type StreamingCadenceHz } from "../settings/appSettings";
+import { registerRendererResource } from "../rendererResources";
 
 const DEFAULT_MAX_ROWS = 2_000;
 const DEFAULT_MAX_BYTES = 24 * 1024 * 1024;
@@ -67,6 +68,8 @@ function pageItems(items: readonly ConversationItem[], maxRows: number, maxBytes
 }
 
 export class ConversationStore {
+  private published = 0;
+  private readonly unregisterDiagnostics: () => void;
   private readonly listeners = new Set<() => void>();
   private readonly metadataListeners = new Set<() => void>();
   private readonly scheduler: FrameScheduler;
@@ -127,7 +130,11 @@ export class ConversationStore {
     const state = { ...emptyConversationState(this.generation), identity: this.identity };
     this.snapshot = { state, rows: [] };
     this.metadataSnapshot = this.snapshot;
+    this.unregisterDiagnostics = registerRendererResource("stores", () => this.getDiagnostics());
   }
+
+  getDiagnostics(): Readonly<Record<string, number>> { return { rows: this.snapshot.rows.length, rowCache: this.rowCache.size,
+    listeners: this.listeners.size + this.metadataListeners.size, published: this.published }; }
 
   getSnapshot = (): ConversationStoreSnapshot => this.snapshot;
   getMetadataSnapshot = (): ConversationStoreSnapshot => this.metadataSnapshot;
@@ -483,6 +490,7 @@ export class ConversationStore {
   private publishNow(): void {
     if (this.disposed) return; if (this.frame !== undefined) { this.scheduler.cancel(this.frame); this.frame = undefined; }
     this.queuedStreaming = false; this.queuedImmediate = false;
+    this.published++;
     this.lastPublishedAt = this.scheduler.now?.() ?? Date.now();
     const state = this.state();
     this.pruneRowCache();
@@ -525,6 +533,7 @@ export class ConversationStore {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.unregisterDiagnostics();
     if (this.frame !== undefined) this.scheduler.cancel(this.frame);
     this.frame = undefined;
     this.listeners.clear(); this.metadataListeners.clear();

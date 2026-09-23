@@ -7,6 +7,7 @@ import { createConversationSource } from "./conversationSource";
 import { ConversationStore } from "./conversationStore";
 import type { ConversationState, PendingUser, TimelineRow } from "./conversationViewModel";
 import { getDefaultThumbStore, type UserThumbStore } from "./userMessageThumbs";
+import { registerRendererResource } from "../rendererResources";
 
 export type ConversationEngineInput = {
   readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null;
@@ -60,6 +61,8 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
   let liveTarget: ConversationTarget | undefined; let conversationSessionId: string | undefined; let watermark = 0;
   let buffer: BufferedConversationEvent[] = []; let bufferBytes = 0; let bufferOverflowed = false;
   let snapshot: ConversationSnapshot = { ...store.getSnapshot(), demo: input.preview, loadingOlder: false, identityKey: identityKey(identity) };
+  const unregisterDiagnostics = registerRendererResource("engines", () => ({ rows: snapshot.rows.length, listeners: listeners.size + metadataListeners.size,
+    openBufferEvents: buffer.length, openBufferBytes: bufferBytes }));
   metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder: false, identityKey: identityKey(identity) };
 
   function publish(): void {
@@ -165,6 +168,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
      */
     dispose() {
       if (disposed) return; disposed = true; run += 1;
+      unregisterDiagnostics();
       transportUnsubscribe?.(); transportUnsubscribe = undefined;
       storeUnsubscribe(); storeMetadataUnsubscribe();
       listeners.clear(); metadataListeners.clear();
