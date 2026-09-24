@@ -263,7 +263,8 @@ const PREFIX_VALUE = /^[A-Za-z0-9._:-]{1,64}$/u;
  * V8 heap occupancy — the caller's counter names should say so.
  */
 export function formatMemorySampleLine(sample: MemorySample, options: FormatMemorySampleOptions = {}): string {
-  const maxLength = options.maxLength ?? DEFAULT_LINE_MAX_LENGTH;
+  const requestedMaxLength = options.maxLength ?? DEFAULT_LINE_MAX_LENGTH;
+  const maxLength = Number.isFinite(requestedMaxLength) ? Math.max(0, Math.floor(requestedMaxLength)) : DEFAULT_LINE_MAX_LENGTH;
   const normalized = normalizeMemorySample(sample);
   const parts: string[] = [`role=${normalized.role}`];
   for (const [key, value] of Object.entries(options.prefix ?? {})) {
@@ -287,7 +288,9 @@ export function formatMemorySampleLine(sample: MemorySample, options: FormatMemo
     rendered += 1;
   }
   if (rendered < counterEntries.length) line += ` …+${counterEntries.length - rendered}`;
-  return line;
+  // The fixed role/prefix portion can itself be wider than a caller-supplied
+  // cap. Keep the public bound absolute even in that degenerate case.
+  return line.length <= maxLength ? line : line.slice(0, maxLength);
 }
 
 export interface DiagnosticsSamplerOptions {

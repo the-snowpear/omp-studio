@@ -36,7 +36,7 @@ export function startHostPerformance(log: HostLog): () => void {
       heapTotalBytes: memory.heapTotal, externalBytes: memory.external, arrayBuffersBytes: memory.arrayBuffers, counters: registry.collect() }; },
     emit: (sample, decision) => log.write("info", "performance.sample", formatMemorySampleLine(sample, { prefix: { instance, seq: decision.seq, reason: decision.reason ?? "first" } })),
     setInterval: (callback, ms) => setInterval(callback, ms), clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
-    onScheduled: (handle) => (handle as NodeJS.Timeout).unref(),
+    onScheduled: (handle) => (handle as { unref?: () => void }).unref?.(),
   });
   sampler.start(); void sampler.tick();
   return () => { sampler.dispose(); unregister(); if (sink === log) sink = undefined; };

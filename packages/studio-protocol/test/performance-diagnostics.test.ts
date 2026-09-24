@@ -179,6 +179,7 @@ test("formatMemorySampleLine renders present fields only and stays within the ca
   const bounded = formatMemorySampleLine({ role: "main-host", rssBytes: 1, counters: many }, { maxLength: 300 });
   assert.ok(bounded.length <= 300, `line is ${bounded.length} chars`);
   assert.match(bounded, / …\+\d+$/u);
+  assert.ok(formatMemorySampleLine({ role: "runtime", counters: { "host.items": 1 } }, { maxLength: 5 }).length <= 5);
   // Default cap fits under HostLog's 2000-char detail limit.
   const wide = formatMemorySampleLine({ role: "main-host", counters: many });
   assert.ok(wide.length <= 1900);
