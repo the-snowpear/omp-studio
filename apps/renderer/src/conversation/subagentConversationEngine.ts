@@ -71,7 +71,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
     try {
       if (input.runtimeConnected && input.liveSessionId === parentSessionId) {
         const opened = await source.open(target, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
-        if (disposed || current !== token) return; const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId);
+        if (disposed || current !== token) return; const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId, opened.page.runtimeEpoch);
         watermark = opened.live.watermark;
         if (opened.live.status === "resyncRequired") {
           store.hydrate(opened.page, [], watermark);

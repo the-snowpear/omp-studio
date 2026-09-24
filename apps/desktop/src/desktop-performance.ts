@@ -1,13 +1,19 @@
 import { createCounterRegistry, createDiagnosticsSampler, createMemorySampleGate, formatMemorySampleLine, type MemorySample, type MemorySampleGateDecision } from "@omp-studio/studio-protocol";
 import type { StudioRuntimeSessionController } from "@omp-studio/studio-host";
 import type { HostLog } from "./host-log.js";
+import { ConversationViews } from "./conversation-views.js";
+
+export const desktopConversationViews = new ConversationViews();
 
 const controllers = new Set<StudioRuntimeSessionController>();
 let sink: HostLog | undefined;
 let nextInstance = 0;
 export function registerPerformanceController(controller: StudioRuntimeSessionController): () => void {
   controllers.add(controller);
-  return () => { controllers.delete(controller); };
+  const unregister = desktopConversationViews.registerController({ epoch: () => controller.publication()?.snapshot.runtimeEpoch,
+    setVisibleSessions: (ids) => controller.setConversationVisibleSessions(ids) });
+  const offPublication = controller.onPublication(() => desktopConversationViews.refresh());
+  return () => { offPublication(); unregister(); controllers.delete(controller); };
 }
 export function collectHostPerformanceCounters(): Readonly<Record<string, number>> {
   const result: Record<string, number> = { residents: controllers.size };

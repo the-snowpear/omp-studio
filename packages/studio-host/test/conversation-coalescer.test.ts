@@ -102,17 +102,32 @@ test("interleaved sessions stay separate, open flushes and stale epochs discard 
   s.send(delta("b", "child" as SessionId));
   s.send(delta("c"));
   s.fanout.snapshot(sessionId);
+  s.tick(250);
   assert.equal(text(s.delivered.filter((e) => e.envelope.event.sessionId === sessionId)), "ac");
-  assert.deepEqual(s.delivered.map((e) => e.streamSeq), [1, 1, 2]);
+  assert.deepEqual(s.delivered.map((e) => e.streamSeq), [1, 2, 1]);
   s.send(delta("must-disappear"));
   s.send(delta("new-epoch"), 2);
   s.tick(250);
-  assert.equal(text(s.delivered), "abcnew-epoch");
+  assert.equal(text(s.delivered), "acbnew-epoch");
   s.fanout.setVisibleSessions(new Set());
   s.send(delta("disposed"), 2);
   s.fanout.dispose();
   s.tick(250);
-  assert.equal(text(s.delivered), "abcnew-epoch");
+  assert.equal(text(s.delivered), "acbnew-epoch");
+});
+
+test("a visible foreground sibling cannot force background deltas to flush every token", () => {
+  const s = setup();
+  s.fanout.setVisibleSessions(new Set([sessionId]));
+  for (let i = 0; i < 50; i++) {
+    s.send(delta("background", "child" as SessionId));
+    s.send(delta("foreground"));
+  }
+  assert.equal(s.delivered.length, 50);
+  assert.equal(s.fanout.getDiagnostics().pendingItems, 50);
+  s.tick(250);
+  assert.equal(text(s.delivered.filter((event) => event.envelope.event.sessionId === "child")), "background".repeat(50));
+  assert.equal(s.fanout.getDiagnostics().pendingItems, 0);
 });
 
 test("append groups keep replace boundaries and truncated flags", () => {

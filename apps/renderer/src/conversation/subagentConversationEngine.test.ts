@@ -78,7 +78,7 @@ describe("subagentConversationEngine", () => {
     expect(after.state.items).toEqual([]);
     // Identity is the resolved child conversation session, exactly as before dispose.
     expect(after.state.identity).toEqual(before.state.identity);
-    expect(after.state.identity).toEqual({ sessionId: conversationPages.userAssistant.sessionId });
+    expect(after.state.identity).toEqual({ sessionId: conversationPages.userAssistant.sessionId, runtimeEpoch: conversationPages.userAssistant.runtimeEpoch });
     expect(after.state.generation).toBe(before.state.generation);
     expect(after.loadingOlder).toBe(false);
     expect(engine.getDiagnostics()).toEqual({ disposed: 1, rows: 0, listeners: 0, openBufferEvents: 0, openBufferBytes: 0 });

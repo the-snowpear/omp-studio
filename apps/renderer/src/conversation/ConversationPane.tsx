@@ -21,6 +21,7 @@ import { isRetryTranscriptNotice } from "./activityStatus";
 import { isTransientStatusNotice } from "./transientStatusNotice";
 import type { SubagentHubTarget } from "./toolMeta";
 import { PlanCreatedCard, type PlanCreatedLink } from "../deck/PlanCreatedCard";
+import { useConversationViewLease } from "./conversationViews";
 
 const FALLBACK_SNAPSHOT: ConversationSnapshot = {
   state: resetConversation(0, null, "unavailable", "当前没有活动会话。"),
@@ -37,6 +38,8 @@ const NOOP_SUBSCRIBE = (): (() => void) => () => undefined;
  *  React，它按引用相等直接跳过整棵子树，DOM（含虚拟列表状态与滚动位置）原样留在
  *  屏上淡出，代价为零。 */
 type PaintedBody = {
+  readonly identity: ConversationState["identity"];
+  readonly demo: boolean;
   readonly node: ReactNode;
   readonly itemCount: number;
   readonly contentKey: string;
@@ -189,6 +192,8 @@ export function ConversationPane({
   /** 淡出期间滚动编排看的是「还在屏上那一屏」，否则它会按新会话的空内容重排，
    *  把正在淡出的旧 transcript 抽走高度。 */
   const held = switchState.phase === "leaving" ? painted.current : null;
+  useConversationViewLease(held?.identity ?? state.identity, held?.demo ?? demo, scrollerRef,
+    standby === undefined && switchState.phase !== "waiting" && switchState.phase !== "settling");
   /* 在屏的面：leaving 期间是正在淡出的旧屏（可能是欢迎区），之后是目标面。
      壳层据此切 .convo-wrap.is-empty——跟目标态走会让 minimap 在旧屏还挂在屏上
      时就占宽，把它向左顶出一次可见跳变。 */
@@ -340,7 +345,7 @@ export function ConversationPane({
   // 前就把 painted 换成自己，旧 transcript 再也留不住，切换时整块硬切加一次淡出淡入。
   const keysChanging = switchKey !== switchState.key;
   if (paintable && switchState.phase !== "leaving" && !keysChanging) {
-    painted.current = { node: liveBody, itemCount: liveItemCount, contentKey: liveContentKey, rows: displayRows, welcome: showWelcome, identityKey, pin: livePin };
+    painted.current = { node: liveBody, itemCount: liveItemCount, contentKey: liveContentKey, rows: displayRows, welcome: showWelcome, identityKey, pin: livePin, identity: state.identity, demo };
   }
   const body = switchState.phase === "leaving" ? heldBody?.node ?? null : paintable ? liveBody : null;
   const minimapRows = standby !== undefined || showWelcome

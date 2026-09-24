@@ -132,7 +132,7 @@ export class ConversationEventFanout {
   snapshot(sessionId: ConversationRuntimeEvent["sessionId"]):
     | { readonly status: "complete"; readonly watermark: number; readonly events: readonly StudioConversationForward[] }
     | { readonly status: "resyncRequired"; readonly watermark: number; readonly events: readonly []; readonly reason: string } {
-    this.flush();
+    this.#coalescer.flush(sessionId);
     const session = this.#replay.get(sessionId);
     const watermark = this.#streamSeq.get(sessionId) ?? 0;
     if (session?.overflowed === true || this.#evictedTurns.has(sessionId)) {
@@ -441,6 +441,7 @@ export class ConversationEventFanout {
   }
 
   emitResync(reason: string): void {
+    this.flush();
     for (const listener of [...this.#resyncListeners]) {
       try {
         listener(reason);

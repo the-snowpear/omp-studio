@@ -1404,7 +1404,10 @@ function createSingleDesktopRuntimeSessionPort(
       processPort = port;
       await port.start(binding);
 
-      controller = new StudioRuntimeSessionController(client, new CommandLedger());
+      controller = new StudioRuntimeSessionController(client, new CommandLedger(), undefined, {
+        incrementalToolReplay: process.env.OMP_INCREMENTAL_REPLAY === "1",
+        backgroundCoalescing: process.env.OMP_BACKGROUND_COALESCING === "1",
+      });
       unregisterPerformance = registerPerformanceController(controller);
       sessionController = controller;
       await controller.refresh();

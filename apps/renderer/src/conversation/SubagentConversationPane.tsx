@@ -16,6 +16,7 @@ import { conversationFollowKey, useConversationScroll } from "./useConversationS
 import { useSubagentConversation } from "./useSubagentConversation";
 import type { SubagentConversationClient } from "./subagentConversationEngine";
 import type { SubagentHubTarget } from "./toolMeta";
+import { useConversationViewLease } from "./conversationViews";
 
 function queuePlaceholder(editing: boolean, running: boolean): string {
   if (editing) return "正在编辑排队消息…";
@@ -69,6 +70,7 @@ export function SubagentConversationPane({
     ...(liveSessionId === undefined ? {} : { liveSessionId }),
   });
   const agent = findSubagentComposerAgent(agents, target.agentId);
+  useConversationViewLease(snapshot.state.identity, preview, scrollerRef, runtimeConnected);
   const composerAllowed = subagentComposerVisible({
     preview,
     runtimeConnected,

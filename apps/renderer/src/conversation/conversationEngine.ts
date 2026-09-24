@@ -115,7 +115,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
       if (input.runtimeConnected && identity.runtimeEpoch !== undefined) {
         const opened = await source.open(liveTarget, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
         if (disposed || token !== run) return;
-        const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId);
+        const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId, opened.page.runtimeEpoch);
         watermark = opened.live.watermark;
         if (opened.live.status === "resyncRequired") {
           store.hydrate(opened.page, [], watermark);

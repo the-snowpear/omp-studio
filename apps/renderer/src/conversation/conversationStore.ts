@@ -14,6 +14,7 @@ import type { UserThumbMap } from "./userMessageThumbs";
 import { capByImageBytes, docImageBytes, thumbsImageBytes } from "./userMessageThumbs";
 import { getAppSettings, type StreamingCadenceHz } from "../settings/appSettings";
 import { registerRendererResource } from "../rendererResources";
+import { performanceOptions } from "../performanceOptions";
 
 const DEFAULT_MAX_ROWS = 2_000;
 const DEFAULT_MAX_BYTES = 24 * 1024 * 1024;
@@ -45,6 +46,7 @@ export type ConversationStoreOptions = {
   readonly maxBytes?: number;
   readonly scheduler?: FrameScheduler;
   readonly streamingCadenceHz?: () => StreamingCadenceHz;
+  readonly backgroundPublishing?: boolean;
 };
 
 /** `ConversationItem` is immutable, so its byte size can be memoised per object.
@@ -70,6 +72,10 @@ function pageItems(items: readonly ConversationItem[], maxRows: number, maxBytes
 export class ConversationStore {
   private published = 0;
   private readonly unregisterDiagnostics: () => void;
+  private background = false;
+  private readonly backgroundPublishing: boolean;
+  private backgroundTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly visibilityChanged = () => this.setBackground(document.hidden);
   private readonly listeners = new Set<() => void>();
   private readonly metadataListeners = new Set<() => void>();
   private readonly scheduler: FrameScheduler;
@@ -131,6 +137,21 @@ export class ConversationStore {
     this.snapshot = { state, rows: [] };
     this.metadataSnapshot = this.snapshot;
     this.unregisterDiagnostics = registerRendererResource("stores", () => this.getDiagnostics());
+    this.backgroundPublishing = options.backgroundPublishing ?? performanceOptions.backgroundPublishing;
+    if (this.backgroundPublishing && typeof document !== "undefined") {
+      this.background = document.hidden;
+      document.addEventListener("visibilitychange", this.visibilityChanged);
+    }
+  }
+
+  setBackground(hidden: boolean): void {
+    if (this.disposed || !this.backgroundPublishing || this.background === hidden) return;
+    this.background = hidden;
+    if (this.frame !== undefined) { this.scheduler.cancel(this.frame); this.frame = undefined; }
+    if (this.backgroundTimer !== undefined) clearTimeout(this.backgroundTimer);
+    this.backgroundTimer = undefined;
+    if (!hidden) this.publishNow();
+    else if (this.queuedStreaming || this.queuedImmediate) this.queuePublish(!this.queuedImmediate);
   }
 
   getDiagnostics(): Readonly<Record<string, number>> { return { rows: this.snapshot.rows.length, rowCache: this.rowCache.size,
@@ -151,10 +172,10 @@ export class ConversationStore {
     return this.liveToolsCache;
   }
 
-  resolveTarget(sessionId: string): void {
-    if (this.target.sessionId === sessionId) return;
+  resolveTarget(sessionId: string, runtimeEpoch?: ConversationIdentity["runtimeEpoch"]): void {
+    if (this.target.sessionId === sessionId && (runtimeEpoch === undefined || this.identity?.runtimeEpoch === runtimeEpoch)) return;
     this.target = { ...this.target, sessionId };
-    this.identity = { ...(this.identity ?? {}), sessionId: sessionId as ConversationIdentity["sessionId"] };
+    this.identity = { ...(this.identity ?? {}), sessionId: sessionId as ConversationIdentity["sessionId"], ...(runtimeEpoch === undefined ? {} : { runtimeEpoch }) };
   }
 
   setLoading(resyncing = false): void { this.status = resyncing ? "resyncing" : "loading"; this.error = undefined; this.resyncRequired = false; this.publishNow(); }
@@ -468,6 +489,11 @@ export class ConversationStore {
     if (this.disposed) return;
     this.queuedStreaming ||= streaming;
     this.queuedImmediate ||= !streaming;
+    if (this.background) {
+      if (!streaming) { this.publishNow(); return; }
+      if (this.backgroundTimer === undefined) this.backgroundTimer = setTimeout(() => { this.backgroundTimer = undefined; this.publishNow(); }, 250);
+      return;
+    }
     if (this.frame !== undefined) return;
     this.frame = this.scheduler.request(() => {
       this.frame = undefined;
@@ -489,6 +515,8 @@ export class ConversationStore {
   }
   private publishNow(): void {
     if (this.disposed) return; if (this.frame !== undefined) { this.scheduler.cancel(this.frame); this.frame = undefined; }
+    if (this.backgroundTimer !== undefined) clearTimeout(this.backgroundTimer);
+    this.backgroundTimer = undefined;
     this.queuedStreaming = false; this.queuedImmediate = false;
     this.published++;
     this.lastPublishedAt = this.scheduler.now?.() ?? Date.now();
@@ -534,6 +562,9 @@ export class ConversationStore {
     if (this.disposed) return;
     this.disposed = true;
     this.unregisterDiagnostics();
+    if (this.backgroundTimer !== undefined) clearTimeout(this.backgroundTimer);
+    this.backgroundTimer = undefined;
+    if (this.backgroundPublishing && typeof document !== "undefined") document.removeEventListener("visibilitychange", this.visibilityChanged);
     if (this.frame !== undefined) this.scheduler.cancel(this.frame);
     this.frame = undefined;
     this.listeners.clear(); this.metadataListeners.clear();

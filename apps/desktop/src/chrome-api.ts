@@ -2,6 +2,7 @@ import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-heal
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
 import { CHROME_PERFORMANCE_CHANNEL } from "./chrome-performance-shared.js";
 import type { MemorySample } from "@omp-studio/studio-protocol";
+import { CONVERSATION_VIEW_CHANNEL, type ConversationViewState } from "./conversation-views.js";
 import { CHROME_NOTIFY_CHANNEL } from "./chrome-notify-shared.js";
 import { CHROME_OPEN_URL_CHANNEL } from "./chrome-open-url-shared.js";
 import {
@@ -74,6 +75,9 @@ export function subscribeChannel<T>(
 
 export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike) {
   return Object.freeze({
+    setConversationViewState(state: ConversationViewState): Promise<boolean> {
+      return ipcRenderer.invoke(CONVERSATION_VIEW_CHANNEL, state) as Promise<boolean>;
+    },
     reportPerformanceSample(sample: MemorySample): Promise<boolean> {
       return ipcRenderer.invoke(CHROME_PERFORMANCE_CHANNEL, sample) as Promise<boolean>;
     },
