@@ -25,6 +25,7 @@
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.6-informational.svg" alt="0.1.6"></a>
   <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows-0078D4.svg" alt="Windows"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
+  <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-Community-FFB003.svg" alt="LINUX DO"></a>
 </p>
 
 OMP Studio is a desktop shell for [oh-my-pi](https://github.com/can1357/oh-my-pi) (OMP). Sessions, approvals, Agent Hub, and the workspace are driven through a typed Studio Bridge — not by scraping TUI text, ANSI, or key macros.
@@ -168,6 +169,8 @@ Invariants (see [docs/architecture.md](docs/architecture.md)):
 Issues and PRs are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 Do not file security issues publicly. Follow [SECURITY.md](SECURITY.md).
+
+Chinese-language discussion and feedback happen on the [LINUX DO](https://linux.do/) community — thanks to everyone there for their support.
 
 Defects in upstream OMP belong in [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi). This repository only maintains the overlay and four seam patches.
 

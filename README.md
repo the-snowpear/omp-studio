@@ -25,6 +25,7 @@
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.6-informational.svg" alt="0.1.6"></a>
   <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows-0078D4.svg" alt="Windows"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
+  <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-Community-FFB003.svg" alt="LINUX DO"></a>
 </p>
 
 OMP Studio 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的桌面壳。它把会话、审批、Agent Hub 和工作区接到类型化的 Studio Bridge 上，而不是去解析 TUI 文本、ANSI 或按键宏。
@@ -168,6 +169,8 @@ Renderer → StudioClient → Desktop IPC → Host facade
 欢迎 Issue 与 PR。请先读 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
 不要把安全问题发到公开 Issue。安全报告走 [SECURITY.md](SECURITY.md)。
+
+中文交流、建议与反馈欢迎来 [LINUX DO](https://linux.do/) 社区，感谢佬友们的支持。
 
 上游 OMP 本身的缺陷请提到 [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi)。本仓库只维护 overlay 与四组接缝补丁。
 
