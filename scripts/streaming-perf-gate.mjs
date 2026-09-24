@@ -21,10 +21,20 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import { cpus } from "node:os";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const rendererRoot = join(root, "apps", "renderer");
 const reportPath = process.env.PERF_REPORT ?? join(root, "outputs", "streaming-perf.json");
+const RUNS = Number(process.env.PERF_RUNS ?? 5);
+const production = process.env.PERF_BUILD_MODE === "production";
+const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const identity = { commit: git("rev-parse", "HEAD"), dirty: git("status", "--porcelain"), node: process.version,
+  buildMode: production ? "production" : "development", cpuCount: cpus().length,
+  cpuModel: cpus()[0]?.model, runs: RUNS, optimizations: {} };
+// Recording must retain its marks even when the dev cleanup module is loaded.
+process.env.VITE_OMP_PRESERVE_PERFORMANCE_TIMELINE = "1";
 
 /**
  * 历史越长、工具输出越多，单帧布局代价的允许放大倍数。
@@ -97,6 +107,16 @@ async function loadPlaywright() {
 }
 
 async function startServer() {
+  if (production) {
+    const { build, preview } = await import("vite");
+    const outDir = join(root, "outputs", "perf", "harness-production");
+    await build({ root: rendererRoot, configFile: join(rendererRoot, "vite.config.ts"), logLevel: "warn",
+      build: { outDir, emptyOutDir: false, rollupOptions: { input: join(rendererRoot, "perf-harness.html") } } });
+    const server = await preview({ root: rendererRoot, configFile: join(rendererRoot, "vite.config.ts"),
+      build: { outDir }, preview: { host: "127.0.0.1", port: 5188, strictPort: false } });
+    return { server: { close: () => new Promise((resolve) => server.httpServer.close(resolve)) },
+      url: `${server.resolvedUrls.local[0]}perf-harness.html` };
+  }
   const { createServer } = await import("vite");
   const server = await createServer({
     root: rendererRoot,
@@ -121,15 +141,18 @@ async function startServer() {
  * "贵得多"读起来一样 —— 而 `LayoutDuration` / `RecalcStyleDuration` 是连续量，正好对应
  * 「工具卡在动画真实高度」这条结论。
  */
-async function scenario(page, cdp, name, seed, runOptions) {
+async function scenarioOnce(page, cdp, name, seed, runOptions) {
   await page.evaluate((value) => window.ompPerf.reset(value), seed);
   await page.evaluate(
     (value) => window.ompPerf.run(value),
     { ...runOptions, frames: Math.min(30, runOptions.frames) },
   );
   const before = await metrics(cdp);
+  const tracing = process.env.PERF_TRACE === "1";
+  if (tracing) await cdp.send("Tracing.start", { categories: "devtools.timeline", transferMode: "ReturnAsStream" });
   const result = await page.evaluate((value) => window.ompPerf.run(value), runOptions);
   const after = await metrics(cdp);
+  const trace = tracing ? await finishTrace(cdp) : undefined;
   const cost = {
     layoutMsPerFrame: ((after.LayoutDuration - before.LayoutDuration) * 1000) / result.frames,
     styleMsPerFrame: ((after.RecalcStyleDuration - before.RecalcStyleDuration) * 1000) / result.frames,
@@ -140,7 +163,43 @@ async function scenario(page, cdp, name, seed, runOptions) {
       + `script ${cost.scriptMsPerFrame.toFixed(2)}ms/f  median ${result.median.toFixed(1)}ms  p95 ${result.p95.toFixed(1)}ms  `
       + `>48ms ${result.stalls}/${result.frames}  toggles ${result.toggles}  rows ${result.rows}`,
   );
-  return { name, seed, ...result, ...cost };
+  return { name, seed, ...result, ...cost, ...(trace === undefined ? {} : trace) };
+}
+
+async function finishTrace(cdp) {
+  const done = new Promise((resolve) => cdp.once("Tracing.tracingComplete", resolve));
+  await cdp.send("Tracing.end");
+  const { stream } = await done;
+  let text = "";
+  try {
+    for (;;) {
+      const chunk = await cdp.send("IO.read", { handle: stream });
+      text += chunk.base64Encoded ? Buffer.from(chunk.data, "base64").toString("utf8") : chunk.data;
+      if (chunk.eof) break;
+    }
+  } finally { await cdp.send("IO.close", { handle: stream }); }
+  const events = JSON.parse(text).traceEvents;
+  const durations = (names) => {
+    const samples = events.filter((event) => event.ph === "X" && names.includes(event.name) && typeof event.dur === "number")
+      .map((event) => event.dur / 1000).sort((a, b) => a - b);
+    if (samples.length === 0) throw new Error(`trace did not capture ${names.join("/")}`);
+    return samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))];
+  };
+  return { scriptTaskP95Ms: durations(["FunctionCall", "EvaluateScript", "RunMicrotasks"]), layoutTaskP95Ms: durations(["Layout"]) };
+}
+
+async function scenario(page, cdp, name, seed, runOptions) {
+  const samples = [];
+  for (let run = 0; run < RUNS; run++) samples.push(await scenarioOnce(page, cdp, name, seed, runOptions));
+  const summary = { ...samples[0] };
+  const worst = {};
+  for (const key of Object.keys(summary)) {
+    if (typeof summary[key] !== "number") continue;
+    const values = samples.map((sample) => sample[key]).sort((a, b) => a - b);
+    summary[key] = values[Math.floor(values.length / 2)];
+    worst[key] = values.at(-1);
+  }
+  return { ...summary, samples, worstRun: worst };
 }
 
 
@@ -230,6 +289,20 @@ try {
   await cdp.send("Performance.enable");
   await page.goto(started.url, { waitUntil: "load" });
   await page.waitForFunction(() => typeof window.ompPerf === "object");
+  identity.chromium = browser.version();
+  identity.optimizations = await page.evaluate(() => window.ompPerf.renderWork.options);
+  identity.trace = process.env.PERF_TRACE === "1";
+  Object.assign(identity, await page.evaluate(async () => {
+    const intervals = [];
+    let before = await new Promise(requestAnimationFrame);
+    for (let i = 0; i < 30; i++) {
+      const now = await new Promise(requestAnimationFrame);
+      intervals.push(now - before);
+      before = now;
+    }
+    intervals.sort((a, b) => a - b);
+    return { observedRefreshHz: 1000 / intervals[15], hardwareConcurrency: navigator.hardwareConcurrency };
+  }));
   const base = { charsPerFrame: 48, toolLinesPerFrame: 2, toggleEveryFrames: 0, frames: FRAMES };
   scenarios = [
     await scenario(page, cdp, "short-history", SHORT_SEED, base),
@@ -384,6 +457,7 @@ await writeFile(
   reportPath,
   `${JSON.stringify({
     generatedAt: new Date().toISOString(),
+    identity,
     platform: `${process.platform}-${process.arch}`,
     frames: FRAMES,
     budgets: { HISTORY_RATIO, FRAME_CEILING_MS, STALL_RATIO },

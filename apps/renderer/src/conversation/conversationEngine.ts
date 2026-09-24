@@ -7,6 +7,7 @@ import { createConversationSource } from "./conversationSource";
 import { ConversationStore } from "./conversationStore";
 import type { ConversationState, PendingUser, TimelineRow } from "./conversationViewModel";
 import { getDefaultThumbStore, type UserThumbStore } from "./userMessageThumbs";
+import { registerRendererResource } from "../rendererResources";
 
 export type ConversationEngineInput = {
   readonly preview: boolean; readonly client: ConversationClient | null; readonly identity: ConversationIdentity | null;
@@ -16,20 +17,34 @@ export type ConversationEngineInput = {
   readonly previewLive?: readonly ConversationRuntimeEvent[]; readonly thumbStore?: UserThumbStore;
 };
 export type ConversationSnapshot = { readonly state: ConversationState; readonly rows: readonly TimelineRow[]; readonly demo: boolean; readonly loadingOlder: boolean; readonly identityKey: string };
+/** Numeric-only counters for the diagnostics sampler; never rows, text or ids. */
+export type ConversationEngineDiagnostics = {
+  readonly disposed: number;
+  readonly rows: number;
+  readonly listeners: number;
+  readonly metadataListeners: number;
+  readonly openBufferEvents: number;
+  readonly openBufferBytes: number;
+};
 export type ConversationEngine = {
   getSnapshot(): ConversationSnapshot; subscribe(listener: () => void): () => void;
   getMetadataSnapshot(): ConversationSnapshot; subscribeMetadata(listener: () => void): () => void;
   start(): void; dispose(): void; loadOlder(): Promise<void>; reload(): Promise<void>;
   restoreFromUser(itemId: string): boolean; trackPending(pending: PendingUser): void; failPending(requestId: string, error: string): void; dropPending(requestId: string): void;
   settleOpenTurns(): boolean;
+  getDiagnostics(): ConversationEngineDiagnostics;
 };
 
 let nextGeneration = 1;
+/** Engines created and not yet disposed. A leak shows up here before it shows up in RSS. */
+let activeEngines = 0;
+export function activeConversationEngineCount(): number { return activeEngines; }
 type BufferedConversationEvent = Extract<ClientEvent, { kind: "conversation.changed" }>;
 const OPEN_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
 
 export function createConversationEngine(input: ConversationEngineInput): ConversationEngine {
   const generation = nextGeneration++;
+  activeEngines += 1;
   const identity = input.preview ? PREVIEW_CONVO_IDENTITY : input.identity;
   const store = new ConversationStore({ target: { sessionId: identity?.sessionId ?? ("unavailable" as ConversationIdentity["sessionId"]) }, identity, generation });
   const listeners = new Set<() => void>();
@@ -46,6 +61,8 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
   let liveTarget: ConversationTarget | undefined; let conversationSessionId: string | undefined; let watermark = 0;
   let buffer: BufferedConversationEvent[] = []; let bufferBytes = 0; let bufferOverflowed = false;
   let snapshot: ConversationSnapshot = { ...store.getSnapshot(), demo: input.preview, loadingOlder: false, identityKey: identityKey(identity) };
+  const unregisterDiagnostics = registerRendererResource("engines", () => ({ rows: snapshot.rows.length, listeners: listeners.size + metadataListeners.size,
+    openBufferEvents: buffer.length, openBufferBytes: bufferBytes }));
   metadataSnapshot = { ...store.getMetadataSnapshot(), demo: input.preview, loadingOlder: false, identityKey: identityKey(identity) };
 
   function publish(): void {
@@ -83,6 +100,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     try { const thumbs = await (input.thumbStore ?? getDefaultThumbStore()).load(sessionId); if (!disposed && token === run) store.setUserThumbs(thumbs); } catch { /* local decoration never blocks transcript */ }
   }
   async function hydrate(resyncing = false): Promise<void> {
+    if (disposed) return;
     const token = ++run; buffer = []; bufferBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
     if (identity === null) { store.setUnavailable("当前没有活动会话。"); return; }
     if (input.deferHydrate) { store.setLoading(false); return; }
@@ -97,7 +115,7 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
       if (input.runtimeConnected && identity.runtimeEpoch !== undefined) {
         const opened = await source.open(liveTarget, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
         if (disposed || token !== run) return;
-        const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId);
+        const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId, opened.page.runtimeEpoch);
         watermark = opened.live.watermark;
         if (opened.live.status === "resyncRequired") {
           store.hydrate(opened.page, [], watermark);
@@ -137,7 +155,31 @@ export function createConversationEngine(input: ConversationEngineInput): Conver
     getMetadataSnapshot: () => metadataSnapshot,
     subscribeMetadata(listener) { if (disposed) return () => {}; metadataListeners.add(listener); return () => metadataListeners.delete(listener); },
     start() { if (started || disposed) return; started = true; if (!input.preview && input.client !== null) transportUnsubscribe = createConversationSource(input.client).subscribe(onEvent); void hydrate(); },
-    dispose() { if (disposed) return; disposed = true; run += 1; transportUnsubscribe?.(); storeUnsubscribe(); storeMetadataUnsubscribe(); store.dispose(); listeners.clear(); metadataListeners.clear(); buffer = []; bufferBytes = 0; bufferOverflowed = false; },
+    /**
+     * Release everything, including the snapshots this engine published.
+     *
+     * The store already swaps its own snapshots for empty ones on dispose, but
+     * `snapshot` / `metadataSnapshot` here are separate closures that would keep
+     * the last `rows` alive for as long as anyone still holds the engine (a
+     * ConversationPane mid-unmount, a retained `previous` ref). They are
+     * replaced — not dropped — so a racing `getSnapshot()` still reads "this
+     * conversation, empty" with identity and generation intact. Listeners are
+     * cleared first so nobody is told about the blanking.
+     */
+    dispose() {
+      if (disposed) return; disposed = true; run += 1;
+      unregisterDiagnostics();
+      transportUnsubscribe?.(); transportUnsubscribe = undefined;
+      storeUnsubscribe(); storeMetadataUnsubscribe();
+      listeners.clear(); metadataListeners.clear();
+      store.dispose();
+      const empty = { ...store.getSnapshot(), demo: input.preview, loadingOlder: false, identityKey: identityKey(store.getSnapshot().state.identity) };
+      snapshot = empty; metadataSnapshot = empty;
+      buffer = []; bufferBytes = 0; bufferOverflowed = false; loadingOlder = false;
+      liveTarget = undefined; conversationSessionId = undefined; watermark = 0;
+      activeEngines -= 1;
+    },
+    getDiagnostics: () => ({ disposed: disposed ? 1 : 0, rows: snapshot.rows.length, listeners: listeners.size, metadataListeners: metadataListeners.size, openBufferEvents: buffer.length, openBufferBytes: bufferBytes }),
     loadOlder,
     reload: () => hydrate(true),
     restoreFromUser: (itemId) => input.preview && store.restoreFromUser(itemId),

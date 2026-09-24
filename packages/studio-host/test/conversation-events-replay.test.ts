@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   CONVERSATION_LIMITS,
+  isParsedConversationRuntimeEvent,
+  parseConversationRuntimeEvent,
   type ConversationRuntimeEvent,
   type RuntimeEpoch,
   type SessionId,
@@ -21,6 +23,36 @@ import {
 
 const SESSION_ID = "session-live-replay" as SessionId;
 const CREATED_AT = "2026-08-24T00:00:00.000Z";
+
+test("W04 incremental replay matches the legacy path for mixed updates and lifecycle events", () => {
+  const legacy = new ConversationEventFanout({ incrementalToolReplay: false });
+  const incremental = new ConversationEventFanout({ incrementalToolReplay: true });
+  let seed = 42;
+  const pieces = ['a\n"\\', '中文', '\ud83d', '\ude80', '\ud800', '', 'x'.repeat(32 * 1024)];
+  for (let seq = 1; seq <= 1500; seq++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const sessionId = `session-${seq % 3}` as SessionId;
+    const turnId = `turn-${Math.floor(seq / 200)}`;
+    const base = { sessionId, turnId };
+    let event: ConversationRuntimeEvent;
+    if (seq % 101 === 0) event = { ...base, kind: "conversation.turn.aborted" };
+    else if (seq % 103 === 0) event = { ...base, kind: "conversation.turn.completed" };
+    else if (seq % 53 === 0) event = { ...base, kind: "conversation.tool.completed", toolCallId: "tool", completedAt: CREATED_AT,
+      result: { type: "toolResult", toolCallId: "tool", toolName: "bash", isError: true } };
+    else event = { ...base, kind: "conversation.tool.updated", toolCallId: "tool", updateMode: seed % 13 === 0 ? "replace" : "append",
+      ...(seed % 7 === 0 ? {} : { output: pieces[seed % pieces.length]! }), ...(seed % 11 === 0 ? { truncated: true } : {}) };
+    const input = envelope(seq, event);
+    assert.equal(incremental.forward(input), legacy.forward(input));
+    const actual = incremental.snapshot(sessionId);
+    assert.deepEqual(actual, legacy.snapshot(sessionId), `seq=${seq}`);
+    assert.equal(incremental.getDiagnostics().replayBytes, legacy.getDiagnostics().replayBytes);
+    // A replay consumer cannot mutate later snapshots.
+    (actual.events as StudioConversationForward[]).splice(0, 1);
+    assert.deepEqual(incremental.snapshot(sessionId), legacy.snapshot(sessionId));
+  }
+  incremental.dispose();
+  assert.deepEqual(incremental.getDiagnostics(), { listeners: 0, replaySessions: 0, replayEvents: 0, replayBytes: 0, toolChunks: 0, pendingItems: 0, pendingBytes: 0 });
+});
 
 function envelope(eventSeq: number, event: ConversationRuntimeEvent): StudioEventEnvelope {
   return {
@@ -267,4 +299,41 @@ test("replay is session-scoped and fails closed when the bounded cache overflows
   fanout.replay(SESSION_ID, (event) => replayed.push(event));
   assert.equal(replayed.length, 0);
   assert.equal(resync.length, 1);
+});
+
+test("W05 the forwarded event is a parser-owned object, so the facade and IPC re-check reuse it", () => {
+  const fanout = new ConversationEventFanout();
+  const forwarded: StudioConversationForward[] = [];
+  fanout.onEvent((event) => forwarded.push(event));
+  const raw: ConversationRuntimeEvent = {
+    kind: "conversation.tool.updated",
+    sessionId: SESSION_ID,
+    turnId: "turn-1",
+    toolCallId: "call-1",
+    updateMode: "append",
+    output: "line\n",
+  };
+  fanout.forward(envelope(1, raw));
+
+  const update = forwarded[0]?.envelope.event;
+  assert.ok(update !== undefined);
+  // The fan-out never forwards the Bridge's own object: it forwards what the
+  // parser built and registered.
+  assert.notEqual(update, raw);
+  assert.equal(isParsedConversationRuntimeEvent(update), true);
+  assert.equal(isParsedConversationRuntimeEvent(raw), false);
+  // Facade (#onConversationForward) and the outbound IPC check both call the
+  // parser again on this same object; both must get it back without a walk.
+  assert.equal(parseConversationRuntimeEvent(update), update);
+  assert.equal(parseConversationRuntimeEvent(update), update);
+  // The Bridge's input object is untouched and still caller-owned.
+  assert.equal(Object.isFrozen(raw), false);
+
+  // Replay events are structured clones, so they lose that identity on purpose
+  // and are validated in full again.
+  const replayed = fanout.snapshot(SESSION_ID);
+  assert.equal(replayed.status, "complete");
+  const replayedUpdate = replayed.events[0]?.envelope.event;
+  assert.ok(replayedUpdate !== undefined);
+  assert.equal(isParsedConversationRuntimeEvent(replayedUpdate), false);
 });

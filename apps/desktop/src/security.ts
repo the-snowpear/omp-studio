@@ -25,6 +25,7 @@ import { pathToFileURL } from "node:url";
 export const RENDERER_CSP =
   "default-src 'self'; " +
   "script-src 'self'; " +
+  "worker-src 'self'; " +
   "style-src 'self' 'unsafe-inline'; " +
   "img-src 'self' data:; " +
   "font-src 'self' data:; " +

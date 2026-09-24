@@ -358,6 +358,12 @@
 .convo-body[data-phase="waiting"] { opacity: 0; transition: none; }
 /* 新 transcript 已挂载但还在完成虚拟行测高与贴底；保持不可见，稳定后才进入 revealing。 */
 .convo-body[data-phase="settling"] { opacity: 0; transition: none; pointer-events: none; }
+/* A running tool initially opens one frame after mounting. Settle that hidden
+   layout immediately; otherwise its 250ms height animation outlives the two
+   settling frames and moves the incoming transcript during its fade-in.
+   Visible interaction and live tool handoff keep their normal transitions. */
+.convo-body[data-phase="settling"] .tl-card,
+.convo-body[data-phase="settling"] .batch-chain { transition: none; }
 /* 淡入用 animation 而不是 transition：起点必须是 0，而正文这一帧才刚挂上，
    没有可插值的前值。transition:none 挡掉同一帧 opacity 0→1 顺带触发的过渡，
    否则动画收尾后还有一条过渡在跑，尾巴会二次变亮。 */

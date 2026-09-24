@@ -27,6 +27,9 @@ import { registerChromeNotifyIpc } from "./chrome-notify.js";
 import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
 import { registerChromeLogsIpc } from "./chrome-logs.js";
 import { registerChromeMetricsIpc } from "./chrome-metrics.js";
+import { registerChromePerformanceIpc } from "./chrome-performance.js";
+import { logRendererPerformance, desktopConversationViews } from "./desktop-performance.js";
+import { CONVERSATION_VIEW_CHANNEL } from "./conversation-views.js";
 import { registerChromeProfileIpc } from "./chrome-profile.js";
 import { resolveProfilePersistRoot } from "./chrome-profile-store.js";
 import { registerPayloadHealthIpc } from "./payload-health.js";
@@ -411,6 +414,19 @@ export async function main(): Promise<void> {
       isTrustedSender,
       actions: { appMetrics: () => app.getAppMetrics(), now: () => new Date() },
     });
+    const disposePerformance = registerChromePerformanceIpc({ ipcMain, isTrustedSender, emit: logRendererPerformance });
+    desktopConversationViews.registerWindow(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
+    const refreshConversationVisibility = () => desktopConversationViews.setVisible(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
+    const resetConversationVisibility = () => desktopConversationViews.reset(window.webContents);
+    const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
+    window.on("show", refreshConversationVisibility);
+    window.on("hide", refreshConversationVisibility);
+    window.on("minimize", refreshConversationVisibility);
+    window.on("restore", refreshConversationVisibility);
+    window.webContents.on("did-start-navigation", resetConversationVisibility);
+    window.webContents.on("destroyed", removeConversationVisibility);
+    ipcMain.handle(CONVERSATION_VIEW_CHANNEL, ({ sender }, input: unknown) =>
+      !sender.isDestroyed() && isTrustedSender(sender) && desktopConversationViews.report(sender, input));
     const logsDirectory = defaultHostLogsDirectory();
     const disposeLogs = registerChromeLogsIpc({
       ipcMain: {
@@ -640,6 +656,15 @@ export async function main(): Promise<void> {
         disposeImage.dispose();
         disposeLogs.dispose();
         disposeMetrics.dispose();
+        disposePerformance.dispose();
+        ipcMain.removeHandler(CONVERSATION_VIEW_CHANNEL);
+        window.removeListener("show", refreshConversationVisibility);
+        window.removeListener("hide", refreshConversationVisibility);
+        window.removeListener("minimize", refreshConversationVisibility);
+        window.removeListener("restore", refreshConversationVisibility);
+        window.webContents.removeListener("did-start-navigation", resetConversationVisibility);
+        window.webContents.removeListener("destroyed", removeConversationVisibility);
+        removeConversationVisibility();
         disposeProfile();
         disposeOpenUrl.dispose();
         disposeNotify();

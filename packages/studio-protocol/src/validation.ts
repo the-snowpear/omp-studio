@@ -47,6 +47,7 @@ import { utf8ByteLength } from "./conversation-text.js";
 export { ContractValidationError } from "./contract-error.js";
 export { isBtwErrorCode, isBtwStatus, parseBtwSnapshot } from "./btw-validation.js";
 export {
+  isParsedConversationRuntimeEvent,
   parseConversationContentBlock,
   parseConversationItem,
   parseConversationOpenResult,

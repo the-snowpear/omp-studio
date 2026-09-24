@@ -43,7 +43,7 @@ export class StudioRuntimeSessionController {
   readonly #unsubscribeProjection: () => void;
   readonly #unsubscribeEvent: () => void;
   readonly #unsubscribeResync: () => void;
-  readonly #conversation = new ConversationEventFanout();
+  readonly #conversation: ConversationEventFanout;
   readonly #interaction = new InteractionEventFanout();
   readonly #telemetry = new TelemetryEventFanout();
   readonly #btw = new BtwEventFanout();
@@ -57,7 +57,9 @@ export class StudioRuntimeSessionController {
     private readonly bridge: StudioBridgeClient,
     private readonly ledger: CommandLedger,
     private readonly publications = new RuntimePublicationStore(),
+    options: ConstructorParameters<typeof ConversationEventFanout>[0] = {},
   ) {
+    this.#conversation = new ConversationEventFanout(options);
     this.#unsubscribeProjection = bridge.onProjectionChanged((snapshot) => {
       this.#publish(snapshot);
     });
@@ -68,6 +70,7 @@ export class StudioRuntimeSessionController {
       this.#interaction.forward(envelope, (commandId) => this.requestIdForCommandId(commandId));
     });
     this.#unsubscribeResync = bridge.onResyncRequired(() => {
+      this.#conversation.flush();
       this.#conversation.emitResync("conversation gap; re-read open transcripts");
       this.#recoverFromGap();
     });
@@ -106,6 +109,8 @@ export class StudioRuntimeSessionController {
   }
 
   #publish(snapshot: Parameters<RuntimePublicationStore["publish"]>[0]): RuntimePublication {
+    this.#conversation.resetEpoch(Number(snapshot.runtimeEpoch));
+    this.#conversation.flush();
     if (this.#publishedTerminalRevision !== this.ledger.terminalRevision) {
       this.#publishedTerminalRevision = this.ledger.terminalRevision;
       this.#publishedTerminalOutcomes = this.ledger.terminalSnapshot();
@@ -300,6 +305,9 @@ export class StudioRuntimeSessionController {
     return this.#conversation.onEvent(listener);
   }
 
+  setConversationVisibleSessions(ids: ReadonlySet<string> | undefined): void { this.#conversation.setVisibleSessions(ids); }
+  getConversationDiagnostics(): Readonly<Record<string, number>> { return this.#conversation.getDiagnostics(); }
+
   replayConversationEvents(sessionId: SessionId, listener: (event: StudioConversationForward) => void): void {
     this.#conversation.replay(sessionId, listener);
   }
@@ -329,6 +337,7 @@ export class StudioRuntimeSessionController {
   }
 
   runtimeLost(runtimeId: RuntimeId, runtimeEpoch: RuntimeEpoch): CommandLedgerEntry[] {
+    this.#conversation.flush();
     const changed = this.ledger.markRuntimeLost(runtimeId, runtimeEpoch);
     const snapshot = this.bridge.projectionSnapshot();
     if (snapshot !== undefined) this.#publish(snapshot);

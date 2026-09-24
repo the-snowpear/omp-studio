@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- 流式工具回放改为有界增量存储；后台对话按可见目标降低中间更新频率，恢复窗口立即补齐，审批与终态保持即时。
+- 生产构建将代码高亮移到有界 Worker，保留即时显示的代码框；Mermaid 增加大小预算、串行队列、取消和缓存上限。开发模式保留旧高亮路径。
+- 增加 Main/Host、Renderer、Runtime 本地数值性能日志和可重复基准；会话关闭后释放 Engine 发布快照及计数登记。维护与回滚见 [性能文档](docs/performance.md)。
+- 会话切换时，运行工具卡在不可见的稳定阶段完成初始展开，避免正文淡入后继续移位；正常工具交接与手动展开动画保留。
+
 ## [0.1.6] - 2026-09-20
 
 ### Added

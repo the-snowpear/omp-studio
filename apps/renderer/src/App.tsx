@@ -1,4 +1,5 @@
 import { WorkbenchHealth } from "./WorkbenchHealth";
+import { conversationViewLeases } from "./conversation/conversationViews";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, FormEvent as ReactFormEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
@@ -8743,6 +8744,7 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
   }, [client]);
 
   const runtimeEpoch = state.clientState?.connection.runtimeEpoch;
+  useEffect(() => { conversationViewLeases.setEpoch(runtimeEpoch ?? undefined); }, [runtimeEpoch]);
   const runtimeStatus = state.clientState?.connection.runtime?.status;
   useEffect(() => {
     if (state.loading || runtimeStatus === undefined) return;

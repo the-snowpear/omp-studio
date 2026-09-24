@@ -7,15 +7,22 @@ import { createConversationSource } from "./conversationSource";
 import { ConversationStore } from "./conversationStore";
 import type { ConversationState, TimelineRow } from "./conversationViewModel";
 import type { SubagentHubTarget } from "./toolMeta";
+import { registerRendererResource } from "../rendererResources";
 
 export type SubagentConversationClient = Pick<StudioClient, "query" | "subscribe">;
 export type SubagentConversationEngineInput = { readonly preview: boolean; readonly previewItems: readonly ConversationItem[]; readonly client: SubagentConversationClient | null; readonly target: SubagentHubTarget | null; readonly runtimeConnected: boolean; readonly parentSessionId?: SessionId; readonly liveSessionId?: SessionId };
 export type SubagentConversationSnapshot = { readonly state: ConversationState; readonly rows: readonly TimelineRow[]; readonly demo: boolean; readonly loadingOlder: boolean; readonly identityKey: string };
-export type SubagentConversationEngine = { getSnapshot(): SubagentConversationSnapshot; subscribe(listener: () => void): () => void; start(): void; dispose(): void; loadOlder(): Promise<void> };
+/** Numeric-only counters for the diagnostics sampler; never rows, text or ids. */
+export type SubagentConversationEngineDiagnostics = { readonly disposed: number; readonly rows: number; readonly listeners: number; readonly openBufferEvents: number; readonly openBufferBytes: number };
+export type SubagentConversationEngine = { getSnapshot(): SubagentConversationSnapshot; subscribe(listener: () => void): () => void; start(): void; dispose(): void; loadOlder(): Promise<void>; getDiagnostics(): SubagentConversationEngineDiagnostics };
 
 let generation = 10_000;
+/** Engines created and not yet disposed; only the open subagent pane should hold one. */
+let activeEngines = 0;
+export function activeSubagentConversationEngineCount(): number { return activeEngines; }
 const OPEN_BUFFER_MAX_BYTES = 2 * 1024 * 1024;
 export function createSubagentConversationEngine(input: SubagentConversationEngineInput): SubagentConversationEngine {
+  activeEngines += 1;
   const parentSessionId = input.parentSessionId ?? input.liveSessionId;
   const initialSessionId = parentSessionId ?? ("unavailable" as SessionId);
   const store = new ConversationStore({ target: { sessionId: initialSessionId, ...(input.target === null ? {} : { agentId: input.target.agentId }) }, identity: parentSessionId === undefined ? null : { sessionId: parentSessionId }, generation: generation++ });
@@ -24,6 +31,8 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
   let liveTarget: ConversationTarget | undefined;
   let snapshot: SubagentConversationSnapshot = { ...store.getSnapshot(), demo: input.preview, loadingOlder, identityKey: identityKey(store.getSnapshot().state.identity) };
   const offStore = store.subscribe(() => publish());
+  const unregisterDiagnostics = registerRendererResource("engines", () => ({ rows: snapshot.rows.length, listeners: listeners.size,
+    openBufferEvents: buffered.length, openBufferBytes: bufferedBytes }));
   function publish(): void { if (disposed) return; const value = store.getSnapshot(); snapshot = { ...value, demo: input.preview, loadingOlder, identityKey: identityKey(value.state.identity) }; for (const listener of listeners) listener(); }
   function applyLiveEvent(event: Extract<ClientEvent, { kind: "conversation.changed" }>): void {
     if (event.streamSeq <= watermark) return;
@@ -49,6 +58,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
     applyLiveEvent(event);
   }
   async function hydrate(resyncing = false): Promise<void> {
+    if (disposed) return;
     const current = ++token; buffered = []; bufferedBytes = 0; bufferOverflowed = false; conversationSessionId = undefined; watermark = 0;
     if (input.target === null) { store.setUnavailable("没有可读取的子 Agent 对话。"); return; }
     store.setLoading(resyncing);
@@ -61,7 +71,7 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
     try {
       if (input.runtimeConnected && input.liveSessionId === parentSessionId) {
         const opened = await source.open(target, CONVERSATION_LIMITS.TRANSCRIPT_LIMIT_DEFAULT);
-        if (disposed || current !== token) return; const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId);
+        if (disposed || current !== token) return; const resolvedSessionId = opened.target.conversationSessionId; conversationSessionId = resolvedSessionId; store.resolveTarget(resolvedSessionId, opened.page.runtimeEpoch);
         watermark = opened.live.watermark;
         if (opened.live.status === "resyncRequired") {
           store.hydrate(opened.page, [], watermark);
@@ -93,7 +103,22 @@ export function createSubagentConversationEngine(input: SubagentConversationEngi
   return {
     getSnapshot: () => snapshot, subscribe(listener) { if (disposed) return () => {}; listeners.add(listener); return () => listeners.delete(listener); },
     start() { if (started || disposed) return; started = true; if (!input.preview && input.client !== null) unsubscribe = createConversationSource(input.client).subscribe(onEvent); void hydrate(); },
-    dispose() { if (disposed) return; disposed = true; token += 1; unsubscribe?.(); offStore(); store.dispose(); listeners.clear(); buffered = []; bufferedBytes = 0; bufferOverflowed = false; }, loadOlder,
+    // Same shape as the main engine's dispose: listeners go first so the
+    // blanking is never broadcast, then the published snapshot is replaced by
+    // the store's empty one so a retained engine cannot hold the child transcript.
+    dispose() {
+      if (disposed) return; disposed = true; token += 1;
+      unregisterDiagnostics();
+      unsubscribe?.(); unsubscribe = undefined; offStore(); listeners.clear();
+      store.dispose();
+      const value = store.getSnapshot();
+      snapshot = { ...value, demo: input.preview, loadingOlder: false, identityKey: identityKey(value.state.identity) };
+      buffered = []; bufferedBytes = 0; bufferOverflowed = false; loadingOlder = false;
+      liveTarget = undefined; conversationSessionId = undefined; watermark = 0;
+      activeEngines -= 1;
+    },
+    loadOlder,
+    getDiagnostics: () => ({ disposed: disposed ? 1 : 0, rows: snapshot.rows.length, listeners: listeners.size, openBufferEvents: buffered.length, openBufferBytes: bufferedBytes }),
   };
 }
 

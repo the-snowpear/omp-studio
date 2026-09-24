@@ -4,6 +4,9 @@ import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { scanStreamingMarkdown, type StreamingCodeFence, type StreamingMarkdownScan } from "./markdownBlocks";
 import { withMagicKeywordChildren } from "./magicKeywordMarkdown";
+import { LazyMermaid } from "./LazyMermaid";
+import { performanceOptions } from "../performanceOptions";
+import { HighlightedCode } from "../highlight/HighlightedCode";
 
 const REMARK: Options["remarkPlugins"] = [remarkGfm];
 const HIGHLIGHT: Options["rehypePlugins"] = [[rehypeHighlight, { detect: false, plainText: ["mermaid"] }]];
@@ -27,7 +30,7 @@ function cacheMermaid(key: string, svg: string): void {
   if (mermaidCache.size >= 32) mermaidCache.delete(mermaidCache.keys().next().value as string);
   mermaidCache.set(key, svg);
 }
-function LazyMermaid({ code }: { code: string }) {
+function LegacyMermaid({ code }: { code: string }) {
   const host = useRef<HTMLDivElement>(null);
   const [svg, setSvg] = useState<string | null>(() => mermaidCache.get(code) ?? null);
   useEffect(() => {
@@ -69,8 +72,8 @@ function CodeFrame({ language, text, children, streaming }: { language: string; 
 }
 
 const componentCache = new Map<string, Components>();
-function componentsFor(streaming: boolean, magic: boolean): Components {
-  const key = `${streaming}:${magic}`;
+function componentsFor(streaming: boolean, magic: boolean, highlightEligible = false): Components {
+  const key = `${streaming}:${magic}:${highlightEligible}`;
   const cached = componentCache.get(key);
   if (cached !== undefined) return cached;
   const prose = (children: ReactNode) => magic ? withMagicKeywordChildren(children) : children;
@@ -92,7 +95,12 @@ function componentsFor(streaming: boolean, magic: boolean): Components {
       const props = child && typeof child === "object" && "props" in child ? (child as { props: { className?: string; children?: ReactNode } }).props : {};
       const language = /language-([\w+#.-]+)/.exec(props.className ?? "")?.[1] ?? "";
       const text = nodeText(props.children).replace(/\n$/, "");
-      if (language === "mermaid" && !streaming) return <LazyMermaid code={text} />;
+      if (language === "mermaid" && !streaming) return performanceOptions.boundedMermaid ? <LazyMermaid code={text} /> : <LegacyMermaid code={text} />;
+      if (performanceOptions.highlightWorker && highlightEligible && language && language !== "mermaid") {
+        return <CodeFrame language={language} text={text} streaming={streaming}>
+          <HighlightedCode language={language} code={nodeText(props.children)} />
+        </CodeFrame>;
+      }
       return <CodeFrame language={language} text={text} streaming={streaming}>{children}</CodeFrame>;
     },
   };
@@ -101,8 +109,9 @@ function componentsFor(streaming: boolean, magic: boolean): Components {
 }
 
 const MarkdownBlock = memo(function MarkdownBlock({ text, streaming, magic }: { text: string; streaming: boolean; magic: boolean }) {
-  const plugins = !streaming && text.length <= MAX_HIGHLIGHT_CHARS ? HIGHLIGHT : undefined;
-  return <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={plugins} components={componentsFor(streaming, magic)}>{text}</ReactMarkdown>;
+  const highlightEligible = !streaming && text.length <= MAX_HIGHLIGHT_CHARS;
+  const plugins = highlightEligible && !performanceOptions.highlightWorker ? HIGHLIGHT : undefined;
+  return <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={plugins} components={componentsFor(streaming, magic, highlightEligible)}>{text}</ReactMarkdown>;
 });
 
 const NO_CLOSED_BLOCKS: readonly string[] = [];

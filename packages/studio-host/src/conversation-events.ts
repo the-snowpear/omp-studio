@@ -6,6 +6,8 @@ import {
   type ConversationRuntimeEvent,
   type StudioEventEnvelope,
 } from "@omp-studio/studio-protocol";
+import { ReplayTextBuffer } from "./replay-text-buffer.js";
+import { ConversationCoalescer, type ConversationCoalescerOptions } from "./conversation-coalescer.js";
 
 export const CONVERSATION_RUNTIME_EVENT_KINDS = [
   "conversation.message.started",
@@ -44,6 +46,7 @@ type ReplaySession = {
   readonly events: Map<string, StudioConversationForward>;
   readonly eventBytes: Map<string, number>;
   readonly deltaChunks: Map<string, { totalBytes: number; lastKey: string; nextIndex: number }>;
+  readonly toolBuffers: Map<string, ReplayTextBuffer>;
 };
 
 function turnIdOf(event: ConversationRuntimeEvent): string | undefined {
@@ -63,6 +66,54 @@ export class ConversationEventFanout {
   readonly #streamSeq = new Map<string, number>();
   readonly #evictedTurns = new Map<string, string | undefined>();
   #replayBytes = 0;
+  #epoch: number | undefined;
+  readonly #coalescer: ConversationCoalescer;
+
+  constructor(readonly options: { readonly incrementalToolReplay?: boolean; readonly backgroundCoalescing?: boolean;
+    readonly timers?: Pick<ConversationCoalescerOptions, "setTimer" | "clearTimer"> } = {}) {
+    this.#coalescer = new ConversationCoalescer({ ...options.timers, emit: (envelope) => this.#deliver(envelope) });
+  }
+
+  setVisibleSessions(ids: ReadonlySet<string> | undefined): void {
+    this.#coalescer.setVisibleSessions(this.options.backgroundCoalescing === true ? ids : undefined);
+  }
+
+  flush(): void { this.#coalescer.flush(); }
+
+  resetEpoch(epoch: number): void {
+    if (this.#epoch !== undefined && this.#epoch !== epoch) {
+      this.#coalescer.reset();
+      this.#replay.clear(); this.#streamSeq.clear(); this.#evictedTurns.clear(); this.#replayBytes = 0;
+    }
+    this.#epoch = epoch;
+  }
+
+  getDiagnostics(): Readonly<Record<string, number>> {
+    let events = 0;
+    let chunks = 0;
+    for (const session of this.#replay.values()) {
+      events += session.events.size;
+      for (const buffer of session.toolBuffers.values()) chunks += buffer.chunkCount;
+    }
+    return { listeners: this.#listeners.size + this.#resyncListeners.size, replaySessions: this.#replay.size,
+      replayEvents: events, replayBytes: this.#replayBytes, toolChunks: chunks, ...this.#coalescer.getDiagnostics() };
+  }
+
+  #materialize(session: ReplaySession, key: string, forward: StudioConversationForward): StudioConversationForward {
+    const buffer = session.toolBuffers.get(key);
+    const event = forward.envelope.event;
+    if (buffer === undefined || event.kind !== "conversation.tool.updated" || !("output" in event)) return forward;
+    return { ...forward, envelope: { ...forward.envelope, event: { ...event, output: buffer.materialize() } } };
+  }
+
+  #releaseToolBuffers(session: ReplaySession): void {
+    for (const [key, buffer] of session.toolBuffers) {
+      const event = session.events.get(key);
+      if (event !== undefined) session.events.set(key, this.#materialize(session, key, event));
+      buffer.clear();
+    }
+    session.toolBuffers.clear();
+  }
 
   onEvent(listener: (event: StudioConversationForward) => void): () => void {
     this.#listeners.add(listener);
@@ -81,6 +132,7 @@ export class ConversationEventFanout {
   snapshot(sessionId: ConversationRuntimeEvent["sessionId"]):
     | { readonly status: "complete"; readonly watermark: number; readonly events: readonly StudioConversationForward[] }
     | { readonly status: "resyncRequired"; readonly watermark: number; readonly events: readonly []; readonly reason: string } {
+    this.#coalescer.flush(sessionId);
     const session = this.#replay.get(sessionId);
     const watermark = this.#streamSeq.get(sessionId) ?? 0;
     if (session?.overflowed === true || this.#evictedTurns.has(sessionId)) {
@@ -91,7 +143,8 @@ export class ConversationEventFanout {
         reason: "live conversation replay exceeded the Host byte or event limit; reopen the conversation",
       };
     }
-    const events = [...(session?.events.values() ?? [])]
+    const events = [...(session?.events.entries() ?? [])]
+      .map(([key, event]) => this.#materialize(session!, key, event))
       .sort((left, right) => left.streamSeq - right.streamSeq)
       .map((event) => structuredClone(event));
     return { status: "complete", watermark, events };
@@ -122,6 +175,7 @@ export class ConversationEventFanout {
         ? (envelope.event as { readonly kind?: unknown }).kind
         : undefined;
     if (!isAllowListedConversationKind(kind)) {
+      this.flush();
       return false;
     }
     let parsed: ConversationRuntimeEvent;
@@ -131,6 +185,13 @@ export class ConversationEventFanout {
       this.emitResync("conversation mapping failed; re-read open transcripts");
       return false;
     }
+    this.resetEpoch(Number(envelope.runtimeEpoch));
+    this.#coalescer.push({ ...envelope, event: parsed });
+    return true;
+  }
+
+  #deliver(envelope: StudioEventEnvelope<ConversationRuntimeEvent>): void {
+    const parsed = parseConversationRuntimeEvent(envelope.event);
     const sessionId = parsed.sessionId;
     const streamSeq = (this.#streamSeq.get(sessionId) ?? 0) + 1;
     this.#streamSeq.set(sessionId, streamSeq);
@@ -147,7 +208,6 @@ export class ConversationEventFanout {
         // Sibling listener isolation: one throw must not skip the rest.
       }
     }
-    return true;
   }
 
   #remember(forward: StudioConversationForward): void {
@@ -165,6 +225,7 @@ export class ConversationEventFanout {
         events: new Map(),
         eventBytes: new Map(),
         deltaChunks: new Map(),
+        toolBuffers: new Map(),
         byteSize: 0,
       };
       this.#replay.set(sessionId, session);
@@ -197,6 +258,26 @@ export class ConversationEventFanout {
         return;
       case "conversation.tool.updated": {
         const key = `tool-updated:${event.toolCallId}`;
+        if (this.options.incrementalToolReplay === true) {
+          if (session.overflowed === true) return;
+          let buffer = session.toolBuffers.get(key);
+          if (buffer === undefined) {
+            buffer = new ReplayTextBuffer(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
+            const previous = session.events.get(key)?.envelope.event;
+            if (previous?.kind === "conversation.tool.updated") buffer.replace(previous.output ?? "");
+            session.toolBuffers.set(key, buffer);
+          }
+          const truncated = event.updateMode === "replace" ? buffer.replace(event.output ?? "") : buffer.append(event.output ?? "");
+          const metadata: StudioConversationForward = {
+            streamSeq: forward.streamSeq,
+            envelope: { ...forward.envelope, event: { ...event, updateMode: "replace",
+              ...(event.output !== undefined || buffer.byteLength > 0 ? { output: "" } : {}),
+              ...(event.truncated === true || truncated ? { truncated: true } : {}),
+            } },
+          };
+          this.#store(session, key, metadata, utf8ByteLength(JSON.stringify(metadata)) + buffer.jsonBytes);
+          return;
+        }
         const previous = session.events.get(key)?.envelope.event;
         const previousOutput = previous?.kind === "conversation.tool.updated" ? (previous.output ?? "") : "";
         const raw = event.updateMode === "replace" ? (event.output ?? "") : previousOutput + (event.output ?? "");
@@ -221,6 +302,7 @@ export class ConversationEventFanout {
         return;
       case "conversation.turn.completed":
       case "conversation.turn.aborted":
+        this.#releaseToolBuffers(session);
         this.#store(session, "turn-terminal", structuredClone(forward));
         return;
       case "conversation.compaction.started":
@@ -268,6 +350,8 @@ export class ConversationEventFanout {
     }
     session.eventBytes.delete(key);
     session.events.delete(key);
+    session.toolBuffers.get(key)?.clear();
+    session.toolBuffers.delete(key);
   }
 
   #clear(session: ReplaySession): void {
@@ -275,6 +359,8 @@ export class ConversationEventFanout {
     session.events.clear();
     session.eventBytes.clear();
     session.deltaChunks.clear();
+    for (const buffer of session.toolBuffers.values()) buffer.clear();
+    session.toolBuffers.clear();
     session.byteSize = 0;
   }
 
@@ -355,6 +441,7 @@ export class ConversationEventFanout {
   }
 
   emitResync(reason: string): void {
+    this.flush();
     for (const listener of [...this.#resyncListeners]) {
       try {
         listener(reason);
@@ -365,6 +452,7 @@ export class ConversationEventFanout {
   }
 
   dispose(): void {
+    this.#coalescer.dispose();
     this.#listeners.clear();
     this.#resyncListeners.clear();
     this.#replay.clear();

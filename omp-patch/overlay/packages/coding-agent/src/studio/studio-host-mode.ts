@@ -44,6 +44,7 @@ import { StudioBtwService } from "./services/btw-service";
 import { StudioCommandManifestService } from "./services/command-manifest-service";
 import { ConversationLiveProjector } from "./services/conversation-live-projector";
 import { ConversationProjectorHub } from "./services/conversation-projector-hub";
+import { createRuntimePerformanceSampler } from "./services/runtime-performance";
 import { StudioFastPrewalkService } from "./services/fast-prewalk-service";
 import { StudioForkService } from "./services/fork-service";
 import { StudioHandoffService } from "./services/handoff-service";
@@ -830,6 +831,20 @@ export function createStudioHostRuntime(
 		runtimeEpoch: () => bridgeConfig.runtimeEpoch as number,
 	});
 	const shutdownSignal = Promise.withResolvers<void>();
+	const performanceSampler = createRuntimePerformanceSampler({
+		counters: () => ({
+			...conversation.getDiagnostics(),
+			workerResidency: ["active", "sleeping", "recycling", "reviving", "dormant", "failed"].indexOf(
+				workerLifecycle.residency(),
+			),
+			workerGeneration: workerLifecycle.generation(),
+		}),
+		// Dedicated numerical diagnostic sink; never used to infer business state.
+		emit: line => {
+			process.stderr.write(`[studio.performance] ${line}\n`);
+		},
+	});
+	performanceSampler.start();
 	let shutdownRequested = false;
 	let disposed = false;
 	let loopSessionId = session.sessionManager.getSessionId();
@@ -936,6 +951,7 @@ export function createStudioHostRuntime(
 		dispose: () => {
 			if (disposed) return;
 			disposed = true;
+			performanceSampler.dispose();
 			session.setBeforeNextUserTurn(undefined);
 			unsubscribe();
 			unsubscribeSessionChange();

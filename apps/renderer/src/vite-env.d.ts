@@ -46,6 +46,8 @@ declare global {
     | {
         /** Initial workbench health; absent on older installed main/preload versions. */
         reportPayloadHealth?(status: "ready" | "failed"): Promise<boolean>;
+        reportPerformanceSample?(sample: import("@omp-studio/studio-protocol").MemorySample): Promise<boolean>;
+        setConversationViewState?(state: { runtimeEpoch: number; visibleSessionIds: readonly string[] }): Promise<boolean>;
         setTheme(theme: "light" | "dark"): Promise<void>;
         /** App 级系统通知（固定文案；非 Host / Studio Bridge 面）。 */
         notify(payload: { title: string; body?: string }): Promise<void>;
