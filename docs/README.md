@@ -8,6 +8,7 @@ Public documentation for OMP Studio.
 | [../README.en.md](../README.en.md) | English overview |
 | [getting-started.md](getting-started.md) | Run from source |
 | [development.md](development.md) | Inner loop, tests, overlay |
+| [performance.md](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
 | [architecture.md](architecture.md) | Packages, Bridge, data rules |
 | [releasing.md](releasing.md) | Version, changelog, tag, installer |
 | [migrations/omp-18.2.5.md](migrations/omp-18.2.5.md) | OMP v18.2.5 changes, selected GUI features, verification and rollback |

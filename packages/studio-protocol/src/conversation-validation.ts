@@ -496,8 +496,10 @@ export function isParsedConversationRuntimeEvent(value: unknown): boolean {
   return typeof value === "object" && value !== null && parsedEvents.has(value as ConversationRuntimeEvent);
 }
 
-export function parseConversationRuntimeEvent(value: unknown, path = "$event.event"): ConversationRuntimeEvent {
-  if (typeof value === "object" && value !== null && parsedEvents.has(value as ConversationRuntimeEvent)) {
+const PARSER_REUSE_ENABLED = typeof process === "undefined" || process.env.OMP_CONVERSATION_PARSER_REUSE !== "0";
+
+export function parseConversationRuntimeEvent(value: unknown, path = "$event.event", reuse = PARSER_REUSE_ENABLED): ConversationRuntimeEvent {
+  if (reuse && typeof value === "object" && value !== null && parsedEvents.has(value as ConversationRuntimeEvent)) {
     return value as ConversationRuntimeEvent;
   }
   const parsed = deepFreeze(parseConversationRuntimeEventFully(value, path));

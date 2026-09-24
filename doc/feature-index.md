@@ -65,7 +65,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | 对话加载 / Store | `conversation/conversationSource.ts`、`conversationStore.ts`、`conversationEngine.ts`、`useConversation.ts` | `conversation.open` 先订阅后打开；目标级 watermark 去重；首屏 / replay / 实时增量统一进入有界 Store；App 只订阅低频 metadata，token 热流只更新 `ConversationPane` |
 | 用户消息 Restore / 新会话 | `conversation/ConversationItemView.tsx`、`UserMessageBody.tsx`、`userMessageThumbs.ts`、`userMessageRestore.ts`、`UserMessageTreeConfirm.tsx`、`conversationEngine.ts`、`composer/serialize.ts` | 已发送用户气泡「恢复」（`undo` 图标）→ `session.tree.navigate`（leaf=该条 parent）；「新会话」（`branch` 图标）→ `session.tree.branch`（新 session 文件，切过去）。确认用应用内模态（归档同风格），不用 `window.confirm`。气泡仍画文件/技能/图片胶囊，配色与 Composer 同类胶囊一致（不刷成气泡白霜）。复制按钮与划选复制走序列化 `@` / `/skill:` / `[图N]`。图缩略图贴在气泡上方，点击预览；公开 transcript 仍剥图。预览字节落本机 IndexedDB（`omp-studio-ui` / `user-message-thumbs`），按 sessionId+itemId 重开会话仍能挂回缩略图，不进 Host。预览本地裁剪，不调 Host。busy 时 overlay 拒绝。`/branch` 提示点气泡，不打开 Changes。 |
 | Client 全局状态 | `packages/client/src/reducer.ts` | 不保存 transcript / live message / tool output；`conversation.changed` 只推进 transport cursor，对话真值由 Renderer 目标级 Store 持有 |
-| 正文 markdown / 流式渲染 | `conversation/markdown.tsx`、`markdownBlocks.ts`、`magicKeywordMarkdown.tsx` | 非流式整篇 `react-markdown`（remark-gfm + rehype-highlight）解析；流式扫描结果拆成引用稳定的 `frozen` 前缀与有界 `pending` 尾部，检查点只续扫新增文本和少量上下文，渲染层分别 memo 两段，不再每帧重建全部历史切点。未闭合代码围栏不进入 `react-markdown`，直接复用 `CodeFrame` 的安全 `<pre><code>` 样式，闭合后恢复完整 Markdown 与高亮。普通切点只落在空行处且要求下一行确实开启新块；围栏内部、松散列表、缩进续行、setext 下划线都不切。链接引用定义从上一条未完整行增量检测，命中后整段保持同一 Markdown 解析域。mermaid 在流式中降级为 `<pre>`，收尾后渲染并按「主题 + 源码」缓存 SVG（上限 32） |
+| 正文 markdown / 流式渲染 | `conversation/markdown.tsx`、`markdownBlocks.ts`、`magicKeywordMarkdown.tsx` | 非流式整篇 `react-markdown`（remark-gfm；production 由有界 lowlight Worker 异步补色，dev/显式回滚用 rehype-highlight）解析；流式扫描结果拆成引用稳定的 `frozen` 前缀与有界 `pending` 尾部，检查点只续扫新增文本和少量上下文，渲染层分别 memo 两段，不再每帧重建全部历史切点。未闭合代码围栏不进入 `react-markdown`，直接复用 `CodeFrame` 的安全 `<pre><code>` 样式，闭合后恢复完整 Markdown，代码框即时显示、语法颜色异步补齐。普通切点只落在空行处且要求下一行确实开启新块；围栏内部、松散列表、缩进续行、setext 下划线都不切。链接引用定义从上一条未完整行增量检测，命中后整段保持同一 Markdown 解析域。mermaid 在流式中降级为 `<pre>`，收尾后经可见性、大小/复杂度预算和串行队列渲染；按完整渲染配置 + 源码缓存 SVG（32 项 / 4MiB） |
 | 快照行复用 / 渲染节流 | `conversation/conversationStore.ts`、`conversationViewModel.ts`、`conversationEngine.ts`、`subagentConversationEngine.ts` | Store 限 2,000 items / 24 MiB，live block 256 KiB、tool output 64 KiB，pending / notice / live message / live tool 均有硬上限；增量按 RAF 合并，流式 chunk 在帧边界压成文本。持久历史前缀只在结构变化时重投影，token 热流只投影有界 transient 尾部；工具事件（`tool.started` / `tool.completed` / `tool.updated`）只标脏所属行而不整窗重投影；Transcript 的 binds / keys 按结构 token 缓存。`rowCache` 在 trim / hydrate / restore 等结构路径按活跃 key 剪枝，不保留被窗口淘汰的正文。主会话和当前可见子代理各持有一个 hot Store，切换即释放 |
 | 时间线虚拟化 | `conversation/ConversationVirtualList.tsx`、`ConvoTranscript.tsx`、`rowHeightCache.ts` | 基于 `@tanstack/react-virtual` 动态测高与 overscan；挂载行硬上限 120；未测量的新面板只临时渲染末尾 20 行，禁止回退为全量 DOM；预览 fixture 可全量渲染。行高按行键跨挂载记忆（`rowHeightCache.ts` 模块级、上限 8192），重挂时估高直接取上次实测值，测量仍是权威。`ConvoTranscript` 的行元素按「行对象 + bind + 回调」缓存身份：虚拟列表每取一次测量就重渲染一次（工具卡高度过渡时每帧一次，流式时每帧一次），未变的行靠引用相等整棵子树跳过，`onReviewChanges` 也不再每帧新建闭包穿透 memo |
 | 会话切换加载 / 显示 | `conversation/useConversation.ts`（`retainConversationWhileRemounting`）、`ConversationPane.tsx`、`conversationSwitchPhase.ts` | 同一 sessionId 的 engine 重挂期间保留上一份 transcript；跨会话时旧 ReactNode 在 `leaving` 全程保持，即使新快照提前到达也不换 DOM。新 transcript 在 `settling` 中以 `opacity: 0` 挂载两帧，等虚拟列表实测高度与唯一跟底写入完成后再淡入，避免首屏估高、实测和贴底造成一两次可见跳位 |
@@ -244,6 +244,17 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | 上游 `AGENTS.md` | 上游 agent 规范，不是 Studio 地图 |
 
 ## 维护
+
+### 流式性能与资源释放
+
+| 功能 | 入口 | 边界 |
+|---|---|---|
+| Host 工具增量 replay / 后台缓冲 | `packages/studio-host/src/replay-text-buffer.ts`、`conversation-coalescer.ts`、`conversation-events.ts`、`runtime-session-controller.ts` | 头截断不变；合并在 streamSeq 前；控制/打开为屏障；非 ASCII 保留原事件边界 |
+| 可见 pane / 隐藏发布 | Renderer `conversation/conversationViews.ts`、`ConversationPane.tsx`、`SubagentConversationPane.tsx`、`conversationStore.ts`；Desktop `conversation-views.ts`、`main.ts` | 固定 chrome 方法；实际 child ID；多窗口并集；旧 preload 保持兼容；预览不登记 |
+| 有界 Mermaid | `conversation/LazyMermaid.tsx`、`mermaidQueue.ts`、`renderCache.ts` | 20,000 单元 / 600 行 / 分数 1,500；串行、可取消等待、32 项 / 4MiB 缓存 |
+| 异步语法高亮 | `highlight/HighlightedCode.tsx`、`pool.ts`、`protocol.ts`、`highlight.worker.ts`、`compute.ts`；`conversation/markdown.tsx` | 生产默认 Worker，dev 默认原路径；即时 CodeFrame；安全 token；源码/队列/缓存/Worker 均有界 |
+| 性能数值采样 | `studio-protocol/src/performance-diagnostics.ts`；Renderer `rendererPerformance.ts`、`rendererResources.ts`；Desktop `chrome-performance*.ts`、`desktop-performance.ts`；overlay `services/runtime-performance.ts` | 每 60 秒采样，门控写本地日志；不读正文、不唤醒 Runtime；Runtime helper 与 canonical 镜像测试 |
+| 性能门禁与回滚 | `scripts/host-replay-bench.mjs`、`streaming-perf-gate.mjs`、`render-work-bench.mjs`、`native-visibility-smoke.cjs`、`compare-streaming-perf.mjs`；Renderer `performanceOptions.ts` | 合成 fixture，输出 `outputs/perf/`；独立生产/file harness；默认选择和命令见 [`docs/performance.md`](../docs/performance.md) |
 
 - 新功能落地后：在对应表加一行（UI + Host/Desktop + 若有 Runtime）。
 - 文件重命名：改这一份，不要让 `AGENTS.md` 再列路径。
