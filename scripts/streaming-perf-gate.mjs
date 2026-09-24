@@ -148,8 +148,11 @@ async function scenarioOnce(page, cdp, name, seed, runOptions) {
     { ...runOptions, frames: Math.min(30, runOptions.frames) },
   );
   const before = await metrics(cdp);
+  const tracing = process.env.PERF_TRACE === "1";
+  if (tracing) await cdp.send("Tracing.start", { categories: "devtools.timeline", transferMode: "ReturnAsStream" });
   const result = await page.evaluate((value) => window.ompPerf.run(value), runOptions);
   const after = await metrics(cdp);
+  const trace = tracing ? await finishTrace(cdp) : undefined;
   const cost = {
     layoutMsPerFrame: ((after.LayoutDuration - before.LayoutDuration) * 1000) / result.frames,
     styleMsPerFrame: ((after.RecalcStyleDuration - before.RecalcStyleDuration) * 1000) / result.frames,
@@ -160,7 +163,29 @@ async function scenarioOnce(page, cdp, name, seed, runOptions) {
       + `script ${cost.scriptMsPerFrame.toFixed(2)}ms/f  median ${result.median.toFixed(1)}ms  p95 ${result.p95.toFixed(1)}ms  `
       + `>48ms ${result.stalls}/${result.frames}  toggles ${result.toggles}  rows ${result.rows}`,
   );
-  return { name, seed, ...result, ...cost };
+  return { name, seed, ...result, ...cost, ...(trace === undefined ? {} : trace) };
+}
+
+async function finishTrace(cdp) {
+  const done = new Promise((resolve) => cdp.once("Tracing.tracingComplete", resolve));
+  await cdp.send("Tracing.end");
+  const { stream } = await done;
+  let text = "";
+  try {
+    for (;;) {
+      const chunk = await cdp.send("IO.read", { handle: stream });
+      text += chunk.base64Encoded ? Buffer.from(chunk.data, "base64").toString("utf8") : chunk.data;
+      if (chunk.eof) break;
+    }
+  } finally { await cdp.send("IO.close", { handle: stream }); }
+  const events = JSON.parse(text).traceEvents;
+  const durations = (names) => {
+    const samples = events.filter((event) => event.ph === "X" && names.includes(event.name) && typeof event.dur === "number")
+      .map((event) => event.dur / 1000).sort((a, b) => a - b);
+    if (samples.length === 0) throw new Error(`trace did not capture ${names.join("/")}`);
+    return samples[Math.min(samples.length - 1, Math.floor(samples.length * 0.95))];
+  };
+  return { scriptTaskP95Ms: durations(["FunctionCall", "EvaluateScript", "RunMicrotasks"]), layoutTaskP95Ms: durations(["Layout"]) };
 }
 
 async function scenario(page, cdp, name, seed, runOptions) {
@@ -265,6 +290,8 @@ try {
   await page.goto(started.url, { waitUntil: "load" });
   await page.waitForFunction(() => typeof window.ompPerf === "object");
   identity.chromium = browser.version();
+  identity.optimizations = await page.evaluate(() => window.ompPerf.renderWork.options);
+  identity.trace = process.env.PERF_TRACE === "1";
   Object.assign(identity, await page.evaluate(async () => {
     const intervals = [];
     let before = await new Promise(requestAnimationFrame);

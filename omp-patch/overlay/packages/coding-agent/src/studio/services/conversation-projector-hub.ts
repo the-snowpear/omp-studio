@@ -50,9 +50,13 @@ export class ConversationProjectorHub {
 	}
 
 	getDiagnostics(): Readonly<Record<string, number>> {
-		const counters: Record<string, number> = { projectors: this.#disposed ? 0 : this.#children.size + 1, ...this.#main.getDiagnostics() };
+		const counters: Record<string, number> = {
+			projectors: this.#disposed ? 0 : this.#children.size + 1,
+			...this.#main.getDiagnostics(),
+		};
 		for (const child of this.#children.values()) {
-			for (const [key, value] of Object.entries(child.projector.getDiagnostics())) counters[key] = (counters[key] ?? 0) + value;
+			for (const [key, value] of Object.entries(child.projector.getDiagnostics()))
+				counters[key] = (counters[key] ?? 0) + value;
 		}
 		counters.listeners = (counters.listeners ?? 0) + this.#listeners.size;
 		return counters;

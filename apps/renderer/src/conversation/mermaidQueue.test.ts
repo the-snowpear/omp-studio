@@ -48,6 +48,25 @@ describe("Mermaid budgets and lifecycle", () => {
     expect(render).not.toHaveBeenCalled();
     queue.dispose();
   });
+  it("resumes a live job when the page becomes visible again during lazy module loading", async () => {
+    let hidden = false;
+    let finish!: () => void;
+    const result = vi.fn();
+    const render = vi.fn(async () => {
+      if (render.mock.calls.length === 1) {
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return undefined;
+      }
+      return "<svg/>";
+    });
+    const queue = new MermaidQueue({ hidden: () => hidden, render });
+    queue.request("graph TD; A-->B", { active: () => true, result }); await settle();
+    hidden = true; finish(); hidden = false;
+    await settle(); await settle();
+    expect(result).toHaveBeenCalledWith("<svg/>");
+    expect(render).toHaveBeenCalledTimes(2);
+    queue.dispose();
+  });
   it("holds the serial slot for a cancelled in-flight promise, bounds waiting and retries slots", async () => {
     let finish!: (svg: string) => void;
     const render = vi.fn(() => new Promise<string>((resolve) => { finish = resolve; }));

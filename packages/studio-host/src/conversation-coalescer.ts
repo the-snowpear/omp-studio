@@ -1,7 +1,7 @@
 import { CONVERSATION_LIMITS, type ConversationRuntimeEvent, type StudioEventEnvelope } from "@omp-studio/studio-protocol";
 
 type Envelope = StudioEventEnvelope<ConversationRuntimeEvent>;
-type Group = { last: Envelope; chunks: string[]; bytes: number; truncated: boolean; hasOutput: boolean; items: number; retainedBytes: number };
+type Group = { last: Envelope; chunks: string[]; bytes: number; truncated: boolean; hasOutput: boolean; items: number; retainedBytes: number; ascii: boolean };
 export interface ConversationCoalescerOptions {
   readonly emit: (envelope: Envelope) => void;
   readonly setTimer?: (callback: () => void, ms: number) => unknown;
@@ -64,10 +64,16 @@ export class ConversationCoalescer {
     if (bytes > MAX_BYTES) { this.options.emit(envelope); return; }
     const text = payload(event);
     const textBytes = Buffer.byteLength(text);
+    // Prefix truncation is not associative for arbitrary UTF-8: with one
+    // byte free, appending "中" and then "a" retains "a", whereas one
+    // append of "中a" retains neither. Lone-surrogate normalization is also
+    // boundary-sensitive. Preserve those input boundaries; ASCII runs can
+    // be joined without changing either the Host head or Renderer tail cap.
+    const ascii = !/[^\x00-\x7f]/u.test(text);
     const last = this.#tail;
     // Limit either kind to the smaller delta budget. A group cannot create an
     // oversized wire event; a replace always remains an independent baseline.
-    if (last !== undefined && adjacent(last.last.event, event) && last.bytes + textBytes <= CONVERSATION_LIMITS.DELTA_MAX_BYTES) {
+    if (last !== undefined && last.ascii && ascii && adjacent(last.last.event, event) && last.bytes + textBytes <= CONVERSATION_LIMITS.DELTA_MAX_BYTES) {
       last.last = envelope;
       last.chunks.push(text);
       last.bytes += textBytes;
@@ -76,7 +82,7 @@ export class ConversationCoalescer {
       last.items++; last.retainedBytes += bytes;
     } else {
       const group = { last: envelope, chunks: [text], bytes: textBytes,
-        truncated: event.kind === "conversation.tool.updated" && event.truncated === true, hasOutput: "output" in event, items: 1, retainedBytes: bytes };
+        truncated: event.kind === "conversation.tool.updated" && event.truncated === true, hasOutput: "output" in event, items: 1, retainedBytes: bytes, ascii };
       this.#groups.push(group); this.#tail = group;
     }
     this.#items++;

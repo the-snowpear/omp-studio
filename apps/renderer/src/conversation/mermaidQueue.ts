@@ -83,7 +83,7 @@ export class MermaidQueue {
       }).finally(() => {
         // A page can become hidden between dequeue and execution. Requeue only
         // the still subscribed job, inside the existing eight-entry budget.
-        if (!this.#disposed && deferred && this.options.hidden() && job.subscribers.size > 0) this.#waiting.set(key, job);
+        if (!this.#disposed && deferred && [...job.subscribers].some((subscriber) => subscriber.active())) this.#waiting.set(key, job);
         else job.subscribers.clear();
         this.#running = undefined;
         this.#notify(); this.pump();

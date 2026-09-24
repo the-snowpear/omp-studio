@@ -22,6 +22,7 @@ import { ConversationPane } from "./conversation/ConversationPane";
 import { ConversationMinimap } from "./conversation/ConversationMinimap";
 import { ConversationStore } from "./conversation/conversationStore";
 import type { ConversationSnapshot } from "./conversation/conversationEngine";
+import { renderWorkHarness } from "./render-work-harness";
 
 import "./styles/tokens.css";
 import "./styles/base.css";
@@ -65,6 +66,7 @@ export type SwitchPerfResult = {
   readonly firstVisibleDistanceFromTail: number | null;
   readonly visiblePositionJumps: number;
   readonly maxVisibleShiftPx: number;
+  readonly positions: readonly { phase: string; index: string; top: number; scrollTop: number; scrollHeight: number }[];
 };
 export type ExpandPerfResult = {
   /** 被点开的卡（工具类型 + 链内序号），null = 没找到可点的中段卡，探针没生效。 */
@@ -444,10 +446,15 @@ async function sessionSwitchContract(): Promise<SwitchPerfResult> {
   let firstVisibleDistanceFromTail: number | null = null;
   let visiblePositionJumps = 0;
   let maxVisibleShiftPx = 0;
+  const positions: { phase: string; index: string; top: number; scrollTop: number; scrollHeight: number }[] = [];
   let previous: { readonly index: string; readonly top: number; readonly scrollTop: number } | null = null;
   let visibleSamples = 0;
   for (let tick = 0; tick < 70; tick += 1) {
     await frame();
+    // Sample the frame the user actually sees, after the sole ResizeObserver
+    // tail writer ran. Reading inside RAF can force layout before that writer
+    // and report a temporary offset that is corrected before paint.
+    await afterPaint();
     const phase = body.dataset.phase ?? "";
     const opacity = Number.parseFloat(getComputedStyle(body).opacity || "0");
     if (phase === "settling") {
@@ -466,6 +473,7 @@ async function sessionSwitchContract(): Promise<SwitchPerfResult> {
           top: mounted.getBoundingClientRect().top,
           scrollTop: scroller.scrollTop,
         };
+        positions.push({ phase, ...current, scrollHeight: scroller.scrollHeight });
         if (previous !== null && previous.index === current.index) {
           const shift = Math.max(Math.abs(current.top - previous.top), Math.abs(current.scrollTop - previous.scrollTop));
           maxVisibleShiftPx = Math.max(maxVisibleShiftPx, shift);
@@ -483,6 +491,7 @@ async function sessionSwitchContract(): Promise<SwitchPerfResult> {
     firstVisibleDistanceFromTail,
     visiblePositionJumps,
     maxVisibleShiftPx,
+    positions,
   };
 }
 
@@ -623,6 +632,7 @@ if (host !== null) createRoot(host).render(<HarnessView />);
 declare global {
   interface Window {
     ompPerf: {
+      renderWork: typeof renderWorkHarness;
       reset(seed: PerfSeed): Promise<void>;
       run(options: PerfRunOptions): Promise<PerfResult>;
       cardTransition(): { readonly streaming: string; readonly idle: string };
@@ -634,6 +644,7 @@ declare global {
 }
 
 window.ompPerf = {
+  renderWork: renderWorkHarness,
   reset: (seed) => harness.reset(seed),
   run: (options) => harness.run(options),
   cardTransition: cardTransitionContract,

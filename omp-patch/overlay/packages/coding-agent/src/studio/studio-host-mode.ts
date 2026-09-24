@@ -832,12 +832,17 @@ export function createStudioHostRuntime(
 	});
 	const shutdownSignal = Promise.withResolvers<void>();
 	const performanceSampler = createRuntimePerformanceSampler({
-		counters: () => ({ ...conversation.getDiagnostics(),
-			workerResidency: ["active", "sleeping", "recycling", "reviving", "dormant", "failed"].indexOf(workerLifecycle.residency()),
+		counters: () => ({
+			...conversation.getDiagnostics(),
+			workerResidency: ["active", "sleeping", "recycling", "reviving", "dormant", "failed"].indexOf(
+				workerLifecycle.residency(),
+			),
 			workerGeneration: workerLifecycle.generation(),
 		}),
 		// Dedicated numerical diagnostic sink; never used to infer business state.
-		emit: line => { process.stderr.write(`[studio.performance] ${line}\n`); },
+		emit: line => {
+			process.stderr.write(`[studio.performance] ${line}\n`);
+		},
 	});
 	performanceSampler.start();
 	let shutdownRequested = false;

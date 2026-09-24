@@ -126,3 +126,44 @@ test("conversation.open returns explicit agent and child-session identity", asyn
     controller.dispose();
   }
 });
+
+test("background conversation.open flushes pending content before returning the watermark", async () => {
+  const harness = fakeBridge({});
+  const controller = new StudioRuntimeSessionController(harness.bridge, new CommandLedger(), undefined, { backgroundCoalescing: true });
+  controller.setConversationVisibleSessions(new Set());
+  const order: string[] = [];
+  controller.onConversationEvent(({ envelope }) => order.push(envelope.event.kind));
+  harness.emit(envelope(1, { kind: "conversation.message.delta", sessionId: CHILD, turnId: "t", messageId: "m", blockId: "b", blockType: "text", delta: "one" }));
+  assert.equal(order.length, 0);
+  const opened = await controller.openConversation({ target: { kind: "agent", parentSessionId: PARENT, agentId: AGENT } });
+  assert.deepEqual(order, ["conversation.message.delta"]);
+  assert.equal(opened.live.watermark, 1);
+  assert.equal(controller.getConversationDiagnostics().pendingItems, 0);
+  controller.dispose();
+});
+
+test("approval, error, receipt publication and runtime loss are immediate barriers after pending text", () => {
+  let eventListener: (event: StudioEventEnvelope) => void = () => {};
+  let projectionListener: (snapshot: never) => void = () => {};
+  const bridge = {
+    onProjectionChanged: (listener: typeof projectionListener) => { projectionListener = listener; return () => {}; },
+    onEvent: (listener: typeof eventListener) => { eventListener = listener; return () => {}; },
+    onResyncRequired: () => () => {}, projectionSnapshot: () => ({ runtimeEpoch: 1, sessionId: PARENT }),
+  } as unknown as StudioBridgeClient;
+  const controller = new StudioRuntimeSessionController(bridge, new CommandLedger(), undefined, { backgroundCoalescing: true });
+  controller.setConversationVisibleSessions(new Set());
+  const order: string[] = [];
+  controller.onConversationEvent(() => order.push("text"));
+  controller.onInteractionEvent(() => order.push("approval"));
+  controller.onPublication(() => order.push("publication"));
+  controller.onConversationResync(() => order.push("lost"));
+  const pending = () => eventListener(envelope(1, { kind: "conversation.message.delta", sessionId: PARENT, turnId: "t", messageId: "m", blockId: "b", blockType: "text", delta: "pending" }));
+  pending();
+  eventListener({ ...envelope(2, { kind: "conversation.turn.completed", sessionId: PARENT, turnId: "t" }), event: { kind: "interaction.required", request: { commandId: "approval-command" } } });
+  assert.deepEqual(order, ["text", "approval"]);
+  pending(); projectionListener({ runtimeEpoch: 1, sessionId: PARENT } as never);
+  assert.deepEqual(order.slice(-2), ["text", "publication"]);
+  pending(); controller.runtimeLost("runtime" as never, 1 as RuntimeEpoch);
+  assert.deepEqual(order.slice(-3), ["text", "publication", "lost"]);
+  controller.dispose(); assert.equal(controller.getConversationDiagnostics().pendingItems, 0);
+});

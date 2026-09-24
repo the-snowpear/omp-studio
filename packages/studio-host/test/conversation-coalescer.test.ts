@@ -52,13 +52,13 @@ test("10,000 deltas: item and byte overflow flush losslessly with continuous wat
   const s = setup();
   s.fanout.setVisibleSessions(new Set());
   for (let i = 0; i < 10000; i++) {
-    s.send(delta("中🚀"));
+    s.send(delta("token"));
     assert.ok(s.fanout.getDiagnostics().pendingItems! < 500);
     assert.ok(s.fanout.getDiagnostics().pendingBytes! <= 1024 * 1024);
   }
   const snapshot = s.fanout.snapshot(sessionId);
   assert.equal(snapshot.status, "complete");
-  assert.equal(text(s.delivered), "中🚀".repeat(10000));
+  assert.equal(text(s.delivered), "token".repeat(10000));
   assert.equal(snapshot.watermark, s.delivered.length);
   s.delivered.forEach((event, i) => {
     assert.equal(event.streamSeq, i + 1);
@@ -149,4 +149,17 @@ test("append groups keep replace boundaries and truncated flags", () => {
   assert.deepEqual(actual, legacy.snapshot(sessionId).events[0]?.envelope.event);
   assert.equal(s.delivered.length, 4);
   assert.equal(s.delivered[2]!.envelope.event.kind === "conversation.tool.updated" && s.delivered[2]!.envelope.event.truncated, true);
+});
+
+test("coalescing preserves UTF-8 truncation and split surrogates at the replay head cap", () => {
+  const s = setup();
+  const legacy = new ConversationEventFanout({ incrementalToolReplay: true });
+  s.fanout.setVisibleSessions(new Set());
+  const chunks = ["x".repeat(CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES - 1), "中", "a", "\ud83d", "\ude80"];
+  for (let index = 0; index < chunks.length; index++) {
+    const event: ConversationRuntimeEvent = { kind: "conversation.tool.updated", sessionId, turnId: "turn", toolCallId: "call", updateMode: "append", output: chunks[index]! };
+    s.send(event);
+    legacy.forward({ type: "studio.event", runtimeEpoch: 1, stateVersion: 1, eventSeq: index + 1, occurredAt: "now", event } as StudioEventEnvelope);
+  }
+  assert.deepEqual(s.fanout.snapshot(sessionId).events[0]?.envelope.event, legacy.snapshot(sessionId).events[0]?.envelope.event);
 });
