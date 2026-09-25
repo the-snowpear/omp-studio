@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { ArtifactLibrary } from "../src/artifact-library.js";
 
 test("bounded text artifacts round-trip exactly and reject changed payloads", async () => {
@@ -52,7 +52,8 @@ test("changing storage roots preserves earlier files; deleting a session retains
     await library.setDirectory(external);
     const second = await library.registerBytes({ kind: "video", name: "result.mp4", mimeType: "video/mp4", sessionId: "one" }, Buffer.from("second video"));
     assert.equal((await library.resolve(first.artifactId)).path, original.path);
-    assert.ok((await library.resolve(second.artifactId)).path.startsWith(external));
+    // Storage resolves directory aliases; CI temp paths may use a junction or a different drive-letter case.
+    assert.equal(dirname((await library.resolve(second.artifactId)).path), await realpath(external));
     await library.detachSession("one");
     assert.equal((await library.list({ sessionId: "one" })).total, 0);
     assert.equal((await library.list()).total, 2);
