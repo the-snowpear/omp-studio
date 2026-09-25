@@ -1,0 +1,28 @@
+.judgments-pane { margin: 0 0 12px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.judgments-pane > summary { cursor: pointer; padding: 12px 16px; font-weight: 600; }
+.judgments-content { padding: 0 16px 16px; max-height: 72vh; overflow: auto; }
+.judgment-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin: 10px 0; }
+.judgment-toolbar > input { max-width: 220px; }
+.judgment-toolbar label { display: grid; gap: 5px; font-size: 12px; }
+.judgment-toolbar input[type=number] { width: 100px; }
+.judgment-form { display: grid; gap: 12px; margin: 12px 0; max-width: 900px; }
+.judgment-form > label, .judgment-question > label { display: grid; gap: 6px; font-size: 12px; }
+.judgment-form textarea { width: 100%; resize: vertical; }
+.judgment-question { border: 1px solid var(--border); padding: 12px; display: grid; gap: 10px; min-width: 0; }
+.judgment-confirm { border-left: 3px solid var(--accent); background: var(--bg-hover); padding: 10px 14px; margin: 12px 0; }
+.judgment-confirm > .btn { margin-right: 8px; }
+.judgment-confirm pre { white-space: pre-wrap; max-height: 240px; overflow: auto; font-size: 12px; }
+.judgment-workspace { display: grid; grid-template-columns: minmax(180px, 25%) minmax(0, 1fr); gap: 20px; margin-top: 14px; }
+.judgment-batches { display: flex; flex-direction: column; gap: 4px; }
+.judgment-batches > button { display: grid; gap: 6px; text-align: left; padding: 10px; border: 0; border-left: 2px solid transparent; background: transparent; color: inherit; cursor: pointer; }
+.judgment-batches > button.selected { background: var(--bg-hover); border-left-color: var(--accent); }
+.judgment-batches strong { font-size: 13px; overflow-wrap: anywhere; }
+.judgment-results { min-width: 0; }
+.judgment-results h3 { margin: 0 0 8px; font-size: 15px; }
+.judgment-results progress { width: 100%; height: 6px; accent-color: var(--accent); }
+.judgment-table { overflow: auto; }
+.judgment-table table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.judgment-table td, .judgment-table th { padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; max-width: 420px; overflow-wrap: anywhere; }
+.judgment-table pre { white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.judgment-error { color: var(--red, #d86464); overflow-wrap: anywhere; }
+@media (max-width: 850px) { .judgment-workspace { grid-template-columns: minmax(0, 1fr); } .judgment-batches { max-height: 180px; overflow: auto; } }

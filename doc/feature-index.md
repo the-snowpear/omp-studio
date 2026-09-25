@@ -61,6 +61,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 
 | 功能 | 入口 | 命令 / query |
 |---|---|---|
+| 通用标注 | `annotations/Annotations.tsx`、`preview/annotationsPreview.ts`；Runtime `services/annotation-service.ts` | `annotations.capture/prepare`；来源版本/选区/编辑/撤销、过期确认；只插入主 Composer；`artifacts.saveText/text.read` 保存重开快照 |
 | 对话窗 | `apps/renderer/src/conversation/ConversationPane.tsx` | 订阅 conversation 事件 |
 | 对话加载 / Store | `conversation/conversationSource.ts`、`conversationStore.ts`、`conversationEngine.ts`、`useConversation.ts` | `conversation.open` 先订阅后打开；目标级 watermark 去重；首屏 / replay / 实时增量统一进入有界 Store；App 只订阅低频 metadata，token 热流只更新 `ConversationPane` |
 | 用户消息 Restore / 新会话 | `conversation/ConversationItemView.tsx`、`UserMessageBody.tsx`、`userMessageThumbs.ts`、`userMessageRestore.ts`、`UserMessageTreeConfirm.tsx`、`conversationEngine.ts`、`composer/serialize.ts` | 已发送用户气泡「恢复」（`undo` 图标）→ `session.tree.navigate`（leaf=该条 parent）；「新会话」（`branch` 图标）→ `session.tree.branch`（新 session 文件，切过去）。确认用应用内模态（归档同风格），不用 `window.confirm`。气泡仍画文件/技能/图片胶囊，配色与 Composer 同类胶囊一致（不刷成气泡白霜）。复制按钮与划选复制走序列化 `@` / `/skill:` / `[图N]`。图缩略图贴在气泡上方，点击预览；公开 transcript 仍剥图。预览字节落本机 IndexedDB（`omp-studio-ui` / `user-message-thumbs`），按 sessionId+itemId 重开会话仍能挂回缩略图，不进 Host。预览本地裁剪，不调 Host。busy 时 overlay 拒绝。`/branch` 提示点气泡，不打开 Changes。 |
@@ -117,11 +118,14 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 | 功能 | UI | Host 适配 | Runtime |
 |---|---|---|---|
 | Agent Hub 页 | `apps/renderer/src/AgentHub.tsx`、`conversation/SubagentConversationPane.tsx`、`conversation/persistedSessionAgents.ts` | 名册：`session.agents.list` 与 live `snapshot.agents` 合并（仅 viewed session === live session 时叠 live）；写操作（spawn/send/kill/revive/release/`job.cancel`）仅 live 会话；历史 Transcript 不读 live `agent.transcript.read`，用「打开」走归档对话；详情「打开」走 `agent.conversation.read`，缺失或非 live 则 `session.transcript.readPage` + `agentId`；聊天附件胶囊经 `agent.send` | overlay `services/agent-hub-service.ts`、`job-service.ts` |
+| 批量评审 | `judgments/JudgmentsPane.tsx`、`preview/judgmentsPreview.ts` | `judgments.list/create/read/cancel/close/retry`；有界分页、付费操作前确认、结果保存产物库 | overlay `services/judgment-service.ts`；native `eval/judgment-batch-bridge.ts` 独立观察游标 |
 | 子代理面板 | `SubagentsPanel.tsx` | `agent.spawn/send/kill/revive/release` | 同上 + `agent-conversation-service.ts` |
 | 隔离子任务 / 多补丁 | `AgentHub.tsx`、`conversation/persistedSessionAgents.ts` | archive 的 `session_init.isolated` 经 Desktop 投影；历史只读 | `AgentHistorySummary.isolated/nestedPatchPaths` → overlay Hub 的 `canRevive`；send/revive 均在 Runtime 拒绝不可恢复的隔离任务 |
 | 任务代理定义 | `AgentHub` / Capabilities | `omp-agent-definitions-adapter.ts` | 磁盘 `.omp/agents/*.md`，不是 Hub live 态 |
 | Skills 抽屉 | `SkillsDrawer.tsx`、`skills/skillUsage.ts` | `omp-extensibility-adapter.ts`、`skills.get` / `skills.setEnabled` | overlay `skill-prompt-expansion.ts` |
-| MCP | `CapabilitiesPage.tsx` | `omp-mcp-adapter.ts`、`omp-mcp-probe.ts`、`mcp.get` / `mcp.setEnabled` / `mcp.refresh` / `mcp.test` / `mcp.logs.get` | 配置扫描 + Host 一次性探测；不是 Runtime MCPManager 连接态 |
+| MCP | `CapabilitiesPage.tsx`、`capabilities/RuntimeCatalogPanes.tsx` | `omp-mcp-adapter.ts`、`omp-mcp-probe.ts`、`mcp.get` / `mcp.setEnabled` / `mcp.refresh` / `mcp.test` / `mcp.logs.get` | 配置扫描 + Host 一次性探测；独立 `mcp.runtime.status` 从 native manager 读取当前连接/工具就绪状态 |
+| 提示词模板 | `capabilities/RuntimeCatalogPanes.tsx`、`preview/runtimeCatalogPreview.ts` | `templates.list/get/prepare`；预览展开后插入主 Composer，不发送 | `services/runtime-catalog-service.ts`；当前 session 已加载模板及版本 |
+| 模型基准测试 | `models/BenchmarkPane.tsx`、`preview/benchmarksPreview.ts` | `benchmarks.list/start/read/cancel/close`；报告保存产物库 | `services/benchmark-service.ts` + `cli/bench-cli.ts` 结构化进度/中止；原生工作负载/指标 |
 | 能力中心 | `CapabilitiesPage.tsx` | Skills 开目录 `skills.reveal` / `skills.revealRoot`（Desktop `shell.openPath`）；Slash 页 `visibleSlashCatalog()` + `App.runSlashCommand`，不是 `commands.getManifest` | overlay `command-manifest-service.ts` 仍只服务协议 manifest |
 | 模型配置页 | `ModelConfigPage.tsx`、`models/fetchedModels.ts`、`models/providerYaml.ts`（卡片 YAML 文本产出）；表单→models.yml 节点映射在 `packages/client-contract/src/provider-yaml-draft.ts`，与 Host 的 `toYamlProvider` 由 `packages/host-client-api/test/provider-yaml-draft-parity.test.ts` 钉齐、`models/WebSearchPanel.tsx`（网络搜索 tab） | `omp-models-adapter.ts`、`models-yml.ts`；「自动获取模型」走 `models.provider.probe`（不传 `discoveryType`，Host 按 api 类型选模型列表地址与认证头），候选清单只进表单草稿，保存才写 `models.yml`；编辑器下方的 `models.yml` / `config.yml` 结构化卡片由当前表单草稿派生（`deriveProviderSlice` / `deriveRoleSlice`），表单有未保存改动时即时刷新并转为只读，未接管字段与源文件一致；网络搜索 tab 为「生效链路 + 优先链/供应商库」双分区面板（含供应商描述与凭证状态、searxng 全量字段）；配置（`web_search.*` / `providers.webSearch*` / `searxng.*` / `exa.*`）走 `models.webSearch.set`，写 `config.yml` | overlay `model-control-service.ts`（会话内切模型） |
 | 发现 / 插件根 | — | `host-client-api/src/omp-discovery/**` | — |
@@ -155,6 +159,7 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 功能 | Renderer | Desktop |
 |---|---|---|
 | 底栏终端 | `apps/renderer/src/TerminalPane.tsx` | `terminal-ipc.ts`、`terminal-pty.ts` |
+| Shell 录制 / 回放 | `recordings/TerminalRecordingControls.tsx`、`RecordingPlayer.tsx`、`format.ts`、`recording.worker.ts`；产物库录制项 | `terminal-recording.ts` + 固定 terminal recording IPC；真实 PTY 输出流写入产物库；支持 `.studiocast` 和上游 `.ompcast` 只读回放，无额外 AgentSession/TUI |
 | 标题栏 overlay | 壳 | `titlebar-overlay.ts` |
 | 应用图标 | 侧栏 / 关于 `AppIcon`；`public/icon.png`、`favicon.ico` | Renderer 自带图标资源；桌面运行时在 Windows 设置 `AppUserModelId` 并把 `resources/icon.ico` 注入窗口（任务栏/窗口身份）；安装包由 `packaging/electron-builder.yml` 将同一 ICO 写入 EXE，并创建带图标的桌面与开始菜单快捷方式 |
 | 系统通知 | — | `chrome-notify.ts` |
@@ -199,7 +204,7 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | Fast / prewalk | `fast-prewalk-service.ts` |
 | 条件 Loop / Prewalk 重启 | `services/loop-service.ts`、`fast-prewalk-service.ts`；Renderer `ComposerModePicker.tsx` |
 | 实验上下文 / Plan 自动保存 / 配额等待 | `services/runtime-settings-service.ts`、`mode-control-service.ts`、`state-projector.ts`；Renderer `settings/tabs.tsx`、`conversation/ActivityLine.tsx` |
-| Live（无桌面音频则 fail closed） | `live-service.ts` |
+| Live 实时语音 | `live-service.ts`、`services/live-audio-service.ts`；Renderer `media/LiveAudioPane.tsx`、`liveCapture.ts`、`live-capture.worklet.js`；Desktop `live-audio.ts` |
 | BTW / TAN / OMFG | overlay `btw-service.ts`、`tan-service.ts`、`omfg-service.ts`；Host `btw-events.ts`、facade `#bindBtw`、client `reducer.ts` `entities.btw`；Renderer `apps/renderer/src/btw/` |
 | 会话来源标记 | `session-origin.ts` |
 
@@ -272,3 +277,18 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | Advisor 费用／实际模型／生成速率 | `App.tsx` token 面板、`conversation/SubagentMetrics.tsx` | overlay `session-telemetry.ts`、`state-projector.ts`、`agent-hub-service.ts` |
 
 迁移明细与验证：[OMP 18.2.5](../docs/migrations/omp-18.2.5.md)。
+
+## OMP 18.3.0 适配
+
+| 功能 | UI | Runtime / Host / Desktop |
+|---|---|---|
+| 服务控制、加密保存配置 | `services/ServicesPane.tsx`，Agent Hub；预览 `preview/servicesPreview.ts` | `contracts/workbench.ts` → overlay `services/workbench-service.ts` → 原生 launch broker；Desktop `service-definitions.ts`、`chrome-services.ts` |
+| 媒体产物库、存储位置 | `MediaPage.tsx`、`media/ArtifactLibraryPane.tsx`；预览 `preview/mediaPreview.ts` | Host `artifact-library.ts`；Desktop `chrome-artifacts.ts`（固定导入/导出 IPC、私有流式协议）；`session.delete.deleteManagedArtifacts` 默认 false |
+| 媒体生成 / 转写 / TTS | `media/MediaWorkbench.tsx`、`AudioCapturePane.tsx`；预览 `mediaWorkbenchPreview.ts` | `contracts/media.ts`、overlay `services/media-service.ts` / `media-files.ts`；Desktop `runtime-media-files.ts`、`media-upload.ts` |
+| Live 实时语音 | `media/LiveAudioPane.tsx`；预览 `liveAudioPreview.ts` | `contracts/live-audio.ts`、overlay `services/live-audio-service.ts`；Desktop `live-audio.ts` 固定 PCM 通道 |
+| 离线 Token 计数 | `usage/TokenCounterPane.tsx`，顶栏 Token 面板 | `tokens.count` → Workbench → 原生 tokenizer |
+| 模型种类、角色链、搜索迁移 | `ModelConfigPage.tsx`、`models/runtimeModels.ts`、`WebRoleChain.tsx` | `runtime.models.list`；Host `model-role-migration.ts`、`web-routing.ts`、`omp-models-adapter.ts` |
+| Claude 重置确认与策略、MCP 启动等待 | `settings/tabs.tsx`、现有 InteractionDeck | overlay `runtime-settings-service.ts`、`studio-host-mode.ts` 与 AgentSession consent hook |
+| 账户、额度、重置券只读状态 | `models/AccountStatusPane.tsx`；预览 `preview/accountsPreview.ts` | `accounts.status` → overlay `services/account-status-service.ts`；手动刷新，不调用自动兑券 heartbeat |
+
+范围和验收进展：[OMP 18.3.0](../docs/migrations/omp-18.3.0.md)。

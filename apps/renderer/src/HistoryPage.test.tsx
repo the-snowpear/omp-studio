@@ -82,7 +82,7 @@ describe("HistoryPage session pins", () => {
 });
 
 describe("HistoryPage delete session (real mode)", () => {
-  it("opens the more menu, confirms, and calls onDeleteSession with the entry", async () => {
+  it.each([false, true])("deletes only the explicitly selected artifacts (cascade=%s)", async (cascade) => {
     window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "0");
     const onDeleteSession = vi.fn(async () => true);
     render(
@@ -103,9 +103,12 @@ describe("HistoryPage delete session (real mode)", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "删除会话确认" });
     expect(dialog).toBeTruthy();
+    const checkbox = screen.getByRole("checkbox", { name: "同时删除此会话的托管产物" });
+    expect((checkbox as HTMLInputElement).checked).toBe(false);
+    if (cascade) fireEvent.click(checkbox);
     fireEvent.click(screen.getByRole("button", { name: "删除会话" }));
 
-    await vi.waitFor(() => expect(onDeleteSession).toHaveBeenCalledWith(ACTIVE_ENTRY));
+    await vi.waitFor(() => expect(onDeleteSession).toHaveBeenCalledWith(ACTIVE_ENTRY, cascade));
   });
 
   it("keeps the dialog open when deletion fails", async () => {

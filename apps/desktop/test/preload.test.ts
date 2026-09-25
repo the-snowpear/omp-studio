@@ -306,6 +306,9 @@ describe("createOmpStudioChromeApi: fixed named surface, frozen object", () => {
     const expectedMethods = [
       "applyUpdate",
       "cancelUpdate",
+      "chooseArtifactDirectory", "importArtifact", "exportArtifact",
+      "revealSkillshareToken", "beginMediaUpload", "appendLiveAudio", "attachLiveAudio", "detachLiveAudio", "appendMediaUpload", "finishMediaUpload", "abortMediaUpload",
+      "listServiceDefinitions", "saveServiceDefinition", "removeServiceDefinition",
       "checkAppUpdate",
       "checkUpdates",
       "getUpdateSnapshot",

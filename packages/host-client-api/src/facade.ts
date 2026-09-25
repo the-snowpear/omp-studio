@@ -1,4 +1,4 @@
-import { isUpgradeOperationKind } from "@omp-studio/studio-protocol";
+import { validateArtifactTextInput, validateArtifactIdInput, isWorkbenchOperationKind, isUpgradeOperationKind } from "@omp-studio/studio-protocol";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
  * StudioHostClientFacade — the P1 presentation-neutral product API.
@@ -269,6 +269,7 @@ export interface StudioHostClientFacadeOptions {
   readonly commands?: HostSemanticCommandService;
   /** Optional OMP models.yml / config / login adapter. */
   readonly models?: HostModelsService;
+  readonly artifacts?: import("./services.js").HostArtifactService;
   /** Optional configured skills/plugins inventory adapter. */
   readonly extensibility?: HostExtensibilityService;
   /** Optional configured MCP server inventory adapter. */
@@ -416,6 +417,7 @@ function validateEnvelope(request: {
 /** Re-validate the three Runtime mirror commands at the in-process Host seam. */
 function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unknown): void {
   if (
+    !isWorkbenchOperationKind(commandName) &&
     !isUpgradeOperationKind(commandName) &&
     !isEvaluationOperationKind(commandName) &&
     commandName !== "runtime.settings.get" &&
@@ -425,6 +427,7 @@ function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unkn
     return;
   }
   try {
+    if (isWorkbenchOperationKind(commandName) && input !== null && typeof input === "object" && ("inputTransfers" in input || "kind" in input)) throw new Error("Private operation fields are not client inputs");
     // Same spread order as the dispatch seam (#commandP4): commandName wins,
     // so validation and dispatch always see the same operation kind.
     const operation = {
@@ -875,6 +878,21 @@ export class StudioHostClientFacade implements ClientTransport {
         const result = await this.#queryModels();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
       }
+      case "artifacts.text.read": {
+        const service = this.#options.artifacts;
+        if (!service?.readText) throw clientError("CAPABILITY_UNAVAILABLE", "Artifact text is unavailable");
+        validateArtifactIdInput(request.input);
+        return { ok: true, queryName: request.queryName, result: await service.readText(request.input.artifactId) } as ClientQueryResponse;
+      }
+      case "artifacts.list":
+      case "artifacts.storage.get": {
+        const service = this.#options.artifacts;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "The artifact library is not available on this Host");
+        const result = request.queryName === "artifacts.list"
+          ? await service.list(request.input as import("@omp-studio/client-contract").ArtifactListInput)
+          : await service.state();
+        return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
+      }
       case "skills.get": {
         const result = await this.#querySkills();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
@@ -1085,6 +1103,23 @@ export class StudioHostClientFacade implements ClientTransport {
       case "usage.openDashboard": {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
       }
+      case "artifacts.saveText": {
+        const service = this.#options.artifacts;
+        if (!service?.saveText) throw clientError("CAPABILITY_UNAVAILABLE", "Artifact text storage is unavailable");
+        validateArtifactTextInput(request.input);
+        const input = request.input;
+        return this.#commandLocalTask(request, () => service.saveText!(input));
+      }
+      case "artifacts.delete": {
+        const service = this.#options.artifacts;
+        if (!service) throw clientError("CAPABILITY_UNAVAILABLE", "The artifact library is not available on this Host");
+        const { artifactId } = request.input as { artifactId: string };
+        if (typeof artifactId !== "string" || !/^[a-f0-9-]{36}$/u.test(artifactId)) throw clientError("INVALID_ARGUMENT", "Invalid artifact ID");
+        return this.#commandLocalTask(request, async () => {
+          await service.remove(artifactId);
+          return { deleted: true, artifactId };
+        });
+      }
       case "plugins.setEnabled":
       case "skills.setEnabled":
       case "skills.reveal":
@@ -1112,6 +1147,25 @@ export class StudioHostClientFacade implements ClientTransport {
         return this.#commandP4(p4);
       }
     }
+  }
+
+  /** Host-owned tasks share the normal idempotency registry and terminal receipts. */
+  async #commandLocalTask(request: ClientCommandRequest, execute: () => Promise<unknown>): Promise<ClientCommandAccepted> {
+    validateEnvelope(request);
+    const acceptedAt = this.#options.diagnostics.now();
+    const replay = this.#registry.accept(request, acceptedAt);
+    if (replay !== undefined) {
+      this.#replayTerminal(replay, request.requestId);
+      return { commandName: request.commandName, requestId: request.requestId, status: "accepted", acceptedAt: replay.acceptedAt };
+    }
+    const accepted = { commandName: request.commandName, requestId: request.requestId, status: "accepted" as const, acceptedAt };
+    this.#bus.emit({ kind: "command.accepted", accepted });
+    void Promise.resolve().then(execute).then(result => {
+      this.#emitTerminal(request.requestId, { requestId: request.requestId, commandName: request.commandName, status: "completed", result, observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+    }, error => {
+      this.#emitTerminal(request.requestId, { requestId: request.requestId, commandName: request.commandName, status: "failed", error: toClientError(error), observedAt: this.#options.diagnostics.now() } as CommandReceipt);
+    });
+    return accepted;
   }
 
   #requireGit(name: string): HostGitService {
@@ -2589,6 +2643,7 @@ export class StudioHostClientFacade implements ClientTransport {
     if (!isThreadCommandInput(request.input)) {
       throw clientError("INVALID_ARGUMENT", "session.delete threadId must not be empty");
     }
+    if (request.input.deleteManagedArtifacts !== undefined && typeof request.input.deleteManagedArtifacts !== "boolean") throw clientError("INVALID_ARGUMENT", "Invalid managed artifact deletion choice");
     const threadId = request.input.threadId;
     const acceptedAt = this.#options.diagnostics.now();
     const replay = this.#registry.accept(request, acceptedAt);
@@ -2603,7 +2658,7 @@ export class StudioHostClientFacade implements ClientTransport {
       acceptedAt,
     };
     this.#bus.emit({ kind: "command.accepted", accepted });
-    void this.#runArchiveToggle(() => service.delete!({ threadId }), request.requestId, "session.delete");
+    void this.#runArchiveToggle(() => service.delete!({ threadId, ...(request.input.deleteManagedArtifacts === undefined ? {} : { deleteManagedArtifacts: request.input.deleteManagedArtifacts }) }), request.requestId, "session.delete");
     return accepted;
   }
 

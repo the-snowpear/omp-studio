@@ -15,6 +15,8 @@ import type {
 } from "@omp-studio/client-contract";
 
 export type FetchedModelCandidate = {
+  readonly kind?: import("@omp-studio/client-contract").ModelKind;
+  readonly webSearch?: string;
   readonly id: string;
   readonly name: string;
   /** Already present under this provider (any source), so importing would duplicate. */
@@ -57,6 +59,8 @@ export function toCandidates(
     const maxTokens = model.maxTokens ?? known?.maxTokens;
     const reasoning = model.reasoning ?? known?.reasoning;
     const image = model.image ?? known?.image;
+    const kind = model.kind ?? known?.kind;
+    const webSearch = model.webSearch ?? known?.webSearch;
     const thinking = known?.thinking && known.thinking.length > 0 ? known.thinking : undefined;
     const enriched = known !== undefined && (
       (model.contextWindow === undefined && contextWindow !== undefined)
@@ -75,6 +79,8 @@ export function toCandidates(
       ...(maxTokens === undefined ? {} : { maxTokens }),
       ...(reasoning === undefined ? {} : { reasoning }),
       ...(image === undefined ? {} : { image }),
+      ...(kind === undefined ? {} : { kind }),
+      ...(webSearch === undefined ? {} : { webSearch }),
       ...(thinking === undefined ? {} : { thinking }),
       enriched,
     });
@@ -114,6 +120,8 @@ export function candidatesToEntries(
 ): ModelCatalogEntry[] {
   return candidates.filter((item) => item.picked).map((item) => ({
     id: item.id,
+    ...(item.kind === undefined ? {} : { kind: item.kind }),
+    ...(item.webSearch === undefined ? {} : { webSearch: item.webSearch }),
     name: item.name,
     selector: `${providerId}/${item.id}`,
     ...(item.contextWindow === undefined ? {} : { contextWindow: item.contextWindow }),

@@ -54,28 +54,35 @@ export class StudioLiveService {
 				"Live media sideband is unavailable until a frontend audio device is attached",
 			);
 		}
+		if (this.#state.status === "failed" && !this.#session && !this.#startPromise) this.#setState({ status: "off" });
 		if (this.#state.status !== "off") {
 			throw new StudioLiveError("COMMAND_BLOCKED", "A Live session is already active or stopping");
 		}
 		if (this.#startPromise !== undefined) return this.#startPromise;
 		this.#setState({ status: "connecting", ...(deviceId === undefined ? {} : { deviceId }) });
-		const session = this.factory.create({
-			...(deviceId === undefined ? {} : { deviceId }),
-			onActive: () => {
-				if (this.#session === session && this.#state.status === "connecting") {
-					this.#setState({ status: "active", ...(deviceId === undefined ? {} : { deviceId }) });
-				}
-			},
-			onTerminal: error => {
-				if (this.#session !== session) return;
-				this.#session = undefined;
-				this.#setState(
-					error === undefined
-						? { status: "off" }
-						: { status: "failed", ...(deviceId === undefined ? {} : { deviceId }) },
-				);
-			},
-		});
+		let session: StudioLiveSessionPort;
+		try {
+			session = this.factory.create({
+				...(deviceId === undefined ? {} : { deviceId }),
+				onActive: () => {
+					if (this.#session === session && this.#state.status === "connecting") {
+						this.#setState({ status: "active", ...(deviceId === undefined ? {} : { deviceId }) });
+					}
+				},
+				onTerminal: error => {
+					if (this.#session !== session) return;
+					this.#session = undefined;
+					this.#setState(
+						error === undefined
+							? { status: "off" }
+							: { status: "failed", ...(deviceId === undefined ? {} : { deviceId }) },
+					);
+				},
+			});
+		} catch (cause) {
+			this.#setState({ status: "off" });
+			throw cause;
+		}
 		this.#session = session;
 		this.#startPromise = session
 			.start()

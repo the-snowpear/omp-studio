@@ -440,6 +440,8 @@ export interface ModelProviderRemoteCompaction {
 
 /** Partial `models.yml` modelOverrides / extra custom-model fields. */
 export interface ModelOverridePatch {
+  readonly kind?: import("./model-kinds.js").ModelKind;
+  readonly webSearch?: string;
   readonly name?: string;
   readonly contextWindow?: number;
   readonly maxTokens?: number;
@@ -459,6 +461,8 @@ export interface ModelOverridePatch {
 
 /** One model row under a provider. Safe display facts only. */
 export interface ModelCatalogEntry {
+  readonly kind?: import("./model-kinds.js").ModelKind;
+  readonly webSearch?: string;
   readonly id: string;
   readonly name: string;
   readonly selector: string;
@@ -558,6 +562,8 @@ export interface ModelRoleRecord {
 }
 
 export interface AvailableModelRecord {
+  readonly kind?: import("./model-kinds.js").ModelKind;
+  readonly webSearch?: string;
   readonly provider: string;
   readonly id: string;
   readonly selector: string;
@@ -630,7 +636,15 @@ export interface WebSearchAdvancedConfig {
 }
 
 /** Web-search configuration section of the model-config read model. */
+export interface WebSearchRouting {
+  readonly primary: string;
+  /** null follows native priority defaults; [] explicitly disables fallback. */
+  readonly fallbacks: ReadonlyArray<string> | null;
+  readonly defaultCandidates: ReadonlyArray<string>;
+  readonly migratedLegacy: boolean;
+}
 export interface WebSearchConfigReadModel {
+  readonly routing?: WebSearchRouting;
   /** `web_search.enabled` — global tool switch. */
   readonly enabled: boolean;
   /** `providers.webSearchOrder` — explicit priority list; empty = built-in order. */
@@ -654,6 +668,7 @@ export interface WebSearchConfigReadModel {
  * `searxng.safesearch` uses `null` to delete the key; omitting it keeps it.
  */
 export interface ModelWebSearchSetInput {
+  readonly routing?: Pick<WebSearchRouting, "primary" | "fallbacks">;
   readonly enabled?: boolean;
   readonly order?: ReadonlyArray<string>;
   readonly exclude?: ReadonlyArray<string>;
@@ -944,6 +959,8 @@ export interface ModelProviderTestResult {
  * must not substitute values of their own.
  */
 export interface ModelDiscoveryModel {
+  readonly kind?: import("./model-kinds.js").ModelKind;
+  readonly webSearch?: string;
   readonly id: string;
   readonly name: string;
   readonly contextWindow?: number;

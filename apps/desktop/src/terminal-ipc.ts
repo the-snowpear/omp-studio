@@ -12,8 +12,10 @@ import {
   parseDisposeInput,
   parseResizeInput,
   parseWriteInput,
+  parseRecordingInput,
 } from "./terminal-shared.js";
 import type { TerminalSessionManager, TerminalSessionListeners } from "./terminal-pty.js";
+import type { TerminalRecordingManager } from "./terminal-recording.js";
 
 export interface TerminalSender {
   readonly id: number;
@@ -35,6 +37,7 @@ export interface TerminalIpcOptions {
   readonly ipcMain: TerminalIpcMain;
   readonly isTrustedSender: (sender: TerminalSender) => boolean;
   readonly manager: TerminalSessionManager;
+  readonly recordings?: TerminalRecordingManager;
 }
 
 export interface TerminalIpcHandle {
@@ -77,6 +80,24 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
   ipc.removeHandler(TERMINAL_IPC_CHANNELS.write);
   ipc.removeHandler(TERMINAL_IPC_CHANNELS.resize);
   ipc.removeHandler(TERMINAL_IPC_CHANNELS.dispose);
+  for (const channel of [TERMINAL_IPC_CHANNELS.recordingStart, TERMINAL_IPC_CHANNELS.recordingStop, TERMINAL_IPC_CHANNELS.recordingStatus]) ipc.removeHandler(channel);
+
+  ipc.handle(TERMINAL_IPC_CHANNELS.recordingStart, (event, payload) => {
+    assertTrusted(event.sender); track(event.sender);
+    const input = parseRecordingInput(payload);
+    if (!options.recordings) throw new Error("Terminal recording is unavailable");
+    return options.recordings.start(event.sender.id, input, options.manager.recordingTarget(event.sender.id, input.id));
+  });
+  ipc.handle(TERMINAL_IPC_CHANNELS.recordingStop, (event, payload) => {
+    assertTrusted(event.sender); const input = parseDisposeInput(payload);
+    if (!options.recordings) throw new Error("Terminal recording is unavailable");
+    return options.recordings.stop(event.sender.id, input.id);
+  });
+  ipc.handle(TERMINAL_IPC_CHANNELS.recordingStatus, (event, payload) => {
+    assertTrusted(event.sender); const input = parseDisposeInput(payload);
+    if (!options.recordings) throw new Error("Terminal recording is unavailable");
+    return options.recordings.status(event.sender.id, input.id);
+  });
 
   ipc.handle(TERMINAL_IPC_CHANNELS.create, (event, payload) => {
     assertTrusted(event.sender);
@@ -113,6 +134,7 @@ export function registerTerminalIpc(options: TerminalIpcOptions): TerminalIpcHan
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.write);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.resize);
       ipc.removeHandler(TERMINAL_IPC_CHANNELS.dispose);
+      for (const channel of [TERMINAL_IPC_CHANNELS.recordingStart, TERMINAL_IPC_CHANNELS.recordingStop, TERMINAL_IPC_CHANNELS.recordingStatus]) ipc.removeHandler(channel);
     },
   });
 }

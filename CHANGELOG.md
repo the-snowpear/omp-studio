@@ -7,12 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-25
+
+### Added
+
+- OMP v18.3.0 的 Studio 控制面：Agent Hub 服务与判断批次、账户/额度/重置券状态、通用标注、模型种类与角色回退链、离线 Token 计数和模型基准。
+- 媒体工作台支持图片/视频生成、录音与导入转写、文本转语音和 Live 实时语音；增加按工作区/会话管理的产物库、私有流式预览与显式导入/导出。Live 沿用同一 AgentSession，隐藏窗口或断开时释放麦克风，不自动重连。
+- 真实 PTY 的 Shell 录制与 `.studiocast` / `.ompcast` 回放；能力中心增加原生提示词模板、MCP 启动状态和 Skillshare 查询、安装、发布、维护、令牌管理。远程写入先展示具体确认单，新令牌仅展示一次并手动复制。
+
 ### Changed
 
+- Runtime 固定升级至 OMP v18.3.0（`18.3.0-studio.11`），同步模型种类、原生角色、按角色排列的回退链及旧版 web/judge 配置迁移。浏览器侧栏暂缓。[版本差异与适配范围](docs/migrations/omp-18.3.0.md)。
+- Claude 重置券保留首次使用前询问，并通过 Studio 审批界面接收确认；默认不自动消耗。服务默认会话归属，保存不自动启动；删除会话默认保留媒体产物，级联删除须明确选择。
 - 流式工具回放改为有界增量存储；后台对话按可见目标降低中间更新频率，恢复窗口立即补齐，审批与终态保持即时。
 - 生产构建将代码高亮移到有界 Worker，保留即时显示的代码框；Mermaid 增加大小预算、串行队列、取消和缓存上限。开发模式保留旧高亮路径。
 - 增加 Main/Host、Renderer、Runtime 本地数值性能日志和可重复基准；会话关闭后释放 Engine 发布快照及计数登记。维护与回滚见 [性能文档](docs/performance.md)。
 - 会话切换时，运行工具卡在不可见的稳定阶段完成初始展开，避免正文淡入后继续移位；正常工具交接与手动展开动画保留。
+
+### Fixed
+
+- 对齐 OMP 新版 find/wait/process/agent 工具展示，非文件写入不再误入文件变更列表。
+- 异步视频任务恢复时继续查询原任务，避免重复提交；会话切换、窗口隐藏或连接关闭时释放 Live 麦克风资源。
+- 桌面 Runtime 冷启动与 Bridge 连接统一使用 30 秒期限，避免初始化尚未完成就提前超时。
+
+### Validation
+
+- 完成源码、补丁重放、Windows 原生 Runtime、隔离安装/回滚、Electron 媒体/PTY、本地安装包及流式性能验证。真实云端付费媒体、Live、判断/基准请求、Skillshare 生产写入与 Claude 重置券消耗尚未实测；具体范围见[验收报告](docs/migrations/omp-18.3.0.md#external-acceptance-decisions)。
 
 ## [0.1.6] - 2026-09-20
 
@@ -132,7 +152,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/the-snowpear/omp-studio/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/the-snowpear/omp-studio/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/the-snowpear/omp-studio/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/the-snowpear/omp-studio/compare/v0.1.3...v0.1.4

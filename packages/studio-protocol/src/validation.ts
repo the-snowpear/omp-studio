@@ -1,3 +1,4 @@
+import { isWorkbenchOperationKind, validateWorkbenchOperation } from "./contracts/workbench.js";
 import { isUpgradeOperationKind, validateUpgradeOperation } from "./contracts/runtime-upgrade.js";
 import { isEvaluationOperationKind, parseEvaluationOperation } from "./evaluation-validation.js";
 import { ContractValidationError } from "./contract-error.js";
@@ -161,6 +162,11 @@ export function validateRuntimeSettingValue(
   path: string,
 ): void {
   switch (key) {
+    case "modelRoles.judge":
+      if (typeof value !== "string" || value.length > 4096 || /[\u0000-\u001f]/u.test(value)) {
+        throw new ContractValidationError("expected a judge model selector", path);
+      }
+      return;
     case "edit.autoRepair.enabled":
     case "extendedContext":
     case "compaction.asyncEnabled":
@@ -178,9 +184,19 @@ export function validateRuntimeSettingValue(
     case "providers.autoThinkingMaxEffort":
       oneOf(value, ["xhigh", "max"], path);
       return;
+    case "claudeResets.autoRedeem":
+      oneOf(value, ["unset", "yes", "no"], path);
+      return;
+    case "ttsr.judge":
+      oneOf(value, ["auto", "on", "off"], path);
+      return;
     case "providers.judgmentProvider":
       oneOf(value, ["auto", "typesafe", "llm"], path);
       return;
+    case "claudeResets.minBlockedMinutes":
+    case "claudeResets.keepCredits":
+    case "claudeResets.salvageHorizonHours":
+    case "mcp.startupTimeoutMs":
     case "images.questionTimeoutMs":
       if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 2147483647)
         throw new ContractValidationError("expected a nonnegative timeout in milliseconds", path);
@@ -224,6 +240,14 @@ export function validateRuntimeSettingValue(
 
 /** Settings an older snapshot may legitimately omit (added after the shape shipped). */
 const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
+  "modelRoles.judge",
+  "claudeResets.autoRedeem",
+  "claudeResets.minBlockedMinutes",
+  "claudeResets.keepCredits",
+  "claudeResets.salvageHorizonHours",
+  "mcp.startupTimeoutMs",
+  "ttsr.judge",
+  "providers.unexpectedStopModel",
   "plan.autosave",
   "plan.autosaveDir",
   "retry.waitForUsageReset",
@@ -1493,6 +1517,10 @@ export function parseFoundationStudioRequest(value: unknown): StudioRequest {
 
   const operation = record(input.operation, "$request.operation");
   const kind = nonEmptyString(operation.kind, "$request.operation.kind");
+  if (isWorkbenchOperationKind(kind)) {
+    try { validateWorkbenchOperation(operation); } catch (error) { throw new ContractValidationError(error instanceof Error ? error.message : "invalid operation", "$request.operation"); }
+    return input as unknown as StudioRequest;
+  }
   if (isUpgradeOperationKind(kind)) {
     try { validateUpgradeOperation(operation); } catch (error) { throw new ContractValidationError(error instanceof Error ? error.message : "invalid operation", "$request.operation"); }
     return input as unknown as StudioRequest;

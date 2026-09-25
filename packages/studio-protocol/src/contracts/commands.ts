@@ -1,3 +1,4 @@
+import type { WorkbenchOperation } from "./workbench";
 import type { UpgradeOperation } from "./runtime-upgrade";
 import type { AgentOperation, JobOperation } from "./agents-jobs";
 import type { EvaluationOperation } from "./evaluation";
@@ -128,6 +129,7 @@ export type TransferOperation = {
 };
 
 export type StudioOperation =
+  | WorkbenchOperation
   | UpgradeOperation
   | CoreOperation
   | SessionOperation

@@ -1,3 +1,6 @@
+import { registerSkillshareTokenIpc } from "./chrome-skillshare.js";
+import { DesktopLiveAudio, registerLiveAudioIpc } from "./live-audio.js";
+import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 /**
  * Electron Main entry for the OMP Studio Windows Desktop shell
  * (FRONTEND_INTEGRATION.md §9.2).
@@ -14,7 +17,11 @@
  * context is just a transport plus a coarse availability status.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, session, shell, Tray, type NativeImage, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, protocol, safeStorage, session, shell, Tray, type NativeImage, type WebContents } from "electron";
+import { registerServiceDefinitionsIpc } from "./chrome-services.js";
+import { ServiceDefinitionStore } from "./service-definitions.js";
+import { activeArtifactLibrary, activeMediaDirectory } from "./artifact-library.js";
+import { artifactResponse, registerArtifactIpc } from "./chrome-artifacts.js";
 import {
   TITLEBAR_OVERLAY,
   TITLEBAR_OVERLAY_HEIGHT,
@@ -88,6 +95,10 @@ import { AppPayloadInstaller } from "@omp-studio/runtime-installer";
 import { planSaveRelativeTarget } from "./plan-save-path.js";
 import { registerTerminalIpc } from "./terminal-ipc.js";
 import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js";
+import { TerminalRecordingManager } from "./terminal-recording.js";
+import { MediaUploadManager, registerMediaUploadIpc } from "./media-upload.js";
+
+protocol.registerSchemesAsPrivileged([{ scheme: "omp-artifact", privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }]);
 
 /** Developer-only override for the renderer entry (Vite dev server). */
 const RENDERER_DEV_URL = rendererDevServerUrl(app.isPackaged, process.env.OMP_RENDERER_DEV_URL);
@@ -179,7 +190,11 @@ export async function main(): Promise<void> {
       restart: () => { app.relaunch({ args: process.argv.slice(1).filter(a => a !== "--omp-restarted").concat("--omp-restarted") }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
     });
   }
+  const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
+  const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
+  const liveAudio = new DesktopLiveAudio({ directory: activeMediaDirectory, files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()) });
   const terminalManager = new TerminalSessionManager({
+    recording: terminalRecordings,
     spawner: createNodePtySpawner(),
     resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? process.cwd(),
   });
@@ -337,6 +352,10 @@ export async function main(): Promise<void> {
     });
 
     const target = resolveRendererEntryFrom(layout.rendererDist, RENDERER_DEV_URL);
+    if (!(await protocol.isProtocolHandled("omp-artifact"))) {
+      const origin = target.kind === "url" ? new URL(target.url).origin : "null";
+      protocol.handle("omp-artifact", request => artifactResponse(request, activeArtifactLibrary(), origin));
+    }
     const allowedOrigin = rendererOriginFor(target);
     const preloadPath = layout.preloadPath;
     installCspHeaders(session.defaultSession, rendererCspFor(target));
@@ -416,7 +435,7 @@ export async function main(): Promise<void> {
     });
     const disposePerformance = registerChromePerformanceIpc({ ipcMain, isTrustedSender, emit: logRendererPerformance });
     desktopConversationViews.registerWindow(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
-    const refreshConversationVisibility = () => desktopConversationViews.setVisible(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
+    const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); if (!visible) liveAudio.disposeWindow(window.webContents.id); };
     const resetConversationVisibility = () => desktopConversationViews.reset(window.webContents);
     const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
     window.on("show", refreshConversationVisibility);
@@ -464,7 +483,40 @@ export async function main(): Promise<void> {
         },
       },
     });
+    const disposeServiceDefinitions = registerServiceDefinitionsIpc({ ipcMain, isTrustedSender,
+      store: new ServiceDefinitionStore(join(app.getPath("userData"), "service-definitions.enc"), {
+        available: () => safeStorage.isEncryptionAvailable(),
+        encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
+      }),
+    });
     const disposeProfile = registerChromeProfileIpc({ isTrustedSender });
+    const disposeArtifacts = registerArtifactIpc({
+      ipcMain,
+      isTrustedSender,
+      library: activeArtifactLibrary,
+      async chooseDirectory(sender) {
+        const owner = BrowserWindow.fromWebContents(sender as WebContents);
+        const options = { title: "产物保存位置", properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
+        const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+        return result.canceled ? undefined : result.filePaths[0];
+      },
+      async chooseFile(sender, kind) {
+        const owner = BrowserWindow.fromWebContents(sender as WebContents);
+        const extensions = kind === "image" ? ["png", "jpg", "jpeg", "webp", "gif", "svg"] : kind === "audio" ? ["wav", "mp3", "ogg", "opus", "flac"] : kind === "video" ? ["mp4", "webm"] : kind === "recording" ? ["ompcast", "studiocast"] : ["*"];
+        const options = { title: "导入文件", properties: ["openFile"] as Array<"openFile">, filters: [{ name: kind, extensions }] };
+        const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+        return result.canceled ? undefined : result.filePaths[0];
+      },
+      async chooseExport(sender, name) {
+        const owner = BrowserWindow.fromWebContents(sender as WebContents);
+        const options = { title: "另存为", defaultPath: name };
+        const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
+        return result.canceled ? undefined : result.filePath;
+      },
+    });
+    const disposeSkillshareTokens = registerSkillshareTokenIpc({ ipcMain, isTrustedSender, directory: activeMediaDirectory });
+    const disposeMediaUploads = registerMediaUploadIpc({ ipcMain, isTrustedSender, manager: mediaUploads });
+    const disposeLiveAudio = registerLiveAudioIpc({ ipcMain, isTrustedSender, manager: liveAudio, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
     const disposeImage = registerChromeImageIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -516,6 +568,7 @@ export async function main(): Promise<void> {
       },
       isTrustedSender,
       manager: terminalManager,
+      recordings: terminalRecordings,
     });
     const disposeWorkspaceShell = registerWorkspaceShellIpc({
       ipcMain: {
@@ -654,6 +707,11 @@ export async function main(): Promise<void> {
         disposeWorkspaceShell.dispose();
         disposeTerminal.dispose();
         disposeImage.dispose();
+        disposeArtifacts.dispose();
+        disposeMediaUploads.dispose();
+        disposeSkillshareTokens.dispose();
+        disposeLiveAudio.dispose();
+        disposeServiceDefinitions.dispose();
         disposeLogs.dispose();
         disposeMetrics.dispose();
         disposePerformance.dispose();
@@ -675,6 +733,7 @@ export async function main(): Promise<void> {
   };
 
   const application = createDesktopApplication({
+    beforeShutdown: async () => { liveAudio.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     requestSingleInstanceLock: () => app.requestSingleInstanceLock(),

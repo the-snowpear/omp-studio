@@ -12,6 +12,14 @@
 
 import { randomUUID } from "node:crypto";
 
+export interface HostArtifactService {
+  saveText?(input: import("@omp-studio/studio-protocol").ArtifactTextInput): Promise<import("@omp-studio/studio-protocol").ArtifactRecord>;
+  readText?(artifactId: string): Promise<import("@omp-studio/studio-protocol").ArtifactTextResult>;
+  list(input: import("@omp-studio/client-contract").ArtifactListInput): Promise<import("@omp-studio/client-contract").ArtifactPage>;
+  state(): Promise<import("@omp-studio/client-contract").ArtifactStorageState>;
+  remove(artifactId: string): Promise<void>;
+}
+
 import type {
   ClientError,
   ClientErrorCode,
@@ -661,7 +669,7 @@ export interface HostSemanticCommandService {
    * file, then removes the transcript, artifacts dir, and every related local
    * record (telemetry, thread binding, session lease, pin entry).
    */
-  delete?(input: { readonly threadId: ThreadId }): ConfigWriteResult | Promise<ConfigWriteResult>;
+  delete?(input: { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean }): ConfigWriteResult | Promise<ConfigWriteResult>;
 }
 
 /** Default diagnostics factory: real timestamps and random opaque entry ids. */

@@ -6,9 +6,15 @@ import { type CompactionMethod, isCompactionMethod } from "../../session/compact
 
 /** Runtime settings intentionally exposed to the Studio Bridge. */
 export const STUDIO_RUNTIME_SETTING_KEYS = [
+	"modelRoles.judge",
+	"claudeResets.autoRedeem",
+	"claudeResets.minBlockedMinutes",
+	"claudeResets.keepCredits",
+	"claudeResets.salvageHorizonHours",
+	"mcp.startupTimeoutMs",
+	"ttsr.judge",
 	"edit.autoRepair.enabled",
 	"features.unexpectedStopDetection",
-	"providers.unexpectedStopModel",
 	"extendedContext",
 	"compaction.asyncEnabled",
 	"compaction.methodOrder",
@@ -21,7 +27,6 @@ export const STUDIO_RUNTIME_SETTING_KEYS = [
 	"task.maxEffort",
 	"task.agentServiceTierOverrides",
 	"providers.autoThinkingMaxEffort",
-	"providers.judgmentProvider",
 	"images.describeForTextModels",
 	"images.questionTimeoutMs",
 	"tools.speculativeExecution.enabled",
@@ -30,9 +35,15 @@ export const STUDIO_RUNTIME_SETTING_KEYS = [
 export type StudioRuntimeSettingKey = (typeof STUDIO_RUNTIME_SETTING_KEYS)[number];
 
 export interface StudioRuntimeSettingsSnapshot {
+	"modelRoles.judge": string;
+	"claudeResets.autoRedeem": SettingValue<"claudeResets.autoRedeem">;
+	"claudeResets.minBlockedMinutes": SettingValue<"claudeResets.minBlockedMinutes">;
+	"claudeResets.keepCredits": SettingValue<"claudeResets.keepCredits">;
+	"claudeResets.salvageHorizonHours": SettingValue<"claudeResets.salvageHorizonHours">;
+	"mcp.startupTimeoutMs": SettingValue<"mcp.startupTimeoutMs">;
+	"ttsr.judge": SettingValue<"ttsr.judge">;
 	"edit.autoRepair.enabled": boolean;
 	"features.unexpectedStopDetection": "none" | "mechanical" | "smart";
-	"providers.unexpectedStopModel": string;
 	extendedContext: boolean;
 	"compaction.asyncEnabled": boolean;
 	"compaction.methodOrder": CompactionMethod[];
@@ -45,7 +56,6 @@ export interface StudioRuntimeSettingsSnapshot {
 	"task.maxEffort": SettingValue<"task.maxEffort">;
 	"task.agentServiceTierOverrides": SettingValue<"task.agentServiceTierOverrides">;
 	"providers.autoThinkingMaxEffort": SettingValue<"providers.autoThinkingMaxEffort">;
-	"providers.judgmentProvider": SettingValue<"providers.judgmentProvider">;
 	"images.describeForTextModels": boolean;
 	"images.questionTimeoutMs": number;
 	"tools.speculativeExecution.enabled": boolean;
@@ -78,6 +88,8 @@ export function isStudioRuntimeSettingValue(
 	value: unknown,
 ): value is StudioRuntimeSettingValue {
 	switch (key) {
+		case "modelRoles.judge":
+			return typeof value === "string" && value.length <= 4096 && !/[\u0000-\u001f]/u.test(value);
 		case "edit.autoRepair.enabled":
 		case "extendedContext":
 		case "compaction.asyncEnabled":
@@ -88,6 +100,10 @@ export function isStudioRuntimeSettingValue(
 		case "tools.speculativeExecution.enabled":
 		case "compaction.experimentalContextManagement":
 			return typeof value === "boolean";
+		case "claudeResets.minBlockedMinutes":
+		case "claudeResets.keepCredits":
+		case "claudeResets.salvageHorizonHours":
+		case "mcp.startupTimeoutMs":
 		case "images.questionTimeoutMs":
 			return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 2147483647;
 		case "task.agentServiceTierOverrides":
@@ -105,11 +121,11 @@ export function isStudioRuntimeSettingValue(
 			);
 		case "plan.autosaveDir":
 			return typeof value === "string" && value.length <= 4096 && !value.includes("\0");
+		case "claudeResets.autoRedeem":
+		case "ttsr.judge":
 		case "task.maxEffort":
 		case "providers.autoThinkingMaxEffort":
-		case "providers.judgmentProvider":
 		case "features.unexpectedStopDetection":
-		case "providers.unexpectedStopModel":
 		case "providers.openai-codex.codeMode":
 			return typeof value === "string" && getEnumValues(key)?.includes(value) === true;
 		case "compaction.methodOrder":
@@ -169,9 +185,15 @@ export class StudioRuntimeSettingsService {
 	snapshot(): StudioRuntimeSettingsSnapshot {
 		this.#syncSession();
 		return {
+			"modelRoles.judge": this.session.settings.getModelRoles().judge ?? "",
+			"claudeResets.autoRedeem": this.session.settings.get("claudeResets.autoRedeem"),
+			"claudeResets.minBlockedMinutes": this.session.settings.get("claudeResets.minBlockedMinutes"),
+			"claudeResets.keepCredits": this.session.settings.get("claudeResets.keepCredits"),
+			"claudeResets.salvageHorizonHours": this.session.settings.get("claudeResets.salvageHorizonHours"),
+			"mcp.startupTimeoutMs": this.session.settings.get("mcp.startupTimeoutMs"),
+			"ttsr.judge": this.session.settings.get("ttsr.judge"),
 			"edit.autoRepair.enabled": this.session.settings.get("edit.autoRepair.enabled"),
 			"features.unexpectedStopDetection": this.session.settings.get("features.unexpectedStopDetection"),
-			"providers.unexpectedStopModel": this.session.settings.get("providers.unexpectedStopModel"),
 			extendedContext: this.session.settings.get("extendedContext"),
 			"compaction.asyncEnabled": this.session.settings.get("compaction.asyncEnabled"),
 			"compaction.methodOrder": [...this.session.settings.get("compaction.methodOrder")],
@@ -186,7 +208,6 @@ export class StudioRuntimeSettingsService {
 			"providers.autoThinkingMaxEffort": structuredClone(
 				this.session.settings.get("providers.autoThinkingMaxEffort"),
 			),
-			"providers.judgmentProvider": structuredClone(this.session.settings.get("providers.judgmentProvider")),
 			"images.describeForTextModels": structuredClone(this.session.settings.get("images.describeForTextModels")),
 			"images.questionTimeoutMs": structuredClone(this.session.settings.get("images.questionTimeoutMs")),
 			"tools.speculativeExecution.enabled": structuredClone(
@@ -260,8 +281,37 @@ export class StudioRuntimeSettingsService {
 
 	#apply(key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist: boolean): void {
 		const settings = this.session.settings;
+		if (key === "modelRoles.judge") {
+			if (persist) settings.setModelRole("judge", (value as string).trim() || undefined);
+			else settings.overrideModelRoles({ ...settings.getModelRoles(), judge: value as string });
+			return;
+		}
 		if (persist) settings.clearOverride(key as SettingPath);
 		switch (key) {
+			case "claudeResets.autoRedeem":
+				return persist
+					? settings.set(key, value as SettingValue<"claudeResets.autoRedeem">)
+					: settings.override(key, value as SettingValue<"claudeResets.autoRedeem">);
+			case "claudeResets.minBlockedMinutes":
+				return persist
+					? settings.set(key, value as SettingValue<"claudeResets.minBlockedMinutes">)
+					: settings.override(key, value as SettingValue<"claudeResets.minBlockedMinutes">);
+			case "claudeResets.keepCredits":
+				return persist
+					? settings.set(key, value as SettingValue<"claudeResets.keepCredits">)
+					: settings.override(key, value as SettingValue<"claudeResets.keepCredits">);
+			case "claudeResets.salvageHorizonHours":
+				return persist
+					? settings.set(key, value as SettingValue<"claudeResets.salvageHorizonHours">)
+					: settings.override(key, value as SettingValue<"claudeResets.salvageHorizonHours">);
+			case "mcp.startupTimeoutMs":
+				return persist
+					? settings.set(key, value as SettingValue<"mcp.startupTimeoutMs">)
+					: settings.override(key, value as SettingValue<"mcp.startupTimeoutMs">);
+			case "ttsr.judge":
+				return persist
+					? settings.set(key, value as SettingValue<"ttsr.judge">)
+					: settings.override(key, value as SettingValue<"ttsr.judge">);
 			case "task.enableEffort":
 				return persist
 					? settings.set(key, value as SettingValue<"task.enableEffort">)
@@ -278,10 +328,6 @@ export class StudioRuntimeSettingsService {
 				return persist
 					? settings.set(key, value as SettingValue<"providers.autoThinkingMaxEffort">)
 					: settings.override(key, value as SettingValue<"providers.autoThinkingMaxEffort">);
-			case "providers.judgmentProvider":
-				return persist
-					? settings.set(key, value as SettingValue<"providers.judgmentProvider">)
-					: settings.override(key, value as SettingValue<"providers.judgmentProvider">);
 			case "images.describeForTextModels":
 				return persist
 					? settings.set(key, value as SettingValue<"images.describeForTextModels">)
@@ -307,10 +353,6 @@ export class StudioRuntimeSettingsService {
 				return persist
 					? settings.set(key, value as SettingValue<"features.unexpectedStopDetection">)
 					: settings.override(key, value as SettingValue<"features.unexpectedStopDetection">);
-			case "providers.unexpectedStopModel":
-				return persist
-					? settings.set(key, value as SettingValue<"providers.unexpectedStopModel">)
-					: settings.override(key, value as SettingValue<"providers.unexpectedStopModel">);
 			case "extendedContext":
 				return persist
 					? settings.set(key, value as SettingValue<"extendedContext">)

@@ -1,3 +1,7 @@
+import { AnnotationsProvider, AnnotationButton } from "./annotations/Annotations";
+import { TokenCounterPane } from "./usage/TokenCounterPane";
+import { MediaPage } from "./MediaPage";
+import { setMediaIntent } from "./media/MediaWorkbench";
 import { WorkbenchHealth } from "./WorkbenchHealth";
 import { conversationViewLeases } from "./conversation/conversationViews";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -233,7 +237,7 @@ import { buildGitStatusLookup, GIT_STATUS_META, type TreeGitStatus } from "./git
 
 const PREVIEW_PLAN_TITLE = PREVIEW_DECK_ITEMS.find((item) => item.kind === "plan")?.title ?? "Plan";
 
-const KNOWN_ROUTES: ReadonlyArray<Route> = ["home", "workbench", "history", "agent-hub", "capabilities", "model-config", "settings", "diagnostics"];
+const KNOWN_ROUTES: ReadonlyArray<Route> = ["home", "workbench", "history", "agent-hub", "capabilities", "model-config", "settings", "diagnostics", "media"];
 
 function parseStoredRoute(value: string | undefined): Route | undefined {
   return value !== undefined && (KNOWN_ROUTES as readonly string[]).includes(value) ? (value as Route) : undefined;
@@ -282,11 +286,11 @@ type ClientStateSource = StudioClient & {
   onState?: (listener: (state: ClientState) => void) => Unsubscribe;
 };
 
-type Route = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics";
+type Route = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media";
 type SecondaryRoute = Exclude<Route, "workbench">;
 
 function isSecondary(route: Route): route is SecondaryRoute {
-  return route === "home" || route === "history" || route === "agent-hub" || route === "capabilities" || route === "model-config" || route === "settings" || route === "diagnostics";
+  return route === "home" || route === "history" || route === "agent-hub" || route === "capabilities" || route === "model-config" || route === "settings" || route === "diagnostics" || route === "media";
 }
 
 const SECONDARY_META: Record<SecondaryRoute, { titleKey: string; icon: string }> = {
@@ -297,6 +301,7 @@ const SECONDARY_META: Record<SecondaryRoute, { titleKey: string; icon: string }>
   "model-config": { titleKey: "nav.modelConfig", icon: "server" },
   settings: { titleKey: "nav.settings", icon: "settings" },
   diagnostics: { titleKey: "nav.diagnostics", icon: "pulse" },
+  media: { titleKey: "media.title", icon: "image" },
 };
 
 type ViewState = {
@@ -710,6 +715,7 @@ export function AppMenu({ chrome, onRoute }: {
               <MenuItem icon="external" {...shellItemProps("editor")} onClick={() => run(chrome.onOpenProjectInEditor)}>{t("shell.openInEditor")}</MenuItem>
               <MenuItem icon="folder" {...shellItemProps("directory")} onClick={() => run(chrome.onOpenProjectDirectory)}>{t("shell.openInExplorer")}</MenuItem>
               <MenuItem icon="server" hint={t("menu.modelConfigHint")} onClick={() => run(() => onRoute("model-config"))}>{t("nav.modelConfig")}</MenuItem>
+              <MenuItem icon="image" onClick={() => run(() => onRoute("media"))}>{t("media.title")}</MenuItem>
               <div className="menu-sep" />
               <MenuItem icon="settings" onClick={() => run(() => onRoute("settings"))}>{t("nav.settings")}</MenuItem>
               <MenuItem icon="keyboard" onClick={() => run(() => chrome.onOpenDialog("shortcuts"))}>{t("nav.shortcuts")}</MenuItem>
@@ -1182,7 +1188,7 @@ type ShellChrome = {
   /** 历史页「取消归档」：session.unarchive，恢复到进行中列表。 */
   onUnarchiveThread: (entry: SessionHistoryEntry) => void;
   /** 历史页「删除会话」：session.delete，永久删除本地文件与相关残留。 */
-  onDeleteSessionThread: (entry: SessionHistoryEntry) => Promise<boolean>;
+  onDeleteSessionThread: (entry: SessionHistoryEntry, deleteManagedArtifacts?: boolean) => Promise<boolean>;
   /** 顶栏「对话选项」：打开重命名对话框（builtin.rename，标题持久化到会话槽）。 */
   onRenameThread: () => void;
   /** 顶栏「对话选项」：Fork 当前会话（session.fork，Runtime 身份切换）。 */
@@ -3174,6 +3180,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
       <button className="icon-btn" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
       <div className="tb-right">
         <div className="telemetry">
+          <AnnotationButton />
           <AnchoredPop
             id="tokens"
             openId={openMenu}
@@ -3183,7 +3190,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
             align="end"
             triggerClassName="t-group"
             popoverClassName="telemetry-pop tok-pop"
-            panel={preview ? <PreviewTokenPanel /> : <RealTokenPanel telemetry={telemetry} view={viewedTelemetry} />}
+            panel={<>{preview ? <PreviewTokenPanel /> : <RealTokenPanel telemetry={telemetry} view={viewedTelemetry} />}<TokenCounterPane key={String(preview)} client={client} /></>}
           >
             {preview ? <PreviewTokenTrigger /> : <RealTokenTrigger telemetry={telemetry} />}
           </AnchoredPop>
@@ -5745,6 +5752,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                   <button className="icon-btn small" data-tip={t("composer.attachFiles")} aria-label={t("composer.attachFilesAria")} onClick={() => { setComposerExpanded(true); composerInputRef.current?.openFilePicker(); }}><Icon name="attach" extra="sm" /></button>
                   <button className="icon-btn small" data-tip={t("composer.mention")} aria-label={t("composer.mentionAria")} onClick={() => { setComposerExpanded(true); composerInputRef.current?.openMention("@"); }}><Icon name="at" extra="sm" /></button>
                   <button className="icon-btn small" data-tip={t("composer.commands")} aria-label={t("composer.commands")} onClick={() => { setComposerExpanded(true); composerInputRef.current?.openCommandMenu(); }}><Icon name="slash" extra="sm" /></button>
+                  <button className="icon-btn small" data-tip={t("media.imageShortcut")} aria-label={t("media.imageShortcut")} onClick={() => { setMediaIntent("image"); onRoute("media"); }}><Icon name="image" extra="sm" /></button>
+                  <button className="icon-btn small" data-tip={t("media.audioShortcut")} aria-label={t("media.audioShortcut")} onClick={() => { setMediaIntent("transcription"); onRoute("media"); }}><Icon name="mic" extra="sm" /></button>
                 </div>
                 {queueEdit !== undefined ? (
                   <span className="pill-btn queue-edit" role="status">
@@ -6085,7 +6094,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
         </div>
         <div className="bp-body">
           <div className={`bp-page${bottomTab === "terminal" ? " active" : ""}`} id="bpTerminal" role="tabpanel">
-            <TerminalPane ref={terminalRef} visible={bottomTab === "terminal" && bottomOpen && bottomVisible} />
+            <TerminalPane ref={terminalRef} workspaceId={workspaceId} sessionId={snapshot?.sessionId} visible={bottomTab === "terminal" && bottomOpen && bottomVisible} />
           </div>
           <div className={`bp-page${bottomTab === "problems" ? " active" : ""}`} id="bpProblems" role="tabpanel">
             {preview ? <PreviewProblems /> : <Deferred title={t("shell.problemsUnavailableTitle")} detail={t("shell.problemsUnavailableDetail")} />}
@@ -7184,7 +7193,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
   };
 
   /** 真实模式「删除会话」：session.delete 永久删除本地文件与相关残留。 */
-  const deleteSessionThread = (entry: SessionHistoryEntry): Promise<boolean> => {
+  const deleteSessionThread = (entry: SessionHistoryEntry, deleteManagedArtifacts = false): Promise<boolean> => {
     return workspaceActionQueue.enqueue(async () => {
       try {
         const cachedWorkspaceId = Object.entries(projectHistoryCache).find(([, value]) =>
@@ -7193,7 +7202,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         const targetWorkspaceId = cachedWorkspaceId
           ?? residentForSession(residentModel, entry.sessionId)?.workspaceId;
         await ensureWorkspaceActive(targetWorkspaceId);
-        const handle = await client.command("session.delete", { threadId: entry.threadId });
+        const handle = await client.command("session.delete", { threadId: entry.threadId, deleteManagedArtifacts });
         await waitReceipt(client, handle.requestId);
         if (entry.sessionId !== undefined) {
           archivedProvisionalSessionIdsRef.current = new Set([
@@ -8242,7 +8251,16 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     usedSkills,
   };
 
+  const insertPreparedPrompt = (text: string) => {
+    const composer = composerRef.current;
+    if (!composer) throw new Error("Open a conversation before inserting prepared text");
+    const current = composer.getSnapshot();
+    const addition = (current.doc.nodes.length ? "\n\n" : "") + text;
+    composer.setSnapshot({ ...current, text: current.text + addition, doc: { nodes: [...current.doc.nodes, { type: "text", value: addition }] } });
+    go("workbench"); composer.focus();
+  };
   return (
+    <AnnotationsProvider client={client} workspaceId={hubWorkspaceId} sessionId={viewedSessionId} runtimeSessionId={snapshot?.sessionId} onInsert={insertPreparedPrompt}>
     <div className="app" id="appRoot">
       <a className="skip-link" href="#convoScroll">跳到对话内容</a>
       <Titlebar
@@ -8285,6 +8303,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               <button className="menu-item" role="menuitem" onClick={() => go("agent-hub")}>Agent Hub</button>
               <button className="menu-item" role="menuitem" onClick={() => go("capabilities")}>{t("menu.capabilities")}</button>
               <button className="menu-item" role="menuitem" onClick={() => go("model-config")}>{t("menu.modelConfig")}</button>
+              <button className="menu-item" role="menuitem" onClick={() => go("media")}>{t("media.title")}</button>
               <button className="menu-item" role="menuitem" onClick={() => go("settings")}>{t("menu.settings")}</button>
               <button className="menu-item" role="menuitem" onClick={() => go("diagnostics")}>{t("menu.diagnostics")}</button>
               <div className="menu-sep" />
@@ -8402,10 +8421,13 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               loadMentions={fetchHubMentions}
               onOpenMain={() => go("workbench")}
             />
+          ) : pageRoute === "media" ? (
+            <MediaPage client={client} workspaceId={hubWorkspaceId} sessionId={snapshot?.sessionId} runtimeAvailable={hubRuntimeConnected} onInsert={insertPreparedPrompt} />
           ) : pageRoute === "model-config" ? (
-            <ModelConfigPage key={mcNonce} client={client} />
+            <ModelConfigPage key={mcNonce} client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} runtimeAvailable={hubRuntimeConnected} />
           ) : pageRoute === "settings" ? (
             <SettingsPage
+              client={client}
               key={settingsNonce}
               {...(snapshot ? { approvalMode } : {})}
               onSetApprovalMode={setApprovalMode}
@@ -8420,7 +8442,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               {...(environment ? { environment } : {})}
             />
           ) : (
-            <CapabilitiesPage key={capNonce} client={client} onRunSlash={runSlashFromShell} onPinCompleted={refreshPinnedHistory} />
+            <CapabilitiesPage key={capNonce} client={client} sessionId={snapshot?.sessionId} runtimeAvailable={hubRuntimeConnected} onInsertPrompt={insertPreparedPrompt} onRunSlash={runSlashFromShell} onPinCompleted={refreshPinnedHistory} />
           )}
         </SecondaryPage>
       ) : (
@@ -8675,6 +8697,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         />
       ) : null}
     </div>
+    </AnnotationsProvider>
   );
 }
 

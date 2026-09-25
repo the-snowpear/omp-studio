@@ -264,6 +264,9 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
+  "artifacts.text.read": { artifactId: "11111111-1111-4111-8111-111111111111" },
+  "artifacts.list": {},
+  "artifacts.storage.get": {},
   "environment.get": {},
   "capabilities.get": {},
   "commands.getManifest": {},
@@ -303,6 +306,9 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
+  "artifacts.text.read": { ok: true, queryName: "artifacts.text.read", result: { artifact: { artifactId: "11111111-1111-4111-8111-111111111111", kind: "annotation", name: "notes.json", mimeType: "application/json", bytes: 2, createdAt: "2026-09-25T00:00:00.000Z", sha256: "0".repeat(64) }, text: "{}" } },
+  "artifacts.list": { ok: true, queryName: "artifacts.list", result: { artifacts: [], total: 0, totalBytes: 0 } },
+  "artifacts.storage.get": { ok: true, queryName: "artifacts.storage.get", result: { locationName: "content", writable: true, total: 0, totalBytes: 0 } },
   "environment.get": { ok: true, queryName: "environment.get", result: ENVIRONMENT },
   "capabilities.get": { ok: true, queryName: "capabilities.get", result: CAPABILITY_MANIFEST },
   "commands.getManifest": {

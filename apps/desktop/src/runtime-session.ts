@@ -27,7 +27,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, readFile, rm } from "node:fs/promises";
+import { lstat, readFile, rm, mkdir } from "node:fs/promises";
 import { writeJsonAtomic } from "@omp-studio/runtime-installer";
 import type { Socket } from "node:net";
 import { join } from "node:path";
@@ -1345,6 +1345,9 @@ function createSingleDesktopRuntimeSessionPort(
         extra.push("--resume", resumeSessionId);
       }
       const launchEpoch = nextRuntimeEpoch();
+      // The bridge parent has current-user-only ACLs. Children inherit them.
+      const mediaDirectory = join(launchContext.profileDirectory, options.bridgeDirectoryName ?? "bridge", "media-v1");
+      await mkdir(mediaDirectory, { recursive: true, mode: 0o700 });
 
       const binding: SessionBinding = {
         threadId: "thread-gui-main" as ThreadId,
@@ -1362,10 +1365,14 @@ function createSingleDesktopRuntimeSessionPort(
       };
 
       const port = new NodeRuntimeProcessPort({
+        env: { ...process.env, OMP_STUDIO_MEDIA_ROOT: mediaDirectory },
         executable: installed.entrypointPath,
         cwd: selected.cwd,
         args: () => buildProcessProbeArgs(extra, bridgeBootstrap, launchEpoch),
         containment,
+        // Catalog/plugin discovery is part of cold startup. Match the 30-second
+        // compatibility probe and honor explicit deadlines in both wait layers.
+        readyTimeoutMs: options.handshakeTimeoutMs ?? 30_000,
         waitUntilReady: async (child) => {
           attachRuntimeOutput(child, log);
           child.once("exit", (code, signal) => {
@@ -1384,7 +1391,7 @@ function createSingleDesktopRuntimeSessionPort(
             }
           });
           hello = await client.connectUntilReady({
-            deadline: Date.now() + (options.handshakeTimeoutMs ?? 10_000),
+            deadline: Date.now() + (options.handshakeTimeoutMs ?? 30_000),
             hasExited: () => child.exitCode !== null || child.signalCode !== null,
           });
           log?.write(
@@ -1424,6 +1431,7 @@ function createSingleDesktopRuntimeSessionPort(
       const view = helloView(hello, launchContext.resolution.classification);
       const session: DesktopRuntimeSession = {
         controller,
+        mediaDirectory: () => (alive ? mediaDirectory : undefined),
         hello: () => (alive ? view : undefined),
         capabilityManifest: () => (alive ? capability : undefined),
         commandManifest: () => (alive ? command : undefined),

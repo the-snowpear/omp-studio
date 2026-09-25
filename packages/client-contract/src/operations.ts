@@ -1,3 +1,4 @@
+import type { WorkbenchOperation, WorkbenchResultMap } from "@omp-studio/studio-protocol";
 import type { UpgradeOperation, UpgradeResultMap } from "@omp-studio/studio-protocol";
 import type { EvaluationOperation } from "@omp-studio/studio-protocol";
 /**
@@ -89,6 +90,9 @@ import type {
 export type EmptyInput = Readonly<Record<string, never>>;
 
 export interface QueryInputMap {
+  "artifacts.text.read": { readonly artifactId: string };
+  "artifacts.list": import("@omp-studio/studio-protocol").ArtifactListInput;
+  "artifacts.storage.get": EmptyInput;
   "environment.get": EmptyInput;
   "capabilities.get": EmptyInput;
   "commands.getManifest": EmptyInput;
@@ -148,6 +152,9 @@ export interface QueryInputMap {
 }
 
 export interface QueryResultMap {
+  "artifacts.text.read": import("@omp-studio/studio-protocol").ArtifactTextResult;
+  "artifacts.list": import("@omp-studio/studio-protocol").ArtifactPage;
+  "artifacts.storage.get": import("@omp-studio/studio-protocol").ArtifactStorageState;
   "environment.get": EnvironmentReadModel;
   /** Capability read model; the protocol manifest is the safe public shape. */
   "capabilities.get": CapabilityManifest;
@@ -356,7 +363,8 @@ export type PromptTextInput = {
 /** Public semantic command inputs exposed by the Runtime control surface. */
 export type EvaluationCommandInputMap = { [K in EvaluationOperation["kind"]]: Omit<Extract<EvaluationOperation, {kind:K}>, "kind"> };
 type UpgradeInputMap = { [K in UpgradeOperation["kind"]]: Omit<Extract<UpgradeOperation, { kind: K }>, "kind" | "fallbackCwd"> };
-export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, UpgradeInputMap {
+type WorkbenchInputMap = { [K in WorkbenchOperation["kind"]]: Omit<Extract<WorkbenchOperation, { kind: K }>, "kind" | "inputTransfers"> };
+export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, UpgradeInputMap, WorkbenchInputMap {
   "core.prompt": PromptTextInput;
   "core.steer": PromptTextInput;
   "core.followUp": PromptTextInput;
@@ -474,6 +482,8 @@ export type InteractionResponseValue =
   | Readonly<Record<string, unknown>>;
 
 interface CoreCommandInputMap {
+  "artifacts.saveText": import("@omp-studio/studio-protocol").ArtifactTextInput;
+  "artifacts.delete": { readonly artifactId: string };
   /** Install or update the trusted runtime (environment page action). */
   "runtime.install": { readonly channel?: RuntimeChannel };
   /**
@@ -505,7 +515,7 @@ interface CoreCommandInputMap {
    * session lease, pin entry). The Host evacuates a resident Runtime off the
    * file first. Destructive and irreversible; the Renderer confirms first.
    */
-  "session.delete": { readonly threadId: ThreadId };
+  "session.delete": { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean };
   /** Answer an `interaction_required` prompt issued by the Host. */
   "interaction.respond": {
     readonly interactionId: InteractionId;
@@ -658,6 +668,8 @@ interface CoreCommandInputMap {
 export type CommandInputMap = CoreCommandInputMap & RuntimeCommandInputMap;
 
 interface CoreCommandResultMap {
+  "artifacts.saveText": import("@omp-studio/studio-protocol").ArtifactRecord;
+  "artifacts.delete": { readonly deleted: true; readonly artifactId: string };
   "runtime.install": RuntimeInstallState;
   "runtime.ensure": RuntimeConnection;
   "session.create": OperatorStateSnapshot;
@@ -772,6 +784,7 @@ export type CommandResultMap = CoreCommandResultMap & {
     | "operator.invoke"
     | "session.tree.navigate"
     | "session.tree.branch"
+    | WorkbenchOperation["kind"]
     | UpgradeOperation["kind"]
     | "btw.ask"
     | "btw.branch"
@@ -781,6 +794,8 @@ export type CommandResultMap = CoreCommandResultMap & {
   >]: OperatorStateSnapshot;
 } & {
   [K in EvaluationOperation["kind"]]: EvaluationCommandOutcome;
+} & {
+  [K in WorkbenchOperation["kind"]]: { readonly snapshot: OperatorStateSnapshot; readonly result: WorkbenchResultMap[K] };
 } & {
   [K in UpgradeOperation["kind"]]: { readonly snapshot: OperatorStateSnapshot; readonly result: UpgradeResultMap[K] };
 } & {

@@ -38,6 +38,13 @@ export const PREVIEW_APP_SETTINGS: AppSettings = {
  * FutureRowDef.key 一一对应；缺省回落到行定义里的静态 value/on。
  */
 export const PREVIEW_RUNTIME_SETTINGS: Readonly<Record<string, string | boolean>> = {
+  "modelRoles.judge": "typesafe/jev-latest",
+  "claudeResets.autoRedeem": "unset",
+  "claudeResets.minBlockedMinutes": "60",
+  "claudeResets.keepCredits": "0",
+  "claudeResets.salvageHorizonHours": "12",
+  "mcp.startupTimeoutMs": "250",
+  "ttsr.judge": "auto",
   "edit.autoRepair.enabled": false,
   "features.unexpectedStopDetection": "mechanical",
   "providers.unexpectedStopModel": "online",

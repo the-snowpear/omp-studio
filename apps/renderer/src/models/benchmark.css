@@ -1,0 +1,20 @@
+.benchmark-pane { padding: 16px 0; }
+.benchmark-setup { border-bottom: 1px solid var(--border); padding: 12px 0 18px; }
+.benchmark-setup > summary { cursor: pointer; font-weight: 600; margin-bottom: 16px; }
+.benchmark-config-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 1fr); gap: 24px; margin-bottom: 16px; }
+.benchmark-config-grid label, .benchmark-toolbar > label { display: grid; gap: 6px; font-size: 12px; }
+.benchmark-models { max-height: 280px; overflow: auto; padding: 6px 0; }
+.benchmark-models > label { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.benchmark-models small { display: block; margin-top: 3px; overflow-wrap: anywhere; }
+.benchmark-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-content: start; }
+.benchmark-fields textarea { min-width: 0; width: 100%; resize: vertical; }
+.benchmark-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.benchmark-review { padding: 12px 16px; background: var(--bg-hover); border-left: 3px solid var(--accent); margin: 16px 0; }
+.benchmark-review .btn { margin-right: 8px; }
+.benchmark-review pre, .benchmark-table pre { max-height: 260px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
+.benchmark-table { overflow: auto; }
+.benchmark-table table { border-collapse: collapse; width: 100%; font-size: 12px; text-align: left; }
+.benchmark-table td, .benchmark-table th { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.benchmark-table td:nth-child(2) { max-width: 360px; overflow-wrap: anywhere; }
+.benchmark-error { color: var(--red, #d86464); }
+@media (max-width: 850px) { .benchmark-config-grid { grid-template-columns: minmax(0, 1fr); } }

@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The managed Runtime pin is `can1357/oh-my-pi` `v18.2.5` at commit `37273117021129e96bd05d8277b140ec3fd61990`. The previous functional baseline was `18.1.18-studio.5` at `00085d4e7dfdcfbf302c122fa2682b410a0f43d1`. See the [migration and verification report](../docs/migrations/omp-18.2.5.md).
+The managed Runtime pin is `can1357/oh-my-pi` `v18.3.0` at commit `62bc57be1b03ef0802a33cf7f5f530e534527531`. The previous functional baseline was `18.2.5-studio.9` at `37273117021129e96bd05d8277b140ec3fd61990`. See the [migration and verification report](../docs/migrations/omp-18.3.0.md).
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -33,7 +33,7 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 ## Windows build toolchain
 
-The v18.2.5 Windows bytecode bundle is validated with Bun 1.4.2. Set `BUN_EXE` to a separately installed 1.4.2 executable before building; the global Bun installation need not change. Bun 1.3.14 passes source checks but hits an internal compile assertion for this bundle. Keep the upstream-pinned Rust nightly toolchain. See the migration report for the verified download digest and local signing-key setup.
+The v18.3.0 Windows bytecode bundle is validated with Bun 1.4.2. Set `BUN_EXE` to a separately installed 1.4.2 executable before building; the global Bun installation need not change. Bun 1.3.14 passes source checks but hits an internal compile assertion for this bundle. Keep the upstream-pinned Rust nightly toolchain. See the migration report for the verified download digest and local signing-key setup.
 
 ## Working loop
 
@@ -55,7 +55,7 @@ npm run omp:verify:patches
 
 The verifier copies the overlay in, applies the seam patches in series order, runs the root and OMP source gates, then reverses the patches and removes the overlay in a `finally` cleanup. Beyond "it builds" it enforces two invariants: the overlay may not modify any upstream-tracked file (that would smuggle a seam change past review), and every seam patch must pass `git apply --check` before being applied. It intentionally does not rebuild the compiled host binary; milestone binary validation runs with the fork applied via `npm run omp:build:host`.
 
-Before the first source change against a fresh pin, both layers must be empty:
+Before the first source change against a fresh pin, verify an unmodified vendor workspace. Canonical overlay and patch metadata remain stored separately:
 
 ```powershell
 npm run omp:install-deps

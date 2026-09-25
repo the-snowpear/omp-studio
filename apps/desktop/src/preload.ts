@@ -68,6 +68,9 @@ contextBridge.exposeInMainWorld(DESKTOP_BRIDGE_GLOBAL, api);
 contextBridge.exposeInMainWorld("ompStudioChrome", createOmpStudioChromeApi(ipcRenderer, webUtils));
 
 const terminalApi: OmpStudioTerminalApi = {
+  recordingStart(input) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStart, input); },
+  recordingStop(id) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStop, { id }); },
+  recordingStatus(id) { return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.recordingStatus, { id }); },
   create(size) {
     return ipcRenderer.invoke(TERMINAL_IPC_CHANNELS.create, size ?? {}) as ReturnType<
       OmpStudioTerminalApi["create"]

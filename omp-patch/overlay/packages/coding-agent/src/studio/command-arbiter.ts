@@ -1,3 +1,4 @@
+import { WORKBENCH_OPERATION_KINDS } from "./workbench-protocol";
 import { UPGRADE_OPERATION_KINDS } from "./runtime-upgrade-protocol";
 import * as crypto from "node:crypto";
 import type { StudioRequest } from "./bridge-protocol";
@@ -7,6 +8,7 @@ export type StudioCommandSurface = "gui" | "tui" | "system";
 /** Abort/steer/pause run against a live turn. Conversation events bump
  *  `stateVersion` continuously, so a snapshot fence races the stream. */
 const LIVE_TURN_OPERATION_KINDS = new Set<string>([
+	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
 	"btw.ask",
 	"btw.abort",
@@ -71,6 +73,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<string>([
  *  prompt still fails closed. The Host's interaction arbiter keeps classifying
  *  it session-exclusive, but this Runtime arbiter is authoritative for it. */
 const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
+	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
 	"btw.ask",
 	"btw.abort",
@@ -126,6 +129,7 @@ const CONCURRENT_WITH_LEASE_OPERATION_KINDS = new Set<string>([
 ]);
 
 const DEFERRED_SESSION_PREFERENCE_KINDS = new Set<string>([
+	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
 	"btw.ask",
 	"btw.abort",

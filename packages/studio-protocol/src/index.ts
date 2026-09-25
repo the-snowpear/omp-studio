@@ -1,4 +1,6 @@
 export * from "./contracts/agents-jobs.js";
+export * from "./contracts/artifacts.js";
+export * from "./contracts/workbench.js";
 export * from "./contracts/btw.js";
 export * from "./contracts/commands.js";
 export * from "./contracts/evaluation.js";
@@ -19,3 +21,13 @@ export * from "./evaluation-validation.js";
 export * from "./performance-diagnostics.js";
 
 export * from "./contracts/runtime-upgrade.js";
+export * from "./contracts/accounts.js";
+export * from "./contracts/annotations.js";
+export * from "./contracts/judgments.js";
+export * from "./contracts/runtime-catalog.js";
+export * from "./contracts/benchmarks.js";
+export * from "./contracts/media.js";
+
+export * from "./contracts/live-audio.js";
+
+export * from "./contracts/skillshare.js";

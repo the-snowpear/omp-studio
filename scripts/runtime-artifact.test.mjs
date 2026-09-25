@@ -34,7 +34,7 @@ import {
 } from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "37273117021129e96bd05d8277b140ec3fd61990";
+const REAL_UPSTREAM_COMMIT = "62bc57be1b03ef0802a33cf7f5f530e534527531";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 async function fixtureInputs() {
@@ -146,6 +146,55 @@ test("artifact manifest carries the contract fields derived from real pin/series
   assert.match(manifest.commandManifestHash, /^sha256:[a-f0-9]{64}$/u);
   assert.notEqual(manifest.capabilityHash, manifest.commandManifestHash);
   assert.deepEqual(IMPLEMENTED_CAPABILITIES, [
+    "skillshare.status",
+    "skillshare.home",
+    "skillshare.search",
+    "skillshare.package",
+    "skillshare.installed",
+    "skillshare.tokens",
+    "skillshare.prepare",
+    "skillshare.execute",
+    "skillshare.action",
+    "skillshare.discard",
+    "live.audio.prepare",
+    "live.audio.start",
+    "live.audio.status",
+    "live.audio.mute",
+    "live.audio.release",
+    "media.models",
+    "media.list",
+    "media.start",
+    "media.read",
+    "media.cancel",
+    "media.resume",
+    "media.close",
+    "benchmarks.list",
+    "benchmarks.start",
+    "benchmarks.read",
+    "benchmarks.cancel",
+    "benchmarks.close",
+    "templates.list",
+    "templates.get",
+    "templates.prepare",
+    "mcp.runtime.status",
+    "judgments.list",
+    "judgments.create",
+    "judgments.read",
+    "judgments.cancel",
+    "judgments.close",
+    "judgments.retry",
+    "annotations.capture",
+    "annotations.prepare",
+    "accounts.status",
+    "services.list",
+    "services.start",
+    "services.stop",
+    "services.restart",
+    "services.mode.set",
+    "services.send",
+    "services.logs",
+    "tokens.count",
+    "runtime.models.list",
     "btw.history.list",
     "btw.history.read",
     "btw.followUp",
@@ -366,11 +415,11 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.commit, REAL_UPSTREAM_COMMIT);
   assert.equal(series.upstreamCommit, upstream.commit);
   assert.equal(upstream.entrypoint, "omp.exe");
-  assert.equal(upstreamVersion, "18.2.5");
+  assert.equal(upstreamVersion, "18.3.0");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.2.5-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.3.0-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }

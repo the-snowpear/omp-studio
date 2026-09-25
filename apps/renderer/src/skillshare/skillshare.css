@@ -1,0 +1,23 @@
+.skillshare-pane { margin: 24px 0; padding: 20px 0; border-top: 1px solid var(--border); min-width: 0; }
+.skillshare-toolbar, .skillshare-tabs, .skillshare-versions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.skillshare-toolbar h3 { margin: 0 12px 0 0; }
+.skillshare-toolbar > .input { flex: 1; min-width: 160px; }
+.skillshare-form { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr); gap: 14px; margin: 18px 0; align-items: end; }
+.skillshare-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.skillshare-form > button { justify-self: start; }
+.skillshare-hits { display: grid; gap: 0; }
+.skillshare-hit { display: grid; gap: 6px; text-align: left; padding: 14px 0; border-bottom: 1px solid var(--border); background: transparent; color: inherit; }
+.skillshare-hit small, .skillshare-file-list span { color: var(--muted); }
+.skillshare-hit:hover strong { color: var(--accent); }
+.skillshare-installed > div, .skillshare-token { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.skillshare-detail, .skillshare-review, .skillshare-action, .skillshare-secret { margin-top: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; }
+.skillshare-review { border-color: var(--accent); }
+.skillshare-review pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12px; }
+.skillshare-review > label { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0; }
+.skillshare-file-list { max-height: 220px; overflow: auto; margin: 12px 0; }
+.skillshare-file-list > div { display: flex; justify-content: space-between; gap: 18px; padding: 4px 0; font-size: 12px; }
+.skillshare-file-list code { overflow-wrap: anywhere; }
+.skillshare-integrity { display: block; overflow-wrap: anywhere; font-size: 11px; margin: 8px 0; }
+.skillshare-error { color: var(--red); }
+.skillshare-secret .input { display: block; width: 100%; margin: 12px 0; }
+@media (max-width: 720px) { .skillshare-form { grid-template-columns: 1fr; } }

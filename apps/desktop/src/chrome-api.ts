@@ -1,4 +1,8 @@
+import { SKILLSHARE_TOKEN_CHANNEL, type SkillshareTokenReveal } from "./chrome-skillshare-shared.js";
+import { LIVE_AUDIO_CHANNELS, type LiveAudioAttach, type LiveAudioChunk, type LiveAudioResult } from "./live-audio-shared.js";
+import { CHROME_SERVICE_CHANNELS, type ServiceDefinitionResult, type ServiceDefinitionsInput } from "./chrome-services-shared.js";
 import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
+import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
 import { TITLEBAR_OVERLAY_CHANNEL } from "./titlebar-overlay-shared.js";
 import { CHROME_PERFORMANCE_CHANNEL } from "./chrome-performance-shared.js";
 import type { MemorySample } from "@omp-studio/studio-protocol";
@@ -48,6 +52,7 @@ import {
   type UpdateStartResult,
 } from "./chrome-updates-shared.js";
 import type { UpdatePrefs } from "./update-prefs-store.js";
+import { MEDIA_UPLOAD_CHANNELS, type MediaUploadInput, type MediaUploadResult } from "./media-upload-shared.js";
 
 export interface IpcRendererLike {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
@@ -75,6 +80,26 @@ export function subscribeChannel<T>(
 
 export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike) {
   return Object.freeze({
+    revealSkillshareToken(input: { secretId: string; sessionId: string }): Promise<SkillshareTokenReveal> { return ipcRenderer.invoke(SKILLSHARE_TOKEN_CHANNEL, input) as Promise<SkillshareTokenReveal>; },
+    attachLiveAudio(input: LiveAudioAttach): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.attach, input) as Promise<LiveAudioResult>; },
+    appendLiveAudio(input: LiveAudioChunk): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.chunk, input) as Promise<LiveAudioResult>; },
+    detachLiveAudio(input: { audioId: string }): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.detach, input) as Promise<LiveAudioResult>; },
+    beginMediaUpload(input: MediaUploadInput): Promise<MediaUploadResult> { return ipcRenderer.invoke(MEDIA_UPLOAD_CHANNELS.begin, input) as Promise<MediaUploadResult>; },
+    appendMediaUpload(input: { uploadId: string; sequence: number; bytes: ArrayBuffer }): Promise<MediaUploadResult> { return ipcRenderer.invoke(MEDIA_UPLOAD_CHANNELS.chunk, input) as Promise<MediaUploadResult>; },
+    finishMediaUpload(input: { uploadId: string }): Promise<MediaUploadResult> { return ipcRenderer.invoke(MEDIA_UPLOAD_CHANNELS.finish, input) as Promise<MediaUploadResult>; },
+    abortMediaUpload(input: { uploadId: string }): Promise<MediaUploadResult> { return ipcRenderer.invoke(MEDIA_UPLOAD_CHANNELS.abort, input) as Promise<MediaUploadResult>; },
+    listServiceDefinitions(input: ServiceDefinitionsInput): Promise<ServiceDefinitionResult> { return ipcRenderer.invoke(CHROME_SERVICE_CHANNELS.list, input) as Promise<ServiceDefinitionResult>; },
+    saveServiceDefinition(input: ServiceDefinitionsInput): Promise<ServiceDefinitionResult> { return ipcRenderer.invoke(CHROME_SERVICE_CHANNELS.save, input) as Promise<ServiceDefinitionResult>; },
+    removeServiceDefinition(input: ServiceDefinitionsInput): Promise<ServiceDefinitionResult> { return ipcRenderer.invoke(CHROME_SERVICE_CHANNELS.remove, input) as Promise<ServiceDefinitionResult>; },
+    chooseArtifactDirectory(): Promise<ArtifactFileResult> {
+      return ipcRenderer.invoke(CHROME_ARTIFACT_CHANNELS.chooseDirectory, {}) as Promise<ArtifactFileResult>;
+    },
+    importArtifact(input: ArtifactImportInput): Promise<ArtifactFileResult> {
+      return ipcRenderer.invoke(CHROME_ARTIFACT_CHANNELS.import, input) as Promise<ArtifactFileResult>;
+    },
+    exportArtifact(input: { artifactId: string }): Promise<ArtifactFileResult> {
+      return ipcRenderer.invoke(CHROME_ARTIFACT_CHANNELS.export, input) as Promise<ArtifactFileResult>;
+    },
     setConversationViewState(state: ConversationViewState): Promise<boolean> {
       return ipcRenderer.invoke(CONVERSATION_VIEW_CHANNEL, state) as Promise<boolean>;
     },

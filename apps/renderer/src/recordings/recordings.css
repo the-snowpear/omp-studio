@@ -1,0 +1,9 @@
+.recording-player { min-width: 0; padding: 12px 0; }
+.recording-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.recording-controls .select { width: auto; min-width: 72px; }
+.recording-controls input[type=file] { width: 180px; margin-left: 8px; font-size: 11px; }
+.recording-screen { overflow: auto; max-height: 420px; background: #17191d; }
+.recording-seek { width: 100%; margin: 8px 0; }
+.terminal-recording-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 5px 12px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.terminal-recording-confirm { padding: 10px 12px; background: var(--bg-hover); font-size: 12px; }
+.terminal-recording-confirm .btn { margin-right: 8px; }

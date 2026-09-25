@@ -243,3 +243,9 @@ test("Desktop outbound applies canonical Base64 and image byte/count caps to edi
   assert.doesNotThrow(() => assertClientEvent(eventWith(maxImages)));
   assert.throws(() => assertClientEvent(eventWith([...maxImages, image("AQID")])), ValidationError);
 });
+
+test("media input grants cannot be forged through public Desktop commands", () => {
+  const request = { commandName: "media.start", requestId: "media", idempotencyKey: "media", input: { sessionId: "s", request: { type: "image", prompt: "mock" } } };
+  assert.doesNotThrow(() => parseClientCommandRequest(request));
+  assert.throws(() => parseClientCommandRequest({ ...request, input: { ...request.input, inputTransfers: [] } }), ValidationError);
+});

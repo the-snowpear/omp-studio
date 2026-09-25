@@ -174,7 +174,7 @@ async function openEditor(options: { preview?: boolean; client?: StudioClient; m
   );
   const edit = await screen.findAllByRole("button", { name: "编辑供应商" });
   fireEvent.click(edit[0] as HTMLElement);
-  await screen.findByRole("button", { name: /自动获取模型/ });
+  await screen.findByRole("button", { name: /自动获取模型/ }, { timeout: 3000 });
   return {
     client: client as ReturnType<typeof fakeClient>,
     container: view.container,

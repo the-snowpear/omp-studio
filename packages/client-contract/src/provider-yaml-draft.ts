@@ -154,6 +154,8 @@ function thinkingNode(
 function modelNode(model: ModelCatalogEntry, previous: Record<string, unknown> | undefined): Record<string, unknown> {
   const row: Record<string, unknown> = { id: model.id };
   if (model.name) row.name = model.name;
+  if (model.kind) row.kind = model.kind;
+  if (model.webSearch) row.webSearch = model.webSearch;
   if (model.api) row.api = mapApiAlias(model.api);
   if (model.baseUrl) row.baseUrl = model.baseUrl;
   if (model.contextWindow) row.contextWindow = model.contextWindow;

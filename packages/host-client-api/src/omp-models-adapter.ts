@@ -1,3 +1,5 @@
+import { migrateModelRoleConfig } from "./model-role-migration.js";
+import { readWebRouting, writeWebRouting } from "./web-routing.js";
 /**
  * File-backed model-config adapter.
  *
@@ -41,9 +43,9 @@ import type {
   ModelWebSearchCredentialRemoveInput,
   WebSearchConfigReadModel,
 } from "@omp-studio/client-contract";
-import { isModelEnvConfigName, parseCacheThinkingEfforts, parseModelThinkingEfforts, parseModelPricing } from "@omp-studio/client-contract";
+import { BUILTIN_MODEL_ROLES, parseModelKind, isModelEnvConfigName, parseCacheThinkingEfforts, parseModelThinkingEfforts, parseModelPricing } from "@omp-studio/client-contract";
 
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml, parseDocument } from "yaml";
 import { parseModelsYml, redactModelsYmlText, restoreRedactedApiKeys, serializeModelsYml, type YamlValue } from "./models-yml.js";
 import { getProjectConfigDir } from "./omp-discovery/paths.js";
 import type { HostModelsService } from "./services.js";
@@ -51,18 +53,7 @@ import { toClientError } from "./services.js";
 
 const execFileAsync = promisify(execFile);
 
-const BUILTIN_ROLES: ReadonlyArray<{ id: string; alias: string; name: string; desc: string }> = [
-  { id: "default", alias: "@default", name: "Default", desc: "默认主模型" },
-  { id: "smol", alias: "@smol", name: "Fast", desc: "快速、低成本任务" },
-  { id: "slow", alias: "@slow", name: "Thinking", desc: "复杂推理任务" },
-  { id: "vision", alias: "@vision", name: "Vision", desc: "视觉与图片任务" },
-  { id: "plan", alias: "@plan", name: "Architect", desc: "规划和架构任务" },
-  { id: "designer", alias: "@designer", name: "Designer", desc: "设计相关任务" },
-  { id: "commit", alias: "@commit", name: "Commit", desc: "Commit 相关任务" },
-  { id: "tiny", alias: "@tiny", name: "Tiny", desc: "标题、记忆等极轻量后台任务" },
-  { id: "task", alias: "@task", name: "Subtask", desc: "通用子任务" },
-  { id: "advisor", alias: "@advisor", name: "Advisor", desc: "第二模型审查" },
-];
+const BUILTIN_ROLES = BUILTIN_MODEL_ROLES.map(role => ({ ...role, alias: `@${role.id}` }));
 
 /**
  * Web-search providers in the runtime's built-in chain order
@@ -472,6 +463,8 @@ function probeModelMeta(row: Record<string, unknown>): Omit<ModelDiscoveryModel,
   const reasoning = probeReasoning(row);
   const image = probeImageInput(row);
   return {
+    ...(parseModelKind(row.kind) === undefined ? {} : { kind: parseModelKind(row.kind)! }),
+    ...(typeof row.webSearch === "string" && row.webSearch.trim() ? { webSearch: row.webSearch } : {}),
     ...(contextWindow === undefined ? {} : { contextWindow }),
     ...(maxTokens === undefined ? {} : { maxTokens }),
     ...(reasoning === undefined ? {} : { reasoning }),
@@ -593,6 +586,7 @@ function webSearchProviderRecord(
 
 function emptyWebSearch(): WebSearchConfigReadModel {
   return {
+    routing: readWebRouting({}),
     enabled: true,
     order: [],
     exclude: [],
@@ -765,6 +759,8 @@ export function availableFromCacheModel(
     selector: typeof model.selector === "string" && model.selector.length > 0 ? model.selector : `${providerOf}/${id}`,
     name: typeof model.name === "string" && model.name.length > 0 ? model.name : id,
     reasoning: model.reasoning === true,
+    ...(parseModelKind(model.kind) ? { kind: parseModelKind(model.kind)! } : {}),
+    ...(typeof model.webSearch === "string" ? { webSearch: model.webSearch } : {}),
     image,
     tools: model.supportsTools !== false,
     ...(contextWindow === undefined ? {} : { contextWindow }),
@@ -784,6 +780,8 @@ export function catalogEntryFromAvailable(model: AvailableModelRecord): ModelCat
     selector: model.selector,
     image: model.image === true,
     reasoning: model.reasoning,
+    ...(model.kind === undefined ? {} : { kind: model.kind }),
+    ...(model.webSearch === undefined ? {} : { webSearch: model.webSearch }),
     tools: model.tools !== false,
     status: "available",
     source: "catalog",
@@ -804,6 +802,8 @@ export function availableFromCatalogEntry(providerId: string, model: ModelCatalo
     selector: model.selector,
     name: model.name,
     reasoning: model.reasoning,
+    ...(model.kind === undefined ? {} : { kind: model.kind }),
+    ...(model.webSearch === undefined ? {} : { webSearch: model.webSearch }),
     image: model.image,
     tools: model.tools,
     ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
@@ -956,6 +956,8 @@ function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undef
       ...(maxTokens === undefined ? {} : { maxTokens }),
       image,
       reasoning: model.reasoning === true,
+      ...(parseModelKind(model.kind) ? { kind: parseModelKind(model.kind)! } : {}),
+      ...(typeof model.webSearch === "string" ? { webSearch: model.webSearch } : {}),
       tools: model.supportsTools !== false,
       ...(cost ? { cost } : {}),
       status: "available" as const,
@@ -1272,6 +1274,8 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
     next.models = input.models.map((model) => {
       const row: Record<string, YamlValue> = { id: model.id };
       if (model.name) row.name = model.name;
+      if (model.kind) row.kind = model.kind;
+      if (model.webSearch) row.webSearch = model.webSearch;
       if (model.api) row.api = mapApi(model.api);
       if (model.baseUrl) row.baseUrl = model.baseUrl;
       if (model.contextWindow) row.contextWindow = model.contextWindow;
@@ -1609,13 +1613,26 @@ export function upsertYamlScalar(source: string, key: string, value: string): st
 }
 
 function patchYamlRoot(source: string, mutator: (root: Record<string, unknown>) => void): string {
-  const parsed = source.trim().length === 0 ? {} : parseYaml(source);
-  const root = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  const doc: import("yaml").Document = parseDocument(source || "{}");
+  if (doc.errors.length) throw new Error("Invalid config.yml");
+  const original = doc.toJS() as unknown;
+  if (original !== null && (typeof original !== "object" || Array.isArray(original))) throw new Error("config.yml must be a mapping");
+  const before = (original ?? {}) as Record<string, unknown>;
+  const root = structuredClone(before);
   mutator(root);
-  const newline = source.includes("\r\n") ? "\r\n" : "\n";
-  let out = stringifyYaml(root);
-  if (newline === "\r\n") out = out.replace(/\n/g, "\r\n");
-  return out;
+  const isMap = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+  const sync = (previous: Record<string, unknown>, next: Record<string, unknown>, path: string[]) => {
+    for (const key of Object.keys(previous)) if (!Object.hasOwn(next, key)) doc.deleteIn([...path, key]);
+    for (const [key, value] of Object.entries(next)) {
+      const old = previous[key]; const target = [...path, key];
+      if (isMap(old) && isMap(value)) sync(old, value, target);
+      else if (JSON.stringify(old) !== JSON.stringify(value)) doc.setIn(target, value);
+    }
+  };
+  if (!doc.contents) doc.contents = doc.createNode({});
+  sync(before, root, []);
+  const out = doc.toString();
+  return source.includes("\r\n") ? out.replace(/\n/g, "\r\n") : out;
 }
 
 export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): HostModelsService {
@@ -1696,7 +1713,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
   async function readRolesFromConfigFile(configPath: string, parsedOverride?: ParsedConfig): Promise<Record<string, string>> {
     try {
-      const parsed = parsedOverride ?? (await readYamlFile(configPath)).root;
+      const parsed = migrateModelRoleConfig(parsedOverride ?? (await readYamlFile(configPath)).root);
       const roles = asRecord(parsed.modelRoles as YamlValue | undefined);
       if (!roles) return {};
       const mapped: Record<string, string> = {};
@@ -1711,7 +1728,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
   async function readStringList(configPath: string, key: string, parsedOverride?: ParsedConfig): Promise<string[]> {
     try {
-      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
+      const parsed = migrateModelRoleConfig(parsedOverride ?? parseYaml(await readConfigText(configPath)));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
       const value = (parsed as ParsedConfig)[key];
       if (!Array.isArray(value)) return [];
@@ -1798,7 +1815,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
   async function readScalar(configPath: string, key: string, parsedOverride?: ParsedConfig): Promise<string | undefined> {
     try {
-      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
+      const parsed = migrateModelRoleConfig(parsedOverride ?? parseYaml(await readConfigText(configPath)));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
       const value = (parsed as Record<string, unknown>)[key];
       return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -1810,7 +1827,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
   /** Walk a dotted path into parsed config.yml (e.g. ["providers", "webSearchOrder"]). */
   async function readNested(configPath: string, path: readonly string[], parsedOverride?: ParsedConfig): Promise<unknown> {
     try {
-      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
+      const parsed = migrateModelRoleConfig(parsedOverride ?? parseYaml(await readConfigText(configPath)));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
       let current: unknown = parsed;
       for (const key of path) {
@@ -1869,6 +1886,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     const exaEnabled = await readNestedBool(configPath, ["exa", "enabled"], true, parsedOverride);
     const exaSearchDelayMs = await readNestedNumber(configPath, ["exa", "searchDelayMs"], 1000, parsedOverride);
     return {
+      routing: readWebRouting(parsedOverride ?? parseYaml(await readConfigText(configPath))),
       enabled,
       order,
       exclude,
@@ -1893,7 +1911,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
   async function readFallback(configPath: string, parsedOverride?: ParsedConfig): Promise<{ chains: Record<string, string[]>; revertPolicy: ModelFallbackRevertPolicy }> {
     try {
-      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
+      const parsed = migrateModelRoleConfig(parsedOverride ?? parseYaml(await readConfigText(configPath)));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
         return { chains: {}, revertPolicy: "cooldown-expiry" };
       }
@@ -1915,7 +1933,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
 
   async function readModelTags(configPath: string, parsedOverride?: ParsedConfig): Promise<Record<string, { name: string; desc?: string; color?: string }>> {
     try {
-      const parsed = parsedOverride ?? parseYaml(await readConfigText(configPath));
+      const parsed = migrateModelRoleConfig(parsedOverride ?? parseYaml(await readConfigText(configPath)));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
       const tags = (parsed as Record<string, unknown>).modelTags;
       if (!tags || typeof tags !== "object" || Array.isArray(tags)) return {};
@@ -2167,6 +2185,10 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const cycleOrder = await readCycleOrder(paths.configPath, configRoot);
       const modelProviderOrder = await readStringList(paths.configPath, "modelProviderOrder", configRoot);
       const fallback = await readFallback(paths.configPath, configRoot);
+      if (storage === "project" && cwd) {
+        const projectFallback = await readFallback(join(getProjectConfigDir(cwd), "config.yml"));
+        Object.assign(fallback.chains, projectFallback.chains);
+      }
       const tags = await readModelTags(paths.configPath, configRoot);
       const disabled = new Set(await readStringList(paths.configPath, "disabledProviders", configRoot));
       const [auth, available] = await Promise.all([
@@ -2207,7 +2229,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       const availableSet = new Set(mergedAvailable.map((model) => model.selector));
       const roleDefs = [
         ...BUILTIN_ROLES.map((role) => ({ ...role, builtin: true })),
-        ...Object.entries(tags)
+        ...Object.entries({ ...Object.fromEntries(Object.keys(modelRoles).map(id => [id, { name: id, desc: "自定义角色" }])), ...tags })
           .filter(([id]) => !BUILTIN_ROLES.some((role) => role.id === id))
           .map(([id, tag]) => ({
             id,
@@ -2237,7 +2259,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         ...roles.filter((role) => role.primary).map((role) => `  ${role.id}: ${role.primary}${role.thinking ? `:${role.thinking}` : ""}`),
         modelProviderOrder.length > 0 ? `modelProviderOrder:\n${modelProviderOrder.map((id) => `  - ${id}`).join("\n")}` : "",
       ].filter((line) => line.length > 0).join("\n") + "\n";
-      const webSearch: WebSearchConfigReadModel = await readWebSearch(paths.configPath, authenticated, authKinds, configRoot);
+      const globalWebSearch = await readWebSearch(paths.configPath, authenticated, authKinds, configRoot);
+      const webSearch: WebSearchConfigReadModel = { ...globalWebSearch, routing: { ...globalWebSearch.routing!, primary: modelRoles.web ?? "", fallbacks: fallback.chains.web ?? null } };
       return {
         providers,
         presets: PRESET_GROUPS,
@@ -2795,7 +2818,8 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     async setFallback(input): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
-      const text = await readConfigText(paths.configPath);
+      const target = await roleTargetPath(paths);
+      const text = await readConfigText(target.path);
       const next = patchYamlRoot(text, (root) => {
         const retry = root.retry && typeof root.retry === "object" && !Array.isArray(root.retry)
           ? { ...(root.retry as Record<string, unknown>) }
@@ -2804,7 +2828,7 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
         if (input.revertPolicy) retry.fallbackRevertPolicy = input.revertPolicy;
         root.retry = retry;
       });
-      await writeConfigText(paths.configPath, next);
+      await writeConfigText(target.path, next);
       return { ...WRITE_OK, message: "已保存 Fallback 链" };
     },
 
@@ -2825,6 +2849,16 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
     async setWebSearch(input: ModelWebSearchSetInput): Promise<ConfigWriteResult> {
       const paths = await resolvePaths();
       if (!paths) throw { code: "UNAVAILABLE", message: `config directory is missing: ${defaultAgentDir()}` };
+      if (input.routing) {
+        if (typeof input.routing.primary !== "string" || input.routing.primary.length > 512 || (input.routing.fallbacks !== null && (!Array.isArray(input.routing.fallbacks) || input.routing.fallbacks.length > 128 || input.routing.fallbacks.some(item => typeof item !== "string" || !item.trim() || item.length > 512)))) throw { code: "INVALID_ARGUMENT", message: "Invalid web model routing" };
+        const target = await roleTargetPath(paths);
+        if (target.path !== paths.configPath) {
+          if (Object.keys(input).some(key => key !== "routing")) throw { code: "INVALID_ARGUMENT", message: "Save project search routing separately from global transport settings" };
+          const text = await readConfigText(target.path);
+          await writeConfigText(target.path, patchYamlRoot(text, root => writeWebRouting(root, input.routing!)));
+          return { ...WRITE_OK, message: "已保存项目 Web 模型链" };
+        }
+      }
       const known = new Set(WEB_SEARCH_PROVIDER_CATALOG.map((provider) => provider.id));
       const filterIds = (items: ReadonlyArray<string>): string[] => {
         const seen = new Set<string>();
@@ -2841,21 +2875,23 @@ export function createOmpModelsService(options: OmpModelsAdapterOptions = {}): H
       if (input.enabled !== undefined) {
         next = upsertYamlRecordEntry(next, "web_search", "enabled", input.enabled ? "true" : "false");
       }
-      // Priority / exclusion lists (empty = built-in order / nothing excluded).
-      if (input.order !== undefined) next = upsertNestedRecordList(next, "providers", "webSearchOrder", filterIds(input.order));
-      if (input.exclude !== undefined) next = upsertNestedRecordList(next, "providers", "webSearchExclude", filterIds(input.exclude));
+      if (input.routing) next = patchYamlRoot(next, root => writeWebRouting(root, input.routing!));
+      else if (input.order !== undefined || input.exclude !== undefined || input.geminiModel !== undefined) {
+        next = patchYamlRoot(next, root => {
+          const providers = typeof root.providers === "object" && root.providers && !Array.isArray(root.providers) ? { ...root.providers as Record<string, unknown> } : {};
+          if (input.order !== undefined) providers.webSearchOrder = filterIds(input.order);
+          if (input.exclude !== undefined) providers.webSearchExclude = filterIds(input.exclude);
+          if (input.geminiModel !== undefined) providers.webSearchGeminiModel = input.geminiModel;
+          const migration = { ...root, providers, modelRoles: {}, retry: {} };
+          writeWebRouting(root, readWebRouting(migration));
+        });
+      }
       // Per-provider transport timeout (clamped like the runtime: 1..300s).
       if (input.timeoutSeconds !== undefined) {
         const clamped = Number.isFinite(input.timeoutSeconds)
           ? Math.min(300, Math.max(1, Math.round(input.timeoutSeconds)))
           : 60;
         next = upsertYamlRecordEntry(next, "providers", "webSearchTimeoutSeconds", String(clamped));
-      }
-      // Gemini grounding model: empty clears back to the runtime default.
-      if (input.geminiModel !== undefined) {
-        next = input.geminiModel.length > 0
-          ? upsertYamlRecordEntry(next, "providers", "webSearchGeminiModel", quoteInline(input.geminiModel.trim()))
-          : deleteYamlRecordEntry(next, "providers", "webSearchGeminiModel");
       }
       // SearXNG advanced: plain-text fields are clearable with an empty string;
       // token and basic password only ever set (blank keeps the existing

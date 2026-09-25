@@ -1,5 +1,7 @@
+import { validateArtifactTextInput } from "@omp-studio/studio-protocol";
+import { validateArtifactListInput, validateArtifactIdInput } from "@omp-studio/studio-protocol";
 import { validateRuntimeSettingValue as validateProtocolSettingValue, type StudioRuntimeSettingKey } from "@omp-studio/studio-protocol";
-import { UPGRADE_OPERATION_KINDS, validateUpgradeOperation } from "@omp-studio/studio-protocol";
+import { WORKBENCH_OPERATION_KINDS, validateWorkbenchOperation, UPGRADE_OPERATION_KINDS, validateUpgradeOperation } from "@omp-studio/studio-protocol";
 import { validateEvaluationOperation } from "@omp-studio/studio-protocol";
 
 function record(value: unknown, field: string): Record<string, unknown> {
@@ -1135,6 +1137,8 @@ function validateThinkingEfforts(value: unknown, what: string): void {
 }
 
 const MODEL_OVERRIDE_KEYS = [
+  "kind",
+  "webSearch",
   "name",
   "contextWindow",
   "maxTokens",
@@ -1154,6 +1158,8 @@ const MODEL_OVERRIDE_KEYS = [
 const MODEL_PROVIDER_MODEL_KEYS = ["id", "api", "baseUrl", ...MODEL_OVERRIDE_KEYS] as const;
 
 function validateModelPatchFields(item: Record<string, unknown>, what: string): void {
+  if (item.kind !== undefined && !["chat", "tiny", "image", "tts", "stt", "search", "judge", "embedding", "rerank", "video"].includes(item.kind as string)) throw new ValidationError("Invalid model kind");
+  if (item.webSearch !== undefined) assertNonEmptyText(item.webSearch, what + ".webSearch");
   if (item.name !== undefined) assertNonEmptyText(item.name, `${what}.name`);
   if (item.contextWindow !== undefined && (typeof item.contextWindow !== "number" || !Number.isSafeInteger(item.contextWindow) || item.contextWindow <= 0)) {
     throw new ValidationError(`${what}.contextWindow must be a positive integer`);
@@ -1375,11 +1381,18 @@ function validateModelsWebSearchSetInput(input: unknown): void {
   assertPlainObject(input, "models.webSearch.set input");
   assertNoUnknownKeys(
     input,
-    ["enabled", "order", "exclude", "timeoutSeconds", "geminiModel", "searxng", "exa"],
+    ["enabled", "routing", "order", "exclude", "timeoutSeconds", "geminiModel", "searxng", "exa"],
     "models.webSearch.set input",
   );
   if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
     throw new ValidationError("models.webSearch.set input: enabled must be boolean");
+  }
+  if (input.routing !== undefined) {
+    const routing = record(input.routing, "web routing");
+    assertNoUnknownKeys(routing, ["primary", "fallbacks"], "web routing");
+    if (typeof routing.primary !== "string" || routing.primary.length > 512 || /[\u0000-\u001f]/u.test(routing.primary)) throw new ValidationError("Invalid web primary");
+    if (routing.fallbacks !== null && (!Array.isArray(routing.fallbacks) || routing.fallbacks.length > 128 || routing.fallbacks.some(item => typeof item !== "string" || !item.trim() || item.length > 512))) throw new ValidationError("Invalid web fallback chain");
+    if (["order", "exclude", "geminiModel"].some(key => input[key] !== undefined)) throw new ValidationError("Use either model routing or legacy web settings");
   }
   for (const key of ["order", "exclude"] as const) {
     if (input[key] !== undefined) {
@@ -1675,6 +1688,9 @@ function validateAgentDefinitionConfigureInput(input: unknown): void {
 const QUERY_INPUT_VALIDATORS: {
   readonly [K in QueryName]: (input: unknown) => void;
 } = {
+  "artifacts.text.read": validateArtifactIdInput,
+  "artifacts.list": validateArtifactListInput,
+  "artifacts.storage.get": (input) => validateEmptyInput(input, "artifacts.storage.get input"),
   "environment.get": (input) => validateEmptyInput(input, "environment.get input"),
   "capabilities.get": (input) => validateEmptyInput(input, "capabilities.get input"),
   "commands.getManifest": (input) => validateEmptyInput(input, "commands.getManifest input"),
@@ -1717,6 +1733,8 @@ const QUERY_INPUT_VALIDATORS: {
 const COMMAND_INPUT_VALIDATORS: {
   readonly [K in CommandName]: (input: unknown) => void;
 } = {
+  "artifacts.saveText": validateArtifactTextInput,
+  "artifacts.delete": validateArtifactIdInput,
   "core.prompt": (input) => validatePromptInput(input, "core.prompt input"),
   "core.steer": (input) => validatePromptInput(input, "core.steer input"),
   "core.followUp": (input) => validatePromptInput(input, "core.followUp input"),
@@ -1783,6 +1801,9 @@ const COMMAND_INPUT_VALIDATORS: {
   "session.tree.navigate": validateTreeNavigateInput,
   "session.tree.branch": validateTreeBranchInput,
   "operator.invoke": validateOperatorInvokeInput,
+  ...Object.fromEntries(WORKBENCH_OPERATION_KINDS.map(kind => [kind, (input: unknown) => {
+    try { const body = record(input, "Workbench input"); if ("kind" in body || "inputTransfers" in body) throw new Error("Private operation fields are not client inputs"); validateWorkbenchOperation({ ...body, kind }); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid Workbench input"); }
+  }])) as Record<(typeof WORKBENCH_OPERATION_KINDS)[number], (input: unknown) => void>,
   ...Object.fromEntries(UPGRADE_OPERATION_KINDS.map(kind => [kind, (input: unknown) => {
     try { const body = record(input, "Runtime input"); if ("kind" in body) throw new Error("Operation identity is not an input field"); if ("fallbackCwd" in body) throw new Error("Use a registered workspace identity"); validateUpgradeOperation({ ...body, kind }); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid Runtime input"); }
   }])) as Record<(typeof UPGRADE_OPERATION_KINDS)[number], (input: unknown) => void>,
@@ -1819,7 +1840,12 @@ const COMMAND_INPUT_VALIDATORS: {
   "session.drop": (input) => validateThreadInput(input, "session.drop input"),
   "session.archive": (input) => validateThreadInput(input, "session.archive input"),
   "session.unarchive": (input) => validateThreadInput(input, "session.unarchive input"),
-  "session.delete": (input) => validateThreadInput(input, "session.delete input"),
+  "session.delete": (input) => {
+    const body = record(input, "session.delete input");
+    assertNoUnknownKeys(body, ["threadId", "deleteManagedArtifacts"], "session.delete input");
+    validateThreadInput({ threadId: body.threadId }, "session.delete input");
+    if (body.deleteManagedArtifacts !== undefined && typeof body.deleteManagedArtifacts !== "boolean") throw new ValidationError("Invalid managed artifact deletion choice");
+  },
   "interaction.respond": validateInteractionRespondInput,
   "permissions.mode.set": (input) => {
     assertPlainObject(input, "permissions.mode.set input");

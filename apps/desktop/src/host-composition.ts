@@ -1,3 +1,5 @@
+import { artifactLibraryForProfile } from "./artifact-library.js";
+import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 /**
  * Desktop Host composition (FRONTEND_INTEGRATION.md §9.2).
  *
@@ -158,6 +160,8 @@ export interface DesktopPrivateEndpoint {
 
 /** Ready Runtime session bundle produced only after a trusted resolution. */
 export interface DesktopRuntimeSession {
+  /** Main-only private file channel. Never project this path to a client. */
+  mediaDirectory?(): string | undefined;
   readonly controller: StudioRuntimeSessionController;
   /** Safe current hello; `undefined` once the Runtime is lost. */
   hello(): HostRuntimeHelloView | undefined;
@@ -803,6 +807,8 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const runtimeCommandService =
     seams.commands ??
     createDesktopSemanticCommands({
+      mediaFiles: runtimeMediaFilesForLibrary(artifactLibraryForProfile(context.profileDirectory)),
+      mediaWorkspaceId: () => context.seams.getActiveWorkspace?.()?.workspaceId,
       ...(seams.resolveImportWorkspace ? { resolveImportWorkspace: seams.resolveImportWorkspace } : {}),
       ...(seams.registerImportedWorkspace ? { registerImportedWorkspace: seams.registerImportedWorkspace } : {}),
       sessionRef,
@@ -817,6 +823,11 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
       },
       archive: currentArchiveService,
       deleteService: currentDeleteService,
+      finishManagedArtifacts: async (sessionId, cascade) => {
+        const library = artifactLibraryForProfile(context.profileDirectory);
+        try { await runtimeMediaFilesForLibrary(library).finishSession(join(context.profileDirectory, "bridge", "media-v1"), sessionId, cascade); }
+        finally { await library.finishSession(sessionId, cascade); }
+      },
       telemetryStore: () => telemetryStore,
       bindings: context.backend.bindings,
       leaseStore: sessionLeaseCleanup,
@@ -871,6 +882,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
             }),
           }),
     commands: runtimeCommandService,
+    artifacts: artifactLibraryForProfile(context.profileDirectory),
     models:
       seams.models ??
       createOmpModelsService({

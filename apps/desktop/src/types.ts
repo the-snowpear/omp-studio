@@ -143,6 +143,8 @@ export interface DesktopApplication {
  * pure orchestration and testable with fakes.
  */
 export interface DesktopApplicationDeps {
+  /** Flush desktop-owned streams before stopping the Host and exiting. */
+  readonly beforeShutdown?: () => Promise<void>;
   readonly hostFactory: DesktopHostFactory;
   readonly createWindow: DesktopWindowFactory;
   /** true when this instance holds the single-instance lock. */

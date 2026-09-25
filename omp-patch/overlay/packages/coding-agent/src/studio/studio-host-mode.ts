@@ -1,4 +1,6 @@
+import { StudioLiveAudioService } from "./services/live-audio-service";
 import { expandModelMentionTags } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
+import { StudioWorkbenchService } from "./services/workbench-service";
 import { StudioUpgradeService } from "./services/upgrade-service";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
@@ -79,6 +81,7 @@ interface StudioSessionSlot extends AgentSession {
 function createSessionSlot(initial: AgentSession): StudioSessionSlot {
 	let current = initial;
 	let beforeNextUserTurn: ((...args: never[]) => unknown) | undefined;
+	let resetConsentHandler: Parameters<AgentSession["setResetConsentHandler"]>[0];
 	const subscriptions = new Map<(...args: never[]) => unknown, () => void>();
 	const sessionChangeCallbacks = new Map<(...args: never[]) => unknown, () => void>();
 	const attach = (next: AgentSession): void => {
@@ -93,6 +96,7 @@ function createSessionSlot(initial: AgentSession): StudioSessionSlot {
 			sessionChangeCallbacks.set(listener, nextUnsubscribe);
 		}
 		if (next.setBeforeNextUserTurn) next.setBeforeNextUserTurn(beforeNextUserTurn as never);
+		next.setResetConsentHandler?.(resetConsentHandler);
 	};
 	const slot = new Proxy(initial as StudioSessionSlot, {
 		get(_target, property) {
@@ -132,6 +136,12 @@ function createSessionSlot(initial: AgentSession): StudioSessionSlot {
 					current.setBeforeNextUserTurn?.(callback as never);
 				};
 			}
+			if (property === "setResetConsentHandler") {
+				return (callback: Parameters<AgentSession["setResetConsentHandler"]>[0]) => {
+					resetConsentHandler = callback;
+					current.setResetConsentHandler?.(callback);
+				};
+			}
 			const value = Reflect.get(current, property, current);
 			return typeof value === "function" ? value.bind(current) : value;
 		},
@@ -164,6 +174,7 @@ export interface StudioHostRuntime {
 		commands: StudioCommandManifestService;
 		btw: StudioBtwService;
 		upgrade: StudioUpgradeService;
+		workbench: StudioWorkbenchService;
 		interaction: StudioInteractionGateway;
 		omfg: StudioOmfgService;
 		tan: StudioTanService;
@@ -470,9 +481,12 @@ export function createStudioHostRuntime(
 		onError: error => session.emitNotice("error", error instanceof Error ? error.message : String(error), "loop"),
 	});
 	const unsubscribeLoopPause = studioPauseService.onChange(() => loop.interruptPending());
-	const live = new StudioLiveService(liveSessionFactory);
+	const liveAudio = new StudioLiveAudioService(session);
+	const live = new StudioLiveService(liveSessionFactory ?? liveAudio.factory);
+	liveAudio.bindControl(live);
 	const modes = new StudioModeControlService(session);
 	const models = new StudioModelControlService(session);
+	const workbench = new StudioWorkbenchService(session, liveAudio);
 	const permissions = new StudioPermissionControlService(session);
 	const settings = new StudioRuntimeSettingsService(session);
 	session.setBeforeNextUserTurn(async () => {
@@ -481,6 +495,25 @@ export function createStudioHostRuntime(
 		await permissions.applyPending();
 	});
 	const interaction = new StudioInteractionGateway();
+	session.setResetConsentHandler?.(async ({ provider, message }) => {
+		const choice = await interaction.select({
+			commandId: `reset-consent:${provider}:${crypto.randomUUID()}`,
+			title: message,
+			options: [
+				{
+					id: "Yes",
+					label: "Use now and allow future automatic use",
+					description: "Spend eligible resets now and remember this choice. You can change it in Settings.",
+				},
+				{
+					id: "No",
+					label: "Disable automatic use",
+					description: "Keep the saved resets and remember that automatic redemption is disabled.",
+				},
+			],
+		});
+		return choice === "Yes" || choice === "No" ? choice : undefined;
+	});
 	const tree = new StudioTreeService(session, interaction);
 	const fork = new StudioForkService(session);
 	const handoff = new StudioHandoffService(session);
@@ -495,6 +528,9 @@ export function createStudioHostRuntime(
 		{
 			runEphemeralTurn: args => session.runEphemeralTurn(args),
 			getMessages: () => session.messages,
+			getTools: () => session.agent.state.tools,
+			getCwd: () => session.sessionManager.getCwd(),
+			ruleJudge: () => session.ruleJudge(),
 		},
 		{
 			resolveRulePath: (scope, ruleName) =>
@@ -898,6 +934,7 @@ export function createStudioHostRuntime(
 			commands,
 			btw,
 			upgrade: new StudioUpgradeService(session, btw),
+			workbench,
 			interaction,
 			omfg,
 			tan,
@@ -953,6 +990,7 @@ export function createStudioHostRuntime(
 			disposed = true;
 			performanceSampler.dispose();
 			session.setBeforeNextUserTurn(undefined);
+			session.setResetConsentHandler?.(undefined);
 			unsubscribe();
 			unsubscribeSessionChange();
 			unsubscribeLoopPause();
@@ -962,6 +1000,7 @@ export function createStudioHostRuntime(
 			}
 			loop.dispose();
 			live.dispose();
+			workbench.dispose();
 			modes.dispose();
 			btw.dispose();
 			agents.dispose();
@@ -1013,6 +1052,13 @@ function createStudioMainWorkerSupervisor(
 	};
 
 	const blocked = (): boolean => {
+		if (
+			runtime.services.workbench.liveAudio.running ||
+			["connecting", "active", "stopping"].includes(runtime.services.live.state().status)
+		)
+			return true;
+		if (runtime.services.workbench.skillshare.running) return true;
+		if (runtime.services.workbench.benchmarks.running || runtime.services.workbench.media.running) return true;
 		if (slot.isStreaming || slot.isCompacting || slot.hasPostPromptWork || slot.queuedMessageCount > 0) return true;
 		if (runtime.services.interaction.pending() !== undefined) return true;
 		return runtime.services.jobs

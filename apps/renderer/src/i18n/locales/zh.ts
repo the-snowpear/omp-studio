@@ -1,6 +1,39 @@
 type DeepString<T> = { readonly [K in keyof T]: T[K] extends string ? string : DeepString<T[K]> };
 
 const zhRaw = {
+  "media": {
+    "imageShortcut": "生成图片 / 视频",
+    "audioShortcut": "录音 / 转写",
+    "title": "媒体",
+    "library": "产物库",
+    "storage": "产物存储",
+    "location": "保存位置",
+    "locationDesc": "修改后仅影响新文件，已有文件仍可访问。删除会话时默认保留这些产物。",
+    "chooseLocation": "选择文件夹",
+    "unavailable": "产物库暂不可用",
+    "failed": "操作失败",
+    "readOnly": "保存位置不可写",
+    "filter": "文件类型",
+    "all": "全部",
+    "import": "导入",
+    "refresh": "刷新",
+    "empty": "还没有生成或导入的文件。",
+    "confirmDelete": "确认删除文件",
+    "saveAs": "另存为",
+    "exportToView": "另存为后可使用对应应用查看。",
+    "more": "加载更多",
+    "kind": {
+      "annotation": "标注",
+      "image": "图片",
+      "video": "视频",
+      "audio": "音频",
+      "transcript": "转写",
+      "judgment": "判断结果",
+      "benchmark": "模型测试",
+      "recording": "终端录制",
+      "export": "导出文件"
+    }
+  },
   "runtimeUpgrade": {
     "lastJudgment": "最近自动思考判断",
     "structuredResult": "结构化任务结果",
@@ -43,7 +76,9 @@ const zhRaw = {
     "agent": "代理名",
     "add": "添加覆盖",
     "judgment": "判断后端",
-    "judgmentDesc": "配置偏好；TypeSafe 失败时沿用上游模型回退链。",
+    "judgmentDesc": "旧版 Runtime 的判断后端配置。",
+    "judgeModel": "判断模型",
+    "judgeModelDesc": "与模型页的 Judge 角色共享配置。可填写模型选择器或逗号分隔的候选链；留空使用原生默认值。",
     "describe": "为纯文本模型描述图片",
     "describeDesc": "通过视觉模型生成描述，原生支持图片的模型仍直接接收图片。",
     "timeout": "图片问答超时（毫秒）",
@@ -765,6 +800,8 @@ const zhRaw = {
     "saveAndQuit": "保存并退出"
   },
   "history": {
+    "retainManagedArtifacts": "默认保留图片、音视频及其他托管产物；导出的副本始终保留。",
+    "deleteManagedArtifacts": "同时删除此会话的托管产物",
     "title": "会话历史",
     "subtitle": "查看、搜索、恢复与归档历史会话",
     "searchPlaceholder": "搜索历史会话…",
@@ -935,6 +972,7 @@ const zhRaw = {
   "modelConfig": {
     "title": "模型配置",
     "subtitle": "Provider 预设、API 凭证、模型路由与角色定义",
+    "benchmarkTab": "基准测试",
     "providersTab": "供应商",
     "modelsTab": "模型定义",
     "rolesTab": "角色",

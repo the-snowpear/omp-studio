@@ -8,6 +8,11 @@ function segments(...tools: ToolView[]): AssistantSegment[] {
 }
 
 describe("sessionFileDiffs", () => {
+  it("excludes process control and peer messaging from workspace changes while retaining Windows file paths", () => {
+    const paths = ["proc://server/kill", "agent://reviewer", "omp://tools/read.md", "local://generated.txt", "D:\\project\\actual.txt"];
+    const diffs = sessionFileDiffs(segments(...paths.map((path, index) => ({ toolCallId: String(index), toolName: "write", status: "succeeded" as const, arguments: { path, content: "hello" } }))));
+    expect([...diffs.keys()]).toEqual(["D:/project/actual.txt"]);
+  });
   it("projects edit and write tool payloads into numbered hunks", () => {
     const diffs = sessionFileDiffs(segments(
       {

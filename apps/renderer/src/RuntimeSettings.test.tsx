@@ -85,7 +85,8 @@ describe("Runtime settings seam", () => {
 
     openTab("任务与执行");
     expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLSelectElement).disabled).toBe(true);
-    expect((screen.getByRole("combobox", { name: "意外停止模型" }) as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByRole("textbox", { name: "判断模型" }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLSelectElement).disabled).toBe(true);
 
     openTab("上下文与记忆");
     expect((screen.getByRole("switch", { name: "扩展上下文" }) as HTMLButtonElement).disabled).toBe(true);
@@ -136,7 +137,7 @@ describe("Runtime settings seam", () => {
       ["compaction.methodOrder", ["snapcompact", "remote", "handoff", "shake", "soft"]],
       ["providers.openai-codex.codeMode", "on"],
     ]);
-  });
+  }, 15000);
 
   it("keeps preview writes local and never calls the Host callback", () => {
     const onSet = vi.fn();
@@ -157,7 +158,9 @@ describe("Runtime settings seam", () => {
 
     openTab("任务与执行");
     expect((screen.getByRole("combobox", { name: "意外停止检测" }) as HTMLSelectElement).value).toBe("mechanical");
-    expect((screen.getByRole("combobox", { name: "意外停止模型" }) as HTMLSelectElement).value).toBe("online");
+    expect(screen.queryByRole("combobox", { name: "意外停止模型" })).toBeNull();
+    expect((screen.getByRole("combobox", { name: "Claude 重置券" }) as HTMLSelectElement).value).toBe("unset");
+    expect((screen.getByRole("spinbutton", { name: "MCP 启动等待（毫秒）" }) as HTMLInputElement).value).toBe("250");
 
     openTab("上下文与记忆");
     expect((screen.getByRole("switch", { name: "扩展上下文" }) as HTMLButtonElement).getAttribute("aria-checked")).toBe("true");

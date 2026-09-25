@@ -1,0 +1,15 @@
+.runtime-catalog-pane { border-bottom: 1px solid var(--border); padding: 8px 0 20px; margin-bottom: 16px; }
+.runtime-catalog-pane h3 { margin: 0; font-size: 15px; }
+.runtime-mcp-rows > div { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.runtime-mcp-rows strong { font-size: 12px; min-width: 150px; overflow-wrap: anywhere; }
+.runtime-template-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.runtime-template-layout { display: grid; grid-template-columns: minmax(180px, 30%) minmax(0, 1fr); gap: 20px; }
+.runtime-template-list { display: flex; flex-direction: column; max-height: 440px; overflow: auto; gap: 4px; }
+.runtime-template-list > button { display: grid; gap: 6px; text-align: left; padding: 10px; border: none; border-left: 2px solid transparent; background: transparent; color: inherit; cursor: pointer; }
+.runtime-template-list > button.selected { border-left-color: var(--accent); background: var(--bg-hover); }
+.runtime-template-editor { display: grid; gap: 12px; min-width: 0; }
+.runtime-template-editor h4 { margin: 0; }
+.runtime-template-editor pre { margin: 0; background: var(--bg-base); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; padding: 12px; font-size: 12px; }
+.runtime-template-editor label { display: grid; gap: 6px; font-size: 12px; }
+.runtime-template-editor textarea { width: 100%; resize: vertical; }
+@media (max-width: 850px) { .runtime-template-layout { grid-template-columns: minmax(0, 1fr); } .runtime-mcp-rows > div { flex-wrap: wrap; } }

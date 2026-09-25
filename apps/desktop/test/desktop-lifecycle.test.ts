@@ -41,7 +41,7 @@ interface Harness {
   emitAllWindowsClosed(): void;
 }
 
-async function setup(options: { withTray?: boolean; withConfirm?: boolean; trayThrows?: boolean } = {}): Promise<Harness> {
+async function setup(options: { withTray?: boolean; withConfirm?: boolean; trayThrows?: boolean; beforeShutdown?: () => Promise<void> } = {}): Promise<Harness> {
   const events: string[] = [];
   let busy = false;
   let confirmAnswer = false;
@@ -78,6 +78,7 @@ async function setup(options: { withTray?: boolean; withConfirm?: boolean; trayT
   };
 
   const deps: DesktopApplicationDeps = {
+    ...(options.beforeShutdown ? { beforeShutdown: options.beforeShutdown } : {}),
     hostFactory: { create: async () => host },
     createWindow: async (context) => {
       windowContext = context;
@@ -320,4 +321,13 @@ describe("desktop lifecycle", () => {
     assert.equal(quitCalls, 1);
     assert.equal(windowCreated, false);
   });
+});
+
+ test("desktop recording flush finishes before Host shutdown and final quit", async () => {
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  const h = await setup({ beforeShutdown: () => gate });
+  h.events.length = 0; const quitting = h.app.quit(); await h.flush();
+  assert.deepEqual(h.events, ["tray.dispose", "window.dispose"]);
+  release(); await quitting;
+  assert.deepEqual(h.events, ["tray.dispose", "window.dispose", "host.shutdown", "app.quit"]);
 });

@@ -1,3 +1,5 @@
+import { SkillsharePane } from "./skillshare/SkillsharePane";
+import { McpRuntimePane, PromptTemplatesPane } from "./capabilities/RuntimeCatalogPanes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -208,10 +210,16 @@ function formatMcpSourceLabel(label: string | undefined, t: (k: string) => strin
 
 export function CapabilitiesPage({
   client,
+  sessionId,
+  runtimeAvailable = false,
+  onInsertPrompt,
   onRunSlash,
   onPinCompleted,
 }: {
   client: StudioClient;
+  sessionId?: string | undefined;
+  runtimeAvailable?: boolean;
+  onInsertPrompt?: (text: string) => void;
   onRunSlash?: (command: StudioSlashCommand, args: string) => Promise<boolean>;
   /** Called after App has received the authoritative `/pin` receipt. */
   onPinCompleted?: () => Promise<void>;
@@ -538,6 +546,7 @@ export function CapabilitiesPage({
     const ok = preview ? skills.filter((skill) => skill.session).length : skills.length - fail - disabled;
     return (
       <>
+        <details className="skillshare-entry"><summary>Skillshare 注册表 / Registry</summary><SkillsharePane client={client} sessionId={sessionId} available={runtimeAvailable} /></details>
         <Summary
           total={skills.length}
           stats={[
@@ -928,8 +937,8 @@ export function CapabilitiesPage({
   const tabBody = (id: CapTab) => {
     if (id === "skills") return renderSkills();
     if (id === "plugins") return renderPlugins();
-    if (id === "mcp") return renderMcp();
-    return renderSlash();
+    if (id === "mcp") return <><McpRuntimePane client={client} sessionId={sessionId} available={runtimeAvailable} />{renderMcp()}</>;
+    return <><PromptTemplatesPane client={client} sessionId={sessionId} available={runtimeAvailable} onInsert={onInsertPrompt} />{renderSlash()}</>;
   };
 
   return (

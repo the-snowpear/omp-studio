@@ -10,6 +10,9 @@ export const TERMINAL_IPC_CHANNELS = {
   write: "omp-studio:desktop:terminal-write",
   resize: "omp-studio:desktop:terminal-resize",
   dispose: "omp-studio:desktop:terminal-dispose",
+  recordingStart: "omp-studio:desktop:terminal-recording-start",
+  recordingStop: "omp-studio:desktop:terminal-recording-stop",
+  recordingStatus: "omp-studio:desktop:terminal-recording-status",
   data: "omp-studio:desktop:terminal-data",
   exit: "omp-studio:desktop:terminal-exit",
 } as const;
@@ -51,6 +54,18 @@ export interface TerminalResizeInput {
 
 export interface TerminalDisposeInput {
   readonly id: string;
+}
+
+export interface TerminalRecordingInput { id: string; workspaceId?: string; sessionId?: string }
+export interface TerminalRecordingStatus {
+  terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed";
+  elapsedMs: number; bytes: number; artifactId?: string; notice?: string;
+}
+export function parseRecordingInput(value: unknown): TerminalRecordingInput {
+  assertPlainObject(value, "terminal recording");
+  if (Object.keys(value).some(key => !["id", "workspaceId", "sessionId"].includes(key))) throw new TerminalIpcError("Invalid recording fields");
+  for (const field of ["workspaceId", "sessionId"]) if (value[field] !== undefined && (typeof value[field] !== "string" || !(value[field] as string).trim() || (value[field] as string).length > 512 || /[\u0000-\u001f]/u.test(value[field] as string))) throw new TerminalIpcError("Invalid recording scope");
+  return { id: parseSessionId(value.id, "recording id"), ...(value.workspaceId ? { workspaceId: value.workspaceId as string } : {}), ...(value.sessionId ? { sessionId: value.sessionId as string } : {}) };
 }
 
 export interface TerminalDataEvent {
@@ -149,6 +164,9 @@ export interface OmpStudioTerminalApi {
   write(id: string, data: string): Promise<void>;
   resize(id: string, cols: number, rows: number): Promise<void>;
   dispose(id: string): Promise<void>;
+  recordingStart(input: TerminalRecordingInput): Promise<TerminalRecordingStatus>;
+  recordingStop(id: string): Promise<TerminalRecordingStatus>;
+  recordingStatus(id: string): Promise<TerminalRecordingStatus>;
   onData(listener: (event: TerminalDataEvent) => void): () => void;
   onExit(listener: (event: TerminalExitEvent) => void): () => void;
 }

@@ -3,6 +3,8 @@
  * ui_reference/ver1/assets/js/models-data.js. Display only.
  */
 
+import { BUILTIN_MODEL_ROLES } from "@omp-studio/client-contract";
+
 import type {
   ModelApiKind,
   ModelAuthType,
@@ -188,7 +190,21 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     { id: "review", alias: "@review", name: "Review", desc: "自定义审查角色", builtin: false, primary: "anthropic/claude-sonnet-4.5", scope: "project" },
   ];
 
-  const availableModels = providers.flatMap((item) =>
+  for (const role of BUILTIN_MODEL_ROLES) {
+    if (!roles.some(existing => existing.id === role.id)) {
+      roles.push({ ...role, alias: `@${role.id}`, builtin: true, primary: "", scope: "global" });
+    }
+  }
+
+  const demoOpenAI = providers.find(item => item.id === "openai" || item.id === "openai-codex");
+  if (demoOpenAI) {
+    (demoOpenAI.models as ModelCatalogEntry[]).push(...withSelector(demoOpenAI.id, [
+      { ...m("gpt-image-1", "GPT Image", 128000, 8192, { img: true }), kind: "image", api: "openai-images" },
+      { ...m("gpt-4o-mini-tts", "Mini TTS", 4096, 4096), kind: "tts" },
+      { ...m("whisper-1", "Whisper", 4096, 4096), kind: "stt" },
+    ]));
+  }
+  const availableModels: import("@omp-studio/client-contract").AvailableModelRecord[] = providers.flatMap((item) =>
     item.models.filter((model) => model.status === "available").map((model) => {
       const thinking = !model.reasoning
         ? undefined
@@ -203,6 +219,8 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
         selector: model.selector,
         name: model.name,
         reasoning: model.reasoning,
+        ...(model.kind === undefined ? {} : { kind: model.kind }),
+        ...(model.webSearch === undefined ? {} : { webSearch: model.webSearch }),
         image: model.image,
         tools: model.tools,
         ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
@@ -212,6 +230,10 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
       };
     }),
   );
+
+  availableModels.push(...["parallel", "perplexity", "exa"].map(id => ({ provider: "web", id, selector: "web/" + id, name: id, reasoning: false, kind: "search" as const })),
+    { provider: "local", id: "title-model", selector: "local/title-model", name: "Local title model", reasoning: false, kind: "tiny" },
+    { provider: "local", id: "rule-judge", selector: "local/rule-judge", name: "Local judge", reasoning: false, kind: "judge" });
 
   return {
     providers,
@@ -237,6 +259,7 @@ export function createPreviewModelConfig(): ModelConfigReadModel {
     },
     fallbackRevertPolicy: "cooldown-expiry",
     webSearch: {
+      routing: { primary: "web/perplexity", fallbacks: ["web/exa", "google/gemini-2.5-flash"], defaultCandidates: ["web/parallel", "web/perplexity", "google/gemini-2.5-flash"], migratedLegacy: false },
       enabled: true,
       order: ["perplexity", "exa", "gemini"],
       exclude: ["mojeek"],

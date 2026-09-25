@@ -1,5 +1,7 @@
+import { validateArtifactTextResult, validateArtifactRecord } from "@omp-studio/studio-protocol";
+import { validateArtifactPage, validateArtifactStorageState, validateArtifactIdInput } from "@omp-studio/studio-protocol";
 import { validateRuntimeSettingValue as validateProtocolSettingValue, type StudioRuntimeSettingKey } from "@omp-studio/studio-protocol";
-import { isUpgradeOperationKind, validateUpgradeResult } from "@omp-studio/studio-protocol";
+import { isWorkbenchOperationKind, validateWorkbenchResult, isUpgradeOperationKind, validateUpgradeResult } from "@omp-studio/studio-protocol";
 /**
  * Safe outbound assertions for the Desktop IPC boundary
  * (FRONTEND_INTEGRATION.md §9).
@@ -662,6 +664,9 @@ export function assertClientQueryResponse(value: unknown): asserts value is Clie
     if (queryName === "residents.list") {
       assertResidentsReadModel(value.result, "residents.list result");
     }
+    if (queryName === "artifacts.text.read") validateArtifactTextResult(value.result);
+    if (queryName === "artifacts.list") validateArtifactPage(value.result);
+    if (queryName === "artifacts.storage.get") validateArtifactStorageState(value.result);
     if (queryName === "workspace.fileTree") {
       assertWorkspaceFileTree(value.result);
     }
@@ -959,11 +964,24 @@ function assertCommandReceipt(value: unknown): void {
       if (!("result" in value)) {
         throw new ValidationError("event: completed receipt is missing the result");
       }
+      if (isWorkbenchOperationKind(commandName)) {
+        assertPlainObject(value.result, "Workbench result");
+        assertNoUnknownKeys(value.result, ["snapshot", "result"], "Workbench result");
+        assertOperatorStateSnapshot(value.result.snapshot, "Workbench result snapshot");
+        try { validateWorkbenchResult(commandName, value.result.result); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid Workbench result"); }
+      }
       if (isUpgradeOperationKind(commandName)) {
         assertPlainObject(value.result, "Runtime result");
         assertNoUnknownKeys(value.result, ["snapshot", "result"], "Runtime result");
         assertOperatorStateSnapshot(value.result.snapshot, "Runtime result snapshot");
         try { validateUpgradeResult(commandName, value.result.result); } catch (error) { throw new ValidationError(error instanceof Error ? error.message : "Invalid Runtime result"); }
+      }
+      if (commandName === "artifacts.saveText") validateArtifactRecord(value.result);
+      if (commandName === "artifacts.delete") {
+        assertPlainObject(value.result, "artifact delete result");
+        assertNoUnknownKeys(value.result, ["artifactId", "deleted"], "artifact delete result");
+        validateArtifactIdInput({ artifactId: value.result.artifactId });
+        if (value.result.deleted !== true) throw new ValidationError("Invalid artifact deletion result");
       }
       if (commandName === "git.execute") assertGitOperationResult(value.result);
       if (commandName === "github.execute") assertGithubOperationResult(value.result);

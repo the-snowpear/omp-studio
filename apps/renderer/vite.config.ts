@@ -7,7 +7,7 @@ import react from "@vitejs/plugin-react";
 // by the desktop response header because browsers ignore it in meta CSP.
 // Vite dev still needs HMR.
 const PACKAGED_RENDERER_CSP =
-  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
+  "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: omp-artifact:; media-src 'self' blob: omp-artifact:; font-src 'self' data:; connect-src 'self' omp-artifact:; object-src 'none'; base-uri 'self'; form-action 'self'";
 
 function packagedCspPlugin() {
   return {

@@ -1,0 +1,21 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import type { StudioClient } from "@omp-studio/client-contract";
+import { I18nProvider } from "../i18n";
+import { PreviewModeProvider } from "../preview/PreviewContext";
+import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
+import { McpRuntimePane, PromptTemplatesPane } from "./RuntimeCatalogPanes";
+afterEach(() => { cleanup(); localStorage.clear(); });
+it("previews template expansion and MCP fixtures without Host or automatic sends", async () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const client = { command: vi.fn() } as unknown as StudioClient; const insert = vi.fn();
+  render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><PromptTemplatesPane client={client} available={false} onInsert={insert} /><McpRuntimePane client={client} available={false} /></PreviewModeProvider></I18nProvider>);
+  fireEvent.click(await screen.findByRole("button", { name: /review-change/u }));
+  fireEvent.change(await screen.findByLabelText("参数（可用引号包住含空格的参数）"), { target: { value: "src/app.ts" } });
+  fireEvent.click(screen.getByRole("button", { name: "预览展开结果" }));
+  expect((await screen.findByLabelText("展开的提示词") as HTMLTextAreaElement).value).toContain("src/app.ts");
+  expect(insert).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "放入主对话输入框" }));
+  expect(insert).toHaveBeenCalledOnce(); expect(client.command).not.toHaveBeenCalled();
+  expect(screen.getByText("连接 / 加载中")).toBeTruthy(); expect(screen.getByText("启动失败")).toBeTruthy();
+});

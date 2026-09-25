@@ -1,0 +1,21 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import type { StudioClient } from "@omp-studio/client-contract";
+import { I18nProvider } from "../i18n";
+import { PreviewModeProvider } from "../preview/PreviewContext";
+import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
+import { BenchmarkPane } from "./BenchmarkPane";
+afterEach(() => { cleanup(); localStorage.clear(); });
+it("preview benchmarks require review and keep reports and requests local", async () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const client = { command: vi.fn() } as unknown as StudioClient;
+  render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><BenchmarkPane client={client} models={[]} available={false} /></PreviewModeProvider></I18nProvider>);
+  const setup = screen.getByText("测试配置").closest("details")!; setup.open = true; fireEvent(setup, new Event("toggle"));
+  fireEvent.click(screen.getByRole("checkbox", { name: /demo\/swift/u }));
+  fireEvent.click(screen.getByRole("button", { name: "检查测试请求" }));
+  expect(screen.getByLabelText("确认基准测试")).toBeTruthy();
+  expect(client.command).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "确认并开始基准" }));
+  fireEvent.click(await screen.findByRole("button", { name: "保存基准报告" }));
+  await screen.findByText("演示：报告已存入产物库"); expect(client.command).not.toHaveBeenCalled();
+});

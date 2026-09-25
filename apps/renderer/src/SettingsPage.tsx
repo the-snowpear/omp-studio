@@ -1,3 +1,4 @@
+import { ArtifactStorageSettings } from "./media/ArtifactLibraryPane";
 /**
  * 设置页（Phase 1 IA 重构）：7 个标签的壳。
  *
@@ -76,10 +77,12 @@ function takeSettingsIntent(): SettingsGroupId | null {
 }
 
 export function SettingsPage({
+  client,
   approvalMode,
   onSetApprovalMode,
   runtimeSettings,
 }: {
+  client?: import("@omp-studio/client-contract").StudioClient;
   /** 当前 Runtime 审批模式；undefined = 无 Runtime 快照。 */
   approvalMode?: ApprovalModeId;
   onSetApprovalMode: (mode: ApprovalModeId) => void;
@@ -244,6 +247,7 @@ export function SettingsPage({
           </div>
           <div {...pane("files")} id="set-files" role="tabpanel" aria-labelledby="setTab-files" tabIndex={0}>
             <FilesTab demo={demoRuntime} runtime={runtime} />
+            <ArtifactStorageSettings client={client} />
           </div>
           <div {...pane("tasks")} id="set-tasks" role="tabpanel" aria-labelledby="setTab-tasks" tabIndex={0}>
             <TasksTab demo={demoRuntime} runtime={runtime} />

@@ -1,6 +1,39 @@
 import type { LocaleDictionary } from "./zh";
 
 export const en: LocaleDictionary = {
+  "media": {
+    "imageShortcut": "Generate image / video",
+    "audioShortcut": "Record / transcribe audio",
+    "title": "Media",
+    "library": "Artifacts",
+    "storage": "Artifact storage",
+    "location": "Save location",
+    "locationDesc": "Changes apply to new files. Existing files remain available. Deleting a session keeps these artifacts by default.",
+    "chooseLocation": "Choose folder",
+    "unavailable": "Artifact library unavailable",
+    "failed": "Operation failed",
+    "readOnly": "Storage is not writable",
+    "filter": "File type",
+    "all": "All",
+    "import": "Import",
+    "refresh": "Refresh",
+    "empty": "No generated or imported files yet.",
+    "confirmDelete": "Delete file",
+    "saveAs": "Save as",
+    "exportToView": "Save a copy to view it in another application.",
+    "more": "Load more",
+    "kind": {
+      "annotation": "Annotations",
+      "image": "Images",
+      "video": "Video",
+      "audio": "Audio",
+      "transcript": "Transcripts",
+      "judgment": "Judgment results",
+      "benchmark": "Benchmarks",
+      "recording": "Terminal recordings",
+      "export": "Exports"
+    }
+  },
   "runtimeUpgrade": {
     "lastJudgment": "Last observed auto-thinking judgment",
     "structuredResult": "Structured task result",
@@ -43,7 +76,9 @@ export const en: LocaleDictionary = {
     "agent": "Agent name",
     "add": "Add override",
     "judgment": "Judgment backend",
-    "judgmentDesc": "Configured preference; TypeSafe failures use the Runtime model fallback chain.",
+    "judgmentDesc": "Judgment backend configuration for older Runtimes.",
+    "judgeModel": "Judge model",
+    "judgeModelDesc": "Shares the Judge role with Models. Enter a model selector or comma-separated candidate chain; leave empty for the native default.",
     "describe": "Describe images for text models",
     "describeDesc": "Use a vision model to describe images for text models; native vision models receive images directly.",
     "timeout": "Image question timeout (ms)",
@@ -765,6 +800,8 @@ export const en: LocaleDictionary = {
     "saveAndQuit": "Save & Quit"
   },
   "history": {
+    "retainManagedArtifacts": "Images, audio, video and other managed artifacts are kept by default. Exported copies are always kept.",
+    "deleteManagedArtifacts": "Also delete managed artifacts for this session",
     "title": "History",
     "subtitle": "View, search, restore and archive past sessions",
     "searchPlaceholder": "Search past sessions…",
@@ -935,6 +972,7 @@ export const en: LocaleDictionary = {
   "modelConfig": {
     "title": "Model Configuration",
     "subtitle": "Provider presets, API credentials, model routing, and role assignments",
+    "benchmarkTab": "Benchmarks",
     "providersTab": "Providers",
     "modelsTab": "Models",
     "rolesTab": "Roles",

@@ -29,7 +29,7 @@ function editKind(tool: ToolView): FileEditKind | undefined {
 function normalizedPath(path: string | undefined): string | undefined {
   if (path === undefined) return undefined;
   const normalized = path.replaceAll("\\", "/").trim();
-  if (normalized.length === 0 || normalized.includes(" → ") || normalized.toLowerCase().startsWith("xd://")) return undefined;
+  if (normalized.length === 0 || normalized.includes(" → ") || /^[a-z][a-z0-9+.-]*:\/\//iu.test(normalized)) return undefined;
   return normalized;
 }
 

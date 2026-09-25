@@ -1,5 +1,6 @@
 import { TerminalGraphicsDecoder, type TerminalGraphic } from "./terminalGraphics";
 import { TerminalGraphicView } from "./TerminalGraphicView";
+import { TerminalRecordingControls } from "./recordings/TerminalRecordingControls";
 /**
  * Desktop-chrome integrated shell. Uses `window.ompStudioTerminal` when the
  * Electron preload is present; otherwise shows an honest unavailable state.
@@ -29,6 +30,8 @@ export type TerminalPaneHandle = {
 type SessionStatus = "running" | "ended";
 
 type Session = {
+  readonly workspaceId?: string;
+  readonly sessionId?: string;
   readonly id: string;
   readonly name: string;
   readonly cwd: string;
@@ -68,8 +71,8 @@ function applyTheme(term: Terminal): void {
   term.options.fontFamily = readCssVar("--font-mono", "Consolas, monospace");
 }
 
-export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>(function TerminalPane(
-  { visible },
+export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; workspaceId?: string | undefined; sessionId?: string | undefined }>(function TerminalPane(
+  { visible, workspaceId, sessionId },
   ref,
 ) {
   const { t } = useI18n();
@@ -95,7 +98,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
     setError(null);
     try {
       const info = await api.create({ cols: 80, rows: 24 });
-      const session: Session = { id: info.id, name: info.name, cwd: info.cwd, status: "running" };
+      const session: Session = { id: info.id, name: info.name, cwd: info.cwd, status: "running", ...(workspaceId ? { workspaceId } : {}), ...(sessionId ? { sessionId } : {}) };
       setSessions((current) => [...current, session]);
       setActiveId(info.id);
     } catch (cause) {
@@ -104,7 +107,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
       createLock.current = false;
       setCreating(false);
     }
-  }, [api]);
+  }, [api, workspaceId, sessionId]);
 
   useImperativeHandle(
     ref,
@@ -237,6 +240,7 @@ export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean }>
                 </span>
               )}
             </div>
+            <TerminalRecordingControls key={active.id} api={api} id={active.id} ended={active.status === "ended"} workspaceId={active.workspaceId} sessionId={active.sessionId} />
             {(graphics[active.id]?.length || graphicsErrors[active.id]) ? <div style={{ maxHeight: 240, overflow: "auto" }} aria-label="Terminal images / 终端图片">
               {graphics[active.id]?.map((image, index) => <TerminalGraphicView key={index} image={image} />)}
               {graphicsErrors[active.id] ? <p role="status">{graphicsErrors[active.id]}</p> : null}

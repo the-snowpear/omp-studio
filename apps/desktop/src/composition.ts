@@ -82,7 +82,7 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
     tray = null;
     mainWindow?.dispose?.();
     try {
-      await shutdownHost();
+      try { await deps.beforeShutdown?.(); } finally { await shutdownHost(); }
     } finally {
       deps.quit();
     }

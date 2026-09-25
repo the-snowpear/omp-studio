@@ -53,6 +53,9 @@ import type {
 
 /** Version of this client contract; bumped on incompatible contract changes. */
 export const CLIENT_CONTRACT_VERSION = 2 as const;
+export type { ArtifactKind, ArtifactRecord, ArtifactListInput, ArtifactPage, ArtifactStorageState } from "@omp-studio/studio-protocol";
+
+export { MODEL_KINDS, BUILTIN_MODEL_ROLES, parseModelKind, modelAcceptsRole, type ModelKind } from "./model-kinds.js";
 
 /** Opaque selections carried by the bootstrap; never resolved to paths. */
 export interface ClientSelection {

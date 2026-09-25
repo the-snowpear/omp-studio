@@ -1,0 +1,21 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import type { StudioClient } from "@omp-studio/client-contract";
+import { I18nProvider } from "../i18n";
+import { PreviewModeProvider } from "../preview/PreviewContext";
+import { PREVIEW_MODE_STORAGE_KEY } from "../preview/mode";
+import { MediaWorkbench } from "./MediaWorkbench";
+afterEach(() => { cleanup(); localStorage.clear(); });
+it("reviews demo media requests, inserts transcription only on click, and never calls Host", async () => {
+  localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, "1");
+  const client = { command: vi.fn(), query: vi.fn() } as unknown as StudioClient; const insert = vi.fn();
+  render(<I18nProvider forcedLanguage="zh"><PreviewModeProvider switchEnabled><MediaWorkbench client={client} available={false} onInsert={insert} onArtifactsChanged={() => {}} /></PreviewModeProvider></I18nProvider>);
+  expect(insert).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "放入主对话输入框" })); expect(insert).toHaveBeenCalledOnce();
+  fireEvent.change(screen.getByLabelText("提示词"), { target: { value: "A preview image" } });
+  fireEvent.click(screen.getByRole("button", { name: "检查生成请求" }));
+  expect(screen.getByLabelText("确认媒体请求")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "确认提交媒体任务" }));
+  await screen.findByDisplayValue("演示任务已完成。真实结果会保存到产物库。");
+  expect(client.command).not.toHaveBeenCalled(); expect(client.query).not.toHaveBeenCalled();
+});

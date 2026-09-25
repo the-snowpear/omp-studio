@@ -60,6 +60,13 @@ export interface RuntimeSettingsCtl {
 }
 
 const RUNTIME_DEFAULTS: RuntimeSettingsReadModel = {
+  "modelRoles.judge": "",
+  "claudeResets.autoRedeem": "unset",
+  "claudeResets.minBlockedMinutes": 60,
+  "claudeResets.keepCredits": 0,
+  "claudeResets.salvageHorizonHours": 12,
+  "mcp.startupTimeoutMs": 250,
+  "ttsr.judge": "auto",
   "edit.autoRepair.enabled": false,
   "features.unexpectedStopDetection": "mechanical",
   "providers.unexpectedStopModel": "online",
@@ -186,6 +193,8 @@ function FutureRows({ rows, demo }: { rows: readonly FutureRowDef[]; demo?: Runt
 
 type RuntimeBooleanKey = "task.enableEffort" | "images.describeForTextModels" | "tools.speculativeExecution.enabled" | "edit.autoRepair.enabled" | "extendedContext" | "compaction.asyncEnabled" | "plan.autosave" | "retry.waitForUsageReset" | "compaction.experimentalContextManagement";
 type RuntimeScalarKey =
+  | "claudeResets.autoRedeem"
+  | "ttsr.judge"
   | "task.maxEffort"
   | "providers.autoThinkingMaxEffort"
   | "providers.judgmentProvider"
@@ -272,6 +281,25 @@ function RuntimePlanDirectoryRow({ runtime, demo }: { runtime?: RuntimeSettingsC
   );
 }
 
+function RuntimeJudgeModelRow({ runtime, demo }: { runtime?: RuntimeSettingsCtl | undefined; demo?: RuntimeDemoApi | undefined }) {
+  const { t } = useI18n();
+  const key = "modelRoles.judge";
+  const preview = runtime?.preview === true && demo !== undefined;
+  const available = runtimeHasValue(runtime, demo, key);
+  const value = preview ? demo.value(key) : runtime?.snapshot?.[key] ?? "";
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const disabled = !available || (!preview && runtime?.set === undefined) || runtime?.pendingKey !== undefined;
+  return <SettingRow label={t("runtimeUpgrade.judgeModel")} desc={t("runtimeUpgrade.judgeModelDesc")} source={runtimeSource(available)}>
+    <input className="input" aria-label={t("runtimeUpgrade.judgeModel")} placeholder="typesafe/jev-latest" value={draft} maxLength={4096} disabled={disabled} onChange={event => setDraft(event.target.value)} />
+    <button type="button" className="btn small outline" disabled={disabled || draft === value || /[\u0000-\u001f]/u.test(draft)} onClick={() => {
+      if (preview) demo.setValue(key, draft.trim());
+      else runtime?.set?.(key, draft.trim());
+    }}>{t("common.save")}</button>
+    <RuntimePending runtime={runtime} />
+  </SettingRow>;
+}
+
 function RuntimeScalarRow({
   runtime,
   demo,
@@ -317,6 +345,38 @@ function RuntimeScalarRow({
       <RuntimePending runtime={runtime} />
     </SettingRow>
   );
+}
+
+function RuntimeNumberRow({ runtime, demo, keyName, label, desc, fallback }: {
+  runtime?: RuntimeSettingsCtl | undefined; demo?: RuntimeDemoApi | undefined;
+  keyName: "claudeResets.minBlockedMinutes" | "claudeResets.keepCredits" | "claudeResets.salvageHorizonHours" | "mcp.startupTimeoutMs";
+  label: string; desc: string; fallback: number;
+}) {
+  const { t } = useI18n();
+  const available = runtimeHasValue(runtime, demo, keyName);
+  const value = runtime?.preview ? demo?.value(keyName) || String(fallback) : String(runtime?.snapshot?.[keyName] ?? fallback);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const disabled = !available || runtime?.set === undefined || runtime.pendingKey !== undefined;
+  const numeric = Number(draft);
+  return <SettingRow label={label} desc={desc} source={runtimeSource(available)}>
+    <input className="input" type="number" min={0} max={2147483647} step={1} aria-label={label} value={draft} disabled={disabled} onChange={event => setDraft(event.target.value)} />
+    <button type="button" className="btn small" disabled={disabled || !draft.trim() || !Number.isSafeInteger(numeric) || numeric < 0 || numeric > 2147483647} onClick={() => runtime?.set?.(keyName, numeric)}>{t("common.save")}</button>
+    <RuntimePending runtime={runtime} />
+  </SettingRow>;
+}
+
+function Runtime1830Rows({ runtime, demo }: { runtime?: RuntimeSettingsCtl | undefined; demo?: RuntimeDemoApi | undefined }) {
+  const { resolvedLanguage } = useI18n();
+  const label = (zh: string, en: string) => resolvedLanguage === "zh" ? zh : en;
+  return <SettingSection title={label("配额重置与启动", "Quota resets and startup")}>
+    <RuntimeScalarRow runtime={runtime} demo={demo} keyName="claudeResets.autoRedeem" label={label("Claude 重置券", "Claude saved resets")} desc={label("默认首次使用前询问。同意会立即使用并记住自动使用；拒绝会记住禁用；取消不改变策略。", "Ask before first use by default. Yes redeems now and remembers automatic use; No remembers disabled; cancel changes nothing.")} fallback="unset" options={[["unset", label("首次使用前询问", "Ask before first use")], ["no", label("禁用自动使用", "Disable automatic use")], ["yes", label("允许自动消耗重置券", "Allow automatic redemption")]]} />
+    <RuntimeNumberRow runtime={runtime} demo={demo} keyName="claudeResets.minBlockedMinutes" label={label("最短配额阻塞（分钟）", "Minimum quota block (minutes)")} desc={label("阻塞达到此时长时才考虑使用。", "Consider redemption when the quota block lasts at least this long.")} fallback={60} />
+    <RuntimeNumberRow runtime={runtime} demo={demo} keyName="claudeResets.keepCredits" label={label("保留券数", "Resets to keep")} desc={label("自动使用时至少保留此数量。", "Keep at least this many saved resets during automatic use.")} fallback={0} />
+    <RuntimeNumberRow runtime={runtime} demo={demo} keyName="claudeResets.salvageHorizonHours" label={label("到期前考虑使用（小时）", "Consider expiring resets within (hours)")} desc={label("仍遵循自动使用策略和上游资格检查。", "Still subject to the redemption policy and upstream eligibility checks.")} fallback={12} />
+    <RuntimeNumberRow runtime={runtime} demo={demo} keyName="mcp.startupTimeoutMs" label={label("MCP 启动等待（毫秒）", "MCP startup wait (ms)")} desc={label("下次 Runtime 启动时生效。默认 250；0 表示等待所有连接完成。", "Applies on the next Runtime startup. Default 250; 0 waits for all connections to settle.")} fallback={250} />
+    <RuntimeScalarRow runtime={runtime} demo={demo} keyName="ttsr.judge" label={label("规则判断", "Rule judgment")} desc={label("使用 Judge 角色验证规则；auto 遵循上游自动策略。", "Use the Judge role to validate rules; auto follows upstream policy.")} fallback="auto" options={[["auto", label("自动", "Auto")], ["on", label("启用", "On")], ["off", label("禁用", "Off")]]} />
+  </SettingSection>;
 }
 
 function RuntimeMethodOrderRow({ runtime, demo, label, desc }: {
@@ -880,6 +940,7 @@ export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
             ["smart", t("settings.runtime.modeSmart")],
           ]}
         />
+        {runtime?.snapshot?.["providers.unexpectedStopModel"] !== undefined && !runtimeHasValue(runtime, demo, "modelRoles.judge") ? (
         <RuntimeScalarRow
           runtime={runtime}
           demo={demo}
@@ -896,6 +957,7 @@ export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
             ["lfm2-1.2b", "lfm2-1.2b"],
           ]}
         />
+        ) : null}
         <FutureRows
           demo={demo}
           rows={[
@@ -907,6 +969,7 @@ export function TasksTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefined;
           ]}
         />
       </SettingSection>
+      <Runtime1830Rows runtime={runtime} demo={demo} />
       <RuntimeUpgradeRows runtime={runtime} demo={demo} />
       <SettingSection title={t("settings.tasks.sectionSubtaskLimits")} desc={t("settings.tasks.sectionSubtaskLimitsDesc")}>
         <FutureRows
@@ -1245,7 +1308,9 @@ function RuntimeUpgradeRows({ runtime, demo }: { runtime?: RuntimeSettingsCtl | 
     <RuntimeBooleanRow runtime={runtime} demo={demo} keyName="task.enableEffort" label={t("runtimeUpgrade.effort")} desc={t("runtimeUpgrade.effortDesc")} />
     <RuntimeScalarRow runtime={runtime} demo={demo} keyName="task.maxEffort" label={t("runtimeUpgrade.maxEffort")} desc={t("runtimeUpgrade.maxEffortDesc")} fallback="max" options={["minimal","low","medium","high","xhigh","max"].map(value => [value, value] as const)} />
     <RuntimeScalarRow runtime={runtime} demo={demo} keyName="providers.autoThinkingMaxEffort" label={t("runtimeUpgrade.autoEffort")} desc={t("runtimeUpgrade.autoEffortDesc")} fallback="xhigh" options={[["xhigh","xhigh"],["max","max"]]} />
+    {runtimeHasValue(runtime, demo, "modelRoles.judge") ? <RuntimeJudgeModelRow runtime={runtime} demo={demo} /> : runtime?.snapshot?.["providers.judgmentProvider"] !== undefined ? (
     <RuntimeScalarRow runtime={runtime} demo={demo} keyName="providers.judgmentProvider" label={t("runtimeUpgrade.judgment")} desc={t("runtimeUpgrade.judgmentDesc")} fallback="auto" options={[["auto","auto"],["typesafe","TypeSafe"],["llm","LLM"]]} />
+    ) : <RuntimeJudgeModelRow runtime={runtime} demo={demo} />}
     <RuntimeBooleanRow runtime={runtime} demo={demo} keyName="images.describeForTextModels" label={t("runtimeUpgrade.describe")} desc={t("runtimeUpgrade.describeDesc")} />
     <SettingRow label={t("runtimeUpgrade.timeout")} desc={t("runtimeUpgrade.timeoutDesc")} source={runtimeSource(runtimeHasValue(runtime, demo, timeoutKey))}>
       <input className="input" type="number" min={0} max={2147483647} aria-label={t("runtimeUpgrade.timeout")} value={timeoutDraft} disabled={disabled} onChange={event => setTimeoutDraft(event.target.value)} />

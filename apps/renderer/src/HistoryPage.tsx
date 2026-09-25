@@ -162,10 +162,11 @@ function DeleteSessionDialog({
   preview: boolean;
   busy: boolean;
   error?: string;
-  onConfirm: () => void;
+  onConfirm: (deleteManagedArtifacts: boolean) => void;
   onCancel: () => void;
 }) {
   const { t } = useI18n();
+  const [deleteManagedArtifacts, setDeleteManagedArtifacts] = useState(false);
   useEffect(() => {
     if (busy) return;
     const onKey = (event: KeyboardEvent) => {
@@ -197,11 +198,13 @@ function DeleteSessionDialog({
           <p className="create-branch-hint">
             {preview ? t("history.deleteConfirmDemo") : t("history.deleteConfirmReal")}
           </p>
+          <label className="small"><input type="checkbox" disabled={busy} checked={deleteManagedArtifacts} onChange={event => setDeleteManagedArtifacts(event.target.checked)} /> {t("history.deleteManagedArtifacts")}</label>
+          <p className="small muted">{t("history.retainManagedArtifacts")}</p>
           {error !== undefined ? <div className="create-project-error" role="alert"><Icon name="alert" extra="sm" />{error}</div> : null}
         </div>
         <div className="create-project-foot">
           <button type="button" className="btn outline" autoFocus disabled={busy} onClick={onCancel}>{t("common.cancel")}</button>
-          <button type="button" className="btn danger" disabled={busy} onClick={onConfirm}>
+          <button type="button" className="btn danger" disabled={busy} onClick={() => onConfirm(deleteManagedArtifacts)}>
             {busy
               ? <><span className="spinner" aria-hidden="true" />{t("history.deleting")}</>
               : <><Icon name="trash" extra="sm" /><span>{t("history.deleteSession")}</span></>}
@@ -358,7 +361,7 @@ export function HistoryPage({
   /** 真实模式「取消归档」（session.unarchive）；预览模式下为 undefined（走演示 toast）。 */
   onUnarchive?: (entry: SessionHistoryEntry) => void;
   /** 真实模式「删除会话」；预览模式下为 undefined（走演示确认 + toast）。 */
-  onDeleteSession?: (entry: SessionHistoryEntry) => Promise<boolean> | boolean;
+  onDeleteSession?: (entry: SessionHistoryEntry, deleteManagedArtifacts?: boolean) => Promise<boolean> | boolean;
 }) {
   const { preview } = usePreviewMode();
   const { t } = useI18n();
@@ -390,7 +393,7 @@ export function HistoryPage({
     setDeleteError(undefined);
   }, [deleting]);
 
-  const confirmDelete = useCallback(() => {
+  const confirmDelete = useCallback((deleteManagedArtifacts: boolean) => {
     if (deleteFor === null || deleting) return;
     if (preview || deleteFor.entry === undefined || onDeleteSession === undefined) {
       show(t("history.demoDeleteToast", { title: deleteFor.title }), "trash");
@@ -399,7 +402,7 @@ export function HistoryPage({
     }
     setDeleting(true);
     setDeleteError(undefined);
-    void Promise.resolve(onDeleteSession(deleteFor.entry))
+    void Promise.resolve(onDeleteSession(deleteFor.entry, deleteManagedArtifacts))
       .then((ok) => {
         if (ok) {
           setDeleteFor(null);

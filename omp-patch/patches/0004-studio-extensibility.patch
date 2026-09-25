@@ -1,8 +1,253 @@
+diff --git a/packages/coding-agent/src/cli/bench-cli.ts b/packages/coding-agent/src/cli/bench-cli.ts
+index 8715b067a5..caf2356a8a 100644
+--- a/packages/coding-agent/src/cli/bench-cli.ts
++++ b/packages/coding-agent/src/cli/bench-cli.ts
+@@ -257,6 +257,9 @@ export interface BenchSummary {
+ }
+ 
+ export interface BenchDependencies {
++	signal?: AbortSignal;
++	/** Structured observer for non-terminal frontends; no ANSI parsing required. */
++	onProgress?: (rows: readonly BenchTableRow[]) => void;
+ 	createRuntime?: () => Promise<BenchRuntime>;
+ 	randomSessionId?: () => string;
+ 	writeStdout?: (text: string) => void;
+@@ -553,6 +556,7 @@ function formatCachePairLine(pair: BenchCachePairReport, index: number, total: n
+ }
+ 
+ interface BenchRequestOptions {
++	signal?: AbortSignal;
+ 	apiKey: ApiKeyResolver;
+ 	sessionId: string;
+ 	/** Native OMP messages; cache mode splits the stable prefix from the suffix. */
+@@ -575,6 +579,7 @@ async function runBenchRequest(
+ 	streamFn: StreamSimpleFn,
+ 	now: () => number,
+ ): Promise<BenchRunResult> {
++	if (options.signal?.aborted) return { ok: false, error: "Benchmark cancelled" };
+ 	const startedAt = now();
+ 	let firstTokenAt: number | undefined;
+ 	const providerSessionState = new Map<string, ProviderSessionState>();
+@@ -586,6 +591,7 @@ async function runBenchRequest(
+ 			messages: options.messages,
+ 		};
+ 		const stream = streamFn(model, context, {
++			signal: options.signal,
+ 			apiKey: options.apiKey,
+ 			sessionId: options.sessionId,
+ 			maxTokens:
+@@ -748,7 +754,7 @@ function formatRunLine(result: BenchRunResult, index: number, total: number, opt
+ const PENDING_CELL = "…";
+ 
+ /** Run (cache mode: pair) counters for one model. */
+-interface BenchProgress {
++export interface BenchProgress {
+ 	total: number;
+ 	completed: number;
+ 	failed: number;
+@@ -756,7 +762,7 @@ interface BenchProgress {
+ }
+ 
+ /** One model's comparison-table row; the live footer repaints it as runs finish. */
+-interface BenchTableRow {
++export interface BenchTableRow {
+ 	/** Aggregates over the runs finished so far. */
+ 	report: BenchModelReport;
+ 	state: "queued" | "running" | "done";
+@@ -982,6 +988,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 					return true;
+ 				},
+ 			} satisfies LiveBoardOutput);
++	const updateProgress = (): void => {
++		deps.onProgress?.(rows);
++		board?.repaint();
++	};
+ 	const print = (text: string): void => {
+ 		if (board) board.log(text);
+ 		else writeStdout(`${text}\n`);
+@@ -1009,7 +1019,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 			state: "queued",
+ 			progress: { total, completed: 0, failed: 0, inFlight: 0 },
+ 		}));
++		updateProgress();
+ 		for (const [targetIndex, { selector, model, thinking }] of targets.entries()) {
++			if (deps.signal?.aborted) break;
+ 			const row = rows[targetIndex]!;
+ 			const { progress } = row;
+ 			if (!json) {
+@@ -1017,7 +1029,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 				print(`${chalk.bold(label)}${selector === label ? "" : chalk.dim(` (${selector})`)}`);
+ 			}
+ 			row.state = "running";
+-			board?.repaint();
++			updateProgress();
+ 			const results: BenchRunResult[] = [];
+ 
+ 			// Preflight check: let's verify credentials before starting any runs.
+@@ -1035,6 +1047,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 				row.report = buildModelReport(selector, model, thinking, results);
+ 				if (cacheMode) row.report.cachePairs = [];
+ 				row.state = "done";
++				updateProgress();
+ 				continue;
+ 			}
+ 
+@@ -1046,7 +1059,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 					async (pairIndex): Promise<BenchCachePairReport> => {
+ 						const cacheNamespace = randomSessionId();
+ 						progress.inFlight++;
+-						board?.repaint();
++						updateProgress();
+ 						const promptCacheKey = `bench-cache:${cacheNamespace}`;
+ 						const stablePrefix = renderCacheBenchmarkPrefix(cachePrefix!, cacheNamespace);
+ 						const coldSuffix = prompt.render(cacheSuffixTemplate, { variant: "A" }).trim();
+@@ -1063,6 +1076,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 						const coldResult = await runBenchRequest(
+ 							model,
+ 							{
++								signal: deps.signal,
+ 								apiKey: credentialResolver,
+ 								sessionId: credentialAffinitySessionId,
+ 								messages: cacheBenchmarkMessages(stablePrefix, coldSuffix),
+@@ -1084,6 +1098,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 						const warmResult = await runBenchRequest(
+ 							model,
+ 							{
++								signal: deps.signal,
+ 								apiKey: credentialResolver,
+ 								sessionId: credentialAffinitySessionId,
+ 								messages: cacheBenchmarkMessages(stablePrefix, warmSuffix),
+@@ -1102,7 +1117,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 						progress.completed++;
+ 						if (!coldResult.ok) progress.failed++;
+ 						if (!warmResult.ok) progress.failed++;
+-						board?.repaint();
++						updateProgress();
+ 						return {
+ 							cold: cacheRunReport("cold", coldResult, coldCapture),
+ 							warm: cacheRunReport("warm", warmResult, warmCapture),
+@@ -1123,6 +1138,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 				row.report = buildModelReport(selector, model, thinking, results);
+ 				row.report.cachePairs = pairs;
+ 				row.state = "done";
++				updateProgress();
+ 				if (!json) {
+ 					for (const [index, pair] of pairs.entries()) {
+ 						print(formatCachePairLine(pair, index, pairs.length));
+@@ -1146,6 +1162,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 				const result = await runBenchRequest(
+ 					model,
+ 					{
++						signal: deps.signal,
+ 						apiKey: runtime.modelRegistry.resolver(model, sessionId),
+ 						sessionId,
+ 						messages: challenge.messages,
+@@ -1162,16 +1179,16 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 			const queue = Array.from({ length: runs }, (_, i) => i);
+ 			const activeWorkers: Promise<void>[] = [];
+ 			const processNext = async (): Promise<void> => {
+-				if (queue.length === 0) return;
++				if (queue.length === 0 || deps.signal?.aborted) return;
+ 				const index = queue.shift()!;
+ 				progress.inFlight++;
+-				board?.repaint();
++				updateProgress();
+ 				await runWorker(index);
+ 				progress.inFlight--;
+ 				progress.completed++;
+ 				if (!results[index]!.ok) progress.failed++;
+ 				row.report = buildModelReport(selector, model, thinking, results);
+-				board?.repaint();
++				updateProgress();
+ 				if (!json) {
+ 					while (nextToPrint < runs && results[nextToPrint] !== undefined) {
+ 						print(formatRunLine(results[nextToPrint], nextToPrint, runs, { tagKind }));
+@@ -1183,6 +1200,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 			for (let worker = 0; worker < Math.min(par, runs); worker++) activeWorkers.push(processNext());
+ 			await Promise.all(activeWorkers);
+ 			row.state = "done";
++			updateProgress();
+ 		}
+ 		const reports = rows.map(row => row.report);
+ 		const failures = reports.reduce((sum, report) => sum + report.results.filter(result => !result.ok).length, 0);
+diff --git a/packages/coding-agent/src/eval/judgment-batch-bridge.ts b/packages/coding-agent/src/eval/judgment-batch-bridge.ts
+index caf6b595a6..f3da171419 100644
+--- a/packages/coding-agent/src/eval/judgment-batch-bridge.ts
++++ b/packages/coding-agent/src/eval/judgment-batch-bridge.ts
+@@ -155,6 +155,8 @@ function ownerOf(session: ToolSession): string {
+ export class JudgmentBatch {
+ 	readonly id: string;
+ 	readonly ownerId: string;
++	/** Captured identity for Studio's session-fenced observer/control surface. */
++	readonly sessionId: string | undefined;
+ 	readonly intent: string;
+ 	readonly total: number;
+ 	readonly #inputs: BatchInput[];
+@@ -185,6 +187,7 @@ export class JudgmentBatch {
+ 	) {
+ 		this.id = `jdgb-${Snowflake.next()}`;
+ 		this.ownerId = ownerOf(session);
++		this.sessionId = session.getSessionId?.() ?? undefined;
+ 		this.intent = intent;
+ 		this.total = inputs.length;
+ 		this.#inputs = inputs;
+@@ -273,6 +276,29 @@ export class JudgmentBatch {
+ 		return [];
+ 	}
+ 
++	/** Non-consuming observer page. Does not move eval's single drain cursor. */
++	readItems(offset: number, limit: number): JudgmentBatchItem[] {
++		if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
++			throw invalid("invalid observer page");
++		}
++		return this.#settled.slice(offset, offset + limit);
++	}
++
++	/** Keep the original batch and charge a separate native job for failed inputs only. */
++	retryFailed(): JudgmentBatch {
++		if (this.#running) throw invalid("wait for the batch to finish before retrying");
++		const failed = new Set(this.#settled.filter(item => item.error !== undefined).map(item => item.key));
++		const inputs = this.#inputs.filter(input => failed.has(input.key));
++		if (!inputs.length) throw invalid("the batch has no failed items");
++		return new JudgmentBatch(
++			this.#session,
++			inputs,
++			this.#questions,
++			{ ...this.#options, minOk: Math.min(this.#options.minOk, inputs.length) },
++			this.intent,
++		);
++	}
++
+ 	results(): Record<string, Record<string, CellAnswer>> {
+ 		const out: Record<string, Record<string, CellAnswer>> = {};
+ 		for (const item of this.#settled) if (item.answers) out[String(item.key)] = item.answers;
+@@ -470,6 +496,21 @@ export function getJudgmentBatch(id: string, session: ToolSession): JudgmentBatc
+ 	return batch && batch.ownerId === ownerOf(session) ? batch : undefined;
+ }
+ 
++/** Studio observes only this owner in the captured session; native drain is untouched. */
++export function listJudgmentBatches(session: ToolSession): JudgmentBatch[] {
++	const sessionId = session.getSessionId?.();
++	return [...batches.values()].filter(batch => batch.ownerId === ownerOf(session) && batch.sessionId === sessionId);
++}
++
++export function retryJudgmentBatch(id: string, session: ToolSession): JudgmentBatchStatus {
++	const source = getJudgmentBatch(id, session);
++	if (!source || source.sessionId !== session.getSessionId?.()) throw invalid("unknown batch in this session");
++	const retry = source.retryFailed();
++	batches.set(retry.id, retry);
++	retry.start();
++	return retry.status();
++}
++
+ /** Cancel and forget every batch owned by an agent session. */
+ export function releaseJudgmentBatches(ownerId: string): void {
+ 	for (const [id, batch] of batches) {
 diff --git a/packages/coding-agent/src/extensibility/extensions/types.ts b/packages/coding-agent/src/extensibility/extensions/types.ts
-index ccb026360e..f4a5c01760 100644
+index 1ce7ddd2cd..8e2052ba33 100644
 --- a/packages/coding-agent/src/extensibility/extensions/types.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/types.ts
-@@ -247,6 +247,26 @@ export interface ExtensionUIContext {
+@@ -248,6 +248,26 @@ export interface ExtensionUIContext {
  	/** Show a text input dialog. */
  	input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
  
@@ -174,11 +419,474 @@ index 79888b2951..2740b4e778 100644
  		}
  
  		// Execute the actual tool
+diff --git a/packages/coding-agent/src/launch/broker.ts b/packages/coding-agent/src/launch/broker.ts
+index 001003e923..a8f7c37526 100644
+--- a/packages/coding-agent/src/launch/broker.ts
++++ b/packages/coding-agent/src/launch/broker.ts
+@@ -618,12 +618,33 @@ class DaemonBroker {
+ 		}
+ 	}
+ 
++	readonly #studioMutationQueues = new Map<string, Promise<unknown>>();
++
+ 	async #dispatch(operation: DaemonOperation): Promise<DaemonRpcResult> {
++		// Fence selection and mutation atomically, including concurrent native CLI calls.
++		const name =
++			operation.op === "start"
++				? operation.spec.name
++				: ["send", "stop", "restart", "mode"].includes(operation.op) && "name" in operation
++					? operation.name
++					: undefined;
++		if (name === undefined) return this.#dispatchOperation(operation);
++		const previous = this.#studioMutationQueues.get(name) ?? Promise.resolve();
++		const next = previous.catch(() => {}).then(() => this.#dispatchOperation(operation));
++		this.#studioMutationQueues.set(name, next);
++		try {
++			return await next;
++		} finally {
++			if (this.#studioMutationQueues.get(name) === next) this.#studioMutationQueues.delete(name);
++		}
++	}
++
++	async #dispatchOperation(operation: DaemonOperation): Promise<DaemonRpcResult> {
+ 		switch (operation.op) {
+ 			case "ping":
+-				return { op: "ping", projectDir: this.#projectDir };
++				return { op: "ping", projectDir: this.#projectDir, instanceFencing: true };
+ 			case "start":
+-				return this.#start(operation.spec, operation.owner, operation.replace);
++				return this.#start(operation.spec, operation.owner, operation.replace, operation.waitForReady);
+ 			case "list": {
+ 				await Promise.all([...this.#records.values()].map(record => this.#refreshDetached(record)));
+ 				return {
+@@ -638,16 +659,16 @@ class DaemonBroker {
+ 			case "send":
+ 				return this.#send(operation);
+ 			case "stop": {
+-				const record = this.#record(operation.name);
+-				await this.#stopRecord(record, operation.timeoutMs);
++				const record = this.#record(operation.name, operation.expectedInstanceId);
++				await this.#stopRecord(record, operation.timeoutMs, operation.expectedInstanceId);
+ 				return { op: "stop", daemon: record.snapshot };
+ 			}
+ 			case "restart":
+-				return this.#restart(operation.name);
++				return this.#restart(operation.name, operation.expectedInstanceId);
+ 			case "mode":
+ 				return this.#mode(operation);
+ 			case "describe": {
+-				const record = this.#record(operation.name);
++				const record = this.#record(operation.name, operation.expectedInstanceId);
+ 				await this.#refreshDetached(record);
+ 				return { op: "describe", daemon: record.snapshot, spec: record.spec };
+ 			}
+@@ -656,7 +677,7 @@ class DaemonBroker {
+ 		}
+ 	}
+ 
+-	async #start(spec: DaemonSpec, owner?: string, replace = false): Promise<DaemonRpcResult> {
++	async #start(spec: DaemonSpec, owner?: string, replace = false, waitForReady = true): Promise<DaemonRpcResult> {
+ 		if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/.test(spec.name)) {
+ 			throw new Error("Daemon name must be 1-48 letters, numbers, dots, underscores, or hyphens");
+ 		}
+@@ -735,7 +756,7 @@ class DaemonBroker {
+ 		}
+ 		await this.#launch(record);
+ 		let readyTimedOut = false;
+-		if (spec.ready && !terminalState(record.snapshot.state)) {
++		if (waitForReady && spec.ready && !terminalState(record.snapshot.state)) {
+ 			// Wake on the sticky readyAt marker or any terminal state, not the live
+ 			// state: a fast process flips starting→ready→exited within one poll
+ 			// interval, so sampling `state === "ready"` never observes readiness even
+@@ -759,7 +780,7 @@ class DaemonBroker {
+ 		record.snapshot.state = record.spec.ready ? "starting" : "running";
+ 		record.snapshot.persist = record.spec.persist;
+ 		record.snapshot.detached = record.spec.detached;
+-		record.snapshot.startedAt = Date.now();
++		record.snapshot.startedAt = Math.max(Date.now(), record.snapshot.startedAt + 1);
+ 		record.snapshot.readyAt = undefined;
+ 		record.snapshot.exitedAt = undefined;
+ 		record.snapshot.exitCode = undefined;
+@@ -1094,7 +1115,7 @@ class DaemonBroker {
+ 	}
+ 
+ 	async #logs(operation: Extract<DaemonOperation, { op: "logs" }>): Promise<DaemonRpcResult> {
+-		const record = this.#record(operation.name);
++		const record = this.#record(operation.name, operation.expectedInstanceId);
+ 		await this.#refreshDetached(record);
+ 		const cursor = operation.cursor ?? record.snapshot.outputBytes;
+ 		let timedOut = false;
+@@ -1122,6 +1143,7 @@ class DaemonBroker {
+ 			terminalOutput !== undefined && operation.renderTerminalRows === true
+ 				? await renderTerminalOutput(terminalOutput, { head: operation.head, maxRows: lines })
+ 				: undefined;
++		this.#record(operation.name, operation.expectedInstanceId);
+ 		return {
+ 			op: "logs",
+ 			name: record.snapshot.name,
+@@ -1138,7 +1160,7 @@ class DaemonBroker {
+ 	}
+ 
+ 	async #wait(operation: Extract<DaemonOperation, { op: "wait" }>): Promise<DaemonRpcResult> {
+-		const record = this.#record(operation.name);
++		const record = this.#record(operation.name, operation.expectedInstanceId);
+ 		// A wait observes exactly one launch generation. Automatic or explicit
+ 		// relaunches reuse the managed record, so polling the record without this
+ 		// binding can hang past an exit or consume the replacement's output.
+@@ -1194,8 +1216,9 @@ class DaemonBroker {
+ 	}
+ 
+ 	async #send(operation: Extract<DaemonOperation, { op: "send" }>): Promise<DaemonRpcResult> {
+-		const record = this.#record(operation.name);
++		const record = this.#record(operation.name, operation.expectedInstanceId);
+ 		await this.#refreshDetached(record);
++		this.#record(operation.name, operation.expectedInstanceId);
+ 		if (terminalState(record.snapshot.state) || record.snapshot.state === "stopping") {
+ 			throw new Error(`Daemon ${operation.name} is ${record.snapshot.state}`);
+ 		}
+@@ -1211,6 +1234,7 @@ class DaemonBroker {
+ 			} else throw new Error(`Daemon ${operation.name} stdin is unavailable`);
+ 		}
+ 		if (operation.signal) {
++			this.#record(operation.name, operation.expectedInstanceId);
+ 			if (process.platform === "win32" && record.pty) {
+ 				if (operation.signal === "SIGINT") record.pty.write("\u0003");
+ 				else record.pty.kill();
+@@ -1223,8 +1247,9 @@ class DaemonBroker {
+ 		return { op: "send", daemon: record.snapshot };
+ 	}
+ 
+-	async #stopRecord(record: ManagedDaemon, timeoutMs: number): Promise<void> {
++	async #stopRecord(record: ManagedDaemon, timeoutMs: number, expectedInstanceId?: string): Promise<void> {
+ 		await this.#refreshDetached(record);
++		if (expectedInstanceId !== undefined) this.#record(record.snapshot.name, expectedInstanceId);
+ 		if (terminalState(record.snapshot.state)) return;
+ 		record.stopRequested = true;
+ 		if (record.restartTimer) {
+@@ -1246,9 +1271,9 @@ class DaemonBroker {
+ 		if (!settled && record.pty) record.pty.kill();
+ 	}
+ 
+-	async #restart(name: string): Promise<DaemonRpcResult> {
+-		const record = this.#record(name);
+-		await this.#stopRecord(record, 2_000);
++	async #restart(name: string, expectedInstanceId?: string): Promise<DaemonRpcResult> {
++		const record = this.#record(name, expectedInstanceId);
++		await this.#stopRecord(record, 2_000, expectedInstanceId);
+ 		await record.log?.close();
+ 		record.log = await DaemonLog.open(record.dir);
+ 		record.stopRequested = false;
+@@ -1258,15 +1283,16 @@ class DaemonBroker {
+ 	}
+ 
+ 	async #mode(operation: Extract<DaemonOperation, { op: "mode" }>): Promise<DaemonRpcResult> {
+-		const record = this.#record(operation.name);
++		const record = this.#record(operation.name, operation.expectedInstanceId);
+ 		await this.#refreshDetached(record);
++		this.#record(operation.name, operation.expectedInstanceId);
+ 		if (terminalState(record.snapshot.state) || record.snapshot.state === "stopping") {
+ 			throw new Error(`Daemon ${operation.name} is ${record.snapshot.state}`);
+ 		}
+ 		if (operation.mode === "detached") {
+ 			if (!record.spec.detached) {
+ 				record.spec = { ...record.spec, detached: true, pty: false, persist: true };
+-				await this.#restart(operation.name);
++				await this.#restart(operation.name, operation.expectedInstanceId);
+ 			}
+ 		} else {
+ 			if (record.spec.detached && operation.mode === "session") {
+@@ -1292,9 +1318,16 @@ class DaemonBroker {
+ 		return condition();
+ 	}
+ 
+-	#record(name: string): ManagedDaemon {
++	#record(name: string, expectedInstanceId?: string): ManagedDaemon {
+ 		const record = this.#records.get(name);
+-		if (record) return record;
++		if (record) {
++			if (
++				expectedInstanceId !== undefined &&
++				expectedInstanceId !== record.snapshot.id + ":" + record.snapshot.startedAt
++			)
++				throw new Error("Service instance changed; refresh before trying again");
++			return record;
++		}
+ 		const names = [...this.#records.keys()];
+ 		throw new Error(`Unknown daemon ${name}${names.length ? `. Available: ${names.join(", ")}` : ""}`);
+ 	}
+diff --git a/packages/coding-agent/src/launch/protocol.ts b/packages/coding-agent/src/launch/protocol.ts
+index c78d539082..13c4b030eb 100644
+--- a/packages/coding-agent/src/launch/protocol.ts
++++ b/packages/coding-agent/src/launch/protocol.ts
+@@ -29,11 +29,12 @@ export type DaemonSignal = "SIGINT" | "SIGTERM" | "SIGHUP" | "SIGQUIT" | "SIGKIL
+ /** Typed broker operation sent over the authenticated socket. */
+ export type DaemonOperation =
+ 	| { op: "ping" }
+-	| { op: "start"; spec: DaemonSpec; owner?: string; replace?: boolean }
++	| { op: "start"; spec: DaemonSpec; owner?: string; replace?: boolean; waitForReady?: boolean }
+ 	| { op: "list" }
+ 	| {
+ 			op: "logs";
+ 			name: string;
++			expectedInstanceId?: string;
+ 			lines: number;
+ 			head: boolean;
+ 			grep?: string;
+@@ -43,17 +44,24 @@ export type DaemonOperation =
+ 			renderTerminalRows?: boolean;
+ 			timeoutMs: number;
+ 	  }
+-	| { op: "wait"; name: string; for: "ready" | "exit"; pattern?: string; timeoutMs: number }
+-	| { op: "send"; name: string; data?: string; signal?: DaemonSignal }
+-	| { op: "stop"; name: string; timeoutMs: number }
+-	| { op: "restart"; name: string }
+-	| { op: "mode"; name: string; mode: "persist" | "session" | "detached" }
+-	| { op: "describe"; name: string }
++	| {
++			op: "wait";
++			name: string;
++			expectedInstanceId?: string;
++			for: "ready" | "exit";
++			pattern?: string;
++			timeoutMs: number;
++	  }
++	| { op: "send"; name: string; expectedInstanceId?: string; data?: string; signal?: DaemonSignal }
++	| { op: "stop"; name: string; expectedInstanceId?: string; timeoutMs: number }
++	| { op: "restart"; name: string; expectedInstanceId?: string }
++	| { op: "mode"; name: string; expectedInstanceId?: string; mode: "persist" | "session" | "detached" }
++	| { op: "describe"; name: string; expectedInstanceId?: string }
+ 	| { op: "shutdown" };
+ 
+ /** Typed broker result decoded before it reaches tool code. */
+ export type DaemonRpcResult =
+-	| { op: "ping"; projectDir: string }
++	| { op: "ping"; projectDir: string; instanceFencing?: boolean }
+ 	| { op: "start"; daemon: DaemonSnapshot; readyTimedOut: boolean }
+ 	| { op: "list"; daemons: DaemonSnapshot[] }
+ 	| {
+@@ -310,11 +318,16 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
+ 				spec: parseDaemonSpec(source.spec),
+ 				owner: optionalString(source.owner, "operation.owner"),
+ 				replace: source.replace === undefined ? undefined : booleanValue(source.replace, "operation.replace"),
++				waitForReady:
++					source.waitForReady === undefined
++						? undefined
++						: booleanValue(source.waitForReady, "operation.waitForReady"),
+ 			};
+ 		case "logs":
+ 			return {
+ 				op,
+ 				name: stringValue(source.name, "operation.name"),
++				expectedInstanceId: optionalString(source.expectedInstanceId, "operation.expectedInstanceId"),
+ 				lines: numberValue(source.lines, "operation.lines"),
+ 				head: booleanValue(source.head, "operation.head"),
+ 				grep: optionalString(source.grep, "operation.grep"),
+@@ -332,6 +345,7 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
+ 			return {
+ 				op,
+ 				name: stringValue(source.name, "operation.name"),
++				expectedInstanceId: optionalString(source.expectedInstanceId, "operation.expectedInstanceId"),
+ 				for: target,
+ 				pattern: optionalString(source.pattern, "operation.pattern"),
+ 				timeoutMs: numberValue(source.timeoutMs, "operation.timeoutMs"),
+@@ -341,6 +355,7 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
+ 			return {
+ 				op,
+ 				name: stringValue(source.name, "operation.name"),
++				expectedInstanceId: optionalString(source.expectedInstanceId, "operation.expectedInstanceId"),
+ 				data: optionalString(source.data, "operation.data"),
+ 				signal: source.signal === undefined ? undefined : daemonSignal(source.signal),
+ 			};
+@@ -348,16 +363,26 @@ function parseDaemonOperation(value: unknown): DaemonOperation {
+ 			return {
+ 				op,
+ 				name: stringValue(source.name, "operation.name"),
++				expectedInstanceId: optionalString(source.expectedInstanceId, "operation.expectedInstanceId"),
+ 				timeoutMs: numberValue(source.timeoutMs, "operation.timeoutMs"),
+ 			};
+ 		case "restart":
+ 		case "describe":
+-			return { op, name: stringValue(source.name, "operation.name") };
++			return {
++				op,
++				name: stringValue(source.name, "operation.name"),
++				expectedInstanceId: optionalString(source.expectedInstanceId, "operation.expectedInstanceId"),
++			};
+ 		case "mode": {
+ 			const mode = stringValue(source.mode, "operation.mode");
+ 			if (mode !== "persist" && mode !== "session" && mode !== "detached")
+ 				throw new Error("operation.mode must be persist, session, or detached");
+-			return { op, name: stringValue(source.name, "operation.name"), mode };
++			return {
++				op,
++				name: stringValue(source.name, "operation.name"),
++				expectedInstanceId: optionalString(source.expectedInstanceId, "operation.expectedInstanceId"),
++				mode,
++			};
+ 		}
+ 		default:
+ 			throw new Error(`Unknown daemon operation: ${op}`);
+@@ -369,7 +394,11 @@ export function parseDaemonRpcResult(operation: DaemonOperation, value: unknown)
+ 	const source = record(value, `${operation.op} result`);
+ 	switch (operation.op) {
+ 		case "ping":
+-			return { op: "ping", projectDir: stringValue(source.projectDir, "result.projectDir") };
++			return {
++				op: "ping",
++				projectDir: stringValue(source.projectDir, "result.projectDir"),
++				instanceFencing: source.instanceFencing === true,
++			};
+ 		case "start":
+ 			return {
+ 				op: "start",
+diff --git a/packages/coding-agent/src/launch/services.ts b/packages/coding-agent/src/launch/services.ts
+index 0998a6edd1..6aa341a4bf 100644
+--- a/packages/coding-agent/src/launch/services.ts
++++ b/packages/coding-agent/src/launch/services.ts
+@@ -25,6 +25,10 @@ export interface ServiceStart {
+ 	pty?: boolean;
+ 	env?: Record<string, string>;
+ 	ready?: ServiceReady;
++	restart?: DaemonSpec["restart"];
++	mode?: "session" | "persist" | "detached";
++	replace?: boolean;
++	waitForReady?: boolean;
+ }
+ 
+ const serviceStateKey = Symbol("ownedServices");
+@@ -97,7 +101,7 @@ function subscribe(session: ToolSession, client: DaemonBrokerClient): void {
+ 	});
+ }
+ 
+-async function request(
++export async function requestService(
+ 	session: ToolSession,
+ 	operation: DaemonOperation,
+ 	signal?: AbortSignal,
+@@ -114,7 +118,7 @@ async function request(
+ }
+ 
+ export async function listServices(session: ToolSession, signal?: AbortSignal): Promise<DaemonSnapshot[]> {
+-	const result = await request(session, { op: "list" }, signal);
++	const result = await requestService(session, { op: "list" }, signal);
+ 	if (result.op !== "list") throw new Error("Unexpected daemon list response");
+ 	return result.daemons;
+ }
+@@ -147,7 +151,7 @@ export async function serviceLogsWithRows(
+ 	name: string,
+ 	signal?: AbortSignal,
+ ): Promise<{ text: string; terminalRows?: string[] }> {
+-	const result = await request(
++	const result = await requestService(
+ 		session,
+ 		{
+ 			op: "logs",
+@@ -202,7 +206,7 @@ export async function startService(
+ 		args: [...shell.args, `${shell.prefix ? `${shell.prefix} ` : ""}${params.command}`],
+ 		env: { ...shell.env, ...params.env },
+ 		cwd: resolveToCwd(params.cwd ?? session.cwd, session.cwd),
+-		pty: params.pty ?? true,
++		pty: params.mode === "detached" ? false : (params.pty ?? true),
+ 		ready: ready
+ 			? {
+ 					log: ready.log,
+@@ -211,13 +215,19 @@ export async function startService(
+ 					timeoutMs: Math.round(Math.max(0.05, Math.min(3_600, ready.timeout ?? 30)) * 1_000),
+ 				}
+ 			: undefined,
+-		restart: "no",
+-		persist: false,
+-		detached: false,
++		restart: params.restart ?? "no",
++		persist: params.mode === "persist" || params.mode === "detached",
++		detached: params.mode === "detached",
+ 	};
+-	const result = await request(
++	const result = await requestService(
+ 		session,
+-		{ op: "start", spec, owner: session.getAgentId?.() ?? session.getSessionId?.() ?? undefined, replace: true },
++		{
++			op: "start",
++			spec,
++			owner: session.getAgentId?.() ?? session.getSessionId?.() ?? undefined,
++			replace: params.replace ?? true,
++			waitForReady: params.waitForReady,
++		},
+ 		signal,
+ 	);
+ 	if (result.op !== "start") throw new Error("Unexpected daemon start response");
+@@ -235,13 +245,13 @@ export async function sendService(
+ 	signal?: AbortSignal,
+ ): Promise<DaemonSnapshot> {
+ 	const data = /[\r\n]$/.test(content) ? content : `${content}\r`;
+-	const result = await request(session, { op: "send", name, data }, signal);
++	const result = await requestService(session, { op: "send", name, data }, signal);
+ 	if (result.op !== "send") throw new Error("Unexpected daemon send response");
+ 	return result.daemon;
+ }
+ 
+ export async function stopService(session: ToolSession, name: string, signal?: AbortSignal): Promise<DaemonSnapshot> {
+-	const result = await request(session, { op: "stop", name, timeoutMs: 5_000 }, signal);
++	const result = await requestService(session, { op: "stop", name, timeoutMs: 5_000 }, signal);
+ 	if (result.op !== "stop") throw new Error("Unexpected daemon stop response");
+ 	return result.daemon;
+ }
+@@ -252,7 +262,7 @@ export async function modeService(
+ 	mode: "persist" | "session" | "detached",
+ 	signal?: AbortSignal,
+ ): Promise<DaemonSnapshot> {
+-	const result = await request(session, { op: "mode", name, mode }, signal);
++	const result = await requestService(session, { op: "mode", name, mode }, signal);
+ 	if (result.op !== "mode") throw new Error("Unexpected daemon mode response");
+ 	return result.daemon;
+ }
+diff --git a/packages/coding-agent/src/live/controller.ts b/packages/coding-agent/src/live/controller.ts
+index 20b8db2e3b..44361d3682 100644
+--- a/packages/coding-agent/src/live/controller.ts
++++ b/packages/coding-agent/src/live/controller.ts
+@@ -46,6 +46,8 @@ export interface LiveSessionCallbacks {
+ 
+ /** Dependencies and presentation callbacks for a live session. */
+ export interface LiveSessionControllerOptions {
++	/** Optional authenticated frontend input; CLI keeps native device capture. */
++	createAudioInput?: (onAudio: (error: Error | null, samples: Float32Array) => void) => { stop(): void };
+ 	/** Agent session that performs all delegated coding work. */
+ 	session: AgentSession;
+ 	/** UI callbacks for live session state. */
+@@ -93,9 +95,10 @@ export class LiveSessionController {
+ 	readonly #callbacks: LiveSessionCallbacks;
+ 	readonly #extractAssistantText: (message: AssistantMessage) => string;
+ 	readonly #voice: string;
++	readonly #createAudioInput: NonNullable<LiveSessionControllerOptions["createAudioInput"]>;
+ 
+ 	#transport: CodexLiveTransport | undefined;
+-	#recorder: AudioCapture | undefined;
++	#recorder: { stop(): void } | undefined;
+ 	#unsubscribeSession: (() => void) | undefined;
+ 	#sendChain: Promise<void> = Promise.resolve();
+ 	#stopPromise: Promise<void> | undefined;
+@@ -118,6 +121,7 @@ export class LiveSessionController {
+ 
+ 	constructor(options: LiveSessionControllerOptions) {
+ 		this.#session = options.session;
++		this.#createAudioInput = options.createAudioInput ?? (onAudio => new AudioCapture(16_000, onAudio));
+ 		this.#callbacks = options.callbacks;
+ 		this.#extractAssistantText = options.extractAssistantText;
+ 		this.#voice = options.voice?.trim() || DEFAULT_LIVE_VOICE;
+@@ -173,7 +177,7 @@ export class LiveSessionController {
+ 			if (this.#stopped) {
+ 				throw this.#failure ?? new Error("The live session stopped before recording began.");
+ 			}
+-			const recorder = new AudioCapture(16_000, (error, samples) => {
++			const recorder = this.#createAudioInput((error, samples) => {
+ 				if (error) {
+ 					this.#reportFailure(error);
+ 					return;
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index 885d627d72..959591ca67 100644
+index dc9f1b4cff..827f1d29b9 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
-@@ -236,9 +236,9 @@ import {
+@@ -240,9 +240,9 @@ import {
  	xdevEntries,
  } from "./tools";
  import { createBrowserPrelude } from "./tools/browser";
@@ -187,10 +895,10 @@ index 885d627d72..959591ca67 100644
 -import { ToolContextStore } from "./tools/context";
 +import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
 +import { ToolContextStore, type ToolUiFactory } from "./tools/context";
- import { isIrcEnabled } from "./tools/hub";
+ import { isIrcEnabled } from "./irc/messaging";
  import { getImageGenTools } from "./tools/image-gen";
  import { wrapToolWithMetaNotice } from "./tools/output-meta";
-@@ -681,8 +681,8 @@ export interface CreateAgentSessionResult {
+@@ -688,8 +688,8 @@ export interface CreateAgentSessionResult {
  	session: AgentSession;
  	/** Extensions result (loaded extensions + runtime) */
  	extensionsResult: LoadExtensionsResult;
@@ -201,8 +909,8 @@ index 885d627d72..959591ca67 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -3582,7 +3582,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
- 			await extensionRunner.emitAfterProviderResponse(response, model);
+@@ -3659,7 +3659,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			await extensionRunner.emitAfterProviderResponse(response, model, signal);
  		};
  
 -		const setToolUIContext = (uiContext: ExtensionUIContext, hasUI: boolean) => {
@@ -210,6 +918,50 @@ index 885d627d72..959591ca67 100644
  			toolContextStore.setUIContext(uiContext, hasUI);
  		};
  
+diff --git a/packages/coding-agent/src/skillshare/client.ts b/packages/coding-agent/src/skillshare/client.ts
+index 9eb2f3de19..d1a2551488 100644
+--- a/packages/coding-agent/src/skillshare/client.ts
++++ b/packages/coding-agent/src/skillshare/client.ts
+@@ -46,6 +46,8 @@ export function parseSkillSpec(spec: string): SkillSpec | null {
+ }
+ 
+ export interface SkillshareClientOptions {
++	/** Optional caller lifecycle/deadline. Aborting does not undo an accepted registry write. */
++	signal?: AbortSignal;
+ 	/** Registry base URL; defaults to the `skills.registryUrl` setting, then {@link DEFAULT_SKILLS_URL}. */
+ 	registryUrl?: string;
+ 	/** Mutations may authenticate with a `SKILLS_TOKEN` publish token instead of the Stencil login. */
+@@ -96,7 +98,11 @@ export class SkillshareClient {
+ 	#forPublish: boolean;
+ 	#credential = new StencilCredential();
+ 
+-	private constructor(registryUrl: string, forPublish: boolean) {
++	private constructor(
++		registryUrl: string,
++		forPublish: boolean,
++		private readonly signal?: AbortSignal,
++	) {
+ 		this.registryUrl = registryUrl;
+ 		this.#forPublish = forPublish;
+ 	}
+@@ -107,7 +113,7 @@ export class SkillshareClient {
+ 			const settings = await Settings.loadReadOnly({ cwd: process.cwd() });
+ 			registryUrl = settings.get("skills.registryUrl") || DEFAULT_SKILLS_URL;
+ 		}
+-		return new SkillshareClient(normalizeRegistryUrl(registryUrl), options.forPublish === true);
++		return new SkillshareClient(normalizeRegistryUrl(registryUrl), options.forPublish === true, options.signal);
+ 	}
+ 
+ 	/**
+@@ -266,7 +272,7 @@ export class SkillshareClient {
+ 
+ 		let response: Response;
+ 		try {
+-			response = await fetch(url, { method, headers, body, redirect: "follow" });
++			response = await fetch(url, { method, headers, body, redirect: "follow", signal: this.signal });
+ 		} catch (error) {
+ 			throw new Error(
+ 				`cannot reach skill registry ${this.registryUrl}: ${error instanceof Error ? error.message : String(error)}`,
 diff --git a/packages/coding-agent/src/tools/context.ts b/packages/coding-agent/src/tools/context.ts
 index 2529138edb..d858c27f01 100644
 --- a/packages/coding-agent/src/tools/context.ts
@@ -264,11 +1016,24 @@ index 2529138edb..d858c27f01 100644
  		this.#hasUI = hasUI;
  	}
  
+diff --git a/packages/coding-agent/src/tools/image-gen.ts b/packages/coding-agent/src/tools/image-gen.ts
+index c02711a21c..b112f46f53 100644
+--- a/packages/coding-agent/src/tools/image-gen.ts
++++ b/packages/coding-agent/src/tools/image-gen.ts
+@@ -140,7 +140,7 @@ function isOpenAIHostedImageModel(model: Model | undefined): model is Model {
+ 
+ const HOSTED_CHAT_MODEL_PRIORITY = ["gpt-5.5", "gpt-5.4", "gpt-5.1", "gpt-5", "gpt-5-codex"];
+ 
+-function resolveHostedImageCarrier(
++export function resolveHostedImageCarrier(
+ 	modelRegistry: ModelRegistry,
+ 	selectedModel: Model,
+ 	activeModel: Model | undefined,
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
-index 1170f716ed..465b856337 100644
+index f4aa58d25e..cff24bbec1 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
 +++ b/packages/coding-agent/test/extensions-runner.test.ts
-@@ -2494,6 +2494,76 @@ describe("ExtensionRunner", () => {
+@@ -2479,6 +2479,76 @@ describe("ExtensionRunner", () => {
  			}
  		});
  

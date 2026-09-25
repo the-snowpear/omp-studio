@@ -41,8 +41,8 @@ export class StudioUpgradeService {
 				const auth = this.session.modelRegistry.authStorage;
 				try {
 					if (operation.kind === "runtime.auth.set")
-						await auth.set(operation.provider, { type: "api_key", key: operation.apiKey });
-					if (operation.kind === "runtime.auth.remove") await auth.remove(operation.provider);
+						await auth.credentials.set(operation.provider, { type: "api_key", key: operation.apiKey });
+					if (operation.kind === "runtime.auth.remove") await auth.credentials.remove(operation.provider);
 					const last =
 						operation.provider === "typesafe"
 							? [...this.session.sessionManager.getBranch()]
@@ -57,7 +57,7 @@ export class StudioUpgradeService {
 							: undefined;
 					return {
 						provider: operation.provider,
-						configured: auth.hasAuth(operation.provider),
+						configured: auth.keys.source(operation.provider) !== undefined,
 						...(last?.type === "model_usage"
 							? { lastJudgment: { purpose: last.purpose, provider: last.provider, model: last.model } }
 							: {}),

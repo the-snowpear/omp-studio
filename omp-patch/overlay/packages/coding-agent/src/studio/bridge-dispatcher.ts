@@ -1,3 +1,4 @@
+import { isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, type WorkbenchOperation } from "./workbench-protocol";
 import { isUpgradeOperationKind, UPGRADE_OPERATION_KINDS, type UpgradeOperation } from "./runtime-upgrade-protocol";
 import { isEvaluationOperationKind } from "./evaluation-validation";
 import type { EvaluationOperation } from "./evaluation-protocol";
@@ -42,6 +43,7 @@ interface RememberedReceipt {
 
 const SESSION_CONTROL_OPERATION_KINDS = new Set<string>([
 	"runtime.shutdown",
+	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
 	"runtime.settings.get",
 	"runtime.settings.set",
@@ -310,7 +312,7 @@ export class StudioBridgeDispatcher {
 
 	async dispatch(request: StudioRequest, send: StudioBridgeSend = this.send): Promise<void> {
 		const operation = request.operation;
-		if (operation.kind !== "runtime.shutdown") {
+		if (operation.kind !== "runtime.shutdown" && operation.kind !== "tokens.count") {
 			try {
 				await this.runtime.ensureWorkerLive?.();
 			} catch (error) {
@@ -425,44 +427,46 @@ export class StudioBridgeDispatcher {
 					].includes(operation.kind)
 				)
 					await this.runtime.services.btw.settle();
-				const result = isUpgradeOperationKind(operation.kind)
-					? await this.runtime.services.upgrade.execute(operation as UpgradeOperation)
-					: isEvaluationOperationKind(operation.kind)
-						? await this.runtime.services.evaluation.execute(operation as EvaluationOperation)
-						: isShutdownOperation
-							? await this.#executeShutdownOperation(operation)
-							: isLiveOperation
-								? await this.#executeLiveOperation(operation)
-								: isPauseOperation
-									? await this.#executePauseOperation(operation)
-									: isLoopOperation
-										? await this.#executeLoopOperation(operation)
-										: isModeOperation
-											? await this.#executeModeOperation(operation)
-											: isTreeOperation
-												? await this.#executeTreeOperation(operation, commandId)
-												: operation.kind === "session.fork"
-													? await this.runtime.services.fork.fork()
-													: operation.kind === "session.handoff"
-														? await this.runtime.services.handoff.handoff(operation.customInstructions)
-														: isOperatorOperation
-															? await this.#executeOperatorOperation(operation)
-															: isBtwOperation
-																? await this.#executeBtwOperation(operation)
-																: isOmfgOperation
-																	? await this.#executeOmfgOperation(operation, commandId)
-																	: isTanOperation
-																		? await this.#executeTanOperation(operation)
-																		: isAgentOperation
-																			? await this.#executeAgentOperation(operation)
-																			: isJobOperation
-																				? await this.#executeJobOperation(operation)
-																				: isPermissionOperation
-																					? await this.#executePermissionOperation(operation)
-																					: await this.#executeSessionOperation(
-																							operation,
-																							commandId,
-																						);
+				const result = isWorkbenchOperationKind(operation.kind)
+					? await this.runtime.services.workbench.execute(operation as WorkbenchOperation)
+					: isUpgradeOperationKind(operation.kind)
+						? await this.runtime.services.upgrade.execute(operation as UpgradeOperation)
+						: isEvaluationOperationKind(operation.kind)
+							? await this.runtime.services.evaluation.execute(operation as EvaluationOperation)
+							: isShutdownOperation
+								? await this.#executeShutdownOperation(operation)
+								: isLiveOperation
+									? await this.#executeLiveOperation(operation)
+									: isPauseOperation
+										? await this.#executePauseOperation(operation)
+										: isLoopOperation
+											? await this.#executeLoopOperation(operation)
+											: isModeOperation
+												? await this.#executeModeOperation(operation)
+												: isTreeOperation
+													? await this.#executeTreeOperation(operation, commandId)
+													: operation.kind === "session.fork"
+														? await this.runtime.services.fork.fork()
+														: operation.kind === "session.handoff"
+															? await this.runtime.services.handoff.handoff(operation.customInstructions)
+															: isOperatorOperation
+																? await this.#executeOperatorOperation(operation)
+																: isBtwOperation
+																	? await this.#executeBtwOperation(operation)
+																	: isOmfgOperation
+																		? await this.#executeOmfgOperation(operation, commandId)
+																		: isTanOperation
+																			? await this.#executeTanOperation(operation)
+																			: isAgentOperation
+																				? await this.#executeAgentOperation(operation)
+																				: isJobOperation
+																					? await this.#executeJobOperation(operation)
+																					: isPermissionOperation
+																						? await this.#executePermissionOperation(operation)
+																						: await this.#executeSessionOperation(
+																								operation,
+																								commandId,
+																							);
 				if (
 					!isPauseOperation &&
 					![

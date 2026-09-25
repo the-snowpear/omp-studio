@@ -5,6 +5,7 @@
  * FileMenuContent / FileRowMenu，预览态用 desktopActionsReason 禁用桌面依赖项。
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { AnnotationButton } from "./annotations/Annotations";
 import { createPortal } from "react-dom";
 
 import { Icon } from "./icons";
@@ -281,6 +282,7 @@ export function FileRowMenu({ id, openId, onToggle, contextPoint, target, opener
                 onAction(action, target);
               }}
             />
+            {target.kind === "file" ? <AnnotationButton menu source={{ kind: "file", path: target.path }} onActivate={() => onToggle(null)} /> : null}
           </div>,
           document.body,
         )

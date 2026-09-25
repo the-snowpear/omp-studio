@@ -1515,15 +1515,16 @@ describe("web search config", () => {
       });
       const ws = (await service.get()).webSearch;
       assert.equal(ws.enabled, false);
-      assert.deepEqual(ws.order, ["perplexity", "exa", "duckduckgo"]);
-      assert.deepEqual(ws.exclude, ["mojeek"]);
+      assert.equal(ws.routing?.primary, "web/perplexity");
+      assert.deepEqual(ws.routing?.fallbacks?.slice(0, 2), ["web/exa", "web/duckduckgo"]);
+      assert.equal(ws.routing?.fallbacks?.includes("web/mojeek"), false);
       assert.equal(ws.timeoutSeconds, 120);
-      assert.equal(ws.geminiModel, "gemini-2.5-flash");
+      assert.ok(ws.routing?.fallbacks?.includes("google/gemini-2.5-flash"));
       const raw = await readFile(join(dir, "config.yml"), "utf8");
-      assert.match(raw, /webSearchOrder:\n    - perplexity/);
-      assert.match(raw, /webSearchExclude:\n    - mojeek/);
+      assert.doesNotMatch(raw, /webSearchOrder:/);
+      assert.doesNotMatch(raw, /webSearchExclude:/);
       assert.match(raw, /webSearchTimeoutSeconds: 120/);
-      assert.match(raw, /webSearchGeminiModel: gemini-2\.5-flash/);
+      assert.doesNotMatch(raw, /webSearchGeminiModel:/);
       assert.match(raw, /web_search:\n  enabled: false/);
     });
   });
@@ -1536,7 +1537,7 @@ describe("web search config", () => {
       const raw = await readFile(join(dir, "config.yml"), "utf8");
       assert.match(raw, /# a comment/);
       assert.match(raw, /tinyModel: online/);
-      assert.match(raw, /webSearchOrder:\n    - google/);
+      assert.match(raw, /web: web\/google/);
     });
   });
 
@@ -1547,7 +1548,8 @@ describe("web search config", () => {
       assert.equal(before.providers[0]?.credentialFree, true);
       assert.equal(before.providers.find(provider => provider.id === "ollama")?.apiKeyId, "ollama-cloud");
       await service.setWebSearch({ order: ["ollama", "parallel"] });
-      assert.deepEqual((await service.get()).webSearch.order, ["ollama", "parallel"]);
+      const routing = (await service.get()).webSearch.routing;
+      assert.equal(routing?.primary, "web/ollama"); assert.equal(routing?.fallbacks?.[0], "web/parallel");
     });
   });
 
@@ -1555,7 +1557,8 @@ describe("web search config", () => {
     await withDir(async (_dir, service) => {
       await service.setWebSearch({ order: ["perplexity", "not-a-provider", "perplexity"] });
       const ws = (await service.get()).webSearch;
-      assert.deepEqual(ws.order, ["perplexity"]);
+      assert.equal(ws.routing?.primary, "web/perplexity");
+      assert.equal(ws.routing?.fallbacks?.includes("web/not-a-provider"), false);
     });
   });
 

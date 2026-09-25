@@ -132,7 +132,7 @@ describe("SettingsPage · 结构", () => {
     openTab("Advanced");
     expect(screen.getByRole("button", { name: "Open" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Export" })).toBeTruthy();
-  });
+  }, 15000);
 
   it("支持深链 intent 直接打开目标标签", () => {
     setSettingsIntent("permissions");

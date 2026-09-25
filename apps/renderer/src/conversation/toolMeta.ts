@@ -68,6 +68,7 @@ export function subagentCardKey(agent: SubagentView): string {
 }
 
 export const KIND_ICON: Record<string, string> = {
+  find: "search", wait: "clock", process: "terminal", agent_message: "message", documentation: "book",
   think: "brain",
   read: "file",
   write: "file-plus",
@@ -111,6 +112,7 @@ export const KIND_ICON: Record<string, string> = {
 };
 
 export const KIND_LABEL: Record<string, string> = {
+  find: "Find", wait: "Wait", process: "Process", agent_message: "Agent Message", documentation: "Documentation",
   think: "Think",
   read: "Read",
   write: "Write",
@@ -320,6 +322,12 @@ export function toolKind(tool: ToolView): ToolKind {
     return xdevTool.replace(/[\s-]+/g, "_");
   }
   const raw = tool.toolName.trim().toLowerCase();
+  if (raw === "read" || raw === "write") {
+    const target = jsonString(jsonRecord(tool.arguments)?.path) ?? "";
+    if (/^proc:\/\//iu.test(target)) return "process";
+    if (/^agent:\/\//iu.test(target)) return "agent_message";
+    if (/^omp:\/\//iu.test(target)) return "documentation";
+  }
   if (NAME_TO_KIND[raw]) return NAME_TO_KIND[raw]!;
   // Upstream mints MCP tool names as `mcp__<server>_<tool>`; the dot form only
   // appears in preview fixtures.
@@ -439,6 +447,8 @@ export function toolTarget(tool: ToolView): string {
   const args = jsonRecord(tool.arguments);
   const kind = toolKind(tool);
   if (kind === "bash") return jsonString(args?.command) ?? jsonString(args?.cmd) ?? "";
+  if (kind === "find") return jsonString(args?.query) ?? jsonString(args?.pattern) ?? "";
+  if (kind === "process" || kind === "agent_message" || kind === "documentation") return jsonString(args?.path) ?? jsonString(args?.target) ?? "";
   if (kind === "grep" || kind === "ast_grep" || kind === "glob") {
     // ast_grep names its pattern `pat`; glob carries its pattern inside `path`.
     return (
@@ -600,7 +610,7 @@ function addTurnFile(
 ): void {
   if (path === undefined) return;
   const normalized = path.replaceAll("\\", "/").trim();
-  if (!normalized || normalized.includes(" → ") || normalized.toLowerCase().startsWith("xd://")) return;
+  if (!normalized || normalized.includes(" → ") || /^[a-z][a-z0-9+.-]*:\/\//iu.test(normalized)) return;
   const previous = files.get(normalized);
   files.set(normalized, previous === undefined
     ? { add, del, kinds: [kind] }

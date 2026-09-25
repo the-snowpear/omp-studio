@@ -1,3 +1,4 @@
+import { WORKBENCH_OPERATION_KINDS } from "./workbench-protocol";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
@@ -18,18 +19,19 @@ import {
 import { StudioStateProjector } from "./state-projector";
 import type { StudioBridgeLifecycle, StudioHostRuntime } from "./studio-host-mode";
 
-const UPSTREAM_COMMIT = "37273117021129e96bd05d8277b140ec3fd61990";
+const UPSTREAM_COMMIT = "62bc57be1b03ef0802a33cf7f5f530e534527531";
 /**
  * Must match `omp-patch/patches/series.json` `patchsetVersion`. The Runtime
  * reports `${VERSION}-${PATCHSET_VERSION}` in its Studio Hello, and packaging
  * refuses to sign an artifact whose probed identity disagrees with the series,
  * so a stale value here fails the build (see `scripts/build-omp-host.mjs`).
  */
-const PATCHSET_VERSION = "studio.9";
+const PATCHSET_VERSION = "studio.11";
 
 /** Reads and interrupts must not wait for `core.prompt` to finish. Prompt holds
  *  `#dispatchQueue` for the whole turn, including 503 auto-retry backoff. */
 const CONCURRENT_DISPATCH_OPERATION_KINDS = new Set<string>([
+	...WORKBENCH_OPERATION_KINDS,
 	"runtime.snapshot",
 	"session.transcript.read",
 	"agent.conversation.read",

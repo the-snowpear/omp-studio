@@ -1,17 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Judge } from "@oh-my-pi/pi-ai";
 import { prompt } from "@oh-my-pi/pi-utils";
 import type { Rule } from "../../capability/rule";
 import {
 	buildOmfgRuleForPath,
 	extractGeneratedRuleJson,
+	historyOutputs,
 	type OmfgRuleSourceLevel,
 	type ParsedGeneratedRule,
 	parseGeneratedRule,
 	sanitizeRuleName,
 	validateParsedRuleAgainstAssistantHistory,
 } from "../../modes/controllers/omfg-rule";
+import { TtsrToolInspector, type TtsrTool } from "../../session/ttsr-outputs";
 import omfgUserPrompt from "../../prompts/system/omfg-user.md" with { type: "text" };
 
 const DEFAULT_MAX_INPUT_LENGTH = 64 * 1024;
@@ -34,6 +36,9 @@ export interface StudioOmfgModelPort {
 		signal?: AbortSignal;
 	}): Promise<{ replyText: string; assistantMessage: AssistantMessage }>;
 	getMessages(): readonly AgentMessage[];
+	getTools?(): readonly TtsrTool[];
+	getCwd?(): string;
+	ruleJudge?(): Judge | undefined;
 }
 
 export interface StudioOmfgStoragePort {
@@ -115,21 +120,21 @@ export class StudioOmfgService {
 
 	async generate(complaint: string): Promise<StudioOmfgCandidate> {
 		const normalized = this.#requireInput(complaint, "OMFG complaint");
-		const replyText = await this.#runTurn(prompt.render(omfgUserPrompt, { complaint: normalized }));
-		return this.#acceptCandidate(normalized, replyText);
+		return this.#generateCandidate(normalized, prompt.render(omfgUserPrompt, { complaint: normalized }));
 	}
 
 	async amend(candidateId: string, feedback: string): Promise<StudioOmfgCandidate> {
 		const current = this.#require(candidateId);
 		const normalized = this.#requireInput(feedback, "OMFG amendment feedback");
-		const replyText = await this.#runTurn(
+		return this.#generateCandidate(
+			current.complaint,
 			prompt.render(omfgUserPrompt, {
 				complaint: current.complaint,
 				feedback: `User requested this amendment before saving:\n${normalized}`,
 				previousRule: current.candidate.fileContent,
 			}),
+			current.candidateId,
 		);
-		return this.#acceptCandidate(current.complaint, replyText, current.candidateId);
 	}
 
 	async commit(
@@ -170,19 +175,25 @@ export class StudioOmfgService {
 		return normalized;
 	}
 
-	async #runTurn(promptText: string): Promise<string> {
+	async #generateCandidate(complaint: string, promptText: string, candidateId?: string): Promise<StudioOmfgCandidate> {
 		if (this.#running) throw new StudioOmfgError("COMMAND_BLOCKED", "An OMFG generation is already running");
 		this.#running = true;
 		try {
-			return (await this.model.runEphemeralTurn({ promptText, dedupeReply: false })).replyText;
-		} catch {
+			const replyText = (await this.model.runEphemeralTurn({ promptText, dedupeReply: false })).replyText;
+			return await this.#acceptCandidate(complaint, replyText, candidateId);
+		} catch (error) {
+			if (error instanceof StudioOmfgError) throw error;
 			throw new StudioOmfgError("INTERNAL_ERROR", "OMFG generation failed");
 		} finally {
 			this.#running = false;
 		}
 	}
 
-	#acceptCandidate(complaint: string, replyText: string, candidateId = this.#idGenerator()): StudioOmfgCandidate {
+	async #acceptCandidate(
+		complaint: string,
+		replyText: string,
+		candidateId = this.#idGenerator(),
+	): Promise<StudioOmfgCandidate> {
 		const parsed = parseGeneratedRule(replyText);
 		if ("error" in parsed) {
 			const message = extractGeneratedRuleJson(replyText)
@@ -197,9 +208,17 @@ export class StudioOmfgService {
 			);
 		}
 
-		let validation: ReturnType<typeof validateParsedRuleAgainstAssistantHistory>;
+		let validation: Awaited<ReturnType<typeof validateParsedRuleAgainstAssistantHistory>>;
 		try {
-			validation = validateParsedRuleAgainstAssistantHistory(parsed, this.model.getMessages());
+			const inspector = new TtsrToolInspector(
+				() => this.model.getTools?.() ?? [],
+				() => this.model.getCwd?.() ?? process.cwd(),
+			);
+			validation = await validateParsedRuleAgainstAssistantHistory(
+				parsed,
+				historyOutputs(this.model.getMessages(), inspector),
+				parsed.rule.question ? this.model.ruleJudge?.() : undefined,
+			);
 		} catch {
 			throw new StudioOmfgError("INTERNAL_ERROR", "OMFG rule validation failed");
 		}

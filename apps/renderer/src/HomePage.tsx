@@ -33,7 +33,7 @@ import { useAxisCrossfade, useTokenChartMorph, type TokenChartModelPts } from ".
 
 import { useI18n } from "./i18n";
 
-export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics";
+export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media";
 
 const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: string; key: string }> = [
   { id: "workbench", icon: "layout", key: "nav.workbench" },
@@ -41,12 +41,13 @@ const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: string; key: string }>
   { id: "history", icon: "history", key: "nav.history" },
   { id: "capabilities", icon: "package", key: "nav.capabilities" },
   { id: "model-config", icon: "server", key: "nav.modelConfig" },
+  { id: "media", icon: "image", key: "media.title" },
   { id: "settings", icon: "settings", key: "nav.settings" },
   { id: "diagnostics", icon: "pulse", key: "nav.diagnostics" },
 ];
 
 function isAppRoute(id: string): id is Exclude<PageRoute, "agent-hub"> {
-  return id === "home" || id === "workbench" || id === "history" || id === "capabilities" || id === "model-config" || id === "settings" || id === "diagnostics";
+  return id === "home" || id === "workbench" || id === "history" || id === "capabilities" || id === "model-config" || id === "settings" || id === "diagnostics" || id === "media";
 }
 
 export function SecondaryPage({

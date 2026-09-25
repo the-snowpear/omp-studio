@@ -1,0 +1,33 @@
+.media-workbench { margin-bottom: 24px; border-bottom: 1px solid var(--border); padding-bottom: 24px; }
+.media-kind-tabs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 18px; }
+.media-workbench-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(260px, 1fr); gap: 28px; }
+.media-request-form { display: grid; align-content: start; gap: 14px; }
+.media-request-form label { display: grid; gap: 6px; font-size: 12px; }
+.media-request-form textarea { width: 100%; resize: vertical; }
+.media-parameter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.media-input-list { display: grid; gap: 8px; max-height: 240px; overflow: auto; padding-top: 10px; }
+.media-input-list label { display: flex; align-items: center; gap: 8px; }
+.media-job-column { min-width: 0; }
+.media-job-column h3, .media-review h3 { margin: 0 0 12px; font-size: 15px; }
+.media-job-list { max-height: 240px; overflow: auto; display: grid; gap: 3px; }
+.media-job-list > button { padding: 10px; border: none; border-left: 2px solid transparent; background: transparent; text-align: left; color: inherit; cursor: pointer; display: grid; gap: 5px; }
+.media-job-list > button.selected { border-left-color: var(--accent); background: var(--bg-hover); }
+.media-job-list span, .media-job-list small { font-size: 11px; overflow-wrap: anywhere; }
+.media-job-detail { margin-top: 16px; }
+.media-job-detail textarea { width: 100%; margin: 10px 0; }
+.media-job-output { display: grid; gap: 8px; font-size: 12px; margin: 12px 0; }
+.media-job-output img, .media-job-output video { width: 100%; max-height: 360px; object-fit: contain; background: var(--bg-base); }
+.media-job-output audio { width: 100%; }
+.media-review { margin: 16px 0; border-left: 3px solid var(--accent); background: var(--bg-hover); padding: 14px 18px; }
+.media-review pre { max-height: 300px; overflow: auto; white-space: pre-wrap; font-size: 12px; }
+.media-review .btn { margin-right: 8px; }
+.media-audio-input { border: 1px solid var(--border); padding: 12px; }
+.media-audio-input input[type=file] { max-width: 250px; }
+@media (max-width: 900px) { .media-workbench-layout { grid-template-columns: minmax(0, 1fr); } }
+
+.live-audio-pane { border-top: 1px solid var(--border); padding: 20px 0; }
+.live-audio-levels { display: flex; gap: 24px; margin: 16px 0; }
+.live-audio-levels label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.live-audio-transcripts { max-height: 260px; overflow: auto; }
+.live-audio-transcripts p { display: grid; grid-template-columns: 84px 1fr; gap: 12px; }
+.live-audio-transcripts span { white-space: pre-wrap; overflow-wrap: anywhere; }

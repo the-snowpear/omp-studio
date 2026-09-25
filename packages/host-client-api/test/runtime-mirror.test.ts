@@ -362,3 +362,11 @@ test("dormant workspace unbinding keeps connected state without emitting false d
     await facade.close();
   }
 });
+
+test("in-process and Web facade reject private media grants before dispatch", async () => {
+  const calls: StudioOperation[] = []; const facade = makeFacade(calls);
+  try {
+    await assert.rejects(facade.command({ commandName: "media.start", requestId: "media-private" as CommandRequestId, idempotencyKey: "media-private" as IdempotencyKey, input: { sessionId: "session-1", request: { type: "image", prompt: "mock" }, inputTransfers: [] } as never }), { code: "INVALID_ARGUMENT" });
+    assert.deepEqual(calls, []);
+  } finally { await facade.close(); }
+});

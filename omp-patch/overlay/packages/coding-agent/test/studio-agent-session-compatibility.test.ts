@@ -26,7 +26,7 @@ describe("AgentSession v18.0.11 Studio compatibility and seam invariants", () =>
 	test("prompt returns boolean true on normal dispatch and executes beforeNextUserTurn hook exactly once", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		try {
-			authStorage.setRuntimeApiKey("anthropic", "test-key");
+			authStorage.keys.setRuntime("anthropic", "test-key");
 			const modelRegistry = new ModelRegistry(authStorage);
 			const settings = Settings.isolated();
 			const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
@@ -59,7 +59,7 @@ describe("AgentSession v18.0.11 Studio compatibility and seam invariants", () =>
 	test("combines Studio prependMessages with upstream preludes in order without duplication", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		try {
-			authStorage.setRuntimeApiKey("anthropic", "test-key");
+			authStorage.keys.setRuntime("anthropic", "test-key");
 			const modelRegistry = new ModelRegistry(authStorage);
 			const settings = Settings.isolated();
 			const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
@@ -100,7 +100,7 @@ describe("AgentSession v18.0.11 Studio compatibility and seam invariants", () =>
 	test("abort racing prompt setup sets dispatched to false and emits promptDropped callback", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		try {
-			authStorage.setRuntimeApiKey("anthropic", "test-key");
+			authStorage.keys.setRuntime("anthropic", "test-key");
 			const modelRegistry = new ModelRegistry(authStorage);
 			const settings = Settings.isolated();
 			const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;

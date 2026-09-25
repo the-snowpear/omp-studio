@@ -20,6 +20,7 @@ export interface PtyExitInfo {
 }
 
 export interface PtyProcess {
+  readonly backend?: "pty" | "pipes";
   write(data: string): void;
   resize(cols: number, rows: number): void;
   kill(): void;
@@ -161,6 +162,7 @@ function spawnWithPipes(options: PtySpawnOptions): PtyProcess {
     for (const listener of exitListeners) listener({ exitCode: code ?? 0 });
   });
   return {
+    backend: "pipes",
     write: (data) => {
       child.stdin?.write(data);
     },
@@ -190,6 +192,7 @@ function spawnWithNodePty(options: PtySpawnOptions): PtyProcess {
     useConpty: process.platform === "win32",
   });
   return {
+    backend: "pty",
     write: (data) => {
       proc.write(data);
     },
@@ -235,6 +238,7 @@ interface LiveSession {
   readonly info: TerminalSessionInfo;
   readonly proc: PtyProcess;
   ended: boolean;
+  size: TerminalSize;
 }
 
 export interface TerminalSessionManagerOptions {
@@ -242,6 +246,12 @@ export interface TerminalSessionManagerOptions {
   readonly resolveShell?: () => ResolvedShell;
   readonly resolveCwd?: () => string;
   readonly newId?: () => string;
+  readonly recording?: {
+    output(windowId: number, id: string, data: string): void;
+    resize(windowId: number, id: string, cols: number, rows: number): void;
+    end(windowId: number, id: string): void;
+    disposeWindow(windowId: number): void;
+  };
 }
 
 export class TerminalSessionManager {
@@ -250,12 +260,14 @@ export class TerminalSessionManager {
   readonly #resolveShell: () => ResolvedShell;
   readonly #resolveCwd: () => string;
   readonly #newId: () => string;
+  readonly #recording: TerminalSessionManagerOptions["recording"];
 
   constructor(options: TerminalSessionManagerOptions) {
     this.#spawner = options.spawner;
     this.#resolveShell = options.resolveShell ?? (() => resolveDefaultShell());
     this.#resolveCwd = options.resolveCwd ?? (() => resolveTerminalCwd());
     this.#newId = options.newId ?? (() => randomBytes(16).toString("base64url"));
+    this.#recording = options.recording;
   }
 
   create(windowId: number, size: TerminalSize, listeners: TerminalSessionListeners): TerminalSessionInfo {
@@ -274,9 +286,9 @@ export class TerminalSessionManager {
       cols: size.cols,
       rows: size.rows,
     });
-    const session: LiveSession = { info, proc, ended: false };
+    const session: LiveSession = { info, proc, ended: false, size };
     proc.onData((data) => {
-      if (!session.ended) listeners.onData({ id, data });
+      if (!session.ended) { this.#recording?.output(windowId, id, data); listeners.onData({ id, data }); }
     });
     proc.onExit(() => {
       this.#markEnded(windowId, id, listeners);
@@ -298,6 +310,13 @@ export class TerminalSessionManager {
     const session = this.#windows.get(windowId)?.get(id);
     if (session === undefined || session.ended) return;
     session.proc.resize(cols, rows);
+    session.size = { cols, rows }; this.#recording?.resize(windowId, id, cols, rows);
+  }
+
+  recordingTarget(windowId: number, id: string): TerminalSize & { name: string; backend: "pty" | "pipes" } {
+    const session = this.#require(windowId, id);
+    if (session.ended) throw new Error("Terminal has exited");
+    return { ...session.size, name: session.info.name, backend: session.proc.backend ?? "pipes" };
   }
 
   dispose(windowId: number, id: string, listeners?: TerminalSessionListeners): void {
@@ -308,6 +327,7 @@ export class TerminalSessionManager {
   }
 
   disposeWindow(windowId: number): void {
+    this.#recording?.disposeWindow(windowId);
     const bucket = this.#windows.get(windowId);
     if (bucket === undefined) return;
     for (const [id, session] of bucket) {
@@ -349,6 +369,7 @@ export class TerminalSessionManager {
     const session = this.#windows.get(windowId)?.get(id);
     if (session === undefined || session.ended) return;
     session.ended = true;
+    this.#recording?.end(windowId, id);
     this.#windows.get(windowId)?.delete(id);
     listeners.onExit({ id });
   }
@@ -356,6 +377,7 @@ export class TerminalSessionManager {
   #kill(session: LiveSession, windowId: number, id: string, listeners?: TerminalSessionListeners): void {
     if (!session.ended) {
       session.ended = true;
+      this.#recording?.end(windowId, id);
       try {
         session.proc.kill();
       } catch {

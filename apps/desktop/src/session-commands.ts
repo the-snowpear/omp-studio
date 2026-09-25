@@ -1,4 +1,5 @@
-import { isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
+import { mediaInputArtifacts, validateMediaResult, type MediaDetail, isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
+import type { RuntimeMediaFiles } from "./runtime-media-files.js";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
  * Desktop semantic commands: session.create / session.resume / session.drop / interaction.respond
@@ -64,6 +65,7 @@ const LIVE_TURN_OPERATION_KINDS = new Set<StudioOperation["kind"]>([
   // `expectedStateVersion` would collide with every streaming delta. The
   // Runtime's own single-slot guards (BUSY_STREAMING / INTERACTION_STALE)
   // already express the real preconditions and give better error text.
+  ...WORKBENCH_OPERATION_KINDS,
   ...UPGRADE_OPERATION_KINDS,
   "btw.ask",
   "btw.abort",
@@ -154,6 +156,8 @@ export function createWorkspaceSessionCatalog(
 }
 
 export function createDesktopSemanticCommands(options: {
+  readonly mediaFiles?: RuntimeMediaFiles;
+  readonly mediaWorkspaceId?: () => string | undefined;
   readonly resolveImportWorkspace?: (workspaceId: string) => Promise<string | undefined>;
   readonly registerImportedWorkspace?: (cwd: string) => Promise<string>;
 
@@ -164,6 +168,7 @@ export function createDesktopSemanticCommands(options: {
   readonly archive?: () => StudioSessionArchiveService;
   /** Lazy factory: the delete service is rebuilt when the workspace changes. */
   readonly deleteService?: () => StudioSessionDeleteService;
+  readonly finishManagedArtifacts?: (sessionId: string, deleteManagedArtifacts: boolean) => Promise<void>;
   /** Lazy telemetry store so deleted sessions leave no telemetry record. */
   readonly telemetryStore?: () => { readonly remove?: (sessionId: string) => Promise<void> | void };
   /** Thread -> Runtime binding registry; the deleted thread's entry is removed. */
@@ -224,7 +229,7 @@ export function createDesktopSemanticCommands(options: {
             return { applied: true, runtimeEffect: "immediate", message: "Session restored from the archive" };
           },
         }),
-    delete: async ({ threadId }: { readonly threadId: ThreadId }): Promise<ConfigWriteResult> => {
+    delete: async ({ threadId, deleteManagedArtifacts = false }: { readonly threadId: ThreadId; readonly deleteManagedArtifacts?: boolean }): Promise<ConfigWriteResult> => {
       if (options.deleteService === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Session deletion is not available on this Host");
       }
@@ -233,6 +238,8 @@ export function createDesktopSemanticCommands(options: {
       // transcript can be removed while no Worker holds it.
       await releaseResidentSession(options, sessionId);
       await options.deleteService().delete(sessionId);
+      let artifactsWarning = false;
+      await options.finishManagedArtifacts?.(sessionId, deleteManagedArtifacts).catch(() => { artifactsWarning = true; });
       // Best-effort residue cleanup: the transcript/artifacts are the primary
       // object; a failing related-record removal must not fail the delete.
       await Promise.resolve(options.telemetryStore?.().remove?.(sessionId)).catch(() => undefined);
@@ -241,7 +248,7 @@ export function createDesktopSemanticCommands(options: {
       if (options.agentDir !== undefined) {
         await Promise.resolve(removeSessionPin(sessionId, options.agentDir())).catch(() => undefined);
       }
-      return { applied: true, runtimeEffect: "immediate", message: "Session deleted" };
+      return { applied: true, runtimeEffect: "immediate", message: artifactsWarning ? "Session deleted; managed artifact cleanup failed. Review the artifact library." : deleteManagedArtifacts ? "Session and managed artifacts deleted" : "Session deleted; managed artifacts retained" };
     },
     create: async () => {
       if (options.switchSession === undefined) {
@@ -355,6 +362,8 @@ export function createDesktopSemanticCommands(options: {
       }
       const snapshot = session.controller.publication()?.snapshot;
       const hello = session.hello();
+      const mediaDirectory = session.mediaDirectory?.();
+      const mediaWorkspaceId = options.mediaWorkspaceId?.();
       if (snapshot === undefined || hello === undefined) {
         throw missingRuntime("Runtime snapshot is unavailable");
       }
@@ -365,13 +374,33 @@ export function createDesktopSemanticCommands(options: {
         if (fallbackWorkspaceId && !cwd) throw new StudioHostError("INVALID_ARGUMENT", "Unknown import workspace");
         operation = { ...rest, ...(cwd ? { fallbackCwd: cwd } : {}) };
       }
+      const grants: Array<{ artifactId: string; transferId: string }> = [];
+      if (operation.kind === "media.start") {
+        if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop media channel is unavailable");
+        try {
+          let remainingBytes = 64 * 1024 * 1024;
+          for (const id of mediaInputArtifacts(operation.request)) {
+            const staged = await options.mediaFiles.stage(mediaDirectory, id, remainingBytes, operation.sessionId);
+            remainingBytes -= staged.bytes; grants.push({ artifactId: staged.artifactId, transferId: staged.transferId });
+          }
+          if (options.sessionRef.current !== session || session.controller.publication()?.snapshot?.sessionId !== operation.sessionId) throw new Error("Session changed during media staging");
+          operation = { ...operation, inputTransfers: grants };
+        } catch {
+          await options.mediaFiles.releaseInputs(mediaDirectory, grants);
+          throw new StudioHostError("INVALID_ARGUMENT", "Unable to stage media inputs. Check the artifact files and active session.");
+        }
+      }
       const receipt = await session.controller.invoke({
         type: "studio.request",
         requestId: requestId as unknown as RequestId,
         runtimeEpoch: snapshot.runtimeEpoch,
         ...(fencesOnStateVersion(operation.kind) ? { expectedStateVersion: snapshot.stateVersion } : {}),
         operation,
+      }).catch(async cause => {
+        if (mediaDirectory && grants.length) await options.mediaFiles?.releaseInputs(mediaDirectory, grants);
+        throw cause;
       });
+      if (receipt.status !== "completed" && mediaDirectory && grants.length) await options.mediaFiles?.releaseInputs(mediaDirectory, grants);
       throwIfNotCompleted(receipt);
       const latest = session.controller.publication()?.snapshot ?? snapshot;
       if (operation.kind === "session.import.execute") {
@@ -381,7 +410,18 @@ export function createDesktopSemanticCommands(options: {
         const workspaceId = await options.registerImportedWorkspace!(imported.cwd);
         return { snapshot: latest, result: { imported: true, sessionId: imported.sessionId, workspaceId } };
       }
-      if (isUpgradeOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
+      if (operation.kind === "media.read") {
+        if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop media channel is unavailable");
+        validateMediaResult("media.read", receipt.result);
+        const detail = receipt.result as MediaDetail;
+        const outputs = [];
+        for (const asset of detail.outputs) {
+          const record = await options.mediaFiles.promote(mediaDirectory, operation.sessionId, mediaWorkspaceId, detail.job.id, asset);
+          outputs.push({ artifactId: record.artifactId, kind: asset.kind, name: record.name, mimeType: record.mimeType, bytes: record.bytes, sha256: record.sha256 });
+        }
+        return { snapshot: latest, result: { ...detail, outputs } };
+      }
+      if (isWorkbenchOperationKind(operation.kind) || isUpgradeOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (isEvaluationOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (operation.kind === "operator.invoke") {
         // The Runtime returns { output, result } for operator commands; carry

@@ -1,0 +1,9 @@
+.account-status { margin-bottom: 16px; }
+.account-status > summary { cursor: pointer; font-weight: 600; padding: 10px 0; }
+.account-status-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.account-status-toolbar > p { flex: 1; }
+.account-status-row { padding: 14px 0; border-top: 1px solid var(--border); }
+.account-quotas { display: grid; gap: 8px; margin-top: 10px; }
+.account-quota { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(80px, 160px); gap: 6px 12px; }
+.account-quota > .small { grid-column: 1 / -1; }
+.account-quota progress { width: 100%; accent-color: var(--accent); align-self: center; height: 5px; }

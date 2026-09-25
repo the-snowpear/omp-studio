@@ -1,4 +1,5 @@
 export * from "./bridge-auth.js";
+export * from "./artifact-library.js";
 export * from "./bridge-client.js";
 export * from "./btw-events.js";
 export * from "./command-arbiter.js";

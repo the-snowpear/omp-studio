@@ -1,4 +1,6 @@
 import { ModelDelegationList } from "./ModelDelegationList";
+import { ServicesPane } from "./services/ServicesPane";
+import { JudgmentsPane } from "./judgments/JudgmentsPane";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject } from "react";
 import type { ClientBootstrap, CommandInput, CommandName, SessionId, StudioClient } from "@omp-studio/client-contract";
@@ -1539,7 +1541,9 @@ export function AgentHubPage({
 
   return (
     <div className={`hub-page${chatOpen ? " is-chat-preview" : ""}${chatClosing ? " is-chat-closing" : ""}`} id="hubRoot">
+      <ServicesPane key={`${workspaceId ?? ""}:${parentSessionId ?? snapshot?.sessionId ?? ""}:${preview}`} client={client} workspaceId={workspaceId} sessionId={parentSessionId ?? snapshot?.sessionId} available={connOnline && viewingLive && !resyncRequired} capabilities={capabilities} />
       <ModelDelegationList client={client ?? null} preview={preview} {...(parentSessionId ? { sessionId: parentSessionId } : {})} />
+      <JudgmentsPane key={`judgments:${workspaceId ?? ""}:${parentSessionId ?? snapshot?.sessionId ?? ""}:${preview}`} client={client} workspaceId={workspaceId} sessionId={parentSessionId ?? snapshot?.sessionId} available={connOnline && viewingLive && !resyncRequired} capabilities={capabilities} />
       {connKind === "offline" ? (
         <RuntimeLossBanner
           {...(runtime === undefined ? {} : { runtime })}

@@ -1,3 +1,4 @@
+import { AnnotationButton } from "../annotations/Annotations";
 import { useId, useState, type CSSProperties } from "react";
 import { Icon } from "../icons";
 import type { TurnFileChange } from "./toolMeta";
@@ -80,6 +81,7 @@ export function TurnDiffCard({
           <Icon name="diff" extra="sm" />
           审核
         </button>
+        <AnnotationButton source={{ kind: "diff" }} label="标注当前改动" />
       </div>
       {/* 面板常驻 DOM 以驱动 0fr→1fr 高度过渡；关闭态用 inert 保持不可聚焦 */}
       <div

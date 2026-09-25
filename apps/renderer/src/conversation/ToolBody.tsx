@@ -825,6 +825,39 @@ function HubBody({ tool }: { tool: ToolView }) {
   return <DefaultBody tool={tool} />;
 }
 
+function FindBody({ tool }: { tool: ToolView }) {
+  const fields = toolFields(tool);
+  const hits = Array.isArray(fields.hits) ? fields.hits : [];
+  if (!hits.length) return <DefaultBody tool={tool} />;
+  return <>
+    <Kv pairs={[["query", fields.query], ["elapsed", fields.elapsedMs], ["hits", hits.length]]} />
+    {hits.slice(0, 50).map((value, index) => {
+      const hit = jsonRecord(value) ?? {};
+      const ranges = Array.isArray(hit.ranges) ? hit.ranges : [];
+      const score = typeof hit.contentScore === "number" && Number.isFinite(hit.contentScore) ? `${Math.round(Math.max(0, Math.min(1, hit.contentScore)) * 100)}%` : "";
+      return <details key={index} className="tc-find-hit">
+        <summary>{jsonString(hit.rel) ?? "—"} {score}</summary>
+        {ranges.slice(0, 20).map((range, rangeIndex) => {
+          const item = jsonRecord(range) ?? {};
+          return <pre key={rangeIndex}>{String(item.start ?? "")}–{String(item.end ?? "")} {jsonString(item.snippet) ?? ""}</pre>;
+        })}
+      </details>;
+    })}
+  </>;
+}
+
+function CoordinationBody({ tool }: { tool: ToolView }) {
+  const fields = toolFields(tool);
+  const daemons = Array.isArray(fields.daemons) ? fields.daemons : fields.daemon ? [fields.daemon] : [];
+  return <>
+    {daemons.slice(0, 50).map((value, index) => {
+      const daemon = jsonRecord(value) ?? {};
+      return <Kv key={index} pairs={[["service", daemon.name], ["state", daemon.state], ["ready", daemon.readyAt], ["exit", daemon.exitCode], ["persist", daemon.persist]]} />;
+    })}
+    <HubBody tool={tool} />
+  </>;
+}
+
 function TodoBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
   const phases = Array.isArray(fields.phases) ? fields.phases : [];
@@ -1024,6 +1057,8 @@ export const ToolBody = memo(function ToolBody({ tool, follow }: { tool: ToolVie
   const fields = toolFields(tool);
   const live = follow ?? tool.status === "running";
   const inner =
+    kind === "find" ? <FindBody tool={tool} /> :
+    kind === "wait" || kind === "process" || kind === "agent_message" ? <CoordinationBody tool={tool} /> :
     kind === "read" ? <ReadBody tool={tool} /> :
     kind === "write" ? <WriteBody tool={tool} /> :
     kind === "edit" ? <EditBody tool={tool} /> :

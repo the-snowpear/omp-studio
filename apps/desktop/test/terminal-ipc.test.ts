@@ -207,7 +207,7 @@ describe("resolveDefaultShell", () => {
 });
 
 describe("registerTerminalIpc", () => {
-  test("registers exactly the four inbound channels", () => {
+  test("registers exactly the shell and recording inbound channels", () => {
     const { ipc, handle } = register();
     assert.deepEqual(
       [...ipc.handlers.keys()].sort(),
@@ -216,6 +216,9 @@ describe("registerTerminalIpc", () => {
         TERMINAL_IPC_CHANNELS.dispose,
         TERMINAL_IPC_CHANNELS.resize,
         TERMINAL_IPC_CHANNELS.write,
+        TERMINAL_IPC_CHANNELS.recordingStart,
+        TERMINAL_IPC_CHANNELS.recordingStop,
+        TERMINAL_IPC_CHANNELS.recordingStatus,
       ].sort(),
     );
     assert.equal(ipc.handlers.has(TERMINAL_IPC_CHANNELS.data), false);

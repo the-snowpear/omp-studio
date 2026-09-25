@@ -1,3 +1,4 @@
+import { AnnotationButton } from "../annotations/Annotations";
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ConversationMessageError } from "@omp-studio/client-contract";
 import type { StudioAgentSnapshot } from "@omp-studio/studio-protocol";
@@ -148,6 +149,7 @@ function MessageCopyActions({ text }: { text: string }) {
   return (
     <div className="ev-msg-actions">
       <MessageCopyButton text={text} />
+      <AnnotationButton small source={{ kind: "message", label: "Reply", text }} />
     </div>
   );
 }

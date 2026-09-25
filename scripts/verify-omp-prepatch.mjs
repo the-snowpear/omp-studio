@@ -20,13 +20,14 @@ const head = run("git", ["-C", ompSourceDirectory, "rev-parse", "HEAD"], { captu
 if (head !== upstream.commit || series.upstreamCommit !== upstream.commit) {
   throw new Error(`OMP pin mismatch: source=${head}, upstream=${upstream.commit}, series=${series.upstreamCommit}`);
 }
-if (series.patches.length !== 0) {
-  throw new Error("Pre-patch verification requires an empty patch series");
-}
-// The overlay carries most of the fork, so an unpatched baseline means both
-// layers are absent — a populated overlay would silently invalidate the run.
-if ((await overlayFiles().catch(() => [])).length !== 0) {
-  throw new Error("Pre-patch verification requires an empty overlay");
+// Canonical overlay/patch sources stay in the Studio repository during an
+// upgrade. The baseline being verified is the vendor working tree, not the
+// storage location of the fork that will subsequently be migrated.
+const appliedOverlay = (await overlayFiles()).filter(file =>
+  existsSync(join(ompSourceDirectory, file)),
+);
+if (appliedOverlay.length !== 0) {
+  throw new Error(`Pre-patch verification requires an unapplied overlay:\n${appliedOverlay.join("\n")}`);
 }
 
 const sourceStatus = run("git", ["-C", ompSourceDirectory, "status", "--porcelain"], { capture: true });
@@ -34,14 +35,17 @@ if (sourceStatus !== "") throw new Error(`OMP source is not clean:\n${sourceStat
 
 const bun = findBun();
 const bunVersion = run(bun, ["--version"], { capture: true });
-if (bunVersion !== "1.3.14") throw new Error(`Expected Bun 1.3.14, found ${bunVersion}`);
+const [bunMajor, bunMinor, bunPatch] = bunVersion.split(".").map(Number);
+if (!(bunMajor > 1 || (bunMajor === 1 && (bunMinor > 4 || (bunMinor === 4 && bunPatch >= 2))))) {
+  throw new Error(`The Windows bytecode baseline requires Bun >=1.4.2; found ${bunVersion}. Set BUN_EXE to a compatible executable.`);
+}
 
 const nativeDirectory = join(ompSourceDirectory, "packages", "natives", "native");
 const nativeCandidates = process.platform === "win32"
   ? ["pi_natives.win32-x64-modern.node", "pi_natives.win32-x64-baseline.node"]
   : [];
 if (nativeCandidates.length > 0 && !nativeCandidates.some(name => existsSync(join(nativeDirectory, name)))) {
-  throw new Error("The Windows pi_natives addon is missing; run npm run omp:build:host");
+  throw new Error("The Windows pi_natives addon is missing; build the unpatched vendor packages/natives first");
 }
 
 const executable = join(
@@ -51,7 +55,7 @@ const executable = join(
   "dist",
   process.platform === "win32" ? "omp.exe" : "omp",
 );
-if (!existsSync(executable)) throw new Error("The OMP host executable is missing; run npm run omp:build:host");
+if (!existsSync(executable)) throw new Error("The OMP executable is missing; build the unpatched vendor packages/coding-agent first");
 
 const env = toolingEnvironment();
 const npmCli = process.env.npm_execpath;
@@ -70,7 +74,9 @@ run(
   { cwd: ompSourceDirectory, env },
 );
 run(bun, ["run", "ci:test:smoke"], { cwd: ompSourceDirectory, env });
-run(executable, ["--version"], { cwd: ompSourceDirectory, env });
+const expectedVersion = JSON.parse(readFileSync(join(ompSourceDirectory, "packages/coding-agent/package.json"), "utf8")).version;
+const binaryVersion = run(executable, ["--version"], { cwd: ompSourceDirectory, env, capture: true });
+if (!binaryVersion.includes(expectedVersion)) throw new Error(`Stale baseline binary: expected ${expectedVersion}, found ${binaryVersion}`);
 run(executable, ["--smoke-test"], { cwd: ompSourceDirectory, env });
 
 console.log(`Pre-patch baseline verified at ${upstream.commit}`);

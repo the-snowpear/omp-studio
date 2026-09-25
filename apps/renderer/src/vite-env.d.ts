@@ -42,8 +42,27 @@ declare global {
     | { readonly status: "cancelled" }
     | { readonly status: "failed"; readonly message: string };
 
+  type StudioServiceDefinition = { id: string; revision: number; workspaceId: string; updatedAt: string; spec: import("@omp-studio/studio-protocol").StudioServiceSpec };
+  type StudioServiceDefinitionsInput = { workspaceId: string; id?: string; revision?: number; spec?: import("@omp-studio/studio-protocol").StudioServiceSpec };
+  type StudioServiceDefinitionResult = { ok: true; definitions: StudioServiceDefinition[] } | { ok: false; message: string };
+  type StudioArtifactFileResult = { ok: true; cancelled: boolean; artifact?: import("@omp-studio/studio-protocol").ArtifactRecord; storage?: import("@omp-studio/studio-protocol").ArtifactStorageState } | { ok: false; message: string };
+
   var ompStudioChrome:
     | {
+        revealSkillshareToken?(input: { secretId: string; sessionId: string }): Promise<{ ok: boolean; token?: string; name?: string; message?: string }>;
+        attachLiveAudio?(input: { audioId: string; sessionId: string }): Promise<{ ok: boolean; message?: string }>;
+        appendLiveAudio?(input: { audioId: string; sequence: number; bytes: ArrayBuffer }): Promise<{ ok: boolean; message?: string }>;
+        detachLiveAudio?(input: { audioId: string }): Promise<{ ok: boolean; message?: string }>;
+        beginMediaUpload?(input: { kind: "audio" | "image" | "video"; name: string; mimeType: string; workspaceId?: string; sessionId?: string }): Promise<{ ok: boolean; uploadId?: string; message?: string }>;
+        appendMediaUpload?(input: { uploadId: string; sequence: number; bytes: ArrayBuffer }): Promise<{ ok: boolean; message?: string }>;
+        finishMediaUpload?(input: { uploadId: string }): Promise<{ ok: boolean; artifact?: import("@omp-studio/studio-protocol").ArtifactRecord; message?: string }>;
+        abortMediaUpload?(input: { uploadId: string }): Promise<{ ok: boolean; message?: string }>;
+        listServiceDefinitions?(input: StudioServiceDefinitionsInput): Promise<StudioServiceDefinitionResult>;
+        saveServiceDefinition?(input: StudioServiceDefinitionsInput): Promise<StudioServiceDefinitionResult>;
+        removeServiceDefinition?(input: StudioServiceDefinitionsInput): Promise<StudioServiceDefinitionResult>;
+        chooseArtifactDirectory?(): Promise<StudioArtifactFileResult>;
+        importArtifact?(input: { kind: import("@omp-studio/studio-protocol").ArtifactKind; sessionId?: string; workspaceId?: string }): Promise<StudioArtifactFileResult>;
+        exportArtifact?(input: { artifactId: string }): Promise<StudioArtifactFileResult>;
         /** Initial workbench health; absent on older installed main/preload versions. */
         reportPayloadHealth?(status: "ready" | "failed"): Promise<boolean>;
         reportPerformanceSample?(sample: import("@omp-studio/studio-protocol").MemorySample): Promise<boolean>;
@@ -250,6 +269,9 @@ declare global {
         write(id: string, data: string): Promise<void>;
         resize(id: string, cols: number, rows: number): Promise<void>;
         dispose(id: string): Promise<void>;
+        recordingStart?(input: { id: string; workspaceId?: string; sessionId?: string }): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
+        recordingStop?(id: string): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
+        recordingStatus?(id: string): Promise<{ terminalId: string; state: "idle" | "recording" | "saving" | "saved" | "failed"; elapsedMs: number; bytes: number; artifactId?: string; notice?: string }>;
         onData(listener: (event: { id: string; data: string }) => void): () => void;
         onExit(listener: (event: { id: string }) => void): () => void;
       }

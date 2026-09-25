@@ -2,6 +2,13 @@ import type { SessionId } from "./ids.js";
 
 /** Runtime settings intentionally exposed to the Studio Bridge. */
 export const STUDIO_RUNTIME_SETTING_KEYS = [
+  "modelRoles.judge",
+  "claudeResets.autoRedeem",
+  "claudeResets.minBlockedMinutes",
+  "claudeResets.keepCredits",
+  "claudeResets.salvageHorizonHours",
+  "mcp.startupTimeoutMs",
+  "ttsr.judge",
   "edit.autoRepair.enabled",
   "features.unexpectedStopDetection",
   "providers.unexpectedStopModel",
@@ -52,9 +59,17 @@ export type StudioRuntimeCodeMode = (typeof STUDIO_RUNTIME_CODE_MODES)[number];
 
 /** Exact schema-backed public values; no arbitrary key/value escapes. */
 export interface StudioRuntimeSettingsSnapshot {
+  "modelRoles.judge"?: string;
+  "claudeResets.autoRedeem"?: "unset" | "yes" | "no";
+  "claudeResets.minBlockedMinutes"?: number;
+  "claudeResets.keepCredits"?: number;
+  "claudeResets.salvageHorizonHours"?: number;
+  "mcp.startupTimeoutMs"?: number;
+  "ttsr.judge"?: "auto" | "on" | "off";
   "edit.autoRepair.enabled": boolean;
   "features.unexpectedStopDetection": StudioRuntimeUnexpectedStopMode;
-  "providers.unexpectedStopModel": StudioRuntimeUnexpectedStopModel;
+  /** Legacy Runtime snapshot compatibility; new Runtime uses modelRoles.judge. */
+  "providers.unexpectedStopModel"?: StudioRuntimeUnexpectedStopModel;
   extendedContext: boolean;
   "compaction.asyncEnabled": boolean;
   "compaction.methodOrder": StudioRuntimeCompactionMethod[];

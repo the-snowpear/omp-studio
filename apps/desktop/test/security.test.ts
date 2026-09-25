@@ -585,7 +585,7 @@ describe("RENDERER_CSP: no unsafe-eval", () => {
 test("rendererCspFor keeps packaged CSP strict and permits Vite refresh only in dev", () => {
   const packaged = rendererCspFor({ kind: "file", path: "C:\\app\\index.html" });
   assert.match(packaged, /script-src 'self'(?:;|\s)/u);
-  assert.match(packaged, /connect-src 'self';/u);
+  assert.match(packaged, /connect-src 'self' omp-artifact:;/u);
   assert.equal(packaged.includes("localhost"), false);
   assert.equal(packaged.includes("127.0.0.1"), false);
   const dev = rendererCspFor({ kind: "url", url: "http://127.0.0.1:5173" });

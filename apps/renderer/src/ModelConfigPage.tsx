@@ -1,3 +1,6 @@
+import { BenchmarkPane } from "./models/BenchmarkPane";
+import { AccountStatusPane } from "./models/AccountStatusPane";
+import { loadRuntimeModels } from "./models/runtimeModels";
 import { RuntimeCredentials, VisionModelStatus } from "./models/RuntimeCredentials";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -24,6 +27,7 @@ import type {
   StudioClient,
 } from "@omp-studio/client-contract";
 import {
+  modelAcceptsRole,
   clampRoleThinking,
   isModelEnvConfigName,
   MODEL_CONFIG_THINKING_EFFORTS,
@@ -64,7 +68,7 @@ const PROVIDER_ORDER_KEY = "omp.providerDisplayOrder";
 
 type I18nT = ReturnType<typeof useI18n>["t"];
 
-export type McTab = "providers" | "roles" | "subagents" | "websearch";
+export type McTab = "providers" | "roles" | "subagents" | "websearch" | "benchmark";
 
 type McIntent = { tab?: McTab; edit?: string; role?: string; assign?: string; agent?: string };
 
@@ -73,6 +77,7 @@ const TAB_BUTTON_ID: Record<McTab, string> = {
   roles: "mcTabRoles",
   subagents: "mcTabSubagents",
   websearch: "mcTabWebSearch",
+  benchmark: "mcTabBenchmark",
 };
 
 const STATUS_META: Record<string, { label: string; chip: string; dot: string }> = {
@@ -123,6 +128,7 @@ function ProviderTestRow({ result }: { result: TestResultView }) {
 export const ROLE_ICONS: Record<string, string> = {
   default: "cpu", smol: "zap", slow: "brain", vision: "eye", plan: "layers",
   designer: "sparkles", commit: "commit", tiny: "box", task: "bot", advisor: "user",
+  memory: "brain", image: "image", web: "globe", speech: "volume", dictation: "mic", judge: "check",
 };
 
 /** 角色列表卡片的主题色（与 models-roles.css 的 .role-row[data-tint] 对应）。 */
@@ -1564,11 +1570,13 @@ function RoleModelPicker({
   value,
   groups,
   disabled,
+  ariaLabel,
   onChange,
 }: {
   value: string;
   groups: ReadonlyArray<ModelPickGroup>;
   disabled?: boolean;
+  ariaLabel?: string;
   onChange: (selector: string) => void;
 }) {
   const uid = useId();
@@ -1687,7 +1695,7 @@ function RoleModelPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-label={t("modelConfig.primaryModel")}
+        aria-label={ariaLabel ?? t("modelConfig.primaryModel")}
         data-tip={value || undefined}
         onMouseDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -1827,7 +1835,7 @@ function formatProviderStatusDetail(detail: string | undefined, t: (k: string) =
   return detail;
 }
 
-export function ModelConfigPage({ client }: { client: StudioClient }) {
+export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailable = false }: { client: StudioClient; sessionId?: string | undefined; workspaceId?: string | undefined; runtimeAvailable?: boolean }) {
   const [, updatePricingClock] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => updatePricingClock(tick => tick + 1), 60_000);
@@ -1845,6 +1853,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   const tabMotionLive = useRef(false);
   if (!Object.is(tab, shownTab)) tabMotionLive.current = true;
   const tabPanelClass = (id: McTab) => (shownTab === id && tabMotionLive.current ? pagePhaseClass(tabPhase) : undefined);
+  const [runtimeModels, setRuntimeModels] = useState<AvailableModelRecord[]>([]);
+  const nativeLoad = useRef(0);
   const [data, setData] = useState<ModelConfigReadModel | null>(preview ? createPreviewModelConfig() : null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1930,6 +1940,16 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  useEffect(() => {
+    const generation = ++nativeLoad.current;
+    setRuntimeModels([]);
+    if (preview || (tab !== "roles" && tab !== "websearch" && tab !== "benchmark")) return;
+    void loadRuntimeModels(client, () => generation === nativeLoad.current)
+      .then(rows => { if (generation === nativeLoad.current) setRuntimeModels(rows); })
+      .catch(() => { /* Disk configuration remains usable when Runtime is unavailable. */ });
+    return () => { nativeLoad.current++; };
+  }, [client, preview, tab, data]);
+
 
   const previewRef = useRef(preview);
   useEffect(() => {
@@ -2006,6 +2026,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     if (intent.tab === "roles" || intent.role || intent.assign) setTab("roles");
     if (intent.tab === "subagents" || intent.agent) setTab("subagents");
     if (intent.tab === "websearch") setTab("websearch");
+    if (intent.tab === "benchmark") setTab("benchmark");
     if (intent.edit) {
       setTab("providers");
     }
@@ -2119,13 +2140,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   };
 
   const onTabKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const keys: McTab[] = ["providers", "roles", "subagents", "websearch"];
+    const keys: McTab[] = ["providers", "roles", "subagents", "websearch", "benchmark"];
     const index = keys.indexOf(tab);
     let next: McTab | null = null;
     if (event.key === "ArrowRight") next = keys[(index + 1) % keys.length] ?? "providers";
     else if (event.key === "ArrowLeft") next = keys[(index - 1 + keys.length) % keys.length] ?? "providers";
     else if (event.key === "Home") next = "providers";
-    else if (event.key === "End") next = "websearch";
+    else if (event.key === "End") next = "benchmark";
     if (!next) return;
     event.preventDefault();
     activate(next, true);
@@ -2196,7 +2217,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
   const configYmlDirty = configYmlEdited;
   const fallbackDirty = Boolean(
     roleDraftState && (
-      (fallbackDraft !== null && !sameStringList(fallbackDraft, data?.fallbackChains[roleDraftState.primary] ?? []))
+      (fallbackDraft !== null && !sameStringList(fallbackDraft, data?.fallbackChains[roleDraftState.id] ?? data?.fallbackChains[roleDraftState.primary] ?? []))
       || (revertPolicyDraft !== null && revertPolicyDraft !== (data?.fallbackRevertPolicy ?? "cooldown-expiry"))
     ),
   );
@@ -3061,11 +3082,10 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
     }
   };
 
-  const saveFallback = async (primary: string) => {
+  const saveFallback = async (role: string, primary: string) => {
     const chains = { ...(data?.fallbackChains ?? {}) };
-    const nextChain = [...(fallbackDraft ?? chains[primary] ?? [])];
-    if (nextChain.length > 0) chains[primary] = nextChain;
-    else delete chains[primary];
+    const nextChain = [...(fallbackDraft ?? chains[role] ?? chains[primary] ?? [])];
+    chains[role] = nextChain;
     const revertPolicy = revertPolicyDraft ?? data?.fallbackRevertPolicy ?? "cooldown-expiry";
     if (preview) {
       mutateLocal((current) => ({ ...current, fallbackChains: chains, fallbackRevertPolicy: revertPolicy }));
@@ -3141,11 +3161,10 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
 
   const usable = useMemo(() => {
     const models = data?.availableModels ?? [];
-    return models.filter((model) =>
-      providers.some((provider) => provider.id === model.provider && provider.enabled && provider.status !== "disabled"),
-    );
-  }, [data, providers]);
-  const usableGroups = useMemo(() => groupModelsByProvider(usable, orderedProviders), [usable, orderedProviders]);
+    const merged = new Map(models.filter(model => (preview && !providers.some(provider => provider.id === model.provider)) || providers.some(provider => provider.id === model.provider && provider.enabled && provider.status !== "disabled")).map(model => [model.selector, model]));
+    for (const model of runtimeModels) if (!providers.some(provider => provider.id === model.provider && !provider.enabled)) merged.set(model.selector, { ...model, ...merged.get(model.selector) });
+    return [...merged.values()];
+  }, [data, providers, runtimeModels, preview]);
   const availableBySelector = useMemo(() => {
     const map = new Map<string, AvailableModelRecord>();
     for (const model of data?.availableModels ?? []) map.set(model.selector, model);
@@ -3159,6 +3178,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
             selector: entry.selector,
             name: entry.name,
             reasoning: entry.reasoning,
+            ...(entry.kind === undefined ? {} : { kind: entry.kind }),
+            ...(entry.webSearch === undefined ? {} : { webSearch: entry.webSearch }),
             image: entry.image,
             tools: entry.tools,
             ...(entry.contextWindow === undefined ? {} : { contextWindow: entry.contextWindow }),
@@ -3173,6 +3194,8 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
             selector: entry.selector,
             name: entry.name,
             reasoning: entry.reasoning,
+            ...(entry.kind === undefined ? {} : { kind: entry.kind }),
+            ...(entry.webSearch === undefined ? {} : { webSearch: entry.webSearch }),
             image: entry.image,
             tools: entry.tools,
             ...(entry.contextWindow === undefined ? {} : { contextWindow: entry.contextWindow }),
@@ -3182,8 +3205,9 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         }
       }
     }
+    for (const model of runtimeModels) map.set(model.selector, { ...model, ...map.get(model.selector) });
     return map;
-  }, [data, providers]);
+  }, [data, providers, runtimeModels]);
 
   return (
     <div className="page-wide" id="mcRoot">
@@ -3206,12 +3230,14 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
             <Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span>
             <span className={`chip ${webSearchReadyCount === 0 ? "amber" : "gray"} xs`}>{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span>
           </button>
+          <button role="tab" id="mcTabBenchmark" aria-controls="mcPanelBenchmark" aria-selected={tab === "benchmark"} tabIndex={tab === "benchmark" ? 0 : -1} className={tab === "benchmark" ? "active" : undefined} onClick={() => activate("benchmark")}><Icon name="pulse" extra="sm" /><span>{t("modelConfig.benchmarkTab")}</span></button>
           <span className="mc-tab-window" ref={tabWinRef} aria-hidden="true">
             <span className="mc-tab-mirror" ref={tabMirrorRef}>
               <button type="button" tabIndex={-1}><Icon name="server" extra="sm" /><span>{t("modelConfig.providersTab")}</span><span className={`chip ${availCount === 0 && providers.length > 0 ? "amber" : "gray"} xs`}>{providers.length}<span className="sr-only"> {t("modelConfig.providersCountAria", { count: providers.length })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="steering" extra="sm" /><span>{t("modelConfig.rolesTab")}</span><span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span><span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span><span className="chip gray xs">{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span></button>
+              <button type="button" tabIndex={-1}><Icon name="pulse" extra="sm" /><span>{t("modelConfig.benchmarkTab")}</span></button>
             </span>
           </span>
         </div>
@@ -3230,6 +3256,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
       {!preview && loadError ? <div className="role-issue-banner mc-page-banner"><Icon name="alert" extra="sm" /><div><div className="rib-title">{t("modelConfig.loadErrorTitle")}</div><div className="rib-text">{loadError}</div></div></div> : null}
 
       <div id="mcPanels" tabIndex={-1}>
+        <section id="mcPanelBenchmark" role="tabpanel" aria-labelledby="mcTabBenchmark" hidden={shownTab !== "benchmark"} className={tabPanelClass("benchmark")}>{shownTab === "benchmark" ? <BenchmarkPane client={client} sessionId={sessionId} workspaceId={workspaceId} available={runtimeAvailable} models={runtimeModels} /> : null}</section>
         <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} className={tabPanelClass("providers")}>
           <div className={editorLive ? `mc-view ${pagePhaseClass(editorPhase)}` : "mc-view"}>
           {editor ? (
@@ -4146,6 +4173,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
         </section>
 
         <section id="mcPanelRoles" role="tabpanel" aria-labelledby="mcTabRoles" hidden={shownTab !== "roles"} className={tabPanelClass("roles")}>
+          <AccountStatusPane client={client} />
           <RuntimeCredentials client={client} preview={preview} />
           <VisionModelStatus client={client} preview={preview} />
           <div className={roleLive ? `mc-view ${pagePhaseClass(rolePhase)}` : "mc-view"}>
@@ -4205,7 +4233,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                     <span className="v">
                       <RoleModelPicker
                         value={roleDraft.primary}
-                        groups={usableGroups}
+                        groups={groupModelsByProvider(usable.filter(model => modelAcceptsRole(roleDraft.id, model)), orderedProviders)}
                         onChange={(primary) => setRoleDraft(withRoleModel(roleDraft, primary, availableBySelector.get(primary)))}
                       />
                     </span>
@@ -4237,11 +4265,13 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                   </div>
                 </div>
                 <div className="cycle-pool" style={{ marginTop: 8 }}>
-                  {(fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? []).map((selector) => (
+                  {(fallbackDraft ?? data?.fallbackChains[roleDraft.id] ?? data?.fallbackChains[roleDraft.primary] ?? []).map((selector, index, chain) => (
                     <span key={selector} className="cycle-chip">
                       <span className="mono">{selector}</span>
+                      <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveUp")} disabled={index === 0} onClick={() => { const next = [...chain]; [next[index - 1], next[index]] = [next[index]!, next[index - 1]!]; setFallbackDraft(next); }}><Icon name="chevron-u" extra="sm" /></button>
+                      <button type="button" className="icon-btn small" aria-label={t("modelConfig.moveDown")} disabled={index === chain.length - 1} onClick={() => { const next = [...chain]; [next[index + 1], next[index]] = [next[index]!, next[index + 1]!]; setFallbackDraft(next); }}><Icon name="chevron-d" extra="sm" /></button>
                       <span className="chip-remove" role="button" tabIndex={0} onClick={() => {
-                        const current = fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? [];
+                        const current = fallbackDraft ?? data?.fallbackChains[roleDraft.id] ?? data?.fallbackChains[roleDraft.primary] ?? [];
                         setFallbackDraft(current.filter((item) => item !== selector));
                       }}><Icon name="x" /></span>
                     </span>
@@ -4249,15 +4279,11 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                 </div>
                 <div className="cycle-pool">
                   <span className="cycle-pool-label">{t("modelConfig.addToFallback")}</span>
-                  {usable.filter((model) => model.selector !== roleDraft.primary && !(fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? []).some(selector => selector.replace(/:(off|minimal|low|medium|high|xhigh|max)$/u, "") === model.selector)).slice(0, 12).map((model) => (
-                    <button type="button" key={model.selector} className="btn small outline" onClick={() => {
-                      const current = fallbackDraft ?? data?.fallbackChains[roleDraft.primary] ?? [];
-                      setFallbackDraft([...current, model.selector]);
-                    }}>{model.name}</button>
-                  ))}
+                  <RoleModelPicker ariaLabel={t("modelConfig.addToFallback")} value="" groups={groupModelsByProvider(usable.filter(model => modelAcceptsRole(roleDraft.id, model) && model.selector !== roleDraft.primary && !(fallbackDraft ?? data?.fallbackChains[roleDraft.id] ?? data?.fallbackChains[roleDraft.primary] ?? []).includes(model.selector)), orderedProviders)} onChange={selector => { if (selector) setFallbackDraft([...(fallbackDraft ?? data?.fallbackChains[roleDraft.id] ?? data?.fallbackChains[roleDraft.primary] ?? []), selector]); }} />
+
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <button type="button" className="btn small outline" disabled={busy || !roleDraft.primary} onClick={() => void saveFallback(roleDraft.primary)}>{t("modelConfig.saveFallback")}</button>
+                  <button type="button" className="btn small outline" disabled={busy || !roleDraft.primary} onClick={() => void saveFallback(roleDraft.id, roleDraft.primary)}>{t("modelConfig.saveFallback")}</button>
                 </div>
               </div>
               <StructuredEditor
@@ -4341,7 +4367,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
                       <>
                         <RoleModelPicker
                           value={role.primary}
-                          groups={usableGroups}
+                          groups={groupModelsByProvider(usable.filter(model => modelAcceptsRole(role.id, model)), orderedProviders)}
                           onChange={(primary) => { void saveRole(withRoleModel(role, primary, availableBySelector.get(primary))); }}
                         />
                         <select className="effort-select" value={thinking.value} disabled={thinking.disabled} aria-label={t("modelConfig.thinkingEffort")} onChange={(event) => {
@@ -4448,6 +4474,7 @@ export function ModelConfigPage({ client }: { client: StudioClient }) {
           <RuntimeCredentials client={client} preview={preview} providers={["exa", "ollama-cloud"]} />
           {data?.webSearch ? (
             <WebSearchPanel
+              models={usable}
               client={client}
               preview={preview}
               webSearch={data.webSearch}

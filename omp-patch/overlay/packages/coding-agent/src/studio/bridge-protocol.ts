@@ -1,4 +1,10 @@
 import {
+	isWorkbenchOperationKind,
+	validateWorkbenchOperation,
+	WORKBENCH_OPERATION_KINDS,
+	type WorkbenchOperation,
+} from "./workbench-protocol";
+import {
 	isUpgradeOperationKind,
 	validateUpgradeOperation,
 	UPGRADE_OPERATION_KINDS,
@@ -72,6 +78,7 @@ import type { EvaluationOperation } from "./evaluation-protocol";
 import { isEvaluationOperationKind, validateEvaluationOperation } from "./evaluation-validation";
 
 export type StudioOperation =
+	| WorkbenchOperation
 	| UpgradeOperation
 	| EvaluationOperation
 	| { kind: "runtime.snapshot" }
@@ -547,6 +554,14 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 	}
 	if (isEvaluationOperationKind(operation.kind)) {
 		validateEvaluationOperation(operation);
+		return input as unknown as StudioRequest;
+	}
+	if (typeof operation.kind === "string" && isWorkbenchOperationKind(operation.kind)) {
+		try {
+			validateWorkbenchOperation(operation);
+		} catch (error) {
+			throw new StudioFrameError(error instanceof Error ? error.message : "Invalid Runtime operation");
+		}
 		return input as unknown as StudioRequest;
 	}
 	if (typeof operation.kind === "string" && isUpgradeOperationKind(operation.kind)) {
@@ -1030,6 +1045,7 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 }
 
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
 	"runtime.pause",
 	"runtime.resume",

@@ -1,3 +1,4 @@
+import { WebRoleChain } from "./WebRoleChain";
 /**
  * Web Search configuration panel (4th tab of the model-config page).
  *
@@ -143,6 +144,7 @@ interface WebSearchPanelProps {
   readonly client: StudioClient;
   readonly preview: boolean;
   readonly webSearch: WebSearchConfigReadModel;
+  readonly models?: readonly import("@omp-studio/client-contract").AvailableModelRecord[];
   /** Real mode: whether in-app OAuth login is available on this Host. */
   readonly loginAvailable: boolean;
   /** Real mode: re-query the read model after a successful write. */
@@ -160,7 +162,7 @@ function credStateOf(provider: WebSearchProviderRecord | undefined): CredState {
   return provider.hasCredential ? "ready" : "missing";
 }
 
-export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onSaved, onPreviewSave }: WebSearchPanelProps) {
+export function WebSearchPanel({ client, preview, webSearch, models = [], loginAvailable, onSaved, onPreviewSave }: WebSearchPanelProps) {
   const { t } = useI18n();
   const [draft, setDraft] = useState<Draft>(() => draftFromReadModel(webSearch));
   const [busy, setBusy] = useState(false);
@@ -530,10 +532,8 @@ export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onS
     try {
       const input: ModelWebSearchSetInput = {
         enabled: draft.enabled,
-        order: draft.order,
-        exclude: draft.exclude,
+        ...(webSearch.routing ? {} : { order: draft.order, exclude: draft.exclude, geminiModel: draft.geminiModel.trim() }),
         timeoutSeconds: draft.timeoutSeconds,
-        geminiModel: draft.geminiModel.trim(),
         searxng: {
           endpoint: draft.searxngEndpoint.trim(),
           token: draft.searxngToken,
@@ -721,13 +721,14 @@ export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onS
             onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))}
           />
         </div>
-        <div className="wsx-chain">
+        {webSearch.routing ? null : <div className="wsx-chain">
           <span className="wsx-chain-label">{t("modelConfig.webSearchChainTitle")}</span>
           {chainChips}
-        </div>
+        </div>}
       </section>
 
-      <section className="wsx-section">
+      {webSearch.routing ? <WebRoleChain client={client} preview={preview} routing={webSearch.routing} models={models} onSaved={onSaved} onPreviewSave={routing => onPreviewSave({ ...webSearch, routing })} /> : (
+<section className="wsx-section">
         <div className="wsx-section-head">
           <div>
             <b>{t("modelConfig.webSearchPriorityTitle")}</b>
@@ -771,6 +772,7 @@ export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onS
         </div>
         {draft.order.length === 0 ? <div className="wsx-empty">{t("modelConfig.webSearchPriorityEmpty")}</div> : null}
       </section>
+      )}
 
       <section className="wsx-section">
         <div className="wsx-section-head">
@@ -791,7 +793,7 @@ export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onS
               ["missing", t("modelConfig.webSearchFilterMissing"), credCounts.missing],
               ["free", t("modelConfig.webSearchFilterFree"), credCounts.free],
               ["excluded", t("modelConfig.webSearchFilterExcluded"), credCounts.excluded],
-            ] as ReadonlyArray<[PoolFilter, string, number]>).map(([key, label, count]) => (
+            ] as ReadonlyArray<[PoolFilter, string, number]>).filter(([key]) => !webSearch.routing || key !== "excluded").map(([key, label, count]) => (
               <button key={key} type="button" className={`chip-btn${poolFilter === key ? " active" : ""}`} aria-pressed={poolFilter === key} onClick={() => setPoolFilter(key)}>
                 {label}<span className="chip gray xs">{count}</span>
               </button>
@@ -814,7 +816,7 @@ export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onS
                   {cred === "ready" ? t("modelConfig.webSearchCredReady") : cred === "free" ? t("modelConfig.webSearchCredFree") : t("modelConfig.webSearchCredMissing")}
                 </span>
                 <span className="wsx-row-actions">
-                  {excluded ? (
+                  {webSearch.routing ? null : excluded ? (
                     <>
                       <span className="wsx-excluded-label">{t("modelConfig.webSearchExcludedLabel")}</span>
                       <button type="button" className="btn small outline" onClick={() => restore(provider.id)}><Icon name="refresh" extra="sm" />{t("modelConfig.webSearchRestore")}</button>
@@ -846,7 +848,7 @@ export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onS
             </select>
             <em>{t("modelConfig.webSearchTimeoutDesc")}</em>
           </div>
-          <div className="wsx-field">
+          {webSearch.routing ? null : <div className="wsx-field">
             <span>{t("modelConfig.webSearchGeminiLabel")}</span>
             <input
               value={draft.geminiModel}
@@ -854,7 +856,7 @@ export function WebSearchPanel({ client, preview, webSearch, loginAvailable, onS
               onChange={(event) => setDraft((d) => ({ ...d, geminiModel: event.target.value }))}
             />
             <em>{t("modelConfig.webSearchGeminiDesc")}</em>
-          </div>
+          </div>}
         </div>
       </section>
 
