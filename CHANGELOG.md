@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Runtime 固定升级至 OMP v18.3.0（`18.3.0-studio.11`），同步模型种类、原生角色、按角色排列的回退链及旧版 web/judge 配置迁移。浏览器侧栏暂缓。[版本差异与适配范围](docs/migrations/omp-18.3.0.md)。
+- Runtime 固定升级至 OMP v18.3.0（`18.3.0-studio.12`），同步模型种类、原生角色、按角色排列的回退链及旧版 web/judge 配置迁移。浏览器侧栏暂缓。[版本差异与适配范围](docs/migrations/omp-18.3.0.md)。
 - Claude 重置券保留首次使用前询问，并通过 Studio 审批界面接收确认；默认不自动消耗。服务默认会话归属，保存不自动启动；删除会话默认保留媒体产物，级联删除须明确选择。
 - 流式工具回放改为有界增量存储；后台对话按可见目标降低中间更新频率，恢复窗口立即补齐，审批与终态保持即时。
 - 生产构建将代码高亮移到有界 Worker，保留即时显示的代码框；Mermaid 增加大小预算、串行队列、取消和缓存上限。开发模式保留旧高亮路径。

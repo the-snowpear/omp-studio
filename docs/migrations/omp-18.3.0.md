@@ -1,6 +1,6 @@
 # OMP 18.3.0 Runtime / Studio migration
 
-Status: local implementation and acceptance complete for 18.3.0-studio.11; prepared for Studio 0.1.7 publication at the user's request. Paid/cloud/production-write acceptance remains pending explicit authorization; see the final decision matrix.
+Status: local implementation and acceptance complete for 18.3.0-studio.12; prepared for Studio 0.1.7 publication at the user's request. Paid/cloud/production-write acceptance remains pending explicit authorization; see the final decision matrix.
 
 ## Fixed baseline and decisions
 
@@ -150,9 +150,9 @@ Some approved surfaces (Live, Skillshare, managed artifacts and media orchestrat
 
 ## Final local acceptance evidence
 
-- Canonical patchset: `18.3.0-studio.11`; upstream `62bc57be1b03ef0802a33cf7f5f530e534527531`. Root `npm run check` passed with **687 Renderer tests** and **388 Desktop tests**. Source/patch replay passed all four seam groups and 114 overlay files; vendor was restored clean and then reapplied.
+- Canonical patchset: `18.3.0-studio.12`; upstream `62bc57be1b03ef0802a33cf7f5f530e534527531`. Root `npm run check` passed with **687 Renderer tests** and **388 Desktop tests**. Source/patch replay passed all four seam groups and 114 overlay files; vendor was restored clean and then reapplied. The patchset includes Broker project-path canonicalization for Windows 8.3 temp paths.
 - Metadata gate: **47 passed** after updating the old-version assertion and synchronizing signed packaging with all **49 Workbench operations**. Signed binary probe matched capability and command hashes.
-- Patched Windows executable built with isolated Bun 1.4.2 and pinned Rust nightly; native smoke and authenticated Bridge probe passed. Local Ed25519 artifact: `packages/runtime-installer/dist/artifacts/win32-x64/18.3.0-studio.11/`.
+- Patched Windows executable built with isolated Bun 1.4.2 and pinned Rust nightly; native smoke and authenticated Bridge probe passed. Local Ed25519 artifact: `packages/runtime-installer/dist/artifacts/win32-x64/18.3.0-studio.12/`.
 - Isolated install/self-check/rollback/reactivation passed against available signed baseline `18.2.5-studio.6` (original source baseline was studio.9; no studio.9 artifact was in the local cache). Global OMP and the operator's installed runtime were not replaced.
 - Real Electron with context isolation and sandbox: fake-device PCM reached the private pipe; hiding closed it and ended microphone tracks. Recording/import produced 16 kHz mono PCM16 WAV, streamed through private `omp-artifact` Range requests and played successfully. Real PowerShell PTY recording saved output and resize events as `.studiocast`. Report: `output/playwright/electron-media-report.json`.
 - Full desktop composition connected the signed binary and read media models/tasks, Live state, benchmarks, templates, MCP readiness, services, tokens, installed Skillshare and accounts through the authenticated Bridge. The media page opened through the real menu. Cold startup now uses the same 30-second deadline as the compatibility probe. Report: `output/playwright/full-desktop-report.json`.

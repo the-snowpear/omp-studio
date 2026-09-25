@@ -420,9 +420,18 @@ index 79888b2951..2740b4e778 100644
  
  		// Execute the actual tool
 diff --git a/packages/coding-agent/src/launch/broker.ts b/packages/coding-agent/src/launch/broker.ts
-index 001003e923..a8f7c37526 100644
+index 001003e923..f905e41600 100644
 --- a/packages/coding-agent/src/launch/broker.ts
 +++ b/packages/coding-agent/src/launch/broker.ts
+@@ -13,7 +13,7 @@ import {
+ 	truncateTailBytes,
+ } from "@oh-my-pi/pi-tui/tools/streaming-output";
+ import { workerEnvFromParent } from "../subprocess/worker-client";
+-import { daemonBrokerEndpoint, writeDaemonScopeMeta } from "./paths";
++import { canonicalProjectDir, daemonBrokerEndpoint, writeDaemonScopeMeta } from "./paths";
+ import type { DaemonReadySpec, DaemonSnapshot, DaemonSpec } from "@oh-my-pi/pi-tui/tools/daemon";
+ import { hasLiveDaemonProjectPresence, pruneDeadDaemonRuntimeDirs } from "./presence";
+ import {
 @@ -618,12 +618,33 @@ class DaemonBroker {
  		}
  	}
@@ -614,6 +623,22 @@ index 001003e923..a8f7c37526 100644
  		const names = [...this.#records.keys()];
  		throw new Error(`Unknown daemon ${name}${names.length ? `. Available: ${names.join(", ")}` : ""}`);
  	}
+@@ -1490,9 +1523,13 @@ export interface DaemonBrokerStartOptions {
+ 
+ /** Start the detached project or global daemon broker selected by the CLI worker host. */
+ export async function startDaemonBrokerFromEnvironment(options: DaemonBrokerStartOptions = {}): Promise<void> {
+-	const projectDir = process.env[DAEMON_PROJECT_DIR_ENV];
++	const projectDirValue = process.env[DAEMON_PROJECT_DIR_ENV];
+ 	const runtimeDir = process.env[DAEMON_RUNTIME_DIR_ENV];
+-	if (!projectDir || !runtimeDir) throw new Error("Daemon broker environment is incomplete");
++	if (!projectDirValue || !runtimeDir) throw new Error("Daemon broker environment is incomplete");
++	// The client canonicalizes its project before hashing the Windows named pipe.
++	// Do the same here: CI and redirected temp roots may expose an 8.3 short path
++	// (for example RUNNER~1) while realpath returns the long path.
++	const projectDir = await canonicalProjectDir(projectDirValue);
+ 	delete process.env[DAEMON_PROJECT_DIR_ENV];
+ 	delete process.env[DAEMON_RUNTIME_DIR_ENV];
+ 	const rawGrace = process.env[DAEMON_IDLE_GRACE_ENV];
 diff --git a/packages/coding-agent/src/launch/protocol.ts b/packages/coding-agent/src/launch/protocol.ts
 index c78d539082..13c4b030eb 100644
 --- a/packages/coding-agent/src/launch/protocol.ts
