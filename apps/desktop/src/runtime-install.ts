@@ -155,6 +155,8 @@ export interface DesktopManagedInstallOptions {
   readonly pendingArtifact?: PendingArtifactRegistry;
   /** false in packaged builds: see {@link InstallerTrustedKeysOptions.environment}. Default true. */
   readonly environmentTrustedKeys?: boolean;
+  /** macOS: clears the quarantine flag on the installer's staged copy (see `platform/quarantine.ts`). */
+  readonly prepareStaging?: (directory: string) => Promise<void>;
 }
 
 export const PACKAGED_RUNTIME_ARTIFACT_DIR = "runtime";

@@ -56,7 +56,7 @@ import {
   type DesktopFacadeSeams,
   type DesktopRuntimeSessionPort,
 } from "./host-composition.js";
-import { createHostFileLog, defaultHostLogsDirectory } from "./host-log.js";
+import { createHostFileLog, defaultHostLogsDirectory, type HostLog } from "./host-log.js";
 import { startHostPerformance } from "./desktop-performance.js";
 import { createDesktopGitService } from "./git-service.js";
 import { createDesktopGithubService } from "./github-service.js";
@@ -72,6 +72,7 @@ import {
 import type { DesktopHostComposition, DesktopHostFactory } from "./types.js";
 import { desktopPaths, desktopSocketTmpRoot } from "./platform/desktop-paths.js";
 import type { LoginEnvironmentStatus } from "./platform/login-env.js";
+import { clearQuarantine } from "./platform/quarantine.js";
 import { createPosixAuthorityLiveness, createWin32AuthorityLiveness } from "./authority-liveness.js";
 
 const execFileAsync = promisify(execFile);
@@ -493,7 +494,7 @@ function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
 export const pendingRuntimeArtifact = createPendingArtifactRegistry();
 
 /** Packaged extraFiles layout; unpackaged keeps AppData runtimes + repo artifact discovery. */
-function productionManagedInstall(): DesktopManagedInstallOptions {
+function productionManagedInstall(hostLog: HostLog): DesktopManagedInstallOptions {
   const layout = packagedRuntimeInstallLayout({
     isPackaged: app.isPackaged,
     execPath: process.execPath,
@@ -505,6 +506,9 @@ function productionManagedInstall(): DesktopManagedInstallOptions {
     // Packaged builds trust only the keys they ship; env overrides are for development.
     environmentTrustedKeys: !app.isPackaged,
     activateOptions: { selfCheck: createSmokeTestRunner({ timeoutMs: 240_000 }) },
+    ...(process.platform === "darwin"
+      ? { prepareStaging: (directory: string) => clearQuarantine(directory, { warn: (detail) => hostLog.write("warn", "runtime.quarantine_clear", detail) }) }
+      : {}),
     ...(layout === undefined
       ? {}
       : {
@@ -654,7 +658,7 @@ export function createProductionHostFactory(options?: {
     authorityLockServices: createProductionAuthorityLockServices(),
     resolver: { probe: createProcessProbe() },
     runtimeSession,
-    managedInstall: productionManagedInstall(),
+    managedInstall: productionManagedInstall(hostLog),
     facade,
   };
   if (process.platform !== "win32" && process.platform !== "darwin") {
