@@ -107,6 +107,7 @@ describe("chrome-app-update", () => {
       const result = await checkGitHubReleaseUpdate({
         currentVersion: "0.1.3",
         fetcher: mockFetcher as any,
+        platform: "win32",
       });
 
       assert.ok(result !== null);
