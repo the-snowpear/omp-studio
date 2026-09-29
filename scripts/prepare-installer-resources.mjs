@@ -6,6 +6,7 @@ import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { verifySignedArtifact, RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest } from "@omp-studio/runtime-installer";
 import { resolveTargetArch, assertRuntimeManifestTarget, assertPeArchitecture } from "./windows-architecture.mjs";
+import { assertExecutableTarget, assertRuntimeManifestPlatform, resolveTargetPlatform, runtimeEntrypointFor } from "./target-platform.mjs";
 
 import {
   REPOSITORY_ROOT,
@@ -22,8 +23,19 @@ import {
 } from "./runtime-signing-keys.mjs";
 
 const TARGET_ARCH = resolveTargetArch();
-const PLATFORM = process.env.OMP_INSTALLER_ARTIFACT_PLATFORM ?? `win32-${TARGET_ARCH}`;
-if (PLATFORM !== `win32-${TARGET_ARCH}`) throw new Error(`Artifact platform ${PLATFORM} does not match target win32-${TARGET_ARCH}`);
+const TARGET = process.platform === "darwin" ? resolveTargetPlatform() : `win32-${TARGET_ARCH}`;
+const PLATFORM = process.env.OMP_INSTALLER_ARTIFACT_PLATFORM ?? TARGET;
+if (PLATFORM !== TARGET) throw new Error(`Artifact platform ${PLATFORM} does not match target ${TARGET}`);
+
+function assertArtifactTarget(directory, manifest, runtimeVersion) {
+  if (TARGET.startsWith("win32-")) {
+    assertRuntimeManifestTarget(manifest, TARGET_ARCH, runtimeVersion);
+    assertPeArchitecture(join(directory, "omp.exe"), TARGET_ARCH);
+    return;
+  }
+  assertRuntimeManifestPlatform(manifest, TARGET, runtimeVersion);
+  assertExecutableTarget(join(directory, runtimeEntrypointFor(TARGET)), TARGET);
+}
 const ARTIFACT_PLATFORM_DIR = resolve(
   process.env.OMP_ARTIFACT_DIR ?? join(REPOSITORY_ROOT, "packages", "runtime-installer", "dist", "artifacts", PLATFORM),
 );
@@ -46,14 +58,12 @@ async function resolveCurrentArtifact() {
   const nested = join(ARTIFACT_PLATFORM_DIR, runtimeVersion);
   if (await exists(join(nested, "runtime-manifest.json"))) {
     const manifest = JSON.parse(await readFile(join(nested, "runtime-manifest.json"), "utf8"));
-    assertRuntimeManifestTarget(manifest, TARGET_ARCH, runtimeVersion);
-    assertPeArchitecture(join(nested, "omp.exe"), TARGET_ARCH);
+    assertArtifactTarget(nested, manifest, runtimeVersion);
     return { runtimeVersion, source: nested };
   }
   if (await exists(join(ARTIFACT_PLATFORM_DIR, "runtime-manifest.json"))) {
     const manifest = JSON.parse(await readFile(join(ARTIFACT_PLATFORM_DIR, "runtime-manifest.json"), "utf8"));
-    assertRuntimeManifestTarget(manifest, TARGET_ARCH, runtimeVersion);
-    assertPeArchitecture(join(ARTIFACT_PLATFORM_DIR, "omp.exe"), TARGET_ARCH);
+    assertArtifactTarget(ARTIFACT_PLATFORM_DIR, manifest, runtimeVersion);
     return { runtimeVersion, source: ARTIFACT_PLATFORM_DIR };
   }
   throw new Error(

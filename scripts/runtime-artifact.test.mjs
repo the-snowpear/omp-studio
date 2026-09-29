@@ -415,6 +415,8 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.commit, REAL_UPSTREAM_COMMIT);
   assert.equal(series.upstreamCommit, upstream.commit);
   assert.equal(upstream.entrypoint, "omp.exe");
+  assert.deepEqual(upstream.entrypoints, { win32: "omp.exe", darwin: "omp" });
+  assert.deepEqual(upstream.platforms, ["win32-x64", "win32-arm64", "darwin-arm64"]);
   assert.equal(upstreamVersion, "18.3.0");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
@@ -548,7 +550,49 @@ test("real patch series contributes real patch content hashes", async () => {
   }
 });
 
-test("entrypoint must be omp.exe and the binary must match it", async () => {
+test("a macOS artifact is named omp regardless of the build machine", async () => {
+  const inputs = await fixtureInputs();
+  const binaryPath = join(inputs.root, "omp");
+  await writeFile(binaryPath, "fixture-binary-bytes\n");
+  const { manifest, checksums } = await generateRuntimeArtifact({
+    ...inputs,
+    binaryPath,
+    upstreamVersion: "17.2.12",
+    platform: "darwin-arm64",
+    outDirectory: join(inputs.root, "out-darwin"),
+  });
+  assert.equal(manifest.platform, "darwin-arm64");
+  assert.equal(manifest.entrypoint, "omp");
+  assert.deepEqual(Object.keys(checksums.files).sort(), ["omp", "runtime-manifest.json"]);
+  assert.ok(existsSync(join(inputs.root, "out-darwin", "omp")));
+  await assert.rejects(
+    generateRuntimeArtifact({
+      ...inputs,
+      upstreamVersion: "17.2.12",
+      platform: "darwin-arm64",
+      entrypoint: MANAGED_ENTRYPOINT,
+      outDirectory: join(inputs.root, "out-darwin-exe"),
+    }),
+    /for darwin-arm64 must be "omp"/u,
+  );
+});
+
+test("pin entrypoints and platforms must agree with the managed table", async () => {
+  const inputs = await fixtureInputs();
+  const generate = (upstream) =>
+    generateRuntimeArtifact({
+      ...inputs,
+      upstream,
+      upstreamVersion: "17.2.12",
+      platform: "win32-x64",
+      outDirectory: join(inputs.root, "out-pin"),
+    });
+  await assert.rejects(generate({ ...inputs.upstream, entrypoints: { win32: "omp.exe", darwin: "omp.exe" } }), /entrypoint for darwin/u);
+  await assert.rejects(generate({ ...inputs.upstream, entrypoints: { linux: "omp" } }), /entrypoint for linux/u);
+  await assert.rejects(generate({ ...inputs.upstream, platforms: ["win32-x64", "darwin-x64"] }), /darwin-x64 is not a supported/u);
+});
+
+test("entrypoint must match the artifact platform and the binary must match it", async () => {
   const inputs = await fixtureInputs();
   await assert.rejects(
     generateRuntimeArtifact({

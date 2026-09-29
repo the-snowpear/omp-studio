@@ -5,11 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest, verifySignedArtifact } from "@omp-studio/runtime-installer";
 import { repositoryRoot, ompSourceDirectory } from "./omp-tooling.mjs";
-import { assertPeArchitecture, resolveTargetArch } from "./windows-architecture.mjs";
+import { assertExecutableTarget, resolveTargetPlatform, runtimeOsOf } from "./target-platform.mjs";
 
-const arch = resolveTargetArch();
-const platform = `win32-${arch}`;
-if (process.platform !== "win32" || process.arch !== arch) throw new Error("Runtime source tests require the matching native Windows architecture");
+const platform = resolveTargetPlatform();
+if (`${process.platform}-${process.arch}` !== platform) throw new Error(`Runtime source tests require a native ${platform} host`);
+const nativeAddon = runtimeOsOf(platform) === "darwin"
+  ? /^pi_natives\.darwin-arm64\.node$/
+  : /^pi_natives\.win32-(?:x64|arm64)(?:-(?:modern|baseline))?\.node$/;
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
 const pin = await readJson(join(repositoryRoot, "omp-patch", "upstream.json"));
 const series = await readJson(join(repositoryRoot, "omp-patch", "patches", "series.json"));
@@ -38,12 +40,12 @@ try {
     env: { ...process.env, XDG_DATA_HOME: temp }, windowsHide: true, timeout: 120_000, stdio: "pipe",
   });
   const extracted = join(temp, "omp", "natives", natives.version);
-  const files = (await readdir(extracted)).filter((name) => /^pi_natives\.win32-(?:x64|arm64)(?:-(?:modern|baseline))?\.node$/.test(name));
+  const files = (await readdir(extracted)).filter((name) => nativeAddon.test(name));
   if (files.length === 0) throw new Error("Verified Runtime did not extract its native test dependency");
   const destination = join(ompSourceDirectory, "packages", "natives", "native");
   for (const filename of files) {
     const source = join(extracted, filename);
-    assertPeArchitecture(source, arch);
+    assertExecutableTarget(source, platform);
     await copyFile(source, join(destination, filename));
   }
   console.log(`Prepared ${files.length} native test addon(s) from verified Runtime ${version}`);

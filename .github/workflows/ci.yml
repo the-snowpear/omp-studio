@@ -32,3 +32,57 @@ jobs:
       - run: npm run check
       - run: npm run omp:test:metadata
       - run: npm run omp:verify:patches
+
+  macos:
+    name: macOS (arm64)
+    # Pinned on purpose: macos-14 retires 2026-11-02 and macos-latest already
+    # means macOS 26 with a different toolchain.
+    runs-on: macos-15
+    timeout-minutes: 60
+    # Non-blocking until the macOS socket-path and platform fixes land; then
+    # this becomes a required gate like the Windows job.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+      - run: npm ci
+      - run: npm run omp:install-deps
+      - run: npm run check
+      - run: npm run omp:test:metadata
+      - run: npm run omp:verify:patches
+
+  macos-runtime:
+    name: macOS Runtime build (arm64)
+    # Manual only: a full native + Bun build proves the darwin-arm64 artifact
+    # path end to end. The throwaway key never leaves the runner and nothing is
+    # published; release signing stays in release.yml.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 120
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          key: darwin-arm64
+      - run: npm ci
+      - run: npm run omp:install-deps
+      - run: npm run omp:overlay:apply
+      - run: npm run omp:keys
+      - run: npm run omp:build:host

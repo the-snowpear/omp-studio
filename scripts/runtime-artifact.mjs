@@ -29,9 +29,10 @@
 //
 // Entrypoint naming
 // -----------------
-// The managed Runtime CLI is always `omp.exe` on Windows (upstream pin).
-// `omp-studio.exe` is reserved for the future desktop application and is
-// rejected here.
+// The managed Runtime CLI is `omp.exe` on Windows and `omp` on macOS, chosen
+// from the artifact platform (never the build machine) through the shared
+// table in target-platform.mjs. `omp-studio.exe` is reserved for the desktop
+// application and is rejected here.
 
 import { createHash, sign as signPayload } from "node:crypto";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
@@ -39,10 +40,12 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { overlayHash } from "./omp-overlay.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
+import { RUNTIME_ENTRYPOINTS, UPDATE_PLATFORMS, runtimeEntrypointFor } from "./target-platform.mjs";
 
 export const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 
-export const MANAGED_ENTRYPOINT = "omp.exe";
+/** Windows entrypoint; other platforms resolve through `runtimeEntrypointFor(platform)`. */
+export const MANAGED_ENTRYPOINT = RUNTIME_ENTRYPOINTS.win32;
 
 // Must stay in sync with STUDIO_PROTOCOL_VERSION in
 // packages/studio-protocol/src/contracts/protocol.ts.
@@ -408,11 +411,20 @@ export async function readUpstreamPin(path = UPSTREAM_JSON_PATH) {
   if (!/^[a-f0-9]{40}$/u.test(commit)) {
     throw new TypeError(`upstream pin commit is not a 40-hex sha: ${commit}`);
   }
+  const entrypoint = requiredString(pin.entrypoint, "upstream pin entrypoint");
+  const entrypoints = pin.entrypoints === undefined ? { win32: entrypoint } : asRecord(pin.entrypoints, "upstream pin entrypoints");
+  const firstPlatform = requiredString(pin.firstPlatform, "upstream pin firstPlatform");
+  const platforms = pin.platforms === undefined ? [firstPlatform] : pin.platforms;
+  if (!Array.isArray(platforms) || platforms.length === 0 || platforms.some((platform) => typeof platform !== "string")) {
+    throw new TypeError("upstream pin platforms must be a non-empty array of platform strings");
+  }
   return {
     repository: requiredString(pin.repository, "upstream pin repository"),
     commit,
-    firstPlatform: requiredString(pin.firstPlatform, "upstream pin firstPlatform"),
-    entrypoint: requiredString(pin.entrypoint, "upstream pin entrypoint"),
+    firstPlatform,
+    entrypoint,
+    entrypoints: { ...entrypoints },
+    platforms: [...platforms],
   };
 }
 
@@ -458,6 +470,14 @@ export function assertPinConsistent(upstream, series) {
   if (upstream.entrypoint !== MANAGED_ENTRYPOINT) {
     throw new Error(`upstream pin entrypoint must be "${MANAGED_ENTRYPOINT}", found "${upstream.entrypoint}"`);
   }
+  for (const [os, name] of Object.entries(upstream.entrypoints ?? {})) {
+    if (!Object.hasOwn(RUNTIME_ENTRYPOINTS, os) || RUNTIME_ENTRYPOINTS[os] !== name) {
+      throw new Error(`upstream pin entrypoint for ${os} must match the managed table, found "${name}"`);
+    }
+  }
+  for (const platform of upstream.platforms ?? []) {
+    if (!UPDATE_PLATFORMS.includes(platform)) throw new Error(`upstream pin platform ${platform} is not a supported Runtime platform`);
+  }
 }
 
 export async function computePatchHashes(patchesDirectory, names) {
@@ -478,14 +498,15 @@ export async function buildManifest({
   binaryPath,
   patchesDirectory,
   platform,
-  entrypoint = MANAGED_ENTRYPOINT,
+  entrypoint = runtimeEntrypointFor(platform),
   channel = "stable",
   runtimeIdentity,
   overlay,
 }) {
-  if (entrypoint !== MANAGED_ENTRYPOINT) {
+  const managedEntrypoint = runtimeEntrypointFor(platform);
+  if (entrypoint !== managedEntrypoint) {
     throw new Error(
-      `Managed Runtime entrypoint must be "${MANAGED_ENTRYPOINT}"; "omp-studio.exe" is reserved for the desktop application`,
+      `Managed Runtime entrypoint for ${platform} must be "${managedEntrypoint}"; "omp-studio.exe" is reserved for the desktop application`,
     );
   }
   if (basename(binaryPath) !== entrypoint) {
@@ -547,7 +568,7 @@ export async function generateRuntimeArtifact({
   binaryPath,
   patchesDirectory,
   platform,
-  entrypoint = MANAGED_ENTRYPOINT,
+  entrypoint = runtimeEntrypointFor(platform),
   channel = "stable",
   signingKey,
   keyId,
@@ -643,7 +664,7 @@ function parseArgs(argv) {
 async function main(argv) {
   const args = parseArgs(argv);
   const platform = args.platform ?? `${process.platform}-${process.arch}`;
-  const entrypoint = args.entrypoint ?? MANAGED_ENTRYPOINT;
+  const entrypoint = args.entrypoint ?? runtimeEntrypointFor(platform);
   const channel = args.channel ?? "stable";
   const envSigningKeyPath = args.signingKey ?? process.env.OMP_RUNTIME_SIGNING_KEY;
   const envKeyId = args.keyId ?? process.env.OMP_RUNTIME_SIGNING_KEY_ID;
