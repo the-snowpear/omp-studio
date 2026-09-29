@@ -2,7 +2,7 @@
   "name": "omp-studio",
   "version": "0.1.7",
   "private": true,
-  "description": "Desktop console for OMP Runtime — typed Studio Bridge, Electron workbench, Windows installer",
+  "description": "Desktop console for OMP Runtime — typed Studio Bridge, Electron workbench, Windows installer and macOS app",
   "license": "MIT",
   "author": "snowpear",
   "homepage": "https://github.com/the-snowpear/omp-studio",

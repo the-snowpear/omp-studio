@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- macOS（Apple Silicon，macOS 13+）桌面：
+  - `npm run pack:mac` 产出 ad hoc 签名的 `.app`、首装 `.dmg` 和应用内更新用 zip。内置已签名的 `omp` Runtime，并由 `audit-mac` 审计，任一项不符即失败。
+  - 窗口外观：左侧红绿灯；原生菜单栏，同时保留窗口内菜单；⌘ 快捷键与符号标签。
+  - 生命周期：关窗留在 Dock，点 Dock 重开；按需阻止 App Nap；关机与注销不被拦截；不在“应用程序”文件夹时提示移动。
+  - 本机工具：导入登录 shell 环境，探测 Command Line Tools，终端以 login shell 启动；支持访达、VS Code / Cursor 打开；麦克风授权（TCC）有引导。
+- macOS 应用内更新对齐 v2：
+  - 整包 zip 按 blockmap 差分下载，新版本在界面就绪后才提交；
+  - 新版本启动失败时自动换回上一版本，同一文件不再推送；
+  - Runtime 独立更新照常可用，激活前核对代码签名。
+- 发布流水线可选（`include_macos`）构建 darwin-arm64 候选。资产包括：
+  - `OMP-Studio-<ver>-macos-arm64.zip` / `.dmg`；
+  - `OMP-Studio-Runtime-<rv>-macos-arm64.zip`；
+  - `updates-darwin-arm64.json`。
+
+  Windows 资产名不变。
+
+### Changed
+
+- Runtime overlay 升至 `studio.13`：Host 丢失时 Runtime 自行退出（macOS 父进程看门狗），Live 音频改用短 socket 路径，会话 telemetry 采用 macOS 路径规则。
+- 标题栏按 Window Controls Overlay 的实际区域让位：修正 Windows 上右侧的过度留白，以及标题栏提示气泡被误翻到下方。
+- 产品文案不再写死“Windows”，文件管理器名称按平台显示（资源管理器 / 访达）。
+
+### Fixed
+
+- 导航守卫改挂到 `webContents`：此前挂在 BrowserWindow 上，实际从未生效。外部 http(s) 链接改由系统浏览器打开。
+- 权限请求只对可信渲染页放行；打包版只信任随包公钥，开发用的环境变量覆盖只在未打包时生效。
+- 模型配置解析 agent 目录的方式与 Runtime 一致。
+
 ## [0.1.7] - 2026-09-25
 
 ### Added

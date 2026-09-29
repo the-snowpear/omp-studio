@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Desktop console for OMP Runtime</strong><br>
-  Typed Studio Bridge · Electron workbench · Windows first
+  Typed Studio Bridge · Electron workbench · Windows / macOS
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
   <a href="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml"><img src="https://github.com/the-snowpear/omp-studio/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.6-informational.svg" alt="0.1.6"></a>
-  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows-0078D4.svg" alt="Windows"></a>
+  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078D4.svg" alt="Windows | macOS"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/node-%3E%3D22-339933.svg" alt="Node 22+"></a>
   <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-Community-FFB003.svg" alt="LINUX DO"></a>
 </p>
@@ -86,6 +86,8 @@ The right-hand Git panel stages, diffs, and commits next to the conversation. Fe
 
 > [!TIP]
 > **Installation & Getting Started:** Windows users can download the latest installer (`OMP-Studio-Setup-0.1.6-windows-x64.exe`) directly from [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases), or run from source following the instructions below. Please file any bugs or suggestions as [Issues](https://github.com/the-snowpear/omp-studio/issues).
+>
+> **macOS (Apple Silicon, macOS 13+):** when a release ships `OMP-Studio-<version>-macos-arm64.dmg`, open it and drag OMP Studio into Applications. It is an ad hoc signed, not yet notarized preview: macOS blocks the first launch, so choose "Open Anyway" in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"`. You can also run from source or build it with `npm run pack:mac`, see [docs/getting-started.md](docs/getting-started.md).
 
 ## What it does
 
@@ -106,7 +108,7 @@ npm install
 npm run preview
 ```
 
-Or double-click `preview.cmd` at the repo root.
+On Windows you can also double-click `preview.cmd` at the repo root. macOS needs the Xcode Command Line Tools; the steps are otherwise the same.
 
 Attach a real Runtime (slow the first time):
 
@@ -129,7 +131,7 @@ packages/             protocol, Host, client, transports, platform
 omp-patch/overlay     Studio-owned Runtime sources
 omp-patch/patches     seam patches on upstream files (do not hand-edit)
 omp-patch/vendor      oh-my-pi submodule (commit the gitlink only)
-packaging/            Windows NSIS installer skeleton
+packaging/            Windows NSIS installer skeleton; macOS signing setup (packaging/mac)
 ui_reference/ver1     visual reference, not product code
 docs/                 user and contributor docs
 ```
@@ -158,7 +160,7 @@ Invariants (see [docs/architecture.md](docs/architecture.md)):
 | [docs/getting-started.md](docs/getting-started.md) | Run from source |
 | [docs/development.md](docs/development.md) | Inner loop, preview mode, patch regen |
 | [docs/architecture.md](docs/architecture.md) | Packages and invariants |
-| [docs/releasing.md](docs/releasing.md) | Version, tag, installer |
+| [docs/releasing.md](docs/releasing.md) | Version, tag, Windows installer, macOS build |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to open a PR |
 | [SECURITY.md](SECURITY.md) | Vulnerability disclosure |
 | [CHANGELOG.md](CHANGELOG.md) | User-facing history |

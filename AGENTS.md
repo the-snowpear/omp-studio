@@ -2,11 +2,11 @@
 
 ## 项目目标
 
-OMP Studio 是 OMP Runtime / AgentSession 的 Windows 桌面控制台与配套 Web UI。它通过类型化的 Studio Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
+OMP Studio 是 OMP Runtime / AgentSession 的桌面控制台（Windows 与 macOS Apple Silicon）与配套 Web UI。它通过类型化的 Studio Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
 
 主要结构：
 
-- `apps/desktop/`：Electron 主进程与 Windows 桌面壳。
+- `apps/desktop/`：Electron 主进程与 Windows / macOS 桌面壳；平台差异集中在 `apps/desktop/src/platform/`。
 - `apps/renderer/`：Vite + React 渲染进程 UI。
 - `packages/`：协议、host、客户端、transport、平台和测试工具包。
 - `omp-patch/overlay/`：Studio 自有的 Runtime 源码（`packages/coding-agent/src/studio/**` 与 `studio-*` 测试），上游没有这些路径，按普通源码维护。

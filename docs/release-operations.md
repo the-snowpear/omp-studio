@@ -27,6 +27,12 @@ are stored in the repository, project backup, release assets, or this document.
 Preserve this directory in a separately managed encrypted offline backup.
 GitHub cannot return the plaintext secret later.
 
+The opt-in macOS release job (`build-macos`) reads the same environment secret.
+It writes the key to `$RUNNER_TEMP` with owner-only permissions for one step
+and deletes it on exit; macOS builds add no second trust root. Apple signing
+credentials (Developer ID, notarization) are a separate set that is not
+configured yet.
+
 The previous public key `omp-studio-release-2026a` remains trusted. Its
 matching private key was not available; the default local development key
 did not match it. Consequently this is a full-Setup bootstrap of a new
