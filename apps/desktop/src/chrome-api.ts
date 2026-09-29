@@ -53,6 +53,15 @@ import {
 } from "./chrome-updates-shared.js";
 import type { UpdatePrefs } from "./update-prefs-store.js";
 import { MEDIA_UPLOAD_CHANNELS, type MediaUploadInput, type MediaUploadResult } from "./media-upload-shared.js";
+import { APP_MENU_COMMAND_CHANNEL, isAppMenuCommand, type AppMenuCommand } from "./app-menu-shared.js";
+import { CHROME_MEDIA_ACCESS_CHANNELS, type MicrophoneAccess } from "./chrome-media-access-shared.js";
+
+/** The OS the renderer runs on; anything but Windows and macOS reports "linux". */
+export type ChromePlatform = "win32" | "darwin" | "linux";
+
+export function chromePlatform(platform: string): ChromePlatform {
+  return platform === "win32" || platform === "darwin" ? platform : "linux";
+}
 
 export interface IpcRendererLike {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
@@ -78,8 +87,22 @@ export function subscribeChannel<T>(
   };
 }
 
-export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike) {
+export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?: WebUtilsLike, platform: string = process.platform) {
   return Object.freeze({
+    /** Fixed at preload time; renderer code reads it through `apps/renderer/src/platform.ts`. */
+    platform: chromePlatform(platform),
+    /** macOS menu bar commands; ids outside the allowlist are dropped here. */
+    onMenuCommand(listener: (command: AppMenuCommand) => void): () => void {
+      return subscribeChannel<unknown>(ipcRenderer, APP_MENU_COMMAND_CHANNEL, (command) => {
+        if (isAppMenuCommand(command)) listener(command);
+      });
+    },
+    requestMicrophoneAccess(): Promise<MicrophoneAccess> {
+      return ipcRenderer.invoke(CHROME_MEDIA_ACCESS_CHANNELS.microphone) as Promise<MicrophoneAccess>;
+    },
+    openMicrophoneSettings(): Promise<boolean> {
+      return ipcRenderer.invoke(CHROME_MEDIA_ACCESS_CHANNELS.openMicrophoneSettings) as Promise<boolean>;
+    },
     revealSkillshareToken(input: { secretId: string; sessionId: string }): Promise<SkillshareTokenReveal> { return ipcRenderer.invoke(SKILLSHARE_TOKEN_CHANNEL, input) as Promise<SkillshareTokenReveal>; },
     attachLiveAudio(input: LiveAudioAttach): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.attach, input) as Promise<LiveAudioResult>; },
     appendLiveAudio(input: LiveAudioChunk): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.chunk, input) as Promise<LiveAudioResult>; },

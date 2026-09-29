@@ -55,6 +55,35 @@ test("darwin picks the first existing app CLI", () => {
   assert.deepEqual([...command.argsFor("/Users/dev/repo")], ["/Users/dev/repo"]);
 });
 
+test("darwin also finds ~/Applications bundles, Insiders and CLI shims on the login PATH, one per editor", () => {
+  const files = new Set([
+    "/Users/dev/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders",
+    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+    "/opt/homebrew/bin/cursor",
+    "/opt/homebrew/bin/code",
+  ]);
+  const commands = listExternalEditorCommands({
+    platform: "darwin",
+    env: { PATH: "/usr/bin:/opt/homebrew/bin" },
+    homedir: "/Users/dev",
+    exists: (path) => files.has(path),
+  });
+  assert.deepEqual(
+    commands.map((command) => [command.id, command.label, command.file]),
+    [
+      ["vscode", "Visual Studio Code", "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"],
+      ["cursor", "Cursor", "/opt/homebrew/bin/cursor"],
+    ],
+  );
+  const insidersOnly = listExternalEditorCommands({
+    platform: "darwin",
+    env: {},
+    homedir: "/Users/dev",
+    exists: (path) => path.includes("Insiders"),
+  });
+  assert.equal(insidersOnly[0]?.label, "Visual Studio Code - Insiders");
+});
+
 test("linux defaults to the VS Code PATH command", () => {
   const command = resolveExternalEditorCommand({ platform: "linux", env: {}, exists: () => false });
   assert.ok(command);

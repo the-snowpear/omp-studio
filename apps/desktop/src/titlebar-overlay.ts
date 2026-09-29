@@ -1,5 +1,6 @@
 /**
- * Native Windows caption-button overlay.
+ * Native Windows caption-button overlay. macOS keeps its traffic lights, so
+ * only the window background and native theme follow the renderer there.
  * Colors stay in lockstep with renderer `.app-titlebar` (`--bg` / `--text`).
  * This file is Main-only: preload must not import it (sandbox).
  */
@@ -11,6 +12,7 @@ import {
   TITLEBAR_OVERLAY_HEIGHT,
   type TitlebarTheme,
 } from "./titlebar-overlay-shared.js";
+import { canRecolorTitleBarOverlay } from "./platform/window-chrome.js";
 
 export {
   TITLEBAR_OVERLAY,
@@ -22,9 +24,10 @@ export {
 export function applyTitleBarOverlay(
   window: { setTitleBarOverlay?(options: { color: string; symbolColor: string; height: number }): void; setBackgroundColor?(color: string): void },
   theme: TitlebarTheme,
+  platform: NodeJS.Platform = process.platform,
 ): void {
   const colors = TITLEBAR_OVERLAY[theme];
-  window.setTitleBarOverlay?.({ ...colors, height: TITLEBAR_OVERLAY_HEIGHT });
+  if (canRecolorTitleBarOverlay(platform)) window.setTitleBarOverlay?.({ ...colors, height: TITLEBAR_OVERLAY_HEIGHT });
   window.setBackgroundColor?.(colors.color);
   nativeTheme.themeSource = theme;
 }

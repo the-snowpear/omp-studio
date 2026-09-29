@@ -304,6 +304,10 @@ describe("createOmpStudioChromeApi: fixed named surface, frozen object", () => {
     assert.ok(Object.isFrozen(chromeApi));
 
     const expectedMethods = [
+      "platform",
+      "onMenuCommand",
+      "requestMicrophoneAccess",
+      "openMicrophoneSettings",
       "applyUpdate",
       "cancelUpdate",
       "chooseArtifactDirectory", "importArtifact", "exportArtifact",
@@ -351,5 +355,31 @@ describe("createOmpStudioChromeApi: fixed named surface, frozen object", () => {
     ].sort();
 
     assert.deepEqual(Object.keys(chromeApi).sort(), expectedMethods);
+  });
+
+  test("the platform is fixed at preload time and anything but Windows or macOS reads as linux", () => {
+    const fakeIpc = { invoke: async () => undefined, on: () => {}, removeListener: () => {} };
+    assert.equal(createOmpStudioChromeApi(fakeIpc, undefined, "darwin").platform, "darwin");
+    assert.equal(createOmpStudioChromeApi(fakeIpc, undefined, "win32").platform, "win32");
+    assert.equal(createOmpStudioChromeApi(fakeIpc, undefined, "freebsd").platform, "linux");
+  });
+
+  test("menu commands arrive only from the fixed channel and only when allowlisted", () => {
+    const listeners = new Map<string, (event: unknown, payload: unknown) => void>();
+    const fakeIpc = {
+      invoke: async () => undefined,
+      on: (channel: string, listener: (event: unknown, payload: unknown) => void) => { listeners.set(channel, listener); },
+      removeListener: (channel: string) => { listeners.delete(channel); },
+    };
+    const received: string[] = [];
+    const unsubscribe = createOmpStudioChromeApi(fakeIpc, undefined, "darwin").onMenuCommand((command) => received.push(command));
+    const deliver = listeners.get("omp-studio:desktop:menu-command");
+    assert.ok(deliver);
+    deliver({}, "view.commandPalette");
+    deliver({}, "app.runArbitraryCode");
+    deliver({}, { command: "file.newChat" });
+    assert.deepEqual(received, ["view.commandPalette"]);
+    unsubscribe();
+    assert.equal(listeners.has("omp-studio:desktop:menu-command"), false);
   });
 });

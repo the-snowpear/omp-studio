@@ -12,6 +12,8 @@ import * as path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { describe, test } from "node:test";
 
+import { resolveTrayIconPath } from "../src/app-icon.js";
+
 import {
   createAppTray,
   firstHideBalloonStrings,
@@ -127,10 +129,15 @@ async function until(condition: () => boolean): Promise<void> {
 
 describe("tray copy", () => {
   test("zh locales use Chinese, everything else English", () => {
-    assert.deepEqual(trayStrings("zh-CN"), { tooltip: "OMP Studio", open: "打开页面", quit: "退出" });
-    assert.deepEqual(trayStrings("zh_TW"), trayStrings("zh-CN"));
-    assert.deepEqual(trayStrings("en-US"), { tooltip: "OMP Studio", open: "Open", quit: "Quit" });
-    assert.deepEqual(trayStrings("de-DE"), trayStrings("en-US"));
+    assert.deepEqual(trayStrings("zh-CN", "win32"), { tooltip: "OMP Studio", open: "打开页面", quit: "退出" });
+    assert.deepEqual(trayStrings("zh_TW", "win32"), trayStrings("zh-CN", "win32"));
+    assert.deepEqual(trayStrings("en-US", "win32"), { tooltip: "OMP Studio", open: "Open", quit: "Quit" });
+    assert.deepEqual(trayStrings("de-DE", "win32"), trayStrings("en-US", "win32"));
+  });
+
+  test("macOS names the app in the menu, which opens on click instead of the window", () => {
+    assert.deepEqual(trayStrings("zh-CN", "darwin"), { tooltip: "OMP Studio", open: "打开 OMP Studio", quit: "退出 OMP Studio" });
+    assert.deepEqual(trayStrings("en-US", "darwin"), { tooltip: "OMP Studio", open: "Open OMP Studio", quit: "Quit OMP Studio" });
   });
 
   test("quit dialog: cancel is the default, quit must be explicit", () => {
@@ -160,7 +167,7 @@ describe("tray copy", () => {
 
 test("menu template wires open and quit through a separator", () => {
   const calls: string[] = [];
-  const template = trayMenuTemplate(trayStrings("zh-CN"), {
+  const template = trayMenuTemplate(trayStrings("zh-CN", "win32"), {
     open: () => calls.push("open"),
     quit: () => calls.push("quit"),
   });
@@ -309,4 +316,16 @@ test("hint marker round-trips under the %APPDATA% root", async () => {
     const stat = await fs.stat(path.join(persistRoot, TRAY_HINT_FILE_NAME));
     assert.equal(stat.isFile(), true);
   });
+});
+
+test("the macOS menu bar uses the template image, packaged or in development; Windows keeps the app icon", () => {
+  const packaged = "/Applications/OMP Studio.app/Contents/Resources/darwin/trayTemplate.png";
+  assert.equal(
+    resolveTrayIconPath({ appPath: "/Applications/OMP Studio.app/Contents/Resources/app.asar", platform: "darwin", exists: (file) => file.replaceAll("\\", "/") === packaged }),
+    path.join("/Applications/OMP Studio.app/Contents/Resources/app.asar", "..", "darwin", "trayTemplate.png"),
+  );
+  const development = path.join("/repo/apps/desktop", "resources-darwin", "trayTemplate.png");
+  assert.equal(resolveTrayIconPath({ appPath: "/repo/apps/desktop", platform: "darwin", exists: (file) => file === development }), development);
+  const windowsIcon = path.join("C:/app/resources/app.asar", "..", "icon.ico");
+  assert.equal(resolveTrayIconPath({ appPath: "C:/app/resources/app.asar", platform: "win32", exists: (file) => file === windowsIcon }), windowsIcon);
 });

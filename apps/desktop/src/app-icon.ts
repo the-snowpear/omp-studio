@@ -35,3 +35,24 @@ export function resolveAppIconPath(options: {
   }
   return undefined;
 }
+
+/**
+ * Tray icon. macOS menu bars need a monochrome template image
+ * (`resources-darwin/trayTemplate.png` + `@2x`, packaged under
+ * `Resources/darwin`); the "Template" suffix lets the system tint it. Other
+ * platforms reuse the app icon.
+ */
+export function resolveTrayIconPath(options: {
+  readonly appPath: string;
+  readonly platform: NodeJS.Platform;
+  readonly exists?: (path: string) => boolean;
+}): string | undefined {
+  if (options.platform !== "darwin") return resolveAppIconPath(options);
+  const exists = options.exists ?? existsSync;
+  const candidates = [
+    join(options.appPath, "..", "darwin", "trayTemplate.png"),
+    join(options.appPath, "resources-darwin", "trayTemplate.png"),
+    join(options.appPath, "apps", "desktop", "resources-darwin", "trayTemplate.png"),
+  ];
+  return candidates.find((path) => exists(path)) ?? resolveAppIconPath(options);
+}

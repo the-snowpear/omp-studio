@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { ServiceDefinitionStore, type SecretCodec } from "../src/service-definitions.js";
+import { SecureStorageLockedError, ServiceDefinitionStore, type SecretCodec } from "../src/service-definitions.js";
 
 function codec(): SecretCodec {
   const key = randomBytes(32);
@@ -32,4 +32,18 @@ test("service definitions are encrypted, scoped, and revision-fenced", async () 
 test("unavailable secret storage fails without writing plaintext", async () => {
   const store = new ServiceDefinitionStore("unused", { ...codec(), available: () => false });
   await assert.rejects(store.save({ workspaceId: "w", spec: { name: "s", command: "echo hi" } }), /unavailable/);
+});
+test("a locked Keychain fails recoverably and never rewrites the stored configurations", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "studio-service-defs-"));
+  try {
+    const file = join(directory, "services.enc");
+    const working = codec();
+    await new ServiceDefinitionStore(file, working).save({ workspaceId: "w", spec: { name: "server", command: "npm run dev" } });
+    const before = await readFile(file);
+    const locked = new ServiceDefinitionStore(file, { ...working, decrypt: () => { throw new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString."); } });
+    await assert.rejects(locked.list("w"), SecureStorageLockedError);
+    await assert.rejects(locked.save({ workspaceId: "w", spec: { name: "other", command: "echo hi" } }), SecureStorageLockedError);
+    assert.deepEqual(await readFile(file), before);
+    assert.equal((await new ServiceDefinitionStore(file, working).list("w")).length, 1);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

@@ -1,5 +1,5 @@
 import type { ChromeImageIpcMain, ChromeImageSender } from "./chrome-image.js";
-import { ServiceDefinitionStore, validateDefinitionInput } from "./service-definitions.js";
+import { SecureStorageLockedError, ServiceDefinitionStore, validateDefinitionInput } from "./service-definitions.js";
 import { CHROME_SERVICE_CHANNELS, type ServiceDefinitionResult } from "./chrome-services-shared.js";
 
 export function registerServiceDefinitionsIpc(options: {
@@ -15,7 +15,14 @@ export function registerServiceDefinitionsIpc(options: {
         if (action === "save") await options.store.save(input);
         if (action === "remove") await options.store.remove(input);
         return { ok: true, definitions: await options.store.list(input.workspaceId) };
-      } catch { return { ok: false, message: "Cannot access service configurations. Refresh and check secure local storage." }; }
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof SecureStorageLockedError
+            ? "Secure storage is locked. Allow OMP Studio when the system asks for Keychain access, then refresh. Saved configurations are kept."
+            : "Cannot access service configurations. Refresh and check secure local storage.",
+        };
+      }
     });
   }
   return { dispose: () => Object.values(CHROME_SERVICE_CHANNELS).forEach(channel => options.ipcMain.removeHandler(channel)) };

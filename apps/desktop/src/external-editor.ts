@@ -9,7 +9,10 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { homedir as osHomedir } from "node:os";
+import { basename, dirname, join, posix } from "node:path";
+
+import { resolveCommandOnPath } from "./platform/developer-tools.js";
 
 export type ExternalEditorId = "vscode" | "cursor" | "windsurf";
 
@@ -25,6 +28,8 @@ export interface ResolveExternalEditorOptions {
   readonly platform?: NodeJS.Platform;
   readonly env?: NodeJS.ProcessEnv;
   readonly exists?: (path: string) => boolean;
+  /** macOS `~/Applications`; defaults to the user's home. */
+  readonly homedir?: string;
 }
 
 function asCommand(id: ExternalEditorId | undefined, label: string, file: string): ExternalEditorCommand {
@@ -68,12 +73,27 @@ export function listExternalEditorCommands(options: ResolveExternalEditorOptions
   }
 
   if (platform === "darwin") {
-    const families: ReadonlyArray<{ id: ExternalEditorId; label: string; file: string }> = [
-      { id: "vscode", label: "Visual Studio Code", file: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" },
-      { id: "cursor", label: "Cursor", file: "/Applications/Cursor.app/Contents/Resources/app/bin/cursor" },
-      { id: "windsurf", label: "Windsurf", file: "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf" },
+    // App bundles in /Applications or ~/Applications, then the CLI shims a
+    // Homebrew cask or "Install 'code' command in PATH" put on the login PATH.
+    const home = options.homedir ?? osHomedir();
+    const bundles: ReadonlyArray<{ id: ExternalEditorId; label: string; app: string; cli: string }> = [
+      { id: "vscode", label: "Visual Studio Code", app: "Visual Studio Code.app", cli: "code" },
+      { id: "vscode", label: "Visual Studio Code - Insiders", app: "Visual Studio Code - Insiders.app", cli: "code-insiders" },
+      { id: "cursor", label: "Cursor", app: "Cursor.app", cli: "cursor" },
+      { id: "windsurf", label: "Windsurf", app: "Windsurf.app", cli: "windsurf" },
     ];
-    return families.filter((candidate) => exists(candidate.file)).map((candidate) => asCommand(candidate.id, candidate.label, candidate.file));
+    const found: ExternalEditorCommand[] = [];
+    const add = (id: ExternalEditorId, label: string, file: string | undefined): void => {
+      if (file !== undefined && !found.some((command) => command.id === id)) found.push(asCommand(id, label, file));
+    };
+    for (const bundle of bundles) {
+      for (const root of ["/Applications", posix.join(home, "Applications")]) {
+        const file = posix.join(root, bundle.app, "Contents", "Resources", "app", "bin", bundle.cli);
+        if (exists(file)) add(bundle.id, bundle.label, file);
+      }
+    }
+    for (const bundle of bundles) add(bundle.id, bundle.label, resolveCommandOnPath(bundle.cli, env.PATH, exists));
+    return found;
   }
 
   // Linux: rely on PATH. `launchExternalEditor` maps ENOENT to a readable

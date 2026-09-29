@@ -22,6 +22,18 @@ export function validateDefinitionInput(raw: unknown, action: "list" | "save" | 
   else if (value.spec !== undefined || (action === "list" && value.id !== undefined)) throw new Error("Unexpected definition fields");
 }
 
+/**
+ * The OS refused to decrypt the store — on macOS the user denied Keychain
+ * access, or an ad-hoc signed update changed the app's identity. The file is
+ * left untouched so allowing access and refreshing recovers everything.
+ */
+export class SecureStorageLockedError extends Error {
+  constructor() {
+    super("Secure service configuration storage is locked");
+    this.name = "SecureStorageLockedError";
+  }
+}
+
 /** Encrypted local configurations, never an autostart file or a process supervisor. */
 export class ServiceDefinitionStore {
   #queue: Promise<unknown> = Promise.resolve();
@@ -32,7 +44,10 @@ export class ServiceDefinitionStore {
     try { data = await readFile(this.file); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
     if (data.length > 8 * 1024 * 1024) throw new Error("Service configuration storage exceeds its limit");
-    const value: unknown = JSON.parse(this.codec.decrypt(data));
+    let plain: string;
+    try { plain = this.codec.decrypt(data); }
+    catch { throw new SecureStorageLockedError(); }
+    const value: unknown = JSON.parse(plain);
     if (!Array.isArray(value) || value.length > 200) throw new Error("Invalid service configuration storage");
     for (const row of value) { validateDefinitionInput({ workspaceId: row.workspaceId, id: row.id, revision: row.revision, spec: row.spec }, "save"); }
     return value as ServiceDefinition[];
