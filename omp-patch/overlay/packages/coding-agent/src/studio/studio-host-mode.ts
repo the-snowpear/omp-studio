@@ -63,6 +63,7 @@ import { StudioRuntimeSettingsService } from "./services/runtime-settings-servic
 import { StudioSessionTranscriptService } from "./services/session-transcript-service";
 import { StudioTanError, StudioTanService } from "./services/tan-service";
 import { StudioTreeService } from "./services/tree-service";
+import { watchStudioParentFromEnv } from "./parent-watchdog";
 
 export interface StudioBridgeConfiguration {
 	endpoint?: string;
@@ -221,6 +222,34 @@ export interface StudioHostModeDependencies {
 	workerIdleSleepMs?: number;
 	workerIdleRecycleMs?: number;
 	nowMs?: () => number;
+	/** Starts watching the desktop Host; defaults to the pid in `OMP_STUDIO_PARENT_PID`. */
+	watchParent?: (onLost: () => void) => () => void;
+	/** Hard-exit budget once the Host is gone; defaults to 15 s. */
+	hostLossExit?: { readonly delayMs: number; readonly exit: (code: number) => void };
+}
+
+/**
+ * The desktop Host is gone, so nobody will read results or answer prompts.
+ * Stop Live and the loop, abort the turn and shut down without the
+ * `runtime.shutdown` drain, which would wait for that turn to finish. A stuck
+ * cleanup cannot keep the process alive past the hard-exit budget.
+ */
+export function abortForHostLoss(
+	runtime: StudioHostRuntime,
+	hardExit: { readonly delayMs: number; readonly exit: (code: number) => void } = {
+		delayMs: 15_000,
+		exit: code => process.exit(code),
+	},
+): void {
+	logger.warn("Studio desktop host is gone; shutting the Runtime down");
+	const timer = setTimeout(() => hardExit.exit(1), hardExit.delayMs);
+	timer.unref?.();
+	try {
+		runtime.services.loop.disable();
+	} catch {}
+	void runtime.services.live.stop().catch(() => undefined);
+	void runtime.session.abort({ goalReason: "internal", reason: "OMP Studio exited" }).catch(() => undefined);
+	runtime.requestShutdown();
 }
 
 function sessionFileOf(session: AgentSession): string | null {
@@ -1242,6 +1271,9 @@ export async function runStudioHostMode(
 			: createStudioMainWorkerSupervisor(slot, runtime, dependencies);
 	supervisorRef.current = supervisor;
 	const unregisterCleanup = postmortem.register(`studio-host-bridge:${runtime.runtimeId}`, () => bridge.stop());
+	const stopParentWatch = (dependencies.watchParent ?? watchStudioParentFromEnv)(() =>
+		abortForHostLoss(runtime, dependencies.hostLossExit),
+	);
 
 	try {
 		await hydratePersistedStudioAgents(AgentRegistry.global(), sessionFileOf(slot));
@@ -1253,6 +1285,7 @@ export async function runStudioHostMode(
 		dependencies.setToolUIContext?.(createStudioRemoteUiFactory(runtime.services.interaction), true);
 		await runTui(runtime);
 	} finally {
+		stopParentWatch();
 		unregisterCleanup();
 		try {
 			await bridge.stop();
