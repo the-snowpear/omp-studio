@@ -198,6 +198,8 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | 外部编辑器 / 打开方式 | `external-editor.ts`；`main.ts` 打开方式 | macOS 查 `/Applications`、`~/Applications` 中的 VS Code / Insiders / Cursor / Windsurf，再查登录 PATH；「打开方式」选择框从 `/Applications` 开始；`rundll32` 仅 Windows |
 | 麦克风 / TCC | `chrome-media-access.ts`；renderer `media/microphoneAccess.tsx` | macOS 先查 `getMediaAccessStatus`，未决时 `askForMediaAccess`；拒绝后 renderer 提供「打开系统设置」（固定 URL）；其他平台不经这一步，采集时序不变 |
 | 钥匙串锁定 | `service-definitions.ts` `SecureStorageLockedError` | safeStorage 解密失败报可恢复的锁定错误，不清空已存数据 |
+| macOS 打包 | `scripts/pack-mac.mjs`、`mac-bundle.mjs`（由 `electron-builder.yml` 派生配置、TCC 用途字符串、ad hoc 签名选项）、`audit-mac.mjs`；`packaging/mac/*.plist`；`scripts/preload-bundle.mjs`（与 pack:win 共用） | `npm run pack:mac` 产出 ad hoc 签名 `.app`、首装 `.dmg`、`ditto` 更新 zip；Runtime 与公钥走 `Contents/Resources`，签名跳过 `runtime/**`；审计复验 Runtime 签名、`codesign --deep --strict`、zip 往返；说明见 `packaging/README.md` |
+| Runtime 副本去 quarantine | `apps/desktop/src/platform/quarantine.ts`；`runtime-installer` `prepareStaging` | macOS 从包内播种 Runtime 时，在安装器私有暂存副本上清除 `com.apple.quarantine`，随后照常 Ed25519 验签；签名 bundle 本身不动 |
 | Renderer 平台 | `apps/renderer/src/platform.ts`、`keyboard/shortcuts.ts`、`platformCopy.ts` | preload 冻结 `platform`，Web UI 回退 `navigator`；根元素 `data-platform`；⌘ / Ctrl 判定与标签（Windows 标签逐字不变）；「资源管理器 / 访达」文案；macOS 保留系统浮动滚动条 |
 
 macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-DD.log`。

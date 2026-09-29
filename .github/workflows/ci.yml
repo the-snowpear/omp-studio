@@ -58,10 +58,12 @@ jobs:
       - run: npm run omp:verify:patches
 
   macos-runtime:
-    name: macOS Runtime build (arm64)
+    name: macOS Runtime build + pack (arm64)
     # Manual only: a full native + Bun build proves the darwin-arm64 artifact
-    # path end to end. The throwaway key never leaves the runner and nothing is
-    # published; release signing stays in release.yml.
+    # path end to end, then pack:mac builds and audits the ad hoc signed app.
+    # The throwaway key never leaves the runner and nothing is published; the
+    # dmg and update zip are kept for a week for on-device testing only.
+    # Release signing stays in release.yml.
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 120
@@ -86,3 +88,19 @@ jobs:
       - run: npm run omp:overlay:apply
       - run: npm run omp:keys
       - run: npm run omp:build:host
+      # The Runtime above is signed with the throwaway key, so the app must
+      # trust that key rather than the release keys in packaging/keys.
+      - name: Pack and audit the ad hoc signed app
+        run: |
+          keys="$HOME/Library/Application Support/omp-studio/keys"
+          export OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$keys/trusted-public.pem"
+          export OMP_RUNTIME_SIGNING_KEY_ID="$(tr -d '[:space:]' < "$keys/key-id.txt")"
+          npm run pack:mac -- --skip-host
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omp-studio-macos-arm64-adhoc
+          path: |
+            outputs/installer-mac/*.dmg
+            outputs/installer-mac/*.zip
+          retention-days: 7
+          if-no-files-found: error
