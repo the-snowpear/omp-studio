@@ -153,6 +153,8 @@ export interface DesktopManagedInstallOptions {
    */
   readonly seedOnStart?: boolean;
   readonly pendingArtifact?: PendingArtifactRegistry;
+  /** false in packaged builds: see {@link InstallerTrustedKeysOptions.environment}. Default true. */
+  readonly environmentTrustedKeys?: boolean;
 }
 
 export const PACKAGED_RUNTIME_ARTIFACT_DIR = "runtime";
@@ -248,11 +250,23 @@ async function readTrustedKeysDirectory(
   }
 }
 
+export interface InstallerTrustedKeysOptions {
+  /**
+   * Honour `OMP_RUNTIME_TRUSTED_PUBLIC_KEY` + `OMP_RUNTIME_SIGNING_KEY_ID`,
+   * which replace the whole trust root. Development only: packaged builds pass
+   * false, so an environment variable (a shell profile on macOS reaches the
+   * app through the login environment) can never make a foreign Runtime
+   * signature trusted.
+   */
+  readonly environment?: boolean;
+}
+
 export async function loadInstallerTrustedKeys(
   keysDirectory: string | readonly string[] = defaultRuntimeKeysDirectory(),
+  options: InstallerTrustedKeysOptions = {},
 ): Promise<{ trustedKeys: Record<string, Buffer> } | undefined> {
-  const envPath = process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY?.trim();
-  const envId = process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
+  const envPath = options.environment === false ? undefined : process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY?.trim();
+  const envId = options.environment === false ? undefined : process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
   if (envPath !== undefined && envPath.length > 0 && envId !== undefined && envId.length > 0) {
     return { trustedKeys: { [envId]: await readFile(envPath) } };
   }

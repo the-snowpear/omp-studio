@@ -263,6 +263,10 @@ test("loadInstallerTrustedKeys honors environment override over directory files"
     assert.ok(loaded);
     assert.deepEqual(Object.keys(loaded.trustedKeys), ["env-id"]);
     assert.equal(loaded.trustedKeys["env-id"]?.equals(Buffer.from(trustedPublicKey)), true);
+    // Packaged builds ignore the override and trust only the keys they ship.
+    const packaged = await loadInstallerTrustedKeys(directory, { environment: false });
+    assert.ok(packaged);
+    assert.deepEqual(Object.keys(packaged.trustedKeys), ["dir-key"]);
   } finally {
     if (originalPath === undefined) delete process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY;
     else process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY = originalPath;

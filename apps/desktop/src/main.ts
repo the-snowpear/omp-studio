@@ -64,6 +64,7 @@ import { createDesktopApplication } from "./composition.js";
 import { registerDesktopIpc } from "./ipc.js";
 import {
   RENDERER_CSP,
+  createPermissionRequestHandler,
   createSecureWindow,
   installCspHeaders,
   isTrustedRendererUrl,
@@ -113,7 +114,7 @@ export async function main(): Promise<void> {
     const legacyInstallRoot = process.argv[migrationIndex + 1];
     // Only the Windows installer migrates a legacy per-machine Runtime.
     if (process.platform !== "win32" || !app.isPackaged || !legacyInstallRoot || !isAbsolute(legacyInstallRoot)) throw new Error("Invalid Runtime migration request");
-    const keys = await loadInstallerTrustedKeys([join(process.execPath, "..", "runtime-keys")]);
+    const keys = await loadInstallerTrustedKeys([join(process.execPath, "..", "runtime-keys")], { environment: false });
     if (!keys) throw new Error("Missing migration trust root");
     const { migrateLegacyRuntime } = await import("./migrate-runtime.js");
     await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot: desktopPaths().runtimesRoot, trustedKeys: keys.trustedKeys });
@@ -152,7 +153,7 @@ export async function main(): Promise<void> {
     join(app.getAppPath(), "packaging", "keys"),
     join(app.getAppPath(), "..", "packaging", "keys"),
   ];
-  const loadedKeys = await loadInstallerTrustedKeys(keysDirs);
+  const loadedKeys = await loadInstallerTrustedKeys(keysDirs, { environment: !app.isPackaged });
   const trustedKeys = loadedKeys?.trustedKeys ?? {};
 
   const payloadRoot = resolve(app.getAppPath(), "..", PAYLOAD_DIR);
@@ -371,6 +372,7 @@ export async function main(): Promise<void> {
     const allowedOrigin = rendererOriginFor(target);
     const preloadPath = layout.preloadPath;
     installCspHeaders(session.defaultSession, rendererCspFor(target));
+    session.defaultSession.setPermissionRequestHandler(createPermissionRequestHandler(allowedOrigin));
 
     const window = createSecureWindow({
       BrowserWindow,
@@ -392,6 +394,7 @@ export async function main(): Promise<void> {
       target,
       allowedOrigin,
       deferLoad: true,
+      openExternal: (url) => { void shell.openExternal(url); },
     });
     const windowSurface = window as typeof window & DesktopWindowSurface;
     if (validAppIcon !== undefined && typeof window.setIcon === "function") {

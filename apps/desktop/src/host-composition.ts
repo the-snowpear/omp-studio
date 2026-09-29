@@ -1267,6 +1267,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
               options.managedInstall.trustedKeysDirectory === undefined
                 ? defaultRuntimeKeysDirectory()
                 : [options.managedInstall.trustedKeysDirectory, defaultRuntimeKeysDirectory()],
+              { environment: options.managedInstall.environmentTrustedKeys !== false },
             ));
       const runtimeInstallDirectory = resolveManagedRuntimeInstallDirectory({
         stateDirectory: profileDirectory,

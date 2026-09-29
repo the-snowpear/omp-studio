@@ -502,6 +502,8 @@ function productionManagedInstall(): DesktopManagedInstallOptions {
   return {
     seedOnStart: true,
     pendingArtifact: pendingRuntimeArtifact,
+    // Packaged builds trust only the keys they ship; env overrides are for development.
+    environmentTrustedKeys: !app.isPackaged,
     activateOptions: { selfCheck: createSmokeTestRunner({ timeoutMs: 240_000 }) },
     ...(layout === undefined
       ? {}
