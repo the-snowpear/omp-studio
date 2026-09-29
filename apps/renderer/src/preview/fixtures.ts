@@ -4,6 +4,7 @@
  */
 
 import { PLATFORM } from "../platform";
+import { demoPath } from "./demoPaths";
 import type { TreeGitStatus } from "../git/treeStatus";
 
 export const PREVIEW_DESKTOP_RECOVERY = { version: "0.1.4" } as const;
@@ -162,9 +163,6 @@ export type PreviewSideAgent = {
   error: boolean;
 };
 
-/** Demo project folders in the local platform's spelling. */
-const DEMO_TOOLS = PLATFORM === "darwin" ? "/Users/demo/Tools" : "C:\\Aspace\\Tools";
-const demoPath = (...segments: string[]): string => [DEMO_TOOLS, ...segments].join(PLATFORM === "darwin" ? "/" : "\\");
 
 export const PREVIEW_PROJECTS: PreviewProject[] = [
   {

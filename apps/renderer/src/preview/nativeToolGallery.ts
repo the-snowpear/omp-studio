@@ -1,5 +1,7 @@
 import type { JsonValue } from "@omp-studio/client-contract";
 
+import { demoPath } from "./demoPaths";
+
 /**
  * Preview-only copy of ver1 `D.nativeToolGallery` (scene 42).
  * Real mode must never import this.
@@ -30,7 +32,7 @@ export const NATIVE_TOOL_GALLERY: readonly { readonly [key: string]: JsonValue }
   },
   {
     kind: "bash", name: "Bash", target: "npm run typecheck", status: "done", dur: "11.2s",
-    cmd: "npm run typecheck", cwd: "C:\\Aspace\\Tools\\omp-web",
+    cmd: "npm run typecheck", cwd: demoPath("omp-web"),
     output: [["> tsc --noEmit", "dim"], ["", ""], ["0 errors, 0 warnings", "ok"]], exit: 0,
   },
   {
