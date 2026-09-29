@@ -102,7 +102,7 @@ export function sanitizeDisplayText(value: string | undefined, maxLength: number
 }
 
 const PATH_LIKE =
-  /(^|[^\p{L}\p{N}])([A-Za-z]:[\\/]|\\\\([?.]\\pipe\\|[^\\]+\\[^\\])|(^|[^\p{L}\p{N}])~[\\/]|\/(?:Users|home|home\/[^/]+\/|etc\/|tmp\/|var\/|opt\/|usr\/|Applications\/))/u;
+  /(^|[^\p{L}\p{N}])([A-Za-z]:[\\/]|\\\\([?.]\\pipe\\|[^\\]+\\[^\\])|(^|[^\p{L}\p{N}])~[\\/]|\/(?:Users|home|home\/[^/]+\/|etc\/|tmp\/|var\/|opt\/|usr\/|Applications\/|private\/|Volumes\/|Library\/))/u;
 const TOKEN_LIKE = /(^|[^\p{L}\p{N}])(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|[A-Za-z0-9_-]{32,})(?=$|[^\p{L}\p{N}])/gu;
 const PID_LIKE = /(^|[^\p{L}\p{N}])\d{5,9}(?=$|[^\p{L}\p{N}])/gu;
 const SENSITIVE_KEYS = /token|secret|password|pid|process|endpoint|pipe|auth|bearer|credential/i;

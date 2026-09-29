@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -16,6 +16,7 @@ import type {
   StudioHelloResponse,
 } from "@omp-studio/studio-protocol";
 import { FULL_PARITY_REQUIRED_CAPABILITIES } from "@omp-studio/studio-protocol";
+import { runtimeEntrypointFor } from "@omp-studio/runtime-installer";
 import {
   buildProcessProbeArgs,
   createPathLocator,
@@ -94,9 +95,12 @@ function environment(partial: Partial<RuntimeResolverEnvironment> = {}): Runtime
   return { probe: probeWith(fullOutcome()), ...partial };
 }
 
+// The PATH locator and managed manifests use the host's entrypoint name.
+const HOST_ENTRYPOINT = runtimeEntrypointFor(process.platform);
+
 async function executableFile(): Promise<{ directory: string; path: string }> {
   const directory = await mkdtemp(join(tmpdir(), "omp-studio-resolver-"));
-  const path = join(directory, "omp.exe");
+  const path = join(directory, HOST_ENTRYPOINT);
   await writeFile(path, "fixture-bytes");
   return { directory, path };
 }
@@ -112,7 +116,7 @@ function managedManifest(partial: Partial<RuntimeInstallationManifest> = {}): Ru
     capabilityHash: "sha256:capabilities-full",
     commandManifestHash: "sha256:commands-full",
     platform: `${process.platform}-${process.arch}`,
-    entrypoint: "omp.exe",
+    entrypoint: HOST_ENTRYPOINT,
     channel: "stable",
     ...partial,
   };
@@ -385,6 +389,28 @@ test("path validation rejects relative, missing, and non-file targets", async ()
   );
   assert.equal(asResolution.classification, "rejected");
   assert.match(asResolution.rejectionReason ?? "", /executable rejected/u);
+});
+
+test("a POSIX PATH symlink resolves to a safe real executable and nothing else", { skip: process.platform === "win32" ? "POSIX symlinks" : false }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "omp-studio-resolver-link-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const cellar = join(root, "Cellar", "omp", "1.0.0", "bin");
+  const bin = join(root, "bin");
+  await mkdir(cellar, { recursive: true });
+  await mkdir(bin);
+  const target = join(cellar, "omp");
+  await writeFile(target, "#!/bin/sh\n");
+  await chmod(target, 0o755);
+  await symlink(target, join(bin, "omp"));
+  const locator = createPathLocator({ pathEnv: bin });
+  assert.equal(await locator.locate("darwin", "arm64"), await realpath(target));
+  await chmod(target, 0o775);
+  assert.equal(await locator.locate("darwin", "arm64"), undefined);
+  await chmod(target, 0o644);
+  assert.equal(await locator.locate("darwin", "arm64"), undefined);
+  await chmod(target, 0o755);
+  await rm(target);
+  assert.equal(await locator.locate("darwin", "arm64"), undefined);
 });
 
 test("system PATH locator finds omp and reports not-found when absent", async () => {

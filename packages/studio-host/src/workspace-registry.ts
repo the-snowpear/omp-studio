@@ -11,8 +11,9 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, readFile, realpath, rename, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { basename, dirname } from "node:path";
+import { canonicalWorkspacePath, sameWorkspacePath } from "./workspace-path.js";
 
 /** Host-internal stored workspace record. Never crosses into a contract shape. */
 export interface StoredWorkspace {
@@ -193,20 +194,14 @@ export class WorkspaceRegistry {
   }
 }
 
-/** Canonical directory path: `resolve`, then `realpath` on win32 (best-effort). */
+/** Canonical directory path: `resolve`, then `realpath` on win32 and darwin (best-effort). */
 async function canonicalizeDirectory(dir: string): Promise<string> {
-  const resolved = resolve(dir);
-  if (process.platform !== "win32") return resolved;
-  try {
-    return await realpath(resolved);
-  } catch {
-    return resolved;
-  }
+  return canonicalWorkspacePath(dir);
 }
 
 function samePath(left: string, right: string): boolean {
   if (process.platform === "win32") {
     return left.toLowerCase() === right.toLowerCase();
   }
-  return left === right;
+  return process.platform === "darwin" ? sameWorkspacePath(left, right) : left === right;
 }

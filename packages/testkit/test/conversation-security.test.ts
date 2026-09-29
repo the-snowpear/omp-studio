@@ -31,6 +31,9 @@ test("unsafe secret arguments are flagged by the public-safety checker", () => {
 test("redactText and redactDetail strip home paths and token-like values", () => {
   assert.match(redactText("C:\\Users\\alice\\project"), /redacted/i);
   assert.match(redactText("/Users/alice/secret"), /redacted/i);
+  for (const macPath of ["/private/var/folders/ab/T/omp-1", "/Volumes/Data/project", "/Library/Application Support/omp-studio"]) {
+    assert.match(redactText(`failed at ${macPath}`), /redacted/i, macPath);
+  }
   const redacted = redactDetail({
     apiKey: "sk-live-secret-value-that-looks-like-a-token-32chars",
     path: "C:\\Users\\alice\\project",

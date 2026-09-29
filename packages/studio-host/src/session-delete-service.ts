@@ -10,6 +10,7 @@ import {
   defaultOmpArchiveRoot,
   defaultOmpSessionsRoot,
 } from "./session-catalog.js";
+import { sameWorkspacePath } from "./workspace-path.js";
 
 const SESSION_SUFFIX = ".jsonl";
 const COMPRESSED_SESSION_SUFFIX = ".jsonl.gz";
@@ -300,9 +301,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function sameWorkspace(left: string, right: string): boolean {
-  const a = resolve(left);
-  const b = resolve(right);
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  return sameWorkspacePath(left, right);
 }
 
 function errorMessage(error: unknown): string {

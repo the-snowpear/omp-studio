@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RuntimeInstanceId } from "@omp-studio/studio-protocol";
+import { privateSocketPath, randomSocketName } from "./socket-paths.js";
 
 export interface BridgeBootstrap {
   endpoint: string;
@@ -63,10 +64,19 @@ export function createWindowsBridgeAclPort(
   };
 }
 
+export interface BridgeBootstrapOptions {
+  /**
+   * POSIX only: short private directory for the socket (see socket-paths.ts);
+   * the token file stays in `privateDirectory`. Ignored on Windows.
+   */
+  readonly socketDirectory?: string;
+}
+
 export async function createBridgeBootstrap(
   privateDirectory: string,
   platform: NodeJS.Platform = process.platform,
   windowsAcl?: WindowsBridgeAclPort,
+  options: BridgeBootstrapOptions = {},
 ): Promise<BridgeBootstrap> {
   await mkdir(privateDirectory, { recursive: true, mode: 0o700 });
   if (platform === "win32") {
@@ -81,7 +91,9 @@ export async function createBridgeBootstrap(
   const endpoint =
     platform === "win32"
       ? `\\\\.\\pipe\\omp-studio-${opaqueName}`
-      : join(privateDirectory, `${opaqueName}.sock`);
+      : options.socketDirectory !== undefined
+        ? privateSocketPath(options.socketDirectory, randomSocketName("b"))
+        : privateSocketPath(privateDirectory, `${opaqueName}.sock`);
 
   if (platform === "win32") {
     await windowsAcl!.createSecureTokenFile(tokenFile, token);

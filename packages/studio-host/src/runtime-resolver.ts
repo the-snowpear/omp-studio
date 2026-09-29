@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { lstat, mkdtemp, rm } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -19,6 +19,7 @@ import {
   createWindowsBridgeAclPort,
   type WindowsBridgeAclPort,
 } from "./bridge-auth.js";
+import { ensurePrivateSocketDirectory } from "./socket-paths.js";
 
 /**
  * WP-062 System Runtime Resolver.
@@ -230,8 +231,25 @@ export async function fingerprintExecutable(platform: NodeJS.Platform, absoluteP
 }
 
 /**
+ * A POSIX PATH symlink (Homebrew, `bun -g`) stands for its real file when that
+ * file is an executable regular file only its owner or root can change.
+ */
+async function trustedLinkTarget(candidate: string): Promise<string | undefined> {
+  try {
+    const target = await realpath(candidate);
+    const metadata = await stat(target);
+    const owned = metadata.uid === 0 || metadata.uid === process.getuid?.();
+    return metadata.isFile() && owned && (metadata.mode & 0o022) === 0 && (metadata.mode & 0o111) !== 0 ? target : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * PATH-based system runtime locator. Empty PATH entries are skipped so a
- * relative "current directory" can never be resolved implicitly.
+ * relative "current directory" can never be resolved implicitly. On POSIX a
+ * symlinked entry resolves to its real file, which is what gets validated,
+ * fingerprinted and spawned.
  */
 export function createPathLocator(options: {
   pathEnv?: string;
@@ -254,6 +272,10 @@ export function createPathLocator(options: {
         } else {
           try {
             const metadata = await lstat(candidate);
+            if (metadata.isSymbolicLink() && platform !== "win32") {
+              const target = await trustedLinkTarget(candidate);
+              if (target !== undefined) return target;
+            }
             found = metadata.isFile() && !metadata.isSymbolicLink();
           } catch {
             found = false;
@@ -570,6 +592,8 @@ export interface ProcessProbeOptions {
   }>;
   /** Required on win32 when using the default createBridgeBootstrap. */
   windowsAcl?: WindowsBridgeAclPort;
+  /** POSIX temp root for the probe's short socket directory; defaults to os.tmpdir(). */
+  socketTmpRoot?: string;
   connectSocket?: (endpoint: string) => Socket;
   /** Drain grace for the shutdown gate; defaults to SHUTDOWN_EXIT_GRACE_MS. */
   shutdownGraceMs?: number;
@@ -613,6 +637,8 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
       const workspace = await mkdtemp(join(resolve(context.workspaceDirectory), "omp-studio-probe-"));
       const cleanup = options.cleanupWorkspace !== false;
       let bootstrap: { endpoint: string; token: string; tokenFile: string };
+      // A socket inside the mkdtemp workspace would exceed macOS's sun_path limit.
+      let ownedSocket: string | undefined;
       try {
         bootstrap =
           options.createBootstrap !== undefined
@@ -621,7 +647,16 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
                 workspace,
                 context.platform,
                 options.windowsAcl ?? (context.platform === "win32" ? createWindowsBridgeAclPort() : undefined),
+                context.platform === "win32"
+                  ? {}
+                  : {
+                      socketDirectory: await ensurePrivateSocketDirectory(
+                        "probe",
+                        options.socketTmpRoot === undefined ? {} : { tmpRoot: options.socketTmpRoot },
+                      ),
+                    },
               );
+        if (options.createBootstrap === undefined && context.platform !== "win32") ownedSocket = bootstrap.endpoint;
       } catch (error) {
         await removeWorkspace(workspace, cleanup);
         return { failure: "PROBE_UNAVAILABLE", failureDetail: (error as Error).message };
@@ -661,6 +696,8 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
             XDG_DATA_HOME: join(workspace, ".local", "share"),
             XDG_STATE_HOME: join(workspace, ".local", "state"),
             XDG_CACHE_HOME: join(workspace, ".cache"),
+            // A probe outlives a crashed Host only until its parent watchdog notices.
+            ...(context.platform === "darwin" ? { OMP_STUDIO_PARENT_PID: String(process.pid) } : {}),
             ...options.env,
           },
           stdio: "ignore",
@@ -771,6 +808,8 @@ export function createProcessProbe(options: ProcessProbeOptions = {}): RuntimePr
         client?.close();
         child.kill();
         await waitForChildExit(child);
+        // A killed Runtime cannot unlink its socket; the short directory outlives the workspace.
+        if (ownedSocket !== undefined) await rm(ownedSocket, { force: true });
         await removeWorkspace(workspace, cleanup);
       }
     },
