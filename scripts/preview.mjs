@@ -4,6 +4,8 @@ import { cp, mkdir, readdir, rm, rename, symlink } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import process from "node:process";
 
+import { bundlePreload } from "./preload-bundle.mjs";
+
 const root = process.cwd();
 const previewHost = "127.0.0.1";
 const previewPort = process.env.OMP_PREVIEW_PORT ?? "5173";
@@ -12,13 +14,6 @@ const previewUrl = `http://${previewHost}:${previewPort}`;
 const npmCli = process.env.OMP_NPM_CLI
   ?? (process.platform === "win32" ? undefined : process.env.npm_execpath)
   ?? join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
-const esbuildCli = join(
-  root,
-  "node_modules",
-  "esbuild",
-  "bin",
-  "esbuild",
-);
 const electronDist = join(root, "node_modules", "electron", "dist");
 /**
  * Managed-Runtime tree an earlier preview run wrote into the Electron
@@ -298,7 +293,7 @@ async function main() {
   if (process.platform !== "win32" && process.platform !== "darwin") {
     throw new Error("The current preview launcher supports Windows and macOS Electron builds.");
   }
-  if (!existsSync(esbuildCli) || !existsSync(join(root, "node_modules", "electron", "package.json"))) {
+  if (!existsSync(join(root, "node_modules", "electron", "package.json"))) {
     throw new Error("Dependencies are missing. Run `npm install` once, then retry.");
   }
 
@@ -306,14 +301,7 @@ async function main() {
   await run(process.execPath, [npmCli, "run", "build"]);
 
   console.log("[preview] Bundling sandboxed preload...");
-  await run(process.execPath, [esbuildCli, 
-    "apps/desktop/src/preload.ts",
-    "--bundle",
-    "--platform=node",
-    "--format=cjs",
-    "--external:electron",
-    "--outfile=apps/desktop/dist/preload.cjs",
-  ]);
+  bundlePreload();
 
   const electronExecutable = await preparePreviewElectron();
 
