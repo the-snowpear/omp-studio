@@ -46,9 +46,6 @@ jobs:
     # means macOS 26 with a different toolchain.
     runs-on: macos-15
     timeout-minutes: 60
-    # Non-blocking until the macOS socket-path and platform fixes land; then
-    # this becomes a required gate like the Windows job.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
