@@ -8,7 +8,10 @@ const root = process.cwd();
 const previewHost = "127.0.0.1";
 const previewPort = process.env.OMP_PREVIEW_PORT ?? "5173";
 const previewUrl = `http://${previewHost}:${previewPort}`;
-const npmCli = process.env.OMP_NPM_CLI ?? join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+// A Homebrew or nvm Node on macOS keeps npm outside dirname(node); `npm run` names the CLI it runs.
+const npmCli = process.env.OMP_NPM_CLI
+  ?? (process.platform === "win32" ? undefined : process.env.npm_execpath)
+  ?? join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
 const esbuildCli = join(
   root,
   "node_modules",
