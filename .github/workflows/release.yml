@@ -26,6 +26,10 @@ on:
         type: string
         description: Optional previous workflow run with matching signed Runtime artifacts
         default: ""
+      include_macos:
+        type: boolean
+        description: Also build, gate and publish macOS (darwin-arm64, ad hoc signed)
+        default: false
   push:
     tags: ["v*", "runtime-v*"]
 
@@ -157,8 +161,115 @@ jobs:
           path: outputs/release/${{ matrix.arch }}/
           if-no-files-found: error
 
+  # macOS joins a release only when asked: publication is all-or-nothing, and
+  # an ad hoc signed Mac build must not hold back the Windows release while it
+  # stabilizes. Tag pushes never enable it.
+  build-macos:
+    needs: prepare
+    if: ${{ inputs.include_macos }}
+    runs-on: macos-15
+    environment: release
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OMP_TARGET_PLATFORM: darwin
+      OMP_TARGET_ARCH: arm64
+      OMP_RELEASE_KIND: ${{ needs.prepare.outputs.kind }}
+      OMP_RUNTIME_CHANNEL: ${{ inputs.runtime_channel || 'stable' }}
+      OMP_RUNTIME_MIN_APP_VERSION: ${{ inputs.runtime_min_app_version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          key: darwin-arm64
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm run omp:install-deps
+      - name: Reuse signed Runtime
+        if: inputs.reuse_runtime_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-artifact-darwin-arm64
+          path: packages/runtime-installer/dist/artifacts/darwin-arm64/
+          run-id: ${{ inputs.reuse_runtime_run_id }}
+          github-token: ${{ github.token }}
+      - name: Build Runtime, verify, package and sign release
+        env:
+          OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
+          REUSE_RUNTIME_RUN_ID: ${{ inputs.reuse_runtime_run_id }}
+        run: |
+          set -euo pipefail
+          key_path="$RUNNER_TEMP/omp-release-signing.pem"
+          trap 'rm -f "$key_path"' EXIT
+          (umask 077 && printf '%s' "$OMP_SIGNING_SECRET" > "$key_path")
+          export OMP_RUNTIME_SIGNING_KEY="$key_path"
+          OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          export OMP_RUNTIME_SIGNING_KEY_ID
+          if [ -z "$REUSE_RUNTIME_RUN_ID" ]; then
+            npm run omp:overlay:apply
+            npm run omp:build:host
+          else
+            npm run build
+            node scripts/prepare-runtime-test-native.mjs
+          fi
+          npm run check
+          npm run omp:test:metadata
+          if [ -z "$REUSE_RUNTIME_RUN_ID" ]; then node scripts/unapply-release-overlay.mjs; fi
+          npm run omp:verify:patches -- --skip-workspace-check
+          npm run pack:mac:prepare
+          runtime_version="$(node -e '
+            const fs = require("node:fs"), path = require("node:path");
+            const root = "packaging/runtime-payload";
+            const staged = fs.readdirSync(root).filter((name) => !name.startsWith("."));
+            const manifest = staged.length === 1 ? JSON.parse(fs.readFileSync(path.join(root, staged[0], "runtime-manifest.json"), "utf8")) : undefined;
+            if (!manifest || manifest.channel !== process.env.OMP_RUNTIME_CHANNEL) throw new Error("Runtime identity/channel mismatch");
+            console.log(manifest.runtimeVersion);
+          ')"
+          app_version="$(node -p 'require("./package.json").version')"
+          if [ "$OMP_RELEASE_KIND" = runtime ]; then tag="runtime-v$runtime_version"; else tag="v$app_version"; fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then echo "Release tag mismatch" >&2; exit 1; fi
+          if [ "$OMP_RELEASE_KIND" = desktop ] && { [ "$OMP_RUNTIME_CHANNEL" != stable ] || [[ "$app_version" == *-* ]]; }; then echo "Desktop releases must be stable" >&2; exit 1; fi
+          export OMP_RELEASE_TAG="$tag"
+          node scripts/collect-update-history.mjs
+          while IFS='=' read -r name value; do
+            case "$name" in OMP_PREVIOUS_CATALOG_DIR|OMP_PREVIOUS_UPDATE_INDEX) export "$name=$value" ;; esac
+          done < "$GITHUB_ENV"
+          if [ "$OMP_RELEASE_KIND" = desktop ]; then npm run pack:mac -- --skip-host --skip-build; fi
+          npm run updates:build
+          npm run updates:verify
+          npm run p5:gate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-artifact-darwin-arm64
+          path: packages/runtime-installer/dist/artifacts/darwin-arm64/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-darwin-arm64
+          path: outputs/release/darwin-arm64/
+          if-no-files-found: error
+
   publish:
-    needs: [prepare, build]
+    needs: [prepare, build, build-macos]
+    # A skipped macOS job (the default) must not skip the Windows release.
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: release
     permissions:

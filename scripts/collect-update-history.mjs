@@ -3,17 +3,20 @@ import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { releaseKeys } from "./build-update-assets-v2.mjs";
 import { verifyUpdateManifest } from "@omp-studio/runtime-installer";
+import { MAC_TARGET_PLATFORM, legacyIndexName, releaseTargetsDarwin } from "./release-assets.mjs";
 
 const root = resolve("."), repo = process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio";
-const arch = process.env.OMP_TARGET_ARCH ?? "x64", platform = `win32-${arch}`;
-const dest = join(process.env.RUNNER_TEMP ?? join(root, "outputs"), `update-history-${arch}`);
+const darwin = releaseTargetsDarwin();
+const arch = process.env.OMP_TARGET_ARCH ?? "x64", platform = darwin ? MAC_TARGET_PLATFORM : `win32-${arch}`;
+const dest = join(process.env.RUNNER_TEMP ?? join(root, "outputs"), `update-history-${darwin ? platform : arch}`);
 await mkdir(dest, { recursive: true });
 const catalogs = join(dest, "catalogs");
 await mkdir(catalogs, { recursive: true });
 const keys = await releaseKeys(root);
 const pages = JSON.parse(execFileSync("gh", ["api", "--paginate", "--slurp", `repos/${repo}/releases?per_page=100`], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 }));
 const releases = pages.flat().filter(r => !r.draft).sort((a, b) => b.id - a.id);
-const legacyName = arch === "x64" ? "update-index" : `update-index-${platform}`;
+// The v1 migration feed only exists for Windows.
+const legacyName = legacyIndexName(platform);
 let legacy;
 for (const release of releases) {
   const catalog = release.assets.find(a => a.name === `updates-${platform}.json`);
@@ -22,7 +25,7 @@ for (const release of releases) {
     verifyUpdateManifest(JSON.parse(bytes.toString("utf8")), keys, repo, platform);
     await writeFile(join(catalogs, `${release.id}.json`), bytes);
   }
-  if (!legacy && !release.prerelease && !release.tag_name.startsWith("runtime-v")) {
+  if (legacyName && !legacy && !release.prerelease && !release.tag_name.startsWith("runtime-v")) {
     const index = release.assets.find(a => a.name === `${legacyName}.json`), sig = release.assets.find(a => a.name === `${legacyName}.sig.json`);
     if (index && sig) {
       for (const asset of [index, sig]) await writeFile(join(dest, asset.name), execFileSync("gh", ["api", "-H", "Accept: application/octet-stream", `repos/${repo}/releases/assets/${asset.id}`], { maxBuffer: 1024 * 1024 }));

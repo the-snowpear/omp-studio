@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { legacyIndexName, platformOfReleaseCandidate } from "./release-assets.mjs";
 const repo = process.env.GITHUB_REPOSITORY;
 if (!repo) throw new Error("GITHUB_REPOSITORY is required");
 const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
@@ -10,14 +11,15 @@ const canonical = v => Array.isArray(v) ? `[${v.map(canonical).join(",")}]` : v 
 const table = JSON.parse(await readFile("packaging/keys/trusted-keys.json", "utf8"));
 const artifacts = [], notes = [], identities = [];
 for (const dir of await readdir("outputs/publish")) {
-  if (!/^release-candidate-(x64|arm64)$/.test(dir)) throw new Error("Unexpected release candidate");
-  const root = join("outputs/publish", dir), arch = dir.replace("release-candidate-", "");
-  const name = `updates-win32-${arch}.json`;
+  const platform = platformOfReleaseCandidate(dir);
+  if (platform === undefined) throw new Error("Unexpected release candidate");
+  const root = join("outputs/publish", dir);
+  const name = `updates-${platform}.json`;
   const envelope = JSON.parse(await readFile(join(root, name), "utf8"));
   const { manifest: m, signature: s } = envelope;
   const keyName = table.keys[s.keyId];
   if (!keyName || s.algorithm !== "ed25519" || !verify(null, Buffer.from(`omp-studio-update-v2\n${canonical(m)}`), createPublicKey(await readFile(join("packaging/keys", keyName))), Buffer.from(s.value, "base64url"))) throw new Error("Invalid candidate signature");
-  if (m.repo !== repo || m.platform !== `win32-${arch}` || m.schema !== 2) throw new Error("Candidate identity mismatch");
+  if (m.repo !== repo || m.platform !== platform || m.schema !== 2) throw new Error("Candidate identity mismatch");
   const runtimeOnly = process.env.OMP_RELEASE_KIND === "runtime";
   if (runtimeOnly === Boolean(m.app)) throw new Error("Release kind mismatch");
   const tag = runtimeOnly ? `runtime-v${m.runtime.version}` : `v${m.app.version}`;
@@ -28,8 +30,15 @@ for (const dir of await readdir("outputs/publish")) {
     if (bytes.length !== file.size || createHash("sha256").update(bytes).digest("hex") !== file.sha256 || file.url !== `https://github.com/${repo}/releases/download/${tag}/${file.asset}`) throw new Error("Candidate asset verification failed");
     allowed.add(file.asset);
   }
-  const legacy = arch === "x64" ? "update-index" : `update-index-win32-${arch}`;
-  allowed.add(`${legacy}.json`); allowed.add(`${legacy}.sig.json`);
+  // The macOS dmg: a first-install download whose digest is signed with the catalog.
+  if (m.firstInstall !== undefined) {
+    const file = m.firstInstall;
+    const bytes = await readFile(join(root, file.asset));
+    if (!m.app || typeof file.asset !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,220}\.dmg$/.test(file.asset) || bytes.length !== file.size || createHash("sha256").update(bytes).digest("hex") !== file.sha256 || file.url !== `https://github.com/${repo}/releases/download/${tag}/${file.asset}`) throw new Error("Candidate asset verification failed");
+    allowed.add(file.asset);
+  }
+  const legacy = legacyIndexName(platform);
+  if (legacy !== undefined) { allowed.add(`${legacy}.json`); allowed.add(`${legacy}.sig.json`); }
   for (const file of await readdir(root)) {
     if (!allowed.has(file)) throw new Error(`Unexpected publish file: ${file}`);
     if (file !== "release-notes.md") artifacts.push(join(root, file));

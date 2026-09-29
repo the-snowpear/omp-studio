@@ -195,12 +195,18 @@ export const MAC_ICONSET = Object.freeze([
   ["icon_512x512@2x.png", 1024],
 ]);
 
+let appBuilderRequire;
+
 /**
  * electron-builder's own dependencies (js-yaml, plist, @electron/osx-sign),
  * resolved from app-builder-lib so the scripts parse and sign exactly as the
- * builder does, however npm hoists them.
+ * builder does, however npm hoists them. Resolved on first use: the publish
+ * job imports the naming helpers here without installing dependencies.
  */
-export const requireFromAppBuilder = createRequire(createRequire(import.meta.url).resolve("app-builder-lib/package.json"));
+export function requireFromAppBuilder(id) {
+  appBuilderRequire ??= createRequire(createRequire(import.meta.url).resolve("app-builder-lib/package.json"));
+  return appBuilderRequire(id);
+}
 
 /** The YAML parser electron-builder itself reads packaging/electron-builder.yml with. */
 export function parseBuilderYaml(text) {

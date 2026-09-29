@@ -88,3 +88,54 @@ test("a desktop republish rejects a reused Runtime version with different bytes 
   const otherChannel = await fixture("canary", "18.0.0-studio.1");
   await assert.rejects(() => buildUpdateAssetsV2({ ...otherChannel, previous: [previous] }), /different bytes or channel/);
 });
+
+async function darwinFixture(channel = "stable") {
+  const root = await mkdtemp(join(tmpdir(), "omp-v2-release-mac-")), runtimeDir = join(root, "runtime");
+  await mkdir(runtimeDir);
+  const exe = Buffer.from("signed-darwin-runtime"), manifest = Buffer.from(JSON.stringify({ runtimeVersion: "18.0.0-studio.1", upstreamVersion: "18.0.0", upstreamCommit: "a".repeat(40), patchsetVersion: "studio.1", studioProtocol: { min: 1, max: 1 }, profile: "full-parity-v1", capabilityHash: "fixture", commandManifestHash: "fixture", platform: "darwin-arm64", entrypoint: "omp", channel }));
+  const sums = Buffer.from(JSON.stringify({ algorithm: "sha256", files: { omp: hash(exe), "runtime-manifest.json": hash(manifest) } }));
+  const payload = Buffer.concat([manifest, Buffer.from("\0"), sums]);
+  for (const [name, bytes] of [["omp", exe], ["runtime-manifest.json", manifest], ["checksums.json", sums], ["runtime-signature.json", JSON.stringify({ algorithm: "ed25519", keyId, payloadSha256: hash(payload), signature: sign(null, payload, signingKey).toString("base64url") })]]) await writeFile(join(runtimeDir, name), bytes);
+  const installer = join(root, "outputs", "installer-mac");
+  await mkdir(installer, { recursive: true });
+  await writeFile(join(installer, "OMP-Studio-1.0.0-macos-arm64.zip"), "app-zip-fixture");
+  await writeFile(join(installer, "OMP-Studio-1.0.0-macos-arm64.dmg"), "dmg-fixture");
+  return { root, runtimeDir, platform: "darwin-arm64", appVersion: "1.0.0", repo: "owner/repo", keys, signingKey, keyId };
+}
+
+test("a macOS desktop release: the update zip in the catalog, the signed dmg beside it, no v1 index", async () => {
+  const options = await darwinFixture();
+  const { out, manifest, notes } = await buildUpdateAssetsV2({ ...options, previousIndex: join(options.root, "never-read.json") });
+  assert.equal(out, join(options.root, "outputs", "release", "darwin-arm64"));
+  assert.equal(manifest.platform, "darwin-arm64");
+  assert.equal(manifest.app.file.asset, "OMP-Studio-1.0.0-macos-arm64.zip");
+  assert.equal(manifest.runtime.file.asset, "OMP-Studio-Runtime-18.0.0-studio.1-macos-arm64.zip");
+  assert.equal(manifest.firstInstall.url, "https://github.com/owner/repo/releases/download/v1.0.0/OMP-Studio-1.0.0-macos-arm64.dmg");
+  assert.deepEqual((await readdir(out)).sort(), [
+    "OMP-Studio-1.0.0-macos-arm64.dmg",
+    "OMP-Studio-1.0.0-macos-arm64.zip",
+    "OMP-Studio-1.0.0-macos-arm64.zip.blockmap",
+    "OMP-Studio-Runtime-18.0.0-studio.1-macos-arm64.zip",
+    "OMP-Studio-Runtime-18.0.0-studio.1-macos-arm64.zip.blockmap",
+    "release-notes.md",
+    "updates-darwin-arm64.json",
+  ]);
+  assert.equal((await verifyUpdateAssets(out, keys, "owner/repo", "darwin-arm64")).app.version, "1.0.0");
+  assert.match(notes, /下载 dmg\]\(https:\/\/github\.com\/owner\/repo\/releases\/download\/v1\.0\.0\/OMP-Studio-1\.0\.0-macos-arm64\.dmg\)/u);
+  assert.match(notes, /仍要打开/u);
+  assert.doesNotMatch(notes, /update-index/u);
+
+  await writeFile(join(out, "OMP-Studio-1.0.0-macos-arm64.dmg"), "tampered");
+  await assert.rejects(() => verifyUpdateAssets(out, keys, "owner/repo", "darwin-arm64"), /mismatch: OMP-Studio-1\.0\.0-macos-arm64\.dmg/u);
+  const { rm } = await import("node:fs/promises");
+  await rm(join(out, "OMP-Studio-1.0.0-macos-arm64.dmg"));
+  await assert.rejects(() => verifyUpdateAssets(out, keys, "owner/repo", "darwin-arm64"), /ENOENT/u);
+});
+
+test("a Runtime-only macOS release carries no dmg", async () => {
+  const options = await darwinFixture("canary");
+  const { out, manifest } = await buildUpdateAssetsV2({ ...options, runtimeOnly: true });
+  assert.equal(manifest.app, undefined);
+  assert.equal(manifest.firstInstall, undefined);
+  assert.equal((await verifyUpdateAssets(out, keys, "owner/repo", "darwin-arm64")).runtime.channel, "canary");
+});
