@@ -9,6 +9,7 @@ import {
 import {
   checkGitHubReleaseUpdate,
   compareSemver,
+  findInstallerAsset,
   findWindowsInstallerAsset,
   parseSemver,
   registerChromeAppUpdateIpc,
@@ -69,6 +70,17 @@ describe("chrome-app-update", () => {
     test("returns undefined if no exe is found", () => {
       assert.equal(findWindowsInstallerAsset([]), undefined);
       assert.equal(findWindowsInstallerAsset([{ name: "foo.zip", browser_download_url: "url" }]), undefined);
+    });
+
+    test("macOS gets the arm64 dmg, never the update zip or the Windows Setup", () => {
+      const assets = [
+        { name: "OMP-Studio-Setup-0.2.0-windows-x64.exe", browser_download_url: "https://example.com/setup.exe", size: 1 },
+        { name: "OMP-Studio-0.2.0-macos-arm64.zip", browser_download_url: "https://example.com/mac.zip", size: 2 },
+        { name: "OMP-Studio-0.2.0-macos-arm64.dmg", browser_download_url: "https://example.com/mac.dmg", size: 3 },
+      ];
+      assert.deepEqual(findInstallerAsset(assets, "darwin"), { name: "OMP-Studio-0.2.0-macos-arm64.dmg", downloadUrl: "https://example.com/mac.dmg", size: 3 });
+      assert.equal(findInstallerAsset(assets, "win32")?.name, "OMP-Studio-Setup-0.2.0-windows-x64.exe");
+      assert.equal(findInstallerAsset(assets.slice(0, 2), "darwin"), undefined);
     });
   });
 

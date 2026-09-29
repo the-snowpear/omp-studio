@@ -72,6 +72,7 @@ import {
 import type { DesktopHostComposition, DesktopHostFactory } from "./types.js";
 import { desktopPaths, desktopSocketTmpRoot } from "./platform/desktop-paths.js";
 import type { LoginEnvironmentStatus } from "./platform/login-env.js";
+import { withCodeSignatureCheck } from "./platform/code-signature.js";
 import { clearQuarantine } from "./platform/quarantine.js";
 import { createPosixAuthorityLiveness, createWin32AuthorityLiveness } from "./authority-liveness.js";
 
@@ -505,7 +506,7 @@ function productionManagedInstall(hostLog: HostLog): DesktopManagedInstallOption
     pendingArtifact: pendingRuntimeArtifact,
     // Packaged builds trust only the keys they ship; env overrides are for development.
     environmentTrustedKeys: !app.isPackaged,
-    activateOptions: { selfCheck: createSmokeTestRunner({ timeoutMs: 240_000 }) },
+    activateOptions: { selfCheck: withCodeSignatureCheck(createSmokeTestRunner({ timeoutMs: 240_000 })) },
     ...(process.platform === "darwin"
       ? { prepareStaging: (directory: string) => clearQuarantine(directory, { warn: (detail) => hostLog.write("warn", "runtime.quarantine_clear", detail) }) }
       : {}),

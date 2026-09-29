@@ -49,6 +49,8 @@ import { registerPayloadHealthIpc } from "./payload-health.js";
 import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
 import { registerChromeUpdatesIpc } from "./chrome-updates.js";
 import { UpdateCoordinator } from "./update-coordinator.js";
+import { MAC_APP_ID, macBundlePath } from "./mac-app-installer.js";
+import { macSwapMarkers } from "./mac-app-swap.js";
 import { registerUnifiedUpdatesIpc } from "./unified-updates-ipc.js";
 import { CHROME_UPDATES_CHANNELS } from "./chrome-updates-shared.js";
 import { createUpdatePrefsStore } from "./update-prefs-store.js";
@@ -101,7 +103,8 @@ import type {
 import { resolveDroppedPaths } from "./dropped-paths.js";
 import { PAYLOAD_DIR, resolveAppResourceLayout } from "./payload-root.js";
 import { resolveRendererEntryFrom } from "./security.js";
-import { AppPayloadInstaller } from "@omp-studio/runtime-installer";
+import { AppPayloadInstaller, createSmokeTestRunner, type UnifiedUpdateSnapshot } from "@omp-studio/runtime-installer";
+import { withCodeSignatureCheck } from "./platform/code-signature.js";
 import { planSaveRelativeTarget } from "./plan-save-path.js";
 import { registerTerminalIpc } from "./terminal-ipc.js";
 import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js";
@@ -180,6 +183,11 @@ export async function main(): Promise<void> {
     app.exit(0);
     return;
   }
+  // A pending macOS update swap watches for this version's main process; say so first thing.
+  const macBundle = process.platform === "darwin" && app.isPackaged ? macBundlePath(process.execPath) : undefined;
+  const macSwapDirectory = join(desktopPaths().updatesV2Root, "mac-swap");
+  const macSwap = macBundle === undefined ? undefined : macSwapMarkers(macSwapDirectory, { version: app.getVersion(), bundlePath: macBundle });
+  macSwap?.started(process.pid);
   if (process.platform === "win32") {
     app.setAppUserModelId(APP_USER_MODEL_ID);
   }
@@ -231,21 +239,46 @@ export async function main(): Promise<void> {
       if (error.length > 0) throw new Error(error);
     },
   });
-  if (app.isPackaged && process.platform === "win32" && runtimeInstallLayout) {
+  // Runs once the renderer has booted: a macOS update commits only then.
+  let confirmMacDesktop: (() => Promise<void>) | undefined;
+  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined)) {
     const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
-    const updater = new PreparedNsisUpdater();
-    updateCoordinator = new UpdateCoordinator({
+    const shared = {
       root: desktopPaths().updatesV2Root,
       runtimeRoot: runtimeInstallLayout.installDirectory,
       bundledRuntimeRoot: runtimeInstallLayout.artifactRoot,
-      initialInstallerPath: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "@omp-studiodesktop-updater", "installer.exe"),
       repo: "the-snowpear/omp-studio", platform: `${process.platform}-${process.arch}`, appVersion: app.getVersion(), keys: trustedKeys,
       prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
-      snapshotChanged: (snapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
+      snapshotChanged: (snapshot: UnifiedUpdateSnapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
       isBusy: () => hostFactory.isBusy(), beforeQuit: () => hostFactory.shutdownForUpdate(),
-      installDesktop: (path) => updater.installPrepared(path),
       restart: () => { app.relaunch({ args: relaunchArguments(process.argv) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
-    });
+    };
+    if (macBundle === undefined) {
+      const updater = new PreparedNsisUpdater();
+      updateCoordinator = new UpdateCoordinator({
+        ...shared,
+        initialInstallerPath: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "@omp-studiodesktop-updater", "installer.exe"),
+        installDesktop: (path) => updater.installPrepared(path),
+      });
+    } else {
+      const { MacAppInstaller } = await import("./mac-app-installer.js");
+      const macInstaller = new MacAppInstaller({ bundlePath: macBundle, swapDirectory: macSwapDirectory, appId: MAC_APP_ID, execPath: process.execPath, pid: process.pid });
+      const coordinator = updateCoordinator = new UpdateCoordinator({
+        ...shared,
+        installDesktop: (path, release) => macInstaller.install(path, release),
+        preflightDesktop: () => macInstaller.preflight(),
+        desktopCommit: "confirmed",
+        desktopInstallOutcome: () => macInstaller.consumeOutcome(),
+        trackAppBaselineWithoutBase: true,
+        activateOptions: { selfCheck: withCodeSignatureCheck(createSmokeTestRunner()) },
+      });
+      let confirmed: Promise<void> | undefined;
+      confirmMacDesktop = () => confirmed ??= (async () => {
+        macSwap?.healthy();
+        await coordinator.confirmDesktopStartup();
+        await macInstaller.cleanup();
+      })().catch((error) => console.error("[omp-studio] confirming the macOS update failed", error));
+    }
   }
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
@@ -405,7 +438,8 @@ export async function main(): Promise<void> {
       appPath: app.getAppPath(),
       isPackaged: app.isPackaged,
       bundledVersion: app.getVersion(),
-      forceBaseline: process.argv.includes("--omp-baseline"),
+      // A macOS hot payload would live inside the signed bundle; the bundle is the only layout there.
+      forceBaseline: process.argv.includes("--omp-baseline") || process.platform === "darwin",
       runtime: {
         electron: process.versions.electron,
         modules: process.versions.modules,
@@ -460,6 +494,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
       noteBootSuccess: async () => {
         if (layout.payloadVersion !== undefined) await appPayloadInstaller.noteBootSuccess(layout.payloadVersion);
+        await confirmMacDesktop?.();
       },
     });
     window.webContents.once("did-finish-load", () => {
@@ -821,7 +856,7 @@ export async function main(): Promise<void> {
     : undefined;
 
   const application = createDesktopApplication({
-    beforeShutdown: async () => { stopAppNapGuard?.(); liveAudio.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,
