@@ -24,6 +24,7 @@
  */
 
 import assert from "node:assert/strict";
+import { join, parse } from "node:path";
 import { pathToFileURL } from "node:url";
 import { register } from "node:module";
 import { describe, test } from "node:test";
@@ -781,38 +782,40 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
 });
 
 describe("renderer entry resolution", () => {
+  // Host-native absolute paths: C:\ on Windows, / on macOS.
+  const root = parse(process.cwd()).root;
+
   test("resolveRendererEntry prefers the explicit dev server URL", () => {
-    assert.deepEqual(resolveRendererEntry("C:\\app\\dist", "http://localhost:5173"), {
+    assert.deepEqual(resolveRendererEntry(join(root, "app", "dist"), "http://localhost:5173"), {
       kind: "url",
       url: "http://localhost:5173",
     });
   });
 
   test("resolveRendererEntry falls back to the workspace renderer bundle", () => {
-    const target = resolveRendererEntry("C:\\app\\desktop\\dist", undefined);
+    const target = resolveRendererEntry(join(root, "app", "desktop", "dist"), undefined);
     assert.equal(target.kind, "file");
-    assert.ok((target as { path: string }).path.endsWith("renderer\\dist\\index.html"));
+    assert.ok((target as { path: string }).path.endsWith(join("renderer", "dist", "index.html")));
     assert.equal(rendererOriginFor(target), pathToFileURL((target as { path: string }).path).href);
   });
 
   test("resolveRendererEntry maps the packaged asar onto extraResources renderer", () => {
-    const target = resolveRendererEntry("C:\\Program Files\\OMP Studio\\resources\\app.asar", undefined);
+    const resources = process.platform === "darwin"
+      ? join(root, "Applications", "OMP Studio.app", "Contents", "Resources")
+      : join(root, "Program Files", "OMP Studio", "resources");
+    const target = resolveRendererEntry(join(resources, "app.asar"), undefined);
     assert.equal(target.kind, "file");
-    assert.equal(
-      (target as { path: string }).path,
-      "C:\\Program Files\\OMP Studio\\resources\\renderer\\dist\\index.html",
-    );
+    assert.equal((target as { path: string }).path, join(resources, "renderer", "dist", "index.html"));
   });
 
   test("resolveRendererEntryFrom maps payload directory to file target with file:// origin", () => {
-    const payloadDist = "C:\\Users\\alice\\AppData\\Local\\omp-studio\\payload\\versions\\0.1.4\\renderer";
+    const payloadDist = join(root, "Users", "alice", "omp-studio", "payload", "versions", "0.1.4", "renderer");
     const target = resolveRendererEntryFrom(payloadDist, undefined);
     assert.equal(target.kind, "file");
-    assert.equal(target.path, "C:\\Users\\alice\\AppData\\Local\\omp-studio\\payload\\versions\\0.1.4\\renderer\\index.html");
+    assert.equal(target.path, join(payloadDist, "index.html"));
     const origin = rendererOriginFor(target);
     assert.equal(origin, pathToFileURL(target.path).href);
-    const fileUrl = new URL(`file:///${target.path.replace(/\\/g, "/")}`).toString();
-    assert.equal(isTrustedRendererUrl(fileUrl, origin), true);
+    assert.equal(isTrustedRendererUrl(pathToFileURL(target.path).toString(), origin), true);
   });
 
   test("rendererOriginFor derives the exact dev origin and fails closed on junk", () => {

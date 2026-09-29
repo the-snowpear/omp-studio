@@ -42,6 +42,7 @@ function safeMessage(error: unknown, cwd?: string): ClientError {
   if (error !== null && typeof error === "object" && "code" in error && "message" in error) return error as ClientError;
   const raw = error instanceof Error ? error.message : "GitHub operation failed";
   if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT" || /spawn gh ENOENT/iu.test(raw)) return clientError("CAPABILITY_UNAVAILABLE", "GitHub CLI is not installed or is not available on PATH");
+  if (error instanceof HostProcessError && error.kind === "unavailable") return clientError("CAPABILITY_UNAVAILABLE", error.message);
   if (error instanceof HostProcessError && error.kind === "cancelled") return clientError("UNAVAILABLE", "Operation cancelled");
   if (error instanceof HostProcessError && error.kind === "timeout") return clientError("UNAVAILABLE", "GitHub operation timed out");
   const withoutCwd = cwd === undefined ? raw : raw.replaceAll(cwd, "[workspace]").replaceAll(cwd.replaceAll("\\", "/"), "[workspace]");

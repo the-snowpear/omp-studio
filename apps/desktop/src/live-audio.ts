@@ -1,5 +1,5 @@
 import { connect, type Socket } from "node:net";
-import { resolve } from "node:path";
+import { liveAudioSocketName, privateSocketPath } from "@omp-studio/studio-host";
 import type { RuntimeMediaFiles } from "./runtime-media-files.js";
 import type { TerminalIpcMain, TerminalSender } from "./terminal-ipc.js";
 import { LIVE_AUDIO_CHANNELS, type LiveAudioResult } from "./live-audio-shared.js";
@@ -10,7 +10,8 @@ function record(value: unknown, keys: string[]): Record<string, unknown> { if (!
 export class DesktopLiveAudio {
   readonly #connections = new Map<string, Connection>();
   readonly #generations = new Map<number, number>();
-  constructor(readonly options: { directory(): string; files(): RuntimeMediaFiles }) {}
+  /** `socketDirectory` is the Runtime's `OMP_STUDIO_SOCKET_DIR`; POSIX live audio needs it. */
+  constructor(readonly options: { directory(): string; files(): RuntimeMediaFiles; socketDirectory?(): Promise<string> }) {}
   async attach(owner: number, raw: unknown): Promise<void> {
     const input = record(raw, ["audioId", "sessionId"]); const audioId = identifier(input.audioId);
     if (typeof input.sessionId !== "string" || !input.sessionId || input.sessionId.length > 512) throw new Error("Invalid audio session");
@@ -18,7 +19,7 @@ export class DesktopLiveAudio {
     const root = this.options.directory();
     const descriptor = record(await this.options.files().descriptor(root, audioId), ["version", "audioId", "sessionId", "endpoint", "token", "expiresAt"]);
     if (generation !== this.#generations.get(owner) || descriptor.version !== 1 || descriptor.audioId !== audioId || descriptor.sessionId !== input.sessionId || typeof descriptor.token !== "string" || !/^[a-f0-9]{64}$/u.test(descriptor.token) || typeof descriptor.expiresAt !== "number" || descriptor.expiresAt < Date.now() || descriptor.expiresAt > Date.now() + 60000) throw new Error("Audio attachment expired");
-    const expected = process.platform === "win32" ? `\\\\.\\pipe\\omp-studio-audio-${audioId}` : resolve(root, "audio", audioId + ".sock");
+    const expected = process.platform === "win32" ? `\\\\.\\pipe\\omp-studio-audio-${audioId}` : await this.#socketEndpoint(audioId);
     if (descriptor.endpoint !== expected || this.#connections.has(audioId)) throw new Error("Invalid audio endpoint");
     const socket = connect(expected); const connection: Connection = { owner, audioId, socket, sequence: 0, busy: false, attached: false }; this.#connections.set(audioId, connection);
     socket.on("error", () => {}); socket.once("close", () => { if (this.#connections.get(audioId) === connection) this.#connections.delete(audioId); });
@@ -35,6 +36,7 @@ export class DesktopLiveAudio {
       connection.attached = true;
     } catch (cause) { socket.destroy(); throw cause; }
   }
+  async #socketEndpoint(audioId: string): Promise<string> { if (!this.options.socketDirectory) throw new Error("Invalid audio endpoint"); return privateSocketPath(await this.options.socketDirectory(), liveAudioSocketName(audioId)); }
   #owned(owner: number, raw: unknown): Connection { const value = this.#connections.get(identifier(raw)); if (!value || value.owner !== owner || !value.attached || value.socket.destroyed) throw new Error("Audio is not attached to this window"); return value; }
   async chunk(owner: number, raw: unknown): Promise<void> {
     const input = record(raw, ["audioId", "sequence", "bytes"]), connection = this.#owned(owner, input.audioId);

@@ -20,7 +20,8 @@ import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, protocol, safeStorage, session, shell, Tray, type NativeImage, type WebContents } from "electron";
 import { registerServiceDefinitionsIpc } from "./chrome-services.js";
 import { ServiceDefinitionStore } from "./service-definitions.js";
-import { activeArtifactLibrary, activeMediaDirectory } from "./artifact-library.js";
+import { activeArtifactLibrary, activeMediaDirectory, activeProfileDirectory } from "./artifact-library.js";
+import { runtimeSocketDirectory } from "./runtime-session.js";
 import { artifactResponse, registerArtifactIpc } from "./chrome-artifacts.js";
 import {
   TITLEBAR_OVERLAY,
@@ -75,6 +76,8 @@ import {
 import type { DesktopTray, DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
 import { createProductionHostFactory } from "./host-factory.js";
 import { defaultHostLogsDirectory } from "./host-log.js";
+import { desktopPaths } from "./platform/desktop-paths.js";
+import { applyLoginEnvironment } from "./platform/login-env.js";
 import {
   externalEditorCommandForPath,
   launchExternalEditor,
@@ -108,11 +111,12 @@ export async function main(): Promise<void> {
   const migrationIndex = process.argv.indexOf("--omp-migrate-runtime");
   if (migrationIndex !== -1) {
     const legacyInstallRoot = process.argv[migrationIndex + 1];
-    if (!app.isPackaged || !legacyInstallRoot || !isAbsolute(legacyInstallRoot)) throw new Error("Invalid Runtime migration request");
+    // Only the Windows installer migrates a legacy per-machine Runtime.
+    if (process.platform !== "win32" || !app.isPackaged || !legacyInstallRoot || !isAbsolute(legacyInstallRoot)) throw new Error("Invalid Runtime migration request");
     const keys = await loadInstallerTrustedKeys([join(process.execPath, "..", "runtime-keys")]);
     if (!keys) throw new Error("Missing migration trust root");
     const { migrateLegacyRuntime } = await import("./migrate-runtime.js");
-    await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "runtimes"), trustedKeys: keys.trustedKeys });
+    await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot: desktopPaths().runtimesRoot, trustedKeys: keys.trustedKeys });
     app.exit(0); return;
   }
   if (process.argv.includes("--omp-print-abi")) {
@@ -134,10 +138,13 @@ export async function main(): Promise<void> {
     app.setAppUserModelId(APP_USER_MODEL_ID);
   }
   await app.whenReady();
+  // A Finder launch has launchd's bare PATH; the Host waits for the login shell's before spawning.
+  const loginEnvironment = applyLoginEnvironment({ locale: app.getLocale() });
 
   const runtimeInstallLayout = packagedRuntimeInstallLayout({
     isPackaged: app.isPackaged,
     execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
   });
   const keysDirs = [
     ...(runtimeInstallLayout !== undefined ? [runtimeInstallLayout.keysDirectory] : []),
@@ -157,6 +164,7 @@ export async function main(): Promise<void> {
 
   let updateCoordinator: UpdateCoordinator | undefined;
   const hostFactory = createProductionHostFactory({
+    loginEnvironment,
     beforeCreate: async () => { await updateCoordinator?.initialize(); },
     afterCreate: async (composition, workspaceSelected) => {
       if (!updateCoordinator?.hasRuntimeTrial || !workspaceSelected) return false;
@@ -178,7 +186,7 @@ export async function main(): Promise<void> {
     const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
     const updater = new PreparedNsisUpdater();
     updateCoordinator = new UpdateCoordinator({
-      root: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "updates-v2"),
+      root: desktopPaths().updatesV2Root,
       runtimeRoot: runtimeInstallLayout.installDirectory,
       bundledRuntimeRoot: runtimeInstallLayout.artifactRoot,
       initialInstallerPath: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "@omp-studiodesktop-updater", "installer.exe"),
@@ -192,7 +200,11 @@ export async function main(): Promise<void> {
   }
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
-  const liveAudio = new DesktopLiveAudio({ directory: activeMediaDirectory, files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()) });
+  const liveAudio = new DesktopLiveAudio({
+    directory: activeMediaDirectory,
+    files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()),
+    socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()),
+  });
   const terminalManager = new TerminalSessionManager({
     recording: terminalRecordings,
     spawner: createNodePtySpawner(),
@@ -622,7 +634,7 @@ export async function main(): Promise<void> {
         }
       },
       prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
-      stagingRoot: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "updates"),
+      stagingRoot: desktopPaths().legacyStagingRoot,
       trustedKeys,
       platform: `${process.platform}-${process.arch}`,
       runtime: { electron: process.versions.electron, modules: process.versions.modules, nodePty: NODE_PTY_VERSION },

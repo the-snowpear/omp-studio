@@ -44,6 +44,7 @@ import {
 import type { DesktopHostComposition } from "../src/types.js";
 import { createDesktopRuntimeSessionPort } from "../src/runtime-session.js";
 import { InMemorySessionLeaseStore } from "@omp-studio/studio-host";
+import { runtimeEntrypointFor } from "@omp-studio/runtime-installer";
 
 const UPSTREAM_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const T0 = "2026-08-12T00:00:00.000Z";
@@ -544,18 +545,20 @@ for (const rejectedContext of [false, true]) {
       const artifact = join(profileDirectory, "artifact");
       await mkdir(artifact);
       const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+      // The managed lookup matches the host platform, so the fixture follows it.
+      const hostPlatform = `${process.platform}-${process.arch}`, entrypoint = runtimeEntrypointFor(hostPlatform);
       const payload = "test executable; never executed";
       const manifest = JSON.stringify({
         runtimeVersion: HELLO.runtimeVersion, upstreamVersion: HELLO.upstreamVersion,
         upstreamCommit: UPSTREAM_COMMIT, patchsetVersion: "0.1.0", studioProtocol: { min: 1, max: 1 },
         profile: "full-parity-v1", capabilityHash: HELLO.capabilityManifest.hash,
-        commandManifestHash: HELLO.commandManifestHash, platform: `win32-${process.arch}`, entrypoint: "omp.exe", channel: "stable",
+        commandManifestHash: HELLO.commandManifestHash, platform: hostPlatform, entrypoint, channel: "stable",
       });
       const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
-      const checksums = JSON.stringify({ algorithm: "sha256", files: { "omp.exe": digest(payload), "runtime-manifest.json": digest(manifest) } });
+      const checksums = JSON.stringify({ algorithm: "sha256", files: { [entrypoint]: digest(payload), "runtime-manifest.json": digest(manifest) } });
       const signed = Buffer.concat([Buffer.from(manifest), Buffer.from("\0"), Buffer.from(checksums)]);
       await Promise.all([
-        writeFile(join(artifact, "omp.exe"), payload),
+        writeFile(join(artifact, entrypoint), payload),
         writeFile(join(artifact, "runtime-manifest.json"), manifest),
         writeFile(join(artifact, "checksums.json"), checksums),
         writeFile(join(artifact, "runtime-signature.json"), JSON.stringify({ algorithm: "ed25519", keyId: "test-key", payloadSha256: digest(signed), signature: sign(null, signed, privateKey).toString("base64url") })),

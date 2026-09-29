@@ -8,14 +8,13 @@
  */
 
 import { appendFile, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { redactText } from "@omp-studio/host-client-api";
 
-export type HostLogLevel = "info" | "warn" | "error";
+import { desktopPaths } from "./platform/desktop-paths.js";
 
-const STATE_DIRECTORY_NAME = "omp-studio";
+export type HostLogLevel = "info" | "warn" | "error";
 
 /** Dated Host log basename: `host-YYYY-MM-DD.log`. */
 export const HOST_LOG_BASENAME = /^host-\d{4}-\d{2}-\d{2}\.log$/u;
@@ -31,10 +30,7 @@ export function hostLogsDirectory(profileDirectory: string): string {
  * Renderer never has to learn a filesystem path.
  */
 export function defaultHostLogsDirectory(): string {
-  const root = process.platform === "darwin"
-    ? join(homedir(), "Library", "Application Support")
-    : (process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"));
-  return join(root, STATE_DIRECTORY_NAME, "logs");
+  return desktopPaths().logsRoot;
 }
 
 export interface HostLog {

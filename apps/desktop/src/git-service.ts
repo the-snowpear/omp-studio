@@ -180,6 +180,9 @@ function displayError(error: unknown, cwd?: string): ClientError {
   if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT" || /spawn git ENOENT/iu.test(raw)) {
     return clientError("CAPABILITY_UNAVAILABLE", "Git is not installed or is not available on PATH");
   }
+  if (error instanceof HostProcessError && error.kind === "unavailable") {
+    return clientError("CAPABILITY_UNAVAILABLE", error.message);
+  }
   if (error instanceof HostProcessError && error.kind === "cancelled") {
     return clientError("UNAVAILABLE", "Operation cancelled");
   }

@@ -30,7 +30,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, readFile, rm, mkdir } from "node:fs/promises";
 import { writeJsonAtomic } from "@omp-studio/runtime-installer";
 import type { Socket } from "node:net";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { redactText, type HostRuntimeHelloView, type HostRuntimeDisconnect, type HostRuntimeUnavailable } from "@omp-studio/host-client-api";
 import {
@@ -38,12 +38,16 @@ import {
   FileSessionLeaseStore,
   HostBackend,
   NodeRuntimeProcessPort,
+  POSIX_PROCESS_GROUP_SPAWN_OPTIONS,
+  PosixProcessGroupContainment,
   StudioBridgeClient,
   StudioBridgeHandshakeError,
   StudioRuntimeSessionController,
   buildProcessProbeArgs,
   createBridgeBootstrap,
   createWindowsBridgeAclPort,
+  ensurePrivateSocketDirectory,
+  sweepStaleSockets,
   type BridgeBootstrap,
   type RuntimeContainmentPort,
   type RuntimePublication,
@@ -52,6 +56,7 @@ import {
   type WindowsBridgeAclPort,
 } from "@omp-studio/studio-host";
 import { registerPerformanceController } from "./desktop-performance.js";
+import { desktopSocketTmpRoot } from "./platform/desktop-paths.js";
 import type {
   ApprovalMode,
   CommandLedgerEntry,
@@ -87,6 +92,12 @@ export interface DesktopRuntimeSessionPortOptions {
   readonly bridgeDirectoryName?: string;
   /** Injectable current-user ACL provider for the bridge directory/token. */
   readonly windowsAcl?: WindowsBridgeAclPort;
+  /**
+   * POSIX: short private directory for Bridge sockets (macOS caps socket paths
+   * at 104 bytes, which `<profile>/bridge` exceeds). Defaults to a
+   * profile-scoped directory under the stable per-user temp root.
+   */
+  readonly socketDirectory?: (profileDirectory: string) => Promise<string>;
   /** Injectable socket connector (tests); defaults to `node:net` createConnection. */
   readonly connectSocket?: (endpoint: string) => Socket;
   /** Injectable process spawner (tests); defaults to `node:child_process` spawn. */
@@ -190,6 +201,15 @@ interface ResidentRuntime {
 }
 
 /**
+ * POSIX Bridge and live-audio sockets live in a short profile-scoped directory
+ * (sun_path limit). Desktop live audio derives the same directory to check the
+ * endpoint a Runtime advertises.
+ */
+export function runtimeSocketDirectory(profileDirectory: string): Promise<string> {
+  return ensurePrivateSocketDirectory(`profile:${resolve(profileDirectory)}`, { tmpRoot: desktopSocketTmpRoot() });
+}
+
+/**
  * Production multi-session coordinator. Each resident Session owns an
  * independent single-Worker port; selecting a sibling only changes the
  * active facade binding and leaves the previous Worker running.
@@ -210,6 +230,18 @@ export function createDesktopRuntimeSessionPort(
   }
   const ownerId = options.ownerId ?? `desktop-${process.pid}-${randomUUID()}`;
   const residents = new Map<string, ResidentRuntime>();
+  let socketSweep: Promise<void> | undefined;
+  const workerOptions: DesktopRuntimeSessionPortOptions = {
+    ...options,
+    async socketDirectory(profileDirectory) {
+      const directory = await (options.socketDirectory ?? runtimeSocketDirectory)(profileDirectory);
+      // Leftovers of a crashed Host, swept once; young sockets are skipped so a
+      // Runtime that is binding right now is never touched.
+      socketSweep ??= sweepStaleSockets(directory, { minAgeMs: 60_000 }).then(() => undefined, () => undefined);
+      await socketSweep;
+      return directory;
+    },
+  };
   let context: DesktopRuntimeSessionContext | undefined;
   /**
    * The workspace new Workers are launched under, i.e. the active project.
@@ -401,7 +433,7 @@ export function createDesktopRuntimeSessionPort(
       options.workerPortFactory?.({
         ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
         nextRuntimeEpoch,
-      }) ?? createSingleDesktopRuntimeSessionPort(options, resumeSessionId, nextRuntimeEpoch);
+      }) ?? createSingleDesktopRuntimeSessionPort(workerOptions, resumeSessionId, nextRuntimeEpoch);
     port.attachSessionSink?.((session) => {
       if (session !== undefined) {
         const snapshot = session.controller.publication()?.snapshot;
@@ -1066,7 +1098,9 @@ function createSingleDesktopRuntimeSessionPort(
   initialResumeSessionId: string | undefined,
   nextRuntimeEpoch: () => number,
 ): DesktopRuntimeSessionPort {
-  const containment = options.containment ?? KILL_BASED_CONTAINMENT;
+  // POSIX Runtimes lead their own process group so stopping one also stops
+  // the tool processes it started; Windows keeps the kill-based fallback.
+  const containment = options.containment ?? (process.platform === "win32" ? KILL_BASED_CONTAINMENT : new PosixProcessGroupContainment());
   const log = options.log;
   /** The selected workspace; `undefined` until the first pick/open rebind. */
   let workspace: { workspaceId: string; cwd: string } | undefined;
@@ -1269,12 +1303,17 @@ function createSingleDesktopRuntimeSessionPort(
       `generation=${launchGeneration} resume=${resumeSessionId === undefined ? "no" : "yes"} classification=${launchContext.resolution.classification}`,
     );
 
+    const socketDirectory =
+      process.platform === "win32"
+        ? undefined
+        : await (options.socketDirectory ?? runtimeSocketDirectory)(launchContext.profileDirectory);
     const bridgeBootstrap: BridgeBootstrap =
       options.windowsAcl !== undefined || process.platform !== "win32"
         ? await createBridgeBootstrap(
             join(launchContext.profileDirectory, options.bridgeDirectoryName ?? "bridge"),
             process.platform,
             options.windowsAcl,
+            socketDirectory === undefined ? {} : { socketDirectory },
           )
         : await createBridgeBootstrap(
             join(launchContext.profileDirectory, options.bridgeDirectoryName ?? "bridge"),
@@ -1365,7 +1404,13 @@ function createSingleDesktopRuntimeSessionPort(
       };
 
       const port = new NodeRuntimeProcessPort({
-        env: { ...process.env, OMP_STUDIO_MEDIA_ROOT: mediaDirectory },
+        env: {
+          ...process.env,
+          OMP_STUDIO_MEDIA_ROOT: mediaDirectory,
+          ...(socketDirectory === undefined ? {} : { OMP_STUDIO_SOCKET_DIR: socketDirectory }),
+          // The Runtime's parent watchdog is enabled on macOS only for now.
+          ...(process.platform === "darwin" ? { OMP_STUDIO_PARENT_PID: String(process.pid) } : {}),
+        },
         executable: installed.entrypointPath,
         cwd: selected.cwd,
         args: () => buildProcessProbeArgs(extra, bridgeBootstrap, launchEpoch),
@@ -1405,7 +1450,11 @@ function createSingleDesktopRuntimeSessionPort(
         },
         // stdout stays ignored: studio-host still starts the interactive TUI,
         // and a piped stdout makes that TUI exit 129 right after handshake.
-        spawnOptions: { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] },
+        spawnOptions: {
+          windowsHide: true,
+          stdio: ["ignore", "ignore", "pipe"],
+          ...(process.platform === "win32" ? {} : POSIX_PROCESS_GROUP_SPAWN_OPTIONS),
+        },
         ...(options.spawnProcess === undefined ? {} : { spawnProcess: options.spawnProcess }),
       });
       processPort = port;

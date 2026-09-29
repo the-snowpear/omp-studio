@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { win32 } from "node:path";
 import { randomBytes } from "node:crypto";
 
 import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize } from "./terminal-shared.js";
@@ -57,13 +57,14 @@ export function resolveDefaultShell(options: ShellResolveOptions = {}): Resolved
   const exists = options.exists ?? existsSync;
 
   if (platform === "win32") {
+    // Windows path semantics follow the requested platform, not the host.
     const programFiles = env.ProgramFiles ?? "C:\\Program Files";
     const systemRoot = env.SystemRoot ?? env.windir ?? "C:\\Windows";
     const candidates: ReadonlyArray<ResolvedShell> = [
-      { name: "pwsh", file: join(programFiles, "PowerShell", "7", "pwsh.exe") },
-      { name: "pwsh", file: join(programFiles, "PowerShell", "7-preview", "pwsh.exe") },
-      { name: "powershell", file: join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") },
-      { name: "cmd", file: env.ComSpec ?? join(systemRoot, "System32", "cmd.exe") },
+      { name: "pwsh", file: win32.join(programFiles, "PowerShell", "7", "pwsh.exe") },
+      { name: "pwsh", file: win32.join(programFiles, "PowerShell", "7-preview", "pwsh.exe") },
+      { name: "powershell", file: win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") },
+      { name: "cmd", file: env.ComSpec ?? win32.join(systemRoot, "System32", "cmd.exe") },
     ];
     for (const candidate of candidates) {
       if (exists(candidate.file)) return candidate;

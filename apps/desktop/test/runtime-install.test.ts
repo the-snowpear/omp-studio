@@ -566,14 +566,28 @@ test("packagedRuntimeInstallLayout separates writable user Runtime from bundled 
   assert.equal(packagedRuntimeInstallLayout({ isPackaged: false, execPath: join("C:", "dev", "OMP Studio.exe") }), undefined);
   const layout = packagedRuntimeInstallLayout({
     isPackaged: true,
-    execPath: join("C:", "Program Files", "OMP Studio", "OMP Studio.exe"),
-    localAppData: join("C:", "Users", "fixture", "AppData", "Local"),
+    platform: "win32",
+    execPath: "C:\\Program Files\\OMP Studio\\OMP Studio.exe",
+    localAppData: "C:\\Users\\fixture\\AppData\\Local",
   });
   assert.deepEqual(layout, {
-    installDirectory: join("C:", "Users", "fixture", "AppData", "Local", "omp-studio", "runtimes"),
-    artifactRoot: join("C:", "Program Files", "OMP Studio", "runtime", "versions"),
-    keysDirectory: join("C:", "Program Files", "OMP Studio", "runtime-keys"),
+    installDirectory: "C:\\Users\\fixture\\AppData\\Local\\omp-studio\\runtimes",
+    artifactRoot: "C:\\Program Files\\OMP Studio\\runtime\\versions",
+    keysDirectory: "C:\\Program Files\\OMP Studio\\runtime-keys",
   });
+});
+
+test("packagedRuntimeInstallLayout reads the macOS seed from the bundle and writes outside it", () => {
+  const layout = packagedRuntimeInstallLayout({
+    isPackaged: true,
+    platform: "darwin",
+    execPath: "/Applications/OMP Studio.app/Contents/MacOS/OMP Studio",
+    resourcesPath: "/Applications/OMP Studio.app/Contents/Resources",
+  });
+  assert.equal(layout?.artifactRoot, "/Applications/OMP Studio.app/Contents/Resources/runtime/versions");
+  assert.equal(layout?.keysDirectory, "/Applications/OMP Studio.app/Contents/Resources/runtime-keys");
+  assert.match(layout?.installDirectory ?? "", /\/Library\/Application Support\/omp-studio\/runtimes$/u);
+  assert.ok(!(layout?.installDirectory ?? "").includes(".app/"), "the writable store must never live inside the signed bundle");
 });
 
 test("resolveManagedRuntimeInstallDirectory prefers the packaged override", () => {

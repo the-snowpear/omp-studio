@@ -2,6 +2,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import type { CommandRequestId, OperationProgress } from "@omp-studio/client-contract";
 
+import { createCommandLineToolsGuard, type CommandLineToolsGuard } from "./platform/developer-tools.js";
+import { processGroupSpawnOptions, terminateProcessTree } from "./platform/process-tree.js";
+
 const DEFAULT_OUTPUT_LIMIT = 4 * 1024 * 1024;
 
 export interface ProcessRunOptions {
@@ -30,7 +33,7 @@ export class HostProcessError extends Error {
     readonly exitCode: number | null,
     readonly stdout: string,
     readonly stderr: string,
-    readonly kind: "exit" | "timeout" | "overflow" | "cancelled" = "exit",
+    readonly kind: "exit" | "timeout" | "overflow" | "cancelled" | "unavailable" = "exit",
   ) {
     super(message);
     this.name = "HostProcessError";
@@ -42,25 +45,24 @@ function safeTail(value: string): string {
 }
 
 function killTree(child: ChildProcessWithoutNullStreams): void {
-  if (child.exitCode !== null || child.pid === undefined) return;
-  if (process.platform === "win32") {
-    const killer = spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], {
-      stdio: "ignore",
-      windowsHide: true,
-      shell: false,
-    });
-    killer.on("error", () => { /* best effort */ });
-    killer.unref();
-    return;
-  }
-  child.kill("SIGKILL");
+  terminateProcessTree(child, "SIGKILL");
+}
+
+export interface HostProcessRunnerOptions {
+  /** Defaults to the macOS Command Line Tools check; other platforms have no shims. */
+  readonly commandLineTools?: CommandLineToolsGuard;
 }
 
 export class HostProcessRunner {
+  readonly #commandLineTools: CommandLineToolsGuard | undefined;
   readonly #running = new Map<CommandRequestId, ChildProcessWithoutNullStreams>();
   readonly #pending = new Set<CommandRequestId>();
   readonly #cancelled = new Set<CommandRequestId>();
   readonly #listeners = new Set<(progress: OperationProgress) => void>();
+
+  constructor(options: HostProcessRunnerOptions = {}) {
+    this.#commandLineTools = options.commandLineTools ?? (process.platform === "darwin" ? createCommandLineToolsGuard() : undefined);
+  }
 
   onProgress(listener: (progress: OperationProgress) => void): () => void {
     this.#listeners.add(listener);
@@ -115,12 +117,18 @@ export class HostProcessRunner {
       LANG: "C",
       ...(options.readOnly === true ? { GIT_OPTIONAL_LOCKS: "0" } : {}),
     };
+    if (this.#commandLineTools !== undefined) {
+      const unavailable = await this.#commandLineTools.unavailableReason(options.command, env);
+      if (unavailable !== undefined) throw new HostProcessError(unavailable, null, "", "", "unavailable");
+      if (options.requestId !== undefined) this.assertNotCancelled(options.requestId);
+    }
     const child = spawn(options.command, [...options.args], {
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       env,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       shell: false,
+      ...processGroupSpawnOptions(),
     });
     if (options.requestId !== undefined) {
       this.#running.set(options.requestId, child);

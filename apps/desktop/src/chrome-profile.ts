@@ -5,9 +5,6 @@
  * 写入 `%APPDATA%\omp-studio\profile\`，不把路径回传给 Renderer。
  */
 
-import { homedir } from "node:os";
-import { join } from "node:path";
-
 import { app, ipcMain, type WebContents } from "electron";
 
 import {
@@ -23,16 +20,10 @@ import {
   resolveProfilePersistRoot,
   writeProfileAvatar,
 } from "./chrome-profile-store.js";
-
-function userAppDataRoot(): string {
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support");
-  }
-  return process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
-}
+import { desktopPaths } from "./platform/desktop-paths.js";
 
 function persistRoot(): string {
-  return resolveProfilePersistRoot(userAppDataRoot());
+  return resolveProfilePersistRoot(desktopPaths().appDataRoot);
 }
 
 async function readyRoot(): Promise<string> {

@@ -15,9 +15,9 @@
  */
 
 import { readFile, readdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { desktopPaths, packagedResourcePaths, resolveDesktopPaths } from "./platform/desktop-paths.js";
 
 import type { HostRuntimeInstallProbe, HostRuntimeInstallService } from "@omp-studio/host-client-api";
 import type { RuntimeChannel, RuntimeInstallState, SignatureStatus } from "@omp-studio/client-contract";
@@ -159,19 +159,30 @@ export const PACKAGED_RUNTIME_ARTIFACT_DIR = "runtime";
 export const PACKAGED_RUNTIME_VERSIONS_DIR = "versions";
 export const PACKAGED_RUNTIME_KEYS_DIR = "runtime-keys";
 
-/** Layout written next to the packaged `OMP Studio.exe`. Undefined when unpackaged. */
+/**
+ * Bundled seed (next to `OMP Studio.exe`, or in the `.app`'s Contents/Resources)
+ * plus the writable per-user Runtime store. Undefined when unpackaged.
+ */
 export function packagedRuntimeInstallLayout(input: {
   readonly isPackaged: boolean;
   readonly execPath: string;
   readonly localAppData?: string;
+  readonly platform?: NodeJS.Platform;
+  /** `process.resourcesPath`; required on macOS. */
+  readonly resourcesPath?: string;
 }): { readonly installDirectory: string; readonly artifactRoot: string; readonly keysDirectory: string } | undefined {
   if (!input.isPackaged) return undefined;
-  const installDir = dirname(input.execPath);
-  const installDirectory = join(input.localAppData ?? process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "runtimes");
+  const platform = input.platform ?? process.platform;
+  const bundled = packagedResourcePaths({
+    platform,
+    execPath: input.execPath,
+    ...(input.resourcesPath === undefined ? {} : { resourcesPath: input.resourcesPath }),
+  });
+  const env = input.localAppData === undefined ? process.env : { ...process.env, LOCALAPPDATA: input.localAppData };
   return {
-    installDirectory,
-    artifactRoot: join(installDir, PACKAGED_RUNTIME_ARTIFACT_DIR, PACKAGED_RUNTIME_VERSIONS_DIR),
-    keysDirectory: join(installDir, PACKAGED_RUNTIME_KEYS_DIR),
+    installDirectory: resolveDesktopPaths({ platform, env }).runtimesRoot,
+    artifactRoot: bundled.bundledRuntimeRoot,
+    keysDirectory: bundled.bundledKeysRoot,
   };
 }
 
@@ -191,10 +202,7 @@ const PUBLIC_KEY_FILE = "trusted-public.pem";
 
 /** Host-profile key directory. Never a repository path. */
 export function defaultRuntimeKeysDirectory(): string {
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", "omp-studio", "keys");
-  }
-  return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "omp-studio", "keys");
+  return desktopPaths().keysRoot;
 }
 
 async function readTrustedKeysDirectory(
