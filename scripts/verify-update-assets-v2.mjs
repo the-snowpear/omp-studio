@@ -25,12 +25,10 @@ export async function verifyUpdateAssets(directory, keys, repo, platform) {
       if (!sameBytes(bytes, file)) throw new Error(`Release artifact mismatch: ${file.asset}`);
     }
   }
-  // The macOS dmg is for people, not the updater; its digest is signed with the catalog.
-  const firstInstall = raw.manifest?.firstInstall;
+  // The macOS dmg is for people, not the updater; its digest is signed with the catalog,
+  // and verifyUpdateManifest already checked it sits beside the app zip.
+  const firstInstall = envelope.manifest.firstInstall;
   if (firstInstall !== undefined) {
-    const app = envelope.manifest.app;
-    const release = app?.file.url.slice(0, app.file.url.lastIndexOf("/") + 1);
-    if (!app || typeof firstInstall.asset !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,220}\.dmg$/.test(firstInstall.asset) || firstInstall.url !== `${release}${firstInstall.asset}`) throw new Error("Invalid first-install asset");
     if (!sameBytes(await readFile(join(directory, firstInstall.asset)), firstInstall)) throw new Error(`Release artifact mismatch: ${firstInstall.asset}`);
     expected.add(firstInstall.asset);
   } else if (platform.startsWith("darwin-") && envelope.manifest.app) {

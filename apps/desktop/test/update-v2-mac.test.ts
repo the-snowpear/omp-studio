@@ -36,6 +36,8 @@ const appRelease = (version: string, sequence: number) => release(`OMP-Studio-${
 
 function signed(parts: Partial<Pick<UpdateManifest, "app" | "runtime">>): SignedUpdateManifest {
   const manifest: UpdateManifest = { schema: 2, repo: "owner/repo", platform: PLATFORM, generatedAt: "2026-09-29T00:00:00Z", releaseNotesUrl: "https://github.com/owner/repo/releases/tag/v", ...parts };
+  // Real macOS catalogs name the dmg for new users next to the app zip.
+  if (parts.app) manifest.firstInstall = file(parts.app.file.asset.replace(/\.zip$/u, ".dmg"), Buffer.from("dmg"));
   return { manifest, signature: { algorithm: "ed25519", keyId: "test", value: sign(null, updateSigningBytes(manifest), pair.privateKey).toString("base64url") } };
 }
 
@@ -105,6 +107,20 @@ test("a macOS desktop update commits only once the new version confirms it is he
   assert.equal(saved.previous.app.manifest.app.version, "2.0.0");
   assert.equal(v2.state.app.phase, "idle");
   assert.equal(v2.state.rollbackAppVersion, "1.0.0", "the dmg install had no zip, yet the previous version is restorable");
+});
+
+test("a prepared update survives a restart before it is applied", async () => {
+  const { h, journal } = await harness([signed({ app: appRelease("2.0.0", 2) })]);
+  const first = new UpdateCoordinator(h.options("1.0.0"));
+  await first.initialize(); await first.check(); await first.prepare("all");
+  assert.equal((await journal()).pending.app.manifest.firstInstall.asset, "OMP-Studio-2.0.0-macos-arm64.dmg");
+
+  const later = new UpdateCoordinator(h.options("1.0.0"));
+  await later.initialize();
+  assert.equal(later.state.app.phase, "ready", "the journaled catalog still verifies");
+  assert.equal((await journal()).pending.app.manifest.app.version, "2.0.0");
+  assert.deepEqual(await later.apply(), { ok: true });
+  assert.deepEqual(h.installs.map((install) => install.version), ["2.0.0"]);
 });
 
 test("a version the helper had to swap back is dropped and that exact file is never offered again", async () => {

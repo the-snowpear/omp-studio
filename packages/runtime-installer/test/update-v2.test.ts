@@ -85,6 +85,29 @@ test("a macOS catalog ships the desktop as a zipped app and rejects the Windows 
   const intel = manifest(); (intel as { platform: string }).platform = "darwin-x64";
   assert.throws(() => verifyUpdateManifest(envelope(intel), { test: key }, "owner/repo", "darwin-x64"), /identity/);
 });
+test("a macOS first-install dmg survives verification, so the journaled catalog verifies again", () => {
+  const m = manifest(); m.platform = "darwin-arm64"; m.app!.file = file("OMP-Studio-1.0.0-macos-arm64.zip"); m.app!.blockmap = file("OMP-Studio-1.0.0-macos-arm64.zip.blockmap");
+  m.firstInstall = file("OMP-Studio-1.0.0-macos-arm64.dmg");
+  const once = verifyUpdateManifest(envelope(m), { test: key }, "owner/repo", "darwin-arm64");
+  assert.deepEqual(once.manifest.firstInstall, m.firstInstall);
+  assert.deepEqual(verifyUpdateManifest(JSON.parse(JSON.stringify(once)), { test: key }, "owner/repo", "darwin-arm64"), once);
+  const other = manifest(); other.platform = "darwin-arm64"; other.app = m.app!; other.firstInstall = { ...file("x.dmg"), url: "https://github.com/owner/repo/releases/download/v0/x.dmg" };
+  assert.throws(() => verifyUpdateManifest(envelope(other), { test: key }, "owner/repo", "darwin-arm64"), /first-install/);
+  const notDmg = manifest(); notDmg.platform = "darwin-arm64"; notDmg.app = m.app!; notDmg.firstInstall = file("x.pkg");
+  assert.throws(() => verifyUpdateManifest(envelope(notDmg), { test: key }, "owner/repo", "darwin-arm64"), /first-install/);
+  const runtimeOnly = manifest(); runtimeOnly.platform = "darwin-arm64"; runtimeOnly.runtime = { ...m.app!, file: file("rt.zip"), blockmap: file("rt.zip.blockmap") }; delete runtimeOnly.app; runtimeOnly.firstInstall = m.firstInstall;
+  assert.throws(() => verifyUpdateManifest(envelope(runtimeOnly), { test: key }, "owner/repo", "darwin-arm64"), /first-install/);
+  const windows = manifest(); windows.firstInstall = file("setup.dmg");
+  assert.throws(() => verifyUpdateManifest(envelope(windows), { test: key }, "owner/repo", "win32-x64"), /first-install/);
+});
+test("a signed field the client does not understand fails at check time, not after the download", () => {
+  const m = manifest() as UpdateManifest & { extra?: string }; m.extra = "future";
+  assert.throws(() => verifyUpdateManifest(envelope(m), { test: key }, "owner/repo", "win32-x64"), /unrecognized/);
+  const nested = manifest(); (nested.app as unknown as Record<string, unknown>).note = "future";
+  assert.throws(() => verifyUpdateManifest(envelope(nested), { test: key }, "owner/repo", "win32-x64"), /unrecognized/);
+  const once = verifyUpdateManifest(envelope(manifest()), { test: key }, "owner/repo", "win32-x64");
+  assert.deepEqual(verifyUpdateManifest(JSON.parse(JSON.stringify(once)), { test: key }, "owner/repo", "win32-x64"), once);
+});
 test("Runtime archive refuses path traversal, compressed entries and missing files", async () => {
   const root = await mkdtemp(join(tmpdir(), "omp-bad-zip-"));
   for (const [name, bytes] of [["traversal", zipSync({ "../omp.exe": new Uint8Array([1]) }, { level: 0 })], ["compressed", zipSync({ "omp.exe": new Uint8Array(512) })], ["missing", zipSync({ "omp.exe": new Uint8Array([1]) }, { level: 0 })]] as const) {

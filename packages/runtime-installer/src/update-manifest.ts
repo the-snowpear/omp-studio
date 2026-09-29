@@ -19,6 +19,8 @@ export interface UpdateManifest {
   schema: 2; repo: string; platform: UpdatePlatform;
   generatedAt: string; releaseNotesUrl: string;
   app?: ComponentRelease; runtime?: ComponentRelease;
+  /** macOS only: the dmg a new user downloads; never installed by the updater. */
+  firstInstall?: UpdateFile;
 }
 export interface SignedUpdateManifest {
   manifest: UpdateManifest;
@@ -81,6 +83,16 @@ export function verifyUpdateManifest(value: unknown, keys: Readonly<Record<strin
   if (raw.app !== undefined) manifest.app = component(raw.app, repo, "app", platform);
   if (raw.runtime !== undefined) manifest.runtime = component(raw.runtime, repo, "runtime", platform);
   if (!manifest.app && !manifest.runtime) throw new Error("Empty update manifest");
+  if (raw.firstInstall !== undefined) {
+    const dmg = file(raw.firstInstall, repo);
+    const release = manifest.app?.file.url.slice(0, manifest.app.file.url.lastIndexOf("/") + 1);
+    if (!platform.startsWith("darwin-") || release === undefined || !dmg.asset.endsWith(".dmg") || dmg.url !== `${release}${dmg.asset}`) throw new Error("Invalid first-install asset");
+    manifest.firstInstall = dmg;
+  }
+  // The coordinator journals this manifest and verifies it again on every
+  // start, so it must be byte-identical to what was signed: a dropped field
+  // would break that later, far from its cause.
+  if (canonicalUpdateJson(manifest) !== canonicalUpdateJson(raw)) throw new Error("Update manifest has unrecognized fields");
   return { manifest, signature: { algorithm: "ed25519", keyId: sig.keyId, value: sig.value } };
 }
 

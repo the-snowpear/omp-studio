@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { buildUpdateAssetsV2, buildMigrationIndex } from "./build-update-assets-v2.mjs";
 import { verifyUpdateAssets } from "./verify-update-assets-v2.mjs";
+import { verifyUpdateManifest } from "@omp-studio/runtime-installer";
 import { parseUpdateIndex } from "../apps/desktop/dist/src/update-index.js";
 
 const { privateKey: signingKey, publicKey } = generateKeyPairSync("ed25519");
@@ -121,6 +122,10 @@ test("a macOS desktop release: the update zip in the catalog, the signed dmg bes
     "updates-darwin-arm64.json",
   ]);
   assert.equal((await verifyUpdateAssets(out, keys, "owner/repo", "darwin-arm64")).app.version, "1.0.0");
+  // The desktop journals the verified envelope and verifies it again on every start.
+  const once = verifyUpdateManifest(JSON.parse(await readFile(join(out, "updates-darwin-arm64.json"), "utf8")), keys, "owner/repo", "darwin-arm64");
+  assert.deepEqual(verifyUpdateManifest(JSON.parse(JSON.stringify(once)), keys, "owner/repo", "darwin-arm64"), once);
+  assert.equal(once.manifest.firstInstall.asset, "OMP-Studio-1.0.0-macos-arm64.dmg");
   assert.match(notes, /下载 dmg\]\(https:\/\/github\.com\/owner\/repo\/releases\/download\/v1\.0\.0\/OMP-Studio-1\.0\.0-macos-arm64\.dmg\)/u);
   assert.match(notes, /仍要打开/u);
   assert.doesNotMatch(notes, /update-index/u);
