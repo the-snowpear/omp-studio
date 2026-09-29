@@ -176,6 +176,23 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 
 Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `event` / `close`（`packages/transport-desktop/src/channels.ts`）。不要再加通用 `invoke(channel, payload)`。
 
+## 平台层（Windows / macOS）
+
+平台差异集中在 `apps/desktop/src/platform/`，其余模块沿用 `{ platform, env, … }` 注入，不再散落 `process.platform`。Windows 的路径、文件名与行为由金样测试逐字钉住。
+
+| 主题 | 文件 | 说明 |
+|---|---|---|
+| 数据 / 日志 / Runtime / 更新目录 | `apps/desktop/src/platform/desktop-paths.ts` | Windows `%APPDATA%` / `%LOCALAPPDATA%` 不变；macOS 全在 `~/Library/Application Support/omp-studio`；打包资源 win32 取 exe 目录，darwin 取 `process.resourcesPath` |
+| 登录 shell 环境 | `platform/login-env.ts` | macOS 从访达启动只有 launchd 的精简 PATH；Host 创建前从登录 shell 取环境写入 `process.env`，补常见工具目录与 UTF-8 `LANG`；结果记 host 日志 `desktop.login_env` |
+| Command Line Tools 垫片 | `platform/developer-tools.ts`、`git-process.ts` | 解析到 `/usr/bin/git` 且 CLT 缺失时不执行垫片（它会弹系统安装框），直接报 `CAPABILITY_UNAVAILABLE` |
+| 进程树终止 | `platform/process-tree.ts`；`studio-host/src/posix-process-group.ts` | Windows `taskkill /t /f`；POSIX 以独立进程组启动并 `kill(-pgid)`，已回收的组长不再发信号 |
+| 单实例权威锁 | `apps/desktop/src/authority-liveness.ts`；`platform-win32/src/authority-lock.ts`（`pathStyle`） | Windows named pipe；POSIX unix socket，连不上即残留，核对 uid 与 dev/ino 后回收 |
+| Owner-only 权限 | `host-factory.ts` `applyOwnerOnlyPermissions` | Windows `icacls`；macOS `chmod 0700/0600` 后 `lstat` 复核 |
+| Runtime 平台表 | `runtime-installer/src/runtime-platform.ts`；`scripts/target-platform.mjs` | 入口 `omp.exe` / `omp`、更新平台 allowlist、PE / Mach-O 架构校验；两张表由测试钉齐 |
+| mac 构建预检 | `scripts/mac-toolchain.mjs` | Node arm64 且未转译、CLT、Bun ≥ 1.4.2、Rust host `aarch64-apple-darwin` |
+
+macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-DD.log`。
+
 ## Host 内核（改协议行为时）
 
 | 主题 | 文件 |
@@ -188,6 +205,8 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | BTW 旁路转发 | `packages/studio-host/src/btw-events.ts`；facade `#bindBtw`；client `entities.btw` |
 | 破坏性确认 | `host-confirmation.ts` |
 | Windows Job Object | `windows-job-object.ts` |
+| POSIX 进程组 / 短 socket | `posix-process-group.ts`；`socket-paths.ts`（`sun_path` ≤ 103 字节，私有 0700 目录；Bridge、探针与 live audio 共用，Runtime 经 `OMP_STUDIO_SOCKET_DIR` 取得） |
+| 工作区路径同一性 | `workspace-path.ts`（registry、catalog、归档、删除共用；Windows 大小写不敏感，macOS realpath + `/private` 别名 + NFC；overlay `session-telemetry-probe.ts` 同规则） |
 | 安装态 | `packages/runtime-installer/src/installer.ts`、`signed-artifact.ts`（Runtime，启动前核对 EXE 摘要、同版本损坏修复、重复激活保留回滚点）；`packages/runtime-installer/src/app-payload.ts`（应用负载，同版本相同签名内容支持重复下载后激活）；桌面 `apps/desktop/src/runtime-install.ts`、`payload-root.ts`（启动验签/回退）。更新维护在 `host-composition.ts` / `runtime-session.ts` 停止空闲居民进程并恢复会话；候选启动失败时恢复旧 Runtime 和原会话，Facade 拒绝并发写命令；下载/导入将验签确认的通道传给 `runtime.install`。安装包 extraFiles `$INSTDIR\runtime\versions\`，打包后直接跑这份 `omp.exe` |
 
 ## Runtime overlay（改 omp `--mode studio-host` 时）
@@ -207,6 +226,7 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | Live 实时语音 | `live-service.ts`、`services/live-audio-service.ts`；Renderer `media/LiveAudioPane.tsx`、`liveCapture.ts`、`live-capture.worklet.js`；Desktop `live-audio.ts` |
 | BTW / TAN / OMFG | overlay `btw-service.ts`、`tan-service.ts`、`omfg-service.ts`；Host `btw-events.ts`、facade `#bindBtw`、client `reducer.ts` `entities.btw`；Renderer `apps/renderer/src/btw/` |
 | 会话来源标记 | `session-origin.ts` |
+| 父进程看门狗 | `parent-watchdog.ts`；`studio-host-mode.ts` `abortForHostLoss`（`OMP_STUDIO_PARENT_PID`，目前只有 macOS 传；Host 消失后中止 turn 并退出，不走 drain） |
 
 接缝补丁（改上游已有文件）：`omp-patch/patches/0001` CLI 入口 → `0002` session → `0003` modes/pause → `0004` extensibility。分组名单：`scripts/omp-seam.mjs`。
 
