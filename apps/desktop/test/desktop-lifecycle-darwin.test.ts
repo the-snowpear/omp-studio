@@ -71,6 +71,22 @@ test("a logout is never cancelled: before-quit passes and a stuck Host shutdown 
   assert.deepEqual(events, ["window.dispose", "app.quit"]);
 });
 
+test("a logout during a ⌘Q whose Host shutdown hangs still quits within the bound, once", async () => {
+  const { app, events, listeners } = harness({ hostShutdown: () => new Promise<void>(() => {}) });
+  await app.start();
+  let prevented = false;
+  listeners.beforeQuit?.({ preventDefault: () => { prevented = true; } });
+  assert.equal(prevented, true, "⌘Q waits for the graceful Host shutdown");
+  await settle();
+  assert.deepEqual(events, ["window.dispose"]);
+  listeners.shutdown?.({ preventDefault: () => {} });
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.deepEqual(events, ["window.dispose", "app.quit"], "the OS was asked to wait, so the wait is bounded");
+  listeners.beforeQuit?.({ preventDefault: () => { throw new Error("the resulting before-quit must pass"); } });
+  await settle();
+  assert.deepEqual(events, ["window.dispose", "app.quit"]);
+});
+
 test("⌘Q while a session streams asks first, like the tray", async () => {
   const declined = harness({ busy: true, confirm: false });
   await declined.app.start();

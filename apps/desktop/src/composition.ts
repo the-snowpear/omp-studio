@@ -39,6 +39,8 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
   let quitConfirmInFlight = false;
   let started = false;
   let systemShutdown = false;
+  let shuttingDown: Promise<void> | null = null;
+  let exited = false;
   const darwin = deps.platform === "darwin";
 
   const log = (message: string): void => {
@@ -100,16 +102,22 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
   }
 
   async function quit(options: { readonly deadlineMs?: number } = {}): Promise<void> {
-    if (quitting) return;
-    quitting = true;
-    // Release the tray icon and stop serving renderer calls before closing
-    // the client session.
-    tray?.dispose?.();
-    tray = null;
-    mainWindow?.dispose?.();
-    const shutdown = (async () => {
-      try { await deps.beforeShutdown?.(); } finally { await shutdownHost(); }
-    })();
+    if (quitting) {
+      // A logout or power-off during an unbounded quit (⌘Q, tray) still
+      // needs its bound: the OS was already asked to wait for us.
+      if (options.deadlineMs === undefined || shuttingDown === null) return;
+    } else {
+      quitting = true;
+      // Release the tray icon and stop serving renderer calls before closing
+      // the client session.
+      tray?.dispose?.();
+      tray = null;
+      mainWindow?.dispose?.();
+      shuttingDown = (async () => {
+        try { await deps.beforeShutdown?.(); } finally { await shutdownHost(); }
+      })();
+    }
+    const shutdown = shuttingDown;
     try {
       if (options.deadlineMs === undefined) await shutdown;
       else {
@@ -118,7 +126,10 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
         try { await Promise.race([shutdown.catch(() => undefined), deadline]); } finally { clearTimeout(timer); }
       }
     } finally {
-      deps.quit();
+      if (!exited) {
+        exited = true;
+        deps.quit();
+      }
     }
   }
 
