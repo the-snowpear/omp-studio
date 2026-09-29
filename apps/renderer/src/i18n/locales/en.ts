@@ -460,7 +460,7 @@ export const en: LocaleDictionary = {
   },
   "home": {
     "title": "OMP Studio Console",
-    "subtitle": "Windows desktop workbench for OMP Runtime",
+    "subtitle": "Desktop workbench for OMP Runtime",
     "welcome": "Welcome back",
     "quickStart": "Quick Start",
     "newSession": "New Session",
@@ -888,7 +888,7 @@ export const en: LocaleDictionary = {
     "builtinNoDir": "Builtin capabilities do not have a standalone disk folder",
     "shadowedTip": "Same-named MCP shadowed by workspace configuration",
     "demoOpenedDir": "Demo: opened directory",
-    "openedSkillDir": "Opened skill directory in file explorer",
+    "openedSkillDir": "Opened skill directory in File Explorer",
     "openDirFailed": "Failed to open directory",
     "openedUserSkillDir": "Opened user skill directory",
     "demoRefreshed": "Demo: Refreshed capabilities configuration",
@@ -2280,7 +2280,7 @@ export const en: LocaleDictionary = {
   },
   "notice": {
     "title": "Welcome to OMP Studio",
-    "desc": "OMP Studio is the Windows desktop console and workbench for OMP Runtime.",
+    "desc": "OMP Studio is the desktop console and workbench for OMP Runtime.",
     "understood": "Got it",
     "dontShowAgain": "Don't show again",
     "visitGithub": "Visit GitHub Repository"

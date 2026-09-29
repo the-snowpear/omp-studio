@@ -460,7 +460,7 @@ const zhRaw = {
   },
   "home": {
     "title": "OMP Studio 控制台",
-    "subtitle": "面向 OMP Runtime 的 Windows 桌面工作台",
+    "subtitle": "面向 OMP Runtime 的桌面工作台",
     "welcome": "欢迎回来",
     "quickStart": "快速开始",
     "newSession": "新建会话",
@@ -2280,7 +2280,7 @@ const zhRaw = {
   },
   "notice": {
     "title": "欢迎体验 OMP Studio",
-    "desc": "OMP Studio 是 OMP Runtime 的 Windows 桌面控制台与配套工作台。当前处于持续迭代中。",
+    "desc": "OMP Studio 是 OMP Runtime 的桌面控制台与配套工作台。当前处于持续迭代中。",
     "understood": "我知道了",
     "dontShowAgain": "不再提示",
     "visitGithub": "访问 GitHub 仓库"

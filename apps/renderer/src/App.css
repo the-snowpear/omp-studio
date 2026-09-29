@@ -22,8 +22,12 @@
   flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
+  /* The Window Controls Overlay leaves [titlebar-area-x, x + width] to the page:
+     Windows reserves its caption buttons on the right, macOS its traffic lights
+     on the left. Without an overlay both env() fall back to the full width. */
   padding: 0 10px;
-  padding-right: max(10px, env(titlebar-area-width, 10px));
+  padding-left: max(10px, env(titlebar-area-x, 0px));
+  padding-right: max(10px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
   background: var(--bg);
   color: var(--text-2);
   -webkit-app-region: drag;
