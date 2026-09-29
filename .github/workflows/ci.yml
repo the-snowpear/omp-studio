@@ -31,6 +31,13 @@ jobs:
       - run: npm run omp:install-deps
       - run: npm run check
       - run: npm run omp:test:metadata
+      # Runtime source tests load the pi-natives addon, which only a native
+      # build produces; build just that addon (cargo, cached) for this host.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          key: natives-win32-x64
+      - run: npm run omp:build:natives
       - run: npm run omp:verify:patches
 
   macos:
@@ -55,6 +62,13 @@ jobs:
       - run: npm run omp:install-deps
       - run: npm run check
       - run: npm run omp:test:metadata
+      # Runtime source tests load the pi-natives addon, which only a native
+      # build produces; build just that addon (cargo, cached) for this host.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: omp-patch/vendor/oh-my-pi -> target
+          key: natives-darwin-arm64
+      - run: npm run omp:build:natives
       - run: npm run omp:verify:patches
 
   macos-runtime:

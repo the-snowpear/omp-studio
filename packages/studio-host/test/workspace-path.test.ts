@@ -58,13 +58,16 @@ const darwinOnly = { skip: process.platform === "darwin" ? false : "macOS file s
 test("a workspace opened through a symlink or /private is registered once", darwinOnly, async (t) => {
   const profile = await mkdtemp(join(tmpdir(), "omp-workspace-path-"));
   t.after(() => rm(profile, { recursive: true, force: true }));
-  const project = join(profile, "project");
-  await mkdir(project);
-  await symlink(project, join(profile, "link"));
+  const project = join(profile, "real", "project");
+  await mkdir(project, { recursive: true });
+  // A linked parent is an ordinary way in; the workspace root itself must not be a link.
+  await symlink(join(profile, "real"), join(profile, "link"));
+  await symlink(project, join(profile, "leaf"));
   const registry = new WorkspaceRegistry(join(profile, "workspaces.json"));
   await registry.load();
   const direct = await registry.upsertByPath(project);
-  const viaLink = await registry.upsertByPath(join(profile, "link"));
+  const viaLink = await registry.upsertByPath(join(profile, "link", "project"));
+  await assert.rejects(() => registry.upsertByPath(join(profile, "leaf")), /symbolic link/u);
   const viaPrivate = await registry.upsertByPath(await realpath(project));
   assert.equal(viaLink.workspaceId, direct.workspaceId);
   assert.equal(viaPrivate.workspaceId, direct.workspaceId);

@@ -18,6 +18,9 @@ import {
 } from "../src/index.js";
 
 const posixOnly = { skip: process.platform === "win32" ? "unix sockets and POSIX modes only" : false };
+// macOS $TMPDIR (/var/folders/.../T/) plus a mkdtemp segment already exceeds the
+// socket budget and would take the /tmp fallback; Desktop's real root is shorter.
+const shortRoot = () => mkdtemp(join(process.platform === "win32" ? tmpdir() : "/tmp", "osr-"));
 
 test("socket directory names are short, deterministic per scope and names are opaque", () => {
   const root = join(tmpdir(), "root");
@@ -73,7 +76,7 @@ test("private socket directories need a POSIX uid", { skip: process.platform ===
 });
 
 test("private socket directory is created 0700 and re-validated idempotently", posixOnly, async () => {
-  const tmpRoot = await mkdtemp(join(tmpdir(), "omp-sock-root-"));
+  const tmpRoot = await shortRoot();
   const directory = await ensurePrivateSocketDirectory("scope-a", { tmpRoot });
   assert.equal(directory, privateSocketDirectoryPath("scope-a", tmpRoot));
   assert.equal((await stat(directory)).mode & 0o777, 0o700);
@@ -81,7 +84,7 @@ test("private socket directory is created 0700 and re-validated idempotently", p
 });
 
 test("a symlinked, shared or foreign socket directory fails closed", posixOnly, async () => {
-  const tmpRoot = await mkdtemp(join(tmpdir(), "omp-sock-root-"));
+  const tmpRoot = await shortRoot();
   const elsewhere = await mkdtemp(join(tmpdir(), "omp-sock-elsewhere-"));
   await symlink(elsewhere, privateSocketDirectoryPath("linked", tmpRoot));
   await assert.rejects(() => ensurePrivateSocketDirectory("linked", { tmpRoot }), /not a real directory/u);
@@ -103,7 +106,7 @@ test("an over-long temp root falls back to a per-user directory under /tmp", pos
 });
 
 test("sweep removes sockets left by a killed listener and keeps live ones", posixOnly, async () => {
-  const directory = await ensurePrivateSocketDirectory("sweep", { tmpRoot: await mkdtemp(join(tmpdir(), "omp-sock-root-")) });
+  const directory = await ensurePrivateSocketDirectory("sweep", { tmpRoot: await shortRoot() });
   const live = privateSocketPath(directory, randomSocketName("b"));
   const server = createServer();
   await new Promise<void>((resolve) => server.listen(live, resolve));
