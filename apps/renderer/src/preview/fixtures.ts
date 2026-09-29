@@ -3,6 +3,7 @@
  * Renderer display only — never sent through Host / Studio Bridge.
  */
 
+import { PLATFORM } from "../platform";
 import type { TreeGitStatus } from "../git/treeStatus";
 
 export const PREVIEW_DESKTOP_RECOVERY = { version: "0.1.4" } as const;
@@ -161,9 +162,13 @@ export type PreviewSideAgent = {
   error: boolean;
 };
 
+/** Demo project folders in the local platform's spelling. */
+const DEMO_TOOLS = PLATFORM === "darwin" ? "/Users/demo/Tools" : "C:\\Aspace\\Tools";
+const demoPath = (...segments: string[]): string => [DEMO_TOOLS, ...segments].join(PLATFORM === "darwin" ? "/" : "\\");
+
 export const PREVIEW_PROJECTS: PreviewProject[] = [
   {
-    id: "p1", name: "omp-web", path: "C:\\Aspace\\Tools\\omp-web",
+    id: "p1", name: "omp-web", path: demoPath("omp-web"),
     branch: "main", worktree: null, dirty: 3, insertions: 214, deletions: 58, running: true,
     attention: true, preview: "running", pinned: true,
     threads: [
@@ -179,7 +184,7 @@ export const PREVIEW_PROJECTS: PreviewProject[] = [
     ],
   },
   {
-    id: "p2", name: "pi-web (upstream)", path: "C:\\Aspace\\Tools\\pi-web",
+    id: "p2", name: "pi-web (upstream)", path: demoPath("pi-web"),
     branch: "v0.8.1", worktree: null, dirty: 0, insertions: 0, deletions: 0, running: false,
     attention: false, preview: "stopped",
     threads: [
@@ -187,7 +192,7 @@ export const PREVIEW_PROJECTS: PreviewProject[] = [
     ],
   },
   {
-    id: "p3", name: "omp-web (feat/mermaid)", path: "C:\\Aspace\\Tools\\omp-web\\.worktrees\\mermaid",
+    id: "p3", name: "omp-web (feat/mermaid)", path: demoPath("omp-web", ".worktrees", "mermaid"),
     branch: "feat/mermaid-zoom", worktree: "mermaid", dirty: 7, insertions: 1263, deletions: 341, running: true,
     attention: false, preview: "building",
     threads: [
@@ -542,8 +547,8 @@ export const PREVIEW_DIAGNOSTICS: PreviewDiagnostics = {
   availableVersion: "v0.82.2",
   upstreamVersion: "0.12.0",
   upstreamCommit: "45e12e5",
-  platform: "win32",
-  arch: "x64",
+  platform: PLATFORM === "darwin" ? "darwin" : "win32",
+  arch: PLATFORM === "darwin" ? "arm64" : "x64",
   capabilities: [
     "agent.run", "agent.steer", "fs.read", "fs.write", "bash.exec",
     "preview.open", "preview.dom", "mcp.proxy", "checkpoint.create", "checkpoint.restore",
@@ -589,8 +594,8 @@ export const PREVIEW_APP_UPDATE: PreviewAppUpdate = {
 - **性能与稳定性优化**：优化 Runtime Bridge 握手与 IPC 通信效率。`,
   publishedAt: "2026-08-20T00:00:00Z",
   htmlUrl: "https://github.com/the-snowpear/omp-studio/releases/tag/v0.2.0",
-  downloadUrl: "https://github.com/the-snowpear/omp-studio/releases/download/v0.2.0/OMP-Studio-Setup-0.2.0-windows-x64.exe",
-  assetName: "OMP-Studio-Setup-0.2.0-windows-x64.exe",
+  downloadUrl: `https://github.com/the-snowpear/omp-studio/releases/download/v0.2.0/${PLATFORM === "darwin" ? "OMP-Studio-0.2.0-macos-arm64.dmg" : "OMP-Studio-Setup-0.2.0-windows-x64.exe"}`,
+  assetName: PLATFORM === "darwin" ? "OMP-Studio-0.2.0-macos-arm64.dmg" : "OMP-Studio-Setup-0.2.0-windows-x64.exe",
   assetSize: 89452000,
 };
 

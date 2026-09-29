@@ -6,12 +6,13 @@ import { usePreviewMode } from "../preview/PreviewContext";
 import { PREVIEW_LIVE_AUDIO } from "../preview/liveAudioPreview";
 import { hostErrorMessage, waitReceipt } from "../hostError";
 import { openLiveCapture, type LiveCapture } from "./liveCapture";
+import { MicrophoneDeniedError, MicrophoneSettingsButton, ensureMicrophoneAccess } from "./microphoneAccess";
 
 export function LiveAudioPane({ client, sessionId, available }: { client: StudioClient; sessionId?: string | undefined; available: boolean }) {
   const { preview } = usePreviewMode(); const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   const t = (cn: string, en: string) => zh ? cn : en;
   const [state, setState] = useState<LiveAudioState>(); const [voice, setVoice] = useState("sol"); const [device, setDevice] = useState(""); const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [review, setReview] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const [review, setReview] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [micDenied, setMicDenied] = useState(false);
   const generation = useRef(0); const lock = useRef(false); const capture = useRef<LiveCapture | undefined>(undefined); const abort = useRef<AbortController | undefined>(undefined); const audioId = useRef<string | undefined>(undefined); const confirm = useRef<HTMLButtonElement>(null);
   const desktop = !!globalThis.ompStudioChrome?.attachLiveAudio && !!navigator.mediaDevices?.getUserMedia;
   const enabled = preview || (desktop && available && !!sessionId);
@@ -45,6 +46,11 @@ export function LiveAudioPane({ client, sessionId, available }: { client: Studio
   const start = async () => {
     if (lock.current || !enabled) return; const epoch = generation.current; lock.current = true; setBusy(true); setError("");
     if (preview) { setState({ ...PREVIEW_LIVE_AUDIO, voice, phase: "listening", attached: true, inputLevel: 0.2 }); setReview(false); setBusy(false); lock.current = false; return; }
+    const access = ensureMicrophoneAccess(zh);
+    if (access) {
+      try { await access; setMicDenied(false); }
+      catch (cause) { if (epoch === generation.current) { setMicDenied(cause instanceof MicrophoneDeniedError); setError(cause instanceof Error ? cause.message : String(cause)); setBusy(false); lock.current = false; } return; }
+    }
     const controller = new AbortController(); abort.current = controller;
     try {
       const input = await openLiveCapture({ ...(device ? { deviceId: device } : {}), signal: controller.signal,
@@ -76,6 +82,7 @@ export function LiveAudioPane({ client, sessionId, available }: { client: Studio
     }}>{state?.muted ? t("取消静音", "Unmute") : t("静音", "Mute")}</button></div>
     {state ? <><div className="live-audio-levels"><label>{t("麦克风电平", "Microphone level")}<meter min={0} max={1} value={state.inputLevel} /></label><label>{t("播放电平", "Output level")}<meter min={0} max={1} value={state.outputLevel} /></label></div><div className="live-audio-transcripts" aria-label={t("实时转写", "Live transcripts")}>{state.transcripts.map(item => <p key={item.role + ":" + item.turn}><strong>{item.role === "user" ? t("你", "You") : t("语音助手", "Voice assistant")}</strong><span>{item.text}{item.final ? "" : " …"}</span></p>)}{!state.transcripts.length ? <p className="muted">{t("开始后显示最近 40 段转写；长段落保留末尾。音频不会写入对话记录。", "After starting, the latest 40 transcript segments appear here; long segments keep their ending. Audio is not stored in the conversation.")}</p> : null}</div></> : null}
     {state?.error || error ? <p role="alert" className="media-error">{error || state?.error}</p> : null}
+    {micDenied ? <MicrophoneSettingsButton zh={zh} /> : null}
     {review ? <section className="media-review" aria-label={t("确认 Live 调用", "Confirm Live call")}><h4>{t("开始实时语音", "Start realtime audio")} · {voice}</h4><p>{t("确认后会打开所选麦克风，并通过你的 Codex OAuth 账户连接实时服务，可能产生费用。语音提出的任务可在当前会话中执行，继续受现有权限和审批设置约束。", "Confirmation opens the selected microphone and connects through your Codex OAuth account; charges may apply. Voice tasks can execute in this session under its existing permissions and approvals.")}</p><button ref={confirm} className="btn small primary" disabled={busy || !enabled} onClick={() => void start()}>{t("确认打开麦克风并连接", "Open microphone and connect")}</button><button className="btn small" disabled={busy} onClick={() => setReview(false)}>{t("返回", "Back")}</button></section> : null}
   </section>;
 }

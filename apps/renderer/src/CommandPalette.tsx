@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef }
 import { createPortal } from "react-dom";
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
+import { isPrimaryModifier } from "./keyboard/shortcuts";
 import {
   flattenPaletteItems,
   type PaletteAction,
@@ -63,7 +64,7 @@ export const CommandPalette = forwardRef<CommandPaletteHandle, {
         return;
       }
       if (event.isComposing) return;
-      const withMod = event.ctrlKey || event.metaKey;
+      const withMod = isPrimaryModifier(event);
       if (withMod && /^[1-9]$/.test(event.key) && !event.shiftKey && !event.altKey) {
         const index = Number(event.key);
         const recent = flat.find((item) => item.recentIndex === index);

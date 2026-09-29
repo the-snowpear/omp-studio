@@ -68,7 +68,7 @@ function readXtermTheme(): {
 
 function applyTheme(term: Terminal): void {
   term.options.theme = readXtermTheme();
-  term.options.fontFamily = readCssVar("--font-mono", "Consolas, monospace");
+  term.options.fontFamily = readCssVar("--font-mono", "Menlo, Consolas, monospace");
 }
 
 export const TerminalPane = forwardRef<TerminalPaneHandle, { visible: boolean; workspaceId?: string | undefined; sessionId?: string | undefined }>(function TerminalPane(
@@ -295,7 +295,7 @@ function XtermScreen({
         cursorBlink: true,
         fontSize: 12,
         lineHeight: 1.3,
-        fontFamily: readCssVar("--font-mono", "Consolas, monospace"),
+        fontFamily: readCssVar("--font-mono", "Menlo, Consolas, monospace"),
         theme: readXtermTheme(),
         allowProposedApi: false,
         // xterm 的默认值也是 1000，写出来是为了让这条上限有据可查：回滚缓冲乘以

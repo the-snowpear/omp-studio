@@ -190,6 +190,15 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | Owner-only 权限 | `host-factory.ts` `applyOwnerOnlyPermissions` | Windows `icacls`；macOS `chmod 0700/0600` 后 `lstat` 复核 |
 | Runtime 平台表 | `runtime-installer/src/runtime-platform.ts`；`scripts/target-platform.mjs` | 入口 `omp.exe` / `omp`、更新平台 allowlist、PE / Mach-O 架构校验；两张表由测试钉齐 |
 | mac 构建预检 | `scripts/mac-toolchain.mjs` | Node arm64 且未转译、CLT、Bun ≥ 1.4.2、Rust host `aarch64-apple-darwin` |
+| 窗口外观 | `platform/window-chrome.ts`、`titlebar-overlay.ts`；renderer `App.css` `.app-titlebar`、`TipHost.tsx` | Windows 右上 caption overlay（可随主题换色）；macOS `hidden` + 红绿灯 `trafficLightPosition`，overlay 不换色；标题栏两侧由 `env(titlebar-area-x/width)` 让位，TipHost 按同一留白翻转气泡 |
+| 原生菜单栏 | `platform/app-menu.ts`、`app-menu-shared.ts`；renderer `App.tsx` `runMenuCommand` | 仅 macOS；Edit 全用 role；自定义项经 `omp-studio:desktop:menu-command` 发 allowlist 命令 ID；这些组合键归菜单独占，renderer keydown 在 macOS 桌面跳过（`nativeMenuOwnsShortcuts`）；打包版无 Reload / DevTools |
+| 生命周期 | `composition.ts`、`platform/app-lifecycle.ts`、`platform/app-nap.ts` | macOS 关窗隐藏到 Dock，`activate` 重开，⌘Q 走 `requestQuit`；关机 / 注销有界关停且不拦截；忙时才持 `prevent-app-suspension`；不在「应用程序」时提示移动；relaunch 去掉 `-psn_*` |
+| 托盘 | `tray.ts`、`app-icon.ts` `resolveTrayIconPath`；`apps/desktop/resources-darwin/trayTemplate*.png`（`scripts/generate-tray-template.mjs` 生成） | macOS 用菜单栏模板图，首项「打开 OMP Studio」；模板图不在 Windows 的 `resources/` 内 |
+| 终端 shell | `terminal-pty.ts` | macOS 账户 shell → `$SHELL` → `/bin/zsh`，login 启动（`-l`，管道 `-il`）；剔除 `ELECTRON_*`，设 `TERM_PROGRAM`；进程组终止；无工作区时 cwd 为家目录 |
+| 外部编辑器 / 打开方式 | `external-editor.ts`；`main.ts` 打开方式 | macOS 查 `/Applications`、`~/Applications` 中的 VS Code / Insiders / Cursor / Windsurf，再查登录 PATH；「打开方式」选择框从 `/Applications` 开始；`rundll32` 仅 Windows |
+| 麦克风 / TCC | `chrome-media-access.ts`；renderer `media/microphoneAccess.tsx` | macOS 先查 `getMediaAccessStatus`，未决时 `askForMediaAccess`；拒绝后 renderer 提供「打开系统设置」（固定 URL）；其他平台不经这一步，采集时序不变 |
+| 钥匙串锁定 | `service-definitions.ts` `SecureStorageLockedError` | safeStorage 解密失败报可恢复的锁定错误，不清空已存数据 |
+| Renderer 平台 | `apps/renderer/src/platform.ts`、`keyboard/shortcuts.ts`、`platformCopy.ts` | preload 冻结 `platform`，Web UI 回退 `navigator`；根元素 `data-platform`；⌘ / Ctrl 判定与标签（Windows 标签逐字不变）；「资源管理器 / 访达」文案；macOS 保留系统浮动滚动条 |
 
 macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-DD.log`。
 

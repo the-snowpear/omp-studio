@@ -15,6 +15,7 @@ import { ToastHost } from "./ToastHost";
 import { tabPaneClass, tabPaneRole, useOverlappingTabs } from "./pageTransition";
 import { SlidingTabs } from "./SlidingTabs";
 import { useI18n, type TranslationParams } from "./i18n";
+import { fileManagerName } from "./platformCopy";
 import {
   createPreviewMcp,
   createPreviewSlashCommands,
@@ -366,7 +367,7 @@ export function CapabilitiesPage({
     try {
       const handle = await client.command("skills.reveal", { name: skill.name });
       const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
-      toast(receipt.message ?? t("capabilities.openedSkillDir", { name: skill.name }));
+      toast(receipt.message ?? t("capabilities.openedSkillDir", { name: skill.name, fileManager: fileManagerName(t) }));
     } catch (error) {
       toast(hostErrorMessage(error, t("capabilities.openDirFailed")));
     }

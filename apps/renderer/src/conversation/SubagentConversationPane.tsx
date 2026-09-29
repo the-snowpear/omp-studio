@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from "react";
+import { SHORTCUTS, formatShortcut } from "../keyboard/shortcuts";
 import type { SessionId } from "@omp-studio/client-contract";
 import { ChipComposer } from "../composer/ChipComposer";
 import type { MentionCandidate } from "../composer/types";
@@ -222,8 +223,8 @@ export function SubagentConversationPane({
             composer.queueEdit !== undefined
               ? "正在编辑排队消息。Enter 写回原位，Escape 取消。"
               : running
-                ? "按 Enter 将消息加入排队栏，本轮结束后发给子 Agent。Ctrl+Enter 作为后续消息发送。"
-                : "按 Enter 发给子 Agent，Ctrl+Enter 作为后续消息发送，Shift+Enter 换行"
+                ? `按 Enter 将消息加入排队栏，本轮结束后发给子 Agent。${formatShortcut(SHORTCUTS.followUp, "hint")} 作为后续消息发送。`
+                : `按 Enter 发给子 Agent，${formatShortcut(SHORTCUTS.followUp, "hint")} 作为后续消息发送，Shift+Enter 换行`
           }</p>
           {composer.error ? (
             <div className="composer-error" role="alert">
