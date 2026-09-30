@@ -147,6 +147,8 @@ try{
  await deck.locator('.ask-images input[type=file]').first().setInputFiles({name:'answer.png',mimeType:'image/png',buffer:png});
  await deck.getByRole('img',{name:'回答 / Answer 1',exact:true}).waitFor();
  await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).fill('First question note');
+ const deckBox=await deck.boundingBox();const nextBox=await deck.getByRole('button',{name:'下一个请求',exact:true}).boundingBox();
+ if(!deckBox||!nextBox||nextBox.x<deckBox.x-1||nextBox.x+nextBox.width>deckBox.x+deckBox.width+1||nextBox.y<deckBox.y-1)throw Error('Ask navigation is outside the visible deck');
  await deck.getByRole('button',{name:'下一个请求',exact:true}).click();
  await deck.locator('.dk-cell-out').waitFor({state:'detached'});
  await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).fill('Second question note');

@@ -2749,6 +2749,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   flex-wrap: wrap;
   background: var(--surface);
 }
+.deck.preview-queue .dk-head-end { max-width: 100%; }
+.deck.preview-queue .dk-agent { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.deck.preview-queue .dk-queue { flex-shrink: 0; }
 .deck.preview-queue .ask-card > .dk-actions {
   position: sticky;
   bottom: 0;
