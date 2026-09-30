@@ -170,7 +170,10 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
 
   const startupGc = runStartupGc(options.stagingRoot, options.getInstalledRuntimeVersion);
 
+  // The v1 index (update-index*.json) only ever described Windows builds; other platforms use the v2 catalogs.
+  const legacyIndexPlatform = options.platform.startsWith("win32-");
   const loadIndex = async (prefs: UpdatePrefs, signal?: AbortSignal, channel: "stable" | "canary" = "stable"): Promise<UpdateIndex> => {
+    if (!legacyIndexPlatform) throw new Error("旧版更新索引只适用于 Windows");
     const index = await fetchUpdateIndex({
       repo: options.repo ?? DEFAULT_GITHUB_REPO,
       mirrorPrefix: prefs.mirrorPrefix,
@@ -215,6 +218,9 @@ export function registerChromeUpdatesIpc(options: ChromeUpdatesIpcOptions): Chro
   ipc.handle(CHROME_UPDATES_CHANNELS.check, async (event): Promise<UpdateCheckResult | null> => {
     if (event.sender.isDestroyed() || !options.isTrustedSender(event.sender)) {
       return null;
+    }
+    if (!legacyIndexPlatform) {
+      return { checkedAt: new Date().toISOString(), app: { currentVersion: options.appVersion, plan: "none" }, runtime: { plan: "none" } };
     }
     try {
       const prefs = await options.prefs.read();

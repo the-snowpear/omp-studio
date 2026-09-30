@@ -37,3 +37,20 @@ test("identical queue text has independent stable IDs and removes all skill comp
   expect(await service.execute({kind:"session.queue.list",sessionId:"stale"}).catch(error=>error.code)).toBe("INVALID_ARGUMENT");
  }finally{agent.state.isStreaming=false;await session.dispose();auth.close();}
 });
+
+
+test("image takeback retains one transfer until explicit acknowledgement", async()=>{
+ let queued=true,exports=0,cleanups=0;
+ const item={id:"message",queue:"followUp",state:"pending",text:"with image",imageCount:1};
+ const asset={artifactId:"11111111-1111-1111-1111-111111111111",kind:"image",name:"a.png",mimeType:"image/png",bytes:1,sha256:"a".repeat(64)};
+ const session={sessionId:"s",getStudioQueueSnapshot:()=>queued?[item]:[],getStudioQueueDraft:()=>queued?{text:"with image",images:[{mimeType:"image/png",data:"YQ=="}]}:undefined,removeStudioQueuedMessage:()=>{const found=queued;queued=false;return found;}};
+ const files={outputBytes:async()=>{exports++;return asset;},removeJob:async()=>{cleanups++;}};
+ const service=new StudioSessionGuiService(session as never,files as never);
+ const operation={kind:"session.queue.takeback" as const,sessionId:"s",id:"message"};
+ const first=await service.execute(operation);
+ expect(queued).toBe(false);expect(exports).toBe(1);
+ // Simulate lost receipt/failed Host promotion: a new request reuses the transfer.
+ expect(await service.execute(operation)).toEqual(first);expect(exports).toBe(1);expect(cleanups).toBe(0);
+ await service.execute({kind:"session.queue.ack",sessionId:"s",id:"message"});
+ expect(cleanups).toBe(1);expect(await service.execute(operation)).toEqual({removed:false,images:[]});
+});

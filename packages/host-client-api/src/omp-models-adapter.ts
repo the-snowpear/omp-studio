@@ -47,7 +47,7 @@ import { BUILTIN_MODEL_ROLES, parseModelKind, isModelEnvConfigName, parseCacheTh
 
 import { parse as parseYaml, stringify as stringifyYaml, parseDocument } from "yaml";
 import { parseModelsYml, redactModelsYmlText, restoreRedactedApiKeys, serializeModelsYml, type YamlValue } from "./models-yml.js";
-import { getProjectConfigDir } from "./omp-discovery/paths.js";
+import { getAgentDir, getProjectConfigDir } from "./omp-discovery/paths.js";
 import type { HostModelsService } from "./services.js";
 import { toClientError } from "./services.js";
 
@@ -1342,10 +1342,9 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+/** The Runtime's agent directory, honoring profiles, XDG and `PI_CODING_AGENT_DIR` the same way. */
 function defaultAgentDir(): string {
-  const fromEnv = process.env.PI_CODING_AGENT_DIR?.trim();
-  if (fromEnv) return fromEnv;
-  return join(homedir(), ".omp", "agent");
+  return getAgentDir(homedir());
 }
 
 async function defaultLocateOmp(): Promise<string | undefined> {

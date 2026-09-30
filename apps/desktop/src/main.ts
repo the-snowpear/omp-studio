@@ -17,18 +17,24 @@ import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
  * context is just a transport plus a coarse availability status.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, protocol, safeStorage, session, shell, Tray, type NativeImage, type WebContents } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, protocol, safeStorage, session, shell, systemPreferences, Tray, type NativeImage, type WebContents } from "electron";
 import { registerServiceDefinitionsIpc } from "./chrome-services.js";
 import { ServiceDefinitionStore } from "./service-definitions.js";
-import { activeArtifactLibrary, activeMediaDirectory } from "./artifact-library.js";
+import { activeArtifactLibrary, activeMediaDirectory, activeProfileDirectory } from "./artifact-library.js";
+import { runtimeSocketDirectory } from "./runtime-session.js";
 import { artifactResponse, registerArtifactIpc } from "./chrome-artifacts.js";
 import {
   TITLEBAR_OVERLAY,
-  TITLEBAR_OVERLAY_HEIGHT,
   applyTitleBarOverlay,
   registerTitleBarOverlayIpc,
 } from "./titlebar-overlay.js";
-import { APP_USER_MODEL_ID, resolveAppIconPath } from "./app-icon.js";
+import { APP_USER_MODEL_ID, resolveAppIconPath, resolveTrayIconPath } from "./app-icon.js";
+import { APP_MENU_COMMAND_CHANNEL, type AppMenuCommand } from "./app-menu-shared.js";
+import { registerMediaAccessIpc } from "./chrome-media-access.js";
+import { buildApplicationMenuTemplate } from "./platform/app-menu.js";
+import { moveToApplicationsMarkerPath, moveToApplicationsStrings, relaunchArguments, shouldOfferMoveToApplications } from "./platform/app-lifecycle.js";
+import { startAppNapGuard } from "./platform/app-nap.js";
+import { windowChromeOptions } from "./platform/window-chrome.js";
 import { registerChromeImageIpc } from "./chrome-image.js";
 import { registerChromeNotifyIpc } from "./chrome-notify.js";
 import { registerChromeOpenUrlIpc } from "./chrome-open-url.js";
@@ -43,6 +49,8 @@ import { registerPayloadHealthIpc } from "./payload-health.js";
 import { registerChromeAppUpdateIpc } from "./chrome-app-update.js";
 import { registerChromeUpdatesIpc } from "./chrome-updates.js";
 import { UpdateCoordinator } from "./update-coordinator.js";
+import { MAC_APP_ID, macBundlePath } from "./mac-app-installer.js";
+import { macSwapMarkers } from "./mac-app-swap.js";
 import { registerUnifiedUpdatesIpc } from "./unified-updates-ipc.js";
 import { CHROME_UPDATES_CHANNELS } from "./chrome-updates-shared.js";
 import { createUpdatePrefsStore } from "./update-prefs-store.js";
@@ -54,15 +62,17 @@ import {
 import { pendingRuntimeArtifact } from "./host-factory.js";
 import { createAppTray, quitBusyDialogStrings, quitBusyMessageBoxOptions } from "./tray.js";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { createRequire } from "node:module";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { createDesktopApplication } from "./composition.js";
 import { registerDesktopIpc } from "./ipc.js";
 import {
   RENDERER_CSP,
+  createPermissionRequestHandler,
   createSecureWindow,
   installCspHeaders,
   isTrustedRendererUrl,
@@ -75,6 +85,8 @@ import {
 import type { DesktopTray, DesktopWindowFactory, DesktopWindowSurface } from "./types.js";
 import { createProductionHostFactory } from "./host-factory.js";
 import { defaultHostLogsDirectory } from "./host-log.js";
+import { desktopPaths } from "./platform/desktop-paths.js";
+import { applyLoginEnvironment } from "./platform/login-env.js";
 import {
   externalEditorCommandForPath,
   launchExternalEditor,
@@ -91,7 +103,8 @@ import type {
 import { resolveDroppedPaths } from "./dropped-paths.js";
 import { PAYLOAD_DIR, resolveAppResourceLayout } from "./payload-root.js";
 import { resolveRendererEntryFrom } from "./security.js";
-import { AppPayloadInstaller } from "@omp-studio/runtime-installer";
+import { AppPayloadInstaller, createSmokeTestRunner, type UnifiedUpdateSnapshot } from "@omp-studio/runtime-installer";
+import { withCodeSignatureCheck } from "./platform/code-signature.js";
 import { planSaveRelativeTarget } from "./plan-save-path.js";
 import { registerTerminalIpc } from "./terminal-ipc.js";
 import { TerminalSessionManager, createNodePtySpawner } from "./terminal-pty.js";
@@ -103,16 +116,56 @@ protocol.registerSchemesAsPrivileged([{ scheme: "omp-artifact", privileges: { st
 /** Developer-only override for the renderer entry (Vite dev server). */
 const RENDERER_DEV_URL = rendererDevServerUrl(app.isPackaged, process.env.OMP_RENDERER_DEV_URL);
 const NODE_PTY_VERSION = (createRequire(import.meta.url)("node-pty/package.json") as { version: string }).version;
+const PROJECT_REPOSITORY_URL = "https://github.com/the-snowpear/omp-studio";
+
+/**
+ * macOS: a packaged app run from the disk image or Downloads cannot update
+ * itself, so offer the move once. true when the app is relaunching from
+ * /Applications and this instance must stop.
+ */
+async function offerMoveToApplications(): Promise<boolean> {
+  if (process.platform !== "darwin" || !app.isPackaged) return false;
+  const marker = moveToApplicationsMarkerPath(desktopPaths().stateRoot);
+  const offer = shouldOfferMoveToApplications({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    inApplicationsFolder: app.isInApplicationsFolder(),
+    declined: existsSync(marker),
+  });
+  if (!offer) return false;
+  const strings = moveToApplicationsStrings(app.getLocale());
+  const { response } = await dialog.showMessageBox({
+    type: "question",
+    message: strings.message,
+    detail: strings.detail,
+    buttons: [strings.move, strings.later],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (response === 0) {
+    try {
+      return app.moveToApplicationsFolder();
+    } catch (error) {
+      console.error(`[omp-studio] move to Applications failed: ${String(error)}`);
+      return false;
+    }
+  }
+  await mkdir(dirname(marker), { recursive: true })
+    .then(() => writeFile(marker, new Date().toISOString(), "utf8"))
+    .catch(() => undefined);
+  return false;
+}
 
 export async function main(): Promise<void> {
   const migrationIndex = process.argv.indexOf("--omp-migrate-runtime");
   if (migrationIndex !== -1) {
     const legacyInstallRoot = process.argv[migrationIndex + 1];
-    if (!app.isPackaged || !legacyInstallRoot || !isAbsolute(legacyInstallRoot)) throw new Error("Invalid Runtime migration request");
-    const keys = await loadInstallerTrustedKeys([join(process.execPath, "..", "runtime-keys")]);
+    // Only the Windows installer migrates a legacy per-machine Runtime.
+    if (process.platform !== "win32" || !app.isPackaged || !legacyInstallRoot || !isAbsolute(legacyInstallRoot)) throw new Error("Invalid Runtime migration request");
+    const keys = await loadInstallerTrustedKeys([join(process.execPath, "..", "runtime-keys")], { environment: false });
     if (!keys) throw new Error("Missing migration trust root");
     const { migrateLegacyRuntime } = await import("./migrate-runtime.js");
-    await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "runtimes"), trustedKeys: keys.trustedKeys });
+    await migrateLegacyRuntime({ legacyInstallRoot, userRuntimeRoot: desktopPaths().runtimesRoot, trustedKeys: keys.trustedKeys });
     app.exit(0); return;
   }
   if (process.argv.includes("--omp-print-abi")) {
@@ -130,14 +183,23 @@ export async function main(): Promise<void> {
     app.exit(0);
     return;
   }
+  // A pending macOS update swap watches for this version's main process; say so first thing.
+  const macBundle = process.platform === "darwin" && app.isPackaged ? macBundlePath(process.execPath) : undefined;
+  const macSwapDirectory = join(desktopPaths().updatesV2Root, "mac-swap");
+  const macSwap = macBundle === undefined ? undefined : macSwapMarkers(macSwapDirectory, { version: app.getVersion(), bundlePath: macBundle });
+  macSwap?.started(process.pid);
   if (process.platform === "win32") {
     app.setAppUserModelId(APP_USER_MODEL_ID);
   }
   await app.whenReady();
+  if (await offerMoveToApplications()) return;
+  // A Finder launch has launchd's bare PATH; the Host waits for the login shell's before spawning.
+  const loginEnvironment = applyLoginEnvironment({ locale: app.getLocale() });
 
   const runtimeInstallLayout = packagedRuntimeInstallLayout({
     isPackaged: app.isPackaged,
     execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
   });
   const keysDirs = [
     ...(runtimeInstallLayout !== undefined ? [runtimeInstallLayout.keysDirectory] : []),
@@ -145,7 +207,7 @@ export async function main(): Promise<void> {
     join(app.getAppPath(), "packaging", "keys"),
     join(app.getAppPath(), "..", "packaging", "keys"),
   ];
-  const loadedKeys = await loadInstallerTrustedKeys(keysDirs);
+  const loadedKeys = await loadInstallerTrustedKeys(keysDirs, { environment: !app.isPackaged });
   const trustedKeys = loadedKeys?.trustedKeys ?? {};
 
   const payloadRoot = resolve(app.getAppPath(), "..", PAYLOAD_DIR);
@@ -154,9 +216,12 @@ export async function main(): Promise<void> {
   const appIcon = resolveAppIconPath({ appPath: app.getAppPath(), platform: process.platform });
   const appNativeIcon = appIcon !== undefined ? nativeImage.createFromPath(appIcon) : undefined;
   const validAppIcon = appNativeIcon !== undefined && !appNativeIcon.isEmpty() ? appNativeIcon : undefined;
+  // Packaged Mac apps take the Dock icon from the bundle; a dev run shows Electron's otherwise.
+  if (process.platform === "darwin" && !app.isPackaged && validAppIcon !== undefined) app.dock?.setIcon(validAppIcon);
 
   let updateCoordinator: UpdateCoordinator | undefined;
   const hostFactory = createProductionHostFactory({
+    loginEnvironment,
     beforeCreate: async () => { await updateCoordinator?.initialize(); },
     afterCreate: async (composition, workspaceSelected) => {
       if (!updateCoordinator?.hasRuntimeTrial || !workspaceSelected) return false;
@@ -174,29 +239,59 @@ export async function main(): Promise<void> {
       if (error.length > 0) throw new Error(error);
     },
   });
-  if (app.isPackaged && process.platform === "win32" && runtimeInstallLayout) {
+  // Runs once the renderer has booted: a macOS update commits only then.
+  let confirmMacDesktop: (() => Promise<void>) | undefined;
+  if (app.isPackaged && runtimeInstallLayout && (process.platform === "win32" || macBundle !== undefined)) {
     const { PreparedNsisUpdater, electronDifferentialDownload } = await import("./electron-update-adapter.js");
-    const updater = new PreparedNsisUpdater();
-    updateCoordinator = new UpdateCoordinator({
-      root: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "updates-v2"),
+    const shared = {
+      root: desktopPaths().updatesV2Root,
       runtimeRoot: runtimeInstallLayout.installDirectory,
       bundledRuntimeRoot: runtimeInstallLayout.artifactRoot,
-      initialInstallerPath: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "@omp-studiodesktop-updater", "installer.exe"),
       repo: "the-snowpear/omp-studio", platform: `${process.platform}-${process.arch}`, appVersion: app.getVersion(), keys: trustedKeys,
       prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
-      snapshotChanged: (snapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
+      snapshotChanged: (snapshot: UnifiedUpdateSnapshot) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send(CHROME_UPDATES_CHANNELS.changed, snapshot); },
       isBusy: () => hostFactory.isBusy(), beforeQuit: () => hostFactory.shutdownForUpdate(),
-      installDesktop: (path) => updater.installPrepared(path),
-      restart: () => { app.relaunch({ args: process.argv.slice(1).filter(a => a !== "--omp-restarted").concat("--omp-restarted") }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
-    });
+      restart: () => { app.relaunch({ args: relaunchArguments(process.argv) }); app.quit(); }, quit: () => app.quit(), differential: electronDifferentialDownload,
+    };
+    if (macBundle === undefined) {
+      const updater = new PreparedNsisUpdater();
+      updateCoordinator = new UpdateCoordinator({
+        ...shared,
+        initialInstallerPath: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "@omp-studiodesktop-updater", "installer.exe"),
+        installDesktop: (path) => updater.installPrepared(path),
+      });
+    } else {
+      const { MacAppInstaller } = await import("./mac-app-installer.js");
+      const macInstaller = new MacAppInstaller({ bundlePath: macBundle, swapDirectory: macSwapDirectory, appId: MAC_APP_ID, execPath: process.execPath, pid: process.pid });
+      const coordinator = updateCoordinator = new UpdateCoordinator({
+        ...shared,
+        installDesktop: (path, release) => macInstaller.install(path, release),
+        preflightDesktop: () => macInstaller.preflight(),
+        desktopCommit: "confirmed",
+        desktopInstallOutcome: () => macInstaller.consumeOutcome(),
+        trackAppBaselineWithoutBase: true,
+        activateOptions: { selfCheck: withCodeSignatureCheck(createSmokeTestRunner()) },
+      });
+      let confirmed: Promise<void> | undefined;
+      confirmMacDesktop = () => confirmed ??= (async () => {
+        macSwap?.healthy();
+        await coordinator.confirmDesktopStartup();
+        await macInstaller.cleanup();
+      })().catch((error) => console.error("[omp-studio] confirming the macOS update failed", error));
+    }
   }
   const terminalRecordings = new TerminalRecordingManager(activeArtifactLibrary);
   const mediaUploads = new MediaUploadManager(activeArtifactLibrary);
-  const liveAudio = new DesktopLiveAudio({ directory: activeMediaDirectory, files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()) });
+  const liveAudio = new DesktopLiveAudio({
+    directory: activeMediaDirectory,
+    files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()),
+    socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()),
+  });
   const terminalManager = new TerminalSessionManager({
     recording: terminalRecordings,
     spawner: createNodePtySpawner(),
-    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? process.cwd(),
+    // A Finder launch starts in "/"; a new Mac terminal without a project opens in the home folder.
+    resolveCwd: () => hostFactory.activeWorkspaceCwd() ?? (process.platform === "darwin" ? homedir() : process.cwd()),
   });
 
   const editorDialogFilters = (platform: NodeJS.Platform): Array<{ name: string; extensions: string[] }> => {
@@ -217,7 +312,10 @@ export async function main(): Promise<void> {
 
   const showOpenWithPicker = async (title: string): Promise<string | undefined> => {
     const detected = resolveExternalEditorCommand();
-    const defaultPath = detected !== undefined && isAbsolute(detected.file) ? detected.file : undefined;
+    // macOS picks .app bundles; a detected CLI shim inside a bundle is not a useful start.
+    const defaultPath = process.platform === "darwin"
+      ? "/Applications"
+      : detected !== undefined && isAbsolute(detected.file) ? detected.file : undefined;
     const pickerOptions: Electron.OpenDialogOptions = {
       title,
       buttonLabel: "用所选程序打开",
@@ -340,7 +438,8 @@ export async function main(): Promise<void> {
       appPath: app.getAppPath(),
       isPackaged: app.isPackaged,
       bundledVersion: app.getVersion(),
-      forceBaseline: process.argv.includes("--omp-baseline"),
+      // A macOS hot payload would live inside the signed bundle; the bundle is the only layout there.
+      forceBaseline: process.argv.includes("--omp-baseline") || process.platform === "darwin",
       runtime: {
         electron: process.versions.electron,
         modules: process.versions.modules,
@@ -359,6 +458,7 @@ export async function main(): Promise<void> {
     const allowedOrigin = rendererOriginFor(target);
     const preloadPath = layout.preloadPath;
     installCspHeaders(session.defaultSession, rendererCspFor(target));
+    session.defaultSession.setPermissionRequestHandler(createPermissionRequestHandler(allowedOrigin));
 
     const window = createSecureWindow({
       BrowserWindow,
@@ -369,17 +469,13 @@ export async function main(): Promise<void> {
         title: "OMP Studio",
         ...(validAppIcon !== undefined ? { icon: validAppIcon } : appIcon !== undefined ? { icon: appIcon } : {}),
         backgroundColor: TITLEBAR_OVERLAY.light.color,
-        titleBarStyle: "hidden" as const,
-        titleBarOverlay: {
-          color: TITLEBAR_OVERLAY.light.color,
-          symbolColor: TITLEBAR_OVERLAY.light.symbolColor,
-          height: TITLEBAR_OVERLAY_HEIGHT,
-        },
+        ...windowChromeOptions(process.platform, "light"),
       },
       preloadPath,
       target,
       allowedOrigin,
       deferLoad: true,
+      openExternal: (url) => { void shell.openExternal(url); },
     });
     const windowSurface = window as typeof window & DesktopWindowSurface;
     if (validAppIcon !== undefined && typeof window.setIcon === "function") {
@@ -398,6 +494,7 @@ export async function main(): Promise<void> {
       isTrustedSender,
       noteBootSuccess: async () => {
         if (layout.payloadVersion !== undefined) await appPayloadInstaller.noteBootSuccess(layout.payloadVersion);
+        await confirmMacDesktop?.();
       },
     });
     window.webContents.once("did-finish-load", () => {
@@ -434,6 +531,20 @@ export async function main(): Promise<void> {
       actions: { appMetrics: () => app.getAppMetrics(), now: () => new Date() },
     });
     const disposePerformance = registerChromePerformanceIpc({ ipcMain, isTrustedSender, emit: logRendererPerformance });
+    const disposeMediaAccess = registerMediaAccessIpc({
+      ipcMain: {
+        handle(channel, listener) {
+          ipcMain.handle(channel, (event) => listener({ sender: event.sender }));
+        },
+        removeHandler(channel) {
+          ipcMain.removeHandler(channel);
+        },
+      },
+      isTrustedSender,
+      platform: process.platform,
+      preferences: systemPreferences,
+      openExternal: (url) => shell.openExternal(url),
+    });
     desktopConversationViews.registerWindow(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
     const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); if (!visible) liveAudio.disposeWindow(window.webContents.id); };
     const resetConversationVisibility = () => desktopConversationViews.reset(window.webContents);
@@ -622,7 +733,7 @@ export async function main(): Promise<void> {
         }
       },
       prefs: createUpdatePrefsStore({ appDataDirectory: join(app.getPath("appData"), "omp-studio") }),
-      stagingRoot: join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "updates"),
+      stagingRoot: desktopPaths().legacyStagingRoot,
       trustedKeys,
       platform: `${process.platform}-${process.arch}`,
       runtime: { electron: process.versions.electron, modules: process.versions.modules, nodePty: NODE_PTY_VERSION },
@@ -637,7 +748,7 @@ export async function main(): Promise<void> {
       openPath: (path) => shell.openPath(path),
       rollbackRuntime: async () => {
         await hostFactory.rollbackRuntime();
-        app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== "--omp-restarted").concat("--omp-restarted") });
+        app.relaunch({ args: relaunchArguments(process.argv) });
         app.quit();
       },
       pruneRuntimes: () => hostFactory.pruneRuntimes(),
@@ -671,10 +782,16 @@ export async function main(): Promise<void> {
     rendererWindow = window;
     // Close hides to the tray (streaming keeps running in background); the
     // real quit path releases this through `isQuitting`.
+    // macOS always hides to the Dock; a full-screen window leaves its Space first.
     window.on("close", (event) => {
-      if (context.isQuitting() || !closeToTrayEnabled) return;
+      if (context.isQuitting() || !(closeToTrayEnabled || process.platform === "darwin")) return;
       event.preventDefault();
-      window.hide();
+      if (process.platform === "darwin" && window.isFullScreen()) {
+        window.once("leave-full-screen", () => window.hide());
+        window.setFullScreen(false);
+      } else {
+        window.hide();
+      }
       trayRef?.notifyHiddenToTray?.();
     });
     window.webContents?.on?.("did-fail-load", (_event: unknown, errorCode: number, errorDescription: string, validatedURL: string) => {
@@ -715,6 +832,7 @@ export async function main(): Promise<void> {
         disposeLogs.dispose();
         disposeMetrics.dispose();
         disposePerformance.dispose();
+        disposeMediaAccess.dispose();
         ipcMain.removeHandler(CONVERSATION_VIEW_CHANNEL);
         window.removeListener("show", refreshConversationVisibility);
         window.removeListener("hide", refreshConversationVisibility);
@@ -732,10 +850,28 @@ export async function main(): Promise<void> {
     };
   };
 
+  // App Nap would throttle a turn streaming in a window closed to the Dock.
+  const stopAppNapGuard = process.platform === "darwin"
+    ? startAppNapGuard({ isBusy: () => hostFactory.isBusy(), blocker: powerSaveBlocker })
+    : undefined;
+
   const application = createDesktopApplication({
-    beforeShutdown: async () => { liveAudio.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
+    platform: process.platform,
+    ...(process.platform === "darwin"
+      ? {
+          onActivate: (listener: () => void) => {
+            app.on("activate", listener);
+          },
+          onSystemShutdown: (listener: (event: { preventDefault(): void }) => void) => {
+            // Electron passes an event whose preventDefault() delays the shutdown; its typings omit it.
+            const onShutdown = (event: { preventDefault(): void }): void => listener({ preventDefault: () => event.preventDefault() });
+            powerMonitor.on("shutdown", onShutdown as unknown as () => void);
+          },
+        }
+      : {}),
     requestSingleInstanceLock: () => app.requestSingleInstanceLock(),
     onSecondInstance: (listener) => {
       app.on("second-instance", listener);
@@ -766,7 +902,7 @@ export async function main(): Promise<void> {
             };
           },
         },
-        iconPath: appIcon,
+        iconPath: resolveTrayIconPath({ appPath: app.getAppPath(), platform: process.platform }),
         persistRoot: resolveProfilePersistRoot(app.getPath("appData")),
         locale: app.getLocale(),
         onOpen: openWindow,
@@ -795,6 +931,23 @@ export async function main(): Promise<void> {
       console.log(`[omp-studio] ${message}`);
     },
   });
+
+  if (process.platform === "darwin") {
+    const sendMenuCommand = (command: AppMenuCommand): void => {
+      const target = rendererWindow;
+      if (target === null || target.isDestroyed()) return;
+      if (!target.isVisible()) target.show();
+      target.webContents.send(APP_MENU_COMMAND_CHANNEL, command);
+    };
+    app.setAboutPanelOptions({ applicationName: "OMP Studio", applicationVersion: app.getVersion(), copyright: "Copyright © 2026 OMP Studio" });
+    Menu.setApplicationMenu(Menu.buildFromTemplate(buildApplicationMenuTemplate({
+      isPackaged: app.isPackaged,
+      locale: app.getLocale(),
+      dispatch: sendMenuCommand,
+      openRepository: () => { void shell.openExternal(PROJECT_REPOSITORY_URL); },
+      requestQuit: () => application.requestQuit(),
+    })));
+  }
 
   await application.start();
   updateCoordinator?.startBackground();

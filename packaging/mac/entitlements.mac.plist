@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  OMP Studio.app main executable. Embedded by pack:mac today; they only take
+	  effect under the hardened runtime, which the Developer ID signature turns on.
+	    * allow-jit — V8 JIT pages (MAP_JIT) are refused without it.
+	    * device.audio-input — microphone for voice input and Live.
+	  The Runtime (`omp`) keeps its own entitlements
+	  (omp-patch/vendor/oh-my-pi/scripts/macos-entitlements.plist).
+	-->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

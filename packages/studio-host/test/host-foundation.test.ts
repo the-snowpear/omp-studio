@@ -294,6 +294,10 @@ test("流式 delta 不再触发 projection 发布：N 个 delta → 0 次发布"
     await client.connect();
     await client.requestSnapshot();
     assert.equal(client.state, "ready");
+    // unix socket 会把帧分几次读到（macOS），等全部送达再计数。
+    for (let waited = 0; observedEvents.length < DELTAS + 1 && waited < 2_000; waited += 10) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     // 每一条都送达了订阅者：门控只影响发布，不影响事件分发。
     assert.equal(observedEvents.length, DELTAS + 1);
     // 两次发布：初始快照一次，那条 state.changed 一次。32 个 delta 贡献 0 次。

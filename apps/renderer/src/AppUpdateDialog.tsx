@@ -3,6 +3,12 @@ import { createPortal } from "react-dom";
 import { Brand } from "./brands";
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
+import { PLATFORM } from "./platform";
+
+/** macOS swaps the app bundle itself: there is no installer to download or launch. */
+const UPDATE_COPY = PLATFORM === "darwin"
+  ? { packageSize: "appUpdate.packageSizeMac", downloading: "appUpdate.downloadingMac", downloadSuccess: "appUpdate.downloadSuccessMac" }
+  : { packageSize: "appUpdate.packageSize", downloading: "appUpdate.downloading", downloadSuccess: "appUpdate.downloadSuccess" };
 
 export interface AppUpdateDialogProps {
   readonly update: {
@@ -117,7 +123,7 @@ export function AppUpdateDialog({
       timers.push(setTimeout(() => {
         setDownloading(false);
         setPreviewReady(true);
-        setStatusMessage(t("appUpdate.downloadSuccess") + " " + t("appUpdate.demoUpdate"));
+        setStatusMessage(t(UPDATE_COPY.downloadSuccess) + " " + t("appUpdate.demoUpdate"));
       }, 1600));
       return;
     }
@@ -128,7 +134,7 @@ export function AppUpdateDialog({
       try {
         const ok = await action();
         if (ok) {
-          setStatusMessage(t("appUpdate.downloadSuccess"));
+          setStatusMessage(t(UPDATE_COPY.downloadSuccess));
         }
       } finally {
         setDownloading(false);
@@ -187,7 +193,7 @@ export function AppUpdateDialog({
           {ready ? <p>{t("updates.readyToApply")}</p> : null}
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", opacity: 0.8 }}>
             <span>{t("appUpdate.releaseDate")}: {formatDate(update.publishedAt)}</span>
-            {update.assetSize ? <span>{t("appUpdate.packageSize")}: {formatBytes(update.assetSize)}</span> : null}
+            {update.assetSize ? <span>{t(UPDATE_COPY.packageSize)}: {formatBytes(update.assetSize)}</span> : null}
           </div>
 
           <div style={{ marginTop: 4 }}>
@@ -227,7 +233,7 @@ export function AppUpdateDialog({
           {downloading ? (
             <div style={{ marginTop: 8 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: 4 }}>
-                <span>{t("appUpdate.downloading")}</span>
+                <span>{t(UPDATE_COPY.downloading)}</span>
                 {progressPct !== null ? <span>{progressPct}%</span> : null}
               </div>
               <div style={{ height: 6, borderRadius: 3, background: "var(--bg-subtle, rgba(0,0,0,0.1))", overflow: "hidden" }}>
@@ -274,7 +280,7 @@ export function AppUpdateDialog({
               autoFocus
               onClick={handleDownload}
             >
-              {downloading ? t("appUpdate.downloading") : ready ? t("updates.applyAndRestart") : t("appUpdate.downloadAndInstall")}
+              {downloading ? t(UPDATE_COPY.downloading) : ready ? t("updates.applyAndRestart") : t("appUpdate.downloadAndInstall")}
             </button>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { isPrimaryModifier } from "../keyboard/shortcuts";
 import { MarkdownText } from "../conversation/markdown";
 import { Icon } from "../icons";
 import { mergePlanDraft, type PlanNotesBySection } from "./planFeedback";
@@ -148,7 +149,7 @@ export const PlanAnnotatedBody = forwardRef<PlanAnnotatedBodyHandle, {
                   placeholder="写下对这一段的修改意见…"
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                    if (event.key === "Enter" && isPrimaryModifier(event)) {
                       event.preventDefault();
                       saveDraft();
                     }

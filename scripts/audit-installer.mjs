@@ -89,6 +89,63 @@ export function findPrivateKeyFiles(root) {
   return hits;
 }
 
+/**
+ * The packaged Runtime trust root: key-id.txt, trusted-public.pem and
+ * trusted-keys.json, where every referenced key is an SPKI public key and no
+ * file carries a private key marker. Shared by the Windows and macOS audits.
+ *
+ * @param {string} keysDir
+ */
+export function assertPublicRuntimeKeys(keysDir) {
+  const publicKeyPath = join(keysDir, RUNTIME_PUBLIC_KEY_FILE);
+  const keyIdPath = join(keysDir, "key-id.txt");
+  if (!existsSync(publicKeyPath) || !existsSync(keyIdPath)) {
+    throw new Error(`Packaged Runtime public key files missing under ${keysDir}`);
+  }
+  const publicKey = readFileSync(publicKeyPath, "utf8");
+  if (!publicKey.includes("BEGIN PUBLIC KEY")) {
+    throw new Error("Packaged trusted-public.pem is not an SPKI public key");
+  }
+  if (containsPrivateKeyMarker(publicKey)) {
+    throw new Error("Packaged trusted-public.pem contains a private key marker");
+  }
+
+  const trustedKeysPath = join(keysDir, "trusted-keys.json");
+  if (!existsSync(trustedKeysPath)) {
+    throw new Error(`Packaged Runtime trusted-keys.json missing under ${keysDir}`);
+  }
+  let trustedKeysData;
+  try {
+    trustedKeysData = JSON.parse(readFileSync(trustedKeysPath, "utf8"));
+  } catch (err) {
+    throw new Error(`Packaged trusted-keys.json is not valid JSON: ${String(err)}`);
+  }
+  if (
+    trustedKeysData.schema !== 1 ||
+    typeof trustedKeysData.activeKeyId !== "string" ||
+    typeof trustedKeysData.keys !== "object" ||
+    trustedKeysData.keys === null
+  ) {
+    throw new Error("Packaged trusted-keys.json structure is invalid");
+  }
+  if (!trustedKeysData.keys[trustedKeysData.activeKeyId]) {
+    throw new Error(`activeKeyId ${trustedKeysData.activeKeyId} missing in packaged trusted-keys.json`);
+  }
+  for (const [kId, fileName] of Object.entries(trustedKeysData.keys)) {
+    const pemPath = join(keysDir, fileName);
+    if (!existsSync(pemPath)) {
+      throw new Error(`Referenced key file ${fileName} for key ${kId} missing under ${keysDir}`);
+    }
+    const pemContent = readFileSync(pemPath, "utf8");
+    if (!pemContent.includes("BEGIN PUBLIC KEY")) {
+      throw new Error(`Referenced key file ${fileName} is not an SPKI public key`);
+    }
+    if (containsPrivateKeyMarker(pemContent)) {
+      throw new Error(`Referenced key file ${fileName} contains a private key marker`);
+    }
+  }
+}
+
 function formatSize(path) {
   const bytes = statSync(path).size;
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -197,55 +254,7 @@ export function auditInstallerOutput(outputDir = defaultInstallerOutputDirectory
   }
   notes.push(`runtime ${packedVersion} ${formatSize(omp)}`);
 
-  const keysDir = join(unpackedDir, "runtime-keys");
-  const publicKeyPath = join(keysDir, RUNTIME_PUBLIC_KEY_FILE);
-  const keyIdPath = join(keysDir, "key-id.txt");
-  if (!existsSync(publicKeyPath) || !existsSync(keyIdPath)) {
-    throw new Error(`Packaged Runtime public key files missing under ${keysDir}`);
-  }
-  const publicKey = readFileSync(publicKeyPath, "utf8");
-  if (!publicKey.includes("BEGIN PUBLIC KEY")) {
-    throw new Error("Packaged trusted-public.pem is not an SPKI public key");
-  }
-  if (containsPrivateKeyMarker(publicKey)) {
-    throw new Error("Packaged trusted-public.pem contains a private key marker");
-  }
-
-  const trustedKeysPath = join(keysDir, "trusted-keys.json");
-  if (!existsSync(trustedKeysPath)) {
-    throw new Error(`Packaged Runtime trusted-keys.json missing under ${keysDir}`);
-  }
-  let trustedKeysData;
-  try {
-    trustedKeysData = JSON.parse(readFileSync(trustedKeysPath, "utf8"));
-  } catch (err) {
-    throw new Error(`Packaged trusted-keys.json is not valid JSON: ${String(err)}`);
-  }
-  if (
-    trustedKeysData.schema !== 1 ||
-    typeof trustedKeysData.activeKeyId !== "string" ||
-    typeof trustedKeysData.keys !== "object" ||
-    trustedKeysData.keys === null
-  ) {
-    throw new Error("Packaged trusted-keys.json structure is invalid");
-  }
-  if (!trustedKeysData.keys[trustedKeysData.activeKeyId]) {
-    throw new Error(`activeKeyId ${trustedKeysData.activeKeyId} missing in packaged trusted-keys.json`);
-  }
-  for (const [kId, fileName] of Object.entries(trustedKeysData.keys)) {
-    const pemPath = join(keysDir, fileName);
-    if (!existsSync(pemPath)) {
-      throw new Error(`Referenced key file ${fileName} for key ${kId} missing under ${keysDir}`);
-    }
-    const pemContent = readFileSync(pemPath, "utf8");
-    if (!pemContent.includes("BEGIN PUBLIC KEY")) {
-      throw new Error(`Referenced key file ${fileName} is not an SPKI public key`);
-    }
-    if (containsPrivateKeyMarker(pemContent)) {
-      throw new Error(`Referenced key file ${fileName} contains a private key marker`);
-    }
-  }
-
+  assertPublicRuntimeKeys(join(unpackedDir, "runtime-keys"));
   notes.push("runtime public key only");
 
   const leakedArtifacts = join(

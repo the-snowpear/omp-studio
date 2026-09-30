@@ -6,12 +6,12 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { test } from "node:test";
 
-import { WorkspaceRegistry } from "@omp-studio/studio-host";
+import { WorkspaceRegistry, canonicalWorkspacePath } from "@omp-studio/studio-host";
 
 import { createOmpWorkspaceService, WorkspacePickCancelledError } from "@omp-studio/host-client-api/workspaces";
 import type { StoredWorkspace } from "@omp-studio/studio-host";
@@ -119,7 +119,8 @@ test("onActivated fires with the stored workspace; the runtime port rebind recei
     const model = await service.pick();
     assert.equal(activated.length, 1);
     assert.equal(rebindCalls.length, 1);
-    assert.equal(rebindCalls[0]!.cwd, await realpath(picked));
+    // realpath on Windows; on macOS also without the /private prefix of /var.
+    assert.equal(rebindCalls[0]!.cwd, await canonicalWorkspacePath(picked));
     assert.equal(rebindCalls[0]!.workspaceId, model.workspaces[0]!.workspaceId);
 
     // Re-opening the already-active workspace must not restart the Runtime.

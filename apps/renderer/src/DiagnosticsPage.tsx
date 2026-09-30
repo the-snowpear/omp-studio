@@ -27,6 +27,8 @@ import {
 } from "./diagnosticsModel";
 import { ActionProgressBar } from "./ActionProgressBar";
 import { useI18n } from "./i18n";
+import { fileManagerName } from "./platformCopy";
+import { PLATFORM } from "./platform";
 import { ensureRuntimeConnection } from "./runtimeEnsure";
 import { isUpdateCheckTimeout, queryWithTimeout } from "./updateCheck";
 import { checkForUpdates, downloadUpdateToReady, fetchUpdatePrefs, useUpdates } from "./settings/updates";
@@ -121,8 +123,8 @@ function previewGeneratedAt(): string {
 
 function previewEnvironment(scenario: PreviewDiagScenario, installer: RuntimeInstallState): EnvironmentReadModel {
   return {
-    platform: "win32",
-    arch: "x64",
+    platform: PLATFORM === "darwin" ? "darwin" : "win32",
+    arch: PLATFORM === "darwin" ? "arm64" : "x64",
     authority: previewAuthority(),
     runtime: previewRuntime(scenario),
     installer,
@@ -905,7 +907,7 @@ export function DiagnosticsPage({
           <div className="set-row">
             <div>
               <div className="sr-label">{t("diagnostics.openLogsLabel")}</div>
-              <div className="sr-desc">{t("diagnostics.openLogsDesc")}</div>
+              <div className="sr-desc">{t("diagnostics.openLogsDesc", { fileManager: fileManagerName(t) })}</div>
             </div>
             <div className="sr-control">
               <button type="button" className="btn outline" onClick={() => void openLogDir()}>

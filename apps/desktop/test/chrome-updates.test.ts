@@ -307,6 +307,20 @@ async function createAppUpdateHarness(extra: Partial<ChromeUpdatesIpcOptions> = 
   return { dir, setupBytes, ipc, prefs, installer, progress, terminal, sender, cleanup: async () => { handle.dispose(); await rm(dir, { recursive: true, force: true }); } };
 }
 
+test("macOS never reads the Windows-only v1 index", async () => {
+  const fetched: string[] = [];
+  const h = await createAppUpdateHarness({ platform: "darwin-arm64", fetcher: async (url) => { fetched.push(String(url)); return new Response("{}"); } });
+  try {
+    const result = await h.ipc.invoke(CHROME_UPDATES_CHANNELS.check, h.sender) as { app: { plan: string }; runtime: { plan: string }; error?: string };
+    assert.equal(result.app.plan, "none");
+    assert.equal(result.runtime.plan, "none");
+    assert.equal(result.error, undefined);
+    const start = await h.ipc.invoke(CHROME_UPDATES_CHANNELS.startApp, h.sender) as { ok: boolean };
+    assert.equal(start.ok, false);
+    assert.deepEqual(fetched, []);
+  } finally { await h.cleanup(); }
+});
+
 test("checking the same release twice still permits starting the advertised hot update", { timeout: 5000 }, async () => {
   const h = await createAppUpdateHarness();
   try {

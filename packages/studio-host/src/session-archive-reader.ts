@@ -16,6 +16,7 @@ import {
 
 import { GzipFileError, readGunzipCapped, readGunzipPrefix } from "./gzip-file.js";
 import { defaultOmpArchiveRoot } from "./session-catalog.js";
+import { sameWorkspacePath } from "./workspace-path.js";
 
 const CURSOR_NAMESPACE = "session.archive.v1";
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
@@ -1597,9 +1598,7 @@ function shrinkItem(item: ConversationItem, maxPayloadBytes: number): Conversati
 }
 
 function sameWorkspace(left: string, right: string): boolean {
-  const a = resolve(left);
-  const b = resolve(right);
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  return sameWorkspacePath(left, right);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

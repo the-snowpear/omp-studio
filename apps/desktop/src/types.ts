@@ -136,6 +136,8 @@ export interface DesktopApplication {
    * renderer reload never routes through this.
    */
   quit(): Promise<void>;
+  /** User-initiated quit (tray, ⌘Q): confirms first while a session is busy. */
+  requestQuit(): void;
 }
 
 /**
@@ -157,8 +159,19 @@ export interface DesktopApplicationDeps {
   readonly onSecondInstance: (listener: () => void) => void;
   /** Fired before quit; `preventDefault` defers the quit. */
   readonly onBeforeQuit: (listener: (event: { preventDefault(): void }) => void) => void;
-  /** Fired when every window closed (Windows: quit the app). */
+  /** Fired when every window closed (Windows: quit the app; macOS: stay in the Dock). */
   readonly onAllWindowsClosed: (listener: () => void) => void;
+  /** Defaults to Windows behaviour; "darwin" keeps the app alive without windows. */
+  readonly platform?: NodeJS.Platform;
+  /** macOS Dock click / app reopen. */
+  readonly onActivate?: (listener: () => void) => void;
+  /**
+   * macOS logout, restart or power off. `preventDefault` asks the OS to wait
+   * while the app shuts down within {@link systemShutdownTimeoutMs}.
+   */
+  readonly onSystemShutdown?: (listener: (event: { preventDefault(): void }) => void) => void;
+  /** Bound on the graceful shutdown once the OS is powering off; default 5 s. */
+  readonly systemShutdownTimeoutMs?: number;
   /**
    * Optional OS tray seam. Returns undefined when the tray is unavailable —
    * closing the window then keeps the legacy behavior (quit the app).

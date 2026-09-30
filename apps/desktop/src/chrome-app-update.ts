@@ -91,9 +91,28 @@ export function findWindowsInstallerAsset(
   };
 }
 
+/** The macOS first-install download: the arm64 dmg (the update zip is for the in-app updater). */
+export function findMacInstallerAsset(
+  assets: readonly GitHubReleaseAsset[] = [],
+): { name: string; downloadUrl: string; size?: number | undefined } | undefined {
+  const dmg = assets.find((asset) =>
+    typeof asset.name === "string" && typeof asset.browser_download_url === "string" && /-macos-arm64\.dmg$/iu.test(asset.name));
+  if (dmg === undefined) return undefined;
+  return {
+    name: dmg.name!,
+    downloadUrl: dmg.browser_download_url!,
+    ...(typeof dmg.size === "number" ? { size: dmg.size } : {}),
+  };
+}
+
+export function findInstallerAsset(assets: readonly GitHubReleaseAsset[] = [], platform: NodeJS.Platform = process.platform) {
+  return platform === "darwin" ? findMacInstallerAsset(assets) : findWindowsInstallerAsset(assets);
+}
+
 export async function checkGitHubReleaseUpdate(options: {
   readonly repo?: string | undefined;
   readonly currentVersion: string;
+  readonly platform?: NodeJS.Platform | undefined;
   readonly fetcher?: ((url: string, init?: RequestInit) => Promise<Response>) | undefined;
   readonly timeoutMs?: number | undefined;
 }): Promise<AppUpdateInfo> {
@@ -129,7 +148,7 @@ export async function checkGitHubReleaseUpdate(options: {
 
     const latestVersion = data.tag_name.replace(/^v/iu, "").trim();
     const hasUpdate = compareSemver(latestVersion, options.currentVersion) > 0;
-    const asset = findWindowsInstallerAsset(data.assets ?? []);
+    const asset = findInstallerAsset(data.assets ?? [], options.platform);
 
     return {
       available: hasUpdate,

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -44,9 +44,22 @@ const blank = (available: boolean): LiveAudioState => ({
 	outputLevel: 0,
 	transcripts: [],
 });
+/** macOS `sun_path` holds 104 bytes including the NUL; Node rejects longer paths with EINVAL. */
+const MAX_UNIX_SOCKET_PATH_BYTES = 103;
+/**
+ * Socket name for one audio id, identical to `liveAudioSocketName` in
+ * `@omp-studio/studio-host` (`socket-paths.ts`): Desktop connects only to the
+ * endpoint it derives itself, so both copies assert the same test vector.
+ */
+export function liveAudioSocketName(audioId: string): string {
+	return `a-${createHash("sha256").update(audioId).digest("hex").slice(0, 16)}.sock`;
+}
 /** Private authenticated PCM transport. No credentials or audio bytes cross the Studio ledger. */
 export class StudioLiveAudioService {
 	readonly #root: string | undefined;
+	/** POSIX only: the Host's short private socket directory (`OMP_STUDIO_SOCKET_DIR`). */
+	readonly #socketDirectory: string | undefined;
+	readonly #available: boolean;
 	readonly #unsubscribe: () => void;
 	#capture?: Capture;
 	#state: LiveAudioState;
@@ -61,12 +74,15 @@ export class StudioLiveAudioService {
 		readonly session: AgentSession,
 		readonly options: {
 			directory?: string;
+			socketDirectory?: string;
 			createController?: (options: LiveSessionControllerOptions) => Controller;
 			prepareTimeoutMs?: number;
 		} = {},
 	) {
 		this.#root = options.directory ?? process.env.OMP_STUDIO_MEDIA_ROOT;
-		this.#state = blank(!!this.#root);
+		this.#socketDirectory = options.socketDirectory ?? process.env.OMP_STUDIO_SOCKET_DIR;
+		this.#available = !!this.#root && (process.platform === "win32" || !!this.#socketDirectory);
+		this.#state = blank(this.#available);
 		this.factory = {
 			create: callbacks => {
 				const capture = this.#capture;
@@ -184,12 +200,19 @@ export class StudioLiveAudioService {
 					this.#state.muted = capture.controller.muted;
 				}
 			}
-			const state = this.#capture?.sessionId === operation.sessionId ? this.#state : blank(!!this.#root);
+			const state = this.#capture?.sessionId === operation.sessionId ? this.#state : blank(this.#available);
 			validateLiveAudioResult(operation.kind, state);
 			return structuredClone(state);
 		});
 		this.#operations = work.catch(() => {});
 		return work;
+	}
+	/** The socket goes in the Host's short directory; the media root is far too long for `sun_path`. */
+	#socketEndpoint(id: string): string {
+		const endpoint = this.#socketDirectory ? join(this.#socketDirectory, liveAudioSocketName(id)) : undefined;
+		if (endpoint === undefined || Buffer.byteLength(endpoint, "utf8") > MAX_UNIX_SOCKET_PATH_BYTES)
+			throw new StudioLiveError("CAPABILITY_UNAVAILABLE", "The desktop audio socket directory is unavailable");
+		return endpoint;
 	}
 	async #prepare(sessionId: string, voice: string): Promise<void> {
 		if (!this.#root) throw new StudioLiveError("CAPABILITY_UNAVAILABLE", "The desktop audio boundary is unavailable");
@@ -197,9 +220,9 @@ export class StudioLiveAudioService {
 			throw new StudioLiveError("COMMAND_BLOCKED", "Stop the current Live call before preparing another");
 		const id = randomUUID(),
 			token = randomBytes(32).toString("hex");
+		const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\omp-studio-audio-${id}` : this.#socketEndpoint(id);
 		const dir = join(this.#root, "audio");
 		await mkdir(dir, { recursive: true, mode: 0o700 });
-		const endpoint = process.platform === "win32" ? `\\\\.\\pipe\\omp-studio-audio-${id}` : join(dir, id + ".sock");
 		const descriptor = join(dir, id + ".json");
 		const server = createServer(socket => this.#peer(capture, socket));
 		const capture: Capture = {

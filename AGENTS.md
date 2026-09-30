@@ -2,11 +2,11 @@
 
 ## 项目目标
 
-OMP Studio 是 OMP Runtime / AgentSession 的 Windows 桌面控制台与配套 Web UI。它通过类型化的 Studio Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
+OMP Studio 是 OMP Runtime / AgentSession 的桌面控制台（Windows 与 macOS Apple Silicon）与配套 Web UI。它通过类型化的 Studio Bridge 暴露运行时能力；不要以 slash 文本、ANSI 输出解析或按键宏模拟控制。
 
 主要结构：
 
-- `apps/desktop/`：Electron 主进程与 Windows 桌面壳。
+- `apps/desktop/`：Electron 主进程与 Windows / macOS 桌面壳；平台差异集中在 `apps/desktop/src/platform/`。
 - `apps/renderer/`：Vite + React 渲染进程 UI。
 - `packages/`：协议、host、客户端、transport、平台和测试工具包。
 - `omp-patch/overlay/`：Studio 自有的 Runtime 源码（`packages/coding-agent/src/studio/**` 与 `studio-*` 测试），上游没有这些路径，按普通源码维护。
@@ -15,7 +15,7 @@ OMP Studio 是 OMP Runtime / AgentSession 的 Windows 桌面控制台与配套 W
 - `ui_reference/`：界面参考，不是运行时产品代码。
 - `backup/`：历史备份；不应作为实现或测试输入。
 
-Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`
+Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`；macOS：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-DD.log`
 
 面向使用者和外部贡献者的入口是 [`README.md`](README.md)、[`docs/`](docs/README.md)、[`CHANGELOG.md`](CHANGELOG.md)、[`CONTRIBUTING.md`](CONTRIBUTING.md)。本文件是协作者的工作约定，不是产品说明书。
 
@@ -31,6 +31,7 @@ Host 诊断日志：`%APPDATA%\omp-studio\logs\host-YYYY-MM-DD.log`
 | Agent Hub、Skills、MCP、模型 | Agent Hub、Skills、MCP、模型 |
 | Git / 文件树 / 工作区 | Git / GitHub / 工作区文件 |
 | 终端、设置、诊断 | 终端、窗口铬、设置、诊断 |
+| macOS / Windows 平台差异 | 平台层 |
 | Host 协议 / Runtime 进程 | Host 内核 |
 | overlay / 接缝补丁 | Runtime overlay |
 | 某条 query/command 落哪 | 命令落点速查 |

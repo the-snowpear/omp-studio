@@ -2,5 +2,7 @@
   "repository": "https://github.com/can1357/oh-my-pi.git",
   "commit": "8ac1309bd8adaddc891eeb389c545345073875be",
   "firstPlatform": "win32-x64",
-  "entrypoint": "omp.exe"
+  "entrypoint": "omp.exe",
+  "platforms": ["win32-x64", "win32-arm64", "darwin-arm64"],
+  "entrypoints": { "win32": "omp.exe", "darwin": "omp" }
 }

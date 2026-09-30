@@ -7,8 +7,9 @@ import { PATCHSET_VERSION_FILE, UPSTREAM_COMMIT_FILES, readPatchsetVersionConsta
 import { findBun, npmInvocation, ompSourceDirectory, run, toolingEnvironment } from "./omp-tooling.mjs";
 import { readRuntimeSigningKeys } from "./runtime-signing-keys.mjs";
 import { resolveTargetArch, assertNativeRuntimeBuild, assertPeArchitecture } from "./windows-architecture.mjs";
+import { assertExecutableTarget, assertNativeTargetBuild, resolveTargetPlatform, runtimeEntrypointFor, verifyMacCodeSignature } from "./target-platform.mjs";
+import { assertMacToolchain } from "./mac-toolchain.mjs";
 import {
-  MANAGED_ENTRYPOINT,
   PATCHES_DIRECTORY,
   defaultArtifactDirectory,
   deriveRuntimeVersion,
@@ -42,10 +43,18 @@ async function assertRuntimeIdentityInSync() {
 
 
 if (process.platform === "win32") assertNativeRuntimeBuild(resolveTargetArch());
+else assertNativeTargetBuild(resolveTargetPlatform());
+const artifactPlatform = `${process.platform}-${process.arch}`;
 const bun = findBun();
 const env = toolingEnvironment({
   CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
 });
+// Inherited, this skips both Bun's and upstream's ad-hoc signing; Apple Silicon
+// then kills the unsigned binary the moment the smoke test runs it.
+if (process.platform === "darwin") {
+  delete env.BUN_NO_CODESIGN_MACHO_BINARY;
+  assertMacToolchain({ rust: true, bunVersion: run(bun, ["--version"], { env, capture: true }), env });
+}
 
 // Building a vendor tree without the fork applied yields an omp.exe with no
 // studio-host mode. That only surfaces much later, as an opaque identity probe
@@ -72,6 +81,13 @@ const executable = join(
 if (!existsSync(executable) || !statSync(executable).isFile()) {
   throw new Error(`Expected host executable was not produced: ${executable}`);
 }
+if (process.platform === "darwin") {
+  // Upstream already ad-hoc signs with its entitlements, so verify instead of
+  // re-signing. Everything below (smoke test, probe, checksums, Ed25519
+  // signature) then covers the final signed bytes.
+  assertExecutableTarget(executable, artifactPlatform);
+  verifyMacCodeSignature(executable);
+}
 
 run(executable, ["--version"], { cwd: ompSourceDirectory, env });
 if (process.platform === "win32") assertPeArchitecture(executable, resolveTargetArch());
@@ -83,7 +99,6 @@ run(npm.command, [...npm.prefix, "run", "build"]);
 const runtimeIdentity = await probeRuntimeIdentity({ binaryPath: executable });
 console.log(`Probed Runtime identity ${runtimeIdentity.runtimeVersion}`);
 
-const artifactPlatform = `${process.platform}-${process.arch}`;
 const upstream = await readUpstreamPin();
 const series = await readPatchSeries();
 const upstreamVersion = await readUpstreamVersion();
@@ -116,7 +131,7 @@ const { manifestPath, checksumsPath, signaturePath, manifest } = await generateR
   binaryPath: executable,
   patchesDirectory: PATCHES_DIRECTORY,
   platform: artifactPlatform,
-  entrypoint: MANAGED_ENTRYPOINT,
+  entrypoint: runtimeEntrypointFor(artifactPlatform),
   channel: process.env.OMP_RUNTIME_CHANNEL ?? "stable",
   signingKey,
   keyId,

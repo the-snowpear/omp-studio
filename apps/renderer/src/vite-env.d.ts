@@ -68,6 +68,14 @@ declare global {
         reportPerformanceSample?(sample: import("@omp-studio/studio-protocol").MemorySample): Promise<boolean>;
         setConversationViewState?(state: { runtimeEpoch: number; visibleSessionIds: readonly string[] }): Promise<boolean>;
         setTheme(theme: "light" | "dark"): Promise<void>;
+        /** Fixed by the preload; read it through `src/platform.ts`. Absent on older installs. */
+        readonly platform?: "win32" | "darwin" | "linux";
+        /** macOS menu bar commands (allowlisted ids from Main). */
+        onMenuCommand?(listener: (command: "app.settings" | "file.newChat" | "file.openProject" | "view.commandPalette" | "view.toggleSidebar" | "view.toggleBottomPanel" | "view.toggleSkills" | "help.shortcuts") => void): () => void;
+        /** macOS microphone permission (TCC); Windows always reports granted. */
+        requestMicrophoneAccess?(): Promise<"granted" | "denied">;
+        /** Opens System Settings › Privacy & Security › Microphone (macOS only). */
+        openMicrophoneSettings?(): Promise<boolean>;
         /** App 级系统通知（固定文案；非 Host / Studio Bridge 面）。 */
         notify(payload: { title: string; body?: string }): Promise<void>;
         /** 用系统默认浏览器打开 https 链接（Main `shell.openExternal`，不是 Electron 窗）。 */

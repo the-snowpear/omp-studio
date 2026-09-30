@@ -148,6 +148,11 @@ export interface Win32AuthorityLockOptions {
   readonly environmentKey: string;
   /** Injected native services. */
   readonly services: Win32AuthorityLockServices;
+  /**
+   * Path syntax of `profileDirectory`. Defaults to "win32"; macOS passes
+   * "posix" so the lock file lands inside the profile, not beside it.
+   */
+  readonly pathStyle?: "win32" | "posix";
 }
 
 /** Base error for every authority lock failure. */
@@ -245,7 +250,9 @@ export class Win32AuthorityLock {
     assertWin32AuthorityLockServices(options.services);
     this.#services = options.services;
     this.#environmentKey = options.environmentKey;
-    this.#lockPath = `${options.profileDirectory.replace(/[\\/]+$/u, "")}\\${LOCK_FILE_NAME}`;
+    this.#lockPath = options.pathStyle === "posix"
+      ? `${options.profileDirectory.replace(/\/+$/u, "")}/${LOCK_FILE_NAME}`
+      : `${options.profileDirectory.replace(/[\\/]+$/u, "")}\\${LOCK_FILE_NAME}`;
   }
 
   /**

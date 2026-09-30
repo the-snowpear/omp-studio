@@ -9,6 +9,7 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { containsPrivateMaterial } from "./p5-secret-scan.mjs";
+import { MAC_TARGET_PLATFORM, releaseOutputDirectory, releaseTargetsDarwin } from "./release-assets.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const reportPath = process.env.OMP_P5_REPORT ?? join(root, "outputs", "p5-readiness.json");
@@ -41,16 +42,18 @@ checks.push({ name: "repository-secret-scan", status: leaks.length === 0 ? "pass
 let updateIndexSigned = false;
 const updateIndexPath = join(root, "outputs", "release", "update-index.json");
 const updateIndexSigPath = join(root, "outputs", "release", "update-index.sig.json");
-const v2Directory = join(root, "outputs", "release", process.env.OMP_TARGET_ARCH ?? "x64");
-if (existsSync(join(v2Directory, `updates-win32-${process.env.OMP_TARGET_ARCH ?? "x64"}.json`))) {
+const darwin = releaseTargetsDarwin();
+const releasePlatform = darwin ? MAC_TARGET_PLATFORM : `win32-${process.env.OMP_TARGET_ARCH ?? "x64"}`;
+const v2Directory = releaseOutputDirectory(root, releasePlatform);
+if (existsSync(join(v2Directory, `updates-${releasePlatform}.json`))) {
   try {
     const { verifyUpdateAssets } = await import("./verify-update-assets-v2.mjs");
     const { releaseKeys } = await import("./build-update-assets-v2.mjs");
-    await verifyUpdateAssets(v2Directory, await releaseKeys(root), process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio", `win32-${process.env.OMP_TARGET_ARCH ?? "x64"}`);
+    await verifyUpdateAssets(v2Directory, await releaseKeys(root), process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio", releasePlatform);
     updateIndexSigned = true;
     checks.push({ name: "update-v2-signature-and-assets", status: "passed" });
   } catch (error) { checks.push({ name: "update-v2-signature-and-assets", status: "failed", message: String(error) }); }
-} else if (existsSync(updateIndexPath)) {
+} else if (!darwin && existsSync(updateIndexPath)) {
   try {
     const { createTrustedKeyVerifier, parseRuntimeSignatureManifest } = await import("@omp-studio/runtime-installer");
     const { createHash } = await import("node:crypto");
@@ -80,6 +83,22 @@ if (existsSync(join(v2Directory, `updates-win32-${process.env.OMP_TARGET_ARCH ??
   checks.push({ name: "update-index-signature", status: "failed", message: "Build update assets before running the release gate" });
 }
 
+// On a Mac release runner the packed bundle is audited for real; a Runtime-only release packs none.
+let macBundleAudit = "not-applicable";
+if (darwin) {
+  const { auditMacOutput, defaultMacOutputDirectory } = await import("./audit-mac.mjs");
+  if (existsSync(join(defaultMacOutputDirectory(), "mac-arm64"))) {
+    try {
+      await auditMacOutput();
+      macBundleAudit = "passed";
+      checks.push({ name: "macos-bundle-audit", status: "passed" });
+    } catch (error) {
+      macBundleAudit = "failed";
+      checks.push({ name: "macos-bundle-audit", status: "failed", message: error instanceof Error ? error.message : String(error) });
+    }
+  } else macBundleAudit = "not-packed";
+}
+
 const readiness = {
   generatedAt: new Date().toISOString(),
   platform: `${process.platform}-${process.arch}`,
@@ -88,12 +107,19 @@ const readiness = {
     noPrivateMaterialInScannedOutputs: leaks.length === 0,
     updateIndexSigned,
     productionWindowsCleanRun: "manual-required",
+    ...(darwin ? { productionMacCleanRun: "manual-required" } : {}),
   },
   sourceTests: "Run check and omp:test:metadata separately; this report only verifies artifacts",
-  macosReadiness: {
-    status: "review-required",
-    note: "Renderer and contract are platform-neutral; notarization and darwin artifact E2E remain release-pipeline work.",
-  },
+  macosReadiness: darwin
+    ? {
+        status: macBundleAudit === "passed" ? "manual-verification-required" : macBundleAudit === "not-packed" ? "runtime-only" : "failed",
+        bundleAudit: macBundleAudit,
+        note: "Ad hoc signed and not notarized: first launch through Gatekeeper, TCC prompts and the in-app update swap still need a clean-machine run.",
+      }
+    : {
+        status: "review-required",
+        note: "Renderer and contract are platform-neutral; notarization and darwin artifact E2E remain release-pipeline work.",
+      },
 };
 await writeFile(reportPath, `${JSON.stringify(readiness, null, 2)}\n`, "utf8");
 console.log(`P5 readiness report: ${reportPath}`);

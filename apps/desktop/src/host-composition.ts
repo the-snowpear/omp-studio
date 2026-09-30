@@ -1272,7 +1272,7 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
     // 3. Current-user-only private endpoint.
     endpointLease = await options.privateEndpoint.createCurrentUserOnly(profileDirectory);
     try {
-      const installerOptions =
+      const loadedInstallerOptions =
         options.installer ??
         (options.managedInstall === undefined
           ? undefined
@@ -1280,7 +1280,13 @@ export async function createDesktopHostComposition(options: DesktopCompositionOp
               options.managedInstall.trustedKeysDirectory === undefined
                 ? defaultRuntimeKeysDirectory()
                 : [options.managedInstall.trustedKeysDirectory, defaultRuntimeKeysDirectory()],
+              { environment: options.managedInstall.environmentTrustedKeys !== false },
             ));
+      const prepareStaging = options.installer === undefined ? options.managedInstall?.prepareStaging : undefined;
+      const installerOptions =
+        loadedInstallerOptions === undefined || prepareStaging === undefined
+          ? loadedInstallerOptions
+          : { ...loadedInstallerOptions, prepareStaging };
       const runtimeInstallDirectory = resolveManagedRuntimeInstallDirectory({
         stateDirectory: profileDirectory,
         ...(options.managedInstall?.installDirectory === undefined

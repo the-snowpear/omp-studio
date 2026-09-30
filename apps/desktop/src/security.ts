@@ -143,36 +143,63 @@ export function isTrustedRendererUrl(url: string, allowedOrigin: string): boolea
 }
 
 /**
- * Minimal structural window surface used by the navigation guards.
+ * Minimal structural surface used by the navigation guards: the window's
+ * WebContents, which emits `will-navigate` and owns `setWindowOpenHandler`.
+ * (Neither exists on BrowserWindow, which is where these guards used to be
+ * registered, so they never ran.)
  *
  * A single generic event boundary rather than per-event overloads: it is
- * implemented by Electron's `BrowserWindow.on` (whose overloaded signature
- * is not assignable to a narrow overloaded interface due to variance) while
- * keeping the guards Electron-free. Callbacks receive raw args and cast
- * only what the guard logic needs.
+ * implemented by Electron's `WebContents.on` (whose overloaded signature is
+ * not assignable to a narrow overloaded interface due to variance) while
+ * keeping the guards Electron-free. Callbacks receive raw args and cast only
+ * what the guard logic needs.
  */
-export interface NavigationGuardedWindow {
+export interface NavigationGuardedContents {
   on(event: string, listener: (...args: readonly unknown[]) => unknown): unknown;
+  setWindowOpenHandler(handler: (details: { url: string }) => { action: "deny" }): void;
+}
+
+/** Web links the renderer opens belong in the system browser. */
+export function isExternalWebLink(url: string): boolean {
+  return /^https?:\/\//iu.test(url);
 }
 
 /**
  * Deny navigation away from the trusted renderer origin and deny every new
  * window: the Studio is a single-window shell (P1). `will-navigate` is
  * prevented unless `isTrustedRendererUrl`; `window.open` and target=_blank
- * are always denied.
+ * are always denied. A denied http(s) link goes to `openExternal`, so links in
+ * the conversation keep opening — in the user's browser instead of a new
+ * unguarded Electron window.
  */
 export function installNavigationGuards(
-  window: NavigationGuardedWindow,
+  contents: NavigationGuardedContents,
   allowedOrigin: string,
+  openExternal?: (url: string) => void,
 ): void {
-  window.on("will-navigate", (event, url) => {
-    if (!isTrustedRendererUrl(String(url), allowedOrigin)) {
-      (event as { preventDefault(): void }).preventDefault();
-    }
+  contents.on("will-navigate", (event, url) => {
+    const target = String(url);
+    if (isTrustedRendererUrl(target, allowedOrigin)) return;
+    (event as { preventDefault(): void }).preventDefault();
+    if (isExternalWebLink(target)) openExternal?.(target);
   });
-  window.on("setWindowOpenHandler", () => {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isExternalWebLink(url)) openExternal?.(url);
     return { action: "deny" };
   });
+}
+
+/**
+ * Permission requests (microphone, notifications, clipboard …) are granted to
+ * the trusted renderer document only. Artifact frames and anything else a page
+ * embeds are denied instead of being granted by Electron's default.
+ */
+export function createPermissionRequestHandler(
+  allowedOrigin: string,
+): (contents: unknown, permission: string, callback: (granted: boolean) => void, details: { readonly requestingUrl?: string }) => void {
+  return (_contents, _permission, callback, details) => {
+    callback(isTrustedRendererUrl(details.requestingUrl ?? "", allowedOrigin));
+  };
 }
 
 /** Minimal structural session surface for CSP header injection. */
@@ -206,7 +233,7 @@ export interface RendererLifecycleSurface {
 
 /** Minimal structural window surface used by the secure window factory. */
 export interface WindowLike {
-  readonly webContents: RendererLifecycleSurface;
+  readonly webContents: RendererLifecycleSurface & NavigationGuardedContents;
   loadFile(path: string): Promise<void>;
   loadURL(url: string): Promise<void>;
   once(event: "ready-to-show", listener: () => void): unknown;
@@ -216,7 +243,7 @@ export interface WindowLike {
 }
 
 export interface CreateSecureWindowDeps<
-  TWindow extends WindowLike & NavigationGuardedWindow,
+  TWindow extends WindowLike,
   TOptions extends object,
 > {
   /** Electron BrowserWindow class (or a fake in tests). */
@@ -230,6 +257,8 @@ export interface CreateSecureWindowDeps<
   readonly allowedOrigin: string;
   /** Defer navigation until the caller has installed its IPC handlers. */
   readonly deferLoad?: boolean;
+  /** Where denied http(s) links go (`shell.openExternal`). */
+  readonly openExternal?: (url: string) => void;
 }
 
 export function loadRendererTarget(window: WindowLike, target: RendererTarget): void {
@@ -243,14 +272,14 @@ export function loadRendererTarget(window: WindowLike, target: RendererTarget): 
  * guarded load of the renderer target, shown on ready-to-show.
  */
 export function createSecureWindow<
-  TWindow extends WindowLike & NavigationGuardedWindow,
+  TWindow extends WindowLike,
   TOptions extends object,
 >(deps: CreateSecureWindowDeps<TWindow, TOptions>): TWindow {
   const window = new deps.BrowserWindow({
     ...deps.windowOptions,
     webPreferences: secureWebPreferences(deps.preloadPath),
   });
-  installNavigationGuards(window, deps.allowedOrigin);
+  installNavigationGuards(window.webContents, deps.allowedOrigin, deps.openExternal);
   window.once("ready-to-show", () => {
     window.show();
   });

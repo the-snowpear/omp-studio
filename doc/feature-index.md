@@ -176,6 +176,36 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 
 Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `event` / `close`（`packages/transport-desktop/src/channels.ts`）。不要再加通用 `invoke(channel, payload)`。
 
+## 平台层（Windows / macOS）
+
+平台差异集中在 `apps/desktop/src/platform/`，其余模块沿用 `{ platform, env, … }` 注入，不再散落 `process.platform`。Windows 的路径、文件名与行为由金样测试逐字钉住。
+
+| 主题 | 文件 | 说明 |
+|---|---|---|
+| 数据 / 日志 / Runtime / 更新目录 | `apps/desktop/src/platform/desktop-paths.ts` | Windows `%APPDATA%` / `%LOCALAPPDATA%` 不变；macOS 全在 `~/Library/Application Support/omp-studio`；打包资源 win32 取 exe 目录，darwin 取 `process.resourcesPath` |
+| 登录 shell 环境 | `platform/login-env.ts` | macOS 从访达启动只有 launchd 的精简 PATH；Host 创建前从登录 shell 取环境写入 `process.env`，补常见工具目录与 UTF-8 `LANG`；结果记 host 日志 `desktop.login_env` |
+| Command Line Tools 垫片 | `platform/developer-tools.ts`、`git-process.ts` | 解析到 `/usr/bin/git` 且 CLT 缺失时不执行垫片（它会弹系统安装框），直接报 `CAPABILITY_UNAVAILABLE` |
+| 进程树终止 | `platform/process-tree.ts`；`studio-host/src/posix-process-group.ts` | Windows `taskkill /t /f`；POSIX 以独立进程组启动并 `kill(-pgid)`，已回收的组长不再发信号 |
+| 单实例权威锁 | `apps/desktop/src/authority-liveness.ts`；`platform-win32/src/authority-lock.ts`（`pathStyle`） | Windows named pipe；POSIX unix socket，连不上即残留，核对 uid 与 dev/ino 后回收 |
+| Owner-only 权限 | `host-factory.ts` `applyOwnerOnlyPermissions` | Windows `icacls`；macOS `chmod 0700/0600` 后 `lstat` 复核 |
+| Runtime 平台表 | `runtime-installer/src/runtime-platform.ts`；`scripts/target-platform.mjs` | 入口 `omp.exe` / `omp`、更新平台 allowlist、PE / Mach-O 架构校验；两张表由测试钉齐 |
+| mac 构建预检 | `scripts/mac-toolchain.mjs` | Node arm64 且未转译、CLT、Bun ≥ 1.4.2、Rust host `aarch64-apple-darwin` |
+| 窗口外观 | `platform/window-chrome.ts`、`titlebar-overlay.ts`；renderer `App.css` `.app-titlebar`、`TipHost.tsx` | Windows 右上 caption overlay（可随主题换色）；macOS `hidden` + 红绿灯 `trafficLightPosition`，overlay 不换色；标题栏两侧由 `env(titlebar-area-x/width)` 让位，TipHost 按同一留白翻转气泡 |
+| 原生菜单栏 | `platform/app-menu.ts`、`app-menu-shared.ts`；renderer `App.tsx` `runMenuCommand` | 仅 macOS；Edit 全用 role；自定义项经 `omp-studio:desktop:menu-command` 发 allowlist 命令 ID；这些组合键归菜单独占，renderer keydown 在 macOS 桌面跳过（`nativeMenuOwnsShortcuts`）；打包版无 Reload / DevTools |
+| 生命周期 | `composition.ts`、`platform/app-lifecycle.ts`、`platform/app-nap.ts` | macOS 关窗隐藏到 Dock，`activate` 重开，⌘Q 走 `requestQuit`；关机 / 注销有界关停且不拦截；忙时才持 `prevent-app-suspension`；不在「应用程序」时提示移动；relaunch 去掉 `-psn_*` |
+| 托盘 | `tray.ts`、`app-icon.ts` `resolveTrayIconPath`；`apps/desktop/resources-darwin/trayTemplate*.png`（`scripts/generate-tray-template.mjs` 生成） | macOS 用菜单栏模板图，首项「打开 OMP Studio」；模板图不在 Windows 的 `resources/` 内 |
+| 终端 shell | `terminal-pty.ts` | macOS 账户 shell → `$SHELL` → `/bin/zsh`，login 启动（`-l`，管道 `-il`）；剔除 `ELECTRON_*`，设 `TERM_PROGRAM`；进程组终止；无工作区时 cwd 为家目录 |
+| 外部编辑器 / 打开方式 | `external-editor.ts`；`main.ts` 打开方式 | macOS 查 `/Applications`、`~/Applications` 中的 VS Code / Insiders / Cursor / Windsurf，再查登录 PATH；「打开方式」选择框从 `/Applications` 开始；`rundll32` 仅 Windows |
+| 麦克风 / TCC | `chrome-media-access.ts`；renderer `media/microphoneAccess.tsx` | macOS 先查 `getMediaAccessStatus`，未决时 `askForMediaAccess`；拒绝后 renderer 提供「打开系统设置」（固定 URL）；其他平台不经这一步，采集时序不变 |
+| 钥匙串锁定 | `service-definitions.ts` `SecureStorageLockedError` | safeStorage 解密失败报可恢复的锁定错误，不清空已存数据 |
+| macOS 打包 | `scripts/pack-mac.mjs`、`mac-bundle.mjs`（由 `electron-builder.yml` 派生配置、TCC 用途字符串、ad hoc 签名选项）、`audit-mac.mjs`；`packaging/mac/*.plist`；`scripts/preload-bundle.mjs`（与 pack:win 共用） | `npm run pack:mac` 产出 ad hoc 签名 `.app`、首装 `.dmg`、`ditto` 更新 zip；Runtime 与公钥走 `Contents/Resources`，签名跳过 `runtime/**`；审计复验 Runtime 签名、`codesign --deep --strict`、zip 往返；说明见 `packaging/README.md` |
+| macOS 整包更新 | `apps/desktop/src/mac-app-installer.ts`（preflight：App Translocation / 目录可写 / 空间；`ditto --noqtn` 解到同级隐藏目录，`codesign --deep --strict`、bundle id、版本、arm64 校验）；`mac-app-swap.ts`（退出后由旧 Electron 以 Node 模式跑的 helper：两次 rename 交换，`started` / `healthy` / `clean-exit` 标记，未启动或崩溃即换回）；`update-coordinator.ts` `desktopCommit: "confirmed"`、`failedApp`、`preflightDesktop`、`trackAppBaselineWithoutBase` | 健康（renderer 就绪）后 `confirmDesktopStartup` 才提交；换回的版本同一文件不再推送；换回后当前 Runtime 与桌面协议不兼容时回到上一 Runtime；v1 索引在 macOS 恒为 none；发布页下载选 `macos-arm64.dmg` |
+| Runtime 签名预检 | `apps/desktop/src/platform/code-signature.ts` | macOS 激活 Runtime 前先 `codesign --verify --strict`，签名坏了给出明确原因而不是自检时被 SIGKILL |
+| Runtime 副本去 quarantine | `apps/desktop/src/platform/quarantine.ts`；`runtime-installer` `prepareStaging` | macOS 从包内播种 Runtime 时，在安装器私有暂存副本上清除 `com.apple.quarantine`，随后照常 Ed25519 验签；签名 bundle 本身不动 |
+| Renderer 平台 | `apps/renderer/src/platform.ts`、`keyboard/shortcuts.ts`、`platformCopy.ts` | preload 冻结 `platform`，Web UI 回退 `navigator`；根元素 `data-platform`；⌘ / Ctrl 判定与标签（Windows 标签逐字不变）；「资源管理器 / 访达」文案；macOS 保留系统浮动滚动条 |
+
+macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-DD.log`。
+
 ## Host 内核（改协议行为时）
 
 | 主题 | 文件 |
@@ -188,6 +218,8 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | BTW 旁路转发 | `packages/studio-host/src/btw-events.ts`；facade `#bindBtw`；client `entities.btw` |
 | 破坏性确认 | `host-confirmation.ts` |
 | Windows Job Object | `windows-job-object.ts` |
+| POSIX 进程组 / 短 socket | `posix-process-group.ts`；`socket-paths.ts`（`sun_path` ≤ 103 字节，私有 0700 目录；Bridge、探针与 live audio 共用，Runtime 经 `OMP_STUDIO_SOCKET_DIR` 取得） |
+| 工作区路径同一性 | `workspace-path.ts`（registry、catalog、归档、删除共用；Windows 大小写不敏感，macOS realpath + `/private` 别名 + NFC；overlay `session-telemetry-probe.ts` 同规则） |
 | 安装态 | `packages/runtime-installer/src/installer.ts`、`signed-artifact.ts`（Runtime，启动前核对 EXE 摘要、同版本损坏修复、重复激活保留回滚点）；`packages/runtime-installer/src/app-payload.ts`（应用负载，同版本相同签名内容支持重复下载后激活）；桌面 `apps/desktop/src/runtime-install.ts`、`payload-root.ts`（启动验签/回退）。更新维护在 `host-composition.ts` / `runtime-session.ts` 停止空闲居民进程并恢复会话；候选启动失败时恢复旧 Runtime 和原会话，Facade 拒绝并发写命令；下载/导入将验签确认的通道传给 `runtime.install`。安装包 extraFiles `$INSTDIR\runtime\versions\`，打包后直接跑这份 `omp.exe` |
 
 ## Runtime overlay（改 omp `--mode studio-host` 时）
@@ -207,6 +239,7 @@ Host 传输通道只有：`bootstrap` / `query` / `command` / `subscribe` / `eve
 | Live 实时语音 | `live-service.ts`、`services/live-audio-service.ts`；Renderer `media/LiveAudioPane.tsx`、`liveCapture.ts`、`live-capture.worklet.js`；Desktop `live-audio.ts` |
 | BTW / TAN / OMFG | overlay `btw-service.ts`、`tan-service.ts`、`omfg-service.ts`；Host `btw-events.ts`、facade `#bindBtw`、client `reducer.ts` `entities.btw`；Renderer `apps/renderer/src/btw/` |
 | 会话来源标记 | `session-origin.ts` |
+| 父进程看门狗 | `parent-watchdog.ts`；`studio-host-mode.ts` `abortForHostLoss`（`OMP_STUDIO_PARENT_PID`，目前只有 macOS 传；Host 消失后中止 turn 并退出，不走 drain） |
 
 接缝补丁（改上游已有文件）：`omp-patch/patches/0001` CLI 入口 → `0002` session → `0003` modes/pause → `0004` extensibility。分组名单：`scripts/omp-seam.mjs`。
 

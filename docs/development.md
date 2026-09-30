@@ -1,7 +1,8 @@
 # Development
 
-Windows is the inner-loop platform. Node 22+ and npm workspaces drive this
-repository; Bun is required inside the vendored OMP tree.
+Windows is the main inner-loop platform; an Apple Silicon Mac runs the same
+commands, and CI runs the full gate on both. Node 22+ and npm workspaces drive
+this repository; Bun is required inside the vendored OMP tree.
 
 ## Layout
 
@@ -13,7 +14,7 @@ repository; Bun is required inside the vendored OMP tree.
 | `omp-patch/overlay/` | Studio-owned Runtime sources (`src/studio/**`) |
 | `omp-patch/patches/` | Seam patches on upstream-owned files |
 | `omp-patch/vendor/oh-my-pi/` | Pinned submodule; do not commit overlay dirt |
-| `packaging/` | electron-builder / NSIS installer |
+| `packaging/` | electron-builder / NSIS installer; macOS entitlements in `packaging/mac/` |
 | `ui_reference/ver1` | Visual reference (not runtime code) |
 | `doc/feature-index.md` | Feature → file map |
 
@@ -30,6 +31,7 @@ npm run check          # build once (includes TypeScript), then all tests once
 npm run build
 npm run preview        # Electron from source
 npm run pack:win       # unsigned Windows NSIS installer
+npm run pack:mac       # ad hoc signed macOS .app, .dmg and update zip (on an Apple Silicon Mac)
 ```
 
 Scoped UI work:
@@ -38,6 +40,16 @@ Scoped UI work:
 npm run typecheck -w @omp-studio/renderer
 npm run test -w @omp-studio/renderer
 ```
+
+## Platform differences
+
+Platform code lives in `apps/desktop/src/platform/`: paths, the login-shell
+environment, process trees, window chrome, the native menu and lifecycle.
+The renderer reads the platform only through `apps/renderer/src/platform.ts`.
+Take a `platform` parameter instead of adding `process.platform` checks, and
+keep Windows paths, names and behaviour pinned by tests. The 平台层 section of
+[`doc/feature-index.md`](../doc/feature-index.md) maps each difference to its
+file.
 
 ## Preview mode
 

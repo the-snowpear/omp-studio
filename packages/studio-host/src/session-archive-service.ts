@@ -6,6 +6,7 @@ import { createGzip } from "node:zlib";
 
 import { GzipFileError, readGunzipCapped, readGunzipPrefix } from "./gzip-file.js";
 import { defaultOmpArchiveRoot, defaultOmpSessionsRoot } from "./session-catalog.js";
+import { sameWorkspacePath } from "./workspace-path.js";
 
 const DEFAULT_MAX_SESSION_BYTES = 512 * 1024 * 1024;
 const DEFAULT_SCAN_FILES = 20_000;
@@ -570,7 +571,5 @@ async function rollback(undo: Array<() => Promise<void>>, original: unknown): Pr
 }
 
 function sameWorkspace(left: string, right: string): boolean {
-  const a = resolve(left);
-  const b = resolve(right);
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  return sameWorkspacePath(left, right);
 }

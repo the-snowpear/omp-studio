@@ -6,9 +6,15 @@ import { fileURLToPath } from "node:url";
 import { extractRuntimeArchive, verifyUpdateManifest, verifySignedArtifact, RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest, createTrustedKeyVerifier, parseRuntimeSignatureManifest } from "@omp-studio/runtime-installer";
 import { releaseKeys } from "./build-update-assets-v2.mjs";
 import { containsPrivateMaterial } from "./p5-secret-scan.mjs";
+import { MAC_TARGET_PLATFORM, legacyIndexName, releaseOutputDirectory, releaseTargetsDarwin } from "./release-assets.mjs";
+
+function sameBytes(bytes, file) {
+  return bytes.length === file.size && createHash("sha256").update(bytes).digest("hex") === file.sha256 && createHash("sha512").update(bytes).digest("base64") === file.sha512;
+}
 
 export async function verifyUpdateAssets(directory, keys, repo, platform) {
-  const envelope = verifyUpdateManifest(JSON.parse(await readFile(join(directory, `updates-${platform}.json`), "utf8")), keys, repo, platform);
+  const raw = JSON.parse(await readFile(join(directory, `updates-${platform}.json`), "utf8"));
+  const envelope = verifyUpdateManifest(raw, keys, repo, platform);
   const expected = new Set([`updates-${platform}.json`, "release-notes.md"]);
   for (const kind of ["app", "runtime"]) {
     const component = envelope.manifest[kind];
@@ -16,8 +22,17 @@ export async function verifyUpdateAssets(directory, keys, repo, platform) {
     for (const file of [component.file, component.blockmap]) {
       expected.add(file.asset);
       const bytes = await readFile(join(directory, file.asset));
-      if (bytes.length !== file.size || createHash("sha256").update(bytes).digest("hex") !== file.sha256 || createHash("sha512").update(bytes).digest("base64") !== file.sha512) throw new Error(`Release artifact mismatch: ${file.asset}`);
+      if (!sameBytes(bytes, file)) throw new Error(`Release artifact mismatch: ${file.asset}`);
     }
+  }
+  // The macOS dmg is for people, not the updater; its digest is signed with the catalog,
+  // and verifyUpdateManifest already checked it sits beside the app zip.
+  const firstInstall = envelope.manifest.firstInstall;
+  if (firstInstall !== undefined) {
+    if (!sameBytes(await readFile(join(directory, firstInstall.asset)), firstInstall)) throw new Error(`Release artifact mismatch: ${firstInstall.asset}`);
+    expected.add(firstInstall.asset);
+  } else if (platform.startsWith("darwin-") && envelope.manifest.app) {
+    throw new Error("A macOS desktop release needs its first-install dmg");
   }
   const runtime = envelope.manifest.runtime;
   if (runtime) {
@@ -29,8 +44,8 @@ export async function verifyUpdateAssets(directory, keys, repo, platform) {
     } finally { await rm(temp, { recursive: true, force: true }); }
   }
   const names = await readdir(directory);
-  const legacy = platform === "win32-x64" ? "update-index" : `update-index-${platform}`;
-  if (names.includes(`${legacy}.json`)) {
+  const legacy = legacyIndexName(platform);
+  if (legacy !== undefined && names.includes(`${legacy}.json`)) {
     expected.add(`${legacy}.json`); expected.add(`${legacy}.sig.json`);
     const payload = await readFile(join(directory, `${legacy}.json`));
     const sig = parseRuntimeSignatureManifest(JSON.parse(await readFile(join(directory, `${legacy}.sig.json`), "utf8")));
@@ -43,7 +58,7 @@ export async function verifyUpdateAssets(directory, keys, repo, platform) {
   return envelope.manifest;
 }
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
-  const root = resolve("."), arch = process.env.OMP_TARGET_ARCH ?? "x64";
-  await verifyUpdateAssets(process.argv[2] ?? join(root, "outputs/release", arch), await releaseKeys(root), process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio", `win32-${arch}`);
+  const root = resolve("."), platform = releaseTargetsDarwin() ? MAC_TARGET_PLATFORM : `win32-${process.env.OMP_TARGET_ARCH ?? "x64"}`;
+  await verifyUpdateAssets(process.argv[2] ?? releaseOutputDirectory(root, platform), await releaseKeys(root), process.env.GITHUB_REPOSITORY ?? "the-snowpear/omp-studio", platform);
   console.log("Signed release assets verified");
 }

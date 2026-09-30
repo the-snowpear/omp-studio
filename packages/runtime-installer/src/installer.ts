@@ -40,6 +40,12 @@ export interface RuntimeInstallerOptions {
   signatureVerifier?: RuntimeSignatureVerifier;
   trustedKeys?: Readonly<Record<string, string | Buffer>>;
   isRuntimeReferenced?: (runtimeVersion: string) => boolean | Promise<boolean>;
+  /**
+   * Platform fix-up of the private staged copy, before it is verified and
+   * published: macOS clears the quarantine flag a copy out of a downloaded app
+   * bundle inherits. It must not change file contents; verification follows.
+   */
+  prepareStaging?: (directory: string) => Promise<void>;
 }
 
 export interface RuntimeInstallOptions {
@@ -62,6 +68,7 @@ export class RuntimeInstaller {
   readonly #signatureVerifier: RuntimeSignatureVerifier | undefined;
   readonly #trustedKeys: Readonly<Record<string, string | Buffer>>;
   readonly #isRuntimeReferenced: ((runtimeVersion: string) => boolean | Promise<boolean>) | undefined;
+  readonly #prepareStaging: ((directory: string) => Promise<void>) | undefined;
 
   constructor(readonly rootDirectory: string, options: RuntimeInstallerOptions = {}) {
     this.#versionsDirectory = join(rootDirectory, "versions");
@@ -69,6 +76,7 @@ export class RuntimeInstaller {
     this.#signatureVerifier = options.signatureVerifier;
     this.#trustedKeys = options.trustedKeys ?? {};
     this.#isRuntimeReferenced = options.isRuntimeReferenced;
+    this.#prepareStaging = options.prepareStaging;
   }
 
   async install(artifactDirectory: string, options: RuntimeInstallOptions = {}): Promise<RuntimeInstallationManifest> {
@@ -121,6 +129,7 @@ export class RuntimeInstaller {
       version: manifest.runtimeVersion,
       requireFile: manifest.entrypoint,
       ...(existing ? { replaceExisting: { beforeReplace } } : {}),
+      ...(this.#prepareStaging === undefined ? {} : { prepareStaging: this.#prepareStaging }),
       verifyStaging: async (directory) => {
         const verified = await verifySignedArtifact({
           directory,

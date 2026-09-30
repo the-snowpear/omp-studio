@@ -10,6 +10,8 @@ import { createPortal } from "react-dom";
 
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
+import { PLATFORM } from "./platform";
+import { fileManagerName } from "./platformCopy";
 
 export function MenuItem({ icon, children, hint, kbd, disabled, title, current, onClick }: {
   icon?: string;
@@ -176,9 +178,9 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
         onPick={(openerId) => onRun({ type: "openWith", openerId })}
       />
       <div className="menu-sep" />
-      {target.kind==="file"&&/\.(exe|dll|so|dylib|bin|elf|i64|idb|sys|o|a)$/i.test(target.path)?<MenuItem icon="code" onClick={()=>onRun({type:"ida"})} {...desktopOnly}>IDA</MenuItem>:null}
+      {target.kind==="file"&&(/\.(exe|dll|so|dylib|bin|elf|i64|idb|sys|o|a)$/i.test(target.path)||(PLATFORM==="darwin"&&!target.name.includes(".")))?<MenuItem icon="code" onClick={()=>onRun({type:"ida"})} {...desktopOnly}>IDA</MenuItem>:null}
       <MenuItem icon="folder-open" onClick={() => onRun({ type: "reveal" })} {...desktopOnly}>
-        {t("shell.fileRevealInExplorer")}
+        {t("shell.fileRevealInExplorer", { fileManager: fileManagerName(t) })}
       </MenuItem>
       <MenuItem icon="copy" onClick={() => onRun({ type: "copyAbsolute" })} {...desktopOnly}>
         {t("shell.copyAbsolutePath")}

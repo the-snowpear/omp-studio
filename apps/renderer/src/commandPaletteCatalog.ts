@@ -1,4 +1,5 @@
 import type { SessionHistoryEntry } from "@omp-studio/client-contract";
+import { SHORTCUTS, formatShortcut, shortcutSearchText } from "./keyboard/shortcuts";
 import type { CapTab } from "./CapabilitiesPage";
 import type { PageRoute } from "./HomePage";
 import type { McTab } from "./ModelConfigPage";
@@ -82,7 +83,7 @@ function recents(input: PaletteCatalogInput): PaletteItem[] {
         icon: "message",
         label: row.title,
         meta: row.project,
-        hint: `Ctrl+${recentIndex}`,
+        hint: formatShortcut({ key: String(recentIndex) }, "hint"),
         keywords: `${row.branch} ${row.model}`,
         recentIndex,
         action: hit
@@ -98,7 +99,7 @@ function recents(input: PaletteCatalogInput): PaletteItem[] {
       icon: "message",
       label: entry.title ?? input.untitledTitle,
       ...(input.activeProjectName ? { meta: input.activeProjectName } : {}),
-      hint: `Ctrl+${recentIndex}`,
+      hint: formatShortcut({ key: String(recentIndex) }, "hint"),
       keywords: entry.summary ?? "",
       recentIndex,
       action: { kind: "selectThread", entry },
@@ -116,8 +117,8 @@ function staticGroups(preview: boolean): PaletteGroup[] {
           id: "new-chat",
           icon: "plus",
           label: "nav.newChat",
-          hint: "Ctrl+Shift+O",
-          keywords: "new chat thread 新建对话",
+          hint: formatShortcut(SHORTCUTS.newChat, "hint"),
+          keywords: `new chat thread 新建对话 ${shortcutSearchText(SHORTCUTS.newChat)}`,
           action: { kind: "newChat" },
         },
         { id: "pick-folder", icon: "folder-open", label: "home.openLocalFolder", keywords: "open project workspace folder 打开本地文件夹", action: { kind: "pickProject" } },
@@ -143,8 +144,8 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       id: "panels",
       label: "palette.groupPanels",
       items: [
-        { id: "toggle-sidebar", icon: "layout", label: "palette.toggleSidebar", hint: "Ctrl+B", keywords: "sidebar 侧栏 切换侧栏", action: { kind: "toggleSidebar" } },
-        { id: "toggle-bottom", icon: "rows", label: "palette.toggleBottom", hint: "Ctrl+J", keywords: "bottom panel 底部面板 切换底部面板", action: { kind: "toggleBottom" } },
+        { id: "toggle-sidebar", icon: "layout", label: "palette.toggleSidebar", hint: formatShortcut(SHORTCUTS.toggleSidebar, "hint"), keywords: `sidebar 侧栏 切换侧栏 ${shortcutSearchText(SHORTCUTS.toggleSidebar)}`, action: { kind: "toggleSidebar" } },
+        { id: "toggle-bottom", icon: "rows", label: "palette.toggleBottom", hint: formatShortcut(SHORTCUTS.toggleBottomPanel, "hint"), keywords: `bottom panel 底部面板 切换底部面板 ${shortcutSearchText(SHORTCUTS.toggleBottomPanel)}`, action: { kind: "toggleBottom" } },
         { id: "toggle-side", icon: "panel", label: "palette.toggleSide", keywords: "right panel 右侧面板 切换右侧面板", action: { kind: "toggleSide" } },
         { id: "open-terminal", icon: "terminal", label: "palette.openTerminal", keywords: "terminal 终端 打开终端", action: { kind: "openBottom", tab: "terminal" } },
         { id: "open-problems", icon: "alert", label: "palette.openProblems", keywords: "problems 打开 Problems", action: { kind: "openBottom", tab: "problems" } },
@@ -157,7 +158,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "open-preview", icon: "eye", label: "palette.openPreview", keywords: "preview 打开 Preview", action: { kind: "openSide", tab: "preview" } },
         { id: "open-agents", icon: "bot", label: "palette.openAgents", keywords: "agents 打开 Agents", action: { kind: "openSide", tab: "agents" } },
         { id: "open-btw", icon: "sparkles", label: "palette.openBtw", keywords: "btw 旁路 side channel 提问 打开 BTW 面板", action: { kind: "openSide", tab: "btw" } },
-        { id: "open-skills", icon: "layers", label: "menu.openSkills", hint: "Ctrl+Shift+K", keywords: "skills plugins drawer 技能 插件 打开技能与插件", action: { kind: "openSkills" } },
+        { id: "open-skills", icon: "layers", label: "menu.openSkills", hint: formatShortcut(SHORTCUTS.skills, "hint"), keywords: `skills plugins drawer 技能 插件 打开技能与插件 ${shortcutSearchText(SHORTCUTS.skills)}`, action: { kind: "openSkills" } },
       ],
     },
     {

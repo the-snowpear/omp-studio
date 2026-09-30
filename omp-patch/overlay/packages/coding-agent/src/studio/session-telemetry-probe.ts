@@ -123,13 +123,20 @@ function parseProbeInput(raw: string): { input: StudioTelemetryProbeInput; reque
 	return { input, requestId: input.requestId };
 }
 
+/**
+ * The Host's workspace path rule (`workspacePathKey` in `@omp-studio/studio-host`
+ * `workspace-path.ts`): case-insensitive on Windows; on macOS `/private/var`,
+ * `/private/tmp` and `/private/etc` spelled the short way and names in NFC.
+ */
+export function workspacePathKey(value: string, platform: NodeJS.Platform = process.platform): string {
+	const resolved = platform === "win32" ? path.win32.resolve(value) : path.posix.resolve(value);
+	if (platform === "win32") return resolved.toLowerCase();
+	if (platform === "darwin") return resolved.replace(/^\/private(?=\/(?:var|tmp|etc)(?:\/|$))/, "").normalize("NFC");
+	return resolved;
+}
+
 function sameWorkspace(left: string, right: string): boolean {
-	const resolvedLeft = path.resolve(left);
-	const resolvedRight = path.resolve(right);
-	if (process.platform === "win32" || process.platform === "darwin") {
-		return resolvedLeft.toLowerCase() === resolvedRight.toLowerCase();
-	}
-	return resolvedLeft === resolvedRight;
+	return workspacePathKey(left) === workspacePathKey(right);
 }
 
 async function fileExists(target: string): Promise<boolean> {

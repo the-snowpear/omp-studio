@@ -95,15 +95,19 @@ code, pre, .mono { font-family: var(--font-mono); }
   outline-color: var(--text);
 }
 
-/* Scrollbars */
-* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
-*::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb {
+/* Scrollbars. macOS keeps its native overlay scrollbars: styling them would
+   force permanent classic ones. Elsewhere these match every element, the root
+   included, exactly like the former bare `*`; :where() keeps them at zero
+   specificity, so per-element overrides still win as before. */
+:where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *) { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+:where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *)::-webkit-scrollbar { width: 8px; height: 8px; }
+:where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *)::-webkit-scrollbar-thumb {
   background: var(--scrollbar);
   border-radius: var(--r-full);
 }
-*::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
-*::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
+:where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *)::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+:where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *)::-webkit-scrollbar-track,
+:where(:root:not([data-platform="darwin"]), :root:not([data-platform="darwin"]) *)::-webkit-scrollbar-corner { background: transparent; }
 
 /* Screen-reader-only text. Used to give icon-only controls and status regions
    a real accessible name without changing the visual density. */

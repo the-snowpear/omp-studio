@@ -74,7 +74,13 @@ export interface TrayElectronSurface {
 
 const isZh = (locale: string): boolean => locale.toLowerCase().startsWith("zh");
 
-export function trayStrings(locale: string): TrayStrings {
+/** macOS opens the menu on click instead of firing `click`, so the first item names the app. */
+export function trayStrings(locale: string, platform: NodeJS.Platform = process.platform): TrayStrings {
+  if (platform === "darwin") {
+    return isZh(locale)
+      ? { tooltip: "OMP Studio", open: "打开 OMP Studio", quit: "退出 OMP Studio" }
+      : { tooltip: "OMP Studio", open: "Open OMP Studio", quit: "Quit OMP Studio" };
+  }
   return isZh(locale)
     ? { tooltip: "OMP Studio", open: "打开页面", quit: "退出" }
     : { tooltip: "OMP Studio", open: "Open", quit: "Quit" };
@@ -173,7 +179,7 @@ export function createAppTray(options: {
   const icon = options.electron.createImageFromPath(options.iconPath);
   if (icon.isEmpty()) return undefined;
   const platform = options.platform ?? process.platform;
-  const strings = trayStrings(options.locale);
+  const strings = trayStrings(options.locale, platform);
 
   const tray = options.electron.createTrayFromImage(icon);
   tray.setToolTip(strings.tooltip);

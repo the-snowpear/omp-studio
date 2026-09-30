@@ -1,3 +1,4 @@
+import { isPrimaryModifier } from "../keyboard/shortcuts";
 import {
   forwardRef,
   useEffect,
@@ -615,7 +616,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     }
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    if (event.ctrlKey || event.metaKey) {
+    if (isPrimaryModifier(event)) {
       onFollowUp?.();
       return;
     }

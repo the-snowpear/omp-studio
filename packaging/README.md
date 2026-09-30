@@ -194,3 +194,38 @@ HTML 经 ProgramData 虚拟主机加载，不是 NSIS 临时目录上的 `file:/
 3. **monorepo workspaces**：electron-builder 在 workspace 里打包需要显式
    指定 `appDirectory`（默认取 `package.json` 所在目录，即 apps/desktop），
    并确认 `@omp-studio/*` 工作区包被收集进产物。
+
+## macOS（darwin-arm64，ad hoc 签名）
+
+在 Apple Silicon Mac 上，从仓库根目录：
+
+```bash
+npm run pack:mac                  # 已有签名 Runtime 工件时：npm run pack:mac -- --skip-host
+npm run pack:mac:audit            # 单独重跑审计
+```
+
+前置同 `omp:build:host`（Xcode Command Line Tools、Rust、Bun ≥ 1.4.2、原生 arm64 Node），另用到系统自带的 `sips`、`iconutil`、`ditto`、`hdiutil`、`codesign`。产物在 `outputs/installer-mac/`（gitignore）：
+
+- `mac-arm64/OMP Studio.app`：ad hoc 签名的 bundle，审计对象。
+- `OMP-Studio-<ver>-macos-arm64.dmg`：首装用，拖进「应用程序」。
+- `OMP-Studio-<ver>-macos-arm64.zip`：整包更新载荷。用 `ditto` 打包，符号链接和签名 xattr 都能保留。
+
+要点：
+
+- **配置在代码里派生**：`scripts/mac-bundle.mjs` 读 `electron-builder.yml`、生成 mac 配置，yml 本身不改，Windows 打包输入逐字节不变。根级 `extraFiles`（Runtime 与公钥）改走 `extraResources`，落在 `Contents/Resources/`。`Contents/` 下任何非标准条目都不在签名封印内，bundle 会被判为“已损坏”。
+- **签名由 pack-mac 自己做**：用 `@electron/osx-sign` 执行 `codesign --sign -`，不走 electron-builder 的证书查找——它按子串匹配 `-`，在开发机上可能挑中真证书。ad hoc 期间不开 hardened runtime（库验证会拒绝 ad hoc 框架），也不打时间戳。`packaging/mac/entitlements.mac*.plist` 已经嵌入，等换成 Developer ID 签名才生效。
+- **Runtime 不重签**：签名时整棵跳过 `Contents/Resources/runtime/**`。`omp` 保留上游构建时的签名与 entitlements，字节由 `checksums.json` 和 Ed25519 签名覆盖，审计会用包内公钥复验。
+- **隐私用途字符串**：`Info.plist` 写明麦克风、本地网络、Apple 事件、文稿 / 桌面 / 下载、可移除宗卷与网络宗卷的用途，中文放在 `zh_CN.lproj/InfoPlist.strings`。缺了麦克风说明，首次录音时 TCC 会直接结束进程。
+- **首次打开**：ad hoc 包没有公证。macOS 15 起要到“系统设置 › 隐私与安全性”点“仍要打开”，或执行 `xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"`。首启会把 Runtime 从包内复制到 `~/Library/Application Support/omp-studio/runtimes/`，并清除副本继承的 quarantine 标记（`apps/desktop/src/platform/quarantine.ts`）；包本身不动。
+- **ad hoc 的代价**：每次更新后签名身份都会变，麦克风、文件夹、本地网络授权会重新询问，钥匙串也会再次请求授权。换成 Developer ID 签名并公证后，这些都会解决。
+
+`scripts/audit-mac.mjs` 任一项不满足即失败：
+
+- Info.plist 键齐全；
+- `Contents/` 只含标准条目；
+- renderer 与 CSP、入口、preload、托盘模板图都在；
+- 恰好一个 Runtime：arm64、`0755`，签名与 checksums 复验通过；
+- 只有公钥；
+- node-pty 的 `spawn-helper` 可执行，且不带 Windows 预编译；
+- `codesign --verify --deep --strict` 和 `hdiutil verify` 通过；
+- update zip 用 `ditto -x` 解出后，签名再验一次也通过。

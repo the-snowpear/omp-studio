@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { test } from "node:test";
 
 import type { ClientBootstrap, ClientError, CommandRequestId, EventCursor, IdempotencyKey, ResidentsReadModel, WorkspaceId } from "@omp-studio/client-contract";
@@ -44,6 +44,7 @@ import {
 import type { DesktopHostComposition } from "../src/types.js";
 import { createDesktopRuntimeSessionPort } from "../src/runtime-session.js";
 import { InMemorySessionLeaseStore } from "@omp-studio/studio-host";
+import { runtimeEntrypointFor } from "@omp-studio/runtime-installer";
 
 const UPSTREAM_COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const T0 = "2026-08-12T00:00:00.000Z";
@@ -538,28 +539,36 @@ test("managedInstall without trusted keys fails closed instead of reporting inst
   });
 });
 
+/** A Runtime artifact signed by a fresh "test-key", for the managed lookup on this host platform. */
+async function writeSignedRuntimeArtifact(profileDirectory: string) {
+  const artifact = join(profileDirectory, "artifact");
+  await mkdir(artifact);
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  // The managed lookup matches the host platform, so the fixture follows it.
+  const hostPlatform = `${process.platform}-${process.arch}`, entrypoint = runtimeEntrypointFor(hostPlatform);
+  const payload = "test executable; never executed";
+  const manifest = JSON.stringify({
+    runtimeVersion: HELLO.runtimeVersion, upstreamVersion: HELLO.upstreamVersion,
+    upstreamCommit: UPSTREAM_COMMIT, patchsetVersion: "0.1.0", studioProtocol: { min: 1, max: 1 },
+    profile: "full-parity-v1", capabilityHash: HELLO.capabilityManifest.hash,
+    commandManifestHash: HELLO.commandManifestHash, platform: hostPlatform, entrypoint, channel: "stable",
+  });
+  const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
+  const checksums = JSON.stringify({ algorithm: "sha256", files: { [entrypoint]: digest(payload), "runtime-manifest.json": digest(manifest) } });
+  const signed = Buffer.concat([Buffer.from(manifest), Buffer.from("\0"), Buffer.from(checksums)]);
+  await Promise.all([
+    writeFile(join(artifact, entrypoint), payload),
+    writeFile(join(artifact, "runtime-manifest.json"), manifest),
+    writeFile(join(artifact, "checksums.json"), checksums),
+    writeFile(join(artifact, "runtime-signature.json"), JSON.stringify({ algorithm: "ed25519", keyId: "test-key", payloadSha256: digest(signed), signature: sign(null, signed, privateKey).toString("base64url") })),
+  ]);
+  return { artifact, publicKey };
+}
+
 for (const rejectedContext of [false, true]) {
   test(`managed install initializes and refreshes the coordinator launch context (stale rejected context=${rejectedContext})`, async () => {
     await withTempProfile(async (profileDirectory) => {
-      const artifact = join(profileDirectory, "artifact");
-      await mkdir(artifact);
-      const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-      const payload = "test executable; never executed";
-      const manifest = JSON.stringify({
-        runtimeVersion: HELLO.runtimeVersion, upstreamVersion: HELLO.upstreamVersion,
-        upstreamCommit: UPSTREAM_COMMIT, patchsetVersion: "0.1.0", studioProtocol: { min: 1, max: 1 },
-        profile: "full-parity-v1", capabilityHash: HELLO.capabilityManifest.hash,
-        commandManifestHash: HELLO.commandManifestHash, platform: `win32-${process.arch}`, entrypoint: "omp.exe", channel: "stable",
-      });
-      const digest = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
-      const checksums = JSON.stringify({ algorithm: "sha256", files: { "omp.exe": digest(payload), "runtime-manifest.json": digest(manifest) } });
-      const signed = Buffer.concat([Buffer.from(manifest), Buffer.from("\0"), Buffer.from(checksums)]);
-      await Promise.all([
-        writeFile(join(artifact, "omp.exe"), payload),
-        writeFile(join(artifact, "runtime-manifest.json"), manifest),
-        writeFile(join(artifact, "checksums.json"), checksums),
-        writeFile(join(artifact, "runtime-signature.json"), JSON.stringify({ algorithm: "ed25519", keyId: "test-key", payloadSha256: digest(signed), signature: sign(null, signed, privateKey).toString("base64url") })),
-      ]);
+      const { artifact, publicKey } = await writeSignedRuntimeArtifact(profileDirectory);
       const launches: DesktopRuntimeSessionContext[] = [];
       const port = createDesktopRuntimeSessionPort({
         sessionLeaseStore: new InMemorySessionLeaseStore(),
@@ -608,6 +617,49 @@ for (const rejectedContext of [false, true]) {
     });
   });
 }
+
+test("managedInstall.prepareStaging reaches the installer when the keys come from the packaged directory", async () => {
+  await withTempProfile(async (profileDirectory) => {
+    const { artifact, publicKey } = await writeSignedRuntimeArtifact(profileDirectory);
+    const keys = join(profileDirectory, "runtime-keys");
+    await mkdir(keys);
+    await writeFile(join(keys, "trusted-public.pem"), publicKey.export({ type: "spki", format: "pem" }));
+    await writeFile(join(keys, "trusted-keys.json"), JSON.stringify({ schema: 1, activeKeyId: "test-key", keys: { "test-key": "trusted-public.pem" } }));
+    const staged: string[] = [];
+    const composition = await createDesktopHostComposition({
+      platform: fakePlatform(profileDirectory).port,
+      authorityLock: fakeAuthorityLock().port,
+      privateEndpoint: fakePrivateEndpoint().port,
+      runtimeSession: createDesktopRuntimeSessionPort({
+        sessionLeaseStore: new InMemorySessionLeaseStore(),
+        workerPortFactory: () => fakeSessionPort({ ready: true }).port,
+      }),
+      resolver: { probe: fullParityProbe() },
+      managedInstall: {
+        installDirectory: join(profileDirectory, "runtime"),
+        trustedKeysDirectory: keys,
+        environmentTrustedKeys: false,
+        locateArtifact: async () => artifact,
+        activateOptions: { selfCheck: { run: async () => undefined } },
+        prepareStaging: async (directory) => { staged.push(directory); },
+      },
+      facade: { getActiveWorkspace: () => ({ workspaceId: "ws-0001", cwd: profileDirectory }) },
+    });
+    const events: Array<{ kind: string; receipt?: { status: string; error?: { message: string } } }> = [];
+    composition.facade.subscribe({ scope: "all" }, (event) => events.push(event));
+    try {
+      await composition.facade.command({ commandName: "runtime.install", input: {}, requestId: "install-staging" as CommandRequestId, idempotencyKey: "install-staging" as IdempotencyKey });
+      const deadline = Date.now() + 5000;
+      while (!events.some((event) => event.kind === "command.receipt") && Date.now() < deadline) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      const receipt = events.find((event) => event.kind === "command.receipt")?.receipt;
+      assert.equal(receipt?.status, "completed", receipt?.error?.message);
+      assert.equal(staged.length, 1);
+      assert.match(basename(staged[0]!), /^\.staging-/u);
+    } finally { await composition.shutdown(); }
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Second owner fails closed

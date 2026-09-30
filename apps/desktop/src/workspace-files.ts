@@ -32,15 +32,19 @@ function resolveInside(root: string, path: string): string {
   return target;
 }
 
-function escapedFrom(root: string, canonical: string): boolean {
-  const escaped = relative(root, canonical);
+/**
+ * `realRoot` must itself be a realpath: the stored root is standardized
+ * (macOS drops `/private` from `/var`, `/tmp`, `/etc`), realpath is not.
+ */
+function escapedFrom(realRoot: string, canonical: string): boolean {
+  const escaped = relative(realRoot, canonical);
   return escaped === ".." || escaped.startsWith(`..${sep}`);
 }
 
 async function assertMutableTarget(root: string, path: string): Promise<string> {
   const target = resolveInside(root, path);
   const parent = await realpath(dirname(target));
-  if (escapedFrom(root, parent)) throw new Error("workspace file path escapes the workspace");
+  if (escapedFrom(await realpath(root), parent)) throw new Error("workspace file path escapes the workspace");
   try {
     const metadata = await lstat(target);
     if (metadata.isSymbolicLink()) throw new Error("workspace file path escapes the workspace");
@@ -63,8 +67,7 @@ export function createWorkspaceFileService({ registry }: { readonly registry: Wo
     const metadata = await lstat(target);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw new Error("workspace file tree path must be a real directory");
     const canonical = await realpath(target);
-    const escaped = relative(root, canonical);
-    if (escaped === ".." || escaped.startsWith(`..${sep}`)) throw new Error("workspace file tree path escapes the workspace");
+    if (escapedFrom(await realpath(root), canonical)) throw new Error("workspace file tree path escapes the workspace");
     const entries = await readdir(canonical, { withFileTypes: true });
     entries.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
     const nodes: WorkspaceFileNode[] = [];

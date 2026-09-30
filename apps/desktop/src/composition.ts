@@ -15,6 +15,10 @@
  *   environment state with a null transport (IPC then serves `unavailable`).
  * - Renderer reload never touches the Host composition; only app quit runs
  *   `shutdown()` (client-session close, Host shutdown, authority release).
+ * - macOS: closing the last window keeps the app in the Dock, Dock activation
+ *   shows it again, and a logout or power-off quits with a bounded Host
+ *   shutdown instead of deferring — deferring `before-quit` there would
+ *   cancel the user's logout.
  */
 
 import type {
@@ -34,6 +38,10 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
   let quitting = false;
   let quitConfirmInFlight = false;
   let started = false;
+  let systemShutdown = false;
+  let shuttingDown: Promise<void> | null = null;
+  let exited = false;
+  const darwin = deps.platform === "darwin";
 
   const log = (message: string): void => {
     deps.log?.(message);
@@ -46,10 +54,28 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
     mainWindow?.show();
   });
 
+  // macOS Dock click or reopen: the window was only hidden.
+  deps.onActivate?.(() => {
+    mainWindow?.show();
+  });
+
+  // The OS is logging out or powering off: ask it to wait, shut down within a
+  // bound, and let the resulting before-quit through.
+  deps.onSystemShutdown?.((event) => {
+    systemShutdown = true;
+    event.preventDefault();
+    log("system shutdown; quitting with a bounded Host shutdown");
+    void quit({ deadlineMs: deps.systemShutdownTimeoutMs ?? 5_000 });
+  });
+
   // Defer every quit until the graceful Host shutdown completed; the
   // re-entrant `quit()` below then proceeds without preventing again.
   deps.onBeforeQuit((event) => {
     if (quitting) return;
+    if (systemShutdown) {
+      void quit({ deadlineMs: deps.systemShutdownTimeoutMs ?? 5_000 });
+      return;
+    }
     event.preventDefault();
     void quit();
   });
@@ -59,6 +85,8 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
   // the before-quit path above). Without a tray the close still destroys
   // the window and this remains the quit safety net.
   deps.onAllWindowsClosed(() => {
+    // macOS apps stay in the Dock without windows; quit() owns the real exit.
+    if (darwin) return;
     deps.quit();
   });
 
@@ -73,18 +101,35 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
     }
   }
 
-  async function quit(): Promise<void> {
-    if (quitting) return;
-    quitting = true;
-    // Release the tray icon and stop serving renderer calls before closing
-    // the client session.
-    tray?.dispose?.();
-    tray = null;
-    mainWindow?.dispose?.();
+  async function quit(options: { readonly deadlineMs?: number } = {}): Promise<void> {
+    if (quitting) {
+      // A logout or power-off during an unbounded quit (⌘Q, tray) still
+      // needs its bound: the OS was already asked to wait for us.
+      if (options.deadlineMs === undefined || shuttingDown === null) return;
+    } else {
+      quitting = true;
+      // Release the tray icon and stop serving renderer calls before closing
+      // the client session.
+      tray?.dispose?.();
+      tray = null;
+      mainWindow?.dispose?.();
+      shuttingDown = (async () => {
+        try { await deps.beforeShutdown?.(); } finally { await shutdownHost(); }
+      })();
+    }
+    const shutdown = shuttingDown;
     try {
-      try { await deps.beforeShutdown?.(); } finally { await shutdownHost(); }
+      if (options.deadlineMs === undefined) await shutdown;
+      else {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const deadline = new Promise<void>((resolve) => { timer = setTimeout(resolve, options.deadlineMs); });
+        try { await Promise.race([shutdown.catch(() => undefined), deadline]); } finally { clearTimeout(timer); }
+      }
     } finally {
-      deps.quit();
+      if (!exited) {
+        exited = true;
+        deps.quit();
+      }
     }
   }
 
@@ -163,6 +208,7 @@ export function createDesktopApplication(deps: DesktopApplicationDeps): DesktopA
       }
     },
 
-    quit,
+    quit: () => quit(),
+    requestQuit,
   };
 }

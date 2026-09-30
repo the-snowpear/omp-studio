@@ -20,3 +20,5 @@ export function activeArtifactLibrary(): ArtifactLibrary {
 }
 
 export function activeMediaDirectory(): string { if (!activeProfile) throw new Error("Media profile unavailable"); return join(activeProfile, "bridge", "media-v1"); }
+
+export function activeProfileDirectory(): string { if (!activeProfile) throw new Error("Media profile unavailable"); return activeProfile; }

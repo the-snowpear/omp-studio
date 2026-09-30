@@ -53,6 +53,9 @@ import type { OperatorCommandManifest } from "@omp-studio/studio-protocol";
 import { AppIcon, Icon } from "./icons";
 import { FileRowMenu, MenuItem, type FileMenuAction, type FileMenuController, type FileMenuTarget, type FileOpenerOption } from "./menus";
 import { I18nProvider, useI18n, type TranslationParams } from "./i18n";
+import { SHORTCUTS, formatShortcut, isPrimaryModifier } from "./keyboard/shortcuts";
+import { PLATFORM, nativeMenuOwnsShortcuts } from "./platform";
+import { fileManagerName } from "./platformCopy";
 import { HomePage, SecondaryPage } from "./HomePage";
 import { HistoryPage } from "./HistoryPage";
 import { AgentHubPage, setHubIntent } from "./AgentHub";
@@ -698,7 +701,7 @@ export function AppMenu({ chrome, onRoute }: {
               style={{ top: pos.top, left: pos.left }}
             >
               <div className="menu-label">{t("shell.globalActions")}</div>
-              <MenuItem icon="plus" kbd="Ctrl ⇧ O" onClick={() => run(chrome.onStartNewChat)}>{t("nav.newChat")}</MenuItem>
+              <MenuItem icon="plus" kbd={formatShortcut(SHORTCUTS.newChat)} onClick={() => run(chrome.onStartNewChat)}>{t("nav.newChat")}</MenuItem>
               <MenuItem
                 icon="folder-open"
                 {...(preview
@@ -712,10 +715,10 @@ export function AppMenu({ chrome, onRoute }: {
               <MenuItem icon="home" onClick={() => run(() => onRoute("home"))}>{t("nav.home")}</MenuItem>
               <MenuItem icon="history" onClick={() => run(() => onRoute("history"))}>{t("nav.history")}</MenuItem>
               <div className="menu-sep" />
-              <MenuItem icon="search" kbd="Ctrl K" onClick={() => run(chrome.onOpenPalette)}>{t("nav.search")}</MenuItem>
-              <MenuItem icon="terminal" kbd="Ctrl J" onClick={() => run(chrome.onOpenTerminalPanel)}>{t("nav.terminal")}</MenuItem>
+              <MenuItem icon="search" kbd={formatShortcut(SHORTCUTS.commandPalette)} onClick={() => run(chrome.onOpenPalette)}>{t("nav.search")}</MenuItem>
+              <MenuItem icon="terminal" kbd={formatShortcut(SHORTCUTS.toggleBottomPanel)} onClick={() => run(chrome.onOpenTerminalPanel)}>{t("nav.terminal")}</MenuItem>
               <MenuItem icon="external" {...shellItemProps("editor")} onClick={() => run(chrome.onOpenProjectInEditor)}>{t("shell.openInEditor")}</MenuItem>
-              <MenuItem icon="folder" {...shellItemProps("directory")} onClick={() => run(chrome.onOpenProjectDirectory)}>{t("shell.openInExplorer")}</MenuItem>
+              <MenuItem icon="folder" {...shellItemProps("directory")} onClick={() => run(chrome.onOpenProjectDirectory)}>{t("shell.openInExplorer", { fileManager: fileManagerName(t) })}</MenuItem>
               <MenuItem icon="server" hint={t("menu.modelConfigHint")} onClick={() => run(() => onRoute("model-config"))}>{t("nav.modelConfig")}</MenuItem>
               <MenuItem icon="image" onClick={() => run(() => onRoute("media"))}>{t("media.title")}</MenuItem>
               <div className="menu-sep" />
@@ -2214,7 +2217,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         <button className="action-row new-convo-btn" aria-label={t("nav.newChat")} onClick={() => chrome.onStartNewChat()}>
           <Icon name="plus" />
           <span className="lbl">{t("nav.newChat")}</span>
-          <span className="meta"><span className="hint">Ctrl ⇧ O</span></span>
+          <span className="meta"><span className="hint">{formatShortcut(SHORTCUTS.newChat)}</span></span>
         </button>
         <button className="action-row skills-btn" aria-label={t("skills.sidebarAction")} aria-expanded={chrome.skillsOpen} aria-controls="skillsDrawer" onClick={chrome.onToggleSkills}>
           <Icon name="layers" />
@@ -5693,10 +5696,10 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 queueEdit !== undefined
                   ? t("composer.editingQueuedMessageHint")
                   : composerRunning
-                    ? t("composer.runningHint")
+                    ? t("composer.runningHint", { shortcut: formatShortcut(SHORTCUTS.followUp, "hint") })
                     : pendingInteraction
                       ? t("composer.pendingInteractionHint")
-                      : t("composer.idleHint")
+                      : t("composer.idleHint", { shortcut: formatShortcut(SHORTCUTS.followUp, "hint") })
               }</p>
               {composerError ? (
                 <div className="composer-error" role="alert">
@@ -7819,7 +7822,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         setOmpMenuOpen(false);
         return;
       }
-      if (event.isComposing || !(event.ctrlKey || event.metaKey)) return;
+      // The macOS menu bar owns these shortcuts in the desktop app and sends them as menu commands.
+      if (event.isComposing || !isPrimaryModifier(event) || nativeMenuOwnsShortcuts()) return;
       const key = event.key.toLowerCase();
       if (key === "b" && !event.shiftKey) {
         event.preventDefault();
@@ -7841,6 +7845,22 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [archiveBusy, archivePending, applyBottomChrome, bottomOpen, bottomVisible, dialog, go, skillsOpen, paletteOpen, closePalette, openPalette, startNewChat]);
+
+  // macOS menu bar: the same actions as the shortcuts above plus a few menu-only ones.
+  const runMenuCommand = useRef<(command: string) => void>(() => {});
+  runMenuCommand.current = (command) => {
+    switch (command) {
+      case "app.settings": go("settings"); return;
+      case "file.newChat": startNewChat(); return;
+      case "file.openProject": void pickProject(); return;
+      case "view.commandPalette": openPalette(); return;
+      case "view.toggleSidebar": setCollapsed((value) => !value); return;
+      case "view.toggleBottomPanel": applyBottomChrome(toggleBottomBarOpen({ visible: bottomVisible, open: bottomOpen })); return;
+      case "view.toggleSkills": setSkillsOpen((value) => !value); return;
+      case "help.shortcuts": openDialog("shortcuts"); return;
+    }
+  };
+  useEffect(() => globalThis.ompStudioChrome?.onMenuCommand?.((command) => runMenuCommand.current(command)), []);
 
   // 项目 shell 动作（外部编辑器 / 文件管理器）：AppShell 统一持有，
   // 顶栏面包屑菜单与侧栏应用菜单共用同一套状态与 Toast 提示。
@@ -8051,7 +8071,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (action.type === "reveal") {
       const reveal = desktop?.revealFileInFileManager;
       if (reveal === undefined) return;
-      run(() => reveal(input), target.kind === "dir" ? `已在资源管理器中打开 ${target.name}` : `已在资源管理器中定位 ${target.name}`);
+      const manager = PLATFORM === "darwin" ? "访达" : "资源管理器";
+      run(() => reveal(input), target.kind === "dir" ? `已在${manager}中打开 ${target.name}` : `已在${manager}中定位 ${target.name}`);
     }
   };
 
@@ -8271,7 +8292,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
         menus={
           <>
             <TitleMenu id="file" label={t("menu.file")} openId={openMenu} onToggle={setOpenMenu}>
-              <button className="menu-item" role="menuitem" onClick={() => startNewChat()}>{t("menu.newThread")}<span className="kbd">Ctrl ⇧ O</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => startNewChat()}>{t("menu.newThread")}<span className="kbd">{formatShortcut(SHORTCUTS.newChat)}</span></button>
               <button className="menu-item" role="menuitem" onClick={() => go("history")}>{t("menu.history")}</button>
               <button className="menu-item" role="menuitem" onClick={() => go("agent-hub")}>Agent Hub</button>
               <button className="menu-item" role="menuitem" onClick={() => go("capabilities")}>{t("menu.capabilities")}</button>
@@ -8280,24 +8301,24 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               <button className="menu-item" role="menuitem" onClick={() => go("settings")}>{t("menu.settings")}</button>
               <button className="menu-item" role="menuitem" onClick={() => go("diagnostics")}>{t("menu.diagnostics")}</button>
               <div className="menu-sep" />
-              <button className="menu-item" role="menuitem" onClick={() => { setOpenMenu(null); openPalette(); }}>{t("menu.commandPalette")}<span className="kbd">Ctrl K</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => { setOpenMenu(null); openPalette(); }}>{t("menu.commandPalette")}<span className="kbd">{formatShortcut(SHORTCUTS.commandPalette)}</span></button>
               <button className="menu-item" role="menuitem" onClick={() => go("home")}>{t("menu.home")}</button>
             </TitleMenu>
             <TitleMenu id="edit" label={t("menu.edit")} openId={openMenu} onToggle={setOpenMenu}>
-              <button className="menu-item" role="menuitem" onClick={() => runEdit("undo")}>{t("menu.undo")}<span className="kbd">Ctrl Z</span></button>
-              <button className="menu-item" role="menuitem" onClick={() => runEdit("redo")}>{t("menu.redo")}<span className="kbd">Ctrl Y</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runEdit("undo")}>{t("menu.undo")}<span className="kbd">{formatShortcut(SHORTCUTS.undo)}</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runEdit("redo")}>{t("menu.redo")}<span className="kbd">{formatShortcut(SHORTCUTS.redo)}</span></button>
               <div className="menu-sep" />
-              <button className="menu-item" role="menuitem" onClick={() => runEdit("cut")}>{t("menu.cut")}<span className="kbd">Ctrl X</span></button>
-              <button className="menu-item" role="menuitem" onClick={() => runEdit("copy")}>{t("menu.copy")}<span className="kbd">Ctrl C</span></button>
-              <button className="menu-item" role="menuitem" onClick={() => runEdit("paste")}>{t("menu.paste")}<span className="kbd">Ctrl V</span></button>
-              <button className="menu-item" role="menuitem" onClick={() => runEdit("selectAll")}>{t("menu.selectAll")}<span className="kbd">Ctrl A</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runEdit("cut")}>{t("menu.cut")}<span className="kbd">{formatShortcut(SHORTCUTS.cut)}</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runEdit("copy")}>{t("menu.copy")}<span className="kbd">{formatShortcut(SHORTCUTS.copy)}</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runEdit("paste")}>{t("menu.paste")}<span className="kbd">{formatShortcut(SHORTCUTS.paste)}</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runEdit("selectAll")}>{t("menu.selectAll")}<span className="kbd">{formatShortcut(SHORTCUTS.selectAll)}</span></button>
             </TitleMenu>
             <TitleMenu id="view" label={t("menu.view")} openId={openMenu} onToggle={setOpenMenu}>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setCollapsed((value) => !value))}>{collapsed ? t("menu.expandSidebar") : t("menu.collapseSidebar")}<span className="kbd">Ctrl B</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setCollapsed((value) => !value))}>{collapsed ? t("menu.expandSidebar") : t("menu.collapseSidebar")}<span className="kbd">{formatShortcut(SHORTCUTS.toggleSidebar)}</span></button>
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setExplorerOpen((value) => !value))}>{explorerOpen ? t("menu.collapseExplorer") : t("menu.expandExplorer")}</button>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setSkillsOpen((value) => !value))}>{skillsOpen ? t("skills.closeAria") : t("skills.title")}<span className="kbd">Ctrl ⇧ K</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setSkillsOpen((value) => !value))}>{skillsOpen ? t("skills.closeAria") : t("skills.title")}<span className="kbd">{formatShortcut(SHORTCUTS.skills)}</span></button>
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setSideOpen((value) => !value))}>{sideOpen ? t("menu.collapseRightPanel") : t("menu.expandRightPanel")}</button>
-              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setBottomOpen((value) => !value))}>{bottomOpen ? t("menu.collapseBottomPanel") : t("menu.expandBottomPanel")}<span className="kbd">Ctrl J</span></button>
+              <button className="menu-item" role="menuitem" onClick={() => runMenu(() => setBottomOpen((value) => !value))}>{bottomOpen ? t("menu.collapseBottomPanel") : t("menu.expandBottomPanel")}<span className="kbd">{formatShortcut(SHORTCUTS.toggleBottomPanel)}</span></button>
               <div className="menu-sep" />
               <button className="menu-item" role="menuitem" onClick={() => runMenu(() => chrome.onToggleTheme())}>{theme === "dark" ? t("menu.lightTheme") : t("menu.darkTheme")}</button>
             </TitleMenu>
@@ -8631,11 +8652,11 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
                 <div className="modal-head" id="shellDialogTitle">{t("nav.shortcuts")}</div>
                 <div className="modal-body">
                   <dl className="about-list">
-                    <div className="about-row"><dt>{t("nav.newChat")}</dt><dd><span className="kbd">Ctrl ⇧ O</span></dd></div>
-                    <div className="about-row"><dt>{t("menu.commandPalette")}</dt><dd><span className="kbd">Ctrl K</span></dd></div>
-                    <div className="about-row"><dt>{t("menu.toggleSidebar")}</dt><dd><span className="kbd">Ctrl B</span></dd></div>
-                    <div className="about-row"><dt>{t("menu.skillsAndPlugins")}</dt><dd><span className="kbd">Ctrl ⇧ K</span></dd></div>
-                    <div className="about-row"><dt>{t("menu.bottomPanel")}</dt><dd><span className="kbd">Ctrl J</span></dd></div>
+                    <div className="about-row"><dt>{t("nav.newChat")}</dt><dd><span className="kbd">{formatShortcut(SHORTCUTS.newChat)}</span></dd></div>
+                    <div className="about-row"><dt>{t("menu.commandPalette")}</dt><dd><span className="kbd">{formatShortcut(SHORTCUTS.commandPalette)}</span></dd></div>
+                    <div className="about-row"><dt>{t("menu.toggleSidebar")}</dt><dd><span className="kbd">{formatShortcut(SHORTCUTS.toggleSidebar)}</span></dd></div>
+                    <div className="about-row"><dt>{t("menu.skillsAndPlugins")}</dt><dd><span className="kbd">{formatShortcut(SHORTCUTS.skills)}</span></dd></div>
+                    <div className="about-row"><dt>{t("menu.bottomPanel")}</dt><dd><span className="kbd">{formatShortcut(SHORTCUTS.toggleBottomPanel)}</span></dd></div>
                     <div className="about-row"><dt>{t("menu.closeMenuOrPanel")}</dt><dd><span className="kbd">Esc</span></dd></div>
                   </dl>
                 </div>

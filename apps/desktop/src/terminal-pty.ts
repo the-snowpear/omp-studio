@@ -5,12 +5,14 @@
  * talks to the Host. Tests inject a fake {@link PtySpawner}.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { homedir, userInfo } from "node:os";
+import { win32 } from "node:path";
 import { randomBytes } from "node:crypto";
+
+import { processGroupSpawnOptions, terminateProcessTree } from "./platform/process-tree.js";
 
 import { TERMINAL_MAX_SESSIONS, type TerminalSessionInfo, type TerminalSize } from "./terminal-shared.js";
 
@@ -49,6 +51,16 @@ export interface ShellResolveOptions {
   readonly platform?: NodeJS.Platform;
   readonly env?: NodeJS.ProcessEnv;
   readonly exists?: (path: string) => boolean;
+  /** macOS account shell (`os.userInfo().shell`); test seam. */
+  readonly accountShell?: () => string | undefined;
+}
+
+function accountShell(): string | undefined {
+  try {
+    return userInfo().shell ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function resolveDefaultShell(options: ShellResolveOptions = {}): ResolvedShell {
@@ -57,13 +69,14 @@ export function resolveDefaultShell(options: ShellResolveOptions = {}): Resolved
   const exists = options.exists ?? existsSync;
 
   if (platform === "win32") {
+    // Windows path semantics follow the requested platform, not the host.
     const programFiles = env.ProgramFiles ?? "C:\\Program Files";
     const systemRoot = env.SystemRoot ?? env.windir ?? "C:\\Windows";
     const candidates: ReadonlyArray<ResolvedShell> = [
-      { name: "pwsh", file: join(programFiles, "PowerShell", "7", "pwsh.exe") },
-      { name: "pwsh", file: join(programFiles, "PowerShell", "7-preview", "pwsh.exe") },
-      { name: "powershell", file: join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") },
-      { name: "cmd", file: env.ComSpec ?? join(systemRoot, "System32", "cmd.exe") },
+      { name: "pwsh", file: win32.join(programFiles, "PowerShell", "7", "pwsh.exe") },
+      { name: "pwsh", file: win32.join(programFiles, "PowerShell", "7-preview", "pwsh.exe") },
+      { name: "powershell", file: win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") },
+      { name: "cmd", file: env.ComSpec ?? win32.join(systemRoot, "System32", "cmd.exe") },
     ];
     for (const candidate of candidates) {
       if (exists(candidate.file)) return candidate;
@@ -71,7 +84,9 @@ export function resolveDefaultShell(options: ShellResolveOptions = {}): Resolved
     return { name: "cmd", file: env.ComSpec ?? "cmd.exe" };
   }
 
-  const unix = env.SHELL && env.SHELL.length > 0 ? env.SHELL : "/bin/bash";
+  // macOS: the account's login shell wins over an inherited $SHELL, like Terminal.app.
+  const configured = platform === "darwin" ? (options.accountShell ?? accountShell)() : undefined;
+  const unix = configured || (env.SHELL && env.SHELL.length > 0 ? env.SHELL : platform === "darwin" ? "/bin/zsh" : "/bin/bash");
   const slash = unix.lastIndexOf("/");
   return { name: slash >= 0 ? unix.slice(slash + 1) : unix, file: unix };
 }
@@ -108,42 +123,63 @@ function loadNodePty(): NodePtyModule {
   return require("node-pty") as NodePtyModule;
 }
 
-function processEnvRecord(): Record<string, string> {
+/**
+ * The shell's environment. `process.env` already carries the macOS login
+ * shell's PATH and LANG (`platform/login-env.ts`); macOS also names the
+ * terminal and keeps Electron's own switches out of the user's shell.
+ */
+export function terminalEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
+  for (const [key, value] of Object.entries(source)) {
+    if (value === undefined) continue;
+    if (platform === "darwin" && key.startsWith("ELECTRON_")) continue;
+    env[key] = value;
   }
   env.TERM = env.TERM ?? "xterm-256color";
   env.COLORTERM = env.COLORTERM ?? "truecolor";
+  if (platform === "darwin") env.TERM_PROGRAM = "OMP-Studio";
   return env;
 }
 
-function shellArgs(file: string): string[] {
+/**
+ * Shell arguments. macOS terminals start login shells so profile files run as
+ * in Terminal.app; without a PTY the shell must also be told it is interactive.
+ */
+export function shellArgs(
+  file: string,
+  options: { readonly platform?: NodeJS.Platform; readonly backend?: "pty" | "pipes" } = {},
+): string[] {
   const base = file.replace(/\\/g, "/").split("/").pop()?.toLowerCase() ?? "";
   if (base === "pwsh.exe" || base === "pwsh" || base === "powershell.exe" || base === "powershell") {
     return ["-NoLogo"];
   }
+  if ((options.platform ?? process.platform) === "darwin") {
+    if (base === "csh" || base === "tcsh") return options.backend === "pipes" ? ["-i", "-l"] : ["-l"];
+    return options.backend === "pipes" ? ["-il"] : ["-l"];
+  }
   return [];
 }
 
-function killProcessTree(pid: number): void {
+function killProcessTree(child: ChildProcess): void {
+  if (child.pid === undefined) return;
   if (process.platform === "win32") {
-    spawn("taskkill.exe", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
+    spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
     return;
   }
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    // Already gone.
-  }
+  // The shell leads its own process group; SIGHUP reaches its jobs like a closed terminal.
+  terminateProcessTree(child, "SIGHUP");
 }
 
 function spawnWithPipes(options: PtySpawnOptions): PtyProcess {
-  const child = spawn(options.file, shellArgs(options.file), {
+  const child = spawn(options.file, shellArgs(options.file, { backend: "pipes" }), {
     cwd: options.cwd,
-    env: processEnvRecord(),
+    env: terminalEnvironment(),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
+    ...processGroupSpawnOptions(),
   });
   if (child.pid === undefined) {
     throw new Error(`terminal: failed to spawn ${options.name}`);
@@ -170,7 +206,7 @@ function spawnWithPipes(options: PtySpawnOptions): PtyProcess {
       // Piped stdio has no console buffer to resize.
     },
     kill: () => {
-      if (child.pid !== undefined) killProcessTree(child.pid);
+      killProcessTree(child);
     },
     onData: (listener) => {
       dataListeners.push(listener);
@@ -183,12 +219,12 @@ function spawnWithPipes(options: PtySpawnOptions): PtyProcess {
 
 function spawnWithNodePty(options: PtySpawnOptions): PtyProcess {
   const pty = loadNodePty();
-  const proc = pty.spawn(options.file, shellArgs(options.file), {
+  const proc = pty.spawn(options.file, shellArgs(options.file, { backend: "pty" }), {
     name: "xterm-256color",
     cols: options.cols,
     rows: options.rows,
     cwd: options.cwd,
-    env: processEnvRecord(),
+    env: terminalEnvironment(),
     useConpty: process.platform === "win32",
   });
   return {

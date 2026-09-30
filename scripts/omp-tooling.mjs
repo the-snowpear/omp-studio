@@ -29,7 +29,7 @@ export function findBun() {
     : null;
   if (fallback && existsSync(fallback)) return fallback;
 
-  throw new Error("Bun was not found. Install Bun 1.3.14 or set BUN_EXE.");
+  throw new Error("Bun was not found. Install Bun 1.4.2 or newer, or set BUN_EXE.");
 }
 
 export function toolingEnvironment(extra = {}) {

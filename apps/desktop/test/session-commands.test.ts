@@ -92,3 +92,21 @@ test("session.archive skips the grace for a dormant Studio-origin session", asyn
   await commands.archive!({ threadId: threadIdFor("session-a") as ThreadId });
   assert.deepEqual(calls, [{ sessionId: "session-a", skipWriteGrace: true }]);
 });
+
+
+test("queue takeback retries a failed attachment promotion before acknowledging recovery", async () => {
+  const asset = {artifactId:"11111111-1111-1111-1111-111111111111",kind:"image",name:"a.png",mimeType:"image/png",bytes:1,sha256:"a".repeat(64)};
+  const id="22222222-2222-2222-2222-222222222222";
+  const snapshot={sessionId:"session-a",runtimeEpoch:"epoch",stateVersion:1};
+  const kinds:string[]=[];let promotions=0;
+  const session={hello:()=>({}),mediaDirectory:()=>"private",controller:{publication:()=>({snapshot}),invoke:async(request:{operation:{kind:string}})=>{kinds.push(request.operation.kind);return {status:"completed",result:{removed:true,recoveryId:id,text:"restore me",images:[asset]}};}}};
+  const options={...baseOptions,sessionRef:{current:session},mediaFiles:{promote:async()=>{if(++promotions===1)throw Error("Disk full");return {...asset,artifactId:"33333333-3333-3333-3333-333333333333"};}}};
+  const commands=createDesktopSemanticCommands(options as unknown as Parameters<typeof createDesktopSemanticCommands>[0]);
+  const operation={kind:"session.queue.takeback" as const,sessionId:"session-a",id};
+  await assert.rejects(async()=>commands.invoke!(operation,"first" as never),/Disk full/);
+  const restored=await commands.invoke!(operation,"retry" as never) as {result:{recoveryId:string;text:string;images:Array<{artifactId:string}>}};
+  assert.equal(restored.result.text,"restore me");assert.equal(restored.result.recoveryId,id);
+  assert.equal(restored.result.images[0]?.artifactId,"33333333-3333-3333-3333-333333333333");
+  assert.deepEqual(kinds,["session.queue.takeback","session.queue.takeback"]);
+  // Only the renderer acknowledges after actually loading the recovered draft.
+});

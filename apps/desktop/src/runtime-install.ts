@@ -15,9 +15,9 @@
  */
 
 import { readFile, readdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { desktopPaths, packagedResourcePaths, resolveDesktopPaths } from "./platform/desktop-paths.js";
 
 import type { HostRuntimeInstallProbe, HostRuntimeInstallService } from "@omp-studio/host-client-api";
 import type { RuntimeChannel, RuntimeInstallState, SignatureStatus } from "@omp-studio/client-contract";
@@ -153,25 +153,40 @@ export interface DesktopManagedInstallOptions {
    */
   readonly seedOnStart?: boolean;
   readonly pendingArtifact?: PendingArtifactRegistry;
+  /** false in packaged builds: see {@link InstallerTrustedKeysOptions.environment}. Default true. */
+  readonly environmentTrustedKeys?: boolean;
+  /** macOS: clears the quarantine flag on the installer's staged copy (see `platform/quarantine.ts`). */
+  readonly prepareStaging?: (directory: string) => Promise<void>;
 }
 
 export const PACKAGED_RUNTIME_ARTIFACT_DIR = "runtime";
 export const PACKAGED_RUNTIME_VERSIONS_DIR = "versions";
 export const PACKAGED_RUNTIME_KEYS_DIR = "runtime-keys";
 
-/** Layout written next to the packaged `OMP Studio.exe`. Undefined when unpackaged. */
+/**
+ * Bundled seed (next to `OMP Studio.exe`, or in the `.app`'s Contents/Resources)
+ * plus the writable per-user Runtime store. Undefined when unpackaged.
+ */
 export function packagedRuntimeInstallLayout(input: {
   readonly isPackaged: boolean;
   readonly execPath: string;
   readonly localAppData?: string;
+  readonly platform?: NodeJS.Platform;
+  /** `process.resourcesPath`; required on macOS. */
+  readonly resourcesPath?: string;
 }): { readonly installDirectory: string; readonly artifactRoot: string; readonly keysDirectory: string } | undefined {
   if (!input.isPackaged) return undefined;
-  const installDir = dirname(input.execPath);
-  const installDirectory = join(input.localAppData ?? process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "omp-studio", "runtimes");
+  const platform = input.platform ?? process.platform;
+  const bundled = packagedResourcePaths({
+    platform,
+    execPath: input.execPath,
+    ...(input.resourcesPath === undefined ? {} : { resourcesPath: input.resourcesPath }),
+  });
+  const env = input.localAppData === undefined ? process.env : { ...process.env, LOCALAPPDATA: input.localAppData };
   return {
-    installDirectory,
-    artifactRoot: join(installDir, PACKAGED_RUNTIME_ARTIFACT_DIR, PACKAGED_RUNTIME_VERSIONS_DIR),
-    keysDirectory: join(installDir, PACKAGED_RUNTIME_KEYS_DIR),
+    installDirectory: resolveDesktopPaths({ platform, env }).runtimesRoot,
+    artifactRoot: bundled.bundledRuntimeRoot,
+    keysDirectory: bundled.bundledKeysRoot,
   };
 }
 
@@ -191,10 +206,7 @@ const PUBLIC_KEY_FILE = "trusted-public.pem";
 
 /** Host-profile key directory. Never a repository path. */
 export function defaultRuntimeKeysDirectory(): string {
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", "omp-studio", "keys");
-  }
-  return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "omp-studio", "keys");
+  return desktopPaths().keysRoot;
 }
 
 async function readTrustedKeysDirectory(
@@ -240,11 +252,23 @@ async function readTrustedKeysDirectory(
   }
 }
 
+export interface InstallerTrustedKeysOptions {
+  /**
+   * Honour `OMP_RUNTIME_TRUSTED_PUBLIC_KEY` + `OMP_RUNTIME_SIGNING_KEY_ID`,
+   * which replace the whole trust root. Development only: packaged builds pass
+   * false, so an environment variable (a shell profile on macOS reaches the
+   * app through the login environment) can never make a foreign Runtime
+   * signature trusted.
+   */
+  readonly environment?: boolean;
+}
+
 export async function loadInstallerTrustedKeys(
   keysDirectory: string | readonly string[] = defaultRuntimeKeysDirectory(),
+  options: InstallerTrustedKeysOptions = {},
 ): Promise<{ trustedKeys: Record<string, Buffer> } | undefined> {
-  const envPath = process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY?.trim();
-  const envId = process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
+  const envPath = options.environment === false ? undefined : process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY?.trim();
+  const envId = options.environment === false ? undefined : process.env.OMP_RUNTIME_SIGNING_KEY_ID?.trim();
   if (envPath !== undefined && envPath.length > 0 && envId !== undefined && envId.length > 0) {
     return { trustedKeys: { [envId]: await readFile(envPath) } };
   }

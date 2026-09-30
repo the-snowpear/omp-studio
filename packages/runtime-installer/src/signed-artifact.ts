@@ -196,6 +196,8 @@ export async function installVerifiedArtifact(input: {
   readonly versionsDirectory: string;
   readonly version: string;
   readonly requireFile?: string;
+  /** Runs on the private staged copy before verification; it must not change file contents. */
+  readonly prepareStaging?: (directory: string) => Promise<void>;
   readonly verifyStaging?: (directory: string) => Promise<unknown>;
   /** Repair only: called after staging verification, immediately before replacing the old directory. */
   readonly replaceExisting?: { readonly beforeReplace: () => Promise<void> };
@@ -226,6 +228,7 @@ export async function installVerifiedArtifact(input: {
 
   try {
     await cp(input.sourceDirectory, staging, { recursive: true, errorOnExist: true, force: false });
+    await input.prepareStaging?.(staging);
     if (input.requireFile !== undefined) {
       const required = join(staging, input.requireFile);
       let isFile = false;

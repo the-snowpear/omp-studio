@@ -13,7 +13,8 @@ Public documentation for OMP Studio.
 | [development.md](development.md) | Inner loop, tests, overlay |
 | [performance.md](performance.md) | Streaming budgets, local counters, rollback and repeatable benchmarks |
 | [architecture.md](architecture.md) | Packages, Bridge, data rules |
-| [releasing.md](releasing.md) | Version, changelog, tag, installer |
+| [releasing.md](releasing.md) | Version, changelog, tag, Windows installer, macOS build |
+| [updates.md](updates.md) | In-app updates on Windows and macOS: storage, trust, recovery |
 | [migrations/omp-18.3.0.md](migrations/omp-18.3.0.md) | OMP v18.3.0 upgrade, Studio features, verification and external acceptance decisions |
 | [migrations/omp-18.2.5.md](migrations/omp-18.2.5.md) | OMP v18.2.5 changes, selected GUI features, verification and rollback |
 | [migrations/omp-18.1.18.md](migrations/omp-18.1.18.md) | OMP v18.1.18 changes, adaptation, verification and rollback |

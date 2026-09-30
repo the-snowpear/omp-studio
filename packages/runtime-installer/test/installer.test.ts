@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { RuntimeInstaller, RuntimeInstallationReferencedError, type RuntimeInstallerOptions } from "../src/index.js";
 
@@ -383,4 +383,33 @@ test("WP-064 pruning keeps at least two stable versions and every referenced ver
   const remaining = (await readdir(join(temporary, "installed", "versions"))).filter(name => !name.startsWith("."));
   assert.equal(remaining.filter(name => name.startsWith("stable-")).length, 2);
   assert.ok(remaining.includes("canary-bound"));
+});
+
+test("prepareStaging runs on the private staged copy before it is verified and published", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-studio-installer-prepare-"));
+  const root = join(temporary, "installed");
+  const seen: { directory: string; published: boolean }[] = [];
+  const installer = runtimeInstaller(root, {
+    prepareStaging: async (directory) => {
+      const published = await readdir(join(root, "versions")).then(names => names.includes("v1"));
+      seen.push({ directory, published });
+    },
+  });
+  await installer.install(await artifact(temporary, "v1"));
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]!.published, false);
+  assert.equal(dirname(seen[0]!.directory), join(root, "versions"));
+  assert.match(basename(seen[0]!.directory), /^\.staging-v1-[0-9a-f]+$/u);
+  assert.equal(await readFile(join(root, "versions", "v1", "omp.exe"), "utf8"), "omp-v1");
+});
+
+test("a staging fix-up that changes bytes fails verification and publishes nothing", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "omp-studio-installer-prepare-tamper-"));
+  const root = join(temporary, "installed");
+  const installer = runtimeInstaller(root, {
+    prepareStaging: async (directory) => { await writeFile(join(directory, "omp.exe"), "changed"); },
+  });
+  const source = await artifact(temporary, "v1");
+  await assert.rejects(() => installer.install(source));
+  assert.deepEqual(await readdir(join(root, "versions")), []);
 });

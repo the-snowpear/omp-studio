@@ -15,6 +15,28 @@ The release workflow now produces complete desktop updates and independent Runti
 - Reuse is supported through a previous workflow run's signed `runtime-artifact-<arch>` artifact. It must match source version, architecture and selected channel. Release-tag reuse of four loose files is retired.
 - A desktop release may reuse the latest Runtime, but cannot publish an older Runtime than one already released for the same channel/architecture. The asset builder rejects this before assigning a new sequence, so a desktop seed cannot hide an independent Runtime update. Update the desktop release branch's Runtime pin/artifact before retrying.
 
+### macOS (darwin-arm64)
+
+- The job: a manual run with `include_macos` adds a `build-macos` job on `macos-15`.
+  - Tag pushes never build macOS, and the input defaults to off. Publication is all-or-nothing, so the ad hoc signed Mac build must not hold back a Windows release while it stabilizes.
+  - The job mirrors the Windows build, but packs with `pack:mac` (ad hoc signed `.app`, first-install `.dmg`, `ditto` update zip, fail-closed `audit-mac`).
+  - It uploads `runtime-artifact-darwin-arm64` and `release-candidate-darwin-arm64`.
+- Public files, staged in `outputs/release/darwin-arm64`:
+  - `OMP-Studio-<ver>-macos-arm64.zip` and its blockmap: the catalog's app asset.
+  - `OMP-Studio-<ver>-macos-arm64.dmg`: the first install. Its digest is signed into the catalog as `firstInstall`, so `updates:verify` and the publisher check its bytes.
+  - `OMP-Studio-Runtime-<rv>-macos-arm64.zip` and its blockmap.
+  - `updates-darwin-arm64.json`.
+
+  There is no v1 migration index for macOS, and Windows asset names are unchanged.
+- `p5:gate` on the Mac runner audits the packed bundle and records `productionMacCleanRun: manual-required`.
+- Before shipping a Mac build, check on a clean Apple Silicon machine:
+  - the first launch through Gatekeeper ("Open Anyway");
+  - the microphone and folder prompts;
+  - a real conversation;
+  - an in-app update swap, and a swap-back.
+
+  The build stays ad hoc signed and not notarized until a Developer ID is configured.
+
 Before publishing: use a new workspace version, validate migration and silent restart on Windows, run `npm run check`, `npm run omp:test:metadata`, `npm run omp:verify:patches -- --skip-workspace-check`, `npm run updates:verify`, and `npm run p5:gate`. Signing credentials remain in the existing GitHub Environment; no new trust root is introduced.
 
 `normalize-release-notes.mjs` prepares a backed-up text-only edit of historical releases. Review the generated plan, then pass its path with `--apply`; any changed remote title/body/assets causes the edit to stop. It does not rename or delete assets.

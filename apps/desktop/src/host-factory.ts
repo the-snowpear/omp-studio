@@ -9,8 +9,9 @@
  * desktop Main entry stays decoupled from Win32 seam details.
  *
  * Realizations implemented here:
- * - app data directory: `%APPDATA%\omp-studio` (fallback under the user
- *   home) — the profile/state directory owned by the current user;
+ * - app data directory: `%APPDATA%\omp-studio` / `~/Library/Application
+ *   Support/omp-studio` (platform/desktop-paths.ts) — the profile/state
+ *   directory owned by the current user;
  * - authority lock: atomic `wx` exclusive-create, strict read and
  *   compare-and-remove over the lock file; owner liveness is a process-lifetime
  *   exclusive named pipe / unix socket. A crashed owner is treated as dead so
@@ -33,9 +34,7 @@
 
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile, rm, unlink, writeFile, type FileHandle } from "node:fs/promises";
-import { createServer, type Server } from "node:net";
-import { homedir, tmpdir } from "node:os";
+import { chmod, lstat, mkdir, open, readFile, rm, unlink, writeFile, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -48,7 +47,7 @@ import type { Win32PlatformServices, Win32AuthorityLockServices, Win32EndpointPr
 import { Win32PlatformPort, Win32AuthorityLock, Win32PrivateEndpoint } from "@omp-studio/platform-win32";
 import type { DarwinPlatformServices, DarwinEndpointProviders } from "@omp-studio/platform-darwin";
 import { DarwinPlatformPort, DarwinPrivateEndpoint } from "@omp-studio/platform-darwin";
-import { WorkspaceRegistry, createProcessProbe, parseWindowsUserSid, type RuntimeResolverEnvironment } from "@omp-studio/studio-host";
+import { WorkspaceRegistry, createProcessProbe, ensurePrivateSocketDirectory, parseWindowsUserSid, type RuntimeResolverEnvironment } from "@omp-studio/studio-host";
 import { createSmokeTestRunner } from "@omp-studio/runtime-installer";
 import type { PlatformPort } from "@omp-studio/platform";
 
@@ -57,7 +56,7 @@ import {
   type DesktopFacadeSeams,
   type DesktopRuntimeSessionPort,
 } from "./host-composition.js";
-import { createHostFileLog, defaultHostLogsDirectory } from "./host-log.js";
+import { createHostFileLog, defaultHostLogsDirectory, type HostLog } from "./host-log.js";
 import { startHostPerformance } from "./desktop-performance.js";
 import { createDesktopGitService } from "./git-service.js";
 import { createDesktopGithubService } from "./github-service.js";
@@ -71,17 +70,16 @@ import {
   type DesktopManagedInstallOptions,
 } from "./runtime-install.js";
 import type { DesktopHostComposition, DesktopHostFactory } from "./types.js";
+import { desktopPaths, desktopSocketTmpRoot } from "./platform/desktop-paths.js";
+import type { LoginEnvironmentStatus } from "./platform/login-env.js";
+import { withCodeSignatureCheck } from "./platform/code-signature.js";
+import { clearQuarantine } from "./platform/quarantine.js";
+import { createPosixAuthorityLiveness, createWin32AuthorityLiveness } from "./authority-liveness.js";
 
 const execFileAsync = promisify(execFile);
 
 /** Environment scope recorded in the authority lock metadata. */
 const DEFAULT_ENVIRONMENT_KEY = "desktop";
-
-/** State directory name under the user's application data root. */
-const STATE_DIRECTORY_NAME = "omp-studio";
-
-/** Endpoint reservation registry root under the user's application data root. */
-const ENDPOINT_REGISTRY_DIRECTORY_NAME = "omp-studio-endpoints";
 
 /** Injectable inputs for {@link createDesktopHostFactory} (Windows). */
 export interface DesktopHostFactoryOptionsWin32 {
@@ -167,6 +165,7 @@ export function createDesktopHostFactory(options: DesktopHostFactoryOptions): De
           profileDirectory,
           environmentKey: options.environmentKey ?? DEFAULT_ENVIRONMENT_KEY,
           services: options.authorityLockServices,
+          pathStyle: "posix",
         });
         privateEndpoint = new DarwinPrivateEndpoint(options.endpointProviders);
       }
@@ -186,17 +185,9 @@ export function createDesktopHostFactory(options: DesktopHostFactoryOptions): De
   };
 }
 
-/** User application-data root shared by the production services. */
-function userAppDataRoot(): string {
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support");
-  }
-  return process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
-}
-
 /** Production workspace registry path (paths live only in the Host). */
 function productionWorkspaceRegistryPath(): string {
-  return join(userAppDataRoot(), STATE_DIRECTORY_NAME, "workspaces.json");
+  return join(desktopPaths().stateRoot, "workspaces.json");
 }
 
 /** Production system directory picker; `undefined` = user cancelled. */
@@ -217,7 +208,7 @@ function createProductionPickDirectory(): () => Promise<string | undefined> {
 function createProductionWin32PlatformServices(): Win32PlatformServices {
   return {
     async appDataDirectory(): Promise<string> {
-      return join(userAppDataRoot(), STATE_DIRECTORY_NAME);
+      return desktopPaths().stateRoot;
     },
     async createCurrentUserOnlyEndpoint(profileDirectory: string): Promise<string> {
       // PlatformPort path: reserve a fresh authority in the shared registry
@@ -265,7 +256,7 @@ function createProductionWin32PlatformServices(): Win32PlatformServices {
 function createProductionDarwinPlatformServices(): DarwinPlatformServices {
   return {
     async appDataDirectory(): Promise<string> {
-      return join(userAppDataRoot(), STATE_DIRECTORY_NAME);
+      return desktopPaths().stateRoot;
     },
     async createCurrentUserOnlyEndpoint(profileDirectory: string): Promise<string> {
       // PlatformPort path: reserve a fresh authority in the shared registry
@@ -308,22 +299,6 @@ function createProductionDarwinPlatformServices(): DarwinPlatformServices {
   };
 }
 
-/**
- * Process-lifetime exclusive listener proving the current owner is alive.
- * Windows uses a named pipe; POSIX uses a temp-dir unix socket. Crash or
- * process exit releases the address automatically, so a leftover metadata
- * file is no longer treated as a live owner.
- */
-const liveProofs = new Map<string, Server>();
-
-function liveProofAddress(environmentKey: string): string {
-  const safe = environmentKey.replace(/[^A-Za-z0-9._-]/gu, "_");
-  if (process.platform === "win32") {
-    return `\\\\.\\pipe\\omp-studio-authority-${safe}`;
-  }
-  return join(tmpdir(), `omp-studio-authority-${safe}.sock`);
-}
-
 function environmentKeyFromLockContent(content: string): string {
   const parsed = JSON.parse(content) as { environmentKey?: unknown };
   if (typeof parsed.environmentKey !== "string" || parsed.environmentKey.length === 0) {
@@ -332,76 +307,13 @@ function environmentKeyFromLockContent(content: string): string {
   return parsed.environmentKey;
 }
 
-function listenExclusive(address: string): Promise<Server> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    const fail = (error: Error): void => {
-      server.close();
-      reject(error);
-    };
-    server.once("error", fail);
-    server.listen(address, () => {
-      server.off("error", fail);
-      resolve(server);
-    });
-  });
-}
-
-async function acquireLiveProof(environmentKey: string): Promise<boolean> {
-  const address = liveProofAddress(environmentKey);
-  if (liveProofs.has(address)) {
-    return true;
-  }
-  try {
-    liveProofs.set(address, await listenExclusive(address));
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function releaseLiveProof(environmentKey: string): Promise<void> {
-  const address = liveProofAddress(environmentKey);
-  const server = liveProofs.get(address);
-  if (server === undefined) {
-    return;
-  }
-  liveProofs.delete(address);
-  await new Promise<void>((resolve) => {
-    server.close(() => resolve());
-  });
-  if (process.platform !== "win32") {
-    await bestEffort(() => unlink(address));
-  }
-}
-
-async function isLiveProofHeld(environmentKey: string): Promise<boolean> {
-  const address = liveProofAddress(environmentKey);
-  if (liveProofs.has(address)) {
-    return true;
-  }
-  try {
-    const probe = await listenExclusive(address);
-    await new Promise<void>((resolve) => {
-      probe.close(() => resolve());
-    });
-    if (process.platform !== "win32") {
-      await bestEffort(() => unlink(address));
-    }
-    return false;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
-      return true;
-    }
-    throw error;
-  }
-}
-
 /** Production authority lock services over the profile lock file. */
 function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
+  const liveness = process.platform === "win32"
+    ? createWin32AuthorityLiveness()
+    : createPosixAuthorityLiveness({
+        socketDirectory: () => ensurePrivateSocketDirectory("authority", { tmpRoot: desktopSocketTmpRoot() }),
+      });
   return {
     async createExclusive(lockFilePath: string, content: string): Promise<boolean> {
       let handle: FileHandle;
@@ -419,7 +331,7 @@ function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
         await handle.close();
       }
       const environmentKey = environmentKeyFromLockContent(content);
-      if (!(await acquireLiveProof(environmentKey))) {
+      if (!(await liveness.acquire(environmentKey))) {
         await bestEffort(() => unlink(lockFilePath));
         return false;
       }
@@ -456,11 +368,11 @@ function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
         }
         throw error;
       }
-      await releaseLiveProof(environmentKeyFromLockContent(expectedContent));
+      await liveness.release(environmentKeyFromLockContent(expectedContent));
       return true;
     },
     async isOwnerAlive(metadata): Promise<boolean> {
-      return isLiveProofHeld(metadata.environmentKey);
+      return liveness.isHeld(metadata.environmentKey);
     },
     nowIso: () => new Date().toISOString(),
     randomId: () => randomBytes(16).toString("base64url"),
@@ -469,7 +381,7 @@ function createProductionAuthorityLockServices(): Win32AuthorityLockServices {
 
 /** Production private-endpoint providers over the shared reservation registry (Windows). */
 function createProductionWin32EndpointProviders(): Win32EndpointProviders {
-  const registryRoot = (): string => join(userAppDataRoot(), ENDPOINT_REGISTRY_DIRECTORY_NAME);
+  const registryRoot = (): string => desktopPaths().endpointRegistryRoot;
   const reservationPath = (authority: string): string => join(registryRoot(), authority);
   return {
     async currentUserSid(): Promise<string> {
@@ -523,7 +435,7 @@ function createProductionWin32EndpointProviders(): Win32EndpointProviders {
 
 /** Production private-endpoint providers over the shared reservation registry (macOS). */
 function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
-  const registryRoot = (): string => join(userAppDataRoot(), ENDPOINT_REGISTRY_DIRECTORY_NAME);
+  const registryRoot = (): string => desktopPaths().endpointRegistryRoot;
   const reservationPath = (authority: string): string => join(registryRoot(), authority);
   return {
     generateEndpointAuthority: () => randomBytes(24).toString("base64url"),
@@ -554,8 +466,19 @@ function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
       return true;
     },
     async applyOwnerOnlyPermissions(authority: string): Promise<void> {
-      // The reservation registry entry is the owned resource with 0700 permissions
-      // already applied during mkdir. No additional chmod needed.
+      // mkdir/writeFile modes are filtered by the umask: set them explicitly,
+      // then fail closed unless both entries are this user's, owner-only.
+      const directory = reservationPath(authority);
+      const reservation = join(directory, "reservation.json");
+      await chmod(directory, 0o700);
+      await chmod(reservation, 0o600);
+      const uid = process.getuid?.();
+      for (const [path, mode] of [[directory, 0o700], [reservation, 0o600]] as const) {
+        const metadata = await lstat(path);
+        if (metadata.isSymbolicLink() || (uid !== undefined && metadata.uid !== uid) || (metadata.mode & 0o777) !== mode) {
+          throw new Error("endpoint reservation is not owner-only");
+        }
+      }
     },
     async releaseEndpoint(authority: string): Promise<void> {
       try {
@@ -572,15 +495,21 @@ function createProductionDarwinEndpointProviders(): DarwinEndpointProviders {
 export const pendingRuntimeArtifact = createPendingArtifactRegistry();
 
 /** Packaged extraFiles layout; unpackaged keeps AppData runtimes + repo artifact discovery. */
-function productionManagedInstall(): DesktopManagedInstallOptions {
+function productionManagedInstall(hostLog: HostLog): DesktopManagedInstallOptions {
   const layout = packagedRuntimeInstallLayout({
     isPackaged: app.isPackaged,
     execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
   });
   return {
     seedOnStart: true,
     pendingArtifact: pendingRuntimeArtifact,
-    activateOptions: { selfCheck: createSmokeTestRunner({ timeoutMs: 240_000 }) },
+    // Packaged builds trust only the keys they ship; env overrides are for development.
+    environmentTrustedKeys: !app.isPackaged,
+    activateOptions: { selfCheck: withCodeSignatureCheck(createSmokeTestRunner({ timeoutMs: 240_000 })) },
+    ...(process.platform === "darwin"
+      ? { prepareStaging: (directory: string) => clearQuarantine(directory, { warn: (detail) => hostLog.write("warn", "runtime.quarantine_clear", detail) }) }
+      : {}),
     ...(layout === undefined
       ? {}
       : {
@@ -609,6 +538,8 @@ export interface ProductionDesktopHostFactory extends DesktopHostFactory {
  * Packaged builds keep the live `omp.exe` under `$INSTDIR\runtime`.
  */
 export function createProductionHostFactory(options?: {
+  /** Settles once `process.env` is ready to spawn with (the macOS login shell). */
+  readonly loginEnvironment?: Promise<LoginEnvironmentStatus>;
   readonly beforeCreate?: () => Promise<void>;
   readonly afterCreate?: (composition: DesktopHostComposition, workspaceSelected: boolean) => Promise<boolean>;
   readonly openUrl?: (url: string) => Promise<void>;
@@ -625,6 +556,13 @@ export function createProductionHostFactory(options?: {
     directory: defaultHostLogsDirectory(),
   });
   let stopPerformance: (() => void) | undefined;
+  let loginEnvironmentLogged = false;
+  const awaitLoginEnvironment = async (): Promise<void> => {
+    const status = await options?.loginEnvironment;
+    if (status === undefined || status === "skipped" || loginEnvironmentLogged) return;
+    loginEnvironmentLogged = true;
+    hostLog.write(status === "resolved" ? "info" : "warn", "desktop.login_env", status);
+  };
   // Runtime 进程由 Host 生命周期管理；Worker 的停驻/唤醒由 OMP Runtime
   // 内部 AgentLifecycleManager 负责。桌面层不因空闲或容量淘汰 Runtime，
   // 避免后台切换时把 Worker 内存维护表现成 Bridge 断开。
@@ -634,7 +572,7 @@ export function createProductionHostFactory(options?: {
   const git = createDesktopGitService({
     registry,
     pickDirectory,
-    preferencesPath: join(userAppDataRoot(), STATE_DIRECTORY_NAME, "git-preferences.json"),
+    preferencesPath: join(desktopPaths().stateRoot, "git-preferences.json"),
     runner: gitProcessRunner,
     queue: gitWriteQueue,
   });
@@ -721,9 +659,12 @@ export function createProductionHostFactory(options?: {
     authorityLockServices: createProductionAuthorityLockServices(),
     resolver: { probe: createProcessProbe() },
     runtimeSession,
-    managedInstall: productionManagedInstall(),
+    managedInstall: productionManagedInstall(hostLog),
     facade,
   };
+  if (process.platform !== "win32" && process.platform !== "darwin") {
+    throw new Error(`OMP Studio does not support ${process.platform}`);
+  }
   const factory = createDesktopHostFactory({
     ...(process.platform === "darwin"
       ? {
@@ -740,6 +681,7 @@ export function createProductionHostFactory(options?: {
   });
   return {
     async create(): Promise<DesktopHostComposition> {
+      await awaitLoginEnvironment();
       await options?.beforeCreate?.();
       // The registry file is loaded once, before the first composition can
       // serve any renderer query.

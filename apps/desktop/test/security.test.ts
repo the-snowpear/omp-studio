@@ -24,6 +24,7 @@
  */
 
 import assert from "node:assert/strict";
+import { join, parse } from "node:path";
 import { pathToFileURL } from "node:url";
 import { register } from "node:module";
 import { describe, test } from "node:test";
@@ -77,7 +78,8 @@ import {
   resolveRendererEntryFrom,
   secureWebPreferences,
   type CreateSecureWindowDeps,
-  type NavigationGuardedWindow,
+  type NavigationGuardedContents,
+  createPermissionRequestHandler,
   type WindowLike,
 } from "../src/security.js";
 
@@ -625,9 +627,10 @@ describe("navigation and new-window policy", () => {
     assert.equal(isTrustedRendererUrl("data:text/html,<script>1</script>", allowed), false);
   });
 
-  test("installNavigationGuards prevents untrusted navigation and denies every new window", () => {
+  test("installNavigationGuards guards the WebContents: untrusted navigation and every new window are denied", () => {
     const events = new Map<string, Set<(...args: unknown[]) => unknown>>();
-    const fakeWindow: NavigationGuardedWindow = {
+    let openHandler: ((details: { url: string }) => { action: "deny" }) | undefined;
+    const fakeContents: NavigationGuardedContents = {
       on(event, listener) {
         let set = events.get(event);
         if (set === undefined) {
@@ -637,11 +640,14 @@ describe("navigation and new-window policy", () => {
         set.add(listener as (...args: unknown[]) => unknown);
         return undefined;
       },
+      setWindowOpenHandler(handler) {
+        openHandler = handler;
+      },
     };
-    installNavigationGuards(fakeWindow, "file:///C:/app/index.html");
+    const opened: string[] = [];
+    installNavigationGuards(fakeContents, "file:///C:/app/index.html", (url) => opened.push(url));
 
     const willNavigate = events.get("will-navigate");
-    const openHandler = events.get("setWindowOpenHandler");
     assert.ok(willNavigate);
     assert.ok(openHandler);
 
@@ -659,10 +665,29 @@ describe("navigation and new-window policy", () => {
     }
     assert.equal(allowed, true, "trusted in-origin navigation stays allowed");
 
-    for (const listener of [...(openHandler ?? [])]) {
-      assert.deepEqual(listener({ url: "https://evil.example/" }), { action: "deny" });
-      assert.deepEqual(listener({ url: "file:///C:/app/index.html" }), { action: "deny" });
-    }
+    assert.deepEqual(openHandler?.({ url: "https://docs.example/page" }), { action: "deny" });
+    assert.deepEqual(openHandler?.({ url: "file:///C:/app/index.html" }), { action: "deny" });
+    assert.deepEqual(openHandler?.({ url: "javascript:alert(1)" }), { action: "deny" });
+    // Web links still open, in the system browser; nothing else leaves the app.
+    assert.deepEqual(opened, ["https://evil.example/", "https://docs.example/page"]);
+  });
+
+  test("permission requests are granted to the renderer document only", () => {
+    const handler = createPermissionRequestHandler("file:///C:/app/index.html");
+    const decide = (requestingUrl: string | undefined): boolean => {
+      let granted: boolean | undefined;
+      handler(undefined, "media", (value) => { granted = value; }, requestingUrl === undefined ? {} : { requestingUrl });
+      return granted === true;
+    };
+    assert.equal(decide("file:///C:/app/index.html"), true);
+    assert.equal(decide("file:///C:/app/index.html#/conversation"), true);
+    assert.equal(decide("omp-artifact://library/report.html"), false);
+    assert.equal(decide("https://evil.example/"), false);
+    assert.equal(decide(undefined), false);
+    const dev = createPermissionRequestHandler("http://localhost:5173");
+    let granted = false;
+    dev(undefined, "media", (value) => { granted = value; }, { requestingUrl: "http://localhost:5173/index.html" });
+    assert.equal(granted, true);
   });
 });
 
@@ -672,10 +697,14 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
     shown = false;
     loaded = "";
     readonly listeners = new Map<string, Set<(...args: unknown[]) => unknown>>();
+    openHandler: ((details: { url: string }) => { action: "deny" }) | undefined;
     readonly webContents = {
-      on: (event: "did-finish-load" | "did-fail-load", listener: () => void): unknown => {
-        this.on(`webContents:${event}`, listener);
+      on: (event: string, listener: (...args: readonly unknown[]) => unknown): unknown => {
+        this.on(`webContents:${event}`, listener as (...args: unknown[]) => unknown);
         return this;
+      },
+      setWindowOpenHandler: (handler: (details: { url: string }) => { action: "deny" }): void => {
+        this.openHandler = handler;
       },
     };
     constructor(options: Record<string, unknown>) {
@@ -717,7 +746,7 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
     const window = createSecureWindow({
       BrowserWindow: FakeBrowserWindow as unknown as new (
         options: { width: number; webPreferences: { nodeIntegration: boolean; contextIsolation: boolean } },
-      ) => WindowLike & NavigationGuardedWindow,
+      ) => WindowLike,
       windowOptions: {
         width: 800,
         webPreferences: { nodeIntegration: true, contextIsolation: false },
@@ -741,7 +770,7 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
 
   test("shows the window when WebContents finishes or fails to load", () => {
     const finishWindow = createSecureWindow({
-      BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike & NavigationGuardedWindow,
+      BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike,
       windowOptions: {},
       preloadPath: "C:\\app\\preload.cjs",
       target: { kind: "file", path: "C:\\app\\renderer\\index.html" },
@@ -752,7 +781,7 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
     assert.equal(finishWindow.shown, true);
 
     const failedWindow = createSecureWindow({
-      BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike & NavigationGuardedWindow,
+      BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike,
       windowOptions: {},
       preloadPath: "C:\\app\\preload.cjs",
       target: { kind: "file", path: "C:\\app\\renderer\\index.html" },
@@ -764,55 +793,61 @@ describe("createSecureWindow: caller webPreferences are never honored", () => {
   });
 
   test("loads the renderer target and installs navigation guards", () => {
+    const opened: string[] = [];
     const window = createSecureWindow({
-      BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike & NavigationGuardedWindow,
+      BrowserWindow: FakeBrowserWindow as unknown as new (options: object) => WindowLike,
       windowOptions: {},
       preloadPath: "C:\\app\\preload.cjs",
       target: { kind: "file", path: "C:\\app\\renderer\\index.html" },
       allowedOrigin: "file:///C:/app/index.html",
+      openExternal: (url) => opened.push(url),
     }) as unknown as FakeBrowserWindow;
     assert.equal(window.loaded, "file:C:\\app\\renderer\\index.html");
-    assert.ok(window.listeners.has("will-navigate"));
-    assert.ok(window.listeners.has("setWindowOpenHandler"));
+    assert.ok(window.listeners.has("webContents:will-navigate"), "the guard listens on the WebContents");
+    assert.ok(window.openHandler, "window.open is handled by the WebContents");
     let prevented = false;
-    window.fire("will-navigate", { preventDefault: () => { prevented = true; } }, "https://evil.example/");
+    window.fire("webContents:will-navigate", { preventDefault: () => { prevented = true; } }, "https://evil.example/");
     assert.equal(prevented, true);
+    assert.deepEqual(window.openHandler?.({ url: "https://docs.example/" }), { action: "deny" });
+    assert.deepEqual(opened, ["https://evil.example/", "https://docs.example/"]);
   });
 });
 
 describe("renderer entry resolution", () => {
+  // Host-native absolute paths: C:\ on Windows, / on macOS.
+  const root = parse(process.cwd()).root;
+
   test("resolveRendererEntry prefers the explicit dev server URL", () => {
-    assert.deepEqual(resolveRendererEntry("C:\\app\\dist", "http://localhost:5173"), {
+    assert.deepEqual(resolveRendererEntry(join(root, "app", "dist"), "http://localhost:5173"), {
       kind: "url",
       url: "http://localhost:5173",
     });
   });
 
   test("resolveRendererEntry falls back to the workspace renderer bundle", () => {
-    const target = resolveRendererEntry("C:\\app\\desktop\\dist", undefined);
+    const target = resolveRendererEntry(join(root, "app", "desktop", "dist"), undefined);
     assert.equal(target.kind, "file");
-    assert.ok((target as { path: string }).path.endsWith("renderer\\dist\\index.html"));
+    assert.ok((target as { path: string }).path.endsWith(join("renderer", "dist", "index.html")));
     assert.equal(rendererOriginFor(target), pathToFileURL((target as { path: string }).path).href);
   });
 
   test("resolveRendererEntry maps the packaged asar onto extraResources renderer", () => {
-    const target = resolveRendererEntry("C:\\Program Files\\OMP Studio\\resources\\app.asar", undefined);
+    const resources = process.platform === "darwin"
+      ? join(root, "Applications", "OMP Studio.app", "Contents", "Resources")
+      : join(root, "Program Files", "OMP Studio", "resources");
+    const target = resolveRendererEntry(join(resources, "app.asar"), undefined);
     assert.equal(target.kind, "file");
-    assert.equal(
-      (target as { path: string }).path,
-      "C:\\Program Files\\OMP Studio\\resources\\renderer\\dist\\index.html",
-    );
+    assert.equal((target as { path: string }).path, join(resources, "renderer", "dist", "index.html"));
   });
 
   test("resolveRendererEntryFrom maps payload directory to file target with file:// origin", () => {
-    const payloadDist = "C:\\Users\\alice\\AppData\\Local\\omp-studio\\payload\\versions\\0.1.4\\renderer";
+    const payloadDist = join(root, "Users", "alice", "omp-studio", "payload", "versions", "0.1.4", "renderer");
     const target = resolveRendererEntryFrom(payloadDist, undefined);
     assert.equal(target.kind, "file");
-    assert.equal(target.path, "C:\\Users\\alice\\AppData\\Local\\omp-studio\\payload\\versions\\0.1.4\\renderer\\index.html");
+    assert.equal(target.path, join(payloadDist, "index.html"));
     const origin = rendererOriginFor(target);
     assert.equal(origin, pathToFileURL(target.path).href);
-    const fileUrl = new URL(`file:///${target.path.replace(/\\/g, "/")}`).toString();
-    assert.equal(isTrustedRendererUrl(fileUrl, origin), true);
+    assert.equal(isTrustedRendererUrl(pathToFileURL(target.path).toString(), origin), true);
   });
 
   test("rendererOriginFor derives the exact dev origin and fails closed on junk", () => {

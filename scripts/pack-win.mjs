@@ -23,31 +23,13 @@ import process from "node:process";
 import { npmInvocation, repositoryRoot, run, toolingEnvironment } from "./omp-tooling.mjs";
 import { auditInstallerOutput, defaultInstallerOutputDirectory } from "./audit-installer.mjs";
 import { buildInstallerHost } from "./build-installer-host.mjs";
+import { bundlePreload } from "./preload-bundle.mjs";
 import { resolveTargetArch, assertNativeRuntimeBuild } from "./windows-architecture.mjs";
 
-const esbuildCli = join(repositoryRoot, "node_modules", "esbuild", "bin", "esbuild");
 const electronBuilderCli = join(repositoryRoot, "node_modules", "electron-builder", "cli.js");
 
 function hasFlag(name) {
   return process.argv.slice(2).includes(name);
-}
-
-function bundlePreload() {
-  if (!existsSync(esbuildCli)) {
-    throw new Error("esbuild is missing. Run npm install.");
-  }
-  run(process.execPath, [
-    esbuildCli,
-    "apps/desktop/src/preload.ts",
-    "--bundle",
-    "--platform=node",
-    "--format=cjs",
-    "--external:electron",
-    "--outfile=apps/desktop/dist/preload.cjs",
-  ]);
-  if (!existsSync(join(repositoryRoot, "apps", "desktop", "dist", "preload.cjs"))) {
-    throw new Error("Sandboxed preload was not emitted at apps/desktop/dist/preload.cjs");
-  }
 }
 
 function disableNodePtySpectreMitigation() {

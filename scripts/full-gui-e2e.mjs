@@ -1,5 +1,7 @@
 /** Real Electron acceptance with isolated profiles and no model requests. */
 import {createRequire} from 'node:module';
+import {defaultRuntimeKeysDirectory} from './runtime-signing-keys.mjs';
+import {resolveTargetPlatform} from './target-platform.mjs';
 import {mkdir,mkdtemp,readFile,writeFile} from 'node:fs/promises';
 import {homedir,tmpdir} from 'node:os';
 import {join,relative} from 'node:path';
@@ -25,12 +27,15 @@ const command=async(name,input={})=>page.evaluate(({name,input})=>{
 },{name,input});
 async function capture(name){await page.screenshot({path:join(output,name+'.png')});}
 try{
- await Promise.all(['workspace','roaming','user-data','local'].map(p=>mkdir(join(temp,p),{recursive:true})));
+ await Promise.all(['workspace','roaming','user-data','local','isolated-home'].map(p=>mkdir(join(temp,p),{recursive:true})));
  await mkdir(output,{recursive:true});
  const desktop=join(root,'apps/desktop');
  const version=JSON.parse(await readFile(join(root,'omp-patch/patches/series.json'),'utf8')).patchsetVersion;
  const runtime='18.4.4-'+version;
- const keys=join(process.env.APPDATA,'omp-studio/keys');
+ const keys=defaultRuntimeKeysDirectory();
+ const platform=resolveTargetPlatform();
+ const isolatedHome=process.platform==='darwin'?join(temp,'isolated-home'):homedir();
+ report.platform=platform;
  await writeFile(join(temp,'bootstrap.cjs'),[
   "const {app,dialog}=require('electron');",
   'app.getAppPath=()=>'+JSON.stringify(desktop)+';',
@@ -40,11 +45,11 @@ try{
   'import('+JSON.stringify(pathToFileURL(join(desktop,'dist/src/main.js')).href)+');',
  ].join('\n'));
  await writeFile(join(temp,'package.json'),JSON.stringify({name:'omp-gui-acceptance',version:'0.1.7',main:'bootstrap.cjs'}));
- const env={...process.env,APPDATA:join(temp,'roaming'),LOCALAPPDATA:join(temp,'local'),PI_CONFIG_DIR:relative(homedir(),join(temp,'native-config')),XDG_CONFIG_HOME:join(temp,'xdg-config'),XDG_DATA_HOME:join(temp,'xdg-data'),XDG_CACHE_HOME:join(temp,'xdg-cache'),OMP_ARTIFACT_DIR:join(root,'packages/runtime-installer/dist/artifacts/win32-x64',runtime),OMP_RUNTIME_TRUSTED_PUBLIC_KEY:join(keys,'trusted-public.pem'),OMP_RUNTIME_SIGNING_KEY_ID:(await readFile(join(keys,'key-id.txt'),'utf8')).trim(),DO_NOT_TRACK:'1'};
+ const env={...process.env,...(process.platform==='darwin'?{HOME:isolatedHome}:{}),APPDATA:join(temp,'roaming'),LOCALAPPDATA:join(temp,'local'),PI_CONFIG_DIR:relative(isolatedHome,join(temp,'native-config')),XDG_CONFIG_HOME:join(temp,'xdg-config'),XDG_DATA_HOME:join(temp,'xdg-data'),XDG_CACHE_HOME:join(temp,'xdg-cache'),OMP_ARTIFACT_DIR:join(root,'packages/runtime-installer/dist/artifacts',platform,runtime),OMP_RUNTIME_TRUSTED_PUBLIC_KEY:join(keys,'trusted-public.pem'),OMP_RUNTIME_SIGNING_KEY_ID:(await readFile(join(keys,'key-id.txt'),'utf8')).trim(),DO_NOT_TRACK:'1'};
  for(const key of ['ELECTRON_RUN_AS_NODE','OMP_RUNTIME_SIGNING_PRIVATE_KEY','OMP_RENDERER_DEV_URL','PI_CODING_AGENT_DIR'])delete env[key];
  const packaged=process.env.OMP_E2E_PACKAGED_EXE;
  if(packaged)delete env.OMP_ARTIFACT_DIR;
- app=await _electron.launch({executablePath:packaged??join(root,'node_modules/electron/dist/electron.exe'),args:packaged?['--user-data-dir='+join(temp,'user-data')]:[temp],cwd:join(temp,'workspace'),env,timeout:60000});
+ app=await _electron.launch({executablePath:packaged??require('electron'),args:packaged?['--user-data-dir='+join(temp,'user-data')]:[temp],cwd:join(temp,'workspace'),env,timeout:60000});
  if(packaged)await app.evaluate(({dialog},workspace)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[workspace]});},join(temp,'workspace'));
  page=await app.firstWindow();page.setDefaultTimeout(20000);
  await page.waitForFunction(()=>!!window.ompStudio);
@@ -64,7 +69,7 @@ try{
  const session=await query('session.state');
  const invoke=(name,input={})=>command(name,{sessionId:session.sessionId,...input});
  const caps=await query('capabilities.get');
- for(const id of ['ida.status','resource.read','session.queue.list','session.tier.get','session.skills.list','agent.btw.read'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing '+id);
+ for(const id of ['ida.status','resource.read','session.queue.list','session.queue.ack','session.tier.get','session.skills.list','agent.btw.read'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing '+id);
  report.checks.push('signed managed Runtime handshake and capability negotiation');
  for(const name of ['ida.status','session.queue.list','session.tier.get','session.skills.list']){const value=await invoke(name);if(name==='ida.status')report.ida=value;report.checks.push(name);}
  await invoke('resource.read',{uri:'omp://'});
@@ -119,7 +124,7 @@ try{
  if(await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).inputValue()!=='First question note')throw Error('Ask ownership mismatch');
  await deck.getByRole('button',{name:'删除 / Remove 回答 / Answer 1',exact:true}).click();
  await capture('preview-ask-images');report.checks.push('real Electron Ask image picker, per-question notes and attachments, navigation and removal');
- report.imeScope='CDP composition integration; physical Windows IME not manually tested';
+ report.imeScope='CDP composition integration; physical OS IME not manually tested';
  report.status='passed';
 }catch(error){report.status='failed';report.error=String(error);process.exitCode=1;if(page)await capture('failure').catch(()=>{});}
 finally{if(app)await app.close().catch(()=>{});await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));}

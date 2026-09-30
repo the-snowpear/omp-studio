@@ -4,9 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, type Socket } from "node:net";
 import type { AgentSession } from "../src/session/agent-session";
-import { StudioLiveAudioService } from "../src/studio/services/live-audio-service";
+import { liveAudioSocketName, StudioLiveAudioService } from "../src/studio/services/live-audio-service";
 import { StudioLiveService } from "../src/studio/services/live-service";
 
+/** POSIX sockets live in the Host's short `OMP_STUDIO_SOCKET_DIR`; Windows uses named pipes. */
+async function shortSocketDirectory(): Promise<string | undefined> {
+	return process.platform === "win32" ? undefined : await mkdtemp(join("/tmp", "omp-la-"));
+}
 async function waitFor(check: () => boolean): Promise<void> {
 	for (let i = 0; i < 200; i++) {
 		if (check()) return;
@@ -16,6 +20,7 @@ async function waitFor(check: () => boolean): Promise<void> {
 }
 it("authenticates local PCM, uses the existing session, and releases on disconnect without reconnecting", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "studio-live-audio-"));
+	const socketDirectory = await shortSocketDirectory();
 	const session = { sessionId: "one" } as AgentSession;
 	let starts = 0,
 		stops = 0,
@@ -23,6 +28,7 @@ it("authenticates local PCM, uses the existing session, and releases on disconne
 	const sockets: Socket[] = [];
 	const audio = new StudioLiveAudioService(session, {
 		directory,
+		socketDirectory,
 		createController: options => {
 			expect(options.session).toBe(session);
 			let stopped = false;
@@ -67,6 +73,8 @@ it("authenticates local PCM, uses the existing session, and releases on disconne
 		expect(JSON.stringify(prepared)).not.toContain(directory);
 		const id = prepared.audioId!;
 		const descriptor = JSON.parse(await readFile(join(directory, "audio", id + ".json"), "utf8"));
+		if (socketDirectory !== undefined)
+			expect(descriptor.endpoint).toBe(join(socketDirectory, liveAudioSocketName(id)));
 		await expect(audio.execute({ kind: "live.audio.start", sessionId: "one", audioId: id })).rejects.toMatchObject({
 			code: "COMMAND_BLOCKED",
 		});
@@ -122,13 +130,16 @@ it("authenticates local PCM, uses the existing session, and releases on disconne
 		audio.dispose();
 		await Bun.sleep(20);
 		await rm(directory, { recursive: true, force: true });
+		if (socketDirectory !== undefined) await rm(socketDirectory, { recursive: true, force: true });
 	}
 });
 
 it("preparation expiry never opens a provider connection", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "studio-live-expiry-"));
+	const socketDirectory = await shortSocketDirectory();
 	const audio = new StudioLiveAudioService({ sessionId: "one" } as AgentSession, {
 		directory,
+		socketDirectory,
 		prepareTimeoutMs: 50,
 		createController: () => {
 			throw new Error("Expired input must not create a controller");
@@ -145,5 +156,37 @@ it("preparation expiry never opens a provider connection", async () => {
 		audio.dispose();
 		await Bun.sleep(10);
 		await rm(directory, { recursive: true, force: true });
+		if (socketDirectory !== undefined) await rm(socketDirectory, { recursive: true, force: true });
 	}
 });
+
+it("derives the same socket name as the desktop Host", () => {
+	// The same vector is asserted in Studio's packages/studio-host/test/socket-paths.test.ts.
+	expect(liveAudioSocketName("00000000-0000-4000-8000-000000000000")).toBe("a-db8055e0e0307d5a.sock");
+});
+
+it.skipIf(process.platform === "win32")(
+	"reports audio unavailable instead of failing to bind without a short socket directory",
+	async () => {
+		const directory = await mkdtemp(join(tmpdir(), "studio-live-nosocket-"));
+		const session = { sessionId: "one" } as AgentSession;
+		const missing = new StudioLiveAudioService(session, { directory, socketDirectory: "" });
+		const tooLong = new StudioLiveAudioService(session, {
+			directory,
+			socketDirectory: join("/tmp", "x".repeat(100)),
+		});
+		try {
+			expect((await missing.execute({ kind: "live.audio.status", sessionId: "one" })).available).toBe(false);
+			await expect(missing.execute({ kind: "live.audio.prepare", sessionId: "one" })).rejects.toMatchObject({
+				code: "CAPABILITY_UNAVAILABLE",
+			});
+			await expect(tooLong.execute({ kind: "live.audio.prepare", sessionId: "one" })).rejects.toMatchObject({
+				code: "CAPABILITY_UNAVAILABLE",
+			});
+		} finally {
+			missing.dispose();
+			tooLong.dispose();
+			await rm(directory, { recursive: true, force: true });
+		}
+	},
+);

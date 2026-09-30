@@ -1,5 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import { assertSafeVersion } from "./signed-artifact.js";
+import { appUpdateAssetSuffix, isUpdatePlatform, type UpdatePlatform } from "./runtime-platform.js";
 
 export type UpdateChannel = "stable" | "canary";
 export type UpdateComponent = "app" | "runtime";
@@ -15,9 +16,11 @@ export interface ComponentRelease {
   bundledRuntimeVersion?: string;
 }
 export interface UpdateManifest {
-  schema: 2; repo: string; platform: "win32-x64" | "win32-arm64";
+  schema: 2; repo: string; platform: UpdatePlatform;
   generatedAt: string; releaseNotesUrl: string;
   app?: ComponentRelease; runtime?: ComponentRelease;
+  /** macOS only: the dmg a new user downloads; never installed by the updater. */
+  firstInstall?: UpdateFile;
 }
 export interface SignedUpdateManifest {
   manifest: UpdateManifest;
@@ -57,7 +60,7 @@ function file(value: unknown, repo: string): UpdateFile {
   if (typeof x.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(x.sha256) || typeof x.sha512 !== "string" || !/^[A-Za-z0-9+/]{86}==$/.test(x.sha512)) throw new Error("Invalid update digest");
   return { asset: x.asset, url, size: integer(x.size), sha256: x.sha256, sha512: x.sha512 };
 }
-function component(value: unknown, repo: string, kind: UpdateComponent): ComponentRelease {
+function component(value: unknown, repo: string, kind: UpdateComponent, platform: UpdatePlatform): ComponentRelease {
   const x = object(value), protocol = object(x.studioProtocol);
   if (x.channel !== "stable" && x.channel !== "canary") throw new Error("Invalid update channel");
   const result: ComponentRelease = {
@@ -65,7 +68,7 @@ function component(value: unknown, repo: string, kind: UpdateComponent): Compone
     file: file(x.file, repo), blockmap: file(x.blockmap, repo), minAppVersion: version(x.minAppVersion),
     studioProtocol: { min: integer(protocol.min), max: integer(protocol.max) },
   };
-  if (result.studioProtocol.min > result.studioProtocol.max || !result.file.asset.endsWith(kind === "app" ? ".exe" : ".zip") || result.blockmap.asset !== `${result.file.asset}.blockmap`) throw new Error("Invalid component metadata");
+  if (result.studioProtocol.min > result.studioProtocol.max || !result.file.asset.endsWith(kind === "app" ? appUpdateAssetSuffix(platform) : ".zip") || result.blockmap.asset !== `${result.file.asset}.blockmap`) throw new Error("Invalid component metadata");
   if (x.bundledRuntimeVersion !== undefined) result.bundledRuntimeVersion = version(x.bundledRuntimeVersion);
   return result;
 }
@@ -74,12 +77,22 @@ export function verifyUpdateManifest(value: unknown, keys: Readonly<Record<strin
   if (sig.algorithm !== "ed25519" || typeof sig.keyId !== "string" || typeof sig.value !== "string" || !Object.hasOwn(keys, sig.keyId)) throw new Error("Untrusted update signing key");
   const key = createPublicKey(keys[sig.keyId]!);
   if (key.asymmetricKeyType !== "ed25519" || !verify(null, updateSigningBytes(raw as unknown as UpdateManifest), key, Buffer.from(sig.value, "base64url"))) throw new Error("Update signature verification failed");
-  if (raw.schema !== 2 || raw.repo !== repo || raw.platform !== platform || !["win32-x64", "win32-arm64"].includes(platform)) throw new Error("Update manifest identity mismatch");
+  if (raw.schema !== 2 || raw.repo !== repo || raw.platform !== platform || !isUpdatePlatform(platform)) throw new Error("Update manifest identity mismatch");
   if (typeof raw.generatedAt !== "string" || !Number.isFinite(Date.parse(raw.generatedAt))) throw new Error("Invalid update timestamp");
-  const manifest: UpdateManifest = { schema: 2, repo, platform: platform as UpdateManifest["platform"], generatedAt: raw.generatedAt, releaseNotesUrl: https(raw.releaseNotesUrl) };
-  if (raw.app !== undefined) manifest.app = component(raw.app, repo, "app");
-  if (raw.runtime !== undefined) manifest.runtime = component(raw.runtime, repo, "runtime");
+  const manifest: UpdateManifest = { schema: 2, repo, platform, generatedAt: raw.generatedAt, releaseNotesUrl: https(raw.releaseNotesUrl) };
+  if (raw.app !== undefined) manifest.app = component(raw.app, repo, "app", platform);
+  if (raw.runtime !== undefined) manifest.runtime = component(raw.runtime, repo, "runtime", platform);
   if (!manifest.app && !manifest.runtime) throw new Error("Empty update manifest");
+  if (raw.firstInstall !== undefined) {
+    const dmg = file(raw.firstInstall, repo);
+    const release = manifest.app?.file.url.slice(0, manifest.app.file.url.lastIndexOf("/") + 1);
+    if (!platform.startsWith("darwin-") || release === undefined || !dmg.asset.endsWith(".dmg") || dmg.url !== `${release}${dmg.asset}`) throw new Error("Invalid first-install asset");
+    manifest.firstInstall = dmg;
+  }
+  // The coordinator journals this manifest and verifies it again on every
+  // start, so it must be byte-identical to what was signed: a dropped field
+  // would break that later, far from its cause.
+  if (canonicalUpdateJson(manifest) !== canonicalUpdateJson(raw)) throw new Error("Update manifest has unrecognized fields");
   return { manifest, signature: { algorithm: "ed25519", keyId: sig.keyId, value: sig.value } };
 }
 

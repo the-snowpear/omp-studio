@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { readGunzipPrefix } from "./gzip-file.js";
+import { sameWorkspacePath } from "./workspace-path.js";
 
 const STUDIO_SESSION_ORIGIN = "studio-host";
 const SESSION_PINS_FILENAME = "session-pins.json";
@@ -228,9 +229,7 @@ async function loadPinnedSessionIds(agentDir: string): Promise<ReadonlySet<strin
 }
 
 function sameWorkspaceCwd(left: string, right: string): boolean {
-  const a = resolve(left);
-  const b = resolve(right);
-  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+  return sameWorkspacePath(left, right);
 }
 
 function classifyOrigin(value: string | undefined): CatalogSessionOrigin {

@@ -8,20 +8,22 @@ const GAP = 6;
 const PAD = 8;
 
 /**
- * Electron `titleBarOverlay` reserves the top-right corner for the OS caption
- * buttons (minimize/maximize/close). Those buttons are painted by the OS above
- * the DOM, so a bubble placed there would be covered. The reserved rectangle is
- * derived from `.app-titlebar`: its height and its right padding, which resolves
- * `env(titlebar-area-width)`. In a plain browser the env falls back to 10px, so
- * the zone is effectively empty and no bubble flips.
+ * Electron `titleBarOverlay` reserves part of the title bar for OS controls:
+ * the caption buttons top-right on Windows, the traffic lights top-left on
+ * macOS. The OS paints them above the DOM, so a bubble placed there would be
+ * covered. The reserved sides are read from `.app-titlebar`: its height and its
+ * left/right padding, which resolve `env(titlebar-area-x/width)`. In a plain
+ * browser both fall back to 10px, so no zone exists and no bubble flips.
  */
-function captionZone(): { height: number; width: number } {
+function captionZones(): { height: number; left: number; right: number } {
   const titlebar = document.querySelector<HTMLElement>(".app-titlebar");
   if (titlebar) {
-    const width = Number.parseFloat(getComputedStyle(titlebar).paddingRight);
-    return { height: titlebar.offsetHeight, width: Number.isFinite(width) ? width : 140 };
+    const style = getComputedStyle(titlebar);
+    const left = Number.parseFloat(style.paddingLeft);
+    const right = Number.parseFloat(style.paddingRight);
+    return { height: titlebar.offsetHeight, left: Number.isFinite(left) ? left : 0, right: Number.isFinite(right) ? right : 140 };
   }
-  return { height: 36, width: 140 };
+  return { height: 36, left: 0, right: 140 };
 }
 
 function readTip(el: Element): string {
@@ -133,14 +135,14 @@ export function TipHost() {
     let top = above >= PAD ? above : anchor.bottom + GAP;
     let left = anchor.left + anchor.width / 2 - bubble.width / 2;
     left = Math.max(PAD, Math.min(left, window.innerWidth - bubble.width - PAD));
-    // OS caption buttons always paint over the DOM in the top-right corner, so
-    // a bubble overlapping that zone (e.g. rightmost topbar buttons) would be
-    // covered — flip it below the anchor instead. Only flip when a real
-    // titleBarOverlay inset is present; the env() browser fallback (10px) means
-    // no caption zone exists.
-    const zone = captionZone();
-    const hasCaptionOverlay = zone.width > 40;
-    if (hasCaptionOverlay && top < zone.height && left + bubble.width > window.innerWidth - zone.width) {
+    // OS window controls always paint over the DOM, so a bubble overlapping
+    // their zone (e.g. rightmost topbar buttons on Windows, leftmost on macOS)
+    // would be covered — flip it below the anchor instead. Only a real
+    // titleBarOverlay inset counts; the env() browser fallback (10px) does not.
+    const zone = captionZones();
+    const overRight = zone.right > 40 && left + bubble.width > window.innerWidth - zone.right;
+    const overLeft = zone.left > 40 && left < zone.left;
+    if (top < zone.height && (overRight || overLeft)) {
       top = anchor.bottom + GAP;
     }
     setBox({ top, left });

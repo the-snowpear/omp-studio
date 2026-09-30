@@ -43,9 +43,9 @@ if (!(bunMajor > 1 || (bunMajor === 1 && (bunMinor > 4 || (bunMinor === 4 && bun
 const nativeDirectory = join(ompSourceDirectory, "packages", "natives", "native");
 const nativeCandidates = process.platform === "win32"
   ? ["pi_natives.win32-x64-modern.node", "pi_natives.win32-x64-baseline.node"]
-  : [];
+  : process.platform === "darwin" ? ["pi_natives.darwin-arm64.node"] : [];
 if (nativeCandidates.length > 0 && !nativeCandidates.some(name => existsSync(join(nativeDirectory, name)))) {
-  throw new Error("The Windows pi_natives addon is missing; build the unpatched vendor packages/natives first");
+  throw new Error(`The ${process.platform === "win32" ? "Windows" : "macOS"} pi_natives addon is missing; build the unpatched vendor packages/natives first`);
 }
 
 const executable = join(
