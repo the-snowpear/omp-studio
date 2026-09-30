@@ -1,6 +1,6 @@
 {
   "name": "@omp-studio/platform-darwin",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "main": "./dist/src/index.js",
@@ -21,6 +21,6 @@
     "test:built": "node --test \"dist/test/*.test.js\""
   },
   "dependencies": {
-    "@omp-studio/platform": "0.1.7"
+    "@omp-studio/platform": "0.1.8"
   }
 }

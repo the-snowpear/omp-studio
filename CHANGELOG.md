@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-01
+
 ### Added
+
+- OMP 18.4.4 GUI：Runtime 消息组队列、可靠草稿取回、Ask 图片、子代理 BTW、模型服务档位与配置审批、命名空间技能、分页资源、输入预测、Stats/Frustration、Benchmark 阶段和 IDA 面板。[功能说明](docs/gui-18.4.4.md)。
 
 - macOS（Apple Silicon，macOS 13+）桌面：
   - `npm run pack:mac` 产出 ad hoc 签名的 `.app`、首装 `.dmg` 和应用内更新用 zip。内置已签名的 `omp` Runtime，并由 `audit-mac` 审计，任一项不符即失败。
@@ -27,11 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Runtime overlay 升至 `studio.13`：Host 丢失时 Runtime 自行退出（macOS 父进程看门狗），Live 音频改用短 socket 路径，会话 telemetry 采用 macOS 路径规则。
+- Runtime 升至 `18.4.4-studio.38`：Host 丢失时 Runtime 自行退出（macOS 父进程看门狗），Live 音频改用短 socket 路径，会话 telemetry 采用 macOS 路径规则。
 - 标题栏按 Window Controls Overlay 的实际区域让位：修正 Windows 上右侧的过度留白，以及标题栏提示气泡被误翻到下方。
 - 产品文案不再写死“Windows”，文件管理器名称按平台显示（资源管理器 / 访达）。
 
 ### Fixed
+
+- 图片消息取回失败可按原 ID 重试恢复，Composer 恢复后确认清除，不重复插入或发送。
+- macOS 首次预测先创建私有锁目录；紧凑窗口下 Ask 翻页、附件与提交操作保持可见。
+- 精简重复构建、测试与工件门禁，保留原生、协议、签名和更新验证。Windows/macOS 实包 GUI 各通过 19 项验收；macOS arm64 为未公证的 ad hoc 签名版本。[验收记录](docs/integration-18.4.4-macos.md)。
 
 - 导航守卫改挂到 `webContents`：此前挂在 BrowserWindow 上，实际从未生效。外部 http(s) 链接改由系统浏览器打开。
 - 权限请求只对可信渲染页放行；打包版只信任随包公钥，开发用的环境变量覆盖只在未打包时生效。
@@ -182,7 +190,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/the-snowpear/omp-studio/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/the-snowpear/omp-studio/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/the-snowpear/omp-studio/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/the-snowpear/omp-studio/compare/v0.1.4...v0.1.5
