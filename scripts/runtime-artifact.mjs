@@ -64,6 +64,7 @@ export const IMPLEMENTED_CAPABILITIES = Object.freeze([
   "agent.btw.abort",
   "prediction.control",
   "session.queue.list",
+  "session.queue.ack",
   "session.queue.remove",
   "session.queue.steer",
   "session.queue.takeback",
