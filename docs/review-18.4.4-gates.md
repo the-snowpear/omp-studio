@@ -1,10 +1,12 @@
 # 18.4.4 GUI 改动审查与门禁精简
 
+更新：后续整合已修复下述 P1：Runtime 保留取回记录，Composer 恢复后通过 `session.queue.ack` 确认清除；失败可按消息 ID 重试，仅重试确认时不会重复插入草稿。macOS 分支也已整合到同一开发线。以下为修复前审查记录；最新状态见 [整合记录](integration-18.4.4-macos.md)。
+
 日期：2026-09-30。基线：main `0af57f9` 的 detached HEAD，以及本轮全部未提交 GUI / Runtime 改动。保留既有改动，未提交、未发布、未合并 macOS 分支。
 
 ## 审查结论
 
-### P1：图片消息取回后的 Host 转存失败缺少恢复通道（未修复）
+### P1：图片消息取回后的 Host 转存失败缺少恢复通道（已在后续整合中修复）
 
 位置：`apps/desktop/src/session-commands.ts` 的 `session.queue.takeback` 分支，以及 Runtime `services/session-gui-service.ts` 的同名操作。
 
@@ -12,7 +14,7 @@ Runtime 导出图片后删除队列项，返回 `removed: true`。Host 随后执
 
 已使用真实编译后的 Host `createDesktopSemanticCommands`、模拟 Runtime 回执和失败的附件转存复现：第一次因模拟磁盘满失败，第二次返回 `removed: false`。未操作真实会话或文件。
 
-建议：为已取回提交保留按会话及消息 ID 索引的恢复记录，直到 Host 完成附件接收并确认，支持仅重试恢复；不能自动重发消息。仅在删除前检查磁盘或提前检查通道，不能解决删除后的失败窗口。本轮是审查与门禁调整，此跨 Runtime/Host 的恢复协议仍列为发布前待修项。
+建议：为已取回提交保留按会话及消息 ID 索引的恢复记录，直到 Host 完成附件接收并确认，支持仅重试恢复；不能自动重发消息。仅在删除前检查磁盘或提前检查通道，不能解决删除后的失败窗口。原审查将其列为发布前待修项；后续整合已实现恢复确认协议并通过回归验证，详见整合记录。
 
 ### P2：资源与 IDA 面板跨会话后永久 busy（已修复）
 

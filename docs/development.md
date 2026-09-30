@@ -113,3 +113,10 @@ re-running source tests. It cannot certify a real installed app from unit tests.
 
 Before editing a product surface, open [`doc/feature-index.md`](../doc/feature-index.md).
 That file is the map; [`AGENTS.md`](../AGENTS.md) only routes to it.
+
+
+Windows and macOS CI share one matrix definition and the same scoped gates.
+The manual CI run also builds a signed darwin-arm64 Runtime, packs the Mac app,
+and runs `scripts/full-gui-e2e.mjs` against that packaged app with an isolated
+home/profile and no paid model calls. GUI evidence is uploaded even on failure.
+This does not replace physical IME, Gatekeeper or TCC permission testing.

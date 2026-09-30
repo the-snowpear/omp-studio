@@ -26,3 +26,5 @@ Public documentation for OMP Studio.
 `../doc/` also holds historical design notes (`BACKEND_FOUNDATION.md`,
 `FRONTEND_INTEGRATION.md`, `real-conversation/`). Treat those as archaeology
 when they disagree with `architecture.md` or the TypeScript contracts.
+
+- [OMP 18.4.4 与 macOS 整合、修复和验收](integration-18.4.4-macos.md)

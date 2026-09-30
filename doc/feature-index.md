@@ -334,7 +334,7 @@ GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-g
 
 | 功能 | GUI | Runtime / Host |
 |---|---|---|
-| Runtime 消息组队列、取回、纠偏 | `composer/RuntimeQueue.tsx`；App 已移除自动 flush effect | `contracts/session-gui.ts`、overlay `services/session-gui-service.ts`；Desktop `session-commands.ts` 私有附件提升 |
+| Runtime 消息组队列、取回、纠偏 | `composer/RuntimeQueue.tsx`；App 已移除自动 flush effect | `contracts/session-gui.ts`、overlay `services/session-gui-service.ts`；Desktop `session-commands.ts` 私有附件提升；失败保留 Runtime 恢复记录，Composer 恢复后 `session.queue.ack` 清除，原 ID 重试不自动发送 |
 | 会话服务档位 | `composer/ServiceTierPicker.tsx`；`preview/sessionGuiPreview.ts` | `session.tier.get/set`，原生模型支持矩阵与会话覆盖 |
 | 新设置及配置来源 | `settings/Runtime1844Rows.tsx` | `contracts/gui-settings.ts`；overlay `runtime-settings-service.ts`、`cfg-service.ts` |
 | Runtime 技能身份 | `skills/runtimeSkills.ts`、`composer/mentions.ts`、`SkillsDrawer.tsx`、`composer/serialize.ts` | `session.skills.list` 返回原生解析名称、来源及 scope |
