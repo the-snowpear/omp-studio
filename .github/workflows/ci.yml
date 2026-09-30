@@ -71,6 +71,7 @@ jobs:
           workspaces: omp-patch/vendor/oh-my-pi -> target
           shared-key: platform
           key: natives-${{ matrix.native }}
+          cache-on-failure: "true"
       - run: npm run omp:build:natives
         if: steps.scope.outputs.runtime == 'true'
       - run: npm run omp:verify:patches
@@ -116,13 +117,15 @@ jobs:
           export OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$keys/trusted-public.pem"
           export OMP_RUNTIME_SIGNING_KEY_ID="$(tr -d '[:space:]' < "$keys/key-id.txt")"
           npm run pack:mac -- --skip-host --skip-build
+      - name: Install Electron test driver
+        timeout-minutes: 5
+        run: npm install --no-save --package-lock=false electron@43.4.0 playwright@1.62.1
       - name: Packaged Electron GUI acceptance
+        timeout-minutes: 10
         env:
           OMP_E2E_PACKAGED_EXE: ${{ github.workspace }}/outputs/installer-mac/mac-arm64/OMP Studio.app/Contents/MacOS/OMP Studio
           OMP_E2E_OUTPUT_DIR: ${{ github.workspace }}/outputs/macos-gui-e2e
-        run: |
-          npm install --no-save --package-lock=false electron@43.4.0 playwright@1.62.1
-          node scripts/full-gui-e2e.mjs
+        run: node scripts/full-gui-e2e.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

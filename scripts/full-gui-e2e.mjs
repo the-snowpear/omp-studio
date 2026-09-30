@@ -14,7 +14,11 @@ const temp=await mkdtemp(join(process.platform==='darwin'?'/tmp':tmpdir(),proces
 const output=process.env.OMP_E2E_OUTPUT_DIR??join(root,'outputs','full-gui-e2e');
 const report={status:'running',modelCalls:0,checks:[],profile:temp};
 let app,page;
-const query=async(name,input={})=>{const r=await page.evaluate(({name,input})=>window.ompStudio.query({queryName:name,input}),{name,input});if(!r.ok)throw Error(JSON.stringify(r.error));return r.result;};
+const query=async(name,input={})=>{const r=await page.evaluate(async({name,input})=>{
+ let timer;
+ try{return await Promise.race([window.ompStudio.query({queryName:name,input}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Query timeout: '+name)),45000);})]);}
+ finally{clearTimeout(timer);}
+},{name,input});if(!r.ok)throw Error(JSON.stringify(r.error));return r.result;};
 async function until(read,accept,label){const end=Date.now()+90000;let last;while(Date.now()<end){try{const value=await read();if(accept(value))return value;}catch(e){last=e;}await new Promise(r=>setTimeout(r,300));}throw Error(label+': '+last);}
 const command=async(name,input={})=>page.evaluate(({name,input})=>{
  const requestId=crypto.randomUUID();return new Promise((resolve,reject)=>{
@@ -50,6 +54,7 @@ try{
  for(const key of ['ELECTRON_RUN_AS_NODE','OMP_RUNTIME_SIGNING_PRIVATE_KEY','OMP_RENDERER_DEV_URL','PI_CODING_AGENT_DIR'])delete env[key];
  const packaged=process.env.OMP_E2E_PACKAGED_EXE;
  if(packaged)delete env.OMP_ARTIFACT_DIR;
+ console.log('Launching Electron for '+platform);
  app=await _electron.launch({executablePath:packaged??require('electron'),args:packaged?['--user-data-dir='+join(temp,'user-data')]:[temp],cwd:join(temp,'workspace'),env,timeout:60000});
  if(packaged)await app.evaluate(({dialog},workspace)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[workspace]});},join(temp,'workspace'));
  page=await app.firstWindow();page.setDefaultTimeout(20000);
@@ -62,6 +67,7 @@ try{
  const environment=await until(()=>query('environment.get'),r=>r.runtime.status==='connected','Runtime');
  if(environment.runtime.runtimeVersion!==runtime||environment.runtime.classification!=='managed')throw Error('Wrong Runtime');
  report.runtime=environment.runtime.runtimeVersion;
+ console.log('Authenticated Runtime '+report.runtime);
  if(packaged){
   const terminal=await page.evaluate(()=>window.ompStudioTerminal.create({cols:80,rows:24}));
   await page.evaluate(id=>window.ompStudioTerminal.dispose(id),terminal.id);
@@ -86,6 +92,7 @@ try{
  await editor.press('Escape');if((await query('session.state')).isStreaming)throw Error('Draft submitted');
  report.checks.push('Chromium IME composition and Escape; unsent draft did not submit');await capture('real-composer');
  for(const preview of [false,true])for(const route of ['statistics','capabilities','settings','model-config','agent-hub']){
+  console.log((preview?'Preview ':'Real ')+route);
   await page.evaluate(({preview,route})=>{localStorage.setItem('omp.previewMode',preview?'1':'0');localStorage.setItem('omp.lastRoute',route);},{preview,route});
   const routeUrl=new URL(page.url());routeUrl.search=preview?'?preview=1':'';
   await page.goto(routeUrl.href);await page.waitForFunction(()=>!!window.ompStudio);await page.waitForTimeout(800);
@@ -128,4 +135,7 @@ try{
  report.imeScope='CDP composition integration; physical OS IME not manually tested';
  report.status='passed';
 }catch(error){report.status='failed';report.error=String(error);process.exitCode=1;if(page)await capture('failure').catch(()=>{});}
-finally{if(app)await app.close().catch(()=>{});await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));}
+finally{
+ if(app){let timer;const child=app.process();try{await Promise.race([app.close().catch(error=>{report.status='failed';report.cleanupError=String(error);process.exitCode=1;}),new Promise(resolve=>{timer=setTimeout(()=>{report.status='failed';report.cleanupError='Electron did not close within 10 seconds';process.exitCode=1;child.kill('SIGKILL');resolve();},10000);})]);}finally{clearTimeout(timer);}}
+ await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+}
