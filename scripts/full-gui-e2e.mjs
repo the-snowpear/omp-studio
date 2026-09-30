@@ -9,7 +9,8 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 const root=fileURLToPath(new URL('..',import.meta.url));
 const require=createRequire(import.meta.url);
 const { _electron }=require(process.env.PLAYWRIGHT_MODULE??'playwright');
-const temp=await mkdtemp(join(tmpdir(),'omp-full-gui-'));
+// macOS sun_path is 104 bytes; the native prediction broker appends its socket name.
+const temp=await mkdtemp(join(process.platform==='darwin'?'/tmp':tmpdir(),process.platform==='darwin'?'osg-':'omp-full-gui-'));
 const output=process.env.OMP_E2E_OUTPUT_DIR??join(root,'outputs','full-gui-e2e');
 const report={status:'running',modelCalls:0,checks:[],profile:temp};
 let app,page;
