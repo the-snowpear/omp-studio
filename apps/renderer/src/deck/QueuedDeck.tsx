@@ -129,6 +129,24 @@ export function QueuedDeck({
   const total = remaining.length;
   const index = total === 0 ? 0 : Math.min(pos, total - 1);
   const current = remaining[index];
+  const deckRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const deck = deckRef.current;
+    const area = deck?.closest(".convo-wrap");
+    const anchor = deck?.parentElement;
+    if (!current || !deck || !area || !anchor) return;
+    const update = () => {
+      const available = anchor.getBoundingClientRect().bottom - area.getBoundingClientRect().top - 16;
+      deck.style.setProperty("--deck-max-height", `${Math.max(64, available)}px`);
+    };
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
+    observer?.observe(area);
+    observer?.observe(anchor);
+    window.addEventListener("resize", update);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", update); };
+  }, [Boolean(current)]);
+
   const editsLocked = busy || askPhase === "leave" || leaving === true;
   const actionsLocked = editsLocked || disabled === true;
   const kind = current?.kind;
@@ -269,7 +287,7 @@ export function QueuedDeck({
   }, [editsLocked]);
 
   if (!current) {
-    return <div className="deck" role="region" aria-label={regionLabel} />;
+    return <div ref={deckRef} className="deck" role="region" aria-label={regionLabel} />;
   }
 
   /* 本批次全部 ask 的 header（按队列顺序，含当前卡），供标题行胶囊切换 */
@@ -303,6 +321,7 @@ export function QueuedDeck({
   const askLeave = askPhase === "leave" || leaving === true;
   return (
     <div
+      ref={deckRef}
       className={`deck active preview-queue${askShell ? " is-ask" : ""}${askEnter ? " is-ask-enter" : ""}${askLeave ? " is-ask-leave" : ""}`}
       {...(previewMark === true ? { "data-preview-deck": true } : {})}
       role="region"

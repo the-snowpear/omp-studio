@@ -80,6 +80,8 @@ try{
  app=await _electron.launch({executablePath:packaged??require('electron'),args:packaged?['--user-data-dir='+join(temp,'user-data')]:[temp],cwd:join(temp,'workspace'),env,timeout:60000});
  let loggedBytes=0;for(const stream of [app.process().stdout,app.process().stderr])stream?.on('data',chunk=>{loggedBytes+=chunk.length;if(loggedBytes<=2*1024*1024)void appendFile(join(output,'electron.log'),chunk).catch(()=>{});});
  page=await app.firstWindow({timeout:30000});page.setDefaultTimeout(20000);
+ await page.setViewportSize({width:1024,height:684});
+ report.viewport='1024x684, panels open';
  console.log('Electron window ready');
  if(packaged)await app.evaluate(({dialog},workspace)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[workspace]});},join(temp,'workspace'));
  await page.waitForFunction(()=>!!window.ompStudio);
