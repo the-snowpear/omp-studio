@@ -1382,10 +1382,30 @@ index c734f5a9f7..eb182a5712 100644
  	selectedModel: Model,
  	activeModel: Model | undefined,
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
-index c6c6c80bf0..fec08bd3f8 100644
+index c6c6c80bf0..7dc53a45d7 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
 +++ b/packages/coding-agent/test/extensions-runner.test.ts
-@@ -2749,6 +2749,76 @@ describe("ExtensionRunner", () => {
+@@ -795,15 +795,11 @@ describe("ExtensionRunner", () => {
+ 			);
+ 			const controller = new AbortController();
+ 			const message = createAssistantMessage("original");
+-			const started = new Promise<void>(resolve => {
+-				const watcher = fs.watch(tempDir.path(), (_eventType, filename) => {
+-					if (filename?.toString() !== path.basename(startedPath)) return;
+-					watcher.close();
+-					resolve();
+-				});
+-			});
+ 			const emission = runner.emitAssistantMessage(message, controller.signal);
+-			await started;
++			// FSEvents can coalesce or omit the filename; synchronize on the marker itself.
++			const deadline = Date.now() + 5_000;
++			while (!fs.existsSync(startedPath) && Date.now() < deadline) await Bun.sleep(10);
++			if (!fs.existsSync(startedPath)) controller.abort(new Error("handler did not start"));
+ 			expect(await Bun.file(startedPath).text()).toBe("started");
+ 			controller.abort(new Error("cancelled"));
+ 			await expect(emission).resolves.toEqual([{ type: "text", text: "accepted" }]);
+@@ -2749,6 +2745,76 @@ describe("ExtensionRunner", () => {
  			}
  		});
  
