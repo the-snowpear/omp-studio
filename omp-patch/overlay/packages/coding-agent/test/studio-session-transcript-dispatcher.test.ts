@@ -98,14 +98,40 @@ function transcriptFixture(
 }
 
 describe("session.transcript.read dispatcher", () => {
-	test("prediction drafts bypass replay, terminal receipts and worker revival", async()=>{
-		const manager=SessionManager.inMemory();const {runtime,projector,frames,dispatcher,request}=transcriptFixture(manager);
-		let calls=0;let revivals=0;
-		Object.assign(runtime,{ensureWorkerLive:async()=>{revivals++;}});
-		Object.assign(runtime.services,{prediction:{query:async(input:{version:number})=>{calls++;return {version:input.version,suffix:"test",engine:"ngram"};}}});
-		const before=projector.response("before").terminalReceipts.length;
-		for(let i=0;i<2;i++){await dispatcher.dispatch(request("same-id",{kind:"prediction.query",sessionId:manager.getSessionId(),version:i,before:"PRIVATE UNSENT",prefix:""}));await Bun.sleep(0);}
-		expect(calls).toBe(2);expect(revivals).toBe(0);expect(frames).toHaveLength(2);
+	test("prediction drafts bypass replay, terminal receipts and worker revival", async () => {
+		const manager = SessionManager.inMemory();
+		const { runtime, projector, frames, dispatcher, request } = transcriptFixture(manager);
+		let calls = 0;
+		let revivals = 0;
+		Object.assign(runtime, {
+			ensureWorkerLive: async () => {
+				revivals++;
+			},
+		});
+		Object.assign(runtime.services, {
+			prediction: {
+				query: async (input: { version: number }) => {
+					calls++;
+					return { version: input.version, suffix: "test", engine: "ngram" };
+				},
+			},
+		});
+		const before = projector.response("before").terminalReceipts.length;
+		for (let i = 0; i < 2; i++) {
+			await dispatcher.dispatch(
+				request("same-id", {
+					kind: "prediction.query",
+					sessionId: manager.getSessionId(),
+					version: i,
+					before: "PRIVATE UNSENT",
+					prefix: "",
+				}),
+			);
+			await Bun.sleep(0);
+		}
+		expect(calls).toBe(2);
+		expect(revivals).toBe(0);
+		expect(frames).toHaveLength(2);
 		expect(projector.response("after").terminalReceipts).toHaveLength(before);
 		expect(projector.snapshot().activeCommandIds).toEqual([]);
 		expect(JSON.stringify(frames)).not.toContain("PRIVATE UNSENT");

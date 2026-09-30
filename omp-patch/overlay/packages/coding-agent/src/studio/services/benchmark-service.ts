@@ -38,11 +38,11 @@ function project(rows: readonly BenchTableRow[]): BenchmarkModelResult[] {
 							: {}),
 					})),
 				)
-			: row.report.results
-					.filter(Boolean)
-					.map(({ phase, ...result }) =>
-						({ ...result, ...(phase ? { workloadPhase: phase } : {}), ...(!result.ok ? { error: clean(result.error) } : {}) }),
-					),
+			: row.report.results.filter(Boolean).map(({ phase, ...result }) => ({
+					...result,
+					...(phase ? { workloadPhase: phase } : {}),
+					...(!result.ok ? { error: clean(result.error) } : {}),
+				})),
 	}));
 }
 

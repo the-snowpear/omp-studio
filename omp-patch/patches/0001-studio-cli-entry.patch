@@ -26,21 +26,22 @@ index b0b264cd65..ad54345b63 100644
  			"types": "./src/index.ts",
  			"import": "./src/index.ts"
 diff --git a/packages/coding-agent/src/cli.ts b/packages/coding-agent/src/cli.ts
-index 6b6b34417b..70cbc979f9 100755
+index 6b6b34417b..d2fd2de66e 100755
 --- a/packages/coding-agent/src/cli.ts
 +++ b/packages/coding-agent/src/cli.ts
-@@ -308,6 +308,10 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
+@@ -308,6 +308,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
  		await startTextPredictDaemonFromEnvironment();
  		return true;
  	}
-+	if(arg === "__omp_worker_studio_stats") {
-+		const {startStudioStatsWorker}=await import("./studio/stats-worker");
-+		await startStudioStatsWorker();return true;
++	if (arg === "__omp_worker_studio_stats") {
++		const { startStudioStatsWorker } = await import("./studio/stats-worker");
++		await startStudioStatsWorker();
++		return true;
 +	}
  	return false;
  }
  
-@@ -559,6 +563,14 @@ export async function runCli(argv: string[]): Promise<void> {
+@@ -559,6 +564,14 @@ export async function runCli(argv: string[]): Promise<void> {
  		process.stdout.write(formatLicenseOutput());
  		return;
  	}

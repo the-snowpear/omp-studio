@@ -53,7 +53,7 @@ try{
  if(packaged)await app.evaluate(({dialog},workspace)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[workspace]});},join(temp,'workspace'));
  page=await app.firstWindow();page.setDefaultTimeout(20000);
  await page.waitForFunction(()=>!!window.ompStudio);
- await page.evaluate(()=>{localStorage.setItem('omp.previewMode','0');localStorage.setItem('omp.startupNotice.dismissed','incomplete-v1');localStorage.setItem('omp.lastRoute','home');});
+ await page.evaluate(()=>{localStorage.setItem('omp.appSettings',JSON.stringify({language:'zh'}));localStorage.setItem('omp.previewMode','0');localStorage.setItem('omp.startupNotice.dismissed','incomplete-v1');localStorage.setItem('omp.lastRoute','home');});
  await page.reload();
  await page.getByRole('button',{name:/打开本地文件夹|Open local folder/i}).first().click();
  await until(()=>query('projects.list'),r=>r.workspaces.some(w=>w.active),'workspace');

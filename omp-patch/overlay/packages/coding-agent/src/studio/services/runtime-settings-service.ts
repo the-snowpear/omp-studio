@@ -1,4 +1,9 @@
-import { GUI_SETTING_KEYS, isGuiSettingKey, validateGuiSetting, type GuiSettingsSnapshot } from "../gui-settings-protocol";
+import {
+	GUI_SETTING_KEYS,
+	isGuiSettingKey,
+	validateGuiSetting,
+	type GuiSettingsSnapshot,
+} from "../gui-settings-protocol";
 import { cfgModelRoles } from "../../config/model-settings";
 import { cfgProvidersCacheWarming } from "../../session/settings";
 import { cfgTaskSpeculativeLaunch } from "../../task/settings";
@@ -185,7 +190,14 @@ export function isStudioRuntimeSettingValue(
 	key: StudioRuntimeSettingKey,
 	value: unknown,
 ): value is StudioRuntimeSettingValue {
-	if (isGuiSettingKey(key)) { try { validateGuiSetting(key,value); return true; } catch { return false; } }
+	if (isGuiSettingKey(key)) {
+		try {
+			validateGuiSetting(key, value);
+			return true;
+		} catch {
+			return false;
+		}
+	}
 	switch (key) {
 		case "modelRoles.judge":
 			return typeof value === "string" && value.length <= 4096 && !/[\u0000-\u001f]/u.test(value);
@@ -276,7 +288,14 @@ export class StudioRuntimeSettingsService {
 		this.#syncSession();
 		return {
 			configured: { "compaction.experimentalContextManagement": this.#notesConfigured },
-			sources: Object.fromEntries(STUDIO_RUNTIME_SETTING_KEYS.map(key => [key, key === "modelRoles.judge" ? cfgModelRoles.provenance(this.session.settings) : SETTING_HANDLES[key].provenance(this.session.settings)])),
+			sources: Object.fromEntries(
+				STUDIO_RUNTIME_SETTING_KEYS.map(key => [
+					key,
+					key === "modelRoles.judge"
+						? cfgModelRoles.provenance(this.session.settings)
+						: SETTING_HANDLES[key].provenance(this.session.settings),
+				]),
+			),
 			restartRequired:
 				this.#notesConfigured === this.#notesEffective ? [] : ["compaction.experimentalContextManagement"],
 		};
@@ -285,7 +304,9 @@ export class StudioRuntimeSettingsService {
 	snapshot(): StudioRuntimeSettingsSnapshot {
 		this.#syncSession();
 		return {
-			...Object.fromEntries(GUI_SETTING_KEYS.map(key => [key, structuredClone(SETTING_HANDLES[key].get(this.session.settings))])) as Required<GuiSettingsSnapshot>,
+			...(Object.fromEntries(
+				GUI_SETTING_KEYS.map(key => [key, structuredClone(SETTING_HANDLES[key].get(this.session.settings))]),
+			) as Required<GuiSettingsSnapshot>),
 			"modelRoles.judge": this.session.settings.getModelRoles().judge ?? "",
 			"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem.get(this.session.settings),
 			"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes.get(this.session.settings),

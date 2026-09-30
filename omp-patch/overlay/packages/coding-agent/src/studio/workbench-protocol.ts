@@ -1,4 +1,12 @@
-import { SESSION_GUI_KINDS, SESSION_GUI_READ_KINDS, isSessionGuiKind, validateSessionGuiOperation, validateSessionGuiResult, type SessionGuiOperation, type SessionGuiResultMap } from "./session-gui-protocol";
+import {
+	SESSION_GUI_KINDS,
+	SESSION_GUI_READ_KINDS,
+	isSessionGuiKind,
+	validateSessionGuiOperation,
+	validateSessionGuiResult,
+	type SessionGuiOperation,
+	type SessionGuiResultMap,
+} from "./session-gui-protocol";
 import {
 	SKILLSHARE_OPERATION_KINDS,
 	isSkillshareOperationKind,
@@ -100,7 +108,7 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
- | SessionGuiOperation
+	| SessionGuiOperation
 	| SkillshareOperation
 	| LiveAudioOperation
 	| MediaOperation
@@ -140,7 +148,8 @@ export interface WorkbenchResultMap
 	"tokens.count": TokenCountResult;
 	"runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
-export const WORKBENCH_OPERATION_KINDS = [...SESSION_GUI_KINDS,
+export const WORKBENCH_OPERATION_KINDS = [
+	...SESSION_GUI_KINDS,
 	...SKILLSHARE_OPERATION_KINDS,
 	...LIVE_AUDIO_OPERATION_KINDS,
 	...MEDIA_OPERATION_KINDS,
@@ -159,7 +168,8 @@ export const WORKBENCH_OPERATION_KINDS = [...SESSION_GUI_KINDS,
 	"tokens.count",
 	"runtime.models.list",
 ] as const;
-export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [...SESSION_GUI_READ_KINDS,
+export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
+	...SESSION_GUI_READ_KINDS,
 	"skillshare.status",
 	"skillshare.home",
 	"skillshare.search",
@@ -249,8 +259,11 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 		validateAnnotationOperation(value);
 		return;
 	}
-	if (isSessionGuiKind(kind)) { validateSessionGuiOperation(value); return; }
-  if (isSkillshareOperationKind(kind)) {
+	if (isSessionGuiKind(kind)) {
+		validateSessionGuiOperation(value);
+		return;
+	}
+	if (isSkillshareOperationKind(kind)) {
 		validateSkillshareOperation(value);
 		return;
 	}
@@ -344,7 +357,10 @@ function serviceRow(value: unknown): void {
 	if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
- if(isSessionGuiKind(kind)){validateSessionGuiResult(kind,value);return;}
+	if (isSessionGuiKind(kind)) {
+		validateSessionGuiResult(kind, value);
+		return;
+	}
 	if (isSkillshareOperationKind(kind)) {
 		validateSkillshareResult(kind, value);
 		return;

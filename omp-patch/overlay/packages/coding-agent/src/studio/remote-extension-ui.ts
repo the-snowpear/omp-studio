@@ -68,9 +68,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function mapAskDialogValue(value: unknown, questions: ExtensionAskDialogQuestion[], acceptImages=false): ExtensionAskDialogResult {
- validateAskAnswerPayload(value);
- if(!acceptImages&&value.results.some(row=>row.customInputImages?.length||row.noteImages?.length))throw new StudioInteractionError("INVALID_ARGUMENT","This interaction does not accept images");
+function mapAskDialogValue(
+	value: unknown,
+	questions: ExtensionAskDialogQuestion[],
+	acceptImages = false,
+): ExtensionAskDialogResult {
+	validateAskAnswerPayload(value);
+	if (!acceptImages && value.results.some(row => row.customInputImages?.length || row.noteImages?.length))
+		throw new StudioInteractionError("INVALID_ARGUMENT", "This interaction does not accept images");
 	if (!isRecord(value) || !Array.isArray(value.results) || value.results.length !== questions.length) {
 		throw new StudioInteractionError(
 			"INVALID_ARGUMENT",
@@ -107,9 +112,11 @@ function mapAskDialogValue(value: unknown, questions: ExtensionAskDialogQuestion
 			multi: question.multi === true,
 			selectedOptions: raw.selectedOptions as string[],
 			...(typeof customInput === "string" ? { customInput } : {}),
-   ...(typeof raw.note === "string" ? {note:raw.note}:{}),
-   ...(raw.customInputImages ? {customInputImages:raw.customInputImages as import("@oh-my-pi/pi-ai").ImageContent[]}:{}),
-   ...(raw.noteImages ? {noteImages:raw.noteImages as import("@oh-my-pi/pi-ai").ImageContent[]}:{}),
+			...(typeof raw.note === "string" ? { note: raw.note } : {}),
+			...(raw.customInputImages
+				? { customInputImages: raw.customInputImages as import("@oh-my-pi/pi-ai").ImageContent[] }
+				: {}),
+			...(raw.noteImages ? { noteImages: raw.noteImages as import("@oh-my-pi/pi-ai").ImageContent[] } : {}),
 		});
 	}
 	return { kind: "submit", results: mapped };
@@ -176,12 +183,12 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 					commandId: this.commandId,
 					title: "Agent 提问",
 					questions: remoteQuestions,
-     acceptImages: dialogOptions?.acceptImages === true,
+					acceptImages: dialogOptions?.acceptImages === true,
 				}),
 			dialogOptions,
 		);
 		if (value === undefined) return undefined;
-		return mapAskDialogValue(value, questions,dialogOptions?.acceptImages===true);
+		return mapAskDialogValue(value, questions, dialogOptions?.acceptImages === true);
 	};
 
 	async confirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean> {
@@ -386,4 +393,4 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 export function createStudioRemoteUiFactory(gateway: StudioInteractionGateway): ToolUiFactory {
 	return (toolCall?: ToolCallContext) => new StudioRemoteExtensionUiContext(gateway, toolCallCommandId(toolCall));
 }
-import {validateAskAnswerPayload} from "./ask-attachments-protocol";
+import { validateAskAnswerPayload } from "./ask-attachments-protocol";

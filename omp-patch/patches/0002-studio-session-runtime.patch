@@ -129,7 +129,7 @@ index f9859ec30f..34adf304d0 100644
  	attribution?: MessageAttribution;
  }
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index c038ea3241..d59761c15d 100644
+index c038ea3241..c6d93262e3 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
 @@ -580,6 +580,8 @@ type ScheduledAgentContinueOptions = {
@@ -185,17 +185,18 @@ index c038ea3241..d59761c15d 100644
  		};
  	}
  
-@@ -1439,7 +1453,8 @@ export class AgentSession implements SettingsScope {
+@@ -1439,7 +1453,9 @@ export class AgentSession implements SettingsScope {
  		this.#reseedTokenRate();
  		this.agent.setQueuedMessageGrouping(
  			(previous, next) =>
 -				isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next)),
-+				(this.#studioQueueIds.has(previous) && this.#studioQueueIds.get(previous) === this.#studioQueueIds.get(next)) ||
++				(this.#studioQueueIds.has(previous) &&
++					this.#studioQueueIds.get(previous) === this.#studioQueueIds.get(next)) ||
 +				(isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next))),
  		);
  		this.#codeModeState = config.codeModeState ?? {};
  		this.sessionManager = config.sessionManager;
-@@ -4215,7 +4230,7 @@ export class AgentSession implements SettingsScope {
+@@ -4215,7 +4231,7 @@ export class AgentSession implements SettingsScope {
  					return;
  				}
  			}
@@ -204,7 +205,7 @@ index c038ea3241..d59761c15d 100644
  				options?.onSkip?.("aborted");
  				return;
  			}
-@@ -4326,7 +4341,13 @@ export class AgentSession implements SettingsScope {
+@@ -4326,7 +4342,13 @@ export class AgentSession implements SettingsScope {
  				// streaming turn — agent.continue() here would race the handoff's session
  				// reset. The first-class fix is in #checkCompaction/the agent_end handler,
  				// but this guard catches anything that bypasses that path.
@@ -219,7 +220,7 @@ index c038ea3241..d59761c15d 100644
  					this.#skipAgentContinue("session-unavailable", request);
  					return;
  				}
-@@ -4334,6 +4355,14 @@ export class AgentSession implements SettingsScope {
+@@ -4334,6 +4356,14 @@ export class AgentSession implements SettingsScope {
  					this.#skipAgentContinue("should-continue-false", request);
  					return;
  				}
@@ -234,7 +235,7 @@ index c038ea3241..d59761c15d 100644
  
  				const active = this.#activeAgentContinue;
  				if (active) {
-@@ -4393,6 +4422,7 @@ export class AgentSession implements SettingsScope {
+@@ -4393,6 +4423,7 @@ export class AgentSession implements SettingsScope {
  				delayMs: 100,
  				generation: options.generation,
  				shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -242,7 +243,7 @@ index c038ea3241..d59761c15d 100644
  			});
  			return true;
  		}
-@@ -4436,6 +4466,7 @@ export class AgentSession implements SettingsScope {
+@@ -4436,6 +4467,7 @@ export class AgentSession implements SettingsScope {
  						source: "auto-continue-queued-message",
  						generation,
  						shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -250,7 +251,7 @@ index c038ea3241..d59761c15d 100644
  					});
  					return;
  				}
-@@ -4836,6 +4867,28 @@ export class AgentSession implements SettingsScope {
+@@ -4836,6 +4868,28 @@ export class AgentSession implements SettingsScope {
  		}
  	}
  
@@ -279,7 +280,7 @@ index c038ea3241..d59761c15d 100644
  	/**
  	 * Subscribe to agent events.
  	 * Session persistence is handled internally (saves messages on message_end).
-@@ -6187,6 +6240,11 @@ export class AgentSession implements SettingsScope {
+@@ -6187,6 +6241,11 @@ export class AgentSession implements SettingsScope {
  	}
  
  	/** All messages including custom types like BashExecutionMessage */
@@ -291,7 +292,7 @@ index c038ea3241..d59761c15d 100644
  	get messages(): AgentMessage[] {
  		return this.agent.state.messages;
  	}
-@@ -6936,7 +6994,7 @@ export class AgentSession implements SettingsScope {
+@@ -6936,7 +6995,7 @@ export class AgentSession implements SettingsScope {
  			await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
  				timestamp: submittedAt,
  				attribution: promptAttribution,
@@ -300,7 +301,7 @@ index c038ea3241..d59761c15d 100644
  				rawText: typedText,
  			});
  			outcome.sessionClaimed = true;
-@@ -7031,21 +7089,17 @@ export class AgentSession implements SettingsScope {
+@@ -7031,21 +7090,17 @@ export class AgentSession implements SettingsScope {
  
  		let dispatched = false;
  		try {
@@ -330,7 +331,7 @@ index c038ea3241..d59761c15d 100644
  			});
  		} catch (error) {
  			if (error instanceof AgentStartPolicyChangedError && message.role === "user") {
-@@ -7352,6 +7406,9 @@ export class AgentSession implements SettingsScope {
+@@ -7352,6 +7407,9 @@ export class AgentSession implements SettingsScope {
  			acceptTerminalEmptyStop?: boolean;
  		},
  	): Promise<boolean> {
@@ -340,7 +341,7 @@ index c038ea3241..d59761c15d 100644
  		// Returns false when the prompt was dropped before reaching the agent —
  		// every pre-dispatch bail (generation bump from abort, disposal, usage
  		// preflight denial) exits silently, and prompt() uses the outcome to hand
-@@ -7752,6 +7809,7 @@ export class AgentSession implements SettingsScope {
+@@ -7752,6 +7810,7 @@ export class AgentSession implements SettingsScope {
  		await this.#queueUserMessage(expandedText, images, "steer", {
  			timestamp: submittedAt,
  			attribution: options?.attribution,
@@ -348,7 +349,7 @@ index c038ea3241..d59761c15d 100644
  			rawText: text,
  		});
  	}
-@@ -7777,6 +7835,7 @@ export class AgentSession implements SettingsScope {
+@@ -7777,6 +7836,7 @@ export class AgentSession implements SettingsScope {
  			await this.#queueUserMessage(expandedText, images, "followUp", {
  				timestamp: submittedAt,
  				attribution: options?.attribution,
@@ -356,7 +357,7 @@ index c038ea3241..d59761c15d 100644
  				rawText: text,
  			});
  			return;
-@@ -7901,6 +7960,8 @@ export class AgentSession implements SettingsScope {
+@@ -7901,6 +7961,8 @@ export class AgentSession implements SettingsScope {
  			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
  			const userMessage: AgentMessage = { role: "user", content, attribution, timestamp: timestamp ?? Date.now() };
  			this.#queuedMessageRawText.set(userMessage, rawText);
@@ -365,7 +366,7 @@ index c038ea3241..d59761c15d 100644
  			records.push(userMessage);
  			this.#irc.queueAside(records);
  			// The awaits above (image normalization / vision description) can span the run's
-@@ -7923,6 +7984,8 @@ export class AgentSession implements SettingsScope {
+@@ -7923,6 +7985,8 @@ export class AgentSession implements SettingsScope {
  				timestamp: timestamp ?? Date.now(),
  			};
  			this.#queuedMessageRawText.set(userMessage, rawText);
@@ -374,7 +375,7 @@ index c038ea3241..d59761c15d 100644
  			this.agent.followUp(userMessage);
  		} else {
  			for (const notice of prependMessages) this.agent.steer(notice);
-@@ -7936,6 +7999,8 @@ export class AgentSession implements SettingsScope {
+@@ -7936,6 +8000,8 @@ export class AgentSession implements SettingsScope {
  				timestamp: timestamp ?? Date.now(),
  			};
  			this.#queuedMessageRawText.set(userMessage, rawText);
@@ -383,7 +384,7 @@ index c038ea3241..d59761c15d 100644
  			this.agent.steer(userMessage);
  		}
  		this.#scheduleIdleQueueDrain();
-@@ -7958,6 +8023,7 @@ export class AgentSession implements SettingsScope {
+@@ -7958,6 +8024,7 @@ export class AgentSession implements SettingsScope {
  		this.#queuedMessageDrainScheduled = true;
  		this.#scheduleAgentContinue({
  			source: "queued-message-drain",
@@ -391,58 +392,91 @@ index c038ea3241..d59761c15d 100644
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
  				return (
-@@ -8518,6 +8584,50 @@ export class AgentSession implements SettingsScope {
+@@ -8518,6 +8585,83 @@ export class AgentSession implements SettingsScope {
  
  	/** Chip texts for the queue display. Steering live steering took for the streaming response
  	 *  stays listed until the transcript records it, when the model actually switches to it. */
 +
-+ /** Stable object identities are private to this Runtime generation, never text matched. */
-+ #studioQueueIds = new WeakMap<AgentMessage, string>();
-+ #studioQueueId(message: AgentMessage): string {
-+  let id=this.#studioQueueIds.get(message);if(!id){id=crypto.randomUUID();this.#studioQueueIds.set(message,id);}return id;
-+ }
-+ #studioQueueGroups() {
-+  const rows: Array<{ id:string; queue:'steering'|'followUp'; state:'pending'|'delivering'; messages:AgentMessage[]; anchor:AgentMessage }> = [];
-+  for(const [queue,state,messages] of [
-+   ['steering','delivering',this.agent.peekLiveSteeredMessages()],
-+   ['steering','pending',this.agent.peekSteeringQueue()],
-+   ['followUp','pending',this.agent.peekFollowUpQueue()],
-+  ] as const) {
-+   const groups=new Map<string,AgentMessage[]>();
-+   for(const message of messages){const id=this.#studioQueueId(message);const group=groups.get(id)??[];group.push(message);groups.set(id,group);}
-+   for(const [id,group] of groups){const anchor=group.findLast(isUserAuthoredQueuedMessage);if(anchor)rows.push({id,queue,state,messages:group,anchor});}
-+  }
-+  return rows;
-+ }
-+ getStudioQueueSnapshot() {
-+  return this.#studioQueueGroups().map(({id,queue,state,anchor})=>({id,queue,state,text:this.#queuedMessageRawText.get(anchor)??queueChipText(anchor),imageCount:toRestoredQueuedMessage(anchor).images?.length??0}));
-+ }
-+ getStudioQueueDraft(id:string) {
-+  const row=this.#studioQueueGroups().find(row=>row.id===id);if(!row || row.state!=='pending')return undefined;
-+  const draft=toRestoredQueuedMessage(row.anchor);
-+  return {...draft,text:this.#queuedMessageRawText.get(row.anchor)??draft.text};
-+ }
-+ steerStudioQueuedMessage(id:string): boolean {
-+  const row=this.#studioQueueGroups().find(row=>row.id===id);
-+  if(!row || row.state!=="pending")return false;
-+  if(row.queue==="steering")return true;
-+  const retained=this.agent.peekFollowUpQueue().filter(message=>!row.messages.includes(message));
-+  this.agent.replaceQueue("followUp",retained);
-+  this.agent.replaceQueue("steering",[...this.agent.peekSteeringQueue(),...row.messages]);
-+  this.#reconcileQueuedMessageDrain();return true;
-+ }
-+ removeStudioQueuedMessage(id:string): boolean {
-+  const row=this.#studioQueueGroups().find(row=>row.id===id);if(!row || row.state!=='pending')return false;
-+  const queue=row.queue==='steering'?this.agent.peekSteeringQueue():this.agent.peekFollowUpQueue();
-+  const index=queue.indexOf(row.anchor);if(index<0)return false;
-+  const without=this.#withoutQueuedUserMessage(queue,index).filter(message=>this.#studioQueueIds.get(message)!==id);
-+  this.agent.replaceQueue(row.queue,without);this.#reconcileQueuedMessageDrain();return true;
-+ }
++	/** Stable object identities are private to this Runtime generation, never text matched. */
++	#studioQueueIds = new WeakMap<AgentMessage, string>();
++	#studioQueueId(message: AgentMessage): string {
++		let id = this.#studioQueueIds.get(message);
++		if (!id) {
++			id = crypto.randomUUID();
++			this.#studioQueueIds.set(message, id);
++		}
++		return id;
++	}
++	#studioQueueGroups() {
++		const rows: Array<{
++			id: string;
++			queue: "steering" | "followUp";
++			state: "pending" | "delivering";
++			messages: AgentMessage[];
++			anchor: AgentMessage;
++		}> = [];
++		for (const [queue, state, messages] of [
++			["steering", "delivering", this.agent.peekLiveSteeredMessages()],
++			["steering", "pending", this.agent.peekSteeringQueue()],
++			["followUp", "pending", this.agent.peekFollowUpQueue()],
++		] as const) {
++			const groups = new Map<string, AgentMessage[]>();
++			for (const message of messages) {
++				const id = this.#studioQueueId(message);
++				const group = groups.get(id) ?? [];
++				group.push(message);
++				groups.set(id, group);
++			}
++			for (const [id, group] of groups) {
++				const anchor = group.findLast(isUserAuthoredQueuedMessage);
++				if (anchor) rows.push({ id, queue, state, messages: group, anchor });
++			}
++		}
++		return rows;
++	}
++	getStudioQueueSnapshot() {
++		return this.#studioQueueGroups().map(({ id, queue, state, anchor }) => ({
++			id,
++			queue,
++			state,
++			text: this.#queuedMessageRawText.get(anchor) ?? queueChipText(anchor),
++			imageCount: toRestoredQueuedMessage(anchor).images?.length ?? 0,
++		}));
++	}
++	getStudioQueueDraft(id: string) {
++		const row = this.#studioQueueGroups().find(row => row.id === id);
++		if (!row || row.state !== "pending") return undefined;
++		const draft = toRestoredQueuedMessage(row.anchor);
++		return { ...draft, text: this.#queuedMessageRawText.get(row.anchor) ?? draft.text };
++	}
++	steerStudioQueuedMessage(id: string): boolean {
++		const row = this.#studioQueueGroups().find(row => row.id === id);
++		if (!row || row.state !== "pending") return false;
++		if (row.queue === "steering") return true;
++		const retained = this.agent.peekFollowUpQueue().filter(message => !row.messages.includes(message));
++		this.agent.replaceQueue("followUp", retained);
++		this.agent.replaceQueue("steering", [...this.agent.peekSteeringQueue(), ...row.messages]);
++		this.#reconcileQueuedMessageDrain();
++		return true;
++	}
++	removeStudioQueuedMessage(id: string): boolean {
++		const row = this.#studioQueueGroups().find(row => row.id === id);
++		if (!row || row.state !== "pending") return false;
++		const queue = row.queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
++		const index = queue.indexOf(row.anchor);
++		if (index < 0) return false;
++		const without = this.#withoutQueuedUserMessage(queue, index).filter(
++			message => this.#studioQueueIds.get(message) !== id,
++		);
++		this.agent.replaceQueue(row.queue, without);
++		this.#reconcileQueuedMessageDrain();
++		return true;
++	}
 +
  	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[] } {
  		return {
  			steering: [...this.agent.peekLiveSteeredMessages(), ...this.agent.peekSteeringQueue()]
-@@ -10041,7 +10151,10 @@ export class AgentSession implements SettingsScope {
+@@ -10041,7 +10185,10 @@ export class AgentSession implements SettingsScope {
  	}
  
  	/** Retry the last failed assistant turn when the session is idle. */
@@ -454,7 +488,7 @@ index c038ea3241..d59761c15d 100644
  		return this.#recovery.retry();
  	}
  
-@@ -11667,7 +11780,7 @@ export class AgentSession implements SettingsScope {
+@@ -11667,7 +11814,7 @@ export class AgentSession implements SettingsScope {
  		const settingsKey = provider === "anthropic" ? "claudeResets.autoRedeem" : "codexResets.autoRedeem";
  		const source = provider === "anthropic" ? "claude-auto-reset" : "codex-auto-reset";
  		const runner = this.#extensionRunner;
@@ -463,7 +497,7 @@ index c038ea3241..d59761c15d 100644
  			if (!coordinator.notifiedKeys.has(first.attemptKey)) {
  				coordinator.notifiedKeys.add(first.attemptKey);
  				this.emitNotice(
-@@ -11700,16 +11813,18 @@ export class AgentSession implements SettingsScope {
+@@ -11700,16 +11847,18 @@ export class AgentSession implements SettingsScope {
  				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
  				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
  		try {

@@ -1100,7 +1100,14 @@ function createStudioMainWorkerSupervisor(
 		)
 			return true;
 		if (runtime.services.workbench.skillshare.running) return true;
-		if (runtime.services.workbench.ida.running || runtime.services.workbench.agentBtw.running || runtime.services.workbench.benchmarks.running || runtime.services.workbench.media.running || runtime.services.workbench.prediction.running) return true;
+		if (
+			runtime.services.workbench.ida.running ||
+			runtime.services.workbench.agentBtw.running ||
+			runtime.services.workbench.benchmarks.running ||
+			runtime.services.workbench.media.running ||
+			runtime.services.workbench.prediction.running
+		)
+			return true;
 		if (slot.isStreaming || slot.isCompacting || slot.hasPostPromptWork || slot.queuedMessageCount > 0) return true;
 		if (runtime.services.interaction.pending() !== undefined) return true;
 		return runtime.services.jobs

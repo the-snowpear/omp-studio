@@ -519,7 +519,8 @@ export class StudioMediaService {
 							},
 						);
 						if (result.images.length > 4) throw new Error("Provider returned too many images");
-      if(result.model?.trim())job.model=`${model.provider}/${result.model.replace(/[\u0000-\u001f]/g,"").slice(0,512)}`;
+						if (result.model?.trim())
+							job.model = `${model.provider}/${result.model.replace(/[\u0000-\u001f]/g, "").slice(0, 512)}`;
 						for (const [index, image] of result.images.entries()) {
 							if (image.data.length > 96 * 1024 * 1024 || !image.mimeType.startsWith("image/"))
 								throw new Error("Image output exceeds budget");

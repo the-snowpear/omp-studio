@@ -330,17 +330,28 @@ describe("studio-host runtime", () => {
 		const sessionFile = path.join(tempDir.path(), "main.jsonl");
 		let disposed = 0;
 		let revived = 0;
-		const initialListeners=new Set<unknown>();const nextListeners=new Set<unknown>();
+		const initialListeners = new Set<unknown>();
+		const nextListeners = new Set<unknown>();
 		const initial = {
 			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
-			subscribe:(listener:unknown)=>{initialListeners.add(listener);return()=>{initialListeners.delete(listener);};},
+			subscribe: (listener: unknown) => {
+				initialListeners.add(listener);
+				return () => {
+					initialListeners.delete(listener);
+				};
+			},
 			dispose: async () => {
 				disposed += 1;
 			},
 		} as unknown as AgentSession;
 		const next = {
 			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
-			subscribe:(listener:unknown)=>{nextListeners.add(listener);return()=>{nextListeners.delete(listener);};},
+			subscribe: (listener: unknown) => {
+				nextListeners.add(listener);
+				return () => {
+					nextListeners.delete(listener);
+				};
+			},
 			dispose: async () => {
 				disposed += 1;
 			},
@@ -351,7 +362,8 @@ describe("studio-host runtime", () => {
 			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 17 },
 			async runtime => {
 				observed = runtime;
-				const listener=()=>{};const unsubscribe=runtime.session.subscribe(listener);
+				const listener = () => {};
+				const unsubscribe = runtime.session.subscribe(listener);
 				await Bun.sleep(30);
 				expect(runtime.workerResidency?.()).toBe("dormant");
 				expect(disposed).toBe(1);
@@ -359,7 +371,9 @@ describe("studio-host runtime", () => {
 				revived += 1;
 				expect(runtime.workerResidency?.()).toBe("active");
 				expect(runtime.workerGeneration?.()).toBe(2);
-				expect(nextListeners.has(listener)).toBe(true);unsubscribe();expect(nextListeners.has(listener)).toBe(false);
+				expect(nextListeners.has(listener)).toBe(true);
+				unsubscribe();
+				expect(nextListeners.has(listener)).toBe(false);
 			},
 			{
 				createBridge: silentBridge,

@@ -526,40 +526,51 @@ index a8357fe877..2e5026f627 100644
  
  		// Execute the actual tool
 diff --git a/packages/coding-agent/src/ida/protocol.ts b/packages/coding-agent/src/ida/protocol.ts
-index 7c1f10e94f..8a6d6782be 100644
+index 7c1f10e94f..3ccfe31d72 100644
 --- a/packages/coding-agent/src/ida/protocol.ts
 +++ b/packages/coding-agent/src/ida/protocol.ts
-@@ -74,7 +74,7 @@ export function idaHostEndpoint(projectDir: string, runtimeDir: string, daemonNa
+@@ -74,7 +74,16 @@ export function idaHostEndpoint(projectDir: string, runtimeDir: string, daemonNa
  }
  
  /** RPC methods an omp process may forward to the worker through `call`. */
 -export const IDA_CALL_METHODS = ["view", "exec", "rename", "comment", "set_type", "make_function", "save"] as const;
-+export const IDA_CALL_METHODS = ["view", "exec", "rename", "comment", "set_type", "make_function", "save", "studio"] as const;
++export const IDA_CALL_METHODS = [
++	"view",
++	"exec",
++	"rename",
++	"comment",
++	"set_type",
++	"make_function",
++	"save",
++	"studio",
++] as const;
  
  /** A method forwarded with `call`. */
  export type IdaCallMethod = (typeof IDA_CALL_METHODS)[number];
 diff --git a/packages/coding-agent/src/ida/supervisor.ts b/packages/coding-agent/src/ida/supervisor.ts
-index 092dfe9613..3f828c100d 100644
+index 092dfe9613..6b9eaa9372 100644
 --- a/packages/coding-agent/src/ida/supervisor.ts
 +++ b/packages/coding-agent/src/ida/supervisor.ts
 @@ -33,6 +33,7 @@ const STDERR_TAIL_LINES = 20;
  
  /** RPC methods implemented by the IDA worker. */
  export type IdaMethod =
-+ | "studio"
++	| "studio"
  	| "open"
  	| "view"
  	| "exec"
-@@ -255,9 +256,10 @@ export class IdaWorker {
+@@ -255,9 +256,12 @@ export class IdaWorker {
  		try {
  			await this.#waitTurn(previous, signal, timeoutMs);
  			const remaining = deadline === undefined ? undefined : Math.max(1, deadline - Date.now());
-+   if (method === "studio" && (params as {method?:string}).method === "exec") this.#execSinceSave = true;
++			if (method === "studio" && (params as { method?: string }).method === "exec") this.#execSinceSave = true;
  			const value = await this.#send(method, params, { signal, timeoutMs: remaining });
 -			if (method === "exec") this.#execSinceSave = true;
 -			else if (method === "save") this.#execSinceSave = false;
-+			if (method === "exec" || method === "studio" && (params as {method?:string}).method === "exec") this.#execSinceSave = true;
-+			else if (method === "save" || method === "studio" && (params as {method?:string}).method === "save") this.#execSinceSave = false;
++			if (method === "exec" || (method === "studio" && (params as { method?: string }).method === "exec"))
++				this.#execSinceSave = true;
++			else if (method === "save" || (method === "studio" && (params as { method?: string }).method === "save"))
++				this.#execSinceSave = false;
  			// The worker answers with the JSON shape documented for `method`.
  			return value as T;
  		} finally {
@@ -1137,7 +1148,7 @@ index 20b8db2e3b..44361d3682 100644
  					this.#reportFailure(error);
  					return;
 diff --git a/packages/coding-agent/src/predict/client.ts b/packages/coding-agent/src/predict/client.ts
-index d49bc07ad5..0ef26e9a58 100644
+index d49bc07ad5..a12eae7784 100644
 --- a/packages/coding-agent/src/predict/client.ts
 +++ b/packages/coding-agent/src/predict/client.ts
 @@ -141,7 +141,7 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
@@ -1149,37 +1160,48 @@ index d49bc07ad5..0ef26e9a58 100644
  	const broker = await daemonClientForGlobal(TEXT_PREDICT_BROKER_SCOPE);
  	await broker.request({ op: "ping" });
  	const { name, endpoint } = textPredictDaemon(broker.projectDir, agentDir);
-@@ -167,7 +167,7 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+@@ -167,7 +167,11 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
  					name,
  					application: spawn.cmd[0]!,
  					args: spawn.cmd.slice(1),
 -					env: { [TEXT_PREDICT_SOCKET_ENV]: endpoint, [TEXT_PREDICT_AGENT_DIR_ENV]: agentDir },
-+					env: { [TEXT_PREDICT_SOCKET_ENV]: endpoint, [TEXT_PREDICT_AGENT_DIR_ENV]: agentDir, OMP_TEXT_PREDICT_NO_FOREIGN: foreignHistory ? "0" : "1" },
++					env: {
++						[TEXT_PREDICT_SOCKET_ENV]: endpoint,
++						[TEXT_PREDICT_AGENT_DIR_ENV]: agentDir,
++						OMP_TEXT_PREDICT_NO_FOREIGN: foreignHistory ? "0" : "1",
++					},
  					cwd: spawn.cwd ?? broker.projectDir,
  					pty: false,
  					ready: { log: TEXT_PREDICT_READY_PATTERN, timeoutMs: READY_TIMEOUT_MS },
-@@ -185,7 +185,19 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+@@ -185,7 +189,26 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
  }
  
  /** Process-wide daemon access shared by every editor and the submit hook. */
 -class TextPredictionClient {
 +export class TextPredictionClient {
-+	constructor(readonly agentDirectory = getAgentDir(), readonly foreignHistory = true, readonly downloads = true) {}
++	constructor(
++		readonly agentDirectory = getAgentDir(),
++		readonly foreignHistory = true,
++		readonly downloads = true,
++	) {}
 +	async stop(): Promise<void> {
 +		this.close();
-+		const broker=await daemonClientForGlobal(TEXT_PREDICT_BROKER_SCOPE);
-+		const {name}=textPredictDaemon(broker.projectDir,this.agentDirectory);
-+		const listed=await broker.request({op:"list"});
-+		if(listed.op!=="list")throw Error("Unexpected prediction broker response");
-+		if(listed.daemons.some(daemon=>daemon.name===name&&daemon.state!=="exited"&&daemon.state!=="failed")){
-+			const stopped=await broker.request({op:"stop",name,timeoutMs:10000});
-+			if(stopped.op!=="stop"||!["exited","failed"].includes(stopped.daemon.state))throw Error("Prediction daemon is still running");
++		const broker = await daemonClientForGlobal(TEXT_PREDICT_BROKER_SCOPE);
++		const { name } = textPredictDaemon(broker.projectDir, this.agentDirectory);
++		const listed = await broker.request({ op: "list" });
++		if (listed.op !== "list") throw Error("Unexpected prediction broker response");
++		if (
++			listed.daemons.some(daemon => daemon.name === name && daemon.state !== "exited" && daemon.state !== "failed")
++		) {
++			const stopped = await broker.request({ op: "stop", name, timeoutMs: 10000 });
++			if (stopped.op !== "stop" || !["exited", "failed"].includes(stopped.daemon.state))
++				throw Error("Prediction daemon is still running");
 +		}
 +	}
  	#connection: DaemonConnection | undefined;
  	#connecting: Promise<DaemonConnection> | undefined;
  	#retryAt = 0;
-@@ -231,7 +243,7 @@ class TextPredictionClient {
+@@ -231,7 +254,7 @@ class TextPredictionClient {
  	async complete(engine: TextPredictMethod, before: string, prefix: string): Promise<TextPrediction> {
  		// SmolLM's weights download here, in the interactive process (shown in the
  		// download HUD), only once the user has chosen SmolLM.
@@ -1188,7 +1210,7 @@ index d49bc07ad5..0ef26e9a58 100644
  		const response = await this.#request(
  			id => ({ id, op: "complete", method: engine, before, prefix }),
  			COMPLETE_TIMEOUT_MS,
-@@ -263,7 +275,7 @@ class TextPredictionClient {
+@@ -263,7 +286,7 @@ class TextPredictionClient {
  		if (current && !current.closed) return Promise.resolve(current);
  		if (this.#connecting) return this.#connecting;
  		if (Date.now() < this.#retryAt) return Promise.reject(new Error("text-predict daemon unavailable"));
@@ -1441,23 +1463,32 @@ index c6c6c80bf0..fec08bd3f8 100644
  			const events: Array<{ type: string; approved?: boolean; reason?: string }> = [];
  			const extCode = `
 diff --git a/packages/stats/src/db.ts b/packages/stats/src/db.ts
-index a21878e37c..82e88b03df 100644
+index a21878e37c..bad22f5e0f 100644
 --- a/packages/stats/src/db.ts
 +++ b/packages/stats/src/db.ts
-@@ -1410,6 +1410,12 @@ const FRUSTRATION_COUNTS_SQL = `
+@@ -1410,6 +1410,21 @@ const FRUSTRATION_COUNTS_SQL = `
  function hasRangeCutoff(cutoff: number | null | undefined): cutoff is number {
  	return cutoff !== null && cutoff !== undefined && cutoff > 0;
  }
-+function studioFrustrationWhere():{sql:string;params:string[]} {
-+ const filter=currentStudioStatsFilter();const clauses:string[]=[];const params:string[]=[];
-+ for(const key of ["model","provider","folder"] as const)if(filter[key]!==undefined){clauses.push(`u.${key} = ?`);params.push(filter[key]!);}
-+ if(filter.proseHashes!==undefined){clauses.push("u.prose_hash IN (SELECT value FROM json_each(?))");params.push(JSON.stringify(filter.proseHashes));}
-+ return {sql:clauses.length?" AND "+clauses.join(" AND "):"",params};
++function studioFrustrationWhere(): { sql: string; params: string[] } {
++	const filter = currentStudioStatsFilter();
++	const clauses: string[] = [];
++	const params: string[] = [];
++	for (const key of ["model", "provider", "folder"] as const)
++		if (filter[key] !== undefined) {
++			clauses.push(`u.${key} = ?`);
++			params.push(filter[key]!);
++		}
++	if (filter.proseHashes !== undefined) {
++		clauses.push("u.prose_hash IN (SELECT value FROM json_each(?))");
++		params.push(JSON.stringify(filter.proseHashes));
++	}
++	return { sql: clauses.length ? " AND " + clauses.join(" AND ") : "", params };
 +}
  
  function toFrustrationCounts(row: FrustrationCountsRow | undefined): FrustrationCounts {
  	return {
-@@ -1429,9 +1435,9 @@ export function getFrustrationOverall(cutoff?: number | null): FrustrationCounts
+@@ -1429,9 +1444,11 @@ export function getFrustrationOverall(cutoff?: number | null): FrustrationCounts
  		SELECT ${FRUSTRATION_COUNTS_SQL}
  		FROM user_messages u
  		LEFT JOIN frustration_verdicts v ON v.prose_hash = u.prose_hash
@@ -1465,11 +1496,13 @@ index a21878e37c..82e88b03df 100644
 +		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}${studioFrustrationWhere().sql}
  	`);
 -	const row = (hasCutoff ? stmt.get(cutoff) : stmt.get()) as FrustrationCountsRow | undefined;
-+	const row = stmt.get(...(hasCutoff?[cutoff]:[]),...studioFrustrationWhere().params) as FrustrationCountsRow | undefined;
++	const row = stmt.get(...(hasCutoff ? [cutoff] : []), ...studioFrustrationWhere().params) as
++		| FrustrationCountsRow
++		| undefined;
  	return toFrustrationCounts(row);
  }
  
-@@ -1446,10 +1452,10 @@ export function getFrustrationByModel(cutoff?: number | null): FrustrationModelR
+@@ -1446,10 +1463,13 @@ export function getFrustrationByModel(cutoff?: number | null): FrustrationModelR
  		SELECT u.model AS model, u.provider AS provider, MIN(u.timestamp) AS first_seen, ${FRUSTRATION_COUNTS_SQL}
  		FROM user_messages u
  		LEFT JOIN frustration_verdicts v ON v.prose_hash = u.prose_hash
@@ -1478,11 +1511,14 @@ index a21878e37c..82e88b03df 100644
  		GROUP BY u.model, u.provider
  	`);
 -	const rows = (hasCutoff ? stmt.all(cutoff) : stmt.all()) as FrustrationModelSqlRow[];
-+	const rows = stmt.all(...(hasCutoff?[cutoff]:[]),...studioFrustrationWhere().params) as FrustrationModelSqlRow[];
++	const rows = stmt.all(
++		...(hasCutoff ? [cutoff] : []),
++		...studioFrustrationWhere().params,
++	) as FrustrationModelSqlRow[];
  	return rows.map(row => ({
  		model: row.model,
  		provider: row.provider,
-@@ -1463,7 +1469,7 @@ function pendingProseSql(hasCutoff: boolean): string {
+@@ -1463,7 +1483,7 @@ function pendingProseSql(hasCutoff: boolean): string {
  	return `
  		SELECT u.prose_hash AS hash, MIN(u.prose) AS prose
  		FROM user_messages u
@@ -1491,25 +1527,27 @@ index a21878e37c..82e88b03df 100644
  		  AND NOT EXISTS (SELECT 1 FROM frustration_verdicts v WHERE v.prose_hash = u.prose_hash)
  		GROUP BY u.prose_hash
  	`;
-@@ -1474,7 +1480,7 @@ export function getPendingFrustrationProse(cutoff?: number | null): PendingProse
+@@ -1474,7 +1494,7 @@ export function getPendingFrustrationProse(cutoff?: number | null): PendingProse
  	if (!db) return [];
  	const hasCutoff = hasRangeCutoff(cutoff);
  	const stmt = db.prepare(pendingProseSql(hasCutoff));
 -	return (hasCutoff ? stmt.all(cutoff) : stmt.all()) as PendingProse[];
-+	return stmt.all(...(hasCutoff?[cutoff]:[]),...studioFrustrationWhere().params) as PendingProse[];
++	return stmt.all(...(hasCutoff ? [cutoff] : []), ...studioFrustrationWhere().params) as PendingProse[];
  }
  
  /** Count and total characters of {@link getPendingFrustrationProse} without loading the text. */
-@@ -1484,7 +1490,7 @@ export function getPendingFrustrationTotals(cutoff?: number | null): { messages:
+@@ -1484,7 +1504,9 @@ export function getPendingFrustrationTotals(cutoff?: number | null): { messages:
  	const stmt = db.prepare(
  		`SELECT COUNT(*) AS messages, COALESCE(SUM(LENGTH(prose)), 0) AS chars FROM (${pendingProseSql(hasCutoff)})`,
  	);
 -	const row = (hasCutoff ? stmt.get(cutoff) : stmt.get()) as { messages: number; chars: number } | undefined;
-+	const row = stmt.get(...(hasCutoff?[cutoff]:[]),...studioFrustrationWhere().params) as { messages: number; chars: number } | undefined;
++	const row = stmt.get(...(hasCutoff ? [cutoff] : []), ...studioFrustrationWhere().params) as
++		| { messages: number; chars: number }
++		| undefined;
  	return { messages: row?.messages ?? 0, chars: row?.chars ?? 0 };
  }
  
-@@ -1584,3 +1590,4 @@ export function updateToolResults(links: Iterable<ToolResultLink>): number {
+@@ -1584,3 +1606,4 @@ export function updateToolResults(links: Iterable<ToolResultLink>): number {
  	apply();
  	return updated;
  }
@@ -1560,7 +1598,7 @@ index b12aa4f0f9..a618cdf531 100644
  			tripped = true;
  			logger.error("frustration judge run stopped: no text succeeded", { failed: job.failed, error: lastError });
 diff --git a/packages/stats/src/rollup.ts b/packages/stats/src/rollup.ts
-index bcee47b06f..bb5fb6d7f3 100644
+index bcee47b06f..0a84ac120d 100644
 --- a/packages/stats/src/rollup.ts
 +++ b/packages/stats/src/rollup.ts
 @@ -26,6 +26,7 @@
@@ -1571,47 +1609,84 @@ index bcee47b06f..bb5fb6d7f3 100644
  import { currentDb, unpricedRequestSql } from "./db";
  import type {
  	AgentType,
-@@ -48,6 +49,21 @@ import type {
+@@ -48,6 +49,54 @@ import type {
  const HOUR_MS = 60 * 60 * 1000;
  const DAY_MS = 24 * HOUR_MS;
  
 +/** Request-local Studio dimensions. Native callers retain the unfiltered defaults. */
-+export interface StudioStatsFilter { model?:string; provider?:string; folder?:string; proseHashes?:readonly string[] }
-+const studioFilters=new AsyncLocalStorage<StudioStatsFilter>();
-+export function currentStudioStatsFilter():StudioStatsFilter {return studioFilters.getStore()??{};}
-+export function withStudioStatsFilter<T>(filter:StudioStatsFilter,read:()=>T):T {
-+ for(const [key,value] of Object.entries(filter)){if(key==="proseHashes"){if(!Array.isArray(value)||value.length>100000||value.some(v=>typeof v!=="string"||!v||v.length>128))throw Error("Invalid prose filter");}else if(!["model","provider","folder"].includes(key)||typeof value!=="string"||!value||value.length>4096||value.includes("\0"))throw Error("Invalid stats filter");}
-+ return studioFilters.run({...filter},read);
++export interface StudioStatsFilter {
++	model?: string;
++	provider?: string;
++	folder?: string;
++	proseHashes?: readonly string[];
 +}
-+function filteredSource(source:Source,tools=false):Source {
-+ const filter=studioFilters.getStore();if(!filter)return source;
-+ const clauses:string[]=[];const values:string[]=[];
-+ for(const key of ["model","provider",...(tools?[]:["folder"])] as const){const value=filter[key as "model"|"provider"|"folder"];if(value!==undefined){clauses.push(`${key} = ?`);values.push(value);}}
-+ return clauses.length?{sql:`SELECT * FROM (${source.sql}) WHERE ${clauses.join(" AND ")}`,params:[...source.params,...values]}:source;
++const studioFilters = new AsyncLocalStorage<StudioStatsFilter>();
++export function currentStudioStatsFilter(): StudioStatsFilter {
++	return studioFilters.getStore() ?? {};
++}
++export function withStudioStatsFilter<T>(filter: StudioStatsFilter, read: () => T): T {
++	for (const [key, value] of Object.entries(filter)) {
++		if (key === "proseHashes") {
++			if (
++				!Array.isArray(value) ||
++				value.length > 100000 ||
++				value.some(v => typeof v !== "string" || !v || v.length > 128)
++			)
++				throw Error("Invalid prose filter");
++		} else if (
++			!["model", "provider", "folder"].includes(key) ||
++			typeof value !== "string" ||
++			!value ||
++			value.length > 4096 ||
++			value.includes("\0")
++		)
++			throw Error("Invalid stats filter");
++	}
++	return studioFilters.run({ ...filter }, read);
++}
++function filteredSource(source: Source, tools = false): Source {
++	const filter = studioFilters.getStore();
++	if (!filter) return source;
++	const clauses: string[] = [];
++	const values: string[] = [];
++	for (const key of ["model", "provider", ...(tools ? [] : ["folder"])] as const) {
++		const value = filter[key as "model" | "provider" | "folder"];
++		if (value !== undefined) {
++			clauses.push(`${key} = ?`);
++			values.push(value);
++		}
++	}
++	return clauses.length
++		? { sql: `SELECT * FROM (${source.sql}) WHERE ${clauses.join(" AND ")}`, params: [...source.params, ...values] }
++		: source;
 +}
 +
  /**
   * Bump when the rollup schema or fact definitions change: the tables are then
   * dropped and every hour is rebuilt from the raw tables.
-@@ -411,7 +427,7 @@ export interface RangeWindow {
+@@ -411,7 +460,7 @@ export interface RangeWindow {
  
  interface Source {
  	sql: string;
 -	params: number[];
-+	params: (number|string)[];
++	params: (number | string)[];
  }
  
  function dirtyIsSmall(database: Database): boolean {
-@@ -466,6 +482,8 @@ function messageSource(database: Database, cutoff: number | null, fine: boolean)
+@@ -466,6 +515,12 @@ function messageSource(database: Database, cutoff: number | null, fine: boolean)
  /** Tool facts covering `[cutoff, now]`; same union shape as {@link messageSource}. */
  function toolSource(database: Database, cutoff: number | null, fine: boolean): Source {
  	const groupRaw = "GROUP BY 1, t.tool_name, t.model, t.provider";
-+	const folder=studioFilters.getStore()?.folder;
-+	if(folder!==undefined)return {sql:`SELECT ${toolFacts(fine?"(t.timestamp / 300000) * 300000":hourOf("t.timestamp"))} FROM tool_calls t ${TOOL_JOIN} WHERE t.timestamp >= ? AND t.folder = ? ${groupRaw}`,params:[cutoff??0,folder]};
++	const folder = studioFilters.getStore()?.folder;
++	if (folder !== undefined)
++		return {
++			sql: `SELECT ${toolFacts(fine ? "(t.timestamp / 300000) * 300000" : hourOf("t.timestamp"))} FROM tool_calls t ${TOOL_JOIN} WHERE t.timestamp >= ? AND t.folder = ? ${groupRaw}`,
++			params: [cutoff ?? 0, folder],
++		};
  	if (fine) {
  		return {
  			sql: `SELECT ${toolFacts("(t.timestamp / 300000) * 300000")} FROM tool_calls t ${TOOL_JOIN}
-@@ -507,7 +525,7 @@ function queryMessages<T>(window: Pick<RangeWindow, "cutoff"> & { bucketMs?: num
+@@ -507,7 +562,7 @@ function queryMessages<T>(window: Pick<RangeWindow, "cutoff"> & { bucketMs?: num
  	const database = currentDb();
  	if (!database) return [];
  	const fine = window.bucketMs !== undefined && window.bucketMs < HOUR_MS;
@@ -1620,31 +1695,38 @@ index bcee47b06f..bb5fb6d7f3 100644
  	return database.prepare(`SELECT ${select} FROM (${source.sql}) f ${tail}`).all(...source.params) as T[];
  }
  
-@@ -515,7 +533,7 @@ function queryTools<T>(window: Pick<RangeWindow, "cutoff"> & { bucketMs?: number
+@@ -515,7 +570,7 @@ function queryTools<T>(window: Pick<RangeWindow, "cutoff"> & { bucketMs?: number
  	const database = currentDb();
  	if (!database) return [];
  	const fine = window.bucketMs !== undefined && window.bucketMs < HOUR_MS;
 -	const source = toolSource(database, normalizeCutoff(window.cutoff), fine);
-+	const source = filteredSource(toolSource(database, normalizeCutoff(window.cutoff), fine),true);
++	const source = filteredSource(toolSource(database, normalizeCutoff(window.cutoff), fine), true);
  	return database.prepare(`SELECT ${select} FROM (${source.sql}) f ${tail}`).all(...source.params) as T[];
  }
  
-@@ -851,9 +869,18 @@ export interface SessionRollupRow {
+@@ -851,9 +906,25 @@ export interface SessionRollupRow {
   * One row per synced transcript file (subagents unfolded). Same exactness
   * rules as the range queries: dirty transcripts are aggregated raw while few.
   */
 -export function getSessionRollups(): SessionRollupRow[] {
-+export function getSessionRollups(cutoff:number|null=null): SessionRollupRow[] {
++export function getSessionRollups(cutoff: number | null = null): SessionRollupRow[] {
  	const database = currentDb();
  	if (!database) return [];
-+	const filter=currentStudioStatsFilter();
-+	if(cutoff!==null||filter.model!==undefined||filter.provider!==undefined||filter.folder!==undefined){
-+		const clauses=["timestamp >= ?"];const params:(number|string)[]=[cutoff??0];
-+		for(const key of ["model","provider","folder"] as const)if(filter[key]!==undefined){clauses.push(`${key} = ?`);params.push(filter[key]!);}
-+		const where=clauses.join(" AND ");
-+		return database.prepare(`WITH filtered_messages AS (SELECT * FROM messages WHERE ${where}), filtered_tools AS (SELECT * FROM tool_calls WHERE ${where})
++	const filter = currentStudioStatsFilter();
++	if (cutoff !== null || filter.model !== undefined || filter.provider !== undefined || filter.folder !== undefined) {
++		const clauses = ["timestamp >= ?"];
++		const params: (number | string)[] = [cutoff ?? 0];
++		for (const key of ["model", "provider", "folder"] as const)
++			if (filter[key] !== undefined) {
++				clauses.push(`${key} = ?`);
++				params.push(filter[key]!);
++			}
++		const where = clauses.join(" AND ");
++		return database
++			.prepare(`WITH filtered_messages AS (SELECT * FROM messages WHERE ${where}), filtered_tools AS (SELECT * FROM tool_calls WHERE ${where})
 +		SELECT session_file AS sessionFile,requests,started_at AS startedAt,ended_at AS endedAt,total_tokens AS totalTokens,cost_total AS costTotal,unpriced AS unpricedRequests,models,tool_calls AS toolCalls
-+		FROM (SELECT ${sessionFacts("m.").replace("FROM tool_calls tc","FROM filtered_tools tc")} FROM filtered_messages m GROUP BY m.session_file)`).all(...params,...params) as SessionRollupRow[];
++		FROM (SELECT ${sessionFacts("m.").replace("FROM tool_calls tc", "FROM filtered_tools tc")} FROM filtered_messages m GROUP BY m.session_file)`)
++			.all(...params, ...params) as SessionRollupRow[];
 +	}
  	const { n } = database
  		.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM session_dirty LIMIT ${EXACT_DIRTY_SESSIONS + 1})`)

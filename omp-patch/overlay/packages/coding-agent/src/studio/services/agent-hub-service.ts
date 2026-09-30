@@ -502,7 +502,11 @@ export class StudioAgentHubService {
 	}): Promise<{ agentId: string; jobId?: string; status: "starting" }> {
 		const definition = args.definition.trim();
 		const assignment = args.assignment.trim();
-		if(args.solutionSpace !== undefined && (!args.solutionSpace.trim() || args.solutionSpace.length > MAX_MESSAGE_TEXT)) throw new StudioAgentHubError("INVALID_ARGUMENT", "Invalid solution space");
+		if (
+			args.solutionSpace !== undefined &&
+			(!args.solutionSpace.trim() || args.solutionSpace.length > MAX_MESSAGE_TEXT)
+		)
+			throw new StudioAgentHubError("INVALID_ARGUMENT", "Invalid solution space");
 		if (definition.length === 0 || definition.length > MAX_DEFINITION_LENGTH) {
 			throw new StudioAgentHubError("INVALID_ARGUMENT", "Spawn definition must be between 1 and 256 characters");
 		}

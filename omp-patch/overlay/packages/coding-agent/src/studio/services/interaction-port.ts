@@ -37,7 +37,7 @@ export interface StudioInteractionPort {
 		commandId: string;
 		title: string;
 		acceptImages?: boolean;
-        questions: Array<{
+		questions: Array<{
 			id: string;
 			question: string;
 			header?: string;
@@ -125,7 +125,7 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 		commandId: string;
 		title: string;
 		acceptImages?: boolean;
-        questions: Array<{
+		questions: Array<{
 			id: string;
 			question: string;
 			header?: string;
@@ -229,7 +229,7 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		commandId: string;
 		title: string;
 		acceptImages?: boolean;
-        questions: Array<{
+		questions: Array<{
 			id: string;
 			question: string;
 			header?: string;
@@ -396,7 +396,7 @@ export class StudioScriptedInteractionPort implements StudioInteractionPort {
 		commandId: string;
 		title: string;
 		acceptImages?: boolean;
-        questions: Array<{
+		questions: Array<{
 			id: string;
 			question: string;
 			header?: string;

@@ -179,4 +179,7 @@ test("the telemetry probe matches workspaces with the Host's path rule", () => {
 	expect(workspacePathKey("/private/tmp/proj", "linux")).not.toBe(workspacePathKey("/tmp/proj", "linux"));
 });
 
-beforeEach(async () => { resetSettingsForTest(); await Settings.init({ inMemory: true }); });
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
+});

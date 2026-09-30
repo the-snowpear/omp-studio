@@ -42,10 +42,10 @@ export function projectService(daemon: DaemonSnapshot): StudioServiceRow {
 
 /** Uses the current worker's native ToolSession and its lifecycle/owner subscriptions. */
 export class StudioWorkbenchService {
- readonly resources:StudioResourceService;
- readonly ida:StudioIdaService;
- readonly agentBtw:StudioAgentBtwService;
- readonly prediction:StudioPredictionService;
+	readonly resources: StudioResourceService;
+	readonly ida: StudioIdaService;
+	readonly agentBtw: StudioAgentBtwService;
+	readonly prediction: StudioPredictionService;
 	readonly sessionGui: StudioSessionGuiService;
 	readonly skillshare: StudioSkillshareService;
 	readonly media: StudioMediaService;
@@ -60,9 +60,9 @@ export class StudioWorkbenchService {
 	) {
 		this.skillshare = new StudioSkillshareService(session);
 		this.sessionGui = new StudioSessionGuiService(session);
-  this.agentBtw = new StudioAgentBtwService(session);
-  this.ida = new StudioIdaService(session);
-  this.resources = new StudioResourceService(session);
+		this.agentBtw = new StudioAgentBtwService(session);
+		this.ida = new StudioIdaService(session);
+		this.resources = new StudioResourceService(session);
 		this.prediction = new StudioPredictionService(session);
 		this.accounts = new StudioAccountStatusService(session);
 		this.judgments = new StudioJudgmentService(session);
@@ -72,8 +72,8 @@ export class StudioWorkbenchService {
 		this.annotations = new StudioAnnotationService(session);
 	}
 	dispose(): void {
-  this.ida.dispose();
-  this.agentBtw.dispose();
+		this.ida.dispose();
+		this.agentBtw.dispose();
 		this.prediction.dispose();
 		this.skillshare.dispose();
 		this.accounts.dispose();
@@ -88,14 +88,37 @@ export class StudioWorkbenchService {
 		return result;
 	}
 	async #execute(operation: WorkbenchOperation): Promise<unknown> {
-  if(operation.kind==="resource.read")return this.resources.read(operation);
-  if(operation.kind==="ida.status"||operation.kind==="ida.view"||operation.kind==="ida.prepare"||operation.kind==="ida.commit"||operation.kind==="ida.cancel")return this.ida.execute(operation);
-  if(operation.kind==="agent.btw.read"||operation.kind==="agent.btw.ask"||operation.kind==="agent.btw.abort")return this.agentBtw.execute(operation);
-		if(operation.kind==="prediction.control") {
-			if(operation.sessionId!==this.session.sessionId)throw new SessionControlError("COMMAND_BLOCKED","Prediction session changed");
+		if (operation.kind === "resource.read") return this.resources.read(operation);
+		if (
+			operation.kind === "ida.status" ||
+			operation.kind === "ida.view" ||
+			operation.kind === "ida.prepare" ||
+			operation.kind === "ida.commit" ||
+			operation.kind === "ida.cancel"
+		)
+			return this.ida.execute(operation);
+		if (
+			operation.kind === "agent.btw.read" ||
+			operation.kind === "agent.btw.ask" ||
+			operation.kind === "agent.btw.abort"
+		)
+			return this.agentBtw.execute(operation);
+		if (operation.kind === "prediction.control") {
+			if (operation.sessionId !== this.session.sessionId)
+				throw new SessionControlError("COMMAND_BLOCKED", "Prediction session changed");
 			return this.prediction.control(operation.action);
 		}
-		if(operation.kind === "session.queue.ack" || operation.kind === "session.queue.steer" || operation.kind === "session.queue.list" || operation.kind === "session.queue.remove" || operation.kind === "session.queue.takeback" || operation.kind === "session.tier.get" || operation.kind === "session.tier.set" || operation.kind === "session.skills.list") return this.sessionGui.execute(operation);
+		if (
+			operation.kind === "session.queue.ack" ||
+			operation.kind === "session.queue.steer" ||
+			operation.kind === "session.queue.list" ||
+			operation.kind === "session.queue.remove" ||
+			operation.kind === "session.queue.takeback" ||
+			operation.kind === "session.tier.get" ||
+			operation.kind === "session.tier.set" ||
+			operation.kind === "session.skills.list"
+		)
+			return this.sessionGui.execute(operation);
 		if (
 			operation.kind === "skillshare.status" ||
 			operation.kind === "skillshare.home" ||
