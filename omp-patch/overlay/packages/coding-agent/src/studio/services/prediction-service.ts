@@ -55,8 +55,14 @@ export class StudioPredictionService {
 			});
 		});
 	}
+	#access<T>(operation: () => Promise<T>): Promise<T> {
+		// Unlike Windows named mutexes, macOS flock needs the sidecar's parent on disk.
+		// Create only the private namespace; draft queries never create a history database.
+		mkdirSync(this.directory, { recursive: true, mode: 0o700 });
+		return withFileLock(this.directory + ".access", operation);
+	}
 	async query(input: StudioPredictionQuery): Promise<StudioPredictionResult> {
-		return withFileLock(this.directory + ".access", () => this.#query(input));
+		return this.#access(() => this.#query(input));
 	}
 	async #query(input: StudioPredictionQuery): Promise<StudioPredictionResult> {
 		if (this.#disposed || input.sessionId !== this.session.sessionId) throw Error("Prediction session unavailable");
@@ -94,7 +100,7 @@ export class StudioPredictionService {
 	async observeSent(id: string, text: string): Promise<void> {
 		if (this.#disposed || cfgSpellingAutocomplete.get(this.session.settings) === "off" || !text.trim()) return;
 		if (!id || id.length > 1024 || text.length > 65536) throw Error("Invalid prediction submission");
-		await withFileLock(this.directory + ".access", async () => {
+		await this.#access(async () => {
 			if (this.#disposed) return;
 			const history = this.#openHistory();
 			try {
@@ -134,7 +140,7 @@ export class StudioPredictionService {
 				});
 		}
 		if (action === "cancel") this.#downloadAbort?.abort();
-		return withFileLock(this.directory + ".access", async () => {
+		return this.#access(async () => {
 			if (action === "clear") {
 				if (!this.client.stop) throw Error("Prediction daemon control unavailable");
 				await this.client.stop();

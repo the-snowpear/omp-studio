@@ -9,7 +9,7 @@ import { cfgSpellingAutocomplete } from "../src/modes/settings";
 import { StudioPredictionService } from "../src/studio/services/prediction-service";
 
 test("draft queries never persist, and only accepted unique submissions train the namespace", async () => {
-	const directory = mkdtempSync(join(tmpdir(), "omp-studio-prediction-test-"));
+	const directory = join(mkdtempSync(join(tmpdir(), "omp-studio-prediction-test-")), "new", "corpus");
 	let calls = 0;
 	const client = {
 		complete: async () => {

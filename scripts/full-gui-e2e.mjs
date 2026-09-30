@@ -2,7 +2,7 @@
 import {createRequire} from 'node:module';
 import {defaultRuntimeKeysDirectory} from './runtime-signing-keys.mjs';
 import {resolveTargetPlatform} from './target-platform.mjs';
-import {mkdir,mkdtemp,readFile,writeFile,appendFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,writeFile,appendFile,readdir} from 'node:fs/promises';
 import {resolveDesktopPaths} from '../apps/desktop/dist/src/platform/desktop-paths.js';
 import {moveToApplicationsMarkerPath} from '../apps/desktop/dist/src/platform/app-lifecycle.js';
 import {homedir,tmpdir} from 'node:os';
@@ -33,6 +33,20 @@ const command=async(name,input={})=>page.evaluate(({name,input})=>{
  });
 },{name,input});
 async function capture(name){await page.screenshot({path:join(output,name+'.png')});}
+async function predictionDiagnostics(directory,depth=0){
+ if(depth>6)return [];
+ const lines=[];
+ for(const entry of await readdir(directory,{withFileTypes:true}).catch(()=>[])){
+  const path=join(directory,entry.name);
+  if(entry.isDirectory())lines.push(...await predictionDiagnostics(path,depth+1));
+  else if(entry.isFile()&&entry.name.endsWith('.log')){
+   const text=await readFile(path,'utf8').catch(()=>'');
+   lines.push(...text.split('\n').filter(line=>/text-predict:|Failed to acquire lock/.test(line)).map(line=>line.slice(0,1000)));
+  }
+ }
+ return lines.slice(-20);
+}
+
 try{
  await Promise.all(['workspace','roaming','user-data','local','isolated-home'].map(p=>mkdir(join(temp,p),{recursive:true})));
  await mkdir(output,{recursive:true});
@@ -58,7 +72,7 @@ try{
   'import('+JSON.stringify(pathToFileURL(join(desktop,'dist/src/main.js')).href)+');',
  ].join('\n'));
  await writeFile(join(temp,'package.json'),JSON.stringify({name:'omp-gui-acceptance',version:'0.1.7',main:'bootstrap.cjs'}));
- const env={...process.env,...(process.platform==='darwin'?{HOME:isolatedHome}:{}),APPDATA:join(temp,'roaming'),LOCALAPPDATA:join(temp,'local'),PI_CONFIG_DIR:relative(isolatedHome,join(temp,'native-config')),XDG_CONFIG_HOME:join(temp,'xdg-config'),XDG_DATA_HOME:join(temp,'xdg-data'),XDG_CACHE_HOME:join(temp,'xdg-cache'),OMP_ARTIFACT_DIR:join(root,'packages/runtime-installer/dist/artifacts',platform,runtime),OMP_RUNTIME_TRUSTED_PUBLIC_KEY:join(keys,'trusted-public.pem'),OMP_RUNTIME_SIGNING_KEY_ID:(await readFile(join(keys,'key-id.txt'),'utf8')).trim(),DO_NOT_TRACK:'1'};
+ const env={...process.env,...(process.platform==='darwin'?{HOME:isolatedHome}:{}),APPDATA:join(temp,'roaming'),LOCALAPPDATA:join(temp,'local'),PI_CONFIG_DIR:relative(isolatedHome,join(temp,'native-config')),XDG_CONFIG_HOME:join(temp,'xdg-config'),XDG_DATA_HOME:join(temp,'xdg-data'),XDG_CACHE_HOME:join(temp,'xdg-cache'),XDG_STATE_HOME:join(temp,'xdg-state'),OMP_ARTIFACT_DIR:join(root,'packages/runtime-installer/dist/artifacts',platform,runtime),OMP_RUNTIME_TRUSTED_PUBLIC_KEY:join(keys,'trusted-public.pem'),OMP_RUNTIME_SIGNING_KEY_ID:(await readFile(join(keys,'key-id.txt'),'utf8')).trim(),DO_NOT_TRACK:'1'};
  for(const key of ['ELECTRON_RUN_AS_NODE','OMP_RUNTIME_SIGNING_PRIVATE_KEY','OMP_RENDERER_DEV_URL','PI_CODING_AGENT_DIR'])delete env[key];
  const packaged=process.env.OMP_E2E_PACKAGED_EXE;
  if(packaged)delete env.OMP_ARTIFACT_DIR;
@@ -147,5 +161,6 @@ try{
 }catch(error){report.status='failed';report.error=String(error);process.exitCode=1;if(page)await capture('failure').catch(()=>{});}
 finally{
  if(app){let timer;const child=app.process();try{await Promise.race([app.close().catch(error=>{report.status='failed';report.cleanupError=String(error);process.exitCode=1;}),new Promise(resolve=>{timer=setTimeout(()=>{report.status='failed';report.cleanupError='Electron did not close within 10 seconds';process.exitCode=1;child.kill('SIGKILL');resolve();},10000);})]);}finally{clearTimeout(timer);}}
+ if(report.status==='failed')report.predictionDiagnostics=await predictionDiagnostics(temp);
  await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }
