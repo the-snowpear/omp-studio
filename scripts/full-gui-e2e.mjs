@@ -2,7 +2,9 @@
 import {createRequire} from 'node:module';
 import {defaultRuntimeKeysDirectory} from './runtime-signing-keys.mjs';
 import {resolveTargetPlatform} from './target-platform.mjs';
-import {mkdir,mkdtemp,readFile,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,writeFile,appendFile} from 'node:fs/promises';
+import {resolveDesktopPaths} from '../apps/desktop/dist/src/platform/desktop-paths.js';
+import {moveToApplicationsMarkerPath} from '../apps/desktop/dist/src/platform/app-lifecycle.js';
 import {homedir,tmpdir} from 'node:os';
 import {join,relative} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -41,6 +43,12 @@ try{
  const platform=resolveTargetPlatform();
  const isolatedHome=process.platform==='darwin'?join(temp,'isolated-home'):homedir();
  report.platform=platform;
+ if(process.platform==='darwin'&&process.env.OMP_E2E_PACKAGED_EXE){
+  const paths=resolveDesktopPaths({platform:'darwin',homedir:isolatedHome});
+  await mkdir(paths.stateRoot,{recursive:true});
+  await writeFile(moveToApplicationsMarkerPath(paths.stateRoot),'acceptance: Not Now');
+  report.firstInstallScope='Normal Not Now preference seeded in isolated profile; native move dialog excluded';
+ }
  await writeFile(join(temp,'bootstrap.cjs'),[
   "const {app,dialog}=require('electron');",
   'app.getAppPath=()=>'+JSON.stringify(desktop)+';',
@@ -56,8 +64,10 @@ try{
  if(packaged)delete env.OMP_ARTIFACT_DIR;
  console.log('Launching Electron for '+platform);
  app=await _electron.launch({executablePath:packaged??require('electron'),args:packaged?['--user-data-dir='+join(temp,'user-data')]:[temp],cwd:join(temp,'workspace'),env,timeout:60000});
+ let loggedBytes=0;for(const stream of [app.process().stdout,app.process().stderr])stream?.on('data',chunk=>{loggedBytes+=chunk.length;if(loggedBytes<=2*1024*1024)void appendFile(join(output,'electron.log'),chunk).catch(()=>{});});
+ page=await app.firstWindow({timeout:30000});page.setDefaultTimeout(20000);
+ console.log('Electron window ready');
  if(packaged)await app.evaluate(({dialog},workspace)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[workspace]});},join(temp,'workspace'));
- page=await app.firstWindow();page.setDefaultTimeout(20000);
  await page.waitForFunction(()=>!!window.ompStudio);
  await page.evaluate(()=>{localStorage.setItem('omp.appSettings',JSON.stringify({language:'zh'}));localStorage.setItem('omp.previewMode','0');localStorage.setItem('omp.startupNotice.dismissed','incomplete-v1');localStorage.setItem('omp.lastRoute','home');});
  await page.reload();
