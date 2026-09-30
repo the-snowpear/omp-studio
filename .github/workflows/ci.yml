@@ -69,6 +69,7 @@ jobs:
         if: steps.scope.outputs.runtime == 'true'
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
+          shared-key: platform
           key: natives-${{ matrix.native }}
       - run: npm run omp:build:natives
         if: steps.scope.outputs.runtime == 'true'
@@ -99,7 +100,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
-          key: darwin-arm64
+          shared-key: platform
+          key: natives-darwin-arm64
+          cache-on-failure: "true"
       - run: npm ci
       - run: npm run omp:install-deps
       - run: npm run omp:overlay:apply
