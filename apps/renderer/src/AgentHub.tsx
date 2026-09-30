@@ -1,4 +1,5 @@
 import { ModelDelegationList } from "./ModelDelegationList";
+import { AgentBtwPane } from "./btw/AgentBtwPane";
 import { ServicesPane } from "./services/ServicesPane";
 import { JudgmentsPane } from "./judgments/JudgmentsPane";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -28,7 +29,7 @@ import { pageMotionReduced, TAB_PANE_MS, tabPaneRole, useOverlappingTabs, type S
 export const HUB_INTENT_KEY = "omp.hubIntent";
 const HUB_STATE_KEY = "omp.agentHub.state";
 
-export type HubTab = "overview" | "transcript" | "jobs" | "messages";
+export type HubTab = "overview" | "transcript" | "jobs" | "messages" | "btw";
 export type HubIntentTab = HubTab | "chat";
 export type HubView = "flat" | "tree";
 
@@ -121,6 +122,7 @@ const TABS: ReadonlyArray<readonly [HubTab, string]> = [
   ["transcript", "Transcript"],
   ["jobs", "Jobs"],
   ["messages", "Messages"],
+  ["btw", "BTW"],
 ];
 
 const JOB_CHIP: Record<StudioJobSnapshot["status"], string> = {
@@ -161,6 +163,7 @@ export function setHubIntent(agentId: string, tab?: HubIntentTab): void {
 }
 
 function parseHubTab(value: unknown): HubTab | undefined {
+  if(value === "btw")return value;
   if (value === "overview" || value === "transcript" || value === "jobs" || value === "messages") return value;
   return undefined;
 }
@@ -283,6 +286,7 @@ function fmtHM(ts: number): string {
 }
 
 function fmtCost(cost: number): string {
+  if(!Number.isFinite(cost)||cost===0)return "—";
   if (cost < 0.01) return `$${cost.toFixed(4)}`;
   if (cost < 1) return `$${cost.toFixed(3)}`;
   return `$${cost.toFixed(2)}`;
@@ -871,6 +875,7 @@ export function AgentHubPage({
   const [commandBusy, setCommandBusy] = useState(false);
   const [draft, setDraft] = useState("");
   const [spawnTask, setSpawnTask] = useState("");
+  const [spawnSolutionSpace, setSpawnSolutionSpace] = useState("");
   const [spawnDefinition, setSpawnDefinition] = useState("");
   const [spawnDefinitions, setSpawnDefinitions] = useState<ReadonlyArray<{ name: string; description: string }> | null>(null);
   const [transcriptPage, setTranscriptPage] = useState<{
@@ -1447,6 +1452,7 @@ export function AgentHubPage({
   };
 
   const renderDetailBody = (agent: HubAgent) => {
+    if(tab === "btw")return <AgentBtwPane key={`${parentSessionId ?? snapshot?.sessionId}:${agent.id}`} client={client} sessionId={parentSessionId ?? snapshot?.sessionId} agentId={agent.id} available={connOnline && viewingLive && !resyncRequired && agent.kind!=="main" && agent.hasLiveSession && !missingCap(capabilities,"agent.btw.read")}/>;
     if (tab === "transcript") {
       if (preview) {
         return (
@@ -1695,6 +1701,7 @@ export function AgentHubPage({
               </div>
             </div>
             <div className="hub-detail-actions">
+              <button className="btn small outline" type="button" disabled={!preview&&(!viewingLive||selectedAgent.kind==="main"||!selectedAgent.hasLiveSession||missingCap(capabilities,"agent.btw.read"))} onClick={()=>setTab("btw")}>BTW</button>
               <button className="btn small primary" type="button" disabled={!caps.open} data-tip={caps.openWhy ?? undefined} onClick={() => openChat(selectedAgent.id)}>
                 <Icon name="external" extra="sm" />打开
               </button>
@@ -1806,6 +1813,8 @@ export function AgentHubPage({
                     </div>
                     <div className="hub-na-row">
                       <div className="field">
+                        <label className="tiny muted" htmlFor="naSolutionSpace">解题范围 / Solution space</label>
+                        <textarea className="input" id="naSolutionSpace" rows={3} maxLength={65536} value={spawnSolutionSpace} onChange={event => setSpawnSolutionSpace(event.target.value)} placeholder="允许探索的方案、限制与边界 / Allowed approaches and constraints" disabled={!preview && (commandBusy || missingCap(capabilities, "session.skills.list"))} />
                         <label className="tiny muted" htmlFor="naRole">Agent 定义</label>
                         <select
                           className="select"
@@ -1850,10 +1859,11 @@ export function AgentHubPage({
                         setNotice({ kind: "warn", text: "没有可用的 Agent 定义" });
                         return;
                       }
-                      void runCommand("agent.spawn", { definition, assignment: spawnTask.trim(), async: true }, `Spawn（${definition}）已提交`).then((ok) => {
+                      void runCommand("agent.spawn", { definition, assignment: spawnTask.trim(), ...(spawnSolutionSpace.trim() ? { solutionSpace: spawnSolutionSpace.trim() } : {}), async: true }, `Spawn（${definition}）已提交`).then((ok) => {
                         if (ok) {
                           setModal(null);
                           setSpawnTask("");
+                          setSpawnSolutionSpace("");
                         }
                       });
                     }}

@@ -440,6 +440,8 @@ export interface ModelProviderRemoteCompaction {
 
 /** Partial `models.yml` modelOverrides / extra custom-model fields. */
 export interface ModelOverridePatch {
+  /** Native compat.bedrockMessagesApi; fits anthropic-messages payloads to Bedrock constraints. */
+  readonly bedrockMessagesApi?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly name?: string;
@@ -461,6 +463,7 @@ export interface ModelOverridePatch {
 
 /** One model row under a provider. Safe display facts only. */
 export interface ModelCatalogEntry {
+  readonly bedrockMessagesApi?: boolean;
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly id: string;
@@ -825,6 +828,9 @@ export interface McpLastProbe {
  * Never includes command, args, env, url, headers, or OAuth secrets.
  */
 export interface McpServerRecord {
+  /** Native per-server instructions policy; absent on older Hosts. */
+  readonly instructions?: boolean;
+  readonly instructionsWritable?: boolean;
   readonly name: string;
   readonly transport: McpTransport;
   /** Effective enabled after denylist / allowlist / per-entry flags. */

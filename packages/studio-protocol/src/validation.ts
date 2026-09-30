@@ -1,3 +1,4 @@
+import { GUI_SETTING_KEYS, isGuiSettingKey, validateGuiSetting } from "./contracts/gui-settings.js";
 import { isWorkbenchOperationKind, validateWorkbenchOperation } from "./contracts/workbench.js";
 import { isUpgradeOperationKind, validateUpgradeOperation } from "./contracts/runtime-upgrade.js";
 import { isEvaluationOperationKind, parseEvaluationOperation } from "./evaluation-validation.js";
@@ -207,7 +208,7 @@ export function validateRuntimeSettingValue(
       for (const [name, tier] of Object.entries(overrides)) {
         if (!name.trim() || name.length > 256 || /[\u0000-\u001f]/u.test(name) || ["__proto__", "constructor", "prototype"].includes(name))
           throw new ContractValidationError("invalid agent name", path);
-        oneOf(tier, ["inherit", "none", "auto", "default", "flex", "scale", "priority"], path + "." + name);
+        oneOf(tier, ["inherit", "none", "auto", "default", "flex", "scale", "priority", "ultrafast"], path + "." + name);
       }
       return;
     }
@@ -240,6 +241,7 @@ export function validateRuntimeSettingValue(
 
 /** Settings an older snapshot may legitimately omit (added after the shape shipped). */
 const OPTIONAL_RUNTIME_SETTING_KEYS: ReadonlySet<string> = new Set([
+  ...GUI_SETTING_KEYS,
   "modelRoles.judge",
   "claudeResets.autoRedeem",
   "claudeResets.minBlockedMinutes",
@@ -671,7 +673,11 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
   }
   if (input.runtimeSettingsActivation !== undefined) {
     const activation = record(input.runtimeSettingsActivation, "$snapshot.snapshot.runtimeSettingsActivation");
-    exactKeys(activation, ["configured", "restartRequired"], "$snapshot.snapshot.runtimeSettingsActivation");
+    exactKeys(activation, ["configured", "restartRequired", "sources"], "$snapshot.snapshot.runtimeSettingsActivation");
+    if (activation.sources !== undefined) {
+      const sources = record(activation.sources, "activation.sources"); exactKeys(sources, STUDIO_RUNTIME_SETTING_KEYS, "activation.sources");
+      for (const source of Object.values(sources)) oneOf(source,["env","runtime","overlay","project","global","default"],"activation.sources");
+    }
     const configured = record(activation.configured, "$snapshot.snapshot.runtimeSettingsActivation.configured");
     exactKeys(configured, STUDIO_RUNTIME_SETTING_KEYS, "$snapshot.snapshot.runtimeSettingsActivation.configured");
     for (const [key, value] of Object.entries(configured)) {
@@ -914,7 +920,8 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
       boundedInteractionJson(request.details, `${path}.details`, INTERACTION_LIMITS.DETAILS_MAX_BYTES);
       return;
     case "ask": {
-      exactKeys(request, [...baseKeys, "questions"], path);
+      exactKeys(request, [...baseKeys, "questions", "acceptImages"], path);
+      if(request.acceptImages!==undefined&&typeof request.acceptImages!=="boolean")throw new ContractValidationError("invalid image capability",path);
       validateAskQuestions(request.questions, `${path}.questions`);
       return;
     }
@@ -1008,6 +1015,7 @@ function validateAgentLifecycleMutation(operation: Record<string, unknown>): voi
 
 const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   "runtime.snapshot": { keys: ["kind"] },
+  "prediction.query": { keys: ["kind", "sessionId", "version", "before", "prefix"], validate: operation => { const { kind, ...input } = operation; validatePredictionQuery(input); } },
   "runtime.pause": { keys: ["kind"] },
   "runtime.resume": {
     keys: ["kind", "expectedPauseEpoch"],
@@ -1313,10 +1321,11 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "agent.spawn": {
-    keys: ["kind", "definition", "assignment", "context", "async", "isolation", "effort"],
+    keys: ["kind", "definition", "assignment", "solutionSpace", "context", "async", "isolation", "effort"],
     validate: (operation) => {
       const definition = nonEmptyString(operation.definition, "$request.operation.definition");
       const assignment = nonEmptyString(operation.assignment, "$request.operation.assignment");
+      if (operation.solutionSpace !== undefined && nonEmptyString(operation.solutionSpace, "$request.operation.solutionSpace").length > MAX_AGENT_TEXT_LENGTH) throw new ContractValidationError("solutionSpace is too long", "$request.operation.solutionSpace");
       if (definition.length > MAX_AGENT_DEFINITION_LENGTH) {
         throw new ContractValidationError("definition is too long", "$request.operation.definition");
       }
@@ -1639,3 +1648,4 @@ export function parseAgentTranscriptPage(value: unknown): AgentTranscriptPage {
     eof: input.eof as boolean,
   };
 }
+import { validatePredictionQuery } from "./contracts/prediction.js";

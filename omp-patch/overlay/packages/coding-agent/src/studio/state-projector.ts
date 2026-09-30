@@ -1,3 +1,4 @@
+import { cfgToolsApprovalMode } from "../tools/settings";
 import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
@@ -379,7 +380,7 @@ export class StudioStateProjector {
 	#approvalMode(): "always-ask" | "write" | "yolo" {
 		const settings = this.#runtime.session.settings;
 		if (settings === undefined) return "yolo";
-		const value = settings.get("tools.approvalMode");
+		const value = cfgToolsApprovalMode.get(settings);
 		return value === "always-ask" || value === "write" || value === "yolo" ? value : "yolo";
 	}
 

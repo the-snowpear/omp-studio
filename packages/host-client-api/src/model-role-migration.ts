@@ -1,5 +1,5 @@
 /**
- * Native kind-role migration from OMP v18.3.0 (62bc57be), config/settings.ts.
+ * Native kind-role migration from OMP v18.4.4 (8ac1309b), config/settings.ts.
  * Host reads the same effective roles before Runtime has saved config.yml.
  * Keep this logic and the selected priority lists aligned on upstream upgrades.
  */
@@ -7,26 +7,9 @@ function isRecord(value: unknown): value is Record<string, unknown> { return !!v
 export const MODEL_ROLE_PRIORITIES = {
   "web": [
     "web/parallel",
-    "web/perplexity",
-    "google/gemini-2.5-flash",
-    "google-antigravity/gemini-2.5-flash",
-    "anthropic/claude-haiku-4-5",
-    "openai-codex/gpt-5.6-luna",
-    "openai-codex/gpt-5.6",
-    "openai-codex/gpt-5.5",
-    "xai/grok-4.5",
-    "xai-oauth/grok-4.5",
-    "web/zai",
+    "web/hosted",
     "web/exa",
-    "web/tinyfish",
-    "web/jina",
-    "web/kagi",
-    "web/tavily",
     "web/firecrawl",
-    "web/brave",
-    "web/kimi",
-    "web/synthetic",
-    "web/ollama",
     "web/searxng",
     "web/startpage",
     "web/duckduckgo",
@@ -36,16 +19,19 @@ export const MODEL_ROLE_PRIORITIES = {
     "web/public"
   ],
   "image": [
-    "openai/gpt-image-1",
-    "openai-codex/gpt-image-1",
+    "openai/gpt-image-2",
+    "openai-codex/gpt-image-2",
     "google-antigravity/gemini-3-pro-image",
     "xai/grok-imagine-image",
     "xai-oauth/grok-imagine-image",
-    "openrouter/google/gemini-3-pro-image-preview",
-    "google/gemini-3-pro-image-preview",
+    "openrouter/google/gemini-3-pro-image",
+    "google/gemini-3-pro-image",
     "deepinfra/black-forest-labs/FLUX-2-pro"
   ]
 };
+/** Pure search engines, including paid engines available for explicit legacy selections. */
+export const REGISTERED_SEARCH_ENGINES = ["perplexity","zai","exa","tinyfish","jina","kagi","tavily","firecrawl","brave","kimi","parallel","synthetic","ollama","searxng","duckduckgo","google","ecosia","startpage","mojeek","public"];
+function isRegisteredSearchEngine(id: string): boolean { return REGISTERED_SEARCH_ENGINES.includes(id); }
 const MODEL_PRIO = MODEL_ROLE_PRIORITIES;
 export function migrateModelRoleConfig(source: unknown): Record<string, unknown> {
   const raw = isRecord(source) ? structuredClone(source) : {};
@@ -82,43 +68,41 @@ export function migrateModelRoleConfig(source: unknown): Record<string, unknown>
 			const legacyWebOrder = legacy(providerSettings, "webSearchOrder", "providers.webSearchOrder");
 			const legacyWebExclude = legacy(providerSettings, "webSearchExclude", "providers.webSearchExclude");
 			const legacyGeminiModel = legacy(providerSettings, "webSearchGeminiModel", "providers.webSearchGeminiModel");
-			const webSelector = (provider: string, geminiModel: string): string | undefined => {
+			const geminiSelectors = (model: string): string[] => [
+				`google-gemini-cli/${model}`,
+				`google-antigravity/${model}`,
+				`google/${model}`,
+			];
+			const webSelectors = (provider: string, geminiModel: string): string[] => {
 				switch (provider) {
 					case "gemini":
-						return `google/${geminiModel}`;
+						return geminiSelectors(geminiModel);
 					case "anthropic":
-						return "anthropic/claude-haiku-4-5";
+						return ["anthropic/claude-haiku-4-5"];
 					case "codex":
-						return "openai-codex/gpt-5.6-luna";
+						return ["openai-codex/gpt-5.6-luna"];
 					case "xai":
-						return "xai/grok-4.5";
+						return ["xai/grok-4.5"];
 					case "auto":
-						return undefined;
+						return [];
 					default:
-						return MODEL_PRIO.web.includes(`web/${provider}`) ? `web/${provider}` : undefined;
+						return isRegisteredSearchEngine(provider) ? [`web/${provider}`] : [];
 				}
 			};
 			const geminiModel =
 				typeof legacyGeminiModel === "string" && legacyGeminiModel.trim()
 					? legacyGeminiModel.trim()
 					: "gemini-2.5-flash";
-			const webDefaults = MODEL_PRIO.web.map(selector => {
-				if (selector === "google/gemini-2.5-flash") return `google/${geminiModel}`;
-				if (selector === "google-antigravity/gemini-2.5-flash") {
-					return `google-antigravity/${geminiModel}`;
-				}
-				return selector;
-			});
 			const excludedWebProviders = new Set(
 				Array.isArray(legacyWebExclude)
 					? legacyWebExclude.filter(
 							(value): value is string =>
-								typeof value === "string" && webSelector(value, geminiModel) !== undefined,
+								typeof value === "string" && webSelectors(value, geminiModel).length > 0,
 						)
 					: [],
 			);
 			const isWebSelectorExcluded = (selector: string): boolean => {
-				if (excludedWebProviders.has("gemini") && /^(?:google|google-antigravity)\//.test(selector)) return true;
+				if (excludedWebProviders.has("gemini") && geminiSelectors(geminiModel).includes(selector)) return true;
 				if (excludedWebProviders.has("anthropic") && selector.startsWith("anthropic/")) return true;
 				if (excludedWebProviders.has("codex") && selector.startsWith("openai-codex/")) return true;
 				if (excludedWebProviders.has("xai") && (selector.startsWith("xai/") || selector.startsWith("xai-oauth/"))) {
@@ -135,16 +119,13 @@ export function migrateModelRoleConfig(source: unknown): Record<string, unknown>
 					? [legacyWebSearch]
 					: [];
 			const orderedWebSelectors = orderedWebProviders.flatMap(value =>
-				typeof value === "string" ? (webSelector(value, geminiModel) ?? []) : [],
+				typeof value === "string" ? webSelectors(value, geminiModel) : [],
 			);
-			const shouldMigrateWeb =
-				orderedWebSelectors.length > 0 ||
-				excludedWebProviders.size > 0 ||
-				(typeof legacyGeminiModel === "string" && legacyGeminiModel.trim().length > 0);
-			if (shouldMigrateWeb) {
+			// The Gemini model only shapes an ordered `gemini` entry; the defaults hold no chat models.
+			if (orderedWebSelectors.length > 0 || excludedWebProviders.size > 0) {
 				setRoleChain(
 					"web",
-					dedupe([...orderedWebSelectors, ...webDefaults]).filter(selector => !isWebSelectorExcluded(selector)),
+					dedupe([...orderedWebSelectors, ...MODEL_PRIO.web]).filter(selector => !isWebSelectorExcluded(selector)),
 				);
 			}
 
@@ -153,17 +134,17 @@ export function migrateModelRoleConfig(source: unknown): Record<string, unknown>
 			const imageSelector = (provider: string): string | undefined => {
 				switch (provider) {
 					case "openai":
-						return "openai/gpt-image-1";
+						return "openai/gpt-image-2";
 					case "openai-codex":
-						return "openai-codex/gpt-image-1";
+						return "openai-codex/gpt-image-2";
 					case "antigravity":
 						return "google-antigravity/gemini-3-pro-image";
 					case "xai":
 						return "xai/grok-imagine-image";
 					case "openrouter":
-						return "openrouter/google/gemini-3-pro-image-preview";
+						return "openrouter/google/gemini-3-pro-image";
 					case "gemini":
-						return "google/gemini-3-pro-image-preview";
+						return "google/gemini-3-pro-image";
 					case "deepinfra":
 						return "deepinfra/black-forest-labs/FLUX-2-pro";
 					default:

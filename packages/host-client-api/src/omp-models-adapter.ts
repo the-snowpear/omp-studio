@@ -854,6 +854,7 @@ function costToYaml(cost: ModelCostMeta | undefined, complete: boolean): Record<
 }
 
 function extrasFromYaml(entry: Record<string, YamlValue>): {
+  bedrockMessagesApi?: boolean;
   omitMaxOutputTokens?: boolean;
   premiumMultiplier?: number;
   headers?: Record<string, string>;
@@ -872,6 +873,7 @@ function extrasFromYaml(entry: Record<string, YamlValue>): {
   const baseUrl = stringOf(entry.baseUrl);
   return {
     ...(typeof entry.omitMaxOutputTokens === "boolean" ? { omitMaxOutputTokens: entry.omitMaxOutputTokens } : {}),
+    ...(typeof asRecord(entry.compat)?.bedrockMessagesApi === "boolean" ? {bedrockMessagesApi: asRecord(entry.compat)!.bedrockMessagesApi as boolean} : {}),
     ...(premiumMultiplier === undefined ? {} : { premiumMultiplier }),
     ...(headers ? { headers } : {}),
     ...(contextPromotionTarget === undefined ? {} : { contextPromotionTarget }),
@@ -908,11 +910,20 @@ function writeThinking(
   return out;
 }
 
+/** Preserve native compatibility flags that the Studio form does not own. */
+function writeBedrockCompat(row:Record<string,YamlValue>, previous:Record<string,YamlValue>|undefined, enabled:boolean|undefined):void {
+  const compat={...asRecord(previous?.compat)};
+  if(enabled===undefined)delete compat.bedrockMessagesApi;
+  else compat.bedrockMessagesApi=enabled;
+  if(Object.keys(compat).length)row.compat=compat;
+}
+
 function writeOverrideRow(
   override: ModelOverridePatch,
   prevOverride?: Record<string, YamlValue>,
 ): Record<string, YamlValue> | undefined {
   const row: Record<string, YamlValue> = {};
+  writeBedrockCompat(row, prevOverride, override.bedrockMessagesApi);
   if (override.name !== undefined) row.name = override.name;
   if (override.contextWindow !== undefined) row.contextWindow = override.contextWindow;
   if (override.maxTokens !== undefined) row.maxTokens = override.maxTokens;
@@ -965,6 +976,7 @@ function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undef
       ...(extras.api === undefined ? {} : { api: extras.api }),
       ...(extras.baseUrl === undefined ? {} : { baseUrl: extras.baseUrl }),
       ...(extras.omitMaxOutputTokens === undefined ? {} : { omitMaxOutputTokens: extras.omitMaxOutputTokens }),
+      ...(extras.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: extras.bedrockMessagesApi }),
       ...(extras.premiumMultiplier === undefined ? {} : { premiumMultiplier: extras.premiumMultiplier }),
       ...(extras.headers ? { headers: extras.headers } : {}),
       ...(extras.contextPromotionTarget === undefined ? {} : { contextPromotionTarget: extras.contextPromotionTarget }),
@@ -1000,6 +1012,7 @@ function yamlModelOverrides(raw: YamlValue | undefined): ModelProviderRecord["mo
       ...(image === undefined ? {} : { image }),
       ...(cost ? { cost } : {}),
       ...(extras.omitMaxOutputTokens === undefined ? {} : { omitMaxOutputTokens: extras.omitMaxOutputTokens }),
+      ...(extras.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: extras.bedrockMessagesApi }),
       ...(extras.premiumMultiplier === undefined ? {} : { premiumMultiplier: extras.premiumMultiplier }),
       ...(extras.headers ? { headers: extras.headers } : {}),
       ...(extras.contextPromotionTarget === undefined ? {} : { contextPromotionTarget: extras.contextPromotionTarget }),
@@ -1029,6 +1042,7 @@ function applyOverrideToCatalog(
     ...(override.image === undefined ? {} : { image: override.image }),
     ...(override.cost === undefined ? {} : { cost: override.cost }),
     ...(override.omitMaxOutputTokens === undefined ? {} : { omitMaxOutputTokens: override.omitMaxOutputTokens }),
+    ...(override.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: override.bedrockMessagesApi }),
     ...(override.premiumMultiplier === undefined ? {} : { premiumMultiplier: override.premiumMultiplier }),
     ...(override.headers ? { headers: override.headers } : {}),
     ...(override.contextPromotionTarget === undefined ? {} : { contextPromotionTarget: override.contextPromotionTarget }),
@@ -1293,6 +1307,7 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
       const rc = writeRemoteCompaction(model.remoteCompaction);
       if (rc) row.remoteCompaction = rc;
       const prevModel = prevModelsList?.find((item): item is Record<string, YamlValue> => Boolean(item) && typeof item === "object" && !Array.isArray(item) && (item as Record<string, YamlValue>).id === model.id);
+      writeBedrockCompat(row, prevModel, model.bedrockMessagesApi);
       const prevThinking = asRecord(prevModel?.thinking);
       const prevMode = stringOf(prevThinking?.mode);
       const thinking = writeThinking(model.thinking, prevMode ?? "effort", prevThinking);

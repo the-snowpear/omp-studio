@@ -1,3 +1,4 @@
+import { Runtime1844Rows } from "./Runtime1844Rows";
 /**
  * 设置页 7 个标签面板（Phase 1）。
  *
@@ -56,7 +57,7 @@ export interface RuntimeSettingsCtl {
   readonly compactionSpeculation?: StudioCompactionSpeculation;
   readonly pendingKey?: StudioRuntimeSettingKey;
   readonly error?: string;
-  readonly set?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue) => void;
+  readonly set?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist?: boolean) => void;
 }
 
 const RUNTIME_DEFAULTS: RuntimeSettingsReadModel = {
@@ -1060,6 +1061,7 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
   return (
     <>
       <TabHeader title={t("settings.advanced.title")} desc={t("settings.advanced.desc")} {...(runtime === undefined ? {} : { runtime })} />
+      <Runtime1844Rows runtime={runtime} />
       <SettingSection title={t("updates.section")}>
         <SettingRow
           label={t("updates.mirrorLabel")}
@@ -1321,7 +1323,7 @@ function RuntimeUpgradeRows({ runtime, demo }: { runtime?: RuntimeSettingsCtl | 
         {tiers.map(([name, tier], index) => <div key={index} className="row">
           <input className="input" aria-label={t("runtimeUpgrade.agent")} value={name} disabled={disabled} onChange={event => setTiers(rows => rows.map((row, i) => i === index ? [event.target.value, row[1]] : row))} />
           <select className="select" aria-label={t("runtimeUpgrade.tiers")} value={tier} disabled={disabled} onChange={event => setTiers(rows => rows.map((row, i) => i === index ? [row[0], event.target.value] : row))}>
-            {["inherit","none","auto","default","flex","scale","priority"].map(value => <option key={value}>{value}</option>)}
+            {["inherit","none","auto","default","flex","scale","priority","ultrafast"].map(value => <option key={value}>{value}</option>)}
           </select>
           <button className="btn small" disabled={disabled} onClick={() => setTiers(rows => rows.filter((_, i) => i !== index))}>{t("common.delete")}</button>
         </div>)}

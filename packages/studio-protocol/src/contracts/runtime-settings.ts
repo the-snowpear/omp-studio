@@ -1,7 +1,9 @@
+import { GUI_SETTING_KEYS, type GuiSettingsSnapshot } from "./gui-settings.js";
 import type { SessionId } from "./ids.js";
 
 /** Runtime settings intentionally exposed to the Studio Bridge. */
 export const STUDIO_RUNTIME_SETTING_KEYS = [
+  ...GUI_SETTING_KEYS,
   "modelRoles.judge",
   "claudeResets.autoRedeem",
   "claudeResets.minBlockedMinutes",
@@ -58,7 +60,7 @@ export const STUDIO_RUNTIME_CODE_MODES = ["off", "on", "auto"] as const;
 export type StudioRuntimeCodeMode = (typeof STUDIO_RUNTIME_CODE_MODES)[number];
 
 /** Exact schema-backed public values; no arbitrary key/value escapes. */
-export interface StudioRuntimeSettingsSnapshot {
+export interface StudioRuntimeSettingsSnapshot extends GuiSettingsSnapshot {
   "modelRoles.judge"?: string;
   "claudeResets.autoRedeem"?: "unset" | "yes" | "no";
   "claudeResets.minBlockedMinutes"?: number;
@@ -80,7 +82,7 @@ export interface StudioRuntimeSettingsSnapshot {
   "compaction.experimentalContextManagement"?: boolean;
   "task.enableEffort"?: boolean;
   "task.maxEffort"?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-  "task.agentServiceTierOverrides"?: Record<string, "inherit" | "none" | "auto" | "default" | "flex" | "scale" | "priority">;
+  "task.agentServiceTierOverrides"?: Record<string, "inherit" | "none" | "auto" | "default" | "flex" | "scale" | "priority" | "ultrafast">;
   "providers.autoThinkingMaxEffort"?: "xhigh" | "max";
   "providers.judgmentProvider"?: "auto" | "typesafe" | "llm";
   "images.describeForTextModels"?: boolean;
@@ -91,6 +93,7 @@ export interface StudioRuntimeSettingsSnapshot {
 export type StudioRuntimeSettingValue = Exclude<StudioRuntimeSettingsSnapshot[StudioRuntimeSettingKey], undefined>;
 
 export interface StudioRuntimeSettingsActivation {
+  sources?: Partial<Record<StudioRuntimeSettingKey, "env" | "runtime" | "overlay" | "project" | "global" | "default">>;
   configured: Partial<StudioRuntimeSettingsSnapshot>;
   restartRequired: StudioRuntimeSettingKey[];
 }

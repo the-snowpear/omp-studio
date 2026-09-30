@@ -1,4 +1,5 @@
-import { expect, it } from "bun:test";
+import { Settings, resetSettingsForTest } from "../src/config/settings";
+import { beforeEach, expect, it } from "bun:test";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioRuntimeCatalogService } from "../src/studio/services/runtime-catalog-service";
 import type { PromptTemplateRow, McpRuntimeStatus } from "../src/studio/runtime-catalog-protocol";
@@ -55,7 +56,7 @@ it("reports native startup readiness without connecting, probing or exposing cre
 	const session = {
 		sessionId: "s",
 		sessionManager: { getCwd: () => "." },
-		settings: { get: () => 250 },
+		settings: Settings.isolated({ "mcp.startupTimeoutMs": 250 }),
 		studioToolSession: { mcpManager: manager },
 	};
 	const service = new StudioRuntimeCatalogService(session as unknown as AgentSession);
@@ -65,4 +66,9 @@ it("reports native startup readiness without connecting, probing or exposing cre
 	expect(result.settled).toBe(false);
 	expect(result.servers.find(row => row.name === "ready")).toEqual({ name: "ready", state: "ready", tools: 1 });
 	expect(JSON.stringify(result)).not.toContain("must-not-leak");
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

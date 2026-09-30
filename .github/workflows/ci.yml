@@ -22,13 +22,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
+      - name: Select additional gates
+        id: scope
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          $full = '${{ github.event_name }}' -eq 'workflow_dispatch' -or !$env:BASE_SHA -or $env:BASE_SHA -match '^0+$'
+          if (!$full) {
+            $files = @(git diff --name-only $env:BASE_SHA HEAD)
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot determine changed files' }
+          }
+          $runtime = $full -or [bool]($files -match '^(omp-patch/|packages/(studio-protocol|client-contract)/|scripts/|\.github/|package(-lock)?\.json$)')
+          $metadata = $full -or [bool]($files -match '^(packaging/|packages/runtime-installer/|scripts/|omp-patch/|\.github/|package(-lock)?\.json$)')
+          "runtime=$($runtime.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "metadata=$($metadata.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - uses: oven-sh/setup-bun@v2
+        if: steps.scope.outputs.runtime == 'true'
+        with:
+          bun-version: "1.4.2"
       - run: npm ci
       - run: npm run omp:install-deps
+        if: steps.scope.outputs.runtime == 'true'
       - run: npm run check
       - run: npm run omp:test:metadata
+        if: steps.scope.outputs.metadata == 'true'
       - run: npm run omp:verify:patches
+        if: steps.scope.outputs.runtime == 'true'

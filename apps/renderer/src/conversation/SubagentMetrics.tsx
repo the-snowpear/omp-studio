@@ -26,6 +26,7 @@ function formatMetricTokens(count: number): string {
 
 /** Host usage is USD; compact-card strings (e.g. `¥ 0.51`) pass through unchanged. */
 export function formatAgentCost(cost: number): string {
+  if(cost===0)return "—";
   if (!Number.isFinite(cost)) return "";
   if (cost < 0.01) return `$${cost.toFixed(4)}`;
   if (cost < 1) return `$${cost.toFixed(3)}`;
@@ -178,7 +179,7 @@ export function SubagentMetrics({ tokens, tools, requests, files, cost, generati
       {requests !== undefined ? <span className="hub-num"><i>req</i><b>{requests}</b></span> : null}
       {files !== undefined ? <span className="hub-num"><i>files</i><b>{files}</b></span> : null}
       {generationTps === undefined ? null : <span className="sa-tok">{generationTps.toFixed(1)} tok/s</span>}
-      {cost ? <span className="sa-cost">{cost}</span> : null}
+      {cost ? <span className="sa-cost" title="API-equivalent estimate; billed cost unavailable / API 等价估算，实际扣费未知">{cost}</span> : null}
     </div>
   );
 }

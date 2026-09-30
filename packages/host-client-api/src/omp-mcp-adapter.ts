@@ -85,6 +85,7 @@ interface McpConfigFile {
 }
 
 interface McpServerEntry {
+  instructions?: boolean;
   enabled?: boolean;
   type?: string;
   transport?: string;
@@ -96,6 +97,7 @@ interface McpServerEntry {
 }
 
 interface InternalServer {
+  readonly instructions: boolean;
   readonly name: string;
   readonly transport: McpTransport;
   readonly entryEnabled: boolean;
@@ -245,6 +247,7 @@ function listFromMap(
     }
     const mapped: McpServerEntry = {};
     if (typeof entry.enabled === "boolean") mapped.enabled = entry.enabled;
+    if (typeof entry.instructions === "boolean") mapped.instructions = entry.instructions;
     if (typeof entry.type === "string") mapped.type = entry.type;
     if (typeof entry.transport === "string") mapped.transport = entry.transport;
     if (entry.command !== undefined) mapped.command = entry.command;
@@ -258,6 +261,7 @@ function listFromMap(
       name,
       transport,
       entryEnabled: mapped.enabled !== false,
+      instructions: mapped.instructions !== false,
       scope,
       sourceLabel,
       sourcePath: filePath,
@@ -615,6 +619,8 @@ function toRecord(
     status,
     sourceLabel: server.sourceLabel,
     scope: server.scope,
+    instructions: server.instructions,
+    instructionsWritable: server.writableNative && !server.shadowed,
     ...(lastProbe === undefined ? {} : { lastProbe }),
   };
 }
@@ -895,6 +901,21 @@ export function createOmpMcpService(options: OmpMcpAdapterOptions = {}): HostMcp
         const message = error instanceof Error ? error.message : "mcp.get failed";
         return emptyModel(now(), sanitizeDisplayText(message, WARNING_MAX) ?? "mcp.get failed");
       }
+    },
+
+    async setInstructions(input) {
+      const name = safeName(input.name);
+      if (!name || typeof input.enabled !== "boolean" || !["user", "project"].includes(input.scope)) {
+        throw { code: "INVALID_ARGUMENT", message: "Invalid MCP instructions policy" };
+      }
+      const { servers } = await collect();
+      const selected = servers.find(server => server.name === name && server.scope === input.scope && !server.shadowed);
+      if (!selected?.writableNative) throw { code: "CAPABILITY_UNAVAILABLE", message: "Edit instructions in the owning MCP configuration; only effective native configurations are writable here" };
+      const config = await readJsonFile(selected.sourcePath);
+      const entry = config?.mcpServers?.[name];
+      if (!config || !entry) throw { code: "COMMAND_BLOCKED", message: "MCP configuration changed; refresh before saving" };
+      await writeJsonFile(selected.sourcePath, {...config, mcpServers: {...config.mcpServers, [name]: {...entry, instructions: input.enabled}}});
+      return WRITE_OK(`${name}: instructions ${input.enabled ? "enabled" : "disabled"}; takes effect in a new session`);
     },
 
     async setEnabled(input) {

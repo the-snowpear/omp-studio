@@ -15,6 +15,7 @@
  */
 
 import { CLIENT_CONTRACT_VERSION } from "@omp-studio/client-contract";
+import { emptyStats } from "@omp-studio/studio-protocol";
 import type {
   AuthorityEpoch,
   AuthorityId,
@@ -264,6 +265,8 @@ const BOOTSTRAP: ClientBootstrap = {
 };
 
 const QUERY_INPUTS = {
+  "stats.read": {filter:{}},
+  "prediction.query": {sessionId:"test",version:1,before:"",prefix:""},
   "artifacts.text.read": { artifactId: "11111111-1111-4111-8111-111111111111" },
   "artifacts.list": {},
   "artifacts.storage.get": {},
@@ -306,6 +309,8 @@ const QUERY_INPUTS = {
 } satisfies { readonly [K in QueryName]: QueryInput<K> };
 
 const QUERY_RESPONSES = {
+  "stats.read": {ok:true,queryName:"stats.read",result:emptyStats({})},
+  "prediction.query": {ok:true,queryName:"prediction.query",result:{version:1,suffix:null,engine:"ngram"}},
   "artifacts.text.read": { ok: true, queryName: "artifacts.text.read", result: { artifact: { artifactId: "11111111-1111-4111-8111-111111111111", kind: "annotation", name: "notes.json", mimeType: "application/json", bytes: 2, createdAt: "2026-09-25T00:00:00.000Z", sha256: "0".repeat(64) }, text: "{}" } },
   "artifacts.list": { ok: true, queryName: "artifacts.list", result: { artifacts: [], total: 0, totalBytes: 0 } },
   "artifacts.storage.get": { ok: true, queryName: "artifacts.storage.get", result: { locationName: "content", writable: true, total: 0, totalBytes: 0 } },

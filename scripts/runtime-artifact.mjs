@@ -49,6 +49,24 @@ export const MANAGED_ENTRYPOINT = "omp.exe";
 export const STUDIO_PROTOCOL_RANGE = Object.freeze({ min: 1, max: 1 });
 
 export const IMPLEMENTED_CAPABILITIES = Object.freeze([
+  "prediction.query",
+  "resource.read",
+  "ida.status",
+  "ida.view",
+  "ida.prepare",
+  "ida.commit",
+  "ida.cancel",
+  "agent.btw.read",
+  "agent.btw.ask",
+  "agent.btw.abort",
+  "prediction.control",
+  "session.queue.list",
+  "session.queue.remove",
+  "session.queue.steer",
+  "session.queue.takeback",
+  "session.tier.get",
+  "session.tier.set",
+  "session.skills.list",
   // Typed Studio Workbench operations; keep order aligned with Runtime.
   "skillshare.status",
   "skillshare.home",

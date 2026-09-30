@@ -29,11 +29,11 @@
   "scripts": {
     "preview": "node scripts/preview.mjs",
     "build": "npm run build -w @omp-studio/studio-protocol && npm run build -w @omp-studio/client-contract && npm run build -w @omp-studio/platform && npm run build -w @omp-studio/runtime-installer && npm run build -w @omp-studio/transport-desktop && npm run build -w @omp-studio/transport-web && npm run build -w @omp-studio/client && npm run build -w @omp-studio/platform-win32 && npm run build -w @omp-studio/platform-darwin && npm run build -w @omp-studio/studio-host && npm run build -w @omp-studio/host-client-api && npm run build -w @omp-studio/testkit && npm run build -w @omp-studio/renderer && npm run build -w @omp-studio/desktop",
-    "typecheck": "npm run build && npm run typecheck -w @omp-studio/renderer && npm run typecheck -w @omp-studio/desktop",
-    "test": "npm run test -w @omp-studio/studio-protocol && npm run test -w @omp-studio/runtime-installer && npm run test -w @omp-studio/studio-host && npm run test -w @omp-studio/host-client-api && npm run test -w @omp-studio/client && npm run test -w @omp-studio/platform-win32 && npm run test -w @omp-studio/platform-darwin && npm run test -w @omp-studio/transport-desktop && npm run test -w @omp-studio/transport-web && npm run test -w @omp-studio/testkit && npm run test -w @omp-studio/renderer && npm run test -w @omp-studio/desktop",
+    "typecheck": "npm run build",
+    "test": "npm run build && npm run test:built",
     "conversation:e2e:manual": "node scripts/real-conversation-e2e.mjs",
     "perf:streaming": "node scripts/streaming-perf-gate.mjs",
-    "check": "npm run typecheck && npm test",
+    "check": "npm test",
     "runtime:verify-source": "node scripts/verify-omp-source.mjs",
     "omp:install-deps": "node scripts/install-omp-deps.mjs",
     "omp:keys": "node scripts/runtime-signing-keys.mjs",
@@ -51,7 +51,8 @@
     "omp:overlay:apply": "node scripts/apply-omp-overlay.mjs",
     "omp:patches:regen": "node scripts/regen-omp-patches.mjs",
     "updates:build": "node scripts/build-update-assets-v2.mjs",
-    "updates:verify": "node scripts/verify-update-assets-v2.mjs"
+    "updates:verify": "node scripts/verify-update-assets-v2.mjs",
+    "test:built": "npm run test:built --workspaces --if-present"
   },
   "engines": {
     "node": ">=22"

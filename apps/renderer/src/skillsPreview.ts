@@ -3,7 +3,7 @@
  * Used by the sidebar drawer until Host exposes a skills read model.
  */
 
-export type SkillScope = "workspace" | "global" | "builtin";
+export type SkillScope = "workspace" | "global" | "builtin" | "runtime";
 export type DrawerKind = "skill" | "plugin";
 export type DrawerCat = "all" | "skill" | "plugin";
 

@@ -164,6 +164,12 @@ export class StudioRuntimeSessionController {
    * Read the active-branch transcript. This is a query, not a Composer
    * command: it is not recorded on the command ledger.
    */
+  async predict(input:PredictionQuery):Promise<PredictionResult> {
+    const snapshot=this.bridge.projectionSnapshot();
+    if(!snapshot || snapshot.sessionId!==input.sessionId)throw new StudioHostError("OUTCOME_UNKNOWN","Prediction session unavailable");
+    return this.bridge.predict(input);
+  }
+
   async readTranscript(
     input: { readonly cursor?: OpaqueCursor; readonly limit?: number } = {},
   ): Promise<ConversationTranscriptPage> {
@@ -374,3 +380,4 @@ export class StudioRuntimeSessionController {
     this.#btw.dispose();
   }
 }
+import type { PredictionQuery, PredictionResult } from "@omp-studio/studio-protocol";

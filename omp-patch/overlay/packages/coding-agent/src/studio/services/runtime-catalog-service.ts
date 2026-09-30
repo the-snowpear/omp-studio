@@ -1,3 +1,4 @@
+import { cfgMcpStartupTimeoutMs } from "../../mcp/settings";
 import { createHash } from "node:crypto";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { expandPromptTemplate, type PromptTemplate } from "../../config/prompt-templates";
@@ -40,7 +41,7 @@ export class StudioRuntimeCatalogService {
 	async #execute(operation: RuntimeCatalogOperation): Promise<unknown> {
 		if (operation.kind === "mcp.runtime.status") {
 			const manager = this.session.studioToolSession?.mcpManager;
-			const startupTimeoutMs = resolveMCPStartupTimeoutMs(this.session.settings.get("mcp.startupTimeoutMs"));
+			const startupTimeoutMs = resolveMCPStartupTimeoutMs(cfgMcpStartupTimeoutMs.get(this.session.settings));
 			if (!manager)
 				return { available: false, startupTimeoutMs, ready: false, settled: false, servers: [], total: 0 };
 			// A one-millisecond bounded observation waits for no new discovery and never changes policy.

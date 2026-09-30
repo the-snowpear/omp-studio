@@ -74,6 +74,7 @@ export type AgentOperation =
       kind: "agent.spawn";
       definition: string;
       assignment: string;
+      solutionSpace?: string;
       context?: string;
       async?: boolean;
       isolation?: string;

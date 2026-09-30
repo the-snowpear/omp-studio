@@ -61,8 +61,8 @@ for (const group of SEAM_GROUPS) {
     console.log(`No changes for ${group.file}; removed`);
     continue;
   }
-  const diff = run("git", ["-C", ompSourceDirectory, "diff", "--", ...present], { capture: true });
-  await writeFile(target, `${diff}\n`, "utf8");
+  const diff = run("git", ["-C", ompSourceDirectory, "diff", "--", ...present], { capture: true, trim: false });
+  await writeFile(target, diff, "utf8");
   written.push(group.file);
   console.log(`Wrote ${group.file} (${present.length} file(s))`);
 }

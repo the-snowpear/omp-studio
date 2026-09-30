@@ -31,3 +31,13 @@ export * from "./contracts/media.js";
 export * from "./contracts/live-audio.js";
 
 export * from "./contracts/skillshare.js";
+
+export * from "./contracts/gui-settings.js";
+
+export * from "./contracts/session-gui.js";
+export * from "./contracts/prediction.js";
+export * from "./contracts/stats.js";
+export * from "./contracts/agent-btw.js";
+export * from "./contracts/ida.js";
+export * from "./contracts/ask-attachments.js";
+export * from "./contracts/resources.js";

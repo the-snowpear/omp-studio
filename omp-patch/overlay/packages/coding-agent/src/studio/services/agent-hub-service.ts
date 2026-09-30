@@ -185,6 +185,7 @@ export interface StudioIrcBusPort {
 export interface StudioAgentSpawnRequest {
 	definition: string;
 	assignment: string;
+	solutionSpace?: string;
 	context?: string;
 	async?: boolean;
 	isolation?: string;
@@ -492,6 +493,7 @@ export class StudioAgentHubService {
 	async spawn(args: {
 		definition: string;
 		assignment: string;
+		solutionSpace?: string;
 		context?: string;
 		async?: boolean;
 		isolation?: string;
@@ -500,6 +502,7 @@ export class StudioAgentHubService {
 	}): Promise<{ agentId: string; jobId?: string; status: "starting" }> {
 		const definition = args.definition.trim();
 		const assignment = args.assignment.trim();
+		if(args.solutionSpace !== undefined && (!args.solutionSpace.trim() || args.solutionSpace.length > MAX_MESSAGE_TEXT)) throw new StudioAgentHubError("INVALID_ARGUMENT", "Invalid solution space");
 		if (definition.length === 0 || definition.length > MAX_DEFINITION_LENGTH) {
 			throw new StudioAgentHubError("INVALID_ARGUMENT", "Spawn definition must be between 1 and 256 characters");
 		}
@@ -520,6 +523,7 @@ export class StudioAgentHubService {
 			receipt = await this.#spawner.spawn({
 				definition,
 				assignment,
+				...(args.solutionSpace !== undefined ? { solutionSpace: args.solutionSpace } : {}),
 				...(args.context !== undefined ? { context: args.context } : {}),
 				...(args.async !== undefined ? { async: args.async } : {}),
 				...(args.isolation !== undefined ? { isolation: args.isolation } : {}),

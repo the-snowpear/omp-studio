@@ -7,6 +7,7 @@
 export type McpStatus = "connected" | "reconnecting" | "disabled" | "error";
 
 export type PreviewMcp = {
+  instructions?: boolean;
   name: string;
   transport: string;
   status: McpStatus;

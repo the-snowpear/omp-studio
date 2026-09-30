@@ -1,26 +1,24 @@
-import { describe, expect, test } from "bun:test";
+import { Settings, resetSettingsForTest } from "../src/config/settings";
+import { cfgToolsApprovalMode } from "../src/tools/settings";
+import { beforeEach, describe, expect, test } from "bun:test";
 import {
 	StudioPermissionControlError,
 	StudioPermissionControlService,
 	type StudioPermissionSession,
 } from "@oh-my-pi/pi-coding-agent/studio/services/permission-control-service";
 
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
+});
+
 function fixture(overrides: { streaming?: boolean; compacting?: boolean; flushError?: Error } = {}) {
-	let currentMode = "yolo";
 	let flushed = 0;
-	const settings = {
-		get: (key: string) => (key === "tools.approvalMode" ? currentMode : undefined),
-		set: (key: string, value: unknown) => {
-			if (key === "tools.approvalMode") currentMode = value as string;
-		},
-		clearOverride: () => {},
-		override: (key: string, value: unknown) => {
-			if (key === "tools.approvalMode") currentMode = value as string;
-		},
-		flush: async () => {
-			if (overrides.flushError) throw overrides.flushError;
-			flushed += 1;
-		},
+	const settings = Settings.isolated();
+	cfgToolsApprovalMode.override(settings, "yolo");
+	settings.flush = async () => {
+		if (overrides.flushError) throw overrides.flushError;
+		flushed += 1;
 	};
 	const session: StudioPermissionSession = {
 		get isStreaming() {
@@ -33,7 +31,7 @@ function fixture(overrides: { streaming?: boolean; compacting?: boolean; flushEr
 	};
 	return {
 		service: new StudioPermissionControlService(session),
-		getMode: () => currentMode,
+		getMode: () => cfgToolsApprovalMode.get(settings),
 		getFlushed: () => flushed,
 	};
 }

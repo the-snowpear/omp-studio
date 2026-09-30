@@ -1,17 +1,17 @@
 diff --git a/packages/coding-agent/src/async/job-manager.ts b/packages/coding-agent/src/async/job-manager.ts
-index e7faf6a553..475b9cb797 100644
+index 0dee961811..bc1bc1e083 100644
 --- a/packages/coding-agent/src/async/job-manager.ts
 +++ b/packages/coding-agent/src/async/job-manager.ts
-@@ -255,6 +255,7 @@ export class AsyncJobManager {
+@@ -257,6 +257,7 @@ export class AsyncJobManager {
  	readonly #releasedForegroundJobs = new Set<string>();
  	#nextAutoId = 1;
  	readonly #deliverySinks = new Map<string, AsyncJobDeliverySink>();
 +	readonly #changeListeners = new Set<() => void>();
  	readonly #onJobComplete: AsyncJobManagerOptions["onJobComplete"];
- 	readonly #maxRunningJobs: number;
+ 	readonly #maxRunningJobsOption: AsyncJobManagerOptions["maxRunningJobs"];
  	readonly #retentionMs: number;
-@@ -297,6 +298,11 @@ export class AsyncJobManager {
- 		);
+@@ -305,6 +306,11 @@ export class AsyncJobManager {
+ 		return Math.max(1, Math.floor(value ?? DEFAULT_MAX_RUNNING_JOBS));
  	}
  
 +	onChange(listener: () => void): () => void {
@@ -22,7 +22,7 @@ index e7faf6a553..475b9cb797 100644
  	/** True when the running-job count has reached the configured cap. */
  	get atCapacity(): boolean {
  		if (this.#disposed) return true;
-@@ -359,6 +365,7 @@ export class AsyncJobManager {
+@@ -368,6 +374,7 @@ export class AsyncJobManager {
  
  		const reportProgress = async (text: string, details?: AsyncJobDetails): Promise<void> => {
  			if (details) job.latestDetails = details;
@@ -30,7 +30,7 @@ index e7faf6a553..475b9cb797 100644
  			if (!options?.onProgress) return;
  			try {
  				await options.onProgress(text, details);
-@@ -377,6 +384,7 @@ export class AsyncJobManager {
+@@ -386,6 +393,7 @@ export class AsyncJobManager {
  					reportProgress,
  					markRunning: () => {
  						job.queued = false;
@@ -38,7 +38,7 @@ index e7faf6a553..475b9cb797 100644
  					},
  				});
  				job.endTime = Date.now();
-@@ -400,11 +408,13 @@ export class AsyncJobManager {
+@@ -409,11 +417,13 @@ export class AsyncJobManager {
  					this.#enqueueDelivery(id, errorText);
  				}
  			}
@@ -52,7 +52,7 @@ index e7faf6a553..475b9cb797 100644
  		return id;
  	}
  
-@@ -420,6 +430,7 @@ export class AsyncJobManager {
+@@ -429,6 +439,7 @@ export class AsyncJobManager {
  		if (job.status !== "running") return false;
  		job.status = "cancelled";
  		job.abortController.abort();
@@ -60,7 +60,7 @@ index e7faf6a553..475b9cb797 100644
  		return true;
  	}
  
-@@ -455,6 +466,7 @@ export class AsyncJobManager {
+@@ -464,6 +475,7 @@ export class AsyncJobManager {
  		if (!job) return false;
  		if (!job.foreground) return true;
  		job.foreground = undefined;
@@ -68,7 +68,7 @@ index e7faf6a553..475b9cb797 100644
  		this.#suppressedDeliveries.delete(jobId);
  		if (job.status === "completed" || job.status === "failed") {
  			this.#enqueueDelivery(jobId, job.status === "completed" ? (job.resultText ?? "") : (job.errorText ?? ""));
-@@ -584,6 +596,7 @@ export class AsyncJobManager {
+@@ -593,6 +605,7 @@ export class AsyncJobManager {
  			if (job.status !== "running") continue;
  			job.status = "cancelled";
  			job.abortController.abort(reason);
@@ -76,7 +76,7 @@ index e7faf6a553..475b9cb797 100644
  		}
  	}
  
-@@ -933,7 +946,17 @@ export class AsyncJobManager {
+@@ -942,7 +955,17 @@ export class AsyncJobManager {
  		this.#consumedJobResults.delete(jobId);
  		const job = this.#jobs.get(jobId);
  		if (job) this.#runRetainedArtifactsCleanup(job);
@@ -96,10 +96,10 @@ index e7faf6a553..475b9cb797 100644
  
  	/**
 diff --git a/packages/coding-agent/src/modes/controllers/event-controller.ts b/packages/coding-agent/src/modes/controllers/event-controller.ts
-index e1f179419d..fd027c9bd0 100644
+index e8a8fdb261..99244fa6e0 100644
 --- a/packages/coding-agent/src/modes/controllers/event-controller.ts
 +++ b/packages/coding-agent/src/modes/controllers/event-controller.ts
-@@ -280,6 +280,7 @@ export class EventController {
+@@ -331,6 +331,7 @@ export class EventController {
  			auto_compaction_end: e => this.#handleAutoCompactionEnd(e),
  			auto_retry_start: e => this.#handleAutoRetryStart(e),
  			auto_retry_end: e => this.#handleAutoRetryEnd(e),
@@ -108,7 +108,7 @@ index e1f179419d..fd027c9bd0 100644
  			retry_fallback_succeeded: e => this.#handleRetryFallbackSucceeded(e),
  			ttsr_triggered: e => this.#handleTtsrTriggered(e),
 diff --git a/packages/coding-agent/src/modes/interactive-mode.ts b/packages/coding-agent/src/modes/interactive-mode.ts
-index c0c588496b..fab3ed9c75 100644
+index 23124bd828..62011960ae 100644
 --- a/packages/coding-agent/src/modes/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive-mode.ts
 @@ -1,3 +1,4 @@
@@ -116,24 +116,24 @@ index c0c588496b..fab3ed9c75 100644
  /**
   * Interactive mode for the coding agent.
   * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
-@@ -137,6 +138,8 @@ import { BUILTIN_SLASH_COMMAND_RESERVED_NAMES, buildTuiBuiltinSlashCommands } fr
- import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
+@@ -142,6 +143,8 @@ import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
  import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
- import { STTController, type SttState } from "../stt";
+ import { type DictationTarget, MicCursor, type SttCallbacks, STTController, type SttState } from "../stt";
+ import type { SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
 +import type { StudioLoopService, StudioLoopState } from "../studio/services/loop-service";
 +import type { StudioModeControlService, StudioModeState } from "../studio/services/mode-control-service";
  import { resolveCliEntryCmd } from "../subprocess/worker-client";
  import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
  import { labelEchoesHandle } from "../task/label";
-@@ -144,6 +147,7 @@ import { agentTypeBadge, formatTaskId } from "@oh-my-pi/pi-tui/tools/task";
- import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
- import { isMCPToolName } from "../tools/builtin-names";
+@@ -151,6 +154,7 @@ import { isMCPToolName } from "../tools/builtin-names";
  import type { LspStartupServerInfo } from "../tools";
+ import { resolvePlanFilePath } from "../plan-mode/plan-files";
+ import { resolveToCwd } from "../tools/path-utils";
 +import type { ToolUiFactory } from "../tools/context";
- import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
  import { StreamPublisher } from "../stream/publisher";
  import { newRecordingPath, SessionRecorder } from "../stream/recording";
-@@ -810,6 +814,7 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
+ import { StreamRedactor } from "../stream/redactor";
+@@ -1046,6 +1050,7 @@ export function renderSubagentHudLines(sessions: ObservableSession[], columns: n
  const CTRL_L_APPEARANCE_RESPONSE_DEADLINE_MS = 2000;
  
  export class InteractiveMode implements InteractiveModeContext {
@@ -141,7 +141,7 @@ index c0c588496b..fab3ed9c75 100644
  	#ownsStartedUi: boolean;
  	session: AgentSession;
  	sessionManager: SessionManager;
-@@ -868,6 +873,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1105,6 +1110,10 @@ export class InteractiveMode implements InteractiveModeContext {
  	 */
  	#loopConditionAbort: AbortController | undefined;
  	#loopAutoSubmitTimer: NodeJS.Timeout | undefined;
@@ -152,7 +152,7 @@ index c0c588496b..fab3ed9c75 100644
  	#todoAutoClearTimer: NodeJS.Timeout | undefined;
  	#todoAutoClearGeneration = 0;
  	#modelCycleClearTimer: NodeJS.Timeout | undefined;
-@@ -1078,7 +1087,7 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1409,7 +1418,7 @@ export class InteractiveMode implements InteractiveModeContext {
  	#planReviewAnnotationStateBySubmission = new WeakMap<SubmittedUserInput, string>();
  	readonly lspServers: LspStartupServerInfo[] | undefined = undefined;
  	mcpManager?: MCPManager;
@@ -161,7 +161,7 @@ index c0c588496b..fab3ed9c75 100644
  
  	readonly #codexResetFireworksController: CodexResetFireworksController;
  	readonly #btwController: BtwController;
-@@ -1246,12 +1255,14 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1559,12 +1568,14 @@ export class InteractiveMode implements InteractiveModeContext {
  		session: AgentSession,
  		version: string,
  		startupChangelog: StartupChangelogSelection | undefined = undefined,
@@ -177,7 +177,7 @@ index c0c588496b..fab3ed9c75 100644
  	) {
  		this.session = session;
  		this.sessionManager = session.sessionManager;
-@@ -1310,6 +1321,8 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1614,6 +1625,8 @@ export class InteractiveMode implements InteractiveModeContext {
  		);
  		this.#eventBus = eventBus;
  		this.#subagentEventBus = subagentEventBus;
@@ -186,8 +186,8 @@ index c0c588496b..fab3ed9c75 100644
  		if (eventBus) {
  			this.#eventBusUnsubscribers.push(
  				eventBus.on(LSP_STARTUP_EVENT_CHANNEL, data => {
-@@ -1487,6 +1500,26 @@ export class InteractiveMode implements InteractiveModeContext {
- 		this.session.setTitleGenerationStart?.(() => this.#inputController.notifyTitleGenerationStart());
+@@ -1783,6 +1796,26 @@ export class InteractiveMode implements InteractiveModeContext {
+ 		this.collabController = new CollabController(this);
  		this.session.setPromptDropped?.(prompt => this.#restoreDroppedPrompt(prompt));
  		this.#observerRegistry = new SessionObserverRegistry();
 +		if (this.#studioLoopService !== undefined) {
@@ -213,7 +213,7 @@ index c0c588496b..fab3ed9c75 100644
  	}
  
  	#handleJudgmentBatchProgress(progress: JudgmentBatchProgress): void {
-@@ -2211,6 +2244,7 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -2633,6 +2666,7 @@ export class InteractiveMode implements InteractiveModeContext {
  	}
  
  	#scheduleLoopAutoSubmit(): void {
@@ -221,7 +221,7 @@ index c0c588496b..fab3ed9c75 100644
  		this.#cancelLoopAutoSubmit();
  		if (!this.loopModeEnabled || !this.loopPrompt) return;
  		const prompt = this.loopPrompt;
-@@ -2432,7 +2466,21 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -2868,7 +2902,21 @@ export class InteractiveMode implements InteractiveModeContext {
  		this.ui.requestRender();
  	}
  
@@ -243,7 +243,7 @@ index c0c588496b..fab3ed9c75 100644
  		const wasEnabled = this.loopModeEnabled;
  		this.loopModeEnabled = false;
  		this.loopModePaused = false;
-@@ -2448,6 +2496,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -2884,6 +2932,10 @@ export class InteractiveMode implements InteractiveModeContext {
  	}
  
  	setLoopPrompt(prompt: string): void {
@@ -254,7 +254,7 @@ index c0c588496b..fab3ed9c75 100644
  		if (!this.loopModeEnabled) return;
  		// Any manual submit supersedes whatever gate is currently pending, even
  		// one resubmitting identical text: the gate was checking the *previous*
-@@ -2476,6 +2528,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -2912,6 +2964,10 @@ export class InteractiveMode implements InteractiveModeContext {
  	 * user submits becomes the new loop prompt and resumes iteration.
  	 */
  	pauseLoop(): void {
@@ -265,7 +265,7 @@ index c0c588496b..fab3ed9c75 100644
  		this.loopPrompt = undefined;
  		this.loopModePaused = true;
  		this.#cancelLoopAutoSubmit();
-@@ -2484,6 +2540,27 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -2920,6 +2976,27 @@ export class InteractiveMode implements InteractiveModeContext {
  	}
  
  	async handleLoopCommand(args = ""): Promise<string | undefined> {
@@ -293,7 +293,7 @@ index c0c588496b..fab3ed9c75 100644
  		if (this.loopModeEnabled) {
  			this.disableLoopMode();
  			return undefined;
-@@ -4800,6 +4877,33 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -5498,6 +5575,33 @@ export class InteractiveMode implements InteractiveModeContext {
  		initialPrompt?: string,
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
@@ -327,7 +327,7 @@ index c0c588496b..fab3ed9c75 100644
  		if (this.goalModeEnabled || this.goalModePaused) {
  			this.showWarning("Exit goal mode first.");
  			return false;
-@@ -4877,6 +4981,32 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -5575,6 +5679,32 @@ export class InteractiveMode implements InteractiveModeContext {
  		initialPrompt?: string,
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
@@ -360,7 +360,7 @@ index c0c588496b..fab3ed9c75 100644
  		if (this.vibeModeEnabled) {
  			await this.#exitVibeMode();
  			return false;
-@@ -5102,7 +5232,11 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -5800,7 +5930,11 @@ export class InteractiveMode implements InteractiveModeContext {
  			}
  			nextBudget = parsed;
  		}
@@ -373,7 +373,7 @@ index c0c588496b..fab3ed9c75 100644
  		this.#resetGoalContinuationSuppression();
  		this.#scheduleGoalContinuation();
  		this.showStatus(nextBudget === undefined ? "Goal budget cleared." : `Goal budget set to ${nextBudget}.`);
-@@ -5157,6 +5291,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -5855,6 +5989,10 @@ export class InteractiveMode implements InteractiveModeContext {
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
  		try {
@@ -384,7 +384,7 @@ index c0c588496b..fab3ed9c75 100644
  			if (this.planModeEnabled || this.planModePaused) {
  				this.#warnPlanModeBlocks();
  				return false;
-@@ -5317,8 +5455,13 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6015,8 +6153,13 @@ export class InteractiveMode implements InteractiveModeContext {
  			this.showWarning("No active goal to pause.");
  			return;
  		}
@@ -400,7 +400,7 @@ index c0c588496b..fab3ed9c75 100644
  	}
  
  	async #resumeGoalAction(): Promise<void> {
-@@ -5326,7 +5469,11 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6024,7 +6167,11 @@ export class InteractiveMode implements InteractiveModeContext {
  			this.showWarning("No paused goal to resume.");
  			return;
  		}
@@ -413,7 +413,7 @@ index c0c588496b..fab3ed9c75 100644
  		this.showStatus("Goal mode resumed.");
  		this.#scheduleGoalContinuation();
  	}
-@@ -5341,15 +5488,24 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6039,15 +6186,24 @@ export class InteractiveMode implements InteractiveModeContext {
  			"This removes the goal record. Accumulated usage stays in the session log.",
  		);
  		if (!confirmed) return;
@@ -441,7 +441,7 @@ index c0c588496b..fab3ed9c75 100644
  		this.#resetGoalContinuationSuppression();
  		if (this.session.isStreaming) {
  			const images = input?.images?.length ? input.images : undefined;
-@@ -5375,10 +5531,14 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6073,10 +6229,14 @@ export class InteractiveMode implements InteractiveModeContext {
  		objective: string,
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
@@ -460,7 +460,7 @@ index c0c588496b..fab3ed9c75 100644
  		this.#resetGoalContinuationSuppression();
  		this.#updateGoalModeStatus();
  		if (this.session.isStreaming) {
-@@ -5727,6 +5887,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6464,6 +6624,10 @@ export class InteractiveMode implements InteractiveModeContext {
  		this.#cancelTodoAutoClearTimer();
  		this.#cancelObserverUiSyncTimer();
  		this.#cancelGoalContinuation();
@@ -471,7 +471,7 @@ index c0c588496b..fab3ed9c75 100644
  		if (this.#sttController) {
  			this.#sttController.dispose();
  			this.#sttController = undefined;
-@@ -5976,7 +6140,7 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6718,7 +6882,7 @@ export class InteractiveMode implements InteractiveModeContext {
  	}
  
  	// Extension UI integration
@@ -481,10 +481,10 @@ index c0c588496b..fab3ed9c75 100644
  	}
  
 diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
-index 3e2900ab30..fe251fc2b4 100644
+index b4b6c52ed5..6cbf53b2f8 100644
 --- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
 +++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
-@@ -36,6 +36,7 @@ import type { AgentSession } from "../../session/agent-session";
+@@ -37,6 +37,7 @@ import { findMostRecentNonEmptySession } from "../../session/session-listing";
  import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
  import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
  import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
@@ -492,28 +492,28 @@ index 3e2900ab30..fe251fc2b4 100644
  import { defaultLoadModeForToolName } from "../../tools/essential-tools";
  import type { EventBus } from "../../utils/event-bus";
  import { selectRpcEntries } from "./rpc-compat";
-@@ -822,7 +823,7 @@ export function registerRpcPersistenceSurface(
-  */
- export async function runRpcMode(
- 	session: AgentSession,
--	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
-+	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void,
- 	subagentEventBus?: EventBus,
- 	input: ReadableStream<Uint8Array> = claimRpcInput(),
- ): Promise<never> {
+@@ -757,7 +758,7 @@ export function registerRpcPersistenceSurface(
+ /** Startup options for {@link runRpcMode}. */
+ export interface RpcModeOptions {
+ 	/** `--mode rpc-ui`: route tool UI (ask, tool cards) over the protocol as well. */
+-	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
++	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
+ 	/** `--no-ui`: extensions run with `hasUI=false`; no dialog or presentation `extension_ui_request` frames are emitted. */
+ 	headless?: boolean;
+ 	subagentEventBus?: EventBus;
 diff --git a/packages/coding-agent/src/modes/types.ts b/packages/coding-agent/src/modes/types.ts
-index 9a249bba42..e03d4aa730 100644
+index 3f41ff47b1..eda8a0b64a 100644
 --- a/packages/coding-agent/src/modes/types.ts
 +++ b/packages/coding-agent/src/modes/types.ts
-@@ -29,6 +29,7 @@ import type { SessionManager } from "../session/session-manager";
- import type { ShakeMode } from "../session/shake-types";
+@@ -33,6 +33,7 @@ import type { DictationTarget } from "../stt";
+ import type { SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
  import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
  import type { LspStartupServerInfo } from "../tools";
 +import type { ToolUiFactory } from "../tools/context";
  import type { EventBus } from "../utils/event-bus";
  import type { TokenRateMeter } from "../utils/token-rate";
  import type { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
-@@ -277,7 +278,7 @@ export interface InteractiveModeContext {
+@@ -278,7 +279,7 @@ export interface InteractiveModeContext {
  	checkShutdownRequested(): Promise<void>;
  
  	// Extension UI integration
@@ -523,10 +523,10 @@ index 9a249bba42..e03d4aa730 100644
  	/** Stack extension autocomplete behavior on top of the built-in editor provider. */
  	addAutocompleteProvider(factory: AutocompleteProviderFactory): void;
 diff --git a/packages/coding-agent/src/slash-commands/builtin-modes.ts b/packages/coding-agent/src/slash-commands/builtin-modes.ts
-index 5a9edaea65..86dbe6ce9f 100644
+index c6682e353b..f896bb545c 100644
 --- a/packages/coding-agent/src/slash-commands/builtin-modes.ts
 +++ b/packages/coding-agent/src/slash-commands/builtin-modes.ts
-@@ -327,6 +327,10 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
+@@ -413,6 +413,10 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
  		icon: "model",
  		description: "Switch model for this session",
  		acpDescription: "Show current model selection",
@@ -538,7 +538,7 @@ index 5a9edaea65..86dbe6ce9f 100644
  			const model = runtime.ctx.session.model;
  			return model ? `Model: ${model.provider}/${model.id}` : "Model: none selected";
 diff --git a/packages/coding-agent/test/interactive-mode-loop.test.ts b/packages/coding-agent/test/interactive-mode-loop.test.ts
-index 19a90c9b83..7eab4a7062 100644
+index d484e3d4a6..33d43005e6 100644
 --- a/packages/coding-agent/test/interactive-mode-loop.test.ts
 +++ b/packages/coding-agent/test/interactive-mode-loop.test.ts
 @@ -12,6 +12,7 @@ import type { SubmittedUserInput } from "@oh-my-pi/pi-coding-agent/modes/types";
@@ -548,8 +548,8 @@ index 19a90c9b83..7eab4a7062 100644
 +import { StudioLoopService } from "@oh-my-pi/pi-coding-agent/studio/services/loop-service";
  import { TempDir } from "@oh-my-pi/pi-utils";
  
- async function flushMicrotasks(): Promise<void> {
-@@ -27,6 +28,50 @@ describe("InteractiveMode loop auto-submit", () => {
+ import { cfgLoopMode } from "@oh-my-pi/pi-coding-agent/modes/settings";
+@@ -29,6 +30,50 @@ describe("InteractiveMode loop auto-submit", () => {
  	let tempDir: TempDir;
  	let pendingInput: Promise<SubmittedUserInput> | undefined;
  
@@ -601,10 +601,10 @@ index 19a90c9b83..7eab4a7062 100644
  		initTheme();
  		resetSettingsForTest();
 diff --git a/packages/coding-agent/test/modes/components/pause-screen.test.ts b/packages/coding-agent/test/modes/components/pause-screen.test.ts
-index 5acf181c6a..2bb37cee3e 100644
+index 3cf6c5f578..5b1343f2e6 100644
 --- a/packages/coding-agent/test/modes/components/pause-screen.test.ts
 +++ b/packages/coding-agent/test/modes/components/pause-screen.test.ts
-@@ -137,12 +137,16 @@ describe("pause screen", () => {
+@@ -135,12 +135,16 @@ describe("pause screen", () => {
  			expect(agentPauseGate.paused).toBe(false);
  		});
  
@@ -625,11 +625,40 @@ index 5acf181c6a..2bb37cee3e 100644
  		});
  	});
  });
+diff --git a/packages/coding-agent/test/rpc-queued-message.test.ts b/packages/coding-agent/test/rpc-queued-message.test.ts
+index 1eb6fc129f..7b0d49164d 100644
+--- a/packages/coding-agent/test/rpc-queued-message.test.ts
++++ b/packages/coding-agent/test/rpc-queued-message.test.ts
+@@ -27,15 +27,19 @@ describe("RPC queued-message removal", () => {
+ 		await client.start();
+ 		await client.followUp("cancel this");
+ 		await client.followUp("keep this");
+-		await expect(client.removeQueuedMessage(null as unknown as string, "followUp")).rejects.toMatchObject({
++		expect(
++			await client.removeQueuedMessage(null as unknown as string, "followUp").catch(error => error),
++		).toMatchObject({
+ 			command: "remove_queued_message",
+ 		});
+-		await expect(client.removeQueuedMessage("cancel this", "steer" as unknown as "steering")).rejects.toMatchObject({
++		expect(
++			await client.removeQueuedMessage("cancel this", "steer" as unknown as "steering").catch(error => error),
++		).toMatchObject({
+ 			command: "remove_queued_message",
+ 		});
+-		await expect(client.removeQueuedMessage("cancel this", undefined as unknown as "steering")).rejects.toMatchObject(
+-			{ command: "remove_queued_message" },
+-		);
++		expect(
++			await client.removeQueuedMessage("cancel this", undefined as unknown as "steering").catch(error => error),
++		).toMatchObject({ command: "remove_queued_message" });
+ 		expect(await client.removeQueuedMessage("cancel this", "steering")).toEqual({ removed: false });
+ 		expect(await client.removeQueuedMessage("absent", "followUp")).toEqual({ removed: false });
+ 		expect((await client.getState()).queuedMessageCount).toBe(2);
 diff --git a/packages/tui/src/overlays/pause-screen.ts b/packages/tui/src/overlays/pause-screen.ts
-index d4612920ee..886271df1f 100644
+index 25839e1105..d876c24a03 100644
 --- a/packages/tui/src/overlays/pause-screen.ts
 +++ b/packages/tui/src/overlays/pause-screen.ts
-@@ -22,7 +22,13 @@ import { matchesAppInterrupt } from "../keybinding-matchers";
+@@ -28,7 +28,13 @@ import { isNativeRendering } from "../native/state";
   * Slice of `InteractiveModeContext` the pause screen drives. Narrow so tests
   * can exercise the full engage → hold → release lifecycle without a real TUI.
   */
@@ -643,17 +672,17 @@ index d4612920ee..886271df1f 100644
  	ui: {
  		showOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
  		setFocus(component: Component): void;
-@@ -121,7 +127,8 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
+@@ -130,7 +136,8 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
  
  	/** Start the clock; resolves once the user asks to resume. */
  	run(): Promise<void> {
 -		this.#startedAt = agentPauseGate.pausedAt ?? Date.now();
 +		const pausedAt = this.host.pauseControl?.state().pausedAt;
 +		this.#startedAt = pausedAt === undefined ? (agentPauseGate.pausedAt ?? Date.now()) : Date.parse(pausedAt);
- 		this.#timer ??= setInterval(() => {
- 			if (!this.#disposed) this.host.ui.requestRender();
- 		}, TICK_MS);
-@@ -169,12 +176,27 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
+ 		this.#native = undefined;
+ 		// The tick only repaints the hold clock; natively the `elapsed` node counts on its own.
+ 		if (!isNativeRendering()) {
+@@ -224,12 +231,27 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
  
  /**
   * Engage the global pause gate and hold the fullscreen pause screen until the
@@ -685,7 +714,7 @@ index d4612920ee..886271df1f 100644
  	const component = new PauseScreenComponent(host);
  	const overlay = host.ui.showOverlay(component, {
  		width: "100%",
-@@ -190,9 +212,11 @@ export async function runPauseScreen(host: PauseScreenHost): Promise<void> {
+@@ -245,9 +267,11 @@ export async function runPauseScreen(host: PauseScreenHost): Promise<void> {
  		component.dispose();
  		host.ui.setFocus(component);
  		overlay.hide();

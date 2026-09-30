@@ -47,8 +47,8 @@ The repository provides a release workflow in `.github/workflows/release.yml` wi
 
 The workflow serializes releases and reads the previous published index before allocating its next sequence. For a local release, download the previous `update-index.json` and set `OMP_PREVIOUS_UPDATE_INDEX` to that file's path; omit it only for the first indexed release. A missing or invalid configured file fails the builder. The ABI is probed from the packaged `OMP Studio.exe --omp-print-abi`; the Node process running the builder is not an Electron ABI source. Both jobs install Bun and Runtime dependencies, and native command failures stop their steps.
 
-After `npm run check` passes for the current source, patch verification may
-use `--skip-workspace-check` to avoid repeating that same workspace gate.
+Patch verification no longer repeats `npm run check`. Existing callers using
+`--skip-workspace-check` remain compatible; `--with-workspace-check` opts in.
 Runtime type checks, every Runtime suite, and smoke tests still run. Native
 Runtime suites use separate processes with bounded execution time on Windows.
 CI pins Bun 1.3.14 to match the validated Runtime toolchain. The real approval
@@ -196,11 +196,11 @@ Once the installer exists and update assets are built, run the release readiness
 npm run p5:gate
 ```
 
-`pack:win` audits `outputs/installer/` only. `p5:gate` re-runs the PTY /
-installer / Host security tests, verifies `update-index.sig.json` against trusted keys,
+`pack:win` audits `outputs/installer/` only. After `check` and
+`omp:test:metadata` pass once, `p5:gate` verifies `update-index.sig.json` against trusted keys,
 and then scans **all** candidate publish surfaces for private material — `apps/desktop/dist`,
 `apps/renderer/dist`, `packages/runtime-installer/dist/artifacts` and `outputs/` — before writing
-`outputs/p5-readiness.json`. It exits non-zero when a test fails or a key
+`outputs/p5-readiness.json`. It exits non-zero when artifact verification fails or a key
 marker is found. Run it after `pack:win`, not before: it skips directories
 that do not exist yet, so an early run silently scans less.
 

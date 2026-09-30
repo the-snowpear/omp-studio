@@ -1,3 +1,4 @@
+import { SESSION_GUI_KINDS, SESSION_GUI_READ_KINDS, isSessionGuiKind, validateSessionGuiOperation, validateSessionGuiResult, type SessionGuiOperation, type SessionGuiResultMap } from "./session-gui.js";
 import { SKILLSHARE_OPERATION_KINDS, isSkillshareOperationKind, validateSkillshareOperation, validateSkillshareResult, type SkillshareOperation, type SkillshareResultMap } from "./skillshare.js";
 import { LIVE_AUDIO_OPERATION_KINDS, isLiveAudioOperationKind, validateLiveAudioOperation, validateLiveAudioResult, type LiveAudioOperation, type LiveAudioResultMap } from "./live-audio.js";
 import { MEDIA_OPERATION_KINDS, isMediaOperationKind, validateMediaOperation, validateMediaResult, type MediaOperation, type MediaResultMap } from "./media.js";
@@ -49,6 +50,7 @@ export interface TokenCountResult {
 }
 
 export type WorkbenchOperation =
+ | SessionGuiOperation
   | SkillshareOperation
   | LiveAudioOperation
   | MediaOperation
@@ -67,7 +69,7 @@ export type WorkbenchOperation =
   | { kind: "tokens.count"; text: string }
   | { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
-export interface WorkbenchResultMap extends SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap {
+export interface WorkbenchResultMap extends SessionGuiResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap {
   "accounts.status": AccountStatusResult;
   "services.list": { enabled: boolean; services: StudioServiceRow[] };
   "services.start": { service: StudioServiceRow; readyTimedOut: boolean };
@@ -79,8 +81,8 @@ export interface WorkbenchResultMap extends SkillshareResultMap, LiveAudioResult
   "tokens.count": TokenCountResult;
   "runtime.models.list": { models: RuntimeModelChoice[]; total: number; nextCursor?: string };
 }
-export const WORKBENCH_OPERATION_KINDS = [...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, "accounts.status", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "tokens.count", "runtime.models.list"] as const;
-export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = ["skillshare.status", "skillshare.home", "skillshare.search", "skillshare.package", "skillshare.installed", "skillshare.tokens", "skillshare.action", "live.audio.status", "live.audio.mute", "live.audio.release", "media.models", "media.list", "media.read", "benchmarks.list", "benchmarks.read", ...RUNTIME_CATALOG_OPERATION_KINDS, "judgments.list", "judgments.read", ...ANNOTATION_OPERATION_KINDS, "accounts.status", "services.list", "services.logs", "tokens.count", "runtime.models.list"];
+export const WORKBENCH_OPERATION_KINDS = [...SESSION_GUI_KINDS,...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, "accounts.status", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "tokens.count", "runtime.models.list"] as const;
+export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [...SESSION_GUI_READ_KINDS,"skillshare.status", "skillshare.home", "skillshare.search", "skillshare.package", "skillshare.installed", "skillshare.tokens", "skillshare.action", "live.audio.status", "live.audio.mute", "live.audio.release", "media.models", "media.list", "media.read", "benchmarks.list", "benchmarks.read", ...RUNTIME_CATALOG_OPERATION_KINDS, "judgments.list", "judgments.read", ...ANNOTATION_OPERATION_KINDS, "accounts.status", "services.list", "services.logs", "tokens.count", "runtime.models.list"];
 export function isWorkbenchOperationKind(value: string): value is WorkbenchOperation["kind"] {
   return (WORKBENCH_OPERATION_KINDS as readonly string[]).includes(value);
 }
@@ -130,13 +132,14 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   const kind = (value as Record<string, unknown>).kind;
   if (typeof kind !== "string" || !isWorkbenchOperationKind(kind)) throw new Error("Unknown workbench operation");
   if (kind === "annotations.capture" || kind === "annotations.prepare") { validateAnnotationOperation(value); return; }
+  if (isSessionGuiKind(kind)) { validateSessionGuiOperation(value); return; }
   if (isSkillshareOperationKind(kind)) { validateSkillshareOperation(value); return; }
   if (isLiveAudioOperationKind(kind)) { validateLiveAudioOperation(value); return; }
   if (isMediaOperationKind(kind)) { validateMediaOperation(value); return; }
   if (isBenchmarkOperationKind(kind)) { validateBenchmarkOperation(value); return; }
   if (isRuntimeCatalogOperationKind(kind)) { validateRuntimeCatalogOperation(value); return; }
   if (isJudgmentOperationKind(kind)) { validateJudgmentOperation(value); return; }
-  const fields: Record<Exclude<WorkbenchOperation["kind"], SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"]>, readonly string[]> = {
+  const fields: Record<Exclude<WorkbenchOperation["kind"], SessionGuiOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"]>, readonly string[]> = {
     "accounts.status": ["refresh"], "services.list": [], "services.start": ["spec"], "services.stop": ["name", "instanceId"], "services.restart": ["name", "instanceId"],
     "services.mode.set": ["name", "instanceId", "mode"], "services.send": ["name", "instanceId", "text"], "services.logs": ["name", "instanceId", "cursor", "lines"],
     "tokens.count": ["text"], "runtime.models.list": ["modelKind", "cursor", "limit"],
@@ -164,6 +167,7 @@ function serviceRow(value: unknown): void {
   if (row.ownerAgentId !== undefined) text(row.ownerAgentId);
 }
 export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value: unknown): void {
+ if(isSessionGuiKind(kind)){validateSessionGuiResult(kind,value);return;}
   if (isSkillshareOperationKind(kind)) { validateSkillshareResult(kind, value); return; }
   if (isLiveAudioOperationKind(kind)) { validateLiveAudioResult(kind, value); return; }
   if (isMediaOperationKind(kind)) { validateMediaResult(kind, value); return; }

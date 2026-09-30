@@ -78,6 +78,7 @@ import type { EvaluationOperation } from "./evaluation-protocol";
 import { isEvaluationOperationKind, validateEvaluationOperation } from "./evaluation-validation";
 
 export type StudioOperation =
+  | PredictionOperation
 	| WorkbenchOperation
 	| UpgradeOperation
 	| EvaluationOperation
@@ -160,6 +161,7 @@ export type StudioOperation =
 			kind: "agent.spawn";
 			definition: string;
 			assignment: string;
+			solutionSpace?: string;
 			context?: string;
 			async?: boolean;
 			isolation?: string;
@@ -239,6 +241,7 @@ export type StudioRemoteInteractionRequest =
 	  }
 	| {
 			kind: "ask";
+   acceptImages?: boolean;
 			interactionId: string;
 			commandId: string;
 			title: string;
@@ -573,6 +576,7 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		return input as unknown as StudioRequest;
 	}
 	switch (operation.kind) {
+		case "prediction.query": { const { kind, ...query }=operation; validatePredictionQuery(query); break; }
 		case "runtime.snapshot":
 		case "runtime.pause":
 			exactKeys(operation, ["kind"]);
@@ -805,7 +809,8 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			if (!nonEmptyString(operation.agentId)) throw new StudioFrameError("Invalid agent id");
 			break;
 		case "agent.spawn":
-			exactKeys(operation, ["kind", "definition", "assignment", "context", "async", "isolation", "effort"]);
+			exactKeys(operation, ["kind", "definition", "assignment", "solutionSpace", "context", "async", "isolation", "effort"]);
+			if(operation.solutionSpace !== undefined && (!nonEmptyString(operation.solutionSpace) || operation.solutionSpace.length > 65536)) throw new StudioFrameError("Invalid solution space");
 			if (!nonEmptyString(operation.definition) || !nonEmptyString(operation.assignment)) {
 				throw new StudioFrameError("Invalid agent spawn request");
 			}
@@ -1045,6 +1050,7 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 }
 
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+  "prediction.query",
 	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
 	"runtime.pause",
@@ -1244,3 +1250,4 @@ export class StudioFrameDecoder {
 		throw new StudioFrameError(message);
 	}
 }
+import { type PredictionOperation, validatePredictionQuery } from "./prediction-protocol";

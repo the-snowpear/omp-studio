@@ -13,6 +13,7 @@ import {
 } from "react";
 
 import type { ComposerChip, ComposerSnapshot, MentionCandidate, PromptImage } from "./types";
+import type { PredictionResult } from "@omp-studio/studio-protocol";
 import { emptySnapshot, newChipId } from "./types";
 import { snapshotFromDoc, snapshotIsEmpty } from "./serialize";
 import { fileToPromptImage, imagePreviewUrl, isImageFile } from "./ingest";
@@ -61,6 +62,7 @@ export type ChipComposerHandle = {
 };
 
 type Props = {
+  predict?: (before:string,prefix:string,version:number)=>Promise<PredictionResult>;
   id?: string;
   placeholder?: string;
   disabled?: boolean;
@@ -137,6 +139,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     onBlur,
     onPointerDown,
     onError,
+    predict,
   },
   ref,
 ) {
@@ -144,6 +147,11 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   const fileRef = useRef<HTMLInputElement | null>(null);
   const imagesRef = useRef(new Map<string, PromptImage>());
   const composingRef = useRef(false);
+  const [documentVersion,setDocumentVersion]=useState(0);
+  const predictionVersion=useRef(0);
+  const predictionBusy=useRef(false);
+  const [prediction,setPrediction]=useState<{suffix:string;version:number;left:number;top:number}|null>(null);
+  const invalidatePrediction=()=>{predictionVersion.current++;setPrediction(null);setDocumentVersion(value=>value+1);};
   const [empty, setEmpty] = useState(true);
   const [thumbs, setThumbs] = useState<Array<ImagePreviewSubject & { id: string }>>([]);
   const [preview, setPreview] = useState<(ImagePreviewSubject & { id: string }) | null>(null);
@@ -161,6 +169,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   const emit = (): ComposerSnapshot => {
+    invalidatePrediction();
     const editor = editorRef.current;
     if (!editor) return emptySnapshot();
     renumberImageChips(editor);
@@ -412,6 +421,24 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
       ? filterSlashCommands(slashDraft.name, slashCatalog)
       : [];
   const commandOpen = (detachedCommand || slashDraft !== null) && mention === null && !commandDismissed;
+  useEffect(()=>{
+    setPrediction(null);
+    if(!predict||disabled||composingRef.current||mention||commandOpen)return;
+    const editor=editorRef.current;const selection=window.getSelection();
+    if(!editor||document.activeElement!==editor||!selection?.isCollapsed||!selection.rangeCount||selection.anchorNode?.nodeType!==Node.TEXT_NODE||!editor.contains(selection.anchorNode))return;
+    const range=selection.getRangeAt(0);const tail=range.cloneRange();tail.selectNodeContents(editor);tail.setStart(range.endContainer,range.endOffset);
+    if(tail.toString()||tail.cloneContents().querySelector("[contenteditable=false]"))return;
+    const text=snapshotOf(editor,imagesRef.current).text;
+    const prefix=/[\p{L}\p{N}_-]*$/u.exec(text)?.[0]??"";
+    if(prefix.length>256||!text.trim())return;
+    const version=predictionVersion.current;let active=true;
+    const timer=setTimeout(()=>{if(predictionBusy.current)return;predictionBusy.current=true;void predict(text.slice(0,text.length-prefix.length).slice(-8192),prefix,version).then(result=>{
+      if(!active||predictionVersion.current!==version||result.version!==version||!result.suffix||composingRef.current||document.activeElement!==editor)return;
+      const rect=range.getBoundingClientRect();const parent=editor.parentElement!.getBoundingClientRect();
+      setPrediction({suffix:result.suffix,version,left:rect.right-parent.left,top:rect.top-parent.top});
+    }).catch(()=>{}).finally(()=>{predictionBusy.current=false;});},200);
+    return()=>{active=false;clearTimeout(timer);};
+  },[documentVersion,predict,disabled,mention,commandOpen]);
 
   useEffect(() => {
     setCommandIndex(0);
@@ -493,6 +520,13 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if(composingRef.current||event.nativeEvent.isComposing||event.keyCode===229)return;
+    if(prediction&&!mention&&!commandOpen&&(event.key==="Tab"||event.key==="Escape")){
+      event.preventDefault();const accepted=prediction;predictionVersion.current++;setPrediction(null);
+      if(event.key==="Tab"&&!event.shiftKey&&accepted.version===predictionVersion.current-1&&editorRef.current){insertPlainText(editorRef.current,accepted.suffix);emit();}
+      return;
+    }
+    if(event.key.startsWith("Arrow")||event.key==="Home"||event.key==="End")invalidatePrediction();
     if (commandOpen && commandItems.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -596,7 +630,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
   };
 
   return (
-    <div className={`chip-composer${compact ? " is-compact" : ""}`}>
+    <div className={`chip-composer${compact ? " is-compact" : ""}`} style={{position:"relative"}}>
       {thumbs.length > 0 ? (
         <div className="cm-thumbs" aria-label="已附加的图片">
           {thumbs.map((thumb) => (
@@ -642,6 +676,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         onDrop={onDrop}
         onDragOver={(event) => event.preventDefault()}
         onKeyDown={onKeyDown}
+        onMouseUp={invalidatePrediction}
         // The capsule × is a control, not a spot in the text: swallowing the
         // mousedown keeps the caret and the focus where the user left them.
         onMouseDown={(event) => {
@@ -660,6 +695,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           onFocus?.(event);
         }}
         onBlur={(event) => {
+          invalidatePrediction();
           setMention(null);
           const next = event.relatedTarget;
           if (next instanceof Node && (editorRef.current?.contains(next) || (next instanceof Element && next.closest(".cm-mention") !== null))) {
@@ -672,12 +708,15 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         onPointerDown={onPointerDown}
         onCompositionStart={() => {
           composingRef.current = true;
+          invalidatePrediction();
         }}
         onCompositionEnd={() => {
           composingRef.current = false;
+          invalidatePrediction();
           refreshMention();
         }}
       />
+      {prediction?<span aria-hidden="true" data-prediction="true" style={{position:"absolute",left:prediction.left,top:prediction.top,opacity:0.45,pointerEvents:"none",whiteSpace:"pre"}}>{prediction.suffix}</span>:null}
       {commandOpen ? (
         <CommandMenu
           query={detachedCommand ? "" : (slashDraft?.name ?? "")}

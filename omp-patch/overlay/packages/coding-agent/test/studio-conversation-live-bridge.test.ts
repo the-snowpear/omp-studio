@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { Settings, resetSettingsForTest } from "../src/config/settings";
+import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
@@ -422,7 +423,7 @@ describe("conversation live projector Bridge wiring", () => {
 		const bus = new SessionEventBus();
 		const session = {
 			sessionManager: { getSessionId: () => "session-host", getCwd: () => process.cwd() },
-			settings: { get: (key: string) => (key === "loop.mode" ? "prompt" : undefined) },
+			settings: Settings.isolated({ "loop.mode": "prompt" }),
 			isStreaming: false,
 			isCompacting: false,
 			hasPostPromptWork: false,
@@ -709,4 +710,9 @@ describe("StateProjector child conversation isolation", () => {
 		expect(envelopes.at(-1)?.eventSeq).not.toBe(childSeq);
 		state.dispose();
 	});
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

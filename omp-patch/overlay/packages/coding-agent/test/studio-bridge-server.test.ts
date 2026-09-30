@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { cfgToolsApprovalMode } from "../src/tools/settings";
+import { Settings, resetSettingsForTest } from "../src/config/settings";
+import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
@@ -698,20 +700,10 @@ describe("WP-011 Studio Bridge runtime server", () => {
 
 	test("permissions.mode.set persists on demand and overrides otherwise; snapshot reflects the mode", async () => {
 		const fixture = await bridgeFixture();
-		let currentMode = "yolo";
 		let flushed = 0;
-		const settings = {
-			get: (key: string) => (key === "tools.approvalMode" ? currentMode : undefined),
-			set: (key: string, value: unknown) => {
-				if (key === "tools.approvalMode") currentMode = value as string;
-			},
-			clearOverride: () => {},
-			override: (key: string, value: unknown) => {
-				if (key === "tools.approvalMode") currentMode = value as string;
-			},
-			flush: async () => {
-				flushed += 1;
-			},
+		const settings = Settings.isolated({ "tools.approvalMode": "yolo" });
+		settings.flush = async () => {
+			flushed += 1;
 		};
 		const session = {
 			isStreaming: false,
@@ -764,7 +756,7 @@ describe("WP-011 Studio Bridge runtime server", () => {
 			status: "completed",
 			result: { mode: "write", persisted: true },
 		});
-		expect(currentMode).toBe("write");
+		expect(cfgToolsApprovalMode.get(settings)).toBe("write");
 		expect(flushed).toBe(1);
 
 		const overrideFrames = receiveFrames(socket, 3);
@@ -997,4 +989,9 @@ describe("WP-011 Studio Bridge runtime server", () => {
 			event: { kind: "state.changed" },
 		});
 	});
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

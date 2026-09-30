@@ -84,3 +84,14 @@ describe("expandSkillPrompts", () => {
 		});
 	});
 });
+
+test("expands the Runtime namespaced skill identity without confusing its bare-name sibling", async () => {
+	const result = await expandSkillPrompts(
+		sessionOf(["review", "custom/review~2"]),
+		"/skill:custom/review~2 inspect",
+		build as never,
+	);
+	expect(result.names).toEqual(["custom/review~2"]);
+	expect(result.preludes.map(item => item.content)).toEqual(["SKILL:custom/review~2"]);
+	expect(listSkillInvocationNames("/skill:custom/review/extra")).toEqual([]);
+});

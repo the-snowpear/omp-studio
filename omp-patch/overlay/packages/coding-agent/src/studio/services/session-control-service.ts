@@ -21,8 +21,8 @@ export interface SessionControlSession {
 	readonly queuedMessageCount: number;
 	readonly sessionFile?: string;
 	prompt(text: string, options?: { images?: ImageContent[]; prependMessages?: CustomMessage[] }): Promise<boolean>;
-	steer(text: string, images?: ImageContent[]): Promise<void>;
-	followUp(text: string, images?: ImageContent[]): Promise<void>;
+	steer(text: string, images?: ImageContent[], options?: { prependMessages?: CustomMessage[] }): Promise<void>;
+	followUp(text: string, images?: ImageContent[], options?: { prependMessages?: CustomMessage[] }): Promise<void>;
 	promptCustomMessage?(
 		message: SessionControlPrelude,
 		options?: { streamingBehavior?: "steer" | "followUp"; queueOnly?: boolean },
@@ -202,8 +202,19 @@ export class SessionControlService {
 		this.#maybeStartTitleGeneration(text);
 		try {
 			await this.#beforeQueuedUserTurn?.();
-			await this.#queuePreludes(preludes, "steer");
-			await this.#session.steer(text, await this.#prepareImages(images));
+			await this.#session.steer(
+				text,
+				await this.#prepareImages(images),
+				preludes?.length
+					? {
+							prependMessages: preludes.map(prelude => ({
+								role: "custom" as const,
+								timestamp: Date.now(),
+								...prelude,
+							})),
+						}
+					: undefined,
+			);
 		} catch (error) {
 			throw this.#mapBusy(error);
 		}
@@ -220,8 +231,19 @@ export class SessionControlService {
 		this.#maybeStartTitleGeneration(text);
 		try {
 			if (!this.#session.isStreaming) await this.#beforeQueuedUserTurn?.();
-			await this.#queuePreludes(preludes, "followUp");
-			await this.#session.followUp(text, await this.#prepareImages(images));
+			await this.#session.followUp(
+				text,
+				await this.#prepareImages(images),
+				preludes?.length
+					? {
+							prependMessages: preludes.map(prelude => ({
+								role: "custom" as const,
+								timestamp: Date.now(),
+								...prelude,
+							})),
+						}
+					: undefined,
+			);
 		} catch (error) {
 			throw this.#mapBusy(error);
 		}
@@ -239,19 +261,6 @@ export class SessionControlService {
 			throw this.#mapBusy(error);
 		}
 		return { aborted: true };
-	}
-
-	async #queuePreludes(
-		preludes: readonly SessionControlPrelude[] | undefined,
-		streamingBehavior: "steer" | "followUp",
-	): Promise<void> {
-		if (preludes === undefined || preludes.length === 0) return;
-		if (this.#session.promptCustomMessage === undefined) {
-			throw new SessionControlError("COMMAND_BLOCKED", "Session cannot inject skill preludes");
-		}
-		for (const prelude of preludes) {
-			await this.#session.promptCustomMessage(prelude, { streamingBehavior, queueOnly: true });
-		}
 	}
 
 	#maybeStartTitleGeneration(text: string): void {

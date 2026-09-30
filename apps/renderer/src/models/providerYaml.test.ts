@@ -22,6 +22,13 @@ const SOURCE = `providers:
     futureField: keep-me
 `;
 
+it("Bedrock Messages draft uses native compat and preserves unrelated flags",()=>{
+  const previous={models:[{id:"bedrock",compat:{bedrockMessagesApi:true,supportsToolChoice:false}}],modelOverrides:{catalog:{compat:{supportsEffort:false}}}};
+  const node=draftProviderYamlNode(draft({models:[model({id:"bedrock",bedrockMessagesApi:false})],modelOverrides:{catalog:{bedrockMessagesApi:true}}}),previous);
+  expect((node.models as Array<Record<string,unknown>>)[0]?.compat).toEqual({bedrockMessagesApi:false,supportsToolChoice:false});
+  expect((node.modelOverrides as Record<string,Record<string,unknown>>).catalog?.compat).toEqual({bedrockMessagesApi:true,supportsEffort:false});
+});
+
 function model(overrides: Partial<ModelCatalogEntry> & { id: string }): ModelCatalogEntry {
   return {
     name: overrides.id,

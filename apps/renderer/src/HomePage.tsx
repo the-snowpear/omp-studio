@@ -33,9 +33,10 @@ import { useAxisCrossfade, useTokenChartMorph, type TokenChartModelPts } from ".
 
 import { useI18n } from "./i18n";
 
-export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media";
+export type PageRoute = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "statistics";
 
 const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: string; key: string }> = [
+  { id:"statistics",icon:"pulse",key:"nav.statistics" },
   { id: "workbench", icon: "layout", key: "nav.workbench" },
   { id: "home", icon: "home", key: "nav.home" },
   { id: "history", icon: "history", key: "nav.history" },
@@ -47,7 +48,7 @@ const PAGE_NAV_DEFS: ReadonlyArray<{ id: PageRoute; icon: string; key: string }>
 ];
 
 function isAppRoute(id: string): id is Exclude<PageRoute, "agent-hub"> {
-  return id === "home" || id === "workbench" || id === "history" || id === "capabilities" || id === "model-config" || id === "settings" || id === "diagnostics" || id === "media";
+  return id === "home" || id === "workbench" || id === "history" || id === "capabilities" || id === "model-config" || id === "settings" || id === "diagnostics" || id === "media" || id === "statistics";
 }
 
 export function SecondaryPage({

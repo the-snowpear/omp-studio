@@ -34,7 +34,7 @@ import {
 } from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "62bc57be1b03ef0802a33cf7f5f530e534527531";
+const REAL_UPSTREAM_COMMIT = "8ac1309bd8adaddc891eeb389c545345073875be";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 async function fixtureInputs() {
@@ -146,6 +146,24 @@ test("artifact manifest carries the contract fields derived from real pin/series
   assert.match(manifest.commandManifestHash, /^sha256:[a-f0-9]{64}$/u);
   assert.notEqual(manifest.capabilityHash, manifest.commandManifestHash);
   assert.deepEqual(IMPLEMENTED_CAPABILITIES, [
+    "prediction.query",
+    "resource.read",
+    "ida.status",
+    "ida.view",
+    "ida.prepare",
+    "ida.commit",
+    "ida.cancel",
+    "agent.btw.read",
+    "agent.btw.ask",
+    "agent.btw.abort",
+  "prediction.control",
+    "session.queue.list",
+    "session.queue.remove",
+    "session.queue.steer",
+    "session.queue.takeback",
+    "session.tier.get",
+    "session.tier.set",
+    "session.skills.list",
     "skillshare.status",
     "skillshare.home",
     "skillshare.search",
@@ -415,11 +433,11 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.commit, REAL_UPSTREAM_COMMIT);
   assert.equal(series.upstreamCommit, upstream.commit);
   assert.equal(upstream.entrypoint, "omp.exe");
-  assert.equal(upstreamVersion, "18.3.0");
+  assert.equal(upstreamVersion, "18.4.4");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.3.0-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.4.4-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }
@@ -587,4 +605,8 @@ test("pin and series commit mismatch is rejected", async () => {
     }),
     /OMP pin mismatch/u,
   );
+});
+import { run as runTooling } from "./omp-tooling.mjs";
+test("patch capture preserves whitespace-only trailing context", () => {
+  assert.equal(runTooling(process.execPath, ["-e", "process.stdout.write('diff\\n \\n')"], { capture: true, trim: false }), "diff\n \n");
 });

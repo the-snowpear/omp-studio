@@ -24,6 +24,7 @@ export function WebRoleChain({ client, preview, routing, models, onSaved, onPrev
   };
   return <section className="wsx-section">
     <div className="wsx-section-head"><b>{zh ? "Web 模型角色" : "Web model role"}</b>{preview ? <span className="chip gray">{zh ? "演示" : "Demo"}</span> : null}</div>
+    <p className="small muted">{zh?"web/hosted 表示由托管模型提供的搜索能力。默认候选链只尝试原生配置中可用的候选；需要密钥或收费的搜索引擎应显式配置，回退尝试也可能计费。":"web/hosted uses search supplied by the hosted model. The default chain tries candidates available to the native configuration; configure credentialed or paid engines explicitly. Fallback attempts may also incur charges."}</p>
     <p className="small muted">{zh ? "主模型与回退顺序使用 OMP 原生模型选择器。留空主模型遵循原生默认；显式空回退链表示不再尝试其他模型。新会话后生效。" : "Primary and fallback order use native model selectors. An empty primary uses the native default; an explicit empty fallback chain disables further attempts. Applies to new sessions."}</p>
     {routing.migratedLegacy ? <p className="small muted">{zh ? "已按上游规则展示旧配置的迁移结果；保存时写入新格式。" : "Showing the upstream migration of legacy settings. Save to write the new format."}</p> : null}
     <div className="wsx-params-grid">

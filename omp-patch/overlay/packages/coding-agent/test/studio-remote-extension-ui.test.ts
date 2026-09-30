@@ -46,6 +46,13 @@ function respond(port: StudioRemoteInteractionPort, value: unknown, decision: "s
 }
 
 describe("WP-041 Studio Remote Extension UI", () => {
+ test("Ask custom images and note images keep their question ownership",async()=>{
+  const {port,gateway}=fixture();const ui=new StudioRemoteExtensionUiContext(gateway,"ask-images");const questions=[{id:"a",question:"A?",options:[{label:"One"}]},{id:"b",question:"B?",options:[{label:"Two"}]}];
+  const answer=ui.askDialog(questions,{acceptImages:true});expect(port.pending()?.request).toMatchObject({kind:"ask",acceptImages:true});
+  const image={type:"image",mimeType:"image/png",data:"AA=="};respond(port,{results:[{id:"a",selectedOptions:[],customInput:"[Image #1]",customInputImages:[image]},{id:"b",selectedOptions:["Two"],note:"see [Image #1]",noteImages:[image]}]});
+  const result=await answer;if(result?.kind!=="submit")throw Error("expected submit");expect(result.results[0]?.customInputImages).toHaveLength(1);expect(result.results[0]?.noteImages).toBeUndefined();expect(result.results[1]?.customInputImages).toBeUndefined();expect(result.results[1]?.noteImages).toHaveLength(1);expect(result.results[1]?.note).toBe("see [Image #1]");
+  const denied=ui.askDialog(questions,{acceptImages:false});respond(port,{results:[{id:"a",selectedOptions:[],customInputImages:[image]},{id:"b",selectedOptions:[]}]});await expect(denied).rejects.toThrow("does not accept images");
+ });
 	test("select maps labels to remote option ids and back; Other keeps the custom-input id", async () => {
 		const { port, gateway, opened } = fixture();
 		const ui = new StudioRemoteExtensionUiContext(gateway, "studio-tool:call-1");

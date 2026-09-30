@@ -508,6 +508,7 @@ export interface HostExtensibilityService {
  * the facade only publishes the public read model.
  */
 export interface HostMcpService {
+  setInstructions?(input: {readonly name:string;readonly enabled:boolean;readonly scope:"user"|"project"}): ConfigWriteResult | Promise<ConfigWriteResult>;
   get(): McpReadModel | Promise<McpReadModel>;
   setEnabled(input: {
     readonly name: string;

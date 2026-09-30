@@ -1,3 +1,5 @@
+import { cfgSkillsRegistryUrl } from "../../extensibility/settings";
+import { VERSION } from "@oh-my-pi/pi-utils/dirs";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -160,7 +162,7 @@ export class StudioSkillshareService {
 		let client: NativeClient | undefined;
 		try {
 			client = await (this.dependencies.client ?? SkillshareClient.create)({
-				registryUrl: this.session.settings.get("skills.registryUrl") || undefined,
+				registryUrl: cfgSkillsRegistryUrl.get(this.session.settings) || undefined,
 				forPublish,
 				signal: controller.signal,
 			});
@@ -664,7 +666,7 @@ export class StudioSkillshareService {
 							plan.pack!.name,
 							plan.pack!.version,
 							plan.pack!.tgz,
-							{ ...(action.tag ? { tag: action.tag } : {}), provenance: { ompVersion: "18.3.0" } },
+							{ ...(action.tag ? { tag: action.tag } : {}), provenance: { ompVersion: VERSION } },
 						);
 						plan.state.link = result.url;
 					} else if (action.type === "import") {

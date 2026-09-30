@@ -1,3 +1,4 @@
+import { cfgTtsLocalVoice } from "../../tts/settings";
 import { randomUUID } from "node:crypto";
 import { generateImage, isImageGenerationApi, type Model } from "@oh-my-pi/pi-ai";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
@@ -518,6 +519,7 @@ export class StudioMediaService {
 							},
 						);
 						if (result.images.length > 4) throw new Error("Provider returned too many images");
+      if(result.model?.trim())job.model=`${model.provider}/${result.model.replace(/[\u0000-\u001f]/g,"").slice(0,512)}`;
 						for (const [index, image] of result.images.entries()) {
 							if (image.data.length > 96 * 1024 * 1024 || !image.mimeType.startsWith("image/"))
 								throw new Error("Image output exceeds budget");
@@ -543,7 +545,7 @@ export class StudioMediaService {
 						let mimeType: string;
 						if (model.api === "local-inference") {
 							const value = await ttsClient.synthesize(model.id, request.text, {
-								voice: request.voice ?? this.session.settings.get("tts.localVoice") ?? DEFAULT_TTS_VOICE,
+								voice: request.voice ?? cfgTtsLocalVoice.get(this.session.settings) ?? DEFAULT_TTS_VOICE,
 								signal,
 							});
 							if (!value) throw new Error("Local speech unavailable");

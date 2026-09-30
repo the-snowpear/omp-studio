@@ -103,6 +103,11 @@ describe("studio real tool approval and ask E2E", () => {
 		return { port, ui: factory(toolCall), toolCall };
 	}
 
+	async function waitForInteraction(port: StudioRemoteInteractionPort): Promise<void> {
+		for (let attempt = 0; attempt < 100 && !port.pending(); attempt++) await Bun.sleep(10);
+		expect(port.pending()).toBeDefined();
+	}
+
 	async function respond(
 		port: StudioRemoteInteractionPort,
 		decision: "submit" | "cancel",
@@ -129,6 +134,7 @@ describe("studio real tool approval and ask E2E", () => {
 			ui,
 			toolCall,
 		} as AgentToolContext);
+		await waitForInteraction(port);
 		const pending = port.pending();
 		expect(pending).toBeDefined();
 		expect(pending?.request).toMatchObject({
@@ -152,7 +158,7 @@ describe("studio real tool approval and ask E2E", () => {
 			ui,
 			toolCall,
 		} as AgentToolContext);
-		expect(port.pending()).toBeDefined();
+		await waitForInteraction(port);
 		await respond(port, "cancel");
 		await expect(result).rejects.toThrow("Tool call denied by user: bash");
 	});

@@ -1,3 +1,4 @@
+import { cfgTaskAgentModelOverrides } from "../../task/settings";
 import { ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentSession } from "../../session/agent-session";
@@ -146,23 +147,23 @@ export class StudioModelControlService {
 	 * the persisted configuration (or inheritance) resolves to.
 	 */
 	async setTaskModel(selector: string | null): Promise<StudioModelState | undefined> {
-		const current = this.session.settings.get("task.agentModelOverrides");
+		const current = cfgTaskAgentModelOverrides.get(this.session.settings);
 		if (selector === null) {
 			const { task: _cleared, ...rest } = current;
-			this.session.settings.override("task.agentModelOverrides", rest);
+			cfgTaskAgentModelOverrides.override(this.session.settings, rest);
 			this.#notifyChanged();
 			return this.taskState();
 		}
 		const model = await this.#resolve(selector);
 		const canonical = `${model.provider}/${model.id}`;
-		this.session.settings.override("task.agentModelOverrides", { ...current, task: canonical });
+		cfgTaskAgentModelOverrides.override(this.session.settings, { ...current, task: canonical });
 		this.#notifyChanged();
 		return this.taskState();
 	}
 
 	/** Merged `task` override entry; a pattern array projects its first member, like the TUI. */
 	#taskSelector(): string | undefined {
-		const entry = this.session.settings.get("task.agentModelOverrides").task;
+		const entry = cfgTaskAgentModelOverrides.get(this.session.settings).task;
 		if (entry === undefined || entry === null) return undefined;
 		const value = Array.isArray(entry) ? entry[0] : entry;
 		return typeof value === "string" && value.length > 0 ? value : undefined;

@@ -26,6 +26,7 @@ function project(rows: readonly BenchTableRow[]): BenchmarkModelResult[] {
 		...row.progress,
 		stats: row.report.stats,
 		byChallenge: row.report.byChallenge,
+		phases: row.report.phases,
 		measurements: row.report.cachePairs
 			? row.report.cachePairs.flatMap(pair =>
 					[pair.cold, pair.warm].map(phase => ({
@@ -39,7 +40,9 @@ function project(rows: readonly BenchTableRow[]): BenchmarkModelResult[] {
 				)
 			: row.report.results
 					.filter(Boolean)
-					.map(result => (result.ok ? { ...result } : { ...result, error: clean(result.error) })),
+					.map(({ phase, ...result }) =>
+						({ ...result, ...(phase ? { workloadPhase: phase } : {}), ...(!result.ok ? { error: clean(result.error) } : {}) }),
+					),
 	}));
 }
 
@@ -167,7 +170,7 @@ export class StudioBenchmarkService {
 									cachePrefixBytes: spec.cachePrefixBytes,
 								}
 							: {
-									profile: spec.profile,
+									...(spec.profile === "detailed" ? { detailed: true } : { profile: spec.profile }),
 									runs: spec.runs,
 									par: spec.concurrency,
 									prefillBytes: spec.prefillBytes,

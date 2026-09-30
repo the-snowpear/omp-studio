@@ -1,3 +1,7 @@
+import { cfgEditAutoRepairEnabled } from "../src/edit/settings";
+import { cfgCompactionExperimentalContextManagement } from "../src/session/context-settings";
+import { cfgPlanAutosave } from "../src/plan-mode/settings";
+import { cfgPlanAutosaveDir } from "../src/plan-mode/settings";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { constants as fsConstants } from "node:fs";
 import * as fs from "node:fs/promises";
@@ -138,6 +142,31 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		expect(session.model?.id).toBe(planModel.id);
 		await service.exitPlan(true);
 		expect(session.model?.id).toBe(previous.id);
+	});
+
+	test("Plan role listener follows a recreated worker's settings", async () => {
+		const originalModel = session.model!;
+		const slot = new Proxy(session, {
+			get(_target, key) {
+				const value = Reflect.get(session, key, session);
+				return typeof value === "function" ? value.bind(session) : value;
+			},
+		});
+		service.dispose();
+		service = new StudioModeControlService(slot);
+		await session.dispose();
+		session = new AgentSession({
+			agent: new Agent({ initialState: { model: originalModel, systemPrompt: ["Test"], tools: [], messages: [] } }),
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated(),
+			modelRegistry: new ModelRegistry(authStorage),
+		});
+		service.rebindSettings();
+		await service.enterPlan();
+		const planModel = new ModelRegistry(authStorage).find("anthropic", "claude-opus-4-6")!;
+		session.settings.setModelRole("plan", `${planModel.provider}/${planModel.id}`);
+		for (let attempt = 0; attempt < 100 && session.model?.id !== planModel.id; attempt++) await Bun.sleep(10);
+		expect(session.model?.id).toBe(planModel.id);
 	});
 
 	test("Plan applies an explicit thinking level without resetting the same model", async () => {
@@ -329,9 +358,9 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 			extendedContext: false,
 		});
 		await runtimeSettings.set("edit.autoRepair.enabled", true, false);
-		expect(session.settings.get("edit.autoRepair.enabled")).toBe(true);
+		expect(cfgEditAutoRepairEnabled.get(session.settings)).toBe(true);
 		await runtimeSettings.set("edit.autoRepair.enabled", false, true);
-		expect(session.settings.get("edit.autoRepair.enabled")).toBe(false);
+		expect(cfgEditAutoRepairEnabled.get(session.settings)).toBe(false);
 		await expect(runtimeSettings.set("edit.autoRepair.enabled", "yes", false)).rejects.toMatchObject({
 			code: "INVALID_ARGUMENT",
 		});
@@ -349,12 +378,13 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 			effectiveValue: false,
 			restartRequired: true,
 		});
-		expect(session.settings.get("compaction.experimentalContextManagement")).toBe(false);
+		expect(cfgCompactionExperimentalContextManagement.get(session.settings)).toBe(false);
 		expect(runtimeSettings.activation()).toEqual({
 			configured: { "compaction.experimentalContextManagement": true },
 			restartRequired: ["compaction.experimentalContextManagement"],
+			sources: expect.objectContaining({ "compaction.experimentalContextManagement": "runtime" }),
 		});
-		session.settings.clearOverride("compaction.experimentalContextManagement");
+		cfgCompactionExperimentalContextManagement.clearOverride(session.settings);
 		const restarted = new StudioRuntimeSettingsService(session);
 		expect(restarted.snapshot()["compaction.experimentalContextManagement"]).toBe(true);
 		expect(restarted.activation().restartRequired).toEqual([]);
@@ -364,9 +394,9 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 	});
 
 	test("approved plans autosave once and execution receives the approved body", async () => {
-		session.settings.override("plan.autosave", true);
+		cfgPlanAutosave.override(session.settings, true);
 		const directory = path.join(tempDir.path(), "saved-plans");
-		session.settings.override("plan.autosaveDir", directory);
+		cfgPlanAutosaveDir.override(session.settings, directory);
 		const { body } = await armPlanReview();
 		const prompted: string[] = [];
 		session.prompt = mock(async (text: string) => {
@@ -383,8 +413,8 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 	test("autosave failure warns without rolling a committed approval back", async () => {
 		const blockedDirectory = path.join(tempDir.path(), "not-a-directory");
 		await Bun.write(blockedDirectory, "occupied");
-		session.settings.override("plan.autosave", true);
-		session.settings.override("plan.autosaveDir", blockedDirectory);
+		cfgPlanAutosave.override(session.settings, true);
+		cfgPlanAutosaveDir.override(session.settings, blockedDirectory);
 		await armPlanReview();
 		const notices: string[] = [];
 		const unsubscribe = session.subscribe(event => {

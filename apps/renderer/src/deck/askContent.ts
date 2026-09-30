@@ -7,7 +7,7 @@ const CHAT_LABEL = "Chat about this";
 const NEXT_LABEL = "Next →";
 
 export function askAnswered(answer: DeckAskAnswer): boolean {
-  return answer.custom.trim().length > 0 || answer.picked.length > 0;
+  return answer.custom.trim().length > 0 || answer.picked.length > 0 || (answer.customInputImages?.length??0)>0;
 }
 
 export function nextPicked(question: DeckAskQuestion, picked: readonly string[], label: string): readonly string[] {
@@ -115,6 +115,7 @@ export function askToDeckView(interaction: Extract<ClientInteraction, { kind: "a
         question: {
           id: question.id,
           question: question.question,
+          ...(interaction.acceptImages===undefined?{}:{acceptImages:interaction.acceptImages}),
           header,
           options,
           ...(question.multiple ? { multi: true } : {}),
@@ -130,6 +131,9 @@ export type AskSubmitPayload = {
     readonly id: string;
     readonly selectedOptions: readonly string[];
     readonly customInput?: string;
+    readonly note?: string;
+    readonly customInputImages?: readonly import("@omp-studio/studio-protocol").AskImage[];
+    readonly noteImages?: readonly import("@omp-studio/studio-protocol").AskImage[];
   }>;
 };
 
@@ -140,11 +144,16 @@ export function submitAskValue(
   return {
     results: questions.map((question) => {
       const answer = answers[question.id] ?? NO_ASK_ANSWER;
-      const custom = answer.custom.trim();
+      const markers=(images:readonly unknown[]|undefined)=>images?.map((_,i)=>`[Image #${i+1}]`).join(" ")??"";
+      const custom = [answer.custom.trim(),markers(answer.customInputImages)].filter(Boolean).join("\n");
+      const note=[answer.note?.trim(),markers(answer.noteImages)].filter(Boolean).join("\n");
       return {
         id: question.id,
         selectedOptions: custom ? [] : [...answer.picked],
         ...(custom ? { customInput: custom } : {}),
+        ...(note ? {note}:{}),
+        ...(answer.customInputImages?.length?{customInputImages:answer.customInputImages}:{}),
+        ...(answer.noteImages?.length?{noteImages:answer.noteImages}:{}),
       };
     }),
   };

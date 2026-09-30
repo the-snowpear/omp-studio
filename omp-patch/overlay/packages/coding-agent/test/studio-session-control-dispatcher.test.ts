@@ -156,6 +156,7 @@ function fixture() {
 			shutdownRequests += 1;
 		},
 		services: {
+			workbench: { agentBtw: { settle: async () => {} } },
 			live: new StudioLiveService(),
 			pause: new StudioPauseService(),
 			loop: fakeLoopService(),

@@ -312,7 +312,7 @@ export class StudioBridgeDispatcher {
 
 	async dispatch(request: StudioRequest, send: StudioBridgeSend = this.send): Promise<void> {
 		const operation = request.operation;
-		if (operation.kind !== "runtime.shutdown" && operation.kind !== "tokens.count") {
+		if (operation.kind !== "runtime.shutdown" && operation.kind !== "tokens.count" && operation.kind !== "prediction.query") {
 			try {
 				await this.runtime.ensureWorkerLive?.();
 			} catch (error) {
@@ -333,6 +333,16 @@ export class StudioBridgeDispatcher {
 		}
 		if (operation.kind === "runtime.snapshot") {
 			send(`snapshot-result:${request.requestId}`, this.projector.response(request.requestId));
+			return;
+		}
+		if(operation.kind === "prediction.query") {
+			void (async()=>{
+				try {
+					if(request.runtimeEpoch!==this.runtime.runtimeEpoch || !this.runtime.services.prediction)throw new StudioRuntimeCommandError("COMMAND_BLOCKED","Prediction unavailable");
+					const result=await this.runtime.services.prediction.query(operation);
+					send(`prediction:${request.requestId}`,{type:"studio.receipt",requestId:request.requestId,commandId:crypto.randomUUID(),runtimeEpoch:this.runtime.runtimeEpoch,stateVersion:this.projector.stateVersion,status:"completed",result});
+				}catch{this.#reject(request,{code:"COMMAND_BLOCKED",message:"Prediction unavailable",retryable:false},send,false);}
+			})();
 			return;
 		}
 		if (operation.kind === "session.transcript.read") {
@@ -426,7 +436,7 @@ export class StudioBridgeDispatcher {
 						"session.tree.branch",
 					].includes(operation.kind)
 				)
-					await this.runtime.services.btw.settle();
+					await Promise.all([this.runtime.services.btw.settle(),this.runtime.services.workbench.agentBtw.settle()]);
 				const result = isWorkbenchOperationKind(operation.kind)
 					? await this.runtime.services.workbench.execute(operation as WorkbenchOperation)
 					: isUpgradeOperationKind(operation.kind)
@@ -644,7 +654,7 @@ export class StudioBridgeDispatcher {
 		// Quiesce before the settle wait (worst case ~10s) so no new command is
 		// accepted into the drain window.
 		this.#quiescing = true;
-		await this.runtime.services.btw.settle();
+		await Promise.all([this.runtime.services.btw.settle(),this.runtime.services.workbench.agentBtw.settle()]);
 		this.runtime.services.loop.disable();
 		await this.runtime.services.live.stop();
 		this.projector.emitRuntimeQuiescing();
@@ -684,7 +694,7 @@ export class StudioBridgeDispatcher {
 					message: "Permanently delete the current session transcript and start a new session?",
 					destructive: true,
 				});
-				if (approved) await this.runtime.services.btw.settle();
+				if (approved) await Promise.all([this.runtime.services.btw.settle(),this.runtime.services.workbench.agentBtw.settle()]);
 				return await this.#sessionControl.drop(approved);
 			}
 			case "turn.retry":
@@ -900,6 +910,7 @@ export class StudioBridgeDispatcher {
 				return await this.runtime.services.agents.spawn({
 					definition: operation.definition,
 					assignment: operation.assignment,
+					...(operation.solutionSpace !== undefined ? { solutionSpace: operation.solutionSpace } : {}),
 					...(operation.context === undefined ? {} : { context: operation.context }),
 					...(operation.async === undefined ? {} : { async: operation.async }),
 					...(operation.isolation === undefined ? {} : { isolation: operation.isolation }),

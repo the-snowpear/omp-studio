@@ -1,8 +1,8 @@
 diff --git a/packages/coding-agent/src/cli/bench-cli.ts b/packages/coding-agent/src/cli/bench-cli.ts
-index 8715b067a5..caf2356a8a 100644
+index 7792fc0316..909a094578 100644
 --- a/packages/coding-agent/src/cli/bench-cli.ts
 +++ b/packages/coding-agent/src/cli/bench-cli.ts
-@@ -257,6 +257,9 @@ export interface BenchSummary {
+@@ -306,6 +306,9 @@ export interface BenchSummary {
  }
  
  export interface BenchDependencies {
@@ -12,7 +12,22 @@ index 8715b067a5..caf2356a8a 100644
  	createRuntime?: () => Promise<BenchRuntime>;
  	randomSessionId?: () => string;
  	writeStdout?: (text: string) => void;
-@@ -553,6 +556,7 @@ function formatCachePairLine(pair: BenchCachePairReport, index: number, total: n
+@@ -619,12 +622,13 @@ async function runWithConcurrency<T>(
+ 	count: number,
+ 	concurrency: number,
+ 	run: (index: number) => Promise<T>,
++	signal?: AbortSignal,
+ ): Promise<T[]> {
+ 	// oxlint-disable-next-line unicorn/no-new-array -- length preallocation
+ 	const results = new Array<T>(count);
+ 	let next = 0;
+ 	const worker = async (): Promise<void> => {
+-		while (next < count) {
++		while (next < count && !signal?.aborted) {
+ 			const index = next++;
+ 			results[index] = await run(index);
+ 		}
+@@ -645,6 +649,7 @@ function formatCachePairLine(pair: BenchCachePairReport, index: number, total: n
  }
  
  interface BenchRequestOptions {
@@ -20,7 +35,7 @@ index 8715b067a5..caf2356a8a 100644
  	apiKey: ApiKeyResolver;
  	sessionId: string;
  	/** Native OMP messages; cache mode splits the stable prefix from the suffix. */
-@@ -575,6 +579,7 @@ async function runBenchRequest(
+@@ -667,6 +672,7 @@ async function runBenchRequest(
  	streamFn: StreamSimpleFn,
  	now: () => number,
  ): Promise<BenchRunResult> {
@@ -28,7 +43,7 @@ index 8715b067a5..caf2356a8a 100644
  	const startedAt = now();
  	let firstTokenAt: number | undefined;
  	const providerSessionState = new Map<string, ProviderSessionState>();
-@@ -586,6 +591,7 @@ async function runBenchRequest(
+@@ -678,6 +684,7 @@ async function runBenchRequest(
  			messages: options.messages,
  		};
  		const stream = streamFn(model, context, {
@@ -36,7 +51,7 @@ index 8715b067a5..caf2356a8a 100644
  			apiKey: options.apiKey,
  			sessionId: options.sessionId,
  			maxTokens:
-@@ -748,7 +754,7 @@ function formatRunLine(result: BenchRunResult, index: number, total: number, opt
+@@ -844,7 +851,7 @@ const PHASE_LABELS: Record<BenchPhase, string> = { single: "single-user", parall
  const PENDING_CELL = "…";
  
  /** Run (cache mode: pair) counters for one model. */
@@ -45,7 +60,7 @@ index 8715b067a5..caf2356a8a 100644
  	total: number;
  	completed: number;
  	failed: number;
-@@ -756,7 +762,7 @@ interface BenchProgress {
+@@ -852,7 +859,7 @@ interface BenchProgress {
  }
  
  /** One model's comparison-table row; the live footer repaints it as runs finish. */
@@ -54,7 +69,7 @@ index 8715b067a5..caf2356a8a 100644
  	/** Aggregates over the runs finished so far. */
  	report: BenchModelReport;
  	state: "queued" | "running" | "done";
-@@ -982,6 +988,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1144,6 +1151,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					return true;
  				},
  			} satisfies LiveBoardOutput);
@@ -65,7 +80,7 @@ index 8715b067a5..caf2356a8a 100644
  	const print = (text: string): void => {
  		if (board) board.log(text);
  		else writeStdout(`${text}\n`);
-@@ -1009,7 +1019,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1171,7 +1182,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			state: "queued",
  			progress: { total, completed: 0, failed: 0, inFlight: 0 },
  		}));
@@ -75,7 +90,7 @@ index 8715b067a5..caf2356a8a 100644
  			const row = rows[targetIndex]!;
  			const { progress } = row;
  			if (!json) {
-@@ -1017,7 +1029,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1179,7 +1192,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				print(`${chalk.bold(label)}${selector === label ? "" : chalk.dim(` (${selector})`)}`);
  			}
  			row.state = "running";
@@ -84,7 +99,7 @@ index 8715b067a5..caf2356a8a 100644
  			const results: BenchRunResult[] = [];
  
  			// Preflight check: let's verify credentials before starting any runs.
-@@ -1035,6 +1047,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1197,6 +1210,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				if (cacheMode) row.report.cachePairs = [];
  				row.state = "done";
@@ -92,7 +107,7 @@ index 8715b067a5..caf2356a8a 100644
  				continue;
  			}
  
-@@ -1046,7 +1059,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1208,7 +1222,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					async (pairIndex): Promise<BenchCachePairReport> => {
  						const cacheNamespace = randomSessionId();
  						progress.inFlight++;
@@ -101,7 +116,7 @@ index 8715b067a5..caf2356a8a 100644
  						const promptCacheKey = `bench-cache:${cacheNamespace}`;
  						const stablePrefix = renderCacheBenchmarkPrefix(cachePrefix!, cacheNamespace);
  						const coldSuffix = prompt.render(cacheSuffixTemplate, { variant: "A" }).trim();
-@@ -1063,6 +1076,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1225,6 +1239,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const coldResult = await runBenchRequest(
  							model,
  							{
@@ -109,7 +124,7 @@ index 8715b067a5..caf2356a8a 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, coldSuffix),
-@@ -1084,6 +1098,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1246,6 +1261,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const warmResult = await runBenchRequest(
  							model,
  							{
@@ -117,7 +132,7 @@ index 8715b067a5..caf2356a8a 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, warmSuffix),
-@@ -1102,7 +1117,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1264,7 +1280,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						progress.completed++;
  						if (!coldResult.ok) progress.failed++;
  						if (!warmResult.ok) progress.failed++;
@@ -126,7 +141,7 @@ index 8715b067a5..caf2356a8a 100644
  						return {
  							cold: cacheRunReport("cold", coldResult, coldCapture),
  							warm: cacheRunReport("warm", warmResult, warmCapture),
-@@ -1123,6 +1138,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1285,6 +1301,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				row.report.cachePairs = pairs;
  				row.state = "done";
@@ -134,37 +149,119 @@ index 8715b067a5..caf2356a8a 100644
  				if (!json) {
  					for (const [index, pair] of pairs.entries()) {
  						print(formatCachePairLine(pair, index, pairs.length));
-@@ -1146,6 +1162,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
- 				const result = await runBenchRequest(
- 					model,
- 					{
-+						signal: deps.signal,
- 						apiKey: runtime.modelRegistry.resolver(model, sessionId),
- 						sessionId,
- 						messages: challenge.messages,
-@@ -1162,16 +1179,16 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
- 			const queue = Array.from({ length: runs }, (_, i) => i);
- 			const activeWorkers: Promise<void>[] = [];
- 			const processNext = async (): Promise<void> => {
--				if (queue.length === 0) return;
-+				if (queue.length === 0 || deps.signal?.aborted) return;
- 				const index = queue.shift()!;
- 				progress.inFlight++;
--				board?.repaint();
-+				updateProgress();
- 				await runWorker(index);
- 				progress.inFlight--;
- 				progress.completed++;
- 				if (!results[index]!.ok) progress.failed++;
- 				row.report = buildModelReport(selector, model, thinking, results);
--				board?.repaint();
-+				updateProgress();
- 				if (!json) {
- 					while (nextToPrint < runs && results[nextToPrint] !== undefined) {
- 						print(formatRunLine(results[nextToPrint], nextToPrint, runs, { tagKind }));
-@@ -1183,6 +1200,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
- 			for (let worker = 0; worker < Math.min(par, runs); worker++) activeWorkers.push(processNext());
- 			await Promise.all(activeWorkers);
+@@ -1298,6 +1315,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 			let offset = 0;
+ 			// Steps run back to back so one phase's load never skews the next.
+ 			for (const step of steps) {
++				if (deps.signal?.aborted) break;
+ 				const { phase } = step;
+ 				if (!json && phase) {
+ 					print(
+@@ -1308,51 +1326,57 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 				const startedAt = now();
+ 				// Runs finish out of order under concurrency; lines print in index order.
+ 				let nextToPrint = 0;
+-				await runWithConcurrency(step.runs, step.concurrency, async index => {
+-					const runIndex = offset + index;
+-					const sessionId = runIndex === 0 ? testSessionId : randomSessionId();
+-					const challenge = buildBenchChallenge(step.kinds[index % step.kinds.length]!, {
+-						promptOverride,
+-						prefillBytes,
+-						nonce: randomSessionId(),
+-						random,
+-						maxTokensOverride,
+-					});
+-					progress.inFlight++;
+-					board?.repaint();
+-					const result: BenchRunResult = {
+-						...(await runBenchRequest(
+-							model,
+-							{
+-								apiKey: runtime.modelRegistry.resolver(model, sessionId),
+-								sessionId,
+-								messages: challenge.messages,
+-								maxTokens: challenge.maxTokens,
+-								reasoning: toReasoningEffort(thinking),
+-								disableReasoning: shouldDisableReasoning(thinking) ? true : undefined,
+-								serviceTier,
+-							},
+-							streamFn,
+-							now,
+-						)),
+-						challenge: challenge.kind,
+-						phase,
+-					};
+-					results[runIndex] = result;
+-					finished.push(result);
+-					progress.inFlight--;
+-					progress.completed++;
+-					if (!result.ok) progress.failed++;
+-					if (phase) phases[phase] = buildPhaseReport(step.concurrency, finished, now() - startedAt);
+-					row.report = buildModelReport(selector, model, thinking, results, phases);
+-					board?.repaint();
+-					if (!json) {
+-						while (nextToPrint < step.runs && results[offset + nextToPrint] !== undefined) {
+-							print(formatRunLine(results[offset + nextToPrint]!, nextToPrint, step.runs, { tagKind }));
+-							nextToPrint++;
++				await runWithConcurrency(
++					step.runs,
++					step.concurrency,
++					async index => {
++						const runIndex = offset + index;
++						const sessionId = runIndex === 0 ? testSessionId : randomSessionId();
++						const challenge = buildBenchChallenge(step.kinds[index % step.kinds.length]!, {
++							promptOverride,
++							prefillBytes,
++							nonce: randomSessionId(),
++							random,
++							maxTokensOverride,
++						});
++						progress.inFlight++;
++						updateProgress();
++						const result: BenchRunResult = {
++							...(await runBenchRequest(
++								model,
++								{
++									signal: deps.signal,
++									apiKey: runtime.modelRegistry.resolver(model, sessionId),
++									sessionId,
++									messages: challenge.messages,
++									maxTokens: challenge.maxTokens,
++									reasoning: toReasoningEffort(thinking),
++									disableReasoning: shouldDisableReasoning(thinking) ? true : undefined,
++									serviceTier,
++								},
++								streamFn,
++								now,
++							)),
++							challenge: challenge.kind,
++							phase,
++						};
++						results[runIndex] = result;
++						finished.push(result);
++						progress.inFlight--;
++						progress.completed++;
++						if (!result.ok) progress.failed++;
++						if (phase) phases[phase] = buildPhaseReport(step.concurrency, finished, now() - startedAt);
++						row.report = buildModelReport(selector, model, thinking, results, phases);
++						updateProgress();
++						if (!json) {
++							while (nextToPrint < step.runs && results[offset + nextToPrint] !== undefined) {
++								print(formatRunLine(results[offset + nextToPrint]!, nextToPrint, step.runs, { tagKind }));
++								nextToPrint++;
++							}
+ 						}
+-					}
+-				});
++					},
++					deps.signal,
++				);
+ 				// Chat phases close with the combined output rate across every in-flight request.
+ 				const phaseReport = phase && phase !== "prefill" ? phases[phase] : undefined;
+ 				if (!json && phaseReport) {
+@@ -1363,6 +1387,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 				offset += step.runs;
+ 			}
  			row.state = "done";
 +			updateProgress();
  		}
@@ -244,10 +341,10 @@ index caf6b595a6..f3da171419 100644
  export function releaseJudgmentBatches(ownerId: string): void {
  	for (const [id, batch] of batches) {
 diff --git a/packages/coding-agent/src/extensibility/extensions/types.ts b/packages/coding-agent/src/extensibility/extensions/types.ts
-index 1ce7ddd2cd..8e2052ba33 100644
+index f245ea99a6..7ad351fb24 100644
 --- a/packages/coding-agent/src/extensibility/extensions/types.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/types.ts
-@@ -248,6 +248,26 @@ export interface ExtensionUIContext {
+@@ -254,6 +254,26 @@ export interface ExtensionUIContext {
  	/** Show a text input dialog. */
  	input(title: string, placeholder?: string, dialogOptions?: ExtensionUIDialogOptions): Promise<string | undefined>;
  
@@ -275,18 +372,18 @@ index 1ce7ddd2cd..8e2052ba33 100644
  	askDialog?(
  		questions: ExtensionAskDialogQuestion[],
 diff --git a/packages/coding-agent/src/extensibility/extensions/wrapper.ts b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
-index 79888b2951..2740b4e778 100644
+index a8357fe877..2e5026f627 100644
 --- a/packages/coding-agent/src/extensibility/extensions/wrapper.ts
 +++ b/packages/coding-agent/src/extensibility/extensions/wrapper.ts
-@@ -7,6 +7,7 @@ import type {
- 	AgentToolResult,
- 	AgentToolUpdateCallback,
- 	ToolLoadMode,
-+	ToolTier,
+@@ -8,6 +8,7 @@ import {
+ 	type AgentToolUpdateCallback,
+ 	isNonBlankContext,
+ 	type ToolLoadMode,
++	type ToolTier,
  } from "@oh-my-pi/pi-agent-core";
  import type { ComputerSafetyCheck, ImageContent, Static, TextContent, TSchema } from "@oh-my-pi/pi-ai";
  import { sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
-@@ -25,6 +26,18 @@ import { applyToolProxy } from "../tool-proxy";
+@@ -26,6 +27,18 @@ import { applyToolProxy } from "../tool-proxy";
  import type { ExtensionRunner } from "./runner";
  import type { RegisteredTool, ToolCallEventResult } from "./types";
  
@@ -303,9 +400,9 @@ index 79888b2951..2740b4e778 100644
 +}
 +
  /**
-  * Adapts a RegisteredTool into an AgentTool.
-  */
-@@ -303,9 +316,80 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+  * Second `renderCall` argument that satisfies both the omp and the upstream-pi
+  * renderer contracts.
+@@ -370,9 +383,84 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  				});
  			};
  
@@ -356,10 +453,12 @@ index 79888b2951..2740b4e778 100644
 +					);
 +				} catch (err) {
 +					await emitApprovalResolved(false, err instanceof Error ? err.message : "approval aborted");
++					cancelPreflight();
 +					throw err;
 +				}
 +				await emitApprovalResolved(approved, approved ? undefined : "denied by user");
 +				if (!approved) {
++					cancelPreflight();
 +					throw new Error(`Tool call denied by user: ${this.tool.name}`);
 +				}
 +				markProviderSafetyApproved();
@@ -375,11 +474,13 @@ index 79888b2951..2740b4e778 100644
 +					choice = await uiContext.select(safetyPrompt, ["Approve", "Deny"]);
 +				} catch (err) {
 +					await emitApprovalResolved(false, err instanceof Error ? err.message : "approval aborted");
++					cancelPreflight();
 +					throw err;
 +				}
 +				const approved = choice === "Approve";
 +				await emitApprovalResolved(approved, approved ? undefined : "denied by user");
 +				if (!approved) {
++					cancelPreflight();
 +					throw new Error(`Tool call denied by user: ${this.tool.name}`);
 +				}
 +				markProviderSafetyApproved();
@@ -388,8 +489,8 @@ index 79888b2951..2740b4e778 100644
 +				// prompt, and tier approvals cannot auto-approve headlessly.
  				const reason = "no interactive UI available";
  				await emitApprovalResolved(false, reason);
- 				if (pendingSafetyChecks.length > 0) {
-@@ -321,29 +405,6 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+ 				cancelPreflight();
+@@ -389,34 +477,6 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
  						`  3. Use an interactive UI to approve the tool call`,
  				);
  			}
@@ -405,22 +506,150 @@ index 79888b2951..2740b4e778 100644
 -				choice = await uiContext.select(safetyPrompt, ["Approve", "Deny"]);
 -			} catch (err) {
 -				await emitApprovalResolved(false, err instanceof Error ? err.message : "approval aborted");
+-				cancelPreflight();
 -				throw err;
 -			}
 -			const approved = choice === "Approve";
 -			await emitApprovalResolved(approved, approved ? undefined : "denied by user");
 -			if (!approved) {
+-				cancelPreflight();
 -				throw new Error(`Tool call denied by user: ${this.tool.name}`);
 -			}
 -			if (pendingSafetyChecks.length > 0) {
--				if (!context) throw new Error("Provider safety approval context is unavailable");
+-				if (!context) {
+-					cancelPreflight();
+-					throw new Error("Provider safety approval context is unavailable");
+-				}
 -				context.providerSafetyApproved = true;
 -			}
  		}
  
  		// Execute the actual tool
+diff --git a/packages/coding-agent/src/ida/protocol.ts b/packages/coding-agent/src/ida/protocol.ts
+index 7c1f10e94f..8a6d6782be 100644
+--- a/packages/coding-agent/src/ida/protocol.ts
++++ b/packages/coding-agent/src/ida/protocol.ts
+@@ -74,7 +74,7 @@ export function idaHostEndpoint(projectDir: string, runtimeDir: string, daemonNa
+ }
+ 
+ /** RPC methods an omp process may forward to the worker through `call`. */
+-export const IDA_CALL_METHODS = ["view", "exec", "rename", "comment", "set_type", "make_function", "save"] as const;
++export const IDA_CALL_METHODS = ["view", "exec", "rename", "comment", "set_type", "make_function", "save", "studio"] as const;
+ 
+ /** A method forwarded with `call`. */
+ export type IdaCallMethod = (typeof IDA_CALL_METHODS)[number];
+diff --git a/packages/coding-agent/src/ida/supervisor.ts b/packages/coding-agent/src/ida/supervisor.ts
+index 092dfe9613..3f828c100d 100644
+--- a/packages/coding-agent/src/ida/supervisor.ts
++++ b/packages/coding-agent/src/ida/supervisor.ts
+@@ -33,6 +33,7 @@ const STDERR_TAIL_LINES = 20;
+ 
+ /** RPC methods implemented by the IDA worker. */
+ export type IdaMethod =
++ | "studio"
+ 	| "open"
+ 	| "view"
+ 	| "exec"
+@@ -255,9 +256,10 @@ export class IdaWorker {
+ 		try {
+ 			await this.#waitTurn(previous, signal, timeoutMs);
+ 			const remaining = deadline === undefined ? undefined : Math.max(1, deadline - Date.now());
++   if (method === "studio" && (params as {method?:string}).method === "exec") this.#execSinceSave = true;
+ 			const value = await this.#send(method, params, { signal, timeoutMs: remaining });
+-			if (method === "exec") this.#execSinceSave = true;
+-			else if (method === "save") this.#execSinceSave = false;
++			if (method === "exec" || method === "studio" && (params as {method?:string}).method === "exec") this.#execSinceSave = true;
++			else if (method === "save" || method === "studio" && (params as {method?:string}).method === "save") this.#execSinceSave = false;
+ 			// The worker answers with the JSON shape documented for `method`.
+ 			return value as T;
+ 		} finally {
+diff --git a/packages/coding-agent/src/ida/worker.py b/packages/coding-agent/src/ida/worker.py
+index 5e077f18cf..6c93cafbec 100644
+--- a/packages/coding-agent/src/ida/worker.py
++++ b/packages/coding-agent/src/ida/worker.py
+@@ -12,8 +12,12 @@ import re
+ import signal
+ import sys
+ import traceback
++import uuid
+ from contextlib import redirect_stderr, redirect_stdout
+ 
++_STUDIO_IDENTITY = str(uuid.uuid4())
++_STUDIO_VERSION = 0
++
+ # Keep a private handle on the real stdout for protocol frames, then point fd 1 at stderr so
+ # kernel messages and stray prints can never corrupt the NDJSON stream.
+ _proto = os.fdopen(os.dup(1), "w", encoding="utf-8", buffering=1)
+@@ -573,6 +577,8 @@ def _rpc_open(params):
+ 
+ def _rpc_view(params):
+     kind = params.get("kind") or "overview"
++    if kind == "functions":
++        return {"text": _text(f"0x{ea:x}  {name}" for ea, name in functions())}
+     if kind in _PLAIN_VIEWS:
+         return {"text": _PLAIN_VIEWS[kind]()}
+     if kind in _TARGET_VIEWS:
+@@ -683,6 +689,7 @@ def _close_and_exit(save):
+ 
+ 
+ def _handle(line):
++    global _STUDIO_VERSION
+     _arm_sigint()
+     req_id = None
+     try:
+@@ -692,6 +699,21 @@ def _handle(line):
+         req_id = req.get("id")
+         method = req.get("method")
+         params = req.get("params") or {}
++        studio = method == "studio"
++        if studio:
++            envelope = params
++            method = envelope.get("method")
++            if method == "status":
++                _send({"id": req_id, "ok": True, "result": {"identity": _STUDIO_IDENTITY, "version": _STUDIO_VERSION, "result": {}}})
++                return
++            if envelope.get("identity") != _STUDIO_IDENTITY or type(envelope.get("version")) is not int or envelope["version"] != _STUDIO_VERSION:
++                raise ValueError("IDA database changed; review the current identity and version")
++            if method not in ("view", "exec", "rename", "comment", "set_type", "make_function", "save", "close"):
++                raise ValueError("Unsupported Studio IDA method")
++            params = envelope.get("params") or {}
++        if method in ("open", "exec", "rename", "comment", "set_type", "make_function", "save", "close"):
++            # Failures and cancellation can leave partial edits; invalidate reviews before dispatch.
++            _STUDIO_VERSION += 1
+         if method == "close":
+             save = bool(params.get("save"))
+             try:
+@@ -701,12 +723,27 @@ def _handle(line):
+                 _send({"id": req_id, "ok": False, "error": _error(e)})
+                 traceback.print_exc()
+                 sys.exit(1)
+-            _send({"id": req_id, "ok": True, "result": {"closed": True, "saved": save}})
++            closed = {"closed": True, "saved": save}
++            _send({"id": req_id, "ok": True, "result": {"identity": _STUDIO_IDENTITY, "version": _STUDIO_VERSION, "result": closed} if studio else closed})
+             sys.exit(0)
+         handler = _METHODS.get(method)
+         if handler is None:
+             raise ValueError(f"unknown method: {method}")
+         result = handler(params)
++        if studio and method == "view":
++            offset = envelope.get("offset", 0)
++            limit = envelope.get("limit", 100)
++            if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
++                raise ValueError("Invalid IDA page")
++            lines = result["text"].splitlines()
++            if offset > len(lines):
++                raise ValueError("IDA page is out of range")
++            page = lines[offset:offset + limit]
++            result = {"text": "\n".join(line[:2048] for line in page), "total": len(lines), "offset": offset, "truncated": any(len(line) > 2048 for line in page)}
++            if offset + len(page) < len(lines):
++                result["nextOffset"] = offset + len(page)
++        if studio:
++            result = {"identity": _STUDIO_IDENTITY, "version": _STUDIO_VERSION, "result": result}
+     except SystemExit:
+         raise
+     except BaseException as e:
 diff --git a/packages/coding-agent/src/launch/broker.ts b/packages/coding-agent/src/launch/broker.ts
-index 001003e923..f905e41600 100644
+index c422a6cfdf..406b7c38ca 100644
 --- a/packages/coding-agent/src/launch/broker.ts
 +++ b/packages/coding-agent/src/launch/broker.ts
 @@ -13,7 +13,7 @@ import {
@@ -432,7 +661,7 @@ index 001003e923..f905e41600 100644
  import type { DaemonReadySpec, DaemonSnapshot, DaemonSpec } from "@oh-my-pi/pi-tui/tools/daemon";
  import { hasLiveDaemonProjectPresence, pruneDeadDaemonRuntimeDirs } from "./presence";
  import {
-@@ -618,12 +618,33 @@ class DaemonBroker {
+@@ -626,12 +626,33 @@ class DaemonBroker {
  		}
  	}
  
@@ -468,7 +697,7 @@ index 001003e923..f905e41600 100644
  			case "list": {
  				await Promise.all([...this.#records.values()].map(record => this.#refreshDetached(record)));
  				return {
-@@ -638,16 +659,16 @@ class DaemonBroker {
+@@ -646,16 +667,16 @@ class DaemonBroker {
  			case "send":
  				return this.#send(operation);
  			case "stop": {
@@ -489,7 +718,7 @@ index 001003e923..f905e41600 100644
  				await this.#refreshDetached(record);
  				return { op: "describe", daemon: record.snapshot, spec: record.spec };
  			}
-@@ -656,7 +677,7 @@ class DaemonBroker {
+@@ -664,7 +685,7 @@ class DaemonBroker {
  		}
  	}
  
@@ -498,7 +727,7 @@ index 001003e923..f905e41600 100644
  		if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/.test(spec.name)) {
  			throw new Error("Daemon name must be 1-48 letters, numbers, dots, underscores, or hyphens");
  		}
-@@ -735,7 +756,7 @@ class DaemonBroker {
+@@ -743,7 +764,7 @@ class DaemonBroker {
  		}
  		await this.#launch(record);
  		let readyTimedOut = false;
@@ -507,7 +736,7 @@ index 001003e923..f905e41600 100644
  			// Wake on the sticky readyAt marker or any terminal state, not the live
  			// state: a fast process flips starting→ready→exited within one poll
  			// interval, so sampling `state === "ready"` never observes readiness even
-@@ -759,7 +780,7 @@ class DaemonBroker {
+@@ -767,7 +788,7 @@ class DaemonBroker {
  		record.snapshot.state = record.spec.ready ? "starting" : "running";
  		record.snapshot.persist = record.spec.persist;
  		record.snapshot.detached = record.spec.detached;
@@ -516,7 +745,7 @@ index 001003e923..f905e41600 100644
  		record.snapshot.readyAt = undefined;
  		record.snapshot.exitedAt = undefined;
  		record.snapshot.exitCode = undefined;
-@@ -1094,7 +1115,7 @@ class DaemonBroker {
+@@ -1102,7 +1123,7 @@ class DaemonBroker {
  	}
  
  	async #logs(operation: Extract<DaemonOperation, { op: "logs" }>): Promise<DaemonRpcResult> {
@@ -525,7 +754,7 @@ index 001003e923..f905e41600 100644
  		await this.#refreshDetached(record);
  		const cursor = operation.cursor ?? record.snapshot.outputBytes;
  		let timedOut = false;
-@@ -1122,6 +1143,7 @@ class DaemonBroker {
+@@ -1130,6 +1151,7 @@ class DaemonBroker {
  			terminalOutput !== undefined && operation.renderTerminalRows === true
  				? await renderTerminalOutput(terminalOutput, { head: operation.head, maxRows: lines })
  				: undefined;
@@ -533,7 +762,7 @@ index 001003e923..f905e41600 100644
  		return {
  			op: "logs",
  			name: record.snapshot.name,
-@@ -1138,7 +1160,7 @@ class DaemonBroker {
+@@ -1146,7 +1168,7 @@ class DaemonBroker {
  	}
  
  	async #wait(operation: Extract<DaemonOperation, { op: "wait" }>): Promise<DaemonRpcResult> {
@@ -542,7 +771,7 @@ index 001003e923..f905e41600 100644
  		// A wait observes exactly one launch generation. Automatic or explicit
  		// relaunches reuse the managed record, so polling the record without this
  		// binding can hang past an exit or consume the replacement's output.
-@@ -1194,8 +1216,9 @@ class DaemonBroker {
+@@ -1202,8 +1224,9 @@ class DaemonBroker {
  	}
  
  	async #send(operation: Extract<DaemonOperation, { op: "send" }>): Promise<DaemonRpcResult> {
@@ -553,7 +782,7 @@ index 001003e923..f905e41600 100644
  		if (terminalState(record.snapshot.state) || record.snapshot.state === "stopping") {
  			throw new Error(`Daemon ${operation.name} is ${record.snapshot.state}`);
  		}
-@@ -1211,6 +1234,7 @@ class DaemonBroker {
+@@ -1219,6 +1242,7 @@ class DaemonBroker {
  			} else throw new Error(`Daemon ${operation.name} stdin is unavailable`);
  		}
  		if (operation.signal) {
@@ -561,7 +790,7 @@ index 001003e923..f905e41600 100644
  			if (process.platform === "win32" && record.pty) {
  				if (operation.signal === "SIGINT") record.pty.write("\u0003");
  				else record.pty.kill();
-@@ -1223,8 +1247,9 @@ class DaemonBroker {
+@@ -1231,8 +1255,9 @@ class DaemonBroker {
  		return { op: "send", daemon: record.snapshot };
  	}
  
@@ -572,7 +801,7 @@ index 001003e923..f905e41600 100644
  		if (terminalState(record.snapshot.state)) return;
  		record.stopRequested = true;
  		if (record.restartTimer) {
-@@ -1246,9 +1271,9 @@ class DaemonBroker {
+@@ -1254,9 +1279,9 @@ class DaemonBroker {
  		if (!settled && record.pty) record.pty.kill();
  	}
  
@@ -585,7 +814,7 @@ index 001003e923..f905e41600 100644
  		await record.log?.close();
  		record.log = await DaemonLog.open(record.dir);
  		record.stopRequested = false;
-@@ -1258,15 +1283,16 @@ class DaemonBroker {
+@@ -1271,15 +1296,16 @@ class DaemonBroker {
  	}
  
  	async #mode(operation: Extract<DaemonOperation, { op: "mode" }>): Promise<DaemonRpcResult> {
@@ -604,7 +833,7 @@ index 001003e923..f905e41600 100644
  			}
  		} else {
  			if (record.spec.detached && operation.mode === "session") {
-@@ -1292,9 +1318,16 @@ class DaemonBroker {
+@@ -1305,9 +1331,16 @@ class DaemonBroker {
  		return condition();
  	}
  
@@ -623,7 +852,7 @@ index 001003e923..f905e41600 100644
  		const names = [...this.#records.keys()];
  		throw new Error(`Unknown daemon ${name}${names.length ? `. Available: ${names.join(", ")}` : ""}`);
  	}
-@@ -1490,9 +1523,13 @@ export interface DaemonBrokerStartOptions {
+@@ -1518,9 +1551,13 @@ export interface DaemonBrokerStartOptions {
  
  /** Start the detached project or global daemon broker selected by the CLI worker host. */
  export async function startDaemonBrokerFromEnvironment(options: DaemonBrokerStartOptions = {}): Promise<void> {
@@ -765,12 +994,12 @@ index c78d539082..13c4b030eb 100644
  			return {
  				op: "start",
 diff --git a/packages/coding-agent/src/launch/services.ts b/packages/coding-agent/src/launch/services.ts
-index 0998a6edd1..6aa341a4bf 100644
+index d98d7c7062..a6fbc292ec 100644
 --- a/packages/coding-agent/src/launch/services.ts
 +++ b/packages/coding-agent/src/launch/services.ts
-@@ -25,6 +25,10 @@ export interface ServiceStart {
+@@ -26,6 +26,10 @@ export interface ServiceStart {
+ 	cwd?: string;
  	pty?: boolean;
- 	env?: Record<string, string>;
  	ready?: ServiceReady;
 +	restart?: DaemonSpec["restart"];
 +	mode?: "session" | "persist" | "detached";
@@ -779,7 +1008,7 @@ index 0998a6edd1..6aa341a4bf 100644
  }
  
  const serviceStateKey = Symbol("ownedServices");
-@@ -97,7 +101,7 @@ function subscribe(session: ToolSession, client: DaemonBrokerClient): void {
+@@ -104,7 +108,7 @@ function subscribe(session: ToolSession, client: DaemonBrokerClient): void {
  	});
  }
  
@@ -788,7 +1017,7 @@ index 0998a6edd1..6aa341a4bf 100644
  	session: ToolSession,
  	operation: DaemonOperation,
  	signal?: AbortSignal,
-@@ -114,7 +118,7 @@ async function request(
+@@ -121,7 +125,7 @@ async function request(
  }
  
  export async function listServices(session: ToolSession, signal?: AbortSignal): Promise<DaemonSnapshot[]> {
@@ -797,7 +1026,7 @@ index 0998a6edd1..6aa341a4bf 100644
  	if (result.op !== "list") throw new Error("Unexpected daemon list response");
  	return result.daemons;
  }
-@@ -147,7 +151,7 @@ export async function serviceLogsWithRows(
+@@ -154,7 +158,7 @@ export async function serviceLogsWithRows(
  	name: string,
  	signal?: AbortSignal,
  ): Promise<{ text: string; terminalRows?: string[] }> {
@@ -806,16 +1035,16 @@ index 0998a6edd1..6aa341a4bf 100644
  		session,
  		{
  			op: "logs",
-@@ -202,7 +206,7 @@ export async function startService(
+@@ -209,7 +213,7 @@ export async function startService(
  		args: [...shell.args, `${shell.prefix ? `${shell.prefix} ` : ""}${params.command}`],
- 		env: { ...shell.env, ...params.env },
+ 		env: shell.env,
  		cwd: resolveToCwd(params.cwd ?? session.cwd, session.cwd),
 -		pty: params.pty ?? true,
 +		pty: params.mode === "detached" ? false : (params.pty ?? true),
  		ready: ready
  			? {
  					log: ready.log,
-@@ -211,13 +215,19 @@ export async function startService(
+@@ -218,13 +222,19 @@ export async function startService(
  					timeoutMs: Math.round(Math.max(0.05, Math.min(3_600, ready.timeout ?? 30)) * 1_000),
  				}
  			: undefined,
@@ -829,18 +1058,18 @@ index 0998a6edd1..6aa341a4bf 100644
 -	const result = await request(
 +	const result = await requestService(
  		session,
--		{ op: "start", spec, owner: session.getAgentId?.() ?? session.getSessionId?.() ?? undefined, replace: true },
+-		{ op: "start", spec, owner: serviceOwner(session) ?? undefined, replace: true },
 +		{
 +			op: "start",
 +			spec,
-+			owner: session.getAgentId?.() ?? session.getSessionId?.() ?? undefined,
++			owner: serviceOwner(session) ?? undefined,
 +			replace: params.replace ?? true,
 +			waitForReady: params.waitForReady,
 +		},
  		signal,
  	);
  	if (result.op !== "start") throw new Error("Unexpected daemon start response");
-@@ -235,13 +245,13 @@ export async function sendService(
+@@ -242,13 +252,13 @@ export async function sendService(
  	signal?: AbortSignal,
  ): Promise<DaemonSnapshot> {
  	const data = /[\r\n]$/.test(content) ? content : `${content}\r`;
@@ -856,7 +1085,7 @@ index 0998a6edd1..6aa341a4bf 100644
  	if (result.op !== "stop") throw new Error("Unexpected daemon stop response");
  	return result.daemon;
  }
-@@ -252,7 +262,7 @@ export async function modeService(
+@@ -259,7 +269,7 @@ export async function modeService(
  	mode: "persist" | "session" | "detached",
  	signal?: AbortSignal,
  ): Promise<DaemonSnapshot> {
@@ -907,13 +1136,87 @@ index 20b8db2e3b..44361d3682 100644
  				if (error) {
  					this.#reportFailure(error);
  					return;
+diff --git a/packages/coding-agent/src/predict/client.ts b/packages/coding-agent/src/predict/client.ts
+index d49bc07ad5..0ef26e9a58 100644
+--- a/packages/coding-agent/src/predict/client.ts
++++ b/packages/coding-agent/src/predict/client.ts
+@@ -141,7 +141,7 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
+ }
+ 
+ /** Find or start the daemon serving `agentDir` under the global broker. */
+-async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
++async function ensureDaemon(agentDir: string, foreignHistory = true): Promise<DaemonConnection> {
+ 	const broker = await daemonClientForGlobal(TEXT_PREDICT_BROKER_SCOPE);
+ 	await broker.request({ op: "ping" });
+ 	const { name, endpoint } = textPredictDaemon(broker.projectDir, agentDir);
+@@ -167,7 +167,7 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+ 					name,
+ 					application: spawn.cmd[0]!,
+ 					args: spawn.cmd.slice(1),
+-					env: { [TEXT_PREDICT_SOCKET_ENV]: endpoint, [TEXT_PREDICT_AGENT_DIR_ENV]: agentDir },
++					env: { [TEXT_PREDICT_SOCKET_ENV]: endpoint, [TEXT_PREDICT_AGENT_DIR_ENV]: agentDir, OMP_TEXT_PREDICT_NO_FOREIGN: foreignHistory ? "0" : "1" },
+ 					cwd: spawn.cwd ?? broker.projectDir,
+ 					pty: false,
+ 					ready: { log: TEXT_PREDICT_READY_PATTERN, timeoutMs: READY_TIMEOUT_MS },
+@@ -185,7 +185,19 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+ }
+ 
+ /** Process-wide daemon access shared by every editor and the submit hook. */
+-class TextPredictionClient {
++export class TextPredictionClient {
++	constructor(readonly agentDirectory = getAgentDir(), readonly foreignHistory = true, readonly downloads = true) {}
++	async stop(): Promise<void> {
++		this.close();
++		const broker=await daemonClientForGlobal(TEXT_PREDICT_BROKER_SCOPE);
++		const {name}=textPredictDaemon(broker.projectDir,this.agentDirectory);
++		const listed=await broker.request({op:"list"});
++		if(listed.op!=="list")throw Error("Unexpected prediction broker response");
++		if(listed.daemons.some(daemon=>daemon.name===name&&daemon.state!=="exited"&&daemon.state!=="failed")){
++			const stopped=await broker.request({op:"stop",name,timeoutMs:10000});
++			if(stopped.op!=="stop"||!["exited","failed"].includes(stopped.daemon.state))throw Error("Prediction daemon is still running");
++		}
++	}
+ 	#connection: DaemonConnection | undefined;
+ 	#connecting: Promise<DaemonConnection> | undefined;
+ 	#retryAt = 0;
+@@ -231,7 +243,7 @@ class TextPredictionClient {
+ 	async complete(engine: TextPredictMethod, before: string, prefix: string): Promise<TextPrediction> {
+ 		// SmolLM's weights download here, in the interactive process (shown in the
+ 		// download HUD), only once the user has chosen SmolLM.
+-		if (engine === "smollm") prefetchSmolLmWeights();
++		if (engine === "smollm" && this.downloads) prefetchSmolLmWeights();
+ 		const response = await this.#request(
+ 			id => ({ id, op: "complete", method: engine, before, prefix }),
+ 			COMPLETE_TIMEOUT_MS,
+@@ -263,7 +275,7 @@ class TextPredictionClient {
+ 		if (current && !current.closed) return Promise.resolve(current);
+ 		if (this.#connecting) return this.#connecting;
+ 		if (Date.now() < this.#retryAt) return Promise.reject(new Error("text-predict daemon unavailable"));
+-		const connecting = ensureDaemon(getAgentDir()).then(
++		const connecting = ensureDaemon(this.agentDirectory, this.foreignHistory).then(
+ 			connection => {
+ 				this.#connection = connection;
+ 				this.#connecting = undefined;
+diff --git a/packages/coding-agent/src/predict/daemon.ts b/packages/coding-agent/src/predict/daemon.ts
+index edbf27b099..f4a8644b42 100644
+--- a/packages/coding-agent/src/predict/daemon.ts
++++ b/packages/coding-agent/src/predict/daemon.ts
+@@ -82,7 +82,7 @@ class Engine {
+ 	) {
+ 		this.cursor = cursor ?? 0;
+ 		this.#persistedCursor = this.cursor;
+-		this.#seed = cursor === undefined;
++		this.#seed = cursor === undefined && process.env.OMP_TEXT_PREDICT_NO_FOREIGN !== "1";
+ 	}
+ 
+ 	get dirty(): boolean {
 diff --git a/packages/coding-agent/src/sdk.ts b/packages/coding-agent/src/sdk.ts
-index dc9f1b4cff..827f1d29b9 100644
+index 555b0fa221..c50a62d485 100644
 --- a/packages/coding-agent/src/sdk.ts
 +++ b/packages/coding-agent/src/sdk.ts
-@@ -240,9 +240,9 @@ import {
- 	xdevEntries,
+@@ -265,9 +265,9 @@ import {
  } from "./tools";
+ import { resolveYieldReportText } from "./tools/yield";
  import { createBrowserPrelude } from "./tools/browser";
 -import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
  import { createComputerPrelude } from "./tools/computer";
@@ -921,9 +1224,9 @@ index dc9f1b4cff..827f1d29b9 100644
 +import { isMCPToolName, normalizeToolNames } from "./tools/builtin-names";
 +import { ToolContextStore, type ToolUiFactory } from "./tools/context";
  import { isIrcEnabled } from "./irc/messaging";
- import { getImageGenTools } from "./tools/image-gen";
+ import { imageGenTool } from "./tools/image-gen";
  import { wrapToolWithMetaNotice } from "./tools/output-meta";
-@@ -688,8 +688,8 @@ export interface CreateAgentSessionResult {
+@@ -838,8 +838,8 @@ export interface CreateAgentSessionResult {
  	session: AgentSession;
  	/** Extensions result (loaded extensions + runtime) */
  	extensionsResult: LoadExtensionsResult;
@@ -934,7 +1237,7 @@ index dc9f1b4cff..827f1d29b9 100644
  	/** MCP manager for server lifecycle management (undefined if MCP disabled) */
  	mcpManager?: MCPManager;
  	/** Warning if session was restored with a different model than saved */
-@@ -3659,7 +3659,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+@@ -4123,7 +4123,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
  			await extensionRunner.emitAfterProviderResponse(response, model, signal);
  		};
  
@@ -944,10 +1247,10 @@ index dc9f1b4cff..827f1d29b9 100644
  		};
  
 diff --git a/packages/coding-agent/src/skillshare/client.ts b/packages/coding-agent/src/skillshare/client.ts
-index 9eb2f3de19..d1a2551488 100644
+index 6315774c44..950eae2c89 100644
 --- a/packages/coding-agent/src/skillshare/client.ts
 +++ b/packages/coding-agent/src/skillshare/client.ts
-@@ -46,6 +46,8 @@ export function parseSkillSpec(spec: string): SkillSpec | null {
+@@ -48,6 +48,8 @@ export function parseSkillSpec(spec: string): SkillSpec | null {
  }
  
  export interface SkillshareClientOptions {
@@ -956,7 +1259,7 @@ index 9eb2f3de19..d1a2551488 100644
  	/** Registry base URL; defaults to the `skills.registryUrl` setting, then {@link DEFAULT_SKILLS_URL}. */
  	registryUrl?: string;
  	/** Mutations may authenticate with a `SKILLS_TOKEN` publish token instead of the Stencil login. */
-@@ -96,7 +98,11 @@ export class SkillshareClient {
+@@ -98,7 +100,11 @@ export class SkillshareClient {
  	#forPublish: boolean;
  	#credential = new StencilCredential();
  
@@ -969,16 +1272,16 @@ index 9eb2f3de19..d1a2551488 100644
  		this.registryUrl = registryUrl;
  		this.#forPublish = forPublish;
  	}
-@@ -107,7 +113,7 @@ export class SkillshareClient {
+@@ -109,7 +115,7 @@ export class SkillshareClient {
  			const settings = await Settings.loadReadOnly({ cwd: process.cwd() });
- 			registryUrl = settings.get("skills.registryUrl") || DEFAULT_SKILLS_URL;
+ 			registryUrl = cfgSkillsRegistryUrl.get(settings) || DEFAULT_SKILLS_URL;
  		}
 -		return new SkillshareClient(normalizeRegistryUrl(registryUrl), options.forPublish === true);
 +		return new SkillshareClient(normalizeRegistryUrl(registryUrl), options.forPublish === true, options.signal);
  	}
  
  	/**
-@@ -266,7 +272,7 @@ export class SkillshareClient {
+@@ -268,7 +274,7 @@ export class SkillshareClient {
  
  		let response: Response;
  		try {
@@ -988,10 +1291,10 @@ index 9eb2f3de19..d1a2551488 100644
  			throw new Error(
  				`cannot reach skill registry ${this.registryUrl}: ${error instanceof Error ? error.message : String(error)}`,
 diff --git a/packages/coding-agent/src/tools/context.ts b/packages/coding-agent/src/tools/context.ts
-index 2529138edb..d858c27f01 100644
+index 28c46c88af..cbe69c995e 100644
 --- a/packages/coding-agent/src/tools/context.ts
 +++ b/packages/coding-agent/src/tools/context.ts
-@@ -24,25 +24,45 @@ declare module "@oh-my-pi/pi-agent-core" {
+@@ -24,18 +24,32 @@ declare module "@oh-my-pi/pi-agent-core" {
  	}
  }
  
@@ -1025,6 +1328,8 @@ index 2529138edb..d858c27f01 100644
 +			hasUI: this.#hasUI && ui !== undefined,
  			toolNames: this.#toolNames,
  			toolCall,
+ 			// Loop-dispatched calls carry the loop's passive-context sink; direct
+@@ -44,8 +58,14 @@ export class ToolContextStore {
  		};
  	}
  
@@ -1042,23 +1347,23 @@ index 2529138edb..d858c27f01 100644
  	}
  
 diff --git a/packages/coding-agent/src/tools/image-gen.ts b/packages/coding-agent/src/tools/image-gen.ts
-index c02711a21c..b112f46f53 100644
+index c734f5a9f7..eb182a5712 100644
 --- a/packages/coding-agent/src/tools/image-gen.ts
 +++ b/packages/coding-agent/src/tools/image-gen.ts
-@@ -140,7 +140,7 @@ function isOpenAIHostedImageModel(model: Model | undefined): model is Model {
- 
- const HOSTED_CHAT_MODEL_PRIORITY = ["gpt-5.5", "gpt-5.4", "gpt-5.1", "gpt-5", "gpt-5-codex"];
- 
+@@ -137,7 +137,7 @@ async function saveImagesToTemp(images: ImageGenerationResult["images"]): Promis
+  * call: the session model when it can carry the tool on the same provider,
+  * otherwise the cheapest available carrier there.
+  */
 -function resolveHostedImageCarrier(
 +export function resolveHostedImageCarrier(
  	modelRegistry: ModelRegistry,
  	selectedModel: Model,
  	activeModel: Model | undefined,
 diff --git a/packages/coding-agent/test/extensions-runner.test.ts b/packages/coding-agent/test/extensions-runner.test.ts
-index f4aa58d25e..cff24bbec1 100644
+index c6c6c80bf0..fec08bd3f8 100644
 --- a/packages/coding-agent/test/extensions-runner.test.ts
 +++ b/packages/coding-agent/test/extensions-runner.test.ts
-@@ -2479,6 +2479,76 @@ describe("ExtensionRunner", () => {
+@@ -2749,6 +2749,76 @@ describe("ExtensionRunner", () => {
  			}
  		});
  
@@ -1083,7 +1388,7 @@ index f4aa58d25e..cff24bbec1 100644
 +				isIdle: () => true,
 +				hasQueuedMessages: () => false,
 +				abort: () => {},
-+				settings: { get: (key: string) => (key === "tools.approvalMode" ? "always-ask" : {}) } as never,
++				settings: Settings.isolated({ "tools.approvalMode": "always-ask" }),
 +				ui: { approveTool } as unknown as ExtensionUIContext as unknown as ExtensionUIContext,
 +			});
 +			expect(approveTool).toHaveBeenCalledWith(
@@ -1124,7 +1429,7 @@ index f4aa58d25e..cff24bbec1 100644
 +					isIdle: () => true,
 +					hasQueuedMessages: () => false,
 +					abort: () => {},
-+					settings: { get: (key: string) => (key === "tools.approvalMode" ? "always-ask" : {}) } as never,
++					settings: Settings.isolated({ "tools.approvalMode": "always-ask" }),
 +					ui: { approveTool } as unknown as ExtensionUIContext as unknown as ExtensionUIContext,
 +				}),
 +			).rejects.toThrow("Tool call denied by user: dangerous_tool");
@@ -1135,3 +1440,234 @@ index f4aa58d25e..cff24bbec1 100644
  		it("emits resolved false when approval is denied", async () => {
  			const events: Array<{ type: string; approved?: boolean; reason?: string }> = [];
  			const extCode = `
+diff --git a/packages/stats/src/db.ts b/packages/stats/src/db.ts
+index a21878e37c..82e88b03df 100644
+--- a/packages/stats/src/db.ts
++++ b/packages/stats/src/db.ts
+@@ -1410,6 +1410,12 @@ const FRUSTRATION_COUNTS_SQL = `
+ function hasRangeCutoff(cutoff: number | null | undefined): cutoff is number {
+ 	return cutoff !== null && cutoff !== undefined && cutoff > 0;
+ }
++function studioFrustrationWhere():{sql:string;params:string[]} {
++ const filter=currentStudioStatsFilter();const clauses:string[]=[];const params:string[]=[];
++ for(const key of ["model","provider","folder"] as const)if(filter[key]!==undefined){clauses.push(`u.${key} = ?`);params.push(filter[key]!);}
++ if(filter.proseHashes!==undefined){clauses.push("u.prose_hash IN (SELECT value FROM json_each(?))");params.push(JSON.stringify(filter.proseHashes));}
++ return {sql:clauses.length?" AND "+clauses.join(" AND "):"",params};
++}
+ 
+ function toFrustrationCounts(row: FrustrationCountsRow | undefined): FrustrationCounts {
+ 	return {
+@@ -1429,9 +1435,9 @@ export function getFrustrationOverall(cutoff?: number | null): FrustrationCounts
+ 		SELECT ${FRUSTRATION_COUNTS_SQL}
+ 		FROM user_messages u
+ 		LEFT JOIN frustration_verdicts v ON v.prose_hash = u.prose_hash
+-		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}
++		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}${studioFrustrationWhere().sql}
+ 	`);
+-	const row = (hasCutoff ? stmt.get(cutoff) : stmt.get()) as FrustrationCountsRow | undefined;
++	const row = stmt.get(...(hasCutoff?[cutoff]:[]),...studioFrustrationWhere().params) as FrustrationCountsRow | undefined;
+ 	return toFrustrationCounts(row);
+ }
+ 
+@@ -1446,10 +1452,10 @@ export function getFrustrationByModel(cutoff?: number | null): FrustrationModelR
+ 		SELECT u.model AS model, u.provider AS provider, MIN(u.timestamp) AS first_seen, ${FRUSTRATION_COUNTS_SQL}
+ 		FROM user_messages u
+ 		LEFT JOIN frustration_verdicts v ON v.prose_hash = u.prose_hash
+-		WHERE u.prose != '' AND u.model IS NOT NULL${hasCutoff ? " AND u.timestamp >= ?" : ""}
++		WHERE u.prose != '' AND u.model IS NOT NULL${hasCutoff ? " AND u.timestamp >= ?" : ""}${studioFrustrationWhere().sql}
+ 		GROUP BY u.model, u.provider
+ 	`);
+-	const rows = (hasCutoff ? stmt.all(cutoff) : stmt.all()) as FrustrationModelSqlRow[];
++	const rows = stmt.all(...(hasCutoff?[cutoff]:[]),...studioFrustrationWhere().params) as FrustrationModelSqlRow[];
+ 	return rows.map(row => ({
+ 		model: row.model,
+ 		provider: row.provider,
+@@ -1463,7 +1469,7 @@ function pendingProseSql(hasCutoff: boolean): string {
+ 	return `
+ 		SELECT u.prose_hash AS hash, MIN(u.prose) AS prose
+ 		FROM user_messages u
+-		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}
++		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}${studioFrustrationWhere().sql}
+ 		  AND NOT EXISTS (SELECT 1 FROM frustration_verdicts v WHERE v.prose_hash = u.prose_hash)
+ 		GROUP BY u.prose_hash
+ 	`;
+@@ -1474,7 +1480,7 @@ export function getPendingFrustrationProse(cutoff?: number | null): PendingProse
+ 	if (!db) return [];
+ 	const hasCutoff = hasRangeCutoff(cutoff);
+ 	const stmt = db.prepare(pendingProseSql(hasCutoff));
+-	return (hasCutoff ? stmt.all(cutoff) : stmt.all()) as PendingProse[];
++	return stmt.all(...(hasCutoff?[cutoff]:[]),...studioFrustrationWhere().params) as PendingProse[];
+ }
+ 
+ /** Count and total characters of {@link getPendingFrustrationProse} without loading the text. */
+@@ -1484,7 +1490,7 @@ export function getPendingFrustrationTotals(cutoff?: number | null): { messages:
+ 	const stmt = db.prepare(
+ 		`SELECT COUNT(*) AS messages, COALESCE(SUM(LENGTH(prose)), 0) AS chars FROM (${pendingProseSql(hasCutoff)})`,
+ 	);
+-	const row = (hasCutoff ? stmt.get(cutoff) : stmt.get()) as { messages: number; chars: number } | undefined;
++	const row = stmt.get(...(hasCutoff?[cutoff]:[]),...studioFrustrationWhere().params) as { messages: number; chars: number } | undefined;
+ 	return { messages: row?.messages ?? 0, chars: row?.chars ?? 0 };
+ }
+ 
+@@ -1584,3 +1590,4 @@ export function updateToolResults(links: Iterable<ToolResultLink>): number {
+ 	apply();
+ 	return updated;
+ }
++import { currentStudioStatsFilter } from "./rollup";
+diff --git a/packages/stats/src/frustration.ts b/packages/stats/src/frustration.ts
+index b12aa4f0f9..a618cdf531 100644
+--- a/packages/stats/src/frustration.ts
++++ b/packages/stats/src/frustration.ts
+@@ -249,6 +249,8 @@ export type StartFrustrationRunResult =
+ 			job: FrustrationJobStatus;
+ 			/** Settles once every worker has stopped (done, cancelled, or failed); never rejects. */
+ 			finished: Promise<void>;
++			/** Exact exhausted items, populated as the run progresses (excludes unattempted/cancelled work). */
++			failedHashes: readonly string[];
+ 	  }
+ 	| { started: false; status: 409 | 503; error: string };
+ 
+@@ -289,11 +291,12 @@ export async function startFrustrationRun(range?: string | null): Promise<StartF
+ 			concurrency: 0,
+ 		};
+ 		currentJob = job;
+-		if (pending.length === 0) return { started: true, job: { ...job }, finished: Promise.resolve() };
++		const failedHashes: string[] = [];
++		if (pending.length === 0) return { started: true, job: { ...job }, finished: Promise.resolve(), failedHashes };
+ 		const controller = new AbortController();
+ 		currentController = controller;
+-		const finished = runJob(job, judge, pending, controller);
+-		return { started: true, job: { ...job }, finished };
++		const finished = runJob(job, judge, pending, controller, failedHashes);
++		return { started: true, job: { ...job }, finished, failedHashes };
+ 	} finally {
+ 		starting = false;
+ 	}
+@@ -353,6 +356,7 @@ async function runJob(
+ 	judge: StatsJudge,
+ 	queue: readonly PendingProse[],
+ 	controller: AbortController,
++	failedHashes: string[],
+ ): Promise<void> {
+ 	const { signal } = controller;
+ 	const limit = new AdaptiveLimit();
+@@ -430,6 +434,7 @@ async function runJob(
+ 			}
+ 		}
+ 		job.failed++;
++		failedHashes.push(item.hash);
+ 		if (job.failed >= CIRCUIT_BREAKER_FAILURES && job.done === 0 && !tripped) {
+ 			tripped = true;
+ 			logger.error("frustration judge run stopped: no text succeeded", { failed: job.failed, error: lastError });
+diff --git a/packages/stats/src/rollup.ts b/packages/stats/src/rollup.ts
+index bcee47b06f..bb5fb6d7f3 100644
+--- a/packages/stats/src/rollup.ts
++++ b/packages/stats/src/rollup.ts
+@@ -26,6 +26,7 @@
+  */
+ 
+ import type { Database } from "bun:sqlite";
++import { AsyncLocalStorage } from "node:async_hooks";
+ import { currentDb, unpricedRequestSql } from "./db";
+ import type {
+ 	AgentType,
+@@ -48,6 +49,21 @@ import type {
+ const HOUR_MS = 60 * 60 * 1000;
+ const DAY_MS = 24 * HOUR_MS;
+ 
++/** Request-local Studio dimensions. Native callers retain the unfiltered defaults. */
++export interface StudioStatsFilter { model?:string; provider?:string; folder?:string; proseHashes?:readonly string[] }
++const studioFilters=new AsyncLocalStorage<StudioStatsFilter>();
++export function currentStudioStatsFilter():StudioStatsFilter {return studioFilters.getStore()??{};}
++export function withStudioStatsFilter<T>(filter:StudioStatsFilter,read:()=>T):T {
++ for(const [key,value] of Object.entries(filter)){if(key==="proseHashes"){if(!Array.isArray(value)||value.length>100000||value.some(v=>typeof v!=="string"||!v||v.length>128))throw Error("Invalid prose filter");}else if(!["model","provider","folder"].includes(key)||typeof value!=="string"||!value||value.length>4096||value.includes("\0"))throw Error("Invalid stats filter");}
++ return studioFilters.run({...filter},read);
++}
++function filteredSource(source:Source,tools=false):Source {
++ const filter=studioFilters.getStore();if(!filter)return source;
++ const clauses:string[]=[];const values:string[]=[];
++ for(const key of ["model","provider",...(tools?[]:["folder"])] as const){const value=filter[key as "model"|"provider"|"folder"];if(value!==undefined){clauses.push(`${key} = ?`);values.push(value);}}
++ return clauses.length?{sql:`SELECT * FROM (${source.sql}) WHERE ${clauses.join(" AND ")}`,params:[...source.params,...values]}:source;
++}
++
+ /**
+  * Bump when the rollup schema or fact definitions change: the tables are then
+  * dropped and every hour is rebuilt from the raw tables.
+@@ -411,7 +427,7 @@ export interface RangeWindow {
+ 
+ interface Source {
+ 	sql: string;
+-	params: number[];
++	params: (number|string)[];
+ }
+ 
+ function dirtyIsSmall(database: Database): boolean {
+@@ -466,6 +482,8 @@ function messageSource(database: Database, cutoff: number | null, fine: boolean)
+ /** Tool facts covering `[cutoff, now]`; same union shape as {@link messageSource}. */
+ function toolSource(database: Database, cutoff: number | null, fine: boolean): Source {
+ 	const groupRaw = "GROUP BY 1, t.tool_name, t.model, t.provider";
++	const folder=studioFilters.getStore()?.folder;
++	if(folder!==undefined)return {sql:`SELECT ${toolFacts(fine?"(t.timestamp / 300000) * 300000":hourOf("t.timestamp"))} FROM tool_calls t ${TOOL_JOIN} WHERE t.timestamp >= ? AND t.folder = ? ${groupRaw}`,params:[cutoff??0,folder]};
+ 	if (fine) {
+ 		return {
+ 			sql: `SELECT ${toolFacts("(t.timestamp / 300000) * 300000")} FROM tool_calls t ${TOOL_JOIN}
+@@ -507,7 +525,7 @@ function queryMessages<T>(window: Pick<RangeWindow, "cutoff"> & { bucketMs?: num
+ 	const database = currentDb();
+ 	if (!database) return [];
+ 	const fine = window.bucketMs !== undefined && window.bucketMs < HOUR_MS;
+-	const source = messageSource(database, normalizeCutoff(window.cutoff), fine);
++	const source = filteredSource(messageSource(database, normalizeCutoff(window.cutoff), fine));
+ 	return database.prepare(`SELECT ${select} FROM (${source.sql}) f ${tail}`).all(...source.params) as T[];
+ }
+ 
+@@ -515,7 +533,7 @@ function queryTools<T>(window: Pick<RangeWindow, "cutoff"> & { bucketMs?: number
+ 	const database = currentDb();
+ 	if (!database) return [];
+ 	const fine = window.bucketMs !== undefined && window.bucketMs < HOUR_MS;
+-	const source = toolSource(database, normalizeCutoff(window.cutoff), fine);
++	const source = filteredSource(toolSource(database, normalizeCutoff(window.cutoff), fine),true);
+ 	return database.prepare(`SELECT ${select} FROM (${source.sql}) f ${tail}`).all(...source.params) as T[];
+ }
+ 
+@@ -851,9 +869,18 @@ export interface SessionRollupRow {
+  * One row per synced transcript file (subagents unfolded). Same exactness
+  * rules as the range queries: dirty transcripts are aggregated raw while few.
+  */
+-export function getSessionRollups(): SessionRollupRow[] {
++export function getSessionRollups(cutoff:number|null=null): SessionRollupRow[] {
+ 	const database = currentDb();
+ 	if (!database) return [];
++	const filter=currentStudioStatsFilter();
++	if(cutoff!==null||filter.model!==undefined||filter.provider!==undefined||filter.folder!==undefined){
++		const clauses=["timestamp >= ?"];const params:(number|string)[]=[cutoff??0];
++		for(const key of ["model","provider","folder"] as const)if(filter[key]!==undefined){clauses.push(`${key} = ?`);params.push(filter[key]!);}
++		const where=clauses.join(" AND ");
++		return database.prepare(`WITH filtered_messages AS (SELECT * FROM messages WHERE ${where}), filtered_tools AS (SELECT * FROM tool_calls WHERE ${where})
++		SELECT session_file AS sessionFile,requests,started_at AS startedAt,ended_at AS endedAt,total_tokens AS totalTokens,cost_total AS costTotal,unpriced AS unpricedRequests,models,tool_calls AS toolCalls
++		FROM (SELECT ${sessionFacts("m.").replace("FROM tool_calls tc","FROM filtered_tools tc")} FROM filtered_messages m GROUP BY m.session_file)`).all(...params,...params) as SessionRollupRow[];
++	}
+ 	const { n } = database
+ 		.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM session_dirty LIMIT ${EXACT_DIRTY_SESSIONS + 1})`)
+ 		.get() as { n: number };
+diff --git a/packages/stats/test/helpers/temp-agent.ts b/packages/stats/test/helpers/temp-agent.ts
+index 92ebc69c2c..911c82915e 100644
+--- a/packages/stats/test/helpers/temp-agent.ts
++++ b/packages/stats/test/helpers/temp-agent.ts
+@@ -58,8 +58,15 @@ export function installStatsTestIsolation(prefix: string): StatsTestIsolation {
+ 			else process.env[key] = prior;
+ 		}
+ 		setAgentDir(originalAgentDir);
+-		tempDir?.removeSync();
+-		tempDir = null;
++		try {
++			tempDir?.removeSync();
++		} catch (error) {
++			// Bun's native SQLite handles may retain a Windows directory handle until
++			// process exit. Keep that fixture; do not abort other afterEach hooks.
++			if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
++		} finally {
++			tempDir = null;
++		}
+ 	});
+ 
+ 	return {

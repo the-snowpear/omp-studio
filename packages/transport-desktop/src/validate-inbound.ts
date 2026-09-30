@@ -272,7 +272,8 @@ function validateAgentIdGenerationFields(input: Record<string, unknown>, what: s
 function validateAgentSpawnInput(input: unknown): void {
   const what = "agent.spawn input";
   assertPlainObject(input, what);
-  assertNoUnknownKeys(input, ["definition", "assignment", "context", "async", "isolation", "effort"], what);
+  assertNoUnknownKeys(input, ["definition", "assignment", "solutionSpace", "context", "async", "isolation", "effort"], what);
+  if (input.solutionSpace !== undefined) { assertNonEmptyText(input.solutionSpace, `${what}: solutionSpace`); if ((input.solutionSpace as string).length > 65536) throw new Error("solutionSpace exceeds budget"); }
   assertNonEmptyText(input.definition, `${what}: definition`);
   assertNonEmptyText(input.assignment, `${what}: assignment`);
   if ("context" in input && input.context !== undefined) {
@@ -1060,6 +1061,7 @@ function validateJsonNode(value: unknown, depth: number, budget: SizeBudget): vo
  * JSON-safe at every nesting level.
  */
 function validateInteractionValue(value: unknown): void {
+  if(value&&typeof value==="object"&&!Array.isArray(value)&&Array.isArray((value as {results?:unknown}).results)&&((value as {results:unknown[]}).results).some(row=>row&&typeof row==="object"&&("customInputImages" in row||"noteImages" in row))){validateAskAnswerPayload(value);return;}
   const budget: SizeBudget = { remaining: MAX_SERIALIZED_SIZE };
   if (value === null || typeof value === "number") {
     throw new ValidationError(
@@ -1137,6 +1139,7 @@ function validateThinkingEfforts(value: unknown, what: string): void {
 }
 
 const MODEL_OVERRIDE_KEYS = [
+  "bedrockMessagesApi",
   "kind",
   "webSearch",
   "name",
@@ -1158,6 +1161,7 @@ const MODEL_OVERRIDE_KEYS = [
 const MODEL_PROVIDER_MODEL_KEYS = ["id", "api", "baseUrl", ...MODEL_OVERRIDE_KEYS] as const;
 
 function validateModelPatchFields(item: Record<string, unknown>, what: string): void {
+  if (item.bedrockMessagesApi !== undefined && typeof item.bedrockMessagesApi !== "boolean") throw new ValidationError(`${what}.bedrockMessagesApi must be boolean`);
   if (item.kind !== undefined && !["chat", "tiny", "image", "tts", "stt", "search", "judge", "embedding", "rerank", "video"].includes(item.kind as string)) throw new ValidationError("Invalid model kind");
   if (item.webSearch !== undefined) assertNonEmptyText(item.webSearch, what + ".webSearch");
   if (item.name !== undefined) assertNonEmptyText(item.name, `${what}.name`);
@@ -1707,6 +1711,8 @@ const QUERY_INPUT_VALIDATORS: {
   "projects.list": (input) => validateEmptyInput(input, "projects.list input"),
   "workspace.fileTree": validateWorkspaceFileTreeInput,
   "usage.get": (input) => validateEmptyInput(input, "usage.get input"),
+  "prediction.query": validatePredictionQuery,
+  "stats.read": input => {if(!input||typeof input!=="object"||Array.isArray(input))throw Error("Invalid stats input");const v=input as Record<string,unknown>;assertNoUnknownKeys(v,["filter","refresh"],"stats.read");validateStatsFilter(v.filter);if(v.refresh!==undefined&&typeof v.refresh!=="boolean")throw Error("Invalid stats refresh");},
   "conversation.open": validateConversationOpenInput,
   "session.transcript.read": validateTranscriptReadInput,
   "agent.transcript.read": validateAgentTranscriptReadInput,
@@ -1879,6 +1885,7 @@ const COMMAND_INPUT_VALIDATORS: {
   "skills.reveal": validateSkillsRevealInput,
   "skills.revealRoot": validateSkillsRevealRootInput,
   "mcp.setEnabled": validateMcpSetEnabledInput,
+  "mcp.setInstructions": input => { validateMcpSetEnabledInput(input); if ((input as {scope?:unknown}).scope !== "user" && (input as {scope?:unknown}).scope !== "project") throw new ValidationError("MCP instruction scope is required"); },
   "mcp.refresh": validateMcpRefreshInput,
   "mcp.test": validateMcpTestInput,
   "agents.definition.upsert": validateAgentDefinitionUpsertInput,
@@ -1900,6 +1907,7 @@ const COMMAND_INPUT_VALIDATORS: {
   "workspace.file.create": (input) => validateWorkspaceFileMutationInput(input, "workspace.file.create input"),
   "workspace.directory.create": (input) => validateWorkspaceFileMutationInput(input, "workspace.directory.create input"),
   "usage.openDashboard": (input) => validateEmptyCommandInput(input, "usage.openDashboard input"),
+  "stats.frustration": validateFrustrationInput,
   "git.execute": validateGitExecuteInput,
   "github.execute": validateGithubExecuteInput,
 };
@@ -1997,3 +2005,6 @@ export function parseSubscriptionScope(value: unknown): SubscriptionScope {
   assertOpaqueToken(value.requestId, "subscription scope: requestId");
   return { scope, requestId: value.requestId as CommandRequestId };
 }
+import { validatePredictionQuery } from "@omp-studio/studio-protocol";
+import { validateStatsFilter, validateFrustrationInput } from "@omp-studio/studio-protocol";
+import {validateAskAnswerPayload} from "@omp-studio/studio-protocol";

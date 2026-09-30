@@ -120,6 +120,7 @@ export type ClientInteraction =
     })
   | (ClientInteractionBase & {
       readonly kind: "ask";
+      readonly acceptImages?: boolean;
       readonly questions: ReadonlyArray<ClientAskQuestion>;
     });
 

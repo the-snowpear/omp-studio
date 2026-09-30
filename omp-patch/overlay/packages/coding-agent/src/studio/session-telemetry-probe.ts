@@ -1,3 +1,12 @@
+import { cfgSkills } from "../extensibility/settings";
+import { cfgExtensions } from "../extensibility/settings";
+import { cfgMcpEnableProjectConfig } from "../mcp/settings";
+import { cfgIncludeModelInPrompt } from "../session/settings";
+import { cfgPersonality } from "../session/settings";
+import { cfgTaskBatch } from "../task/settings";
+import { cfgTaskMaxConcurrency } from "../task/settings";
+import { cfgSecurityEnabled } from "../tools/settings";
+import { cfgTuiRenderMermaid } from "../modes/settings";
 /**
  * One-shot, read-only Studio telemetry probe for archived sessions.
  *
@@ -161,11 +170,11 @@ export async function detectDynamicContextInfluences(options: {
 	readonly agentDir: string;
 }): Promise<boolean> {
 	const { settings, allowedCwd, agentDir } = options;
-	const configuredExtensions = settings.get("extensions");
+	const configuredExtensions = cfgExtensions.get(settings);
 	if (Array.isArray(configuredExtensions) && configuredExtensions.length > 0) return true;
 
 	const mcpCandidates: string[] = [];
-	if (settings.get("mcp.enableProjectConfig") !== false) {
+	if (cfgMcpEnableProjectConfig.get(settings) !== false) {
 		mcpCandidates.push(path.join(allowedCwd, ".mcp.json"), path.join(allowedCwd, "mcp.json"));
 	}
 	mcpCandidates.push(path.join(allowedCwd, ".omp", "mcp.json"), path.join(agentDir, "mcp.json"));
@@ -278,7 +287,7 @@ export async function deriveProbeSessionInputs(options: {
 	readonly registry: ModelRegistry;
 	readonly fallbackModelIds: readonly string[];
 }): Promise<ProbeSessionInputs> {
-	const skills = await discoverSkills(options.allowedCwd, options.agentDir, options.settings.getGroup("skills"));
+	const skills = await discoverSkills(options.allowedCwd, options.agentDir, cfgSkills.get(options.settings));
 	const tools = await createProbeTools({
 		settings: options.settings,
 		allowedCwd: options.allowedCwd,
@@ -297,14 +306,14 @@ export async function deriveProbeSessionInputs(options: {
 		toolNames,
 		tools: projectSystemPromptToolMetadata(toolMap, { mode: "compact", toolNames }),
 		skills: skills.skills,
-		skillsSettings: options.settings.getGroup("skills"),
+		skillsSettings: cfgSkills.get(options.settings),
 		model: model?.id,
-		includeModelInPrompt: options.settings.get("includeModelInPrompt"),
-		personality: options.settings.get("personality"),
-		taskBatch: options.settings.get("task.batch"),
-		taskMaxConcurrency: options.settings.get("task.maxConcurrency"),
-		securityEnabled: options.settings.get("security.enabled"),
-		renderMermaid: options.settings.get("tui.renderMermaid"),
+		includeModelInPrompt: cfgIncludeModelInPrompt.get(options.settings),
+		personality: cfgPersonality.get(options.settings),
+		taskBatch: cfgTaskBatch.get(options.settings),
+		taskMaxConcurrency: cfgTaskMaxConcurrency.get(options.settings),
+		securityEnabled: cfgSecurityEnabled.get(options.settings),
+		renderMermaid: cfgTuiRenderMermaid.get(options.settings),
 	});
 	return { skills: skills.skills, tools, systemPrompt: prompt.systemPrompt, model };
 }

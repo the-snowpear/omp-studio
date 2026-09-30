@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { Settings, resetSettingsForTest } from "../src/config/settings";
+import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -23,7 +24,7 @@ function fakeSession(
 			ensureOnDisk: async () => {},
 			flush: async () => {},
 		},
-		settings: { get: (key: string) => (key === "loop.mode" ? "prompt" : undefined) },
+		settings: Settings.isolated({ "loop.mode": "prompt" }),
 		isStreaming: false,
 		isCompacting: false,
 		hasPostPromptWork: false,
@@ -329,14 +330,17 @@ describe("studio-host runtime", () => {
 		const sessionFile = path.join(tempDir.path(), "main.jsonl");
 		let disposed = 0;
 		let revived = 0;
+		const initialListeners=new Set<unknown>();const nextListeners=new Set<unknown>();
 		const initial = {
 			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
+			subscribe:(listener:unknown)=>{initialListeners.add(listener);return()=>{initialListeners.delete(listener);};},
 			dispose: async () => {
 				disposed += 1;
 			},
 		} as unknown as AgentSession;
 		const next = {
 			...fakeSession("session-main", { getSessionFile: () => sessionFile }),
+			subscribe:(listener:unknown)=>{nextListeners.add(listener);return()=>{nextListeners.delete(listener);};},
 			dispose: async () => {
 				disposed += 1;
 			},
@@ -347,6 +351,7 @@ describe("studio-host runtime", () => {
 			{ endpoint: "omp-studio-test", tokenFile: "C:\\temp\\omp-studio.token", runtimeEpoch: 17 },
 			async runtime => {
 				observed = runtime;
+				const listener=()=>{};const unsubscribe=runtime.session.subscribe(listener);
 				await Bun.sleep(30);
 				expect(runtime.workerResidency?.()).toBe("dormant");
 				expect(disposed).toBe(1);
@@ -354,6 +359,7 @@ describe("studio-host runtime", () => {
 				revived += 1;
 				expect(runtime.workerResidency?.()).toBe("active");
 				expect(runtime.workerGeneration?.()).toBe(2);
+				expect(nextListeners.has(listener)).toBe(true);unsubscribe();expect(nextListeners.has(listener)).toBe(false);
 			},
 			{
 				createBridge: silentBridge,
@@ -367,4 +373,9 @@ describe("studio-host runtime", () => {
 		expect(revived).toBe(1);
 		expect(disposed).toBe(2);
 	});
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

@@ -151,8 +151,15 @@ function thinkingNode(
 }
 
 /** One `models:` row. Only `custom` rows are written, matching the save path. */
+function bedrockCompatNode(previous:Record<string,unknown>|undefined,enabled:boolean|undefined):Record<string,unknown> {
+  const compat={...nestedNode(previous?.compat)};
+  if(enabled===undefined)delete compat.bedrockMessagesApi;else compat.bedrockMessagesApi=enabled;
+  return Object.keys(compat).length?{compat}:{};
+}
+
 function modelNode(model: ModelCatalogEntry, previous: Record<string, unknown> | undefined): Record<string, unknown> {
   const row: Record<string, unknown> = { id: model.id };
+  Object.assign(row,bedrockCompatNode(previous,model.bedrockMessagesApi));
   if (model.name) row.name = model.name;
   if (model.kind) row.kind = model.kind;
   if (model.webSearch) row.webSearch = model.webSearch;
@@ -180,6 +187,7 @@ function modelNode(model: ModelCatalogEntry, previous: Record<string, unknown> |
 /** One `modelOverrides:` row, sparse like the Host writer. */
 function overrideNode(override: ModelOverridePatch, previous: Record<string, unknown> | undefined): Record<string, unknown> {
   const row: Record<string, unknown> = {};
+  Object.assign(row,bedrockCompatNode(previous,override.bedrockMessagesApi));
   if (override.name !== undefined) row.name = override.name;
   if (override.contextWindow !== undefined) row.contextWindow = override.contextWindow;
   if (override.maxTokens !== undefined) row.maxTokens = override.maxTokens;
