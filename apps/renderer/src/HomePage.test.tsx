@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeConnection } from "@omp-studio/client-contract";
 import { HomePage, SecondaryPage } from "./HomePage";
 import { PAGE_EXIT_MS } from "./pageTransition";
@@ -105,7 +105,7 @@ describe("HomePage identity", () => {
 });
 
 describe("HomePage Token usage chart", () => {
-  it("places the hover card beside the active day instead of over its curve", () => {
+  beforeEach(() => {
     vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
       matches: true,
       media: query,
@@ -118,7 +118,12 @@ describe("HomePage Token usage chart", () => {
       return domRect(0, 0, 0, 0);
     });
     vi.spyOn(SVGSVGElement.prototype, "getBoundingClientRect").mockReturnValue(domRect(114, 180, 572, 210));
+  });
 
+  it.each([2, 15, 31])("places the hover card beside the active day on October %i", (day) => {
+    // The month view ends today. A real clock made this two-point assertion
+    // fail on the first of every month, when both pointer positions select one day.
+    vi.spyOn(Date, "now").mockReturnValue(new Date(2026, 9, day, 12).getTime());
     renderHome({ preview: true, runtime: { status: "connected", classification: "managed" } });
     const chart = document.querySelector<SVGSVGElement>("svg.tk-chart");
     expect(chart).toBeTruthy();
@@ -131,14 +136,32 @@ describe("HomePage Token usage chart", () => {
     expect(tip).toBeTruthy();
     const pointXInCard = 14 + Number(cursor!.getAttribute("x1"));
     expect(Number.parseFloat(tip!.style.left)).toBeGreaterThanOrEqual(pointXInCard + 12);
+    const tipTop = tip!.style.top;
 
     fireEvent(chart!, new MouseEvent("pointermove", { bubbles: true, clientX: 660, clientY: 220 }));
 
     const rightCursor = chart!.querySelector<SVGLineElement>(".tk-cursor");
     const flippedTip = document.querySelector<HTMLElement>(".tk-tip.show");
     const rightPointXInCard = 14 + Number(rightCursor!.getAttribute("x1"));
+    expect(rightPointXInCard).toBeGreaterThan(pointXInCard);
     expect(Number.parseFloat(flippedTip!.style.left) + 168).toBeLessThanOrEqual(rightPointXInCard - 12);
-    expect(flippedTip!.style.top).toBe(tip!.style.top);
+    expect(flippedTip!.style.top).toBe(tipTop);
+  });
+
+  it("keeps the first-of-month hover card beside the single day from either edge", () => {
+    vi.spyOn(Date, "now").mockReturnValue(new Date(2026, 9, 1, 12).getTime());
+    renderHome({ preview: true, runtime: { status: "connected", classification: "managed" } });
+    const chart = document.querySelector<SVGSVGElement>("svg.tk-chart")!;
+
+    for (const clientX of [180, 660]) {
+      fireEvent(chart, new MouseEvent("pointermove", { bubbles: true, clientX, clientY: 220 }));
+      const cursor = chart.querySelector<SVGLineElement>(".tk-cursor")!;
+      const tip = document.querySelector<HTMLElement>(".tk-tip.show")!;
+      // One day is centered regardless of which edge the pointer approaches.
+      expect(Number(cursor.getAttribute("x1"))).toBe(572 / 2);
+      expect(Number.parseFloat(tip.style.left)).toBeGreaterThanOrEqual(14 + 572 / 2 + 12);
+      expect(Number.parseFloat(tip.style.left) + 168).toBeLessThanOrEqual(600 - 8);
+    }
   });
 });
 
