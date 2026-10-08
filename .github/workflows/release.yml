@@ -119,8 +119,8 @@ jobs:
             [IO.File]::WriteAllText($keyPath, $env:OMP_SIGNING_SECRET, [Text.UTF8Encoding]::new($false))
             $env:OMP_RUNTIME_SIGNING_KEY = $keyPath
             $env:OMP_RUNTIME_SIGNING_KEY_ID = (Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json).activeKeyId
+            npm run omp:overlay:apply
             if (!$env:REUSE_RUNTIME_RUN_ID) {
-              npm run omp:overlay:apply
               npm run omp:build:host
             } else {
               npm run build
@@ -128,7 +128,7 @@ jobs:
             }
             npm run check
             npm run omp:test:metadata
-            if (!$env:REUSE_RUNTIME_RUN_ID) { node scripts/unapply-release-overlay.mjs }
+            node scripts/unapply-release-overlay.mjs
             npm run omp:verify:patches -- --skip-workspace-check
             npm run pack:win:prepare
             $runtime = Get-ChildItem packaging/runtime-payload -Recurse -Filter runtime-manifest.json | ForEach-Object { Get-Content $_.FullName | ConvertFrom-Json }
@@ -222,8 +222,8 @@ jobs:
           export OMP_RUNTIME_SIGNING_KEY="$key_path"
           OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
           export OMP_RUNTIME_SIGNING_KEY_ID
+          npm run omp:overlay:apply
           if [ -z "$REUSE_RUNTIME_RUN_ID" ]; then
-            npm run omp:overlay:apply
             npm run omp:build:host
           else
             npm run build
@@ -231,7 +231,7 @@ jobs:
           fi
           npm run check
           npm run omp:test:metadata
-          if [ -z "$REUSE_RUNTIME_RUN_ID" ]; then node scripts/unapply-release-overlay.mjs; fi
+          node scripts/unapply-release-overlay.mjs
           npm run omp:verify:patches -- --skip-workspace-check
           npm run pack:mac:prepare
           runtime_version="$(node -e '

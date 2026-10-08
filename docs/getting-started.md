@@ -1,8 +1,6 @@
 # Getting started
 
-OMP Studio currently ships **from source**, or from an unsigned Windows NSIS
-installer built locally with `npm run pack:win`. There is no Authenticode-signed
-GitHub Release installer yet. Windows 10/11 x64 is the supported desktop.
+OMP Studio ships Windows x64 and ARM64 Setup packages through [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases). You can also build from source with `npm run pack:win`. Runtime and update catalogs use Ed25519 signatures; Windows Setup is not Authenticode-signed.
 
 macOS 13 or later on Apple Silicon also runs from source, or as an ad hoc signed
 app built with `npm run pack:mac` (not notarized yet; see
@@ -39,6 +37,7 @@ git submodule update --init --recursive
 
 ```powershell
 npm install
+npm run omp:overlay:apply
 npm run preview
 ```
 
@@ -81,7 +80,7 @@ and `npm run omp:keys` once). Then:
 npm run pack:win
 ```
 
-Output: `outputs/installer/OMP-Studio-Setup-0.1.0-win-x64.exe` (gitignored).
+Output: `outputs/installer/OMP-Studio-Setup-<version>-windows-<arch>.exe` (gitignored).
 The Setup is not Authenticode-signed; SmartScreen will warn. `pack:win` audits
 the unpacked tree so a Runtime **private** key cannot ship.
 

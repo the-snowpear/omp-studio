@@ -62,9 +62,13 @@ jobs:
       - run: npm ci
       - run: npm run omp:install-deps
         if: steps.scope.outputs.runtime == 'true'
+      # Renderer reuses the native chart sources, including their strict TS seams.
+      - run: npm run omp:overlay:apply
       - run: npm run check
       - run: npm run omp:test:metadata
         if: steps.scope.outputs.metadata == 'true'
+      - name: Restore clean source for independent patch replay
+        run: node scripts/unapply-release-overlay.mjs
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.runtime == 'true'
         with:

@@ -105,6 +105,7 @@ Skills、Plugins、MCP、Slash Commands 同一页开关、探测和打开目录�
 git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git
 cd omp-studio
 npm install
+npm run omp:overlay:apply
 npm run preview
 ```
 

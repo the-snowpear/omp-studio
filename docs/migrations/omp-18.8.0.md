@@ -90,9 +90,12 @@ Merged-source verification for **18.8.0-studio.20**:
 | Metadata | 81 checks passed, including signed manifest, update assets and platform validation. Capability membership is checked independently of list ordering. |
 | Native artifact | Rebuilt win32-x64 module and Runtime. Authenticated Bridge probe confirmed 18.8.0-studio.20, 214 capabilities and matching manifest hashes. Local artifact uses the development key. |
 | Runtime install / rollback | In an isolated temporary root: 18.2.5-studio.6 → 18.8.0-studio.20 → old → new passed with the production verifier and executable smoke checks. Existing installation was read only. |
+| Local Windows candidate | Setup 0.1.9 / Runtime studio.20 built and passed package, CSP, preload, Runtime and public-key audit; retained in output/omp-1880/candidate019. |
 | Compatibility regressions | Published/new IDA and queue contracts stay distinct; per-spawn model chains coexist with solution space. IDA write/close checkpoints fail closed, execute once and preserve both disk/in-memory versions. Configuration approval rebind and disposal passed. |
 
 Local evidence is retained under output/omp-1880/release: root-check-019.log, renderer-tests-019-3.log, native-suites-019.log, patch-replay-020.log, metadata-020-2.log, runtime-build-020.log and runtime-install-rollback20.log. The initial workspace log includes the corrected renderer fixture failure; the separate full renderer rerun is the final result.
+
+Clean-checkout CI also prepares the generated seams before the workspace build: Renderer imports the native chart sources and requires their strict TypeScript compatibility changes. CI reverses only those managed inputs before independent patch replay; Runtime artifact reuse follows the same order.
 
 The [release workflow](https://github.com/the-snowpear/omp-studio/actions/workflows/release.yml) rebuilds Windows x64/ARM64 on native runners using the existing release signing identity, checks source and patch replay, audits packages, verifies the update catalogs and publishes only after both architectures succeed. Developer-key artifacts are not uploaded as official assets. Minimum app compatibility remains 0.1.9; earlier installations use the complete Setup. No new macOS binary is part of this release.
 

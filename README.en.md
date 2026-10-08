@@ -105,6 +105,7 @@ Node.js 22+ is required. Full steps: [docs/getting-started.md](docs/getting-star
 git clone --recurse-submodules https://github.com/the-snowpear/omp-studio.git
 cd omp-studio
 npm install
+npm run omp:overlay:apply
 npm run preview
 ```
 

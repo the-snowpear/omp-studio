@@ -25,6 +25,7 @@ in a pull request.
 
 ```powershell
 npm install
+npm run omp:overlay:apply # once after cloning or changing the upstream pin
 npm run typecheck
 npm test
 npm run check          # build once (includes TypeScript), then all tests once
@@ -33,6 +34,8 @@ npm run preview        # Electron from source
 npm run pack:win       # unsigned Windows NSIS installer
 npm run pack:mac       # ad hoc signed macOS .app, .dmg and update zip (on an Apple Silicon Mac)
 ```
+
+Renderer charts reuse the pinned native sources. Apply the overlay and generated seams before the first workspace build, including UI-only work. When editing native source, regenerate before reapplying so local edits are preserved. CI applies these inputs before the workspace gate, reverses them, then independently verifies patch replay.
 
 Scoped UI work:
 
