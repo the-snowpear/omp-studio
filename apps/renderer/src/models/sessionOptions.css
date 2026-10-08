@@ -1,0 +1,25 @@
+.session-options { display: grid; gap: var(--sp-16); margin: var(--sp-20) 0; }
+.session-options-card { border: 1px solid var(--border); border-radius: var(--r-12); background: var(--surface); padding: var(--sp-20); min-width: 0; }
+.session-options-card h3 { display: flex; align-items: center; gap: var(--sp-8); margin: 0 0 var(--sp-16); font-size: var(--fs-14); }
+.session-options-card p { font-size: var(--fs-12); line-height: 1.7; margin: var(--sp-12) 0 0; }
+.session-options-row { display: flex; flex-wrap: wrap; gap: var(--sp-20); align-items: end; }
+.session-options-row label { display: grid; gap: var(--sp-8); font-size: var(--fs-12); min-width: 160px; max-width: 100%; }
+.session-options-row .mono { overflow-wrap: anywhere; }
+.session-options-row .session-options-check { display: flex; align-items: center; min-height: 32px; }
+.session-options-note { display: flex; flex-wrap: wrap; gap: var(--sp-12); font-size: var(--fs-12); margin-top: var(--sp-16); overflow-wrap: anywhere; }
+.session-options-error { color: var(--red); }
+.session-options-confirm { padding: var(--sp-20); border: 1px solid var(--accent); border-radius: var(--r-12); background: var(--surface); }
+.session-options-confirm .btn { margin-right: var(--sp-8); }
+.model-presets { display: grid; grid-template-columns: minmax(180px, 25%) minmax(0, 1fr); gap: var(--sp-24); margin: var(--sp-20) 0; }
+.model-presets-list { display: flex; flex-direction: column; gap: var(--sp-6); }
+.model-presets-list > button { display: flex; align-items: center; gap: var(--sp-8); padding: var(--sp-12); color: var(--text); border: 0; border-radius: var(--r-8); background: transparent; text-align: left; cursor: pointer; }
+.model-presets-list > button[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); }
+.model-presets-list > button:hover { background: var(--surface-hover); }
+.model-presets-detail { min-width: 0; }
+.model-presets-detail dl { display: grid; grid-template-columns: minmax(90px, 25%) minmax(0, 1fr); gap: var(--sp-12); font-size: var(--fs-12); }
+.model-presets-detail dd { margin: 0; overflow-wrap: anywhere; }
+@media(max-width:850px) { .model-presets { grid-template-columns: 1fr; } .model-presets-list { max-height: 180px; overflow: auto; } }
+
+.native-preference-controls { display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:var(--sp-8); }
+.native-preference-controls .input { max-width:100px; }
+.native-preference-controls details { flex-basis:100%;font-size:var(--fs-11);color:var(--text-3);text-align:right; }

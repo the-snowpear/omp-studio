@@ -80,7 +80,9 @@ export class StudioFastPrewalkService {
 	}
 
 	disarm(): { disarmed: boolean } {
-		return { disarmed: this.session.disarmPrewalk() };
+		const disarmed = this.session.getPrewalkState() !== undefined;
+		this.session.disarmPrewalk();
+		return { disarmed };
 	}
 
 	async restart(): Promise<{ restarted: true; armed: boolean }> {

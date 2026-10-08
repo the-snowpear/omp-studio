@@ -1,3 +1,6 @@
+import { PredictionSettingsPane } from "./settings/PredictionSettingsPane";
+import "./composer/prediction.css";
+import { NativePreferencesPane, type NativePreferencesContext } from "./settings/NativePreferencesPane";
 import { ArtifactStorageSettings } from "./media/ArtifactLibraryPane";
 /**
  * 设置页（Phase 1 IA 重构）：7 个标签的壳。
@@ -40,7 +43,7 @@ import type {
 
 export const SETTINGS_INTENT_KEY = "omp.settingsIntent";
 
-export type SettingsGroupId = "general" | "interaction" | "permissions" | "context" | "files" | "tasks" | "advanced";
+export type SettingsGroupId = "general" | "interaction" | "permissions" | "context" | "files" | "tasks" | "advanced" | "native";
 
 type GroupId = SettingsGroupId;
 
@@ -54,7 +57,7 @@ export interface RuntimeSettingsApi {
   readonly onSet?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue) => void | Promise<void>;
 }
 
-const GROUP_IDS: ReadonlyArray<SettingsGroupId> = ["general", "interaction", "permissions", "context", "files", "tasks", "advanced"];
+const GROUP_IDS: ReadonlyArray<SettingsGroupId> = ["general", "interaction", "permissions", "context", "files", "tasks", "advanced", "native"];
 
 export function setSettingsIntent(group: SettingsGroupId): void {
   try {
@@ -81,6 +84,7 @@ export function SettingsPage({
   approvalMode,
   onSetApprovalMode,
   runtimeSettings,
+  nativeContext,
 }: {
   client?: import("@omp-studio/client-contract").StudioClient;
   /** 当前 Runtime 审批模式；undefined = 无 Runtime 快照。 */
@@ -88,8 +92,9 @@ export function SettingsPage({
   onSetApprovalMode: (mode: ApprovalModeId) => void;
   /** Optional Runtime settings read/write surface; omitted on older Runtime versions. */
   runtimeSettings?: RuntimeSettingsApi;
+  nativeContext?: NativePreferencesContext | undefined;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const groups: ReadonlyArray<readonly [GroupId, string, string]> = [
     ["general", "settings", t("settings.tabs.general")],
     ["interaction", "message", t("settings.tabs.interaction")],
@@ -98,6 +103,7 @@ export function SettingsPage({
     ["files", "terminal", t("settings.tabs.files")],
     ["tasks", "play", t("settings.tabs.tasks")],
     ["advanced", "wrench", t("settings.tabs.advanced")],
+    ["native", "settings", resolvedLanguage === "zh" ? "运行偏好" : "Runtime preferences"],
   ];
 
   const [group, setGroup] = useState<GroupId>(() => takeSettingsIntent() ?? "general");
@@ -233,11 +239,12 @@ export function SettingsPage({
       <div className="cap-main" id="setMain">
         {flash ? <div className="set-flash" role="status">{flash}</div> : null}
         <div className="cap-pane-stage" ref={stageRef}>
+          <div {...pane("native")} id="set-native" role="tabpanel" aria-labelledby="setTab-native" tabIndex={0}><NativePreferencesPane client={client} context={nativeContext} visible={group === "native"} /></div>
           <div {...pane("general")} id="set-general" role="tabpanel" aria-labelledby="setTab-general" tabIndex={0}>
             <GeneralTab ctl={ctl} />
           </div>
           <div {...pane("interaction")} id="set-interaction" role="tabpanel" aria-labelledby="setTab-interaction" tabIndex={0}>
-            <InteractionTab ctl={ctl} demo={demoRuntime} />
+            <InteractionTab ctl={ctl} demo={demoRuntime} prediction={<PredictionSettingsPane client={client} context={nativeContext} visible={group === "interaction"} />} />
           </div>
           <div {...pane("permissions")} id="set-permissions" role="tabpanel" aria-labelledby="setTab-permissions" tabIndex={0}>
             <PermissionsTab ctl={ctl} demo={demoRuntime} />

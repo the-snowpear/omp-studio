@@ -1,0 +1,118 @@
+.native-maintenance {
+  min-width: 0;
+  font-size: var(--fs-13);
+}
+.maintenance-section {
+  padding: var(--sp-20) 0;
+  border-top: 1px solid var(--border);
+}
+.maintenance-section > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  flex-wrap: wrap;
+}
+.maintenance-section h3 {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-semibold);
+}
+.maintenance-section p {
+  color: var(--text-3);
+  font-size: var(--fs-12);
+  line-height: 1.7;
+  max-width: 66em;
+}
+.maintenance-section .maintenance-error,
+.maintenance-error {
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+.maintenance-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-16);
+  border: 0;
+  padding: var(--sp-12) 0;
+  margin: 0;
+}
+.maintenance-categories label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+  font-size: var(--fs-12);
+}
+.maintenance-categories input {
+  accent-color: var(--accent);
+}
+.maintenance-table-wrap {
+  overflow-x: auto;
+}
+.maintenance-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-12);
+}
+.maintenance-table-wrap th {
+  color: var(--text-3);
+  font-weight: var(--fw-medium);
+}
+.maintenance-table-wrap td,
+.maintenance-table-wrap th {
+  text-align: left;
+  padding: var(--sp-10);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.maintenance-actions,
+.maintenance-export {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-12);
+  margin-top: var(--sp-16);
+}
+.maintenance-export > span:first-child {
+  overflow-wrap: anywhere;
+}
+.maintenance-checks {
+  list-style: none;
+  padding: 0;
+}
+.maintenance-checks li {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(100px, 1fr) minmax(0, 2fr);
+  gap: var(--sp-12);
+  padding: var(--sp-12) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-12);
+}
+.maintenance-checks details {
+  min-width: 0;
+}
+.maintenance-checks summary {
+  cursor: pointer;
+  color: var(--text-3);
+}
+.maintenance-checks code {
+  font-size: var(--fs-11);
+  overflow-wrap: anywhere;
+}
+.maintenance-check-ok {
+  color: var(--green);
+}
+.maintenance-check-warning {
+  color: var(--amber);
+}
+.maintenance-check-error {
+  color: var(--red);
+}
+@media (max-width: 600px) {
+  .maintenance-checks li {
+    grid-template-columns: 1fr 1fr;
+  }
+  .maintenance-checks details {
+    grid-column: 1/-1;
+  }
+}

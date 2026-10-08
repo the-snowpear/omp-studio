@@ -9,13 +9,13 @@
 .judgment-form > label, .judgment-question > label { display: grid; gap: 6px; font-size: 12px; }
 .judgment-form textarea { width: 100%; resize: vertical; }
 .judgment-question { border: 1px solid var(--border); padding: 12px; display: grid; gap: 10px; min-width: 0; }
-.judgment-confirm { border-left: 3px solid var(--accent); background: var(--bg-hover); padding: 10px 14px; margin: 12px 0; }
+.judgment-confirm { border-left: 3px solid var(--accent); background: var(--surface-hover); padding: 10px 14px; margin: 12px 0; }
 .judgment-confirm > .btn { margin-right: 8px; }
 .judgment-confirm pre { white-space: pre-wrap; max-height: 240px; overflow: auto; font-size: 12px; }
 .judgment-workspace { display: grid; grid-template-columns: minmax(180px, 25%) minmax(0, 1fr); gap: 20px; margin-top: 14px; }
 .judgment-batches { display: flex; flex-direction: column; gap: 4px; }
 .judgment-batches > button { display: grid; gap: 6px; text-align: left; padding: 10px; border: 0; border-left: 2px solid transparent; background: transparent; color: inherit; cursor: pointer; }
-.judgment-batches > button.selected { background: var(--bg-hover); border-left-color: var(--accent); }
+.judgment-batches > button.selected { background: var(--surface-hover); border-left-color: var(--accent); }
 .judgment-batches strong { font-size: 13px; overflow-wrap: anywhere; }
 .judgment-results { min-width: 0; }
 .judgment-results h3 { margin: 0 0 8px; font-size: 15px; }

@@ -1,3 +1,4 @@
+import { validateMaintenanceResult, type SessionExportResult, type SessionExportStatus } from "@omp-studio/studio-protocol";
 import { mediaInputArtifacts, validateMediaResult, type MediaDetail, isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
 import type { RuntimeMediaFiles } from "./runtime-media-files.js";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
@@ -265,7 +266,7 @@ export function createDesktopSemanticCommands(options: {
       }
       return created;
     },
-    resume: async ({ threadId }) => {
+    resume: async ({ threadId, model }) => {
       const target = await resolveCatalogSessionId(options, threadId);
       const snapshot = options.sessionRef.current?.controller.publication()?.snapshot;
       if (snapshot !== undefined) {
@@ -273,13 +274,14 @@ export function createDesktopSemanticCommands(options: {
           throw new StudioHostError("BUSY_STREAMING", "Cannot resume while the Runtime is streaming");
         }
         if (snapshot.sessionId === target) {
+          if (model !== undefined) throw new StudioHostError("INVALID_ARGUMENT", "This session is already active; change its model using the model picker");
           return snapshot;
         }
       }
       if (options.switchSession === undefined) {
         throw new StudioHostError("CAPABILITY_UNAVAILABLE", "Runtime session switching is not available");
       }
-      const next = await options.switchSession({ kind: "resume", sessionId: target });
+      const next = await options.switchSession({ kind: "resume", sessionId: target, ...(model === undefined ? {} : { model }) });
       let restoredSession = next;
       if (next?.controller.publication()?.snapshot === undefined && options.ensureRuntime !== undefined) {
         await options.ensureRuntime();
@@ -409,6 +411,16 @@ export function createDesktopSemanticCommands(options: {
           throw new StudioHostError("INTERNAL_ERROR", "Invalid import result");
         const workspaceId = await options.registerImportedWorkspace!(imported.cwd);
         return { snapshot: latest, result: { imported: true, sessionId: imported.sessionId, workspaceId } };
+      }
+      if (operation.kind === "maintenance.session.export" || operation.kind === "maintenance.export.status") {
+        validateMaintenanceResult(operation.kind,receipt.result);
+        const native = operation.kind === "maintenance.session.export" ? receipt.result as SessionExportResult : (receipt.result as SessionExportStatus).result;
+        if (native) {
+          if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop file channel is unavailable");
+          const record = await options.mediaFiles.promote(mediaDirectory,operation.sessionId,mediaWorkspaceId,native.id,native.asset);
+          const result = { ...native,asset:{...native.asset,artifactId:record.artifactId} };
+          return {snapshot:latest,result:operation.kind === "maintenance.session.export"?result:{...(receipt.result as SessionExportStatus),result}};
+        }
       }
       if (operation.kind === "media.read") {
         if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop media channel is unavailable");

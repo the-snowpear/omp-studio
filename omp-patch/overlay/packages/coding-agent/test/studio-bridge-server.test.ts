@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgToolsApprovalMode } from "../src/tools/settings";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
@@ -64,6 +66,7 @@ function fakeExtendedServices(session: Record<string, unknown>) {
 }
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	for (const socket of sockets.splice(0)) socket.destroy();
 	for (const server of servers.splice(0)) {
 		await Promise.race([
@@ -698,21 +701,11 @@ describe("WP-011 Studio Bridge runtime server", () => {
 
 	test("permissions.mode.set persists on demand and overrides otherwise; snapshot reflects the mode", async () => {
 		const fixture = await bridgeFixture();
-		let currentMode = "yolo";
 		let flushed = 0;
-		const settings = {
-			get: (key: string) => (key === "tools.approvalMode" ? currentMode : undefined),
-			set: (key: string, value: unknown) => {
-				if (key === "tools.approvalMode") currentMode = value as string;
-			},
-			clearOverride: () => {},
-			override: (key: string, value: unknown) => {
-				if (key === "tools.approvalMode") currentMode = value as string;
-			},
-			flush: async () => {
-				flushed += 1;
-			},
-		};
+		const settings = Settings.isolated({ "tools.approvalMode": "yolo" });
+		vi.spyOn(settings, "flush").mockImplementation(async () => {
+			flushed += 1;
+		});
 		const session = {
 			isStreaming: false,
 			isCompacting: false,
@@ -764,7 +757,7 @@ describe("WP-011 Studio Bridge runtime server", () => {
 			status: "completed",
 			result: { mode: "write", persisted: true },
 		});
-		expect(currentMode).toBe("write");
+		expect(cfgToolsApprovalMode.get(settings)).toBe("write");
 		expect(flushed).toBe(1);
 
 		const overrideFrames = receiveFrames(socket, 3);

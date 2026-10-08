@@ -1,0 +1,73 @@
+.runtime-queue .qs-list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+.runtime-queue-row {
+  min-width: 0;
+}
+.runtime-queue .qs-status {
+  flex-wrap: wrap;
+}
+.runtime-queue-editor {
+  padding: 8px 12px;
+}
+.runtime-queue-editor textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  max-height: 180px;
+}
+.runtime-queue-editor .btn + .btn {
+  margin-inline-start: 6px;
+}
+.runtime-queue > p {
+  padding: 0 12px;
+  overflow-wrap: anywhere;
+}
+
+.runtime-queue {
+  min-width: 0;
+}
+.runtime-queue .qs-list {
+  max-height: min(180px, 25vh);
+  overflow-x: hidden;
+}
+.runtime-queue .qs-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 8px 0;
+}
+.runtime-queue .qs-status {
+  position: static;
+  transform: none;
+  width: auto;
+  justify-content: flex-start;
+  gap: 8px;
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.runtime-queue .qs-actions {
+  margin-inline-start: auto;
+  opacity: 1;
+  pointer-events: auto;
+}
+.runtime-queue-row + .runtime-queue-row {
+  border-top: 1px solid var(--border);
+}
+
+.composer-queues:has(.runtime-queue) {
+  max-height: min(24vh, 172px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-width: var(--doc-max-w);
+  margin: 0 auto;
+  scrollbar-gutter: stable;
+}
+.composer-queues .runtime-queue .qs-list {
+  max-height: none;
+  overflow: visible;
+}
+.composer-queues:has(.runtime-queue) .queue-strip {
+  margin-inline: 0;
+}

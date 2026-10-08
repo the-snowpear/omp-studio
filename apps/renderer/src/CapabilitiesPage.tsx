@@ -1,9 +1,12 @@
+import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
+import { IdaPane } from "./capabilities/IdaPane";
 import { SkillsharePane } from "./skillshare/SkillsharePane";
 import { McpRuntimePane, PromptTemplatesPane } from "./capabilities/RuntimeCatalogPanes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type {
+  ClientBootstrap,
   ConfigWriteResult,
   McpServerRecord,
   McpTestResult,
@@ -40,7 +43,7 @@ import { usePreviewMode } from "./preview/PreviewContext";
 
 export const CAP_INTENT_KEY = "omp.capIntent";
 
-export type CapTab = "skills" | "plugins" | "mcp" | "slash";
+export type CapTab = "skills" | "plugins" | "mcp" | "slash" | "ida";
 
 type CapIntent = { tab?: CapTab; name?: string };
 
@@ -52,6 +55,7 @@ const TABS: ReadonlyArray<readonly [CapTab, string]> = [
   ["plugins", "package"],
   ["mcp", "plug"],
   ["slash", "slash"],
+  ["ida", "code"],
 ];
 
 const TAB_LABELS: Record<CapTab, string> = {
@@ -59,6 +63,7 @@ const TAB_LABELS: Record<CapTab, string> = {
   plugins: "capabilities.pluginsTab",
   mcp: "capabilities.mcpTab",
   slash: "capabilities.slashTab",
+  ida: "capabilities.idaTab",
 };
 
 type McpLogView = {
@@ -186,8 +191,7 @@ function Summary({
     <div className="cap-summary">
       <span className="cap-sum-stat">
         <Icon name="layers" extra="xs" />
-        <strong>{total}</strong>
-        <span className="muted">{t("capabilities.items")}</span>
+        <strong>{t("capabilities.items", { count: total })}</strong>
       </span>
       {stats.filter((stat) => stat.n > 0).map((stat) => (
         <span key={stat.label} className="cap-sum-stat">
@@ -213,6 +217,7 @@ export function CapabilitiesPage({
   client,
   sessionId,
   runtimeAvailable = false,
+  capabilities,
   onInsertPrompt,
   onRunSlash,
   onPinCompleted,
@@ -220,6 +225,7 @@ export function CapabilitiesPage({
   client: StudioClient;
   sessionId?: string | undefined;
   runtimeAvailable?: boolean;
+  capabilities?: ClientBootstrap["capabilityManifest"] | undefined;
   onInsertPrompt?: (text: string) => void;
   onRunSlash?: (command: StudioSlashCommand, args: string) => Promise<boolean>;
   /** Called after App has received the authoritative `/pin` receipt. */
@@ -227,6 +233,11 @@ export function CapabilitiesPage({
 }) {
   const { t } = useI18n();
   const { preview } = usePreviewMode();
+  const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
+  const [skillsView,setSkillsView] = useState<"local"|"registry">("local");
+  const [mcpView,setMcpView] = useState<"config"|"runtime">("config");
+  const [commandsView,setCommandsView] = useState<"commands"|"templates">("commands");
+  const supports = (id:string) => capabilities?.capabilities.some(row=>row.id===id&&row.grade!=="unavailable") === true;
   const [tab, setTab] = useState<CapTab>("skills");
   const [skills, setSkills] = useState<SkillPreview[]>(() => preview ? previewSkills() : []);
   const [plugins, setPlugins] = useState<PluginPreview[]>(() => preview ? previewPlugins() : []);
@@ -312,6 +323,7 @@ export function CapabilitiesPage({
     plugins: plugins.length,
     mcp: preview ? mcp.length : mcpServers.length,
     slash: slash.length,
+    ida: 0,
   };
 
   useEffect(() => {
@@ -547,7 +559,7 @@ export function CapabilitiesPage({
     const ok = preview ? skills.filter((skill) => skill.session).length : skills.length - fail - disabled;
     return (
       <>
-        <details className="skillshare-entry"><summary>Skillshare 注册表 / Registry</summary><SkillsharePane client={client} sessionId={sessionId} available={runtimeAvailable} /></details>
+
         <Summary
           total={skills.length}
           stats={[
@@ -936,10 +948,11 @@ export function CapabilitiesPage({
   };
 
   const tabBody = (id: CapTab) => {
-    if (id === "skills") return renderSkills();
+    if (id === "ida") return <IdaPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={tab === "ida"} />;
+    if (id === "skills") return <><WorkspaceTabs<"local"|"registry"> id="cap-skills-view" label={zh?"技能来源":"Skill source"} value={skillsView} onChange={setSkillsView} items={[{id:"local",icon:"book",label:zh?"已发现技能":"Discovered skills"},{id:"registry",icon:"package",label:"Skillshare"}]}/><WorkspacePanel id="cap-skills-view" name="local" active={skillsView==="local"}>{renderSkills()}</WorkspacePanel><WorkspacePanel id="cap-skills-view" name="registry" active={skillsView==="registry"}><SkillsharePane client={client} sessionId={sessionId} available={runtimeAvailable&&supports("skillshare.status")} visible={tab==="skills"&&skillsView==="registry"}/></WorkspacePanel></>;
     if (id === "plugins") return renderPlugins();
-    if (id === "mcp") return <><McpRuntimePane client={client} sessionId={sessionId} available={runtimeAvailable} />{renderMcp()}</>;
-    return <><PromptTemplatesPane client={client} sessionId={sessionId} available={runtimeAvailable} onInsert={onInsertPrompt} />{renderSlash()}</>;
+    if (id === "mcp") return <><WorkspaceTabs<"config"|"runtime"> id="cap-mcp-view" label="MCP" value={mcpView} onChange={setMcpView} items={[{id:"config",icon:"settings",label:zh?"服务器配置":"Server configuration"},{id:"runtime",icon:"pulse",label:zh?"会话连接":"Session connections"}]}/><WorkspacePanel id="cap-mcp-view" name="config" active={mcpView==="config"}>{renderMcp()}</WorkspacePanel><WorkspacePanel id="cap-mcp-view" name="runtime" active={mcpView==="runtime"}><McpRuntimePane client={client} sessionId={sessionId} available={runtimeAvailable&&supports("mcp.runtime.status")} visible={tab==="mcp"&&mcpView==="runtime"}/></WorkspacePanel></>;
+    return <><WorkspaceTabs<"commands"|"templates"> id="cap-command-view" label={zh?"指令与模板":"Commands and templates"} value={commandsView} onChange={setCommandsView} items={[{id:"commands",icon:"slash",label:zh?"指令":"Commands"},{id:"templates",icon:"file",label:zh?"提示词模板":"Prompt templates"}]}/><WorkspacePanel id="cap-command-view" name="commands" active={commandsView==="commands"}>{renderSlash()}</WorkspacePanel><WorkspacePanel id="cap-command-view" name="templates" active={commandsView==="templates"}><PromptTemplatesPane client={client} sessionId={sessionId} available={runtimeAvailable&&supports("templates.list")} visible={tab==="slash"&&commandsView==="templates"} onInsert={onInsertPrompt}/></WorkspacePanel></>;
   };
 
   return (
@@ -976,37 +989,20 @@ export function CapabilitiesPage({
             label: t(TAB_LABELS[id]),
             buttonId: `capTab-${id}`,
             panelId: `cap-${id}`,
-            badge: <span className="cnt">{counts[id]}<span className="sr-only"> {t("capabilities.catItemCount", { count: counts[id] })}</span></span>,
+            badge: id === "ida" ? null : <span className="cnt">{counts[id]}<span className="sr-only"> {t("capabilities.catItemCount", { count: counts[id] })}</span></span>,
           }))}
         />
         <div className="cap-main" id="capMain">
           <div className="cap-pane-stage" ref={stageRef}>
-            {outgoing != null && outgoing !== incoming ? (
-              <div
-                key={outgoing}
-                className={tabPaneClass(tabPaneRole(outgoing, incoming, outgoing, live), dir)}
-                data-tab-pane={outgoing}
-                role="tabpanel"
-                id={`cap-${outgoing}`}
-                tabIndex={-1}
-                aria-labelledby={`capTab-${outgoing}`}
-                aria-hidden
-                inert
-              >
-                {tabBody(outgoing)}
-              </div>
-            ) : null}
-            <div
-              key={incoming}
-              className={tabPaneClass(tabPaneRole(incoming, incoming, outgoing, live), dir)}
-              data-tab-pane={incoming}
-              role="tabpanel"
-              id={`cap-${incoming}`}
-              tabIndex={0}
-              aria-labelledby={`capTab-${incoming}`}
-            >
-              {tabBody(incoming)}
-            </div>
+            {TABS.map(([id]) => {
+              const active = id === incoming; const leaving = id === outgoing && outgoing !== incoming;
+              return <div key={id} className={tabPaneClass(tabPaneRole(id, incoming, outgoing, live), dir)}
+                data-tab-pane={id} role="tabpanel" id={"cap-" + id} tabIndex={active ? 0 : -1}
+                aria-labelledby={"capTab-" + id} aria-hidden={!active} inert={!active}
+                style={!active && !leaving ? { display: "none" } : undefined}>
+                {tabBody(id)}
+              </div>;
+            })}
           </div>
         </div>
       </div>

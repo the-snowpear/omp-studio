@@ -446,6 +446,7 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
   "omfg.generate": { readonly complaint: string };
   /** Spawn a subagent via the native structured-subagent path. */
   "agent.spawn": {
+    readonly model?: string[];
     readonly definition: string;
     readonly assignment: string;
     readonly context?: string;
@@ -496,7 +497,7 @@ interface CoreCommandInputMap {
   /** Start a fresh Runtime session in the active workspace. */
   "session.create": EmptyInput;
   /** Resume a thread from history or the home page. */
-  "session.resume": { readonly threadId: ThreadId };
+  "session.resume": { readonly threadId: ThreadId; readonly model?: string };
   /** Drop a thread. Destructive: the Host issues a one-time confirmation. */
   "session.drop": { readonly threadId: ThreadId };
   /**

@@ -1,6 +1,11 @@
+export interface AccountQuotaScope {
+  provider: string; accountId?: string; projectId?: string; orgId?: string; modelId?: string;
+  tier?: string; windowId?: string; shared?: boolean; sharedGroup?: string;
+}
 export interface AccountQuotaWindow {
   id: string; label: string; status: "ok" | "warning" | "exhausted" | "unknown";
   usedFraction?: number; resetsAt?: number; model?: string;
+  scope?: AccountQuotaScope; notes?: string[]; resetLabel?: string;
 }
 export interface AccountResetCredit {
   title: string; status?: string; expiresAt?: string; remainingCount?: number;
@@ -33,10 +38,17 @@ function optional(row: Record<string, unknown>, keys: string[], validate: (value
 function boolean(value: unknown): void { if (typeof value !== "boolean") throw new Error("Invalid account status flag"); }
 function list(value: unknown, max: number, validate: (value: unknown) => void): void { if (!Array.isArray(value) || value.length > max) throw new Error("Invalid account status list"); value.forEach(validate); }
 function quota(value: unknown): void {
-  const row = object(value, ["id", "label", "status", "usedFraction", "resetsAt", "model"]);
+  const row = object(value, ["id", "label", "status", "usedFraction", "resetsAt", "model", "scope", "notes", "resetLabel"]);
   text(row.id); text(row.label);
   if (!["ok", "warning", "exhausted", "unknown"].includes(row.status as string)) throw new Error("Invalid quota status");
-  optional(row, ["usedFraction", "resetsAt"], number); optional(row, ["model"], text);
+  optional(row, ["usedFraction", "resetsAt"], number); optional(row, ["model", "resetLabel"], text);
+  if (row.notes !== undefined) list(row.notes, 16, text);
+  if (row.scope !== undefined) {
+    const scope = object(row.scope, ["provider", "accountId", "projectId", "orgId", "modelId", "tier", "windowId", "shared", "sharedGroup"]);
+    text(scope.provider);
+    optional(scope, ["accountId", "projectId", "orgId", "modelId", "tier", "windowId", "sharedGroup"], text);
+    optional(scope, ["shared"], boolean);
+  }
 }
 function resets(value: unknown): void {
   const row = object(value, ["state", "availableCount", "redeemableCount", "eligible", "credits"]);

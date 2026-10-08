@@ -134,7 +134,9 @@ it("uses single-use file grants for image/STT and saves native speech outputs wi
 		},
 		transcribeAudio: async (_model, request) => {
 			transcripts++;
-			expect(Buffer.from(request.audio).toString()).toBe("fixture");
+			const audio =
+				request.audio instanceof Blob ? new Uint8Array(await request.audio.arrayBuffer()) : request.audio;
+			expect(new TextDecoder().decode(audio)).toBe("fixture");
 			return { text: "mock transcript", usage, segments: [{ start: 0, end: 1, text: "mock transcript" }] } as never;
 		},
 		synthesizeSpeech: async (_model, request) => {

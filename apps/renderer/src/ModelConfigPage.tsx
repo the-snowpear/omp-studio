@@ -1,4 +1,6 @@
-import { BenchmarkPane } from "./models/BenchmarkPane";
+import { ModelPresetsPane } from "./models/ModelPresetsPane";
+import { SessionOptionsPane } from "./models/SessionOptionsPane";
+
 import { AccountStatusPane } from "./models/AccountStatusPane";
 import { loadRuntimeModels } from "./models/runtimeModels";
 import { RuntimeCredentials, VisionModelStatus } from "./models/RuntimeCredentials";
@@ -6,6 +8,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from "react-dom";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, CSSProperties } from "react";
 import type {
+  ClientBootstrap,
   AvailableModelRecord,
   CommandName,
   ConfigWriteResult,
@@ -68,7 +71,7 @@ const PROVIDER_ORDER_KEY = "omp.providerDisplayOrder";
 
 type I18nT = ReturnType<typeof useI18n>["t"];
 
-export type McTab = "providers" | "roles" | "subagents" | "websearch" | "benchmark";
+export type McTab = "providers" | "roles" | "subagents" | "websearch" | "presets" | "accounts" | "benchmark";
 
 type McIntent = { tab?: McTab; edit?: string; role?: string; assign?: string; agent?: string };
 
@@ -77,6 +80,8 @@ const TAB_BUTTON_ID: Record<McTab, string> = {
   roles: "mcTabRoles",
   subagents: "mcTabSubagents",
   websearch: "mcTabWebSearch",
+  presets: "mcTabPresets",
+  accounts: "mcTabAccounts",
   benchmark: "mcTabBenchmark",
 };
 
@@ -229,6 +234,7 @@ function sortProviders(
 }
 
 export type ModelPickItem = {
+  readonly execution?: import("@omp-studio/client-contract").ModelExecutionMetadata;
   readonly provider: string;
   readonly id: string;
   readonly selector: string;
@@ -249,6 +255,7 @@ type ModelPickGroup = {
 function toPickItem(model: AvailableModelRecord, entry?: ModelCatalogEntry): ModelPickItem {
   const contextWindow = entry?.contextWindow ?? model.contextWindow;
   return {
+    execution: { ...model, ...entry },
     provider: model.provider,
     id: model.id,
     selector: model.selector,
@@ -305,13 +312,15 @@ function flattenModelGroups(
 }
 
 export function ModelPickCaps({ model }: { model: ModelPickItem }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const metadata = model.execution;
+  const modelInfo = [t("modelConfig.tipContext"), metadata?.serviceTiers ? `${resolvedLanguage === "zh" ? "公布的服务档位" : "Advertised service tiers"}: ${metadata.serviceTiers.join(", ") || "—"}` : "", metadata?.promptCache ? `${resolvedLanguage === "zh" ? "缓存时长（秒）" : "Cache lifetime (seconds)"}: ${Object.entries(metadata.promptCache).map(([tier, seconds]) => `${tier} ${seconds}`).join(", ") || "—"}` : ""].filter(Boolean).join("\n");
   return (
     <span className="rms-option-caps">
       {model.reasoning ? <span className="chip purple xs chip-icon" data-tip={t("modelConfig.tipThinking")}><Icon name="brain" extra="sm" /></span> : null}
       {model.image ? <span className="chip blue xs chip-icon" data-tip={t("modelConfig.tipMultimodal")}><Icon name="image" extra="sm" /></span> : null}
       {model.tools ? <span className="chip gray xs chip-icon" data-tip={t("modelConfig.tipTools")}><Icon name="wrench" extra="sm" /></span> : null}
-      <span className="chip gray xs" data-tip={t("modelConfig.tipContext")}>{fmtK(model.contextWindow)}</span>
+      <span className="chip gray xs" data-tip={modelInfo}>{fmtK(model.contextWindow)}</span>
     </span>
   );
 }
@@ -1835,7 +1844,8 @@ function formatProviderStatusDetail(detail: string | undefined, t: (k: string) =
   return detail;
 }
 
-export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailable = false }: { client: StudioClient; sessionId?: string | undefined; workspaceId?: string | undefined; runtimeAvailable?: boolean }) {
+export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailable = false, onOpenEvaluation, capabilities }: { capabilities?: ClientBootstrap["capabilityManifest"] | undefined; onOpenEvaluation?: () => void; client: StudioClient; sessionId?: string | undefined; workspaceId?: string | undefined; runtimeAvailable?: boolean }) {
+  const { resolvedLanguage } = useI18n();
   const [, updatePricingClock] = useState(0);
   useEffect(() => {
     const timer = window.setInterval(() => updatePricingClock(tick => tick + 1), 60_000);
@@ -2027,6 +2037,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
     if (intent.tab === "subagents" || intent.agent) setTab("subagents");
     if (intent.tab === "websearch") setTab("websearch");
     if (intent.tab === "benchmark") setTab("benchmark");
+    if (intent.tab === "presets" || intent.tab === "accounts") setTab(intent.tab);
     if (intent.edit) {
       setTab("providers");
     }
@@ -2140,7 +2151,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
   };
 
   const onTabKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const keys: McTab[] = ["providers", "roles", "subagents", "websearch", "benchmark"];
+    const keys: McTab[] = ["providers", "roles", "subagents", "websearch", "presets", "accounts", "benchmark"];
     const index = keys.indexOf(tab);
     let next: McTab | null = null;
     if (event.key === "ArrowRight") next = keys[(index + 1) % keys.length] ?? "providers";
@@ -3230,6 +3241,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             <Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span>
             <span className={`chip ${webSearchReadyCount === 0 ? "amber" : "gray"} xs`}>{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span>
           </button>
+          <button role="tab" id="mcTabPresets" aria-controls="mcPanelPresets" aria-selected={tab === "presets"} tabIndex={tab === "presets" ? 0 : -1} className={tab === "presets" ? "active" : undefined} onClick={() => activate("presets")}><Icon name="layers" extra="sm" /><span>{resolvedLanguage === "zh" ? "预设" : "Presets"}</span></button>
+          <button role="tab" id="mcTabAccounts" aria-controls="mcPanelAccounts" aria-selected={tab === "accounts"} tabIndex={tab === "accounts" ? 0 : -1} className={tab === "accounts" ? "active" : undefined} onClick={() => activate("accounts")}><Icon name="user" extra="sm" /><span>{resolvedLanguage === "zh" ? "账户" : "Accounts"}</span></button>
           <button role="tab" id="mcTabBenchmark" aria-controls="mcPanelBenchmark" aria-selected={tab === "benchmark"} tabIndex={tab === "benchmark" ? 0 : -1} className={tab === "benchmark" ? "active" : undefined} onClick={() => activate("benchmark")}><Icon name="pulse" extra="sm" /><span>{t("modelConfig.benchmarkTab")}</span></button>
           <span className="mc-tab-window" ref={tabWinRef} aria-hidden="true">
             <span className="mc-tab-mirror" ref={tabMirrorRef}>
@@ -3237,6 +3250,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
               <button type="button" tabIndex={-1}><Icon name="steering" extra="sm" /><span>{t("modelConfig.rolesTab")}</span><span className={`chip ${roleIssues ? "red" : "gray"} xs`}>{roles.length}<span className="sr-only"> {t("modelConfig.rolesCountAria", { count: roles.length })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="bot" extra="sm" /><span>{t("modelConfig.subagentsTab")}</span><span className="chip gray xs">{agentCount}<span className="sr-only"> {t("modelConfig.subagentsCountAria", { count: agentCount })}</span></span></button>
               <button type="button" tabIndex={-1}><Icon name="globe" extra="sm" /><span>{t("modelConfig.webSearchTab")}</span><span className="chip gray xs">{webSearchReadyCount}<span className="sr-only"> {t("modelConfig.webSearchCountAria", { count: webSearchReadyCount })}</span></span></button>
+              <button type="button" tabIndex={-1}><Icon name="layers" extra="sm" /><span>{resolvedLanguage === "zh" ? "预设" : "Presets"}</span></button>
+              <button type="button" tabIndex={-1}><Icon name="user" extra="sm" /><span>{resolvedLanguage === "zh" ? "账户" : "Accounts"}</span></button>
               <button type="button" tabIndex={-1}><Icon name="pulse" extra="sm" /><span>{t("modelConfig.benchmarkTab")}</span></button>
             </span>
           </span>
@@ -3256,7 +3271,15 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
       {!preview && loadError ? <div className="role-issue-banner mc-page-banner"><Icon name="alert" extra="sm" /><div><div className="rib-title">{t("modelConfig.loadErrorTitle")}</div><div className="rib-text">{loadError}</div></div></div> : null}
 
       <div id="mcPanels" tabIndex={-1}>
-        <section id="mcPanelBenchmark" role="tabpanel" aria-labelledby="mcTabBenchmark" hidden={shownTab !== "benchmark"} className={tabPanelClass("benchmark")}>{shownTab === "benchmark" ? <BenchmarkPane client={client} sessionId={sessionId} workspaceId={workspaceId} available={runtimeAvailable} models={runtimeModels} /> : null}</section>
+        <section id="mcPanelPresets" role="tabpanel" aria-labelledby="mcTabPresets" hidden={shownTab !== "presets"} className={tabPanelClass("presets")}>
+          <ModelPresetsPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={shownTab === "presets"} />
+        </section>
+        <section id="mcPanelAccounts" role="tabpanel" aria-labelledby="mcTabAccounts" hidden={shownTab !== "accounts"} className={tabPanelClass("accounts")}>
+          <AccountStatusPane sessionId={sessionId} standalone visible={shownTab === "accounts"} client={client} available={runtimeAvailable} capabilities={capabilities} />
+          <SessionOptionsPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={shownTab === "accounts"} />
+          <RuntimeCredentials client={client} preview={preview} />
+        </section>
+        <section id="mcPanelBenchmark" role="tabpanel" aria-labelledby="mcTabBenchmark" hidden={shownTab !== "benchmark"} className={tabPanelClass("benchmark")}>{shownTab === "benchmark" ? <div className="workspace-empty"><Icon name="pulse" /><strong>{t("nav.evaluation")}</strong><p>{resolvedLanguage === "zh" ? "模型基准与判断批次已整合到评测工作区。" : "Model benchmarks and judgment batches are now in Evaluation."}</p><button className="btn primary" type="button" disabled={!onOpenEvaluation} onClick={onOpenEvaluation}>{t("nav.evaluation")} <Icon name="arrow-r" /></button></div> : null}</section>
         <section id="mcPanelProviders" role="tabpanel" aria-labelledby="mcTabProviders" hidden={shownTab !== "providers"} className={tabPanelClass("providers")}>
           <div className={editorLive ? `mc-view ${pagePhaseClass(editorPhase)}` : "mc-view"}>
           {editor ? (
@@ -4173,8 +4196,6 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
         </section>
 
         <section id="mcPanelRoles" role="tabpanel" aria-labelledby="mcTabRoles" hidden={shownTab !== "roles"} className={tabPanelClass("roles")}>
-          <AccountStatusPane client={client} />
-          <RuntimeCredentials client={client} preview={preview} />
           <VisionModelStatus client={client} preview={preview} />
           <div className={roleLive ? `mc-view ${pagePhaseClass(rolePhase)}` : "mc-view"}>
           {roleDraft ? (

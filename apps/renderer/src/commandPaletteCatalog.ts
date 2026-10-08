@@ -7,7 +7,7 @@ import { PREVIEW_HISTORY, PREVIEW_PROJECTS } from "./preview/fixtures";
 import type { SettingsGroupId } from "./SettingsPage";
 import type { DrawerItem } from "./skillsPreview";
 
-export type SideTab = "changes" | "git" | "preview" | "agents" | "btw";
+export type SideTab = "changes" | "git" | "preview" | "computer" | "agents" | "btw";
 export type BottomTab = "terminal" | "problems" | "tests" | "output" | "logs" | "pvlogs";
 
 export type PaletteAction =
@@ -155,7 +155,8 @@ function staticGroups(preview: boolean): PaletteGroup[] {
         { id: "open-pvlogs", icon: "globe", label: "palette.openPreviewLogs", keywords: "preview logs 打开 Preview Logs", action: { kind: "openBottom", tab: "pvlogs" } },
         { id: "open-changes", icon: "diff", label: "palette.openChanges", keywords: "changes 打开 Changes", action: { kind: "openSide", tab: "changes" } },
         { id: "open-git", icon: "branch", label: "palette.openGit", keywords: "git branch commit push pull stage 打开 Git", action: { kind: "openSide", tab: "git" } },
-        { id: "open-preview", icon: "eye", label: "palette.openPreview", keywords: "preview 打开 Preview", action: { kind: "openSide", tab: "preview" } },
+        { id: "open-preview", icon: "globe", label: "browser.title", keywords: "browser 浏览器 观察 接管 preview", action: { kind: "openSide", tab: "preview" } },
+        { id: "open-computer", icon: "monitor", label: "computer.title", keywords: "computer 电脑 屏幕 窗口 观察", action: { kind: "openSide", tab: "computer" } },
         { id: "open-agents", icon: "bot", label: "palette.openAgents", keywords: "agents 打开 Agents", action: { kind: "openSide", tab: "agents" } },
         { id: "open-btw", icon: "sparkles", label: "palette.openBtw", keywords: "btw 旁路 side channel 提问 打开 BTW 面板", action: { kind: "openSide", tab: "btw" } },
         { id: "open-skills", icon: "layers", label: "menu.openSkills", hint: formatShortcut(SHORTCUTS.skills, "hint"), keywords: `skills plugins drawer 技能 插件 打开技能与插件 ${shortcutSearchText(SHORTCUTS.skills)}`, action: { kind: "openSkills" } },

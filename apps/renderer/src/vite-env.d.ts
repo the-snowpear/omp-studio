@@ -51,6 +51,16 @@ declare global {
     | {
         revealSkillshareToken?(input: { secretId: string; sessionId: string }): Promise<{ ok: boolean; token?: string; name?: string; message?: string }>;
         attachLiveAudio?(input: { audioId: string; sessionId: string }): Promise<{ ok: boolean; message?: string }>;
+        attachPrediction?(input: import("@omp-studio/studio-protocol").PredictionChannel): Promise<{ok:boolean;message?:string}>;
+        predictionInput?(input:{channelId:string;input:Exclude<import("@omp-studio/studio-protocol").PredictionInput,{kind:"import"}>}):Promise<{ok:boolean;message?:string}>;
+        detachPrediction?(input:{channelId:string}):Promise<{ok:boolean;message?:string}>;
+        importPredictionHistory?(input:{channelId:string}):Promise<{ok:boolean;cancelled?:boolean;message?:string;count?:number;truncated?:boolean}>;
+        onPrediction?(listener:(event:import("@omp-studio/studio-protocol").PredictionEvent)=>void):()=>void;
+        attachBrowserObservation?(input: { observationId: string; sessionId: string; tabId: string }): Promise<{ ok: boolean; message?: string }>;
+        readComputerCapture?(input: { captureId: string; sessionId: string; targetId: string }): Promise<{ ok: true; data: ArrayBuffer; width: number; height: number } | { ok: false; message: string }>;
+        controlBrowserObservation?(input: { observationId: string; input: import("@omp-studio/studio-protocol").BrowserObservationInput }): Promise<{ ok: boolean; message?: string }>;
+        detachBrowserObservation?(input: { observationId: string }): Promise<{ ok: boolean; message?: string }>;
+        onBrowserObservation?(listener: (event: import("@omp-studio/studio-protocol").BrowserObservationEvent) => void): () => void;
         appendLiveAudio?(input: { audioId: string; sequence: number; bytes: ArrayBuffer }): Promise<{ ok: boolean; message?: string }>;
         detachLiveAudio?(input: { audioId: string }): Promise<{ ok: boolean; message?: string }>;
         beginMediaUpload?(input: { kind: "audio" | "image" | "video"; name: string; mimeType: string; workspaceId?: string; sessionId?: string }): Promise<{ ok: boolean; uploadId?: string; message?: string }>;

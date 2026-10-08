@@ -8,7 +8,7 @@ import type { ArtifactLibrary } from "@omp-studio/studio-host";
 import type { ArtifactRecord } from "@omp-studio/studio-protocol";
 
 const id = (value: string) => { if (!/^[a-f0-9-]{36}$/u.test(value)) throw new Error("Invalid private media identifier"); return value; };
-export interface RuntimeMediaAsset { artifactId: string; kind: "image" | "audio" | "video" | "transcript"; name: string; mimeType: string; bytes: number; sha256: string }
+export interface RuntimeMediaAsset { artifactId: string; kind: "image" | "audio" | "video" | "transcript" | "export"; name: string; mimeType: string; bytes: number; sha256: string }
 const instances = new WeakMap<ArtifactLibrary, RuntimeMediaFiles>();
 export function runtimeMediaFilesForLibrary(library: ArtifactLibrary): RuntimeMediaFiles { let value = instances.get(library); if (!value) { value = new RuntimeMediaFiles(library); instances.set(library, value); } return value; }
 
@@ -48,7 +48,7 @@ export class RuntimeMediaFiles {
   }
   async #promote(directory: string, sessionId: string, workspaceId: string | undefined, runId: string, asset: RuntimeMediaAsset): Promise<ArtifactRecord> {
     const previous = await this.library.findByRunId(runId); if (previous) return previous;
-    if (!["image", "audio", "video", "transcript"].includes(asset.kind) || !Number.isSafeInteger(asset.bytes) || asset.bytes < 0 || asset.bytes > 512 * 1024 * 1024 || !/^[a-f0-9]{64}$/u.test(asset.sha256)) throw new Error("Invalid Runtime media output");
+    if (!["image", "audio", "video", "transcript", "export"].includes(asset.kind) || !Number.isSafeInteger(asset.bytes) || asset.bytes < 0 || asset.bytes > 512 * 1024 * 1024 || !/^[a-f0-9]{64}$/u.test(asset.sha256)) throw new Error("Invalid Runtime media output");
     const file = join(directory, "outputs", createHash("sha256").update(sessionId).digest("hex"), id(asset.artifactId) + ".bin"); const stat = await lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== asset.bytes) throw new Error("Runtime media output is unavailable");
     const digest = createHash("sha256"); let bytes = 0;

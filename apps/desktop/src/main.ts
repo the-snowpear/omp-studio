@@ -1,5 +1,8 @@
+import { DesktopPrediction, registerPredictionIpc } from "./prediction.js";
 import { registerSkillshareTokenIpc } from "./chrome-skillshare.js";
 import { DesktopLiveAudio, registerLiveAudioIpc } from "./live-audio.js";
+import { DesktopBrowserObservation, registerBrowserObservationIpc } from "./browser-observation.js";
+import { registerComputerCaptureIpc } from "./computer-observation.js";
 import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 /**
  * Electron Main entry for the OMP Studio Windows Desktop shell
@@ -287,6 +290,8 @@ export async function main(): Promise<void> {
     files: () => runtimeMediaFilesForLibrary(activeArtifactLibrary()),
     socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()),
   });
+  const prediction = new DesktopPrediction({directory:activeMediaDirectory,socketDirectory:()=>runtimeSocketDirectory(activeProfileDirectory()),chooseHistory:async sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);const options={title:"导入提示词历史 / Import prompt history",filters:[{name:"JSONL history",extensions:["jsonl"]}],properties:["openFile"] as const};const result=owner?await dialog.showOpenDialog(owner,{...options,properties:[...options.properties]}):await dialog.showOpenDialog({...options,properties:[...options.properties]});return result.canceled?undefined:result.filePaths[0];}});
+  const browserObservation = new DesktopBrowserObservation({ directory: activeMediaDirectory, socketDirectory: () => runtimeSocketDirectory(activeProfileDirectory()) });
   const terminalManager = new TerminalSessionManager({
     recording: terminalRecordings,
     spawner: createNodePtySpawner(),
@@ -546,7 +551,7 @@ export async function main(): Promise<void> {
       openExternal: (url) => shell.openExternal(url),
     });
     desktopConversationViews.registerWindow(window.webContents, windowSurface.isVisible() && !windowSurface.isMinimized());
-    const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); if (!visible) liveAudio.disposeWindow(window.webContents.id); };
+    const refreshConversationVisibility = () => { const visible = windowSurface.isVisible() && !windowSurface.isMinimized(); desktopConversationViews.setVisible(window.webContents, visible); if (!visible) { liveAudio.disposeWindow(window.webContents.id); browserObservation.disposeWindow(window.webContents.id); prediction.disposeWindow(window.webContents.id); } };
     const resetConversationVisibility = () => desktopConversationViews.reset(window.webContents);
     const removeConversationVisibility = () => desktopConversationViews.remove(window.webContents);
     window.on("show", refreshConversationVisibility);
@@ -613,7 +618,7 @@ export async function main(): Promise<void> {
       },
       async chooseFile(sender, kind) {
         const owner = BrowserWindow.fromWebContents(sender as WebContents);
-        const extensions = kind === "image" ? ["png", "jpg", "jpeg", "webp", "gif", "svg"] : kind === "audio" ? ["wav", "mp3", "ogg", "opus", "flac"] : kind === "video" ? ["mp4", "webm"] : kind === "recording" ? ["ompcast", "studiocast"] : ["*"];
+        const extensions = kind === "graphic" ? ["svg", "mermaid", "mmd", "chart", "obj", "ply", "wrl", "x3dv", "stl", "gltf", "glb", "usda", "zip"] : kind === "image" ? ["png", "jpg", "jpeg", "webp", "gif", "svg"] : kind === "audio" ? ["wav", "mp3", "ogg", "opus", "flac"] : kind === "video" ? ["mp4", "webm"] : kind === "recording" ? ["ompcast", "studiocast"] : ["*"];
         const options = { title: "导入文件", properties: ["openFile"] as Array<"openFile">, filters: [{ name: kind, extensions }] };
         const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
         return result.canceled ? undefined : result.filePaths[0];
@@ -628,6 +633,9 @@ export async function main(): Promise<void> {
     const disposeSkillshareTokens = registerSkillshareTokenIpc({ ipcMain, isTrustedSender, directory: activeMediaDirectory });
     const disposeMediaUploads = registerMediaUploadIpc({ ipcMain, isTrustedSender, manager: mediaUploads });
     const disposeLiveAudio = registerLiveAudioIpc({ ipcMain, isTrustedSender, manager: liveAudio, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposePrediction = registerPredictionIpc({ipcMain,isTrustedSender,manager:prediction,isVisible:sender=>{const owner=BrowserWindow.fromWebContents(sender as WebContents);return !!owner&&owner.isVisible()&&!owner.isMinimized();}});
+    const disposeBrowserObservation = registerBrowserObservationIpc({ ipcMain, isTrustedSender, manager: browserObservation, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
+    const disposeComputerCapture = registerComputerCaptureIpc({ ipcMain, isTrustedSender, directory: activeMediaDirectory, isVisible: sender => { const owner = BrowserWindow.fromWebContents(sender as WebContents); return !!owner && owner.isVisible() && !owner.isMinimized(); } });
     const disposeImage = registerChromeImageIpc({
       ipcMain: {
         handle(channel, listener) {
@@ -828,6 +836,9 @@ export async function main(): Promise<void> {
         disposeMediaUploads.dispose();
         disposeSkillshareTokens.dispose();
         disposeLiveAudio.dispose();
+        disposePrediction.dispose();
+        disposeBrowserObservation.dispose();
+        disposeComputerCapture.dispose();
         disposeServiceDefinitions.dispose();
         disposeLogs.dispose();
         disposeMetrics.dispose();
@@ -856,7 +867,7 @@ export async function main(): Promise<void> {
     : undefined;
 
   const application = createDesktopApplication({
-    beforeShutdown: async () => { macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
+    beforeShutdown: async () => { macSwap?.cleanExit(); stopAppNapGuard?.(); liveAudio.dispose(); browserObservation.dispose(); prediction.dispose(); mediaUploads.dispose(); await terminalRecordings.dispose(); },
     hostFactory,
     createWindow,
     platform: process.platform,

@@ -172,8 +172,8 @@ export function InteractionPrompt({ interaction, onRespond, disabled, caption, d
       {...(caption?.meta ? { meta: caption.meta } : {})}
       {...(busy ? { disabled: true } : {})}
       {...(submitError ? { submitError: true } : {})}
-      onAllow={() => submit(true)}
-      onAlways={() => submit(true)}
+      onAllow={() => submit(view.configuration ? "once" : true)}
+      onAlways={() => { if (view.configuration) submit("session"); }}
       onDeny={cancel}
     />
   );

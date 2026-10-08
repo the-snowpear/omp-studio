@@ -1,3 +1,6 @@
+import { NativeMaintenancePane } from "./diagnostics/NativeMaintenancePane";
+import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
+import type { NativePreferencesContext } from "./settings/NativePreferencesPane";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ClientBootstrap,
@@ -117,8 +120,9 @@ function previewAuthority(): EnvironmentReadModel["authority"] {
   return { authorityId: "preview-authority" as EnvironmentReadModel["authority"]["authorityId"], authorityEpoch: 1 as EnvironmentReadModel["authority"]["authorityEpoch"] };
 }
 
+const PREVIEW_GENERATED_AT = new Date().toISOString();
 function previewGeneratedAt(): string {
-  return "2026-08-18T04:03:00.000Z";
+  return PREVIEW_GENERATED_AT;
 }
 
 function previewEnvironment(scenario: PreviewDiagScenario, installer: RuntimeInstallState): EnvironmentReadModel {
@@ -238,12 +242,14 @@ function primaryIcon(action: DiagnosticsHero["primary"]): string {
 }
 
 export function DiagnosticsPage({
+ nativeContext,
   client,
   diagnostics,
   capabilities,
   runtime,
   environment,
 }: {
+  nativeContext?: NativePreferencesContext;
   client: StudioClient;
   diagnostics?: DiagnosticReadModel;
   capabilities?: CapManifest;
@@ -251,8 +257,9 @@ export function DiagnosticsPage({
   environment?: EnvironmentReadModel;
 }) {
   const { preview } = usePreviewMode();
+ const [workspaceTab,setWorkspaceTab]=useState<"runtime"|"maintenance">("runtime");
   const updates = useUpdates();
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
   const mock = PREVIEW_DIAGNOSTICS;
   const [scenario, setScenario] = useState<PreviewDiagScenario>("update");
   const [diag, setDiag] = useState<DiagnosticReadModel | undefined>(diagnostics);
@@ -711,6 +718,8 @@ export function DiagnosticsPage({
 
   return (
     <div className="page-wide diag-page">
+<WorkspaceTabs<"runtime"|"maintenance"> id="diagnostics-workspace" label="Diagnostics" value={workspaceTab} onChange={setWorkspaceTab} items={[{id:"runtime",icon:"activity",label:resolvedLanguage==="zh"?"运行环境":"Runtime"},{id:"maintenance",icon:"settings",label:resolvedLanguage==="zh"?"会话与维护":"Sessions and maintenance"}]}/>
+<WorkspacePanel id="diagnostics-workspace" name="runtime" active={workspaceTab==="runtime"}>
       <div className="diag-head">
         <div>
           <h1>{t("diagnostics.title")}</h1>
@@ -1003,6 +1012,8 @@ export function DiagnosticsPage({
 
       <p className="tiny muted" style={{ marginTop: 16 }}>{t("diagnostics.lastChecked", { time: formatCheckedAt(viewDiag?.generatedAt) })}</p>
       <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />
+</WorkspacePanel>
+<WorkspacePanel id="diagnostics-workspace" name="maintenance" active={workspaceTab==="maintenance"}><NativeMaintenancePane client={client} sessionId={nativeContext?.sessionId} available={nativeContext?.available??false} capabilities={nativeContext?.capabilities} active={workspaceTab==="maintenance"}/></WorkspacePanel>
     </div>
   );
 }

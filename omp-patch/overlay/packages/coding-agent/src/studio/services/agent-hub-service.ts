@@ -1,3 +1,4 @@
+import { invalidModelSelectorReason } from "../../task/structured-subagent";
 /**
  * StudioAgentHubService - presentation-neutral agent roster and control
  * service for the Studio Agent Hub (05_AGENT_HUB_AND_JOBS.md, WP-050..WP-053).
@@ -183,6 +184,7 @@ export interface StudioIrcBusPort {
 }
 
 export interface StudioAgentSpawnRequest {
+	model?: string[];
 	definition: string;
 	assignment: string;
 	context?: string;
@@ -490,6 +492,7 @@ export class StudioAgentHubService {
 	}
 
 	async spawn(args: {
+		model?: string[];
 		definition: string;
 		assignment: string;
 		context?: string;
@@ -498,6 +501,12 @@ export class StudioAgentHubService {
 		effort?: string;
 		callerAgentId: string;
 	}): Promise<{ agentId: string; jobId?: string; status: "starting" }> {
+		const modelReason = invalidModelSelectorReason(args.model, "Studio agent");
+		if (modelReason || (args.model && args.model.length > 8))
+			throw new StudioAgentHubError(
+				"INVALID_ARGUMENT",
+				modelReason ?? "At most eight model candidates are supported",
+			);
 		const definition = args.definition.trim();
 		const assignment = args.assignment.trim();
 		if (definition.length === 0 || definition.length > MAX_DEFINITION_LENGTH) {
@@ -518,6 +527,7 @@ export class StudioAgentHubService {
 		let receipt: StudioAgentSpawnReceipt;
 		try {
 			receipt = await this.#spawner.spawn({
+				...(args.model === undefined ? {} : { model: [...args.model] }),
 				definition,
 				assignment,
 				...(args.context !== undefined ? { context: args.context } : {}),

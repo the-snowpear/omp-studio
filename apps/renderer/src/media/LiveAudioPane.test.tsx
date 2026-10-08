@@ -14,7 +14,7 @@ it("demo Live reviews before activation and mute/stop never use the microphone o
   expect(screen.getByLabelText("确认 Live 调用")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "确认打开麦克风并连接" }));
   fireEvent.click(screen.getByRole("button", { name: "静音" })); expect(screen.getByRole("button", { name: "取消静音" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "停止 Live" })); expect(screen.getByText("off")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "停止 Live" })); expect((screen.getByRole("button",{name:"停止 Live"}) as HTMLButtonElement).disabled).toBe(true);
   expect(client.command).not.toHaveBeenCalled(); expect(client.query).not.toHaveBeenCalled();
 });
 it("shared Web does not claim microphone capability from Runtime availability", () => {

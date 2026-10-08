@@ -357,3 +357,29 @@
   --minimap-viewport: rgba(235, 235, 245, 0.07);
   --selection: rgba(158, 140, 252, 0.3);
 }
+
+/* Compatibility names from older feature panes reuse the established Studio
+   scale. They are aliases, not extra colors, font sizes, or corner styles. */
+:root {
+  --danger: var(--red);
+  --orange: var(--amber);
+  --surface-muted: var(--surface-2);
+  --surface-1: var(--surface);
+  --accent-subtle: var(--accent-softer);
+  --bg-subtle: var(--surface-2);
+  --bg-hover: var(--surface-hover);
+  --border-subtle: var(--border);
+  --text-muted: var(--text-3);
+  --text-1: var(--text);
+  --r-12: var(--r-8);
+  --fs-10: var(--fs-11);
+  --fs-13: var(--fs-12);
+  --fs-15: var(--fs-14);
+  --sp-3: var(--sp-4);
+  --sp-5: var(--sp-6);
+  --sp-18: var(--sp-20);
+  --shadow-sm: var(--shadow-menu);
+  --tint-purple: var(--tint-violet);
+  --tint-purple-soft: var(--tint-violet-soft);
+  --warning-soft: var(--amber-soft);
+}

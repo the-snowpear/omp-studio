@@ -1,6 +1,8 @@
 import type { LocaleDictionary } from "./zh";
 
 export const en: LocaleDictionary = {
+  "computer": { "title": "Computer" },
+  "browser": { "title": "Browser" },
   "media": {
     "imageShortcut": "Generate image / video",
     "audioShortcut": "Record / transcribe audio",
@@ -23,6 +25,7 @@ export const en: LocaleDictionary = {
     "exportToView": "Save a copy to view it in another application.",
     "more": "Load more",
     "kind": {
+      "graphic": "Graphics and models",
       "annotation": "Annotations",
       "image": "Images",
       "video": "Video",
@@ -236,6 +239,7 @@ export const en: LocaleDictionary = {
     "shortcuts": "Keyboard Shortcuts"
   },
   "nav": {
+    "evaluation": "Evaluation",
     "brand": "OMP Studio",
     "home": "Home",
     "workbench": "Workbench",
@@ -855,6 +859,7 @@ export const en: LocaleDictionary = {
     "demoRestoreToast": "Demo: Executed \"{desc}\""
   },
   "capabilities": {
+    "idaTab": "IDA",
     "title": "Capabilities",
     "subtitle": "Slash commands, skills, and MCP tool servers",
     "slashTab": "Slash Commands",
@@ -1378,6 +1383,8 @@ export const en: LocaleDictionary = {
       "advanced": "Advanced"
     },
     "sources": {
+      "env": "Environment",
+      "overlay": "Config overlay",
       "default": "Default",
       "user": "User",
       "project": "Project",

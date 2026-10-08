@@ -164,14 +164,14 @@ describe("DiagnosticsPage", () => {
     expect(screen.getByRole("button", { name: "更新 Runtime" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "检查更新" }).length).toBeGreaterThan(1);
     expect(screen.queryByText(/路径 \/ PID/)).toBeNull();
-    expect(screen.getByText("托管 Runtime").parentElement?.textContent).toContain("v0.82.1");
-    expect(screen.getAllByText(/可更新到 v0\.82\.2/).length).toBeGreaterThan(0);
+    expect(screen.getByText("托管 Runtime").parentElement?.textContent).toContain("18.8.0-studio.17");
+    expect(screen.getAllByText(/可更新到 18\.8\.0-studio\.18/).length).toBeGreaterThan(0);
   });
 
   it("checks updates in preview without calling Host", () => {
     const client = renderPage({ preview: true });
     fireEvent.click(screen.getAllByRole("button", { name: "检查更新" })[0]!);
-    expect(screen.getByText("已检查更新（演示）· v0.82.2 可用")).toBeTruthy();
+    expect(screen.getByText("已检查更新（演示）· 18.8.0-studio.18 可用")).toBeTruthy();
     expect(client.query).not.toHaveBeenCalled();
     expect(client.command).not.toHaveBeenCalled();
   });
@@ -220,7 +220,7 @@ describe("DiagnosticsPage", () => {
   it("honors a check-update intent on mount in preview", () => {
     setDiagnosticsIntent("check-update");
     renderPage({ preview: true });
-    expect(screen.getByText("已检查更新（演示）· v0.82.2 可用")).toBeTruthy();
+    expect(screen.getByText("已检查更新（演示）· 18.8.0-studio.18 可用")).toBeTruthy();
   });
 
   it("stays quiet when the automatic update check times out", async () => {

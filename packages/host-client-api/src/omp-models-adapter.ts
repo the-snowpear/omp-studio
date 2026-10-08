@@ -21,6 +21,7 @@ import type {
   ModelApiKind,
   ModelAuthType,
   ModelCatalogEntry,
+  ModelExecutionMetadata,
   ModelConfigReadModel,
   ModelCostMeta,
   ModelDiscoveryModel,
@@ -735,6 +736,23 @@ function cacheCost(value: unknown): ModelCostMeta | undefined {
   };
 }
 
+/** Preserve bounded public metadata without carrying provider endpoints or headers. */
+export function executionMetadata(value: unknown): ModelExecutionMetadata {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const model = value as Record<string, unknown>;
+  const tiers = Array.isArray(model.serviceTiers) ? model.serviceTiers.filter((value): value is string => typeof value === "string" && value.length > 0 && value.length <= 128 && !/[\u0000-\u001f]/u.test(value)).slice(0,32) : undefined;
+  const cache = (value: unknown): { short?: number; long?: number } | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const row = value as Record<string, unknown>; const result: { short?: number; long?: number } = {};
+    for (const key of ["short", "long"] as const) if (typeof row[key] === "number" && Number.isFinite(row[key]) && row[key] >= 0) result[key] = row[key];
+    return result;
+  };
+  const promptCache = cache(model.promptCache), promptCacheConfig = cache(model.promptCacheConfig);
+  const source = model.compatibility && typeof model.compatibility === "object" ? model.compatibility as Record<string, unknown> : model;
+  const compatibility = { ...(typeof source.preferWebsockets === "boolean" ? { preferWebsockets: source.preferWebsockets } : {}), ...(typeof source.useResponsesLite === "boolean" ? { useResponsesLite: source.useResponsesLite } : {}), ...(source.toolMode === "code_mode_only" ? { toolMode: "code_mode_only" as const } : {}) };
+  return { ...(tiers === undefined ? {} : { serviceTiers: tiers }), ...(promptCache === undefined ? {} : { promptCache }), ...(promptCacheConfig === undefined ? {} : { promptCacheConfig }), ...(Object.keys(compatibility).length ? { compatibility } : {}) };
+}
+
 /** Map one OMP `models.db` cache model into the Studio available-model record. */
 export function availableFromCacheModel(
   model: Record<string, unknown>,
@@ -754,6 +772,7 @@ export function availableFromCacheModel(
   const pricing = parseModelPricing(model.cost);
   const maxContextWindow = cacheNumber(model.maxContextWindow);
   return {
+    ...executionMetadata(model),
     provider: providerOf,
     id,
     selector: typeof model.selector === "string" && model.selector.length > 0 ? model.selector : `${providerOf}/${id}`,
@@ -775,6 +794,7 @@ export function availableFromCacheModel(
 
 export function catalogEntryFromAvailable(model: AvailableModelRecord): ModelCatalogEntry {
   return {
+    ...executionMetadata(model),
     id: model.id,
     name: model.name,
     selector: model.selector,
@@ -797,6 +817,7 @@ export function catalogEntryFromAvailable(model: AvailableModelRecord): ModelCat
 
 export function availableFromCatalogEntry(providerId: string, model: ModelCatalogEntry): AvailableModelRecord {
   return {
+    ...executionMetadata(model),
     provider: providerId,
     id: model.id,
     selector: model.selector,
@@ -949,6 +970,7 @@ function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undef
     const extras = extrasFromYaml(model);
     const thinking = parseModelThinkingEfforts(model.thinking);
     return [{
+      ...executionMetadata(model),
       id: modelId,
       name: stringOf(model.name) ?? modelId,
       selector: `${id}/${modelId}`,

@@ -1,0 +1,26 @@
+.ratchet-pane { padding: 0; min-width: 0; }
+.ratchet-layout { display:grid;grid-template-columns:minmax(150px,220px) minmax(0,1fr);gap:var(--sp-24); }
+.ratchet-list { display:flex;flex-direction:column;gap:var(--sp-8);align-self:start; }
+.ratchet-list button { display:flex;align-items:center;justify-content:space-between;gap:var(--sp-8);text-align:left;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--r-8);padding:var(--sp-12);min-width:0; }
+.ratchet-list button[aria-pressed=true] { background:var(--accent-soft);border-color:var(--accent); }
+.ratchet-list strong { overflow-wrap:anywhere; }
+.ratchet-detail { min-width:0;display:flex;flex-direction:column;gap:var(--sp-16); }
+.ratchet-heading { display:flex;align-items:center;gap:var(--sp-12);flex-wrap:wrap; }
+.ratchet-heading h3 { margin:0; }
+.ratchet-summary { display:flex;flex-wrap:wrap;gap:var(--sp-16);font-size:var(--fs-12);color:var(--text-3); }
+.ratchet-summary b { color:var(--text);margin-left:var(--sp-8); }
+.ratchet-stages { list-style:decimal;padding-left:var(--sp-24);margin:0; }
+.ratchet-stages li { padding:var(--sp-12) 0;border-bottom:1px solid var(--border); }
+.ratchet-stages li>div { display:inline-flex;flex-direction:column;min-width:55%;gap:var(--sp-4);vertical-align:middle; }
+.ratchet-stages span { font-size:var(--fs-12);color:var(--text-3); }
+.ratchet-actions { display:flex;gap:var(--sp-8);flex-wrap:wrap; }
+.ratchet-table { overflow:auto;max-height:420px; }
+.ratchet-table table { width:100%;border-collapse:collapse;font-size:var(--fs-12); }
+.ratchet-table th,.ratchet-table td { padding:var(--sp-12);text-align:left;vertical-align:top;border-bottom:1px solid var(--border); }
+.ratchet-table th { position:sticky;top:0;background:var(--surface); }
+.ratchet-detail pre,.ratchet-detail p { white-space:pre-wrap;overflow-wrap:anywhere; }
+.ratchet-fields { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-16); }
+.ratchet-fields label { display:flex;flex-direction:column;gap:var(--sp-8);font-size:var(--fs-12); }
+.ratchet-fields textarea { resize:vertical;min-height:72px; }
+.ratchet-create>p { margin:var(--sp-12) 0; }
+@media(max-width:1100px) { .ratchet-layout { grid-template-columns:1fr; }.ratchet-list { flex-direction:row;flex-wrap:wrap; }.ratchet-fields {grid-template-columns:1fr;} }

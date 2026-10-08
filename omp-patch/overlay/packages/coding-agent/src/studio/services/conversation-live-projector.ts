@@ -354,13 +354,6 @@ export class ConversationLiveProjector {
 					"retry-end",
 				);
 				return;
-			case "unexpected_stop_retry":
-				this.#emitNotice(
-					"warning",
-					`Assistant stop recovered automatically (${event.attempt}/${event.maxAttempts})`,
-					"unexpected-stop",
-				);
-				return;
 			case "notice":
 				this.#emitNotice(event.level, event.message, event.source);
 				return;

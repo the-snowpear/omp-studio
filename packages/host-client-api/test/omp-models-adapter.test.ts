@@ -1519,7 +1519,8 @@ describe("web search config", () => {
       assert.deepEqual(ws.routing?.fallbacks?.slice(0, 2), ["web/exa", "web/duckduckgo"]);
       assert.equal(ws.routing?.fallbacks?.includes("web/mojeek"), false);
       assert.equal(ws.timeoutSeconds, 120);
-      assert.ok(ws.routing?.fallbacks?.includes("google/gemini-2.5-flash"));
+      assert.ok(ws.routing?.fallbacks?.includes("web/hosted"));
+      assert.equal(ws.routing?.fallbacks?.includes("google/gemini-2.5-flash"), false);
       const raw = await readFile(join(dir, "config.yml"), "utf8");
       assert.doesNotMatch(raw, /webSearchOrder:/);
       assert.doesNotMatch(raw, /webSearchExclude:/);
@@ -1709,4 +1710,12 @@ describe("web search config", () => {
       assert.equal(byId.get("duckduckgo")?.loginId, undefined);
     });
   });
+});
+
+
+test("cached model metadata survives catalog round trips without copying private headers", () => {
+ const available = availableFromCacheModel({ id: "test-model", name: "Test model", provider: "test", input: ["text"], reasoning: true, serviceTiers: ["priority", "ultrafast"], promptCache: { short: 300, long: 3600 }, promptCacheConfig: {}, useResponsesLite: true, preferWebsockets: true, toolMode: "code_mode_only", headers: { Authorization: "private-secret" } }, "test");
+ assert.ok(available); const catalog = catalogEntryFromAvailable(available); const roundtrip = availableFromCatalogEntry("test", catalog);
+ assert.deepEqual(roundtrip.serviceTiers, ["priority", "ultrafast"]); assert.deepEqual(roundtrip.promptCache, { short: 300, long: 3600 }); assert.deepEqual(roundtrip.promptCacheConfig, {});
+ assert.deepEqual(roundtrip.compatibility, { preferWebsockets: true, useResponsesLite: true, toolMode: "code_mode_only" }); assert.equal(JSON.stringify(roundtrip).includes("private-secret"), false);
 });

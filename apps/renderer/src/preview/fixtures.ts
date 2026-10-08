@@ -541,10 +541,10 @@ export type PreviewDiagnostics = {
 
 /** 诊断中心演示数据。主故事是版本与维护，不再把路径 / PID 当读模型。 */
 export const PREVIEW_DIAGNOSTICS: PreviewDiagnostics = {
-  version: "v0.82.1",
-  availableVersion: "v0.82.2",
-  upstreamVersion: "0.12.0",
-  upstreamCommit: "45e12e5",
+  version: "18.8.0-studio.17",
+  availableVersion: "18.8.0-studio.18",
+  upstreamVersion: "18.8.0",
+  upstreamCommit: "4ef97c8826ee012829a3e756b693a2a16a414f47",
   platform: PLATFORM === "darwin" ? "darwin" : "win32",
   arch: PLATFORM === "darwin" ? "arm64" : "x64",
   capabilities: [

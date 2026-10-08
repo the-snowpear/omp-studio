@@ -32,6 +32,7 @@ export function SlidingTabs<T extends string>({
   items,
   onChange,
   syncKey,
+  orientation = "vertical",
 }: {
   id?: string;
   ariaLabel: string;
@@ -39,6 +40,7 @@ export function SlidingTabs<T extends string>({
   items: ReadonlyArray<SlidingTabItem<T>>;
   onChange: (id: T) => void;
   syncKey?: string;
+  orientation?: "vertical" | "horizontal";
 }) {
   const tabsRef = useRef<HTMLDivElement>(null);
   const winRef = useRef<HTMLSpanElement>(null);
@@ -59,16 +61,22 @@ export function SlidingTabs<T extends string>({
         win.style.transition = "none";
         mirror.style.transition = "none";
       }
-      win.style.top = `${active.offsetTop}px`;
-      win.style.height = `${active.offsetHeight}px`;
-      mirror.style.top = `${-active.offsetTop}px`;
+      if (orientation === "horizontal") {
+        win.style.left = `${active.offsetLeft}px`;
+        win.style.width = `${active.offsetWidth}px`;
+        mirror.style.left = `${-active.offsetLeft}px`;
+      } else {
+        win.style.top = `${active.offsetTop}px`;
+        win.style.height = `${active.offsetHeight}px`;
+        mirror.style.top = `${-active.offsetTop}px`;
+      }
       if (!animate) {
         void win.offsetHeight;
         win.style.removeProperty("transition");
         mirror.style.removeProperty("transition");
       }
       primed.current = true;
-      if (scroll) {
+      if (scroll && orientation === "vertical") {
         const top = active.offsetTop;
         const bottom = top + active.offsetHeight;
         const viewTop = tabs.scrollTop;
@@ -80,11 +88,12 @@ export function SlidingTabs<T extends string>({
     };
 
     sync(true);
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => sync(false));
     observer.observe(tabs);
     for (const button of tabs.querySelectorAll('[role="tab"]')) observer.observe(button);
     return () => observer.disconnect();
-  }, [value, syncKey]);
+  }, [value, syncKey, orientation]);
 
   const activate = (next: T, focus = false) => {
     onChange(next);
@@ -108,11 +117,11 @@ export function SlidingTabs<T extends string>({
   return (
     <div
       id={id}
-      className="cap-side"
+      className={orientation === "vertical" ? "cap-side" : "workspace-tabs"}
       ref={tabsRef}
       role="tablist"
       aria-label={ariaLabel}
-      aria-orientation="vertical"
+      aria-orientation={orientation}
       onKeyDown={onTabKey}
     >
       {items.map((item) => {
@@ -133,8 +142,8 @@ export function SlidingTabs<T extends string>({
           </button>
         );
       })}
-      <span className="cap-tab-window" ref={winRef} aria-hidden="true">
-        <span className="cap-tab-mirror" ref={mirrorRef}>
+      <span className={orientation === "vertical" ? "cap-tab-window" : "workspace-tab-window"} ref={winRef} aria-hidden="true">
+        <span className={orientation === "vertical" ? "cap-tab-mirror" : "workspace-tab-mirror"} ref={mirrorRef}>
           {items.map((item) => (
             <button key={item.id} type="button" tabIndex={-1}>
               <TabFace item={item} />

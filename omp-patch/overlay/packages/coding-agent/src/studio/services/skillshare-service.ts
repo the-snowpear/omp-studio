@@ -1,3 +1,4 @@
+import { cfgSkillsRegistryUrl } from "../../extensibility/settings";
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -160,7 +161,7 @@ export class StudioSkillshareService {
 		let client: NativeClient | undefined;
 		try {
 			client = await (this.dependencies.client ?? SkillshareClient.create)({
-				registryUrl: this.session.settings.get("skills.registryUrl") || undefined,
+				registryUrl: cfgSkillsRegistryUrl.get(this.session.settings) || undefined,
 				forPublish,
 				signal: controller.signal,
 			});

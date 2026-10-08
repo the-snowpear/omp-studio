@@ -11,7 +11,7 @@
  * Host 切模式等本轮结束后再生效。
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 
 import type { CommandInput, CommandName } from "@omp-studio/client-contract";
 import type { OperatorStateSnapshot } from "@omp-studio/studio-protocol";
@@ -112,8 +112,10 @@ export function ComposerModePicker({
   openToggles = false,
   onInteract,
   onCapsulesChange,
+  speedControl,
 }: {
   preview: boolean;
+  speedControl?: ReactNode;
   snapshot?: OperatorStateSnapshot;
   can: (id: string) => boolean;
   busy: boolean;
@@ -134,6 +136,8 @@ export function ComposerModePicker({
   /** Overlay while streaming: snapshot.activeMode lags or Host is blocked by resync. */
   const [optimistic, setOptimistic] = useState<SessionMode | null | undefined>(undefined);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuHeight, setMenuHeight] = useState(380);
+  useLayoutEffect(() => { if (!open) return; const measure = () => { const bottom = menuRef.current?.getBoundingClientRect().bottom; if (bottom !== undefined) setMenuHeight(Math.max(100, bottom - 44)); }; measure(); window.addEventListener("resize", measure); return () => window.removeEventListener("resize", measure); }, [open]);
   const flyoutTimer = useRef<number | undefined>(undefined);
   const hostFailedRef = useRef(false);
   const wasStreamingRef = useRef(false);
@@ -372,7 +376,7 @@ export function ComposerModePicker({
           onClear: toggleLoop,
         }]
       : []),
-    ...(fastOn ? [{ id: "fast", label: "Fast", tint: "green" as const, onClear: toggleFast }] : []),
+    ...(!speedControl && fastOn ? [{ id: "fast", label: "Fast", tint: "green" as const, onClear: toggleFast }] : []),
     ...(prewalkOn
       ? [{
           id: "prewalk",
@@ -411,11 +415,13 @@ export function ComposerModePicker({
             <div className="approval-menu-backdrop" onClick={close} />
             <div
               className="approval-menu cmp-mode-menu"
+              style={{ "--cmp-menu-max-height": `${menuHeight}px` } as CSSProperties}
               role="menu"
               aria-label={t("composer.sessionMode")}
               ref={menuRef}
               onMouseDown={retainComposerFocus}
             >
+              <div className="cmp-mode-menu-scroll">
               {preview ? <p className="cmp-menu-note"><span className="chip gray xs">{t("common.demo")}</span>{t("composer.previewModelNote")}</p> : null}
               {nextTurnOnly ? <p className="cmp-menu-note">{t("composer.modeNoteNextTurn")}</p> : null}
               <p className="menu-label">{t("composer.sessionMode")}</p>
@@ -489,6 +495,7 @@ export function ComposerModePicker({
                 <span className="am-desc">{t("composer.workflowzDesc")}</span>
               </button>
 
+              </div>
               <div className="cmp-menu-sep" />
               <span
                 className={`cmp-more-zone${togglesOpen ? " is-open" : ""}`}
@@ -501,7 +508,7 @@ export function ComposerModePicker({
                   aria-haspopup="menu"
                   aria-expanded={togglesOpen}
                   aria-label={t("composer.moreModes")}
-                  onClick={() => setTogglesOpen((value) => !value)}
+                  onClick={() => setTogglesOpen(true)}
                 >
                   <span>{t("composer.moreModes")}</span>
                   <span className="spacer" />
@@ -564,13 +571,13 @@ export function ComposerModePicker({
                     </div>
                   ) : null}
                   <p className="am-desc">{!preview && snapshot?.loop?.evaluatingCondition ? t("composer.loopChecking") : t("composer.loopConditionHint")}</p>
-                  <label className={`cmp-mode-check${fastOn ? " selected" : ""}`} data-tip={fastReady ? undefined : t("common.notImplemented")}>
+                  {speedControl ?? (<label className={`cmp-mode-check${fastOn ? " selected" : ""}`} data-tip={fastReady ? undefined : t("common.notImplemented")}>
                     <input type="checkbox" checked={fastOn} disabled={!fastReady} onChange={toggleFast} />
                     <span>
                       <span className="am-label">Fast</span>
                       <span className="am-desc">{t("composer.fastDesc")}</span>
                     </span>
-                  </label>
+                  </label>)}
                   <label className={`cmp-mode-check${prewalkOn ? " selected" : ""}`} data-tip={prewalkReady ? undefined : t("common.notImplemented")}>
                     <input type="checkbox" checked={prewalkOn} disabled={!prewalkReady} onChange={togglePrewalk} />
                     <span>

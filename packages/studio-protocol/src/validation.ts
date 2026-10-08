@@ -1313,8 +1313,9 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
     },
   },
   "agent.spawn": {
-    keys: ["kind", "definition", "assignment", "context", "async", "isolation", "effort"],
+    keys: ["kind", "definition", "assignment", "context", "async", "isolation", "effort", "model"],
     validate: (operation) => {
+      if (operation.model !== undefined && (!Array.isArray(operation.model) || operation.model.length === 0 || operation.model.length > 8 || operation.model.some(value => typeof value !== "string" || !value.trim() || value.length > 1024 || /[\u0000-\u001f]/u.test(value)))) throw new ContractValidationError("invalid per-spawn model chain", "$request.operation.model");
       const definition = nonEmptyString(operation.definition, "$request.operation.definition");
       const assignment = nonEmptyString(operation.assignment, "$request.operation.assignment");
       if (definition.length > MAX_AGENT_DEFINITION_LENGTH) {

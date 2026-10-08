@@ -471,7 +471,7 @@ function validateInteractionValue(value: unknown): void {
   throw clientError("INVALID_ARGUMENT", "interaction.respond value has an unsupported shape");
 }
 
-function isThreadCommandInput(value: unknown): value is { readonly threadId: ThreadId } {
+function isThreadCommandInput(value: unknown): value is { readonly threadId: ThreadId; readonly model?: string } {
   if (value === null || typeof value !== "object" || !("threadId" in value)) return false;
   return typeof value.threadId === "string" && value.threadId.length > 0;
 }
@@ -3267,7 +3267,7 @@ export class StudioHostClientFacade implements ClientTransport {
         }
         const threadId = input.threadId;
         if (commandName === "session.resume") {
-          void this.#runSemanticCommand(() => service.resume({ threadId }), request.requestId, commandName);
+          void this.#runSemanticCommand(() => service.resume({ threadId, ...(input.model === undefined ? {} : { model: input.model }) }), request.requestId, commandName);
         } else {
           void this.#runSemanticCommand(
             () => service.drop({ threadId, requestId: request.requestId }),
@@ -3315,6 +3315,7 @@ export class StudioHostClientFacade implements ClientTransport {
       if (!isThreadCommandInput(input)) {
         throw clientError("INVALID_ARGUMENT", `${commandName} threadId must not be empty`);
       }
+      if (commandName === "session.resume" && input.model !== undefined && (typeof input.model !== "string" || input.model.length > 512 || !/^[^\s\u0000-\u001f-][^\u0000-\u001f]*\/[^\u0000-\u001f]+$/u.test(input.model))) throw clientError("INVALID_ARGUMENT", "Recovery requires a provider/model selector");
       return;
     }
     if (!isInteractionCommandInput(input)) {

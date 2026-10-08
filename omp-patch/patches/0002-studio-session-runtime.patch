@@ -1,5 +1,55 @@
+diff --git a/packages/coding-agent/src/archive/archive.ts b/packages/coding-agent/src/archive/archive.ts
+index 53726ec547..1de77662aa 100644
+--- a/packages/coding-agent/src/archive/archive.ts
++++ b/packages/coding-agent/src/archive/archive.ts
+@@ -147,11 +147,15 @@ export async function archiveSessions(cwd: string | undefined, limit: number): P
+  *
+  * @throws {ToolError} when no session or several sessions match, or the file is not a session.
+  */
+-export async function archiveSession(idOrFile: string, limit: number): Promise<ArchiveView<ArchiveSessionDetail>> {
++export async function archiveSession(
++	idOrFile: string,
++	limit: number,
++	recapLimit?: number,
++): Promise<ArchiveView<ArchiveSessionDetail>> {
+ 	const file = path.isAbsolute(idOrFile) ? idOrFile : await resolveSessionFile(idOrFile);
+ 	const info = await readSessionInfo(file);
+ 	if (!info) throw new ToolError(`Not a readable session file: ${shortenPath(file)}`);
+-	const recaps = listSessionRecaps({ sessionIds: [info.id] })
++	const recaps = listSessionRecaps({ sessionIds: [info.id], limit: recapLimit })
+ 		.map(toArchiveRecap)
+ 		.reverse();
+ 	const prompts = HistoryStorage.open().getRecent(limit, { sessionId: info.id }).map(toArchivePrompt).reverse();
+diff --git a/packages/coding-agent/src/cli/gc-cli.ts b/packages/coding-agent/src/cli/gc-cli.ts
+index 457ab940e8..27cdfb1633 100644
+--- a/packages/coding-agent/src/cli/gc-cli.ts
++++ b/packages/coding-agent/src/cli/gc-cli.ts
+@@ -2010,7 +2010,8 @@ function renderText(result: GcResult): string {
+ 	return `${lines.join("\n")}\n`;
+ }
+ 
+-export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
++/** Run the native collector without writing terminal output. */
++export async function collectGc(args: GcCommandArgs): Promise<GcResult> {
+ 	const options = await resolveOptions(args.flags);
+ 	const archiveRoot = getArchivedSessionsDir(options.agentDir);
+ 	const result = await withGcLock(options.agentDir, async lockPath => {
+@@ -2023,7 +2024,12 @@ export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
+ 		return next;
+ 	});
+ 
+-	const output = options.json ? `${JSON.stringify(result, null, 2)}\n` : renderText(result);
++	return result;
++}
++
++export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
++	const result = await collectGc(args);
++	const output = args.flags.json ? `${JSON.stringify(result, null, 2)}\n` : renderText(result);
+ 	process.stdout.write(output);
+ 	return result;
+ }
 diff --git a/packages/coding-agent/src/plan-mode/approved-plan.ts b/packages/coding-agent/src/plan-mode/approved-plan.ts
-index 942f95b1df..ebdbcda406 100644
+index 90cd798e91..2bc96a315d 100644
 --- a/packages/coding-agent/src/plan-mode/approved-plan.ts
 +++ b/packages/coding-agent/src/plan-mode/approved-plan.ts
 @@ -10,6 +10,7 @@ export interface PlanApprovalDetails {
@@ -10,11 +60,345 @@ index 942f95b1df..ebdbcda406 100644
  }
  
  /** Validate and normalize the agent-supplied plan title into a safe filename stem.
+diff --git a/packages/coding-agent/src/predict/client.ts b/packages/coding-agent/src/predict/client.ts
+index d49bc07ad5..de4d14fd9c 100644
+--- a/packages/coding-agent/src/predict/client.ts
++++ b/packages/coding-agent/src/predict/client.ts
+@@ -21,6 +21,8 @@ import { connectJsonlSocket, LineParser, writeJsonLine } from "../tiny/jsonl-soc
+ import { prefetchSmolLmWeights } from "./smollm-weights";
+ import {
+ 	TEXT_PREDICT_AGENT_DIR_ENV,
++	TEXT_PREDICT_PROFILE_ENV,
++	type TextPredictProfile,
+ 	TEXT_PREDICT_BROKER_SCOPE,
+ 	TEXT_PREDICT_READY_PATTERN,
+ 	TEXT_PREDICT_SOCKET_ENV,
+@@ -120,7 +122,10 @@ class DaemonConnection {
+ }
+ 
+ /** Connect and confirm the daemon speaks this omp version; `undefined` when nothing usable listens. */
+-async function connectDaemon(endpoint: string): Promise<DaemonConnection | undefined> {
++async function connectDaemon(
++	endpoint: string,
++	profile: TextPredictProfile = "default",
++): Promise<DaemonConnection | undefined> {
+ 	let socket: net.Socket;
+ 	try {
+ 		socket = await connectJsonlSocket(endpoint, CONNECT_TIMEOUT_MS);
+@@ -130,7 +135,13 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
+ 	const connection = new DaemonConnection(socket);
+ 	try {
+ 		const pong = await connection.request(id => ({ id, op: "ping" }), REQUEST_TIMEOUT_MS);
+-		if (pong.ok && pong.op === "ping" && pong.version === VERSION) return connection;
++		if (
++			pong.ok &&
++			pong.op === "ping" &&
++			pong.version === VERSION &&
++			(profile === "default" || (pong.profile === profile && pong.protocol === 2))
++		)
++			return connection;
+ 		// A daemon from another omp version: retire it so this version's starts.
+ 		await connection.request(id => ({ id, op: "shutdown" }), REQUEST_TIMEOUT_MS).catch(() => undefined);
+ 	} catch (error) {
+@@ -141,19 +152,19 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
+ }
+ 
+ /** Find or start the daemon serving `agentDir` under the global broker. */
+-async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
++async function ensureDaemon(agentDir: string, profile: TextPredictProfile): Promise<DaemonConnection> {
+ 	const broker = await daemonClientForGlobal(TEXT_PREDICT_BROKER_SCOPE);
+ 	await broker.request({ op: "ping" });
+-	const { name, endpoint } = textPredictDaemon(broker.projectDir, agentDir);
++	const { name, endpoint } = textPredictDaemon(broker.projectDir, agentDir, profile);
+ 	const spawn = resolveWorkerSpawnCmd(TEXT_PREDICT_WORKER_ARG);
+ 	for (let attempt = 0; attempt < ENSURE_ATTEMPTS; attempt++) {
+-		const live = await connectDaemon(endpoint);
++		const live = await connectDaemon(endpoint, profile);
+ 		if (live) return live;
+ 		const existing = await describeQuietly(broker, name, LABEL);
+ 		if (existing && existing.state !== "exited" && existing.state !== "failed") {
+ 			if (existing.readyAt === undefined) {
+ 				await waitReady(broker, name, LABEL, undefined, READY_TIMEOUT_MS);
+-				const ready = await connectDaemon(endpoint);
++				const ready = await connectDaemon(endpoint, profile);
+ 				if (ready) return ready;
+ 			}
+ 			// Live record but nothing usable listening: replace it.
+@@ -167,7 +178,11 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+ 					name,
+ 					application: spawn.cmd[0]!,
+ 					args: spawn.cmd.slice(1),
+-					env: { [TEXT_PREDICT_SOCKET_ENV]: endpoint, [TEXT_PREDICT_AGENT_DIR_ENV]: agentDir },
++					env: {
++						[TEXT_PREDICT_SOCKET_ENV]: endpoint,
++						[TEXT_PREDICT_AGENT_DIR_ENV]: agentDir,
++						[TEXT_PREDICT_PROFILE_ENV]: profile,
++					},
+ 					cwd: spawn.cwd ?? broker.projectDir,
+ 					pty: false,
+ 					ready: { log: TEXT_PREDICT_READY_PATTERN, timeoutMs: READY_TIMEOUT_MS },
+@@ -185,7 +200,12 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+ }
+ 
+ /** Process-wide daemon access shared by every editor and the submit hook. */
+-class TextPredictionClient {
++export class TextPredictionClient {
++	#closed = false;
++	constructor(
++		readonly profile: TextPredictProfile = "default",
++		readonly downloadWeights = true,
++	) {}
+ 	#connection: DaemonConnection | undefined;
+ 	#connecting: Promise<DaemonConnection> | undefined;
+ 	#retryAt = 0;
+@@ -218,6 +238,7 @@ class TextPredictionClient {
+ 
+ 	/** Drop the daemon connection so a short-lived command can exit. */
+ 	close(): void {
++		this.#closed = true;
+ 		this.#connection?.close();
+ 		this.#connection = undefined;
+ 	}
+@@ -231,7 +252,7 @@ class TextPredictionClient {
+ 	async complete(engine: TextPredictMethod, before: string, prefix: string): Promise<TextPrediction> {
+ 		// SmolLM's weights download here, in the interactive process (shown in the
+ 		// download HUD), only once the user has chosen SmolLM.
+-		if (engine === "smollm") prefetchSmolLmWeights();
++		if (engine === "smollm" && this.downloadWeights) prefetchSmolLmWeights();
+ 		const response = await this.#request(
+ 			id => ({ id, op: "complete", method: engine, before, prefix }),
+ 			COMPLETE_TIMEOUT_MS,
+@@ -241,6 +262,21 @@ class TextPredictionClient {
+ 		return { engine, suggestion: response.suggestion };
+ 	}
+ 
++	/** Explicit import into the isolated Studio learning state; never writes prompt history. */
++	async importPrompts(prompts: string[]): Promise<number> {
++		if (this.profile !== "studio") throw new Error("Explicit imports require the Studio prediction profile");
++		let ingested = 0;
++		for (let start = 0; start < prompts.length; start += 128) {
++			const response = await this.#request(
++				id => ({ id, op: "import", prompts: prompts.slice(start, start + 128) }),
++				COMPLETE_TIMEOUT_MS,
++			);
++			if (!response.ok) throw new Error(response.error);
++			if (response.op !== "import") throw new Error("Unexpected prediction import response");
++			ingested += response.ingested;
++		}
++		return ingested;
++	}
+ 	/**
+ 	 * Tell a running daemon new history rows exist. Without a live connection
+ 	 * nothing needs telling: the daemon ingests everything new when it starts.
+@@ -259,12 +295,18 @@ class TextPredictionClient {
+ 	}
+ 
+ 	#connect(): Promise<DaemonConnection> {
++		if (this.#closed) return Promise.reject(new Error("text-predict client closed"));
+ 		const current = this.#connection;
+ 		if (current && !current.closed) return Promise.resolve(current);
+ 		if (this.#connecting) return this.#connecting;
+ 		if (Date.now() < this.#retryAt) return Promise.reject(new Error("text-predict daemon unavailable"));
+-		const connecting = ensureDaemon(getAgentDir()).then(
++		const connecting = ensureDaemon(getAgentDir(), this.profile).then(
+ 			connection => {
++				if (this.#closed) {
++					connection.close();
++					this.#connecting = undefined;
++					throw new Error("text-predict client closed");
++				}
+ 				this.#connection = connection;
+ 				this.#connecting = undefined;
+ 				return connection;
+diff --git a/packages/coding-agent/src/predict/daemon.ts b/packages/coding-agent/src/predict/daemon.ts
+index bc73e1de7f..ce7a2ae179 100644
+--- a/packages/coding-agent/src/predict/daemon.ts
++++ b/packages/coding-agent/src/predict/daemon.ts
+@@ -21,6 +21,8 @@ import { blendPredictions } from "./blend";
+ import { readForeignPrompts } from "./foreign-history";
+ import {
+ 	TEXT_PREDICT_AGENT_DIR_ENV,
++	TEXT_PREDICT_PROFILE_ENV,
++	type TextPredictProfile,
+ 	TEXT_PREDICT_SOCKET_ENV,
+ 	type TextPredictMethod,
+ 	type TextPredictRequest,
+@@ -130,10 +132,11 @@ class Engine {
+ 		readonly stateDir: string,
+ 		readonly predictor: TextPredictor,
+ 		cursor: number | undefined,
++		seedForeign = true,
+ 	) {
+ 		this.cursor = cursor ?? 0;
+ 		this.#persistedCursor = this.cursor;
+-		this.#seed = cursor === undefined;
++		this.#seed = cursor === undefined && seedForeign;
+ 	}
+ 
+ 	get dirty(): boolean {
+@@ -210,6 +213,7 @@ class Engine {
+ 
+ /** Serves every connection; engines open lazily on their first request. */
+ class TextPredictDaemon {
++	readonly #profile: TextPredictProfile;
+ 	#agentDir: string;
+ 	#historyDbPath: string;
+ 	#engines = new Map<TextPredictMethod, Promise<Engine>>();
+@@ -229,8 +233,9 @@ class TextPredictDaemon {
+ 		onStop: () => this.#persistAll(),
+ 	});
+ 
+-	constructor(agentDir: string) {
+-		this.#agentDir = agentDir;
++	constructor(agentDir: string, profile: TextPredictProfile = "default") {
++		this.#profile = profile;
++		this.#agentDir = profile === "studio" ? path.join(agentDir, "studio-predict") : agentDir;
+ 		this.#historyDbPath = getHistoryDbPath(agentDir);
+ 	}
+ 
+@@ -255,6 +260,8 @@ class TextPredictDaemon {
+ 					ok: true,
+ 					op: "ping",
+ 					version: VERSION,
++					profile: this.#profile,
++					protocol: 2,
+ 					pid: process.pid,
+ 					engines: [...this.#engines.keys()],
+ 				};
+@@ -281,6 +288,20 @@ class TextPredictDaemon {
+ 				if (ingested > 0) this.#persistCadence.touch();
+ 				return { id: request.id, ok: true, op: "sync", ingested };
+ 			}
++			case "import": {
++				if (
++					this.#profile !== "studio" ||
++					!Array.isArray(request.prompts) ||
++					request.prompts.length > 128 ||
++					request.prompts.some(text => typeof text !== "string" || text.length > 4096)
++				)
++					throw new Error("Invalid explicit prediction import");
++				const engine = await this.#engine("ngram");
++				await engine.predictor.observe(request.prompts);
++				engine.markDirty();
++				await engine.persist();
++				return { id: request.id, ok: true, op: "import", ingested: request.prompts.length };
++			}
+ 			case "shutdown":
+ 				setImmediate(() => this.#server.exit("shutdown requested"));
+ 				return { id: request.id, ok: true, op: "shutdown" };
+@@ -358,7 +379,7 @@ class TextPredictDaemon {
+ 			await predictor.ready();
+ 			cursor = undefined;
+ 		}
+-		const engine = new Engine(method, stateDir, predictor, cursor);
++		const engine = new Engine(method, stateDir, predictor, cursor, this.#profile !== "studio");
+ 		const ingested = await engine.ingest(this.#historyDbPath);
+ 		if (ingested > 0) this.#persistCadence.touch();
+ 		logger.debug("text-predict: engine ready", {
+@@ -389,5 +410,7 @@ export async function startTextPredictDaemonFromEnvironment(): Promise<void> {
+ 	if (!endpoint || !agentDir) {
+ 		throw new Error(`${TEXT_PREDICT_SOCKET_ENV} and ${TEXT_PREDICT_AGENT_DIR_ENV} must be set`);
+ 	}
+-	await new TextPredictDaemon(agentDir).serve(endpoint);
++	await new TextPredictDaemon(agentDir, Bun.env[TEXT_PREDICT_PROFILE_ENV] === "studio" ? "studio" : "default").serve(
++		endpoint,
++	);
+ }
+diff --git a/packages/coding-agent/src/predict/foreign-history.ts b/packages/coding-agent/src/predict/foreign-history.ts
+index 86beea3866..7067f815f3 100644
+--- a/packages/coding-agent/src/predict/foreign-history.ts
++++ b/packages/coding-agent/src/predict/foreign-history.ts
+@@ -14,8 +14,8 @@ import { readForeignJsonRecords } from "../session/foreign-session-jsonl";
+ const PLACEHOLDER = /\[(?:Pasted text|Image) #\d+[^\]]*\]/g;
+ 
+ /** Claude Code then Codex prompts, each in file order; missing or unreadable files contribute nothing. */
+-export async function readForeignPrompts(): Promise<string[]> {
+-	const files = [
++export async function readForeignPrompts(selectedFiles?: readonly string[]): Promise<string[]> {
++	const files = selectedFiles ?? [
+ 		path.join(resolveClaudePaths().configDir, "history.jsonl"),
+ 		path.join(os.homedir(), ".codex", "history.jsonl"),
+ 	];
+diff --git a/packages/coding-agent/src/predict/protocol.ts b/packages/coding-agent/src/predict/protocol.ts
+index 25bb0619e6..a1fd5dff88 100644
+--- a/packages/coding-agent/src/predict/protocol.ts
++++ b/packages/coding-agent/src/predict/protocol.ts
+@@ -19,6 +19,8 @@ export const TEXT_PREDICT_SOCKET_ENV = "OMP_TEXT_PREDICT_SOCKET";
+ 
+ /** Environment key carrying the agent directory whose history and state the daemon serves. */
+ export const TEXT_PREDICT_AGENT_DIR_ENV = "OMP_TEXT_PREDICT_AGENT_DIR";
++export const TEXT_PREDICT_PROFILE_ENV = "OMP_TEXT_PREDICT_PROFILE";
++export type TextPredictProfile = "default" | "studio";
+ 
+ /** Broker readiness regex matched against {@link textPredictReadyBanner}. */
+ export const TEXT_PREDICT_READY_PATTERN = String.raw`omp text-predict listening on \S+`;
+@@ -36,8 +38,16 @@ export function textPredictReadyBanner(endpoint: string): string {
+  * endpoint inside the broker runtime dir. Different agent directories (profiles,
+  * tests) get separate daemons because history and learned state are per agent dir.
+  */
+-export function textPredictDaemon(runtimeDir: string, agentDir: string): { name: string; endpoint: string } {
+-	const key = Bun.hash.wyhash(path.resolve(agentDir)).toString(16).padStart(16, "0").slice(0, 12);
++export function textPredictDaemon(
++	runtimeDir: string,
++	agentDir: string,
++	profile: TextPredictProfile = "default",
++): { name: string; endpoint: string } {
++	const key = Bun.hash
++		.wyhash(profile === "studio" ? path.resolve(agentDir) + "|studio" : path.resolve(agentDir))
++		.toString(16)
++		.padStart(16, "0")
++		.slice(0, 12);
+ 	const endpoint =
+ 		process.platform === "win32"
+ 			? `\\\\.\\pipe\\omp-text-predict-${Bun.hash.wyhash(runtimeDir).toString(16)}-${key}`
+@@ -60,13 +70,24 @@ export type TextPredictRequest =
+ 	  }
+ 	/** Ingest history rows newer than each open engine's cursor. */
+ 	| { id: number; op: "sync" }
++	| { id: number; op: "import"; prompts: string[] }
+ 	/** Persist and exit (a client found a daemon from another omp version). */
+ 	| { id: number; op: "shutdown" };
+ 
+ /** Daemon → client response. */
+ export type TextPredictResponse =
+-	| { id: number; ok: true; op: "ping"; version: string; pid: number; engines: TextPredictMethod[] }
++	| {
++			id: number;
++			ok: true;
++			op: "ping";
++			version: string;
++			pid: number;
++			engines: TextPredictMethod[];
++			profile?: TextPredictProfile;
++			protocol?: number;
++	  }
+ 	| { id: number; ok: true; op: "complete"; suggestion: PredictedWord | null }
+ 	| { id: number; ok: true; op: "feedback" | "shutdown" }
+ 	| { id: number; ok: true; op: "sync"; ingested: number }
++	| { id: number; ok: true; op: "import"; ingested: number }
+ 	| { id: number; ok: false; error: string };
+diff --git a/packages/coding-agent/src/ratchet/prelude-definition.ts b/packages/coding-agent/src/ratchet/prelude-definition.ts
+index 6490e232cf..f6c120fce7 100644
+--- a/packages/coding-agent/src/ratchet/prelude-definition.ts
++++ b/packages/coding-agent/src/ratchet/prelude-definition.ts
+@@ -1,3 +1,4 @@
++import { enforceStudioRatchetBoundary } from "../studio/services/ratchet-boundary";
+ import { type } from "@oh-my-pi/omptype";
+ import type { AgentToolResult, ToolApprovalDecision } from "@oh-my-pi/pi-agent-core";
+ import type { ModelCost } from "@oh-my-pi/pi-catalog/types";
+@@ -194,6 +195,7 @@ async function invokeRatchet(
+ 	lookup: PriceLookup,
+ ): Promise<AgentToolResult<unknown>> {
+ 	const cwd = session.cwd;
++	await enforceStudioRatchetBoundary(cwd, params);
+ 	const lockKey = `${cwd}\0${params.flow}`;
+ 	if (params.action === "init") {
+ 		const state = await withFlowLock(lockKey, () => initFlow(cwd, params.flow, params));
 diff --git a/packages/coding-agent/src/registry/agent-registry.ts b/packages/coding-agent/src/registry/agent-registry.ts
-index 0372bf42a4..c0c48b07f9 100644
+index c6d8fce13d..8c1c7f9c9c 100644
 --- a/packages/coding-agent/src/registry/agent-registry.ts
 +++ b/packages/coding-agent/src/registry/agent-registry.ts
-@@ -50,6 +50,7 @@ export interface AgentRunLifecycle {
+@@ -43,6 +43,7 @@ export interface AgentRunLifecycle {
  
  /** Historical identity and telemetry that remain available after the live session is disposed. */
  export interface AgentHistorySummary {
@@ -22,7 +406,7 @@ index 0372bf42a4..c0c48b07f9 100644
  	agent?: string;
  	modelRole?: string;
  	resolvedModel?: string;
-@@ -92,6 +93,7 @@ export type RegistryEvent =
+@@ -85,6 +86,7 @@ export type RegistryEvent =
  	| { type: "registered"; ref: AgentRef }
  	| { type: "status_changed"; ref: AgentRef }
  	| { type: "metadata_changed"; ref: AgentRef }
@@ -30,7 +414,7 @@ index 0372bf42a4..c0c48b07f9 100644
  	| { type: "removed"; ref: AgentRef };
  
  type RegistryListener = (event: RegistryEvent) => void;
-@@ -266,8 +268,7 @@ export class AgentRegistry {
+@@ -259,8 +261,7 @@ export class AgentRegistry {
  	/**
  	 * Record a short activity gist for the work-aware roster. Display-only and
  	 * read on demand (`irc list`, peer roster), so it emits no event — keeping
@@ -40,7 +424,7 @@ index 0372bf42a4..c0c48b07f9 100644
  	 * `running` agent has current work: a heartbeat for any other status is
  	 * dropped, so a late progress flush can't resurrect activity on a ref that
  	 * `setStatus` just cleared. Every running heartbeat refreshes `lastActivity`
-@@ -298,16 +299,20 @@ export class AgentRegistry {
+@@ -291,16 +292,20 @@ export class AgentRegistry {
  		// closes the race between a parked reviver claiming the ref and finishing
  		// createAgentSession after an explicit kill.
  		if (!ref || ref.status === "aborted" || !this.#matchesExpected(ref, expected)) return false;
@@ -62,10 +446,10 @@ index 0372bf42a4..c0c48b07f9 100644
  	}
  
 diff --git a/packages/coding-agent/src/registry/persisted-agents.ts b/packages/coding-agent/src/registry/persisted-agents.ts
-index f5fffa3f62..77e2c60a38 100644
+index 10d84e3804..4e81670a8e 100644
 --- a/packages/coding-agent/src/registry/persisted-agents.ts
 +++ b/packages/coding-agent/src/registry/persisted-agents.ts
-@@ -350,6 +350,7 @@ async function readPersistedAgentMetadata(
+@@ -353,6 +353,7 @@ async function readPersistedAgentMetadata(
  						typeof record.modelRole === "string" ? record.modelRole : (history.modelRole ?? inferred.modelRole),
  					resolvedModel: typeof record.resolvedModel === "string" ? record.resolvedModel : history.resolvedModel,
  					readOnly: typeof record.readOnly === "boolean" ? record.readOnly : inferred.readOnly,
@@ -73,48 +457,32 @@ index f5fffa3f62..77e2c60a38 100644
  				};
  				return false;
  			},
-diff --git a/packages/coding-agent/src/session/agent-session-events.ts b/packages/coding-agent/src/session/agent-session-events.ts
-index d8b3336cb0..9e8110c137 100644
---- a/packages/coding-agent/src/session/agent-session-events.ts
-+++ b/packages/coding-agent/src/session/agent-session-events.ts
-@@ -46,6 +46,11 @@ export type AgentSessionEvent =
- 			finalError?: string;
- 			retryErrors?: RetryErrorUpdate[];
- 	  }
-+	| {
-+			type: "unexpected_stop_retry";
-+			attempt: number;
-+			maxAttempts: number;
-+	  }
- 	| { type: "retry_fallback_applied"; from: string; to: string; role: string; reason?: string }
- 	| { type: "retry_fallback_succeeded"; model: string; role: string }
- 	| { type: "model_changed" }
 diff --git a/packages/coding-agent/src/session/agent-session-types.ts b/packages/coding-agent/src/session/agent-session-types.ts
-index eed39b3ca8..fd614a69d5 100644
+index 7f1129a07a..9c46fe2a57 100644
 --- a/packages/coding-agent/src/session/agent-session-types.ts
 +++ b/packages/coding-agent/src/session/agent-session-types.ts
-@@ -42,6 +42,7 @@ import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
- import type { ToolSession } from "../tools";
+@@ -46,6 +46,7 @@ import type { ToolSession } from "../tools";
  import type { XdevState } from "../tools/xdev";
  import type { CodexAutoRedeemCoordinator } from "./codex-auto-reset";
+ import type { SettingsGatedToolDelta } from "./session-tools";
 +import type { CustomMessage } from "./messages";
  import type { SessionManager } from "./session-manager";
  
  /** Maximum time the interactive shutdown path waits for Mnemopi consolidation. */
-@@ -361,6 +362,8 @@ export interface PromptOptions {
- 	attribution?: MessageAttribution;
- 	/** Skip pre-send compaction checks for this prompt. */
- 	skipCompactionCheck?: boolean;
+@@ -422,6 +423,8 @@ export interface PromptOptions {
+ 	 * failed before admission still only settles through the returned promise.
+ 	 */
+ 	onPromptAdmitted?: () => void;
 +	/** Messages injected ahead of the user message in the same turn. */
 +	prependMessages?: CustomMessage[];
  }
  
  /** Payload for {@link AgentSession.setPromptDropped}: a user prompt cancelled
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index 398a2ec792..534bab8771 100644
+index 2357f091dd..273dfc207b 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
-@@ -486,6 +486,8 @@ type ScheduledAgentContinueOptions = {
+@@ -619,6 +619,8 @@ type ScheduledAgentContinueOptions = {
  	shouldContinue?: () => boolean;
  	onSkip?: (reason: AgentContinueSkipReason) => void;
  	onError?: (error: unknown) => void;
@@ -123,7 +491,32 @@ index 398a2ec792..534bab8771 100644
  };
  
  type ScheduledAgentContinueRequest = {
-@@ -841,6 +843,10 @@ export class AgentSession {
+@@ -701,6 +703,14 @@ export function powerAssertionOptions(mode: "off" | "idle" | "display" | "system
+ 	};
+ }
+ 
++export interface QueuedMessageEntry {
++	id: string;
++	text: string;
++	queue: "steering" | "followUp";
++	state: "queued" | "inFlight" | "held";
++	imageCount: number;
++	editable: boolean;
++}
+ export class AgentSession implements SettingsScope {
+ 	readonly agent: Agent;
+ 	readonly sessionManager: SessionManager;
+@@ -772,6 +782,9 @@ export class AgentSession implements SettingsScope {
+ 	 * command.
+ 	 */
+ 	readonly #queuedMessageRawText = new WeakMap<AgentMessage, string>();
++	readonly #queuedMessageIds = new WeakMap<AgentMessage, string>();
++	readonly #heldQueueGroups: Array<{ sessionId: string; queue: "steering" | "followUp"; messages: AgentMessage[] }> =
++		[];
+ 
+ 	// Event subscription state
+ 	#unsubscribeAgent?: () => void;
+@@ -1008,6 +1021,10 @@ export class AgentSession implements SettingsScope {
  	 *  incremented, so `isStreaming` alone cannot tell a host that a submission is admitted. */
  	#admittedSubmissionCount = 0;
  	#admittedSubmissionsSettled: PromiseWithResolvers<void> | undefined;
@@ -134,18 +527,7 @@ index 398a2ec792..534bab8771 100644
  	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
  	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
  	// checks in #handleAgentEvent) still fire on the original schedule — only the
-@@ -1270,6 +1276,10 @@ export class AgentSession {
- 		return this.#prewalk.arm(target, thinkingLevel);
- 	}
- 
-+	disarmPrewalk(): boolean {
-+		return this.#prewalk.disarm();
-+	}
-+
- 	/** Restore a planning model and re-arm prewalk without partially applying a rejected restart. */
- 	restartPrewalk(
- 		source: Model,
-@@ -1286,7 +1296,11 @@ export class AgentSession {
+@@ -1522,7 +1539,11 @@ export class AgentSession implements SettingsScope {
  		if (!state?.enabled) {
  			throw new ToolError("Plan mode is not active.");
  		}
@@ -158,7 +540,7 @@ index 398a2ec792..534bab8771 100644
  			suppliedTitle: title,
  			statePlanFilePath: state.planFilePath,
  			readPlan: url => this.#readPlanFile(url),
-@@ -1294,7 +1308,7 @@ export class AgentSession {
+@@ -1530,7 +1551,7 @@ export class AgentSession implements SettingsScope {
  		});
  		return {
  			content: [{ type: "text", text: "Plan ready for review." }],
@@ -167,7 +549,7 @@ index 398a2ec792..534bab8771 100644
  		};
  	}
  
-@@ -3884,7 +3898,7 @@ export class AgentSession {
+@@ -4476,7 +4497,7 @@ export class AgentSession implements SettingsScope {
  					return;
  				}
  			}
@@ -176,22 +558,7 @@ index 398a2ec792..534bab8771 100644
  				options?.onSkip?.("aborted");
  				return;
  			}
-@@ -3995,7 +4009,13 @@ export class AgentSession {
- 				// streaming turn — agent.continue() here would race the handoff's session
- 				// reset. The first-class fix is in #checkCompaction/the agent_end handler,
- 				// but this guard catches anything that bypasses that path.
--				if (signal.aborted || this.#isDisposed || this.isCompacting || this.isGeneratingHandoff) {
-+				if (
-+					signal.aborted ||
-+					this.#isDisposed ||
-+					this.#abortInProgress ||
-+					this.isCompacting ||
-+					this.isGeneratingHandoff
-+				) {
- 					this.#skipAgentContinue("session-unavailable", request);
- 					return;
- 				}
-@@ -4003,6 +4023,14 @@ export class AgentSession {
+@@ -4610,6 +4631,14 @@ export class AgentSession implements SettingsScope {
  					this.#skipAgentContinue("should-continue-false", request);
  					return;
  				}
@@ -204,9 +571,9 @@ index 398a2ec792..534bab8771 100644
 +					}
 +				}
  
- 				const active = this.#activeAgentContinue;
- 				if (active) {
-@@ -4062,6 +4090,7 @@ export class AgentSession {
+ 				for (;;) {
+ 					const active = this.#activeAgentContinue;
+@@ -4689,6 +4718,7 @@ export class AgentSession implements SettingsScope {
  				delayMs: 100,
  				generation: options.generation,
  				shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -214,7 +581,7 @@ index 398a2ec792..534bab8771 100644
  			});
  			return true;
  		}
-@@ -4105,6 +4134,7 @@ export class AgentSession {
+@@ -4732,6 +4762,7 @@ export class AgentSession implements SettingsScope {
  						source: "auto-continue-queued-message",
  						generation,
  						shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -222,8 +589,8 @@ index 398a2ec792..534bab8771 100644
  					});
  					return;
  				}
-@@ -4492,6 +4522,28 @@ export class AgentSession {
- 		}
+@@ -5037,6 +5068,28 @@ export class AgentSession implements SettingsScope {
+ 		await this.#extensionRunner.emit(mapped);
  	}
  
 +	/**
@@ -251,7 +618,15 @@ index 398a2ec792..534bab8771 100644
  	/**
  	 * Subscribe to agent events.
  	 * Session persistence is handled internally (saves messages on message_end).
-@@ -5721,6 +5773,11 @@ export class AgentSession {
+@@ -5689,6 +5742,7 @@ export class AgentSession implements SettingsScope {
+ 
+ 	/** Drop the in-memory conversation state after the terminal dispose flush. */
+ 	#releaseRetainedSessionMemory(): void {
++		this.#heldQueueGroups.length = 0;
+ 		this.#releaseQueuedTtsrReservations();
+ 		this.agent.reset();
+ 		this.agent.setAppendOnlyContext(undefined);
+@@ -6447,6 +6501,11 @@ export class AgentSession implements SettingsScope {
  	}
  
  	/** All messages including custom types like BashExecutionMessage */
@@ -263,20 +638,17 @@ index 398a2ec792..534bab8771 100644
  	get messages(): AgentMessage[] {
  		return this.agent.state.messages;
  	}
-@@ -6467,7 +6524,10 @@ export class AgentSession {
- 				throw new AgentBusyError();
- 			}
- 
--			// Steer/follow-up/aside the keyword notices BEFORE the queued user message so the
-+			for (const prelude of options?.prependMessages ?? []) {
-+				await this.#queueCustomMessage(prelude, streamingBehavior);
-+			}
-+			// Steer/follow-up the keyword notices BEFORE the queued user message so the
- 			// model reads the steering notice ahead of the prompt it modifies.
- 			for (const notice of keywordNotices) {
- 				await this.#queueCustomMessage(notice, streamingBehavior);
-@@ -6569,21 +6629,17 @@ export class AgentSession {
- 
+@@ -7226,7 +7285,7 @@ export class AgentSession implements SettingsScope {
+ 			const queued = await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
+ 				timestamp: submittedAt,
+ 				attribution: promptAttribution,
+-				prependMessages: keywordNotices,
++				prependMessages: [...(options?.prependMessages ?? []), ...keywordNotices],
+ 				rawText: typedText,
+ 				onPromptAdmitted: options?.onPromptAdmitted,
+ 				promptGeneration: queueGeneration,
+@@ -7355,21 +7414,17 @@ export class AgentSession implements SettingsScope {
+ 		let turnError: unknown;
  		let dispatched = false;
  		try {
 +			const injected = [
@@ -304,8 +676,8 @@ index 398a2ec792..534bab8771 100644
 +				prependMessages: injected.length > 0 ? injected : undefined,
  			});
  		} catch (error) {
- 			if (error instanceof AgentStartPolicyChangedError && message.role === "user") {
-@@ -6864,6 +6920,9 @@ export class AgentSession {
+ 			turnError = error;
+@@ -7690,6 +7745,9 @@ export class AgentSession implements SettingsScope {
  			acceptTerminalEmptyStop?: boolean;
  		},
  	): Promise<boolean> {
@@ -315,7 +687,7 @@ index 398a2ec792..534bab8771 100644
  		// Returns false when the prompt was dropped before reaching the agent —
  		// every pre-dispatch bail (generation bump from abort, disposal, usage
  		// preflight denial) exits silently, and prompt() uses the outcome to hand
-@@ -7434,6 +7493,7 @@ export class AgentSession {
+@@ -8313,6 +8371,7 @@ export class AgentSession implements SettingsScope {
  		this.#queuedMessageDrainScheduled = true;
  		this.#scheduleAgentContinue({
  			source: "queued-message-drain",
@@ -323,7 +695,190 @@ index 398a2ec792..534bab8771 100644
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
  				return (
-@@ -9290,7 +9350,10 @@ export class AgentSession {
+@@ -8837,13 +8896,28 @@ export class AgentSession implements SettingsScope {
+ 	 *  dequeued but never recorded — live-steered into the aborted response, or taken for its next
+ 	 *  model call — and treats it as queued ahead of the rest (it was queued first).
+ 	 *  Plain Alt+Up dequeue preserves those non-user steers. */
+-	clearQueue(options?: { forInterrupt?: boolean }): {
++	clearQueue(options?: { forInterrupt?: boolean; preserveGroups?: boolean }): {
+ 		steering: RestoredQueuedMessage[];
+ 		followUp: RestoredQueuedMessage[];
+ 	} {
+ 		const withdrawn = options?.forInterrupt ? this.agent.withdrawUndeliveredQueuedMessages() : undefined;
+ 		const steeringAll = [...(withdrawn?.steering ?? []), ...this.agent.peekSteeringQueue()];
+ 		const followUpAll = [...(withdrawn?.followUp ?? []), ...this.agent.peekFollowUpQueue()];
++		if (options?.preserveGroups) {
++			for (const [queue, messages] of [
++				["steering", steeringAll],
++				["followUp", followUpAll],
++			] as const) {
++				for (let index = 0; index < messages.length; index++)
++					if (isUserAuthoredQueuedMessage(messages[index])) {
++						this.#heldQueueGroups.push({
++							sessionId: this.sessionId,
++							queue,
++							messages: messages.slice(this.#queuedUserGroupStart(messages, index), index + 1),
++						});
++					}
++			}
++		}
+ 		const steering = steeringAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
+ 		const followUp = followUpAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
+ 		const keep: (m: AgentMessage) => boolean = options?.forInterrupt
+@@ -8888,6 +8962,81 @@ export class AgentSession implements SettingsScope {
+ 		};
+ 	}
+ 
++	/** Stable identities refer to the native message object, never to display text or position. */
++	getQueuedMessageEntries(): QueuedMessageEntry[] {
++		const entries: QueuedMessageEntry[] = [];
++		const append = (
++			messages: readonly AgentMessage[],
++			queue: "steering" | "followUp",
++			state: "queued" | "inFlight" | "held",
++		) => {
++			for (const message of messages) {
++				if (!isUserAuthoredQueuedMessage(message)) continue;
++				let id = this.#queuedMessageIds.get(message);
++				if (!id) {
++					id = Bun.randomUUIDv7();
++					this.#queuedMessageIds.set(message, id);
++				}
++				entries.push({
++					id,
++					text: queueChipText(message),
++					queue,
++					state,
++					imageCount: toRestoredQueuedMessage(message).images?.length ?? 0,
++					editable: state !== "inFlight" && message.role === "user",
++				});
++			}
++		};
++		append(this.agent.peekLiveSteeredMessages(), "steering", "inFlight");
++		append(this.agent.peekSteeringQueue(), "steering", "queued");
++		append(this.agent.peekFollowUpQueue(), "followUp", "queued");
++		for (const group of this.#heldQueueGroups)
++			if (group.sessionId === this.sessionId) append(group.messages, group.queue, "held");
++		return entries;
++	}
++
++	/** Edit prepared text in place. Keep images, attribution and hidden companions; never replay commands. */
++	editQueuedMessage(id: string, queue: "steering" | "followUp", expectedText: string, text: string): boolean {
++		const held = this.#heldQueueGroups.find(
++			group =>
++				group.sessionId === this.sessionId &&
++				group.queue === queue &&
++				group.messages.some(message => this.#queuedMessageIds.get(message) === id),
++		);
++		const messages =
++			held?.messages ?? (queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue());
++		const index = this.#findQueuedUserMessage(messages, { id });
++		const message = messages[index];
++		if (!message || message.role !== "user" || queueChipText(message) !== expectedText) return false;
++		if (!text.trim() || text.length > 32768) throw new Error("Invalid queue text");
++		const images = typeof message.content === "string" ? [] : message.content.filter(part => part.type !== "text");
++		message.content = [{ type: "text", text }, ...images];
++		this.#queuedMessageRawText.set(message, text);
++		if (!held) {
++			this.agent.replaceQueue(queue, [...messages]);
++			this.#reconcileQueuedMessageDrain();
++		}
++		return true;
++	}
++
++	/** Return a held original group to execution only after an explicit operator action. */
++	restoreQueuedMessage(id: string): boolean {
++		const index = this.#heldQueueGroups.findIndex(
++			group =>
++				group.sessionId === this.sessionId &&
++				group.messages.some(message => this.#queuedMessageIds.get(message) === id),
++		);
++		if (index < 0) return false;
++		const [group] = this.#heldQueueGroups.splice(index, 1);
++		this.#advisors.autoResumeSuppressed = false;
++		if (group.queue === "steering")
++			this.agent.moveFollowUpsToSteering([...this.agent.peekFollowUpQueue()], group.messages);
++		else this.agent.replaceQueue("followUp", [...this.agent.peekFollowUpQueue(), ...group.messages]);
++		this.#allowQueuedMessageDrainRetry();
++		this.#scheduleIdleQueueDrain();
++		return true;
++	}
++
+ 	/** Last {@link getQueuedMessages} snapshot emitted as a `queue_update` event.
+ 	 *  Coalesces the agent's internal `onQueueChange` notification down to the
+ 	 *  externally observable transitions RPC/ACP/TUI subscribers actually care
+@@ -8922,7 +9071,7 @@ export class AgentSession implements SettingsScope {
+ 	 * already delivered target changes nothing; repeated calls may remove further
+ 	 * duplicates.
+ 	 */
+-	removeQueuedMessage(text: string, queue: "steering" | "followUp"): boolean {
++	removeQueuedMessage(text: string | { id: string }, queue: "steering" | "followUp"): boolean {
+ 		return this.takeQueuedMessage(text, queue) !== undefined;
+ 	}
+ 
+@@ -8930,7 +9079,19 @@ export class AgentSession implements SettingsScope {
+ 	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
+ 	 * content (its chip text and images); undefined when nothing matched.
+ 	 */
+-	takeQueuedMessage(text: string, queue: "steering" | "followUp"): RestoredQueuedMessage | undefined {
++	takeQueuedMessage(text: string | { id: string }, queue: "steering" | "followUp"): RestoredQueuedMessage | undefined {
++		if (typeof text !== "string") {
++			const held = this.#heldQueueGroups.findIndex(
++				group =>
++					group.sessionId === this.sessionId &&
++					group.queue === queue &&
++					group.messages.some(message => this.#queuedMessageIds.get(message) === text.id),
++			);
++			if (held >= 0) {
++				const [group] = this.#heldQueueGroups.splice(held, 1);
++				return toRestoredQueuedMessage(group.messages[group.messages.length - 1]);
++			}
++		}
+ 		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
+ 		const index = this.#findQueuedUserMessage(selected, text);
+ 		if (index < 0) return undefined;
+@@ -8947,7 +9108,7 @@ export class AgentSession implements SettingsScope {
+ 	 * {@link removeQueuedMessage}; agent-attributed handoffs are never promoted. A missing
+ 	 * or already delivered target changes nothing; repeated calls may promote duplicates.
+ 	 */
+-	promoteQueuedMessage(text: string): boolean {
++	promoteQueuedMessage(text: string | { id: string }): boolean {
+ 		const followUp = this.agent.peekFollowUpQueue();
+ 		const index = this.#findQueuedUserMessage(followUp, text);
+ 		if (index < 0) return false;
+@@ -8973,7 +9134,11 @@ export class AgentSession implements SettingsScope {
+ 	 * matches the raw text the caller originally submitted first, then the queued chip text
+ 	 * itself (exact); -1 when nothing matches.
+ 	 */
+-	#findQueuedUserMessage(queue: readonly AgentMessage[], text: string): number {
++	#findQueuedUserMessage(queue: readonly AgentMessage[], text: string | { id: string }): number {
++		if (typeof text !== "string")
++			return queue.findIndex(
++				message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageIds.get(message) === text.id,
++			);
+ 		let index = queue.findIndex(
+ 			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
+ 		);
+@@ -9553,7 +9718,10 @@ export class AgentSession implements SettingsScope {
+ 		reason?: string;
+ 		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
+ 		preserveCompaction?: boolean;
++		/** Studio keeps unsubmitted input groups in Runtime until explicitly restored or removed. */
++		preserveQueuedInput?: boolean;
+ 	}): Promise<void> {
++		if (options?.preserveQueuedInput) this.clearQueue({ forInterrupt: true, preserveGroups: true });
+ 		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
+ 		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
+ 		if (userInterrupt) this.#advisors.autoResumeSuppressed = true;
+@@ -9640,6 +9808,7 @@ export class AgentSession implements SettingsScope {
+ 				this.#preserveAdvisorCard(card);
+ 			}
+ 		} finally {
++			if (options?.preserveQueuedInput) this.clearQueue({ forInterrupt: true, preserveGroups: true });
+ 			this.#abortInProgress = false;
+ 			this.#drainStrandedQueuedMessages();
+ 		}
+@@ -10765,7 +10934,10 @@ export class AgentSession implements SettingsScope {
  	}
  
  	/** Retry the last failed assistant turn when the session is idle. */
@@ -335,7 +890,7 @@ index 398a2ec792..534bab8771 100644
  		return this.#recovery.retry();
  	}
  
-@@ -10917,7 +10980,7 @@ export class AgentSession {
+@@ -12483,7 +12655,7 @@ export class AgentSession implements SettingsScope {
  		const settingsKey = provider === "anthropic" ? "claudeResets.autoRedeem" : "codexResets.autoRedeem";
  		const source = provider === "anthropic" ? "claude-auto-reset" : "codex-auto-reset";
  		const runner = this.#extensionRunner;
@@ -344,7 +899,7 @@ index 398a2ec792..534bab8771 100644
  			if (!coordinator.notifiedKeys.has(first.attemptKey)) {
  				coordinator.notifiedKeys.add(first.attemptKey);
  				this.emitNotice(
-@@ -10950,16 +11013,18 @@ export class AgentSession {
+@@ -12516,16 +12688,18 @@ export class AgentSession implements SettingsScope {
  				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
  				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
  		try {
@@ -371,46 +926,31 @@ index 398a2ec792..534bab8771 100644
 +						},
 +					]);
  			if (choice === "Yes") {
- 				if (provider === "anthropic") this.settings.set("claudeResets.autoRedeem", "yes");
- 				else this.settings.set("codexResets.autoRedeem", "yes");
-diff --git a/packages/coding-agent/src/session/claude-session-store.ts b/packages/coding-agent/src/session/claude-session-store.ts
-index 79807a2479..b2c7e81396 100644
---- a/packages/coding-agent/src/session/claude-session-store.ts
-+++ b/packages/coding-agent/src/session/claude-session-store.ts
-@@ -115,7 +115,9 @@ async function readRegisteredProjects(root: string): Promise<string[]> {
- }
- 
- function projectCwd(encoded: string, registered: readonly string[]): string {
--	const exact = registered.find(project => project.replaceAll(path.sep, "-") === encoded);
-+	const exact = registered.find(
-+		project => project.replaceAll(path.sep, "-") === encoded || project.replace(/[:/\\._]/g, "-") === encoded,
-+	);
- 	if (exact) return exact;
- 	if (!encoded.startsWith("-")) return encoded;
- 	return encoded.replaceAll("-", path.sep);
-diff --git a/packages/coding-agent/src/session/prewalk.ts b/packages/coding-agent/src/session/prewalk.ts
-index 36d4de9a09..b50e4108e1 100644
---- a/packages/coding-agent/src/session/prewalk.ts
-+++ b/packages/coding-agent/src/session/prewalk.ts
-@@ -223,6 +223,13 @@ export class PrewalkCoordinator {
- 		});
+ 				if (provider === "anthropic") cfgClaudeResetsAutoRedeem.set(this.settings, "yes");
+ 				else cfgCodexResetsAutoRedeem.set(this.settings, "yes");
+@@ -13064,7 +13238,7 @@ export class AgentSession implements SettingsScope {
+ 	 * @returns the archive path and member names, or `undefined` when the main
+ 	 * session has no messages.
+ 	 */
+-	async dumpSessionArchiveToTmpDir(): Promise<SessionDumpArchive | undefined> {
++	async dumpSessionArchiveToTmpDir(outputPath?: string): Promise<SessionDumpArchive | undefined> {
+ 		const messages = this.messages;
+ 		if (messages.length === 0) return undefined;
+ 		const entries: Array<readonly [string, string]> = [["session.md", `${this.formatSessionAsText()}\n`]];
+@@ -13097,7 +13271,7 @@ export class AgentSession implements SettingsScope {
+ 			entries.push([`subagents/${key}.md`, `${text}\n`]);
+ 			subagentCount++;
+ 		}
+-		const filePath = path.join(os.tmpdir(), `omp-dump-${Snowflake.next()}.zip`);
++		const filePath = outputPath ?? path.join(os.tmpdir(), `omp-dump-${Snowflake.next()}.zip`);
+ 		await writeArchive(filePath, "zip", entries);
+ 		return { path: filePath, files: entries.map(([name]) => name), subagentCount, subagentError };
  	}
- 
-+	/** Clears an armed prewalk without switching models. */
-+	disarm(): boolean {
-+		if (!this.#prewalk) return false;
-+		this.#clearPrewalkState();
-+		return true;
-+	}
-+
- 	/** Arms a prewalk immediately for an explicit slash-command request. */
- 	arm(target: Model, thinkingLevel?: ConfiguredThinkingLevel): boolean {
- 		const active = this.#prewalk;
 diff --git a/packages/coding-agent/src/session/session-entries.ts b/packages/coding-agent/src/session/session-entries.ts
-index 4b7e280657..101aba4345 100644
+index 391e88f251..eb25b3488c 100644
 --- a/packages/coding-agent/src/session/session-entries.ts
 +++ b/packages/coding-agent/src/session/session-entries.ts
-@@ -18,6 +18,10 @@ export const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";
+@@ -20,6 +20,10 @@ export const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";
  
  export const TITLE_CHANGE_ENTRY_TYPE = "title_change";
  
@@ -421,7 +961,7 @@ index 4b7e280657..101aba4345 100644
  export type SessionTitleSource = "auto" | "user";
  
  /** Fixed-width first-line slot carrying the mutable current session title. */
-@@ -51,6 +55,8 @@ export interface SessionHeader {
+@@ -53,6 +57,8 @@ export interface SessionHeader {
  	previousSessionFiles?: string[];
  	/** Provider prompt-cache identity inherited by exact-route full forks. */
  	providerPromptCacheKey?: string;
@@ -430,10 +970,10 @@ index 4b7e280657..101aba4345 100644
  }
  
  export interface NewSessionOptions {
-@@ -61,6 +67,10 @@ export interface NewSessionOptions {
- 	drop?: boolean;
- 	/** Additional workspace directories to seed on the new session. */
+@@ -65,6 +71,10 @@ export interface NewSessionOptions {
  	additionalDirectories?: string[];
+ 	/** Directory for the new session file (and later `/new` sessions); defaults to the current session directory. */
+ 	sessionDir?: string;
 +	/** Creation marker for a fresh session; never applied while opening an existing session. */
 +	studioOrigin?: StudioSessionOrigin;
 +	/** Reset inherited usage totals when forking a session. */
@@ -442,18 +982,32 @@ index 4b7e280657..101aba4345 100644
  
  export interface SessionEntryBase {
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
-index d24d866a2a..7c4b0189a8 100644
+index 3df8cdc8ff..8f6f0657e9 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
-@@ -62,6 +62,7 @@ import {
- 	type SessionMessageEntry,
+@@ -42,7 +42,12 @@ import {
+ } from "./messages";
+ import type { WorkPoolYieldItem } from "../task/workpool-yield";
+ import type { RetryFallbackRole } from "./retry-fallback-chains";
+-import { type BuildSessionContextOptions, buildSessionContext, type SessionContext } from "./session-context";
++import {
++	type BuildSessionContextOptions,
++	buildSessionContext,
++	getRestorableSessionModels,
++	type SessionContext,
++} from "./session-context";
+ import {
+ 	type BranchSummaryEntry,
+ 	type CompactionEntry,
+@@ -65,6 +70,7 @@ import {
+ 	type SessionTitleCard,
  	type SessionTitleSource,
  	type SessionTreeNode,
 +	type StudioSessionOrigin,
  	type ThinkingLevelChangeEntry,
  	TITLE_CHANGE_ENTRY_TYPE,
  	type TitleChangeEntry,
-@@ -724,6 +725,9 @@ export class SessionManager {
+@@ -868,6 +874,9 @@ export class SessionManager {
  	#hasTitleSlot = true;
  	#entries: SessionEntry[] = [];
  	#index = new SessionEntryIndex();
@@ -463,7 +1017,7 @@ index d24d866a2a..7c4b0189a8 100644
  
  	/** File reflects all current entries; appends can go incrementally. */
  	#fileIsCurrent = false;
-@@ -807,6 +811,8 @@ export class SessionManager {
+@@ -953,6 +962,8 @@ export class SessionManager {
  	 * back to the most-recent session instead of being treated as a fresh crumb.
  	 */
  	#breadcrumbFresh = false;
@@ -471,8 +1025,8 @@ index d24d866a2a..7c4b0189a8 100644
 +	#newSessionStudioOrigin: StudioSessionOrigin | undefined;
  	#sessionNameChangedCallbacks = new Set<() => void>();
  	#persistenceErrorCallbacks = new Set<(error: Error) => void>();
- 
-@@ -1508,6 +1514,8 @@ export class SessionManager {
+ 	#persistenceNoticeCallbacks = new Set<(notice: SessionPersistenceNotice) => void>();
+@@ -1958,6 +1969,8 @@ export class SessionManager {
  			parentSession: options?.parentSession,
  			providerPromptCacheKey: options?.providerPromptCacheKey,
  		};
@@ -481,7 +1035,7 @@ index d24d866a2a..7c4b0189a8 100644
  		const workspace = normalizeSessionWorkspace({
  			cwd: this.#cwd,
  			directories: options?.additionalDirectories ?? [],
-@@ -1520,6 +1528,7 @@ export class SessionManager {
+@@ -1970,6 +1983,7 @@ export class SessionManager {
  
  		this.#entries = [];
  		this.#index.clear();
@@ -489,9 +1043,9 @@ index d24d866a2a..7c4b0189a8 100644
  		this.#fileIsCurrent = false;
  		this.#rewriteRequired = false;
  		this.#forceFileCreation = false;
-@@ -1554,16 +1563,80 @@ export class SessionManager {
- 		this.#titleSource = header.titleSource;
- 		this.#titleUpdatedAt = header.timestamp;
+@@ -2006,16 +2020,80 @@ export class SessionManager {
+ 		const repairedUsage = normalizeLoadedUsage(entries);
+ 		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
  		this.#index.rebuild(entries);
 +		this.clearReservedMessageIds();
 +	}
@@ -571,7 +1125,7 @@ index d24d866a2a..7c4b0189a8 100644
  	#setLeaf(id: string | null): void {
  		this.#index.setLeaf(id);
  		const batch = this.#atomicEntryBatch;
-@@ -2538,6 +2611,10 @@ export class SessionManager {
+@@ -3091,6 +3169,10 @@ export class SessionManager {
  		return this.#sessionId;
  	}
  
@@ -582,7 +1136,50 @@ index d24d866a2a..7c4b0189a8 100644
  	getSessionFile(): string | undefined {
  		return this.#sessionFile;
  	}
-@@ -2779,7 +2856,15 @@ export class SessionManager {
+@@ -3220,15 +3302,39 @@ export class SessionManager {
+ 	 * gets it back from its own entries.
+ 	 */
+ 	getSessionTitleCard(): SessionTitleCard | undefined {
+-		const title = this.#sessionName;
++		return SessionManager.#cardForTitle(this.#sessionName, this.#entries);
++	}
++
++	static #cardForTitle(title: string | undefined, entries: readonly FileEntry[]): SessionTitleCard | undefined {
+ 		if (!title) return undefined;
+-		for (let i = this.#entries.length - 1; i >= 0; i--) {
+-			const entry = this.#entries[i]!;
++		for (let i = entries.length - 1; i >= 0; i--) {
++			const entry = entries[i]!;
+ 			if (entry.type === TITLE_CHANGE_ENTRY_TYPE) return entry.title === title ? entry.card : undefined;
+ 		}
+ 		return undefined;
+ 	}
+ 
++	/** Read only title metadata without acquiring session ownership or writing migrations. */
++	static async peekSessionTitle(
++		filePath: string,
++		storage: SessionStorage = new FileSessionStorage(),
++	): Promise<{ sessionId: string; title?: string; source?: SessionTitleSource; card?: SessionTitleCard }> {
++		const limit = 8 * 1024 * 1024;
++		if (storage.statSync(filePath).size > limit) throw new Error("Session exceeds the 8 MiB title-inspection limit");
++		const loaded = await loadSessionFile(filePath, storage, { throwIfMissing: true });
++		const header = loaded.entries[0];
++		if (loaded.invalidHeader || !header || header.type !== "session" || loaded.malformedRecords > 0)
++			throw new Error("The saved session is incomplete or damaged; title inspection cannot continue");
++		if ((loaded.sourceSize ?? 0) > limit) throw new Error("Session exceeds the 8 MiB title-inspection limit");
++		const card = SessionManager.#cardForTitle(header.title, loaded.entries);
++		return {
++			sessionId: header.id,
++			...(header.title ? { title: header.title } : {}),
++			...(header.titleSource ? { source: header.titleSource } : {}),
++			...(card ? { card } : {}),
++		};
++	}
++
+ 	onSessionNameChanged(cb: () => void): () => void {
+ 		this.#sessionNameChangedCallbacks.add(cb);
+ 		return () => {
+@@ -3361,7 +3467,15 @@ export class SessionManager {
  			| PythonExecutionMessage
  			| FileMentionMessage,
  	): string {
@@ -599,7 +1196,7 @@ index d24d866a2a..7c4b0189a8 100644
  		this.#recordEntry(entry);
  		return entry.id;
  	}
-@@ -2913,9 +2998,12 @@ export class SessionManager {
+@@ -3501,9 +3615,12 @@ export class SessionManager {
  			tokensAfter?: number;
  		} = {},
  	): string {
@@ -613,7 +1210,7 @@ index d24d866a2a..7c4b0189a8 100644
  			summary,
  			shortSummary,
  			firstKeptEntryId,
-@@ -3299,10 +3387,16 @@ export class SessionManager {
+@@ -3906,10 +4023,16 @@ export class SessionManager {
  	 * @param cwd Working directory (stored in the session header)
  	 * @param sessionDir Optional session directory; defaults to the cwd-derived dir.
  	 */
@@ -632,7 +1229,7 @@ index d24d866a2a..7c4b0189a8 100644
  		return manager;
  	}
  
-@@ -3346,6 +3440,7 @@ export class SessionManager {
+@@ -3953,6 +4076,7 @@ export class SessionManager {
  			copyArtifacts?: boolean;
  			suppressBreadcrumb?: boolean;
  			sessionFile?: string;
@@ -640,7 +1237,7 @@ index d24d866a2a..7c4b0189a8 100644
  			resetInheritedCost?: boolean;
  			repairInterruptedTail?: boolean;
  		},
-@@ -3353,6 +3448,7 @@ export class SessionManager {
+@@ -3960,6 +4084,7 @@ export class SessionManager {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const manager = new SessionManager(cwd, dir, true, storage);
  		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
@@ -648,7 +1245,7 @@ index d24d866a2a..7c4b0189a8 100644
  
  		// A missing source must fail instead of forking an empty parentless session:
  		// the loader swallows ENOENT by default for fresh-session opens, so fork opts out.
-@@ -3375,6 +3471,7 @@ export class SessionManager {
+@@ -3981,6 +4106,7 @@ export class SessionManager {
  			{
  				parentSession: sourceHeader?.id,
  				providerPromptCacheKey: sourceHeader?.providerPromptCacheKey ?? sourceHeader?.id,
@@ -656,7 +1253,46 @@ index d24d866a2a..7c4b0189a8 100644
  			},
  			options?.sessionFile,
  		);
-@@ -3561,6 +3658,7 @@ export class SessionManager {
+@@ -4128,6 +4254,38 @@ export class SessionManager {
+ 		return manager;
+ 	}
+ 
++	/** Read saved model roles without taking a writer lock, migrating disk data, or changing breadcrumbs. */
++	static async peekRestoreModels(
++		filePath: string,
++		storage: SessionStorage = new FileSessionStorage(),
++	): Promise<{ sessionId: string; selectors: string[]; thinking?: string }> {
++		if (storage.statSync(filePath).size > 32 * 1024 * 1024)
++			throw new Error("Session exceeds the 32 MiB model-inspection limit");
++		const loaded = await loadSessionFile(filePath, storage, { throwIfMissing: true });
++		const header = loaded.entries[0];
++		if (loaded.invalidHeader || !header || header.type !== "session" || loaded.malformedRecords > 0)
++			throw new Error("The saved session is incomplete or damaged; model inspection cannot continue");
++		if ((loaded.sourceSize ?? 0) > 32 * 1024 * 1024)
++			throw new Error("Session exceeds the 32 MiB model-inspection limit");
++		migrateToCurrentVersion(loaded.entries);
++		const entries = loaded.entries.slice(1) as SessionEntry[];
++		const index = new SessionEntryIndex();
++		index.rebuild(entries);
++		const context = buildSessionContext(entries, index.leafId(), index.entriesById());
++		const lastRole = index.pathTo(index.leafId()).findLast(entry => entry.type === "model_change");
++		const selectors = getRestorableSessionModels(
++			context.models,
++			lastRole?.type === "model_change" ? (lastRole.role ?? "default") : undefined,
++		);
++		return {
++			sessionId: header.id,
++			selectors,
++			...((context.configuredThinkingLevel ?? context.thinkingLevel)
++				? { thinking: context.configuredThinkingLevel ?? context.thinkingLevel }
++				: {}),
++		};
++	}
++
+ 	/**
+ 	 * Lock-free peek for cold subagent revival: returns the recorded working
+ 	 * directory (session header) and the latest `session_init` contract (system
+@@ -4167,6 +4325,7 @@ export class SessionManager {
  		cwd: string,
  		sessionDir?: string,
  		storage: SessionStorage = new FileSessionStorage(),
@@ -664,7 +1300,7 @@ index d24d866a2a..7c4b0189a8 100644
  	): Promise<SessionManager> {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const resolvedCwd = path.resolve(cwd);
-@@ -3580,7 +3678,8 @@ export class SessionManager {
+@@ -4186,7 +4345,8 @@ export class SessionManager {
  				(!sessionDir || pathIsWithin(dir, path.dirname(breadcrumb.sessionFile)))
  			) {
  				const manager = new SessionManager(cwd, dir, true, storage);
@@ -674,7 +1310,7 @@ index d24d866a2a..7c4b0189a8 100644
  				return manager;
  			}
  
-@@ -3653,8 +3752,9 @@ export class SessionManager {
+@@ -4270,8 +4430,9 @@ export class SessionManager {
  		if (chosenSession === undefined) chosenSession = await findMostRecentNonEmptySession(dir, storage);
  
  		const manager = new SessionManager(cwd, dir, true, storage);
@@ -686,10 +1322,10 @@ index d24d866a2a..7c4b0189a8 100644
  	}
  
 diff --git a/packages/coding-agent/src/session/turn-recovery.ts b/packages/coding-agent/src/session/turn-recovery.ts
-index 71f8b2f348..8a0cd0917c 100644
+index 65243243fe..5cd903bd4f 100644
 --- a/packages/coding-agent/src/session/turn-recovery.ts
 +++ b/packages/coding-agent/src/session/turn-recovery.ts
-@@ -274,6 +274,8 @@ type UsageLimitOutcome = {
+@@ -304,6 +304,8 @@ type UsageLimitOutcome = {
  export class TurnRecovery {
  	readonly #host: TurnRecoveryHost;
  	#retryAbortController: AbortController | undefined;
@@ -698,27 +1334,33 @@ index 71f8b2f348..8a0cd0917c 100644
  	#retryAttempt = 0;
  	#requestBodyReadTimeoutRecoveryPromptSequence: number | undefined;
  	#retryPromise: Promise<void> | undefined;
-@@ -419,6 +421,7 @@ export class TurnRecovery {
- 		this.#unexpectedStopRetryCount = 0;
- 		this.#malformedFunctionCallRetryCount = 0;
+@@ -459,6 +461,7 @@ export class TurnRecovery {
+ 		this.#streamStallContinueCount = 0;
  		this.#acceptTerminalEmptyStopForPrompt = false;
+ 		this.#activeFallbackCreditRedemption = undefined;
 +		this.#retryCancelled = false;
  	}
  
  	/** Sets whether one terminal empty stop is accepted for the current prompt. */
-@@ -984,6 +987,11 @@ export class TurnRecovery {
+@@ -1106,6 +1109,17 @@ export class TurnRecovery {
  			attribution: "agent",
  			timestamp: Date.now(),
  		});
 +		await this.#host.emitSessionEvent({
-+			type: "unexpected_stop_retry",
-+			attempt: this.#unexpectedStopRetryCount,
-+			maxAttempts: UNEXPECTED_STOP_MAX_RETRIES,
++			type: "notice",
++			level: "warning",
++			source: "unexpected-stop",
++			message:
++				"Assistant stop recovered automatically (" +
++				this.#unexpectedStopRetryCount +
++				"/" +
++				UNEXPECTED_STOP_MAX_RETRIES +
++				")",
 +		});
  		this.#host.scheduleAgentContinue({
  			source: "unexpected-stop-retry",
  			generation: this.#host.promptGeneration(),
-@@ -2184,6 +2192,7 @@ export class TurnRecovery {
+@@ -2389,6 +2403,7 @@ export class TurnRecovery {
  		// not a retry loop, so it runs even when the user disabled retries: it switches
  		// the model once and lets the base turn proceed.
  		if (!retrySettings.enabled && !options?.fireworksFastFallback) return false;
@@ -726,7 +1368,7 @@ index 71f8b2f348..8a0cd0917c 100644
  		const classifierRefusal = this.isClassifierRefusal(message);
  
  		const generation = this.#host.promptGeneration();
-@@ -2516,6 +2525,10 @@ export class TurnRecovery {
+@@ -2777,6 +2792,10 @@ export class TurnRecovery {
  
  		await this.#recordPendingRetryError(message, id, { switchedCredential, switchedModel, delayMs });
  
@@ -737,7 +1379,7 @@ index 71f8b2f348..8a0cd0917c 100644
  		await this.#host.emitSessionEvent({
  			type: "auto_retry_start",
  			attempt: this.#retryAttempt,
-@@ -2537,6 +2550,10 @@ export class TurnRecovery {
+@@ -2801,6 +2820,10 @@ export class TurnRecovery {
  		// pattern instead of re-sampling the same stalled reasoning.
  		this.#maybeInjectThinkingLoopRedirect(id);
  
@@ -748,26 +1390,7 @@ index 71f8b2f348..8a0cd0917c 100644
  		// Day-scale provider waits (a monthly quota reset parsed from the error
  		// text) exceed the signed 32-bit timer limit; sleepLong chunks the sleep
  		// so the full wait elapses instead of overflowing the timer. `delayMs`
-@@ -2550,24 +2567,16 @@ export class TurnRecovery {
- 			if (this.#retryAbortController !== retryAbortController) {
- 				return false;
- 			}
--			// Aborted during sleep - emit end event so UI can clean up
--			const attempt = this.#retryAttempt;
--			this.#retryAttempt = 0;
--			this.#retryAbortController = undefined;
--			await this.#host.emitSessionEvent({
--				type: "auto_retry_end",
--				success: false,
--				attempt,
--				finalError: "Retry cancelled",
--			});
--			this.#clearPendingRetryErrors();
--			this.resolveRetry();
--			return false;
-+			return await this.#abandonRetry({ announced: true });
- 		}
- 		if (this.#retryAbortController === retryAbortController) {
+@@ -2821,6 +2844,10 @@ export class TurnRecovery {
  			this.#retryAbortController = undefined;
  		}
  
@@ -778,7 +1401,7 @@ index 71f8b2f348..8a0cd0917c 100644
  		// The identity-keyed removal above can miss when a context rebuild
  		// recreated the failed turn's message object between settle and retry
  		// (fresh identity, same failed tail — issue #5382). Agent.continue()
-@@ -2581,6 +2590,10 @@ export class TurnRecovery {
+@@ -2834,6 +2861,10 @@ export class TurnRecovery {
  			this.#stripFailedAssistantTail();
  		}
  
@@ -789,7 +1412,7 @@ index 71f8b2f348..8a0cd0917c 100644
  		// Retry via continue() outside the agent_end event callback chain. A
  		// continuation that still fails locally must close the retry saga —
  		// otherwise auto_retry_end never fires, retryPromise stays pending, and
-@@ -2671,11 +2684,37 @@ export class TurnRecovery {
+@@ -2940,11 +2971,37 @@ export class TurnRecovery {
  	 * Cancel in-progress retry.
  	 */
  	abortRetry(): void {
@@ -828,7 +1451,7 @@ index 71f8b2f348..8a0cd0917c 100644
  	async #promptAgentWithIdleRetry(messages: AgentMessage[], options?: { toolChoice?: ToolChoice }): Promise<void> {
  		const deadline = Date.now() + 30_000;
  		for (;;) {
-@@ -2791,6 +2830,7 @@ export class TurnRecovery {
+@@ -3060,6 +3117,7 @@ export class TurnRecovery {
  		}
  
  		// Reset retry budget for a fresh attempt
@@ -837,19 +1460,10 @@ index 71f8b2f348..8a0cd0917c 100644
  
  		// Re-attempt the turn
 diff --git a/packages/coding-agent/src/task/executor.ts b/packages/coding-agent/src/task/executor.ts
-index 3047096e72..049ad9d207 100644
+index 7c337b2e29..a48659eb67 100644
 --- a/packages/coding-agent/src/task/executor.ts
 +++ b/packages/coding-agent/src/task/executor.ts
-@@ -3398,7 +3398,7 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
- 	);
- 	// TTL before an adopted idle subagent is parked by the lifecycle manager.
- 	// <= 0 disables parking (the session stays live until process teardown).
--	const agentIdleTtlMs = Math.trunc(Number(settings.get("task.agentIdleTtlMs") ?? 420_000) || 0);
-+	const agentIdleTtlMs = Math.trunc(Number(settings.get("task.agentIdleTtlMs") ?? 300_000) || 0);
- 	const configuredDefaultBudget = Math.max(
- 		0,
- 		Math.trunc(Number(settings.get("task.softRequestBudget") ?? SOFT_REQUEST_BUDGET.default) || 0),
-@@ -4020,6 +4020,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
+@@ -4495,6 +4495,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
  				// even when the workspace was retained for recovery.
  				isolated: worktree !== undefined || undefined,
  			});
@@ -861,10 +1475,10 @@ index 3047096e72..049ad9d207 100644
  			abortSignal.addEventListener(
  				"abort",
 diff --git a/packages/coding-agent/src/task/isolation-runner.ts b/packages/coding-agent/src/task/isolation-runner.ts
-index 9abb167c22..d82aea576c 100644
+index 7be0aace6d..ec47f4a192 100644
 --- a/packages/coding-agent/src/task/isolation-runner.ts
 +++ b/packages/coding-agent/src/task/isolation-runner.ts
-@@ -85,6 +85,7 @@ export function renderIsolationSummary(context: IsolationSummaryContext): string
+@@ -87,6 +87,7 @@ export function renderIsolationSummary(context: IsolationSummaryContext): string
  /** Record artifact locations for `agent://` and mark the result as an isolated run. */
  function rememberAgentArtifacts(result: SingleResult): SingleResult {
  	AgentRegistry.global().setHistory(result.id, {
@@ -872,87 +1486,11 @@ index 9abb167c22..d82aea576c 100644
  		outputPath: result.outputPath,
  		patchPath: result.patchPath,
  		branchName: result.branchName,
-diff --git a/packages/coding-agent/test/foreign-session-stores.test.ts b/packages/coding-agent/test/foreign-session-stores.test.ts
-index 4921dd0b39..c01551dcd8 100644
---- a/packages/coding-agent/test/foreign-session-stores.test.ts
-+++ b/packages/coding-agent/test/foreign-session-stores.test.ts
-@@ -39,7 +39,7 @@ async function createClaudeFixture(): Promise<{ info: ForeignSessionInfo; store:
- 	const root = path.join(tempRoot, ".claude");
- 	const cwd = path.join(tempRoot, "project-with-hyphen");
- 	const id = "11111111-1111-4111-8111-111111111111";
--	const projectDirectory = cwd.replaceAll(path.sep, "-");
-+	const projectDirectory = cwd.replace(/[:/\\._]/g, "-");
- 	const sessionPath = path.join(root, "projects", projectDirectory, `${id}.jsonl`);
- 	await writeJsonl(path.join(root, "history.jsonl"), [
- 		{ sessionId: id, timestamp: 1_767_225_600_000, display: "First prompt", project: cwd },
-@@ -98,7 +98,7 @@ describe("ClaudeSessionStore", () => {
- 		const cwd = path.join(tempRoot, "my-project.dir");
- 		const id = "33333333-3333-4333-8333-333333333333";
- 		// No history entry, and a directory name whose "-" separators are ambiguous.
--		await writeJsonl(path.join(root, "projects", cwd.replace(/[/\\._]/g, "-"), `${id}.jsonl`), [
-+		await writeJsonl(path.join(root, "projects", cwd.replace(/[:/\\._]/g, "-"), `${id}.jsonl`), [
- 			{ type: "file-history-snapshot", timestamp: "2026-01-01T00:00:00.000Z" },
- 			{
- 				type: "user",
-@@ -117,7 +117,7 @@ describe("ClaudeSessionStore", () => {
- 	it("bounds cwd discovery to the transcript prefix before using the encoded fallback", async () => {
- 		const root = path.join(tempRoot, ".claude");
- 		const cwd = path.join(tempRoot, "late-project.dir");
--		const encoded = cwd.replace(/[/\\._]/g, "-");
-+		const encoded = cwd.replace(/[:/\\._]/g, "-");
- 		const id = "55555555-5555-4555-8555-555555555555";
- 		await writeJsonl(path.join(root, "projects", encoded, `${id}.jsonl`), [
- 			{ type: "file-history-snapshot", snapshot: "x".repeat(128 * 1024) },
-@@ -125,7 +125,7 @@ describe("ClaudeSessionStore", () => {
- 		]);
- 
- 		const info = (await new ClaudeSessionStore(root).list()).find(item => item.id === id);
--		expect(info?.cwd).toBe(encoded.replaceAll("-", path.sep));
-+		expect(info?.cwd).toBe(encoded.startsWith("-") ? encoded.replaceAll("-", path.sep) : encoded);
- 	});
- 
- 	it("prefers the history index cwd over the transcript's", async () => {
-@@ -135,7 +135,7 @@ describe("ClaudeSessionStore", () => {
- 		await writeJsonl(path.join(root, "history.jsonl"), [
- 			{ sessionId: id, timestamp: 1_767_225_600_000, display: ".", project: indexedCwd },
- 		]);
--		await writeJsonl(path.join(root, "projects", indexedCwd.replaceAll(path.sep, "-"), `${id}.jsonl`), [
-+		await writeJsonl(path.join(root, "projects", indexedCwd.replace(/[:/\\._]/g, "-"), `${id}.jsonl`), [
- 			{
- 				type: "user",
- 				uuid: "u",
-@@ -157,7 +157,7 @@ describe("ClaudeSessionStore", () => {
- 		await writeJsonl(path.join(root, "history.jsonl"), [
- 			{ sessionId: id, timestamp: 1_767_225_600_000, display: ".", project: cwd },
- 		]);
--		await writeJsonl(path.join(root, "projects", cwd.replaceAll(path.sep, "-"), `${id}.jsonl`), [
-+		await writeJsonl(path.join(root, "projects", cwd.replace(/[:/\\._]/g, "-"), `${id}.jsonl`), [
- 			{
- 				type: "user",
- 				uuid: "u",
-@@ -232,7 +232,7 @@ describe("ClaudeSessionStore", () => {
- 		const root = path.join(tempRoot, ".claude");
- 		const cwd = path.join(tempRoot, "legacy");
- 		const id = "22222222-2222-4222-8222-222222222222";
--		const sessionPath = path.join(root, ".projects", cwd.replaceAll(path.sep, "-"), `${id}.jsonl`);
-+		const sessionPath = path.join(root, ".projects", cwd.replace(/[:/\\._]/g, "-"), `${id}.jsonl`);
- 		await writeJsonl(path.join(root, "history.jsonl"), [
- 			{ session_id: id, ts: 1_735_689_600_000, text: "Legacy prompt" },
- 		]);
-@@ -258,7 +258,7 @@ describe("ClaudeSessionStore", () => {
- 		const root = path.join(tempRoot, "relocated-claude");
- 		const cwd = path.join(tempRoot, "project-with-hyphen");
- 		const id = "22222222-2222-4222-8222-333333333333";
--		const encoded = cwd.replaceAll(path.sep, "-");
-+		const encoded = cwd.replace(/[:/\\._]/g, "-");
- 		process.env.CLAUDE_CONFIG_DIR = root;
- 		await Bun.write(path.join(root, ".claude.json"), JSON.stringify({ projects: { [cwd]: {} } }));
- 		await writeJsonl(path.join(root, "projects", encoded, `${id}.jsonl`), [
 diff --git a/packages/tui/src/status-line/context-usage.ts b/packages/tui/src/status-line/context-usage.ts
-index 4edceaf7e9..3e506c0320 100644
+index 05d518f3e5..2d7f46dcb5 100644
 --- a/packages/tui/src/status-line/context-usage.ts
 +++ b/packages/tui/src/status-line/context-usage.ts
-@@ -233,20 +233,18 @@ export function estimateToolSchemaTokens(tools: ToolSchemaSource, tokenizer: Tok
+@@ -240,20 +240,18 @@ export function estimateToolSchemaTokens(tools: ToolSchemaSource, tokenizer: Tok
  
  	const fragments: string[] = [];
  	for (const tool of tools) {

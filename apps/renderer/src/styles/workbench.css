@@ -6511,3 +6511,11 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .runtime-credential-row input { max-width:240px; }
 
 .model-delegation-list { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 16px; }
+
+/* Mode menus share the Studio menu type scale and remain below window chrome. */
+.cmp-mode-menu-scroll { max-height:calc(var(--cmp-menu-max-height, 380px) - 42px); overflow-y:auto; min-height:0; }
+.menu.rms-pop.cmp-flyout.cmp-mode-flyout { max-height:var(--cmp-menu-max-height, 380px); overflow-y:auto; overflow-x:hidden; }
+.cmp-mode-check > span { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.cmp-mode-check .am-label { font-size:var(--fs-12); font-weight:var(--fw-medium); }
+.cmp-mode-check .am-desc, .cmp-mode-flyout > .am-desc { font-size:var(--fs-11); color:var(--text-3); }
+.cmp-mode-flyout > .am-desc { margin:4px 8px; }

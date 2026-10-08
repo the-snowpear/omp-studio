@@ -6,6 +6,7 @@ import type {
 	StudioRemoteInteractionRequest,
 } from "../bridge-protocol";
 import type { StudioRuntimeCommandArbiter } from "../command-arbiter";
+import type { CfgApproval } from "../../internal-urls/cfg-protocol";
 
 export interface StudioInteractionPort {
 	confirm(input: { commandId: string; title: string; message: string; destructive?: boolean }): Promise<boolean>;
@@ -82,6 +83,13 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 
 	pending(): StudioPendingInteraction | undefined {
 		return this.#port?.pending();
+	}
+
+	approveConfiguration(
+		input: { commandId: string; title: string; details: unknown },
+		timeoutMs: number,
+	): Promise<CfgApproval> {
+		return this.#requirePort().approveConfiguration(input, timeoutMs);
 	}
 
 	confirm(input: { commandId: string; title: string; message: string; destructive?: boolean }): Promise<boolean> {
@@ -221,6 +229,33 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 	}): Promise<boolean> {
 		const value = await this.#request({ kind: "approval", ...input });
 		return value === true;
+	}
+
+	async approveConfiguration(
+		input: { commandId: string; title: string; details: unknown },
+		timeoutMs: number,
+	): Promise<CfgApproval> {
+		const deadline = Date.now() + timeoutMs;
+		while (this.#pending !== undefined && Date.now() < deadline) await Bun.sleep(20);
+		if (Date.now() >= deadline) return "timeout";
+		let timedOut = false;
+		const timer = setTimeout(
+			() => {
+				if (this.#pending?.request.commandId !== input.commandId) return;
+				timedOut = true;
+				this.cancel("Configuration approval expired", "expired");
+			},
+			Math.max(1, deadline - Date.now()),
+		);
+		try {
+			const request = { kind: "approval" as const, approvalType: "configuration", ...input };
+			const value = await this.#request(request);
+			return value === "once" || value === "session" ? value : "deny";
+		} catch {
+			return timedOut ? "timeout" : "deny";
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	async ask(input: {

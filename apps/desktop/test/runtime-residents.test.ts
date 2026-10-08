@@ -53,10 +53,12 @@ type FakePublication = {
 function createHarness(options: {
   maxResidentSessions?: number;
   idleWorkerTtlMs?: number;
+  requiresModelFor?: string;
 } = {}) {
   let nextFresh = 0;
   let commitSeq = 0;
   const stopped: string[] = [];
+  const starts: Array<{ sessionId: string; model?: string }> = [];
   const snapshots = new Map<string, OperatorStateSnapshot>();
   const listeners = new Map<string, Set<(publication: FakePublication) => void>>();
   const makePublication = (sessionId: string, terminalOutcomes: readonly CommandLedgerEntry[] = []) => ({
@@ -65,7 +67,7 @@ function createHarness(options: {
     snapshot: snapshots.get(sessionId)!,
     terminalOutcomes,
   });
-  const workerPortFactory = ({ resumeSessionId, nextRuntimeEpoch }: Parameters<NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]>>[0]): DesktopRuntimeSessionPort => {
+  const workerPortFactory = ({ resumeSessionId, model, nextRuntimeEpoch }: Parameters<NonNullable<DesktopRuntimeSessionPortOptions["workerPortFactory"]>>[0]): DesktopRuntimeSessionPort => {
     const sessionId = resumeSessionId ?? `fresh-${++nextFresh}`;
     const epoch = nextRuntimeEpoch();
     snapshots.set(sessionId, baseSnapshot(sessionId, epoch));
@@ -99,7 +101,7 @@ function createHarness(options: {
       },
     } as unknown as DesktopRuntimeSession;
     return {
-      start: async () => session,
+      start: async () => { starts.push({ sessionId, ...(model === undefined ? {} : { model }) }); if (sessionId === options.requiresModelFor && !model) throw new Error("Could not restore saved model"); return session; },
       stop: async () => {
         if (!alive) return;
         alive = false;
@@ -124,7 +126,7 @@ function createHarness(options: {
     const current = makePublication(sessionId, terminalOutcomes);
     for (const listener of listeners.get(sessionId) ?? []) listener(current);
   };
-  return { port, snapshots, publish, stopped };
+  return { port, snapshots, publish, stopped, starts };
 }
 
 const context = {
@@ -187,4 +189,19 @@ test("pending interaction resident is neither idle nor eligible for capacity/TTL
   assert.deepEqual(harness.stopped, []);
   await assert.rejects(() => port.switchSession!({ kind: "fresh" }), /capacity is exhausted/);
   await port.stop();
+});
+
+
+test("missing-model recovery preserves the current worker and forwards only the explicitly selected model", async () => {
+ const harness = createHarness({ requiresModelFor: "saved" }); const { port } = harness;
+ try {
+  await port.start(context); harness.publish("fresh-1", { isStreaming: true });
+  await assert.rejects(() => port.switchSession!({ kind: "resume", sessionId: "saved" }), /Could not restore saved model/);
+  assert.equal(port.listResidents!().activeSessionId, "fresh-1"); assert.equal(harness.stopped.includes("fresh-1"), false);
+  const restored = await port.switchSession!({ kind: "resume", sessionId: "saved", model: "provider/replacement" });
+  assert.equal(restored?.controller.publication()?.snapshot.sessionId, "saved");
+  assert.deepEqual(harness.starts.at(-1), { sessionId: "saved", model: "provider/replacement" });
+  assert.equal(harness.stopped.includes("fresh-1"), false);
+  await assert.rejects(() => port.switchSession!({ kind: "resume", sessionId: "saved", model: "provider/another" }), /already active/);
+ } finally { await port.stop(); }
 });

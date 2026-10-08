@@ -72,7 +72,7 @@ type StateWatchClient = StudioClient & {
 
 const stateWatchClient = (client: StudioClient): StateWatchClient => client as StateWatchClient;
 
-export async function waitReceipt<T>(client: ReceiptClient, requestId: string, timeoutMs = RECEIPT_TIMEOUT_MS): Promise<T> {
+export async function waitReceipt<T>(client: ReceiptClient, requestId: string, timeoutMs: number | null = RECEIPT_TIMEOUT_MS): Promise<T> {
   const watched = stateWatchClient(client);
   const existing = receiptFromState(watched, requestId);
   if (existing !== undefined) {
@@ -96,7 +96,8 @@ export async function waitReceipt<T>(client: ReceiptClient, requestId: string, t
       offState?.();
       reject(error);
     };
-    const timer = setTimeout(() => fail({ code: "UNAVAILABLE", message: "等待 Host 回执超时" }), timeoutMs);
+    // A native human picker has no protocol deadline; closing or resync still settles through command state.
+    const timer = timeoutMs === null ? undefined : setTimeout(() => fail({ code: "UNAVAILABLE", message: "等待 Host 回执超时" }), timeoutMs);
     const unsub = client.subscribe({ scope: "command", requestId: requestId as CommandRequestId }, (event) => {
       if (event.kind !== "command.receipt" || event.receipt.requestId !== requestId) return;
       settleReceipt(event.receipt, succeed, fail);

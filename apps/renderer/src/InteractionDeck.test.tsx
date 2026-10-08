@@ -147,11 +147,23 @@ describe("InteractionDeck real cards", () => {
     expect(onRespond).toHaveBeenCalledWith("cancel");
   });
 
-  it("approval 始终允许 still submits true for this call", () => {
+  it("tool approvals do not pretend to grant permission for the whole session", () => {
     const onRespond = vi.fn();
     render(<InteractionPrompt interaction={approval("Allow?")} onRespond={onRespond} />);
-    fireEvent.click(screen.getByRole("button", { name: "始终允许" }));
-    expect(onRespond).toHaveBeenCalledWith("submit", true);
+    const sessionButton = screen.getByRole("button", { name: "本会话允许" }) as HTMLButtonElement;
+    expect(sessionButton.disabled).toBe(true);
+    fireEvent.click(sessionButton);
+    expect(onRespond).not.toHaveBeenCalled();
+  });
+
+  it("configuration approvals show the value change and send the native session grant", () => {
+    const onRespond = vi.fn();
+    const interaction: ClientInteraction = { ...approval("Configuration change"), kind: "approval", approvalType: "configuration", detail: { path: "advisor.enabled", previous: "false", value: "true", save: true, shadowedBy: "project config" } };
+    render(<InteractionPrompt interaction={interaction} onRespond={onRespond} />);
+    expect(screen.getByText("false")).toBeTruthy(); expect(screen.getByText("true")).toBeTruthy();
+    expect(screen.getByText(/project config/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "本会话允许" }));
+    expect(onRespond).toHaveBeenCalledWith("submit", "session");
   });
 
   it("failed respond keeps the card and shows Retry; resolved clears it", async () => {

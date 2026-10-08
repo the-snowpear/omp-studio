@@ -1,3 +1,14 @@
+export interface AccountQuotaScope {
+	provider: string;
+	accountId?: string;
+	projectId?: string;
+	orgId?: string;
+	modelId?: string;
+	tier?: string;
+	windowId?: string;
+	shared?: boolean;
+	sharedGroup?: string;
+}
 export interface AccountQuotaWindow {
 	id: string;
 	label: string;
@@ -5,6 +16,9 @@ export interface AccountQuotaWindow {
 	usedFraction?: number;
 	resetsAt?: number;
 	model?: string;
+	scope?: AccountQuotaScope;
+	notes?: string[];
+	resetLabel?: string;
 }
 export interface AccountResetCredit {
 	title: string;
@@ -67,13 +81,40 @@ function list(value: unknown, max: number, validate: (value: unknown) => void): 
 	value.forEach(validate);
 }
 function quota(value: unknown): void {
-	const row = object(value, ["id", "label", "status", "usedFraction", "resetsAt", "model"]);
+	const row = object(value, [
+		"id",
+		"label",
+		"status",
+		"usedFraction",
+		"resetsAt",
+		"model",
+		"scope",
+		"notes",
+		"resetLabel",
+	]);
 	text(row.id);
 	text(row.label);
 	if (!["ok", "warning", "exhausted", "unknown"].includes(row.status as string))
 		throw new Error("Invalid quota status");
 	optional(row, ["usedFraction", "resetsAt"], number);
-	optional(row, ["model"], text);
+	optional(row, ["model", "resetLabel"], text);
+	if (row.notes !== undefined) list(row.notes, 16, text);
+	if (row.scope !== undefined) {
+		const scope = object(row.scope, [
+			"provider",
+			"accountId",
+			"projectId",
+			"orgId",
+			"modelId",
+			"tier",
+			"windowId",
+			"shared",
+			"sharedGroup",
+		]);
+		text(scope.provider);
+		optional(scope, ["accountId", "projectId", "orgId", "modelId", "tier", "windowId", "sharedGroup"], text);
+		optional(scope, ["shared"], boolean);
+	}
 }
 function resets(value: unknown): void {
 	const row = object(value, ["state", "availableCount", "redeemableCount", "eligible", "credits"]);

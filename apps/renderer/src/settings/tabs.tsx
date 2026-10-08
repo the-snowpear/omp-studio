@@ -11,7 +11,7 @@
  * settings-schema 行仍以禁用枚举呈现，预览模式下这些行改绑演示状态。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AppSettings } from "./appSettings";
 import { DEFAULT_APP_SETTINGS } from "./appSettings";
 import { SettingRow, SettingSection, StaticSelect, Switch, type SettingSource } from "./SettingRow";
@@ -591,7 +591,7 @@ export function GeneralTab({ ctl }: { ctl: SettingsCtl }) {
 /* 2. 对话与交互                                                        */
 /* ------------------------------------------------------------------ */
 
-export function InteractionTab({ ctl, demo }: { ctl: SettingsCtl; demo?: RuntimeDemoApi | undefined }) {
+export function InteractionTab({ ctl, demo, prediction }: { ctl: SettingsCtl; demo?: RuntimeDemoApi | undefined; prediction?: ReactNode }) {
   const { t } = useI18n();
   const { app, updateApp } = ctl;
   return (
@@ -602,6 +602,7 @@ export function InteractionTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
         ctl={ctl}
         resetKeys={["showThinkingSummary", "showToolIntent"]}
       />
+      {prediction}
       <SettingSection title={t("settings.interaction.sectionInput")}>
         <FutureRows
           demo={demo}

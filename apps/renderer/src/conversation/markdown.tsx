@@ -1,3 +1,7 @@
+import { NumericMarkdownTable } from "./NumericMarkdownTable";
+import { SvgFigureImage } from "../graphics/SvgFigureImage";
+import { GraphicPreview } from "../graphics/GraphicPreview";
+import { graphicFormat } from "../graphics/graphic-types";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -88,13 +92,14 @@ function componentsFor(streaming: boolean, magic: boolean, highlightEligible = f
       const url = typeof src === "string" ? src.trim() : "";
       return isSafeMarkdownUrl(url, true) ? <img src={url} alt={alt ?? ""} loading="lazy" decoding="async" referrerPolicy="no-referrer" /> : null;
     },
-    table: ({ children }) => <div className="md-table-wrap"><table>{children}</table></div>,
+    table: ({ children,node }) => <NumericMarkdownTable node={node} streaming={streaming}>{children}</NumericMarkdownTable>,
     code: ({ className, children }) => className ? <code className={className}>{children}</code> : <code className="chip-code">{children}</code>,
     pre: ({ children }) => {
       const child = Array.isArray(children) ? children[0] : children;
       const props = child && typeof child === "object" && "props" in child ? (child as { props: { className?: string; children?: ReactNode } }).props : {};
       const language = /language-([\w+#.-]+)/.exec(props.className ?? "")?.[1] ?? "";
       const text = nodeText(props.children).replace(/\n$/, "");
+      if (language !== "mermaid" && graphicFormat("graphic."+language) && (!streaming || language === "svg")) return <GraphicPreview name={"graphic."+language} text={text}/>;
       if (language === "mermaid" && !streaming) return performanceOptions.boundedMermaid ? <LazyMermaid code={text} /> : <LegacyMermaid code={text} />;
       if (performanceOptions.highlightWorker && highlightEligible && language && language !== "mermaid") {
         return <CodeFrame language={language} text={text} streaming={streaming}>
@@ -152,7 +157,7 @@ export const MarkdownText = memo(function MarkdownText({ text, streaming = false
       <MarkdownBlockList blocks={parts.frozen} magic={magicKeywords} scope="frozen" />
       <MarkdownBlockList blocks={parts.pending} magic={magicKeywords} scope="pending" />
       {parts.tail.length > 0 ? <MarkdownBlock text={parts.tail} streaming={streaming} magic={magicKeywords} /> : null}
-      {parts.openFence !== undefined ? (
+      {parts.openFence?.language.toLowerCase() === "svg" ? <SvgFigureImage source={parts.openFence.code} alt="SVG" streaming/> : parts.openFence !== undefined ? (
         <CodeFrame language={parts.openFence.language} text={parts.openFence.code} streaming>
           <code className={parts.openFence.language ? `language-${parts.openFence.language}` : undefined}>{parts.openFence.code}</code>
         </CodeFrame>

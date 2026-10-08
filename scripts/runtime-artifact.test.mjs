@@ -34,7 +34,7 @@ import {
 } from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "62bc57be1b03ef0802a33cf7f5f530e534527531";
+const REAL_UPSTREAM_COMMIT = "4ef97c8826ee012829a3e756b693a2a16a414f47";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 async function fixtureInputs() {
@@ -146,6 +146,63 @@ test("artifact manifest carries the contract fields derived from real pin/series
   assert.match(manifest.commandManifestHash, /^sha256:[a-f0-9]{64}$/u);
   assert.notEqual(manifest.capabilityHash, manifest.commandManifestHash);
   assert.deepEqual(IMPLEMENTED_CAPABILITIES, [
+    "settings.approval",
+    "agent.spawn.models",
+    "session.titles.inspect",
+    "prediction.status",
+    "prediction.configure",
+    "prediction.clearOverride",
+    "prediction.download.cancel",
+    "prediction.prepare",
+    "prediction.release",
+    "maintenance.gc.preview",
+    "maintenance.gc.apply",
+    "maintenance.gc.status",
+    "maintenance.session.export",
+    "maintenance.export.status",
+    "maintenance.connection.check",
+    "archive.sessions.list",
+    "archive.recaps.list",
+    "archive.prompts.search",
+    "archive.session.inspect",
+    "agent.model.inspect",
+    "session.restore.inspect",
+    "session.queue.get",
+    "session.queue.remove",
+    "session.queue.promote",
+    "session.queue.edit",
+    "session.queue.restore",
+    "preferences.native.get",
+    "preferences.native.set",
+    "preferences.native.clearOverride",
+    "ratchet.list",
+    "ratchet.read",
+    "ratchet.create",
+    "ratchet.approve",
+    "ratchet.start",
+    "ratchet.stop",
+    "computer.status",
+    "computer.configure",
+    "computer.capture",
+    "computer.stop",
+    "computer.observe.release",
+    "browser.tabs.get",
+    "browser.observe.prepare",
+    "ida.status",
+    "ida.configure",
+    "ida.open",
+    "ida.save",
+    "ida.close",
+    "ida.run",
+    "ida.cancel",
+    "session.speed.get",
+    "session.speed.set",
+    "session.warming.get",
+    "session.warming.set",
+    "models.presets.list",
+    "models.presets.save",
+    "models.presets.apply",
+    "models.presets.delete",
     "skillshare.status",
     "skillshare.home",
     "skillshare.search",
@@ -186,6 +243,8 @@ test("artifact manifest carries the contract fields derived from real pin/series
     "annotations.capture",
     "annotations.prepare",
     "accounts.status",
+    "accounts.status.details",
+    "accounts.logout",
     "services.list",
     "services.start",
     "services.stop",
@@ -195,6 +254,7 @@ test("artifact manifest carries the contract fields derived from real pin/series
     "services.logs",
     "tokens.count",
     "runtime.models.list",
+    "runtime.models.describe",
     "btw.history.list",
     "btw.history.read",
     "btw.followUp",
@@ -280,7 +340,7 @@ test("artifact manifest carries the contract fields derived from real pin/series
     "interaction.respond",
     "tui.transfer",
     "remoteUi.standard",
-    "tui.manualCompatibility",
+    "tui.manualCompatibility"
   ]);
   assert.equal(manifest.capabilityHash, implementedManifestHash("capabilities"));
   assert.equal(manifest.commandManifestHash, FIXTURE_COMMAND_MANIFEST_HASH);
@@ -417,11 +477,11 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.entrypoint, "omp.exe");
   assert.deepEqual(upstream.entrypoints, { win32: "omp.exe", darwin: "omp" });
   assert.deepEqual(upstream.platforms, ["win32-x64", "win32-arm64", "darwin-arm64"]);
-  assert.equal(upstreamVersion, "18.3.0");
+  assert.equal(upstreamVersion, "18.8.0");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.3.0-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.8.0-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }

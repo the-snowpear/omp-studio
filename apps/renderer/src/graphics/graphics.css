@@ -1,0 +1,55 @@
+.graphic-preview {
+  min-height: 160px;
+  min-width: 0;
+  width: 100%;
+  margin: var(--sp-12) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-8);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.graphic-preview > p {
+  padding: var(--sp-12);
+  overflow-wrap: anywhere;
+}
+.graphic-canvas,
+.graphic-x3d {
+  display: block;
+  width: 100%;
+  height: 360px;
+  max-height: 55vh;
+  border: 0;
+}
+.graphic-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.graphic-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-8);
+  padding: var(--sp-8) var(--sp-12);
+  font-size: var(--fs-11);
+  color: var(--text-3);
+}
+.graphic-svg {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  height: 360px;
+  object-fit: contain;
+}
+.graphic-chart {
+  width: 100%;
+  max-height: 360px;
+  fill: var(--text-2);
+  font: 12px var(--font-ui);
+}
+
+.graphic-failure { min-height: 110px; display:flex; flex-direction:column; justify-content:center; padding: var(--sp-12); color: var(--text-2); overflow-wrap:anywhere; }
+.graphic-failure p { margin:8px 0 0; color:var(--text-3); font-size:var(--fs-12); }
+
+.md-native-table-chart .graphic-svg {height:auto;max-height:380px;display:block;margin:var(--sp-8) 0;}

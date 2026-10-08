@@ -10,7 +10,7 @@
 import type { ReactNode } from "react";
 import { useI18n } from "../i18n";
 
-export type SettingSource = "default" | "user" | "project" | "runtime" | "unavailable";
+export type SettingSource = "env" | "overlay" | "default" | "user" | "project" | "runtime" | "unavailable";
 
 export function SourceBadge({ source, reason }: { source: SettingSource; reason?: string | undefined }) {
   const { t } = useI18n();
@@ -45,7 +45,7 @@ export function SettingRow({
 }: {
   label: string;
   desc?: string;
-  source?: SettingSource;
+  source?: SettingSource | null;
   reason?: string;
   children: ReactNode;
 }) {
@@ -54,7 +54,7 @@ export function SettingRow({
     <div className={`set-row${source === "unavailable" ? " is-unavailable" : ""}`} data-tip={source === "unavailable" ? (reason ?? `（${t("common.notImplemented")}）`) : undefined}>
       <div>
         <div className="sr-label">
-          {label} <SourceBadge source={source} reason={reason} />
+          {label} {source ? <SourceBadge source={source} reason={reason} /> : null}
         </div>
         {desc ? <div className="sr-desc">{desc}</div> : null}
       </div>

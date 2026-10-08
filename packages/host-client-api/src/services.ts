@@ -613,7 +613,7 @@ export interface HostInteractionRespondInput {
  */
 export interface HostSemanticCommandService {
   create?(): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
-  resume(input: { readonly threadId: ThreadId }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
+  resume(input: { readonly threadId: ThreadId; readonly model?: string }): OperatorStateSnapshot | Promise<OperatorStateSnapshot>;
   drop(input: {
     readonly threadId: ThreadId;
     readonly requestId: CommandRequestId;

@@ -1,3 +1,9 @@
+import type { SessionTitleRow } from "@omp-studio/studio-protocol";
+import { useSessionTitles } from "./history/useSessionTitles";
+import { SessionTitleMark } from "./history/SessionTitleMark";
+import { previewSessionTitle } from "./preview/sessionTitlePreview";
+import { NativeArchivePane, type NativeHistoryContext } from "./history/NativeArchivePane";
+import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
 import { SessionImportPanel } from "./SessionImportPanel";
 import type { StudioClient, WorkspaceId } from "@omp-studio/client-contract";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -235,7 +241,7 @@ function PreviewHistRow({
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
         <span className="h-title ellipsis">
           {row.pinned ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
-          {row.title}
+          <SessionTitleMark row={previewSessionTitle(row.id,row.title)} title={row.title} />{row.title}
         </span>
         <span className="h-sub">
           <span>{row.project} · {row.branch}</span>
@@ -268,12 +274,13 @@ function PreviewHistRow({
 }
 
 function HostHistRow({
-  entry,
+  entry, titleRow,
   onOpen,
   onUnarchive,
   onMore,
 }: {
   entry: SessionHistoryEntry;
+  titleRow?: SessionTitleRow | undefined;
   onOpen: () => void;
   onUnarchive: (() => void) | undefined;
   onMore: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -288,7 +295,7 @@ function HostHistRow({
       <a className="h-main" href="#!workbench" onClick={(event) => { event.preventDefault(); onOpen(); }}>
         <span className="h-title ellipsis">
           {entry.pinned === true ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
-          {title}
+          <SessionTitleMark row={titleRow} title={title} />{title}
         </span>
         <span className="h-sub">
           <span>{t("history.messagesCount", { count: entry.messageCount })}</span>
@@ -345,6 +352,7 @@ function TimeTravelRail({ onRestore }: { onRestore: (kind: keyof typeof TT_RESTO
 }
 
 export function HistoryPage({
+ nativeContext,
   client, onImportedOpen, onImported,
   history,
   onRoute,
@@ -352,6 +360,7 @@ export function HistoryPage({
   onUnarchive,
   onDeleteSession,
 }: {
+  nativeContext?: NativeHistoryContext;
   client?: StudioClient;
   onImportedOpen?: (sessionId: string, workspaceId: WorkspaceId) => void;
   onImported?: () => void;
@@ -364,7 +373,9 @@ export function HistoryPage({
   onDeleteSession?: (entry: SessionHistoryEntry, deleteManagedArtifacts?: boolean) => Promise<boolean> | boolean;
 }) {
   const { preview } = usePreviewMode();
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
+  const [workspaceTab,setWorkspaceTab] = useState<"catalog"|"archive">("catalog");
   const [query, setQuery] = useState("");
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [notice, show, dismissNotice] = useNotice();
@@ -429,11 +440,15 @@ export function HistoryPage({
     [history, q, statusTab, t],
   );
 
+  const titleMetadata = useSessionTitles(client,nativeContext,hostRows.flatMap(entry=>entry.sessionId?[{id:entry.sessionId,title:entry.title}]:[]),workspaceTab==="catalog");
   const rows = preview ? previewRows : hostRows;
   const live = rows.length ? t("history.conversationsCount", { count: rows.length }) : t("history.noMatches");
 
   return (
-    <div className="page-wide hist-layout">
+    <div className="page-wide">
+<WorkspaceTabs<"catalog"|"archive"> id="history-workspace" label={zh ? "历史" : "History"} value={workspaceTab} onChange={setWorkspaceTab} items={[{id:"catalog",icon:"history",label:zh?"会话目录":"Session catalog"},{id:"archive",icon:"archive",label:"Archive / Recap"}]}/>
+<WorkspacePanel id="history-workspace" name="catalog" active={workspaceTab==="catalog"}>
+<div className="hist-layout">
       <section aria-labelledby="histHeading">
         <h2 className="sr-only" id="histHeading">{t("history.listHeading")}</h2>
         <SessionImportPanel client={client ?? null} onOpen={onImportedOpen ?? (() => {})} {...(onImported ? { onImported } : {})} />
@@ -505,6 +520,7 @@ export function HistoryPage({
               <HostHistRow
                 key={entry.historyId}
                 entry={entry}
+                titleRow={titleMetadata.rows.get(entry.sessionId ?? "")}
                 onOpen={() => onSelectThread(entry)}
                 onUnarchive={entry.status === "archived" && onUnarchive !== undefined ? () => onUnarchive(entry) : undefined}
                 onMore={(event) => openMenu(entry.historyId, event)}
@@ -555,6 +571,9 @@ export function HistoryPage({
         />
       ) : null}
       <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />
+    </div>
+</WorkspacePanel>
+<WorkspacePanel id="history-workspace" name="archive" active={workspaceTab==="archive"}><NativeArchivePane client={client} context={nativeContext} active={workspaceTab==="archive"} canOpen={id=>(history?.entries??[]).some(entry=>entry.sessionId===id)} onOpen={id=>{const entry=(history?.entries??[]).find(entry=>entry.sessionId===id);if(entry)onSelectThread(entry);}}/></WorkspacePanel>
     </div>
   );
 }

@@ -9,15 +9,20 @@
 // every seam patch must apply with `--check` before it is applied for real.
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { applyOverlay, assertOverlayPresent, removeOverlay } from "./omp-overlay.mjs";
 import {
   findBun,
-  ompSourceDirectory,
+  ompSourceDirectory as vendorSourceDirectory,
   repositoryRoot,
   run,
   toolingEnvironment,
 } from "./omp-tooling.mjs";
+
+// A scratch clone lets local verification preserve the active patched checkout.
+const sourceIndex = process.argv.indexOf("--source");
+if (sourceIndex >= 0 && !process.argv[sourceIndex + 1]) throw new Error("--source requires a checkout directory");
+const ompSourceDirectory = sourceIndex >= 0 ? resolve(process.argv[sourceIndex + 1]) : vendorSourceDirectory;
 
 const upstream = JSON.parse(
   readFileSync(join(repositoryRoot, "omp-patch", "upstream.json"), "utf8"),
@@ -44,7 +49,7 @@ let overlayApplied = false;
 let verificationError;
 
 try {
-  const overlayFiles = await applyOverlay();
+  const overlayFiles = await applyOverlay(ompSourceDirectory);
   overlayApplied = true;
   const overlayTouchedTracked = run("git", ["-C", ompSourceDirectory, "diff", "--name-only"], { capture: true });
   if (overlayTouchedTracked !== "") {
@@ -167,7 +172,7 @@ try {
   }
   if (overlayApplied) {
     try {
-      await removeOverlay();
+      await removeOverlay(ompSourceDirectory);
     } catch (error) {
       verificationError = new AggregateError(
         [verificationError, error].filter(Boolean),

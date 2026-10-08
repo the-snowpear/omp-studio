@@ -4,11 +4,13 @@ import { resolveUsedFraction } from "@oh-my-pi/pi-ai/usage";
 import type { AgentSession } from "../../session/agent-session";
 import type {
 	AccountQuotaWindow,
+	AccountQuotaScope,
 	AccountResetStatus,
 	AccountStatusResult,
 	StudioAccountStatus,
 } from "../accounts-protocol";
 import { validateAccountStatus } from "../accounts-protocol";
+import { SessionControlError } from "./session-control-service";
 
 const clean = (value: string) =>
 	value
@@ -29,11 +31,27 @@ export function accountMatchesReport(account: OAuthAccountSummary, report: Usage
 	if (typeof metadata.email === "string") return metadata.email === account.email;
 	return false;
 }
-export function projectQuota(report: UsageReport): AccountQuotaWindow[] {
+export function projectQuota(report: UsageReport, details = false): AccountQuotaWindow[] {
 	return report.limits.slice(0, 64).map(limit => {
 		const fraction = resolveUsedFraction(limit);
+		const scope: AccountQuotaScope = { provider: clean(limit.scope.provider) };
+		for (const key of ["accountId", "projectId", "orgId", "modelId", "tier", "windowId", "sharedGroup"] as const) {
+			const value = limit.scope[key];
+			if (value && clean(value)) scope[key] = clean(value);
+		}
+		if (limit.scope.shared !== undefined) scope.shared = limit.scope.shared;
+		const notes = limit.notes?.slice(0, 16).map(clean).filter(Boolean);
 		return {
 			id: clean(limit.id) || "quota",
+			...(details
+				? {
+						scope,
+						...(notes?.length ? { notes } : {}),
+						...(limit.window?.resetLabel && clean(limit.window.resetLabel)
+							? { resetLabel: clean(limit.window.resetLabel) }
+							: {}),
+					}
+				: {}),
 			label: clean(limit.label) || "Quota",
 			status: limit.status ?? (finite(fraction) ? (fraction >= 1 ? "exhausted" : "ok") : "unknown"),
 			...(finite(fraction) ? { usedFraction: fraction } : {}),
@@ -64,6 +82,7 @@ function resetStatus(status: ResetCreditAccountStatus | undefined, fetched: bool
 /** Read-only quota/reset status. Does not call AgentSession's auto-redemption heartbeat. */
 export class StudioAccountStatusService {
 	#reports: UsageReport[] = [];
+	#generation = 0;
 	#resets: ResetCreditAccountStatus[] = [];
 	#refreshedAt: number | undefined;
 	#usageUnavailable = false;
@@ -71,12 +90,40 @@ export class StudioAccountStatusService {
 	#abort: AbortController | undefined;
 	constructor(readonly session: AgentSession) {}
 	dispose(): void {
+		this.#generation++;
 		this.#abort?.abort();
 	}
-	async get(refresh = false): Promise<AccountStatusResult> {
+	async logout(sessionId: string, id: string): Promise<{ loggedOut: true }> {
+		if (sessionId !== this.session.sessionId)
+			throw new SessionControlError("COMMAND_BLOCKED", "Account session changed");
+		const auth = this.session.modelRegistry.authStorage;
+		for (const provider of new Set(auth.credentials.list().map(row => row.provider))) {
+			const account = auth.oauth
+				.accounts(provider, sessionId)
+				.find(row => accountId(provider, String(row.credentialId)) === id);
+			if (!account) continue;
+			if (!(await auth.credentials.removeById(provider, account.credentialId)))
+				throw new SessionControlError(
+					"COMMAND_BLOCKED",
+					"This account has already changed; refresh the account list",
+				);
+			this.#generation++;
+			this.#abort?.abort();
+			this.#reports = this.#reports.filter(
+				report => report.provider !== provider || !accountMatchesReport(account, report),
+			);
+			this.#resets = this.#resets.filter(
+				row => row.provider !== provider || row.credentialId !== account.credentialId,
+			);
+			return { loggedOut: true };
+		}
+		throw new SessionControlError("INVALID_ARGUMENT", "The selected OAuth account is no longer available");
+	}
+	async get(refresh = false, details = false): Promise<AccountStatusResult> {
 		const auth = this.session.modelRegistry.authStorage;
 		if (refresh) {
 			this.#refreshing ??= (async () => {
+				const generation = this.#generation;
 				const controller = new AbortController();
 				this.#abort = controller;
 				const timer = setTimeout(() => controller.abort(), 30000);
@@ -94,6 +141,7 @@ export class StudioAccountStatusService {
 						),
 					);
 					const [usage, credits] = await Promise.allSettled([reports, resets]);
+					if (generation !== this.#generation) return;
 					this.#reports = usage.status === "fulfilled" ? (usage.value ?? []) : [];
 					this.#usageUnavailable = usage.status === "rejected" || usage.value === null;
 					this.#resets = credits.status === "fulfilled" ? credits.value.flat() : [];
@@ -131,7 +179,7 @@ export class StudioAccountStatusService {
 					...(account.orgName ? { organization: clean(account.orgName) } : {}),
 					source: "oauth",
 					active: account.active,
-					limits: report ? projectQuota(report) : [],
+					limits: report ? projectQuota(report, details) : [],
 					...(report ? { reportedAt: report.fetchedAt } : {}),
 					resets: resetStatus(
 						this.#resets.find(item => item.provider === provider && item.credentialId === account.credentialId),
@@ -153,7 +201,11 @@ export class StudioAccountStatusService {
 		}
 		const unassigned = this.#reports
 			.filter(report => !assigned.has(report))
-			.map(report => ({ provider: report.provider, reportedAt: report.fetchedAt, limits: projectQuota(report) }));
+			.map(report => ({
+				provider: report.provider,
+				reportedAt: report.fetchedAt,
+				limits: projectQuota(report, details),
+			}));
 		const result: AccountStatusResult = {
 			accounts: accounts.slice(0, 200),
 			unassigned: unassigned.slice(0, 200),

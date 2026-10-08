@@ -1,3 +1,10 @@
+import { useSessionTitles } from "./history/useSessionTitles";
+import { SessionTitleMark } from "./history/SessionTitleMark";
+import { previewSessionTitle } from "./preview/sessionTitlePreview";
+import { EvaluationPage } from "./evaluation/EvaluationPage";
+import { SecondaryInteractionDeck } from "./deck/SecondaryInteractionDeck";
+import { BrowserPane } from "./browser/BrowserPane";
+import { ComputerPane } from "./browser/ComputerPane";
 import { AnnotationsProvider, AnnotationButton } from "./annotations/Annotations";
 import { TokenCounterPane } from "./usage/TokenCounterPane";
 import { MediaPage } from "./MediaPage";
@@ -104,6 +111,10 @@ import {
 import { snapshotFromDoc, snapshotFromText, snapshotFromTextAndImages, snapshotIsEmpty } from "./composer/serialize";
 import { emptySnapshot, fileLabel, type ComposerSnapshot } from "./composer/types";
 import { mergeUsedSkills, skillNamesInDoc, skillNamesInText } from "./skills/skillUsage";
+import type { StudioSpeed } from "@omp-studio/studio-protocol";
+import { ComposerSpeedControl } from "./composer/ComposerSpeedControl";
+import { SessionModelRecovery } from "./models/SessionModelRecovery";
+import { RuntimeQueueBar } from "./composer/RuntimeQueueBar";
 import { MessageQueueBar, type QueuedMessage } from "./MessageQueueBar";
 import { injectMagicKeyword, type MagicKeyword } from "./composerMode";
 import { SettingsPage, setSettingsIntent, type RuntimeSettingsApi } from "./SettingsPage";
@@ -240,7 +251,7 @@ import { buildGitStatusLookup, GIT_STATUS_META, type TreeGitStatus } from "./git
 
 const PREVIEW_PLAN_TITLE = PREVIEW_DECK_ITEMS.find((item) => item.kind === "plan")?.title ?? "Plan";
 
-const KNOWN_ROUTES: ReadonlyArray<Route> = ["home", "workbench", "history", "agent-hub", "capabilities", "model-config", "settings", "diagnostics", "media"];
+const KNOWN_ROUTES: ReadonlyArray<Route> = ["home", "workbench", "history", "agent-hub", "capabilities", "model-config", "settings", "diagnostics", "media", "evaluation"];
 
 function parseStoredRoute(value: string | undefined): Route | undefined {
   return value !== undefined && (KNOWN_ROUTES as readonly string[]).includes(value) ? (value as Route) : undefined;
@@ -289,11 +300,11 @@ type ClientStateSource = StudioClient & {
   onState?: (listener: (state: ClientState) => void) => Unsubscribe;
 };
 
-type Route = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media";
+type Route = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "evaluation";
 type SecondaryRoute = Exclude<Route, "workbench">;
 
 function isSecondary(route: Route): route is SecondaryRoute {
-  return route === "home" || route === "history" || route === "agent-hub" || route === "capabilities" || route === "model-config" || route === "settings" || route === "diagnostics" || route === "media";
+  return route === "home" || route === "history" || route === "agent-hub" || route === "capabilities" || route === "model-config" || route === "settings" || route === "diagnostics" || route === "media" || route === "evaluation";
 }
 
 const SECONDARY_META: Record<SecondaryRoute, { titleKey: string; icon: string }> = {
@@ -304,6 +315,7 @@ const SECONDARY_META: Record<SecondaryRoute, { titleKey: string; icon: string }>
   "model-config": { titleKey: "nav.modelConfig", icon: "server" },
   settings: { titleKey: "nav.settings", icon: "settings" },
   diagnostics: { titleKey: "nav.diagnostics", icon: "pulse" },
+  evaluation: { titleKey: "nav.evaluation", icon: "pulse" },
   media: { titleKey: "media.title", icon: "image" },
 };
 
@@ -1952,6 +1964,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
   );
   const omp = runtimeStatusLabel(runtime, t);
   const liveSnapshot = snapshotFrom(state);
+  const titleEntries = chrome.projectHistories?.[chrome.selectedProject?.id ?? ""]?.model?.entries ?? [];
+  const titleMetadata = useSessionTitles(client,{sessionId:liveSnapshot?.sessionId,available:runtime?.status === "connected",capabilities:usableCapabilityManifest(state.model.capabilities,state.clientState?.connection.capabilityManifest,state.bootstrap?.capabilityManifest)},titleEntries.flatMap(entry=>entry.sessionId?[{id:entry.sessionId,title:entry.title}]:[]),state.route === "workbench");
   // 会话行 ⋯ 菜单：同一时刻至多一个弹层；Escape / 点外部关闭。
   const [openRowMenuId, setOpenRowMenuId] = useState<string | null>(null);
   /** 非 null = 当前弹层由行右键打开，贴该光标点；null = 由 ⋯ 按钮打开。 */
@@ -2292,8 +2306,9 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                           onClick={() => chrome.onSelectPreviewThread(thread.id)}
                         >
                           <ThreadSpin running={running} />
-                          <span className="t-title"><span className="t-scroll">{thread.title}</span></span>
+                          <span className="t-title"><SessionTitleMark row={previewSessionTitle(thread.id,thread.title)} title={thread.title}/><span className="t-scroll">{thread.title}</span></span>
                           {wait || running ? null : <span className="t-meta">{thread.time}</span>}
+                          {wait ? <ThreadWaitChip kind={wait} /> : null}
                         </button>
                         {/* 悬停操作区：最右「归档」（演示：本地隐藏），其左 ⋯ 菜单（顶栏同款；
                             演示行无真实会话，会话动作禁用，写表面不伪造目标）。 */}
@@ -2324,9 +2339,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             }
                           />
                           <button type="button" className="icon-btn" data-tip={t("history.archiveSession")} aria-label={t("history.archiveSession")} onClick={() => chrome.onArchivePreviewThread(thread.id)}><Icon name="archive" extra="sm" /></button>
-                        </span>
-                        {wait ? <ThreadWaitChip kind={wait} /> : null}
-                      </div>
+                        </span>                      </div>
                       );
                     })}
                     {visible.length < threads.length ? (
@@ -2479,9 +2492,10 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             <ThreadSpin running={running} />
                             <span className="t-title">
                               {entry.pinned === true ? <span className="t-pin" role="img" aria-label={t("history.pinned")}><Icon name="pin" extra="sm" /></span> : null}
-                              <span className="t-scroll">{sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"))}</span>
+                              <SessionTitleMark row={titleMetadata.rows.get(entry.sessionId ?? "")} title={sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"))}/><span className="t-scroll">{sidebarThreadTitle(entry, provisional, t("conversation.untitledSession"))}</span>
                             </span>
                             {wait || running ? null : <span className="t-meta">{relativeTime(entry.lastActiveAt)}</span>}
+                          {wait ? <ThreadWaitChip kind={wait} /> : null}
                           </button>
                           {/* 悬停操作区：最右「归档」（session.archive），其左 ⋯ 菜单（顶栏同款；
                               会话动作作用于所在行，非当前会话先打开 resume 再执行）。 */}
@@ -2518,9 +2532,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                               aria-label={t("history.archiveSession")}
                               onClick={() => chrome.onArchiveThread(entry, workspace.workspaceId)}
                             ><Icon name="archive" extra="sm" /></button>
-                          </span>
-                          {wait ? <ThreadWaitChip kind={wait} /> : null}
-                        </div>
+                          </span>                        </div>
                         );
                       })}
                       {entries.length < total ? (
@@ -2990,6 +3002,9 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
     : (realActiveWorkspace?.name ?? t("conversation.noProjectSelected"));
   const crumbBranch = preview ? (previewProject?.branch ?? "main") : (realGit.repository?.branch ?? (realGit.repository?.detached ? "detached HEAD" : "—"));
   const crumbThread = preview ? (previewHit?.thread.title ?? threadTitle) : threadTitle;
+  const titleTarget = viewedSessionId ?? liveSnapshot?.sessionId;
+  const titleMetadata = useSessionTitles(client,{sessionId:liveSnapshot?.sessionId,available:(state.clientState?.connection.runtime ?? state.bootstrap?.runtime)?.status === "connected",capabilities:usableCapabilityManifest(state.model.capabilities,state.clientState?.connection.capabilityManifest,state.bootstrap?.capabilityManifest)},titleTarget?[{id:titleTarget,title:crumbThread}]:[],state.route === "workbench");
+  const titleRow = preview ? previewSessionTitle(chrome.previewThreadId,crumbThread) : titleMetadata.rows.get(titleTarget ?? "");
   const viewedTelemetry = useViewedSessionTelemetry({
     client: preview ? null : client,
     preview,
@@ -3160,7 +3175,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
               </>
             }
           >
-            <span className="ellipsis" data-tip={crumbThread}>{crumbThread}</span>
+            <SessionTitleMark row={titleRow} title={crumbThread} /><span className="ellipsis" data-tip={crumbThread}>{crumbThread}</span>
             <Icon name="chevron-d" extra="sm crumb-chevron" />
           </CrumbMenu>
         </nav>
@@ -3179,7 +3194,7 @@ function AppTopbar({ state, client, chrome, onRoute, threadTitle, sideOpen, onTo
           onClick={() => run(chrome.onHandoffThread)}
         ><Icon name="handoff" /></button>
       </div>
-      <button className="icon-btn lg" data-tip={t("menu.agentHub")} aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
+      <button className="icon-btn lg" data-tip={t("nav.agentHub")} aria-label="Agent Hub" onClick={() => onRoute("agent-hub")}><Icon name="bot" extra="lg" /></button>
       <button className="icon-btn" data-tip={t("nav.history")} aria-label={t("nav.history")} onClick={() => onRoute("history")}><Icon name="history" /></button>
       <div className="tb-right">
         <div className="telemetry">
@@ -3531,6 +3546,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const composerInputRef = composerRef;
   // 流式期间按 Enter 的消息先排本地队列，本轮 run 结束后由 flush effect 按序发送。
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const [previewSpeeds, setPreviewSpeeds] = useState<Record<string, StudioSpeed>>({});
   const queuedSeqRef = useRef(0);
   const [queueEdit, setQueueEdit] = useState<QueueEditState | undefined>(undefined);
   const [queueFlushTick, setQueueFlushTick] = useState(0);
@@ -3892,7 +3908,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     setCreateProjectBusy(true);
     try {
       const handle = await client.command("workspace.pick", name ? { name } : {});
-      const model = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
+      const model = await waitReceipt<WorkspaceListReadModel>(client, handle.requestId, null);
       const active = model.workspaces.find((workspace) => workspace.active);
       if (!active) throw new Error("选择的文件夹未注册为项目");
       onSelectProject({ id: active.workspaceId, name: active.name });
@@ -5205,6 +5221,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     <>
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
         <div className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
+          <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
           <ConversationPane
             snapshot={convo}
             liveEngine={convo.engine}
@@ -5640,6 +5657,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 </section>
               </div>
             ) : null}
+            <div className="composer-queues">
+            <RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming)} showDemo={previewThreadId === "t1"} />
             <MessageQueueBar
               messages={sessionQueue}
               running={preview ? previewThreadId === "t1" : running}
@@ -5663,6 +5682,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               onSendNow={(entry) => void sendQueuedNow(entry)}
               onRemove={removeQueuedMessage}
             />
+            </div>
             <div className={`composer${composerRunning ? ` running ${composerExpanded ? "expanded" : "compact"}` : ""}`} id="composer">
               {jumpPill?.visible && sessionQueue.length === 0 ? (
                 <button
@@ -5678,6 +5698,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               <div className="composer-ctx" aria-label="已引用的上下文" role="group" />
               <label className="sr-only" htmlFor="composerInput">消息输入框。发送给 Runtime 的文本。</label>
               <ChipComposer
+                prediction={{client,sessionId:snapshot?.sessionId,available:runtimeConnected&&executionMatches&&can("prediction.prepare")}}
                 ref={composerInputRef}
                 id="composerInput"
                 compact={composerRunning && !composerExpanded}
@@ -5815,6 +5836,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                   }}
                 />
                 <ComposerModePicker
+                  {...(preview || (can("session.speed.get") && can("session.speed.set")) ? { speedControl: <ComposerSpeedControl previewSelected={previewSpeeds[previewThreadId ?? "new"] ?? "normal"} onPreviewChange={value => setPreviewSpeeds(values => ({ ...values, [previewThreadId ?? "new"]: value }))} client={client} sessionId={snapshot?.sessionId} modelSelector={snapshot?.model?.selector} available={runtimeConnected && executionMatches && !connection?.resyncRequired} /> } : {})}
                   preview={preview}
                   {...(snapshot === undefined ? {} : { snapshot })}
                   can={can}
@@ -5939,12 +5961,13 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 <Icon name="branch" extra="sm" />Git
               </button>
               <button className={sideTab === "preview" ? "active" : ""} role="tab" aria-selected={sideTab === "preview"} aria-controls="spPreview" onClick={() => onSideTabChange("preview")}>
-                <Icon name="globe" extra="sm" />Preview
+                <Icon name="globe" extra="sm" />{t("browser.title")}
               </button>
               <button className={sideTab === "agents" ? "active" : ""} role="tab" aria-selected={sideTab === "agents"} aria-controls="spAgents" onClick={() => onSideTabChange("agents")}>
                 <Icon name="bot" extra="sm" />Agents
                 {preview ? <span className="chip gray xs">4</span> : rosterAgents !== undefined ? <span className="chip gray xs">{rosterAgents.length}</span> : snapshot ? <span className="chip gray xs">{snapshot.agents.length}</span> : null}
               </button>
+              <button className={sideTab === "computer" ? "active" : ""} role="tab" aria-selected={sideTab === "computer"} aria-controls="spComputer" onClick={() => onSideTabChange("computer")}><Icon name="monitor" extra="sm" />{t("computer.title")}</button>
               {btwWindow.open && btwWindow.placement === "docked" ? (
                 /* 这个按钮同时是拖出握把：移动超过阈值并离开标题栏就切回浮动态，
                    不到阈值当普通点击。状态点让 BTW 在别的 tab 前台时也能看出在跑。 */
@@ -5980,8 +6003,9 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               {sideContentMounted && sideTab === "git" ? (preview ? <PreviewGitPanel /> : <GitStatusPanel client={client} {...(activeWorkspace === undefined ? {} : { workspaceId: activeWorkspace.workspaceId })} />) : null}
             </div>
             <div className={`sp-page${sideTab === "preview" ? " active" : ""}`} id="spPreview" role="tabpanel">
-              {preview ? <PreviewSidePreview /> : <Deferred title={t("shell.previewUnavailableTitle")} detail={t("shell.previewUnavailableDetail")} />}
+              <BrowserPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={sideOpen && sideContentMounted && sideTab === "preview"} capabilities={capabilities} />
             </div>
+            <div className={`sp-page${sideTab === "computer" ? " active" : ""}`} id="spComputer" role="tabpanel"><ComputerPane client={client} sessionId={snapshot?.sessionId} available={runtimeConnected && executionMatches && !connection?.resyncRequired} visible={sideOpen && sideContentMounted && sideTab === "computer"} capabilities={capabilities} /></div>
             <div className={`sp-page${sideTab === "agents" ? " active" : ""}`} id="spAgents" role="tabpanel">
               {preview ? (
                 <PreviewSideAgents onOpenHub={() => onRoute("agent-hub")} />
@@ -6622,7 +6646,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (memory.bottomOpen !== undefined) setBottomOpen(memory.bottomOpen);
     if (memory.bottomVisible !== undefined) setBottomVisible(memory.bottomVisible);
     if (memory.sideTab === "changes" || memory.sideTab === "git" || memory.sideTab === "preview"
-      || memory.sideTab === "agents" || memory.sideTab === "btw") setSideTab(memory.sideTab);
+      || memory.sideTab === "agents" || memory.sideTab === "btw" || memory.sideTab === "computer") setSideTab(memory.sideTab);
     if (memory.bottomTab === "terminal" || memory.bottomTab === "problems" || memory.bottomTab === "tests"
       || memory.bottomTab === "output" || memory.bottomTab === "logs" || memory.bottomTab === "pvlogs") setBottomTab(memory.bottomTab);
     if (memory.explorerOpen !== undefined) setExplorerOpen(memory.explorerOpen);
@@ -6793,7 +6817,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     try {
       const result = await workspaceActionQueue.enqueue(async () => {
         const handle = await client.command("workspace.pick", {});
-        return await waitReceipt<WorkspaceListReadModel>(client, handle.requestId);
+        return await waitReceipt<WorkspaceListReadModel>(client, handle.requestId, null);
       });
       if (!navigationGate.isCurrent(generation)) return;
       onWorkspacesChange(result);
@@ -8412,6 +8436,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               const historyModel = historyAll ?? state.model.history;
               return (
                 <HistoryPage
+                  nativeContext={{ sessionId:snapshot?.sessionId, available:hubRuntimeConnected, capabilities }}
                   client={client}
                   onImported={() => void refreshHistoryModels()}
                   onImportedOpen={(sessionId, workspaceId) => { void client.query("history.list", { workspaceId, limit: PROJECT_THREADS_QUERY_MAX }).then(history => { const entry = history.entries.find(item => item.sessionId === sessionId); if (entry) void openHistoryEntry(entry, workspaceId); else setSessionActionError("Imported session is not yet available; refresh history"); }); }}
@@ -8444,10 +8469,13 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             />
           ) : pageRoute === "media" ? (
             <MediaPage client={client} workspaceId={hubWorkspaceId} sessionId={snapshot?.sessionId} runtimeAvailable={hubRuntimeConnected} onInsert={insertPreparedPrompt} />
+          ) : pageRoute === "evaluation" ? (
+            <EvaluationPage client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} available={hubRuntimeConnected} capabilities={capabilities} />
           ) : pageRoute === "model-config" ? (
-            <ModelConfigPage key={mcNonce} client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} runtimeAvailable={hubRuntimeConnected} />
+            <ModelConfigPage capabilities={capabilities} onOpenEvaluation={() => go("evaluation")} key={mcNonce} client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} runtimeAvailable={hubRuntimeConnected} />
           ) : pageRoute === "settings" ? (
             <SettingsPage
+              nativeContext={{ sessionId: snapshot?.sessionId, available: hubRuntimeConnected, capabilities }}
               client={client}
               key={settingsNonce}
               {...(snapshot ? { approvalMode } : {})}
@@ -8456,6 +8484,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             />
           ) : pageRoute === "diagnostics" ? (
             <DiagnosticsPage
+              nativeContext={{sessionId:snapshot?.sessionId,available:hubRuntimeConnected,capabilities}}
               client={client}
               {...(state.model.diagnostics ? { diagnostics: state.model.diagnostics } : {})}
               {...(capabilities ? { capabilities } : {})}
@@ -8463,8 +8492,9 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               {...(environment ? { environment } : {})}
             />
           ) : (
-            <CapabilitiesPage key={capNonce} client={client} sessionId={snapshot?.sessionId} runtimeAvailable={hubRuntimeConnected} onInsertPrompt={insertPreparedPrompt} onRunSlash={runSlashFromShell} onPinCompleted={refreshPinnedHistory} />
+            <CapabilitiesPage capabilities={capabilities} key={capNonce} client={client} sessionId={snapshot?.sessionId} runtimeAvailable={hubRuntimeConnected} onInsertPrompt={insertPreparedPrompt} onRunSlash={runSlashFromShell} onPinCompleted={refreshPinnedHistory} />
           )}
+          <SecondaryInteractionDeck client={client} interaction={pendingInteraction} runtimeConnected={hubRuntimeConnected} resyncRequired={state.clientState?.connection.resyncRequired === true} preview={previewMode.preview} />
         </SecondaryPage>
       ) : (
       <div className={`app-body ${shellClass}`}>

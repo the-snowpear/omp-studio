@@ -1,3 +1,4 @@
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { expect, it } from "bun:test";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioRuntimeCatalogService } from "../src/studio/services/runtime-catalog-service";
@@ -55,7 +56,7 @@ it("reports native startup readiness without connecting, probing or exposing cre
 	const session = {
 		sessionId: "s",
 		sessionManager: { getCwd: () => "." },
-		settings: { get: () => 250 },
+		settings: Settings.isolated({ "mcp.startupTimeoutMs": 250 }),
 		studioToolSession: { mcpManager: manager },
 	};
 	const service = new StudioRuntimeCatalogService(session as unknown as AgentSession);

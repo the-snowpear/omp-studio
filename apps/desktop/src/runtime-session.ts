@@ -127,6 +127,7 @@ export interface DesktopRuntimeSessionPortOptions {
   /** Injectable Worker port factory used by desktop multi-session tests. */
   readonly workerPortFactory?: (input: {
     readonly resumeSessionId?: string;
+    readonly model?: string;
     readonly nextRuntimeEpoch: () => number;
   }) => DesktopRuntimeSessionPort;
 }
@@ -428,12 +429,13 @@ export function createDesktopRuntimeSessionPort(
     return leaseStore;
   };
 
-  const workerPort = (resumeSessionId?: string): DesktopRuntimeSessionPort => {
+  const workerPort = (resumeSessionId?: string, model?: string): DesktopRuntimeSessionPort => {
     const port =
       options.workerPortFactory?.({
         ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
+        ...(model === undefined ? {} : { model }),
         nextRuntimeEpoch,
-      }) ?? createSingleDesktopRuntimeSessionPort(workerOptions, resumeSessionId, nextRuntimeEpoch);
+      }) ?? createSingleDesktopRuntimeSessionPort(workerOptions, resumeSessionId, nextRuntimeEpoch, model);
     port.attachSessionSink?.((session) => {
       if (session !== undefined) {
         const snapshot = session.controller.publication()?.snapshot;
@@ -501,6 +503,7 @@ export function createDesktopRuntimeSessionPort(
   const launchWorker = async (
     resumeSessionId?: string,
     launchWorkspace?: { workspaceId: string; cwd: string },
+    model?: string,
   ): Promise<DesktopRuntimeSession | undefined> => {
     const launchContext = context;
     const selected = launchWorkspace ?? workspace;
@@ -520,7 +523,7 @@ export function createDesktopRuntimeSessionPort(
     }
     await ensureCapacity();
     let lease: SessionLease | undefined;
-    const port = workerPort(resumeSessionId);
+    const port = workerPort(resumeSessionId, model);
     try {
       if (resumeSessionId !== undefined) {
         lease = await getLeaseStore().acquire({ sessionId: resumeSessionId, ownerId });
@@ -617,10 +620,11 @@ export function createDesktopRuntimeSessionPort(
     }
   };
 
-  const selectResident = async (sessionId: string): Promise<DesktopRuntimeSession | undefined> => {
+  const selectResident = async (sessionId: string, model?: string): Promise<DesktopRuntimeSession | undefined> => {
     const existing = residents.get(sessionId);
     if (existing !== undefined) {
       if (existing.session.hello() !== undefined && existing.session.controller.publication()?.snapshot?.sessionId === sessionId) {
+        if (model !== undefined) throw new Error("This session is already active; change its model using the model picker");
         // Resuming a Session of another project follows its Worker: the active
         // workspace moves with the selection so later `fresh` launches and
         // cwd-derived Host reads (catalog, archive) agree with the view.
@@ -640,9 +644,9 @@ export function createDesktopRuntimeSessionPort(
       const previousWorkspace = existing.workspace;
       await stopResident(existing);
       adoptWorkspace(previousWorkspace);
-      return await launchWorker(sessionId, previousWorkspace);
+      return await launchWorker(sessionId, previousWorkspace, model);
     }
-    return await launchWorker(sessionId);
+    return await launchWorker(sessionId, undefined, model);
   };
 
   function armIdleTimer(resident: ResidentRuntime): void {
@@ -994,7 +998,7 @@ export function createDesktopRuntimeSessionPort(
     },
     switchSession(intent): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
-        if (intent.kind === "resume") return await selectResident(intent.sessionId);
+        if (intent.kind === "resume") return await selectResident(intent.sessionId, intent.model);
         return await launchWorker();
       });
     },
@@ -1097,6 +1101,7 @@ function createSingleDesktopRuntimeSessionPort(
   options: DesktopRuntimeSessionPortOptions,
   initialResumeSessionId: string | undefined,
   nextRuntimeEpoch: () => number,
+  initialModel?: string,
 ): DesktopRuntimeSessionPort {
   // POSIX Runtimes lead their own process group so stopping one also stops
   // the tool processes it started; Windows keeps the kill-based fallback.
@@ -1114,6 +1119,7 @@ function createSingleDesktopRuntimeSessionPort(
   let unsubscribeProjection: (() => void) | undefined;
   let alive = false;
   let resumeSessionId: string | undefined = initialResumeSessionId;
+  let resumeModel = initialModel;
   /** Bumped on every launch so a late socket close cannot kill the next session. */
   let generation = 0;
   /** Public start/stop/rebind/switch must not overlap; overlapping kills the live Runtime. */
@@ -1380,6 +1386,7 @@ function createSingleDesktopRuntimeSessionPort(
 
     try {
       const extra = ["--cwd", selected.cwd];
+      if (resumeModel !== undefined) extra.push("--model", resumeModel);
       if (resumeSessionId !== undefined) {
         extra.push("--resume", resumeSessionId);
       }
@@ -1495,6 +1502,7 @@ function createSingleDesktopRuntimeSessionPort(
       bundle = session;
       alive = true;
       becameReady = true;
+      resumeModel = undefined;
       log?.write("info", "runtime.launch.ready", `generation=${launchGeneration}`);
       rememberUnavailable(undefined);
       rememberDisconnect(undefined);
@@ -1541,13 +1549,15 @@ function createSingleDesktopRuntimeSessionPort(
       });
     },
 
-    switchSession(intent: { kind: "resume"; sessionId: string } | { kind: "fresh" }): Promise<DesktopRuntimeSession | undefined> {
+    switchSession(intent: { kind: "resume"; sessionId: string; model?: string } | { kind: "fresh" }): Promise<DesktopRuntimeSession | undefined> {
       return serialized(async () => {
         const previousResume = resumeSessionId;
+        const previousModel = resumeModel;
         log?.write("info", "runtime.switch.begin", `kind=${intent.kind} generation=${generation}`);
         stopping = false;
         await stopCurrent("replace");
         resumeSessionId = intent.kind === "resume" ? intent.sessionId : undefined;
+        resumeModel = intent.kind === "resume" ? intent.model : undefined;
         try {
           const next = await launch();
           if (next !== undefined) {
@@ -1560,6 +1570,7 @@ function createSingleDesktopRuntimeSessionPort(
           await stopCurrent("replace");
         }
         resumeSessionId = previousResume;
+        resumeModel = previousModel;
         log?.write("warn", "runtime.switch.fallback", `resume=${previousResume === undefined ? "no" : "yes"}`);
         return await launch();
       });

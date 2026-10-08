@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { graphicVendorPlugin } from "./graphic-vendor-plugin";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
@@ -27,8 +29,9 @@ function packagedCspPlugin() {
 // relative base keeps the same bundle loadable from any origin the shell
 // later serves it from (including file:// during early desktop bring-up).
 export default defineConfig({
-  plugins: [react(), packagedCspPlugin()],
+  plugins: [react(), packagedCspPlugin(), graphicVendorPlugin()],
   base: "./",
+  server: { cors: { origin: ["null", /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/] } },
   test: {
     environment: "jsdom",
     setupFiles: ["src/test/setup.ts"],
@@ -36,6 +39,7 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
+      input: { index: fileURLToPath(new URL("./index.html", import.meta.url)), graphic: fileURLToPath(new URL("./graphic-preview.html", import.meta.url)) },
       output: {
         // Keep the entry under the 500 kB warning: React, xterm, and the
         // Studio client stay on their own cacheable vendor chunks.
@@ -43,6 +47,7 @@ export default defineConfig({
         // whole dependency tree rides its own chunk instead of inflating vendor.
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
+          if (id.includes("/three/") || id.includes("\\three\\")) return "three";
           if (id.includes("@xterm")) return "xterm";
           if (id.includes("@codemirror") || id.includes("@lezer") || /node_modules[/\\]codemirror[/\\]/.test(id)) {
             return "codemirror";

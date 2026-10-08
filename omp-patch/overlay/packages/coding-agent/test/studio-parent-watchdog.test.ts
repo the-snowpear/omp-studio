@@ -1,3 +1,4 @@
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { afterEach, expect, test } from "bun:test";
 import * as path from "node:path";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -120,7 +121,7 @@ test("losing the Host aborts the turn and shuts down without draining", async ()
 			ensureOnDisk: async () => {},
 			flush: async () => {},
 		},
-		settings: { get: (key: string) => (key === "loop.mode" ? "prompt" : undefined) },
+		settings: Settings.isolated({ "loop.mode": "prompt" }),
 		isStreaming: true,
 		isCompacting: false,
 		hasPostPromptWork: false,

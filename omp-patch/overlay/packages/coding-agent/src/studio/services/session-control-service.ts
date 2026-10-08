@@ -30,7 +30,7 @@ export interface SessionControlSession {
 	maybeStartTitleGeneration?(text: string): void;
 	resetSessionContext(): Promise<{ droppedCount: number } | undefined>;
 	retry(): Promise<boolean>;
-	abort(options?: { reason?: string }): Promise<void>;
+	abort(options?: { reason?: string; preserveQueuedInput?: boolean }): Promise<void>;
 	newSession(options?: { drop?: boolean }): Promise<boolean>;
 }
 
@@ -234,7 +234,7 @@ export class SessionControlService {
 	 *  `session.abort` → `abortCompaction`, then waits for its cleanup barrier. */
 	async abort(): Promise<{ aborted: true }> {
 		try {
-			await this.#session.abort({ reason: USER_INTERRUPT_LABEL });
+			await this.#session.abort({ reason: USER_INTERRUPT_LABEL, preserveQueuedInput: true });
 		} catch (error) {
 			throw this.#mapBusy(error);
 		}

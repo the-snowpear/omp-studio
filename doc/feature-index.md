@@ -85,6 +85,9 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | @ 提及 | `composer/mentions.ts` | `workspace.fileTree`、`agents.definitions.get`、查询非空时 `skills.get` |
 | 模型 / 模式选择 | `ComposerModelPicker.tsx`、`ComposerModePicker.tsx` | `session.model.set`、`session.thinking.set`、plan/vibe |
 | 消息队列条 | `MessageQueueBar.tsx`、`composer/queueEdit.ts`、`composer/dispatch.ts`（`composerOwnerSessionId` / `composerRunningForTarget`） | 流式 Enter 本地排队（按 session 隔离），idle 后 `core.prompt`；会话归属由 `composer/dispatch.ts` 判定：新建会话 `session.create` 回执落地前快照仍指向旧会话，此时 Enter 不进排队，而是等新会话创建后发送；第一条等待创建期间再次 Enter 保留输入框草稿，同步 dispatch 锁阻止同帧重复发送。草稿与侧栏当前行也不归到旧会话；「插入纠偏」`core.steer`；`/queue` 为 `queue.enqueue`，带图片时改 `core.followUp`。编辑在 Composer 内进行，条目留队；编辑队首时暂停 flush |
+| Runtime 已提交队列 | `composer/RuntimeQueueBar.tsx`、`preview/runtimeQueuePreview.ts` | `session.queue.get/remove/promote/edit/restore`；原生对象 ID 区分重复正文；编辑保留图片及隐藏上下文；Studio 中止后保留原生组，显式恢复才排队；真实模式不回填演示 |
+| 历史会话模型恢复 | `models/SessionModelRecovery.tsx` | 原生 `session.restore.inspect` 只读检查；显式选择后 Host `session.resume` 携带 model，Desktop 将 `--model` 传给目标 Worker；失败保留已有 Worker |
+| Composer 服务档位 | `composer/ComposerSpeedControl.tsx`、`ComposerModePicker.tsx` | `session.speed.get/set`；按能力显示四档；旧 Runtime 保留 Fast 布尔入口；全局 Slow 策略提示确认 |
 | 审批 / Ask 卡片 | `InteractionDeck.tsx`、`deck/ApprovalCard.tsx`、`deck/AskCard.tsx`、`deck/QueuedDeck.tsx`、`deck/askGenie.ts`、`deck/interactionGate.ts` | `interaction.respond`；Ask 紧凑卡/Ask 卡加载与退出为底边变形浮入（不改 Plan 放大缩小）。可见提问卡不复用 Composer `gated` |
 | Plan 评审 | `deck/PlanCard.tsx`、`deck/PlanCreatedCard.tsx`、`planSections.ts`、`planFeedback.ts`、`conversation/toolMeta.ts`（`xd://propose`） | 出现时保持紧凑卡，点放大或对话入口才展开大卡；紧凑卡与展开卡右上角均放「保存并退出」（能力存在时显示），不再占用底部评审操作区；大卡章节批注；大卡底栏常驻全文批注（整份计划）；大卡右上角叉号收成紧凑卡；有意见 `mode.plan.review.respond` refine，空 Refine 走 dismiss 回 Composer；批准 `execute` 清上下文、`compact` 先压缩再执行、`keep` 保留上下文（`approve` 是 keep 别名）；钉在 `xd://propose` 所在 assistant 行（批准后不跟到最新轮）；执行后入口卡打开只读大卡回看正文，不再打 `mode.plan.review.open` |
 | 权限档位 | `ComposerApprovalPicker.tsx`（`App.tsx` 接入） | `permissions.mode.set`；预览本地切换；历史会话先 `session.resume` 再 set；流式 / 压缩中可改，下一轮对话才写入 `tools.approvalMode` |
@@ -103,6 +106,7 @@ Runtime 投影：overlay `services/conversation-live-projector.ts`、`conversati
 | 创建 / 恢复 / 删除 | `apps/desktop/src/session-commands.ts` | `services/session-control-service.ts` |
 | 目录扫描 | `studio-host/src/session-catalog.ts` | — |
 | 归档 / 解档 | `studio-host/src/session-archive-service.ts` | 切走 live 文件后再 gzip |
+| Archive / Recap 查询 | `HistoryPage.tsx`、`history/NativeArchivePane.tsx`、`preview/archivePreview.ts` | `archive.sessions.list/recaps.list/prompts.search/session.inspect`；native Archive、限量列表和详情、不接受文件路径 |
 | 永久删除 / 残留清理 | `studio-host/src/session-delete-service.ts`；历史页 `HistoryPage.tsx`「⋮ → 删除会话」 | — |
 | 线程绑定 | `studio-host/src/thread-binding-store.ts` | — |
 | 多会话经纪 / 居民摘要 | `studio-host/src/session-broker.ts`、`session-registry.ts`；桌面 `runtime-session.ts`、`host-composition.ts`；facade `residents.list` | — |
@@ -120,6 +124,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 | Agent Hub 页 | `apps/renderer/src/AgentHub.tsx`、`conversation/SubagentConversationPane.tsx`、`conversation/persistedSessionAgents.ts` | 名册：`session.agents.list` 与 live `snapshot.agents` 合并（仅 viewed session === live session 时叠 live）；写操作（spawn/send/kill/revive/release/`job.cancel`）仅 live 会话；历史 Transcript 不读 live `agent.transcript.read`，用「打开」走归档对话；详情「打开」走 `agent.conversation.read`，缺失或非 live 则 `session.transcript.readPage` + `agentId`；聊天附件胶囊经 `agent.send` | overlay `services/agent-hub-service.ts`、`job-service.ts` |
 | 批量评审 | `judgments/JudgmentsPane.tsx`、`preview/judgmentsPreview.ts` | `judgments.list/create/read/cancel/close/retry`；有界分页、付费操作前确认、结果保存产物库 | overlay `services/judgment-service.ts`；native `eval/judgment-batch-bridge.ts` 独立观察游标 |
 | 子代理面板 | `SubagentsPanel.tsx` | `agent.spawn/send/kill/revive/release` | 同上 + `agent-conversation-service.ts` |
+| 子代理本次模型与路由详情 | `AgentHub.tsx`、`models/AgentModelDetails.tsx`、`preview/agentModelPreview.ts` | `agent.spawn.models` capability 限制本次候选链覆盖；`agent.model.inspect` | 原生 TaskTool/structured-subagent 参数；`services/agent-model-service.ts` 验证父子归属，报告实际 serving model/thinking |
 | 隔离子任务 / 多补丁 | `AgentHub.tsx`、`conversation/persistedSessionAgents.ts` | archive 的 `session_init.isolated` 经 Desktop 投影；历史只读 | `AgentHistorySummary.isolated/nestedPatchPaths` → overlay Hub 的 `canRevive`；send/revive 均在 Runtime 拒绝不可恢复的隔离任务 |
 | 任务代理定义 | `AgentHub` / Capabilities | `omp-agent-definitions-adapter.ts` | 磁盘 `.omp/agents/*.md`，不是 Hub live 态 |
 | Skills 抽屉 | `SkillsDrawer.tsx`、`skills/skillUsage.ts` | `omp-extensibility-adapter.ts`、`skills.get` / `skills.setEnabled` | overlay `skill-prompt-expansion.ts` |
@@ -169,6 +174,10 @@ Git **不走 Runtime Bridge**。桌面主进程实现，Facade 转调。
 | 应用更新（GitHub Release） | AppUpdateDialog、settings/appUpdate、settings/updates、settings/DesktopUpdateRecovery；预览 PREVIEW_APP_UPDATE / PREVIEW_DESKTOP_RECOVERY | Main update-coordinator / unified-updates-ipc 管理后台准备、持久化事务、统一重启；update-discovery 验签按组件/通道/架构发现；differential-artifact + electron-update-adapter 分块下载/全量回退及静默 NSIS；共享 v2 清单和 ZIP 在 runtime-installer。旧 chrome-updates 保留本地导入与诊断维护；新打包应用禁用旧在线 startApp/startRuntime。 |
 | Plan 另存为对话框 | `App.tsx` `pickPlanSaveTarget` / `savePlanAndQuit`；`deck/PlanCard.tsx` 按钮 | `workspace-shell-shared.ts`、`workspace-shell-ipc.ts`、`plan-save-path.ts`（原生另存为，默认 `<工作区>/PLAN.md`，回传工作区相对路径；越界拒绝）→ Bridge `mode.plan.review.saveAndQuit` |
 | 设置页 | `SettingsPage.tsx`、`settings/tabs.tsx` | 本地设置 + 少量 Host query |
+| 预测输入 | `composer/useWordPrediction.ts`、`settings/PredictionSettingsPane.tsx`；desktop `prediction.ts` | 原生 WordCompletionProvider；默认本地 n-gram，模型下载和外部历史显式选择；私有通道不进入 Bridge 事件 |
+| 标题图标与短码 | `history/useSessionTitles.ts`、`history/SessionTitleMark.tsx` | `session.titles.inspect`；原生当前/保存标题元数据；保留稳定会话身份与现有原生重新生成流程 |
+| 原生运行偏好 | `settings/NativePreferencesPane.tsx` | `preferences.native.get/set/clearOverride`；静态原生设置句柄，Advisor/标题/OTLP；范围与生效来源；OTLP 下次启动生效 |
+| 原生维护 / 完整导出 | `diagnostics/NativeMaintenancePane.tsx`、`preview/maintenancePreview.ts` | `maintenance.gc.preview/apply/status`、`maintenance.session.export`、`maintenance.export.status`、`maintenance.connection.check`；native GC 与 dump-all ZIP/HTML；Desktop `session-commands.ts` + `runtime-media-files.ts` 私有文件提升入库 |
 | 诊断页 | `DiagnosticsPage.tsx`、`diagnosticsModel.ts`、`runtimeEnsure.ts`、`RuntimeLossBanner.tsx`、`ActionProgressBar.tsx`、`updateCheck.ts`；预览 `preview/fixtures.ts` `PREVIEW_DIAGNOSTICS`；桌面 `chrome-logs.ts` | `diagnostics.get` / `environment.get` / `capabilities.get`；`chrome-updates.ts` 提供网络下载、本地导入、回滚并重启、清理旧 Runtime，`settings/updates.ts` 按 jobId 等待终态；启动与进页静默检查更新（超时不报错）；手动检查更新超时才提示；本地制品对比 `runtime-install.ts` `probeManagedRuntimeInstall`；安装/更新/重装 `runtime.install`；断开或启动失败时「重新连接 Runtime」走 `runtime.ensure`；已连接时「重启 Runtime」走 `runtime.ensure` `{ force: true }`，收据未连上时自动再 `ensure` 并等到 `runtime.changed` connected；Host 日志打开/导出走 chrome IPC `chrome-logs.ts`（路径不回传 Renderer）。工作台 / Hub / 空对话复用 `RuntimeLossBanner`。长操作显示分步进度条。 |
 | 安全窗 / CSP | — | `apps/desktop/src/security.ts` |
 | Windows 安装包 | packaging/ui、installer-host | packaging/electron-builder.yml / nsis/custom.nsh：当前用户安装、旧全机迁移、静默升级；scripts/build-update-assets-v2.mjs、verify-update-assets-v2.mjs、publish-update-release.mjs + .github/workflows/release.yml：多架构签名差分工件与独立 Runtime 发版；详见 docs/updates.md。 |
@@ -323,5 +332,10 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | 模型种类、角色链、搜索迁移 | `ModelConfigPage.tsx`、`models/runtimeModels.ts`、`WebRoleChain.tsx` | `runtime.models.list`；Host `model-role-migration.ts`、`web-routing.ts`、`omp-models-adapter.ts` |
 | Claude 重置确认与策略、MCP 启动等待 | `settings/tabs.tsx`、现有 InteractionDeck | overlay `runtime-settings-service.ts`、`studio-host-mode.ts` 与 AgentSession consent hook |
 | 账户、额度、重置券只读状态 | `models/AccountStatusPane.tsx`；预览 `preview/accountsPreview.ts` | `accounts.status` → overlay `services/account-status-service.ts`；手动刷新，不调用自动兑券 heartbeat |
+| 模型预设、速度与缓存保温 | `models/ModelPresetsPane.tsx`、`models/SessionOptionsPane.tsx`；预览 `preview/sessionOptionsPreview.ts` | `contracts/session-options.ts` → overlay `services/session-options-service.ts` → 原生 model-presets / service tier / cache warmer；账户与预设独立页签 |
+| 配置审批 | `deck/approvalContent.ts`、`deck/ApprovalCard.tsx`、`InteractionDeck.tsx` | overlay `services/configuration-approval.ts` 注册原生 CfgApprovalHost；前后值、范围、覆盖、一次/本会话/拒绝/超时；普通工具不能伪造本会话授权 |
+| 统一评测工作区 | `evaluation/EvaluationPage.tsx`、`models/BenchmarkPane.tsx`、`judgments/JudgmentsPane.tsx` | 模型基准与判断批次；原模型页基准入口跳转；共用 `workspaces/Workspace.tsx` |
+| IDA 管理 | `capabilities/IdaPane.tsx`；预览 `preview/idaPreview.ts` | `contracts/ida.ts` → overlay `services/ida-service.ts` → 原生 IDA Broker；`ida/worker.py` 在串行请求内建立恢复副本后执行 |
+| 浏览器观察与人工接管 | `browser/BrowserPane.tsx`；Desktop `browser-observation.ts`、`browser-observation-shared.ts`；预览 `preview/browserPreview.ts` | `browser.tabs.get/observe.prepare` 只传目录和不透明标识；图像/控制走窗口私有通道；overlay `services/browser-observation-service.ts`、`browser-tab-control.ts`，原生 supervisor 排他租约 |
 
 范围和验收进展：[OMP 18.3.0](../docs/migrations/omp-18.3.0.md)。

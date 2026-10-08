@@ -1,3 +1,5 @@
+import { cfgPlanEnabled } from "../../plan-mode/settings";
+import { cfgGoalEnabled } from "../../goals/settings";
 import { constants as fsConstants } from "node:fs";
 import { mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -6,7 +8,7 @@ import { CompactionCancelledError } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
-import { onModelRolesChanged } from "../../config/settings";
+import { cfgModelRoles } from "../../config/model-settings";
 import type { PlanApprovalDetails } from "../../plan-mode/approved-plan";
 import { autosaveApprovedPlan } from "../../plan-mode/plan-autosave";
 import { resolvePlanModelTransition } from "../../plan-mode/model-transition";
@@ -155,7 +157,7 @@ export class StudioModeControlService {
 				});
 			}
 		});
-		this.#unsubscribeModelRoles = onModelRolesChanged(() => {
+		this.#unsubscribeModelRoles = cfgModelRoles.listen(this.session.settings, () => {
 			if (this.session.getPlanModeState()?.enabled) void this.#applyPlanModel();
 		});
 	}
@@ -170,7 +172,7 @@ export class StudioModeControlService {
 	}
 
 	async enterPlan(initialPrompt?: string): Promise<StudioModeState> {
-		if (!this.session.settings.get("plan.enabled")) {
+		if (!cfgPlanEnabled.get(this.session.settings)) {
 			throw new StudioModeError("COMMAND_BLOCKED", "Plan mode is disabled in settings");
 		}
 		if (this.#shouldDefer()) {
@@ -713,7 +715,7 @@ export class StudioModeControlService {
 	}
 
 	#assertNoOtherMode(target: "plan" | "goal" | "vibe"): void {
-		if (target === "goal" && !this.session.settings.get("goal.enabled")) {
+		if (target === "goal" && !cfgGoalEnabled.get(this.session.settings)) {
 			throw new StudioModeError("COMMAND_BLOCKED", "Goal mode is disabled in settings");
 		}
 		if (target !== "plan" && this.session.getPlanModeState() !== undefined) {

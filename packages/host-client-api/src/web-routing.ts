@@ -1,8 +1,8 @@
 import { migrateModelRoleConfig, MODEL_ROLE_PRIORITIES } from "./model-role-migration.js";
 import type { WebSearchRouting } from "@omp-studio/client-contract";
 
-/** Released v18.3.0 priority.json; kept separate from credential display order. */
-export const WEB_PRIORITY_1830 = MODEL_ROLE_PRIORITIES.web;
+/** Released v18.8.0 priority.json; kept separate from credential display order. */
+export const WEB_PRIORITY_1880 = MODEL_ROLE_PRIORITIES.web;
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const text = (value: unknown) => typeof value === "string" ? value.trim() : "";
 const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()) : [];
@@ -15,7 +15,7 @@ export function readWebRouting(value: unknown): WebSearchRouting {
   const roles = record(root.modelRoles); const chains = record(record(root.retry).fallbackChains);
   const legacy = RETIRED.some(key => Object.hasOwn(record(original.providers), key) || Object.hasOwn(original, "providers." + key));
   return { primary: text(roles.web), fallbacks: Array.isArray(chains.web) ? list(chains.web) : null,
-    defaultCandidates: [...WEB_PRIORITY_1830], migratedLegacy: legacy };
+    defaultCandidates: [...WEB_PRIORITY_1880], migratedLegacy: legacy };
 }
 
 export function writeWebRouting(root: Record<string, unknown>, routing: Pick<WebSearchRouting, "primary" | "fallbacks">): void {

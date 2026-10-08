@@ -1,0 +1,8 @@
+.composer-speed { padding:8px 4px; border-block:1px solid var(--border); margin-block:8px; }
+.composer-speed-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.composer-speed-row .select { max-width:130px; min-width:0; }
+.composer-speed p { margin:6px 0; font-size:var(--fs-11); overflow-wrap:anywhere; }
+.composer-speed .btn + .btn { margin-inline-start:6px; }
+
+.composer-speed .am-label { font-size:var(--fs-12); font-weight:var(--fw-medium); }
+.composer-speed .select { font-size:var(--fs-12); height:28px; }

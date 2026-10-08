@@ -73,6 +73,7 @@ export type AgentOperation =
   | {
       kind: "agent.spawn";
       definition: string;
+      model?: string[];
       assignment: string;
       context?: string;
       async?: boolean;

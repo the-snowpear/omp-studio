@@ -1,0 +1,3 @@
+.secondary-interactions { position: fixed; z-index: var(--z-modal); bottom: var(--sp-24); left: 50%; transform: translateX(-50%); width: min(720px, calc(100vw - 48px)); max-height: calc(100vh - 120px); overflow: auto; border-radius: var(--r-10); background: var(--surface); border:1px solid var(--border); box-shadow: var(--shadow-modal); }
+.secondary-interactions .deck { margin: 0; }
+.secondary-interactions > [role="alert"] { margin: var(--sp-12); }

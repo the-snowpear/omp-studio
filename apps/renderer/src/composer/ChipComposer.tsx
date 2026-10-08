@@ -1,3 +1,4 @@
+import { useWordPrediction, type ComposerPrediction } from "./useWordPrediction";
 import { isPrimaryModifier } from "../keyboard/shortcuts";
 import {
   forwardRef,
@@ -62,6 +63,7 @@ export type ChipComposerHandle = {
 };
 
 type Props = {
+ prediction?:ComposerPrediction;
   id?: string;
   placeholder?: string;
   disabled?: boolean;
@@ -123,6 +125,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     placeholder,
     disabled,
     compact,
+    prediction,
     workspaceId,
     describedBy,
     loadMentions,
@@ -461,6 +464,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
     setMention(at ? { trigger: at.trigger, query: at.query } : null);
   };
 
+  const predictionState=useWordPrediction(editorRef,prediction,!!disabled || !!mention || commandOpen);
+
   const onInput = (_event: FormEvent<HTMLDivElement>): void => {
     emit();
     refreshMention();
@@ -563,6 +568,7 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
         return;
       }
     }
+    if(!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.nativeEvent.isComposing&&predictionState.key(event.key)){event.preventDefault();return;}
     if (event.key === "Escape") {
       if (commandOpen) {
         event.preventDefault();
@@ -679,6 +685,8 @@ export const ChipComposer = forwardRef<ChipComposerHandle, Props>(function ChipC
           refreshMention();
         }}
       />
+      {predictionState.ghost?<span className="cm-prediction" aria-hidden="true" style={{left:predictionState.ghost.left,top:predictionState.ghost.top,maxWidth:predictionState.ghost.width}}>{predictionState.ghost.suffix}<kbd>Tab</kbd></span>:null}
+      {predictionState.error?<span className="cm-prediction-error" role="status">{predictionState.error}</span>:null}
       {commandOpen ? (
         <CommandMenu
           query={detachedCommand ? "" : (slashDraft?.name ?? "")}

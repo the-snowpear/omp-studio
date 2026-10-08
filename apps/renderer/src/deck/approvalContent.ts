@@ -12,6 +12,7 @@ export type ApprovalView = {
   readonly reason?: string;
   readonly scope?: string;
   readonly extra?: string;
+  readonly configuration?: { previous: string; value: string; save: boolean; shadowedBy?: string; expiresAt?: number };
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -95,6 +96,18 @@ export function approvalFromInteraction(
   interaction: Extract<ClientInteraction, { kind: "approval" }>,
 ): ApprovalView {
   const detail = interaction.detail;
+  if (interaction.approvalType === "configuration") {
+    return {
+      title: interaction.title || "Configuration change", toolLabel: "Configuration", risk: detail.save === true ? "medium" : "low",
+      path: stringDetail(detail, "path") ?? "cfg://",
+      configuration: {
+        previous: typeof detail.previous === "string" ? detail.previous : "—",
+        value: typeof detail.value === "string" ? detail.value : "—", save: detail.save === true,
+        ...(typeof detail.shadowedBy === "string" ? { shadowedBy: detail.shadowedBy } : {}),
+        ...(typeof detail.expiresAt === "number" ? { expiresAt: detail.expiresAt } : {}),
+      },
+    };
+  }
   const tool = toolKey(stringDetail(detail, "toolName") ?? interaction.approvalType);
   const summary = stringDetail(detail, "summary") ?? "";
   const labeled = summary ? parseLabeledLines(summary) : {};

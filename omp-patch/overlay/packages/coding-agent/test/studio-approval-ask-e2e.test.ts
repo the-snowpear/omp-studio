@@ -119,6 +119,12 @@ describe("studio real tool approval and ask E2E", () => {
 		});
 	}
 
+	async function waitForApproval(port: StudioRemoteInteractionPort): Promise<void> {
+		const deadline = Date.now() + 1000;
+		while (!port.pending() && Date.now() < deadline) await Bun.sleep(1);
+		expect(port.pending()).toBeDefined();
+	}
+
 	test("Review mode: bash approval card allows once and the tool continues", async () => {
 		const bash = session.getToolByName("bash");
 		if (!bash) throw new Error("Expected bash tool");
@@ -129,6 +135,7 @@ describe("studio real tool approval and ask E2E", () => {
 			ui,
 			toolCall,
 		} as AgentToolContext);
+		await waitForApproval(port);
 		const pending = port.pending();
 		expect(pending).toBeDefined();
 		expect(pending?.request).toMatchObject({
@@ -152,7 +159,7 @@ describe("studio real tool approval and ask E2E", () => {
 			ui,
 			toolCall,
 		} as AgentToolContext);
-		expect(port.pending()).toBeDefined();
+		await waitForApproval(port);
 		await respond(port, "cancel");
 		await expect(result).rejects.toThrow("Tool call denied by user: bash");
 	});

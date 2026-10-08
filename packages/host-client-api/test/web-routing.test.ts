@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
-import { readWebRouting, writeWebRouting, WEB_PRIORITY_1830 } from "../src/web-routing.js";
+import { readWebRouting, writeWebRouting, WEB_PRIORITY_1880 } from "../src/web-routing.js";
 import { migrateModelRoleConfig, MODEL_ROLE_PRIORITIES } from "../src/model-role-migration.js";
 
 test("legacy search exclusion applies to the complete native chain, including OAuth aliases", () => {
@@ -31,5 +31,5 @@ test("judge, media and local lightweight roles follow the upstream migration", (
 });
 test("mirrored default candidates remain aligned with the pinned Runtime", async () => {
   const native = JSON.parse(await readFile(new URL("../../../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/priority.json", import.meta.url), "utf8")) as Record<string, string[]>;
-  assert.deepEqual(WEB_PRIORITY_1830, native.web); assert.deepEqual(MODEL_ROLE_PRIORITIES.image, native.image);
+  assert.deepEqual(WEB_PRIORITY_1880, native.web); assert.deepEqual(MODEL_ROLE_PRIORITIES.image, native.image);
 });

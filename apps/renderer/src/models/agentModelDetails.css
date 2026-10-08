@@ -1,0 +1,32 @@
+.agent-model-details {
+  margin: 8px 16px;
+  padding: 8px 0;
+  border-block: 1px solid var(--border);
+  font-size: var(--fs-12);
+}
+.agent-model-details summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-weight: var(--fw-medium);
+  margin-bottom: 8px;
+}
+.agent-model-details dl {
+  display: grid;
+  gap: 5px;
+}
+.agent-model-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) minmax(0, 2fr);
+  gap: 8px;
+}
+.agent-model-details dt {
+  color: var(--text-3);
+}
+.agent-model-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.agent-model-details ol {
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}

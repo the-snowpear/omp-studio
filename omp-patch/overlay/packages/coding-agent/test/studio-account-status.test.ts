@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from "bun:test";
 import type { AgentSession } from "../src/session/agent-session";
-import { StudioAccountStatusService } from "../src/studio/services/account-status-service";
+import { projectQuota, StudioAccountStatusService } from "../src/studio/services/account-status-service";
 
 describe("Studio read-only account status", () => {
 	it("refreshes status without redemption or ambiguous cross-organization quota assignment", async () => {
@@ -79,5 +79,70 @@ describe("Studio read-only account status", () => {
 		for (const secret of ["private-key", "private-credit-id", '"credentialId"', '"raw"', "secret"])
 			expect(wire.includes(secret)).toBe(false);
 		service.dispose();
+	});
+});
+
+it("signs out the exact native credential when account labels are duplicated, rejecting stale or cross-session targets", async () => {
+	let accounts = [
+		{ credentialId: 31, position: 0, email: "same@example.test", orgId: "one", active: true },
+		{ credentialId: 47, position: 1, email: "same@example.test", orgId: "two", active: false },
+	];
+	const removeById = mock(async (provider: string, id: number) => {
+		expect(provider).toBe("anthropic");
+		const found = accounts.some(account => account.credentialId === id);
+		accounts = accounts.filter(account => account.credentialId !== id);
+		return found;
+	});
+	const auth = {
+		credentials: { list: () => [{ provider: "anthropic" }], removeById },
+		oauth: { accounts: () => accounts },
+		keys: { source: () => undefined },
+	};
+	const service = new StudioAccountStatusService({
+		sessionId: "owner",
+		modelRegistry: { authStorage: auth, getAvailable: () => [] },
+	} as unknown as AgentSession);
+	const rows = (await service.get()).accounts;
+	await expect(service.logout("other", rows[1]!.id)).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+	expect(removeById).not.toHaveBeenCalled();
+	expect(await service.logout("owner", rows[1]!.id)).toEqual({ loggedOut: true });
+	expect(removeById).toHaveBeenCalledWith("anthropic", 47);
+	expect((await service.get()).accounts.map(account => account.id)).toEqual([rows[0]!.id]);
+	await expect(service.logout("owner", rows[1]!.id)).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+	expect(removeById).toHaveBeenCalledTimes(1);
+	service.dispose();
+});
+
+it("quota details opt in to new fields while the old status response remains readable", () => {
+	const report = {
+		provider: "test",
+		fetchedAt: 123,
+		limits: [
+			{
+				id: "weekly",
+				label: "Weekly",
+				scope: {
+					provider: "test",
+					projectId: "project",
+					orgId: "organization",
+					shared: true,
+					sharedGroup: "group",
+					tier: "low_priority",
+				},
+				amount: { unit: "percent" as const, usedFraction: 0.8 },
+				notes: ["Lower priority allowance"],
+				window: { id: "7d", label: "Weekly", resetsAt: 900, resetLabel: "regen" },
+			},
+		],
+	};
+	const legacy = projectQuota(report)[0]!;
+	expect("scope" in legacy).toBe(false);
+	expect("notes" in legacy).toBe(false);
+	expect("resetLabel" in legacy).toBe(false);
+	expect(projectQuota(report, true)[0]).toMatchObject({
+		scope: report.limits[0]!.scope,
+		notes: ["Lower priority allowance"],
+		resetLabel: "regen",
+		resetsAt: 900,
 	});
 });

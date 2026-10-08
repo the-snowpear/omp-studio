@@ -1,3 +1,5 @@
+import { cfgLoopConditionTimeoutMs, cfgLoopMode } from "../modes/settings";
+import { cfgTaskEnableLsp } from "../task/settings";
 import { StudioLiveAudioService } from "./services/live-audio-service";
 import { expandModelMentionTags } from "@oh-my-pi/pi-tui/prompt/model-mention-syntax";
 import { StudioWorkbenchService } from "./services/workbench-service";
@@ -51,6 +53,7 @@ import { StudioFastPrewalkService } from "./services/fast-prewalk-service";
 import { StudioForkService } from "./services/fork-service";
 import { StudioHandoffService } from "./services/handoff-service";
 import { StudioInteractionGateway } from "./services/interaction-port";
+import { installStudioConfigurationApproval } from "./services/configuration-approval";
 import { StudioJobService, type StudioJobsPort } from "./services/job-service";
 import { StudioLiveService, type StudioLiveSessionFactory } from "./services/live-service";
 import { StudioLoopService } from "./services/loop-service";
@@ -483,7 +486,7 @@ export function createStudioHostRuntime(
 		throw new Error("Studio Host Runtime epoch must be a positive safe integer");
 	}
 	const loop = new StudioLoopService({
-		action: () => session.settings.get("loop.mode"),
+		action: () => cfgLoopMode.get(session.settings),
 		isBlocked: () =>
 			studioPauseService.state().paused || session.isStreaming || session.isCompacting || session.hasPostPromptWork,
 		isVibeActive: () => session.getVibeModeState()?.enabled === true || modes.vibeTransitionPending,
@@ -503,7 +506,7 @@ export function createStudioHostRuntime(
 			evaluateLoopCondition(condition, {
 				cwd: session.sessionManager.getCwd(),
 				sessionId: session.sessionManager.getSessionId(),
-				timeoutMs: session.settings.get("loop.conditionTimeoutMs"),
+				timeoutMs: cfgLoopConditionTimeoutMs.get(session.settings),
 				signal,
 			}),
 		onStatus: message => session.emitNotice("info", message, "loop"),
@@ -645,7 +648,7 @@ export function createStudioHostRuntime(
 			},
 			settings: session.settings,
 			get enableLsp() {
-				return session.settings.get("task.enableLsp") !== false;
+				return cfgTaskEnableLsp.get(session.settings) !== false;
 			},
 			customTools: tanCustomTools,
 			get parentFile() {
@@ -786,19 +789,20 @@ export function createStudioHostRuntime(
 						invocationKind: "task",
 						assignment: request.assignment,
 						agent: request.definition,
+						...(request.model === undefined ? {} : { model: request.model }),
 						...(request.context === undefined ? {} : { context: request.context }),
 						...(effort === undefined ? {} : { effort }),
 						...(isolation === undefined ? {} : { isolation }),
 						...(request.async === false ? {} : { detached: true }),
 						keepAlive: true,
-						shareEvalSession: true,
-						enableLsp: session.settings.get("task.enableLsp") !== false,
+						enableLsp: cfgTaskEnableLsp.get(session.settings) !== false,
 					});
 					return { agentId: result.result.id };
 				}
 				const task = await TaskTool.create(toolSession);
 				const result = await task.execute(crypto.randomUUID(), {
 					agent: request.definition,
+					...(request.model === undefined ? {} : { model: request.model }),
 					task: request.assignment,
 					...(request.context === undefined ? {} : { context: request.context }),
 					...(effort === undefined ? {} : { effort }),
@@ -1274,6 +1278,7 @@ export async function runStudioHostMode(
 	const stopParentWatch = (dependencies.watchParent ?? watchStudioParentFromEnv)(() =>
 		abortForHostLoss(runtime, dependencies.hostLossExit),
 	);
+	const releaseConfigurationApproval = installStudioConfigurationApproval(slot, runtime.services.interaction);
 
 	try {
 		await hydratePersistedStudioAgents(AgentRegistry.global(), sessionFileOf(slot));
@@ -1286,6 +1291,7 @@ export async function runStudioHostMode(
 		await runTui(runtime);
 	} finally {
 		stopParentWatch();
+		releaseConfigurationApproval();
 		unregisterCleanup();
 		try {
 			await bridge.stop();

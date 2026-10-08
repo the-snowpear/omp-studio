@@ -46,3 +46,25 @@ test("session deletion promotes unread outputs by default and cascades private f
     const retained = await library.list({}); assert.equal(retained.total, 1); assert.equal(retained.artifacts[0]!.sessionId, undefined);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("session HTML exports promote to the library and saved copies survive internal deletion", async () => {
+ const root=await mkdtemp(join(tmpdir(),"studio-session-export-"));
+ try {
+  const library=new ArtifactLibrary({profileDirectory:root}), bridge=new RuntimeMediaFiles(library), directory=join(root,"private");
+  const artifactId=randomUUID(),exportId=randomUUID(),sessionId="exported-session",key=createHash("sha256").update(sessionId).digest("hex");
+  const bytes=Buffer.from("<html>complete session fixture</html>"),outputs=join(directory,"outputs",key);
+  await mkdir(outputs,{recursive:true});await writeFile(join(outputs,artifactId+".bin"),bytes);
+  const asset={artifactId,kind:"export" as const,name:"session.html",mimeType:"text/html",bytes:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex")};
+  const record=await bridge.promote(directory,sessionId,"workspace",exportId,asset);
+  assert.equal(record.kind,"export");
+  const stored=await library.resolve(record.artifactId);
+  const copy=join(root,"user-saved-copy.html");
+  await writeFile(copy,await readFile(stored.path));
+  const recovered=await bridge.promote(directory,sessionId,"workspace",exportId,asset);
+  assert.equal(recovered.artifactId,record.artifactId);
+  await library.remove(record.artifactId);
+  await bridge.finishSession(directory,sessionId,true);
+  assert.deepEqual(await readFile(copy),bytes);
+  await assert.rejects(()=>bridge.promote(directory,sessionId,"workspace",exportId,asset),/explicitly removed/);
+ } finally {await rm(root,{recursive:true,force:true});}
+});

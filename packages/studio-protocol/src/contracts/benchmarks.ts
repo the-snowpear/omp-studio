@@ -10,7 +10,7 @@ export interface BenchmarkStats {
 }
 export interface BenchmarkMeasurement {
   ok: boolean; challenge?: "chat" | "prefill" | "generation"; error?: string;
-  phase?: "cold" | "warm"; cacheReadTokens?: number; cacheWriteTokens?: number;
+  phase?: "cold" | "warm" | "single" | "parallel" | "prefill"; cacheReadTokens?: number; cacheWriteTokens?: number;
   cacheObservations?: Array<"prompt_cache_read_observed" | "prompt_cache_write_observed" | "response_cache_hit_observed" | "no_provider_proof">;
   ttftMs?: number; durationMs?: number; generationMs?: number; inputTokens?: number; outputTokens?: number;
   tokensPerSecond?: number; generationTps?: number; prefillTps?: number; cost?: number;
@@ -97,7 +97,7 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
       if (typeof measurement.ok !== "boolean") throw new Error("Invalid measurement");
       if (measurement.error !== undefined) text(measurement.error, 4000);
       if (measurement.challenge !== undefined && !["chat", "prefill", "generation"].includes(measurement.challenge as string)) throw new Error("Invalid challenge");
-      if (measurement.phase !== undefined && measurement.phase !== "cold" && measurement.phase !== "warm") throw new Error("Invalid cache phase");
+      if (measurement.phase !== undefined && !["cold", "warm", "single", "parallel", "prefill"].includes(measurement.phase as string)) throw new Error("Invalid benchmark phase");
       if (measurement.cacheObservations !== undefined && (!Array.isArray(measurement.cacheObservations) || measurement.cacheObservations.length > 4 || measurement.cacheObservations.some(item => !["prompt_cache_read_observed", "prompt_cache_write_observed", "response_cache_hit_observed", "no_provider_proof"].includes(item)))) throw new Error("Invalid cache observation");
       for (const [key, value] of Object.entries(measurement)) if (!["ok", "error", "challenge", "phase", "cacheObservations"].includes(key)) number(value);
     }

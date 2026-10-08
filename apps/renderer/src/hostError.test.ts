@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   ClientEvent,
   CommandReceipt,
@@ -145,4 +145,22 @@ describe("waitReceipt", () => {
       message: "client re-bootstrapped; outcome unknown",
     });
   });
+});
+
+it("keeps a human folder picker pending beyond the protocol deadline and applies its eventual result", async () => {
+  vi.useFakeTimers();
+  try {
+    const client = fakeClient({ [REQ]: { ...accepted(), commandName: "workspace.pick" } as CommandState });
+    let settled = false;
+    const pending = waitReceipt(client, REQ, null);
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(settled).toBe(false);
+    client.emitEvent(cursorlessEvent("command.receipt", {
+      receipt: { ...receipt("completed", { result: { workspace: "selected-after-three-minutes" } }), commandName: "workspace.pick" },
+    }));
+    await expect(pending).resolves.toEqual({ workspace: "selected-after-three-minutes" });
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -19,6 +19,9 @@
   flex-direction: column;
   gap: var(--sp-14);
 }
+.hub-page > .workspace-panel:not([hidden]) { display: flex; flex-direction: column; gap: var(--sp-14); }
+.hub-page.is-chat-preview > .workspace-panel:not([hidden]) { flex: 1; min-height: 0; }
+.hub-page > .workspace-tabbar { flex-shrink: 0; margin-bottom: 0; }
 
 /* ---------- 连接横幅（offline / reconnecting / stale / resync / limited） ---------- */
 .hub-conn {
@@ -784,3 +787,8 @@
 @media (max-width: 900px) {
   .hub-detail-placeholder { display: none; }  /* 移动端未选中时只显示列表 */
 }
+
+.hub-modal .modal-head { display: flex; align-items: center; justify-content: space-between; }
+.hub-modal .field { min-width: 0; }
+.hub-modal .select { width: 100%; text-overflow: ellipsis; }
+@media (max-width: 600px) { .hub-modal .hub-na-row { flex-direction: column; } }

@@ -1,3 +1,5 @@
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { cfgTaskAgentModelOverrides } from "../src/task/settings";
 import { describe, expect, test } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
@@ -28,15 +30,7 @@ function fixture(
 	let thinking: string | undefined = "medium";
 	let configured: string | undefined = "medium";
 	let available = overrides.available ?? [sonnet, opus, model("gpt-5-mini", "openai")];
-	const taskOverrides: Record<string, string | string[]> = { ...(overrides.taskOverrides ?? {}) };
-	const settings = {
-		get: (path: string) => (path === "task.agentModelOverrides" ? { ...taskOverrides } : undefined),
-		override: (path: string, value: Record<string, string | string[]>) => {
-			if (path !== "task.agentModelOverrides") throw new Error(`unexpected override path: ${path}`);
-			for (const key of Object.keys(taskOverrides)) delete taskOverrides[key];
-			Object.assign(taskOverrides, value);
-		},
-	};
+	const settings = Settings.isolated({ "task.agentModelOverrides": overrides.taskOverrides ?? {} });
 	const session = {
 		get model() {
 			return current;
@@ -76,7 +70,7 @@ function fixture(
 		setAvailable: (next: Model[]) => {
 			available = next;
 		},
-		taskOverrides,
+		getTaskOverrides: () => cfgTaskAgentModelOverrides.get(settings),
 	};
 }
 
@@ -264,21 +258,21 @@ describe("StudioModelControlService task subagent model", () => {
 	});
 
 	test("setTaskModel pins the canonical selector without touching other agent overrides", async () => {
-		const { service, taskOverrides } = fixture({ taskOverrides: { reviewer: "openai/gpt-5-mini" } });
+		const { service, getTaskOverrides } = fixture({ taskOverrides: { reviewer: "openai/gpt-5-mini" } });
 		expect(await service.setTaskModel("claude-opus-4-6")).toMatchObject({
 			selector: "anthropic/claude-opus-4-6",
 		});
-		expect(taskOverrides.task).toBe("anthropic/claude-opus-4-6");
-		expect(taskOverrides.reviewer).toBe("openai/gpt-5-mini");
+		expect(getTaskOverrides().task).toBe("anthropic/claude-opus-4-6");
+		expect(getTaskOverrides().reviewer).toBe("openai/gpt-5-mini");
 	});
 
 	test("setTaskModel(null) clears only the task entry and returns to inheritance", async () => {
-		const { service, taskOverrides } = fixture({
+		const { service, getTaskOverrides } = fixture({
 			taskOverrides: { task: "anthropic/claude-opus-4-6", reviewer: "openai/gpt-5-mini" },
 		});
 		expect(await service.setTaskModel(null)).toBeUndefined();
-		expect("task" in taskOverrides).toBe(false);
-		expect(taskOverrides.reviewer).toBe("openai/gpt-5-mini");
+		expect("task" in getTaskOverrides()).toBe(false);
+		expect(getTaskOverrides().reviewer).toBe("openai/gpt-5-mini");
 	});
 
 	test("setTaskModel rejects unknown selectors", async () => {

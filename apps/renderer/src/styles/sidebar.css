@@ -317,14 +317,11 @@
   --title-fade: 58px;
   --title-clear: 40px;
 }
-/* 等待胶囊（待确认 / 待审核 / 待回答）：钉在行最右，盖住归档键。
-   宽约 52px（三字 10.5px + 左右 10px）+ 右缘 4px → 左缘距行右 56px。
-   标题盒右缘距行右 8px → clear=48、fade=66。悬停仍以胶囊为准，
-   不改走操作按钮那套 58/40。 */
+/* 等待状态位于会话按钮内的独立 flex 槽，按实际语言宽度让出空间。 */
 .thread-row.has-wait .t-title,
 .thread-row.has-wait:hover .t-title {
-  --title-fade: 66px;
-  --title-clear: 48px;
+  --title-fade: 18px;
+  --title-clear: 0px;
 }
 @property --title-fade {
   syntax: "<length>";
@@ -357,7 +354,7 @@
   transition: transform 3s linear 800ms;
 }
 .thread-row.has-wait:hover .t-scroll {
-  transform: translateX(min(100cqw - 100% - 66px, 0px));
+  transform: translateX(min(100cqw - 100% - 18px, 0px));
 }
 /* 「展开更多」：第 7 位起的出现口，与会话标题同左缘（文件夹槽 + gap）。 */
 .load-more {
@@ -420,15 +417,14 @@
   color: var(--text-3);
 }
 .thread .t-badges { display: flex; gap: 3px; align-items: center; flex: none; }
-/* 会话行最右等待胶囊：绝对定位盖住归档键，图层高于 .t-actions。
-   自身不接点击，点到胶囊仍落到下面的会话按钮。
-   底色只用 chip 自身的状态色，悬停 / 选中行都不改，避免看起来褪色。 */
+/* 状态胶囊参与行布局，点击仍落在包含它的会话按钮上。 */
 .t-wait {
-  position: absolute;
-  right: var(--sp-4);
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 2;
+  position: static;
+  flex: 0 0 auto;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   pointer-events: none;
   border-radius: var(--r-full);
 }

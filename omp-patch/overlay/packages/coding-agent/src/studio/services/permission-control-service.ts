@@ -1,3 +1,5 @@
+import { cfgToolsApprovalMode } from "../../tools/settings";
+import type { Settings } from "../../config/settings";
 export type StudioApprovalMode = "always-ask" | "write" | "yolo";
 
 export class StudioPermissionControlError extends Error {
@@ -10,13 +12,7 @@ export class StudioPermissionControlError extends Error {
 	}
 }
 
-export interface StudioPermissionSettings {
-	get(key: string): unknown;
-	set(key: string, value: unknown): void;
-	clearOverride(key: string): void;
-	override(key: string, value: unknown): void;
-	flush(): Promise<void>;
-}
+export type StudioPermissionSettings = Settings;
 
 export interface StudioPermissionSession {
 	readonly isStreaming: boolean;
@@ -81,17 +77,17 @@ export class StudioPermissionControlService {
 			throw new StudioPermissionControlError("COMMAND_BLOCKED", "Session settings are unavailable");
 		}
 		if (pending.persist) {
-			settings.clearOverride("tools.approvalMode");
-			settings.set("tools.approvalMode", pending.mode);
+			cfgToolsApprovalMode.clearOverride(settings);
+			cfgToolsApprovalMode.set(settings, pending.mode);
 			await settings.flush();
 			return;
 		}
-		settings.override("tools.approvalMode", pending.mode);
+		cfgToolsApprovalMode.override(settings, pending.mode);
 	}
 }
 
 function readApprovalMode(settings: StudioPermissionSettings | undefined): StudioApprovalMode {
 	if (settings === undefined) return "yolo";
-	const value = settings.get("tools.approvalMode");
+	const value = cfgToolsApprovalMode.get(settings);
 	return value === "always-ask" || value === "write" || value === "yolo" ? value : "yolo";
 }

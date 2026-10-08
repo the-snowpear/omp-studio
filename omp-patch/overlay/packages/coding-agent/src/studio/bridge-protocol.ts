@@ -159,6 +159,7 @@ export type StudioOperation =
 	| {
 			kind: "agent.spawn";
 			definition: string;
+			model?: string[];
 			assignment: string;
 			context?: string;
 			async?: boolean;
@@ -805,7 +806,21 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 			if (!nonEmptyString(operation.agentId)) throw new StudioFrameError("Invalid agent id");
 			break;
 		case "agent.spawn":
-			exactKeys(operation, ["kind", "definition", "assignment", "context", "async", "isolation", "effort"]);
+			exactKeys(operation, ["kind", "definition", "assignment", "context", "async", "isolation", "effort", "model"]);
+			if (
+				operation.model !== undefined &&
+				(!Array.isArray(operation.model) ||
+					operation.model.length === 0 ||
+					operation.model.length > 8 ||
+					operation.model.some(
+						value =>
+							typeof value !== "string" ||
+							!value.trim() ||
+							value.length > 1024 ||
+							/[\u0000-\u001f]/u.test(value),
+					))
+			)
+				throw new StudioFrameError("Invalid per-spawn model chain");
 			if (!nonEmptyString(operation.definition) || !nonEmptyString(operation.assignment)) {
 				throw new StudioFrameError("Invalid agent spawn request");
 			}
@@ -1045,6 +1060,8 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 }
 
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
+	"settings.approval",
+	"agent.spawn.models",
 	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
 	"runtime.pause",

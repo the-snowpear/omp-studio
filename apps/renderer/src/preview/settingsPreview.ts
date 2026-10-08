@@ -8,7 +8,7 @@
 
 import { useCallback, useState } from "react";
 
-import type { AppSettings } from "../settings/appSettings";
+import { getAppSettings, type AppSettings } from "../settings/appSettings";
 import type { RuntimeDemoApi } from "../settings/tabs";
 
 /** App 级设置的演示值（预览模式显示，不落盘）。 */
@@ -151,7 +151,10 @@ export function usePreviewAppSettings(): {
   app: AppSettings;
   patch: (next: Partial<AppSettings>) => void;
 } {
-  const [app, setApp] = useState<AppSettings>(PREVIEW_APP_SETTINGS);
+  const [app, setApp] = useState<AppSettings>(() => {
+    const appearance = getAppSettings();
+    return { ...PREVIEW_APP_SETTINGS, theme: appearance.theme, density: appearance.density, language: appearance.language };
+  });
   const patch = useCallback((next: Partial<AppSettings>) => {
     setApp((previous) => ({ ...previous, ...next }));
   }, []);

@@ -899,6 +899,7 @@ export class StudioBridgeDispatcher {
 			case "agent.spawn":
 				return await this.runtime.services.agents.spawn({
 					definition: operation.definition,
+					...(operation.model === undefined ? {} : { model: operation.model }),
 					assignment: operation.assignment,
 					...(operation.context === undefined ? {} : { context: operation.context }),
 					...(operation.async === undefined ? {} : { async: operation.async }),

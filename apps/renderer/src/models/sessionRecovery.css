@@ -1,0 +1,45 @@
+.session-model-recovery {
+  flex: none;
+  max-height: min(260px, 35vh);
+  overflow: auto;
+  margin: 8px 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-8);
+  background: var(--surface);
+  font-size: var(--fs-12);
+}
+.session-model-recovery p {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+.session-model-recovery .chip {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.session-recovery-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.session-recovery-actions select {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 200px;
+}
+.session-recovery-confirm {
+  padding: 10px 0 0;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.session-recovery-confirm .btn + .btn {
+  margin-inline-start: 8px;
+}
+
+.session-model-recovery {
+  min-width: 0;
+  margin-right: calc(var(--sp-16) + var(--minimap-w) + 8px);
+}

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
-import type { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import type { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent/session/agent-session";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
@@ -64,7 +64,7 @@ function parentContext(overrides: Partial<StudioTanParentContext> = {}): StudioT
 		systemPrompt: ["parent system prompt"],
 		toolNames: ["bash", "edit"],
 		thinkingLevel: "auto",
-		settings: { get: () => undefined, getStorage: () => null } as unknown as Settings,
+		settings: Settings.isolated(),
 		enableLsp: true,
 		parentFile: "C:/sessions/parent.jsonl",
 		cwd: "C:/work",

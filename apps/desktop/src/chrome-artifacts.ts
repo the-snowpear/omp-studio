@@ -7,7 +7,7 @@ import type { ArtifactLibrary } from "@omp-studio/studio-host";
 import type { ChromeImageIpcMain, ChromeImageSender } from "./chrome-image.js";
 import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
 
-const MIME: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml", ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".opus": "audio/opus", ".flac": "audio/flac", ".txt": "text/plain", ".json": "application/json", ".jsonl": "application/x-ndjson", ".ompcast": "application/x-ompcast", ".studiocast": "application/x-studio-terminalcast" };
+const MIME: Record<string, string> = { ".obj": "model/obj", ".ply": "application/x-ply", ".wrl": "model/vrml", ".x3dv": "model/x3d-vrml", ".stl": "model/stl", ".gltf": "model/gltf+json", ".glb": "model/gltf-binary", ".usda": "model/vnd.usda", ".zip": "application/zip", ".chart": "application/json", ".mmd": "text/plain", ".mermaid": "text/plain", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml", ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".opus": "audio/opus", ".flac": "audio/flac", ".txt": "text/plain", ".json": "application/json", ".jsonl": "application/x-ndjson", ".ompcast": "application/x-ompcast", ".studiocast": "application/x-studio-terminalcast" };
 
 export function registerArtifactIpc(options: {
   ipcMain: ChromeImageIpcMain;

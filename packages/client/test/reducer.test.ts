@@ -1010,8 +1010,14 @@ test("StudioClientImpl rejects an incompatible bootstrap contract before applyin
 
 test("StudioClientImpl blocks sensitive commands before the transport sees them", async () => {
   let commandCalls = 0;
+  let bootstrapCalls = 0;
   const transport = new MemoryClientTransport({
-    bootstrap: () => bootstrap(),
+    bootstrap: () => {
+      bootstrapCalls += 1;
+      // Keep the gap unresolved while the client attempts automatic recovery.
+      if (bootstrapCalls > 1) throw new Error("The reconnect snapshot is still unavailable");
+      return bootstrap();
+    },
     command: <TName extends CommandName>(request: ClientCommandRequest<TName>) => {
       commandCalls += 1;
       return {
@@ -1042,6 +1048,16 @@ test("StudioClientImpl blocks sensitive commands before the transport sees them"
     },
   );
   assert.equal(commandCalls, 0);
+  const resync = (error: unknown) => (error as ClientError).code === "RESYNC_REQUIRED";
+  await assert.rejects(() => client.command("prediction.configure", { sessionId: "s", method: "smollm", scope: "global" }), resync);
+  await assert.rejects(() => client.command("maintenance.gc.apply", { sessionId: "s", token: "00000000-0000-4000-8000-000000000000" }), resync);
+  await assert.rejects(() => client.command("maintenance.session.export", { sessionId: "s", format: "archive" }), resync);
+  assert.equal(commandCalls, 0);
+  await client.command("maintenance.gc.status", { sessionId: "s" });
+  await client.command("session.titles.inspect", { sessionId: "s", targetSessionIds: ["s"] });
+  assert.equal(commandCalls, 2);
+  assert.equal(client.getState().connection.resyncRequired, true);
+  assert.equal(bootstrapCalls, 2);
   await client.close();
 });
 

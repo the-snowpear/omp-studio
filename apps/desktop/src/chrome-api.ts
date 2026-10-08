@@ -1,5 +1,10 @@
+import { PREDICTION_CHANNELS, type PredictionAttach, type PredictionControl, type PredictionResult, type PredictionEvent } from "./prediction-shared.js";
+import { validatePredictionEvent } from "@omp-studio/studio-protocol";
 import { SKILLSHARE_TOKEN_CHANNEL, type SkillshareTokenReveal } from "./chrome-skillshare-shared.js";
 import { LIVE_AUDIO_CHANNELS, type LiveAudioAttach, type LiveAudioChunk, type LiveAudioResult } from "./live-audio-shared.js";
+import { BROWSER_OBSERVATION_CHANNELS, type BrowserObservationAttach, type BrowserObservationControl, type BrowserObservationEvent, type BrowserObservationResult } from "./browser-observation-shared.js";
+import { validateBrowserObservationEvent } from "@omp-studio/studio-protocol";
+import { COMPUTER_CAPTURE_CHANNEL, type ComputerCaptureRequest, type ComputerCaptureResult } from "./computer-observation-shared.js";
 import { CHROME_SERVICE_CHANNELS, type ServiceDefinitionResult, type ServiceDefinitionsInput } from "./chrome-services-shared.js";
 import { PAYLOAD_HEALTH_CHANNEL, type PayloadHealthStatus } from "./payload-health-shared.js";
 import { CHROME_ARTIFACT_CHANNELS, type ArtifactFileResult, type ArtifactImportInput } from "./chrome-artifacts-shared.js";
@@ -105,6 +110,16 @@ export function createOmpStudioChromeApi(ipcRenderer: IpcRendererLike, webUtils?
     },
     revealSkillshareToken(input: { secretId: string; sessionId: string }): Promise<SkillshareTokenReveal> { return ipcRenderer.invoke(SKILLSHARE_TOKEN_CHANNEL, input) as Promise<SkillshareTokenReveal>; },
     attachLiveAudio(input: LiveAudioAttach): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.attach, input) as Promise<LiveAudioResult>; },
+    attachPrediction(input:PredictionAttach):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.attach,input) as Promise<PredictionResult>;},
+    predictionInput(input:PredictionControl):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.input,input) as Promise<PredictionResult>;},
+    detachPrediction(input:{channelId:string}):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.detach,input) as Promise<PredictionResult>;},
+    importPredictionHistory(input:{channelId:string}):Promise<PredictionResult>{return ipcRenderer.invoke(PREDICTION_CHANNELS.import,input) as Promise<PredictionResult>;},
+    onPrediction(listener:(event:PredictionEvent)=>void):()=>void{return subscribeChannel<unknown>(ipcRenderer,PREDICTION_CHANNELS.event,event=>{try{validatePredictionEvent(event);listener(event);}catch{/* Ignore malformed private data. */}});},
+    attachBrowserObservation(input: BrowserObservationAttach): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.attach, input) as Promise<BrowserObservationResult>; },
+    readComputerCapture(input: ComputerCaptureRequest): Promise<ComputerCaptureResult> { return ipcRenderer.invoke(COMPUTER_CAPTURE_CHANNEL, input) as Promise<ComputerCaptureResult>; },
+    controlBrowserObservation(input: BrowserObservationControl): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.input, input) as Promise<BrowserObservationResult>; },
+    detachBrowserObservation(input: { observationId: string }): Promise<BrowserObservationResult> { return ipcRenderer.invoke(BROWSER_OBSERVATION_CHANNELS.detach, input) as Promise<BrowserObservationResult>; },
+    onBrowserObservation(listener: (event: BrowserObservationEvent) => void): () => void { return subscribeChannel<unknown>(ipcRenderer, BROWSER_OBSERVATION_CHANNELS.event, event => { try { validateBrowserObservationEvent(event); listener(event); } catch { /* Malformed private frames never enter the Renderer. */ } }); },
     appendLiveAudio(input: LiveAudioChunk): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.chunk, input) as Promise<LiveAudioResult>; },
     detachLiveAudio(input: { audioId: string }): Promise<LiveAudioResult> { return ipcRenderer.invoke(LIVE_AUDIO_CHANNELS.detach, input) as Promise<LiveAudioResult>; },
     beginMediaUpload(input: MediaUploadInput): Promise<MediaUploadResult> { return ipcRenderer.invoke(MEDIA_UPLOAD_CHANNELS.begin, input) as Promise<MediaUploadResult>; },

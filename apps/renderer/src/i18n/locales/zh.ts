@@ -1,6 +1,8 @@
 type DeepString<T> = { readonly [K in keyof T]: T[K] extends string ? string : DeepString<T[K]> };
 
 const zhRaw = {
+  "computer": { "title": "电脑" },
+  "browser": { "title": "浏览器" },
   "media": {
     "imageShortcut": "生成图片 / 视频",
     "audioShortcut": "录音 / 转写",
@@ -23,6 +25,7 @@ const zhRaw = {
     "exportToView": "另存为后可使用对应应用查看。",
     "more": "加载更多",
     "kind": {
+      "graphic": "图形与模型",
       "annotation": "标注",
       "image": "图片",
       "video": "视频",
@@ -236,6 +239,7 @@ const zhRaw = {
     "shortcuts": "键盘快捷键"
   },
   "nav": {
+    "evaluation": "评测",
     "brand": "OMP Studio",
     "home": "首页",
     "workbench": "工作台",
@@ -855,6 +859,7 @@ const zhRaw = {
     "demoRestoreToast": "演示：已执行「{desc}」"
   },
   "capabilities": {
+    "idaTab": "IDA",
     "title": "能力中心",
     "subtitle": "Slash 命令、技能与 MCP 工具服务",
     "slashTab": "Slash Commands",
@@ -1378,6 +1383,8 @@ const zhRaw = {
       "advanced": "高级"
     },
     "sources": {
+      "env": "环境变量",
+      "overlay": "配置覆盖",
       "default": "默认值",
       "user": "用户",
       "project": "项目",

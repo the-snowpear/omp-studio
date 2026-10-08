@@ -60,7 +60,7 @@ function openTab(name: string) {
 }
 
 describe("SettingsPage · 结构", () => {
-  it("渲染 7 个新标签，删除旧的 Models/Sessions/Preview 分组", () => {
+  it("渲染 8 个新标签，删除旧的 Models/Sessions/Preview 分组", () => {
     renderSettings({ preview: false, language: "zh" });
     const tabs = screen.getAllByRole("tab");
     const labels = tabs.map((tab) => tab.textContent ?? "");
@@ -71,7 +71,8 @@ describe("SettingsPage · 结构", () => {
     expect(labels).toContain("文件与终端");
     expect(labels).toContain("任务与执行");
     expect(labels).toContain("高级");
-    expect(labels).toHaveLength(7);
+    expect(labels).toContain("运行偏好");
+    expect(labels).toHaveLength(8);
     expect(screen.queryByText("Models and Providers")).toBeNull();
     expect(screen.queryByText("Sessions")).toBeNull();
     expect(screen.queryByText("Preview")).toBeNull();
@@ -80,7 +81,7 @@ describe("SettingsPage · 结构", () => {
     expect(screen.queryByText("Full Access")).toBeNull();
   });
 
-  it("支持英文模式渲染 7 个英文标签与所有子面板的英文文案", () => {
+  it("支持英文模式渲染 8 个英文标签与所有子面板的英文文案", () => {
     renderSettings({ preview: false, language: "en" });
     const tabs = screen.getAllByRole("tab");
     const labels = tabs.map((tab) => tab.textContent ?? "");
@@ -91,7 +92,8 @@ describe("SettingsPage · 结构", () => {
     expect(labels).toContain("Files & Terminal");
     expect(labels).toContain("Tasks & Execution");
     expect(labels).toContain("Advanced");
-    expect(labels).toHaveLength(7);
+    expect(labels).toContain("Runtime preferences");
+    expect(labels).toHaveLength(8);
 
     // General tab English checks
     expect(screen.getByRole("combobox", { name: "Interface Language" })).toBeTruthy();
@@ -230,13 +232,13 @@ describe("SettingsPage · 预览模式", () => {
   it("预览开时展示演示值，改动只影响本地状态，不写设置存储", () => {
     renderSettings({ preview: true });
     const themeSelect = screen.getByRole("combobox", { name: "主题" });
-    expect((themeSelect as HTMLSelectElement).value).toBe("dark");
+    expect((themeSelect as HTMLSelectElement).value).toBe("light");
     const cadenceSelect = screen.getByRole("combobox", { name: "流式刷新率" });
     expect((cadenceSelect as HTMLSelectElement).value).toBe("60");
     fireEvent.change(cadenceSelect, { target: { value: "120" } });
     expect(getAppSettings().streamingCadenceHz).toBe(60);
     expect(window.localStorage.getItem("omp.appSettings")).toBeNull();
-    fireEvent.change(themeSelect, { target: { value: "light" } });
+    fireEvent.change(themeSelect, { target: { value: "dark" } });
     // 演示改动不落盘：真实存储仍是默认 light。
     expect(getAppSettings().theme).toBe("light");
     expect(window.localStorage.getItem("omp.appSettings")).toBeNull();

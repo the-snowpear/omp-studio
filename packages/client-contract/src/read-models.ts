@@ -460,7 +460,13 @@ export interface ModelOverridePatch {
 }
 
 /** One model row under a provider. Safe display facts only. */
-export interface ModelCatalogEntry {
+export interface ModelExecutionMetadata {
+  readonly serviceTiers?: ReadonlyArray<string>;
+  readonly promptCache?: { readonly short?: number; readonly long?: number };
+  readonly promptCacheConfig?: { readonly short?: number; readonly long?: number };
+  readonly compatibility?: { readonly preferWebsockets?: boolean; readonly useResponsesLite?: boolean; readonly toolMode?: "code_mode_only" };
+}
+export interface ModelCatalogEntry extends ModelExecutionMetadata {
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly id: string;
@@ -561,7 +567,7 @@ export interface ModelRoleRecord {
   readonly issue?: ModelRoleIssue;
 }
 
-export interface AvailableModelRecord {
+export interface AvailableModelRecord extends ModelExecutionMetadata {
   readonly kind?: import("./model-kinds.js").ModelKind;
   readonly webSearch?: string;
   readonly provider: string;

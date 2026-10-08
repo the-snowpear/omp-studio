@@ -775,7 +775,12 @@ describe("ConversationLiveProjector", () => {
 		session.emit({ type: "message_end", message: first });
 		session.emit({ type: "agent_end", messages: [], isTerminal: false });
 		expect(events.some(event => event.kind === "conversation.turn.completed")).toBe(false);
-		session.emit({ type: "unexpected_stop_retry", attempt: 1, maxAttempts: 3 });
+		session.emit({
+			type: "notice",
+			level: "warning",
+			source: "unexpected-stop",
+			message: "Assistant stop recovered automatically (1/3)",
+		});
 		const notice = events.find(event => event.kind === "conversation.notice");
 		expect(notice).toMatchObject({
 			kind: "conversation.notice",

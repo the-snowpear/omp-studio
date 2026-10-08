@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
+import { Settings } from "../src/config/settings";
+import { cfgToolsApprovalMode } from "../src/tools/settings";
+afterEach(() => vi.restoreAllMocks());
 import {
 	StudioPermissionControlError,
 	StudioPermissionControlService,
@@ -6,22 +9,12 @@ import {
 } from "@oh-my-pi/pi-coding-agent/studio/services/permission-control-service";
 
 function fixture(overrides: { streaming?: boolean; compacting?: boolean; flushError?: Error } = {}) {
-	let currentMode = "yolo";
 	let flushed = 0;
-	const settings = {
-		get: (key: string) => (key === "tools.approvalMode" ? currentMode : undefined),
-		set: (key: string, value: unknown) => {
-			if (key === "tools.approvalMode") currentMode = value as string;
-		},
-		clearOverride: () => {},
-		override: (key: string, value: unknown) => {
-			if (key === "tools.approvalMode") currentMode = value as string;
-		},
-		flush: async () => {
-			if (overrides.flushError) throw overrides.flushError;
-			flushed += 1;
-		},
-	};
+	const settings = Settings.isolated({ "tools.approvalMode": "yolo" });
+	vi.spyOn(settings, "flush").mockImplementation(async () => {
+		if (overrides.flushError) throw overrides.flushError;
+		flushed++;
+	});
 	const session: StudioPermissionSession = {
 		get isStreaming() {
 			return overrides.streaming === true;
@@ -33,7 +26,7 @@ function fixture(overrides: { streaming?: boolean; compacting?: boolean; flushEr
 	};
 	return {
 		service: new StudioPermissionControlService(session),
-		getMode: () => currentMode,
+		getMode: () => cfgToolsApprovalMode.get(settings),
 		getFlushed: () => flushed,
 	};
 }

@@ -1,0 +1,12 @@
+.browser-pane { padding: var(--sp-12); min-width: 0; height: 100%; overflow: auto; }
+.browser-toolbar { display: flex; gap: var(--sp-8); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-12); }
+.browser-toolbar .select, .browser-toolbar .input { flex: 1; min-width: 100px; width: 100%; }
+.browser-status { flex: 1; font-size: var(--fs-11); color: var(--text-3); }
+.browser-error { font-size: var(--fs-12); color: var(--red); overflow-wrap: anywhere; }
+.browser-picture { min-height: 160px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); background: var(--surface-2); border-radius: var(--r-8); overflow: hidden; }
+.browser-picture img { display: block; width: 100%; height: auto; user-select: none; }
+.browser-picture.is-controlled { border-color: var(--accent); }
+.browser-picture:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.browser-hint { color: var(--text-3); line-height: 1.6; font-size: var(--fs-11); margin-top: var(--sp-12); }
+.computer-permissions { display: grid; gap: var(--sp-6); color: var(--text-3); font-size: var(--fs-11); padding-bottom: var(--sp-12); }
+.sp-head > .tabs { min-width: 0; overflow-x: auto; scrollbar-width: thin; }

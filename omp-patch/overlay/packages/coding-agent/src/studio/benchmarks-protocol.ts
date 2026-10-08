@@ -29,7 +29,7 @@ export interface BenchmarkMeasurement {
 	ok: boolean;
 	challenge?: "chat" | "prefill" | "generation";
 	error?: string;
-	phase?: "cold" | "warm";
+	phase?: "cold" | "warm" | "single" | "parallel" | "prefill";
 	cacheReadTokens?: number;
 	cacheWriteTokens?: number;
 	cacheObservations?: Array<
@@ -259,8 +259,11 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
 				!["chat", "prefill", "generation"].includes(measurement.challenge as string)
 			)
 				throw new Error("Invalid challenge");
-			if (measurement.phase !== undefined && measurement.phase !== "cold" && measurement.phase !== "warm")
-				throw new Error("Invalid cache phase");
+			if (
+				measurement.phase !== undefined &&
+				!["cold", "warm", "single", "parallel", "prefill"].includes(measurement.phase as string)
+			)
+				throw new Error("Invalid benchmark phase");
 			if (
 				measurement.cacheObservations !== undefined &&
 				(!Array.isArray(measurement.cacheObservations) ||

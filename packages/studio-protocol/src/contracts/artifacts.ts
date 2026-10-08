@@ -1,5 +1,5 @@
 /** Public artifact facts. Storage roots and absolute payload paths stay private. */
-export const ARTIFACT_KINDS = ["image", "video", "audio", "transcript", "judgment", "benchmark", "recording", "annotation", "export"] as const;
+export const ARTIFACT_KINDS = ["graphic", "image", "video", "audio", "transcript", "judgment", "benchmark", "recording", "annotation", "export"] as const;
 export type ArtifactKind = typeof ARTIFACT_KINDS[number];
 
 export interface ArtifactRecord {

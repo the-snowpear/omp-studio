@@ -396,7 +396,7 @@ export class StudioTanService {
 		try {
 			if (ctx.signal.aborted) throw new Error("Aborted before execution");
 			clone.sessionManager?.appendSessionInit?.({
-				systemPrompt: clone.systemPrompt ? clone.systemPrompt.join("\n\n") : parent.systemPrompt.join("\n\n"),
+				systemPrompt: clone.systemPrompt ?? parent.systemPrompt,
 				task: work,
 				tools: clone.getActiveToolNames ? clone.getActiveToolNames() : parent.toolNames,
 			});

@@ -17,7 +17,7 @@ import { AgentHubPage, setHubIntent } from "./AgentHub";
 import { PreviewModeProvider } from "./preview/PreviewContext";
 import { TAB_PANE_MS } from "./pageTransition";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 beforeAll(() => {
   window.matchMedia = (query: string) =>
@@ -30,6 +30,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   localStorage.setItem("omp.previewMode", "0");
   localStorage.removeItem("omp.agentHub.state");
   sessionStorage.removeItem("omp.hubIntent");
@@ -151,7 +152,7 @@ describe("AgentHubPage real-mode projection", () => {
       patchPath: "main.patch", nestedPatchPaths: ["nested-0.patch", "nested-1.patch"],
     })]), { client, runtimeConnected: true, canSend: true, capabilities: hubCapabilities("agent.revive", "agent.send") });
     fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
-    const revive = screen.getByRole("button", { name: /Revive/ }) as HTMLButtonElement;
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
     expect(revive.disabled).toBe(true);
     expect(revive.getAttribute("data-tip")).toContain("不可恢复");
     expect(screen.getByText("nested-0.patch")).toBeTruthy();
@@ -194,7 +195,7 @@ describe("AgentHubPage real-mode projection", () => {
   it("keeps write actions disabled without an injected Studio client", () => {
     renderHub(snapshotWith([snapshotAgent({ status: "parked" })]));
     fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
-    const revive = screen.getByRole("button", { name: /Revive/ }) as HTMLButtonElement;
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
     expect(revive.disabled).toBe(true);
     expect(revive.getAttribute("data-tip") ?? "").toContain("无 Studio client");
   });
@@ -206,8 +207,8 @@ describe("AgentHubPage real-mode projection", () => {
       canSend: true,
     });
     fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
-    const revive = screen.getByRole("button", { name: /Revive/ }) as HTMLButtonElement;
-    const kill = screen.getByRole("button", { name: /Kill/ }) as HTMLButtonElement;
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
+    const kill = screen.getByRole("button", { name: /停止/ }) as HTMLButtonElement;
     const chat = screen.getByRole("button", { name: /发消息/ }) as HTMLButtonElement;
     expect(revive.disabled).toBe(true);
     expect(kill.disabled).toBe(true);
@@ -246,7 +247,7 @@ describe("AgentHubPage real-mode projection", () => {
       capabilities: hubCapabilities("agent.kill"),
     });
     fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
-    fireEvent.click(screen.getByRole("button", { name: /^Kill$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^停止$/ }));
     const dialog = screen.getByRole("dialog", { name: "结束任务" });
     expect(dialog.textContent).toMatch(/确定结束「Lockfile Auditor」吗？结束后无法恢复。/);
     expect(dialog.textContent).not.toMatch(/tombstone|InteractionDeck|registry|abort/i);
@@ -270,7 +271,7 @@ describe("AgentHubPage real-mode projection", () => {
       })],
     });
     expect(screen.getByRole("option", { name: /WorkerEcho/ })).toBeTruthy();
-    expect(screen.getByText("Parked")).toBeTruthy();
+    expect(screen.getAllByText("已停驻").length).toBeGreaterThan(0);
   });
 
   it("freezes the elapsed time of a stopped agent and keeps counting a running one", () => {
@@ -338,7 +339,7 @@ describe("AgentHubPage conversation preview", () => {
     expect(document.querySelector(".hub-page.is-chat-preview")).toBeTruthy();
     expect(document.querySelector(".hub-cols.is-chat-preview")).toBeTruthy();
     expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
-    expect(screen.queryByRole("tab", { name: "Overview" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "概览" })).toBeNull();
     await vi.waitFor(() => {
       expect(query).toHaveBeenCalledWith("conversation.open", { target: { kind: "agent", parentSessionId: "sess-1", agentId: "agent-0001" }, limit: 50 });
       expect(screen.getByText("hello")).toBeTruthy();
@@ -348,7 +349,7 @@ describe("AgentHubPage conversation preview", () => {
     expect(document.querySelector(".subagent-convo")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "返回" }));
     expect(document.querySelector(".hub-page.is-chat-preview")).toBeNull();
-    expect(screen.getByRole("tab", { name: "Overview" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "概览" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "打开" })).toBeTruthy();
   });
 
@@ -401,7 +402,7 @@ describe("AgentHubPage conversation preview", () => {
 
   it("hides the preview composer for advisor agents", () => {
     renderHub(undefined, { preview: true, runtimeConnected: true, canSend: true });
-    fireEvent.click(screen.getByRole("option", { name: /Idle advisor/ }));
+    fireEvent.click(screen.getByRole("option", { name: /空闲 advisor/ }));
     fireEvent.click(screen.getByRole("button", { name: "打开" }));
     expect(document.querySelector(".hub-page.is-chat-preview")).toBeTruthy();
     expect(document.querySelector("#hubAgentComposer")).toBeNull();
@@ -413,11 +414,11 @@ describe("AgentHubPage conversation preview", () => {
     const client = { ...mockClient(query), command };
     renderHub(undefined, { preview: true, client, runtimeConnected: true, canSend: true });
     fireEvent.click(screen.getByRole("option", { name: /audit 子 Agent/ }));
-    const revive = screen.getByRole("button", { name: /Revive/ }) as HTMLButtonElement;
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
     expect(revive.disabled).toBe(true);
     expect(revive.getAttribute("data-tip") ?? "").toContain("预览模式");
     fireEvent.click(screen.getByRole("option", { name: /typecheck 子 Agent/ }));
-    fireEvent.click(screen.getByRole("tab", { name: "Jobs" }));
+    fireEvent.click(screen.getByRole("tab", { name: "任务" }));
     const cancel = screen.getByRole("button", { name: "取消" }) as HTMLButtonElement;
     expect(cancel.disabled).toBe(true);
     fireEvent.click(cancel);
@@ -539,10 +540,10 @@ describe("AgentHubPage conversation preview", () => {
       agents: [snapshotAgent({ status: "parked" })],
     });
     fireEvent.click(screen.getByRole("option", { name: /Lockfile Auditor/ }));
-    const revive = screen.getByRole("button", { name: /Revive/ }) as HTMLButtonElement;
+    const revive = screen.getByRole("button", { name: /恢复/ }) as HTMLButtonElement;
     expect(revive.disabled).toBe(true);
     expect(revive.getAttribute("data-tip") ?? "").toContain("历史会话");
-    fireEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+    fireEvent.click(screen.getByRole("tab", { name: "对话记录" }));
     expect(query).not.toHaveBeenCalledWith("agent.transcript.read", expect.anything());
     expect(screen.getByText(/归档对话/)).toBeTruthy();
   });
@@ -587,4 +588,19 @@ describe("AgentHubPage conversation preview", () => {
       expect(screen.getByText(/Runtime 已重新连接/)).toBeTruthy();
     });
   });
+});
+
+
+it("previews a configured agent spawn without sending Host queries or writes", async () => {
+ const query = vi.fn(); const command = vi.fn(); const client = { ...mockClient(query), command };
+ renderHub(undefined, { preview: true, client, runtimeConnected: true, canSend: true });
+ fireEvent.click(screen.getAllByRole("button", { name: "创建代理" })[0]!);
+ const dialog = await screen.findByRole("dialog", { name: "创建代理" });
+ fireEvent.change(within(dialog).getByRole("textbox", { name: "任务描述" }), { target: { value: "检查模型配置页面的布局" } });
+ const model = within(dialog).getByRole("combobox", { name: "本次主模型" }) as HTMLSelectElement;
+ fireEvent.change(model, { target: { value: model.options[1]!.value } });
+ fireEvent.change(within(dialog).getByRole("combobox", { name: "本次思考强度" }), { target: { value: "hi" } });
+ fireEvent.change(within(dialog).getByRole("textbox", { name: "候选模型链（可选）" }), { target: { value: "test/backup:medium" } });
+ fireEvent.click(within(dialog).getByRole("button", { name: "预览创建" }));
+ await screen.findByText(/演示任务已配置/); expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
 });

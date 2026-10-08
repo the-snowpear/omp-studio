@@ -1,8 +1,60 @@
+import {
+	cfgCompactionAsyncEnabled,
+	cfgCompactionExperimentalContextManagement,
+	cfgCompactionMethodOrder,
+	cfgExtendedContext,
+} from "../../session/context-settings";
+import {
+	cfgClaudeResetsAutoRedeem,
+	cfgClaudeResetsKeepCredits,
+	cfgClaudeResetsMinBlockedMinutes,
+	cfgClaudeResetsSalvageHorizonHours,
+	cfgFeaturesUnexpectedStopDetection,
+	cfgImagesDescribeForTextModels,
+	cfgProvidersAutoThinkingMaxEffort,
+	cfgProvidersOpenaiCodexCodeMode,
+	cfgRetryWaitForUsageReset,
+} from "../../session/settings";
+import { cfgMcpStartupTimeoutMs } from "../../mcp/settings";
+import { cfgTtsrJudge } from "../../export/ttsr-settings";
+import { cfgEditAutoRepairEnabled } from "../../edit/settings";
+import { cfgPlanAutosave, cfgPlanAutosaveDir } from "../../plan-mode/settings";
+import { cfgTaskAgentServiceTierOverrides, cfgTaskEnableEffort, cfgTaskMaxEffort } from "../../task/settings";
+import { cfgImagesQuestionTimeoutMs, cfgToolsSpeculativeExecutionEnabled } from "../../tools/settings";
 import { isServiceTierInheritSettingValue } from "../../config/service-tier";
 import { isRecord } from "@oh-my-pi/pi-utils";
-import { getEnumValues, type SettingPath, type SettingValue } from "../../config/settings-schema";
+import { type AnySetting, type DefinitionValue } from "../../config/registry";
 import type { AgentSession } from "../../session/agent-session";
 import { type CompactionMethod, isCompactionMethod } from "../../session/compaction-methods";
+
+const RUNTIME_SETTING_HANDLES = {
+	"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem,
+	"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes,
+	"claudeResets.keepCredits": cfgClaudeResetsKeepCredits,
+	"claudeResets.salvageHorizonHours": cfgClaudeResetsSalvageHorizonHours,
+	"mcp.startupTimeoutMs": cfgMcpStartupTimeoutMs,
+	"ttsr.judge": cfgTtsrJudge,
+	"edit.autoRepair.enabled": cfgEditAutoRepairEnabled,
+	"features.unexpectedStopDetection": cfgFeaturesUnexpectedStopDetection,
+	extendedContext: cfgExtendedContext,
+	"compaction.asyncEnabled": cfgCompactionAsyncEnabled,
+	"compaction.methodOrder": cfgCompactionMethodOrder,
+	"providers.openai-codex.codeMode": cfgProvidersOpenaiCodexCodeMode,
+	"plan.autosave": cfgPlanAutosave,
+	"plan.autosaveDir": cfgPlanAutosaveDir,
+	"retry.waitForUsageReset": cfgRetryWaitForUsageReset,
+	"compaction.experimentalContextManagement": cfgCompactionExperimentalContextManagement,
+	"task.enableEffort": cfgTaskEnableEffort,
+	"task.maxEffort": cfgTaskMaxEffort,
+	"task.agentServiceTierOverrides": cfgTaskAgentServiceTierOverrides,
+	"providers.autoThinkingMaxEffort": cfgProvidersAutoThinkingMaxEffort,
+	"images.describeForTextModels": cfgImagesDescribeForTextModels,
+	"images.questionTimeoutMs": cfgImagesQuestionTimeoutMs,
+	"tools.speculativeExecution.enabled": cfgToolsSpeculativeExecutionEnabled,
+};
+type SettingValue<K extends keyof typeof RUNTIME_SETTING_HANDLES> = DefinitionValue<
+	(typeof RUNTIME_SETTING_HANDLES)[K]["definition"]
+>;
 
 /** Runtime settings intentionally exposed to the Studio Bridge. */
 export const STUDIO_RUNTIME_SETTING_KEYS = [
@@ -127,7 +179,7 @@ export function isStudioRuntimeSettingValue(
 		case "providers.autoThinkingMaxEffort":
 		case "features.unexpectedStopDetection":
 		case "providers.openai-codex.codeMode":
-			return typeof value === "string" && getEnumValues(key)?.includes(value) === true;
+			return typeof value === "string" && RUNTIME_SETTING_HANDLES[key].enumValues?.includes(value) === true;
 		case "compaction.methodOrder":
 			return (
 				Array.isArray(value) &&
@@ -161,7 +213,7 @@ export class StudioRuntimeSettingsService {
 
 	constructor(readonly session: AgentSession) {
 		this.#settings = session.settings;
-		this.#notesEffective = session.settings.get("compaction.experimentalContextManagement") === true;
+		this.#notesEffective = cfgCompactionExperimentalContextManagement.get(session.settings) === true;
 		this.#notesConfigured = this.#notesEffective;
 	}
 
@@ -169,7 +221,7 @@ export class StudioRuntimeSettingsService {
 		if (this.#settings === this.session.settings) return;
 		const pending = this.#notesConfigured !== this.#notesEffective;
 		this.#settings = this.session.settings;
-		this.#notesEffective = this.#settings.get("compaction.experimentalContextManagement") === true;
+		this.#notesEffective = cfgCompactionExperimentalContextManagement.get(this.#settings) === true;
 		if (!pending) this.#notesConfigured = this.#notesEffective;
 	}
 
@@ -186,32 +238,32 @@ export class StudioRuntimeSettingsService {
 		this.#syncSession();
 		return {
 			"modelRoles.judge": this.session.settings.getModelRoles().judge ?? "",
-			"claudeResets.autoRedeem": this.session.settings.get("claudeResets.autoRedeem"),
-			"claudeResets.minBlockedMinutes": this.session.settings.get("claudeResets.minBlockedMinutes"),
-			"claudeResets.keepCredits": this.session.settings.get("claudeResets.keepCredits"),
-			"claudeResets.salvageHorizonHours": this.session.settings.get("claudeResets.salvageHorizonHours"),
-			"mcp.startupTimeoutMs": this.session.settings.get("mcp.startupTimeoutMs"),
-			"ttsr.judge": this.session.settings.get("ttsr.judge"),
-			"edit.autoRepair.enabled": this.session.settings.get("edit.autoRepair.enabled"),
-			"features.unexpectedStopDetection": this.session.settings.get("features.unexpectedStopDetection"),
-			extendedContext: this.session.settings.get("extendedContext"),
-			"compaction.asyncEnabled": this.session.settings.get("compaction.asyncEnabled"),
-			"compaction.methodOrder": [...this.session.settings.get("compaction.methodOrder")],
-			"providers.openai-codex.codeMode": this.session.settings.get("providers.openai-codex.codeMode"),
-			"plan.autosave": this.session.settings.get("plan.autosave"),
-			"plan.autosaveDir": this.session.settings.get("plan.autosaveDir") ?? "",
-			"retry.waitForUsageReset": this.session.settings.get("retry.waitForUsageReset"),
+			"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem.get(this.session.settings),
+			"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes.get(this.session.settings),
+			"claudeResets.keepCredits": cfgClaudeResetsKeepCredits.get(this.session.settings),
+			"claudeResets.salvageHorizonHours": cfgClaudeResetsSalvageHorizonHours.get(this.session.settings),
+			"mcp.startupTimeoutMs": cfgMcpStartupTimeoutMs.get(this.session.settings),
+			"ttsr.judge": cfgTtsrJudge.get(this.session.settings),
+			"edit.autoRepair.enabled": cfgEditAutoRepairEnabled.get(this.session.settings),
+			"features.unexpectedStopDetection": cfgFeaturesUnexpectedStopDetection.get(this.session.settings),
+			extendedContext: cfgExtendedContext.get(this.session.settings),
+			"compaction.asyncEnabled": cfgCompactionAsyncEnabled.get(this.session.settings),
+			"compaction.methodOrder": [...cfgCompactionMethodOrder.get(this.session.settings)],
+			"providers.openai-codex.codeMode": cfgProvidersOpenaiCodexCodeMode.get(this.session.settings),
+			"plan.autosave": cfgPlanAutosave.get(this.session.settings),
+			"plan.autosaveDir": cfgPlanAutosaveDir.get(this.session.settings) ?? "",
+			"retry.waitForUsageReset": cfgRetryWaitForUsageReset.get(this.session.settings),
 			"compaction.experimentalContextManagement": this.#notesEffective,
-			"task.enableEffort": structuredClone(this.session.settings.get("task.enableEffort")),
-			"task.maxEffort": structuredClone(this.session.settings.get("task.maxEffort")),
-			"task.agentServiceTierOverrides": structuredClone(this.session.settings.get("task.agentServiceTierOverrides")),
+			"task.enableEffort": structuredClone(cfgTaskEnableEffort.get(this.session.settings)),
+			"task.maxEffort": structuredClone(cfgTaskMaxEffort.get(this.session.settings)),
+			"task.agentServiceTierOverrides": structuredClone(cfgTaskAgentServiceTierOverrides.get(this.session.settings)),
 			"providers.autoThinkingMaxEffort": structuredClone(
-				this.session.settings.get("providers.autoThinkingMaxEffort"),
+				cfgProvidersAutoThinkingMaxEffort.get(this.session.settings),
 			),
-			"images.describeForTextModels": structuredClone(this.session.settings.get("images.describeForTextModels")),
-			"images.questionTimeoutMs": structuredClone(this.session.settings.get("images.questionTimeoutMs")),
+			"images.describeForTextModels": structuredClone(cfgImagesDescribeForTextModels.get(this.session.settings)),
+			"images.questionTimeoutMs": structuredClone(cfgImagesQuestionTimeoutMs.get(this.session.settings)),
 			"tools.speculativeExecution.enabled": structuredClone(
-				this.session.settings.get("tools.speculativeExecution.enabled"),
+				cfgToolsSpeculativeExecutionEnabled.get(this.session.settings),
 			),
 		};
 	}
@@ -257,12 +309,12 @@ export class StudioRuntimeSettingsService {
 				);
 			this.#syncSession();
 			const previous = this.#notesConfigured;
-			this.#settings.override(key, this.#notesEffective);
-			this.#settings.set(key, value as boolean);
+			cfgCompactionExperimentalContextManagement.override(this.#settings, this.#notesEffective);
+			cfgCompactionExperimentalContextManagement.set(this.#settings, value as boolean);
 			try {
 				await this.#settings.flush();
 			} catch (error) {
-				this.#settings.set(key, previous);
+				cfgCompactionExperimentalContextManagement.set(this.#settings, previous);
 				throw error;
 			}
 			this.#notesConfigured = value as boolean;
@@ -286,89 +338,13 @@ export class StudioRuntimeSettingsService {
 			else settings.overrideModelRoles({ ...settings.getModelRoles(), judge: value as string });
 			return;
 		}
-		if (persist) settings.clearOverride(key as SettingPath);
-		switch (key) {
-			case "claudeResets.autoRedeem":
-				return persist
-					? settings.set(key, value as SettingValue<"claudeResets.autoRedeem">)
-					: settings.override(key, value as SettingValue<"claudeResets.autoRedeem">);
-			case "claudeResets.minBlockedMinutes":
-				return persist
-					? settings.set(key, value as SettingValue<"claudeResets.minBlockedMinutes">)
-					: settings.override(key, value as SettingValue<"claudeResets.minBlockedMinutes">);
-			case "claudeResets.keepCredits":
-				return persist
-					? settings.set(key, value as SettingValue<"claudeResets.keepCredits">)
-					: settings.override(key, value as SettingValue<"claudeResets.keepCredits">);
-			case "claudeResets.salvageHorizonHours":
-				return persist
-					? settings.set(key, value as SettingValue<"claudeResets.salvageHorizonHours">)
-					: settings.override(key, value as SettingValue<"claudeResets.salvageHorizonHours">);
-			case "mcp.startupTimeoutMs":
-				return persist
-					? settings.set(key, value as SettingValue<"mcp.startupTimeoutMs">)
-					: settings.override(key, value as SettingValue<"mcp.startupTimeoutMs">);
-			case "ttsr.judge":
-				return persist
-					? settings.set(key, value as SettingValue<"ttsr.judge">)
-					: settings.override(key, value as SettingValue<"ttsr.judge">);
-			case "task.enableEffort":
-				return persist
-					? settings.set(key, value as SettingValue<"task.enableEffort">)
-					: settings.override(key, value as SettingValue<"task.enableEffort">);
-			case "task.maxEffort":
-				return persist
-					? settings.set(key, value as SettingValue<"task.maxEffort">)
-					: settings.override(key, value as SettingValue<"task.maxEffort">);
-			case "task.agentServiceTierOverrides":
-				return persist
-					? settings.set(key, value as SettingValue<"task.agentServiceTierOverrides">)
-					: settings.override(key, value as SettingValue<"task.agentServiceTierOverrides">);
-			case "providers.autoThinkingMaxEffort":
-				return persist
-					? settings.set(key, value as SettingValue<"providers.autoThinkingMaxEffort">)
-					: settings.override(key, value as SettingValue<"providers.autoThinkingMaxEffort">);
-			case "images.describeForTextModels":
-				return persist
-					? settings.set(key, value as SettingValue<"images.describeForTextModels">)
-					: settings.override(key, value as SettingValue<"images.describeForTextModels">);
-			case "images.questionTimeoutMs":
-				return persist
-					? settings.set(key, value as SettingValue<"images.questionTimeoutMs">)
-					: settings.override(key, value as SettingValue<"images.questionTimeoutMs">);
-			case "tools.speculativeExecution.enabled":
-				return persist
-					? settings.set(key, value as SettingValue<"tools.speculativeExecution.enabled">)
-					: settings.override(key, value as SettingValue<"tools.speculativeExecution.enabled">);
-			case "plan.autosave":
-			case "retry.waitForUsageReset":
-				return persist ? settings.set(key, value as boolean) : settings.override(key, value as boolean);
-			case "plan.autosaveDir":
-				return persist ? settings.set(key, value as string) : settings.override(key, value as string);
-			case "edit.autoRepair.enabled":
-				return persist
-					? settings.set(key, value as SettingValue<"edit.autoRepair.enabled">)
-					: settings.override(key, value as SettingValue<"edit.autoRepair.enabled">);
-			case "features.unexpectedStopDetection":
-				return persist
-					? settings.set(key, value as SettingValue<"features.unexpectedStopDetection">)
-					: settings.override(key, value as SettingValue<"features.unexpectedStopDetection">);
-			case "extendedContext":
-				return persist
-					? settings.set(key, value as SettingValue<"extendedContext">)
-					: settings.override(key, value as SettingValue<"extendedContext">);
-			case "compaction.asyncEnabled":
-				return persist
-					? settings.set(key, value as SettingValue<"compaction.asyncEnabled">)
-					: settings.override(key, value as SettingValue<"compaction.asyncEnabled">);
-			case "compaction.methodOrder":
-				return persist
-					? settings.set(key, value as SettingValue<"compaction.methodOrder">)
-					: settings.override(key, value as SettingValue<"compaction.methodOrder">);
-			case "providers.openai-codex.codeMode":
-				return persist
-					? settings.set(key, value as SettingValue<"providers.openai-codex.codeMode">)
-					: settings.override(key, value as SettingValue<"providers.openai-codex.codeMode">);
+		const setting: AnySetting = RUNTIME_SETTING_HANDLES[key];
+		setting.assertWritable(value);
+		if (persist) {
+			setting.clearOverride(settings);
+			setting.set(settings, value);
+		} else {
+			setting.override(settings, value);
 		}
 	}
 }

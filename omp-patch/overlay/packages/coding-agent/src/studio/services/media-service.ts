@@ -1,3 +1,4 @@
+import { cfgTtsLocalVoice } from "../../tts/settings";
 import { randomUUID } from "node:crypto";
 import { generateImage, isImageGenerationApi, type Model } from "@oh-my-pi/pi-ai";
 import { ProviderHttpError } from "@oh-my-pi/pi-ai/error";
@@ -543,7 +544,7 @@ export class StudioMediaService {
 						let mimeType: string;
 						if (model.api === "local-inference") {
 							const value = await ttsClient.synthesize(model.id, request.text, {
-								voice: request.voice ?? this.session.settings.get("tts.localVoice") ?? DEFAULT_TTS_VOICE,
+								voice: request.voice ?? cfgTtsLocalVoice.get(this.session.settings) ?? DEFAULT_TTS_VOICE,
 								signal,
 							});
 							if (!value) throw new Error("Local speech unavailable");

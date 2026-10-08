@@ -1,0 +1,11 @@
+.ida-pane { min-width: 0; }
+.ida-pane > h2 { font-size: var(--fs-16); display: flex; gap: var(--sp-8); align-items: center; }
+.ida-pane p { line-height: 1.7; font-size: var(--fs-12); overflow-wrap: anywhere; }
+.ida-pane summary { cursor: pointer; font-size: var(--fs-12); margin: var(--sp-12) 0; }
+.ida-configuration { padding: var(--sp-16); border: 1px solid var(--border); border-radius: var(--r-12); margin: var(--sp-16) 0; background: var(--surface); }
+.ida-fields { display: grid; gap: var(--sp-12); }
+.ida-fields label, .ida-code { display: grid; gap: var(--sp-8); font-size: var(--fs-12); }
+.ida-fields > button { justify-self: start; }
+.ida-code { margin: var(--sp-16) 0; }
+.ida-code textarea { resize: vertical; width: 100%; }
+.ida-output { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--sp-12); font: var(--fs-12)/1.6 var(--font-mono); border: 1px solid var(--border); border-radius: var(--r-8); background: var(--surface-2); }

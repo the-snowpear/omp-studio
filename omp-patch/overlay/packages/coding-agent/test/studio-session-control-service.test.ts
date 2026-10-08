@@ -257,7 +257,7 @@ describe("WP-021/022/023/024/025 SessionControlService", () => {
 		const session = new FakeSessionControlSession();
 		const service = new SessionControlService(session);
 		await expect(service.abort()).resolves.toEqual({ aborted: true });
-		expect(session.abortCalls).toEqual([{ reason: "Interrupted by user" }]);
+		expect(session.abortCalls).toEqual([{ reason: "Interrupted by user", preserveQueuedInput: true }]);
 	});
 
 	test("core.prompt starts the shared first-input title generator", async () => {
@@ -300,7 +300,7 @@ describe("WP-021/022/023/024/025 SessionControlService", () => {
 		expect(session.promptCalls).toEqual([]);
 		expect(session.steerCalls).toEqual([]);
 		expect(session.followUpCalls).toEqual([]);
-		expect(session.abortCalls).toEqual([{ reason: "Interrupted by user" }]);
+		expect(session.abortCalls).toEqual([{ reason: "Interrupted by user", preserveQueuedInput: true }]);
 		expect(session.titleGenerationCalls).toEqual([]);
 	});
 
