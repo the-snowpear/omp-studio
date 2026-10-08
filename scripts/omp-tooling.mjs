@@ -76,5 +76,5 @@ export function run(command, args, options = {}) {
     throw new Error(`${command} ${args.join(" ")} failed with exit ${result.status}${detail}`);
   }
 
-  return options.capture ? result.stdout.trim() : "";
+  return options.capture ? (options.trim === false ? result.stdout : result.stdout.trim()) : "";
 }

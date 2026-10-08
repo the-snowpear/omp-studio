@@ -1,4 +1,5 @@
 import { artifactLibraryForProfile } from "./artifact-library.js";
+import { NativeStatsWorker, supportsNativeStatsWorker } from "./stats-worker.js";
 import { runtimeMediaFilesForLibrary } from "./runtime-media-files.js";
 /**
  * Desktop Host composition (FRONTEND_INTEGRATION.md §9.2).
@@ -441,6 +442,8 @@ function clearDisconnect(holder: { current: HostRuntimeDisconnect | undefined })
 }
 
 interface FacadeContext {
+  stats?: NativeStatsWorker;
+  statsPaused?: boolean;
   readonly authority: PublicAuthorityIdentity;
   readonly platform: PlatformId;
   readonly arch: ArchId;
@@ -654,8 +657,11 @@ function managedRuntimeInstallService(context: FacadeContext): HostRuntimeInstal
         }
       : async () => undefined),
   });
-  if (maintenance === undefined) return install;
+  if (maintenance === undefined) return async(channel)=>{context.statsPaused=true;try{await context.stats?.dispose();delete context.stats;return await install(channel);}finally{context.statsPaused=false;}};
   return async (channel) => {
+    context.statsPaused=true;
+    try {
+    await context.stats?.dispose();delete context.stats;
     let version: string | undefined;
     let previousVersion: string | undefined;
     const result = await maintenance(async () => {
@@ -676,9 +682,14 @@ function managedRuntimeInstallService(context: FacadeContext): HostRuntimeInstal
       if (next?.hello()?.runtimeVersion !== version) throw new Error("Installed Runtime did not become ready with the expected version");
     }
     return result;
+    } finally { context.statsPaused=false; }
   };
 }
 
+function statsWorker(context:FacadeContext):NativeStatsWorker {
+  if(context.statsPaused)throw new Error("Statistics paused for Runtime maintenance");
+  return context.stats??=new NativeStatsWorker({cacheFile:join(context.profileDirectory,"stats-cache.json"),executable:async()=>{await installedRuntimeContext(context);const manifest=await context.backend.installer.currentManifest();return manifest&&supportsNativeStatsWorker(manifest.manifest.runtimeVersion)?manifest.entrypointPath:undefined;}});
+}
 function buildFacade(context: FacadeContext): StudioHostClientFacade {
   const seams = context.seams;
   const sessionRef = context.sessionRef;
@@ -910,6 +921,7 @@ function buildFacade(context: FacadeContext): StudioHostClientFacade {
     ...(seams.git === undefined ? {} : { git: seams.git }),
     ...(seams.github === undefined ? {} : { github: seams.github }),
     usage: seams.usage ?? createOmpUsageService(seams.openUrl === undefined ? {} : { openUrl: seams.openUrl }),
+    stats: {read: input=>statsWorker(context).read(input), frustration: input=>statsWorker(context).frustration(input)},
     // Live accessors follow workspace/runtime rebind. Conversation and
     // interaction events are not buffered; reload never replays old deltas.
     runtime: {
@@ -1226,6 +1238,7 @@ class DesktopHostCompositionImpl implements DesktopHostComposition {
     this.#unsubscribeResidents?.();
     this.#unsubscribeWorkspace?.();
     this.#facadeContext.seams.disposeHostOperations?.();
+    await this.#facadeContext.stats?.dispose();
     if (this.#sessionStarted && this.#runtimeSession !== undefined) {
       await this.#runtimeSession.stop();
     }

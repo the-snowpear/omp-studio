@@ -1,3 +1,5 @@
+import { beforeEach } from "bun:test";
+import { resetSettingsForTest } from "../src/config/settings";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { afterEach, describe, expect, test } from "bun:test";
 import * as crypto from "node:crypto";
@@ -710,4 +712,9 @@ describe("StateProjector child conversation isolation", () => {
 		expect(envelopes.at(-1)?.eventSeq).not.toBe(childSeq);
 		state.dispose();
 	});
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

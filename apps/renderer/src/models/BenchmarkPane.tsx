@@ -15,7 +15,7 @@ import {
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
-import { PREVIEW_BENCHMARK } from "../preview/benchmarksPreview";
+import { PREVIEW_BENCHMARK, previewBenchmark } from "../preview/benchmarksPreview";
 import { WorkspaceStatus, workspaceStateLabel } from "../workspaces/Workspace";
 import "./benchmark.css";
 
@@ -342,6 +342,7 @@ export function BenchmarkPane({
                 onChange={(event) => {
                   const value = event.target.value as BenchmarkSpec["profile"];
                   setProfile(value);
+                    if (value === "detailed") setConcurrency(Math.max(2, concurrency));
                   setMetric(
                     value === "prefill"
                       ? "prefillTps"
@@ -355,7 +356,8 @@ export function BenchmarkPane({
                   }
                 }}
               >
-                <option value="chat">Chat</option>
+                <option value="detailed">{t("完整阶段：吞吐 / 并发 / Prefill", "Detailed: throughput / concurrency / prefill")}</option>
+                  <option value="chat">Chat</option>
                 <option value="prefill">Prefill</option>
                 <option value="generation">Generation</option>
                 <option value="mix">Mix</option>
@@ -650,7 +652,8 @@ export function BenchmarkPane({
                           <pre>
                             {JSON.stringify(
                               {
-                                byChallenge: row.byChallenge,
+                                phases: row.phases,
+                              byChallenge: row.byChallenge,
                                 measurements: row.measurements,
                               },
                               null,

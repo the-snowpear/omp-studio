@@ -1,3 +1,5 @@
+import { beforeEach } from "bun:test";
+import { resetSettingsForTest } from "../src/config/settings";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { expect, it } from "bun:test";
 import type { AgentSession } from "../src/session/agent-session";
@@ -66,4 +68,9 @@ it("reports native startup readiness without connecting, probing or exposing cre
 	expect(result.settled).toBe(false);
 	expect(result.servers.find(row => row.name === "ready")).toEqual({ name: "ready", state: "ready", tools: 1 });
 	expect(JSON.stringify(result)).not.toContain("must-not-leak");
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

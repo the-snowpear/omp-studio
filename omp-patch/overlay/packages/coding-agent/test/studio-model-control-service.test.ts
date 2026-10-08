@@ -1,3 +1,5 @@
+import { beforeEach } from "bun:test";
+import { resetSettingsForTest } from "../src/config/settings";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgTaskAgentModelOverrides } from "../src/task/settings";
 import { describe, expect, test } from "bun:test";
@@ -292,4 +294,9 @@ describe("StudioModelControlService task subagent model", () => {
 		await service.setTaskModel("claude-opus-4-6");
 		expect(changes).toBe(2);
 	});
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

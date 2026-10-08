@@ -54,7 +54,12 @@ test("identity-based edits and promotion retain the exact duplicate's image comp
 		await session.followUp("duplicate", [image]);
 		before = service.get();
 		const [first, second] = before.entries;
-		service.execute({ kind: "session.queue.remove", sessionId: session.sessionId, id: first!.id, queue: "followUp" });
+		service.execute({
+			kind: "session.queue.entry.remove",
+			sessionId: session.sessionId,
+			id: first!.id,
+			queue: "followUp",
+		});
 		try {
 			service.execute({
 				kind: "session.queue.edit",
@@ -112,7 +117,7 @@ test("identity-based edits and promotion retain the exact duplicate's image comp
 		expect(service.get().entries).toEqual([]);
 		expect(() =>
 			service.execute({
-				kind: "session.queue.remove",
+				kind: "session.queue.entry.remove",
 				sessionId: session.sessionId,
 				id: before!.entries[1]!.id,
 				queue: "steering",

@@ -1,7 +1,8 @@
+import { StudioIdaDetailsService } from "./ida-details-service";
 import { StudioSessionTitlesService } from "./session-titles-service";
 import { isSessionTitlesKind, type SessionTitlesOperation } from "../session-titles-protocol";
 import { StudioPredictionService } from "./prediction-service";
-import { isPredictionKind, type PredictionOperation } from "../prediction-protocol";
+import { isPredictionKind, type PredictionChannelOperation } from "../prediction-channel-protocol";
 import { StudioMaintenanceService } from "./maintenance-service";
 import { isMaintenanceKind, type MaintenanceOperation } from "../maintenance-protocol";
 import { StudioArchiveService } from "./archive-service";
@@ -17,6 +18,10 @@ import { isNativePreferenceKind, type NativePreferenceOperation } from "../nativ
 import { StudioRatchetService } from "./ratchet-service";
 import { isRatchetKind, type RatchetOperation } from "../ratchet-protocol";
 import { cfgLaunchEnabled } from "../../tools/settings";
+import { StudioSessionGuiService } from "./session-gui-service";
+import { StudioAgentBtwService } from "./agent-btw-service";
+import { StudioIdaService } from "./ida-service";
+import { StudioResourceService } from "./resource-service";
 import { StudioSkillshareService } from "./skillshare-service";
 import { StudioLiveAudioService } from "./live-audio-service";
 import { StudioMediaService } from "./media-service";
@@ -24,12 +29,11 @@ import { StudioBenchmarkService } from "./benchmark-service";
 import { StudioRuntimeCatalogService } from "./runtime-catalog-service";
 import { StudioJudgmentService } from "./judgment-service";
 import { StudioSessionOptionsService } from "./session-options-service";
-import { StudioIdaService } from "./ida-service";
 import { StudioBrowserObservationService } from "./browser-observation-service";
 import { StudioComputerObservationService } from "./computer-observation-service";
 import { isComputerObservationKind, type ComputerObservationOperation } from "../computer-observation-protocol";
 import { isBrowserObservationKind, type BrowserObservationOperation } from "../browser-observation-protocol";
-import { isIdaOperationKind, type StudioIdaOperation } from "../ida-protocol";
+import { isIdaOperationKind, type StudioIdaOperation } from "../ida-details-protocol";
 import { isSessionOptionsKind, type SessionOptionsOperation } from "../session-options-protocol";
 import { type JudgmentOperation } from "../judgments-protocol";
 import { StudioAnnotationService } from "./annotation-service";
@@ -48,7 +52,7 @@ import { SessionControlError } from "./session-control-service";
 function isSessionTitlesOperation(operation: WorkbenchOperation): operation is SessionTitlesOperation {
 	return isSessionTitlesKind(operation.kind);
 }
-function isPredictionOperation(operation: WorkbenchOperation): operation is PredictionOperation {
+function isPredictionChannelOperation(operation: WorkbenchOperation): operation is PredictionChannelOperation {
 	return isPredictionKind(operation.kind);
 }
 function isMaintenanceOperation(operation: WorkbenchOperation): operation is MaintenanceOperation {
@@ -104,6 +108,10 @@ export class StudioWorkbenchService {
 	readonly runtimeQueue: StudioRuntimeQueueService;
 	readonly nativePreferences: StudioNativePreferencesService;
 	readonly ratchet: StudioRatchetService;
+	readonly resources: StudioResourceService;
+	readonly ida: StudioIdaService;
+	readonly agentBtw: StudioAgentBtwService;
+	readonly sessionGui: StudioSessionGuiService;
 	readonly skillshare: StudioSkillshareService;
 	readonly media: StudioMediaService;
 	readonly benchmarks: StudioBenchmarkService;
@@ -112,7 +120,7 @@ export class StudioWorkbenchService {
 	readonly accounts: StudioAccountStatusService;
 	readonly annotations: StudioAnnotationService;
 	readonly sessionOptions: StudioSessionOptionsService;
-	readonly ida: StudioIdaService;
+	readonly idaDetails: StudioIdaDetailsService;
 	readonly browserObservation: StudioBrowserObservationService;
 	readonly computerObservation: StudioComputerObservationService;
 	constructor(
@@ -129,6 +137,10 @@ export class StudioWorkbenchService {
 		this.nativePreferences = new StudioNativePreferencesService(session);
 		this.ratchet = new StudioRatchetService(session);
 		this.skillshare = new StudioSkillshareService(session);
+		this.sessionGui = new StudioSessionGuiService(session);
+		this.agentBtw = new StudioAgentBtwService(session);
+		this.ida = new StudioIdaService(session);
+		this.resources = new StudioResourceService(session);
 		this.accounts = new StudioAccountStatusService(session);
 		this.judgments = new StudioJudgmentService(session);
 		this.catalog = new StudioRuntimeCatalogService(session);
@@ -136,7 +148,7 @@ export class StudioWorkbenchService {
 		this.media = new StudioMediaService(session);
 		this.annotations = new StudioAnnotationService(session);
 		this.sessionOptions = new StudioSessionOptionsService(session);
-		this.ida = new StudioIdaService(session);
+		this.idaDetails = new StudioIdaDetailsService(session);
 		this.browserObservation = new StudioBrowserObservationService(session);
 		this.computerObservation = new StudioComputerObservationService(session);
 	}
@@ -146,7 +158,9 @@ export class StudioWorkbenchService {
 		this.ratchet.dispose();
 		this.computerObservation.dispose();
 		this.browserObservation.dispose();
+		this.idaDetails.dispose();
 		this.ida.dispose();
+		this.agentBtw.dispose();
 		this.skillshare.dispose();
 		this.accounts.dispose();
 		this.benchmarks.dispose();
@@ -161,7 +175,7 @@ export class StudioWorkbenchService {
 	}
 	async #execute(operation: WorkbenchOperation): Promise<unknown> {
 		if (isSessionTitlesOperation(operation)) return this.titles.execute(operation);
-		if (isPredictionOperation(operation)) return this.prediction.execute(operation);
+		if (isPredictionChannelOperation(operation)) return this.prediction.execute(operation);
 		if (isMaintenanceOperation(operation)) return this.maintenance.execute(operation);
 		if (isArchiveOperation(operation)) return this.archive.execute(operation);
 		if (operation.kind === "agent.model.inspect") return this.agentModels.execute(operation);
@@ -172,8 +186,39 @@ export class StudioWorkbenchService {
 		if (isRatchetOperation(operation)) return this.ratchet.execute(operation);
 		if (isComputerObservationOperation(operation)) return this.computerObservation.execute(operation);
 		if (isBrowserObservationOperation(operation)) return this.browserObservation.execute(operation);
-		if (isIdaOperation(operation)) return this.ida.execute(operation);
+		if (isIdaOperation(operation)) return this.idaDetails.execute(operation);
 		if (isSessionOptionsOperation(operation)) return this.sessionOptions.execute(operation);
+		if (operation.kind === "resource.read") return this.resources.read(operation);
+		if (
+			operation.kind === "ida.status" ||
+			operation.kind === "ida.view" ||
+			operation.kind === "ida.prepare" ||
+			operation.kind === "ida.commit" ||
+			operation.kind === "ida.cancel"
+		)
+			return this.ida.execute(operation);
+		if (
+			operation.kind === "agent.btw.read" ||
+			operation.kind === "agent.btw.ask" ||
+			operation.kind === "agent.btw.abort"
+		)
+			return this.agentBtw.execute(operation);
+		if (operation.kind === "prediction.control") {
+			if (operation.sessionId !== this.session.sessionId)
+				throw new SessionControlError("COMMAND_BLOCKED", "Prediction session changed");
+			return this.prediction.control(operation.action);
+		}
+		if (
+			operation.kind === "session.queue.ack" ||
+			operation.kind === "session.queue.steer" ||
+			operation.kind === "session.queue.list" ||
+			operation.kind === "session.queue.remove" ||
+			operation.kind === "session.queue.takeback" ||
+			operation.kind === "session.tier.get" ||
+			operation.kind === "session.tier.set" ||
+			operation.kind === "session.skills.list"
+		)
+			return this.sessionGui.execute(operation);
 		if (
 			operation.kind === "skillshare.status" ||
 			operation.kind === "skillshare.home" ||

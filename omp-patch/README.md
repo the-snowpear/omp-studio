@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The managed Runtime pin is `can1357/oh-my-pi` `v18.3.0` at commit `62bc57be1b03ef0802a33cf7f5f530e534527531`. The previous functional baseline was `18.2.5-studio.9` at `37273117021129e96bd05d8277b140ec3fd61990`. See the [migration and verification report](../docs/migrations/omp-18.3.0.md).
+The managed Runtime pin is `can1357/oh-my-pi` `v18.8.0` at commit `4ef97c8826ee012829a3e756b693a2a16a414f47`. Studio 0.1.9 preserves the published `18.4.4-studio.38` baseline while migrating the native runtime. See the [migration and verification report](../docs/migrations/omp-18.8.0.md).
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -13,10 +13,10 @@ Executable names have separate responsibilities:
 
 Studio's changes to the pinned tree split by file ownership, not by feature or date.
 
-| Layer | Location | Contents | Size |
-|---|---|---|---|
-| Overlay | `overlay/` | Files upstream does not have at all: `packages/coding-agent/src/studio/**` and the `studio-*` tests | ~22,400 lines |
-| Seam | `patches/*.patch` | The only edits that touch upstream-owned files | ~960 lines |
+| Layer | Location | Contents |
+|---|---|---|
+| Overlay | `overlay/` | Files upstream does not have at all: `packages/coding-agent/src/studio/**` and the `studio-*` tests |
+| Seam | `patches/*.patch` | The only edits that touch upstream-owned files |
 
 The overlay is ordinary tracked source in this repository. Editing it is an ordinary edit with an ordinary diff — no patch number, no apply/reverse cycle, and no rebase conflict when the pin moves, because upstream has nothing at those paths to conflict with. Only the seam is expressed as patches, and each patch is grouped by the upstream subsystem it touches, so an upstream bump maps to a small predictable set of refreshes:
 
@@ -33,7 +33,7 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 ## Windows build toolchain
 
-The v18.3.0 Windows bytecode bundle is validated with Bun 1.4.2. Set `BUN_EXE` to a separately installed 1.4.2 executable before building; the global Bun installation need not change. Bun 1.3.14 passes source checks but hits an internal compile assertion for this bundle. Keep the upstream-pinned Rust nightly toolchain. See the migration report for the verified download digest and local signing-key setup.
+The v18.8.0 Windows bytecode bundle is validated with Bun 1.4.2. Set `BUN_EXE` to a separately installed 1.4.2 executable before building; the global Bun installation need not change. Bun 1.3.14 hit an internal compile assertion for the earlier 18.3.0 bundle; use the validated 1.4.2 build runtime. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; local development keys are not release identities.
 
 ## Working loop
 
@@ -53,7 +53,7 @@ Verify the whole fork from a clean vendor tree:
 npm run omp:verify:patches
 ```
 
-The verifier copies the overlay in, applies the seam patches in series order, runs the root and OMP source gates, then reverses the patches and removes the overlay in a `finally` cleanup. Beyond "it builds" it enforces two invariants: the overlay may not modify any upstream-tracked file (that would smuggle a seam change past review), and every seam patch must pass `git apply --check` before being applied. It intentionally does not rebuild the compiled host binary; milestone binary validation runs with the fork applied via `npm run omp:build:host`.
+The verifier copies the overlay in, applies the seam patches in series order, runs the OMP source gates (run root `npm run check` separately), then reverses the patches and removes the overlay in a `finally` cleanup. Beyond "it builds" it enforces two invariants: the overlay may not modify any upstream-tracked file (that would smuggle a seam change past review), and every seam patch must pass `git apply --check` before being applied. It intentionally does not rebuild the compiled host binary; milestone binary validation runs with the fork applied via `npm run omp:build:host`.
 
 Before the first source change against a fresh pin, verify an unmodified vendor workspace. Canonical overlay and patch metadata remain stored separately:
 

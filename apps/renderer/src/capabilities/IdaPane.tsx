@@ -9,7 +9,8 @@ import { PREVIEW_IDA } from "../preview/idaPreview";
 import { usePreviewMode } from "../preview/PreviewContext";
 import { useI18n } from "../i18n";
 import { hostErrorMessage, waitReceipt } from "../hostError";
-import { WorkspaceEmpty, WorkspaceStatus } from "../workspaces/Workspace";
+import { IdaDatabaseTools } from "./IdaDatabaseTools";
+import { WorkspaceDialog, WorkspaceEmpty, WorkspaceStatus } from "../workspaces/Workspace";
 import "../models/sessionOptions.css";
 import "./ida.css";
 
@@ -28,6 +29,7 @@ export function IdaPane({
   const { preview } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
+  const [showTools, setShowTools] = useState(false);
   const [status, setStatus] = useState<StudioIdaStatus>();
   const [selected, setSelected] = useState<string>();
   const [enabled, setEnabled] = useState(true);
@@ -50,7 +52,7 @@ export function IdaPane({
       capabilities?.capabilities.some(
         (item) => item.id === kind && item.grade !== "unavailable",
       ) === true);
-  const canRead = can("ida.status");
+  const canRead = can("ida.status.details");
   const invoke = useCallback(
     async <K extends keyof StudioIdaResultMap>(
       kind: K,
@@ -76,6 +78,7 @@ export function IdaPane({
     setResult(undefined);
     setNotice("");
     setConfirm(undefined);
+    setShowTools(false);
     setSelected(undefined);
     setStatus(preview ? structuredClone(PREVIEW_IDA) : undefined);
     return () => {
@@ -91,7 +94,7 @@ export function IdaPane({
         if (!document.hidden) {
           const value = preview
             ? structuredClone(PREVIEW_IDA)
-            : await invoke("ida.status", { sessionId: sessionId! });
+            : await invoke("ida.status.details", { sessionId: sessionId! });
           if (active) {
             if (!preview) setStatus(value);
             if (!configLoaded.current) {
@@ -180,7 +183,7 @@ export function IdaPane({
             );
         }
         if (generation === epoch.current) {
-          const value = await invoke("ida.status", { sessionId: sessionId! });
+          const value = await invoke("ida.status.details", { sessionId: sessionId! });
           if (generation === epoch.current) setStatus(value);
         }
       }
@@ -207,6 +210,11 @@ export function IdaPane({
     status?.databases[0];
   return (
     <section className="ida-pane" aria-label="IDA">
+      <div className="session-options-actions">
+        <button type="button" className="btn small outline" disabled={!can("ida.view")} onClick={() => setShowTools(true)}>{zh ? "数据库视图与编辑" : "Database views and edits"}</button>
+      </div>
+      {showTools ? <WorkspaceDialog title={zh ? "数据库视图与编辑" : "Database views and edits"} onClose={() => setShowTools(false)}><IdaDatabaseTools client={client} sessionId={sessionId} available={available} /></WorkspaceDialog> : null}
+
       <h2>
         IDA{" "}
         {preview ? (
@@ -381,7 +389,7 @@ export function IdaPane({
               </button>
               <button
                 className="btn outline danger"
-                disabled={(!busy && !db.busy) || !can("ida.cancel")}
+                disabled={(!busy && !db.busy) || !can("ida.database.cancel")}
                 onClick={() => {
                   if (preview) {
                     setNotice(
@@ -389,7 +397,7 @@ export function IdaPane({
                     );
                     return;
                   }
-                  void invoke("ida.cancel", {
+                  void invoke("ida.database.cancel", {
                     sessionId: sessionId!,
                     id: db.id,
                   })

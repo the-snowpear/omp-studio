@@ -75,6 +75,7 @@ export type AgentOperation =
       definition: string;
       model?: string[];
       assignment: string;
+      solutionSpace?: string;
       context?: string;
       async?: boolean;
       isolation?: string;

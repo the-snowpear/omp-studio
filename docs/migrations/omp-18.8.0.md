@@ -1,161 +1,110 @@
-# OMP 18.8.0 / Studio workbench migration
+# OMP 18.8.0 / Studio 0.1.9 migration
 
-Status: implementation in progress. No release or installation replacement is authorized by this migration.
+## Release scope
 
-## Fixed baseline
+Studio 0.1.9 is released after code, migration and signed-artifact verification. This acceptance scope does not certify the entire manual GUI matrix.
 
-- Studio: `35ab6d05a2fe9b882d4336d973a6fa5c7dbd382d`, application 0.1.7, Runtime 18.3.0-studio.13.
-- Target: OMP v18.8.0, `4ef97c8826ee012829a3e756b693a2a16a414f47`; do not follow main.
-- Branch: `codex/omp-18-8-studio-refresh`.
-- Backup: `backup/2026-10-07/omp-18.8.0-194003/`, 1,158 project files with SHA-256 manifest and the pristine upstream archive.
-- Preserve the pre-existing untracked HTML and browser-sidebar plan. Global OMP, installed Studio, operator credentials and sessions remain outside this work.
+- Original worktree: Studio 0.1.7, Runtime 18.3.0-studio.13, source 35ab6d05a2fe9b882d4336d973a6fa5c7dbd382d.
+- Published baseline incorporated before release: Studio 0.1.8, Runtime 18.4.4-studio.38, main e16fabb73c9248296c7155bbea3da1464aae2f39.
+- Frozen upstream: OMP v18.8.0, **4ef97c8826ee012829a3e756b693a2a16a414f47**.
+- Final Runtime: **18.8.0-studio.20**, generated from omp-patch/patches/series.json; patch digest sha256:35feefcd307d7f891db0c15f400368f31c2955bec9c39c622f808fa619e1a768. The pre-integration 18.8.0-studio.18 binary is not the release artifact.
+- Existing installations, independent global CLI configuration and original untracked files are preserved. Source backups are under backup/2026-10-07 and backup/2026-10-08. Generated evidence is not committed.
 
-## Accepted delivery and defaults
+## Upstream changes
 
-Windows source, UI, native Runtime, isolated installation/rollback and local candidate package are the acceptance target. macOS receives code compatibility review with existing CI gates retained; no macOS device verification is claimed. Paid model calls, production Skillshare mutations and reset-credit consumption are outside default acceptance.
+[Changes from the original 18.3.0 baseline](https://github.com/can1357/oh-my-pi/compare/v18.3.0...v18.8.0), [changes since published 18.4.4](https://github.com/can1357/oh-my-pi/compare/v18.4.4...v18.8.0), and the [frozen upstream changelog](https://github.com/can1357/oh-my-pi/blob/4ef97c8826ee012829a3e756b693a2a16a414f47/packages/coding-agent/CHANGELOG.md) are the authoritative history.
 
-Use OMP's native engines and typed Studio Bridge with one AgentSession. Rework all recently integrated UI around mature Studio components, tokens and interaction patterns; major internal and navigation refactors are approved. Preview and real data share display components, and demonstration actions never cause real writes.
+| Area | Native change and Studio treatment |
+|---|---|
+| Models/accounts | Service tiers, custom model kinds, logout, quota scopes and expiring resets. Studio shows supported choices and preserves explicit redemption policies. |
+| Sessions/queue | Admission-aware operations, exact withdrawal/promotion, branch/recovery and final-message fixes. Missing models require an explicit replacement; the current session survives. |
+| Settings | Registered handles, temporary overrides, provenance and cfg approval. Unconfigured warming defaults to off only inside Studio. |
+| Prediction | Native daemon and word completion. No unsolicited external-history learning or model download. New private and published ephemeral transports share one engine and corpus. |
+| Advisors/maintenance | Review cadence, final review and waiting policies; full export, archive/recaps, OTLP and GC preview. Cleanup requires an explicit current request. |
+| Browser/computer | Native target ownership, lifecycle/CDP fixes and richer targets/screenshots/stop. Studio observes Runtime targets without a second execution engine. |
+| Figures/titles | Numeric charts, streamed SVG and completed Mermaid/3D parsing; native 18.8 title icons, shortcodes and generation policy. |
+| Performance | Frozen upstream fixes to large files/output, JSON/JSONL queries, memory, image retention, session locks, subprocess cleanup, fetching and long-session streaming. |
 
-Cache warming defaults to off only for unconfigured Studio sessions; preserve explicit choices without changing standalone CLI settings. Browser viewing uses the Runtime's same targets and supports explicit exclusive human takeover. Computer control exposes observation, target selection and stop, not desktop mouse/keyboard forwarding. IDA and Ratchet have dedicated management surfaces. SVG, Mermaid, tables and OBJ/PLY/WRL/X3DV/STL/glTF/GLB/USDA previews are in scope.
+Terminal-specific Tern layouts, bare commands and RPC UI are not copied into Electron; Studio uses their corresponding native behavior.
 
-## Delivery checklist
+## Implemented workspaces
 
-- [x] Pristine 18.8.0 dependency, source, native and executable baseline.
-- [ ] Settings registry migration, four regenerated seams, overlay type and behavioral compatibility.
-- [ ] Model recovery, queue withdrawal, extensions, storage ownership and lifecycle regression.
-- [ ] Speed/slow tiers, usage, account logout, cache warming, configuration approvals and model presets.
-- [ ] Subagent controls, prediction, titles, archive, advisor and maintenance surfaces.
-- [ ] Shared UI and recent-feature audit: media/Live/artifacts, services, batches, benchmarks, accounts, Skillshare, templates, annotations and recordings.
-- [ ] Workspaces: media tabs, Hub tabs, evaluation workspace, capability center and legacy-entry routing.
-- [ ] Browser catalog, authenticated bounded observation, exclusive takeover and lifecycle tests.
-- [ ] Computer observation/target/stop integration.
-- [ ] Native IDA database manager and Ratchet approvals/isolated evaluation integration.
-- [ ] All promised graphical formats, bounded decoding and controlled resource resolution.
-- [ ] Preview/real/empty/error/unavailable states; theme, density, locale, resizing and visual comparison.
-- [ ] Root checks, patch replay, metadata, Runtime probe, Windows installer/rollback, performance and candidate audit.
-- [ ] macOS code review and final evidence/limitations.
+| Workspace | Behavior |
+|---|---|
+| Media | Generate, Voice (transcription/TTS/Live), Library, task/result detail, local import/export, recordings and graphics. Hidden viewers release resources. |
+| Agent Hub | Agents, background tasks and saved services, parent navigation, model overrides, real execution state/logs. Save-only does not start a service. Published child BTW remains available. |
+| Models | Providers, roles, agents, search, presets and accounts. Benchmarks link to Evaluation. Speed and warming come from Runtime state. |
+| Evaluation | Native benchmark phases, judgment batches and Ratchet. Retry keeps original evidence. Ratchet uses native isolated experiments and approval hashes. |
+| Capabilities | Skills/Skillshare, plugins, MCP, templates, resources and IDA. IDA combines configuration/detection with reviewed database views and edits. |
+| History/diagnostics | Stable catalog, Archive/Recap, title adornments, complete exports, cleanup preview and connection checks. |
+| Context | Message/file/Diff annotations remain near their source. Terminal recording stays at the terminal; Library also opens playback. Token counting stays in Usage. |
+| Statistics | Retains the 0.1.8 native worker, filters, cost semantics and Frustration flow. |
 
-## Evidence log
+## Published protocol compatibility
 
-- 2026-10-07: baseline source and canonical patchset inspected; backup completed and v18.8.0 fetched. Earlier read-only patch preview found 29 of 45 seam target files requiring refresh. UI planning captured media, mature model configuration and benchmark screens; recent styles reference undeclared theme tokens.
+The merge retains 0.1.8 Ask attachments, namespaced skills, child BTW, resource pagination, statistics, Frustration and benchmark APIs.
 
-Completed checks and unresolved failures must be recorded here as implementation proceeds. Do not check a delivery item based solely on a preview fixture or a compilation success.
+- Published ida.status keeps its original shape. New detection/configuration data uses ida.status.details; per-database cancellation uses ida.database.cancel.
+- Published session.queue.remove keeps its original request/result. The new entry operation uses session.queue.entry.remove and a separate capability.
+- prediction.query remains ephemeral and bypasses command retention. Private channel drafts never enter snapshots, ledgers or conversation reducers.
+- Browser/Computer frames, audio, files and large results use private bounded channels. Renderer gets opaque identities and fixed operations, not raw CDP endpoints.
+- Mutating settings, models, queues, exports and cleanup are fenced during resync. Durable results are queried after reconnect; mutations are not automatically repeated.
+- Old Fast remains valid; new speed/model metadata is separately advertised to keep strict older result validators readable.
 
-### Current implementation evidence
+## Lifecycle and resource boundaries
 
-- Pristine frozen install, Rust/native rebuild, CLI smoke and complete prepatch gate passed (`output/omp-1880/pristine-*`). Isolated Bun 1.4.2 is used; global Bun/OMP are unchanged.
-- Migrated native setting handles, event semantics and 22 seam conflict files. First generated patchset is `18.8.0-studio.1`. New feature edits after that generation still need recapture before the next build.
-- Studio compatibility suite: 412 passed, 2 platform-condition skips, 0 failures (`overlay-tests-4.log`). The two new configuration approval tests also pass (`cfg-tests-1.log`). Typecheck is being repeated after the final configuration-request typing correction.
-- Native session options now cover speed, warming and model presets. Three adapter tests cover stale model fencing, unsupported Ultrafast, native persistence and unavailable preset preservation. No paid requests were sent.
-- Native `cfg://` approval host now routes through Studio with once/session/deny/timeout and native grant ownership. Tests exercise the real protocol handler through the remote interaction port; disposal revokes the host.
-- Media uses Generate/Voice/Library; Hub uses Agents/Background jobs/Services; Evaluation contains model benchmarks and judgment batches. Model configuration adds Presets and Accounts; the old benchmark tab links to Evaluation.
-- New pages retain draft and selection state while hidden and pause their polling. Preview actions stay local. Renderer focused checks cover media lifecycle, 24 existing Hub tests, services/judgments/benchmarks, and 12 model configuration/session option tests.
-- Root build and all package typechecks passed at `types-3.log`; further edits require another full check. This is not the final acceptance gate.
-- Preview screenshots at 1280×720: `output/omp-1880/ui/media-generate-first.png`, `evaluation-benchmark-first.png`, `hub-agents-first.png`. These establish first-pass layout only; complete theme/density/locale/real Runtime visual acceptance remains open.
-- Native `check:ts` across all upstream packages passed (`native-check-ts-1.log`; existing warnings retained). The first patched binary passed smoke and the authenticated identity probe; signed intermediate Runtime `18.8.0-studio.2` is in the ignored Runtime artifact directory (`patched-artifact-2.log`). This is not the final installer.
-- Root check reached 700 passing renderer tests and one obsolete approval expectation; that expectation was corrected to assert no false session grant, and focused approval tests passed. Final full check remains required after subsequent work.
-- IDA is now a dedicated capability tab. Native worker checkpoints execute in the same serialized request as code; an offline Python test exercises exclusive backup copies, preservation of old/on-disk and in-memory state, and rejection before execution on backup failure (`ida-tests-1.log`). Real IDA installation behavior remains unverified.
-- Browser observation has a native same-target CDP session and a private authenticated local pipe; no CDP endpoint is sent to Renderer. The single-frame acknowledgement budget is enforced in Runtime and Desktop, with bounded payloads and window ownership. Native control leases block Agent open/run/close, wait for in-flight work, expire, and change identity on worker recreation.
-- Windows native browser probe passed (`browser-native-e2e-2.log`): same target, unchanged viewport/idle timestamp while observing, Agent blocked under human takeover, picture-coordinate click changes the original page, Agent resumes after return. Probe used a local page with native Chromium and a 1.25 device scale factor. Desktop ownership/backpressure and preview/no-old-runtime-command tests also passed. External Chrome/Edge, multiple session/child isolation and complete visibility/resource acceptance remain open.
+Browser control is an exclusive per-tab lease: wait for an existing action, then prevent new agent operations on that target. Releasing it sends no prompt. Hidden windows, session changes, disconnects and replaced target identities release observations and leases. Viewing does not resize or refresh the target.
 
-### UI inventory and remaining acceptance
+Computer Use exposes native screen/window observation and owner-scoped stopping. Studio does not forward desktop keyboard/mouse input.
 
-| Area | Existing entry → target | First-pass evidence | Still required |
-| --- | --- | --- | --- |
-| Media, Live, artifacts | Media → Generate / Voice / Library | Media screenshot and lifecycle tests | Full result/error/capture/export flows; locale/theme/density; real devices |
-| Agent Hub, services | Hub → Agents / Background jobs / Services | Hub screenshot and existing tests | Service create/save/start/log/control visual checks; parent navigation and hidden chat lifecycle |
-| Benchmark, judgments | Model/Hub → Evaluation | Benchmark screenshot, focused tests | Native phase labels, task details/retry/export; Ratchet |
-| Accounts and model presets | Roles → Accounts / Presets | Native adapter tests and preview-write tests | Logout, native quota additions, recovery UI; screenshots |
-| Skills/Skillshare/plugins/MCP/templates/IDA | Capability center | Pending | Shared list/detail cleanup, native IDA integration, all states |
-| Annotations, recording/replay | Message/file/diff and terminal/artifacts | Existing baseline | Visual and real workflow checks |
-| Browser/Computer | Sidebar Preview → Browser / Computer | Existing design plan | Native seams, private channels, takeover/stop, isolation/lifecycle tests |
-| History/maintenance | History and Diagnostics | Existing baseline | Archive/recap, full export, GC preview, OTLP, connection diagnosis |
-| Graphics | Conversation/artifact previews | Existing Mermaid/SVG baseline | All promised 3D formats, resource limits, invalid/linked-resource fixtures |
+Ratchet uses native state, approvals, scoring and keep/revert decisions. Existing source changes outside the isolated experiment are not rollback targets. Limits cover rounds and reported model cost; in-flight or external evaluator charges may finish separately.
 
-### Continuation checkpoint — Computer, Ratchet and graphical previews
+SVG, Mermaid, charts and OBJ/PLY/WRL/X3DV/STL/glTF/GLB/USDA use pinned local parsers. Workers, geometry/texture budgets, sandboxed X_ITE and controlled ZIP sidecars reject scripts, uncontrolled remote resources, malformed files and excessive input.
 
-- A second source checkpoint was saved before continuing: `backup/2026-10-07/omp-continuation-2026-10-07T133749.9/`.
-- Computer capture now validates PNG dimensions against its descriptor and holds one-use claims through file cleanup. Desktop test proves foreign/hidden readers cannot consume another session's capture, parallel reads deliver once, malformed geometry is rejected, and consumed files are removed (`desktop-computer-tests-1.log`).
-- Browser cleanup checks the native tab identity before restoring an old frozen state.
-- Shared native descendant ownership helper and Computer tests were seeded and captured. Generated patchset advanced to `18.8.0-studio.4` (`regen-4.log`); later native ResultMap/format changes still need regeneration.
-- Native full TypeScript/lint/format gate passed (`native-check-ts-3.log`). Full Studio suite: **420 passed, 4 skipped, 0 failed** (`overlay-tests-6.log`). Optional real browser/Computer probes are skipped without their opt-in environment variables; earlier separate probes remain the real-device evidence.
-- Ratchet now has typed list/read/create/approve/start/stop operations and an Evaluation tab. The adapter uses native isolation, native prelude state/split/plan/approvals, native structured subagent execution and native OS file locks. Per-flow stages recheck hashes. A Studio boundary prevents changing approved setup while running and starting further rounds beyond the configured limit. The cost threshold covers reported agent model cost; external evaluator charges and in-flight usage are explicitly outside that estimate. Full paid autonomous iteration remains unverified.
-- Ratchet offline test exercises changed-material approval rejection, original-source preservation, native run cancellation, cross-owner contention and restore without redispatch (`ratchet-tests-1.log`; included in the newer full Studio suite). Renderer preview/capability tests and the secondary-workspace interaction response test pass (`ui-ratchet-tests-3.log`).
-- Native approval cards were formerly only visible in the conversation route. `SecondaryInteractionDeck` now shows the existing cards on secondary pages with original interaction identity/lease, receipt errors and reconnect fencing. Preview does not send responses.
-- Graphics dependencies pinned: `three 0.186.1`, `@types/three 0.186.0`, `x_ite 16.4.3` (MIT), `fflate 0.8.3`, `image-meta 0.3.0`. Added graphical artifact kind and import filters, library inspector and completed Markdown-fence entry.
-- Three parsers run in a disposable Worker with input/archive/geometry/texture budgets. Associated resources come from a user-imported ZIP through the existing private artifact stream, not arbitrary filesystem or network requests. X_ITE is packaged locally in an opaque sandbox, uses memory-only storage, keeps URL loading disabled, and replaces supported local images/Inline scenes via controlled bytes.
-- Graphical parser tests: **13 passed**, covering OBJ/PLY/STL/USDA/glTF/GLB, ZIP sidecars, damaged sources, traversal, remote/missing resources and size/script rejection (`graphics-tests-1.log`). These do not substitute for GPU/texture/iframe tests.
-- First graphics build passed (`graphics-build-1.log`), but newer changes need rebuilding. Real browser preview exposed and fixed an empty Three mesh (single material array without groups), opaque-frame localStorage initialization and X_ITE splash-screen lifecycle. Valid WRL/X3DV geometry was seen in the browser; malformed X3D initially showed a false blank success, and a drawable-node check has now been added but needs visual recheck.
-- Preview screenshots: `ratchet-first.png`, `graphic-obj-first.png`, `graphic-x3dv-first.png`, `graphic-wrl-first.png` under `output/omp-1880/ui/`. These are first-pass evidence, not final visual signoff. OBJ screenshot predates improved lighting; Ratchet header/library toolbar are still being refined.
-- Added dev-only `preview-graphics-harness.html` (excluded from explicit build inputs) to avoid repeatedly navigating the full application during graphics debugging.
+## Verification record
 
-Open graphics work: test bounded texture decoding and embedded GLB textures; add GLB preflight/index/matrix resource checks; inspect USDA linked-layer behavior; provide all valid/broken samples; test scripts/URLs, theme/resize and release; verify sandbox/CSP in packaged Electron. The latest renderer typecheck is `graphics-types-4.log` (check completion). Full root gates, patch replay, final signed Runtime, Windows installer/rollback and macOS review remain outstanding, along with the previously listed native queue/recovery/account/prediction/title/history/advisor/maintenance features and broad UI acceptance.
+Pre-integration evidence for 18.8.0-studio.18 remains useful for unchanged behavior, but does not replace merged-source gates:
 
+| Evidence | Result |
+|---|---|
+| Pristine upstream | Native rebuild, CLI smoke and prepatch gate passed. |
+| Root gate | root-check-final18-2.log passed before the 0.1.8 merge. |
+| Patch replay | replay-18.log passed native lint/types/tests and smoke. |
+| Metadata | metadata-current-18-2.log: 80 checks passed. |
+| Chromium/Chrome/Edge | Native same-target observation, takeover and cleanup passed. |
+| Browser isolation | Parent/child/foreign ownership, in-flight action fencing, frame backpressure and replaced identities passed. |
+| Computer | Native Windows screenshot/release and owner-scoped stop passed. |
+| Runtime rollback | Isolated 18.2.5-studio.6 → 18.8.0-studio.18 → old → new passed. |
+| Windows installer | Standard candidate audited; disposable namespace installed and same-version repair passed. Original executable/manifest hashes were unchanged. |
+| Streaming | Existing thresholds passed: busy p95 12.5 ms, no >48 ms stalls; layout ratio 1.50 ≤ 2.50; heap/DOM ratios 1.00. |
+| Preview UI | Themes, densities, Chinese/English, 1280×720, 1440×900 and 1920×1080 screenshots; service save-only, Skillshare review, templates, presets, IDA/Ratchet demos, retry, annotations and playback flows. |
 
-### Low-memory continuation — native preferences, accounts, queue and graphics
+Merged-source verification for **18.8.0-studio.20**:
 
-- User requested continued low-memory work. Checks now run serially. Native TypeScript uses GOMAXPROCS=1, GOMEMLIMIT=768MiB and tsgo --singleThreaded; root TypeScript uses a 768 MiB Node heap. No user processes, pagefile settings, installed Studio or global CLI were changed.
-- Backups: backup/2026-10-07/omp-low-memory-2026-10-07T15-21-49-509Z plus focused native-queue/capture checkpoints. Generated canonical patchset is now **18.8.0-studio.6** (regen-6.log), including native preference/account/queue changes. Native TypeScript passes (native-types-single-thread-4.log).
-- Fixed App-to-Settings native context forwarding. Runtime preferences use static native registered handles, native scope/provenance and override clearing. UI shows restart-required OTLP changes separately from effective values, includes English preview labels and fences repeated saves and stale session completions. Preference and account renderer tests cover preview-only changes and old Runtime gating.
-- Native OAuth sign-out resolves the exact credential by opaque account ID, including duplicated labels. Refresh generations invalidate pending account reports after sign-out. Quota summaries now retain bounded native provider/account/project/organization/model/tier/window/shared-group scope, notes and reset verbs. Preview account dates no longer show expired example credits.
-- Added typed session.queue.get/remove/promote/edit/restore commands and a separate submitted-message strip next to local drafts. Native object identities distinguish duplicate text; edits operate on prepared text without replaying commands, preserve image and hidden companion objects, and reject stale/in-flight targets. Large queue summaries are bounded and contain image counts, never image bytes or source-path companions.
-- Studio core.abort preserves undispatched original native groups in session memory, including withdrawn in-flight input. It does not automatically resend them. Operators explicitly restore or discard held entries; native disposal releases held data. These are session-resident queues, not durable jobs: full process loss does not promise restoring queued messages from disk.
-- Real in-memory native AgentSession/mock-provider tests prove duplicate selection, image/hidden-context delivery once, stale edit rejection, cross-session denial, abort without redispatch and explicit restoration. Along with session-control tests: **22 passed** (native-queue-tests-4.log). No paid provider requests. Queue preview tests: **2 passed** (ui-queue-tests-1.log); preceding account/preferences/graphics focused suite: **19 passed** (ui-preferences-graphics-4.log).
-- Graphics preserve base texture orientation, UV transforms and wrapping. Advanced PBR maps are explicitly reported as omitted. Viewer packaging now includes dist/LICENSE.md, bundled font notices and LICENSES. The dev harness releases React roots on HMR.
-- X3D error/timeout and GPU failure release their preview slot and display a compact error; malformed scenes no longer leave a blank canvas. Mermaid renders into a private temporary DOM container removed on success/failure, preventing its native error diagram from leaking outside the conversation.
-- Browser harness visual evidence at 1280×720: valid OBJ/PLY/STL/glTF/GLB/USDA triangles, glTF texture, damaged OBJ/PLY/STL/glTF/GLB/USDA/WRL/SVG/chart, and rejected empty X3D. Saved under output/omp-1880/graphic-valid-*, graphic-invalid-*, graphic-x3d-invalid.png and graphic-gltf-texture-fixed.png. This is browser/fixture validation, not packaged Electron or real Runtime visual acceptance. Mermaid cleanup requires final recheck after its change.
+| Gate | Result |
+|---|---|
+| Workspace build and Node suites | Production build passed; 1,213 tests passed, with 14 platform-specific skips on Windows. |
+| Renderer | 135 files / 779 tests passed. The merged IDA fixture import was corrected; the full renderer suite passed with four workers to avoid CPU-contention timeouts. |
+| Native Studio suites | All 78 suite files passed against the working native tree. |
+| Independent patch replay | Clean v18.8.0 checkout: 191 overlay files + four generated seams; lint, formatting, all-package types, 806 tests across 100 processes and CLI smoke passed. Checkout restored clean. |
+| Metadata | 81 checks passed, including signed manifest, update assets and platform validation. Capability membership is checked independently of list ordering. |
+| Native artifact | Rebuilt win32-x64 module and Runtime. Authenticated Bridge probe confirmed 18.8.0-studio.20, 214 capabilities and matching manifest hashes. Local artifact uses the development key. |
+| Runtime install / rollback | In an isolated temporary root: 18.2.5-studio.6 → 18.8.0-studio.20 → old → new passed with the production verifier and executable smoke checks. Existing installation was read only. |
+| Compatibility regressions | Published/new IDA and queue contracts stay distinct; per-spawn model chains coexist with solution space. IDA write/close checkpoints fail closed, execute once and preserve both disk/in-memory versions. Configuration approval rebind and disposal passed. |
 
-Still open: explicit missing-model recovery; richer Composer speed/model metadata; per-spawn subagent settings; local prediction; title metadata/refresh; Archive/recap; export/GC/connection diagnostics; full capabilities/media/Live/services/evaluation/annotation/recording UI audit; browser multi-session/Chrome/Edge matrix; IDA/Ratchet actual environment boundaries; graphical linked USDA/embedded GLB and packaged CSP; complete root/patch/signing/installer/rollback/performance gates and macOS code review. Do not interpret these focused passes or studio.6 as final delivery.
+Local evidence is retained under output/omp-1880/release: root-check-019.log, renderer-tests-019-3.log, native-suites-019.log, patch-replay-020.log, metadata-020-2.log, runtime-build-020.log and runtime-install-rollback20.log. The initial workspace log includes the corrected renderer fixture failure; the separate full renderer rerun is the final result.
+
+The [release workflow](https://github.com/the-snowpear/omp-studio/actions/workflows/release.yml) rebuilds Windows x64/ARM64 on native runners using the existing release signing identity, checks source and patch replay, audits packages, verifies the update catalogs and publishes only after both architectures succeed. Developer-key artifacts are not uploaded as official assets. Minimum app compatibility remains 0.1.9; earlier installations use the complete Setup. No new macOS binary is part of this release.
 
 
-### Model recovery, speed and backward-readable metadata checkpoint
+## macOS compatibility review
 
-- Canonical generated patchset is **18.8.0-studio.8** (regen-8.log). All root packages pass serial TypeScript compilation (root-types-low-memory-12.log). Native TypeScript passed through the model-restoration change (native-types-single-thread-5.log); the latest metadata native check is in native-types-single-thread-6.log and must be checked for completion.
-- session.restore.inspect resolves the target only from the current native workspace session catalog. SessionManager.peekRestoreModels uses native loading, migration in memory, branch indexing and model-role restore ordering without acquiring a writer lock or changing disk/breadcrumbs. Damaged and oversized sessions fail explicitly. It returns candidate model identities, saved thinking and available replacements, never transcript text or paths.
-- SessionModelRecovery appears for a viewed historical session with missing models; no replacement is preselected. Explicit confirmation forwards a model through Host session.resume into the new worker's native --model argument. Existing active workers are preserved on failure. Overrides are cleared after successful launch so later worker restarts honor the newly saved native state. A race to an already-active target is rejected instead of pretending the replacement was applied.
-- Native restoration tests: 2 passed (native-restore-tests-1.log). Desktop broker/session-command tests: 8 passed (desktop-restore-tests-1.log), including continued operation of a streaming current worker while the target fails, followed by explicit-model recovery. Preview/old-runtime/queue UI tests: 4 passed (ui-restore-tests-1.log). Actual packaged native cold-start recovery still needs the final Windows integration flow.
-- Composer's More modes menu now uses the native speed API when supported, retaining old Fast behavior for older Runtime capabilities. Preview selection is remembered per displayed thread. Existing hover-open behavior used to toggle the submenu closed on its first click; that is fixed. Both menus now fit above the Composer and below window chrome, with the Studio menu type scale and a bounded local scroll area.
-- Native model metadata includes advertised service tiers, effective and explicitly configured cache lifetimes, model kind, WebSocket/Lite preferences and code-mode requirements. These fields survive Host cache/catalog round trips. No endpoints or credential headers are included in the native public projection.
-- To preserve older strict clients, **runtime.models.list and accounts.status retain their original result shape**. New capabilities runtime.models.describe and accounts.status.details carry extended metadata. New account UI selects the detailed command only when advertised, otherwise it uses the old query. Root model-catalog metadata is read-only; saving unrelated provider settings does not introduce another native config store.
-- Native metadata/account tests: 4 passed (native-model-metadata-tests-3.log). Host model adapter tests: 108 passed (host-model-metadata-tests-1.log). Composer modes/speed/account UI: 6 passed (ui-speed-tests-3.log). Combined earlier graphics/preferences/accounts/queue/Mermaid queue checks: 28 passed (ui-low-memory-6.log).
-- Native queue UI was visually tested in the full app at 1280×720 with narrow conversation space. A collision with the original absolute-positioned queue actions was fixed. Local drafts and submitted entries now share a bounded queue scroller, preventing the Composer from overlapping the bottom panel. Editing and saving a submitted preview message preserved the image count. The menu selection was also changed, closed and reopened successfully.
-- Current screenshots under output/omp-1880/: baseline-home-light-1280.png, native-preferences-light-1280.png, workbench-queue-bounded-1280.png, workbench-queue-edited-1280.png, session-model-recovery-1280.png, composer-speed-bounded-1280.png, graphic-mermaid-invalid-clean.png. Some earlier first-pass files show defects that have since been corrected; use the latest named evidence for review. These remain browser/preview evidence, not final Windows Electron signoff.
+POSIX sockets remain short and private under the existing per-user namespace; writable state stays outside signed app bundles. Browser/prediction transports share the Runtime platform path source. Apple prediction is platform-gated. Hiding, closure and process disposal keep cleanup hooks. Graphics assets are local and resolved relative to renderer resources. Existing macOS CI gates remain.
 
-The Agent Hub slice below completes the next model-control increment. Still open: local prediction, title metadata/refresh, Archive/recap, maintenance export/GC/connection diagnostics, broad recent-feature visual acceptance, remaining dedicated-feature/lifecycle matrices, complete final gates and Windows candidate installer, macOS code review.
+This is code compatibility review, not a new physical-device GUI certificate. No new macOS microphone/TCC, browser capture, IDA installation or installer interaction is claimed.
 
-### 2026-10-08 — Agent Hub model controls checkpoint
+## Unverified manual/external scenarios
 
-- Canonical generated patchset is **18.8.0-studio.9** (regen-9.log). Native TypeScript passed before the final Agent Hub tests (native-types-single-thread-7.log); all final gates still need a fresh run.
-- agent.spawn accepts an optional native candidate chain and effort; agent.spawn.models capability gates the model override UI. Native selector validation preserves candidate order and thinking suffixes. Default requests remain compatible with old Runtime versions.
-- agent.model.inspect reports native selected/serving model, effective/configured thinking and persisted candidates for owned descendants, including parked agents. Saved reads recheck ownership and identity after awaits; cycles and cross-session access fail. No fabricated progress or candidates.
-- Agent Hub creation includes definitions, a chat-model picker, effort and fallback candidates. Preview writes are local, preview models use the same kind filter as real models, and requests are protected against duplicate submissions and session changes. Model details only poll when expanded and connected; stale responses are ignored.
-- Native focused tests: 28 passed, 2 real-device tests not enabled (native-agent-model-tests-2.log). UI: 28 passed (ui-agent-model-tests-3.log), including old Runtime gating, no preview Host calls, and stale response suppression. The first new UI test run used an unsupported test event helper; this is corrected and rerun.
-- Fixed creation dialog header alignment and untranslated Agent Hub tooltip. Fresh browser screenshots are pending because the browser tool rejected the localhost URL under its security policy; no workaround was attempted. Prior preview screenshots are not final acceptance for these edits.
-- User reported memory restored; subsequent work is no longer constrained to low-memory mode. No installed Studio, global CLI, user config, or paid requests were changed.
+Windows packaged graphics/CSP, browser takeover/Computer UI, the full zoom/narrow-sidebar interaction matrix and disposable-app uninstall were not all completed before publication was authorized. Prior UI automation was explicitly stopped. These boundaries remain in the release notes.
 
-### 2026-10-08 — Native history and maintenance checkpoint
-
-- Canonical generated patchset: **18.8.0-studio.10** (regen-10.log), 160 overlay files. New native Archive and maintenance commands have strict result bounds and capability gates; old commands keep their original shape.
-- History now separates the Studio session catalog from Archive / Recap. Native queries cover current/all workspaces, sessions, idle recaps, prompt search and session details. IDs remain native and paths are not accepted from Renderer. Lists show the latest 20 records; long text and details are explicitly truncated. The native Archive API now accepts an optional recap limit, preserving its original default behavior.
-- Diagnostics now separates Runtime management from session maintenance. GC calls the native collector with captured native retention settings, previews first, and accepts only a current, single-use confirmation token. The UI reports scan errors, active-session skips and partial failures. Reconnect queries status; it never repeats cleanup automatically. Native CLI output behavior is unchanged after extracting the collector API.
-- Full export defaults to native dump-all ZIP, including the main transcript, readable child sessions and model-request payload. Missing native components surface warnings. HTML remains available for browsing saved branches and child sessions. Export confirmation explains raw-context contents. Files travel through the bounded private file channel and are promoted to the artifact library; only metadata enters Bridge receipts. The native ZIP method accepts an optional private output path while retaining its CLI default. Current implementation caps exported files at 64 MiB and requires an idle session.
-- Native tests: 65 passed across GC and maintenance (native-maintenance-tests-2.log); 14 passed for native Archive and HTML child-session export (native-export-archive-tests-1.log); 4 passed for maintenance including an actual native dump-all ZIP with main/child/request-content checks (native-maintenance-tests-3.log). Desktop export retention: 3 passed (export-desktop-check-1.log). Latest combined History/Diagnostics/Agent Hub UI: 63 passed (ui-history-maintenance-final-1.log). Native and affected root TypeScript passed (native-types-maintenance-3.log, root-types-maintenance-2.log).
-- Browser access was restored after diagnosis: the stopped Vite server had led to a data-URL error page, which the tool correctly refused. Restarting the local service restored ordinary HTTP access without changing browser security. Active preview server uses port 5179.
-- Actual preview interactions covered configured agent creation, model details expansion, Archive selection/search/tab retention, light/dark themes, cleanup preview/confirmation and connection checks. Evidence: agent-spawn-form-aligned.png, archive-detail-light-1280.png, archive-search-dark-1280.png, maintenance-preview-dark-1280.png, maintenance-confirm-dark-1280.png, maintenance-result-light-1280.png. Some screenshots predate subsequent ZIP-selector and saved-agent-label refinements; those need fresh captures. Browser preview is still distinct from packaged Electron/real Runtime acceptance.
-- Corrected native complete/pending/unknown/aborted status labels, parked-agent preview state, and the shared tab observer fallback. No production cleanup, real user-data export, paid model calls or installation was performed.
-
-Remaining implementation: prediction with opt-in foreign-history import, title icon/shortcode projection (existing rename-generation flow is already native), remaining recent-feature UI audit, dedicated-feature lifecycle/format matrices, final replay/signature/build/performance/Windows installer checks, and macOS code review.
-
-### 2026-10-08 — Prediction, title metadata and workspace review
-
-- Canonical generated patchset is **18.8.0-studio.12** (regen-12.log), 167 overlay files. Prediction was captured in studio.11; title metadata in studio.12. Native module and Runtime binary rebuild is in progress (rebuild-runtime12.log); no new signed candidate is confirmed yet.
-- Prediction uses OMP's WordCompletionProvider and an isolated Studio daemon profile. Defaults to local n-gram; SmolLM weights download only after selection and confirmation. OMP's prompt history is readable; foreign Claude/Codex JSONL is learned only from a file selected in the desktop picker, into Studio's separate model state. It does not modify native session history.
-- Only channel metadata, settings and download status enter Bridge. Drafts and selected import files use an authenticated bounded private socket/file channel. Fixed preload methods enforce window ownership; idle/hidden/stale connections close. Import interruption can be partially completed and is never automatically retried; durable import recovery is not claimed.
-- Prediction review strengthened per-event validation, focus/session fencing, cancellation and tab draft retention. Desktop transport/preload: 19 passed (prediction-desktop-tests-3.log). Native focused prediction: 2 passed (native-prediction-tests-3.log), including an actual isolated daemon and persisted explicit imports. UI focused prediction: 5 passed (ui-prediction-tests-3.log); later overall workspace checks remain pending.
-- session.titles.inspect projects native title source, emoji and short code independently of legacy strict snapshots. Read-only saved metadata uses the native loader without taking a writer lock or writing migration/breadcrumb state. Requests are bound to current workspace IDs, capped at 32 targets / 8 MiB per file / 32 MiB per read batch, with bounded metadata caching. Unknown, changed or oversized sessions have explicit missing/unavailable states.
-- Title adornments appear in workbench, active-project sidebar and history using the same preview/real component. They never replace stable session IDs. Manual renames clear obsolete cards; native generated rename already exists and is reused. Native title tests: 5 passed (native-titles-tests-2.log), including disk metadata invalidation and ownership changes. UI title stale-result/old-runtime tests passed inside ui-workspaces-tests-1.log; that combined run had one outdated Live status assertion, being updated.
-- UI follow-up separates transcription / TTS / Live within Voice, and separates discovered skills / Skillshare, MCP configuration / session connections, and commands / prompt templates. Hidden panes stop polling; Live closes input on hiding and fences late microphone preparation. Skillshare package details use a bounded dialog, with keyboard focus restoration. The newest layout changes are still under verification.
-- Older unresolved token names now alias the mature Studio typography, spacing, radius and color ramp. Numeric sizes/colors are not independently restyled per page. Media fixtures now include a native PNG and WAV tone using the same media elements as actual output.
-- Browser evidence continues at output/omp-1880. The preview harness now accepts explicit theme/density/lang/route parameters for repeatable acceptance; they affect only the fixture entry point, not installed settings. Existing screenshots that predate the latest layout changes must not be treated as current signoff.
-
-Remaining: broad visual/state matrix; graphs/linked-resource and packaged CSP checks; dedicated browser/Computer/IDA/Ratchet scenarios; complete root/native/replay/signature/performance and Windows install/rollback/candidate audit; macOS code review; final acceptance report. Paid requests, production Skillshare writes and reset-credit consumption remain excluded.
+Paid model/media/Live/Ratchet experiments, production Skillshare writes, reset credits and licensed IDA databases remain outside default acceptance. Building, testing and publishing require no paid model request.

@@ -1,5 +1,5 @@
 export interface BenchmarkSpec {
-  models: string[]; profile: "chat" | "prefill" | "generation" | "mix" | "cache";
+  models: string[]; profile: "chat" | "prefill" | "generation" | "mix" | "cache" | "detailed";
   runs: number; concurrency: number; maxTokens?: number; prompt?: string;
   prefillBytes?: number; cachePrefixBytes?: number;
 }
@@ -9,6 +9,7 @@ export interface BenchmarkStats {
   inputTokens: number; outputTokens: number; cost: number;
 }
 export interface BenchmarkMeasurement {
+  workloadPhase?: "single" | "parallel" | "prefill";
   ok: boolean; challenge?: "chat" | "prefill" | "generation"; error?: string;
   phase?: "cold" | "warm" | "single" | "parallel" | "prefill"; cacheReadTokens?: number; cacheWriteTokens?: number;
   cacheObservations?: Array<"prompt_cache_read_observed" | "prompt_cache_write_observed" | "response_cache_hit_observed" | "no_provider_proof">;
@@ -16,6 +17,7 @@ export interface BenchmarkMeasurement {
   tokensPerSecond?: number; generationTps?: number; prefillTps?: number; cost?: number;
 }
 export interface BenchmarkModelResult {
+  phases?: Partial<Record<"single" | "parallel" | "prefill", { concurrency: number; runs: number; wallMs: number; aggregateTps: number; stats: BenchmarkStats | null }>>;
   selector: string; model: string; state: "queued" | "running" | "done";
   total: number; completed: number; failed: number; inFlight: number;
   stats: BenchmarkStats | null; byChallenge: Partial<Record<"chat" | "prefill" | "generation", BenchmarkStats>>;
@@ -52,7 +54,8 @@ export function validateBenchmarkSpec(value: unknown): asserts value is Benchmar
   const spec = record(value, ["models", "profile", "runs", "concurrency", "maxTokens", "prompt", "prefillBytes", "cachePrefixBytes"]);
   if (!Array.isArray(spec.models) || spec.models.length < 1 || spec.models.length > 8 || new Set(spec.models).size !== spec.models.length) throw new Error("Choose 1–8 distinct models");
   spec.models.forEach(model => { text(model); if (!(model as string).includes("/")) throw new Error("Use an explicit provider/model selector"); });
-  if (!["chat", "prefill", "generation", "mix", "cache"].includes(spec.profile as string)) throw new Error("Unknown benchmark profile");
+  if (!["chat", "prefill", "generation", "mix", "cache", "detailed"].includes(spec.profile as string)) throw new Error("Unknown benchmark profile");
+  if (spec.profile === "detailed") number(spec.concurrency, 2, 8, true);
   number(spec.runs, 1, spec.profile === "cache" ? 10 : 20, true); number(spec.concurrency, 1, spec.profile === "cache" ? 4 : 8, true);
   if (spec.maxTokens !== undefined) number(spec.maxTokens, 1, 8192, true);
   if (spec.prompt !== undefined) { text(spec.prompt, 8000); if (spec.profile !== "chat" && spec.profile !== "generation") throw new Error("Custom prompts require chat or generation profile"); }
@@ -86,20 +89,22 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
   if (kind !== "benchmarks.read") return;
   if (!Array.isArray(input.models) || input.models.length > 8) throw new Error("Invalid benchmark models");
   for (const entry of input.models) {
-    const model = record(entry, ["selector", "model", "state", "total", "completed", "failed", "inFlight", "stats", "byChallenge", "measurements"]); text(model.selector); text(model.model);
+    const model = record(entry, ["selector", "model", "state", "total", "completed", "failed", "inFlight", "stats", "byChallenge", "measurements", "phases"]); text(model.selector); text(model.model);
     if (!["queued", "running", "done"].includes(model.state as string)) throw new Error("Invalid model run state");
-    for (const key of ["total", "completed", "failed", "inFlight"]) number(model[key], 0, 40, true);
+    for (const key of ["total", "completed", "failed", "inFlight"]) number(model[key], 0, 80, true);
     if (model.stats !== null) stats(model.stats);
+    if (model.phases !== undefined) for (const phase of Object.values(record(model.phases, ["single", "parallel", "prefill"]))) { const p = record(phase, ["concurrency", "runs", "wallMs", "aggregateTps", "stats"]); for(const key of ["concurrency", "runs", "wallMs", "aggregateTps"]) number(p[key]); if(p.stats !== null) stats(p.stats); }
     const groups = record(model.byChallenge, ["chat", "prefill", "generation"]); Object.values(groups).forEach(stats);
-    if (!Array.isArray(model.measurements) || model.measurements.length > 20) throw new Error("Invalid measurements");
+    if (!Array.isArray(model.measurements) || model.measurements.length > 80) throw new Error("Invalid measurements");
     for (const item of model.measurements) {
-      const measurement = record(item, ["ok", "challenge", "error", "phase", "cacheReadTokens", "cacheWriteTokens", "cacheObservations", "ttftMs", "durationMs", "generationMs", "inputTokens", "outputTokens", "tokensPerSecond", "generationTps", "prefillTps", "cost"]);
+      const measurement = record(item, ["ok", "challenge", "error", "phase", "workloadPhase", "cacheReadTokens", "cacheWriteTokens", "cacheObservations", "ttftMs", "durationMs", "generationMs", "inputTokens", "outputTokens", "tokensPerSecond", "generationTps", "prefillTps", "cost"]);
+      if (measurement.workloadPhase !== undefined && !["single", "parallel", "prefill"].includes(measurement.workloadPhase as string)) throw new Error("Invalid workload phase");
       if (typeof measurement.ok !== "boolean") throw new Error("Invalid measurement");
       if (measurement.error !== undefined) text(measurement.error, 4000);
       if (measurement.challenge !== undefined && !["chat", "prefill", "generation"].includes(measurement.challenge as string)) throw new Error("Invalid challenge");
       if (measurement.phase !== undefined && !["cold", "warm", "single", "parallel", "prefill"].includes(measurement.phase as string)) throw new Error("Invalid benchmark phase");
       if (measurement.cacheObservations !== undefined && (!Array.isArray(measurement.cacheObservations) || measurement.cacheObservations.length > 4 || measurement.cacheObservations.some(item => !["prompt_cache_read_observed", "prompt_cache_write_observed", "response_cache_hit_observed", "no_provider_proof"].includes(item)))) throw new Error("Invalid cache observation");
-      for (const [key, value] of Object.entries(measurement)) if (!["ok", "error", "challenge", "phase", "cacheObservations"].includes(key)) number(value);
+      for (const [key, value] of Object.entries(measurement)) if (!["ok", "error", "challenge", "phase", "workloadPhase", "cacheObservations"].includes(key)) number(value);
     }
   }
 }

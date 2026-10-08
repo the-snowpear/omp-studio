@@ -12,6 +12,7 @@ class FakeSessionControlSession implements SessionControlSession {
 	queuedMessageCount = 0;
 	sessionFile: string | undefined = "C:/sessions/current.jsonl";
 	readonly followUpCalls: string[] = [];
+	readonly followUpOptions: unknown[] = [];
 	readonly steerCalls: string[] = [];
 	readonly promptCalls: string[] = [];
 	readonly promptOptions: Array<{ images?: unknown[]; prependMessages?: unknown[] } | undefined> = [];
@@ -56,7 +57,8 @@ class FakeSessionControlSession implements SessionControlSession {
 		return Promise.resolve();
 	}
 
-	followUp(text: string): Promise<void> {
+	followUp(text: string, _images?: unknown[], options?: { prependMessages?: unknown[] }): Promise<void> {
+		this.followUpOptions.push(options);
 		this.followUpCalls.push(text);
 		if (this.followUpError !== undefined) return Promise.reject(this.followUpError);
 		this.queuedMessageCount += 1;
@@ -207,16 +209,27 @@ describe("WP-021/022/023/024/025 SessionControlService", () => {
 		expect(session.promptOptions[0]?.prependMessages).toEqual([prelude]);
 	});
 
-	test("core.followUp queues skill preludes before the user text", async () => {
+	test("core.followUp groups skill preludes with the user text", async () => {
 		const session = new FakeSessionControlSession();
 		const service = new SessionControlService(session);
 		await expect(
 			service.followUp("then continue", undefined, [
 				{ customType: "skill-prompt", content: "SKILL:alpha", display: true },
 			]),
-		).resolves.toEqual({ queued: true, pendingMessages: 2 });
-		expect(session.customMessages).toEqual([
-			{ customType: "skill-prompt", streamingBehavior: "followUp", queueOnly: true },
+		).resolves.toEqual({ queued: true, pendingMessages: 1 });
+		expect(session.customMessages).toEqual([]);
+		expect(session.followUpOptions).toEqual([
+			{
+				prependMessages: [
+					{
+						role: "custom",
+						timestamp: expect.any(Number),
+						customType: "skill-prompt",
+						content: "SKILL:alpha",
+						display: true,
+					},
+				],
+			},
 		]);
 		expect(session.followUpCalls).toEqual(["then continue"]);
 	});

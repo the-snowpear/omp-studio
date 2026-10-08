@@ -9,11 +9,11 @@ import {
 import {
 	PREDICTION_KINDS,
 	isPredictionKind,
-	validatePredictionOperation,
-	validatePredictionResult,
-	type PredictionOperation,
+	validatePredictionChannelOperation,
+	validatePredictionChannelResult,
+	type PredictionChannelOperation,
 	type PredictionResultMap,
-} from "./prediction-protocol";
+} from "./prediction-channel-protocol";
 import {
 	MAINTENANCE_OPERATION_KINDS,
 	MAINTENANCE_READ_KINDS,
@@ -90,11 +90,11 @@ import {
 import {
 	IDA_OPERATION_KINDS,
 	isIdaOperationKind,
-	validateIdaOperation,
-	validateIdaResult,
+	validateStudioIdaOperation,
+	validateStudioIdaResult,
 	type StudioIdaOperation,
 	type StudioIdaResultMap,
-} from "./ida-protocol";
+} from "./ida-details-protocol";
 import {
 	SESSION_OPTIONS_KINDS,
 	isSessionOptionsKind,
@@ -103,6 +103,15 @@ import {
 	type SessionOptionsOperation,
 	type SessionOptionsResultMap,
 } from "./session-options-protocol";
+import {
+	SESSION_GUI_KINDS,
+	SESSION_GUI_READ_KINDS,
+	isSessionGuiKind,
+	validateSessionGuiOperation,
+	validateSessionGuiResult,
+	type SessionGuiOperation,
+	type SessionGuiResultMap,
+} from "./session-gui-protocol";
 import {
 	SKILLSHARE_OPERATION_KINDS,
 	isSkillshareOperationKind,
@@ -209,7 +218,7 @@ export interface TokenCountResult {
 
 export type WorkbenchOperation =
 	| SessionTitlesOperation
-	| PredictionOperation
+	| PredictionChannelOperation
 	| MaintenanceOperation
 	| ArchiveOperation
 	| AgentModelOperation
@@ -221,6 +230,7 @@ export type WorkbenchOperation =
 	| BrowserObservationOperation
 	| StudioIdaOperation
 	| SessionOptionsOperation
+	| SessionGuiOperation
 	| SkillshareOperation
 	| LiveAudioOperation
 	| MediaOperation
@@ -257,6 +267,7 @@ export interface WorkbenchResultMap
 		BrowserObservationResultMap,
 		StudioIdaResultMap,
 		SessionOptionsResultMap,
+		SessionGuiResultMap,
 		SkillshareResultMap,
 		LiveAudioResultMap,
 		AnnotationResultMap,
@@ -292,6 +303,7 @@ export const WORKBENCH_OPERATION_KINDS = [
 	...BROWSER_OBSERVATION_KINDS,
 	...IDA_OPERATION_KINDS,
 	...SESSION_OPTIONS_KINDS,
+	...SESSION_GUI_KINDS,
 	...SKILLSHARE_OPERATION_KINDS,
 	...LIVE_AUDIO_OPERATION_KINDS,
 	...MEDIA_OPERATION_KINDS,
@@ -332,11 +344,12 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"computer.observe.release",
 	"browser.tabs.get",
 	"browser.observe.prepare",
-	"ida.status",
-	"ida.cancel",
+	"ida.status.details",
+	"ida.database.cancel",
 	"session.speed.get",
 	"session.warming.get",
 	"models.presets.list",
+	...SESSION_GUI_READ_KINDS,
 	"skillshare.status",
 	"skillshare.home",
 	"skillshare.search",
@@ -429,7 +442,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 		return;
 	}
 	if (isPredictionKind(kind)) {
-		validatePredictionOperation(value);
+		validatePredictionChannelOperation(value);
 		return;
 	}
 	if (isMaintenanceKind(kind)) {
@@ -484,11 +497,15 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 		return;
 	}
 	if (isIdaOperationKind(kind)) {
-		validateIdaOperation(value);
+		validateStudioIdaOperation(value);
 		return;
 	}
 	if (isSessionOptionsKind(kind)) {
 		validateSessionOptionsOperation(value);
+		return;
+	}
+	if (isSessionGuiKind(kind)) {
+		validateSessionGuiOperation(value);
 		return;
 	}
 	if (isSkillshareOperationKind(kind)) {
@@ -519,7 +536,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 		Exclude<
 			WorkbenchOperation["kind"],
 			| SessionTitlesOperation["kind"]
-			| PredictionOperation["kind"]
+			| PredictionChannelOperation["kind"]
 			| MaintenanceOperation["kind"]
 			| ArchiveOperation["kind"]
 			| AgentModelOperation["kind"]
@@ -531,6 +548,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 			| BrowserObservationOperation["kind"]
 			| StudioIdaOperation["kind"]
 			| SessionOptionsOperation["kind"]
+			| SessionGuiOperation["kind"]
 			| SkillshareOperation["kind"]
 			| LiveAudioOperation["kind"]
 			| AnnotationOperation["kind"]
@@ -610,7 +628,7 @@ export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value:
 		return;
 	}
 	if (isPredictionKind(kind)) {
-		validatePredictionResult(kind, value);
+		validatePredictionChannelResult(kind, value);
 		return;
 	}
 	if (isMaintenanceKind(kind)) {
@@ -657,11 +675,15 @@ export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value:
 		return;
 	}
 	if (isIdaOperationKind(kind)) {
-		validateIdaResult(kind, value);
+		validateStudioIdaResult(kind, value);
 		return;
 	}
 	if (isSessionOptionsKind(kind)) {
 		validateSessionOptionsResult(kind, value);
+		return;
+	}
+	if (isSessionGuiKind(kind)) {
+		validateSessionGuiResult(kind, value);
 		return;
 	}
 	if (isSkillshareOperationKind(kind)) {

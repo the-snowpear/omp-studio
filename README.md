@@ -85,7 +85,7 @@ Skills、Plugins、MCP、Slash Commands 同一页开关、探测和打开目录�
 </p>
 
 > [!TIP]
-> **安装与运行：** Windows 用户可直接前往 [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases) 下载最新的安装包（`OMP-Studio-Setup-0.1.6-windows-x64.exe`），或参考下方说明从源码构建运行。如遇问题欢迎提交 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
+> **安装与运行：** Windows 用户可直接前往 [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases) 下载最新的安装包（`OMP-Studio-Setup-0.1.9-windows-x64.exe`），或参考下方说明从源码构建运行。如遇问题欢迎提交 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
 >
 > **macOS（Apple Silicon，macOS 13+）：** 发布附带 `OMP-Studio-<版本>-macos-arm64.dmg` 时，打开 dmg，把 OMP Studio 拖进“应用程序”。目前是 ad hoc 签名、尚未公证的预览版：首次打开会被拦截，请到“系统设置 › 隐私与安全性”点“仍要打开”，或执行 `xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"`。也可以按 [docs/getting-started.md](docs/getting-started.md) 从源码运行或用 `npm run pack:mac` 自行打包。
 

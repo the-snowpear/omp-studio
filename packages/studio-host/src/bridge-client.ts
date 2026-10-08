@@ -339,6 +339,13 @@ export class StudioBridgeClient {
     return parseOperatorCommandManifest(receipt.result);
   }
 
+  async predict(input: PredictionQuery): Promise<PredictionResult> {
+    if(this.#state !== "ready" || this.#runtimeEpoch === undefined) throw new StudioHostError("OUTCOME_UNKNOWN", "Prediction unavailable");
+    const receipt = await this.invoke({type:"studio.request",requestId:(this.options.createRequestId ?? randomUUID)() as RequestId,runtimeEpoch:this.#runtimeEpoch,operation:{kind:"prediction.query",...input}});
+    if(receipt.status !== "completed") throw new StudioHostError("OUTCOME_UNKNOWN", "Prediction unavailable");
+    validatePredictionResult(receipt.result); return receipt.result;
+  }
+
   async readTranscript(
     input: { readonly cursor?: OpaqueCursor; readonly limit?: number } = {},
   ): Promise<ConversationTranscriptPage> {
@@ -738,3 +745,4 @@ export class StudioBridgeClient {
     for (const listener of this.#projectionListeners) listener(published);
   }
 }
+import { type PredictionQuery, type PredictionResult, validatePredictionResult } from "@omp-studio/studio-protocol";

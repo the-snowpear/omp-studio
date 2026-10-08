@@ -1,4 +1,33 @@
 import {
+	GUI_SETTING_KEYS,
+	isGuiSettingKey,
+	validateGuiSetting,
+	type GuiSettingsSnapshot,
+} from "../gui-settings-protocol";
+import { cfgModelRoles } from "../../config/model-settings";
+import { cfgProvidersCacheWarming } from "../../session/settings";
+import { cfgTaskSpeculativeLaunch } from "../../task/settings";
+import { cfgProvidersOpenaiLiveSteering } from "../../session/settings";
+import { cfgTelemetryOtlpExportEnabled } from "../../telemetry-settings";
+import { cfgAdvisorEvictStaleResults } from "../../advisor/settings";
+import { cfgTaskAgentCompactionThresholdOverrides } from "../../task/settings";
+import { cfgMnemopiScoping } from "../../mnemopi/settings";
+import { cfgTierOpenai } from "../../session/settings";
+import { cfgTierAnthropic } from "../../session/settings";
+import { cfgTierGoogle } from "../../session/settings";
+import { cfgTierSubagent } from "../../session/settings";
+import { cfgTierAdvisor } from "../../session/settings";
+import { cfgCodexResetsAutoRedeem } from "../../session/settings";
+import { cfgCodexResetsMinBlockedMinutes } from "../../session/settings";
+import { cfgCodexResetsKeepCredits } from "../../session/settings";
+import { cfgCodexResetsSalvageHorizonHours } from "../../session/settings";
+import { cfgIdaEnabled } from "../../ida/settings";
+import { cfgIdaPython } from "../../ida/settings";
+import { cfgIdaInstallDir } from "../../ida/settings";
+import { cfgIdaMaxOpen } from "../../ida/settings";
+import { cfgIdaIdleCloseSec } from "../../ida/settings";
+import { cfgSpellingAutocomplete } from "../../modes/settings";
+import {
 	cfgCompactionAsyncEnabled,
 	cfgCompactionExperimentalContextManagement,
 	cfgCompactionMethodOrder,
@@ -26,8 +55,57 @@ import { isRecord } from "@oh-my-pi/pi-utils";
 import { type AnySetting, type DefinitionValue } from "../../config/registry";
 import type { AgentSession } from "../../session/agent-session";
 import { type CompactionMethod, isCompactionMethod } from "../../session/compaction-methods";
+const GUI_SETTING_HANDLES = {
+	"providers.cacheWarming": cfgProvidersCacheWarming,
+	"task.speculativeLaunch": cfgTaskSpeculativeLaunch,
+	"providers.openaiLiveSteering": cfgProvidersOpenaiLiveSteering,
+	"telemetry.otlpExportEnabled": cfgTelemetryOtlpExportEnabled,
+	"advisor.evictStaleResults": cfgAdvisorEvictStaleResults,
+	"task.agentCompactionThresholdOverrides": cfgTaskAgentCompactionThresholdOverrides,
+	"mnemopi.scoping": cfgMnemopiScoping,
+	"tier.openai": cfgTierOpenai,
+	"tier.anthropic": cfgTierAnthropic,
+	"tier.google": cfgTierGoogle,
+	"tier.subagent": cfgTierSubagent,
+	"tier.advisor": cfgTierAdvisor,
+	"codexResets.autoRedeem": cfgCodexResetsAutoRedeem,
+	"codexResets.minBlockedMinutes": cfgCodexResetsMinBlockedMinutes,
+	"codexResets.keepCredits": cfgCodexResetsKeepCredits,
+	"codexResets.salvageHorizonHours": cfgCodexResetsSalvageHorizonHours,
+	"ida.enabled": cfgIdaEnabled,
+	"ida.python": cfgIdaPython,
+	"ida.installDir": cfgIdaInstallDir,
+	"ida.maxOpen": cfgIdaMaxOpen,
+	"ida.idleCloseSec": cfgIdaIdleCloseSec,
+	"spelling.autocomplete": cfgSpellingAutocomplete,
+
+	"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem,
+	"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes,
+	"claudeResets.keepCredits": cfgClaudeResetsKeepCredits,
+	"claudeResets.salvageHorizonHours": cfgClaudeResetsSalvageHorizonHours,
+	"mcp.startupTimeoutMs": cfgMcpStartupTimeoutMs,
+	"ttsr.judge": cfgTtsrJudge,
+	"edit.autoRepair.enabled": cfgEditAutoRepairEnabled,
+	"features.unexpectedStopDetection": cfgFeaturesUnexpectedStopDetection,
+	extendedContext: cfgExtendedContext,
+	"compaction.asyncEnabled": cfgCompactionAsyncEnabled,
+	"compaction.methodOrder": cfgCompactionMethodOrder,
+	"providers.openai-codex.codeMode": cfgProvidersOpenaiCodexCodeMode,
+	"plan.autosave": cfgPlanAutosave,
+	"plan.autosaveDir": cfgPlanAutosaveDir,
+	"retry.waitForUsageReset": cfgRetryWaitForUsageReset,
+	"compaction.experimentalContextManagement": cfgCompactionExperimentalContextManagement,
+	"task.enableEffort": cfgTaskEnableEffort,
+	"task.maxEffort": cfgTaskMaxEffort,
+	"task.agentServiceTierOverrides": cfgTaskAgentServiceTierOverrides,
+	"providers.autoThinkingMaxEffort": cfgProvidersAutoThinkingMaxEffort,
+	"images.describeForTextModels": cfgImagesDescribeForTextModels,
+	"images.questionTimeoutMs": cfgImagesQuestionTimeoutMs,
+	"tools.speculativeExecution.enabled": cfgToolsSpeculativeExecutionEnabled,
+} as const;
 
 const RUNTIME_SETTING_HANDLES = {
+	...GUI_SETTING_HANDLES,
 	"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem,
 	"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes,
 	"claudeResets.keepCredits": cfgClaudeResetsKeepCredits,
@@ -58,6 +136,7 @@ type SettingValue<K extends keyof typeof RUNTIME_SETTING_HANDLES> = DefinitionVa
 
 /** Runtime settings intentionally exposed to the Studio Bridge. */
 export const STUDIO_RUNTIME_SETTING_KEYS = [
+	...GUI_SETTING_KEYS,
 	"modelRoles.judge",
 	"claudeResets.autoRedeem",
 	"claudeResets.minBlockedMinutes",
@@ -86,7 +165,7 @@ export const STUDIO_RUNTIME_SETTING_KEYS = [
 
 export type StudioRuntimeSettingKey = (typeof STUDIO_RUNTIME_SETTING_KEYS)[number];
 
-export interface StudioRuntimeSettingsSnapshot {
+export interface StudioRuntimeSettingsSnapshot extends Required<GuiSettingsSnapshot> {
 	"modelRoles.judge": string;
 	"claudeResets.autoRedeem": SettingValue<"claudeResets.autoRedeem">;
 	"claudeResets.minBlockedMinutes": SettingValue<"claudeResets.minBlockedMinutes">;
@@ -114,6 +193,7 @@ export interface StudioRuntimeSettingsSnapshot {
 }
 
 export interface StudioRuntimeSettingsActivation {
+	sources?: Partial<Record<StudioRuntimeSettingKey, "env" | "runtime" | "overlay" | "project" | "global" | "default">>;
 	configured: Partial<StudioRuntimeSettingsSnapshot>;
 	restartRequired: StudioRuntimeSettingKey[];
 }
@@ -139,6 +219,14 @@ export function isStudioRuntimeSettingValue(
 	key: StudioRuntimeSettingKey,
 	value: unknown,
 ): value is StudioRuntimeSettingValue {
+	if (isGuiSettingKey(key)) {
+		try {
+			validateGuiSetting(key, value);
+			return true;
+		} catch {
+			return false;
+		}
+	}
 	switch (key) {
 		case "modelRoles.judge":
 			return typeof value === "string" && value.length <= 4096 && !/[\u0000-\u001f]/u.test(value);
@@ -229,6 +317,14 @@ export class StudioRuntimeSettingsService {
 		this.#syncSession();
 		return {
 			configured: { "compaction.experimentalContextManagement": this.#notesConfigured },
+			sources: Object.fromEntries(
+				STUDIO_RUNTIME_SETTING_KEYS.map(key => [
+					key,
+					key === "modelRoles.judge"
+						? cfgModelRoles.provenance(this.session.settings)
+						: RUNTIME_SETTING_HANDLES[key].provenance(this.session.settings),
+				]),
+			),
 			restartRequired:
 				this.#notesConfigured === this.#notesEffective ? [] : ["compaction.experimentalContextManagement"],
 		};
@@ -237,6 +333,12 @@ export class StudioRuntimeSettingsService {
 	snapshot(): StudioRuntimeSettingsSnapshot {
 		this.#syncSession();
 		return {
+			...(Object.fromEntries(
+				GUI_SETTING_KEYS.map(key => [
+					key,
+					structuredClone(RUNTIME_SETTING_HANDLES[key].get(this.session.settings)),
+				]),
+			) as Required<GuiSettingsSnapshot>),
 			"modelRoles.judge": this.session.settings.getModelRoles().judge ?? "",
 			"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem.get(this.session.settings),
 			"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes.get(this.session.settings),
@@ -281,7 +383,7 @@ export class StudioRuntimeSettingsService {
 		}
 		return {
 			values,
-			...(selected.includes("compaction.experimentalContextManagement") ? { activation: this.activation() } : {}),
+			activation: this.activation(),
 		};
 	}
 

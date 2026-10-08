@@ -71,7 +71,8 @@ try {
   if (!npmCli) throw new Error("Run patch verification through npm run omp:verify:patches");
 
   run("git", ["-C", ompSourceDirectory, "diff", "--check"]);
-  if (!process.argv.includes("--skip-workspace-check")) {
+  // Workspace checks belong to `npm run check`; opt in only for standalone use.
+  if (process.argv.includes("--with-workspace-check")) {
     run(process.execPath, [npmCli, "run", "check"], { cwd: repositoryRoot, env });
   }
   run(bun, ["run", "check:ts"], { cwd: ompSourceDirectory, env });
@@ -97,42 +98,8 @@ try {
       "packages/coding-agent/test/cli-argv-routing.test.ts",
       "packages/coding-agent/test/cli-unknown-flag.test.ts",
       "packages/coding-agent/test/session-manager/studio-origin.test.ts",
-      "packages/coding-agent/test/studio-host-args.test.ts",
-      "packages/coding-agent/test/studio-command-arbiter.test.ts",
-      "packages/coding-agent/test/studio-host-mode.test.ts",
-      "packages/coding-agent/test/studio-loop-service.test.ts",
-      "packages/coding-agent/test/studio-live-service.test.ts",
       "packages/coding-agent/test/extensions-runner.test.ts",
       "packages/coding-agent/test/interactive-mode-loop.test.ts",
-      "packages/coding-agent/test/studio-mode-control-service.test.ts",
-      "packages/coding-agent/test/studio-tree-service.test.ts",
-      "packages/coding-agent/test/studio-fork-service.test.ts",
-      "packages/coding-agent/test/studio-handoff-service.test.ts",
-      "packages/coding-agent/test/studio-fast-prewalk-service.test.ts",
-      "packages/coding-agent/test/studio-model-control-service.test.ts",
-      "packages/coding-agent/test/studio-session-control-dispatcher.test.ts",
-      "packages/coding-agent/test/studio-session-control-service.test.ts",
-      "packages/coding-agent/test/studio-agent-session-compatibility.test.ts",
-      "packages/coding-agent/test/studio-skill-prompt-expansion.test.ts",
-      "packages/coding-agent/test/studio-command-manifest-service.test.ts",
-      "packages/coding-agent/test/studio-interaction-port.test.ts",
-      "packages/coding-agent/test/studio-remote-extension-ui.test.ts",
-      "packages/coding-agent/test/studio-approval-ask-e2e.test.ts",
-      "packages/coding-agent/test/studio-btw-service.test.ts",
-      "packages/coding-agent/test/studio-tan-service.test.ts",
-      "packages/coding-agent/test/studio-omfg-service.test.ts",
-      "packages/coding-agent/test/studio-agent-hub-service.test.ts",
-      "packages/coding-agent/test/studio-job-service.test.ts",
-      "packages/coding-agent/test/studio-m4-protocol.test.ts",
-      "packages/coding-agent/test/studio-conversation-protocol.test.ts",
-      "packages/coding-agent/test/studio-session-transcript-service.test.ts",
-      "packages/coding-agent/test/studio-session-transcript-dispatcher.test.ts",
-      "packages/coding-agent/test/studio-conversation-live-projector.test.ts",
-      "packages/coding-agent/test/studio-conversation-live-bridge.test.ts",
-      "packages/coding-agent/test/studio-agent-conversation-service.test.ts",
-      "packages/coding-agent/test/studio-conversation-projector-hub.test.ts",
-      "packages/coding-agent/test/studio-session-telemetry.test.ts",
-      "packages/coding-agent/test/studio-archived-session-telemetry.test.ts",
   ];
   const allSuites = new Set([
     ...suites,
@@ -146,6 +113,11 @@ try {
     "packages/coding-agent/test/plan-autosave.test.ts",
     "packages/coding-agent/test/loop-condition.test.ts",
     "packages/coding-agent/test/agent-session-prewalk.test.ts",
+    "packages/coding-agent/test/agent-session-queue-update-events.test.ts",
+    "packages/coding-agent/test/rpc-queued-message.test.ts",
+    "packages/coding-agent/test/config/settings-registry.test.ts",
+    "packages/coding-agent/test/bench-profiles.test.ts",
+    "packages/coding-agent/test/bench-cache.test.ts",
     "packages/agent/test/anthropic-native-compaction.test.ts",
   ]);
   // Bun's 5s default per-test timeout is not enough on loaded CI runners

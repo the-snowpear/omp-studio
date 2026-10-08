@@ -5,6 +5,7 @@ export type DeckAskOption = {
 };
 
 export type DeckAskQuestion = {
+  readonly acceptImages?: boolean;
   readonly id: string;
   readonly question: string;
   readonly header?: string;
@@ -14,6 +15,9 @@ export type DeckAskQuestion = {
 };
 
 export type DeckAskAnswer = {
+  readonly note?: string;
+  readonly customInputImages?: readonly import("@omp-studio/studio-protocol").AskImage[];
+  readonly noteImages?: readonly import("@omp-studio/studio-protocol").AskImage[];
   readonly picked: readonly string[];
   readonly custom: string;
 };

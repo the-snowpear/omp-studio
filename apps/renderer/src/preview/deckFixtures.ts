@@ -18,6 +18,7 @@ export type PreviewAskQuestion = {
   readonly header?: string;
   readonly options: readonly PreviewAskOption[];
   readonly multi?: boolean;
+  readonly acceptImages?: boolean;
   readonly recommended?: number;
 };
 
@@ -79,6 +80,7 @@ export const PREVIEW_DECK_ITEMS: readonly PreviewDeckItem[] = [
       id: "inertia",
       question: "缩放交互确认：拖拽平移是否需要惯性？",
       header: "惯性",
+      acceptImages: true,
       recommended: 0,
       options: [
         {
@@ -105,6 +107,7 @@ export const PREVIEW_DECK_ITEMS: readonly PreviewDeckItem[] = [
       id: "default",
       question: "如果做成设置项，**默认值**怎么定？",
       header: "默认",
+      acceptImages: true,
       recommended: 1,
       options: [
         { label: "默认开", description: "新会话直接带惯性。" },

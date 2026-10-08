@@ -33,6 +33,23 @@ async function withTempHome<T>(run: (home: string, cwd: string) => Promise<T>): 
 }
 
 describe("createOmpMcpService", () => {
+  test("instructions defaults on and saves only the effective native source while preserving secrets and enablement", async () => {
+    await withTempHome(async (home,cwd) => {
+      const userFile=path.join(home,".omp","agent","mcp.json");const projectFile=path.join(cwd,".omp","mcp.json");
+      const userConfig={mcpServers:{same:{command:"node",instructions:true,env:{TOKEN:"synthetic"}}}};
+      const projectConfig={mcpServers:{same:{command:"node",enabled:false,args:["server.js"],env:{TOKEN:"synthetic-project"}}},disabledServers:["unrelated"]};
+      await fs.writeFile(userFile,JSON.stringify(userConfig));await fs.writeFile(projectFile,JSON.stringify(projectConfig));
+      const service=createOmpMcpService({home,getCwd:()=>cwd});const inventory=await service.get();
+      assert.equal(inventory.servers.find(row=>row.scope==="project")?.instructions,true);
+      assert.equal(inventory.servers.find(row=>row.scope==="user")?.instructionsWritable,false);
+      await assert.rejects(async()=>service.setInstructions!({name:"same",scope:"user",enabled:false}));
+      const result=await service.setInstructions!({name:"same",scope:"project",enabled:false});assert.equal(result.runtimeEffect,"new-session");
+      assert.deepEqual(JSON.parse(await fs.readFile(userFile,"utf8")),userConfig);
+      assert.deepEqual(JSON.parse(await fs.readFile(projectFile,"utf8")),{...projectConfig,mcpServers:{same:{...projectConfig.mcpServers.same,instructions:false}}});
+      assert.equal((await service.get()).servers.find(row=>row.scope==="project")?.instructions,false);
+      assert.ok(!JSON.stringify(await service.get()).includes("synthetic"));
+    });
+  });
   test("lists user and project servers without leaking secrets", async () => {
     await withTempHome(async (home, cwd) => {
       await fs.writeFile(

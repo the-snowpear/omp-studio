@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { StudioCfgService } from "../src/studio/services/cfg-service";
 import { cfgAdvisorEnabled, cfgAdvisorSyncBacklog } from "../src/advisor/settings";
 import { Settings } from "../src/config/settings";
 import { CfgProtocolHandler, setCfgApprovalHost } from "../src/internal-urls/cfg-protocol";
@@ -89,4 +90,34 @@ test("expiry never approves a configuration change or cancels a different pendin
 		decision: "cancel",
 	});
 	await expect(other).resolves.toBe(false);
+});
+
+test("published cfg service rebind cancels old approvals and owns the new host until disposal", async () => {
+	const { port, gateway } = fixture();
+	const settings = Settings.isolated();
+	const toolSession = { settings, hasUI: true, taskDepth: 0, getSessionId: () => "s" } as unknown as ToolSession;
+	const session = { sessionId: "s", settings, studioToolSession: toolSession } as unknown as AgentSession;
+	const service = new StudioCfgService(session, gateway);
+	const handler = new CfgProtocolHandler();
+	try {
+		const oldWrite = handler.write(parseInternalUrl("cfg://advisor/enabled"), "true", { session: toolSession });
+		const deadline = Date.now() + 1000;
+		while (!port.pending() && Date.now() < deadline) await Bun.sleep(1);
+		expect(port.pending()).toBeDefined();
+		service.rebind();
+		await oldWrite;
+		expect(cfgAdvisorEnabled.get(settings)).toBe(false);
+		expect(port.pending()).toBeUndefined();
+		const nextWrite = handler.write(parseInternalUrl("cfg://advisor/enabled"), "true", { session: toolSession });
+		await answer(port, "once");
+		await nextWrite;
+		expect(cfgAdvisorEnabled.get(settings)).toBe(true);
+	} finally {
+		service.dispose();
+	}
+	expect(toolSession.settingsApproval).toBe(false);
+	await expect(
+		handler.write(parseInternalUrl("cfg://advisor/enabled"), "false", { session: toolSession }),
+	).rejects.toThrow();
+	expect(cfgAdvisorEnabled.get(settings)).toBe(true);
 });

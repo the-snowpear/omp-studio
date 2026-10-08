@@ -13,7 +13,7 @@ export interface RuntimeQueueResult {
 }
 export type RuntimeQueueOperation =
 	| { kind: "session.queue.get"; sessionId: string }
-	| { kind: "session.queue.remove"; sessionId: string; id: string; queue: "steering" | "followUp" }
+	| { kind: "session.queue.entry.remove"; sessionId: string; id: string; queue: "steering" | "followUp" }
 	| { kind: "session.queue.restore"; sessionId: string; id: string; queue: "steering" | "followUp" }
 	| { kind: "session.queue.promote"; sessionId: string; id: string; queue: "steering" | "followUp" }
 	| {
@@ -26,14 +26,14 @@ export type RuntimeQueueOperation =
 	  };
 export interface RuntimeQueueResultMap {
 	"session.queue.get": RuntimeQueueResult;
-	"session.queue.remove": RuntimeQueueResult;
+	"session.queue.entry.remove": RuntimeQueueResult;
 	"session.queue.promote": RuntimeQueueResult;
 	"session.queue.edit": RuntimeQueueResult;
 	"session.queue.restore": RuntimeQueueResult;
 }
 export const RUNTIME_QUEUE_KINDS = [
 	"session.queue.get",
-	"session.queue.remove",
+	"session.queue.entry.remove",
 	"session.queue.promote",
 	"session.queue.edit",
 	"session.queue.restore",

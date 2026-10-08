@@ -103,6 +103,11 @@ describe("studio real tool approval and ask E2E", () => {
 		return { port, ui: factory(toolCall), toolCall };
 	}
 
+	async function waitForInteraction(port: StudioRemoteInteractionPort): Promise<void> {
+		for (let attempt = 0; attempt < 100 && !port.pending(); attempt++) await Bun.sleep(10);
+		expect(port.pending()).toBeDefined();
+	}
+
 	async function respond(
 		port: StudioRemoteInteractionPort,
 		decision: "submit" | "cancel",

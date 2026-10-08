@@ -22,7 +22,7 @@ function mockStreamFn() {
 	};
 }
 
-describe("AgentSession v18.0.11 Studio compatibility and seam invariants", () => {
+describe("AgentSession pinned Runtime Studio compatibility and seam invariants", () => {
 	test("prompt returns boolean true on normal dispatch and executes beforeNextUserTurn hook exactly once", async () => {
 		const authStorage = createInMemoryAuthStorage();
 		try {
@@ -134,4 +134,42 @@ describe("AgentSession v18.0.11 Studio compatibility and seam invariants", () =>
 			authStorage.close();
 		}
 	});
+});
+
+test("Studio queue context is published with its prompt and cancelled without orphaned hidden context", async () => {
+	const authStorage = createInMemoryAuthStorage();
+	const model = getBundledModel("anthropic", "claude-sonnet-4-5")!;
+	const agent = new Agent({
+		initialState: { model, systemPrompt: ["Test"], tools: [] },
+		streamFn: (() => {
+			throw new Error("This queue test must not call a model");
+		}) as never,
+	});
+	const session = new AgentSession({
+		agent,
+		sessionManager: SessionManager.inMemory(),
+		settings: Settings.isolated(),
+		modelRegistry: new ModelRegistry(authStorage),
+	});
+	agent.state.isStreaming = true;
+	try {
+		const prelude: CustomMessage = {
+			role: "custom",
+			timestamp: Date.now(),
+			customType: "image-attachment",
+			content: "private attachment context",
+			display: false,
+			attribution: "user",
+		};
+		await session.followUp("cancel follow-up", undefined, { prependMessages: [prelude] });
+		expect(session.removeQueuedMessage("cancel follow-up", "followUp")).toBe(true);
+		expect(agent.hasQueuedMessages()).toBe(false);
+		await session.steer("cancel steer", undefined, { prependMessages: [prelude] });
+		expect(session.removeQueuedMessage("cancel steer", "steering")).toBe(true);
+		expect(agent.hasQueuedMessages()).toBe(false);
+	} finally {
+		agent.state.isStreaming = false;
+		await session.dispose();
+		authStorage.close();
+	}
 });

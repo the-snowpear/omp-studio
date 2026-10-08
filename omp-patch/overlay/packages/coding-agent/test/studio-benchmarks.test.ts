@@ -91,6 +91,40 @@ it("runs native mixed workloads with structured metrics and no terminal output p
 		service.dispose();
 	}
 });
+it("detailed workloads retain native phases independently from cache phases", async () => {
+	const { session } = setup();
+	let calls = 0;
+	const service = new StudioBenchmarkService(session as unknown as AgentSession, {
+		streamSimple: () => {
+			calls++;
+			const iterator = (async function* () {
+				yield { type: "text_delta", delta: "response" };
+				yield { type: "done", message };
+			})();
+			return Object.assign(iterator, { result: async () => message }) as unknown as AssistantMessageEventStream;
+		},
+	});
+	try {
+		const { run } = (await service.execute({
+			kind: "benchmarks.start",
+			sessionId: "s",
+			spec: { models: ["mock/bench"], profile: "detailed", runs: 1, concurrency: 2, maxTokens: 32 },
+		})) as { run: BenchmarkRun };
+		const result = await finished(service, run.id);
+		expect(result.run.state).toBe("completed");
+		expect(calls).toBe(4);
+		expect(Object.keys(result.models[0]!.phases!)).toEqual(["single", "parallel", "prefill"]);
+		expect(result.models[0]!.measurements.map(row => row.workloadPhase)).toEqual([
+			"single",
+			"parallel",
+			"parallel",
+			"prefill",
+		]);
+		expect(result.models[0]!.measurements.every(row => row.phase === undefined)).toBe(true);
+	} finally {
+		service.dispose();
+	}
+});
 it("session changes abort the in-flight stream and prevent queued requests", async () => {
 	const { session, changed } = setup();
 	let calls = 0;

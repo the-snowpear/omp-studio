@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 
 import { Icon } from "./icons";
 import { useI18n } from "./i18n";
+import { PLATFORM } from "./platform";
 import { fileManagerName } from "./platformCopy";
 
 export function MenuItem({ icon, children, hint, kbd, disabled, title, current, onClick }: {
@@ -49,6 +50,7 @@ export type FileMenuTarget = {
 
 /** 「打开」对文件 = 系统默认程序（Main shell.openPath）；对目录 = 树内展开/收起（caller 本地执行）。 */
 export type FileMenuAction =
+  | { readonly type: "ida" }
   | { readonly type: "open" }
   | { readonly type: "openWith"; readonly openerId: string }
   | { readonly type: "reveal" }
@@ -169,12 +171,14 @@ export function FileMenuContent({ target, openers, onRun, desktopActionsReason }
         {t("shell.fileOpen")}
       </MenuItem>
       <OpenWithZone
+        // The native resource resolver validates the selected workspace path before IDA sees it.
         openers={openers}
         disabled={desktopActionsReason !== undefined}
         reason={desktopActionsReason}
         onPick={(openerId) => onRun({ type: "openWith", openerId })}
       />
       <div className="menu-sep" />
+      {target.kind==="file"&&(/\.(exe|dll|so|dylib|bin|elf|i64|idb|sys|o|a)$/i.test(target.path)||(PLATFORM==="darwin"&&!target.name.includes(".")))?<MenuItem icon="code" onClick={()=>onRun({type:"ida"})} {...desktopOnly}>IDA</MenuItem>:null}
       <MenuItem icon="folder-open" onClick={() => onRun({ type: "reveal" })} {...desktopOnly}>
         {t("shell.fileRevealInExplorer", { fileManager: fileManagerName(t) })}
       </MenuItem>

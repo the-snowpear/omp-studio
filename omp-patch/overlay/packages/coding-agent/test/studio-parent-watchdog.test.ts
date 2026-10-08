@@ -1,3 +1,5 @@
+import { beforeEach } from "bun:test";
+import { resetSettingsForTest } from "../src/config/settings";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { afterEach, expect, test } from "bun:test";
 import * as path from "node:path";
@@ -177,4 +179,9 @@ test("the telemetry probe matches workspaces with the Host's path rule", () => {
 	expect(workspacePathKey("/Users/dev/Proj", "darwin")).not.toBe(workspacePathKey("/Users/dev/proj", "darwin"));
 	expect(workspacePathKey("C:\\Work\\Proj", "win32")).toBe(workspacePathKey("c:\\work\\proj\\", "win32"));
 	expect(workspacePathKey("/private/tmp/proj", "linux")).not.toBe(workspacePathKey("/tmp/proj", "linux"));
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

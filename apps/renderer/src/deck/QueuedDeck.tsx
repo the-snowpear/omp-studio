@@ -112,6 +112,7 @@ export function QueuedDeck({
   const [answers, setAnswers] = useState<Readonly<Record<string, DeckAskAnswer>>>({});
   const [swap, setSwap] = useState<DeckSwap | null>(null);
   const [busy, setBusy] = useState(false);
+  const [attachmentBusy,setAttachmentBusy]=useState(false);
   /** 像素高度锁；null = 跟随自然高度。锁在哪一层见 lockOn。 */
   const [lockH, setLockH] = useState<number | null>(null);
   const [smoothH, setSmoothH] = useState(false);
@@ -128,6 +129,24 @@ export function QueuedDeck({
   const total = remaining.length;
   const index = total === 0 ? 0 : Math.min(pos, total - 1);
   const current = remaining[index];
+  const deckRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const deck = deckRef.current;
+    const area = deck?.closest(".convo-wrap");
+    const anchor = deck?.parentElement;
+    if (!current || !deck || !area || !anchor) return;
+    const update = () => {
+      const available = anchor.getBoundingClientRect().bottom - area.getBoundingClientRect().top - 16;
+      deck.style.setProperty("--deck-max-height", `${Math.max(64, available)}px`);
+    };
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(update);
+    observer?.observe(area);
+    observer?.observe(anchor);
+    window.addEventListener("resize", update);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", update); };
+  }, [Boolean(current)]);
+
   const editsLocked = busy || askPhase === "leave" || leaving === true;
   const actionsLocked = editsLocked || disabled === true;
   const kind = current?.kind;
@@ -202,7 +221,7 @@ export function QueuedDeck({
   const navigate = useCallback((next: number) => {
     const at = total === 0 ? 0 : Math.min(pos, total - 1);
     const target = Math.max(0, Math.min(total - 1, next));
-    if (target === at) return;
+    if (target === at || attachmentBusy) return;
     const from = remaining[at];
     const to = remaining[target];
     const active = document.activeElement;
@@ -211,7 +230,7 @@ export function QueuedDeck({
     const keep = from?.kind === "ask" && to?.kind === "ask" ? from : null;
     beginSwap(keep, target > at ? "fwd" : "back");
     setPos(target);
-  }, [beginSwap, pos, remaining, total]);
+  }, [beginSwap, pos, remaining, total, attachmentBusy]);
 
   const drop = useCallback((id: string) => {
     const gone = remaining.find((item) => item.id === id);
@@ -232,7 +251,7 @@ export function QueuedDeck({
   }, [askPhase, beginSwap, remaining]);
 
   const dismissAsk = useCallback(async (item: QueuedAskItem, reason: "submit" | "cancel") => {
-    if (actionsLocked) return;
+    if (actionsLocked || (reason === "submit" && attachmentBusy)) return;
     if (reason === "submit" && onAskSubmit) {
       setBusy(true);
       try {
@@ -252,7 +271,7 @@ export function QueuedDeck({
       }
     }
     drop(item.id);
-  }, [answers, drop, actionsLocked, onAskCancel, onAskSubmit]);
+  }, [answers, drop, actionsLocked, attachmentBusy, onAskCancel, onAskSubmit]);
 
   const pick = useCallback((item: QueuedAskItem, label: string) => {
     if (editsLocked) return;
@@ -268,7 +287,7 @@ export function QueuedDeck({
   }, [editsLocked]);
 
   if (!current) {
-    return <div className="deck" role="region" aria-label={regionLabel} />;
+    return <div ref={deckRef} className="deck" role="region" aria-label={regionLabel} />;
   }
 
   /* 本批次全部 ask 的 header（按队列顺序，含当前卡），供标题行胶囊切换 */
@@ -285,11 +304,14 @@ export function QueuedDeck({
   const dir = swap?.dir ?? "fwd";
   const askBody = (item: QueuedAskItem) => (
     <AskBody
+      key={item.id}
+      onBusy={setAttachmentBusy}
       question={item.question}
       answer={answers[item.id] ?? NO_ASK_ANSWER}
       {...(editsLocked ? { disabled: true } : {})}
       onPick={(label) => pick(item, label)}
       onCustom={(value) => writeCustom(item.id, value)}
+      onPatch={patch=>setAnswers(prev=>({...prev,[item.id]:{...(prev[item.id]??NO_ASK_ANSWER),...patch}}))}
       onSubmit={() => { void dismissAsk(item, "submit"); }}
     />
   );
@@ -299,6 +321,7 @@ export function QueuedDeck({
   const askLeave = askPhase === "leave" || leaving === true;
   return (
     <div
+      ref={deckRef}
       className={`deck active preview-queue${askShell ? " is-ask" : ""}${askEnter ? " is-ask-enter" : ""}${askLeave ? " is-ask-leave" : ""}`}
       {...(previewMark === true ? { "data-preview-deck": true } : {})}
       role="region"
@@ -349,7 +372,7 @@ export function QueuedDeck({
               ) : null}
               <AskActions
                 {...(actionsLocked ? { disabled: true } : {})}
-                canSubmit={askAnswered(answers[current.id] ?? NO_ASK_ANSWER)}
+                canSubmit={!attachmentBusy && askAnswered(answers[current.id] ?? NO_ASK_ANSWER)}
                 onCancel={() => { void dismissAsk(current, "cancel"); }}
                 onSubmit={() => { void dismissAsk(current, "submit"); }}
               />

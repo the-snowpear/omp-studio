@@ -1,4 +1,6 @@
 import { MarkdownInline } from "../conversation/markdown";
+import {useState,useEffect} from "react";
+import {AskImages} from "./AskImages";
 import { PromptHead, type DeckQueue } from "./PromptHead";
 import { askAnswered } from "./askContent";
 import type { AskHeader, DeckAskAnswer, DeckAskQuestion } from "./types";
@@ -55,15 +57,22 @@ export function AskBody({
   disabled,
   onPick,
   onCustom,
+  onPatch,
   onSubmit,
+  onBusy,
 }: {
+  onBusy?: (busy: boolean) => void;
   question: DeckAskQuestion;
   answer: DeckAskAnswer;
   disabled?: boolean;
   onPick: (label: string) => void;
   onCustom: (value: string) => void;
+  onPatch?: (patch:Partial<DeckAskAnswer>)=>void;
   onSubmit: () => void;
 }) {
+  const [customFiles,setCustomFiles]=useState<readonly File[]>();const [noteFiles,setNoteFiles]=useState<readonly File[]>();
+  const [customBusy,setCustomBusy]=useState(false);const [noteBusy,setNoteBusy]=useState(false);
+  useEffect(()=>{onBusy?.(customBusy||noteBusy);return()=>onBusy?.(false);},[customBusy,noteBusy,onBusy]);
   return (
     <div className="ask-body">
       <p className="dk-sub"><MarkdownInline text={question.question} k={`q-${question.id}`} /></p>
@@ -91,7 +100,7 @@ export function AskBody({
           );
         })}
       </div>
-      <div className="dk-custom">
+      <div className="dk-custom" style={{display:"grid",gridTemplateColumns:"minmax(0, 1fr)",gap:8}}>
         <input
           className="input dk-input"
           value={answer.custom}
@@ -99,10 +108,13 @@ export function AskBody({
           aria-label="自定义回答"
           disabled={disabled}
           onChange={(event) => onCustom(event.target.value)}
+          onPaste={event=>{if(question.acceptImages&&event.clipboardData.files.length){event.preventDefault();setCustomFiles([...event.clipboardData.files]);}}}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && askAnswered(answer)) onSubmit();
+            if (event.key === "Enter" && !event.nativeEvent.isComposing && !customBusy && !noteBusy && askAnswered(answer)) onSubmit();
           }}
         />
+        {question.acceptImages&&onPatch?<AskImages onBusy={setCustomBusy} label="回答 / Answer" images={answer.customInputImages??[]} onChange={customInputImages=>onPatch({customInputImages})} files={customFiles} disabled={disabled}/>:null}
+        {question.acceptImages!==undefined&&onPatch?<><textarea className="input" aria-label="备注 / Note" placeholder="备注 / Note" value={answer.note??""} disabled={disabled} onChange={event=>onPatch({note:event.target.value})} onPaste={event=>{if(question.acceptImages&&event.clipboardData.files.length){event.preventDefault();setNoteFiles([...event.clipboardData.files]);}}}/>{question.acceptImages?<AskImages onBusy={setNoteBusy} label="备注 / Note" images={answer.noteImages??[]} onChange={noteImages=>onPatch({noteImages})} files={noteFiles} disabled={disabled}/>:null}</>:null}
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+import { beforeEach } from "bun:test";
+import { resetSettingsForTest } from "../src/config/settings";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { cfgToolsApprovalMode } from "../src/tools/settings";
 import { afterEach, describe, expect, test, vi } from "bun:test";
@@ -990,4 +992,9 @@ describe("WP-011 Studio Bridge runtime server", () => {
 			event: { kind: "state.changed" },
 		});
 	});
+});
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
 });

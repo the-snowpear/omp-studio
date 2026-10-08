@@ -5,68 +5,77 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      scope:
+        description: Full gates or only rebuild and accept the Mac package
+        type: choice
+        options: [all, macos-package]
+        default: all
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.scope || 'all' }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  windows:
-    name: Windows
-    runs-on: windows-latest
+  platform:
+    if: github.event_name != 'workflow_dispatch' || inputs.scope != 'macos-package'
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows, os: windows-latest, native: win32-x64 }
+          - { name: "macOS (arm64)", os: macos-15, native: darwin-arm64 }
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
+      - name: Select additional gates
+        id: scope
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          $full = '${{ github.event_name }}' -eq 'workflow_dispatch' -or !$env:BASE_SHA -or $env:BASE_SHA -match '^0+$'
+          if (!$full) {
+            $files = @(git diff --name-only $env:BASE_SHA HEAD)
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot determine changed files' }
+          }
+          $runtime = $full -or [bool]($files -match '^(omp-patch/|packages/(studio-protocol|client-contract)/|scripts/|\.github/|package(-lock)?\.json$)')
+          $metadata = $full -or [bool]($files -match '^(packaging/|packages/runtime-installer/|scripts/|omp-patch/|\.github/|package(-lock)?\.json$)')
+          "runtime=$($runtime.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "metadata=$($metadata.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - uses: oven-sh/setup-bun@v2
+        if: steps.scope.outputs.runtime == 'true'
+        with:
+          bun-version: "1.4.2"
       - run: npm ci
       - run: npm run omp:install-deps
+        if: steps.scope.outputs.runtime == 'true'
       - run: npm run check
       - run: npm run omp:test:metadata
-      # Runtime source tests load the pi-natives addon, which only a native
-      # build produces; build just that addon (cargo, cached) for this host.
+        if: steps.scope.outputs.metadata == 'true'
       - uses: Swatinem/rust-cache@v2
+        if: steps.scope.outputs.runtime == 'true'
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
-          key: natives-win32-x64
+          shared-key: platform
+          key: natives-${{ matrix.native }}
+          cache-on-failure: "true"
       - run: npm run omp:build:natives
+        if: steps.scope.outputs.runtime == 'true'
       - run: npm run omp:verify:patches
-
-  macos:
-    name: macOS (arm64)
-    # Pinned on purpose: macos-14 retires 2026-11-02 and macos-latest already
-    # means macOS 26 with a different toolchain.
-    runs-on: macos-15
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-      - uses: oven-sh/setup-bun@v2
-      - run: npm ci
-      - run: npm run omp:install-deps
-      - run: npm run check
-      - run: npm run omp:test:metadata
-      # Runtime source tests load the pi-natives addon, which only a native
-      # build produces; build just that addon (cargo, cached) for this host.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: omp-patch/vendor/oh-my-pi -> target
-          key: natives-darwin-arm64
-      - run: npm run omp:build:natives
-      - run: npm run omp:verify:patches
+        if: steps.scope.outputs.runtime == 'true'
 
   macos-runtime:
     name: macOS Runtime build + pack (arm64)
@@ -78,7 +87,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 120
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -93,7 +101,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
-          key: darwin-arm64
+          shared-key: platform
+          key: natives-darwin-arm64
+          cache-on-failure: "true"
       - run: npm ci
       - run: npm run omp:install-deps
       - run: npm run omp:overlay:apply
@@ -106,7 +116,21 @@ jobs:
           keys="$HOME/Library/Application Support/omp-studio/keys"
           export OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$keys/trusted-public.pem"
           export OMP_RUNTIME_SIGNING_KEY_ID="$(tr -d '[:space:]' < "$keys/key-id.txt")"
-          npm run pack:mac -- --skip-host
+          npm run pack:mac -- --skip-host --skip-build
+      - name: Install Electron test driver
+        timeout-minutes: 5
+        run: npm install --no-save --package-lock=false electron@43.4.0 playwright@1.62.1
+      - name: Packaged Electron GUI acceptance
+        timeout-minutes: 10
+        env:
+          OMP_E2E_PACKAGED_EXE: ${{ github.workspace }}/outputs/installer-mac/mac-arm64/OMP Studio.app/Contents/MacOS/OMP Studio
+          OMP_E2E_OUTPUT_DIR: ${{ github.workspace }}/outputs/macos-gui-e2e
+        run: node scripts/full-gui-e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-gui-evidence
+          path: outputs/macos-gui-e2e/
       - uses: actions/upload-artifact@v4
         with:
           name: omp-studio-macos-arm64-adhoc

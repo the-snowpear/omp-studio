@@ -26,10 +26,22 @@ index 1b9525d615..4567fbe8e1 100644
  			"types": "./src/index.ts",
  			"import": "./src/index.ts"
 diff --git a/packages/coding-agent/src/cli.ts b/packages/coding-agent/src/cli.ts
-index 6ed949f15c..252c16187c 100755
+index 6ed949f15c..8fabf83e67 100755
 --- a/packages/coding-agent/src/cli.ts
 +++ b/packages/coding-agent/src/cli.ts
-@@ -512,6 +512,14 @@ export async function runCli(argv: string[]): Promise<void> {
+@@ -315,6 +315,11 @@ async function runWorkerEntrypoint(arg: string | undefined): Promise<boolean> {
+ 		await startTextPredictDaemonFromEnvironment();
+ 		return true;
+ 	}
++	if (arg === "__omp_worker_studio_stats") {
++		const { startStudioStatsWorker } = await import("./studio/stats-worker");
++		await startStudioStatsWorker();
++		return true;
++	}
+ 	return false;
+ }
+ 
+@@ -512,6 +517,14 @@ export async function runCli(argv: string[]): Promise<void> {
  		process.stdout.write(formatLicenseOutput());
  		return;
  	}
@@ -157,7 +169,7 @@ index ef58a29b3c..af4d98e757 100644
  		this.writeValue(setting, value, "override");
  		this.#softPins.add(setting);
 diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
-index 2eadfbb00e..5089ad9544 100644
+index 2eadfbb00e..8ea3870f0e 100644
 --- a/packages/coding-agent/src/main.ts
 +++ b/packages/coding-agent/src/main.ts
 @@ -1,3 +1,4 @@
@@ -185,14 +197,14 @@ index 2eadfbb00e..5089ad9544 100644
  import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
  import { createTelemetryExportConfig, initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
  import { cfgTelemetryOtlpExportEnabled } from "./telemetry-settings";
-@@ -133,6 +140,7 @@ import {
- 	resolveStartupChangelogForDisplay,
- 	type StartupChangelogSelection,
- } from "./utils/changelog";
+@@ -127,6 +134,7 @@ import { registerLocalInferenceApi } from "./tiny/local-inference-api";
+ import { concreteThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+ import type { LspStartupServerInfo } from "./tools";
+ import { sanitizeDisplayWarnings } from "@oh-my-pi/pi-tui/render/render-utils";
 +import type { ToolUiFactory } from "./tools/context";
- import { EventBus } from "./utils/event-bus";
- import { resolveFirstLaunchPythonEvalWarning } from "./eval/startup-warning";
- import { CliUsageError } from "./cli/usage-error";
+ import {
+ 	getChangelogPath,
+ 	readLastChangelogVersion,
 @@ -607,7 +615,7 @@ async function runInteractiveMode(
  	notifs: (InteractiveModeNotify | null)[],
  	versionCheckPromise: Promise<string | undefined>,
@@ -490,6 +502,19 @@ index 2eadfbb00e..5089ad9544 100644
  			}
  		}
  	} catch (error) {
+diff --git a/packages/coding-agent/src/task/settings.ts b/packages/coding-agent/src/task/settings.ts
+index 4580cac4de..2e3caa8bcd 100644
+--- a/packages/coding-agent/src/task/settings.ts
++++ b/packages/coding-agent/src/task/settings.ts
+@@ -324,7 +324,7 @@ export const cfgTaskCompletionProbe = register({
+ export const cfgTaskAgentIdleTtlMs = register({
+ 	id: "task.agentIdleTtlMs",
+ 	type: "number",
+-	default: 420_000,
++	default: 300_000,
+ 	ui: {
+ 		tab: "tasks",
+ 		group: "Subagents",
 diff --git a/packages/coding-agent/test/main-host-classification.test.ts b/packages/coding-agent/test/main-host-classification.test.ts
 index 8a6dfe6355..7491a0c17f 100644
 --- a/packages/coding-agent/test/main-host-classification.test.ts

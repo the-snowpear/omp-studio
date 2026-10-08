@@ -332,10 +332,51 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | 模型种类、角色链、搜索迁移 | `ModelConfigPage.tsx`、`models/runtimeModels.ts`、`WebRoleChain.tsx` | `runtime.models.list`；Host `model-role-migration.ts`、`web-routing.ts`、`omp-models-adapter.ts` |
 | Claude 重置确认与策略、MCP 启动等待 | `settings/tabs.tsx`、现有 InteractionDeck | overlay `runtime-settings-service.ts`、`studio-host-mode.ts` 与 AgentSession consent hook |
 | 账户、额度、重置券只读状态 | `models/AccountStatusPane.tsx`；预览 `preview/accountsPreview.ts` | `accounts.status` → overlay `services/account-status-service.ts`；手动刷新，不调用自动兑券 heartbeat |
-| 模型预设、速度与缓存保温 | `models/ModelPresetsPane.tsx`、`models/SessionOptionsPane.tsx`；预览 `preview/sessionOptionsPreview.ts` | `contracts/session-options.ts` → overlay `services/session-options-service.ts` → 原生 model-presets / service tier / cache warmer；账户与预设独立页签 |
-| 配置审批 | `deck/approvalContent.ts`、`deck/ApprovalCard.tsx`、`InteractionDeck.tsx` | overlay `services/configuration-approval.ts` 注册原生 CfgApprovalHost；前后值、范围、覆盖、一次/本会话/拒绝/超时；普通工具不能伪造本会话授权 |
-| 统一评测工作区 | `evaluation/EvaluationPage.tsx`、`models/BenchmarkPane.tsx`、`judgments/JudgmentsPane.tsx` | 模型基准与判断批次；原模型页基准入口跳转；共用 `workspaces/Workspace.tsx` |
-| IDA 管理 | `capabilities/IdaPane.tsx`；预览 `preview/idaPreview.ts` | `contracts/ida.ts` → overlay `services/ida-service.ts` → 原生 IDA Broker；`ida/worker.py` 在串行请求内建立恢复副本后执行 |
-| 浏览器观察与人工接管 | `browser/BrowserPane.tsx`；Desktop `browser-observation.ts`、`browser-observation-shared.ts`；预览 `preview/browserPreview.ts` | `browser.tabs.get/observe.prepare` 只传目录和不透明标识；图像/控制走窗口私有通道；overlay `services/browser-observation-service.ts`、`browser-tab-control.ts`，原生 supervisor 排他租约 |
 
 范围和验收进展：[OMP 18.3.0](../docs/migrations/omp-18.3.0.md)。
+
+## OMP 18.4.4 Runtime 适配
+
+配置读取与写入改用上游注册句柄；接缝配置默认值移至 `task/settings.ts`。搜索与图像候选及旧配置迁移见 `packages/host-client-api/src/model-role-migration.ts`、`web-routing.ts`；现有子代理档位覆盖支持 `ultrafast`。版本变化、兼容范围和未接入 GUI 的新能力见 [迁移报告](../docs/migrations/omp-18.4.4.md)。
+
+GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-gui.md)。
+
+| 功能 | GUI | Runtime / Host |
+|---|---|---|
+| Runtime 消息组队列、取回、纠偏 | `composer/RuntimeQueue.tsx`；App 已移除自动 flush effect | `contracts/session-gui.ts`、overlay `services/session-gui-service.ts`；Desktop `session-commands.ts` 私有附件提升；失败保留 Runtime 恢复记录，Composer 恢复后 `session.queue.ack` 清除，原 ID 重试不自动发送 |
+| 会话服务档位 | `composer/ServiceTierPicker.tsx`；`preview/sessionGuiPreview.ts` | `session.tier.get/set`，原生模型支持矩阵与会话覆盖 |
+| 新设置及配置来源 | `settings/Runtime1844Rows.tsx` | `contracts/gui-settings.ts`；overlay `runtime-settings-service.ts`、`cfg-service.ts` |
+| Runtime 技能身份 | `skills/runtimeSkills.ts`、`composer/mentions.ts`、`SkillsDrawer.tsx`、`composer/serialize.ts` | `session.skills.list` 返回原生解析名称、来源及 scope |
+| 独立任务范围 | `AgentHub.tsx` 的 `solutionSpace` 输入 | `agent.spawn` → `agent-hub-service.ts` → 原生 task |
+| Benchmark 详细阶段 | `models/BenchmarkPane.tsx`、`preview/benchmarksPreview.ts` | `benchmarks-protocol.ts`、`services/benchmark-service.ts` → 原生 detailed benchmark |
+| 本地输入预测、语料与模型管理 | `composer/ChipComposer.tsx`、`settings/PredictionSettings.tsx`；预览 `preview/predictionPreview.ts` | `prediction.query` 经 Facade/controller/Bridge 临时查询；`prediction.control` 管理语料和显式下载；overlay `services/prediction-service.ts` + 原生 `predict/client.ts`、`predict/daemon.ts` |
+| 统计、缓存与历史同步 | `StatisticsPage.tsx`；预览 `preview/statsPreview.ts` | `contracts/stats.ts`、Facade `stats.read`；Desktop `stats-worker.ts` 管理独立原生 `studio/stats-worker.ts`，复用统计数据库、同步锁、聚合与过滤；不创建 AgentSession |
+| Frustration 估算、确认、取消与失败重试 | `FrustrationPane.tsx` | `stats.frustration` 经 Host 幂等回执及私有 worker 通道；原生 Judge 分析，单次报价绑定范围、待分析集合和 Judge，重试仅包含耗尽重试的失败文本 |
+| MCP instructions 策略 | `CapabilitiesPage.tsx` MCP 行；预览 `capabilitiesPreview.ts` | `mcp.setInstructions` → `omp-mcp-adapter.ts`，只修改生效的原生来源，保留连接信息，新会话加载 |
+| Bedrock Messages 请求兼容 | `ModelConfigPage.tsx` 模型高级设置 | `ModelOverridePatch.bedrockMessagesApi` → `omp-models-adapter.ts` 的 `compat.bedrockMessagesApi`；`provider-yaml-draft.ts` 保持 YAML 预览与写入一致 |
+| 子代理 BTW、独立话题与追问 | `btw/AgentBtwPane.tsx`；Agent Hub BTW 标签、`SubagentInspectCard.tsx` 与侧栏入口；预览 `preview/agentBtwPreview.ts` | `agent.btw.read/ask/abort` → Workbench `services/agent-btw-service.ts`；原生 child AgentSession + `StudioBtwService`，父会话/目标实例凭据绑定，目标失效中止；不使用主 BTW 状态槽 |
+| IDA 数据库、分页视图及修改确认 | `capabilities/IdaPane.tsx`；预览 `preview/idaPreview.ts`；文件树二进制入口 | `contracts/ida.ts` → `services/ida-service.ts`；原生 Python worker 在串行执行边界校验数据库身份与版本，单次 review token，读取和执行可取消 |
+| Ask 回答与备注图片 | `deck/AskImages.tsx`、`AskCard.tsx`、`QueuedDeck.tsx`；预览 `preview/deckFixtures.ts` | `contracts/ask-attachments.ts`；remote UI 到原生 Ask 的问题/字段归属；转换期间禁止提交/换题，过期卸载丢弃未完成读取 |
+| 分页会话资源 | `capabilities/ResourcesPane.tsx`；预览 `preview/resourcesPreview.ts` | `contracts/resources.ts` → `services/resource-service.ts`；原生 local/omp/attachment/conflict handler，内容版本绑定、文件越界拒绝 |
+| 无付费调用 Electron 验收 | `scripts/full-gui-e2e.mjs` | 独立应用配置、原生配置与工作区；签名握手、真实读取、预览操作、CDP 中文组合输入；证据 `outputs/full-gui-e2e/` |
+
+
+## OMP 18.8.0 / Studio 0.1.9
+
+| 功能 | UI | Runtime / Host / Desktop |
+|---|---|---|
+| 工作区与样式 | workspaces/Workspace.tsx、MediaPage.tsx、evaluation/EvaluationPage.tsx、AgentHub.tsx | 原生任务与既有 Bridge；preview 与真实组件复用 |
+| 模型预设、速度与保温 | models/ModelPresetsPane.tsx、SessionOptionsPane.tsx | session-options-protocol.ts → session-options-service.ts；旧 session.tier 接口保留 |
+| 原生配置与审批 | settings/NativePreferencesPane.tsx、deck/ApprovalCard.tsx | native-preferences-service.ts、configuration-approval.ts；cfg-service.ts 复用同一原生审批主机 |
+| 队列编辑和恢复 | composer/RuntimeQueueBar.tsx；旧 Runtime 回退 RuntimeQueue.tsx | runtime-queue-service.ts；session.queue.entry.remove 与旧 session.queue.remove 保持独立结果结构 |
+| 子代理与标题 | models/AgentModelDetails.tsx、history/SessionTitleMark.tsx | agent-model-service.ts、session-titles-service.ts；保留 agent-btw-service.ts |
+| 预测输入 | composer/useWordPrediction.ts、settings/PredictionSettingsPane.tsx | prediction-service.ts 私有通道；prediction-engine.ts 复用语料、锁与下载；旧 prediction.query/control 保留 |
+| Archive 与维护 | history/NativeArchivePane.tsx、diagnostics/NativeMaintenancePane.tsx | archive-service.ts、maintenance-service.ts；完整导出走私有文件通道 |
+| 浏览器观察与接管 | browser/BrowserPane.tsx | browser-observation-service.ts、browser-tab-control.ts；Desktop browser-observation.ts 固定 IPC |
+| Computer Use | browser/ComputerPane.tsx | computer-observation-service.ts；Desktop computer-observation.ts；目标、截图与停止 |
+| IDA 管理与编辑 | capabilities/IdaPane.tsx、IdaDatabaseTools.tsx | ida-details-service.ts 新管理接口、ida-service.ts 保留发布协议；同一原生 IDA Broker |
+| Ratchet | evaluation/RatchetPane.tsx | ratchet-service.ts、ratchet-boundary.ts；原生隔离、审批与评分 |
+| 图形预览 | graphics/GraphicPreview.tsx、GraphicScene.tsx、SvgFigureImage.tsx、NumericMarkdownTable.tsx | 有界 Worker、Three/X_ITE、本地资源包；Desktop chrome-artifacts.ts |
+| 录制与标注 | recordings/RecordingPlayer.tsx、annotations/Annotations.tsx、terminalTheme.ts | 既有产物库、录制和标注协议；隐藏页面释放媒体资源 |
+
+发布范围和验证：[OMP 18.8.0](../docs/migrations/omp-18.8.0.md)。0.1.8 既有 Stats、Frustration、Ask 图片、技能命名空间及子代理 BTW 路径保留。

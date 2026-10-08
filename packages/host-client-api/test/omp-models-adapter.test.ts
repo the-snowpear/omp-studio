@@ -232,6 +232,16 @@ describe("toYamlProvider auth boundary", () => {
     });
   });
 
+  test("Bedrock Messages writes the native compatibility slot and preserves unrelated flags",()=>{
+    const previous={models:[{id:"custom",compat:{bedrockMessagesApi:true,supportsToolChoice:false}}],modelOverrides:{catalog:{compat:{bedrockMessagesApi:true,supportsEffort:false}}}};
+    const out=toYamlProvider({id:"bedrock",name:"Bedrock",api:"anthropic-messages",auth:{type:"api-key",apiKey:"synthetic"},models:[{id:"custom",bedrockMessagesApi:false}],modelOverrides:{catalog:{bedrockMessagesApi:false}}},previous);
+    assert.deepEqual((out.models as Array<Record<string,unknown>>)[0]?.compat,{bedrockMessagesApi:false,supportsToolChoice:false});
+    assert.deepEqual((out.modelOverrides as Record<string,Record<string,unknown>>).catalog?.compat,{bedrockMessagesApi:false,supportsEffort:false});
+    const inherited=toYamlProvider({id:"bedrock",name:"Bedrock",api:"anthropic-messages",auth:{type:"api-key",apiKey:"synthetic"},models:[{id:"custom"}],modelOverrides:{catalog:{name:"Catalog"}}},previous);
+    assert.deepEqual((inherited.models as Array<Record<string,unknown>>)[0]?.compat,{supportsToolChoice:false});
+    assert.deepEqual((inherited.modelOverrides as Record<string,Record<string,unknown>>).catalog?.compat,{supportsEffort:false});
+  });
+
   test("serializes custom and override thinking.efforts", () => {
     const input = {
       id: "gateway",

@@ -30,6 +30,7 @@ export function SubagentInspectCard({
   sendClient,
   agents,
   canSend,
+  canBtw = false,
   runtimeConnected,
   parentSessionId,
   liveSessionId,
@@ -45,6 +46,7 @@ export function SubagentInspectCard({
   readonly sendClient: SubagentComposerClient | null;
   readonly agents: readonly StudioAgentSnapshot[];
   readonly canSend: boolean;
+  readonly canBtw?: boolean;
   readonly runtimeConnected: boolean;
   readonly parentSessionId?: SessionId;
   readonly liveSessionId?: SessionId;
@@ -52,7 +54,7 @@ export function SubagentInspectCard({
   readonly workspaceId?: string;
   readonly loadMentions?: (trigger: "@" | "/" | "^", query: string) => Promise<readonly MentionCandidate[]>;
   readonly onClose: () => void;
-  readonly onOpenHub: (agentId: string) => void;
+  readonly onOpenHub: (agentId: string, tab?: "btw") => void;
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -155,6 +157,7 @@ export function SubagentInspectCard({
         </div>
         <SubagentMetrics {...metrics} />
         {preview ? <span className="chip gray xs">演示</span> : null}
+        <button type="button" className="btn small outline" disabled={!preview&&(!canBtw||!runtimeConnected||!agent?.hasLiveSession)} onClick={()=>requestClose(()=>onOpenHub(target.agentId,"btw"))}>BTW</button>
         <button type="button" className="btn small outline" onClick={() => requestClose(() => onOpenHub(target.agentId))}>
           前往 Agent Hub
         </button>

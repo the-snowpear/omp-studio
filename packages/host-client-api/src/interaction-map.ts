@@ -79,6 +79,7 @@ export function mapRemoteInteractionToClient(
       return {
         ...base,
         kind: "ask",
+        ...(request.acceptImages===undefined?{}:{acceptImages:request.acceptImages}),
         questions: request.questions.map((question) => ({
           id: question.id,
           question: question.question,

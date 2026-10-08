@@ -286,6 +286,7 @@ export interface StudioHostClientFacadeOptions {
   readonly github?: HostGitHubService;
   /** Optional omp stats usage adapter (heatmap / native dashboard). */
   readonly usage?: HostUsageService;
+  readonly stats?: {read(input:{filter:StatsFilter;refresh?:boolean}):Promise<StatsSnapshot>;frustration(input:FrustrationInput):Promise<FrustrationResult>};
   /** Bounded idempotency registry capacity (default 512). */
   readonly registryCapacity?: number;
 }
@@ -833,6 +834,14 @@ export class StudioHostClientFacade implements ClientTransport {
 
   async #dispatchQuery(request: ClientQueryRequest): Promise<ClientQueryResponse> {
     switch (request.queryName) {
+      case "stats.read": {const input=(request as ClientQueryRequest<"stats.read">).input;validateStatsFilter(input.filter);if(!this.#options.stats)throw unavailableError("Local statistics worker unavailable");return {ok:true,queryName:request.queryName,result:await this.#options.stats.read(input)} as ClientQueryResponse;}
+      case "prediction.query": {
+        const input=(request as ClientQueryRequest<"prediction.query">).input;
+        validatePredictionQuery(input);
+        const session=this.#runtimeSession();
+        if(!session)throw unavailableError("Prediction requires a connected Runtime");
+        return {ok:true,queryName:request.queryName,result:await session.predict(input)} as ClientQueryResponse;
+      }
       case "environment.get": {
         const result = await this.#queryEnvironment();
         return { ok: true, queryName: request.queryName, result } as ClientQueryResponse;
@@ -1100,6 +1109,7 @@ export class StudioHostClientFacade implements ClientTransport {
       case "workspace.directory.create": {
         return this.#commandWorkspaceFile(request as ClientCommandRequest<"workspace.file.create" | "workspace.directory.create">);
       }
+      case "stats.frustration": return this.#commandFrustration(request as ClientCommandRequest<"stats.frustration">);
       case "usage.openDashboard": {
         return this.#commandUsage(request as ClientCommandRequest<"usage.openDashboard">);
       }
@@ -1128,10 +1138,11 @@ export class StudioHostClientFacade implements ClientTransport {
           request as ClientCommandRequest<"plugins.setEnabled" | "skills.setEnabled" | "skills.reveal" | "skills.revealRoot">,
         );
       }
+      case "mcp.setInstructions":
       case "mcp.setEnabled":
       case "mcp.refresh":
       case "mcp.test": {
-        return this.#commandMcp(request as ClientCommandRequest<"mcp.setEnabled" | "mcp.refresh" | "mcp.test">);
+        return this.#commandMcp(request as ClientCommandRequest<"mcp.setEnabled" | "mcp.setInstructions" | "mcp.refresh" | "mcp.test">);
       }
       case "agents.definition.upsert":
       case "agents.definition.delete":
@@ -2927,7 +2938,7 @@ export class StudioHostClientFacade implements ClientTransport {
    * MCP enable/disable, refresh, and one-shot probe: Host-owned; no Runtime required.
    */
   async #commandMcp(
-    request: ClientCommandRequest<"mcp.setEnabled" | "mcp.refresh" | "mcp.test">,
+    request: ClientCommandRequest<"mcp.setEnabled" | "mcp.setInstructions" | "mcp.refresh" | "mcp.test">,
   ): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.mcp;
@@ -2952,12 +2963,16 @@ export class StudioHostClientFacade implements ClientTransport {
   }
 
   async #runMcpCommand(
-    request: ClientCommandRequest<"mcp.setEnabled" | "mcp.refresh" | "mcp.test">,
+    request: ClientCommandRequest<"mcp.setEnabled" | "mcp.setInstructions" | "mcp.refresh" | "mcp.test">,
     service: HostMcpService,
   ): Promise<void> {
     try {
       let result: ConfigWriteResult | McpTestResult;
       switch (request.commandName) {
+        case "mcp.setInstructions":
+          if (!service.setInstructions) throw clientError("CAPABILITY_UNAVAILABLE", "MCP instructions are unavailable in this Host");
+          result = await service.setInstructions(request.input as never);
+          break;
         case "mcp.setEnabled":
           result = await service.setEnabled(request.input as never);
           break;
@@ -3165,6 +3180,14 @@ export class StudioHostClientFacade implements ClientTransport {
     }
   }
 
+  async #commandFrustration(request:ClientCommandRequest<"stats.frustration">):Promise<ClientCommandAccepted> {
+    validateEnvelope(request);validateFrustrationInput(request.input);
+    const service=this.#options.stats;if(!service)throw unavailableError("Statistics worker unavailable");
+    const acceptedAt=this.#options.diagnostics.now();const replay=this.#registry.accept(request,acceptedAt);
+    if(replay){this.#replayTerminal(replay,request.requestId);return {commandName:request.commandName,requestId:request.requestId,status:"accepted",acceptedAt:replay.acceptedAt};}
+    const accepted={commandName:request.commandName,requestId:request.requestId,status:"accepted" as const,acceptedAt};this.#bus.emit({kind:"command.accepted",accepted});
+    void(async()=>{try{const result=await service.frustration(request.input);this.#emitTerminal(request.requestId,{requestId:request.requestId,commandName:request.commandName,status:"completed",result,observedAt:this.#options.diagnostics.now()});}catch(error){this.#emitTerminal(request.requestId,{requestId:request.requestId,commandName:request.commandName,status:"failed",error:toClientError(error),observedAt:this.#options.diagnostics.now()});}})();return accepted;
+  }
   async #commandUsage(request: ClientCommandRequest<"usage.openDashboard">): Promise<ClientCommandAccepted> {
     validateEnvelope(request);
     const service = this.#options.usage;
@@ -3408,3 +3431,5 @@ export class StudioHostClientFacade implements ClientTransport {
     this.#bus.emit({ kind: "command.receipt", receipt });
   }
 }
+import { validatePredictionQuery } from "@omp-studio/studio-protocol";
+import { type StatsFilter, type StatsSnapshot, type FrustrationInput, type FrustrationResult, validateStatsFilter, validateFrustrationInput } from "@omp-studio/studio-protocol";

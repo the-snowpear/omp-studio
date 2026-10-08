@@ -140,7 +140,7 @@ export function RuntimeQueueBar({
   async function act(
     kind:
       | "session.queue.edit"
-      | "session.queue.remove"
+      | "session.queue.entry.remove"
       | "session.queue.promote"
       | "session.queue.restore",
     entry: RuntimeQueueEntry,
@@ -156,7 +156,7 @@ export function RuntimeQueueBar({
         const entries = result.entries.flatMap((row) =>
           row.id !== entry.id
             ? [row]
-            : kind === "session.queue.remove"
+            : kind === "session.queue.entry.remove"
               ? []
               : [
                   {
@@ -187,7 +187,7 @@ export function RuntimeQueueBar({
       }
       if (current === epoch.current) {
         setResult(next);
-        if (kind !== "session.queue.remove") setFocusEntry(entry.id);
+        if (kind !== "session.queue.entry.remove") setFocusEntry(entry.id);
         setEditing(undefined);
       }
     } catch (cause) {
@@ -310,9 +310,9 @@ export function RuntimeQueueBar({
                       disabled={
                         busy ||
                         entry.state === "inFlight" ||
-                        !can("session.queue.remove")
+                        !can("session.queue.entry.remove")
                       }
-                      onClick={() => void act("session.queue.remove", entry)}
+                      onClick={() => void act("session.queue.entry.remove", entry)}
                     >
                       <Icon name="trash" extra="sm" />
                     </button>

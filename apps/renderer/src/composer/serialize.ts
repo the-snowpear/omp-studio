@@ -97,7 +97,7 @@ export function snapshotIsEmpty(snapshot: ComposerSnapshot): boolean {
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/iu;
 const MENTION_BOUNDARY = /[\s([{<"'`]/u;
 const IMAGE_TOKEN_RE = /\[图(\d+)\]/gu;
-const SKILL_TOKEN_RE = /\/skill:([^\s/]+)(?=\s|$)/gu;
+const SKILL_TOKEN_RE = /\/skill:([^\s/]+(?:\/[^\s/]+)?)(?=\s|$)/gu;
 const MENTION_TOKEN_RE = /@(?:"([^"]+)"|'([^']+)'|([^\s@]+))/gu;
 
 function isMentionBoundary(text: string, index: number): boolean {

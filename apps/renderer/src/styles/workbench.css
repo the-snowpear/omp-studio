@@ -2719,14 +2719,14 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .deck-cell {
   flex: 0 0 100%;
   min-width: 0;
-  max-height: min(420px, 72vh);
+  max-height: min(420px, 72vh, var(--deck-max-height, 72vh));
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 /* 预览与真实共用 .preview-queue：ver1 队列 1/N，同一窗口切换审批 / 提问，不并排两张卡 */
 .deck.preview-queue {
   height: auto;
-  max-height: min(420px, 72vh);
+  max-height: min(420px, 72vh, var(--deck-max-height, 72vh));
   overflow: visible;
 }
 .deck.preview-queue .deck-card {
@@ -2735,9 +2735,28 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   left: auto;
   right: auto;
   bottom: auto;
-  max-height: min(420px, 72vh);
+  max-height: min(420px, 72vh, var(--deck-max-height, 72vh));
   overflow-y: auto;
   border-radius: inherit;
+}
+/* Keep navigation and submission reachable when panels leave a short/narrow conversation. */
+.deck.preview-queue.is-ask .dk-stage,
+.deck.preview-queue.is-ask .ask-card { overflow: visible; }
+.deck.preview-queue .ask-card > .ask-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex-wrap: wrap;
+  background: var(--surface);
+}
+.deck.preview-queue .dk-head-end { max-width: 100%; }
+.deck.preview-queue .dk-agent { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.deck.preview-queue .dk-queue { flex-shrink: 0; }
+.deck.preview-queue .ask-card > .dk-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: var(--surface);
 }
 /* Ask 紧凑卡 / Ask 卡：与子 Agent 检查卡相同的底边变形加载与退出。不作用于 Plan 卡。 */
 .deck.is-ask-enter,

@@ -1,4 +1,5 @@
 import { invokeUpgrade } from "../runtimeUpgrade";
+import { loadRuntimeSkills } from "../skills/runtimeSkills";
 import { createPreviewModelConfig } from "../preview/modelConfigFixtures";
 import type {
   AgentDefinitionRecord,
@@ -288,6 +289,7 @@ export async function loadMentions(
   trigger: "@" | "/" | "^",
   query: string,
   files?: WorkspaceFileIndex,
+  runtimeSessionId?: string | null,
 ): Promise<MentionCandidate[]> {
   if (trigger === "^") {
     return filterMentions(await loadModelMentionCandidates(client), query);
@@ -301,6 +303,7 @@ export async function loadMentions(
       .catch(() => [] as MentionCandidate[]),
     needle.length === 0
       ? Promise.resolve([] as MentionCandidate[])
+      : runtimeSessionId !== undefined ? (runtimeSessionId ? loadRuntimeSkills(client,runtimeSessionId).then(skills=>filterMentions(skills.map(skill=>skillCandidate({name:skill.name,desc:[skill.namespace,skill.source,skill.description,skill.conflict?"名称冲突 / Name conflict":""].filter(Boolean).join(" · ")})),query)).catch(()=>[] as MentionCandidate[]) : Promise.resolve([] as MentionCandidate[]))
       : client
           .query("skills.get", {})
           .then((model) =>

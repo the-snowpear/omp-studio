@@ -610,6 +610,8 @@ function addTurnFile(
 ): void {
   if (path === undefined) return;
   const normalized = path.replaceAll("\\", "/").trim();
+  // Handler writes and SQLite row mutations are not ordinary file diffs.
+  if(/^(?:cfg|proc|local|omp|attachment|conflict):/iu.test(normalized)||/\.(?:sqlite3?|db)\//iu.test(normalized))return;
   if (!normalized || normalized.includes(" → ") || /^[a-z][a-z0-9+.-]*:\/\//iu.test(normalized)) return;
   const previous = files.get(normalized);
   files.set(normalized, previous === undefined

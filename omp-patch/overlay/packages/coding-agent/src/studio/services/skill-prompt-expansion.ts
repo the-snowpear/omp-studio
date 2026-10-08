@@ -2,7 +2,7 @@ import { buildSkillPromptMessage, type Skill } from "../../extensibility/skills"
 import { type CustomMessage, SKILL_PROMPT_MESSAGE_TYPE } from "../../session/messages";
 
 /** Same token shape the Studio composer serializes: `/skill:<name>`. */
-export const SKILL_TOKEN_RE = /(?:^|\s)\/skill:([^\s/]+)(?=\s|$)/g;
+export const SKILL_TOKEN_RE = /(?:^|\s)\/skill:([^\s/]+(?:\/[^\s/]+)?)(?=\s|$)/g;
 
 export type SkillPromptExpansionSession = {
 	readonly skills?: readonly Pick<Skill, "name" | "filePath" | "baseDir">[];

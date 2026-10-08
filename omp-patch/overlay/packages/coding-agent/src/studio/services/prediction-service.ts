@@ -9,17 +9,19 @@ import {
 } from "@oh-my-pi/pi-tui/prompt/word-completion";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { cfgSpellingAutocomplete } from "../../modes/settings";
-import { TextPredictionClient, resolveTextPredictMethod } from "../../predict/client";
+import { resolveTextPredictMethod } from "../../predict/client";
+import { StudioPredictionEngine, type StudioPredictionQuery } from "./prediction-engine";
+import type { PredictionControlAction } from "../prediction-protocol";
 import { readForeignPrompts } from "../../predict/foreign-history";
-import { ensureSmolLmWeights, smolLmWeightsReady, SMOLLM_TOTAL_BYTES } from "../../predict/smollm-weights";
+
 import type { AgentSession } from "../../session/agent-session";
 import {
 	validatePredictionInput,
-	type PredictionOperation,
+	type PredictionChannelOperation,
 	type PredictionSettings,
 	type PredictionEvent,
 	type PredictionInput,
-} from "../prediction-protocol";
+} from "../prediction-channel-protocol";
 import { SessionControlError } from "./session-control-service";
 interface Channel {
 	id: string;
@@ -46,17 +48,35 @@ export function predictionSocketName(id: string): string {
 }
 /** Native completion/prose gates; typed settings over Bridge, draft text only over private sockets. */
 export class StudioPredictionService {
-	readonly #client = new TextPredictionClient("studio", false);
+	readonly #engine: StudioPredictionEngine;
+	readonly directory: string | undefined;
+	get running(): boolean {
+		return this.#engine.running || [...this.#channels.values()].some(channel => channel.importing);
+	}
+	query(input: StudioPredictionQuery) {
+		return this.#engine.query(input);
+	}
+	control(action: PredictionControlAction) {
+		return this.#engine.control(action);
+	}
+	observeSent(id: string, text: string) {
+		return this.#engine.observeSent(id, text);
+	}
 	readonly #channels = new Map<string, Channel>();
-	#download: PredictionSettings["download"] = { state: "idle", bytes: 0, total: SMOLLM_TOTAL_BYTES };
-	#downloadController: AbortController | undefined;
 	#disposed = false;
 	readonly #unsubscribe: () => void;
 	constructor(
-		readonly session: AgentSession,
-		readonly directory = process.env.OMP_STUDIO_MEDIA_ROOT,
+		readonly session: Pick<AgentSession, "sessionId" | "settings"> &
+			Partial<Pick<AgentSession, "registerSessionChangeCallback" | "subscribe">>,
+		directoryOrOptions: string | ConstructorParameters<typeof StudioPredictionEngine>[1] = process.env
+			.OMP_STUDIO_MEDIA_ROOT,
 		readonly socketDirectory = process.env.OMP_STUDIO_SOCKET_DIR,
 	) {
+		this.directory = typeof directoryOrOptions === "string" ? directoryOrOptions : process.env.OMP_STUDIO_MEDIA_ROOT;
+		this.#engine = new StudioPredictionEngine(
+			session,
+			typeof directoryOrOptions === "object" ? directoryOrOptions : {},
+		);
 		this.#unsubscribe =
 			session.registerSessionChangeCallback?.(() => {
 				for (const channel of this.#channels.values()) this.#close(channel);
@@ -67,19 +87,32 @@ export class StudioPredictionService {
 			throw new SessionControlError("COMMAND_BLOCKED", "Prediction requires the current session");
 	}
 	async #status(): Promise<PredictionSettings> {
-		const method = cfgSpellingAutocomplete.get(this.session.settings),
-			ready = await smolLmWeightsReady();
+		const method = cfgSpellingAutocomplete.get(this.session.settings);
+		const status = await this.#engine.control("status");
 		return {
 			method,
 			effective:
-				method === "off" ? "off" : method === "smollm" && !ready ? "ngram" : resolveTextPredictMethod(method),
+				method === "off"
+					? "off"
+					: method === "smollm" && !status.modelReady
+						? "ngram"
+						: resolveTextPredictMethod(method),
 			source: this.session.settings.getProvenance(cfgSpellingAutocomplete),
-			download: ready
-				? { state: "ready", bytes: SMOLLM_TOTAL_BYTES, total: SMOLLM_TOTAL_BYTES }
-				: { ...this.#download },
+			download: {
+				state: status.modelReady
+					? "ready"
+					: status.download.state === "running"
+						? "downloading"
+						: status.download.state === "completed"
+							? "ready"
+							: status.download.state,
+				bytes: status.download.loaded,
+				total: status.download.total,
+				...(status.download.error ? { error: status.download.error } : {}),
+			},
 		};
 	}
-	async execute(operation: PredictionOperation): Promise<unknown> {
+	async execute(operation: PredictionChannelOperation): Promise<unknown> {
 		this.#check(operation.sessionId);
 		if (operation.kind === "prediction.prepare") return this.#prepare();
 		if (operation.kind === "prediction.release") {
@@ -87,11 +120,7 @@ export class StudioPredictionService {
 			if (channel && channel.sessionId === operation.sessionId) this.#close(channel);
 			return { released: true };
 		}
-		if (operation.kind === "prediction.download.cancel") {
-			this.#downloadController?.abort();
-			this.#downloadController = undefined;
-			this.#download = { ...this.#download, state: "cancelled" };
-		}
+		if (operation.kind === "prediction.download.cancel") await this.#engine.control("cancel");
 		if (operation.kind === "prediction.clearOverride") cfgSpellingAutocomplete.clearOverride(this.session.settings);
 		if (operation.kind === "prediction.configure") {
 			cfgSpellingAutocomplete.assertWritable(operation.method);
@@ -104,12 +133,8 @@ export class StudioPredictionService {
 			}
 		}
 		const method = cfgSpellingAutocomplete.get(this.session.settings);
-		if (operation.kind === "prediction.configure" && method === "smollm") this.#downloadWeights();
-		if (method !== "smollm" && this.#downloadController) {
-			this.#downloadController.abort();
-			this.#downloadController = undefined;
-			this.#download = { ...this.#download, state: "cancelled" };
-		}
+		if (operation.kind === "prediction.configure" && method === "smollm") await this.#engine.control("download");
+		if (method !== "smollm" && this.#engine.running) await this.#engine.control("cancel");
 		if (operation.kind !== "prediction.status")
 			for (const channel of this.#channels.values()) {
 				channel.provider.setMethod(method);
@@ -117,36 +142,6 @@ export class StudioPredictionService {
 				this.#send(channel, { kind: "suggestion", channelId: channel.id, revision: 0, suffix: null });
 			}
 		return this.#status();
-	}
-	#downloadWeights(): void {
-		if (this.#downloadController) return;
-		const controller = new AbortController();
-		this.#downloadController = controller;
-		this.#download = { state: "downloading", bytes: 0, total: SMOLLM_TOTAL_BYTES };
-		void ensureSmolLmWeights({
-			signal: controller.signal,
-			onProgress: bytes => {
-				if (this.#downloadController === controller)
-					this.#download = { state: "downloading", bytes, total: SMOLLM_TOTAL_BYTES };
-			},
-		})
-			.then(
-				() => {
-					if (this.#downloadController === controller)
-						this.#download = { state: "ready", bytes: SMOLLM_TOTAL_BYTES, total: SMOLLM_TOTAL_BYTES };
-				},
-				cause => {
-					if (this.#downloadController === controller)
-						this.#download = {
-							...this.#download,
-							state: controller.signal.aborted ? "cancelled" : "failed",
-							...(controller.signal.aborted ? {} : { error: clean(cause) }),
-						};
-				},
-			)
-			.finally(() => {
-				if (this.#downloadController === controller) this.#downloadController = undefined;
-			});
 	}
 	async #prepare(): Promise<{ channelId: string; sessionId: string; expiresAt: number }> {
 		if (!this.directory || (!this.socketDirectory && process.platform !== "win32"))
@@ -170,8 +165,8 @@ export class StudioPredictionService {
 			complete: async (before, prefix) => {
 				try {
 					return (
-						(await this.#client.complete(resolveTextPredictMethod(method), before, prefix)).suggestion?.suffix ??
-						null
+						(await this.#engine.completeNative(resolveTextPredictMethod(method), before, prefix)).suggestion
+							?.suffix ?? null
 					);
 				} catch (cause) {
 					this.#send(channel, { kind: "error", channelId: id, message: clean(cause) });
@@ -179,7 +174,7 @@ export class StudioPredictionService {
 				}
 			},
 			feedback: (before, prefix, suggestion, accepted) =>
-				this.#client.backend(method).feedback(before, prefix, suggestion, accepted),
+				this.#engine.feedback(method, before, prefix, suggestion, accepted),
 		});
 		const provider = new WordCompletionProvider(backend);
 		provider.setMethod(cfgSpellingAutocomplete.get(this.session.settings));
@@ -336,7 +331,7 @@ export class StudioPredictionService {
 			if (channel.closed) throw new Error("Prediction channel closed");
 			if (!prompts.length) throw new Error("No Claude Code or Codex prompt records were found in the selected file");
 			const selected = prompts.slice(0, 2000).map(text => text.slice(0, 4096));
-			const count = await this.#client.importPrompts(selected);
+			const count = await this.#engine.importPrompts(selected);
 			for (const current of this.#channels.values()) {
 				current.provider.setMethod("off");
 				current.provider.setMethod(cfgSpellingAutocomplete.get(this.session.settings));
@@ -377,9 +372,7 @@ export class StudioPredictionService {
 	dispose(): void {
 		this.#disposed = true;
 		this.#unsubscribe();
-		this.#downloadController?.abort();
-		this.#downloadController = undefined;
 		for (const channel of this.#channels.values()) this.#close(channel);
-		this.#client.close();
+		this.#engine.dispose();
 	}
 }

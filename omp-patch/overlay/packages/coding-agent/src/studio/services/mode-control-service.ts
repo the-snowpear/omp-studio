@@ -129,7 +129,7 @@ export class StudioModeControlService {
 	#planPreviousModelState: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
 	#pendingModelSwitch: { model: Model; thinkingLevel?: ConfiguredThinkingLevel } | undefined;
 	readonly #unsubscribeSession: () => void;
-	readonly #unsubscribeModelRoles: () => void;
+	#unsubscribeModelRoles: () => void = () => {};
 
 	constructor(readonly session: AgentSession) {
 		this.#unsubscribeSession = session.subscribe(event => {
@@ -157,6 +157,12 @@ export class StudioModeControlService {
 				});
 			}
 		});
+		this.rebindSettings();
+	}
+
+	/** Rebind the scoped registry listener after the sleeping worker is recreated. */
+	rebindSettings(): void {
+		this.#unsubscribeModelRoles();
 		this.#unsubscribeModelRoles = cfgModelRoles.listen(this.session.settings, () => {
 			if (this.session.getPlanModeState()?.enabled) void this.#applyPlanModel();
 		});

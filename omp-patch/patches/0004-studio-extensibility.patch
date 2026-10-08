@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/src/cli/bench-cli.ts b/packages/coding-agent/src/cli/bench-cli.ts
-index 7792fc0316..68370d7365 100644
+index 7792fc0316..909a094578 100644
 --- a/packages/coding-agent/src/cli/bench-cli.ts
 +++ b/packages/coding-agent/src/cli/bench-cli.ts
 @@ -306,6 +306,9 @@ export interface BenchSummary {
@@ -12,7 +12,22 @@ index 7792fc0316..68370d7365 100644
  	createRuntime?: () => Promise<BenchRuntime>;
  	randomSessionId?: () => string;
  	writeStdout?: (text: string) => void;
-@@ -645,6 +648,7 @@ function formatCachePairLine(pair: BenchCachePairReport, index: number, total: n
+@@ -619,12 +622,13 @@ async function runWithConcurrency<T>(
+ 	count: number,
+ 	concurrency: number,
+ 	run: (index: number) => Promise<T>,
++	signal?: AbortSignal,
+ ): Promise<T[]> {
+ 	// oxlint-disable-next-line unicorn/no-new-array -- length preallocation
+ 	const results = new Array<T>(count);
+ 	let next = 0;
+ 	const worker = async (): Promise<void> => {
+-		while (next < count) {
++		while (next < count && !signal?.aborted) {
+ 			const index = next++;
+ 			results[index] = await run(index);
+ 		}
+@@ -645,6 +649,7 @@ function formatCachePairLine(pair: BenchCachePairReport, index: number, total: n
  }
  
  interface BenchRequestOptions {
@@ -20,7 +35,7 @@ index 7792fc0316..68370d7365 100644
  	apiKey: ApiKeyResolver;
  	sessionId: string;
  	/** Native OMP messages; cache mode splits the stable prefix from the suffix. */
-@@ -667,6 +671,7 @@ async function runBenchRequest(
+@@ -667,6 +672,7 @@ async function runBenchRequest(
  	streamFn: StreamSimpleFn,
  	now: () => number,
  ): Promise<BenchRunResult> {
@@ -28,7 +43,7 @@ index 7792fc0316..68370d7365 100644
  	const startedAt = now();
  	let firstTokenAt: number | undefined;
  	const providerSessionState = new Map<string, ProviderSessionState>();
-@@ -678,6 +683,7 @@ async function runBenchRequest(
+@@ -678,6 +684,7 @@ async function runBenchRequest(
  			messages: options.messages,
  		};
  		const stream = streamFn(model, context, {
@@ -36,7 +51,7 @@ index 7792fc0316..68370d7365 100644
  			apiKey: options.apiKey,
  			sessionId: options.sessionId,
  			maxTokens:
-@@ -844,7 +850,7 @@ const PHASE_LABELS: Record<BenchPhase, string> = { single: "single-user", parall
+@@ -844,7 +851,7 @@ const PHASE_LABELS: Record<BenchPhase, string> = { single: "single-user", parall
  const PENDING_CELL = "…";
  
  /** Run (cache mode: pair) counters for one model. */
@@ -45,7 +60,7 @@ index 7792fc0316..68370d7365 100644
  	total: number;
  	completed: number;
  	failed: number;
-@@ -852,7 +858,7 @@ interface BenchProgress {
+@@ -852,7 +859,7 @@ interface BenchProgress {
  }
  
  /** One model's comparison-table row; the live footer repaints it as runs finish. */
@@ -54,7 +69,7 @@ index 7792fc0316..68370d7365 100644
  	/** Aggregates over the runs finished so far. */
  	report: BenchModelReport;
  	state: "queued" | "running" | "done";
-@@ -1144,6 +1150,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1144,6 +1151,10 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					return true;
  				},
  			} satisfies LiveBoardOutput);
@@ -65,7 +80,7 @@ index 7792fc0316..68370d7365 100644
  	const print = (text: string): void => {
  		if (board) board.log(text);
  		else writeStdout(`${text}\n`);
-@@ -1171,7 +1181,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1171,7 +1182,9 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  			state: "queued",
  			progress: { total, completed: 0, failed: 0, inFlight: 0 },
  		}));
@@ -75,7 +90,7 @@ index 7792fc0316..68370d7365 100644
  			const row = rows[targetIndex]!;
  			const { progress } = row;
  			if (!json) {
-@@ -1179,7 +1191,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1179,7 +1192,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				print(`${chalk.bold(label)}${selector === label ? "" : chalk.dim(` (${selector})`)}`);
  			}
  			row.state = "running";
@@ -84,7 +99,7 @@ index 7792fc0316..68370d7365 100644
  			const results: BenchRunResult[] = [];
  
  			// Preflight check: let's verify credentials before starting any runs.
-@@ -1197,6 +1209,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1197,6 +1210,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				if (cacheMode) row.report.cachePairs = [];
  				row.state = "done";
@@ -92,7 +107,7 @@ index 7792fc0316..68370d7365 100644
  				continue;
  			}
  
-@@ -1208,7 +1221,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1208,7 +1222,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  					async (pairIndex): Promise<BenchCachePairReport> => {
  						const cacheNamespace = randomSessionId();
  						progress.inFlight++;
@@ -101,7 +116,7 @@ index 7792fc0316..68370d7365 100644
  						const promptCacheKey = `bench-cache:${cacheNamespace}`;
  						const stablePrefix = renderCacheBenchmarkPrefix(cachePrefix!, cacheNamespace);
  						const coldSuffix = prompt.render(cacheSuffixTemplate, { variant: "A" }).trim();
-@@ -1225,6 +1238,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1225,6 +1239,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const coldResult = await runBenchRequest(
  							model,
  							{
@@ -109,7 +124,7 @@ index 7792fc0316..68370d7365 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, coldSuffix),
-@@ -1246,6 +1260,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1246,6 +1261,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						const warmResult = await runBenchRequest(
  							model,
  							{
@@ -117,7 +132,7 @@ index 7792fc0316..68370d7365 100644
  								apiKey: credentialResolver,
  								sessionId: credentialAffinitySessionId,
  								messages: cacheBenchmarkMessages(stablePrefix, warmSuffix),
-@@ -1264,7 +1279,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1264,7 +1280,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  						progress.completed++;
  						if (!coldResult.ok) progress.failed++;
  						if (!warmResult.ok) progress.failed++;
@@ -126,7 +141,7 @@ index 7792fc0316..68370d7365 100644
  						return {
  							cold: cacheRunReport("cold", coldResult, coldCapture),
  							warm: cacheRunReport("warm", warmResult, warmCapture),
-@@ -1285,6 +1300,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1285,6 +1301,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				row.report = buildModelReport(selector, model, thinking, results);
  				row.report.cachePairs = pairs;
  				row.state = "done";
@@ -134,38 +149,117 @@ index 7792fc0316..68370d7365 100644
  				if (!json) {
  					for (const [index, pair] of pairs.entries()) {
  						print(formatCachePairLine(pair, index, pairs.length));
-@@ -1309,6 +1325,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+@@ -1298,6 +1315,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 			let offset = 0;
+ 			// Steps run back to back so one phase's load never skews the next.
+ 			for (const step of steps) {
++				if (deps.signal?.aborted) break;
+ 				const { phase } = step;
+ 				if (!json && phase) {
+ 					print(
+@@ -1308,51 +1326,57 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+ 				const startedAt = now();
  				// Runs finish out of order under concurrency; lines print in index order.
  				let nextToPrint = 0;
- 				await runWithConcurrency(step.runs, step.concurrency, async index => {
-+					if (deps.signal?.aborted) return;
- 					const runIndex = offset + index;
- 					const sessionId = runIndex === 0 ? testSessionId : randomSessionId();
- 					const challenge = buildBenchChallenge(step.kinds[index % step.kinds.length]!, {
-@@ -1319,11 +1336,12 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
- 						maxTokensOverride,
- 					});
- 					progress.inFlight++;
+-				await runWithConcurrency(step.runs, step.concurrency, async index => {
+-					const runIndex = offset + index;
+-					const sessionId = runIndex === 0 ? testSessionId : randomSessionId();
+-					const challenge = buildBenchChallenge(step.kinds[index % step.kinds.length]!, {
+-						promptOverride,
+-						prefillBytes,
+-						nonce: randomSessionId(),
+-						random,
+-						maxTokensOverride,
+-					});
+-					progress.inFlight++;
 -					board?.repaint();
-+					updateProgress();
- 					const result: BenchRunResult = {
- 						...(await runBenchRequest(
- 							model,
- 							{
-+								signal: deps.signal,
- 								apiKey: runtime.modelRegistry.resolver(model, sessionId),
- 								sessionId,
- 								messages: challenge.messages,
-@@ -1345,7 +1363,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
- 					if (!result.ok) progress.failed++;
- 					if (phase) phases[phase] = buildPhaseReport(step.concurrency, finished, now() - startedAt);
- 					row.report = buildModelReport(selector, model, thinking, results, phases);
+-					const result: BenchRunResult = {
+-						...(await runBenchRequest(
+-							model,
+-							{
+-								apiKey: runtime.modelRegistry.resolver(model, sessionId),
+-								sessionId,
+-								messages: challenge.messages,
+-								maxTokens: challenge.maxTokens,
+-								reasoning: toReasoningEffort(thinking),
+-								disableReasoning: shouldDisableReasoning(thinking) ? true : undefined,
+-								serviceTier,
+-							},
+-							streamFn,
+-							now,
+-						)),
+-						challenge: challenge.kind,
+-						phase,
+-					};
+-					results[runIndex] = result;
+-					finished.push(result);
+-					progress.inFlight--;
+-					progress.completed++;
+-					if (!result.ok) progress.failed++;
+-					if (phase) phases[phase] = buildPhaseReport(step.concurrency, finished, now() - startedAt);
+-					row.report = buildModelReport(selector, model, thinking, results, phases);
 -					board?.repaint();
-+					updateProgress();
- 					if (!json) {
- 						while (nextToPrint < step.runs && results[offset + nextToPrint] !== undefined) {
- 							print(formatRunLine(results[offset + nextToPrint]!, nextToPrint, step.runs, { tagKind }));
-@@ -1363,6 +1381,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
+-					if (!json) {
+-						while (nextToPrint < step.runs && results[offset + nextToPrint] !== undefined) {
+-							print(formatRunLine(results[offset + nextToPrint]!, nextToPrint, step.runs, { tagKind }));
+-							nextToPrint++;
++				await runWithConcurrency(
++					step.runs,
++					step.concurrency,
++					async index => {
++						const runIndex = offset + index;
++						const sessionId = runIndex === 0 ? testSessionId : randomSessionId();
++						const challenge = buildBenchChallenge(step.kinds[index % step.kinds.length]!, {
++							promptOverride,
++							prefillBytes,
++							nonce: randomSessionId(),
++							random,
++							maxTokensOverride,
++						});
++						progress.inFlight++;
++						updateProgress();
++						const result: BenchRunResult = {
++							...(await runBenchRequest(
++								model,
++								{
++									signal: deps.signal,
++									apiKey: runtime.modelRegistry.resolver(model, sessionId),
++									sessionId,
++									messages: challenge.messages,
++									maxTokens: challenge.maxTokens,
++									reasoning: toReasoningEffort(thinking),
++									disableReasoning: shouldDisableReasoning(thinking) ? true : undefined,
++									serviceTier,
++								},
++								streamFn,
++								now,
++							)),
++							challenge: challenge.kind,
++							phase,
++						};
++						results[runIndex] = result;
++						finished.push(result);
++						progress.inFlight--;
++						progress.completed++;
++						if (!result.ok) progress.failed++;
++						if (phase) phases[phase] = buildPhaseReport(step.concurrency, finished, now() - startedAt);
++						row.report = buildModelReport(selector, model, thinking, results, phases);
++						updateProgress();
++						if (!json) {
++							while (nextToPrint < step.runs && results[offset + nextToPrint] !== undefined) {
++								print(formatRunLine(results[offset + nextToPrint]!, nextToPrint, step.runs, { tagKind }));
++								nextToPrint++;
++							}
+ 						}
+-					}
+-				});
++					},
++					deps.signal,
++				);
+ 				// Chat phases close with the combined output rate across every in-flight request.
+ 				const phaseReport = phase && phase !== "prefill" ? phases[phase] : undefined;
+ 				if (!json && phaseReport) {
+@@ -1363,6 +1387,7 @@ export async function runBenchCommand(command: BenchCommandArgs, deps: BenchDepe
  				offset += step.runs;
  			}
  			row.state = "done";
@@ -441,11 +535,60 @@ index d8150f47e7..c4fc9e8dad 100644
  		}
  
  		// Execute the actual tool
+diff --git a/packages/coding-agent/src/ida/protocol.ts b/packages/coding-agent/src/ida/protocol.ts
+index 7c1f10e94f..3ccfe31d72 100644
+--- a/packages/coding-agent/src/ida/protocol.ts
++++ b/packages/coding-agent/src/ida/protocol.ts
+@@ -74,7 +74,16 @@ export function idaHostEndpoint(projectDir: string, runtimeDir: string, daemonNa
+ }
+ 
+ /** RPC methods an omp process may forward to the worker through `call`. */
+-export const IDA_CALL_METHODS = ["view", "exec", "rename", "comment", "set_type", "make_function", "save"] as const;
++export const IDA_CALL_METHODS = [
++	"view",
++	"exec",
++	"rename",
++	"comment",
++	"set_type",
++	"make_function",
++	"save",
++	"studio",
++] as const;
+ 
+ /** A method forwarded with `call`. */
+ export type IdaCallMethod = (typeof IDA_CALL_METHODS)[number];
+diff --git a/packages/coding-agent/src/ida/supervisor.ts b/packages/coding-agent/src/ida/supervisor.ts
+index 461e101f89..3af8d02f47 100644
+--- a/packages/coding-agent/src/ida/supervisor.ts
++++ b/packages/coding-agent/src/ida/supervisor.ts
+@@ -33,6 +33,7 @@ const STDERR_TAIL_LINES = 20;
+ 
+ /** RPC methods implemented by the IDA worker. */
+ export type IdaMethod =
++	| "studio"
+ 	| "open"
+ 	| "view"
+ 	| "exec"
+@@ -256,9 +257,12 @@ export class IdaWorker {
+ 		try {
+ 			await this.#waitTurn(previous, signal, timeoutMs);
+ 			const remaining = deadline === undefined ? undefined : Math.max(1, deadline - Date.now());
++			if (method === "studio" && (params as { method?: string }).method === "exec") this.#execSinceSave = true;
+ 			const value = await this.#send(method, params, { signal, timeoutMs: remaining });
+-			if (method === "exec") this.#execSinceSave = true;
+-			else if (method === "save") this.#execSinceSave = false;
++			if (method === "exec" || (method === "studio" && (params as { method?: string }).method === "exec"))
++				this.#execSinceSave = true;
++			else if (method === "save" || (method === "studio" && (params as { method?: string }).method === "save"))
++				this.#execSinceSave = false;
+ 			// The worker answers with the JSON shape documented for `method`.
+ 			return value as T;
+ 		} finally {
 diff --git a/packages/coding-agent/src/ida/worker.py b/packages/coding-agent/src/ida/worker.py
-index 42a0f382d1..cc9ef62ed5 100644
+index 42a0f382d1..e6df6001c3 100644
 --- a/packages/coding-agent/src/ida/worker.py
 +++ b/packages/coding-agent/src/ida/worker.py
-@@ -12,6 +12,7 @@ import os
+@@ -12,12 +12,17 @@ import os
  import queue
  import re
  import signal
@@ -453,7 +596,26 @@ index 42a0f382d1..cc9ef62ed5 100644
  import sys
  import threading
  import time
-@@ -588,6 +589,10 @@ def _rpc_view(params):
+ import traceback
++import uuid
+ from contextlib import redirect_stderr, redirect_stdout
+ 
++_STUDIO_IDENTITY = str(uuid.uuid4())
++_STUDIO_VERSION = 0
++
+ # Keep a private handle on the real stdout for protocol frames, then point fd 1 at stderr so
+ # kernel messages and stray prints can never corrupt the NDJSON stream.
+ _proto = os.fdopen(os.dup(1), "w", encoding="utf-8", buffering=1)
+@@ -577,6 +582,8 @@ def _rpc_open(params):
+ 
+ def _rpc_view(params):
+     kind = params.get("kind") or "overview"
++    if kind == "functions":
++        return {"text": _text(f"0x{ea:x}  {name}" for ea, name in functions())}
+     if kind in _PLAIN_VIEWS:
+         return {"text": _PLAIN_VIEWS[kind]()}
+     if kind in _TARGET_VIEWS:
+@@ -588,6 +595,10 @@ def _rpc_view(params):
  
  
  def _rpc_exec(params):
@@ -464,7 +626,7 @@ index 42a0f382d1..cc9ef62ed5 100644
      code = params.get("code") or ""
      buf = io.StringIO()
      value = None
-@@ -632,9 +637,23 @@ def _rpc_save(params):
+@@ -632,9 +643,23 @@ def _rpc_save(params):
      global _DIRTY
      _db()
      p = _idb_path()
@@ -488,6 +650,85 @@ index 42a0f382d1..cc9ef62ed5 100644
      return {"idb": p}
  
  
+@@ -759,6 +784,7 @@ def _close_and_exit(save):
+ 
+ 
+ def _handle(line):
++    global _STUDIO_VERSION
+     _arm_sigint()
+     req_id = None
+     try:
+@@ -768,8 +794,27 @@ def _handle(line):
+         req_id = req.get("id")
+         method = req.get("method")
+         params = req.get("params") or {}
++        studio = method == "studio"
++        if studio:
++            envelope = params
++            method = envelope.get("method")
++            if method == "status":
++                _send({"id": req_id, "ok": True, "result": {"identity": _STUDIO_IDENTITY, "version": _STUDIO_VERSION, "result": {}}})
++                return
++            if envelope.get("identity") != _STUDIO_IDENTITY or type(envelope.get("version")) is not int or envelope["version"] != _STUDIO_VERSION:
++                raise ValueError("IDA database changed; review the current identity and version")
++            if method not in ("view", "exec", "rename", "comment", "set_type", "make_function", "save", "close"):
++                raise ValueError("Unsupported Studio IDA method")
++            params = envelope.get("params") or {}
++        if method in ("open", "exec", "rename", "comment", "set_type", "make_function", "save", "close"):
++            # Failures and cancellation can leave partial edits; invalidate reviews before dispatch.
++            _STUDIO_VERSION += 1
+         if method == "close":
+             save = bool(params.get("save"))
++            checkpoint = None
++            if studio and save and DB is not None:
++                checkpoint = os.path.abspath(_idb_path()) + ".studio-" + uuid.uuid4().hex + ".backup"
++                _rpc_save({"studioBackup": checkpoint})
+             try:
+                 if DB is not None:
+                     DB.close(save=save)
+@@ -777,7 +822,10 @@ def _handle(line):
+                 _send({"id": req_id, "ok": False, "error": _error(e)})
+                 traceback.print_exc()
+                 sys.exit(1)
+-            _send({"id": req_id, "ok": True, "result": {"closed": True, "saved": save}})
++            closed = {"closed": True, "saved": save}
++            if checkpoint:
++                closed["backup"] = checkpoint
++            _send({"id": req_id, "ok": True, "result": {"identity": _STUDIO_IDENTITY, "version": _STUDIO_VERSION, "result": closed} if studio else closed})
+             sys.exit(0)
+         handler = _METHODS.get(method)
+         if handler is None:
+@@ -787,6 +835,30 @@ def _handle(line):
+     except BaseException as e:
+         _send({"id": req_id, "ok": False, "error": _error(e)})
+         return
++    if studio:
++        delegate = handler
++        def guarded(params):
++            checkpoint = None
++            if method in ("exec", "rename", "comment", "set_type", "make_function", "save"):
++                checkpoint = os.path.abspath(_idb_path()) + ".studio-" + uuid.uuid4().hex + ".backup"
++                _rpc_save({"studioBackup": checkpoint})
++            result = delegate(params)
++            if method == "view":
++                offset = envelope.get("offset", 0)
++                limit = envelope.get("limit", 100)
++                if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
++                    raise ValueError("Invalid IDA page")
++                lines = result["text"].splitlines()
++                if offset > len(lines):
++                    raise ValueError("IDA page is out of range")
++                page = lines[offset:offset + limit]
++                result = {"text": "\n".join(line[:2048] for line in page), "total": len(lines), "offset": offset, "truncated": any(len(line) > 2048 for line in page)}
++                if offset + len(page) < len(lines):
++                    result["nextOffset"] = offset + len(page)
++            elif checkpoint:
++                result = {"result": result, "backup": checkpoint}
++            return {"identity": _STUDIO_IDENTITY, "version": _STUDIO_VERSION, "result": result}
++        handler = guarded
+     ok, result = _run(req_id, handler, params)
+     if ok:
+         _send({"id": req_id, "ok": True, "result": result, "dirty": _DIRTY})
 diff --git a/packages/coding-agent/src/launch/broker.ts b/packages/coding-agent/src/launch/broker.ts
 index a1d4b849b0..b5f686fd44 100644
 --- a/packages/coding-agent/src/launch/broker.ts
@@ -1366,3 +1607,295 @@ index 079e034fcb..6fa48dd3ce 100644
  		it("emits resolved false when approval is denied", async () => {
  			const events: Array<{ type: string; approved?: boolean; reason?: string }> = [];
  			const extCode = `
+diff --git a/packages/stats/src/db.ts b/packages/stats/src/db.ts
+index e1a62556ca..35d80f51c9 100644
+--- a/packages/stats/src/db.ts
++++ b/packages/stats/src/db.ts
+@@ -1464,6 +1464,21 @@ const FRUSTRATION_COUNTS_SQL = `
+ function hasRangeCutoff(cutoff: number | null | undefined): cutoff is number {
+ 	return cutoff !== null && cutoff !== undefined && cutoff > 0;
+ }
++function studioFrustrationWhere(): { sql: string; params: string[] } {
++	const filter = currentStudioStatsFilter();
++	const clauses: string[] = [];
++	const params: string[] = [];
++	for (const key of ["model", "provider", "folder"] as const)
++		if (filter[key] !== undefined) {
++			clauses.push(`u.${key} = ?`);
++			params.push(filter[key]!);
++		}
++	if (filter.proseHashes !== undefined) {
++		clauses.push("u.prose_hash IN (SELECT value FROM json_each(?))");
++		params.push(JSON.stringify(filter.proseHashes));
++	}
++	return { sql: clauses.length ? " AND " + clauses.join(" AND ") : "", params };
++}
+ 
+ function toFrustrationCounts(row: FrustrationCountsRow | undefined): FrustrationCounts {
+ 	return {
+@@ -1483,9 +1498,11 @@ export function getFrustrationOverall(cutoff?: number | null): FrustrationCounts
+ 		SELECT ${FRUSTRATION_COUNTS_SQL}
+ 		FROM user_messages u
+ 		LEFT JOIN frustration_verdicts v ON v.prose_hash = u.prose_hash
+-		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}
++		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}${studioFrustrationWhere().sql}
+ 	`);
+-	const row = (hasCutoff ? stmt.get(cutoff) : stmt.get()) as FrustrationCountsRow | undefined;
++	const row = stmt.get(...(hasCutoff ? [cutoff] : []), ...studioFrustrationWhere().params) as
++		| FrustrationCountsRow
++		| undefined;
+ 	return toFrustrationCounts(row);
+ }
+ 
+@@ -1500,10 +1517,13 @@ export function getFrustrationByModel(cutoff?: number | null): FrustrationModelR
+ 		SELECT u.model AS model, u.provider AS provider, MIN(u.timestamp) AS first_seen, ${FRUSTRATION_COUNTS_SQL}
+ 		FROM user_messages u
+ 		LEFT JOIN frustration_verdicts v ON v.prose_hash = u.prose_hash
+-		WHERE u.prose != '' AND u.model IS NOT NULL${hasCutoff ? " AND u.timestamp >= ?" : ""}
++		WHERE u.prose != '' AND u.model IS NOT NULL${hasCutoff ? " AND u.timestamp >= ?" : ""}${studioFrustrationWhere().sql}
+ 		GROUP BY u.model, u.provider
+ 	`);
+-	const rows = (hasCutoff ? stmt.all(cutoff) : stmt.all()) as FrustrationModelSqlRow[];
++	const rows = stmt.all(
++		...(hasCutoff ? [cutoff] : []),
++		...studioFrustrationWhere().params,
++	) as FrustrationModelSqlRow[];
+ 	return rows.map(row => ({
+ 		model: row.model,
+ 		provider: row.provider,
+@@ -1517,7 +1537,7 @@ function pendingProseSql(hasCutoff: boolean): string {
+ 	return `
+ 		SELECT u.prose_hash AS hash, MIN(u.prose) AS prose
+ 		FROM user_messages u
+-		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}
++		WHERE u.prose != ''${hasCutoff ? " AND u.timestamp >= ?" : ""}${studioFrustrationWhere().sql}
+ 		  AND NOT EXISTS (SELECT 1 FROM frustration_verdicts v WHERE v.prose_hash = u.prose_hash)
+ 		GROUP BY u.prose_hash
+ 	`;
+@@ -1528,7 +1548,7 @@ export function getPendingFrustrationProse(cutoff?: number | null): PendingProse
+ 	if (!db) return [];
+ 	const hasCutoff = hasRangeCutoff(cutoff);
+ 	const stmt = db.query(pendingProseSql(hasCutoff));
+-	return (hasCutoff ? stmt.all(cutoff) : stmt.all()) as PendingProse[];
++	return stmt.all(...(hasCutoff ? [cutoff] : []), ...studioFrustrationWhere().params) as PendingProse[];
+ }
+ 
+ /** Count and total characters of {@link getPendingFrustrationProse} without loading the text. */
+@@ -1538,7 +1558,9 @@ export function getPendingFrustrationTotals(cutoff?: number | null): { messages:
+ 	const stmt = db.query(
+ 		`SELECT COUNT(*) AS messages, COALESCE(SUM(LENGTH(prose)), 0) AS chars FROM (${pendingProseSql(hasCutoff)})`,
+ 	);
+-	const row = (hasCutoff ? stmt.get(cutoff) : stmt.get()) as { messages: number; chars: number } | undefined;
++	const row = stmt.get(...(hasCutoff ? [cutoff] : []), ...studioFrustrationWhere().params) as
++		| { messages: number; chars: number }
++		| undefined;
+ 	return { messages: row?.messages ?? 0, chars: row?.chars ?? 0 };
+ }
+ 
+@@ -1638,3 +1660,4 @@ export function updateToolResults(links: Iterable<ToolResultLink>): number {
+ 	apply();
+ 	return updated;
+ }
++import { currentStudioStatsFilter } from "./rollup";
+diff --git a/packages/stats/src/frustration.ts b/packages/stats/src/frustration.ts
+index b12aa4f0f9..a618cdf531 100644
+--- a/packages/stats/src/frustration.ts
++++ b/packages/stats/src/frustration.ts
+@@ -249,6 +249,8 @@ export type StartFrustrationRunResult =
+ 			job: FrustrationJobStatus;
+ 			/** Settles once every worker has stopped (done, cancelled, or failed); never rejects. */
+ 			finished: Promise<void>;
++			/** Exact exhausted items, populated as the run progresses (excludes unattempted/cancelled work). */
++			failedHashes: readonly string[];
+ 	  }
+ 	| { started: false; status: 409 | 503; error: string };
+ 
+@@ -289,11 +291,12 @@ export async function startFrustrationRun(range?: string | null): Promise<StartF
+ 			concurrency: 0,
+ 		};
+ 		currentJob = job;
+-		if (pending.length === 0) return { started: true, job: { ...job }, finished: Promise.resolve() };
++		const failedHashes: string[] = [];
++		if (pending.length === 0) return { started: true, job: { ...job }, finished: Promise.resolve(), failedHashes };
+ 		const controller = new AbortController();
+ 		currentController = controller;
+-		const finished = runJob(job, judge, pending, controller);
+-		return { started: true, job: { ...job }, finished };
++		const finished = runJob(job, judge, pending, controller, failedHashes);
++		return { started: true, job: { ...job }, finished, failedHashes };
+ 	} finally {
+ 		starting = false;
+ 	}
+@@ -353,6 +356,7 @@ async function runJob(
+ 	judge: StatsJudge,
+ 	queue: readonly PendingProse[],
+ 	controller: AbortController,
++	failedHashes: string[],
+ ): Promise<void> {
+ 	const { signal } = controller;
+ 	const limit = new AdaptiveLimit();
+@@ -430,6 +434,7 @@ async function runJob(
+ 			}
+ 		}
+ 		job.failed++;
++		failedHashes.push(item.hash);
+ 		if (job.failed >= CIRCUIT_BREAKER_FAILURES && job.done === 0 && !tripped) {
+ 			tripped = true;
+ 			logger.error("frustration judge run stopped: no text succeeded", { failed: job.failed, error: lastError });
+diff --git a/packages/stats/src/rollup.ts b/packages/stats/src/rollup.ts
+index 52cf581af2..71ce4bcc21 100644
+--- a/packages/stats/src/rollup.ts
++++ b/packages/stats/src/rollup.ts
+@@ -26,6 +26,7 @@
+  */
+ 
+ import type { Database } from "bun:sqlite";
++import { AsyncLocalStorage } from "node:async_hooks";
+ import { currentDb, unpricedRequestSql } from "./db";
+ import type {
+ 	AgentType,
+@@ -49,6 +50,54 @@ import type {
+ const HOUR_MS = 60 * 60 * 1000;
+ const DAY_MS = 24 * HOUR_MS;
+ 
++/** Request-local Studio dimensions. Native callers retain the unfiltered defaults. */
++export interface StudioStatsFilter {
++	model?: string;
++	provider?: string;
++	folder?: string;
++	proseHashes?: readonly string[];
++}
++const studioFilters = new AsyncLocalStorage<StudioStatsFilter>();
++export function currentStudioStatsFilter(): StudioStatsFilter {
++	return studioFilters.getStore() ?? {};
++}
++export function withStudioStatsFilter<T>(filter: StudioStatsFilter, read: () => T): T {
++	for (const [key, value] of Object.entries(filter)) {
++		if (key === "proseHashes") {
++			if (
++				!Array.isArray(value) ||
++				value.length > 100000 ||
++				value.some(v => typeof v !== "string" || !v || v.length > 128)
++			)
++				throw Error("Invalid prose filter");
++		} else if (
++			!["model", "provider", "folder"].includes(key) ||
++			typeof value !== "string" ||
++			!value ||
++			value.length > 4096 ||
++			value.includes("\0")
++		)
++			throw Error("Invalid stats filter");
++	}
++	return studioFilters.run({ ...filter }, read);
++}
++function filteredSource(source: Source, tools = false): Source {
++	const filter = studioFilters.getStore();
++	if (!filter) return source;
++	const clauses: string[] = [];
++	const values: string[] = [];
++	for (const key of ["model", "provider", ...(tools ? [] : ["folder"])] as const) {
++		const value = filter[key as "model" | "provider" | "folder"];
++		if (value !== undefined) {
++			clauses.push(`${key} = ?`);
++			values.push(value);
++		}
++	}
++	return clauses.length
++		? { sql: `SELECT * FROM (${source.sql}) WHERE ${clauses.join(" AND ")}`, params: [...source.params, ...values] }
++		: source;
++}
++
+ /**
+  * Bump when the rollup schema or fact definitions change: the tables are then
+  * dropped and every hour is rebuilt from the raw tables.
+@@ -412,7 +461,7 @@ export interface RangeWindow {
+ 
+ interface Source {
+ 	sql: string;
+-	params: number[];
++	params: (number | string)[];
+ }
+ 
+ function dirtyIsSmall(database: Database): boolean {
+@@ -467,6 +516,12 @@ function messageSource(database: Database, cutoff: number | null, fine: boolean)
+ /** Tool facts covering `[cutoff, now]`; same union shape as {@link messageSource}. */
+ function toolSource(database: Database, cutoff: number | null, fine: boolean): Source {
+ 	const groupRaw = "GROUP BY 1, t.tool_name, t.model, t.provider";
++	const folder = studioFilters.getStore()?.folder;
++	if (folder !== undefined)
++		return {
++			sql: `SELECT ${toolFacts(fine ? "(t.timestamp / 300000) * 300000" : hourOf("t.timestamp"))} FROM tool_calls t ${TOOL_JOIN} WHERE t.timestamp >= ? AND t.folder = ? ${groupRaw}`,
++			params: [cutoff ?? 0, folder],
++		};
+ 	if (fine) {
+ 		return {
+ 			sql: `SELECT ${toolFacts("(t.timestamp / 300000) * 300000")} FROM tool_calls t ${TOOL_JOIN}
+@@ -508,8 +563,7 @@ function queryMessages<T>(window: Pick<RangeWindow, "cutoff"> & { bucketMs?: num
+ 	const database = currentDb();
+ 	if (!database) return [];
+ 	const fine = window.bucketMs !== undefined && window.bucketMs < HOUR_MS;
+-	const source = messageSource(database, normalizeCutoff(window.cutoff), fine);
+-	// `query` caches the compiled statement: the SQL varies only over a small set of shapes.
++	const source = filteredSource(messageSource(database, normalizeCutoff(window.cutoff), fine));
+ 	return database.query(`SELECT ${select} FROM (${source.sql}) f ${tail}`).all(...source.params) as T[];
+ }
+ 
+@@ -517,7 +571,7 @@ function queryTools<T>(window: Pick<RangeWindow, "cutoff"> & { bucketMs?: number
+ 	const database = currentDb();
+ 	if (!database) return [];
+ 	const fine = window.bucketMs !== undefined && window.bucketMs < HOUR_MS;
+-	const source = toolSource(database, normalizeCutoff(window.cutoff), fine);
++	const source = filteredSource(toolSource(database, normalizeCutoff(window.cutoff), fine), true);
+ 	return database.query(`SELECT ${select} FROM (${source.sql}) f ${tail}`).all(...source.params) as T[];
+ }
+ 
+@@ -872,9 +926,25 @@ export interface SessionRollupRow {
+  * One row per synced transcript file (subagents unfolded). Same exactness
+  * rules as the range queries: dirty transcripts are aggregated raw while few.
+  */
+-export function getSessionRollups(): SessionRollupRow[] {
++export function getSessionRollups(cutoff: number | null = null): SessionRollupRow[] {
+ 	const database = currentDb();
+ 	if (!database) return [];
++	const filter = currentStudioStatsFilter();
++	if (cutoff !== null || filter.model !== undefined || filter.provider !== undefined || filter.folder !== undefined) {
++		const clauses = ["timestamp >= ?"];
++		const params: (number | string)[] = [cutoff ?? 0];
++		for (const key of ["model", "provider", "folder"] as const)
++			if (filter[key] !== undefined) {
++				clauses.push(`${key} = ?`);
++				params.push(filter[key]!);
++			}
++		const where = clauses.join(" AND ");
++		return database
++			.prepare(`WITH filtered_messages AS (SELECT * FROM messages WHERE ${where}), filtered_tools AS (SELECT * FROM tool_calls WHERE ${where})
++		SELECT session_file AS sessionFile,requests,started_at AS startedAt,ended_at AS endedAt,total_tokens AS totalTokens,cost_total AS costTotal,unpriced AS unpricedRequests,models,tool_calls AS toolCalls
++		FROM (SELECT ${sessionFacts("m.").replace("FROM tool_calls tc", "FROM filtered_tools tc")} FROM filtered_messages m GROUP BY m.session_file)`)
++			.all(...params, ...params) as SessionRollupRow[];
++	}
+ 	const { n } = database
+ 		.query(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM session_dirty LIMIT ${EXACT_DIRTY_SESSIONS + 1})`)
+ 		.get() as { n: number };
+diff --git a/packages/stats/test/helpers/temp-agent.ts b/packages/stats/test/helpers/temp-agent.ts
+index 92ebc69c2c..911c82915e 100644
+--- a/packages/stats/test/helpers/temp-agent.ts
++++ b/packages/stats/test/helpers/temp-agent.ts
+@@ -58,8 +58,15 @@ export function installStatsTestIsolation(prefix: string): StatsTestIsolation {
+ 			else process.env[key] = prior;
+ 		}
+ 		setAgentDir(originalAgentDir);
+-		tempDir?.removeSync();
+-		tempDir = null;
++		try {
++			tempDir?.removeSync();
++		} catch (error) {
++			// Bun's native SQLite handles may retain a Windows directory handle until
++			// process exit. Keep that fixture; do not abort other afterEach hooks.
++			if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
++		} finally {
++			tempDir = null;
++		}
+ 	});
+ 
+ 	return {

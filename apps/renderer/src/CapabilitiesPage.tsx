@@ -1,6 +1,8 @@
 import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
 import { IdaPane } from "./capabilities/IdaPane";
 import { SkillsharePane } from "./skillshare/SkillsharePane";
+import { loadRuntimeSkills } from "./skills/runtimeSkills";
+import { ResourcesPane } from "./capabilities/ResourcesPane";
 import { McpRuntimePane, PromptTemplatesPane } from "./capabilities/RuntimeCatalogPanes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -43,7 +45,7 @@ import { usePreviewMode } from "./preview/PreviewContext";
 
 export const CAP_INTENT_KEY = "omp.capIntent";
 
-export type CapTab = "skills" | "plugins" | "mcp" | "slash" | "ida";
+export type CapTab = "skills" | "plugins" | "mcp" | "slash" | "ida" | "resources";
 
 type CapIntent = { tab?: CapTab; name?: string };
 
@@ -56,6 +58,7 @@ const TABS: ReadonlyArray<readonly [CapTab, string]> = [
   ["mcp", "plug"],
   ["slash", "slash"],
   ["ida", "code"],
+  ["resources", "file"],
 ];
 
 const TAB_LABELS: Record<CapTab, string> = {
@@ -64,6 +67,7 @@ const TAB_LABELS: Record<CapTab, string> = {
   mcp: "capabilities.mcpTab",
   slash: "capabilities.slashTab",
   ida: "capabilities.idaTab",
+  resources: "capabilities.resourcesTab",
 };
 
 type McpLogView = {
@@ -291,8 +295,17 @@ export function CapabilitiesPage({
       client.query("mcp.get", {}),
       client.query("commands.getManifest", {}),
     ]);
+    let identityError: string | null = null;
     if (skillsResult.status === "fulfilled") {
-      setSkills(skillsResult.value.skills.map(skillToPreview));
+      if (sessionId) {
+        try {
+          const identities = await loadRuntimeSkills(client, sessionId);
+          setSkills(identities.map(skill => ({kind: "skill", name: skill.name,
+            desc: skill.description + (skill.conflict ? " · 名称冲突 / Name conflict" : ""),
+            src: [skill.namespace, skill.source].filter(Boolean).join(" · "),
+            scope: skill.scope ?? "runtime", path: "", enabled: true, loaded: true, session: true})));
+        } catch (error) { setSkills([]); identityError = hostErrorMessage(error, "Runtime 技能身份不可用 / Runtime skill identities unavailable"); }
+      } else setSkills(skillsResult.value.skills.map(skillToPreview));
       setPlugins(skillsResult.value.plugins.map(pluginToPreview));
     } else {
       setSkills([]);
@@ -311,19 +324,20 @@ export function CapabilitiesPage({
       : mcpResult.status === "rejected"
         ? (mcpResult.reason instanceof Error ? mcpResult.reason.message : "mcp.get failed")
         : skillsResult.value.unavailableReason ?? mcpResult.value.unavailableReason ?? null;
-    setLoadError(loadError);
-  }, [client, preview]);
+    setLoadError(identityError ?? loadError);
+  }, [client, preview, sessionId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
   const counts: Record<CapTab, number> = {
+    ida: 0,
+    resources: 0,
     skills: skills.length,
     plugins: plugins.length,
     mcp: preview ? mcp.length : mcpServers.length,
     slash: slash.length,
-    ida: 0,
   };
 
   useEffect(() => {
@@ -553,6 +567,18 @@ export function CapabilitiesPage({
     }
   };
 
+  const toggleMcpInstructions = async (server: McpServerRecord) => {
+    if (preview || !server.instructionsWritable) return;
+    await withMcpBusy(server.name, async () => {
+      try {
+        const handle = await client.command("mcp.setInstructions", {name:server.name,scope:server.scope,enabled:server.instructions === false});
+        const receipt = await waitReceipt<ConfigWriteResult>(client, handle.requestId);
+        toast(receipt.message ?? "MCP instructions updated");
+        await refresh();
+      } catch (error) { toast(error instanceof Error ? error.message : String(error)); }
+    });
+  };
+
   const renderSkills = () => {
     const fail = skills.filter((skill) => Boolean(skill.error)).length;
     const disabled = skills.filter((skill) => skill.enabled === false).length;
@@ -597,8 +623,8 @@ export function CapabilitiesPage({
                       label={t("capabilities.toggleSkillAria", { name: skill.name })}
                       onToggle={() => void toggleSkill(skill)}
                     />
-                  ) : skill.scope === "builtin" ? (
-                    <Disabled className="switch" tip={t("capabilities.scopeBuiltin")}>
+                  ) : skill.scope === "builtin" || (sessionId && !skill.path) ? (
+                    <Disabled className="switch" tip={sessionId && !skill.path ? "Runtime 身份不支持按名称修改 / Runtime identities cannot be changed by name" : t("capabilities.scopeBuiltin")}>
                       <span className="sr-only">{t("capabilities.toggleSkillAria", { name: skill.name })}</span>
                     </Disabled>
                   ) : (
@@ -610,7 +636,7 @@ export function CapabilitiesPage({
                     />
                   )}
                   <Disabled className="btn small outline" tip={CONTRACT.view}>{t("capabilities.viewDetails")}</Disabled>
-                  {skill.scope === "builtin" ? (
+                  {skill.scope === "builtin" || (sessionId && !skill.path) ? (
                     <Disabled className="icon-btn small" tip={CONTRACT.builtinDir}><Icon name="folder-open" extra="sm" /></Disabled>
                   ) : (
                     <button
@@ -781,6 +807,7 @@ export function CapabilitiesPage({
                     <span>Tools {item.tools}</span>
                     <span>Resources {item.resources}</span>
                     <span>Prompts {item.prompts}</span>
+                    <label>Instructions <Switch on={item.instructions !== false} label={`Instructions: ${item.name}`} onToggle={() => setMcp(current => current.map(entry => entry.name === item.name ? {...entry,instructions:entry.instructions === false} : entry))}/></label>
                     <span className="mono">{t("capabilities.recentCall", { time: item.last })}</span>
                   </div>
                 </div>
@@ -877,6 +904,8 @@ export function CapabilitiesPage({
                   <span>Tools {item.lastProbe?.toolCount ?? "—"}</span>
                   <span>Resources —</span>
                   <span>Prompts —</span>
+                  <label>Instructions <Switch on={item.instructions === true} label={`Instructions: ${item.name}`} disabled={!item.instructionsWritable || mcpBusy.has(item.name)} onToggle={() => void toggleMcpInstructions(item)}/></label>
+                  <span className="muted">{t("capabilities.instructionsPolicyNote")}</span>
                   <span className="mono">
                     {item.lastProbe
                       ? (item.lastProbe.ok ? item.lastProbe.detail : t("capabilities.probeFailedDetail", { detail: item.lastProbe.detail }))
@@ -948,6 +977,7 @@ export function CapabilitiesPage({
   };
 
   const tabBody = (id: CapTab) => {
+    if(id==="resources")return <ResourcesPane client={client} sessionId={sessionId} available={runtimeAvailable}/>;
     if (id === "ida") return <IdaPane client={client} sessionId={sessionId} available={runtimeAvailable} capabilities={capabilities} visible={tab === "ida"} />;
     if (id === "skills") return <><WorkspaceTabs<"local"|"registry"> id="cap-skills-view" label={zh?"技能来源":"Skill source"} value={skillsView} onChange={setSkillsView} items={[{id:"local",icon:"book",label:zh?"已发现技能":"Discovered skills"},{id:"registry",icon:"package",label:"Skillshare"}]}/><WorkspacePanel id="cap-skills-view" name="local" active={skillsView==="local"}>{renderSkills()}</WorkspacePanel><WorkspacePanel id="cap-skills-view" name="registry" active={skillsView==="registry"}><SkillsharePane client={client} sessionId={sessionId} available={runtimeAvailable&&supports("skillshare.status")} visible={tab==="skills"&&skillsView==="registry"}/></WorkspacePanel></>;
     if (id === "plugins") return renderPlugins();

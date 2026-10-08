@@ -37,6 +37,7 @@ export type RemoteInteractionRequest =
     })
   | (InteractionBase & {
       kind: "ask";
+      acceptImages?: boolean;
       questions: RemoteAskQuestion[];
     });
 

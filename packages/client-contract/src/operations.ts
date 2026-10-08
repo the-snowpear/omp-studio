@@ -1,4 +1,5 @@
 import type { WorkbenchOperation, WorkbenchResultMap } from "@omp-studio/studio-protocol";
+import type { PredictionQuery, PredictionResult } from "@omp-studio/studio-protocol";
 import type { UpgradeOperation, UpgradeResultMap } from "@omp-studio/studio-protocol";
 import type { EvaluationOperation } from "@omp-studio/studio-protocol";
 /**
@@ -90,6 +91,8 @@ import type {
 export type EmptyInput = Readonly<Record<string, never>>;
 
 export interface QueryInputMap {
+  "stats.read": {filter:StatsFilter;refresh?:boolean};
+  "prediction.query": PredictionQuery;
   "artifacts.text.read": { readonly artifactId: string };
   "artifacts.list": import("@omp-studio/studio-protocol").ArtifactListInput;
   "artifacts.storage.get": EmptyInput;
@@ -152,6 +155,8 @@ export interface QueryInputMap {
 }
 
 export interface QueryResultMap {
+  "stats.read": StatsSnapshot;
+  "prediction.query": PredictionResult;
   "artifacts.text.read": import("@omp-studio/studio-protocol").ArtifactTextResult;
   "artifacts.list": import("@omp-studio/studio-protocol").ArtifactPage;
   "artifacts.storage.get": import("@omp-studio/studio-protocol").ArtifactStorageState;
@@ -449,6 +454,7 @@ export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, Upgra
     readonly model?: string[];
     readonly definition: string;
     readonly assignment: string;
+    readonly solutionSpace?: string;
     readonly context?: string;
     readonly async?: boolean;
     readonly isolation?: string;
@@ -619,6 +625,11 @@ interface CoreCommandInputMap {
     readonly enabled: boolean;
     readonly scope?: "user" | "project";
   };
+  "mcp.setInstructions": {
+    readonly name: string;
+    readonly enabled: boolean;
+    readonly scope: "user" | "project";
+  };
   /**
    * Open the winning skill's directory in the system file manager.
    * Paths stay in the Host; the Renderer only supplies the skill name.
@@ -657,6 +668,7 @@ interface CoreCommandInputMap {
   "agents.definition.configure": AgentDefinitionConfigureInput;
   /** Open the native `omp stats` dashboard in the default browser. */
   "usage.openDashboard": EmptyInput;
+  "stats.frustration": FrustrationInput;
   /** Execute one strictly typed Host-owned Git operation. */
   "git.execute": GitExecuteInput;
   /** Execute one strictly typed GitHub CLI operation. */
@@ -715,12 +727,14 @@ interface CoreCommandResultMap {
   "skills.reveal": ConfigWriteResult;
   "skills.revealRoot": ConfigWriteResult;
   "mcp.setEnabled": ConfigWriteResult;
+  "mcp.setInstructions": ConfigWriteResult;
   "mcp.refresh": ConfigWriteResult;
   "mcp.test": McpTestResult;
   "agents.definition.upsert": ConfigWriteResult;
   "agents.definition.delete": ConfigWriteResult;
   "agents.definition.configure": ConfigWriteResult;
   "usage.openDashboard": ConfigWriteResult;
+  "stats.frustration": FrustrationResult;
   "git.execute": GitOperationResult;
   "github.execute": GitHubOperationResult;
 }
@@ -867,3 +881,4 @@ export interface ClientCommandAccepted<TName extends CommandName = CommandName> 
   readonly status: "accepted";
   readonly acceptedAt: string;
 }
+import type { StatsFilter, StatsSnapshot, FrustrationInput, FrustrationResult } from "@omp-studio/studio-protocol";

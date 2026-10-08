@@ -471,7 +471,7 @@ index 187dbaee00..bf07eac93a 100644
  	}
  
 diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
-index c8cb041ff4..8071bedfc0 100644
+index c8cb041ff4..d4d8a28d65 100644
 --- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
 +++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
 @@ -56,6 +56,7 @@ import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/m
@@ -482,6 +482,19 @@ index c8cb041ff4..8071bedfc0 100644
  import { defaultLoadModeForToolName } from "../../tools/essential-tools";
  import type { EventBus } from "../../utils/event-bus";
  import { selectRpcEntries } from "./rpc-compat";
+@@ -1325,9 +1326,9 @@ export function registerRpcPersistenceSurface(
+ 
+ /** Startup options for {@link runRpcMode}. */
+ export interface RpcModeOptions {
+-	/** `--mode rpc-ui`: route tool UI (e.g. ask) over the protocol, independently of headless extensions. */
+-	setToolUIContext?: (uiContext: ExtensionUIContext, hasUI: boolean) => void;
+-	/** `--no-ui`: extensions run with `hasUI=false` and no UI frames; tool UI and host-issued login are unaffected. */
++	/** `--mode rpc-ui`: route tool UI (ask, tool cards) over the protocol as well. */
++	setToolUIContext?: (uiContext: ExtensionUIContext | ToolUiFactory | undefined, hasUI: boolean) => void;
++	/** `--no-ui`: extensions run with `hasUI=false`; no dialog or presentation `extension_ui_request` frames are emitted. */
+ 	headless?: boolean;
+ 	subagentEventBus?: EventBus;
+ 	input?: ReadableStream<Uint8Array>;
 diff --git a/packages/coding-agent/src/modes/types.ts b/packages/coding-agent/src/modes/types.ts
 index 5cd2021395..9666b47f3d 100644
 --- a/packages/coding-agent/src/modes/types.ts

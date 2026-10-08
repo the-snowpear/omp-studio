@@ -27,7 +27,7 @@ in a pull request.
 npm install
 npm run typecheck
 npm test
-npm run check          # typecheck && test
+npm run check          # build once (includes TypeScript), then all tests once
 npm run build
 npm run preview        # Electron from source
 npm run pack:win       # unsigned Windows NSIS installer
@@ -95,7 +95,28 @@ transition), not that a fixture was copied into memory. Do not source-grep
 implementation files. Prefer the package-local test script; `npm run check`
 is the merge gate.
 
+The root `check` / `test` builds each workspace once and then runs `test:built`.
+Package-local `test` keeps its build prerequisite; `test:built` assumes current
+build output and is for orchestration only. Root `typecheck` aliases the build,
+which already checks TypeScript in every workspace.
+
+Run Runtime patch verification only for Runtime/overlay/seam changes; it no longer
+repeats the workspace gate. `--with-workspace-check` opts into both when needed;
+the old `--skip-workspace-check` argument remains harmless for existing callers.
+Metadata tests belong to packaging/signature/update changes and releases.
+Electron acceptance belongs to affected UI/lifecycle changes and release candidates.
+The streaming performance gate keeps its existing thresholds and path trigger.
+`p5:gate` verifies release artifacts and scans for private material, without
+re-running source tests. It cannot certify a real installed app from unit tests.
+
 ## Feature map
 
 Before editing a product surface, open [`doc/feature-index.md`](../doc/feature-index.md).
 That file is the map; [`AGENTS.md`](../AGENTS.md) only routes to it.
+
+
+Windows and macOS CI share one matrix definition and the same scoped gates.
+The manual CI run also builds a signed darwin-arm64 Runtime, packs the Mac app,
+and runs `scripts/full-gui-e2e.mjs` against that packaged app with an isolated
+home/profile and no paid model calls. GUI evidence is uploaded even on failure.
+This does not replace physical IME, Gatekeeper or TCC permission testing.

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseFoundationStudioRequest, validateUpgradeResult, validateRuntimeSettingValue } from "../src/index.js";
 const request=(operation:unknown)=>({type:"studio.request",requestId:"upgrade",runtimeEpoch:1,operation});
 test("new settings reject malformed values and retain all native service tiers",()=>{
- for(const tier of ["inherit","none","auto","default","flex","scale","priority"]) assert.doesNotThrow(()=>validateRuntimeSettingValue("task.agentServiceTierOverrides",{explore:tier},"setting"));
+ for(const tier of ["inherit","none","auto","default","flex","scale","priority","ultrafast"]) assert.doesNotThrow(()=>validateRuntimeSettingValue("task.agentServiceTierOverrides",{explore:tier},"setting"));
  for(const value of [-1,NaN,Infinity,1.5,2147483648]) assert.throws(()=>validateRuntimeSettingValue("images.questionTimeoutMs",value,"setting"));
  assert.throws(()=>validateRuntimeSettingValue("task.agentServiceTierOverrides",JSON.parse('{"__proto__":"priority"}'),"setting"));
  assert.throws(()=>validateRuntimeSettingValue("tools.speculativeExecution.enabled","true","setting"));

@@ -139,6 +139,20 @@ function renderPage(options: {
 }
 
 describe("CapabilitiesPage", () => {
+  it("updates MCP instructions through the owning scope and disables old Host records", async () => {
+    const client=fakeClient({servers:[mcpServer({instructions:true,instructionsWritable:true}),mcpServer({name:"legacy"})]});
+    renderPage({preview:false,client});await waitFor(()=>expect(client.query).toHaveBeenCalledWith("mcp.get",{}));
+    fireEvent.click(screen.getByRole("tab",{name:/^MCP/}));
+    fireEvent.click(screen.getByRole("switch",{name:"Instructions: filesystem"}));
+    await waitFor(()=>expect(client.command).toHaveBeenCalledWith("mcp.setInstructions",{name:"filesystem",scope:"user",enabled:false}));
+    expect((screen.getByRole("switch",{name:"Instructions: legacy"}) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps preview MCP instructions local", async () => {
+    const client=renderPage({preview:true});fireEvent.click(screen.getByRole("tab",{name:/^MCP/}));
+    const toggle=screen.getAllByRole("switch",{name:/^Instructions:/})[0]!;fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");expect(client.command).not.toHaveBeenCalled();expect(client.query).not.toHaveBeenCalled();
+  });
   it("opens a skill directory in preview without calling Host", async () => {
     const client = renderPage({ preview: true });
     fireEvent.click(screen.getByRole("button", { name: "打开来源目录：mermaid-verify" }));

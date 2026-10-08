@@ -25,8 +25,9 @@ export const MODEL_ROLE_PRIORITIES = {
     "deepinfra/black-forest-labs/FLUX-2-pro"
   ]
 };
-const SEARCH_ENGINES: ReadonlySet<string> = new Set(["perplexity","zai","exa","tinyfish","jina","kagi","tavily","firecrawl","brave","kimi","parallel","synthetic","ollama","searxng","duckduckgo","google","ecosia","startpage","mojeek","public"]);
-const isRegisteredSearchEngine = (id: string): boolean => SEARCH_ENGINES.has(id);
+/** Pure search engines, including paid engines available for explicit legacy selections. */
+export const REGISTERED_SEARCH_ENGINES = ["perplexity","zai","exa","tinyfish","jina","kagi","tavily","firecrawl","brave","kimi","parallel","synthetic","ollama","searxng","duckduckgo","google","ecosia","startpage","mojeek","public"];
+function isRegisteredSearchEngine(id: string): boolean { return REGISTERED_SEARCH_ENGINES.includes(id); }
 const MODEL_PRIO = MODEL_ROLE_PRIORITIES;
 export function migrateModelRoleConfig(source: unknown): Record<string, unknown> {
   const raw = isRecord(source) ? structuredClone(source) : {};

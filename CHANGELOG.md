@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-10-08
+
 ### Added
+
+- 浏览器侧栏观察 OMP 使用的同一标签页，支持实例与标签选择、实时画面、导航和显式排他接管；Computer Use 增加目标、权限、截图与停止入口。
+- 评测工作区加入 Ratchet：原生输入、评分器和计划审批，隔离工作区运行、轮次与费用边界、keep/revert 结果及停止控制。历史加入 Archive / Recap，诊断加入完整会话导出、GC 清理预览和连接诊断。
+- 模型配置加入原生预设、有效速度档位、缓存保温状态和账户登出；子代理显示单次模型、思考档位、候选链及父子关系。支持会话标题图标、短码和生成策略。
+- 产物库与对话支持 SVG、Mermaid、数值图表，以及 OBJ、PLY、WRL、X3DV、STL、glTF / GLB、USDA 图形预览；解析、纹理与关联文件通过本地受控通道并限制资源使用。
+
+### Changed
+
+- Runtime 固定迁移至 OMP **18.8.0**（`18.8.0-studio.20`，上游 `4ef97c8826ee012829a3e756b693a2a16a414f47`），合并 0.1.8 已发布能力；保留单 AgentSession、类型化 Bridge、原生设置注册器和生成式四组接缝补丁。[迁移说明与验收边界](docs/migrations/omp-18.8.0.md)。
+- 媒体按“生成 / 语音 / 产物库”，Agent Hub 按“代理 / 后台任务 / 服务”，评测按“模型基准 / 判断批次 / Ratchet”组织。能力中心细分 Skills、Skillshare、插件、MCP、模板、资源与 IDA。
+- 新界面复用 Studio 样式变量、页签、确认对话框、状态和错误提示，补齐明暗主题、密度、中英文以及预览与真实数据的共同展示路径。
+- 预测输入使用原生轻量本地引擎；草稿经过私有有界通道，旧查询接口保持兼容并共用学习语料、下载与清理流程。外部历史只在明确导入后学习。
+- 未显式配置时，Studio 的缓存保温默认关闭；既有显式值和独立 CLI 配置保持原样。新版完整 Setup 是应用与 Runtime 更新的兼容基线。
+
+### Fixed
+
+- 队列编辑、移除、纠偏和中止恢复保留图片与隐藏附件上下文，重连先查状态，不自动重发可能重复计费的请求；保留 0.1.8 草稿取回接口。
+- 模型缺失时保留当前会话，展示缺失模型并等待用户选择替代模型，不静默换模型。
+- 修复媒体页隐藏后仍持有播放和图形资源、服务表单与状态布局、标注提示和来源详情、录制主题、英文等待徽标压住标题，以及人工文件选择超过普通请求期限后界面失步。
+- 修复显式停止 OMP 自行启动的 Edge 时，启动进程已退出导致浏览器未关闭的问题；连接用户已有浏览器时仍只断开观察连接。
+- 新增 IDA 管理接口与旧版查看/编辑接口分开能力声明；数据库操作保留原生身份和版本校验，并在写入及保存关闭前生成可恢复副本。配置审批统一生命周期，切换会话或释放服务时撤销旧审批。
+
+### Validation
+
+- 发布以代码、迁移、补丁重放、元数据、签名工件和原生平台门禁为准。Windows 打包界面的全部图形格式、接管和资源释放人工矩阵尚未全部完成；预览截图及单元测试不等同于完整实机验收。
+- macOS 本轮保留现有 CI 与代码兼容审查，不宣称完成新的实机 GUI 验证。真实 IDA 环境、付费模型/媒体/Live/Ratchet 请求、生产 Skillshare 写入及重置券消耗未纳入默认验证。
+
+## [0.1.8] - 2026-10-01
+
+### Added
+
+- OMP 18.4.4 GUI：Runtime 消息组队列、可靠草稿取回、Ask 图片、子代理 BTW、模型服务档位与配置审批、命名空间技能、分页资源、输入预测、Stats/Frustration、Benchmark 阶段和 IDA 面板。[功能说明](docs/gui-18.4.4.md)。
 
 - macOS（Apple Silicon，macOS 13+）桌面：
   - `npm run pack:mac` 产出 ad hoc 签名的 `.app`、首装 `.dmg` 和应用内更新用 zip。内置已签名的 `omp` Runtime，并由 `audit-mac` 审计，任一项不符即失败。
@@ -27,11 +61,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Runtime overlay 升至 `studio.13`：Host 丢失时 Runtime 自行退出（macOS 父进程看门狗），Live 音频改用短 socket 路径，会话 telemetry 采用 macOS 路径规则。
+- Runtime 升至 `18.4.4-studio.38`：Host 丢失时 Runtime 自行退出（macOS 父进程看门狗），Live 音频改用短 socket 路径，会话 telemetry 采用 macOS 路径规则。
 - 标题栏按 Window Controls Overlay 的实际区域让位：修正 Windows 上右侧的过度留白，以及标题栏提示气泡被误翻到下方。
 - 产品文案不再写死“Windows”，文件管理器名称按平台显示（资源管理器 / 访达）。
 
 ### Fixed
+
+- 图片消息取回失败可按原 ID 重试恢复，Composer 恢复后确认清除，不重复插入或发送。
+- macOS 首次预测先创建私有锁目录；紧凑窗口下 Ask 翻页、附件与提交操作保持可见。
+- 精简重复构建、测试与工件门禁，保留原生、协议、签名和更新验证。Windows/macOS 实包 GUI 各通过 19 项验收；macOS arm64 为未公证的 ad hoc 签名版本。[验收记录](docs/integration-18.4.4-macos.md)。
 
 - 导航守卫改挂到 `webContents`：此前挂在 BrowserWindow 上，实际从未生效。外部 http(s) 链接改由系统浏览器打开。
 - 权限请求只对可信渲染页放行；打包版只信任随包公钥，开发用的环境变量覆盖只在未打包时生效。
@@ -182,7 +220,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - 初始正式版本发布，提供 OMP Studio 桌面工作台、Session 管理、审批模式与工具链集成。
 
-[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/the-snowpear/omp-studio/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/the-snowpear/omp-studio/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/the-snowpear/omp-studio/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/the-snowpear/omp-studio/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/the-snowpear/omp-studio/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/the-snowpear/omp-studio/compare/v0.1.4...v0.1.5

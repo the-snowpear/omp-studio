@@ -1,60 +1,23 @@
-export interface StudioIdaDatabase {
-  id: string; ref: string; name: string; path: string; state: "opening" | "open";
-  module: string; format: string; arch: string; bitness: number; busy: boolean; dirty: boolean;
-  current?: { method: string; startedAt: number };
+export const IDA_VIEWS=["overview","pseudocode","asm","functions","strings","imports","exports","xrefs"] as const;
+export type IdaView=typeof IDA_VIEWS[number];
+export type IdaEdit={action:"open";path:string}|{action:"save";dbId:string}|{action:"close";dbId:string;save:boolean}|{action:"rename";dbId:string;target:string;name:string}|{action:"comment";dbId:string;target:string;text:string;repeatable:boolean}|{action:"set_type";dbId:string;target:string;decl:string}|{action:"make_function";dbId:string;target:string}|{action:"exec";dbId:string;code:string};
+export interface IdaRow {id:string;label:string;state:"opening"|"open";dirty:boolean;busy:boolean;identity?:string;version?:number}
+export interface IdaState {available:boolean;reason?:string;databases:IdaRow[]}
+export type IdaOperation={kind:"ida.status";sessionId:string}|{kind:"ida.view";sessionId:string;dbId:string;identity:string;version:number;view:IdaView;target?:string;offset?:number}|{kind:"ida.prepare";sessionId:string;edit:IdaEdit}|{kind:"ida.commit";sessionId:string;token:string}|{kind:"ida.cancel";sessionId:string};
+export interface IdaResultMap {"ida.status":IdaState;"ida.view":{text:string;total:number;offset:number;nextOffset?:number;truncated:boolean};"ida.prepare":{token:string;edit:IdaEdit;identity?:string;version?:number;expiresAt:number};"ida.commit":{text:string};"ida.cancel":{cancelled:boolean}}
+export const IDA_KINDS=["ida.status","ida.view","ida.prepare","ida.commit","ida.cancel"] as const;
+export function isIdaKind(kind:string):kind is IdaOperation["kind"]{return (IDA_KINDS as readonly string[]).includes(kind);}
+function obj(v:unknown,keys:readonly string[]):Record<string,unknown>{if(!v||typeof v!=="object"||Array.isArray(v)||Object.keys(v).some(k=>!keys.includes(k)))throw Error("Invalid IDA fields");return v as Record<string,unknown>;}
+function text(v:unknown,max=4096,empty=false):void{if(typeof v!=="string"||(!empty&&!v.trim())||v.length>max||v.includes("\0"))throw Error("Invalid IDA text");}
+function num(v:unknown):void{if(typeof v!=="number"||!Number.isSafeInteger(v)||v<0)throw Error("Invalid IDA number");}
+export function validateIdaEdit(value:unknown):asserts value is IdaEdit{
+ const a=(value as {action?:string})?.action;const fields:Record<string,string[]>={open:["path"],save:["dbId"],close:["dbId","save"],rename:["dbId","target","name"],comment:["dbId","target","text","repeatable"],set_type:["dbId","target","decl"],make_function:["dbId","target"],exec:["dbId","code"]};if(!a||!Object.hasOwn(fields,a))throw Error("Invalid IDA action");const row=obj(value,["action",...fields[a]!]);for(const k of fields[a]!){if(k==="save"||k==="repeatable"){if(typeof row[k]!=="boolean")throw Error("Invalid IDA flag");}else text(row[k],k==="code"?65536:k==="text"?16384:4096,k==="text");}
 }
-export interface StudioIdaStatus {
-  enabled: boolean; installDir: string; python: string; detectedInstall?: string; detectedPython?: string;
-  available: boolean; reason?: string; databases: StudioIdaDatabase[];
-}
-export type StudioIdaOperation =
-  | { kind: "ida.status"; sessionId: string }
-  | { kind: "ida.configure"; sessionId: string; enabled: boolean; installDir: string; python: string }
-  | { kind: "ida.open"; sessionId: string; path: string }
-  | { kind: "ida.save"; sessionId: string; id: string }
-  | { kind: "ida.close"; sessionId: string; id: string }
-  | { kind: "ida.run"; sessionId: string; id: string; code: string; timeoutMs: number }
-  | { kind: "ida.cancel"; sessionId: string; id: string };
-export interface StudioIdaResultMap {
-  "ida.status": StudioIdaStatus;
-  "ida.configure": StudioIdaStatus;
-  "ida.open": { database: StudioIdaDatabase };
-  "ida.save": { saved: true; backup: string };
-  "ida.close": { closed: true; backup: string };
-  "ida.run": { output: string; value: string | null; error: string | null; truncated: boolean; backup: string; resultFile: string };
-  "ida.cancel": { cancelled: boolean };
-}
-export const IDA_OPERATION_KINDS = ["ida.status", "ida.configure", "ida.open", "ida.save", "ida.close", "ida.run", "ida.cancel"] as const;
-export function isIdaOperationKind(kind: string): kind is StudioIdaOperation["kind"] { return (IDA_OPERATION_KINDS as readonly string[]).includes(kind); }
-function object(value: unknown, allowed: readonly string[]): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !allowed.includes(key))) throw new Error("Invalid IDA payload"); return value as Record<string, unknown>;
-}
-function text(value: unknown, max = 4096): void { if (typeof value !== "string" || value.length > max || value.includes("\0")) throw new Error("Invalid IDA text"); }
-function bool(value: unknown): void { if (typeof value !== "boolean") throw new Error("Invalid IDA boolean"); }
-function number(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): void { if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min || value > max) throw new Error("Invalid IDA number"); }
-export function validateIdaOperation(value: unknown): void {
-  const input = object(value, ["kind", "sessionId", "enabled", "installDir", "python", "path", "id", "code", "timeoutMs"]);
-  if (typeof input.kind !== "string" || !isIdaOperationKind(input.kind)) throw new Error("Unknown IDA operation");
-  text(input.sessionId, 512); if (!input.sessionId) throw new Error("Session identity required");
-  const fields = input.kind === "ida.status" ? [] : input.kind === "ida.configure" ? ["enabled", "installDir", "python"] : input.kind === "ida.open" ? ["path"] : input.kind === "ida.run" ? ["id", "code", "timeoutMs"] : ["id"];
-  object(input, ["kind", "sessionId", ...fields]);
-  for (const field of fields) { if (field === "enabled") bool(input[field]); else if (field === "timeoutMs") number(input[field], 100, 300_000); else text(input[field], field === "code" ? 65536 : 4096); }
-  if ((fields.includes("id") && !input.id) || (fields.includes("path") && !input.path) || (fields.includes("code") && !input.code)) throw new Error("IDA target or code is empty");
-}
-function database(value: unknown): void {
-  const row = object(value, ["id", "ref", "name", "path", "state", "module", "format", "arch", "bitness", "busy", "dirty", "current"]);
-  for (const key of ["id", "ref", "name", "path", "module", "format", "arch"]) text(row[key]);
-  if (!["opening", "open"].includes(row.state as string)) throw new Error("Invalid IDA database state"); number(row.bitness); bool(row.busy); bool(row.dirty);
-  if (row.current !== undefined) { const current = object(row.current, ["method", "startedAt"]); text(current.method, 64); number(current.startedAt); }
-}
-export function validateIdaResult(kind: StudioIdaOperation["kind"], value: unknown): void {
-  if (kind === "ida.status" || kind === "ida.configure") {
-    const row = object(value, ["enabled", "installDir", "python", "detectedInstall", "detectedPython", "available", "reason", "databases"]);
-    bool(row.enabled); bool(row.available); text(row.installDir); text(row.python); for (const key of ["detectedInstall", "detectedPython", "reason"]) if (row[key] !== undefined) text(row[key]);
-    if (!Array.isArray(row.databases) || row.databases.length > 128) throw new Error("Invalid IDA database list"); row.databases.forEach(database); return;
-  }
-  if (kind === "ida.open") { database(object(value, ["database"]).database); return; }
-  if (kind === "ida.cancel") { bool(object(value, ["cancelled"]).cancelled); return; }
-  if (kind === "ida.run") { const row = object(value, ["output", "value", "error", "truncated", "backup", "resultFile"]); text(row.output, 65536); for (const key of ["value", "error"]) if (row[key] !== null) text(row[key], 65536); bool(row.truncated); text(row.backup); text(row.resultFile); return; }
-  const flag = kind === "ida.save" ? "saved" : "closed"; const row = object(value, [flag, "backup"]); if (row[flag] !== true) throw new Error("IDA operation did not complete"); text(row.backup);
+export function validateIdaOperation(value:unknown):asserts value is IdaOperation{const kind=(value as {kind?:string})?.kind;if(!kind||!isIdaKind(kind))throw Error("Invalid IDA operation");const keys=kind==="ida.view"?["dbId","identity","version","view","target","offset"]:kind==="ida.prepare"?["edit"]:kind==="ida.commit"?["token"]:[];const r=obj(value,["kind","sessionId",...keys]);text(r.sessionId,512);if(kind==="ida.prepare")validateIdaEdit(r.edit);if(kind==="ida.commit")text(r.token,128);if(kind==="ida.view"){text(r.dbId);text(r.identity,128);num(r.version);if(!IDA_VIEWS.includes(r.view as IdaView))throw Error("Invalid IDA view");if(r.target!==undefined)text(r.target);if(r.offset!==undefined)num(r.offset);}}
+export function validateIdaResult(kind:IdaOperation["kind"],value:unknown):void{
+ if(new TextEncoder().encode(JSON.stringify(value)).length>1048576)throw Error("IDA result exceeds budget");
+ if(kind==="ida.status"){const r=obj(value,["available","reason","databases"]);if(typeof r.available!=="boolean")throw Error("Invalid IDA availability");if(r.reason!==undefined)text(r.reason);if(!Array.isArray(r.databases)||r.databases.length>100)throw Error("Invalid IDA list");for(const x of r.databases){const d=obj(x,["id","label","state","dirty","busy","identity","version"]);text(d.id);text(d.label);if(!["opening","open"].includes(d.state as string)||typeof d.dirty!=="boolean"||typeof d.busy!=="boolean")throw Error("Invalid IDA status");if(d.identity!==undefined)text(d.identity,128);if(d.version!==undefined)num(d.version);}return;}
+ if(kind==="ida.view"){const r=obj(value,["text","total","offset","nextOffset","truncated"]);text(r.text,262144,true);num(r.total);num(r.offset);if(r.nextOffset!==undefined)num(r.nextOffset);if(typeof r.truncated!=="boolean")throw Error("Invalid IDA page");return;}
+ if(kind==="ida.prepare"){const r=obj(value,["token","edit","identity","version","expiresAt"]);text(r.token,128);validateIdaEdit(r.edit);num(r.expiresAt);if(r.identity!==undefined)text(r.identity,128);if(r.version!==undefined)num(r.version);return;}
+ if(kind==="ida.commit"){text(obj(value,["text"]).text,262144,true);return;}if(typeof obj(value,["cancelled"]).cancelled!=="boolean")throw Error("Invalid cancellation");
 }

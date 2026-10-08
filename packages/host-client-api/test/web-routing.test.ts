@@ -33,3 +33,22 @@ test("mirrored default candidates remain aligned with the pinned Runtime", async
   const native = JSON.parse(await readFile(new URL("../../../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/priority.json", import.meta.url), "utf8")) as Record<string, string[]>;
   assert.deepEqual(WEB_PRIORITY_1880, native.web); assert.deepEqual(MODEL_ROLE_PRIORITIES.image, native.image);
 });
+
+test("free defaults do not discard explicitly configured paid legacy engines", () => {
+  const defaults = readWebRouting({});
+  assert.equal(defaults.fallbacks, null);
+  assert.equal(defaults.defaultCandidates[1], "web/hosted");
+  assert.ok(!defaults.defaultCandidates.includes("web/perplexity"));
+  const selected = readWebRouting({ providers: { webSearchOrder: ["perplexity", "kagi"] } });
+  assert.equal(selected.primary, "web/perplexity");
+  assert.equal(selected.fallbacks![0], "web/kagi");
+});
+
+test("Gemini legacy selection preserves all native credential routes and GA image IDs", () => {
+  const routing = readWebRouting({ providers: { webSearch: "gemini", webSearchGeminiModel: "custom-flash" } });
+  assert.equal(routing.primary, "google-gemini-cli/custom-flash");
+  assert.deepEqual(routing.fallbacks!.slice(0, 2), ["google-antigravity/custom-flash", "google/custom-flash"]);
+  const root = migrateModelRoleConfig({ providers: { imageOrder: ["openai", "gemini"] } });
+  assert.equal((root.modelRoles as Record<string, string>).image, "openai/gpt-image-2");
+  assert.equal((root.retry as { fallbackChains: Record<string, string[]> }).fallbackChains.image![0], "google/gemini-3-pro-image");
+});

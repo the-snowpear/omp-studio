@@ -1,6 +1,6 @@
 export interface BenchmarkSpec {
 	models: string[];
-	profile: "chat" | "prefill" | "generation" | "mix" | "cache";
+	profile: "chat" | "prefill" | "generation" | "mix" | "cache" | "detailed";
 	runs: number;
 	concurrency: number;
 	maxTokens?: number;
@@ -26,6 +26,7 @@ export interface BenchmarkStats {
 	cost: number;
 }
 export interface BenchmarkMeasurement {
+	workloadPhase?: "single" | "parallel" | "prefill";
 	ok: boolean;
 	challenge?: "chat" | "prefill" | "generation";
 	error?: string;
@@ -46,6 +47,12 @@ export interface BenchmarkMeasurement {
 	cost?: number;
 }
 export interface BenchmarkModelResult {
+	phases?: Partial<
+		Record<
+			"single" | "parallel" | "prefill",
+			{ concurrency: number; runs: number; wallMs: number; aggregateTps: number; stats: BenchmarkStats | null }
+		>
+	>;
 	selector: string;
 	model: string;
 	state: "queued" | "running" | "done";
@@ -135,8 +142,9 @@ export function validateBenchmarkSpec(value: unknown): asserts value is Benchmar
 		text(model);
 		if (!(model as string).includes("/")) throw new Error("Use an explicit provider/model selector");
 	});
-	if (!["chat", "prefill", "generation", "mix", "cache"].includes(spec.profile as string))
+	if (!["chat", "prefill", "generation", "mix", "cache", "detailed"].includes(spec.profile as string))
 		throw new Error("Unknown benchmark profile");
+	if (spec.profile === "detailed") number(spec.concurrency, 2, 8, true);
 	number(spec.runs, 1, spec.profile === "cache" ? 10 : 20, true);
 	number(spec.concurrency, 1, spec.profile === "cache" ? 4 : 8, true);
 	if (spec.maxTokens !== undefined) number(spec.maxTokens, 1, 8192, true);
@@ -224,21 +232,29 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
 			"stats",
 			"byChallenge",
 			"measurements",
+			"phases",
 		]);
 		text(model.selector);
 		text(model.model);
 		if (!["queued", "running", "done"].includes(model.state as string)) throw new Error("Invalid model run state");
-		for (const key of ["total", "completed", "failed", "inFlight"]) number(model[key], 0, 40, true);
+		for (const key of ["total", "completed", "failed", "inFlight"]) number(model[key], 0, 80, true);
 		if (model.stats !== null) stats(model.stats);
+		if (model.phases !== undefined)
+			for (const phase of Object.values(record(model.phases, ["single", "parallel", "prefill"]))) {
+				const p = record(phase, ["concurrency", "runs", "wallMs", "aggregateTps", "stats"]);
+				for (const key of ["concurrency", "runs", "wallMs", "aggregateTps"]) number(p[key]);
+				if (p.stats !== null) stats(p.stats);
+			}
 		const groups = record(model.byChallenge, ["chat", "prefill", "generation"]);
 		Object.values(groups).forEach(stats);
-		if (!Array.isArray(model.measurements) || model.measurements.length > 20) throw new Error("Invalid measurements");
+		if (!Array.isArray(model.measurements) || model.measurements.length > 80) throw new Error("Invalid measurements");
 		for (const item of model.measurements) {
 			const measurement = record(item, [
 				"ok",
 				"challenge",
 				"error",
 				"phase",
+				"workloadPhase",
 				"cacheReadTokens",
 				"cacheWriteTokens",
 				"cacheObservations",
@@ -252,6 +268,11 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
 				"prefillTps",
 				"cost",
 			]);
+			if (
+				measurement.workloadPhase !== undefined &&
+				!["single", "parallel", "prefill"].includes(measurement.workloadPhase as string)
+			)
+				throw new Error("Invalid workload phase");
 			if (typeof measurement.ok !== "boolean") throw new Error("Invalid measurement");
 			if (measurement.error !== undefined) text(measurement.error, 4000);
 			if (
@@ -280,7 +301,8 @@ export function validateBenchmarkResult(kind: BenchmarkOperation["kind"], value:
 			)
 				throw new Error("Invalid cache observation");
 			for (const [key, value] of Object.entries(measurement))
-				if (!["ok", "error", "challenge", "phase", "cacheObservations"].includes(key)) number(value);
+				if (!["ok", "error", "challenge", "phase", "workloadPhase", "cacheObservations"].includes(key))
+					number(value);
 		}
 	}
 }

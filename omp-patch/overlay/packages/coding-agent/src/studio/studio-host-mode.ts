@@ -1,3 +1,4 @@
+import { StudioCfgService } from "./services/cfg-service";
 import { cfgLoopConditionTimeoutMs, cfgLoopMode } from "../modes/settings";
 import { cfgTaskEnableLsp } from "../task/settings";
 import { StudioLiveAudioService } from "./services/live-audio-service";
@@ -53,7 +54,6 @@ import { StudioFastPrewalkService } from "./services/fast-prewalk-service";
 import { StudioForkService } from "./services/fork-service";
 import { StudioHandoffService } from "./services/handoff-service";
 import { StudioInteractionGateway } from "./services/interaction-port";
-import { installStudioConfigurationApproval } from "./services/configuration-approval";
 import { StudioJobService, type StudioJobsPort } from "./services/job-service";
 import { StudioLiveService, type StudioLiveSessionFactory } from "./services/live-service";
 import { StudioLoopService } from "./services/loop-service";
@@ -119,7 +119,7 @@ function createSessionSlot(initial: AgentSession): StudioSessionSlot {
 					const unsubscribe = current.subscribe?.(listener as never) ?? (() => {});
 					subscriptions.set(listener, unsubscribe);
 					return () => {
-						unsubscribe();
+						subscriptions.get(listener)?.();
 						subscriptions.delete(listener);
 					};
 				};
@@ -129,7 +129,7 @@ function createSessionSlot(initial: AgentSession): StudioSessionSlot {
 					const unsubscribe = current.registerSessionChangeCallback?.(listener as never) ?? (() => {});
 					sessionChangeCallbacks.set(listener, unsubscribe);
 					return () => {
-						unsubscribe();
+						sessionChangeCallbacks.get(listener)?.();
 						sessionChangeCallbacks.delete(listener);
 					};
 				};
@@ -171,6 +171,8 @@ export interface StudioHostRuntime {
 		models: StudioModelControlService;
 		permissions?: StudioPermissionControlService;
 		settings: StudioRuntimeSettingsService;
+		cfg?: StudioCfgService;
+		prediction?: StudioPredictionService;
 		tree: StudioTreeService;
 		fork: StudioForkService;
 		handoff: StudioHandoffService;
@@ -521,12 +523,14 @@ export function createStudioHostRuntime(
 	const workbench = new StudioWorkbenchService(session, liveAudio);
 	const permissions = new StudioPermissionControlService(session);
 	const settings = new StudioRuntimeSettingsService(session);
+	const prediction = workbench.prediction;
 	session.setBeforeNextUserTurn(async () => {
 		await models.applyPending();
 		await modes.applyPending();
 		await permissions.applyPending();
 	});
 	const interaction = new StudioInteractionGateway();
+	const cfg = new StudioCfgService(session, interaction);
 	session.setResetConsentHandler?.(async ({ provider, message }) => {
 		const choice = await interaction.select({
 			commandId: `reset-consent:${provider}:${crypto.randomUUID()}`,
@@ -788,6 +792,8 @@ export function createStudioHostRuntime(
 						session: toolSession,
 						invocationKind: "task",
 						assignment: request.assignment,
+						// Until Studio has a separate rationale field, retain assignment-based auto effort.
+						solutionSpace: request.solutionSpace ?? request.assignment,
 						agent: request.definition,
 						...(request.model === undefined ? {} : { model: request.model }),
 						...(request.context === undefined ? {} : { context: request.context }),
@@ -804,6 +810,7 @@ export function createStudioHostRuntime(
 					agent: request.definition,
 					...(request.model === undefined ? {} : { model: request.model }),
 					task: request.assignment,
+					solutionSpace: request.solutionSpace ?? request.assignment,
 					...(request.context === undefined ? {} : { context: request.context }),
 					...(effort === undefined ? {} : { effort }),
 					...(request.isolation === undefined ? {} : { isolated: true }),
@@ -960,6 +967,8 @@ export function createStudioHostRuntime(
 			models,
 			permissions,
 			settings,
+			prediction,
+			cfg,
 			tree,
 			fork,
 			handoff,
@@ -1024,6 +1033,7 @@ export function createStudioHostRuntime(
 			performanceSampler.dispose();
 			session.setBeforeNextUserTurn(undefined);
 			session.setResetConsentHandler?.(undefined);
+			cfg.dispose();
 			unsubscribe();
 			unsubscribeSessionChange();
 			unsubscribeLoopPause();
@@ -1091,7 +1101,14 @@ function createStudioMainWorkerSupervisor(
 		)
 			return true;
 		if (runtime.services.workbench.skillshare.running) return true;
-		if (runtime.services.workbench.benchmarks.running || runtime.services.workbench.media.running) return true;
+		if (
+			runtime.services.workbench.ida.running ||
+			runtime.services.workbench.agentBtw.running ||
+			runtime.services.workbench.benchmarks.running ||
+			runtime.services.workbench.media.running ||
+			runtime.services.workbench.prediction.running
+		)
+			return true;
 		if (slot.isStreaming || slot.isCompacting || slot.hasPostPromptWork || slot.queuedMessageCount > 0) return true;
 		if (runtime.services.interaction.pending() !== undefined) return true;
 		return runtime.services.jobs
@@ -1196,6 +1213,8 @@ function createStudioMainWorkerSupervisor(
 			try {
 				const next = await recreateSession(sessionFile);
 				slot.replace(next);
+				runtime.services.modes.rebindSettings();
+				runtime.services.cfg?.rebind();
 				generation += 1;
 				idleSince = now();
 				emit("active");
@@ -1278,7 +1297,6 @@ export async function runStudioHostMode(
 	const stopParentWatch = (dependencies.watchParent ?? watchStudioParentFromEnv)(() =>
 		abortForHostLoss(runtime, dependencies.hostLossExit),
 	);
-	const releaseConfigurationApproval = installStudioConfigurationApproval(slot, runtime.services.interaction);
 
 	try {
 		await hydratePersistedStudioAgents(AgentRegistry.global(), sessionFileOf(slot));
@@ -1291,7 +1309,7 @@ export async function runStudioHostMode(
 		await runTui(runtime);
 	} finally {
 		stopParentWatch();
-		releaseConfigurationApproval();
+		runtime.services.cfg?.dispose();
 		unregisterCleanup();
 		try {
 			await bridge.stop();
@@ -1304,3 +1322,4 @@ export async function runStudioHostMode(
 		}
 	}
 }
+import { StudioPredictionService } from "./services/prediction-service";

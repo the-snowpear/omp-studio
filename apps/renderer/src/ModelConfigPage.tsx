@@ -662,6 +662,7 @@ type ModelEditState =
   | { kind: "add"; draft: CustomModelForm; providerId?: string };
 
 type DraftOverrideForm = {
+  bedrockMessagesApi: "" | "true" | "false";
   name: string;
   contextWindow: string;
   maxTokens: string;
@@ -684,6 +685,7 @@ type DraftOverrideForm = {
 };
 
 type CustomModelForm = {
+  bedrockMessagesApi: "" | "true" | "false";
   id: string;
   name: string;
   api: string;
@@ -747,8 +749,14 @@ function rcFromParts(
   };
 }
 
+function BedrockMessagesControl({value,onChange}:{value:""|"true"|"false";onChange:(value:""|"true"|"false")=>void}) {
+  const {t}=useI18n();
+  return <div className="field span2"><label>Bedrock Messages API</label><select className="select" aria-label="Bedrock Messages API" value={value} onChange={event=>onChange(event.target.value as ""|"true"|"false")}><option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option></select><span className="desc">{t("modelConfig.bedrockMessagesDesc")}</span></div>;
+}
+
 function blankOverrideForm(from?: DraftOverride): DraftOverrideForm {
   return {
+    bedrockMessagesApi: from?.bedrockMessagesApi === undefined ? "" : from.bedrockMessagesApi ? "true" : "false",
     name: from?.name ?? "",
     contextWindow: from?.contextWindow !== undefined ? String(from.contextWindow) : "",
     maxTokens: from?.maxTokens !== undefined ? String(from.maxTokens) : "",
@@ -773,6 +781,7 @@ function blankOverrideForm(from?: DraftOverride): DraftOverrideForm {
 
 function blankCustomForm(from?: ModelCatalogEntry): CustomModelForm {
   return {
+    bedrockMessagesApi: from?.bedrockMessagesApi === undefined ? "" : from.bedrockMessagesApi ? "true" : "false",
     id: from?.id ?? "",
     name: from?.name ?? "",
     api: from?.api ?? "inherit",
@@ -807,6 +816,8 @@ function parseOptionalNumber(text: string): number | undefined {
 
 function overrideFromForm(form: DraftOverrideForm): DraftOverride | null {
   const next: DraftOverride = {};
+  const bedrock = triState(form.bedrockMessagesApi);
+  if (bedrock !== undefined) next.bedrockMessagesApi = bedrock;
   if (form.name.trim()) next.name = form.name.trim();
   const ctx = parseOptionalNumber(form.contextWindow);
   if (ctx !== undefined) next.contextWindow = ctx;
@@ -883,6 +894,7 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
     ...(form.api && form.api !== "inherit" ? { api: form.api } : {}),
     ...(form.baseUrl.trim() ? { baseUrl: form.baseUrl.trim() } : {}),
     ...(form.omitMaxOutputTokens ? { omitMaxOutputTokens: true } : {}),
+    ...(triState(form.bedrockMessagesApi) === undefined ? {} : { bedrockMessagesApi: triState(form.bedrockMessagesApi)! }),
     ...(premium === undefined ? {} : { premiumMultiplier: premium }),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
     ...(form.contextPromotionTarget.trim() ? { contextPromotionTarget: form.contextPromotionTarget.trim() } : {}),
@@ -1040,6 +1052,7 @@ function overrideDraftEqual(left: DraftOverride | undefined, right: DraftOverrid
     && left.reasoning === right.reasoning
     && left.tools === right.tools
     && left.image === right.image
+    && left.bedrockMessagesApi === right.bedrockMessagesApi
     && left.omitMaxOutputTokens === right.omitMaxOutputTokens
     && left.premiumMultiplier === right.premiumMultiplier
     && left.contextPromotionTarget === right.contextPromotionTarget
@@ -1181,6 +1194,7 @@ function providerUpsertFromDraft(editor: Draft, contentHash?: string): ModelProv
       ...(model.api ? { api: model.api } : {}),
       ...(model.baseUrl ? { baseUrl: model.baseUrl } : {}),
       ...(model.omitMaxOutputTokens ? { omitMaxOutputTokens: true } : {}),
+      ...(model.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: model.bedrockMessagesApi }),
       ...(model.premiumMultiplier === undefined ? {} : { premiumMultiplier: model.premiumMultiplier }),
       ...(model.headers ? { headers: model.headers } : {}),
       ...(model.contextPromotionTarget ? { contextPromotionTarget: model.contextPromotionTarget } : {}),
@@ -4006,6 +4020,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                                   <option value="">{t("common.inherit")}</option><option value="true">{t("common.on")}</option><option value="false">{t("common.off")}</option>
                                 </select>
                               </div>
+                              <BedrockMessagesControl value={modelEditView.draft.bedrockMessagesApi} onChange={bedrockMessagesApi => setModelEdit({...modelEditView,draft:{...modelEditView.draft,bedrockMessagesApi}})}/>
                               <div className="field"><label>Premium Multiplier</label>
                                 <input className="input mono" placeholder={t("common.inherit")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
                               </div>
@@ -4128,6 +4143,7 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                                   <span className="desc">{t("modelConfig.omitMaxOutputTokensDesc")}</span>
                                 </span>
                               </div>
+                              <BedrockMessagesControl value={modelEditView.draft.bedrockMessagesApi} onChange={bedrockMessagesApi => setModelEdit({...modelEditView,draft:{...modelEditView.draft,bedrockMessagesApi}})}/>
                               <div className="field"><label>Premium Multiplier</label>
                                 <input className="input mono" placeholder={t("common.notSet")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
                               </div>

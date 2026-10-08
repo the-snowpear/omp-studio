@@ -70,6 +70,8 @@ import { CapabilitiesPage, setCapIntent, type CapTab } from "./CapabilitiesPage"
 import { ModelConfigPage, modelConfigHasUnsavedChanges, setModelConfigIntent } from "./ModelConfigPage";
 import { approvalPickerDisabled, ComposerApprovalPicker } from "./ComposerApprovalPicker";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { ServiceTierPicker } from "./composer/ServiceTierPicker";
+import { RuntimeQueue } from "./composer/RuntimeQueue";
 import { ComposerModePicker } from "./ComposerModePicker";
 import { ChipComposer, type ChipComposerHandle } from "./composer/ChipComposer";
 import {
@@ -83,7 +85,6 @@ import {
   type StudioSlashCommand,
 } from "./composer/commands";
 import {
-  canFlushQueuedMessage,
   composerFollowUpEnabled,
   composerOwnerSessionId,
   composerOwnsLiveSnapshot,
@@ -251,7 +252,7 @@ import { buildGitStatusLookup, GIT_STATUS_META, type TreeGitStatus } from "./git
 
 const PREVIEW_PLAN_TITLE = PREVIEW_DECK_ITEMS.find((item) => item.kind === "plan")?.title ?? "Plan";
 
-const KNOWN_ROUTES: ReadonlyArray<Route> = ["home", "workbench", "history", "agent-hub", "capabilities", "model-config", "settings", "diagnostics", "media", "evaluation"];
+const KNOWN_ROUTES: ReadonlyArray<Route> = ["home", "workbench", "history", "agent-hub", "capabilities", "model-config", "settings", "diagnostics", "media", "evaluation", "statistics"];
 
 function parseStoredRoute(value: string | undefined): Route | undefined {
   return value !== undefined && (KNOWN_ROUTES as readonly string[]).includes(value) ? (value as Route) : undefined;
@@ -300,14 +301,15 @@ type ClientStateSource = StudioClient & {
   onState?: (listener: (state: ClientState) => void) => Unsubscribe;
 };
 
-type Route = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "evaluation";
+type Route = "home" | "workbench" | "history" | "agent-hub" | "capabilities" | "model-config" | "settings" | "diagnostics" | "media" | "evaluation" | "statistics";
 type SecondaryRoute = Exclude<Route, "workbench">;
 
 function isSecondary(route: Route): route is SecondaryRoute {
-  return route === "home" || route === "history" || route === "agent-hub" || route === "capabilities" || route === "model-config" || route === "settings" || route === "diagnostics" || route === "media" || route === "evaluation";
+  return route === "home" || route === "history" || route === "agent-hub" || route === "capabilities" || route === "model-config" || route === "settings" || route === "diagnostics" || route === "media" || route === "evaluation" || route === "statistics";
 }
 
 const SECONDARY_META: Record<SecondaryRoute, { titleKey: string; icon: string }> = {
+  statistics: {titleKey:"nav.statistics",icon:"pulse"},
   home: { titleKey: "nav.home", icon: "home" },
   history: { titleKey: "nav.history", icon: "history" },
   "agent-hub": { titleKey: "nav.agentHub", icon: "bot" },
@@ -2225,6 +2227,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
         </button>
       </div>
       <div className="sb-actions">
+        <button className="action-row" aria-label={t("nav.statistics")} onClick={()=>onRoute("statistics")}><Icon name="pulse"/><span className="lbl">{t("nav.statistics")}</span></button>
         <button className="action-row new-convo-btn" aria-label={t("nav.newChat")} onClick={() => chrome.onStartNewChat()}>
           <Icon name="plus" />
           <span className="lbl">{t("nav.newChat")}</span>
@@ -2649,6 +2652,7 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
       <SkillsDrawer
         open={chrome.skillsOpen}
         client={client}
+        runtimeSessionId={liveSnapshot?.sessionId ?? null}
         onClose={chrome.onToggleSkills}
         onEnabledCountChange={chrome.onSkillsEnabledCount}
         onOpenHub={(intent) => chrome.onOpenCapabilities(intent?.tab, intent?.name)}
@@ -2843,7 +2847,7 @@ function formatTelemetryTokens(value: number): string {
 }
 
 function formatTelemetryCost(value: number): string {
-  return Number.isFinite(value) ? value.toFixed(4) : "—";
+  return Number.isFinite(value) && value>0 ? `≈$${value.toFixed(4)}` : "—";
 }
 
 function formatTelemetryTime(value: string): string {
@@ -3549,9 +3553,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const [previewSpeeds, setPreviewSpeeds] = useState<Record<string, StudioSpeed>>({});
   const queuedSeqRef = useRef(0);
   const [queueEdit, setQueueEdit] = useState<QueueEditState | undefined>(undefined);
-  const [queueFlushTick, setQueueFlushTick] = useState(0);
-  const queueFlushBusyRef = useRef(false);
-  const queueRetryAtRef = useRef(0);
   const [contextProjectMenuOpen, setContextProjectMenuOpen] = useState(false);
   const [contextProjectQuery, setContextProjectQuery] = useState("");
   const [contextBranchMenuOpen, setContextBranchMenuOpen] = useState(false);
@@ -4934,11 +4935,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       return;
     }
     if (!composerRunning) return;
-    queuedSeqRef.current += 1;
-    setQueuedMessages((queue) => [...queue, queueEntryOf(payload, queuedSeqRef.current)]);
-    composerInputRef.current?.clear();
-    setDraft(emptySnapshot());
-    setComposerError(undefined);
+    if (!can("session.queue.list")) { setComposerError("当前 Runtime 不支持消息队列，输入已保留为草稿。 / Queue unavailable; input kept as a draft."); return; }
+    void sendFollowUp();
   };
   const editQueuedMessage = (entry: QueuedMessage) => {
     const composer = takeComposerSnapshot();
@@ -5027,52 +5025,6 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       setSending(false);
     }
   };
-  // run 结束（且无 pending interaction）后按序 flush：一次发一条，等下一个 run 结束再发
-  // 下一条；busyRef 防 receipt→isStreaming 间隙内的重复触发。发送成功但新 run 瞬间完成
-  //（running 仍为 false）时靠 tick 继续排水；失败回队后设冷却窗口，防止快速持续失败
-  // （如会话切换冲突）被重新入队的依赖变化立刻重触发而形成热重试循环。
-  useEffect(() => {
-    const targetSession = composerOwner;
-    const head = queuedMessages.find((entry) => entry.sessionId === targetSession || entry.sessionId === undefined);
-    if (
-      head === undefined ||
-      queueFlushBusyRef.current ||
-      !canFlushQueuedMessage({
-        running,
-        pendingInteraction: pendingInteraction !== null,
-        promptChannelReady,
-        entryId: head.id,
-        ...(queueEdit === undefined ? {} : { pausedEntryId: queueEdit.entryId }),
-        ...(selectedSessionId === undefined ? {} : { selectedSessionId }),
-        ...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId }),
-        ...(head.sessionId === undefined ? {} : { entrySessionId: head.sessionId }),
-      })
-    ) {
-      return;
-    }
-    const retryDelay = queueRetryAtRef.current - Date.now();
-    if (retryDelay > 0) {
-      const timer = window.setTimeout(() => setQueueFlushTick((tick) => tick + 1), retryDelay);
-      return () => window.clearTimeout(timer);
-    }
-    queueFlushBusyRef.current = true;
-    setQueuedMessages((queue) => queue.filter((item) => item.id !== head.id));
-    void (async () => {
-      let sent = false;
-      try {
-        sent = await dispatchPrompt(snapshotOfEntry(head));
-        if (!sent) {
-          queueRetryAtRef.current = Date.now() + 1500;
-          setQueuedMessages((queue) => [{ ...head }, ...queue]);
-        }
-      } finally {
-        queueFlushBusyRef.current = false;
-        if (sent) window.setTimeout(() => setQueueFlushTick((tick) => tick + 1), 300);
-      }
-    })();
-    // dispatchPrompt 每渲染重建（与 sendPrompt 同风格），effect 触发时同步快照队列头，
-    // 不进依赖以免每次渲染都重启 flush。
-  }, [running, pendingInteraction, promptChannelReady, queuedMessages, queueFlushTick, composerOwner, selectedSessionId, snapshot?.sessionId, queueEdit]);
   // 一次有界遍历后本地过滤，`@` 的每次击键不再回打 Host；换项目才重建索引。
   const fileIndex = useMemo(
     () => (preview || workspaceId === undefined
@@ -5084,11 +5036,15 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     if (trigger === "/") return [];
     if (preview) return previewMentions(trigger, query);
     try {
-      return await loadMentions(client, trigger, query, fileIndex);
+      return await loadMentions(client, trigger, query, fileIndex, can("session.skills.list") ? composerOwner ?? null : null);
     } catch {
       return [];
     }
-  }, [preview, client, fileIndex]);
+  }, [preview, client, fileIndex, composerOwner, capabilities]);
+  const predictDraft = useCallback(async (before:string,prefix:string,version:number) => {
+    if(preview||!composerOwner||!can("prediction.query"))return {version,suffix:null,engine:"off" as const};
+    return client.query("prediction.query",{sessionId:composerOwner,version,before,prefix});
+  },[client,composerOwner,preview,capabilities]);
   function openChanges(focus?: { path?: string; turnId?: string }): void {
     if (focus !== undefined) {
       setChangesFocus((prev) => ({
@@ -5658,7 +5614,16 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               </div>
             ) : null}
             <div className="composer-queues">
-            <RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming)} showDemo={previewThreadId === "t1"} />
+            {(preview || can("session.queue.get")) ? (<RuntimeQueueBar client={client} sessionId={snapshot?.sessionId} capabilities={capabilities} available={runtimeConnected && executionMatches && !connection?.resyncRequired} pending={snapshot?.pendingMessages ?? 0} running={Boolean(snapshot?.isStreaming)} showDemo={previewThreadId === "t1"} />) : (!preview ? <RuntimeQueue client={client} sessionId={composerOwner} available={can("session.queue.list")} hasDraft={() => !snapshotIsEmpty(takeComposerSnapshot())} onRecover={(recovered, owner) => {
+              if (owner !== composerOwner) return;
+              const current = takeComposerSnapshot();
+              const merged = snapshotIsEmpty(current) ? recovered : {
+                text: current.text + "\n" + recovered.text,
+                images: [...current.images, ...recovered.images],
+                doc: { nodes: [...current.doc.nodes, { type: "text" as const, value: "\n" }, ...recovered.doc.nodes] },
+              };
+              setDraft(merged); composerInputRef.current?.setSnapshot(merged); composerInputRef.current?.focus();
+            }} /> : null)}
             <MessageQueueBar
               messages={sessionQueue}
               running={preview ? previewThreadId === "t1" : running}
@@ -5706,6 +5671,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 describedBy="composerHint"
                 {...(workspaceId === undefined ? {} : { workspaceId })}
                 loadMentions={fetchMentions}
+                {...(can("prediction.prepare") ? {} : { predict: predictDraft })}
                 slashCatalog={slashCatalog}
                 onRunCommand={runSlashCommand}
                 onChange={(next) => {
@@ -5861,6 +5827,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                   onRun={run}
                   openNonce={modelMenuNonce}
                 />
+                {!can("session.speed.get") ? <ServiceTierPicker client={client} sessionId={composerOwner} available={can("session.tier.get")} modelKey={JSON.stringify(snapshot?.model)} /> : null}
                 {/* 运行中且没有草稿时，发送位变停止；有草稿时保持"加入排队栏"，
                     否则会吃掉流式期间唯一的点击排队入口。编辑排队时始终是写回。 */}
                 {composerRunning && !textReady && queueEdit === undefined ? (
@@ -5925,6 +5892,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                 can("agent.send")
                 && (selectedSessionId === undefined || snapshot?.sessionId === undefined || selectedSessionId === snapshot.sessionId)
               }
+              canBtw={can("agent.btw.read") && (selectedSessionId === undefined || selectedSessionId === snapshot?.sessionId)}
               runtimeConnected={runtimeConnected}
               {...(selectedSessionId === undefined ? {} : { parentSessionId: selectedSessionId as SessionId })}
               {...(snapshot?.sessionId === undefined ? {} : { liveSessionId: snapshot.sessionId })}
@@ -5932,8 +5900,8 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               {...(workspaceId === undefined ? {} : { workspaceId })}
               loadMentions={fetchMentions}
               onClose={() => setInspectTarget(null)}
-              onOpenHub={(agentId) => {
-                setHubIntent(agentId, "chat");
+              onOpenHub={(agentId, tab) => {
+                setHubIntent(agentId, tab ?? "chat");
                 setInspectTarget(null);
                 onRoute("agent-hub");
               }}
@@ -6029,6 +5997,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
                         </button>
                       </div>
                       <div className="ag-acts">
+                        <button className="btn small outline" type="button" disabled={!agent.hasLiveSession || !can("agent.btw.read")} onClick={() => { setHubIntent(agent.agentId,"btw"); onRoute("agent-hub"); }}>BTW</button>
                         <button
                           className="icon-btn small"
                           type="button"
@@ -6460,8 +6429,8 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     if (runtime?.classification === "limited-system") return false;
     return true;
   })();
-  const setRuntimeSetting = useCallback(async (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue): Promise<void> => {
-    const input = { key, value, persist: true } as CommandInput<"runtime.settings.set">;
+  const setRuntimeSetting = useCallback(async (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist = true): Promise<void> => {
+    const input = { key, value, persist } as CommandInput<"runtime.settings.set">;
     const handle = await client.command("runtime.settings.set", input);
     await waitReceipt(client, handle.requestId);
   }, [client]);
@@ -8083,6 +8052,10 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
       return;
     }
     const input = { workspaceId, path: target.path, kind: target.kind };
+    if(action.type==="ida"){
+      const resolve=desktop?.resolveFileAbsolutePath;if(!resolve)return;
+      void resolve(input).then(absolute=>{setCapIntent("ida",absolute);setCapNonce(value=>value+1);go("capabilities");}).catch(cause=>notice(`IDA: ${messageOf(cause)}`,"alert"));return;
+    }
     if (action.type === "copyAbsolute") {
       const resolve = desktop?.resolveFileAbsolutePath;
       if (resolve === undefined) return;
@@ -8473,10 +8446,14 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             <EvaluationPage client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} available={hubRuntimeConnected} capabilities={capabilities} />
           ) : pageRoute === "model-config" ? (
             <ModelConfigPage capabilities={capabilities} onOpenEvaluation={() => go("evaluation")} key={mcNonce} client={client} sessionId={snapshot?.sessionId} workspaceId={hubWorkspaceId} runtimeAvailable={hubRuntimeConnected} />
+          ) : pageRoute === "statistics" ? (
+            <StatisticsPage client={client}/>
           ) : pageRoute === "settings" ? (
             <SettingsPage
               nativeContext={{ sessionId: snapshot?.sessionId, available: hubRuntimeConnected, capabilities }}
               client={client}
+              predictionSessionId={snapshot?.sessionId}
+              predictionAvailable={capabilities?.capabilities.some(capability=>capability.id==="prediction.control"&&capability.grade!=="unavailable")??false}
               key={settingsNonce}
               {...(snapshot ? { approvalMode } : {})}
               onSetApprovalMode={setApprovalMode}
@@ -8895,3 +8872,4 @@ export function App({ client: inputClient }: { readonly client: StudioClient }) 
     </PreviewModeProvider>
   );
 }
+import { StatisticsPage } from "./StatisticsPage";

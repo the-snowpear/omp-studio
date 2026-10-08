@@ -37,7 +37,7 @@ export class StudioRuntimeQueueService {
 				? entry.state === "held" && this.session.restoreQueuedMessage(entry.id)
 				: operation.kind === "session.queue.edit"
 					? this.session.editQueuedMessage(entry.id, entry.queue, operation.expectedText, operation.text)
-					: operation.kind === "session.queue.remove"
+					: operation.kind === "session.queue.entry.remove"
 						? this.session.removeQueuedMessage({ id: entry.id }, entry.queue)
 						: entry.queue === "followUp" && this.session.promoteQueuedMessage({ id: entry.id });
 		if (!changed)

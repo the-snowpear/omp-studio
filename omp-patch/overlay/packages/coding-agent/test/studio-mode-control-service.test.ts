@@ -143,6 +143,31 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		expect(session.model?.id).toBe(previous.id);
 	});
 
+	test("Plan role listener follows a recreated worker's settings", async () => {
+		const originalModel = session.model!;
+		const slot = new Proxy(session, {
+			get(_target, key) {
+				const value = Reflect.get(session, key, session);
+				return typeof value === "function" ? value.bind(session) : value;
+			},
+		});
+		service.dispose();
+		service = new StudioModeControlService(slot);
+		await session.dispose();
+		session = new AgentSession({
+			agent: new Agent({ initialState: { model: originalModel, systemPrompt: ["Test"], tools: [], messages: [] } }),
+			sessionManager: SessionManager.inMemory(),
+			settings: Settings.isolated(),
+			modelRegistry: new ModelRegistry(authStorage),
+		});
+		service.rebindSettings();
+		await service.enterPlan();
+		const planModel = new ModelRegistry(authStorage).find("anthropic", "claude-opus-4-6")!;
+		session.settings.setModelRole("plan", `${planModel.provider}/${planModel.id}`);
+		for (let attempt = 0; attempt < 100 && session.model?.id !== planModel.id; attempt++) await Bun.sleep(10);
+		expect(session.model?.id).toBe(planModel.id);
+	});
+
 	test("Plan applies an explicit thinking level without resetting the same model", async () => {
 		const current = session.model;
 		if (!current) throw new Error("Expected current test model");
@@ -356,6 +381,7 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		expect(runtimeSettings.activation()).toEqual({
 			configured: { "compaction.experimentalContextManagement": true },
 			restartRequired: ["compaction.experimentalContextManagement"],
+			sources: expect.objectContaining({ "compaction.experimentalContextManagement": "runtime" }),
 		});
 		cfgCompactionExperimentalContextManagement.clearOverride(session.settings);
 		const restarted = new StudioRuntimeSettingsService(session);

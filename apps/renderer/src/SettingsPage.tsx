@@ -54,7 +54,7 @@ export interface RuntimeSettingsApi {
   readonly compactionSpeculation?: StudioCompactionSpeculation;
   readonly pendingKey?: StudioRuntimeSettingKey;
   readonly error?: string;
-  readonly onSet?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue) => void | Promise<void>;
+  readonly onSet?: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist?: boolean) => void | Promise<void>;
 }
 
 const GROUP_IDS: ReadonlyArray<SettingsGroupId> = ["general", "interaction", "permissions", "context", "files", "tasks", "advanced", "native"];
@@ -85,6 +85,8 @@ export function SettingsPage({
   onSetApprovalMode,
   runtimeSettings,
   nativeContext,
+  predictionSessionId,
+  predictionAvailable = false,
 }: {
   client?: import("@omp-studio/client-contract").StudioClient;
   /** 当前 Runtime 审批模式；undefined = 无 Runtime 快照。 */
@@ -93,6 +95,8 @@ export function SettingsPage({
   /** Optional Runtime settings read/write surface; omitted on older Runtime versions. */
   runtimeSettings?: RuntimeSettingsApi;
   nativeContext?: NativePreferencesContext | undefined;
+  predictionSessionId?: string | undefined;
+  predictionAvailable?: boolean;
 }) {
   const { t, resolvedLanguage } = useI18n();
   const groups: ReadonlyArray<readonly [GroupId, string, string]> = [
@@ -151,13 +155,14 @@ export function SettingsPage({
     demoRuntime.setValue(key, Array.isArray(value) ? value.join(",") : typeof value === "object" ? JSON.stringify(value) : String(value));
   };
 
-  const setRealRuntimeSetting = async (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue): Promise<void> => {
+  const setRealRuntimeSetting = async (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist?: boolean): Promise<void> => {
     const onSet = runtimeSettings?.onSet;
     if (!onSet) return;
     setRuntimeWriteError(undefined);
     setRuntimePendingKey(key);
     try {
-      await onSet(key, value);
+      if (persist === undefined) await onSet(key, value);
+      else await onSet(key, value, persist);
     } catch (error) {
       setRuntimeWriteError(error instanceof Error && error.message.length > 0 ? error.message : t("settings.runtime.writeError"));
     } finally {
@@ -209,7 +214,7 @@ export function SettingsPage({
     const error = runtimeSettings?.error ?? runtimeWriteError;
     if (error !== undefined) runtime = { ...runtime, error };
     if (runtimeSettings?.onSet !== undefined) {
-      runtime = { ...runtime, set: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue) => { void setRealRuntimeSetting(key, value); } };
+      runtime = { ...runtime, set: (key: StudioRuntimeSettingKey, value: StudioRuntimeSettingValue, persist?: boolean) => { void setRealRuntimeSetting(key, value, persist); } };
     }
   }
 
@@ -261,9 +266,11 @@ export function SettingsPage({
           </div>
           <div {...pane("advanced")} id="set-advanced" role="tabpanel" aria-labelledby="setTab-advanced" tabIndex={0}>
             <AdvancedTab demo={demoRuntime} runtime={runtime} />
+            <PredictionSettings client={client} sessionId={predictionSessionId} available={predictionAvailable} />
           </div>
         </div>
       </div>
     </div>
   );
 }
+import { PredictionSettings } from "./settings/PredictionSettings";

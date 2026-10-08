@@ -1,3 +1,5 @@
+import { beforeEach } from "bun:test";
+import { resetSettingsForTest } from "../src/config/settings";
 import { afterEach, describe, expect, test, vi } from "bun:test";
 import { Settings } from "../src/config/settings";
 import { cfgToolsApprovalMode } from "../src/tools/settings";
@@ -7,6 +9,11 @@ import {
 	StudioPermissionControlService,
 	type StudioPermissionSession,
 } from "@oh-my-pi/pi-coding-agent/studio/services/permission-control-service";
+
+beforeEach(async () => {
+	resetSettingsForTest();
+	await Settings.init({ inMemory: true });
+});
 
 function fixture(overrides: { streaming?: boolean; compacting?: boolean; flushError?: Error } = {}) {
 	let flushed = 0;

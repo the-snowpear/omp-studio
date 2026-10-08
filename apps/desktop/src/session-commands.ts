@@ -1,5 +1,6 @@
 import { validateMaintenanceResult, type SessionExportResult, type SessionExportStatus } from "@omp-studio/studio-protocol";
 import { mediaInputArtifacts, validateMediaResult, type MediaDetail, isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
+import { validateSessionGuiResult, type QueueTakeback } from "@omp-studio/studio-protocol";
 import type { RuntimeMediaFiles } from "./runtime-media-files.js";
 import { isEvaluationOperationKind } from "@omp-studio/studio-protocol";
 /**
@@ -432,6 +433,18 @@ export function createDesktopSemanticCommands(options: {
           outputs.push({ artifactId: record.artifactId, kind: asset.kind, name: record.name, mimeType: record.mimeType, bytes: record.bytes, sha256: record.sha256 });
         }
         return { snapshot: latest, result: { ...detail, outputs } };
+      }
+      if (operation.kind === "session.queue.takeback") {
+        validateSessionGuiResult(operation.kind, receipt.result);
+        const detail = receipt.result as QueueTakeback;
+        if (!detail.images.length) return { snapshot: latest, result: detail };
+        if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop media channel is unavailable");
+        const images = [];
+        for (const asset of detail.images) {
+          const record = await options.mediaFiles.promote(mediaDirectory, operation.sessionId, mediaWorkspaceId, operation.id, asset);
+          images.push({ artifactId: record.artifactId, kind: "image" as const, name: record.name, mimeType: record.mimeType, bytes: record.bytes, sha256: record.sha256 });
+        }
+        return { snapshot: latest, result: { ...detail, images } };
       }
       if (isWorkbenchOperationKind(operation.kind) || isUpgradeOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
       if (isEvaluationOperationKind(operation.kind)) return { snapshot: latest, result: receipt.result };
