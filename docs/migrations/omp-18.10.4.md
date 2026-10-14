@@ -107,3 +107,5 @@ CI 增加 `workflow_dispatch → scope: macos-runtime`，使用 `macos-15` Apple
 首轮发布（38592561039）在 Windows x64 和 macOS 的 Worktree 回归测试中发现临时目录别名导致归属误判，未发布任何工件。现在注册表、当前目录和 Git Worktree 清单均按 realpath 比较；无法解析的目录仍拒绝清理。回归测试在各平台主动创建目录别名，覆盖归属识别和审核后文件变化的保留行为。本地 7 项相关测试通过，Runtime 因此递增为 `18.10.4-studio.8`，正式工件重新构建；上表 `studio.7` 日志仍保留为初始验收证据。
 
 `studio.8` 本地二进制已重新构建并通过身份/能力摘要探测。真实 Electron 在目录别名下完成了 Worktree 选择、进入和退出清理；视觉复查后又将自动打开接入 AppShell 的项目切换，新增断言确保工作台项目、Git 分支与活动 Runtime 一致。3 项聚焦桌面验收通过，0 次模型调用；证据为 `output/playwright/omp-18104/runtime-8-ui-worktree/report.json` 和同目录截图。
+
+最终本地完整验收又使用 Windows API 提供的真实 8.3 短路径作为 TEMP/TMP：测试会话先按桌面入口规范化 cwd，等待实际工作区选择完成，新会话等待范围对齐应用的 120 秒回执期限。30 项检查通过、0 次模型调用，报告为 `output/playwright/omp-18104/full-short-path-verified/report.json`。Windows 打包测试补齐了隔离 USERPROFILE 的标准 AppData 目录；Mac 工件复用在验签后恢复执行位并复验代码签名。ASAR 测试归档等待输出流写完再审核，未放宽审计断言。

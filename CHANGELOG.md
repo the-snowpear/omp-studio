@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Validation
 
-- Windows 本地全量检查（1,219 项 Node、787 项 Renderer）、824 项 Runtime 补丁测试、82 项工件元数据检查、29 项桌面端到端验收、旧版安装/回滚循环和 18 项流式性能门禁通过。
+- Windows 本地全量检查（1,219 项 Node、787 项 Renderer）、824 项 Runtime 补丁测试、82 项工件元数据检查、30 项桌面端到端验收、旧版安装/回滚循环和 18 项流式性能门禁通过；最终桌面验收使用真实 Windows 8.3 短路径。
 - 正式工件在 Windows x64、Windows ARM64、macOS arm64 runner 上分别重建与验收。macOS 应用采用 ad hoc 签名，未做 Apple 公证；自动化验收不代表人工 Gatekeeper、麦克风、系统输入法或付费模型服务的完整验证。凭据导入导出 GUI 仍暂缓。
 
 ## [0.1.9] - 2026-10-08

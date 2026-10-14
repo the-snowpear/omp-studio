@@ -5,7 +5,7 @@ import {existsSync} from 'node:fs';
 import {findBun} from './omp-tooling.mjs';
 import {defaultRuntimeKeysDirectory} from './runtime-signing-keys.mjs';
 import {resolveTargetPlatform} from './target-platform.mjs';
-import {mkdir,mkdtemp,readFile,writeFile,appendFile,readdir} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,writeFile,appendFile,readdir,realpath} from 'node:fs/promises';
 import {resolveDesktopPaths} from '../apps/desktop/dist/src/platform/desktop-paths.js';
 import {moveToApplicationsMarkerPath} from '../apps/desktop/dist/src/platform/app-lifecycle.js';
 import {homedir,tmpdir} from 'node:os';
@@ -24,7 +24,7 @@ const query=async(name,input={})=>{const r=await page.evaluate(async({name,input
  try{return await Promise.race([window.ompStudio.query({queryName:name,input}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Query timeout: '+name)),45000);})]);}
  finally{clearTimeout(timer);}
 },{name,input});if(!r.ok)throw Error(JSON.stringify(r.error));return r.result;};
-async function until(read,accept,label){const end=Date.now()+90000;let last;while(Date.now()<end){try{const value=await read();if(accept(value))return value;}catch(e){last=e;}await new Promise(r=>setTimeout(r,300));}throw Error(label+': '+last);}
+async function until(read,accept,label,timeoutMs=90000){const end=Date.now()+timeoutMs;let last;while(Date.now()<end){try{const value=await read();if(accept(value))return value;}catch(e){last=e;}await new Promise(r=>setTimeout(r,300));}throw Error(label+': '+last);}
 const command=async(name,input={})=>page.evaluate(({name,input})=>{
  const requestId=crypto.randomUUID();return new Promise((resolve,reject)=>{
   const timer=setTimeout(()=>{off();reject(Error('Receipt timeout: '+name));},45000);
@@ -52,7 +52,9 @@ async function predictionDiagnostics(directory,depth=0){
 
 try{
  await Promise.all(['workspace','user-data','isolated-home'].map(p=>mkdir(join(temp,p),{recursive:true})));
- const workspace=join(temp,'workspace'), transferFile=join(temp,'session-transfer.tar');
+ // Match Desktop's canonical workspace identity before calling the low-level
+ // SessionManager fixture API (Bun sync realpath retains Windows 8.3 names).
+ const workspace=await realpath(join(temp,'workspace')), transferFile=join(temp,'session-transfer.tar');
  await writeFile(join(workspace,'fixture.txt'),'Isolated Studio GUI acceptance workspace.\n');
  for(const args of [['init','-q','-b','main'],['add','.'],['commit','-qm','acceptance fixture']])execFileSync('git',['-c','user.name=Studio Acceptance','-c','user.email=acceptance@example.test',...args],{cwd:workspace,windowsHide:true,stdio:'pipe'});
  await mkdir(output,{recursive:true});
@@ -238,25 +240,31 @@ try{
  // Exercise the real fresh-session policy without sending any prompt.
  await page.evaluate(()=>localStorage.setItem('omp.previewMode','0'));
  const realUrl=new URL(page.url());realUrl.search='';await page.goto(realUrl.href);await page.waitForFunction(()=>!!window.ompStudio);
+ await page.getByText('OMP 已就绪',{exact:true}).first().waitFor({timeout:60000});
  // Preview project selections are UI-only. Select the real fixture workspace again.
  await page.getByRole('button',{name:/打开本地文件夹|Open local folder/i}).first().click();
  await until(()=>query('projects.list'),value=>value.workspaces.some(row=>row.active&&row.name==='workspace'),'real workspace selection');
+ // The Host can already be active while the UI's picker receipt is pending.
+ // Wait for the actual selection before issuing a new navigation action.
+ await page.locator('.ctx-project-switch').filter({hasText:'workspace'}).waitFor();
+ await page.locator('.ctx-git-switch').filter({hasText:'main'}).waitFor();
  const policySession=await query('session.state');
- await page.getByRole('button',{name:'新建对话',exact:true}).first().waitFor();
+ await page.locator('.new-convo-btn').waitFor();
  await command('preferences.features.set',{sessionId:policySession.sessionId,key:'worktree.onStart',value:'ask',scope:'global'});
- await page.getByRole('button',{name:'新建对话',exact:true}).first().click();
- const firstChoiceSession=await until(()=>query('session.state'),value=>value.sessionId!==policySession.sessionId,'fresh worktree choice session');
+ await page.locator('.new-convo-btn').click();
+ // Application receipts allow 120s; leave room for the following UI update.
+ const firstChoiceSession=await until(()=>query('session.state'),value=>value.sessionId!==policySession.sessionId,'fresh worktree choice session',150000);
  report.worktreeStartPolicy=(await command('worktrees.session.startPolicy',{sessionId:firstChoiceSession.sessionId})).result;
  console.log('Worktree start policy',JSON.stringify(report.worktreeStartPolicy));
  let worktreeDialog=page.getByRole('dialog',{name:/新会话工作区|New session workspace/});await worktreeDialog.waitFor();
  await capture('real-worktree-start-choice');
  await worktreeDialog.getByRole('button',{name:/留在当前工作区|Stay in this workspace/}).click();await worktreeDialog.waitFor({state:'hidden'});
- await page.getByRole('button',{name:'新建对话',exact:true}).first().click();
- const secondChoiceSession=await until(()=>query('session.state'),value=>value.sessionId!==firstChoiceSession.sessionId,'second fresh worktree choice session');
+ await page.locator('.new-convo-btn').click();
+ const secondChoiceSession=await until(()=>query('session.state'),value=>value.sessionId!==firstChoiceSession.sessionId,'second fresh worktree choice session',150000);
  if((await command('worktrees.session.startPolicy',{sessionId:secondChoiceSession.sessionId})).result.policy!=='ask')throw Error('New session did not retain the configured worktree policy');
  worktreeDialog=page.getByRole('dialog',{name:/新会话工作区|New session workspace/});await worktreeDialog.waitFor();
- await worktreeDialog.getByRole('button',{name:/创建并进入|Create and open/}).click();await worktreeDialog.waitFor({state:'hidden',timeout:60000});
- const isolatedSession=await until(()=>query('session.state'),value=>value.sessionId!==secondChoiceSession.sessionId&&!value.isStreaming,'isolated worktree session');
+ await worktreeDialog.getByRole('button',{name:/创建并进入|Create and open/}).click();await worktreeDialog.waitFor({state:'hidden',timeout:180000});
+ const isolatedSession=await until(()=>query('session.state'),value=>value.sessionId!==secondChoiceSession.sessionId&&!value.isStreaming,'isolated worktree session',150000);
  const ownWorktrees=await command('worktrees.session.list',{sessionId:isolatedSession.sessionId});
  const owned=ownWorktrees.result.worktrees.find(row=>row.current);
  if(!owned||!owned.branch.startsWith('wt/')||owned.dirty)throw Error('New worktree session is not an isolated clean checkout');
