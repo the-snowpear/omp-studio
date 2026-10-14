@@ -3,6 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { finished } from "node:stream/promises";
 import { test } from "node:test";
 
 import { auditMacOutput } from "./audit-mac.mjs";
@@ -51,7 +52,10 @@ async function bundle() {
   const appSource = join(out, "app-source");
   write(join(appSource, "package.json"), JSON.stringify({ main: "./dist/src/main.js" }));
   write(join(appSource, "dist", "preload.cjs"), "module.exports = {};");
-  await require("@electron/asar").createPackage(appSource, join(resources, "app.asar"));
+  // asar 3.4.1 resolves with an ended WriteStream before its buffered bytes
+  // finish writing. Reading immediately can yield a zero-filled package.json.
+  const archive = await require("@electron/asar").createPackage(appSource, join(resources, "app.asar"));
+  await finished(archive);
   rmSync(appSource, { recursive: true, force: true });
 
   write(join(resources, "renderer", "dist", "index.html"), '<meta http-equiv="Content-Security-Policy" content="default-src \'self\'">');
