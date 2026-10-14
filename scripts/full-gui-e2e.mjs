@@ -51,7 +51,7 @@ async function predictionDiagnostics(directory,depth=0){
 }
 
 try{
- await Promise.all(['workspace','roaming','user-data','local','isolated-home'].map(p=>mkdir(join(temp,p),{recursive:true})));
+ await Promise.all(['workspace','user-data','isolated-home'].map(p=>mkdir(join(temp,p),{recursive:true})));
  const workspace=join(temp,'workspace'), transferFile=join(temp,'session-transfer.tar');
  await writeFile(join(workspace,'fixture.txt'),'Isolated Studio GUI acceptance workspace.\n');
  for(const args of [['init','-q','-b','main'],['add','.'],['commit','-qm','acceptance fixture']])execFileSync('git',['-c','user.name=Studio Acceptance','-c','user.email=acceptance@example.test',...args],{cwd:workspace,windowsHide:true,stdio:'pipe'});
@@ -65,6 +65,11 @@ try{
  const signingKeyId=process.env.OMP_RUNTIME_SIGNING_KEY_ID??(await readFile(join(keys,'key-id.txt'),'utf8')).trim();
  const platform=resolveTargetPlatform();
  const isolatedHome=join(temp,'isolated-home');
+ // Windows shell known-folder APIs resolve through USERPROFILE, not APPDATA.
+ // Packaged Electron must see the same existing directories as the Host.
+ const roaming=process.platform==='win32'?join(isolatedHome,'AppData','Roaming'):join(temp,'roaming');
+ const local=process.platform==='win32'?join(isolatedHome,'AppData','Local'):join(temp,'local');
+ await Promise.all([roaming,local].map(path=>mkdir(path,{recursive:true})));
  report.platform=platform;
  if(process.platform==='darwin'&&process.env.OMP_E2E_PACKAGED_EXE){
   const paths=resolveDesktopPaths({platform:'darwin',homedir:isolatedHome});
@@ -75,14 +80,14 @@ try{
  await writeFile(join(temp,'bootstrap.cjs'),[
   "const {app,dialog}=require('electron');",
   'app.getAppPath=()=>'+JSON.stringify(desktop)+';',
-  "app.setPath('appData',"+JSON.stringify(join(temp,'roaming'))+');',
+  "app.setPath('appData',"+JSON.stringify(roaming)+');',
   "app.setPath('userData',"+JSON.stringify(join(temp,'user-data'))+');',
   'dialog.showOpenDialog=async(...args)=>({canceled:false,filePaths:[args.at(-1)?.properties?.includes("openDirectory")?'+JSON.stringify(workspace)+':'+JSON.stringify(transferFile)+']});',
   'dialog.showSaveDialog=async()=>({canceled:false,filePath:'+JSON.stringify(transferFile)+'});',
   'import('+JSON.stringify(pathToFileURL(join(desktop,'dist/src/main.js')).href)+');',
  ].join('\n'));
  await writeFile(join(temp,'package.json'),JSON.stringify({name:'omp-gui-acceptance',version:'0.1.7',main:'bootstrap.cjs'}));
- const env={...process.env,HOME:isolatedHome,USERPROFILE:isolatedHome,APPDATA:join(temp,'roaming'),LOCALAPPDATA:join(temp,'local'),PI_CONFIG_DIR:relative(isolatedHome,join(temp,'native-config')),XDG_CONFIG_HOME:join(temp,'xdg-config'),XDG_DATA_HOME:join(temp,'xdg-data'),XDG_CACHE_HOME:join(temp,'xdg-cache'),XDG_STATE_HOME:join(temp,'xdg-state'),OMP_ARTIFACT_DIR:join(root,'packages/runtime-installer/dist/artifacts',platform,runtime),OMP_RUNTIME_TRUSTED_PUBLIC_KEY:trustedPublicKey,OMP_RUNTIME_SIGNING_KEY_ID:signingKeyId,DO_NOT_TRACK:'1'};
+ const env={...process.env,HOME:isolatedHome,USERPROFILE:isolatedHome,APPDATA:roaming,LOCALAPPDATA:local,PI_CONFIG_DIR:relative(isolatedHome,join(temp,'native-config')),XDG_CONFIG_HOME:join(temp,'xdg-config'),XDG_DATA_HOME:join(temp,'xdg-data'),XDG_CACHE_HOME:join(temp,'xdg-cache'),XDG_STATE_HOME:join(temp,'xdg-state'),OMP_ARTIFACT_DIR:join(root,'packages/runtime-installer/dist/artifacts',platform,runtime),OMP_RUNTIME_TRUSTED_PUBLIC_KEY:trustedPublicKey,OMP_RUNTIME_SIGNING_KEY_ID:signingKeyId,DO_NOT_TRACK:'1'};
  for(const key of ['ELECTRON_RUN_AS_NODE','OMP_SIGNING_SECRET','OMP_RUNTIME_SIGNING_KEY','OMP_RUNTIME_SIGNING_PRIVATE_KEY','GH_TOKEN','GITHUB_TOKEN','OMP_RENDERER_DEV_URL','PI_CODING_AGENT_DIR'])delete env[key];
  env.OMP_WORKTREE_DIR=join(temp,'worktrees');
  // Populate a disposable native transcript without making a model request.
