@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Worktree 的注册、当前目录和移除归属检查使用真实目录路径，兼容 macOS 临时目录别名及 Windows 短路径；解析失败时继续拒绝清理。
+- 自动进入 Worktree 时同步切换工作台项目、文件树和分支显示，避免界面仍显示源工作区。
 
 - 后台 Bash/Eval/Task 的后续输出继续更新原工具卡，取消状态与重连后的结果正确恢复；复用工具调用 ID 时按原生作业身份区分结果。
 - 对齐原生 IPC、会话恢复和标题格式；日期生效的价格表不再误显示为非高峰折扣。Studio 服务控制遵循共享浏览器不可 detach 的原生限制。

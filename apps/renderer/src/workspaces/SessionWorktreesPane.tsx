@@ -21,10 +21,12 @@ async function openWorkspace(client: StudioClient, workspaceId: string, fresh: b
 }
 
 /** The Runtime independently fences the first prompt until this choice has been resolved. */
-export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(blocked: boolean): void }) {
+export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(blocked: boolean): void; onOpenWorkspace?: ((workspaceId: string) => Promise<void>) | undefined }) {
   const { preview } = usePreviewMode(), { resolvedLanguage } = useI18n(), zh = resolvedLanguage === "zh";
   const [phase, setPhase] = useState<"idle" | "checking" | "ask" | "creating" | "failed">("idle"), [error, setError] = useState("");
   const epoch = useRef(0), lock = useRef(false), moving = useRef(false);
+  const openWorkspaceAction = useRef(props.onOpenWorkspace);
+  useLayoutEffect(() => { openWorkspaceAction.current = props.onOpenWorkspace; }, [props.onOpenWorkspace]);
   const supported = !!props.context?.capabilities?.capabilities.some(row => row.id === "worktrees.session.startPolicy" && row.grade !== "unavailable");
   const enabled = !preview && supported && props.context?.available && props.client && props.context.sessionId;
   const gate = props.onGateChange;
@@ -36,7 +38,8 @@ export function WorktreeLaunchGate(props: FeatureSettingsProps & { onGateChange(
       if (epoch.current !== current) return;
       if (!result.workspaceId) throw Error("Created worktree could not be registered");
       moving.current = true;
-      await openWorkspace(props.client, result.workspaceId, true);
+      if (openWorkspaceAction.current) await openWorkspaceAction.current(result.workspaceId);
+      else await openWorkspace(props.client, result.workspaceId, true);
       if (epoch.current === current) { setPhase("idle"); gate(false); }
     } catch (cause) { if (epoch.current === current) { setPhase("failed"); setError(hostErrorMessage(cause, "Worktree creation failed")); } }
     finally { if (epoch.current === current) { lock.current = false; moving.current = false; } }

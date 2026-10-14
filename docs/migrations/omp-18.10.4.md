@@ -105,3 +105,5 @@ CI 增加 `workflow_dispatch → scope: macos-runtime`，使用 `macos-15` Apple
 ### 原生发布门禁发现并修复的问题
 
 首轮发布（38592561039）在 Windows x64 和 macOS 的 Worktree 回归测试中发现临时目录别名导致归属误判，未发布任何工件。现在注册表、当前目录和 Git Worktree 清单均按 realpath 比较；无法解析的目录仍拒绝清理。回归测试在各平台主动创建目录别名，覆盖归属识别和审核后文件变化的保留行为。本地 7 项相关测试通过，Runtime 因此递增为 `18.10.4-studio.8`，正式工件重新构建；上表 `studio.7` 日志仍保留为初始验收证据。
+
+`studio.8` 本地二进制已重新构建并通过身份/能力摘要探测。真实 Electron 在目录别名下完成了 Worktree 选择、进入和退出清理；视觉复查后又将自动打开接入 AppShell 的项目切换，新增断言确保工作台项目、Git 分支与活动 Runtime 一致。3 项聚焦桌面验收通过，0 次模型调用；证据为 `output/playwright/omp-18104/runtime-8-ui-worktree/report.json` 和同目录截图。

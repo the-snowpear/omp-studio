@@ -255,6 +255,11 @@ try{
  const ownWorktrees=await command('worktrees.session.list',{sessionId:isolatedSession.sessionId});
  const owned=ownWorktrees.result.worktrees.find(row=>row.current);
  if(!owned||!owned.branch.startsWith('wt/')||owned.dirty)throw Error('New worktree session is not an isolated clean checkout');
+ const activeWorkspace=(await query('projects.list')).workspaces.find(row=>row.active);
+ if(!activeWorkspace)throw Error('Worktree workspace is not active');
+ await page.locator('.ctx-project-switch').filter({hasText:activeWorkspace.name}).waitFor();
+ await page.locator('.ctx-git-switch').filter({hasText:owned.branch}).waitFor();
+ report.checks.push('worktree project selection and branch display match the active Runtime workspace');
  report.worktreeExitPath=owned.directory;
  await command('preferences.features.set',{sessionId:isolatedSession.sessionId,key:'worktree.onExit',value:'remove',scope:'global'});
  await capture('real-worktree-session');
