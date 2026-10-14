@@ -1,11 +1,11 @@
 // Use the native addon embedded in the verified release Runtime for source tests.
 import { execFileSync } from "node:child_process";
-import { access, copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest, verifySignedArtifact } from "@omp-studio/runtime-installer";
 import { repositoryRoot, ompSourceDirectory } from "./omp-tooling.mjs";
-import { assertExecutableTarget, resolveTargetPlatform, runtimeOsOf } from "./target-platform.mjs";
+import { assertExecutableTarget, resolveTargetPlatform, runtimeOsOf, verifyMacCodeSignature } from "./target-platform.mjs";
 
 const platform = resolveTargetPlatform();
 if (`${process.platform}-${process.arch}` !== platform) throw new Error(`Runtime source tests require a native ${platform} host`);
@@ -32,11 +32,19 @@ const { manifest } = await verifySignedArtifact({
 if (manifest.runtimeVersion !== version || manifest.platform !== platform || manifest.upstreamCommit !== pin.commit) {
   throw new Error("Test Runtime does not match the pinned source and target architecture");
 }
+const executable = join(artifact, manifest.entrypoint);
+assertExecutableTarget(executable, platform);
+if (runtimeOsOf(platform) === "darwin") {
+  // Actions artifact transport drops mode bits. Restore only this verified
+  // executable; its bytes and embedded code signature remain unchanged.
+  await chmod(executable, 0o755);
+  verifyMacCodeSignature(executable);
+}
 const temp = await mkdtemp(join(tmpdir(), "omp-native-from-release-"));
 try {
   // The compiled loader extracts into XDG_DATA_HOME only when omp/ exists.
   await mkdir(join(temp, "omp"));
-  execFileSync(join(artifact, manifest.entrypoint), ["--smoke-test"], {
+  execFileSync(executable, ["--smoke-test"], {
     env: { ...process.env, XDG_DATA_HOME: temp }, windowsHide: true, timeout: 120_000, stdio: "pipe",
   });
   const extracted = join(temp, "omp", "natives", natives.version);
