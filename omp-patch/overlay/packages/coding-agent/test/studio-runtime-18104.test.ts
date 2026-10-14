@@ -184,7 +184,13 @@ test("worktree removal preserves files changed after review and startup policy f
 	};
 	try {
 		setAgentDir(temp.join("agent"));
-		setWorktreesDir(temp.join("wt"));
+		// Runner temp roots can be aliases (/var on macOS or a Windows short path).
+		// Reproduce that on every platform without requiring a particular runner.
+		const worktrees = temp.join("wt-real"),
+			worktreeAlias = temp.join("wt-alias");
+		await fs.mkdir(worktrees);
+		await fs.symlink(worktrees, worktreeAlias, process.platform === "win32" ? "junction" : "dir");
+		setWorktreesDir(worktreeAlias);
 		const cwd = temp.join("repo");
 		await fs.mkdir(cwd);
 		git(cwd, "init", "-q", "-b", "main");
@@ -212,6 +218,21 @@ test("worktree removal preserves files changed after review and startup policy f
 			branch: "wt/review-test",
 			keepChanges: false,
 		})) as { worktree: SessionWorktreeRow };
+		const aliasedSession = {
+			...session,
+			sessionId: "alias-reader",
+			sessionManager: { getCwd: () => path.join(worktreeAlias, path.basename(created.worktree.directory)) },
+		} as unknown as AgentSession;
+		const aliased = new StudioSessionWorktreesService(aliasedSession);
+		try {
+			const listing = (await aliased.execute({
+				kind: "worktrees.session.list",
+				sessionId: aliasedSession.sessionId,
+			})) as { worktrees: SessionWorktreeRow[] };
+			expect(listing.worktrees.find(row => row.id === created.worktree.id)?.current).toBe(true);
+		} finally {
+			aliased.dispose();
+		}
 		const review = (await service.execute({
 			kind: "worktrees.session.remove.prepare",
 			sessionId: session.sessionId,

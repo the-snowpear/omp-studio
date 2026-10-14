@@ -34,10 +34,15 @@ const clean = (cause: unknown) =>
 	String(cause instanceof Error ? cause.message : cause)
 		.replace(/[\u0000-\u001f]/gu, " ")
 		.slice(0, 1024) || "Worktree operation failed";
-const equalPath = (a: string, b: string) =>
-	process.platform === "win32"
-		? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
-		: path.resolve(a) === path.resolve(b);
+const equalPath = async (a: string, b: string): Promise<boolean> => {
+	try {
+		const [left, right] = await Promise.all([fs.realpath(a), fs.realpath(b)]);
+		return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+	} catch {
+		// Missing or inaccessible directories cannot prove ownership.
+		return false;
+	}
+};
 export class StudioSessionWorktreesService {
 	#pending:
 		| { owner: string; preview: WorktreeRemovalPreview; plan: WorktreeExitPlan[]; owned: OwnedWorktree }
@@ -71,10 +76,10 @@ export class StudioSessionWorktreesService {
 		if (this.#disposed || id !== this.session.sessionId)
 			throw new SessionControlError("COMMAND_BLOCKED", "Worktree session changed");
 	}
-	#registry(): string {
+	async #registry(): Promise<string> {
 		const cwd = this.session.sessionManager.getCwd(),
 			repository = vcs.git(cwd);
-		const root = repository?.primaryRoot() ?? cwd;
+		const root = await fs.realpath(repository?.primaryRoot() ?? cwd);
 		return path.join(
 			getAgentDir(),
 			"studio",
@@ -127,7 +132,7 @@ export class StudioSessionWorktreesService {
 			branch: owned.worktree.branch,
 			directory: owned.worktree.path,
 			sessionId: owned.sessionId,
-			current: equalPath(owned.worktree.path, this.session.sessionManager.getCwd()),
+			current: await equalPath(owned.worktree.path, this.session.sessionManager.getCwd()),
 		};
 		try {
 			const stat = await fs.lstat(owned.worktree.path);
@@ -140,7 +145,12 @@ export class StudioSessionWorktreesService {
 	}
 	async #leases(owned: OwnedWorktree): Promise<() => void> {
 		const repository = vcs.git(owned.worktree.sourceCwd);
-		if (!repository || !(await repository.worktrees()).some(row => equalPath(row.path, owned.worktree.path)))
+		if (
+			!repository ||
+			!(await Promise.all((await repository.worktrees()).map(row => equalPath(row.path, owned.worktree.path)))).some(
+				Boolean,
+			)
+		)
 			throw Error("Worktree is no longer registered in its source repository");
 		const sessions = await SessionManager.list(owned.worktree.path),
 			releases: Array<() => void> = [];
@@ -164,7 +174,7 @@ export class StudioSessionWorktreesService {
 			this.#startDecisionSession = operation.sessionId;
 			return { continued: true };
 		}
-		const file = this.#registry();
+		const file = await this.#registry();
 		await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
 		if (operation.kind === "worktrees.session.startPolicy") {
 			const eligible =
@@ -279,11 +289,12 @@ export class StudioSessionWorktreesService {
 	async cleanupOnShutdown(): Promise<void> {
 		const policy = cfgWorktreeOnExit.get(this.session.settings);
 		if (policy === "keep") return;
-		const file = this.#registry();
+		const file = await this.#registry();
 		await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
 		await withFileLock(file + ".lock", async () => {
 			const rows = await this.#load(file);
-			for (const owned of rows.filter(row => equalPath(row.worktree.path, this.session.sessionManager.getCwd()))) {
+			for (const owned of rows) {
+				if (!(await equalPath(owned.worktree.path, this.session.sessionManager.getCwd()))) continue;
 				try {
 					const release = await this.#leases(owned);
 					try {

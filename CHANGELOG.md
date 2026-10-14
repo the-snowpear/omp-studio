@@ -19,11 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Runtime 从 `18.8.0-studio.20` 升至 **`18.10.4-studio.7`**，沿用 overlay 与四组生成接缝。[逐版本变更、GUI 入口及验收记录](docs/migrations/omp-18.10.4.md)。应用与 Runtime 更新的最低兼容应用版本为 **0.1.10**；旧版使用完整安装包升级。
+- Runtime 从 `18.8.0-studio.20` 升至 **`18.10.4-studio.8`**，沿用 overlay 与四组生成接缝。[逐版本变更、GUI 入口及验收记录](docs/migrations/omp-18.10.4.md)。应用与 Runtime 更新的最低兼容应用版本为 **0.1.10**；旧版使用完整安装包升级。
 - 子代理使用代理配置中的模型和候选链，移除单次启动模型覆盖；移除已被上游取消的 Codex Code Mode 界面入口，旧写请求明确拒绝。
 - 发布流水线在三个原生平台构建后运行打包版 Electron 验收；所有所选平台通过后才发布。发布页使用仓库内维护的文案，并核验下载链接对应真实附件。
 
 ### Fixed
+
+- Worktree 的注册、当前目录和移除归属检查使用真实目录路径，兼容 macOS 临时目录别名及 Windows 短路径；解析失败时继续拒绝清理。
 
 - 后台 Bash/Eval/Task 的后续输出继续更新原工具卡，取消状态与重连后的结果正确恢复；复用工具调用 ID 时按原生作业身份区分结果。
 - 对齐原生 IPC、会话恢复和标题格式；日期生效的价格表不再误显示为非高峰折扣。Studio 服务控制遵循共享浏览器不可 detach 的原生限制。

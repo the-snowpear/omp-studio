@@ -95,6 +95,7 @@ jobs:
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
           key: ${{ matrix.arch }}
+          cache-on-failure: "true"
       - name: Install dependencies
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
@@ -218,6 +219,7 @@ jobs:
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
           key: darwin-arm64
+          cache-on-failure: "true"
       - name: Install dependencies
         run: |
           npm ci

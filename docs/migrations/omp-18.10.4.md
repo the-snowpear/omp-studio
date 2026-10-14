@@ -7,8 +7,8 @@
 - Studio 基线：0.1.9，提交 `2c07600`。
 - Runtime 基线：18.8.0-studio.20，`4ef97c8826ee012829a3e756b693a2a16a414f47`。
 - 上游目标：正式版 18.10.4，`687892d1046ecaf18829b45f5b86928a308258f4`。
-- Runtime：`18.10.4-studio.7`；本地开发验收基于 `0.1.9`，正式应用版本提升为 `0.1.10`。
-- 补丁摘要：`sha256:8fd473880ebb6dc9a6dc947c941aefaee7b7bcc8309787d2c61d727123f245c6`。
+- Runtime：`18.10.4-studio.8`（初始本地候选为 `studio.7`）；本地开发验收基于 `0.1.9`，正式应用版本提升为 `0.1.10`。
+- 补丁摘要：`sha256:d7e06b51304eaeef8d94be66599ce5d50994b59a27c0702b9677487d2e6dce6f`。
 - Windows 工件：`packages/runtime-installer/dist/artifacts/win32-x64/18.10.4-studio.7/`，包含可执行文件、manifest、校验和与开发签名。它使用本地开发密钥，不是正式发行签名。
 - 执行开始时重新确认了正式 Release；未采用 `main` 上尚未发布的提交。
 - [完整上游比较](https://github.com/can1357/oh-my-pi/compare/v18.8.0...v18.10.4)，[发布说明](https://github.com/can1357/oh-my-pi/releases/tag/v18.10.4)。
@@ -101,3 +101,7 @@ CI 增加 `workflow_dispatch → scope: macos-runtime`，使用 `macos-15` Apple
 打包模式的 Electron 测试也已修正：目录选择、会话包选择和导出保存使用各自的隔离路径，避免把测试工作区误当成归档。正式发布选择 GitHub Actions 的 Apple Silicon runner，`include_macos=true`，与 Windows 两种架构共同通过门禁后发布。上表记录的是本机证据；Mac 原生结果以发布流水线的 `build-macos` 和 `release-gui-evidence-macos-arm64` 为准，不把 Windows 测试当作 Mac 验收。
 
 验收不自动调用付费模型，不兑换真实重置券，不操作生产 Skillshare 或授权 IDA 数据库。模型推理、Plan 执行、预测付费路径使用替身验证生命周期；真实 Electron 验证签名连接、读写、文件传输与本机操作。macOS/ARM64 未在这台 Windows x64 机器上进行实机验证。CDP 中文组合输入测试不等同于人工操作物理输入法。
+
+### 原生发布门禁发现并修复的问题
+
+首轮发布（38592561039）在 Windows x64 和 macOS 的 Worktree 回归测试中发现临时目录别名导致归属误判，未发布任何工件。现在注册表、当前目录和 Git Worktree 清单均按 realpath 比较；无法解析的目录仍拒绝清理。回归测试在各平台主动创建目录别名，覆盖归属识别和审核后文件变化的保留行为。本地 7 项相关测试通过，Runtime 因此递增为 `18.10.4-studio.8`，正式工件重新构建；上表 `studio.7` 日志仍保留为初始验收证据。
