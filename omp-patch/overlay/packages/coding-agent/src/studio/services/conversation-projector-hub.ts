@@ -49,6 +49,15 @@ export class ConversationProjectorHub {
 		return () => this.#listeners.delete(listener);
 	}
 
+	toolResult(sessionId: string, toolCallId: string) {
+		const main = this.#main.toolResult(sessionId, toolCallId);
+		if (main) return main;
+		for (const child of this.#children.values()) {
+			const result = child.projector.toolResult(sessionId, toolCallId);
+			if (result) return result;
+		}
+		return undefined;
+	}
 	getDiagnostics(): Readonly<Record<string, number>> {
 		const counters: Record<string, number> = {
 			projectors: this.#disposed ? 0 : this.#children.size + 1,

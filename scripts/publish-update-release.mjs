@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { legacyIndexName, platformOfReleaseCandidate } from "./release-assets.mjs";
+import { assertReleaseNoteAssets, legacyIndexName, platformOfReleaseCandidate } from "./release-assets.mjs";
 const repo = process.env.GITHUB_REPOSITORY;
 if (!repo) throw new Error("GITHUB_REPOSITORY is required");
 const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
@@ -66,7 +66,18 @@ if (identity.latest) for (const legacyName of ["update-index", "update-index-win
   }
 }
 const notesPath = "outputs/publish/release-notes.md";
-await writeFile(notesPath, notes.join("\n\n---\n\n"));
+let releaseNotes = notes.join("\n\n---\n\n");
+if (identity.latest) {
+  try {
+    const curated = await readFile(join("docs", "releases", `${identity.tag}.md`), "utf8");
+    if (!curated.trim()) throw new Error("Curated release notes are empty");
+    assertReleaseNoteAssets(curated, repo, identity.tag, artifacts.map(path => path.split(/[\\/]/).at(-1)));
+    releaseNotes = curated;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+await writeFile(notesPath, releaseNotes);
 if (!releases.some(r => r.tag_name === identity.tag)) gh("release", "create", identity.tag, "--draft", "--target", process.env.GITHUB_SHA, "--title", identity.title, "--notes-file", notesPath);
 else gh("release", "edit", identity.tag, "--title", identity.title, "--notes-file", notesPath);
 const existingAssets = JSON.parse(gh("release", "view", identity.tag, "--json", "assets")).assets;

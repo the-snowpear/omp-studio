@@ -94,6 +94,70 @@ function kinds(events: ConversationRuntimeEvent[]): string[] {
 	return events.map(event => event.kind);
 }
 
+test("background output remains bound to its original turn and retains cancellation for reconnect", () => {
+	const { projector, events } = createProjector();
+	try {
+		const message = assistant([
+			{ type: "toolCall", id: "background", name: "bash", arguments: { command: "build" } },
+		]);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message });
+		projector.project({
+			type: "tool_execution_start",
+			toolCallId: "background",
+			toolName: "bash",
+			args: { command: "build" },
+		});
+		projector.project({
+			type: "tool_execution_end",
+			toolCallId: "background",
+			toolName: "bash",
+			result: {
+				content: [{ type: "text", text: "started" }],
+				details: { async: { jobId: "job", state: "running" } },
+			},
+			isError: false,
+		});
+		projector.project({ type: "message_end", message });
+		projector.project({ type: "agent_end", messages: [message] });
+		projector.project({ type: "agent_start" });
+		projector.project({
+			type: "tool_execution_update",
+			toolCallId: "background",
+			toolName: "bash",
+			args: {},
+			partialResult: {
+				content: [{ type: "text", text: "build progress" }],
+				details: { async: { jobId: "job", state: "running" } },
+			},
+		});
+		projector.flush();
+		const update = events.findLast(event => event.kind === "conversation.tool.updated");
+		expect(update).toMatchObject({ kind: "conversation.tool.updated", turnId: "turn-1", output: "build progress" });
+		projector.project({
+			type: "tool_execution_update",
+			toolCallId: "background",
+			toolName: "bash",
+			args: {},
+			partialResult: {
+				content: [{ type: "text", text: "stopped" }],
+				details: { async: { jobId: "job", state: "cancelled" } },
+			},
+		});
+		expect(events.findLast(event => event.kind === "conversation.tool.completed")).toMatchObject({
+			turnId: "turn-1",
+			result: { output: "stopped", data: { async: { state: "cancelled" } } },
+		});
+		expect(projector.toolResult("session-1", "background")).toMatchObject({
+			output: "stopped",
+			data: { async: { state: "cancelled" } },
+		});
+		expect(projector.toolResult("foreign-session", "background")).toBeUndefined();
+	} finally {
+		projector.dispose();
+	}
+});
+
 function deltas(events: ConversationRuntimeEvent[], blockType?: "text" | "thinking"): string {
 	return events
 		.filter(

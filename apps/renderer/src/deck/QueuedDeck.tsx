@@ -112,6 +112,7 @@ export function QueuedDeck({
   const [answers, setAnswers] = useState<Readonly<Record<string, DeckAskAnswer>>>({});
   const [swap, setSwap] = useState<DeckSwap | null>(null);
   const [busy, setBusy] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [attachmentBusy,setAttachmentBusy]=useState(false);
   /** 像素高度锁；null = 跟随自然高度。锁在哪一层见 lockOn。 */
   const [lockH, setLockH] = useState<number | null>(null);
@@ -129,6 +130,19 @@ export function QueuedDeck({
   const total = remaining.length;
   const index = total === 0 ? 0 : Math.min(pos, total - 1);
   const current = remaining[index];
+  useEffect(() => { setCollapsed(false); }, [items[0]?.id]);
+  useEffect(() => {
+    if (current?.kind !== "ask" || leaving) return;
+    const toggle = (event: KeyboardEvent) => {
+      // Option+H produces a different character on macOS keyboard layouts.
+      const isH = event.code ? event.code === "KeyH" : event.key.toLowerCase() === "h";
+      if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && isH && !event.isComposing && !event.repeat) {
+        event.preventDefault(); setCollapsed(value => !value);
+      }
+    };
+    window.addEventListener("keydown", toggle);
+    return () => window.removeEventListener("keydown", toggle);
+  }, [current?.kind, leaving]);
   const deckRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const deck = deckRef.current;
@@ -328,7 +342,8 @@ export function QueuedDeck({
       aria-label={regionLabel}
       aria-live="polite"
     >
-      <div className="deck-card">
+      {collapsed && current.kind === "ask" ? <div className="ask-collapsed-bar"><span>待回答 / Pending</span><strong>{current.question.question}</strong><button className="btn small outline" type="button" autoFocus onClick={() => setCollapsed(false)}>展开 / Show</button></div> : null}
+      <div className="deck-card" hidden={collapsed && current.kind === "ask"}>
         <div ref={stageRef} className={`dk-stage${lockSmooth("stage")}`} style={lockStyle("stage")}>
           {current.kind === "plan" ? (
             <PlanCard
@@ -354,6 +369,7 @@ export function QueuedDeck({
                 {...(queue ? { queue } : {})}
                 headers={headers}
                 onJump={navigate}
+                onCollapse={() => setCollapsed(true)}
               />
               <div ref={swapRef} className={`dk-swap${lockSmooth("swap")}`} style={lockStyle("swap")}>
                 {out ? (

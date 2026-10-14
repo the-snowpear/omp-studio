@@ -9,7 +9,7 @@ import type {
 import { tailUtf8, truncateUtf8, utf8ByteLength } from "@omp-studio/client-contract";
 import type { ComposerDoc } from "../composer/types";
 import type { ConversationIdentity } from "./conversationHost";
-import { buildPersistedTimeline, buildPersistedTimelineRow, buildTransientTimeline, emptyConversationState, tagTimelineStructure, type ConversationNotice, type ConversationState, type LiveMessage, type LiveTool, type PendingUser, type TimelineRow, type TimelineRowCache } from "./conversationViewModel";
+import { backgroundToolState, toolResultStatus, buildPersistedTimeline, buildPersistedTimelineRow, buildTransientTimeline, emptyConversationState, tagTimelineStructure, type ConversationNotice, type ConversationState, type LiveMessage, type LiveTool, type PendingUser, type TimelineRow, type TimelineRowCache } from "./conversationViewModel";
 import type { UserThumbMap } from "./userMessageThumbs";
 import { capByImageBytes, docImageBytes, thumbsImageBytes } from "./userMessageThumbs";
 import { getAppSettings, type StreamingCadenceHz } from "../settings/appSettings";
@@ -272,7 +272,8 @@ export class ConversationStore {
         this.markRowChanged(update.messageId); break;
       }
       case "conversation.tool.updated": {
-        const tool = this.liveTools.get(update.toolCallId); if (tool === undefined || tool.turnId !== update.turnId) break;
+        const tool = this.toolForEvent(update.toolCallId, update.turnId);
+        if (tool === undefined || tool.turnId !== update.turnId) break;
         const candidate = update.updateMode === "replace" ? update.output ?? tool.output ?? "" : `${tool.output ?? ""}${update.output ?? ""}`;
         const tail = tailUtf8(candidate, TOOL_OUTPUT_MAX_BYTES);
         this.setLiveTool(update.toolCallId, { ...tool, output: tail.text, ...(update.truncated === true || tail.truncated ? { truncated: true } : {}) });
@@ -280,8 +281,8 @@ export class ConversationStore {
         break;
       }
       case "conversation.tool.completed": {
-        const tool = this.liveTools.get(update.toolCallId); if (tool !== undefined) {
-          this.setLiveTool(update.toolCallId, { ...tool, result: update.result, status: update.result.isError ? "failed" : "succeeded" });
+        const tool = this.toolForEvent(update.toolCallId, update.turnId); if (tool !== undefined) {
+          this.setLiveTool(update.toolCallId, { ...tool, result: update.result, ...(update.result.output === undefined ? {} : { output: update.result.output }), status: toolResultStatus(update.result) });
           this.markRowChanged(tool.messageId);
         }
         break;
@@ -292,6 +293,19 @@ export class ConversationStore {
       case "conversation.compaction.completed": if (update.item !== undefined) this.upsertItem(update.item); this.compacting = undefined; this.markStructureChanged(); break;
       case "conversation.notice": this.notices = [...this.notices.slice(-(NOTICE_LIMIT - 1)), { id: `notice:${this.generation}:${this.notices.length}`, level: update.level, message: update.message, ...(update.source === undefined ? {} : { source: update.source }) }]; break;
     }
+  }
+
+  private toolForEvent(toolCallId: string, turnId: string): LiveTool | undefined {
+    const live = this.liveTools.get(toolCallId); if (live) return live;
+    for (const item of this.items) {
+      if (item.kind !== "message") continue;
+      const call = item.content.find(block => block.type === "toolCall" && block.toolCallId === toolCallId);
+      if (!call || call.type !== "toolCall") continue;
+      const result = item.content.find(block => block.type === "toolResult" && block.toolCallId === toolCallId);
+      if (!result || result.type !== "toolResult" || !["running", "unknown"].includes(backgroundToolState(result) ?? "")) return;
+      return { toolCallId, messageId: item.itemId, turnId, toolName: call.toolName, result, status: "running" };
+    }
+    return undefined;
   }
 
   private upsertItem(item: ConversationItem): void {
@@ -327,6 +341,7 @@ export class ConversationStore {
     }
     for (const [id, tool] of this.liveTools) {
       if (tool.turnId !== turnId) continue;
+      if (backgroundToolState(tool.result) === "running") continue;
       // An aborted turn keeps its live row on screen until the next turn opens,
       // so tools owned by that still-live row must stay addressable there —
       // only their non-terminal status is settled. Everything else is either

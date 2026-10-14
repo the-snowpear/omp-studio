@@ -34,6 +34,8 @@ OMP Studio is a desktop shell for [oh-my-pi](https://github.com/can1357/oh-my-pi
   <img src="docs/images/workbench.png" alt="OMP Studio workbench: new conversation welcome, activity heatmap, and composer" width="920">
 </p>
 
+Version 0.1.10 targets OMP 18.10.4, adding session transfer, worktrees, storage compression and model controls. See the [release notes](docs/releases/v0.1.10.md) and [migration report](docs/migrations/omp-18.10.4.md). Windows x64 / ARM64 and macOS Apple Silicon downloads are available from [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases). The Mac application is ad hoc signed and not notarized.
+
 ## Why this workbench
 
 Skills, usage, providers, capabilities, and Git live in one window — no hopping between a TUI and a pile of web pages.

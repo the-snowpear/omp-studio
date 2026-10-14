@@ -21,10 +21,53 @@ index 53726ec547..1de77662aa 100644
  		.reverse();
  	const prompts = HistoryStorage.open().getRecent(limit, { sessionId: info.id }).map(toArchivePrompt).reverse();
 diff --git a/packages/coding-agent/src/cli/gc-cli.ts b/packages/coding-agent/src/cli/gc-cli.ts
-index 457ab940e8..27cdfb1633 100644
+index 2f65650670..73bcb09684 100644
 --- a/packages/coding-agent/src/cli/gc-cli.ts
 +++ b/packages/coding-agent/src/cli/gc-cli.ts
-@@ -2010,7 +2010,8 @@ function renderText(result: GcResult): string {
+@@ -95,6 +95,11 @@ export interface GcCommandFlags {
+ 
+ export interface GcCommandArgs {
+ 	flags: GcCommandFlags;
++	/** Optional typed selection boundary for reviewed desktop compression operations. */
++	compressionCandidates?: (
++		sessionId: string,
++		candidates: readonly CompressCandidate[],
++	) => readonly CompressCandidate[];
+ }
+ 
+ export interface BlobGcResult {
+@@ -1946,7 +1951,11 @@ async function tryAcquireSessionTreeLeases(
+  * deleted, so it stays resumable. Leftover scratch directories from a killed
+  * run are removed first. A session that fails is reported and skipped.
+  */
+-async function runCompressGc(options: ResolvedGcOptions, archiveRoot: string): Promise<CompressGcResult> {
++async function runCompressGc(
++	options: ResolvedGcOptions,
++	archiveRoot: string,
++	select?: GcCommandArgs["compressionCandidates"],
++): Promise<CompressGcResult> {
+ 	const sessionsRoot = getSessionsDir(options.agentDir);
+ 	const method = await compressMethod(sessionsRoot);
+ 	const result: CompressGcResult = {
+@@ -1986,7 +1995,7 @@ async function runCompressGc(options: ResolvedGcOptions, archiveRoot: string): P
+ 			result.errors.push(`${session.path}: ${errorMessage(error)}`);
+ 			continue;
+ 		}
+-		const candidates: CompressCandidate[] = [];
++		let candidates: CompressCandidate[] = [];
+ 		for (const file of files) {
+ 			try {
+ 				const candidate = await compressCandidate(file);
+@@ -2003,6 +2012,8 @@ async function runCompressGc(options: ResolvedGcOptions, archiveRoot: string): P
+ 				result.skippedLive += 1;
+ 				continue;
+ 			}
++			if (select) candidates = [...select(session.id, candidates)];
++			if (candidates.length === 0) continue;
+ 			result.sessions += 1;
+ 			result.wouldCompress += candidates.length;
+ 			for (const candidate of candidates) {
+@@ -2311,7 +2322,8 @@ function renderText(result: GcResult): string {
  	return `${lines.join("\n")}\n`;
  }
  
@@ -34,7 +77,13 @@ index 457ab940e8..27cdfb1633 100644
  	const options = await resolveOptions(args.flags);
  	const archiveRoot = getArchivedSessionsDir(options.agentDir);
  	const result = await withGcLock(options.agentDir, async lockPath => {
-@@ -2023,7 +2024,12 @@ export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
+@@ -2324,12 +2336,17 @@ export async function runGcCommand(args: GcCommandArgs): Promise<GcResult> {
+ 		if (options.runStale) next.stale = await runStaleGc(options);
+ 		if (options.runBlobs) next.blobs = await runBlobGc(options, archiveRoot);
+ 		if (options.runArchive) next.archive = await runArchiveGc(options, archiveRoot, registeredSessionPaths);
+-		if (options.runCompress) next.compress = await runCompressGc(options, archiveRoot);
++		if (options.runCompress) next.compress = await runCompressGc(options, archiveRoot, args.compressionCandidates);
+ 		if (options.runWal) next.wal = await runWalGc(options);
  		return next;
  	});
  
@@ -61,10 +110,10 @@ index 90cd798e91..2bc96a315d 100644
  
  /** Validate and normalize the agent-supplied plan title into a safe filename stem.
 diff --git a/packages/coding-agent/src/predict/client.ts b/packages/coding-agent/src/predict/client.ts
-index d49bc07ad5..cbd44f676f 100644
+index 15e2c8a29e..15676b25d1 100644
 --- a/packages/coding-agent/src/predict/client.ts
 +++ b/packages/coding-agent/src/predict/client.ts
-@@ -21,6 +21,8 @@ import { connectJsonlSocket, LineParser, writeJsonLine } from "../tiny/jsonl-soc
+@@ -19,6 +19,8 @@ import { resolveWorkerSpawnCmd, SMOKE_TEST_TIMEOUT_MS, workerEnvFromParent } fro
  import { prefetchSmolLmWeights } from "./smollm-weights";
  import {
  	TEXT_PREDICT_AGENT_DIR_ENV,
@@ -73,7 +122,7 @@ index d49bc07ad5..cbd44f676f 100644
  	TEXT_PREDICT_BROKER_SCOPE,
  	TEXT_PREDICT_READY_PATTERN,
  	TEXT_PREDICT_SOCKET_ENV,
-@@ -120,7 +122,10 @@ class DaemonConnection {
+@@ -116,7 +118,10 @@ class DaemonConnection {
  }
  
  /** Connect and confirm the daemon speaks this omp version; `undefined` when nothing usable listens. */
@@ -82,11 +131,11 @@ index d49bc07ad5..cbd44f676f 100644
 +	endpoint: string,
 +	profile: TextPredictProfile = "default",
 +): Promise<DaemonConnection | undefined> {
- 	let socket: net.Socket;
+ 	let ipc: IpcConnection;
  	try {
- 		socket = await connectJsonlSocket(endpoint, CONNECT_TIMEOUT_MS);
-@@ -130,7 +135,13 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
- 	const connection = new DaemonConnection(socket);
+ 		ipc = await IpcConnection.connect(endpoint, { framing: "lines", timeoutMs: CONNECT_TIMEOUT_MS });
+@@ -126,7 +131,13 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
+ 	const connection = new DaemonConnection(ipc);
  	try {
  		const pong = await connection.request(id => ({ id, op: "ping" }), REQUEST_TIMEOUT_MS);
 -		if (pong.ok && pong.op === "ping" && pong.version === VERSION) return connection;
@@ -100,7 +149,7 @@ index d49bc07ad5..cbd44f676f 100644
  		// A daemon from another omp version: retire it so this version's starts.
  		await connection.request(id => ({ id, op: "shutdown" }), REQUEST_TIMEOUT_MS).catch(() => undefined);
  	} catch (error) {
-@@ -141,19 +152,23 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
+@@ -137,19 +148,23 @@ async function connectDaemon(endpoint: string): Promise<DaemonConnection | undef
  }
  
  /** Find or start the daemon serving `agentDir` under the global broker. */
@@ -128,7 +177,7 @@ index d49bc07ad5..cbd44f676f 100644
  				if (ready) return ready;
  			}
  			// Live record but nothing usable listening: replace it.
-@@ -167,7 +182,12 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+@@ -163,7 +178,12 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
  					name,
  					application: spawn.cmd[0]!,
  					args: spawn.cmd.slice(1),
@@ -142,7 +191,7 @@ index d49bc07ad5..cbd44f676f 100644
  					cwd: spawn.cwd ?? broker.projectDir,
  					pty: false,
  					ready: { log: TEXT_PREDICT_READY_PATTERN, timeoutMs: READY_TIMEOUT_MS },
-@@ -185,7 +205,41 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
+@@ -181,7 +201,41 @@ async function ensureDaemon(agentDir: string): Promise<DaemonConnection> {
  }
  
  /** Process-wide daemon access shared by every editor and the submit hook. */
@@ -185,7 +234,7 @@ index d49bc07ad5..cbd44f676f 100644
  	#connection: DaemonConnection | undefined;
  	#connecting: Promise<DaemonConnection> | undefined;
  	#retryAt = 0;
-@@ -218,6 +272,7 @@ class TextPredictionClient {
+@@ -214,6 +268,7 @@ class TextPredictionClient {
  
  	/** Drop the daemon connection so a short-lived command can exit. */
  	close(): void {
@@ -193,7 +242,7 @@ index d49bc07ad5..cbd44f676f 100644
  		this.#connection?.close();
  		this.#connection = undefined;
  	}
-@@ -231,7 +286,7 @@ class TextPredictionClient {
+@@ -227,7 +282,7 @@ class TextPredictionClient {
  	async complete(engine: TextPredictMethod, before: string, prefix: string): Promise<TextPrediction> {
  		// SmolLM's weights download here, in the interactive process (shown in the
  		// download HUD), only once the user has chosen SmolLM.
@@ -202,7 +251,7 @@ index d49bc07ad5..cbd44f676f 100644
  		const response = await this.#request(
  			id => ({ id, op: "complete", method: engine, before, prefix }),
  			COMPLETE_TIMEOUT_MS,
-@@ -241,6 +296,21 @@ class TextPredictionClient {
+@@ -237,6 +292,21 @@ class TextPredictionClient {
  		return { engine, suggestion: response.suggestion };
  	}
  
@@ -224,7 +273,7 @@ index d49bc07ad5..cbd44f676f 100644
  	/**
  	 * Tell a running daemon new history rows exist. Without a live connection
  	 * nothing needs telling: the daemon ingests everything new when it starts.
-@@ -259,12 +329,18 @@ class TextPredictionClient {
+@@ -255,12 +325,18 @@ class TextPredictionClient {
  	}
  
  	#connect(): Promise<DaemonConnection> {
@@ -244,8 +293,24 @@ index d49bc07ad5..cbd44f676f 100644
  				this.#connection = connection;
  				this.#connecting = undefined;
  				return connection;
+@@ -328,13 +404,14 @@ export async function smokeTestTextPredictDaemon(): Promise<void> {
+ 		env: workerEnvFromParent({
+ 			[TEXT_PREDICT_SOCKET_ENV]: endpoint,
+ 			[TEXT_PREDICT_AGENT_DIR_ENV]: path.join(root, "agent"),
++			[TEXT_PREDICT_PROFILE_ENV]: "studio",
+ 		}),
+ 	});
+ 	let connection: DaemonConnection | undefined;
+ 	try {
+ 		const deadline = Date.now() + SMOKE_TEST_TIMEOUT_MS;
+ 		while (!connection && Date.now() < deadline && proc.exitCode === null) {
+-			connection = await connectDaemon(endpoint);
++			connection = await connectDaemon(endpoint, "studio");
+ 			if (!connection) await Bun.sleep(200);
+ 		}
+ 		if (!connection) {
 diff --git a/packages/coding-agent/src/predict/daemon.ts b/packages/coding-agent/src/predict/daemon.ts
-index bc73e1de7f..a1d3afb978 100644
+index 26d3cbb0c0..d536235911 100644
 --- a/packages/coding-agent/src/predict/daemon.ts
 +++ b/packages/coding-agent/src/predict/daemon.ts
 @@ -21,6 +21,8 @@ import { blendPredictions } from "./blend";
@@ -278,7 +343,7 @@ index bc73e1de7f..a1d3afb978 100644
  	#agentDir: string;
  	#historyDbPath: string;
  	#engines = new Map<TextPredictMethod, Promise<Engine>>();
-@@ -229,8 +233,9 @@ class TextPredictDaemon {
+@@ -228,8 +232,9 @@ class TextPredictDaemon {
  		onStop: () => this.#persistAll(),
  	});
  
@@ -290,7 +355,7 @@ index bc73e1de7f..a1d3afb978 100644
  		this.#historyDbPath = getHistoryDbPath(agentDir);
  	}
  
-@@ -255,6 +260,8 @@ class TextPredictDaemon {
+@@ -254,6 +259,8 @@ class TextPredictDaemon {
  					ok: true,
  					op: "ping",
  					version: VERSION,
@@ -299,7 +364,7 @@ index bc73e1de7f..a1d3afb978 100644
  					pid: process.pid,
  					engines: [...this.#engines.keys()],
  				};
-@@ -281,6 +288,20 @@ class TextPredictDaemon {
+@@ -280,6 +287,20 @@ class TextPredictDaemon {
  				if (ingested > 0) this.#persistCadence.touch();
  				return { id: request.id, ok: true, op: "sync", ingested };
  			}
@@ -320,7 +385,7 @@ index bc73e1de7f..a1d3afb978 100644
  			case "shutdown":
  				setImmediate(() => this.#server.exit("shutdown requested"));
  				return { id: request.id, ok: true, op: "shutdown" };
-@@ -358,7 +379,7 @@ class TextPredictDaemon {
+@@ -357,7 +378,7 @@ class TextPredictDaemon {
  			await predictor.ready();
  			cursor = undefined;
  		}
@@ -329,7 +394,7 @@ index bc73e1de7f..a1d3afb978 100644
  		const ingested = await engine.ingest(this.#historyDbPath);
  		if (ingested > 0) this.#persistCadence.touch();
  		logger.debug("text-predict: engine ready", {
-@@ -389,5 +410,7 @@ export async function startTextPredictDaemonFromEnvironment(): Promise<void> {
+@@ -388,5 +409,7 @@ export async function startTextPredictDaemonFromEnvironment(): Promise<void> {
  	if (!endpoint || !agentDir) {
  		throw new Error(`${TEXT_PREDICT_SOCKET_ENV} and ${TEXT_PREDICT_AGENT_DIR_ENV} must be set`);
  	}
@@ -354,7 +419,7 @@ index 86beea3866..7067f815f3 100644
  		path.join(os.homedir(), ".codex", "history.jsonl"),
  	];
 diff --git a/packages/coding-agent/src/predict/protocol.ts b/packages/coding-agent/src/predict/protocol.ts
-index 25bb0619e6..a1fd5dff88 100644
+index c6740951e4..91ed2a1276 100644
 --- a/packages/coding-agent/src/predict/protocol.ts
 +++ b/packages/coding-agent/src/predict/protocol.ts
 @@ -19,6 +19,8 @@ export const TEXT_PREDICT_SOCKET_ENV = "OMP_TEXT_PREDICT_SOCKET";
@@ -382,10 +447,10 @@ index 25bb0619e6..a1fd5dff88 100644
 +		.toString(16)
 +		.padStart(16, "0")
 +		.slice(0, 12);
- 	const endpoint =
- 		process.platform === "win32"
- 			? `\\\\.\\pipe\\omp-text-predict-${Bun.hash.wyhash(runtimeDir).toString(16)}-${key}`
-@@ -60,13 +70,24 @@ export type TextPredictRequest =
+ 	return { name: `omp.text-predict.${key}`, endpoint: ipcEndpoint(runtimeDir, `text-predict-${key}`) };
+ }
+ 
+@@ -56,13 +66,24 @@ export type TextPredictRequest =
  	  }
  	/** Ingest history rows newer than each open engine's cursor. */
  	| { id: number; op: "sync" }
@@ -429,7 +494,7 @@ index 6490e232cf..f6c120fce7 100644
  	if (params.action === "init") {
  		const state = await withFlowLock(lockKey, () => initFlow(cwd, params.flow, params));
 diff --git a/packages/coding-agent/src/registry/agent-registry.ts b/packages/coding-agent/src/registry/agent-registry.ts
-index c6d8fce13d..8c1c7f9c9c 100644
+index 7c3730a378..60a3182a50 100644
 --- a/packages/coding-agent/src/registry/agent-registry.ts
 +++ b/packages/coding-agent/src/registry/agent-registry.ts
 @@ -43,6 +43,7 @@ export interface AgentRunLifecycle {
@@ -440,7 +505,7 @@ index c6d8fce13d..8c1c7f9c9c 100644
  	agent?: string;
  	modelRole?: string;
  	resolvedModel?: string;
-@@ -85,6 +86,7 @@ export type RegistryEvent =
+@@ -87,6 +88,7 @@ export type RegistryEvent =
  	| { type: "registered"; ref: AgentRef }
  	| { type: "status_changed"; ref: AgentRef }
  	| { type: "metadata_changed"; ref: AgentRef }
@@ -448,7 +513,7 @@ index c6d8fce13d..8c1c7f9c9c 100644
  	| { type: "removed"; ref: AgentRef };
  
  type RegistryListener = (event: RegistryEvent) => void;
-@@ -259,8 +261,7 @@ export class AgentRegistry {
+@@ -277,8 +279,7 @@ export class AgentRegistry {
  	/**
  	 * Record a short activity gist for the work-aware roster. Display-only and
  	 * read on demand (`irc list`, peer roster), so it emits no event — keeping
@@ -458,13 +523,17 @@ index c6d8fce13d..8c1c7f9c9c 100644
  	 * `running` agent has current work: a heartbeat for any other status is
  	 * dropped, so a late progress flush can't resurrect activity on a ref that
  	 * `setStatus` just cleared. Every running heartbeat refreshes `lastActivity`
-@@ -291,16 +292,20 @@ export class AgentRegistry {
+@@ -309,6 +310,7 @@ export class AgentRegistry {
  		// closes the race between a parked reviver claiming the ref and finishing
  		// createAgentSession after an explicit kill.
  		if (!ref || ref.status === "aborted" || !this.#matchesExpected(ref, expected)) return false;
 +		const previousSession = ref.session;
  		ref.session = session;
- 		if (sessionFile !== undefined) ref.sessionFile = sessionFile;
+ 		if (sessionFile !== undefined) {
+ 			// A replacement transcript starts a new cumulative-cost identity.
+@@ -318,13 +320,16 @@ export class AgentRegistry {
+ 			ref.sessionFile = sessionFile;
+ 		}
  		ref.lastActivity = Date.now();
 +		this.#emit({ type: "session_changed", ref, previousSession });
  		return true;
@@ -480,10 +549,10 @@ index c6d8fce13d..8c1c7f9c9c 100644
  	}
  
 diff --git a/packages/coding-agent/src/registry/persisted-agents.ts b/packages/coding-agent/src/registry/persisted-agents.ts
-index 10d84e3804..4e81670a8e 100644
+index 7bda0b8782..788099312a 100644
 --- a/packages/coding-agent/src/registry/persisted-agents.ts
 +++ b/packages/coding-agent/src/registry/persisted-agents.ts
-@@ -353,6 +353,7 @@ async function readPersistedAgentMetadata(
+@@ -377,6 +377,7 @@ async function readPersistedAgentMetadata(
  						typeof record.modelRole === "string" ? record.modelRole : (history.modelRole ?? inferred.modelRole),
  					resolvedModel: typeof record.resolvedModel === "string" ? record.resolvedModel : history.resolvedModel,
  					readOnly: typeof record.readOnly === "boolean" ? record.readOnly : inferred.readOnly,
@@ -492,10 +561,10 @@ index 10d84e3804..4e81670a8e 100644
  				return false;
  			},
 diff --git a/packages/coding-agent/src/session/agent-session-types.ts b/packages/coding-agent/src/session/agent-session-types.ts
-index 7f1129a07a..c9e8c5867e 100644
+index eed06874bd..4407a214b0 100644
 --- a/packages/coding-agent/src/session/agent-session-types.ts
 +++ b/packages/coding-agent/src/session/agent-session-types.ts
-@@ -46,6 +46,7 @@ import type { ToolSession } from "../tools";
+@@ -47,6 +47,7 @@ import type { ToolSession } from "../tools";
  import type { XdevState } from "../tools/xdev";
  import type { CodexAutoRedeemCoordinator } from "./codex-auto-reset";
  import type { SettingsGatedToolDelta } from "./session-tools";
@@ -503,7 +572,7 @@ index 7f1129a07a..c9e8c5867e 100644
  import type { SessionManager } from "./session-manager";
  
  /** Maximum time the interactive shutdown path waits for Mnemopi consolidation. */
-@@ -422,6 +423,8 @@ export interface PromptOptions {
+@@ -441,6 +442,8 @@ export interface PromptOptions {
  	 * failed before admission still only settles through the returned promise.
  	 */
  	onPromptAdmitted?: () => void;
@@ -512,7 +581,7 @@ index 7f1129a07a..c9e8c5867e 100644
  }
  
  /** Payload for {@link AgentSession.setPromptDropped}: a user prompt cancelled
-@@ -436,6 +439,8 @@ export interface DroppedPrompt {
+@@ -455,6 +458,8 @@ export interface DroppedPrompt {
  
  /** Options for AgentSession.followUp(). */
  export interface FollowUpOptions {
@@ -521,7 +590,7 @@ index 7f1129a07a..c9e8c5867e 100644
  	/** Enqueue as a hidden developer message instead of a user follow-up. */
  	synthetic?: boolean;
  	/** Whether to expand file-based prompt templates (default: true). */
-@@ -446,6 +451,8 @@ export interface FollowUpOptions {
+@@ -465,6 +470,8 @@ export interface FollowUpOptions {
  
  /** Options for AgentSession.steer(). */
  export interface SteerOptions {
@@ -531,10 +600,10 @@ index 7f1129a07a..c9e8c5867e 100644
  	attribution?: MessageAttribution;
  }
 diff --git a/packages/coding-agent/src/session/agent-session.ts b/packages/coding-agent/src/session/agent-session.ts
-index 2357f091dd..241561c5a3 100644
+index 50465f8b9a..40b7fdcc31 100644
 --- a/packages/coding-agent/src/session/agent-session.ts
 +++ b/packages/coding-agent/src/session/agent-session.ts
-@@ -619,6 +619,8 @@ type ScheduledAgentContinueOptions = {
+@@ -650,6 +650,8 @@ type ScheduledAgentContinueOptions = {
  	shouldContinue?: () => boolean;
  	onSkip?: (reason: AgentContinueSkipReason) => void;
  	onError?: (error: unknown) => void;
@@ -543,8 +612,8 @@ index 2357f091dd..241561c5a3 100644
  };
  
  type ScheduledAgentContinueRequest = {
-@@ -701,6 +703,14 @@ export function powerAssertionOptions(mode: "off" | "idle" | "display" | "system
- 	};
+@@ -780,6 +782,14 @@ function ephemeralMaxTokensRejection(model: Model): string | undefined {
+ 	return undefined;
  }
  
 +export interface QueuedMessageEntry {
@@ -558,7 +627,7 @@ index 2357f091dd..241561c5a3 100644
  export class AgentSession implements SettingsScope {
  	readonly agent: Agent;
  	readonly sessionManager: SessionManager;
-@@ -772,6 +782,9 @@ export class AgentSession implements SettingsScope {
+@@ -851,6 +861,9 @@ export class AgentSession implements SettingsScope {
  	 * command.
  	 */
  	readonly #queuedMessageRawText = new WeakMap<AgentMessage, string>();
@@ -568,7 +637,7 @@ index 2357f091dd..241561c5a3 100644
  
  	// Event subscription state
  	#unsubscribeAgent?: () => void;
-@@ -1008,6 +1021,10 @@ export class AgentSession implements SettingsScope {
+@@ -1087,6 +1100,10 @@ export class AgentSession implements SettingsScope {
  	 *  incremented, so `isStreaming` alone cannot tell a host that a submission is admitted. */
  	#admittedSubmissionCount = 0;
  	#admittedSubmissionsSettled: PromiseWithResolvers<void> | undefined;
@@ -579,7 +648,7 @@ index 2357f091dd..241561c5a3 100644
  	// Wire-level agent_end emission deferred until #promptInFlightCount drops to 0.
  	// Internal extension hooks and post-emit work (auto-retry, auto-compaction, todo
  	// checks in #handleAgentEvent) still fire on the original schedule — only the
-@@ -1501,9 +1518,8 @@ export class AgentSession implements SettingsScope {
+@@ -1588,9 +1605,8 @@ export class AgentSession implements SettingsScope {
  		return this.#prewalk.arm(target, thinkingLevel);
  	}
  
@@ -591,7 +660,7 @@ index 2357f091dd..241561c5a3 100644
  	}
  
  	/** Restore a planning model and re-arm prewalk without partially applying a rejected restart. */
-@@ -1522,7 +1538,11 @@ export class AgentSession implements SettingsScope {
+@@ -1609,7 +1625,11 @@ export class AgentSession implements SettingsScope {
  		if (!state?.enabled) {
  			throw new ToolError("Plan mode is not active.");
  		}
@@ -604,7 +673,7 @@ index 2357f091dd..241561c5a3 100644
  			suppliedTitle: title,
  			statePlanFilePath: state.planFilePath,
  			readPlan: url => this.#readPlanFile(url),
-@@ -1530,7 +1550,7 @@ export class AgentSession implements SettingsScope {
+@@ -1617,7 +1637,7 @@ export class AgentSession implements SettingsScope {
  		});
  		return {
  			content: [{ type: "text", text: "Plan ready for review." }],
@@ -613,7 +682,7 @@ index 2357f091dd..241561c5a3 100644
  		};
  	}
  
-@@ -1558,7 +1578,9 @@ export class AgentSession implements SettingsScope {
+@@ -1643,7 +1663,9 @@ export class AgentSession implements SettingsScope {
  		this.#reseedTokenRate();
  		this.agent.setQueuedMessageGrouping(
  			(previous, next) =>
@@ -622,9 +691,9 @@ index 2357f091dd..241561c5a3 100644
 +					this.#studioQueueIds.get(previous) === this.#studioQueueIds.get(next)) ||
 +				(isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next))),
  		);
- 		this.#codeModeState = config.codeModeState ?? {};
  		this.sessionManager = config.sessionManager;
-@@ -4476,7 +4498,7 @@ export class AgentSession implements SettingsScope {
+ 		this.settings = config.settings;
+@@ -4586,7 +4608,7 @@ export class AgentSession implements SettingsScope {
  					return;
  				}
  			}
@@ -633,7 +702,7 @@ index 2357f091dd..241561c5a3 100644
  				options?.onSkip?.("aborted");
  				return;
  			}
-@@ -4610,6 +4632,14 @@ export class AgentSession implements SettingsScope {
+@@ -4720,6 +4742,14 @@ export class AgentSession implements SettingsScope {
  					this.#skipAgentContinue("should-continue-false", request);
  					return;
  				}
@@ -648,7 +717,7 @@ index 2357f091dd..241561c5a3 100644
  
  				for (;;) {
  					const active = this.#activeAgentContinue;
-@@ -4689,6 +4719,7 @@ export class AgentSession implements SettingsScope {
+@@ -4799,6 +4829,7 @@ export class AgentSession implements SettingsScope {
  				delayMs: 100,
  				generation: options.generation,
  				shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -656,7 +725,7 @@ index 2357f091dd..241561c5a3 100644
  			});
  			return true;
  		}
-@@ -4732,6 +4763,7 @@ export class AgentSession implements SettingsScope {
+@@ -4842,6 +4873,7 @@ export class AgentSession implements SettingsScope {
  						source: "auto-continue-queued-message",
  						generation,
  						shouldContinue: () => this.agent.hasQueuedMessages(),
@@ -664,7 +733,7 @@ index 2357f091dd..241561c5a3 100644
  					});
  					return;
  				}
-@@ -5037,6 +5069,28 @@ export class AgentSession implements SettingsScope {
+@@ -5147,6 +5179,28 @@ export class AgentSession implements SettingsScope {
  		await this.#extensionRunner.emit(mapped);
  	}
  
@@ -693,15 +762,15 @@ index 2357f091dd..241561c5a3 100644
  	/**
  	 * Subscribe to agent events.
  	 * Session persistence is handled internally (saves messages on message_end).
-@@ -5689,6 +5743,7 @@ export class AgentSession implements SettingsScope {
+@@ -5810,6 +5864,7 @@ export class AgentSession implements SettingsScope {
  
  	/** Drop the in-memory conversation state after the terminal dispose flush. */
  	#releaseRetainedSessionMemory(): void {
 +		this.#heldQueueGroups.length = 0;
  		this.#releaseQueuedTtsrReservations();
  		this.agent.reset();
- 		this.agent.setAppendOnlyContext(undefined);
-@@ -6447,6 +6502,11 @@ export class AgentSession implements SettingsScope {
+ 		this.#tools.releaseRestoredTranscript();
+@@ -6558,6 +6613,11 @@ export class AgentSession implements SettingsScope {
  	}
  
  	/** All messages including custom types like BashExecutionMessage */
@@ -713,7 +782,7 @@ index 2357f091dd..241561c5a3 100644
  	get messages(): AgentMessage[] {
  		return this.agent.state.messages;
  	}
-@@ -7226,7 +7286,7 @@ export class AgentSession implements SettingsScope {
+@@ -7352,7 +7412,7 @@ export class AgentSession implements SettingsScope {
  			const queued = await this.#queueUserMessage(expandedText, options?.images, streamingBehavior, {
  				timestamp: submittedAt,
  				attribution: promptAttribution,
@@ -722,7 +791,7 @@ index 2357f091dd..241561c5a3 100644
  				rawText: typedText,
  				onPromptAdmitted: options?.onPromptAdmitted,
  				promptGeneration: queueGeneration,
-@@ -7355,21 +7415,17 @@ export class AgentSession implements SettingsScope {
+@@ -7481,21 +7541,17 @@ export class AgentSession implements SettingsScope {
  		let turnError: unknown;
  		let dispatched = false;
  		try {
@@ -752,7 +821,7 @@ index 2357f091dd..241561c5a3 100644
  			});
  		} catch (error) {
  			turnError = error;
-@@ -7690,6 +7746,9 @@ export class AgentSession implements SettingsScope {
+@@ -7830,6 +7886,9 @@ export class AgentSession implements SettingsScope {
  			acceptTerminalEmptyStop?: boolean;
  		},
  	): Promise<boolean> {
@@ -762,7 +831,7 @@ index 2357f091dd..241561c5a3 100644
  		// Returns false when the prompt was dropped before reaching the agent —
  		// every pre-dispatch bail (generation bump from abort, disposal, usage
  		// preflight denial) exits silently, and prompt() uses the outcome to hand
-@@ -8093,6 +8152,7 @@ export class AgentSession implements SettingsScope {
+@@ -8239,6 +8298,7 @@ export class AgentSession implements SettingsScope {
  		await this.#queueUserMessage(expandedText, images, "steer", {
  			timestamp: submittedAt,
  			attribution: options?.attribution,
@@ -770,7 +839,7 @@ index 2357f091dd..241561c5a3 100644
  			rawText: text,
  		});
  	}
-@@ -8118,6 +8178,7 @@ export class AgentSession implements SettingsScope {
+@@ -8264,6 +8324,7 @@ export class AgentSession implements SettingsScope {
  			await this.#queueUserMessage(expandedText, images, "followUp", {
  				timestamp: submittedAt,
  				attribution: options?.attribution,
@@ -778,7 +847,7 @@ index 2357f091dd..241561c5a3 100644
  				rawText: text,
  			});
  			return;
-@@ -8253,6 +8314,8 @@ export class AgentSession implements SettingsScope {
+@@ -8399,6 +8460,8 @@ export class AgentSession implements SettingsScope {
  			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
  			const userMessage: AgentMessage = { role: "user", content, attribution, timestamp: timestamp ?? Date.now() };
  			this.#queuedMessageRawText.set(userMessage, rawText);
@@ -787,7 +856,7 @@ index 2357f091dd..241561c5a3 100644
  			records.push(userMessage);
  			this.#irc.queueAside(records);
  			options?.onPromptAdmitted?.();
-@@ -8276,6 +8339,8 @@ export class AgentSession implements SettingsScope {
+@@ -8422,6 +8485,8 @@ export class AgentSession implements SettingsScope {
  				timestamp: timestamp ?? Date.now(),
  			};
  			this.#queuedMessageRawText.set(userMessage, rawText);
@@ -796,7 +865,7 @@ index 2357f091dd..241561c5a3 100644
  			this.agent.followUp(userMessage);
  		} else {
  			for (const notice of prependMessages) this.agent.steer(notice);
-@@ -8289,6 +8354,8 @@ export class AgentSession implements SettingsScope {
+@@ -8435,6 +8500,8 @@ export class AgentSession implements SettingsScope {
  				timestamp: timestamp ?? Date.now(),
  			};
  			this.#queuedMessageRawText.set(userMessage, rawText);
@@ -805,7 +874,7 @@ index 2357f091dd..241561c5a3 100644
  			this.agent.steer(userMessage);
  		}
  		options?.onPromptAdmitted?.();
-@@ -8313,6 +8380,7 @@ export class AgentSession implements SettingsScope {
+@@ -8459,6 +8526,7 @@ export class AgentSession implements SettingsScope {
  		this.#queuedMessageDrainScheduled = true;
  		this.#scheduleAgentContinue({
  			source: "queued-message-drain",
@@ -813,7 +882,7 @@ index 2357f091dd..241561c5a3 100644
  			shouldContinue: () => {
  				this.#queuedMessageDrainScheduled = false;
  				return (
-@@ -8837,13 +8905,28 @@ export class AgentSession implements SettingsScope {
+@@ -8983,13 +9051,28 @@ export class AgentSession implements SettingsScope {
  	 *  dequeued but never recorded — live-steered into the aborted response, or taken for its next
  	 *  model call — and treats it as queued ahead of the rest (it was queued first).
  	 *  Plain Alt+Up dequeue preserves those non-user steers. */
@@ -843,7 +912,7 @@ index 2357f091dd..241561c5a3 100644
  		const steering = steeringAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
  		const followUp = followUpAll.filter(isUserAuthoredQueuedMessage).map(toRestoredQueuedMessage);
  		const keep: (m: AgentMessage) => boolean = options?.forInterrupt
-@@ -8879,6 +8962,83 @@ export class AgentSession implements SettingsScope {
+@@ -9025,6 +9108,83 @@ export class AgentSession implements SettingsScope {
  
  	/** Chip texts for the queue display. Steering live steering took for the streaming response
  	 *  stays listed until the transcript records it, when the model actually switches to it. */
@@ -924,10 +993,10 @@ index 2357f091dd..241561c5a3 100644
 +		return true;
 +	}
 +
- 	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[] } {
+ 	getQueuedMessages(): { steering: readonly string[]; followUp: readonly string[]; liveSteered: number } {
+ 		const liveSteered = this.agent.peekLiveSteeredMessages().filter(isUserAuthoredQueuedMessage).length;
  		return {
- 			steering: [...this.agent.peekLiveSteeredMessages(), ...this.agent.peekSteeringQueue()]
-@@ -8888,6 +9048,81 @@ export class AgentSession implements SettingsScope {
+@@ -9036,6 +9196,81 @@ export class AgentSession implements SettingsScope {
  		};
  	}
  
@@ -1009,7 +1078,7 @@ index 2357f091dd..241561c5a3 100644
  	/** Last {@link getQueuedMessages} snapshot emitted as a `queue_update` event.
  	 *  Coalesces the agent's internal `onQueueChange` notification down to the
  	 *  externally observable transitions RPC/ACP/TUI subscribers actually care
-@@ -8922,7 +9157,7 @@ export class AgentSession implements SettingsScope {
+@@ -9078,7 +9313,7 @@ export class AgentSession implements SettingsScope {
  	 * already delivered target changes nothing; repeated calls may remove further
  	 * duplicates.
  	 */
@@ -1018,7 +1087,7 @@ index 2357f091dd..241561c5a3 100644
  		return this.takeQueuedMessage(text, queue) !== undefined;
  	}
  
-@@ -8930,7 +9165,19 @@ export class AgentSession implements SettingsScope {
+@@ -9086,7 +9321,19 @@ export class AgentSession implements SettingsScope {
  	 * {@link removeQueuedMessage}, returning the removed message as editor-restorable
  	 * content (its chip text and images); undefined when nothing matched.
  	 */
@@ -1039,7 +1108,7 @@ index 2357f091dd..241561c5a3 100644
  		const selected = queue === "steering" ? this.agent.peekSteeringQueue() : this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(selected, text);
  		if (index < 0) return undefined;
-@@ -8947,7 +9194,7 @@ export class AgentSession implements SettingsScope {
+@@ -9103,7 +9350,7 @@ export class AgentSession implements SettingsScope {
  	 * {@link removeQueuedMessage}; agent-attributed handoffs are never promoted. A missing
  	 * or already delivered target changes nothing; repeated calls may promote duplicates.
  	 */
@@ -1048,7 +1117,7 @@ index 2357f091dd..241561c5a3 100644
  		const followUp = this.agent.peekFollowUpQueue();
  		const index = this.#findQueuedUserMessage(followUp, text);
  		if (index < 0) return false;
-@@ -8973,7 +9220,11 @@ export class AgentSession implements SettingsScope {
+@@ -9129,7 +9376,11 @@ export class AgentSession implements SettingsScope {
  	 * matches the raw text the caller originally submitted first, then the queued chip text
  	 * itself (exact); -1 when nothing matches.
  	 */
@@ -1061,7 +1130,7 @@ index 2357f091dd..241561c5a3 100644
  		let index = queue.findIndex(
  			message => isUserAuthoredQueuedMessage(message) && this.#queuedMessageRawText.get(message) === text,
  		);
-@@ -9553,7 +9804,10 @@ export class AgentSession implements SettingsScope {
+@@ -9687,7 +9938,10 @@ export class AgentSession implements SettingsScope {
  		reason?: string;
  		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
  		preserveCompaction?: boolean;
@@ -1072,7 +1141,7 @@ index 2357f091dd..241561c5a3 100644
  		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
  		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
  		if (userInterrupt) this.#advisors.autoResumeSuppressed = true;
-@@ -9640,6 +9894,7 @@ export class AgentSession implements SettingsScope {
+@@ -9774,6 +10028,7 @@ export class AgentSession implements SettingsScope {
  				this.#preserveAdvisorCard(card);
  			}
  		} finally {
@@ -1080,7 +1149,7 @@ index 2357f091dd..241561c5a3 100644
  			this.#abortInProgress = false;
  			this.#drainStrandedQueuedMessages();
  		}
-@@ -10765,7 +11020,10 @@ export class AgentSession implements SettingsScope {
+@@ -10916,7 +11171,10 @@ export class AgentSession implements SettingsScope {
  	}
  
  	/** Retry the last failed assistant turn when the session is idle. */
@@ -1092,16 +1161,16 @@ index 2357f091dd..241561c5a3 100644
  		return this.#recovery.retry();
  	}
  
-@@ -12483,7 +12741,7 @@ export class AgentSession implements SettingsScope {
+@@ -12698,7 +12956,7 @@ export class AgentSession implements SettingsScope {
  		const settingsKey = provider === "anthropic" ? "claudeResets.autoRedeem" : "codexResets.autoRedeem";
  		const source = provider === "anthropic" ? "claude-auto-reset" : "codex-auto-reset";
  		const runner = this.#extensionRunner;
--		if (!runner?.hasUI()) {
-+		if (!this.#resetConsentHandler && !runner?.hasUI()) {
- 			if (!coordinator.notifiedKeys.has(first.attemptKey)) {
- 				coordinator.notifiedKeys.add(first.attemptKey);
- 				this.emitNotice(
-@@ -12516,16 +12774,18 @@ export class AgentSession implements SettingsScope {
+-		if (!runner?.hasUI() || !this.#interactivePrompts) {
++		if (!this.#resetConsentHandler && (!runner?.hasUI() || !this.#interactivePrompts)) {
+ 			const approved = headlessApprovedResetActions(actions);
+ 			const waiting = actions.find(action => !approved.some(spend => spend.attemptKey === action.attemptKey));
+ 			if (waiting && !coordinator.notifiedKeys.has(waiting.attemptKey)) {
+@@ -12740,16 +12998,18 @@ export class AgentSession implements SettingsScope {
  				? `Spend a saved ${providerLabel} rate-limit reset?\n${lines[0]}`
  				: `Spend ${actions.length} saved ${providerLabel} rate-limit resets?\n${lines.join("\n")}`;
  		try {
@@ -1130,7 +1199,7 @@ index 2357f091dd..241561c5a3 100644
  			if (choice === "Yes") {
  				if (provider === "anthropic") cfgClaudeResetsAutoRedeem.set(this.settings, "yes");
  				else cfgCodexResetsAutoRedeem.set(this.settings, "yes");
-@@ -13064,7 +13324,7 @@ export class AgentSession implements SettingsScope {
+@@ -13308,7 +13568,7 @@ export class AgentSession implements SettingsScope {
  	 * @returns the archive path and member names, or `undefined` when the main
  	 * session has no messages.
  	 */
@@ -1139,7 +1208,7 @@ index 2357f091dd..241561c5a3 100644
  		const messages = this.messages;
  		if (messages.length === 0) return undefined;
  		const entries: Array<readonly [string, string]> = [["session.md", `${this.formatSessionAsText()}\n`]];
-@@ -13097,7 +13357,7 @@ export class AgentSession implements SettingsScope {
+@@ -13351,7 +13611,7 @@ export class AgentSession implements SettingsScope {
  			entries.push([`subagents/${key}.md`, `${text}\n`]);
  			subagentCount++;
  		}
@@ -1173,7 +1242,7 @@ index df6a46ef71..3c7e96513c 100644
  
  	/** Arms a prewalk immediately for an explicit slash-command request. */
 diff --git a/packages/coding-agent/src/session/session-entries.ts b/packages/coding-agent/src/session/session-entries.ts
-index 391e88f251..eb25b3488c 100644
+index 6fe181a0d9..14f85a78a2 100644
 --- a/packages/coding-agent/src/session/session-entries.ts
 +++ b/packages/coding-agent/src/session/session-entries.ts
 @@ -20,6 +20,10 @@ export const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";
@@ -1187,16 +1256,16 @@ index 391e88f251..eb25b3488c 100644
  export type SessionTitleSource = "auto" | "user";
  
  /** Fixed-width first-line slot carrying the mutable current session title. */
-@@ -53,6 +57,8 @@ export interface SessionHeader {
- 	previousSessionFiles?: string[];
- 	/** Provider prompt-cache identity inherited by exact-route full forks. */
+@@ -55,6 +59,8 @@ export interface SessionHeader {
  	providerPromptCacheKey?: string;
+ 	/** Local-only Task candidate, gated by the actual request model's cache policy; omitted from shares and HTML. */
+ 	taskPromptCacheKey?: string;
 +	/** Optional creation marker ignored by unpatched OMP readers. */
 +	studioOrigin?: StudioSessionOrigin;
  }
  
  export interface NewSessionOptions {
-@@ -65,6 +71,10 @@ export interface NewSessionOptions {
+@@ -68,6 +74,10 @@ export interface NewSessionOptions {
  	additionalDirectories?: string[];
  	/** Directory for the new session file (and later `/new` sessions); defaults to the current session directory. */
  	sessionDir?: string;
@@ -1208,32 +1277,32 @@ index 391e88f251..eb25b3488c 100644
  
  export interface SessionEntryBase {
 diff --git a/packages/coding-agent/src/session/session-manager.ts b/packages/coding-agent/src/session/session-manager.ts
-index 3df8cdc8ff..8f6f0657e9 100644
+index bbf5d7b02c..4f8b019776 100644
 --- a/packages/coding-agent/src/session/session-manager.ts
 +++ b/packages/coding-agent/src/session/session-manager.ts
-@@ -42,7 +42,12 @@ import {
- } from "./messages";
- import type { WorkPoolYieldItem } from "../task/workpool-yield";
- import type { RetryFallbackRole } from "./retry-fallback-chains";
--import { type BuildSessionContextOptions, buildSessionContext, type SessionContext } from "./session-context";
-+import {
-+	type BuildSessionContextOptions,
-+	buildSessionContext,
+@@ -1,3 +1,5 @@
++import { splitCardTitle } from "../utils/title-card";
++import type { SessionTitleCard } from "../studio/session-titles-protocol";
+ import * as fs from "node:fs";
+ import * as path from "node:path";
+ import type {
+@@ -48,6 +50,7 @@ import {
+ 	buildSessionContext,
+ 	type SessionContext,
+ 	snapcompactHistoryBlockOptions,
 +	getRestorableSessionModels,
-+	type SessionContext,
-+} from "./session-context";
+ } from "./session-context";
  import {
  	type BranchSummaryEntry,
- 	type CompactionEntry,
-@@ -65,6 +70,7 @@ import {
- 	type SessionTitleCard,
+@@ -72,6 +75,7 @@ import {
+ 	type SessionMessageEntry,
  	type SessionTitleSource,
  	type SessionTreeNode,
 +	type StudioSessionOrigin,
  	type ThinkingLevelChangeEntry,
  	TITLE_CHANGE_ENTRY_TYPE,
  	type TitleChangeEntry,
-@@ -868,6 +874,9 @@ export class SessionManager {
+@@ -908,6 +912,9 @@ export class SessionManager {
  	#hasTitleSlot = true;
  	#entries: SessionEntry[] = [];
  	#index = new SessionEntryIndex();
@@ -1243,7 +1312,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  
  	/** File reflects all current entries; appends can go incrementally. */
  	#fileIsCurrent = false;
-@@ -953,6 +962,8 @@ export class SessionManager {
+@@ -995,6 +1002,8 @@ export class SessionManager {
  	 * back to the most-recent session instead of being treated as a fresh crumb.
  	 */
  	#breadcrumbFresh = false;
@@ -1252,24 +1321,24 @@ index 3df8cdc8ff..8f6f0657e9 100644
  	#sessionNameChangedCallbacks = new Set<() => void>();
  	#persistenceErrorCallbacks = new Set<(error: Error) => void>();
  	#persistenceNoticeCallbacks = new Set<(notice: SessionPersistenceNotice) => void>();
-@@ -1958,6 +1969,8 @@ export class SessionManager {
- 			parentSession: options?.parentSession,
+@@ -2001,6 +2010,8 @@ export class SessionManager {
  			providerPromptCacheKey: options?.providerPromptCacheKey,
+ 			taskPromptCacheKey: options?.taskPromptCacheKey,
  		};
 +		const studioOrigin = options?.studioOrigin ?? this.#newSessionStudioOrigin;
 +		if (studioOrigin) this.#header.studioOrigin = studioOrigin;
  		const workspace = normalizeSessionWorkspace({
  			cwd: this.#cwd,
  			directories: options?.additionalDirectories ?? [],
-@@ -1970,6 +1983,7 @@ export class SessionManager {
+@@ -2013,6 +2024,7 @@ export class SessionManager {
  
  		this.#entries = [];
  		this.#index.clear();
 +		this.clearReservedMessageIds();
  		this.#fileIsCurrent = false;
  		this.#rewriteRequired = false;
- 		this.#forceFileCreation = false;
-@@ -2006,16 +2020,80 @@ export class SessionManager {
+ 		this.#loadedMalformedRecords = 0;
+@@ -2050,16 +2062,80 @@ export class SessionManager {
  		const repairedUsage = normalizeLoadedUsage(entries);
  		if (repairedUsage > 0) logger.warn("Loaded assistant messages with incomplete usage", { count: repairedUsage });
  		this.#index.rebuild(entries);
@@ -1351,7 +1420,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  	#setLeaf(id: string | null): void {
  		this.#index.setLeaf(id);
  		const batch = this.#atomicEntryBatch;
-@@ -3091,6 +3169,10 @@ export class SessionManager {
+@@ -3143,6 +3219,10 @@ export class SessionManager {
  		return this.#sessionId;
  	}
  
@@ -1362,25 +1431,41 @@ index 3df8cdc8ff..8f6f0657e9 100644
  	getSessionFile(): string | undefined {
  		return this.#sessionFile;
  	}
-@@ -3220,15 +3302,39 @@ export class SessionManager {
- 	 * gets it back from its own entries.
- 	 */
- 	getSessionTitleCard(): SessionTitleCard | undefined {
--		const title = this.#sessionName;
+@@ -3270,6 +3350,58 @@ export class SessionManager {
+ 		return this.#sessionName;
+ 	}
+ 
++	/**
++	 * The card index of the current title, if it has one. Read from the latest
++	 * title change rather than stored beside the title (header, title slot,
++	 * listings): a rename that passes no card drops it, and a resumed session
++	 * gets it back from its own entries.
++	 */
++	getSessionTitleCard(): SessionTitleCard | undefined {
 +		return SessionManager.#cardForTitle(this.#sessionName, this.#entries);
 +	}
 +
 +	static #cardForTitle(title: string | undefined, entries: readonly FileEntry[]): SessionTitleCard | undefined {
- 		if (!title) return undefined;
--		for (let i = this.#entries.length - 1; i >= 0; i--) {
--			const entry = this.#entries[i]!;
++		if (!title) return undefined;
++		const parsed = splitCardTitle(title);
++		if (parsed) return { code: parsed.code, emoji: parsed.icon };
++		// Legacy Studio sessions kept the card beside the title.
 +		for (let i = entries.length - 1; i >= 0; i--) {
 +			const entry = entries[i]!;
- 			if (entry.type === TITLE_CHANGE_ENTRY_TYPE) return entry.title === title ? entry.card : undefined;
- 		}
- 		return undefined;
- 	}
- 
++			if (entry.type !== TITLE_CHANGE_ENTRY_TYPE) continue;
++			if (entry.title !== title || !("card" in entry) || !entry.card || typeof entry.card !== "object")
++				return undefined;
++			const old = entry.card as Record<string, unknown>;
++			if (typeof old.code !== "string") return undefined;
++			return {
++				code: old.code,
++				...(typeof old.emoji === "string" ? { emoji: old.emoji } : {}),
++				...(typeof old.nf === "string" ? { nf: old.nf } : {}),
++			};
++		}
++		return undefined;
++	}
++
 +	/** Read only title metadata without acquiring session ownership or writing migrations. */
 +	static async peekSessionTitle(
 +		filePath: string,
@@ -1405,7 +1490,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  	onSessionNameChanged(cb: () => void): () => void {
  		this.#sessionNameChangedCallbacks.add(cb);
  		return () => {
-@@ -3361,7 +3467,15 @@ export class SessionManager {
+@@ -3395,7 +3527,15 @@ export class SessionManager {
  			| PythonExecutionMessage
  			| FileMentionMessage,
  	): string {
@@ -1422,7 +1507,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  		this.#recordEntry(entry);
  		return entry.id;
  	}
-@@ -3501,9 +3615,12 @@ export class SessionManager {
+@@ -3537,9 +3677,12 @@ export class SessionManager {
  			tokensAfter?: number;
  		} = {},
  	): string {
@@ -1436,7 +1521,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  			summary,
  			shortSummary,
  			firstKeptEntryId,
-@@ -3906,10 +4023,16 @@ export class SessionManager {
+@@ -3971,10 +4114,16 @@ export class SessionManager {
  	 * @param cwd Working directory (stored in the session header)
  	 * @param sessionDir Optional session directory; defaults to the cwd-derived dir.
  	 */
@@ -1455,7 +1540,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  		return manager;
  	}
  
-@@ -3953,6 +4076,7 @@ export class SessionManager {
+@@ -4018,6 +4167,7 @@ export class SessionManager {
  			copyArtifacts?: boolean;
  			suppressBreadcrumb?: boolean;
  			sessionFile?: string;
@@ -1463,7 +1548,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  			resetInheritedCost?: boolean;
  			repairInterruptedTail?: boolean;
  		},
-@@ -3960,6 +4084,7 @@ export class SessionManager {
+@@ -4025,6 +4175,7 @@ export class SessionManager {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const manager = new SessionManager(cwd, dir, true, storage);
  		manager.#suppressBreadcrumb = options?.suppressBreadcrumb === true;
@@ -1471,15 +1556,15 @@ index 3df8cdc8ff..8f6f0657e9 100644
  
  		// A missing source must fail instead of forking an empty parentless session:
  		// the loader swallows ENOENT by default for fresh-session opens, so fork opts out.
-@@ -3981,6 +4106,7 @@ export class SessionManager {
- 			{
+@@ -4047,6 +4198,7 @@ export class SessionManager {
  				parentSession: sourceHeader?.id,
- 				providerPromptCacheKey: sourceHeader?.providerPromptCacheKey ?? sourceHeader?.id,
+ 				providerPromptCacheKey: SessionManager.getInheritedProviderPromptCacheKey(sourceHeader),
+ 				taskPromptCacheKey: sourceHeader?.taskPromptCacheKey,
 +				studioOrigin: options?.studioOrigin,
  			},
  			options?.sessionFile,
  		);
-@@ -4128,6 +4254,38 @@ export class SessionManager {
+@@ -4176,6 +4328,38 @@ export class SessionManager {
  		return manager;
  	}
  
@@ -1516,9 +1601,9 @@ index 3df8cdc8ff..8f6f0657e9 100644
 +	}
 +
  	/**
- 	 * Lock-free peek for cold subagent revival: returns the recorded working
- 	 * directory (session header) and the latest `session_init` contract (system
-@@ -4167,6 +4325,7 @@ export class SessionManager {
+ 	 * Whether `session` was recorded in a worktree of `cwd`'s repository that no
+ 	 * longer exists, e.g. a `/wt` worktree removed since. Resume such a session
+@@ -4258,6 +4442,7 @@ export class SessionManager {
  		cwd: string,
  		sessionDir?: string,
  		storage: SessionStorage = new FileSessionStorage(),
@@ -1526,7 +1611,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  	): Promise<SessionManager> {
  		const dir = sessionDir ?? SessionManager.getDefaultSessionDir(cwd, undefined, storage);
  		const resolvedCwd = path.resolve(cwd);
-@@ -4186,7 +4345,8 @@ export class SessionManager {
+@@ -4277,7 +4462,8 @@ export class SessionManager {
  				(!sessionDir || pathIsWithin(dir, path.dirname(breadcrumb.sessionFile)))
  			) {
  				const manager = new SessionManager(cwd, dir, true, storage);
@@ -1536,7 +1621,7 @@ index 3df8cdc8ff..8f6f0657e9 100644
  				return manager;
  			}
  
-@@ -4270,8 +4430,9 @@ export class SessionManager {
+@@ -4361,8 +4547,9 @@ export class SessionManager {
  		if (chosenSession === undefined) chosenSession = await findMostRecentNonEmptySession(dir, storage);
  
  		const manager = new SessionManager(cwd, dir, true, storage);
@@ -1547,20 +1632,77 @@ index 3df8cdc8ff..8f6f0657e9 100644
  		return manager;
  	}
  
+diff --git a/packages/coding-agent/src/session/session-transfer.ts b/packages/coding-agent/src/session/session-transfer.ts
+index b3da4911b8..f1fd902e9b 100644
+--- a/packages/coding-agent/src/session/session-transfer.ts
++++ b/packages/coding-agent/src/session/session-transfer.ts
+@@ -93,6 +93,8 @@ export interface PackSessionResult {
+ 
+ /** Options for {@link unpackSession}. */
+ export interface UnpackSessionOptions {
++	/** Always fork when a local copy exists; desktop imports never replace an existing transcript. */
++	preserveExisting?: boolean;
+ 	/** Directory the session continues in on this machine; becomes the header `cwd`. */
+ 	cwd: string;
+ 	/** Session directory to land in; defaults to `cwd`'s session directory. */
+@@ -560,6 +562,34 @@ async function placeSession(
+  * copy diverged, the incoming transcript lands as a fork with a new id whose
+  * `parentSession` is the original id, and local copies stay untouched.
+  */
++export async function inspectSessionArchive(
++	archivePath: string,
++	cwd: string,
++): Promise<{
++	id: string;
++	title: string;
++	cwd: string;
++	omp: string;
++	messages: number;
++	artifacts: number;
++	blobs: number;
++	conflicts: boolean;
++}> {
++	const contents = await readSessionArchive(path.resolve(archivePath));
++	await requireDirectory(path.resolve(cwd));
++	const copies = await findLocalCopies(contents.header.id, SessionManager.getDefaultSessionDir(cwd));
++	return {
++		id: contents.header.id,
++		title: contents.header.title || contents.header.id,
++		cwd: contents.header.cwd || contents.manifest.cwd,
++		omp: contents.manifest.omp,
++		messages: contents.entries.filter(entry => entry.type === "message").length,
++		artifacts: contents.artifacts.length,
++		blobs: contents.blobs.length,
++		conflicts: copies.length > 0,
++	};
++}
++
+ export async function unpackSession(archivePath: string, options: UnpackSessionOptions): Promise<UnpackSessionResult> {
+ 	const archive = path.resolve(archivePath);
+ 	const cwd = path.resolve(options.cwd);
+@@ -594,7 +624,7 @@ export async function unpackSession(archivePath: string, options: UnpackSessionO
+ 			if (!isTranscriptPrefix(entries, contents.entries)) diverged = true;
+ 		}
+ 
+-		if (diverged) {
++		if (diverged || (options.preserveExisting && localCopies.length > 0)) {
+ 			const placed = await placeSession(() => SessionManager.forkFrom(stagedFile, cwd, sessionDir), arrival);
+ 			logger.info("Unpacked session as a fork of a diverged local copy", { parent: id, ...placed });
+ 			return { ...placed, mode: "forked" };
 diff --git a/packages/coding-agent/src/session/turn-recovery.ts b/packages/coding-agent/src/session/turn-recovery.ts
-index 65243243fe..9a117541a5 100644
+index 89593013d7..f9f4a31448 100644
 --- a/packages/coding-agent/src/session/turn-recovery.ts
 +++ b/packages/coding-agent/src/session/turn-recovery.ts
-@@ -304,6 +304,8 @@ type UsageLimitOutcome = {
- export class TurnRecovery {
+@@ -339,6 +339,8 @@ export class TurnRecovery {
  	readonly #host: TurnRecoveryHost;
+ 	readonly #unexpectedStopJudgeTimeoutMs: number;
  	#retryAbortController: AbortController | undefined;
 +	/** Sticky cancel so abort wins even if the backoff controller is created after `abortRetry()`. */
 +	#retryCancelled = false;
  	#retryAttempt = 0;
- 	#requestBodyReadTimeoutRecoveryPromptSequence: number | undefined;
- 	#retryPromise: Promise<void> | undefined;
-@@ -459,6 +461,7 @@ export class TurnRecovery {
+ 	/**
+ 	 * Selectors a classifier refusal has already moved off in the current retry saga; see the walk
+@@ -501,6 +503,7 @@ export class TurnRecovery {
  		this.#streamStallContinueCount = 0;
  		this.#acceptTerminalEmptyStopForPrompt = false;
  		this.#activeFallbackCreditRedemption = undefined;
@@ -1568,7 +1710,7 @@ index 65243243fe..9a117541a5 100644
  	}
  
  	/** Sets whether one terminal empty stop is accepted for the current prompt. */
-@@ -1106,6 +1109,17 @@ export class TurnRecovery {
+@@ -1187,6 +1190,17 @@ export class TurnRecovery {
  			attribution: "agent",
  			timestamp: Date.now(),
  		});
@@ -1586,7 +1728,7 @@ index 65243243fe..9a117541a5 100644
  		this.#host.scheduleAgentContinue({
  			source: "unexpected-stop-retry",
  			generation: this.#host.promptGeneration(),
-@@ -2389,6 +2403,7 @@ export class TurnRecovery {
+@@ -2492,6 +2506,7 @@ export class TurnRecovery {
  		// not a retry loop, so it runs even when the user disabled retries: it switches
  		// the model once and lets the base turn proceed.
  		if (!retrySettings.enabled && !options?.fireworksFastFallback) return false;
@@ -1594,7 +1736,7 @@ index 65243243fe..9a117541a5 100644
  		const classifierRefusal = this.isClassifierRefusal(message);
  
  		const generation = this.#host.promptGeneration();
-@@ -2777,6 +2792,10 @@ export class TurnRecovery {
+@@ -2884,6 +2899,10 @@ export class TurnRecovery {
  
  		await this.#recordPendingRetryError(message, id, { switchedCredential, switchedModel, delayMs });
  
@@ -1605,7 +1747,7 @@ index 65243243fe..9a117541a5 100644
  		await this.#host.emitSessionEvent({
  			type: "auto_retry_start",
  			attempt: this.#retryAttempt,
-@@ -2801,6 +2820,10 @@ export class TurnRecovery {
+@@ -2908,6 +2927,10 @@ export class TurnRecovery {
  		// pattern instead of re-sampling the same stalled reasoning.
  		this.#maybeInjectThinkingLoopRedirect(id);
  
@@ -1616,7 +1758,7 @@ index 65243243fe..9a117541a5 100644
  		// Day-scale provider waits (a monthly quota reset parsed from the error
  		// text) exceed the signed 32-bit timer limit; sleepLong chunks the sleep
  		// so the full wait elapses instead of overflowing the timer. `delayMs`
-@@ -2814,13 +2837,16 @@ export class TurnRecovery {
+@@ -2921,13 +2944,16 @@ export class TurnRecovery {
  			if (this.#retryAbortController !== retryAbortController) {
  				return false;
  			}
@@ -1635,7 +1777,7 @@ index 65243243fe..9a117541a5 100644
  		// The identity-keyed removal above can miss when a context rebuild
  		// recreated the failed turn's message object between settle and retry
  		// (fresh identity, same failed tail — issue #5382). Agent.continue()
-@@ -2834,6 +2860,10 @@ export class TurnRecovery {
+@@ -2941,6 +2967,10 @@ export class TurnRecovery {
  			this.#stripFailedAssistantTail();
  		}
  
@@ -1646,7 +1788,7 @@ index 65243243fe..9a117541a5 100644
  		// Retry via continue() outside the agent_end event callback chain. A
  		// continuation that still fails locally must close the retry saga —
  		// otherwise auto_retry_end never fires, retryPromise stays pending, and
-@@ -2940,11 +2970,37 @@ export class TurnRecovery {
+@@ -3051,11 +3081,37 @@ export class TurnRecovery {
  	 * Cancel in-progress retry.
  	 */
  	abortRetry(): void {
@@ -1685,7 +1827,7 @@ index 65243243fe..9a117541a5 100644
  	async #promptAgentWithIdleRetry(messages: AgentMessage[], options?: { toolChoice?: ToolChoice }): Promise<void> {
  		const deadline = Date.now() + 30_000;
  		for (;;) {
-@@ -3060,6 +3116,7 @@ export class TurnRecovery {
+@@ -3171,6 +3227,7 @@ export class TurnRecovery {
  		}
  
  		// Reset retry budget for a fresh attempt
@@ -1694,10 +1836,10 @@ index 65243243fe..9a117541a5 100644
  
  		// Re-attempt the turn
 diff --git a/packages/coding-agent/src/task/executor.ts b/packages/coding-agent/src/task/executor.ts
-index 7c337b2e29..a48659eb67 100644
+index 5d3dc5f10a..783200677a 100644
 --- a/packages/coding-agent/src/task/executor.ts
 +++ b/packages/coding-agent/src/task/executor.ts
-@@ -4495,6 +4495,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
+@@ -4612,6 +4612,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
  				// even when the workspace was retained for recovery.
  				isolated: worktree !== undefined || undefined,
  			});
@@ -1721,7 +1863,7 @@ index 7be0aace6d..ec47f4a192 100644
  		patchPath: result.patchPath,
  		branchName: result.branchName,
 diff --git a/packages/tui/src/status-line/context-usage.ts b/packages/tui/src/status-line/context-usage.ts
-index 05d518f3e5..2d7f46dcb5 100644
+index 0733e753d1..3cf30206f9 100644
 --- a/packages/tui/src/status-line/context-usage.ts
 +++ b/packages/tui/src/status-line/context-usage.ts
 @@ -240,20 +240,18 @@ export function estimateToolSchemaTokens(tools: ToolSchemaSource, tokenizer: Tok

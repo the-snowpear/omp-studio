@@ -1,3 +1,5 @@
+import { SessionWorktreesPane } from "./workspaces/SessionWorktreesPane";
+import { FeatureSettingsPane } from "./settings/FeatureSettingsPane";
 import { PredictionSettingsPane } from "./settings/PredictionSettingsPane";
 import "./composer/prediction.css";
 import { NativePreferencesPane, type NativePreferencesContext } from "./settings/NativePreferencesPane";
@@ -85,6 +87,7 @@ export function SettingsPage({
   onSetApprovalMode,
   runtimeSettings,
   nativeContext,
+  onOpenWorktree,
   predictionSessionId,
   predictionAvailable = false,
 }: {
@@ -95,6 +98,7 @@ export function SettingsPage({
   /** Optional Runtime settings read/write surface; omitted on older Runtime versions. */
   runtimeSettings?: RuntimeSettingsApi;
   nativeContext?: NativePreferencesContext | undefined;
+  onOpenWorktree?: ((workspaceId: string) => Promise<void>) | undefined;
   predictionSessionId?: string | undefined;
   predictionAvailable?: boolean;
 }) {
@@ -244,18 +248,20 @@ export function SettingsPage({
       <div className="cap-main" id="setMain">
         {flash ? <div className="set-flash" role="status">{flash}</div> : null}
         <div className="cap-pane-stage" ref={stageRef}>
-          <div {...pane("native")} id="set-native" role="tabpanel" aria-labelledby="setTab-native" tabIndex={0}><NativePreferencesPane client={client} context={nativeContext} visible={group === "native"} /></div>
+          <div {...pane("native")} id="set-native" role="tabpanel" aria-labelledby="setTab-native" tabIndex={0}><NativePreferencesPane client={client} context={nativeContext} visible={group === "native"} /><FeatureSettingsPane group="voice" client={client} context={nativeContext} visible={group === "native"} /></div>
           <div {...pane("general")} id="set-general" role="tabpanel" aria-labelledby="setTab-general" tabIndex={0}>
             <GeneralTab ctl={ctl} />
           </div>
           <div {...pane("interaction")} id="set-interaction" role="tabpanel" aria-labelledby="setTab-interaction" tabIndex={0}>
             <InteractionTab ctl={ctl} demo={demoRuntime} prediction={<PredictionSettingsPane client={client} context={nativeContext} visible={group === "interaction"} />} />
+            <FeatureSettingsPane group="interaction" client={client} context={nativeContext} visible={group === "interaction"} />
           </div>
           <div {...pane("permissions")} id="set-permissions" role="tabpanel" aria-labelledby="setTab-permissions" tabIndex={0}>
             <PermissionsTab ctl={ctl} demo={demoRuntime} />
           </div>
           <div {...pane("context")} id="set-context" role="tabpanel" aria-labelledby="setTab-context" tabIndex={0}>
             <ContextTab demo={demoRuntime} runtime={runtime} />
+            <FeatureSettingsPane group="context" client={client} context={nativeContext} visible={group === "context"} />
           </div>
           <div {...pane("files")} id="set-files" role="tabpanel" aria-labelledby="setTab-files" tabIndex={0}>
             <FilesTab demo={demoRuntime} runtime={runtime} />
@@ -263,6 +269,8 @@ export function SettingsPage({
           </div>
           <div {...pane("tasks")} id="set-tasks" role="tabpanel" aria-labelledby="setTab-tasks" tabIndex={0}>
             <TasksTab demo={demoRuntime} runtime={runtime} />
+            <FeatureSettingsPane group="tasks" client={client} context={nativeContext} visible={group === "tasks"} />
+            <SessionWorktreesPane client={client} context={nativeContext} visible={group === "tasks"} onOpenWorkspace={onOpenWorktree} />
           </div>
           <div {...pane("advanced")} id="set-advanced" role="tabpanel" aria-labelledby="setTab-advanced" tabIndex={0}>
             <AdvancedTab demo={demoRuntime} runtime={runtime} />

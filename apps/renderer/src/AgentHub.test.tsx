@@ -597,10 +597,8 @@ it("previews a configured agent spawn without sending Host queries or writes", a
  fireEvent.click(screen.getAllByRole("button", { name: "创建代理" })[0]!);
  const dialog = await screen.findByRole("dialog", { name: "创建代理" });
  fireEvent.change(within(dialog).getByRole("textbox", { name: "任务描述" }), { target: { value: "检查模型配置页面的布局" } });
- const model = within(dialog).getByRole("combobox", { name: "本次主模型" }) as HTMLSelectElement;
- fireEvent.change(model, { target: { value: model.options[1]!.value } });
+ expect(within(dialog).queryByRole("combobox", { name: "本次主模型" })).toBeNull();
  fireEvent.change(within(dialog).getByRole("combobox", { name: "本次思考强度" }), { target: { value: "hi" } });
- fireEvent.change(within(dialog).getByRole("textbox", { name: "候选模型链（可选）" }), { target: { value: "test/backup:medium" } });
  fireEvent.click(within(dialog).getByRole("button", { name: "预览创建" }));
  await screen.findByText(/演示任务已配置/); expect(command).not.toHaveBeenCalled(); expect(query).not.toHaveBeenCalled();
 });

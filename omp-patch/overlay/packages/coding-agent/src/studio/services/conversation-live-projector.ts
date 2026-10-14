@@ -1,3 +1,4 @@
+import { asyncJobState } from "@oh-my-pi/pi-tui/chat/tool-execution";
 import { projectToolMedia } from "./conversation-media";
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, AssistantMessageEvent, ToolCall } from "@oh-my-pi/pi-ai";
@@ -218,6 +219,8 @@ export class ConversationLiveProjector {
 	readonly #openMessages = new Map<string, OpenMessage>();
 	readonly #completedMessageIds = new Set<string>();
 	readonly #completedToolIds = new Set<string>();
+	readonly #retainedToolResults = new Map<string, Extract<ConversationContentBlock, { type: "toolResult" }>>();
+	readonly #backgroundTools = new Map<string, { turnId: string; toolName: string }>();
 	readonly #toolOutput = new Map<string, string>();
 	/** Full tool state the client has actually been sent. `append` is decided
 	 *  against this, never against `#toolOutput`, so a coalesced run of partials
@@ -292,6 +295,16 @@ export class ConversationLiveProjector {
 		this.#flushPending();
 	}
 
+	toolResult(
+		sessionId: string,
+		toolCallId: string,
+	): Extract<ConversationContentBlock, { type: "toolResult" }> | undefined {
+		if (this.#disposed || sessionId !== this.#sessionId) return undefined;
+		const result = this.#retainedToolResults.get(toolCallId);
+		if (!result) return undefined;
+		const output = this.#toolOutput.get(toolCallId) ?? result.output;
+		return structuredClone({ ...result, ...(output === undefined ? {} : { output }) });
+	}
 	dispose(): void {
 		this.#unsubscribe?.();
 		this.#unsubscribe = undefined;
@@ -525,9 +538,22 @@ export class ConversationLiveProjector {
 	}
 
 	#onToolUpdate(event: Extract<AgentSessionEvent, { type: "tool_execution_update" }>): void {
-		if (this.#turnAborted) return;
 		const toolCallId = publicToolCallId(event.toolCallId, "").id;
 		if (toolCallId.length === 0 || this.#completedToolIds.has(toolCallId)) return;
+		const background = this.#backgroundTools.get(toolCallId);
+		if (this.#turnAborted && !background) return;
+		const partial = event.partialResult as { details?: unknown; isError?: boolean };
+		const jobState = asyncJobState(partial?.details);
+		if (background && ["completed", "failed", "cancelled"].includes(jobState ?? "")) {
+			this.#onToolEnd({
+				type: "tool_execution_end",
+				toolCallId: event.toolCallId,
+				toolName: event.toolName,
+				result: event.partialResult,
+				isError: jobState === "failed" || partial?.isError === true,
+			});
+			return;
+		}
 		const extracted = toolText(event.partialResult);
 		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 		const truncated = sanitized.truncated || extracted.truncated === true;
@@ -545,7 +571,7 @@ export class ConversationLiveProjector {
 		// lossless because the full text stays in `#toolOutput`; the flush sends
 		// whatever the client is still missing.
 		this.#rememberBoundedMap(this.#toolPending, toolCallId, {
-			turnId: pending?.turnId ?? this.#ensureTurnId(),
+			turnId: background?.turnId ?? pending?.turnId ?? this.#ensureTurnId(),
 			truncated: truncated || pending?.truncated === true,
 		});
 		const sentText = sent?.text ?? "";
@@ -565,7 +591,19 @@ export class ConversationLiveProjector {
 			return;
 		}
 		if (this.#completedToolIds.has(toolCallId)) return;
-		this.#rememberCompletedTool(toolCallId);
+		const previousBackground = this.#backgroundTools.get(toolCallId);
+		const details =
+			event.result && typeof event.result === "object" && "details" in event.result
+				? event.result.details
+				: undefined;
+		const background =
+			["task", "bash", "eval"].includes(event.toolName) && asyncJobState(details) === "running" && !event.isError;
+		const turnId = previousBackground?.turnId ?? this.#ensureTurnId();
+		if (background) this.#rememberBoundedMap(this.#backgroundTools, toolCallId, { turnId, toolName: event.toolName });
+		else {
+			this.#backgroundTools.delete(toolCallId);
+			this.#rememberCompletedTool(toolCallId);
+		}
 		const extracted = toolText(event.result);
 		const isError = event.isError === true || extracted.isError || event.result instanceof Error;
 		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
@@ -580,14 +618,25 @@ export class ConversationLiveProjector {
 		if (sanitized.truncated) result.truncated = true;
 		if (extracted.data !== undefined) result.data = extracted.data;
 		if (extracted.truncated === true) result.truncated = true;
+		if (background || previousBackground) {
+			this.#rememberBoundedMap(this.#retainedToolResults, toolCallId, result);
+			let bytes = 0;
+			for (const item of this.#retainedToolResults.values()) bytes += utf8ByteLength(JSON.stringify(item));
+			while (this.#retainedToolResults.size > 32 || bytes > 4 * 1024 * 1024) {
+				const oldest = this.#retainedToolResults.keys().next().value;
+				if (!oldest) break;
+				bytes -= utf8ByteLength(JSON.stringify(this.#retainedToolResults.get(oldest)));
+				this.#retainedToolResults.delete(oldest);
+			}
+		}
 		this.#toolOutput.delete(toolCallId);
 		this.#toolSent.delete(toolCallId);
 		this.#toolPending.delete(toolCallId);
-		this.#toolOwners.delete(toolCallId);
+		if (!background) this.#toolOwners.delete(toolCallId);
 		this.#emitParsed({
 			kind: "conversation.tool.completed",
 			sessionId: this.#sessionId,
-			turnId: this.#ensureTurnId(),
+			turnId,
 			toolCallId,
 			result,
 			completedAt: this.#clock.nowIso(),
@@ -932,10 +981,10 @@ export class ConversationLiveProjector {
 			}
 		}
 		this.#pending.clear();
-		this.#toolPending.clear();
-		this.#toolOutput.clear();
-		this.#toolSent.clear();
-		this.#toolOwners.clear();
+		for (const id of this.#toolPending.keys()) if (!this.#backgroundTools.has(id)) this.#toolPending.delete(id);
+		for (const id of this.#toolOutput.keys()) if (!this.#backgroundTools.has(id)) this.#toolOutput.delete(id);
+		for (const id of this.#toolSent.keys()) if (!this.#backgroundTools.has(id)) this.#toolSent.delete(id);
+		for (const id of this.#toolOwners.keys()) if (!this.#backgroundTools.has(id)) this.#toolOwners.delete(id);
 	}
 
 	#blockId(messageId: string, contentIndex: number, blockType: "text" | "thinking"): string {
@@ -996,7 +1045,8 @@ export class ConversationLiveProjector {
 		const pending = this.#toolPending.get(toolCallId);
 		if (pending === undefined) return;
 		this.#toolPending.delete(toolCallId);
-		if (this.#completedToolIds.has(toolCallId) || this.#turnAborted) return;
+		if (this.#completedToolIds.has(toolCallId) || (this.#turnAborted && !this.#backgroundTools.has(toolCallId)))
+			return;
 		const full = this.#toolOutput.get(toolCallId) ?? "";
 		const sent = this.#toolSent.get(toolCallId);
 		const textChanged = sent === undefined || full !== sent.text;
@@ -1081,6 +1131,8 @@ export class ConversationLiveProjector {
 		this.#openMessages.clear();
 		this.#completedMessageIds.clear();
 		this.#completedToolIds.clear();
+		this.#backgroundTools.clear();
+		this.#retainedToolResults.clear();
 		this.#toolOutput.clear();
 		this.#toolSent.clear();
 		this.#toolOwners.clear();

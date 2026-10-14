@@ -1,4 +1,5 @@
 import { MarkdownInline } from "../conversation/markdown";
+import { PLATFORM } from "../platform";
 import {useState,useEffect} from "react";
 import {AskImages} from "./AskImages";
 import { PromptHead, type DeckQueue } from "./PromptHead";
@@ -12,6 +13,7 @@ export function AskHead({
   queue,
   headers,
   onJump,
+  onCollapse,
 }: {
   demo?: boolean;
   meta?: string;
@@ -19,11 +21,13 @@ export function AskHead({
   /** 本批次全部 ask 的 header 胶囊（含当前卡）；多张 ask 时才显示。 */
   headers: readonly AskHeader[];
   onJump: (index: number) => void;
+  onCollapse?: () => void;
 }) {
   return (
     <PromptHead
       icon="message"
       title="Agent 提问"
+      {...(onCollapse ? { end: <button type="button" className="btn small ghost" onClick={onCollapse} data-tip={PLATFORM === "darwin" ? "⌥H" : "Alt+H"}>收起 / Hide</button> } : {})}
       {...(demo === true ? { demo: true } : {})}
       {...(meta ? { meta } : {})}
       {...(queue ? { queue } : {})}

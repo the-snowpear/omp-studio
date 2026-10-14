@@ -1,3 +1,5 @@
+import { validateSessionWorktreeResult, type SessionWorktreeRow } from "@omp-studio/studio-protocol";
+import { validateSessionPortabilityResult, type PortableExport, type SessionPortabilityStatus } from "@omp-studio/studio-protocol";
 import { validateMaintenanceResult, type SessionExportResult, type SessionExportStatus } from "@omp-studio/studio-protocol";
 import { mediaInputArtifacts, validateMediaResult, type MediaDetail, isWorkbenchOperationKind, WORKBENCH_OPERATION_KINDS, isUpgradeOperationKind, UPGRADE_OPERATION_KINDS } from "@omp-studio/studio-protocol";
 import { validateSessionGuiResult, type QueueTakeback } from "@omp-studio/studio-protocol";
@@ -378,6 +380,17 @@ export function createDesktopSemanticCommands(options: {
         operation = { ...rest, ...(cwd ? { fallbackCwd: cwd } : {}) };
       }
       const grants: Array<{ artifactId: string; transferId: string }> = [];
+      if (operation.kind === "session.portability.prepare") {
+        if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop file channel is unavailable");
+        const cwd = operation.targetWorkspaceId ? await options.resolveImportWorkspace?.(operation.targetWorkspaceId) : undefined;
+        if (operation.targetWorkspaceId && !cwd) throw new StudioHostError("INVALID_ARGUMENT", "Unknown import workspace");
+        try {
+          const staged = await options.mediaFiles.stage(mediaDirectory, operation.artifactId, 64 * 1024 * 1024, operation.sessionId, true);
+          grants.push({ artifactId: staged.artifactId, transferId: staged.transferId });
+          if (options.sessionRef.current !== session || session.controller.publication()?.snapshot?.sessionId !== operation.sessionId) throw new Error("Session changed during archive staging");
+          operation = { ...operation, inputTransfers: grants, ...(cwd ? { targetCwd: cwd } : {}) };
+        } catch (cause) { await options.mediaFiles.releaseInputs(mediaDirectory, grants); throw cause; }
+      }
       if (operation.kind === "media.start") {
         if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop media channel is unavailable");
         try {
@@ -412,6 +425,35 @@ export function createDesktopSemanticCommands(options: {
           throw new StudioHostError("INTERNAL_ERROR", "Invalid import result");
         const workspaceId = await options.registerImportedWorkspace!(imported.cwd);
         return { snapshot: latest, result: { imported: true, sessionId: imported.sessionId, workspaceId } };
+      }
+      if (operation.kind === "worktrees.session.create" || operation.kind === "worktrees.session.open") {
+        validateSessionWorktreeResult(operation.kind, receipt.result);
+        const result = receipt.result as { cwd?: string; worktree?: SessionWorktreeRow };
+        if (!result.cwd || !options.registerImportedWorkspace) throw new StudioHostError("INTERNAL_ERROR", "Worktree registration unavailable");
+        const workspaceId = await options.registerImportedWorkspace(result.cwd);
+        return { snapshot: latest, result: { ...(result.worktree ? { worktree: result.worktree } : {}), workspaceId } };
+      }
+      if (operation.kind === "session.portability.import") {
+        validateSessionPortabilityResult(operation.kind, receipt.result);
+        const imported = receipt.result as { sessionId: string; mode: "created" | "forked"; cwd?: string };
+        if (!imported.cwd || !options.registerImportedWorkspace) throw new StudioHostError("INTERNAL_ERROR", "Imported workspace registration is unavailable");
+        const workspaceId = await options.registerImportedWorkspace(imported.cwd);
+        return { snapshot: latest, result: { sessionId: imported.sessionId, mode: imported.mode, workspaceId } };
+      }
+      if (operation.kind === "session.portability.pack" || operation.kind === "session.portability.anonymize" || operation.kind === "session.portability.status") {
+        validateSessionPortabilityResult(operation.kind, receipt.result);
+        const status = operation.kind === "session.portability.status" ? receipt.result as SessionPortabilityStatus : undefined;
+        if (status?.imported?.cwd && options.registerImportedWorkspace) {
+          const workspaceId = await options.registerImportedWorkspace(status.imported.cwd);
+          return { snapshot: latest, result: { ...status, imported: { sessionId: status.imported.sessionId, mode: status.imported.mode, workspaceId } } };
+        }
+        const exported = status ? status.exported : receipt.result as PortableExport;
+        if (exported) {
+          if (!mediaDirectory || !options.mediaFiles) throw missingRuntime("The private desktop file channel is unavailable");
+          const record = await options.mediaFiles.promote(mediaDirectory, operation.sessionId, mediaWorkspaceId, exported.id, exported.asset);
+          const result = { ...exported, asset: { ...exported.asset, artifactId: record.artifactId } };
+          return { snapshot: latest, result: status ? { ...status, exported: result } : result };
+        }
       }
       if (operation.kind === "maintenance.session.export" || operation.kind === "maintenance.export.status") {
         validateMaintenanceResult(operation.kind,receipt.result);

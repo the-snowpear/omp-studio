@@ -428,7 +428,7 @@ function validateRuntimeMirrorCommandInput(commandName: CommandName, input: unkn
     return;
   }
   try {
-    if (isWorkbenchOperationKind(commandName) && input !== null && typeof input === "object" && ("inputTransfers" in input || "kind" in input)) throw new Error("Private operation fields are not client inputs");
+    if (isWorkbenchOperationKind(commandName) && input !== null && typeof input === "object" && ("inputTransfers" in input || "targetCwd" in input || "kind" in input)) throw new Error("Private operation fields are not client inputs");
     // Same spread order as the dispatch seam (#commandP4): commandName wins,
     // so validation and dispatch always see the same operation kind.
     const operation = {

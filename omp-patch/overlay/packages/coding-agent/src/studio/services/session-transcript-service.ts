@@ -32,7 +32,11 @@ export type StudioSessionTranscriptSessionManager = {
 	getBranch(fromId?: string): readonly SessionEntry[];
 };
 
+export type StudioToolResultResolver = (
+	toolCallId: string,
+) => Extract<ConversationContentBlock, { type: "toolResult" }> | undefined;
 export type StudioSessionTranscriptContext = {
+	toolResult?: StudioToolResultResolver;
 	runtimeEpoch: number;
 	sessionId: string;
 	sessionManager?: StudioSessionTranscriptSessionManager | null;
@@ -243,7 +247,10 @@ function attachToolResult(
 	return { index: parentIndex, result: { ...result, toolCallId: call.toolCallId } };
 }
 
-export function projectConversationBranch(entries: readonly SessionEntry[]): ConversationItem[] {
+export function projectConversationBranch(
+	entries: readonly SessionEntry[],
+	resolveToolResult?: StudioToolResultResolver,
+): ConversationItem[] {
 	const items: ConversationItem[] = [];
 	const toolOwners = new Map<string, number>();
 	const mentions = new Map(readModelMentions(entries).map(mention => [mention.agent, mention.selector]));
@@ -252,7 +259,20 @@ export function projectConversationBranch(entries: readonly SessionEntry[]): Con
 			const message = asRecord(entry.message) ?? {};
 			if (message.role === "toolResult") {
 				const rawId = typeof message.toolCallId === "string" ? message.toolCallId : "";
-				const mapped = mapToolResultMessage(message, undefined, `tool:${entry.id}`);
+				const original = mapToolResultMessage(message, undefined, `tool:${entry.id}`);
+				const candidate = resolveToolResult?.(original.toolCallId);
+				const originalJob = asRecord(asRecord(original.data)?.async)?.jobId;
+				const candidateJob = asRecord(asRecord(candidate?.data)?.async)?.jobId;
+				// A provider may reuse a tool-call id in a later turn. Only the same
+				// native job may replace this persisted background result.
+				const live = typeof originalJob === "string" && originalJob === candidateJob ? candidate : undefined;
+				const mapped = live ?? original;
+				if (!live) {
+					const data = asRecord(mapped.data),
+						async = asRecord(data?.async);
+					if (data && async?.state === "running")
+						mapped.data = { ...data, async: { ...async, state: "unknown" } } as JsonValue;
+				}
 				const attached = attachToolResult(items, toolOwners, mapped, entry.parentId, rawId);
 				if (attached !== undefined) {
 					const owner = items[attached.index];
@@ -374,6 +394,7 @@ function shrinkItem(item: ConversationItem, maxPayloadBytes: number): Conversati
 }
 
 export type ConversationTranscriptSource = {
+	toolResult?: StudioToolResultResolver;
 	runtimeEpoch: number;
 	sessionId: string;
 	branchLeafId: string;
@@ -473,7 +494,7 @@ export function readConversationTranscriptPage(
 			throw new StudioSessionTranscriptError("INVALID_ARGUMENT", "Invalid transcript limit");
 		}
 	}
-	const publicItems = projectConversationBranch(source.branch);
+	const publicItems = projectConversationBranch(source.branch, source.toolResult);
 	let endExclusive = publicItems.length;
 	if (args.cursor !== undefined) {
 		const cursor = decodeConversationCursor(args.cursor, secret);
@@ -564,7 +585,7 @@ export class StudioSessionTranscriptService {
 
 	headCursor(): string {
 		const snapshot = this.#snapshot(false);
-		const publicItems = projectConversationBranch(snapshot.branch);
+		const publicItems = projectConversationBranch(snapshot.branch, snapshot.toolResult);
 		return encodeConversationCursor(
 			{
 				sessionId: snapshot.sessionId,
@@ -581,6 +602,7 @@ export class StudioSessionTranscriptService {
 	}
 
 	#snapshot(requireSession: boolean): {
+		toolResult?: StudioToolResultResolver;
 		runtimeEpoch: number;
 		sessionId: string;
 		branchLeafId: string;
@@ -608,6 +630,7 @@ export class StudioSessionTranscriptService {
 				: "";
 		return {
 			runtimeEpoch: context.runtimeEpoch,
+			...(context.toolResult ? { toolResult: context.toolResult } : {}),
 			sessionId,
 			branchLeafId: leafId,
 			branch,

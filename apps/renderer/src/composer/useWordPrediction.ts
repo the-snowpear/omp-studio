@@ -12,6 +12,7 @@ export interface ComposerPrediction {
   client: StudioClient;
   sessionId?: string | undefined;
   available: boolean;
+  nextMessageAvailable?: boolean;
 }
 /** Plain prose only: chips, hidden attachment names and image bytes never reach prediction. */
 function plain(node: Node): string {
@@ -166,6 +167,12 @@ export function useWordPrediction(
         rect = new DOMRect(rect.right, rect.top, 0, rect.height);
       }
       const editorBounds = editor.getBoundingClientRect();
+      if (!rect.height && !draft.text) {
+        const style = getComputedStyle(editor);
+        rect = new DOMRect(editorBounds.left + (parseFloat(style.paddingLeft) || 0),
+          editorBounds.top + (parseFloat(style.paddingTop) || 0), 0,
+          parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5 || 20);
+      }
       if (rect.bottom < editorBounds.top || rect.top > editorBounds.bottom) {
         setGhost(undefined);
         return;
@@ -197,6 +204,7 @@ export function useWordPrediction(
             generation.current !== current
           )
             return;
+          if (event.kind === "next") { show(event.suffix, event.revision); return; }
           if (event.kind === "suggestion") {
             if (event.revision === 0) {
               setGhost(undefined);
@@ -279,7 +287,7 @@ export function useWordPrediction(
         () =>
           void (async () => {
             const draft = predictionDraft(editor);
-            if (!draft || !draft.text.trim()) return;
+            if (!draft || (!draft.text.trim() && !options.nextMessageAvailable)) return;
             const version = ++revision.current;
             lastDraft = { ...draft, revision: version };
             if (preview) {
@@ -295,7 +303,9 @@ export function useWordPrediction(
             const latest = predictionDraft(editor);
             if (latest?.text !== draft.text || latest.caret !== draft.caret)
               return;
-            send({ kind: "update", revision: version, ...draft });
+            if (!draft.text && options.nextMessageAvailable && !editor.querySelector(".cm-chip,[contenteditable=false]")) {
+              send({ kind: "next", revision: version, empty: true });
+            } else send({ kind: "update", revision: version, ...draft });
           })(),
         140,
       );
@@ -306,6 +316,7 @@ export function useWordPrediction(
       close();
     };
     const start = () => {
+      if (options.nextMessageAvailable) send({ kind: "next", revision: ++revision.current, empty: false });
       composing = true;
       clearTimeout(timer);
       setGhost(undefined);
@@ -361,6 +372,7 @@ export function useWordPrediction(
     options?.client,
     options?.sessionId,
     options?.available,
+    options?.nextMessageAvailable,
     blocked,
     preview,
   ]);

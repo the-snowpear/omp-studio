@@ -1,0 +1,4 @@
+.plan-execution { display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-8) var(--sp-16); padding:var(--sp-12) var(--sp-16); border-top:1px solid var(--border); background:var(--surface); }
+.plan-execution label { display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-12); font-size:var(--fs-12); }
+.plan-execution .select { max-width:300px; }
+.plan-execution-detail { color:var(--text-muted); font-size:var(--fs-11); overflow-wrap:anywhere; }

@@ -686,6 +686,7 @@ export class StudioBridgeDispatcher {
 			await this.runtime.session.asyncJobManager.waitForAll();
 			await this.runtime.session.asyncJobManager.drainDeliveries({ timeoutMs: 5_000 });
 		}
+		await this.runtime.services.workbench.worktrees.cleanupOnShutdown();
 		return { drained: true };
 	}
 

@@ -155,6 +155,26 @@ jobs:
           name: runtime-artifact-${{ matrix.arch }}
           path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
           if-no-files-found: error
+      - name: Packaged Electron GUI acceptance
+        if: needs.prepare.outputs.kind == 'desktop'
+        timeout-minutes: 15
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm run omp:overlay:apply
+          npm install --no-save --package-lock=false playwright@1.62.1
+          $keys = Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json -AsHashtable
+          $env:OMP_RUNTIME_TRUSTED_PUBLIC_KEY = Join-Path $env:GITHUB_WORKSPACE ("packaging/keys/" + $keys.keys[$keys.activeKeyId])
+          $env:OMP_RUNTIME_SIGNING_KEY_ID = $keys.activeKeyId
+          $executables = @(Get-ChildItem outputs/installer -Recurse -Filter "OMP Studio.exe" | Where-Object { $_.Directory.Name -like '*unpacked' })
+          if ($executables.Count -ne 1) { throw "Expected one packaged desktop executable" }
+          $env:OMP_E2E_PACKAGED_EXE = $executables[0].FullName
+          $env:OMP_E2E_OUTPUT_DIR = Join-Path $env:GITHUB_WORKSPACE "outputs/release-gui-e2e"
+          node scripts/full-gui-e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always() && needs.prepare.outputs.kind == 'desktop'
+        with:
+          name: release-gui-evidence-windows-${{ matrix.arch }}
+          path: outputs/release-gui-e2e/
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-${{ matrix.arch }}
@@ -260,6 +280,25 @@ jobs:
           name: runtime-artifact-darwin-arm64
           path: packages/runtime-installer/dist/artifacts/darwin-arm64/
           if-no-files-found: error
+      - name: Packaged Electron GUI acceptance
+        if: needs.prepare.outputs.kind == 'desktop'
+        timeout-minutes: 15
+        env:
+          OMP_E2E_PACKAGED_EXE: ${{ github.workspace }}/outputs/installer-mac/mac-arm64/OMP Studio.app/Contents/MacOS/OMP Studio
+          OMP_E2E_OUTPUT_DIR: ${{ github.workspace }}/outputs/release-gui-e2e
+        run: |
+          npm run omp:overlay:apply
+          npm install --no-save --package-lock=false playwright@1.62.1
+          OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$GITHUB_WORKSPACE/packaging/keys/$(node -p 'const t=require("./packaging/keys/trusted-keys.json"); t.keys[t.activeKeyId]')"
+          export OMP_RUNTIME_TRUSTED_PUBLIC_KEY
+          OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
+          export OMP_RUNTIME_SIGNING_KEY_ID
+          node scripts/full-gui-e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always() && needs.prepare.outputs.kind == 'desktop'
+        with:
+          name: release-gui-evidence-macos-arm64
+          path: outputs/release-gui-e2e/
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-darwin-arm64

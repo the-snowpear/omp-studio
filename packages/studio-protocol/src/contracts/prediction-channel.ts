@@ -49,11 +49,13 @@ export function isPredictionKind(
   return (PREDICTION_KINDS as readonly string[]).includes(kind);
 }
 export type PredictionInput =
+  | { kind: "next"; revision: number; empty: boolean }
   | { kind: "update"; revision: number; text: string; caret: number }
   | { kind: "feedback"; revision: number; accepted: boolean }
   | { kind: "ping" }
   | { kind: "import"; requestId: string; transferId: string };
 export type PredictionEvent =
+  | { kind: "next"; channelId: string; revision: number; suffix: string | null }
   | {
       kind: "suggestion";
       channelId: string;
@@ -172,8 +174,13 @@ export function validatePredictionInput(
     "accepted",
     "requestId",
     "transferId",
+    "empty",
   ]);
   switch (row.kind) {
+    case "next":
+      integer(row.revision);
+      if (typeof row.empty !== "boolean") throw new Error("Invalid next-message state");
+      break;
     case "update":
       integer(row.revision);
       text(row.text, 4096, true);
@@ -194,7 +201,7 @@ export function validatePredictionInput(
       throw new Error("Invalid prediction message");
   }
   const allowed =
-    row.kind === "update"
+    row.kind === "next" ? ["kind", "revision", "empty"] : row.kind === "update"
       ? ["kind", "revision", "text", "caret"]
       : row.kind === "feedback"
         ? ["kind", "revision", "accepted"]
@@ -218,6 +225,11 @@ export function validatePredictionEvent(
   ]);
   id(row.channelId);
   switch (row.kind) {
+    case "next":
+      object(value, ["kind", "channelId", "revision", "suffix"]);
+      integer(row.revision);
+      if (row.suffix !== null) text(row.suffix, 500, true);
+      break;
     case "suggestion":
       object(value, ["kind", "channelId", "revision", "suffix"]);
       integer(row.revision);

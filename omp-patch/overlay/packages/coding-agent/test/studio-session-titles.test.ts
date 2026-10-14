@@ -13,7 +13,7 @@ test("saved title metadata follows the latest native rename and never changes th
 		file = "/sessions/title.jsonl";
 	const id = manager.getSessionId();
 	try {
-		await manager.setSessionName("Inspect stale locks", "auto", "test", { code: "LOCK", emoji: "🔒" });
+		await manager.setSessionName("🔒 LOCK: Inspect stale locks", "auto", "test");
 		const snapshot = () =>
 			[manager.getHeader(), ...manager.getEntries()].map(row => JSON.stringify(row)).join("\n") + "\n";
 		const source = snapshot();
@@ -22,7 +22,7 @@ test("saved title metadata follows the latest native rename and never changes th
 		try {
 			expect(await SessionManager.peekSessionTitle(file, storage)).toEqual({
 				sessionId: id,
-				title: "Inspect stale locks",
+				title: "🔒 LOCK: Inspect stale locks",
 				source: "auto",
 				card: { code: "LOCK", emoji: "🔒" },
 			});
@@ -50,7 +50,7 @@ test("title query rejects a different session and malformed targets instead of o
 		id = manager.getSessionId();
 	const session = { sessionId: id, sessionManager: manager } as unknown as AgentSession;
 	try {
-		await manager.setSessionName("Preview title", "auto", "test", { code: "CARD", emoji: "🧩" });
+		await manager.setSessionName("🧩 CARD: Preview title", "auto", "test");
 		const service = new StudioSessionTitlesService(session);
 		const operation = { kind: "session.titles.inspect", sessionId: id, targetSessionIds: [id] } as const;
 		const result = await service.execute({ ...operation, targetSessionIds: [id] });
@@ -93,7 +93,7 @@ test("title inspection refreshes persisted cards, excludes unknown identities, a
 				file,
 				[manager.getHeader(), ...manager.getEntries()].map(row => JSON.stringify(row)).join("\n") + "\n",
 			);
-		await manager.setSessionName("Old title", "auto", "test", { code: "OLD", emoji: "🔎" });
+		await manager.setSessionName("🔎 OLD: Old title", "auto", "test");
 		await save();
 		const service = new StudioSessionTitlesService(session),
 			operation = {

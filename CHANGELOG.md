@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-10-14
+
+### Added
+
+- OMP 18.10.4 的代理 OAuth 账号池、按模型压缩阈值与原生触发点预览、失败回退条件、额外指令文件、结构化任务结果、Git 工作区保护与本地语音速度设置。
+- 历史工作区加入完整会话包迁移与匿名诊断导出；导入先检查内容和冲突，已有同 ID 会话保留并创建新分支。维护页提供 NTFS/APFS 透明压缩的候选预览、身份复查和结果。
+- 会话 Worktree 管理、新会话目录选择及退出策略；Plan 评审支持原生执行档位与扩展响应，Ask 可折叠且保留未提交回答。
+- 可选的下一消息预测，默认关闭，复用原生临时回合与用量记录；草稿状态和建议经过私有通道。评测页增加原生 Judge 模型选择。
+- macOS Apple Silicon 增加仅验收 Runtime 的 CI 入口（`scope: macos-runtime`）；正式发布支持原生 arm64 构建、ad hoc 签名应用、DMG 与整包更新 ZIP。
+
+### Changed
+
+- Runtime 从 `18.8.0-studio.20` 升至 **`18.10.4-studio.7`**，沿用 overlay 与四组生成接缝。[逐版本变更、GUI 入口及验收记录](docs/migrations/omp-18.10.4.md)。应用与 Runtime 更新的最低兼容应用版本为 **0.1.10**；旧版使用完整安装包升级。
+- 子代理使用代理配置中的模型和候选链，移除单次启动模型覆盖；移除已被上游取消的 Codex Code Mode 界面入口，旧写请求明确拒绝。
+- 发布流水线在三个原生平台构建后运行打包版 Electron 验收；所有所选平台通过后才发布。发布页使用仓库内维护的文案，并核验下载链接对应真实附件。
+
+### Fixed
+
+- 后台 Bash/Eval/Task 的后续输出继续更新原工具卡，取消状态与重连后的结果正确恢复；复用工具调用 ID 时按原生作业身份区分结果。
+- 对齐原生 IPC、会话恢复和标题格式；日期生效的价格表不再误显示为非高峰折扣。Studio 服务控制遵循共享浏览器不可 detach 的原生限制。
+- Runtime 的预测 smoke test 使用隔离的 Studio 配置；本地验证不自动学习外部历史。
+- Ask 折叠快捷键按物理键码识别 macOS Option+H，并忽略输入法组合和按键长按；Mac 打包验收中的目录、归档选择与保存分别使用隔离路径。
+
+### Validation
+
+- Windows 本地全量检查（1,219 项 Node、787 项 Renderer）、824 项 Runtime 补丁测试、82 项工件元数据检查、29 项桌面端到端验收、旧版安装/回滚循环和 18 项流式性能门禁通过。
+- 正式工件在 Windows x64、Windows ARM64、macOS arm64 runner 上分别重建与验收。macOS 应用采用 ad hoc 签名，未做 Apple 公证；自动化验收不代表人工 Gatekeeper、麦克风、系统输入法或付费模型服务的完整验证。凭据导入导出 GUI 仍暂缓。
+
 ## [0.1.9] - 2026-10-08
 
 ### Added

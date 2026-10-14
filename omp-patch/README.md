@@ -1,6 +1,6 @@
 # Managed OMP patch boundary
 
-The managed Runtime pin is `can1357/oh-my-pi` `v18.8.0` at commit `4ef97c8826ee012829a3e756b693a2a16a414f47`. Studio 0.1.9 preserves the published `18.4.4-studio.38` baseline while migrating the native runtime. See the [migration and verification report](../docs/migrations/omp-18.8.0.md).
+The development Runtime pin is `can1357/oh-my-pi` `v18.10.4` at commit `687892d1046ecaf18829b45f5b86928a308258f4`. The application remains at 0.1.9 pending a separate release. See the [18.10.4 migration and verification report](../docs/migrations/omp-18.10.4.md); the published 0.1.9 baseline is documented in the [18.8.0 report](../docs/migrations/omp-18.8.0.md).
 
 The pinned upstream is attached as the Git submodule at `vendor/oh-my-pi/`. The root repository stores only the pinned gitlink; the upstream working tree keeps its own `.git` so the fork can be generated and reviewed without mixing upstream files into the Studio repository.
 
@@ -33,7 +33,7 @@ The overlay is ordinary tracked source in this repository. Editing it is an ordi
 
 ## Windows build toolchain
 
-The v18.8.0 Windows bytecode bundle is validated with Bun 1.4.2. Set `BUN_EXE` to a separately installed 1.4.2 executable before building; the global Bun installation need not change. Bun 1.3.14 hit an internal compile assertion for the earlier 18.3.0 bundle; use the validated 1.4.2 build runtime. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; local development keys are not release identities.
+The v18.10.4 Windows bytecode bundle uses Bun 1.4.2. Set `BUN_EXE` to a separately installed 1.4.2 executable before building; the global Bun installation need not change. Bun 1.3.14 hit an internal compile assertion for the earlier 18.3.0 bundle; use the validated 1.4.2 build runtime. Use the upstream-pinned Rust `nightly-2026-10-06` toolchain. Release signing uses the existing GitHub Environment; local development keys are not release identities.
 
 ## Working loop
 

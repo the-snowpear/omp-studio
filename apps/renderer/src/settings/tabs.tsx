@@ -1174,21 +1174,7 @@ export function AdvancedTab({ demo, runtime }: { demo?: RuntimeDemoApi | undefin
       <SettingSection title={t("updates.rollbackApp")}>
         <DesktopUpdateRecovery preview={preview} />
       </SettingSection>
-      <SettingSection title={t("settings.runtime.section")}>
-        <RuntimeScalarRow
-          runtime={runtime}
-          demo={demo}
-          keyName="providers.openai-codex.codeMode"
-          label={t("settings.runtime.codeMode")}
-          desc={t("settings.runtime.codeModeDesc")}
-          fallback="off"
-          options={[
-            ["off", t("settings.runtime.codeModeOff")],
-            ["on", t("settings.runtime.codeModeOn")],
-            ["auto", t("settings.runtime.codeModeAuto")],
-          ]}
-        />
-      </SettingSection>
+
       <SettingSection title={t("settings.advanced.sectionConfigLayers")} desc={t("settings.advanced.sectionConfigLayersDesc")}>
         <div className="config-layer-list">
           {configLayers.map(([key, label]) => (

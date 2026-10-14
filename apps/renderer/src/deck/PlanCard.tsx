@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { PlanExecutionPicker } from "./PlanExecutionPicker";
+import { PREVIEW_PLAN_EXECUTION } from "../preview/planExecutionPreview";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MarkdownText } from "../conversation/markdown";
 import { useI18n } from "../i18n";
@@ -177,6 +179,7 @@ function PlanReviewDialog({
   onClose,
   onAction,
   onSaveAndQuit,
+  executionControl,
   onPrepareAction,
   onNotesChange,
   onOverallNoteChange,
@@ -193,6 +196,7 @@ function PlanReviewDialog({
   onClose: () => void;
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
   onSaveAndQuit?: () => void;
+  executionControl?: ReactNode;
   onPrepareAction?: (id: PlanActionId) => void;
   onNotesChange: (notes: Record<number, string[]>) => void;
   onOverallNoteChange: (note: string) => void;
@@ -326,6 +330,8 @@ function PlanReviewDialog({
         </div>
         )}
         {viewOnly === true ? null : (
+        <>
+        {executionControl}
         <PlanActions
           onPick={(id) => {
             onPrepareAction?.(id);
@@ -334,6 +340,7 @@ function PlanReviewDialog({
           large
           {...(disabled === true ? { disabled: true } : {})}
         />
+        </>
         )}
       </div>
     </div>,
@@ -352,6 +359,7 @@ export function PlanCard({
   originRef,
   onAction,
   onSaveAndQuit,
+  executionControl,
 }: {
   title: string;
   body: string;
@@ -363,7 +371,10 @@ export function PlanCard({
   originRef?: RefObject<HTMLElement | null>;
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
   onSaveAndQuit?: () => void;
+  executionControl?: ReactNode;
 }) {
+  const [demoRole, setDemoRole] = useState("default");
+  const tierControl = executionControl ?? (demo ? <PlanExecutionPicker details={PREVIEW_PLAN_EXECUTION} role={demoRole} onChange={setDemoRole} disabled={disabled} /> : null);
   const cardRef = useRef<HTMLDivElement>(null);
   const controlled = expandedProp !== undefined;
   const [internalExpanded, setInternalExpanded] = useState(false);
@@ -443,12 +454,14 @@ export function PlanCard({
           <MarkdownText text={body} />
         </div>
       </div>
+      {tierControl}
       <PlanActions
         onPick={emitAction}
         {...(disabled === true ? { disabled: true } : {})}
       />
       {expanded ? (
         <PlanReviewDialog
+          executionControl={tierControl}
           title={title}
           body={body}
           notes={notes}
@@ -509,6 +522,7 @@ export function PlanReviewDeck({
   originRef,
   onAction,
   onSaveAndQuit,
+  executionControl,
 }: {
   title: string;
   body: string;
@@ -519,11 +533,13 @@ export function PlanReviewDeck({
   originRef?: RefObject<HTMLElement | null>;
   onAction: (id: PlanActionId, detail?: PlanActionDetail) => void;
   onSaveAndQuit?: () => void;
+  executionControl?: ReactNode;
 }) {
   return (
     <div className="deck active preview-queue" role="region" aria-label="待审核的计划" aria-live="polite">
       <div className="deck-card">
         <PlanCard
+          executionControl={executionControl}
           title={title}
           body={body}
           onAction={onAction}

@@ -98,7 +98,7 @@ export function resolveModelPrice(
     (threshold.inputThresholdInclusive === true && promptInputTokens === threshold.inputThreshold));
   if (longContext) cost = threshold;
   const schedule = pricing?.timeBased;
-  if (!schedule) return { cost, longContext };
+  if (!schedule || (schedule.peakWindows.length === 0 && schedule.offPeakMultiplier === 1)) return { cost, longContext };
   const date = new Date(timestamp);
   const minute = date.getUTCHours() * 60 + date.getUTCMinutes();
   const peak = schedule.peakWindows.some(window => window.weekdays.includes(date.getUTCDay()) &&

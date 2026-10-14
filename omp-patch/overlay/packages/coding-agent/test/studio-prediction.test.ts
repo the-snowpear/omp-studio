@@ -12,7 +12,21 @@ import {
 	TEXT_PREDICT_SOCKET_ENV,
 	type TextPredictResponse,
 } from "../src/predict/protocol";
-import { connectJsonlSocket, LineParser, writeJsonLine } from "../src/tiny/jsonl-socket";
+import { createInterface } from "node:readline";
+import { once } from "node:events";
+async function connectJsonlSocket(endpoint: string, timeoutMs: number): Promise<net.Socket> {
+	const socket = net.createConnection(endpoint);
+	try {
+		await once(socket, "connect", { signal: AbortSignal.timeout(timeoutMs) });
+		return socket;
+	} catch (error) {
+		socket.destroy();
+		throw error;
+	}
+}
+function writeJsonLine(socket: net.Socket, value: unknown): void {
+	socket.write(JSON.stringify(value) + String.fromCharCode(10));
+}
 import { StudioPredictionService } from "../src/studio/services/prediction-service";
 import {
 	validatePredictionEvent,
@@ -40,7 +54,8 @@ test("prediction channels keep prose private, apply native prose gates and close
 		socket = await connectJsonlSocket(descriptor.endpoint, 1000);
 		const frames: PredictionEvent[] = [];
 		let authenticated = false;
-		const parser = new LineParser(line => {
+		const lines = createInterface({ input: socket });
+		lines.on("line", (line: string) => {
 			if (line === "OK") {
 				authenticated = true;
 				return;
@@ -49,7 +64,7 @@ test("prediction channels keep prose private, apply native prose gates and close
 			validatePredictionEvent(event);
 			frames.push(event);
 		});
-		socket.on("data", (part: string) => parser.push(part));
+
 		socket.write(descriptor.token + "\n");
 		const until = async (check: () => boolean) => {
 			const deadline = Date.now() + 3000;
@@ -129,7 +144,8 @@ test("the native Studio daemon never bootstraps foreign history and persists exp
 			throw new Error(
 				"Prediction daemon did not start: " + (child.exitCode === null ? "startup timeout" : await stderr),
 			);
-		const parser = new LineParser(line => {
+		const lines = createInterface({ input: socket });
+		lines.on("line", (line: string) => {
 			const result = JSON.parse(line) as TextPredictResponse;
 			const request = pending.get(result.id);
 			if (request) {
@@ -138,7 +154,7 @@ test("the native Studio daemon never bootstraps foreign history and persists exp
 				request.resolve(result);
 			}
 		});
-		socket.on("data", (part: string) => parser.push(part));
+
 		const call = (operation: Record<string, unknown>): Promise<TextPredictResponse> => {
 			const id = nextId++,
 				promise = Promise.withResolvers<TextPredictResponse>();

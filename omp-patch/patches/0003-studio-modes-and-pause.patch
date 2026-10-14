@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/src/async/job-manager.ts b/packages/coding-agent/src/async/job-manager.ts
-index 5bd8f09ca5..5cca9ac0d9 100644
+index e6bb504d1d..a9246a2eb6 100644
 --- a/packages/coding-agent/src/async/job-manager.ts
 +++ b/packages/coding-agent/src/async/job-manager.ts
 @@ -276,6 +276,7 @@ export class AsyncJobManager {
@@ -95,17 +95,45 @@ index 5bd8f09ca5..5cca9ac0d9 100644
  	}
  
  	/**
+diff --git a/packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts b/packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts
+index f23e21e517..29e49ff6a7 100644
+--- a/packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts
++++ b/packages/coding-agent/src/modes/controllers/composer-prediction-controller.ts
+@@ -33,7 +33,13 @@ interface PredictionSource {
+ 	leafId: string | null;
+ }
+ 
+-type PredictionContext = Pick<InteractiveModeContext, "settings" | "viewSession" | "focusedAgentId" | "editor" | "ui">;
++export interface PredictionContext {
++	settings: InteractiveModeContext["settings"];
++	viewSession: AgentSession;
++	focusedAgentId?: string | undefined;
++	editor: Pick<InteractiveModeContext["editor"], "getText">;
++	ui: Pick<InteractiveModeContext["ui"], "requestRender">;
++}
+ 
+ /**
+  * Normalize a prediction reply to the single line the composer shows, or
+@@ -64,6 +70,9 @@ export class ComposerPredictionController {
+ 		this.#deadlineMs = options.deadlineMs ?? PREDICTION_DEADLINE_MS;
+ 	}
+ 
++	get running(): boolean {
++		return this.#abort !== undefined;
++	}
+ 	/** The prediction for the conversation as it stands now, if one is ready. */
+ 	get text(): string | undefined {
+ 		const prediction = this.#prediction;
 diff --git a/packages/coding-agent/src/modes/interactive-mode.ts b/packages/coding-agent/src/modes/interactive-mode.ts
-index 187dbaee00..bf07eac93a 100644
+index 4210b2e9d0..51b8916910 100644
 --- a/packages/coding-agent/src/modes/interactive-mode.ts
 +++ b/packages/coding-agent/src/modes/interactive-mode.ts
-@@ -1,4 +1,5 @@
- import { formatModelSelectorValue } from "@oh-my-pi/pi-tui/overlays/model-selector";
+@@ -1,3 +1,4 @@
 +import { studioPauseService } from "../studio/services/pause-service";
  /**
   * Interactive mode for the coding agent.
   * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
-@@ -147,6 +148,8 @@ import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
+@@ -158,6 +159,8 @@ import { buildStaticInlineHint } from "../slash-commands/builtin-completions";
  import { formatCoarseDuration } from "@oh-my-pi/pi-tui/chrome/format";
  import { type DictationTarget, MicCursor, type SttCallbacks, STTController, type SttState } from "../stt";
  import type { SpaceHoldHandler } from "@oh-my-pi/pi-tui/space-hold";
@@ -114,7 +142,7 @@ index 187dbaee00..bf07eac93a 100644
  import { resolveCliEntryCmd } from "../subprocess/worker-client";
  import { discoverTitleSystemPromptFile, resolvePromptInput } from "../system-prompt";
  import { labelEchoesHandle } from "../task/label";
-@@ -156,6 +159,7 @@ import { isMCPToolName } from "../tools/builtin-names";
+@@ -167,6 +170,7 @@ import { isMCPToolName } from "../tools/builtin-names";
  import type { LspStartupServerInfo } from "../tools";
  import { resolvePlanFilePath } from "../plan-mode/plan-files";
  import { resolveToCwd } from "../tools/path-utils";
@@ -122,7 +150,7 @@ index 187dbaee00..bf07eac93a 100644
  import { StreamPublisher } from "../stream/publisher";
  import { newRecordingPath, SessionRecorder } from "../stream/recording";
  import { StreamRedactor } from "../stream/redactor";
-@@ -1155,6 +1159,7 @@ const CTRL_L_APPEARANCE_RESPONSE_DEADLINE_MS = 2000;
+@@ -1183,6 +1187,7 @@ const CTRL_L_APPEARANCE_RESPONSE_DEADLINE_MS = 2000;
  const JOBS_SHEET_REFRESH_MS = 250;
  
  export class InteractiveMode implements InteractiveModeContext {
@@ -130,7 +158,7 @@ index 187dbaee00..bf07eac93a 100644
  	#ownsStartedUi: boolean;
  	session: AgentSession;
  	sessionManager: SessionManager;
-@@ -1216,6 +1221,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1244,6 +1249,10 @@ export class InteractiveMode implements InteractiveModeContext {
  	 */
  	#loopConditionAbort: AbortController | undefined;
  	#loopAutoSubmitTimer: NodeJS.Timeout | undefined;
@@ -141,7 +169,7 @@ index 187dbaee00..bf07eac93a 100644
  	#todoAutoClearTimer: NodeJS.Timeout | undefined;
  	#todoAutoClearGeneration = 0;
  	#modelCycleClearTimer: NodeJS.Timeout | undefined;
-@@ -1539,7 +1548,7 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1578,7 +1587,7 @@ export class InteractiveMode implements InteractiveModeContext {
  	#planReviewAnnotationStateBySubmission = new WeakMap<SubmittedUserInput, string>();
  	readonly lspServers: LspStartupServerInfo[] | undefined = undefined;
  	mcpManager?: MCPManager;
@@ -150,7 +178,7 @@ index 187dbaee00..bf07eac93a 100644
  
  	readonly #codexResetFireworksController: CodexResetFireworksController;
  	readonly #btwController: BtwController;
-@@ -1701,12 +1710,14 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1747,12 +1756,14 @@ export class InteractiveMode implements InteractiveModeContext {
  		session: AgentSession,
  		version: string,
  		startupChangelog: StartupChangelogSelection | undefined = undefined,
@@ -166,7 +194,7 @@ index 187dbaee00..bf07eac93a 100644
  	) {
  		this.session = session;
  		this.sessionManager = session.sessionManager;
-@@ -1751,6 +1762,8 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1798,6 +1809,8 @@ export class InteractiveMode implements InteractiveModeContext {
  		);
  		this.#eventBus = eventBus;
  		this.#subagentEventBus = subagentEventBus;
@@ -175,7 +203,7 @@ index 187dbaee00..bf07eac93a 100644
  		if (eventBus) {
  			this.#eventBusUnsubscribers.push(
  				eventBus.on(LSP_STARTUP_EVENT_CHANNEL, data => {
-@@ -1927,6 +1940,26 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -1974,6 +1987,26 @@ export class InteractiveMode implements InteractiveModeContext {
  		this.collabController = new CollabController(this);
  		this.session.setPromptDropped?.(prompt => this.#restoreDroppedPrompt(prompt));
  		this.#observerRegistry = new SessionObserverRegistry();
@@ -202,15 +230,15 @@ index 187dbaee00..bf07eac93a 100644
  	}
  
  	#handleJudgmentBatchProgress(progress: JudgmentBatchProgress): void {
-@@ -2794,6 +2827,7 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -2837,6 +2870,7 @@ export class InteractiveMode implements InteractiveModeContext {
  	}
  
  	#scheduleLoopAutoSubmit(): void {
 +		if (this.#studioLoopService !== undefined) return;
  		this.#cancelLoopAutoSubmit();
- 		if (!this.loopModeEnabled || !this.loopPrompt) return;
+ 		if (!this.loopModeEnabled || !this.loopPrompt || this.#isShuttingDown) return;
  		const prompt = this.loopPrompt;
-@@ -3029,7 +3063,21 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -3072,7 +3106,21 @@ export class InteractiveMode implements InteractiveModeContext {
  		this.ui.requestRender();
  	}
  
@@ -232,7 +260,7 @@ index 187dbaee00..bf07eac93a 100644
  		const wasEnabled = this.loopModeEnabled;
  		this.loopModeEnabled = false;
  		this.loopModePaused = false;
-@@ -3045,6 +3093,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -3088,6 +3136,10 @@ export class InteractiveMode implements InteractiveModeContext {
  	}
  
  	setLoopPrompt(prompt: string): void {
@@ -243,7 +271,7 @@ index 187dbaee00..bf07eac93a 100644
  		if (!this.loopModeEnabled) return;
  		// Any manual submit supersedes whatever gate is currently pending, even
  		// one resubmitting identical text: the gate was checking the *previous*
-@@ -3073,6 +3125,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -3116,6 +3168,10 @@ export class InteractiveMode implements InteractiveModeContext {
  	 * user submits becomes the new loop prompt and resumes iteration.
  	 */
  	pauseLoop(): void {
@@ -254,7 +282,7 @@ index 187dbaee00..bf07eac93a 100644
  		this.loopPrompt = undefined;
  		this.loopModePaused = true;
  		this.#cancelLoopAutoSubmit();
-@@ -3081,6 +3137,27 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -3124,6 +3180,27 @@ export class InteractiveMode implements InteractiveModeContext {
  	}
  
  	async handleLoopCommand(args = ""): Promise<string | undefined> {
@@ -282,7 +310,7 @@ index 187dbaee00..bf07eac93a 100644
  		if (this.loopModeEnabled) {
  			this.disableLoopMode();
  			return undefined;
-@@ -5784,6 +5861,33 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -5883,6 +5960,33 @@ export class InteractiveMode implements InteractiveModeContext {
  		initialPrompt?: string,
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
@@ -316,7 +344,7 @@ index 187dbaee00..bf07eac93a 100644
  		if (this.goalModeEnabled || this.goalModePaused) {
  			this.showWarning("Exit goal mode first.");
  			return false;
-@@ -5861,6 +5965,32 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -5960,6 +6064,32 @@ export class InteractiveMode implements InteractiveModeContext {
  		initialPrompt?: string,
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
@@ -349,7 +377,7 @@ index 187dbaee00..bf07eac93a 100644
  		if (this.vibeModeEnabled) {
  			await this.#exitVibeMode();
  			return false;
-@@ -6086,7 +6216,11 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6185,7 +6315,11 @@ export class InteractiveMode implements InteractiveModeContext {
  			}
  			nextBudget = parsed;
  		}
@@ -362,7 +390,7 @@ index 187dbaee00..bf07eac93a 100644
  		this.#resetGoalContinuationSuppression();
  		this.#scheduleGoalContinuation();
  		this.showStatus(nextBudget === undefined ? "Goal budget cleared." : `Goal budget set to ${nextBudget}.`);
-@@ -6141,6 +6275,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6240,6 +6374,10 @@ export class InteractiveMode implements InteractiveModeContext {
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
  		try {
@@ -373,7 +401,7 @@ index 187dbaee00..bf07eac93a 100644
  			if (this.planModeEnabled || this.planModePaused) {
  				this.#warnPlanModeBlocks();
  				return false;
-@@ -6303,8 +6441,13 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6402,8 +6540,13 @@ export class InteractiveMode implements InteractiveModeContext {
  			this.showWarning("No active goal to pause.");
  			return;
  		}
@@ -389,7 +417,7 @@ index 187dbaee00..bf07eac93a 100644
  	}
  
  	async #resumeGoalAction(): Promise<void> {
-@@ -6312,7 +6455,11 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6411,7 +6554,11 @@ export class InteractiveMode implements InteractiveModeContext {
  			this.showWarning("No paused goal to resume.");
  			return;
  		}
@@ -402,7 +430,7 @@ index 187dbaee00..bf07eac93a 100644
  		this.showStatus("Goal mode resumed.");
  		this.#scheduleGoalContinuation();
  	}
-@@ -6327,8 +6474,13 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6426,8 +6573,13 @@ export class InteractiveMode implements InteractiveModeContext {
  			"This removes the goal record. Accumulated usage stays in the session log.",
  		);
  		if (!confirmed) return;
@@ -418,7 +446,7 @@ index 187dbaee00..bf07eac93a 100644
  	}
  
  	/** Enter through the same goal activation path as `/goal set`, then start its first turn. */
-@@ -6344,7 +6496,11 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6443,7 +6595,11 @@ export class InteractiveMode implements InteractiveModeContext {
  		objective: string,
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
@@ -431,7 +459,7 @@ index 187dbaee00..bf07eac93a 100644
  		this.#resetGoalContinuationSuppression();
  		if (this.session.isStreaming) {
  			const images = input?.images?.length ? input.images : undefined;
-@@ -6370,10 +6526,14 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -6469,10 +6625,14 @@ export class InteractiveMode implements InteractiveModeContext {
  		objective: string,
  		input?: Pick<SubmittedUserInput, "images" | "imageLinks">,
  	): Promise<boolean> {
@@ -450,7 +478,7 @@ index 187dbaee00..bf07eac93a 100644
  		this.#resetGoalContinuationSuppression();
  		this.#updateGoalModeStatus();
  		if (this.session.isStreaming) {
-@@ -6767,6 +6927,10 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -7007,6 +7167,10 @@ export class InteractiveMode implements InteractiveModeContext {
  		this.#cancelGoalContinuation();
  		clearInterval(this.#jobsSheetTimer);
  		this.#jobsSheetTimer = undefined;
@@ -461,7 +489,7 @@ index 187dbaee00..bf07eac93a 100644
  		if (this.#sttController) {
  			this.#sttController.dispose();
  			this.#sttController = undefined;
-@@ -7021,7 +7185,7 @@ export class InteractiveMode implements InteractiveModeContext {
+@@ -7298,7 +7462,7 @@ export class InteractiveMode implements InteractiveModeContext {
  	}
  
  	// Extension UI integration
@@ -471,7 +499,7 @@ index 187dbaee00..bf07eac93a 100644
  	}
  
 diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
-index c8cb041ff4..d4d8a28d65 100644
+index 2a291babc8..e6460bf005 100644
 --- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
 +++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
 @@ -56,6 +56,7 @@ import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/m
@@ -496,7 +524,7 @@ index c8cb041ff4..d4d8a28d65 100644
  	subagentEventBus?: EventBus;
  	input?: ReadableStream<Uint8Array>;
 diff --git a/packages/coding-agent/src/modes/types.ts b/packages/coding-agent/src/modes/types.ts
-index 5cd2021395..9666b47f3d 100644
+index bf8aa74cec..6651f188ca 100644
 --- a/packages/coding-agent/src/modes/types.ts
 +++ b/packages/coding-agent/src/modes/types.ts
 @@ -34,6 +34,7 @@ import type { DictationTarget } from "../stt";
@@ -507,7 +535,7 @@ index 5cd2021395..9666b47f3d 100644
  import type { EventBus } from "../utils/event-bus";
  import type { TokenRateMeter } from "../utils/token-rate";
  import type { AssistantMessageComponent } from "@oh-my-pi/pi-tui/chat/assistant-message";
-@@ -289,7 +290,7 @@ export interface InteractiveModeContext {
+@@ -290,7 +291,7 @@ export interface InteractiveModeContext {
  	checkShutdownRequested(): Promise<void>;
  
  	// Extension UI integration
@@ -595,10 +623,10 @@ index d484e3d4a6..33d43005e6 100644
  		initTheme();
  		resetSettingsForTest();
 diff --git a/packages/coding-agent/test/modes/components/pause-screen.test.ts b/packages/coding-agent/test/modes/components/pause-screen.test.ts
-index 3cf6c5f578..5b1343f2e6 100644
+index bbaf8c62d7..0adddb6db8 100644
 --- a/packages/coding-agent/test/modes/components/pause-screen.test.ts
 +++ b/packages/coding-agent/test/modes/components/pause-screen.test.ts
-@@ -135,12 +135,16 @@ describe("pause screen", () => {
+@@ -191,12 +191,16 @@ describe("pause screen", () => {
  			expect(agentPauseGate.paused).toBe(false);
  		});
  
@@ -620,22 +648,161 @@ index 3cf6c5f578..5b1343f2e6 100644
  	});
  });
 diff --git a/packages/tui/src/charts/chart-plan.ts b/packages/tui/src/charts/chart-plan.ts
-index 04aa7b3c33..3b51f3a301 100644
+index c4edf8d9a7..0c1f1d22b5 100644
 --- a/packages/tui/src/charts/chart-plan.ts
 +++ b/packages/tui/src/charts/chart-plan.ts
-@@ -64,7 +64,7 @@ export interface ChartPoint {
+@@ -119,13 +119,13 @@ export interface ChartPlan {
+ 	/** Column naming each category (or holding the x values of a line); rows are numbered without one. */
+ 	readonly label: number | undefined;
+ 	/** Columns joined to the label to tell rows apart (`Sonnet 5.5 · bash`); none by default. */
+-	readonly qualifiers?: readonly number[];
++	readonly qualifiers?: readonly number[] | undefined;
+ 	/**
+ 	 * Naming column whose values nest the rows: rows regroup by its values in
+ 	 * order of first appearance (table order within each), and a label column
+ 	 * writes each value once beside its block. Lines keep their x order and ignore it.
+ 	 */
+-	readonly group?: number;
++	readonly group?: number | undefined;
+ 	/**
+ 	 * Plotted columns, in order; a `change` measures the rest against the first (or its `a → b` cells),
+ 	 * a `slope` runs through them as stages, and a `butterfly` draws the first leftward (the losing side).
+@@ -136,7 +136,7 @@ export interface ChartPlan {
+ 	 * In | Iter1 Tokens In`): the baseline column of each series, in order, so
+ 	 * each series is measured against its own before column instead of the first.
+ 	 */
+-	readonly baselines?: readonly number[];
++	readonly baselines?: readonly number[] | undefined;
+ 	/** Each data row is its own series (a metric with its own unit) and the plotted columns are the categories. */
+ 	readonly transpose: boolean;
+ 	/**
+@@ -145,25 +145,25 @@ export interface ChartPlan {
+ 	 * at most {@link MAX_PANELS} series draws as a grid of bars instead, each
+ 	 * column on its own axis: its columns are different quantities.
+ 	 */
+-	readonly shading?: Shading;
++	readonly shading?: Shading | undefined;
+ 	/**
+ 	 * Rows whose `column` cell reads `value` are the reference the others are
+ 	 * read against (`Harness` = `baseline`), one per group; none by default.
+ 	 */
+-	readonly reference?: RowReference;
++	readonly reference?: RowReference | undefined;
+ 	/**
+ 	 * Rows ranked by a plotted column instead of table order (rankings,
+ 	 * leaderboards); within each group when grouped. Lines and scatters keep
+ 	 * their x order, `change` charts table order. Table order by default: most
+ 	 * tables are deliberately ordered.
+ 	 */
+-	readonly order?: RowOrder;
++	readonly order?: RowOrder | undefined;
+ 	/**
+ 	 * `stacked`: the column the plotted parts make up (`Total`), labelling each
+ 	 * bar with its written figure and drawing any rest it holds beyond the parts
+ 	 * as an unlabelled track. Without it a bar ends at the parts' sum.
+ 	 */
+-	readonly whole?: number;
++	readonly whole?: number | undefined;
+ 	/**
+ 	 * `stacked`: each bar spans 100% of its category's total (its whole, else
+ 	 * its parts' sum), so rows of very different sizes compare by their mix.
+@@ -174,28 +174,28 @@ export interface ChartPlan {
+ 	 * of different sizes compare by shape. Absent: normalized when two or more
+ 	 * count columns' totals lie {@link MIX_SPREAD}× apart or more.
+ 	 */
+-	readonly normalize?: boolean;
++	readonly normalize?: boolean | undefined;
+ 	/**
+ 	 * `timeline`: the column holding each segment's start (`Offset`, `Start`),
+ 	 * in the plotted column's dimension; without it segments follow one another
+ 	 * in table order from zero.
+ 	 */
+-	readonly offsets?: number;
++	readonly offsets?: number | undefined;
+ 	/**
+ 	 * `waterfall`: the row (by index) of a cap the steps build toward (`Hard
+ 	 * cap`, `Budget`), drawn as a rule across the steps instead of a step.
+ 	 */
+-	readonly limit?: number;
++	readonly limit?: number | undefined;
+ 	/**
+ 	 * `bullet`: the column holding each row's target (`Target` `≤ 200 µs`, `§6
+ 	 * budget`, `Limit`), which the one plotted series is measured against
+ 	 * ({@link findTarget}).
+ 	 */
+-	readonly target?: number;
++	readonly target?: number | undefined;
+ 	/** Which way each column improves, by column index; neutral columns absent. */
+-	readonly polarity?: Readonly<Record<number, Polarity>>;
++	readonly polarity?: Readonly<Record<number, Polarity>> | undefined;
+ 	/** Which way each row's metric improves, by row index, where rows are metrics ({@link rowsAreMetrics}). */
+-	readonly rowPolarity?: Readonly<Record<number, Polarity>>;
++	readonly rowPolarity?: Readonly<Record<number, Polarity>> | undefined;
+ 	/**
+ 	 * What competes, so each contest's best value (by {@link polarity}) is
+ 	 * marked: `rows` are alternatives scored by every measure (models,
+@@ -203,13 +203,13 @@ export interface ChartPlan {
+ 	 * on every row (`Record | Map | string[]` per scenario: the best per row).
+ 	 * Absent for parts of a whole, steps, or items described side by side.
+ 	 */
+-	readonly rivals?: Rivals;
++	readonly rivals?: Rivals | undefined;
+ 	/** Rows the table is about (the recommended option, `current`, `ours`, the bolded row), by row index. */
+-	readonly focus?: readonly number[];
++	readonly focus?: readonly number[] | undefined;
+ 	/** Column whose status cells (`ok`, `FAIL`, `pending`, ✅) badge each row's name. */
+-	readonly status?: number;
++	readonly status?: number | undefined;
+ 	/** The chart's title: one fact stated over it, the text of one of {@link tableTakeaways}; none by default. */
+-	readonly title?: string;
++	readonly title?: string | undefined;
+ }
+ 
+ /** A naming cell marking reference rows: column index and cell text. */
+@@ -242,9 +242,9 @@ export interface ChartPoint {
  	/** The table bolded the cell. */
  	readonly emphasis: boolean;
  	/** Upper end of a range cell (`24–72 h`). */
 -	readonly upper?: number;
 +	readonly upper?: number | undefined;
+ 	/** The spread a `± e` cell states around the value (`3.67s ± 0.69`), drawn as a whisker either side of it. */
+-	readonly error?: number;
++	readonly error?: number | undefined;
+ }
+ 
+ /**
+@@ -260,7 +260,7 @@ export type Bound = "max" | "min";
+  * header nor the measure's polarity says which side.
+  */
+ export interface ChartTarget extends ChartPoint {
+-	readonly bound?: Bound;
++	readonly bound?: Bound | undefined;
  }
  
  export interface ChartSeries {
-@@ -84,14 +84,16 @@ export interface ChartSpec {
- 	readonly categories: readonly string[];
+@@ -273,9 +273,9 @@ export interface ChartSeries {
+ 	/** Status words standing in for a value (`TIMEOUT`, `OOM`), one per category. */
+ 	readonly notes: readonly (string | undefined)[];
+ 	/** Which way the series improves; absent when neutral. */
+-	readonly polarity?: Polarity;
++	readonly polarity?: Polarity | undefined;
+ 	/** Category of the series' best value, marked when its rows are rivals; absent when tied or neutral. */
+-	readonly best?: number;
++	readonly best?: number | undefined;
+ }
+ 
+ /** Consecutive categories sharing a leading name, which a label column writes once beside its members. */
+@@ -301,44 +301,46 @@ export interface ChartSpec {
+ 	 * a group, under a leading part their names share (`glm new`, `glm prior` →
+ 	 * `glm` → `new`, `prior`). Absent when neither applies, or when each series is a row.
+ 	 */
+-	readonly groups?: readonly ChartGroup[];
++	readonly groups?: readonly ChartGroup[] | undefined;
  	readonly series: readonly ChartSeries[];
- 	/** Numeric x positions of a line or the x measure of a scatter, one per category. */
+ 	/**
+ 	 * Numeric x positions of a line, the x measure of a scatter, or each
+ 	 * `timeline` segment's start ({@link ChartPlan.offsets}), one per category.
+ 	 */
 -	readonly x?: {
 -		readonly name: string;
 -		readonly dim: Dimension;
@@ -653,42 +820,412 @@ index 04aa7b3c33..3b51f3a301 100644
  	/** Total/summary rows, printed under the chart instead of skewing its scale. */
 -	readonly caption?: string;
 +	readonly caption?: string | undefined;
- 	/** Name of the category axis (the label column's header). */
+ 	/** Name of the category axis: the headers of the columns naming the rows. */
  	readonly axis: string;
- }
-diff --git a/packages/tui/src/charts/chart-svg.ts b/packages/tui/src/charts/chart-svg.ts
-index d22991efe6..fdfadf87aa 100644
---- a/packages/tui/src/charts/chart-svg.ts
-+++ b/packages/tui/src/charts/chart-svg.ts
-@@ -652,7 +652,7 @@ interface TextStyle {
- 	size?: number;
- 	fill: string;
- 	anchor?: "start" | "middle" | "end";
--	weight?: number;
-+	weight?: number | undefined;
+ 	/** What a `change` measures against (its baseline column); its points are factors of it. */
+-	readonly baseline?: string;
++	readonly baseline?: string | undefined;
+ 	/**
+ 	 * The `change` is measured against a rival column — the one leading most rows — rather than a before
+ 	 * state: its bars are gaps to that rival (`+22%` slower than `tsc-rs, 8`), never improvements or regressions.
+ 	 */
+-	readonly rival?: boolean;
++	readonly rival?: boolean | undefined;
+ 	/** How a heatmap shades its cells; `shared` when absent. */
+-	readonly shading?: Shading;
++	readonly shading?: Shading | undefined;
+ 	/**
+ 	 * Indices of the categories the others read against ({@link ChartPlan.reference}),
+ 	 * at most one per group: bars and bar grids mark each with a dashed rule at
+ 	 * its value through its group, and single bars print the others' change from it.
+ 	 */
+-	readonly reference?: readonly number[];
++	readonly reference?: readonly number[] | undefined;
+ 	/** `stacked`: the whole each category's parts make up ({@link ChartPlan.whole}), one point per category. */
+-	readonly whole?: ChartSeries;
++	readonly whole?: ChartSeries | undefined;
+ 	/**
+ 	 * `stacked`: each bar is its category's mix, parts as percentages of its total; `histogram`: each
+ 	 * distribution as shares of its own total ({@link ChartPlan.normalize}).
+ 	 */
+-	readonly normalized?: boolean;
++	readonly normalized?: boolean | undefined;
+ 	/**
+ 	 * Outcome of each part of a whole, coloring it `success`/`warning`/`error`/
+ 	 * `muted` instead of a series color: per series of a `stacked` chart
+@@ -346,34 +348,34 @@ export interface ChartSpec {
+ 	 * `undefined` for a part naming none. Absent unless most parts read as
+ 	 * statuses ({@link outcomeTones}) and they are not all alike.
+ 	 */
+-	readonly tones?: readonly (Status | undefined)[];
++	readonly tones?: readonly (Status | undefined)[] | undefined;
+ 	/**
+ 	 * `waterfall`: the bar the steps build to — the table's total row as
+ 	 * written, else the steps' sum written like their figures (`~$8.0M`).
+ 	 */
+-	readonly total?: { readonly name: string; readonly point: ChartPoint };
++	readonly total?: { readonly name: string; readonly point: ChartPoint } | undefined;
+ 	/**
+ 	 * `range`: the central estimate of the first series' intervals, one point per category, from a
+ 	 * plotted column whose values all fall inside them (`≈ $6,700` beside `$6.0k–7.3k`); drawn as a tick.
+ 	 */
+-	readonly estimate?: ChartSeries;
++	readonly estimate?: ChartSeries | undefined;
+ 	/**
+ 	 * `bullet`: each category's target ({@link ChartPlan.target}), against the
+ 	 * first series' point; `null` where the row states none in its unit.
+ 	 */
+-	readonly targets?: readonly (ChartTarget | null)[];
++	readonly targets?: readonly (ChartTarget | null)[] | undefined;
+ 	/** `bullet`: what the targets are called, lowercased from their header (`target`, `budget`, `limit`). */
+-	readonly targetName?: string;
++	readonly targetName?: string | undefined;
+ 	/**
+ 	 * The one fact the chart states over it ({@link ChartPlan.title}: `Every
+ 	 * scenario improved (median 14× less)`); no title line without one.
+ 	 */
+-	readonly title?: string;
++	readonly title?: string | undefined;
+ 	/**
+ 	 * Muted note beside the title. Absent: the renderer writes how the chart
+ 	 * encodes the data where that is not obvious (`log scale`, `scaled per column`).
+ 	 */
+-	readonly subtitle?: string;
++	readonly subtitle?: string | undefined;
+ 	/**
+ 	 * The two series of a `paired` chart are one quantity before and after
+ 	 * (`a → b` cells, before/after headers per {@link isTransition}): drawn as a
+@@ -384,38 +386,38 @@ export interface ChartSpec {
+ 	 * the judge's `pair`) draw as `paired` at all. A `ladder`'s two ladders
+ 	 * (`before fix` | `after fix`) by the same reading: the first muted.
+ 	 */
+-	readonly transition?: boolean;
++	readonly transition?: boolean | undefined;
+ 	/** Marks laid over the chart by a planner: reference lines, highlighted categories, callouts. */
+-	readonly annotations?: readonly ChartAnnotation[];
++	readonly annotations?: readonly ChartAnnotation[] | undefined;
+ 	/**
+ 	 * Each series is a table row (a metric in its own unit) and the categories
+ 	 * are the plotted columns ({@link ChartPlan.transpose}); {@link axis} then
+ 	 * names the series rather than the categories.
+ 	 */
+-	readonly transposed?: boolean;
++	readonly transposed?: boolean | undefined;
+ 	/** Which way each category's metric improves where categories are metrics or items moving by a factor (`change`); neutral absent. */
+-	readonly categoryPolarity?: readonly (Polarity | undefined)[];
++	readonly categoryPolarity?: readonly (Polarity | undefined)[] | undefined;
+ 	/**
+ 	 * Per category, the series holding its best value where the plotted
+ 	 * columns are rivals sharing a unit and a polarity; absent where tied.
+ 	 */
+-	readonly leaders?: readonly (number | undefined)[];
++	readonly leaders?: readonly (number | undefined)[] | undefined;
+ 	/** Status of each category (`ok`, `FAIL`, `pending`), badged beside its name. */
+-	readonly status?: readonly (Status | undefined)[];
++	readonly status?: readonly (Status | undefined)[] | undefined;
+ 	/** Header of the column the {@link status} badges come from, named in their key. */
+-	readonly statusName?: string;
++	readonly statusName?: string | undefined;
+ 	/**
+ 	 * Status columns the chart does not plot (`Preserves layout? | Machine-parseable? | Renderable?`),
+ 	 * drawn as a matrix of status dots between the row names and the marks, each column headed by its
+ 	 * name; two to {@link MAX_MATRIX}, in place of the single {@link status} badge.
+ 	 */
+-	readonly matrix?: readonly StatusColumn[];
++	readonly matrix?: readonly StatusColumn[] | undefined;
+ 	/**
+ 	 * `ladder`: the series of each ladder drawn on every category, lowest quantile first; one ladder per
+ 	 * condition measured (`Startup p50 | Startup p95 | Wall p50 | Wall p95`), named by it (empty when
+ 	 * there is one). Each series is named by its quantile (`p50`, `max`).
+ 	 */
+-	readonly ladders?: readonly ChartLadder[];
++	readonly ladders?: readonly ChartLadder[] | undefined;
  }
  
- /** Text vertically centred on `y`. */
+ /** One measurement's quantiles in a `ladder` chart: its name and its series, lowest quantile first. */
+@@ -455,10 +457,15 @@ export type ChartAnnotation =
+ 			readonly value: number;
+ 			readonly label: string;
+ 			/** Series whose axis the value is on, for charts with an axis per unit (`range` bands); 0 by default. */
+-			readonly series?: number;
++			readonly series?: number | undefined;
+ 	  }
+ 	| { readonly kind: "highlight"; readonly category: number }
+-	| { readonly kind: "callout"; readonly category: number; readonly series?: number; readonly text: string };
++	| {
++			readonly kind: "callout";
++			readonly category: number;
++			readonly series?: number | undefined;
++			readonly text: string;
++	  };
+ 
+ const BEFORE =
+ 	/\b(?:before|old|baseline|base|main|master|prev|previous|original|orig|cold|was|from|v1|stock|default|unpatched|without)\b/i;
+@@ -1086,8 +1093,8 @@ export function outcomeTones(names: readonly string[]): (Status | undefined)[] |
+ interface Flow {
+ 	readonly kind: "timeline" | "waterfall";
+ 	readonly column: TableColumn;
+-	readonly offsets?: number;
+-	readonly limit?: number;
++	readonly offsets?: number | undefined;
++	readonly limit?: number | undefined;
+ }
+ 
+ /**
+@@ -1356,7 +1363,7 @@ function measuredCell(cell: Cell | undefined): NumberCell | undefined {
+  * ≤ 120 ms`), a window (`60–100 ms`), or a bare number; `text` writes a bound as `≤`/`≥`. `undefined` without
+  * one, or for two targets in one cell (`30 / 200 ms`, `1 / 4`).
+  */
+-function targetCell(written: string): { cell: NumberCell; bound?: Bound; text: string } | undefined {
++function targetCell(written: string): { cell: NumberCell; bound?: Bound | undefined; text: string } | undefined {
+ 	const bound = BOUND.exec(written);
+ 	const rest = bound ? written.slice(bound.index + bound[0].length) : written;
+ 	// `≤ 3s / ≤ 6s`: one target per measure of a pair, none for the row.
+@@ -1887,15 +1894,15 @@ const MAX_LADDERS = 3;
+ export interface Rung {
+ 	readonly column: TableColumn;
+ 	/** Which listed value of each cell (`p99` of `79 / 124 µs`); absent when the column holds the quantile alone. */
+-	readonly slot?: number;
++	readonly slot?: number | undefined;
+ 	/** How many values each cell of a listing column holds (the quantiles its header lists). */
+-	readonly slots?: number;
++	readonly slots?: number | undefined;
+ 	/** The quantile as the header writes it (`p50`, `max`). */
+ 	readonly name: string;
+ 	/** Where it ranks: 0 the minimum, 50 the median (or a mean beside quantiles), 100 the maximum. */
+ 	readonly rank: number;
+ 	/** The unit the header gives bare numbers (`cpu p50 / p95 (ms)`): their dimension and base factor. */
+-	readonly scale?: readonly [Dimension, number];
++	readonly scale?: readonly [Dimension, number] | undefined;
+ }
+ 
+ /**
+@@ -1951,7 +1958,7 @@ function quantileRank(word: string): number {
+  * What a header names besides its quantiles (`Startup p95` → `Startup`, `zoom 1, p50 / p95` → `zoom 1`),
+  * and the unit it gives bare numbers (`cpu p50 / p95 (ms)` → milliseconds).
+  */
+-function ladderSubject(rest: string): { name: string; scale?: readonly [Dimension, number] } {
++function ladderSubject(rest: string): { name: string; scale?: readonly [Dimension, number] | undefined } {
+ 	let scale: readonly [Dimension, number] | undefined;
+ 	const words = rest
+ 		.replace(/[()[\],:;]/g, " ")
+@@ -2457,7 +2464,7 @@ function spreadOf(values: readonly number[]): number {
+  * `series` with the first interval series leading, and a series of the same unit whose values all
+  * fall inside its intervals (two at least) taken out as its estimate: `≈ $6,700` beside `$6.0k–7.3k`.
+  */
+-function foldEstimate(series: readonly ChartSeries[]): { series: ChartSeries[]; estimate?: ChartSeries } {
++function foldEstimate(series: readonly ChartSeries[]): { series: ChartSeries[]; estimate?: ChartSeries | undefined } {
+ 	const ranged = series.find(entry => intervalShare([entry]) >= RANGE_SHARE);
+ 	if (!ranged) return { series: [...series] };
+ 	const inside = (entry: ChartSeries) => {
+@@ -4521,7 +4528,7 @@ function changeChart(
+ 	// Each series improves the way its measure does: the compared column's polarity, else its baseline's.
+ 	const improves = (column: TableColumn, before = baseline) =>
+ 		plan.polarity?.[column.index] ?? plan.polarity?.[before.index];
+-	let pairs: { name: string; polarity?: Polarity; at: (row: number) => ChartPoint | undefined }[];
++	let pairs: { name: string; polarity?: Polarity | undefined; at: (row: number) => ChartPoint | undefined }[];
+ 	let against: string;
+ 	if (baselines) {
+ 		// Metric pairs: each series against its own before column, the legend naming the before condition.
+@@ -4614,7 +4621,7 @@ interface RowNames {
+ 	readonly names: readonly string[];
+ 	/** Headers of the columns the names come from. */
+ 	readonly axis: string;
+-	readonly groups?: readonly ChartGroup[];
++	readonly groups?: readonly ChartGroup[] | undefined;
+ }
+ 
+ /**
+diff --git a/packages/tui/src/charts/chart-svg.ts b/packages/tui/src/charts/chart-svg.ts
+index 5bef22ecac..b09362fc67 100644
+--- a/packages/tui/src/charts/chart-svg.ts
++++ b/packages/tui/src/charts/chart-svg.ts
+@@ -188,22 +188,22 @@ interface Layer {
+ 	readonly height: number;
+ 	readonly body: string;
+ 	/** Series keys the header draws beside the title (or under it when they do not fit). */
+-	readonly legend?: readonly LegendItem[];
++	readonly legend?: readonly LegendItem[] | undefined;
+ 	/** A heat scale key the header draws instead of a legend. */
+-	readonly ramp?: RampKey;
++	readonly ramp?: RampKey | undefined;
+ 	/** How the chart encodes its data where that is not obvious (`log scale`); the derived subtitle. */
+-	readonly notes?: readonly string[];
++	readonly notes?: readonly string[] | undefined;
+ }
+ 
+ /** A legend entry: a name beside a filled dot of `color`, or a hollow ring for a transition's start. */
+ interface LegendItem {
+ 	readonly name: string;
+ 	readonly color: string;
+-	readonly ring?: boolean;
++	readonly ring?: boolean | undefined;
+ 	/** Further dot colors drawn beside the first, for marks colored by meaning (a toned end: `success`, `error`). */
+-	readonly tones?: readonly string[];
++	readonly tones?: readonly string[] | undefined;
+ 	/** The dot's opacity, matching a fainter mark (a second part in one outcome color); opaque by default. */
+-	readonly opacity?: number;
++	readonly opacity?: number | undefined;
+ }
+ 
+ /** A heat scale key: the faintest and strongest cells' figures either side of a strip of swatches. */
+@@ -219,7 +219,7 @@ interface Scale {
+ 	readonly ticks: readonly number[];
+ 	readonly log: boolean;
+ 	/** A broken axis: values above `below` jump the gap from `start` to `end` onto a second, zoomed segment. */
+-	readonly cut?: Cut;
++	readonly cut?: Cut | undefined;
+ }
+ 
+ /** Where a broken axis parts its segments: the first ends at `start` (value `below`), the second begins at `end`. */
+@@ -3251,7 +3251,7 @@ interface EndLabel {
+ 	readonly text: string;
+ 	readonly color: string;
+ 	/** The line's name, set before its value when lines are labelled directly instead of through a legend. */
+-	readonly name?: string;
++	readonly name?: string | undefined;
+ }
+ 
+ /**
+@@ -3621,9 +3621,9 @@ function valueScale(
+ 	to: number,
+ 	options: {
+ 		zero: boolean;
+-		breakable?: boolean;
++		breakable?: boolean | undefined;
+ 		/** One tick unit in base units ({@link tickUnit}): a linear axis ticks on nice multiples of it. */
+-		unit?: number;
++		unit?: number | undefined;
+ 	},
+ ): Scale {
+ 	let min = Math.min(...values);
+@@ -4249,7 +4249,11 @@ function groupNameWidth(groups: readonly ChartGroup[]): number {
+  */
+ function tickFormat(
+ 	scale: Scale,
+-	axis: { readonly dim: Dimension; readonly unit: string; readonly points?: readonly (ChartPoint | null)[] },
++	axis: {
++		readonly dim: Dimension;
++		readonly unit: string;
++		readonly points?: readonly (ChartPoint | null)[] | undefined;
++	},
+ ): (tick: number) => string {
+ 	const unit = binaryBytes(axis) ? "iB" : axis.unit;
+ 	const format = (ticks: readonly number[], magnitude: number) =>
+@@ -4266,7 +4270,10 @@ function tickFormat(
+ }
+ 
+ /** Whether `axis` holds sizes the table wrote in binary units (`GiB`, `MiB`), which its ticks then read in too. */
+-function binaryBytes(axis: { readonly dim: Dimension; readonly points?: readonly (ChartPoint | null)[] }): boolean {
++function binaryBytes(axis: {
++	readonly dim: Dimension;
++	readonly points?: readonly (ChartPoint | null)[] | undefined;
++}): boolean {
+ 	return axis.dim === "bytes" && !!axis.points?.some(point => point && /[KMGTP]iB/i.test(point.text));
+ }
+ 
+@@ -4437,18 +4444,18 @@ function num(value: number): string {
+ }
+ 
+ interface TextStyle {
+-	size?: number;
++	size?: number | undefined;
+ 	fill: string;
+-	anchor?: "start" | "middle" | "end";
+-	weight?: number;
+-	italic?: boolean;
++	anchor?: ("start" | "middle" | "end") | undefined;
++	weight?: number | undefined;
++	italic?: boolean | undefined;
+ }
+ 
+ /** A stretch of one {@link text} set apart from the rest: its own color and/or weight. */
+ interface TextRun {
+ 	readonly content: string;
+-	readonly fill?: string;
+-	readonly weight?: number;
++	readonly fill?: string | undefined;
++	readonly weight?: number | undefined;
+ }
+ 
+ /**
+@@ -4599,7 +4606,7 @@ function barRect(
+ 	height: number,
+ 	fill: string,
+ 	opacity: number,
+-	options: { estimate?: boolean } = {},
++	options: { estimate?: boolean | undefined } = {},
+ ): string {
+ 	if (!options.estimate) return rect(x, y, width, height, fill, opacity);
+ 	const radius = Math.min(RADIUS, width / 2, height / 2);
 diff --git a/packages/tui/src/charts/table-data.ts b/packages/tui/src/charts/table-data.ts
-index aec748a960..1de7770d63 100644
+index e11aa46dcc..99dcce0dae 100644
 --- a/packages/tui/src/charts/table-data.ts
 +++ b/packages/tui/src/charts/table-data.ts
-@@ -40,11 +40,11 @@ export interface NumberCell {
+@@ -40,28 +40,28 @@ export interface NumberCell {
  	/** The number as written, with approximation, sign, currency and unit (`~$250`, `12.5 ms`, `24–72 h`). */
  	readonly figure: string;
  	/** `a → b`: `b`, in the same base units. */
 -	readonly to?: number;
 +	readonly to?: number | undefined;
  	/** `a → b`: `b` as written. */
- 	readonly toFigure?: string;
+-	readonly toFigure?: string;
++	readonly toFigure?: string | undefined;
  	/** `a–b`: `b`, in the same base units. */
 -	readonly upper?: number;
 +	readonly upper?: number | undefined;
- 	/** `a/b`: `b`. */
- 	readonly denominator?: number;
+ 	/**
+ 	 * `a/b`: `b`. {@link analyzeTable} reads a score (`12/12`, `154/160`, a mean
+ 	 * like `0.6/4`) as the percent of `b` reached, unless its column also holds a
+ 	 * plain fraction; a pair (`85 / 147` under `Edit / read calls`) keeps `a`.
+ 	 */
+-	readonly denominator?: number;
++	readonly denominator?: number | undefined;
+ 	/**
+ 	 * `a ± e` (`3.67s ± 0.69`, `~404ms ± 60`, `$0.72 (±0.16)`): `e`, in the same base units — the
+ 	 * spread the table states around the value; {@link figure} then writes both (`3.67s ± 0.69`).
+ 	 */
+-	readonly error?: number;
++	readonly error?: number | undefined;
+ 	/**
+ 	 * A slash list of measurements in one unit (`79 / 124 µs`, `1,864 ms /
+ 	 * 2,678 ms`, `**675ms** / 680ms`): every listed value, the first included,
+ 	 * in base units, 2–4 of them. `value` is the first.
+ 	 */
+-	readonly values?: readonly number[];
++	readonly values?: readonly number[] | undefined;
  }
+ 
+ /** A cell that is not a quantity. */
+@@ -98,7 +98,7 @@ export interface TableColumn {
+ 	 * Per row, the status its cell leads with ({@link cellStatus}), when most
+ 	 * of the column's cells lead with one: a pass/fail or progress column.
+ 	 */
+-	readonly statuses?: readonly (Status | undefined)[];
++	readonly statuses?: readonly (Status | undefined)[] | undefined;
+ 	/** Every numeric data cell holds the same value: an echoed setting, not a measure. */
+ 	readonly constant: boolean;
+ 	/** Share of numeric cells written with an explicit sign. */
+@@ -111,7 +111,7 @@ export interface TableColumn {
+ 	 * Total`, `Leverage vs $200` beside the cost) or a running total of it
+ 	 * (`Offset` summing `Verts`). Such a column is never a measure of its own.
+ 	 */
+-	readonly restates?: number;
++	readonly restates?: number | undefined;
+ }
+ 
+ /**
+@@ -145,7 +145,7 @@ export interface TableAnalysis {
+ 	/** Total/summary rows (`Total`, `Average`, …), kept out of the scale. */
+ 	readonly totals: readonly number[];
+ 	/** Measure columns adding up to a whole, when the values show it. */
+-	readonly composition?: Composition;
++	readonly composition?: Composition | undefined;
+ }
+ 
+ const NUMBER = String.raw`(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?|\.\d+`;
 diff --git a/packages/tui/src/overlays/pause-screen.ts b/packages/tui/src/overlays/pause-screen.ts
-index a0d3f19cde..d57ee3cac8 100644
+index 325bd5d30f..505045597c 100644
 --- a/packages/tui/src/overlays/pause-screen.ts
 +++ b/packages/tui/src/overlays/pause-screen.ts
 @@ -28,7 +28,13 @@ import { isNativeRendering } from "../native/state";
@@ -705,7 +1242,7 @@ index a0d3f19cde..d57ee3cac8 100644
  	ui: {
  		showOverlay(component: Component, options?: OverlayOptions): OverlayHandle;
  		setFocus(component: Component): void;
-@@ -130,7 +136,8 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
+@@ -138,7 +144,8 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
  
  	/** Start the clock; resolves once the user asks to resume. */
  	run(): Promise<void> {
@@ -715,7 +1252,7 @@ index a0d3f19cde..d57ee3cac8 100644
  		this.#native = undefined;
  		// The tick only repaints the hold clock; natively the `elapsed` node counts on its own.
  		if (!isNativeRendering()) {
-@@ -224,12 +231,27 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
+@@ -282,12 +289,27 @@ export class PauseScreenComponent implements Component, OverlayFocusOwner {
  
  /**
   * Engage the global pause gate and hold the fullscreen pause screen until the
@@ -747,7 +1284,7 @@ index a0d3f19cde..d57ee3cac8 100644
  	const component = new PauseScreenComponent(host);
  	const overlay = host.ui.showOverlay(component, {
  		width: "100%",
-@@ -245,9 +267,11 @@ export async function runPauseScreen(host: PauseScreenHost): Promise<void> {
+@@ -303,9 +325,11 @@ export async function runPauseScreen(host: PauseScreenHost): Promise<void> {
  		component.dispose();
  		host.ui.setFocus(component);
  		overlay.hide();

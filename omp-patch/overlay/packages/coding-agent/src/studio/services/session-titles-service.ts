@@ -1,3 +1,4 @@
+import { splitCardTitle } from "../../utils/title-card";
 import * as fs from "node:fs/promises";
 import { sanitizeText } from "@oh-my-pi/pi-utils";
 import { LRUCache } from "@oh-my-pi/pi-utils/lru";
@@ -52,7 +53,7 @@ export class StudioSessionTitlesService {
 				rows.push({
 					sessionId: id,
 					state: "available",
-					...(title ? { title: clean(title, 1024) } : {}),
+					...(title ? { title: clean(splitCardTitle(title)?.title ?? title, 1024) } : {}),
 					...(manager.titleSource ? { source: manager.titleSource } : {}),
 					...(title && nativeCard ? { card: nativeCard } : {}),
 				});

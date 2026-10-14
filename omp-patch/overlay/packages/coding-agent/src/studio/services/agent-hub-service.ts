@@ -1,4 +1,3 @@
-import { invalidModelSelectorReason } from "../../task/structured-subagent";
 /**
  * StudioAgentHubService - presentation-neutral agent roster and control
  * service for the Studio Agent Hub (05_AGENT_HUB_AND_JOBS.md, WP-050..WP-053).
@@ -503,12 +502,12 @@ export class StudioAgentHubService {
 		effort?: string;
 		callerAgentId: string;
 	}): Promise<{ agentId: string; jobId?: string; status: "starting" }> {
-		const modelReason = invalidModelSelectorReason(args.model, "Studio agent");
-		if (modelReason || (args.model && args.model.length > 8))
+		if (args.model !== undefined) {
 			throw new StudioAgentHubError(
 				"INVALID_ARGUMENT",
-				modelReason ?? "At most eight model candidates are supported",
+				"Per-spawn models are no longer supported. Configure the agent model chain before starting a task.",
 			);
+		}
 		const definition = args.definition.trim();
 		const assignment = args.assignment.trim();
 		if (
@@ -534,7 +533,6 @@ export class StudioAgentHubService {
 		let receipt: StudioAgentSpawnReceipt;
 		try {
 			receipt = await this.#spawner.spawn({
-				...(args.model === undefined ? {} : { model: [...args.model] }),
 				definition,
 				assignment,
 				...(args.solutionSpace !== undefined ? { solutionSpace: args.solutionSpace } : {}),

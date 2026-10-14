@@ -7,6 +7,8 @@ Public documentation for OMP Studio.
 | [../README.md](../README.md) | 中文总览 |
 | [../README.en.md](../README.en.md) | English overview |
 | [getting-started.md](getting-started.md) | Run from source |
+| [releases/v0.1.10.md](releases/v0.1.10.md) | 0.1.10 发布页文案、三平台下载与升级说明 |
+| [migrations/omp-18.10.4.md](migrations/omp-18.10.4.md) | 18.8.0 → 18.10.4 完整版本概览、GUI 入口与验收 |
 | [migrations/omp-18.8.0.md](migrations/omp-18.8.0.md) | Studio 0.1.9 / OMP 18.8.0 changes, compatibility and acceptance boundaries |
 | [gui-18.4.4.md](gui-18.4.4.md) | OMP 18.4.4 GUI 使用说明 |
 | [migrations/omp-18.4.4.md](migrations/omp-18.4.4.md) | Upstream changes and Runtime migration |

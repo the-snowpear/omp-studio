@@ -520,6 +520,40 @@ describe("WP-030/031/032 StudioModeControlService", () => {
 		expect(promptFn).toHaveBeenCalledTimes(1);
 	});
 
+	test("native review identities reject stale and duplicate approvals while one execution is pending", async () => {
+		await armPlanReview();
+		const review = service.reviewDetails();
+		expect(review.available).toBe(true);
+		await expect(
+			service.executeReview({
+				kind: "mode.plan.review.resolve",
+				sessionId: session.sessionId,
+				reviewId: "stale",
+				decision: "keep",
+			}),
+		).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+		const pending = Promise.withResolvers<boolean>();
+		session.prompt = mock(() => pending.promise);
+		const first = service.executeReview({
+			kind: "mode.plan.review.resolve",
+			sessionId: session.sessionId,
+			reviewId: review.reviewId!,
+			decision: "keep",
+		});
+		await expect(
+			service.executeReview({
+				kind: "mode.plan.review.resolve",
+				sessionId: session.sessionId,
+				reviewId: review.reviewId!,
+				decision: "execute",
+			}),
+		).rejects.toMatchObject({ code: "COMMAND_BLOCKED" });
+		pending.resolve(true);
+		expect(await first).toEqual({ resolved: true });
+		expect(session.prompt).toHaveBeenCalledTimes(1);
+		expect(service.reviewDetails().available).toBe(false);
+	});
+
 	test("the Runtime mirror parser accepts M3 operations and rejects unknown fields", () => {
 		const base = { type: "studio.request", requestId: "m3-op", runtimeEpoch: 1 };
 		expect(

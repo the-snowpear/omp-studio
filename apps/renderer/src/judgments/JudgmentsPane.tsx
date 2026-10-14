@@ -1,4 +1,5 @@
 import { WorkspaceSection } from "../workspaces/Workspace";
+import { JudgeModelPane } from "./JudgeModelPane";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ClientBootstrap,
@@ -461,6 +462,7 @@ export function JudgmentsPane({
     >
       {open ? (
         <div className="judgments-content">
+          <JudgeModelPane client={client} context={{ sessionId, available, capabilities }} visible={visible && !!open} />
           <p className="small muted">
             {t(
               "使用当前会话的 Judge 模型链。仅显示本会话主代理的批次；关闭批次会释放内存，已保存的产物继续保留。",

@@ -521,15 +521,19 @@ export function createStudioHostRuntime(
 	const modes = new StudioModeControlService(session);
 	const models = new StudioModelControlService(session);
 	const workbench = new StudioWorkbenchService(session, liveAudio);
+	workbench.planControl = modes;
 	const permissions = new StudioPermissionControlService(session);
 	const settings = new StudioRuntimeSettingsService(session);
 	const prediction = workbench.prediction;
 	session.setBeforeNextUserTurn(async () => {
+		await workbench.worktrees.ensureStartResolved();
 		await models.applyPending();
 		await modes.applyPending();
 		await permissions.applyPending();
 	});
 	const interaction = new StudioInteractionGateway();
+	workbench.worktrees.interaction = interaction;
+	modes.interaction = interaction;
 	const cfg = new StudioCfgService(session, interaction);
 	session.setResetConsentHandler?.(async ({ provider, message }) => {
 		const choice = await interaction.select({
@@ -795,7 +799,6 @@ export function createStudioHostRuntime(
 						// Until Studio has a separate rationale field, retain assignment-based auto effort.
 						solutionSpace: request.solutionSpace ?? request.assignment,
 						agent: request.definition,
-						...(request.model === undefined ? {} : { model: request.model }),
 						...(request.context === undefined ? {} : { context: request.context }),
 						...(effort === undefined ? {} : { effort }),
 						...(isolation === undefined ? {} : { isolation }),
@@ -808,7 +811,6 @@ export function createStudioHostRuntime(
 				const task = await TaskTool.create(toolSession);
 				const result = await task.execute(crypto.randomUUID(), {
 					agent: request.definition,
-					...(request.model === undefined ? {} : { model: request.model }),
 					task: request.assignment,
 					solutionSpace: request.solutionSpace ?? request.assignment,
 					...(request.context === undefined ? {} : { context: request.context }),
@@ -857,6 +859,7 @@ export function createStudioHostRuntime(
 		runtimeEpoch: bridgeConfig.runtimeEpoch as number,
 		sessionId: session.sessionManager.getSessionId(),
 		sessionManager: session.sessionManager,
+		toolResult: toolCallId => mainConversation.toolResult(session.sessionManager.getSessionId(), toolCallId),
 	}));
 	const createConversationProjector = (target: AgentSession, runtimeEpoch: number): ConversationLiveProjector => {
 		const manager = target.sessionManager;
@@ -904,6 +907,7 @@ export function createStudioHostRuntime(
 	});
 	const agentConversation = new StudioAgentConversationService({
 		registry,
+		toolResult: sessionId => toolCallId => conversation.toolResult(sessionId, toolCallId),
 		runtimeEpoch: () => bridgeConfig.runtimeEpoch as number,
 	});
 	const shutdownSignal = Promise.withResolvers<void>();
@@ -1106,7 +1110,10 @@ function createStudioMainWorkerSupervisor(
 			runtime.services.workbench.agentBtw.running ||
 			runtime.services.workbench.benchmarks.running ||
 			runtime.services.workbench.media.running ||
-			runtime.services.workbench.prediction.running
+			runtime.services.workbench.prediction.running ||
+			runtime.services.workbench.portability.running ||
+			runtime.services.workbench.compression.running ||
+			runtime.services.workbench.worktrees.running
 		)
 			return true;
 		if (slot.isStreaming || slot.isCompacting || slot.hasPostPromptWork || slot.queuedMessageCount > 0) return true;
@@ -1214,6 +1221,7 @@ function createStudioMainWorkerSupervisor(
 				const next = await recreateSession(sessionFile);
 				slot.replace(next);
 				runtime.services.modes.rebindSettings();
+				runtime.services.workbench.prediction.enableMessagePrediction(next);
 				runtime.services.cfg?.rebind();
 				generation += 1;
 				idleSince = now();

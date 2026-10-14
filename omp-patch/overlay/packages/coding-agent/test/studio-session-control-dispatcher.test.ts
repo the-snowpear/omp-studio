@@ -156,7 +156,14 @@ function fixture() {
 			shutdownRequests += 1;
 		},
 		services: {
-			workbench: { agentBtw: { settle: async () => {} } },
+			workbench: {
+				agentBtw: { settle: async () => {} },
+				worktrees: {
+					cleanupOnShutdown: async () => {
+						serviceCalls.push("worktrees.cleanup");
+					},
+				},
+			},
 			live: new StudioLiveService(),
 			pause: new StudioPauseService(),
 			loop: fakeLoopService(),

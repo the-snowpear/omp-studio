@@ -124,7 +124,7 @@ Renderer 读当前查看会话：`apps/renderer/src/telemetry/useViewedSessionTe
 | Agent Hub 页 | `apps/renderer/src/AgentHub.tsx`、`conversation/SubagentConversationPane.tsx`、`conversation/persistedSessionAgents.ts` | 名册：`session.agents.list` 与 live `snapshot.agents` 合并（仅 viewed session === live session 时叠 live）；写操作（spawn/send/kill/revive/release/`job.cancel`）仅 live 会话；历史 Transcript 不读 live `agent.transcript.read`，用「打开」走归档对话；详情「打开」走 `agent.conversation.read`，缺失或非 live 则 `session.transcript.readPage` + `agentId`；聊天附件胶囊经 `agent.send` | overlay `services/agent-hub-service.ts`、`job-service.ts` |
 | 批量评审 | `judgments/JudgmentsPane.tsx`、`preview/judgmentsPreview.ts` | `judgments.list/create/read/cancel/close/retry`；有界分页、付费操作前确认、结果保存产物库 | overlay `services/judgment-service.ts`；native `eval/judgment-batch-bridge.ts` 独立观察游标 |
 | 子代理面板 | `SubagentsPanel.tsx` | `agent.spawn/send/kill/revive/release` | 同上 + `agent-conversation-service.ts` |
-| 子代理本次模型与路由详情 | `AgentHub.tsx`、`models/AgentModelDetails.tsx`、`preview/agentModelPreview.ts` | `agent.spawn.models` capability 限制本次候选链覆盖；`agent.model.inspect` | 原生 TaskTool/structured-subagent 参数；`services/agent-model-service.ts` 验证父子归属，报告实际 serving model/thinking |
+| 子代理配置模型与路由详情 | `AgentHub.tsx`、`models/AgentModelDetails.tsx`、`preview/agentModelPreview.ts` | 启动使用代理配置；`agent.model.inspect` | 18.10.4 起移除单次模型覆盖；`services/agent-model-service.ts` 验证父子归属，报告实际 serving model/thinking |
 | 隔离子任务 / 多补丁 | `AgentHub.tsx`、`conversation/persistedSessionAgents.ts` | archive 的 `session_init.isolated` 经 Desktop 投影；历史只读 | `AgentHistorySummary.isolated/nestedPatchPaths` → overlay Hub 的 `canRevive`；send/revive 均在 Runtime 拒绝不可恢复的隔离任务 |
 | 任务代理定义 | `AgentHub` / Capabilities | `omp-agent-definitions-adapter.ts` | 磁盘 `.omp/agents/*.md`，不是 Hub live 态 |
 | Skills 抽屉 | `SkillsDrawer.tsx`、`skills/skillUsage.ts` | `omp-extensibility-adapter.ts`、`skills.get` / `skills.setEnabled` | overlay `skill-prompt-expansion.ts` |
@@ -380,3 +380,19 @@ GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-g
 | 录制与标注 | recordings/RecordingPlayer.tsx、annotations/Annotations.tsx、terminalTheme.ts | 既有产物库、录制和标注协议；隐藏页面释放媒体资源 |
 
 发布范围和验证：[OMP 18.8.0](../docs/migrations/omp-18.8.0.md)。0.1.8 既有 Stats、Frustration、Ask 图片、技能命名空间及子代理 BTW 路径保留。
+
+## OMP 18.10.4 开发适配
+
+| 功能 | UI | Runtime / Host / Desktop |
+|---|---|---|
+| 账号池、压缩阈值与新设置 | `models/AgentPoolsPane.tsx`、`ModelCompactionPane.tsx`、`settings/FeatureSettingsPane.tsx` | `contracts/feature-settings.ts` → `services/feature-settings-service.ts`；原生设置注册器、OAuth 身份键和压缩预览 |
+| 会话迁移与匿名导出 | `history/SessionPortabilityPane.tsx` | `contracts/session-portability.ts` → `services/session-portability-service.ts`；`session-commands.ts` 注入私有文件授权并注册目标工作区；`runtime-media-files.ts` 保持媒体与会话包授权分离 |
+| NTFS/APFS 透明压缩 | `diagnostics/SessionCompressionPane.tsx` | `contracts/session-compression.ts` → `services/session-compression-service.ts`；原生 GC 候选选择和文件身份复核 |
+| 会话 Worktree 与启动选择 | `workspaces/SessionWorktreesPane.tsx`（含 `WorktreeLaunchGate`）；任务设置、Git 侧栏、主 Composer | `contracts/session-worktrees.ts` → `services/session-worktrees-service.ts`；原生创建/退出规划，Bridge 退出清理；首条提示词门控 |
+| Plan 执行档位与扩展评审 | `deck/PlanExecutionPicker.tsx`、`PlanCard.tsx`、`App.tsx` | `contracts/plan-review.ts` → `mode-control-service.ts`；`ExtensionRunner.bindPlanReviewActions`，评审 ID 与重复响应门控 |
+| 下一消息预测 | `composer/useWordPrediction.ts`、交互设置 | 私有 `prediction-channel` 的 `next` 输入/事件；`services/message-prediction.ts` 复用原生 `ComposerPredictionController` |
+| 后台工具结果与重连 | `conversationStore.ts`、`conversationViewModel.ts` | `conversation-live-projector.ts` 有界结果缓存；`session-transcript-service.ts` 按原生 jobId 补当前结果 |
+| Ask 折叠 | `deck/AskCard.tsx`、`QueuedDeck.tsx` | 本地显示状态，回答/附件保留，不产生提交或取消 |
+| Judge 模型配置 | `judgments/JudgeModelPane.tsx`、`JudgmentsPane.tsx` | 既有 `runtime.models.list` 和 `runtime.settings.get/set`；原生 NativeJudge 与批次用量 |
+
+本版移除创建子代理时的单次模型覆盖和 Codex Code Mode 设置入口。旧协议读取兼容保留，废弃写操作明确拒绝。[完整版本变化与验收](../docs/migrations/omp-18.10.4.md)。

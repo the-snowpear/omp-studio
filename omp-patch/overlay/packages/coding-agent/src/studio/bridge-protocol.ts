@@ -1084,8 +1084,8 @@ export function stableEmptyManifestHash(kind: "capabilities" | "commands"): stri
 
 export const STUDIO_IMPLEMENTED_CAPABILITIES = [
 	"settings.approval",
-	"agent.spawn.models",
 	"prediction.query",
+	"composer.predictions",
 	...WORKBENCH_OPERATION_KINDS,
 	...UPGRADE_OPERATION_KINDS,
 	"runtime.pause",

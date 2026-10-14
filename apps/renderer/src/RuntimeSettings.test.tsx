@@ -77,7 +77,7 @@ describe("Runtime settings seam", () => {
     fireEvent.click(screen.getByRole("switch", { name: "等待模型额度恢复" }));
     expect(onSet).not.toHaveBeenCalled();
   });
-  it("keeps the seven settings disabled without a Runtime snapshot", () => {
+  it("keeps available settings disabled without a Runtime snapshot", () => {
     renderSettings();
 
     openTab("文件与终端");
@@ -94,7 +94,7 @@ describe("Runtime settings seam", () => {
     expect((screen.getByRole("combobox", { name: "压缩方法顺序" }) as HTMLSelectElement).disabled).toBe(true);
 
     openTab("高级");
-    expect((screen.getByRole("combobox", { name: "Codex code mode" }) as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.queryByRole("combobox", { name: "Codex code mode" })).toBeNull();
   });
 
   it("renders the snapshot and sends only the closed whitelist keys", async () => {
@@ -125,8 +125,7 @@ describe("Runtime settings seam", () => {
     expect(screen.getByText("运行中")).toBeTruthy();
 
     openTab("高级");
-    fireEvent.change(screen.getByRole("combobox", { name: "Codex code mode" }), { target: { value: "on" } });
-    await waitFor(() => expect(onSet).toHaveBeenCalledTimes(7));
+    expect(screen.queryByRole("combobox", { name: "Codex code mode" })).toBeNull();
 
     expect(onSet.mock.calls).toEqual([
       ["edit.autoRepair.enabled", false],
@@ -135,7 +134,6 @@ describe("Runtime settings seam", () => {
       ["extendedContext", false],
       ["compaction.asyncEnabled", true],
       ["compaction.methodOrder", ["snapcompact", "remote", "handoff", "shake", "soft"]],
-      ["providers.openai-codex.codeMode", "on"],
     ]);
   }, 15000);
 
@@ -168,7 +166,7 @@ describe("Runtime settings seam", () => {
     expect((screen.getByRole("combobox", { name: "压缩方法顺序" }) as HTMLSelectElement).value).toBe("remote,snapcompact,handoff,shake,soft");
 
     openTab("高级");
-    expect((screen.getByRole("combobox", { name: "Codex code mode" }) as HTMLSelectElement).value).toBe("off");
+    expect(screen.queryByRole("combobox", { name: "Codex code mode" })).toBeNull();
   });
 
   it("localizes every compaction speculation state", () => {

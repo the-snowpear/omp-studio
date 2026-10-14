@@ -1,3 +1,5 @@
+import { AgentPoolsPane } from "./models/AgentPoolsPane";
+import { ModelCompactionPane } from "./models/ModelCompactionPane";
 import { ModelPresetsPane } from "./models/ModelPresetsPane";
 import { SessionOptionsPane } from "./models/SessionOptionsPane";
 
@@ -4497,7 +4499,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             </>
           )}
           </div>
-        </section>
+        {shownTab === "roles" && !hasRoleEditor ? <ModelCompactionPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "roles"} models={data?.availableModels ?? []} /> : null}
+</section>
         <section id="mcPanelSubagents" role="tabpanel" aria-labelledby="mcTabSubagents" hidden={shownTab !== "subagents"} className={tabPanelClass("subagents")}>
           <SubagentsPanel
             client={client}
@@ -4506,7 +4509,8 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
             onCount={setAgentCount}
             {...(agentIntent === undefined ? {} : { initialAgent: agentIntent })}
           />
-        </section>
+        <AgentPoolsPane client={client} context={{ sessionId, available: runtimeAvailable, capabilities }} visible={shownTab === "subagents"} />
+</section>
         <section id="mcPanelWebSearch" role="tabpanel" aria-labelledby="mcTabWebSearch" hidden={shownTab !== "websearch"} className={tabPanelClass("websearch")}>
           <RuntimeCredentials client={client} preview={preview} providers={["exa", "ollama-cloud"]} />
           {data?.webSearch ? (

@@ -1,3 +1,13 @@
+import type { StudioModeControlService } from "./mode-control-service";
+import { isNativePlanReviewKind, type NativePlanReviewOperation } from "../plan-review-protocol";
+import { StudioSessionWorktreesService } from "./session-worktrees-service";
+import { isSessionWorktreeKind, type SessionWorktreeOperation } from "../session-worktrees-protocol";
+import { StudioSessionCompressionService } from "./session-compression-service";
+import { isSessionCompressionKind, type SessionCompressionOperation } from "../session-compression-protocol";
+import { StudioSessionPortabilityService } from "./session-portability-service";
+import { isSessionPortabilityKind, type SessionPortabilityOperation } from "../session-portability-protocol";
+import { StudioFeatureSettingsService } from "./feature-settings-service";
+import { isFeatureSettingsKind, type FeatureSettingsOperation } from "../feature-settings-protocol";
 import { StudioIdaDetailsService } from "./ida-details-service";
 import { StudioSessionTitlesService } from "./session-titles-service";
 import { isSessionTitlesKind, type SessionTitlesOperation } from "../session-titles-protocol";
@@ -107,6 +117,11 @@ export class StudioWorkbenchService {
 	readonly sessionRestore: StudioSessionRestoreService;
 	readonly runtimeQueue: StudioRuntimeQueueService;
 	readonly nativePreferences: StudioNativePreferencesService;
+	readonly featureSettings: StudioFeatureSettingsService;
+	readonly portability: StudioSessionPortabilityService;
+	readonly compression: StudioSessionCompressionService;
+	readonly worktrees: StudioSessionWorktreesService;
+	planControl: StudioModeControlService | undefined;
 	readonly ratchet: StudioRatchetService;
 	readonly resources: StudioResourceService;
 	readonly ida: StudioIdaService;
@@ -129,12 +144,17 @@ export class StudioWorkbenchService {
 	) {
 		this.titles = new StudioSessionTitlesService(session);
 		this.prediction = new StudioPredictionService(session);
+		if (typeof session.runEphemeralTurn === "function") this.prediction.enableMessagePrediction(session);
 		this.maintenance = new StudioMaintenanceService(session);
 		this.archive = new StudioArchiveService(session);
 		this.agentModels = new StudioAgentModelService(session);
 		this.sessionRestore = new StudioSessionRestoreService(session);
 		this.runtimeQueue = new StudioRuntimeQueueService(session);
 		this.nativePreferences = new StudioNativePreferencesService(session);
+		this.featureSettings = new StudioFeatureSettingsService(session);
+		this.portability = new StudioSessionPortabilityService(session);
+		this.compression = new StudioSessionCompressionService(session);
+		this.worktrees = new StudioSessionWorktreesService(session);
 		this.ratchet = new StudioRatchetService(session);
 		this.skillshare = new StudioSkillshareService(session);
 		this.sessionGui = new StudioSessionGuiService(session);
@@ -154,6 +174,9 @@ export class StudioWorkbenchService {
 	}
 	dispose(): void {
 		this.prediction.dispose();
+		this.portability.dispose();
+		this.compression.dispose();
+		this.worktrees.dispose();
 		this.maintenance.dispose();
 		this.ratchet.dispose();
 		this.computerObservation.dispose();
@@ -182,6 +205,14 @@ export class StudioWorkbenchService {
 		if (operation.kind === "session.restore.inspect") return this.sessionRestore.execute(operation);
 		if (isRuntimeQueueOperation(operation)) return this.runtimeQueue.execute(operation);
 		if (isNativePreferenceOperation(operation)) return this.nativePreferences.execute(operation);
+		if (isFeatureSettingsOperation(operation)) return this.featureSettings.execute(operation);
+		if (isSessionPortabilityOperation(operation)) return this.portability.execute(operation);
+		if (isSessionCompressionOperation(operation)) return this.compression.execute(operation);
+		if (isSessionWorktreeOperation(operation)) return this.worktrees.execute(operation);
+		if (isNativePlanReviewOperation(operation)) {
+			if (!this.planControl) throw new Error("Plan review host unavailable");
+			return this.planControl.executeReview(operation);
+		}
 		if (operation.kind === "accounts.logout") return this.accounts.logout(operation.sessionId, operation.accountId);
 		if (isRatchetOperation(operation)) return this.ratchet.execute(operation);
 		if (isComputerObservationOperation(operation)) return this.computerObservation.execute(operation);
@@ -399,9 +430,28 @@ export function projectRuntimeModel(model: Model, includeExecution = false): Run
 					compatibility: {
 						...(model.preferWebsockets === undefined ? {} : { preferWebsockets: model.preferWebsockets }),
 						...(model.useResponsesLite === undefined ? {} : { useResponsesLite: model.useResponsesLite }),
-						...(model.toolMode === undefined ? {} : { toolMode: model.toolMode }),
 					},
 				}
 			: {}),
 	};
+}
+
+function isFeatureSettingsOperation(operation: WorkbenchOperation): operation is FeatureSettingsOperation {
+	return isFeatureSettingsKind(operation.kind);
+}
+
+function isSessionPortabilityOperation(operation: WorkbenchOperation): operation is SessionPortabilityOperation {
+	return isSessionPortabilityKind(operation.kind);
+}
+
+function isSessionCompressionOperation(operation: WorkbenchOperation): operation is SessionCompressionOperation {
+	return isSessionCompressionKind(operation.kind);
+}
+
+function isSessionWorktreeOperation(operation: WorkbenchOperation): operation is SessionWorktreeOperation {
+	return isSessionWorktreeKind(operation.kind);
+}
+
+function isNativePlanReviewOperation(operation: WorkbenchOperation): operation is NativePlanReviewOperation {
+	return isNativePlanReviewKind(operation.kind);
 }

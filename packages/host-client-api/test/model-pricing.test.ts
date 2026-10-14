@@ -50,6 +50,15 @@ test("dated rate cards replace rather than inherit an older long-context tier", 
   assert.equal(resolveModelPrice(base, pricing, monday, 101).cost?.input, 3);
 });
 
+test("dated-only price changes update the card without showing an off-peak discount", () => {
+  const pricing = parseModelPricing({ timeBased: { offPeakMultiplier: 1, peakWindows: [], effectiveRates: [{ ...base, input: 3, effectiveFrom: monday }] } });
+  const before = resolveModelPrice(base, pricing, monday - 1);
+  const after = resolveModelPrice(base, pricing, monday);
+  assert.equal(before.cost?.input, 2);
+  assert.equal(after.cost?.input, 3);
+  assert.equal(after.period, undefined);
+});
+
 test("long-context inclusive and exclusive thresholds remain distinct", () => {
   const pricing = parseModelPricing({ longContext: { ...base, input: 5, inputThreshold: 100 } });
   assert.equal(resolveModelPrice(base, pricing, monday, 100).cost?.input, 2);

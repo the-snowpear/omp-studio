@@ -35,7 +35,7 @@ import {
 } from "./omp-seam.mjs";
 import { RuntimeInstaller } from "../packages/runtime-installer/dist/src/index.js";
 
-const REAL_UPSTREAM_COMMIT = "4ef97c8826ee012829a3e756b693a2a16a414f47";
+const REAL_UPSTREAM_COMMIT = "687892d1046ecaf18829b45f5b86928a308258f4";
 const FIXTURE_COMMAND_MANIFEST_HASH = `sha256:${"c".repeat(64)}`;
 
 async function fixtureInputs() {
@@ -284,11 +284,11 @@ test("real repository pin and series resolve to the pinned runtime identity", as
   assert.equal(upstream.entrypoint, "omp.exe");
   assert.deepEqual(upstream.entrypoints, { win32: "omp.exe", darwin: "omp" });
   assert.deepEqual(upstream.platforms, ["win32-x64", "win32-arm64", "darwin-arm64"]);
-  assert.equal(upstreamVersion, "18.8.0");
+  assert.equal(upstreamVersion, "18.10.4");
   const patchsetVersion = derivePatchsetVersion(series);
   assert.match(patchsetVersion, /^studio\.\d+$/u);
   assert.equal(patchsetVersion, series.patchsetVersion);
-  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.8.0-${patchsetVersion}`);
+  assert.equal(deriveRuntimeVersion(upstreamVersion, series), `18.10.4-${patchsetVersion}`);
   for (const name of series.patches) {
     assert.ok(existsSync(join(PATCHES_DIRECTORY, name)), `series patch must exist: ${name}`);
   }

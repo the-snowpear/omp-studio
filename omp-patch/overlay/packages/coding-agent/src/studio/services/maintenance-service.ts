@@ -118,6 +118,7 @@ export class StudioMaintenanceService {
 	#flags(categories: GcCategory[], policy: GcPolicy): GcCommandFlags {
 		return {
 			agentDir: getAgentDir(),
+			compress: false,
 			blobs: categories.includes("blobs"),
 			archive: categories.includes("archive"),
 			wal: categories.includes("wal"),

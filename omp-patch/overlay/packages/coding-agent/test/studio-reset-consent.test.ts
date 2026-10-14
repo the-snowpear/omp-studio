@@ -14,6 +14,7 @@ import {
 	createCodexAutoRedeemCoordinator,
 } from "@oh-my-pi/pi-coding-agent/session/codex-auto-reset";
 import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { TempDir } from "@oh-my-pi/pi-utils";
 
 const ACCOUNT_ID = "claude-account";
 const EMAIL = "claude@example.com";
@@ -84,6 +85,7 @@ describe("Studio Claude reset consent", () => {
 	let modelRegistry: ModelRegistry;
 	let sessions: AgentSession[];
 	let managers: SessionManager[];
+	let temp: TempDir;
 
 	beforeAll(async () => {
 		authStorage = await AuthStorage.create(":memory:");
@@ -91,6 +93,7 @@ describe("Studio Claude reset consent", () => {
 	});
 
 	beforeEach(() => {
+		temp = TempDir.createSync("@studio-reset-consent-");
 		vi.spyOn(aiEnv, "getEnvApiKey").mockReturnValue(undefined);
 		sessions = [];
 		managers = [];
@@ -104,6 +107,7 @@ describe("Studio Claude reset consent", () => {
 			await manager.close();
 		}
 		vi.restoreAllMocks();
+		await temp.remove();
 	});
 
 	afterAll(() => {
@@ -124,7 +128,21 @@ describe("Studio Claude reset consent", () => {
 			email: EMAIL,
 			orgId: ORG_ID,
 		});
-		vi.spyOn(authStorage.usage, "reports").mockImplementation(async () => [options.report]);
+		vi.spyOn(authStorage.oauth, "accounts").mockReturnValue([
+			{ position: 1, credentialId: CREDENTIAL_ID, accountId: ACCOUNT_ID, email: EMAIL, orgId: ORG_ID, active: true },
+		]);
+		vi.spyOn(authStorage.usage, "reports").mockImplementation(async () => [
+			{
+				...options.report,
+				resetCredits: {
+					availableCount: options.status.availableCount,
+					redeemableCount: options.status.redeemableCount,
+					eligible: options.status.eligible,
+					nextCreditId: options.status.nextCreditId,
+					credits: options.status.credits,
+				},
+			},
+		]);
 		vi.spyOn(authStorage.resets, "list").mockImplementation(async request =>
 			request?.provider === "anthropic" ? [options.status] : [],
 		);
@@ -169,6 +187,7 @@ describe("Studio Claude reset consent", () => {
 		const sessionManager = SessionManager.inMemory();
 		managers.push(sessionManager);
 		const coordinator = createCodexAutoRedeemCoordinator();
+		coordinator.resetLockPath = temp.join("reset.lock");
 		const session = new AgentSession({
 			agent,
 			sessionManager,
@@ -208,11 +227,13 @@ describe("Studio Claude reset consent", () => {
 			status: claudeStatus(false),
 			autoRedeem: "unset",
 		});
-		session.setResetConsentHandler(async () => {
+		const handler = vi.fn(async () => {
 			throw new Error("window closed");
 		});
+		session.setResetConsentHandler(handler);
 		await session.fetchUsageReports();
 		await coordinator.sweepPromise;
+		expect(handler).toHaveBeenCalledTimes(1);
 		expect(targets).toHaveLength(0);
 		expect(cfgClaudeResetsAutoRedeem.get(session.settings)).toBe("unset");
 	});

@@ -1,3 +1,4 @@
+import { StudioMessagePrediction } from "./message-prediction";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { createServer, type Server, type Socket } from "node:net";
@@ -61,6 +62,14 @@ export class StudioPredictionService {
 	}
 	observeSent(id: string, text: string) {
 		return this.#engine.observeSent(id, text);
+	}
+	#messagePrediction: StudioMessagePrediction | undefined;
+	enableMessagePrediction(session: AgentSession): void {
+		this.#messagePrediction?.dispose();
+		this.#messagePrediction = new StudioMessagePrediction(session, (channelId, revision, suffix) => {
+			const channel = this.#channels.get(channelId);
+			if (channel && !channel.closed) this.#send(channel, { kind: "next", channelId, revision, suffix });
+		});
 	}
 	readonly #channels = new Map<string, Channel>();
 	#disposed = false;
@@ -297,7 +306,12 @@ export class StudioPredictionService {
 	}
 	async #input(channel: Channel, input: PredictionInput): Promise<void> {
 		if (input.kind === "ping") return;
+		if (input.kind === "next") {
+			this.#messagePrediction?.update(channel.id, input.revision, input.empty);
+			return;
+		}
 		if (input.kind === "update") {
+			this.#messagePrediction?.update(channel.id, input.revision, false);
 			if (channel.input && input.revision <= channel.input.revision) return;
 			const head = input.text.slice(0, input.caret),
 				line = head.split("\n").length - 1,
@@ -308,6 +322,7 @@ export class StudioPredictionService {
 			return;
 		}
 		if (input.kind === "feedback") {
+			if (this.#messagePrediction?.dismiss(channel.id, input.revision)) return;
 			const shown = channel.input;
 			if (shown?.revision === input.revision && shown.suffix)
 				channel.provider.wordCompletionFeedback(
@@ -357,6 +372,7 @@ export class StudioPredictionService {
 		channel.socket.write(JSON.stringify(event) + "\n");
 	}
 	#close(channel: Channel): void {
+		this.#messagePrediction?.release(channel.id);
 		if (channel.closed) return;
 		this.#send(channel, { kind: "closed", channelId: channel.id });
 		channel.closed = true;
@@ -374,5 +390,6 @@ export class StudioPredictionService {
 		this.#unsubscribe();
 		for (const channel of this.#channels.values()) this.#close(channel);
 		this.#engine.dispose();
+		this.#messagePrediction?.dispose();
 	}
 }

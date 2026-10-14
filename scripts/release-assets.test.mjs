@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import {
   appUpdateAssetName,
+  assertReleaseNoteAssets,
   firstInstallAssetName,
   legacyIndexName,
   packagedAppAssetPath,
@@ -13,6 +14,13 @@ import {
   releaseTargetsDarwin,
   runtimeArchiveAssetName,
 } from "./release-assets.mjs";
+
+test("curated release notes cannot advertise an unbuilt platform", () => {
+  const note = "[Mac](https://github.com/owner/repo/releases/download/v0.1.10/OMP-Studio-0.1.10-macos-arm64.dmg)";
+  assert.throws(() => assertReleaseNoteAssets(note, "owner/repo", "v0.1.10", ["windows.exe"]), /unavailable asset/u);
+  assert.doesNotThrow(() => assertReleaseNoteAssets(note, "owner/repo", "v0.1.10", ["OMP-Studio-0.1.10-macos-arm64.dmg"]));
+  assert.doesNotThrow(() => assertReleaseNoteAssets(note, "owner/repo", "v0.1.11", []));
+});
 
 test("Windows release names and layout stay exactly as published before", () => {
   for (const arch of ["x64", "arm64"]) {

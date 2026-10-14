@@ -1,3 +1,4 @@
+import { SessionCompressionPane } from "./diagnostics/SessionCompressionPane";
 import { NativeMaintenancePane } from "./diagnostics/NativeMaintenancePane";
 import { WorkspaceTabs, WorkspacePanel } from "./workspaces/Workspace";
 import type { NativePreferencesContext } from "./settings/NativePreferencesPane";
@@ -1013,7 +1014,7 @@ export function DiagnosticsPage({
       <p className="tiny muted" style={{ marginTop: 16 }}>{t("diagnostics.lastChecked", { time: formatCheckedAt(viewDiag?.generatedAt) })}</p>
       <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />
 </WorkspacePanel>
-<WorkspacePanel id="diagnostics-workspace" name="maintenance" active={workspaceTab==="maintenance"}><NativeMaintenancePane client={client} sessionId={nativeContext?.sessionId} available={nativeContext?.available??false} capabilities={nativeContext?.capabilities} active={workspaceTab==="maintenance"}/></WorkspacePanel>
+<WorkspacePanel id="diagnostics-workspace" name="maintenance" active={workspaceTab==="maintenance"}><NativeMaintenancePane client={client} sessionId={nativeContext?.sessionId} available={nativeContext?.available??false} capabilities={nativeContext?.capabilities} active={workspaceTab==="maintenance"}/><SessionCompressionPane client={client} context={nativeContext} visible={workspaceTab==="maintenance"} /></WorkspacePanel>
     </div>
   );
 }

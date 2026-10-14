@@ -66,6 +66,36 @@ function serviceFor(manager: SessionManager, runtimeEpoch = 3) {
 }
 
 describe("StudioSessionTranscriptService", () => {
+	test("a later background job cannot replace an older result with a reused tool-call id", async () => {
+		const manager = SessionManager.inMemory();
+		try {
+			manager.appendMessage(assistantMessage([{ type: "toolCall", id: "reused", name: "bash", arguments: {} }]));
+			manager.appendMessage({
+				...toolResult("reused", "bash", "older output"),
+				details: { async: { jobId: "older-job", state: "running" } },
+			});
+			const later = {
+				type: "toolResult" as const,
+				toolCallId: "reused",
+				isError: false,
+				output: "later output",
+				data: { async: { jobId: "later-job", state: "completed" } },
+			};
+			const different = JSON.stringify(projectConversationBranch(manager.getBranch(), () => later));
+			expect(different).toContain("older output");
+			expect(different).not.toContain("later output");
+			const same = JSON.stringify(
+				projectConversationBranch(manager.getBranch(), () => ({
+					...later,
+					data: { async: { jobId: "older-job", state: "completed" } },
+				})),
+			);
+			expect(same).toContain("later output");
+			expect(same).not.toContain("older output");
+		} finally {
+			await manager.close();
+		}
+	});
 	test("notes and native compaction payloads stay persisted but outside the public transcript", () => {
 		using tempDir = TempDir.createSync("@omp-studio-native-payload-");
 		const manager = SessionManager.create(tempDir.path(), tempDir.path());

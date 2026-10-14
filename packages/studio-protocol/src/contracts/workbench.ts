@@ -1,3 +1,8 @@
+import { NATIVE_PLAN_REVIEW_KINDS, isNativePlanReviewKind, validateNativePlanReviewOperation, validateNativePlanReviewResult, type NativePlanReviewOperation, type NativePlanReviewResultMap } from "./plan-review.js";
+import { SESSION_WORKTREE_KINDS, isSessionWorktreeKind, validateSessionWorktreeOperation, validateSessionWorktreeResult, type SessionWorktreeOperation, type SessionWorktreeResultMap } from "./session-worktrees.js";
+import { SESSION_COMPRESSION_KINDS, isSessionCompressionKind, validateSessionCompressionOperation, validateSessionCompressionResult, type SessionCompressionOperation, type SessionCompressionResultMap } from "./session-compression.js";
+import { SESSION_PORTABILITY_KINDS, isSessionPortabilityKind, validateSessionPortabilityOperation, validateSessionPortabilityResult, type SessionPortabilityOperation, type SessionPortabilityResultMap } from "./session-portability.js";
+import { FEATURE_SETTINGS_KINDS, FEATURE_SETTINGS_READ_KINDS, isFeatureSettingsKind, validateFeatureSettingsOperation, validateFeatureSettingsResult, type FeatureSettingsOperation, type FeatureSettingsResultMap } from "./feature-settings.js";
 import { SESSION_TITLES_KINDS, isSessionTitlesKind, validateSessionTitlesOperation, validateSessionTitlesResult, type SessionTitlesOperation, type SessionTitlesResultMap } from "./session-titles.js";
 import { PREDICTION_KINDS, isPredictionKind, validatePredictionChannelOperation, validatePredictionChannelResult, type PredictionChannelOperation, type PredictionResultMap } from "./prediction-channel.js";
 import { MAINTENANCE_OPERATION_KINDS, MAINTENANCE_READ_KINDS, isMaintenanceKind, validateMaintenanceOperation, validateMaintenanceResult, type MaintenanceOperation, type MaintenanceResultMap } from "./maintenance.js";
@@ -75,6 +80,11 @@ export type WorkbenchOperation =
  | SessionRestoreOperation
  | RuntimeQueueOperation
  | NativePreferenceOperation
+  | FeatureSettingsOperation
+  | SessionPortabilityOperation
+  | SessionCompressionOperation
+  | SessionWorktreeOperation
+  | NativePlanReviewOperation
   | RatchetOperation
   | ComputerObservationOperation
   | BrowserObservationOperation
@@ -102,7 +112,7 @@ export type WorkbenchOperation =
   | { kind: "runtime.models.describe"; selector: string }
  | { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
-export interface WorkbenchResultMap extends SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, RatchetResultMap, ComputerObservationResultMap, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap {
+export interface WorkbenchResultMap extends SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap {
   "accounts.status": AccountStatusResult;
  "accounts.status.details": AccountStatusResult;
   "accounts.logout": { loggedOut: true };
@@ -125,7 +135,7 @@ export const WORKBENCH_OPERATION_KINDS = [...SESSION_GUI_KINDS,
 ...AGENT_MODEL_KINDS,
 ...SESSION_RESTORE_KINDS,
 ...RUNTIME_QUEUE_KINDS,
-...NATIVE_PREFERENCE_KINDS,
+...NATIVE_PREFERENCE_KINDS, ...FEATURE_SETTINGS_KINDS, ...SESSION_PORTABILITY_KINDS, ...SESSION_COMPRESSION_KINDS, ...SESSION_WORKTREE_KINDS, ...NATIVE_PLAN_REVIEW_KINDS,
 ...RATCHET_OPERATION_KINDS,
 ...COMPUTER_OBSERVATION_KINDS,
 ...BROWSER_OBSERVATION_KINDS,
@@ -138,7 +148,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [...S
  "agent.model.inspect",
  "session.restore.inspect",
  "session.queue.get",
-"preferences.native.get",
+"preferences.native.get", ...FEATURE_SETTINGS_READ_KINDS, "session.portability.status", "maintenance.compression.status", "worktrees.session.list", "worktrees.session.startPolicy", "mode.plan.review.details",
 "ratchet.list", "ratchet.read", "ratchet.stop",
 "computer.status", "computer.capture", "computer.stop", "computer.observe.release",
 "browser.tabs.get", "browser.observe.prepare",
@@ -202,6 +212,11 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 
   if (isRuntimeQueueKind(kind)) { validateRuntimeQueueOperation(value); return; }
 
+  if (isNativePlanReviewKind(kind)) { validateNativePlanReviewOperation(value); return; }
+  if (isSessionWorktreeKind(kind)) { validateSessionWorktreeOperation(value); return; }
+  if (isSessionCompressionKind(kind)) { validateSessionCompressionOperation(value); return; }
+  if (isSessionPortabilityKind(kind)) { validateSessionPortabilityOperation(value); return; }
+  if (isFeatureSettingsKind(kind)) { validateFeatureSettingsOperation(value); return; }
   if (isNativePreferenceKind(kind)) { validateNativePreferenceOperation(value); return; }
   if (kind === "accounts.logout") { const row = record(value, ["kind", "sessionId", "accountId"]); text(row.sessionId); text(row.accountId); if (!row.sessionId || !/^account-[a-f0-9]{32}$/u.test(String(row.accountId))) throw new Error("Invalid logout target"); return; }
   if (kind === "annotations.capture" || kind === "annotations.prepare") { validateAnnotationOperation(value); return; }
@@ -217,7 +232,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   if (isBenchmarkOperationKind(kind)) { validateBenchmarkOperation(value); return; }
   if (isRuntimeCatalogOperationKind(kind)) { validateRuntimeCatalogOperation(value); return; }
   if (isJudgmentOperationKind(kind)) { validateJudgmentOperation(value); return; }
-  const fields: Record<Exclude<WorkbenchOperation["kind"], SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | RatchetOperation["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"]>, readonly string[]> = {
+  const fields: Record<Exclude<WorkbenchOperation["kind"], SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"]>, readonly string[]> = {
     "accounts.status": ["refresh"],
  "accounts.status.details": ["refresh"],
     "accounts.logout": ["sessionId", "accountId"], "services.list": [], "services.start": ["spec"], "services.stop": ["name", "instanceId"], "services.restart": ["name", "instanceId"],
@@ -259,7 +274,12 @@ export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value:
 
  if (isRuntimeQueueKind(kind)) { validateRuntimeQueueResult(kind,value); return; }
 
- if (isNativePreferenceKind(kind)) { validateNativePreferenceResult(kind,value); return; }
+ if (isNativePlanReviewKind(kind)) { validateNativePlanReviewResult(kind, value); return; }
+  if (isSessionWorktreeKind(kind)) { validateSessionWorktreeResult(kind, value); return; }
+  if (isSessionCompressionKind(kind)) { validateSessionCompressionResult(kind, value); return; }
+  if (isSessionPortabilityKind(kind)) { validateSessionPortabilityResult(kind, value); return; }
+  if (isFeatureSettingsKind(kind)) { validateFeatureSettingsResult(kind, value); return; }
+  if (isNativePreferenceKind(kind)) { validateNativePreferenceResult(kind,value); return; }
   if (kind === "accounts.logout") { if (record(value, ["loggedOut"]).loggedOut !== true) throw new Error("Logout did not complete"); return; }
   if (isRatchetKind(kind)) { validateRatchetResult(kind, value); return; }
   if (isComputerObservationKind(kind)) { validateComputerObservationResult(kind, value); return; }

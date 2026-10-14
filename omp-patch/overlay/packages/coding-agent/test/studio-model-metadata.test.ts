@@ -25,8 +25,9 @@ test("model metadata retains advertised tiers, explicit cache overrides and safe
 		serviceTiers: ["priority", "ultrafast"],
 		promptCache: { short: 300, long: 3600 },
 		promptCacheConfig: {},
-		compatibility: { preferWebsockets: true, useResponsesLite: true, toolMode: "code_mode_only" },
+		compatibility: { preferWebsockets: true, useResponsesLite: true },
 	});
+	expect(result.compatibility).not.toHaveProperty("toolMode");
 	validateWorkbenchResult("runtime.models.describe", { model: result });
 	expect(JSON.stringify(result)).not.toContain("private-secret");
 	expect("baseUrl" in result).toBe(false);

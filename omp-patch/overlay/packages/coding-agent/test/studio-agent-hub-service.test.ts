@@ -978,36 +978,26 @@ describe("WP-050/051/053 StudioAgentHubService", () => {
 	});
 });
 
-test("per-spawn model candidates retain order and thinking suffixes without changing native defaults", async () => {
+test("removed per-spawn models are rejected before a task starts, while configured agents still launch", async () => {
 	const { service, spawner } = makeHub();
 	try {
-		const model = ["@default:high", "openai/test-model:medium"];
-		await service.spawn({
-			definition: "researcher",
-			assignment: "summarize the docs",
-			model,
-			effort: "hi",
-			callerAgentId: "Main",
-		});
-		expect(spawner.requests()[0]).toMatchObject({
-			model: ["@default:high", "openai/test-model:medium"],
-			effort: "hi",
-			callerAgentId: "Main",
-		});
-		model[0] = "changed-after-submit";
-		expect(spawner.requests()[0]!.model?.[0]).toBe("@default:high");
-		await expect(
-			service.spawn({ definition: "researcher", assignment: "x", model: ["default"], callerAgentId: "Main" }),
-		).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
 		await expect(
 			service.spawn({
 				definition: "researcher",
-				assignment: "x",
-				model: Array(9).fill("@default"),
+				assignment: "summarize the docs",
+				model: ["@default:high"],
 				callerAgentId: "Main",
 			}),
 		).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+		expect(spawner.requests()).toHaveLength(0);
+		await service.spawn({
+			definition: "researcher",
+			assignment: "summarize the docs",
+			effort: "hi",
+			callerAgentId: "Main",
+		});
 		expect(spawner.requests()).toHaveLength(1);
+		expect(spawner.requests()[0]!.model).toBeUndefined();
 	} finally {
 		service.dispose();
 	}

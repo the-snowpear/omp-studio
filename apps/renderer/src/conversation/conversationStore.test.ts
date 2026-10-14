@@ -26,6 +26,20 @@ function create(session = "session") {
   return { sessionId, frames, store: new ConversationStore({ target: { sessionId }, identity: { sessionId }, generation: 1, scheduler: frames.frame }) };
 }
 
+it("keeps a background tool live across the parent turn and applies its final cancellation after hydration", () => {
+  const { store, sessionId, frames } = create();
+  const owner: ConversationMessageItem = { kind: "message", itemId: "owner", parentId: null, createdAt: "now", role: "assistant", content: [{ type: "toolCall", toolCallId: "background", toolName: "bash" }, { type: "toolResult", toolCallId: "background", isError: false, output: "started", data: { async: { state: "running", jobId: "job" } } }] };
+  store.hydrate({ items: [owner], headCursor: "head" as never, hasMoreBefore: false });
+  store.applyEvent({ kind: "conversation.tool.updated", sessionId, turnId: "old-turn", toolCallId: "background", output: "build progress", updateMode: "replace" }, 1);
+  store.applyEvent({ kind: "conversation.turn.completed", sessionId, turnId: "old-turn" }, 2);
+  frames.flush();
+  expect(store.getSnapshot().state.liveTools.background).toMatchObject({ status: "running", output: "build progress" });
+  store.applyEvent({ kind: "conversation.tool.completed", sessionId, turnId: "old-turn", toolCallId: "background", completedAt: "later", result: { type: "toolResult", toolCallId: "background", isError: false, output: "cancelled output", data: { async: { state: "cancelled", jobId: "job" } } } }, 3);
+  frames.flush();
+  expect(store.getSnapshot().state.liveTools.background).toMatchObject({ status: "aborted", output: "cancelled output" });
+  store.dispose();
+});
+
 describe("ConversationStore", () => {
   it("hydrates, prepends without duplicates, and preserves oldest-to-newest order", () => {
     const { store } = create();

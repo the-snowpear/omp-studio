@@ -111,16 +111,22 @@ function cachedRow(cache: TimelineRowCache, key: string, dependencies: readonly 
   if (previous !== undefined && previous.dependencies.length === dependencies.length && previous.dependencies.every((value, index) => value === dependencies[index])) return previous.row;
   const row = create(); cache.set(key, { dependencies, row }); return row;
 }
+export function backgroundToolState(result: Extract<ConversationContentBlock, { type: "toolResult" }> | undefined): string | undefined {
+  const data = jsonRecord(result?.data), async = jsonRecord(data?.async);
+  return typeof async?.state === "string" ? async.state : undefined;
+}
+export function toolResultStatus(result: Extract<ConversationContentBlock, { type: "toolResult" }>): ToolStatus {
+  const state = backgroundToolState(result);
+  return state === "unknown" ? "missing" : state === "cancelled" ? "aborted" : state === "running" ? "running" : state === "failed" || result.isError ? "failed" : "succeeded";
+}
 function toolViews(content: readonly ConversationContentBlock[], live: readonly LiveTool[], turnOpen: boolean): readonly ToolView[] {
   const results = new Map(content.filter((block): block is Extract<ConversationContentBlock, { type: "toolResult" }> => block.type === "toolResult").map((block) => [block.toolCallId, block]));
   const liveById = new Map(live.map((tool) => [tool.toolCallId, tool]));
   const persisted = content.filter((block): block is Extract<ConversationContentBlock, { type: "toolCall" }> => block.type === "toolCall").map((call): ToolView => {
     const persistedResult = results.get(call.toolCallId);
     const liveTool = liveById.get(call.toolCallId);
-    const result = persistedResult ?? liveTool?.result;
-    const status = persistedResult !== undefined
-      ? (persistedResult.isError ? "failed" : "succeeded")
-      : liveTool?.status ?? (turnOpen ? "running" : "missing");
+    const result = backgroundToolState(persistedResult) || backgroundToolState(liveTool?.result) ? liveTool?.result ?? persistedResult : persistedResult ?? liveTool?.result;
+    const status = liveTool && backgroundToolState(result) ? liveTool.status : result !== undefined ? toolResultStatus(result) : liveTool?.status ?? (turnOpen ? "running" : "missing");
     return {
       toolCallId: call.toolCallId,
       toolName: call.toolName,

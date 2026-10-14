@@ -41,7 +41,6 @@ import {
 	cfgFeaturesUnexpectedStopDetection,
 	cfgImagesDescribeForTextModels,
 	cfgProvidersAutoThinkingMaxEffort,
-	cfgProvidersOpenaiCodexCodeMode,
 	cfgRetryWaitForUsageReset,
 } from "../../session/settings";
 import { cfgMcpStartupTimeoutMs } from "../../mcp/settings";
@@ -90,7 +89,6 @@ const GUI_SETTING_HANDLES = {
 	extendedContext: cfgExtendedContext,
 	"compaction.asyncEnabled": cfgCompactionAsyncEnabled,
 	"compaction.methodOrder": cfgCompactionMethodOrder,
-	"providers.openai-codex.codeMode": cfgProvidersOpenaiCodexCodeMode,
 	"plan.autosave": cfgPlanAutosave,
 	"plan.autosaveDir": cfgPlanAutosaveDir,
 	"retry.waitForUsageReset": cfgRetryWaitForUsageReset,
@@ -117,7 +115,6 @@ const RUNTIME_SETTING_HANDLES = {
 	extendedContext: cfgExtendedContext,
 	"compaction.asyncEnabled": cfgCompactionAsyncEnabled,
 	"compaction.methodOrder": cfgCompactionMethodOrder,
-	"providers.openai-codex.codeMode": cfgProvidersOpenaiCodexCodeMode,
 	"plan.autosave": cfgPlanAutosave,
 	"plan.autosaveDir": cfgPlanAutosaveDir,
 	"retry.waitForUsageReset": cfgRetryWaitForUsageReset,
@@ -227,6 +224,7 @@ export function isStudioRuntimeSettingValue(
 			return false;
 		}
 	}
+	if (key === "providers.openai-codex.codeMode") return value === "off" || value === "on" || value === "auto";
 	switch (key) {
 		case "modelRoles.judge":
 			return typeof value === "string" && value.length <= 4096 && !/[\u0000-\u001f]/u.test(value);
@@ -266,7 +264,6 @@ export function isStudioRuntimeSettingValue(
 		case "task.maxEffort":
 		case "providers.autoThinkingMaxEffort":
 		case "features.unexpectedStopDetection":
-		case "providers.openai-codex.codeMode":
 			return typeof value === "string" && RUNTIME_SETTING_HANDLES[key].enumValues?.includes(value) === true;
 		case "compaction.methodOrder":
 			return (
@@ -320,9 +317,11 @@ export class StudioRuntimeSettingsService {
 			sources: Object.fromEntries(
 				STUDIO_RUNTIME_SETTING_KEYS.map(key => [
 					key,
-					key === "modelRoles.judge"
-						? cfgModelRoles.provenance(this.session.settings)
-						: RUNTIME_SETTING_HANDLES[key].provenance(this.session.settings),
+					key === "providers.openai-codex.codeMode"
+						? "default"
+						: key === "modelRoles.judge"
+							? cfgModelRoles.provenance(this.session.settings)
+							: RUNTIME_SETTING_HANDLES[key].provenance(this.session.settings),
 				]),
 			),
 			restartRequired:
@@ -340,6 +339,7 @@ export class StudioRuntimeSettingsService {
 				]),
 			) as Required<GuiSettingsSnapshot>),
 			"modelRoles.judge": this.session.settings.getModelRoles().judge ?? "",
+			"providers.openai-codex.codeMode": "off",
 			"claudeResets.autoRedeem": cfgClaudeResetsAutoRedeem.get(this.session.settings),
 			"claudeResets.minBlockedMinutes": cfgClaudeResetsMinBlockedMinutes.get(this.session.settings),
 			"claudeResets.keepCredits": cfgClaudeResetsKeepCredits.get(this.session.settings),
@@ -351,7 +351,6 @@ export class StudioRuntimeSettingsService {
 			extendedContext: cfgExtendedContext.get(this.session.settings),
 			"compaction.asyncEnabled": cfgCompactionAsyncEnabled.get(this.session.settings),
 			"compaction.methodOrder": [...cfgCompactionMethodOrder.get(this.session.settings)],
-			"providers.openai-codex.codeMode": cfgProvidersOpenaiCodexCodeMode.get(this.session.settings),
 			"plan.autosave": cfgPlanAutosave.get(this.session.settings),
 			"plan.autosaveDir": cfgPlanAutosaveDir.get(this.session.settings) ?? "",
 			"retry.waitForUsageReset": cfgRetryWaitForUsageReset.get(this.session.settings),
@@ -440,6 +439,11 @@ export class StudioRuntimeSettingsService {
 			else settings.overrideModelRoles({ ...settings.getModelRoles(), judge: value as string });
 			return;
 		}
+		if (key === "providers.openai-codex.codeMode")
+			throw new StudioRuntimeSettingsError(
+				"COMMAND_BLOCKED",
+				"Codex Code Mode was removed upstream; Codex now uses direct tools.",
+			);
 		const setting: AnySetting = RUNTIME_SETTING_HANDLES[key];
 		setting.assertWritable(value);
 		if (persist) {

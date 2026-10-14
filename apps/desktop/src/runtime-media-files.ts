@@ -19,10 +19,11 @@ export class RuntimeMediaFiles {
   async releaseInputs(directory: string, grants: readonly { transferId: string }[]): Promise<void> {
     await Promise.all(grants.flatMap(grant => [".bin", ".json"].map(extension => unlink(join(directory, "inputs", id(grant.transferId) + extension)).catch(() => {}))));
   }
-  async stage(directory: string, artifactId: string, remainingBytes = 64 * 1024 * 1024, sessionId?: string): Promise<{ artifactId: string; transferId: string; bytes: number }> {
+  async stage(directory: string, artifactId: string, remainingBytes = 64 * 1024 * 1024, sessionId?: string, sessionArchive = false): Promise<{ artifactId: string; transferId: string; bytes: number }> {
     id(artifactId); const source = await this.library.resolve(artifactId);
     const transferId = randomUUID();
-    if (!["image", "audio", "video"].includes(source.record.kind) || source.record.bytes > Math.min(remainingBytes, 64 * 1024 * 1024)) throw new Error("Media inputs must total at most 64 MiB");
+    const allowed = sessionArchive ? source.record.kind === "export" && source.record.name.toLowerCase().endsWith(".tar") : ["image", "audio", "video"].includes(source.record.kind);
+    if (!allowed || source.record.bytes > Math.min(remainingBytes, 64 * 1024 * 1024)) throw new Error("Input type is unsupported or exceeds 64 MiB");
     const inputs = join(directory, "inputs"); await mkdir(inputs, { recursive: true, mode: 0o700 });
     const target = join(inputs, transferId + ".bin"); const temporary = target + ".partial";
     const digest = createHash("sha256"); let bytes = 0;

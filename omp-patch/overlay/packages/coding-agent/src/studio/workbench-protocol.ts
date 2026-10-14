@@ -1,4 +1,45 @@
 import {
+	NATIVE_PLAN_REVIEW_KINDS,
+	isNativePlanReviewKind,
+	validateNativePlanReviewOperation,
+	validateNativePlanReviewResult,
+	type NativePlanReviewOperation,
+	type NativePlanReviewResultMap,
+} from "./plan-review-protocol";
+import {
+	SESSION_WORKTREE_KINDS,
+	isSessionWorktreeKind,
+	validateSessionWorktreeOperation,
+	validateSessionWorktreeResult,
+	type SessionWorktreeOperation,
+	type SessionWorktreeResultMap,
+} from "./session-worktrees-protocol";
+import {
+	SESSION_COMPRESSION_KINDS,
+	isSessionCompressionKind,
+	validateSessionCompressionOperation,
+	validateSessionCompressionResult,
+	type SessionCompressionOperation,
+	type SessionCompressionResultMap,
+} from "./session-compression-protocol";
+import {
+	SESSION_PORTABILITY_KINDS,
+	isSessionPortabilityKind,
+	validateSessionPortabilityOperation,
+	validateSessionPortabilityResult,
+	type SessionPortabilityOperation,
+	type SessionPortabilityResultMap,
+} from "./session-portability-protocol";
+import {
+	FEATURE_SETTINGS_KINDS,
+	FEATURE_SETTINGS_READ_KINDS,
+	isFeatureSettingsKind,
+	validateFeatureSettingsOperation,
+	validateFeatureSettingsResult,
+	type FeatureSettingsOperation,
+	type FeatureSettingsResultMap,
+} from "./feature-settings-protocol";
+import {
 	SESSION_TITLES_KINDS,
 	isSessionTitlesKind,
 	validateSessionTitlesOperation,
@@ -225,6 +266,11 @@ export type WorkbenchOperation =
 	| SessionRestoreOperation
 	| RuntimeQueueOperation
 	| NativePreferenceOperation
+	| FeatureSettingsOperation
+	| SessionPortabilityOperation
+	| SessionCompressionOperation
+	| SessionWorktreeOperation
+	| NativePlanReviewOperation
 	| RatchetOperation
 	| ComputerObservationOperation
 	| BrowserObservationOperation
@@ -262,6 +308,11 @@ export interface WorkbenchResultMap
 		SessionRestoreResultMap,
 		RuntimeQueueResultMap,
 		NativePreferenceResultMap,
+		FeatureSettingsResultMap,
+		SessionPortabilityResultMap,
+		SessionCompressionResultMap,
+		SessionWorktreeResultMap,
+		NativePlanReviewResultMap,
 		RatchetResultMap,
 		ComputerObservationResultMap,
 		BrowserObservationResultMap,
@@ -298,6 +349,11 @@ export const WORKBENCH_OPERATION_KINDS = [
 	...SESSION_RESTORE_KINDS,
 	...RUNTIME_QUEUE_KINDS,
 	...NATIVE_PREFERENCE_KINDS,
+	...FEATURE_SETTINGS_KINDS,
+	...SESSION_PORTABILITY_KINDS,
+	...SESSION_COMPRESSION_KINDS,
+	...SESSION_WORKTREE_KINDS,
+	...NATIVE_PLAN_REVIEW_KINDS,
 	...RATCHET_OPERATION_KINDS,
 	...COMPUTER_OBSERVATION_KINDS,
 	...BROWSER_OBSERVATION_KINDS,
@@ -335,6 +391,12 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	"session.restore.inspect",
 	"session.queue.get",
 	"preferences.native.get",
+	...FEATURE_SETTINGS_READ_KINDS,
+	"session.portability.status",
+	"maintenance.compression.status",
+	"worktrees.session.list",
+	"worktrees.session.startPolicy",
+	"mode.plan.review.details",
 	"ratchet.list",
 	"ratchet.read",
 	"ratchet.stop",
@@ -468,6 +530,26 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 		return;
 	}
 
+	if (isNativePlanReviewKind(kind)) {
+		validateNativePlanReviewOperation(value);
+		return;
+	}
+	if (isSessionWorktreeKind(kind)) {
+		validateSessionWorktreeOperation(value);
+		return;
+	}
+	if (isSessionCompressionKind(kind)) {
+		validateSessionCompressionOperation(value);
+		return;
+	}
+	if (isSessionPortabilityKind(kind)) {
+		validateSessionPortabilityOperation(value);
+		return;
+	}
+	if (isFeatureSettingsKind(kind)) {
+		validateFeatureSettingsOperation(value);
+		return;
+	}
 	if (isNativePreferenceKind(kind)) {
 		validateNativePreferenceOperation(value);
 		return;
@@ -543,6 +625,11 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 			| SessionRestoreOperation["kind"]
 			| RuntimeQueueOperation["kind"]
 			| NativePreferenceOperation["kind"]
+			| FeatureSettingsOperation["kind"]
+			| SessionPortabilityOperation["kind"]
+			| SessionCompressionOperation["kind"]
+			| SessionWorktreeOperation["kind"]
+			| NativePlanReviewOperation["kind"]
 			| RatchetOperation["kind"]
 			| ComputerObservationOperation["kind"]
 			| BrowserObservationOperation["kind"]
@@ -654,6 +741,26 @@ export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value:
 		return;
 	}
 
+	if (isNativePlanReviewKind(kind)) {
+		validateNativePlanReviewResult(kind, value);
+		return;
+	}
+	if (isSessionWorktreeKind(kind)) {
+		validateSessionWorktreeResult(kind, value);
+		return;
+	}
+	if (isSessionCompressionKind(kind)) {
+		validateSessionCompressionResult(kind, value);
+		return;
+	}
+	if (isSessionPortabilityKind(kind)) {
+		validateSessionPortabilityResult(kind, value);
+		return;
+	}
+	if (isFeatureSettingsKind(kind)) {
+		validateFeatureSettingsResult(kind, value);
+		return;
+	}
 	if (isNativePreferenceKind(kind)) {
 		validateNativePreferenceResult(kind, value);
 		return;

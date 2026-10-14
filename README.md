@@ -34,6 +34,8 @@ OMP Studio 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的桌面
   <img src="docs/images/workbench.png" alt="OMP Studio 工作台：新建对话欢迎页、活动热力图与 Composer" width="920">
 </p>
 
+0.1.10 适配 OMP 18.10.4，新增会话迁移、Worktree、存储压缩和模型配置能力。查看 [发行说明](docs/releases/v0.1.10.md) 与 [迁移及验收记录](docs/migrations/omp-18.10.4.md)。
+
 ## 工作台亮点
 
 同一扇窗口里把 Skills、用量、供应商、能力和 Git 收齐，不用在 TUI 和一堆网页之间来回跳。
@@ -85,7 +87,7 @@ Skills、Plugins、MCP、Slash Commands 同一页开关、探测和打开目录�
 </p>
 
 > [!TIP]
-> **安装与运行：** Windows 用户可直接前往 [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases) 下载最新的安装包（`OMP-Studio-Setup-0.1.9-windows-x64.exe`），或参考下方说明从源码构建运行。如遇问题欢迎提交 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
+> **安装与运行：** 前往 [GitHub Releases](https://github.com/the-snowpear/omp-studio/releases) 下载 Windows x64 / ARM64 安装包或 macOS Apple Silicon DMG，或参考下方说明从源码构建运行。macOS 包为 ad hoc 签名，首次打开可能需要在「系统设置 → 隐私与安全性」确认。如遇问题欢迎提交 [Issue](https://github.com/the-snowpear/omp-studio/issues)。
 >
 > **macOS（Apple Silicon，macOS 13+）：** 发布附带 `OMP-Studio-<版本>-macos-arm64.dmg` 时，打开 dmg，把 OMP Studio 拖进“应用程序”。目前是 ad hoc 签名、尚未公证的预览版：首次打开会被拦截，请到“系统设置 › 隐私与安全性”点“仍要打开”，或执行 `xattr -dr com.apple.quarantine "/Applications/OMP Studio.app"`。也可以按 [docs/getting-started.md](docs/getting-started.md) 从源码运行或用 `npm run pack:mac` 自行打包。
 

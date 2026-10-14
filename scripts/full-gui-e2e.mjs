@@ -1,5 +1,8 @@
 /** Real Electron acceptance with isolated profiles and no model requests. */
 import {createRequire} from 'node:module';
+import {execFileSync} from 'node:child_process';
+import {existsSync} from 'node:fs';
+import {findBun} from './omp-tooling.mjs';
 import {defaultRuntimeKeysDirectory} from './runtime-signing-keys.mjs';
 import {resolveTargetPlatform} from './target-platform.mjs';
 import {mkdir,mkdtemp,readFile,writeFile,appendFile,readdir} from 'node:fs/promises';
@@ -49,13 +52,19 @@ async function predictionDiagnostics(directory,depth=0){
 
 try{
  await Promise.all(['workspace','roaming','user-data','local','isolated-home'].map(p=>mkdir(join(temp,p),{recursive:true})));
+ const workspace=join(temp,'workspace'), transferFile=join(temp,'session-transfer.tar');
+ await writeFile(join(workspace,'fixture.txt'),'Isolated Studio GUI acceptance workspace.\n');
+ for(const args of [['init','-q','-b','main'],['add','.'],['commit','-qm','acceptance fixture']])execFileSync('git',['-c','user.name=Studio Acceptance','-c','user.email=acceptance@example.test',...args],{cwd:workspace,windowsHide:true,stdio:'pipe'});
  await mkdir(output,{recursive:true});
  const desktop=join(root,'apps/desktop');
  const version=JSON.parse(await readFile(join(root,'omp-patch/patches/series.json'),'utf8')).patchsetVersion;
- const runtime='18.4.4-'+version;
+ const upstreamVersion=JSON.parse(await readFile(join(root,'omp-patch/vendor/oh-my-pi/packages/coding-agent/package.json'),'utf8')).version;
+ const runtime=upstreamVersion+'-'+version;
  const keys=defaultRuntimeKeysDirectory();
+ const trustedPublicKey=process.env.OMP_RUNTIME_TRUSTED_PUBLIC_KEY??join(keys,'trusted-public.pem');
+ const signingKeyId=process.env.OMP_RUNTIME_SIGNING_KEY_ID??(await readFile(join(keys,'key-id.txt'),'utf8')).trim();
  const platform=resolveTargetPlatform();
- const isolatedHome=process.platform==='darwin'?join(temp,'isolated-home'):homedir();
+ const isolatedHome=join(temp,'isolated-home');
  report.platform=platform;
  if(process.platform==='darwin'&&process.env.OMP_E2E_PACKAGED_EXE){
   const paths=resolveDesktopPaths({platform:'darwin',homedir:isolatedHome});
@@ -68,12 +77,24 @@ try{
   'app.getAppPath=()=>'+JSON.stringify(desktop)+';',
   "app.setPath('appData',"+JSON.stringify(join(temp,'roaming'))+');',
   "app.setPath('userData',"+JSON.stringify(join(temp,'user-data'))+');',
-  'dialog.showOpenDialog=async()=>({canceled:false,filePaths:['+JSON.stringify(join(temp,'workspace'))+']});',
+  'dialog.showOpenDialog=async(...args)=>({canceled:false,filePaths:[args.at(-1)?.properties?.includes("openDirectory")?'+JSON.stringify(workspace)+':'+JSON.stringify(transferFile)+']});',
+  'dialog.showSaveDialog=async()=>({canceled:false,filePath:'+JSON.stringify(transferFile)+'});',
   'import('+JSON.stringify(pathToFileURL(join(desktop,'dist/src/main.js')).href)+');',
  ].join('\n'));
  await writeFile(join(temp,'package.json'),JSON.stringify({name:'omp-gui-acceptance',version:'0.1.7',main:'bootstrap.cjs'}));
- const env={...process.env,...(process.platform==='darwin'?{HOME:isolatedHome}:{}),APPDATA:join(temp,'roaming'),LOCALAPPDATA:join(temp,'local'),PI_CONFIG_DIR:relative(isolatedHome,join(temp,'native-config')),XDG_CONFIG_HOME:join(temp,'xdg-config'),XDG_DATA_HOME:join(temp,'xdg-data'),XDG_CACHE_HOME:join(temp,'xdg-cache'),XDG_STATE_HOME:join(temp,'xdg-state'),OMP_ARTIFACT_DIR:join(root,'packages/runtime-installer/dist/artifacts',platform,runtime),OMP_RUNTIME_TRUSTED_PUBLIC_KEY:join(keys,'trusted-public.pem'),OMP_RUNTIME_SIGNING_KEY_ID:(await readFile(join(keys,'key-id.txt'),'utf8')).trim(),DO_NOT_TRACK:'1'};
- for(const key of ['ELECTRON_RUN_AS_NODE','OMP_RUNTIME_SIGNING_PRIVATE_KEY','OMP_RENDERER_DEV_URL','PI_CODING_AGENT_DIR'])delete env[key];
+ const env={...process.env,HOME:isolatedHome,USERPROFILE:isolatedHome,APPDATA:join(temp,'roaming'),LOCALAPPDATA:join(temp,'local'),PI_CONFIG_DIR:relative(isolatedHome,join(temp,'native-config')),XDG_CONFIG_HOME:join(temp,'xdg-config'),XDG_DATA_HOME:join(temp,'xdg-data'),XDG_CACHE_HOME:join(temp,'xdg-cache'),XDG_STATE_HOME:join(temp,'xdg-state'),OMP_ARTIFACT_DIR:join(root,'packages/runtime-installer/dist/artifacts',platform,runtime),OMP_RUNTIME_TRUSTED_PUBLIC_KEY:trustedPublicKey,OMP_RUNTIME_SIGNING_KEY_ID:signingKeyId,DO_NOT_TRACK:'1'};
+ for(const key of ['ELECTRON_RUN_AS_NODE','OMP_SIGNING_SECRET','OMP_RUNTIME_SIGNING_KEY','OMP_RUNTIME_SIGNING_PRIVATE_KEY','GH_TOKEN','GITHUB_TOKEN','OMP_RENDERER_DEV_URL','PI_CODING_AGENT_DIR'])delete env[key];
+ env.OMP_WORKTREE_DIR=join(temp,'worktrees');
+ // Populate a disposable native transcript without making a model request.
+ const seedSource=[
+  'import {SessionManager} from '+JSON.stringify(pathToFileURL(join(root,'omp-patch/vendor/oh-my-pi/packages/coding-agent/src/session/session-manager.ts')).href)+';',
+  'const m=SessionManager.create('+JSON.stringify(workspace)+',undefined,undefined,{studioOrigin:"studio-host"});',
+  'm.appendMessage({role:"user",content:"Private acceptance fixture 87419",timestamp:Date.now()});',
+  'm.appendMessage({role:"assistant",content:[{type:"text",text:"Acceptance fixture reply"}],api:"openai-completions",provider:"test",model:"fixture",usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:Date.now()});',
+  'await m.flush();await m.setSessionName("Session transfer acceptance","user");await m.flush();const id=m.getSessionId();await m.close();process.stdout.write(id);',
+ ].join('\n');
+ const transferSessionId=execFileSync(findBun(),['-e',seedSource],{cwd:join(root,'omp-patch/vendor/oh-my-pi'),env,encoding:'utf8',windowsHide:true}).trim();
+ if(!/^[a-zA-Z0-9_-]+$/.test(transferSessionId))throw Error('Invalid acceptance session identity');
  const packaged=process.env.OMP_E2E_PACKAGED_EXE;
  if(packaged)delete env.OMP_ARTIFACT_DIR;
  console.log('Launching Electron for '+platform);
@@ -83,7 +104,10 @@ try{
  await page.setViewportSize({width:1024,height:684});
  report.viewport='1024x684, panels open';
  console.log('Electron window ready');
- if(packaged)await app.evaluate(({dialog},workspace)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[workspace]});},join(temp,'workspace'));
+ if(packaged)await app.evaluate(({dialog},{workspace,transferFile})=>{
+  dialog.showOpenDialog=async(...args)=>({canceled:false,filePaths:[args.at(-1)?.properties?.includes('openDirectory')?workspace:transferFile]});
+  dialog.showSaveDialog=async()=>({canceled:false,filePath:transferFile});
+ },{workspace,transferFile});
  await page.waitForFunction(()=>!!window.ompStudio);
  await page.evaluate(()=>{localStorage.setItem('omp.appSettings',JSON.stringify({language:'zh'}));localStorage.setItem('omp.previewMode','0');localStorage.setItem('omp.startupNotice.dismissed','incomplete-v1');localStorage.setItem('omp.lastRoute','home');});
  await page.reload();
@@ -101,9 +125,34 @@ try{
  }
  const session=await query('session.state');
  const invoke=(name,input={})=>command(name,{sessionId:session.sessionId,...input});
+ if(process.env.OMP_E2E_WORKTREE_ONLY!=='1'){
  const caps=await query('capabilities.get');
  for(const id of ['ida.status','resource.read','session.queue.list','session.queue.ack','session.tier.get','session.skills.list','agent.btw.read'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing '+id);
  report.checks.push('signed managed Runtime handshake and capability negotiation');
+ for(const id of ['preferences.features.get','accounts.pool.options','models.compaction.preview','session.portability.prepare','maintenance.compression.scan','worktrees.session.create','mode.plan.review.details','composer.predictions'])if(!caps.capabilities.some(c=>c.id===id&&c.grade!=='unavailable'))throw Error('Missing new capability '+id);
+ const featureSettings=(await invoke('preferences.features.get')).result;
+ if(featureSettings.settings.find(row=>row.key==='composer.predictions')?.value!==false)throw Error('Message prediction must default to off');
+ await invoke('preferences.features.set',{key:'retry.fallbackOn',value:'usage-limit',scope:'session'});
+ await invoke('preferences.features.clearOverride',{key:'retry.fallbackOn'});
+ await invoke('accounts.pool.options');await invoke('mode.plan.review.details');await invoke('maintenance.compression.scan');
+ report.checks.push('new settings, opt-in prediction default, account inventory and non-mutating compression scan');
+ const worktree=(await invoke('worktrees.session.create',{branch:'wt/gui-acceptance',keepChanges:false})).result;
+ const removal=(await invoke('worktrees.session.remove.prepare',{id:worktree.worktree.id})).result;
+ if(!(await invoke('worktrees.session.remove.apply',{token:removal.token})).result.removed)throw Error('Isolated worktree was not removed');
+ report.checks.push('native worktree creation, desktop workspace registration, reviewed removal');
+ const packed=(await invoke('session.portability.pack',{targetSessionId:transferSessionId})).result;
+ const saved=await page.evaluate(artifactId=>window.ompStudioChrome.exportArtifact({artifactId}),packed.asset.artifactId);
+ if(!saved.ok||saved.cancelled)throw Error('Cannot export acceptance session archive');
+ const picked=await page.evaluate(sessionId=>window.ompStudioChrome.importArtifact({kind:'export',sessionId}),session.sessionId);
+ if(!picked.ok||!picked.artifact)throw Error('Cannot select acceptance session archive');
+ const importPreview=(await invoke('session.portability.prepare',{artifactId:picked.artifact.artifactId})).result;
+ if(!importPreview.conflicts)throw Error('Archive collision was not detected');
+ const imported=(await invoke('session.portability.import',{token:importPreview.token})).result;
+ if(imported.mode!=='forked'||imported.sessionId===transferSessionId||!imported.workspaceId)throw Error('Import did not preserve the source as a separate session');
+ const recovered=(await invoke('session.portability.status')).result;
+ if(recovered.imported?.workspaceId!==imported.workspaceId)throw Error('Import result was not recoverable after refresh');
+ await invoke('session.portability.anonymize',{targetSessionId:transferSessionId});
+ report.checks.push('native archive export, private desktop transfer, collision-preserving import, recoverable result and anonymous export');
  for(const name of ['ida.status','session.queue.list','session.tier.get','session.skills.list']){const value=await invoke(name);if(name==='ida.status')report.ida=value;report.checks.push(name);}
  await invoke('resource.read',{uri:'omp://'});
  const prediction=await query('prediction.query',{sessionId:session.sessionId,version:1,before:'',prefix:'unsent-verification'});
@@ -117,7 +166,7 @@ try{
  if(!(await editor.innerText()).includes('中文输入'))throw Error('Composition lost');
  await editor.press('Escape');if((await query('session.state')).isStreaming)throw Error('Draft submitted');
  report.checks.push('Chromium IME composition and Escape; unsent draft did not submit');await capture('real-composer');
- for(const preview of [false,true])for(const route of ['statistics','capabilities','settings','model-config','agent-hub']){
+ for(const preview of [false,true])for(const route of ['statistics','capabilities','settings','model-config','agent-hub','history','diagnostics','evaluation']){
   console.log((preview?'Preview ':'Real ')+route);
   await page.evaluate(({preview,route})=>{localStorage.setItem('omp.previewMode',preview?'1':'0');localStorage.setItem('omp.lastRoute',route);},{preview,route});
   const routeUrl=new URL(page.url());routeUrl.search=preview?'?preview=1':'';
@@ -131,11 +180,31 @@ try{
    await page.getByRole('tab',{name:'Frustration',exact:true}).click();
    if(preview){await page.getByRole('button',{name:/估算分析范围与费用|Estimate analysis and cost/}).click();await page.getByRole('alertdialog').waitFor();await page.getByRole('button',{name:/确认并分析|Confirm and analyze/}).click();}
   }
-  if(route==='model-config')await page.locator('#mcTabBenchmark').click();
+  if(route==='model-config'){
+   await page.locator('#mcTabRoles').click();
+   await page.getByRole('region',{name:/模型压缩阈值|Model compaction thresholds/}).scrollIntoViewIfNeeded();
+   await capture((preview?'preview-':'real-')+'model-compaction');
+   await page.locator('#mcTabSubagents').click();
+   await page.getByRole('region',{name:/代理账号池|Agent account pools/}).scrollIntoViewIfNeeded();
+  }
+  if(route==='settings'){
+   await page.locator('#setTab-tasks').click();
+   await page.getByRole('region',{name:/^会话 Worktree$|^Session worktrees$/}).scrollIntoViewIfNeeded();
+  }
+  if(route==='history'){
+   await page.getByRole('tab',{name:/迁移与导出|Transfer & export/}).click();
+   if(preview){await page.getByRole('button',{name:/选择 OMP 会话包|Choose an OMP archive/}).click();await page.getByRole('button',{name:/^确认导入$|^Confirm import$/}).waitFor();}
+  }
+  if(route==='diagnostics'){
+   await page.getByRole('tab',{name:/会话与维护|Sessions and maintenance/}).click();
+   await page.getByRole('region',{name:/会话存储压缩|Session storage compression/}).scrollIntoViewIfNeeded();
+   if(preview){await page.getByRole('button',{name:/扫描候选文件|Scan candidates/}).click();await page.getByRole('button',{name:/压缩这些文件|Compress these files/}).waitFor();}
+  }
+  if(route==='evaluation')await page.getByRole('tab',{name:/判断批次|Judgment batches/}).click();
   if(route==='capabilities'){
    await page.locator('#capTab-ida').click();
    await page.getByRole('heading',{name:/IDA/}).waitFor();
-   if(preview){await page.getByRole('combobox',{name:/IDA 数据库|IDA database/}).selectOption({index:1});await page.getByRole('button',{name:/^检查操作$|^Review operation$/}).click();await page.getByRole('alertdialog').waitFor();await page.getByRole('alertdialog').getByRole('button',{name:/^返回$|^Back$/}).click();}
+   if(preview){await page.getByRole('button',{name:/数据库视图与编辑|Database views and edits/}).click();await page.getByRole('combobox',{name:/IDA 数据库|IDA database/}).selectOption({index:1});await page.getByRole('button',{name:/^检查操作$|^Review operation$/}).click();await page.getByRole('alertdialog').waitFor();await page.getByRole('alertdialog').getByRole('button',{name:/^返回$|^Back$/}).click();}
   }
   await capture((preview?'preview-':'real-')+route);report.checks.push((preview?'preview':'real')+' '+route);
  }
@@ -160,11 +229,42 @@ try{
  if(await deck.getByRole('textbox',{name:'备注 / Note',exact:true}).inputValue()!=='First question note')throw Error('Ask ownership mismatch');
  await deck.getByRole('button',{name:'删除 / Remove 回答 / Answer 1',exact:true}).click();
  await capture('preview-ask-images');report.checks.push('real Electron Ask image picker, per-question notes and attachments, navigation and removal');
- report.imeScope='CDP composition integration; physical OS IME not manually tested';
+ }
+ // Exercise the real fresh-session policy without sending any prompt.
+ await page.evaluate(()=>localStorage.setItem('omp.previewMode','0'));
+ const realUrl=new URL(page.url());realUrl.search='';await page.goto(realUrl.href);await page.waitForFunction(()=>!!window.ompStudio);
+ // Preview project selections are UI-only. Select the real fixture workspace again.
+ await page.getByRole('button',{name:/打开本地文件夹|Open local folder/i}).first().click();
+ await until(()=>query('projects.list'),value=>value.workspaces.some(row=>row.active&&row.name==='workspace'),'real workspace selection');
+ const policySession=await query('session.state');
+ await page.getByRole('button',{name:'新建对话',exact:true}).first().waitFor();
+ await command('preferences.features.set',{sessionId:policySession.sessionId,key:'worktree.onStart',value:'ask',scope:'global'});
+ await page.getByRole('button',{name:'新建对话',exact:true}).first().click();
+ const firstChoiceSession=await until(()=>query('session.state'),value=>value.sessionId!==policySession.sessionId,'fresh worktree choice session');
+ report.worktreeStartPolicy=(await command('worktrees.session.startPolicy',{sessionId:firstChoiceSession.sessionId})).result;
+ console.log('Worktree start policy',JSON.stringify(report.worktreeStartPolicy));
+ let worktreeDialog=page.getByRole('dialog',{name:/新会话工作区|New session workspace/});await worktreeDialog.waitFor();
+ await capture('real-worktree-start-choice');
+ await worktreeDialog.getByRole('button',{name:/留在当前工作区|Stay in this workspace/}).click();await worktreeDialog.waitFor({state:'hidden'});
+ await page.getByRole('button',{name:'新建对话',exact:true}).first().click();
+ const secondChoiceSession=await until(()=>query('session.state'),value=>value.sessionId!==firstChoiceSession.sessionId,'second fresh worktree choice session');
+ if((await command('worktrees.session.startPolicy',{sessionId:secondChoiceSession.sessionId})).result.policy!=='ask')throw Error('New session did not retain the configured worktree policy');
+ worktreeDialog=page.getByRole('dialog',{name:/新会话工作区|New session workspace/});await worktreeDialog.waitFor();
+ await worktreeDialog.getByRole('button',{name:/创建并进入|Create and open/}).click();await worktreeDialog.waitFor({state:'hidden',timeout:60000});
+ const isolatedSession=await until(()=>query('session.state'),value=>value.sessionId!==secondChoiceSession.sessionId&&!value.isStreaming,'isolated worktree session');
+ const ownWorktrees=await command('worktrees.session.list',{sessionId:isolatedSession.sessionId});
+ const owned=ownWorktrees.result.worktrees.find(row=>row.current);
+ if(!owned||!owned.branch.startsWith('wt/')||owned.dirty)throw Error('New worktree session is not an isolated clean checkout');
+ report.worktreeExitPath=owned.directory;
+ await command('preferences.features.set',{sessionId:isolatedSession.sessionId,key:'worktree.onExit',value:'remove',scope:'global'});
+ await capture('real-worktree-session');
+ report.checks.push('fresh-session worktree prompt, continue-here choice, create/open flow and recursion guard');
+ if(process.env.OMP_E2E_WORKTREE_ONLY!=='1')report.imeScope='CDP composition integration; physical OS IME not manually tested';
  report.status='passed';
 }catch(error){report.status='failed';report.error=String(error);process.exitCode=1;if(page)await capture('failure').catch(()=>{});}
 finally{
  if(app){let timer;const child=app.process();try{await Promise.race([app.close().catch(error=>{report.status='failed';report.cleanupError=String(error);process.exitCode=1;}),new Promise(resolve=>{timer=setTimeout(()=>{report.status='failed';report.cleanupError='Electron did not close within 10 seconds';process.exitCode=1;child.kill('SIGKILL');resolve();},10000);})]);}finally{clearTimeout(timer);}}
+ if(report.status==='passed'&&report.worktreeExitPath){if(existsSync(report.worktreeExitPath)){report.status='failed';report.cleanupError='Native clean-worktree exit policy did not remove the isolated checkout';process.exitCode=1;}else report.checks.push('native clean-worktree exit cleanup');}
  if(report.status==='failed')report.predictionDiagnostics=await predictionDiagnostics(temp);
  await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }

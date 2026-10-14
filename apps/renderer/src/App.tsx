@@ -1,3 +1,5 @@
+import { PlanExecutionPicker, useNativePlanReview } from "./deck/PlanExecutionPicker";
+import { WorktreeLaunchGate, SessionWorktreesPane } from "./workspaces/SessionWorktreesPane";
 import { useSessionTitles } from "./history/useSessionTitles";
 import { SessionTitleMark } from "./history/SessionTitleMark";
 import { previewSessionTitle } from "./preview/sessionTitlePreview";
@@ -2342,7 +2344,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                             }
                           />
                           <button type="button" className="icon-btn" data-tip={t("history.archiveSession")} aria-label={t("history.archiveSession")} onClick={() => chrome.onArchivePreviewThread(thread.id)}><Icon name="archive" extra="sm" /></button>
-                        </span>                      </div>
+                        </span>
+                      </div>
                       );
                     })}
                     {visible.length < threads.length ? (
@@ -2535,7 +2538,8 @@ export function AppSidebar({ state, chrome, client, onRoute, onOpenAppUpdateDial
                               aria-label={t("history.archiveSession")}
                               onClick={() => chrome.onArchiveThread(entry, workspace.workspaceId)}
                             ><Icon name="archive" extra="sm" /></button>
-                          </span>                        </div>
+                          </span>
+                        </div>
                         );
                       })}
                       {entries.length < total ? (
@@ -3339,9 +3343,10 @@ const PROMPT_SEND_PHASE_LABEL: Record<PromptSendPhase, string> = {
   initiating: "Initiating",
 };
 
-function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwWindow, btwSession, btwSideHeadRect, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh, composerDraft, onComposerDraftChange }: {
+function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, viewedAgents, selectedThreadId, viewIdentity, previewProjectId, previewThreadId, sessionCreating, waitForNewSession, ensureNewSession, onSelectProject, onSelectPreviewProject, onSelectPreviewThread, onSelectThread, onBranchedSession, hiddenPreviewThreads, onPreviewDeckWait, sideOpen, onCloseSide, sideTab, onSideTabChange, panelWidth, onResizePanel, bottomOpen, onBottomOpenChange, bottomVisible, onBottomVisibleChange, bottomHeight, onResizeBottom, bottomTab, onBottomTabChange, onRoute, onOpenChanges, onOpenGit, composerRef, workspaceId, onSlashUi, onDraftSkillsChange, onUsedSkillsChange, onSessionTitleMaybeChanged, onProvisionalSessionChange, onPinCompleted, btwWindow, btwSession, btwSideHeadRect, onBtwDemoNext, onBtwPreviewAsk, createProjectNonce, compactPending, onCompactPending, onViewedTelemetryRefresh, composerDraft, onComposerDraftChange }: {
   state: ViewState;
   client: ClientStateSource;
+  onOpenWorktree?: ((workspaceId: string) => Promise<void>) | undefined;
   selectedSessionId?: string;
   viewedAgents?: readonly StudioAgentSnapshot[];
   selectedThreadId?: ThreadId;
@@ -3983,13 +3988,26 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       ...(value === undefined ? {} : { value }),
     });
   }, [pendingInteraction, run]);
+  const nativePlanEnabled = !preview && runtimeConnected && can("mode.plan.review.details") && can("mode.plan.review.resolve");
+  const planExecution = useNativePlanReview(client, snapshot?.sessionId, nativePlanEnabled, snapshot?.plan?.status === "review", snapshot?.stateVersion);
+  const submitPlanDecision = useCallback((decision: "execute" | "compact" | "keep" | "refine" | "dismiss", feedback?: string): Promise<boolean> => {
+    if (!nativePlanEnabled) return run("mode.plan.review.respond", { decision, ...(feedback ? { feedback } : {}) });
+    const reviewId = planExecution.details?.reviewId;
+    if (!snapshot?.sessionId || !reviewId || !planExecution.details?.available || planExecution.loading) {
+      setStatusToast(planExecution.error || "计划评审已变化，请稍后重试");
+      return Promise.resolve(false);
+    }
+    return run("mode.plan.review.resolve", { sessionId: snapshot.sessionId, reviewId, decision,
+      ...(["execute", "compact", "keep"].includes(decision) && planExecution.role ? { role: planExecution.role } : {}),
+      ...(feedback ? { feedback } : {}) });
+  }, [nativePlanEnabled, planExecution.details, planExecution.role, planExecution.loading, planExecution.error, snapshot?.sessionId, run]);
   const respondPlanReview = useCallback(async (id: PlanActionId, detail?: PlanActionDetail): Promise<boolean> => {
     if (id === "refine") {
       const feedback = detail?.feedback?.trim();
       if (feedback) {
-        return run("mode.plan.review.respond", { decision: "refine", feedback });
+        return submitPlanDecision("refine", feedback);
       }
-      const ok = await run("mode.plan.review.respond", { decision: "dismiss" });
+      const ok = await submitPlanDecision("dismiss");
       if (ok) {
         setStatusToast("请在输入框写下修改意见");
         queueMicrotask(() => composerInputRef.current?.focus());
@@ -3997,7 +4015,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
       return ok;
     }
     if (id === "dismiss") {
-      const ok = await run("mode.plan.review.respond", { decision: "dismiss" });
+      const ok = await submitPlanDecision("dismiss");
       if (ok) queueMicrotask(() => composerInputRef.current?.focus());
       return ok;
     }
@@ -4007,11 +4025,11 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
     const compacting = id === "compact";
     if (compacting) onCompactPending?.(true);
     try {
-      return await run("mode.plan.review.respond", { decision: id });
+      return await submitPlanDecision(id);
     } finally {
       if (compacting) onCompactPending?.(false);
     }
-  }, [onCompactPending, run]);
+  }, [onCompactPending, submitPlanDecision]);
   /** 收集「保存并退出」的目标路径：桌面端经白名单 IPC 走 Main 的原生另存为
       对话框（默认 `<工作区>/PLAN.md`，返回工作区相对路径）；浏览器 dev /
       测试环境回退 window.prompt。Electron 渲染进程不支持 prompt，旧 preload
@@ -4085,7 +4103,20 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   const composerOwner = composerOwnerSessionId(composerTarget) as SessionId | undefined;
   const snapshotIsViewedSession = preview || composerOwnsLiveSnapshot(composerTarget);
   const executionMatches = snapshotIsViewedSession;
-  const gated = busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady || !executionMatches;
+  const [worktreeGated, setWorktreeGated] = useState(false);
+  const worktreeWait = useRef<{ promise: Promise<void>; resolve(): void } | undefined>(undefined);
+  const changeWorktreeGate = useCallback((blocked: boolean) => {
+    setWorktreeGated(blocked);
+    if (blocked && !worktreeWait.current) {
+      let resolve!: () => void;
+      const promise = new Promise<void>(done => { resolve = done; });
+      worktreeWait.current = { promise, resolve };
+    } else if (!blocked) {
+      worktreeWait.current?.resolve(); worktreeWait.current = undefined;
+    }
+  }, []);
+
+  const gated = worktreeGated || busy || Boolean(connection?.resyncRequired) || !runtimeConnected || !snapshotReady || !executionMatches;
   // Composer `gated` / can() flicker while snapshot, capabilities, or the
   // selected session catch up. The ask is already on screen — lock only when
   // the Host cannot take interaction.respond. That is why the card went dead
@@ -4781,6 +4812,15 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
         rememberSubmittedPrompt(readySessionId);
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       }
+      if (worktreeWait.current) {
+        await worktreeWait.current.promise;
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        const prepared = client.getState?.()?.entities.snapshot;
+        if (prepared?.sessionId !== undefined && targetSessionId === undefined) {
+          readySessionId = prepared.sessionId as SessionId;
+          rememberSubmittedPrompt(readySessionId);
+        }
+      }
       await ensureSelectedSessionActive(client, {
         ...((readySessionId ?? snapshot?.sessionId) === undefined ? {} : { activeSessionId: readySessionId ?? snapshot!.sessionId }),
         ...(targetSessionId === undefined ? {} : { selectedSessionId: targetSessionId }),
@@ -5175,6 +5215,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
   }
   return (
     <>
+      <WorktreeLaunchGate client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={true} onGateChange={changeWorktreeGate} />
       <div className={`workbench${sideOpen ? " split-right" : ""}`} id="workbench">
         <div className={`convo-wrap${surfaceWelcome ? " is-empty" : ""}`}>
           <SessionModelRecovery demo={previewThreadId === "t5"} client={client} currentSessionId={snapshot?.sessionId} targetSessionId={selectedSessionId} threadId={selectedThreadId} available={runtimeConnected && !connection?.resyncRequired} capabilities={capabilities} onOpenModels={() => onRoute("model-config")} />
@@ -5230,12 +5271,13 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               />
             ) : planReview ? (
               <PlanReviewDeck
+                executionControl={nativePlanEnabled ? <PlanExecutionPicker details={planExecution.details} role={planExecution.role} onChange={planExecution.setRole} loading={planExecution.loading} error={planExecution.error} disabled={planSaveBusy || !planExecution.details?.available} /> : undefined}
                 title={planReview.title ?? "Plan"}
                 body={planReview.body ?? ""}
                 expanded={planDialogOpen}
                 onExpandedChange={setPlanDialogOpen}
                 originRef={planDialogOriginRef}
-                {...(planReviewDisabled || planSaveBusy ? { disabled: true } : {})}
+                {...(planReviewDisabled || planSaveBusy || nativePlanEnabled && (planExecution.loading || !planExecution.details?.available) ? { disabled: true } : {})}
                 onAction={(id, detail) => { void respondPlanReview(id, detail); }}
                 {...(can("mode.plan.review.saveAndQuit") ? { onSaveAndQuit: savePlanAndQuit } : {})}
               />
@@ -5663,9 +5705,10 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               <div className="composer-ctx" aria-label="已引用的上下文" role="group" />
               <label className="sr-only" htmlFor="composerInput">消息输入框。发送给 Runtime 的文本。</label>
               <ChipComposer
-                prediction={{client,sessionId:snapshot?.sessionId,available:runtimeConnected&&executionMatches&&can("prediction.prepare")}}
+                prediction={{client,sessionId:snapshot?.sessionId,available:runtimeConnected&&executionMatches&&can("prediction.prepare"),nextMessageAvailable:can("composer.predictions")}}
                 ref={composerInputRef}
                 id="composerInput"
+                disabled={worktreeGated}
                 compact={composerRunning && !composerExpanded}
                 placeholder={queueEdit === undefined ? t("conversation.composerPlaceholder") : t("conversation.editingQueuedMessage")}
                 describedBy="composerHint"
@@ -5968,6 +6011,7 @@ function WorkbenchCanvas({ state, client, selectedSessionId, viewedAgents, selec
               {sideContentMounted && sideTab === "changes" ? (preview ? <PreviewChanges {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} /> : <SessionChanges rows={convo.rows} {...(changesFocus.path === undefined ? {} : { focusPath: changesFocus.path })} {...(changesFocus.turnId === undefined ? {} : { focusTurnId: changesFocus.turnId })} focusKey={changesFocus.key} />) : null}
             </div>
             <div className={`sp-page${sideTab === "git" ? " active" : ""}`} id="spGit" role="tabpanel">
+              <SessionWorktreesPane launcher onOpenWorkspace={onOpenWorktree} client={client} context={{ sessionId: snapshot?.sessionId, available: runtimeConnected && executionMatches && !connection?.resyncRequired, capabilities }} visible={sideOpen && sideContentMounted && sideTab === "git"} />
               {sideContentMounted && sideTab === "git" ? (preview ? <PreviewGitPanel /> : <GitStatusPanel client={client} {...(activeWorkspace === undefined ? {} : { workspaceId: activeWorkspace.workspaceId })} />) : null}
             </div>
             <div className={`sp-page${sideTab === "preview" ? " active" : ""}`} id="spPreview" role="tabpanel">
@@ -7558,6 +7602,16 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     }));
   }, [client, expandProject, loadProjectHistory, navigationGate, previewMode.preview, go, onNewThread, onWorkspacesChange, runSessionCreate, refreshSessionTitles, workspaceActionQueue]);
 
+  const openManagedWorktree = useCallback(async (workspaceId: string) => {
+    await waitForNewSession();
+    const projects = await client.query("projects.list", {});
+    const project = projects.workspaces.find(row => row.workspaceId === workspaceId);
+    if (!project) throw new Error("Worktree workspace is no longer registered");
+    startNewChatInProject({ id: project.workspaceId, name: project.name });
+    const result = await waitForNewSession();
+    if (!result.ok) throw new Error(result.error);
+  }, [client, waitForNewSession, startNewChatInProject]);
+
   /** opts.resumeForAction：行级「打开并执行」——即使无驻留也 resume，让目标会话
       真正成为 Runtime 活动会话；失败时向上抛出，由调用方统一报告并中止后续动作。 */
   const openHistoryEntry = (entry: SessionHistoryEntry, workspaceId?: WorkspaceId, opts?: { resumeForAction?: boolean; skipQueue?: boolean }): Promise<void> => {
@@ -8450,6 +8504,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             <StatisticsPage client={client}/>
           ) : pageRoute === "settings" ? (
             <SettingsPage
+              onOpenWorktree={openManagedWorktree}
               nativeContext={{ sessionId: snapshot?.sessionId, available: hubRuntimeConnected, capabilities }}
               client={client}
               predictionSessionId={snapshot?.sessionId}
@@ -8510,6 +8565,7 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
             onOpenDiagnostics={() => go("diagnostics")}
           />
           <WorkbenchCanvas
+            onOpenWorktree={openManagedWorktree}
             state={state}
             client={client}
             viewIdentity={selectedProvisionalSessionId === undefined

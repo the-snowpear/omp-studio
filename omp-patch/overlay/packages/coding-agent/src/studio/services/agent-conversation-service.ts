@@ -3,7 +3,11 @@ import type { AgentRef, AgentRegistry } from "../../registry/agent-registry";
 import type { FileEntry, SessionEntry } from "../../session/session-entries";
 import { loadEntriesFromFile } from "../../session/session-loader";
 import type { ConversationTranscriptPage } from "../conversation-protocol";
-import { readConversationTranscriptPage, StudioSessionTranscriptError } from "./session-transcript-service";
+import {
+	type StudioToolResultResolver,
+	readConversationTranscriptPage,
+	StudioSessionTranscriptError,
+} from "./session-transcript-service";
 
 export class StudioAgentConversationError extends Error {
 	constructor(
@@ -85,13 +89,16 @@ export class StudioAgentConversationService {
 	 */
 	readonly #secrets = new Map<string, Buffer>();
 	#unsubscribeRegistry: (() => void) | undefined;
+	readonly #toolResult: ((sessionId: string) => StudioToolResultResolver) | undefined;
 
 	constructor(options: {
 		registry: AgentRegistry;
 		runtimeEpoch: () => number;
 		loadEntries?: StudioAgentConversationLoadEntries;
+		toolResult?: (sessionId: string) => StudioToolResultResolver;
 	}) {
 		this.#registry = options.registry;
+		this.#toolResult = options.toolResult;
 		this.#runtimeEpoch = options.runtimeEpoch;
 		this.#loadEntries = options.loadEntries ?? loadEntriesFromFile;
 		this.#unsubscribeRegistry = this.#registry.onChange(event => {
@@ -134,6 +141,7 @@ export class StudioAgentConversationService {
 					sessionId: source.sessionId,
 					branchLeafId: source.branchLeafId,
 					branch: source.branch,
+					...(captured.session && this.#toolResult ? { toolResult: this.#toolResult(source.sessionId) } : {}),
 				},
 				{ cursor: args.cursor, limit: args.limit },
 				secret,

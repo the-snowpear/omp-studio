@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ArtifactLibrary } from "@omp-studio/studio-host";
@@ -67,4 +67,26 @@ test("session HTML exports promote to the library and saved copies survive inter
   assert.deepEqual(await readFile(copy),bytes);
   await assert.rejects(()=>bridge.promote(directory,sessionId,"workspace",exportId,asset),/explicitly removed/);
  } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test("session archive grants require the dedicated transfer path and cannot become media inputs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "studio-archive-grant-"));
+  try {
+    const library = new ArtifactLibrary({ profileDirectory: root }), bridge = new RuntimeMediaFiles(library), directory = join(root, "private");
+    const archive = await library.registerBytes({ kind: "export", name: "session.tar", mimeType: "application/x-tar" }, Buffer.from("archive bytes"));
+    await assert.rejects(() => bridge.stage(directory, archive.artifactId), /unsupported/u);
+    const granted = await bridge.stage(directory, archive.artifactId, 1024, "session", true);
+    const metadata = JSON.parse(await readFile(join(directory, "inputs", granted.transferId + ".json"), "utf8"));
+    assert.equal(metadata.sourceArtifactId, archive.artifactId);
+    assert.equal(metadata.sessionId, "session");
+    if (process.platform !== "win32") {
+      for (const suffix of [".bin", ".json"]) {
+        assert.equal((await stat(join(directory, "inputs", granted.transferId + suffix))).mode & 0o777, 0o600);
+      }
+      assert.equal((await stat(join(directory, "inputs"))).mode & 0o777, 0o700);
+    }
+    const report = await library.registerBytes({ kind: "export", name: "report.html", mimeType: "text/html" }, Buffer.from("report"));
+    await assert.rejects(() => bridge.stage(directory, report.artifactId, 1024, "session", true), /unsupported/u);
+    await assert.rejects(() => bridge.stage(directory, archive.artifactId, 2, "session", true), /64 MiB/u);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

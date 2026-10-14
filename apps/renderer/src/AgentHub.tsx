@@ -1,5 +1,4 @@
 import { AgentModelDetails } from "./models/AgentModelDetails";
-import { createPreviewModelConfig } from "./preview/modelConfigFixtures";
 import { PREVIEW_AGENT_DEFINITIONS } from "./preview/agentSpawnPreview";
 import { ModelDelegationList } from "./ModelDelegationList";
 import { AgentBtwPane } from "./btw/AgentBtwPane";
@@ -24,7 +23,6 @@ import type {
   RefObject,
 } from "react";
 import type {
-  AvailableModelRecord,
   ClientBootstrap,
   CommandInput,
   CommandName,
@@ -1303,12 +1301,7 @@ export function AgentHubPage({
   const [commandBusy, setCommandBusy] = useState(false);
   const [draft, setDraft] = useState("");
   const [spawnTask, setSpawnTask] = useState("");
-  const [spawnModel, setSpawnModel] = useState("");
   const [spawnEffort, setSpawnEffort] = useState("");
-  const [spawnFallbacks, setSpawnFallbacks] = useState("");
-  const [spawnModels, setSpawnModels] = useState<
-    ReadonlyArray<AvailableModelRecord>
-  >([]);
   const spawnLock = useRef(false);
   const spawnEpoch = useRef(0);
   const [spawnSolutionSpace, setSpawnSolutionSpace] = useState("");
@@ -1316,6 +1309,7 @@ export function AgentHubPage({
   const [spawnDefinitions, setSpawnDefinitions] = useState<ReadonlyArray<{
     name: string;
     description: string;
+    model?: readonly string[];
   }> | null>(null);
   const [transcriptPage, setTranscriptPage] = useState<{
     agentId: string;
@@ -1381,23 +1375,12 @@ export function AgentHubPage({
       connOnline &&
       client !== undefined &&
       !missingCap(capabilities, "agent.spawn"));
-  const spawnModelsSupported =
-    preview || !missingCap(capabilities, "agent.spawn.models");
   useEffect(() => {
     spawnEpoch.current++;
     spawnLock.current = false;
     setSpawnDefinitions(preview ? PREVIEW_AGENT_DEFINITIONS : null);
     setSpawnDefinition(preview ? PREVIEW_AGENT_DEFINITIONS[0]!.name : "");
-    setSpawnModels(
-      preview
-        ? createPreviewModelConfig().availableModels.filter(
-            (model) => model.kind === undefined || model.kind === "chat",
-          )
-        : [],
-    );
-    setSpawnModel("");
     setSpawnEffort("");
-    setSpawnFallbacks("");
     return () => {
       spawnEpoch.current++;
     };
@@ -1810,6 +1793,7 @@ export function AgentHubPage({
         const agents = model.agents.map((definition) => ({
           name: definition.name,
           description: definition.description,
+          ...(definition.model ? { model: definition.model } : {}),
         }));
         setSpawnDefinitions(agents);
         setSpawnDefinition((current) => current || agents[0]?.name || "");
@@ -1821,41 +1805,6 @@ export function AgentHubPage({
       cancelled = true;
     };
   }, [modal, preview, viewingLive, client, spawnDefinitions]);
-  useEffect(() => {
-    if (
-      modal?.kind !== "spawn" ||
-      preview ||
-      !spawnAvailable ||
-      !spawnModelsSupported ||
-      !client
-    )
-      return;
-    let active = true;
-    void client
-      .query("models.get", {})
-      .then((result) => {
-        if (active)
-          setSpawnModels(
-            result.availableModels.filter(
-              (model) => model.kind === undefined || model.kind === "chat",
-            ),
-          );
-      })
-      .catch((error) => {
-        if (active)
-          setNotice({
-            kind: "err",
-            text: hostErrorMessage(
-              error,
-              zh ? "模型目录读取失败" : "Cannot read model catalog",
-            ),
-          });
-      });
-    return () => {
-      active = false;
-    };
-  }, [modal?.kind, preview, spawnAvailable, spawnModelsSupported, client, zh]);
-
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -3157,66 +3106,14 @@ export function AgentHubPage({
                         </select>
                       </div>
                     </div>
-                    <div className="field">
-                      <label className="tiny muted" htmlFor="naModel">
-                        {zh ? "本次主模型" : "Primary model for this run"}
-                      </label>
-                      <select
-                        className="select"
-                        id="naModel"
-                        value={spawnModel}
-                        onChange={(event) => setSpawnModel(event.target.value)}
-                        disabled={
-                          !spawnAvailable ||
-                          !spawnModelsSupported ||
-                          commandBusy
-                        }
-                      >
-                        <option value="">
-                          {zh ? "继承代理定义" : "Inherit agent definition"}
-                        </option>
-                        {spawnModels.map((model) => (
-                          <option key={model.selector} value={model.selector}>
-                            {model.name} · {model.selector}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="agent-spawn-config" role="status">
+                      <strong>{zh ? "使用代理配置" : "Agent configuration"}</strong>
+                      <p className="small muted">{zh
+                        ? "模型和备用链由所选代理的配置决定，可在模型工作区的代理页编辑。"
+                        : "Models and fallbacks come from the selected agent. Edit them in Models → Agents."}</p>
+                      <code>{spawnDefinitions?.find(item => item.name === spawnDefinition)?.model?.join(" → ")
+                        || (zh ? "使用原生角色与代理模型配置" : "Use native role and agent model settings")}</code>
                     </div>
-                    <div className="field">
-                      <label className="tiny muted" htmlFor="naFallbacks">
-                        {zh
-                          ? "候选模型链（可选）"
-                          : "Fallback candidates (optional)"}
-                      </label>
-                      <textarea
-                        className="input"
-                        id="naFallbacks"
-                        rows={2}
-                        maxLength={7168}
-                        value={spawnFallbacks}
-                        onChange={(event) =>
-                          setSpawnFallbacks(event.target.value)
-                        }
-                        disabled={
-                          !spawnAvailable ||
-                          !spawnModelsSupported ||
-                          commandBusy
-                        }
-                        placeholder="provider/model:high"
-                      />
-                    </div>
-                    <div className="tiny muted">
-                      {zh
-                        ? "每行一个候选模型，最多 7 个。思考强度由原生引擎映射到各模型支持的档位。本次覆盖不会改写代理定义。"
-                        : "One candidate per line, up to 7. Native execution maps effort to each model's supported levels. Overrides do not change the saved agent definition."}
-                    </div>
-                    {!spawnModelsSupported ? (
-                      <p className="tiny muted">
-                        {zh
-                          ? "此 Runtime 不支持本次模型覆盖；仍可使用代理定义创建任务。"
-                          : "This Runtime cannot override spawn models; tasks can still use the agent definition."}
-                      </p>
-                    ) : null}
                     {preview ? (
                       <p className="tiny muted">
                         {zh
@@ -3270,40 +3167,11 @@ export function AgentHubPage({
                         });
                         return;
                       }
-                      const fallbacks = spawnFallbacks
-                        .split(/\r?\n/u)
-                        .map((value) => value.trim())
-                        .filter(Boolean);
-                      if (
-                        fallbacks.length > 7 ||
-                        fallbacks.some((value) => value.length > 1024) ||
-                        (fallbacks.length > 0 && !spawnModel)
-                      ) {
-                        setNotice({
-                          kind: "warn",
-                          text: zh
-                            ? "请先选择主模型，再添加最多 7 个候选模型。"
-                            : "Choose a primary model before adding up to 7 fallback candidates.",
-                        });
-                        return;
-                      }
-                      if (
-                        !spawnModelsSupported &&
-                        (spawnModel || fallbacks.length)
-                      ) {
-                        setNotice({
-                          kind: "warn",
-                          text: zh
-                            ? "当前 Runtime 不支持本次模型覆盖"
-                            : "This Runtime does not support model overrides",
-                        });
-                        return;
-                      }
                       if (preview) {
                         setNotice({
                           kind: "ok",
                           text: zh
-                            ? `演示任务已配置：${definition} · ${spawnModel || "继承模型"}${spawnEffort ? " · " + spawnEffort : ""}。未执行真实任务。`
+                            ? `演示任务已配置：${definition} · 使用代理配置${spawnEffort ? " · " + spawnEffort : ""}。未执行真实任务。`
                             : `Demo task configured: ${definition}. No real task was executed.`,
                         });
                         setModal(null);
@@ -3318,9 +3186,6 @@ export function AgentHubPage({
                           assignment: spawnTask.trim(),
                           ...(spawnSolutionSpace.trim() ? { solutionSpace: spawnSolutionSpace.trim() } : {}),
                           async: true,
-                          ...(spawnModel
-                            ? { model: [spawnModel, ...fallbacks] }
-                            : {}),
                           ...(spawnEffort ? { effort: spawnEffort } : {}),
                         },
                         zh ? "代理任务已提交" : "Agent task submitted",

@@ -81,3 +81,12 @@ export function platformOfReleaseCandidate(directoryName) {
   if (!match) return undefined;
   return match[1] === "darwin-arm64" ? MAC_TARGET_PLATFORM : `win32-${match[1]}`;
 }
+
+/** Curated download links may only advertise files present in this release. */
+export function assertReleaseNoteAssets(notes, repo, tag, assets) {
+  const names = new Set(assets);
+  for (const match of notes.matchAll(/https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/releases\/download\/([^/\s]+)\/([^\s)<>]+)/gu)) {
+    if (match[1] !== repo || match[2] !== tag) continue;
+    if (!names.has(match[3])) throw new Error(`Release notes advertise an unavailable asset: ${match[3]}`);
+  }
+}

@@ -368,7 +368,7 @@ export type PromptTextInput = {
 /** Public semantic command inputs exposed by the Runtime control surface. */
 export type EvaluationCommandInputMap = { [K in EvaluationOperation["kind"]]: Omit<Extract<EvaluationOperation, {kind:K}>, "kind"> };
 type UpgradeInputMap = { [K in UpgradeOperation["kind"]]: Omit<Extract<UpgradeOperation, { kind: K }>, "kind" | "fallbackCwd"> };
-type WorkbenchInputMap = { [K in WorkbenchOperation["kind"]]: Omit<Extract<WorkbenchOperation, { kind: K }>, "kind" | "inputTransfers"> };
+type WorkbenchInputMap = { [K in WorkbenchOperation["kind"]]: Omit<Extract<WorkbenchOperation, { kind: K }>, "kind" | "inputTransfers" | "targetCwd"> };
 export interface RuntimeCommandInputMap extends EvaluationCommandInputMap, UpgradeInputMap, WorkbenchInputMap {
   "core.prompt": PromptTextInput;
   "core.steer": PromptTextInput;

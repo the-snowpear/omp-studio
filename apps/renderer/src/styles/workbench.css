@@ -2739,6 +2739,10 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
   overflow-y: auto;
   border-radius: inherit;
 }
+.deck.preview-queue .deck-card[hidden] { display: none; }
+.ask-collapsed-bar { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-12) var(--sp-16); background: var(--surface); border-radius: inherit; }
+.ask-collapsed-bar > span { color: var(--text-muted); font-size: var(--fs-11); white-space: nowrap; }
+.ask-collapsed-bar > strong { flex: 1; min-width: 0; font-size: var(--fs-12); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Keep navigation and submission reachable when panels leave a short/narrow conversation. */
 .deck.preview-queue.is-ask .dk-stage,
 .deck.preview-queue.is-ask .ask-card { overflow: visible; }

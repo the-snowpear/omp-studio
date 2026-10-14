@@ -1,3 +1,4 @@
+import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
 import type { SessionTitleRow } from "@omp-studio/studio-protocol";
 import { useSessionTitles } from "./history/useSessionTitles";
 import { SessionTitleMark } from "./history/SessionTitleMark";
@@ -375,7 +376,7 @@ export function HistoryPage({
   const { preview } = usePreviewMode();
   const { t, resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
-  const [workspaceTab,setWorkspaceTab] = useState<"catalog"|"archive">("catalog");
+  const [workspaceTab,setWorkspaceTab] = useState<"catalog"|"archive"|"transfer">("catalog");
   const [query, setQuery] = useState("");
   const [statusTab, setStatusTab] = useState<StatusTab>("all");
   const [notice, show, dismissNotice] = useNotice();
@@ -446,7 +447,7 @@ export function HistoryPage({
 
   return (
     <div className="page-wide">
-<WorkspaceTabs<"catalog"|"archive"> id="history-workspace" label={zh ? "历史" : "History"} value={workspaceTab} onChange={setWorkspaceTab} items={[{id:"catalog",icon:"history",label:zh?"会话目录":"Session catalog"},{id:"archive",icon:"archive",label:"Archive / Recap"}]}/>
+<WorkspaceTabs<"catalog"|"archive"|"transfer"> id="history-workspace" label={zh ? "历史" : "History"} value={workspaceTab} onChange={setWorkspaceTab} items={[{id:"catalog",icon:"history",label:zh?"会话目录":"Session catalog"},{id:"archive",icon:"archive",label:"Archive / Recap"},{id:"transfer",icon:"export",label:zh?"迁移与导出":"Transfer & export"}]}/>
 <WorkspacePanel id="history-workspace" name="catalog" active={workspaceTab==="catalog"}>
 <div className="hist-layout">
       <section aria-labelledby="histHeading">
@@ -573,6 +574,7 @@ export function HistoryPage({
       <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />
     </div>
 </WorkspacePanel>
+<WorkspacePanel id="history-workspace" name="transfer" active={workspaceTab==="transfer"}>{workspaceTab === "transfer" ? <SessionPortabilityPane client={client} context={nativeContext} visible={workspaceTab==="transfer"} entries={history?.entries ?? []} onImported={onImported} onOpen={onImportedOpen} /> : null}</WorkspacePanel>
 <WorkspacePanel id="history-workspace" name="archive" active={workspaceTab==="archive"}><NativeArchivePane client={client} context={nativeContext} active={workspaceTab==="archive"} canOpen={id=>(history?.entries??[]).some(entry=>entry.sessionId===id)} onOpen={id=>{const entry=(history?.entries??[]).find(entry=>entry.sessionId===id);if(entry)onSelectThread(entry);}}/></WorkspacePanel>
     </div>
   );

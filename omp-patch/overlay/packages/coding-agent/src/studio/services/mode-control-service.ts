@@ -8,7 +8,10 @@ import { CompactionCancelledError } from "@oh-my-pi/pi-agent-core/compaction";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger, prompt } from "@oh-my-pi/pi-utils";
-import { cfgModelRoles } from "../../config/model-settings";
+import { cfgCycleOrder, cfgModelRoles } from "../../config/model-settings";
+import type { PlanReviewChoice, PlanReviewRequestedEvent } from "../../extensibility/extensions/types";
+import type { NativePlanReview, NativePlanReviewOperation } from "../plan-review-protocol";
+import type { StudioInteractionGateway } from "./interaction-port";
 import type { PlanApprovalDetails } from "../../plan-mode/approved-plan";
 import { autosaveApprovedPlan } from "../../plan-mode/plan-autosave";
 import { resolvePlanModelTransition } from "../../plan-mode/model-transition";
@@ -116,7 +119,17 @@ export function resolveStudioPlanSavePath(input: string, cwd: string): { absolut
 }
 
 /** Runtime-owned Plan/Goal/Vibe transitions shared by Bridge and presentation adapters. */
+interface NativeReviewRecord {
+	request: PlanReviewRequestedEvent;
+	claimed: boolean;
+	announced: boolean;
+	emitted: Promise<void>;
+}
+
 export class StudioModeControlService {
+	#review: NativeReviewRecord | undefined;
+	#releaseReviewActions: (() => void) | undefined;
+	interaction: StudioInteractionGateway | undefined;
 	readonly #listeners = new Set<StudioModeChangeListener>();
 	#planPreviousTools: string[] | undefined;
 	#goalPreviousTools: string[] | undefined;
@@ -147,6 +160,7 @@ export class StudioModeControlService {
 				queueMicrotask(() => {
 					void (async () => {
 						await this.flushPendingModelSwitch();
+						this.#announceReview();
 						if (this.session.isStreaming || this.session.isCompacting) return;
 						try {
 							await this.applyPending();
@@ -162,6 +176,7 @@ export class StudioModeControlService {
 
 	/** Rebind the scoped registry listener after the sleeping worker is recreated. */
 	rebindSettings(): void {
+		this.#bindReviewActions();
 		this.#unsubscribeModelRoles();
 		this.#unsubscribeModelRoles = cfgModelRoles.listen(this.session.settings, () => {
 			if (this.session.getPlanModeState()?.enabled) void this.#applyPlanModel();
@@ -175,6 +190,165 @@ export class StudioModeControlService {
 	onChange(listener: StudioModeChangeListener): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
+	}
+
+	#reviewTiers() {
+		return this.session.getRoleModelCycle?.(cfgCycleOrder.get(this.session.settings))?.models ?? [];
+	}
+	reviewDetails(): NativePlanReview {
+		const review = this.#review;
+		if (!review || !this.#pendingPlan || review.request.sessionId !== this.session.sessionId)
+			return { available: false, tiers: [] };
+		const tiers = this.#reviewTiers()
+			.slice(0, 32)
+			.map(entry => ({
+				role: entry.role,
+				provider: entry.model.provider,
+				model: entry.model.id,
+				name: entry.model.name || entry.model.id,
+				...(entry.explicitThinkingLevel && entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
+			}));
+		return {
+			available: !review.claimed,
+			reviewId: review.request.reviewId,
+			tiers,
+			...(tiers.length ? { selectedRole: tiers.find(tier => tier.role === "default")?.role ?? tiers[0]!.role } : {}),
+		};
+	}
+	async executeReview(operation: NativePlanReviewOperation): Promise<unknown> {
+		if (operation.sessionId !== this.session.sessionId)
+			throw new StudioModeError("COMMAND_BLOCKED", "Plan session changed");
+		if (operation.kind === "mode.plan.review.details") return this.reviewDetails();
+		if (!this.#review || this.#review.request.reviewId !== operation.reviewId)
+			throw new StudioModeError("COMMAND_BLOCKED", "Plan review was replaced; reopen the review");
+		await this.respondPlanReview(operation.decision, operation.feedback, operation.role);
+		return { resolved: true };
+	}
+	#bindReviewActions(): void {
+		this.#releaseReviewActions?.();
+		this.#releaseReviewActions = this.session.extensionRunner?.bindPlanReviewActions({
+			getPendingPlanReview: () =>
+				this.#review && !this.#review.claimed && this.#review.request.sessionId === this.session.sessionId
+					? structuredClone(this.#review.request)
+					: undefined,
+			openPlanReview: async () => {
+				if (this.session.isStreaming || this.session.isCompacting || !this.session.getPlanModeState()?.enabled)
+					return false;
+				if (!this.#review || !this.#pendingPlan) await this.openPlanReview();
+				return true;
+			},
+			resolvePlanReview: (id, choice, input) => {
+				const review = this.#review;
+				if (
+					!review ||
+					review.request.reviewId !== id ||
+					review.claimed ||
+					review.request.sessionId !== this.session.sessionId ||
+					this.session.isStreaming ||
+					this.session.isCompacting
+				)
+					return false;
+				if (choice === "refine" && !input?.feedback?.trim()) return false;
+				if (
+					input?.role &&
+					(!["execute", "compact", "keep"].includes(choice) ||
+						!this.#reviewTiers().some(entry => entry.role === input.role))
+				)
+					return false;
+				review.claimed = true;
+				void review.emitted
+					.then(async () => {
+						if (this.#review !== review) return;
+						if (choice === "save") {
+							const file = await this.interaction?.input({
+								commandId: "plan-save:" + id,
+								title: "Save plan and exit",
+								placeholder: "PLAN.md",
+							});
+							if (this.#review !== review) return;
+							if (!file) {
+								review.claimed = false;
+								return;
+							}
+							await this.savePlanAndQuit(file, true);
+						} else await this.#runReview(review, choice, input?.feedback, input?.role, "extension");
+					})
+					.catch(error => {
+						if (this.#review === review) review.claimed = false;
+						this.session.emitNotice(
+							"error",
+							error instanceof Error ? error.message : String(error),
+							"plan-review",
+						);
+					});
+				return true;
+			},
+		});
+	}
+	#announceReview(): void {
+		const review = this.#review;
+		if (!review || review.announced || this.session.isStreaming || this.session.isCompacting) return;
+		review.announced = true;
+		const done = Promise.withResolvers<void>();
+		review.emitted = done.promise;
+		void Promise.resolve(this.session.extensionRunner?.emit(structuredClone(review.request)))
+			.catch(error => logger.warn("Plan review extension event failed", { error: String(error) }))
+			.finally(() => done.resolve());
+	}
+	#finishReview(review: NativeReviewRecord, choice: PlanReviewChoice | undefined, by: "local" | "extension"): void {
+		if (this.#review !== review) return;
+		this.#review = undefined;
+		void review.emitted
+			.then(() =>
+				this.session.extensionRunner?.emit({
+					type: "plan_review_resolved",
+					reviewId: review.request.reviewId,
+					sessionId: review.request.sessionId,
+					choice,
+					by,
+				}),
+			)
+			.catch(error => logger.warn("Plan review resolution event failed", { error: String(error) }));
+	}
+	async respondPlanReview(decision: StudioPlanReviewDecision, feedback?: string, role?: string): Promise<unknown> {
+		const review = this.#review;
+		if (!review) return this.#respondPlanReview(decision, feedback);
+		if (review.claimed || review.request.sessionId !== this.session.sessionId)
+			throw new StudioModeError("COMMAND_BLOCKED", "Plan review is already being resolved");
+		review.claimed = true;
+		return this.#runReview(review, decision, feedback, role, "local");
+	}
+	async #runReview(
+		review: NativeReviewRecord,
+		decision: StudioPlanReviewDecision,
+		feedback: string | undefined,
+		role: string | undefined,
+		by: "local" | "extension",
+	): Promise<unknown> {
+		const previous = this.#planPreviousModelState;
+		try {
+			if (role !== undefined) {
+				if (!["execute", "compact", "keep", "approve"].includes(decision))
+					throw new StudioModeError("INVALID_ARGUMENT", "Execution tier requires approval");
+				const entry = this.#reviewTiers().find(entry => entry.role === role);
+				if (!entry) throw new StudioModeError("COMMAND_BLOCKED", "Execution tier is no longer available");
+				this.#planPreviousModelState = {
+					model: entry.model,
+					...(entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
+				};
+			}
+			const result = await this.#respondPlanReview(decision, feedback);
+			this.#finishReview(
+				review,
+				decision === "dismiss" ? undefined : decision === "approve" ? "keep" : decision,
+				by,
+			);
+			return result;
+		} catch (error) {
+			if (this.#review === review) review.claimed = false;
+			if (this.#pendingPlan) this.#planPreviousModelState = previous;
+			throw error;
+		}
 	}
 
 	async enterPlan(initialPrompt?: string): Promise<StudioModeState> {
@@ -216,7 +390,12 @@ export class StudioModeControlService {
 		return this.state();
 	}
 
-	async exitPlan(discardDraft = false, options?: { deferModelRestore?: boolean }): Promise<StudioModeState> {
+	async exitPlan(
+		discardDraft = false,
+		options?: { deferModelRestore?: boolean; claimedReviewId?: string },
+	): Promise<StudioModeState> {
+		if (this.#review?.claimed && options?.claimedReviewId !== this.#review.request.reviewId)
+			throw new StudioModeError("COMMAND_BLOCKED", "Plan review is being resolved");
 		if (this.#shouldDefer()) {
 			if (this.#pendingSession?.kind === "plan") return this.#queuePending(undefined);
 			if (this.#committedKind() === "plan") return this.#queuePending({ kind: "normal" });
@@ -265,6 +444,7 @@ export class StudioModeControlService {
 	}
 
 	async openPlanReview(): Promise<{ planFilePath: string; title: string; planExists: boolean }> {
+		if (this.#review?.claimed) throw new StudioModeError("COMMAND_BLOCKED", "Plan review is being resolved");
 		if (!this.session.getPlanModeState()?.enabled) {
 			throw new StudioModeError("COMMAND_BLOCKED", "Plan mode is not active");
 		}
@@ -275,13 +455,29 @@ export class StudioModeControlService {
 		return { planFilePath: details.planFilePath, title: details.title, planExists: details.planExists };
 	}
 
-	async savePlanAndQuit(rawPath: string): Promise<{
+	async savePlanAndQuit(rawPath: string, alreadyClaimed = false) {
+		const review = this.#review;
+		if (review?.claimed && !alreadyClaimed)
+			throw new StudioModeError("COMMAND_BLOCKED", "Plan review is already being resolved");
+		if (review) review.claimed = true;
+		try {
+			return await this.#savePlanAndQuit(rawPath, alreadyClaimed);
+		} catch (error) {
+			if (review && this.#review === review) review.claimed = false;
+			throw error;
+		}
+	}
+	async #savePlanAndQuit(
+		rawPath: string,
+		alreadyClaimed = false,
+	): Promise<{
 		saved: true;
 		path: string;
 		exitedPlan: true;
 		newSession: "started" | "cancelled" | "failed";
 		sessionId?: string;
 	}> {
+		const review = this.#review;
 		const pending = this.#pendingPlan;
 		if (!pending) throw new StudioModeError("COMMAND_BLOCKED", "No plan review is open");
 		if (this.session.isStreaming || this.session.isCompacting) {
@@ -296,7 +492,10 @@ export class StudioModeControlService {
 				`Failed to save the plan: ${error instanceof Error ? error.message : "unknown error"}`,
 			);
 		}
-		await this.exitPlan(true);
+		if (review && review.request.sessionId !== this.session.sessionId)
+			throw new StudioModeError("COMMAND_BLOCKED", "Session changed after saving the plan");
+		await this.exitPlan(true, { claimedReviewId: review?.request.reviewId });
+		if (review) this.#finishReview(review, "save", alreadyClaimed ? "extension" : "local");
 		let started: boolean;
 		try {
 			started = await this.session.newSession();
@@ -315,7 +514,7 @@ export class StudioModeControlService {
 		};
 	}
 
-	async respondPlanReview(decision: StudioPlanReviewDecision, feedback?: string): Promise<unknown> {
+	async #respondPlanReview(decision: StudioPlanReviewDecision, feedback?: string): Promise<unknown> {
 		const pending = this.#pendingPlan;
 		if (!pending) throw new StudioModeError("COMMAND_BLOCKED", "No plan review is open");
 		if (decision === "dismiss") {
@@ -343,7 +542,10 @@ export class StudioModeControlService {
 		if (compactBeforeExecute) this.session.markPlanInternalAbortPending();
 		try {
 			this.session.setPlanReferencePath(pending.planFilePath);
-			await this.exitPlan(true, { deferModelRestore: compactBeforeExecute });
+			await this.exitPlan(true, {
+				deferModelRestore: compactBeforeExecute,
+				claimedReviewId: this.#review?.request.reviewId,
+			});
 			await this.#ensureReadTool();
 			if (!preserveContext) {
 				const reset = await this.session.resetSessionContext();
@@ -536,6 +738,8 @@ export class StudioModeControlService {
 	}
 
 	dispose(): void {
+		if (this.#review) this.#finishReview(this.#review, undefined, "local");
+		this.#releaseReviewActions?.();
 		this.#pendingSession = undefined;
 		this.#clearPendingModelSwitch();
 		this.#unsubscribeSession();
@@ -796,6 +1000,35 @@ export class StudioModeControlService {
 			title: details.title,
 			body: details.planContent ?? "",
 		};
+		if (this.#review) this.#finishReview(this.#review, undefined, "local");
+		const tiers = this.#reviewTiers()
+			.slice(0, 32)
+			.map(entry => ({
+				role: entry.role,
+				provider: entry.model.provider,
+				model: entry.model.id,
+				...(entry.explicitThinkingLevel && entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
+			}));
+		this.#review = {
+			claimed: false,
+			announced: false,
+			emitted: Promise.resolve(),
+			request: {
+				type: "plan_review_requested",
+				reviewId: crypto.randomUUID(),
+				sessionId: this.session.sessionId,
+				title: details.title,
+				planFilePath: details.planFilePath,
+				planContent: details.planContent ?? "",
+				options: ["execute", "compact", "keep", "refine", "save"].map(id => ({
+					id: id as PlanReviewChoice,
+					label: id,
+					disabled: false,
+				})),
+				...(tiers.length > 1 ? { tiers } : {}),
+			},
+		};
+		this.#announceReview();
 		this.#notify();
 	}
 
@@ -805,6 +1038,7 @@ export class StudioModeControlService {
 			await this.session.abort();
 		} finally {
 			this.session.clearPlanInternalAbortPending();
+			this.#announceReview();
 		}
 	}
 
