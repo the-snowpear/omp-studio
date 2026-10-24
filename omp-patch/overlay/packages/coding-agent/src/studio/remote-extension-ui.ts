@@ -5,6 +5,9 @@ import type {
 	ExtensionAskDialogQuestion,
 	ExtensionAskDialogResult,
 	ExtensionAskDialogResultItem,
+	ExtensionApprovalAnswer,
+	ExtensionApprovalGrant,
+	ExtensionApprovalPrompt,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionUISelectItem,
@@ -221,10 +224,12 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 			title: string;
 			reason?: string;
 			details: unknown;
-			approvalMode: "always-ask" | "write" | "yolo";
+			approvalMode: "always-ask" | "always-ask-cached" | "write" | "yolo";
+			session?: string;
+			grants?: readonly ExtensionApprovalGrant[];
 		},
 		options?: ExtensionUIDialogOptions,
-	): Promise<boolean> {
+	): Promise<ExtensionApprovalAnswer> {
 		return await this.#runWithCancel(
 			() =>
 				this.gateway.approve({
@@ -232,6 +237,28 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 					title: input.title,
 					approvalType: input.toolName,
 					details: input.details,
+					...(input.session === undefined ? {} : { session: input.session }),
+					...(input.grants === undefined ? {} : { grants: input.grants }),
+				}),
+			options,
+		);
+	}
+
+	/** Built-in tool approvals: the prompt text is all upstream passes, so the card shows it as the summary. */
+	async approve(
+		prompt: ExtensionApprovalPrompt,
+		options?: ExtensionUIDialogOptions,
+	): Promise<ExtensionApprovalAnswer> {
+		const [title = "Approve tool call?"] = prompt.full.split("\n", 1);
+		return await this.#runWithCancel(
+			() =>
+				this.gateway.approve({
+					commandId: this.commandId,
+					title,
+					approvalType: "tool",
+					details: { summary: prompt.full, compact: prompt.compact },
+					...(prompt.session === undefined ? {} : { session: prompt.session }),
+					...(prompt.grants === undefined ? {} : { grants: prompt.grants }),
 				}),
 			options,
 		);
@@ -309,6 +336,10 @@ export class StudioRemoteExtensionUiContext implements ExtensionUIContext {
 
 	setEditorComponent(): void {
 		// Custom editor components are not supported on the Remote surface.
+	}
+
+	getEditorComponent(): undefined {
+		return undefined;
 	}
 
 	get theme(): Theme {

@@ -366,7 +366,7 @@ export class StudioWorkbenchService {
 				...spec,
 				cwd,
 				replace: false,
-				waitForReady: false,
+				awaitReady: false,
 				...(spec.ready ? { ready: { ...spec.ready, timeout: spec.ready.timeoutMs / 1000 } } : {}),
 			});
 			return { service: projectService(result.daemon), readyTimedOut: result.readyTimedOut };

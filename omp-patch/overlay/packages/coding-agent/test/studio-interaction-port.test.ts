@@ -173,7 +173,9 @@ describe("WP-040 Runtime InteractionPort", () => {
 		await expect(port.select({ commandId: "c", title: "x", options: [] })).resolves.toBe("one");
 		await expect(port.input({ commandId: "c", title: "x" })).resolves.toBe("input");
 		await expect(port.editor({ commandId: "c", title: "x" })).resolves.toBe("edited");
-		await expect(port.approve({ commandId: "c", title: "x", approvalType: "tool", details: {} })).resolves.toBe(true);
+		await expect(port.approve({ commandId: "c", title: "x", approvalType: "tool", details: {} })).resolves.toBe(
+			"once",
+		);
 	});
 
 	test("approve resolves strictly true only for an explicit submit with value true", async () => {
@@ -193,7 +195,7 @@ describe("WP-040 Runtime InteractionPort", () => {
 			commandId: request.commandId,
 			decision: "cancel",
 		});
-		await expect(result).resolves.toBe(false);
+		await expect(result).resolves.toBe("deny");
 		// allow: submit with value true resolves true
 		const allowed = port.approve({ commandId: "command-8", title: "Approve?", approvalType: "bash", details: {} });
 		const request2 = opened[1]!.request;
@@ -204,7 +206,7 @@ describe("WP-040 Runtime InteractionPort", () => {
 			decision: "submit",
 			value: true,
 		});
-		await expect(allowed).resolves.toBe(true);
+		await expect(allowed).resolves.toBe("once");
 		// any other value is not an approval
 		const nonTrue = port.approve({ commandId: "command-9", title: "Approve?", approvalType: "bash", details: {} });
 		const request3 = opened[2]!.request;
@@ -215,6 +217,6 @@ describe("WP-040 Runtime InteractionPort", () => {
 			decision: "submit",
 			value: "yes",
 		});
-		await expect(nonTrue).resolves.toBe(false);
+		await expect(nonTrue).resolves.toBe("deny");
 	});
 });

@@ -205,7 +205,7 @@ describe("WP-041 Studio Remote Extension UI", () => {
 			details: { toolName: "bash", toolCallId: "call-6", risk: "high" },
 		});
 		respond(port, true);
-		await expect(promise).resolves.toBe(true);
+		await expect(promise).resolves.toBe("once");
 		// deny: cancel resolves false
 		const denied = ui.approveTool({
 			toolName: "bash",
@@ -215,7 +215,7 @@ describe("WP-041 Studio Remote Extension UI", () => {
 			approvalMode: "write",
 		});
 		respond(port, undefined, "cancel");
-		await expect(denied).resolves.toBe(false);
+		await expect(denied).resolves.toBe("deny");
 	});
 
 	test("factory binds each tool call to its own studio-tool commandId and reuses it across questions", async () => {

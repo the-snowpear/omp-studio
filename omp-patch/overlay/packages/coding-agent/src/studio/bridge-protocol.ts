@@ -188,7 +188,7 @@ export type StudioOperation =
 	| { kind: "job.subscribe" }
 	| { kind: "operator.manifest.get" }
 	| { kind: "operator.invoke"; commandId: string; arguments?: unknown }
-	| { kind: "permissions.mode.set"; mode: "always-ask" | "write" | "yolo"; persist: boolean }
+	| { kind: "permissions.mode.set"; mode: "always-ask" | "always-ask-cached" | "write" | "yolo"; persist: boolean }
 	| { kind: "tui.transfer"; commandId: string; interactionId?: string }
 	| {
 			kind: "interaction.respond";
@@ -239,6 +239,10 @@ export type StudioRemoteInteractionRequest =
 			title: string;
 			approvalType: string;
 			details: unknown;
+			/** Label of the "approve for this session" choice, when offered. */
+			session?: string;
+			/** Remembered-approval choices of an `always-ask-cached` prompt. */
+			grants?: ReadonlyArray<{ scope: "folder" | "target"; label: string; alwaysLabel: string }>;
 	  }
 	| {
 			kind: "ask";
@@ -406,7 +410,7 @@ export interface StudioOperatorStateSnapshot {
 	isStreaming: boolean;
 	isCompacting: boolean;
 	activeMode: "normal" | "plan" | "goal" | "vibe";
-	approvalMode: "always-ask" | "write" | "yolo";
+	approvalMode: "always-ask" | "always-ask-cached" | "write" | "yolo";
 	plan?: { status: "off" | "active" | "paused" | "review"; planReference?: string; title?: string; body?: string };
 	goal?: {
 		status: "off" | "active" | "paused" | "complete";
@@ -1011,7 +1015,10 @@ export function parseStudioRequest(value: unknown): StudioRequest {
 		case "permissions.mode.set":
 			exactKeys(operation, ["kind", "mode", "persist"]);
 			if (
-				(operation.mode !== "always-ask" && operation.mode !== "write" && operation.mode !== "yolo") ||
+				(operation.mode !== "always-ask" &&
+					operation.mode !== "always-ask-cached" &&
+					operation.mode !== "write" &&
+					operation.mode !== "yolo") ||
 				typeof operation.persist !== "boolean"
 			) {
 				throw new StudioFrameError("Invalid approval mode operation");

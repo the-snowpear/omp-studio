@@ -7,6 +7,36 @@ import type {
 } from "../bridge-protocol";
 import type { StudioRuntimeCommandArbiter } from "../command-arbiter";
 import type { CfgApproval } from "../../internal-urls/cfg-protocol";
+import type { ExtensionApprovalAnswer, ExtensionApprovalGrant } from "../../extensibility/extensions/types";
+
+/** A tool approval request; `session`/`grants` mirror the upstream approval prompt's extra choices. */
+export interface StudioApprovalInput {
+	commandId: string;
+	title: string;
+	approvalType: string;
+	details: unknown;
+	session?: string;
+	grants?: readonly ExtensionApprovalGrant[];
+}
+
+/**
+ * Map a submitted approval value to an answer. `true` is the legacy "approve"
+ * submit; only choices the request offered are honoured, anything else denies.
+ */
+export function approvalAnswerFromValue(
+	value: unknown,
+	offered: Pick<StudioApprovalInput, "session" | "grants">,
+): ExtensionApprovalAnswer {
+	if (value === true || value === "once") return "once";
+	if (value === "session" && offered.session !== undefined) return "session";
+	if (typeof value === "object" && value !== null) {
+		const { grant, always } = value as { grant?: unknown; always?: unknown };
+		if (offered.grants?.some(item => item.scope === grant)) {
+			return { grant: grant as ExtensionApprovalGrant["scope"], always: always === true };
+		}
+	}
+	return "deny";
+}
 
 export interface StudioInteractionPort {
 	confirm(input: { commandId: string; title: string; message: string; destructive?: boolean }): Promise<boolean>;
@@ -30,10 +60,10 @@ export interface StudioInteractionPort {
 		promptStyle?: boolean;
 	}): Promise<string | undefined>;
 	/**
-	 * Structured tool approval. Resolves `true` only for an explicit submit
-	 * with `value: true`; cancel, denial or any other value resolves `false`.
+	 * Structured tool approval. `session` and `grants` are the extra choices
+	 * offered; an answer outside them, a cancel or a denial resolves `deny`.
 	 */
-	approve(input: { commandId: string; title: string; approvalType: string; details: unknown }): Promise<boolean>;
+	approve(input: StudioApprovalInput): Promise<ExtensionApprovalAnswer>;
 	ask(input: {
 		commandId: string;
 		title: string;
@@ -125,7 +155,7 @@ export class StudioInteractionGateway implements StudioInteractionPort {
 		return this.#requirePort().editor(input);
 	}
 
-	approve(input: { commandId: string; title: string; approvalType: string; details: unknown }): Promise<boolean> {
+	approve(input: StudioApprovalInput): Promise<ExtensionApprovalAnswer> {
 		return this.#requirePort().approve(input);
 	}
 
@@ -223,14 +253,9 @@ export class StudioRemoteInteractionPort implements StudioInteractionPort {
 		return await this.#stringRequest({ kind: "editor", ...input });
 	}
 
-	async approve(input: {
-		commandId: string;
-		title: string;
-		approvalType: string;
-		details: unknown;
-	}): Promise<boolean> {
+	async approve(input: StudioApprovalInput): Promise<ExtensionApprovalAnswer> {
 		const value = await this.#request({ kind: "approval", ...input });
-		return value === true;
+		return approvalAnswerFromValue(value, input);
 	}
 
 	async approveConfiguration(
@@ -424,8 +449,8 @@ export class StudioScriptedInteractionPort implements StudioInteractionPort {
 	}): Promise<string | undefined> {
 		return Promise.resolve(this.responses.shift() as string | undefined);
 	}
-	approve(_input: { commandId: string; title: string; approvalType: string; details: unknown }): Promise<boolean> {
-		return Promise.resolve(this.responses.shift() === true);
+	approve(input: StudioApprovalInput): Promise<ExtensionApprovalAnswer> {
+		return Promise.resolve(approvalAnswerFromValue(this.responses.shift(), input));
 	}
 	ask(_input: {
 		commandId: string;

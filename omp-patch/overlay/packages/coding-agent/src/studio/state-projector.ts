@@ -377,11 +377,13 @@ export class StudioStateProjector {
 	}
 
 	/** Effective tool approval mode: runtime override layer first, then the persisted default. */
-	#approvalMode(): "always-ask" | "write" | "yolo" {
+	#approvalMode(): "always-ask" | "always-ask-cached" | "write" | "yolo" {
 		const settings = this.#runtime.session.settings;
 		if (settings === undefined) return "yolo";
 		const value = cfgToolsApprovalMode.get(settings);
-		return value === "always-ask" || value === "write" || value === "yolo" ? value : "yolo";
+		return value === "always-ask" || value === "always-ask-cached" || value === "write" || value === "yolo"
+			? value
+			: "yolo";
 	}
 
 	#emitConversation(event: ConversationRuntimeEvent): void {

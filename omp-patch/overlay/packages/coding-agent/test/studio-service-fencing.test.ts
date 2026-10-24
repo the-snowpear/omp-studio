@@ -92,7 +92,7 @@ describe("Studio service instance fencing", () => {
 			const beforeStart = Date.now();
 			const starting = await client.request({
 				op: "start",
-				waitForReady: false,
+				awaitReady: false,
 				spec: {
 					name: "readiness",
 					application: process.execPath,

@@ -9,7 +9,7 @@ import { cfgTaskAgentAccountPools, cfgWorktreeOnStart } from "../src/task/settin
 import { cfgComposerPredictions } from "../src/modes/settings";
 import { cfgRetryFallbackOn } from "../src/session/settings";
 import { SessionManager } from "../src/session/session-manager";
-import { resetSessionIndexForTests } from "../src/session/session-index";
+import { closeSessionIndex } from "../src/session/session-index";
 import type { AgentSession } from "../src/session/agent-session";
 import { StudioFeatureSettingsService } from "../src/studio/services/feature-settings-service";
 import { StudioSessionPortabilityService } from "../src/studio/services/session-portability-service";
@@ -161,7 +161,7 @@ test("session archives import as forks without overwriting the source, and anony
 	} finally {
 		service?.dispose();
 		await manager?.close();
-		resetSessionIndexForTests();
+		closeSessionIndex();
 		setAgentDir(originalAgentDir);
 		if (originalEnv === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		await temp.remove();
@@ -257,7 +257,7 @@ test("worktree removal preserves files changed after review and startup policy f
 	} finally {
 		service?.dispose();
 		await manager?.close();
-		resetSessionIndexForTests();
+		closeSessionIndex();
 		setWorktreesDir(undefined);
 		if (originalWorktrees === undefined) delete process.env.OMP_WORKTREE_DIR;
 		else process.env.OMP_WORKTREE_DIR = originalWorktrees;
@@ -395,7 +395,7 @@ test("compression rechecks reviewed files and leaves compressed session bytes re
 	} finally {
 		service?.dispose();
 		await manager?.close();
-		resetSessionIndexForTests();
+		closeSessionIndex();
 		setAgentDir(originalAgentDir);
 		if (originalEnv === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		await temp.remove();

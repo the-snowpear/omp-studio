@@ -1,6 +1,6 @@
 import { cfgToolsApprovalMode } from "../../tools/settings";
 import type { Settings } from "../../config/settings";
-export type StudioApprovalMode = "always-ask" | "write" | "yolo";
+export type StudioApprovalMode = "always-ask" | "always-ask-cached" | "write" | "yolo";
 
 export class StudioPermissionControlError extends Error {
 	constructor(
@@ -43,7 +43,7 @@ export class StudioPermissionControlService {
 		mode: StudioApprovalMode,
 		persist: boolean,
 	): Promise<{ mode: StudioApprovalMode; persisted: boolean }> {
-		if (mode !== "always-ask" && mode !== "write" && mode !== "yolo") {
+		if (mode !== "always-ask" && mode !== "always-ask-cached" && mode !== "write" && mode !== "yolo") {
 			throw new StudioPermissionControlError("INVALID_ARGUMENT", `Unsupported approval mode: ${mode}`);
 		}
 		if (this.#shouldDefer()) {
@@ -89,5 +89,7 @@ export class StudioPermissionControlService {
 function readApprovalMode(settings: StudioPermissionSettings | undefined): StudioApprovalMode {
 	if (settings === undefined) return "yolo";
 	const value = cfgToolsApprovalMode.get(settings);
-	return value === "always-ask" || value === "write" || value === "yolo" ? value : "yolo";
+	return value === "always-ask" || value === "always-ask-cached" || value === "write" || value === "yolo"
+		? value
+		: "yolo";
 }
