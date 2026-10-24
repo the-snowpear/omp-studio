@@ -22,10 +22,10 @@ on:
         type: string
         description: Tested minimum desktop version (blank uses workspace version)
         default: ""
-      reuse_runtime_run_id:
-        type: string
-        description: Optional previous workflow run with matching signed Runtime artifacts
-        default: ""
+      rebuild_runtime:
+        type: boolean
+        description: Force a Runtime rebuild even when its sources are unchanged
+        default: false
       include_macos:
         type: boolean
         description: Also build and publish macOS (darwin-arm64, ad hoc signed)
@@ -35,6 +35,8 @@ on:
 
 permissions:
   contents: read
+env:
+  BUN_VERSION: "1.4.2"
 concurrency:
   group: omp-studio-release
   cancel-in-progress: false
@@ -84,16 +86,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Find reusable Runtime
+        id: runtime
+        shell: bash
+        env:
+          PLATFORM: win32-${{ matrix.arch }}
+          REBUILD: ${{ inputs.rebuild_runtime }}
+          INPUTS_HASH: ${{ hashFiles('omp-patch/overlay/**', 'omp-patch/patches/**', 'omp-patch/upstream.json', 'packaging/keys/trusted-keys.json', 'scripts/build-omp-host.mjs', 'scripts/runtime-artifact.mjs') }}
+        run: bash .github/scripts/find-runtime.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - uses: oven-sh/setup-bun@v2
-        if: inputs.reuse_runtime_run_id == ''
+        if: steps.runtime.outputs.run_id == ''
         with:
-          bun-version: "1.4.2"
+          bun-version: ${{ env.BUN_VERSION }}
       - uses: Swatinem/rust-cache@v2
-        if: inputs.reuse_runtime_run_id == ''
+        if: steps.runtime.outputs.run_id == ''
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
           shared-key: platform
@@ -104,17 +114,17 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           npm ci
       - name: Reuse signed Runtime
-        if: inputs.reuse_runtime_run_id != ''
+        if: steps.runtime.outputs.run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: runtime-artifact-${{ matrix.arch }}
+          name: ${{ steps.runtime.outputs.key }}
           path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
-          run-id: ${{ inputs.reuse_runtime_run_id }}
+          run-id: ${{ steps.runtime.outputs.run_id }}
           github-token: ${{ github.token }}
       - name: Build, package and verify release
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
-          REUSE_RUNTIME_RUN_ID: ${{ inputs.reuse_runtime_run_id }}
+          REUSE_RUNTIME_RUN_ID: ${{ steps.runtime.outputs.run_id }}
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           $keyPath = Join-Path $env:RUNNER_TEMP "omp-release-signing.pem"
@@ -149,7 +159,7 @@ jobs:
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: runtime-artifact-${{ matrix.arch }}
+          name: ${{ steps.runtime.outputs.key }}
           path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
@@ -184,16 +194,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Find reusable Runtime
+        id: runtime
+        env:
+          PLATFORM: darwin-arm64
+          REBUILD: ${{ inputs.rebuild_runtime }}
+          INPUTS_HASH: ${{ hashFiles('omp-patch/overlay/**', 'omp-patch/patches/**', 'omp-patch/upstream.json', 'packaging/keys/trusted-keys.json', 'scripts/build-omp-host.mjs', 'scripts/runtime-artifact.mjs') }}
+        run: bash .github/scripts/find-runtime.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - uses: oven-sh/setup-bun@v2
-        if: inputs.reuse_runtime_run_id == ''
+        if: steps.runtime.outputs.run_id == ''
         with:
-          bun-version: "1.4.2"
+          bun-version: ${{ env.BUN_VERSION }}
       - uses: Swatinem/rust-cache@v2
-        if: inputs.reuse_runtime_run_id == ''
+        if: steps.runtime.outputs.run_id == ''
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
           shared-key: platform
@@ -203,17 +220,17 @@ jobs:
         run: |
           npm ci
       - name: Reuse signed Runtime
-        if: inputs.reuse_runtime_run_id != ''
+        if: steps.runtime.outputs.run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: runtime-artifact-darwin-arm64
+          name: ${{ steps.runtime.outputs.key }}
           path: packages/runtime-installer/dist/artifacts/darwin-arm64/
-          run-id: ${{ inputs.reuse_runtime_run_id }}
+          run-id: ${{ steps.runtime.outputs.run_id }}
           github-token: ${{ github.token }}
       - name: Build, package and verify release
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
-          REUSE_RUNTIME_RUN_ID: ${{ inputs.reuse_runtime_run_id }}
+          REUSE_RUNTIME_RUN_ID: ${{ steps.runtime.outputs.run_id }}
         run: |
           set -euo pipefail
           key_path="$RUNNER_TEMP/omp-release-signing.pem"
@@ -251,7 +268,7 @@ jobs:
           npm run updates:verify
       - uses: actions/upload-artifact@v4
         with:
-          name: runtime-artifact-darwin-arm64
+          name: ${{ steps.runtime.outputs.key }}
           path: packages/runtime-installer/dist/artifacts/darwin-arm64/
           if-no-files-found: error
       - uses: actions/upload-artifact@v4

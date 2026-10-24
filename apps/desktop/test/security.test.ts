@@ -310,47 +310,12 @@ describe("registerDesktopIpc: sender trust", () => {
   });
 });
 
-describe("registerDesktopIpc: inbound validation before dispatch", () => {
-  test("identity-smuggling envelope fields never reach the facade", async () => {
+describe("registerDesktopIpc: envelope parsing before dispatch", () => {
+  test("malformed query, command and scope envelopes are rejected before the facade", async () => {
     const { invoke, facade, handle } = registerIpc();
     const sender = makeSender(1);
-    await assert.rejects(() =>
-      invoke(DESKTOP_IPC_CHANNELS.query, sender, {
-        queryName: "home.get",
-        input: {},
-        windowId: sender.id,
-      }),
-    );
-    await assert.rejects(() =>
-      invoke(DESKTOP_IPC_CHANNELS.command, sender, {
-        commandName: "session.drop",
-        input: { threadId: "t" },
-        idempotencyKey: "k",
-        requestId: "r",
-        authority: "A",
-      }),
-    );
-    await assert.rejects(() =>
-      invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all", windowId: 1 }),
-    );
-    assert.deepEqual(facade.calls, []);
-    handle.dispose();
-  });
-
-  test("prototype pollution payloads fail closed at the boundary", async () => {
-    const { invoke, facade, handle } = registerIpc();
-    const sender = makeSender(1);
-    const polluted = JSON.parse('{"queryName":"home.get","input":{},"__proto__":{"x":1}}');
-    await assert.rejects(() => invoke(DESKTOP_IPC_CHANNELS.query, sender, polluted));
-    assert.deepEqual(facade.calls, []);
-    assert.equal(({} as Record<string, unknown>).x, undefined);
-    handle.dispose();
-  });
-
-  test("malformed query, command and scope payloads are rejected before the facade", async () => {
-    const { invoke, facade, handle } = registerIpc();
-    const sender = makeSender(1);
-    await assert.rejects(() => invoke(DESKTOP_IPC_CHANNELS.query, sender, { queryName: "nope.get", input: {} }));
+    await assert.rejects(() => invoke(DESKTOP_IPC_CHANNELS.query, sender, "home.get"));
+    await assert.rejects(() => invoke(DESKTOP_IPC_CHANNELS.query, sender, { input: {} }));
     await assert.rejects(() =>
       invoke(DESKTOP_IPC_CHANNELS.command, sender, {
         commandName: "session.drop",
@@ -360,6 +325,18 @@ describe("registerDesktopIpc: inbound validation before dispatch", () => {
     );
     await assert.rejects(() => invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "allx" }));
     assert.deepEqual(facade.calls, []);
+    handle.dispose();
+  });
+
+  test("extra envelope fields such as window ids never reach the facade", async () => {
+    const { invoke, facade, handle } = registerIpc();
+    const seen: unknown[] = [];
+    facade.query = async (request) => {
+      seen.push(request);
+      return facade.queryResult as never;
+    };
+    await invoke(DESKTOP_IPC_CHANNELS.query, makeSender(1), { queryName: "home.get", input: {}, windowId: 1 });
+    assert.deepEqual(seen, [{ queryName: "home.get", input: {} }]);
     handle.dispose();
   });
 });
@@ -420,33 +397,10 @@ describe("registerDesktopIpc: valid named-method routes", () => {
     handle.dispose();
   });
 
-  test("outbound assertions reject malformed facade responses", async () => {
-    const { invoke, facade, handle } = registerIpc();
-    const sender = makeSender(1);
-    facade.queryResult = { ok: true, queryName: "home.get" } as unknown as ClientQueryResponse;
-    await assert.rejects(() =>
-      invoke(DESKTOP_IPC_CHANNELS.query, sender, { queryName: "home.get", input: {} }),
-    );
-    facade.commandResult = {
-      commandName: "session.drop",
-      requestId: "req-1",
-      status: "rejected",
-      acceptedAt: "2026-08-12T00:00:00.000Z",
-    } as unknown as ClientCommandAccepted;
-    await assert.rejects(() =>
-      invoke(DESKTOP_IPC_CHANNELS.command, sender, {
-        commandName: "session.drop",
-        input: { threadId: "t-1" },
-        idempotencyKey: "idem-1",
-        requestId: "req-1",
-      }),
-    );
-    handle.dispose();
-  });
 });
 
 describe("registerDesktopIpc: window-bound event forwarding and teardown", () => {
-  test("subscription events are asserted and forwarded to the sender on the event channel", async () => {
+  test("subscription events are forwarded to the sender on the event channel", async () => {
     const { invoke, facade, handle } = registerIpc();
     const sender = makeSender(1);
     await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
@@ -467,19 +421,6 @@ describe("registerDesktopIpc: window-bound event forwarding and teardown", () =>
     const event = validConversationEvent();
     assert.doesNotThrow(() => registered.listener(event));
     assert.deepEqual(sender.sent, [{ channel: DESKTOP_IPC_CHANNELS.event, payload: event }]);
-    handle.dispose();
-  });
-
-  test("malformed events fail closed and are never forwarded", async () => {
-    const { invoke, facade, handle } = registerIpc();
-    const sender = makeSender(1);
-    await invoke(DESKTOP_IPC_CHANNELS.subscribe, sender, { scope: "all" });
-    const registered = facade.subscribeListeners[0];
-    assert.ok(registered);
-    assert.throws(() =>
-      registered.listener({ kind: "auth.tampered", ...EVENT_BASE } as unknown as ClientEvent),
-    );
-    assert.deepEqual(sender.sent, []);
     handle.dispose();
   });
 

@@ -1,2 +1,3 @@
 *.patch text eol=lf whitespace=-trailing-space,-space-before-tab
 omp-patch/overlay/** text=auto eol=lf
+*.sh text eol=lf

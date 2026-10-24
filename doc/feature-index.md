@@ -29,7 +29,7 @@ Facade 分发：`packages/host-client-api/src/facade.ts`（`query` / `command` �
 | `@omp-studio/client` | 客户端状态机、对话 reducer、收据选择器 | `packages/client/src/studio-client.ts` |
 | `@omp-studio/host-client-api` | 产品 Facade：query/command → Host 或 Runtime | `packages/host-client-api/src/facade.ts` |
 | `@omp-studio/studio-host` | Runtime 进程、Bridge、ledger、catalog、telemetry | `packages/studio-host/src/host-backend.ts` |
-| `@omp-studio/transport-desktop` | 固定 IPC 通道名与校验 | `packages/transport-desktop/src/channels.ts` |
+| `@omp-studio/transport-desktop` | 固定 IPC 通道名与信封解析 | `packages/transport-desktop/src/channels.ts`、`ipc-envelope.ts` |
 | `@omp-studio/runtime-installer` | 签名工件安装 / 回滚 | `packages/runtime-installer/src/index.ts` |
 | `@omp-studio/platform-win32` | 单实例锁、Job Object、私有 endpoint | `packages/platform-win32/src/index.ts` |
 | `apps/desktop` | Electron 壳、Host 组装、Git/终端等本机能力 | `apps/desktop/src/host-composition.ts` |
@@ -284,7 +284,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | 路径 | 原因 |
 |---|---|
 | `ui_reference/` | 界面参考 |
-| `backup/` | 任务前快照 |
+| `backup/` | 历史归档（只读，不再新增） |
 | `omp-patch/vendor/oh-my-pi/` | 上游工作区；Studio 自有逻辑在 overlay，接缝在 `patches/` |
 | `doc/real-conversation/`、`doc/multi-session/` | 过程计划，默认当归档 |
 | `apps/*/dist/`、`packages/*/dist/` | 构建产物 |

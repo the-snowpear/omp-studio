@@ -19,8 +19,13 @@ Push a new desktop tag `v<workspace version>` or Runtime tag
 4. Upload candidates. The publisher checks signatures and uploaded digests,
    then publishes only after all requested architectures succeed.
 
-Runtime builds install their own Bun dependencies. Reuse runs skip Bun setup,
-Rust caching/compilation and Runtime dependency installation. Neither path
+The Runtime is reused automatically: each build job hashes the Runtime inputs
+(vendor commit, `omp-patch/overlay`, `omp-patch/patches`, `upstream.json`, the
+trusted key table, the Runtime build scripts, Bun version, channel and
+platform) and downloads the signed Runtime artifact of an earlier run with the
+same key (artifacts are kept 90 days). A desktop-only fix therefore skips Bun
+setup, Rust compilation and Runtime dependency installation. Set
+`rebuild_runtime` to force a fresh build. Neither path
 runs workspace tests, full patch replay or GUI acceptance during publication.
 The repeated P5 readiness gate and old v1 asset generator have been removed.
 
@@ -30,7 +35,7 @@ The repeated P5 readiness gate and old v1 asset generator have been removed.
 | `target_arch` | Windows x64, ARM64, or both (default) |
 | `runtime_channel` | Stable, or canary for Runtime-only releases |
 | `runtime_min_app_version` | Tested desktop compatibility floor; blank uses the workspace version |
-| `reuse_runtime_run_id` | Previous run containing matching signed Runtime artifacts |
+| `rebuild_runtime` | Rebuild the Runtime even when its inputs are unchanged |
 | `include_macos` | Also build and publish macOS Apple Silicon; off by default |
 
 Tag pushes build both Windows architectures. Runtime-only releases never

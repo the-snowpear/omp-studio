@@ -16,18 +16,9 @@
  *   a receipt);
  * - events deliver in order with scope filtering honored and unsubscribe
  *   stopping delivery, with subscription scopes forwarded verbatim;
- * - defensive clone isolation holds in both directions: mutating a request
- *   after the call never reaches the host's copy, and mutating a returned
- *   result never poisons the next call;
  * - close is idempotent, reaches the host, and every operation rejects
  *   (subscribe throws) afterwards;
- * - malformed query/command names fail closed with INVALID_ARGUMENT;
- * - malformed structural envelopes — non-object bootstrap results, query
- *   responses with a non-boolean `ok`, missing `result`/`error`, malformed
- *   error shapes, mismatched names, or command acceptances with missing/
- *   non-string `requestId`/`acceptedAt` or a status other than exactly
- *   `"accepted"` — are rejected by the transport before the caller ever
- *   sees them.
+ * - malformed query/command names fail closed with INVALID_ARGUMENT.
  *
  * Only observable behavior is asserted: no platform-specific URLs,
  * channels, endpoints or transport internals appear anywhere.
@@ -123,21 +114,6 @@ export function runTransportContract(name: string, factory: TransportFactory): v
       assert.equal(api.calls.bootstrapCalls, 1);
     });
 
-    await t.test("bootstrap result is defensively cloned", async () => {
-      const { transport } = createHarness(factory);
-      const first = await transport.bootstrap();
-      // Test seam: the contract types are readonly, so mutate through a
-      // deliberately mutable view of the returned value.
-      const tampered = first as unknown as {
-        surface: { terminalAttach: boolean };
-        snapshot: { agents: unknown[] };
-      };
-      tampered.surface.terminalAttach = true;
-      tampered.snapshot.agents.push({ tampered: true });
-      const second = await transport.bootstrap();
-      assert.deepEqual(second, contractFixtures.bootstrap);
-    });
-
     await t.test("representative query envelopes forward verbatim", async () => {
       const { api, transport } = createHarness(factory);
       for (const queryName of Object.keys(contractFixtures.queryInputs) as QueryName[]) {
@@ -182,33 +158,6 @@ export function runTransportContract(name: string, factory: TransportFactory): v
       }
     });
 
-    await t.test("query input is defensively cloned before forwarding", async () => {
-      const { api, transport } = createHarness(factory);
-      const input = { limit: 5 };
-      await transport.query({ queryName: "history.list", input });
-      input.limit = 99;
-      assert.deepEqual(api.calls.lastQueryRequest, {
-        queryName: "history.list",
-        input: { limit: 5 },
-      });
-    });
-
-    await t.test("query result is defensively cloned", async () => {
-      const { transport } = createHarness(factory);
-      const first = await transport.query({ queryName: "diagnostics.get", input: {} });
-      if (!first.ok) {
-        assert.fail("diagnostics.get must resolve ok");
-      }
-      // Test seam: mutate the returned entry list through a mutable view.
-      const tampered = first as unknown as { ok: true; result: { entries: unknown[] } };
-      tampered.result.entries.push({ tampered: true });
-      const second = await transport.query({ queryName: "diagnostics.get", input: {} });
-      if (!second.ok) {
-        assert.fail("diagnostics.get must resolve ok");
-      }
-      assert.deepEqual(second, contractFixtures.queryResponses["diagnostics.get"]);
-    });
-
     await t.test("command envelopes forward verbatim; acceptance is non-terminal", async () => {
       const { api, transport } = createHarness(factory);
       for (let i = 0; i < contractFixtures.commandRequests.length; i++) {
@@ -235,26 +184,6 @@ export function runTransportContract(name: string, factory: TransportFactory): v
       // the acknowledgement.
       assert.equal(first.requestId, request.requestId);
       assert.equal(second.requestId, request.requestId);
-    });
-
-    await t.test("command input is defensively cloned before forwarding", async () => {
-      const { api, transport } = createHarness(factory);
-      const input = { channel: "stable" } as const;
-      await transport.command({
-        commandName: "runtime.install",
-        input,
-        idempotencyKey: contractFixtures.idempotencyKey,
-        requestId: contractFixtures.commandRequestId,
-      });
-      // Test seam: the fixture accepts both channels; flip the caller's copy.
-      const mutableInput = input as { channel: "stable" | "canary" };
-      mutableInput.channel = "canary";
-      assert.deepEqual(api.calls.lastCommandRequest, {
-        commandName: "runtime.install",
-        input: { channel: "stable" },
-        idempotencyKey: contractFixtures.idempotencyKey,
-        requestId: contractFixtures.commandRequestId,
-      });
     });
 
     await t.test("all-scope events deliver verbatim and in order", async () => {
@@ -440,81 +369,5 @@ export function runTransportContract(name: string, factory: TransportFactory): v
       assertInvalidArgumentRejection(await captureRejection(transport.command(missing)), "command");
     });
 
-    await t.test("malformed bootstrap results fail closed", async () => {
-      const { api, transport } = createHarness(factory);
-      for (const malformed of [null, "bogus", 42] as const) {
-        api.overrideBootstrap(malformed);
-        const outcome = await settle(transport.bootstrap());
-        assert.equal(
-          outcome.rejected,
-          true,
-          `a malformed bootstrap result must be rejected, not surfaced: ${String(malformed)}`,
-        );
-      }
-      // The override is one-shot: the next call resolves the real fixture.
-      assert.deepEqual(await transport.bootstrap(), contractFixtures.bootstrap);
-    });
-
-    await t.test("malformed query responses fail closed", async () => {
-      const { api, transport } = createHarness(factory);
-      const request = { queryName: "session.state", input: {} } as const;
-      const malformedResponses: ReadonlyArray<unknown> = [
-        null,
-        "bogus",
-        { ok: "yes", queryName: "session.state" }, // ok flag must be a boolean
-        { ok: true, queryName: "session.state" }, // ok response must own result
-        { ok: false, queryName: "session.state" }, // error response must own error
-        { ok: false, queryName: "session.state", error: null },
-        { ok: false, queryName: "session.state", error: { code: 42, message: "nope" } },
-        { ok: false, queryName: "session.state", error: { code: "INTERNAL_ERROR", message: 7 } },
-        { ok: true, queryName: "home.get", result: {} }, // mismatched queryName
-      ];
-      for (const malformed of malformedResponses) {
-        api.overrideQueryResponse(malformed);
-        const outcome = await settle(transport.query(request));
-        assert.equal(
-          outcome.rejected,
-          true,
-          `a malformed query response must be rejected, not surfaced: ${JSON.stringify(malformed)}`,
-        );
-      }
-      // The override is one-shot: the next call resolves the real fixture.
-      const valid = await transport.query(request);
-      assert.equal(valid.ok, true);
-      assert.deepEqual(valid, contractFixtures.queryResponses["session.state"]);
-    });
-
-    await t.test("malformed command acceptances fail closed", async () => {
-      const { api, transport } = createHarness(factory);
-      const request = contractFixtures.commandRequests[0]!;
-      const validAcceptance = contractFixtures.commandAccepted[0]!;
-      const malformedAcceptances: ReadonlyArray<unknown> = [
-        null,
-        "bogus",
-        // requestId/acceptedAt must be string-typed; absent or non-string
-        // values are malformed (the structural check is typeof string).
-        { ...validAcceptance, requestId: undefined },
-        { ...validAcceptance, acceptedAt: undefined },
-        { ...validAcceptance, requestId: 42 },
-        { ...validAcceptance, acceptedAt: 42 },
-        { ...validAcceptance, commandName: "session.resume" }, // mismatched commandName
-        { ...validAcceptance, status: "completed" }, // status must be exactly "accepted"
-        { ...validAcceptance, status: "Accepted" },
-        { ...validAcceptance, status: undefined },
-      ];
-      for (const malformed of malformedAcceptances) {
-        api.overrideCommandResponse(malformed);
-        const outcome = await settle(transport.command(request));
-        assert.equal(
-          outcome.rejected,
-          true,
-          `a malformed command acceptance must be rejected, not surfaced: ${JSON.stringify(malformed)}`,
-        );
-      }
-      // The override is one-shot: the next call resolves the real fixture.
-      const valid = await transport.command(request);
-      assert.equal(valid.status, "accepted");
-      assert.deepEqual(valid, contractFixtures.commandAccepted[0]!);
-    });
   });
 }

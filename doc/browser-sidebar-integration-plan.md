@@ -258,9 +258,9 @@ CDP 帧元数据含 DIP 尺寸、pageScaleFactor、CSS 滚动偏移等，它们�
 
 建议先 B0，再按 B1→B2→B3→B4→B5 完成。B0 不通过时停止开启正式功能；不自动改用原生内嵌方案。实施期间通过桌面内部 feature flag 保持默认关闭，B5 通过后启用；它不是第二套预览模式开关。
 
-### 8.1 备份与 Runtime 补丁流程
+### 8.1 Runtime 补丁流程
 
-修改既有文件前，备份到 `backup/YYYY-MM-DD/browser-sidebar-阶段-HHmmss/`，保留相对路径，README 写来源提交、原因、清单和恢复步骤。B1 尤其要保存将编辑的 vendor 原文件、对应 overlay、scripts/omp-seam.mjs、series.json 及会被 regen 改写的接缝文件；不备份依赖、构建产物或机密。
+版本与回退以 Git 为准（见根 `AGENTS.md`），不另做 `backup/` 快照。
 
 新增上游接缝路径先登记到 `scripts/omp-seam.mjs` 的会话 Runtime 分组，再执行标准流程：
 

@@ -3,10 +3,8 @@
  *
  * Registers handlers for exactly the fixed `DESKTOP_IPC_CHANNELS` set —
  * bootstrap / query / command / subscribe / close — with no generic
- * `ipcMain.handle(channel, payload)` surface. Every inbound payload is
- * parsed with the `@omp-studio/transport-desktop` strict validators before
- * it reaches the facade; every outbound response/event is asserted before
- * it crosses back to the preload.
+ * `ipcMain.handle(channel, payload)` surface. Inbound envelopes are parsed
+ * down to their known fields; input checks belong to the facade.
  *
  * Security posture:
  * - Client identity is bound from `IpcMainInvokeEvent.sender` only; the
@@ -29,9 +27,6 @@ import { ipcMain, type IpcMain, type IpcMainInvokeEvent, type WebContents } from
 import type { ClientEvent, ClientTransport, SubscriptionScope, Unsubscribe } from "@omp-studio/client-contract";
 import {
   DESKTOP_IPC_CHANNELS,
-  assertClientCommandAccepted,
-  assertClientEvent,
-  assertClientQueryResponse,
   isPlainObject,
   parseClientCommandRequest,
   parseClientQueryRequest,
@@ -145,7 +140,6 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
   function subscribeWindow(target: ClientTransport, sender: WebContents, scope: SubscriptionScope): void {
     const entry = trackWindow(sender);
     const unsubscribe = target.subscribe(scope, (event: ClientEvent) => {
-      assertClientEvent(event);
       if (!sender.isDestroyed()) {
         sender.send(DESKTOP_IPC_CHANNELS.event, event);
       }
@@ -169,10 +163,7 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
   ipc.handle(DESKTOP_IPC_CHANNELS.query, async (event: IpcMainInvokeEvent, payload: unknown) => {
     assertTrustedSender(event.sender);
     try {
-      const request = parseClientQueryRequest(payload);
-      const response = await requireFacade().query(request);
-      assertClientQueryResponse(response);
-      return response;
+      return await requireFacade().query(parseClientQueryRequest(payload));
     } catch (error) {
       throwIpcError(error);
     }
@@ -181,10 +172,7 @@ export function registerDesktopIpc(options: DesktopIpcOptions): DesktopIpcHandle
   ipc.handle(DESKTOP_IPC_CHANNELS.command, async (event: IpcMainInvokeEvent, payload: unknown) => {
     assertTrustedSender(event.sender);
     try {
-      const request = parseClientCommandRequest(payload);
-      const accepted = await requireFacade().command(request);
-      assertClientCommandAccepted(accepted);
-      return accepted;
+      return await requireFacade().command(parseClientCommandRequest(payload));
     } catch (error) {
       throwIpcError(error);
     }

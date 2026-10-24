@@ -113,6 +113,14 @@ function assertRef(value: string): string {
   return value;
 }
 
+/** Remote URLs are positional git args: refuse option-looking or `ext::` values. */
+function assertRemoteUrl(value: string): string {
+  if (!value || value.startsWith("-") || /^ext::/iu.test(value) || /[\0\r\n]/u.test(value)) {
+    throw clientError("INVALID_ARGUMENT", "Invalid Git remote URL");
+  }
+  return value;
+}
+
 /**
  * Extract the conflicting paths from a `git switch` refusal, or undefined when
  * the failure is something else. Git prints the file list with tab-indented
@@ -881,7 +889,7 @@ export class DesktopGitService implements HostGitService {
     const escaped = relative(parent, target);
     if (escaped === ".." || escaped.startsWith(`..${sep}`)) throw clientError("INVALID_ARGUMENT", "Clone destination escapes the selected directory");
     try {
-      await this.#runner.run({ command: "git", args: ["clone", "--", operation.url, target], cwd: parent, requestId, domain: "git", phase: "cloning", timeoutMs: NETWORK_TIMEOUT, outputLimit: 16 * 1024 * 1024 });
+      await this.#runner.run({ command: "git", args: ["clone", "--", assertRemoteUrl(operation.url), target], cwd: parent, requestId, domain: "git", phase: "cloning", timeoutMs: NETWORK_TIMEOUT, outputLimit: 16 * 1024 * 1024 });
     } catch (error) {
       throw displayError(error, parent);
     }
@@ -968,8 +976,8 @@ export class DesktopGitService implements HostGitService {
       case "worktree.unlock": { const target = await this.#resolveWorktree(identity, operation.worktreeId); args = ["worktree", "unlock", target]; break; }
       case "worktree.remove": { if (operation.force) { if (!operation.expectedRevision) throw clientError("INVALID_ARGUMENT", "Force removal requires a reviewed repository revision"); await this.#assertRevision(workspaceId, operation.expectedRevision); } const target = await this.#resolveWorktree(identity, operation.worktreeId); args = ["worktree", "remove", ...(operation.force ? ["--force"] : []), target]; break; }
       case "worktree.prune": args = ["worktree", "prune", ...(operation.dryRun ? ["--dry-run"] : [])]; break;
-      case "remote.add": args = ["remote", "add", assertRef(operation.name), operation.url]; break;
-      case "remote.setUrl": args = ["remote", "set-url", ...(operation.push ? ["--push"] : []), assertRef(operation.name), operation.url]; break;
+      case "remote.add": args = ["remote", "add", assertRef(operation.name), assertRemoteUrl(operation.url)]; break;
+      case "remote.setUrl": args = ["remote", "set-url", ...(operation.push ? ["--push"] : []), assertRef(operation.name), assertRemoteUrl(operation.url)]; break;
       case "remote.remove": args = ["remote", "remove", assertRef(operation.name)]; break;
       case "fetch": args = ["fetch", ...(operation.prune ? ["--prune"] : []), ...(operation.remote ? [assertRef(operation.remote)] : [])]; timeoutMs = NETWORK_TIMEOUT; break;
       case "pull": args = ["pull", operation.strategy === "ff-only" ? "--ff-only" : operation.strategy === "rebase" ? "--rebase" : "--no-rebase", ...(operation.remote ? [assertRef(operation.remote)] : []), ...(operation.branch ? [assertRef(operation.branch)] : [])]; timeoutMs = NETWORK_TIMEOUT; break;
