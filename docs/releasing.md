@@ -1,241 +1,99 @@
 # Releasing
 
-## Current release system (v2 updater branch)
+The release workflow builds, packages and verifies the files being published.
+Source tests run during development and CI; release jobs do not repeat them.
+See [development.md](development.md) for optional full tests, Runtime checks
+and performance diagnostics.
 
-The release workflow now produces complete desktop updates and independent Runtime updates. See [updates.md](updates.md) for installation migration, storage, security and recovery.
+## Automated release
 
-- Desktop tags: `v<workspace version>`; Runtime-only tags: `runtime-v<Runtime version>`. Runtime-only releases never become Latest. Canary is selected explicitly on manual Runtime releases and is published as a prerelease. Runtime versions must be unique across channels.
-- Tag builds target both x64 and ARM64 on native Windows runners. Manual builds can select one architecture. Failed required architectures prevent publication; previous architecture files are not presented as a new build.
-- Desktop releases include Setup EXE, its blockmap, Runtime ZIP, its blockmap, and a signed `updates-win32-<arch>.json`. Runtime-only releases omit Setup. Each architecture's public files are staged in `outputs/release/<arch>`.
-- Runtime ZIP uses fixed order/timestamps and STORE compression, preserving unchanged binary chunks. Its four internal files retain the existing Runtime signature format. The Runtime source executable is not modified to append metadata.
-- `collect-update-history.mjs` verifies all earlier v2 catalogs and retrieves the signed v1 migration feed. The builder allocates component/channel/architecture sequence numbers. Missing/invalid configured history fails the build.
-- `npm run updates:build` signs the new catalog; `npm run updates:verify` verifies every public artifact and rejects unrelated files. `p5:gate` recognizes v2 artifacts.
-- `publish-update-release.mjs` checks candidate signatures and local/uploaded digests, uploads to a draft, and publishes only after all files are present. Published releases are immutable. It uses explicit notes with installation links and technical attachment descriptions.
-- Desktop publication uses `docs/releases/v<version>.md` when present. Download links for that tag must correspond to built assets; an unbuilt platform advertised in the notes blocks publication. Runtime releases retain generated notes.
-- Desktop build jobs run `scripts/full-gui-e2e.mjs` against the packaged executable in isolated profiles before uploading the release candidate. They use the configured release public key and retain platform-specific GUI evidence; no model requests are made by this gate.
-- The first v2 desktop release emits a v1-compatible migration index pointing to its Setup. Subsequent desktop releases carry that signed migration index unchanged, so long-offline v1 clients can migrate. The original Runtime URLs referenced by it remain valid.
-- Reuse is supported through a previous workflow run's signed `runtime-artifact-<arch>` artifact. It must match source version, architecture and selected channel. Release-tag reuse of four loose files is retired.
-- A desktop release may reuse the latest Runtime, but cannot publish an older Runtime than one already released for the same channel/architecture. The asset builder rejects this before assigning a new sequence, so a desktop seed cannot hide an independent Runtime update. Update the desktop release branch's Runtime pin/artifact before retrying.
+Push a new desktop tag `v<workspace version>` or Runtime tag
+`runtime-v<Runtime version>`, or run the Release workflow manually.
 
-### macOS (darwin-arm64)
+1. Build and sign the Runtime, including its binary smoke and identity checks,
+   or reuse a matching signed Runtime from a previous workflow run.
+2. Build the workspace once and package the desktop when requested.
+   `pack:win` / `pack:mac` audit the resulting package.
+3. Collect previous update catalogs, build the new signed assets, and run
+   `updates:verify` once.
+4. Upload candidates. The publisher checks signatures and uploaded digests,
+   then publishes only after all requested architectures succeed.
 
-- The job: a manual run with `include_macos` adds a `build-macos` job on `macos-15`.
-  - Tag pushes never build macOS, and the input defaults to off. Publication is all-or-nothing, so the ad hoc signed Mac build must not hold back a Windows release while it stabilizes.
-  - The job mirrors the Windows build, but packs with `pack:mac` (ad hoc signed `.app`, first-install `.dmg`, `ditto` update zip, fail-closed `audit-mac`).
-  - It uploads `runtime-artifact-darwin-arm64` and `release-candidate-darwin-arm64`.
-- Public files, staged in `outputs/release/darwin-arm64`:
-  - `OMP-Studio-<ver>-macos-arm64.zip` and its blockmap: the catalog's app asset.
-  - `OMP-Studio-<ver>-macos-arm64.dmg`: the first install. Its digest is signed into the catalog as `firstInstall`, so `updates:verify` and the publisher check its bytes.
-  - `OMP-Studio-Runtime-<rv>-macos-arm64.zip` and its blockmap.
-  - `updates-darwin-arm64.json`.
+Runtime builds install their own Bun dependencies. Reuse runs skip Bun setup,
+Rust caching/compilation and Runtime dependency installation. Neither path
+runs workspace tests, full patch replay or GUI acceptance during publication.
+The repeated P5 readiness gate and old v1 asset generator have been removed.
 
-  There is no v1 migration index for macOS, and Windows asset names are unchanged.
-- `p5:gate` on the Mac runner audits the packed bundle and records `productionMacCleanRun: manual-required`.
-- Before shipping a Mac build, check on a clean Apple Silicon machine:
-  - the first launch through Gatekeeper ("Open Anyway");
-  - the microphone and folder prompts;
-  - a real conversation;
-  - an in-app update swap, and a swap-back.
+| Manual input | Purpose |
+|---|---|
+| `release_kind` | Complete desktop release or independent Runtime |
+| `target_arch` | Windows x64, ARM64, or both (default) |
+| `runtime_channel` | Stable, or canary for Runtime-only releases |
+| `runtime_min_app_version` | Tested desktop compatibility floor; blank uses the workspace version |
+| `reuse_runtime_run_id` | Previous run containing matching signed Runtime artifacts |
+| `include_macos` | Also build and publish macOS Apple Silicon; off by default |
 
-  The build stays ad hoc signed and not notarized until a Developer ID is configured.
+Tag pushes build both Windows architectures. Runtime-only releases never
+become Latest; canary releases are prereleases. Desktop releases use stable
+Runtime. Versions are unique across channels, and published assets are immutable.
+Reuse still validates signatures, source identity, platform and channel.
+A desktop release cannot bundle an older Runtime than one already published
+for that channel and architecture.
 
-Before publishing: use a new workspace version, validate migration and silent restart on Windows, run `npm run check`, `npm run omp:test:metadata`, `npm run omp:verify:patches -- --skip-workspace-check`, `npm run updates:verify`, and `npm run p5:gate`. Signing credentials remain in the existing GitHub Environment; no new trust root is introduced.
+Signing uses the existing GitHub Environment `release` and its
+`OMP_RUNTIME_SIGNING_KEY`. The key must match the active public key in
+`packaging/keys/trusted-keys.json`. `omp:keys` creates development keys only;
+it does not replace the release identity. Custody and recovery are documented
+in [release-operations.md](release-operations.md).
 
-`normalize-release-notes.mjs` prepares a backed-up text-only edit of historical releases. Review the generated plan, then pass its path with `--apply`; any changed remote title/body/assets causes the edit to stop. It does not rename or delete assets.
+## Published files
 
-## Historical workflow: v0.1.0–v0.1.5
+| Platform | Output directory | Desktop artifacts |
+|---|---|---|
+| Windows | `outputs/release/<arch>/` | Setup EXE and blockmap, Runtime ZIP and blockmap, signed `updates-win32-<arch>.json` |
+| macOS arm64 | `outputs/release/darwin-arm64/` | App ZIP and blockmap, first-install DMG, Runtime ZIP and blockmap, signed `updates-darwin-arm64.json` |
 
-The remainder records the old renderer/preload-only updater. Its asset names and minimum-Main controls are retained here for understanding existing published releases, not for producing new releases.
+Runtime-only releases omit the desktop package. Windows also retains the
+signed v1 migration feed unchanged so old installations can migrate to Setup;
+removing the old generator does not remove client migration support.
+The macOS DMG digest is signed into the catalog. Packages remain ad hoc signed
+and not notarized until a Developer ID is configured.
 
-OMP Studio is versioned from the workspace root `package.json` (`0.1.0` at
-the first public snapshot). Workspace packages share that version today.
+Desktop notes use `docs/releases/v<version>.md` when present. Download links
+must name assets actually built for that tag. Runtime notes are generated.
+The publisher rejects missing files, inconsistent digests and attempts to
+replace a published release.
 
-## Automated Release (GitHub Actions)
+## Preparing a version
 
-The configured key identity, local custody location, and recovery procedure
-are recorded in [Release Operations](release-operations.md).
+Update the root/workspace versions and lockfile together, record user-facing
+changes in the changelog, and keep `PREVIEW_MODE_SWITCH_ENABLED=false`.
+Run checks for the affected code before tagging: the daily command is
+`npm run check`; packaging/update changes use `npm run test:tooling`, and
+Runtime changes use `npm run omp:verify:patches`. Full tests and GUI acceptance
+are available on demand rather than mandatory on every release.
 
-The repository provides a release workflow in `.github/workflows/release.yml` with two jobs:
+For local packages, apply the overlay and run `npm run pack:win` or
+`npm run pack:mac` on the target platform. When the workspace and signed Runtime
+are already current, `--skip-host --skip-build` reuses them. A package is audited
+automatically; it does not run source tests.
 
-1. **Job `runtime`** (Always runs on tag pushes; defaults to enabled on manual runs):
-   - Builds OMP Runtime from source using `bun` and native toolchains.
-   - May be skipped explicitly on manual runs only when reusing a published Runtime matching the current source version and architecture.
-   - Signs the runtime using `OMP_RUNTIME_SIGNING_KEY` stored in GitHub Environment `release`.
-2. **Job `app`**:
-   - Runs full verification gates (`check`, `omp:test:metadata`, `omp:verify:patches`).
-   - Retrieves Runtime artifacts from `runtime`, or from `reuse_runtime_tag` when rebuilding is explicitly disabled. The reused release must contain the four prefixed Runtime assets; the original v0.1.3 release does not.
-   - Packs Windows installer (`pack:win -- --skip-host`).
-   - Builds update assets (`scripts/build-update-assets.mjs`): signed app payload `tar.gz`, `update-index.json`, and `update-index.sig.json`.
-   - Runs `p5:gate` after assets exist; a missing or invalid index signature fails the release.
-   - Uploads all assets to a draft release, including the four Runtime files even when reused, then publishes it. Published releases are immutable to this workflow.
+To create public update assets locally, configure the release signing identity,
+collect verified previous catalogs with `scripts/collect-update-history.mjs`,
+set `OMP_PREVIOUS_CATALOG_DIR` and the Windows `OMP_PREVIOUS_UPDATE_INDEX` to
+the downloaded history, then run `npm run updates:build` and
+`npm run updates:verify`. The Actions workflow handles this history wiring.
+Never change a catalog after signing or include private keys, logs or backups.
 
-The workflow serializes releases and reads the previous published index before allocating its next sequence. For a local release, download the previous `update-index.json` and set `OMP_PREVIOUS_UPDATE_INDEX` to that file's path; omit it only for the first indexed release. A missing or invalid configured file fails the builder. The ABI is probed from the packaged `OMP Studio.exe --omp-print-abi`; the Node process running the builder is not an Electron ABI source. Both jobs install Bun and Runtime dependencies, and native command failures stop their steps.
+When installer, update recovery or platform permissions change, test the
+affected installation/upgrade on a suitable machine. The manual CI
+`macos-package` scope also produces a test package and GUI evidence without
+publishing. Unit tests and package audits do not demonstrate an actual
+Gatekeeper prompt, UAC flow or clean-machine launch.
 
-Patch verification no longer repeats `npm run check`. Existing callers using
-`--skip-workspace-check` remain compatible; `--with-workspace-check` opts in.
-Runtime type checks, every Runtime suite, and smoke tests still run. Native
-Runtime suites use separate processes with bounded execution time on Windows.
-CI pins Bun 1.4.2 to match the validated Runtime toolchain. The real approval
-E2E suite allows 30 seconds for cold AgentSession initialization.
+For key rotation, first distribute a full installer containing the new public
+key while still signing with the old key. Switch signing identities only after
+that trust root is installed. Update signatures and SHA digests remain the
+application's trust mechanism; OS code signing is separate.
 
-Before the first run, configure the `release` GitHub Environment and its
-`OMP_RUNTIME_SIGNING_KEY` secret with the Ed25519 private key matching the
-active public key in `packaging/keys/trusted-keys.json`. A fresh key created
-by `npm run omp:keys` is a development identity and cannot replace the
-release identity. The first indexed release must be a full Setup upgrade
-for existing installations; keep both minimum-version inputs blank.
-
-Manual inputs `payload_min_app_version` and `runtime_min_app_version` are
-reviewed compatibility baselines for the installed Main process. Blank
-means the new release's application version. They map to local builder
-variables `OMP_PAYLOAD_MIN_APP_VERSION` and `OMP_RUNTIME_MIN_APP_VERSION`.
-Lower them only after validating the new payload or Runtime against that
-specific older installed Main. A hot payload's displayed application
-version does not upgrade the Main process.
-
-If a run successfully uploaded Runtime but failed later, a manual retry can
-set `build_runtime=false` and `reuse_runtime_run_id` to that run's ID. This
-downloads its signed architecture-specific artifact directly; source-version,
-architecture and signature validation still apply during packaging.
-
-The application job verifies the Runtime before executing its smoke test in
-an isolated native cache. `scripts/prepare-runtime-test-native.mjs` copies the
-embedded native addon into the source-test workspace. This gives source tests
-the exact native dependency shipped in the signed Runtime, including on reuse
-runs, without requiring a second native compilation.
-
-### Stable and Canary
-
-Application updates always read the stable `releases/latest/download`
-index. Runtime stable uses that same signed index. Runtime canary discovers
-the newest published prerelease with a `-canary` tag and both signed index
-assets for the local architecture among the latest 30 releases. It never
-falls back to an unsigned asset or silently switches back to stable.
-Canary discovery errors do not suppress a successful stable application check.
-The two channels retain independent sequence watermarks.
-
-For canary, use a workspace application version such as `0.1.5-canary.1`
-and select `runtime_channel=canary`, or push its matching tag. The workflow
-publishes it as a prerelease without changing stable latest. Rebuild
-Runtime and use a new Runtime version for every distinct signed artifact,
-including channel changes; do not publish different bytes under the same
-Runtime version. The corresponding previous index is selected within the
-same channel. Set `runtime_min_app_version` to a tested stable Main baseline
-when distributing canary Runtime to stable application installations.
-
-### Published Assets
-
-Upload the Setup from `outputs/installer/` and these files from `outputs/release/`:
-
-- `omp-studio-app-<appVersion>-win32-<arch>.tar.gz`
-- `update-index.json` and `update-index.sig.json` for x64
-- `update-index-win32-arm64.json` and `update-index-win32-arm64.sig.json` for arm64
-- All four `omp-runtime-<version>-win32-<arch>-*` files emitted by the builder
-
-The four Runtime suffixes are `omp.exe`, `runtime-manifest.json`,
-`checksums.json`, and `runtime-signature.json`. Publish the generated names
-unchanged: the signed index maps them back to the installer's fixed local
-names. For offline directory import, restore those four original local
-names in a single directory. Do not publish the staging `app-payload/` tree.
-Retain the other architecture's index and signature as the workflow does.
-Never edit an index after signing it.
-
-## Local / Hotfix Manual Checklist
-
-1. **Changelog.** Move items from `## [Unreleased]` in `CHANGELOG.md` into a
-   new `## [X.Y.Z] - YYYY-MM-DD` section. Keep `[Unreleased]` headings empty.
-   Update the compare links at the bottom of the file.
-2. **Version.** Bump `version` in the root `package.json` and in workspace
-   `package.json` files that still hard-code the same number.
-3. **Preview switch.** For a build you would give to end users, set
-   `PREVIEW_MODE_SWITCH_ENABLED` in `apps/renderer/src/preview/mode.ts` to
-   `false`.
-4. **Gate.**
-
-   ```powershell
-   npm run check
-   npm run omp:test:metadata
-   npm run omp:verify:patches
-   ```
-
-5. **Commit** on `main` with a message such as `release: vX.Y.Z`.
-6. **Tag** annotated: `git tag -a vX.Y.Z -m "OMP Studio vX.Y.Z"`.
-7. **Push** `main` and the tag: `git push origin main --tags`.
-8. **Installer + assets + readiness.** Build the Windows artifact, build update assets, then run the
-   readiness gate — see [Windows installer](#windows-installer) below:
-
-   ```powershell
-   npm run pack:win
-   node scripts/build-update-assets.mjs
-   npm run p5:gate
-   ```
-
-9. **GitHub Release.** `gh release create vX.Y.Z --notes-file ...` (or paste
-   the changelog section). Attach the eight generated assets described above,
-   including all four prefixed Runtime files when reusing an older Runtime.
-   For canary use `--prerelease --latest=false`. Local manual publishing and
-   the tag-triggered workflow are alternative release paths; do not publish
-   the same version through both.
-
-Do not put signing private keys, `%APPDATA%` logs, or `backup/` into the tag.
-
-## Update Contracts and Policies
-
-- **PAYLOAD_FORMAT**: Currently `1`. Only increment `PAYLOAD_FORMAT` when the bootstrap ↔ payload interface changes. Each payload declares its `payloadFormat`.
-- **Main-process compatibility**: A payload updates only renderer and preload. Its `minAppVersion` defaults to the version being released, so older installed main processes use the full Setup. Only after reviewing compatibility with an older bundled main process may a release set `OMP_PAYLOAD_MIN_APP_VERSION` to that baseline. Matching Electron ABI and contract versions alone do not establish compatibility. Client contract and Studio protocol values are read from the built workspace constants.
-- **Update security and recovery migration**: The release introducing retirement of the unsigned legacy update IPC, the `payload-health` acknowledgement, and Runtime maintenance transactions requires the full Setup for earlier installations. Keep the default `minAppVersion` at that release's version; do not lower `OMP_PAYLOAD_MIN_APP_VERSION` to a main-process baseline lacking these changes. A renderer/preload payload alone cannot remove the old installed handlers or replace the Runtime lifecycle code.
-- **Forced Full Upgrade**: To force all users to run the full installer, omit the `app.payload` section from `update-index.json`. The app update plan will classify this as `full` ("no-payload").
-- **Key Rotation**: To rotate update signing keys, add the new public key to `packaging/keys/trusted-keys.json`. Publish **one full-installer** intermediate release still signed with the **old** private key but containing the new public key in `trusted-keys.json`. A renderer/preload payload cannot update the installed trust store. Only after that version is distributed should you switch the active signing key. Skipping this step leaves existing installations without a trust anchor for subsequent updates.
-- **Trust Root vs Authenticode**: The root of trust for OMP Studio updates is Ed25519 signatures and SHA-256 digests on the index and assets, not the transport channel or Windows Authenticode. Authenticode is an independent OS-level signature for the Setup installer.
-- **Registry DisplayVersion**: After hot-updating, HKLM `DisplayVersion` remains the baseline version from the installer (we intentionally do not modify registry from the app runtime). Consequently, Windows "Installed Apps" displays the baseline version number, and rerunning the installer will trigger an upgrade rather than repair.
-- **Interrupted payload updates**: A repeated download re-verifies both the source and installed copy and reuses only identical signed file digests. Different content under the same version is rejected. Activation remains explicit; closing the app before activation does not activate the staged version.
-- **Runtime recovery**: Active work blocks maintenance. Idle sessions are stopped and restored on the candidate Runtime. If activation succeeds but actual session startup fails, the previous distinct Runtime is re-verified, activated, and used to restore the original sessions. The update still reports failure even when recovery succeeds. First installs and same-version repairs have no distinct previous version to recover automatically.
-
-## Windows installer
-
-Build the NSIS artifact from the repository root:
-
-```powershell
-npm run pack:win
-```
-
-That rebuilds the signed Runtime (`omp:build:host`), emits the sandboxed
-preload, copies the **public** Runtime key into `packaging/runtime-keys/`
-(gitignored), runs electron-builder, then audits `outputs/installer/`
-(gitignored). Fail closed if the renderer, preload, `omp.exe`, or public key
-is missing, or if a private key is present.
-
-If electron-builder times out downloading Electron (common on some networks):
-
-```powershell
-$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
-npm run pack:win
-```
-
-### Readiness gate
-
-Once the installer exists and update assets are built, run the release readiness verifier:
-
-```powershell
-npm run p5:gate
-```
-
-`pack:win` audits `outputs/installer/` only. After `check` and
-`omp:test:metadata` pass once, `p5:gate` verifies `update-index.sig.json` against trusted keys,
-and then scans **all** candidate publish surfaces for private material — `apps/desktop/dist`,
-`apps/renderer/dist`, `packages/runtime-installer/dist/artifacts` and `outputs/` — before writing
-`outputs/p5-readiness.json`. It exits non-zero when artifact verification fails or a key
-marker is found. Run it after `pack:win`, not before: it skips directories
-that do not exist yet, so an early run silently scans less.
-
-`productionWindowsCleanRun` in the report stays `manual-required` — a clean
-Windows boot is still a human check.
-
-Details: [`packaging/README.md`](../packaging/README.md).
-
-## What not to publish
-
-- `signing-private.pem` or any `.pem` except a documented public key
-- Session transcripts, `models.yml` with secrets, Host logs
-- `architecture_review_v2_work/`, `ui_reference/test/`, `backup/`
-- A dirty `omp-patch/vendor/oh-my-pi` gitlink
+Update behaviour and recovery: [updates.md](updates.md).

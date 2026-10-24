@@ -1,3 +1,4 @@
+// Shared by the release asset verifier; public keys are distributable.
 const PRIVATE_MATERIAL_PATTERNS = [
   /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/u,
   /"privateKey"\s*:/u,

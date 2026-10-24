@@ -36,7 +36,7 @@ import {
   parseBuilderYaml,
   requireFromAppBuilder,
 } from "./mac-bundle.mjs";
-import { npmInvocation, repositoryRoot, run, toolingEnvironment } from "./omp-tooling.mjs";
+import { npmInvocation, repositoryRoot, run } from "./omp-tooling.mjs";
 import { bundlePreload } from "./preload-bundle.mjs";
 import { assertNativeTargetBuild } from "./target-platform.mjs";
 
@@ -93,11 +93,12 @@ async function main() {
   const skipHost = hasFlag("--skip-host") || process.env.OMP_PACK_SKIP_HOST === "1";
   const skipBuild = hasFlag("--skip-build") || process.env.OMP_PACK_SKIP_BUILD === "1";
   const npm = npmInvocation();
-  const env = toolingEnvironment({
+  const env = {
+    ...process.env,
     OMP_TARGET_PLATFORM: "darwin",
     OMP_TARGET_ARCH: "arm64",
     OMP_INSTALLER_ARTIFACT_PLATFORM: MAC_TARGET_PLATFORM,
-  });
+  };
 
   if (!skipHost) {
     console.log("[pack:mac] Building signed Runtime host artifact...");

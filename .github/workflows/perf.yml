@@ -1,14 +1,7 @@
 name: Streaming perf
 
-# 独立 job，不进主 CI 的三条门禁（check / omp:test:metadata / omp:verify:patches）：
-# 它要下 ~100MB 的 Chromium，没必要让每次 `npm ci` 都背上；playwright 也因此按需装、
-# 不写进 package.json（与 scripts/capture-readme-shots.mjs 一致）。
+# 手动性能诊断：需要 Chromium，不随普通 UI 改动或发布自动运行。
 on:
-  pull_request:
-    paths:
-      - "apps/renderer/**"
-      - "scripts/streaming-perf-gate.mjs"
-      - ".github/workflows/perf.yml"
   workflow_dispatch:
 
 concurrency:

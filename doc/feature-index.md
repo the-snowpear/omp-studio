@@ -300,7 +300,7 @@ macOS host 日志：`~/Library/Application Support/omp-studio/logs/host-YYYY-MM-
 | 可见 pane / 隐藏发布 | Renderer `conversation/conversationViews.ts`、`ConversationPane.tsx`、`SubagentConversationPane.tsx`、`conversationStore.ts`；Desktop `conversation-views.ts`、`main.ts` | 固定 chrome 方法；实际 child ID；多窗口并集；旧 preload 保持兼容；预览不登记 |
 | 有界 Mermaid | `conversation/LazyMermaid.tsx`、`mermaidQueue.ts`、`renderCache.ts` | 20,000 单元 / 600 行 / 分数 1,500；串行、可取消等待、32 项 / 4MiB 缓存 |
 | 异步语法高亮 | `highlight/HighlightedCode.tsx`、`pool.ts`、`protocol.ts`、`highlight.worker.ts`、`compute.ts`；`conversation/markdown.tsx` | 生产默认 Worker，dev 默认原路径；即时 CodeFrame；安全 token；源码/队列/缓存/Worker 均有界 |
-| 性能数值采样 | `studio-protocol/src/performance-diagnostics.ts`；Renderer `rendererPerformance.ts`、`rendererResources.ts`；Desktop `chrome-performance*.ts`、`desktop-performance.ts`；overlay `services/runtime-performance.ts` | 每 60 秒采样，门控写本地日志；不读正文、不唤醒 Runtime；Runtime helper 与 canonical 镜像测试 |
+| 性能数值采样 | `studio-protocol/src/performance-diagnostics.ts`；Renderer `rendererPerformance.ts`、`rendererResources.ts`；Desktop `chrome-performance*.ts`、`desktop-performance.ts`；overlay `services/runtime-performance.ts` | 每 60 秒采样，门控写本地日志；不读正文、不唤醒 Runtime；数值 helper 保留行为测试 |
 | 性能门禁与回滚 | `scripts/host-replay-bench.mjs`、`streaming-perf-gate.mjs`、`render-work-bench.mjs`、`native-visibility-smoke.cjs`、`compare-streaming-perf.mjs`；Renderer `performanceOptions.ts` | 合成 fixture，输出 `outputs/perf/`；独立生产/file harness；默认选择和命令见 [`docs/performance.md`](../docs/performance.md) |
 
 - 新功能落地后：在对应表加一行（UI + Host/Desktop + 若有 Runtime）。

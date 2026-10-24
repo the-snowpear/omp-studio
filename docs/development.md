@@ -1,8 +1,8 @@
 # Development
 
 Windows is the main inner-loop platform; an Apple Silicon Mac runs the same
-commands, and CI runs the full gate on both. Node 22+ and npm workspaces drive
-this repository; Bun is required inside the vendored OMP tree.
+commands. Automatic CI builds and runs core tests on Windows. Node 22+ and
+npm workspaces drive this repository; Bun is needed only for Runtime work.
 
 ## Layout
 
@@ -26,16 +26,21 @@ in a pull request.
 ```powershell
 npm install
 npm run omp:overlay:apply # once after cloning or changing the upstream pin
-npm run typecheck
-npm test
-npm run check          # build once (includes TypeScript), then all tests once
-npm run build
+npm run check          # build once, then core regression tests
 npm run preview        # Electron from source
-npm run pack:win       # unsigned Windows NSIS installer
-npm run pack:mac       # ad hoc signed macOS .app, .dmg and update zip (on an Apple Silicon Mac)
 ```
 
-Renderer charts reuse the pinned native sources. Apply the overlay and generated seams before the first workspace build, including UI-only work. When editing native source, regenerate before reapplying so local edits are preserved. CI applies these inputs before the workspace gate, reverses them, then independently verifies patch replay.
+Choose other commands as needed; these are alternatives, not a checklist:
+
+| Command | Use |
+|---|---|
+| `npm run typecheck` | TypeScript checks without bundling the renderer |
+| `npm run build` | Production build, no tests |
+| `npm test` | Build and run all workspace tests |
+| `npm run test:tooling` | Build script dependencies and test packaging, signatures and updates |
+| `npm run pack:win` / `npm run pack:mac` | Build and audit a desktop package on its native platform |
+
+Renderer charts reuse the pinned native sources. Apply the overlay and generated seams before the first workspace build, including UI-only work. When editing native source, regenerate before reapplying so local edits are preserved. Ordinary builds need the applied sources but do not compile Rust or install the Runtime's Bun dependencies.
 
 Scoped UI work:
 
@@ -93,33 +98,45 @@ Details: [`omp-patch/README.md`](../omp-patch/README.md).
 
 ## Tests
 
-Tests must assert an observable contract (behaviour, error mapping, state
-transition), not that a fixture was copied into memory. Do not source-grep
-implementation files. Prefer the package-local test script; `npm run check`
-is the merge gate.
+Tests should protect observable behaviour. Do not add fixture inventories,
+source-text/AST equality checks, or tests that only pin a UI label or default
+constant. Small copy/style changes usually need visual review, not new tests.
 
-The root `check` / `test` builds each workspace once and then runs `test:built`.
-Package-local `test` keeps its build prerequisite; `test:built` assumes current
-build output and is for orchestration only. Root `typecheck` aliases the build,
-which already checks TypeScript in every workspace.
+`npm run check` builds once and runs the core list in `scripts/test-core.mjs`:
+Bridge/client communication, session lifecycle and history, Composer and
+approvals, conversation state, local files, installation and update recovery.
+`npm test` keeps the broader workspace regression suite available on demand.
+After a current build, `test:core` and `test:built` rerun tests without rebuilding.
+Package-local test commands are useful when editing one feature.
 
-Run Runtime patch verification only for Runtime/overlay/seam changes; it no longer
-repeats the workspace gate. `--with-workspace-check` opts into both when needed;
-the old `--skip-workspace-check` argument remains harmless for existing callers.
-Metadata tests belong to packaging/signature/update changes and releases.
-Electron acceptance belongs to affected UI/lifecycle changes and release candidates.
-The streaming performance gate keeps its existing thresholds and path trigger.
-`p5:gate` verifies release artifacts and scans for private material, without
-re-running source tests. It cannot certify a real installed app from unit tests.
+`typecheck` builds shared TypeScript declarations in dependency order, then
+checks renderer and desktop types; it does not run Vite. Packaging scripts
+have a separate `test:tooling` entry. Runtime patch verification is for
+Runtime/overlay/seam changes and upstream upgrades. Performance benchmarks
+and `scripts/full-gui-e2e.mjs` are manual diagnostics for affected behaviour.
+
+Release jobs build and package artifacts, audit the package, and verify the
+signed update assets. They do not repeat source tests. The duplicate P5
+readiness gate and the unused v1 asset generator have been removed; the
+current builder still preserves the signed migration feed for old clients.
+
+## CI
+
+PRs and pushes to `main` run one Windows build and the core suite. Documentation
+and UI-reference-only changes skip CI. The manual CI workflow has three scopes:
+
+- `core` (default): the same Windows checks.
+- `full`: all workspace and tooling tests on Windows and macOS, plus native
+  Runtime builds and patch verification.
+- `macos-package`: an ad hoc signed test package and packaged Electron smoke
+  checks, with evidence and installers retained for seven days; nothing is published.
+
+The Streaming perf workflow is manual only. Run it when investigating or
+changing streaming performance. No paid model calls are needed for packaged
+Electron checks; physical IME, Gatekeeper and TCC still require device testing
+when those behaviours change.
 
 ## Feature map
 
 Before editing a product surface, open [`doc/feature-index.md`](../doc/feature-index.md).
 That file is the map; [`AGENTS.md`](../AGENTS.md) only routes to it.
-
-
-Windows and macOS CI share one matrix definition and the same scoped gates.
-The manual CI run also builds a signed darwin-arm64 Runtime, packs the Mac app,
-and runs `scripts/full-gui-e2e.mjs` against that packaged app with an isolated
-home/profile and no paid model calls. GUI evidence is uploaded even on failure.
-This does not replace physical IME, Gatekeeper or TCC permission testing.

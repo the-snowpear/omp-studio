@@ -98,7 +98,7 @@ Renderer 有全局 **预览模式**（顶栏右上角「预览」开关，三个
 
 ## 验证
 
-优先按改动范围验证；完整门禁：
+优先按改动范围验证；日常检查只构建一次并运行核心流程回归：
 
 ```bash
 npm run check
@@ -107,11 +107,16 @@ npm run check
 常用命令：
 
 - `npm run build`
-- `npm run typecheck`
-- `npm test`
+- `npm run typecheck`（TypeScript 检查，不打 Vite 生产包）
+- `npm test`（按需运行完整工作区测试）
+- `npm run test:tooling`（打包、签名、更新脚本改动时运行）
 - `npm run preview`（Windows：构建后启动 Electron 预览）
 
-运行时/补丁专项命令见根目录 `package.json`，包括 `runtime:verify-source`、`omp:test:metadata` 和 `omp:verify:patches`。
+核心测试名单在 `scripts/test-core.mjs`。不要把页面细节、演示 fixture 或性能基准加入默认门禁；新测试应验证实际行为。
+
+普通 PR / main CI 只运行 Windows 构建和核心测试；纯文档改动跳过。完整双平台与 Runtime 检查通过 CI 的 `full` 手动运行，性能 workflow 也只手动触发。发布负责构建、打包和产物校验，不重复跑源码测试。
+
+运行时/补丁专项命令见根目录 `package.json`，包括 `runtime:verify-source` 和 `omp:verify:patches`，只在相关改动或升级上游时按需运行。
 
 ## 改 OMP Runtime 源码
 

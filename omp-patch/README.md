@@ -55,13 +55,10 @@ npm run omp:verify:patches
 
 The verifier copies the overlay in, applies the seam patches in series order, runs the OMP source gates (run root `npm run check` separately), then reverses the patches and removes the overlay in a `finally` cleanup. Beyond "it builds" it enforces two invariants: the overlay may not modify any upstream-tracked file (that would smuggle a seam change past review), and every seam patch must pass `git apply --check` before being applied. It intentionally does not rebuild the compiled host binary; milestone binary validation runs with the fork applied via `npm run omp:build:host`.
 
-Before the first source change against a fresh pin, verify an unmodified vendor workspace. Canonical overlay and patch metadata remain stored separately:
-
-```powershell
-npm run omp:install-deps
-npm run omp:build:host
-npm run omp:verify:prepatch
-```
+Run this verification for Runtime changes and upstream upgrades, or select
+`full` in the manual CI workflow. Ordinary UI changes and release packaging
+do not rerun it. The old pre-patch baseline gate has been removed; validate
+the resulting Studio fork instead of building and testing upstream twice.
 
 Never run `git submodule update` while the fork is applied, and never use root-wide `git add -A` while unrelated Studio/frontend work is present.
 

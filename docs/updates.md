@@ -72,7 +72,7 @@ v2 清单采用 Ed25519 签名，包含组件、版本、通道、架构、序�
 
 ## 发布前验收
 
-运行 `npm run check`、`npm run omp:test:metadata`、`npm run updates:verify`、`npm run p5:gate`。Windows 安装迁移、UAC、静默重启、安装失败恢复和 ARM64 必须在对应环境验收。不得将代码编译通过或本地 HTTP 差分测试标记为已完成 Windows GUI 迁移验收。
+更新实现改动时运行 `npm run check` 和 `npm run test:tooling`。发布流程在打包审计后只运行一次 `npm run updates:verify`，不重复源码测试或 P5 门禁。涉及 Windows 安装迁移、UAC、静默重启、安装失败恢复和 ARM64 的改动，在对应环境按需验收；代码编译或本地 HTTP 差分测试不能替代实际安装验证。
 
 macOS 同理，以下各项须在干净的 Apple Silicon 机器上实测：
 

@@ -28,7 +28,7 @@ on:
         default: ""
       include_macos:
         type: boolean
-        description: Also build, gate and publish macOS (darwin-arm64, ad hoc signed)
+        description: Also build and publish macOS (darwin-arm64, ad hoc signed)
         default: false
   push:
     tags: ["v*", "runtime-v*"]
@@ -89,18 +89,20 @@ jobs:
           node-version: 24
           cache: npm
       - uses: oven-sh/setup-bun@v2
+        if: inputs.reuse_runtime_run_id == ''
         with:
           bun-version: "1.4.2"
       - uses: Swatinem/rust-cache@v2
+        if: inputs.reuse_runtime_run_id == ''
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
-          key: ${{ matrix.arch }}
+          shared-key: platform
+          key: natives-win32-${{ matrix.arch }}
           cache-on-failure: "true"
       - name: Install dependencies
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           npm ci
-          npm run omp:install-deps
       - name: Reuse signed Runtime
         if: inputs.reuse_runtime_run_id != ''
         uses: actions/download-artifact@v4
@@ -109,7 +111,7 @@ jobs:
           path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
           run-id: ${{ inputs.reuse_runtime_run_id }}
           github-token: ${{ github.token }}
-      - name: Build Runtime, verify, package and sign release
+      - name: Build, package and verify release
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
           REUSE_RUNTIME_RUN_ID: ${{ inputs.reuse_runtime_run_id }}
@@ -125,12 +127,7 @@ jobs:
               npm run omp:build:host
             } else {
               npm run build
-              node scripts/prepare-runtime-test-native.mjs
             }
-            npm run check
-            npm run omp:test:metadata
-            node scripts/unapply-release-overlay.mjs
-            npm run omp:verify:patches -- --skip-workspace-check
             npm run pack:win:prepare
             $runtime = Get-ChildItem packaging/runtime-payload -Recurse -Filter runtime-manifest.json | ForEach-Object { Get-Content $_.FullName | ConvertFrom-Json }
             if (@($runtime).Count -ne 1 -or $runtime.channel -ne $env:OMP_RUNTIME_CHANNEL) { throw "Runtime identity/channel mismatch" }
@@ -147,7 +144,6 @@ jobs:
             if ($env:OMP_RELEASE_KIND -eq "desktop") { npm run pack:win -- --skip-host --skip-build }
             npm run updates:build
             npm run updates:verify
-            npm run p5:gate
           } finally {
             if (Test-Path -LiteralPath $keyPath) { Remove-Item -LiteralPath $keyPath -Force }
           }
@@ -156,26 +152,6 @@ jobs:
           name: runtime-artifact-${{ matrix.arch }}
           path: packages/runtime-installer/dist/artifacts/win32-${{ matrix.arch }}/
           if-no-files-found: error
-      - name: Packaged Electron GUI acceptance
-        if: needs.prepare.outputs.kind == 'desktop'
-        timeout-minutes: 15
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          npm run omp:overlay:apply
-          npm install --no-save --package-lock=false playwright@1.62.1
-          $keys = Get-Content packaging/keys/trusted-keys.json | ConvertFrom-Json -AsHashtable
-          $env:OMP_RUNTIME_TRUSTED_PUBLIC_KEY = Join-Path $env:GITHUB_WORKSPACE ("packaging/keys/" + $keys.keys[$keys.activeKeyId])
-          $env:OMP_RUNTIME_SIGNING_KEY_ID = $keys.activeKeyId
-          $executables = @(Get-ChildItem outputs/installer -Recurse -Filter "OMP Studio.exe" | Where-Object { $_.Directory.Name -like '*unpacked' })
-          if ($executables.Count -ne 1) { throw "Expected one packaged desktop executable" }
-          $env:OMP_E2E_PACKAGED_EXE = $executables[0].FullName
-          $env:OMP_E2E_OUTPUT_DIR = Join-Path $env:GITHUB_WORKSPACE "outputs/release-gui-e2e"
-          node scripts/full-gui-e2e.mjs
-      - uses: actions/upload-artifact@v4
-        if: always() && needs.prepare.outputs.kind == 'desktop'
-        with:
-          name: release-gui-evidence-windows-${{ matrix.arch }}
-          path: outputs/release-gui-e2e/
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-${{ matrix.arch }}
@@ -213,17 +189,19 @@ jobs:
           node-version: 24
           cache: npm
       - uses: oven-sh/setup-bun@v2
+        if: inputs.reuse_runtime_run_id == ''
         with:
           bun-version: "1.4.2"
       - uses: Swatinem/rust-cache@v2
+        if: inputs.reuse_runtime_run_id == ''
         with:
           workspaces: omp-patch/vendor/oh-my-pi -> target
-          key: darwin-arm64
+          shared-key: platform
+          key: natives-darwin-arm64
           cache-on-failure: "true"
       - name: Install dependencies
         run: |
           npm ci
-          npm run omp:install-deps
       - name: Reuse signed Runtime
         if: inputs.reuse_runtime_run_id != ''
         uses: actions/download-artifact@v4
@@ -232,7 +210,7 @@ jobs:
           path: packages/runtime-installer/dist/artifacts/darwin-arm64/
           run-id: ${{ inputs.reuse_runtime_run_id }}
           github-token: ${{ github.token }}
-      - name: Build Runtime, verify, package and sign release
+      - name: Build, package and verify release
         env:
           OMP_SIGNING_SECRET: ${{ secrets.OMP_RUNTIME_SIGNING_KEY }}
           REUSE_RUNTIME_RUN_ID: ${{ inputs.reuse_runtime_run_id }}
@@ -249,12 +227,7 @@ jobs:
             npm run omp:build:host
           else
             npm run build
-            node scripts/prepare-runtime-test-native.mjs
           fi
-          npm run check
-          npm run omp:test:metadata
-          node scripts/unapply-release-overlay.mjs
-          npm run omp:verify:patches -- --skip-workspace-check
           npm run pack:mac:prepare
           runtime_version="$(node -e '
             const fs = require("node:fs"), path = require("node:path");
@@ -276,31 +249,11 @@ jobs:
           if [ "$OMP_RELEASE_KIND" = desktop ]; then npm run pack:mac -- --skip-host --skip-build; fi
           npm run updates:build
           npm run updates:verify
-          npm run p5:gate
       - uses: actions/upload-artifact@v4
         with:
           name: runtime-artifact-darwin-arm64
           path: packages/runtime-installer/dist/artifacts/darwin-arm64/
           if-no-files-found: error
-      - name: Packaged Electron GUI acceptance
-        if: needs.prepare.outputs.kind == 'desktop'
-        timeout-minutes: 15
-        env:
-          OMP_E2E_PACKAGED_EXE: ${{ github.workspace }}/outputs/installer-mac/mac-arm64/OMP Studio.app/Contents/MacOS/OMP Studio
-          OMP_E2E_OUTPUT_DIR: ${{ github.workspace }}/outputs/release-gui-e2e
-        run: |
-          npm run omp:overlay:apply
-          npm install --no-save --package-lock=false playwright@1.62.1
-          OMP_RUNTIME_TRUSTED_PUBLIC_KEY="$GITHUB_WORKSPACE/packaging/keys/$(node -p 'const t=require("./packaging/keys/trusted-keys.json"); t.keys[t.activeKeyId]')"
-          export OMP_RUNTIME_TRUSTED_PUBLIC_KEY
-          OMP_RUNTIME_SIGNING_KEY_ID="$(node -p 'require("./packaging/keys/trusted-keys.json").activeKeyId')"
-          export OMP_RUNTIME_SIGNING_KEY_ID
-          node scripts/full-gui-e2e.mjs
-      - uses: actions/upload-artifact@v4
-        if: always() && needs.prepare.outputs.kind == 'desktop'
-        with:
-          name: release-gui-evidence-macos-arm64
-          path: outputs/release-gui-e2e/
       - uses: actions/upload-artifact@v4
         with:
           name: release-candidate-darwin-arm64

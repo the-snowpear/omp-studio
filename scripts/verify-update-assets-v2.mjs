@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { extractRuntimeArchive, verifyUpdateManifest, verifySignedArtifact, RUNTIME_ARTIFACT_LAYOUT, parseRuntimeInstallationManifest, createTrustedKeyVerifier, parseRuntimeSignatureManifest } from "@omp-studio/runtime-installer";
 import { releaseKeys } from "./build-update-assets-v2.mjs";
-import { containsPrivateMaterial } from "./p5-secret-scan.mjs";
+import { containsPrivateMaterial } from "./private-material.mjs";
 import { MAC_TARGET_PLATFORM, legacyIndexName, releaseOutputDirectory, releaseTargetsDarwin } from "./release-assets.mjs";
 
 function sameBytes(bytes, file) {

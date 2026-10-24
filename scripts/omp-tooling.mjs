@@ -63,7 +63,8 @@ export function npmInvocation() {
 export function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repositoryRoot,
-    env: options.env ?? toolingEnvironment(),
+    // Runtime builders opt into toolingEnvironment; Git/npm helpers need no Bun.
+    env: options.env ?? process.env,
     encoding: options.capture ? "utf8" : undefined,
     stdio: options.capture ? "pipe" : (options.stdio ?? ["ignore", "inherit", "inherit"]),
     windowsHide: true,

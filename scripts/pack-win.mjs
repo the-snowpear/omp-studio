@@ -20,7 +20,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
-import { npmInvocation, repositoryRoot, run, toolingEnvironment } from "./omp-tooling.mjs";
+import { npmInvocation, repositoryRoot, run } from "./omp-tooling.mjs";
 import { auditInstallerOutput, defaultInstallerOutputDirectory } from "./audit-installer.mjs";
 import { buildInstallerHost } from "./build-installer-host.mjs";
 import { bundlePreload } from "./preload-bundle.mjs";
@@ -72,13 +72,14 @@ async function main() {
   const targetArch = resolveTargetArch();
   const outputDirectory = defaultInstallerOutputDirectory();
   if (!skipHost) assertNativeRuntimeBuild(targetArch);
-  const env = toolingEnvironment({
+  const env = {
+    ...process.env,
     OMP_TARGET_ARCH: targetArch,
     OMP_INSTALLER_ARTIFACT_PLATFORM: `win32-${targetArch}`,
     CSC_IDENTITY_AUTO_DISCOVERY: "false",
     CSC_LINK: "",
     WIN_CSC_LINK: "",
-  });
+  };
 
   if (!skipHost) {
     console.log("[pack:win] Building signed Runtime host artifact...");

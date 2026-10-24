@@ -116,10 +116,12 @@ local network access, and the Keychain may ask to allow access once more.
 ## Verify
 
 ```powershell
-npm run check                 # typecheck + tests
-npm run omp:test:metadata
-npm run omp:verify:patches    # clean vendor tree, apply overlay+patches, reverse
+npm run check                 # build + core regression tests
 ```
+
+Full workspace tests (`npm test`), packaging tests (`npm run test:tooling`),
+and Runtime patch verification (`npm run omp:verify:patches`) are available
+when those areas change. They are not required just to run the app.
 
 ## Next
 

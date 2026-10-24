@@ -42,35 +42,22 @@ must manually install v0.1.4 Setup to acquire the new trust root.
 
 ## Release Procedure
 
-Use [releasing.md](releasing.md) for artifact names, channels and gates.
-The first indexed release is v0.1.4, targeting Windows x64. Keep the payload
-and Runtime minimum Main versions at 0.1.4 for this migration. The release
-contains the Setup, signed renderer/preload archive, signed update index,
-and four signed Runtime files. The preview switch must remain disabled.
+Use [releasing.md](releasing.md) for the current workflow, asset names and
+local package commands. Source checks belong to development; publication
+builds once, audits the package and verifies the signed update assets.
 
-After all workspace package versions and the lockfile agree, push the
-matching `vX.Y.Z` tag. Tag runs always build and sign Runtime. The workflow
-checks the source, packages Setup, creates assets, verifies readiness, and
-publishes a draft only after its assets have been uploaded. Manual workflow
-runs support reuse only when all four matching Runtime assets already exist.
-
-For a local build, set these PowerShell variables without printing the key:
+Use the existing signing identity for local release builds without printing
+the private key:
 
 ```powershell
 $env:OMP_RUNTIME_SIGNING_KEY_ID = 'omp-studio-release-2026b'
-$env:OMP_RUNTIME_SIGNING_KEY = Join-Path $env:APPDATA 'omp-studio\release-keys\omp-studio-release-2026b\signing-private.pem'
-npm run omp:overlay:apply
-npm run pack:win
-node scripts/build-update-assets.mjs
-npm run p5:gate
+$env:OMP_RUNTIME_SIGNING_KEY = Join-Path $env:APPDATA 'omp-studioelease-keysomp-studio-release-2026bsigning-private.pem'
 ```
 
-Subsequent local releases must also provide `OMP_PREVIOUS_UPDATE_INDEX` for
-the previous signed index from the same channel and architecture. Do not
-reuse a sequence or change bytes under an existing published version.
-Use a new application version and a new Runtime version for changed Runtime
-content. Do not replace the release public key with an automatically
-generated development key.
+Previous signed catalogs determine update sequences. The Actions workflow
+collects them automatically; local publishing must supply the verified history
+paths described in the release guide. Use new versions for changed content,
+and never replace the release public key with a development key.
 
 ## Recovery and Rotation
 

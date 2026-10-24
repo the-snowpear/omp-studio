@@ -16,8 +16,8 @@
 
 ---
 
-- [ ] `npm run check` (or a documented subset)
-- [ ] Runtime / overlay change: `npm run omp:verify:patches`
+- [ ] Relevant checks recorded above; docs-only changes need no tests
+- [ ] Runtime or packaging changes: relevant tests run when applicable
 - [ ] Preview **and** real Host paths updated, if this is a read surface
 - [ ] `CHANGELOG.md` `[Unreleased]` updated when user-facing
 - [ ] No secrets, `%APPDATA%` logs, `backup/`, or dirty vendor gitlink

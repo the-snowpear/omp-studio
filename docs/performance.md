@@ -75,6 +75,8 @@ PERF_BUILD_MODE=file PERF_REPORT=outputs/perf/file-smoke.json node scripts/rende
 
 `render-work-bench.mjs` 验证 100 个代码块、即时围栏、Mermaid、50 次主/子视图生命周期、缓存计数及空闲 Worker 归零。`file` 模式通过 Electron 加载生产文件，并另外启动未接 Playwright 的原生窗口验证最小化/恢复，避免自动化的焦点模拟掩盖 document visibility。
 
-Runtime 修改仍按 `npm run omp:overlay:apply` → vendor 编辑 → `npm run omp:patches:regen`。`npm run omp:verify:patches -- --skip-workspace-check` 要求 vendor 干净，会应用并在 finally 清理补丁/overlay；全仓 `npm run check` 必须另外通过。不要在未回收的 vendor 改动上运行清理。
+性能 workflow 只手动触发，日常 CI 与发布不运行基准。需要比较性能时使用上述命令，阈值和采样方式保持一致。
+
+Runtime 修改仍按 `npm run omp:overlay:apply` → vendor 编辑 → `npm run omp:patches:regen`。`npm run omp:verify:patches` 要求 vendor 干净，会应用并在 finally 清理补丁/overlay；它是 Runtime 专项验证，独立于日常 `npm run check`。不要在未回收的 vendor 改动上运行清理。
 
 验收数据及未覆盖范围见 [本次性能报告](performance-report-2026-09-24.md)。RSS 未马上下降不单独判失败；以 provider/listener/pending/Worker 计数及三批操作后的 retained heap 为准。若计数稳定而 RSS 持续上涨，另做诊断，不自动增加强制 GC 或杀进程策略。

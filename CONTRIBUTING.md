@@ -47,14 +47,16 @@ install script documents those.
 6. Add or update tests that protect an observable contract. Do not add
    tautologies (`expect(true).toBe(true)`, source-text greps).
 7. Put user-facing changes under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
-8. Run the gate that matches the change. The full gate is `npm run check`.
-   Runtime / patch work also needs `npm run omp:verify:patches`.
+8. Run checks that match the change. `npm run check` builds once and runs
+   core regressions; `npm test` runs the full workspace suite when needed.
+   Use `npm run test:tooling` for packaging/update scripts and
+   `npm run omp:verify:patches` for Runtime / patch work.
 
 ## Pull request checklist
 
 Use the GitHub PR template. At minimum:
 
-- [ ] `npm run check` (or a documented subset plus why the rest is N/A)
+- [ ] Relevant checks recorded (`npm run check` for core regression; docs-only changes need no tests)
 - [ ] `CHANGELOG.md` updated when the change is user-facing
 - [ ] Preview and real data paths both handled, if you touched a read surface
 - [ ] No secrets, local paths, or `backup/` files
