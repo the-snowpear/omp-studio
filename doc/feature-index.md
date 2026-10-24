@@ -396,3 +396,18 @@ GUI 适配及本地验收记录：[实施记录](../docs/migrations/omp-18.4.4-g
 | Judge 模型配置 | `judgments/JudgeModelPane.tsx`、`JudgmentsPane.tsx` | 既有 `runtime.models.list` 和 `runtime.settings.get/set`；原生 NativeJudge 与批次用量 |
 
 本版移除创建子代理时的单次模型覆盖和 Codex Code Mode 设置入口。旧协议读取兼容保留，废弃写操作明确拒绝。[完整版本变化与验收](../docs/migrations/omp-18.10.4.md)。
+
+## OMP 18.12.6 适配
+
+| 功能 | UI | Runtime / Host / Desktop |
+|---|---|---|
+| Ask and remember、记住授权、审批时输入 | `ComposerApprovalPicker.tsx`、`deck/ApprovalCard.tsx`、`InteractionDeck.tsx`、`App.tsx` `steerPastApproval` | `interactions.ts` 的 `session` / `grants`；overlay `remote-extension-ui.ts`（`approve()`、`approveTool`）、`interaction-port.ts` `approvalAnswerFromValue`；接缝 `extensions/wrapper.ts` 经上游 `requestApproval()` |
+| 忘记已记住的审批 | `settings/tabs.tsx` 权限页 | `approvals.forget` → `services/runtime-feature-service.ts` → 上游 `clearApprovalGrants()` |
+| 作业树 / 详情 / widget / wait tile | `AgentHub.tsx`、`conversation/JobWidget.tsx`、`JobInspector.tsx`、`jobTree.ts`、`ToolBody.tsx` | `services/job-service.ts`、`state-projector.ts`（`jobAgents`、widget 订阅）、`jobs.inspect` → `services/job-inspect.ts` |
+| 等待后台作业、MCP 进度、Eval 视图 | `App.tsx` 活动行、`ToolBody.tsx` McpBody / EvalBody | `services/conversation-live-projector.ts`（`awaitingAsyncWork`、`tool.updated.progress`、`cells[].views`） |
+| MCP 重新授权 / 退出 / 重连 | `capabilities/McpAuthActions.tsx` | `mcp.auth.*` → `services/mcp-auth-service.ts`（上游 `oauth-reauth.ts`） |
+| Seance 只读咨询 | `HistoryPage.tsx`、`history/SeanceDialog.tsx` | `seance.ask` → `services/seance-service.ts`（task 工具 + seance agent） |
+| 会话构建来源 | `DiagnosticsPage.tsx` | `state-projector.ts` `runtimeIdentity` |
+| 新设置、`widget` 角色、`imageCountBudget`、`structured` | `NativePreferencesPane.tsx`、`FeatureSettingsPane.tsx`、`ModelConfigPage.tsx`、`SubagentsPanel.tsx` | 两组设置白名单、`model-kinds.ts`、`omp-models-adapter.ts`、`omp-agent-definitions-adapter.ts` |
+
+新 Runtime 操作集中在 `contracts/runtime-features.ts`（overlay 镜像 `runtime-features-protocol.ts`）。[完整版本变化与验证](../docs/migrations/omp-18.12.6.md)。
