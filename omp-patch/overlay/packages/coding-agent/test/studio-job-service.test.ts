@@ -67,6 +67,81 @@ function fixture(options: { confirm?: boolean } = {}) {
 	return { service, jobs, cancelled, abortedAgents };
 }
 
+describe("StudioJobService job tree and widgets", () => {
+	test("keeps a settled job's last widget and frozen end, and links owners up to the root", () => {
+		const jobs = new Map<string, AsyncJob>();
+		const views: string[] = [];
+		const port: StudioJobsPort = {
+			getJob: id => jobs.get(id),
+			getRunningJobs: () => [...jobs.values()].filter(candidate => candidate.status === "running"),
+			getRecentJobs: () => [...jobs.values()].filter(candidate => candidate.status !== "running"),
+			getAllJobs: () => [...jobs.values()],
+			cancel: () => false,
+			widgetView: candidate => {
+				views.push(candidate.id);
+				return {
+					title: `watch ${candidate.id}`,
+					blocks: [{ kind: "text", text: "ok" }],
+					state: "live",
+					updatedAt: 1,
+				};
+			},
+		};
+		// "Gone" left the registry; its task job (owned by Worker) still links it.
+		const registry = new Map([
+			["Main", { id: "Main" }],
+			["Worker", { id: "Worker", parentId: "Main" }],
+		]);
+		const service = new StudioJobService(port, { get: id => registry.get(id) });
+		jobs.set("task-gone", job("task-gone", { ownerId: "Worker", agentId: "Gone" }));
+		jobs.set(
+			"bash-1",
+			job("bash-1", {
+				type: "bash",
+				ownerId: "Gone",
+				agentId: undefined,
+				process: { command: "cargo test --workspace", cwd: "/repo", pids: () => [42] },
+			}),
+		);
+		const running = service.list({ callerAgentId: "Main" }).find(row => row.jobId === "bash-1");
+		expect(running?.widget?.title).toBe("watch bash-1");
+		expect(running?.command).toBe("cargo test --workspace");
+
+		const bash = jobs.get("bash-1")!;
+		bash.status = "completed";
+		bash.endTime = bash.startTime + 5_000;
+		views.length = 0;
+		const settled = service.get("bash-1");
+		expect(views).toEqual([]); // no widget authoring for a settled job
+		expect(settled.widget?.title).toBe("watch bash-1");
+		expect(Date.parse(settled.completedAt!) - Date.parse(settled.startedAt)).toBe(5_000);
+
+		const links = service.agentLinks(service.list({ callerAgentId: "Main", includeRecent: true }), "Main");
+		expect(links).toEqual(
+			expect.arrayContaining([
+				{ id: "Gone", parentId: "Worker" },
+				{ id: "Worker", parentId: "Main" },
+			]),
+		);
+		expect(links.some(link => link.id === "Main")).toBe(false);
+	});
+
+	test("reports a running task's stage and completion estimate from its progress", () => {
+		const h = fixture();
+		h.jobs.set(
+			"task-1",
+			job("task-1", {
+				latestDetails: { progress: [{ id: "task-1", stage: " wiring the parser ", completionPercent: 140 }] },
+			}),
+		);
+		const row = h.service.get("task-1");
+		expect(row.stage).toBe("wiring the parser");
+		expect(row.completionPercent).toBe(100);
+		h.jobs.get("task-1")!.status = "completed";
+		expect(h.service.get("task-1").completionPercent).toBeUndefined();
+	});
+});
+
 describe("WP-054 StudioJobService", () => {
 	test("lists bounded owner-scoped DTOs without native handles", () => {
 		const h = fixture();

@@ -8,6 +8,12 @@ export class StudioConversationError extends Error {
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type ConversationRole = "user" | "assistant" | "system";
+/** MCP `notifications/progress`: `progress` of an optional `total`, with an optional phase message. */
+export interface ConversationToolProgress {
+	progress: number;
+	total?: number;
+	message?: string;
+}
 
 export type ConversationContentBlock =
 	| { type: "text"; text: string; truncated?: boolean }
@@ -177,6 +183,8 @@ export type ConversationRuntimeEvent =
 			updateMode: "append" | "replace";
 			output?: string;
 			truncated?: boolean;
+			/** Latest MCP progress notification of the call. */
+			progress?: ConversationToolProgress;
 	  }
 	| {
 			kind: "conversation.tool.completed";
@@ -461,7 +469,29 @@ export function parseConversationRuntimeEvent(value: unknown): ConversationRunti
 			if ("arguments" in input) parseJsonValue(input.arguments);
 			return input as unknown as ConversationRuntimeEvent;
 		case "conversation.tool.updated":
-			exactKeys(input, ["kind", "sessionId", "turnId", "toolCallId", "updateMode", "output", "truncated"]);
+			exactKeys(input, [
+				"kind",
+				"sessionId",
+				"turnId",
+				"toolCallId",
+				"updateMode",
+				"output",
+				"truncated",
+				"progress",
+			]);
+			if (input.progress !== undefined) {
+				const progress = input.progress as Record<string, unknown> | null;
+				if (
+					!progress ||
+					typeof progress !== "object" ||
+					typeof progress.progress !== "number" ||
+					!Number.isFinite(progress.progress) ||
+					(progress.total !== undefined && typeof progress.total !== "number") ||
+					(progress.message !== undefined && typeof progress.message !== "string")
+				) {
+					throw new StudioConversationError("Invalid tool progress");
+				}
+			}
 			boundedId(input.turnId);
 			boundedId(input.toolCallId);
 			if (input.updateMode !== "append" && input.updateMode !== "replace") {

@@ -202,6 +202,15 @@ import {
 	type JudgmentResultMap,
 } from "./judgments-protocol";
 import {
+	RUNTIME_FEATURE_KINDS,
+	RUNTIME_FEATURE_READ_KINDS,
+	isRuntimeFeatureKind,
+	validateRuntimeFeatureOperation,
+	validateRuntimeFeatureResult,
+	type RuntimeFeatureOperation,
+	type RuntimeFeatureResultMap,
+} from "./runtime-features-protocol";
+import {
 	ANNOTATION_OPERATION_KINDS,
 	validateAnnotationOperation,
 	validateAnnotationResult,
@@ -283,6 +292,7 @@ export type WorkbenchOperation =
 	| BenchmarkOperation
 	| RuntimeCatalogOperation
 	| JudgmentOperation
+	| RuntimeFeatureOperation
 	| AnnotationOperation
 	| { kind: "accounts.logout"; sessionId: string; accountId: string }
 	| { kind: "accounts.status"; refresh?: boolean }
@@ -325,7 +335,8 @@ export interface WorkbenchResultMap
 		JudgmentResultMap,
 		RuntimeCatalogResultMap,
 		BenchmarkResultMap,
-		MediaResultMap {
+		MediaResultMap,
+		RuntimeFeatureResultMap {
 	"accounts.status": AccountStatusResult;
 	"accounts.status.details": AccountStatusResult;
 	"accounts.logout": { loggedOut: true };
@@ -366,6 +377,7 @@ export const WORKBENCH_OPERATION_KINDS = [
 	...BENCHMARK_OPERATION_KINDS,
 	...RUNTIME_CATALOG_OPERATION_KINDS,
 	...JUDGMENT_OPERATION_KINDS,
+	...RUNTIME_FEATURE_KINDS,
 	...ANNOTATION_OPERATION_KINDS,
 	"accounts.status",
 	"accounts.status.details",
@@ -430,6 +442,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [
 	...RUNTIME_CATALOG_OPERATION_KINDS,
 	"judgments.list",
 	"judgments.read",
+	...RUNTIME_FEATURE_READ_KINDS,
 	...ANNOTATION_OPERATION_KINDS,
 	"accounts.status",
 	"accounts.status.details",
@@ -614,6 +627,10 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 		validateJudgmentOperation(value);
 		return;
 	}
+	if (isRuntimeFeatureKind(kind)) {
+		validateRuntimeFeatureOperation(value);
+		return;
+	}
 	const fields: Record<
 		Exclude<
 			WorkbenchOperation["kind"],
@@ -640,6 +657,7 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
 			| LiveAudioOperation["kind"]
 			| AnnotationOperation["kind"]
 			| JudgmentOperation["kind"]
+			| RuntimeFeatureOperation["kind"]
 			| RuntimeCatalogOperation["kind"]
 			| BenchmarkOperation["kind"]
 			| MediaOperation["kind"]
@@ -815,6 +833,10 @@ export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value:
 	}
 	if (isJudgmentOperationKind(kind)) {
 		validateJudgmentResult(kind, value);
+		return;
+	}
+	if (isRuntimeFeatureKind(kind)) {
+		validateRuntimeFeatureResult(kind, value);
 		return;
 	}
 	if (kind === "annotations.capture" || kind === "annotations.prepare") {

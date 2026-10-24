@@ -29,7 +29,7 @@ import type {
 } from "@omp-studio/client-contract";
 
 
-export type ApprovalModeId = "always-ask" | "write" | "yolo";
+export type ApprovalModeId = "always-ask" | "always-ask-cached" | "write" | "yolo";
 
 /** 由 SettingsPage 提供的控制器；预览模式替换为演示实现。 */
 export interface SettingsCtl {
@@ -39,6 +39,8 @@ export interface SettingsCtl {
   readonly resetApp: (keys: readonly (keyof AppSettings)[]) => void;
   readonly approvalMode: ApprovalModeId | undefined;
   readonly setApprovalMode: (mode: ApprovalModeId) => void;
+  /** Clears every remembered approval (`/forget-approvals`); absent without a Runtime session. */
+  readonly forgetApprovals?: () => Promise<void>;
 }
 
 /** 预览模式下「尚未接入」行的演示读写面。 */
@@ -645,7 +647,16 @@ export function InteractionTab({ ctl, demo, prediction }: { ctl: SettingsCtl; de
 
 export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: RuntimeDemoApi | undefined }) {
   const { t } = useI18n();
-  const { approvalMode, setApprovalMode } = ctl;
+  const { approvalMode, setApprovalMode, forgetApprovals } = ctl;
+  const [forgetState, setForgetState] = useState<"idle" | "busy" | "done" | "failed">("idle");
+  const runForget = () => {
+    if (!forgetApprovals || forgetState === "busy") return;
+    setForgetState("busy");
+    forgetApprovals().then(
+      () => setForgetState("done"),
+      () => setForgetState("failed"),
+    );
+  };
 
   const toolPolicyOptions: ReadonlyArray<readonly [string, string]> = [
     ["允许", t("settings.permissions.allow")],
@@ -689,9 +700,29 @@ export function PermissionsTab({ ctl, demo }: { ctl: SettingsCtl; demo?: Runtime
           >
             {approvalMode === undefined ? <option value="" disabled>{t("settings.permissions.noRuntime")}</option> : null}
             <option value="always-ask">Always ask</option>
+            <option value="always-ask-cached">Ask and remember</option>
             <option value="write">Write</option>
             <option value="yolo">Yolo</option>
           </select>
+        </SettingRow>
+        <SettingRow
+          label={t("settings.permissions.forgetApprovals")}
+          desc={t("settings.permissions.forgetApprovalsDesc")}
+          source={forgetApprovals === undefined ? "unavailable" : "runtime"}
+          reason={t("settings.permissions.noRuntime")}
+        >
+          <button
+            type="button"
+            className="btn small outline"
+            disabled={forgetApprovals === undefined || forgetState === "busy"}
+            onClick={runForget}
+          >
+            {forgetState === "done"
+              ? t("settings.permissions.forgetApprovalsDone")
+              : forgetState === "failed"
+                ? t("settings.permissions.forgetApprovalsFailed")
+                : t("settings.permissions.forgetApprovalsAction")}
+          </button>
         </SettingRow>
       </SettingSection>
       <SettingSection title={t("settings.permissions.sectionToolPolicy")} desc={t("settings.permissions.sectionToolPolicyDesc")}>

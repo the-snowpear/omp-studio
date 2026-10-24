@@ -34,13 +34,17 @@ import type {
   AgentTranscriptMessage,
   OpaqueCursor,
   OperatorStateSnapshot,
+  JobWidgetView,
   StudioAgentSnapshot,
   StudioJobSnapshot,
 } from "@omp-studio/studio-protocol";
+import { CompletionRing, JobWidget } from "./conversation/JobWidget";
+import { JobInspector } from "./conversation/JobInspector";
+import { agentJobTree, buildJobTree, type JobTreeRow } from "./conversation/jobTree";
 import type { MentionCandidate } from "./composer/types";
 import { RuntimeLossBanner } from "./RuntimeLossBanner";
 import { Icon } from "./icons";
-import { buildPreviewHub } from "./hubPreview";
+import { buildPreviewHub, previewJobInspections } from "./hubPreview";
 import type { PreviewAgent, PreviewJob, PreviewMetrics } from "./hubPreview";
 import { usePreviewMode } from "./preview/PreviewContext";
 import { hostErrorMessage, waitReceipt } from "./hostError";
@@ -101,6 +105,8 @@ type HubAgent = {
   canRevive?: boolean;
   children: string[];
   activeJobIds: string[];
+  stage?: string;
+  completionPercent?: number;
   startedAt?: number;
   lastActivity: number;
   hasLiveSession: boolean;
@@ -115,9 +121,14 @@ type HubJob = {
   label: string;
   durationMs: number;
   ownerId: string;
+  /** Subagent this job runs (task jobs); its own jobs nest under this row. */
+  agentId?: string;
   generation: number;
   resultText?: string;
   errorText?: string;
+  stage?: string;
+  completionPercent?: number;
+  widget?: JobWidgetView;
 };
 
 type Caps = {
@@ -615,6 +626,8 @@ function toHubAgent(agent: StudioAgentSnapshot, children: string[]): HubAgent {
     ...(agent.canRevive === undefined ? {} : { canRevive: agent.canRevive }),
     children,
     activeJobIds: agent.activeJobIds,
+    ...(agent.stage ? { stage: agent.stage } : {}),
+    ...(agent.completionPercent !== undefined ? { completionPercent: agent.completionPercent } : {}),
     ...(Number.isFinite(parseTs(agent.startedAt))
       ? { startedAt: parseTs(agent.startedAt) }
       : {}),
@@ -654,6 +667,7 @@ function toHubJob(job: StudioJobSnapshot): HubJob {
     label: job.label,
     durationMs,
     ownerId: job.ownerAgentId,
+    ...(job.agentId ? { agentId: job.agentId } : {}),
     generation: job.generation,
     ...(job.status === "completed" && job.summary
       ? { resultText: job.summary }
@@ -661,6 +675,11 @@ function toHubJob(job: StudioJobSnapshot): HubJob {
     ...(job.status === "failed" && job.summary
       ? { errorText: job.summary }
       : {}),
+    ...(job.stage ? { stage: job.stage } : {}),
+    ...(job.completionPercent !== undefined
+      ? { completionPercent: job.completionPercent }
+      : {}),
+    ...(job.widget ? { widget: job.widget } : {}),
   };
 }
 
@@ -694,6 +713,10 @@ function fromPreviewAgent(agent: PreviewAgent): HubAgent {
     branchName: agent.branchName ?? null,
     children: agent.children,
     activeJobIds: [],
+    ...(agent.stage ? { stage: agent.stage } : {}),
+    ...(agent.completionPercent !== undefined
+      ? { completionPercent: agent.completionPercent }
+      : {}),
     startedAt: agent.createdAt,
     lastActivity: agent.lastActivity,
     hasLiveSession: agent.status !== "aborted",
@@ -710,9 +733,15 @@ function fromPreviewJob(job: PreviewJob): HubJob {
     label: job.label,
     durationMs: job.durationMs,
     ownerId: job.ownerId,
+    ...(job.agentId ? { agentId: job.agentId } : {}),
     generation: 1,
     ...(job.resultText ? { resultText: job.resultText } : {}),
     ...(job.errorText ? { errorText: job.errorText } : {}),
+    ...(job.stage ? { stage: job.stage } : {}),
+    ...(job.completionPercent !== undefined
+      ? { completionPercent: job.completionPercent }
+      : {}),
+    ...(job.widget ? { widget: job.widget } : {}),
   };
 }
 
@@ -1038,6 +1067,7 @@ function AgentCard({
           ) : null}
         </span>
         <span className="hc-task">{agent.task}</span>
+        <AgentStage agent={agent} />
         <span className="hc-foot">
           {agent.modelRole ? (
             <span className="hub-role">{agent.modelRole}</span>
@@ -1083,6 +1113,17 @@ function AgentCard({
   );
 }
 
+/** The subagent's current step: its running task's stage and completion estimate. */
+function AgentStage({ agent }: { agent: HubAgent }) {
+  if (!agent.stage && agent.completionPercent === undefined) return null;
+  return (
+    <span className="hub-agent-stage">
+      {agent.completionPercent !== undefined ? <CompletionRing percent={agent.completionPercent} size={16} /> : null}
+      {agent.stage ? <span className="ellipsis" title={agent.stage}>{agent.stage}</span> : null}
+    </span>
+  );
+}
+
 function AgentNode({
   agent,
   selected,
@@ -1121,6 +1162,7 @@ function AgentNode({
         ) : null}
       </span>
       <span className="hn-task">{agent.task}</span>
+      <AgentStage agent={agent} />
       <span className="hn-foot">
         {agent.modelRole ? (
           <span className="hub-role">{agent.modelRole}</span>
@@ -1290,7 +1332,7 @@ export function AgentHubPage({
   const [view, setView] = useState<HubView>(initial.view);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [jobsTab, setJobsTab] = useState<"mine" | "all">("mine");
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [modal, setModal] = useState<Modal | null>(null);
@@ -1404,6 +1446,7 @@ export function AgentHubPage({
         preview: true,
         roster: fixture.agents.map(fromPreviewAgent),
         jobs: fixture.jobs.map(fromPreviewJob),
+        jobAgents: fixture.jobAgents as ReadonlyArray<{ id: string; parentId?: string }>,
         mainName: fixture.main.name,
         mainStatus: fixture.main.statusText,
         mainTask: fixture.main.task,
@@ -1416,7 +1459,8 @@ export function AgentHubPage({
       return {
         preview: false,
         roster: [],
-        jobs: [],
+        jobs: viewingLive ? (snapshot?.jobs ?? []).map(toHubJob) : [],
+        jobAgents: (viewingLive ? (snapshot?.jobAgents ?? []) : []) as ReadonlyArray<{ id: string; parentId?: string }>,
         mainName: "主对话",
         mainStatus:
           viewingLive && snapshot?.isStreaming
@@ -1465,6 +1509,7 @@ export function AgentHubPage({
       preview: false,
       roster,
       jobs: viewingLive ? (snapshot?.jobs ?? []).map(toHubJob) : [],
+      jobAgents: (viewingLive ? (snapshot?.jobAgents ?? []) : []) as ReadonlyArray<{ id: string; parentId?: string }>,
       mainName: main?.name ?? "主对话",
       mainStatus:
         liveHeader && snapshot.isStreaming
@@ -2199,34 +2244,124 @@ export function AgentHubPage({
     );
   };
 
+  const renderJobRow = (row: JobTreeRow<HubJob>, agent?: HubAgent) => {
+    const job = row.job;
+    const open = selectedJobId === job.id;
+    const toggle = () => setSelectedJobId(open ? null : job.id);
+    return (
+      <div key={job.id}>
+        <div
+          className={`hub-job${open ? " selected" : ""}`}
+          role="button"
+          tabIndex={0}
+          aria-expanded={open}
+          aria-label={`${job.label} · ${job.status}`}
+          data-job-id={job.id}
+          data-depth={row.depth}
+          style={row.depth > 0 ? { marginLeft: `calc(${row.depth} * var(--sp-16, 16px))` } : undefined}
+          onClick={toggle}
+          onKeyDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              toggle();
+            }
+          }}
+        >
+          <span
+            className={`a-ic ${job.type === "bash" ? "blue" : "purple"}`}
+            aria-hidden="true"
+          >
+            <Icon
+              name={job.type === "bash" ? "terminal" : "bot"}
+              extra="sm"
+            />
+          </span>
+          <div className="jb-label">
+            <span className="ellipsis" style={{ display: "block" }}>
+              {job.label}
+            </span>
+            <span className="mono hub-job-meta">
+              {job.id} · {job.type} · {fmtDur(job.durationMs)}
+              {agent && job.ownerId !== agent.id ? ` · owner ${job.ownerId}` : ""}
+              {row.descendants > 0 ? ` · ${row.descendants} ${zh ? "个子任务" : "nested"}` : ""}
+              {job.completionPercent !== undefined && job.status === "running" ? (
+                <CompletionRing percent={job.completionPercent} size={16} />
+              ) : null}
+            </span>
+            {job.stage ?? job.widget?.stage ? (
+              <span className="ellipsis" style={{ display: "block", color: "var(--text-2)" }}>
+                {job.stage ?? job.widget?.stage}
+              </span>
+            ) : null}
+            {job.widget && job.widget.blocks.length > 0 && !open ? (
+              <div className="hub-job-widget">
+                <JobWidget view={job.widget} compact />
+              </div>
+            ) : null}
+            {job.errorText ? (
+              <span className="mono" style={{ color: "var(--red)" }}>
+                {job.errorText}
+              </span>
+            ) : null}
+            {job.resultText ? (
+              <span className="mono" style={{ color: "var(--green)" }}>
+                {job.resultText}
+              </span>
+            ) : null}
+          </div>
+          <WorkspaceStatus state={job.status} />
+          {job.status === "running" &&
+          (!agent || job.ownerId === agent.id) ? (
+            <button
+              className="btn small outline"
+              type="button"
+              disabled={
+                preview ||
+                !viewingLive ||
+                commandBusy ||
+                !connOnline ||
+                !client ||
+                missingCap(capabilities, "job.cancel")
+              }
+              data-tip={
+                !viewingLive
+                  ? CONTRACT.historicalWrite
+                  : missingCap(capabilities, "job.cancel")
+                    ? CONTRACT.cancel
+                    : undefined
+              }
+              onClick={(event) => {
+                event.stopPropagation();
+                cancelJob(job);
+              }}
+            >
+              取消
+            </button>
+          ) : null}
+        </div>
+        {open ? (
+          <JobInspector
+            job={job}
+            client={client}
+            sessionId={parentSessionId ?? snapshot?.sessionId}
+            available={!preview && viewingLive && connOnline && !resyncRequired}
+            {...(preview ? { previewInspection: previewJobInspections()[job.id] ?? null } : {})}
+            onClose={() => setSelectedJobId(null)}
+          />
+        ) : null}
+      </div>
+    );
+  };
+
   const renderJobs = (agent?: HubAgent) => {
-    const mine = mapped.jobs.filter((job) => job.ownerId === agent?.id);
-    const rows = !agent || jobsTab === "all" ? mapped.jobs : mine;
+    // Subagent jobs nest under the task job that runs the subagent; an agent's
+    // own tab lists only the jobs it owns (with what nests under them).
+    const rows = agent
+      ? agentJobTree(mapped.jobs, mapped.jobAgents, agent.id)
+      : buildJobTree(mapped.jobs, mapped.jobAgents);
     return (
       <>
-        {agent ? (
-          <div
-            className="seg"
-            role="group"
-            aria-label="Jobs 范围"
-            style={{ marginBottom: "var(--sp-10)" }}
-          >
-            <button
-              type="button"
-              className={jobsTab === "mine" ? "active" : undefined}
-              onClick={() => setJobsTab("mine")}
-            >
-              该 Agent
-            </button>
-            <button
-              type="button"
-              className={jobsTab === "all" ? "active" : undefined}
-              onClick={() => setJobsTab("all")}
-            >
-              全部
-            </button>
-          </div>
-        ) : null}
         <div className="hub-cap-note" style={{ marginBottom: "var(--sp-8)" }}>
           <Icon name="lock" extra="sm" />
           {missingCap(capabilities, "job.cancel")
@@ -2234,68 +2369,13 @@ export function AgentHubPage({
             : "取消走 runtime 确认门；运行中的 job 才可取消（owner-scoped）"}
         </div>
         {rows.length ? (
-          rows.map((job) => (
-            <div className="hub-job" key={job.id}>
-              <span
-                className={`a-ic ${job.type === "bash" ? "blue" : "purple"}`}
-                aria-hidden="true"
-              >
-                <Icon
-                  name={job.type === "bash" ? "terminal" : "bot"}
-                  extra="sm"
-                />
-              </span>
-              <div className="jb-label">
-                <span className="ellipsis" style={{ display: "block" }}>
-                  {job.label}
-                </span>
-                <span className="mono">
-                  {job.id} · {job.type} · {fmtDur(job.durationMs)}
-                  {job.ownerId !== agent?.id ? ` · owner ${job.ownerId}` : ""}
-                </span>
-                {job.errorText ? (
-                  <span className="mono" style={{ color: "var(--red)" }}>
-                    {job.errorText}
-                  </span>
-                ) : null}
-                {job.resultText ? (
-                  <span className="mono" style={{ color: "var(--green)" }}>
-                    {job.resultText}
-                  </span>
-                ) : null}
-              </div>
-              <WorkspaceStatus state={job.status} />
-              {job.status === "running" &&
-              (!agent || job.ownerId === agent.id) ? (
-                <button
-                  className="btn small outline"
-                  type="button"
-                  disabled={
-                    preview ||
-                    !viewingLive ||
-                    commandBusy ||
-                    !connOnline ||
-                    !client ||
-                    missingCap(capabilities, "job.cancel")
-                  }
-                  data-tip={
-                    !viewingLive
-                      ? CONTRACT.historicalWrite
-                      : missingCap(capabilities, "job.cancel")
-                        ? CONTRACT.cancel
-                        : undefined
-                  }
-                  onClick={() => cancelJob(job)}
-                >
-                  取消
-                </button>
-              ) : null}
-            </div>
-          ))
+          <div className="hub-job-tree">
+            {rows.map((row) => renderJobRow(row, agent))}
+          </div>
         ) : (
           <EmptyBlock
             icon="terminal"
-            detail={`没有${jobsTab === "mine" ? "该 Agent 的" : ""} job`}
+            detail={agent ? (zh ? "没有该 Agent 的 job" : "This agent has no jobs") : zh ? "没有 job" : "No jobs"}
           />
         )}
       </>

@@ -276,7 +276,7 @@ export class ConversationStore {
         if (tool === undefined || tool.turnId !== update.turnId) break;
         const candidate = update.updateMode === "replace" ? update.output ?? tool.output ?? "" : `${tool.output ?? ""}${update.output ?? ""}`;
         const tail = tailUtf8(candidate, TOOL_OUTPUT_MAX_BYTES);
-        this.setLiveTool(update.toolCallId, { ...tool, output: tail.text, ...(update.truncated === true || tail.truncated ? { truncated: true } : {}) });
+        this.setLiveTool(update.toolCallId, { ...tool, output: tail.text, ...(update.truncated === true || tail.truncated ? { truncated: true } : {}), ...(update.progress === undefined ? {} : { progress: update.progress }) });
         if (this.hasItem(tool.messageId)) this.dirtyPersistedRows.add(tool.messageId);
         break;
       }

@@ -158,6 +158,78 @@ test("background output remains bound to its original turn and retains cancellat
 	}
 });
 
+test("a run that only background jobs can resume keeps its turn open into the resumed run", () => {
+	const { projector, events } = createProjector();
+	try {
+		const first = assistant([{ type: "text", text: "started the build" }]);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: first });
+		projector.project({ type: "message_end", message: first });
+		projector.project({
+			type: "agent_end",
+			messages: [first],
+			isTerminal: false,
+			yielded: true,
+			awaitingAsyncWork: true,
+		});
+		expect(events.some(event => event.kind === "conversation.turn.completed")).toBe(false);
+		// The job result wakes the session: same logical turn, then a terminal end closes it.
+		const resumed = assistant([{ type: "text", text: "build passed" }]);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message: resumed });
+		projector.project({ type: "message_end", message: resumed });
+		projector.project({ type: "agent_end", messages: [resumed] });
+		const completed = events.filter(event => event.kind === "conversation.turn.completed");
+		expect(completed).toEqual([{ kind: "conversation.turn.completed", sessionId: "session-1", turnId: "turn-1" }]);
+	} finally {
+		projector.dispose();
+	}
+});
+
+test("MCP progress notifications reach the running tool card without waiting for the coalesce timer", () => {
+	const { projector, events } = createProjector();
+	try {
+		const message = assistant([{ type: "toolCall", id: "mcp-call", name: "mcp__docs__index", arguments: {} }]);
+		projector.project({ type: "agent_start" });
+		projector.project({ type: "message_start", message });
+		projector.project({
+			type: "tool_execution_start",
+			toolCallId: "mcp-call",
+			toolName: "mcp__docs__index",
+			args: {},
+		});
+		const progress = (value: number, text: string) =>
+			projector.project({
+				type: "tool_execution_update",
+				toolCallId: "mcp-call",
+				toolName: "mcp__docs__index",
+				args: {},
+				partialResult: {
+					content: [{ type: "text", text }],
+					details: {
+						serverName: "docs",
+						mcpToolName: "index",
+						progress: { progress: value, total: 4, message: "indexing" },
+					},
+				},
+			});
+		progress(1, "indexing 1/4");
+		progress(3, "indexing 3/4");
+		const updates = events.filter(
+			(event): event is Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> =>
+				event.kind === "conversation.tool.updated",
+		);
+		expect(updates.map(event => event.progress)).toEqual([
+			{ progress: 1, total: 4, message: "indexing" },
+			{ progress: 3, total: 4, message: "indexing" },
+		]);
+		expect(updates.at(-1)?.output).toBe("indexing 3/4");
+		for (const event of updates) expect(parseConversationRuntimeEvent(event)).toEqual(event);
+	} finally {
+		projector.dispose();
+	}
+});
+
 function deltas(events: ConversationRuntimeEvent[], blockType?: "text" | "thinking"): string {
 	return events
 		.filter(

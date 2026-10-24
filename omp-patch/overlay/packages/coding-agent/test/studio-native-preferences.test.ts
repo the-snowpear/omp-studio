@@ -28,3 +28,25 @@ test("native preferences preserve overlay precedence and distinguish next-launch
 	await expect(set("title.icons", "invalid", "global")).rejects.toThrow();
 	await expect(service.execute({ kind: "preferences.native.get", sessionId: "old" })).rejects.toThrow("changed");
 });
+test("OMP 18.12 native preferences are listed in their groups and round-trip through the Runtime settings", async () => {
+	const settings = Settings.isolated();
+	const service = new StudioNativePreferencesService({ sessionId: "s", settings } as AgentSession);
+	const listed = (await service.execute({ kind: "preferences.native.get", sessionId: "s" })) as {
+		preferences: Array<{ key: string; group: string; choices?: unknown[] }>;
+	};
+	validateNativePreferenceResult("preferences.native.get", listed);
+	const byKey = new Map(listed.preferences.map(row => [row.key, row]));
+	expect(byKey.get("advisor.continueSeverity")).toMatchObject({
+		group: "advisor",
+		choices: ["nit", "concern", "blocker"],
+	});
+	expect(byKey.get("lsp.requestTimeout")?.group).toBe("tools");
+	const saved = await service.execute({
+		kind: "preferences.native.set",
+		sessionId: "s",
+		key: "sharpshooter.minPromptLength",
+		value: 40,
+		scope: "session",
+	});
+	expect(saved).toMatchObject({ value: 40, source: "runtime", group: "tools" });
+});

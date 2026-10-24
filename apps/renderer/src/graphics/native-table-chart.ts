@@ -4,10 +4,7 @@ import {
   planChart,
   worthCharting,
 } from "../../../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/chart-plan";
-import {
-  chartAlt,
-  renderChartSvg,
-} from "../../../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/chart-svg";
+import { renderChartSvg } from "../../../../omp-patch/vendor/oh-my-pi/packages/tui/src/charts/chart-svg";
 export interface NumericTableData {
   header: string[];
   rows: string[][];
@@ -33,8 +30,21 @@ export function nativeTableFigure(
   if (!plan) return;
   const spec = buildChart(analysis, plan);
   if (!spec || !worthCharting(spec)) return;
-  const figure = renderChartSvg(spec);
-  if (figure.width > 4096 || figure.height > 4096 || figure.svg.length > 800000)
+  // Upstream returns the SVG document; its size and screen-reader label live on the root element.
+  const svg = renderChartSvg(spec);
+  const root = /^<svg\b[^>]*>/u.exec(svg)?.[0] ?? "";
+  const width = Number(/\swidth="(\d+(?:\.\d+)?)"/u.exec(root)?.[1] ?? Number.NaN);
+  const height = Number(/\sheight="(\d+(?:\.\d+)?)"/u.exec(root)?.[1] ?? Number.NaN);
+  if (!(width <= 4096) || !(height <= 4096) || svg.length > 800000)
     throw new Error("Chart exceeds the 4,096 px / 800 kB figure limit");
-  return { svg: figure.svg, alt: chartAlt(spec) };
+  return { svg, alt: unescapeXml(/\saria-label="([^"]*)"/u.exec(root)?.[1] ?? "") };
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
 }

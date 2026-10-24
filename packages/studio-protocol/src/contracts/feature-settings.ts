@@ -3,7 +3,8 @@ export const FEATURE_SETTING_KEYS = [
   "task.agentAccountPools", "compaction.modelThresholds", "retry.fallbackOn",
   "contextFiles.extra", "task.structured", "bash.gitGuard", "worktree.onStart",
   "worktree.onExit", "composer.predictions", "speech.speed", "tts.localSpeed",
-  "gc.compress", "gc.compressAfterDays",
+  "gc.compress", "gc.compressAfterDays", "prewalk.auto", "prewalk.autoTarget",
+  "async.widgets", "computer.backgroundFallback",
 ] as const;
 export type FeatureSettingKey = (typeof FEATURE_SETTING_KEYS)[number];
 export type FeatureSettingValue = null | boolean | number | string | FeatureSettingValue[] | { [key: string]: FeatureSettingValue };

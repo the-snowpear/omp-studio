@@ -1,0 +1,31 @@
+.seance-dialog {
+  width: 620px;
+}
+.seance-demo {
+  margin-left: 8px;
+}
+.seance-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.seance-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-12, 12px);
+}
+.seance-answer {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.seance-text {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow: auto;
+  font-family: inherit;
+  user-select: text;
+}

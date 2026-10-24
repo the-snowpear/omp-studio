@@ -31,19 +31,25 @@ export function approvalPickerDisabled(input: {
   return input.selectedSessionId === undefined || input.selectedThreadId === undefined;
 }
 
-/** Permission pill options (plan §5.1): Review → always-ask, Workspace → write, Full Access → yolo. */
+/** Permission pill options (plan §5.1): Review → always-ask, Remember → always-ask-cached, Workspace → write, Full Access → yolo. */
 export const APPROVAL_MODE_OPTIONS: ReadonlyArray<{
   readonly mode: ApprovalMode;
   readonly label: string;
-  readonly descriptionKey: "composer.permissionReviewDesc" | "composer.permissionWorkspaceDesc" | "composer.permissionFullAccessDesc";
+  readonly descriptionKey:
+    | "composer.permissionReviewDesc"
+    | "composer.permissionRememberDesc"
+    | "composer.permissionWorkspaceDesc"
+    | "composer.permissionFullAccessDesc";
 }> = [
   { mode: "always-ask", label: "Review", descriptionKey: "composer.permissionReviewDesc" },
+  { mode: "always-ask-cached", label: "Remember", descriptionKey: "composer.permissionRememberDesc" },
   { mode: "write", label: "Workspace", descriptionKey: "composer.permissionWorkspaceDesc" },
   { mode: "yolo", label: "Full Access", descriptionKey: "composer.permissionFullAccessDesc" },
 ];
 
 export const APPROVAL_MODE_LABELS: Readonly<Record<ApprovalMode, string>> = {
   "always-ask": "Review",
+  "always-ask-cached": "Remember",
   write: "Workspace",
   yolo: "Full Access",
 };

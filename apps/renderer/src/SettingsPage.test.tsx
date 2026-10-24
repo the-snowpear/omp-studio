@@ -35,8 +35,8 @@ afterEach(() => {
 
 function renderSettings(options: {
   preview?: boolean;
-  approvalMode?: "always-ask" | "write" | "yolo";
-  onSetApprovalMode?: (mode: "always-ask" | "write" | "yolo") => void;
+  approvalMode?: "always-ask" | "always-ask-cached" | "write" | "yolo";
+  onSetApprovalMode?: (mode: "always-ask" | "always-ask-cached" | "write" | "yolo") => void;
   language?: AppLanguage;
 } = {}) {
   window.localStorage.setItem(PREVIEW_MODE_STORAGE_KEY, options.preview === true ? "1" : "0");

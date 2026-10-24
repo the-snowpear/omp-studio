@@ -54,7 +54,7 @@ import { StudioFastPrewalkService } from "./services/fast-prewalk-service";
 import { StudioForkService } from "./services/fork-service";
 import { StudioHandoffService } from "./services/handoff-service";
 import { StudioInteractionGateway } from "./services/interaction-port";
-import { StudioJobService, type StudioJobsPort } from "./services/job-service";
+import { StudioJobService, type StudioJobsPort, taskJobProgress } from "./services/job-service";
 import { StudioLiveService, type StudioLiveSessionFactory } from "./services/live-service";
 import { StudioLoopService } from "./services/loop-service";
 import { StudioModeControlService } from "./services/mode-control-service";
@@ -533,6 +533,7 @@ export function createStudioHostRuntime(
 	});
 	const interaction = new StudioInteractionGateway();
 	workbench.worktrees.interaction = interaction;
+	workbench.runtimeFeatures.mcpAuth.interaction = interaction;
 	modes.interaction = interaction;
 	const cfg = new StudioCfgService(session, interaction);
 	session.setResetConsentHandler?.(async ({ provider, message }) => {
@@ -752,6 +753,7 @@ export function createStudioHostRuntime(
 		getRecentJobs: (limit, filter) => session.asyncJobManager?.getRecentJobs(limit, filter) ?? [],
 		getAllJobs: filter => session.asyncJobManager?.getAllJobs(filter) ?? [],
 		cancel: (id, filter) => session.asyncJobManager?.cancel(id, filter) ?? false,
+		widgetView: job => session.asyncJobManager?.widgets?.view(job),
 	};
 	const agentsRef = { current: undefined as StudioAgentHubService | undefined };
 	const jobs = new StudioJobService(jobsPort, registry, {
@@ -851,6 +853,12 @@ export function createStudioHostRuntime(
 					.getAllJobs()
 					.filter(job => job.agentId === agentId && job.status === "running")
 					.map(job => job.id),
+			taskProgressFor: agentId => {
+				const job = jobsPort
+					.getRunningJobs()
+					.find(candidate => candidate.type === "task" && candidate.agentId === agentId);
+				return job === undefined ? undefined : taskJobProgress(job);
+			},
 			telemetry: createStudioAgentTelemetry(registry),
 		},
 	);

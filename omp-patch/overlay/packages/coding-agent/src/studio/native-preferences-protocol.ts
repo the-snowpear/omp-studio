@@ -6,6 +6,9 @@ export const NATIVE_PREFERENCE_KEYS = [
 	"advisor.immuneTurns",
 	"advisor.maxNotesPerUpdate",
 	"advisor.evictStaleResults",
+	"advisor.continueSeverity",
+	"lsp.requestTimeout",
+	"sharpshooter.minPromptLength",
 	"title.icons",
 	"title.generator",
 	"title.refreshOnReplan",
@@ -15,7 +18,7 @@ export type NativePreferenceKey = (typeof NATIVE_PREFERENCE_KEYS)[number];
 export type NativePreferenceValue = string | number | boolean;
 export interface NativePreference {
 	key: NativePreferenceKey;
-	group: "advisor" | "titles" | "diagnostics";
+	group: "advisor" | "tools" | "titles" | "diagnostics";
 	label: string;
 	description: string;
 	value: NativePreferenceValue;
@@ -108,7 +111,7 @@ export function validateNativePreferenceResult(kind: NativePreferenceOperation["
 	]);
 	if (
 		!(NATIVE_PREFERENCE_KEYS as readonly unknown[]).includes(row.key) ||
-		!["advisor", "titles", "diagnostics"].includes(String(row.group))
+		!["advisor", "tools", "titles", "diagnostics"].includes(String(row.group))
 	)
 		throw new Error("Invalid preference identity");
 	text(row.label);

@@ -23,6 +23,7 @@ import { MEDIA_OPERATION_KINDS, isMediaOperationKind, validateMediaOperation, va
 import { BENCHMARK_OPERATION_KINDS, isBenchmarkOperationKind, validateBenchmarkOperation, validateBenchmarkResult, type BenchmarkOperation, type BenchmarkResultMap } from "./benchmarks.js";
 import { RUNTIME_CATALOG_OPERATION_KINDS, isRuntimeCatalogOperationKind, validateRuntimeCatalogOperation, validateRuntimeCatalogResult, type RuntimeCatalogOperation, type RuntimeCatalogResultMap } from "./runtime-catalog.js";
 import { JUDGMENT_OPERATION_KINDS, isJudgmentOperationKind, validateJudgmentOperation, validateJudgmentResult, type JudgmentOperation, type JudgmentResultMap } from "./judgments.js";
+import { RUNTIME_FEATURE_KINDS, RUNTIME_FEATURE_READ_KINDS, isRuntimeFeatureKind, validateRuntimeFeatureOperation, validateRuntimeFeatureResult, type RuntimeFeatureOperation, type RuntimeFeatureResultMap } from "./runtime-features.js";
 import { ANNOTATION_OPERATION_KINDS, validateAnnotationOperation, validateAnnotationResult, type AnnotationOperation, type AnnotationResultMap } from "./annotations.js";
 import { validateAccountStatus, type AccountStatusResult } from "./accounts.js";
 /** Shared, presentation-neutral tools added with OMP 18.3.0. */
@@ -98,6 +99,7 @@ export type WorkbenchOperation =
   | RuntimeCatalogOperation
   | JudgmentOperation
   | AnnotationOperation
+  | RuntimeFeatureOperation
   | { kind: "accounts.logout"; sessionId: string; accountId: string }
   | { kind: "accounts.status"; refresh?: boolean }
  | { kind: "accounts.status.details"; refresh?: boolean }
@@ -112,7 +114,7 @@ export type WorkbenchOperation =
   | { kind: "runtime.models.describe"; selector: string }
  | { kind: "runtime.models.list"; modelKind?: string; cursor?: string; limit?: number };
 
-export interface WorkbenchResultMap extends SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap {
+export interface WorkbenchResultMap extends SessionGuiResultMap, SessionTitlesResultMap, PredictionResultMap, MaintenanceResultMap, ArchiveResultMap, AgentModelResultMap, SessionRestoreResultMap, RuntimeQueueResultMap, NativePreferenceResultMap, FeatureSettingsResultMap, SessionPortabilityResultMap, SessionCompressionResultMap, SessionWorktreeResultMap, NativePlanReviewResultMap, RatchetResultMap, ComputerObservationResultMap, BrowserObservationResultMap, StudioIdaResultMap, SessionOptionsResultMap, SkillshareResultMap, LiveAudioResultMap, AnnotationResultMap, JudgmentResultMap, RuntimeCatalogResultMap, BenchmarkResultMap, MediaResultMap, RuntimeFeatureResultMap {
   "accounts.status": AccountStatusResult;
  "accounts.status.details": AccountStatusResult;
   "accounts.logout": { loggedOut: true };
@@ -140,7 +142,7 @@ export const WORKBENCH_OPERATION_KINDS = [...SESSION_GUI_KINDS,
 ...COMPUTER_OBSERVATION_KINDS,
 ...BROWSER_OBSERVATION_KINDS,
 ...IDA_OPERATION_KINDS,
-...SESSION_OPTIONS_KINDS,...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, "accounts.status", "accounts.status.details", "accounts.logout", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"] as const;
+...SESSION_OPTIONS_KINDS,...SKILLSHARE_OPERATION_KINDS, ...LIVE_AUDIO_OPERATION_KINDS, ...MEDIA_OPERATION_KINDS, ...BENCHMARK_OPERATION_KINDS, ...RUNTIME_CATALOG_OPERATION_KINDS, ...JUDGMENT_OPERATION_KINDS, ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_KINDS, "accounts.status", "accounts.status.details", "accounts.logout", "services.list", "services.start", "services.stop", "services.restart", "services.mode.set", "services.send", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"] as const;
 export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [...SESSION_GUI_READ_KINDS,
 "prediction.status","prediction.prepare","prediction.release",
 ...MAINTENANCE_READ_KINDS,
@@ -153,7 +155,7 @@ export const WORKBENCH_READ_KINDS: readonly WorkbenchOperation["kind"][] = [...S
 "computer.status", "computer.capture", "computer.stop", "computer.observe.release",
 "browser.tabs.get", "browser.observe.prepare",
 "ida.status.details", "ida.database.cancel",
-"session.speed.get", "session.warming.get", "models.presets.list","skillshare.status", "skillshare.home", "skillshare.search", "skillshare.package", "skillshare.installed", "skillshare.tokens", "skillshare.action", "live.audio.status", "live.audio.mute", "live.audio.release", "media.models", "media.list", "media.read", "benchmarks.list", "benchmarks.read", ...RUNTIME_CATALOG_OPERATION_KINDS, "judgments.list", "judgments.read", ...ANNOTATION_OPERATION_KINDS, "accounts.status", "accounts.status.details", "services.list", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"];
+"session.speed.get", "session.warming.get", "models.presets.list","skillshare.status", "skillshare.home", "skillshare.search", "skillshare.package", "skillshare.installed", "skillshare.tokens", "skillshare.action", "live.audio.status", "live.audio.mute", "live.audio.release", "media.models", "media.list", "media.read", "benchmarks.list", "benchmarks.read", ...RUNTIME_CATALOG_OPERATION_KINDS, "judgments.list", "judgments.read", ...ANNOTATION_OPERATION_KINDS, ...RUNTIME_FEATURE_READ_KINDS, "accounts.status", "accounts.status.details", "services.list", "services.logs", "tokens.count", "runtime.models.list", "runtime.models.describe"];
 export function isWorkbenchOperationKind(value: string): value is WorkbenchOperation["kind"] {
   return (WORKBENCH_OPERATION_KINDS as readonly string[]).includes(value);
 }
@@ -232,7 +234,8 @@ export function validateWorkbenchOperation(value: unknown): asserts value is Wor
   if (isBenchmarkOperationKind(kind)) { validateBenchmarkOperation(value); return; }
   if (isRuntimeCatalogOperationKind(kind)) { validateRuntimeCatalogOperation(value); return; }
   if (isJudgmentOperationKind(kind)) { validateJudgmentOperation(value); return; }
-  const fields: Record<Exclude<WorkbenchOperation["kind"], SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"]>, readonly string[]> = {
+  if (isRuntimeFeatureKind(kind)) { validateRuntimeFeatureOperation(value); return; }
+  const fields: Record<Exclude<WorkbenchOperation["kind"], SessionGuiOperation["kind"] | SessionTitlesOperation["kind"] | PredictionChannelOperation["kind"] | MaintenanceOperation["kind"] | ArchiveOperation["kind"] | AgentModelOperation["kind"] | SessionRestoreOperation["kind"] | RuntimeQueueOperation["kind"] | NativePreferenceOperation["kind"] | FeatureSettingsOperation["kind"] | SessionPortabilityOperation["kind"] | SessionCompressionOperation["kind"] | SessionWorktreeOperation["kind"] | NativePlanReviewOperation["kind"] | RatchetOperation["kind"] | ComputerObservationOperation["kind"] | BrowserObservationOperation["kind"] | StudioIdaOperation["kind"] | SessionOptionsOperation["kind"] | SkillshareOperation["kind"] | LiveAudioOperation["kind"] | AnnotationOperation["kind"] | JudgmentOperation["kind"] | RuntimeCatalogOperation["kind"] | BenchmarkOperation["kind"] | MediaOperation["kind"] | RuntimeFeatureOperation["kind"]>, readonly string[]> = {
     "accounts.status": ["refresh"],
  "accounts.status.details": ["refresh"],
     "accounts.logout": ["sessionId", "accountId"], "services.list": [], "services.start": ["spec"], "services.stop": ["name", "instanceId"], "services.restart": ["name", "instanceId"],
@@ -293,6 +296,7 @@ export function validateWorkbenchResult(kind: WorkbenchOperation["kind"], value:
   if (isBenchmarkOperationKind(kind)) { validateBenchmarkResult(kind, value); return; }
   if (isRuntimeCatalogOperationKind(kind)) { validateRuntimeCatalogResult(kind, value); return; }
   if (isJudgmentOperationKind(kind)) { validateJudgmentResult(kind, value); return; }
+  if (isRuntimeFeatureKind(kind)) { validateRuntimeFeatureResult(kind, value); return; }
   if (kind === "annotations.capture" || kind === "annotations.prepare") { validateAnnotationResult(kind, value); return; }
   if ((kind === "accounts.status" || kind === "accounts.status.details")) { validateAccountStatus(value); return; }
   if (kind === "runtime.models.describe") { const described = record(value, ["model"]); validateWorkbenchResult("runtime.models.list", { models: [described.model], total: 1 }); return; }

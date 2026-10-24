@@ -12,6 +12,7 @@ import type {
   RuntimeInstallState,
   StudioClient,
 } from "@omp-studio/client-contract";
+import type { SessionBuildIdentity, SessionBuildProvenance } from "@omp-studio/studio-protocol";
 import { Icon } from "./icons";
 import { ProcessMemoryPanel } from "./ProcessMemoryPanel";
 import { ToastHost } from "./ToastHost";
@@ -242,6 +243,48 @@ function primaryIcon(action: DiagnosticsHero["primary"]): string {
   return "pulse";
 }
 
+const PREVIEW_BUILD_PROVENANCE: SessionBuildProvenance = {
+  current: { version: "18.12.6", commit: "a1b2c3d4e5f6", branch: "main", label: "studio" },
+  history: [
+    null,
+    { version: "18.11.2" },
+    { version: "18.12.6", commit: "a1b2c3d4e5f6", branch: "main", label: "studio" },
+  ],
+};
+
+/** Upstream `formatRuntimeIdentity`: `18.10.4 will/topic@a1b2c3d4e5 +diff 3f2a9c01 "variant-a"`. */
+export function formatBuildIdentity(identity: SessionBuildIdentity | null, zh: boolean): string {
+  if (!identity) return zh ? "未记录版本（较早的条目）" : "unknown (entries written before builds were recorded)";
+  let text = identity.version;
+  if (identity.commit) text += ` ${identity.branch ? `${identity.branch}@` : ""}${identity.commit.slice(0, 10)}`;
+  if (identity.diff) text += ` +diff ${identity.diff.slice(0, 8)}`;
+  if (identity.label) text += ` "${identity.label}"`;
+  return text;
+}
+
+/** "This session was run by": the builds that wrote the active session, oldest first. */
+function SessionBuildList({ provenance, zh, demo }: { provenance: SessionBuildProvenance | undefined; zh: boolean; demo: boolean }) {
+  if (!provenance || provenance.history.length === 0) return null;
+  return (
+    <div className="diag-section" aria-label={zh ? "会话运行版本" : "Session build provenance"}>
+      <h3>
+        {zh ? "此会话由以下版本运行" : "This session was run by"}
+        {demo ? <span className="chip gray xs" style={{ marginLeft: 8 }}>{zh ? "演示" : "Demo"}</span> : null}
+      </h3>
+      <ol className="card" style={{ margin: 0, paddingInlineStart: 28 }}>
+        {provenance.history.map((identity, index) => (
+          <li key={index} className="mono" style={{ padding: "2px 0" }}>
+            {formatBuildIdentity(identity, zh)}
+            {index === provenance.history.length - 1 ? (
+              <span className="chip green xs" style={{ marginLeft: 8 }}>{zh ? "当前" : "current"}</span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 export function DiagnosticsPage({
  nativeContext,
   client,
@@ -249,6 +292,7 @@ export function DiagnosticsPage({
   capabilities,
   runtime,
   environment,
+  buildProvenance,
 }: {
   nativeContext?: NativePreferencesContext;
   client: StudioClient;
@@ -256,6 +300,8 @@ export function DiagnosticsPage({
   capabilities?: CapManifest;
   runtime?: RuntimeConnection;
   environment?: EnvironmentReadModel;
+  /** omp builds that wrote the active session (`snapshot.runtimeIdentity`). */
+  buildProvenance?: SessionBuildProvenance;
 }) {
   const { preview } = usePreviewMode();
  const [workspaceTab,setWorkspaceTab]=useState<"runtime"|"maintenance">("runtime");
@@ -797,6 +843,12 @@ export function DiagnosticsPage({
           <div className="dv-s">{viewRuntime?.upstreamCommit ? viewRuntime.upstreamCommit.slice(0, 7) : t("diagnostics.noCommit")}</div>
         </div>
       </div>
+
+      <SessionBuildList
+        provenance={preview ? PREVIEW_BUILD_PROVENANCE : buildProvenance}
+        zh={resolvedLanguage === "zh"}
+        demo={preview}
+      />
 
       {viewRuntime?.status === "disconnected" || viewRuntime?.status === "unavailable" ? (
         <div className="diag-kv" aria-label={t("diagnostics.disconnectDetailsAria")}>

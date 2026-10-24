@@ -7,7 +7,10 @@ import {
 	cfgAdvisorImmuneTurns,
 	cfgAdvisorMaxNotesPerUpdate,
 	cfgAdvisorEvictStaleResults,
+	cfgAdvisorContinueSeverity,
 } from "../../advisor/settings";
+import { cfgLspRequestTimeout } from "../../lsp/settings";
+import { cfgSharpshooterMinPromptLength } from "../../sharpshooter/settings";
 import { cfgTitleIcons, cfgTitleGenerator, cfgTitleRefreshOnReplan } from "../../utils/title-settings";
 import { cfgTelemetryOtlpExportEnabled } from "../../telemetry-settings";
 import type { AgentSession } from "../../session/agent-session";
@@ -27,6 +30,9 @@ const HANDLES: Record<NativePreferenceKey, AnySetting> = {
 	"advisor.immuneTurns": cfgAdvisorImmuneTurns,
 	"advisor.maxNotesPerUpdate": cfgAdvisorMaxNotesPerUpdate,
 	"advisor.evictStaleResults": cfgAdvisorEvictStaleResults,
+	"advisor.continueSeverity": cfgAdvisorContinueSeverity,
+	"lsp.requestTimeout": cfgLspRequestTimeout,
+	"sharpshooter.minPromptLength": cfgSharpshooterMinPromptLength,
 	"title.icons": cfgTitleIcons,
 	"title.generator": cfgTitleGenerator,
 	"title.refreshOnReplan": cfgTitleRefreshOnReplan,
@@ -53,7 +59,13 @@ export class StudioNativePreferencesService {
 					: value;
 		return {
 			key,
-			group: key.startsWith("advisor.") ? "advisor" : key.startsWith("title.") ? "titles" : "diagnostics",
+			group: key.startsWith("advisor.")
+				? "advisor"
+				: key.startsWith("title.")
+					? "titles"
+					: key.startsWith("telemetry.")
+						? "diagnostics"
+						: "tools",
 			label: definition.ui?.label ?? key,
 			description: definition.ui?.description ?? "",
 			value,

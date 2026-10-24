@@ -50,6 +50,18 @@ const descriptions: Record<NativePreferenceKey, [string, string]> = {
     "整理旧审查上下文",
     "用简短占位说明替换旧审查的工具结果，保留最新结果。",
   ],
+  "advisor.continueSeverity": [
+    "继续阈值",
+    "Agent 给出最终回答后，达到该级别的 Advisor 提醒会唤醒它继续；更低级别的提醒留在对话末尾，随你的下一条消息送达。",
+  ],
+  "lsp.requestTimeout": [
+    "LSP 请求超时（秒）",
+    "Agent 未指定超时时，等待语言服务器诊断、悬停等结果的秒数；冷启动慢的服务器可调大。",
+  ],
+  "sharpshooter.minPromptLength": [
+    "Sharpshooter 最短提示长度",
+    "短于该字符数的提示不触发 Sharpshooter。",
+  ],
   "title.icons": ["标题图标", "选择标题图标与短码的显示方式。"],
   "title.generator": [
     "标题生成方式",
@@ -93,6 +105,18 @@ const englishDescriptions: Record<NativePreferenceKey, [string, string]> = {
     "Compact review context",
     "Replace old review tool results with short placeholders.",
   ],
+  "advisor.continueSeverity": [
+    "Continue severity",
+    "Minimum severity of an Advisor note that wakes the agent after its final answer; lower notes wait for your next message.",
+  ],
+  "lsp.requestTimeout": [
+    "LSP request timeout (seconds)",
+    "Seconds to wait for language-server answers when the agent sets no timeout; raise it for slow cold starts.",
+  ],
+  "sharpshooter.minPromptLength": [
+    "Sharpshooter minimum prompt length",
+    "Prompts shorter than this many characters do not trigger Sharpshooter.",
+  ],
   "title.icons": ["Title icons", "Choose title icons and short codes."],
   "title.generator": [
     "Title generation",
@@ -116,6 +140,9 @@ const demo = (): NativePreference[] =>
     ["advisor.immuneTurns", 3, undefined],
     ["advisor.maxNotesPerUpdate", 4, undefined],
     ["advisor.evictStaleResults", true, undefined],
+    ["advisor.continueSeverity", "concern", ["nit", "concern", "blocker"]],
+    ["lsp.requestTimeout", 10, undefined],
+    ["sharpshooter.minPromptLength", 16, undefined],
     ["title.icons", "emoji", ["nf+emoji", "emoji", "boring"]],
     ["title.generator", "fork", ["fork", "tiny"]],
     ["title.refreshOnReplan", true, undefined],
@@ -126,7 +153,9 @@ const demo = (): NativePreference[] =>
       ? "advisor"
       : String(key).startsWith("title.")
         ? "titles"
-        : "diagnostics",
+        : String(key).startsWith("telemetry.")
+          ? "diagnostics"
+          : "tools",
     label: englishDescriptions[key as NativePreferenceKey][0],
     description: englishDescriptions[key as NativePreferenceKey][1],
     value: value as NativePreferenceValue,
@@ -316,7 +345,7 @@ export function NativePreferencesPane({
     }
   };
   const label = (row: NativePreference) =>
-    zh ? descriptions[row.key][0] : row.label;
+    zh ? descriptions[row.key][0] : englishDescriptions[row.key][0];
   const choice = (value: NativePreferenceValue) =>
     zh
       ? ({
@@ -329,6 +358,9 @@ export function NativePreferencesPane({
           boring: "仅标题",
           fork: "当前模型的旁路调用",
           tiny: "标题角色模型",
+          nit: "细节（nit）",
+          concern: "关注（concern）",
+          blocker: "阻断（blocker）",
         }[String(value)] ?? String(value))
       : String(value);
   if (!can("preferences.native.get"))
@@ -371,13 +403,17 @@ export function NativePreferencesPane({
         </p>
       ) : null}
       {notice ? <p role="status">{notice}</p> : null}
-      {(["advisor", "titles", "diagnostics"] as const).map((group) => (
+      {(["advisor", "tools", "titles", "diagnostics"] as const).map((group) => (
         <SettingSection
           key={group}
           title={
             group === "advisor"
               ? "Advisor"
-              : group === "titles"
+              : group === "tools"
+                ? zh
+                  ? "工具"
+                  : "Tools"
+                : group === "titles"
                 ? zh
                   ? "标题"
                   : "Titles"
@@ -392,7 +428,7 @@ export function NativePreferencesPane({
               <SettingRow
                 key={row.key}
                 label={label(row)}
-                desc={zh ? descriptions[row.key][1] : row.description}
+                desc={zh ? descriptions[row.key][1] : row.description || englishDescriptions[row.key][1]}
                 source={row.source === "global" ? "user" : row.source}
               >
                 <div className="native-preference-controls">

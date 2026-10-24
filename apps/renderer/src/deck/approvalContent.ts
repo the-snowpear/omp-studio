@@ -2,6 +2,12 @@ import type { ClientInteraction } from "@omp-studio/client-contract";
 
 export type ApprovalRisk = "high" | "medium" | "low";
 
+export type ApprovalGrantView = {
+  readonly scope: "folder" | "target";
+  readonly label: string;
+  readonly alwaysLabel: string;
+};
+
 export type ApprovalView = {
   readonly title: string;
   readonly toolLabel: string;
@@ -13,6 +19,10 @@ export type ApprovalView = {
   readonly scope?: string;
   readonly extra?: string;
   readonly configuration?: { previous: string; value: string; save: boolean; shadowedBy?: string; expiresAt?: number };
+  /** Runtime-offered "approve for this session" label. */
+  readonly session?: string;
+  /** Runtime-offered remembered-approval choices (Ask and remember mode). */
+  readonly grants?: readonly ApprovalGrantView[];
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -109,6 +119,10 @@ export function approvalFromInteraction(
     };
   }
   const tool = toolKey(stringDetail(detail, "toolName") ?? interaction.approvalType);
+  const choices = {
+    ...(interaction.session === undefined ? {} : { session: interaction.session }),
+    ...(interaction.grants === undefined || interaction.grants.length === 0 ? {} : { grants: interaction.grants }),
+  };
   const summary = stringDetail(detail, "summary") ?? "";
   const labeled = summary ? parseLabeledLines(summary) : {};
   const labeledEmpty = Object.keys(labeled).length === 0;
@@ -122,7 +136,7 @@ export function approvalFromInteraction(
     .filter((value): value is string => Boolean(value));
   const unlabeledExtra = labeledEmpty && tool !== "bash" && summary && !command && !path ? summary : undefined;
   const extra = extraBits.length > 0 ? extraBits.join("\n") : unlabeledExtra;
-  const title = TOOL_TITLES[tool] ?? interaction.title ?? `Allow ${interaction.approvalType}?`;
+  const title = TOOL_TITLES[tool] ?? (interaction.title || `Allow ${interaction.approvalType}?`);
   const scope = defaultScope(tool, stringDetail(detail, "scope"));
   return {
     title,
@@ -134,5 +148,6 @@ export function approvalFromInteraction(
     ...(reason ? { reason } : {}),
     ...(scope ? { scope } : {}),
     ...(extra ? { extra } : {}),
+    ...choices,
   };
 }

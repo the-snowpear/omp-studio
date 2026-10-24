@@ -1,0 +1,79 @@
+/* Job widgets, wait-card tiles, the Agent Hub job tree and the job inspector. */
+
+.job-widget { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.job-widget.compact { gap: 3px; }
+.jw-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.jw-title { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jw-state { font-size: 11px; color: var(--text-3); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+.jw-state.live { color: var(--green); border-color: var(--green-soft); }
+.jw-state.authoring { color: var(--amber); border-color: var(--amber-soft); }
+.jw-updated { margin-left: auto; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.jw-headline { display: flex; align-items: baseline; gap: 6px; }
+.jw-headline-text { font-size: 16px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.jw-headline-label { font-size: 12px; color: var(--text-3); }
+.jw-trend { font-size: 12px; font-variant-numeric: tabular-nums; }
+.jw-stage { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jw-block { min-width: 0; }
+.jw-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.jw-label { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jw-value { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.jw-spark-svg { display: block; width: 100%; height: 44px; }
+.job-widget.compact .jw-spark-svg { height: 24px; }
+.jw-marks { display: flex; gap: 10px; font-size: 11px; }
+.jw-bar-row { display: grid; grid-template-columns: minmax(60px, 30%) 1fr auto; align-items: center; gap: 8px; font-size: 12px; }
+.jw-bar-label { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jw-bar-track { position: relative; display: block; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.jw-meter .jw-bar-track { margin-top: 3px; }
+.jw-bar-fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px; }
+.jw-bar-text { font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
+.jw-more { font-size: 11px; color: var(--text-3); }
+.jw-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; }
+.jw-stat { display: inline-flex; gap: 4px; align-items: baseline; }
+.jw-stat-label { color: var(--text-3); }
+.jw-stat-text { font-variant-numeric: tabular-nums; font-weight: 600; }
+.jw-grid { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.jw-cell { display: inline-flex; gap: 4px; align-items: baseline; border: 1px solid; border-radius: 4px; padding: 0 5px; font-size: 11px; max-width: 220px; }
+.jw-cell-label { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jw-cell-text { white-space: nowrap; }
+.jw-text { font-size: 12px; color: var(--text-2); font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jw-ring { position: relative; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.jw-ring svg { display: block; }
+
+.job-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin: 6px 0; }
+.job-tile { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--surface); min-width: 0; }
+.job-tile[data-status="failed"] { border-color: var(--red-soft); }
+.jt-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.jt-label { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jt-id { font-size: 11px; color: var(--text-3); }
+.jt-stage { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-stage { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+
+.tc-progress { display: flex; flex-direction: column; gap: 3px; margin: 4px 0 8px; }
+.tc-progress .jw-bar-track.indeterminate .jw-bar-fill { width: 30%; animation: tc-progress-slide 1.2s ease-in-out infinite; background: var(--accent); }
+@keyframes tc-progress-slide { 0% { left: -30%; } 100% { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .tc-progress .jw-bar-track.indeterminate .jw-bar-fill { animation: none; left: 0; } }
+.tc-progress-text { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2); }
+
+.ev-view-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ev-view-table th, .ev-view-table td { border-bottom: 1px solid var(--border); padding: 3px 8px; text-align: left; white-space: nowrap; }
+.ev-view-table th { color: var(--text-3); font-weight: 600; }
+.ev-view-table .num { text-align: right; }
+.ev-view-wrap { overflow: auto; max-height: 320px; }
+.ev-status { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-2); }
+
+.hub-agent-stage { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--text-2); }
+.hub-job-tree .hub-job { cursor: pointer; }
+.hub-job-tree .hub-job.selected { background: var(--accent-softer); }
+.hub-job-tree .hub-job:focus-visible { outline: 2px solid var(--accent-border); outline-offset: -2px; }
+.hub-job-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hub-job-widget { margin-top: 4px; max-width: 420px; }
+
+.job-inspector { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 8px 0; background: var(--surface); display: flex; flex-direction: column; gap: 8px; }
+.ji-head { display: flex; align-items: center; gap: 8px; }
+.ji-title { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ji-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 12px; }
+.ji-kv dt { color: var(--text-3); }
+.ji-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-mono, monospace); }
+.ji-output { max-height: 280px; overflow: auto; margin: 0; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: 6px; padding: 8px; }
+.ji-note { font-size: 12px; color: var(--text-3); }
+.ji-error { font-size: 12px; color: var(--red); }

@@ -1,4 +1,5 @@
 import { SessionPortabilityPane } from "./history/SessionPortabilityPane";
+import { SeanceDialog } from "./history/SeanceDialog";
 import type { SessionTitleRow } from "@omp-studio/studio-protocol";
 import { useSessionTitles } from "./history/useSessionTitles";
 import { SessionTitleMark } from "./history/SessionTitleMark";
@@ -228,14 +229,17 @@ function PreviewHistRow({
   onOpen,
   onAct,
   onMore,
+  onConsult,
 }: {
   row: PreviewHistoryRow;
   onOpen: () => void;
   onAct: (kind: "resume" | "fork" | "more" | "unarchive") => void;
   onMore: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onConsult: () => void;
 }) {
   const status = PREVIEW_STATUS[row.status];
   const { t } = useI18n();
+  const consultLabel = useConsultLabel();
   return (
     <div className="hist-row">
       <span className="a-ic purple" aria-hidden="true"><Icon name="message" extra="sm" /></span>
@@ -265,6 +269,7 @@ function PreviewHistRow({
           onClick={() => onAct("resume")}
         ><Icon name="refresh" extra="sm" /></button>
         <button type="button" className="icon-btn small" data-tip="Fork" aria-label="Fork" onClick={() => onAct("fork")}><Icon name="fork" extra="sm" /></button>
+        <button type="button" className="icon-btn small" data-tip={consultLabel} aria-label={consultLabel} onClick={onConsult}><Icon name="eye" extra="sm" /></button>
         {row.status === "archived" ? (
           <button type="button" className="icon-btn small" data-tip={t("history.unarchiveSession")} aria-label={t("history.unarchiveSession")} onClick={() => onAct("unarchive")}><Icon name="external" extra="sm" /></button>
         ) : null}
@@ -274,21 +279,30 @@ function PreviewHistRow({
   );
 }
 
+/** Inline zh/en: no locale keys for this action yet. */
+function useConsultLabel(): string {
+  return useI18n().resolvedLanguage === "zh" ? "只读咨询" : "Consult (read-only)";
+}
+
 function HostHistRow({
   entry, titleRow,
   onOpen,
   onUnarchive,
   onMore,
+  onConsult,
 }: {
   entry: SessionHistoryEntry;
   titleRow?: SessionTitleRow | undefined;
   onOpen: () => void;
   onUnarchive: (() => void) | undefined;
   onMore: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  /** Undefined when no live session can run the consult (or this is the live session). */
+  onConsult: (() => void) | undefined;
 }) {
   const status = HOST_STATUS[entry.status];
   const archived = entry.status === "archived";
   const { t } = useI18n();
+  const consultLabel = useConsultLabel();
   const title = hostHistoryTitle(entry, t("conversation.untitledSession"));
   return (
     <div className="hist-row">
@@ -315,6 +329,7 @@ function HostHistRow({
           onClick={onOpen}
         ><Icon name="refresh" extra="sm" /></button>
         <button type="button" className="icon-btn small" disabled data-tip={t("history.forkNotImplemented")} aria-label="Fork"><Icon name="fork" extra="sm" /></button>
+        <button type="button" className="icon-btn small" data-tip={consultLabel} aria-label={consultLabel} disabled={onConsult === undefined} onClick={onConsult}><Icon name="eye" extra="sm" /></button>
         {archived && onUnarchive !== undefined ? (
           <button type="button" className="icon-btn small" data-tip={t("history.unarchiveSession")} aria-label={t("history.unarchiveSession")} onClick={onUnarchive}><Icon name="external" extra="sm" /></button>
         ) : null}
@@ -386,6 +401,8 @@ export function HistoryPage({
   const [deleteFor, setDeleteFor] = useState<{ title: string; entry?: SessionHistoryEntry } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | undefined>(undefined);
+  const [consult, setConsult] = useState<{ source: string; title: string } | null>(null);
+  const canConsult = !!(nativeContext?.available && nativeContext.sessionId && nativeContext.capabilities?.capabilities.some((item) => item.id === "seance.ask" && item.grade !== "unavailable"));
 
   const closeMenu = useCallback(() => setMenu(null), []);
   const openMenu = useCallback((id: string, event: React.MouseEvent<HTMLButtonElement>) => {
@@ -512,6 +529,7 @@ export function HistoryPage({
                   }
                   show(t("history.demoForkToast", { title: row.title }), "fork");
                 }}
+                onConsult={() => setConsult({ source: row.id, title: row.title })}
                 onMore={(event) => openMenu(row.id, event)}
               />
             ))
@@ -525,6 +543,7 @@ export function HistoryPage({
                 onOpen={() => onSelectThread(entry)}
                 onUnarchive={entry.status === "archived" && onUnarchive !== undefined ? () => onUnarchive(entry) : undefined}
                 onMore={(event) => openMenu(entry.historyId, event)}
+                onConsult={canConsult && entry.sessionId && entry.sessionId !== nativeContext?.sessionId ? () => setConsult({ source: entry.sessionId!, title: hostHistoryTitle(entry, t("conversation.untitledSession")) }) : undefined}
               />
             ))
             : <HistEmpty text={history ? t("history.noMatches") : t("history.catalogUnavailable")} />)}
@@ -569,6 +588,16 @@ export function HistoryPage({
           {...(deleteError === undefined ? {} : { error: deleteError })}
           onConfirm={confirmDelete}
           onCancel={cancelDelete}
+        />
+      ) : null}
+      {consult !== null ? (
+        <SeanceDialog
+          client={client}
+          sessionId={nativeContext?.sessionId}
+          source={consult.source}
+          title={consult.title}
+          preview={preview}
+          onClose={() => setConsult(null)}
         />
       ) : null}
       <ToastHost message={notice?.text ?? null} icon={notice?.icon ?? "info"} onDismiss={dismissNotice} />

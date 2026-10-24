@@ -182,6 +182,7 @@ interface ParsedAgentFile {
   readonly thinkingLevel?: AgentThinkingLevel;
   readonly output?: unknown;
   readonly blocking?: boolean;
+  readonly structured?: boolean;
   readonly autoloadSkills?: string[];
   readonly readSummarize?: boolean;
   readonly prewalk?: boolean | string;
@@ -314,6 +315,7 @@ function parseAgentMarkdown(content: string): ParsedAgentFile | undefined {
   const thinkingLevel = parseThinkingLevel(frontmatter.thinkingLevel ?? frontmatter.thinking);
   const model = parseArrayOrCsv(frontmatter.model);
   const blocking = parseBoolean(frontmatter.blocking);
+  const structured = parseBoolean(frontmatter.structured);
   const readSummarize = parseBoolean(frontmatter.readSummarize);
   const prewalk = parseBoolOrPattern(frontmatter.prewalk);
   const advisor = parseBoolOrPattern(frontmatter.advisor);
@@ -328,6 +330,7 @@ function parseAgentMarkdown(content: string): ParsedAgentFile | undefined {
     ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
     ...(frontmatter.output === undefined ? {} : { output: frontmatter.output }),
     ...(blocking === undefined ? {} : { blocking }),
+    ...(structured === undefined ? {} : { structured }),
     ...(autoloadSkills === undefined ? {} : { autoloadSkills }),
     ...(readSummarize === undefined ? {} : { readSummarize }),
     ...(prewalk === undefined ? {} : { prewalk }),
@@ -390,6 +393,7 @@ function toRecord(
     ...(parsed.thinkingLevel === undefined ? {} : { thinkingLevel: parsed.thinkingLevel }),
     ...(parsed.output === undefined ? {} : { output: parsed.output }),
     ...(parsed.blocking === undefined ? {} : { blocking: parsed.blocking }),
+    ...(parsed.structured === undefined ? {} : { structured: parsed.structured }),
     ...(parsed.autoloadSkills === undefined ? {} : { autoloadSkills: parsed.autoloadSkills }),
     ...(parsed.readSummarize === undefined ? {} : { readSummarize: parsed.readSummarize }),
     ...(parsed.prewalk === undefined ? {} : { prewalk: parsed.prewalk }),
@@ -564,6 +568,7 @@ function serializeAgentMarkdown(input: AgentDefinitionUpsertInput): string {
   if (input.model && input.model.length > 0) frontmatter.model = [...input.model];
   if (input.thinkingLevel) frontmatter["thinking-level"] = input.thinkingLevel;
   if (input.blocking === true) frontmatter.blocking = true;
+  if (input.structured === true) frontmatter.structured = true;
   if (input.readSummarize === false) frontmatter["read-summarize"] = false;
   if (input.readSummarize === true) frontmatter["read-summarize"] = true;
   if (input.prewalk === true) frontmatter.prewalk = true;

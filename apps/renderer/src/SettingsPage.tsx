@@ -85,6 +85,7 @@ export function SettingsPage({
   client,
   approvalMode,
   onSetApprovalMode,
+  onForgetApprovals,
   runtimeSettings,
   nativeContext,
   onOpenWorktree,
@@ -95,6 +96,8 @@ export function SettingsPage({
   /** 当前 Runtime 审批模式；undefined = 无 Runtime 快照。 */
   approvalMode?: ApprovalModeId;
   onSetApprovalMode: (mode: ApprovalModeId) => void;
+  /** Clears remembered approvals in the active Runtime; omitted without a session. */
+  onForgetApprovals?: () => Promise<void>;
   /** Optional Runtime settings read/write surface; omitted on older Runtime versions. */
   runtimeSettings?: RuntimeSettingsApi;
   nativeContext?: NativePreferencesContext | undefined;
@@ -192,6 +195,7 @@ export function SettingsPage({
       },
       approvalMode: PREVIEW_APPROVAL_MODE,
       setApprovalMode: () => flashDemo(),
+      forgetApprovals: async () => flashDemo(),
     }
     : {
       preview: false,
@@ -200,6 +204,7 @@ export function SettingsPage({
       resetApp: real.reset,
       approvalMode,
       setApprovalMode: onSetApprovalMode,
+      ...(onForgetApprovals === undefined ? {} : { forgetApprovals: onForgetApprovals }),
     };
 
   let runtime: RuntimeSettingsCtl = { preview: false };

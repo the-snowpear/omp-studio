@@ -135,13 +135,13 @@ function ProviderTestRow({ result }: { result: TestResultView }) {
 export const ROLE_ICONS: Record<string, string> = {
   default: "cpu", smol: "zap", slow: "brain", vision: "eye", plan: "layers",
   designer: "sparkles", commit: "commit", tiny: "box", task: "bot", advisor: "user",
-  memory: "brain", image: "image", web: "globe", speech: "volume", dictation: "mic", judge: "check",
+  memory: "brain", image: "image", web: "globe", speech: "volume", dictation: "mic", judge: "check", widget: "layout",
 };
 
 /** 角色列表卡片的主题色（与 models-roles.css 的 .role-row[data-tint] 对应）。 */
 export const ROLE_TINTS: Record<string, string> = {
   default: "purple", smol: "green", slow: "blue", vision: "violet", plan: "teal",
-  designer: "pink", commit: "cyan", tiny: "lime", task: "orange", advisor: "indigo",
+  designer: "pink", commit: "cyan", tiny: "lime", task: "orange", advisor: "indigo", widget: "green",
 };
 
 export function setModelConfigIntent(intent: McIntent): void {
@@ -677,6 +677,7 @@ type DraftOverrideForm = {
   costCacheW: string;
   omitMaxOutputTokens: "" | "true" | "false";
   premiumMultiplier: string;
+  imageCountBudget: string;
   headersText: string;
   contextPromotionTarget: string;
   compactionModel: string;
@@ -703,6 +704,7 @@ type CustomModelForm = {
   costCacheW: string;
   omitMaxOutputTokens: boolean;
   premiumMultiplier: string;
+  imageCountBudget: string;
   headersText: string;
   contextPromotionTarget: string;
   compactionModel: string;
@@ -771,6 +773,7 @@ function blankOverrideForm(from?: DraftOverride): DraftOverrideForm {
     costCacheW: from?.cost?.cacheWrite !== undefined ? String(from.cost.cacheWrite) : "",
     omitMaxOutputTokens: from?.omitMaxOutputTokens === undefined ? "" : from.omitMaxOutputTokens ? "true" : "false",
     premiumMultiplier: from?.premiumMultiplier !== undefined ? String(from.premiumMultiplier) : "",
+    imageCountBudget: from?.imageCountBudget !== undefined ? String(from.imageCountBudget) : "",
     headersText: headersTextFrom(from?.headers),
     contextPromotionTarget: from?.contextPromotionTarget ?? "",
     compactionModel: from?.compactionModel ?? "",
@@ -798,6 +801,7 @@ function blankCustomForm(from?: ModelCatalogEntry): CustomModelForm {
     costCacheW: !from?.pricing && from?.cost?.cacheWrite !== undefined ? String(from.cost.cacheWrite) : "",
     omitMaxOutputTokens: from?.omitMaxOutputTokens ?? false,
     premiumMultiplier: from?.premiumMultiplier !== undefined ? String(from.premiumMultiplier) : "",
+    imageCountBudget: from?.imageCountBudget !== undefined ? String(from.imageCountBudget) : "",
     headersText: headersTextFrom(from?.headers),
     contextPromotionTarget: from?.contextPromotionTarget ?? "",
     compactionModel: from?.compactionModel ?? "",
@@ -837,6 +841,8 @@ function overrideFromForm(form: DraftOverrideForm): DraftOverride | null {
   if (omit !== undefined) next.omitMaxOutputTokens = omit;
   const premium = parseOptionalNumber(form.premiumMultiplier);
   if (premium !== undefined) next.premiumMultiplier = premium;
+  const imageBudget = parseOptionalNumber(form.imageCountBudget);
+  if (imageBudget !== undefined) next.imageCountBudget = imageBudget;
   const headers = parseHeaders(form.headersText);
   if (Object.keys(headers).length > 0) next.headers = headers;
   if (form.contextPromotionTarget.trim()) next.contextPromotionTarget = form.contextPromotionTarget.trim();
@@ -879,6 +885,7 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
   const maxTokens = parseOptionalNumber(form.maxTokens);
   const cost = costFromFields(form.costIn, form.costOut, form.costCacheR, form.costCacheW);
   const premium = parseOptionalNumber(form.premiumMultiplier);
+  const imageBudget = parseOptionalNumber(form.imageCountBudget);
   const headers = parseHeaders(form.headersText);
   const rc = rcFromParts(form.rcEnabled ? true : undefined, form.rcEndpoint, form.rcModel);
   return {
@@ -898,6 +905,7 @@ function entryFromCustomForm(providerId: string, form: CustomModelForm): ModelCa
     ...(form.omitMaxOutputTokens ? { omitMaxOutputTokens: true } : {}),
     ...(triState(form.bedrockMessagesApi) === undefined ? {} : { bedrockMessagesApi: triState(form.bedrockMessagesApi)! }),
     ...(premium === undefined ? {} : { premiumMultiplier: premium }),
+    ...(imageBudget === undefined ? {} : { imageCountBudget: imageBudget }),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
     ...(form.contextPromotionTarget.trim() ? { contextPromotionTarget: form.contextPromotionTarget.trim() } : {}),
     ...(form.compactionModel.trim() ? { compactionModel: form.compactionModel.trim() } : {}),
@@ -1057,6 +1065,7 @@ function overrideDraftEqual(left: DraftOverride | undefined, right: DraftOverrid
     && left.bedrockMessagesApi === right.bedrockMessagesApi
     && left.omitMaxOutputTokens === right.omitMaxOutputTokens
     && left.premiumMultiplier === right.premiumMultiplier
+    && left.imageCountBudget === right.imageCountBudget
     && left.contextPromotionTarget === right.contextPromotionTarget
     && left.compactionModel === right.compactionModel
     && sameStringList(left.thinking, right.thinking)
@@ -1198,6 +1207,7 @@ function providerUpsertFromDraft(editor: Draft, contentHash?: string): ModelProv
       ...(model.omitMaxOutputTokens ? { omitMaxOutputTokens: true } : {}),
       ...(model.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: model.bedrockMessagesApi }),
       ...(model.premiumMultiplier === undefined ? {} : { premiumMultiplier: model.premiumMultiplier }),
+      ...(model.imageCountBudget === undefined ? {} : { imageCountBudget: model.imageCountBudget }),
       ...(model.headers ? { headers: model.headers } : {}),
       ...(model.contextPromotionTarget ? { contextPromotionTarget: model.contextPromotionTarget } : {}),
       ...(model.compactionModel ? { compactionModel: model.compactionModel } : {}),
@@ -1829,6 +1839,7 @@ const BUILTIN_ROLE_DESC_KEYS: Record<string, string> = {
   tiny: "modelConfig.roleDescTiny",
   task: "modelConfig.roleDescSubtask",
   advisor: "modelConfig.roleDescAdvisor",
+  widget: "modelConfig.roleDescWidget",
 };
 
 function formatRoleDesc(role: { id: string; desc: string; builtin?: boolean }, t: (k: string) => string): string {
@@ -4026,6 +4037,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                               <div className="field"><label>Premium Multiplier</label>
                                 <input className="input mono" placeholder={t("common.inherit")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
                               </div>
+                              <div className="field"><label>Image Count Budget</label>
+                                <input className="input mono" inputMode="numeric" placeholder={t("common.inherit")} value={modelEditView.draft.imageCountBudget} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, imageCountBudget: e.target.value } })} />
+                              </div>
                               <div className="field span2"><label>{t("modelConfig.headersPerLine")}</label>
                                 <textarea className="input mono" rows={2} placeholder={t("modelConfig.headersInheritPlaceholder")} value={modelEditView.draft.headersText} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, headersText: e.target.value } })} />
                               </div>
@@ -4148,6 +4162,9 @@ export function ModelConfigPage({ client, sessionId, workspaceId, runtimeAvailab
                               <BedrockMessagesControl value={modelEditView.draft.bedrockMessagesApi} onChange={bedrockMessagesApi => setModelEdit({...modelEditView,draft:{...modelEditView.draft,bedrockMessagesApi}})}/>
                               <div className="field"><label>Premium Multiplier</label>
                                 <input className="input mono" placeholder={t("common.notSet")} value={modelEditView.draft.premiumMultiplier} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, premiumMultiplier: e.target.value } })} />
+                              </div>
+                              <div className="field"><label>Image Count Budget</label>
+                                <input className="input mono" inputMode="numeric" placeholder={t("common.notSet")} value={modelEditView.draft.imageCountBudget} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, imageCountBudget: e.target.value } })} />
                               </div>
                               <div className="field span2"><label>{t("modelConfig.headersPerLine")}</label>
                                 <textarea className="input mono" rows={2} placeholder="X-Model: value" value={modelEditView.draft.headersText} onChange={(e) => setModelEdit({ ...modelEditView, draft: { ...modelEditView.draft, headersText: e.target.value } })} />

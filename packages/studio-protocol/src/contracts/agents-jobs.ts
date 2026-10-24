@@ -1,4 +1,5 @@
 import type { AgentId, Generation, JobId, OpaqueCursor } from "./ids";
+import type { JobWidgetView } from "./runtime-features";
 
 export type AgentStatus =
   | "starting"
@@ -38,6 +39,10 @@ export interface StudioAgentSnapshot {
   hasTranscript: boolean;
   unreadCount: number;
   activeJobIds: JobId[];
+  /** Current stage of the task job running this agent, from its completion probe. */
+  stage?: string;
+  /** The running task's own completion estimate, 0–100. */
+  completionPercent?: number;
   usage?: StudioAgentUsage;
   modelRole?: string;
   resolvedModel?: string;
@@ -63,8 +68,23 @@ export interface StudioJobSnapshot {
   label: string;
   status: JobStatus;
   startedAt?: string;
+  /** When the run settled; a finished job's duration is frozen at this instant. */
   completedAt?: string;
   summary?: string;
+  /** Full command line of a job that spawned a process (the label is cut short). */
+  command?: string;
+  /** A running task's own completion estimate, 0–100. */
+  completionPercent?: number;
+  /** What the job is doing now: a subagent's stage. */
+  stage?: string;
+  /** Live widget (the last view seen once the job settled). */
+  widget?: JobWidgetView;
+}
+
+/** Lineage of a job owner up to the session's root agent (absent `parentId` = child of the root). */
+export interface StudioJobAgentLink {
+  id: AgentId;
+  parentId?: AgentId;
 }
 
 export type AgentOperation =

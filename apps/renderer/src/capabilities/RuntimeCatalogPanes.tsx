@@ -13,6 +13,7 @@ import {
   PREVIEW_TEMPLATE,
   PREVIEW_TEMPLATE_TEXT,
 } from "../preview/runtimeCatalogPreview";
+import { McpAuthActions } from "./McpAuthActions";
 import "./runtimeCatalog.css";
 
 interface Props {
@@ -44,7 +45,8 @@ export function McpRuntimePane({
   sessionId,
   available,
   visible = true,
-}: Props) {
+  authAvailable = false,
+}: Props & { authAvailable?: boolean | undefined }) {
   const { preview } = usePreviewMode();
   const { resolvedLanguage } = useI18n();
   const zh = resolvedLanguage === "zh";
@@ -154,6 +156,16 @@ export function McpRuntimePane({
                   <span className="small muted">
                     {server.tools} {zh ? "个工具" : "tools"}
                   </span>
+                  {preview || authAvailable ? (
+                    <McpAuthActions
+                      client={client}
+                      sessionId={sessionId}
+                      name={server.name}
+                      available={authAvailable}
+                      preview={preview}
+                      zh={zh}
+                    />
+                  ) : null}
                 </div>
               ))}
               {!status.servers.length ? (

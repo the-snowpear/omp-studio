@@ -288,6 +288,13 @@ export function conversationRedactKey(key: string): boolean {
  * - `conversation.message.completed.item.itemId` **must equal** `messageId`.
  * - There is no `replacesLiveId`. Downstream must not correlate by text.
  */
+/** MCP `notifications/progress`: `progress` of an optional `total`, with an optional phase message. */
+export interface ConversationToolProgress {
+  progress: number;
+  total?: number;
+  message?: string;
+}
+
 export type ConversationRuntimeEvent =
   | {
       kind: "conversation.message.started";
@@ -338,6 +345,8 @@ export type ConversationRuntimeEvent =
       updateMode: "append" | "replace";
       output?: string;
       truncated?: boolean;
+      /** Latest MCP progress notification of the call. */
+      progress?: ConversationToolProgress;
     }
   | {
       kind: "conversation.tool.completed";

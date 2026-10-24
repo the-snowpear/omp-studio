@@ -878,6 +878,7 @@ function extrasFromYaml(entry: Record<string, YamlValue>): {
   bedrockMessagesApi?: boolean;
   omitMaxOutputTokens?: boolean;
   premiumMultiplier?: number;
+  imageCountBudget?: number;
   headers?: Record<string, string>;
   contextPromotionTarget?: string;
   compactionModel?: string;
@@ -886,6 +887,7 @@ function extrasFromYaml(entry: Record<string, YamlValue>): {
   baseUrl?: string;
 } {
   const premiumMultiplier = numberOf(entry.premiumMultiplier);
+  const imageCountBudget = numberOf(entry.imageCountBudget);
   const headers = stringMapOf(entry.headers);
   const contextPromotionTarget = stringOf(entry.contextPromotionTarget);
   const compactionModel = stringOf(entry.compactionModel);
@@ -896,6 +898,7 @@ function extrasFromYaml(entry: Record<string, YamlValue>): {
     ...(typeof entry.omitMaxOutputTokens === "boolean" ? { omitMaxOutputTokens: entry.omitMaxOutputTokens } : {}),
     ...(typeof asRecord(entry.compat)?.bedrockMessagesApi === "boolean" ? {bedrockMessagesApi: asRecord(entry.compat)!.bedrockMessagesApi as boolean} : {}),
     ...(premiumMultiplier === undefined ? {} : { premiumMultiplier }),
+    ...(imageCountBudget === undefined ? {} : { imageCountBudget }),
     ...(headers ? { headers } : {}),
     ...(contextPromotionTarget === undefined ? {} : { contextPromotionTarget }),
     ...(compactionModel === undefined ? {} : { compactionModel }),
@@ -956,6 +959,7 @@ function writeOverrideRow(
   if (cost) row.cost = cost;
   if (override.omitMaxOutputTokens !== undefined) row.omitMaxOutputTokens = override.omitMaxOutputTokens;
   if (override.premiumMultiplier !== undefined) row.premiumMultiplier = override.premiumMultiplier;
+  if (override.imageCountBudget !== undefined) row.imageCountBudget = override.imageCountBudget;
   if (override.headers && Object.keys(override.headers).length > 0) row.headers = { ...override.headers };
   if (override.contextPromotionTarget) row.contextPromotionTarget = override.contextPromotionTarget;
   if (override.compactionModel) row.compactionModel = override.compactionModel;
@@ -1000,6 +1004,7 @@ function yamlModels(id: string, models: Array<Record<string, YamlValue>> | undef
       ...(extras.omitMaxOutputTokens === undefined ? {} : { omitMaxOutputTokens: extras.omitMaxOutputTokens }),
       ...(extras.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: extras.bedrockMessagesApi }),
       ...(extras.premiumMultiplier === undefined ? {} : { premiumMultiplier: extras.premiumMultiplier }),
+      ...(extras.imageCountBudget === undefined ? {} : { imageCountBudget: extras.imageCountBudget }),
       ...(extras.headers ? { headers: extras.headers } : {}),
       ...(extras.contextPromotionTarget === undefined ? {} : { contextPromotionTarget: extras.contextPromotionTarget }),
       ...(extras.compactionModel === undefined ? {} : { compactionModel: extras.compactionModel }),
@@ -1036,6 +1041,7 @@ function yamlModelOverrides(raw: YamlValue | undefined): ModelProviderRecord["mo
       ...(extras.omitMaxOutputTokens === undefined ? {} : { omitMaxOutputTokens: extras.omitMaxOutputTokens }),
       ...(extras.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: extras.bedrockMessagesApi }),
       ...(extras.premiumMultiplier === undefined ? {} : { premiumMultiplier: extras.premiumMultiplier }),
+      ...(extras.imageCountBudget === undefined ? {} : { imageCountBudget: extras.imageCountBudget }),
       ...(extras.headers ? { headers: extras.headers } : {}),
       ...(extras.contextPromotionTarget === undefined ? {} : { contextPromotionTarget: extras.contextPromotionTarget }),
       ...(extras.compactionModel === undefined ? {} : { compactionModel: extras.compactionModel }),
@@ -1066,6 +1072,7 @@ function applyOverrideToCatalog(
     ...(override.omitMaxOutputTokens === undefined ? {} : { omitMaxOutputTokens: override.omitMaxOutputTokens }),
     ...(override.bedrockMessagesApi === undefined ? {} : { bedrockMessagesApi: override.bedrockMessagesApi }),
     ...(override.premiumMultiplier === undefined ? {} : { premiumMultiplier: override.premiumMultiplier }),
+    ...(override.imageCountBudget === undefined ? {} : { imageCountBudget: override.imageCountBudget }),
     ...(override.headers ? { headers: override.headers } : {}),
     ...(override.contextPromotionTarget === undefined ? {} : { contextPromotionTarget: override.contextPromotionTarget }),
     ...(override.compactionModel === undefined ? {} : { compactionModel: override.compactionModel }),
@@ -1323,6 +1330,7 @@ export function toYamlProvider(input: ModelProviderUpsertInput, previous: Record
       if (cost) row.cost = cost;
       if (model.omitMaxOutputTokens) row.omitMaxOutputTokens = true;
       if (model.premiumMultiplier !== undefined) row.premiumMultiplier = model.premiumMultiplier;
+      if (model.imageCountBudget !== undefined) row.imageCountBudget = model.imageCountBudget;
       if (model.headers && Object.keys(model.headers).length > 0) row.headers = { ...model.headers };
       if (model.contextPromotionTarget) row.contextPromotionTarget = model.contextPromotionTarget;
       if (model.compactionModel) row.compactionModel = model.compactionModel;

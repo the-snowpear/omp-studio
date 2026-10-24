@@ -2,6 +2,13 @@ import { cfgToolsApprovalMode } from "../tools/settings";
 import { logger } from "@oh-my-pi/pi-utils";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import {
+	currentRuntimeIdentity,
+	type RuntimeIdentity,
+	runtimeIdentityHistory,
+	sameRuntimeIdentity,
+} from "../session/runtime-identity";
+import type { SessionEntry } from "../session/session-entries";
+import {
 	type StudioEventEnvelope,
 	type StudioInteractionRequiredEvent,
 	type StudioInteractionResolvedEvent,
@@ -9,6 +16,7 @@ import {
 	type StudioPendingInteraction,
 	type StudioReceipt,
 	type StudioRetryState,
+	type StudioRuntimeIdentitySnapshot,
 	type StudioSessionTelemetry,
 	type StudioSnapshotResponse,
 	stableImplementedManifestHash,
@@ -116,6 +124,8 @@ export class StudioStateProjector {
 	#telemetrySnapshot: StudioSessionTelemetry;
 	#retry: StudioRetryState | undefined;
 	#retrySessionId: string | undefined;
+	#awaitingAsyncWork = false;
+	#identity: { sessionId: string; history: Array<RuntimeIdentity | null> } | undefined;
 
 	constructor(runtime: StudioHostRuntime) {
 		this.#runtime = runtime;
@@ -151,6 +161,15 @@ export class StudioStateProjector {
 						this.commitStateChange();
 					}
 				}
+				if (event.type === "agent_start" || event.type === "agent_end") {
+					// A non-terminal end that only a background-job result resumes is
+					// not a finished run: surface it until a run starts or settles.
+					const awaiting = event.type === "agent_end" && event.awaitingAsyncWork === true;
+					if (awaiting !== this.#awaitingAsyncWork) {
+						this.#awaitingAsyncWork = awaiting;
+						this.commitStateChange();
+					}
+				}
 				if (event.type === "advisor_cost_changed") this.#scheduleTelemetry(false);
 				if (event.type === "model_changed" || event.type === "thinking_level_changed") this.commitStateChange();
 			}) ?? (() => {});
@@ -165,11 +184,19 @@ export class StudioStateProjector {
 		let unsubscribeJobManager = () => {};
 		const bindJobManager = (): void => {
 			unsubscribeJobManager();
-			unsubscribeJobManager =
-				runtime.session.asyncJobManager?.onChange(() => {
-					this.#jobsRevision += 1;
-					this.commitStateChange();
-				}) ?? (() => {});
+			const manager = runtime.session.asyncJobManager;
+			const onJobsChanged = (): void => {
+				this.#jobsRevision += 1;
+				this.commitStateChange();
+			};
+			// Widgets refresh in the background while shown; their registry pushes
+			// those repaints separately from job state changes.
+			const unsubscribeJobs = manager?.onChange(onJobsChanged) ?? (() => {});
+			const unsubscribeWidgets = manager?.widgets?.subscribe(onJobsChanged) ?? (() => {});
+			unsubscribeJobManager = () => {
+				unsubscribeJobs();
+				unsubscribeWidgets();
+			};
 		};
 		bindJobManager();
 		this.#unsubscribeJobs = () => unsubscribeJobManager();
@@ -237,6 +264,12 @@ export class StudioStateProjector {
 					: vibe?.enabled
 						? "vibe"
 						: "normal";
+		const rootAgentId = this.#runtime.session.getAgentId() ?? "Main";
+		const jobs = this.#runtime.services.jobs.list({ callerAgentId: rootAgentId, includeRecent: true });
+		const jobAgents = jobs.length === 0 ? [] : this.#runtime.services.jobs.agentLinks(jobs, rootAgentId);
+		const awaitingAsyncWork =
+			this.#awaitingAsyncWork && jobs.some(job => job.status === "running" || job.status === "queued");
+		const runtimeIdentity = this.#runtimeIdentity();
 		const snapshot: StudioOperatorStateSnapshot = {
 			runtimeId: this.#runtime.runtimeId,
 			runtimeEpoch: this.#runtime.runtimeEpoch,
@@ -264,10 +297,10 @@ export class StudioStateProjector {
 			agentsRevision: this.#agentsRevision,
 			jobsRevision: this.#jobsRevision,
 			agents: this.#runtime.services.agents.list({ includeTerminal: true, includePersisted: true }),
-			jobs: this.#runtime.services.jobs.list({
-				callerAgentId: this.#runtime.session.getAgentId() ?? "Main",
-				includeRecent: true,
-			}),
+			jobs,
+			...(jobAgents.length > 0 ? { jobAgents } : {}),
+			...(awaitingAsyncWork ? { awaitingAsyncWork: true } : {}),
+			...(runtimeIdentity === undefined ? {} : { runtimeIdentity }),
 			telemetry: this.#telemetrySnapshot,
 			...(this.#retry === undefined || this.#retrySessionId !== this.#runtime.sessionManager.getSessionId()
 				? {}
@@ -374,6 +407,31 @@ export class StudioStateProjector {
 			}));
 		}
 		return this.#ownedTranscript;
+	}
+
+	/**
+	 * Builds that wrote this session plus the running one. The file's stamps are
+	 * read once per session: entries this process appends carry the current
+	 * identity, which is appended here already.
+	 */
+	#runtimeIdentity(): StudioRuntimeIdentitySnapshot | undefined {
+		const sessionId = this.#runtime.sessionId;
+		try {
+			if (this.#identity?.sessionId !== sessionId) {
+				const sessionManager = this.#runtime.sessionManager as { getEntries?: () => SessionEntry[] } | undefined;
+				this.#identity = { sessionId, history: runtimeIdentityHistory(sessionManager?.getEntries?.() ?? []) };
+			}
+			// `current` is re-read: a source checkout's diff hash resolves after start.
+			const current = currentRuntimeIdentity();
+			const history = [...this.#identity.history];
+			const last = history.at(-1);
+			if (last === undefined || !sameRuntimeIdentity(last, current)) history.push(current);
+			// Keep the newest builds; a session revived across many builds stays bounded.
+			return { current: { ...current }, history: history.slice(-32).map(item => (item ? { ...item } : null)) };
+		} catch (error) {
+			logger.debug("Studio runtime identity unavailable", { error: String(error) });
+			return undefined;
+		}
 	}
 
 	/** Effective tool approval mode: runtime override layer first, then the persisted default. */

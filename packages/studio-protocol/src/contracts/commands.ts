@@ -114,7 +114,7 @@ export type OperatorOperation =
   | { kind: "operator.manifest.get" }
   | { kind: "operator.invoke"; commandId: string; arguments?: unknown };
 
-export type ApprovalMode = "always-ask" | "write" | "yolo";
+export type ApprovalMode = "always-ask" | "always-ask-cached" | "write" | "yolo";
 
 export type PermissionOperation = {
   kind: "permissions.mode.set";

@@ -30,8 +30,13 @@ test("judge, media and local lightweight roles follow the upstream migration", (
   assert.equal(root.providers, undefined);
 });
 test("mirrored default candidates remain aligned with the pinned Runtime", async () => {
-  const native = JSON.parse(await readFile(new URL("../../../../omp-patch/vendor/oh-my-pi/packages/coding-agent/src/priority.json", import.meta.url), "utf8")) as Record<string, string[]>;
-  assert.deepEqual(WEB_PRIORITY_1880, native.web); assert.deepEqual(MODEL_ROLE_PRIORITIES.image, native.image);
+  // Since OMP 18.12 the default role chains live in the catalog's KDL rules (`role-defaults "<role>" { model "…" }`).
+  const kdl = await readFile(new URL("../../../../omp-patch/vendor/oh-my-pi/packages/catalog/src/compat/rules/runtime/behavior.kdl", import.meta.url), "utf8");
+  const chain = (role: string) => {
+    const block = new RegExp(`role-defaults "${role}" \\{([^}]*)\\}`, "u").exec(kdl)?.[1] ?? "";
+    return [...block.matchAll(/model "([^"]+)"/gu)].map((match) => match[1]);
+  };
+  assert.deepEqual(WEB_PRIORITY_1880, chain("web")); assert.deepEqual(MODEL_ROLE_PRIORITIES.image, chain("image"));
 });
 
 test("free defaults do not discard explicitly configured paid legacy engines", () => {

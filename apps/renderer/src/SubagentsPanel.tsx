@@ -46,6 +46,7 @@ interface AgentDraft {
   modelInput: string;
   thinkingLevel: "" | AgentThinkingLevel;
   blocking: boolean;
+  structured: boolean;
   readSummarize: boolean;
   prewalkMode: PrewalkMode;
   prewalkPattern: string;
@@ -122,6 +123,7 @@ function blankDraft(projectAvailable: boolean): AgentDraft {
     modelInput: "",
     thinkingLevel: "",
     blocking: false,
+    structured: false,
     readSummarize: true,
     prewalkMode: "inherit",
     prewalkPattern: "",
@@ -160,6 +162,7 @@ function draftFromAgent(agent: AgentDefinitionRecord, projectAvailable: boolean)
     modelInput: "",
     thinkingLevel: agent.thinkingLevel ?? "",
     blocking: agent.blocking === true,
+    structured: agent.structured === true,
     readSummarize: agent.readSummarize !== false,
     prewalkMode,
     prewalkPattern: typeof agent.prewalk === "string" ? agent.prewalk : "",
@@ -190,6 +193,7 @@ function previewMd(draft: AgentDraft): string {
   if (draft.models.length > 0) lines.push(`model: ${draft.models.join(", ")}`);
   if (draft.thinkingLevel) lines.push(`thinking-level: ${draft.thinkingLevel}`);
   if (draft.blocking) lines.push("blocking: true");
+  if (draft.structured) lines.push("structured: true");
   if (!draft.readSummarize) lines.push("read-summarize: false");
   if (draft.prewalkMode === "on") lines.push("prewalk: true");
   if (draft.prewalkMode === "custom" && draft.prewalkPattern) lines.push(`prewalk: ${draft.prewalkPattern}`);
@@ -229,7 +233,8 @@ export function SubagentsPanel({
   initialAgent?: string;
   onCount?: (count: number) => void;
 }) {
-  const { t } = useI18n();
+  const { t, resolvedLanguage } = useI18n();
+  const zh = resolvedLanguage === "zh";
   const [data, setData] = useState<AgentDefinitionsReadModel | null>(preview ? createPreviewAgentDefinitions() : null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -408,6 +413,7 @@ export function SubagentsPanel({
       model: draft.models.length > 0 ? draft.models : null,
       thinkingLevel: draft.thinkingLevel || null,
       blocking: draft.blocking ? true : null,
+      structured: draft.structured ? true : null,
       readSummarize: draft.readSummarize ? null : false,
       prewalk,
       advisor,
@@ -430,6 +436,7 @@ export function SubagentsPanel({
           ...(upsert.thinkingLevel ? { thinkingLevel: upsert.thinkingLevel } : {}),
           ...(output === undefined ? {} : { output }),
           ...(upsert.blocking ? { blocking: true } : {}),
+          ...(upsert.structured ? { structured: true } : {}),
           ...(upsert.readSummarize === false ? { readSummarize: false } : {}),
           ...(prewalk === null || prewalk === undefined ? {} : { prewalk }),
           ...(advisor === null || advisor === undefined ? {} : { advisor }),
@@ -797,6 +804,11 @@ export function SubagentsPanel({
               <span className="desc">frontmatter blocking</span>
             </div>
             <div className="field">
+              <label>{zh ? "保留结构化结果" : "Keep structured output"}</label>
+              <button type="button" className={`switch${draft.structured ? " on" : ""}`} role="switch" aria-checked={draft.structured} disabled={definitionLocked} onClick={() => setDraft({ ...draft, structured: !draft.structured })} />
+              <span className="desc">{zh ? "frontmatter structured：全局关闭「结构化任务结果」时，此 Agent 仍保留 yield 与输出 schema" : "frontmatter structured: keep yield and the output schema even when task.structured is off"}</span>
+            </div>
+            <div className="field">
               <label>{t("subagents.readSummary")}</label>
               <button type="button" className={`switch${draft.readSummarize ? " on" : ""}`} role="switch" aria-checked={draft.readSummarize} disabled={definitionLocked} onClick={() => setDraft({ ...draft, readSummarize: !draft.readSummarize })} />
               <span className="desc">{t("subagents.readSummaryDesc")}</span>
@@ -966,6 +978,7 @@ export function SubagentsPanel({
                       {agent.prewalk === true || typeof agent.prewalk === "string" ? <span className="chip blue xs">prewalk</span> : null}
                       {agent.advisor === true || typeof agent.advisor === "string" ? <span className="chip blue xs">advisor</span> : null}
                       {agent.blocking ? <span className="chip amber xs">blocking</span> : null}
+                      {agent.structured ? <span className="chip blue xs">structured</span> : null}
                     </div>
                   </button>
                   <div className="sa-card-act">

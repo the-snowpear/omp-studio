@@ -1,4 +1,4 @@
-import type { StudioAgentSnapshot, StudioJobSnapshot } from "./agents-jobs";
+import type { StudioAgentSnapshot, StudioJobAgentLink, StudioJobSnapshot } from "./agents-jobs";
 import type { ApprovalMode } from "./commands";
 import type {
   AgentId,
@@ -118,6 +118,24 @@ export interface LiveState {
   deviceId?: string;
 }
 
+/** Upstream `RuntimeIdentity`: the omp build that wrote session entries. */
+export interface SessionBuildIdentity {
+  version: string;
+  /** Source checkout commit; absent for installed builds. */
+  commit?: string;
+  branch?: string;
+  /** Hash of the checkout's uncommitted diff; `unknown` when unread. */
+  diff?: string;
+  /** `OMP_BUILD_LABEL`. */
+  label?: string;
+}
+
+export interface SessionBuildProvenance {
+  current: SessionBuildIdentity;
+  /** File order, consecutive repeats collapsed; `null` = entries written without a stamp. */
+  history: Array<SessionBuildIdentity | null>;
+}
+
 export interface OperatorStateSnapshot {
   runtimeId: RuntimeId;
   runtimeEpoch: RuntimeEpoch;
@@ -158,6 +176,15 @@ export interface OperatorStateSnapshot {
   jobsRevision: number;
   agents: StudioAgentSnapshot[];
   jobs: StudioJobSnapshot[];
+  /** Lineage of the agents that own `jobs`, for nesting subagent jobs under their spawner. */
+  jobAgents?: StudioJobAgentLink[];
+  /**
+   * The last run ended non-terminally and only a background-job result can
+   * resume it: the turn is waiting on background jobs, not finished.
+   */
+  awaitingAsyncWork?: boolean;
+  /** omp builds that wrote this session, ending with the running one. */
+  runtimeIdentity?: SessionBuildProvenance;
   telemetry?: SessionTelemetrySnapshot;
   /** Optional on older Runtime versions; present when the settings seam is available. */
   runtimeSettings?: StudioRuntimeSettingsSnapshot;

@@ -12,10 +12,12 @@ import type { ComposerDoc } from "../composer/types";
 import type { ConversationIdentity } from "./conversationHost";
 import type { UserMessageThumb, UserThumbMap } from "./userMessageThumbs";
 
+/** Latest MCP progress notification of a running call. */
+export type ToolProgress = { readonly progress: number; readonly total?: number; readonly message?: string };
 export type ToolStatus = "queued" | "running" | "succeeded" | "failed" | "aborted" | "missing";
 export type LiveBlock = { readonly blockId: string; readonly blockType: "text" | "thinking"; readonly text: string; readonly truncated?: boolean };
 export type LiveMessage = { readonly messageId: string; readonly turnId: string; readonly role: ConversationMessageItem["role"]; readonly createdAt: string; readonly blocks: readonly LiveBlock[]; readonly aborted: boolean };
-export type LiveTool = { readonly toolCallId: string; readonly messageId: string; readonly turnId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly truncated?: boolean; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus };
+export type LiveTool = { readonly toolCallId: string; readonly messageId: string; readonly turnId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly truncated?: boolean; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly progress?: ToolProgress };
 export type PendingUser = { readonly requestId: string; readonly text: string; readonly draft: string; readonly status: "pending" | "failed"; readonly knownItemIds: readonly string[]; readonly error?: string; readonly doc?: ComposerDoc };
 export type ConversationNotice = { readonly id: string; readonly level: "info" | "warning" | "error"; readonly message: string; readonly source?: string };
 export type HydrateStatus = "idle" | "loading" | "ready" | "error" | "resyncing" | "unavailable";
@@ -28,7 +30,7 @@ export type ConversationState = {
   readonly userDisplays: { readonly [itemId: string]: ComposerDoc }; readonly userThumbs: UserThumbMap; readonly openTurnItems: { readonly [itemId: string]: string };
   readonly compacting?: { readonly action: string }; readonly messageErrors?: { readonly [messageId: string]: ConversationMessageError };
 };
-export type ToolView = { readonly toolCallId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly truncated?: boolean };
+export type ToolView = { readonly toolCallId: string; readonly toolName: string; readonly arguments?: JsonValue; readonly output?: string; readonly result?: Extract<ConversationContentBlock, { type: "toolResult" }>; readonly status: ToolStatus; readonly truncated?: boolean; readonly progress?: ToolProgress };
 export type AssistantSegment =
   | { readonly type: "text"; readonly key: string; readonly text: string; readonly truncated?: boolean; readonly streaming?: boolean }
   | { readonly type: "thinking"; readonly key: string; readonly text: string; readonly truncated?: boolean }
@@ -135,10 +137,11 @@ function toolViews(content: readonly ConversationContentBlock[], live: readonly 
       ...(result === undefined ? {} : { result }),
       status,
       ...(call.truncated || liveTool?.truncated === true ? { truncated: true } : {}),
+      ...(liveTool?.progress === undefined || status !== "running" ? {} : { progress: liveTool.progress }),
     };
   });
   const known = new Set(persisted.map((tool) => tool.toolCallId));
-  return [...persisted, ...live.filter((tool) => !known.has(tool.toolCallId)).map((tool): ToolView => ({ toolCallId: tool.toolCallId, toolName: tool.toolName, ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }), ...(tool.output === undefined ? {} : { output: tool.output }), ...(tool.result === undefined ? {} : { result: tool.result }), status: tool.status, ...(tool.truncated ? { truncated: true } : {}) }))];
+  return [...persisted, ...live.filter((tool) => !known.has(tool.toolCallId)).map((tool): ToolView => ({ toolCallId: tool.toolCallId, toolName: tool.toolName, ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }), ...(tool.output === undefined ? {} : { output: tool.output }), ...(tool.result === undefined ? {} : { result: tool.result }), status: tool.status, ...(tool.truncated ? { truncated: true } : {}), ...(tool.progress === undefined || tool.status !== "running" ? {} : { progress: tool.progress }) }))];
 }
 function assistantSegments(content: readonly ConversationContentBlock[], liveTools: readonly LiveTool[], turnOpen: boolean, streaming = false): readonly AssistantSegment[] {
   const segments: AssistantSegment[] = [];

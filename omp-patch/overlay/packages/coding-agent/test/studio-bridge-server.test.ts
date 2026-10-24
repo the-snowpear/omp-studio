@@ -372,6 +372,10 @@ describe("WP-011 Studio Bridge runtime server", () => {
 				jobsRevision: 0,
 				agents: [],
 				jobs: [],
+				runtimeIdentity: {
+					current: expect.objectContaining({ version: VERSION }),
+					history: [expect.objectContaining({ version: VERSION })],
+				},
 				telemetry: {
 					sessionId: "session-test",
 					capturedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),

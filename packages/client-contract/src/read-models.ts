@@ -453,6 +453,7 @@ export interface ModelOverridePatch {
   readonly cost?: ModelCostMeta;
   readonly omitMaxOutputTokens?: boolean;
   readonly premiumMultiplier?: number;
+  readonly imageCountBudget?: number;
   readonly headers?: Readonly<Record<string, string>>;
   readonly contextPromotionTarget?: string;
   readonly compactionModel?: string;
@@ -489,6 +490,7 @@ export interface ModelCatalogEntry extends ModelExecutionMetadata {
   readonly baseUrl?: string;
   readonly omitMaxOutputTokens?: boolean;
   readonly premiumMultiplier?: number;
+  readonly imageCountBudget?: number;
   readonly headers?: Readonly<Record<string, string>>;
   readonly contextPromotionTarget?: string;
   readonly compactionModel?: string;
@@ -908,6 +910,7 @@ export interface AgentDefinitionRecord {
   readonly thinkingLevel?: AgentThinkingLevel;
   readonly output?: unknown;
   readonly blocking?: boolean;
+  readonly structured?: boolean;
   readonly autoloadSkills?: ReadonlyArray<string>;
   readonly readSummarize?: boolean;
   /** `true` = default prewalk target; string = custom model pattern. */

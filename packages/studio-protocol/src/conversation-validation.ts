@@ -581,7 +581,7 @@ function parseConversationRuntimeEventFully(value: unknown, path: string): Conve
       return event;
     }
     case "conversation.tool.updated": {
-      exactKeys(input, ["kind", "sessionId", "turnId", "toolCallId", "updateMode", "output", "truncated"], path);
+      exactKeys(input, ["kind", "sessionId", "turnId", "toolCallId", "updateMode", "output", "truncated", "progress"], path);
       if (input.updateMode !== "append" && input.updateMode !== "replace") {
         throw new ContractValidationError("unsupported update mode", `${path}.updateMode`);
       }
@@ -597,6 +597,22 @@ function parseConversationRuntimeEventFully(value: unknown, path: string): Conve
       }
       const truncated = parseTruncated(input.truncated, `${path}.truncated`);
       if (truncated !== undefined) event.truncated = truncated;
+      if (input.progress !== undefined) {
+        const raw = input.progress as Record<string, unknown> | null;
+        if (
+          !raw || typeof raw !== "object" || Array.isArray(raw) ||
+          typeof raw.progress !== "number" || !Number.isFinite(raw.progress) ||
+          (raw.total !== undefined && (typeof raw.total !== "number" || !Number.isFinite(raw.total))) ||
+          (raw.message !== undefined && typeof raw.message !== "string")
+        ) {
+          throw new ContractValidationError("invalid tool progress", `${path}.progress`);
+        }
+        event.progress = {
+          progress: raw.progress,
+          ...(raw.total === undefined ? {} : { total: raw.total as number }),
+          ...(raw.message === undefined ? {} : { message: raw.message as string }),
+        };
+      }
       return event;
     }
     case "conversation.tool.completed": {

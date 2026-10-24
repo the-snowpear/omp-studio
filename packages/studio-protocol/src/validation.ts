@@ -515,6 +515,9 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
       "jobsRevision",
       "agents",
       "jobs",
+      "jobAgents",
+      "awaitingAsyncWork",
+      "runtimeIdentity",
       "telemetry",
       "runtimeSettings",
       "runtimeSettingsActivation",
@@ -540,7 +543,7 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
   if (!["normal", "plan", "goal", "vibe"].includes(input.activeMode as string)) {
     throw new ContractValidationError("unsupported active mode", "$snapshot.snapshot.activeMode");
   }
-  if (!["always-ask", "write", "yolo"].includes(input.approvalMode as string)) {
+  if (!["always-ask", "always-ask-cached", "write", "yolo"].includes(input.approvalMode as string)) {
     throw new ContractValidationError("unsupported approval mode", "$snapshot.snapshot.approvalMode");
   }
   nonNegativeInteger(input.pendingMessages, "$snapshot.snapshot.pendingMessages");
@@ -555,6 +558,17 @@ export function parseOperatorStateSnapshot(value: unknown): OperatorStateSnapsho
   }
   if ((input.activeCommandIds as unknown[]).some((item) => typeof item !== "string" || item.length === 0)) {
     throw new ContractValidationError("expected non-empty string ids", "$snapshot.snapshot.activeCommandIds");
+  }
+  if (input.jobAgents !== undefined && !Array.isArray(input.jobAgents)) {
+    throw new ContractValidationError("expected an array", "$snapshot.snapshot.jobAgents");
+  }
+  if (input.awaitingAsyncWork !== undefined) booleanValue(input.awaitingAsyncWork, "$snapshot.snapshot.awaitingAsyncWork");
+  if (input.runtimeIdentity !== undefined) {
+    const identity = record(input.runtimeIdentity, "$snapshot.snapshot.runtimeIdentity");
+    record(identity.current, "$snapshot.snapshot.runtimeIdentity.current");
+    if (!Array.isArray(identity.history)) {
+      throw new ContractValidationError("expected an array", "$snapshot.snapshot.runtimeIdentity.history");
+    }
   }
 
   if (input.plan !== undefined) {
@@ -915,9 +929,24 @@ function validateRemoteInteractionRequest(request: Record<string, unknown>, path
       }
       return;
     case "approval":
-      exactKeys(request, [...baseKeys, "approvalType", "details"], path);
+      exactKeys(request, [...baseKeys, "approvalType", "details", "session", "grants"], path);
       boundedInteractionString(request.approvalType, `${path}.approvalType`, INTERACTION_LIMITS.ID_MAX_CHARS);
       boundedInteractionJson(request.details, `${path}.details`, INTERACTION_LIMITS.DETAILS_MAX_BYTES);
+      if (request.session !== undefined) boundedInteractionString(request.session, `${path}.session`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+      if (request.grants !== undefined) {
+        if (!Array.isArray(request.grants) || request.grants.length > 4) {
+          throw new ContractValidationError("expected at most 4 grants", `${path}.grants`);
+        }
+        for (const [index, value] of request.grants.entries()) {
+          const grant = record(value, `${path}.grants[${index}]`);
+          exactKeys(grant, ["scope", "label", "alwaysLabel"], `${path}.grants[${index}]`);
+          if (grant.scope !== "folder" && grant.scope !== "target") {
+            throw new ContractValidationError("unsupported grant scope", `${path}.grants[${index}].scope`);
+          }
+          boundedInteractionString(grant.label, `${path}.grants[${index}].label`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+          boundedInteractionString(grant.alwaysLabel, `${path}.grants[${index}].alwaysLabel`, INTERACTION_LIMITS.OPTION_TEXT_MAX_CHARS);
+        }
+      }
       return;
     case "ask": {
       exactKeys(request, [...baseKeys, "questions", "acceptImages"], path);
@@ -1467,7 +1496,7 @@ const FOUNDATION_OPERATIONS: Readonly<Record<string, OperationShape>> = {
   "permissions.mode.set": {
     keys: ["kind", "mode", "persist"],
     validate: (operation) => {
-      if (operation.mode !== "always-ask" && operation.mode !== "write" && operation.mode !== "yolo") {
+      if (!["always-ask", "always-ask-cached", "write", "yolo"].includes(operation.mode as string)) {
         throw new ContractValidationError("unsupported approval mode", "$request.operation.mode");
       }
       if (typeof operation.persist !== "boolean") {

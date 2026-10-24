@@ -74,6 +74,10 @@ export function mapRemoteInteractionToClient(
         kind: "approval",
         approvalType: request.approvalType,
         detail: sanitizeApprovalDetail(request.details),
+        ...(request.session === undefined ? {} : { session: request.session }),
+        ...(request.grants === undefined
+          ? {}
+          : { grants: request.grants.map(({ scope, label, alwaysLabel }) => ({ scope, label, alwaysLabel })) }),
       };
     case "ask":
       return {

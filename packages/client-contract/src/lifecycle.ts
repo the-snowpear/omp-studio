@@ -117,6 +117,14 @@ export type ClientInteraction =
       readonly approvalType: string;
       /** Heterogeneous, pre-redacted approval details. */
       readonly detail: Readonly<Record<string, unknown>>;
+      /** Label of the "approve for this session" choice; absent when each call must be approved. */
+      readonly session?: string;
+      /** Remembered-approval choices (`always-ask-cached`); submit `{ grant: scope, always }`. */
+      readonly grants?: ReadonlyArray<{
+        readonly scope: "folder" | "target";
+        readonly label: string;
+        readonly alwaysLabel: string;
+      }>;
     })
   | (ClientInteractionBase & {
       readonly kind: "ask";

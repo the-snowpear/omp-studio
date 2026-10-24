@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { Icon } from "../icons";
 import { demoMark } from "./PromptHead";
 import type { ApprovalView } from "./approvalContent";
@@ -11,6 +13,7 @@ export function ApprovalCard({
   submitError,
   onAllow,
   onAlways,
+  onGrant,
   onDeny,
 }: {
   view: ApprovalView;
@@ -20,8 +23,12 @@ export function ApprovalCard({
   submitError?: boolean;
   onAllow: () => void;
   onAlways: () => void;
+  /** Remember a Runtime-offered grant for this session (`always: false`) or across sessions. */
+  onGrant?: (scope: "folder" | "target", always: boolean) => void;
   onDeny: () => void;
 }) {
+  const [rememberOpen, setRememberOpen] = useState(false);
+  const canSession = Boolean(view.configuration) || view.session !== undefined;
   const high = view.risk === "high";
   const { resolvedLanguage } = useI18n(); const zh = resolvedLanguage === "zh";
   return (
@@ -61,20 +68,66 @@ export function ApprovalCard({
           </div>
         ) : null}
       </div>
+      {view.configuration ? null : (
+        <p className="small muted dk-steer-hint">
+          {zh ? "此时在输入框发送消息，会拒绝这次调用并把消息转交给 OMP。" : "Sending a message now denies this call and steers the turn."}
+        </p>
+      )}
       {submitError ? (
         <p className="ask-error" role="alert">{zh ? "提交失败，卡片已保留。请重试。" : "Submission failed. The card remains available for retry."}</p>
       ) : null}
       <div className="dk-actions">
         <button type="button" className="btn small danger" disabled={disabled} onClick={onDeny}>{zh ? "拒绝" : "Deny"}</button>
-        <button
-          type="button"
-          className="btn small outline"
-          disabled={disabled || !view.configuration}
-          data-tip={view.configuration ? undefined : zh ? "此审批仅支持单次允许" : "This approval supports one-time permission only"}
-          onClick={onAlways}
-        >
-          {zh ? "本会话允许" : "Allow for session"}
-        </button>
+        {view.grants && onGrant ? (
+          <span className="approval-remember">
+            <button
+              type="button"
+              className="btn small outline"
+              disabled={disabled}
+              aria-haspopup="menu"
+              aria-expanded={rememberOpen}
+              onClick={() => setRememberOpen((open) => !open)}
+            >
+              {zh ? "记住…" : "Remember…"}
+            </button>
+            {rememberOpen ? (
+              <div className="approval-menu approval-remember-menu" role="menu">
+                {view.grants.flatMap((grant) => [
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={`${grant.scope}:session`}
+                    className="approval-menu-item"
+                    onClick={() => { setRememberOpen(false); onGrant(grant.scope, false); }}
+                  >
+                    <span className="am-label">{grant.label}</span>
+                    <span className="am-desc">{zh ? "仅本会话" : "This session"}</span>
+                  </button>,
+                  <button
+                    type="button"
+                    role="menuitem"
+                    key={`${grant.scope}:always`}
+                    className="approval-menu-item"
+                    onClick={() => { setRememberOpen(false); onGrant(grant.scope, true); }}
+                  >
+                    <span className="am-label">{grant.alwaysLabel}</span>
+                    <span className="am-desc">{zh ? "跨会话记住" : "Across sessions"}</span>
+                  </button>,
+                ])}
+              </div>
+            ) : null}
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="btn small outline"
+            disabled={disabled || !canSession}
+            data-tip={canSession ? view.session : zh ? "此审批仅支持单次允许" : "This approval supports one-time permission only"}
+            onClick={onAlways}
+          >
+            {zh ? "本会话允许" : "Allow for session"}
+          </button>
+        )}
         <button type="button" className="btn small primary" disabled={disabled} onClick={onAllow}>{zh ? "允许一次" : "Allow once"}</button>
       </div>
     </div>

@@ -15,6 +15,7 @@
  */
 
 import type { AsyncJob, AsyncJobFilter, AsyncJobType } from "../../async/job-manager";
+import type { JobWidgetView } from "../runtime-features-protocol";
 
 const MAX_ID_LENGTH = 512;
 const DEFAULT_LIST_LIMIT = 100;
@@ -31,6 +32,8 @@ const MAX_HIERARCHY_HOPS = 64;
  * process.
  */
 const MAX_TRACKED_GENERATIONS = 4 * (MAX_LIST_LIMIT + RECENT_SETTLED_LIMIT);
+/** Last widget views kept for settled jobs: the projected window, with headroom. */
+const MAX_RETAINED_WIDGETS = MAX_LIST_LIMIT + RECENT_SETTLED_LIMIT;
 
 export type StudioJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -43,8 +46,48 @@ export interface StudioJobSnapshot {
 	label: string;
 	status: StudioJobStatus;
 	startedAt: string;
+	/** When the run settled; a finished job's duration is frozen at this instant. */
 	completedAt?: string;
 	summary?: string;
+	/** Full command line of a job that spawned a process (the label is cut short). */
+	command?: string;
+	/** A running task's own completion estimate, 0–100. */
+	completionPercent?: number;
+	/** What the job is doing now: a subagent's stage. */
+	stage?: string;
+	/** Live widget of the job (last seen view once it settled). */
+	widget?: JobWidgetView;
+}
+
+/** Agent lineage linking job owners to the projected root; parents absent at the root. */
+export interface StudioJobAgentLink {
+	id: string;
+	parentId?: string;
+}
+
+/** Stage and completion estimate a running task job reports for its subagent (upstream `snapshotJobs`). */
+export function taskJobProgress(job: AsyncJob): { stage?: string; completionPercent?: number } {
+	if (job.type !== "task") return {};
+	const progress = job.latestDetails?.progress;
+	if (!Array.isArray(progress)) return {};
+	let record: Record<string, unknown> | undefined;
+	for (const item of progress) {
+		if (!item || typeof item !== "object") continue;
+		const candidate = item as Record<string, unknown>;
+		record ??= candidate;
+		if (candidate.id === job.id) {
+			record = candidate;
+			break;
+		}
+	}
+	const stage = typeof record?.stage === "string" ? record.stage.trim().slice(0, 240) : "";
+	const percent = record?.completionPercent;
+	return {
+		...(stage ? { stage } : {}),
+		...(job.status === "running" && typeof percent === "number" && Number.isFinite(percent)
+			? { completionPercent: Math.min(100, Math.max(0, percent)) }
+			: {}),
+	};
 }
 
 export interface StudioJobCancelReceipt {
@@ -62,6 +105,11 @@ export interface StudioJobsPort {
 	getRecentJobs(limit?: number, filter?: AsyncJobFilter): AsyncJob[];
 	getAllJobs(filter?: AsyncJobFilter): AsyncJob[];
 	cancel(id: string, filter?: AsyncJobFilter): boolean;
+	/**
+	 * Live widget of a job (`AsyncJobManager.widgets.view`). Reading marks the
+	 * widget shown, which is what lets its spec be authored.
+	 */
+	widgetView?(job: AsyncJob): JobWidgetView | undefined;
 }
 
 /** Hierarchy port; structurally compatible with AgentRegistry.get. */
@@ -128,6 +176,7 @@ export class StudioJobService {
 	readonly #maxListLimit: number;
 	readonly #summaryLimit: number;
 	readonly #generations = new Map<string, { generation: number; startTime: number }>();
+	readonly #widgets = new Map<string, JobWidgetView>();
 
 	constructor(jobs: StudioJobsPort, registry: StudioJobRegistryPort, options: StudioJobServiceOptions = {}) {
 		this.#jobs = jobs;
@@ -232,6 +281,8 @@ export class StudioJobService {
 		const generation = this.#observe(job);
 		const status: StudioJobStatus = job.status === "running" && job.queued === true ? "queued" : job.status;
 		const summary = (job.resultText ?? job.errorText ?? "").trim();
+		const command = job.process?.command;
+		const widget = this.#widget(job);
 		return {
 			jobId: job.id,
 			generation,
@@ -241,10 +292,66 @@ export class StudioJobService {
 			label: job.label,
 			status,
 			startedAt: new Date(job.startTime).toISOString(),
+			...(job.status !== "running" && job.endTime !== undefined
+				? { completedAt: new Date(job.endTime).toISOString() }
+				: {}),
 			...(summary.length > 0
 				? { summary: summary.length > this.#summaryLimit ? `${summary.slice(0, this.#summaryLimit)}…` : summary }
 				: {}),
+			...(command ? { command: command.length > 4096 ? `${command.slice(0, 4096)}…` : command } : {}),
+			...taskJobProgress(job),
+			...(widget ? { widget } : {}),
 		};
+	}
+
+	/**
+	 * Lineage for the jobs in `jobs`: every owner and its ancestors up to (not
+	 * including) `rootId`. Parents come from the agent registry, falling back to
+	 * the task job that runs a subagent once its registry entry is gone.
+	 */
+	agentLinks(jobs: readonly StudioJobSnapshot[], rootId: string | undefined): StudioJobAgentLink[] {
+		const parentOf = this.#parentResolver();
+		const links = new Map<string, StudioJobAgentLink>();
+		for (const job of jobs) {
+			let hops = 0;
+			for (
+				let id = job.ownerAgentId;
+				id !== undefined && id !== rootId && !links.has(id) && hops < MAX_HIERARCHY_HOPS;
+				hops += 1
+			) {
+				const parentId = parentOf(id);
+				links.set(id, parentId === undefined ? { id } : { id, parentId });
+				id = parentId;
+			}
+		}
+		return [...links.values()];
+	}
+
+	/**
+	 * Running jobs are read live (which keeps their widgets authored); a settled
+	 * job keeps the last view seen while it ran, so no spec authoring starts for
+	 * a job nobody watched.
+	 */
+	#widget(job: AsyncJob): JobWidgetView | undefined {
+		if (job.status === "running" && job.queued !== true && this.#jobs.widgetView) {
+			let view: JobWidgetView | undefined;
+			try {
+				view = this.#jobs.widgetView(job);
+			} catch {
+				view = undefined;
+			}
+			if (view) {
+				this.#widgets.delete(job.id);
+				this.#widgets.set(job.id, view);
+				while (this.#widgets.size > MAX_RETAINED_WIDGETS) {
+					const oldest = this.#widgets.keys().next().value;
+					if (oldest === undefined) break;
+					this.#widgets.delete(oldest);
+				}
+			}
+			return view;
+		}
+		return this.#widgets.get(job.id);
 	}
 
 	/**
@@ -305,14 +412,37 @@ export class StudioJobService {
 	}
 
 	#isAncestorOf(ancestorId: string, descendantId: string): boolean {
+		const parentOf = this.#parentResolver();
 		let current: string | undefined = descendantId;
 		let hops = 0;
 		while (current !== undefined && hops < MAX_HIERARCHY_HOPS) {
 			if (current === ancestorId) return true;
-			current = this.#registry.get(current)?.parentId;
+			current = parentOf(current);
 			hops += 1;
 		}
 		return false;
+	}
+
+	/**
+	 * Parent of an agent: the registry first, then the owner of the task job
+	 * that runs it (the registry entry of a finished subagent is gone, but its
+	 * jobs still belong in its spawner's tree, as upstream `getAsyncJobTree`).
+	 */
+	#parentResolver(): (agentId: string) => string | undefined {
+		let taskOwners: Map<string, string> | undefined;
+		return id => {
+			const parent = this.#registry.get(id)?.parentId;
+			if (parent !== undefined) return parent;
+			if (taskOwners === undefined) {
+				taskOwners = new Map();
+				for (const job of this.#jobs.getAllJobs()) {
+					if (job.agentId !== undefined && job.ownerId !== undefined && job.agentId !== job.ownerId) {
+						taskOwners.set(job.agentId, job.ownerId);
+					}
+				}
+			}
+			return taskOwners.get(id);
+		};
 	}
 
 	async #requireConfirmation(action: StudioJobCancelAction): Promise<void> {

@@ -25,6 +25,7 @@ export * from "./contracts/accounts.js";
 export * from "./contracts/annotations.js";
 export * from "./contracts/judgments.js";
 export * from "./contracts/runtime-catalog.js";
+export * from "./contracts/runtime-features.js";
 export * from "./contracts/benchmarks.js";
 export * from "./contracts/media.js";
 

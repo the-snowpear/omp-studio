@@ -38,6 +38,7 @@ import { StudioMediaService } from "./media-service";
 import { StudioBenchmarkService } from "./benchmark-service";
 import { StudioRuntimeCatalogService } from "./runtime-catalog-service";
 import { StudioJudgmentService } from "./judgment-service";
+import { StudioRuntimeFeatureService } from "./runtime-feature-service";
 import { StudioSessionOptionsService } from "./session-options-service";
 import { StudioBrowserObservationService } from "./browser-observation-service";
 import { StudioComputerObservationService } from "./computer-observation-service";
@@ -46,6 +47,11 @@ import { isBrowserObservationKind, type BrowserObservationOperation } from "../b
 import { isIdaOperationKind, type StudioIdaOperation } from "../ida-details-protocol";
 import { isSessionOptionsKind, type SessionOptionsOperation } from "../session-options-protocol";
 import { type JudgmentOperation } from "../judgments-protocol";
+import { isRuntimeFeatureKind, type RuntimeFeatureOperation } from "../runtime-features-protocol";
+
+function isRuntimeFeatureOperation(operation: { kind: string }): operation is RuntimeFeatureOperation {
+	return isRuntimeFeatureKind(operation.kind);
+}
 import { StudioAnnotationService } from "./annotation-service";
 import { StudioAccountStatusService } from "./account-status-service";
 import * as path from "node:path";
@@ -132,6 +138,7 @@ export class StudioWorkbenchService {
 	readonly benchmarks: StudioBenchmarkService;
 	readonly catalog: StudioRuntimeCatalogService;
 	readonly judgments: StudioJudgmentService;
+	readonly runtimeFeatures: StudioRuntimeFeatureService;
 	readonly accounts: StudioAccountStatusService;
 	readonly annotations: StudioAnnotationService;
 	readonly sessionOptions: StudioSessionOptionsService;
@@ -163,6 +170,7 @@ export class StudioWorkbenchService {
 		this.resources = new StudioResourceService(session);
 		this.accounts = new StudioAccountStatusService(session);
 		this.judgments = new StudioJudgmentService(session);
+		this.runtimeFeatures = new StudioRuntimeFeatureService(session);
 		this.catalog = new StudioRuntimeCatalogService(session);
 		this.benchmarks = new StudioBenchmarkService(session);
 		this.media = new StudioMediaService(session);
@@ -305,6 +313,7 @@ export class StudioWorkbenchService {
 			operation.kind === "judgments.retry"
 		)
 			return this.judgments.execute(operation as JudgmentOperation);
+		if (isRuntimeFeatureOperation(operation)) return this.runtimeFeatures.execute(operation);
 		if (operation.kind === "annotations.capture" || operation.kind === "annotations.prepare")
 			return this.annotations.execute(operation);
 		if (operation.kind === "accounts.status") return this.accounts.get(operation.refresh);

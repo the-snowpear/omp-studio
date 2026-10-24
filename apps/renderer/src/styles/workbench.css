@@ -3933,6 +3933,9 @@ button.compact-rule.is-open .compact-rule-chev { transform: rotate(180deg); }
 .approval-menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
 .approval-menu-item:disabled:hover { background: transparent; }
 .approval-menu-item.selected { color: var(--accent); }
+/* 审批卡「记住…」：按文件夹 / 文件记住本次或跨会话（always-ask-cached） */
+.approval-remember { position: relative; display: inline-flex; }
+.approval-remember-menu { min-width: 260px; z-index: var(--z-menu); }
 /* Full Access 选项 = 警告橙红：label 常驻橙红（选择前即有警示）；
    选中态同款文字呼吸外发光打在 .am-label 上，不要打在 menuitem 按钮上
    （否则最底下的 Full Access 项会被合成层挡住点不到）。 */

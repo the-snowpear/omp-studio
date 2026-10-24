@@ -11,6 +11,7 @@ import {
 	type ConversationMessageItem,
 	type ConversationRole,
 	type ConversationRuntimeEvent,
+	type ConversationToolProgress,
 	parseConversationRuntimeEvent,
 } from "../conversation-protocol";
 import { publicToolCallId, sanitizePublicText, sanitizeToolArguments, utf8ByteLength } from "./conversation-sanitizer";
@@ -71,7 +72,29 @@ type PendingDelta = {
 type PendingToolOutput = {
 	turnId: string;
 	truncated: boolean;
+	/** Newest MCP progress notification not yet sent. */
+	progress?: ConversationToolProgress;
 };
+
+const PROGRESS_MESSAGE_MAX_CHARS = 1024;
+
+/** MCP `notifications/progress` carried on a tool update (`MCPToolDetails.progress`). */
+function mcpProgressOf(details: unknown): ConversationToolProgress | undefined {
+	if (!details || typeof details !== "object") return undefined;
+	const raw = (details as { progress?: unknown }).progress;
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const { progress, total, message } = raw as { progress?: unknown; total?: unknown; message?: unknown };
+	if (typeof progress !== "number" || !Number.isFinite(progress)) return undefined;
+	const result: ConversationToolProgress = { progress };
+	if (typeof total === "number" && Number.isFinite(total) && total > 0) result.total = total;
+	if (typeof message === "string" && message.trim().length > 0) {
+		result.message = sanitizePublicText(message.trim(), PROGRESS_MESSAGE_MAX_CHARS * 4).text.slice(
+			0,
+			PROGRESS_MESSAGE_MAX_CHARS,
+		);
+	}
+	return result;
+}
 
 type SentToolOutput = {
 	text: string;
@@ -396,9 +419,11 @@ export class ConversationLiveProjector {
 	#onAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
 		this.#flushPending();
 		const turnId = this.#ensureTurnId();
-		if (event.isTerminal === false) {
-			// The Runtime has already scheduled another continuation. Keep the
-			// logical turn open instead of exposing a false completed event.
+		if (event.isTerminal === false || event.awaitingAsyncWork === true) {
+			// The Runtime has already scheduled another continuation, or only a
+			// background-job result can resume this run (`awaitingAsyncWork`; the
+			// state snapshot surfaces that wait). Keep the logical turn open
+			// instead of exposing a false completed event.
 			this.#continuationPending = true;
 			this.#openAssistantId = undefined;
 			return;
@@ -557,13 +582,19 @@ export class ConversationLiveProjector {
 		const extracted = toolText(event.partialResult);
 		const sanitized = sanitizePublicText(extracted.text, CONVERSATION_LIMITS.TEXT_BLOCK_MAX_BYTES);
 		const truncated = sanitized.truncated || extracted.truncated === true;
-		if (sanitized.text.length === 0 && !truncated) return;
+		const progress = mcpProgressOf(partial?.details);
+		if (sanitized.text.length === 0 && !truncated && progress === undefined) return;
 		const previous = this.#toolOutput.get(toolCallId);
 		const pending = this.#toolPending.get(toolCallId);
 		const sent = this.#toolSent.get(toolCallId);
-		if (previous === sanitized.text && (!truncated || pending?.truncated === true || sent?.truncated === true))
+		if (
+			progress === undefined &&
+			previous === sanitized.text &&
+			(!truncated || pending?.truncated === true || sent?.truncated === true)
+		)
 			return;
-		this.#rememberBoundedMap(this.#toolOutput, toolCallId, sanitized.text);
+		if (sanitized.text.length > 0 || previous === undefined)
+			this.#rememberBoundedMap(this.#toolOutput, toolCallId, sanitized.text);
 		// Buffer rather than emit. A streaming tool (build log, test run) produces
 		// far more updates than a frame can show, and a partial result that is not
 		// a prefix extension of the last one has to ship the whole retained text —
@@ -573,13 +604,16 @@ export class ConversationLiveProjector {
 		this.#rememberBoundedMap(this.#toolPending, toolCallId, {
 			turnId: background?.turnId ?? pending?.turnId ?? this.#ensureTurnId(),
 			truncated: truncated || pending?.truncated === true,
+			...((progress ?? pending?.progress) === undefined ? {} : { progress: progress ?? pending?.progress }),
 		});
 		const sentText = sent?.text ?? "";
 		const unsent = sanitized.text.startsWith(sentText)
 			? sanitized.text.length - sentText.length
 			: sanitized.text.length;
 		const threshold = this.#options.toolFlushCharThreshold ?? CONVERSATION_LIVE_TOOL_FLUSH_CHARS;
-		if (unsent >= threshold) this.#flushPendingTool(toolCallId);
+		// Progress is sparse (the MCP bridge already coalesces it) and is the
+		// whole point of the update, so it never waits for the coalesce timer.
+		if (unsent >= threshold || progress !== undefined) this.#flushPendingTool(toolCallId);
 		else this.#scheduleCoalesce();
 	}
 
@@ -1053,16 +1087,18 @@ export class ConversationLiveProjector {
 		const append = textChanged && sent !== undefined && full.startsWith(sent.text) && full.length > sent.text.length;
 		const output = !textChanged ? "" : append ? full.slice(sent.text.length) : full;
 		const truncatedChanged = pending.truncated && sent?.truncated !== true;
-		if (output.length === 0 && !truncatedChanged) return;
+		if (output.length === 0 && !truncatedChanged && pending.progress === undefined) return;
 		const updated: Extract<ConversationRuntimeEvent, { kind: "conversation.tool.updated" }> = {
 			kind: "conversation.tool.updated",
 			sessionId: this.#sessionId,
 			turnId: pending.turnId,
 			toolCallId,
-			updateMode: append ? "append" : "replace",
+			// A progress-only update carries no text; `append` of nothing keeps the client's output.
+			updateMode: append || output.length === 0 ? "append" : "replace",
 		};
 		if (output.length > 0) updated.output = output;
 		if (truncatedChanged) updated.truncated = true;
+		if (pending.progress !== undefined) updated.progress = pending.progress;
 		this.#rememberBoundedMap(this.#toolSent, toolCallId, {
 			text: full,
 			truncated: sent?.truncated === true || pending.truncated,

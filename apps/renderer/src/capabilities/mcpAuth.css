@@ -1,0 +1,23 @@
+.runtime-mcp-rows > div:has(> .mcp-auth-actions) {
+  flex-wrap: wrap;
+}
+.mcp-auth-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-basis: 100%;
+  min-width: 0;
+}
+.mcp-auth-buttons,
+.mcp-auth-confirm,
+.mcp-auth-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.mcp-auth-url code {
+  word-break: break-all;
+  user-select: text;
+}

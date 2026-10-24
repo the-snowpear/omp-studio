@@ -174,6 +174,7 @@ function modelNode(model: ModelCatalogEntry, previous: Record<string, unknown> |
   if (cost) row.cost = cost;
   if (model.omitMaxOutputTokens) row.omitMaxOutputTokens = true;
   if (model.premiumMultiplier !== undefined) row.premiumMultiplier = model.premiumMultiplier;
+  if (model.imageCountBudget !== undefined) row.imageCountBudget = model.imageCountBudget;
   if (model.headers && Object.keys(model.headers).length > 0) row.headers = { ...model.headers };
   if (model.contextPromotionTarget) row.contextPromotionTarget = model.contextPromotionTarget;
   if (model.compactionModel) row.compactionModel = model.compactionModel;
@@ -199,6 +200,7 @@ function overrideNode(override: ModelOverridePatch, previous: Record<string, unk
   if (cost) row.cost = cost;
   if (override.omitMaxOutputTokens !== undefined) row.omitMaxOutputTokens = override.omitMaxOutputTokens;
   if (override.premiumMultiplier !== undefined) row.premiumMultiplier = override.premiumMultiplier;
+  if (override.imageCountBudget !== undefined) row.imageCountBudget = override.imageCountBudget;
   if (override.headers && Object.keys(override.headers).length > 0) row.headers = { ...override.headers };
   if (override.contextPromotionTarget) row.contextPromotionTarget = override.contextPromotionTarget;
   if (override.compactionModel) row.compactionModel = override.compactionModel;

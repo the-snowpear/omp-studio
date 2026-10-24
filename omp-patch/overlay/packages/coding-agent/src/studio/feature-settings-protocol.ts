@@ -13,6 +13,10 @@ export const FEATURE_SETTING_KEYS = [
 	"tts.localSpeed",
 	"gc.compress",
 	"gc.compressAfterDays",
+	"prewalk.auto",
+	"prewalk.autoTarget",
+	"async.widgets",
+	"computer.backgroundFallback",
 ] as const;
 export type FeatureSettingKey = (typeof FEATURE_SETTING_KEYS)[number];
 export type FeatureSettingValue =

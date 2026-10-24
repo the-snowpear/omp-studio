@@ -13,6 +13,10 @@ export const PREVIEW_FEATURE_SETTINGS: FeatureSettingRow[] = [
   { key: "tts.localSpeed", value: 1, source: "default" },
   { key: "gc.compress", value: false, source: "default" },
   { key: "gc.compressAfterDays", value: 7, source: "default" },
+  { key: "prewalk.auto", value: "suggest", source: "global" },
+  { key: "prewalk.autoTarget", value: "@smol", source: "default" },
+  { key: "async.widgets", value: true, source: "default" },
+  { key: "computer.backgroundFallback", value: "takeover", source: "default" },
 ];
 export const PREVIEW_POOL_ACCOUNTS: PoolAccountOption[] = [
   { provider: "anthropic", identityKey: "email:review@example.test", label: "Review · Team" },

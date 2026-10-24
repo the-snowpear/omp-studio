@@ -7,7 +7,8 @@ import {
 	cfgWorktreeOnExit,
 } from "../../task/settings";
 import { cfgCompactionModelThresholds, cfgContextFilesExtra } from "../../session/context-settings";
-import { cfgRetryFallbackOn } from "../../session/settings";
+import { cfgPrewalkAuto, cfgPrewalkAutoTarget, cfgRetryFallbackOn } from "../../session/settings";
+import { cfgAsyncWidgets, cfgComputerBackgroundFallback } from "../../tools/settings";
 import { cfgBashGitGuard } from "../../exec/settings";
 import { cfgComposerPredictions } from "../../modes/settings";
 import { cfgSpeechSpeed, cfgTtsLocalSpeed } from "../../tts/settings";
@@ -42,6 +43,10 @@ const HANDLES: Record<FeatureSettingKey, AnySetting> = {
 	"tts.localSpeed": cfgTtsLocalSpeed,
 	"gc.compress": cfgGcCompress,
 	"gc.compressAfterDays": cfgGcCompressAfterDays,
+	"prewalk.auto": cfgPrewalkAuto,
+	"prewalk.autoTarget": cfgPrewalkAutoTarget,
+	"async.widgets": cfgAsyncWidgets,
+	"computer.backgroundFallback": cfgComputerBackgroundFallback,
 };
 
 export class StudioFeatureSettingsService {

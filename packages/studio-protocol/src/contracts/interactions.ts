@@ -34,12 +34,32 @@ export type RemoteInteractionRequest =
       kind: "approval";
       approvalType: string;
       details: unknown;
+      /** Label of the "approve for this session" choice, when the Runtime offers it. */
+      session?: string;
+      /** Remembered-approval choices of an `always-ask-cached` prompt, in display order. */
+      grants?: ApprovalGrantChoice[];
     })
   | (InteractionBase & {
       kind: "ask";
       acceptImages?: boolean;
       questions: RemoteAskQuestion[];
     });
+
+/**
+ * One remembered-approval choice. Submitting `{ grant: scope, always }`
+ * remembers it for this session (`always: false`) or across sessions.
+ */
+export type ApprovalGrantChoice = {
+  scope: "folder" | "target";
+  label: string;
+  alwaysLabel: string;
+};
+
+/**
+ * Submit value of an approval interaction: `true`/`"once"` approve this call,
+ * `"session"` and grants only when offered. Cancel denies.
+ */
+export type ApprovalAnswerValue = true | "once" | "session" | { grant: ApprovalGrantChoice["scope"]; always: boolean };
 
 export type RemoteAskOption = {
   id: string;

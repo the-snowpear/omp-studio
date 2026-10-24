@@ -17,6 +17,9 @@ import {
   toolKind,
 } from "./toolMeta";
 import { ToolCardScroll } from "./useToolCardFollowScroll";
+import { CompletionRing, JobTile, type JobTileData } from "./JobWidget";
+import { MarkdownText } from "./markdown";
+import type { JobWidgetView } from "@omp-studio/studio-protocol";
 
 const ToolCardLive = createContext(false);
 
@@ -530,11 +533,16 @@ function TaskBody({ tool }: { tool: ToolView }) {
           {progress.map((entry, index) => {
             const item = jsonRecord(entry) ?? {};
             const name = jsonString(item.id) ?? jsonString(item.name) ?? `agent-${index + 1}`;
+            const status = jsonString(item.status) ?? "pending";
+            const stage = jsonString(item.stage)?.trim();
+            const percent = jsonNumber(item.completionPercent);
             return (
               <div key={name} className="task-agent">
                 <span className="task-dot" aria-hidden="true" />
                 <span className="task-aname">{name}</span>
-                <span className="task-atype">[{jsonString(item.status) ?? "pending"}]</span>
+                <span className="task-atype">[{status}]</span>
+                {stage ? <span className="task-stage" title={stage}>{stage}</span> : null}
+                {percent !== undefined && status === "running" ? <CompletionRing percent={percent} size={18} /> : null}
                 {durationText(item.durationMs) ? <span className="tc-dur">{durationText(item.durationMs)}</span> : null}
               </div>
             );
@@ -648,6 +656,107 @@ function DebugBody({ tool }: { tool: ToolView }) {
   );
 }
 
+type ProgressValue = { readonly progress: number; readonly total?: number; readonly message?: string };
+
+/** MCP progress: a bar when the total is known, an indeterminate strip otherwise, plus the phase message. */
+function ProgressBar({ progress, label }: { progress: ProgressValue; label?: string }) {
+  const total = progress.total !== undefined && progress.total > 0 ? progress.total : undefined;
+  const ratio = total === undefined ? undefined : Math.min(1, Math.max(0, progress.progress / total));
+  const figure = total === undefined ? String(progress.progress) : `${progress.progress}/${total}`;
+  return (
+    <div className="tc-progress">
+      <div className="tc-progress-text">
+        <span>{[label, progress.message].filter(Boolean).join(" · ") || "progress"}</span>
+        <span className="mono">{ratio === undefined ? figure : `${Math.round(ratio * 100)}%`}</span>
+      </div>
+      <div
+        className={`jw-bar-track${ratio === undefined ? " indeterminate" : ""}`}
+        role="progressbar"
+        aria-label={label ?? "progress"}
+        aria-valuemin={0}
+        {...(ratio === undefined ? {} : { "aria-valuemax": 100, "aria-valuenow": Math.round(ratio * 100) })}
+      >
+        <span className="jw-bar-fill" style={ratio === undefined ? undefined : { width: `${ratio * 100}%`, background: "var(--accent)" }} />
+      </div>
+    </div>
+  );
+}
+
+/** Newest `mcp_progress` status event per call id (upstream updates them in place). */
+function mcpProgressEvents(value: JsonValue | undefined): Array<{ key: string; tool?: string; progress: ProgressValue }> {
+  if (!Array.isArray(value)) return [];
+  const byId = new Map<string, { key: string; tool?: string; progress: ProgressValue }>();
+  value.forEach((entry, index) => {
+    const event = jsonRecord(entry);
+    if (!event || event.op !== "mcp_progress") return;
+    const progress = jsonNumber(event.progress);
+    if (progress === undefined) return;
+    const key = jsonString(event.id) ?? `progress-${index}`;
+    const total = jsonNumber(event.total);
+    const message = jsonString(event.message);
+    const tool = jsonString(event.tool);
+    byId.set(key, { key, ...(tool ? { tool } : {}), progress: { progress, ...(total === undefined ? {} : { total }), ...(message ? { message } : {}) } });
+  });
+  return [...byId.values()];
+}
+
+function EvalViewBlock({ view }: { view: JsonValue }) {
+  const record = jsonRecord(view);
+  if (record?.kind === "table" && Array.isArray(record.columns) && Array.isArray(record.rows)) {
+    const columns = record.columns.map((column) => {
+      const item = jsonRecord(column) ?? {};
+      return { head: jsonString(item.head) ?? "", numeric: item.numeric === true };
+    });
+    const rows = capRows(record.rows.filter(Array.isArray) as JsonValue[][]);
+    return (
+      <div className="ev-view-wrap">
+        <table className="ev-view-table">
+          <thead><tr>{columns.map((column, index) => <th key={index} className={column.numeric ? "num" : undefined}>{column.head}</th>)}</tr></thead>
+          <tbody>
+            {rows.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {columns.map((column, index) => <td key={index} className={column.numeric ? "num" : undefined}>{displayValue(row[index]) ?? ""}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.omitted > 0 ? <OmittedRows count={rows.omitted} /> : null}
+      </div>
+    );
+  }
+  if (record?.kind === "json" && "value" in record) return <JsonBlock value={record.value ?? null} />;
+  if (record?.kind === "markdown" && typeof record.text === "string") return <div className="tc-markdown"><MarkdownText text={record.text} /></div>;
+  return null;
+}
+
+/**
+ * A cell's printed text with its pretty views (upstream `EvalViewEntry`) shown
+ * in place of the spans they stand for; an entry whose text is no longer in the
+ * output (truncated) is skipped.
+ */
+function EvalOutput({ output, views }: { output: string; views: readonly JsonValue[] }) {
+  const parts: Array<{ text: string } | { view: JsonValue }> = [];
+  let rest = output;
+  for (const entry of views) {
+    const record = jsonRecord(entry);
+    const text = jsonString(record?.text);
+    if (!record || !text || record.view === undefined) continue;
+    const at = rest.indexOf(text);
+    if (at < 0) continue;
+    if (at > 0) parts.push({ text: rest.slice(0, at) });
+    parts.push({ view: record.view });
+    rest = rest.slice(at + text.length);
+  }
+  if (rest.trim().length > 0) parts.push({ text: rest });
+  return (
+    <>
+      {parts.map((part, index) => "view" in part
+        ? <EvalViewBlock key={index} view={part.view} />
+        : part.text.trim().length > 0 ? <ScrollPane key={index} className="codeblock"><div className="c-ok">{part.text.replace(/^\n+|\n+$/g, "")}</div></ScrollPane> : null)}
+    </>
+  );
+}
+
 function EvalBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
   const cells = Array.isArray(fields.cells) ? fields.cells : [];
@@ -660,11 +769,20 @@ function EvalBody({ tool }: { tool: ToolView }) {
         const code = jsonString(cell.code) ?? "";
         const stdout = jsonString(cell.stdout) ?? jsonString(cell.output);
         const stderr = jsonString(cell.stderr);
+        const views = Array.isArray(cell.views) ? cell.views : [];
+        const progress = mcpProgressEvents(cell.statusEvents);
         return (
           <div key={index} className="ev-cell">
-            <div className="tc-label">{jsonString(fields.lang) ?? jsonString(cell.lang) ?? "code"}</div>
+            <div className="tc-label">{jsonString(fields.lang) ?? jsonString(cell.lang) ?? jsonString(cell.language) ?? "code"}</div>
             <CodeLines lines={code.split("\n")} />
-            {stdout ? <ScrollPane className="codeblock"><div className="c-ok">{stdout}</div></ScrollPane> : null}
+            {progress.length ? (
+              <div className="ev-status" role="status">
+                {progress.map((event) => (
+                  <ProgressBar key={event.key} progress={event.progress} {...(event.tool ? { label: event.tool } : {})} />
+                ))}
+              </div>
+            ) : null}
+            {stdout && views.length ? <EvalOutput output={stdout} views={views} /> : stdout ? <ScrollPane className="codeblock"><div className="c-ok">{stdout}</div></ScrollPane> : null}
             {stderr ? <ScrollPane className="codeblock"><div className="c-err">{stderr}</div></ScrollPane> : null}
             <div className="tc-foot">
               {jsonString(cell.status) ? <span className="chip gray xs">{jsonString(cell.status)}</span> : null}
@@ -769,6 +887,34 @@ function ComputerBody({ tool }: { tool: ToolView }) {
   );
 }
 
+/** A Runtime `JobWidgetView` riding on a tool result; anything else is ignored. */
+function widgetView(value: JsonValue | undefined): JobWidgetView | undefined {
+  const record = jsonRecord(value);
+  if (!record || typeof record.title !== "string" || !Array.isArray(record.blocks)) return undefined;
+  return record as unknown as JobWidgetView;
+}
+
+/** One `wait` / `job` snapshot (upstream `JobSnapshot`) as a tile. */
+function jobTileData(entry: JsonValue, index: number): JobTileData {
+  const job = jsonRecord(entry) ?? {};
+  const widget = widgetView(job.widget);
+  const stage = jsonString(job.stage)?.trim();
+  const percent = jsonNumber(job.completionPercent);
+  const exitCode = jsonNumber(job.exitCode);
+  const durationMs = jsonNumber(job.durationMs);
+  return {
+    id: jsonString(job.id) ?? `job-${index + 1}`,
+    status: jsonString(job.status) ?? "unknown",
+    label: jsonString(job.label) ?? jsonString(job.id) ?? `job-${index + 1}`,
+    ...(jsonString(job.type) ? { type: jsonString(job.type)! } : {}),
+    ...(stage ? { stage } : {}),
+    ...(percent === undefined ? {} : { completionPercent: percent }),
+    ...(exitCode === undefined ? {} : { exitCode }),
+    ...(durationMs === undefined ? {} : { durationMs }),
+    ...(widget ? { widget } : {}),
+  };
+}
+
 function HubBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
   const jobs = Array.isArray(fields.jobs) ? fields.jobs : [];
@@ -776,21 +922,11 @@ function HubBody({ tool }: { tool: ToolView }) {
     return (
       <>
         <Kv pairs={[["op", fields.op], ["jobs", jobs.length], ["queue", fields.queue], ["concurrency", fields.concurrency]]} />
-        <div className="tc-task">
-          <div className="task-agents">
-            {jobs.map((entry, index) => {
-              const job = jsonRecord(entry) ?? {};
-              const name = jsonString(job.label) ?? jsonString(job.id) ?? `job-${index + 1}`;
-              return (
-                <div key={name} className="task-agent">
-                  <span className="task-dot" aria-hidden="true" />
-                  <span className="task-aname">{name}</span>
-                  <span className="task-atype">[{jsonString(job.status) ?? "unknown"}]</span>
-                  {durationText(job.durationMs) ? <span className="tc-dur">{durationText(job.durationMs)}</span> : null}
-                </div>
-              );
-            })}
-          </div>
+        <div className="job-tiles">
+          {jobs.map((entry, index) => {
+            const tile = jobTileData(entry, index);
+            return <JobTile key={tile.id} job={tile} />;
+          })}
         </div>
       </>
     );
@@ -1038,6 +1174,7 @@ function McpBody({ tool }: { tool: ToolView }) {
   const fields = toolFields(tool);
   return (
     <>
+      {tool.progress !== undefined && tool.status === "running" ? <ProgressBar progress={tool.progress} label={jsonString(fields.mcpToolName) ?? tool.toolName} /> : null}
       <div className="tc-label">args</div>
       <JsonBlock value={fields.args ?? {}} />
       <div className="tc-label">result</div>

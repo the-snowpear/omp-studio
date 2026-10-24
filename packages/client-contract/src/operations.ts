@@ -327,6 +327,7 @@ export interface AgentDefinitionUpsertInput {
   readonly thinkingLevel?: AgentThinkingLevel | null;
   readonly output?: unknown;
   readonly blocking?: boolean | null;
+  readonly structured?: boolean | null;
   readonly autoloadSkills?: ReadonlyArray<string> | null;
   readonly readSummarize?: boolean | null;
   readonly prewalk?: boolean | string | null;

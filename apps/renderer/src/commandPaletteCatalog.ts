@@ -168,7 +168,7 @@ function staticGroups(preview: boolean): PaletteGroup[] {
       items: [
         { id: "set-general", icon: "settings", label: "palette.settingsGeneral", keywords: "general 设置 常规 主题 密度 通知 启动 布局", action: { kind: "openSettings", group: "general" } },
         { id: "set-interaction", icon: "message", label: "palette.settingsInteraction", keywords: "interaction steering 对话与交互 中断 粘贴 thinking 工具意图", action: { kind: "openSettings", group: "interaction" } },
-        { id: "set-permissions", icon: "shield", label: "palette.settingsPermissions", keywords: "permissions 权限与安全 审批 always ask write yolo 工具级", action: { kind: "openSettings", group: "permissions" } },
+        { id: "set-permissions", icon: "shield", label: "palette.settingsPermissions", keywords: "permissions 权限与安全 审批 always ask write yolo 工具级 forget approvals remembered 忘记 记住的审批", action: { kind: "openSettings", group: "permissions" } },
         { id: "set-context", icon: "layers", label: "palette.settingsContext", keywords: "context compact 上下文与记忆 压缩 记忆 memory hindsight mnemopi", action: { kind: "openSettings", group: "context" } },
         { id: "set-files", icon: "terminal", label: "palette.settingsFiles", keywords: "files edit mode hashline lsp shell 文件与终端 终端", action: { kind: "openSettings", group: "files" } },
         { id: "set-tasks", icon: "play", label: "palette.settingsTasks", keywords: "tasks plan goal loop 任务与执行 子任务 并发", action: { kind: "openSettings", group: "tasks" } },

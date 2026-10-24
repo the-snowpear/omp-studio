@@ -2699,8 +2699,8 @@ export class StudioHostClientFacade implements ClientTransport {
       throw unavailableError("permissions.mode.set requires a Runtime snapshot");
     }
     const mode = request.input.mode;
-    if (mode !== "always-ask" && mode !== "write" && mode !== "yolo") {
-      throw clientError("INVALID_ARGUMENT", "permissions.mode.set mode must be always-ask, write or yolo");
+    if (mode !== "always-ask" && mode !== "always-ask-cached" && mode !== "write" && mode !== "yolo") {
+      throw clientError("INVALID_ARGUMENT", "permissions.mode.set mode must be always-ask, always-ask-cached, write or yolo");
     }
     const acceptedAt = this.#options.diagnostics.now();
     const replay = this.#registry.accept(request, acceptedAt);
@@ -2722,13 +2722,13 @@ export class StudioHostClientFacade implements ClientTransport {
   async #runSetApprovalMode(
     run: () =>
       | {
-          readonly mode: "always-ask" | "write" | "yolo";
+          readonly mode: "always-ask" | "always-ask-cached" | "write" | "yolo";
           readonly syncStatus: "complete" | "partial";
           readonly appliedSessions: number;
           readonly failedSessions: number;
         }
       | Promise<{
-          readonly mode: "always-ask" | "write" | "yolo";
+          readonly mode: "always-ask" | "always-ask-cached" | "write" | "yolo";
           readonly syncStatus: "complete" | "partial";
           readonly appliedSessions: number;
           readonly failedSessions: number;

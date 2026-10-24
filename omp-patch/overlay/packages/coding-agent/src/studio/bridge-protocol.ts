@@ -396,6 +396,21 @@ export interface StudioPendingInteraction {
 	leaseGeneration: number;
 }
 
+/** Upstream `RuntimeIdentity`: the omp build that wrote session entries. */
+export interface StudioRuntimeIdentity {
+	version: string;
+	commit?: string;
+	branch?: string;
+	diff?: string;
+	label?: string;
+}
+
+export interface StudioRuntimeIdentitySnapshot {
+	current: StudioRuntimeIdentity;
+	/** Builds in file order, consecutive repeats collapsed; `null` = entries written without a stamp. */
+	history: Array<StudioRuntimeIdentity | null>;
+}
+
 export interface StudioOperatorStateSnapshot {
 	runtimeId: string;
 	runtimeEpoch: number;
@@ -441,6 +456,16 @@ export interface StudioOperatorStateSnapshot {
 	jobsRevision: number;
 	agents: unknown[];
 	jobs: unknown[];
+	/** Lineage of the agents that own `jobs`, for building the job tree. */
+	jobAgents?: Array<{ id: string; parentId?: string }>;
+	/**
+	 * The last run ended non-terminally and only a background-job result can
+	 * resume it (upstream `agent_end.awaitingAsyncWork`). Cleared when a run
+	 * starts, the run settles terminally, or no job is left running.
+	 */
+	awaitingAsyncWork?: boolean;
+	/** omp builds that wrote this session, oldest first, ending with the running one. */
+	runtimeIdentity?: StudioRuntimeIdentitySnapshot;
 	telemetry?: StudioSessionTelemetry;
 	runtimeSettings?: Record<StudioRuntimeSettingKey, unknown>;
 	runtimeSettingsActivation?: StudioRuntimeSettingsActivation;

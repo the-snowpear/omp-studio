@@ -4251,10 +4251,12 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
   // Idempotent: a no-op as soon as the store has nothing open.
   useEffect(() => {
     if (!executionMatches || snapshot?.isStreaming !== false) return;
+    // OMP 18.12: the run ended only to wait for background jobs; their result resumes it.
+    if (snapshot?.awaitingAsyncWork === true) return;
     if (!runStreaming.settled && abortGeneration === 0) return;
     if (hasLiveActivityProgress(convoRef.current.state)) return;
     convoRef.current.settleOpenTurns();
-  }, [abortGeneration, executionMatches, runStreaming.settled, snapshot?.isStreaming]);
+  }, [abortGeneration, executionMatches, runStreaming.settled, snapshot?.isStreaming, snapshot?.awaitingAsyncWork]);
   // Composer / abort / queue flush are write surfaces: follow the live Runtime,
   // including the send → isStreaming snapshot gap. Preview must not replace this
   // with the t1 demo story or the stop button appears while core.abort stays gated.
@@ -4293,14 +4295,16 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
       ? (previewThreadId === "t1" ? PREVIEW_RUN_ACTIVITY.status : null)
       : optimisticPrompt !== undefined
         ? { phase: "waiting" as const, label: PROMPT_SEND_PHASE_LABEL[optimisticPrompt.phase] }
-        : deriveActivityStatus({
+        : executionMatches && snapshot?.awaitingAsyncWork === true && !sessionStreaming
+          ? { phase: "waiting" as const, label: "等待后台任务 / Waiting for background jobs" }
+          : deriveActivityStatus({
           state: convo.state,
           streaming: sessionStreaming,
           pendingMessages: snapshot?.pendingMessages ?? 0,
           awaiting: executionMatches && awaitingTurn,
           ...(activityRetry === undefined ? {} : { retry: activityRetry }),
         })),
-    [activityRetry, awaitingTurn, convo.state, executionMatches, optimisticPrompt, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages],
+    [activityRetry, awaitingTurn, convo.state, executionMatches, optimisticPrompt, preview, previewThreadId, sessionStreaming, snapshot?.pendingMessages, snapshot?.awaitingAsyncWork],
   );
   const runWindowKey = preview ? `preview:${previewThreadId ?? ""}` : convo.identityKey;
   const runWindow = useRunWindow(activityStatus !== null, runWindowKey);
@@ -4890,6 +4894,17 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
     // editor until the first dispatch completes, including same-frame Enter.
     if (promptDispatchGate.busy && !composerRunning) return;
     const payload = composerInputRef.current?.getSnapshot() ?? draft;
+    // OMP 18.11: typing while a tool approval waits denies that call and steers the turn.
+    if (
+      composerRunning &&
+      pendingInteraction?.kind === "approval" &&
+      steerNowEnabled &&
+      !snapshotIsEmpty(payload) &&
+      composerSlashExecute(payload, slashCatalog) === undefined
+    ) {
+      void steerPastApproval(payload);
+      return;
+    }
     if (composerRunning && composerSlashExecute(payload, slashCatalog) === undefined) {
       enqueueDraft();
       return;
@@ -4904,6 +4919,33 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
     if (!(await dispatchPrompt(payload, { waitForReady: waitForNewSession !== undefined }))) {
       setDraft(payload);
       composerInputRef.current?.setSnapshot(payload);
+    }
+  };
+  const steerPastApproval = async (payload: ComposerSnapshot) => {
+    if (sending) return;
+    setComposerError(undefined);
+    composerInputRef.current?.clear();
+    setDraft(emptySnapshot());
+    setSending(true);
+    try {
+      if (!(await respond("cancel"))) throw new Error("拒绝审批失败 / Could not deny the approval");
+      const outbound = promptInputOf(payload);
+      const handle = await client.command("core.steer", outbound);
+      convoRef.current.trackPending({
+        requestId: handle.requestId,
+        text: outbound.text,
+        draft: payload.text,
+        status: "pending",
+        knownItemIds: convoRef.current.state.items.map((item) => item.itemId),
+        doc: payload.doc,
+      });
+      await waitReceipt(client, handle.requestId);
+    } catch (error) {
+      setDraft(payload);
+      composerInputRef.current?.setSnapshot(payload);
+      setComposerError(hostErrorMessage(error, "纠偏失败"));
+    } finally {
+      setSending(false);
     }
   };
   const sendFollowUp = async () => {
@@ -5046,6 +5088,8 @@ function WorkbenchCanvas({ state, client, onOpenWorktree, selectedSessionId, vie
         outboundPayload = planned.snapshot;
       }
       const outbound = promptInputOf(outboundPayload);
+      // A waiting approval would hold the steer; deny it first, as OMP does when the user types.
+      if (pendingInteraction?.kind === "approval" && !(await respond("cancel"))) return;
       const handle = await client.command("core.steer", outbound);
       const pendingConvo = convoRef.current;
       pendingConvo.trackPending({
@@ -6466,6 +6510,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
     },
     [client, snapshot],
   );
+  /** Settings → Permissions: clear every remembered approval (`/forget-approvals`). */
+  const forgetApprovals = useCallback(async () => {
+    if (snapshot === undefined) throw new Error("No Runtime session");
+    const handle = await client.command("approvals.forget", { sessionId: snapshot.sessionId });
+    await waitReceipt(client, handle.requestId);
+  }, [client, snapshot]);
   const runtimeSettingsCanSet = (() => {
     const entry = capabilities?.capabilities.find((capability) => capability.id === "runtime.settings.set");
     if (!entry || entry.grade === "unavailable") return false;
@@ -8512,10 +8562,12 @@ function AppShell({ state, client, onRoute, selectedHistoryId, onSelectThread, o
               key={settingsNonce}
               {...(snapshot ? { approvalMode } : {})}
               onSetApprovalMode={setApprovalMode}
+              {...(snapshot ? { onForgetApprovals: forgetApprovals } : {})}
               {...(runtimeSettings === undefined ? {} : { runtimeSettings })}
             />
           ) : pageRoute === "diagnostics" ? (
             <DiagnosticsPage
+              {...(snapshot?.runtimeIdentity ? { buildProvenance: snapshot.runtimeIdentity } : {})}
               nativeContext={{sessionId:snapshot?.sessionId,available:hubRuntimeConnected,capabilities}}
               client={client}
               {...(state.model.diagnostics ? { diagnostics: state.model.diagnostics } : {})}

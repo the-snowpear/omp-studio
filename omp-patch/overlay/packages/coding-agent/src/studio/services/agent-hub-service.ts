@@ -87,6 +87,10 @@ export interface StudioAgentSnapshot {
 	hasTranscript: boolean;
 	unreadCount: number;
 	activeJobIds: string[];
+	/** Current stage of the task job running this agent, from its completion probe. */
+	stage?: string;
+	/** The running task's own completion estimate, 0–100. */
+	completionPercent?: number;
 	usage?: StudioAgentUsage;
 	modelRole?: string;
 	resolvedModel?: string;
@@ -254,6 +258,8 @@ export interface StudioAgentHubServiceOptions {
 	confirmationGate?: StudioConfirmationGate;
 	/** Active job ids for an agent; production wiring reads AsyncJobManager rows. */
 	activeJobIdsFor?: (agentId: string) => string[];
+	/** Stage / completion estimate of the running task job behind an agent. */
+	taskProgressFor?: (agentId: string) => { stage?: string; completionPercent?: number } | undefined;
 	/** Live usage/model/summary source; production wiring reads AgentSession. */
 	telemetry?: StudioAgentTelemetryPort;
 	maxListLimit?: number;
@@ -303,6 +309,7 @@ export class StudioAgentHubService {
 	readonly #spawner: StudioAgentSpawnerPort;
 	readonly #transcript: StudioTranscriptReaderPort;
 	readonly #activeJobIdsFor: (agentId: string) => string[];
+	readonly #taskProgressFor?: StudioAgentHubServiceOptions["taskProgressFor"];
 	readonly #confirmationGate?: StudioConfirmationGate;
 	readonly #telemetry?: StudioAgentTelemetryPort;
 	readonly #maxListLimit: number;
@@ -333,6 +340,7 @@ export class StudioAgentHubService {
 		this.#spawner = spawner;
 		this.#transcript = transcript;
 		this.#activeJobIdsFor = options.activeJobIdsFor ?? (() => []);
+		this.#taskProgressFor = options.taskProgressFor;
 		this.#confirmationGate = options.confirmationGate;
 		this.#telemetry = options.telemetry;
 		this.#maxListLimit = clampInt(options.maxListLimit ?? DEFAULT_LIST_LIMIT, 1, MAX_LIST_LIMIT);
@@ -830,6 +838,7 @@ export class StudioAgentHubService {
 			hasTranscript: ref.session !== null || ref.sessionFile !== null,
 			unreadCount: this.#irc.unreadCount(agentId),
 			activeJobIds: this.#activeJobIdsFor(agentId),
+			...this.#taskProgressFor?.(agentId),
 			...(usage !== undefined
 				? {
 						usage: {
